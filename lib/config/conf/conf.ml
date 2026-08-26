@@ -31,7 +31,7 @@ module type S = sig
   (** The domain's stores as one: reads walk them in order, a write lands on the
       mains and the deferred targets catch up behind it. Everything that reads
       or writes a domain key goes through this and nothing else. *)
-  val store : (module Backend.S)
+  val store : (module Backend_lwt.Store)
 
   (** The same stores individually, in role order, for the callers that need one
       rather than the domain: a report naming each, a resync copying between
@@ -41,7 +41,7 @@ module type S = sig
       so publishing one changes no domain content — which is why it goes to a
       member directly rather than through {!store}, and why a read-only domain
       can share what it can already read. *)
-  val members : Backend.member list
+  val members : (module Backend_lwt.Store) Backend.member list
 
   val cache_root : string
   val data_dir : string
@@ -115,7 +115,7 @@ let locality (module C : S) =
    set from one store rather than a per-field minimum, so that total, free and
    available stay describing the same disk. *)
 let capacity members =
-  let bounded (m : Backend.member) =
+  let bounded (m : (module Backend_lwt.Store) Backend.member) =
     if m.Backend.role = `ReadOnly then None
     else Option.bind m.Backend.local_path Io_lwt.Fs.disk_space
   in

@@ -24,7 +24,9 @@ module C : Conf.S = struct
   let shares_prefix = "tsync/shares/"
 
   let store =
-    Backend.make ~backend_type:"local" ~get_field:(fun _ -> Some store_dir) ()
+    Backend_lwt.make ~backend_type:"local"
+      ~get_field:(fun _ -> Some store_dir)
+      ()
 
   let members = [Backend.member ~name:"local" store]
   let cache_root = cache_dir

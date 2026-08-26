@@ -10,8 +10,8 @@
     so which chunks are garbage is knowable nowhere but on the main.
 
     So this is only [put], and only the object stores implement
-    {!Backend.S.discard} with it. A filesystem and an http-proxy peer have
-    nothing on their side to wake and delete in the call instead.
+    {!Backend_lwt.Store.discard} with it. A filesystem and an http-proxy peer
+    have nothing on their side to wake and delete in the call instead.
 
     [queue] returns once the request is durably stored, which is what lets the
     collection go on to discard the main's own copy: the request outliving the

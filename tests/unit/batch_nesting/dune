@@ -10,7 +10,9 @@
    -open
    Tsync_bigstring
    -open
-   Tsync_backend_register))
+   Tsync_backend_register
+   -open
+   Tsync_backend_lwt))
  (name batch_nesting)
  (libraries
   tsync-libs.logical_key
@@ -18,5 +20,6 @@
   tsync_domain_store
   tsync_bigstring
   tsync_backend_register
+  tsync_backend_lwt
   lwt
   lwt.unix))

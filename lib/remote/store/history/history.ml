@@ -35,7 +35,7 @@ let folder_versions ~versions_prefix ~folder_id =
   Stored_key.namespace ~prefix:versions_prefix ~folder_id
 
 module Make (C : Conf.S) (L : Layout.S) = struct
-  module B = (val C.store : Backend.S)
+  module B = (val C.store : Backend_lwt.Store)
 
   let version_dir ~key =
     let+ bk = L.manifest_key key in

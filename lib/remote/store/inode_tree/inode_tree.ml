@@ -38,7 +38,8 @@ module Make (C : Conf.S) = struct
     lazy
       (List.length
          (List.filter
-            (fun (m : Backend.member) -> m.Backend.readable)
+            (fun (m : (module Backend_lwt.Store) Backend.member) ->
+              m.Backend.readable)
             C.members)
       = 1)
 

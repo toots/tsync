@@ -15,8 +15,8 @@ val conf :
   ?domain:string ->
   ?client_name:string ->
   ?versioning:bool ->
-  ?store:(module Backend.S) ->
-  ?members:Backend.member list ->
+  ?store:(module Backend_lwt.Store) ->
+  ?members:(module Backend_lwt.Store) Backend.member list ->
   ?verify_writes:bool ->
   ?max_uploads:int ->
   ?max_chunk_buffers:int ->
@@ -35,4 +35,4 @@ val conf :
 
 (** The store a bare {!conf} builds, for a test that plants content before
     handing the domain over. *)
-val local_store : ?verify_writes:bool -> string -> (module Backend.S)
+val local_store : ?verify_writes:bool -> string -> (module Backend_lwt.Store)

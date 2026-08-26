@@ -18,7 +18,7 @@
     When nothing answers, the last error is re-raised: swallowing it into [None]
     would hand a caller a confident ENOENT from an unreachable store. *)
 
-type sub = { name : string; backend : (module Backend.S) }
+type sub = { name : string; backend : (module Backend_lwt.Store) }
 
 (** A target is given the store to catch up from — the mains alone, see
     {!Deferred.make} — supplied here rather than by the caller, since only this
@@ -28,11 +28,12 @@ type sub = { name : string; backend : (module Backend.S) }
     {!Deferred.make}'s [reads_reach]. *)
 val make :
   mains:sub list ->
-  targets:(source:(module Backend.S) -> (module Deferred.S)) list ->
+  targets:(source:(module Backend_lwt.Store) -> (module Deferred.S)) list ->
   archives:sub list ->
-  (module Backend.S)
+  (module Backend_lwt.Store)
 
 (** Wait for every deferred target in this process to catch up. Registered with
-    {!Backend.on_drain} by {!make}, so callers normally reach it through
-    [Backend.drain]; exposed for tests that assert on what a target holds. *)
+    {!Backend_lwt.on_drain} by {!make}, so callers normally reach it through
+    [Backend_lwt.drain]; exposed for tests that assert on what a target holds.
+*)
 val drain : unit -> unit Lwt.t

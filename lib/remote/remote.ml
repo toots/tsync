@@ -89,7 +89,7 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
   (* [St] maps logical keys to backend keys through the layout scheme. *)
   module St = Store.Make (C) (L)
   module Hs = History.Make (C) (L)
-  module B = (val C.store : Backend.S)
+  module B = (val C.store : Backend_lwt.Store)
 
   (* Chunk writes go where they always went; only presence checks and reads have
      to know that a collection may be in progress ({!Collection}). *)

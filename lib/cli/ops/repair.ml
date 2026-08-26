@@ -26,7 +26,7 @@ module Make (C : Conf.S) = struct
   module Cor = Corruption.Make (C)
   module L = Chunk_layout.Make (C)
 
-  let good_body (module B : Backend.S) chunk_key =
+  let good_body (module B : Backend_lwt.Store) chunk_key =
     Lwt.catch
       (fun () ->
         let+ body = B.get_opt ~key:(L.key chunk_key) () in
@@ -36,13 +36,16 @@ module Make (C : Conf.S) = struct
       (fun _ -> Lwt.return_none)
 
   let member_named name =
-    List.find_opt (fun (m : Backend.member) -> m.Backend.name = name) C.members
+    List.find_opt
+      (fun (m : (module Backend_lwt.Store) Backend.member) ->
+        m.Backend.name = name)
+      C.members
 
   (* A backfill target is excluded by [readable]: it is not read from, and may
      not hold the chunk at all. *)
   let sources_for ~source ~bad_store =
     List.filter
-      (fun (m : Backend.member) ->
+      (fun (m : (module Backend_lwt.Store) Backend.member) ->
         m.Backend.name <> bad_store
         && m.Backend.readable
         && match source with None -> true | Some n -> m.Backend.name = n)
@@ -50,7 +53,7 @@ module Make (C : Conf.S) = struct
 
   let rec first_good chunk_key = function
     | [] -> Lwt.return_none
-    | (m : Backend.member) :: rest -> (
+    | (m : (module Backend_lwt.Store) Backend.member) :: rest -> (
         let* body = good_body m.Backend.backend chunk_key in
         match body with
           | Some body -> Lwt.return_some (m.Backend.name, body)
@@ -64,7 +67,7 @@ module Make (C : Conf.S) = struct
     match member_named e.Corruption.store with
       | None -> Lwt.return Unrepairable
       | Some m -> (
-          let (module Dst : Backend.S) = m.Backend.backend in
+          let (module Dst : Backend_lwt.Store) = m.Backend.backend in
           let write body =
             if dry_run then Lwt.return_unit
             else Dst.put ~key:(L.key chunk_key) ~data:body ()

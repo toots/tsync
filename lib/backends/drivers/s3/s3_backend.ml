@@ -235,7 +235,7 @@ let list_all t ?max_keys ~prefix () =
         Lwt.fail (failed "ls" e)
 
 let make ?endpoint ?unsigned_payload ?share_url ~bucket ~region ~access_key_id
-    ~secret_access_key () : (module Backend.S) =
+    ~secret_access_key () : (module Backend_lwt.Store) =
   let t =
     make_t ?endpoint ?unsigned_payload ?share_url ~bucket ~region ~access_key_id
       ~secret_access_key ()
@@ -260,7 +260,7 @@ let make ?endpoint ?unsigned_payload ?share_url ~bucket ~region ~access_key_id
 
     let list_prefix ?max_keys ~prefix () = list_all t ?max_keys ~prefix ()
 
-    (* No multi-object GET in the API: {!Backend.Batched} fans these out. *)
+    (* No multi-object GET in the API: {!Backend_lwt.Batched} fans these out. *)
     let get_many = None
 
     let verify_all ~chunk_prefix () =
@@ -358,7 +358,7 @@ let () =
       | Some v -> v
       | None -> failwith ("s3 backend: missing field: " ^ key)
   in
-  Backend.register ~spec "s3" (fun get ->
+  Backend_lwt.register ~spec "s3" (fun get ->
       (* [None] rather than [Some false]: unset must leave the store's own
          default alone. *)
       let unsigned_payload =

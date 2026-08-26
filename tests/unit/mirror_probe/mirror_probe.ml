@@ -20,19 +20,23 @@ let domain_prefix = "tsync/testdom/manifests/"
 let objects = 200
 
 module Src =
-  (val Backend.make ~backend_type:"local" ~get_field:(fun _ -> Some src_dir) ()
-      : Backend.S)
+  (val Backend_lwt.make ~backend_type:"local"
+         ~get_field:(fun _ -> Some src_dir)
+         ()
+      : Backend_lwt.Store)
 
 module Real =
-  (val Backend.make ~backend_type:"local" ~get_field:(fun _ -> Some dst_dir) ()
-      : Backend.S)
+  (val Backend_lwt.make ~backend_type:"local"
+         ~get_field:(fun _ -> Some dst_dir)
+         ()
+      : Backend_lwt.Store)
 
 let heads = ref 0
 let listings = ref 0
 
 (* Counts what the destination is asked, and answers exactly as the store
    underneath would. *)
-module Dst : Backend.S = struct
+module Dst : Backend_lwt.Store = struct
   include Real
 
   let head_opt ~key () =
@@ -59,10 +63,10 @@ module C : Conf.S = struct
     [
       Backend.member ~role:`Main ~backend_type:"local" ~local_path:src_dir
         ~name:"source"
-        (module Src);
+        (module Src : Backend_lwt.Store);
       Backend.member ~role:`Replica ~backend_type:"local" ~local_path:dst_dir
         ~name:"copy"
-        (module Dst);
+        (module Dst : Backend_lwt.Store);
     ]
 
   let store =

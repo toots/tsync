@@ -59,7 +59,7 @@ module Make (C : Conf.S) = struct
 
   let string_of_phase = string_of_phase
 
-  module B = (val C.store : Backend.S)
+  module B = (val C.store : Backend_lwt.Store)
   module L = Chunk_layout.Make (C)
 
   let marker_key = Chunk_layout.gc_marker_key ~chunk_prefix:C.chunk_prefix
@@ -69,7 +69,8 @@ module Make (C : Conf.S) = struct
   let main_backend =
     lazy
       (List.find_opt
-         (fun (m : Backend.member) -> m.Backend.role = `Main)
+         (fun (m : (module Backend_lwt.Store) Backend.member) ->
+           m.Backend.role = `Main)
          C.members)
 
   let main () =
@@ -94,7 +95,7 @@ module Make (C : Conf.S) = struct
      target, leaving them carrying a marker about a collection that is not theirs
      and that they can do nothing with. *)
   let marker_store () =
-    match main () with Some b -> b | None -> (module B : Backend.S)
+    match main () with Some b -> b | None -> (module B : Backend_lwt.Store)
 
   (* Whether a run is open, cached: reading the marker per chunk lookup would cost
      more than the lookup it saves. *)
@@ -107,7 +108,7 @@ module Make (C : Conf.S) = struct
      run all the same — reading it as an idle store would take the second
      lookup away exactly when it is needed. *)
   let refresh_order () =
-    let (module Mk : Backend.S) = marker_store () in
+    let (module Mk : Backend_lwt.Store) = marker_store () in
     let+ found = Mk.head_opt ~key:marker_key () in
     order_checked := Unix.gettimeofday ();
     running := found <> None;
@@ -161,7 +162,7 @@ module Make (C : Conf.S) = struct
   let head chunk_key =
     match (local_root (), main ()) with
       | None, _ | _, None -> B.head_opt ~key:(L.key chunk_key) ()
-      | Some _, Some (module M : Backend.S) ->
+      | Some _, Some (module M : Backend_lwt.Store) ->
           let* keys = candidates chunk_key in
           let rec first = function
             | [] -> (
@@ -189,7 +190,7 @@ module Make (C : Conf.S) = struct
   let get chunk_key =
     match (local_root (), main ()) with
       | None, _ | _, None -> B.get ~key:(L.key chunk_key) ()
-      | Some _, Some (module M : Backend.S) ->
+      | Some _, Some (module M : Backend_lwt.Store) ->
           let* keys = candidates chunk_key in
           let rec first = function
             | [] -> B.get ~key:(L.key chunk_key) ()
@@ -202,7 +203,7 @@ module Make (C : Conf.S) = struct
           first keys
 
   let read_run () =
-    let (module Mk : Backend.S) = marker_store () in
+    let (module Mk : Backend_lwt.Store) = marker_store () in
     let* data = Mk.get_opt ~key:marker_key () in
     match data with
       | None -> Lwt.return_none
@@ -218,11 +219,11 @@ module Make (C : Conf.S) = struct
                 Lwt.return_none)
 
   let write_run run =
-    let (module Mk : Backend.S) = marker_store () in
+    let (module Mk : Backend_lwt.Store) = marker_store () in
     Mk.put ~key:marker_key ~data:(Bigstring.of_string (to_string run)) ()
 
   let clear_run () =
-    let (module Mk : Backend.S) = marker_store () in
+    let (module Mk : Backend_lwt.Store) = marker_store () in
     Mk.delete ~key:marker_key ()
 
   (* A move, not a copy: what stays behind in the space on its way out is then

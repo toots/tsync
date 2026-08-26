@@ -147,7 +147,7 @@ module Make (C : Conf.S) = struct
      any answer, including a miss, means the store is reachable. Deliberately not
      a listing: a [local] backend walks its whole tree before honouring
      [max_keys]. The body comes back too, since the journal section wants it. *)
-  let probe (module B : Backend.S) =
+  let probe (module B : Backend_lwt.Store) =
     let t0 = Unix.gettimeofday () in
     Lwt.catch
       (fun () ->
@@ -169,7 +169,7 @@ module Make (C : Conf.S) = struct
 
   (* [behind] is what a sync pass would still have to do, our own entries
      excluded. *)
-  let journal ~cursor (module B : Backend.S) =
+  let journal ~cursor (module B : Backend_lwt.Store) =
     Lwt.catch
       (fun () ->
         let+ entries =
@@ -268,7 +268,7 @@ module Make (C : Conf.S) = struct
   let total_bytes =
     List.fold_left (fun acc (e : Backend.file_entry) -> acc + e.Backend.size) 0
 
-  let count_chunks ~exact (module B : Backend.S) =
+  let count_chunks ~exact (module B : Backend_lwt.Store) =
     if exact then
       let+ chunks = B.list_prefix ~prefix:C.chunk_prefix () in
       let chunks = chunk_entries chunks in
@@ -293,7 +293,7 @@ module Make (C : Conf.S) = struct
         ("chunksFromShards", `Int sampled_shards);
       ])
 
-  let count_now ~name ~exact (module B : Backend.S) =
+  let count_now ~name ~exact (module B : Backend_lwt.Store) =
     Lwt.catch
       (fun () ->
         let* listed = B.list_prefix ~prefix:C.domain_prefix () in
@@ -381,7 +381,7 @@ module Make (C : Conf.S) = struct
       | None -> `Null
 
   (* One syscall, so unlike the counts above this is always reported. *)
-  let disk_json (m : Backend.member) =
+  let disk_json (m : (module Backend_lwt.Store) Backend.member) =
     match Option.bind m.Backend.local_path Io_lwt.Fs.disk_space with
       | None -> []
       | Some { Io_lwt.Fs.avail; total; _ } ->
@@ -394,7 +394,8 @@ module Make (C : Conf.S) = struct
                 ] );
           ]
 
-  let member_json ~totals ~exact ~reload (m : Backend.member) =
+  let member_json ~totals ~exact ~reload
+      (m : (module Backend_lwt.Store) Backend.member) =
     let* probed, cursor = probe m.Backend.backend in
     let cursor = Option.map Bigstring.to_string cursor in
     let* jrnl = journal ~cursor m.Backend.backend in

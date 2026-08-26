@@ -30,7 +30,7 @@ module C = struct
   let shares_prefix = "tsync/shares/"
 
   let store =
-    Backend.make ~backend_type:"local"
+    Backend_lwt.make ~backend_type:"local"
       ~get_field:(function "path" -> Some backend_root | _ -> None)
       ()
 
@@ -51,7 +51,7 @@ end
 module Lk = Logical_key.Make (C)
 module R = Remote.Make (C)
 module Corrupt = Corruption.Make (C)
-module B = (val C.store : Backend.S)
+module B = (val C.store : Backend_lwt.Store)
 
 let write_file path contents =
   let oc = open_out_bin path in

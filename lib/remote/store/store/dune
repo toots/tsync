@@ -15,6 +15,8 @@
    -open
    Tsync_backend_register
    -open
+   Tsync_backend_lwt
+   -open
    Tsync_io_lwt))
  (name tsync_store)
  (public_name tsync-libs.store)
@@ -24,6 +26,7 @@
   tsync_layout
   tsync_bigstring
   tsync_backend_register
+  tsync_backend_lwt
   tsync_io_lwt
   lwt
   unix))

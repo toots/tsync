@@ -1,6 +1,6 @@
 (* A batch must not queue behind itself.
 
-   {!Backend.Batched} takes a slot for each request it makes, and a domain's
+   {!Backend_lwt.Batched} takes a slot for each request it makes, and a domain's
    stores are presented as one {!Backend.S}: a batch asked of the composite that
    took a second slot for the member it forwarded to held one while waiting for
    the other, and enough callers at once left every slot held by something
@@ -13,7 +13,7 @@ open Lwt.Syntax
 
 let objects : (Stored_key.t, string) Hashtbl.t = Hashtbl.create 8
 
-module Member : Backend.S = struct
+module Member : Backend_lwt.Store = struct
   let unsupported () = Lwt.fail (Backend.Backend_error "not part of this test")
   let put ~key:_ ~data:_ () = unsupported ()
   let put_if_absent ~key:_ ~data:_ () = unsupported ()
@@ -56,7 +56,7 @@ module Store =
          ~mains:[{ Domain_store.name = "main"; backend = (module Member) }]
          ~targets:[] ~archives:[])
 
-module Batched = Backend.Batched (Store)
+module Batched = Backend_lwt.Batched (Store)
 
 let entry key = Backend.{ key; size = 1; last_modified = 0.; etag = None }
 

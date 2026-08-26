@@ -60,6 +60,8 @@
    -open
    Tsync_backend_register
    -open
+   Tsync_backend_lwt
+   -open
    Tsync_conf
    -open
    Tsync_domain_store
@@ -100,6 +102,7 @@
   tsync_conf
   tsync_bigstring
   tsync_backend_register
+  tsync_backend_lwt
   tsync_domain_store
   tsync_local_backend
   tsync_conf_parsing

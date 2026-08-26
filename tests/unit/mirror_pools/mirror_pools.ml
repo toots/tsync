@@ -18,12 +18,16 @@ let dst_dir = root ^ "/dst"
 let domain_prefix = "tsync/testdom/manifests/"
 
 module Src =
-  (val Backend.make ~backend_type:"local" ~get_field:(fun _ -> Some src_dir) ()
-      : Backend.S)
+  (val Backend_lwt.make ~backend_type:"local"
+         ~get_field:(fun _ -> Some src_dir)
+         ()
+      : Backend_lwt.Store)
 
 module Dst =
-  (val Backend.make ~backend_type:"local" ~get_field:(fun _ -> Some dst_dir) ()
-      : Backend.S)
+  (val Backend_lwt.make ~backend_type:"local"
+         ~get_field:(fun _ -> Some dst_dir)
+         ()
+      : Backend_lwt.Store)
 
 module C : Conf.S = struct
   let versioning = false
@@ -40,10 +44,10 @@ module C : Conf.S = struct
     [
       Backend.member ~role:`Main ~backend_type:"local" ~local_path:src_dir
         ~name:"source"
-        (module Src);
+        (module Src : Backend_lwt.Store);
       Backend.member ~role:`Replica ~backend_type:"local" ~local_path:dst_dir
         ~name:"copy"
-        (module Dst);
+        (module Dst : Backend_lwt.Store);
     ]
 
   let store =

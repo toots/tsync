@@ -60,7 +60,7 @@ let run_prefix =
     (Option.value (env "GITHUB_RUN_ID")
        ~default:(string_of_int (Unix.getpid ())))
 
-let suite name (module B : Backend.S) =
+let suite name (module B : Backend_lwt.Store) =
   let open Lwt.Syntax in
   let key s = Stored_key.in_space ~prefix:run_prefix s in
   let round_trip () =
@@ -102,11 +102,11 @@ let suite name (module B : Backend.S) =
      answered absent writes a mirror missing that file, and nothing walks a copy
      afterwards to notice.
 
-     Asked through {!Backend.Batched} rather than of the driver's own field, so
+     Asked through {!Backend_lwt.Batched} rather than of the driver's own field, so
      a store that declares no batch is held to the same answers as one that
      does, and a driver that later grows one inherits the cases. *)
   let reading_many () =
-    let module Bb = Backend.Batched (B) in
+    let module Bb = Backend_lwt.Batched (B) in
     let entry k =
       Backend.{ key = k; size = 5; last_modified = 0.; etag = None }
     in
@@ -327,7 +327,7 @@ let suite name (module B : Backend.S) =
   section "bulk delete past the cap" (fun () -> bulk_delete survived)
 
 let backend_of name fields =
-  Backend.make ~backend_type:name
+  Backend_lwt.make ~backend_type:name
     ~get_field:(fun k -> List.assoc_opt k fields)
     ()
 
@@ -346,7 +346,7 @@ let verify_suite name fields =
     let chunk_prefix = chunk_prefix
   end) in
   let jobs = L.verify_jobs_prefix in
-  let (module On : Backend.S) = backend_of name fields in
+  let (module On : Backend_lwt.Store) = backend_of name fields in
   let* caps = On.capabilities ~prefix:chunk_prefix () in
   check "an object store reports that its chunks are checked"
     caps.Backend.verified;
@@ -402,7 +402,7 @@ let verify_suite name fields =
    where there is merely an absence. Told rather than probed: nothing a client
    can ask distinguishes "no function" from "function is broken", which is the
    whole reason this is worth having. *)
-let live_delete_suite name (module B : Backend.S) =
+let live_delete_suite name (module B : Backend_lwt.Store) =
   let open Lwt.Syntax in
   group (Printf.sprintf "%s: the deployed function" name);
   match
@@ -462,7 +462,7 @@ let live_delete_suite name (module B : Backend.S) =
    and markers are namespaced beside the store rather than under the domain: a
    run that only cleared [run_prefix] would leave one per shard behind in a real
    bucket, every time. *)
-let sweep (module B : Backend.S) =
+let sweep (module B : Backend_lwt.Store) =
   let open Lwt.Syntax in
   let clear prefix =
     Lwt.catch
@@ -485,7 +485,7 @@ let sweep (module B : Backend.S) =
   clear L.corrupted_prefix
 
 let () =
-  let linked = Backend.types () in
+  let linked = Backend_lwt.types () in
   let candidates =
     [
       ( "gcs",

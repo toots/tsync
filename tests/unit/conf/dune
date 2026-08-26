@@ -16,6 +16,8 @@
    -open
    Tsync_backend_register
    -open
+   Tsync_backend_lwt
+   -open
    Tsync_io_lwt))
  (name conf_test)
  (libraries
@@ -24,5 +26,6 @@
   tsync_metrics
   tsync-libs.conf
   tsync-libs.backend_register
+  tsync-libs.backend_lwt
   tsync_local_backend
   tsync_io_lwt))

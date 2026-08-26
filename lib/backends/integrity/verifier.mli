@@ -7,8 +7,8 @@
     an upload, then deletes the request.
 
     So this is only [put], and only the object stores implement
-    {!Backend.S.verify_all} with it: a filesystem has no event source to deliver
-    anything, and [tsync gc --verify] is its sweep. *)
+    {!Backend_lwt.Store.verify_all} with it: a filesystem has no event source to
+    deliver anything, and [tsync gc --verify] is its sweep. *)
 
 (** Queue one request per shard. Answers how many, which is work started rather
     than work done: what came of it is read afterwards by listing

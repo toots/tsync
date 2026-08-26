@@ -6,7 +6,7 @@ module Make (C : Conf.S) = struct
   module Lk = Logical_key.Make (C)
   module L = Layout.Inode.Make (C)
   module St = Store.Make (C) (L)
-  module B = (val C.store : Backend.S)
+  module B = (val C.store : Backend_lwt.Store)
 
   (* A directory key is the namespace itself, not one of the markers filed in
      it. *)

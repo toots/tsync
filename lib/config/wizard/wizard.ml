@@ -340,7 +340,7 @@ module Make (E : ENV) = struct
     if which <> None && List.exists is_main siblings then "replica" else "main"
 
   let prompt_backend ?(siblings = []) () =
-    let types = Backend.types () in
+    let types = Backend_lwt.types () in
     (* [local] is always compiled in and is the only type that needs no bucket
        and no credentials, so it is the one default that cannot ask for something
        the user does not have yet. Falling back to the first registered type used
@@ -372,7 +372,7 @@ module Make (E : ENV) = struct
     let synced_skip =
       match synced with Some s -> store_fields s | None -> []
     in
-    let spec = Option.value ~default:[] (Backend.spec_for backend_type) in
+    let spec = Option.value ~default:[] (Backend_lwt.spec_for backend_type) in
     let fields =
       List.filter_map
         (fun (s : Field_spec.t) ->
@@ -475,7 +475,7 @@ module Make (E : ENV) = struct
       match btype with "s3" -> Some `S3 | "gcs" -> Some `Gcs | _ -> None
     in
     let can_sync = which <> None in
-    let spec = Option.value ~default:[] (Backend.spec_for btype) in
+    let spec = Option.value ~default:[] (Backend_lwt.spec_for btype) in
     let running = ref true in
     let status = ref "" in
     while !running do
@@ -577,7 +577,7 @@ module Make (E : ENV) = struct
   let frontend_entry name opts =
     if opts = [] then `String name else `Assoc (("type", `String name) :: opts)
 
-  (* Sorted, as {!Backend.types} is: [Frontend.names] comes out of a hashtable, so
+  (* Sorted, as {!Backend_lwt.types} is: [Frontend.names] comes out of a hashtable, so
      without this the wizard asks in whatever order the frontends hashed into. *)
   let frontend_types () = List.sort compare (Frontend.names ())
 

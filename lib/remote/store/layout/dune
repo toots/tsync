@@ -18,6 +18,8 @@
    -open
    Tsync_backend_register
    -open
+   Tsync_backend_lwt
+   -open
    Tsync_log))
  (name tsync_layout)
  (public_name tsync-libs.layout)
@@ -28,6 +30,7 @@
   tsync_conf
   tsync_bigstring
   tsync_backend_register
+  tsync_backend_lwt
   tsync_log
   lwt
   unix))

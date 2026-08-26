@@ -1,5 +1,5 @@
 let make_backend ~traffic (bc : Conf_parsing.backend_config) =
-  Backend.make ~traffic ~backend_type:bc.backend_type
+  Backend_lwt.make ~traffic ~backend_type:bc.backend_type
     ~get_field:(fun k -> List.assoc_opt k bc.fields)
     ()
 
@@ -22,7 +22,8 @@ let deferred_root ~paths (d : Conf_parsing.domain) =
    are the same target with one bit between them — whether reads may reach it —
    so a resynced backfill is promoted by editing one word. *)
 let build_backends ~paths ~resume (d : Conf_parsing.domain) :
-    (module Backend.S) * Backend.member list =
+    (module Backend_lwt.Store) * (module Backend_lwt.Store) Backend.member list
+    =
   (* One counter pair per configured store, kept by name so the member built
      below reports the very counters that store's wrapper adds to. *)
   let traffic : (string, Backend.traffic) Hashtbl.t = Hashtbl.create 4 in
@@ -99,7 +100,7 @@ let build_backends ~paths ~resume (d : Conf_parsing.domain) :
                (fun (k, v) ->
                  match
                    Option.bind
-                     (Backend.spec_for bc.backend_type)
+                     (Backend_lwt.spec_for bc.backend_type)
                      (List.find_opt (fun (s : Field_spec.t) -> s.name = k))
                  with
                    | Some { secret = true; _ } when v <> "" -> (k, "***")
@@ -109,14 +110,14 @@ let build_backends ~paths ~resume (d : Conf_parsing.domain) :
           ?in_flight:(stat (fun s -> s.Deferred.in_flight))
           ?degraded:(stat (fun s -> s.Deferred.degraded))
           ?traffic:
-            (let module B = (val backend : Backend.S) in
+            (let module B = (val backend : Backend_lwt.Store) in
             if B.local_path = None then Hashtbl.find_opt traffic bc.name
             else None)
             (* Both of these are the store's own, not config's to work out from
                its type: where it keeps its files, and so whether anything it
                moved crossed a link. *)
           ?local_path:
-            (let module B = (val backend : Backend.S) in
+            (let module B = (val backend : Backend_lwt.Store) in
             B.local_path)
           backend)
       leaves
@@ -207,14 +208,20 @@ let socket ?domain ~paths cfg = snd (target ?domain ~paths cfg)
 let reading_from name (module C : Conf.S) : (module Conf.S) =
   let m =
     match
-      List.filter (fun (m : Backend.member) -> m.Backend.name = name) C.members
+      List.filter
+        (fun (m : (module Backend_lwt.Store) Backend.member) ->
+          m.Backend.name = name)
+        C.members
     with
       | [m] -> m
       | [] ->
           failwith
             (Printf.sprintf "no backend named %s (available: %s)" name
                (String.concat ", "
-                  (List.map (fun (m : Backend.member) -> m.name) C.members)))
+                  (List.map
+                     (fun (m : (module Backend_lwt.Store) Backend.member) ->
+                       m.name)
+                     C.members)))
       | _ ->
           failwith
             (Printf.sprintf
@@ -227,8 +234,8 @@ let reading_from name (module C : Conf.S) : (module Conf.S) =
 
     let store =
       (module struct
-        include (val C.store : Backend.S)
-        module Src = (val m.Backend.backend : Backend.S)
+        include (val C.store : Backend_lwt.Store)
+        module Src = (val m.Backend.backend : Backend_lwt.Store)
 
         let get = Src.get
         let get_opt = Src.get_opt
@@ -240,5 +247,5 @@ let reading_from name (module C : Conf.S) : (module Conf.S) =
            this one store. [None] where [Src] has no batch of its own, so the
            fan-out asks the [get_opt] above. *)
         let get_many = Src.get_many
-      end : Backend.S)
+      end : Backend_lwt.Store)
   end : Conf.S)

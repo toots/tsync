@@ -38,7 +38,7 @@ let empty =
 module Make (C : Conf.S) = struct
   module L = Chunk_layout.Make (C)
   module Collection = Collection.Make (C)
-  module B = (val C.store : Backend.S)
+  module B = (val C.store : Backend_lwt.Store)
 
   (* How long the closing phase may go without recording where it got to. Longer
      than the reporting interval, a checkpoint costing a delete against every
@@ -70,11 +70,12 @@ module Make (C : Conf.S) = struct
     end
 
   (* Opening and closing a run are a rename and an [rm -rf] within the main's own
-     directory, which is what having a {!Backend.S.local_path} grants. *)
+     directory, which is what having a {!Backend_lwt.Store.local_path} grants. *)
   let collector () =
     let main =
       List.find_opt
-        (fun (m : Backend.member) -> m.Backend.role = `Main)
+        (fun (m : (module Backend_lwt.Store) Backend.member) ->
+          m.Backend.role = `Main)
         C.members
     in
     match main with
@@ -83,11 +84,11 @@ module Make (C : Conf.S) = struct
             (Unsupported
                (Printf.sprintf "%s has no main store to collect." C.domain_name))
       | Some m -> (
-          let (module M : Backend.S) = m.Backend.backend in
+          let (module M : Backend_lwt.Store) = m.Backend.backend in
           (* A collection is renames within the store's own tree, so it needs a
              store that is one. *)
             match M.local_path with
-            | Some root -> Lwt.return ((module M : Backend.S), root)
+            | Some root -> Lwt.return ((module M : Backend_lwt.Store), root)
             | None ->
                 Lwt.fail
                   (Unsupported
@@ -119,7 +120,7 @@ module Make (C : Conf.S) = struct
 
   let deferred_members () =
     List.filter
-      (fun (m : Backend.member) ->
+      (fun (m : (module Backend_lwt.Store) Backend.member) ->
         m.Backend.role = `Replica || m.Backend.role = `Backfill)
       C.members
 
@@ -317,7 +318,7 @@ module Make (C : Conf.S) = struct
      Keys come back spelled as a target holds them, a target having no
      from-space. Nothing here holds more than a shard's worth of them, whatever
      the store's size. *)
-  let orphans_in_shard ~main:(module M : Backend.S) ~slots shard =
+  let orphans_in_shard ~main:(module M : Backend_lwt.Store) ~slots shard =
     let prefix = L.shard_prefix shard in
     let* going = M.list_prefix ~prefix:(L.from_shard_prefix shard) () in
     (* Only chunks: a write left in flight is discarded with the old space, but
@@ -349,10 +350,10 @@ module Make (C : Conf.S) = struct
   type work = Mark of string list | Keep of string list | Close of string list
 
   type session = {
-    main : (module Backend.S);
+    main : (module Backend_lwt.Store);
     root : string;
     started : float;
-    targets : Backend.member list;
+    targets : (module Backend_lwt.Store) Backend.member list;
     lock : Lwt_unix.file_descr;
     (* Which pool to use is decided by nesting depth, not by what is being
        iterated: whatever runs several at once takes from [unit_slots], the
@@ -443,8 +444,8 @@ module Make (C : Conf.S) = struct
      stuck, which is the data's length and not ours. *)
   let outstanding () =
     Lwt_list.filter_map_s
-      (fun (m : Backend.member) ->
-        let (module T : Backend.S) = m.Backend.backend in
+      (fun (m : (module Backend_lwt.Store) Backend.member) ->
+        let (module T : Backend_lwt.Store) = m.Backend.backend in
         let+ entries = T.list_prefix ~prefix:L.gc_jobs_prefix () in
         let jobs =
           List.filter
@@ -474,8 +475,8 @@ module Make (C : Conf.S) = struct
      this code chose. *)
   let retry_outstanding () =
     Lwt_list.map_s
-      (fun (m : Backend.member) ->
-        let (module T : Backend.S) = m.Backend.backend in
+      (fun (m : (module Backend_lwt.Store) Backend.member) ->
+        let (module T : Backend_lwt.Store) = m.Backend.backend in
         let* entries = T.list_prefix ~prefix:L.gc_jobs_prefix () in
         let jobs =
           List.filter
@@ -518,7 +519,7 @@ module Make (C : Conf.S) = struct
     (* I/O bound, so a batch wants concurrent syscalls rather than cores: the
        device's own answer by default, and 1 makes a run as unobtrusive as it
        can be. *)
-    let (module M : Backend.S) = main in
+    let (module M : Backend_lwt.Store) = main in
     let* max_slots =
       match concurrency with
         | Some n -> Lwt.return (max 1 n)
@@ -676,7 +677,7 @@ module Make (C : Conf.S) = struct
        to a replica, so an unreadable copy here would come back as somebody
        else's good one, and a write fans out, filing every healthy copy as
        corrupt alongside the bad one. *)
-    let (module M : Backend.S) = s.main in
+    let (module M : Backend_lwt.Store) = s.main in
     let backend_key = L.key ck in
     match Chunk_layout.marker_key backend_key with
       | None -> Lwt.return_unit
@@ -821,8 +822,8 @@ module Make (C : Conf.S) = struct
       if doomed = [] then Lwt.return []
       else
         Lwt_list.filter_map_s
-          (fun (m : Backend.member) ->
-            let (module T : Backend.S) = m.Backend.backend in
+          (fun (m : (module Backend_lwt.Store) Backend.member) ->
+            let (module T : Backend_lwt.Store) = m.Backend.backend in
             let* queued =
               T.discard ~chunk_prefix:C.chunk_prefix
                 ~run:(Chunk_layout.gc_run_name s.started)
@@ -851,13 +852,13 @@ module Make (C : Conf.S) = struct
        and a copy that enqueued has these derived for it by the same function
        that does the deleting. A separate call rather than keys appended to
        [doomed], so the batch stays the size the operator asked for, and absent
-       keys are already a success ({!Backend.S.delete_multi}). *)
+       keys are already a success ({!Backend_lwt.Store.delete_multi}). *)
     let markers = List.filter_map Chunk_layout.marker_key doomed in
     let* () =
       if markers = [] then Lwt.return_unit
       else
         Lwt_list.iter_s
-          (fun (module T : Backend.S) -> T.delete_multi markers)
+          (fun (module T : Backend_lwt.Store) -> T.delete_multi markers)
           (s.main :: direct)
     in
     let* () = Lwt_list.iter_s (discard_shard s) shards in
@@ -1092,7 +1093,10 @@ module Make (C : Conf.S) = struct
         | ms ->
             ", deleting on "
             ^ String.concat ", "
-                (List.map (fun (m : Backend.member) -> m.Backend.name) ms));
+                (List.map
+                   (fun (m : (module Backend_lwt.Store) Backend.member) ->
+                     m.Backend.name)
+                   ms));
     s.work <- Close shards;
     s.total <- List.length shards;
     s.done_ <- 0;

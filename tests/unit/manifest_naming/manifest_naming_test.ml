@@ -17,7 +17,7 @@ let root = Scratch.dir "manifest-naming"
 let domain = "testdom"
 
 module Store =
-  (val Backend.make ~backend_type:"local"
+  (val Backend_lwt.make ~backend_type:"local"
          ~get_field:(fun _ -> Some (Filename.concat root "store"))
          ())
 
@@ -25,7 +25,7 @@ module C =
   (val Fixture.conf ~domain
          ~chunk_size:(8 * 1024 * 1024)
          ~cache_chunk_size:(8 * 1024 * 1024)
-         ~store:(module Store : Backend.S)
+         ~store:(module Store : Backend_lwt.Store)
          ~cache_root:root ~data_dir:root ~root ()
       : Conf.S)
 

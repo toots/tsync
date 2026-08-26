@@ -74,7 +74,7 @@ module Inode = struct
               let* pid = ensure_id (Logical_key.parent key) in
               let candidate = { Folder.name; id = Stored_key.new_id () } in
               let bkey = child_key ~folder_id:pid name in
-              let module B = (val C.store : Backend.S) in
+              let module B = (val C.store : Backend_lwt.Store) in
               let* held =
                 Lwt.catch
                   (fun () ->

@@ -19,7 +19,7 @@ module C : Conf.S = struct
     (* [verifyWrites] off: the chunks planted here are named to land one per
        shard, which a real content key cannot be made to do, so the store would
        rightly file every one of them as corrupt. *)
-    Backend.make ~backend_type:"local"
+    Backend_lwt.make ~backend_type:"local"
       ~get_field:(function
         | "verifyWrites" -> Some "false" | _ -> Some (status_root ^ "/store"))
       ()
@@ -40,7 +40,7 @@ module C : Conf.S = struct
         ~pending:(fun () -> 7)
         ~in_flight:(fun () -> 2)
         ~degraded:(fun () -> true)
-        (module Down);
+        (module Down : Backend_lwt.Store);
     ]
 
   let cache_root = status_root ^ "/cache"
@@ -214,7 +214,7 @@ let () =
          now, so a leftover object would answer the read this asserts is a
          miss. *)
       store =
-        Backend.make ~backend_type:"local"
+        Backend_lwt.make ~backend_type:"local"
           ~get_field:(fun _ -> Some (Scratch.dir "route-test"))
           ();
       serve_share = None;
@@ -314,7 +314,7 @@ let () =
     List.exists (fun (s : Field_spec.t) -> s.name = name) specs
   in
   let backend_spec =
-    match Backend.spec_for "http-proxy" with
+    match Backend_lwt.spec_for "http-proxy" with
       | Some s -> s
       | None -> failwith "http-proxy backend not registered"
   in
@@ -373,7 +373,7 @@ let () =
          let key =
            Printf.sprintf "%s%013x-%016x" (Chunk_layout.shard_name i) i i
          in
-         let (module B : Backend.S) = C.store in
+         let (module B : Backend_lwt.Store) = C.store in
          B.put
            ~key:
              (Stored_key.in_space ~prefix:C.chunk_prefix
@@ -401,7 +401,7 @@ let () =
   Lwt_main.run
     (Lwt_list.iter_s
        (fun entry ->
-         let (module B : Backend.S) = C.store in
+         let (module B : Backend_lwt.Store) = C.store in
          B.put
            ~key:
              (Stored_key.in_space ~prefix:C.journal_prefix

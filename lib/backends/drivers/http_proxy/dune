@@ -16,6 +16,8 @@
    -open
    Tsync_backend_register
    -open
+   Tsync_backend_lwt
+   -open
    Tsync_http_client
    -open
    Tsync_http_client_lwt))
@@ -29,6 +31,7 @@
   tsync-libs.field_spec
   tsync-libs.bigstring
   tsync-libs.backend_register
+  tsync-libs.backend_lwt
   tsync_http_client
   tsync_http_client_lwt
   tsync-libs.http_proxy

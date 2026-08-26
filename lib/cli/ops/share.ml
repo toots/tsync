@@ -6,7 +6,7 @@ exception Share_not_found of string
 module Make (C : Conf.S) = struct
   module Lk = Logical_key.Make (C)
   module L = Layout.Inode.Make (C)
-  module R = (val C.store : Backend.S)
+  module R = (val C.store : Backend_lwt.Store)
 
   let shares_prefix = C.shares_prefix
 
@@ -24,15 +24,18 @@ module Make (C : Conf.S) = struct
           Lwt.fail
             (Share_unavailable
                (Printf.sprintf "Sharing is not available for %s." C.domain_name))
-      | (m : Backend.member) :: rest -> (
-          let (module Bk : Backend.S) = m.Backend.backend in
+      | (m : (module Backend_lwt.Store) Backend.member) :: rest -> (
+          let (module Bk : Backend_lwt.Store) = m.Backend.backend in
           let* caps = Bk.capabilities ~prefix:C.domain_prefix () in
           match caps.Backend.share_url with
-            | Some url -> Lwt.return ((module Bk : Backend.S), url)
+            | Some url -> Lwt.return ((module Bk : Backend_lwt.Store), url)
             | None -> find rest)
     in
     let readable, rest =
-      List.partition (fun (m : Backend.member) -> m.Backend.readable) C.members
+      List.partition
+        (fun (m : (module Backend_lwt.Store) Backend.member) ->
+          m.Backend.readable)
+        C.members
     in
     find (readable @ rest)
 
@@ -41,7 +44,7 @@ module Make (C : Conf.S) = struct
     Lwt.catch
       (fun () ->
         let* share_backend, share_url = share_backend () in
-        let (module B : Backend.S) = share_backend in
+        let (module B : Backend_lwt.Store) = share_backend in
         (* Read through the domain's own read path; the store serving the link
            is chosen for where the link points, not for holding the newest
            copy. *)
@@ -159,7 +162,7 @@ module Make (C : Conf.S) = struct
   let clear_cache () =
     Lwt.catch
       (fun () ->
-        let* (module B : Backend.S), _ = share_backend () in
+        let* (module B : Backend_lwt.Store), _ = share_backend () in
         let* entries = B.list_prefix ~prefix:shares_prefix () in
         let entries =
           List.filter

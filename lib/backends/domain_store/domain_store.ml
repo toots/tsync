@@ -1,6 +1,6 @@
 open Lwt.Syntax
 
-type sub = { name : string; backend : (module Backend.S) }
+type sub = { name : string; backend : (module Backend_lwt.Store) }
 
 let drain () = Durable_queue_lwt.settle_all ()
 
@@ -11,12 +11,12 @@ let hooked = ref false
 let hook_drain () =
   if not !hooked then begin
     hooked := true;
-    Backend.on_drain drain
+    Backend_lwt.on_drain drain
   end
 
 let rec make ~(mains : sub list)
-    ~(targets : (source:(module Backend.S) -> (module Deferred.S)) list)
-    ~(archives : sub list) : (module Backend.S) =
+    ~(targets : (source:(module Backend_lwt.Store) -> (module Deferred.S)) list)
+    ~(archives : sub list) : (module Backend_lwt.Store) =
   (* Each target catches up by re-reading from the source of truth and nothing
      else: a job is consumed once it succeeds, so a body read from a copy
      that is itself behind would land here and never be corrected. *)
@@ -63,8 +63,8 @@ let rec make ~(mains : sub list)
           let* outcome =
             Lwt.catch
               (fun () ->
-                let module B = (val s.backend : Backend.S) in
-                let+ v = f (module B : Backend.S) in
+                let module B = (val s.backend : Backend_lwt.Store) in
+                let+ v = f (module B : Backend_lwt.Store) in
                 `Got v)
               (fun exn ->
                 Log.warn "domain store %s: %s unavailable (%s); trying next"
@@ -101,7 +101,9 @@ let rec make ~(mains : sub list)
   in
   (module struct
     let put ~key ~data () =
-      let* () = write (fun (module B : Backend.S) -> B.put ~key ~data ()) in
+      let* () =
+        write (fun (module B : Backend_lwt.Store) -> B.put ~key ~data ())
+      in
       fill (Deferred.Put { key; data }) key
 
     (* Arbitrated by the first main alone, then fanned out as an ordinary write:
@@ -111,12 +113,12 @@ let rec make ~(mains : sub list)
       match mains with
         | [] -> Lwt.fail Backend.Not_writable
         | first :: rest ->
-            let module A = (val first.backend : Backend.S) in
+            let module A = (val first.backend : Backend_lwt.Store) in
             let* held = A.put_if_absent ~key ~data () in
             let* () =
               Lwt_list.iter_s
                 (fun s ->
-                  let module B = (val s.backend : Backend.S) in
+                  let module B = (val s.backend : Backend_lwt.Store) in
                   B.put ~key ~data:held ())
                 rest
             in
@@ -124,11 +126,15 @@ let rec make ~(mains : sub list)
             held
 
     let delete ~key () =
-      let* () = write (fun (module B : Backend.S) -> B.delete ~key ()) in
+      let* () =
+        write (fun (module B : Backend_lwt.Store) -> B.delete ~key ())
+      in
       fill (Deferred.Delete key) key
 
     let delete_multi keys =
-      let* () = write (fun (module B : Backend.S) -> B.delete_multi keys) in
+      let* () =
+        write (fun (module B : Backend_lwt.Store) -> B.delete_multi keys)
+      in
       (* Filtered per target rather than through [fill], which decides for one
          key: a target may have a use for some of these and not others. *)
       Lwt_list.iter_s
@@ -140,18 +146,19 @@ let rec make ~(mains : sub list)
 
     let copy ~src_key ~dst_key () =
       let* () =
-        write (fun (module B : Backend.S) -> B.copy ~src_key ~dst_key ())
+        write (fun (module B : Backend_lwt.Store) ->
+            B.copy ~src_key ~dst_key ())
       in
       fill (Deferred.Copy { src_key; dst_key }) dst_key
 
     let get_opt ~key () =
-      read "get_opt" (fun (module B : Backend.S) -> B.get_opt ~key ())
+      read "get_opt" (fun (module B : Backend_lwt.Store) -> B.get_opt ~key ())
 
     let head_opt ~key () =
-      read "head_opt" (fun (module B : Backend.S) -> B.head_opt ~key ())
+      read "head_opt" (fun (module B : Backend_lwt.Store) -> B.head_opt ~key ())
 
     (* Declared only where the first readable store has a batch of its own, and
-       forwarding to it directly rather than through {!Backend.Batched}: the
+       forwarding to it directly rather than through {!Backend_lwt.Batched}: the
        caller asking already holds a slot for this read, and taking a second
        from the same pool is how a fan-out deadlocks against itself. What it is
        handed is already packed to one request.
@@ -170,7 +177,7 @@ let rec make ~(mains : sub list)
         match readable with
           | [] -> None
           | s :: _ ->
-              let module B = (val s.backend : Backend.S) in
+              let module B = (val s.backend : Backend_lwt.Store) in
               Option.map (fun f -> (s.name, f)) B.get_many
       in
       match native with
@@ -201,14 +208,17 @@ let rec make ~(mains : sub list)
                       | Some body -> Lwt.return (e.Backend.key, body)
                       | None ->
                           let+ body =
-                            read "get_many" (fun (module B : Backend.S) ->
+                            read "get_many"
+                              (fun (module B : Backend_lwt.Store) ->
                                 B.get_opt ~key:e.Backend.key ())
                           in
                           (e.Backend.key, body))
                   entries)
 
     let get ~key () =
-      let* d = read "get" (fun (module B : Backend.S) -> B.get_opt ~key ()) in
+      let* d =
+        read "get" (fun (module B : Backend_lwt.Store) -> B.get_opt ~key ())
+      in
       match d with
         | Some d -> Lwt.return d
         (* Every store that could hold it was asked and none had it, an
@@ -224,7 +234,7 @@ let rec make ~(mains : sub list)
        Listings are never merged: one store's view wins. *)
     let list_prefix ?max_keys ~prefix () =
       let* r =
-        read "list_prefix" (fun (module B : Backend.S) ->
+        read "list_prefix" (fun (module B : Backend_lwt.Store) ->
             let+ l = B.list_prefix ?max_keys ~prefix () in
             Some l)
       in
@@ -240,7 +250,7 @@ let rec make ~(mains : sub list)
     let verify_all ~chunk_prefix () =
       let+ answers =
         Lwt_list.map_s
-          (fun (module B : Backend.S) -> B.verify_all ~chunk_prefix ())
+          (fun (module B : Backend_lwt.Store) -> B.verify_all ~chunk_prefix ())
           inners
       in
       let queued =
@@ -264,7 +274,7 @@ let rec make ~(mains : sub list)
     let capabilities ~prefix () =
       let+ answers =
         Lwt_list.map_s
-          (fun (module B : Backend.S) -> B.capabilities ~prefix ())
+          (fun (module B : Backend_lwt.Store) -> B.capabilities ~prefix ())
           inners
       in
       Backend.merge_caps answers

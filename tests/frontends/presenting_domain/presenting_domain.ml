@@ -33,7 +33,7 @@ module C = struct
   let shares_prefix = "tsync/shares/"
 
   let store =
-    Backend.make ~backend_type:"local"
+    Backend_lwt.make ~backend_type:"local"
       ~get_field:(fun _ -> Some backend_root)
       ()
 
@@ -97,7 +97,7 @@ let () =
         finished without the store holding it would read the same above. *)
      let module L = Layout.Inode.Make (C) in
      let* bkey = L.ensure_manifest_key key in
-     let module B = (val C.store : Backend.S) in
+     let module B = (val C.store : Backend_lwt.Store) in
      let* head = B.head_opt ~key:bkey () in
      Printf.printf "manifest in the store: %b\n" (head <> None);
      (* What a peer polls. The upload published a journal entry, and an entry

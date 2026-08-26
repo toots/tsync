@@ -325,7 +325,7 @@ let list_all t ?max_keys ~prefix () =
   collect [] None
 
 let make ?endpoint ?service_account_key ?share_url ~bucket () :
-    (module Backend.S) =
+    (module Backend_lwt.Store) =
   let base =
     match endpoint with
       | Some e when e <> "" -> e
@@ -369,7 +369,7 @@ let make ?endpoint ?service_account_key ?share_url ~bucket () :
 
     let list_prefix ?max_keys ~prefix () = list_all t ?max_keys ~prefix ()
 
-    (* The batch API carries metadata, not bodies: {!Backend.Batched} fans
+    (* The batch API carries metadata, not bodies: {!Backend_lwt.Batched} fans
        these out. *)
     let get_many = None
 
@@ -449,7 +449,7 @@ let () =
       | None -> failwith ("gcs backend: missing field: " ^ key)
   in
   let opt get key = match get key with Some "" | None -> None | s -> s in
-  Backend.register ~spec "gcs" (fun get ->
+  Backend_lwt.register ~spec "gcs" (fun get ->
       make ?endpoint:(opt get "endpoint")
         ?service_account_key:(opt get "serviceAccountKey")
         ?share_url:(opt get "shareUrl") ~bucket:(req get "bucket") ())

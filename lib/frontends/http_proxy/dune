@@ -44,6 +44,8 @@
    -open
    Tsync_backend_register
    -open
+   Tsync_backend_lwt
+   -open
    Tsync_conf
    -open
    Tsync_frontend_register
@@ -87,6 +89,7 @@
   tsync-libs.metrics
   tsync-libs.bigstring
   tsync-libs.backend_register
+  tsync-libs.backend_lwt
   tsync-libs.conf
   tsync-libs.zip
   tsync-libs.log

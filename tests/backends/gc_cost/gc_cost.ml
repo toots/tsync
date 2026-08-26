@@ -49,10 +49,10 @@ let replica_ops = counted ()
 (* Passes everything through and keeps score. [markers] counts writes of the run
    marker specifically: on a copy, any at all is one too many. *)
 module Count
-    (B : Backend.S)
+    (B : Backend_lwt.Store)
     (T : sig
       val t : tally
-    end) : Backend.S = struct
+    end) : Backend_lwt.Store = struct
   include B
 
   (* Counted apart from [lists], which stands for walking a copy's chunk space:
@@ -85,20 +85,20 @@ end
 
 module Main =
   Count
-    ((val Backend.make ~backend_type:"local"
+    ((val Backend_lwt.make ~backend_type:"local"
             ~get_field:(fun _ -> Some main_dir)
             ()
-         : Backend.S))
+         : Backend_lwt.Store))
     (struct
       let t = main_ops
     end)
 
 module Replica =
   Count
-    ((val Backend.make ~backend_type:"local"
+    ((val Backend_lwt.make ~backend_type:"local"
             ~get_field:(fun _ -> Some replica_dir)
             ()
-         : Backend.S))
+         : Backend_lwt.Store))
     (struct
       let t = replica_ops
     end)
@@ -118,10 +118,10 @@ module C : Conf.S = struct
     [
       Backend.member ~role:`Main ~backend_type:"local" ~local_path:main_dir
         ~name:"main"
-        (module Main);
+        (module Main : Backend_lwt.Store);
       Backend.member ~role:`Replica ~backend_type:"local"
         ~local_path:replica_dir ~name:"replica"
-        (module Replica);
+        (module Replica : Backend_lwt.Store);
     ]
 
   (* The real composite, deliberately. A test that hands {!Gc} the main alone

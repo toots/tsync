@@ -1,8 +1,8 @@
 open Lwt.Syntax
 
 module Make (C : Conf.S) (L : Layout.S) = struct
-  module B = (val C.store : Backend.S)
-  module Bb = Backend.Batched (B)
+  module B = (val C.store : Backend_lwt.Store)
+  module Bb = Backend_lwt.Batched (B)
 
   (* Publishing may bring the folder into existence; every other operation
      resolves what is already there and treats an unknown folder as absent. *)

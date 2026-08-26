@@ -12,7 +12,7 @@ open Check
 let root = Scratch.dir "resync"
 
 module Store =
-  (val Backend.make ~backend_type:"local"
+  (val Backend_lwt.make ~backend_type:"local"
          ~get_field:(fun _ -> Some (Filename.concat root "store"))
          ())
 
@@ -21,7 +21,7 @@ module Store =
    the suite must behave the same as root. *)
 let broken = ref (Stored_key.listed "")
 
-module Flaky : Backend.S = struct
+module Flaky : Backend_lwt.Store = struct
   include Store
 
   let refuse key =
@@ -37,7 +37,7 @@ end
 
 module C =
   (val Fixture.conf ~domain:"testdom"
-         ~store:(module Flaky : Backend.S)
+         ~store:(module Flaky : Backend_lwt.Store)
          ~cache_root:root ~data_dir:root ~root ()
       : Conf.S)
 

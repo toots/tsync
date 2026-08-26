@@ -24,7 +24,7 @@ module C = struct
   let shares_prefix = "tsync/shares/"
 
   let store =
-    Backend.make ~backend_type:"local"
+    Backend_lwt.make ~backend_type:"local"
       ~get_field:(fun _ -> Some backend_root)
       ()
 
@@ -56,10 +56,10 @@ let moving = ref ""
 
 module Mutating = struct
   include
-    (val Backend.make ~backend_type:"local"
+    (val Backend_lwt.make ~backend_type:"local"
            ~get_field:(fun _ -> Some backend_root)
            ()
-        : Backend.S)
+        : Backend_lwt.Store)
 
   let put ~key ~data () =
     if !moving <> "" then begin
@@ -75,19 +75,19 @@ end
 module Cm = struct
   include C
 
-  let store = (module Mutating : Backend.S)
+  let store = (module Mutating : Backend_lwt.Store)
   let members = [Backend.member ~name:"local" store]
 end
 
 module Rm = Remote.Make (Cm)
 
-let opinionated n : (module Backend.S) =
+let opinionated n : (module Backend_lwt.Store) =
   (module struct
     include
-      (val Backend.make ~backend_type:"local"
+      (val Backend_lwt.make ~backend_type:"local"
              ~get_field:(fun _ -> Some backend_root)
              ()
-          : Backend.S)
+          : Backend_lwt.Store)
 
     let get_many = None
 
@@ -130,8 +130,8 @@ let read_file path =
   s
 
 let count_chunks () =
-  let (module B : Backend.S) =
-    Backend.make ~backend_type:"local"
+  let (module B : Backend_lwt.Store) =
+    Backend_lwt.make ~backend_type:"local"
       ~get_field:(fun _ -> Some backend_root)
       ()
   in

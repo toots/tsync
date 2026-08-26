@@ -42,6 +42,6 @@ let run ?report p =
            let* () = Job_report_lwt.finish ~error:(Printexc.to_string exn) () in
            Lwt.fail exn)
      in
-     let* () = Backend.drain () in
+     let* () = Backend_lwt.drain () in
      let+ () = Job_report_lwt.finish () in
      r)

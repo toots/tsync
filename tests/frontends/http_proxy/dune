@@ -20,6 +20,8 @@
    -open
    Tsync_backend_register
    -open
+   Tsync_backend_lwt
+   -open
    Tsync_conf
    -open
    Tsync_local_backend
@@ -49,6 +51,7 @@
   tsync_http_proxy
   tsync_bigstring
   tsync_backend_register
+  tsync_backend_lwt
   tsync_local_backend
   tsync_http_proxy_backend
   tsync_frontend_register

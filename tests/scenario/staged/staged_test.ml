@@ -229,7 +229,7 @@ let () =
      (* A published file edited in one chunk must re-upload that chunk and no
         other: the untouched ones stay [Inherit] and keep their entries. *)
      let backend_chunks () =
-       let (module B : Backend.S) = C.store in
+       let (module B : Backend_lwt.Store) = C.store in
        let+ entries = B.list_prefix ~prefix:C.chunk_prefix () in
        List.length entries
      in

@@ -39,7 +39,7 @@ module Make (C : Conf.S) = struct
   let key = L.corrupted_key
 
   (* Unbounded for {!list}, which is feeding a repair rather than a report. *)
-  let entries_on ?max_keys ~store (module B : Backend.S) =
+  let entries_on ?max_keys ~store (module B : Backend_lwt.Store) =
     let+ found = B.list_prefix ?max_keys ~prefix () in
     List.filter_map
       (fun (e : Backend.file_entry) ->
@@ -55,8 +55,8 @@ module Make (C : Conf.S) = struct
         else None)
       found
 
-  let member_entries ?max_keys (m : Backend.member) =
-    let (module B : Backend.S) = m.Backend.backend in
+  let member_entries ?max_keys (m : (module Backend_lwt.Store) Backend.member) =
+    let (module B : Backend_lwt.Store) = m.Backend.backend in
     let* caps = B.capabilities ~prefix:C.domain_prefix () in
     if not caps.Backend.verified then Lwt.return `Unverified
     else
@@ -68,7 +68,7 @@ module Make (C : Conf.S) = struct
   let list () =
     let+ per_member =
       Lwt_list.map_s
-        (fun (m : Backend.member) ->
+        (fun (m : (module Backend_lwt.Store) Backend.member) ->
           Lwt.catch
             (fun () ->
               let+ found = member_entries m in
@@ -94,12 +94,13 @@ module Make (C : Conf.S) = struct
   let detail e =
     match
       List.find_opt
-        (fun (m : Backend.member) -> m.Backend.name = e.store)
+        (fun (m : (module Backend_lwt.Store) Backend.member) ->
+          m.Backend.name = e.store)
         C.members
     with
       | None -> Lwt.return_none
       | Some m ->
-          let (module B : Backend.S) = m.Backend.backend in
+          let (module B : Backend_lwt.Store) = m.Backend.backend in
           Lwt.catch
             (fun () ->
               let+ body = B.get_opt ~key:(key e.chunk_key) () in

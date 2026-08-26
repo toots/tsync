@@ -250,7 +250,7 @@ let capabilities t ~prefix () =
         t.caps_cache <- Some p;
         p
 
-let make ~url ~secret : (module Backend.S) =
+let make ~url ~secret : (module Backend_lwt.Store) =
   let t =
     {
       base_uri = Uri.of_string url;
@@ -319,5 +319,5 @@ let () =
       | Some v -> v
       | None -> failwith ("http-proxy backend: missing field: " ^ key)
   in
-  Backend.register ~spec "http-proxy" (fun get ->
+  Backend_lwt.register ~spec "http-proxy" (fun get ->
       make ~url:(req get "url") ~secret:(req get "secret"))

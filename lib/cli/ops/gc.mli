@@ -17,9 +17,9 @@
     {!Remote.publish} does.
 
     {b Where it runs.} Only on a main that keeps its objects here
-    ({!Backend.S.local_path}), a directory rename within the store being the
-    whole of what this rests on; an s3, gcs or http-proxy main is refused rather
-    than half-served.
+    ({!Backend_lwt.Store.local_path}), a directory rename within the store being
+    the whole of what this rests on; an s3, gcs or http-proxy main is refused
+    rather than half-served.
 
     {b The copies.} Replicas and backfill targets are never renamed. Closing
     deletes off each of them the same keys it discards here, batched by key
@@ -28,10 +28,10 @@
     nothing will ever name.
 
     A copy whose bucket runs the delete function is {i told} rather than
-    deleted: {!Backend.S.discard} writes the batch as a request the bucket's own
-    notification delivers, and the request being durably stored is what stands
-    in for the delete having happened. So the ordering above holds either way,
-    but a copy whose function never runs keeps its garbage — see
+    deleted: {!Backend_lwt.Store.discard} writes the batch as a request the
+    bucket's own notification delivers, and the request being durably stored is
+    what stands in for the delete having happened. So the ordering above holds
+    either way, but a copy whose function never runs keeps its garbage — see
     {!Make.outstanding}, which is the only thing that will ever say so.
 
     What this does {i not} do is fill a copy that has fallen behind, or find

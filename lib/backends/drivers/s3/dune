@@ -16,7 +16,9 @@
    -open
    Tsync_bigstring
    -open
-   Tsync_backend_register))
+   Tsync_backend_register
+   -open
+   Tsync_backend_lwt))
  (name tsync_s3_backend)
  (private_modules s3_backend)
  (optional)
@@ -30,6 +32,7 @@
   tsync-libs.field_spec
   tsync-libs.bigstring
   tsync-libs.backend_register
+  tsync-libs.backend_lwt
   tsync-libs.log
   aws-s3-lwt
   lwt

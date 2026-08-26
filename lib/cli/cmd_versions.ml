@@ -43,7 +43,7 @@ let cmd : unit Cmd.t =
        let module St = Store.Make (C) (L) in
        let module Hs = History.Make (C) (L) in
        let module Lk = Logical_key.Make (C) in
-       let module B = (val C.store : Backend.S) in
+       let module B = (val C.store : Backend_lwt.Store) in
        let parse = History.parse ~versions_prefix:C.versions_prefix in
        match path with
          | Some rel ->

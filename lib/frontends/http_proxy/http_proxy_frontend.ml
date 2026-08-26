@@ -102,7 +102,7 @@ type route = {
   secret : string;
   read_only : bool;
   chunk_size : int option;  (** what this domain's config says, if anything *)
-  store : (module Backend.S);
+  store : (module Backend_lwt.Store);
       (** The domain's stores as one. It resolves the read order and carries the
           deferred targets internally, so this side never sees a role. *)
   serve_share : share_handler option;
@@ -397,7 +397,7 @@ let exec route op ~body =
   in
   match op with
     | Get key -> (
-        let module B = (val route.store : Backend.S) in
+        let module B = (val route.store : Backend_lwt.Store) in
         let* data = B.get_opt ~key () in
         match data with
           | Some data ->
@@ -405,7 +405,7 @@ let exec route op ~body =
               respond_chunk data
           | None -> respond ~status:`Not_found "")
     | Head key -> (
-        let module B = (val route.store : Backend.S) in
+        let module B = (val route.store : Backend_lwt.Store) in
         let* e = B.head_opt ~key () in
         match e with
           | Some e ->
@@ -421,7 +421,7 @@ let exec route op ~body =
     | Put_if_absent key ->
         if not (writable key) then reject_ro ()
         else
-          let module B = (val route.store : Backend.S) in
+          let module B = (val route.store : Backend_lwt.Store) in
           let* held = B.put_if_absent ~key ~data:body () in
           Metrics.count written_bytes (Bigstring.length body);
           Metrics.count read_bytes (Bigstring.length held);
@@ -432,7 +432,7 @@ let exec route op ~body =
         if not (writable key) then reject_ro ()
         else
           let* () =
-            let module B = (val route.store : Backend.S) in
+            let module B = (val route.store : Backend_lwt.Store) in
             B.put ~key ~data:body ()
           in
           Metrics.count written_bytes (Bigstring.length body);
@@ -441,13 +441,13 @@ let exec route op ~body =
         if not (writable key) then reject_ro ()
         else
           let* () =
-            let module B = (val route.store : Backend.S) in
+            let module B = (val route.store : Backend_lwt.Store) in
             B.delete ~key ()
           in
           respond ""
     | Get_multi keys ->
-        let module B = (val route.store : Backend.S) in
-        let module Bb = Backend.Batched (B) in
+        let module B = (val route.store : Backend_lwt.Store) in
+        let module Bb = Backend_lwt.Batched (B) in
         (* Sizes the caller has and this end does not, so the answer is bounded
            by the key count alone; the client packed the request to its own byte
            budget before sending it. *)
@@ -465,7 +465,7 @@ let exec route op ~body =
         if route.read_only then reject_ro ()
         else
           let* () =
-            let module B = (val route.store : Backend.S) in
+            let module B = (val route.store : Backend_lwt.Store) in
             B.delete_multi keys
           in
           respond ""
@@ -473,12 +473,12 @@ let exec route op ~body =
         if route.read_only then reject_ro ()
         else
           let* () =
-            let module B = (val route.store : Backend.S) in
+            let module B = (val route.store : Backend_lwt.Store) in
             B.copy ~src_key ~dst_key ()
           in
           respond ""
     | List_all (prefix, max_keys) ->
-        let module B = (val route.store : Backend.S) in
+        let module B = (val route.store : Backend_lwt.Store) in
         let* entries = B.list_prefix ?max_keys ~prefix () in
         respond (Http_proxy.Wire.entries_to_json entries)
     | Share_url prefix -> (
@@ -492,7 +492,7 @@ let exec route op ~body =
             (* A backing store may serve shares itself (an s3 with a configured
              shareUrl): pass its absolute URL through. *)
             B =
-            (val route.store : Backend.S)
+            (val route.store : Backend_lwt.Store)
           in
           let* caps = B.capabilities ~prefix () in
           match caps.Backend.share_url with
@@ -525,7 +525,7 @@ let exec route op ~body =
            us reads markers out of that store, so what it may claim about them is
            exactly what the store claims. Answering for ourselves would let a
            proxy in front of an unchecked bucket report a clean domain. *)
-        let module B = (val route.store : Backend.S) in
+        let module B = (val route.store : Backend_lwt.Store) in
         let* caps = B.capabilities ~prefix () in
         respond
           (Yojson.Safe.to_string
@@ -918,7 +918,7 @@ let start served =
               let+ answers =
                 Lwt_list.map_s
                   (fun r ->
-                    let module B = (val r.store : Backend.S) in
+                    let module B = (val r.store : Backend_lwt.Store) in
                     Lwt.catch
                       (fun () -> B.capabilities ~prefix:"" ())
                       (fun _ -> Lwt.return Backend.no_caps))

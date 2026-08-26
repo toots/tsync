@@ -56,17 +56,17 @@ let outcome to_string p =
           | Backend.Backend_error m -> m
           | e -> Printexc.to_string e))
 
-let get (module B : Backend.S) key =
+let get (module B : Backend_lwt.Store) key =
   outcome (Printf.sprintf "%S") (fun () ->
       let+ body = B.get_opt ~key () in
       Option.map Bigstring.to_string body)
 
-let head (module B : Backend.S) key =
+let head (module B : Backend_lwt.Store) key =
   outcome
     (fun (e : Backend.file_entry) -> Printf.sprintf "%d bytes" e.size)
     (fun () -> B.head_opt ~key ())
 
-let listing (module B : Backend.S) prefix =
+let listing (module B : Backend_lwt.Store) prefix =
   outcome
     (fun l ->
       match List.map (fun (e : Backend.file_entry) -> e.key) l with
@@ -83,20 +83,22 @@ let holds root key =
 
 let () =
   let main =
-    Backend.make ~backend_type:"local" ~get_field:(fun _ -> Some main_root) ()
+    Backend_lwt.make ~backend_type:"local"
+      ~get_field:(fun _ -> Some main_root)
+      ()
   in
   let replica =
-    Backend.make ~backend_type:"local"
+    Backend_lwt.make ~backend_type:"local"
       ~get_field:(fun _ -> Some replica_root)
       ()
   in
   let archive =
-    Backend.make ~backend_type:"local"
+    Backend_lwt.make ~backend_type:"local"
       ~get_field:(fun _ -> Some archive_root)
       ()
   in
-  let (module Rep : Backend.S) = replica in
-  let (module Arc : Backend.S) = archive in
+  let (module Rep : Backend_lwt.Store) = replica in
+  let (module Arc : Backend_lwt.Store) = archive in
   Lwt_main.run
     (* Content each store has that the others do not. *)
     (let* () =
@@ -114,7 +116,7 @@ let () =
      let solo =
        Domain_store.make ~mains:[sub "main" main] ~targets:[] ~archives:[]
      in
-     let (module Solo : Backend.S) = solo in
+     let (module Solo : Backend_lwt.Store) = solo in
      let* () =
        Solo.put ~key:(k "on-main") ~data:(Bigstring.of_string "from-main") ()
      in
@@ -143,7 +145,7 @@ let () =
          ~targets:[readable "replica" replica]
          ~archives:[]
      in
-     let (module WithRep : Backend.S) = with_rep in
+     let (module WithRep : Backend_lwt.Store) = with_rep in
      (* The write waits for the main and nothing else: the replica is filled off
         this path. *)
      let* () =
@@ -164,7 +166,7 @@ let () =
          ~targets:[readable "replica" replica]
          ~archives:[]
      in
-     let (module DeadMain : Backend.S) = dead_main in
+     let (module DeadMain : Backend_lwt.Store) = dead_main in
      let* r = get dead_main (k "on-replica") in
      step "get on-replica = %s" r;
      (* A replica is a complete copy, so its "no" still ends the read. *)
@@ -190,7 +192,7 @@ let () =
          ~targets:[]
          ~archives:[sub "archive" archive]
      in
-     let (module WithArc : Backend.S) = with_arc in
+     let (module WithArc : Backend_lwt.Store) = with_arc in
      let* r = get with_arc (k "on-archive") in
      step "get on-archive = %s" r;
      let* r = head with_arc (k "on-archive") in
@@ -238,7 +240,7 @@ let () =
      let ro =
        Domain_store.make ~mains:[] ~targets:[] ~archives:[sub "archive" archive]
      in
-     let (module Ro : Backend.S) = ro in
+     let (module Ro : Backend_lwt.Store) = ro in
      let* r = get ro (k "on-archive") in
      step "get on-archive = %s" r;
      let* r = get ro (k "nowhere") in

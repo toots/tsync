@@ -514,8 +514,8 @@ let setup_client (module C : Conf.S) root staging_prefix =
   in
   (* The member, not just its module: damaging a file behind the store's back
      needs to know where the store keeps it. *)
-  let damage (m : Backend.member) =
-    let (module B : Backend.S) = m.Backend.backend in
+  let damage (m : (module Backend_lwt.Store) Backend.member) =
+    let (module B : Backend_lwt.Store) = m.Backend.backend in
     function
     | DeleteRemoteChunk { path; index } ->
         let* ck = remote_chunk_key path index in
@@ -847,8 +847,8 @@ let setup_client (module C : Conf.S) root staging_prefix =
     | RequestVerify ->
         let+ answers =
           Lwt_list.map_s
-            (fun (m : Backend.member) ->
-              let (module B : Backend.S) = m.Backend.backend in
+            (fun (m : (module Backend_lwt.Store) Backend.member) ->
+              let (module B : Backend_lwt.Store) = m.Backend.backend in
               let+ a = B.verify_all ~chunk_prefix:C.chunk_prefix () in
               (m.Backend.name, a))
             C.members
@@ -1235,8 +1235,8 @@ let setup_client (module C : Conf.S) root staging_prefix =
 
 let dump_backend_at ~backend_root ~domain_prefix ~chunk_prefix ~journal_prefix
     ~versions_prefix ~cursor_key =
-  let (module B : Backend.S) =
-    Backend.make ~backend_type:"local"
+  let (module B : Backend_lwt.Store) =
+    Backend_lwt.make ~backend_type:"local"
       ~get_field:(fun _ -> Some backend_root)
       ()
   in
@@ -1519,13 +1519,13 @@ let run_scenario ?(versioning = false) ?(symlink_policy = `Keep)
         Backend.member ~name:"backend" ~backend_type:"local"
           ~config:[("path", backend_root)]
           ~local_path:backend_root
-          (Backend.make ~backend_type:"local"
+          (Backend_lwt.make ~backend_type:"local"
              ~get_field:(fun _ -> Some backend_root)
              ());
         Backend.member ~name:"backend2" ~backend_type:"local"
           ~config:[("path", backend2_root)]
           ~local_path:backend2_root
-          (Backend.make ~backend_type:"local"
+          (Backend_lwt.make ~backend_type:"local"
              ~get_field:(fun _ -> Some backend2_root)
              ());
       ]
@@ -1534,7 +1534,7 @@ let run_scenario ?(versioning = false) ?(symlink_policy = `Keep)
       Domain_store.make ~targets:[] ~archives:[]
         ~mains:
           (List.map
-             (fun (m : Backend.member) ->
+             (fun (m : (module Backend_lwt.Store) Backend.member) ->
                {
                  Domain_store.name = m.Backend.name;
                  backend = m.Backend.backend;
@@ -1611,7 +1611,7 @@ let run_two_client_scenario ?(versioning = false)
       Backend.member ~name:"backend" ~backend_type:"local"
         ~config:[("path", backend_root)]
         ~local_path:backend_root
-        (Backend.make ~backend_type:"local"
+        (Backend_lwt.make ~backend_type:"local"
            ~get_field:(fun _ -> Some backend_root)
            ());
     ]
@@ -1732,7 +1732,7 @@ let make_conf ?(versioning = false) ~client_name ~backend_root ~cache_root
     let shares_prefix = "tsync/shares/"
 
     let store =
-      Backend.make ~backend_type:"local"
+      Backend_lwt.make ~backend_type:"local"
         ~get_field:(fun _ -> Some backend_root)
         ()
 

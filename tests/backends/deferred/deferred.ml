@@ -91,11 +91,11 @@ let owed name = List.length (keys_under (Filename.concat log_dir name))
 (* A store whose first [fails] writes fail in a way that clears on its own — a
    dropped link, a throttling store. Counts what it refused, so the snapshot can
    say the failure really happened rather than just that the job landed. *)
-let flaky ~fails ~root : (module Backend.S) * (unit -> int) =
+let flaky ~fails ~root : (module Backend_lwt.Store) * (unit -> int) =
   let left = ref fails in
   let refused = ref 0 in
-  let (module Real : Backend.S) =
-    Backend.make ~backend_type:"local"
+  let (module Real : Backend_lwt.Store) =
+    Backend_lwt.make ~backend_type:"local"
       ~get_field:(function "verifyWrites" -> Some "false" | _ -> Some root)
       ()
   in
@@ -117,9 +117,9 @@ let flaky ~fails ~root : (module Backend.S) * (unit -> int) =
 module Refuses = Doubles.Refuses
 
 (* Reachable only while [up]. *)
-let switchable ~up ~root : (module Backend.S) =
-  let (module Real : Backend.S) =
-    Backend.make ~backend_type:"local"
+let switchable ~up ~root : (module Backend_lwt.Store) =
+  let (module Real : Backend_lwt.Store) =
+    Backend_lwt.make ~backend_type:"local"
       ~get_field:(function "verifyWrites" -> Some "false" | _ -> Some root)
       ()
   in
@@ -194,12 +194,12 @@ let settled ~name stats =
 
 let () =
   let main =
-    Backend.make ~backend_type:"local"
+    Backend_lwt.make ~backend_type:"local"
       ~get_field:(function
         | "verifyWrites" -> Some "false" | _ -> Some main_root)
       ()
   in
-  let (module M : Backend.S) = main in
+  let (module M : Backend_lwt.Store) = main in
   Lwt_main.run
     (let c0 = chunk 0 and c2 = chunk 2 in
      case "the job is on disk before the write returns, and outlives a failure";
@@ -212,7 +212,7 @@ let () =
      let l1, (module T1 : Deferred.S) =
        target_for ~inners:[main] ~target:target1 ~name:"flaky" ()
      in
-     let (module B1 : Backend.S) = l1 in
+     let (module B1 : Backend_lwt.Store) = l1 in
      let stats1 = T1.stats in
      let* () =
        B1.put ~key:(manifest_key "one")
@@ -232,7 +232,7 @@ let () =
      let l2, (module T2 : Deferred.S) =
        target_for ~inners:[main] ~target:(module Refuses) ~name:"refuses" ()
      in
-     let (module B2 : Backend.S) = l2 in
+     let (module B2 : Backend_lwt.Store) = l2 in
      let stats2 = T2.stats in
      let* () =
        B2.put ~key:(manifest_key "two")
@@ -254,7 +254,7 @@ let () =
          ~target:(switchable ~up:down ~root:t3_root)
          ~name:"offline" ()
      in
-     let (module B3 : Backend.S) = l3 in
+     let (module B3 : Backend_lwt.Store) = l3 in
      let* () = B3.put ~key:c2 ~data:(Bigstring.of_string "bbbb") () in
      let* () =
        B3.put ~key:(manifest_key "three")
@@ -297,13 +297,13 @@ let () =
      let l5, (module T5 : Deferred.S) =
        target_for ~inners:[main]
          ~target:
-           (Backend.make ~backend_type:"local"
+           (Backend_lwt.make ~backend_type:"local"
               ~get_field:(function
                 | "verifyWrites" -> Some "false" | _ -> Some t5_root)
               ())
          ~name:"replica" ()
      in
-     let (module B5 : Backend.S) = l5 in
+     let (module B5 : Backend_lwt.Store) = l5 in
      let stats5 = T5.stats in
      let* () =
        B5.put

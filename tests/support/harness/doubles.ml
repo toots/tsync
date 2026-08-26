@@ -1,6 +1,6 @@
 module Down (M : sig
   val why : string
-end) : Backend.S = struct
+end) : Backend_lwt.Store = struct
   let fail () = Lwt.fail (Backend.Backend_error M.why)
   let put ~key:_ ~data:_ () = fail ()
   let put_if_absent ~key:_ ~data:_ () = fail ()
@@ -21,7 +21,7 @@ end) : Backend.S = struct
   let local_path = None
 end
 
-module Hung : Backend.S = struct
+module Hung : Backend_lwt.Store = struct
   let never () = fst (Lwt.wait ())
   let put ~key:_ ~data:_ () = never ()
   let put_if_absent ~key:_ ~data:_ () = never ()
@@ -42,7 +42,7 @@ module Hung : Backend.S = struct
   let local_path = None
 end
 
-module Refuses : Backend.S = struct
+module Refuses : Backend_lwt.Store = struct
   let fail () = Lwt.fail Backend.Not_writable
   let put ~key:_ ~data:_ () = fail ()
   let put_if_absent ~key:_ ~data:_ () = fail ()

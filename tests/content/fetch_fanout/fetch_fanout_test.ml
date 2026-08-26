@@ -18,7 +18,7 @@ let slots = 4
 
 (* Nothing here reaches a store: the fetch function is supplied directly. A
    backend that raises makes that explicit rather than quietly succeeding. *)
-let unused_store : (module Backend.S) =
+let unused_store : (module Backend_lwt.Store) =
   (module Doubles.Down (struct
     let why = "no backend in this test"
   end))

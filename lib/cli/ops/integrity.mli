@@ -49,6 +49,6 @@ module Make (C : Conf.S) : sig
     on_progress:(store:string -> left:int -> found:int -> unit) ->
     on_done:(store:string -> found:int -> unit) ->
     on_stalled:(store:string -> unit) ->
-    Backend.member ->
+    (module Backend_lwt.Store) Backend.member ->
     unit Lwt.t
 end

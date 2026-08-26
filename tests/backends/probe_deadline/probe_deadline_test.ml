@@ -29,7 +29,7 @@ module C : Conf.S = struct
   let shares_prefix = "tsync/shares/"
 
   let store =
-    Backend.make ~backend_type:"local"
+    Backend_lwt.make ~backend_type:"local"
       ~get_field:(fun _ -> Some (root ^ "/store"))
       ()
 
@@ -38,7 +38,7 @@ module C : Conf.S = struct
     [
       Backend.member ~name:"wedged" ~backend_type:"http-proxy"
         ~config:[("url", "http://wedged.example:8000")]
-        (module Hung);
+        (module Hung : Backend_lwt.Store);
     ]
 
   let cache_root = root ^ "/cache"

@@ -92,7 +92,8 @@ let cmd : unit Cmd.t =
            let destinations =
              List.length
                (List.filter
-                  (fun (m : Backend.member) -> m.Backend.name <> src)
+                  (fun (m : (module Backend_lwt.Store) Backend.member) ->
+                    m.Backend.name <> src)
                   C.members)
            in
            let on_scan ~objects ~bytes =

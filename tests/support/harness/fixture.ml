@@ -1,5 +1,5 @@
 let local_store ?(verify_writes = true) path =
-  Backend.make ~backend_type:"local"
+  Backend_lwt.make ~backend_type:"local"
     ~get_field:(function
       | "verifyWrites" -> Some (string_of_bool verify_writes) | _ -> Some path)
     ()

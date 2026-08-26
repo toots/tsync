@@ -3,7 +3,7 @@ open Common
 
 let cmd : unit Cmd.t =
   let mask (b : Conf_parsing.backend_config) k v =
-    match Backend.spec_for b.backend_type with
+    match Backend_lwt.spec_for b.backend_type with
       | None -> v
       | Some specs -> (
           match List.find_opt (fun (s : Field_spec.t) -> s.name = k) specs with

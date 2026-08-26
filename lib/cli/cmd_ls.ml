@@ -54,7 +54,7 @@ let cmd : unit Cmd.t =
        in
        let module Mf = Checkout_lwt.Make (C) in
        let module Mfs = Staged_lwt.Manifest.Make (C) in
-       let module B = (val C.store : Backend.S) in
+       let module B = (val C.store : Backend_lwt.Store) in
        let* files, subdirs = Mf.list_children ~prefix () in
        let items =
          List.map (fun d -> (d, `Dir d)) subdirs

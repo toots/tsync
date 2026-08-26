@@ -371,7 +371,7 @@ module Make (C : Conf.S) = struct
               record ~rel status)
         in
         let* () = publish () in
-        (* No queue settles behind an import and [Backend.drain] does not
+        (* No queue settles behind an import and [Backend_lwt.drain] does not
            reach the cursor, so a bump still held back when this returns is one
            no peer goes looking for. *)
         let+ () = Fs.flush_cursor () in

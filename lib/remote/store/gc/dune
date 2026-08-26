@@ -18,7 +18,9 @@
    -open
    Tsync_bigstring
    -open
-   Tsync_backend_register))
+   Tsync_backend_register
+   -open
+   Tsync_backend_lwt))
  (name tsync_collection)
  (public_name tsync-libs.collection)
  (libraries
@@ -29,6 +31,7 @@
   tsync_log
   tsync_bigstring
   tsync_backend_register
+  tsync_backend_lwt
   yojson
   unix
   lwt))

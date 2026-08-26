@@ -118,7 +118,7 @@ module Make (C : Conf.S) : S = struct
   let drain () =
     let* () = Sq.drain () in
     let* () = Fs.flush_cursor () in
-    Backend.drain ()
+    Backend_lwt.drain ()
 
   let stats_fields () =
     [

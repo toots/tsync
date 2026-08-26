@@ -1,0 +1,9 @@
+; The store interface bound to this process's loop: the driver registry, the
+; drain hooks and the batched reads, each of which there is one of.
+
+(library
+ (flags
+  (:standard -open Tsync_backend_register -open Tsync_io_lwt))
+ (name tsync_backend_lwt)
+ (public_name tsync-libs.backend_lwt)
+ (libraries tsync_backend_register tsync_io_lwt lwt))

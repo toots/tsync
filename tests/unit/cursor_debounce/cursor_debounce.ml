@@ -19,7 +19,7 @@ let root = Scratch.dir "cursor-debounce"
 (* Counts what reaches the store, which is the figure the rate limit is on. *)
 let puts = ref 0
 
-module Counting : Backend.S = struct
+module Counting : Backend_lwt.Store = struct
   let objects : (Stored_key.t, Bigstring.t) Hashtbl.t = Hashtbl.create 8
 
   let put ~key ~data () =

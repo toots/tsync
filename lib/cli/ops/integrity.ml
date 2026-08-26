@@ -16,8 +16,9 @@ let unhealthy (r : Corruption.report) =
 module Make (C : Conf.S) = struct
   module L = Chunk_layout.Make (C)
 
-  let follow ~on_progress ~on_done ~on_stalled (m : Backend.member) =
-    let (module B : Backend.S) = m.Backend.backend in
+  let follow ~on_progress ~on_done ~on_stalled
+      (m : (module Backend_lwt.Store) Backend.member) =
+    let (module B : Backend_lwt.Store) = m.Backend.backend in
     let jobs = L.verify_jobs_prefix in
     let corrupted = L.corrupted_prefix in
     (* A listing that fails counts as nothing found rather than ending the
@@ -53,8 +54,8 @@ module Make (C : Conf.S) = struct
   let verify ~on_answers ~on_progress ~on_done ~on_stalled () =
     let* answers =
       Lwt_list.map_s
-        (fun (m : Backend.member) ->
-          let (module B : Backend.S) = m.Backend.backend in
+        (fun (m : (module Backend_lwt.Store) Backend.member) ->
+          let (module B : Backend_lwt.Store) = m.Backend.backend in
           let+ a = B.verify_all ~chunk_prefix:C.chunk_prefix () in
           match a with
             | `Queued n -> { store = m.Backend.name; queued = Some n }
@@ -71,7 +72,7 @@ module Make (C : Conf.S) = struct
     else
       let+ () =
         Lwt_list.iter_p
-          (fun (m : Backend.member) ->
+          (fun (m : (module Backend_lwt.Store) Backend.member) ->
             if List.mem_assoc m.Backend.name queued then
               follow ~on_progress ~on_done ~on_stalled m
             else Lwt.return_unit)

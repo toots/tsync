@@ -22,24 +22,24 @@ let chunk_prefix = "tsync/testdom/chunks/"
 let manifest_prefix = "tsync/testdom/manifests/"
 
 module Src =
-  (val Backend.make ~backend_type:"local"
+  (val Backend_lwt.make ~backend_type:"local"
          ~get_field:(function
            | "verifyWrites" -> Some "false" | _ -> Some src_dir)
          ()
-      : Backend.S)
+      : Backend_lwt.Store)
 
 module Real =
-  (val Backend.make ~backend_type:"local"
+  (val Backend_lwt.make ~backend_type:"local"
          ~get_field:(function
            | "verifyWrites" -> Some "false" | _ -> Some dst_dir)
          ()
-      : Backend.S)
+      : Backend_lwt.Store)
 
 let heads = ref 0
 let listings = ref 0
 let puts = ref 0
 
-module Dst : Backend.S = struct
+module Dst : Backend_lwt.Store = struct
   include Real
 
   let head_opt ~key () =

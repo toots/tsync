@@ -29,7 +29,9 @@ module C : Conf.S = struct
   let shares_prefix = "tsync/shares/"
 
   let store =
-    Backend.make ~backend_type:"local" ~get_field:(fun _ -> Some store_dir) ()
+    Backend_lwt.make ~backend_type:"local"
+      ~get_field:(fun _ -> Some store_dir)
+      ()
 
   let members = [Backend.member ~name:"local" store]
   let cache_root = cache_dir
@@ -84,7 +86,7 @@ let build_fixture () =
   let* hello_key = upload "hello.txt" hello_body in
   let* _ = upload "sub/inner.txt" inner_body in
   (* The folder marker that makes "sub" visible in a listing. *)
-  let (module B : Backend.S) = backend () in
+  let (module B : Backend_lwt.Store) = backend () in
   let* () =
     B.put
       ~key:

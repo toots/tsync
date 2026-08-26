@@ -22,20 +22,22 @@ let chunk_prefix = "tsync/testdom/chunks/"
 let domain_prefix = "tsync/testdom/manifests/"
 
 module Main =
-  (val Backend.make ~backend_type:"local" ~get_field:(fun _ -> Some main_dir) ()
-      : Backend.S)
+  (val Backend_lwt.make ~backend_type:"local"
+         ~get_field:(fun _ -> Some main_dir)
+         ()
+      : Backend_lwt.Store)
 
 module Replica =
-  (val Backend.make ~backend_type:"local"
+  (val Backend_lwt.make ~backend_type:"local"
          ~get_field:(fun _ -> Some replica_dir)
          ()
-      : Backend.S)
+      : Backend_lwt.Store)
 
 module Backfill =
-  (val Backend.make ~backend_type:"local"
+  (val Backend_lwt.make ~backend_type:"local"
          ~get_field:(fun _ -> Some backfill_dir)
          ()
-      : Backend.S)
+      : Backend_lwt.Store)
 
 module C : Conf.S = struct
   let versioning = false
@@ -51,19 +53,19 @@ module C : Conf.S = struct
   (* Reads and writes go to the main alone: this test is about what {!Gc} does to
      the copies, not about fan-out, and a composite would put every chunk on every
      store before the collection even started. *)
-  let store = (module Main : Backend.S)
+  let store = (module Main : Backend_lwt.Store)
 
   let members =
     [
       Backend.member ~role:`Main ~backend_type:"local" ~local_path:main_dir
         ~name:"main"
-        (module Main);
+        (module Main : Backend_lwt.Store);
       Backend.member ~role:`Replica ~backend_type:"local"
         ~local_path:replica_dir ~name:"replica"
-        (module Replica);
+        (module Replica : Backend_lwt.Store);
       Backend.member ~role:`Backfill ~backend_type:"local"
         ~local_path:backfill_dir ~name:"backfill"
-        (module Backfill);
+        (module Backfill : Backend_lwt.Store);
     ]
 
   let cache_root = root ^ "/cache"
@@ -96,7 +98,7 @@ let label n = Printf.sprintf "%03x" n
    names anything in a delete. Filtering out directory markers instead let
    anything else through, so the two sides of this test answered "is that a
    chunk" differently from each other and from the code under test. *)
-let chunks_of (module B : Backend.S) =
+let chunks_of (module B : Backend_lwt.Store) =
   let+ entries = B.list_prefix ~prefix:chunk_prefix () in
   List.filter_map
     (fun (e : Backend.file_entry) ->

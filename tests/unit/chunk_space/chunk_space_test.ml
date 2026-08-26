@@ -23,18 +23,18 @@ let marker_key = Chunk_layout.gc_marker_key ~chunk_prefix
 
 (* An object store's stand-in: a local backend that says it cannot collect, which
    is what every non-filesystem driver answers. *)
-module Uncollectable : Backend.S = struct
+module Uncollectable : Backend_lwt.Store = struct
   include
-    (val Backend.make ~backend_type:"local"
+    (val Backend_lwt.make ~backend_type:"local"
            ~get_field:(fun _ -> Some store_dir)
            ()
-        : Backend.S)
+        : Backend_lwt.Store)
 
   let get_many = None
   let capabilities ~prefix:_ () = Lwt.return Backend.no_caps
 end
 
-module Conf_of (B : Backend.S) : Conf.S = struct
+module Conf_of (B : Backend_lwt.Store) : Conf.S = struct
   let versioning = false
   let client_name = "test"
   let domain_name = "testdom"
@@ -44,7 +44,7 @@ module Conf_of (B : Backend.S) : Conf.S = struct
   let journal_prefix = "tsync/testdom/journal/"
   let cursor_key = Stored_key.in_space ~prefix:"tsync/testdom/" "cursor"
   let shares_prefix = "tsync/shares/"
-  let store = (module B : Backend.S)
+  let store = (module B : Backend_lwt.Store)
 
   (* [local_path] is not decoration here: promoting is a rename within the store's
      own tree, so it is the path and not the module that does it. {!Gc} refuses to
@@ -67,10 +67,10 @@ end
 
 module Collectable =
   Conf_of
-    ((val Backend.make ~backend_type:"local"
+    ((val Backend_lwt.make ~backend_type:"local"
             ~get_field:(fun _ -> Some store_dir)
             ()
-         : Backend.S))
+         : Backend_lwt.Store))
 
 module Space = Collection.Make (Collectable)
 module Frozen = Conf_of (Uncollectable)
@@ -83,10 +83,10 @@ module Frozen_space = Collection.Make (Frozen)
 let ck n = Printf.sprintf "%016x-%016x" n n
 
 module Store =
-  (val Backend.make ~backend_type:"local"
+  (val Backend_lwt.make ~backend_type:"local"
          ~get_field:(fun _ -> Some store_dir)
          ()
-      : Backend.S)
+      : Backend_lwt.Store)
 
 let () =
   ignore

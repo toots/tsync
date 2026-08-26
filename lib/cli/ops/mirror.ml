@@ -38,8 +38,9 @@ module Make (C : Conf.S) = struct
   (* Objects are content-addressed or immutable once written, so a size mismatch
      means the destination copy is corrupt. [None] when it was already correct;
      otherwise what was wrong with it, which is worth carrying to the caller. *)
-  let sync_entry ?(on_start = fun () -> ()) ?held (module Src : Backend.S)
-      (module Dst : Backend.S) (entry : Backend.file_entry) =
+  let sync_entry ?(on_start = fun () -> ()) ?held
+      (module Src : Backend_lwt.Store) (module Dst : Backend_lwt.Store)
+      (entry : Backend.file_entry) =
     let* size_there =
       match held with
         | Some held ->
@@ -113,7 +114,8 @@ module Make (C : Conf.S) = struct
      That makes it the one prefix worth asking for a shard at a time: whole, it
      is the bucket's object count in one list, which is what a resync used to
      hold before it copied anything. *)
-  let list_into ~listing ~bytes ~on_list ~name (module Src : Backend.S) prefix =
+  let list_into ~listing ~bytes ~on_list ~name (module Src : Backend_lwt.Store)
+      prefix =
     on_list ~name:("listing " ^ name);
     let* entries = Src.list_prefix ~prefix () in
     Lwt_list.iter_s (add_entry ~bytes listing) entries
@@ -123,7 +125,8 @@ module Make (C : Conf.S) = struct
      A batch at a time, and spilled before the next one is asked for: what a
      fan-out over every shard would hold is each shard's answer until the last
      of them arrives, which is the whole prefix again by another route. *)
-  let list_chunks_into ~listing ~bytes ~on_list (module Src : Backend.S) =
+  let list_chunks_into ~listing ~bytes ~on_list (module Src : Backend_lwt.Store)
+      =
     on_list ~name:"listing chunks";
     let width = Io_lwt.Bounded.width probe_pool in
     let rec batch first =
@@ -146,7 +149,7 @@ module Make (C : Conf.S) = struct
     batch 0
 
   let namespace_entries ~manifests_only ~on_list ~name src =
-    let (module Src : Backend.S) = src in
+    let (module Src : Backend_lwt.Store) = src in
     let* listing =
       Listing_lwt.create ~dir:spool_dir ~name ~decode:decode_entry
     in
@@ -246,7 +249,7 @@ module Make (C : Conf.S) = struct
 
   (* This command copies a full backend onto a partial one, so an object the
      source cannot produce is the source being wrong, not the scope. *)
-  let path_entries ~rel ~src_name ~on_list (module Src : Backend.S) =
+  let path_entries ~rel ~src_name ~on_list (module Src : Backend_lwt.Store) =
     on_list ~name:(Printf.sprintf "walking the tree under %s" rel);
     let* keys = path_keys ~rel in
     on_list
@@ -324,7 +327,8 @@ module Make (C : Conf.S) = struct
     let named name =
       match
         List.filter
-          (fun (m : Backend.member) -> m.Backend.name = name)
+          (fun (m : (module Backend_lwt.Store) Backend.member) ->
+            m.Backend.name = name)
           C.members
       with
         | [m] -> m
@@ -332,7 +336,10 @@ module Make (C : Conf.S) = struct
             failwith
               (Printf.sprintf "no backend named %s (available: %s)" name
                  (String.concat ", "
-                    (List.map (fun (m : Backend.member) -> m.name) C.members)))
+                    (List.map
+                       (fun (m : (module Backend_lwt.Store) Backend.member) ->
+                         m.name)
+                       C.members)))
         | _ ->
             failwith
               (Printf.sprintf
@@ -387,21 +394,23 @@ module Make (C : Conf.S) = struct
     Lwt.finalize
       (fun () ->
         C.members
-        |> List.filter (fun (m : Backend.member) -> m.Backend.name <> src.name)
-        |> Lwt_list.map_s (fun (m : Backend.member) ->
-            let* held =
-              match listed_scope with
-                | None -> Lwt.return_none
-                | Some manifests_only ->
-                    let+ held =
-                      destination_view ~manifests_only ~name:m.Backend.name
-                        ~on_list:(fun ~name ->
-                          on_list ~name:(name ^ " on " ^ m.Backend.name))
-                        m.Backend.backend
-                    in
-                    Some held
-            in
-            resync_to ?on_start ?on_entry ?held src.Backend.backend
-              m.Backend.backend ~name:m.Backend.name listing))
+        |> List.filter (fun (m : (module Backend_lwt.Store) Backend.member) ->
+            m.Backend.name <> src.name)
+        |> Lwt_list.map_s
+             (fun (m : (module Backend_lwt.Store) Backend.member) ->
+               let* held =
+                 match listed_scope with
+                   | None -> Lwt.return_none
+                   | Some manifests_only ->
+                       let+ held =
+                         destination_view ~manifests_only ~name:m.Backend.name
+                           ~on_list:(fun ~name ->
+                             on_list ~name:(name ^ " on " ^ m.Backend.name))
+                           m.Backend.backend
+                       in
+                       Some held
+               in
+               resync_to ?on_start ?on_entry ?held src.Backend.backend
+                 m.Backend.backend ~name:m.Backend.name listing))
       (fun () -> Listing_lwt.drop listing)
 end

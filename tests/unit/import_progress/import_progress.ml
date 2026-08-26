@@ -22,8 +22,10 @@ let main_dir = Filename.concat root "main"
 let chunk_size = 64
 
 module Main =
-  (val Backend.make ~backend_type:"local" ~get_field:(fun _ -> Some main_dir) ()
-      : Backend.S)
+  (val Backend_lwt.make ~backend_type:"local"
+         ~get_field:(fun _ -> Some main_dir)
+         ()
+      : Backend_lwt.Store)
 
 module C : Conf.S = struct
   let versioning = false
@@ -40,7 +42,7 @@ module C : Conf.S = struct
     [
       Backend.member ~role:`Main ~backend_type:"local" ~local_path:main_dir
         ~name:"main"
-        (module Main);
+        (module Main : Backend_lwt.Store);
     ]
 
   let store =

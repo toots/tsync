@@ -18,13 +18,13 @@ let child_reads = ref 0
 let index_writes = ref 0
 
 module Disk =
-  (val Backend.make ~backend_type:"local"
+  (val Backend_lwt.make ~backend_type:"local"
          ~get_field:(fun _ -> Some (Filename.concat root "store"))
          ())
 
 (* A version per key, bumped on every write, which is what S3 and GCS report and
    a filesystem does not. *)
-module Store : Backend.S = struct
+module Store : Backend_lwt.Store = struct
   include Disk
 
   let bump key =
@@ -61,7 +61,7 @@ end
 
 module C =
   (val Fixture.conf ~domain:"testdom"
-         ~store:(module Store : Backend.S)
+         ~store:(module Store : Backend_lwt.Store)
          ~cache_root:root ~data_dir:root ~root ()
       : Conf.S)
 
@@ -72,12 +72,12 @@ module Tree = Inode_tree.Make (C)
    this holds none. *)
 module Two =
   (val Fixture.conf ~domain:"testdom"
-         ~store:(module Store : Backend.S)
+         ~store:(module Store : Backend_lwt.Store)
          ~members:
            [
-             Backend.member ~name:"one" (module Store : Backend.S);
+             Backend.member ~name:"one" (module Store : Backend_lwt.Store);
              Backend.member ~name:"two" ~role:`Replica
-               (module Store : Backend.S);
+               (module Store : Backend_lwt.Store);
            ]
          ~cache_root:root ~data_dir:root ~root ()
       : Conf.S)

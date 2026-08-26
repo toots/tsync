@@ -4,7 +4,7 @@ type entry = { path : string; latest : int64; versions : int }
 
 module Make (C : Conf.S) = struct
   module Lk = Logical_key.Make (C)
-  module B = (val C.store : Backend.S)
+  module B = (val C.store : Backend_lwt.Store)
 
   let parse key = History.parse ~versions_prefix:C.versions_prefix key
 

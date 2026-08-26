@@ -27,7 +27,7 @@ let set_cursor_flush_interval s = cursor_flush_interval := s
 module Make (C : Conf.S) = struct
   module J = Journal.Make (C)
   module St = Store.Make (C) (Layout.Inode.Make (C))
-  module B = (val C.store : Backend.S)
+  module B = (val C.store : Backend_lwt.Store)
 
   let rename_file ~src_key ~dst_key = St.copy_manifest ~src_key ~dst_key
   let head_manifest_opt ~key = St.head_manifest ~key

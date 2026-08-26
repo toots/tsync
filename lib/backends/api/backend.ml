@@ -75,23 +75,23 @@ let merge_caps cs =
   { merged with verified = cs <> [] && List.for_all (fun c -> c.verified) cs }
 
 module type S = sig
-  val put : key:Stored_key.t -> data:Bigstring.t -> unit -> unit Lwt.t
-  val get : key:Stored_key.t -> unit -> Bigstring.t Lwt.t
+  type 'a io
+
+  val put : key:Stored_key.t -> data:Bigstring.t -> unit -> unit io
+  val get : key:Stored_key.t -> unit -> Bigstring.t io
 
   (** [None] when the key does not exist; other failures raise. Saves the HEAD
       round trip of [head_opt] + [get] when the body is wanted. *)
-  val get_opt : key:Stored_key.t -> unit -> Bigstring.t option Lwt.t
+  val get_opt : key:Stored_key.t -> unit -> Bigstring.t option io
 
   val put_if_absent :
-    key:Stored_key.t -> data:Bigstring.t -> unit -> Bigstring.t Lwt.t
+    key:Stored_key.t -> data:Bigstring.t -> unit -> Bigstring.t io
 
-  val head_opt : key:Stored_key.t -> unit -> file_entry option Lwt.t
-  val delete : key:Stored_key.t -> unit -> unit Lwt.t
-  val delete_multi : Stored_key.t list -> unit Lwt.t
-  val copy : src_key:Stored_key.t -> dst_key:Stored_key.t -> unit -> unit Lwt.t
-
-  val list_prefix :
-    ?max_keys:int -> prefix:string -> unit -> file_entry list Lwt.t
+  val head_opt : key:Stored_key.t -> unit -> file_entry option io
+  val delete : key:Stored_key.t -> unit -> unit io
+  val delete_multi : Stored_key.t list -> unit io
+  val copy : src_key:Stored_key.t -> dst_key:Stored_key.t -> unit -> unit io
+  val list_prefix : ?max_keys:int -> prefix:string -> unit -> file_entry list io
 
   (** A native multi-object read, or [None] from a store with none — which is
       every store but http-proxy, S3 having no multi-object GET and the GCS
@@ -100,11 +100,11 @@ module type S = sig
   val get_many :
     (entries:file_entry list ->
     unit ->
-    (Stored_key.t * Bigstring.t option) list Lwt.t)
+    (Stored_key.t * Bigstring.t option) list io)
     option
 
   val verify_all :
-    chunk_prefix:string -> unit -> [ `Queued of int | `Unsupported ] Lwt.t
+    chunk_prefix:string -> unit -> [ `Queued of int | `Unsupported ] io
 
   val discard :
     chunk_prefix:string ->
@@ -112,12 +112,12 @@ module type S = sig
     name:string ->
     keys:Stored_key.t list ->
     unit ->
-    [ `Queued | `Unsupported ] Lwt.t
+    [ `Queued | `Unsupported ] io
 
   (** What this store can tell a client about [prefix]'s domain beyond holding
       its bytes. See {!caps}; [no_caps] is the honest answer for every store
       that only holds bytes. *)
-  val capabilities : prefix:string -> unit -> caps Lwt.t
+  val capabilities : prefix:string -> unit -> caps io
 
   val local_path : string option
 end
@@ -142,37 +142,10 @@ let batches entries =
 
 (* Object reads a batch stands in for, for a caller with no budget of its own.
    Module-level, since a pool built per call is not a bound. *)
-let batch_slots = lazy (Io_lwt.Bounded.create ~name:"batch reads" ~max:32 ())
-
-module Batched (B : S) = struct
-  open Lwt.Syntax
-
-  let get_many ?slots ~entries () =
-    let slots =
-      match slots with Some s -> s | None -> Lazy.force batch_slots
-    in
-    let ask run =
-      match B.get_many with
-        | Some f -> Io_lwt.Bounded.use slots (fun () -> f ~entries:run ())
-        | None ->
-            Io_lwt.Bounded.map_with slots
-              (fun (e : file_entry) ->
-                let+ body = B.get_opt ~key:e.key () in
-                (e.key, body))
-              run
-    in
-    (* A run at a time, so what is held is one request's bodies rather than the
-       whole folder's twice over. *)
-    let+ answered = Lwt_list.map_s ask (batches entries) in
-    List.concat answered
-end
-
-type factory = (string -> string option) -> (module S)
-
-let drain_hooks : (unit -> unit Lwt.t) list ref = ref []
-let on_drain f = drain_hooks := f :: !drain_hooks
-let drain () = Lwt_list.iter_p (fun f -> f ()) !drain_hooks
-
+(* The registries here are one per process: the drivers that register
+   themselves, the hooks a composite settles through, and the pool the batched
+   reads come out of. So this is applied once, in the layer that names a
+   scheduler. *)
 (* One store's own share of what {!Metrics} counts globally. Separate counters
    rather than a total each, so a rate comes off the same ring the process-wide
    figures do and nothing reimplements the window. *)
@@ -183,7 +156,7 @@ let new_traffic () =
 
 type role = [ `Main | `Replica | `Backfill | `ReadOnly ]
 
-type member = {
+type 'store member = {
   name : string;
   role : role;
   readable : bool;
@@ -191,8 +164,7 @@ type member = {
   config : (string * string) list;
       (** What this store points at — a bucket, a URL, a path — with secret
           fields masked: a report gets pasted into bug threads. *)
-  backend : (module S);
-      (** The leaf store, so a reader can probe it directly. *)
+  backend : 'store;  (** The leaf store, so a reader can probe it directly. *)
   pending : (unit -> int) option;
       (** Replica and backfill: jobs this target still owes, kept on disk. *)
   in_flight : (unit -> int) option;
@@ -225,94 +197,147 @@ let member ?(role = `Main) ?(readable = true) ?(backend_type = "local")
     local_path;
   }
 
-type entry = { factory : factory; spec : Field_spec.t list }
+(* What the batched reads need of a pool. *)
+module type POOLS = sig
+  type 'a io
+  type t
 
-let registry : (string, entry) Hashtbl.t = Hashtbl.create 4
+  val create : ?max_waiting:int -> ?name:string -> max:int -> unit -> t
+  val use : t -> (unit -> 'a io) -> 'a io
+  val map_with : t -> ('a -> 'b io) -> 'a list -> 'b list io
+end
 
-let register ~spec name (f : factory) =
-  Hashtbl.replace registry name { factory = f; spec }
+module Make (Io : Io.S) (Bounded : POOLS with type 'a io := 'a Io.t) = struct
+  module type Store = S with type 'a io := 'a Io.t
 
-let spec_for name =
-  Option.map (fun e -> e.spec) (Hashtbl.find_opt registry name)
+  let ( let* ) = Io.bind
+  let ( let+ ) x f = Io.map f x
 
-let types () =
-  List.sort compare (Hashtbl.fold (fun name _ acc -> name :: acc) registry [])
+  let rec map_s f = function
+    | [] -> Io.return []
+    | x :: rest ->
+        let* y = f x in
+        let+ rest = map_s f rest in
+        y :: rest
 
-(* Bytes are counted here rather than at the content layer, which is the only
-   place that reached: a collection, a mirror and a repair go to a store
-   directly, so the figure a report showed was the chunk path's traffic under a
-   name that claimed to be the backend's.
+  let batch_slots = lazy (Bounded.create ~name:"batch reads" ~max:32 ())
 
-   Only the verbs that carry a body, and only where a body crosses a link: a
-   local store is a filesystem, and counting its reads as traffic would bury the
-   remote ones it exists to be read instead of. *)
-let counted ~traffic m =
-  let module Inner = (val m : S) in
-  (* Every body is counted twice over: once for the process, once for the store
-     it went to. The per-store figure is what says which link a stalled transfer
-     is stalled on, which the sum cannot. *)
-  let up n =
-    Metrics.add_uploaded n;
-    Metrics.count traffic.uploaded n
-  and down n =
-    Metrics.add_downloaded n;
-    Metrics.count traffic.downloaded n
-  in
-  (module struct
-    open Lwt.Syntax
-    include Inner
+  module Batched (B : Store) = struct
+    let get_many ?slots ~entries () =
+      let slots =
+        match slots with Some s -> s | None -> Lazy.force batch_slots
+      in
+      let ask run =
+        match B.get_many with
+          | Some f -> Bounded.use slots (fun () -> f ~entries:run ())
+          | None ->
+              Bounded.map_with slots
+                (fun (e : file_entry) ->
+                  let+ body = B.get_opt ~key:e.key () in
+                  (e.key, body))
+                run
+      in
+      (* A run at a time, so what is held is one request's bodies rather than the
+         whole folder's twice over. *)
+      let+ answered = map_s ask (batches entries) in
+      List.concat answered
+  end
 
-    let put ~key ~data () =
-      let+ () = Inner.put ~key ~data () in
-      up (Bigstring.length data)
+  type factory = (string -> string option) -> (module Store)
 
-    (* A loser gets the winning body back, which came down the link; the winner
-       is handed its own [data] again, so physical identity tells them apart
-       without comparing bodies that are equal by construction. *)
-    let put_if_absent ~key ~data () =
-      let+ held = Inner.put_if_absent ~key ~data () in
-      up (Bigstring.length data);
-      if held != data then down (Bigstring.length held);
-      held
+  let drain_hooks : (unit -> unit Io.t) list ref = ref []
+  let on_drain f = drain_hooks := f :: !drain_hooks
+  let drain () = Io.iter_p (fun f -> f ()) !drain_hooks
 
-    let get ~key () =
-      let+ data = Inner.get ~key () in
-      down (Bigstring.length data);
-      data
+  type entry = { factory : factory; spec : Field_spec.t list }
 
-    let get_opt ~key () =
-      let+ data = Inner.get_opt ~key () in
-      Option.iter (fun d -> down (Bigstring.length d)) data;
-      data
+  let registry : (string, entry) Hashtbl.t = Hashtbl.create 4
 
-    (* The fan-out {!Batched} builds needs nothing here, going through the
-       [get_opt] above; a store's own batch crosses the link unseen otherwise. *)
-    let get_many =
-      Option.map
-        (fun f ~entries () ->
-          let+ answered = f ~entries () in
-          List.iter
-            (fun (_, body) ->
-              Option.iter (fun b -> down (Bigstring.length b)) body)
-            answered;
-          answered)
-        Inner.get_many
+  let register ~spec name (f : factory) =
+    Hashtbl.replace registry name { factory = f; spec }
 
-    let local_path = Inner.local_path
-  end : S)
+  let spec_for name =
+    Option.map (fun e -> e.spec) (Hashtbl.find_opt registry name)
 
-let make ?traffic ~backend_type ~get_field () =
-  match Hashtbl.find_opt registry backend_type with
-    | Some { factory; _ } ->
-        let store = factory get_field in
-        let module St = (val store : S) in
-        (* A store that is a tree here read nothing over a link, so there is no
-           traffic to count. Derived from the store rather than asked of its
-           type, so the wrapper that counts and the report that prints cannot
-           disagree about which stores have a figure. *)
-        if St.local_path <> None then store
-        else
-          counted
-            ~traffic:(match traffic with Some t -> t | None -> new_traffic ())
-            store
-    | None -> failwith ("unknown backend type: " ^ backend_type)
+  let types () =
+    List.sort compare (Hashtbl.fold (fun name _ acc -> name :: acc) registry [])
+
+  (* Bytes are counted here rather than at the content layer, which is the only
+     place that reached: a collection, a mirror and a repair go to a store
+     directly, so the figure a report showed was the chunk path's traffic under a
+     name that claimed to be the backend's.
+
+     Only the verbs that carry a body, and only where a body crosses a link: a
+     local store is a filesystem, and counting its reads as traffic would bury the
+     remote ones it exists to be read instead of. *)
+  let counted ~traffic m =
+    let module Inner = (val m : Store) in
+    (* Every body is counted twice over: once for the process, once for the store
+       it went to. The per-store figure is what says which link a stalled transfer
+       is stalled on, which the sum cannot. *)
+    let up n =
+      Metrics.add_uploaded n;
+      Metrics.count traffic.uploaded n
+    and down n =
+      Metrics.add_downloaded n;
+      Metrics.count traffic.downloaded n
+    in
+    (module struct
+      include Inner
+
+      let put ~key ~data () =
+        let+ () = Inner.put ~key ~data () in
+        up (Bigstring.length data)
+
+      (* A loser gets the winning body back, which came down the link; the winner
+         is handed its own [data] again, so physical identity tells them apart
+         without comparing bodies that are equal by construction. *)
+      let put_if_absent ~key ~data () =
+        let+ held = Inner.put_if_absent ~key ~data () in
+        up (Bigstring.length data);
+        if held != data then down (Bigstring.length held);
+        held
+
+      let get ~key () =
+        let+ data = Inner.get ~key () in
+        down (Bigstring.length data);
+        data
+
+      let get_opt ~key () =
+        let+ data = Inner.get_opt ~key () in
+        Option.iter (fun d -> down (Bigstring.length d)) data;
+        data
+
+      (* The fan-out {!Batched} builds needs nothing here, going through the
+         [get_opt] above; a store's own batch crosses the link unseen otherwise. *)
+      let get_many =
+        Option.map
+          (fun f ~entries () ->
+            let+ answered = f ~entries () in
+            List.iter
+              (fun (_, body) ->
+                Option.iter (fun b -> down (Bigstring.length b)) body)
+              answered;
+            answered)
+          Inner.get_many
+
+      let local_path = Inner.local_path
+    end : Store)
+
+  let make ?traffic ~backend_type ~get_field () =
+    match Hashtbl.find_opt registry backend_type with
+      | Some { factory; _ } ->
+          let store = factory get_field in
+          let module St = (val store : Store) in
+          (* A store that is a tree here read nothing over a link, so there is no
+             traffic to count. Derived from the store rather than asked of its
+             type, so the wrapper that counts and the report that prints cannot
+             disagree about which stores have a figure. *)
+          if St.local_path <> None then store
+          else
+            counted
+              ~traffic:
+                (match traffic with Some t -> t | None -> new_traffic ())
+              store
+      | None -> failwith ("unknown backend type: " ^ backend_type)
+end

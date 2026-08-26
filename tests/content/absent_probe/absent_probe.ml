@@ -16,11 +16,11 @@ let root = Scratch.dir "absent-probe"
 let reads = ref 0
 
 module Disk =
-  (val Backend.make ~backend_type:"local"
+  (val Backend_lwt.make ~backend_type:"local"
          ~get_field:(fun _ -> Some (Filename.concat root "store"))
          ())
 
-module Store : Backend.S = struct
+module Store : Backend_lwt.Store = struct
   include Disk
 
   let get_opt ~key () =
@@ -32,7 +32,7 @@ end
 
 module C =
   (val Fixture.conf ~domain:"testdom"
-         ~store:(module Store : Backend.S)
+         ~store:(module Store : Backend_lwt.Store)
          ~cache_root:root ~data_dir:root ~root ()
       : Conf.S)
 

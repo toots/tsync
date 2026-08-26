@@ -37,7 +37,7 @@ module Make (C : Conf.S) : sig
       rather than taking the report down with it. *)
   val member_entries :
     ?max_keys:int ->
-    Backend.member ->
+    (module Backend_lwt.Store) Backend.member ->
     [ `Unverified | `Entries of entry list ] Lwt.t
 
   (** What a marker records beyond existing — what the body hashed to, how big

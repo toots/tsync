@@ -6,14 +6,14 @@
    reaching three stores must move them three times.
 
    The store here is in memory and keeps no files of its own, which is what puts
-   it on the counted side of {!Backend.make}. *)
+   it on the counted side of {!Backend_lwt.make}. *)
 
 open Lwt.Syntax
 open Check
 
 let body n = Bigstring.of_string (String.make n 'x')
 
-module Memory () : Backend.S = struct
+module Memory () : Backend_lwt.Store = struct
   let objects : (Stored_key.t, Bigstring.t) Hashtbl.t = Hashtbl.create 8
 
   let put ~key ~data () =
@@ -90,16 +90,19 @@ module Memory () : Backend.S = struct
 end
 
 let () =
-  Backend.register ~spec:[] "memory" (fun _ -> (module Memory () : Backend.S))
+  Backend_lwt.register ~spec:[] "memory" (fun _ ->
+      (module Memory () : Backend_lwt.Store))
 
 let remote () =
-  Backend.make ~backend_type:"memory" ~get_field:(fun _ -> None) ()
+  Backend_lwt.make ~backend_type:"memory" ~get_field:(fun _ -> None) ()
 
 (* A store holding its own counters, which is what a [member] carries so a
    report can name the link a transfer is on. *)
 let remote_counted () =
   let traffic = Backend.new_traffic () in
-  ( Backend.make ~traffic ~backend_type:"memory" ~get_field:(fun _ -> None) (),
+  ( Backend_lwt.make ~traffic ~backend_type:"memory"
+      ~get_field:(fun _ -> None)
+      (),
     traffic )
 
 (* What one store's own counters moved by, the same shape as [moved] so the two
@@ -131,9 +134,11 @@ let () =
   ignore
     (Sys.command (Printf.sprintf "rm -rf %s && mkdir -p %s" scratch scratch));
   Lwt_main.run
-    (let (module R : Backend.S) = remote () in
-     let (module L : Backend.S) =
-       Backend.make ~backend_type:"local" ~get_field:(fun _ -> Some scratch) ()
+    (let (module R : Backend_lwt.Store) = remote () in
+     let (module L : Backend_lwt.Store) =
+       Backend_lwt.make ~backend_type:"local"
+         ~get_field:(fun _ -> Some scratch)
+         ()
      in
 
      case "a body crossing a link is counted, once, for its own length";
@@ -198,7 +203,7 @@ let () =
      expect "local get" ~up:0 ~down:0 r;
 
      case "a write reaching two stores is counted twice";
-     let (module Composite : Backend.S) =
+     let (module Composite : Backend_lwt.Store) =
        Domain_store.make
          ~mains:
            [
@@ -222,8 +227,8 @@ let () =
      expect "a read is counted once" ~up:0 ~down:70 r;
 
      case "a store counts its own bytes as well as the process's";
-     let (module One : Backend.S), t1 = remote_counted () in
-     let (module Two : Backend.S), t2 = remote_counted () in
+     let (module One : Backend_lwt.Store), t1 = remote_counted () in
+     let (module Two : Backend_lwt.Store), t2 = remote_counted () in
      let* r =
        moved_on t1 (fun () ->
            One.put ~key:(Stored_key.listed "a") ~data:(body 25) ())
@@ -249,12 +254,12 @@ let () =
 
      case "which stores have a link to count";
      let disk =
-       Backend.make ~backend_type:"local"
+       Backend_lwt.make ~backend_type:"local"
          ~get_field:(fun k ->
            if k = "path" then Some (Filename.get_temp_dir_name ()) else None)
          ()
      in
-     let module Disk = (val disk : Backend.S) in
+     let module Disk = (val disk : Backend_lwt.Store) in
      check "a store keeping its files here has no link" (Disk.local_path <> None);
      let module Far = Memory () in
      check "one reached over a link does" (Far.local_path = None);

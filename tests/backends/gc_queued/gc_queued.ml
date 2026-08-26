@@ -1,6 +1,6 @@
 (* Closing against a copy that takes the deletes rather than doing them.
 
-   A store whose bucket runs the delete function answers {!Backend.S.discard}
+   A store whose bucket runs the delete function answers {!Backend_lwt.Store.discard}
    with [`Queued], having written the batch as a request its own notification
    would deliver. What that buys is that the collection stops waiting on other
    people's stores; what it gives up is that the copy is only clean once
@@ -30,7 +30,7 @@ module Disk = (val Fixture.local_store ~verify_writes:false replica_dir)
 (* A copy standing in for one whose bucket wakes a function: the request goes
    into the store itself, which is what makes it durable before this answers and
    what leaves it visible when nothing consumes it. *)
-module Replica : Backend.S = struct
+module Replica : Backend_lwt.Store = struct
   include Disk
 
   let discard ~chunk_prefix ~run ~name ~keys () =
@@ -49,9 +49,9 @@ module C =
            [
              Backend.member ~role:`Main ~backend_type:"local"
                ~local_path:main_dir ~name:"main"
-               (module Main);
+               (module Main : Backend_lwt.Store);
              Backend.member ~role:`Replica ~backend_type:"s3" ~name:"replica"
-               (module Replica);
+               (module Replica : Backend_lwt.Store);
            ]
          ())
 
@@ -62,7 +62,7 @@ let ck n = Printf.sprintf "%03x%013x-%016x" n n n
 let key n =
   Stored_key.in_space ~prefix:chunk_prefix (Chunk_layout.relative_path (ck n))
 
-let chunks_of (module B : Backend.S) =
+let chunks_of (module B : Backend_lwt.Store) =
   let+ entries = B.list_prefix ~prefix:chunk_prefix () in
   List.filter_map
     (fun (e : Backend.file_entry) ->
@@ -74,7 +74,7 @@ let chunks_of (module B : Backend.S) =
 (* The function the notification would wake, by the same rules: derive each
    chunk's marker rather than expect it in the body, and delete the request last
    so a run that died partway leaves it to be seen. *)
-let consume_requests (module B : Backend.S) =
+let consume_requests (module B : Backend_lwt.Store) =
   let* entries = B.list_prefix ~prefix:jobs_prefix () in
   let+ consumed =
     Lwt_list.filter_map_s

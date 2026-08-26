@@ -20,6 +20,8 @@
    -open
    Tsync_backend_register
    -open
+   Tsync_backend_lwt
+   -open
    Tsync_log))
  (name tsync_file_store)
  (public_name tsync-libs.file_store)
@@ -31,6 +33,7 @@
   tsync_store
   tsync_bigstring
   tsync_backend_register
+  tsync_backend_lwt
   tsync_log
   lwt
   unix

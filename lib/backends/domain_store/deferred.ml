@@ -80,10 +80,10 @@ end)
 
 module type S = sig
   val name : string
-  val backend : (module Backend.S)
+  val backend : (module Backend_lwt.Store)
   val accept : op -> unit Lwt.t
   val skip : Stored_key.t -> bool
-  val readable : (module Backend.S) option
+  val readable : (module Backend_lwt.Store) option
   val stats : unit -> stats
 end
 
@@ -117,8 +117,8 @@ let make ?(resume = false) ?chunk_from_prefix ~name ~backend ~source
     ~chunk_prefix ~(chunk_keys : string -> string list) ~journal_prefix
     ~cursor_key ~(excluded : Stored_key.t -> bool) ~reads_reach ~root () :
     (module S) =
-  let (module Target : Backend.S) = backend in
-  let (module Source : Backend.S) = source in
+  let (module Target : Backend_lwt.Store) = backend in
+  let (module Source : Backend_lwt.Store) = source in
   let module L = Chunk_layout.Make (struct
     let chunk_prefix = chunk_prefix
   end) in

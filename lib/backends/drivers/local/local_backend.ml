@@ -101,7 +101,7 @@ let of_errno ~op key e =
      failed is the first thing a report needs. *)
   Retry.failed ~kind ~op:("local " ^ op) (key ^ ": " ^ Unix.error_message e)
 
-let make ?(verify_writes = true) ~root () : (module Backend.S) =
+let make ?(verify_writes = true) ~root () : (module Backend_lwt.Store) =
   let walk_slots = Io_lwt.Bounded.create ~max:walk_fanout () in
   let resolve key = if key = "" then root else Filename.concat root key in
   (* Keys with a trailing slash are directory markers: S3 stores them as
@@ -416,7 +416,7 @@ let make ?(verify_writes = true) ~root () : (module Backend.S) =
     (* A filesystem has nothing on its side to wake. Every write is already
        checked as it lands ({!verify_written}), and [tsync gc --verify] is the
        sweep over what is already there. *)
-    (* A filesystem read is not a round trip: {!Backend.Batched} fans these
+    (* A filesystem read is not a round trip: {!Backend_lwt.Batched} fans these
        out. *)
     let get_many = None
     let verify_all ~chunk_prefix:_ () = Lwt.return `Unsupported
@@ -467,7 +467,7 @@ let spec =
     ]
 
 let () =
-  Backend.register ~spec "local" (fun get ->
+  Backend_lwt.register ~spec "local" (fun get ->
       let root =
         match get "path" with
           | Some p -> p

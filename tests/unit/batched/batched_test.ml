@@ -36,14 +36,14 @@ module Base = struct
   let capabilities ~prefix:_ () = Lwt.return Backend.no_caps
 end
 
-module Plain : Backend.S = struct
+module Plain : Backend_lwt.Store = struct
   include Base
 
   let get_many = None
   let local_path = None
 end
 
-module Native : Backend.S = struct
+module Native : Backend_lwt.Store = struct
   include Base
 
   let get_many =
@@ -59,8 +59,8 @@ module Native : Backend.S = struct
   let local_path = None
 end
 
-module Bp = Backend.Batched (Plain)
-module Bn = Backend.Batched (Native)
+module Bp = Backend_lwt.Batched (Plain)
+module Bn = Backend_lwt.Batched (Native)
 
 let entry ?(size = 1) key =
   Backend.{ key; size; last_modified = 0.; etag = None }

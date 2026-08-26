@@ -45,7 +45,7 @@ module type S = sig
   val name : string
 
   (** The leaf store under this target. *)
-  val backend : (module Backend.S)
+  val backend : (module Backend_lwt.Store)
 
   (** Take one write, to catch up on later. Returns once the work is durable,
       not once it has landed. *)
@@ -58,7 +58,7 @@ module type S = sig
       write-only. Also what decides whether a share link may be served from it:
       a link into a target nobody reads could point at a file it will never
       have. *)
-  val readable : (module Backend.S) option
+  val readable : (module Backend_lwt.Store) option
 
   val stats : unit -> stats
 end
@@ -100,8 +100,8 @@ val make :
   ?resume:bool ->
   ?chunk_from_prefix:string ->
   name:string ->
-  backend:(module Backend.S) ->
-  source:(module Backend.S) ->
+  backend:(module Backend_lwt.Store) ->
+  source:(module Backend_lwt.Store) ->
   chunk_prefix:string ->
   chunk_keys:(string -> string list) ->
   journal_prefix:string ->

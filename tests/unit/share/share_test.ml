@@ -11,12 +11,12 @@ let share_base = "https://share.example"
 
 (* A local backend that also advertises a share URL (a plain local backend
    never serves shares). *)
-module Shareable : Backend.S = struct
+module Shareable : Backend_lwt.Store = struct
   include
-    (val Backend.make ~backend_type:"local"
+    (val Backend_lwt.make ~backend_type:"local"
            ~get_field:(fun _ -> Some store_dir)
            ()
-        : Backend.S)
+        : Backend_lwt.Store)
 
   let get_many = None
 
@@ -34,7 +34,7 @@ module C : Conf.S = struct
   let journal_prefix = "tsync/testdom/journal/"
   let cursor_key = Stored_key.in_space ~prefix:"tsync/testdom/" "cursor"
   let shares_prefix = "tsync/shares/"
-  let store = (module Shareable : Backend.S)
+  let store = (module Shareable : Backend_lwt.Store)
   let members = [Backend.member ~name:"local" store]
   let cache_root = cache_dir
   let data_dir = data_dir
@@ -64,7 +64,7 @@ let () =
     (Sys.command
        (Printf.sprintf "rm -rf %s && mkdir -p %s %s %s" root store_dir cache_dir
           data_dir));
-  let (module B : Backend.S) = (module Shareable) in
+  let (module B : Backend_lwt.Store) = (module Shareable) in
   Lwt_main.run
     (let open Lwt.Syntax in
      (* File: put a (non-marker) manifest, share it. *)
@@ -105,17 +105,17 @@ let () =
        = `String (C.domain_prefix ^ Stored_key.root_id ^ "/"));
      Lwt.return_unit);
 
-  let module NoShare : Backend.S = struct
+  let module NoShare : Backend_lwt.Store = struct
     include
-      (val Backend.make ~backend_type:"local"
+      (val Backend_lwt.make ~backend_type:"local"
              ~get_field:(fun _ -> Some store_dir)
              ()
-          : Backend.S)
+          : Backend_lwt.Store)
   end in
   let module C2 : Conf.S = struct
     include C
 
-    let store = (module NoShare : Backend.S)
+    let store = (module NoShare : Backend_lwt.Store)
     let members = [Backend.member ~name:"local" store]
   end in
   let module S2 = Share.Make (C2) in
@@ -136,11 +136,14 @@ let () =
           [{ Domain_store.name = "archive"; backend = (module Shareable) }]
 
     let members =
-      [Backend.member ~name:"archive" ~role:`ReadOnly (module Shareable)]
+      [
+        Backend.member ~name:"archive" ~role:`ReadOnly
+          (module Shareable : Backend_lwt.Store);
+      ]
   end in
   let module S3 = Share.Make (ReadOnlyDomain) in
   (* The composite really does refuse writes: without that, this proves nothing. *)
-  let (module Composite : Backend.S) = ReadOnlyDomain.store in
+  let (module Composite : Backend_lwt.Store) = ReadOnlyDomain.store in
   (match
      Lwt_main.run
        (Composite.put
@@ -160,9 +163,9 @@ let () =
 
     let members =
       [
-        Backend.member ~name:"local" (module NoShare);
+        Backend.member ~name:"local" (module NoShare : Backend_lwt.Store);
         Backend.member ~name:"gcs" ~role:`Backfill ~readable:false
-          (module Shareable);
+          (module Shareable : Backend_lwt.Store);
       ]
   end in
   let module S4 = Share.Make (BackfillOnly) in
@@ -177,7 +180,7 @@ let () =
   (* Clearing the cache takes the assembled artifacts — the ones under cache/,
      and the loose .data siblings written before that subtree existed — and
      leaves every published manifest where it is. *)
-  let (module B : Backend.S) = (module Shareable) in
+  let (module B : Backend_lwt.Store) = (module Shareable) in
   Lwt_main.run
     (let open Lwt.Syntax in
      let cached =

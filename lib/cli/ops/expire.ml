@@ -6,7 +6,7 @@ module Make (C : Conf.S) = struct
   module Lk = Logical_key.Make (C)
   module Fs = File_store.Make (C)
   module Tree = Inode_tree.Make (C)
-  module B = (val C.store : Backend.S)
+  module B = (val C.store : Backend_lwt.Store)
 
   (* Deleted in batches rather than one call with everything, so a long delete
      reports progress from inside it. 1000 matches what the object stores accept

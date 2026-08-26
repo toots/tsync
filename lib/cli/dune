@@ -68,6 +68,8 @@
    -open
    Tsync_backend_register
    -open
+   Tsync_backend_lwt
+   -open
    Tsync_domain_store
    -open
    Tsync_domain
@@ -113,6 +115,7 @@
   tsync_launcher
   tsync-libs.bigstring
   tsync-libs.backend_register
+  tsync-libs.backend_lwt
   tsync-libs.metrics
   tsync-libs.job_progress
   tsync-libs.job_report

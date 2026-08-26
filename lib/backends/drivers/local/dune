@@ -22,6 +22,8 @@
    -open
    Tsync_backend_register
    -open
+   Tsync_backend_lwt
+   -open
    Tsync_log
    -open
    Tsync_device))
@@ -37,6 +39,7 @@
   tsync-libs.bigstring
   tsync-libs.bigstring_lwt
   tsync-libs.backend_register
+  tsync-libs.backend_lwt
   tsync-libs.log
   tsync_device
   tsync_io_lwt

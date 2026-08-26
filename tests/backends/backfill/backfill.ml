@@ -116,28 +116,28 @@ let wrap ~inners ~target ~name =
 
 let () =
   let main =
-    Backend.make ~backend_type:"local"
+    Backend_lwt.make ~backend_type:"local"
       ~get_field:(function
         | "verifyWrites" -> Some "false" | _ -> Some main_root)
       ()
   in
-  let (module M : Backend.S) = main in
+  let (module M : Backend_lwt.Store) = main in
   let composite, (module T : Deferred.S) =
     wrap ~inners:[main]
       ~target:
-        (Backend.make ~backend_type:"local"
+        (Backend_lwt.make ~backend_type:"local"
            ~get_field:(function
              | "verifyWrites" -> Some "false" | _ -> Some target_root)
            ())
       ~name:"target"
   in
-  let (module B : Backend.S) = composite in
+  let (module B : Backend_lwt.Store) = composite in
   (* As the diagnosis endpoints report it. *)
   let owed = T.stats in
   (* The generic hook rather than [Domain_store.drain]: a target catches up only
      because [make] registered itself there. *)
   let drain () =
-    let+ () = Backend.drain () in
+    let+ () = Backend_lwt.drain () in
     step "drain"
   in
   Lwt_main.run
@@ -270,7 +270,7 @@ let () =
 
      case "an unreachable target is logged, never fatal";
      let down, _ = wrap ~inners:[main] ~target:(module Down) ~name:"down" in
-     let (module D : Backend.S) = down in
+     let (module D : Backend_lwt.Store) = down in
      let* () = D.put ~key:c8 ~data:(Bigstring.of_string "eeee") () in
      let* () =
        D.put ~key:(manifest_key "safe")

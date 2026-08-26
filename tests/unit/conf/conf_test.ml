@@ -208,7 +208,7 @@ let () =
      for itself what to report then. *)
   let store ?local_path ?(role = `Main) name =
     Backend.member ~name ~role ?local_path
-      (Backend.make ~backend_type:"local"
+      (Backend_lwt.make ~backend_type:"local"
          ~get_field:(fun _ -> Some (Filename.get_temp_dir_name ()))
          ())
   in

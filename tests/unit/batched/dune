@@ -8,12 +8,15 @@
    -open
    Tsync_backend_register
    -open
+   Tsync_backend_lwt
+   -open
    Tsync_test_harness))
  (name batched_test)
  (libraries
   tsync-libs.logical_key
   tsync_test_harness
   tsync_backend_register
+  tsync_backend_lwt
   tsync_bigstring
   lwt
   lwt.unix))

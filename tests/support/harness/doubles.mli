@@ -8,13 +8,13 @@
     so two unreachable stores in one domain can be told apart. *)
 module Down (M : sig
   val why : string
-end) : Backend.S
+end) : Backend_lwt.Store
 
 (** Never answers at all: every operation is a promise that stays pending, for
     the tests whose subject is the answer that does not come. *)
-module Hung : Backend.S
+module Hung : Backend_lwt.Store
 
 (** Readable and never writable — a wrong credential, a bucket that refuses
     writes. Reads answer empty rather than failing; writes raise
     {!Backend.Not_writable}. *)
-module Refuses : Backend.S
+module Refuses : Backend_lwt.Store
