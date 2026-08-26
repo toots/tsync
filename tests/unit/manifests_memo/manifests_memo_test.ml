@@ -1,6 +1,6 @@
 (* A domain's manifests are remembered once however many places name them.
 
-   [Manifests.Make] is applied wherever a manifest is read or written -- the
+   [Manifests_lwt.Make] is applied wherever a manifest is read or written -- the
    tree, the content layer, the file operations -- and each application used to
    carry a table of its own. Nothing was served stale by that: an entry records
    the inode, size and mtime it was read through, so a manifest replaced by any
@@ -29,10 +29,10 @@ let conf ~domain =
 
 module C = (val conf ~domain : Conf.S)
 module Lk = Logical_key.Make (C)
-module A = Manifests.Make (C)
-module B = Manifests.Make (C)
+module A = Manifests_lwt.Make (C)
+module B = Manifests_lwt.Make (C)
 module D = (val conf ~domain:"otherdom" : Conf.S)
-module E = Manifests.Make (D)
+module E = Manifests_lwt.Make (D)
 
 let key = Lk.file "a.txt"
 

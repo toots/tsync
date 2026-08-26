@@ -8,6 +8,8 @@
    -open
    Tsync_staged
    -open
+   Tsync_staged_lwt
+   -open
    Tsync_content
    -open
    Tsync_metrics
@@ -23,6 +25,7 @@
   tsync_logical_key
   tsync_remote
   tsync_staged
+  tsync_staged_lwt
   tsync_content
   tsync_conf
   tsync_backend_register

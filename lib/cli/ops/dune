@@ -21,11 +21,15 @@
    -open
    Tsync_staged
    -open
+   Tsync_staged_lwt
+   -open
    Tsync_checkout
    -open
    Tsync_file
    -open
    Tsync_manifests
+   -open
+   Tsync_manifests_lwt
    -open
    Tsync_manifest
    -open
@@ -84,9 +88,11 @@
   tsync_history
   tsync_remote
   tsync_staged
+  tsync_staged_lwt
   tsync_checkout
   tsync_file
   tsync_manifests
+  tsync_manifests_lwt
   tsync_manifest
   tsync_journal
   tsync_chunks

@@ -11,81 +11,109 @@
     the group will be, so publishing it is {!Make.link_group} rather than a
     copy. Its members are told apart by the offset each slot carries. *)
 
-(** What the staged half needs of the cache: read a published chunk it is
-    overwriting part of, and take a finished body to publish. *)
-module type Cache = sig
-  val read_into :
-    group:Manifest.Group.t ->
-    index:int ->
-    Io_lwt.Fs.buffer ->
-    chunk_off:int ->
-    Chunk_cache.served Lwt.t
+(** What this needs of a filesystem and of the retrying syscalls. *)
+module type FS = sig
+  type 'a io
 
-  val link_in : src:string -> group:Manifest.Group.t -> bool Lwt.t
+  val copy_file : src:string -> dst:string -> unit io
+  val ensure_parent : string -> unit io
+  val unlink_quiet : string -> unit io
+  val read : string -> Bigstring.t -> offset:int64 -> int io
+  val write : string -> Bigstring.t -> offset:int64 -> int io
 end
 
-module Make (C : Conf.S) (Cache : Cache) : sig
-  (** Path of a staged body, for the upload that reads and hashes it. *)
-  val path : string -> string
+module type SYSCALLS = sig
+  type 'a io
+  type fd
 
-  (** Create the body if absent and grow it to [len], never shrinking: one body
-      holds a whole cache group, and a member written before its neighbours must
-      not lose them. *)
-  val ensure : uuid:string -> len:int -> unit Lwt.t
+  val openfile : string -> Unix.open_flag list -> Unix.file_perm -> fd io
+  val close : fd -> unit io
+  val rename : string -> string -> unit io
 
-  (** Set the length exactly. *)
-  val resize : uuid:string -> len:int -> unit Lwt.t
+  module LargeFile : sig
+    val stat : string -> Unix.LargeFile.stats io
+    val ftruncate : fd -> int64 -> unit io
+  end
+end
 
-  val write : uuid:string -> Io_lwt.Fs.buffer -> offset:int -> int Lwt.t
-  val read_into : uuid:string -> Io_lwt.Fs.buffer -> offset:int -> int Lwt.t
+module Over
+    (Io : Io.S)
+    (_ : FS with type 'a io := 'a Io.t)
+    (_ : SYSCALLS with type 'a io := 'a Io.t) : sig
+  (** What the staged half needs of the cache: read a published chunk it is
+      overwriting part of, and take a finished body to publish. *)
+  module type Cache = sig
+    val read_into :
+      group:Manifest.Group.t ->
+      index:int ->
+      Bigstring.t ->
+      chunk_off:int ->
+      Chunk_cache.served Io.t
 
-  (** Copy a published chunk's bytes out of its group into [offset] of a staged
-      body, for a write that does not replace all of them. *)
-  val copy_chunk :
-    group:Manifest.Group.t ->
-    index:int ->
-    uuid:string ->
-    offset:int ->
-    unit Lwt.t
+    val link_in : src:string -> group:Manifest.Group.t -> bool Io.t
+  end
 
-  (** Move [len] bytes between staged bodies, for regrouping. *)
-  val copy :
-    src:string ->
-    src_off:int ->
-    dst:string ->
-    dst_off:int ->
-    len:int ->
-    unit Lwt.t
+  module Make (C : Conf.S) (Cache : Cache) : sig
+    (** Path of a staged body, for the upload that reads and hashes it. *)
+    val path : string -> string
 
-  val forget : uuid:string -> unit Lwt.t
+    (** Create the body if absent and grow it to [len], never shrinking: one
+        body holds a whole cache group, and a member written before its
+        neighbours must not lose them. *)
+    val ensure : uuid:string -> len:int -> unit Io.t
 
-  (** Publish a staged body under its group's content name, via
-      {!Chunk_cache.link_in}.
+    (** Set the length exactly. *)
+    val resize : uuid:string -> len:int -> unit Io.t
 
-      [false] where the cache root cannot hold a second name for one inode, and
-      the caller writes the group out instead.
+    val write : uuid:string -> Bigstring.t -> offset:int -> int Io.t
+    val read_into : uuid:string -> Bigstring.t -> offset:int -> int Io.t
 
-      [len] is the caller's account of how long the body should be, and it must
-      match the group's own or the two disagree about the layout and nothing is
-      published. The body is resized to it first, which supplies zeros for a
-      member never written and cuts anything past the last one. *)
-  val link_group :
-    uuid:string -> len:int -> group:Manifest.Group.t -> bool Lwt.t
+    (** Copy a published chunk's bytes out of its group into [offset] of a
+        staged body, for a write that does not replace all of them. *)
+    val copy_chunk :
+      group:Manifest.Group.t ->
+      index:int ->
+      uuid:string ->
+      offset:int ->
+      unit Io.t
 
-  (** {2 Whole bodies}
+    (** Move [len] bytes between staged bodies, for regrouping. *)
+    val copy :
+      src:string ->
+      src_off:int ->
+      dst:string ->
+      dst_off:int ->
+      len:int ->
+      unit Io.t
 
-      A frontend that hands back a complete file gets it adopted as one file: no
-      chunk split, and a rename rather than a copy when it is already on this
-      filesystem. *)
+    val forget : uuid:string -> unit Io.t
 
-  val whole_path : string -> string
+    (** Publish a staged body under its group's content name, via
+        {!Chunk_cache.link_in}.
 
-  (** Take over [src] as whole body [uuid]: a rename, or a copy across
-      filesystems. *)
-  val adopt_whole : src:string -> uuid:string -> unit Lwt.t
+        [false] where the cache root cannot hold a second name for one inode,
+        and the caller writes the group out instead.
 
-  val whole_read_into :
-    uuid:string -> Io_lwt.Fs.buffer -> offset:int64 -> int Lwt.t
+        [len] is the caller's account of how long the body should be, and it
+        must match the group's own or the two disagree about the layout and
+        nothing is published. The body is resized to it first, which supplies
+        zeros for a member never written and cuts anything past the last one. *)
+    val link_group :
+      uuid:string -> len:int -> group:Manifest.Group.t -> bool Io.t
 
-  val whole_forget : uuid:string -> unit Lwt.t
+    (** {2 Whole bodies}
+
+        A frontend that hands back a complete file gets it adopted as one file:
+        no chunk split, and a rename rather than a copy when it is already on
+        this filesystem. *)
+
+    val whole_path : string -> string
+
+    (** Take over [src] as whole body [uuid]: a rename, or a copy across
+        filesystems. *)
+    val adopt_whole : src:string -> uuid:string -> unit Io.t
+
+    val whole_read_into : uuid:string -> Bigstring.t -> offset:int64 -> int Io.t
+    val whole_forget : uuid:string -> unit Io.t
+  end
 end

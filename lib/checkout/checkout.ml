@@ -61,8 +61,8 @@ let rec clean_tmp dir =
 (* The store, per domain: manifests keyed by logical key and nothing else. *)
 module Make (C : Conf.S) = struct
   module Lk = Logical_key.Make (C)
-  module Sm = Staged_manifest.Make (C)
-  module Mf = Manifests.Make (C)
+  module Sm = Staged_lwt.Manifest.Make (C)
+  module Mf = Manifests_lwt.Make (C)
 
   let rel_of = Logical_key.path
 
@@ -103,7 +103,7 @@ module Make (C : Conf.S) = struct
           | exception _ -> Lwt.return_unit))
 
   (* The mirror is the directory structure: directories exist only here. *)
-  let create_dir key = Manifests.ensure_dirs (Mf.root ()) (rel_of key)
+  let create_dir key = Manifests_lwt.ensure_dirs (Mf.root ()) (rel_of key)
   let delete_dir key = Io_lwt.Fs.rm_rf (Mf.path key)
 
   (* Staged entries win for the same key.

@@ -51,7 +51,7 @@ end
 module Lk = Logical_key.Make (C)
 module R = Remote.Make (C)
 module Mf = Checkout.Make (C)
-module Mfs = Staged_manifest.Make (C)
+module Mfs = Staged_lwt.Manifest.Make (C)
 module Sh = Share_server.Make (C)
 
 let backend () = C.store

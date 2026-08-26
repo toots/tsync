@@ -63,9 +63,9 @@ struct
 
   (* [Mf] is the local mirror; [St] the store's own copy, which takes logical
      keys and maps them to backend keys through the layout scheme. *)
-  module Mf = Manifests.Make (C)
+  module Mf = Manifests_lwt.Make (C)
   module Ck = Checkout.Make (C)
-  module Mfs = Staged_manifest.Make (C)
+  module Mfs = Staged_lwt.Manifest.Make (C)
   module D = Data.Make (C) (R)
 
   (* The file a record is about, and what it will cost to send. Both derived

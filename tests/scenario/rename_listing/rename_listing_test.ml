@@ -30,9 +30,9 @@ module C =
       : Conf.S)
 
 module Lk = Logical_key.Make (C)
-module Mf = Manifests.Make (C)
+module Mf = Manifests_lwt.Make (C)
 module Ck = Checkout.Make (C)
-module Mfs = Staged_manifest.Make (C)
+module Mfs = Staged_lwt.Manifest.Make (C)
 
 let key rel = Lk.file @@ rel
 

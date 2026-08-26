@@ -33,9 +33,9 @@ let absences_for prefix =
 
 module Make (C : Conf.S) (R : Remote.S) = struct
   module Cc = Chunk_cache_lwt.Make (C) (R)
-  module Sb = Staged_body.Make (C) (Cc)
-  module Mf = Manifests.Make (C)
-  module Mfs = Staged_manifest.Make (C)
+  module Sb = Staged_lwt.Body.Make (C) (Cc)
+  module Mf = Manifests_lwt.Make (C)
+  module Mfs = Staged_lwt.Manifest.Make (C)
   module Fs = File_store.Make (C)
 
   (* Advisory: a lost or stale entry costs at most one un-prefetched read. *)

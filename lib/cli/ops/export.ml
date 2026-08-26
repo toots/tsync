@@ -8,7 +8,7 @@ module Make (C : Conf.S) = struct
   module R = Remote.Make (C)
   module Tree = Inode_tree.Make (C)
   module Mf = Checkout.Make (C)
-  module Mfs = Staged_manifest.Make (C)
+  module Mfs = Staged_lwt.Manifest.Make (C)
   module D = Data.Make (C) (R)
 
   (* Assembling through the read path covers unsynced staged edits, a partially

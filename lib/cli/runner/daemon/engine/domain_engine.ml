@@ -53,7 +53,7 @@ module Make (C : Conf.S) : S = struct
   module Sp = Sync_poller.Make (C) (F)
   module Rp = Replay.Make (C) (F)
   module Mf = Checkout.Make (C)
-  module Mfs = Staged_manifest.Make (C)
+  module Mfs = Staged_lwt.Manifest.Make (C)
   module Fs = File_store.Make (C)
 
   (* Also nudged after each upload, but downloads grow the store too. The same

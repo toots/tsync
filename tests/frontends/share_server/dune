@@ -10,6 +10,8 @@
    -open
    Tsync_staged
    -open
+   Tsync_staged_lwt
+   -open
    Tsync_checkout
    -open
    Tsync_content
@@ -41,6 +43,7 @@
   tsync_remote
   tsync_layout
   tsync_staged
+  tsync_staged_lwt
   tsync_checkout
   tsync_content
   tsync_folder_ids

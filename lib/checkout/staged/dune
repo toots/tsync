@@ -14,17 +14,13 @@
    -open
    Tsync_cache_layout
    -open
-   Tsync_cache_layout_lwt
-   -open
    Tsync_manifest
    -open
    Tsync_chunks
    -open
    Tsync_chunk_cache
    -open
-   Tsync_chunk_cache_lwt
-   -open
-   Tsync_io_lwt
+   Tsync_io
    -open
    Tsync_backend_register
    -open
@@ -38,17 +34,13 @@
   tsync_id
   tsync_conf
   tsync_cache_layout
-  tsync_cache_layout_lwt
   tsync_manifest
   tsync_chunks
   tsync_chunk_cache
-  tsync_chunk_cache_lwt
-  tsync_io_lwt
+  tsync_io
   tsync_backend_register
   tsync_bigstring
   tsync_log
   yojson
   unix
-  lwt
-  base64
-  lwt.unix))
+  base64))

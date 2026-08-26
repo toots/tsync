@@ -6,6 +6,8 @@
    -open
    Tsync_staged
    -open
+   Tsync_staged_lwt
+   -open
    Tsync_manifest
    -open
    Tsync_cache_layout
@@ -21,6 +23,7 @@
  (libraries
   tsync_logical_key
   tsync_staged
+  tsync_staged_lwt
   tsync_manifest
   tsync_cache_layout
   tsync_conf

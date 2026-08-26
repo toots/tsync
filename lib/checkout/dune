@@ -13,6 +13,8 @@
    -open
    Tsync_staged
    -open
+   Tsync_staged_lwt
+   -open
    Tsync_conf
    -open
    Tsync_cache_layout
@@ -22,6 +24,8 @@
    Tsync_manifest
    -open
    Tsync_manifests
+   -open
+   Tsync_manifests_lwt
    -open
    Tsync_folder_ids
    -open
@@ -51,11 +55,13 @@
   tsync_filename
   tsync_logical_key
   tsync_staged
+  tsync_staged_lwt
   tsync_conf
   tsync_cache_layout
   tsync_cache_layout_lwt
   tsync_manifest
   tsync_manifests
+  tsync_manifests_lwt
   tsync_folder_ids
   tsync_folder_ids_lwt
   tsync_journal

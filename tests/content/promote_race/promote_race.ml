@@ -42,7 +42,7 @@ end
 
 module Lk = Logical_key.Make (C)
 module R = Remote.Make (C)
-module Mfs = Staged_manifest.Make (C)
+module Mfs = Staged_lwt.Manifest.Make (C)
 module D = Data.Make (C) (R)
 
 let key = Lk.file @@ "file.txt"

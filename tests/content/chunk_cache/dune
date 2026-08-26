@@ -8,6 +8,8 @@
    -open
    Tsync_staged
    -open
+   Tsync_staged_lwt
+   -open
    Tsync_chunk_cache
    -open
    Tsync_chunk_cache_lwt
@@ -33,6 +35,7 @@
   tsync-libs.logical_key
   tsync_manifest
   tsync_staged
+  tsync_staged_lwt
   tsync_chunk_cache
   tsync_chunk_cache_lwt
   tsync_chunks

@@ -25,9 +25,9 @@ module C =
 
 module Lk = Logical_key.Make (C)
 module R = Remote.Make (C)
-module Mf = Manifests.Make (C)
+module Mf = Manifests_lwt.Make (C)
 module Ck = Checkout.Make (C)
-module Mfs = Staged_manifest.Make (C)
+module Mfs = Staged_lwt.Manifest.Make (C)
 module D = Data.Make (C) (R)
 
 let key = Lk.file @@ "file.txt"
@@ -113,9 +113,9 @@ end
 
 module LkG = Logical_key.Make (CG)
 module GR = Remote.Make (CG)
-module Gm = Manifests.Make (CG)
+module Gm = Manifests_lwt.Make (CG)
 module Gck = Checkout.Make (CG)
-module Gms = Staged_manifest.Make (CG)
+module Gms = Staged_lwt.Manifest.Make (CG)
 module GD = Data.Make (CG) (GR)
 
 let gkey = LkG.file "file.txt"

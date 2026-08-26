@@ -5,45 +5,78 @@
     it all sits in — listings, directories, renames — is {!Checkout}, which is
     built on this. *)
 
-(** Create [rel] under [root] and every directory above it, recording the real
-    name beside any component the filesystem cannot hold verbatim. *)
-val ensure_dirs : string -> string -> unit Lwt.t
+(** What this needs of a filesystem, and of the marker the layout keeps beside a
+    directory. *)
+module type FILES = sig
+  type 'a io
 
-module Make (C : Conf.S) : sig
-  (** The directory the manifests of this domain are filed under. *)
-  val root : unit -> string
+  val mkdir_p : string -> unit io
+  val stat_opt : string -> Unix.stats option io
+  val unlink_quiet : string -> unit io
 
-  (** Where [key]'s manifest is filed. *)
-  val path : Logical_key.t -> string
+  val atomic_write_at :
+    string ->
+    size:int ->
+    ((offset:int -> Bigstring.t -> unit io) -> unit io) ->
+    unit io
 
-  (** Create the directory [key]'s manifest is filed in, and every one above it.
-  *)
-  val ensure_parent : Logical_key.t -> unit Lwt.t
+  val record_dir_name : string -> string -> unit io
+end
 
-  (** What the store has published for [key], read through the mirror. Answers
-      [None] for a key with no manifest filed. *)
-  val published : Logical_key.t -> Manifest.t option Lwt.t
+(** What this needs of the staged half: the edits a client has over the
+    published manifest, if any. *)
+module type STAGED = sig
+  type 'a io
 
-  (** Sole writer of a manifest body in the cache. Stamps the name from the key,
-      so a mirror manifest always records the name it is filed under. *)
-  val write : Logical_key.t -> Manifest.t -> unit Lwt.t
+  module Make (_ : Conf.S) : sig
+    val read_edits : Logical_key.t -> Staged_manifest.staged option io
+  end
+end
 
-  val delete : Logical_key.t -> unit Lwt.t
+module Over
+    (Io : Io.S)
+    (_ : FILES with type 'a io := 'a Io.t)
+    (_ : STAGED with type 'a io := 'a Io.t) : sig
+  (** Create [rel] under [root] and every directory above it, recording the real
+      name beside any component the filesystem cannot hold verbatim. *)
+  val ensure_dirs : string -> string -> unit Io.t
 
-  (** The single resolution point, and no caller decides it itself: staged edits
-      where this client has any, otherwise what was published. *)
-  val current :
-    Logical_key.t ->
-    [ `Staged of Staged_manifest.staged * Manifest.t option
-    | `Published of Manifest.t ]
-    option
-    Lwt.t
+  module Make (C : Conf.S) : sig
+    (** The directory the manifests of this domain are filed under. *)
+    val root : unit -> string
 
-  (** Drop what is remembered of [key], for a caller that moves a manifest by
-      other means. A read re-checks the inode anyway, so this is for the cases
-      that would otherwise re-read it needlessly. *)
-  val forget : Logical_key.t -> unit
+    (** Where [key]'s manifest is filed. *)
+    val path : Logical_key.t -> string
 
-  (** How many manifests are remembered. For a test that pins the bound. *)
-  val memo_size : unit -> int
+    (** Create the directory [key]'s manifest is filed in, and every one above
+        it. *)
+    val ensure_parent : Logical_key.t -> unit Io.t
+
+    (** What the store has published for [key], read through the mirror. Answers
+        [None] for a key with no manifest filed. *)
+    val published : Logical_key.t -> Manifest.t option Io.t
+
+    (** Sole writer of a manifest body in the cache. Stamps the name from the
+        key, so a mirror manifest always records the name it is filed under. *)
+    val write : Logical_key.t -> Manifest.t -> unit Io.t
+
+    val delete : Logical_key.t -> unit Io.t
+
+    (** The single resolution point, and no caller decides it itself: staged
+        edits where this client has any, otherwise what was published. *)
+    val current :
+      Logical_key.t ->
+      [ `Staged of Staged_manifest.staged * Manifest.t option
+      | `Published of Manifest.t ]
+      option
+      Io.t
+
+    (** Drop what is remembered of [key], for a caller that moves a manifest by
+        other means. A read re-checks the inode anyway, so this is for the cases
+        that would otherwise re-read it needlessly. *)
+    val forget : Logical_key.t -> unit
+
+    (** How many manifests are remembered. For a test that pins the bound. *)
+    val memo_size : unit -> int
+  end
 end

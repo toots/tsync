@@ -147,144 +147,187 @@ let staged_of_string body =
   |> fun st ->
   match published with None -> Owed st | Some m -> Committed (st, m)
 
-open Lwt.Syntax
-
 let sidecar_path = Cache_layout.staged_manifest_path
 
-module Make (C : Conf.S) = struct
-  module Lk = Logical_key.Make (C)
+(* What this needs of a filesystem and of the retrying syscalls. *)
+module type FS = sig
+  type 'a io
 
-  let rel_of = Logical_key.path
+  val atomic_write : string -> string -> unit io
+  val ensure_parent : string -> unit io
+  val is_directory : string -> bool io
+  val readdir_list : string -> string list io
+  val read_file_opt : string -> string option io
+  val reap_older_than : cutoff:float -> string -> bool io
+  val unlink_quiet : string -> unit io
 
-  let root () =
-    Cache_layout.staged_manifests_dir ~cache_root:C.cache_root C.domain_name
+  (* {!Cache_layout.Make.real_dir_name}. *)
+  val real_dir_name : string -> string -> string io
+end
 
-  let path key =
-    Cache_layout.staged_manifest_path ~cache_root:C.cache_root
-      ~domain_name:C.domain_name key
+module type SYSCALLS = sig
+  type 'a io
 
-  let exists key = Io_lwt.Retry.file_exists (path key)
+  val file_exists : string -> bool io
+  val rename : string -> string -> unit io
+end
 
-  let read key =
-    let p = path key in
-    let* body = Io_lwt.Fs.read_file_opt p in
-    match body with
-      | None -> Lwt.return_none
-      | Some body -> (
-          match staged_of_string body with
-            | st -> Lwt.return_some st
-            | exception exn ->
-                (* Unsynced user data: set aside rather than dropped, so the next
-                   start does not trip over it again. *)
-                Log.err "staged manifest %s unreadable (%s); moving aside"
-                  (Logical_key.to_string key)
-                  (Printexc.to_string exn);
-                let* () =
-                  Lwt.catch
-                    (fun () -> Io_lwt.Retry.rename p (p ^ ".bad"))
-                    (fun _ -> Lwt.return_unit)
-                in
-                Lwt.return_none)
+module Over
+    (Io : Io.S)
+    (Fs : FS with type 'a io := 'a Io.t)
+    (Retry : SYSCALLS with type 'a io := 'a Io.t) =
+struct
+  let ( let* ) = Io.bind
+  let ( let+ ) x f = Io.map f x
+  let return_unit = Io.return ()
+  let return_some x = Io.return (Some x)
+  let return_true = Io.return true
+  let return_false = Io.return false
 
-  (* For callers that want what the file holds, not which half of the lifecycle
-     its sidecar is in. *)
-  let read_edits key = Lwt.map (Option.map edits) (read key)
+  let rec fold_left_s f acc = function
+    | [] -> Io.return acc
+    | x :: rest -> Io.bind (f acc x) (fun acc -> fold_left_s f acc rest)
 
-  (* Stamped from the key: this name is what a listing shows before an upload
-     lands. *)
-  let put key state =
-    let p = path key in
-    let name = Logical_key.leaf key in
-    let state =
-      match state with
-        | Owed st -> Owed { st with s_name = name }
-        | Committed (st, m) -> Committed ({ st with s_name = name }, m)
-    in
-    let* () = Io_lwt.Fs.ensure_parent p in
-    Io_lwt.Fs.atomic_write p (staged_to_string state)
+  let rec iter_s f = function
+    | [] -> return_unit
+    | x :: rest -> Io.bind (f x) (fun () -> iter_s f rest)
 
-  let write key (st : staged) = put key (Owed st)
+  module Make (C : Conf.S) = struct
+    module Lk = Logical_key.Make (C)
 
-  (* The record the upload started from, now carrying what it published. Written
-     before anything local moves, so a crash after it leaves only local work to
-     replay. *)
-  let commit key (st : staged) published = put key (Committed (st, published))
-  let delete key = Io_lwt.Fs.unlink_quiet (path key)
+    let rel_of = Logical_key.path
 
-  let rename ~src_key ~dst_key =
-    let src = path src_key in
-    let* exists = Io_lwt.Retry.file_exists src in
-    if not exists then Lwt.return_unit
-    else (
-      let dst = path dst_key in
-      let* () = Io_lwt.Fs.ensure_parent dst in
-      let* () = Io_lwt.Retry.rename src dst in
-      let* body = Io_lwt.Fs.read_file_opt dst in
+    let root () =
+      Cache_layout.staged_manifests_dir ~cache_root:C.cache_root C.domain_name
+
+    let path key =
+      Cache_layout.staged_manifest_path ~cache_root:C.cache_root
+        ~domain_name:C.domain_name key
+
+    let exists key = Retry.file_exists (path key)
+
+    let read key =
+      let p = path key in
+      let* body = Fs.read_file_opt p in
       match body with
-        | None -> Lwt.return_unit
+        | None -> Io.return None
         | Some body -> (
             match staged_of_string body with
-              | state -> put dst_key state
-              | exception _ -> Lwt.return_unit))
+              | st -> return_some st
+              | exception exn ->
+                  (* Unsynced user data: set aside rather than dropped, so the next
+                     start does not trip over it again. *)
+                  Log.err "staged manifest %s unreadable (%s); moving aside"
+                    (Logical_key.to_string key)
+                    (Printexc.to_string exn);
+                  let* () =
+                    Io.catch
+                      (fun () -> Retry.rename p (p ^ ".bad"))
+                      (fun _ -> return_unit)
+                  in
+                  Io.return None)
 
-  (* Walks on-disk names: a staged manifest records its leaf name, but tree
-     position is what identifies the file. *)
-  let fold ~rel_dir ~deep f acc =
-    let start = path (Lk.dir rel_dir) in
-    let rec walk dir key acc =
-      let* names = Io_lwt.Fs.readdir_list dir in
-      Lwt_list.fold_left_s
-        (fun acc name ->
-          if Stored_key.internal_leaf name || Filename.check_suffix name ".bad"
-          then Lwt.return acc
-          else (
-            let path = Filename.concat dir name in
-            let* is_dir = Io_lwt.Fs.is_directory path in
-            if is_dir then
-              if not deep then Lwt.return acc
+    (* For callers that want what the file holds, not which half of the lifecycle
+       its sidecar is in. *)
+    let read_edits key = Io.map (Option.map edits) (read key)
+
+    (* Stamped from the key: this name is what a listing shows before an upload
+       lands. *)
+    let put key state =
+      let p = path key in
+      let name = Logical_key.leaf key in
+      let state =
+        match state with
+          | Owed st -> Owed { st with s_name = name }
+          | Committed (st, m) -> Committed ({ st with s_name = name }, m)
+      in
+      let* () = Fs.ensure_parent p in
+      Fs.atomic_write p (staged_to_string state)
+
+    let write key (st : staged) = put key (Owed st)
+
+    (* The record the upload started from, now carrying what it published. Written
+       before anything local moves, so a crash after it leaves only local work to
+       replay. *)
+    let commit key (st : staged) published = put key (Committed (st, published))
+    let delete key = Fs.unlink_quiet (path key)
+
+    let rename ~src_key ~dst_key =
+      let src = path src_key in
+      let* exists = Retry.file_exists src in
+      if not exists then return_unit
+      else (
+        let dst = path dst_key in
+        let* () = Fs.ensure_parent dst in
+        let* () = Retry.rename src dst in
+        let* body = Fs.read_file_opt dst in
+        match body with
+          | None -> return_unit
+          | Some body -> (
+              match staged_of_string body with
+                | state -> put dst_key state
+                | exception _ -> return_unit))
+
+    (* Walks on-disk names: a staged manifest records its leaf name, but tree
+       position is what identifies the file. *)
+    let fold ~rel_dir ~deep f acc =
+      let start = path (Lk.dir rel_dir) in
+      let rec walk dir key acc =
+        let* names = Fs.readdir_list dir in
+        fold_left_s
+          (fun acc name ->
+            if
+              Stored_key.internal_leaf name || Filename.check_suffix name ".bad"
+            then Io.return acc
+            else (
+              let path = Filename.concat dir name in
+              let* is_dir = Fs.is_directory path in
+              if is_dir then
+                if not deep then Io.return acc
+                else
+                  let* real = Fs.real_dir_name path name in
+                  walk path (Logical_key.dir_in key real) acc
               else
-                let* real = Cache_layout_lwt.real_dir_name path name in
-                walk path (Logical_key.dir_in key real) acc
-            else
-              let+ body = Io_lwt.Fs.read_file_opt path in
-              match body with
-                | Some body -> (
-                    match staged_of_string body |> edits with
-                      | st ->
-                          let leaf =
-                            if Stored_key.is_escaped name then st.s_name
-                            else name
-                          in
-                          f acc (Logical_key.file_in key leaf) st
-                      | exception _ -> acc)
-                | None -> acc))
-        acc names
-    in
-    let* ok = Io_lwt.Fs.is_directory start in
-    if ok then walk start (Lk.dir rel_dir) acc else Lwt.return acc
+                let+ body = Fs.read_file_opt path in
+                match body with
+                  | Some body -> (
+                      match staged_of_string body |> edits with
+                        | st ->
+                            let leaf =
+                              if Stored_key.is_escaped name then st.s_name
+                              else name
+                            in
+                            f acc (Logical_key.file_in key leaf) st
+                        | exception _ -> acc)
+                  | None -> acc))
+          acc names
+      in
+      let* ok = Fs.is_directory start in
+      if ok then walk start (Lk.dir rel_dir) acc else Io.return acc
 
-  (* Logical keys owing an upload. *)
-  let list () =
-    fold ~rel_dir:"" ~deep:true (fun acc key (_ : staged) -> key :: acc) []
+    (* Logical keys owing an upload. *)
+    let list () =
+      fold ~rel_dir:"" ~deep:true (fun acc key (_ : staged) -> key :: acc) []
 
-  (* Every staged body reachable from a manifest: what a sweep of the body trees
-     must keep. *)
-  let uuids () =
-    fold ~rel_dir:"" ~deep:true
-      (fun acc _ st ->
-        let acc =
-          match st.s_whole with Some uuid -> uuid :: acc | None -> acc
-        in
-        List.rev_append (body_uuids st.s_slots) acc)
-      []
+    (* Every staged body reachable from a manifest: what a sweep of the body trees
+       must keep. *)
+    let uuids () =
+      fold ~rel_dir:"" ~deep:true
+        (fun acc _ st ->
+          let acc =
+            match st.s_whole with Some uuid -> uuid :: acc | None -> acc
+          in
+          List.rev_append (body_uuids st.s_slots) acc)
+        []
 
-  (* Cutoff 0 deletes no file, only prunes what is left empty. *)
-  let prune_dirs () =
-    let+ (_ : bool) = Io_lwt.Fs.reap_older_than ~cutoff:0. (root ()) in
-    ()
+    (* Cutoff 0 deletes no file, only prunes what is left empty. *)
+    let prune_dirs () =
+      let+ (_ : bool) = Fs.reap_older_than ~cutoff:0. (root ()) in
+      ()
 
-  (* A locally created file has no published sidecar, so the mirror alone would
-     not list it; for one that does, the staged size and mtime are current. *)
-  let entries ~rel_dir ~deep =
-    fold ~rel_dir ~deep (fun acc key st -> (key, st) :: acc) []
+    (* A locally created file has no published sidecar, so the mirror alone would
+       not list it; for one that does, the staged size and mtime are current. *)
+    let entries ~rel_dir ~deep =
+      fold ~rel_dir ~deep (fun acc key st -> (key, st) :: acc) []
+  end
 end

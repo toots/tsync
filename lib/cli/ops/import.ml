@@ -18,9 +18,9 @@ module Make (C : Conf.S) = struct
   module R = Remote.Make (C)
   module Fs = File_store.Make (C)
   module St = Store.Make (C) (Layout.Inode.Make (C))
-  module Mf = Manifests.Make (C)
+  module Mf = Manifests_lwt.Make (C)
   module Ck = Checkout.Make (C)
-  module Mfs = Staged_manifest.Make (C)
+  module Mfs = Staged_lwt.Manifest.Make (C)
 
   (* [rel] is excluded when any glob matches either the full relative path or
      the basename, so [node_modules] prunes any directory of that name and

@@ -14,13 +14,11 @@
    -open
    Tsync_cache_layout
    -open
-   Tsync_cache_layout_lwt
-   -open
    Tsync_manifest
    -open
    Tsync_bigstring
    -open
-   Tsync_io_lwt))
+   Tsync_io))
  (name tsync_manifests)
  (public_name tsync-libs.manifests)
  (libraries
@@ -28,10 +26,7 @@
   tsync_staged
   tsync_conf
   tsync_cache_layout
-  tsync_cache_layout_lwt
   tsync_manifest
   tsync_bigstring
-  tsync_io_lwt
-  unix
-  lwt
-  lwt.unix))
+  tsync_io
+  unix))

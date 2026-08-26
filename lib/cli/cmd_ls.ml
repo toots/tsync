@@ -53,7 +53,7 @@ let cmd : unit Cmd.t =
                Lk.dir rel
        in
        let module Mf = Checkout.Make (C) in
-       let module Mfs = Staged_manifest.Make (C) in
+       let module Mfs = Staged_lwt.Manifest.Make (C) in
        let module B = (val C.store : Backend.S) in
        let* files, subdirs = Mf.list_children ~prefix () in
        let items =
