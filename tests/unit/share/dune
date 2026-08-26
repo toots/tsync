@@ -10,6 +10,8 @@
    -open
    Tsync_ops
    -open
+   Tsync_ops_lwt
+   -open
    Tsync_bigstring
    -open
    Tsync_backend_register
@@ -31,6 +33,7 @@
   tsync_layout
   tsync_layout_lwt
   tsync_ops
+  tsync_ops_lwt
   tsync_conf
   tsync_conf_lwt
   tsync_bigstring

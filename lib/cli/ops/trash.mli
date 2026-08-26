@@ -18,12 +18,37 @@ type outcome =
           it would go back under, so there is no key to write. A sync resolves
           the parent and makes the restore possible. *)
 
-module Make (C : Conf_lwt.S) : sig
-  (** The domain-relative path of every trashed folder. A marker whose body does
-      not name one is passed over: a body that will not parse is a write in
-      flight, not a finding. *)
-  val list : unit -> string list Lwt.t
+(** The key scheme a caller holding real paths wants. *)
+module type INODE_LAYOUT = sig
+  type 'a io
 
-  (** Put [path] back where it was. The subtree is untouched. *)
-  val restore : string -> outcome Lwt.t
+  module Make (_ : Conf.S with type 'a io = 'a io) :
+    Layout.S with type 'a io := 'a io
+end
+
+(** Writing and removing a folder marker by the key it already has. *)
+module type MANIFESTS = sig
+  type 'a io
+
+  module Make
+      (_ : Conf.S with type 'a io = 'a io)
+      (_ : Layout.S with type 'a io := 'a io) : sig
+    val put_raw : bkey:Stored_key.t -> data:string -> unit io
+    val delete_raw : bkey:Stored_key.t -> unit io
+  end
+end
+
+module Over
+    (Io : Io.S)
+    (_ : INODE_LAYOUT with type 'a io := 'a Io.t)
+    (_ : MANIFESTS with type 'a io := 'a Io.t) : sig
+  module Make (C : Conf.S with type 'a io = 'a Io.t) : sig
+    (** The domain-relative path of every trashed folder. A marker whose body
+        does not name one is passed over: a body that will not parse is a write
+        in flight, not a finding. *)
+    val list : unit -> string list Io.t
+
+    (** Put [path] back where it was. The subtree is untouched. *)
+    val restore : string -> outcome Io.t
+  end
 end

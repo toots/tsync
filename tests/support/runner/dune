@@ -32,6 +32,8 @@
    -open
    Tsync_ops
    -open
+   Tsync_ops_lwt
+   -open
    Tsync_layout
    -open
    Tsync_layout_lwt
@@ -98,6 +100,7 @@
   tsync_chunks
   tsync_test_harness
   tsync_ops
+  tsync_ops_lwt
   tsync_layout
   tsync_layout_lwt
   tsync_file_store

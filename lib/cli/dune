@@ -48,6 +48,8 @@
    -open
    Tsync_ops
    -open
+   Tsync_ops_lwt
+   -open
    Tsync_folder_ids
    -open
    Tsync_folder_ids_lwt
@@ -125,6 +127,7 @@
   tsync-libs.field_spec
   tsync-libs.sync
   tsync-libs.ops
+  tsync-libs.ops_lwt
   tsync-libs.store
   tsync_folder_ids
   tsync_folder_ids_lwt

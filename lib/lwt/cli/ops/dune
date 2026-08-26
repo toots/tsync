@@ -1,0 +1,37 @@
+; The whole-domain operations on Lwt: each is the same job, bound to this
+; process's filesystem, pools and clock.
+
+(library
+ (flags
+  (:standard
+   -open
+   Tsync_ops
+   -open
+   Tsync_conf_lwt
+   -open
+   Tsync_folder_ids_lwt
+   -open
+   Tsync_layout_lwt
+   -open
+   Tsync_store_lwt
+   -open
+   Tsync_corruption_lwt
+   -open
+   Tsync_inode_tree_lwt
+   -open
+   Tsync_file_store_lwt
+   -open
+   Tsync_io_lwt))
+ (name tsync_ops_lwt)
+ (public_name tsync-libs.ops_lwt)
+ (libraries
+  tsync_ops
+  tsync_conf_lwt
+  tsync_folder_ids_lwt
+  tsync_layout_lwt
+  tsync_store_lwt
+  tsync_file_store_lwt
+  tsync_inode_tree_lwt
+  tsync_corruption_lwt
+  tsync_io_lwt
+  lwt))

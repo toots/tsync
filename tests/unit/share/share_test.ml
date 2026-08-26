@@ -56,7 +56,7 @@ module Lk = Logical_key.Make (C)
 let shares_prefix = "tsync/shares/"
 
 module L = Layout_lwt.Inode.Make (C)
-module S = Share.Make (C)
+module S = Share_lwt.Make (C)
 
 let member key json =
   match json with `Assoc l -> List.assoc key l | _ -> assert false
@@ -120,7 +120,7 @@ let () =
     let store = (module NoShare : Backend_lwt.Store)
     let members = [Backend.member ~name:"local" store]
   end in
-  let module S2 = Share.Make (C2) in
+  let module S2 = Share_lwt.Make (C2) in
   (match Lwt_main.run (S2.create ~expires:123 ~rel:"foo" ()) with
     | Error _ -> ()
     | Ok _ -> assert false);
@@ -143,7 +143,7 @@ let () =
           (module Shareable : Backend_lwt.Store);
       ]
   end in
-  let module S3 = Share.Make (ReadOnlyDomain) in
+  let module S3 = Share_lwt.Make (ReadOnlyDomain) in
   (* The composite really does refuse writes: without that, this proves nothing. *)
   let (module Composite : Backend_lwt.Store) = ReadOnlyDomain.store in
   (match
@@ -170,7 +170,7 @@ let () =
           (module Shareable : Backend_lwt.Store);
       ]
   end in
-  let module S4 = Share.Make (BackfillOnly) in
+  let module S4 = Share_lwt.Make (BackfillOnly) in
   (match Lwt_main.run (S4.create ~token:"dd" ~expires:123 ~rel:"foo" ()) with
     | Ok u -> assert (u = share_base ^ "/dd")
     | Error e -> failwith e);

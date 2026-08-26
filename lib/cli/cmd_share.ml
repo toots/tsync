@@ -37,7 +37,7 @@ let cmd : unit Cmd.t =
       match domain with Some _ -> domain | None -> read_default_domain ()
     in
     let (module C : Conf_lwt.S) = make_conf ?domain cfg in
-    let module S = Share.Make (C) in
+    let module S = Share_lwt.Make (C) in
     match run_lwt (S.clear_cache ()) with
       | Error msg ->
           Printf.eprintf "%s\n" msg;
@@ -83,7 +83,7 @@ let cmd : unit Cmd.t =
         String.sub rel 0 (String.length rel - 1)
       else rel
     in
-    let module S = Share.Make (C) in
+    let module S = Share_lwt.Make (C) in
     match run_lwt (S.create ?token ~expires ~rel ()) with
       | Error msg ->
           Printf.eprintf "%s\n" msg;

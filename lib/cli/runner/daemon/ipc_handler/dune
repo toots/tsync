@@ -22,6 +22,8 @@
    -open
    Tsync_ops
    -open
+   Tsync_ops_lwt
+   -open
    Tsync_file_store
    -open
    Tsync_file_store_lwt
@@ -60,6 +62,7 @@
   tsync_manifest
   tsync_journal
   tsync_ops
+  tsync_ops_lwt
   tsync_file_store
   tsync_file_store_lwt
   tsync_folder_ids

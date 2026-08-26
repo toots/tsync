@@ -12,13 +12,23 @@
     key carries. *)
 type entry = { path : string; latest : int64; versions : int }
 
-module Make (C : Conf_lwt.S) : sig
-  (** Deleted files directly under the folder at domain-relative [rel], by name.
-      Mints a folder id if this client has none, since a listing of somewhere
-      that does not resolve is empty rather than wrong. *)
-  val in_folder : Logical_key.t -> string list Lwt.t
+(** The id naming a folder's own namespace, minted if this client has none. *)
+module type FOLDER_IDS = sig
+  type 'a io
 
-  (** Every deleted file in the domain, unordered — one listing of the whole
-      versions prefix, then one existence check per distinct file. *)
-  val in_domain : unit -> entry list Lwt.t
+  val ensure_id :
+    cache_root:string -> domain_name:string -> Logical_key.t -> string io
+end
+
+module Over (Io : Io.S) (_ : FOLDER_IDS with type 'a io := 'a Io.t) : sig
+  module Make (C : Conf.S with type 'a io = 'a Io.t) : sig
+    (** Deleted files directly under the folder at domain-relative [rel], by
+        name. Mints a folder id if this client has none, since a listing of
+        somewhere that does not resolve is empty rather than wrong. *)
+    val in_folder : Logical_key.t -> string list Io.t
+
+    (** Every deleted file in the domain, unordered — one listing of the whole
+        versions prefix, then one existence check per distinct file. *)
+    val in_domain : unit -> entry list Io.t
+  end
 end

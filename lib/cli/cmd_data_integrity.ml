@@ -138,7 +138,7 @@ let cmd : unit Cmd.t =
   in
   let repair (module C : Conf_lwt.S) source dry_run verbose =
     let open Lwt.Syntax in
-    let module Rp = Repair.Make (C) in
+    let module Rp = Repair_lwt.Make (C) in
     (* Verbose says every chunk and where it has got to; quiet says only what it
        changed. A stale marker is the one outcome quiet leaves out: it is the
        common case on a store whose events arrived out of order, and it means

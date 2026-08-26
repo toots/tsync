@@ -742,7 +742,7 @@ let setup_client (module C : Conf_lwt.S) root staging_prefix =
         mark_time := Unix.gettimeofday ();
         Lwt.return_unit
     | Expire selector ->
-        let module E = Expire.Make (C) in
+        let module E = Expire_lwt.Make (C) in
         let cutoff =
           match selector with
             | "all" -> Unix.gettimeofday ()
@@ -754,7 +754,7 @@ let setup_client (module C : Conf_lwt.S) root staging_prefix =
         Printf.printf "  expire %s -> %d version(s), %d journal entr(ies)\n"
           selector s.Expire.versions_deleted s.journal_deleted
     | PurgeTrashed path -> (
-        let module E = Expire.Make (C) in
+        let module E = Expire_lwt.Make (C) in
         let+ outcome = E.purge_trashed ~path () in
         match outcome with
           | `Not_in_trash -> Printf.printf "  purge %s -> not in trash\n" path
@@ -865,7 +865,7 @@ let setup_client (module C : Conf_lwt.S) root staging_prefix =
         Cor.invalidate ();
         Lwt.return_unit
     | Repair ->
-        let module Rp = Repair.Make (C) in
+        let module Rp = Repair_lwt.Make (C) in
         let+ s =
           Rp.run
             ~on_start:(fun ~total ->

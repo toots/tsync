@@ -69,7 +69,7 @@ let cmd : unit Cmd.t =
                    Printf.printf "%Ld  %s  %d bytes\n" ts (human_ts ts) size)
                  versions
          | None ->
-             let module D = Deleted.Make (C) in
+             let module D = Deleted_lwt.Make (C) in
              let+ deleted = D.in_domain () in
              let deleted = List.sort compare deleted in
              if deleted = [] then print_endline "No deleted files"

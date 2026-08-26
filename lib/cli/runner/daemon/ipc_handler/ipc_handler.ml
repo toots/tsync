@@ -642,7 +642,7 @@ module Make
     hooks.changed key;
     ok_json []
 
-  module Sh = Share.Make (C)
+  module Sh = Share_lwt.Make (C)
 
   (* Recovers the domain-relative path the share core expects from a full
      storage key. *)

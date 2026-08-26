@@ -1,188 +1,241 @@
-open Lwt.Syntax
-
 exception Share_unavailable of string
 exception Share_not_found of string
 
-module Make (C : Conf_lwt.S) = struct
-  module Lk = Logical_key.Make (C)
-  module L = Layout_lwt.Inode.Make (C)
-  module R = (val C.store : C.Store)
+(** The key scheme a caller holding real paths wants. *)
+module type INODE_LAYOUT = sig
+  type 'a io
 
-  let shares_prefix = C.shares_prefix
+  module Make (_ : Conf.S with type 'a io = 'a io) :
+    Layout.S with type 'a io := 'a io
+end
 
-  (* Asked of the individual stores, not the read/write composite: a share
-     manifest lives outside every domain root, so a domain with nothing writable
-     can still publish one.
+(** The folder id this client already records, if any. *)
+module type FOLDER_IDS = sig
+  type 'a io
 
-     A member reads never reach comes last rather than being skipped: a link
-     served from it can name a file it does not hold yet, but a backfill target
-     is filling from the write side, and a domain whose readable stores serve
-     no shares would otherwise have none at all. *)
-  let share_backend () =
-    let rec find = function
-      | [] ->
-          Lwt.fail
-            (Share_unavailable
-               (Printf.sprintf "Sharing is not available for %s." C.domain_name))
-      | (m : (module Backend_lwt.Store) Backend.member) :: rest -> (
-          let (module Bk : Backend_lwt.Store) = m.Backend.backend in
-          let* caps = Bk.capabilities ~prefix:C.domain_prefix () in
-          match caps.Backend.share_url with
-            | Some url -> Lwt.return ((module Bk : Backend_lwt.Store), url)
-            | None -> find rest)
-    in
-    let readable, rest =
-      List.partition
-        (fun (m : (module Backend_lwt.Store) Backend.member) ->
-          m.Backend.readable)
-        C.members
-    in
-    find (readable @ rest)
+  val lookup_id :
+    cache_root:string -> domain_name:string -> Logical_key.t -> string option io
+end
 
-  (* [rel] of "" is the whole domain. *)
-  let create ?token ~expires ~rel () =
-    Lwt.catch
-      (fun () ->
-        let* share_backend, share_url = share_backend () in
-        let (module B : Backend_lwt.Store) = share_backend in
-        (* Read through the domain's own read path; the store serving the link
-           is chosen for where the link points, not for holding the newest
-           copy. *)
-        let base_json = [("v", `Int 1); ("expires", `Int expires)] in
-        let* manifest =
-          let* file_key = L.manifest_key (Lk.file rel) in
-          (* A file manifest and a folder marker occupy the same key within a
-             parent namespace, so classification is by body: otherwise a folder
-             is shared as a chunkless file and the Lambda chokes.
+module Over
+    (Io : Io.S)
+    (Folder_ids : FOLDER_IDS with type 'a io := 'a Io.t)
+    (Inode_layout : INODE_LAYOUT with type 'a io := 'a Io.t) =
+struct
+  let ( let* ) = Io.bind
+  let ( let+ ) x f = Io.map f x
+  let return_some x = Io.return (Some x)
+  let return_ok x = Io.return (Ok x)
+  let return_error e = Io.return (Error e)
 
-             Sharing is a read, so an unresolvable key is the same answer as an
-             absent object. *)
-          let* obj =
-            match file_key with
-              | Some file_key when rel <> "" -> R.get_opt ~key:file_key ()
-              | _ -> Lwt.return_none
-          in
-          let marker =
-            Option.bind obj (fun obj ->
-                Folder.marker_of_string (Bigstring.to_string obj))
-          in
-          match (file_key, obj, marker) with
-            | Some file_key, Some _, None ->
-                (* Single file: the Lambda fetches the manifest by this key. *)
-                Lwt.return
-                  (`Assoc
-                     (base_json
-                     @ [
-                         ("type", `String "file");
-                         ("key", `String (Stored_key.to_string file_key));
-                         ("chunkPrefix", `String C.chunk_prefix);
-                         ("filename", `String (Filename.basename rel));
-                       ]))
-            | _ ->
-                (* Directory: store the folder's namespace prefix by id and let
-                   the Lambda list it lazily, keeping creation O(1).
+  let rec iter_s f = function
+    | [] -> Io.return ()
+    | x :: rest ->
+        let* () = f x in
+        iter_s f rest
 
-                   Never mint an id here: no marker means the folder does not
-                   exist remotely, so a fresh id names a namespace nothing wrote
-                   to and persisting it re-creates the local directory on a
-                   read. *)
-                let* dir_id =
-                  match marker with
-                    | Some m -> Lwt.return_some m.Folder.id
-                    | None ->
-                        Folder_ids_lwt.lookup_id ~cache_root:C.cache_root
-                          ~domain_name:C.domain_name (Lk.dir rel)
-                in
-                let* dir_prefix =
-                  match dir_id with
-                    | Some id ->
-                        Lwt.return
-                          (Stored_key.to_string
-                             (Stored_key.namespace ~prefix:C.domain_prefix
-                                ~folder_id:id))
-                    | None ->
-                        Lwt.fail
-                          (Share_not_found (Printf.sprintf "not found: %s" rel))
-                in
-                (* Two, because one of them may be the folder's index, which
-                   is a cache of its children rather than one of them. *)
-                let* entries =
-                  R.list_prefix ~prefix:dir_prefix ~max_keys:2 ()
-                in
-                let entries =
-                  List.filter
-                    (fun (e : Backend.file_entry) ->
-                      Stored_key.is_child_object e.Backend.key)
-                    entries
-                in
-                if entries = [] then
-                  Lwt.fail
-                    (Share_not_found (Printf.sprintf "not found: %s" rel))
-                else (
-                  let base =
-                    if rel = "" then C.domain_name else Filename.basename rel
-                  in
-                  Lwt.return
+  let rec map_s f = function
+    | [] -> Io.return []
+    | x :: rest ->
+        let* y = f x in
+        let+ ys = map_s f rest in
+        y :: ys
+
+  let rec filter_map_s f = function
+    | [] -> Io.return []
+    | x :: rest -> (
+        let* y = f x in
+        let+ ys = filter_map_s f rest in
+        match y with Some y -> y :: ys | None -> ys)
+
+  let rec fold_left_s f acc = function
+    | [] -> Io.return acc
+    | x :: rest ->
+        let* acc = f acc x in
+        fold_left_s f acc rest
+
+  module Make (C : Conf.S with type 'a io = 'a Io.t) = struct
+    module Lk = Logical_key.Make (C)
+    module L = Inode_layout.Make (C)
+    module R = (val C.store : C.Store)
+
+    let shares_prefix = C.shares_prefix
+
+    (* Asked of the individual stores, not the read/write composite: a share
+       manifest lives outside every domain root, so a domain with nothing writable
+       can still publish one.
+
+       A member reads never reach comes last rather than being skipped: a link
+       served from it can name a file it does not hold yet, but a backfill target
+       is filling from the write side, and a domain whose readable stores serve
+       no shares would otherwise have none at all. *)
+    let share_backend () =
+      let rec find = function
+        | [] ->
+            Io.fail
+              (Share_unavailable
+                 (Printf.sprintf "Sharing is not available for %s."
+                    C.domain_name))
+        | (m : (module C.Store) Backend.member) :: rest -> (
+            let (module Bk : C.Store) = m.Backend.backend in
+            let* caps = Bk.capabilities ~prefix:C.domain_prefix () in
+            match caps.Backend.share_url with
+              | Some url -> Io.return ((module Bk : C.Store), url)
+              | None -> find rest)
+      in
+      let readable, rest =
+        List.partition
+          (fun (m : (module C.Store) Backend.member) -> m.Backend.readable)
+          C.members
+      in
+      find (readable @ rest)
+
+    (* [rel] of "" is the whole domain. *)
+    let create ?token ~expires ~rel () =
+      Io.catch
+        (fun () ->
+          let* share_backend, share_url = share_backend () in
+          let (module B : C.Store) = share_backend in
+          (* Read through the domain's own read path; the store serving the link
+             is chosen for where the link points, not for holding the newest
+             copy. *)
+          let base_json = [("v", `Int 1); ("expires", `Int expires)] in
+          let* manifest =
+            let* file_key = L.manifest_key (Lk.file rel) in
+            (* A file manifest and a folder marker occupy the same key within a
+               parent namespace, so classification is by body: otherwise a folder
+               is shared as a chunkless file and the Lambda chokes.
+
+               Sharing is a read, so an unresolvable key is the same answer as an
+               absent object. *)
+            let* obj =
+              match file_key with
+                | Some file_key when rel <> "" -> R.get_opt ~key:file_key ()
+                | _ -> Io.return None
+            in
+            let marker =
+              Option.bind obj (fun obj ->
+                  Folder.marker_of_string (Bigstring.to_string obj))
+            in
+            match (file_key, obj, marker) with
+              | Some file_key, Some _, None ->
+                  (* Single file: the Lambda fetches the manifest by this key. *)
+                  Io.return
                     (`Assoc
                        (base_json
                        @ [
-                           ("type", `String "dir");
+                           ("type", `String "file");
+                           ("key", `String (Stored_key.to_string file_key));
                            ("chunkPrefix", `String C.chunk_prefix);
-                           ("dirPrefix", `String dir_prefix);
-                           ("filename", `String (base ^ ".zip"));
-                         ])))
-        in
-        (* A caller-supplied id gives a stable link. *)
-        let token = Option.value token ~default:(Id.token 16) in
-        let* () =
-          B.put
-            ~key:(Stored_key.share_key ~prefix:shares_prefix token)
-            ~data:(Bigstring.of_string (Yojson.Basic.to_string manifest))
-            ()
-        in
-        Lwt.return_ok (share_url ^ "/" ^ token))
-      (function
-        | Share_unavailable msg | Share_not_found msg -> Lwt.return_error msg
-        | exn -> Lwt.fail exn)
+                           ("filename", `String (Filename.basename rel));
+                         ]))
+              | _ ->
+                  (* Directory: store the folder's namespace prefix by id and let
+                     the Lambda list it lazily, keeping creation O(1).
 
-  (* The share server assembles a whole file or a folder's zip and keeps it under
-     [cache_prefix], so a second download of the same link costs nothing. Every
-     object there is rebuildable from the chunks it was stitched from, which is
-     what makes dropping the lot safe: links keep working, the next download pays
-     to assemble again. *)
-  let cache_prefix = shares_prefix ^ "cache/"
+                     Never mint an id here: no marker means the folder does not
+                     exist remotely, so a fresh id names a namespace nothing wrote
+                     to and persisting it re-creates the local directory on a
+                     read. *)
+                  let* dir_id =
+                    match marker with
+                      | Some m -> return_some m.Folder.id
+                      | None ->
+                          Folder_ids.lookup_id ~cache_root:C.cache_root
+                            ~domain_name:C.domain_name (Lk.dir rel)
+                  in
+                  let* dir_prefix =
+                    match dir_id with
+                      | Some id ->
+                          Io.return
+                            (Stored_key.to_string
+                               (Stored_key.namespace ~prefix:C.domain_prefix
+                                  ~folder_id:id))
+                      | None ->
+                          Io.fail
+                            (Share_not_found
+                               (Printf.sprintf "not found: %s" rel))
+                  in
+                  (* Two, because one of them may be the folder's index, which
+                     is a cache of its children rather than one of them. *)
+                  let* entries =
+                    R.list_prefix ~prefix:dir_prefix ~max_keys:2 ()
+                  in
+                  let entries =
+                    List.filter
+                      (fun (e : Backend.file_entry) ->
+                        Stored_key.is_child_object e.Backend.key)
+                      entries
+                  in
+                  if entries = [] then
+                    Io.fail
+                      (Share_not_found (Printf.sprintf "not found: %s" rel))
+                  else (
+                    let base =
+                      if rel = "" then C.domain_name else Filename.basename rel
+                    in
+                    Io.return
+                      (`Assoc
+                         (base_json
+                         @ [
+                             ("type", `String "dir");
+                             ("chunkPrefix", `String C.chunk_prefix);
+                             ("dirPrefix", `String dir_prefix);
+                             ("filename", `String (base ^ ".zip"));
+                           ])))
+          in
+          (* A caller-supplied id gives a stable link. *)
+          let token = Option.value token ~default:(Id.token 16) in
+          let* () =
+            B.put
+              ~key:(Stored_key.share_key ~prefix:shares_prefix token)
+              ~data:(Bigstring.of_string (Yojson.Basic.to_string manifest))
+              ()
+          in
+          return_ok (share_url ^ "/" ^ token))
+        (function
+          | Share_unavailable msg | Share_not_found msg -> return_error msg
+          | exn -> Io.fail exn)
 
-  (* An assembled artifact filed before the cache subtree existed: a [.data]
-     sibling of the manifests. A token is hex, so no published object can end
-     that way. *)
-  let is_loose_artifact key =
-    (not (Stored_key.is_in ~prefix:cache_prefix key))
-    && Filename.extension (Stored_key.to_string key) = ".data"
+    (* The share server assembles a whole file or a folder's zip and keeps it under
+       [cache_prefix], so a second download of the same link costs nothing. Every
+       object there is rebuildable from the chunks it was stitched from, which is
+       what makes dropping the lot safe: links keep working, the next download pays
+       to assemble again. *)
+    let cache_prefix = shares_prefix ^ "cache/"
 
-  let clear_cache () =
-    Lwt.catch
-      (fun () ->
-        let* (module B : Backend_lwt.Store), _ = share_backend () in
-        let* entries = B.list_prefix ~prefix:shares_prefix () in
-        let entries =
-          List.filter
-            (fun (e : Backend.file_entry) ->
-              (* A filesystem backend lists the directories holding the cache,
-                 and they outlive their contents: counting them would report a
-                 delete that took nothing and never settle. *)
-              (not (Stored_key.is_dir_key e.key))
-              && (Stored_key.is_in ~prefix:cache_prefix e.key
-                 || is_loose_artifact e.key))
-            entries
-        in
-        let keys = List.map (fun (e : Backend.file_entry) -> e.key) entries in
-        let bytes =
-          List.fold_left
-            (fun n (e : Backend.file_entry) -> n + e.size)
-            0 entries
-        in
-        let+ () = if keys = [] then Lwt.return_unit else B.delete_multi keys in
-        Ok (List.length keys, bytes))
-      (function
-        | Share_unavailable msg -> Lwt.return_error msg | exn -> Lwt.fail exn)
+    (* An assembled artifact filed before the cache subtree existed: a [.data]
+       sibling of the manifests. A token is hex, so no published object can end
+       that way. *)
+    let is_loose_artifact key =
+      (not (Stored_key.is_in ~prefix:cache_prefix key))
+      && Filename.extension (Stored_key.to_string key) = ".data"
+
+    let clear_cache () =
+      Io.catch
+        (fun () ->
+          let* (module B : C.Store), _ = share_backend () in
+          let* entries = B.list_prefix ~prefix:shares_prefix () in
+          let entries =
+            List.filter
+              (fun (e : Backend.file_entry) ->
+                (* A filesystem backend lists the directories holding the cache,
+                   and they outlive their contents: counting them would report a
+                   delete that took nothing and never settle. *)
+                (not (Stored_key.is_dir_key e.key))
+                && (Stored_key.is_in ~prefix:cache_prefix e.key
+                   || is_loose_artifact e.key))
+              entries
+          in
+          let keys = List.map (fun (e : Backend.file_entry) -> e.key) entries in
+          let bytes =
+            List.fold_left
+              (fun n (e : Backend.file_entry) -> n + e.size)
+              0 entries
+          in
+          let+ () = if keys = [] then Io.return () else B.delete_multi keys in
+          Ok (List.length keys, bytes))
+        (function
+          | Share_unavailable msg -> return_error msg | exn -> Io.fail exn)
+  end
 end
