@@ -9,8 +9,6 @@
    -open
    Tsync_logical_key
    -open
-   Tsync_remote
-   -open
    Tsync_staged
    -open
    Tsync_chunk_cache
@@ -27,8 +25,6 @@
    -open
    Tsync_chunks
    -open
-   Tsync_file_store
-   -open
    Tsync_io
    -open
    Tsync_xxhash
@@ -44,7 +40,6 @@
  (public_name tsync-libs.content)
  (libraries
   tsync_logical_key
-  tsync_remote
   tsync_staged
   tsync_chunk_cache
   tsync_manifests
@@ -53,7 +48,6 @@
   tsync_conf
   tsync_cache_layout
   tsync_chunks
-  tsync_file_store
   tsync_io
   tsync_xxhash
   tsync_metrics

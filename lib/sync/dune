@@ -9,10 +9,6 @@
    -open
    Tsync_logical_key
    -open
-   Tsync_history
-   -open
-   Tsync_remote
-   -open
    Tsync_staged
    -open
    Tsync_checkout
@@ -35,8 +31,6 @@
    -open
    Tsync_retry
    -open
-   Tsync_file_store
-   -open
    Tsync_content
    -open
    Tsync_backend_register
@@ -49,8 +43,6 @@
  (libraries
   tsync_retry
   tsync_logical_key
-  tsync_history
-  tsync_remote
   tsync_staged
   tsync_checkout
   tsync_file_ops
@@ -62,7 +54,6 @@
   tsync_conf
   tsync_io
   tsync_durable_queue
-  tsync_file_store
   tsync_content
   tsync_backend_register
   tsync_log
