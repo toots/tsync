@@ -12,8 +12,6 @@
    -open
    Tsync_log
    -open
-   Tsync_bigstring
-   -open
    Tsync_backend_register
    -open
    Tsync_io
@@ -28,6 +26,5 @@
   tsync_io
   tsync_chunk_integrity
   tsync-libs.field_spec
-  tsync-libs.bigstring
   tsync-libs.backend_register
   tsync-libs.log))

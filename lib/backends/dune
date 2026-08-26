@@ -5,8 +5,6 @@
 (library
  (name tsync_backend)
  (libraries
-  tsync-libs.bigstring
-  tsync-libs.backend_register
   tsync_local_backend_lwt
   tsync_http_proxy_backend_lwt
   tsync_gcs_backend_lwt

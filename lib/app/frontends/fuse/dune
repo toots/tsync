@@ -6,15 +6,11 @@
    -open
    Tsync_checkout
    -open
-   Tsync_checkout_lwt
-   -open
    Tsync_file_ops
    -open
    Tsync_field_spec
    -open
    Tsync_cache_layout
-   -open
-   Tsync_ipc
    -open
    Tsync_ipc_lwt
    -open
@@ -25,8 +21,6 @@
    Tsync_conf
    -open
    Tsync_conf_lwt
-   -open
-   Tsync_ipc_handler
    -open
    Tsync_engine
    -open
@@ -41,18 +35,15 @@
   tsync_cache_layout
   tsync_conf_lwt
   tsync_checkout
-  tsync_checkout_lwt
   tsync_file_ops
   tsync-libs.field_spec
   tsync-libs.frontend_register
   tsync-libs.log
   tsync-libs.conf
   tsync-libs.engine
-  tsync-libs.ipc
   tsync-libs.ipc_lwt
   tsync-libs.metrics
   tsync_io_lwt
-  tsync-libs.ipc_handler
   fuse3
   unix
   lwt

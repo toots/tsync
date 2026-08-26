@@ -2,7 +2,6 @@
  (name tsync_frontend)
  (library_flags (-linkall))
  (libraries
-  tsync-libs.frontend_register
   tsync_http_proxy_frontend
   (select
    frontend_android.ml

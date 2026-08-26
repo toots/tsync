@@ -6,11 +6,7 @@
    -open
    Tsync_http_proxy_backend
    -open
-   Tsync_backend_register
-   -open
    Tsync_backend_lwt
-   -open
-   Tsync_field_spec
    -open
    Tsync_http_client_lwt
    -open
@@ -19,9 +15,7 @@
  (library_flags (-linkall))
  (libraries
   tsync_http_proxy_backend
-  tsync_backend_register
   tsync_backend_lwt
-  tsync-libs.field_spec
   tsync_http_client_lwt
   tsync_io_lwt
   lwt))
