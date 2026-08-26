@@ -1,6 +1,6 @@
 (* What bounds chunk work is the domain's, not the caller's.
 
-   [Remote.Make] is applied once per role rather than once per domain -- the
+   [Remote_lwt.Make] is applied once per role rather than once per domain -- the
    uploader, diagnostics, export, import, the share server. Every one of them
    queues on the same device and spends from the same memory budget, so a pool
    held inside the functor bounds each of them separately and the process admits
@@ -32,7 +32,7 @@ let max_of name =
 
 let () =
   case "one application";
-  let module R1 = Remote.Make (C) in
+  let module R1 = Remote_lwt.Make (C) in
   ignore R1.known_chunk_count;
   step "chunk buffers %d, downloads %d" (max_of "chunk buffers")
     (max_of "downloads");
@@ -43,7 +43,7 @@ let () =
   case "a second role on the same domain";
   (* The share server's: the same domain under a different layout, which is what
      makes it a second application rather than a second domain. *)
-  let module R2 = Remote.Make_with_layout (C) (Layout_lwt.Identity) in
+  let module R2 = Remote_lwt.Make_with_layout (C) (Layout_lwt.Identity) in
   ignore R2.known_chunk_count;
   step "chunk buffers %d, downloads %d" (max_of "chunk buffers")
     (max_of "downloads");

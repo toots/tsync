@@ -15,7 +15,7 @@ type summary = {
 
 module Make (C : Conf_lwt.S) = struct
   module Lk = Logical_key.Make (C)
-  module R = Remote.Make (C)
+  module R = Remote_lwt.Make (C)
   module Fs = File_store_lwt.Make (C)
   module St = Store_lwt.Make (C) (Layout_lwt.Inode.Make (C))
   module Mf = Manifests_lwt.Make (C)

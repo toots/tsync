@@ -24,7 +24,7 @@ module C =
       : Conf_lwt.S)
 
 module Lk = Logical_key.Make (C)
-module R = Remote.Make (C)
+module R = Remote_lwt.Make (C)
 module Mf = Manifests_lwt.Make (C)
 module Ck = Checkout_lwt.Make (C)
 module Mfs = Staged_lwt.Manifest.Make (C)
@@ -112,7 +112,7 @@ module CG : Conf_lwt.S = struct
 end
 
 module LkG = Logical_key.Make (CG)
-module GR = Remote.Make (CG)
+module GR = Remote_lwt.Make (CG)
 module Gm = Manifests_lwt.Make (CG)
 module Gck = Checkout_lwt.Make (CG)
 module Gms = Staged_lwt.Manifest.Make (CG)

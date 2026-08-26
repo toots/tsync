@@ -4,6 +4,8 @@
    -open
    Tsync_remote
    -open
+   Tsync_remote_lwt
+   -open
    Tsync_layout
    -open
    Tsync_layout_lwt
@@ -24,6 +26,7 @@
  (name chunk_pools)
  (libraries
   tsync_remote
+  tsync_remote_lwt
   tsync_layout
   tsync_layout_lwt
   tsync_test_harness

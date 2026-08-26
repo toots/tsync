@@ -6,91 +6,51 @@
  (flags
   (:standard
    -open
+   Tsync_io
+   -open
    Tsync_retry
    -open
    Tsync_logical_key
    -open
    Tsync_history
    -open
-   Tsync_history_lwt
-   -open
-   Tsync_staged
-   -open
-   Tsync_chunk_cache
-   -open
    Tsync_manifest
    -open
-   Tsync_journal
-   -open
    Tsync_conf
-   -open
-   Tsync_conf_lwt
    -open
    Tsync_chunks
    -open
    Tsync_chunk_store
    -open
-   Tsync_chunk_store_lwt
-   -open
    Tsync_layout
-   -open
-   Tsync_layout_lwt
    -open
    Tsync_store
    -open
-   Tsync_store_lwt
-   -open
    Tsync_corruption
    -open
-   Tsync_corruption_lwt
-   -open
    Tsync_collection
-   -open
-   Tsync_collection_lwt
-   -open
-   Tsync_io_lwt
-   -open
-   Tsync_xxhash
-   -open
-   Tsync_metrics
    -open
    Tsync_bigstring
    -open
    Tsync_backend_register
    -open
-   Tsync_backend_lwt
-   -open
    Tsync_log))
  (name tsync_remote)
  (public_name tsync-libs.remote)
  (libraries
+  tsync_io
   tsync_retry
   tsync_logical_key
   tsync_history
-  tsync_history_lwt
-  tsync_staged
-  tsync_chunk_cache
   tsync_manifest
-  tsync_journal
   tsync_conf
-  tsync_conf_lwt
   tsync_chunks
   tsync_chunk_store
-  tsync_chunk_store_lwt
   tsync_layout
-  tsync_layout_lwt
   tsync_store
-  tsync_store_lwt
   tsync_corruption
-  tsync_corruption_lwt
   tsync_collection
-  tsync_collection_lwt
-  tsync_io_lwt
-  tsync_xxhash
-  tsync_metrics
   tsync_bigstring
   tsync_backend_register
-  tsync_backend_lwt
   tsync_log
-  unix
-  lwt))
+  unix))

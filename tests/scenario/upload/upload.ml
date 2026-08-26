@@ -45,7 +45,7 @@ module C = struct
 end
 
 module Lk = Logical_key.Make (C)
-module R = Remote.Make (C)
+module R = Remote_lwt.Make (C)
 module D = Data_lwt.Make (C) (R)
 
 (* New files take the configured size when there is one, else what the primary
@@ -81,7 +81,7 @@ module Cm = struct
   let members = [Backend.member ~name:"local" store]
 end
 
-module Rm = Remote.Make (Cm)
+module Rm = Remote_lwt.Make (Cm)
 
 let opinionated n : (module Backend_lwt.Store) =
   (module struct
@@ -107,11 +107,11 @@ struct
   let store = opinionated B.answer
 end
 
-module From_backend = Remote.Make (Unset (struct
+module From_backend = Remote_lwt.Make (Unset (struct
   let answer = Some 4096
 end))
 
-module No_opinion = Remote.Make (Unset (struct
+module No_opinion = Remote_lwt.Make (Unset (struct
   let answer = None
 end))
 

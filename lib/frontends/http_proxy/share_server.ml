@@ -106,7 +106,7 @@ let preview_kinds_json =
 
 module Make (C : Conf_lwt.S) = struct
   module Lk = Logical_key.Make (C)
-  module R = Remote.Make_with_layout (C) (Layout_lwt.Identity)
+  module R = Remote_lwt.Make_with_layout (C) (Layout_lwt.Identity)
   module D = Data_lwt.Make (C) (R)
 
   (* Share manifests come from the backend, never the local mirror: their keys

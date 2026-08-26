@@ -14,6 +14,8 @@
    -open
    Tsync_remote
    -open
+   Tsync_remote_lwt
+   -open
    Tsync_journal
    -open
    Tsync_sync
@@ -73,6 +75,7 @@
   tsync_logical_key
   tsync_chunks
   tsync_remote
+  tsync_remote_lwt
   tsync_journal
   tsync_sync
   tsync_content

@@ -17,5 +17,5 @@ module Make (C : Conf_lwt.S) = struct
     Over.Make_with_layout (C) (L) (File_store_lwt.Make (C))
       (Store_lwt.Make (C) (L))
       (History_lwt.Make (C) (L))
-      (Remote.Make_with_layout (C) (L))
+      (Remote_lwt.Make_with_layout (C) (L))
 end

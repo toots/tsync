@@ -56,7 +56,7 @@ module C = struct
 end
 
 module Lk = Logical_key.Make (C)
-module R = Remote.Make (C)
+module R = Remote_lwt.Make (C)
 module D = Data_lwt.Make (C) (R)
 
 let write_file path contents =

@@ -29,6 +29,8 @@
    -open
    Tsync_remote
    -open
+   Tsync_remote_lwt
+   -open
    Tsync_wal_lwt
    -open
    Tsync_manifests_lwt
@@ -57,6 +59,7 @@
   tsync_history
   tsync_history_lwt
   tsync_remote
+  tsync_remote_lwt
   tsync_wal_lwt
   tsync_manifests_lwt
   tsync_checkout_lwt

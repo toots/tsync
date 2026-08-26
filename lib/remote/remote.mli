@@ -11,6 +11,8 @@ exception Source_changed of string
 val set_max_known : int -> unit
 
 module type S = sig
+  type 'a io
+
   (** Upload [src_path] as chunks under [key]: each chunk is read, hashed (chunk
       key) and uploaded if absent, then the manifest is written. For a file
       handed over whole — import, and the FileProvider's re-import. Setting
@@ -35,18 +37,18 @@ module type S = sig
     ?cancel:bool ref ->
     ?on_progress:(bytes:int -> sent:bool -> unit) ->
     unit ->
-    Manifest.t Lwt.t
+    Manifest.t io
 
   (** Fetch one chunk body from the domain's stores by its content key
       ([Manifest.chunk_key], without the domain's chunk prefix). *)
-  val get_chunk : chunk_key:string -> Bigstring.t Lwt.t
+  val get_chunk : chunk_key:string -> Bigstring.t io
 
-  (** Chunk size for files this client creates: [Conf_lwt.S.chunk_size] when the
+  (** Chunk size for files this client creates: [Conf.S.chunk_size] when the
       config says, else what the domain's stores recommend — an http-proxy
       answers with the serving domain's own, so the setting need not be mirrored
       in two configs — else [Conf.default_chunk_size]. Existing files always use
       the size recorded in their own manifest and never come near this. *)
-  val chunk_size : unit -> int Lwt.t
+  val chunk_size : unit -> int io
 
   (** Chunk keys this session has seen present on the stores. Bounded, so it
       counts what the memo holds rather than what the session has uploaded;
@@ -84,14 +86,14 @@ module type S = sig
     size:int64 ->
     chunk_size:int ->
     mtime:float ->
-    source:(int -> unit Lwt.t Chunk_source.t Lwt.t) ->
+    source:(int -> unit io Chunk_source.t io) ->
     ?cancel:bool ref ->
     unit ->
-    Manifest.t Lwt.t
+    Manifest.t io
 
   (** Fetch only the manifest for [key] from the primary backend. Returns [None]
       if the key does not exist or is not a manifest. *)
-  val fetch_manifest : key:Logical_key.t -> unit -> Manifest.t option Lwt.t
+  val fetch_manifest : key:Logical_key.t -> unit -> Manifest.t option io
 
   (** {!fetch_manifest} saying which nothing it found. Only [`Absent] is an
       answer about the domain: [`Unresolved] is this client not knowing the
@@ -101,12 +103,107 @@ module type S = sig
   val fetch_manifest_state :
     key:Logical_key.t ->
     unit ->
-    [ `Found of Manifest.t | `Absent | `Unresolved | `Unreadable ] Lwt.t
+    [ `Found of Manifest.t | `Absent | `Unresolved | `Unreadable ] io
 end
 
-(** Keys are mapped to backend keys through [L]. Callers holding real paths want
-    {!Make}; {!Layout_lwt.Identity} serves callers that already hold backend
-    keys. *)
-module Make_with_layout (C : Conf_lwt.S) (L : Layout_lwt.S) : S
+(** The bound on what runs at once: chunk buffers and reads in flight. *)
+module type POOLS = sig
+  type 'a io
+  type t
 
-module Make (C : Conf_lwt.S) : S
+  val create : ?max_waiting:int -> ?name:string -> max:int -> unit -> t
+  val use : t -> (unit -> 'a io) -> 'a io
+  val width : t -> int
+  val each : width:int -> (unit -> (unit -> unit io) option) -> unit io
+end
+
+(** Opening the source file, and asking whether it moved while it was read. *)
+module type SYSCALLS = sig
+  type 'a io
+  type fd
+
+  val openfile : string -> Unix.open_flag list -> int -> fd io
+  val close : fd -> unit io
+
+  module LargeFile : sig
+    val fstat : fd -> Unix.LargeFile.stats io
+  end
+end
+
+(** The key scheme a caller holding real paths wants. *)
+module type INODE_LAYOUT = sig
+  type 'a io
+
+  module Make (_ : Conf.S with type 'a io = 'a io) :
+    Layout.S with type 'a io := 'a io
+end
+
+(** Publishing a manifest and taking it back, which is all this does with one.
+*)
+module type MANIFESTS = sig
+  type 'a io
+
+  module Make
+      (_ : Conf.S with type 'a io = 'a io)
+      (_ : Layout.S with type 'a io := 'a io) : sig
+    val put_manifest : key:Logical_key.t -> data:Bigstring.t -> unit io
+
+    val get_manifest_state :
+      key:Logical_key.t -> [ `Body of string | `Absent | `Unresolved ] io
+
+    val delete_manifest : key:Logical_key.t -> unit io
+  end
+end
+
+(** Snapshotting what a write is about to replace. *)
+module type VERSIONS = sig
+  type 'a io
+
+  module Make
+      (_ : Conf.S with type 'a io = 'a io)
+      (_ : Layout.S with type 'a io := 'a io) : sig
+    val save_version : key:Logical_key.t -> unit io
+  end
+end
+
+(** Where a chunk is while a collection is under way, and what keeps one alive
+    across it. *)
+module type COLLECTION = sig
+  type 'a io
+
+  module Make (_ : Conf.S with type 'a io = 'a io) : sig
+    val get : string -> Bigstring.t io
+    val head : string -> Backend.file_entry option io
+    val promote_all : count:int -> (int -> string) -> unit io
+  end
+end
+
+(** Which chunks a store filed as not holding what their names say. *)
+module type CORRUPTION = sig
+  type 'a io
+
+  module Make (_ : Conf.S with type 'a io = 'a io) : sig
+    val is_marked : string -> bool io
+    val forget : string -> unit
+  end
+end
+
+module Over
+    (Io : Io.S)
+    (_ : POOLS with type 'a io := 'a Io.t)
+    (_ : SYSCALLS with type 'a io := 'a Io.t)
+    (_ : INODE_LAYOUT with type 'a io := 'a Io.t)
+    (_ : MANIFESTS with type 'a io := 'a Io.t)
+    (_ : VERSIONS with type 'a io := 'a Io.t)
+    (_ : COLLECTION with type 'a io := 'a Io.t)
+    (_ : CORRUPTION with type 'a io := 'a Io.t) : sig
+  (** Keys are mapped to backend keys through [L]. Callers holding real paths
+      want {!Make}; {!Layout.Identity} serves callers that already hold backend
+      keys. *)
+  module Make_with_layout
+      (_ : Conf.S with type 'a io = 'a Io.t)
+      (_ : Layout.S with type 'a io := 'a Io.t) : S with type 'a io := 'a Io.t
+
+  module Make (_ : Conf.S with type 'a io = 'a Io.t) :
+    S with type 'a io := 'a Io.t
+end

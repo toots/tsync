@@ -57,7 +57,7 @@ module C = struct
 end
 
 module Lk = Logical_key.Make (C)
-module R = Remote.Make (C)
+module R = Remote_lwt.Make (C)
 
 (* Distinct bytes per chunk, so every chunk is its own key and dedup does not
    quietly reduce what the memo is asked to hold. *)

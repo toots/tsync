@@ -49,7 +49,7 @@ module C = struct
 end
 
 module Lk = Logical_key.Make (C)
-module R = Remote.Make (C)
+module R = Remote_lwt.Make (C)
 
 (* A body is live from the moment [source] is asked for it until the upload of
    it finishes, so the count is taken inside [source] and the pauses keep it

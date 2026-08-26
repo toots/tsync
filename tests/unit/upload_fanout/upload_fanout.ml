@@ -30,7 +30,7 @@ let conf =
 
 module C = (val conf : Conf_lwt.S)
 module Lk = Logical_key.Make (C)
-module R = Remote.Make (C)
+module R = Remote_lwt.Make (C)
 
 (* Seeded so no two chunks share content: a file of one repeated byte
    deduplicates to a single put and never fills the pool. *)

@@ -5,7 +5,7 @@ type summary = { exported : int; missing : int }
 
 module Make (C : Conf_lwt.S) = struct
   module Lk = Logical_key.Make (C)
-  module R = Remote.Make (C)
+  module R = Remote_lwt.Make (C)
   module Tree = Inode_tree_lwt.Make (C)
   module Mf = Checkout_lwt.Make (C)
   module Mfs = Staged_lwt.Manifest.Make (C)

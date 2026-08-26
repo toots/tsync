@@ -37,7 +37,7 @@ module C =
       : Conf_lwt.S)
 
 module Lk = Logical_key.Make (C)
-module R = Remote.Make (C)
+module R = Remote_lwt.Make (C)
 module D = Data_lwt.Make (C) (R)
 module Mf = Checkout_lwt.Make (C)
 module Mfs = Staged_lwt.Manifest.Make (C)

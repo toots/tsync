@@ -51,7 +51,7 @@ module C = struct
 end
 
 module Lk = Logical_key.Make (C)
-module R = Remote.Make (C)
+module R = Remote_lwt.Make (C)
 module Corrupt = Corruption_lwt.Make (C)
 module B = (val C.store : C.Store)
 
