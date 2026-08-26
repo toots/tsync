@@ -58,34 +58,55 @@ module Subs = struct
 
   let unregister t sub = t.subs <- List.filter (fun s -> s != sub) t.subs
 
-  (* Nothing yields between the empty check and the wait, so a publish cannot slip
-     through and leave us asleep on a non-empty queue. *)
-  let rec write_pending sub oc =
+  (* Nothing yields between the empty check and the wait, so a publish cannot
+     slip through and leave us asleep on a non-empty queue.
+
+     [gone] is what ends this side: it has nothing to read, so it would
+     otherwise wait on the condition for a client that has already left. *)
+  let rec write_pending sub ~gone oc =
     let open Lwt.Syntax in
     match Queue.take_opt sub.queue with
       | Some msg ->
           let* () = Lwt_io.write_line oc msg in
           let* () = Lwt_io.flush oc in
-          write_pending sub oc
+          write_pending sub ~gone oc
       | None ->
           let* () = Lwt_condition.wait sub.wake in
-          write_pending sub oc
+          if !gone then Lwt.return_unit else write_pending sub ~gone oc
 
-  (* Ends when the client goes away: EOF on the read side, or a failed write. *)
+  (* Ends when the client goes away: EOF on the read side, or a failed write.
+     Both halves end of their own accord — the read side says so and wakes the
+     write side — rather than one being cancelled out from under the other. *)
   let serve t ~topic ~ic ~oc =
-    let open Lwt.Syntax in
     let sub = register t ~topic in
+    let gone = ref false in
     Lwt.finalize
       (fun () ->
         let until_eof () =
+          let open Lwt.Syntax in
           let rec loop () =
             let* _ = Lwt_io.read_line ic in
             loop ()
           in
-          Lwt.catch loop (fun _ -> Lwt.return_unit)
+          Lwt.finalize
+            (fun () -> Lwt.catch loop (fun _ -> Lwt.return_unit))
+            (fun () ->
+              gone := true;
+              Lwt_condition.signal sub.wake ();
+              Lwt.return_unit)
         in
         Lwt.catch
-          (fun () -> Lwt.pick [write_pending sub oc; until_eof ()])
+          (fun () ->
+            Lwt.join
+              [
+                Lwt.catch
+                  (fun () -> write_pending sub ~gone oc)
+                  (fun _ ->
+                    gone := true;
+                    Lwt_condition.signal sub.wake ();
+                    Lwt.return_unit);
+                until_eof ();
+              ])
           (fun _ -> Lwt.return_unit))
       (fun () ->
         unregister t sub;
@@ -98,6 +119,8 @@ let serve ?subs ~path handler =
   Io_lwt.Fs.mkdir_p_sync ~perm:0o700 dir;
   (try Unix.unlink path with Unix.Unix_error (Unix.ENOENT, _, _) -> ());
   let stopped, wake_stop = Lwt.wait () in
+  (* Waking twice raises, and two clients can each ask the daemon to stop. *)
+  let woken = ref false in
   (* One Lwt task per connection, so a slow request (a large restore) never
      blocks another client. A connection carries requests until the client
      closes it: fileproviderd asks constantly, and a connect and accept per
@@ -110,7 +133,10 @@ let serve ?subs ~path handler =
       let* () = Lwt_io.flush oc in
       match action with
         | `Stop ->
-            if Lwt.state stopped = Lwt.Sleep then Lwt.wakeup_later wake_stop ();
+            if not !woken then begin
+              woken := true;
+              Lwt.wakeup_later wake_stop ()
+            end;
             Lwt.return_unit
         | `Subscribe topic -> (
             (* The connection becomes the event stream, so events and replies
