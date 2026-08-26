@@ -17,7 +17,7 @@ let serve ~reply =
     Lwt.return
       (Yojson.Safe.to_string (`Assoc (("asked", asked) :: reply)), `Continue)
   in
-  Ipc.serve ~path:socket_path handler
+  Ipc_lwt.serve ~path:socket_path handler
 
 let mount_reply =
   [

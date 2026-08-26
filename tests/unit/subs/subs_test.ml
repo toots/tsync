@@ -40,11 +40,11 @@ let read_within ic seconds =
     ]
 
 let main () =
-  let subs = Ipc.Subs.create () in
-  Lwt.async (fun () -> Ipc.serve ~subs ~path:socket_path handler);
+  let subs = Ipc_lwt.Subs.create () in
+  Lwt.async (fun () -> Ipc_lwt.serve ~subs ~path:socket_path handler);
   let* () = Lwt_unix.sleep 0.2 in
 
-  check "no subscribers yet" (Ipc.Subs.publish subs ~topic:"a" "early" = 0);
+  check "no subscribers yet" (Ipc_lwt.Subs.publish subs ~topic:"a" "early" = 0);
 
   (* Several requests on one connection: the old server closed after the first. *)
   let* client = connect () in
@@ -57,20 +57,20 @@ let main () =
   let ic_a, _ = sub_a in
   let* ack = ask sub_a "subscribe a" in
   check "subscribe is acknowledged" (ack = "subscribed");
-  check "subscriber is counted" (Ipc.Subs.count subs ~topic:"a" = 1);
-  check "other topics are unaffected" (Ipc.Subs.count subs ~topic:"b" = 0);
+  check "subscriber is counted" (Ipc_lwt.Subs.count subs ~topic:"a" = 1);
+  check "other topics are unaffected" (Ipc_lwt.Subs.count subs ~topic:"b" = 0);
 
   check "publish reports the delivery"
-    (Ipc.Subs.publish subs ~topic:"a" "hello" = 1);
+    (Ipc_lwt.Subs.publish subs ~topic:"a" "hello" = 1);
   let* got = read_within ic_a 2. in
   check "event reaches the subscriber" (got = Some "hello");
 
   check "a different topic is not delivered"
-    (Ipc.Subs.publish subs ~topic:"b" "not for a" = 0);
+    (Ipc_lwt.Subs.publish subs ~topic:"b" "not for a" = 0);
 
   (* Queued before anyone could be waiting on them, and in order. *)
-  ignore (Ipc.Subs.publish subs ~topic:"a" "one");
-  ignore (Ipc.Subs.publish subs ~topic:"a" "two");
+  ignore (Ipc_lwt.Subs.publish subs ~topic:"a" "one");
+  ignore (Ipc_lwt.Subs.publish subs ~topic:"a" "two");
   let* one = read_within ic_a 2. in
   let* two = read_within ic_a 2. in
   check "events arrive in order" (one = Some "one" && two = Some "two");
@@ -79,9 +79,10 @@ let main () =
      deliveries to nobody and [evict] lies about having been carried out. *)
   let* () = Lwt_io.close ic_a in
   let* () = Lwt_unix.sleep 0.3 in
-  check "a departed subscriber is dropped" (Ipc.Subs.count subs ~topic:"a" = 0);
+  check "a departed subscriber is dropped"
+    (Ipc_lwt.Subs.count subs ~topic:"a" = 0);
   check "publishing to nobody reports zero"
-    (Ipc.Subs.publish subs ~topic:"a" "gone" = 0);
+    (Ipc_lwt.Subs.publish subs ~topic:"a" "gone" = 0);
 
   let* () = Lwt_io.close (fst client) in
   Lwt.return_unit

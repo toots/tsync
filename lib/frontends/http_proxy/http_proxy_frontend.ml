@@ -950,7 +950,7 @@ let start served =
       let socket_path = Runtime.proxy_socket_path (Runtime.default_paths ()) in
       Log.debug "starting IPC server at %s" socket_path;
       Lwt.async (fun () ->
-          Ipc.serve ~path:socket_path
+          Ipc_lwt.serve ~path:socket_path
             (ipc_handler ~port ~tls ~request_stop routes));
       ready ();
       let* () =

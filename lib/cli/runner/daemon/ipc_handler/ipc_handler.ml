@@ -953,7 +953,7 @@ module Make (C : Conf.S) (F : File_ops.S) (Sq : Sync_queue.S) : S = struct
                         hooks.on_stop ();
                         Lwt.return (ok_json [])
                     (* Answered here so the connection can be handed over; the
-                     stream itself belongs to {!Ipc.serve}. *)
+                     stream itself belongs to {!Ipc_lwt.serve}. *)
                     | "subscribe" when get_str obj "domain" = "" ->
                         fail `Invalid "subscribe requires \"domain\""
                     | "subscribe" -> Lwt.return (ok_json [])

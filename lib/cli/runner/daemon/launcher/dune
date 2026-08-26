@@ -18,6 +18,8 @@
    -open
    Tsync_ipc
    -open
+   Tsync_ipc_lwt
+   -open
    Tsync_runtime
    -open
    Tsync_ipc_handler
@@ -35,6 +37,7 @@
   tsync-libs.log
   tsync_io_lwt
   tsync-libs.ipc
+  tsync-libs.ipc_lwt
   tsync-libs.ipc_handler
   tsync-libs.diagnostics
   tsync_runtime

@@ -10,6 +10,8 @@
    -open
    Tsync_ipc
    -open
+   Tsync_ipc_lwt
+   -open
    Tsync_conf
    -open
    Tsync_conf_parsing
@@ -55,6 +57,7 @@
   tsync_folder_ids
   tsync-libs.conf
   tsync-libs.ipc
+  tsync-libs.ipc_lwt
   tsync-libs.engine
   tsync-libs.ipc_handler
   tsync_runtime

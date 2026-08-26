@@ -10,6 +10,8 @@
    -open
    Tsync_ipc
    -open
+   Tsync_ipc_lwt
+   -open
    Tsync_conf_parsing
    -open
    Tsync_runtime
@@ -25,6 +27,7 @@
   tsync_dbus
   tsync-libs.menu
   tsync-libs.ipc
+  tsync-libs.ipc_lwt
   tsync-libs.conf_parsing
   tsync_runtime
   tsync-libs.log

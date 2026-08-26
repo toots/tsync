@@ -62,7 +62,7 @@ let post t keys =
     (fun socket_path ->
       Lwt.catch
         (fun () ->
-          let+ (_ : string) = Ipc.send_lwt ~socket_path line in
+          let+ (_ : string) = Ipc_lwt.send_lwt ~socket_path line in
           ())
         (fun exn ->
           (* Said once: a frontend that is down would otherwise put a line in

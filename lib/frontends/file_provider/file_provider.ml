@@ -39,7 +39,7 @@ module Make (C : Conf.S) (D : Domain_engine.Domain) = struct
            :: ("id", `Int !event_seq)
            :: fields))
     in
-    Ipc.Subs.publish subs ~topic:C.domain_name msg
+    Ipc_lwt.Subs.publish subs ~topic:C.domain_name msg
 
   (* A request the user waits on must say it went nowhere rather than report an
      eviction that never happened. *)
@@ -97,7 +97,10 @@ module Make (C : Conf.S) (D : Domain_engine.Domain) = struct
             Lwt.return_unit);
         status_fields =
           (fun () ->
-            [("subscribers", `Int (Ipc.Subs.count subs ~topic:C.domain_name))]);
+            [
+              ( "subscribers",
+                `Int (Ipc_lwt.Subs.count subs ~topic:C.domain_name) );
+            ]);
         stats_fields =
           (fun () -> ("frontend", `String "file_provider") :: D.stats_fields ());
         on_stop = (fun () -> ());
@@ -190,7 +193,7 @@ let start ~served ~socket_path =
     Yojson.Safe.to_string (`Assoc [("ok", `Bool false); ("error", `String msg)])
   in
   (* Subscribers name the domain they want, and events carry it too. *)
-  let subs = Ipc.Subs.create () in
+  let subs = Ipc_lwt.Subs.create () in
   Domain_engine.run (fun ~ready ->
       let* domain_runtimes =
         Lwt_list.map_s
@@ -293,5 +296,5 @@ let start ~served ~socket_path =
           | _ -> Lwt.return (error_json "expected JSON object", `Continue)
       in
       ready ();
-      let* () = Ipc.serve ~subs ~path:socket_path router in
+      let* () = Ipc_lwt.serve ~subs ~path:socket_path router in
       Lwt_list.iter_s (fun r -> r.drain ()) domain_runtimes)

@@ -1,5 +1,12 @@
 (executable
  (flags
-  (:standard -open Tsync_diagnostics -open Tsync_ipc))
+  (:standard -open Tsync_diagnostics -open Tsync_ipc -open Tsync_ipc_lwt))
  (name status_ask)
- (libraries tsync_diagnostics tsync_ipc yojson lwt lwt.unix unix))
+ (libraries
+  tsync_diagnostics
+  tsync_ipc
+  tsync_ipc_lwt
+  yojson
+  lwt
+  lwt.unix
+  unix))

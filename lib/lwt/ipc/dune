@@ -1,0 +1,26 @@
+; Speaking the domain socket from inside an event loop, and the server that
+; answers on it. Beside the synchronous client rather than in it, so a caller
+; that only asks a question links no server.
+
+(library
+ (flags
+  (:standard
+   -open
+   Tsync_log
+   -open
+   Tsync_logical_key
+   -open
+   Tsync_ipc
+   -open
+   Tsync_io_lwt))
+ (name tsync_ipc_lwt)
+ (public_name tsync-libs.ipc_lwt)
+ (libraries
+  tsync_ipc
+  tsync_io_lwt
+  tsync-libs.logical_key
+  tsync_log
+  yojson
+  unix
+  lwt
+  lwt.unix))

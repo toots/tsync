@@ -40,7 +40,7 @@ let ask ?timeout ?arg ~frontend ~domain ~socket_path () =
   let+ reply =
     Lwt.catch
       (fun () ->
-        let+ resp = Ipc.send_lwt ?timeout ~socket_path request in
+        let+ resp = Ipc_lwt.send_lwt ?timeout ~socket_path request in
         match Yojson.Safe.from_string resp with
           | json -> json
           | exception _ -> `Assoc [("error", `String "unreadable answer")])
@@ -51,7 +51,7 @@ let ask ?timeout ?arg ~frontend ~domain ~socket_path () =
                ( "error",
                  `String
                    (match exn with
-                     | Lwt_unix.Timeout -> "timed out"
+                     | exn when Io_lwt.Clock.is_timeout exn -> "timed out"
                      | exn -> Printexc.to_string exn) );
              ]))
   in

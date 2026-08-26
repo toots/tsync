@@ -283,7 +283,7 @@ let converge domains =
       Log.debug "converging %d domain(s), answering at %s" (List.length engines)
         socket_path;
       Lwt.async (fun () ->
-          Ipc.serve ~path:socket_path (handler ~request_stop engines));
+          Ipc_lwt.serve ~path:socket_path (handler ~request_stop engines));
       ready ();
       let* () = stop in
       Log.info "stopping, letting the domains catch up";

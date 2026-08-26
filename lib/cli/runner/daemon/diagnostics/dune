@@ -42,6 +42,8 @@
    -open
    Tsync_ipc
    -open
+   Tsync_ipc_lwt
+   -open
    Tsync_conf
    -open
    Tsync_conf_parsing))
@@ -68,6 +70,7 @@
   tsync_bigstring
   tsync_backend_register
   tsync_ipc
+  tsync_ipc_lwt
   tsync_metrics
   tsync_metrics_lwt
   tsync_log

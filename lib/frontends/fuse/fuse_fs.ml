@@ -525,7 +525,8 @@ module Make (C : Conf.S) (D : Domain_engine.Domain) = struct
         in
         Log.debug "starting IPC server at %s" C.socket_path;
         Lwt.async (fun () ->
-            Ipc.serve ~path:C.socket_path (Ih.handler (ipc_hooks mount_point)));
+            Ipc_lwt.serve ~path:C.socket_path
+              (Ih.handler (ipc_hooks mount_point)));
         Lwt.async (fun () -> report_recorded_failures 0);
         (* A plain SIGTERM reaches this group too, from a supervisor that only
            signals and always from the parent when this frontend was forked.

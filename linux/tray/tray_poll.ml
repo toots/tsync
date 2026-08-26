@@ -45,7 +45,7 @@ let poll ds =
       (fun () ->
         let open Lwt.Syntax in
         let+ reply =
-          Ipc.send_lwt ~timeout:1.5 ~socket_path:d.socket
+          Ipc_lwt.send_lwt ~timeout:1.5 ~socket_path:d.socket
             {|{"action":"status"}|}
         in
         Menu.of_status_json ~name:d.name (Yojson.Safe.from_string reply))
@@ -67,7 +67,7 @@ let stats ds =
       (fun () ->
         let open Lwt.Syntax in
         let+ reply =
-          Ipc.send_lwt ~timeout:stats_timeout ~socket_path:d.socket
+          Ipc_lwt.send_lwt ~timeout:stats_timeout ~socket_path:d.socket
             (Printf.sprintf {|{"action":"stats","domain":%s}|}
                (Yojson.Safe.to_string (`String d.name)))
         in
@@ -88,7 +88,7 @@ let set_paused ds paused =
       (fun () ->
         let open Lwt.Syntax in
         let+ _ =
-          Ipc.send_lwt ~timeout:1.5 ~socket_path:d.socket
+          Ipc_lwt.send_lwt ~timeout:1.5 ~socket_path:d.socket
             (Printf.sprintf {|{"action":"pause","arg":"%s"}|} arg)
         in
         ())

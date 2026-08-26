@@ -38,7 +38,8 @@ let of_exn = function
   | Unix.Unix_error ((Unix.EPERM | Unix.EACCES), _, _) -> `Denied
   | Unix.Unix_error (Unix.EROFS, _, _) -> `Read_only
   | Backend.Not_writable -> `Read_only
-  | Backend.Backend_error _ | Lwt_unix.Timeout -> `Unreachable
+  | Backend.Backend_error _ -> `Unreachable
+  | exn when Io_lwt.Clock.is_timeout exn -> `Unreachable
   | Share.Share_not_found _ -> `Not_found
   | Share.Share_unavailable _ -> `Unreachable
   | Invalid_argument _ -> `Invalid

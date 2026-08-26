@@ -1,5 +1,5 @@
 (executable
  (flags
-  (:standard -open Tsync_ipc -open Tsync_test_harness))
+  (:standard -open Tsync_ipc -open Tsync_ipc_lwt -open Tsync_test_harness))
  (name subs_test)
- (libraries unix tsync_test_harness tsync_ipc lwt lwt.unix))
+ (libraries unix tsync_test_harness tsync_ipc tsync_ipc_lwt lwt lwt.unix))

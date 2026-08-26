@@ -24,6 +24,8 @@
    -open
    Tsync_ipc
    -open
+   Tsync_ipc_lwt
+   -open
    Tsync_log
    -open
    Tsync_metrics
@@ -52,6 +54,7 @@
   tsync_io_lwt
   tsync_conf
   tsync_ipc
+  tsync_ipc_lwt
   tsync_metrics
   tsync_diagnostics
   tsync_log

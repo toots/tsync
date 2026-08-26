@@ -137,7 +137,7 @@ module Make (C : Conf.S) = struct
   let unreachable exn =
     let detail =
       match exn with
-        | Lwt_unix.Timeout ->
+        | exn when Io_lwt.Clock.is_timeout exn ->
             Printf.sprintf "no answer within %.0fs" probe_timeout
         | exn -> Printexc.to_string exn
     in
