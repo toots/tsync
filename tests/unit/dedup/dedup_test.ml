@@ -27,6 +27,8 @@ let probes () =
   in
   (asked, record)
 
+module Dedup = Dedup_lwt
+
 let () =
   Lwt_main.run
     (case "a corrupt key is absent, and nothing else is consulted";

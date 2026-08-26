@@ -1,5 +1,16 @@
 (executable
  (flags
-  (:standard -open Tsync_chunk_store -open Tsync_test_harness))
+  (:standard
+   -open
+   Tsync_chunk_store
+   -open
+   Tsync_chunk_store_lwt
+   -open
+   Tsync_test_harness))
  (name dedup_test)
- (libraries tsync_test_harness tsync_chunk_store lwt lwt.unix))
+ (libraries
+  tsync_test_harness
+  tsync_chunk_store
+  tsync_chunk_store_lwt
+  lwt
+  lwt.unix))

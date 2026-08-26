@@ -148,7 +148,7 @@ module Make_with_layout (C : Conf_lwt.S) (L : Layout.S) : S = struct
           incr next;
           Some (fun () -> f index)))
 
-  module Chunks_store = Chunk_store.Make (struct
+  module Chunks_store = Chunk_store_lwt.Make (struct
     let put = B.put
     let backend_key = L.key
     let fetch_body = Collection.get

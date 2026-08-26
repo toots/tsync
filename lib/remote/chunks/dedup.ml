@@ -1,5 +1,3 @@
-open Lwt.Syntax
-
 type t = { known : (string, unit) Hashtbl.t; max_known : unit -> int }
 
 let create ?(max_known = fun () -> 100_000) () =
@@ -11,8 +9,12 @@ let remember t key =
 
 let count t = Hashtbl.length t.known
 
-let known t ~corrupt ~present key =
-  let* marked = corrupt key in
-  if marked then Lwt.return_false
-  else if Hashtbl.mem t.known key then Lwt.return_true
-  else present key
+module Over (Io : Io.S) = struct
+  let ( let* ) = Io.bind
+
+  let known t ~corrupt ~present key =
+    let* marked = corrupt key in
+    if marked then Io.return false
+    else if Hashtbl.mem t.known key then Io.return true
+    else present key
+end

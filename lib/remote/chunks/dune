@@ -10,7 +10,7 @@
    -open
    Tsync_bigstring
    -open
-   Tsync_io_lwt
+   Tsync_io
    -open
    Tsync_metrics
    -open
@@ -21,6 +21,5 @@
   tsync-libs.logical_key
   tsync_chunks
   tsync_bigstring
-  tsync_io_lwt
-  tsync_metrics
-  lwt))
+  tsync_io
+  tsync_metrics))

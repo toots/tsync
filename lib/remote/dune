@@ -28,6 +28,8 @@
    -open
    Tsync_chunk_store
    -open
+   Tsync_chunk_store_lwt
+   -open
    Tsync_layout
    -open
    Tsync_store
@@ -63,6 +65,7 @@
   tsync_conf_lwt
   tsync_chunks
   tsync_chunk_store
+  tsync_chunk_store_lwt
   tsync_layout
   tsync_store
   tsync_corruption
