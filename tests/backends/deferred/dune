@@ -10,11 +10,7 @@
    -open
    Tsync_chunks
    -open
-   Tsync_io_lwt
-   -open
    Tsync_bigstring
-   -open
-   Tsync_backend_register
    -open
    Tsync_backend_lwt
    -open
@@ -33,12 +29,10 @@
   tsync_chunks
   tsync_test_harness
   tsync_bigstring
-  tsync_backend_register
   tsync_backend_lwt
   tsync_domain_store
   tsync_domain_store_lwt
   tsync_local_backend_lwt
-  tsync_io_lwt
   lwt
   lwt.unix
   unix))

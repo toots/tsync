@@ -8,8 +8,6 @@
    -open
    Tsync_log
    -open
-   Tsync_io_lwt
-   -open
    Tsync_test_harness))
  (name queue_stall)
  (libraries
@@ -17,7 +15,6 @@
   tsync_test_harness
   tsync_durable_queue_lwt
   tsync_log
-  tsync_io_lwt
   lwt
   lwt.unix
   unix))

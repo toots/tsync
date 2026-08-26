@@ -8,19 +8,11 @@
    -open
    Tsync_journal
    -open
-   Tsync_sync
-   -open
    Tsync_sync_lwt
-   -open
-   Tsync_file
    -open
    Tsync_file_lwt
    -open
    Tsync_io_lwt
-   -open
-   Tsync_backend_register
-   -open
-   Tsync_conf
    -open
    Tsync_conf_lwt
    -open
@@ -33,13 +25,9 @@
   tsync_wal_lwt
   tsync_journal
   tsync_test_harness
-  tsync_sync
   tsync_sync_lwt
-  tsync_file
   tsync_file_lwt
-  tsync_conf
   tsync_conf_lwt
-  tsync_backend_register
   tsync_local_backend_lwt
   tsync_io_lwt
   lwt

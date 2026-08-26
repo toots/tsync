@@ -4,8 +4,6 @@
    -open
    Tsync_job_progress
    -open
-   Tsync_job_report
-   -open
    Tsync_job_report_lwt
    -open
    Tsync_test_harness))
@@ -13,7 +11,6 @@
  (libraries
   tsync_test_harness
   tsync_job_progress
-  tsync_job_report
   tsync_job_report_lwt
   yojson
   unix

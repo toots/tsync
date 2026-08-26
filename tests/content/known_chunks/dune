@@ -12,13 +12,9 @@
    -open
    Tsync_test_harness
    -open
-   Tsync_content
-   -open
    Tsync_backend_register
    -open
    Tsync_backend_lwt
-   -open
-   Tsync_conf
    -open
    Tsync_conf_lwt
    -open
@@ -33,8 +29,6 @@
   tsync_remote_lwt
   tsync_manifest
   tsync_test_harness
-  tsync_content
-  tsync_conf
   tsync_conf_lwt
   tsync_backend_register
   tsync_backend_lwt

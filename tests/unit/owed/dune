@@ -1,23 +1,5 @@
 (executable
  (flags
-  (:standard
-   -open
-   Tsync_wal
-   -open
-   Tsync_wal_lwt
-   -open
-   Tsync_journal
-   -open
-   Tsync_io_lwt
-   -open
-   Tsync_test_harness))
+  (:standard -open Tsync_wal_lwt -open Tsync_test_harness))
  (name owed_test)
- (libraries
-  tsync_wal
-  tsync_wal_lwt
-  tsync_journal
-  tsync_test_harness
-  tsync_io_lwt
-  lwt
-  lwt.unix
-  unix))
+ (libraries tsync_wal_lwt tsync_test_harness lwt lwt.unix unix))

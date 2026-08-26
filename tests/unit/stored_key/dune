@@ -1,5 +1,5 @@
 (executable
  (flags
-  (:standard -open Tsync_filename -open Tsync_logical_key -open Tsync_io_lwt))
+  (:standard -open Tsync_filename -open Tsync_logical_key))
  (name stored_key_test)
  (libraries tsync_filename tsync_logical_key tsync_io_lwt))

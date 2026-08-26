@@ -4,25 +4,15 @@
    -open
    Tsync_logical_key
    -open
-   Tsync_remote
-   -open
    Tsync_remote_lwt
-   -open
-   Tsync_staged
    -open
    Tsync_staged_lwt
    -open
-   Tsync_content
-   -open
    Tsync_content_lwt
-   -open
-   Tsync_metrics
    -open
    Tsync_backend_register
    -open
    Tsync_backend_lwt
-   -open
-   Tsync_conf
    -open
    Tsync_conf_lwt
    -open
@@ -31,17 +21,12 @@
  (libraries
   unix
   tsync_logical_key
-  tsync_remote
   tsync_remote_lwt
-  tsync_staged
   tsync_staged_lwt
-  tsync_content
   tsync_content_lwt
-  tsync_conf
   tsync_conf_lwt
   tsync_backend_register
   tsync_backend_lwt
   tsync_local_backend_lwt
-  tsync_metrics
   lwt
   lwt.unix))

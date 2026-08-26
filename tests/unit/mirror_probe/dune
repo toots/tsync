@@ -8,15 +8,11 @@
    -open
    Tsync_bigstring
    -open
-   Tsync_conf
-   -open
    Tsync_conf_lwt
    -open
    Tsync_backend_register
    -open
    Tsync_backend_lwt
-   -open
-   Tsync_domain_store
    -open
    Tsync_domain_store_lwt
    -open
@@ -24,20 +20,15 @@
    -open
    Tsync_ops
    -open
-   Tsync_ops_lwt
-   -open
-   Tsync_test_harness))
+   Tsync_ops_lwt))
  (name mirror_probe)
  (libraries
   tsync-libs.logical_key
   tsync_chunks
-  tsync_test_harness
   tsync_bigstring
-  tsync_conf
   tsync_conf_lwt
   tsync_backend_register
   tsync_backend_lwt
-  tsync_domain_store
   tsync_domain_store_lwt
   tsync_local_backend_lwt
   tsync_ops

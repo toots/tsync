@@ -6,21 +6,11 @@
    -open
    Tsync_manifest
    -open
-   Tsync_chunk_cache
-   -open
    Tsync_chunk_cache_lwt
-   -open
-   Tsync_chunks
    -open
    Tsync_bigstring
    -open
-   Tsync_backend_register
-   -open
    Tsync_backend_lwt
-   -open
-   Tsync_content
-   -open
-   Tsync_conf
    -open
    Tsync_conf_lwt
    -open
@@ -29,15 +19,10 @@
  (libraries
   tsync-libs.logical_key
   tsync_manifest
-  tsync_chunk_cache
   tsync_chunk_cache_lwt
-  tsync_chunks
   tsync_test_harness
   tsync_bigstring
-  tsync_backend_register
   tsync_backend_lwt
-  tsync_content
-  tsync_conf
   tsync_conf_lwt
   lwt
   lwt.unix

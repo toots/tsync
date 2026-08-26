@@ -4,25 +4,13 @@
    -open
    Tsync_logical_key
    -open
-   Tsync_remote
-   -open
    Tsync_remote_lwt
    -open
    Tsync_manifest
    -open
-   Tsync_chunks
-   -open
-   Tsync_content
-   -open
    Tsync_bigstring
    -open
-   Tsync_io_lwt
-   -open
-   Tsync_conf
-   -open
    Tsync_conf_lwt
-   -open
-   Tsync_backend_register
    -open
    Tsync_local_backend_lwt
    -open
@@ -30,17 +18,11 @@
  (name upload_fanout)
  (libraries
   tsync_logical_key
-  tsync_remote
   tsync_remote_lwt
   tsync_manifest
-  tsync_chunks
   tsync_test_harness
-  tsync_content
   tsync_bigstring
-  tsync_io_lwt
-  tsync_conf
   tsync_conf_lwt
-  tsync_backend_register
   tsync_local_backend_lwt
   lwt
   lwt.unix

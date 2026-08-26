@@ -2,7 +2,7 @@
 
 (executable
  (flags
-  (:standard -open Tsync_runtime -open Tsync_e2e))
+  (:standard -open Tsync_e2e))
  (name e2e_linux)
  (enabled_if
   (= %{system} linux))

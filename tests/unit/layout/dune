@@ -8,14 +8,11 @@
    -open
    Tsync_chunks
    -open
-   Tsync_journal
-   -open
-   Tsync_io_lwt))
+   Tsync_journal))
  (name layout)
  (libraries
   tsync-libs.logical_key
   tsync_chunk_integrity
   tsync_chunks
   tsync_journal
-  tsync_io_lwt
   unix))

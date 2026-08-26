@@ -18,8 +18,6 @@
    -open
    Tsync_backend_lwt
    -open
-   Tsync_conf
-   -open
    Tsync_conf_lwt
    -open
    Tsync_local_backend_lwt
@@ -33,7 +31,6 @@
   tsync_store
   tsync_collection
   tsync_collection_lwt
-  tsync_conf
   tsync_conf_lwt
   tsync_bigstring
   tsync_backend_register

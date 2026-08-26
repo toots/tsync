@@ -8,11 +8,7 @@
    -open
    Tsync_ops_lwt
    -open
-   Tsync_conf
-   -open
    Tsync_conf_lwt
-   -open
-   Tsync_file_store
    -open
    Tsync_file_store_lwt
    -open
@@ -23,9 +19,7 @@
   tsync_test_harness
   tsync_ops
   tsync_ops_lwt
-  tsync_conf
   tsync_conf_lwt
-  tsync_file_store
   tsync_file_store_lwt
   tsync_local_backend_lwt
   lwt

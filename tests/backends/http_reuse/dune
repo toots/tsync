@@ -4,20 +4,14 @@
    -open
    Tsync_bigstring
    -open
-   Tsync_http_client
-   -open
    Tsync_http_client_lwt
    -open
-   Tsync_retry
-   -open
-   Tsync_test_harness))
+   Tsync_retry))
  (name http_reuse)
  (libraries
   cohttp-lwt
   cohttp
-  tsync_test_harness
   tsync_bigstring
-  tsync_http_client
   tsync_http_client_lwt
   tsync_retry
   cohttp-lwt-unix

@@ -4,10 +4,6 @@
    -open
    Tsync_logical_key
    -open
-   Tsync_test_harness
-   -open
-   Tsync_domain_store
-   -open
    Tsync_domain_store_lwt
    -open
    Tsync_bigstring
@@ -18,8 +14,6 @@
  (name batch_nesting)
  (libraries
   tsync-libs.logical_key
-  tsync_test_harness
-  tsync_domain_store
   tsync_domain_store_lwt
   tsync_bigstring
   tsync_backend_register

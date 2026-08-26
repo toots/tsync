@@ -2,39 +2,24 @@
  (flags
   (:standard
    -open
-   Tsync_remote
-   -open
    Tsync_remote_lwt
-   -open
-   Tsync_layout
    -open
    Tsync_layout_lwt
    -open
-   Tsync_content
-   -open
    Tsync_io_lwt
    -open
-   Tsync_conf
-   -open
    Tsync_conf_lwt
-   -open
-   Tsync_backend_register
    -open
    Tsync_local_backend_lwt
    -open
    Tsync_test_harness))
  (name chunk_pools)
  (libraries
-  tsync_remote
   tsync_remote_lwt
-  tsync_layout
   tsync_layout_lwt
   tsync_test_harness
-  tsync_content
   tsync_io_lwt
-  tsync_conf
   tsync_conf_lwt
-  tsync_backend_register
   tsync_local_backend_lwt
   lwt
   lwt.unix

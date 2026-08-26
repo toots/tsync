@@ -1,23 +1,5 @@
 (executable
  (flags
-  (:standard
-   -open
-   Tsync_spill
-   -open
-   Tsync_spill_lwt
-   -open
-   Tsync_bigstring
-   -open
-   Tsync_io_lwt
-   -open
-   Tsync_test_harness))
+  (:standard -open Tsync_spill_lwt -open Tsync_test_harness))
  (name spool_reap_test)
- (libraries
-  tsync_test_harness
-  tsync_spill
-  tsync_spill_lwt
-  tsync_bigstring
-  tsync_io_lwt
-  lwt
-  lwt.unix
-  unix))
+ (libraries tsync_test_harness tsync_spill_lwt lwt lwt.unix unix))

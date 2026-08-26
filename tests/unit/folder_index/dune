@@ -6,13 +6,9 @@
    -open
    Tsync_manifest
    -open
-   Tsync_chunks
-   -open
    Tsync_test_harness
    -open
    Tsync_store
-   -open
-   Tsync_inode_tree
    -open
    Tsync_inode_tree_lwt
    -open
@@ -22,8 +18,6 @@
    -open
    Tsync_backend_lwt
    -open
-   Tsync_conf
-   -open
    Tsync_conf_lwt
    -open
    Tsync_local_backend_lwt))
@@ -31,13 +25,10 @@
  (libraries
   tsync_logical_key
   tsync_manifest
-  tsync_chunks
   tsync_test_harness
   tsync_store
-  tsync_inode_tree
   tsync_inode_tree_lwt
   tsync_bigstring
-  tsync_conf
   tsync_conf_lwt
   tsync_backend_register
   tsync_backend_lwt

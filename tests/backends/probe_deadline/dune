@@ -8,8 +8,6 @@
    -open
    Tsync_backend_lwt
    -open
-   Tsync_conf
-   -open
    Tsync_conf_lwt
    -open
    Tsync_local_backend_lwt
@@ -25,7 +23,6 @@
   tsync_backend_lwt
   tsync_local_backend_lwt
   tsync_diagnostics
-  tsync_conf
   tsync_conf_lwt
   yojson
   lwt

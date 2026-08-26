@@ -8,8 +8,6 @@
    -open
    Tsync_manifest
    -open
-   Tsync_conf
-   -open
    Tsync_conf_lwt
    -open
    Tsync_backend_register
@@ -26,15 +24,12 @@
  (name tsync_test_harness)
  (libraries
   tsync_manifest
-  tsync_conf
   tsync_conf_lwt
   tsync_backend_register
   tsync_backend_lwt
   tsync_conf_parsing
   tsync_domain
   tsync_runtime
-  tsync_bigstring
-  tsync_io
   tsync_io_lwt
   lwt
   lwt.unix

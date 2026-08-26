@@ -22,13 +22,9 @@
    -open
    Tsync_backend_lwt
    -open
-   Tsync_conf
-   -open
    Tsync_conf_lwt
    -open
    Tsync_local_backend_lwt
-   -open
-   Tsync_domain_store
    -open
    Tsync_domain_store_lwt
    -open
@@ -45,14 +41,12 @@
   tsync_ops_lwt
   tsync_collection
   tsync_collection_lwt
-  tsync_conf
   tsync_conf_lwt
   tsync_bigstring
   tsync_backend_register
   tsync_backend_lwt
   tsync_local_backend_lwt
   tsync_io_lwt
-  tsync_domain_store
   tsync_domain_store_lwt
   lwt
   lwt.unix

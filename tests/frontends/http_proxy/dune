@@ -10,8 +10,6 @@
    -open
    Tsync_field_spec
    -open
-   Tsync_file_store
-   -open
    Tsync_file_store_lwt
    -open
    Tsync_io_lwt
@@ -23,8 +21,6 @@
    Tsync_backend_register
    -open
    Tsync_backend_lwt
-   -open
-   Tsync_conf
    -open
    Tsync_conf_lwt
    -open
@@ -50,7 +46,6 @@
   tsync_journal
   tsync_test_harness
   tsync_field_spec
-  tsync_file_store
   tsync_file_store_lwt
   tsync_http_proxy_frontend
   tsync_http_proxy
@@ -62,7 +57,6 @@
   tsync_frontend_register
   tsync_frontend
   tsync_diagnostics
-  tsync_conf
   tsync_conf_lwt
   tsync_io_lwt
   cohttp

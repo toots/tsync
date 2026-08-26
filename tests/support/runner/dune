@@ -12,10 +12,6 @@
    -open
    Tsync_checkout
    -open
-   Tsync_checkout_lwt
-   -open
-   Tsync_file
-   -open
    Tsync_file_lwt
    -open
    Tsync_wal
@@ -34,11 +30,7 @@
    -open
    Tsync_ops_lwt
    -open
-   Tsync_layout
-   -open
    Tsync_layout_lwt
-   -open
-   Tsync_file_store
    -open
    Tsync_file_store_lwt
    -open
@@ -46,13 +38,7 @@
    -open
    Tsync_corruption_lwt
    -open
-   Tsync_collection
-   -open
-   Tsync_sync
-   -open
    Tsync_sync_lwt
-   -open
-   Tsync_folder_ids
    -open
    Tsync_folder_ids_lwt
    -open
@@ -74,8 +60,6 @@
    -open
    Tsync_conf_lwt
    -open
-   Tsync_domain_store
-   -open
    Tsync_domain_store_lwt
    -open
    Tsync_local_backend_lwt
@@ -90,8 +74,6 @@
   tsync_staged
   tsync_staged_lwt
   tsync_checkout
-  tsync_checkout_lwt
-  tsync_file
   tsync_file_lwt
   tsync_wal
   tsync_wal_lwt
@@ -101,16 +83,11 @@
   tsync_test_harness
   tsync_ops
   tsync_ops_lwt
-  tsync_layout
   tsync_layout_lwt
-  tsync_file_store
   tsync_file_store_lwt
   tsync_corruption
   tsync_corruption_lwt
-  tsync_collection
-  tsync_sync
   tsync_sync_lwt
-  tsync_folder_ids
   tsync_folder_ids_lwt
   tsync_cache_layout
   tsync_cache_layout_lwt
@@ -120,7 +97,6 @@
   tsync_bigstring
   tsync_backend_register
   tsync_backend_lwt
-  tsync_domain_store
   tsync_domain_store_lwt
   tsync_local_backend_lwt
   tsync_conf_parsing
