@@ -15,11 +15,11 @@
    -open
    Tsync_checkout
    -open
-   Tsync_checkout_lwt
-   -open
    Tsync_wal
    -open
-   Tsync_io_lwt))
+   Tsync_io
+   -open
+   Tsync_bigstring))
  (name tsync_file_ops)
  (public_name tsync-libs.file_ops)
  (libraries
@@ -28,9 +28,7 @@
   tsync_manifest
   tsync_journal
   tsync_checkout
-  tsync_checkout_lwt
   tsync_wal
-  tsync_io_lwt
-  unix
-  lwt
-  lwt.unix))
+  tsync_io
+  tsync_bigstring
+  unix))

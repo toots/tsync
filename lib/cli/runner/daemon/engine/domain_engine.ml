@@ -7,7 +7,7 @@ open Lwt.Syntax
    here to ask about and no way to hold a lesser one. Keeping the domain
    converging with the store is {!Converging}, and it runs somewhere else. *)
 module type Domain = sig
-  module F : File_ops.S
+  module F : File_ops.S with type 'a io := 'a Lwt.t
   module Ih : Ipc_handler.S
 
   val start :

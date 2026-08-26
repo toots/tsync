@@ -2,7 +2,7 @@ open Lwt.Syntax
 
 (* The timer, not the algorithm: applying foreign entries is {!Replay}, which
    [tsync sync] calls too. This only decides when to look. *)
-module Make (C : Conf.S) (F : File_ops.S) = struct
+module Make (C : Conf.S) (F : File_ops.S with type 'a io := 'a Lwt.t) = struct
   module Fs = File_store.Make (C)
   module Rp = Replay.Make (C) (F)
 

@@ -78,11 +78,11 @@ module Make_with_layout
     (_ : OBJECTS)
     (_ : VERSIONS)
     (_ : Remote.S) : sig
-  include File_ops.S
+  include File_ops.S with type 'a io := 'a Lwt.t
   include Owing
 end
 
 module Make (C : Conf.S) : sig
-  include File_ops.S
+  include File_ops.S with type 'a io := 'a Lwt.t
   include Owing
 end

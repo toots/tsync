@@ -42,4 +42,7 @@ module type S = sig
     (string * [ `Continue | `Stop | `Subscribe of string ]) Lwt.t
 end
 
-module Make (_ : Conf.S) (_ : File_ops.S) (_ : Sync_queue.S) : S
+module Make
+    (_ : Conf.S)
+    (_ : File_ops.S with type 'a io := 'a Lwt.t)
+    (_ : Sync_queue.S) : S

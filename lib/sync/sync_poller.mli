@@ -1,6 +1,6 @@
 (** The background thread that notices what other clients did. *)
 
-module Make (C : Conf.S) (F : File_ops.S) : sig
+module Make (C : Conf.S) (F : File_ops.S with type 'a io := 'a Lwt.t) : sig
   (** One pass: read the cursor, and if it has moved since the last pass apply
       whatever {!Replay.apply_foreign} finds, answering how many entries that
       was. The cursor is the gate — a peer bumps it after publishing — so an

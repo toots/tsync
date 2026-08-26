@@ -4,7 +4,7 @@
     It lives here rather than in the CLI because both callers need it, and
     because a copy living in an executable was unreachable from [tests/] — which
     is how one domain sat on 295 stale records for hours. *)
-module Make (C : Conf.S) (F : File_ops.S) : sig
+module Make (C : Conf.S) (F : File_ops.S with type 'a io := 'a Lwt.t) : sig
   (** Finish or discard every record this client left behind, oldest first, each
       under the entry key it already has. Startup only: it replays ops and
       re-queues uploads, so it must not run while writes are staging.

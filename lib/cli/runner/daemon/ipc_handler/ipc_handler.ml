@@ -34,7 +34,10 @@ module type S = sig
     (string * [ `Continue | `Stop | `Subscribe of string ]) Lwt.t
 end
 
-module Make (C : Conf.S) (F : File_ops.S) (Sq : Sync_queue.S) : S = struct
+module Make
+    (C : Conf.S)
+    (F : File_ops.S with type 'a io := 'a Lwt.t)
+    (Sq : Sync_queue.S) : S = struct
   module Fs = File_store.Make (C)
   module J = Journal.Make (C)
   module Diag = Diagnostics.Make (C)
