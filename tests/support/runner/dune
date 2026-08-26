@@ -12,6 +12,8 @@
    -open
    Tsync_checkout
    -open
+   Tsync_checkout_lwt
+   -open
    Tsync_file
    -open
    Tsync_wal
@@ -70,6 +72,7 @@
   tsync_staged
   tsync_staged_lwt
   tsync_checkout
+  tsync_checkout_lwt
   tsync_file
   tsync_wal
   tsync_wal_lwt

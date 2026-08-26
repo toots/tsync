@@ -26,7 +26,7 @@ module C =
 module Lk = Logical_key.Make (C)
 module R = Remote.Make (C)
 module Mf = Manifests_lwt.Make (C)
-module Ck = Checkout.Make (C)
+module Ck = Checkout_lwt.Make (C)
 module Mfs = Staged_lwt.Manifest.Make (C)
 module D = Data_lwt.Make (C) (R)
 
@@ -114,7 +114,7 @@ end
 module LkG = Logical_key.Make (CG)
 module GR = Remote.Make (CG)
 module Gm = Manifests_lwt.Make (CG)
-module Gck = Checkout.Make (CG)
+module Gck = Checkout_lwt.Make (CG)
 module Gms = Staged_lwt.Manifest.Make (CG)
 module GD = Data_lwt.Make (CG) (GR)
 

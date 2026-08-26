@@ -12,6 +12,8 @@
    -open
    Tsync_checkout
    -open
+   Tsync_checkout_lwt
+   -open
    Tsync_manifest
    -open
    Tsync_field_spec
@@ -68,6 +70,7 @@
   tsync_layout
   tsync_inode_tree
   tsync_checkout
+  tsync_checkout_lwt
   tsync_manifest
   tsync-libs.field_spec
   tsync-libs.content

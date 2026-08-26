@@ -14,6 +14,8 @@
    -open
    Tsync_checkout
    -open
+   Tsync_checkout_lwt
+   -open
    Tsync_content
    -open
    Tsync_folder_ids
@@ -45,6 +47,7 @@
   tsync_staged
   tsync_staged_lwt
   tsync_checkout
+  tsync_checkout_lwt
   tsync_content
   tsync_folder_ids
   tsync_folder_ids_lwt

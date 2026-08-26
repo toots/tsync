@@ -10,6 +10,8 @@
    -open
    Tsync_checkout
    -open
+   Tsync_checkout_lwt
+   -open
    Tsync_file_ops
    -open
    Tsync_file
@@ -37,6 +39,7 @@
   tsync_staged
   tsync_staged_lwt
   tsync_checkout
+  tsync_checkout_lwt
   tsync_file_ops
   tsync_file
   tsync_sync

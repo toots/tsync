@@ -8,6 +8,8 @@
    -open
    Tsync_checkout
    -open
+   Tsync_checkout_lwt
+   -open
    Tsync_file_ops
    -open
    Tsync_sync
@@ -45,6 +47,7 @@
   tsync_logical_key
   tsync_staged
   tsync_checkout
+  tsync_checkout_lwt
   tsync_file_ops
   tsync_sync
   tsync_manifest

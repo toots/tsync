@@ -52,7 +52,7 @@ module Make (C : Conf.S) : S = struct
   module Ih = Ipc_handler.Make (C) (F) (Sq)
   module Sp = Sync_poller.Make (C) (F)
   module Rp = Replay.Make (C) (F)
-  module Mf = Checkout.Make (C)
+  module Mf = Checkout_lwt.Make (C)
   module Mfs = Staged_lwt.Manifest.Make (C)
   module Fs = File_store.Make (C)
 

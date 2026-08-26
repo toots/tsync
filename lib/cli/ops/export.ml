@@ -7,7 +7,7 @@ module Make (C : Conf.S) = struct
   module Lk = Logical_key.Make (C)
   module R = Remote.Make (C)
   module Tree = Inode_tree.Make (C)
-  module Mf = Checkout.Make (C)
+  module Mf = Checkout_lwt.Make (C)
   module Mfs = Staged_lwt.Manifest.Make (C)
   module D = Data_lwt.Make (C) (R)
 

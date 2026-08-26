@@ -31,7 +31,7 @@ module C =
 
 module Lk = Logical_key.Make (C)
 module Mf = Manifests_lwt.Make (C)
-module Ck = Checkout.Make (C)
+module Ck = Checkout_lwt.Make (C)
 module Mfs = Staged_lwt.Manifest.Make (C)
 
 let key rel = Lk.file @@ rel

@@ -15,6 +15,8 @@
    -open
    Tsync_checkout
    -open
+   Tsync_checkout_lwt
+   -open
    Tsync_wal
    -open
    Tsync_io_lwt))
@@ -26,6 +28,7 @@
   tsync_manifest
   tsync_journal
   tsync_checkout
+  tsync_checkout_lwt
   tsync_wal
   tsync_io_lwt
   unix
