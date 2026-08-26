@@ -1,9 +1,0 @@
-; Queueing a whole-store check on Lwt: one request per shard, bounded by this
-; process's pools.
-
-(library
- (flags
-  (:standard -open Tsync_chunk_integrity -open Tsync_io_lwt))
- (name tsync_verifier_lwt)
- (public_name tsync-libs.verifier_lwt)
- (libraries tsync_chunk_integrity tsync_io_lwt lwt))
