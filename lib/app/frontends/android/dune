@@ -8,19 +8,11 @@
    -open
    Tsync_checkout
    -open
-   Tsync_checkout_lwt
-   -open
    Tsync_manifest
-   -open
-   Tsync_conf
    -open
    Tsync_conf_lwt
    -open
-   Tsync_sync
-   -open
    Tsync_engine
-   -open
-   Tsync_ipc_handler
    -open
    Tsync_diagnostics
    -open
@@ -35,12 +27,8 @@
   tsync_staged
   tsync_conf_lwt
   tsync_checkout
-  tsync_checkout_lwt
   tsync_manifest
-  tsync-libs.conf
-  tsync-libs.sync
   tsync-libs.engine
-  tsync-libs.ipc_handler
   tsync-libs.diagnostics
   tsync-libs.frontend_register
   tsync-libs.log

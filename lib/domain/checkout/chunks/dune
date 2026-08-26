@@ -13,8 +13,6 @@
    -open
    Tsync_cache_layout
    -open
-   Tsync_chunks
-   -open
    Tsync_io
    -open
    Tsync_backend_register
@@ -28,7 +26,6 @@
   tsync_manifest
   tsync_conf
   tsync_cache_layout
-  tsync_chunks
   tsync_io
   tsync_backend_register
   tsync_bigstring

@@ -13,8 +13,6 @@
    -open
    Tsync_chunk_cache
    -open
-   Tsync_manifests
-   -open
    Tsync_manifest
    -open
    Tsync_journal
@@ -27,10 +25,6 @@
    -open
    Tsync_io
    -open
-   Tsync_xxhash
-   -open
-   Tsync_metrics
-   -open
    Tsync_bigstring
    -open
    Tsync_backend_register
@@ -42,15 +36,12 @@
   tsync_logical_key
   tsync_staged
   tsync_chunk_cache
-  tsync_manifests
   tsync_manifest
   tsync_journal
   tsync_conf
   tsync_cache_layout
   tsync_chunks
   tsync_io
-  tsync_xxhash
-  tsync_metrics
   tsync_bigstring
   tsync_backend_register
   tsync_log

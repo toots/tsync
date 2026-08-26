@@ -10,16 +10,13 @@
    -open
    Tsync_io_lwt
    -open
-   Tsync_retry_lwt
-   -open
-   Tsync_bigstring))
+   Tsync_retry_lwt))
  (name tsync_http_client_lwt)
  (public_name tsync-libs.http_client_lwt)
  (libraries
   tsync_http_client
   tsync_io_lwt
   tsync_retry_lwt
-  tsync_bigstring
   cohttp
   cohttp-lwt
   cohttp-lwt-unix

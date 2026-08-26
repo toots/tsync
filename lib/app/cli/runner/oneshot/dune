@@ -8,19 +8,13 @@
    -open
    Tsync_log
    -open
-   Tsync_job_report
-   -open
    Tsync_job_report_lwt
-   -open
-   Tsync_backend_register
    -open
    Tsync_backend_lwt))
  (name tsync_oneshot)
  (libraries
   tsync_log
-  tsync_job_report
   tsync_job_report_lwt
-  tsync_backend_register
   tsync_backend_lwt
   memtrace
   unix

@@ -2,8 +2,6 @@
  (flags
   (:standard
    -open
-   Tsync_log
-   -open
    Tsync_bigstring
    -open
    Tsync_io
@@ -23,5 +21,4 @@
   tsync_field_spec
   tsync_metrics
   tsync_bigstring
-  tsync_io
-  tsync_log))
+  tsync_io))

@@ -7,27 +7,15 @@
    -open
    Tsync_file
    -open
-   Tsync_conf
-   -open
    Tsync_conf_lwt
-   -open
-   Tsync_layout
    -open
    Tsync_layout_lwt
    -open
-   Tsync_store
-   -open
    Tsync_store_lwt
-   -open
-   Tsync_file_store
    -open
    Tsync_file_store_lwt
    -open
-   Tsync_history
-   -open
    Tsync_history_lwt
-   -open
-   Tsync_remote
    -open
    Tsync_remote_lwt
    -open
@@ -48,17 +36,11 @@
  (public_name tsync-libs.file_lwt)
  (libraries
   tsync_file
-  tsync_conf
   tsync_conf_lwt
-  tsync_layout
   tsync_layout_lwt
-  tsync_store
   tsync_store_lwt
-  tsync_file_store
   tsync_file_store_lwt
-  tsync_history
   tsync_history_lwt
-  tsync_remote
   tsync_remote_lwt
   tsync_wal_lwt
   tsync_manifests_lwt

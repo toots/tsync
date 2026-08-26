@@ -12,8 +12,6 @@
    -open
    Tsync_chunks
    -open
-   Tsync_conf
-   -open
    Tsync_conf_lwt
    -open
    Tsync_conf_parsing
@@ -34,7 +32,6 @@
   tsync_logical_key
   tsync_manifest
   tsync_chunks
-  tsync_conf
   tsync_conf_lwt
   tsync_conf_parsing
   tsync_backend_register

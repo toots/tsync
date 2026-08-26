@@ -13,8 +13,6 @@
    -open
    Tsync_checkout
    -open
-   Tsync_manifests
-   -open
    Tsync_file_ops
    -open
    Tsync_wal
@@ -31,10 +29,6 @@
    -open
    Tsync_chunks
    -open
-   Tsync_folder_ids
-   -open
-   Tsync_content
-   -open
    Tsync_backend_register
    -open
    Tsync_log))
@@ -45,7 +39,6 @@
   tsync_history
   tsync_staged
   tsync_checkout
-  tsync_manifests
   tsync_file_ops
   tsync_wal
   tsync_manifest
@@ -54,8 +47,6 @@
   tsync_conf
   tsync_io
   tsync_chunks
-  tsync_folder_ids
-  tsync_content
   tsync_backend_register
   tsync_log
   unix))

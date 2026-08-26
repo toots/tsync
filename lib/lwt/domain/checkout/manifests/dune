@@ -5,8 +5,6 @@
  (flags
   (:standard
    -open
-   Tsync_conf
-   -open
    Tsync_manifests
    -open
    Tsync_staged_lwt
@@ -17,7 +15,6 @@
  (name tsync_manifests_lwt)
  (public_name tsync-libs.manifests_lwt)
  (libraries
-  tsync_conf
   tsync_manifests
   tsync_staged_lwt
   tsync_cache_layout_lwt

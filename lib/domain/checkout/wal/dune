@@ -5,8 +5,6 @@
  (flags
   (:standard
    -open
-   Tsync_logical_key
-   -open
    Tsync_conf
    -open
    Tsync_journal
@@ -19,7 +17,6 @@
  (name tsync_wal)
  (public_name tsync-libs.wal)
  (libraries
-  tsync_logical_key
   tsync_conf
   tsync_journal
   tsync_durable_queue

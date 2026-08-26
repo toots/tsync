@@ -4,11 +4,7 @@
    -open
    Tsync_logical_key
    -open
-   Tsync_remote
-   -open
    Tsync_remote_lwt
-   -open
-   Tsync_layout
    -open
    Tsync_layout_lwt
    -open
@@ -18,19 +14,11 @@
    -open
    Tsync_checkout
    -open
-   Tsync_checkout_lwt
-   -open
    Tsync_manifest
    -open
    Tsync_field_spec
    -open
-   Tsync_content
-   -open
    Tsync_content_lwt
-   -open
-   Tsync_store
-   -open
-   Tsync_ipc
    -open
    Tsync_ipc_lwt
    -open
@@ -51,8 +39,6 @@
    Tsync_backend_register
    -open
    Tsync_backend_lwt
-   -open
-   Tsync_conf
    -open
    Tsync_conf_lwt
    -open
@@ -76,25 +62,19 @@
   unix
   cohttp
   tsync_logical_key
-  tsync_remote
   tsync_remote_lwt
-  tsync_layout
   tsync_layout_lwt
   tsync_inode_tree
   tsync_inode_tree_lwt
   tsync_conf_lwt
   tsync_checkout
-  tsync_checkout_lwt
   tsync_manifest
   tsync-libs.field_spec
-  tsync-libs.content
   tsync-libs.content_lwt
-  tsync-libs.store
   tsync_io_lwt
   tsync-libs.frontend_register
   tsync-libs.engine
   tsync-libs.http_proxy
-  tsync-libs.ipc
   tsync-libs.ipc_lwt
   tsync-libs.ipc_handler
   tsync-libs.diagnostics
@@ -102,7 +82,6 @@
   tsync-libs.bigstring
   tsync-libs.backend_register
   tsync-libs.backend_lwt
-  tsync-libs.conf
   tsync-libs.zip
   tsync-libs.log
   tsync_runtime

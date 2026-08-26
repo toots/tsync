@@ -17,8 +17,6 @@
    -open
    Tsync_wal
    -open
-   Tsync_io
-   -open
    Tsync_bigstring))
  (name tsync_file_ops)
  (public_name tsync-libs.file_ops)
@@ -29,6 +27,5 @@
   tsync_journal
   tsync_checkout
   tsync_wal
-  tsync_io
   tsync_bigstring
   unix))

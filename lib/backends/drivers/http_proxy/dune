@@ -6,8 +6,6 @@
    -open
    Tsync_field_spec
    -open
-   Tsync_log
-   -open
    Tsync_http_proxy
    -open
    Tsync_bigstring
@@ -30,6 +28,5 @@
   tsync-libs.backend_register
   tsync_http_client
   tsync-libs.http_proxy
-  tsync-libs.log
   uri
   yojson))

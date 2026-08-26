@@ -12,27 +12,15 @@
    -open
    Tsync_chunks
    -open
-   Tsync_remote
-   -open
    Tsync_remote_lwt
    -open
    Tsync_journal
    -open
-   Tsync_sync
-   -open
-   Tsync_content
-   -open
    Tsync_content_lwt
-   -open
-   Tsync_layout
    -open
    Tsync_layout_lwt
    -open
-   Tsync_file_store
-   -open
    Tsync_file_store_lwt
-   -open
-   Tsync_corruption
    -open
    Tsync_corruption_lwt
    -open
@@ -56,8 +44,6 @@
    -open
    Tsync_backend_lwt
    -open
-   Tsync_ipc
-   -open
    Tsync_ipc_lwt
    -open
    Tsync_conf
@@ -74,17 +60,11 @@
   tsync_retry
   tsync_logical_key
   tsync_chunks
-  tsync_remote
   tsync_remote_lwt
   tsync_journal
-  tsync_sync
-  tsync_content
   tsync_content_lwt
-  tsync_layout
   tsync_layout_lwt
-  tsync_file_store
   tsync_file_store_lwt
-  tsync_corruption
   tsync_corruption_lwt
   tsync_collection
   tsync_collection_lwt
@@ -96,7 +76,6 @@
   tsync_bigstring
   tsync_backend_register
   tsync_backend_lwt
-  tsync_ipc
   tsync_ipc_lwt
   tsync_metrics
   tsync_metrics_lwt

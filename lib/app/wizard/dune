@@ -29,7 +29,6 @@
   tsync_backend_lwt
   tsync_frontend_register
   tsync_metrics
-  tsync_io
   tsync_io_lwt
   tsync_tls
   yojson

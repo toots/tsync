@@ -4,35 +4,21 @@
    -open
    Tsync_logical_key
    -open
-   Tsync_staged
-   -open
    Tsync_staged_lwt
-   -open
-   Tsync_checkout
    -open
    Tsync_checkout_lwt
    -open
    Tsync_file_ops
    -open
-   Tsync_file
-   -open
    Tsync_file_lwt
    -open
-   Tsync_sync
-   -open
    Tsync_sync_lwt
-   -open
-   Tsync_file_store
    -open
    Tsync_file_store_lwt
    -open
    Tsync_log
    -open
-   Tsync_conf
-   -open
    Tsync_conf_lwt
-   -open
-   Tsync_backend_register
    -open
    Tsync_backend_lwt
    -open
@@ -46,20 +32,13 @@
   lwt.unix
   yojson
   tsync_logical_key
-  tsync_staged
   tsync_staged_lwt
-  tsync_checkout
   tsync_checkout_lwt
   tsync_file_ops
-  tsync_file
   tsync_file_lwt
-  tsync_sync
   tsync_sync_lwt
-  tsync_file_store
   tsync_file_store_lwt
-  tsync_backend_register
   tsync_backend_lwt
-  tsync_conf
   tsync_conf_lwt
   tsync_ipc_handler
   tsync_log

@@ -16,13 +16,9 @@
    -open
    Tsync_manifest
    -open
-   Tsync_chunks
-   -open
    Tsync_chunk_cache
    -open
    Tsync_io
-   -open
-   Tsync_backend_register
    -open
    Tsync_bigstring
    -open
@@ -35,10 +31,8 @@
   tsync_conf
   tsync_cache_layout
   tsync_manifest
-  tsync_chunks
   tsync_chunk_cache
   tsync_io
-  tsync_backend_register
   tsync_bigstring
   tsync_log
   yojson

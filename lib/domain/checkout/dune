@@ -19,41 +19,20 @@
    -open
    Tsync_manifest
    -open
-   Tsync_manifests
-   -open
-   Tsync_folder_ids
-   -open
-   Tsync_journal
-   -open
    Tsync_io
    -open
-   Tsync_retry
-   -open
-   Tsync_chunks
-   -open
-   Tsync_backend_register
-   -open
-   Tsync_bigstring
-   -open
-   Tsync_log))
+   Tsync_retry))
  (name tsync_checkout)
  (public_name tsync-libs.checkout)
  (libraries
-  tsync-libs.log
   tsync_filename
   tsync_logical_key
   tsync_staged
   tsync_conf
   tsync_cache_layout
   tsync_manifest
-  tsync_manifests
-  tsync_folder_ids
-  tsync_journal
   tsync_io
   tsync_retry
-  tsync_chunks
-  tsync_backend_register
-  tsync_bigstring
   yojson
   unix
   base64))

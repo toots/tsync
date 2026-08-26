@@ -10,15 +10,9 @@
    -open
    Tsync_engine
    -open
-   Tsync_conf
-   -open
    Tsync_conf_lwt
    -open
    Tsync_log
-   -open
-   Tsync_io_lwt
-   -open
-   Tsync_ipc
    -open
    Tsync_ipc_lwt
    -open
@@ -36,10 +30,7 @@
   tsync_conf_lwt
   tsync_domain
   tsync-libs.engine
-  tsync-libs.conf
   tsync-libs.log
-  tsync_io_lwt
-  tsync-libs.ipc
   tsync-libs.ipc_lwt
   tsync-libs.ipc_handler
   tsync-libs.diagnostics
