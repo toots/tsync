@@ -9,7 +9,7 @@ module Make (C : Conf.S) = struct
   module Tree = Inode_tree.Make (C)
   module Mf = Checkout.Make (C)
   module Mfs = Staged_lwt.Manifest.Make (C)
-  module D = Data.Make (C) (R)
+  module D = Data_lwt.Make (C) (R)
 
   (* Assembling through the read path covers unsynced staged edits, a partially
      cached file and a never-cached one alike. Only symlinks are special, having

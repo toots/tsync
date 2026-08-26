@@ -47,6 +47,8 @@
    -open
    Tsync_content
    -open
+   Tsync_content_lwt
+   -open
    Tsync_io_lwt
    -open
    Tsync_backend_register
@@ -76,6 +78,7 @@
   tsync_store
   tsync_file_store
   tsync_content
+  tsync_content_lwt
   tsync_io_lwt
   tsync_backend_register
   tsync_log

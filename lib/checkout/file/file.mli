@@ -11,7 +11,8 @@
     Signatures rather than the modules that satisfy them, so the operations are
     written against what they call and not against a store: {!File_store.Make},
     {!Store.Make} and {!History.Make} each answer one, and {!Remote.S} is taken
-    whole because {!Data.Make} is given it. {!Make} is where they are built. *)
+    whole because {!Data_lwt.Make} is given it. {!Make} is where they are built.
+*)
 
 (** The shared journal: a file change is recorded there before anyone is told
     about it, and the cursor names the last record a reader should have seen. *)

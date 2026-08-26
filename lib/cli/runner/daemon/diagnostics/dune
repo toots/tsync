@@ -20,6 +20,8 @@
    -open
    Tsync_content
    -open
+   Tsync_content_lwt
+   -open
    Tsync_layout
    -open
    Tsync_file_store
@@ -62,6 +64,7 @@
   tsync_journal
   tsync_sync
   tsync_content
+  tsync_content_lwt
   tsync_layout
   tsync_file_store
   tsync_corruption

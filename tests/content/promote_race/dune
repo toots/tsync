@@ -12,6 +12,8 @@
    -open
    Tsync_content
    -open
+   Tsync_content_lwt
+   -open
    Tsync_metrics
    -open
    Tsync_backend_register
@@ -27,6 +29,7 @@
   tsync_staged
   tsync_staged_lwt
   tsync_content
+  tsync_content_lwt
   tsync_conf
   tsync_backend_register
   tsync_local_backend

@@ -61,6 +61,8 @@
    -open
    Tsync_content
    -open
+   Tsync_content_lwt
+   -open
    Tsync_sync
    -open
    Tsync_io_lwt
@@ -108,6 +110,7 @@
   tsync_corruption
   tsync_collection
   tsync_content
+  tsync_content_lwt
   tsync_sync
   tsync_io_lwt
   tsync_glob

@@ -1,0 +1,25 @@
+; A file's content on Lwt: the chunks it is read from and written back as,
+; bound to this process's filesystem and pools.
+
+(library
+ (flags
+  (:standard
+   -open
+   Tsync_content
+   -open
+   Tsync_manifests_lwt
+   -open
+   Tsync_cache_layout_lwt
+   -open
+   Tsync_file_store
+   -open
+   Tsync_io_lwt))
+ (name tsync_content_lwt)
+ (public_name tsync-libs.content_lwt)
+ (libraries
+  tsync_content
+  tsync_manifests_lwt
+  tsync_cache_layout_lwt
+  tsync_file_store
+  tsync_io_lwt
+  lwt))

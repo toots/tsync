@@ -28,7 +28,7 @@ module R = Remote.Make (C)
 module Mf = Manifests_lwt.Make (C)
 module Ck = Checkout.Make (C)
 module Mfs = Staged_lwt.Manifest.Make (C)
-module D = Data.Make (C) (R)
+module D = Data_lwt.Make (C) (R)
 
 let key = Lk.file @@ "file.txt"
 let body = "abcdefghijklmnopqrstuvwx" (* 24 bytes = 3 chunks *)
@@ -116,7 +116,7 @@ module GR = Remote.Make (CG)
 module Gm = Manifests_lwt.Make (CG)
 module Gck = Checkout.Make (CG)
 module Gms = Staged_lwt.Manifest.Make (CG)
-module GD = Data.Make (CG) (GR)
+module GD = Data_lwt.Make (CG) (GR)
 
 let gkey = LkG.file "file.txt"
 

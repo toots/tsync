@@ -66,7 +66,7 @@ struct
   module Mf = Manifests_lwt.Make (C)
   module Ck = Checkout.Make (C)
   module Mfs = Staged_lwt.Manifest.Make (C)
-  module D = Data.Make (C) (R)
+  module D = Data_lwt.Make (C) (R)
 
   (* The file a record is about, and what it will cost to send. Both derived
      from the ops rather than carried alongside them, so the two cannot disagree

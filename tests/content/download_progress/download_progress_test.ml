@@ -61,7 +61,7 @@ end
 
 module Lk = Logical_key.Make (C)
 module R = Remote.Make (C)
-module D = Data.Make (C) (R)
+module D = Data_lwt.Make (C) (R)
 
 let write_file path contents =
   let oc = open_out_bin path in

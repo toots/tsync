@@ -18,6 +18,8 @@
    -open
    Tsync_content
    -open
+   Tsync_content_lwt
+   -open
    Tsync_store
    -open
    Tsync_ipc
@@ -69,6 +71,7 @@
   tsync_manifest
   tsync-libs.field_spec
   tsync-libs.content
+  tsync-libs.content_lwt
   tsync-libs.store
   tsync_io_lwt
   tsync-libs.frontend_register

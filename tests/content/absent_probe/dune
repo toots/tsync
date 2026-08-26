@@ -22,6 +22,8 @@
    -open
    Tsync_content
    -open
+   Tsync_content_lwt
+   -open
    Tsync_store
    -open
    Tsync_file_store
@@ -49,6 +51,7 @@
   tsync_chunks
   tsync_test_harness
   tsync_content
+  tsync_content_lwt
   tsync_store
   tsync_file_store
   tsync_folder_ids

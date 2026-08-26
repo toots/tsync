@@ -44,7 +44,7 @@ end
 
 module Lk = Logical_key.Make (C)
 module R = Remote.Make (C)
-module D = Data.Make (C) (R)
+module D = Data_lwt.Make (C) (R)
 
 (* New files take the configured size when there is one, else what the primary
    backend recommends (an http-proxy answers with the serving domain's own, so the

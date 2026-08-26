@@ -22,6 +22,8 @@
    -open
    Tsync_content
    -open
+   Tsync_content_lwt
+   -open
    Tsync_cache_layout
    -open
    Tsync_metrics
@@ -46,6 +48,7 @@
   tsync_chunks
   tsync_test_harness
   tsync_content
+  tsync_content_lwt
   tsync_cache_layout
   tsync_conf
   tsync_backend_register

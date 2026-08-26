@@ -38,7 +38,7 @@ module C =
 
 module Lk = Logical_key.Make (C)
 module R = Remote.Make (C)
-module D = Data.Make (C) (R)
+module D = Data_lwt.Make (C) (R)
 module Mf = Checkout.Make (C)
 module Mfs = Staged_lwt.Manifest.Make (C)
 module Fs = File_store.Make (C)
