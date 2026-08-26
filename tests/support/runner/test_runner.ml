@@ -768,7 +768,7 @@ let setup_client (module C : Conf_lwt.S) root staging_prefix =
         let* s = G.run ~verify:true () in
         print_gc s;
         (* The collection just changed what is marked. *)
-        let module Cor = Corruption.Make (C) in
+        let module Cor = Corruption_lwt.Make (C) in
         Cor.invalidate ();
         Lwt.return_unit
     | GcMark ->
@@ -830,7 +830,7 @@ let setup_client (module C : Conf_lwt.S) root staging_prefix =
       | ScrambleBackendFile _ | DeleteRemoteManifest _ ) as s ->
         damage (List.hd C.members) s
     | ListCorrupted ->
-        let module Cor = Corruption.Make (C) in
+        let module Cor = Corruption_lwt.Make (C) in
         let+ report = Cor.list () in
         let entries = List.sort compare report.Corruption.entries in
         (* A count first, so a listing is visible even when it finds nothing and
@@ -861,7 +861,7 @@ let setup_client (module C : Conf_lwt.S) root staging_prefix =
                 | `Unsupported -> "unsupported"))
           answers
     | RescanCorrupted ->
-        let module Cor = Corruption.Make (C) in
+        let module Cor = Corruption_lwt.Make (C) in
         Cor.invalidate ();
         Lwt.return_unit
     | Repair ->

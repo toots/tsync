@@ -23,7 +23,7 @@ let describe ~chunk_key ~store = function
         store
 
 module Make (C : Conf_lwt.S) = struct
-  module Cor = Corruption.Make (C)
+  module Cor = Corruption_lwt.Make (C)
   module L = Chunk_layout.Make (C)
 
   let good_body (module B : Backend_lwt.Store) chunk_key =

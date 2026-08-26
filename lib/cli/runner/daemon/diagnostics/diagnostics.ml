@@ -125,7 +125,7 @@ module Make (C : Conf_lwt.S) = struct
   module Collection = Collection.Make (C)
   module J = Journal.Make (C)
   module W = Wal_lwt.Make (C)
-  module Cor = Corruption.Make (C)
+  module Cor = Corruption_lwt.Make (C)
 
   let int_opt = function Some n -> `Int n | None -> `Null
 

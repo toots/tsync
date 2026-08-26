@@ -9,17 +9,15 @@
    -open
    Tsync_chunks
    -open
+   Tsync_io
+   -open
    Tsync_retry
    -open
    Tsync_conf
    -open
-   Tsync_conf_lwt
-   -open
    Tsync_bigstring
    -open
-   Tsync_backend_register
-   -open
-   Tsync_backend_lwt))
+   Tsync_backend_register))
  (name tsync_corruption)
  (public_name tsync-libs.corruption)
  (libraries
@@ -27,9 +25,7 @@
   tsync_chunks
   tsync_retry
   tsync_conf
-  tsync_conf_lwt
+  tsync_io
   tsync_bigstring
   tsync_backend_register
-  tsync_backend_lwt
-  lwt
   unix))

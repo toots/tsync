@@ -38,6 +38,8 @@
    -open
    Tsync_corruption
    -open
+   Tsync_corruption_lwt
+   -open
    Tsync_collection
    -open
    Tsync_sync
@@ -95,6 +97,7 @@
   tsync_layout
   tsync_file_store
   tsync_corruption
+  tsync_corruption_lwt
   tsync_collection
   tsync_sync
   tsync_sync_lwt

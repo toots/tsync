@@ -18,6 +18,8 @@
    -open
    Tsync_corruption
    -open
+   Tsync_corruption_lwt
+   -open
    Tsync_content
    -open
    Tsync_bigstring
@@ -40,6 +42,7 @@
   tsync_conf
   tsync_conf_lwt
   tsync_corruption
+  tsync_corruption_lwt
   tsync_content
   tsync_bigstring
   tsync_backend_register

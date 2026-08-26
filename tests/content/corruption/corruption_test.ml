@@ -52,7 +52,7 @@ end
 
 module Lk = Logical_key.Make (C)
 module R = Remote.Make (C)
-module Corrupt = Corruption.Make (C)
+module Corrupt = Corruption_lwt.Make (C)
 module B = (val C.store : C.Store)
 
 let write_file path contents =

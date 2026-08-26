@@ -20,6 +20,8 @@
    -open
    Tsync_corruption
    -open
+   Tsync_corruption_lwt
+   -open
    Tsync_collection
    -open
    Tsync_staged
@@ -100,6 +102,7 @@
   tsync_store
   tsync_file_store
   tsync_corruption
+  tsync_corruption_lwt
   tsync_collection
   tsync_staged
   tsync_staged_lwt

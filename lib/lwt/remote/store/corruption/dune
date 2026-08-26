@@ -1,0 +1,8 @@
+; What a store filed as corrupt, on Lwt.
+
+(library
+ (flags
+  (:standard -open Tsync_corruption -open Tsync_io_lwt))
+ (name tsync_corruption_lwt)
+ (public_name tsync-libs.corruption_lwt)
+ (libraries tsync_corruption tsync_io_lwt lwt))

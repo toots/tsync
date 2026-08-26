@@ -95,7 +95,7 @@ module Make_with_layout (C : Conf_lwt.S) (L : Layout.S) : S = struct
      to know that a collection may be in progress ({!Collection}). *)
   module Collection = Collection.Make (C)
   module L = Chunk_layout.Make (C)
-  module Corrupt = Corruption.Make (C)
+  module Corrupt = Corruption_lwt.Make (C)
 
   let pools =
     pools_for ~prefix:C.chunk_prefix ~max_chunk_buffers:C.max_chunk_buffers

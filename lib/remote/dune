@@ -36,6 +36,8 @@
    -open
    Tsync_corruption
    -open
+   Tsync_corruption_lwt
+   -open
    Tsync_collection
    -open
    Tsync_io_lwt
@@ -69,6 +71,7 @@
   tsync_layout
   tsync_store
   tsync_corruption
+  tsync_corruption_lwt
   tsync_collection
   tsync_io_lwt
   tsync_xxhash

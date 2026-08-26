@@ -18,7 +18,7 @@ let cmd : unit Cmd.t =
   in
   let report (module C : Conf_lwt.S) detail =
     let open Lwt.Syntax in
-    let module Cor = Corruption.Make (C) in
+    let module Cor = Corruption_lwt.Make (C) in
     let* r = Cor.list () in
     let entries =
       List.sort
