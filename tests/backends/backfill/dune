@@ -31,5 +31,4 @@
   tsync_domain_store_lwt
   tsync_local_backend_lwt
   lwt
-  lwt.unix
-  unix))
+  lwt.unix))

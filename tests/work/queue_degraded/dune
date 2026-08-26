@@ -13,5 +13,4 @@
   tsync_test_harness
   tsync_durable_queue_lwt
   lwt
-  lwt.unix
-  unix))
+  lwt.unix))

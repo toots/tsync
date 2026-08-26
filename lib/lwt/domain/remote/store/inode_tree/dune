@@ -20,5 +20,4 @@
   tsync_conf_lwt
   tsync_layout_lwt
   tsync_store_lwt
-  tsync_io_lwt
-  lwt))
+  tsync_io_lwt))

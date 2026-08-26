@@ -17,8 +17,6 @@
   tsync_http_client
   tsync_io_lwt
   tsync_retry_lwt
-  cohttp
   cohttp-lwt
   cohttp-lwt-unix
-  uri
   lwt))

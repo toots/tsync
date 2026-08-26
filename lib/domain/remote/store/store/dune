@@ -24,5 +24,4 @@
   tsync_layout
   tsync_bigstring
   tsync_backend_register
-  tsync_io
-  unix))
+  tsync_io))

@@ -17,7 +17,4 @@
   tsync_conf_lwt
   tsync_test_harness
   tsync_backend_lwt
-  tsync_local_backend_lwt
-  lwt
-  lwt.unix
-  unix))
+  tsync_local_backend_lwt))

@@ -17,5 +17,4 @@
   tsync_http_proxy_backend
   tsync_backend_lwt
   tsync_http_client_lwt
-  tsync_io_lwt
-  lwt))
+  tsync_io_lwt))

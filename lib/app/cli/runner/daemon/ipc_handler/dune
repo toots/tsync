@@ -57,5 +57,4 @@
   tsync_log
   yojson
   unix
-  lwt
-  lwt.unix))
+  lwt))

@@ -50,7 +50,6 @@
   tsync-libs.metrics
   tsync_local_backend_lwt
   tsync_conf_lwt
-  cohttp-lwt-unix
   yojson
   lwt
   lwt.unix))

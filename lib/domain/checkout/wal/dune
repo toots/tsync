@@ -22,5 +22,4 @@
   tsync_durable_queue
   tsync_io
   tsync_retry
-  yojson
-  unix))
+  yojson))

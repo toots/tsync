@@ -48,5 +48,4 @@
   tsync_staged_lwt
   tsync_content_lwt
   tsync_folder_ids_lwt
-  tsync_io_lwt
-  lwt))
+  tsync_io_lwt))

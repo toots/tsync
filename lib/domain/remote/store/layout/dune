@@ -25,5 +25,4 @@
   tsync_io
   tsync_conf
   tsync_bigstring
-  tsync_log
-  unix))
+  tsync_log))

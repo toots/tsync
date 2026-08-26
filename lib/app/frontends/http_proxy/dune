@@ -87,7 +87,6 @@
   tsync_runtime
   cohttp-lwt-unix
   bigstringaf
-  conduit-lwt-unix
   uri
   yojson
   lwt

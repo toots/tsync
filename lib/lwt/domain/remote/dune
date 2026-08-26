@@ -26,5 +26,4 @@
   tsync_history_lwt
   tsync_collection_lwt
   tsync_corruption_lwt
-  tsync_io_lwt
-  lwt))
+  tsync_io_lwt))

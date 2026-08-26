@@ -42,6 +42,5 @@
   tsync_backend_register
   tsync_backend_lwt
   tsync_local_backend_lwt
-  unix
   lwt
   lwt.unix))

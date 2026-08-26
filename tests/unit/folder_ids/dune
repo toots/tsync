@@ -19,5 +19,4 @@
   tsync_cache_layout
   tsync_io_lwt
   lwt
-  lwt.unix
-  unix))
+  lwt.unix))

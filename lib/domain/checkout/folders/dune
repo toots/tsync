@@ -20,5 +20,4 @@
   tsync_logical_key
   tsync_cache_layout
   tsync_io
-  yojson
-  unix))
+  yojson))

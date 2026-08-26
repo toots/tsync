@@ -34,5 +34,4 @@
   tsync_ops
   tsync_ops_lwt
   lwt
-  lwt.unix
-  unix))
+  lwt.unix))

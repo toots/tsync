@@ -21,5 +21,4 @@
   tsync_field_spec
   tsync_bigstring_lwt
   tsync_io_lwt
-  unix
-  lwt))
+  unix))

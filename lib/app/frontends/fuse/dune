@@ -47,5 +47,4 @@
   fuse3
   unix
   lwt
-  lwt.unix
-  threads.posix))
+  lwt.unix))

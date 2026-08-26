@@ -32,7 +32,4 @@
   tsync_cache_layout
   tsync_manifest
   tsync_io
-  tsync_retry
-  yojson
-  unix
-  base64))
+  tsync_retry))

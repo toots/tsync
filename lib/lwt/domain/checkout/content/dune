@@ -21,5 +21,4 @@
   tsync_manifests_lwt
   tsync_cache_layout_lwt
   tsync_file_store_lwt
-  tsync_io_lwt
-  lwt))
+  tsync_io_lwt))

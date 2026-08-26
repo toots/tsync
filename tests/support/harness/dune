@@ -32,5 +32,4 @@
   tsync_runtime
   tsync_io_lwt
   lwt
-  lwt.unix
   unix))

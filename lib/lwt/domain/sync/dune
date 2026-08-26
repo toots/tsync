@@ -21,5 +21,4 @@
   tsync_file_store_lwt
   tsync_wal_lwt
   tsync_staged_lwt
-  tsync_io_lwt
-  lwt))
+  tsync_io_lwt))

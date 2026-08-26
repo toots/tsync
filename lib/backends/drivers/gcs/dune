@@ -25,7 +25,6 @@
  (private_modules gcs_auth)
  (libraries
   cohttp
-  unix
   tsync-libs.logical_key
   tsync_retry
   tsync_io

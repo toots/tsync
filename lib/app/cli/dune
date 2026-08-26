@@ -128,9 +128,7 @@
   tsync_frontend
   tsync-libs.tls
   cmdliner
-  memtrace
   yojson
   lwt
   lwt.unix
-  threads.posix
   unix))

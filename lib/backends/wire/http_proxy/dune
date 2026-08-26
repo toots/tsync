@@ -17,5 +17,4 @@
   eqaf
   base64
   yojson
-  unix
-  bigstringaf))
+  unix))

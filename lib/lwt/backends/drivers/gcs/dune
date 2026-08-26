@@ -21,6 +21,5 @@
   cohttp
   cohttp-lwt
   cohttp-lwt-unix
-  uri
   unix
   lwt))

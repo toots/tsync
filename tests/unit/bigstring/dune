@@ -18,7 +18,6 @@
   tsync_filename
   tsync_test_harness
   unix
-  lwt
   lwt.unix
   bigstringaf
   tsync_bigstring

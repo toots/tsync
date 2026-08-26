@@ -14,5 +14,4 @@
   tsync-libs.logical_key
   tsync_chunk_integrity
   tsync_chunks
-  tsync_journal
-  unix))
+  tsync_journal))

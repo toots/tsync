@@ -22,5 +22,4 @@
   tsync-libs.field_spec
   tsync_retry_lwt
   tsync_io_lwt
-  aws-s3-lwt
-  lwt))
+  aws-s3-lwt))

@@ -87,6 +87,5 @@
   tsync_hashtbl_mmap
   tsync_backend_register
   tsync_log
-  bigstringaf
   yojson
   unix))

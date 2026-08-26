@@ -32,5 +32,4 @@
   tsync_local_backend_lwt
   yojson
   lwt
-  lwt.unix
-  unix))
+  lwt.unix))

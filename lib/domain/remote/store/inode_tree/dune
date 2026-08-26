@@ -27,5 +27,4 @@
   tsync_conf
   tsync_backend_register
   tsync_io
-  tsync_log
-  unix))
+  tsync_log))

@@ -35,5 +35,4 @@
   tsync_bigstring
   tsync_backend_register
   tsync_log
-  unix
   yojson))

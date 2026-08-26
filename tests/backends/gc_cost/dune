@@ -49,5 +49,4 @@
   tsync_io_lwt
   tsync_domain_store_lwt
   lwt
-  lwt.unix
-  unix))
+  lwt.unix))
