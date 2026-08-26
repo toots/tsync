@@ -64,6 +64,8 @@
    -open
    Tsync_conf
    -open
+   Tsync_conf_lwt
+   -open
    Tsync_bigstring
    -open
    Tsync_backend_register
@@ -127,6 +129,7 @@
   tsync_backend
   tsync-libs.diagnostics
   tsync-libs.domain_store
+  tsync_conf_lwt
   tsync_domain
   tsync_oneshot
   tsync-libs.log

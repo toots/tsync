@@ -16,7 +16,7 @@ let root = Scratch.dir "import-listing"
 let src = Filename.concat root "src"
 let conf = Fixture.conf ~domain:"listing" ~root ()
 
-module C = (val conf : Conf.S)
+module C = (val conf : Conf_lwt.S)
 module I = Import.Make (C)
 
 let write rel =

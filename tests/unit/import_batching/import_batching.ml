@@ -19,7 +19,7 @@ module C =
   (val Fixture.conf ~domain:"testdom"
          ~store:(Fixture.local_store main_dir)
          ~root ()
-      : Conf.S)
+      : Conf_lwt.S)
 
 module I = Import.Make (C)
 module Fs = File_store.Make (C)

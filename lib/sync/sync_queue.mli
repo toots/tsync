@@ -38,7 +38,7 @@ end
 module type JOURNAL = sig
   type 'a io
 
-  module Make (_ : Conf.S) : sig
+  module Make (_ : Conf.S with type 'a io = 'a io) : sig
     val write_journal_entry :
       ?entry_key:Journal.Entry_key.t ->
       Journal.op list ->
@@ -92,7 +92,7 @@ module type WAL = sig
     val idle : 'a t -> unit
   end
 
-  module Make (_ : Conf.S) : sig
+  module Make (_ : Conf.S with type 'a io = 'a io) : sig
     val log : records
     val owed : (Journal.Entry_key.t * Wal.record) Owed.t
     val complete : Journal.Entry_key.t -> unit io
@@ -116,6 +116,7 @@ module Over
       write and hand over, and drains them to the store on a pool of its own.
       The records are not its own — they are written before it hears of them,
       which is what makes a crash leave something saying the work is owed. *)
-  module Make (C : Conf.S) (F : File.Owing with type 'a io := 'a Io.t) :
-    S with type 'a io := 'a Io.t
+  module Make
+      (C : Conf.S with type 'a io = 'a Io.t)
+      (F : File.Owing with type 'a io := 'a Io.t) : S with type 'a io := 'a Io.t
 end

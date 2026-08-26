@@ -22,6 +22,8 @@
    -open
    Tsync_conf
    -open
+   Tsync_conf_lwt
+   -open
    Tsync_local_backend_lwt
    -open
    Tsync_test_harness))
@@ -36,6 +38,7 @@
   tsync_file
   tsync_file_lwt
   tsync_conf
+  tsync_conf_lwt
   tsync_backend_register
   tsync_local_backend_lwt
   tsync_io_lwt

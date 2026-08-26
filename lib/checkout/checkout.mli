@@ -45,7 +45,7 @@ end
 module type MIRROR = sig
   type 'a io
 
-  module Make (_ : Conf.S) : sig
+  module Make (_ : Conf.S with type 'a io = 'a io) : sig
     val root : unit -> string
     val path : Logical_key.t -> string
     val ensure_parent : Logical_key.t -> unit io
@@ -59,7 +59,7 @@ end
 module type STAGED = sig
   type 'a io
 
-  module Make (_ : Conf.S) : sig
+  module Make (_ : Conf.S with type 'a io = 'a io) : sig
     val fold :
       rel_dir:string ->
       deep:bool ->
@@ -91,7 +91,7 @@ module Over
   (** The local manifest mirror for one domain: where manifests live, how the
       tree is walked, and the parsed-sidecar cache. Callers name logical keys
       only — no cache paths, no domain prefixes, no raw bodies. *)
-  module Make (C : Conf.S) : sig
+  module Make (C : Conf.S with type 'a io = 'a Io.t) : sig
     val rename : src_key:Logical_key.t -> dst_key:Logical_key.t -> unit Io.t
     val create_dir : Logical_key.t -> unit Io.t
     val delete_dir : Logical_key.t -> unit Io.t

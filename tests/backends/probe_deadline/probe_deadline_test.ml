@@ -17,7 +17,7 @@ let root = "/tmp/tsync-probe-deadline-test"
    comes. *)
 module Hung = Doubles.Hung
 
-module C : Conf.S = struct
+module C : Conf_lwt.S = struct
   let versioning = false
   let client_name = "test-client"
   let domain_name = "wedgedom"
@@ -52,6 +52,8 @@ module C : Conf.S = struct
   let max_cache = None
   let symlink_policy = `Keep
   let read_only = false
+
+  include Conf_lwt.Monad
 end
 
 module Diag = Diagnostics.Make (C)

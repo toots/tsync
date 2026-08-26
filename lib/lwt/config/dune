@@ -1,0 +1,8 @@
+; A domain's config with its stores, on Lwt.
+
+(library
+ (flags
+  (:standard -open Tsync_conf -open Tsync_backend_lwt))
+ (name tsync_conf_lwt)
+ (public_name tsync-libs.conf_lwt)
+ (libraries tsync_conf tsync_backend_register tsync_backend_lwt lwt))

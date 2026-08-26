@@ -21,7 +21,7 @@ let conf =
   Fixture.conf ~domain:"pools" ~root ~verify_writes:false
     ~max_chunk_buffers:buffers ~max_downloads:downloads ()
 
-module C = (val conf : Conf.S)
+module C = (val conf : Conf_lwt.S)
 
 let max_of name =
   match

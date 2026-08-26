@@ -13,7 +13,7 @@ type summary = {
   failed : int;
 }
 
-module Make (C : Conf.S) = struct
+module Make (C : Conf_lwt.S) = struct
   module Lk = Logical_key.Make (C)
   module R = Remote.Make (C)
   module Fs = File_store.Make (C)

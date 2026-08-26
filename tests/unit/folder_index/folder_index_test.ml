@@ -63,7 +63,7 @@ module C =
   (val Fixture.conf ~domain:"testdom"
          ~store:(module Store : Backend_lwt.Store)
          ~cache_root:root ~data_dir:root ~root ()
-      : Conf.S)
+      : Conf_lwt.S)
 
 module Tree = Inode_tree.Make (C)
 
@@ -80,7 +80,7 @@ module Two =
                (module Store : Backend_lwt.Store);
            ]
          ~cache_root:root ~data_dir:root ~root ()
-      : Conf.S)
+      : Conf_lwt.S)
 
 module Tree_two = Inode_tree.Make (Two)
 

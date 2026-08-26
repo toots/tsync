@@ -58,7 +58,7 @@ struct
     val link_in : src:string -> group:Manifest.Group.t -> bool Io.t
   end
 
-  module Make (C : Conf.S) (Cache : Cache) = struct
+  module Make (C : Conf.S with type 'a io = 'a Io.t) (Cache : Cache) = struct
     let path uuid =
       Filename.concat
         (Cache_layout.staged_chunks_dir ~cache_root:C.cache_root C.domain_name)

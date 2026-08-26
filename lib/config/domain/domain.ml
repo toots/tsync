@@ -153,7 +153,7 @@ let default_domain ~paths =
    the daemon alone — a one-shot command records and drains its own, but must
    not run jobs the daemon is also running. *)
 let of_config ?domain ?socket_path ?(resume = false) ~paths cfg :
-    (module Conf.S) =
+    (module Conf_lwt.S) =
   let domain =
     match domain with Some _ -> domain | None -> default_domain ~paths
   in
@@ -185,7 +185,9 @@ let of_config ?domain ?socket_path ?(resume = false) ~paths cfg :
     let max_cache = d.Conf_parsing.max_cache
     let symlink_policy = d.Conf_parsing.symlink_policy
     let read_only = d.Conf_parsing.read_only
-  end : Conf.S)
+
+    include Conf_lwt.Monad
+  end : Conf_lwt.S)
 
 (* Linux gives each domain its own socket (a domain is its own child process)
    while macOS shares one, so reaching the right daemon means resolving the
@@ -208,12 +210,11 @@ let socket ?domain ~paths cfg = snd (target ?domain ~paths cfg)
 (* [--source] says where to read from, so only reads move: a write still goes
    through the domain's own path and reaches the deferred targets behind it.
    Raises [Failure] when nothing has that name. *)
-let reading_from name (module C : Conf.S) : (module Conf.S) =
+let reading_from name (module C : Conf_lwt.S) : (module Conf_lwt.S) =
   let m =
     match
       List.filter
-        (fun (m : (module Backend_lwt.Store) Backend.member) ->
-          m.Backend.name = name)
+        (fun (m : _ Backend.member) -> m.Backend.name = name)
         C.members
     with
       | [m] -> m
@@ -221,10 +222,7 @@ let reading_from name (module C : Conf.S) : (module Conf.S) =
           failwith
             (Printf.sprintf "no backend named %s (available: %s)" name
                (String.concat ", "
-                  (List.map
-                     (fun (m : (module Backend_lwt.Store) Backend.member) ->
-                       m.name)
-                     C.members)))
+                  (List.map (fun (m : _ Backend.member) -> m.name) C.members)))
       | _ ->
           failwith
             (Printf.sprintf
@@ -237,8 +235,8 @@ let reading_from name (module C : Conf.S) : (module Conf.S) =
 
     let store =
       (module struct
-        include (val C.store : Backend_lwt.Store)
-        module Src = (val m.Backend.backend : Backend_lwt.Store)
+        include (val C.store : C.Store)
+        module Src = (val m.Backend.backend : C.Store)
 
         let get = Src.get
         let get_opt = Src.get_opt
@@ -251,4 +249,4 @@ let reading_from name (module C : Conf.S) : (module Conf.S) =
            fan-out asks the [get_opt] above. *)
         let get_many = Src.get_many
       end : Backend_lwt.Store)
-  end : Conf.S)
+  end : Conf_lwt.S)

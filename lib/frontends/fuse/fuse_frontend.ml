@@ -11,7 +11,7 @@ let prepare_mount_point mount_point =
 
 let mount_binding (sv : Frontend.served) =
   let b = sv.Frontend.binding in
-  let module C = (val b.Frontend.conf : Conf.S) in
+  let module C = (val b.Frontend.conf : Conf_lwt.S) in
   (* Each domain is its own process; tag its log lines with the domain name. *)
   Log.set_prefix (Printf.sprintf "[%s] " C.domain_name);
   (* FUSE allow_other, so a service running as another user can read the

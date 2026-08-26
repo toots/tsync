@@ -28,7 +28,7 @@ let conf =
   Fixture.conf ~domain:"fanout" ~root ~chunk_size ~cache_chunk_size:chunk_size
     ~max_chunk_buffers:buffers ()
 
-module C = (val conf : Conf.S)
+module C = (val conf : Conf_lwt.S)
 module Lk = Logical_key.Make (C)
 module R = Remote.Make (C)
 

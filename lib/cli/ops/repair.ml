@@ -22,7 +22,7 @@ let describe ~chunk_key ~store = function
       Printf.sprintf "LOST  %s on %s (no store holds these bytes)" chunk_key
         store
 
-module Make (C : Conf.S) = struct
+module Make (C : Conf_lwt.S) = struct
   module Cor = Corruption.Make (C)
   module L = Chunk_layout.Make (C)
 

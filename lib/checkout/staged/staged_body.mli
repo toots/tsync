@@ -53,7 +53,7 @@ module Over
     val link_in : src:string -> group:Manifest.Group.t -> bool Io.t
   end
 
-  module Make (C : Conf.S) (Cache : Cache) : sig
+  module Make (C : Conf.S with type 'a io = 'a Io.t) (Cache : Cache) : sig
     (** Path of a staged body, for the upload that reads and hashes it. *)
     val path : string -> string
 

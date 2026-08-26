@@ -11,7 +11,7 @@ type progress = {
 
 let no_progress = { on_phase = (fun _ -> ()); on_current = (fun _ -> ()) }
 
-module Make (C : Conf.S) = struct
+module Make (C : Conf_lwt.S) = struct
   module Lk = Logical_key.Make (C)
   module J = Journal.Make (C)
   module Fs = File_store.Make (C)

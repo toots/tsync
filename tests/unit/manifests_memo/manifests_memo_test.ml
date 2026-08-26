@@ -27,11 +27,11 @@ let conf ~domain =
     ~store:(module Store : Backend_lwt.Store)
     ~cache_root:root ~data_dir:root ~root ()
 
-module C = (val conf ~domain : Conf.S)
+module C = (val conf ~domain : Conf_lwt.S)
 module Lk = Logical_key.Make (C)
 module A = Manifests_lwt.Make (C)
 module B = Manifests_lwt.Make (C)
-module D = (val conf ~domain:"otherdom" : Conf.S)
+module D = (val conf ~domain:"otherdom" : Conf_lwt.S)
 module E = Manifests_lwt.Make (D)
 
 let key = Lk.file "a.txt"

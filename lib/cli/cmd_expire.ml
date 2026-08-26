@@ -34,7 +34,7 @@ let cmd : unit Cmd.t =
     let s =
       run_lwt
         (let cutoff = parse_date date in
-         let (module C : Conf.S) = load_conf ?domain () in
+         let (module C : Conf_lwt.S) = load_conf ?domain () in
          let module E = Expire.Make (C) in
          (* A domain with a long history spends minutes listing before it deletes
             anything, so say what is happening rather than sit silent. Progress

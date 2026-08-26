@@ -46,12 +46,14 @@ module C = struct
   let max_cache : int option = None
   let symlink_policy = `Keep
   let read_only = false
+
+  include Conf_lwt.Monad
 end
 
 module Lk = Logical_key.Make (C)
 module R = Remote.Make (C)
 module Corrupt = Corruption.Make (C)
-module B = (val C.store : Backend_lwt.Store)
+module B = (val C.store : C.Store)
 
 let write_file path contents =
   let oc = open_out_bin path in

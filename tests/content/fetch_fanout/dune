@@ -22,6 +22,8 @@
    -open
    Tsync_conf
    -open
+   Tsync_conf_lwt
+   -open
    Tsync_test_harness))
  (name fetch_fanout_test)
  (libraries
@@ -36,6 +38,7 @@
   tsync_backend_lwt
   tsync_content
   tsync_conf
+  tsync_conf_lwt
   lwt
   lwt.unix
   unix))

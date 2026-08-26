@@ -30,7 +30,7 @@ let int_arg verb what s =
     | Some n -> n
     | None -> usage verb (Printf.sprintf "%s must be a number, got %S" what s)
 
-module Make (C : Conf.S) = struct
+module Make (C : Conf_lwt.S) = struct
   module Lk = Logical_key.Make (C)
   module E = Domain_engine.Make (C)
   module F = E.F
@@ -229,13 +229,13 @@ let command verb doc run = { Frontend.verb; doc; run }
 let commands =
   [
     command "stat" "Describe one item, named by reference."
-      (fun (module C : Conf.S) args ->
+      (fun (module C : Conf_lwt.S) args ->
         let module R = Make (C) in
         match args with
           | [r] -> R.answer ~staging:false (request "stat" [("ref", `String r)])
           | _ -> usage "stat" "REF");
     command "list" "List the children of one directory reference."
-      (fun (module C : Conf.S) args ->
+      (fun (module C : Conf_lwt.S) args ->
         let module R = Make (C) in
         match args with
           | [r] ->
@@ -243,7 +243,7 @@ let commands =
           | _ -> usage "list" "REF");
     command "read"
       "Write LENGTH bytes of KEY from OFFSET into DEST at that same offset, \
-       leaving the rest of DEST sparse." (fun (module C : Conf.S) args ->
+       leaving the rest of DEST sparse." (fun (module C : Conf_lwt.S) args ->
         let module R = Make (C) in
         match args with
           | [r; dest; offset; length] ->
@@ -259,16 +259,16 @@ let commands =
     command "open"
       "Serve ranges of REF until stdin closes: a size line, then one JSON \
        length line and that many bytes per \"OFFSET LENGTH\" request."
-      (fun (module C : Conf.S) args ->
+      (fun (module C : Conf_lwt.S) args ->
         let module R = Make (C) in
         match args with [r] -> R.session r | _ -> usage "open" "REF");
     command "residency" "Report how many of REF's chunks are on this device."
-      (fun (module C : Conf.S) args ->
+      (fun (module C : Conf_lwt.S) args ->
         let module R = Make (C) in
         match args with [r] -> R.residency r | _ -> usage "residency" "REF");
     command "fetch"
       "Assemble the whole content of REF into DEST, fetching what is missing."
-      (fun (module C : Conf.S) args ->
+      (fun (module C : Conf_lwt.S) args ->
         let module R = Make (C) in
         match args with
           | [r; dest] ->
@@ -279,7 +279,7 @@ let commands =
     command "write-whole"
       "Make STAGING the whole content of NAME under PARENT. The file is \
        adopted by rename, so it is gone on success."
-      (fun (module C : Conf.S) args ->
+      (fun (module C : Conf_lwt.S) args ->
         let module R = Make (C) in
         match args with
           | [parent; name; staging] ->
@@ -292,7 +292,7 @@ let commands =
                    ])
           | _ -> usage "write-whole" "PARENT NAME STAGING");
     command "create" "Create an empty file NAME under PARENT."
-      (fun (module C : Conf.S) args ->
+      (fun (module C : Conf_lwt.S) args ->
         let module R = Make (C) in
         match args with
           | [parent; name] ->
@@ -301,7 +301,7 @@ let commands =
                    [("parentRef", `String parent); ("name", `String name)])
           | _ -> usage "create" "PARENT NAME");
     command "mkdir" "Create the directory NAME under PARENT."
-      (fun (module C : Conf.S) args ->
+      (fun (module C : Conf_lwt.S) args ->
         let module R = Make (C) in
         match args with
           | [parent; name] ->
@@ -309,19 +309,20 @@ let commands =
                 (request "mkdir"
                    [("parentRef", `String parent); ("name", `String name)])
           | _ -> usage "mkdir" "PARENT NAME");
-    command "delete" "Delete the file KEY." (fun (module C : Conf.S) args ->
+    command "delete" "Delete the file KEY." (fun (module C : Conf_lwt.S) args ->
         let module R = Make (C) in
         match args with
           | [r] ->
               R.answer ~staging:true (request "delete" [("ref", `String r)])
           | _ -> usage "delete" "REF");
-    command "rmdir" "Remove the directory KEY." (fun (module C : Conf.S) args ->
+    command "rmdir" "Remove the directory KEY."
+      (fun (module C : Conf_lwt.S) args ->
         let module R = Make (C) in
         match args with
           | [r] -> R.answer ~staging:true (request "rmdir" [("ref", `String r)])
           | _ -> usage "rmdir" "REF");
     command "rename" "Move SRC under PARENT, naming it NAME."
-      (fun (module C : Conf.S) args ->
+      (fun (module C : Conf_lwt.S) args ->
         let module R = Make (C) in
         match args with
           | [src; parent; name] ->
@@ -334,7 +335,7 @@ let commands =
                    ])
           | _ -> usage "rename" "SRC PARENT NAME");
     command "status" "Report this domain: cache, backlog and backends."
-      (fun (module C : Conf.S) args ->
+      (fun (module C : Conf_lwt.S) args ->
         let module R = Make (C) in
         match args with [] -> R.status () | _ -> usage "status" "");
   ]

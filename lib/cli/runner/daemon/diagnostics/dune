@@ -52,6 +52,8 @@
    -open
    Tsync_conf
    -open
+   Tsync_conf_lwt
+   -open
    Tsync_conf_parsing))
  (name tsync_diagnostics)
  (public_name tsync-libs.diagnostics)
@@ -75,6 +77,7 @@
   tsync_io
   tsync_io_lwt
   tsync_conf
+  tsync_conf_lwt
   tsync_bigstring
   tsync_backend_register
   tsync_backend_lwt

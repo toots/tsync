@@ -3,7 +3,7 @@ open Lwt.Syntax
 type status = Exported | Exported_symlink | Missing_data
 type summary = { exported : int; missing : int }
 
-module Make (C : Conf.S) = struct
+module Make (C : Conf_lwt.S) = struct
   module Lk = Logical_key.Make (C)
   module R = Remote.Make (C)
   module Tree = Inode_tree.Make (C)

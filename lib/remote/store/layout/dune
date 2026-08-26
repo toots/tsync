@@ -14,6 +14,8 @@
    -open
    Tsync_conf
    -open
+   Tsync_conf_lwt
+   -open
    Tsync_bigstring
    -open
    Tsync_backend_register
@@ -28,6 +30,7 @@
   tsync_folder_ids
   tsync_folder_ids_lwt
   tsync_conf
+  tsync_conf_lwt
   tsync_bigstring
   tsync_backend_register
   tsync_backend_lwt

@@ -31,7 +31,7 @@ val conf :
   ?data_dir:string ->
   root:string ->
   unit ->
-  (module Conf.S)
+  (module Conf_lwt.S)
 
 (** The store a bare {!conf} builds, for a test that plants content before
     handing the domain over. *)

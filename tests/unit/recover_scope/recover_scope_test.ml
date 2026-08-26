@@ -18,7 +18,7 @@ let () = ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote root)))
 let conf =
   Fixture.conf ~domain:"recov" ~root ~verify_writes:false ~chunk_size:64 ()
 
-module C = (val conf : Conf.S)
+module C = (val conf : Conf_lwt.S)
 module E = Domain_engine.Make (C)
 
 (* Named by [Filename.temp_path], so the recogniser and this agree by

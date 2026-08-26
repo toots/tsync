@@ -22,8 +22,8 @@ type report = {
   unreachable : (string * string) list;  (** member name, why *)
 }
 
-module Make (C : Conf.S) : sig
-  (** Every member, in role order. Not through {!Conf.S.store}: a composite
+module Make (C : Conf_lwt.S) : sig
+  (** Every member, in role order. Not through {!Conf_lwt.S.store}: a composite
       serves a listing from whichever store answers first, so a chunk corrupt on
       one copy only would be reported or not depending on which that was. *)
   val list : unit -> report Lwt.t

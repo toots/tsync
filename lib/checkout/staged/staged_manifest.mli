@@ -93,7 +93,7 @@ module Over
     (Io : Io.S)
     (_ : FS with type 'a io := 'a Io.t)
     (_ : SYSCALLS with type 'a io := 'a Io.t) : sig
-  module Make (C : Conf.S) : sig
+  module Make (C : Conf.S with type 'a io = 'a Io.t) : sig
     (** The staged tree's root. *)
     val root : unit -> string
 

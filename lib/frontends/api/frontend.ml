@@ -1,5 +1,5 @@
 type binding = {
-  conf : (module Conf.S);
+  conf : (module Conf_lwt.S);
   options : (string * string) list;
   mount_point : string;
 }
@@ -27,7 +27,7 @@ end
 type command = {
   verb : string;
   doc : string;
-  run : (module Conf.S) -> string list -> unit;
+  run : (module Conf_lwt.S) -> string list -> unit;
 }
 
 type entry = {
@@ -81,7 +81,7 @@ let pool_size concurrency = min 256 (max 32 (concurrency * 8))
 let binding_concurrency bindings =
   List.fold_left
     (fun acc b ->
-      let module C = (val b.conf : Conf.S) in
+      let module C = (val b.conf : Conf_lwt.S) in
       acc + C.max_uploads + C.max_downloads)
     0 bindings
 

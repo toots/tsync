@@ -192,7 +192,7 @@ struct
     | [] -> return_unit
     | x :: rest -> Io.bind (f x) (fun () -> iter_s f rest)
 
-  module Make (C : Conf.S) = struct
+  module Make (C : Conf.S with type 'a io = 'a Io.t) = struct
     module Lk = Logical_key.Make (C)
 
     let rel_of = Logical_key.path

@@ -104,7 +104,7 @@ let preview_kind mime =
 let preview_kinds_json =
   `Assoc (List.map (fun (e, m) -> (e, `String (preview_kind m))) mime_table)
 
-module Make (C : Conf.S) = struct
+module Make (C : Conf_lwt.S) = struct
   module Lk = Logical_key.Make (C)
   module R = Remote.Make_with_layout (C) (Layout.Identity)
   module D = Data_lwt.Make (C) (R)
@@ -139,7 +139,7 @@ module Make (C : Conf.S) = struct
             | None -> Lwt.return_none)
 
   module Tree = Inode_tree.Make (C)
-  module B = (val C.store : Backend_lwt.Store)
+  module B = (val C.store : C.Store)
 
   let is_hex s =
     s <> ""

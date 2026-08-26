@@ -36,7 +36,7 @@ let cmd : unit Cmd.t =
     let domain =
       match domain with Some _ -> domain | None -> read_default_domain ()
     in
-    let (module C : Conf.S) = make_conf ?domain cfg in
+    let (module C : Conf_lwt.S) = make_conf ?domain cfg in
     let module S = Share.Make (C) in
     match run_lwt (S.clear_cache ()) with
       | Error msg ->
@@ -63,7 +63,7 @@ let cmd : unit Cmd.t =
       match domain with Some _ -> domain | None -> read_default_domain ()
     in
     let ttl = parse_duration expires in
-    let (module C : Conf.S) = make_conf ?domain cfg in
+    let (module C : Conf_lwt.S) = make_conf ?domain cfg in
     let expires = int_of_float (Unix.time () +. ttl) in
     (* Resolve PATH to a domain-relative path; accept an absolute path under the
        mount point too. Empty rel means the whole domain. *)

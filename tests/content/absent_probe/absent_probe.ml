@@ -34,7 +34,7 @@ module C =
   (val Fixture.conf ~domain:"testdom"
          ~store:(module Store : Backend_lwt.Store)
          ~cache_root:root ~data_dir:root ~root ()
-      : Conf.S)
+      : Conf_lwt.S)
 
 module Lk = Logical_key.Make (C)
 module R = Remote.Make (C)

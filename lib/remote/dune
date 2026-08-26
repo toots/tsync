@@ -22,6 +22,8 @@
    -open
    Tsync_conf
    -open
+   Tsync_conf_lwt
+   -open
    Tsync_chunks
    -open
    Tsync_chunk_store
@@ -58,6 +60,7 @@
   tsync_manifest
   tsync_journal
   tsync_conf
+  tsync_conf_lwt
   tsync_chunks
   tsync_chunk_store
   tsync_layout

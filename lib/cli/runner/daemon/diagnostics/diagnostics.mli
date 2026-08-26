@@ -16,7 +16,7 @@ val restart : unit -> unit
 val self_json :
   ?extra:(string * Yojson.Safe.t) list -> unit -> (string * Yojson.Safe.t) list
 
-module Make (C : Conf.S) : sig
+module Make (C : Conf_lwt.S) : sig
   (** One domain: its config, cache, pending work, and every backend with its
       role and reachability.
 

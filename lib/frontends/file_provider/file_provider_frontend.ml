@@ -15,14 +15,14 @@ let start served =
     match served with
       | [] -> failwith "file_provider: no domains to serve"
       | sv :: _ ->
-          let (module C : Conf.S) = sv.Frontend.binding.Frontend.conf in
+          let (module C : Conf_lwt.S) = sv.Frontend.binding.Frontend.conf in
           C.socket_path
   in
   File_provider.start ~served ~socket_path
 
 (* Reuses the [full_resync] IPC action, routed to the domain's runtime by the
    [domain] field. *)
-let reimport (module C : Conf.S) _args =
+let reimport (module C : Conf_lwt.S) _args =
   let req =
     `Assoc
       [("action", `String "full_resync"); ("domain", `String C.domain_name)]
@@ -64,7 +64,7 @@ let write_marker ?contents name =
 
 (* Only the app owning the extension may remove a File Provider domain, and it
    reconciles at launch: name the domain in a marker, then bounce the app. *)
-let reset (module C : Conf.S) _args =
+let reset (module C : Conf_lwt.S) _args =
   let marker =
     write_marker "fileprovider-reset" ~contents:(C.domain_name ^ "\n")
   in
@@ -77,7 +77,7 @@ let reset (module C : Conf.S) _args =
 (* Only the app can unregister the domains, so that goes first. [config.json]
    lives outside [data_dir] and survives, so `make install` restores
    everything. *)
-let purge (_ : (module Conf.S)) _args =
+let purge (_ : (module Conf_lwt.S)) _args =
   let paths = Runtime.default_paths () in
   let marker = write_marker "fileprovider-purge" in
   let rec wait attempts =

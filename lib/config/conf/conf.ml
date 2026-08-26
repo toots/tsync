@@ -27,22 +27,6 @@ module type S = sig
   val journal_prefix : string
   val cursor_key : Stored_key.t
   val shares_prefix : string
-
-  (** The domain's stores as one: reads walk them in order, a write lands on the
-      mains and the deferred targets catch up behind it. Everything that reads
-      or writes a domain key goes through this and nothing else. *)
-  val store : (module Backend_lwt.Store)
-
-  (** The same stores individually, in role order, for the callers that need one
-      rather than the domain: a report naming each, a resync copying between
-      two, a share link choosing where to point.
-
-      A share manifest lives under {!shares_prefix}, outside every domain root,
-      so publishing one changes no domain content — which is why it goes to a
-      member directly rather than through {!store}, and why a read-only domain
-      can share what it can already read. *)
-  val members : (module Backend_lwt.Store) Backend.member list
-
   val cache_root : string
   val data_dir : string
   val socket_path : string
@@ -87,15 +71,27 @@ module type S = sig
 
   (** When [true], the domain rejects all write operations. *)
   val read_only : bool
+
+  type 'a io
+
+  module type Store = Backend.S with type 'a io := 'a io
+
+  (** The domain's stores as one: reads walk them in order, a write lands on the
+      mains and the deferred targets catch up behind it. Everything that reads
+      or writes a domain key goes through this and nothing else. *)
+  val store : (module Store)
+
+  (** The same stores individually, in role order, for the callers that need one
+      rather than the domain: a report naming each, a resync copying between
+      two, a share link choosing where to point.
+
+      A share manifest lives under {!shares_prefix}, outside every domain root,
+      so publishing one changes no domain content — which is why it goes to a
+      member directly rather than through {!store}, and why a read-only domain
+      can share what it can already read. *)
+  val members : (module Store) Backend.member list
 end
 
-(* Chunks per cache file: the [n >= 1] minimising
-   [|n * chunk_size - cache_chunk_size|], round-half-up so a tie takes the
-   larger run. Answered from the file's own chunk size, so one uploaded under a
-   different setting still groups the way its own body says. *)
-
-(** The domain's effective cache chunk size: config value or built-in default.
-    One spelling, so no caller picks a different default by accident. *)
 let chunks_per_group ~chunk_size ~cache_chunk_size =
   if chunk_size <= 0 then 1
   else max 1 ((cache_chunk_size + (chunk_size / 2)) / chunk_size)
@@ -115,11 +111,11 @@ let locality (module C : S) =
    set from one store rather than a per-field minimum, so that total, free and
    available stay describing the same disk. *)
 let capacity members =
-  let bounded (m : (module Backend_lwt.Store) Backend.member) =
+  let bounded (m : _ Backend.member) =
     if m.Backend.role = `ReadOnly then None
-    else Option.bind m.Backend.local_path Io_lwt.Fs.disk_space
+    else Option.bind m.Backend.local_path Fs.disk_space
   in
-  let tighter a b = if b.Io_lwt.Fs.avail < a.Io_lwt.Fs.avail then b else a in
+  let tighter a b = if b.Fs.avail < a.Fs.avail then b else a in
   match List.filter_map bounded members with
     | [] -> None
     | first :: rest -> Some (List.fold_left tighter first rest)

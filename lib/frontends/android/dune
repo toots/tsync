@@ -14,6 +14,8 @@
    -open
    Tsync_conf
    -open
+   Tsync_conf_lwt
+   -open
    Tsync_sync
    -open
    Tsync_engine
@@ -31,6 +33,7 @@
   bigstringaf
   tsync_logical_key
   tsync_staged
+  tsync_conf_lwt
   tsync_checkout
   tsync_checkout_lwt
   tsync_manifest

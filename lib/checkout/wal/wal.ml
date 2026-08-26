@@ -140,7 +140,7 @@ module Make (Io : Io.S) (R : RECORDS with type 'a io := 'a Io.t) = struct
           Hashtbl.replace logs dir both;
           both
 
-  module Make (C : Conf.S) = struct
+  module Make (C : Conf.S with type 'a io = 'a Io.t) = struct
     module J = Journal.Make (C)
 
     (* One directory per domain: the ops carry domain-relative keys, so a shared

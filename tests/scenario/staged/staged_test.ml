@@ -21,7 +21,7 @@ module C =
   (val Fixture.conf ~max_uploads:2 ~max_downloads:2
          ~store:(Fixture.local_store store_dir)
          ~root ()
-      : Conf.S)
+      : Conf_lwt.S)
 
 module Lk = Logical_key.Make (C)
 module R = Remote.Make (C)
@@ -102,7 +102,7 @@ let write_at offset s =
 
 (* Three stored chunks of 8 to one cache chunk of 24. Its own domain, so its
    cache subtree can be counted separately. *)
-module CG : Conf.S = struct
+module CG : Conf_lwt.S = struct
   include C
 
   let domain_name = "groupdom"

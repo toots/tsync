@@ -13,7 +13,7 @@ let unhealthy (r : Corruption.report) =
   || r.Corruption.unverified <> []
   || r.Corruption.unreachable <> []
 
-module Make (C : Conf.S) = struct
+module Make (C : Conf_lwt.S) = struct
   module L = Chunk_layout.Make (C)
 
   let follow ~on_progress ~on_done ~on_stalled

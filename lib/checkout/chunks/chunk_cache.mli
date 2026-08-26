@@ -64,7 +64,7 @@ module Make
     (_ : FS with type 'a io := 'a Io.t)
     (_ : SYSCALLS with type 'a io := 'a Io.t)
     (_ : POOLS with type 'a io := 'a Io.t)
-    (C : Conf.S)
+    (C : Conf.S with type 'a io = 'a Io.t)
     (F : Fetch with type 'a io := 'a Io.t) : sig
   (** Whether this group's body is local. *)
   val exists : Manifest.Group.t -> bool Io.t

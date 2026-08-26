@@ -20,7 +20,7 @@ type answer = { store : string; queued : int option }
     answer as zero markers out of one that did. *)
 val unhealthy : Corruption.report -> bool
 
-module Make (C : Conf.S) : sig
+module Make (C : Conf_lwt.S) : sig
   (** Ask every member to check itself, then watch the ones that accepted until
       their requests drain.
 

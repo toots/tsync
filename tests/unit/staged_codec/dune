@@ -14,6 +14,8 @@
    -open
    Tsync_conf
    -open
+   Tsync_conf_lwt
+   -open
    Tsync_backend_register
    -open
    Tsync_backend_lwt
@@ -29,6 +31,7 @@
   tsync_manifest
   tsync_cache_layout
   tsync_conf
+  tsync_conf_lwt
   tsync_backend_register
   tsync_backend_lwt
   tsync_local_backend_lwt

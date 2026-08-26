@@ -10,6 +10,8 @@
    -open
    Tsync_conf
    -open
+   Tsync_conf_lwt
+   -open
    Tsync_layout
    -open
    Tsync_bigstring
@@ -24,6 +26,7 @@
  (libraries
   tsync_logical_key
   tsync_conf
+  tsync_conf_lwt
   tsync_layout
   tsync_bigstring
   tsync_backend_register

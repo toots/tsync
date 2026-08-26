@@ -37,7 +37,7 @@ let cmd : unit Cmd.t =
   in
   let run domain src only exclude force_rehash v =
     set_verbose v;
-    let (module C : Conf.S) = load_conf ?domain () in
+    let (module C : Conf_lwt.S) = load_conf ?domain () in
     let current = ref None and planned = ref 0 in
     (* The same buckets {!Import.tally} keeps, so the row in [tsync status] and
        the summary this prints cannot disagree about one run. *)

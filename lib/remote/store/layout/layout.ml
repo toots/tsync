@@ -37,7 +37,7 @@ end
    local [.tsync-dir] markers, so a folder rename never changes its descendants'
    keys. A directory prefix maps to [manifests/<id>/]. *)
 module Inode = struct
-  module Make (C : Conf.S) : S = struct
+  module Make (C : Conf_lwt.S) : S = struct
     open Lwt.Syntax
 
     let lookup_id key =
@@ -74,7 +74,7 @@ module Inode = struct
               let* pid = ensure_id (Logical_key.parent key) in
               let candidate = { Folder.name; id = Stored_key.new_id () } in
               let bkey = child_key ~folder_id:pid name in
-              let module B = (val C.store : Backend_lwt.Store) in
+              let module B = (val C.store : C.Store) in
               let* held =
                 Lwt.catch
                   (fun () ->

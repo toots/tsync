@@ -8,6 +8,8 @@
    -open
    Tsync_conf
    -open
+   Tsync_conf_lwt
+   -open
    Tsync_logical_key
    -open
    Tsync_chunks
@@ -25,6 +27,7 @@
  (public_name tsync-libs.collection)
  (libraries
   tsync_conf
+  tsync_conf_lwt
   tsync_logical_key
   tsync_chunks
   tsync_io_lwt

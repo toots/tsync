@@ -142,7 +142,7 @@ let cmd : unit Cmd.t =
         | Gc.Unsupported msg | Gc.Busy msg -> failwith msg
         | Failure msg -> failwith msg
     in
-    let (module C : Conf.S) = load_conf ?domain () in
+    let (module C : Conf_lwt.S) = load_conf ?domain () in
     let module G = Gc.Make (C) in
     if retry then (
       (* Re-delivery, not a fresh decision: what each request names is in the

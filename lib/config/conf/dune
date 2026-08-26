@@ -4,15 +4,9 @@
    -open
    Tsync_backend_register
    -open
-   Tsync_backend_lwt
-   -open
    Tsync_logical_key
    -open
-   Tsync_io_lwt))
+   Tsync_io))
  (name tsync_conf)
  (public_name tsync-libs.conf)
- (libraries
-  tsync-libs.logical_key
-  tsync_backend_register
-  tsync_backend_lwt
-  tsync_io_lwt))
+ (libraries tsync-libs.logical_key tsync_backend_register tsync_io))

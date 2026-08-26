@@ -33,7 +33,7 @@ type run = { phase : phase; started : float; cursor : string }
 
 val string_of_phase : phase -> string
 
-module Make (_ : Conf.S) : sig
+module Make (_ : Conf_lwt.S) : sig
   (** Re-exported, so a caller binding this functor's result to [Collection] can
       still name what it reads back. *)
   type nonrec phase = phase = Opening | Marking | Abandoning | Closing

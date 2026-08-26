@@ -13,6 +13,8 @@
    -open
    Tsync_conf
    -open
+   Tsync_conf_lwt
+   -open
    Tsync_layout
    -open
    Tsync_store
@@ -31,6 +33,7 @@
   tsync_manifest
   tsync_retry
   tsync_conf
+  tsync_conf_lwt
   tsync_layout
   tsync_store
   tsync_backend_register

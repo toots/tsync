@@ -25,12 +25,12 @@ let conf ~domain =
     ~store:(module Store : Backend_lwt.Store)
     ~cache_root:root ~data_dir:root ~root ()
 
-module C = (val conf ~domain : Conf.S)
+module C = (val conf ~domain : Conf_lwt.S)
 module W1 = Wal_lwt.Make (C)
 module W2 = Wal_lwt.Make (C)
 
 (* A second domain to show the sharing is per directory rather than global. *)
-module D = (val conf ~domain:"otherdom" : Conf.S)
+module D = (val conf ~domain:"otherdom" : Conf_lwt.S)
 module W3 = Wal_lwt.Make (D)
 
 let () =

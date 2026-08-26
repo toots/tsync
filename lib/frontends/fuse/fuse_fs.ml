@@ -6,7 +6,7 @@ open Lwt.Syntax
    that crosses, so the backtrace travels inside it. *)
 exception With_backtrace of exn * Printexc.raw_backtrace
 
-module Make (C : Conf.S) (D : Domain_engine.Domain) = struct
+module Make (C : Conf_lwt.S) (D : Domain_engine.Domain) = struct
   module F = D.F
   module Ih = D.Ih
   module H = Hidden_ops.Make (C)

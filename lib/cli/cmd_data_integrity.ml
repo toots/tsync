@@ -16,7 +16,7 @@ let cmd : unit Cmd.t =
   let sum_stores which =
     Hashtbl.fold (fun _ v acc -> acc + which v) per_store 0
   in
-  let report (module C : Conf.S) detail =
+  let report (module C : Conf_lwt.S) detail =
     let open Lwt.Syntax in
     let module Cor = Corruption.Make (C) in
     let* r = Cor.list () in
@@ -104,7 +104,7 @@ let cmd : unit Cmd.t =
   (* Fails rather than reporting a check that did not happen: a store with
      nothing on its side to run one says so, and saying "queued" anyway would be
      the same lie as printing zero for a store nobody looks at. *)
-  let verify (module C : Conf.S) =
+  let verify (module C : Conf_lwt.S) =
     let open Lwt.Syntax in
     let module I = Integrity.Make (C) in
     let on_progress, on_done, on_stalled = watchers in
@@ -136,7 +136,7 @@ let cmd : unit Cmd.t =
           1
       | `Watched -> 0
   in
-  let repair (module C : Conf.S) source dry_run verbose =
+  let repair (module C : Conf_lwt.S) source dry_run verbose =
     let open Lwt.Syntax in
     let module Rp = Repair.Make (C) in
     (* Verbose says every chunk and where it has got to; quiet says only what it
@@ -182,7 +182,7 @@ let cmd : unit Cmd.t =
   in
   let run domain do_verify do_repair detail source dry_run verbose =
     set_verbose verbose;
-    let (module C : Conf.S) = load_conf ?domain () in
+    let (module C : Conf_lwt.S) = load_conf ?domain () in
     if do_verify && do_repair then
       failwith "--verify and --repair are separate steps; run one.";
     let code =

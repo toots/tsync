@@ -367,7 +367,7 @@ type client = {
 
 (* The real IPC handler, driven directly without a socket: every daemon service
    and the handler run on the one Lwt loop [run_scenario] spins up. *)
-let setup_client (module C : Conf.S) root staging_prefix =
+let setup_client (module C : Conf_lwt.S) root staging_prefix =
   let module Lk = Logical_key.Make (C) in
   let module F = File_lwt.Make (C) in
   let module Sq = Sync_lwt.Sync_queue.Make (C) (F) in
@@ -1557,6 +1557,9 @@ let run_scenario ?(versioning = false) ?(symlink_policy = `Keep)
 
     let symlink_policy = symlink_policy
     let read_only = false
+
+    include Conf_lwt.Monad
+    include Conf_lwt.Monad
   end in
   Lwt_main.run
     (let client = setup_client (module C) root "" in
@@ -1644,6 +1647,8 @@ let run_two_client_scenario ?(versioning = false)
 
     let symlink_policy = `Keep
     let read_only = false
+
+    include Conf_lwt.Monad
   end in
   let module Cb = struct
     let versioning = versioning
@@ -1673,6 +1678,8 @@ let run_two_client_scenario ?(versioning = false)
 
     let symlink_policy = `Keep
     let read_only = false
+
+    include Conf_lwt.Monad
   end in
   Lwt_main.run
     (let client_a = setup_client (module Ca) root "a" in
@@ -1719,7 +1726,7 @@ let run_two_client_scenarios ?versioning scenarios =
   List.iter (run_two_client_scenario ?versioning) scenarios
 
 let make_conf ?(versioning = false) ~client_name ~backend_root ~cache_root
-    ~data_dir ~socket_path () : (module Conf.S) =
+    ~data_dir ~socket_path () : (module Conf_lwt.S) =
   (module struct
     let versioning = versioning
     let client_name = client_name
@@ -1761,6 +1768,8 @@ let make_conf ?(versioning = false) ~client_name ~backend_root ~cache_root
 
     let symlink_policy = `Keep
     let read_only = false
+
+    include Conf_lwt.Monad
   end)
 
 (* Single client: after draining uploads, snapshot the listing IPC responses

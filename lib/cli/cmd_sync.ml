@@ -29,7 +29,7 @@ let cmd : unit Cmd.t =
   in
   let run domain source full parallelism v =
     set_verbose v;
-    let (module C : Conf.S) =
+    let (module C : Conf_lwt.S) =
       let conf = load_conf ?domain () in
       match source with Some name -> reading_from name conf | None -> conf
     in

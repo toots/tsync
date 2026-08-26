@@ -15,7 +15,7 @@
 
 type stats = { versions_deleted : int; journal_deleted : int }
 
-module Make (C : Conf.S) : sig
+module Make (C : Conf_lwt.S) : sig
   (** Delete one trashed folder and everything under it, now, answering how many
       objects went. [`Not_in_trash] when [path] names nothing there.
 

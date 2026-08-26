@@ -38,7 +38,9 @@ end
 module type CONTENT = sig
   type 'a io
 
-  module Make (C : Conf.S) (_ : REMOTE with type 'a io := 'a io) : sig
+  module Make
+      (C : Conf.S with type 'a io = 'a io)
+      (_ : REMOTE with type 'a io := 'a io) : sig
     val pread :
       id:string -> manifest:Manifest.t -> Bigstring.t -> offset:int64 -> int io
 
@@ -120,7 +122,7 @@ module type WAL = sig
     val idle : 'a t -> unit
   end
 
-  module Make (_ : Conf.S) : sig
+  module Make (_ : Conf.S with type 'a io = 'a io) : sig
     val owed : (Journal.Entry_key.t * Wal.record) Owed.t
     val record : Journal.Entry_key.t -> Journal.op list -> unit io
     val write : Journal.Entry_key.t -> Wal.record -> unit io
@@ -138,7 +140,7 @@ end
 module type MIRROR = sig
   type 'a io
 
-  module Make (_ : Conf.S) : sig
+  module Make (_ : Conf.S with type 'a io = 'a io) : sig
     val path : Logical_key.t -> string
     val published : Logical_key.t -> Manifest.t option io
     val write : Logical_key.t -> Manifest.t -> unit io
@@ -156,7 +158,7 @@ end
 module type TREE = sig
   type 'a io
 
-  module Make (_ : Conf.S) : sig
+  module Make (_ : Conf.S with type 'a io = 'a io) : sig
     val rename : src_key:Logical_key.t -> dst_key:Logical_key.t -> unit io
     val create_dir : Logical_key.t -> unit io
     val delete_dir : Logical_key.t -> unit io
@@ -171,7 +173,7 @@ end
 module type STAGED = sig
   type 'a io
 
-  module Make (_ : Conf.S) : sig
+  module Make (_ : Conf.S with type 'a io = 'a io) : sig
     val exists : Logical_key.t -> bool io
     val read_edits : Logical_key.t -> Staged_manifest.staged option io
     val rename : src_key:Logical_key.t -> dst_key:Logical_key.t -> unit io
@@ -269,7 +271,7 @@ struct
      in return. *)
 
   module Make_with_layout
-      (C : Conf.S)
+      (C : Conf.S with type 'a io = 'a Io.t)
       (L : LAYOUT with type 'a io := 'a Io.t)
       (Js : JOURNAL)
       (St : OBJECTS)

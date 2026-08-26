@@ -91,7 +91,7 @@ exception Unsupported of string
     nobody may touch. *)
 exception Busy of string
 
-module Make (C : Conf.S) : sig
+module Make (C : Conf_lwt.S) : sig
   (** {1 Stepping}
 
       The pacing seam under {!run}, for a caller that has to hold one collection

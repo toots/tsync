@@ -6,7 +6,7 @@
 type status = Exported | Exported_symlink | Missing_data
 type summary = { exported : int; missing : int }
 
-module Make (C : Conf.S) : sig
+module Make (C : Conf_lwt.S) : sig
   (** Export the domain to [dst] (created if needed), calling [on_file] per file
       in sorted order. Files are the union of the backend listing and the local
       sidecar tree, so pending local-only files are included.

@@ -25,7 +25,7 @@ type unusable = [ `Unreadable of exn | `Unclassifiable of exn ]
     unclassifiable body is skipped under both, being mid-write. *)
 type on_unusable = [ `Fail | `Skip of Stored_key.t -> unusable -> unit ]
 
-module Make (C : Conf.S) : sig
+module Make (C : Conf_lwt.S) : sig
   (** The backend prefix a folder's children live under. *)
   val namespace_prefix : string -> Stored_key.t
 

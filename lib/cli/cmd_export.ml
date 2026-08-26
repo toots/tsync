@@ -10,7 +10,7 @@ let cmd : unit Cmd.t =
   in
   let run domain dst v =
     set_verbose v;
-    let (module C : Conf.S) = load_conf ?domain () in
+    let (module C : Conf_lwt.S) = load_conf ?domain () in
     let current = ref None and planned = ref 0 in
     (* The same buckets the summary below prints, so the row in [tsync status]
        and that line cannot disagree about one run. *)

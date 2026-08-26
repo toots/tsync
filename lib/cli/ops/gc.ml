@@ -35,10 +35,10 @@ let empty =
     bytes_reclaimed = 0;
   }
 
-module Make (C : Conf.S) = struct
+module Make (C : Conf_lwt.S) = struct
   module L = Chunk_layout.Make (C)
   module Collection = Collection.Make (C)
-  module B = (val C.store : Backend_lwt.Store)
+  module B = (val C.store : C.Store)
 
   (* How long the closing phase may go without recording where it got to. Longer
      than the reporting interval, a checkpoint costing a delete against every

@@ -32,7 +32,7 @@ let memo_for prefix =
         Hashtbl.replace memos prefix m;
         m
 
-module Make (C : Conf.S) = struct
+module Make (C : Conf_lwt.S) = struct
   module L = Chunk_layout.Make (C)
 
   let prefix = L.corrupted_prefix

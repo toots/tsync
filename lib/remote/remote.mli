@@ -41,7 +41,7 @@ module type S = sig
       ([Manifest.chunk_key], without the domain's chunk prefix). *)
   val get_chunk : chunk_key:string -> Bigstring.t Lwt.t
 
-  (** Chunk size for files this client creates: [Conf.S.chunk_size] when the
+  (** Chunk size for files this client creates: [Conf_lwt.S.chunk_size] when the
       config says, else what the domain's stores recommend — an http-proxy
       answers with the serving domain's own, so the setting need not be mirrored
       in two configs — else [Conf.default_chunk_size]. Existing files always use
@@ -107,6 +107,6 @@ end
 (** Keys are mapped to backend keys through [L]. Callers holding real paths want
     {!Make}; {!Layout.Identity} serves callers that already hold backend keys.
 *)
-module Make_with_layout (C : Conf.S) (L : Layout.S) : S
+module Make_with_layout (C : Conf_lwt.S) (L : Layout.S) : S
 
-module Make (C : Conf.S) : S
+module Make (C : Conf_lwt.S) : S

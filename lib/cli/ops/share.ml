@@ -3,10 +3,10 @@ open Lwt.Syntax
 exception Share_unavailable of string
 exception Share_not_found of string
 
-module Make (C : Conf.S) = struct
+module Make (C : Conf_lwt.S) = struct
   module Lk = Logical_key.Make (C)
   module L = Layout.Inode.Make (C)
-  module R = (val C.store : Backend_lwt.Store)
+  module R = (val C.store : C.Store)
 
   let shares_prefix = C.shares_prefix
 

@@ -24,6 +24,8 @@
    -open
    Tsync_conf
    -open
+   Tsync_conf_lwt
+   -open
    Tsync_local_backend_lwt
    -open
    Tsync_http_proxy_backend_lwt
@@ -58,6 +60,7 @@
   tsync_frontend
   tsync_diagnostics
   tsync_conf
+  tsync_conf_lwt
   tsync_io_lwt
   cohttp
   yojson

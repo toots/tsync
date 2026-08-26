@@ -34,7 +34,7 @@ let cmd : unit Cmd.t =
     set_verbose v;
     (* Mirror copies between the stores themselves, so it reads [C.members]
        rather than going through the composite. *)
-    let (module C : Conf.S) = load_conf ?domain () in
+    let (module C : Conf_lwt.S) = load_conf ?domain () in
     let src =
       Option.value source
         ~default:(match C.members with m :: _ -> m.Backend.name | [] -> "")

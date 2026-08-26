@@ -12,6 +12,8 @@
    -open
    Tsync_conf
    -open
+   Tsync_conf_lwt
+   -open
    Tsync_field_spec))
  (name tsync_frontend_register)
  (public_name tsync-libs.frontend_register)
@@ -21,6 +23,7 @@
   tsync_diagnostics
   tsync_field_spec
   tsync_conf
+  tsync_conf_lwt
   tsync_log
   unix
   lwt.unix))

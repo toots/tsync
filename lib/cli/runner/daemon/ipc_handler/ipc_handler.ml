@@ -35,7 +35,7 @@ module type S = sig
 end
 
 module Make
-    (C : Conf.S)
+    (C : Conf_lwt.S)
     (F : File_ops.S with type 'a io := 'a Lwt.t)
     (Sq : Sync_queue.S with type 'a io := 'a Lwt.t) : S = struct
   module Fs = File_store.Make (C)

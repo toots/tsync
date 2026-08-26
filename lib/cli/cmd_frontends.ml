@@ -20,7 +20,7 @@ let frontend_cmds () =
     if not (List.mem name (frontend_names d)) then (
       Printf.eprintf "domain %s has no %s frontend\n" d.Conf_parsing.name name;
       exit 1);
-    let (module C : Conf.S) = make_conf ?domain cfg in
+    let (module C : Conf_lwt.S) = make_conf ?domain cfg in
     command.Frontend.run (module C) args
   in
   List.filter_map

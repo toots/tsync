@@ -39,7 +39,7 @@ module C =
   (val Fixture.conf ~domain:"testdom"
          ~store:(module Flaky : Backend_lwt.Store)
          ~cache_root:root ~data_dir:root ~root ()
-      : Conf.S)
+      : Conf_lwt.S)
 
 module R = Resync.Make (C)
 module Fs = File_store.Make (C)

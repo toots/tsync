@@ -12,7 +12,7 @@ let store_dir = root ^ "/store"
 let cache_dir = root ^ "/cache"
 let data_dir = root ^ "/data"
 
-module C : Conf.S = struct
+module C : Conf_lwt.S = struct
   let versioning = false
   let client_name = "test"
   let domain_name = "racedom"
@@ -40,6 +40,8 @@ module C : Conf.S = struct
   let max_cache = None
   let symlink_policy = `Keep
   let read_only = false
+
+  include Conf_lwt.Monad
 end
 
 module Lk = Logical_key.Make (C)

@@ -25,7 +25,7 @@ let cmd : unit Cmd.t =
        let domain =
          match domain with Some _ -> domain | None -> read_default_domain ()
        in
-       let (module C : Conf.S) = make_conf ?domain cfg in
+       let (module C : Conf_lwt.S) = make_conf ?domain cfg in
        let (module F : Frontend.S) =
          resolve_frontend ?frontend (Conf_parsing.pick_domain ?domain cfg)
        in
@@ -54,7 +54,7 @@ let cmd : unit Cmd.t =
        in
        let module Mf = Checkout_lwt.Make (C) in
        let module Mfs = Staged_lwt.Manifest.Make (C) in
-       let module B = (val C.store : Backend_lwt.Store) in
+       let module B = (val C.store : C.Store) in
        let* files, subdirs = Mf.list_children ~prefix () in
        let items =
          List.map (fun d -> (d, `Dir d)) subdirs

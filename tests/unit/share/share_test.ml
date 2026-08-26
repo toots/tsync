@@ -24,7 +24,7 @@ module Shareable : Backend_lwt.Store = struct
     Lwt.return { Backend.no_caps with share_url = Some share_base }
 end
 
-module C : Conf.S = struct
+module C : Conf_lwt.S = struct
   let versioning = false
   let client_name = "test"
   let domain_name = "testdom"
@@ -47,6 +47,8 @@ module C : Conf.S = struct
   let max_cache = None
   let symlink_policy = `Keep
   let read_only = false
+
+  include Conf_lwt.Monad
 end
 
 module Lk = Logical_key.Make (C)
@@ -112,7 +114,7 @@ let () =
              ()
           : Backend_lwt.Store)
   end in
-  let module C2 : Conf.S = struct
+  let module C2 : Conf_lwt.S = struct
     include C
 
     let store = (module NoShare : Backend_lwt.Store)
@@ -127,7 +129,7 @@ let () =
      reachable only as a fallback. Sharing still has to work, a share manifest
      living outside every domain root — which is why it goes to a member
      directly rather than through the write composite. *)
-  let module ReadOnlyDomain : Conf.S = struct
+  let module ReadOnlyDomain : Conf_lwt.S = struct
     include C
 
     let store =
@@ -158,7 +160,7 @@ let () =
 
   (* Only the backfill target serves shares, and reads never reach it: it is
      the last choice, not a skipped one. *)
-  let module BackfillOnly : Conf.S = struct
+  let module BackfillOnly : Conf_lwt.S = struct
     include C
 
     let members =

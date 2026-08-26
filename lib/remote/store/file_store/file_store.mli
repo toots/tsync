@@ -5,7 +5,10 @@
     test observing a flush need not sleep it out. *)
 val set_cursor_flush_interval : float -> unit
 
-module Make (C : Conf.S) : sig
+(* {!Data.JOURNAL} asks which monad this answers in. *)
+type 'a io = 'a Lwt.t
+
+module Make (C : Conf_lwt.S) : sig
   val rename_file : src_key:Logical_key.t -> dst_key:Logical_key.t -> unit Lwt.t
 
   (** Heads a *file key*'s manifest object, resolving it through the layout.

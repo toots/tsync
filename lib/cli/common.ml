@@ -95,7 +95,7 @@ let item_for_path ?domain path =
   match found with
     | None -> Error (path ^ ": under no domain this machine serves")
     | Some (name, rel) -> (
-        let (module C : Conf.S) = make_conf ~domain:name cfg in
+        let (module C : Conf_lwt.S) = make_conf ~domain:name cfg in
         let module Lk = Logical_key.Make (C) in
         let found =
           Oneshot.run
@@ -140,7 +140,7 @@ let deferred_totals members =
 
    [current] joins a phase to the thing within it, so six commands do not each
    pick a separator. *)
-let report_job ?target ?current ~kind (module C : Conf.S) ~counters () =
+let report_job ?target ?current ~kind (module C : Conf_lwt.S) ~counters () =
   Job_report_lwt.start
     ~socket_path:(Runtime.sync_socket_path runtime_paths)
     ~domain:C.domain_name ~kind ?target ?current

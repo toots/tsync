@@ -10,7 +10,7 @@ module C =
   (val Fixture.conf ~max_uploads:2 ~max_downloads:2
          ~store:(Fixture.local_store store_dir)
          ~root ()
-      : Conf.S)
+      : Conf_lwt.S)
 
 module F = File_lwt.Make (C)
 module J = Journal.Make (C)

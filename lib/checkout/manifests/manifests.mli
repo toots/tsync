@@ -28,7 +28,7 @@ end
 module type STAGED = sig
   type 'a io
 
-  module Make (_ : Conf.S) : sig
+  module Make (_ : Conf.S with type 'a io = 'a io) : sig
     val read_edits : Logical_key.t -> Staged_manifest.staged option io
   end
 end
@@ -41,7 +41,7 @@ module Over
       name beside any component the filesystem cannot hold verbatim. *)
   val ensure_dirs : string -> string -> unit Io.t
 
-  module Make (C : Conf.S) : sig
+  module Make (C : Conf.S with type 'a io = 'a Io.t) : sig
     (** The directory the manifests of this domain are filed under. *)
     val root : unit -> string
 

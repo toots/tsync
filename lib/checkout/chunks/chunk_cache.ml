@@ -58,7 +58,7 @@ module Make
     (Fs : FS with type 'a io := 'a Io.t)
     (Retry : SYSCALLS with type 'a io := 'a Io.t)
     (Bounded : POOLS with type 'a io := 'a Io.t)
-    (C : Conf.S)
+    (C : Conf.S with type 'a io = 'a Io.t)
     (F : Fetch with type 'a io := 'a Io.t) =
 struct
   let ( let* ) = Io.bind

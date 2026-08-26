@@ -22,7 +22,7 @@ type summary = {
   failed : int;
 }
 
-module Make (C : Conf.S) : sig
+module Make (C : Conf_lwt.S) : sig
   (** Import every file under [src] (recursively, sorted), calling [on_file] per
       entry. Directories are created in the manifest tree and on the backends.
       When [force_rehash] is true, existing keys are not skipped: every file is

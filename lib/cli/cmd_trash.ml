@@ -7,7 +7,7 @@ open Common
 let trash_list domain =
   run_lwt
     (let open Lwt.Syntax in
-     let (module C : Conf.S) = load_conf ?domain () in
+     let (module C : Conf_lwt.S) = load_conf ?domain () in
      let module T = Trash.Make (C) in
      let+ paths = T.list () in
      List.iter (Printf.printf "%s\n") paths)
@@ -16,7 +16,7 @@ let trash_restore path domain =
   let code =
     run_lwt
       (let open Lwt.Syntax in
-       let (module C : Conf.S) = load_conf ?domain () in
+       let (module C : Conf_lwt.S) = load_conf ?domain () in
        let module T = Trash.Make (C) in
        let+ outcome = T.restore path in
        match outcome with
@@ -59,7 +59,7 @@ let cmd : unit Cmd.t =
     let code =
       run_lwt
         (let open Lwt.Syntax in
-         let (module C : Conf.S) = load_conf ?domain () in
+         let (module C : Conf_lwt.S) = load_conf ?domain () in
          let module E = Expire.Make (C) in
          let+ outcome = E.purge_trashed ~path () in
          match outcome with

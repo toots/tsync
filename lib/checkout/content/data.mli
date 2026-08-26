@@ -70,7 +70,7 @@ end
 module type MIRROR = sig
   type 'a io
 
-  module Make (_ : Conf.S) : sig
+  module Make (_ : Conf.S with type 'a io = 'a io) : sig
     val published : Logical_key.t -> Manifest.t option io
     val write : Logical_key.t -> Manifest.t -> unit io
 
@@ -84,7 +84,9 @@ module type MIRROR = sig
 end
 
 module type JOURNAL = sig
-  module Make (_ : Conf.S) : sig
+  type 'a io
+
+  module Make (_ : Conf.S with type 'a io = 'a io) : sig
     val read_last_sync_key : unit -> Journal.Entry_key.t option
   end
 end
@@ -131,8 +133,10 @@ module Over
     (_ : LOCKS with type 'a io := 'a Io.t)
     (_ : POOLS with type 'a io := 'a Io.t)
     (_ : MIRROR with type 'a io := 'a Io.t)
-    (_ : JOURNAL) : sig
-  module Make (C : Conf.S) (R : REMOTE with type 'a io := 'a Io.t) : sig
+    (_ : JOURNAL with type 'a io = 'a Io.t) : sig
+  module Make
+      (C : Conf.S with type 'a io = 'a Io.t)
+      (R : REMOTE with type 'a io := 'a Io.t) : sig
     (** Fills [buf] from [offset] in the file [manifest] describes, returning
         the byte count — short only at end of file. [id] is for the read-ahead
         heuristic alone. Raises {!Backend.Backend_error} for a manifest whose

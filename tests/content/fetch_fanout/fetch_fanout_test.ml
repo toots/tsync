@@ -23,7 +23,7 @@ let unused_store : (module Backend_lwt.Store) =
     let why = "no backend in this test"
   end))
 
-module C : Conf.S = struct
+module C : Conf_lwt.S = struct
   let versioning = false
   let client_name = "Test"
   let domain_name = "test"
@@ -46,6 +46,8 @@ module C : Conf.S = struct
   let max_cache = None
   let symlink_policy = `Keep
   let read_only = false
+
+  include Conf_lwt.Monad
 end
 
 (* Every fetch parks here, so each started one holds whatever it opened. *)

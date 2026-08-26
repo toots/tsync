@@ -117,7 +117,7 @@ let self_json ?(extra = []) () =
            (Log.recent ())) );
   ]
 
-module Make (C : Conf.S) = struct
+module Make (C : Conf_lwt.S) = struct
   module R = Remote.Make_with_layout (C) (Layout.Identity)
   module L = Chunk_layout.Make (C)
   module D = Data_lwt.Make (C) (R)

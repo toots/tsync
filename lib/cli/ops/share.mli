@@ -14,7 +14,7 @@ exception Share_unavailable of string
 (** There is nothing at that path to link to. *)
 exception Share_not_found of string
 
-module Make (C : Conf.S) : sig
+module Make (C : Conf_lwt.S) : sig
   (** Publish a share for [rel], answering its token. [expires] is a Unix
       timestamp; [token] reuses an existing one instead of minting a fresh
       random id, for a caller replacing a link in place. *)

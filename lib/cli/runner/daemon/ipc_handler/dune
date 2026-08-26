@@ -40,6 +40,8 @@
    -open
    Tsync_conf
    -open
+   Tsync_conf_lwt
+   -open
    Tsync_backend_register
    -open
    Tsync_diagnostics))
@@ -62,6 +64,7 @@
   tsync_backend_register
   tsync_io_lwt
   tsync_conf
+  tsync_conf_lwt
   tsync_ipc
   tsync_ipc_lwt
   tsync_metrics

@@ -56,12 +56,15 @@ let conf ?(domain = "testdom") ?(client_name = "test") ?(versioning = false)
   match (store_override, members_override) with
     | None, None -> built
     | _ ->
-        let module B = (val built : Conf.S) in
+        let module B = (val built : Conf_lwt.S) in
         (* A double has no config to be parsed from, so it is grafted onto what
            the assembly built rather than described to it. *)
         (module struct
           include B
 
-          let store = Option.value store_override ~default:B.store
-          let members = Option.value members_override ~default:B.members
-        end : Conf.S)
+          let store : (module Backend_lwt.Store) =
+            Option.value store_override ~default:B.store
+
+          let members : (module Backend_lwt.Store) Backend.member list =
+            Option.value members_override ~default:B.members
+        end : Conf_lwt.S)

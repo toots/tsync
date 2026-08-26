@@ -7,7 +7,7 @@ type dest_stats = {
   copied_bytes : int;
 }
 
-module Make (C : Conf.S) = struct
+module Make (C : Conf_lwt.S) = struct
   module Lk = Logical_key.Make (C)
   module Collection = Collection.Make (C)
   module L = Chunk_layout.Make (C)

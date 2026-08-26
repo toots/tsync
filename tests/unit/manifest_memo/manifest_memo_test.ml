@@ -25,7 +25,7 @@ module C =
          ~cache_chunk_size:(8 * 1024 * 1024)
          ~store:(module Store : Backend_lwt.Store)
          ~cache_root:root ~data_dir:root ~root ()
-      : Conf.S)
+      : Conf_lwt.S)
 
 module Lk = Logical_key.Make (C)
 module Mf = Manifests_lwt.Make (C)

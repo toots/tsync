@@ -9,7 +9,7 @@
 module type JOURNAL = sig
   type 'a io
 
-  module Make (_ : Conf.S) : sig
+  module Make (_ : Conf.S with type 'a io = 'a io) : sig
     val write_journal_entry :
       ?entry_key:Journal.Entry_key.t ->
       Journal.op list ->
@@ -30,7 +30,7 @@ end
 module type WAL = sig
   type 'a io
 
-  module Make (_ : Conf.S) : sig
+  module Make (_ : Conf.S with type 'a io = 'a io) : sig
     val list : unit -> (Journal.Entry_key.t * Wal.record) list io
     val complete : Journal.Entry_key.t -> unit io
     val note_failure : Journal.Entry_key.t -> Retry.kind -> string -> unit io
@@ -40,7 +40,7 @@ end
 module type STAGED = sig
   type 'a io
 
-  module Make (_ : Conf.S) : sig
+  module Make (_ : Conf.S with type 'a io = 'a io) : sig
     val list : unit -> Logical_key.t list io
   end
 end
@@ -59,7 +59,9 @@ module Over
     (_ : JOURNAL with type 'a io := 'a Io.t)
     (_ : WAL with type 'a io := 'a Io.t)
     (_ : STAGED with type 'a io := 'a Io.t) : sig
-  module Make (C : Conf.S) (F : File_ops.S with type 'a io := 'a Io.t) : sig
+  module Make
+      (C : Conf.S with type 'a io = 'a Io.t)
+      (F : File_ops.S with type 'a io := 'a Io.t) : sig
     (** Finish or discard every record this client left behind, oldest first,
         each under the entry key it already has. Startup only: it replays ops
         and re-queues uploads, so it must not run while writes are staging.

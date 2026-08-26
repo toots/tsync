@@ -34,8 +34,8 @@ let manifest_of ~domain_prefix ~grouping =
 let folder_versions ~versions_prefix ~folder_id =
   Stored_key.namespace ~prefix:versions_prefix ~folder_id
 
-module Make (C : Conf.S) (L : Layout.S) = struct
-  module B = (val C.store : Backend_lwt.Store)
+module Make (C : Conf_lwt.S) (L : Layout.S) = struct
+  module B = (val C.store : C.Store)
 
   let version_dir ~key =
     let+ bk = L.manifest_key key in

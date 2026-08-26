@@ -133,7 +133,7 @@ and share_handler =
   (Cohttp.Response.t * Cohttp_lwt.Body.t) Lwt.t
 
 let make_route bindings ~peers (b : Frontend.binding) =
-  let module C = (val b.Frontend.conf : Conf.S) in
+  let module C = (val b.Frontend.conf : Conf_lwt.S) in
   let secret =
     match inherited bindings b "secret" with
       | Some s -> s

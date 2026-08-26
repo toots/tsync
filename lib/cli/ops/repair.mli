@@ -28,7 +28,7 @@ type stats = {
 (** One line for a report, e.g. ["FIXED <key> on cloud (from disk)"]. *)
 val describe : chunk_key:string -> store:string -> outcome -> string
 
-module Make (C : Conf.S) : sig
+module Make (C : Conf_lwt.S) : sig
   (** Repair every marked chunk. [source] narrows the candidate copies to one
       named store; by default every readable member is tried in configuration
       order, which puts the main first.
@@ -37,9 +37,9 @@ module Make (C : Conf.S) : sig
       writing one bad body over another would spread the damage while reporting
       a repair. [dry_run] does everything but the write.
 
-      The bad copy is written directly rather than through {!Conf.S.store}: only
-      one store is wrong, and a fan-out write would re-send the chunk to healthy
-      ones and queue deferred jobs for them.
+      The bad copy is written directly rather than through {!Conf_lwt.S.store}:
+      only one store is wrong, and a fan-out write would re-send the chunk to
+      healthy ones and queue deferred jobs for them.
 
       [on_start] fires once the marked chunks are known and [on_chunk] carries
       the position within that total, a repair being a chunk-sized read and

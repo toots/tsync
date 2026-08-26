@@ -4,7 +4,7 @@
 module type JOURNAL = sig
   type 'a io
 
-  module Make (_ : Conf.S) : sig
+  module Make (_ : Conf.S with type 'a io = 'a io) : sig
     val fetch_cursor : unit -> Journal.Entry_key.t option io
   end
 end
@@ -20,7 +20,9 @@ module Over
     (Clock : CLOCK with type 'a io := 'a Io.t)
     (Js : JOURNAL with type 'a io := 'a Io.t)
     (Rp : sig
-      module Make (_ : Conf.S) (_ : File_ops.S with type 'a io := 'a Io.t) : sig
+      module Make
+          (_ : Conf.S with type 'a io = 'a Io.t)
+          (_ : File_ops.S with type 'a io := 'a Io.t) : sig
         val apply_foreign : on_changed:(string -> unit) -> unit -> int Io.t
       end
     end) =
@@ -36,7 +38,10 @@ struct
     | [] -> return_unit
     | x :: rest -> Io.bind (f x) (fun () -> iter_s f rest)
 
-  module Make (C : Conf.S) (F : File_ops.S with type 'a io := 'a Io.t) = struct
+  module Make
+      (C : Conf.S with type 'a io = 'a Io.t)
+      (F : File_ops.S with type 'a io := 'a Io.t) =
+  struct
     module Js = Js.Make (C)
     module Rp = Rp.Make (C) (F)
 

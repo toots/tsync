@@ -26,7 +26,7 @@ module Main =
          ()
       : Backend_lwt.Store)
 
-module C : Conf.S = struct
+module C : Conf_lwt.S = struct
   let versioning = false
   let client_name = "test"
   let domain_name = "testdom"
@@ -60,6 +60,8 @@ module C : Conf.S = struct
   let max_cache = None
   let symlink_policy = `Keep
   let read_only = false
+
+  include Conf_lwt.Monad
 end
 
 module G = Gc.Make (C)

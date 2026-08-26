@@ -44,6 +44,8 @@ module C = struct
   let max_cache = None
   let symlink_policy = `Keep
   let read_only = false
+
+  include Conf_lwt.Monad
 end
 
 module Lk = Logical_key.Make (C)

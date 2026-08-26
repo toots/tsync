@@ -45,7 +45,7 @@ module type S = sig
   val converge : on_changed:(string -> unit) -> unit -> unit Lwt.t
 end
 
-module Make (C : Conf.S) : S = struct
+module Make (C : Conf_lwt.S) : S = struct
   module Lk = Logical_key.Make (C)
   module F = File_lwt.Make (C)
   module Sq = Sync_lwt.Sync_queue.Make (C) (F)

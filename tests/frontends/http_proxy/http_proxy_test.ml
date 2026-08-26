@@ -4,7 +4,7 @@ module Down = Doubles.Down (struct
   let why = "connection refused"
 end)
 
-module C : Conf.S = struct
+module C : Conf_lwt.S = struct
   let versioning = false
   let client_name = "test-client"
   let domain_name = "statusdom"
@@ -57,6 +57,8 @@ module C : Conf.S = struct
   let max_cache = None
   let symlink_policy = `Keep
   let read_only = false
+
+  include Conf_lwt.Monad
 end
 
 let json_member name j = Yojson.Safe.Util.member name j
@@ -419,7 +421,7 @@ let () =
      ones rather than a stand-in. *)
   let binding =
     {
-      Frontend.conf = (module C : Conf.S);
+      Frontend.conf = (module C : Conf_lwt.S);
       options = [("port", "8443"); ("secret", "s3cr3t")];
       mount_point = "";
     }

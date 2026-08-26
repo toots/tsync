@@ -72,7 +72,7 @@ end
 module type MIRROR = sig
   type 'a io
 
-  module Make (_ : Conf.S) : sig
+  module Make (_ : Conf.S with type 'a io = 'a io) : sig
     val published : Logical_key.t -> Manifest.t option io
     val write : Logical_key.t -> Manifest.t -> unit io
 
@@ -86,7 +86,9 @@ module type MIRROR = sig
 end
 
 module type JOURNAL = sig
-  module Make (_ : Conf.S) : sig
+  type 'a io
+
+  module Make (_ : Conf.S with type 'a io = 'a io) : sig
     val read_last_sync_key : unit -> Journal.Entry_key.t option
   end
 end
@@ -133,7 +135,7 @@ module Over
     (Lock : LOCKS with type 'a io := 'a Io.t)
     (Bounded : POOLS with type 'a io := 'a Io.t)
     (Mf : MIRROR with type 'a io := 'a Io.t)
-    (Js : JOURNAL) =
+    (Js : JOURNAL with type 'a io = 'a Io.t) =
 struct
   let ( let* ) = Io.bind
   let ( let+ ) x f = Io.map f x
@@ -174,7 +176,10 @@ struct
           Hashtbl.replace absences prefix a;
           a
 
-  module Make (C : Conf.S) (R : REMOTE with type 'a io := 'a Io.t) = struct
+  module Make
+      (C : Conf.S with type 'a io = 'a Io.t)
+      (R : REMOTE with type 'a io := 'a Io.t) =
+  struct
     module Cc = Chunk_cache.Make (Io) (Fs) (Retry) (Bounded) (C) (R)
     module Bodies = Staged_body.Over (Io) (Fs) (Retry)
     module Sb = Bodies.Make (C) (Cc)

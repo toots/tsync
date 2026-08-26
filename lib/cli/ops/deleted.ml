@@ -2,9 +2,9 @@ open Lwt.Syntax
 
 type entry = { path : string; latest : int64; versions : int }
 
-module Make (C : Conf.S) = struct
+module Make (C : Conf_lwt.S) = struct
   module Lk = Logical_key.Make (C)
-  module B = (val C.store : Backend_lwt.Store)
+  module B = (val C.store : C.Store)
 
   let parse key = History.parse ~versions_prefix:C.versions_prefix key
 

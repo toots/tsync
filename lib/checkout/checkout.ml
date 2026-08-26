@@ -57,7 +57,7 @@ end
 module type MIRROR = sig
   type 'a io
 
-  module Make (_ : Conf.S) : sig
+  module Make (_ : Conf.S with type 'a io = 'a io) : sig
     val root : unit -> string
     val path : Logical_key.t -> string
     val ensure_parent : Logical_key.t -> unit io
@@ -71,7 +71,7 @@ end
 module type STAGED = sig
   type 'a io
 
-  module Make (_ : Conf.S) : sig
+  module Make (_ : Conf.S with type 'a io = 'a io) : sig
     val fold :
       rel_dir:string ->
       deep:bool ->
@@ -142,7 +142,7 @@ struct
         names
 
   (* The store, per domain: manifests keyed by logical key and nothing else. *)
-  module Make (C : Conf.S) = struct
+  module Make (C : Conf.S with type 'a io = 'a Io.t) = struct
     module Lk = Logical_key.Make (C)
     module Sm = Sm.Make (C)
     module Mf = Mf.Make (C)

@@ -64,6 +64,8 @@
    -open
    Tsync_conf
    -open
+   Tsync_conf_lwt
+   -open
    Tsync_domain_store
    -open
    Tsync_domain_store_lwt
@@ -102,6 +104,7 @@
   tsync_cache_layout_lwt
   tsync_io_lwt
   tsync_conf
+  tsync_conf_lwt
   tsync_bigstring
   tsync_backend_register
   tsync_backend_lwt

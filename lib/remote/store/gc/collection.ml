@@ -51,7 +51,7 @@ let of_string data =
     | _ -> None
     | exception _ -> None
 
-module Make (C : Conf.S) = struct
+module Make (C : Conf_lwt.S) = struct
   (* Re-exported so a caller binding [Collection] to this can still name the
      record it reads back. *)
   type nonrec phase = phase = Opening | Marking | Abandoning | Closing
@@ -59,7 +59,7 @@ module Make (C : Conf.S) = struct
 
   let string_of_phase = string_of_phase
 
-  module B = (val C.store : Backend_lwt.Store)
+  module B = (val C.store : C.Store)
   module L = Chunk_layout.Make (C)
 
   let marker_key = Chunk_layout.gc_marker_key ~chunk_prefix:C.chunk_prefix

@@ -13,7 +13,7 @@ type dest_stats = {
   copied_bytes : int;
 }
 
-module Make (C : Conf.S) : sig
+module Make (C : Conf_lwt.S) : sig
   (** Copy from the {!Conf.members} entry named [source] (default the first,
       which role order makes a main) to every other one. Copies between the
       stores themselves rather than through {!Conf.store}: the point is to reach

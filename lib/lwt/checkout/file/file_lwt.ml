@@ -10,7 +10,7 @@ module Over =
 
 (* The one place the store modules are built, so everything above takes them
    rather than knowing which they are. *)
-module Make (C : Conf.S) = struct
+module Make (C : Conf_lwt.S) = struct
   module L = Layout.Inode.Make (C)
 
   include

@@ -1,10 +1,10 @@
 (** A parsed config, made live: the domain a command or a daemon actually runs
     against.
 
-    {!Conf_parsing} reads the file and {!Conf.S} is the shape everything above
-    is a functor over; this is the step between, and the one place a configured
-    role becomes behaviour — which store is the source of truth, which is a copy
-    filled behind the write, which is only ever read.
+    {!Conf_parsing} reads the file and {!Conf_lwt.S} is the shape everything
+    above is a functor over; this is the step between, and the one place a
+    configured role becomes behaviour — which store is the source of truth,
+    which is a copy filled behind the write, which is only ever read.
 
     [paths] is asked for rather than discovered here: where a machine keeps its
     cache and data is the caller's to decide, and a library reading the
@@ -23,12 +23,12 @@ val of_config :
   ?resume:bool ->
   paths:Runtime.paths ->
   Conf_parsing.t ->
-  (module Conf.S)
+  (module Conf_lwt.S)
 
 (** Read from the member named, and only read: writes still go through the
     domain's own path so the deferred targets behind it still fill. Raises
     [Failure] when nothing has that name, or when several do. *)
-val reading_from : string -> (module Conf.S) -> (module Conf.S)
+val reading_from : string -> (module Conf_lwt.S) -> (module Conf_lwt.S)
 
 (** The domain a command means and the socket its daemon answers on. *)
 val target :

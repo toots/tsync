@@ -43,6 +43,8 @@
    -open
    Tsync_conf
    -open
+   Tsync_conf_lwt
+   -open
    Tsync_folder_ids
    -open
    Tsync_folder_ids_lwt
@@ -109,6 +111,7 @@
   tsync_journal
   tsync_chunks
   tsync_conf
+  tsync_conf_lwt
   tsync_folder_ids
   tsync_folder_ids_lwt
   tsync_cache_layout

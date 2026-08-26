@@ -24,7 +24,7 @@ type progress = {
       (** The folder being walked, [None] once the walk is done. *)
 }
 
-module Make (C : Conf.S) : sig
+module Make (C : Conf_lwt.S) : sig
   (** [notify] is called once the rebuild is complete and never before, or a
       daemon told earlier re-reads a mirror that is still being written.
       [on_decision] receives the local mark, the published journal and why a

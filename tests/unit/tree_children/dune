@@ -14,6 +14,8 @@
    -open
    Tsync_conf
    -open
+   Tsync_conf_lwt
+   -open
    Tsync_bigstring
    -open
    Tsync_backend_register
@@ -34,6 +36,7 @@
   tsync_store
   tsync_inode_tree
   tsync_conf
+  tsync_conf_lwt
   tsync_bigstring
   tsync_backend_register
   tsync_backend_lwt

@@ -6,7 +6,7 @@
     journal and cursor objects are not manifest keys and live in {!File_store}
     and {!Remote}. *)
 
-module Make (C : Conf.S) (L : Layout.S) : sig
+module Make (C : Conf_lwt.S) (L : Layout.S) : sig
   (** Publish a manifest, bringing its folder into existence if needed. Every
       other operation here resolves what is already there and treats an unknown
       folder as absent. *)

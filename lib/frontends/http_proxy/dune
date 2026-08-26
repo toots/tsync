@@ -48,6 +48,8 @@
    -open
    Tsync_conf
    -open
+   Tsync_conf_lwt
+   -open
    Tsync_frontend_register
    -open
    Tsync_engine
@@ -71,6 +73,7 @@
   tsync_remote
   tsync_layout
   tsync_inode_tree
+  tsync_conf_lwt
   tsync_checkout
   tsync_checkout_lwt
   tsync_manifest

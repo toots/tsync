@@ -12,6 +12,8 @@
    -open
    Tsync_conf
    -open
+   Tsync_conf_lwt
+   -open
    Tsync_log
    -open
    Tsync_io_lwt
@@ -31,6 +33,7 @@
   lwt.unix
   tsync_frontend_register
   tsync-libs.conf_parsing
+  tsync_conf_lwt
   tsync_domain
   tsync-libs.engine
   tsync-libs.conf

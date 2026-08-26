@@ -4,7 +4,7 @@ external is_dataless : string -> bool = "caml_is_dataless"
    folder, which also tells a caller there is nothing local to look at. *)
 let domain_dir = Conf_parsing.cloud_storage_dir
 
-module Make (C : Conf.S) (D : Domain_engine.Domain) = struct
+module Make (C : Conf_lwt.S) (D : Domain_engine.Domain) = struct
   module Lk = Logical_key.Make (C)
   module F = D.F
   module H = D.Ih
@@ -198,7 +198,8 @@ let start ~served ~socket_path =
       let* domain_runtimes =
         Lwt_list.map_s
           (fun (sv : Frontend.served) ->
-            let module C = (val sv.Frontend.binding.Frontend.conf : Conf.S) in
+            let module C = (val sv.Frontend.binding.Frontend.conf : Conf_lwt.S)
+            in
             let module D = (val sv.Frontend.domain : Domain_engine.Domain) in
             let module R = Make (C) (D) in
             let* () = R.init ~subs () in

@@ -12,7 +12,7 @@ type entry = { bkey : Stored_key.t; body : body }
 type unusable = [ `Unreadable of exn | `Unclassifiable of exn ]
 type on_unusable = [ `Fail | `Skip of Stored_key.t -> unusable -> unit ]
 
-module Make (C : Conf.S) = struct
+module Make (C : Conf_lwt.S) = struct
   module St = Store.Make (C) (Layout.Inode.Make (C))
 
   let namespace_prefix folder_id =

@@ -18,7 +18,7 @@ type outcome =
           it would go back under, so there is no key to write. A sync resolves
           the parent and makes the restore possible. *)
 
-module Make (C : Conf.S) : sig
+module Make (C : Conf_lwt.S) : sig
   (** The domain-relative path of every trashed folder. A marker whose body does
       not name one is passed over: a body that will not parse is a write in
       flight, not a finding. *)

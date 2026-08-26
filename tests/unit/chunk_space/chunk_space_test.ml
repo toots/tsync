@@ -34,7 +34,7 @@ module Uncollectable : Backend_lwt.Store = struct
   let capabilities ~prefix:_ () = Lwt.return Backend.no_caps
 end
 
-module Conf_of (B : Backend_lwt.Store) : Conf.S = struct
+module Conf_of (B : Backend_lwt.Store) : Conf_lwt.S = struct
   let versioning = false
   let client_name = "test"
   let domain_name = "testdom"
@@ -63,6 +63,8 @@ module Conf_of (B : Backend_lwt.Store) : Conf.S = struct
   let max_cache = None
   let symlink_policy = `Keep
   let read_only = false
+
+  include Conf_lwt.Monad
 end
 
 module Collectable =

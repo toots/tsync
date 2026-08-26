@@ -22,6 +22,8 @@
    -open
    Tsync_conf
    -open
+   Tsync_conf_lwt
+   -open
    Tsync_local_backend_lwt))
  (name upload)
  (libraries
@@ -35,6 +37,7 @@
   tsync_content
   tsync_content_lwt
   tsync_conf
+  tsync_conf_lwt
   tsync_backend_register
   tsync_backend_lwt
   tsync_local_backend_lwt))

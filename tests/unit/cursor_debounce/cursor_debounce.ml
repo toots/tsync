@@ -96,7 +96,7 @@ end
 
 module C =
   (val Fixture.conf ~domain:"testdom" ~store:(module Counting) ~root ()
-      : Conf.S)
+      : Conf_lwt.S)
 
 module Fs = File_store.Make (C)
 

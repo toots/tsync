@@ -42,7 +42,7 @@ let recover domains =
   Lwt_main.run
     (Lwt_list.iter_s
        (fun conf ->
-         let module C = (val conf : Conf.S) in
+         let module C = (val conf : Conf_lwt.S) in
          let module E = Domain_engine.Make (C) in
          Lwt.catch E.recover (fun exn ->
              (* One domain's leftovers are not another's problem, and none of
@@ -58,7 +58,7 @@ let socket_of (name, b) =
   match F.listens with
     | None -> None
     | Some `Domain_socket ->
-        let module C = (val b.Frontend.conf : Conf.S) in
+        let module C = (val b.Frontend.conf : Conf_lwt.S) in
         Some C.socket_path
     | Some `Proxy_socket ->
         Some (Runtime.proxy_socket_path (Runtime.default_paths ()))
@@ -242,7 +242,7 @@ let converge domains =
       (function
         | [] -> None
         | (_, b) :: _ as d ->
-            let module C = (val b.Frontend.conf : Conf.S) in
+            let module C = (val b.Frontend.conf : Conf_lwt.S) in
             let module E = Domain_engine.Make (C) in
             let module Cv = Domain_engine.Converge (E) in
             let module Diag = Diagnostics.Make (C) in
@@ -308,7 +308,7 @@ let run ?(on_leaf = fun ~name:_ -> ()) domains =
       F.start
         (List.map
            (fun (binding, peers) ->
-             let module C = (val binding.Frontend.conf : Conf.S) in
+             let module C = (val binding.Frontend.conf : Conf_lwt.S) in
              let module E = Domain_engine.Make (C) in
              {
                Frontend.binding;

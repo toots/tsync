@@ -76,7 +76,7 @@ module Make (Io : Io.S) (R : RECORDS with type 'a io := 'a Io.t) : sig
     val idle : 'a t -> unit
   end
 
-  module Make (C : Conf.S) : sig
+  module Make (C : Conf.S with type 'a io = 'a Io.t) : sig
     (** This domain's records. Shared with {!Sync_queue}, which drains the ones
         that name an upload.
 

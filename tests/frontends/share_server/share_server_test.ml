@@ -17,7 +17,7 @@ let data_dir = root ^ "/data"
 let mtime = 315532800.
 let expires = 4102444800 (* 2100-01-01 *)
 
-module C : Conf.S = struct
+module C : Conf_lwt.S = struct
   let versioning = false
   let client_name = "test"
   let domain_name = "testdom"
@@ -48,6 +48,8 @@ module C : Conf.S = struct
   let max_cache = None
   let symlink_policy = `Keep
   let read_only = false
+
+  include Conf_lwt.Monad
 end
 
 module Lk = Logical_key.Make (C)
