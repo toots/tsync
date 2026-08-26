@@ -13,13 +13,13 @@
 
     Writes need no cooperation: a client that has never heard of a run still
     writes to the space that survives. The one thing a writer must do is
-    {!Collection_lwt.Make.promote_all} before publishing a manifest, which
+    {!Collection.Make.promote_all} before publishing a manifest, which
     {!Remote.publish} does.
 
     {b Where it runs.} Only on a main that keeps its objects here
-    ({!Backend_lwt.Store.local_path}), a directory rename within the store being
-    the whole of what this rests on; an s3, gcs or http-proxy main is refused
-    rather than half-served.
+    ({!Backend.S.local_path}), a directory rename within the store being the
+    whole of what this rests on; an s3, gcs or http-proxy main is refused rather
+    than half-served.
 
     {b The copies.} Replicas and backfill targets are never renamed. Closing
     deletes off each of them the same keys it discards here, batched by key
@@ -28,10 +28,10 @@
     nothing will ever name.
 
     A copy whose bucket runs the delete function is {i told} rather than
-    deleted: {!Backend_lwt.Store.discard} writes the batch as a request the
-    bucket's own notification delivers, and the request being durably stored is
-    what stands in for the delete having happened. So the ordering above holds
-    either way, but a copy whose function never runs keeps its garbage — see
+    deleted: {!Backend.S.discard} writes the batch as a request the bucket's own
+    notification delivers, and the request being durably stored is what stands
+    in for the delete having happened. So the ordering above holds either way,
+    but a copy whose function never runs keeps its garbage — see
     {!Make.outstanding}, which is the only thing that will ever say so.
 
     What this does {i not} do is fill a copy that has fallen behind, or find
@@ -91,171 +91,251 @@ exception Unsupported of string
     nobody may touch. *)
 exception Busy of string
 
-module Make (C : Conf_lwt.S) : sig
-  (** {1 Stepping}
+(** One collection per machine, and the kernel is what enforces it: a run holds
+    an exclusive lock on a file under the store's own directory.
 
-      The pacing seam under {!run}, for a caller that has to hold one collection
-      across many steps and watch it; anything driving a collection to get it
-      done wants {!run}.
+    [take] answers [None] when another process holds it, rather than raising, so
+    that what a busy machine is told stays this module's sentence to write. The
+    kernel drops the lock when the holder dies, which is what makes a crashed
+    collection leave a run that resumes rather than one nobody may touch. *)
+module type LOCKFILE = sig
+  type 'a io
+  type t
 
-      A unit of work is one namespace while marking — a folder's worth of
-      manifests, or of versions — and one shard while closing, though closing
-      pools several shards into one delete. They are not the same size, so a
-      caller pacing itself should think in seconds spent rather than in units
-      done. *)
+  val take : string -> t option io
+  val drop : t -> unit io
+end
 
-  type session
+(** The tree a collection walks and the two spaces it moves chunks between. *)
+module type FS = sig
+  type 'a io
 
-  (** Open a run, or pick up the one already open. Lists the work outstanding,
-      which is the one expensive thing here, and takes the collection lock.
+  val ensure_parent : string -> unit io
+  val mkdir_p : string -> unit io
+  val readdir_list : string -> string list io
+  val readdir_list_quiet : string -> string list io
+  val unlink_quiet : string -> unit io
+  val rm_rf : string -> unit io
 
-      [concurrency] caps the syscalls in flight within a step; the main's
-      {!Backend.caps.max_concurrency} by default, and 1 to be as unobtrusive as
-      possible. The work is I/O bound, so this and not the batch size decides
-      how hard a step leans on the device.
+  val lstat_kind :
+    string -> [ `Dir | `File of int64 | `Symlink of string | `Missing ] io
+end
 
-      [delete_batch] is how many keys go into one delete against a copy (default
-      1000, which is what s3 and gcs both cap a bulk delete at). Raise it for a
-      store that takes more, lower it for one that chokes.
+module type SYSCALLS = sig
+  type 'a io
 
-      [keep] makes this an abandonment rather than a collection: see {!abort}.
+  val rename : string -> string -> unit io
+  val rmdir : string -> unit io
+  val file_exists : string -> bool io
+end
 
-      [verify] holds every live chunk against its own name as marking promotes
-      it, filing what fails under {!Corruption}. Opt-in because it reads every
-      live byte where the rest of a collection touches only metadata — the same
-      reason [tsync data-integrity] is.
+(** The bound on what runs at once. *)
+module type POOLS = sig
+  type 'a io
+  type t
 
-      Live chunks only: what marking never reaches is the garbage closing is
-      about to delete. A chunk that fails is promoted and marked, never
-      discarded — a manifest names it, so dropping it would take a file's only
-      copy with it.
+  val create : ?max_waiting:int -> ?name:string -> max:int -> unit -> t
+  val use : t -> (unit -> 'a io) -> 'a io
+  val filter_map_with : t -> ('a -> 'b option io) -> 'a list -> 'b list io
+end
 
-      Raises {!Unsupported} when no main can collect, {!Busy} when a collection
-      is already under way. *)
-  val start :
-    ?concurrency:int ->
-    ?delete_batch:int ->
-    ?keep:bool ->
-    ?verify:bool ->
-    unit ->
-    session Lwt.t
+(** What a run records about itself, and the move that keeps a chunk alive. *)
+module type COLLECTION = sig
+  type 'a io
 
-  (** Do up to [units] units (default 1) and report whether any remain. Saves
-      enough as it goes that dropping the session — or the process — loses at
-      most the last step.
+  module Make (_ : Conf.S with type 'a io = 'a io) : sig
+    val marker_key : Stored_key.t
+    val string_of_phase : Collection.phase -> string
+    val read_run : unit -> Collection.run option io
+    val write_run : Collection.run -> unit io
+    val clear_run : unit -> unit io
+    val promote : string -> bool io
+  end
+end
 
-      [`Done] means the run is closed and the store is back to one space. *)
-  val step : ?units:int -> session -> [ `More | `Done ] Lwt.t
+(** The pause between passes when a run is asked to keep going. *)
+module type CLOCK = sig
+  type 'a io
 
-  (** Give up the collection lock. A caller driving {!step} itself must call
-      this when it stops, whether or not the run finished — the run is meant to
-      outlive the process and be resumed, the lock is not; {!run} does it for
-      you.
+  val sleep : float -> unit io
+end
 
-      Not needed for correctness after the process exits: the kernel drops the
-      lock with the process, which is why a crash leaves a resumable run. *)
-  val release : session -> unit Lwt.t
+module Over
+    (Io : Io.S)
+    (_ : FS with type 'a io := 'a Io.t)
+    (_ : SYSCALLS with type 'a io := 'a Io.t)
+    (Pools : POOLS with type 'a io := 'a Io.t)
+    (_ : LOCKFILE with type 'a io := 'a Io.t)
+    (_ : CLOCK with type 'a io := 'a Io.t)
+    (_ : COLLECTION with type 'a io := 'a Io.t) : sig
+  module Make (C : Conf.S with type 'a io = 'a Io.t) : sig
+    (** {1 Stepping}
 
-  (** What the session is doing and how far along, for a caller driving {!step}
-      itself. [total] is the units this phase started with. *)
-  val phase : session -> string
+        The pacing seam under {!run}, for a caller that has to hold one
+        collection across many steps and watch it; anything driving a collection
+        to get it done wants {!run}.
 
-  val done_ : session -> int
-  val total : session -> int
+        A unit of work is one namespace while marking — a folder's worth of
+        manifests, or of versions — and one shard while closing, though closing
+        pools several shards into one delete. They are not the same size, so a
+        caller pacing itself should think in seconds spent rather than in units
+        done. *)
 
-  (** What has been reclaimed so far. [outcome] is meaningful once {!step} has
-      answered [`Done]. *)
-  val stats : session -> stats
+    type session
 
-  (** {1 Driving it for them} *)
+    (** Open a run, or pick up the one already open. Lists the work outstanding,
+        which is the one expensive thing here, and takes the collection lock.
 
-  (** {!start} then {!step} to completion.
+        [concurrency] caps the syscalls in flight within a step; the main's
+        {!Backend.caps.max_concurrency} by default, and 1 to be as unobtrusive
+        as possible. The work is I/O bound, so this and not the batch size
+        decides how hard a step leans on the device.
 
-      [units] per step (default 256), [concurrency] within a step and [pause]
-      seconds of sleep between steps (default none) are the pace. [budget] is a
-      wall-clock limit in seconds, after which the run is left open and
-      {!Suspended} is returned. It is checked between units, not merely between
-      steps: a unit can run for a while, and a limit only honoured at the end of
-      a batch of them is not much of a limit.
+        [delete_batch] is how many keys go into one delete against a copy
+        (default 1000, which is what s3 and gcs both cap a bulk delete at).
+        Raise it for a store that takes more, lower it for one that chokes.
 
-      Both progress callbacks are throttled to about one call a second, per
-      phase, and carry running totals rather than per-item deltas. The last call
-      of a phase is not throttled, so a phase shorter than the interval still
-      reports where it ended.
+        [keep] makes this an abandonment rather than a collection: see {!abort}.
 
-      [at] is the namespace or shard being worked on, set as it is picked up
-      rather than once it is done, which is what a caller saying where a
-      collection has got to wants. *)
-  val run :
-    ?budget:float ->
-    ?units:int ->
-    ?pause:float ->
-    ?concurrency:int ->
-    ?delete_batch:int ->
-    ?keep:bool ->
-    ?verify:bool ->
-    ?on_open:(unit -> unit) ->
-    ?on_mark:
-      (namespaces:int ->
-      total:int ->
-      roots:int ->
-      promoted:int ->
-      at:string ->
-      unit) ->
-    ?on_close:(shards:int -> reclaimed:int -> at:string -> unit) ->
-    unit ->
-    stats Lwt.t
+        [verify] holds every live chunk against its own name as marking promotes
+        it, filing what fails under {!Corruption}. Opt-in because it reads every
+        live byte where the rest of a collection touches only metadata — the
+        same reason [tsync data-integrity] is.
 
-  (** {1 Getting out of one} *)
+        Live chunks only: what marking never reaches is the garbage closing is
+        about to delete. A chunk that fails is promoted and marked, never
+        discarded — a manifest names it, so dropping it would take a file's only
+        copy with it.
 
-  (** Abandon an open run, keeping everything: every chunk still in the space on
-      its way out is given a name in the surviving one first, so nothing is
-      collected. A no-op when no run is open.
+        Raises {!Unsupported} when no main can collect, {!Busy} when a
+        collection is already under way. *)
+    val start :
+      ?concurrency:int ->
+      ?delete_batch:int ->
+      ?keep:bool ->
+      ?verify:bool ->
+      unit ->
+      session Io.t
 
-      This is {!run} with one difference — every chunk is treated as live — so
-      it takes the same pacing arguments and is resumable a shard at a time.
-      Coming back to an abandonment continues abandoning rather than resuming
-      the collection. *)
-  val abort :
-    ?budget:float ->
-    ?units:int ->
-    ?pause:float ->
-    ?concurrency:int ->
-    ?on_open:(unit -> unit) ->
-    ?on_mark:
-      (namespaces:int ->
-      total:int ->
-      roots:int ->
-      promoted:int ->
-      at:string ->
-      unit) ->
-    ?on_close:(shards:int -> reclaimed:int -> at:string -> unit) ->
-    unit ->
-    stats Lwt.t
+    (** Do up to [units] units (default 1) and report whether any remain. Saves
+        enough as it goes that dropping the session — or the process — loses at
+        most the last step.
 
-  (** The run in progress, for a caller that wants to report one rather than
-      continue it. *)
-  val status : unit -> Collection.run option Lwt.t
+        [`Done] means the run is closed and the store is back to one space. *)
+    val step : ?units:int -> session -> [ `More | `Done ] Io.t
 
-  (** Delete requests a copy has not consumed: its name, how many, and how long
-      the oldest has been sitting there. Anything here is a copy holding chunks
-      nothing references — the keys are already gone from the main, so no later
-      collection meets them again and only {!Checkout.resync} would find them.
+    (** Give up the collection lock. A caller driving {!step} itself must call
+        this when it stops, whether or not the run finished — the run is meant
+        to outlive the process and be resumed, the lock is not; {!run} does it
+        for you.
 
-      Outlives the run that queued them, so a caller reporting this must do so
-      whether or not {!status} found one open. *)
-  val outstanding : unit -> (string * int * float) list Lwt.t
+        Not needed for correctness after the process exits: the kernel drops the
+        lock with the process, which is why a crash leaves a resumable run. *)
+    val release : session -> unit Io.t
 
-  (** Deliver every outstanding request again, by copy name and count. The
-      store's notification fired once when the request was written and will not
-      fire again on its own, so a function that was absent or broken then does
-      not pick one up by being fixed — this is what gives it a second delivery.
+    (** What the session is doing and how far along, for a caller driving
+        {!step} itself. [total] is the units this phase started with. *)
+    val phase : session -> string
 
-      Safe to repeat: a request the function has already consumed is gone, and
-      one it consumes twice deletes keys that are already deleted. *)
-  val retry_outstanding : unit -> (string * int) list Lwt.t
+    val done_ : session -> int
+    val total : session -> int
 
-  (** An age from {!outstanding} as the report says it. Shared so a log line and
-      [--status] cannot answer the same question differently. *)
-  val show_age : float -> string
+    (** What has been reclaimed so far. [outcome] is meaningful once {!step} has
+        answered [`Done]. *)
+    val stats : session -> stats
+
+    (** {1 Driving it for them} *)
+
+    (** {!start} then {!step} to completion.
+
+        [units] per step (default 256), [concurrency] within a step and [pause]
+        seconds of sleep between steps (default none) are the pace. [budget] is
+        a wall-clock limit in seconds, after which the run is left open and
+        {!Suspended} is returned. It is checked between units, not merely
+        between steps: a unit can run for a while, and a limit only honoured at
+        the end of a batch of them is not much of a limit.
+
+        Both progress callbacks are throttled to about one call a second, per
+        phase, and carry running totals rather than per-item deltas. The last
+        call of a phase is not throttled, so a phase shorter than the interval
+        still reports where it ended.
+
+        [at] is the namespace or shard being worked on, set as it is picked up
+        rather than once it is done, which is what a caller saying where a
+        collection has got to wants. *)
+    val run :
+      ?budget:float ->
+      ?units:int ->
+      ?pause:float ->
+      ?concurrency:int ->
+      ?delete_batch:int ->
+      ?keep:bool ->
+      ?verify:bool ->
+      ?on_open:(unit -> unit) ->
+      ?on_mark:
+        (namespaces:int ->
+        total:int ->
+        roots:int ->
+        promoted:int ->
+        at:string ->
+        unit) ->
+      ?on_close:(shards:int -> reclaimed:int -> at:string -> unit) ->
+      unit ->
+      stats Io.t
+
+    (** {1 Getting out of one} *)
+
+    (** Abandon an open run, keeping everything: every chunk still in the space
+        on its way out is given a name in the surviving one first, so nothing is
+        collected. A no-op when no run is open.
+
+        This is {!run} with one difference — every chunk is treated as live — so
+        it takes the same pacing arguments and is resumable a shard at a time.
+        Coming back to an abandonment continues abandoning rather than resuming
+        the collection. *)
+    val abort :
+      ?budget:float ->
+      ?units:int ->
+      ?pause:float ->
+      ?concurrency:int ->
+      ?on_open:(unit -> unit) ->
+      ?on_mark:
+        (namespaces:int ->
+        total:int ->
+        roots:int ->
+        promoted:int ->
+        at:string ->
+        unit) ->
+      ?on_close:(shards:int -> reclaimed:int -> at:string -> unit) ->
+      unit ->
+      stats Io.t
+
+    (** The run in progress, for a caller that wants to report one rather than
+        continue it. *)
+    val status : unit -> Collection.run option Io.t
+
+    (** Delete requests a copy has not consumed: its name, how many, and how
+        long the oldest has been sitting there. Anything here is a copy holding
+        chunks nothing references — the keys are already gone from the main, so
+        no later collection meets them again and only {!Checkout.resync} would
+        find them.
+
+        Outlives the run that queued them, so a caller reporting this must do so
+        whether or not {!status} found one open. *)
+    val outstanding : unit -> (string * int * float) list Io.t
+
+    (** Deliver every outstanding request again, by copy name and count. The
+        store's notification fired once when the request was written and will
+        not fire again on its own, so a function that was absent or broken then
+        does not pick one up by being fixed — this is what gives it a second
+        delivery.
+
+        Safe to repeat: a request the function has already consumed is gone, and
+        one it consumes twice deletes keys that are already deleted. *)
+    val retry_outstanding : unit -> (string * int) list Io.t
+
+    (** An age from {!outstanding} as the report says it. Shared so a log line
+        and [--status] cannot answer the same question differently. *)
+    val show_age : float -> string
+  end
 end

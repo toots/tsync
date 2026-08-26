@@ -64,4 +64,6 @@
   tsync_inode_tree_lwt
   tsync_corruption_lwt
   tsync_io_lwt
-  lwt))
+  lwt
+  lwt.unix
+  unix))

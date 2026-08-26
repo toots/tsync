@@ -48,9 +48,9 @@ module Over (Io : Io.S) (_ : CORRUPTION with type 'a io := 'a Io.t) : sig
         writing one bad body over another would spread the damage while
         reporting a repair. [dry_run] does everything but the write.
 
-        The bad copy is written directly rather than through
-        {!Conf_lwt.S.store}: only one store is wrong, and a fan-out write would
-        re-send the chunk to healthy ones and queue deferred jobs for them.
+        The bad copy is written directly rather than through {!Conf.S.store}:
+        only one store is wrong, and a fan-out write would re-send the chunk to
+        healthy ones and queue deferred jobs for them.
 
         [on_start] fires once the marked chunks are known and [on_chunk] carries
         the position within that total, a repair being a chunk-sized read and

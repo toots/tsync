@@ -83,7 +83,7 @@ module C : Conf_lwt.S = struct
   include Conf_lwt.Monad
 end
 
-module G = Gc.Make (C)
+module G = Gc_lwt.Make (C)
 
 (* "<h1>-<h2>", 16 hex each. Built so that [n] is the leading three characters,
    which is the shard ({!Chunk_layout.relative_path}). Numbering the low bits

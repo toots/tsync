@@ -10,6 +10,8 @@
    -open
    Tsync_ops
    -open
+   Tsync_ops_lwt
+   -open
    Tsync_collection
    -open
    Tsync_collection_lwt
@@ -40,6 +42,7 @@
   tsync_chunks
   tsync_test_harness
   tsync_ops
+  tsync_ops_lwt
   tsync_collection
   tsync_collection_lwt
   tsync_conf

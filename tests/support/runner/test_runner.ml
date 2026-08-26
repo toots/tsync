@@ -760,11 +760,11 @@ let setup_client (module C : Conf_lwt.S) root staging_prefix =
           | `Not_in_trash -> Printf.printf "  purge %s -> not in trash\n" path
           | `Purged n -> Printf.printf "  purge %s -> %d object(s)\n" path n)
     | Gc ->
-        let module G = Gc.Make (C) in
+        let module G = Gc_lwt.Make (C) in
         let+ s = G.run () in
         print_gc s
     | GcVerify ->
-        let module G = Gc.Make (C) in
+        let module G = Gc_lwt.Make (C) in
         let* s = G.run ~verify:true () in
         print_gc s;
         (* The collection just changed what is marked. *)
@@ -774,7 +774,7 @@ let setup_client (module C : Conf_lwt.S) root staging_prefix =
     | GcMark ->
         (* Stopped at the phase boundary rather than after a duration, so a
            scenario can act on a half-collected store deterministically. *)
-        let module G = Gc.Make (C) in
+        let module G = Gc_lwt.Make (C) in
         let* session = G.start () in
         let rec until_closing () =
           if G.phase session <> "marking" then Lwt.return_unit
@@ -792,11 +792,11 @@ let setup_client (module C : Conf_lwt.S) root staging_prefix =
         Printf.printf "  gc marked %d root(s), %d chunk(s) kept\n"
           s.Gc.roots_marked s.chunks_promoted
     | GcClose ->
-        let module G = Gc.Make (C) in
+        let module G = Gc_lwt.Make (C) in
         let+ s = G.run () in
         print_gc s
     | GcAbort ->
-        let module G = Gc.Make (C) in
+        let module G = Gc_lwt.Make (C) in
         let+ s = G.abort () in
         (* Moved back, not kept: what marking had already moved across is kept
            too, so this is the count that shrinks as a mark gets further along. *)

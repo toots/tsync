@@ -55,7 +55,7 @@ module C =
            ]
          ())
 
-module G = Gc.Make (C)
+module G = Gc_lwt.Make (C)
 
 let ck n = Printf.sprintf "%03x%013x-%016x" n n n
 

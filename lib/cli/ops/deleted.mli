@@ -2,8 +2,8 @@
 
     A deletion leaves the versions behind — that is what makes it recoverable —
     so what names a deleted file is a version key with nothing live under it.
-    Both of these walk {!Conf_lwt.S.versions_prefix} and ask the store whether
-    the live key is still there.
+    Both of these walk {!Conf.S.versions_prefix} and ask the store whether the
+    live key is still there.
 
     The paths are what a version body recorded, not what its key spells: a
     version key carries a hash of the folder id and leaf, which is one way only.
