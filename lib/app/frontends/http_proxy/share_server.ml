@@ -67,9 +67,9 @@ let read_slots =
 
 (* Embedded from the files the share Lambda loads at runtime, so the table and
    the browser UI have one definition across both deployments. *)
-let mime_json = [%blob "../../../lambda/mime.json"]
-let browse_html = [%blob "../../../lambda/browse.html"]
-let player_js = [%blob "../../../lambda/player.js"]
+let mime_json = [%blob "../../../../lambda/mime.json"]
+let browse_html = [%blob "../../../../lambda/browse.html"]
+let player_js = [%blob "../../../../lambda/player.js"]
 
 let mime_table =
   match Yojson.Safe.from_string mime_json with
