@@ -23,6 +23,8 @@
    -open
    Tsync_manifest
    -open
+   Tsync_bigstring
+   -open
    Tsync_journal
    -open
    Tsync_conf
@@ -54,6 +56,7 @@
   tsync_file_ops
   tsync_wal
   tsync_manifest
+  tsync_bigstring
   tsync_journal
   tsync_conf
   tsync_folder_ids

@@ -6,6 +6,46 @@
     its own. That pool is not here; what is here is the record, and the few
     questions the pool asks back. *)
 
+(** {1 What the store is asked for}
+
+    Signatures rather than the modules that satisfy them, so the operations are
+    written against what they call and not against a store: {!File_store.Make},
+    {!Store.Make} and {!History.Make} each answer one, and {!Remote.S} is taken
+    whole because {!Data.Make} is given it. {!Make} is where they are built. *)
+
+(** The shared journal: a file change is recorded there before anyone is told
+    about it, and the cursor names the last record a reader should have seen. *)
+module type JOURNAL = sig
+  val write_journal_entry :
+    ?entry_key:Journal.Entry_key.t ->
+    Journal.op list ->
+    Journal.Entry_key.t Lwt.t
+
+  val bump_cursor : Journal.Entry_key.t -> unit Lwt.t
+  val rename_file : src_key:Logical_key.t -> dst_key:Logical_key.t -> unit Lwt.t
+  val head_manifest_opt : key:Logical_key.t -> Backend.file_entry option Lwt.t
+end
+
+(** A domain's manifests and the folder markers beside them, by logical key, and
+    the raw objects a trashed folder is moved through, by backend key. *)
+module type OBJECTS = sig
+  val put_manifest : key:Logical_key.t -> data:Bigstring.t -> unit Lwt.t
+  val delete_manifest : key:Logical_key.t -> unit Lwt.t
+  val put_folder_marker : key:Logical_key.t -> unit Lwt.t
+  val get_object : bkey:Stored_key.t -> string Lwt.t
+  val put_raw : bkey:Stored_key.t -> data:string -> unit Lwt.t
+  val delete_raw : bkey:Stored_key.t -> unit Lwt.t
+end
+
+(** What a file used to be. Snapshotting is best-effort: a version that is not
+    written must not wedge the change that would have been versioned. *)
+module type VERSIONS = sig
+  val version_dir : key:Logical_key.t -> Stored_key.t option Lwt.t
+  val save_version : key:Logical_key.t -> unit Lwt.t
+  val list_versions : key:Logical_key.t -> Backend.file_entry list Lwt.t
+  val get_version : vkey:Stored_key.t -> string Lwt.t
+end
+
 (** What the sending pool needs of the file operations, and what it tells them
     in return. *)
 module type Owing = sig
@@ -29,7 +69,14 @@ module type Owing = sig
   val set_canceller : (Logical_key.t -> bool) -> unit
 end
 
-module Make_with_layout (C : Conf.S) (L : Layout.S) : sig
+(** [L] is still taken: a folder's id is resolved here, not by the store. *)
+module Make_with_layout
+    (C : Conf.S)
+    (L : Layout.S)
+    (_ : JOURNAL)
+    (_ : OBJECTS)
+    (_ : VERSIONS)
+    (_ : Remote.S) : sig
   include File_ops.S
   include Owing
 end

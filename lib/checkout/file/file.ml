@@ -1,5 +1,32 @@
 open Lwt.Syntax
 
+module type JOURNAL = sig
+  val write_journal_entry :
+    ?entry_key:Journal.Entry_key.t ->
+    Journal.op list ->
+    Journal.Entry_key.t Lwt.t
+
+  val bump_cursor : Journal.Entry_key.t -> unit Lwt.t
+  val rename_file : src_key:Logical_key.t -> dst_key:Logical_key.t -> unit Lwt.t
+  val head_manifest_opt : key:Logical_key.t -> Backend.file_entry option Lwt.t
+end
+
+module type OBJECTS = sig
+  val put_manifest : key:Logical_key.t -> data:Bigstring.t -> unit Lwt.t
+  val delete_manifest : key:Logical_key.t -> unit Lwt.t
+  val put_folder_marker : key:Logical_key.t -> unit Lwt.t
+  val get_object : bkey:Stored_key.t -> string Lwt.t
+  val put_raw : bkey:Stored_key.t -> data:string -> unit Lwt.t
+  val delete_raw : bkey:Stored_key.t -> unit Lwt.t
+end
+
+module type VERSIONS = sig
+  val version_dir : key:Logical_key.t -> Stored_key.t option Lwt.t
+  val save_version : key:Logical_key.t -> unit Lwt.t
+  val list_versions : key:Logical_key.t -> Backend.file_entry list Lwt.t
+  val get_version : vkey:Stored_key.t -> string Lwt.t
+end
+
 (* What the sending pool needs of the file operations, and what it tells them
    in return. *)
 module type Owing = sig
@@ -10,12 +37,17 @@ module type Owing = sig
   val set_canceller : (Logical_key.t -> bool) -> unit
 end
 
-module Make_with_layout (C : Conf.S) (L : Layout.S) = struct
+module Make_with_layout
+    (C : Conf.S)
+    (L : Layout.S)
+    (Fs : JOURNAL)
+    (St : OBJECTS)
+    (Hs : VERSIONS)
+    (R : Remote.S) =
+struct
   module Lk = Logical_key.Make (C)
   module J = Journal.Make (C)
   module W = Wal.Make (C)
-  module Fs = File_store.Make (C)
-  module R = Remote.Make_with_layout (C) (L)
 
   type t = Logical_key.t
 
@@ -29,10 +61,8 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) = struct
   let meta_waiters () = Io_lwt.Lock.has_waiters meta_mutex
   let rel_key = Logical_key.path
 
-  (* [St] takes logical (real-path) keys and maps them to backend keys through
-     the layout scheme. [Mf] is the local mirror. *)
-  module St = Store.Make (C) (L)
-  module Hs = History.Make (C) (L)
+  (* [Mf] is the local mirror; [St] the store's own copy, which takes logical
+     keys and maps them to backend keys through the layout scheme. *)
   module Mf = Manifests.Make (C)
   module Ck = Checkout.Make (C)
   module Mfs = Staged_manifest.Make (C)
@@ -670,4 +700,13 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) = struct
     with_meta (fun () -> Lwt_list.iter_s apply_one ops)
 end
 
-module Make (C : Conf.S) = Make_with_layout (C) (Layout.Inode.Make (C))
+(* The one place the store modules are built, so everything above takes them
+   rather than knowing which they are. *)
+module Make (C : Conf.S) = struct
+  module L = Layout.Inode.Make (C)
+
+  include
+    Make_with_layout (C) (L) (File_store.Make (C)) (Store.Make (C) (L))
+      (History.Make (C) (L))
+      (Remote.Make_with_layout (C) (L))
+end
