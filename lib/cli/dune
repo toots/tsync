@@ -24,6 +24,8 @@
    -open
    Tsync_file_store
    -open
+   Tsync_file_store_lwt
+   -open
    Tsync_corruption
    -open
    Tsync_corruption_lwt
@@ -110,6 +112,7 @@
   tsync_store
   tsync_store_lwt
   tsync_file_store
+  tsync_file_store_lwt
   tsync_corruption
   tsync_corruption_lwt
   tsync_collection

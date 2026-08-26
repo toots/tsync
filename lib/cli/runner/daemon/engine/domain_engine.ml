@@ -54,7 +54,7 @@ module Make (C : Conf_lwt.S) : S = struct
   module Rp = Sync_lwt.Replay.Make (C) (F)
   module Mf = Checkout_lwt.Make (C)
   module Mfs = Staged_lwt.Manifest.Make (C)
-  module Fs = File_store.Make (C)
+  module Fs = File_store_lwt.Make (C)
 
   (* Also nudged after each upload, but downloads grow the store too. The same
      sweep looks for deferred work a one-shot command left behind, which is

@@ -65,7 +65,7 @@ module C =
          ~cache_root:root ~data_dir:root ~root ()
       : Conf_lwt.S)
 
-module Tree = Inode_tree.Make (C)
+module Tree = Inode_tree_lwt.Make (C)
 
 (* The same store, described as two a read could land on. A body answered by
    the second would carry the first's version into the index, so a domain like
@@ -82,7 +82,7 @@ module Two =
          ~cache_root:root ~data_dir:root ~root ()
       : Conf_lwt.S)
 
-module Tree_two = Inode_tree.Make (Two)
+module Tree_two = Inode_tree_lwt.Make (Two)
 
 let folder = Stored_key.new_id ()
 

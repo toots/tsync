@@ -1,0 +1,24 @@
+; Reading the backend's folder tree on Lwt.
+
+(library
+ (flags
+  (:standard
+   -open
+   Tsync_inode_tree
+   -open
+   Tsync_conf_lwt
+   -open
+   Tsync_layout_lwt
+   -open
+   Tsync_store_lwt
+   -open
+   Tsync_io_lwt))
+ (name tsync_inode_tree_lwt)
+ (public_name tsync-libs.inode_tree_lwt)
+ (libraries
+  tsync_inode_tree
+  tsync_conf_lwt
+  tsync_layout_lwt
+  tsync_store_lwt
+  tsync_io_lwt
+  lwt))

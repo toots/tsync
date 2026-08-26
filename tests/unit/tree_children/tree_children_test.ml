@@ -20,7 +20,7 @@ module C =
          ~cache_root:root ~data_dir:root ~root ()
       : Conf_lwt.S)
 
-module Tree = Inode_tree.Make (C)
+module Tree = Inode_tree_lwt.Make (C)
 
 (* One key that will not read, so the batch fails whole and the walk has to
    decide what that costs its siblings. A wrapper rather than a chmod: the suite
@@ -47,7 +47,7 @@ module Cf =
          ~cache_root:root ~data_dir:root ~root ()
       : Conf_lwt.S)
 
-module Tf = Inode_tree.Make (Cf)
+module Tf = Inode_tree_lwt.Make (Cf)
 
 let ns id = C.domain_prefix ^ id ^ "/"
 

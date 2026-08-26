@@ -98,7 +98,7 @@ module C =
   (val Fixture.conf ~domain:"testdom" ~store:(module Counting) ~root ()
       : Conf_lwt.S)
 
-module Fs = File_store.Make (C)
+module Fs = File_store_lwt.Make (C)
 
 (* A key by its timestamp, rather than from the generator: the forward-only case
    needs one that is older than a key already handed over. *)
@@ -119,7 +119,7 @@ let say fmt = Printf.printf fmt
 let counted () = !puts
 
 let () =
-  File_store.set_cursor_flush_interval interval;
+  File_store_lwt.set_cursor_flush_interval interval;
   Lwt_main.run
     (say "a bump on a quiet cursor publishes before it returns\n";
      let before = counted () in
@@ -165,7 +165,7 @@ let () =
         instantiation and flushed through another, as the daemon does — the
         queue notes through {!Sync_queue}'s and drain flushes through the
         engine's. A per-application debouncer fails only here. *)
-     let module Other = File_store.Make (C) in
+     let module Other = File_store_lwt.Make (C) in
      let before = counted () in
      Fs.note_cursor (ek 700);
      let* () = Other.flush_cursor () in

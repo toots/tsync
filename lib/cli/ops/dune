@@ -63,7 +63,11 @@
    -open
    Tsync_file_store
    -open
+   Tsync_file_store_lwt
+   -open
    Tsync_inode_tree
+   -open
+   Tsync_inode_tree_lwt
    -open
    Tsync_corruption
    -open
@@ -129,7 +133,9 @@
   tsync_store
   tsync_store_lwt
   tsync_file_store
+  tsync_file_store_lwt
   tsync_inode_tree
+  tsync_inode_tree_lwt
   tsync_corruption
   tsync_corruption_lwt
   tsync_collection

@@ -38,7 +38,7 @@ module Make
     (C : Conf_lwt.S)
     (F : File_ops.S with type 'a io := 'a Lwt.t)
     (Sq : Sync_queue.S with type 'a io := 'a Lwt.t) : S = struct
-  module Fs = File_store.Make (C)
+  module Fs = File_store_lwt.Make (C)
   module J = Journal.Make (C)
   module Diag = Diagnostics.Make (C)
 

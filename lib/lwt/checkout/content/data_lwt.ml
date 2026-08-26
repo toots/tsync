@@ -16,4 +16,4 @@ end
 include
   Data.Over (Io_lwt.Core) (Files) (Syscalls) (Io_lwt.Lock) (Io_lwt.Bounded)
     (Manifests_lwt)
-    (File_store)
+    (File_store_lwt)

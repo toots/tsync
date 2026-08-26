@@ -25,50 +25,83 @@ type unusable = [ `Unreadable of exn | `Unclassifiable of exn ]
     unclassifiable body is skipped under both, being mid-write. *)
 type on_unusable = [ `Fail | `Skip of Stored_key.t -> unusable -> unit ]
 
-module Make (C : Conf_lwt.S) : sig
-  (** The backend prefix a folder's children live under. *)
-  val namespace_prefix : string -> Stored_key.t
+(** The bound on what runs at once, and the pool a domain's tree reads share. *)
+module type POOLS = sig
+  type 'a io
+  type t
 
-  (** Direct children of [folder_id], [`Fail] by default.
+  val shared : key:string -> name:string -> max:int -> unit -> t
+  val map_with : t -> ('a -> 'b io) -> 'a list -> 'b list io
+end
 
-      One listing, then whatever {!Folder_index} does not already hold, read in
-      one request where the store has a way to make one. [slots] bounds those
-      reads — the domain's download budget unless a caller passes a bound of its
-      own, which is how [tsync sync --full] honours [--parallelism]. A pool
-      passed here must outlive the call and must not be one the fold body asks
-      again.
+(** What reading the tree needs of the store under it: the four ways an object
+    in a folder's namespace is reached. *)
+module type STORE = sig
+  type 'a io
+  type pool
 
-      [refresh_index] writes the folder's index back when enough of it was not
-      covered to pay for the round trip, and is for a caller that walks the tree
-      and may write: a read-only domain and a share being served must leave it
-      alone. Best effort either way — a read does not fail because its cache
-      could not be refreshed.
+  module Make (_ : Conf.S with type 'a io = 'a io) : sig
+    val get_objects :
+      ?slots:pool ->
+      entries:Backend.file_entry list ->
+      unit ->
+      (Stored_key.t * string option) list io
 
-      [on_index] is told the folder's index key where the listing offered one.
-      It is not a child and no fold sees it, but it is an object in the
-      namespace holding a copy of every manifest body in it, so a caller
-      deleting the folder needs it named or nothing ever reclaims it. *)
-  val children :
-    ?on_unusable:on_unusable ->
-    ?refresh_index:bool ->
-    ?on_index:(Stored_key.t -> unit) ->
-    ?slots:Io_lwt.Bounded.t ->
-    folder_id:string ->
-    unit ->
-    entry list Lwt.t
+    val list_namespace : folder_id:string -> Backend.file_entry list io
+    val get_object : bkey:Stored_key.t -> string io
+    val put_raw : bkey:Stored_key.t -> data:string -> unit io
+  end
+end
 
-  (** Depth-first over the subtree under [folder_id]. [f acc rel entry] sees
-      each entry with the real relative path of the folder holding it, [rel]
-      naming that starting folder. A folder is visited before it is descended
-      into. *)
-  val fold_tree :
-    ?on_unusable:on_unusable ->
-    ?refresh_index:bool ->
-    ?on_index:(Stored_key.t -> unit) ->
-    ?slots:Io_lwt.Bounded.t ->
-    folder_id:string ->
-    key:Logical_key.t ->
-    ('a -> Logical_key.t -> entry -> 'a Lwt.t) ->
-    'a ->
-    'a Lwt.t
+module Over
+    (Io : Io.S)
+    (Pools : POOLS with type 'a io := 'a Io.t)
+    (_ : STORE with type 'a io := 'a Io.t and type pool := Pools.t) : sig
+  module Make (C : Conf.S with type 'a io = 'a Io.t) : sig
+    (** The backend prefix a folder's children live under. *)
+    val namespace_prefix : string -> Stored_key.t
+
+    (** Direct children of [folder_id], [`Fail] by default.
+
+        One listing, then whatever {!Folder_index} does not already hold, read
+        in one request where the store has a way to make one. [slots] bounds
+        those reads — the domain's download budget unless a caller passes a
+        bound of its own, which is how [tsync sync --full] honours
+        [--parallelism]. A pool passed here must outlive the call and must not
+        be one the fold body asks again.
+
+        [refresh_index] writes the folder's index back when enough of it was not
+        covered to pay for the round trip, and is for a caller that walks the
+        tree and may write: a read-only domain and a share being served must
+        leave it alone. Best effort either way — a read does not fail because
+        its cache could not be refreshed.
+
+        [on_index] is told the folder's index key where the listing offered one.
+        It is not a child and no fold sees it, but it is an object in the
+        namespace holding a copy of every manifest body in it, so a caller
+        deleting the folder needs it named or nothing ever reclaims it. *)
+    val children :
+      ?on_unusable:on_unusable ->
+      ?refresh_index:bool ->
+      ?on_index:(Stored_key.t -> unit) ->
+      ?slots:Pools.t ->
+      folder_id:string ->
+      unit ->
+      entry list Io.t
+
+    (** Depth-first over the subtree under [folder_id]. [f acc rel entry] sees
+        each entry with the real relative path of the folder holding it, [rel]
+        naming that starting folder. A folder is visited before it is descended
+        into. *)
+    val fold_tree :
+      ?on_unusable:on_unusable ->
+      ?refresh_index:bool ->
+      ?on_index:(Stored_key.t -> unit) ->
+      ?slots:Pools.t ->
+      folder_id:string ->
+      key:Logical_key.t ->
+      ('a -> Logical_key.t -> entry -> 'a Io.t) ->
+      'a ->
+      'a Io.t
+  end
 end

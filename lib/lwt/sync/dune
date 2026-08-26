@@ -7,7 +7,7 @@
    -open
    Tsync_sync
    -open
-   Tsync_file_store
+   Tsync_file_store_lwt
    -open
    Tsync_wal_lwt
    -open
@@ -18,7 +18,7 @@
  (public_name tsync-libs.sync_lwt)
  (libraries
   tsync_sync
-  tsync_file_store
+  tsync_file_store_lwt
   tsync_wal_lwt
   tsync_staged_lwt
   tsync_io_lwt

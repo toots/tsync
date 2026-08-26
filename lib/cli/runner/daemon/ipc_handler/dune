@@ -24,6 +24,8 @@
    -open
    Tsync_file_store
    -open
+   Tsync_file_store_lwt
+   -open
    Tsync_folder_ids
    -open
    Tsync_folder_ids_lwt
@@ -59,6 +61,7 @@
   tsync_journal
   tsync_ops
   tsync_file_store
+  tsync_file_store_lwt
   tsync_folder_ids
   tsync_folder_ids_lwt
   tsync_backend_register

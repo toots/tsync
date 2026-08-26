@@ -4,8 +4,8 @@ type stats = { versions_deleted : int; journal_deleted : int }
 
 module Make (C : Conf_lwt.S) = struct
   module Lk = Logical_key.Make (C)
-  module Fs = File_store.Make (C)
-  module Tree = Inode_tree.Make (C)
+  module Fs = File_store_lwt.Make (C)
+  module Tree = Inode_tree_lwt.Make (C)
   module B = (val C.store : C.Store)
 
   (* Deleted in batches rather than one call with everything, so a long delete

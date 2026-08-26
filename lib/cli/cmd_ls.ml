@@ -29,7 +29,7 @@ let cmd : unit Cmd.t =
        let (module F : Frontend.S) =
          resolve_frontend ?frontend (Conf_parsing.pick_domain ?domain cfg)
        in
-       let module Fs = File_store.Make (C) in
+       let module Fs = File_store_lwt.Make (C) in
        let mount_point =
          mount_point_of (Conf_parsing.pick_domain ?domain cfg)
        in

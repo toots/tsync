@@ -16,6 +16,8 @@
    -open
    Tsync_file_store
    -open
+   Tsync_file_store_lwt
+   -open
    Tsync_conf
    -open
    Tsync_conf_lwt
@@ -41,6 +43,7 @@
   tsync_ops
   tsync_store
   tsync_file_store
+  tsync_file_store_lwt
   tsync_conf
   tsync_conf_lwt
   tsync_bigstring

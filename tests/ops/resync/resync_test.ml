@@ -42,7 +42,7 @@ module C =
       : Conf_lwt.S)
 
 module R = Resync.Make (C)
-module Fs = File_store.Make (C)
+module Fs = File_store_lwt.Make (C)
 module Lk = Logical_key.Make (C)
 
 let ns id = C.domain_prefix ^ id ^ "/"

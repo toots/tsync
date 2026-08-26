@@ -24,6 +24,8 @@
    -open
    Tsync_file_store
    -open
+   Tsync_file_store_lwt
+   -open
    Tsync_log
    -open
    Tsync_conf
@@ -54,6 +56,7 @@
   tsync_sync
   tsync_sync_lwt
   tsync_file_store
+  tsync_file_store_lwt
   tsync_backend_register
   tsync_backend_lwt
   tsync_conf

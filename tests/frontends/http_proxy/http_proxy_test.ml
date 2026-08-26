@@ -390,7 +390,7 @@ let () =
      entry sorts above the cursor and an idle client reports a permanent backlog.
      Only the one foreign entry past the cursor is behind — our own entries never
      are, whatever their timestamp. *)
-  let module Fs = File_store.Make (C) in
+  let module Fs = File_store_lwt.Make (C) in
   let module J = Journal.Make (C) in
   let other = "ffffffffffffffffffffffffffffffff" in
   let entry_key s =

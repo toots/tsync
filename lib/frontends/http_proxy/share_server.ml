@@ -138,7 +138,7 @@ module Make (C : Conf_lwt.S) = struct
                 Lwt.return_some m
             | None -> Lwt.return_none)
 
-  module Tree = Inode_tree.Make (C)
+  module Tree = Inode_tree_lwt.Make (C)
   module B = (val C.store : C.Store)
 
   let is_hex s =

@@ -11,7 +11,7 @@ module Make (C : Conf_lwt.S) = struct
   module Lk = Logical_key.Make (C)
   module Collection = Collection_lwt.Make (C)
   module L = Chunk_layout.Make (C)
-  module Tree = Inode_tree.Make (C)
+  module Tree = Inode_tree_lwt.Make (C)
 
   (* What a destination holds, by key. A first resync of a shared bucket asks
      this of half a million objects, which on the heap is a string and a bucket

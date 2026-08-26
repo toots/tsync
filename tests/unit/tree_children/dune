@@ -12,6 +12,8 @@
    -open
    Tsync_inode_tree
    -open
+   Tsync_inode_tree_lwt
+   -open
    Tsync_conf
    -open
    Tsync_conf_lwt
@@ -35,6 +37,7 @@
   tsync_test_harness
   tsync_store
   tsync_inode_tree
+  tsync_inode_tree_lwt
   tsync_conf
   tsync_conf_lwt
   tsync_bigstring

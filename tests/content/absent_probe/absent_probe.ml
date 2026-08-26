@@ -41,7 +41,7 @@ module R = Remote.Make (C)
 module D = Data_lwt.Make (C) (R)
 module Mf = Checkout_lwt.Make (C)
 module Mfs = Staged_lwt.Manifest.Make (C)
-module Fs = File_store.Make (C)
+module Fs = File_store_lwt.Make (C)
 module J = Journal.Make (C)
 
 let key name = Lk.file @@ name

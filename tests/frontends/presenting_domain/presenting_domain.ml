@@ -79,7 +79,7 @@ let settle () =
 let () =
   (* Short enough to observe inside [settle]. The default would have this
      reporting "not flushed yet" whether or not the flusher was ever started. *)
-  File_store.set_cursor_flush_interval 0.05;
+  File_store_lwt.set_cursor_flush_interval 0.05;
   ignore
     (Sys.command
        (Printf.sprintf "rm -rf %s && mkdir -p %s %s" root root backend_root));
@@ -104,6 +104,6 @@ let () =
      Printf.printf "manifest in the store: %b\n" (head <> None);
      (* What a peer polls. The upload published a journal entry, and an entry
         the cursor does not point past is one no other client reads. *)
-     let module Fs = File_store.Make (C) in
+     let module Fs = File_store_lwt.Make (C) in
      let+ cursor = Fs.fetch_cursor () in
      Printf.printf "cursor published: %b\n" (cursor <> None))
