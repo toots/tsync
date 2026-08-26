@@ -6,8 +6,6 @@
    -open
    Tsync_file_ops
    -open
-   Tsync_folder_ids
-   -open
    Tsync_folder_ids_lwt
    -open
    Tsync_ipc
@@ -19,8 +17,6 @@
    Tsync_conf_lwt
    -open
    Tsync_conf_parsing
-   -open
-   Tsync_ipc_handler
    -open
    Tsync_engine
    -open
@@ -59,13 +55,11 @@
   tsync_logical_key
   tsync-libs.menu
   tsync_file_ops
-  tsync_folder_ids
   tsync_folder_ids_lwt
   tsync-libs.conf
   tsync-libs.ipc
   tsync-libs.ipc_lwt
   tsync-libs.engine
-  tsync-libs.ipc_handler
   tsync_runtime
   tsync-libs.frontend_register
   tsync-libs.log

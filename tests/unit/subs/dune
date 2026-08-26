@@ -2,4 +2,4 @@
  (flags
   (:standard -open Tsync_ipc_lwt -open Tsync_test_harness))
  (name subs_test)
- (libraries unix tsync_test_harness tsync_ipc tsync_ipc_lwt lwt lwt.unix))
+ (libraries unix tsync_test_harness tsync_ipc_lwt lwt lwt.unix))

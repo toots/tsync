@@ -6,4 +6,4 @@
  (name e2e_linux)
  (enabled_if
   (= %{system} linux))
- (libraries tsync_e2e tsync_runtime yojson unix))
+ (libraries tsync_e2e yojson unix))
