@@ -378,7 +378,7 @@ let setup_client (module C : Conf_lwt.S) root staging_prefix =
   let module Fs = File_store.Make (C) in
   let module J = Journal.Make (C) in
   let module W = Wal_lwt.Make (C) in
-  let module L = Layout.Inode.Make (C) in
+  let module L = Layout_lwt.Inode.Make (C) in
   (* A scenario says which it means with a trailing separator, the way it would
      write one in a shell. Nothing on the wire reads that; it is read here. *)
   let key p = if String.ends_with ~suffix:"/" p then Lk.dir p else Lk.file p in

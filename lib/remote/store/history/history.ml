@@ -34,7 +34,7 @@ let manifest_of ~domain_prefix ~grouping =
 let folder_versions ~versions_prefix ~folder_id =
   Stored_key.namespace ~prefix:versions_prefix ~folder_id
 
-module Make (C : Conf_lwt.S) (L : Layout.S) = struct
+module Make (C : Conf_lwt.S) (L : Layout_lwt.S) = struct
   module B = (val C.store : C.Store)
 
   let version_dir ~key =

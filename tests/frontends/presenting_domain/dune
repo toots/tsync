@@ -6,6 +6,8 @@
    -open
    Tsync_layout
    -open
+   Tsync_layout_lwt
+   -open
    Tsync_file_store
    -open
    Tsync_test_harness
@@ -27,6 +29,7 @@
  (libraries
   tsync_logical_key
   tsync_layout
+  tsync_layout_lwt
   tsync_file_store
   tsync_test_harness
   tsync-libs.engine

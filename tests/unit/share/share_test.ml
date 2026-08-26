@@ -55,7 +55,7 @@ module Lk = Logical_key.Make (C)
 
 let shares_prefix = "tsync/shares/"
 
-module L = Layout.Inode.Make (C)
+module L = Layout_lwt.Inode.Make (C)
 module S = Share.Make (C)
 
 let member key json =

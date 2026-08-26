@@ -16,6 +16,8 @@
    -open
    Tsync_layout
    -open
+   Tsync_layout_lwt
+   -open
    Tsync_store
    -open
    Tsync_bigstring
@@ -33,6 +35,7 @@
   tsync_conf
   tsync_conf_lwt
   tsync_layout
+  tsync_layout_lwt
   tsync_store
   tsync_bigstring
   tsync_backend_register

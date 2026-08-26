@@ -43,7 +43,7 @@ let () =
   case "a second role on the same domain";
   (* The share server's: the same domain under a different layout, which is what
      makes it a second application rather than a second domain. *)
-  let module R2 = Remote.Make_with_layout (C) (Layout.Identity) in
+  let module R2 = Remote.Make_with_layout (C) (Layout_lwt.Identity) in
   ignore R2.known_chunk_count;
   step "chunk buffers %d, downloads %d" (max_of "chunk buffers")
     (max_of "downloads");

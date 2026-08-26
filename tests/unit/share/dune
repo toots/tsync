@@ -6,6 +6,8 @@
    -open
    Tsync_layout
    -open
+   Tsync_layout_lwt
+   -open
    Tsync_ops
    -open
    Tsync_bigstring
@@ -27,6 +29,7 @@
  (libraries
   tsync_logical_key
   tsync_layout
+  tsync_layout_lwt
   tsync_ops
   tsync_conf
   tsync_conf_lwt

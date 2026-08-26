@@ -1,6 +1,6 @@
 open Lwt.Syntax
 
-module Make (C : Conf_lwt.S) (L : Layout.S) = struct
+module Make (C : Conf_lwt.S) (L : Layout_lwt.S) = struct
   module B = (val C.store : C.Store)
   module Bb = Backend_lwt.Batched (B)
 

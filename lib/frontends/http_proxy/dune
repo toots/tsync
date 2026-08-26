@@ -8,6 +8,8 @@
    -open
    Tsync_layout
    -open
+   Tsync_layout_lwt
+   -open
    Tsync_inode_tree
    -open
    Tsync_checkout
@@ -72,6 +74,7 @@
   tsync_logical_key
   tsync_remote
   tsync_layout
+  tsync_layout_lwt
   tsync_inode_tree
   tsync_conf_lwt
   tsync_checkout

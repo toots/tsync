@@ -4,7 +4,7 @@ type outcome = Restored | Not_in_trash | Parent_unknown
 
 module Make (C : Conf_lwt.S) = struct
   module Lk = Logical_key.Make (C)
-  module L = Layout.Inode.Make (C)
+  module L = Layout_lwt.Inode.Make (C)
   module St = Store.Make (C) (L)
   module B = (val C.store : C.Store)
 

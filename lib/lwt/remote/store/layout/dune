@@ -1,0 +1,14 @@
+; Which backend key a logical key maps to, on Lwt.
+
+(library
+ (flags
+  (:standard
+   -open
+   Tsync_layout
+   -open
+   Tsync_folder_ids_lwt
+   -open
+   Tsync_io_lwt))
+ (name tsync_layout_lwt)
+ (public_name tsync-libs.layout_lwt)
+ (libraries tsync_layout tsync_folder_ids_lwt tsync_io_lwt lwt))

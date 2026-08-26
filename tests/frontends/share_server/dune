@@ -8,6 +8,8 @@
    -open
    Tsync_layout
    -open
+   Tsync_layout_lwt
+   -open
    Tsync_staged
    -open
    Tsync_staged_lwt
@@ -48,6 +50,7 @@
   tsync_logical_key
   tsync_remote
   tsync_layout
+  tsync_layout_lwt
   tsync_staged
   tsync_staged_lwt
   tsync_checkout

@@ -5,7 +5,7 @@ exception Share_not_found of string
 
 module Make (C : Conf_lwt.S) = struct
   module Lk = Logical_key.Make (C)
-  module L = Layout.Inode.Make (C)
+  module L = Layout_lwt.Inode.Make (C)
   module R = (val C.store : C.Store)
 
   let shares_prefix = C.shares_prefix

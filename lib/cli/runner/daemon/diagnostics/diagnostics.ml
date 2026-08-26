@@ -118,7 +118,7 @@ let self_json ?(extra = []) () =
   ]
 
 module Make (C : Conf_lwt.S) = struct
-  module R = Remote.Make_with_layout (C) (Layout.Identity)
+  module R = Remote.Make_with_layout (C) (Layout_lwt.Identity)
   module L = Chunk_layout.Make (C)
   module D = Data_lwt.Make (C) (R)
   module Fs = File_store.Make (C)

@@ -105,8 +105,8 @@ module type S = sig
 end
 
 (** Keys are mapped to backend keys through [L]. Callers holding real paths want
-    {!Make}; {!Layout.Identity} serves callers that already hold backend keys.
-*)
-module Make_with_layout (C : Conf_lwt.S) (L : Layout.S) : S
+    {!Make}; {!Layout_lwt.Identity} serves callers that already hold backend
+    keys. *)
+module Make_with_layout (C : Conf_lwt.S) (L : Layout_lwt.S) : S
 
 module Make (C : Conf_lwt.S) : S

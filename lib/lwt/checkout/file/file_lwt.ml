@@ -11,7 +11,7 @@ module Over =
 (* The one place the store modules are built, so everything above takes them
    rather than knowing which they are. *)
 module Make (C : Conf_lwt.S) = struct
-  module L = Layout.Inode.Make (C)
+  module L = Layout_lwt.Inode.Make (C)
 
   include
     Over.Make_with_layout (C) (L) (File_store.Make (C)) (Store.Make (C) (L))

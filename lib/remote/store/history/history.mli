@@ -19,7 +19,7 @@ val manifest_of : domain_prefix:string -> grouping:string -> Stored_key.t
 (** Every version of every file in one folder, which share its id. *)
 val folder_versions : versions_prefix:string -> folder_id:string -> Stored_key.t
 
-module Make (C : Conf_lwt.S) (L : Layout.S) : sig
+module Make (C : Conf_lwt.S) (L : Layout_lwt.S) : sig
   (** [<versions_prefix>/<manifest key tail>/], so a file's versions share the
       identity its manifest has. [None] for a key whose folder this client
       cannot resolve. *)

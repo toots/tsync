@@ -72,7 +72,7 @@ let upload rel content =
   let key = Lk.file @@ rel in
   let* chunk_size = R.chunk_size () in
   let* _ = R.upload ~key ~src_path:src ~mtime ~chunk_size () in
-  let module L = Layout.Inode.Make (C) in
+  let module L = Layout_lwt.Inode.Make (C) in
   L.ensure_manifest_key key
 
 let hello_body = "hello world, this spans several chunks\n"

@@ -39,7 +39,7 @@ let cmd : unit Cmd.t =
     run_lwt
       (let open Lwt.Syntax in
        let (module C : Conf_lwt.S) = load_conf ?domain () in
-       let module L = Layout.Inode.Make (C) in
+       let module L = Layout_lwt.Inode.Make (C) in
        let module St = Store.Make (C) (L) in
        let module Hs = History.Make (C) (L) in
        let module Lk = Logical_key.Make (C) in

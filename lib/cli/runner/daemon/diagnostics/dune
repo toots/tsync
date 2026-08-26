@@ -24,6 +24,8 @@
    -open
    Tsync_layout
    -open
+   Tsync_layout_lwt
+   -open
    Tsync_file_store
    -open
    Tsync_corruption
@@ -74,6 +76,7 @@
   tsync_content
   tsync_content_lwt
   tsync_layout
+  tsync_layout_lwt
   tsync_file_store
   tsync_corruption
   tsync_corruption_lwt
