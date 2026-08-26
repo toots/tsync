@@ -4,6 +4,8 @@
    -open
    Tsync_ops
    -open
+   Tsync_ops_lwt
+   -open
    Tsync_io_lwt
    -open
    Tsync_conf
@@ -19,6 +21,7 @@
  (libraries
   tsync_test_harness
   tsync_ops
+  tsync_ops_lwt
   tsync_io_lwt
   tsync_conf
   tsync_conf_lwt

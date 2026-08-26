@@ -21,7 +21,7 @@ module C =
          ~root ()
       : Conf_lwt.S)
 
-module I = Import.Make (C)
+module I = Import_lwt.Make (C)
 module Fs = File_store_lwt.Make (C)
 
 let write rel =

@@ -6,6 +6,8 @@
    -open
    Tsync_ops
    -open
+   Tsync_ops_lwt
+   -open
    Tsync_conf
    -open
    Tsync_conf_lwt
@@ -20,6 +22,7 @@
   tsync_journal
   tsync_test_harness
   tsync_ops
+  tsync_ops_lwt
   tsync_conf
   tsync_conf_lwt
   tsync_file_store

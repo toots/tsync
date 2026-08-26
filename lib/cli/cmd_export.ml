@@ -31,7 +31,7 @@ let cmd : unit Cmd.t =
               ])
             ())
         (let open Lwt.Syntax in
-         let module E = Export.Make (C) in
+         let module E = Export_lwt.Make (C) in
          vprintf "exporting domain %s to %s" C.domain_name dst;
          let+ summary =
            E.run ~dst

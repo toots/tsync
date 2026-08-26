@@ -62,7 +62,7 @@ let cmd : unit Cmd.t =
               ])
             ())
         (let open Lwt.Syntax in
-         let module I = Import.Make (C) in
+         let module I = Import_lwt.Make (C) in
          vprintf "importing from %s into domain %s" src C.domain_name;
          let+ summary =
            I.run ~only ~exclude ~force_rehash ~src

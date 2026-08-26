@@ -905,7 +905,7 @@ let setup_client (module C : Conf_lwt.S) root staging_prefix =
             | None -> get_or_create_staging ()
         in
         local_staging := None;
-        let module I = Import.Make (C) in
+        let module I = Import_lwt.Make (C) in
         let+ summary =
           I.run ~only ~exclude ~force_rehash ~src
             ~on_dir:(fun ~rel -> Printf.printf "  mkdir %s\n" rel)
@@ -929,7 +929,7 @@ let setup_client (module C : Conf_lwt.S) root staging_prefix =
           Filename.concat root
             (Printf.sprintf "export-%s%d" staging_prefix !staging_seq)
         in
-        let module E = Export.Make (C) in
+        let module E = Export_lwt.Make (C) in
         let* summary =
           E.run ~dst
             ~on_file:(fun ~rel status ->

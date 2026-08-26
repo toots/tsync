@@ -6,6 +6,8 @@
    -open
    Tsync_ops
    -open
+   Tsync_ops_lwt
+   -open
    Tsync_conf
    -open
    Tsync_conf_lwt
@@ -26,6 +28,7 @@
   tsync-libs.logical_key
   tsync_test_harness
   tsync_ops
+  tsync_ops_lwt
   tsync_conf
   tsync_conf_lwt
   tsync_backend_register

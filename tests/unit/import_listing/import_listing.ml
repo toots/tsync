@@ -17,7 +17,7 @@ let src = Filename.concat root "src"
 let conf = Fixture.conf ~domain:"listing" ~root ()
 
 module C = (val conf : Conf_lwt.S)
-module I = Import.Make (C)
+module I = Import_lwt.Make (C)
 
 let write rel =
   let path = Filename.concat src rel in

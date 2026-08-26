@@ -21,6 +21,16 @@
    -open
    Tsync_file_store_lwt
    -open
+   Tsync_manifests_lwt
+   -open
+   Tsync_remote_lwt
+   -open
+   Tsync_content_lwt
+   -open
+   Tsync_staged_lwt
+   -open
+   Tsync_checkout_lwt
+   -open
    Tsync_collection_lwt
    -open
    Tsync_spill_lwt
@@ -41,6 +51,11 @@
   tsync_layout_lwt
   tsync_store_lwt
   tsync_file_store_lwt
+  tsync_manifests_lwt
+  tsync_remote_lwt
+  tsync_content_lwt
+  tsync_staged_lwt
+  tsync_checkout_lwt
   tsync_collection_lwt
   tsync_spill_lwt
   tsync_sync_lwt

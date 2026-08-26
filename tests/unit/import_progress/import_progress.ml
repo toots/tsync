@@ -65,7 +65,7 @@ module C : Conf_lwt.S = struct
   include Conf_lwt.Monad
 end
 
-module I = Import.Make (C)
+module I = Import_lwt.Make (C)
 
 (* Seeded by name, so no two files share a chunk: content repeated across the
    tree deduplicates within the first run, and the re-hash below would then be

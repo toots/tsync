@@ -106,7 +106,7 @@ let cmd : unit Cmd.t =
      the same lie as printing zero for a store nobody looks at. *)
   let verify (module C : Conf_lwt.S) =
     let open Lwt.Syntax in
-    let module I = Integrity.Make (C) in
+    let module I = Integrity_lwt.Make (C) in
     let on_progress, on_done, on_stalled = watchers in
     let on_answers answers =
       List.iter
