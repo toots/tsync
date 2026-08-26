@@ -8,33 +8,26 @@
    -open
    Tsync_conf
    -open
-   Tsync_conf_lwt
-   -open
    Tsync_logical_key
    -open
    Tsync_chunks
    -open
-   Tsync_io_lwt
+   Tsync_io
    -open
    Tsync_log
    -open
    Tsync_bigstring
    -open
-   Tsync_backend_register
-   -open
-   Tsync_backend_lwt))
+   Tsync_backend_register))
  (name tsync_collection)
  (public_name tsync-libs.collection)
  (libraries
   tsync_conf
-  tsync_conf_lwt
   tsync_logical_key
   tsync_chunks
-  tsync_io_lwt
+  tsync_io
   tsync_log
   tsync_bigstring
   tsync_backend_register
-  tsync_backend_lwt
   yojson
-  unix
-  lwt))
+  unix))

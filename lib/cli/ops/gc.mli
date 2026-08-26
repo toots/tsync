@@ -13,7 +13,7 @@
 
     Writes need no cooperation: a client that has never heard of a run still
     writes to the space that survives. The one thing a writer must do is
-    {!Collection.Make.promote_all} before publishing a manifest, which
+    {!Collection_lwt.Make.promote_all} before publishing a manifest, which
     {!Remote.publish} does.
 
     {b Where it runs.} Only on a main that keeps its objects here

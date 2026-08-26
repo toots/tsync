@@ -93,7 +93,7 @@ module Make_with_layout (C : Conf_lwt.S) (L : Layout.S) : S = struct
 
   (* Chunk writes go where they always went; only presence checks and reads have
      to know that a collection may be in progress ({!Collection}). *)
-  module Collection = Collection.Make (C)
+  module Collection = Collection_lwt.Make (C)
   module L = Chunk_layout.Make (C)
   module Corrupt = Corruption_lwt.Make (C)
 

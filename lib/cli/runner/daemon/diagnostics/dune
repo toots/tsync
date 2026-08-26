@@ -32,6 +32,8 @@
    -open
    Tsync_collection
    -open
+   Tsync_collection_lwt
+   -open
    Tsync_cache_layout
    -open
    Tsync_log
@@ -76,6 +78,7 @@
   tsync_corruption
   tsync_corruption_lwt
   tsync_collection
+  tsync_collection_lwt
   tsync_cache_layout
   tsync_io
   tsync_io_lwt

@@ -37,7 +37,7 @@ let empty =
 
 module Make (C : Conf_lwt.S) = struct
   module L = Chunk_layout.Make (C)
-  module Collection = Collection.Make (C)
+  module Collection = Collection_lwt.Make (C)
   module B = (val C.store : C.Store)
 
   (* How long the closing phase may go without recording where it got to. Longer
@@ -305,7 +305,7 @@ module Make (C : Conf_lwt.S) = struct
      uploaded again by a writer that never saw the outgoing copy. On the main
      that is harmless — the new name survives the discard — but deleting the key
      off a replica would take out a live chunk. Asked after the outgoing listing,
-     so a {!Collection.Make.promote_all} landing between the two is seen rather than
+     so a {!Collection_lwt.Make.promote_all} landing between the two is seen rather than
      missed.
 
      By name rather than by listing the surviving shard, because the two are

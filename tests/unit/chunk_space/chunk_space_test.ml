@@ -74,9 +74,9 @@ module Collectable =
             ()
          : Backend_lwt.Store))
 
-module Space = Collection.Make (Collectable)
+module Space = Collection_lwt.Make (Collectable)
 module Frozen = Conf_of (Uncollectable)
-module Frozen_space = Collection.Make (Frozen)
+module Frozen_space = Collection_lwt.Make (Frozen)
 
 (* A chunk key is "<h1>-<h2>", 16 hex each. Every one of these lands in shard
    [000], which is what this file wants: it is about the two spaces, and keeping

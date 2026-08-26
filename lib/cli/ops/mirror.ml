@@ -9,7 +9,7 @@ type dest_stats = {
 
 module Make (C : Conf_lwt.S) = struct
   module Lk = Logical_key.Make (C)
-  module Collection = Collection.Make (C)
+  module Collection = Collection_lwt.Make (C)
   module L = Chunk_layout.Make (C)
   module Tree = Inode_tree.Make (C)
 

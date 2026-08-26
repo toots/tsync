@@ -67,6 +67,8 @@
    -open
    Tsync_collection
    -open
+   Tsync_collection_lwt
+   -open
    Tsync_content
    -open
    Tsync_content_lwt
@@ -125,6 +127,7 @@
   tsync_corruption
   tsync_corruption_lwt
   tsync_collection
+  tsync_collection_lwt
   tsync_content
   tsync_content_lwt
   tsync_sync

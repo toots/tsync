@@ -10,6 +10,8 @@
    -open
    Tsync_collection
    -open
+   Tsync_collection_lwt
+   -open
    Tsync_bigstring
    -open
    Tsync_backend_register
@@ -30,6 +32,7 @@
   tsync_test_harness
   tsync_store
   tsync_collection
+  tsync_collection_lwt
   tsync_conf
   tsync_conf_lwt
   tsync_bigstring

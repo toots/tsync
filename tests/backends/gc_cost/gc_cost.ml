@@ -150,7 +150,7 @@ module C : Conf_lwt.S = struct
 end
 
 module G = Gc.Make (C)
-module Collection = Collection.Make (C)
+module Collection = Collection_lwt.Make (C)
 
 let ck n = Printf.sprintf "%03x%013x-%016x" n n n
 let folders = 12

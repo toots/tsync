@@ -33,69 +33,89 @@ type run = { phase : phase; started : float; cursor : string }
 
 val string_of_phase : phase -> string
 
-module Make (_ : Conf_lwt.S) : sig
-  (** Re-exported, so a caller binding this functor's result to [Collection] can
-      still name what it reads back. *)
-  type nonrec phase = phase = Opening | Marking | Abandoning | Closing
+(** Renaming a chunk between the two spaces, which is a move on one filesystem
+    rather than anything a store offers. *)
+module type SYSCALLS = sig
+  type 'a io
 
-  type nonrec run = run = { phase : phase; started : float; cursor : string }
+  val rename : string -> string -> unit io
+end
 
-  val string_of_phase : phase -> string
+module type FS = sig
+  type 'a io
 
-  (** Where this domain's run records itself. *)
-  val marker_key : Stored_key.t
+  val ensure_parent : string -> unit io
+end
 
-  (** The run in progress, or [None] when the store is idle. Costs one read; a
-      marker that will not parse logs and reads as idle.
+module Over
+    (Io : Io.S)
+    (_ : SYSCALLS with type 'a io := 'a Io.t)
+    (_ : FS with type 'a io := 'a Io.t) : sig
+  module Make (_ : Conf.S with type 'a io = 'a Io.t) : sig
+    (** Re-exported, so a caller binding this functor's result to [Collection]
+        can still name what it reads back. *)
+    type nonrec phase = phase = Opening | Marking | Abandoning | Closing
 
-      A lookup does not go through this: it asks whether the marker is there at
-      all, since a run it cannot read is still a run. *)
-  val read_run : unit -> run option Lwt.t
+    type nonrec run = run = { phase : phase; started : float; cursor : string }
 
-  (** Open a run, or move it to its next phase. *)
-  val write_run : run -> unit Lwt.t
+    val string_of_phase : phase -> string
 
-  (** The store is idle again. *)
-  val clear_run : unit -> unit Lwt.t
+    (** Where this domain's run records itself. *)
+    val marker_key : Stored_key.t
 
-  (** {1 Where a chunk is, while there are two places it could be}
+    (** The run in progress, or [None] when the store is idle. Costs one read; a
+        marker that will not parse logs and reads as idle.
 
-      What every upload and download calls. A caller passes a chunk key and is
-      answered; which space held it, and whether a run is open at all, is not
-      something it is told. *)
+        A lookup does not go through this: it asks whether the marker is there
+        at all, since a run it cannot read is still a run. *)
+    val read_run : unit -> run option Io.t
 
-  (** Whether the store holds this chunk, in either space. *)
-  val head : string -> Backend.file_entry option Lwt.t
+    (** Open a run, or move it to its next phase. *)
+    val write_run : run -> unit Io.t
 
-  (** The chunk's bytes, from whichever space holds it. Does not promote:
-      reading a chunk says nothing about what references it, and whatever does
-      is a root the mark reaches anyway.
+    (** The store is idle again. *)
+    val clear_run : unit -> unit Io.t
 
-      Both look in the surviving space {i first} while a run is open, that being
-      where every write lands and where marking moves each live chunk, so only a
-      chunk marking has not reached yet costs a second lookup. A main that can
-      never be mid-run — every object store — is not routed through any of this.
-  *)
-  val get : string -> Bigstring.t Lwt.t
+    (** {1 Where a chunk is, while there are two places it could be}
 
-  (** {1 Moving them} *)
+        What every upload and download calls. A caller passes a chunk key and is
+        answered; which space held it, and whether a run is open at all, is not
+        something it is told. *)
 
-  (** Move a chunk into the surviving space. Idempotent, and a no-op when the
-      chunk is not in the space on its way out — so a caller can promote
-      whatever it names without first asking where any of it is.
+    (** Whether the store holds this chunk, in either space. *)
+    val head : string -> Backend.file_entry option Io.t
 
-      A move rather than a copy, so what is left behind in the outgoing space is
-      the garbage itself, which is what lets a collection delete by name. *)
-  val promote : string -> bool Lwt.t
+    (** The chunk's bytes, from whichever space holds it. Does not promote:
+        reading a chunk says nothing about what references it, and whatever does
+        is a root the mark reaches anyway.
 
-  (** Promote every chunk of a manifest about to be published, and the one thing
-      a writer owes an open run.
+        Both look in the surviving space {i first} while a run is open, that
+        being where every write lands and where marking moves each live chunk,
+        so only a chunk marking has not reached yet costs a second lookup. A
+        main that can never be mid-run — every object store — is not routed
+        through any of this. *)
+    val get : string -> Bigstring.t Io.t
 
-      Tying survival to the publish rather than to how each chunk was found
-      covers what a presence check cannot: a chunk skipped by an uploader's own
-      session memo, a chunk written before the run opened and moved by the
-      rename since, an upload still in flight when the run opened.
+    (** {1 Moving them} *)
 
-      A no-op when no run is open. *)
-  val promote_all : count:int -> (int -> string) -> unit Lwt.t
+    (** Move a chunk into the surviving space. Idempotent, and a no-op when the
+        chunk is not in the space on its way out — so a caller can promote
+        whatever it names without first asking where any of it is.
+
+        A move rather than a copy, so what is left behind in the outgoing space
+        is the garbage itself, which is what lets a collection delete by name.
+    *)
+    val promote : string -> bool Io.t
+
+    (** Promote every chunk of a manifest about to be published, and the one
+        thing a writer owes an open run.
+
+        Tying survival to the publish rather than to how each chunk was found
+        covers what a presence check cannot: a chunk skipped by an uploader's
+        own session memo, a chunk written before the run opened and moved by the
+        rename since, an upload still in flight when the run opened.
+
+        A no-op when no run is open. *)
+    val promote_all : count:int -> (int -> string) -> unit Io.t
+  end
 end
