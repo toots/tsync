@@ -1,0 +1,29 @@
+; The S3 store on Lwt, and where it registers itself.
+
+(library
+ (flags
+  (:standard
+   -open
+   Tsync_s3_backend
+   -open
+   Tsync_backend_register
+   -open
+   Tsync_backend_lwt
+   -open
+   Tsync_field_spec
+   -open
+   Tsync_retry_lwt
+   -open
+   Tsync_io_lwt))
+ (name tsync_s3_backend_lwt)
+ (optional)
+ (library_flags (-linkall))
+ (libraries
+  tsync_s3_backend
+  tsync_backend_register
+  tsync_backend_lwt
+  tsync-libs.field_spec
+  tsync_retry_lwt
+  tsync_io_lwt
+  aws-s3-lwt
+  lwt))

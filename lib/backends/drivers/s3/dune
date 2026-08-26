@@ -6,11 +6,7 @@
    -open
    Tsync_retry
    -open
-   Tsync_retry_lwt
-   -open
    Tsync_chunk_integrity
-   -open
-   Tsync_verifier_lwt
    -open
    Tsync_field_spec
    -open
@@ -20,23 +16,18 @@
    -open
    Tsync_backend_register
    -open
-   Tsync_backend_lwt))
+   Tsync_io
+   -open
+   Tsync_retry))
  (name tsync_s3_backend)
- (private_modules s3_backend)
  (optional)
- (library_flags (-linkall))
  (libraries
   aws-s3
   tsync-libs.logical_key
   tsync_retry
-  tsync_retry_lwt
+  tsync_io
   tsync_chunk_integrity
-  tsync_verifier_lwt
   tsync-libs.field_spec
   tsync-libs.bigstring
   tsync-libs.backend_register
-  tsync-libs.backend_lwt
-  tsync-libs.log
-  aws-s3-lwt
-  lwt
-  lwt.unix))
+  tsync-libs.log))

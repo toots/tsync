@@ -13,5 +13,5 @@
   (select
    s3_link.ml
    from
-   (tsync_s3_backend -> s3_link.enabled.ml)
+   (tsync_s3_backend_lwt -> s3_link.enabled.ml)
    (-> s3_link.disabled.ml))))
