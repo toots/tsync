@@ -94,7 +94,7 @@ module C : Conf_lwt.S = struct
   include Conf_lwt.Monad
 end
 
-module M = Mirror.Make (C)
+module M = Mirror_lwt.Make (C)
 
 let mask key =
   let name = Filename.basename key in

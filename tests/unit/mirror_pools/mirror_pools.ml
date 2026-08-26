@@ -71,7 +71,7 @@ module C : Conf_lwt.S = struct
   include Conf_lwt.Monad
 end
 
-module M = Mirror.Make (C)
+module M = Mirror_lwt.Make (C)
 
 let pool name =
   List.find_opt (fun (n, _, _, _) -> n = name) (Io_lwt.Bounded.totals ())

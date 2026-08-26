@@ -41,7 +41,7 @@ module C =
          ~cache_root:root ~data_dir:root ~root ()
       : Conf_lwt.S)
 
-module R = Resync.Make (C)
+module R = Resync_lwt.Make (C)
 module Fs = File_store_lwt.Make (C)
 module Lk = Logical_key.Make (C)
 

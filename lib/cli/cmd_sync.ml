@@ -33,7 +33,7 @@ let cmd : unit Cmd.t =
       let conf = load_conf ?domain () in
       match source with Some name -> reading_from name conf | None -> conf
     in
-    let module R = Resync.Make (C) in
+    let module R = Resync_lwt.Make (C) in
     let phase = ref "starting" and current = ref None in
     let manifests = ref 0 and failures = ref 0 in
     (* An incremental pass counts no manifests, and a fixed set of counters

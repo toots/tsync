@@ -965,7 +965,7 @@ let setup_client (module C : Conf_lwt.S) root staging_prefix =
         in
         dump ""
     | (ResyncRemote | ResyncScoped _) as s ->
-        let module M = Mirror.Make (C) in
+        let module M = Mirror_lwt.Make (C) in
         let scope =
           match s with
             | ResyncScoped { path = Some rel; _ } -> `Path rel

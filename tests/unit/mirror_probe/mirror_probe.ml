@@ -90,7 +90,7 @@ module C : Conf_lwt.S = struct
   include Conf_lwt.Monad
 end
 
-module M = Mirror.Make (C)
+module M = Mirror_lwt.Make (C)
 
 let key n =
   Stored_key.in_space ~prefix:domain_prefix (Printf.sprintf "folder/%04d" n)

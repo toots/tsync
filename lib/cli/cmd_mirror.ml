@@ -82,7 +82,7 @@ let cmd : unit Cmd.t =
                | `Manifests -> "manifests"
                | `Path rel -> Printf.sprintf "%s and its chunks" rel)
              src;
-           let module M = Mirror.Make (C) in
+           let module M = Mirror_lwt.Make (C) in
            let on_list ~name =
              current := Some name;
              vprintf "  %s..." name
