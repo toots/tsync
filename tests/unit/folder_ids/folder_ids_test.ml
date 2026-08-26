@@ -16,22 +16,24 @@ module Lk = Logical_key.Make (struct
   let domain_prefix = "tsync/testdom/manifests/"
 end)
 
-let ensure rel = Folder_ids.ensure_id ~cache_root ~domain_name (Lk.dir rel)
-let lookup rel = Folder_ids.lookup_id ~cache_root ~domain_name (Lk.dir rel)
+let ensure rel = Folder_ids_lwt.ensure_id ~cache_root ~domain_name (Lk.dir rel)
+let lookup rel = Folder_ids_lwt.lookup_id ~cache_root ~domain_name (Lk.dir rel)
 
 let rel_of id =
-  let+ key = Folder_ids.key_of_id ~cache_root ~domain_name ~root:Lk.root id in
+  let+ key =
+    Folder_ids_lwt.key_of_id ~cache_root ~domain_name ~root:Lk.root id
+  in
   Option.map Logical_key.path key
 
-let reparent rel = Folder_ids.reparent ~cache_root ~domain_name (Lk.dir rel)
+let reparent rel = Folder_ids_lwt.reparent ~cache_root ~domain_name (Lk.dir rel)
 
 (* Named the way a caller holding a path does it, which is without knowing
    whether the path is a folder: the key is built as a file either way. *)
 let item rel =
-  let+ r = Folder_ids.ref_of_key ~cache_root ~domain_name (Lk.file rel) in
+  let+ r = Folder_ids_lwt.ref_of_key ~cache_root ~domain_name (Lk.file rel) in
   Option.map Item_ref.to_string r
 
-let rebuild () = Folder_ids.rebuild ~cache_root ~domain_name
+let rebuild () = Folder_ids_lwt.rebuild ~cache_root ~domain_name
 
 let mirror rel =
   Filename.concat

@@ -333,7 +333,7 @@ module Make (C : Conf.S) = struct
               (* Minted by the marker above; read back so the journal entry
                  carries the id a peer resolves the folder by. *)
               let* id =
-                Folder_ids.ensure_id ~cache_root:C.cache_root
+                Folder_ids_lwt.ensure_id ~cache_root:C.cache_root
                   ~domain_name:C.domain_name (Lk.dir rel)
               in
               on_dir ~rel;

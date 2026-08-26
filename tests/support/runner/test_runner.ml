@@ -1004,7 +1004,7 @@ let setup_client (module C : Conf.S) root staging_prefix =
                (Cache_layout.manifests_dir ~cache_root:C.cache_root
                   C.domain_name)
                (Stored_key.escape_path rel))
-            Folder_ids.marker_name
+            Folder_ids_lwt.marker_name
         in
         Lwt.catch
           (fun () -> Io_lwt.Retry.unlink marker)

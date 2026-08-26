@@ -15,6 +15,8 @@
    -open
    Tsync_chunk_cache
    -open
+   Tsync_chunk_cache_lwt
+   -open
    Tsync_manifests
    -open
    Tsync_manifest
@@ -47,6 +49,7 @@
   tsync_remote
   tsync_staged
   tsync_chunk_cache
+  tsync_chunk_cache_lwt
   tsync_manifests
   tsync_manifest
   tsync_journal

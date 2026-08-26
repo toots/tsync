@@ -91,12 +91,12 @@ module C : Conf.S = struct
   let read_only = false
 end
 
-module Cc = Chunk_cache.Make (C) (Fetch)
+module Cc = Chunk_cache_lwt.Make (C) (Fetch)
 module Sb = Staged_body.Make (C) (Cc)
 
 (* Same store, seen through a capped config: the cap is the only difference. *)
 module Capped20 =
-  Chunk_cache.Make
+  Chunk_cache_lwt.Make
     (struct
       include C
 
@@ -105,7 +105,7 @@ module Capped20 =
     (Fetch)
 
 module Capped0 =
-  Chunk_cache.Make
+  Chunk_cache_lwt.Make
     (struct
       include C
 

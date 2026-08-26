@@ -90,7 +90,7 @@ module Make (C : Conf.S) (D : Domain_engine.Domain) = struct
                owed. *)
             let open Lwt.Syntax in
             let* () =
-              Folder_ids.rebuild ~cache_root:C.cache_root
+              Folder_ids_lwt.rebuild ~cache_root:C.cache_root
                 ~domain_name:C.domain_name
             in
             ignore (publish ~subs "resync" []);

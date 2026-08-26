@@ -600,7 +600,7 @@ struct
                 let* data = St.get_object ~bkey:marker_key in
                 match Folder.marker_of_string data with
                   | Some m ->
-                      Folder_ids.write ~cache_root:C.cache_root
+                      Folder_ids_lwt.write ~cache_root:C.cache_root
                         ~domain_name:C.domain_name (Lk.dir rel)
                         {
                           Folder.name = Filename.basename rel;
@@ -627,7 +627,7 @@ struct
     Lwt_list.iter_s
       (fun dir ->
         let* known =
-          Folder_ids.lookup_id ~cache_root:C.cache_root
+          Folder_ids_lwt.lookup_id ~cache_root:C.cache_root
             ~domain_name:C.domain_name dir
         in
         match known with

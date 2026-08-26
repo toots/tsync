@@ -33,6 +33,8 @@
    -open
    Tsync_folder_ids
    -open
+   Tsync_folder_ids_lwt
+   -open
    Tsync_layout
    -open
    Tsync_store
@@ -63,6 +65,7 @@
   tsync_journal
   tsync_conf
   tsync_folder_ids
+  tsync_folder_ids_lwt
   tsync_layout
   tsync_store
   tsync_file_store

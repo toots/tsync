@@ -60,7 +60,7 @@ module F = struct
       (String.make csize (Char.chr (Hashtbl.hash chunk_key land 0x7f)))
 end
 
-module Cc = Chunk_cache.Make (C) (F)
+module Cc = Chunk_cache_lwt.Make (C) (F)
 
 (* Counted through lsof rather than inferred: the descriptor is the point, not
    the promise. *)

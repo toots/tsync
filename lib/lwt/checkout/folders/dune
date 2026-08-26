@@ -1,0 +1,9 @@
+; The folder-id index on Lwt: which folder a marker names, and the path back
+; from an id, over this process's filesystem.
+
+(library
+ (flags
+  (:standard -open Tsync_folder_ids -open Tsync_io_lwt))
+ (name tsync_folder_ids_lwt)
+ (public_name tsync-libs.folder_ids_lwt)
+ (libraries tsync_folder_ids tsync_io_lwt lwt))

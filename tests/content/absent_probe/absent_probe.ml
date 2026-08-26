@@ -101,7 +101,7 @@ let () =
      let* () =
        (* What the folder's own marker being learned looks like, which is a
           local write and moves no mark. *)
-       Folder_ids.write ~cache_root:C.cache_root ~domain_name:C.domain_name
+       Folder_ids_lwt.write ~cache_root:C.cache_root ~domain_name:C.domain_name
          (Lk.dir "unknown-folder")
          { Folder.name = "unknown-folder"; id = Stored_key.root_id }
      in

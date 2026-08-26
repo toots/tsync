@@ -87,7 +87,7 @@ module Make (C : Conf.S) (F : File_ops.S) (Sq : Sync_queue.S) : S = struct
   module Lk = Logical_key.Make (C)
 
   let key_of_id id =
-    Folder_ids.key_of_id ~cache_root:C.cache_root ~domain_name:C.domain_name
+    Folder_ids_lwt.key_of_id ~cache_root:C.cache_root ~domain_name:C.domain_name
       ~root:Lk.root id
 
   (* [None] when nothing is there any more, which is the point of naming a
@@ -125,8 +125,8 @@ module Make (C : Conf.S) (F : File_ops.S) (Sq : Sync_queue.S) : S = struct
     if body = "" then Lwt.return_some `Root
     else if Logical_key.kind key = `Dir then
       let+ id =
-        Folder_ids.lookup_id ~cache_root:C.cache_root ~domain_name:C.domain_name
-          key
+        Folder_ids_lwt.lookup_id ~cache_root:C.cache_root
+          ~domain_name:C.domain_name key
       in
       Option.map (fun id -> `Dir id) id
     else Lwt.return_some (`File (container_id, Logical_key.leaf key))
@@ -150,8 +150,8 @@ module Make (C : Conf.S) (F : File_ops.S) (Sq : Sync_queue.S) : S = struct
   let lookup_folder key =
     if Logical_key.is_root key then Lwt.return_some Stored_key.root_id
     else
-      Folder_ids.lookup_id ~cache_root:C.cache_root ~domain_name:C.domain_name
-        key
+      Folder_ids_lwt.lookup_id ~cache_root:C.cache_root
+        ~domain_name:C.domain_name key
 
   let rel_body = Logical_key.path
 

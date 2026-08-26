@@ -30,8 +30,8 @@ module Make (C : Conf.S) = struct
   let in_folder key =
     (* Versions of the files in a folder share the folder's id. *)
     let* fid =
-      Folder_ids.ensure_id ~cache_root:C.cache_root ~domain_name:C.domain_name
-        key
+      Folder_ids_lwt.ensure_id ~cache_root:C.cache_root
+        ~domain_name:C.domain_name key
     in
     let* entries =
       B.list_prefix

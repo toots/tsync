@@ -32,7 +32,7 @@ let absences_for prefix =
         a
 
 module Make (C : Conf.S) (R : Remote.S) = struct
-  module Cc = Chunk_cache.Make (C) (R)
+  module Cc = Chunk_cache_lwt.Make (C) (R)
   module Sb = Staged_body.Make (C) (Cc)
   module Mf = Manifests.Make (C)
   module Mfs = Staged_manifest.Make (C)

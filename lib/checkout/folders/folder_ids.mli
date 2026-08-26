@@ -11,57 +11,73 @@
     rebuilds them and retries, which is what makes the mirror tolerable to write
     from another process ([tsync import], [tsync sync --full]). *)
 
-(** The per-directory marker file naming that folder's id. *)
-val marker_name : string
+(** What this needs of a filesystem, which is seven calls. *)
+module type FILES = sig
+  type 'a io
 
-(** The folder's id, minting and persisting one when it has no marker yet. For
-    the write paths, which may bring a folder into existence. *)
-val ensure_id :
-  cache_root:string -> domain_name:string -> Logical_key.t -> string Lwt.t
+  val read_file_opt : string -> string option io
+  val readdir_list_quiet : string -> string list io
+  val is_directory : string -> bool io
+  val mkdir_p : string -> unit io
+  val ensure_parent : string -> unit io
+  val atomic_write : string -> string -> unit io
+  val unlink_quiet : string -> unit io
+end
 
-(** The folder's id if this client already records one, [None] otherwise.
+module Over (Io : Io.S) (_ : FILES with type 'a io := 'a Io.t) : sig
+  (** The per-directory marker file naming that folder's id. *)
+  val marker_name : string
 
-    What a read must use: minting here would persist a marker that re-creates
-    the local directory, which is how a deleted folder comes back from a stat.
-*)
-val lookup_id :
-  cache_root:string ->
-  domain_name:string ->
-  Logical_key.t ->
-  string option Lwt.t
+  (** The folder's id, minting and persisting one when it has no marker yet. For
+      the write paths, which may bring a folder into existence. *)
+  val ensure_id :
+    cache_root:string -> domain_name:string -> Logical_key.t -> string Io.t
 
-(** The reference an item answers to, [None] for a folder this client cannot
-    resolve. The inverse of what {!key_of_id} does for the daemon: a caller
-    holding a path names the item before it asks anything over a socket. *)
-val ref_of_key :
-  cache_root:string ->
-  domain_name:string ->
-  Logical_key.t ->
-  Item_ref.t option Lwt.t
+  (** The folder's id if this client already records one, [None] otherwise.
 
-(** Write a folder's marker, and the reverse entry that makes {!rel_of_id}
-    answerable. *)
-val write :
-  cache_root:string ->
-  domain_name:string ->
-  Logical_key.t ->
-  Folder.marker ->
-  unit Lwt.t
+      What a read must use: minting here would persist a marker that re-creates
+      the local directory, which is how a deleted folder comes back from a stat.
+  *)
+  val lookup_id :
+    cache_root:string ->
+    domain_name:string ->
+    Logical_key.t ->
+    string option Io.t
 
-(** The domain-relative path of a folder id, or [None] when nothing records it.
-    A miss rebuilds the reverse index once and retries before answering. *)
-val key_of_id :
-  cache_root:string ->
-  domain_name:string ->
-  root:Logical_key.t ->
-  string ->
-  Logical_key.t option Lwt.t
+  (** The reference an item answers to, [None] for a folder this client cannot
+      resolve. The inverse of what {!key_of_id} does for the daemon: a caller
+      holding a path names the item before it asks anything over a socket. *)
+  val ref_of_key :
+    cache_root:string ->
+    domain_name:string ->
+    Logical_key.t ->
+    Item_ref.t option Io.t
 
-(** Restate a folder's marker after it moved, taking the name from the new path.
-    Every path that moves a directory locally owes this call, or the folder
-    becomes unreachable by id. *)
-val reparent :
-  cache_root:string -> domain_name:string -> Logical_key.t -> unit Lwt.t
+  (** Write a folder's marker, and the reverse entry that makes {!rel_of_id}
+      answerable. *)
+  val write :
+    cache_root:string ->
+    domain_name:string ->
+    Logical_key.t ->
+    Folder.marker ->
+    unit Io.t
 
-(** Restate the whole reverse index from the markers, which are the truth. *)
-val rebuild : cache_root:string -> domain_name:string -> unit Lwt.t
+  (** The domain-relative path of a folder id, or [None] when nothing records
+      it. A miss rebuilds the reverse index once and retries before answering.
+  *)
+  val key_of_id :
+    cache_root:string ->
+    domain_name:string ->
+    root:Logical_key.t ->
+    string ->
+    Logical_key.t option Io.t
+
+  (** Restate a folder's marker after it moved, taking the name from the new
+      path. Every path that moves a directory locally owes this call, or the
+      folder becomes unreachable by id. *)
+  val reparent :
+    cache_root:string -> domain_name:string -> Logical_key.t -> unit Io.t
+
+  (** Restate the whole reverse index from the markers, which are the truth. *)
+  val rebuild : cache_root:string -> domain_name:string -> unit Io.t
+end

@@ -43,7 +43,8 @@ module Make (C : Conf.S) = struct
     let apply key (entry : Inode_tree.entry) =
       match entry.Inode_tree.body with
         | Inode_tree.Dir m ->
-            Folder_ids.write ~cache_root:C.cache_root ~domain_name:C.domain_name
+            Folder_ids_lwt.write ~cache_root:C.cache_root
+              ~domain_name:C.domain_name
               (Logical_key.dir_in key m.Folder.name)
               m
         | Inode_tree.File man ->

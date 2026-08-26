@@ -12,15 +12,13 @@
    -open
    Tsync_cache_layout
    -open
-   Tsync_io_lwt))
+   Tsync_io))
  (name tsync_folder_ids)
  (public_name tsync-libs.folder_ids)
  (libraries
   tsync_filename
   tsync_logical_key
   tsync_cache_layout
-  tsync_io_lwt
+  tsync_io
   yojson
-  unix
-  lwt
-  lwt.unix))
+  unix))

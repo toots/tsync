@@ -22,6 +22,8 @@
    -open
    Tsync_folder_ids
    -open
+   Tsync_folder_ids_lwt
+   -open
    Tsync_ipc
    -open
    Tsync_ipc_lwt
@@ -50,6 +52,7 @@
   tsync_ops
   tsync_file_store
   tsync_folder_ids
+  tsync_folder_ids_lwt
   tsync_backend_register
   tsync_io_lwt
   tsync_conf

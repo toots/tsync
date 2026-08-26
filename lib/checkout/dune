@@ -25,6 +25,8 @@
    -open
    Tsync_folder_ids
    -open
+   Tsync_folder_ids_lwt
+   -open
    Tsync_journal
    -open
    Tsync_durable_queue_lwt
@@ -55,6 +57,7 @@
   tsync_manifest
   tsync_manifests
   tsync_folder_ids
+  tsync_folder_ids_lwt
   tsync_journal
   tsync_durable_queue_lwt
   tsync_io

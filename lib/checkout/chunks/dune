@@ -15,7 +15,7 @@
    -open
    Tsync_chunks
    -open
-   Tsync_io_lwt
+   Tsync_io
    -open
    Tsync_backend_register
    -open
@@ -29,10 +29,8 @@
   tsync_conf
   tsync_cache_layout
   tsync_chunks
-  tsync_io_lwt
+  tsync_io
   tsync_backend_register
   tsync_bigstring
   tsync_log
-  lwt
-  unix
-  lwt.unix))
+  unix))

@@ -99,7 +99,7 @@ let item_for_path ?domain path =
         let module Lk = Logical_key.Make (C) in
         let found =
           Oneshot.run
-            (Folder_ids.ref_of_key ~cache_root:C.cache_root
+            (Folder_ids_lwt.ref_of_key ~cache_root:C.cache_root
                ~domain_name:C.domain_name (Lk.file rel))
         in
         match found with

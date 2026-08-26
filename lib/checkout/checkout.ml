@@ -95,8 +95,8 @@ module Make (C : Conf.S) = struct
       let* is_dir = Io_lwt.Fs.is_directory dst in
       if is_dir then
         let* () = refresh_dir_marker dst_key in
-        Folder_ids.reparent ~cache_root:C.cache_root ~domain_name:C.domain_name
-          dst_key
+        Folder_ids_lwt.reparent ~cache_root:C.cache_root
+          ~domain_name:C.domain_name dst_key
       else (
         match of_file dst with
           | m -> Mf.write dst_key m

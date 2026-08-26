@@ -41,8 +41,8 @@ module Inode = struct
     open Lwt.Syntax
 
     let lookup_id key =
-      Folder_ids.lookup_id ~cache_root:C.cache_root ~domain_name:C.domain_name
-        key
+      Folder_ids_lwt.lookup_id ~cache_root:C.cache_root
+        ~domain_name:C.domain_name key
 
     let rel_of = Logical_key.path
 
@@ -102,7 +102,7 @@ module Inode = struct
                   ~default:candidate
               in
               let+ () =
-                Folder_ids.write ~cache_root:C.cache_root
+                Folder_ids_lwt.write ~cache_root:C.cache_root
                   ~domain_name:C.domain_name key winner
               in
               winner.Folder.id
