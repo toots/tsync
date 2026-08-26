@@ -12,7 +12,7 @@
    -open
    Tsync_backend_lwt
    -open
-   Tsync_local_backend
+   Tsync_local_backend_lwt
    -open
    Tsync_domain_store
    -open
@@ -25,7 +25,7 @@
   tsync_bigstring
   tsync_backend_register
   tsync_backend_lwt
-  tsync_local_backend
+  tsync_local_backend_lwt
   tsync_domain_store
   lwt
   lwt.unix

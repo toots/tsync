@@ -12,7 +12,7 @@
    -open
    Tsync_backend_register
    -open
-   Tsync_local_backend
+   Tsync_local_backend_lwt
    -open
    Tsync_io_lwt
    -open
@@ -25,7 +25,7 @@
   tsync_cache_layout
   tsync_conf
   tsync_backend_register
-  tsync_local_backend
+  tsync_local_backend_lwt
   tsync_io
   tsync_io_lwt
   lwt

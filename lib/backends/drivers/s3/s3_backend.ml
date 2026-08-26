@@ -265,7 +265,7 @@ let make ?endpoint ?unsigned_payload ?share_url ~bucket ~region ~access_key_id
 
     let verify_all ~chunk_prefix () =
       let+ n =
-        Verifier.queue
+        Verifier_lwt.queue
           ~on_progress:(fun ~done_ ~total ->
             if done_ mod 256 = 0 || done_ = total then
               Log.info "verify: queued %d/%d shard request(s)" done_ total)

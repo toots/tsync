@@ -1,0 +1,28 @@
+; The local store on Lwt, and where it registers itself.
+
+(library
+ (flags
+  (:standard
+   -open
+   Tsync_local_backend
+   -open
+   Tsync_backend_register
+   -open
+   Tsync_backend_lwt
+   -open
+   Tsync_field_spec
+   -open
+   Tsync_bigstring_lwt
+   -open
+   Tsync_io_lwt))
+ (library_flags (-linkall))
+ (name tsync_local_backend_lwt)
+ (libraries
+  tsync_local_backend
+  tsync_backend_register
+  tsync_backend_lwt
+  tsync_field_spec
+  tsync_bigstring_lwt
+  tsync_io_lwt
+  unix
+  lwt))

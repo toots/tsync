@@ -8,6 +8,8 @@
    -open
    Tsync_chunk_integrity
    -open
+   Tsync_verifier_lwt
+   -open
    Tsync_field_spec
    -open
    Tsync_log
@@ -31,6 +33,7 @@
   tsync-libs.logical_key
   tsync_retry
   tsync_chunk_integrity
+  tsync_verifier_lwt
   tsync-libs.field_spec
   tsync-libs.bigstring
   tsync-libs.backend_register

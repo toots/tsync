@@ -10,7 +10,7 @@
    -open
    Tsync_conf
    -open
-   Tsync_local_backend
+   Tsync_local_backend_lwt
    -open
    Tsync_diagnostics
    -open
@@ -21,7 +21,7 @@
   tsync_test_harness
   tsync_backend_register
   tsync_backend_lwt
-  tsync_local_backend
+  tsync_local_backend_lwt
   tsync_diagnostics
   tsync_conf
   yojson

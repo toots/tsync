@@ -375,7 +375,7 @@ let make ?endpoint ?service_account_key ?share_url ~bucket () :
 
     let verify_all ~chunk_prefix () =
       let+ n =
-        Verifier.queue
+        Verifier_lwt.queue
           ~on_progress:(fun ~done_ ~total ->
             if done_ mod 256 = 0 || done_ = total then
               Log.info "verify: queued %d/%d shard request(s)" done_ total)

@@ -7,19 +7,30 @@
     an upload, then deletes the request.
 
     So this is only [put], and only the object stores implement
-    {!Backend_lwt.Store.verify_all} with it: a filesystem has no event source to
-    deliver anything, and [tsync gc --verify] is its sweep. *)
+    {!Backend.S.verify_all} with it: a filesystem has no event source to deliver
+    anything, and [tsync gc --verify] is its sweep. *)
 
-(** Queue one request per shard. Answers how many, which is work started rather
-    than work done: what came of it is read afterwards by listing
-    {!Chunk_layout.corrupted_prefix}.
+(** What queueing the requests needs of a pool. *)
+module type POOLS = sig
+  type 'a io
+  type t
 
-    Not batched — neither store has a bulk put, only a bulk delete — so this is
-    one round trip per shard and [on_progress] is how a caller says so rather
-    than appearing to hang. *)
-val queue :
-  ?on_progress:(done_:int -> total:int -> unit) ->
-  put:(key:Stored_key.t -> data:string -> unit -> unit Lwt.t) ->
-  chunk_prefix:string ->
-  unit ->
-  int Lwt.t
+  val create : ?max_waiting:int -> ?name:string -> max:int -> unit -> t
+  val use : t -> (unit -> 'a io) -> 'a io
+end
+
+module Over (Io : Io.S) (_ : POOLS with type 'a io := 'a Io.t) : sig
+  (** Queue one request per shard. Answers how many, which is work started
+      rather than work done: what came of it is read afterwards by listing
+      {!Chunk_layout.corrupted_prefix}.
+
+      Not batched — neither store has a bulk put, only a bulk delete — so this
+      is one round trip per shard and [on_progress] is how a caller says so
+      rather than appearing to hang. *)
+  val queue :
+    ?on_progress:(done_:int -> total:int -> unit) ->
+    put:(key:Stored_key.t -> data:string -> unit -> unit Io.t) ->
+    chunk_prefix:string ->
+    unit ->
+    int Io.t
+end

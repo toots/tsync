@@ -7,7 +7,7 @@
  (libraries
   tsync-libs.bigstring
   tsync-libs.backend_register
-  tsync_local_backend
+  tsync_local_backend_lwt
   tsync_http_proxy_backend
   tsync_gcs_backend
   (select

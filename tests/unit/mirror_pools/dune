@@ -16,7 +16,7 @@
    -open
    Tsync_conf
    -open
-   Tsync_local_backend
+   Tsync_local_backend_lwt
    -open
    Tsync_domain_store
    -open
@@ -31,7 +31,7 @@
   tsync_backend_register
   tsync_backend_lwt
   tsync_conf
-  tsync_local_backend
+  tsync_local_backend_lwt
   tsync_domain_store
   lwt
   lwt.unix

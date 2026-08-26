@@ -1,4 +1,4 @@
-; [tsync_local_backend] is linked for its registration alone: a member needs a
+; [tsync_local_backend_lwt] is linked for its registration alone: a member needs a
 ; store module, and capacity reads only the fields beside it.
 ;
 ; [tsync_metrics] for the one assertion that spans both: what [human_bytes]
@@ -27,5 +27,5 @@
   tsync-libs.conf
   tsync-libs.backend_register
   tsync-libs.backend_lwt
-  tsync_local_backend
+  tsync_local_backend_lwt
   tsync_io_lwt))

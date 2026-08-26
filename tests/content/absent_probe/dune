@@ -42,7 +42,7 @@
    -open
    Tsync_conf
    -open
-   Tsync_local_backend))
+   Tsync_local_backend_lwt))
  (name absent_probe)
  (libraries
   tsync_logical_key
@@ -65,6 +65,6 @@
   tsync_conf
   tsync_backend_register
   tsync_backend_lwt
-  tsync_local_backend
+  tsync_local_backend_lwt
   lwt
   lwt.unix))

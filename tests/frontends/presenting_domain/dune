@@ -18,7 +18,7 @@
    -open
    Tsync_conf
    -open
-   Tsync_local_backend
+   Tsync_local_backend_lwt
    -open
    Tsync_store))
  (name presenting_domain)
@@ -32,7 +32,7 @@
   tsync-libs.conf
   tsync_backend_register
   tsync_backend_lwt
-  tsync_local_backend
+  tsync_local_backend_lwt
   yojson
   lwt
   lwt.unix))

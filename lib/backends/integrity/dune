@@ -11,7 +11,7 @@
    -open
    Tsync_bigstring
    -open
-   Tsync_io_lwt
+   Tsync_io
    -open
    Tsync_logical_key))
  (name tsync_chunk_integrity)
@@ -20,6 +20,5 @@
   tsync-libs.logical_key
   tsync_chunks
   tsync_bigstring
-  tsync_io_lwt
-  yojson
-  lwt))
+  tsync_io
+  yojson))

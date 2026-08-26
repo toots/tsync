@@ -10,20 +10,20 @@
     so which chunks are garbage is knowable nowhere but on the main.
 
     So this is only [put], and only the object stores implement
-    {!Backend_lwt.Store.discard} with it. A filesystem and an http-proxy peer
-    have nothing on their side to wake and delete in the call instead.
+    {!Backend.S.discard} with it. A filesystem and an http-proxy peer have
+    nothing on their side to wake and delete in the call instead.
 
     [queue] returns once the request is durably stored, which is what lets the
     collection go on to discard the main's own copy: the request outliving the
     collector is the whole of what that ordering rests on. *)
 val queue :
-  put:(key:Stored_key.t -> data:string -> unit -> unit Lwt.t) ->
+  put:(key:Stored_key.t -> data:string -> unit -> 'answer) ->
   chunk_prefix:string ->
   run:string ->
   name:string ->
   keys:Stored_key.t list ->
   unit ->
-  unit Lwt.t
+  'answer
 
 (** The body, shared so the two stores that write one, and whatever reads one
     back, cannot spell it differently. *)

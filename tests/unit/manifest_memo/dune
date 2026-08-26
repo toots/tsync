@@ -22,7 +22,7 @@
    -open
    Tsync_backend_lwt
    -open
-   Tsync_local_backend
+   Tsync_local_backend_lwt
    -open
    Tsync_io_lwt
    -open
@@ -40,7 +40,7 @@
   tsync_conf
   tsync_backend_register
   tsync_backend_lwt
-  tsync_local_backend
+  tsync_local_backend_lwt
   tsync_io_lwt
   lwt
   lwt.unix
