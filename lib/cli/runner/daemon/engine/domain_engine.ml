@@ -48,10 +48,10 @@ end
 module Make (C : Conf.S) : S = struct
   module Lk = Logical_key.Make (C)
   module F = File_lwt.Make (C)
-  module Sq = Sync_queue.Make (C) (F)
+  module Sq = Sync_lwt.Sync_queue.Make (C) (F)
   module Ih = Ipc_handler.Make (C) (F) (Sq)
-  module Sp = Sync_poller.Make (C) (F)
-  module Rp = Replay.Make (C) (F)
+  module Sp = Sync_lwt.Sync_poller.Make (C) (F)
+  module Rp = Sync_lwt.Replay.Make (C) (F)
   module Mf = Checkout_lwt.Make (C)
   module Mfs = Staged_lwt.Manifest.Make (C)
   module Fs = File_store.Make (C)

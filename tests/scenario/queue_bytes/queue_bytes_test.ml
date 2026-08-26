@@ -29,7 +29,7 @@ module Sent = struct
   let upload ?cancel:_ _ = if !renaming then dir_gate else gate
 end
 
-module Sq = Sync_queue.Make (C) (Sent)
+module Sq = Sync_lwt.Sync_queue.Make (C) (Sent)
 
 (* Waits for the queue to stop moving rather than for a length of time: on a
    loaded CI runner 0.2s elapsed before the worker had dequeued, and the report

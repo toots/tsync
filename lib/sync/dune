@@ -7,8 +7,6 @@
  (flags
   (:standard
    -open
-   Tsync_retry
-   -open
    Tsync_logical_key
    -open
    Tsync_history
@@ -16,8 +14,6 @@
    Tsync_remote
    -open
    Tsync_staged
-   -open
-   Tsync_staged_lwt
    -open
    Tsync_checkout
    -open
@@ -27,8 +23,6 @@
    -open
    Tsync_wal
    -open
-   Tsync_wal_lwt
-   -open
    Tsync_manifests
    -open
    Tsync_manifest
@@ -37,17 +31,19 @@
    -open
    Tsync_conf
    -open
+   Tsync_io
+   -open
+   Tsync_retry
+   -open
    Tsync_file_store
    -open
    Tsync_content
-   -open
-   Tsync_io_lwt
    -open
    Tsync_backend_register
    -open
    Tsync_log
    -open
-   Tsync_durable_queue_lwt))
+   Tsync_durable_queue))
  (name tsync_sync)
  (public_name tsync-libs.sync)
  (libraries
@@ -56,22 +52,18 @@
   tsync_history
   tsync_remote
   tsync_staged
-  tsync_staged_lwt
   tsync_checkout
   tsync_file_ops
   tsync_file
   tsync_wal
-  tsync_wal_lwt
   tsync_manifests
   tsync_manifest
   tsync_journal
-  tsync_durable_queue_lwt
   tsync_conf
+  tsync_io
+  tsync_durable_queue
   tsync_file_store
   tsync_content
-  tsync_io_lwt
   tsync_backend_register
   tsync_log
-  unix
-  lwt
-  lwt.unix))
+  unix))

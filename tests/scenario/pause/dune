@@ -10,6 +10,8 @@
    -open
    Tsync_sync
    -open
+   Tsync_sync_lwt
+   -open
    Tsync_file
    -open
    Tsync_file_lwt
@@ -30,6 +32,7 @@
   tsync_journal
   tsync_test_harness
   tsync_sync
+  tsync_sync_lwt
   tsync_file
   tsync_file_lwt
   tsync_conf

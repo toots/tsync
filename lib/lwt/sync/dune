@@ -1,0 +1,25 @@
+; Synchronising a domain on Lwt: this client's records drained outward, other
+; clients' entries applied inward, and the timer that asks.
+
+(library
+ (flags
+  (:standard
+   -open
+   Tsync_sync
+   -open
+   Tsync_file_store
+   -open
+   Tsync_wal_lwt
+   -open
+   Tsync_staged_lwt
+   -open
+   Tsync_io_lwt))
+ (name tsync_sync_lwt)
+ (public_name tsync-libs.sync_lwt)
+ (libraries
+  tsync_sync
+  tsync_file_store
+  tsync_wal_lwt
+  tsync_staged_lwt
+  tsync_io_lwt
+  lwt))

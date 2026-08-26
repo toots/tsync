@@ -16,8 +16,8 @@ module Make (C : Conf.S) = struct
   module J = Journal.Make (C)
   module Fs = File_store.Make (C)
   module F = File_lwt.Make (C)
-  module Sq = Sync_queue.Make (C) (F)
-  module Rp = Replay.Make (C) (F)
+  module Sq = Sync_lwt.Sync_queue.Make (C) (F)
+  module Rp = Sync_lwt.Replay.Make (C) (F)
   module Tree = Inode_tree.Make (C)
 
   (* Walks the inode tree through the module that owns the walk, so a resync and

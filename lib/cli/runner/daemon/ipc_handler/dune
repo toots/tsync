@@ -14,6 +14,8 @@
    -open
    Tsync_sync
    -open
+   Tsync_sync_lwt
+   -open
    Tsync_manifest
    -open
    Tsync_journal
@@ -50,6 +52,7 @@
   tsync_checkout_lwt
   tsync_file_ops
   tsync_sync
+  tsync_sync_lwt
   tsync_manifest
   tsync_journal
   tsync_ops

@@ -42,6 +42,8 @@
    -open
    Tsync_sync
    -open
+   Tsync_sync_lwt
+   -open
    Tsync_folder_ids
    -open
    Tsync_folder_ids_lwt
@@ -89,6 +91,7 @@
   tsync_corruption
   tsync_collection
   tsync_sync
+  tsync_sync_lwt
   tsync_folder_ids
   tsync_folder_ids_lwt
   tsync_cache_layout
