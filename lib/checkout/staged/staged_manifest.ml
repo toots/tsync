@@ -243,7 +243,7 @@ module Make (C : Conf.S) = struct
             if is_dir then
               if not deep then Lwt.return acc
               else
-                let* real = Cache_layout.real_dir_name path name in
+                let* real = Cache_layout_lwt.real_dir_name path name in
                 walk path (Logical_key.dir_in key real) acc
             else
               let+ body = Io_lwt.Fs.read_file_opt path in

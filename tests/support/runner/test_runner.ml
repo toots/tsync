@@ -1041,7 +1041,8 @@ let setup_client (module C : Conf.S) root staging_prefix =
         Lwt.return_unit
     | ReclaimStaged -> F.reclaim_staged_orphans ()
     | ClearCache ->
-        Cache_layout.clear ~cache_root:C.cache_root ~domain_name:C.domain_name
+        Cache_layout_lwt.clear ~cache_root:C.cache_root
+          ~domain_name:C.domain_name
   in
   (* The daemon's order: the queue settles, then the bumps its uploads owe are
      published. A step must have moved the cursor by the time it returns, since

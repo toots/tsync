@@ -17,6 +17,8 @@
    -open
    Tsync_cache_layout
    -open
+   Tsync_cache_layout_lwt
+   -open
    Tsync_manifest
    -open
    Tsync_manifests
@@ -49,6 +51,7 @@
   tsync_staged
   tsync_conf
   tsync_cache_layout
+  tsync_cache_layout_lwt
   tsync_manifest
   tsync_manifests
   tsync_folder_ids

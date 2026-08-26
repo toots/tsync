@@ -79,7 +79,7 @@ module Make (C : Conf.S) = struct
     progress.on_phase "clearing the cache";
     (* Unsynced edits are kept: nothing else holds those bytes. *)
     let* () =
-      Cache_layout.clear ~cache_root:C.cache_root ~domain_name:C.domain_name
+      Cache_layout_lwt.clear ~cache_root:C.cache_root ~domain_name:C.domain_name
     in
     progress.on_phase "rebuilding";
     let* manifests, failed =

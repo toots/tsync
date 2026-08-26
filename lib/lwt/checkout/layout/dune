@@ -1,0 +1,9 @@
+; The cache layout on Lwt: the paths as they are, and the three that touch the
+; disk bound to this process's filesystem.
+
+(library
+ (flags
+  (:standard -open Tsync_cache_layout -open Tsync_io_lwt))
+ (name tsync_cache_layout_lwt)
+ (public_name tsync-libs.cache_layout_lwt)
+ (libraries tsync_cache_layout tsync_io_lwt lwt))

@@ -149,7 +149,7 @@ module Make (C : Conf.S) = struct
             let path = Filename.concat dir name in
             let* is_dir = Io_lwt.Fs.is_directory path in
             if is_dir then
-              let+ real = Cache_layout.real_dir_name path name in
+              let+ real = Cache_layout_lwt.real_dir_name path name in
               (files, real :: dirs)
             else
               let+ m = read_clean path in
@@ -181,7 +181,7 @@ module Make (C : Conf.S) = struct
             let path = Filename.concat dir name in
             let* is_dir = Io_lwt.Fs.is_directory path in
             if is_dir then
-              let* real = Cache_layout.real_dir_name path name in
+              let* real = Cache_layout_lwt.real_dir_name path name in
               walk path (Logical_key.dir_in key real) acc
             else
               let+ m = read_clean path in

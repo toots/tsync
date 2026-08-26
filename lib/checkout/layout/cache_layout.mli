@@ -45,14 +45,32 @@ val scratch_path :
 (** A cache chunk's path, sharded by {!Chunk_layout} like the backend store. *)
 val chunk_path : cache_root:string -> domain_name:string -> string -> string
 
-(** Record what a directory stored under a handle is really called, unless it is
-    already recorded. Both trees that mirror real paths keep these. *)
-val record_dir_name : string -> string -> unit Lwt.t
+(** {1 The three that touch the disk}
 
-(** [real_dir_name dir_path name] is [name] itself, or what the marker in
-    [dir_path] records when [name] is a handle. *)
-val real_dir_name : string -> string -> string Lwt.t
+    A component the filesystem cannot hold is stored as a handle, which is
+    lossy, so a directory's real name is written beside it. A file needs no
+    marker: its manifest body carries the name. *)
 
-(** Drop everything rebuildable, for a resync that restates the domain from the
-    backend. Staged edits are kept: nothing else holds those bytes. *)
-val clear : cache_root:string -> domain_name:string -> unit Lwt.t
+(** What this needs of a filesystem, which is four calls. *)
+module type FILES = sig
+  type 'a io
+
+  val file_exists : string -> bool io
+  val atomic_write : string -> string -> unit io
+  val read_file_opt : string -> string option io
+  val rm_rf : string -> unit io
+end
+
+module Make (Io : Io.S) (_ : FILES with type 'a io := 'a Io.t) : sig
+  (** Record what a directory stored under a handle is really called, unless it
+      is already recorded. Both trees that mirror real paths keep these. *)
+  val record_dir_name : string -> string -> unit Io.t
+
+  (** [real_dir_name dir_path name] is [name] itself, or what the marker in
+      [dir_path] records when [name] is a handle. *)
+  val real_dir_name : string -> string -> string Io.t
+
+  (** Drop everything rebuildable, for a resync that restates the domain from
+      the backend. Staged edits are kept: nothing else holds those bytes. *)
+  val clear : cache_root:string -> domain_name:string -> unit Io.t
+end

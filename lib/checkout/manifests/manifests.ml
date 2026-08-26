@@ -25,7 +25,7 @@ let ensure_dirs root rel =
         let* () = Io_lwt.Fs.mkdir_p dir in
         let* () =
           if Stored_key.is_escaped enc then
-            Cache_layout.record_dir_name
+            Cache_layout_lwt.record_dir_name
               (Filename.concat dir Stored_key.dir_name_leaf)
               c
           else Lwt.return_unit

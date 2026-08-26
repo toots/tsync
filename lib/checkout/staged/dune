@@ -14,6 +14,8 @@
    -open
    Tsync_cache_layout
    -open
+   Tsync_cache_layout_lwt
+   -open
    Tsync_manifest
    -open
    Tsync_chunks
@@ -34,6 +36,7 @@
   tsync_id
   tsync_conf
   tsync_cache_layout
+  tsync_cache_layout_lwt
   tsync_manifest
   tsync_chunks
   tsync_chunk_cache

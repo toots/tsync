@@ -51,24 +51,35 @@ let chunk_path ~cache_root ~domain_name chunk_key =
 (* A component the filesystem cannot hold is stored as a handle, which is lossy,
    so a directory's real name is written beside it. A file needs no marker: its
    manifest body carries the name. *)
-let record_dir_name path name =
-  let open Lwt.Syntax in
-  let* exists = Io_lwt.Retry.file_exists path in
-  if exists then Lwt.return_unit else Io_lwt.Fs.atomic_write path name
 
-let real_dir_name dir_path name =
-  let open Lwt.Syntax in
-  if Stored_key.is_escaped name then
-    let+ body =
-      Io_lwt.Fs.read_file_opt
-        (Filename.concat dir_path Stored_key.dir_name_leaf)
-    in
-    Option.value body ~default:""
-  else Lwt.return name
+module type FILES = sig
+  type 'a io
 
-let clear ~cache_root ~domain_name =
-  let open Lwt.Syntax in
-  let* () = Io_lwt.Fs.rm_rf (manifests_dir ~cache_root domain_name) in
-  let* () = Io_lwt.Fs.rm_rf (scratch_dir ~cache_root domain_name) in
-  let* () = Io_lwt.Fs.rm_rf (folders_dir ~cache_root domain_name) in
-  Io_lwt.Fs.rm_rf (chunks_dir ~cache_root domain_name)
+  val file_exists : string -> bool io
+  val atomic_write : string -> string -> unit io
+  val read_file_opt : string -> string option io
+  val rm_rf : string -> unit io
+end
+
+module Make (Io : Io.S) (F : FILES with type 'a io := 'a Io.t) = struct
+  let ( let* ) = Io.bind
+  let ( let+ ) x f = Io.map f x
+
+  let record_dir_name path name =
+    let* exists = F.file_exists path in
+    if exists then Io.return () else F.atomic_write path name
+
+  let real_dir_name dir_path name =
+    if Stored_key.is_escaped name then
+      let+ body =
+        F.read_file_opt (Filename.concat dir_path Stored_key.dir_name_leaf)
+      in
+      Option.value body ~default:""
+    else Io.return name
+
+  let clear ~cache_root ~domain_name =
+    let* () = F.rm_rf (manifests_dir ~cache_root domain_name) in
+    let* () = F.rm_rf (scratch_dir ~cache_root domain_name) in
+    let* () = F.rm_rf (folders_dir ~cache_root domain_name) in
+    F.rm_rf (chunks_dir ~cache_root domain_name)
+end
