@@ -8,8 +8,6 @@
    -open
    Tsync_chunk_integrity
    -open
-   Tsync_verifier_lwt
-   -open
    Tsync_field_spec
    -open
    Tsync_log
@@ -18,34 +16,27 @@
    -open
    Tsync_backend_register
    -open
-   Tsync_backend_lwt
-   -open
    Tsync_http_client
    -open
-   Tsync_http_client_lwt))
+   Tsync_io
+   -open
+   Tsync_retry))
  (name tsync_gcs_backend)
  (private_modules gcs_auth)
- (library_flags (-linkall))
  (libraries
-  cohttp-lwt
   cohttp
   unix
   tsync-libs.logical_key
   tsync_retry
+  tsync_io
   tsync_chunk_integrity
-  tsync_verifier_lwt
   tsync-libs.field_spec
   tsync-libs.bigstring
   tsync-libs.backend_register
-  tsync-libs.backend_lwt
   tsync_http_client
-  tsync_http_client_lwt
   tsync-libs.log
-  cohttp-lwt-unix
   uri
   yojson
   base64
   x509
-  mirage-crypto-pk
-  lwt
-  lwt.unix))
+  mirage-crypto-pk))

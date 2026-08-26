@@ -4,8 +4,6 @@
    -open
    Tsync_logical_key
    -open
-   Tsync_retry
-   -open
    Tsync_field_spec
    -open
    Tsync_log
@@ -16,28 +14,22 @@
    -open
    Tsync_backend_register
    -open
-   Tsync_backend_lwt
-   -open
    Tsync_http_client
    -open
-   Tsync_http_client_lwt))
+   Tsync_io
+   -open
+   Tsync_retry))
  (name tsync_http_proxy_backend)
- (private_modules http_proxy_backend)
- (library_flags (-linkall))
  (libraries
   cohttp
   tsync-libs.logical_key
   tsync_retry
+  tsync_io
   tsync-libs.field_spec
   tsync-libs.bigstring
   tsync-libs.backend_register
-  tsync-libs.backend_lwt
   tsync_http_client
-  tsync_http_client_lwt
   tsync-libs.http_proxy
   tsync-libs.log
-  cohttp-lwt-unix
   uri
-  yojson
-  lwt
-  lwt.unix))
+  yojson))

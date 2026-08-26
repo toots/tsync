@@ -8,4 +8,8 @@
    -open
    Tsync_gcs_backend))
  (name gcs)
- (libraries tsync-libs.logical_key tsync_gcs_backend tsync_backend_register))
+ (libraries
+  tsync-libs.logical_key
+  tsync_gcs_backend
+  tsync_gcs_backend_lwt
+  tsync_backend_register))

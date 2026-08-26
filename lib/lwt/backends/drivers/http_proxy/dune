@@ -1,0 +1,27 @@
+; The peer-proxy store on Lwt, and where it registers itself.
+
+(library
+ (flags
+  (:standard
+   -open
+   Tsync_http_proxy_backend
+   -open
+   Tsync_backend_register
+   -open
+   Tsync_backend_lwt
+   -open
+   Tsync_field_spec
+   -open
+   Tsync_http_client_lwt
+   -open
+   Tsync_io_lwt))
+ (name tsync_http_proxy_backend_lwt)
+ (library_flags (-linkall))
+ (libraries
+  tsync_http_proxy_backend
+  tsync_backend_register
+  tsync_backend_lwt
+  tsync-libs.field_spec
+  tsync_http_client_lwt
+  tsync_io_lwt
+  lwt))
