@@ -357,6 +357,8 @@
    (diff presenting_domain.expected presenting_domain.output))))
 
 (subdir frontends/preview
+ (alias
+  (name default))
  (rule
   (alias runtest)
   (enabled_if

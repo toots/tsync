@@ -88,10 +88,14 @@ for dune in $(find . -mindepth 2 -name dune | sed 's|^\./||' | sort); do
   fi
 
   printf '\n(subdir %s' "$dir"
-  # A platform-gated test has no default-alias entry: dune would build the
-  # executable on every platform to satisfy it.
+  # A platform-gated test names no executable here: dune would build it on
+  # every platform to satisfy the alias. The alias is still declared, or the
+  # directory falls back to dune's implicit default -- every target in it,
+  # which is the test's own output, and `dune build` would run the test.
   if [ -z "$platform" ]; then
     printf '\n (alias\n  (name default)\n  (deps %s.exe))' "$exe"
+  else
+    printf '\n (alias\n  (name default))'
   fi
 
   extra=$(deps_for "$dir")
