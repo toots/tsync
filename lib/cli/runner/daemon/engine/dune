@@ -16,6 +16,8 @@
    -open
    Tsync_file
    -open
+   Tsync_file_lwt
+   -open
    Tsync_sync
    -open
    Tsync_file_store
@@ -42,6 +44,7 @@
   tsync_checkout_lwt
   tsync_file_ops
   tsync_file
+  tsync_file_lwt
   tsync_sync
   tsync_file_store
   tsync_backend_register

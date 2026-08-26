@@ -16,6 +16,8 @@
    -open
    Tsync_file
    -open
+   Tsync_file_lwt
+   -open
    Tsync_wal
    -open
    Tsync_wal_lwt
@@ -74,6 +76,7 @@
   tsync_checkout
   tsync_checkout_lwt
   tsync_file
+  tsync_file_lwt
   tsync_wal
   tsync_wal_lwt
   tsync_manifest

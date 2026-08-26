@@ -36,4 +36,4 @@ end
     write and hand over, and drains them to the store on a pool of its own. The
     records are not its own — they are written before it hears of them, which is
     what makes a crash leave something saying the work is owed. *)
-module Make (C : Conf.S) (F : File.Owing) : S
+module Make (C : Conf.S) (F : File.Owing with type 'a io := 'a Lwt.t) : S

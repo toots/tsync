@@ -1,0 +1,20 @@
+include File
+
+module Over =
+  File.Over (Io_lwt.Core) (Io_lwt.Fs) (Io_lwt.Retry) (Io_lwt.Lock) (Wal_lwt)
+    (Manifests_lwt)
+    (Checkout_lwt)
+    (Staged_lwt.Manifest)
+    (Data_lwt)
+    (Folder_ids_lwt)
+
+(* The one place the store modules are built, so everything above takes them
+   rather than knowing which they are. *)
+module Make (C : Conf.S) = struct
+  module L = Layout.Inode.Make (C)
+
+  include
+    Over.Make_with_layout (C) (L) (File_store.Make (C)) (Store.Make (C) (L))
+      (History.Make (C) (L))
+      (Remote.Make_with_layout (C) (L))
+end

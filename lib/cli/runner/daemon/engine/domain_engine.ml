@@ -47,7 +47,7 @@ end
 
 module Make (C : Conf.S) : S = struct
   module Lk = Logical_key.Make (C)
-  module F = File.Make (C)
+  module F = File_lwt.Make (C)
   module Sq = Sync_queue.Make (C) (F)
   module Ih = Ipc_handler.Make (C) (F) (Sq)
   module Sp = Sync_poller.Make (C) (F)

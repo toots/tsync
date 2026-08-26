@@ -13,7 +13,7 @@ module C =
          ~root ()
       : Conf.S)
 
-module F = File.Make (C)
+module F = File_lwt.Make (C)
 module J = Journal.Make (C)
 module W = Wal_lwt.Make (C)
 

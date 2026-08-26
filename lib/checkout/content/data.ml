@@ -231,9 +231,9 @@ struct
         pulls
 
     (* Synchronous, and called with no await between the lookup and the update:
-       every writer runs on the Lwt loop (FUSE workers reach it through
-       [Lwt_preemptive.run_in_main]), so that is all the mutual exclusion this
-       needs. *)
+       every writer runs on the one loop, a worker with a thread of its own
+       reaching it by handing the work back, so that is all the mutual exclusion
+       this needs. *)
     let credit_pull key ~size n =
       let now = Unix.gettimeofday () in
       match Hashtbl.find_opt pulls key with

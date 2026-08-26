@@ -29,6 +29,8 @@
    -open
    Tsync_file
    -open
+   Tsync_file_lwt
+   -open
    Tsync_manifests
    -open
    Tsync_manifests_lwt
@@ -96,6 +98,7 @@
   tsync_checkout
   tsync_checkout_lwt
   tsync_file
+  tsync_file_lwt
   tsync_manifests
   tsync_manifests_lwt
   tsync_manifest

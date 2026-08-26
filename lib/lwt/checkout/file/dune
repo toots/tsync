@@ -1,0 +1,52 @@
+; The file operations on Lwt: the metadata half of a domain wired to this
+; process's filesystem, its log, its mirror and its store.
+
+(library
+ (flags
+  (:standard
+   -open
+   Tsync_file
+   -open
+   Tsync_conf
+   -open
+   Tsync_layout
+   -open
+   Tsync_store
+   -open
+   Tsync_file_store
+   -open
+   Tsync_history
+   -open
+   Tsync_remote
+   -open
+   Tsync_wal_lwt
+   -open
+   Tsync_manifests_lwt
+   -open
+   Tsync_checkout_lwt
+   -open
+   Tsync_staged_lwt
+   -open
+   Tsync_content_lwt
+   -open
+   Tsync_folder_ids_lwt
+   -open
+   Tsync_io_lwt))
+ (name tsync_file_lwt)
+ (public_name tsync-libs.file_lwt)
+ (libraries
+  tsync_file
+  tsync_conf
+  tsync_layout
+  tsync_store
+  tsync_file_store
+  tsync_history
+  tsync_remote
+  tsync_wal_lwt
+  tsync_manifests_lwt
+  tsync_checkout_lwt
+  tsync_staged_lwt
+  tsync_content_lwt
+  tsync_folder_ids_lwt
+  tsync_io_lwt
+  lwt))

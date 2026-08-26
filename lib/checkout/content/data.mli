@@ -266,8 +266,8 @@ module Over
         materialization. Biggest first and capped, since [status] asks on every
         poll, and pruned of anything gone quiet as a side effect of asking.
 
-        Synchronous on purpose: the table is mutated by reads on the same Lwt
-        loop, so a fold that could yield would see it change underneath itself.
+        Synchronous on purpose: the table is mutated by reads on the same loop,
+        so a fold that could yield would see it change underneath itself.
 
         Note that [Make] is applied once per consumer — {!Sync.File},
         {!Diagnostics}, the share server, {!Ops.Export} — and each gets its own

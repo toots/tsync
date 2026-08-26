@@ -27,7 +27,8 @@ module type S = sig
   val drain : unit -> unit Lwt.t
 end
 
-module Make (C : Conf.S) (F : File.Owing) : S = struct
+module Make (C : Conf.S) (F : File.Owing with type 'a io := 'a Lwt.t) : S =
+struct
   module Lk = Logical_key.Make (C)
   module Fs = File_store.Make (C)
   module W = Wal_lwt.Make (C)
