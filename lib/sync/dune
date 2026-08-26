@@ -25,6 +25,8 @@
    -open
    Tsync_wal
    -open
+   Tsync_wal_lwt
+   -open
    Tsync_manifests
    -open
    Tsync_manifest
@@ -56,6 +58,7 @@
   tsync_file_ops
   tsync_file
   tsync_wal
+  tsync_wal_lwt
   tsync_manifests
   tsync_manifest
   tsync_journal

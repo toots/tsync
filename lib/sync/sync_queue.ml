@@ -30,8 +30,8 @@ end
 module Make (C : Conf.S) (F : File.Owing) : S = struct
   module Lk = Logical_key.Make (C)
   module Fs = File_store.Make (C)
-  module W = Wal.Make (C)
-  module Q = Wal.Q
+  module W = Wal_lwt.Make (C)
+  module Q = Wal_lwt.Q
 
   (* The queue's own slot identity, not a name: one string per file so a second
      write to it takes the first one's place. *)
@@ -129,7 +129,7 @@ module Make (C : Conf.S) (F : File.Owing) : S = struct
        which is what makes a crash there leave something saying the work is
        owed -- and it happens there too, so a close returns with the upload
        queued and whatever follows can cancel it. *)
-    Wal.Owed.consume W.owed (fun (entry_key, r) ->
+    Wal_lwt.Owed.consume W.owed (fun (entry_key, r) ->
         Q.adopt queue ~id:(Ek.to_string entry_key) r);
     (* No recovery here: {!Replay} reads the records itself, decides what is
        still owed against the shared journal, and re-writes only that. *)

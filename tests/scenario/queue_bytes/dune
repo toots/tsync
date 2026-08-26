@@ -4,6 +4,8 @@
    -open
    Tsync_wal
    -open
+   Tsync_wal_lwt
+   -open
    Tsync_logical_key
    -open
    Tsync_journal
@@ -24,6 +26,7 @@
  (name queue_bytes_test)
  (libraries
   tsync_wal
+  tsync_wal_lwt
   tsync_logical_key
   tsync_journal
   tsync_test_harness

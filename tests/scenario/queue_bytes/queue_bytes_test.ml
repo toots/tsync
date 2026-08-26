@@ -15,7 +15,7 @@ module C =
 
 module F = File.Make (C)
 module J = Journal.Make (C)
-module W = Wal.Make (C)
+module W = Wal_lwt.Make (C)
 
 let gate, open_gate = Lwt.wait ()
 let dir_gate, open_dir_gate = Lwt.wait ()
@@ -61,7 +61,7 @@ let settle () =
 let owe r =
   let entry_key = J.entry_key () in
   let* () = W.write entry_key r in
-  Wal.Owed.signal W.owed (entry_key, r)
+  Wal_lwt.Owed.signal W.owed (entry_key, r)
 
 let post n size =
   let name = Printf.sprintf "f%d.txt" n in

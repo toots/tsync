@@ -11,24 +11,19 @@
    -open
    Tsync_journal
    -open
-   Tsync_durable_queue_lwt
+   Tsync_durable_queue
    -open
    Tsync_io
    -open
-   Tsync_retry
-   -open
-   Tsync_io_lwt))
+   Tsync_retry))
  (name tsync_wal)
  (public_name tsync-libs.wal)
  (libraries
   tsync_logical_key
   tsync_conf
   tsync_journal
-  tsync_durable_queue_lwt
+  tsync_durable_queue
   tsync_io
   tsync_retry
-  tsync_io_lwt
   yojson
-  unix
-  lwt
-  lwt.unix))
+  unix))

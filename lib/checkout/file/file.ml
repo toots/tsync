@@ -47,7 +47,7 @@ module Make_with_layout
 struct
   module Lk = Logical_key.Make (C)
   module J = Journal.Make (C)
-  module W = Wal.Make (C)
+  module W = Wal_lwt.Make (C)
 
   type t = Logical_key.t
 
@@ -319,7 +319,7 @@ struct
             }
           in
           let* () = W.write entry_key record in
-          Wal.Owed.signal W.owed (entry_key, record)
+          Wal_lwt.Owed.signal W.owed (entry_key, record)
 
   (* The record already exists and already names this work; writing it under
      its own key is what keeps one unit of work to one key across a restart. *)
@@ -328,7 +328,7 @@ struct
     if not staged then Lwt.return_false
     else
       let* () = W.write entry_key record in
-      let+ () = Wal.Owed.signal W.owed (entry_key, record) in
+      let+ () = Wal_lwt.Owed.signal W.owed (entry_key, record) in
       true
 
   let reclaim_staged_orphans = D.reclaim_staged_orphans

@@ -1,4 +1,3 @@
-open Lwt.Syntax
 module Ek = Journal.Entry_key
 
 type state = Intent | Prepared | Executed
@@ -85,7 +84,7 @@ let of_body body =
     | exception _ -> legacy ()
 
 (* The record is the durable job the upload queue drains, so it is a
-   {!Durable_queue_lwt.JOB} rather than a format this module reads and writes
+   {!Durable_queue.JOB} rather than a format this module reads and writes
    itself. *)
 module Job = struct
   type t = record
@@ -94,95 +93,105 @@ module Job = struct
   let of_string body = Some (of_body body)
 end
 
-module Q = Durable_queue_lwt.Make (Job)
+(* What this needs of a durable log, which is the record half of a queue and
+   none of the draining. *)
+module type RECORDS = sig
+  type 'a io
+  type t
 
-(* The records of a domain are one thing however many places name them: this
-   functor is applied wherever the log is read or written, and a second
-   [Records.t] over the same directory would keep its own id counter. *)
-(* A hand-off between a file operation, which writes a record, and whoever
-   sends the bytes, which is a worker pool with a width of its own. It holds
-   what it is told: a condition alone drops a signal sent while nobody is
-   waiting, and here that would be work nobody comes back for. *)
-(* A hand-off between a file operation, which writes a record, and whoever
-   sends the bytes, which is a worker pool with a width of its own.
-
-   The taker is installed rather than waited on. A file operation must not stall
-   where nothing is draining -- the record is already written, so the work
-   survives either way -- and it must not return before the work is taken up,
-   or a delete arriving straight after a close finds no upload to cancel. *)
-module Owed = struct
-  type 'a t = { mutable take : 'a -> unit Lwt.t }
-
-  let create () = { take = (fun _ -> Lwt.return_unit) }
-  let consume t take = t.take <- take
-  let idle t = t.take <- (fun _ -> Lwt.return_unit)
-  let signal t x = t.take x
+  val create : dir:string -> t
+  val write : t -> id:string -> record -> unit io
+  val update : t -> string -> (record -> record) -> unit io
+  val complete : t -> string -> unit io
+  val list : ?wanted:(string -> bool) -> t -> (string * record) list io
 end
 
-let logs : (string, Q.Records.t * (Ek.t * record) Owed.t) Hashtbl.t =
-  Hashtbl.create 4
+module Make (Io : Io.S) (R : RECORDS with type 'a io := 'a Io.t) = struct
+  let ( let* ) = Io.bind
+  let ( let+ ) x f = Io.map f x
 
-let log_for dir =
-  match Hashtbl.find_opt logs dir with
-    | Some both -> both
-    | None ->
-        let both = (Q.Records.create ~dir, Owed.create ()) in
-        Hashtbl.replace logs dir both;
-        both
+  (* A hand-off between a file operation, which writes a record, and whoever
+     sends the bytes, which is a worker pool with a width of its own.
 
-module Make (C : Conf.S) = struct
-  module J = Journal.Make (C)
+     The taker is installed rather than waited on. A file operation must not
+     stall where nothing is draining -- the record is already written, so the
+     work survives either way -- and it must not return before the work is taken
+     up, or a delete arriving straight after a close finds no upload to
+     cancel. *)
+  module Owed = struct
+    type 'a t = { mutable take : 'a -> unit Io.t }
 
-  (* One directory per domain: the ops carry domain-relative keys, so a shared
-     store would let one domain's replay run another's entries against the wrong
-     backend. *)
-  let log, owed =
-    log_for
-      (Filename.concat
-         (Filename.concat C.data_dir "journal-pending")
-         C.domain_name)
+    let create () = { take = (fun _ -> Io.return ()) }
+    let consume t take = t.take <- take
+    let idle t = t.take <- (fun _ -> Io.return ())
+    let signal t x = t.take x
+  end
 
-  (* An entry key names one unit of work for its whole life — here, in the
-     backend journal, and in the cursor a peer compares against — so it is the
-     record's id rather than something minted per queue. *)
-  let id = Ek.to_string
-  let write key r = Q.Records.write log ~id:(id key) r
+  (* The records of a domain are one thing however many places name them: the
+     functor below is applied wherever the log is read or written, and a second
+     [t] over the same directory would keep its own id counter. *)
+  let logs : (string, R.t * (Ek.t * record) Owed.t) Hashtbl.t = Hashtbl.create 4
 
-  let record key ops =
-    write key { ops; state = Intent; attempts = 0; last_error = None }
+  let log_for dir =
+    match Hashtbl.find_opt logs dir with
+      | Some both -> both
+      | None ->
+          let both = (R.create ~dir, Owed.create ()) in
+          Hashtbl.replace logs dir both;
+          both
 
-  let advance key state =
-    Q.Records.update log (id key) (fun r -> { r with state })
+  module Make (C : Conf.S) = struct
+    module J = Journal.Make (C)
 
-  let note_failure key kind detail =
-    Q.Records.update log (id key) (fun r ->
-        { r with attempts = r.attempts + 1; last_error = Some (kind, detail) })
+    (* One directory per domain: the ops carry domain-relative keys, so a shared
+       store would let one domain's replay run another's entries against the wrong
+       backend. *)
+    let log, owed =
+      log_for
+        (Filename.concat
+           (Filename.concat C.data_dir "journal-pending")
+           C.domain_name)
 
-  let complete key = Q.Records.complete log (id key)
+    (* An entry key names one unit of work for its whole life — here, in the
+       backend journal, and in the cursor a peer compares against — so it is the
+       record's id rather than something minted per queue. *)
+    let id = Ek.to_string
+    let write key r = R.write log ~id:(id key) r
 
-  (* Executed, then published, then peers told to look, then the record goes: a
-     crash in any of those windows leaves a record reconcile can finish from
-     what the backend says. Dropping the record first would leave the work done,
-     no entry for peers to read, and nothing saying anything was owed.
+    let record key ops =
+      write key { ops; state = Intent; attempts = 0; last_error = None }
 
-     Where the entry goes and how the cursor moves are the store's, not this
-     log's: a caller that publishes on a timer passes a different [cursor] from
-     one discharging a single operation in its own path. *)
-  let discharge ~publish ~cursor key ops =
-    let* () = advance key Executed in
-    let* (_ : Journal.Entry_key.t) = publish key ops in
-    let* () = cursor key in
-    complete key
+    let advance key state = R.update log (id key) (fun r -> { r with state })
 
-  (* Ours alone: another client's records are its own to reconcile, and the
-     directory is per domain rather than per client. *)
-  let list () =
-    let uuid = J.client_uuid () in
-    let open Lwt.Syntax in
-    let+ records = Q.Records.list log in
-    records
-    |> List.filter_map (fun (id, r) ->
-        Option.map (fun key -> (key, r)) (Ek.of_string id))
-    |> List.filter (fun (key, _) -> Ek.client_uuid key = uuid)
-    |> List.sort (fun (a, _) (b, _) -> Ek.compare a b)
+    let note_failure key kind detail =
+      R.update log (id key) (fun r ->
+          { r with attempts = r.attempts + 1; last_error = Some (kind, detail) })
+
+    let complete key = R.complete log (id key)
+
+    (* Executed, then published, then peers told to look, then the record goes: a
+       crash in any of those windows leaves a record reconcile can finish from
+       what the backend says. Dropping the record first would leave the work done,
+       no entry for peers to read, and nothing saying anything was owed.
+
+       Where the entry goes and how the cursor moves are the store's, not this
+       log's: a caller that publishes on a timer passes a different [cursor] from
+       one discharging a single operation in its own path. *)
+    let discharge ~publish ~cursor key ops =
+      let* () = advance key Executed in
+      let* (_ : Journal.Entry_key.t) = publish key ops in
+      let* () = cursor key in
+      complete key
+
+    (* Ours alone: another client's records are its own to reconcile, and the
+       directory is per domain rather than per client. *)
+    let list () =
+      let uuid = J.client_uuid () in
+      let+ records = R.list log in
+      records
+      |> List.filter_map (fun (id, r) ->
+          Option.map (fun key -> (key, r)) (Ek.of_string id))
+      |> List.filter (fun (key, _) -> Ek.client_uuid key = uuid)
+      |> List.sort (fun (a, _) (b, _) -> Ek.compare a b)
+  end
 end

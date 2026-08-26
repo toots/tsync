@@ -4,6 +4,8 @@
    -open
    Tsync_wal
    -open
+   Tsync_wal_lwt
+   -open
    Tsync_journal
    -open
    Tsync_sync
@@ -22,6 +24,7 @@
  (name pause_test)
  (libraries
   tsync_wal
+  tsync_wal_lwt
   tsync_journal
   tsync_test_harness
   tsync_sync

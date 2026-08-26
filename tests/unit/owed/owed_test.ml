@@ -7,7 +7,7 @@
 
 open Lwt.Syntax
 open Check
-module O = Wal.Owed
+module O = Wal_lwt.Owed
 
 let () =
   Lwt_main.run

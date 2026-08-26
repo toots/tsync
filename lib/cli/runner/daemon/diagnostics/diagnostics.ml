@@ -124,7 +124,7 @@ module Make (C : Conf.S) = struct
   module Fs = File_store.Make (C)
   module Collection = Collection.Make (C)
   module J = Journal.Make (C)
-  module W = Wal.Make (C)
+  module W = Wal_lwt.Make (C)
   module Cor = Corruption.Make (C)
 
   let int_opt = function Some n -> `Int n | None -> `Null

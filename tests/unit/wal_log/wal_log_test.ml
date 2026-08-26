@@ -1,6 +1,6 @@
 (* A domain's records are one log, however many places name it.
 
-   [Wal.Make] is applied wherever the log is read or written -- the file
+   [Wal_lwt.Make] is applied wherever the log is read or written -- the file
    operations, the queue that drains them, the replay, the diagnostics -- and
    every application used to build its own [Records.t] over the same directory.
    Nothing was wrong yet: a record's id comes from its entry key, so the
@@ -26,12 +26,12 @@ let conf ~domain =
     ~cache_root:root ~data_dir:root ~root ()
 
 module C = (val conf ~domain : Conf.S)
-module W1 = Wal.Make (C)
-module W2 = Wal.Make (C)
+module W1 = Wal_lwt.Make (C)
+module W2 = Wal_lwt.Make (C)
 
 (* A second domain to show the sharing is per directory rather than global. *)
 module D = (val conf ~domain:"otherdom" : Conf.S)
-module W3 = Wal.Make (D)
+module W3 = Wal_lwt.Make (D)
 
 let () =
   case "one domain";
