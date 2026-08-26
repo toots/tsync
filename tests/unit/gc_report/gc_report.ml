@@ -45,8 +45,8 @@ module C : Conf.S = struct
     ]
 
   let store =
-    Domain_store.make
-      ~mains:[{ Domain_store.name = "main"; backend = (module Main) }]
+    Domain_store_lwt.make
+      ~mains:[{ Domain_store_lwt.name = "main"; backend = (module Main) }]
       ~targets:[] ~archives:[]
 
   let cache_root = root ^ "/cache"

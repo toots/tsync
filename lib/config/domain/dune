@@ -22,6 +22,8 @@
    -open
    Tsync_domain_store
    -open
+   Tsync_domain_store_lwt
+   -open
    Tsync_field_spec
    -open
    Tsync_runtime))
@@ -35,6 +37,7 @@
   tsync_backend_register
   tsync_backend_lwt
   tsync_domain_store
+  tsync_domain_store_lwt
   tsync_field_spec
   tsync_runtime
   unix))

@@ -18,22 +18,52 @@
     When nothing answers, the last error is re-raised: swallowing it into [None]
     would hand a caller a confident ENOENT from an unreachable store. *)
 
-type sub = { name : string; backend : (module Backend_lwt.Store) }
+(** What the composite needs of the layer below: the settling every deferred
+    target registers with, the batched reads a fan-out goes through, and the
+    hook a process about to exit waits on. *)
+module type DRAIN = sig
+  type 'a io
 
-(** A target is given the store to catch up from — the mains alone, see
-    {!Deferred.make} — supplied here rather than by the caller, since only this
-    module knows which members are authoritative.
+  val on_drain : (unit -> unit io) -> unit
+end
 
-    Whether reads may reach the resulting target is the caller's to say, through
-    {!Deferred.make}'s [reads_reach]. *)
-val make :
-  mains:sub list ->
-  targets:(source:(module Backend_lwt.Store) -> (module Deferred.S)) list ->
-  archives:sub list ->
-  (module Backend_lwt.Store)
+module Over
+    (Io : Io.S)
+    (Queues : Deferred.QUEUES with type 'a io := 'a Io.t)
+    (Lock : Deferred.LOCKS with type 'a io := 'a Io.t)
+    (_ : DRAIN with type 'a io := 'a Io.t)
+    (_ : sig
+      type slots
 
-(** Wait for every deferred target in this process to catch up. Registered with
-    {!Backend_lwt.on_drain} by {!make}, so callers normally reach it through
-    [Backend_lwt.drain]; exposed for tests that assert on what a target holds.
-*)
-val drain : unit -> unit Lwt.t
+      module Batched (_ : Backend.S with type 'a io := 'a Io.t) : sig
+        val get_many :
+          ?slots:slots ->
+          entries:Backend.file_entry list ->
+          unit ->
+          (Stored_key.t * Bigstring.t option) list Io.t
+      end
+    end) : sig
+  module Dt : module type of Deferred.Over (Io) (Queues) (Lock)
+
+  module type Store = Backend.S with type 'a io := 'a Io.t
+
+  type sub = { name : string; backend : (module Store) }
+
+  (** A target is given the store to catch up from — the mains alone, see
+      {!Deferred.make} — supplied here rather than by the caller, since only
+      this module knows which members are authoritative.
+
+      Whether reads may reach the resulting target is the caller's to say,
+      through {!Deferred.make}'s [reads_reach]. *)
+  val make :
+    mains:sub list ->
+    targets:(source:(module Store) -> (module Dt.S)) list ->
+    archives:sub list ->
+    (module Store)
+
+  (** Wait for every deferred target in this process to catch up. Registered
+      with {!Drain.on_drain} by {!make}, so callers normally reach it through
+      [Backend_lwt.drain]; exposed for tests that assert on what a target holds.
+  *)
+  val drain : unit -> unit Io.t
+end

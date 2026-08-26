@@ -74,10 +74,10 @@ module C : Conf.S = struct
     ]
 
   let store =
-    Domain_store.make
-      ~mains:[{ Domain_store.name = "source"; backend = (module Stale) }]
+    Domain_store_lwt.make
+      ~mains:[{ Domain_store_lwt.name = "source"; backend = (module Stale) }]
       ~targets:[]
-      ~archives:[{ Domain_store.name = "copy"; backend = (module Dst) }]
+      ~archives:[{ Domain_store_lwt.name = "copy"; backend = (module Dst) }]
 
   let cache_root = Scratch.sub root "cache"
   let data_dir = Scratch.sub root "data"

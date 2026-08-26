@@ -86,15 +86,15 @@ module Down = Doubles.Down (struct
   let why = "down"
 end)
 
-(* A plain {!Deferred.make}: a backfill target is the one reads never reach, and
+(* A plain {!Domain_store_lwt.Deferred.make}: a backfill target is the one reads never reach, and
    so has no use for the journal or cursor either. The composite and the target
    both come back, since the target is what says how far behind it is. *)
 let wrap ~inners ~target ~name =
   let built = ref None in
   let spec ~source =
     let d =
-      Deferred.make ~name ~backend:target ~source ~chunk_prefix ~chunk_keys
-        ~journal_prefix ~cursor_key
+      Domain_store_lwt.Deferred.make ~name ~backend:target ~source ~chunk_prefix
+        ~chunk_keys ~journal_prefix ~cursor_key
         ~excluded:(fun _ -> false)
         ~reads_reach:false
         ~root:(Filename.concat root "pending")
@@ -104,11 +104,11 @@ let wrap ~inners ~target ~name =
     d
   in
   let composite =
-    Domain_store.make
+    Domain_store_lwt.make
       ~mains:
         (List.mapi
            (fun i backend ->
-             { Domain_store.name = Printf.sprintf "main%d" i; backend })
+             { Domain_store_lwt.name = Printf.sprintf "main%d" i; backend })
            inners)
       ~targets:[spec] ~archives:[]
   in
@@ -122,7 +122,7 @@ let () =
       ()
   in
   let (module M : Backend_lwt.Store) = main in
-  let composite, (module T : Deferred.S) =
+  let composite, (module T : Domain_store_lwt.Deferred.S) =
     wrap ~inners:[main]
       ~target:
         (Backend_lwt.make ~backend_type:"local"
@@ -134,7 +134,7 @@ let () =
   let (module B : Backend_lwt.Store) = composite in
   (* As the diagnosis endpoints report it. *)
   let owed = T.stats in
-  (* The generic hook rather than [Domain_store.drain]: a target catches up only
+  (* The generic hook rather than [Domain_store_lwt.drain]: a target catches up only
      because [make] registered itself there. *)
   let drain () =
     let+ () = Backend_lwt.drain () in

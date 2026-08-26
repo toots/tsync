@@ -52,8 +52,8 @@ module Member : Backend_lwt.Store = struct
 end
 
 module Store =
-  (val Domain_store.make
-         ~mains:[{ Domain_store.name = "main"; backend = (module Member) }]
+  (val Domain_store_lwt.make
+         ~mains:[{ Domain_store_lwt.name = "main"; backend = (module Member) }]
          ~targets:[] ~archives:[])
 
 module Batched = Backend_lwt.Batched (Store)

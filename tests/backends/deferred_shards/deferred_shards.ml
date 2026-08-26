@@ -60,7 +60,7 @@ end
 let chunk_keys data = String.split_on_char ' ' (String.trim data)
 
 let target =
-  Deferred.make ~name:"replica"
+  Domain_store_lwt.Deferred.make ~name:"replica"
     ~backend:(module Dst)
     ~source:(module Src)
     ~chunk_prefix ~chunk_keys ~journal_prefix:"tsync/testdom/journal/"
@@ -68,7 +68,7 @@ let target =
     ~excluded:(fun _ -> false)
     ~reads_reach:true ~root:log_dir ()
 
-module T = (val target : Deferred.S)
+module T = (val target : Domain_store_lwt.Deferred.S)
 
 (* Two hex characters of shard and one of spread, so [chunks] keys land in a
    known, small number of shards. *)

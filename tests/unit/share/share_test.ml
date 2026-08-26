@@ -131,9 +131,9 @@ let () =
     include C
 
     let store =
-      Domain_store.make ~mains:[] ~targets:[]
+      Domain_store_lwt.make ~mains:[] ~targets:[]
         ~archives:
-          [{ Domain_store.name = "archive"; backend = (module Shareable) }]
+          [{ Domain_store_lwt.name = "archive"; backend = (module Shareable) }]
 
     let members =
       [

@@ -15,28 +15,25 @@
    -open
    Tsync_log
    -open
-   Tsync_io_lwt
-   -open
    Tsync_bigstring
    -open
    Tsync_backend_register
    -open
-   Tsync_backend_lwt
+   Tsync_durable_queue
    -open
-   Tsync_durable_queue_lwt))
+   Tsync_io
+   -open
+   Tsync_retry))
  (name tsync_domain_store)
  (public_name tsync-libs.domain_store)
  (libraries
   tsync-libs.logical_key
   tsync_retry
+  tsync_io
   tsync_chunks
-  tsync_durable_queue_lwt
+  tsync_durable_queue
   tsync_bigstring
   tsync_backend_register
-  tsync_backend_lwt
-  tsync_io_lwt
   tsync_log
-  lwt
   unix
-  lwt.unix
   yojson))

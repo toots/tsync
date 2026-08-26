@@ -128,10 +128,11 @@ module C : Conf.S = struct
      cannot see anything being fanned out to a copy — which is exactly how the
      marker reaching every replica went unnoticed. *)
   let store =
-    Domain_store.make
-      ~mains:[{ Domain_store.name = "main"; backend = (module Main) }]
+    Domain_store_lwt.make
+      ~mains:[{ Domain_store_lwt.name = "main"; backend = (module Main) }]
       ~targets:[]
-      ~archives:[{ Domain_store.name = "replica"; backend = (module Replica) }]
+      ~archives:
+        [{ Domain_store_lwt.name = "replica"; backend = (module Replica) }]
 
   let cache_root = root ^ "/cache"
   let data_dir = root ^ "/data"

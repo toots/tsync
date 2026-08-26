@@ -24,6 +24,8 @@
    -open
    Tsync_domain_store
    -open
+   Tsync_domain_store_lwt
+   -open
    Tsync_io_lwt
    -open
    Tsync_test_harness))
@@ -42,6 +44,7 @@
   tsync_local_backend_lwt
   tsync_io_lwt
   tsync_domain_store
+  tsync_domain_store_lwt
   lwt
   lwt.unix
   unix))

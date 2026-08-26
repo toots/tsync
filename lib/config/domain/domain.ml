@@ -44,15 +44,17 @@ let build_backends ~paths ~resume (d : Conf_parsing.domain) :
       leaves
   in
   let sub ((bc : Conf_parsing.backend_config), backend) =
-    { Domain_store.name = bc.Conf_parsing.name; backend }
+    { Domain_store_lwt.name = bc.Conf_parsing.name; backend }
   in
   (* Kept so [report_members] and the share list can ask a target how it is
      doing, and whether reads reach it, without re-deriving either from the
      role. *)
-  let built : (string, (module Deferred.S)) Hashtbl.t = Hashtbl.create 4 in
+  let built : (string, (module Domain_store_lwt.Deferred.S)) Hashtbl.t =
+    Hashtbl.create 4
+  in
   let target ((bc : Conf_parsing.backend_config), backend) ~source =
     let built_target =
-      Deferred.make ~resume ~name:bc.name ~backend ~source
+      Domain_store_lwt.Deferred.make ~resume ~name:bc.name ~backend ~source
         ~chunk_prefix:(Conf_parsing.chunk_prefix d)
         ~chunk_from_prefix:
           (let module L = Chunk_layout.Make (struct
@@ -71,7 +73,7 @@ let build_backends ~paths ~resume (d : Conf_parsing.domain) :
   (* Roles are validated at parse time ({!Conf_parsing.validate_roles}), so the
      mains are empty only for a legitimately read-only domain. *)
   let composite =
-    Domain_store.make
+    Domain_store_lwt.make
       ~mains:(List.map sub (of_roles [`Main]))
       ~targets:(List.map target (of_roles [`Replica; `Backfill]))
       ~archives:(List.map sub (of_roles [`ReadOnly]))
@@ -84,13 +86,14 @@ let build_backends ~paths ~resume (d : Conf_parsing.domain) :
       (fun ((bc : Conf_parsing.backend_config), backend) ->
         let stat f =
           Option.map
-            (fun (module D : Deferred.S) () -> f (D.stats ()))
+            (fun (module D : Domain_store_lwt.Deferred.S) () -> f (D.stats ()))
             (Hashtbl.find_opt built bc.name)
         in
         Backend.member ~name:bc.name ~role:bc.role
           ~readable:
             (match Hashtbl.find_opt built bc.name with
-              | Some (module D : Deferred.S) -> D.readable <> None
+              | Some (module D : Domain_store_lwt.Deferred.S) ->
+                  D.readable <> None
               | None -> true)
           ~backend_type:bc.backend_type
             (* Masked as [tsync config] does, so a report names the

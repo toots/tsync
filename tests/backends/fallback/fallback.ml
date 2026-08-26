@@ -27,11 +27,11 @@ module Archive_down = Doubles.Down (struct
   let why = "archive down"
 end)
 
-let sub name backend = { Domain_store.name; backend }
+let sub name backend = { Domain_store_lwt.name; backend }
 
 (* A replica the read chain may reach. Filling one is {!Deferred}'s business,
    not this file's, so this one accepts nothing and only answers reads. *)
-let readable name backend ~source:_ : (module Deferred.S) =
+let readable name backend ~source:_ : (module Domain_store_lwt.Deferred.S) =
   (module struct
     let name = name
     let backend = backend
@@ -114,7 +114,7 @@ let () =
 
      case "one main, nothing behind it";
      let solo =
-       Domain_store.make ~mains:[sub "main" main] ~targets:[] ~archives:[]
+       Domain_store_lwt.make ~mains:[sub "main" main] ~targets:[] ~archives:[]
      in
      let (module Solo : Backend_lwt.Store) = solo in
      let* () =
@@ -129,7 +129,7 @@ let () =
      case "the only main is unreachable";
      (* Reporting a miss here would tell a caller the file is gone. *)
      let dead =
-       Domain_store.make
+       Domain_store_lwt.make
          ~mains:[sub "main" (module Down)]
          ~targets:[] ~archives:[]
      in
@@ -140,7 +140,7 @@ let () =
 
      case "main + replica: same content, so a miss is authoritative";
      let with_rep =
-       Domain_store.make
+       Domain_store_lwt.make
          ~mains:[sub "main" main]
          ~targets:[readable "replica" replica]
          ~archives:[]
@@ -161,7 +161,7 @@ let () =
 
      case "main unreachable, replica reachable";
      let dead_main =
-       Domain_store.make
+       Domain_store_lwt.make
          ~mains:[sub "main" (module Down)]
          ~targets:[readable "replica" replica]
          ~archives:[]
@@ -187,7 +187,7 @@ let () =
 
      case "main + readOnly archive: different content, so a miss falls through";
      let with_arc =
-       Domain_store.make
+       Domain_store_lwt.make
          ~mains:[sub "main" main]
          ~targets:[]
          ~archives:[sub "archive" archive]
@@ -211,7 +211,7 @@ let () =
 
      case "main unreachable, archive behind it";
      let dead_to_arc =
-       Domain_store.make
+       Domain_store_lwt.make
          ~mains:[sub "main" (module Down)]
          ~targets:[]
          ~archives:[sub "archive" archive]
@@ -224,7 +224,7 @@ let () =
 
      case "reachable main, unreachable archive behind it";
      let dead_arc =
-       Domain_store.make
+       Domain_store_lwt.make
          ~mains:[sub "main" main]
          ~targets:[]
          ~archives:[sub "archive" (module Down)]
@@ -238,7 +238,8 @@ let () =
 
      case "a read-only domain: archives only, nothing writable at all";
      let ro =
-       Domain_store.make ~mains:[] ~targets:[] ~archives:[sub "archive" archive]
+       Domain_store_lwt.make ~mains:[] ~targets:[]
+         ~archives:[sub "archive" archive]
      in
      let (module Ro : Backend_lwt.Store) = ro in
      let* r = get ro (k "on-archive") in
@@ -279,7 +280,7 @@ let () =
         worth acting on; an archive's would send someone to the wrong machine. *)
      case "every store unreachable: the main's failure is the one reported";
      let all_dead =
-       Domain_store.make
+       Domain_store_lwt.make
          ~mains:[sub "main" (module Down)]
          ~targets:[]
          ~archives:[sub "archive" (module Archive_down)]

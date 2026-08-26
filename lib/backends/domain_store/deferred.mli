@@ -41,77 +41,126 @@ type op =
     dropped or the log overflowed. *)
 type stats = { queued : int; in_flight : int; degraded : bool }
 
-module type S = sig
-  val name : string
+(** The durable queues this composite drains through: one per target, and the
+    process-wide settling every one of them registers with. *)
+module type QUEUES = sig
+  type 'a io
 
-  (** The leaf store under this target. *)
-  val backend : (module Backend_lwt.Store)
+  val settle_all : ?timeout:float -> unit -> unit io
+  val register_settle : (unit -> unit io) -> unit
 
-  (** Take one write, to catch up on later. Returns once the work is durable,
-      not once it has landed. *)
-  val accept : op -> unit Lwt.t
+  module Make (J : Durable_queue.JOB) : sig
+    type t
 
-  (** Keys this target has no use for, and which are never forwarded to it. *)
-  val skip : Stored_key.t -> bool
+    module Records : sig
+      type t
 
-  (** The store, when a read may fall through to this target; [None] when it is
-      write-only. Also what decides whether a share link may be served from it:
-      a link into a target nobody reads could point at a file it will never
-      have. *)
-  val readable : (module Backend_lwt.Store) option
+      val create : dir:string -> t
+    end
 
-  val stats : unit -> stats
+    val ordered :
+      ?max_queued:int ->
+      name:string ->
+      log:Records.t ->
+      classify:(exn -> Retry.kind) ->
+      poison:Durable_queue.poison ->
+      run:(J.t -> unit io) ->
+      unit ->
+      t
+
+    val post : ?id:string -> t -> J.t -> unit io
+    val start : ?recover:bool -> t -> unit
+    val stats : t -> Durable_queue.stats
+  end
 end
 
-(** [make ~name ~backend ~source ~chunk_prefix ~chunk_keys ~journal_prefix
-     ~cursor_key ~root ()].
+module type LOCKS = sig
+  type 'a io
+  type condition
 
-    [source] is where the worker re-reads a job's body from, and must be the
-    authoritative store rather than any read path that can fall through to
-    another copy: a job is consumed once it succeeds, so a body read from a
-    target that is itself behind would be written here and never corrected.
+  val condition : unit -> condition
+  val wait : condition -> unit io
+  val broadcast : condition -> unit
+end
 
-    [chunk_keys] returns the bare ["<h1>-<h2>"] keys a manifest body names, and
-    the empty list for a body that is not a manifest; injected so this library
-    stays below the manifest format.
+module Over
+    (Io : Io.S)
+    (_ : QUEUES with type 'a io := 'a Io.t)
+    (_ : LOCKS with type 'a io := 'a Io.t) : sig
+  module type Store = Backend.S with type 'a io := 'a Io.t
 
-    [root] is where work owed is kept, one directory per target beneath it. It
-    should be per domain: the jobs name domain keys, and a shared root would
-    replay one domain's against another's stores.
+  module type S = sig
+    val name : string
 
-    [resume] picks up what a previous run left in [dir]. The daemon passes it; a
-    one-shot command does not, so two processes cannot run one target's jobs at
-    once and reorder a rename's copy and delete. A one-shot command still
-    records and drains its own.
+    (** The leaf store under this target. *)
+    val backend : (module Store)
 
-    [chunk_from_prefix] is where the source keeps chunks it has not finished
-    collecting — see {!Collection} — and a read falls through to it, though what
-    is written to the target is always the ordinary chunk key. Omit it for a
-    source that is never collected.
+    (** Take one write, to catch up on later. Returns once the work is durable,
+        not once it has landed. *)
+    val accept : op -> unit Io.t
 
-    [excluded] names the keys no target carries, whatever it is for. The caller
-    decides which those are: this knows only that some keys describe the store
-    that wrote them, so a copy would match nothing where it lands.
+    (** Keys this target has no use for, and which are never forwarded to it. *)
+    val skip : Stored_key.t -> bool
 
-    [reads_reach] is whether reads may fall through to this target. One they
-    reach carries the journal and cursor too, a peer reading it needing both;
-    one they never reach has no use for either. *)
-val make :
-  ?resume:bool ->
-  ?chunk_from_prefix:string ->
-  name:string ->
-  backend:(module Backend_lwt.Store) ->
-  source:(module Backend_lwt.Store) ->
-  chunk_prefix:string ->
-  chunk_keys:(string -> string list) ->
-  journal_prefix:string ->
-  cursor_key:Stored_key.t ->
-  excluded:(Stored_key.t -> bool) ->
-  reads_reach:bool ->
-  root:string ->
-  unit ->
-  (module S)
+    (** The store, when a read may fall through to this target; [None] when it
+        is write-only. Also what decides whether a share link may be served from
+        it: a link into a target nobody reads could point at a file it will
+        never have. *)
+    val readable : (module Store) option
 
-(** Give up this process's claim on a target's log, so another may take what it
-    left owed without waiting for this one to exit. *)
-val release : root:string -> name:string -> unit
+    val stats : unit -> stats
+  end
+
+  (** [make ~name ~backend ~source ~chunk_prefix ~chunk_keys ~journal_prefix
+       ~cursor_key ~root ()].
+
+      [source] is where the worker re-reads a job's body from, and must be the
+      authoritative store rather than any read path that can fall through to
+      another copy: a job is consumed once it succeeds, so a body read from a
+      target that is itself behind would be written here and never corrected.
+
+      [chunk_keys] returns the bare ["<h1>-<h2>"] keys a manifest body names,
+      and the empty list for a body that is not a manifest; injected so this
+      library stays below the manifest format.
+
+      [root] is where work owed is kept, one directory per target beneath it. It
+      should be per domain: the jobs name domain keys, and a shared root would
+      replay one domain's against another's stores.
+
+      [resume] picks up what a previous run left in [dir]. The daemon passes it;
+      a one-shot command does not, so two processes cannot run one target's jobs
+      at once and reorder a rename's copy and delete. A one-shot command still
+      records and drains its own.
+
+      [chunk_from_prefix] is where the source keeps chunks it has not finished
+      collecting — see {!Collection} — and a read falls through to it, though
+      what is written to the target is always the ordinary chunk key. Omit it
+      for a source that is never collected.
+
+      [excluded] names the keys no target carries, whatever it is for. The
+      caller decides which those are: this knows only that some keys describe
+      the store that wrote them, so a copy would match nothing where it lands.
+
+      [reads_reach] is whether reads may fall through to this target. One they
+      reach carries the journal and cursor too, a peer reading it needing both;
+      one they never reach has no use for either. *)
+  val make :
+    ?resume:bool ->
+    ?chunk_from_prefix:string ->
+    name:string ->
+    backend:(module Store) ->
+    source:(module Store) ->
+    chunk_prefix:string ->
+    chunk_keys:(string -> string list) ->
+    journal_prefix:string ->
+    cursor_key:Stored_key.t ->
+    excluded:(Stored_key.t -> bool) ->
+    reads_reach:bool ->
+    root:string ->
+    unit ->
+    (module S)
+
+  (** Give up this process's claim on a target's log, so another may take what
+      it left owed without waiting for this one to exit. *)
+  val release : root:string -> name:string -> unit
+end

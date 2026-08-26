@@ -24,6 +24,8 @@
    -open
    Tsync_domain_store
    -open
+   Tsync_domain_store_lwt
+   -open
    Tsync_test_harness))
  (name writes_in_flight)
  (libraries
@@ -39,6 +41,7 @@
   tsync_backend_lwt
   tsync_local_backend_lwt
   tsync_domain_store
+  tsync_domain_store_lwt
   lwt
   lwt.unix
   unix))

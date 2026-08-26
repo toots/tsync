@@ -204,11 +204,11 @@ let () =
 
      case "a write reaching two stores is counted twice";
      let (module Composite : Backend_lwt.Store) =
-       Domain_store.make
+       Domain_store_lwt.make
          ~mains:
            [
-             { Domain_store.name = "one"; backend = remote () };
-             { Domain_store.name = "two"; backend = remote () };
+             { Domain_store_lwt.name = "one"; backend = remote () };
+             { Domain_store_lwt.name = "two"; backend = remote () };
            ]
          ~targets:[] ~archives:[]
      in

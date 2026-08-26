@@ -154,8 +154,8 @@ let target_for ?resume ~inners ~target ~name () =
   let built = ref None in
   let spec ~source =
     let t =
-      Deferred.make ?resume ~name ~backend:target ~source ~chunk_prefix
-        ~chunk_keys ~journal_prefix ~cursor_key
+      Domain_store_lwt.Deferred.make ?resume ~name ~backend:target ~source
+        ~chunk_prefix ~chunk_keys ~journal_prefix ~cursor_key
         ~excluded:(fun _ -> false)
         ~reads_reach:true ~root:log_dir ()
     in
@@ -163,11 +163,11 @@ let target_for ?resume ~inners ~target ~name () =
     t
   in
   let composite =
-    Domain_store.make
+    Domain_store_lwt.make
       ~mains:
         (List.mapi
            (fun i backend ->
-             { Domain_store.name = Printf.sprintf "main%d" i; backend })
+             { Domain_store_lwt.name = Printf.sprintf "main%d" i; backend })
            inners)
       ~targets:[spec] ~archives:[]
   in
@@ -209,7 +209,7 @@ let () =
      let* () = M.put ~key:c0 ~data:(Bigstring.of_string "aaaa") () in
      let t1_root = Filename.concat root "t1" in
      let target1, refused = flaky ~fails:1 ~root:t1_root in
-     let l1, (module T1 : Deferred.S) =
+     let l1, (module T1 : Domain_store_lwt.Deferred.S) =
        target_for ~inners:[main] ~target:target1 ~name:"flaky" ()
      in
      let (module B1 : Backend_lwt.Store) = l1 in
@@ -229,7 +229,7 @@ let () =
      dump_target t1_root;
 
      case "a failure that cannot clear is dropped, and the target says so";
-     let l2, (module T2 : Deferred.S) =
+     let l2, (module T2 : Domain_store_lwt.Deferred.S) =
        target_for ~inners:[main] ~target:(module Refuses) ~name:"refuses" ()
      in
      let (module B2 : Backend_lwt.Store) = l2 in
@@ -249,7 +249,7 @@ let () =
      case "a target that was down the whole time a process ran";
      let t3_root = Filename.concat root "t3" in
      let down = ref false in
-     let l3, (module T3 : Deferred.S) =
+     let l3, (module T3 : Domain_store_lwt.Deferred.S) =
        target_for ~inners:[main]
          ~target:(switchable ~up:down ~root:t3_root)
          ~name:"offline" ()
@@ -277,9 +277,9 @@ let () =
         directory, and the link is back. Letting go of the claim is the part of
         a restart this process would otherwise skip, and without it the second
         target reads a log something still alive says is its own. *)
-     Deferred.release ~root:log_dir ~name:"offline";
+     Domain_store_lwt.Deferred.release ~root:log_dir ~name:"offline";
      let up = ref true in
-     let l4, (module T4 : Deferred.S) =
+     let l4, (module T4 : Domain_store_lwt.Deferred.S) =
        target_for ~resume:true ~inners:[main]
          ~target:(switchable ~up ~root:t3_root)
          ~name:"offline" ()
@@ -294,7 +294,7 @@ let () =
      case "a replica carries the sync bookkeeping too";
      (* A backfill target skips both; a peer reading a replica needs them. *)
      let t5_root = Filename.concat root "t5" in
-     let l5, (module T5 : Deferred.S) =
+     let l5, (module T5 : Domain_store_lwt.Deferred.S) =
        target_for ~inners:[main]
          ~target:
            (Backend_lwt.make ~backend_type:"local"

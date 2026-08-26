@@ -1531,12 +1531,12 @@ let run_scenario ?(versioning = false) ?(symlink_policy = `Keep)
       ]
 
     let store =
-      Domain_store.make ~targets:[] ~archives:[]
+      Domain_store_lwt.make ~targets:[] ~archives:[]
         ~mains:
           (List.map
              (fun (m : (module Backend_lwt.Store) Backend.member) ->
                {
-                 Domain_store.name = m.Backend.name;
+                 Domain_store_lwt.name = m.Backend.name;
                  backend = m.Backend.backend;
                })
              members)

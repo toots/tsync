@@ -111,7 +111,7 @@ module Make (C : Conf.S) (D : Domain_engine.Domain) = struct
      timeout kills us and reports the unit failed, where a timer of our own would
      abandon the same pending work with an exit status saying all was well.
      Steps waiting on something remote carry their own bounds
-     ({!Domain_store.drain}). *)
+     ({!Domain_store_lwt.drain}). *)
   let stop_t, stop_wake = Lwt.wait ()
 
   let do_stop () =
