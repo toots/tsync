@@ -698,7 +698,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
                 ()
             | Staged_manifest.Inherit | Staged_manifest.Zero ->
                 (* [ensure_group_body] just made this a staged body. *)
-                Lwt.fail_with "data: slot not staged"
+                Lwt.fail (Failure "data: slot not staged")
         in
         go (i + 1))
     in

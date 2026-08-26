@@ -165,10 +165,24 @@ let rebuilds : (string, unit Lwt.t) Hashtbl.t = Hashtbl.create 4
 let rebuild_once ~cache_root ~domain_name =
   let key = cache_root ^ "\000" ^ domain_name in
   match Hashtbl.find_opt rebuilds key with
-    | Some running when Lwt.state running = Lwt.Sleep -> running
-    | _ ->
-        let running = rebuild ~cache_root ~domain_name in
+    | Some running -> running
+    | None ->
+        (* Being in the table is what says a walk is in flight, so it leaves on
+           the way out. The walk waits for [start] rather than beginning here:
+           one that finished first would remove a key not yet added, and the
+           replace below would then park a finished walk there for good. *)
+        let started, start = Lwt.wait () in
+        let running =
+          Lwt.finalize
+            (fun () ->
+              let* () = started in
+              rebuild ~cache_root ~domain_name)
+            (fun () ->
+              Hashtbl.remove rebuilds key;
+              Lwt.return_unit)
+        in
         Hashtbl.replace rebuilds key running;
+        Lwt.wakeup_later start ();
         running
 
 (* A cycle in a corrupted index would otherwise climb forever. *)

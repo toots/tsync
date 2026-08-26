@@ -83,13 +83,14 @@ module Make (C : Conf.S) (F : Fetch) = struct
           entry.from_backend
       | None ->
           let entry = { done_ = Lwt.return_unit; from_backend = false } in
+          (* Nothing below runs until this is woken, which is after the entry is
+             in the table: a second caller must find it there rather than start
+             a fetch of its own. *)
+          let started, start = Lwt.wait () in
           let t =
             Lwt.finalize
               (fun () ->
-                (* Load-bearing: the table entry must be visible to a second
-                   caller before this one touches the filesystem, and every step
-                   below yields. *)
-                let* () = Lwt.pause () in
+                let* () = started in
                 let* present =
                   if force then Lwt.return_false else exists group
                 in
@@ -103,11 +104,9 @@ module Make (C : Conf.S) (F : Fetch) = struct
                 Hashtbl.remove fetching key;
                 Lwt.return_unit)
           in
-          (* Filled in after the fact rather than at construction: [Lwt.finalize]
-             above runs as far as that [Lwt.pause ()] and no further, so no
-             second caller can reach the table in between. *)
           entry.done_ <- t;
           Hashtbl.replace fetching key entry;
+          Lwt.wakeup_later start ();
           let+ () = t in
           entry.from_backend
 
@@ -223,7 +222,7 @@ module Make (C : Conf.S) (F : Fetch) = struct
              old as the write that staged it. *)
           let+ () =
             Lwt.catch
-              (fun () -> Lwt_unix.utimes dst now now)
+              (fun () -> Io_lwt.Retry.utimes dst now now)
               (fun _ -> Lwt.return_unit)
           in
           links_supported := Some true;
