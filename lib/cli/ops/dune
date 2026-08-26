@@ -59,6 +59,8 @@
    -open
    Tsync_store
    -open
+   Tsync_store_lwt
+   -open
    Tsync_file_store
    -open
    Tsync_inode_tree
@@ -125,6 +127,7 @@
   tsync_layout
   tsync_layout_lwt
   tsync_store
+  tsync_store_lwt
   tsync_file_store
   tsync_inode_tree
   tsync_corruption

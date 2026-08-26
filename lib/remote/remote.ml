@@ -87,8 +87,8 @@ let pools_for ~prefix ~max_chunk_buffers ~max_downloads =
 
 module Make_with_layout (C : Conf_lwt.S) (L : Layout_lwt.S) : S = struct
   (* [St] maps logical keys to backend keys through the layout scheme. *)
-  module St = Store.Make (C) (L)
-  module Hs = History.Make (C) (L)
+  module St = Store_lwt.Make (C) (L)
+  module Hs = History_lwt.Make (C) (L)
   module B = (val C.store : C.Store)
 
   (* Chunk writes go where they always went; only presence checks and reads have

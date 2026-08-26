@@ -13,7 +13,7 @@ type unusable = [ `Unreadable of exn | `Unclassifiable of exn ]
 type on_unusable = [ `Fail | `Skip of Stored_key.t -> unusable -> unit ]
 
 module Make (C : Conf_lwt.S) = struct
-  module St = Store.Make (C) (Layout_lwt.Inode.Make (C))
+  module St = Store_lwt.Make (C) (Layout_lwt.Inode.Make (C))
 
   let namespace_prefix folder_id =
     Stored_key.namespace ~prefix:C.domain_prefix ~folder_id

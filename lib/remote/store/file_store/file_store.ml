@@ -28,7 +28,7 @@ type 'a io = 'a Lwt.t
 
 module Make (C : Conf_lwt.S) = struct
   module J = Journal.Make (C)
-  module St = Store.Make (C) (Layout_lwt.Inode.Make (C))
+  module St = Store_lwt.Make (C) (Layout_lwt.Inode.Make (C))
   module B = (val C.store : C.Store)
 
   let rename_file ~src_key ~dst_key = St.copy_manifest ~src_key ~dst_key

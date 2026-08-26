@@ -19,20 +19,24 @@ val manifest_of : domain_prefix:string -> grouping:string -> Stored_key.t
 (** Every version of every file in one folder, which share its id. *)
 val folder_versions : versions_prefix:string -> folder_id:string -> Stored_key.t
 
-module Make (C : Conf_lwt.S) (L : Layout_lwt.S) : sig
-  (** [<versions_prefix>/<manifest key tail>/], so a file's versions share the
-      identity its manifest has. [None] for a key whose folder this client
-      cannot resolve. *)
-  val version_dir : key:Logical_key.t -> Stored_key.t option Lwt.t
+module Over (Io : Io.S) : sig
+  module Make
+      (C : Conf.S with type 'a io = 'a Io.t)
+      (L : Layout.S with type 'a io := 'a Io.t) : sig
+    (** [<versions_prefix>/<manifest key tail>/], so a file's versions share the
+        identity its manifest has. [None] for a key whose folder this client
+        cannot resolve. *)
+    val version_dir : key:Logical_key.t -> Stored_key.t option Io.t
 
-  (** Snapshot the current manifest object under a fresh timestamped version
-      key, when the backend has one. Best-effort: a lost snapshot must not wedge
-      the write it precedes. *)
-  val save_version : key:Logical_key.t -> unit Lwt.t
+    (** Snapshot the current manifest object under a fresh timestamped version
+        key, when the backend has one. Best-effort: a lost snapshot must not
+        wedge the write it precedes. *)
+    val save_version : key:Logical_key.t -> unit Io.t
 
-  val list_versions : key:Logical_key.t -> Backend.file_entry list Lwt.t
-  val get_version : vkey:Stored_key.t -> string Lwt.t
+    val list_versions : key:Logical_key.t -> Backend.file_entry list Io.t
+    val get_version : vkey:Stored_key.t -> string Io.t
 
-  (** {!parse} against this domain's prefix. *)
-  val parse : Stored_key.t -> (string * string) option
+    (** {!parse} against this domain's prefix. *)
+    val parse : Stored_key.t -> (string * string) option
+  end
 end

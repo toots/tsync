@@ -5,8 +5,6 @@
     rename of the folder, and a file that is deleted outright leaves its
     versions behind under a key nothing live resolves. *)
 
-open Lwt.Syntax
-
 (* [rel] is a folder-id/leaf-hash pair, used only as an opaque grouping key; the
    timestamp orders versions. *)
 let parse ~versions_prefix key =
@@ -34,55 +32,64 @@ let manifest_of ~domain_prefix ~grouping =
 let folder_versions ~versions_prefix ~folder_id =
   Stored_key.namespace ~prefix:versions_prefix ~folder_id
 
-module Make (C : Conf_lwt.S) (L : Layout_lwt.S) = struct
-  module B = (val C.store : C.Store)
+module Over (Io : Io.S) = struct
+  let ( let* ) = Io.bind
+  let ( let+ ) x f = Io.map f x
 
-  let version_dir ~key =
-    let+ bk = L.manifest_key key in
-    Option.map
-      (fun bk ->
-        versions_of ~versions_prefix:C.versions_prefix
-          ~grouping:(Stored_key.path_in ~prefix:C.domain_prefix bk))
-      bk
+  module Make
+      (C : Conf.S with type 'a io = 'a Io.t)
+      (L : Layout.S with type 'a io := 'a Io.t) =
+  struct
+    module B = (val C.store : C.Store)
 
-  (* Snapshot the current manifest object under a fresh timestamped version key,
-     when it exists on the backend. Best-effort: a lost snapshot must not wedge
-     the write it precedes. *)
-  let save_version ~key =
-    let* bk = L.manifest_key key in
-    match bk with
-      | None -> Lwt.return_unit
-      | Some bk -> (
-          let* head = B.head_opt ~key:bk () in
-          match head with
-            | None -> Lwt.return_unit
-            | Some _ -> (
-                let ts = Int64.of_float (Unix.gettimeofday () *. 1e9) in
-                let* dir = version_dir ~key in
-                match dir with
-                  | None -> Lwt.return_unit
-                  | Some dir ->
-                      Lwt.catch
-                        (fun () ->
-                          B.copy ~src_key:bk
-                            ~dst_key:(Stored_key.under dir (Int64.to_string ts))
-                            ())
-                        (fun exn ->
-                          Log.warn "save_version %s: %s"
-                            (Logical_key.to_string key)
-                            (Printexc.to_string exn);
-                          Lwt.return_unit)))
+    let version_dir ~key =
+      let+ bk = L.manifest_key key in
+      Option.map
+        (fun bk ->
+          versions_of ~versions_prefix:C.versions_prefix
+            ~grouping:(Stored_key.path_in ~prefix:C.domain_prefix bk))
+        bk
 
-  let list_versions ~key =
-    let* dir = version_dir ~key in
-    match dir with
-      | None -> Lwt.return_nil
-      | Some dir -> B.list_prefix ~prefix:(Stored_key.to_string dir) ()
+    (* Snapshot the current manifest object under a fresh timestamped version key,
+       when it exists on the backend. Best-effort: a lost snapshot must not wedge
+       the write it precedes. *)
+    let save_version ~key =
+      let* bk = L.manifest_key key in
+      match bk with
+        | None -> Io.return ()
+        | Some bk -> (
+            let* head = B.head_opt ~key:bk () in
+            match head with
+              | None -> Io.return ()
+              | Some _ -> (
+                  let ts = Int64.of_float (Unix.gettimeofday () *. 1e9) in
+                  let* dir = version_dir ~key in
+                  match dir with
+                    | None -> Io.return ()
+                    | Some dir ->
+                        Io.catch
+                          (fun () ->
+                            B.copy ~src_key:bk
+                              ~dst_key:
+                                (Stored_key.under dir (Int64.to_string ts))
+                              ())
+                          (fun exn ->
+                            Log.warn "save_version %s: %s"
+                              (Logical_key.to_string key)
+                              (Printexc.to_string exn);
+                            Io.return ())))
 
-  let get_version ~vkey =
-    let+ body = B.get ~key:vkey () in
-    Bigstring.to_string body
+    let list_versions ~key =
+      let* dir = version_dir ~key in
+      match dir with
+        | None -> Io.return []
+        | Some dir -> B.list_prefix ~prefix:(Stored_key.to_string dir) ()
 
-  (* The other direction of the key {!version_dir} builds. *)
-  let parse key = parse ~versions_prefix:C.versions_prefix key
+    let get_version ~vkey =
+      let+ body = B.get ~key:vkey () in
+      Bigstring.to_string body
+
+    (* The other direction of the key {!version_dir} builds. *)
+    let parse key = parse ~versions_prefix:C.versions_prefix key
+  end
 end

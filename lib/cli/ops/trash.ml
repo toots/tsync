@@ -5,7 +5,7 @@ type outcome = Restored | Not_in_trash | Parent_unknown
 module Make (C : Conf_lwt.S) = struct
   module Lk = Logical_key.Make (C)
   module L = Layout_lwt.Inode.Make (C)
-  module St = Store.Make (C) (L)
+  module St = Store_lwt.Make (C) (L)
   module B = (val C.store : C.Store)
 
   (* A directory key is the namespace itself, not one of the markers filed in

@@ -1,0 +1,8 @@
+; What a store keeps of a file after the tree stopped pointing at it, on Lwt.
+
+(library
+ (flags
+  (:standard -open Tsync_history -open Tsync_io_lwt))
+ (name tsync_history_lwt)
+ (public_name tsync-libs.history_lwt)
+ (libraries tsync_history tsync_io_lwt lwt))

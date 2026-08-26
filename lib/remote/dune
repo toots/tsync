@@ -12,6 +12,8 @@
    -open
    Tsync_history
    -open
+   Tsync_history_lwt
+   -open
    Tsync_staged
    -open
    Tsync_chunk_cache
@@ -35,6 +37,8 @@
    Tsync_layout_lwt
    -open
    Tsync_store
+   -open
+   Tsync_store_lwt
    -open
    Tsync_corruption
    -open
@@ -63,6 +67,7 @@
   tsync_retry
   tsync_logical_key
   tsync_history
+  tsync_history_lwt
   tsync_staged
   tsync_chunk_cache
   tsync_manifest
@@ -75,6 +80,7 @@
   tsync_layout
   tsync_layout_lwt
   tsync_store
+  tsync_store_lwt
   tsync_corruption
   tsync_corruption_lwt
   tsync_collection

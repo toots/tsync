@@ -40,8 +40,8 @@ let cmd : unit Cmd.t =
       (let open Lwt.Syntax in
        let (module C : Conf_lwt.S) = load_conf ?domain () in
        let module L = Layout_lwt.Inode.Make (C) in
-       let module St = Store.Make (C) (L) in
-       let module Hs = History.Make (C) (L) in
+       let module St = Store_lwt.Make (C) (L) in
+       let module Hs = History_lwt.Make (C) (L) in
        let module Lk = Logical_key.Make (C) in
        let module B = (val C.store : C.Store) in
        let parse = History.parse ~versions_prefix:C.versions_prefix in

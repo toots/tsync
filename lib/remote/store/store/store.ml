@@ -1,71 +1,96 @@
-open Lwt.Syntax
+(** The batched read a store may have of its own, already resolved: which
+    drivers have one and how wide the fan-out is are settled where the stores
+    are built, not here. *)
+module type BATCHED = sig
+  type 'a io
+  type pool
 
-module Make (C : Conf_lwt.S) (L : Layout_lwt.S) = struct
-  module B = (val C.store : C.Store)
-  module Bb = Backend_lwt.Batched (B)
+  module Make (_ : Backend.S with type 'a io := 'a io) : sig
+    val get_many :
+      ?slots:pool ->
+      entries:Backend.file_entry list ->
+      unit ->
+      (Stored_key.t * Bigstring.t option) list io
+  end
+end
 
-  (* Publishing may bring the folder into existence; every other operation
-     resolves what is already there and treats an unknown folder as absent. *)
-  let put_manifest ~key ~data =
-    let* bk = L.ensure_manifest_key key in
-    B.put ~key:bk ~data ()
+module Over (Io : Io.S) (Batched : BATCHED with type 'a io := 'a Io.t) = struct
+  let ( let* ) = Io.bind
+  let ( let+ ) x f = Io.map f x
 
-  let get_manifest_state ~key =
-    let* bk = L.manifest_key key in
-    match bk with
-      | None -> Lwt.return `Unresolved
-      | Some bk -> (
-          let+ body = B.get_opt ~key:bk () in
-          match body with
-            | None -> `Absent
-            | Some body -> `Body (Bigstring.to_string body))
+  module Make
+      (C : Conf.S with type 'a io = 'a Io.t)
+      (L : Layout.S with type 'a io := 'a Io.t) =
+  struct
+    module B = (val C.store : C.Store)
+    module Bb = Batched.Make (B)
 
-  let head_manifest ~key =
-    let* bk = L.manifest_key key in
-    match bk with None -> Lwt.return_none | Some bk -> B.head_opt ~key:bk ()
+    (* Publishing may bring the folder into existence; every other operation
+       resolves what is already there and treats an unknown folder as absent. *)
+    let put_manifest ~key ~data =
+      let* bk = L.ensure_manifest_key key in
+      B.put ~key:bk ~data ()
 
-  let delete_manifest ~key =
-    let* bk = L.manifest_key key in
-    match bk with None -> Lwt.return_unit | Some bk -> B.delete ~key:bk ()
+    let get_manifest_state ~key =
+      let* bk = L.manifest_key key in
+      match bk with
+        | None -> Io.return `Unresolved
+        | Some bk -> (
+            let+ body = B.get_opt ~key:bk () in
+            match body with
+              | None -> `Absent
+              | Some body -> `Body (Bigstring.to_string body))
 
-  (* The destination may be brought into existence; the source has to be there
-     already or there is nothing to move. *)
-  let copy_manifest ~src_key ~dst_key =
-    let* src = L.manifest_key src_key in
-    match src with
-      | None -> Lwt.return_unit
-      | Some src ->
-          let* dst = L.ensure_manifest_key dst_key in
-          let* () = B.copy ~src_key:src ~dst_key:dst () in
-          B.delete ~key:src ()
+    let head_manifest ~key =
+      let* bk = L.manifest_key key in
+      match bk with None -> Io.return None | Some bk -> B.head_opt ~key:bk ()
 
-  (* Records a directory under its parent's namespace so resync can rebuild the
-     tree. No-op for layouts with no folder tree. *)
-  let put_folder_marker ~key =
-    let* m = L.ensure_folder_marker key in
-    match m with
-      | None -> Lwt.return_unit
-      | Some (bkey, data) -> B.put ~key:bkey ~data:(Bigstring.of_string data) ()
+    let delete_manifest ~key =
+      let* bk = L.manifest_key key in
+      match bk with None -> Io.return () | Some bk -> B.delete ~key:bk ()
 
-  (* Direct children (file manifests and folder markers) of a folder namespace,
-     and a raw object fetch — used by resync to walk the inode tree by id. *)
-  let list_namespace ~folder_id =
-    B.list_prefix
-      ~prefix:
-        (Stored_key.to_string
-           (Stored_key.namespace ~prefix:C.domain_prefix ~folder_id))
-      ()
+    (* The destination may be brought into existence; the source has to be there
+       already or there is nothing to move. *)
+    let copy_manifest ~src_key ~dst_key =
+      let* src = L.manifest_key src_key in
+      match src with
+        | None -> Io.return ()
+        | Some src ->
+            let* dst = L.ensure_manifest_key dst_key in
+            let* () = B.copy ~src_key:src ~dst_key:dst () in
+            B.delete ~key:src ()
 
-  let get_object ~bkey =
-    let+ body = B.get ~key:bkey () in
-    Bigstring.to_string body
+    (* Records a directory under its parent's namespace so resync can rebuild the
+       tree. No-op for layouts with no folder tree. *)
+    let put_folder_marker ~key =
+      let* m = L.ensure_folder_marker key in
+      match m with
+        | None -> Io.return ()
+        | Some (bkey, data) ->
+            B.put ~key:bkey ~data:(Bigstring.of_string data) ()
 
-  let get_objects ?slots ~entries () =
-    let+ answered = Bb.get_many ?slots ~entries () in
-    List.map
-      (fun (key, body) -> (key, Option.map Bigstring.to_string body))
-      answered
+    (* Direct children (file manifests and folder markers) of a folder namespace,
+       and a raw object fetch — used by resync to walk the inode tree by id. *)
+    let list_namespace ~folder_id =
+      B.list_prefix
+        ~prefix:
+          (Stored_key.to_string
+             (Stored_key.namespace ~prefix:C.domain_prefix ~folder_id))
+        ()
 
-  let delete_raw ~bkey = B.delete ~key:bkey ()
-  let put_raw ~bkey ~data = B.put ~key:bkey ~data:(Bigstring.of_string data) ()
+    let get_object ~bkey =
+      let+ body = B.get ~key:bkey () in
+      Bigstring.to_string body
+
+    let get_objects ?slots ~entries () =
+      let+ answered = Bb.get_many ?slots ~entries () in
+      List.map
+        (fun (key, body) -> (key, Option.map Bigstring.to_string body))
+        answered
+
+    let delete_raw ~bkey = B.delete ~key:bkey ()
+
+    let put_raw ~bkey ~data =
+      B.put ~key:bkey ~data:(Bigstring.of_string data) ()
+  end
 end
