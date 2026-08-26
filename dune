@@ -1,0 +1,17 @@
+; A plain `dune build' builds what ships, and nothing under tests.
+;
+; Without this stanza dune assumes (deps (alias_rec all)) here, which reaches
+; every directory in the tree: building would compile all hundred-odd test
+; executables and run the eighty-two that record their output. A subdirectory
+; cannot opt out of that, since the recursion asks each directory for its all
+; alias and never for its default.
+;
+; `dune build @runtest' and `dune build @check' name what they need and are
+; unaffected.
+
+(alias
+ (name default)
+ (deps
+  (alias_rec lib/all)
+  (alias_rec bin/all)
+  (alias_rec linux/all)))

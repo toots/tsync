@@ -89,9 +89,11 @@ for dune in $(find . -mindepth 2 -name dune | sed 's|^\./||' | sort); do
 
   printf '\n(subdir %s' "$dir"
   # A platform-gated test names no executable here: dune would build it on
-  # every platform to satisfy the alias. The alias is still declared, or the
-  # directory falls back to dune's implicit default -- every target in it,
-  # which is the test's own output, and `dune build` would run the test.
+  # every platform to satisfy the alias. The empty alias beside it buys nothing
+  # -- what keeps a plain `dune build' out of this tree is the default alias in
+  # the root dune, since dune's implicit default recurses asking each directory
+  # for its all alias and never for its default. It is declared anyway so the
+  # two branches read alike.
   if [ -z "$platform" ]; then
     printf '\n (alias\n  (name default)\n  (deps %s.exe))' "$exe"
   else
