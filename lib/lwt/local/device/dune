@@ -1,0 +1,9 @@
+; Waiting on what lib/local/device opens. Apart from it for the same reason
+; every other Lwt directory here is: the pure side names no scheduler.
+
+(library
+ (name tsync_device_lwt)
+ (public_name tsync-libs.device_lwt)
+ (flags
+  (:standard -open Tsync_device))
+ (libraries tsync_device lwt lwt.unix unix))

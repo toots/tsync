@@ -36,6 +36,17 @@ module type WALL_CLOCK = sig
   val now : unit -> float
 end
 
+(* Being told a directory changed. [None] from [open_dir] is a directory this
+   platform or filesystem will not watch, which is not a failure: the caller
+   goes back to asking on a timer. *)
+module type WATCHER = sig
+  type 'a io
+  type t
+
+  val open_dir : string -> t option
+  val wait : t -> unit io
+end
+
 (* Writing a buffer straight to a path, which the bigstring layer owns. *)
 module type BYTES = sig
   type 'a io
@@ -50,7 +61,8 @@ module Over
     (Bounded : POOLS with type 'a io := 'a Io.t)
     (Bytes : BYTES with type 'a io := 'a Io.t)
     (Wall : WALL_CLOCK)
-    (Clock : Clock.S with type 'a io := 'a Io.t) =
+    (Clock : Clock.S with type 'a io := 'a Io.t)
+    (Watcher : WATCHER with type 'a io := 'a Io.t) =
 struct
   module type Store = Backend.S with type 'a io := 'a Io.t
 
@@ -503,10 +515,41 @@ struct
             verified = verify_writes;
           }
 
-      (* Nothing native to be told by, so this is the sleep a caller would
-         otherwise spell itself. *)
-      let watch ~key:_ ~last_seen:_ () =
-        Clock.sleep Backend.default_watch_interval
+      (* One per directory, held for the life of the process: a store watches
+         its own root and nothing else, so opening is the whole cost.
+
+         ponytail: never closed and never evicted, the set being the domains
+         this process serves. Reclaim them if a process ever drops a store. *)
+      let watchers : (string, Watcher.t) Hashtbl.t = Hashtbl.create 1
+
+      let watcher_for dir =
+        match Hashtbl.find_opt watchers dir with
+          | Some watcher -> Some watcher
+          | None ->
+              let watcher = Watcher.open_dir dir in
+              Option.iter (Hashtbl.replace watchers dir) watcher;
+              watcher
+
+      (* The directory, never the object: {!write_file} renames into place, so a
+         watch on the object's own name follows an inode that is unlinked a
+         moment later.
+
+         Capped at the interval this would otherwise have slept, so an event
+         that never comes — a writer on the far side of a network mount — costs
+         nothing against asking, and one that does turns a wait of seconds into
+         no wait at all. *)
+      let watch ~key ~last_seen:_ () =
+        let dir = Filename.dirname (resolve (Stored_key.to_string key)) in
+        match watcher_for dir with
+          | None -> Clock.sleep Backend.default_watch_interval
+          | Some watcher ->
+              Io.catch
+                (fun () ->
+                  Clock.with_timeout Backend.default_watch_interval (fun () ->
+                      Watcher.wait watcher))
+                (fun exn ->
+                  if Clock.is_timeout exn then Io.return ()
+                  else Clock.sleep Backend.default_watch_interval)
 
       (* Objects are files at [root/<key>] ({!resolve}), so a caller may work on
          the tree as one. *)

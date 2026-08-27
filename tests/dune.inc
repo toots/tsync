@@ -143,6 +143,20 @@
   (action
    (diff http_reuse.expected http_reuse.output))))
 
+(subdir backends/local_watch
+ (alias
+  (name default)
+  (deps local_watch.exe))
+ (rule
+  (alias runtest)
+  (target local_watch.output)
+  (action
+   (with-stdout-to local_watch.output (ignore-stderr (run ./local_watch.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff local_watch.expected local_watch.output))))
+
 (subdir backends/probe_deadline
  (alias
   (name default)

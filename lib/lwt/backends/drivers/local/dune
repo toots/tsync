@@ -12,7 +12,9 @@
    -open
    Tsync_bigstring_lwt
    -open
-   Tsync_io_lwt))
+   Tsync_io_lwt
+   -open
+   Tsync_device_lwt))
  (library_flags (-linkall))
  (name tsync_local_backend_lwt)
  (libraries
@@ -21,4 +23,5 @@
   tsync_field_spec
   tsync_bigstring_lwt
   tsync_io_lwt
+  tsync_device_lwt
   unix))
