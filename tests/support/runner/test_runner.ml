@@ -815,6 +815,31 @@ let setup_client (module C : Conf_lwt.S) root staging_prefix =
            all: a step that left it behind would exercise [Sync] against a gate
            stuck shut. *)
         let* () = Fs.flush_cursor () in
+        (* Waited for, not assumed: whichever of this flush and the debounce
+           timer gets there first is what publishes, and a step returning before
+           the bump landed leaves [Sync] reading a gate that is still shut —
+           which reads as a peer that simply saw nothing. *)
+        let deadline = Unix.gettimeofday () +. 10. in
+        let rec published () =
+          let* keys = Fs.list_journal_keys () in
+          match List.rev keys with
+            | [] -> Lwt.return_unit
+            | newest :: _ ->
+                let* cursor = Fs.fetch_cursor () in
+                let covers =
+                  match cursor with
+                    | Some c -> Journal.Entry_key.compare c newest >= 0
+                    | None -> false
+                in
+                (* Bounded, so a bump that never lands fails the snapshot with
+                   what it was about rather than hanging the run. *)
+                if covers || Unix.gettimeofday () > deadline then
+                  Lwt.return_unit
+                else
+                  let* () = Lwt_unix.sleep 0.001 in
+                  published ()
+        in
+        let* () = published () in
         (* Move past the current ms so the next journal entry key is distinct. *)
         Lwt_unix.sleep 0.002
     | Uploads state ->
@@ -1609,6 +1634,13 @@ let run_two_client_scenario ?(versioning = false)
     steps;
   let root = Scratch.dir "test-2" in
   let backend_root = Filename.concat root "backend" in
+  (* Per scenario rather than per suite: the cursor debouncer is process-global
+     and keyed by the cursor's name alone, so two scenarios sharing a domain
+     name hand each other bumps aimed at a backend root that has since been
+     replaced — and the one that loses publishes nothing, leaving [Sync]
+     reading a gate still shut. *)
+  let domain_name = "test-" ^ name in
+  let space = "tsync/" ^ domain_name ^ "/" in
   let shared_members =
     [
       Backend.member ~name:"backend" ~backend_type:"local"
@@ -1622,12 +1654,12 @@ let run_two_client_scenario ?(versioning = false)
   let module Ca = struct
     let versioning = versioning
     let client_name = "Client A"
-    let domain_name = "test"
-    let domain_prefix = "tsync/test/manifests/"
-    let chunk_prefix = "tsync/test/chunks/"
-    let versions_prefix = "tsync/test/versions/"
-    let journal_prefix = "tsync/test/journal/"
-    let cursor_key = Stored_key.in_space ~prefix:"tsync/test/" "cursor"
+    let domain_name = domain_name
+    let domain_prefix = space ^ "manifests/"
+    let chunk_prefix = space ^ "chunks/"
+    let versions_prefix = space ^ "versions/"
+    let journal_prefix = space ^ "journal/"
+    let cursor_key = Stored_key.in_space ~prefix:space "cursor"
     let shares_prefix = "tsync/shares/"
     let members = shared_members
     let store = (List.hd members).Backend.backend
@@ -1653,12 +1685,12 @@ let run_two_client_scenario ?(versioning = false)
   let module Cb = struct
     let versioning = versioning
     let client_name = "Client B"
-    let domain_name = "test"
-    let domain_prefix = "tsync/test/manifests/"
-    let chunk_prefix = "tsync/test/chunks/"
-    let versions_prefix = "tsync/test/versions/"
-    let journal_prefix = "tsync/test/journal/"
-    let cursor_key = Stored_key.in_space ~prefix:"tsync/test/" "cursor"
+    let domain_name = domain_name
+    let domain_prefix = space ^ "manifests/"
+    let chunk_prefix = space ^ "chunks/"
+    let versions_prefix = space ^ "versions/"
+    let journal_prefix = space ^ "journal/"
+    let cursor_key = Stored_key.in_space ~prefix:space "cursor"
     let shares_prefix = "tsync/shares/"
     let members = shared_members
     let store = (List.hd members).Backend.backend
