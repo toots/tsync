@@ -32,12 +32,9 @@ module type S = sig
   val manifest_path : t -> string
   val rel_key : t -> string
 
-  (** What this machine has published for [t]. *)
-  val published_here : t -> Manifest.t option io
-
-  (** {!published_here}, falling back to the store when there is no local
-      sidecar, so a file this client has never cached still resolves to its
-      logical size and mtime rather than the manifest object's byte size. *)
+  (** What has been published for [t], read from the local manifest mirror. The
+      mirror is the whole answer: the poller replays what peers published into
+      it, so a key it does not hold is a key the domain does not have. *)
   val published : t -> Manifest.t option io
 
   val write_manifest : t -> Manifest.t -> unit io

@@ -40,11 +40,6 @@ module type S = sig
     Manifest.t io
 
   val fetch_manifest : key:Logical_key.t -> unit -> Manifest.t option io
-
-  val fetch_manifest_state :
-    key:Logical_key.t ->
-    unit ->
-    [ `Found of Manifest.t | `Absent | `Unresolved | `Unreadable ] io
 end
 
 (* Settable so a test can reach the cap without uploading a terabyte. *)
@@ -406,25 +401,16 @@ struct
       let* () = each_chunk ~count:n one in
       publish ~key ~size ~chunk_size ~mtime ~cancel table
 
-    let fetch_manifest_state ~key () =
+    (* An unknown folder, an absent object and a body caught mid-write all read
+       as no metadata, so a caller reports nothing found rather than garbage. *)
+    let fetch_manifest ~key () =
       let+ state = St.get_manifest_state ~key in
       match state with
-        | `Unresolved -> `Unresolved
-        | `Absent -> `Absent
+        | `Unresolved | `Absent -> None
         | `Body body -> (
             match Manifest.of_string body with
-              | m -> `Found m
-              (* Read again rather than remembered: a body that will not parse is
-                 a write in flight, which is a moment rather than an answer. *)
-              | exception _ -> `Unreadable)
-
-    let fetch_manifest ~key () =
-      let+ state = fetch_manifest_state ~key () in
-      match state with
-        | `Found m -> Some m
-        (* Absent, unresolved and unparseable all read as no metadata, so stat
-           reports ENOENT rather than garbage. *)
-        | `Absent | `Unresolved | `Unreadable -> None
+              | m -> Some m
+              | exception _ -> None)
 
     let get_chunk ~chunk_key = Chunks_store.fetch chunk_key
   end
