@@ -8,21 +8,15 @@
    -open
    Tsync_remote_lwt
    -open
-   Tsync_staged_lwt
-   -open
    Tsync_checkout_lwt
    -open
-   Tsync_journal
+   Tsync_manifests_lwt
    -open
    Tsync_test_harness
    -open
    Tsync_content_lwt
    -open
    Tsync_store
-   -open
-   Tsync_file_store_lwt
-   -open
-   Tsync_folder_ids_lwt
    -open
    Tsync_bigstring
    -open
@@ -36,14 +30,11 @@
   tsync_logical_key
   tsync_manifest
   tsync_remote_lwt
-  tsync_staged_lwt
   tsync_checkout_lwt
-  tsync_journal
+  tsync_manifests_lwt
   tsync_test_harness
   tsync_content_lwt
   tsync_store
-  tsync_file_store_lwt
-  tsync_folder_ids_lwt
   tsync_bigstring
   tsync_conf_lwt
   tsync_backend_lwt

@@ -1,5 +1,3 @@
-(* Applied once: the per-prefix memo of keys known absent is one table however
-   many places name it. *)
 module Files = struct
   include Cache_layout_lwt
   include Io_lwt.Fs
@@ -16,4 +14,3 @@ end
 include
   Data.Over (Io_lwt.Core) (Files) (Syscalls) (Io_lwt.Lock) (Io_lwt.Bounded)
     (Manifests_lwt)
-    (File_store_lwt)

@@ -1,20 +1,17 @@
 
-=== a name that is not there is asked about once
-the first probe misses: ok
-and it reached the backend: ok
-the second probe still misses: ok
-without asking again: ok
+=== a name that is not there costs nothing
+the probe misses: ok
+without reaching the backend: ok
+and misses again: ok
+still without reaching it: ok
 
-=== a name that is there is unaffected
+=== a name the mirror holds resolves
 it resolves: ok
+from the mirror alone: ok
 
-=== an absence is dropped once the journal moves
-not there yet: ok
-and is not seen while the mark stands: ok
-but is once the mark has moved: ok
+=== the mirror is the whole answer
+a key only the store has is not seen: ok
+and is not asked after: ok
+but is once the poller has written it: ok
 
-=== a folder this client has not learned is not an absence
-a key under an unknown folder finds nothing: ok
-and is asked again once the folder is known: ok
-
-10 check(s), 0 failure(s)
+9 check(s), 0 failure(s)

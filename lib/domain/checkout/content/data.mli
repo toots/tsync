@@ -83,14 +83,6 @@ module type MIRROR = sig
   end
 end
 
-module type JOURNAL = sig
-  type 'a io
-
-  module Make (_ : Conf.S with type 'a io = 'a io) : sig
-    val read_last_sync_key : unit -> Journal.Entry_key.t option
-  end
-end
-
 (** What this needs of the store above it. *)
 module type REMOTE = sig
   type 'a io
@@ -119,11 +111,6 @@ module type REMOTE = sig
     Manifest.t io
 
   val fetch_manifest : key:Logical_key.t -> unit -> Manifest.t option io
-
-  val fetch_manifest_state :
-    key:Logical_key.t ->
-    unit ->
-    [ `Found of Manifest.t | `Absent | `Unresolved | `Unreadable ] io
 end
 
 module Over
@@ -132,8 +119,7 @@ module Over
     (_ : SYSCALLS with type 'a io := 'a Io.t and type fd = Fs.fd)
     (_ : LOCKS with type 'a io := 'a Io.t)
     (_ : POOLS with type 'a io := 'a Io.t)
-    (_ : MIRROR with type 'a io := 'a Io.t)
-    (_ : JOURNAL with type 'a io = 'a Io.t) : sig
+    (_ : MIRROR with type 'a io := 'a Io.t) : sig
   module Make
       (C : Conf.S with type 'a io = 'a Io.t)
       (R : REMOTE with type 'a io := 'a Io.t) : sig
@@ -148,15 +134,9 @@ module Over
       offset:int64 ->
       int Io.t
 
-    (** [key]'s published manifest wherever it currently lives: the local
-        sidecar when there is one, else the store's — so a file that was never
-        cached still reports its real logical size and mtime rather than the
-        manifest object's byte size.
-
-        Owns the negative cache for keys the store says are absent, so a cold
-        listing does not pay a round trip per missing key on every pass. It is
-        bounded, and it invalidates itself against the sync journal's mark
-        rather than asking whoever changes the tree to remember to clear it.
+    (** [key]'s published manifest, read from the local mirror, which holds one
+        sidecar per key the poller has replayed and is the whole answer: a name
+        it does not carry is a name the domain does not have.
 
         Says nothing about staged edits: a staged key is by definition local, so
         a caller wanting those asks {!Checkout.current} first. {!File_ops.stat}
@@ -164,8 +144,8 @@ module Over
     val published : Logical_key.t -> Manifest.t option Io.t
 
     (** {!pread} for a key of this domain, resolved through
-        {!Manifest.Make.resolve}: staged edits, else what was published, else
-        the backend's manifest. *)
+        {!Manifest.Make.resolve}: staged edits, else what was published. Reads
+        nothing for a key the mirror does not hold. *)
     val pread_key : Logical_key.t -> Bigstring.t -> offset:int64 -> int Io.t
 
     (** {2 Writes}

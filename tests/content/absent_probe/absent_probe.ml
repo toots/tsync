@@ -1,13 +1,13 @@
 (* What a name that is not there costs.
 
-   A lookup that misses the mirror falls through to the backend, and a miss
-   leaves nothing behind to find: a shell probing for [.git] in every parent
-   directory, once per prompt, paid a round trip each time. The reads are
-   counted, since the answers are the same either way and only the cost differs.
+   The mirror is the whole answer: the poller replays what peers published into
+   it, so a name it does not carry is a name the domain does not have. A lookup
+   that misses it must therefore stay off the network, and the reads are counted
+   because the answer alone cannot say whether one was made.
 
-   The last two cases are the guard on the other side: the fallback exists for a
-   file this client has not learned about yet, so an absence must stop being
-   believed once the journal moves. *)
+   The last case is the window this buys: a key published straight to the store
+   is not seen until the poller writes it, which is how the mount's own listing
+   learns of it too. *)
 
 open Lwt.Syntax
 open Check
@@ -40,22 +40,24 @@ module Lk = Logical_key.Make (C)
 module R = Remote_lwt.Make (C)
 module D = Data_lwt.Make (C) (R)
 module Mf = Checkout_lwt.Make (C)
-module Mfs = Staged_lwt.Manifest.Make (C)
-module Fs = File_store_lwt.Make (C)
-module J = Journal.Make (C)
+module Mirror = Manifests_lwt.Make (C)
 
 let key name = Lk.file @@ name
 
-let publish name =
-  let body =
-    Manifest.encode ~name ~size:0L ~chunk_size:4 ~mtime:0.
-      ~h1:(String.make 16 'a') ~h2:(String.make 16 'b') ~symlink:None ~keys:[]
-  in
+let manifest name =
+  Manifest.of_string
+  @@ Manifest.encode ~name ~size:0L ~chunk_size:4 ~mtime:0.
+       ~h1:(String.make 16 'a') ~h2:(String.make 16 'b') ~symlink:None ~keys:[]
+
+(* Straight to the store, the way a peer publishes: nothing here writes the
+   mirror, which is what the poller would do. *)
+let publish_remotely name =
   Store.put
     ~key:
       (Stored_key.child_key ~prefix:C.domain_prefix
          ~folder_id:Stored_key.root_id name)
-    ~data:(Bigstring.of_string body) ()
+    ~data:(Manifest.body ~name (manifest name))
+    ()
 
 let found name =
   let+ m = D.published (key name) in
@@ -64,49 +66,30 @@ let found name =
 let () =
   Lwt_main.run
     (let* () = Mf.ensure_root () in
-     case "a name that is not there is asked about once";
+     case "a name that is not there costs nothing";
      reads := 0;
      let* gone = found ".git" in
-     check "the first probe misses" (not gone);
-     let asked = !reads in
-     check "and it reached the backend" (asked > 0);
+     check "the probe misses" (not gone);
+     check "without reaching the backend" (!reads = 0);
      let* gone = found ".git" in
-     check "the second probe still misses" (not gone);
-     check "without asking again" (!reads = asked);
+     check "and misses again" (not gone);
+     check "still without reaching it" (!reads = 0);
 
-     case "a name that is there is unaffected";
-     let* () = publish "here.txt" in
+     case "a name the mirror holds resolves";
+     let* () = Mirror.write (key "here.txt") (manifest "here.txt") in
+     reads := 0;
      let* there = found "here.txt" in
      check "it resolves" there;
+     check "from the mirror alone" (!reads = 0);
 
-     case "an absence is dropped once the journal moves";
-     let* gone = found "later.txt" in
-     check "not there yet" (not gone);
-     let* () = publish "later.txt" in
+     case "the mirror is the whole answer";
+     let* () = publish_remotely "later.txt" in
      let* still = found "later.txt" in
-     (* The window this trades for the round trips: as stale as the mount's own
-        listing, which learns the same way. *)
-     check "and is not seen while the mark stands" (not still);
-     Fs.write_last_sync_key (J.entry_key ());
+     (* As stale as the mount's own listing, which learns the same way. *)
+     check "a key only the store has is not seen" (not still);
+     check "and is not asked after" (!reads = 0);
+     let* () = Mirror.write (key "later.txt") (manifest "later.txt") in
      let* now = found "later.txt" in
-     check "but is once the mark has moved" now;
-
-     (* Only the store's own answer is worth remembering. Not knowing a key's
-        folder yet is a fact about this client, and nothing that fixes it moves
-        the mark, so remembering it was an ENOENT that never lifted. *)
-     case "a folder this client has not learned is not an absence";
-     let deep = "unknown-folder/inside.txt" in
-     let* gone = found deep in
-     check "a key under an unknown folder finds nothing" (not gone);
-     let* () =
-       (* What the folder's own marker being learned looks like, which is a
-          local write and moves no mark. *)
-       Folder_ids_lwt.write ~cache_root:C.cache_root ~domain_name:C.domain_name
-         (Lk.dir "unknown-folder")
-         { Folder.name = "unknown-folder"; id = Stored_key.root_id }
-     in
-     let* () = publish "inside.txt" in
-     let* now = found deep in
-     check "and is asked again once the folder is known" now;
+     check "but is once the poller has written it" now;
      Lwt.return_unit);
-  report ~expected:10 ()
+  report ~expected:9 ()
