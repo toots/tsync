@@ -644,10 +644,9 @@ module Make
 
   module Sh = Share_lwt.Make (C)
 
-  (* Recovers the domain-relative path the share core expects from a full
-     storage key. *)
-  let handle_share key =
-    let rel = Logical_key.path key in
+  (* A domain-relative path is the whole of what the share core needs: it never
+     asks whether the target is a file or a folder. *)
+  let handle_share rel =
     let expires = int_of_float (Unix.time ()) + (7 * 86400) in
     let+ result = Sh.create ~expires ~rel () in
     match result with
@@ -776,7 +775,14 @@ module Make
                         with_file_destination (fun key ->
                             handle_symlink key (get_str obj "target"))
                     | "rmdir" -> with_target handle_rmdir
-                    | "share" -> with_target handle_share
+                    (* A caller holding a real path names it directly, which
+                       skips the folder resolution a reference costs. *)
+                    | "share" -> (
+                        match List.assoc_opt "rel" obj with
+                          | Some (`String rel) -> handle_share rel
+                          | _ ->
+                              with_target (fun key ->
+                                  handle_share (Logical_key.path key)))
                     | "evict" ->
                         with_target (fun key ->
                             let+ () = hooks.evict key in
