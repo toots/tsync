@@ -6,6 +6,7 @@ module type JOURNAL = sig
 
   module Make (_ : Conf.S with type 'a io = 'a io) : sig
     val fetch_cursor : unit -> Journal.Entry_key.t option io
+    val wait_cursor_change : Journal.Entry_key.t option -> unit io
   end
 end
 
@@ -38,7 +39,9 @@ module Over
         op is applied. *)
     val sync_once : on_changed:(string -> unit) -> unit -> int Io.t
 
-    (** {!sync_once} on a ~2 s timer, detached. *)
+    (** {!sync_once} whenever the store says the cursor is worth reading again,
+        detached. What paces it is {!File_store.wait_cursor_change}, so the
+        cadence is the store's and not this module's. *)
     val start : on_changed:(string -> unit) -> unit -> unit
   end
 end

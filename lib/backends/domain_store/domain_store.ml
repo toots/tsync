@@ -191,6 +191,16 @@ struct
       let head_opt ~key () =
         read "head_opt" (fun (module B : Store) -> B.head_opt ~key ())
 
+      (* Where the cursor read goes and no wider: a wake from a store this does
+         not read the cursor from says nothing about the one it does. *)
+      let watch ~key ~last_seen () =
+        let+ (_ : unit option) =
+          read "watch" (fun (module B : Store) ->
+              let+ () = B.watch ~key ~last_seen () in
+              Some ())
+        in
+        ()
+
       (* Declared only where the first readable store has a batch of its own, and
          forwarding to it directly rather than through {!Bk.Batched}: the
          caller asking already holds a slot for this read, and taking a second

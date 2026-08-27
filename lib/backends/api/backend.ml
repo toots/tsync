@@ -12,6 +12,20 @@ type file_entry = {
           chunk count — is invisible in both. *)
 }
 
+(* Trimmed on the way in, in the one place it happens: a store comparing a body
+   against a token that reached it over a wire must not conclude "changed" from
+   whitespace. *)
+module Watch_token = struct
+  type t = string
+
+  let of_body body = String.trim (Bigstring.to_string body)
+  let to_wire token = token
+  let of_wire s = String.trim s
+  let equal = String.equal
+end
+
+let default_watch_interval = 2.
+
 exception Backend_error of string
 exception Not_writable
 
@@ -92,6 +106,15 @@ module type S = sig
   val delete_multi : Stored_key.t list -> unit io
   val copy : src_key:Stored_key.t -> dst_key:Stored_key.t -> unit -> unit io
   val list_prefix : ?max_keys:int -> prefix:string -> unit -> file_entry list io
+
+  (** Return when the object at [key] may have changed, or after however long
+      this store thinks is sensible to wait before saying so. A hint: waking
+      early is allowed and waking late is not, the caller re-reading and
+      comparing either way, and a store may watch something coarser than [key].
+      Bounded always, so a watch that cannot fire slows a caller rather than
+      stopping it. *)
+  val watch :
+    key:Stored_key.t -> last_seen:Watch_token.t option -> unit -> unit io
 
   (** A native multi-object read, or [None] from a store with none — which is
       every store but http-proxy, S3 having no multi-object GET and the GCS

@@ -27,7 +27,11 @@ module type HTTP = sig
     (Cohttp.Response.t * string) io
 end
 
-module Over (Io : Io.S) (Hc : HTTP with type 'a io := 'a Io.t) = struct
+module Over
+    (Io : Io.S)
+    (Hc : HTTP with type 'a io := 'a Io.t)
+    (Clock : Clock.S with type 'a io := 'a Io.t) =
+struct
   module type Store = Backend.S with type 'a io := 'a Io.t
 
   let ( let* ) = Io.bind
@@ -348,6 +352,11 @@ module Over (Io : Io.S) (Hc : HTTP with type 'a io := 'a Io.t) = struct
         Io.return `Unsupported
 
       let capabilities ~prefix () = capabilities t ~prefix ()
+
+      (* Nothing native to be told by, so this is the sleep a caller would
+         otherwise spell itself. *)
+      let watch ~key:_ ~last_seen:_ () =
+        Clock.sleep Backend.default_watch_interval
 
       (* The peer's files are the peer's, whatever it keeps them on. *)
       let local_path = None

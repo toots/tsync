@@ -243,6 +243,10 @@ let reading_from name (module C : Conf_lwt.S) : (module Conf_lwt.S) =
         let head_opt = Src.head_opt
         let list_prefix = Src.list_prefix
 
+        (* With the reads, for the same reason: a wake from a store this does
+           not read from says nothing about the one it does. *)
+        let watch = Src.watch
+
         (* Taken from [Src] rather than left as the composite's, which would
            read bodies through the whole domain while the listings came from
            this one store. [None] where [Src] has no batch of its own, so the

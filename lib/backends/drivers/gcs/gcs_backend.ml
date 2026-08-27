@@ -133,7 +133,8 @@ module Over
     (Post : Gcs_auth.POST with type 'a io := 'a Io.t)
     (Lock : Gcs_auth.LOCKS with type 'a io := 'a Io.t)
     (Bounded : Verifier.POOLS with type 'a io := 'a Io.t)
-    (Clock : Gcs_auth.CLOCK) =
+    (Wall : Gcs_auth.CLOCK)
+    (Clock : Clock.S with type 'a io := 'a Io.t) =
 struct
   module Verify = Verifier.Over (Io) (Bounded)
 
@@ -146,7 +147,7 @@ struct
      minted from a service-account key ({!Gcs_auth}), and unlike s3 there is no
      per-request signing. *)
 
-  module Auth = Gcs_auth.Over (Io) (Post) (Lock) (Clock)
+  module Auth = Gcs_auth.Over (Io) (Post) (Lock) (Wall)
 
   exception Cancelled = Retry.Cancelled
 
@@ -454,6 +455,11 @@ struct
       let capabilities ~prefix:_ () =
         Io.return
           { Backend.no_caps with share_url = t.share_url; verified = true }
+
+      (* Nothing native to be told by, so this is the sleep a caller would
+         otherwise spell itself. *)
+      let watch ~key:_ ~last_seen:_ () =
+        Clock.sleep Backend.default_watch_interval
 
       let local_path = None
     end)

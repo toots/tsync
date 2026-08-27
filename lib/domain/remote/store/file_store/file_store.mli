@@ -84,6 +84,15 @@ module Over
 
     val fetch_cursor : unit -> Journal.Entry_key.t option Io.t
 
+    (** Wait for the cursor to be worth reading again — how, and for how long,
+        being the store's to decide ({!Backend.S.watch}). A hint, so this
+        returning means read and compare, not that anything changed.
+
+        [last_seen] is the entry key the caller last read and finished with; a
+        store able to compare answers at once when the cursor already points
+        past it. *)
+    val wait_cursor_change : Journal.Entry_key.t option -> unit Io.t
+
     (** How far this client has applied the shared journal. [None] when it has
         never synced. Local state — it says what we caught up to, not what has
         been published. *)

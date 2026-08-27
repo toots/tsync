@@ -19,6 +19,33 @@ type file_entry = {
           chunk count — is invisible in both. *)
 }
 
+(** What a store had at a key, as far as {!S.watch} needs to compare it.
+
+    Abstract because a key's contents get spelled several ways around here — an
+    entry key, a stored key, an etag — and a [watch] concluding "unchanged" from
+    the wrong one holds a request it should have answered. Same reason
+    {!Journal.Entry_key} is. *)
+module Watch_token : sig
+  type t
+
+  (** The token for a body a store holds, normalised: the one place the trim
+      happens, so a body and a token off a wire cannot differ by whitespace. *)
+  val of_body : Bigstring.t -> t
+
+  (** The wire spelling, for a driver carrying one to its peer, and its only
+      parser. Compared with {!equal}, never as strings. *)
+  val to_wire : t -> string
+
+  val of_wire : string -> t
+  val equal : t -> t -> bool
+end
+
+(** What a store with nothing native waits in {!S.watch} before letting a caller
+    re-read. A cursor-like object is one name, and a store caps writes to a
+    single name at about one a second, so looking faster than a writer can
+    publish only spends requests. A store that can do better ignores this. *)
+val default_watch_interval : float
+
 (** {1 What a store can say about a domain}
 
     One record rather than a method each: a composite merges them once, and
@@ -107,6 +134,24 @@ module type S = sig
 
   val copy : src_key:Stored_key.t -> dst_key:Stored_key.t -> unit -> unit io
   val list_prefix : ?max_keys:int -> prefix:string -> unit -> file_entry list io
+
+  (** Return when the object at [key] may have changed, or after however long
+      this store thinks is sensible to wait before saying so.
+
+      A hint, never a guarantee: waking early is allowed and waking late is not,
+      the caller re-reading and comparing either way — so a store with nothing
+      native sleeps and returns, and one that can only watch something coarser
+      than [key] may watch that and wake for its neighbours too. Bounded always,
+      since a watch that cannot fire has to slow a caller down rather than stop
+      it: that is what keeps a filesystem on a network mount, where an event
+      never arrives for a remote writer, syncing at all.
+
+      [last_seen] is what the caller last had at [key], so a store able to
+      compare cheaply answers at once when its own differs rather than holding
+      through a change that already happened. [None] from a caller that has
+      never had one. *)
+  val watch :
+    key:Stored_key.t -> last_seen:Watch_token.t option -> unit -> unit io
 
   (** A native multi-object read, or [None] from a store with none — which is
       every store but http-proxy, S3 having no multi-object GET and the GCS

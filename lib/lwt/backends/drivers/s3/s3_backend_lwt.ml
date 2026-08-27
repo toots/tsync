@@ -2,6 +2,7 @@
    itself. *)
 include
   S3_backend.Over (Io_lwt.Core) (Aws_s3_lwt.Io) (Retry_lwt) (Io_lwt.Bounded)
+    (Io_lwt.Clock)
 
 let () =
   let req get key =

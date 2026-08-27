@@ -753,6 +753,20 @@
   (action
    (diff cursor_debounce.expected cursor_debounce.output))))
 
+(subdir unit/cursor_watch
+ (alias
+  (name default)
+  (deps cursor_watch.exe))
+ (rule
+  (alias runtest)
+  (target cursor_watch.output)
+  (action
+   (with-stdout-to cursor_watch.output (ignore-stderr (run ./cursor_watch.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff cursor_watch.expected cursor_watch.output))))
+
 (subdir unit/dedup
  (alias
   (name default)

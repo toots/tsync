@@ -32,7 +32,7 @@ module type POOLS = sig
   val each : width:int -> (unit -> (unit -> unit io) option) -> unit io
 end
 
-module type CLOCK = sig
+module type WALL_CLOCK = sig
   val now : unit -> float
 end
 
@@ -49,7 +49,8 @@ module Over
     (Sys : SYSCALLS with type 'a io := 'a Io.t)
     (Bounded : POOLS with type 'a io := 'a Io.t)
     (Bytes : BYTES with type 'a io := 'a Io.t)
-    (Clock : CLOCK) =
+    (Wall : WALL_CLOCK)
+    (Clock : Clock.S with type 'a io := 'a Io.t) =
 struct
   module type Store = Backend.S with type 'a io := 'a Io.t
 
@@ -213,7 +214,7 @@ struct
                        {
                          computed = None;
                          size = None;
-                         at = Some (Clock.now ());
+                         at = Some (Wall.now ());
                          reason = Some why;
                        })
               | `Body stored ->
@@ -239,7 +240,7 @@ struct
                          {
                            computed = Some computed;
                            size = Some (Bigstring.length stored);
-                           at = Some (Clock.now ());
+                           at = Some (Wall.now ());
                            reason = None;
                          })))
     in
@@ -501,6 +502,11 @@ struct
             max_concurrency = Lazy.force concurrency;
             verified = verify_writes;
           }
+
+      (* Nothing native to be told by, so this is the sleep a caller would
+         otherwise spell itself. *)
+      let watch ~key:_ ~last_seen:_ () =
+        Clock.sleep Backend.default_watch_interval
 
       (* Objects are files at [root/<key>] ({!resolve}), so a caller may work on
          the tree as one. *)

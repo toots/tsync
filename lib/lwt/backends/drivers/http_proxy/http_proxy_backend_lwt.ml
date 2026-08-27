@@ -1,5 +1,5 @@
 (* The peer-proxy store on Lwt, and where it registers itself. *)
-include Http_proxy_backend.Over (Io_lwt.Core) (Http_client_lwt)
+include Http_proxy_backend.Over (Io_lwt.Core) (Http_client_lwt) (Io_lwt.Clock)
 
 let () =
   let req get key =
