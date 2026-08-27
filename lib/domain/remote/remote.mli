@@ -94,16 +94,6 @@ module type S = sig
   (** Fetch only the manifest for [key] from the primary backend. Returns [None]
       if the key does not exist or is not a manifest. *)
   val fetch_manifest : key:Logical_key.t -> unit -> Manifest.t option io
-
-  (** {!fetch_manifest} saying which nothing it found. Only [`Absent] is an
-      answer about the domain: [`Unresolved] is this client not knowing the
-      key's folder yet, and [`Unreadable] a body caught mid-write. A caller that
-      remembers an answer may remember the first and must not remember the other
-      two, which change with nothing about the domain changing. *)
-  val fetch_manifest_state :
-    key:Logical_key.t ->
-    unit ->
-    [ `Found of Manifest.t | `Absent | `Unresolved | `Unreadable ] io
 end
 
 (** The bound on what runs at once: chunk buffers and reads in flight. *)

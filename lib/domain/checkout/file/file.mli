@@ -36,11 +36,6 @@ module type REMOTE = sig
     Manifest.t io
 
   val fetch_manifest : key:Logical_key.t -> unit -> Manifest.t option io
-
-  val fetch_manifest_state :
-    key:Logical_key.t ->
-    unit ->
-    [ `Found of Manifest.t | `Absent | `Unresolved | `Unreadable ] io
 end
 
 module type CONTENT = sig

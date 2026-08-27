@@ -28,11 +28,6 @@ module type REMOTE = sig
     Manifest.t io
 
   val fetch_manifest : key:Logical_key.t -> unit -> Manifest.t option io
-
-  val fetch_manifest_state :
-    key:Logical_key.t ->
-    unit ->
-    [ `Found of Manifest.t | `Absent | `Unresolved | `Unreadable ] io
 end
 
 module type CONTENT = sig
@@ -335,7 +330,6 @@ struct
     let set_canceller f = cancel_send := f
     let cancel_upload key = !cancel_send key
     let manifest_path key = Mf.path key
-    let published_here key : Manifest.t option Io.t = Mf.published key
     let published = D.published
     let write_manifest key (state : Manifest.t) = Mf.write key state
     let delete_manifest key = Mf.delete key
@@ -399,23 +393,6 @@ struct
                         return_some
                           (file_stat (Manifest.size m) (Manifest.mtime m)))
               | None -> Io.return None)
-
-    let stat key =
-      let* st = stat key in
-      match st with
-        | Some _ -> Io.return st
-        | None -> (
-            (* No local sidecar (never cached, or after a full resync): resolve
-               from the backend so stat reports the logical size, not ENOENT. *)
-            let+ m = published key in
-            match m with
-              | Some m -> (
-                  match Manifest.symlink m with
-                    | Some target ->
-                        Some (symlink_stat target (Manifest.mtime m))
-                    | None ->
-                        Some (file_stat (Manifest.size m) (Manifest.mtime m)))
-              | None -> None)
 
     let readlink key =
       let+ m = published key in
@@ -653,7 +630,7 @@ struct
        whether the backend's needs it. *)
     let resync_manifest_name key =
       let name = Logical_key.leaf key in
-      let* m = published_here key in
+      let* m = published key in
       match m with
         | Some man -> St.put_manifest ~key ~data:(Manifest.body ~name man)
         | None -> return_unit
