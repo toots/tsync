@@ -219,7 +219,7 @@ tsync sync          # apply changes made elsewhere, incrementally
 tsync sync --full   # clear the local cache, re-read everything from the backend
 ```
 
-The daemon polls on its own; `tsync sync` is for when you want it now.
+The daemon picks changes up on its own, as soon as the backend can say there are any — immediately for a `local` disk or through an `http-proxy`, within a couple of seconds for a bucket. `tsync sync` is for when you want it now.
 
 A machine that should only pull, never push, gets a read-only domain. The poller still
 downloads normally; only local writes are refused (`EROFS` on Linux, an error from the

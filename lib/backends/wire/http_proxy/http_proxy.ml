@@ -40,6 +40,13 @@ module Auth = struct
     && Eqaf.equal expected signature
 end
 
+module Watch = struct
+  let max_seconds = 30.
+  let wait_param = "wait"
+  let last_seen_param = "last_seen"
+  let answered_header = "x-tsync-watched"
+end
+
 module Wire = struct
   let encode_key key =
     Base64.encode_string ~alphabet:Base64.uri_safe_alphabet ~pad:false key

@@ -1,0 +1,11 @@
+
+=== the wait and the token are what the peer is asked for
+the request says how long the peer may hold it: ok
+and what this client last had: ok
+
+=== a peer that says it understood is taken at its word
+the answer is passed straight up, having been waited for: ok
+a client that has nothing to compare sends no token: ok
+
+=== a peer too old to know the parameter is paced from this end
+an answer that cost no time is floored before returning: ok

@@ -1,0 +1,23 @@
+
+=== a request parses as a watch only when it asks to wait
+a plain get is still a get: ok
+one that asks to wait carries the deadline and the token: ok
+a wait longer than this end allows is cut down to it: ok
+holding costs no storage slot: ok
+and it is still authorised against its own key: ok
+
+=== a client that is already behind is answered, never held
+a client with no token at all is answered: ok
+answered at once rather than held to the deadline: ok
+and it says this end understood the wait: ok
+one read to decide it: ok
+
+=== a client that is up to date is held until the deadline
+no content, the deadline having passed: ok
+still marked as understood: ok
+and the store was not asked again while it was held: ok
+
+=== many waiters on one key cost the store one read per change
+every waiter was answered: ok
+  waiters: 8, store reads: 9
+one read per arrival, and one for the change: ok
