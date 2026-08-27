@@ -38,6 +38,24 @@ module Auth : sig
     bool
 end
 
+(** The long-poll parameters. Here rather than spelled at each end because that
+    is what this module is for: the client sets them and the frontend reads
+    them, and nothing but agreement makes the exchange work. *)
+module Watch : sig
+  (** How long a client asks a peer to hold a request open, and the longest a
+      peer will agree to hold one. One value, so a client cannot ask for more
+      than a peer would give: it is clamped to this either way. *)
+  val max_seconds : float
+
+  val wait_param : string
+  val last_seen_param : string
+
+  (** Set by a peer that held the request. A peer too old to know the parameters
+      reads the request as a plain get and answers at once, which is
+      indistinguishable from one reporting a change — except by this. *)
+  val answered_header : string
+end
+
 module Wire : sig
   (** A key holds ['/'], ['-'] and hex; base64url makes it one safe path
       segment. *)

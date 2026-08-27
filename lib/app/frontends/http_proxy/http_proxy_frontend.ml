@@ -204,6 +204,14 @@ type op =
           it afterwards. Distinct from {!Put} on the wire because the answer
           differs, not just the effect. *)
   | Delete of Stored_key.t
+  | Watch of {
+      key : Stored_key.t;
+      wait : float;
+      last_seen : Backend.Watch_token.t option;
+    }
+      (** Hold the request until [key] differs from [last_seen], or [wait]
+          seconds pass. A {!Get} that answers late on purpose, so that one
+          client asking often becomes many clients asking once. *)
   | Get_multi of Stored_key.t list
       (** A folder's manifests in one answer. The only op that saves a round
           trip rather than merely proxying one: the peer holds the objects,
@@ -218,6 +226,81 @@ type op =
   | Bad
       (** One of ours but malformed: an undecodable key, a missing argument. *)
   | Unknown  (** not part of the API at all — a browser asking for a favicon *)
+
+(* One watch per (domain, key) however many clients are waiting on it, which is
+   the whole point of holding these requests here: the store is asked once and
+   every waiter is told. Without it a proxy costs its store exactly what the
+   clients cost it today, and only the link between them gets quieter. *)
+type gate = {
+  mutable token : Backend.Watch_token.t option;
+  mutable waiters : int;
+  mutable watching : bool;
+  woken : unit Lwt_condition.t;
+}
+
+let gates : (string, gate) Hashtbl.t = Hashtbl.create 4
+
+let gate_for key =
+  let name = Stored_key.to_string key in
+  match Hashtbl.find_opt gates name with
+    | Some gate -> gate
+    | None ->
+        let gate =
+          {
+            token = None;
+            waiters = 0;
+            watching = false;
+            woken = Lwt_condition.create ();
+          }
+        in
+        Hashtbl.replace gates name gate;
+        gate
+
+let read_token (module B : Backend_lwt.Store) key =
+  let+ body = B.get_opt ~key () in
+  Option.map Backend.Watch_token.of_body body
+
+let differs token = function
+  | None -> token <> None
+  | Some seen -> (
+      match token with
+        | None -> true
+        | Some token -> not (Backend.Watch_token.equal token seen))
+
+(* Runs only while someone is waiting, so a proxy nobody is asking costs its
+   store nothing. Failures are swallowed and paced by the store's own watch,
+   which is what keeps a dying backend from spinning this. *)
+let rec watch_loop store key gate =
+  if gate.waiters = 0 then begin
+    (* Dropped with the last waiter, not kept for next time: which keys have one
+       of these is a client's choice, and a table that only grows is one it
+       chooses the size of. Nothing is racing the removal — a waiter counts
+       itself in before it asks for the loop, and there is no await between the
+       two lines below. *)
+    Hashtbl.remove gates (Stored_key.to_string key);
+    gate.watching <- false;
+    Lwt.return_unit
+  end
+  else
+    let* () =
+      Lwt.catch
+        (fun () ->
+          let module B = (val store : Backend_lwt.Store) in
+          let* () = B.watch ~key ~last_seen:gate.token () in
+          let+ token = read_token store key in
+          gate.token <- token;
+          Lwt_condition.broadcast gate.woken ())
+        (fun exn ->
+          Log.err "http-proxy watch: %s" (Printexc.to_string exn);
+          Lwt_unix.sleep Http_proxy.Watch.max_seconds)
+    in
+    watch_loop store key gate
+
+let start_watching store key gate =
+  if not gate.watching then begin
+    gate.watching <- true;
+    Lwt.async (fun () -> watch_loop store key gate)
+  end
 
 (* Keys one bulk request may name. The client packs its own requests to a key
    count and a byte budget, so this only bounds what a client that does not —
@@ -239,7 +322,23 @@ let parse_op meth uri body =
   let is_obj p = String.starts_with ~prefix:"/o/" p in
   match (meth, path) with
     | `GET, p when is_obj p -> (
-        match obj_key () with Some k -> Get k | None -> Bad)
+        match
+          ( obj_key (),
+            Option.bind (q Http_proxy.Watch.wait_param) float_of_string_opt )
+        with
+          | None, _ -> Bad
+          | Some key, None -> Get key
+          | Some key, Some wait ->
+              Watch
+                {
+                  key;
+                  (* Clamped here rather than trusted: what a client may make
+                     this end hold is this end's to decide. *)
+                  wait = Float.min wait Http_proxy.Watch.max_seconds;
+                  last_seen =
+                    Option.map Backend.Watch_token.of_wire
+                      (q Http_proxy.Watch.last_seen_param);
+                })
     | `HEAD, p when is_obj p -> (
         match obj_key () with Some k -> Head k | None -> Bad)
     | `PUT, p when is_obj p -> (
@@ -301,6 +400,8 @@ let parse_op meth uri body =
 
 (* [Head] is metadata only; [Copy] is settled by the backend without the bytes
    passing through here. *)
+(* [Watch] is [`Meta] though it reads an object: it holds for seconds by design,
+   and a slot it kept for that long is one a caller doing real work has lost. *)
 let data_kind = function
   | Get _ | Get_multi _ -> `Get
   | Put _ -> `Put
@@ -308,6 +409,7 @@ let data_kind = function
 
 let op_name = function
   | Get _ -> "get"
+  | Watch _ -> "watch"
   | Head _ -> "head"
   | Put _ -> "put"
   | Put_if_absent _ -> "putIfAbsent"
@@ -334,6 +436,7 @@ let op_keys = function
   | Copy (src, dst) -> List.map Stored_key.to_string [src; dst]
   | Get k | Head k | Put k | Put_if_absent k | Delete k ->
       [Stored_key.to_string k]
+  | Watch { key; _ } -> [Stored_key.to_string key]
   | List_all (p, _)
   | Share_url p
   | Chunk_size p
@@ -351,6 +454,7 @@ let within route name =
 let route_key = function
   | Get k | Head k | Put k | Put_if_absent k | Delete k ->
       Some (Stored_key.to_string k)
+  | Watch { key; _ } -> Some (Stored_key.to_string key)
   | Delete_multi (k :: _) | Get_multi (k :: _) -> Some (Stored_key.to_string k)
   | Delete_multi [] | Get_multi [] -> None
   | Copy (src, _) -> Some (Stored_key.to_string src)
@@ -361,6 +465,11 @@ let route_key = function
   | Verified p ->
       Some p
   | Bad | Unknown -> None
+
+(* An older peer answers a [?wait=] request at once, as the plain GET it reads
+   it as. This is how a client tells that apart from an answer it really did
+   wait for, and paces itself when it cannot. *)
+let watched = [(Http_proxy.Watch.answered_header, "1")]
 
 let respond ?(status = `OK) ?(headers = []) body =
   Cohttp_lwt_unix.Server.respond_string ~status
@@ -404,6 +513,31 @@ let exec route op ~body =
               Metrics.count read_bytes (Bigstring.length data);
               respond_chunk data
           | None -> respond ~status:`Not_found "")
+    | Watch { key; wait; last_seen } ->
+        let gate = gate_for key in
+        (* This end's own read first, closing the window between the client's
+           and the loop's: the token the loop holds may predate the client's,
+           and holding through a change that already happened is the one thing
+           this must not do. *)
+        let* token = read_token route.store key in
+        gate.token <- token;
+        let deadline = Unix.gettimeofday () +. wait in
+        let rec held () =
+          if differs gate.token last_seen then respond ~headers:watched ""
+          else (
+            let left = deadline -. Unix.gettimeofday () in
+            if left <= 0. then respond ~status:`No_content ~headers:watched ""
+            else
+              let* () =
+                Lwt.pick [Lwt_condition.wait gate.woken; Lwt_unix.sleep left]
+              in
+              held ())
+        in
+        gate.waiters <- gate.waiters + 1;
+        start_watching route.store key gate;
+        Lwt.finalize held (fun () ->
+            gate.waiters <- gate.waiters - 1;
+            Lwt.return_unit)
     | Head key -> (
         let module B = (val route.store : Backend_lwt.Store) in
         let* e = B.head_opt ~key () in

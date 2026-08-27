@@ -171,6 +171,20 @@
   (action
    (diff probe_deadline_test.expected probe_deadline_test.output))))
 
+(subdir backends/proxy_watch_client
+ (alias
+  (name default)
+  (deps proxy_watch_client.exe))
+ (rule
+  (alias runtest)
+  (target proxy_watch_client.output)
+  (action
+   (with-stdout-to proxy_watch_client.output (ignore-stderr (run ./proxy_watch_client.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff proxy_watch_client.expected proxy_watch_client.output))))
+
 (subdir backends/writes_in_flight
  (alias
   (name default)
@@ -400,6 +414,20 @@
   (alias runtest)
   (action
    (diff proxy_bound_test.expected proxy_bound_test.output))))
+
+(subdir frontends/proxy_watch
+ (alias
+  (name default)
+  (deps proxy_watch.exe))
+ (rule
+  (alias runtest)
+  (target proxy_watch.output)
+  (action
+   (with-stdout-to proxy_watch.output (ignore-stderr (run ./proxy_watch.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff proxy_watch.expected proxy_watch.output))))
 
 (subdir frontends/share_server
  (alias

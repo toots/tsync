@@ -353,10 +353,45 @@ struct
 
       let capabilities ~prefix () = capabilities t ~prefix ()
 
-      (* Nothing native to be told by, so this is the sleep a caller would
-         otherwise spell itself. *)
-      let watch ~key:_ ~last_seen:_ () =
-        Clock.sleep Backend.default_watch_interval
+      (* Asked of the peer rather than slept out here: it holds the request
+         until the object differs, so a change crosses the link when it happens
+         instead of on the next tick, and one peer watching its own store
+         answers every client waiting on it.
+
+         How long, and what to call the parameters, are {!Http_proxy.Watch}'s:
+         the peer reads what this writes. *)
+      let watch ~key ~last_seen () =
+        let uri =
+          Uri.add_query_param'
+            (obj_uri t (str key))
+            ( Http_proxy.Watch.wait_param,
+              Printf.sprintf "%g" Http_proxy.Watch.max_seconds )
+        in
+        let uri =
+          match last_seen with
+            | None -> uri
+            | Some token ->
+                Uri.add_query_param' uri
+                  ( Http_proxy.Watch.last_seen_param,
+                    Backend.Watch_token.to_wire token )
+        in
+        let* answered =
+          Io.catch
+            (fun () ->
+              let+ resp, (_ : Bigstring.t) =
+                call_retry t ~meth:`GET "watch" uri
+              in
+              Cohttp.Header.get
+                (Cohttp.Response.headers resp)
+                Http_proxy.Watch.answered_header)
+            (fun (_ : exn) -> Io.return None)
+        in
+        match answered with
+          | Some (_ : string) -> Io.return ()
+          (* A peer too old to know the parameter reads this as a plain get and
+             answers at once, and a failed request costs no time either. Without
+             a floor, both are a caller spinning. *)
+          | None -> Clock.sleep Backend.default_watch_interval
 
       (* The peer's files are the peer's, whatever it keeps them on. *)
       let local_path = None
