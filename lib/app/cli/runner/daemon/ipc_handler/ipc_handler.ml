@@ -266,19 +266,12 @@ module Make
                                    ~symlink:(Manifest.symlink m)))
                       | None -> not_found (Logical_key.to_string key))))
 
-  (* Bounds concurrent per-file manifest resolutions during enumeration. *)
-  let resolve_pool = Io_lwt.Bounded.create ~max:C.max_downloads ()
-
   (* Listed objects are manifests, so their backend size/mtime describe the
      manifest, not the file. Resolving gives the logical size/mtime and h1 as the
      etag — the identity stat returns. A dirty file has no clean hash: fall back
      to the backend metadata with an empty etag. *)
   let file_entry_json ~container_id (e : Checkout.listed) =
     let key = e.key in
-    (* The slot is taken for the resolution, not for deciding there is none to
-       do: the list is as long as the folder, and only the GETs need
-       bounding. *)
-    Io_lwt.Bounded.use resolve_pool @@ fun () ->
     let* naming = naming_fields ~container_id key in
     let+ m = F.published key in
     match m with
@@ -323,11 +316,8 @@ module Make
       | None -> not_found (Logical_key.to_string prefix)
       | Some container_id ->
           let* files, dirs = F.list_children ~prefix in
-          (* Uncached entries each cost a GET, so sequential resolution makes a
-             cold enumeration O(files) round trips. [resolve_pool] bounds the
-             fan-out; map_p preserves order. *)
           let* files_json =
-            Lwt_list.filter_map_p (file_entry_json ~container_id) files
+            Lwt_list.filter_map_s (file_entry_json ~container_id) files
           in
           let+ dirs_json =
             Lwt_list.map_s
