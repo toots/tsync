@@ -35,6 +35,16 @@ Requires:       %{name} = %{version}-%{release}
 Shows what each tsync domain is doing in the desktop notification area, with a
 menu listing the files in flight and a switch that pauses uploads.
 
+# Split off for the reason the tray is: this one links Qt and KDE Frameworks,
+# which a GNOME desktop installing the tray should not be made to carry.
+%package dolphin
+Summary:        Copy a tsync share link from Dolphin
+Requires:       %{name} = %{version}-%{release}
+
+%description dolphin
+Adds a Copy Share Link entry to the context menu of a file or folder inside a
+tsync mount, which publishes a public download URL and puts it on the clipboard.
+
 %install
 install -Dm755 %{srcdir}/_build/default/bin/tsync.exe %{buildroot}%{_bindir}/tsync
 strip %{buildroot}%{_bindir}/tsync
@@ -44,27 +54,33 @@ install -Dm644 %{srcdir}/linux/tsync@.service %{buildroot}%{_unitdir}/tsync@.ser
 install -d %{buildroot}%{_sysconfdir}/xdg/autostart
 sed 's|@BIN@|%{_bindir}/tsync-tray|' %{srcdir}/linux/tsync-tray.desktop.in \
   > %{buildroot}%{_sysconfdir}/xdg/autostart/tsync-tray.desktop
-# The .desktop names an icon and the tray asks for four more, so the package
-# that ships them is the package that has to ship the icons. The suffix and the
-# symbolic/ directory are a pair: together they are what makes GTK recolour to
-# the panel foreground. Qt ignores both and recolours by the stylesheet the
-# SVGs carry instead.
+# The application icon goes to the base package: both desktop packages want it
+# and a file has one owner. The four tray states are the tray's alone, and their
+# suffix and the symbolic/ directory are a pair -- together they are what makes
+# GTK recolour to the panel foreground. Qt ignores both and recolours by the
+# stylesheet the SVGs carry instead.
 install -Dm644 %{srcdir}/assets/tsync-app.svg \
   %{buildroot}%{_datadir}/icons/hicolor/scalable/apps/tsync.svg
 for state in idle sync paused error; do
   install -Dm644 %{srcdir}/assets/tray/tsync-$state-symbolic.svg \
     %{buildroot}%{_datadir}/icons/hicolor/symbolic/apps/tsync-$state-symbolic.svg
 done
+install -Dm755 %{srcdir}/linux/dolphin/build/tsyncdolphin.so \
+  %{buildroot}%{_libdir}/qt6/plugins/kf6/kfileitemaction/tsyncdolphin.so
+strip %{buildroot}%{_libdir}/qt6/plugins/kf6/kfileitemaction/tsyncdolphin.so
 
 %files
 %{_bindir}/tsync
 %{_unitdir}/tsync@.service
+%{_datadir}/icons/hicolor/scalable/apps/tsync.svg
 
 %files tray
 %{_bindir}/tsync-tray
 %{_sysconfdir}/xdg/autostart/tsync-tray.desktop
-%{_datadir}/icons/hicolor/scalable/apps/tsync.svg
 %{_datadir}/icons/hicolor/symbolic/apps/tsync-*-symbolic.svg
+
+%files dolphin
+%{_libdir}/qt6/plugins/kf6/kfileitemaction/tsyncdolphin.so
 
 # The unit is a template with no default instance, so these only refresh
 # already-enabled tsync@<user> instances across an upgrade.

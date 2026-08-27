@@ -67,6 +67,11 @@ root=$(mktemp -d)
 install -Dm755 _build/default/bin/tsync.exe "$root/usr/bin/tsync"
 strip "$root/usr/bin/tsync"
 install -Dm644 'linux/tsync@.service' "$root/usr/lib/systemd/system/tsync@.service"
+# The application icon, here rather than with the tray because both desktop
+# packages want it and dpkg gives a file one owner. Costs a headless install
+# 4K and no dependency: every theme inherits hicolor.
+install -Dm644 assets/tsync-app.svg \
+  "$root/usr/share/icons/hicolor/scalable/apps/tsync.svg"
 deps=$(shlibdeps tsync "$root/usr/bin/tsync")
 test -n "$deps"
 emit tsync "$root" "$deps, fuse3" 'Cloud-backed filesystem sync tool
@@ -83,13 +88,10 @@ mkdir -p "$tray/etc/xdg/autostart"
 sed 's|@BIN@|/usr/bin/tsync-tray|' linux/tsync-tray.desktop.in \
   > "$tray/etc/xdg/autostart/tsync-tray.desktop"
 chmod 644 "$tray/etc/xdg/autostart/tsync-tray.desktop"
-# The .desktop names an icon and the tray asks for four more, so the package
-# that ships them is the package that has to ship the icons. The suffix and the
+# The four tray states, which nothing else asks for. The suffix and the
 # symbolic/ directory are a pair: together they are what makes GTK recolour to
 # the panel foreground. Qt ignores both and recolours by the stylesheet the
 # SVGs carry instead.
-install -Dm644 assets/tsync-app.svg \
-  "$tray/usr/share/icons/hicolor/scalable/apps/tsync.svg"
 for state in idle sync paused error; do
     install -Dm644 "assets/tray/tsync-$state-symbolic.svg" \
       "$tray/usr/share/icons/hicolor/symbolic/apps/tsync-$state-symbolic.svg"
@@ -99,5 +101,21 @@ test -n "$tray_deps"
 emit tsync-tray "$tray" "$tray_deps, tsync (= $version)" 'Sync status in the system tray
  Shows what each tsync domain is doing in the desktop notification area,
  with a menu listing the files in flight and a switch that pauses uploads.'
+
+# The Dolphin plugin. Its own package for the reason the tray is one: it links
+# Qt and KDE Frameworks, and a GNOME desktop installing the tray should get
+# neither.
+plugin=$(mktemp -d)
+so=linux/dolphin/build/tsyncdolphin.so
+test -f "$so"
+plugin_dir="usr/lib/$(dpkg-architecture -qDEB_HOST_MULTIARCH)/qt6/plugins/kf6/kfileitemaction"
+install -Dm644 "$so" "$plugin/$plugin_dir/tsyncdolphin.so"
+plugin_deps=$(shlibdeps tsync-dolphin "$plugin/$plugin_dir/tsyncdolphin.so")
+test -n "$plugin_deps"
+emit tsync-dolphin "$plugin" "$plugin_deps, tsync (= $version)" \
+  'Copy a tsync share link from Dolphin
+ Adds a Copy Share Link entry to the context menu of a file or folder
+ inside a tsync mount, which publishes a public download URL and puts it
+ on the clipboard.'
 
 rm -rf "$stub"

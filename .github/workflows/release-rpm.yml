@@ -48,7 +48,8 @@ jobs:
             opam gcc gcc-c++ make m4 pkgconf-pkg-config git curl unzip rsync \
             rpm-build systemd-rpm-macros gh \
             fuse3-devel fuse3 xxhash-devel libev-devel openssl-devel gmp-devel \
-            pcre2-devel dbus-devel
+            pcre2-devel dbus-devel \
+            cmake extra-cmake-modules qt6-qtbase-devel kf6-kio-devel
 
       - uses: actions/checkout@v4
         with:
@@ -73,6 +74,10 @@ jobs:
             test "$(ldd "$(command -v $b)" | grep -c 'not found')" = 0
           done
           rpm -qpR dist/tsync-tray_*.rpm | grep -q libdbus-1
+          rpm -qpR dist/tsync-dolphin_*.rpm | grep -q libKF6
+          ! rpm -qpR dist/tsync-tray_*.rpm | grep -q libKF6
+          test "$(ldd /usr/lib*/qt6/plugins/kf6/kfileitemaction/tsyncdolphin.so \
+            | grep -c 'not found')" = 0
           ! rpm -qpR dist/tsync_*.rpm | grep -q libdbus-1
 
       - uses: actions/upload-artifact@v4

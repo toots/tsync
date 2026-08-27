@@ -47,3 +47,11 @@ done
 opam install --deps-only tsync tsync-tls tsync-ssl tsync-s3 tsync-fuse tsync-tray
 
 opam exec -- dune build --profile release bin/tsync.exe linux/tray/main.exe
+
+# The Dolphin plugin, which cmake builds against Qt and KDE Frameworks. Not
+# conditional on those being installed: a plugin quietly skipped leaves a
+# package built around a file that is not there, and the caller installing the
+# system libraries first is what this script already asks for.
+cmake -S linux/dolphin -B linux/dolphin/build -DCMAKE_BUILD_TYPE=Release
+cmake --build linux/dolphin/build --parallel
+ctest --test-dir linux/dolphin/build --output-on-failure
