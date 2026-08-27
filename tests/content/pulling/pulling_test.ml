@@ -58,6 +58,7 @@ end
 module Lk = Logical_key.Make (C)
 module R = Remote_lwt.Make (C)
 module D = Data_lwt.Make (C) (R)
+module Mirror = Manifests_lwt.Make (C)
 
 let write_file path contents =
   let oc = open_out_bin path in
@@ -77,9 +78,10 @@ let publish ~salt name =
   let key = Lk.file @@ name in
   let src = Filename.concat root name in
   write_file src (distinct ~salt size);
-  let* (_ : Manifest.t) =
-    R.upload ~key ~src_path:src ~mtime:0. ~chunk_size ()
-  in
+  let* m = R.upload ~key ~src_path:src ~mtime:0. ~chunk_size () in
+  (* What publishing does beyond the upload: a key only the store knows is a key
+     the domain does not have. *)
+  let* () = Mirror.write key m in
   let+ () = D.forget_chunks key in
   key
 

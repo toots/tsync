@@ -85,14 +85,6 @@ module type MIRROR = sig
   end
 end
 
-module type JOURNAL = sig
-  type 'a io
-
-  module Make (_ : Conf.S with type 'a io = 'a io) : sig
-    val read_last_sync_key : unit -> Journal.Entry_key.t option
-  end
-end
-
 (* What this needs of the store above it. *)
 module type REMOTE = sig
   type 'a io
@@ -121,11 +113,6 @@ module type REMOTE = sig
     Manifest.t io
 
   val fetch_manifest : key:Logical_key.t -> unit -> Manifest.t option io
-
-  val fetch_manifest_state :
-    key:Logical_key.t ->
-    unit ->
-    [ `Found of Manifest.t | `Absent | `Unresolved | `Unreadable ] io
 end
 
 module Over
@@ -134,8 +121,7 @@ module Over
     (Retry : SYSCALLS with type 'a io := 'a Io.t and type fd = Fs.fd)
     (Lock : LOCKS with type 'a io := 'a Io.t)
     (Bounded : POOLS with type 'a io := 'a Io.t)
-    (Mf : MIRROR with type 'a io := 'a Io.t)
-    (Js : JOURNAL with type 'a io = 'a Io.t) =
+    (Mf : MIRROR with type 'a io := 'a Io.t) =
 struct
   let ( let* ) = Io.bind
   let ( let+ ) x f = Io.map f x
@@ -155,27 +141,6 @@ struct
   let readahead_bytes = 4 * 1024 * 1024
   let max_readahead_groups = 8
 
-  (* Keys the backend has already said it does not hold. A name probed but never
-     present — a shell looking for [.git] in every parent directory, once per
-     prompt — otherwise costs a round trip every time, a miss being the one answer
-     that leaves nothing behind to find.
-
-     Kept per domain rather than per functor application, so a frontend and an
-     engine in one process answer the same probe once between them. *)
-  let max_absent = 4096
-
-  type absences = { mutable mark : string; keys : (string, unit) Hashtbl.t }
-
-  let absences : (string, absences) Hashtbl.t = Hashtbl.create 4
-
-  let absences_for prefix =
-    match Hashtbl.find_opt absences prefix with
-      | Some a -> a
-      | None ->
-          let a = { mark = ""; keys = Hashtbl.create 64 } in
-          Hashtbl.replace absences prefix a;
-          a
-
   module Make
       (C : Conf.S with type 'a io = 'a Io.t)
       (R : REMOTE with type 'a io := 'a Io.t) =
@@ -186,7 +151,6 @@ struct
     module Mf = Mf.Make (C)
     module Staged = Staged_manifest.Over (Io) (Fs) (Retry)
     module Mfs = Staged.Make (C)
-    module Js = Js.Make (C)
 
     (* Advisory: a lost or stale entry costs at most one un-prefetched read. *)
     let last_read_end : (string, int) Hashtbl.t = Hashtbl.create 64
@@ -499,55 +463,10 @@ struct
         in
         go start 0)
 
-    (* A key reaches the backend only by being published, this client learns that
-       by applying the journal, and applying it moves the mark: an absence taken
-       under one is good until it moves.
-
-       Checked on the way in and on the way out rather than cleared by whoever
-       changes the mirror, since a cache that stands on its own ground has no
-       invalidation for a caller to forget. *)
-    let applied_mark () =
-      match Js.read_last_sync_key () with
-        | Some k -> Journal.Entry_key.to_string k
-        | None -> ""
-
-    let live_absences () =
-      let mark = applied_mark () in
-      let a = absences_for C.domain_prefix in
-      if mark <> a.mark then begin
-        Hashtbl.reset a.keys;
-        a.mark <- mark
-      end;
-      a.keys
-
-    (* ponytail: one GET per uncached file; add a metadata cache if a cold
-       full-directory enumeration gets slow. *)
-    let published key =
-      let* m = Mf.published key in
-      match m with
-        | Some _ -> Io.return m
-        | None when Hashtbl.mem (live_absences ()) (Logical_key.to_string key)
-          ->
-            Io.return None
-        | None -> (
-            (* Read before the fetch: an entry applied while it was in flight
-               would otherwise be recorded under the mark that apply moved to, and
-               so survive the very thing that invalidates it. *)
-            let before = applied_mark () in
-            let+ state = R.fetch_manifest_state ~key () in
-            (* Only the store's own answer is remembered. Not knowing the key's
-               folder yet, and a body caught mid-write, are facts about this
-               client that change with nothing about the domain changing — and
-               nothing that fixes either of them moves the mark. *)
-            (match state with
-              | `Absent when before = applied_mark () ->
-                  let keys = live_absences () in
-                  (* Reset past the cap rather than evicted one at a time,
-                     overflowing costing only the round trips again. *)
-                  if Hashtbl.length keys >= max_absent then Hashtbl.reset keys;
-                  Hashtbl.replace keys (Logical_key.to_string key) ()
-              | `Found _ | `Absent | `Unresolved | `Unreadable -> ());
-            match state with `Found m -> Some m | _ -> None)
+    (* The mirror is the whole answer: a key reaches it by the poller replaying
+       what a peer published, so a name it does not hold is a name the domain
+       does not have as of the journal this client has applied. *)
+    let published key = Mf.published key
 
     (* A promotion can retire the staged bodies between resolving the key and
        reading them, so a miss is resolved again and read once more. The retry
@@ -563,14 +482,7 @@ struct
                 ~staged ~base buf ~offset
           | Some (`Published m) ->
               pread ~id:(Logical_key.to_string key) ~manifest:m buf ~offset
-          | None -> (
-              let* state = R.fetch_manifest ~key () in
-              match state with
-                | Some m ->
-                    pread
-                      ~id:(Logical_key.to_string key)
-                      ~manifest:m buf ~offset
-                | None -> Io.return 0)
+          | None -> Io.return 0
       in
       Io.catch attempt (function
         | Unix.Unix_error (Unix.ENOENT, _, _) -> attempt ()
