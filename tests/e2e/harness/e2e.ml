@@ -537,6 +537,27 @@ let run ~env ~mount ~store ~client ~extra =
             if body <> "shareable content" then failf "the URL served %S" body
         | _ -> failf "no URL in the response");
 
+  (* The form a file manager sends: it holds a path, and stripping the mount the
+     daemon just reported leaves exactly this. *)
+  check "sharing by relative path yields a URL that serves it" (fun () ->
+      let name = "shared-rel-" ^ tag ^ ".txt" in
+      write_file (path name) "shareable by path";
+      ignore
+        (until ~what:(name ^ " to appear") (fun () -> item_named client name));
+      let response =
+        ipc client [("action", `String "share"); ("rel", `String name)]
+      in
+      match member "url" response with
+        | `String url ->
+            let out = Filename.temp_file "tsync-share-rel" ".txt" in
+            sh "curl -sf %s -o %s"
+              (Filename.quote (url ^ "/download"))
+              (Filename.quote out);
+            let body = read_file out in
+            Sys.remove out;
+            if body <> "shareable by path" then failf "the URL served %S" body
+        | _ -> failf "no URL in the response");
+
   (* Waited for, not sampled: the second client builds its mirror by replaying
      the journal, so comparing straight away races its catch-up. *)
   check "the mount and the store agree on what exists" (fun () ->
