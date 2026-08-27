@@ -49,6 +49,16 @@ install-system:
 	# again -- an install whose icons only appear after the next login.
 	-gdbus emit --session --object-path /KIconLoader \
 	  --signal org.kde.KIconLoader.iconChanged 0 2>/dev/null
+	# The Dolphin plugin. Qt only looks for plugins under its own prefix, never
+	# under ~/.local, so this one is system-wide and the prefix has to be named:
+	# cmake's default of /usr/local installs to a directory nothing searches,
+	# which looks like success and loads nothing.
+	cmake -S dolphin -B dolphin/build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr
+	cmake --build dolphin/build --parallel
+	ctest --test-dir dolphin/build --output-on-failure
+	sudo cmake --install dolphin/build
+	test -f /usr/lib64/qt6/plugins/kf6/kfileitemaction/tsyncdolphin.so \
+	  || test -f /usr/lib/qt6/plugins/kf6/kfileitemaction/tsyncdolphin.so
 	mkdir -p ~/.config/systemd/user
 	cp tsync.service ~/.config/systemd/user/
 	systemctl --user daemon-reload
@@ -73,6 +83,8 @@ uninstall:
 	rm -f ~/.config/autostart/tsync-tray.desktop
 	rm -f ~/.local/share/icons/hicolor/scalable/apps/tsync.svg
 	rm -f ~/.local/share/icons/hicolor/symbolic/apps/tsync-*-symbolic.svg
+	-sudo rm -f /usr/lib64/qt6/plugins/kf6/kfileitemaction/tsyncdolphin.so \
+	  /usr/lib/qt6/plugins/kf6/kfileitemaction/tsyncdolphin.so
 	-gtk-update-icon-cache -f -t ~/.local/share/icons/hicolor 2>/dev/null
 	-opam remove -y tsync tsync-tls tsync-ssl tsync-s3 tsync-fuse tsync-tray
 

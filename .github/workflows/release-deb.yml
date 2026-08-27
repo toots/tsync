@@ -57,7 +57,8 @@ jobs:
             opam build-essential dpkg-dev m4 pkg-config git curl \
             ca-certificates unzip rsync gh \
             libfuse3-dev fuse3 libxxhash-dev libev-dev libssl-dev libgmp-dev \
-            libpcre2-dev libdbus-1-dev
+            libpcre2-dev libdbus-1-dev \
+            cmake extra-cmake-modules qt6-base-dev libkf6kio-dev
 
       - uses: actions/checkout@v4
         with:
@@ -83,6 +84,10 @@ jobs:
           done
           dpkg-deb -f dist/tsync-tray_*.deb Depends | grep -q libdbus-1
           ! dpkg-deb -f dist/tsync_*.deb Depends | grep -q libdbus-1
+          dpkg-deb -f dist/tsync-dolphin_*.deb Depends | grep -qi kf6
+          ! dpkg-deb -f dist/tsync-tray_*.deb Depends | grep -qi kf6
+          test "$(ldd /usr/lib/*/qt6/plugins/kf6/kfileitemaction/tsyncdolphin.so \
+            | grep -c 'not found')" = 0
 
       - uses: actions/upload-artifact@v4
         with:
