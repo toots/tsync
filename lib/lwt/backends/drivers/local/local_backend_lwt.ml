@@ -10,6 +10,7 @@ include
     (Bigstring_lwt)
     (Wall)
     (Io_lwt.Clock)
+    (Watch_lwt)
 
 let () =
   Backend_lwt.register ~spec "local" (fun get ->

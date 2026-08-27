@@ -1,0 +1,15 @@
+
+=== a directory that is not there is not a failure
+no watcher for a path that does not exist: ok
+
+=== a watcher wakes on a rename into the directory
+the wait returned as soon as the rename landed: ok
+
+=== the store's own wait returns at once when the object is written
+woken by the write rather than by the cap: ok
+
+=== a watcher that has been drained goes quiet again
+the wait blocks rather than returning to a stale event: ok
+
+=== and returns at the cap when nothing happens
+a directory nothing writes to still returns: ok

@@ -43,6 +43,17 @@ module type WALL_CLOCK = sig
   val now : unit -> float
 end
 
+(** Being told a directory changed. [None] from [open_dir] is a directory this
+    platform or filesystem will not watch, which is not a failure: the caller
+    goes back to asking on a timer. *)
+module type WATCHER = sig
+  type 'a io
+  type t
+
+  val open_dir : string -> t option
+  val wait : t -> unit io
+end
+
 (** Writing a buffer straight to a path, which the bigstring layer owns. *)
 module type BYTES = sig
   type 'a io
@@ -57,7 +68,8 @@ module Over
     (_ : POOLS with type 'a io := 'a Io.t)
     (_ : BYTES with type 'a io := 'a Io.t)
     (_ : WALL_CLOCK)
-    (_ : Clock.S with type 'a io := 'a Io.t) : sig
+    (_ : Clock.S with type 'a io := 'a Io.t)
+    (_ : WATCHER with type 'a io := 'a Io.t) : sig
   module type Store = Backend.S with type 'a io := 'a Io.t
 
   (** The fields a configured store is described by, for the registry. *)

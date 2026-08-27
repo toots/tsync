@@ -29,18 +29,19 @@
   (names macos_clone_stubs))
  (libraries unix tsync-libs.filename tsync_io))
 
-; [descriptors] is not per-OS: getrlimit/setrlimit are POSIX and identical on
-; both targets, and the per-process ceiling is discovered by asking rather than
-; looked up per platform. It lives here because it is the same kind of fact as
-; [device] — a limit the platform imposes, discovered at runtime.
+; [descriptors] and [watch] are not per-OS in the way [device] is: both are one
+; C file with the platform branch inside it, because what differs is which
+; syscalls name the idea rather than the idea. They live here because they are
+; the same kind of fact as [device] — something the platform imposes or offers,
+; discovered at runtime by asking rather than looked up per target.
 
 (library
  (name tsync_device)
  (public_name tsync-libs.device)
- (modules device descriptors)
+ (modules device descriptors watch)
  (foreign_stubs
   (language c)
-  (names descriptors_stubs))
+  (names descriptors_stubs watch_stubs))
  (libraries
   unix
   tsync_filename
