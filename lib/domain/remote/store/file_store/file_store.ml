@@ -193,6 +193,17 @@ struct
       Option.bind body (fun b ->
           Ek.of_string (String.trim (Bigstring.to_string b)))
 
+    (* The token is the body {!publish_cursor} writes, spelled the same way here:
+       what a caller holds is the key, and what a store compares is the object. *)
+    let wait_cursor_change last_seen =
+      let last_seen =
+        Option.map
+          (fun ek ->
+            Backend.Watch_token.of_body (Bigstring.of_string (Ek.to_string ek)))
+          last_seen
+      in
+      B.watch ~key:C.cursor_key ~last_seen ()
+
     let list_journal_keys ?start_after () =
       let+ all = B.list_prefix ~prefix:C.journal_prefix () in
       List.filter_map

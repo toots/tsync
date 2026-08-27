@@ -79,6 +79,7 @@ module Memory () : Backend_lwt.Store = struct
            else acc)
          objects [])
 
+  let watch ~key:_ ~last_seen:_ () = Lwt.return_unit
   let verify_all ~chunk_prefix:_ () = Lwt.return `Unsupported
 
   let discard ~chunk_prefix:_ ~run:_ ~name:_ ~keys:_ () =

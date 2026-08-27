@@ -13,14 +13,15 @@ module Post = struct
     (Cohttp.Code.code_of_status (Cohttp.Response.status resp), s)
 end
 
-module Clock = struct
+module Wall = struct
   let now = Unix.gettimeofday
 end
 
 include
   Gcs_backend.Over (Io_lwt.Core) (Http_client_lwt) (Post) (Io_lwt.Lock)
     (Io_lwt.Bounded)
-    (Clock)
+    (Wall)
+    (Io_lwt.Clock)
 
 let () =
   let req get key =

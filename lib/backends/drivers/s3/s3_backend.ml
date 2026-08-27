@@ -5,7 +5,8 @@ module Over
     (Io : Io.S)
     (S3io : Aws_s3.Types.Io with type 'a Deferred.t = 'a Io.t)
     (Loop : Retry.LOOP with type 'a io := 'a Io.t)
-    (Bounded : Verifier.POOLS with type 'a io := 'a Io.t) =
+    (Bounded : Verifier.POOLS with type 'a io := 'a Io.t)
+    (Clock : Clock.S with type 'a io := 'a Io.t) =
 struct
   module Verify = Verifier.Over (Io) (Bounded)
   module S3 = Aws_s3.S3.Make (S3io)
@@ -308,6 +309,11 @@ struct
       let capabilities ~prefix:_ () =
         Io.return
           { Backend.no_caps with share_url = t.share_url; verified = true }
+
+      (* Nothing native to be told by, so this is the sleep a caller would
+         otherwise spell itself. *)
+      let watch ~key:_ ~last_seen:_ () =
+        Clock.sleep Backend.default_watch_interval
 
       let local_path = None
     end)

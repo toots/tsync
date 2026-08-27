@@ -1,11 +1,14 @@
-(* The timer, not the algorithm: applying foreign entries is {!Replay}, which
-   [tsync sync] calls too. This only decides when to look. *)
+(* When to look, not what to do about it: applying foreign entries is
+   {!Replay}, which [tsync sync] calls too. Even the when is mostly the store's,
+   which says how long a wait for its cursor is worth. *)
+
 (* What this needs below it. *)
 module type JOURNAL = sig
   type 'a io
 
   module Make (_ : Conf.S with type 'a io = 'a io) : sig
     val fetch_cursor : unit -> Journal.Entry_key.t option io
+    val wait_cursor_change : Journal.Entry_key.t option -> unit io
   end
 end
 
@@ -69,18 +72,22 @@ struct
             last_version := Some v;
             Io.return n
 
+    (* Only ever reached by a failure. The wait is what paces this loop, so
+       something that fails without taking any time would otherwise spin. *)
+    let retry_floor = 2.
+
     let start ~on_changed () =
       Io.async (fun () ->
+          let step () =
+            let* () = Js.wait_cursor_change !last_version in
+            let+ (_ : int) = sync_once ~on_changed () in
+            ()
+          in
           let rec loop () =
-            let* () = Clock.sleep 2.0 in
             let* () =
-              Io.catch
-                (fun () ->
-                  let+ (_ : int) = sync_once ~on_changed () in
-                  ())
-                (fun exn ->
+              Io.catch step (fun exn ->
                   Log.err "sync_poller: %s" (Printexc.to_string exn);
-                  return_unit)
+                  Clock.sleep retry_floor)
             in
             loop ()
           in

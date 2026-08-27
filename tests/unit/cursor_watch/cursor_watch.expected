@@ -1,0 +1,25 @@
+
+=== an idle client reads nothing until the store says to
+the first wait is entered before any cursor read: ok
+and it offers nothing, never having read one: ok
+
+=== a wake on a moved cursor reads it and applies what it points past
+  cursor reads: 1, journal listings: 1
+the cursor was read once: ok
+and the journal listed once: ok
+the token now offered is what that pass finished with: ok
+
+=== a wake on an unmoved cursor costs the read and nothing more
+  cursor reads: 1, journal listings: 0
+the cursor was read again: ok
+but the journal was not listed: ok
+and the token is unchanged: ok
+
+=== a pass that dies keeps offering the token it last finished with
+  offered after the failed pass: 0000000000100-peer
+the moved cursor is not offered: ok
+the token is the one from the last clean pass: ok
+
+=== and it advances again once a pass completes
+the token has caught up with the cursor: ok
+a token off a body compares equal to one off the wire: ok

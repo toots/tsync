@@ -39,7 +39,7 @@ module type POOLS = sig
   val each : width:int -> (unit -> (unit -> unit io) option) -> unit io
 end
 
-module type CLOCK = sig
+module type WALL_CLOCK = sig
   val now : unit -> float
 end
 
@@ -56,7 +56,8 @@ module Over
     (_ : SYSCALLS with type 'a io := 'a Io.t)
     (_ : POOLS with type 'a io := 'a Io.t)
     (_ : BYTES with type 'a io := 'a Io.t)
-    (_ : CLOCK) : sig
+    (_ : WALL_CLOCK)
+    (_ : Clock.S with type 'a io := 'a Io.t) : sig
   module type Store = Backend.S with type 'a io := 'a Io.t
 
   (** The fields a configured store is described by, for the registry. *)

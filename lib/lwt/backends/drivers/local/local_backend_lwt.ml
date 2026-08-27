@@ -1,14 +1,15 @@
 (* The store on this machine's filesystem, and the registration that makes it
    reachable by name. The registry is the instance's, so this is where a driver
    announces itself. *)
-module Clock = struct
+module Wall = struct
   let now = Unix.gettimeofday
 end
 
 include
   Local_backend.Over (Io_lwt.Core) (Io_lwt.Fs) (Io_lwt.Retry) (Io_lwt.Bounded)
     (Bigstring_lwt)
-    (Clock)
+    (Wall)
+    (Io_lwt.Clock)
 
 let () =
   Backend_lwt.register ~spec "local" (fun get ->

@@ -28,6 +28,7 @@ module Base = struct
   let delete_multi _ = unsupported ()
   let copy ~src_key:_ ~dst_key:_ () = unsupported ()
   let list_prefix ?max_keys:_ ~prefix:_ () = unsupported ()
+  let watch ~key:_ ~last_seen:_ () = Lwt.return_unit
   let verify_all ~chunk_prefix:_ () = Lwt.return `Unsupported
 
   let discard ~chunk_prefix:_ ~run:_ ~name:_ ~keys:_ () =
