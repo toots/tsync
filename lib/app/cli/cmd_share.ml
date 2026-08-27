@@ -59,30 +59,28 @@ let cmd : unit Cmd.t =
           exit 1
       | _ -> ());
     let cfg = load_config () in
-    let domain =
-      match domain with Some _ -> domain | None -> read_default_domain ()
-    in
     let ttl = parse_duration expires in
-    let (module C : Conf_lwt.S) = make_conf ?domain cfg in
-    let expires = int_of_float (Unix.time () +. ttl) in
-    (* Resolve PATH to a domain-relative path; accept an absolute path under the
-       mount point too. Empty rel means the whole domain. *)
-    let mount_point = mount_point_of (Conf_parsing.pick_domain ?domain cfg) in
-    let rel =
-      let mp = mount_point ^ "/" in
-      if
-        String.length path >= String.length mp
-        && String.sub path 0 (String.length mp) = mp
-      then
-        String.sub path (String.length mp)
-          (String.length path - String.length mp)
-      else path
+    (* An absolute path names its own domain, which need not be the default one,
+       while a relative one is already the domain-relative path the share core
+       wants. Either way an empty one means the whole domain. *)
+    let domain, rel =
+      if Filename.is_relative path then
+        ( (match domain with Some _ -> domain | None -> read_default_domain ()),
+          path )
+      else (
+        match Daemons.domain_for_path ?domain ~paths:runtime_paths cfg path with
+          | Some (d, rel) -> (Some d.Conf_parsing.name, rel)
+          | None ->
+              Printf.eprintf "%s: under no domain this machine serves\n" path;
+              exit 1)
     in
     let rel =
       if rel <> "" && rel.[String.length rel - 1] = '/' then
         String.sub rel 0 (String.length rel - 1)
       else rel
     in
+    let (module C : Conf_lwt.S) = make_conf ?domain cfg in
+    let expires = int_of_float (Unix.time () +. ttl) in
     let module S = Share_lwt.Make (C) in
     match run_lwt (S.create ?token ~expires ~rel ()) with
       | Error msg ->
