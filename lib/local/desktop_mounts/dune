@@ -1,0 +1,13 @@
+; Linux only: it reads the mount table by that name, and the extensions asking
+; are the ones a Linux desktop loads. Per-OS on the model of lib/local/device,
+; without the (select ...) -- no other platform has an implementation to choose.
+
+(library
+ ; Private, like tsync_runtime below it: nothing outside this tree links it,
+ ; and a public library cannot depend on a private one.
+ (name tsync_desktop_mounts)
+ (enabled_if
+  (= %{system} linux))
+ (flags
+  (:standard -open Tsync_conf_parsing -open Tsync_runtime))
+ (libraries tsync-libs.conf_parsing tsync_runtime))

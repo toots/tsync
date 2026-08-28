@@ -1,0 +1,7 @@
+(test
+ (flags
+  (:standard -open Tsync_runtime -open Tsync_desktop_mounts))
+ (name desktop_mounts_test)
+ (enabled_if
+  (= %{system} linux))
+ (libraries tsync_desktop_mounts tsync_runtime unix))
