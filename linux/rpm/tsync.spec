@@ -65,14 +65,15 @@ for state in idle sync paused error; do
   install -Dm644 %{srcdir}/assets/tray/tsync-$state-symbolic.svg \
     %{buildroot}%{_datadir}/icons/hicolor/symbolic/apps/tsync-$state-symbolic.svg
 done
-install -Dm755 %{srcdir}/linux/dolphin/build/tsyncdolphin.so \
-  %{buildroot}%{_libdir}/qt6/plugins/kf6/kfileitemaction/tsyncdolphin.so
+# Installed by cmake rather than copied out of its build directory: a plugin
+# copied from there keeps the rpath it was built with, which names a path on the
+# build machine. Only the install step rewrites that to where the mount rules
+# actually land. The two components ship in different packages.
+DESTDIR=%{buildroot} cmake --install %{srcdir}/linux/dolphin/build \
+  --component plugin
+DESTDIR=%{buildroot} cmake --install %{srcdir}/linux/dolphin/build \
+  --component rules
 strip %{buildroot}%{_libdir}/qt6/plugins/kf6/kfileitemaction/tsyncdolphin.so
-# The mount rules, as an object the file-manager extensions call. In the base
-# package because it is tsync's answer, and a second extension should link the
-# same object rather than restate it.
-install -Dm755 %{srcdir}/_build/default/linux/dolphin/ml/libtsync_mounts.so \
-  %{buildroot}%{_libdir}/tsync/libtsync_mounts.so
 strip %{buildroot}%{_libdir}/tsync/libtsync_mounts.so
 
 %files

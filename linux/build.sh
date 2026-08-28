@@ -55,7 +55,11 @@ opam exec -- dune build --profile release bin/tsync.exe linux/tray/main.exe \
 # system libraries first is what this script already asks for. The mount rules
 # come from the object dune just built, named rather than guessed at.
 ml=$PWD/_build/default/linux/dolphin/ml
+# The prefix has to be named: the packages install through cmake so the rpath is
+# rewritten, and cmake's default of /usr/local would rewrite it to a directory
+# nothing searches.
 cmake -S linux/dolphin -B linux/dolphin/build -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_INSTALL_PREFIX=/usr \
   -DTSYNC_ML_SO="$ml/libtsync_mounts.so" \
   -DTSYNC_FAKE_ML_SO="$ml/libtsync_mounts_fake.so"
 cmake --build linux/dolphin/build --parallel

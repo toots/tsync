@@ -74,9 +74,9 @@ install -Dm644 assets/tsync-app.svg \
   "$root/usr/share/icons/hicolor/scalable/apps/tsync.svg"
 # The mount rules, as an object the file-manager extensions call. Here rather
 # than with tsync-dolphin because it is tsync's answer, and a second extension
-# should link the same object rather than restate it.
-install -Dm644 _build/default/linux/dolphin/ml/libtsync_mounts.so \
-  "$root/usr/lib/$(dpkg-architecture -qDEB_HOST_MULTIARCH)/tsync/libtsync_mounts.so"
+# should link the same object rather than restate it. Installed by cmake, which
+# is what puts it where the plugin's rpath looks.
+DESTDIR=$root cmake --install linux/dolphin/build --component rules
 deps=$(shlibdeps tsync "$root/usr/bin/tsync")
 test -n "$deps"
 emit tsync "$root" "$deps, fuse3" 'Cloud-backed filesystem sync tool
@@ -110,12 +110,14 @@ emit tsync-tray "$tray" "$tray_deps, tsync (= $version)" 'Sync status in the sys
 # The Dolphin plugin. Its own package for the reason the tray is one: it links
 # Qt and KDE Frameworks, and a GNOME desktop installing the tray should get
 # neither.
+# Installed rather than copied out of the build directory: a plugin copied from
+# there keeps the rpath it was built with, which names a path on the build
+# machine. Only the install step rewrites it to where the rules land.
 plugin=$(mktemp -d)
-so=linux/dolphin/build/tsyncdolphin.so
-test -f "$so"
-plugin_dir="usr/lib/$(dpkg-architecture -qDEB_HOST_MULTIARCH)/qt6/plugins/kf6/kfileitemaction"
-install -Dm644 "$so" "$plugin/$plugin_dir/tsyncdolphin.so"
-plugin_deps=$(shlibdeps tsync-dolphin "$plugin/$plugin_dir/tsyncdolphin.so")
+DESTDIR=$plugin cmake --install linux/dolphin/build --component plugin
+so=$(find "$plugin" -name tsyncdolphin.so)
+test -n "$so"
+plugin_deps=$(shlibdeps tsync-dolphin "$so")
 test -n "$plugin_deps"
 emit tsync-dolphin "$plugin" "$plugin_deps, tsync (= $version)" \
   'Copy a tsync share link from Dolphin

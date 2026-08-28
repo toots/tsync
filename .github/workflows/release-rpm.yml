@@ -83,6 +83,11 @@ jobs:
             | grep -c 'not found')" = 0
           ldd /usr/lib*/qt6/plugins/kf6/kfileitemaction/tsyncdolphin.so \
             | grep -q libtsync_mounts.so
+          # ldd alone cannot catch a leaked build path here: this is the machine
+          # that built it, so the build tree still exists and the bogus entry
+          # resolves. What ships would not.
+          ! objdump -p /usr/lib*/qt6/plugins/kf6/kfileitemaction/tsyncdolphin.so \
+            | grep -E 'RPATH|RUNPATH' | grep -q _build
           rpm -ql tsync | grep -q libtsync_mounts.so
           ! rpm -ql tsync-dolphin | grep -q libtsync_mounts.so
           ! rpm -qpR dist/tsync_*.rpm | grep -q libdbus-1

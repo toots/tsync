@@ -14,10 +14,14 @@ set(CMAKE_AUTOMOC ON)
 
 find_package(ECM REQUIRED NO_MODULE)
 set(CMAKE_MODULE_PATH ${ECM_MODULE_PATH})
-include(KDEInstallDirs)
 
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Network DBus Widgets)
 find_package(KF6 REQUIRED COMPONENTS KIO CoreAddons)
+
+# After Qt, not before: it works out where plugins belong by asking Qt, and with
+# nothing to ask it answers a path without the qt6 in it -- which installs the
+# plugin somewhere nothing scans.
+include(KDEInstallDirs)
 
 if(NOT TSYNC_ML_SO)
   message(FATAL_ERROR
@@ -50,12 +54,16 @@ target_link_libraries(
 # and finds it beside the other tsync libraries.
 set_target_properties(tsyncdolphin PROPERTIES
                       INSTALL_RPATH ${KDE_INSTALL_FULL_LIBDIR}/tsync)
+# Two components because the halves ship in different packages, and installing
+# is the only way to get them out: a plugin copied from the build tree keeps
+# BUILD_RPATH, which names a directory that exists only on the machine that
+# built it. Only `cmake --install` rewrites it to INSTALL_RPATH.
 install(TARGETS tsyncdolphin
-        DESTINATION ${KDE_INSTALL_PLUGINDIR}/kf6/kfileitemaction)
-# Installed here so the destination and the rpath above are derived from one
-# libdir. The packages place it themselves, into the base tsync package -- this
-# is what `make -C linux install-system` uses.
-install(FILES ${TSYNC_ML_SO} DESTINATION ${KDE_INSTALL_LIBDIR}/tsync)
+        COMPONENT plugin
+        DESTINATION ${KDE_INSTALL_QTPLUGINDIR}/kf6/kfileitemaction)
+install(FILES ${TSYNC_ML_SO}
+        COMPONENT rules
+        DESTINATION ${KDE_INSTALL_LIBDIR}/tsync)
 
 enable_testing()
 
