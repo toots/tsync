@@ -13,6 +13,9 @@ _opam
 # Dolphin plugin, built by cmake rather than dune
 linux/dolphin/build/
 
+# Dolphin plugin, built by cmake rather than dune
+linux/dolphin/build/
+
 # Debian packages from linux/Dockerfile
 dist/
 

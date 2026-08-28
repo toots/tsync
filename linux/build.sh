@@ -46,12 +46,17 @@ done
 # native is what the endpoints OpenSSL trips over fall back to.
 opam install --deps-only tsync tsync-tls tsync-ssl tsync-s3 tsync-fuse tsync-tray
 
-opam exec -- dune build --profile release bin/tsync.exe linux/tray/main.exe
+opam exec -- dune build --profile release bin/tsync.exe linux/tray/main.exe \
+  linux/dolphin/ml/libtsync_mounts.so linux/dolphin/ml/libtsync_mounts_fake.so
 
 # The Dolphin plugin, which cmake builds against Qt and KDE Frameworks. Not
 # conditional on those being installed: a plugin quietly skipped leaves a
 # package built around a file that is not there, and the caller installing the
-# system libraries first is what this script already asks for.
-cmake -S linux/dolphin -B linux/dolphin/build -DCMAKE_BUILD_TYPE=Release
+# system libraries first is what this script already asks for. The mount rules
+# come from the object dune just built, named rather than guessed at.
+ml=$PWD/_build/default/linux/dolphin/ml
+cmake -S linux/dolphin -B linux/dolphin/build -DCMAKE_BUILD_TYPE=Release \
+  -DTSYNC_ML_SO="$ml/libtsync_mounts.so" \
+  -DTSYNC_FAKE_ML_SO="$ml/libtsync_mounts_fake.so"
 cmake --build linux/dolphin/build --parallel
 ctest --test-dir linux/dolphin/build --output-on-failure

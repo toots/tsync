@@ -24,41 +24,13 @@ install-opam:
 	cd .. && opam pin -ny .
 	opam install tsync
 
+# The daemon, and nothing else. The tray and Dolphin's context-menu action
+# install system-wide, pull Qt, KDE Frameworks and libdbus, and are what
+# tsync-tray and tsync-dolphin exist to deliver -- building them from here would
+# put files under /usr that no package owns.
 install-system:
 	mkdir -p ~/.local/bin
 	ln -sf "$$(opam var bin)/tsync" ~/.local/bin/tsync
-	ln -sf "$$(opam var bin)/tsync-tray" ~/.local/bin/tsync-tray
-	# Started by the desktop, not by systemd: see the comment in the .desktop.
-	mkdir -p ~/.config/autostart
-	sed 's|@BIN@|$(HOME)/.local/bin/tsync-tray|' tsync-tray.desktop.in \
-	  > ~/.config/autostart/tsync-tray.desktop
-	# Every theme inherits hicolor, so this is where an icon is found whatever
-	# the desktop. The four tray states go under symbolic/ and keep the suffix
-	# in their name: GTK only recolours an icon to the panel foreground when
-	# both are true, and the SVGs carry the stylesheet KDE recolours by.
-	mkdir -p ~/.local/share/icons/hicolor/scalable/apps
-	mkdir -p ~/.local/share/icons/hicolor/symbolic/apps
-	cp ../assets/tsync-app.svg ~/.local/share/icons/hicolor/scalable/apps/tsync.svg
-	cp ../assets/tray/tsync-*-symbolic.svg ~/.local/share/icons/hicolor/symbolic/apps/
-	# Advisory: GTK scans the directory when the cache is missing or stale, so a
-	# desktop without the tool installed still finds the icons.
-	-gtk-update-icon-cache -f -t ~/.local/share/icons/hicolor 2>/dev/null
-	# Not advisory for Plasma. It snapshots which of hicolor's directories
-	# exist, and the two above are ones a fresh machine has never had, so a
-	# panel already running resolves nothing under them until told to look
-	# again -- an install whose icons only appear after the next login.
-	-gdbus emit --session --object-path /KIconLoader \
-	  --signal org.kde.KIconLoader.iconChanged 0 2>/dev/null
-	# The Dolphin plugin. Qt only looks for plugins under its own prefix, never
-	# under ~/.local, so this one is system-wide and the prefix has to be named:
-	# cmake's default of /usr/local installs to a directory nothing searches,
-	# which looks like success and loads nothing.
-	cmake -S dolphin -B dolphin/build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr
-	cmake --build dolphin/build --parallel
-	ctest --test-dir dolphin/build --output-on-failure
-	sudo cmake --install dolphin/build
-	test -f /usr/lib64/qt6/plugins/kf6/kfileitemaction/tsyncdolphin.so \
-	  || test -f /usr/lib/qt6/plugins/kf6/kfileitemaction/tsyncdolphin.so
 	mkdir -p ~/.config/systemd/user
 	cp tsync.service ~/.config/systemd/user/
 	systemctl --user daemon-reload
@@ -69,6 +41,10 @@ install-system:
 	# skip the prompt when it is already set.
 	loginctl show-user "$$USER" -p Linger 2>/dev/null | grep -q 'Linger=yes' \
 	  || sudo loginctl enable-linger "$$USER"
+	@echo
+	@echo "Installed the tsync daemon only."
+	@echo "The system tray and Dolphin's Copy Share Link are not installed from"
+	@echo "here: they ship as the tsync-tray and tsync-dolphin packages."
 
 install: install-opam install-system
 
@@ -79,12 +55,14 @@ uninstall:
 	-systemctl --user disable --now tsync
 	rm -f ~/.config/systemd/user/tsync.service
 	-systemctl --user daemon-reload
-	rm -f ~/.local/bin/tsync ~/.local/bin/tsync-tray
+	rm -f ~/.local/bin/tsync
+	# Under /usr and owned by tsync-tray and tsync-dolphin, so removing them is
+	# the package manager's to do. What follows is an earlier install-system's
+	# leavings in this user's own directories, which nothing else claims.
+	rm -f ~/.local/bin/tsync-tray
 	rm -f ~/.config/autostart/tsync-tray.desktop
 	rm -f ~/.local/share/icons/hicolor/scalable/apps/tsync.svg
 	rm -f ~/.local/share/icons/hicolor/symbolic/apps/tsync-*-symbolic.svg
-	-sudo rm -f /usr/lib64/qt6/plugins/kf6/kfileitemaction/tsyncdolphin.so \
-	  /usr/lib/qt6/plugins/kf6/kfileitemaction/tsyncdolphin.so
 	-gtk-update-icon-cache -f -t ~/.local/share/icons/hicolor 2>/dev/null
 	-opam remove -y tsync tsync-tls tsync-ssl tsync-s3 tsync-fuse tsync-tray
 
