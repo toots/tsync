@@ -1,0 +1,33 @@
+; The mount rules as an object a file-manager extension can call, rather than a
+; daemon it has to reach: a menu is drawn while the user waits, and a socket has
+; a process at the other end that can stop answering.
+;
+; [shared_object] rather than [object]: the single self-contained object links
+; the runtime without -fPIC, which a shared library cannot hold. Dune names the
+; output after the executable and sets no soname, so the two are made to agree
+; here -- the loader searches for the soname, and a file named otherwise in the
+; build tree would not be found.
+
+(executable
+ (name libtsync_mounts)
+ (modules libtsync_mounts)
+ (modes shared_object)
+ (enabled_if
+  (= %{system} linux))
+ (link_flags
+  (-cclib -Wl,-soname,libtsync_mounts.so))
+ (flags
+  (:standard -open Tsync_desktop_mounts))
+ (libraries tsync_desktop_mounts))
+
+; The same entry point with fixed answers, linked by the C++ test instead of the
+; real one. Never installed.
+
+(executable
+ (name libtsync_mounts_fake)
+ (modules libtsync_mounts_fake)
+ (modes shared_object)
+ (enabled_if
+  (= %{system} linux))
+ (link_flags
+  (-cclib -Wl,-soname,libtsync_mounts_fake.so)))

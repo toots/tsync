@@ -1,90 +1,38 @@
 #include "tsync_mounts.h"
 
-#include <QDir>
-#include <QJsonDocument>
-#include <QJsonObject>
-#include <QLocalSocket>
-#include <QStandardPaths>
+#include <caml/callback.h>
+#include <caml/memory.h>
+#include <caml/mlvalues.h>
 
-namespace {
-
-// A menu is built while the user waits, so a daemon that has stopped answering
-// costs this much and no more. A local round trip measures well under a
-// millisecond.
-constexpr int replyTimeoutMs = 150;
-
-QByteArray ask(const QString &socketPath, const QByteArray &request)
+QList<TsyncMount> tsyncMounts()
 {
-    QLocalSocket sock;
-    sock.connectToServer(socketPath);
-    if (!sock.waitForConnected(replyTimeoutMs)) {
-        return {};
+    static bool started = false;
+    if (!started) {
+        // No argv of our own inside a plugin, and none is read: the name is
+        // what the runtime reports about itself.
+        char program[] = "tsyncdolphin";
+        char *argv[] = {program, nullptr};
+        caml_startup(argv);
+        started = true;
     }
-    sock.write(request);
-    sock.write("\n");
-    if (!sock.waitForBytesWritten(replyTimeoutMs)) {
-        return {};
-    }
-    QByteArray reply;
-    while (!reply.endsWith('\n')) {
-        if (!sock.waitForReadyRead(replyTimeoutMs)) {
-            return {};
-        }
-        reply += sock.readAll();
-    }
-    return reply;
-}
 
-}
-
-QString tsyncDataDir()
-{
-    return QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation)
-        + QStringLiteral("/tsync");
-}
-
-bool tsyncMountFromStatus(const QByteArray &reply, const QString &socketPath,
-                          TsyncMount *out)
-{
-    const QJsonObject obj = QJsonDocument::fromJson(reply).object();
-    QString mount = obj.value(QStringLiteral("mount")).toString();
-    while (mount.length() > 1 && mount.endsWith(QLatin1Char('/'))) {
-        mount.chop(1);
+    static const value *answer = nullptr;
+    if (!answer) {
+        answer = caml_named_value("tsync_mount_points");
     }
-    if (mount.isEmpty()) {
-        return false;
-    }
-    *out = TsyncMount{socketPath, obj.value(QStringLiteral("domain")).toString(),
-                      mount};
-    return true;
-}
-
-// The glob is looser than the daemons' own naming and stays that way: the sync
-// service matches it too and answers no mount, a domain removed since leaves a
-// socket nothing listens on, and both drop out here without a rule to keep in
-// step with linux_runtime.ml.
-QStringList tsyncSocketPaths(const QString &dataDir)
-{
-    const QDir dir(dataDir);
-    QStringList paths;
-    const QStringList names =
-        dir.entryList({QStringLiteral("tsync-*.sock")},
-                      QDir::System | QDir::Files | QDir::NoDotAndDotDot);
-    for (const QString &name : names) {
-        paths.append(dir.absoluteFilePath(name));
-    }
-    return paths;
-}
-
-QList<TsyncMount> tsyncMounts(const QString &dataDir)
-{
     QList<TsyncMount> mounts;
-    for (const QString &path : tsyncSocketPaths(dataDir)) {
-        TsyncMount mount;
-        if (tsyncMountFromStatus(ask(path, QByteArrayLiteral("{\"action\":\"status\"}")),
-                                 path, &mount)) {
-            mounts.append(mount);
-        }
+    if (!answer) {
+        return mounts;
+    }
+
+    // Copied out as it is walked. Nothing here allocates on the OCaml heap, so
+    // the list cannot move underneath the loop.
+    value list = caml_callback(*answer, Val_unit);
+    while (Is_block(list)) {
+        const value pair = Field(list, 0);
+        mounts.append(TsyncMount{QString::fromUtf8(String_val(Field(pair, 0))),
+                                 QString::fromUtf8(String_val(Field(pair, 1)))});
+        list = Field(list, 1);
     }
     return mounts;
 }

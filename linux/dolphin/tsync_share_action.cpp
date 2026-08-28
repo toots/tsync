@@ -42,11 +42,9 @@ void requestShare(const TsyncMount &mount, const QString &rel)
     auto buffer = std::make_shared<QByteArray>();
 
     QObject::connect(sock, &QLocalSocket::connected, sock, [sock, mount, rel]() {
-        QJsonObject request{{QStringLiteral("action"), QStringLiteral("share")},
-                            {QStringLiteral("rel"), rel}};
-        if (!mount.domain.isEmpty()) {
-            request.insert(QStringLiteral("domain"), mount.domain);
-        }
+        const QJsonObject request{
+            {QStringLiteral("action"), QStringLiteral("share")},
+            {QStringLiteral("rel"), rel}};
         sock->write(QJsonDocument(request).toJson(QJsonDocument::Compact));
         sock->write("\n");
     });
@@ -98,8 +96,8 @@ public:
         }
         TsyncMount mount;
         QString rel;
-        if (!tsyncResolve(tsyncMounts(tsyncDataDir()), urls.first().toLocalFile(),
-                          &mount, &rel)) {
+        if (!tsyncResolve(tsyncMounts(), urls.first().toLocalFile(), &mount,
+                          &rel)) {
             return {};
         }
         // The application icon comes from whichever tsync package installed
