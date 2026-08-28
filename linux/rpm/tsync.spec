@@ -68,11 +68,18 @@ done
 install -Dm755 %{srcdir}/linux/dolphin/build/tsyncdolphin.so \
   %{buildroot}%{_libdir}/qt6/plugins/kf6/kfileitemaction/tsyncdolphin.so
 strip %{buildroot}%{_libdir}/qt6/plugins/kf6/kfileitemaction/tsyncdolphin.so
+# The mount rules, as an object the file-manager extensions call. In the base
+# package because it is tsync's answer, and a second extension should link the
+# same object rather than restate it.
+install -Dm755 %{srcdir}/_build/default/linux/dolphin/ml/libtsync_mounts.so \
+  %{buildroot}%{_libdir}/tsync/libtsync_mounts.so
+strip %{buildroot}%{_libdir}/tsync/libtsync_mounts.so
 
 %files
 %{_bindir}/tsync
 %{_unitdir}/tsync@.service
 %{_datadir}/icons/hicolor/scalable/apps/tsync.svg
+%{_libdir}/tsync/libtsync_mounts.so
 
 %files tray
 %{_bindir}/tsync-tray

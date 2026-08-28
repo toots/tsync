@@ -76,8 +76,15 @@ jobs:
           rpm -qpR dist/tsync-tray_*.rpm | grep -q libdbus-1
           rpm -qpR dist/tsync-dolphin_*.rpm | grep -q libKF6
           ! rpm -qpR dist/tsync-tray_*.rpm | grep -q libKF6
+          # The plugin resolves the mount rules by soname along its rpath, and
+          # the object answering that soname ships in the base package. ldd
+          # finding it is what says the two halves agree.
           test "$(ldd /usr/lib*/qt6/plugins/kf6/kfileitemaction/tsyncdolphin.so \
             | grep -c 'not found')" = 0
+          ldd /usr/lib*/qt6/plugins/kf6/kfileitemaction/tsyncdolphin.so \
+            | grep -q libtsync_mounts.so
+          rpm -ql tsync | grep -q libtsync_mounts.so
+          ! rpm -ql tsync-dolphin | grep -q libtsync_mounts.so
           ! rpm -qpR dist/tsync_*.rpm | grep -q libdbus-1
 
       - uses: actions/upload-artifact@v4

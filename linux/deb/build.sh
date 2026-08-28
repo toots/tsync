@@ -72,6 +72,11 @@ install -Dm644 'linux/tsync@.service' "$root/usr/lib/systemd/system/tsync@.servi
 # 4K and no dependency: every theme inherits hicolor.
 install -Dm644 assets/tsync-app.svg \
   "$root/usr/share/icons/hicolor/scalable/apps/tsync.svg"
+# The mount rules, as an object the file-manager extensions call. Here rather
+# than with tsync-dolphin because it is tsync's answer, and a second extension
+# should link the same object rather than restate it.
+install -Dm644 _build/default/linux/dolphin/ml/libtsync_mounts.so \
+  "$root/usr/lib/$(dpkg-architecture -qDEB_HOST_MULTIARCH)/tsync/libtsync_mounts.so"
 deps=$(shlibdeps tsync "$root/usr/bin/tsync")
 test -n "$deps"
 emit tsync "$root" "$deps, fuse3" 'Cloud-backed filesystem sync tool
