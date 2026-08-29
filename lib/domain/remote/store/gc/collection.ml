@@ -167,14 +167,28 @@ struct
         let+ opened = refresh_order () in
         if opened then Some (L.from_key chunk_key) else None
 
-    (* The two lookups below are spelled out rather than shared through a
-       combinator, because they differ in what "not there" is: an option for one, a
-       raised failure for the other.
-
-       Both ask the main's spaces first and the composite only once those have
-       missed: routing a miss through the composite would walk past the main to a
+    (* Every candidate space on the main first, and the composite only once those
+       have missed: routing a miss through the composite walks past the main to a
        replica, which during a run is nearly every read — an object-store request
-       per chunk, for as long as the run lasts. *)
+       per chunk, for as long as the run lasts.
+
+       Shared by the reads that fail on a real miss, [last] being where each says
+       so in its own words. {!head} keeps a walk of its own: it has {!missed} to
+       try before giving up, and an option to answer with. *)
+    let read_first chunk_key ~probe ~last =
+      match (local_root (), main ()) with
+        | None, _ | _, None -> last ()
+        | Some _, Some m ->
+            let* keys = candidates chunk_key in
+            let rec first = function
+              | [] -> last ()
+              | k :: rest -> (
+                  let* found = probe m k in
+                  match found with
+                    | Some v -> Io.return v
+                    | None -> first rest)
+            in
+            first keys
 
     (* Deliberately does not promote what it finds in the space on its way out:
        {!promote_all} at publish time is what a chunk's survival hangs on, and one
@@ -208,19 +222,9 @@ struct
        The last attempt is a [get], not a [get_opt], so a chunk that is simply gone
        is reported in the store's own words. *)
     let get chunk_key =
-      match (local_root (), main ()) with
-        | None, _ | _, None -> B.get ~key:(L.key chunk_key) ()
-        | Some _, Some (module M : C.Store) ->
-            let* keys = candidates chunk_key in
-            let rec first = function
-              | [] -> B.get ~key:(L.key chunk_key) ()
-              | k :: rest -> (
-                  let* found = M.get_opt ~key:k () in
-                  match found with
-                    | Some data -> Io.return data
-                    | None -> first rest)
-            in
-            first keys
+      read_first chunk_key
+        ~probe:(fun (module M : C.Store) k -> M.get_opt ~key:k ())
+        ~last:(fun () -> B.get ~key:(L.key chunk_key) ())
 
     let read_run () =
       let (module Mk : C.Store) = marker_store () in
