@@ -43,6 +43,12 @@ module type S = sig
       ([Manifest.chunk_key], without the domain's chunk prefix). *)
   val get_chunk : chunk_key:string -> Bigstring.t io
 
+  (** [length] bytes of a stored chunk from [offset], for a reader that wants
+      part of one. Bounded by the same reads-in-flight budget as {!get_chunk},
+      a range being a round trip like any other. *)
+  val get_chunk_range :
+    chunk_key:string -> offset:int -> length:int -> Bigstring.t io
+
   (** Chunk size for files this client creates: [Conf.S.chunk_size] when the
       config says, else what the domain's stores recommend — an http-proxy
       answers with the serving domain's own, so the setting need not be mirrored
@@ -163,6 +169,7 @@ module type COLLECTION = sig
 
   module Make (_ : Conf.S with type 'a io = 'a io) : sig
     val get : string -> Bigstring.t io
+    val get_range : string -> offset:int -> length:int -> Bigstring.t io
     val head : string -> Backend.file_entry option io
     val promote_all : count:int -> (int -> string) -> unit io
   end

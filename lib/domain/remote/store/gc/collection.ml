@@ -226,6 +226,24 @@ struct
         ~probe:(fun (module M : C.Store) k -> M.get_opt ~key:k ())
         ~last:(fun () -> B.get ~key:(L.key chunk_key) ())
 
+    (* The composite answers a total miss with [None], every store that could
+       hold the chunk having been asked -- an unreachable one raises out of the
+       walk instead -- so this is where a range read says the chunk is gone. *)
+    let get_range chunk_key ~offset ~length =
+      read_first chunk_key
+        ~probe:(fun (module M : C.Store) k ->
+          M.get_range ~key:k ~offset ~length ())
+        ~last:(fun () ->
+          let* found =
+            B.get_range ~key:(L.key chunk_key) ~offset ~length ()
+          in
+          match found with
+            | Some data -> Io.return data
+            | None ->
+                Io.fail
+                  (Backend.Backend_error
+                     (Printf.sprintf "chunk %s: no store holds it" chunk_key)))
+
     let read_run () =
       let (module Mk : C.Store) = marker_store () in
       let* data = Mk.get_opt ~key:marker_key () in

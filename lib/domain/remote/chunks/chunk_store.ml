@@ -13,6 +13,9 @@ module Over (Io : Io.S) (Pools : POOLS with type 'a io := 'a Io.t) = struct
     val backend_key : string -> Stored_key.t
     val present : string -> bool Io.t
     val fetch_body : string -> Bigstring.t Io.t
+
+    val fetch_body_range :
+      string -> offset:int -> length:int -> Bigstring.t Io.t
     val corrupt : string -> bool Io.t
     val cleared : string -> unit
     val slots : Pools.t
@@ -56,5 +59,8 @@ module Over (Io : Io.S) (Pools : POOLS with type 'a io := 'a Io.t) = struct
               put buf)
 
     let fetch key = Pools.use D.downloads (fun () -> D.fetch_body key)
+
+    let fetch_range key ~offset ~length =
+      Pools.use D.downloads (fun () -> D.fetch_body_range key ~offset ~length)
   end
 end

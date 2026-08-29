@@ -47,6 +47,9 @@ module type Fetch = sig
   type 'a io
 
   val get_chunk : chunk_key:string -> Bigstring.t io
+
+  val get_chunk_range :
+    chunk_key:string -> offset:int -> length:int -> Bigstring.t io
 end
 
 (* What a read cost. Hoisted out of [Make]: it describes a read, not one
