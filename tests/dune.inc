@@ -129,6 +129,20 @@
   (alias runtest)
   (action (run ./gcs.exe))))
 
+(subdir backends/get_range
+ (alias
+  (name default)
+  (deps get_range.exe))
+ (rule
+  (alias runtest)
+  (target get_range.output)
+  (action
+   (with-stdout-to get_range.output (ignore-stderr (run ./get_range.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff get_range.expected get_range.output))))
+
 (subdir backends/http_reuse
  (alias
   (name default)

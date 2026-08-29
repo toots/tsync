@@ -6,6 +6,7 @@ end) : Backend_lwt.Store = struct
   let put_if_absent ~key:_ ~data:_ () = fail ()
   let get ~key:_ () = fail ()
   let get_opt ~key:_ () = fail ()
+  let get_range ~key:_ ~offset:_ ~length:_ () = fail ()
   let head_opt ~key:_ () = fail ()
   let delete ~key:_ () = fail ()
   let delete_multi _ = fail ()
@@ -28,6 +29,7 @@ module Hung : Backend_lwt.Store = struct
   let put_if_absent ~key:_ ~data:_ () = never ()
   let get ~key:_ () = never ()
   let get_opt ~key:_ () = never ()
+  let get_range ~key:_ ~offset:_ ~length:_ () = never ()
   let head_opt ~key:_ () = never ()
   let delete ~key:_ () = never ()
   let delete_multi _ = never ()
@@ -50,6 +52,7 @@ module Refuses : Backend_lwt.Store = struct
   let put_if_absent ~key:_ ~data:_ () = fail ()
   let get ~key:_ () = fail ()
   let get_opt ~key:_ () = fail ()
+  let get_range ~key:_ ~offset:_ ~length:_ () = fail ()
   let head_opt ~key:_ () = Lwt.return_none
   let delete ~key:_ () = fail ()
   let delete_multi _ = fail ()
@@ -65,3 +68,10 @@ module Refuses : Backend_lwt.Store = struct
   let capabilities ~prefix:_ () = Lwt.return Backend.no_caps
   let local_path = None
 end
+
+(* What a store answers a range read with, for a double holding whole bodies.
+   Clamped at the end of the object as every driver's is, so a double cannot
+   answer a range a real store would have cut short. *)
+let range_of ~offset ~length body =
+  Bigstring.sub body ~off:offset
+    ~len:(max 0 (min length (Bigstring.length body - offset)))

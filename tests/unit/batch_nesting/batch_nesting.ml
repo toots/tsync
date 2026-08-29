@@ -22,6 +22,13 @@ module Member : Backend_lwt.Store = struct
   let get_opt ~key () =
     Lwt.return (Option.map Bigstring.of_string (Hashtbl.find_opt objects key))
 
+  let get_range ~key ~offset ~length () =
+    let slice s =
+      Bigstring.of_string
+        (String.sub s offset (max 0 (min length (String.length s - offset))))
+    in
+    Lwt.return (Option.map slice (Hashtbl.find_opt objects key))
+
   let head_opt ~key:_ () = unsupported ()
   let delete ~key:_ () = unsupported ()
   let delete_multi _ = unsupported ()

@@ -99,6 +99,29 @@ module type S = sig
       round trip of [head_opt] + [get] when the body is wanted. *)
   val get_opt : key:Stored_key.t -> unit -> Bigstring.t option io
 
+  (** [length] bytes of the object at [key], from [offset]. Every store has a
+      native one — a range header, or a read at an offset — so this is a plain
+      member rather than a declaration a resolver fills in: the generic form
+      would be a whole [get] and a copy, which satisfies every caller while
+      fetching what the range exists to avoid.
+
+      What a store owes here:
+
+      - exactly [length] bytes, which must be positive, and fewer only where the
+        object ends. More than that means the store ignored the range, which is
+        a failure rather than something to trim: a store answering whole objects
+        would otherwise be indistinguishable from one answering ranges.
+      - [None] for a key it does not hold, other failures raised. The [get_opt]
+        shape rather than [get]'s, because the caller walks several keys and has
+        to tell "not under this name" from "the link is down" — see
+        {!Collection}, which is where the miss becomes a failure. *)
+  val get_range :
+    key:Stored_key.t ->
+    offset:int ->
+    length:int ->
+    unit ->
+    Bigstring.t option io
+
   (** Write [data] at [key] only if nothing is there, answering with whatever is
       there afterwards — [data] itself when this call won, the other writer's
       body when it did not.
@@ -305,6 +328,15 @@ exception Backend_error of string
     because callers act on it: a frontend turns it into a read-only error for
     the user, and matching on prose breaks the day the sentence is reworded. *)
 exception Not_writable
+
+(** A range answer held against what was asked for: [body], or a failure where
+    the store sent more than [length] bytes, which is what a store that ignored
+    the range does. Written once because three drivers ask it and a driver that
+    skipped it would look exactly like one that works — the caller is satisfied
+    either way, having been handed the bytes it wanted inside a body it paid for
+    in full. *)
+val checked_range :
+  op:string -> key:string -> length:int -> Bigstring.t -> Bigstring.t
 
 (** Whether a per-key error code from a bulk delete means the object was already
     gone, which is a success. Here rather than in each driver because s3 and gcs

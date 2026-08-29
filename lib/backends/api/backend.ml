@@ -34,6 +34,14 @@ exception Not_writable
    a missing key means. *)
 let absent_code = function "NoSuchKey" | "NotFound" -> true | _ -> false
 
+let checked_range ~op ~key ~length body =
+  if Bigstring.length body > length then
+    raise
+      (Backend_error
+         (Printf.sprintf "%s get_range %s: asked for %d bytes, got %d" op key
+            length (Bigstring.length body)))
+  else body
+
 (* The two a store answers for itself: a missing chunk or a truncated body is a
    considered answer, not a hiccup. Everything else is {!Retry}'s to judge. *)
 let classify = function
@@ -97,6 +105,13 @@ module type S = sig
   (** [None] when the key does not exist; other failures raise. Saves the HEAD
       round trip of [head_opt] + [get] when the body is wanted. *)
   val get_opt : key:Stored_key.t -> unit -> Bigstring.t option io
+
+  val get_range :
+    key:Stored_key.t ->
+    offset:int ->
+    length:int ->
+    unit ->
+    Bigstring.t option io
 
   val put_if_absent :
     key:Stored_key.t -> data:Bigstring.t -> unit -> Bigstring.t io
@@ -328,6 +343,11 @@ module Make (Io : Io.S) (Bounded : POOLS with type 'a io := 'a Io.t) = struct
 
       let get_opt ~key () =
         let+ data = Inner.get_opt ~key () in
+        Option.iter (fun d -> down (Bigstring.length d)) data;
+        data
+
+      let get_range ~key ~offset ~length () =
+        let+ data = Inner.get_range ~key ~offset ~length () in
         Option.iter (fun d -> down (Bigstring.length d)) data;
         data
 

@@ -244,6 +244,18 @@ struct
     else if code resp = 404 then None
     else raise (failed "get_opt" (code resp) (Bigstring.to_string body))
 
+  (* A range answered whole comes back 200 rather than 206, which [is_ok] takes
+     either way; {!Backend.checked_range} is what tells them apart. *)
+  let get_range t ~key ~offset ~length () =
+    let uri = Uri.of_string (obj_path t key ^ "?alt=media") in
+    let range = Printf.sprintf "bytes=%d-%d" offset (offset + length - 1) in
+    let+ resp, body =
+      call_retry t ~meth:`GET ~extra_headers:[("Range", range)] "get_range" uri
+    in
+    if is_ok resp then Some (Backend.checked_range ~op:"gcs" ~key ~length body)
+    else if code resp = 404 then None
+    else raise (failed "get_range" (code resp) (Bigstring.to_string body))
+
   (* [ifGenerationMatch=0] means "only if this object does not exist", and the 412
      GCS answers when it already does is the claim being lost, not an error. *)
   let put_if_absent t ~key ~data () =
@@ -411,6 +423,9 @@ struct
       let put_if_absent ~key ~data () = put_if_absent t ~key:(str key) ~data ()
       let get ~key () = get t ~key:(str key) ()
       let get_opt ~key () = get_opt t ~key:(str key) ()
+
+      let get_range ~key ~offset ~length () =
+        get_range t ~key:(str key) ~offset ~length ()
       let head_opt ~key () = head_opt t ~key:(str key) ()
       let delete ~key () = delete t ~key:(str key) ()
       let delete_multi keys = delete_multi t (List.map str keys)

@@ -212,6 +212,10 @@ type op =
       (** Hold the request until [key] differs from [last_seen], or [wait]
           seconds pass. A {!Get} that answers late on purpose, so that one
           client asking often becomes many clients asking once. *)
+  | Get_range of { key : Stored_key.t; offset : int; length : int }
+      (** Part of one object. Where {!Get} would hand over a whole stored chunk
+          for a reader that wants a few bytes of it, which is the cost this
+          exists to take off the wire. *)
   | Get_multi of Stored_key.t list
       (** A folder's manifests in one answer. The only op that saves a round
           trip rather than merely proxying one: the peer holds the objects,
@@ -322,12 +326,31 @@ let parse_op meth uri body =
   let is_obj p = String.starts_with ~prefix:"/o/" p in
   match (meth, path) with
     | `GET, p when is_obj p -> (
+        let range =
+          match
+            ( Option.bind (q "offset") int_of_string_opt,
+              Option.bind (q "length") int_of_string_opt )
+          with
+            | Some offset, Some length when offset >= 0 && length > 0 ->
+                Some (offset, length)
+            | _ -> None
+        in
         match
           ( obj_key (),
             Option.bind (q Http_proxy.Watch.wait_param) float_of_string_opt )
         with
           | None, _ -> Bad
-          | Some key, None -> Get key
+          (* A range asked for but not spelled is refused rather than widened to
+             the whole object: a client that sent a bad offset wants to hear so,
+             and the body it would otherwise get back is the one this call
+             exists to avoid. *)
+          | Some _, _ when range = None && (q "offset" <> None || q "length" <> None)
+            ->
+              Bad
+          | Some key, None -> (
+              match range with
+                | Some (offset, length) -> Get_range { key; offset; length }
+                | None -> Get key)
           | Some key, Some wait ->
               Watch
                 {
@@ -403,12 +426,13 @@ let parse_op meth uri body =
 (* [Watch] is [`Meta] though it reads an object: it holds for seconds by design,
    and a slot it kept for that long is one a caller doing real work has lost. *)
 let data_kind = function
-  | Get _ | Get_multi _ -> `Get
+  | Get _ | Get_range _ | Get_multi _ -> `Get
   | Put _ -> `Put
   | _ -> `Meta
 
 let op_name = function
   | Get _ -> "get"
+  | Get_range _ -> "getRange"
   | Watch _ -> "watch"
   | Head _ -> "head"
   | Put _ -> "put"
@@ -436,7 +460,7 @@ let op_keys = function
   | Copy (src, dst) -> List.map Stored_key.to_string [src; dst]
   | Get k | Head k | Put k | Put_if_absent k | Delete k ->
       [Stored_key.to_string k]
-  | Watch { key; _ } -> [Stored_key.to_string key]
+  | Watch { key; _ } | Get_range { key; _ } -> [Stored_key.to_string key]
   | List_all (p, _)
   | Share_url p
   | Chunk_size p
@@ -454,7 +478,7 @@ let within route name =
 let route_key = function
   | Get k | Head k | Put k | Put_if_absent k | Delete k ->
       Some (Stored_key.to_string k)
-  | Watch { key; _ } -> Some (Stored_key.to_string key)
+  | Watch { key; _ } | Get_range { key; _ } -> Some (Stored_key.to_string key)
   | Delete_multi (k :: _) | Get_multi (k :: _) -> Some (Stored_key.to_string k)
   | Delete_multi [] | Get_multi [] -> None
   | Copy (src, _) -> Some (Stored_key.to_string src)
@@ -508,6 +532,14 @@ let exec route op ~body =
     | Get key -> (
         let module B = (val route.store : Backend_lwt.Store) in
         let* data = B.get_opt ~key () in
+        match data with
+          | Some data ->
+              Metrics.count read_bytes (Bigstring.length data);
+              respond_chunk data
+          | None -> respond ~status:`Not_found "")
+    | Get_range { key; offset; length } -> (
+        let module B = (val route.store : Backend_lwt.Store) in
+        let* data = B.get_range ~key ~offset ~length () in
         match data with
           | Some data ->
               Metrics.count read_bytes (Bigstring.length data);

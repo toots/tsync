@@ -60,6 +60,15 @@ let run_prefix =
     (Option.value (env "GITHUB_RUN_ID")
        ~default:(string_of_int (Unix.getpid ())))
 
+(* Position-dependent, so a slice arriving twice, out of order or not at all
+   shows up; a constant fill survives all three. *)
+let sized_body size =
+  let buffer = Bigstring.create size in
+  for i = 0 to size - 1 do
+    Bigstringaf.unsafe_set buffer i (Char.chr (i * 31 land 0xff))
+  done;
+  buffer
+
 let suite name (module B : Backend_lwt.Store) =
   let open Lwt.Syntax in
   let key s = Stored_key.in_space ~prefix:run_prefix s in
@@ -144,15 +153,7 @@ let suite name (module B : Backend_lwt.Store) =
      that it never becomes one. *)
   let chunk_sized_body () =
     let size = Conf.default_chunk_size in
-    let body =
-      let buffer = Bigstring.create size in
-      (* Position-dependent, so a slice arriving twice, out of order or not at
-         all shows up; a constant fill survives all three. *)
-      for i = 0 to size - 1 do
-        Bigstringaf.unsafe_set buffer i (Char.chr (i * 31 land 0xff))
-      done;
-      buffer
-    in
+    let body = sized_body size in
     let digest = Xxhash.hash_bigstring_hex body 0 in
     let big = key "big" in
     let* () = B.put ~key:big ~data:body () in
@@ -171,6 +172,55 @@ let suite name (module B : Backend_lwt.Store) =
       (Bigstring.length held = size && Xxhash.hash_bigstring_hex held 0 = digest);
     let* () = B.delete ~key:big () in
     Lwt.return_unit
+  in
+  (* Ranges of a chunk-sized object, which is both the size the product asks for
+     them at and the only size at which a store answering ranges can be told
+     from one ignoring them: a body that fits a single socket read comes back
+     whole either way, and looks right.
+
+     Held against the same bytes locally rather than merely measured, since a
+     store answering the right number of bytes from the wrong offset is the
+     failure a length check cannot see. *)
+  let ranges () =
+    let size = Conf.default_chunk_size in
+    let body = sized_body size in
+    let ranged = key "ranged" in
+    let* () = B.put ~key:ranged ~data:body () in
+    let ask label ~offset ~length expected =
+      let+ got = B.get_range ~key:ranged ~offset ~length () in
+      match got with
+        | None -> check (label ^ " (answered None)") false
+        | Some got ->
+            check
+              ~why:(fun () ->
+                Printf.sprintf "asked [%d,%d), got %d bytes" offset
+                  (offset + length) (Bigstring.length got))
+              label
+              (Bigstring.length got = expected
+              && Xxhash.hash_bigstring_hex got 0
+                 = Xxhash.hash_bigstring_hex
+                     (Bigstringaf.sub body ~off:offset ~len:expected)
+                     0)
+    in
+    let* () = ask "a range at the start is those bytes" ~offset:0 ~length:1024 1024 in
+    let* () =
+      ask "a range in the middle is those bytes"
+        ~offset:((size / 2) + 7)
+        ~length:4096 4096
+    in
+    let* () =
+      ask "a range ending on the last byte is those bytes" ~offset:(size - 512)
+        ~length:512 512
+    in
+    (* Short rather than an error, which is what lets a reader ask for a whole
+       chunk without first learning how long the last one is. *)
+    let* () =
+      ask "a range reaching past the end stops there" ~offset:(size - 100)
+        ~length:4096 100
+    in
+    let* missing = B.get_range ~key:(key "nope") ~offset:0 ~length:16 () in
+    check "a range of an absent key is None" (missing = None);
+    B.delete ~key:ranged ()
   in
   (* The reason this file exists. *)
   let racing_claims () =
@@ -320,6 +370,7 @@ let suite name (module B : Backend_lwt.Store) =
   let* () = section "listing" listing in
   let* () = section "reading many at once" reading_many in
   let* () = section "a chunk-sized body" chunk_sized_body in
+  let* () = section "ranges of an object" ranges in
   let* () = section "racing claims" racing_claims in
   let* () = section "capabilities" capabilities in
   let* () = section "deleting" deleting in
