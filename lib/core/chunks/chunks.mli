@@ -36,3 +36,17 @@ val offset_of : chunk_size:int -> int -> int
 (** Bytes chunk [i] holds: [chunk_size] for every chunk but the last, and 0 for
     an index past the end. *)
 val length_of : size:int64 -> chunk_size:int -> int -> int
+
+(** {1 Cutting a byte range up}
+
+    [len] bytes of chunk [index], starting [chunk_off] into it, belonging [dest]
+    bytes into the range asked for. Every reader asks which chunks a range
+    touches, and one that works it out for itself is one that can come to a
+    different answer. *)
+type piece = { index : int; chunk_off : int; len : int; dest : int }
+
+(** The pieces of [length] bytes from [offset], in order, covering the range
+    exactly once. Stops at chunk [count], so a range reaching past the last
+    chunk is short rather than an error, and empty for one no chunk holds. *)
+val pieces :
+  chunk_size:int -> count:int -> offset:int -> length:int -> piece list

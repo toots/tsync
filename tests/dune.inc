@@ -789,6 +789,20 @@
   (action
    (diff bounded_test.expected bounded_test.output))))
 
+(subdir unit/chunk_pieces
+ (alias
+  (name default)
+  (deps chunk_pieces.exe))
+ (rule
+  (alias runtest)
+  (target chunk_pieces.output)
+  (action
+   (with-stdout-to chunk_pieces.output (ignore-stderr (run ./chunk_pieces.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff chunk_pieces.expected chunk_pieces.output))))
+
 (subdir unit/chunk_pools
  (alias
   (name default)
