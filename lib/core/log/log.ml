@@ -9,8 +9,7 @@ let set_min_level l = min_level := l
 (* Receives the level and the fully formatted message. Defaults to stderr. *)
 let active : (level -> string -> unit) ref = ref Log_printf.log
 
-(* Internal: [Daemon.init] is the only thing that swaps the sink. *)
-let use sink = active := sink
+let set_sink sink = active := sink
 
 (* Set per-process to a domain name, so per-domain daemon processes are
    distinguishable in a shared journal. *)
@@ -56,6 +55,6 @@ module Daemon = struct
     set_min_level `debug;
     if available then (
       Log_syslog_provider.init ();
-      use Log_syslog_provider.log)
+      set_sink Log_syslog_provider.log)
     else Log_printf.init ()
 end

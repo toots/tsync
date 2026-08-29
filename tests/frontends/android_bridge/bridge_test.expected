@@ -1,0 +1,6 @@
+booted
+size matches: true
+concurrent reads served wrong bytes: 0
+close: 0
+read after close: -9
+open of a name the domain does not have: -2

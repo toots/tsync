@@ -1,11 +1,5 @@
 open Lwt.Syntax
 
-(* Carries the backtrace of a raise across [Lwt_preemptive.run_in_main], which
-   re-raises on the calling thread and so replaces the backtrace of what
-   actually failed with its own line. The exception value is the only thing
-   that crosses, so the backtrace travels inside it. *)
-exception With_backtrace of exn * Printexc.raw_backtrace
-
 module Make (C : Conf_lwt.S) (D : Domain_engine.Domain) = struct
   module F = D.F
   module Ih = D.Ih
@@ -13,8 +7,8 @@ module Make (C : Conf_lwt.S) (D : Domain_engine.Domain) = struct
   module I = Internal_ops.Make (F)
 
   (* FUSE runs Multi_threaded while every File operation runs on the single Lwt
-     event-loop thread, so each handler bridges with [Lwt_preemptive.run_in_main]
-     and a slow operation blocks only its own kernel thread.
+     event-loop thread, so each handler bridges with [Domain_engine.on_loop] and
+     a slow operation blocks only its own kernel thread.
 
      Nothing is reported from there: the binding records what a handler raised
      and answers EIO, and formatting a message on a thread that has just failed
@@ -55,16 +49,7 @@ module Make (C : Conf_lwt.S) (D : Domain_engine.Domain) = struct
       ("handlerFailures", `Int (Fuse.error_count ()));
     ]
 
-  let on_loop f =
-    Lwt_preemptive.run_in_main (fun () ->
-        Lwt.catch f (function
-          (* Matched before the capture rather than after: a [Unix_error] is an
-             answer rather than a failure and wants no backtrace, matching
-             cannot raise, and [getattr] answering ENOENT is the hot path. *)
-          | Unix.Unix_error _ as exn -> Lwt.fail exn
-          | exn ->
-              let backtrace = Printexc.get_raw_backtrace () in
-              Lwt.fail (With_backtrace (exn, backtrace))))
+  let on_loop = Domain_engine.on_loop
 
   (* What the binding recorded, logged from the loop rather than from the
      handler that failed.
@@ -86,7 +71,7 @@ module Make (C : Conf_lwt.S) (D : Domain_engine.Domain) = struct
            crossing, and only worth having for handlers that do not cross. *)
         let exn, backtrace =
           match e.Fuse.exn with
-            | With_backtrace (exn, raw) -> (exn, Some raw)
+            | Domain_engine.With_backtrace (exn, raw) -> (exn, Some raw)
             | exn -> (exn, e.Fuse.backtrace)
         in
         Log.err "fuse %s %s: %s" e.Fuse.op e.Fuse.path (Printexc.to_string exn);
@@ -129,7 +114,7 @@ module Make (C : Conf_lwt.S) (D : Domain_engine.Domain) = struct
     unmount_needed := true;
     do_stop ()
 
-  (* [Lwt_preemptive.run_in_main] cannot be used here: it blocks until the loop
+  (* [Domain_engine.on_loop] cannot be used here: it blocks until the loop
      picks the job up, and by then the loop may be finished, leaving the main
      thread waiting forever. A notification is engine-delivered, safe from any
      thread, and a no-op if the loop is already gone. *)

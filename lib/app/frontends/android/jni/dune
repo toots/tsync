@@ -1,0 +1,62 @@
+; The domain as an object the Android app links, rather than a binary it execs:
+; a read is served from the chunk cache of a runtime that outlives the open
+; file, which is what lets Data.pread's read-ahead fire at all.
+;
+; Private, so it may reach the domain constructor that the shipped
+; tsync-android library may not, and so a host test can link the same entry
+; points the app calls.
+
+(library
+ (name tsync_android_jni)
+ (modules android_jni)
+ (foreign_stubs
+  (language c)
+  (names tsync_bridge))
+ (flags
+  (:standard -open Tsync_log -open Tsync_engine -open Tsync_conf_lwt
+   -open Tsync_frontend_register -open Tsync_runtime -open Tsync_conf_parsing -open Tsync_tls
+   -open Tsync_domain
+   -open Tsync_logical_key -open Tsync_staged -open Tsync_manifest))
+ (libraries
+  tsync_android_frontend
+  tsync_backend
+  tsync_runtime
+  tsync_domain
+  tsync-libs.conf_parsing
+  tsync-libs.tls
+  tsync-libs.conf_lwt
+  tsync-libs.engine
+  tsync-libs.frontend_register
+  tsync-libs.log
+  lwt
+  lwt.unix
+  unix
+  tsync_logical_key
+  tsync_staged
+  tsync_manifest))
+
+; [shared_object] rather than [object]: the single self-contained object links
+; the runtime without -fPIC, which a shared library cannot hold. Dune names the
+; output after the executable and sets no soname, so the two are made to agree
+; here -- the loader searches for the soname.
+
+(executable
+ (name libtsyncjni)
+ (modules libtsyncjni)
+ (modes shared_object)
+ (foreign_stubs
+  (language c)
+  (names tsync_jni))
+ (enabled_if
+  (= %{context_name} default.android))
+ (link_flags
+  (-cclib -Wl,-soname,libtsyncjni.so
+   ; lwt_unix.cmxa records -lev, and the cross sysroot's lib directory is not
+   ; on the linker's search path; asked of the toolchain so it follows a switch.
+   -cclib -L%{ocaml-config:standard_library}/..
+   ; Android 15 runs 16KB pages, and the loader rejects a library aligned for 4K.
+   -cclib -Wl,-z,max-page-size=16384
+   ; __android_log_write lives in liblog, and without this the object links with
+   ; it undefined and fails at dlopen instead.
+   -cclib -llog))
+ (libraries tsync_android_jni))

@@ -86,7 +86,11 @@ let all ~paths cfg =
                 match Frontend.find f.Conf_parsing.frontend_type with
                   | None -> None
                   | Some (module F : Frontend.S) -> (
-                      match F.listens with
+                      match
+                        match F.serving with
+                          | Frontend.Daemon d -> d.Frontend.listens
+                          | Frontend.Commands _ -> None
+                      with
                         | None -> None
                         | Some `Domain_socket ->
                             Some

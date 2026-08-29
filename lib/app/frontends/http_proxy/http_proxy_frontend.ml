@@ -1163,7 +1163,8 @@ let register () =
   Frontend.register ~spec implementation
     (module struct
       let is_local = is_local
-      let topology = `One_process
-      let listens = Some `Proxy_socket
-      let start = start
+
+      let serving =
+        Frontend.Daemon
+          { topology = `One_process; listens = Some `Proxy_socket; start }
     end : Frontend.S)

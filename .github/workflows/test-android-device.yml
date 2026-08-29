@@ -28,10 +28,12 @@ jobs:
       # (INSTALL_FAILED_NO_MATCHING_ABIS). What is left here reads MediaStore and
       # never invokes it — but its absence has to be deliberate rather than a
       # checkout that happened to lack it.
-      - name: Refuse a binary in the test APK
+      - name: Refuse a native artifact in the test APK
         run: |
-          test ! -e android/app/src/main/jniLibs/arm64-v8a/libtsync.so \
-            || { echo "a staged binary would make this APK uninstallable here"; exit 1; }
+          for staged in android/app/src/main/jniLibs/arm64-v8a/*.so; do
+            test ! -e "$staged" \
+              || { echo "$staged would make this APK uninstallable here"; exit 1; }
+          done
 
       - name: Enable KVM
         run: |

@@ -157,7 +157,7 @@ let loop_died exn =
   flush stderr;
   Unix._exit 1
 
-let run ?main_thread ?after serve =
+let handshake () =
   let lock = Mutex.create () in
   let cond = Condition.create () in
   let ready = ref false in
@@ -174,6 +174,43 @@ let run ?main_thread ?after serve =
     done;
     Mutex.unlock lock
   in
+  (signal_ready, wait_ready)
+
+(* Carries the backtrace of a raise across [on_loop], which re-raises on the
+   calling thread and so replaces the backtrace of what actually failed with its
+   own line. The exception value is the only thing that crosses. *)
+exception With_backtrace of exn * Printexc.raw_backtrace
+
+(* A handler arriving on a thread of the platform's own -- a libfuse worker, a
+   JVM binder thread -- runs its file operations on the single Lwt loop and
+   blocks only itself meanwhile. *)
+let on_loop f =
+  Lwt_preemptive.run_in_main (fun () ->
+      Lwt.catch f (function
+        (* Matched before the capture rather than after: a [Unix_error] is an
+           answer rather than a failure and wants no backtrace, matching cannot
+           raise, and [getattr] answering ENOENT is the hot path. *)
+        | Unix.Unix_error _ as exn -> Lwt.fail exn
+        | exn ->
+            let backtrace = Printexc.get_raw_backtrace () in
+            Lwt.fail (With_backtrace (exn, backtrace))))
+
+(* The loop on a thread of its own, for a host process whose main thread belongs
+   to a platform rather than to us. Nothing joins it: it ends with the process,
+   and the absence of a stop is what keeps [on_loop] from waiting on a loop that
+   has finished. *)
+let start_detached serve =
+  let signal_ready, wait_ready = handshake () in
+  let body () =
+    match Lwt_main.run (serve ~ready:signal_ready) with
+      | () -> signal_ready ()
+      | exception exn -> loop_died exn
+  in
+  ignore (Thread.create body ());
+  wait_ready ()
+
+let run ?main_thread ?after serve =
+  let signal_ready, wait_ready = handshake () in
   let body () =
     match Lwt_main.run (serve ~ready:signal_ready) with
       | () -> (

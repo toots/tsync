@@ -18,9 +18,14 @@ let resolve name =
              "frontend %s is configured but not compiled into this binary" name)
 
 (* The frontend's own wording, which knows what to point the user at instead. *)
-let refuse name =
+let refuse hint = failwith hint
+
+(* [None] for a frontend the launcher does not run. *)
+let daemon_of name =
   let (module F : Frontend.S) = resolve name in
-  F.start []
+  match F.serving with
+    | Frontend.Daemon d -> Some d
+    | Frontend.Commands _ -> None
 
 (* What a crash left behind, collected while nothing is serving.
 
@@ -54,8 +59,7 @@ let recover domains =
 (* Where one frontend answers, if it answers at all. [None] for one driven by
    commands rather than by requests. *)
 let socket_of (name, b) =
-  let (module F : Frontend.S) = resolve name in
-  match F.listens with
+  match Option.bind (daemon_of name) (fun d -> d.Frontend.listens) with
     | None -> None
     | Some `Domain_socket ->
         let module C = (val b.Frontend.conf : Conf_lwt.S) in
@@ -298,6 +302,11 @@ let run ?(on_leaf = fun ~name:_ -> ()) domains =
   let run_group (name, bindings) =
     let (module F : Frontend.S) = resolve name in
     Log.debug "starting frontend %s (%d domains)" name (List.length bindings);
+    let daemon =
+      match F.serving with
+        | Frontend.Daemon d -> d
+        | Frontend.Commands hint -> refuse hint
+    in
     (* After the fork, so each process is named for what it runs. *)
     on_leaf ~name;
     (* Sized here because only this side knows what else shares the leaf, and
@@ -305,7 +314,7 @@ let run ?(on_leaf = fun ~name:_ -> ()) domains =
     let serve items =
       Frontend.cap_blocking_pool
         ~concurrency:(Frontend.binding_concurrency (List.map fst items));
-      F.start
+      daemon.Frontend.start
         (List.map
            (fun (binding, peers) ->
              let module C = (val binding.Frontend.conf : Conf_lwt.S) in
@@ -317,11 +326,10 @@ let run ?(on_leaf = fun ~name:_ -> ()) domains =
              })
            items)
     in
-    match F.topology with
+    match daemon.Frontend.topology with
       | `One_process -> serve bindings
       | `Process_per_binding ->
           Frontend.run_forked (fun b -> serve [b]) bindings
-      | `Not_a_daemon -> refuse name
   in
   let groups = bindings_by_frontend domains in
   (* Before the first fork: a frontend that cannot be served under the daemon
@@ -329,7 +337,9 @@ let run ?(on_leaf = fun ~name:_ -> ()) domains =
   List.iter
     (fun (name, _) ->
       let (module F : Frontend.S) = resolve name in
-      if F.topology = `Not_a_daemon then refuse name)
+      match F.serving with
+        | Frontend.Daemon _ -> ()
+        | Frontend.Commands hint -> refuse hint)
     groups;
   recover domains;
   let reap = Frontend.fork_each run_group groups in

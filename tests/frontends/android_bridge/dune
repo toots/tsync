@@ -1,0 +1,15 @@
+; The bridge as the app reaches it: the entry points linked in, and threads of
+; the caller's own making driving them.
+
+(executable
+ (flags
+  (:standard -open Tsync_test_harness))
+ (name bridge_test)
+ (foreign_stubs
+  (language c)
+  (names tsync_stress))
+ (libraries
+  tsync_test_harness
+  tsync_android_jni
+  bigstringaf
+  unix))

@@ -58,10 +58,14 @@ jobs:
             ppx_blob-android mem_usage-android base64-android tls-lwt-android \
             x509-android mirage-crypto-pk-android cmdliner-android \
             memtrace-android bigstringaf-android
-      - name: Cross-build the daemon
-        # The context path, not `bin/tsync.exe`: that builds the host context too,
-        # which wants FUSE.
-        run: opam exec -- dune build -x android _build/default.android/bin/tsync.exe
+      - name: Cross-build the domain
+        # The context paths, not the bare targets: those build the host context
+        # too, which wants FUSE. The library is what the app calls into; the
+        # binary serves the verbs that have not moved in-process yet.
+        run: |
+          opam exec -- dune build -x android \
+            _build/default.android/lib/app/frontends/android/jni/libtsyncjni.so \
+            _build/default.android/bin/tsync.exe
       - uses: actions/setup-java@v4
         with:
           distribution: temurin

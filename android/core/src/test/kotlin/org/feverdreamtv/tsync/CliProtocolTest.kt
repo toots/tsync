@@ -330,7 +330,7 @@ class CliProtocolTest {
     }
 
     /**
-     * The session, driven as ReadSession drives it: a size line, then a header
+     * The session, driven as the verb documents it: a size line, then a header
      * and that many bytes per request, until stdin closes.
      *
      * One process is the point — reads in it are sequential to

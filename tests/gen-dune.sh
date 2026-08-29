@@ -37,7 +37,8 @@ env_for() {
 # other per-test knobs so the exceptions stay countable.
 deps_for() {
   case "$1" in
-    frontends/android) echo "%{exe:../../../bin/tsync.exe}" ;;
+    frontends/android | frontends/android_bridge)
+      echo "%{exe:../../../bin/tsync.exe}" ;;
     *) echo "" ;;
   esac
 }

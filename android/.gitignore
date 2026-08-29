@@ -3,5 +3,5 @@
 build/
 app/build/
 local.properties
-# The daemon, staged out of the dune cross build by `stageDaemon`.
+# The library and the daemon, staged out of the dune cross build.
 app/src/main/jniLibs/

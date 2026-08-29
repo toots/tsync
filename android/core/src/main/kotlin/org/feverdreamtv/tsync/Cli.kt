@@ -55,7 +55,9 @@ object Cli {
      *  there are. */
     fun residency(ref: String) = listOf("android", "residency", ref)
 
-    /** Serves ranges until stdin closes; see ReadSession. */
+    /** Serves ranges until stdin closes. The app reads through the linked
+     *  domain instead; this stays as the verb a person can drive by hand, and
+     *  as what CliProtocolTest holds the reply framing to. */
     fun open(ref: String) = listOf("android", "open", ref)
 
     /** The whole content into [dest], for editing in place. */

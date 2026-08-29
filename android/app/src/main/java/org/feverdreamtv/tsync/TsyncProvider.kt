@@ -16,8 +16,6 @@ import android.provider.DocumentsProvider
 import android.util.Log
 import android.webkit.MimeTypeMap
 import java.io.File
-import java.io.RandomAccessFile
-import java.util.UUID
 
 /**
  * Exposes a tsync domain through the Storage Access Framework.
@@ -38,14 +36,25 @@ class TsyncProvider : DocumentsProvider() {
 
     private val rootDocumentId get() = Cli.ROOT
 
-    private lateinit var callbackThread: HandlerThread
-    private lateinit var callbackHandler: Handler
+    /** A descriptor's callbacks all arrive on the handler's thread, so a single
+     *  one would serialise every read of every open file in the app. Fixed and
+     *  made once: each is registered with the OCaml runtime for as long as it
+     *  lives, and the interleaving that matters happens on the Lwt loop. */
+    private val callbackHandlers = mutableListOf<Handler>()
+    private val nextHandler = java.util.concurrent.atomic.AtomicInteger(0)
 
     override fun onCreate(): Boolean {
-        callbackThread = HandlerThread("tsync-pfd").apply { start() }
-        callbackHandler = Handler(callbackThread.looper)
+        repeat(CALLBACK_THREADS) { index ->
+            val thread = HandlerThread("tsync-pfd-$index").apply { start() }
+            callbackHandlers += Handler(thread.looper)
+        }
         return true
     }
+
+    private fun handler(): Handler =
+        callbackHandlers[
+            (nextHandler.getAndIncrement() and Int.MAX_VALUE) % callbackHandlers.size
+        ]
 
     // ── Roots ────────────────────────────────────────────────────────────────
 
@@ -143,74 +152,40 @@ class TsyncProvider : DocumentsProvider() {
         // probing needs.
         if (!mode.contains("w")) {
             val storage = context!!.getSystemService(StorageManager::class.java)
-            val session = ReadSession.open(context!!, documentId)
-            if (session != null) {
-                // Closed here if the descriptor cannot be made: nothing else
-                // would, onRelease belonging to a descriptor that never existed.
-                return try {
-                    storage.openProxyFileDescriptor(
-                        ParcelFileDescriptor.MODE_READ_ONLY,
-                        object : ProxyFileDescriptorCallback() {
-                            override fun onGetSize(): Long = session.size
+            Native.ensure(context!!)
+            val handle = Native.nativeOpen(documentId)
+            if (handle < 0) throw ErrnoException("openDocument", -handle)
+            // Closed here if the descriptor cannot be made: nothing else would,
+            // onRelease belonging to a descriptor that never existed.
+            return try {
+                storage.openProxyFileDescriptor(
+                    ParcelFileDescriptor.MODE_READ_ONLY,
+                    object : ProxyFileDescriptorCallback() {
+                        override fun onGetSize(): Long = Native.nativeSize(handle)
 
-                            override fun onRead(
-                                offset: Long,
-                                size: Int,
-                                data: ByteArray
-                            ): Int =
-                                try {
-                                    session.read(offset, size, data)
-                                } catch (e: Exception) {
-                                    Log.w(TAG, "read $documentId @$offset: ${e.message}")
-                                    throw ErrnoException("onRead", OsConstants.EIO)
-                                }
+                        override fun onRead(
+                            offset: Long,
+                            size: Int,
+                            data: ByteArray
+                        ): Int {
+                            val served = Native.nativeRead(handle, offset, size, data)
+                            // The errno the domain answered, not a blanket EIO:
+                            // a document that is gone reads differently from one
+                            // that could not be fetched.
+                            if (served < 0) throw ErrnoException("onRead", -served)
+                            return served
+                        }
 
-                            override fun onRelease() = session.close()
-                        },
-                        callbackHandler
-                    )
-                } catch (failure: Exception) {
-                    session.close()
-                    throw failure
-                }
+                        override fun onRelease() {
+                            Native.nativeClose(handle)
+                        }
+                    },
+                    handler()
+                )
+            } catch (failure: Exception) {
+                Native.nativeClose(handle)
+                throw failure
             }
-
-            // Every session is busy. A range per invocation is slow enough that
-            // it is a fallback and not a design, but it answers.
-            val size = Tsync.json(context!!, Cli.stat(documentId)).getLong("size")
-            val scratch = File(context!!.cacheDir, "reads").apply { mkdirs() }
-                .resolve(UUID.randomUUID().toString())
-            return storage.openProxyFileDescriptor(
-                ParcelFileDescriptor.MODE_READ_ONLY,
-                object : ProxyFileDescriptorCallback() {
-                    override fun onGetSize(): Long = size
-
-                    override fun onRead(offset: Long, size: Int, data: ByteArray): Int {
-                        val served = try {
-                            Tsync.json(
-                                context!!,
-                                Cli.read(documentId, scratch.absolutePath, offset, size)
-                            ).getInt("length")
-                        } catch (e: Exception) {
-                            Log.w(TAG, "read $documentId @$offset: ${e.message}")
-                            throw ErrnoException("onRead", OsConstants.EIO)
-                        }
-                        if (served <= 0) return 0
-                        // The range lands at its own offset, the rest of the
-                        // file staying a hole.
-                        RandomAccessFile(scratch, "r").use { file ->
-                            file.seek(offset)
-                            file.readFully(data, 0, served)
-                        }
-                        return served
-                    }
-
-                    override fun onRelease() {
-                        scratch.delete()
-                    }
-                },
-                callbackHandler
-            )
         }
 
         val staging = Ingest.newStaging(context!!)
@@ -226,7 +201,7 @@ class TsyncProvider : DocumentsProvider() {
         return ParcelFileDescriptor.open(
             staging,
             ParcelFileDescriptor.MODE_READ_WRITE,
-            callbackHandler
+            handler()
         ) { error ->
             if (error != null) {
                 // A truncated write is worse than a dropped edit.
@@ -341,6 +316,10 @@ class TsyncProvider : DocumentsProvider() {
 
     companion object {
         const val TAG = "tsyncsaf"
+
+        /** Concurrent reads in flight; beyond this a caller waits rather than
+         *  falling into anything slower. */
+        const val CALLBACK_THREADS = 4
         const val AUTHORITY = "org.feverdreamtv.tsync.documents"
 
         /** DocumentsUI caches the root list and only re-queries when told, so a

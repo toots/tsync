@@ -356,6 +356,21 @@
   (action
    (diff android_test.expected android_test.output))))
 
+(subdir frontends/android_bridge
+ (alias
+  (name default)
+  (deps bridge_test.exe))
+ (rule
+  (alias runtest)
+  (deps %{exe:../../../bin/tsync.exe})
+  (target bridge_test.output)
+  (action
+   (with-stdout-to bridge_test.output (ignore-stderr (run ./bridge_test.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff bridge_test.expected bridge_test.output))))
+
 (subdir frontends/http_proxy
  (alias
   (name default)

@@ -17,10 +17,8 @@ type binding = {
 (** How many processes a frontend needs. Declared, not enacted: the launcher
     does the forking, so one place decides what runs where.
     [`Process_per_binding] is for a frontend whose serving call blocks per
-    domain, as FUSE's mount does; [`Not_a_daemon] for one driven by commands
-    rather than by [tsync start], which the launcher refuses before forking
-    anything else. *)
-type topology = [ `One_process | `Process_per_binding | `Not_a_daemon ]
+    domain, as FUSE's mount does. *)
+type topology = [ `One_process | `Process_per_binding ]
 
 (** A binding with the domain wiring the launcher built for it: file operations,
     the request handler, and the queue that sends what this process accepts.
@@ -49,15 +47,25 @@ type served = {
     and the same path for every domain on macOS. *)
 type socket = [ `Domain_socket | `Proxy_socket ]
 
+(** What the launcher needs to run a frontend: how many processes to fork, where
+    it answers, and the call that serves. [start] blocks until shutdown. *)
+type daemon = {
+  topology : topology;
+  listens : socket option;
+  start : served list -> unit;
+}
+
+(** How a frontend is served. [Commands] is one the launcher never runs, driven
+    by [tsync <group> <verb>] or by an app that links it; it carries the wording
+    a refusal answers with, since only the frontend knows what to point the user
+    at instead. *)
+type serving = Daemon of daemon | Commands of string
+
 module type S = sig
   (** Whether every byte of [key] is on this machine, for [tsync ls]. *)
   val is_local : Conf.locality -> Logical_key.t -> bool
 
-  val topology : topology
-  val listens : socket option
-
-  (** Serve everything handed to this process. Blocks until shutdown. *)
-  val start : served list -> unit
+  val serving : serving
 end
 
 (** {1 Registry} *)
@@ -103,6 +111,11 @@ val entries : unit -> (string * string * command list) list
     event loop and sizes the blocking pool, which is why it can size a leaf
     knowing everything that shares it — a frontend sees one binding and cannot
     know what else the process runs. *)
+
+(** Select the libev event loop, for a frontend that sizes its own blocking
+    pool: {!cap_blocking_pool}'s range is a server's, and its lower bound alone
+    is more than a phone should hold. *)
+val use_libev : unit -> unit
 
 (** Select the libev event loop and cap the blocking pool. Call from inside the
     leaf's own Lwt loop, after all forking: the first [Lwt_unix] touch creates

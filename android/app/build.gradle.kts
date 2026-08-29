@@ -108,23 +108,40 @@ val ndkStrip: File by lazy {
 // -PrequireDaemon.
 val requireDaemon = providers.gradleProperty("requireDaemon").isPresent
 
-val stageDaemon by tasks.registering {
-    val built = rootProject.file("../_build/default.android/bin/tsync.exe")
-    val staged = file("src/main/jniLibs/arm64-v8a/libtsync.so")
-    // A FileCollection, not inputs.file: that one fails the task outright when
-    // the path does not exist, which is the case this gate exists to allow.
-    inputs.files(built)
-    outputs.file(staged)
-    onlyIf { built.exists() || requireDaemon }
-    doLast {
-        require(built.exists()) {
-            "missing $built — run `dune build -x android bin/tsync.exe` first"
+// A FileCollection, not inputs.file: that one fails the task outright when the
+// path does not exist, which is the case the gate exists to allow.
+fun stage(name: String, from: String, to: String) =
+    tasks.register(name) {
+        val built = rootProject.file(from)
+        val staged = file(to)
+        inputs.files(built)
+        outputs.file(staged)
+        onlyIf { built.exists() || requireDaemon }
+        doLast {
+            require(built.exists()) {
+                "missing $built — run `dune build -x android $from` first"
+            }
+            staged.parentFile.mkdirs()
+            built.copyTo(staged, overwrite = true)
+            staged.setWritable(true)
+            // llvm-strip drops .symtab and the debug sections but keeps
+            // .dynsym, so the Java_* entry points still resolve.
+            exec { commandLine(ndkStrip.absolutePath, staged.absolutePath) }
         }
-        staged.parentFile.mkdirs()
-        built.copyTo(staged, overwrite = true)
-        staged.setWritable(true)
-        exec { commandLine(ndkStrip.absolutePath, staged.absolutePath) }
     }
-}
 
-tasks.named("preBuild") { dependsOn(stageDaemon) }
+// The library the app calls into, and the binary it still execs for the verbs
+// that have not moved in-process yet.
+val stageLibrary = stage(
+    "stageLibrary",
+    "../_build/default.android/lib/app/frontends/android/jni/libtsyncjni.so",
+    "src/main/jniLibs/arm64-v8a/libtsyncjni.so"
+)
+
+val stageDaemon = stage(
+    "stageDaemon",
+    "../_build/default.android/bin/tsync.exe",
+    "src/main/jniLibs/arm64-v8a/libtsync.so"
+)
+
+tasks.named("preBuild") { dependsOn(stageLibrary, stageDaemon) }
