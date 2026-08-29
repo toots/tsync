@@ -164,6 +164,23 @@ let () =
       (Http_proxy.Auth.verify ~secret ~meth ~path ~timestamp:ts
          ~signature:"deadbeef" ~body));
 
+  (* A range travels in the query, which the signature covers along with the
+     rest of the request target: a peer cannot be talked into reading somewhere
+     else by rewriting the offset of a request it was handed. *)
+  let ranged = "/o/abc?offset=64&length=8" in
+  let headers =
+    Http_proxy.Auth.request_headers ~secret ~meth ~path:ranged ~body ()
+  in
+  let ts = List.assoc Http_proxy.Auth.timestamp_header headers in
+  let sig_ = List.assoc Http_proxy.Auth.signature_header headers in
+  assert (
+    Http_proxy.Auth.verify ~secret ~meth ~path:ranged ~timestamp:ts
+      ~signature:sig_ ~body);
+  assert (
+    not
+      (Http_proxy.Auth.verify ~secret ~meth ~path:"/o/abc?offset=0&length=8"
+         ~timestamp:ts ~signature:sig_ ~body));
+
   (* A stale timestamp (outside the skew window) fails. *)
   let old_ts = Printf.sprintf "%.0f" (Unix.time () -. 1000.) in
   (* Signed the way a client signs, only under an old clock: what is being
@@ -247,6 +264,35 @@ let () =
   assert (
     Http_proxy_frontend.route_key (chunk_size_op "tsync/one/")
     = Some "tsync/one/");
+  (* A range is a GET of the object it names, so it routes and is authorised
+     exactly as the whole-object read it replaces. *)
+  let obj_op q =
+    Http_proxy_frontend.parse_op `GET
+      (Uri.of_string ("/o/" ^ Http_proxy.Wire.encode_key "tsync/one/chunks/ab/k"
+                    ^ q))
+      Bigstring.empty
+  in
+  let ranged = obj_op "?offset=64&length=8" in
+  assert (
+    match ranged with
+      | Http_proxy_frontend.Get_range { offset = 64; length = 8; _ } -> true
+      | _ -> false);
+  assert (
+    Http_proxy_frontend.route_key ranged = Some "tsync/one/chunks/ab/k");
+  (* The gate that bounds concurrent reads keys off this, and its fallback is
+     the metadata class: a body-carrying op left out of it holds no slot. *)
+  assert (Http_proxy_frontend.data_kind ranged = `Get);
+  (* A range asked for but not spelled is refused rather than widened to the
+     whole object, which is the one answer that would look like success while
+     sending what the range exists to avoid. *)
+  assert (obj_op "?offset=64" = Http_proxy_frontend.Bad);
+  assert (obj_op "?length=8" = Http_proxy_frontend.Bad);
+  assert (obj_op "?offset=-1&length=8" = Http_proxy_frontend.Bad);
+  assert (obj_op "?offset=0&length=0" = Http_proxy_frontend.Bad);
+  (* Without one it is still the plain read. *)
+  assert (
+    match obj_op "" with Http_proxy_frontend.Get _ -> true | _ -> false);
+
   (* No prefix is a bad request, not a silent answer for some other domain. *)
   assert (
     Http_proxy_frontend.parse_op `GET
