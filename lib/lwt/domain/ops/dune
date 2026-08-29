@@ -39,6 +39,8 @@
    -open
    Tsync_file_lwt
    -open
+   Tsync_filing_lwt
+   -open
    Tsync_cache_layout_lwt
    -open
    Tsync_io_lwt))
@@ -60,6 +62,7 @@
   tsync_spill_lwt
   tsync_sync_lwt
   tsync_file_lwt
+  tsync_filing_lwt
   tsync_cache_layout_lwt
   tsync_inode_tree_lwt
   tsync_corruption_lwt

@@ -1,0 +1,23 @@
+; One rule, because a resync and a browse must leave the same tree behind.
+
+(library
+ (flags
+  (:standard
+   -open
+   Tsync_logical_key
+   -open
+   Tsync_manifest
+   -open
+   Tsync_inode_tree
+   -open
+   Tsync_conf
+   -open
+   Tsync_io))
+ (name tsync_filing)
+ (public_name tsync-libs.filing)
+ (libraries
+  tsync_logical_key
+  tsync_manifest
+  tsync_inode_tree
+  tsync_conf
+  tsync_io))

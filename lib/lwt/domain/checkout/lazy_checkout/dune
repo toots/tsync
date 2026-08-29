@@ -9,6 +9,8 @@
    -open
    Tsync_checkout_lwt
    -open
+   Tsync_filing_lwt
+   -open
    Tsync_inode_tree_lwt
    -open
    Tsync_folder_ids_lwt
@@ -23,6 +25,7 @@
  (libraries
   tsync_lazy_checkout
   tsync_checkout_lwt
+  tsync_filing_lwt
   tsync_inode_tree_lwt
   tsync_folder_ids_lwt
   tsync_manifests_lwt

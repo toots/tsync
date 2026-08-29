@@ -24,25 +24,25 @@ module type PULL = sig
   end
 end
 
+module type FILING = sig
+  type 'a io
+
+  module Make (_ : Conf.S with type 'a io = 'a io) : sig
+    val record : parent:Logical_key.t -> Inode_tree.entry -> Logical_key.t io
+  end
+end
+
 module type FOLDERS = sig
   type 'a io
 
   val lookup_id :
     cache_root:string -> domain_name:string -> Logical_key.t -> string option io
-
-  val write :
-    cache_root:string ->
-    domain_name:string ->
-    Logical_key.t ->
-    Folder.marker ->
-    unit io
 end
 
 module type MANIFESTS = sig
   type 'a io
 
   module Make (_ : Conf.S with type 'a io = 'a io) : sig
-    val write : Logical_key.t -> Manifest.t -> unit io
     val delete : Logical_key.t -> unit io
   end
 end
@@ -57,6 +57,7 @@ module Over
     (Io : Io.S)
     (Ck : TREE with type 'a io := 'a Io.t)
     (P : PULL with type 'a io := 'a Io.t)
+    (Fl : FILING with type 'a io := 'a Io.t)
     (Fi : FOLDERS with type 'a io := 'a Io.t)
     (Mf : MANIFESTS with type 'a io := 'a Io.t) =
 struct
@@ -79,6 +80,7 @@ struct
   module Make (C : Conf.S with type 'a io = 'a Io.t) = struct
     module T = Ck.Make (C)
     module Pull = P.Make (C)
+    module Filing = Fl.Make (C)
     module Manifests = Mf.Make (C)
     module Lk = Logical_key.Make (C)
 
@@ -93,23 +95,9 @@ struct
       else
         Fi.lookup_id ~cache_root:C.cache_root ~domain_name:C.domain_name prefix
 
-    (* The name a child answers to is in its body: the key it was read by is
-       hashed. *)
-    let record prefix (entry : Inode_tree.entry) =
-      match entry.Inode_tree.body with
-        | Inode_tree.Dir marker ->
-            let key = Logical_key.dir_in prefix marker.Folder.name in
-            let+ () =
-              Fi.write ~cache_root:C.cache_root ~domain_name:C.domain_name key
-                marker
-            in
-            marker.Folder.name
-        | Inode_tree.File manifest ->
-            let name = Manifest.recorded_name manifest in
-            let+ () =
-              Manifests.write (Logical_key.file_in prefix name) manifest
-            in
-            name
+    let record prefix entry =
+      let+ filed = Filing.record ~parent:prefix entry in
+      Logical_key.leaf filed
 
     (* Only the published half is dropped: a staged body is this client's own
        and is not the store's to retract. *)

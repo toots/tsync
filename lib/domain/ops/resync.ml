@@ -115,6 +115,14 @@ module type SYNC = sig
   end
 end
 
+module type FILING = sig
+  type 'a io
+
+  module Make (_ : Conf.S with type 'a io = 'a io) : sig
+    val record : parent:Logical_key.t -> Inode_tree.entry -> Logical_key.t io
+  end
+end
+
 module Over
     (Io : Io.S)
     (Folder_ids : FOLDER_IDS with type 'a io := 'a Io.t)
@@ -123,6 +131,7 @@ module Over
     (Tree : TREE with type 'a io := 'a Io.t and type pool := Pools.t)
     (Cursor_of : CURSOR with type 'a io := 'a Io.t)
     (Checkout : CHECKOUT with type 'a io := 'a Io.t)
+    (Filing : FILING with type 'a io := 'a Io.t)
     (Sync : SYNC with type 'a io := 'a Io.t) =
 struct
   let ( let* ) = Io.bind
@@ -162,6 +171,7 @@ struct
     module J = Journal.Make (C)
     module Cursor = Cursor_of.Make (C)
     module F = Checkout.Make (C)
+    module Fl = Filing.Make (C)
     module Sq = Sync.Queue (C) (F)
     module Rp = Sync.Replay (C) (F)
     module Tree = Tree.Make (C)
@@ -185,19 +195,13 @@ struct
                 "unreadable manifest: " ^ Printexc.to_string exn)
       in
       let apply key (entry : Inode_tree.entry) =
+        let* filed = Fl.record ~parent:key entry in
         match entry.Inode_tree.body with
-          | Inode_tree.Dir m ->
-              Folder_ids.write ~cache_root:C.cache_root
-                ~domain_name:C.domain_name
-                (Logical_key.dir_in key m.Folder.name)
-                m
-          | Inode_tree.File man ->
+          | Inode_tree.Dir _ -> Io.return ()
+          | Inode_tree.File _ ->
               incr count;
-              (* Read by backend key, which is hashed: the body is what names
-                 it. *)
-              let file = Logical_key.file_in key (Manifest.recorded_name man) in
-              on_manifest (Logical_key.path file);
-              F.write_manifest file man
+              on_manifest (Logical_key.path filed);
+              Io.return ()
       in
       let visit () key entry =
         let rel = Logical_key.path key in

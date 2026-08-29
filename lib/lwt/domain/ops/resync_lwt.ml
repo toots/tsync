@@ -16,4 +16,5 @@ include
     (Tree)
     (File_store_lwt)
     (File_lwt)
+    (Filing_lwt)
     (Sync)

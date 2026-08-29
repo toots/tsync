@@ -16,5 +16,6 @@ module Pull = struct
 end
 
 include
-  Lazy_checkout.Over (Io_lwt.Core) (Checkout_lwt) (Pull) (Folder_ids_lwt)
+  Lazy_checkout.Over (Io_lwt.Core) (Checkout_lwt) (Pull) (Filing_lwt)
+    (Folder_ids_lwt)
     (Manifests_lwt)

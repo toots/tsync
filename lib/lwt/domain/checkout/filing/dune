@@ -1,0 +1,20 @@
+; Filing on Lwt: the writers a resync and a browse both record through.
+
+(library
+ (flags
+  (:standard
+   -open
+   Tsync_filing
+   -open
+   Tsync_folder_ids_lwt
+   -open
+   Tsync_manifests_lwt
+   -open
+   Tsync_io_lwt))
+ (name tsync_filing_lwt)
+ (public_name tsync-libs.filing_lwt)
+ (libraries
+  tsync_filing
+  tsync_folder_ids_lwt
+  tsync_manifests_lwt
+  tsync_io_lwt))

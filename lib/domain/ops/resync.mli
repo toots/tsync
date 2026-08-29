@@ -130,6 +130,16 @@ module type SYNC = sig
   end
 end
 
+(** Where a folder's child is filed in the working copy: shared with the browse
+    path, so a resync and a browse leave the same tree behind. *)
+module type FILING = sig
+  type 'a io
+
+  module Make (_ : Conf.S with type 'a io = 'a io) : sig
+    val record : parent:Logical_key.t -> Inode_tree.entry -> Logical_key.t io
+  end
+end
+
 module Over
     (Io : Io.S)
     (_ : FOLDER_IDS with type 'a io := 'a Io.t)
@@ -138,6 +148,7 @@ module Over
     (_ : TREE with type 'a io := 'a Io.t and type pool := Pools.t)
     (_ : CURSOR with type 'a io := 'a Io.t)
     (_ : CHECKOUT with type 'a io := 'a Io.t)
+    (_ : FILING with type 'a io := 'a Io.t)
     (_ : SYNC with type 'a io := 'a Io.t) : sig
   module Make (C : Conf.S with type 'a io = 'a Io.t) : sig
     (** [notify] is called once the rebuild is complete and never before, or a
