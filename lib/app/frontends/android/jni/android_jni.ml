@@ -133,7 +133,9 @@ let read handle offset buffer =
             | None -> Lwt.fail (Unix.Unix_error (Unix.EBADF, "read", ""))
             | Some h ->
                 let module E = (val serving () : Domain_engine.S) in
-                E.F.read h.key buffer ~offset))
+                (* The handle, not the key: a player opens one file twice, to
+                   probe it and to play it, and each walks it at its own pace. *)
+                E.F.read ~stream:(string_of_int handle) h.key buffer ~offset))
 
 let close handle =
   guard "close" (fun () ->

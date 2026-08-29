@@ -37,10 +37,16 @@ module type CONTENT = sig
       (C : Conf.S with type 'a io = 'a io)
       (_ : REMOTE with type 'a io := 'a io) : sig
     val pread :
-      id:string -> manifest:Manifest.t -> Bigstring.t -> offset:int64 -> int io
+      id:string ->
+      ?stream:string ->
+      manifest:Manifest.t ->
+      Bigstring.t ->
+      offset:int64 ->
+      int io
 
     val published : Logical_key.t -> Manifest.t option io
-    val pread_key : Logical_key.t -> Bigstring.t -> offset:int64 -> int io
+    val pread_key :
+      ?stream:string -> Logical_key.t -> Bigstring.t -> offset:int64 -> int io
     val write : Logical_key.t -> Bigstring.t -> offset:int64 -> int io
     val truncate : Logical_key.t -> int64 -> unit io
     val create : Logical_key.t -> unit io
@@ -431,7 +437,8 @@ struct
 
     let create key = D.create key
     let write_whole key ~src_path = D.stage_whole key ~src_path
-    let read key (buf : File_ops.buffer) ~offset = D.pread_key key buf ~offset
+    let read ?stream key (buf : File_ops.buffer) ~offset =
+      D.pread_key ?stream key buf ~offset
 
     (* What to call a row, and where the file sits under the domain root. *)
     (* The queue and the pull tracker hold rendered keys, so this takes one back

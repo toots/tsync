@@ -8,7 +8,7 @@ open Test_runner
 
 (* The trailing [Drain] spaces successive reads out in time, so coldest-first
    ordering is deterministic. *)
-let cache path = [ReadRange { path; offset = 0; len = 8 }; Drain]
+let cache path = [ReadRange { path; offset = 0; len = 8; stream = None }; Drain]
 
 let scenarios : scenario list =
   [
@@ -37,7 +37,7 @@ let scenarios : scenario list =
             ShowChunks "b.txt";
             ShowChunks "c.txt";
             (* Dropped bodies are not lost data: reading returns the same bytes. *)
-            ReadRange { path = "a.txt"; offset = 0; len = 8 };
+            ReadRange { path = "a.txt"; offset = 0; len = 8; stream = None };
             ShowChunks "a.txt";
           ];
     };
@@ -53,7 +53,7 @@ let scenarios : scenario list =
             EnforceCache;
             ShowChunks "x.txt";
             ShowChunks "z.txt";
-            ReadRange { path = "z.txt"; offset = 0; len = 8 };
+            ReadRange { path = "z.txt"; offset = 0; len = 8; stream = None };
           ];
     };
   ]

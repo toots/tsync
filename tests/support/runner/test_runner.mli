@@ -29,7 +29,14 @@ type step =
   | Close of string
       (** Handle closed, the way FUSE [release] does: queue the upload a file
           with staged edits owes, and nothing otherwise. *)
-  | ReadRange of { path : string; offset : int; len : int }
+  (** [stream] names the descriptor reading, so interleaved readers of one file
+      each keep their own place for the read-ahead heuristic. *)
+  | ReadRange of {
+      path : string;
+      offset : int;
+      len : int;
+      stream : string option;
+    }
       (** Read [len] bytes at [offset], fetching only the chunks they need, and
           print the bytes returned. *)
   | FetchRange of { path : string; offset : int; len : int }

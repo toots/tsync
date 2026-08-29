@@ -28,7 +28,12 @@ type step =
   | Restore of string
   | RevertVersion of { path : string; version : string option }
   | Close of string  (** Handle closed: queue the upload a staged file owes. *)
-  | ReadRange of { path : string; offset : int; len : int }
+  | ReadRange of {
+      path : string;
+      offset : int;
+      len : int;
+      stream : string option;
+    }
       (** Read [len] bytes at [offset], fetching only the chunks they need, and
           print the bytes returned. *)
   | FetchRange of { path : string; offset : int; len : int }
@@ -163,8 +168,10 @@ let rec render_step = function
       Printf.sprintf "revert %s%s" path
         (match version with Some v -> " @" ^ v | None -> " @latest")
   | Close p -> "close " ^ p
-  | ReadRange { path; offset; len } ->
-      Printf.sprintf "read %s [%d,%d)" path offset (offset + len)
+  | ReadRange { path; offset; len; stream } ->
+      Printf.sprintf "read %s%s [%d,%d)" path
+        (match stream with None -> "" | Some s -> " <" ^ s ^ ">")
+        offset (offset + len)
   | FetchRange { path; offset; len } ->
       Printf.sprintf "fetch-range %s [%d,%d)" path offset (offset + len)
   | WriteAt { path; offset; content } ->
@@ -617,14 +624,16 @@ let setup_client (module C : Conf_lwt.S) root staging_prefix =
           ?extra:(Option.map (fun v -> [("arg", `String v)]) version)
           "revert" (key path)
     | Close p -> F.close (key p)
-    | ReadRange { path; offset; len } ->
+    | ReadRange { path; offset; len; stream } ->
         let buf = Bigarray.Array1.create Bigarray.char Bigarray.c_layout len in
-        let* n = F.read (key path) buf ~offset:(Int64.of_int offset) in
+        let* n = F.read ?stream (key path) buf ~offset:(Int64.of_int offset) in
         let bytes = Bytes.create n in
         for i = 0 to n - 1 do
           Bytes.set bytes i (Bigarray.Array1.get buf i)
         done;
-        Printf.printf "  read %s [%d,%d) = %S\n" path offset (offset + len)
+        Printf.printf "  read %s%s [%d,%d) = %S\n" path
+          (match stream with None -> "" | Some s -> " <" ^ s ^ ">")
+          offset (offset + len)
           (Bytes.to_string bytes);
         Lwt.return_unit
     | FetchRange { path; offset; len } ->

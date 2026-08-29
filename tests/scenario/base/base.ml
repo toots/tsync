@@ -49,7 +49,7 @@ let scenarios : scenario list =
           (* Read first: a whole-file write leaves nothing in the chunk store, so
              the eviction would have nothing to drop and the snapshot could not
              tell a working evict from a no-op. *)
-          ReadRange { path = "a.txt"; offset = 0; len = 7 };
+          ReadRange { path = "a.txt"; offset = 0; len = 7; stream = None };
           ShowChunks "a.txt";
           Evict "a.txt";
           ShowChunks "a.txt";

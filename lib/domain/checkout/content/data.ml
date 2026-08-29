@@ -152,7 +152,11 @@ struct
     module Staged = Staged_manifest.Over (Io) (Fs) (Retry)
     module Mfs = Staged.Make (C)
 
-    (* Advisory: a lost or stale entry costs at most one un-prefetched read. *)
+    (* Keyed by the reading stream rather than by the file: two descriptors open
+       on one file each walk it at their own pace, and a shared position reads
+       each one's progress as the other's and prefetches for neither.
+
+       Advisory: a lost or stale entry costs at most one un-prefetched read. *)
     let last_read_end : (string, int) Hashtbl.t = Hashtbl.create 64
 
     (* Files waiting on the network because something is reading them. Separate
@@ -338,7 +342,8 @@ struct
 
     (* [id] names the file for the read-ahead heuristic and for {!pulling}, which
        is how a byte fetched here is attributed to the file someone is reading. *)
-    let pread ~id ~(manifest : Manifest.t) buf ~offset =
+    let pread ~id ?stream ~(manifest : Manifest.t) buf ~offset =
+      let stream = Option.value stream ~default:id in
       let cs = Manifest.chunk_size manifest in
       let size = Manifest.size manifest in
       let want = Bigarray.Array1.dim buf in
@@ -381,10 +386,10 @@ struct
         let last =
           min (n - 1) (Chunks.index_of ~chunk_size:cs (start + max 0 (got - 1)))
         in
-        if Hashtbl.find_opt last_read_end id = Some start then
+        if Hashtbl.find_opt last_read_end stream = Some start then
           read_ahead ~id ~size:(Int64.to_int size) ~table ~per ~chunk_size:cs
             ~last;
-        Hashtbl.replace last_read_end id (start + got);
+        Hashtbl.replace last_read_end stream (start + got);
         Io.return got)
 
     let rec pread_staged ~id ~(staged : Staged_manifest.staged) ~base buf
@@ -472,16 +477,19 @@ struct
        reading them, so a miss is resolved again and read once more. The retry
        finds the published manifest because {!promote} puts it in place before any
        body goes, the same shape as {!Chunk_cache.read_into} against the cap. *)
-    let pread_key key buf ~offset =
+    (* [stream] names the descriptor asking, for callers that have one; without
+       it every reader of a key shares its position. *)
+    let pread_key ?stream key buf ~offset =
+      let id = Logical_key.to_string key in
+      let stream =
+        match stream with None -> id | Some s -> id ^ "\000" ^ s
+      in
       let attempt () =
         let* resolved = Mf.current key in
         match resolved with
           | Some (`Staged (staged, base)) ->
-              pread_staged
-                ~id:(Logical_key.to_string key)
-                ~staged ~base buf ~offset
-          | Some (`Published m) ->
-              pread ~id:(Logical_key.to_string key) ~manifest:m buf ~offset
+              pread_staged ~id ~staged ~base buf ~offset
+          | Some (`Published m) -> pread ~id ~stream ~manifest:m buf ~offset
           | None -> Io.return 0
       in
       Io.catch attempt (function

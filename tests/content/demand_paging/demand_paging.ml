@@ -12,6 +12,9 @@ open Test_runner
 let big = "0123456789ABCDEFghijklmn"
 let edit = "aaaaaaaabbbbbbbbcccccccc"
 
+(* Ten chunks, so a prefetch can reach one no read asked for. *)
+let ten = String.concat "" (List.init 10 (fun i -> String.make 8 (Char.chr (48 + i))))
+
 let scenarios : scenario list =
   [
     {
@@ -22,13 +25,39 @@ let scenarios : scenario list =
           Drain;
           Evict "big.txt";
           ShowChunks "big.txt";
-          ReadRange { path = "big.txt"; offset = 0; len = 8 };
+          ReadRange { path = "big.txt"; offset = 0; len = 8; stream = None };
           ShowChunks "big.txt";
-          ReadRange { path = "big.txt"; offset = 16; len = 8 };
+          ReadRange { path = "big.txt"; offset = 16; len = 8; stream = None };
           ShowChunks "big.txt";
           (* Reading the remaining hole completes the file. *)
-          ReadRange { path = "big.txt"; offset = 8; len = 8 };
+          ReadRange { path = "big.txt"; offset = 8; len = 8; stream = None };
           ShowChunks "big.txt";
+        ];
+    };
+    {
+      (* A player opens one file twice: one handle probes the end for the index
+         while the other plays from the start. Each keeps its own place, so
+         neither reads the other's bytes.
+
+         What is not covered here is the prefetch the separate places exist for:
+         [read_ahead] is fired and forgotten, so nothing it fetches has landed
+         by the time the chunks are counted. *)
+      name = "two readers of one file keep their own place";
+      steps =
+        [
+          Write { path = "two.txt"; content = ten };
+          Drain;
+          Evict "two.txt";
+          ShowChunks "two.txt";
+          ReadRange { path = "two.txt"; offset = 0; len = 8; stream = Some "play" };
+          ReadRange
+            { path = "two.txt"; offset = 72; len = 8; stream = Some "probe" };
+          ReadRange { path = "two.txt"; offset = 8; len = 8; stream = Some "play" };
+          ShowChunks "two.txt";
+          (* Settles the file, so what the fired-and-forgotten prefetch had
+             reached by the end does not decide the count. *)
+          ReadRange { path = "two.txt"; offset = 0; len = 80; stream = None };
+          ShowChunks "two.txt";
         ];
     };
     {
@@ -37,11 +66,11 @@ let scenarios : scenario list =
         [
           Write { path = "gone.txt"; content = big };
           Drain;
-          ReadRange { path = "gone.txt"; offset = 0; len = 8 };
+          ReadRange { path = "gone.txt"; offset = 0; len = 8; stream = None };
           DeleteCachedChunk { path = "gone.txt"; index = 0 };
           ShowChunks "gone.txt";
           (* The cap may unlink a body at any time, so a miss is ordinary. *)
-          ReadRange { path = "gone.txt"; offset = 0; len = 8 };
+          ReadRange { path = "gone.txt"; offset = 0; len = 8; stream = None };
           ShowChunks "gone.txt";
         ];
     };
@@ -59,7 +88,7 @@ let scenarios : scenario list =
           Drain;
           (* Chunks #0/#2 were inherited unchanged and are still not local. *)
           ShowChunks "edit.txt";
-          ReadRange { path = "edit.txt"; offset = 0; len = 24 };
+          ReadRange { path = "edit.txt"; offset = 0; len = 24; stream = None };
           ShowChunks "edit.txt";
         ];
     };
@@ -76,7 +105,7 @@ let scenarios : scenario list =
           ShowChunks "rmw.txt";
           Close "rmw.txt";
           Drain;
-          ReadRange { path = "rmw.txt"; offset = 8; len = 8 };
+          ReadRange { path = "rmw.txt"; offset = 8; len = 8; stream = None };
         ];
     };
     {
@@ -92,7 +121,7 @@ let scenarios : scenario list =
           ShowChunks "shrink.txt";
           Close "shrink.txt";
           Drain;
-          ReadRange { path = "shrink.txt"; offset = 0; len = 8 };
+          ReadRange { path = "shrink.txt"; offset = 0; len = 8; stream = None };
         ];
     };
     {
@@ -104,11 +133,11 @@ let scenarios : scenario list =
           Truncate { path = "grow.txt"; size = 24 };
           (* Z slots: holes, no body on disk and nothing fetched. *)
           ShowChunks "grow.txt";
-          ReadRange { path = "grow.txt"; offset = 8; len = 8 };
+          ReadRange { path = "grow.txt"; offset = 8; len = 8; stream = None };
           Close "grow.txt";
           Drain;
           ShowChunks "grow.txt";
-          ReadRange { path = "grow.txt"; offset = 0; len = 24 };
+          ReadRange { path = "grow.txt"; offset = 0; len = 24; stream = None };
         ];
     };
   ]

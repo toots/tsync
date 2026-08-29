@@ -31,6 +31,53 @@
     chunk#1 b759bff1a75c54a7-53cd28ced10cf0e3 size=8
     chunk#2 1ba95805d6ae106a-87537fcfd250fddb size=8
 
+=== two readers of one file keep their own place
+  write two.txt "00000000111111112222222233333333444444445555555566666666777777778888888899999999"
+  drain
+  evict two.txt
+  chunks two.txt
+  read two.txt <play> [0,8)
+  read two.txt <probe> [72,80)
+  read two.txt <play> [8,16)
+  chunks two.txt
+  read two.txt [0,80)
+  chunks two.txt
+  chunks two.txt published size=80 chunks=10 cached=0/10
+  read two.txt <play> [0,8) = "00000000"
+  read two.txt <probe> [72,80) = "99999999"
+  read two.txt <play> [8,16) = "11111111"
+  chunks two.txt published size=80 chunks=10 cached=3/10
+  read two.txt [0,80) = "00000000111111112222222233333333444444445555555566666666777777778888888899999999"
+  chunks two.txt published size=80 chunks=10 cached=10/10
+--- tree
+  f two.txt size=80 cached=10/10 uploaded=true etag=8e42d8ff7c95786d
+--- content
+  two.txt = "00000000111111112222222233333333444444445555555566666666777777778888888899999999"
+--- backend
+  chunk 03773ad41c34c5b2-51d52f15793065c4 size=8
+  chunk 0f11c575783463dd-211831025a823ef3 size=8
+  chunk 15827768afcbaaa6-8ae64dcde06e1300 size=8
+  chunk 485eac4c1e8603aa-e3661e60b80e218a size=8
+  chunk 6d260edd9b442c3a-b5890fdf2f5ac850 size=8
+  chunk 74da68eebc971451-dbb17bfa7bc84d58 size=8
+  chunk 7c8614b3f4b0e447-65f10fb7d16cfbb6 size=8
+  chunk ba08a207890df2c1-53485af9feada7c6 size=8
+  chunk c7432b51032c70d7-61e4cb7e323a7c1a size=8
+  chunk fa8acf0f54c10866-56a427276ecceb09 size=8
+  cursor = <entry-1>
+  journal <entry-1> = put two.txt 80
+  file two.txt [.tsync-root/ec31f599335e0228-beece75c09adaf3f] = manifest size=80 chunks=10 h1=8e42d8ff7c95786d h2=9155223ca492904b
+    chunk#0 485eac4c1e8603aa-e3661e60b80e218a size=8
+    chunk#1 74da68eebc971451-dbb17bfa7bc84d58 size=8
+    chunk#2 15827768afcbaaa6-8ae64dcde06e1300 size=8
+    chunk#3 03773ad41c34c5b2-51d52f15793065c4 size=8
+    chunk#4 0f11c575783463dd-211831025a823ef3 size=8
+    chunk#5 fa8acf0f54c10866-56a427276ecceb09 size=8
+    chunk#6 ba08a207890df2c1-53485af9feada7c6 size=8
+    chunk#7 6d260edd9b442c3a-b5890fdf2f5ac850 size=8
+    chunk#8 c7432b51032c70d7-61e4cb7e323a7c1a size=8
+    chunk#9 7c8614b3f4b0e447-65f10fb7d16cfbb6 size=8
+
 === a chunk deleted under a reader is fetched again
   write gone.txt "0123456789ABCDEFghijklmn"
   drain

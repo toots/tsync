@@ -38,7 +38,7 @@ let scenarios : scenario list =
           WriteAt { path = "part.txt"; offset = 8; content = "bbbbbbbb" };
           ShowStaged;
           ShowChunks "part.txt";
-          ReadRange { path = "part.txt"; offset = 0; len = 48 };
+          ReadRange { path = "part.txt"; offset = 0; len = 48; stream = None };
           Drain;
           ShowChunks "part.txt";
         ];
@@ -54,7 +54,7 @@ let scenarios : scenario list =
           (* A different member of the group already staged. *)
           WriteAt { path = "twice.txt"; offset = 16; content = "cccccccc" };
           ShowStaged;
-          ReadRange { path = "twice.txt"; offset = 0; len = 48 };
+          ReadRange { path = "twice.txt"; offset = 0; len = 48; stream = None };
           Drain;
           ShowChunks "twice.txt";
         ];
@@ -73,7 +73,7 @@ let scenarios : scenario list =
           WriteAt { path = "grow.txt"; offset = 16; content = "CCCCCCCC" };
           ShowStaged;
           ShowChunks "grow.txt";
-          ReadRange { path = "grow.txt"; offset = 0; len = 24 };
+          ReadRange { path = "grow.txt"; offset = 0; len = 24; stream = None };
           Drain;
           ShowChunks "grow.txt";
         ];
@@ -98,7 +98,7 @@ let scenarios : scenario list =
           (* And the third, still partly. *)
           WriteAt { path = "piece.txt"; offset = 18; content = "cc" };
           ShowChunks "piece.txt";
-          ReadRange { path = "piece.txt"; offset = 0; len = 24 };
+          ReadRange { path = "piece.txt"; offset = 0; len = 24; stream = None };
           Uploads `Running;
           Drain;
           ShowChunks "piece.txt";
@@ -115,7 +115,7 @@ let scenarios : scenario list =
           Truncate { path = "cut.txt"; size = 12 };
           ShowStaged;
           ShowChunks "cut.txt";
-          ReadRange { path = "cut.txt"; offset = 0; len = 12 };
+          ReadRange { path = "cut.txt"; offset = 0; len = 12; stream = None };
           Drain;
           ShowChunks "cut.txt";
           ShowChunkCache;

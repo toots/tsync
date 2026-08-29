@@ -45,10 +45,16 @@ module type CONTENT = sig
       (C : Conf.S with type 'a io = 'a io)
       (_ : REMOTE with type 'a io := 'a io) : sig
     val pread :
-      id:string -> manifest:Manifest.t -> Bigstring.t -> offset:int64 -> int io
+      id:string ->
+      ?stream:string ->
+      manifest:Manifest.t ->
+      Bigstring.t ->
+      offset:int64 ->
+      int io
 
     val published : Logical_key.t -> Manifest.t option io
-    val pread_key : Logical_key.t -> Bigstring.t -> offset:int64 -> int io
+    val pread_key :
+      ?stream:string -> Logical_key.t -> Bigstring.t -> offset:int64 -> int io
     val write : Logical_key.t -> Bigstring.t -> offset:int64 -> int io
     val truncate : Logical_key.t -> int64 -> unit io
     val create : Logical_key.t -> unit io

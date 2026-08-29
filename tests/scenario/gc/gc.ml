@@ -135,7 +135,7 @@ let scenarios : scenario list =
           Drain;
           Evict "foo.txt";
           GcMark;
-          ReadRange { path = "foo.txt"; offset = 0; len = 24 };
+          ReadRange { path = "foo.txt"; offset = 0; len = 24; stream = None };
           GcClose;
           Evict "foo.txt";
         ];

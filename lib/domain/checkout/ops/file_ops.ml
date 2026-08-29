@@ -145,7 +145,9 @@ module type S = sig
   (** Stage a whole file handed over by a frontend as [t]'s new content. *)
   val write_whole : t -> src_path:string -> unit io
 
-  val read : t -> buffer -> offset:int64 -> int io
+  (** [stream] names the descriptor reading, so two open on one file each keep
+      their own place for the read-ahead heuristic; without it they share one. *)
+  val read : ?stream:string -> t -> buffer -> offset:int64 -> int io
   val write : t -> buffer -> offset:int64 -> int io
 
   (** Stop an upload of [t] that is under way. [false] when none was. Not only
