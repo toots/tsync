@@ -63,71 +63,6 @@ end
    all. *)
 type served = { bytes : int; fetched : int; from_backend : bool }
 
-(* Which part of each stored chunk a partly filled body holds, in member-local
-   coordinates.
-
-   One interval per member and never a set: a fill that overlaps or sits apart
-   from what is there takes in the ground between them, so the worst a read
-   costs is one gap inside one stored chunk and there is no interval algebra to
-   get wrong at three in the morning. *)
-module Filled = struct
-  type t = (int * (int * int)) list
-
-  let empty = []
-  let interval t i = List.assoc_opt i t
-  let put t i span = (i, span) :: List.remove_assoc i t
-
-  let render t =
-    String.concat ""
-      (List.map
-         (fun (i, (a, b)) -> Printf.sprintf "%d %d %d\n" i a b)
-         (List.sort compare t))
-
-  (* Strict: anything unreadable is taken as an empty body rather than as the
-     part of one it can still be parsed as. A manifest is rewritten whole, so a
-     half-written one means a write was interrupted, and the safe reading of
-     that is that nothing landed. *)
-  let parse text =
-    let line l =
-      match String.split_on_char ' ' (String.trim l) with
-        | [i; a; b] -> (
-            match
-              (int_of_string_opt i, int_of_string_opt a, int_of_string_opt b)
-            with
-              | Some i, Some a, Some b when i >= 0 && 0 <= a && a < b ->
-                  Some (i, (a, b))
-              | _ -> None)
-        | _ -> None
-    in
-    let rec go acc = function
-      | [] -> List.rev acc
-      | "" :: rest -> go acc rest
-      | l :: rest -> (
-          match line l with Some e -> go (e :: acc) rest | None -> [])
-    in
-    go [] (String.split_on_char '\n' text)
-
-  (* The one range to ask for so that [want] is held afterwards, or [None] when
-     it already is. Always contiguous: where the two intervals leave a hole the
-     hole comes too, and where [want] surrounds what is held the middle is
-     fetched again rather than split into a request either side. *)
-  let missing ~have ~want =
-    let c, d = want in
-    match have with
-      | None -> Some want
-      | Some (a, b) ->
-          if c >= a && d <= b then None
-          else if d <= a then Some (c, a)
-          else if c >= b then Some (b, d)
-          else if c < a && d > b then Some (c, d)
-          else if c < a then Some (c, a)
-          else Some (b, d)
-
-  let widen ~have ~want =
-    let c, d = want in
-    match have with None -> want | Some (a, b) -> (min a c, max b d)
-end
-
 module Make
     (Io : Io.S)
     (Fs : FS with type 'a io := 'a Io.t)
@@ -151,11 +86,18 @@ struct
     Cache_layout.chunk_path ~cache_root:C.cache_root ~domain_name:C.domain_name
       (Manifest.Group.key group)
 
-  let manifest_path group =
-    Cache_layout.chunk_manifest_path ~cache_root:C.cache_root
-      ~domain_name:C.domain_name (Manifest.Group.key group)
+  (* [file_exists] is the retrying one: a record is asked about on the read path
+     as often as a body is. *)
+  module Part =
+    Partial.Make
+      (Io)
+      (struct
+        include Fs
 
-  let partial group = Retry.file_exists (manifest_path group)
+        let file_exists = Retry.file_exists
+      end)
+
+  let key group = Manifest.Group.key group
 
   (* A body with no manifest beside it is whole, which is what every caller of
      this has always been told and what the atomic write still establishes. *)
@@ -163,21 +105,14 @@ struct
     let* here = Retry.file_exists (path group) in
     if not here then return_false
     else
-      let+ incomplete = partial group in
+      let+ incomplete = Part.recorded ~body:(path group) in
       not incomplete
 
-  let load_filled group =
-    let+ text = Fs.read_file_opt (manifest_path group) in
-    match text with None -> Filled.empty | Some text -> Filled.parse text
+  let full_member group held i =
+    Partial.interval held i = Some (0, Manifest.Group.size group i)
 
-  let save_filled group filled =
-    Fs.atomic_write (manifest_path group) (Filled.render filled)
-
-  let full_member group filled i =
-    Filled.interval filled i = Some (0, Manifest.Group.size group i)
-
-  let whole group filled =
-    List.for_all (full_member group filled) (Manifest.Group.indices group)
+  let whole group held =
+    List.for_all (full_member group held) (Manifest.Group.indices group)
 
   (* Keyed by content, so two readers of one group share a fetch whether or not
      they are reading the same file.
@@ -239,10 +174,10 @@ struct
      Dropping the manifest last is what publishes the body: until then a reader
      sees a partial one, and every byte it claims is on disk. *)
   let complete_body group =
-    let* filled = load_filled group in
+    let* held = Part.load ~key:(key group) ~body:(path group) in
     let owed =
       List.filter
-        (fun i -> not (full_member group filled i))
+        (fun i -> not (full_member group held i))
         (Manifest.Group.indices group)
     in
     let* () =
@@ -257,7 +192,7 @@ struct
           ())
         owed
     in
-    Fs.unlink_quiet (manifest_path group)
+    Part.drop ~key:(key group) ~body:(path group)
 
   let fetch group =
     Bounded.use slots (fun () ->
@@ -265,9 +200,9 @@ struct
         if partial then complete_body group
         else
           let* () = write_group group (member group) in
-          (* A manifest left behind by a body the cap took describes a body that
+          (* A record left behind by a body the cap took is about a body that
              is not there; the one just written is whole. *)
-          Fs.unlink_quiet (manifest_path group))
+          Part.drop ~key:(key group) ~body:(path group))
 
   (* Concurrent callers await the same fetch; [force] re-fetches a body believed
      corrupt. Answers whether the body had to come from a backend. *)
@@ -316,7 +251,7 @@ struct
     else
       let* () = write_group group member in
       (* Whole by construction, whatever a partial body left here claimed. *)
-      Fs.unlink_quiet (manifest_path group)
+      Part.drop ~key:(key group) ~body:(path group)
 
   (* Every chunk here is re-fetchable, so holding the store under [C.max_cache]
      needs no residency, open counts or dirty checks. *)
@@ -354,8 +289,7 @@ struct
                  holding more than it does, and evicting one on its own leaves a
                  partial body reading as a whole one. It goes where its body
                  goes. *)
-              if Filename.check_suffix name Cache_layout.manifest_suffix then
-                Io.return None
+              if Partial.is_record name then Io.return None
               else
                 let path = Filename.concat dir name in
                 Io.catch
@@ -398,19 +332,17 @@ struct
                   Log.debug "chunk cache: dropping %s (%d bytes)"
                     (Filename.basename path) bytes;
                   let* () = Fs.unlink_quiet path in
-                  (* After the body, so a crash leaves a manifest describing a
-                     body that is gone -- read as an empty group -- rather than a
+                  (* After the body, so a crash leaves a record about a body
+                     that is gone -- read as an empty group -- rather than a
                      partial body read as a whole one. *)
-                  let* () =
-                    Fs.unlink_quiet (path ^ Cache_layout.manifest_suffix)
-                  in
+                  let* () = Part.drop_beside ~body:path in
                   go (total - bytes) rest
             in
             go total coldest)
 
   let forget ~group =
     let* () = Fs.unlink_quiet (path group) in
-    Fs.unlink_quiet (manifest_path group)
+    Part.drop ~key:(key group) ~body:(path group)
 
   (* Adopt [src] as this group's body by giving the same bytes a second name.
      The cache owns where a group body lives, so the staged half hands over the
@@ -432,12 +364,12 @@ struct
           (* A partly filled body under this name would take the link's place
              and be published as the group: the name existing is proof of whole
              bytes only while no manifest sits beside it. *)
-          let* incomplete = partial group in
+          let* incomplete = Part.recorded ~body:dst in
           let* () =
             if not incomplete then return_unit
             else
               let* () = Fs.unlink_quiet dst in
-              Fs.unlink_quiet (manifest_path group)
+              Part.drop ~key:(key group) ~body:dst
           in
           let* () = Retry.link src dst in
           let now = Unix.gettimeofday () in
@@ -470,18 +402,24 @@ struct
      wrong that way costs a re-fetch. The other way round leaves a partial body
      with no manifest, which every reader takes for a whole one. *)
   let fill group ~index ~want =
-    let* here = Retry.file_exists (path group) in
-    (* A manifest whose body the cap took describes nothing, so the group starts
+    let key = key group and body = path group in
+    let* here = Retry.file_exists body in
+    (* A record whose body the cap took is about nothing, so the group starts
        again rather than trusting it. *)
-    let* filled = if here then load_filled group else Io.return Filled.empty in
-    match Filled.missing ~have:(Filled.interval filled index) ~want with
+    let* held =
+      if here then Part.load ~key ~body
+      else (
+        Part.reset ~key;
+        Io.return Partial.nothing)
+    in
+    match Partial.missing ~have:(Partial.interval held index) ~want with
       | None -> Io.return 0
       | Some (lo, hi) ->
           let* () =
             if here then return_unit
             else
-              let* () = Fs.ensure_parent (path group) in
-              save_filled group Filled.empty
+              let* () = Fs.ensure_parent body in
+              Part.start ~body
           in
           let* data =
             F.get_chunk_range
@@ -492,18 +430,11 @@ struct
           if got = 0 then Io.return 0
           else
             let* (_ : int) =
-              Fs.write (path group) data
+              Fs.write body data
                 ~offset:(Int64.of_int (Manifest.Group.offset group index + lo))
             in
-            let span =
-              Filled.widen ~have:(Filled.interval filled index)
-                ~want:(lo, lo + got)
-            in
-            let filled = Filled.put filled index span in
-            let+ () =
-              if whole group filled then Fs.unlink_quiet (manifest_path group)
-              else save_filled group filled
-            in
+            Part.take ~key index (lo, lo + got);
+            let+ () = Part.publish ~key ~body ~complete:(whole group) in
             got
 
   (* The cap may delete a group between the fetch and the read, or mid-read, so a

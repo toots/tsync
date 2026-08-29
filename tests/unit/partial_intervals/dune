@@ -1,0 +1,7 @@
+(executable
+ (flags
+  (:standard
+   -open
+   Tsync_chunk_cache))
+ (name partial_intervals)
+ (libraries tsync-libs.chunk_cache))
