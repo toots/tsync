@@ -20,6 +20,9 @@ module type FS = sig
   val readdir_list : string -> string list io
   val unlink_quiet : string -> unit io
   val read : string -> Bigstring.t -> offset:int64 -> int io
+  val write : string -> Bigstring.t -> offset:int64 -> int io
+  val read_file_opt : string -> string option io
+  val atomic_write : string -> string -> unit io
 
   val atomic_write_at :
     string ->
@@ -59,8 +62,11 @@ module type Fetch = sig
 end
 
 (** What a read cost. [from_backend] is the part a caller cannot work out for
-    itself, and is what attributes a network wait to the file being read. *)
-type served = { bytes : int; from_backend : bool }
+    itself, and is what attributes a network wait to the file being read;
+    [fetched] is how much of it crossed the wire, which is neither [bytes] nor
+    the group's length — a read of a few bytes may pull a range, a whole group,
+    or nothing. *)
+type served = { bytes : int; fetched : int; from_backend : bool }
 
 module Make
     (Io : Io.S)
@@ -90,8 +96,14 @@ module Make
     group:Manifest.Group.t -> member:(int -> Bigstring.t Io.t) -> unit Io.t
 
   (** Fill [buf] from stored chunk [index], starting [chunk_off] bytes into that
-      chunk and fetching the group if absent. A body that vanishes (or is
-      truncated) under the read is fetched again and the read retried once. *)
+      chunk and fetching what the body is missing. A body that vanishes (or is
+      truncated) under the read is fetched again and the read retried once.
+
+      What it fetches is the range asked for and no more, unless the whole group
+      is already on its way — in which case waiting for it costs nothing a range
+      would have saved. Those bytes are kept: a body may hold part of a stored
+      chunk, and a later fetch of the whole group skips the members it already
+      holds whole. *)
   val read_into :
     group:Manifest.Group.t ->
     index:int ->

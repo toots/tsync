@@ -40,11 +40,16 @@ let staged_manifest_path ~cache_root ~domain_name key =
 let scratch_path ~cache_root ~domain_name key =
   under (scratch_dir ~cache_root domain_name) key
 
+let manifest_suffix = ".manifest"
+
 (* Sharded by {!Chunk_layout}, like the backend chunk store. *)
 let chunk_path ~cache_root ~domain_name chunk_key =
   Filename.concat
     (chunks_dir ~cache_root domain_name)
     (Chunk_layout.relative_path chunk_key)
+
+let chunk_manifest_path ~cache_root ~domain_name chunk_key =
+  chunk_path ~cache_root ~domain_name chunk_key ^ manifest_suffix
 
 (* For a full resync that rebuilds from the backend. Staged edits are kept:
    nothing else holds those bytes. *)

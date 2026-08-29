@@ -377,11 +377,12 @@ struct
                       Cc.read_into ~group ~index:i slice ~chunk_off
                     in
                     let got = served.Chunk_cache.bytes in
-                    (* The group's size, not the slice's: what came down the wire
-                       is the whole group, however little of it this read wanted. *)
-                    if served.Chunk_cache.from_backend then
+                    (* What crossed the wire, which is neither the slice nor the
+                       group: a read may pull a range of one stored chunk, a
+                       whole group, or nothing. *)
+                    if served.Chunk_cache.fetched > 0 then
                       credit_pull id ~size:(Int64.to_int size)
-                        (Manifest.Group.bytes group);
+                        served.Chunk_cache.fetched;
                     if got <= 0 then Io.return done_
                     else go (pos + got) (done_ + got) cached))
         in
@@ -454,11 +455,11 @@ struct
                             let+ served =
                               Cc.read_into ~group ~index:i slice ~chunk_off
                             in
-                            if served.Chunk_cache.from_backend then
+                            if served.Chunk_cache.fetched > 0 then
                               credit_pull id
                                 ~size:
                                   (Int64.to_int staged.Staged_manifest.s_size)
-                                (Manifest.Group.bytes group);
+                                served.Chunk_cache.fetched;
                             served.Chunk_cache.bytes
                         | None ->
                             Io.fail
