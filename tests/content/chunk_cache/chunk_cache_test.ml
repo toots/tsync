@@ -28,6 +28,11 @@ let bodies =
     (key_of "AAAA", "AAAA");
     (key_of "BBBB", "BBBB");
     (key_of "CC", "CC");
+    (* A second group, for the whole-group fetch, which needs one nothing has
+       touched. *)
+    (key_of "DDDD", "DDDD");
+    (key_of "EEEE", "EEEE");
+    (key_of "FF", "FF");
   ]
 
 let gets : (string, int) Hashtbl.t = Hashtbl.create 8
@@ -169,11 +174,21 @@ let k3 = fst (List.nth bodies 2)
 let k4 = fst (List.nth bodies 3)
 let k5 = fst (List.nth bodies 4)
 
+let k6 = fst (List.nth bodies 5)
+let k7 = fst (List.nth bodies 6)
+let k8 = fst (List.nth bodies 7)
+
 (* One cache file over three backend chunks: 4 + 4 + 2, the last one short. *)
 let trio_table = table ~chunk_size:4 ~size:10 [k3; k4; k5]
 let trio = Option.get (Manifest.Group.of_table ~table:trio_table ~per:3 0)
+let whole_table = table ~chunk_size:4 ~size:10 [k6; k7; k8]
+let whole_trio = Option.get (Manifest.Group.of_table ~table:whole_table ~per:3 0)
 
-(* The store's own rule; never recomputed here. *)
+(* The store's own rules; never recomputed here. *)
+let manifest_path g =
+  Cache_layout.chunk_manifest_path ~cache_root:C.cache_root
+    ~domain_name:C.domain_name (Manifest.Group.key g)
+
 let path g =
   Cache_layout.chunk_path ~cache_root:C.cache_root ~domain_name:C.domain_name
     (Manifest.Group.key g)
@@ -243,29 +258,46 @@ let () =
      let* () = show_body "second key" g2 0 in
      Printf.printf "%-28s %s\n" "layout" (rel (path g2));
 
-     (* One cache miss costs one GET per member, and lands as a single file. *)
+     (* A read takes the bytes it asked for and no more: one range against the
+        member it names, and nothing at all for the two beside it. *)
      let* () = show "trio cold" trio in
-     watch_overlap ();
      let* () = show_body "trio member 0" trio 0 in
-     (* All three members are in the fetcher at once, each writing its own
-        offset, so the miss costs about one round trip. Serial fetching peaks
-        at 1. *)
-     Printf.printf "%-28s peak_concurrent_gets=%d of %d\n"
-       "trio fetch concurrency" !peak_in_fetch
-       (Manifest.Group.member_count trio);
+     Printf.printf "%-28s %s / %s / %s\n" "trio ranges asked"
+       (range_summary k3) (range_summary k4) (range_summary k5);
      Printf.printf "%-28s %s\n" "layout" (rel (path trio));
      Printf.printf "%-28s bytes=%d members=%d\n" "trio body"
        (Manifest.Group.bytes trio)
        (Manifest.Group.member_count trio);
 
-     (* The other members came down with it: reading them costs nothing more,
-        and each lands at its own offset inside the one file. *)
-     let* () = show_body "trio member 1 (cached)" trio 1 in
-     let* () = show_body "trio member 2 (cached)" trio 2 in
+     (* Kept: the same bytes read again cost nothing, which is what a partly
+        filled body is for. *)
+     let* () = show_body "trio member 0 again" trio 0 in
+     Printf.printf "%-28s %s\n" "trio ranges after re-read" (range_summary k3);
+
+     (* The neighbours were never fetched, so each costs its own range. *)
+     let* () = show_body "trio member 1" trio 1 in
+     let* () = show_body "trio member 2" trio 2 in
+     Printf.printf "%-28s %s / %s / %s\n" "trio ranges after all three"
+       (range_summary k3) (range_summary k4) (range_summary k5);
+     (* Every member whole makes the body whole, and the manifest that said
+        otherwise is what its absence now denies. *)
+     Printf.printf "%-28s partial=%b\n" "trio body after all three"
+       (Sys.file_exists (path trio ^ Cache_layout.manifest_suffix));
      Printf.printf "%-28s off0=%d off1=%d off2=%d\n" "trio offsets"
        (Manifest.Group.offset trio 0)
        (Manifest.Group.offset trio 1)
        (Manifest.Group.offset trio 2);
+
+     (* Whole-group fetching is what read-ahead and materialization do, and it
+        is where members are fetched together: all three are in the fetcher at
+        once, each writing its own offset, so a cold group costs about one round
+        trip. Serial fetching peaks at 1. *)
+     watch_overlap ();
+     let* () = Cc.ensure ~group:whole_trio () in
+     Printf.printf "%-28s peak_concurrent_gets=%d of %d\n"
+       "whole group concurrency" !peak_in_fetch
+       (Manifest.Group.member_count whole_trio);
+     let* () = show "whole group" whole_trio in
 
      (* A partial read inside a member is still addressed by member offset. *)
      let* () =
@@ -320,6 +352,22 @@ let () =
      let* () = show_body "refetch after cap" g1 0 in
      let* () = Capped0.enforce_cap () in
      let* () = show_cap "cap=0 (drops all)" in
+
+     (* A partly filled body and its manifest are one thing to the cap. Evicting
+        the body alone would leave a manifest describing bytes that are gone;
+        evicting the manifest alone would leave a body with holes in it that
+        every reader takes for whole, and serve those holes as content. *)
+     let partial = manifest_path whole_trio in
+     let* (_ : string * bool) = read_member whole_trio 0 in
+     Printf.printf "%-28s body=%b manifest=%b\n" "partly filled again"
+       (Sys.file_exists (path whole_trio))
+       (Sys.file_exists partial);
+     let* () = Capped0.enforce_cap () in
+     Printf.printf "%-28s body=%b manifest=%b\n" "cap=0 over a partial body"
+       (Sys.file_exists (path whole_trio))
+       (Sys.file_exists partial);
+     (* And what it reads afterwards is the chunk, not the hole. *)
+     let* () = show_body "read after the pair goes" whole_trio 0 in
 
      (* Publishing a group that was staged in its own layout: the bytes get a
         second name rather than a second copy, so both are readable until the

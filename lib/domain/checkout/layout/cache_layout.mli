@@ -6,6 +6,8 @@
     <cache_root>/<domain>/scratch/<real path>     .fuse_hidden* scratch files
     <cache_root>/<domain>/chunks/<xxx>/<key>      cache-chunk store, one file
                                                   per {!Manifest.Group}
+    <cache_root>/<domain>/chunks/<xxx>/<key>.manifest   what a partly filled
+                                                  one holds; absent once whole
     <cache_root>/<domain>/staged/manifests/<path> staged manifests (unsynced edits)
     <cache_root>/<domain>/staged/chunks/<uuid>    staged bodies, one per
                                                   {!Manifest.Group} in that
@@ -44,6 +46,17 @@ val scratch_path :
 
 (** A cache chunk's path, sharded by {!Chunk_layout} like the backend store. *)
 val chunk_path : cache_root:string -> domain_name:string -> string -> string
+
+(** Beside the body, and only while it is incomplete: what a cache chunk holds
+    of each stored chunk in it. Its absence is what says a body is whole, so a
+    sweep over this tree has to take the pair together or leave a partial body
+    reading as a complete one. *)
+val chunk_manifest_path :
+  cache_root:string -> domain_name:string -> string -> string
+
+(** What {!chunk_manifest_path} adds, for a walk that has to tell the two
+    apart. *)
+val manifest_suffix : string
 
 (** {1 The three that touch the disk}
 

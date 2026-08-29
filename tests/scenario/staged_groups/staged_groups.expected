@@ -169,7 +169,7 @@
   chunks cut.txt staged size=12 slots=[SS] cached=2/2
   read cut.txt [0,12) = "AAAAAAAABBBB"
   chunks cut.txt staged size=12 slots=[SS] cached=2/2
-  chunk-cache chunks=1 bytes=24
+  chunk-cache chunks=1 bytes=16
 --- tree
   f cut.txt size=12 cached=2/2 uploaded=false etag=
 --- content
