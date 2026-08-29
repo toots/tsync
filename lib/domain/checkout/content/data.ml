@@ -286,16 +286,41 @@ struct
         | None -> None
         | Some m -> Manifest.Group.of_table ~table:m ~per:(per_of m) i
 
-    (* Reuses [cached] while [i] stays in the same group, so a sequential read
-       rebuilds one group per boundary crossing rather than one per chunk. *)
-    let group_at ~table ~per ~cached i =
-      let gi = Manifest.Group.index_of ~per i in
-      match cached with
-        | Some (j, g) when j = gi -> Some (gi, g)
-        | _ ->
-            Option.map
-              (fun g -> (gi, g))
-              (Manifest.Group.of_table ~table ~per i)
+    (* The pieces of one read, whose count the caller chooses -- {!fetch_range}
+       takes any length -- so it bounds itself here rather than relying on the
+       download budget each piece queues for. Its own pool: that budget is taken
+       inside a piece, and a pool nested inside itself deadlocks. *)
+    let piece_slots = Bounded.create ~max:(4 * max 1 C.max_downloads) ()
+
+    (* Built once per group rather than once per piece, so a read spanning a
+       group rebuilds it at the boundary and not at every chunk. *)
+    let groups_of ~table ~per =
+      let seen = Hashtbl.create 4 in
+      fun i ->
+        let gi = Manifest.Group.index_of ~per i in
+        match Hashtbl.find_opt seen gi with
+          | Some g -> g
+          | None ->
+              let g = Manifest.Group.of_table ~table ~per i in
+              Hashtbl.replace seen gi g;
+              g
+
+    (* Each piece writes its own slice of the caller's buffer, so they run at
+       once; what is served is the leading run of whole ones, a piece short in
+       the middle leaving a hole that cannot be counted as bytes read. *)
+    let serve_pieces buf pieces one =
+      let+ got =
+        Bounded.map_with piece_slots
+          (fun (p : Chunks.piece) ->
+            one p (Bigarray.Array1.sub buf p.Chunks.dest p.Chunks.len))
+          pieces
+      in
+      let rec upto acc = function
+        | [] -> acc
+        | ((p : Chunks.piece), n) :: rest ->
+            if n = p.Chunks.len then upto (acc + n) rest else acc + n
+      in
+      upto 0 (List.combine pieces got)
 
     (* Credits {!pulls} as a foreground read does: prefetch is what pulls the bytes
        during sequential streaming, so leaving it out would empty the display
@@ -314,7 +339,11 @@ struct
         min max_readahead_groups
           (max 1 (readahead_bytes / max 1 (per * max 1 chunk_size)))
       in
-      let first = (Manifest.Group.index_of ~per last + 1) * per in
+      (* From the group the read is in, not the one after it: that one holds
+         whatever the read fetched a range of, and a streaming reader would
+         otherwise fill it a request at a time while the prefetch ran ahead.
+         A group already whole costs nothing to name here. *)
+      let first = Manifest.Group.index_of ~per last * per in
       let hi = min (n - 1) (first + (window * per) - 1) in
       if first <= hi && !readahead_in_flight < max_readahead_loops then (
         incr readahead_in_flight;
@@ -358,35 +387,32 @@ struct
       if total <= 0 || cs <= 0 || n = 0 then Io.return 0
       else (
         let per = per_of manifest in
-        let rec go pos done_ cached =
-          if done_ >= total then Io.return done_
-          else (
-            let i = Chunks.index_of ~chunk_size:cs pos in
-            if i >= n then Io.return done_
-            else (
-              let chunk_off = pos mod cs in
-              let take = min (cs - chunk_off) (total - done_) in
-              match group_at ~table ~per ~cached i with
-                | None ->
-                    Io.fail
-                      (Backend.Backend_error
-                         (Printf.sprintf "manifest %s: missing chunk %d" id i))
-                | Some (_, group) as cached ->
-                    let slice = Bigarray.Array1.sub buf done_ take in
-                    let* served =
-                      Cc.read_into ~group ~index:i slice ~chunk_off
-                    in
-                    let got = served.Chunk_cache.bytes in
-                    (* What crossed the wire, which is neither the slice nor the
-                       group: a read may pull a range of one stored chunk, a
-                       whole group, or nothing. *)
-                    if served.Chunk_cache.fetched > 0 then
-                      credit_pull id ~size:(Int64.to_int size)
-                        served.Chunk_cache.fetched;
-                    if got <= 0 then Io.return done_
-                    else go (pos + got) (done_ + got) cached))
+        let group_at = groups_of ~table ~per in
+        let one (p : Chunks.piece) slice =
+          match group_at p.Chunks.index with
+            | None ->
+                Io.fail
+                  (Backend.Backend_error
+                     (Printf.sprintf "manifest %s: missing chunk %d" id
+                        p.Chunks.index))
+            | Some group ->
+                let+ served =
+                  Cc.read_into ~group ~index:p.Chunks.index slice
+                    ~chunk_off:p.Chunks.chunk_off
+                in
+                (* What crossed the wire, which is neither the slice nor the
+                   group: a read may pull a range of one stored chunk, a whole
+                   group, or nothing. *)
+                if served.Chunk_cache.fetched > 0 then
+                  credit_pull id ~size:(Int64.to_int size)
+                    served.Chunk_cache.fetched;
+                served.Chunk_cache.bytes
         in
-        let* got = go start 0 None in
+        let* got =
+          serve_pieces buf
+            (Chunks.pieces ~chunk_size:cs ~count:n ~offset:start ~length:total)
+            one
+        in
         let last =
           min (n - 1) (Chunks.index_of ~chunk_size:cs (start + max 0 (got - 1)))
         in
@@ -422,55 +448,45 @@ struct
       else (
         let slots = staged.Staged_manifest.s_slots in
         let n = Array.length slots in
-
-        let rec go pos done_ =
-          if done_ >= total then Io.return done_
-          else (
-            let i = Chunks.index_of ~chunk_size:cs pos in
-            if i >= n then Io.return done_
-            else (
-              let chunk_off = pos mod cs in
-              let take = min (cs - chunk_off) (total - done_) in
-              let slice = Bigarray.Array1.sub buf done_ take in
-              let* got =
-                match slots.(i) with
-                  | Staged_manifest.Staged { uuid; offset = body_off } ->
-                      let* got =
-                        Sb.read_into ~uuid slice ~offset:(body_off + chunk_off)
+        let one (p : Chunks.piece) slice =
+          let i = p.Chunks.index and chunk_off = p.Chunks.chunk_off in
+          let take = p.Chunks.len in
+          match slots.(i) with
+            | Staged_manifest.Staged { uuid; offset = body_off } ->
+                let* got =
+                  Sb.read_into ~uuid slice ~offset:(body_off + chunk_off)
+                in
+                (* A staged body is only as long as the writes that reached it:
+                   past its end is a hole, reading as zeros. *)
+                if got < take then (
+                  Bigarray.Array1.fill
+                    (Bigarray.Array1.sub slice got (take - got))
+                    '\000';
+                  Io.return take)
+                else Io.return got
+            | Staged_manifest.Zero ->
+                Bigarray.Array1.fill slice '\000';
+                Io.return take
+            | Staged_manifest.Inherit -> (
+                match group_at_opt base i with
+                  | Some group ->
+                      let+ served =
+                        Cc.read_into ~group ~index:i slice ~chunk_off
                       in
-                      (* A staged body is only as long as the writes that reached
-                         it: past its end is a hole, reading as zeros. *)
-                      if got < take then (
-                        Bigarray.Array1.fill
-                          (Bigarray.Array1.sub slice got (take - got))
-                          '\000';
-                        Io.return take)
-                      else Io.return got
-                  | Staged_manifest.Zero ->
-                      Bigarray.Array1.fill slice '\000';
-                      Io.return take
-                  | Staged_manifest.Inherit -> (
-                      match group_at_opt base i with
-                        | Some group ->
-                            let+ served =
-                              Cc.read_into ~group ~index:i slice ~chunk_off
-                            in
-                            if served.Chunk_cache.fetched > 0 then
-                              credit_pull id
-                                ~size:
-                                  (Int64.to_int staged.Staged_manifest.s_size)
-                                served.Chunk_cache.fetched;
-                            served.Chunk_cache.bytes
-                        | None ->
-                            Io.fail
-                              (Backend.Backend_error
-                                 (Printf.sprintf
-                                    "staged %s: chunk %d inherits nothing" id i))
-                      )
-              in
-              if got <= 0 then Io.return done_ else go (pos + got) (done_ + got)))
+                      if served.Chunk_cache.fetched > 0 then
+                        credit_pull id
+                          ~size:(Int64.to_int staged.Staged_manifest.s_size)
+                          served.Chunk_cache.fetched;
+                      served.Chunk_cache.bytes
+                  | None ->
+                      Io.fail
+                        (Backend.Backend_error
+                           (Printf.sprintf "staged %s: chunk %d inherits nothing"
+                              id i)))
         in
-        go start 0)
+        serve_pieces buf
+          (Chunks.pieces ~chunk_size:cs ~count:n ~offset:start ~length:total)
+          one)
 
     (* The mirror is the whole answer: a key reaches it by the poller replaying
        what a peer published, so a name it does not hold is a name the domain

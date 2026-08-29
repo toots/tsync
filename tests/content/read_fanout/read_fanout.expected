@@ -1,0 +1,5 @@
+=== one read over 200 stored chunks
+  the fixture really is many pieces: yes
+  no more pieces start than there are slots: yes
+  but the read is not serialised either: yes
+  and every byte still arrives: yes

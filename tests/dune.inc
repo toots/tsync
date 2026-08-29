@@ -341,6 +341,20 @@
   (alias runtest)
   (action (run ./pulling_test.exe))))
 
+(subdir content/read_fanout
+ (alias
+  (name default)
+  (deps read_fanout.exe))
+ (rule
+  (alias runtest)
+  (target read_fanout.output)
+  (action
+   (with-stdout-to read_fanout.output (ignore-stderr (run ./read_fanout.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff read_fanout.expected read_fanout.output))))
+
 (subdir e2e/ipc_tap
  (alias
   (name default)
@@ -1184,6 +1198,20 @@
   (alias runtest)
   (action
    (diff owed_test.expected owed_test.output))))
+
+(subdir unit/partial_intervals
+ (alias
+  (name default)
+  (deps partial_intervals.exe))
+ (rule
+  (alias runtest)
+  (target partial_intervals.output)
+  (action
+   (with-stdout-to partial_intervals.output (ignore-stderr (run ./partial_intervals.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff partial_intervals.expected partial_intervals.output))))
 
 (subdir unit/progress_eta
  (alias

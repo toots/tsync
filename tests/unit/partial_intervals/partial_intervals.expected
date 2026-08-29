@@ -1,0 +1,18 @@
+=== a chunk nothing has touched
+  first read               holds nothing   wants [2,5) -> fetch [2,5)
+
+=== what is held already costs nothing
+  the same range           holds [2,5)     wants [2,5) -> already held
+  inside it                holds [0,8)     wants [3,4) -> already held
+  its first byte           holds [0,8)     wants [0,1) -> already held
+
+=== growing at either end
+  carrying on              holds [0,4)     wants [4,8) -> fetch [4,8)
+  overlapping forwards     holds [2,6)     wants [4,9) -> fetch [6,9)
+  backwards to the start   holds [4,8)     wants [0,4) -> fetch [0,4)
+  overlapping backwards    holds [2,6)     wants [0,4) -> fetch [0,2)
+
+=== where one request means fetching more than was asked
+  a hole beyond            holds [0,2)     wants [6,8) -> fetch [2,8)
+  a hole before            holds [6,8)     wants [0,2) -> fetch [0,6)
+  surrounding it           holds [3,5)     wants [0,8) -> fetch [0,8) (2 already held)
