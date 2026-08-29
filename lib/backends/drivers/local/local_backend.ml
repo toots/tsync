@@ -293,6 +293,23 @@ struct
                 Io.fail (of_errno ~op:"get_opt" key e)
             | exn -> Io.fail exn)
 
+      (* Clamped to what the file holds, since a mapping past the end is not a
+         short read but a signal on the first page touched. *)
+      let get_range ~key ~offset ~length () =
+        let key = Stored_key.to_string key in
+        let path = resolve key in
+        Io.catch
+          (fun () ->
+            let+ st = Sys.LargeFile.stat path in
+            let size = Int64.to_int st.Unix.LargeFile.st_size in
+            let len = max 0 (min length (size - offset)) in
+            Some (Bigstring.map_file ~path ~offset ~len))
+          (function
+            | Unix.Unix_error (Unix.ENOENT, _, _) -> Io.return None
+            | Unix.Unix_error (e, _, _) ->
+                Io.fail (of_errno ~op:"get_range" key e)
+            | exn -> Io.fail exn)
+
       let head_opt ~key () =
         let path = resolve (Stored_key.to_string key) in
         Io.catch

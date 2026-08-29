@@ -23,6 +23,10 @@ module Base = struct
     incr reads;
     Lwt.return (body key)
 
+  let get_range ~key ~offset ~length () =
+    incr reads;
+    Lwt.return (Option.map (Doubles.range_of ~offset ~length) (body key))
+
   let head_opt ~key:_ () = unsupported ()
   let delete ~key:_ () = unsupported ()
   let delete_multi _ = unsupported ()

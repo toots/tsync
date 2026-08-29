@@ -31,6 +31,11 @@ module Memory () : Backend_lwt.Store = struct
 
   let get_opt ~key () = Lwt.return (Hashtbl.find_opt objects key)
 
+  let get_range ~key ~offset ~length () =
+    Lwt.return
+      (Option.map (Doubles.range_of ~offset ~length)
+         (Hashtbl.find_opt objects key))
+
   let get ~key () =
     match Hashtbl.find_opt objects key with
       | Some d -> Lwt.return d

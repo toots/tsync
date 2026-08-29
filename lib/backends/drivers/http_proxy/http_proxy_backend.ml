@@ -120,6 +120,23 @@ struct
     else if code resp = 404 then None
     else raise (failed "get_opt" (code resp) (Bigstring.to_string body))
 
+  (* In the query rather than a [Range] header, which is what the signature
+     already covers: it is taken over the request target, so a tampered offset
+     does not verify. A peer too old to know these answers the whole object and
+     is caught by {!Backend.checked_range}, rather than serving a body that
+     silently is not the range asked for. *)
+  let get_range t ~key ~offset ~length () =
+    let uri =
+      Uri.with_query'
+        (obj_uri t key)
+        [("offset", string_of_int offset); ("length", string_of_int length)]
+    in
+    let+ resp, body = call_retry t ~meth:`GET "get_range" uri in
+    if is_ok resp then
+      Some (Backend.checked_range ~op:"http-proxy" ~key ~length body)
+    else if code resp = 404 then None
+    else raise (failed "get_range" (code resp) (Bigstring.to_string body))
+
   let head_opt t ~key () =
     let+ resp, body = call_text t ~meth:`HEAD "head" (obj_uri t key) in
     if is_ok resp then (
@@ -332,6 +349,9 @@ struct
       let put_if_absent ~key ~data () = put_if_absent t ~key:(str key) ~data ()
       let get ~key () = get t ~key:(str key) ()
       let get_opt ~key () = get_opt t ~key:(str key) ()
+
+      let get_range ~key ~offset ~length () =
+        get_range t ~key:(str key) ~offset ~length ()
       let head_opt ~key () = head_opt t ~key:(str key) ()
       let delete ~key () = delete t ~key:(str key) ()
       let delete_multi keys = delete_multi t keys

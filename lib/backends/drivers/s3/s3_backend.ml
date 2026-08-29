@@ -143,6 +143,22 @@ struct
           Log.err "s3 get %s: %s" key (string_of_error e);
           raise (failed "get" e)
 
+  (* [last] is the index of the final byte, which is why a length of zero has no
+     spelling here and the signature rules one out. *)
+  let get_range t ~key ~offset ~length () =
+    let range = { S3.first = Some offset; last = Some (offset + length - 1) } in
+    let+ res =
+      with_retry "get_range" (fun () ->
+          S3.get_bigstring ~range ~credentials:t.credentials
+            ~endpoint:t.endpoint ~bucket:t.bucket ~key ())
+    in
+    match res with
+      | Ok body -> Some (Backend.checked_range ~op:"s3" ~key ~length body)
+      | Error S3.Not_found -> None
+      | Error e ->
+          Log.err "s3 get_range %s: %s" key (string_of_error e);
+          raise (failed "get_range" e)
+
   let head_opt t ~key () =
     let+ res =
       with_retry "head" (fun () ->
@@ -266,6 +282,9 @@ struct
       let put_if_absent ~key ~data () = put_if_absent t ~key:(str key) ~data ()
       let get ~key () = get t ~key:(str key) ()
       let get_opt ~key () = get_opt t ~key:(str key) ()
+
+      let get_range ~key ~offset ~length () =
+        get_range t ~key:(str key) ~offset ~length ()
       let head_opt ~key () = head_opt t ~key:(str key) ()
       let delete ~key () = delete t ~key:(str key) ()
       let delete_multi keys = delete_multi t (List.map str keys)

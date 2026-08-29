@@ -1,0 +1,17 @@
+=== a store answers exactly the range asked for
+  [0,8) of 40 -> 8 bytes, matches
+  [13,22) of 40 -> 9 bytes, matches
+  [36,40) of 40 -> 4 bytes, matches
+  [0,40) of 40 -> 40 bytes, matches
+
+=== the object's end is where an answer runs short
+  [37,137) of 40 -> 3 bytes, matches
+  [50,58) of 40 -> 0 bytes, matches
+
+=== a key the store does not hold
+  absent key -> None
+
+=== a store that ignored the range is refused, not trimmed
+  asked 8, answered 8    -> 8 bytes
+  asked 8, answered 3    -> 3 bytes
+  asked 8, answered 40   -> refused: test get_range obj: asked for 8 bytes, got 40

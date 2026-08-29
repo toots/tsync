@@ -188,6 +188,10 @@ struct
       let get_opt ~key () =
         read "get_opt" (fun (module B : Store) -> B.get_opt ~key ())
 
+      let get_range ~key ~offset ~length () =
+        read "get_range" (fun (module B : Store) ->
+            B.get_range ~key ~offset ~length ())
+
       let head_opt ~key () =
         read "head_opt" (fun (module B : Store) -> B.head_opt ~key ())
 

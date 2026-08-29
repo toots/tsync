@@ -18,3 +18,8 @@ module Hung : Backend_lwt.Store
     writes. Reads answer empty rather than failing; writes raise
     {!Backend.Not_writable}. *)
 module Refuses : Backend_lwt.Store
+
+(** The slice a range read answers with, for a double that holds whole bodies:
+    clamped at the end of the object as every driver's is, so a double cannot
+    answer a range a real store would have cut short. *)
+val range_of : offset:int -> length:int -> Bigstring.t -> Bigstring.t
