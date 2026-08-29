@@ -157,6 +157,7 @@ let register () =
       ]
     (module struct
       let is_local = is_local
+      let tree = `Replicated
 
       let serving =
         Frontend.Daemon

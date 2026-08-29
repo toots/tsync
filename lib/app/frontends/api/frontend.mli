@@ -61,11 +61,18 @@ type daemon = {
     at instead. *)
 type serving = Daemon of daemon | Commands of string
 
+(** Whether this frontend keeps the domain's manifest tree complete locally.
+    [`Pulled] is one that reads a folder when asked, for which a resync has no
+    replica to rebuild and would discard a cache instead; it carries the wording
+    a refusal answers with, since only the frontend knows what to say. *)
+type tree = [ `Replicated | `Pulled of string ]
+
 module type S = sig
   (** Whether every byte of [key] is on this machine, for [tsync ls]. *)
   val is_local : Conf.locality -> Logical_key.t -> bool
 
   val serving : serving
+  val tree : tree
 end
 
 (** {1 Registry} *)

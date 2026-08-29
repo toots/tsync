@@ -1,0 +1,21 @@
+
+=== a mirror wiped to nothing
+  mirror: (empty)
+
+=== the root lists without ever having synced
+  {"ok":true,"items":[{"ref":"d:<photos>","parentRef":"root","name":"photos","kind":"dir","size":0,"mtime":0.0,"etag":"<photos>","isUploaded":true}]}
+  mirror: photos/.tsync-dir
+
+=== descending fetches that folder, and only then
+  {"ok":true,"items":[{"ref":"f:<photos>/pic.txt","parentRef":"d:<photos>","name":"pic.txt","kind":"file","size":20,"mtime":<clock>,"etag":"6b3fc6d2d2155c6b","isUploaded":true}]}
+  mirror: photos/pic.txt
+photos/.tsync-dir
+
+=== a file another device removed stops being listed, and is pruned
+  the other device deletes it: {"ok":true}
+  {"ok":true,"items":[]}
+  mirror: photos/.tsync-dir
+
+=== a staged file survives the pull that does not know about it
+  created: {"ok":true}
+  {"ok":true,"items":[{"ref":"f:<photos>/draft.txt","parentRef":"d:<photos>","name":"draft.txt","kind":"file","size":0,"mtime":<clock>,"etag":"","isUploaded":true}]}

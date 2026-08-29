@@ -16,8 +16,10 @@
   (:standard -open Tsync_log -open Tsync_engine -open Tsync_conf_lwt
    -open Tsync_frontend_register -open Tsync_runtime -open Tsync_conf_parsing -open Tsync_tls
    -open Tsync_domain
-   -open Tsync_logical_key -open Tsync_staged -open Tsync_manifest))
+   -open Tsync_logical_key -open Tsync_staged -open Tsync_manifest
+   -open Tsync_lazy_checkout_lwt))
  (libraries
+  tsync-libs.lazy_checkout_lwt
   tsync_android_frontend
   tsync_backend
   tsync_runtime

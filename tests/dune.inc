@@ -371,6 +371,21 @@
   (action
    (diff bridge_test.expected bridge_test.output))))
 
+(subdir frontends/android_lazy
+ (alias
+  (name default)
+  (deps lazy_test.exe))
+ (rule
+  (alias runtest)
+  (deps %{exe:../../../bin/tsync.exe})
+  (target lazy_test.output)
+  (action
+   (with-stdout-to lazy_test.output (ignore-stderr (run ./lazy_test.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff lazy_test.expected lazy_test.output))))
+
 (subdir frontends/http_proxy
  (alias
   (name default)

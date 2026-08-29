@@ -8,6 +8,8 @@
    -open
    Tsync_checkout
    -open
+   Tsync_lazy_checkout_lwt
+   -open
    Tsync_manifest
    -open
    Tsync_conf_lwt
@@ -27,6 +29,7 @@
   tsync_staged
   tsync_conf_lwt
   tsync_checkout
+  tsync-libs.lazy_checkout_lwt
   tsync_manifest
   tsync-libs.engine
   tsync-libs.diagnostics

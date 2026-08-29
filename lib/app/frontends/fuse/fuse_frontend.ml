@@ -60,6 +60,7 @@ let register () =
   Frontend.register ~spec implementation
     (module struct
       let is_local = is_local
+      let tree = `Replicated
 
       let serving =
         Frontend.Daemon { topology; listens = Some `Domain_socket; start }

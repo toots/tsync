@@ -1,0 +1,8 @@
+; Spawned, like the other android test: the claim is about what a process finds
+; on disk when it starts.
+
+(executable
+ (flags
+  (:standard -open Tsync_test_harness))
+ (name lazy_test)
+ (libraries tsync_test_harness unix))

@@ -27,10 +27,28 @@ let cmd : unit Cmd.t =
             "Max concurrent backend operations during a full resync (default \
              32). Lower it if you hit DNS or open-file limits.")
   in
+  (* Asked of the frontends rather than of their names: what makes a resync
+     wrong here is that nothing keeps a replica, which is theirs to declare. *)
+  let refuse_if_pulled cfg domain =
+    let d = Conf_parsing.pick_domain ?domain cfg in
+    List.iter
+      (fun name ->
+        match Frontend.find name with
+          | Some (module F : Frontend.S) -> (
+              match F.tree with
+                | `Replicated -> ()
+                | `Pulled why ->
+                    prerr_endline ("tsync sync: " ^ why);
+                    exit 2)
+          | None -> ())
+      (frontend_names d)
+  in
   let run domain source full parallelism v =
     set_verbose v;
+    let cfg = load_config () in
+    refuse_if_pulled cfg domain;
     let (module C : Conf_lwt.S) =
-      let conf = load_conf ?domain () in
+      let conf = make_conf ?domain cfg in
       match source with Some name -> reading_from name conf | None -> conf
     in
     let module R = Resync_lwt.Make (C) in

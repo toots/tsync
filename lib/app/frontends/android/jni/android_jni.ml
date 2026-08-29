@@ -39,7 +39,7 @@ let boot domain =
     let domain = if domain = "" then None else Some domain in
     let conf = Domain.of_config ?domain ~paths cfg in
     let module C = (val conf : Conf_lwt.S) in
-    let module E = Domain_engine.Make (C) in
+    let module E = Domain_engine.Make_over (Lazy_checkout_lwt) (C) in
     Frontend.use_libev ();
     Lwt_unix.set_pool_size pool_size;
     (* Detached work has no caller to fail, and the default hook ends the

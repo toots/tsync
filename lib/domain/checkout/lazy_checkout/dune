@@ -1,0 +1,28 @@
+; The working copy as a cache of what was browsed: a decorator over the tree
+; that keeps the whole domain, for a client that cannot carry the state a full
+; replica needs.
+
+(library
+ (flags
+  (:standard
+   -open
+   Tsync_checkout
+   -open
+   Tsync_logical_key
+   -open
+   Tsync_manifest
+   -open
+   Tsync_inode_tree
+   -open
+   Tsync_conf
+   -open
+   Tsync_io))
+ (name tsync_lazy_checkout)
+ (public_name tsync-libs.lazy_checkout)
+ (libraries
+  tsync_checkout
+  tsync_logical_key
+  tsync_manifest
+  tsync_inode_tree
+  tsync_conf
+  tsync_io))

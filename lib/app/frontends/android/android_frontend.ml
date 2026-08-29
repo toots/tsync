@@ -32,7 +32,7 @@ let int_arg verb what s =
 
 module Make (C : Conf_lwt.S) = struct
   module Lk = Logical_key.Make (C)
-  module E = Domain_engine.Make (C)
+  module E = Domain_engine.Make_over (Lazy_checkout_lwt) (C)
   module F = E.F
   module Ih = E.Ih
 
@@ -215,6 +215,14 @@ end
 (* Serving a socket here would put a second way to reach a domain beside the
    commands, and the two would answer differently the moment one of them grew a
    feature. *)
+(* A folder is read when it is asked for, so there is no replica for a resync to
+   rebuild: it would drop what has been browsed and walk the domain to fill it
+   again. *)
+let tree =
+  `Pulled
+    "the android frontend reads a folder when it is asked for, so there is \
+     nothing for a resync to rebuild"
+
 let serving =
   Frontend.Commands
     "the android frontend is driven by commands, not by a daemon: see `tsync \
@@ -343,4 +351,5 @@ let register () =
     (module struct
       let is_local = is_local
       let serving = serving
+      let tree = tree
     end : Frontend.S)

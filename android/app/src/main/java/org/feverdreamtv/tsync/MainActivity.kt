@@ -38,29 +38,10 @@ class MainActivity : Activity() {
         const val MEDIA_PERMISSIONS = 1
     }
 
-    /** Whether a full sync this screen started is still going: minutes of work
-     *  on a large domain, so it runs off the main thread and its exit code is
-     *  read rather than assumed. */
-    @Volatile
-    private var syncRunning: Boolean = false
-
-    private fun runFullSync(): Pair<Int, String> {
-        syncRunning = true
-        return try {
-            Tsync.plain(this, "sync", "--full")
-        } finally {
-            syncRunning = false
-        }
-    }
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         if (Config.exists(this)) {
             TsyncProvider.notifyRootsChanged(this)
-            // Nothing polls for foreign writes, so opening the app is one of the
-            // moments the mirror is brought up to date.
-            SyncSchedule.enable(this)
-            SyncSchedule.runNow(this)
             showStatus()
         } else showSetup()
     }
@@ -142,8 +123,6 @@ class MainActivity : Activity() {
                     error.text = "tsync rejected the config:\n$output"
                     return@setOnClickListener
                 }
-                SyncSchedule.enable(this@MainActivity)
-                SyncSchedule.runNow(this@MainActivity)
                 // The root's id and title come from the config, so the picker
                 // is holding a stale answer until it re-queries.
                 TsyncProvider.notifyRootsChanged(this@MainActivity)
@@ -306,14 +285,9 @@ class MainActivity : Activity() {
         fun refresh() = thread {
             runOnUiThread { output.text = "reading…" }
             val (code, text) = Tsync.plain(this, Cli.status())
-            // A walk creates each folder before fetching what is inside it, so
-            // mid-sync a directory that looks empty is not one.
-            val syncing =
-                if (syncRunning) "full sync running — folders fill in as it walks\n\n"
-                else ""
             val backup = backupLine()
             runOnUiThread {
-                output.text = syncing + backup + text.ifBlank {
+                output.text = backup + text.ifBlank {
                     "tsync reported nothing (exit $code) — check `adb logcat -s tsync`"
                 }
             }
@@ -323,31 +297,6 @@ class MainActivity : Activity() {
             addView(row {
                 addView(Button(this@MainActivity).apply {
                     text = "Refresh"; setOnClickListener { refresh() }
-                })
-                val sync = Button(this@MainActivity)
-                addView(sync.apply {
-                    text = "Sync"
-                    setOnClickListener {
-                        sync.isEnabled = false
-                        sync.text = "Syncing…"
-                        refresh()
-                        thread {
-                            val (code, out) = runFullSync()
-                            runOnUiThread {
-                                sync.isEnabled = true
-                                sync.text = "Sync"
-                                Toast.makeText(
-                                    this@MainActivity,
-                                    if (code == 0) out.trim().takeLast(120)
-                                    // It says which part it could not fetch, and
-                                    // running it again is what finishes the job.
-                                    else "sync incomplete — run it again\n" + out.trim().takeLast(100),
-                                    Toast.LENGTH_LONG
-                                ).show()
-                                refresh()
-                            }
-                        }
-                    }
                 })
                 addView(Button(this@MainActivity).apply {
                     text = "Settings"; setOnClickListener { showSetup() }

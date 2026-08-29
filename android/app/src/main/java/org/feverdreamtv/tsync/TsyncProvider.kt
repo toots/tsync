@@ -124,9 +124,11 @@ class TsyncProvider : DocumentsProvider() {
             }
         } catch (e: Exception) {
             // A banner in the picker beats an empty folder that looks like truth.
+            // A folder is read when it is opened, so a failure here is the
+            // server being out of reach rather than anything left undone.
             cursor.extras = android.os.Bundle().apply {
                 putString(android.provider.DocumentsContract.EXTRA_ERROR,
-                    "tsync could not read this folder — open the tsync app")
+                    "tsync could not reach the server for this folder")
             }
             Log.w(TAG, "list_dir $parentDocumentId: ${e.message}")
         }

@@ -1,0 +1,30 @@
+; The browse cache on Lwt: folders read through the inode tree, recorded by the
+; same writers a resync uses.
+
+(library
+ (flags
+  (:standard
+   -open
+   Tsync_lazy_checkout
+   -open
+   Tsync_checkout_lwt
+   -open
+   Tsync_inode_tree_lwt
+   -open
+   Tsync_folder_ids_lwt
+   -open
+   Tsync_manifests_lwt
+   -open
+   Tsync_conf_lwt
+   -open
+   Tsync_io_lwt))
+ (name tsync_lazy_checkout_lwt)
+ (public_name tsync-libs.lazy_checkout_lwt)
+ (libraries
+  tsync_lazy_checkout
+  tsync_checkout_lwt
+  tsync_inode_tree_lwt
+  tsync_folder_ids_lwt
+  tsync_manifests_lwt
+  tsync_conf_lwt
+  tsync_io_lwt))
