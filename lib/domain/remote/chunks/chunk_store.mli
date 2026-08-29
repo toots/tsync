@@ -35,6 +35,9 @@ module Over (Io : Io.S) (Pools : POOLS with type 'a io := 'a Io.t) : sig
 
     val fetch_body : string -> Bigstring.t Io.t
 
+    val fetch_body_range :
+      string -> offset:int -> length:int -> Bigstring.t Io.t
+
     (** Whether the store filed this key as not holding what its name says, and
         how to stop holding it against the rest of the session once a write has
         cleared it — a write is what clears a marker, the store having
@@ -58,6 +61,11 @@ module Over (Io : Io.S) (Pools : POOLS with type 'a io := 'a Io.t) : sig
     val store : unit Io.t Chunk_source.t -> (string * bool) Io.t
 
     val fetch : string -> Bigstring.t Io.t
+
+    (** Part of one, holding a read slot as a whole fetch does: what a range
+        saves is bytes on the wire, not a round trip. *)
+    val fetch_range :
+      string -> offset:int -> length:int -> Bigstring.t Io.t
 
     (** Keys this session has spared itself a round trip on. *)
     val known_count : unit -> int

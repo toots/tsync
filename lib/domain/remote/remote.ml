@@ -24,6 +24,9 @@ module type S = sig
 
   val get_chunk : chunk_key:string -> Bigstring.t io
 
+  val get_chunk_range :
+    chunk_key:string -> offset:int -> length:int -> Bigstring.t io
+
   (** Chunk size for files this client creates; see the .mli. *)
   val chunk_size : unit -> int io
 
@@ -113,6 +116,7 @@ module type COLLECTION = sig
 
   module Make (_ : Conf.S with type 'a io = 'a io) : sig
     val get : string -> Bigstring.t io
+    val get_range : string -> offset:int -> length:int -> Bigstring.t io
     val head : string -> Backend.file_entry option io
     val promote_all : count:int -> (int -> string) -> unit io
   end
@@ -246,6 +250,7 @@ struct
       let put = B.put
       let backend_key = L.key
       let fetch_body = Space.get
+      let fetch_body_range = Space.get_range
       let corrupt = Corrupt.is_marked
       let cleared = Corrupt.forget
       let slots = chunk_slots
@@ -413,6 +418,9 @@ struct
               | exception _ -> None)
 
     let get_chunk ~chunk_key = Chunks_store.fetch chunk_key
+
+    let get_chunk_range ~chunk_key ~offset ~length =
+      Chunks_store.fetch_range chunk_key ~offset ~length
   end
 
   (* The inode layout is what every path-keyed caller wants. *)

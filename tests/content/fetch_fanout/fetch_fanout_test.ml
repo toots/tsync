@@ -60,6 +60,10 @@ module F = struct
     let+ () = gate in
     Bigstring.of_string
       (String.make csize (Char.chr (Hashtbl.hash chunk_key land 0x7f)))
+
+  let get_chunk_range ~chunk_key ~offset ~length =
+    let+ body = get_chunk ~chunk_key in
+    Bigstring.sub body ~off:offset ~len:length
 end
 
 module Cc = Chunk_cache_lwt.Make (C) (F)

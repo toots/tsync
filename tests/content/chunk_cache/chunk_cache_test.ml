@@ -33,6 +33,19 @@ let bodies =
 let gets : (string, int) Hashtbl.t = Hashtbl.create 8
 let count ck = Option.value ~default:0 (Hashtbl.find_opt gets ck)
 
+(* Counted apart from whole-chunk gets, and by the bytes as well as the calls: a
+   range read that quietly asked for the whole chunk would be indistinguishable
+   from one that asked for eight bytes if only the calls were counted. *)
+let ranges : (string, (int * int) list) Hashtbl.t = Hashtbl.create 8
+let asked ck = Option.value ~default:[] (Hashtbl.find_opt ranges ck)
+
+let range_summary ck =
+  match List.rev (asked ck) with
+    | [] -> "none"
+    | rs ->
+        String.concat " "
+          (List.map (fun (o, l) -> Printf.sprintf "[%d,%d)" o (o + l)) rs)
+
 (* Overlap is what shows whether a group's members are fetched concurrently, and
    unlike elapsed time it does not depend on machine load. *)
 let in_fetch = ref 0
@@ -52,6 +65,25 @@ module Fetch = struct
         let* () = Lwt_unix.sleep 0.05 in
         match List.assoc_opt chunk_key bodies with
           | Some b -> Lwt.return (Bigstring.of_string b)
+          | None ->
+              Lwt.fail (Backend.Backend_error ("no such chunk: " ^ chunk_key)))
+      (fun () ->
+        decr in_fetch;
+        Lwt.return_unit)
+
+  let get_chunk_range ~chunk_key ~offset ~length =
+    Hashtbl.replace ranges chunk_key ((offset, length) :: asked chunk_key);
+    incr in_fetch;
+    if !in_fetch > !peak_in_fetch then peak_in_fetch := !in_fetch;
+    Lwt.finalize
+      (fun () ->
+        let* () = Lwt_unix.sleep 0.05 in
+        match List.assoc_opt chunk_key bodies with
+          | Some b ->
+              Lwt.return
+                (Bigstring.of_string
+                   (String.sub b offset
+                      (max 0 (min length (String.length b - offset)))))
           | None ->
               Lwt.fail (Backend.Backend_error ("no such chunk: " ^ chunk_key)))
       (fun () ->
