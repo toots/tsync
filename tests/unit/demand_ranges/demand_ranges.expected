@@ -1,0 +1,6 @@
+=== the prefetch holds the download budget
+  download budget    2
+  parked on it       2
+
+=== a reader asks for the bytes it is playing
+  range served       true

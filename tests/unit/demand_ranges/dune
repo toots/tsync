@@ -1,0 +1,19 @@
+(executable
+ (flags
+  (:standard
+   -open
+   Tsync_logical_key
+   -open
+   Tsync_chunk_store_lwt
+   -open
+   Tsync_bigstring
+   -open
+   Tsync_io_lwt))
+ (name demand_ranges)
+ (libraries
+  tsync-libs.logical_key
+  tsync_chunk_store_lwt
+  tsync_bigstring
+  tsync_io_lwt
+  lwt
+  lwt.unix))

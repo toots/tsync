@@ -20,6 +20,7 @@ module Over (Io : Io.S) (Pools : POOLS with type 'a io := 'a Io.t) = struct
     val cleared : string -> unit
     val slots : Pools.t
     val downloads : Pools.t
+    val ranges : Pools.t
     val max_known : unit -> int
   end
 
@@ -60,7 +61,12 @@ module Over (Io : Io.S) (Pools : POOLS with type 'a io := 'a Io.t) = struct
 
     let fetch key = Pools.use D.downloads (fun () -> D.fetch_body key)
 
+    (* Its own budget, not [downloads]: every caller of this is a reader waiting
+       on bytes, and a whole-chunk fetch is mostly the prefetch running ahead of
+       one. Sharing the budget put the reader in a queue the prefetch refills as
+       fast as it drains -- a 128 KiB ask waiting behind eight 1 MiB transfers,
+       which on a phone is six seconds a read. *)
     let fetch_range key ~offset ~length =
-      Pools.use D.downloads (fun () -> D.fetch_body_range key ~offset ~length)
+      Pools.use D.ranges (fun () -> D.fetch_body_range key ~offset ~length)
   end
 end

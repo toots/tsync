@@ -156,7 +156,7 @@ struct
      shares beside an engine held two of each and admitted twice what either said.
 
      Same reasoning as {!Corruption}'s memo, which is keyed the same way. *)
-  type pools = { chunk_slots : Pools.t; downloads : Pools.t }
+  type pools = { chunk_slots : Pools.t; downloads : Pools.t; ranges : Pools.t }
 
   let pools : (string, pools) Hashtbl.t = Hashtbl.create 4
 
@@ -178,7 +178,8 @@ struct
           let downloads =
             Pools.create ~name:"downloads" ~max:max_downloads ()
           in
-          let p = { chunk_slots; downloads } in
+          let ranges = Pools.create ~name:"ranges" ~max:max_downloads () in
+          let p = { chunk_slots; downloads; ranges } in
           Hashtbl.replace pools prefix p;
           p
 
@@ -257,6 +258,7 @@ struct
       let cleared = Corrupt.forget
       let slots = chunk_slots
       let downloads = pools.downloads
+      let ranges = pools.ranges
       let max_known () = !max_known
 
       let present key =
