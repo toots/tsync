@@ -55,6 +55,14 @@
             android:foregroundServiceType="dataSync"
             tools:node="merge" />
 
+        <!-- A descriptor's reads are answered in this process, and the system
+             freezes a cached one: this holds the process up for as long as a
+             file the app is serving is open. -->
+        <service
+            android:name=".OpenDocumentsService"
+            android:foregroundServiceType="dataSync"
+            android:exported="false" />
+
         <!-- MANAGE_DOCUMENTS is held by the system only, so this is reachable
              through the picker rather than by arbitrary apps. -->
         <provider

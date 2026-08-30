@@ -1,8 +1,5 @@
 package org.feverdreamtv.tsync.backup
 
-import android.app.Notification
-import android.app.NotificationChannel
-import android.app.NotificationManager
 import android.content.Context
 import android.content.pm.ServiceInfo
 import android.os.Build
@@ -13,7 +10,7 @@ import androidx.work.WorkerParameters
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.feverdreamtv.tsync.Ingest
-import org.feverdreamtv.tsync.R
+import org.feverdreamtv.tsync.Notifications
 
 /**
  * One bounded pass over the camera roll, rescheduled while anything is still
@@ -34,8 +31,6 @@ class BackupWorker(
         /** Marks a run the user asked for, which the network and battery
          *  conditions set for background work do not gate. */
         const val USER_INITIATED = "userInitiated"
-        private const val CHANNEL = "tsync-backup"
-        private const val NOTIFICATION_ID = 2
 
         /** Staged bodies a crash left behind, which nothing else removes. */
         private const val ORPHAN_AGE_MS = 24L * 3600 * 1000
@@ -117,22 +112,20 @@ class BackupWorker(
     }
 
     override suspend fun getForegroundInfo(): ForegroundInfo {
-        val manager = applicationContext.getSystemService(NotificationManager::class.java)
-        manager.createNotificationChannel(
-            NotificationChannel(CHANNEL, "Camera backup", NotificationManager.IMPORTANCE_LOW)
+        val notification = Notifications.build(
+            applicationContext,
+            Notifications.BACKUP_CHANNEL,
+            "Camera backup",
+            "Backing up camera photos"
         )
-        val notification = Notification.Builder(applicationContext, CHANNEL)
-            .setContentTitle("tsync")
-            .setContentText("Backing up camera photos")
-            .setSmallIcon(R.drawable.ic_notification)
-            .build()
-
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             ForegroundInfo(
-                NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+                Notifications.BACKUP_ID,
+                notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
             )
         } else {
-            ForegroundInfo(NOTIFICATION_ID, notification)
+            ForegroundInfo(Notifications.BACKUP_ID, notification)
         }
     }
 }
