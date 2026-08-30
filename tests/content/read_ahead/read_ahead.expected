@@ -1,0 +1,10 @@
+=== one read, before anything says the stream is sequential
+  chunks asked for   g0=1/16 g1=0/16 g2=0/16 g3=0/16
+
+=== reading on, which is what says it
+  chunks asked for   g0=16/16 g1=16/16 g2=0/16 g3=0/16
+  taken whole        g0=15/16 g1=16/16 g2=0/16 g3=0/16
+
+=== still inside the first cache chunk
+  chunks asked for   g0=16/16 g1=16/16 g2=0/16 g3=0/16
+  group ahead ready  true

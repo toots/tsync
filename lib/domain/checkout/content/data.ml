@@ -341,12 +341,14 @@ struct
         min max_readahead_groups
           (max 1 (readahead_bytes / max 1 (per * max 1 chunk_size)))
       in
-      (* From the group the read is in, not the one after it: that one holds
-         whatever the read fetched a range of, and a streaming reader would
-         otherwise fill it a request at a time while the prefetch ran ahead.
-         A group already whole costs nothing to name here. *)
+      (* From the group the read is in, so a range read does not leave it to be
+         filled a request at a time; [window] groups beyond it, which is the
+         lookahead a player lives on. Counting the current one against the
+         window would leave none at all at the sizes a cache chunk actually has
+         -- a whole group is bigger than [readahead_bytes], so the window is
+         one. A group already whole costs nothing to name here. *)
       let first = Manifest.Group.index_of ~per last * per in
-      let hi = min (n - 1) (first + (window * per) - 1) in
+      let hi = min (n - 1) (first + ((window + 1) * per) - 1) in
       if first <= hi && !readahead_in_flight < max_readahead_loops then (
         incr readahead_in_flight;
         Io.async (fun () ->
