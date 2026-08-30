@@ -100,8 +100,11 @@ let scrub s =
 let mirror ~cache =
   let dir = Filename.concat cache "media/manifests" in
   let out = Filename.concat root "mirror.txt" in
-  sh "find %s -type f 2>/dev/null | sed 's|%s/||' | sort > %s" (Filename.quote dir)
-    dir (Filename.quote out);
+  (* Byte order, not the machine's collation: this listing is compared against a
+     committed snapshot, and a locale that ignores the leading dot of
+     [.tsync-dir] files it after [pic.txt] rather than before. *)
+  sh "find %s -type f 2>/dev/null | sed 's|%s/||' | LC_ALL=C sort > %s"
+    (Filename.quote dir) dir (Filename.quote out);
   match read_file out with "" -> "(empty)" | s -> String.trim s
 
 let () =
