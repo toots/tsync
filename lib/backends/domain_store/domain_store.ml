@@ -320,6 +320,17 @@ struct
         in
         Backend.merge_caps answers
 
+      (* The main's alone: it is the store a read lands on, and a replica behind
+         a link would make every read of this domain pay for a whole cache chunk
+         where it wanted a few bytes. A domain with a disk in it has that disk as
+         its main. *)
+      let fast_read =
+        match mains with
+          | [] -> false
+          | first :: _ ->
+              let module M = (val first.backend : Store) in
+              M.fast_read
+
       (* Several stores, so no one tree: a caller working on files reaches for the
          member it means ({!Collection} takes the main's) rather than the fan-out
          over all of them. *)

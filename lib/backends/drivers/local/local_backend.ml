@@ -295,6 +295,8 @@ struct
 
       (* Clamped to what the file holds, since a mapping past the end is not a
          short read but a signal on the first page touched. *)
+      let fast_read = true
+
       let get_range ~key ~offset ~length () =
         let key = Stored_key.to_string key in
         let path = resolve key in

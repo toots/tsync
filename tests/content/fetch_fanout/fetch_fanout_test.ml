@@ -64,6 +64,8 @@ module F = struct
   let get_chunk_range ~chunk_key ~offset ~length =
     let+ body = get_chunk ~chunk_key in
     Bigstring.sub body ~off:offset ~len:length
+
+  let fast_read = false
 end
 
 module Cc = Chunk_cache_lwt.Make (C) (F)

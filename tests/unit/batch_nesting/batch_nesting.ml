@@ -56,6 +56,7 @@ module Member : Backend_lwt.Store = struct
                    (Hashtbl.find_opt objects e.Backend.key) ))
              entries))
 
+  let fast_read = false
   let local_path = None
 end
 

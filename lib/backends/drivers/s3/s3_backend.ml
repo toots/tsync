@@ -283,6 +283,8 @@ struct
       let get ~key () = get t ~key:(str key) ()
       let get_opt ~key () = get_opt t ~key:(str key) ()
 
+      let fast_read = false
+
       let get_range ~key ~offset ~length () =
         get_range t ~key:(str key) ~offset ~length ()
       let head_opt ~key () = head_opt t ~key:(str key) ()

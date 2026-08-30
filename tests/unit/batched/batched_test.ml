@@ -45,11 +45,14 @@ module Plain : Backend_lwt.Store = struct
   include Base
 
   let get_many = None
+  let fast_read = false
   let local_path = None
 end
 
 module Native : Backend_lwt.Store = struct
   include Base
+
+  let fast_read = false
 
   let get_many =
     Some

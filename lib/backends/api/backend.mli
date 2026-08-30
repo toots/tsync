@@ -250,6 +250,19 @@ module type S = sig
       identifies the domain, for backends that front several. *)
   val capabilities : prefix:string -> unit -> caps io
 
+  (** Whether a read from this store is cheap enough that taking more than was
+      asked for is the better trade. True for a filesystem on this machine,
+      where a whole cache chunk costs about what a range of it does and leaves
+      the reads after this one with nothing to fetch at all; false wherever a
+      read crosses a link, and a range is the difference between a few bytes and
+      a few megabytes.
+
+      Not derived from {!local_path}: that grants the filesystem, and a caller
+      handed a tree may want it for reasons that have nothing to do with what a
+      read costs — a composite has no one tree and still reads through one
+      store. *)
+  val fast_read : bool
+
   (** The directory this store keeps its objects in, where the object for a key
       is the file at that path under it. [None] for a store to be reached only
       through the operations above.

@@ -157,6 +157,7 @@ module type S = sig
       that only holds bytes. *)
   val capabilities : prefix:string -> unit -> caps io
 
+  val fast_read : bool
   val local_path : string option
 end
 

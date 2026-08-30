@@ -33,6 +33,11 @@ let bodies =
     (key_of "DDDD", "DDDD");
     (key_of "EEEE", "EEEE");
     (key_of "FF", "FF");
+    (* A third, for the store that reads fast enough to be asked for all of
+       it. *)
+    (key_of "GGGG", "GGGG");
+    (key_of "HHHH", "HHHH");
+    (key_of "II", "II");
   ]
 
 let gets : (string, int) Hashtbl.t = Hashtbl.create 8
@@ -94,6 +99,18 @@ module Fetch = struct
       (fun () ->
         decr in_fetch;
         Lwt.return_unit)
+
+  (* Ranges are the subject here, so the fetcher is one a range is worth
+     asking. *)
+  let fast_read = false
+end
+
+(* The same store, saying that a read of it is cheap. Nothing else differs, so
+   what changes below is the cache's choice and not the fetcher's behaviour. *)
+module Fetch_fast = struct
+  include Fetch
+
+  let fast_read = true
 end
 
 (* Nothing here reaches a store: the fetch function is supplied directly. A
@@ -131,6 +148,7 @@ module C : Conf_lwt.S = struct
 end
 
 module Cc = Chunk_cache_lwt.Make (C) (Fetch)
+module Fast = Chunk_cache_lwt.Make (C) (Fetch_fast)
 module Sb = Staged_lwt.Body.Make (C) (Cc)
 
 (* Same store, seen through a capped config: the cap is the only difference. *)
@@ -175,6 +193,9 @@ let k4 = fst (List.nth bodies 3)
 let k5 = fst (List.nth bodies 4)
 
 let k6 = fst (List.nth bodies 5)
+let k9 = fst (List.nth bodies 8)
+let k10 = fst (List.nth bodies 9)
+let k11 = fst (List.nth bodies 10)
 let k7 = fst (List.nth bodies 6)
 let k8 = fst (List.nth bodies 7)
 
@@ -183,6 +204,9 @@ let trio_table = table ~chunk_size:4 ~size:10 [k3; k4; k5]
 let trio = Option.get (Manifest.Group.of_table ~table:trio_table ~per:3 0)
 let whole_table = table ~chunk_size:4 ~size:10 [k6; k7; k8]
 let whole_trio = Option.get (Manifest.Group.of_table ~table:whole_table ~per:3 0)
+
+let fast_table = table ~chunk_size:4 ~size:10 [k9; k10; k11]
+let fast_trio = Option.get (Manifest.Group.of_table ~table:fast_table ~per:3 0)
 
 (* The store's own rules; never recomputed here. *)
 let manifest_path g =
@@ -298,6 +322,22 @@ let () =
        "whole group concurrency" !peak_in_fetch
        (Manifest.Group.member_count whole_trio);
      let* () = show "whole group" whole_trio in
+
+     (* A store cheap enough to read whole is asked for the whole body: one
+        member is read and all three come down, so nothing after this fetches
+        anything at all. *)
+     let* () =
+       let want = Manifest.Group.size fast_trio 0 in
+       let buf = Bigarray.Array1.create Bigarray.char Bigarray.c_layout want in
+       let+ served = Fast.read_into ~group:fast_trio ~index:0 buf ~chunk_off:0 in
+       Printf.printf "%-28s body=%-18S gets=%d backend=%b\n" "fast store: one member"
+         (String.init served.Chunk_cache.bytes (Bigarray.Array1.get buf))
+         (gets_for fast_trio) served.Chunk_cache.from_backend
+     in
+     Printf.printf "%-28s %s / %s / %s\n" "fast store: ranges asked"
+       (range_summary k9) (range_summary k10) (range_summary k11);
+     Printf.printf "%-28s partial=%b\n" "fast store: body"
+       (Sys.file_exists (path fast_trio ^ Cache_layout.manifest_suffix));
 
      (* A partial read inside a member is still addressed by member offset. *)
      let* () =
