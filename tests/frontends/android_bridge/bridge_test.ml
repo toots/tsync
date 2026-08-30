@@ -68,7 +68,12 @@ let () =
         exit 1
     | Some tsync ->
         sh "mkdir -p %s %s" (Filename.quote home) (Filename.quote store);
-        let config = Filename.concat home ".config/tsync/config.json" in
+        (* This one calls in rather than spawning, so the environment it sets is
+           the one the runtime reads. *)
+        Android_home.adopt ~home;
+        let config =
+          (Android_home.paths ~tsync ~home ~scratch:root).Android_home.config
+        in
         sh "mkdir -p %s" (Filename.quote (Filename.dirname config));
         write_file config
           (Printf.sprintf
@@ -78,15 +83,15 @@ let () =
     "frontends": ["android"],
     "backends": [ { "type": "local", "name": "store", "role": "main", "path": %S } ] } ] }|}
              chunk_size chunk_size store);
-        Unix.putenv "HOME" home;
 
         let staging = Filename.concat root "staged.bin" in
         write_file staging fixture;
-        sh "%s android write-whole root big.bin %s >/dev/null"
-          (Filename.quote tsync) (Filename.quote staging);
+        sh "%s %s android write-whole root big.bin %s >/dev/null"
+          (Android_home.env ~home) (Filename.quote tsync)
+          (Filename.quote staging);
         let listing = Filename.concat root "listing.json" in
-        sh "%s android list root > %s" (Filename.quote tsync)
-          (Filename.quote listing);
+        sh "%s %s android list root > %s" (Android_home.env ~home)
+          (Filename.quote tsync) (Filename.quote listing);
         let item =
           let ic = open_in_bin listing in
           let s = really_input_string ic (in_channel_length ic) in
