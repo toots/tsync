@@ -97,8 +97,8 @@ let scrub_clock s =
 let scrub s =
   scrub_clock (List.fold_left (fun s (id, by) -> replace ~needle:id ~by s) s !seen)
 
-let mirror home =
-  let dir = Filename.concat home ".cache/tsync/media/manifests" in
+let mirror ~cache =
+  let dir = Filename.concat cache "media/manifests" in
   let out = Filename.concat root "mirror.txt" in
   sh "find %s -type f 2>/dev/null | sed 's|%s/||' | sort > %s" (Filename.quote dir)
     dir (Filename.quote out);
@@ -110,10 +110,11 @@ let () =
         print_endline "no tsync binary found";
         exit 1
     | Some tsync ->
+        let where home = Android_home.paths ~tsync ~home ~scratch:root in
         let config home =
-          sh "mkdir -p %s" (Filename.quote (Filename.concat home ".config/tsync"));
-          write_file
-            (Filename.concat home ".config/tsync/config.json")
+          let path = (where home).Android_home.config in
+          sh "mkdir -p %s" (Filename.quote (Filename.dirname path));
+          write_file path
             (Printf.sprintf
                {|{ "name": "test",
   "domains": [ { "name": "media", "versioning": true, "symlinks": "skip",
@@ -127,9 +128,10 @@ let () =
         config browsing;
         config other;
 
+        let browsing_cache = (where browsing).Android_home.cache in
         let run home args =
           let out = Filename.concat root "reply.json" in
-          sh "HOME=%s %s android %s > %s 2>/dev/null" (Filename.quote home)
+          sh "%s %s android %s > %s 2>/dev/null" (Android_home.env ~home)
             (Filename.quote tsync) args (Filename.quote out);
           String.trim (read_file out)
         in
@@ -175,18 +177,18 @@ let () =
 
         case "a mirror wiped to nothing";
         sh "rm -rf %s %s"
-          (Filename.quote (Filename.concat browsing ".cache/tsync/media/manifests"))
-          (Filename.quote (Filename.concat browsing ".cache/tsync/media/folders"));
-        line "mirror: %s" (mirror browsing);
+          (Filename.quote (Filename.concat browsing_cache "media/manifests"))
+          (Filename.quote (Filename.concat browsing_cache "media/folders"));
+        line "mirror: %s" (mirror ~cache:browsing_cache);
 
         case "the root lists without ever having synced";
         line "%s" (scrub (run browsing "list root"));
         (* Only the folder browsed is here: its contents were not asked for. *)
-        line "mirror: %s" (scrub (mirror browsing));
+        line "mirror: %s" (scrub (mirror ~cache:browsing_cache));
 
         case "descending fetches that folder, and only then";
         line "%s" (scrub (run browsing (Printf.sprintf "list %s" photos)));
-        line "mirror: %s" (scrub (mirror browsing));
+        line "mirror: %s" (scrub (mirror ~cache:browsing_cache));
 
         case "a file another device removed stops being listed, and is pruned";
         ignore (run other "list root");
@@ -194,7 +196,7 @@ let () =
         line "the other device deletes it: %s"
           (scrub (run other (Printf.sprintf "delete f:%s/pic.txt" id)));
         line "%s" (scrub (run browsing (Printf.sprintf "list %s" photos)));
-        line "mirror: %s" (scrub (mirror browsing));
+        line "mirror: %s" (scrub (mirror ~cache:browsing_cache));
 
         case "a staged file survives the pull that does not know about it";
         line "created: %s" (scrub (run browsing (Printf.sprintf "create %s draft.txt" photos)));

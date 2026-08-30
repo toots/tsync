@@ -165,13 +165,7 @@ let scrub s =
 
 let exercised : (string, unit) Hashtbl.t = Hashtbl.create 16
 
-(* HOME alone does not decide where the binary looks: XDG_CONFIG_HOME and its
-   neighbours take precedence on Linux and a CI runner sets them, so a test that
-   only exported HOME read the runner's own config and not its own. *)
-let with_home =
-  Printf.sprintf
-    "env -u XDG_CONFIG_HOME -u XDG_CACHE_HOME -u XDG_DATA_HOME HOME=%s"
-    (Filename.quote home)
+let with_home = Android_home.env ~home
 
 (* stderr carries the log, which the snapshot rule discards: what a caller parses
    is stdout and nothing else. *)
@@ -197,31 +191,9 @@ let invoke args =
   end;
   read_file out
 
-(* Asked rather than assumed: the layout is the platform's -- XDG on Linux, a
-   group container on macOS -- and a test that spells one of them out is a test
-   for one platform. *)
 let config_path () =
-  let out = Filename.concat root "paths.txt" in
-  ignore
-    (Sys.command
-       (Printf.sprintf "%s %s build-info > %s 2>/dev/null" with_home
-          (Filename.quote (Option.get binary))
-          (Filename.quote out)));
-  let field = "config:" in
-  let of_line l =
-    if
-      String.length l > String.length field
-      && String.sub l 0 (String.length field) = field
-    then
-      Some
-        (String.trim
-           (String.sub l (String.length field)
-              (String.length l - String.length field)))
-    else None
-  in
-  match List.filter_map of_line (String.split_on_char '\n' (read_file out)) with
-    | path :: _ -> path
-    | [] -> Filename.concat home ".config/tsync/config.json"
+  (Android_home.paths ~tsync:(Option.get binary) ~home ~scratch:root)
+    .Android_home.config
 
 (* Entries come back in readdir order, which is the filesystem's and differs
    between one and another; sorting is what makes a listing something a snapshot
