@@ -63,7 +63,8 @@ module F = struct
 
   let get_chunk_range ~chunk_key ~offset ~length =
     let+ body = get_chunk ~chunk_key in
-    Bigstring.sub body ~off:offset ~len:length
+    Bigstring.sub body ~off:offset
+      ~len:(max 0 (min length (Bigstring.length body - offset)))
 
   let fast_read = false
 end

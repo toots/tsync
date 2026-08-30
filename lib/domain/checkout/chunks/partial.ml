@@ -89,10 +89,21 @@ module Make (Io : Io.S) (Fs : FS with type 'a io := 'a Io.t) = struct
           Hashtbl.replace now key held;
           held
 
-  let reset ~key = Hashtbl.remove now key
+  (* One writer at a time per body: an [atomic_write] is a write and a rename
+     with a wait between them, so two fills finishing together otherwise leave
+     the earlier one's view on disk -- over a body that is by then whole, which
+     reads as partial until something touches the chunk that view forgot.
+
+     Its turn is kept beside what it writes and dropped with it, so nothing here
+     outlives the record it is about. *)
+  let publishing : (string, unit Io.t) Hashtbl.t = Hashtbl.create 16
+
+  let reset ~key =
+    Hashtbl.remove now key;
+    Hashtbl.remove publishing key
 
   let drop ~key ~body =
-    Hashtbl.remove now key;
+    reset ~key;
     Fs.unlink_quiet (beside body)
 
   let drop_beside ~body = Fs.unlink_quiet (beside body)
@@ -109,14 +120,8 @@ module Make (Io : Io.S) (Fs : FS with type 'a io := 'a Io.t) = struct
     let span = widen ~have:(interval held i) ~want:span in
     Hashtbl.replace now key (put held i span)
 
-  (* One writer at a time per body, and each reads what is recorded when its
-     turn comes rather than what its own fill saw. An [atomic_write] is a write
-     and a rename with a wait between them, so two fills finishing together
-     otherwise leave the earlier one's view on disk -- over a body that is by
-     then whole, which reads as partial until something touches the chunk that
-     view forgot. *)
-  let publishing : (string, unit Io.t) Hashtbl.t = Hashtbl.create 16
-
+  (* Each reads what is recorded when its turn comes rather than what its own
+     fill saw, so the last one out is the one that decides. *)
   let publish ~key ~body ~complete =
     let write () =
       match Hashtbl.find_opt now key with
@@ -127,15 +132,7 @@ module Make (Io : Io.S) (Fs : FS with type 'a io := 'a Io.t) = struct
     let prev =
       Option.value (Hashtbl.find_opt publishing key) ~default:return_unit
     in
-    let t = ref return_unit in
-    (t :=
-       Io.finalize
-         (fun () -> Io.bind prev write)
-         (fun () ->
-           (match Hashtbl.find_opt publishing key with
-             | Some last when last == !t -> Hashtbl.remove publishing key
-             | _ -> ());
-           return_unit));
-    Hashtbl.replace publishing key !t;
-    !t
+    let t = Io.bind prev write in
+    Hashtbl.replace publishing key t;
+    t
 end

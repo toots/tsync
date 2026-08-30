@@ -17,15 +17,21 @@ let sidecar_path = Cache_layout.manifest_path
    counts here if `tsync ls` should distinguish "partial n/m". *)
 let is_local
     ({ Conf.cache_root; domain_name; cache_chunk_size } : Conf.locality) key =
+  (* A cache chunk is whole when nothing stands beside it: a body a read filled
+     part of is on disk under the same name, and taking its presence for the
+     whole file would report a file as local that still has to be fetched. *)
+  let held key =
+    Sys.file_exists (Cache_layout.chunk_path ~cache_root ~domain_name key)
+    && not
+         (Sys.file_exists
+            (Cache_layout.chunk_manifest_path ~cache_root ~domain_name key))
+  in
   Sys.file_exists (Staged_manifest.sidecar_path ~cache_root ~domain_name key)
   ||
     match of_file (sidecar_path ~cache_root ~domain_name key) with
     | m ->
         List.for_all
-          (fun g ->
-            Sys.file_exists
-              (Cache_layout.chunk_path ~cache_root ~domain_name
-                 (Manifest.Group.key g)))
+          (fun g -> held (Manifest.Group.key g))
           (Manifest.Group.all ~table:m
              ~per:
                (Conf.chunks_per_group ~chunk_size:(chunk_size m)
