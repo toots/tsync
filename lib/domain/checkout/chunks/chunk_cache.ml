@@ -413,6 +413,7 @@ struct
      wrong that way costs a re-fetch. The other way round leaves a partial body
      with no manifest, which every reader takes for a whole one. *)
   let fill group ~index ~want =
+    Bounded.use slots @@ fun () ->
     let key = key group and body = path group in
     let* here = Retry.file_exists body in
     (* A record whose body the cap took is about nothing, so the group starts
