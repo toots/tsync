@@ -59,6 +59,9 @@ module type Fetch = sig
 
   val get_chunk_range :
     chunk_key:string -> offset:int -> length:int -> Bigstring.t io
+
+  (** Whether a whole body is the better ask — see {!Backend.S.fast_read}. *)
+  val fast_read : bool
 end
 
 (** What a read cost. [from_backend] is the part a caller cannot work out for
@@ -101,7 +104,8 @@ module Make
 
       What it fetches is the range asked for and no more, unless the whole group
       is already on its way — in which case waiting for it costs nothing a range
-      would have saved. Those bytes are kept: a body may hold part of a stored
+      would have saved — or the store reads fast enough that the whole body is
+      the better ask. Those bytes are kept: a body may hold part of a stored
       chunk, and a later fetch of the whole group skips the members it already
       holds whole. *)
   val read_into :

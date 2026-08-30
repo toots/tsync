@@ -86,6 +86,7 @@ module R = struct
     unused "upload_chunks"
 
   let fetch_manifest ~key:_ () = Lwt.return None
+  let fast_reads = false
 end
 
 module D = Data_lwt.Make (C) (R)

@@ -241,6 +241,7 @@ let reading_from name (module C : Conf_lwt.S) : (module Conf_lwt.S) =
         let get = Src.get
         let get_opt = Src.get_opt
         let get_range = Src.get_range
+        let fast_read = Src.fast_read
         let head_opt = Src.head_opt
         let list_prefix = Src.list_prefix
 

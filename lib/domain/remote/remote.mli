@@ -49,6 +49,11 @@ module type S = sig
   val get_chunk_range :
     chunk_key:string -> offset:int -> length:int -> Bigstring.t io
 
+  (** Whether reads of this domain's chunks are cheap enough that a reader
+      wanting part of one is better served the whole thing — see
+      {!Backend.S.fast_read}. *)
+  val fast_reads : bool
+
   (** Chunk size for files this client creates: [Conf.S.chunk_size] when the
       config says, else what the domain's stores recommend — an http-proxy
       answers with the serving domain's own, so the setting need not be mirrored

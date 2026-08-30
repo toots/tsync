@@ -95,6 +95,8 @@ module type REMOTE = sig
   val get_chunk_range :
     chunk_key:string -> offset:int -> length:int -> Bigstring.t io
 
+  val fast_reads : bool
+
   val upload :
     key:Logical_key.t ->
     src_path:string ->
@@ -148,7 +150,13 @@ struct
       (C : Conf.S with type 'a io = 'a Io.t)
       (R : REMOTE with type 'a io := 'a Io.t) =
   struct
-    module Cc = Chunk_cache.Make (Io) (Fs) (Retry) (Bounded) (C) (R)
+    module Cc =
+      Chunk_cache.Make (Io) (Fs) (Retry) (Bounded) (C)
+        (struct
+          include R
+
+          let fast_read = R.fast_reads
+        end)
     module Bodies = Staged_body.Over (Io) (Fs) (Retry)
     module Sb = Bodies.Make (C) (Cc)
     module Mf = Mf.Make (C)

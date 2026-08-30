@@ -53,6 +53,8 @@ module type Fetch = sig
 
   val get_chunk_range :
     chunk_key:string -> offset:int -> length:int -> Bigstring.t io
+
+  val fast_read : bool
 end
 
 (* What a read cost. Hoisted out of [Make]: it describes a read, not one
@@ -471,6 +473,15 @@ struct
         | Some entry ->
             let* () = entry.done_ in
             read_or_refetch ~fetched:0 ~from_backend:entry.from_backend
+        (* A store on this machine reads the whole body for about what a range
+           of it costs, and leaves every read after this one with nothing to
+           fetch at all. Asking for less would be paying the same round trip for
+           a worse cache. *)
+        | None when F.fast_read ->
+            let* from_backend = ensure_fetched ~group () in
+            read_or_refetch ~from_backend
+              ~fetched:
+                (if from_backend then Manifest.Group.bytes group else 0)
         | None ->
             let upto =
               min (chunk_off + want) (Manifest.Group.size group index)
