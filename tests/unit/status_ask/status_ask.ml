@@ -6,8 +6,11 @@
 
 open Lwt.Syntax
 
+(* The pid, so instances running beside each other do not bind and unlink the
+   same socket. *)
 let socket_path =
-  Filename.concat (Filename.get_temp_dir_name ()) "tsync-ask.sock"
+  Filename.concat (Filename.get_temp_dir_name ())
+    (Printf.sprintf "tsync-ask-%d.sock" (Unix.getpid ()))
 
 (* Echoes the request back as the reply's [asked] field, so the snapshot below
    shows what was sent as well as what came of it. *)
@@ -54,6 +57,18 @@ let mount_reply =
         ] );
   ]
 
+(* Bound, rather than a guess at how long binding takes: [serve] binds in a
+   thread of its own, and the pause this replaces was fifty milliseconds, which
+   a loaded runner spends without getting there. What that produced was not a
+   timeout but a snapshot of an answer nobody gave. *)
+let rec await_bound tries =
+  if Sys.file_exists socket_path then Lwt.return_unit
+  else if tries <= 0 then
+    Lwt.fail (Failure "status_ask: the daemon never bound its socket")
+  else
+    let* () = Lwt_unix.sleep 0.01 in
+    await_bound (tries - 1)
+
 let show name json =
   Printf.printf "=== %s\n%s\n\n" name (Yojson.Safe.pretty_to_string json)
 
@@ -61,7 +76,7 @@ let () =
   (try Unix.unlink socket_path with _ -> ());
   Lwt_main.run
     (let server = serve ~reply:mount_reply in
-     let* () = Lwt_unix.sleep 0.05 in
+     let* () = await_bound 500 in
      (* The domain travels, and the arg with it. *)
      let* a =
        Status_report.ask ~arg:Status_report.frontend_only ~frontend:"fuse"
