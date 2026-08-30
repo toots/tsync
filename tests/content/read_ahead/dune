@@ -1,0 +1,29 @@
+(executable
+ (flags
+  (:standard
+   -open
+   Tsync_logical_key
+   -open
+   Tsync_manifest
+   -open
+   Tsync_content_lwt
+   -open
+   Tsync_bigstring
+   -open
+   Tsync_backend_lwt
+   -open
+   Tsync_conf_lwt
+   -open
+   Tsync_test_harness))
+ (name read_ahead)
+ (libraries
+  tsync-libs.logical_key
+  tsync_manifest
+  tsync_content_lwt
+  tsync_test_harness
+  tsync_bigstring
+  tsync_backend_lwt
+  tsync_conf_lwt
+  lwt
+  lwt.unix
+  unix))

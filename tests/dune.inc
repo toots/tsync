@@ -349,6 +349,20 @@
   (alias runtest)
   (action (run ./pulling_test.exe))))
 
+(subdir content/read_ahead
+ (alias
+  (name default)
+  (deps read_ahead.exe))
+ (rule
+  (alias runtest)
+  (target read_ahead.output)
+  (action
+   (with-stdout-to read_ahead.output (ignore-stderr (run ./read_ahead.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff read_ahead.expected read_ahead.output))))
+
 (subdir content/read_fanout
  (alias
   (name default)
