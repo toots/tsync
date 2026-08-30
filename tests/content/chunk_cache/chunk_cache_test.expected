@@ -24,11 +24,14 @@ whole group                  present=true  gets=3 in_flight=0
 fast store: one member       body="GGGG"             gets=3 backend=true
 fast store: ranges asked     none / none / none
 fast store: body             partial=false
+read past a held fetch       body="JJJJ"             while the group is in flight
+ranges it asked for          [0,4) / none / none
+and the group still arrives  present=true
 trio member 1 at +2          body="BB"
 trio in another file         same_key=true
 missing chunk                Backend.Backend_error("no such chunk: 8f2a5dd2e287e4d1-2661a4d28dde64aa") in_flight=0
-uncapped                     chunks=5 bytes=52 first=true  second=true
-cap=none (no-op)             chunks=5 bytes=52 first=true  second=true
+uncapped                     chunks=6 bytes=62 first=true  second=true
+cap=none (no-op)             chunks=6 bytes=62 first=true  second=true
 cap=20 (drops coldest)       chunks=2 bytes=20 first=false second=false
 refetch after cap            body="first chunk body" gets=2 backend=true
 cap=0 (drops all)            chunks=0 bytes= 0 first=false second=false

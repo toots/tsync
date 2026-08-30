@@ -102,12 +102,12 @@ module Make
       chunk and fetching what the body is missing. A body that vanishes (or is
       truncated) under the read is fetched again and the read retried once.
 
-      What it fetches is the range asked for and no more, unless the whole group
-      is already on its way — in which case waiting for it costs nothing a range
-      would have saved — or the store reads fast enough that the whole body is
-      the better ask. Those bytes are kept: a body may hold part of a stored
-      chunk, and a later fetch of the whole group skips the members it already
-      holds whole. *)
+      What it fetches is the range asked for and no more, unless the store reads
+      fast enough that the whole body is the better ask. It waits for no other
+      fetch: one of the whole group may be in flight, and waiting for that would
+      turn a small read into a cache chunk's worth of latency. Those bytes are
+      kept: a body may hold part of a stored chunk, and a later fetch of the
+      whole group skips the members it already holds whole. *)
   val read_into :
     group:Manifest.Group.t ->
     index:int ->
