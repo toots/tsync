@@ -145,6 +145,25 @@ class TsyncProvider : DocumentsProvider() {
 
     // ── Opening ──────────────────────────────────────────────────────────────
 
+    /** A handle and the app's claim on the foreground are taken together: the
+     *  reads it will serve are answered in this process, and a process the
+     *  system has frozen answers none of them. */
+    private fun openHandle(documentId: String): Int {
+        val handle = Native.nativeOpen(documentId)
+        if (handle < 0) throw ErrnoException("openDocument", -handle)
+        OpenDocumentsService.retain(context!!)
+        Log.i(TAG, "open $documentId (${OpenDescriptors.count} open)")
+        return handle
+    }
+
+    /** Both ends a handle can come to go through here, so the count and the
+     *  handle cannot drift apart. */
+    private fun closeHandle(handle: Int, documentId: String) {
+        Native.nativeClose(handle)
+        OpenDocumentsService.release(context!!)
+        Log.i(TAG, "close $documentId (${OpenDescriptors.count} open)")
+    }
+
     override fun openDocument(
         documentId: String,
         mode: String,
@@ -155,8 +174,7 @@ class TsyncProvider : DocumentsProvider() {
         if (!mode.contains("w")) {
             val storage = context!!.getSystemService(StorageManager::class.java)
             Native.ensure(context!!)
-            val handle = Native.nativeOpen(documentId)
-            if (handle < 0) throw ErrnoException("openDocument", -handle)
+            val handle = openHandle(documentId)
             // Closed here if the descriptor cannot be made: nothing else would,
             // onRelease belonging to a descriptor that never existed.
             return try {
@@ -170,7 +188,16 @@ class TsyncProvider : DocumentsProvider() {
                             size: Int,
                             data: ByteArray
                         ): Int {
+                            val began = android.os.SystemClock.uptimeMillis()
                             val served = Native.nativeRead(handle, offset, size, data)
+                            val took = android.os.SystemClock.uptimeMillis() - began
+                            // A read this slow is what a player gives up on, and
+                            // what the descriptor is killed for; the ones that
+                            // return promptly are the overwhelming majority and
+                            // would drown it.
+                            if (took >= SLOW_READ_MILLIS) {
+                                Log.w(TAG, "read $documentId @$offset+$size took ${took}ms")
+                            }
                             // The errno the domain answered, not a blanket EIO:
                             // a document that is gone reads differently from one
                             // that could not be fetched.
@@ -179,13 +206,13 @@ class TsyncProvider : DocumentsProvider() {
                         }
 
                         override fun onRelease() {
-                            Native.nativeClose(handle)
+                            closeHandle(handle, documentId)
                         }
                     },
                     handler()
                 )
             } catch (failure: Exception) {
-                Native.nativeClose(handle)
+                closeHandle(handle, documentId)
                 throw failure
             }
         }
@@ -322,6 +349,9 @@ class TsyncProvider : DocumentsProvider() {
         /** Concurrent reads in flight; beyond this a caller waits rather than
          *  falling into anything slower. */
         const val CALLBACK_THREADS = 4
+
+        /** Long enough that only a read worth knowing about is logged. */
+        const val SLOW_READ_MILLIS = 1_000L
         const val AUTHORITY = "org.feverdreamtv.tsync.documents"
 
         /** DocumentsUI caches the root list and only re-queries when told, so a
