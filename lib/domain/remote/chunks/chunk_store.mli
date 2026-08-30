@@ -51,6 +51,12 @@ module Over (Io : Io.S) (Pools : POOLS with type 'a io := 'a Io.t) : sig
     val slots : Pools.t
 
     val downloads : Pools.t
+
+    (** What a reader waiting on bytes draws from. Separate from [downloads] so
+        that the prefetch, which cannot be waited on by anyone, has no way to
+        take what a reader needs. *)
+    val ranges : Pools.t
+
     val max_known : unit -> int
   end
 

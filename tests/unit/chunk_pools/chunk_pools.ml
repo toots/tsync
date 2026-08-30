@@ -39,6 +39,10 @@ let () =
   check "the chunk buffer bound is what the domain asked for"
     (max_of "chunk buffers" = buffers);
   check "and so is the download bound" (max_of "downloads" = downloads);
+  (* A reader's own budget, which is a different pool from the one the prefetch
+     spends: sharing it is what let a prefetch queue in front of a player. *)
+  check "a reader's ranges are bounded separately"
+    (max_of "ranges" = downloads);
 
   case "a second role on the same domain";
   (* The share server's: the same domain under a different layout, which is what
@@ -51,4 +55,5 @@ let () =
     (max_of "chunk buffers" = buffers);
   check "nor what it will hold in memory at once"
     (max_of "downloads" = downloads);
-  report ~expected:4 ()
+  check "nor what a reader may ask for at once" (max_of "ranges" = downloads);
+  report ~expected:6 ()

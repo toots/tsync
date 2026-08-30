@@ -118,7 +118,8 @@ stop: {"ok":true} closes=true asked=1
       "pools": [
         { "name": "share reads", "inFlight": 0, "waiting": 0, "max": 16 },
         { "name": "chunk buffers", "inFlight": 0, "waiting": 0, "max": 2 },
-        { "name": "downloads", "inFlight": 0, "waiting": 0, "max": 3 }
+        { "name": "downloads", "inFlight": 0, "waiting": 0, "max": 3 },
+        { "name": "ranges", "inFlight": 0, "waiting": 0, "max": 3 }
       ],
       "lwt": {
         "readableFds": 2,

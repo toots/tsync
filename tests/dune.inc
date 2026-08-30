@@ -911,6 +911,20 @@
   (alias runtest)
   (action (run ./dedup_test.exe))))
 
+(subdir unit/demand_ranges
+ (alias
+  (name default)
+  (deps demand_ranges.exe))
+ (rule
+  (alias runtest)
+  (target demand_ranges.output)
+  (action
+   (with-stdout-to demand_ranges.output (ignore-stderr (run ./demand_ranges.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff demand_ranges.expected demand_ranges.output))))
+
 (subdir unit/field_spec
  (alias
   (name default)
