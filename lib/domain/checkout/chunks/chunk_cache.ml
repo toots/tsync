@@ -475,27 +475,27 @@ struct
     in
     let* complete = exists group in
     if complete then read_or_refetch ~fetched:0 ~from_backend:false
-    else
-      match Hashtbl.find_opt fetching (Manifest.Group.key group) with
-        (* The whole group is already on its way: waiting for it costs this
-           reader nothing a range would have saved, and leaves one writer on the
-           body. *)
-        | Some entry ->
-            let* () = entry.done_ in
-            read_or_refetch ~fetched:0 ~from_backend:entry.from_backend
-        (* A store on this machine reads the whole body for about what a range
-           of it costs, and leaves every read after this one with nothing to
-           fetch at all. Asking for less would be paying the same round trip for
-           a worse cache. *)
-        | None when F.fast_read ->
-            let* from_backend = ensure_fetched ~group () in
-            read_or_refetch ~from_backend
-              ~fetched:
-                (if from_backend then Manifest.Group.bytes group else 0)
-        | None ->
-            let upto =
-              min (chunk_off + want) (Manifest.Group.size group index)
-            in
-            let* fetched = fill group ~index ~want:(chunk_off, upto) in
-            read_or_refetch ~fetched ~from_backend:(fetched > 0)
+    else if F.fast_read then (
+      (* A store on this machine reads the whole body for about what a range of
+         it costs, and leaves every read after this one with nothing to fetch at
+         all. Asking for less would be paying the same round trip for a worse
+         cache. *)
+      let* from_backend = ensure_fetched ~group () in
+      read_or_refetch ~from_backend
+        ~fetched:(if from_backend then Manifest.Group.bytes group else 0))
+    else (
+      (* Whatever else is on its way, this reader asks for its own bytes and
+         waits for nothing more. A fetch of the whole group may well be in
+         flight -- the prefetch runs one -- and waiting for it would turn a
+         hundred kilobytes into a cache chunk's worth: seconds, over a link,
+         where a range is a moment. The bytes it duplicates are bounded by the
+         read, and two writers of one region write the same bytes to the same
+         offsets.
+
+         What it already holds it does not ask for again: [fill] answers from
+         the record first, which is the same question the whole-group fetch
+         would have been waited on to settle. *)
+      let upto = min (chunk_off + want) (Manifest.Group.size group index) in
+      let* fetched = fill group ~index ~want:(chunk_off, upto) in
+      read_or_refetch ~fetched ~from_backend:(fetched > 0))
 end

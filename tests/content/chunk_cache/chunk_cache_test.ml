@@ -38,7 +38,24 @@ let bodies =
     (key_of "GGGG", "GGGG");
     (key_of "HHHH", "HHHH");
     (key_of "II", "II");
+    (* A fourth, for the group left in flight while something else is read. *)
+    (key_of "JJJJ", "JJJJ");
+    (key_of "KKKK", "KKKK");
+    (key_of "LL", "LL");
   ]
+
+(* Held open so a whole-chunk fetch can be left in flight while the cache is
+   asked for something else. Only whole fetches wait on it: what is on trial is
+   whether a range read waits for them. *)
+let gate : unit Lwt.t option ref = ref None
+
+let arm_gate () =
+  let waited, release = Lwt.wait () in
+  gate := Some waited;
+  release
+
+let through_gate () =
+  match !gate with None -> Lwt.return_unit | Some t -> t
 
 let gets : (string, int) Hashtbl.t = Hashtbl.create 8
 let count ck = Option.value ~default:0 (Hashtbl.find_opt gets ck)
@@ -69,9 +86,11 @@ module Fetch = struct
   let get_chunk ~chunk_key =
     Hashtbl.replace gets chunk_key (count chunk_key + 1);
     incr in_fetch;
+    let held = through_gate () in
     if !in_fetch > !peak_in_fetch then peak_in_fetch := !in_fetch;
     Lwt.finalize
       (fun () ->
+        let* () = held in
         let* () = Lwt_unix.sleep 0.05 in
         match List.assoc_opt chunk_key bodies with
           | Some b -> Lwt.return (Bigstring.of_string b)
@@ -193,6 +212,9 @@ let k4 = fst (List.nth bodies 3)
 let k5 = fst (List.nth bodies 4)
 
 let k6 = fst (List.nth bodies 5)
+let k12 = fst (List.nth bodies 11)
+let k13 = fst (List.nth bodies 12)
+let k14 = fst (List.nth bodies 13)
 let k9 = fst (List.nth bodies 8)
 let k10 = fst (List.nth bodies 9)
 let k11 = fst (List.nth bodies 10)
@@ -207,6 +229,10 @@ let whole_trio = Option.get (Manifest.Group.of_table ~table:whole_table ~per:3 0
 
 let fast_table = table ~chunk_size:4 ~size:10 [k9; k10; k11]
 let fast_trio = Option.get (Manifest.Group.of_table ~table:fast_table ~per:3 0)
+let gated_table = table ~chunk_size:4 ~size:10 [k12; k13; k14]
+
+let gated_trio =
+  Option.get (Manifest.Group.of_table ~table:gated_table ~per:3 0)
 
 (* The store's own rules; never recomputed here. *)
 let manifest_path g =
@@ -338,6 +364,33 @@ let () =
        (range_summary k9) (range_summary k10) (range_summary k11);
      Printf.printf "%-28s partial=%b\n" "fast store: body"
        (Sys.file_exists (path fast_trio ^ Cache_layout.manifest_suffix));
+
+     (* A read does not queue behind a fetch of the whole group. The prefetch
+        runs one of those, and waiting for it would turn a read of a few bytes
+        into a wait for a cache chunk -- seconds over a link, where the range is
+        a moment. The whole fetch is held open here, so a read that waited for
+        it could not finish at all. *)
+     let release = arm_gate () in
+     let ensuring = Cc.ensure ~group:gated_trio () in
+     let* () = Lwt.pause () in
+     let* () =
+       Lwt.pick
+         [
+           (let+ body, _ = read_member gated_trio 0 in
+            Printf.printf "%-28s body=%-18S while the group is in flight\n"
+              "read past a held fetch" body);
+           (let+ () = Lwt_unix.sleep 5. in
+            Printf.printf "%-28s WAITED FOR THE WHOLE GROUP\n"
+              "read past a held fetch");
+         ]
+     in
+     Printf.printf "%-28s %s / %s / %s\n" "ranges it asked for"
+       (range_summary k12) (range_summary k13) (range_summary k14);
+     gate := None;
+     Lwt.wakeup_later release ();
+     let* () = ensuring in
+     Printf.printf "%-28s present=%b\n" "and the group still arrives"
+       (Sys.file_exists (path gated_trio));
 
      (* A partial read inside a member is still addressed by member offset. *)
      let* () =
