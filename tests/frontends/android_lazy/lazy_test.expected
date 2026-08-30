@@ -8,8 +8,8 @@
 
 === descending fetches that folder, and only then
   {"ok":true,"items":[{"ref":"f:<photos>/pic.txt","parentRef":"d:<photos>","name":"pic.txt","kind":"file","size":20,"mtime":<clock>,"etag":"6b3fc6d2d2155c6b","isUploaded":true}]}
-  mirror: photos/pic.txt
-photos/.tsync-dir
+  mirror: photos/.tsync-dir
+photos/pic.txt
 
 === a file another device removed stops being listed, and is pruned
   the other device deletes it: {"ok":true}
