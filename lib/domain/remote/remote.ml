@@ -27,7 +27,7 @@ module type S = sig
   val get_chunk_range :
     chunk_key:string -> offset:int -> length:int -> Bigstring.t io
 
-  val fast_reads : bool
+  val fast_read : bool
 
   (** Chunk size for files this client creates; see the .mli. *)
   val chunk_size : unit -> int io
@@ -424,7 +424,7 @@ struct
     let get_chunk_range ~chunk_key ~offset ~length =
       Chunks_store.fetch_range chunk_key ~offset ~length
 
-    let fast_reads = B.fast_read
+    let fast_read = B.fast_read
   end
 
   (* The inode layout is what every path-keyed caller wants. *)

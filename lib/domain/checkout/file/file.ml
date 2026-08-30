@@ -10,7 +10,7 @@ module type REMOTE = sig
   val get_chunk_range :
     chunk_key:string -> offset:int -> length:int -> Bigstring.t io
 
-  val fast_reads : bool
+  val fast_read : bool
 
   val upload :
     key:Logical_key.t ->

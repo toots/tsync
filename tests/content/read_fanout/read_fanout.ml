@@ -75,7 +75,9 @@ module R = struct
   let get_chunk_range ~chunk_key ~offset ~length =
     incr started;
     let+ () = gate in
-    Bigstring.sub (body_of chunk_key) ~off:offset ~len:length
+    let body = body_of chunk_key in
+    Bigstring.sub body ~off:offset
+      ~len:(max 0 (min length (Bigstring.length body - offset)))
 
   let upload ~key:_ ~src_path:_ ~mtime:_ ~chunk_size:_ ?cancel:_
       ?on_progress:_ () =
@@ -86,7 +88,7 @@ module R = struct
     unused "upload_chunks"
 
   let fetch_manifest ~key:_ () = Lwt.return None
-  let fast_reads = false
+  let fast_read = false
 end
 
 module D = Data_lwt.Make (C) (R)

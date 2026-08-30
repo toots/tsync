@@ -158,11 +158,12 @@ struct
             put ~offset:(Manifest.Group.offset group i) data)
           (Manifest.Group.indices group))
 
-  (* Bounds fetches that have started, not groups asked for: a fetch opens its
+  (* Bounds writes that have started, not groups asked for: a fetch opens its
      destination before waiting for a download slot, so without this every
      pending group holds a descriptor while only [max_downloads] make progress —
      247 open files inside 200ms on a 250 MB file at a 1 MiB group size, against
-     a 256 descriptor limit.
+     a 256 descriptor limit. A range fill opens the same destination the same
+     way, so it takes the same slot.
 
      Bounded here rather than at the callers so every route in gets it. *)
   let slots = Bounded.create ~max:C.max_downloads ()
@@ -182,6 +183,9 @@ struct
         (fun i -> not (full_member group held i))
         (Manifest.Group.indices group)
     in
+    (* As wide as the group has members, which the cache chunk size chooses and
+       whose bodies together are one cache chunk -- the same fan-out, and the
+       same bound on it, as writing a group from scratch. *)
     let* () =
       Io.iter_p
         (fun i ->
@@ -196,9 +200,14 @@ struct
     in
     Part.drop ~key:(key group) ~body:(path group)
 
+  (* A record beside the body, not the body itself, is what says there is
+     something here worth topping up. A forced re-fetch of a whole body is
+     asking for it to be replaced -- it is believed corrupt -- and that is the
+     atomic write, not a run of writes in place over the bytes being
+     replaced. *)
   let fetch group =
     Bounded.use slots (fun () ->
-        let* partial = Retry.file_exists (path group) in
+        let* partial = Part.recorded ~body:(path group) in
         if partial then complete_body group
         else
           let* () = write_group group (member group) in

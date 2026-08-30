@@ -95,7 +95,7 @@ module type REMOTE = sig
   val get_chunk_range :
     chunk_key:string -> offset:int -> length:int -> Bigstring.t io
 
-  val fast_reads : bool
+  val fast_read : bool
 
   val upload :
     key:Logical_key.t ->
@@ -150,13 +150,7 @@ struct
       (C : Conf.S with type 'a io = 'a Io.t)
       (R : REMOTE with type 'a io := 'a Io.t) =
   struct
-    module Cc =
-      Chunk_cache.Make (Io) (Fs) (Retry) (Bounded) (C)
-        (struct
-          include R
-
-          let fast_read = R.fast_reads
-        end)
+    module Cc = Chunk_cache.Make (Io) (Fs) (Retry) (Bounded) (C) (R)
     module Bodies = Staged_body.Over (Io) (Fs) (Retry)
     module Sb = Bodies.Make (C) (Cc)
     module Mf = Mf.Make (C)
@@ -408,10 +402,11 @@ struct
                   Cc.read_into ~group ~index:p.Chunks.index slice
                     ~chunk_off:p.Chunks.chunk_off
                 in
-                (* What crossed the wire, which is neither the slice nor the
-                   group: a read may pull a range of one stored chunk, a whole
-                   group, or nothing. *)
-                if served.Chunk_cache.fetched > 0 then
+                (* Whether this read waited on the network decides the row;
+                   what crossed the wire decides the bytes, and they are not the
+                   same question -- a reader that only joined someone else's
+                   fetch waited for it without pulling any of it. *)
+                if served.Chunk_cache.from_backend then
                   credit_pull id ~size:(Int64.to_int size)
                     served.Chunk_cache.fetched;
                 served.Chunk_cache.bytes
@@ -456,6 +451,11 @@ struct
       else (
         let slots = staged.Staged_manifest.s_slots in
         let n = Array.length slots in
+        let group_at =
+          match base with
+            | None -> fun _ -> None
+            | Some table -> groups_of ~table ~per:(per_of table)
+        in
         let one (p : Chunks.piece) slice =
           let i = p.Chunks.index and chunk_off = p.Chunks.chunk_off in
           let take = p.Chunks.len in
@@ -476,12 +476,12 @@ struct
                 Bigarray.Array1.fill slice '\000';
                 Io.return take
             | Staged_manifest.Inherit -> (
-                match group_at_opt base i with
+                match group_at i with
                   | Some group ->
                       let+ served =
                         Cc.read_into ~group ~index:i slice ~chunk_off
                       in
-                      if served.Chunk_cache.fetched > 0 then
+                      if served.Chunk_cache.from_backend then
                         credit_pull id
                           ~size:(Int64.to_int staged.Staged_manifest.s_size)
                           served.Chunk_cache.fetched;

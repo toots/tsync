@@ -319,6 +319,14 @@
   (alias runtest)
   (action (run ./known_chunks.exe))))
 
+(subdir content/partial_local
+ (alias
+  (name default)
+  (deps partial_local.exe))
+ (rule
+  (alias runtest)
+  (action (run ./partial_local.exe))))
+
 (subdir content/promote_race
  (alias
   (name default)
