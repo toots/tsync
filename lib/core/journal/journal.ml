@@ -177,6 +177,10 @@ let of_json j =
       | _ -> None
   with _ -> None
 
+let keys_of_op = function
+  | `Put (k, _) | `Delete k | `Mkdir (k, _) | `Rmdir (k, _) -> [k]
+  | `Rename { dst; src; _ } -> [dst; src]
+
 let encode ops =
   String.concat "\n"
     (List.map (fun op -> Yojson.Basic.to_string (to_json op)) ops)

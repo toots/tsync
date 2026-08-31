@@ -18,6 +18,8 @@
    -open
    Tsync_file_store_lwt
    -open
+   Tsync_ipc_lwt
+   -open
    Tsync_log
    -open
    Tsync_conf_lwt
@@ -43,6 +45,7 @@
   tsync_file_store_lwt
   tsync_backend_lwt
   tsync_conf_lwt
+  tsync_ipc_lwt
   tsync_ipc_handler
   tsync_log
   tsync_durable_queue_lwt

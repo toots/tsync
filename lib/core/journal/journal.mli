@@ -62,6 +62,11 @@ val to_json : op -> Yojson.Basic.t
 
 val of_json : Yojson.Basic.t -> op option
 
+(** The keys an op names. A rename touches two: where the item went, and where
+    it was, since a reader deciding whether an op concerns it has to test both.
+*)
+val keys_of_op : op -> string list
+
 (** A published journal entry: one op per line. Unreadable lines are skipped — a
     newer client may have written an op this one does not know. *)
 val encode : op list -> string

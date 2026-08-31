@@ -23,7 +23,30 @@ module Base =
 module Make (C : Conf_lwt.S) = struct
   include Base.Make (C)
   module J = Journal.Make (C)
+  module Lk = Logical_key.Make (C)
   open Lwt.Syntax
+
+  (* Recording a change and announcing it are one operation. Two would mean
+     every caller that mutates a domain is trusted to remember the second, and
+     the ones outside the daemon -- an import, a revert -- did not: the entry
+     was kept and the change feed would have answered with it, but nothing told
+     a frontend to ask, so it stayed invisible until something else happened to
+     look.
+
+     Batched and best-effort on {!Change_notice}'s terms: a frontend that is
+     down is the ordinary case, and a catch-up of a hundred thousand entries
+     must not be a hundred thousand round trips. The daemon publishing its own
+     uploads notifies its own socket, which is one round trip per batch and one
+     code path rather than two. *)
+  let announce ops =
+    List.iter
+      (fun op ->
+        List.iter
+          (fun rel ->
+            Change_notice.send ~domain:C.domain_name ~sockets:[C.socket_path]
+              (Logical_key.to_string (Lk.file rel)))
+          (Journal.keys_of_op op))
+      ops
 
   let note_applied entry_key ops =
     Applied_entries.note ~cache_root:C.cache_root ~domain_name:C.domain_name
@@ -36,7 +59,9 @@ module Make (C : Conf_lwt.S) = struct
   let write_journal_entry ?entry_key ops =
     let entry_key = entry_key_of entry_key in
     let* () = note_applied entry_key ops in
-    write_journal_entry ~entry_key ops
+    let+ published = write_journal_entry ~entry_key ops in
+    announce ops;
+    published
 
   (* The bulk path an import takes. The body is the entry's own encoding, so the
      ops are read back from it rather than passed a second way. *)

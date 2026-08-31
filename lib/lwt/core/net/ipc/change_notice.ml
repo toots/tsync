@@ -87,6 +87,18 @@ let rec flush t =
     let* () = Lwt_list.iter_s (post t) (chunks max_batch keys) in
     flush t
 
+(* Post what is pending now instead of on the next tick. A long-lived process
+   leans on the timer; a command that returns before it fires would take its
+   notices with it, which is how a change made outside the mount stayed
+   invisible until something else happened to look. *)
+let settle () =
+  Lwt_list.iter_s
+    (fun t ->
+      let keys = Hashtbl.fold (fun k () acc -> k :: acc) t.pending [] in
+      Hashtbl.reset t.pending;
+      Lwt_list.iter_s (post t) (chunks max_batch keys))
+    (Hashtbl.fold (fun _ t acc -> t :: acc) table [])
+
 let send ~domain ~sockets key =
   let t = for_domain ~domain ~sockets in
   if t.sockets <> [] then begin

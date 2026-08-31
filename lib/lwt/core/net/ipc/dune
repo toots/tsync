@@ -4,7 +4,7 @@
 
 (library
  (flags
-  (:standard -open Tsync_ipc -open Tsync_io_lwt))
+  (:standard -open Tsync_ipc -open Tsync_log -open Tsync_io_lwt))
  (name tsync_ipc_lwt)
  (public_name tsync-libs.ipc_lwt)
- (libraries tsync_ipc tsync_io_lwt yojson unix lwt lwt.unix))
+ (libraries tsync_log tsync_ipc tsync_io_lwt yojson unix lwt lwt.unix))

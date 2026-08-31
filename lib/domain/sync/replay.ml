@@ -78,12 +78,7 @@ struct
     module Mfs = Sm.Make (C)
 
     let full_key rel = Lk.file rel
-
-    (* The key an op names, for the last-writer-wins check. A rename touches two. *)
-    let op_keys = function
-      | `Put (k, _) | `Delete k | `Mkdir (k, _) | `Rmdir (k, _) -> [k]
-      | `Rename { Journal.dst; src; _ } -> [dst; src]
-
+    let op_keys = Journal.keys_of_op
     let op_key op = List.hd (op_keys op)
 
     (* Bounded rather than [iter_p]: recovery can face a journal of any size, and
