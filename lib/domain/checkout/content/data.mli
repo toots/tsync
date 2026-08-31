@@ -152,9 +152,11 @@ module Over
 
     (** {!pread} for a key of this domain, resolved through
         {!Manifest.Make.resolve}: staged edits, else what was published. Reads
-        nothing for a key the mirror does not hold. *)
-    (** [stream] names the descriptor reading, so two open on one file each keep
-        their own place for the read-ahead heuristic; without it they share one. *)
+        nothing for a key the mirror does not hold.
+
+        [stream] names the descriptor reading, so two open on one file each keep
+        their own place for the read-ahead heuristic; without it they share one.
+    *)
     val pread_key :
       ?stream:string -> Logical_key.t -> Bigstring.t -> offset:int64 -> int Io.t
 
