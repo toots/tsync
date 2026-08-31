@@ -58,4 +58,25 @@ let scenarios : scenario list =
     };
   ]
 
-let () = run scenarios
+(* The cap consults a count, not a walk. Only the leading [ShowChunkCache] reads
+   the store -- anchoring an empty one -- and every figure after it is
+   arithmetic over what the steps below put there and took away. A body counted
+   wrong shows up here as a number that does not match the bytes cached. *)
+let counting : scenario list =
+  [
+    {
+      name = "the count follows what lands in the store, without walking it";
+      steps =
+        [
+          ShowChunkCache;
+          Write { path = "a.txt"; content = "aaaaaaaa" };
+          Drain;
+          Evict "a.txt";
+          ShowChunkCache;
+        ]
+        @ cache "a.txt"
+        @ [ShowChunkCache; Evict "a.txt"; ShowChunkCache];
+    };
+  ]
+
+let () = run (scenarios @ counting)

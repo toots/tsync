@@ -83,3 +83,30 @@
   file x.txt [.tsync-root/fecd6e94d21b3dc7-d6d12967f4c00d3d] = manifest size=8 chunks=1 h1=c000da6ed59e60d5 h2=f16a0981a4898b6a
     chunk#0 4267e87c9cb0bc97-3ffc27d07b585304 size=8
 
+=== the count follows what lands in the store, without walking it
+  chunk-cache
+  write a.txt "aaaaaaaa"
+  drain
+  evict a.txt
+  chunk-cache
+  read a.txt [0,8)
+  drain
+  chunk-cache
+  evict a.txt
+  chunk-cache
+  chunk-cache chunks=0 bytes=0
+  chunk-cache chunks=0 bytes=0
+  read a.txt [0,8) = "aaaaaaaa"
+  chunk-cache chunks=1 bytes=8
+  chunk-cache chunks=0 bytes=0
+--- tree
+  f a.txt size=8 cached=0/1 uploaded=true etag=205e7be268ad065e
+--- content
+  a.txt = "aaaaaaaa"
+--- backend
+  chunk c9dbc05573cd5d9a-1ae64e03afa5a78e size=8
+  cursor = <entry-1>
+  journal <entry-1> = put a.txt 8
+  file a.txt [.tsync-root/f01e5cbbc09d4fc4-9a0fcd66f030de75] = manifest size=8 chunks=1 h1=205e7be268ad065e h2=d54b96d6efd47935
+    chunk#0 c9dbc05573cd5d9a-1ae64e03afa5a78e size=8
+
