@@ -71,6 +71,16 @@ end
     or nothing. *)
 type served = { bytes : int; fetched : int; from_backend : bool }
 
+(** What a store holds, kept per store rather than per instantiation: two
+    functor instances over one cache root are two views of one directory. The
+    store maintains this on its write path, where the bytes are known;
+    {!Chunk_cap} is what reads it against a cap. *)
+type held = {
+  mutable files : int;
+  mutable bytes : int;
+  mutable anchored : bool;
+}
+
 module Make
     (Io : Io.S)
     (_ : FS with type 'a io := 'a Io.t)
@@ -133,13 +143,24 @@ module Make
   (** Number of downloads currently in flight. *)
   val in_flight : unit -> int
 
-  (** [(cache chunks, bytes)] currently held. *)
-  val stats : unit -> (int * int) Io.t
+  (** {2 What {!Chunk_cap} reads}
 
-  (** While the store exceeds [C.max_cache], delete cache-chunk bodies
-      oldest-mtime first; no-op when [max_cache] is unset.
+      The store enumerates and counts itself; holding it under a cap is a
+      file-layer sweep and lives beside the others. *)
 
-      Needs no notion of what is in use, a body deleted under a reader being
-      fetched again. *)
-  val enforce_cap : unit -> unit Io.t
+  (** Where the bodies are. *)
+  val root : unit -> string
+
+  (** [(path, bytes, mtime)] per chunk body, stat'd through the store's own
+      pools. A partial-body record is not a body and is left out. *)
+  val entries : unit -> (string * int * float) list Io.t
+
+  (** The running count, maintained by every write. *)
+  val held : unit -> held
+
+  (** Tell the count a body of this size is gone. *)
+  val dropped : int -> unit
+
+  (** Drop the partial-body record beside [body], if there is one. *)
+  val drop_record : body:string -> unit Io.t
 end

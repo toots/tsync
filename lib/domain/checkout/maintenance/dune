@@ -1,0 +1,42 @@
+; The file layer's cleanup, kept apart from the code that serves files: temp
+; files a crash left in the mirror, staged bodies no manifest names, the chunk
+; cap, and the folder index. Depends on the trees it sweeps, never the reverse,
+; and never on the storage layer -- what collects a backend store is tsync gc.
+
+(library
+ (flags
+  (:standard
+   -open
+   Tsync_filename
+   -open
+   Tsync_logical_key
+   -open
+   Tsync_conf
+   -open
+   Tsync_cache_layout
+   -open
+   Tsync_staged
+   -open
+   Tsync_chunk_cache
+   -open
+   Tsync_folder_ids
+   -open
+   Tsync_manifest
+   -open
+   Tsync_io
+   -open
+   Tsync_log))
+ (name tsync_checkout_maintenance)
+ (public_name tsync-libs.checkout_maintenance)
+ (libraries
+  tsync_filename
+  tsync_logical_key
+  tsync_conf
+  tsync_cache_layout
+  tsync_staged
+  tsync_chunk_cache
+  tsync_folder_ids
+  tsync_manifest
+  tsync_io
+  tsync_log
+  unix))

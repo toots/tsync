@@ -17,10 +17,6 @@
     contains, not what a bucket does. *)
 type listed = { key : Logical_key.t; size : int; mtime : float }
 
-(** What a sweep collected. The staged half counts its own the same way, so a
-    caller running both adds the two up. *)
-type swept = Staged_manifest.swept = { files : int; bytes : int }
-
 (** True when [key] has unsynced edits, or the chunk store holds every cache
     chunk its sidecar's chunks group into. Synchronous, for the CLI listing;
     [false] for a partly cached file. *)
@@ -33,8 +29,6 @@ module type FS = sig
   val mkdir_p : string -> unit io
   val is_directory : string -> bool io
   val readdir_list : string -> string list io
-  val readdir_list_quiet : string -> string list io
-  val stat_opt : string -> Unix.stats option io
   val atomic_write : string -> string -> unit io
   val rm_rf : string -> unit io
   val unlink_quiet : string -> unit io
@@ -122,17 +116,5 @@ module Over
     (** Create the checkout root. Every process serving the domain needs this
         and nothing more. *)
     val ensure_root : unit -> unit Io.t
-
-    (** Drop the temp files a crash left behind, walking the whole mirror.
-
-        On demand, never on the way to serving: the walk costs a stat per entry
-        over a tree that holds one per file the domain has, which is minutes on
-        a large domain and collects a handful of files.
-
-        Safe against a domain that is being served. A temp name embeds the pid
-        that made it ({!Filename.temp_path}), so one whose owner is gone is a
-        leftover and one whose owner is alive is a write in progress, and only
-        the first is taken. *)
-    val reap_temp_files : unit -> swept Io.t
   end
 end

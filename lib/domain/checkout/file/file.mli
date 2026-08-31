@@ -66,7 +66,7 @@ module type CONTENT = sig
     val truncate : Logical_key.t -> int64 -> unit io
     val create : Logical_key.t -> unit io
     val sync : Logical_key.t -> ?cancel:bool ref -> unit -> unit io
-    val enforce_chunk_cap : unit -> unit io
+    val enforce_chunk_cap : unit -> Sweep.swept io
     val chunk_stats : unit -> (int * int) io
     val downloads_in_flight : unit -> int
     val downloads_completed_count : unit -> int

@@ -81,7 +81,7 @@ module type S = sig
   val close : t -> unit io
 
   (** Keep the chunk store under [C.max_cache]; never touches staged data. *)
-  val enforce_chunk_cap : unit -> unit io
+  val enforce_chunk_cap : unit -> Sweep.swept io
 
   (** [(chunks, bytes)] held in the chunk store. *)
   val chunk_stats : unit -> (int * int) io

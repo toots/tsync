@@ -165,27 +165,26 @@ module C : Conf_lwt.S = struct
 end
 
 module Cc = Chunk_cache_lwt.Make (C) (Fetch)
+module Cap = Maintenance_lwt.Chunk_cap (Cc) (C)
 module Fast = Chunk_cache_lwt.Make (C) (Fetch_fast)
 module Sb = Staged_lwt.Body.Make (C) (Cc)
 
-(* Same store, seen through a capped config: the cap is the only difference. *)
-module Capped20 =
-  Chunk_cache_lwt.Make
-    (struct
-      include C
+(* Same store, seen through a capped config: the cap is the only difference.
+   The store is one instance; what differs is the policy read over it. *)
+module C20 = struct
+  include C
 
-      let max_cache = Some 20
-    end)
-    (Fetch)
+  let max_cache = Some 20
+end
 
-module Capped0 =
-  Chunk_cache_lwt.Make
-    (struct
-      include C
+module C0 = struct
+  include C
 
-      let max_cache = Some 0
-    end)
-    (Fetch)
+  let max_cache = Some 0
+end
+
+module Capped20 = Maintenance_lwt.Chunk_cap (Cc) (C20)
+module Capped0 = Maintenance_lwt.Chunk_cap (Cc) (C0)
 
 (* Chunk lengths derive from the header, so file size and chunk size set
    them. *)
@@ -431,21 +430,25 @@ let () =
      Unix.utimes (path g1) 1000. 1000.;
      Unix.utimes (path g2) 2000. 2000.;
      let show_cap label =
-       let+ chunks, bytes = Cc.stats () in
+       let+ chunks, bytes = Cap.stats () in
        let p1 = Sys.file_exists (path g1) in
        let p2 = Sys.file_exists (path g2) in
        Printf.printf "%-28s chunks=%d bytes=%2d first=%-5b second=%b\n" label
          chunks bytes p1 p2
      in
      let* () = show_cap "uncapped" in
-     let* () = Cc.enforce_cap () in
+     let* () = Lwt.map (fun (_ : Maintenance_lwt.swept) -> ()) (Cap.run ()) in
      let* () = show_cap "cap=none (no-op)" in
-     let* () = Capped20.enforce_cap () in
+     let* () =
+       Lwt.map (fun (_ : Maintenance_lwt.swept) -> ()) (Capped20.run ())
+     in
      (* 22 bytes over a 20-byte cap: the colder chunk goes, the warmer stays. *)
      let* () = show_cap "cap=20 (drops coldest)" in
      (* A dropped chunk is not lost, just not local. *)
      let* () = show_body "refetch after cap" g1 0 in
-     let* () = Capped0.enforce_cap () in
+     let* () =
+       Lwt.map (fun (_ : Maintenance_lwt.swept) -> ()) (Capped0.run ())
+     in
      let* () = show_cap "cap=0 (drops all)" in
 
      (* A partly filled body and its manifest are one thing to the cap. Evicting
@@ -457,7 +460,9 @@ let () =
      Printf.printf "%-28s body=%b manifest=%b\n" "partly filled again"
        (Sys.file_exists (path whole_trio))
        (Sys.file_exists partial);
-     let* () = Capped0.enforce_cap () in
+     let* () =
+       Lwt.map (fun (_ : Maintenance_lwt.swept) -> ()) (Capped0.run ())
+     in
      Printf.printf "%-28s body=%b manifest=%b\n" "cap=0 over a partial body"
        (Sys.file_exists (path whole_trio))
        (Sys.file_exists partial);
@@ -502,8 +507,10 @@ let () =
         does not sweep, so a cap of zero cannot reach them. *)
      let unpublished = "stagedbody000002" in
      let* () = Sb.ensure ~uuid:unpublished ~len:4 in
-     let* () = Capped0.enforce_cap () in
-     let+ chunks, _ = Cc.stats () in
+     let* () =
+       Lwt.map (fun (_ : Maintenance_lwt.swept) -> ()) (Capped0.run ())
+     in
+     let+ chunks, _ = Cap.stats () in
      Printf.printf "%-28s staged=%b cache chunks=%d\n"
        "cap=0 over a staged body"
        (Sys.file_exists (Sb.path unpublished))

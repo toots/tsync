@@ -65,15 +65,14 @@ let cmd : unit Cmd.t =
     if paths <> [] then
       failwith "cache --prune takes no PATH; it collects the whole domain.";
     let (module C : Conf_lwt.S) = load_conf ?domain () in
-    let module Mf = Checkout_lwt.Make (C) in
-    let module Mfs = Staged_lwt.Manifest.Make (C) in
-    let temp = run_lwt (Mf.reap_temp_files ()) in
+    let module Temp = Maintenance_lwt.Temp_files.Make (C) in
+    let module Orphans = Maintenance_lwt.Staged_orphans.Make (C) in
+    let temp = run_lwt (Temp.run ()) in
     let cutoff = Unix.gettimeofday () -. grace in
-    let staged = run_lwt (Mfs.reclaim_orphan_bodies ~cutoff ()) in
-    let freed = temp.Checkout.bytes + staged.Staged_manifest.bytes in
+    let staged = run_lwt (Orphans.run ~cutoff ()) in
+    let freed = temp.Sweep.bytes + staged.Sweep.bytes in
     Printf.printf "%s: %d temp file(s), %d staged body(s), %s reclaimed.\n"
-      C.domain_name temp.Checkout.files staged.Staged_manifest.files
-      (human_bytes freed)
+      C.domain_name temp.Sweep.files staged.Sweep.files (human_bytes freed)
   in
   let run paths domain evict fetch prune_ grace =
     match (evict, fetch, prune_) with

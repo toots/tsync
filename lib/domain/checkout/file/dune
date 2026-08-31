@@ -9,6 +9,8 @@
    -open
    Tsync_history
    -open
+   Tsync_checkout_maintenance
+   -open
    Tsync_staged
    -open
    Tsync_checkout
@@ -37,6 +39,7 @@
  (libraries
   tsync_logical_key
   tsync_history
+  tsync_checkout_maintenance
   tsync_staged
   tsync_checkout
   tsync_file_ops

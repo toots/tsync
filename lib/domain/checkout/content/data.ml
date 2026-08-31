@@ -152,6 +152,11 @@ struct
       (R : REMOTE with type 'a io := 'a Io.t) =
   struct
     module Cc = Chunk_cache.Make (Io) (Fs) (Retry) (Bounded) (C) (R)
+
+    (* Holding the store under its cap is a file-layer sweep, and lives beside
+       the others. What stays here is the two hooks a caller of this module
+       reaches it through. *)
+    module Cap = Chunk_cap.Make (Io) (Fs) (Retry) (Cc) (C)
     module Bodies = Staged_body.Over (Io) (Fs) (Retry)
     module Sb = Bodies.Make (C) (Cc)
     module Mf = Mf.Make (C)
@@ -1128,8 +1133,8 @@ struct
     (* Re-exported so a domain has exactly one {!Chunk_cache} instance: two would
        each keep their own in-flight table and stop deduplicating downloads. *)
 
-    let enforce_chunk_cap = Cc.enforce_cap
-    let chunk_stats = Cc.stats
+    let enforce_chunk_cap = Cap.run
+    let chunk_stats = Cap.stats
     let downloads_in_flight = Cc.in_flight
 
     (* Adopts [src_path] by rename: no copy, no chunking pass; the upload reads it
