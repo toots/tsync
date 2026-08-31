@@ -9,7 +9,8 @@ open Lwt.Syntax
 (* The pid, so instances running beside each other do not bind and unlink the
    same socket. *)
 let socket_path =
-  Filename.concat (Filename.get_temp_dir_name ())
+  Filename.concat
+    (Filename.get_temp_dir_name ())
     (Printf.sprintf "tsync-ask-%d.sock" (Unix.getpid ()))
 
 (* Echoes the request back as the reply's [asked] field, so the snapshot below

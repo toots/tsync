@@ -17,7 +17,6 @@ let store = Filename.concat root "store"
    device changing the domain underneath it. *)
 let browsing = Filename.concat root "browsing"
 let other = Filename.concat root "other"
-
 let case name = Printf.printf "\n=== %s\n" name
 let line fmt = Printf.printf ("  " ^^ fmt ^^ "\n%!")
 let sh fmt = Printf.ksprintf (fun cmd -> ignore (Sys.command cmd)) fmt
@@ -25,10 +24,10 @@ let sh fmt = Printf.ksprintf (fun cmd -> ignore (Sys.command cmd)) fmt
 let binary =
   let rec find dir depth =
     if depth = 0 then None
-    else
+    else (
       let candidate = Filename.concat dir "bin/tsync.exe" in
       if Sys.file_exists candidate then Some candidate
-      else find (Filename.dirname dir) (depth - 1)
+      else find (Filename.dirname dir) (depth - 1))
   in
   find (Sys.getcwd ()) 6
 
@@ -75,7 +74,10 @@ let scrub_clock s =
       let stop = ref (i + n) in
       while
         !stop < h
-        && match s.[!stop] with '0' .. '9' | '.' | '-' | 'e' -> true | _ -> false
+        &&
+          match s.[!stop] with
+          | '0' .. '9' | '.' | '-' | 'e' -> true
+          | _ -> false
       do
         incr stop
       done;
@@ -95,7 +97,8 @@ let scrub_clock s =
   go 0
 
 let scrub s =
-  scrub_clock (List.fold_left (fun s (id, by) -> replace ~needle:id ~by s) s !seen)
+  scrub_clock
+    (List.fold_left (fun s (id, by) -> replace ~needle:id ~by s) s !seen)
 
 let mirror ~cache =
   let dir = Filename.concat cache "media/manifests" in
@@ -143,7 +146,7 @@ let () =
           let tag = "\"ref\":\"" in
           let rec find i =
             if i + String.length needle > String.length reply then None
-            else if String.sub reply i (String.length needle) = needle then
+            else if String.sub reply i (String.length needle) = needle then (
               let rec back j =
                 if j < 0 then None
                 else if
@@ -152,7 +155,7 @@ let () =
                 then Some (j + String.length tag)
                 else back (j - 1)
               in
-              back i
+              back i)
             else find (i + 1)
           in
           match find 0 with
@@ -202,5 +205,6 @@ let () =
         line "mirror: %s" (scrub (mirror ~cache:browsing_cache));
 
         case "a staged file survives the pull that does not know about it";
-        line "created: %s" (scrub (run browsing (Printf.sprintf "create %s draft.txt" photos)));
+        line "created: %s"
+          (scrub (run browsing (Printf.sprintf "create %s draft.txt" photos)));
         line "%s" (scrub (run browsing (Printf.sprintf "list %s" photos)))

@@ -70,8 +70,7 @@ module Over (Io : Io.S) (Pools : POOLS with type 'a io := 'a Io.t) : sig
 
     (** Part of one, holding a read slot as a whole fetch does: what a range
         saves is bytes on the wire, not a round trip. *)
-    val fetch_range :
-      string -> offset:int -> length:int -> Bigstring.t Io.t
+    val fetch_range : string -> offset:int -> length:int -> Bigstring.t Io.t
 
     (** Keys this session has spared itself a round trip on. *)
     val known_count : unit -> int

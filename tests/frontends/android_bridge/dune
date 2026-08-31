@@ -8,8 +8,4 @@
  (foreign_stubs
   (language c)
   (names tsync_stress))
- (libraries
-  tsync_test_harness
-  tsync_android_jni
-  bigstringaf
-  unix))
+ (libraries tsync_test_harness tsync_android_jni bigstringaf unix))

@@ -16,7 +16,9 @@ module Over = Over_tree (Checkout_lwt)
 
 (* The one place the store modules are built, so everything above takes them
    rather than knowing which they are. *)
-module Make_over (Ck : File.TREE with type 'a io := 'a Io_lwt.Core.t) (C : Conf_lwt.S) =
+module Make_over
+    (Ck : File.TREE with type 'a io := 'a Io_lwt.Core.t)
+    (C : Conf_lwt.S) =
 struct
   module O = Over_tree (Ck)
   module L = Layout_lwt.Inode.Make (C)

@@ -46,6 +46,7 @@ module C : Conf_lwt.S = struct
   let max_chunk_buffers = 2
   let max_downloads = downloads
   let chunk_size = Some csize
+
   (* One group per stored chunk, which is the shape that fans out most. *)
   let cache_chunk_size = Some csize
   let max_cache = None
@@ -59,7 +60,8 @@ let gate, release = Lwt.wait ()
 let started = ref 0
 
 let body_of key =
-  Bigstring.of_string (String.make csize (Char.chr (Hashtbl.hash key land 0x5f)))
+  Bigstring.of_string
+    (String.make csize (Char.chr (Hashtbl.hash key land 0x5f)))
 
 (* Only the read path is exercised; a write reaching here is a test that stopped
    testing what it says it does. *)
@@ -79,8 +81,8 @@ module R = struct
     Bigstring.sub body ~off:offset
       ~len:(max 0 (min length (Bigstring.length body - offset)))
 
-  let upload ~key:_ ~src_path:_ ~mtime:_ ~chunk_size:_ ?cancel:_
-      ?on_progress:_ () =
+  let upload ~key:_ ~src_path:_ ~mtime:_ ~chunk_size:_ ?cancel:_ ?on_progress:_
+      () =
     unused "upload"
 
   let upload_chunks ~key:_ ~size:_ ~chunk_size:_ ~mtime:_ ~source:_ ?cancel:_ ()
@@ -95,7 +97,8 @@ module D = Data_lwt.Make (C) (R)
 
 let manifest =
   let keys =
-    List.init chunks (fun i -> Printf.sprintf "%016x-%016x" i ((i * 7) land 0xffffffff))
+    List.init chunks (fun i ->
+        Printf.sprintf "%016x-%016x" i (i * 7 land 0xffffffff))
   in
   Manifest.of_string
     (Manifest.encode ~name:"f"

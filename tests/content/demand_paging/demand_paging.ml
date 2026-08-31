@@ -13,7 +13,8 @@ let big = "0123456789ABCDEFghijklmn"
 let edit = "aaaaaaaabbbbbbbbcccccccc"
 
 (* Ten chunks, so a prefetch can reach one no read asked for. *)
-let ten = String.concat "" (List.init 10 (fun i -> String.make 8 (Char.chr (48 + i))))
+let ten =
+  String.concat "" (List.init 10 (fun i -> String.make 8 (Char.chr (48 + i))))
 
 let scenarios : scenario list =
   [
@@ -49,10 +50,12 @@ let scenarios : scenario list =
           Drain;
           Evict "two.txt";
           ShowChunks "two.txt";
-          ReadRange { path = "two.txt"; offset = 0; len = 8; stream = Some "play" };
+          ReadRange
+            { path = "two.txt"; offset = 0; len = 8; stream = Some "play" };
           ReadRange
             { path = "two.txt"; offset = 72; len = 8; stream = Some "probe" };
-          ReadRange { path = "two.txt"; offset = 8; len = 8; stream = Some "play" };
+          ReadRange
+            { path = "two.txt"; offset = 8; len = 8; stream = Some "play" };
           ShowChunks "two.txt";
           (* Settles the file, so what the fired-and-forgotten prefetch had
              reached by the end does not decide the count. *)

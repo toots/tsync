@@ -268,8 +268,8 @@ let () =
      exactly as the whole-object read it replaces. *)
   let obj_op q =
     Http_proxy_frontend.parse_op `GET
-      (Uri.of_string ("/o/" ^ Http_proxy.Wire.encode_key "tsync/one/chunks/ab/k"
-                    ^ q))
+      (Uri.of_string
+         ("/o/" ^ Http_proxy.Wire.encode_key "tsync/one/chunks/ab/k" ^ q))
       Bigstring.empty
   in
   let ranged = obj_op "?offset=64&length=8" in
@@ -277,8 +277,7 @@ let () =
     match ranged with
       | Http_proxy_frontend.Get_range { offset = 64; length = 8; _ } -> true
       | _ -> false);
-  assert (
-    Http_proxy_frontend.route_key ranged = Some "tsync/one/chunks/ab/k");
+  assert (Http_proxy_frontend.route_key ranged = Some "tsync/one/chunks/ab/k");
   (* The gate that bounds concurrent reads keys off this, and its fallback is
      the metadata class: a body-carrying op left out of it holds no slot. *)
   assert (Http_proxy_frontend.data_kind ranged = `Get);
@@ -290,8 +289,7 @@ let () =
   assert (obj_op "?offset=-1&length=8" = Http_proxy_frontend.Bad);
   assert (obj_op "?offset=0&length=0" = Http_proxy_frontend.Bad);
   (* Without one it is still the plain read. *)
-  assert (
-    match obj_op "" with Http_proxy_frontend.Get _ -> true | _ -> false);
+  assert (match obj_op "" with Http_proxy_frontend.Get _ -> true | _ -> false);
 
   (* No prefix is a bad request, not a silent answer for some other domain. *)
   assert (

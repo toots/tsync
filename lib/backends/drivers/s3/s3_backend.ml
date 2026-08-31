@@ -282,11 +282,11 @@ struct
       let put_if_absent ~key ~data () = put_if_absent t ~key:(str key) ~data ()
       let get ~key () = get t ~key:(str key) ()
       let get_opt ~key () = get_opt t ~key:(str key) ()
-
       let fast_read = false
 
       let get_range ~key ~offset ~length () =
         get_range t ~key:(str key) ~offset ~length ()
+
       let head_opt ~key () = head_opt t ~key:(str key) ()
       let delete ~key () = delete t ~key:(str key) ()
       let delete_multi keys = delete_multi t (List.map str keys)

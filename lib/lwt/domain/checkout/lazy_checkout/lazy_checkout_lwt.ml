@@ -10,8 +10,7 @@ module Pull = struct
   module Make (C : Conf_lwt.S) = struct
     module Tree = Inode_tree_lwt.Make (C)
 
-    let children ~folder_id () =
-      Tree.children ~on_unusable:`Fail ~folder_id ()
+    let children ~folder_id () = Tree.children ~on_unusable:`Fail ~folder_id ()
   end
 end
 

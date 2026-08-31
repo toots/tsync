@@ -54,9 +54,7 @@ let arm_gate () =
   gate := Some waited;
   release
 
-let through_gate () =
-  match !gate with None -> Lwt.return_unit | Some t -> t
-
+let through_gate () = match !gate with None -> Lwt.return_unit | Some t -> t
 let gets : (string, int) Hashtbl.t = Hashtbl.create 8
 let count ck = Option.value ~default:0 (Hashtbl.find_opt gets ck)
 
@@ -210,7 +208,6 @@ let g2 = solo (fst (List.nth bodies 1))
 let k3 = fst (List.nth bodies 2)
 let k4 = fst (List.nth bodies 3)
 let k5 = fst (List.nth bodies 4)
-
 let k6 = fst (List.nth bodies 5)
 let k12 = fst (List.nth bodies 11)
 let k13 = fst (List.nth bodies 12)
@@ -225,7 +222,9 @@ let k8 = fst (List.nth bodies 7)
 let trio_table = table ~chunk_size:4 ~size:10 [k3; k4; k5]
 let trio = Option.get (Manifest.Group.of_table ~table:trio_table ~per:3 0)
 let whole_table = table ~chunk_size:4 ~size:10 [k6; k7; k8]
-let whole_trio = Option.get (Manifest.Group.of_table ~table:whole_table ~per:3 0)
+
+let whole_trio =
+  Option.get (Manifest.Group.of_table ~table:whole_table ~per:3 0)
 
 let fast_table = table ~chunk_size:4 ~size:10 [k9; k10; k11]
 let fast_trio = Option.get (Manifest.Group.of_table ~table:fast_table ~per:3 0)
@@ -312,8 +311,8 @@ let () =
         member it names, and nothing at all for the two beside it. *)
      let* () = show "trio cold" trio in
      let* () = show_body "trio member 0" trio 0 in
-     Printf.printf "%-28s %s / %s / %s\n" "trio ranges asked"
-       (range_summary k3) (range_summary k4) (range_summary k5);
+     Printf.printf "%-28s %s / %s / %s\n" "trio ranges asked" (range_summary k3)
+       (range_summary k4) (range_summary k5);
      Printf.printf "%-28s %s\n" "layout" (rel (path trio));
      Printf.printf "%-28s bytes=%d members=%d\n" "trio body"
        (Manifest.Group.bytes trio)
@@ -355,8 +354,11 @@ let () =
      let* () =
        let want = Manifest.Group.size fast_trio 0 in
        let buf = Bigarray.Array1.create Bigarray.char Bigarray.c_layout want in
-       let+ served = Fast.read_into ~group:fast_trio ~index:0 buf ~chunk_off:0 in
-       Printf.printf "%-28s body=%-18S gets=%d backend=%b\n" "fast store: one member"
+       let+ served =
+         Fast.read_into ~group:fast_trio ~index:0 buf ~chunk_off:0
+       in
+       Printf.printf "%-28s body=%-18S gets=%d backend=%b\n"
+         "fast store: one member"
          (String.init served.Chunk_cache.bytes (Bigarray.Array1.get buf))
          (gets_for fast_trio) served.Chunk_cache.from_backend
      in

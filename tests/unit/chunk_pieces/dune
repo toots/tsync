@@ -1,7 +1,5 @@
 (executable
  (flags
-  (:standard
-   -open
-   Tsync_chunks))
+  (:standard -open Tsync_chunks))
  (name chunk_pieces)
  (libraries tsync-libs.chunks))

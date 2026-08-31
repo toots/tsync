@@ -74,7 +74,8 @@ module Make (Io : Io.S) (_ : FS with type 'a io := 'a Io.t) : sig
 
   (** Take the record away, for a caller replacing or deleting the body it is
       about. [drop_beside] is the same for one holding a path and not a name — a
-      sweep over the store, which knows what it deletes only by where it sits. *)
+      sweep over the store, which knows what it deletes only by where it sits.
+  *)
   val drop : key:string -> body:string -> unit Io.t
 
   val drop_beside : body:string -> unit Io.t

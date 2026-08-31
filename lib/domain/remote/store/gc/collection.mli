@@ -97,10 +97,9 @@ module Over
     val get : string -> Bigstring.t Io.t
 
     (** [length] bytes of the chunk from [offset], over the same spaces. A
-        collection is invisible to a reader either way, which is the point of
-        it being here rather than at the caller: a range read that only knew
-        about the surviving space would fail mid-run where a whole read
-        succeeds. *)
+        collection is invisible to a reader either way, which is the point of it
+        being here rather than at the caller: a range read that only knew about
+        the surviving space would fail mid-run where a whole read succeeds. *)
     val get_range : string -> offset:int -> length:int -> Bigstring.t Io.t
 
     (** {1 Moving them} *)

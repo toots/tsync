@@ -44,8 +44,8 @@ module type S = sig
   val get_chunk : chunk_key:string -> Bigstring.t io
 
   (** [length] bytes of a stored chunk from [offset], for a reader that wants
-      part of one. Bounded by the same reads-in-flight budget as {!get_chunk},
-      a range being a round trip like any other. *)
+      part of one. Bounded by the same reads-in-flight budget as {!get_chunk}, a
+      range being a round trip like any other. *)
   val get_chunk_range :
     chunk_key:string -> offset:int -> length:int -> Bigstring.t io
 

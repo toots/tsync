@@ -21,7 +21,6 @@ type daemon = {
 }
 
 type serving = Daemon of daemon | Commands of string
-
 type tree = [ `Replicated | `Pulled of string ]
 
 module type S = sig

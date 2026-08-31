@@ -202,7 +202,9 @@ let suite name (module B : Backend_lwt.Store) =
                      (Bigstringaf.sub body ~off:offset ~len:expected)
                      0)
     in
-    let* () = ask "a range at the start is those bytes" ~offset:0 ~length:1024 1024 in
+    let* () =
+      ask "a range at the start is those bytes" ~offset:0 ~length:1024 1024
+    in
     let* () =
       ask "a range in the middle is those bytes"
         ~offset:((size / 2) + 7)
