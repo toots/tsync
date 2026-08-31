@@ -29,8 +29,6 @@ type step =
   | Close of string
       (** Handle closed, the way FUSE [release] does: queue the upload a file
           with staged edits owes, and nothing otherwise. *)
-  (** [stream] names the descriptor reading, so interleaved readers of one file
-      each keep their own place for the read-ahead heuristic. *)
   | ReadRange of {
       path : string;
       offset : int;
@@ -38,7 +36,9 @@ type step =
       stream : string option;
     }
       (** Read [len] bytes at [offset], fetching only the chunks they need, and
-          print the bytes returned. *)
+          print the bytes returned. [stream] names the descriptor reading, so
+          interleaved readers of one file each keep their own place for the
+          read-ahead heuristic. *)
   | FetchRange of { path : string; offset : int; len : int }
       (** Serve [len] bytes at [offset] the way the macOS File Provider asks for
           a piece of a large file. Prints bytes served, the destination file's
