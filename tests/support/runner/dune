@@ -8,6 +8,8 @@
    -open
    Tsync_staged
    -open
+   Tsync_checkout_maintenance_lwt
+   -open
    Tsync_staged_lwt
    -open
    Tsync_checkout
@@ -72,6 +74,7 @@
   tsync_logical_key
   tsync_history
   tsync_staged
+  tsync_checkout_maintenance_lwt
   tsync_staged_lwt
   tsync_checkout
   tsync_file_lwt

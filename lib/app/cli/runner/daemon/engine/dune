@@ -4,6 +4,8 @@
    -open
    Tsync_logical_key
    -open
+   Tsync_checkout_maintenance_lwt
+   -open
    Tsync_staged_lwt
    -open
    Tsync_checkout_lwt
@@ -32,6 +34,7 @@
   lwt.unix
   yojson
   tsync_logical_key
+  tsync_checkout_maintenance_lwt
   tsync_staged_lwt
   tsync_checkout_lwt
   tsync_file_ops

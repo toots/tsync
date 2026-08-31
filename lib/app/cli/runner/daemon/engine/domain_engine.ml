@@ -35,6 +35,10 @@ module type S = sig
 
   val init : unit -> unit Lwt.t
 
+  (* Start this domain's periodic sweeps. Every frontend calls this and none
+     writes a loop of its own. *)
+  val run_maintenance : unit -> unit
+
   (* Presenting, plus the records this client left behind. For a one-shot
      command, which is alone and so owes both. *)
   val start_queue :
@@ -63,6 +67,84 @@ module Make_over
      bounded by how long that work may sit rather than by the store's growth. *)
   let housekeeping_interval = 60.
 
+  (* Every sweep this domain owes, and when. Stated once, as data, so the answer
+     to "what runs unasked, and how often" is this list rather than a reading of
+     whichever loop happens to call what -- which is how the Android frontend
+     came to run half of what the daemon runs.
+
+     What each one does is in {!Tsync_checkout_maintenance}; what collects a
+     backend store is [tsync gc] and is not here. *)
+  let maintenance : Maintenance_lwt.task list =
+    let unit_task name triggers f =
+      {
+        Maintenance_lwt.name;
+        triggers;
+        run = (fun () -> Lwt.map (fun () -> Maintenance_lwt.nothing) (f ()));
+      }
+    in
+    [
+      {
+        Maintenance_lwt.name = "chunk cap";
+        (* Both: an upload is the growth this process caused and is worth
+           answering at once, and the periodic pass is what catches the growth
+           downloads cause in a process that only reads. *)
+        triggers = [`After_upload; `Periodic housekeeping_interval];
+        run = F.enforce_chunk_cap;
+      };
+      unit_task "deferred rescan"
+        [`Periodic housekeeping_interval]
+        Durable_queue_lwt.rescan_all;
+    ]
+
+  (* One driver for every frontend, so a sweep added to the list above runs
+     everywhere rather than wherever someone remembered to call it. *)
+  let run_maintenance () =
+    let due =
+      List.filter_map
+        (fun (t : Maintenance_lwt.task) ->
+          List.find_map
+            (function
+              | `Periodic seconds -> Some (t, seconds)
+              | `After_upload | `On_demand -> None)
+            t.Maintenance_lwt.triggers)
+        maintenance
+    in
+    List.iter
+      (fun ((t : Maintenance_lwt.task), seconds) ->
+        Lwt.async (fun () ->
+            let rec loop () =
+              let* () = Lwt_unix.sleep seconds in
+              let* () =
+                Lwt.catch
+                  (fun () ->
+                    let+ (_ : Maintenance_lwt.swept) =
+                      t.Maintenance_lwt.run ()
+                    in
+                    ())
+                  (fun exn ->
+                    Log.err "%s: %s" t.Maintenance_lwt.name
+                      (Printexc.to_string exn);
+                    Lwt.return_unit)
+              in
+              loop ()
+            in
+            loop ()))
+      due
+
+  let after_upload () =
+    Lwt_list.iter_s
+      (fun (t : Maintenance_lwt.task) ->
+        if List.mem `After_upload t.Maintenance_lwt.triggers then
+          Lwt.catch
+            (fun () ->
+              let+ (_ : Maintenance_lwt.swept) = t.Maintenance_lwt.run () in
+              ())
+            (fun exn ->
+              Log.err "%s: %s" t.Maintenance_lwt.name (Printexc.to_string exn);
+              Lwt.return_unit)
+        else Lwt.return_unit)
+      maintenance
+
   (* The manifest tree, which a caller needs before it can resolve a key at all.
      Separate from {!start_queue} because a read-only command needs this and
      nothing else. *)
@@ -79,7 +161,7 @@ module Make_over
     let* () = init () in
     Sq.start ~on_upload_done:(fun ~key ->
         let* () = on_upload_done ~key in
-        F.enforce_chunk_cap ());
+        after_upload ());
     Lwt.return_unit
 
   (* The queue must be running first: recovery goes through it, for the journal
@@ -91,19 +173,7 @@ module Make_over
   let converge ~on_changed () =
     let* () = start_queue () in
     Sp.start ~on_changed ();
-    Lwt.async (fun () ->
-        let sweep what f =
-          Lwt.catch f (fun exn ->
-              Log.err "%s: %s" what (Printexc.to_string exn);
-              Lwt.return_unit)
-        in
-        let rec loop () =
-          let* () = Lwt_unix.sleep housekeeping_interval in
-          let* () = sweep "chunk cap sweep" F.enforce_chunk_cap in
-          let* () = sweep "deferred rescan" Durable_queue_lwt.rescan_all in
-          loop ()
-        in
-        loop ());
+    run_maintenance ();
     Lwt.return_unit
 
   (* Uploads produce backfill work, so the queue settles first and the backends
@@ -119,6 +189,19 @@ module Make_over
     [
       ("pendingUploads", `Int (Sq.pending ()));
       ("uploadsCompleted", `Int (Sq.completed_count ()));
+      (* What runs unasked, answered by the running process rather than read out
+         of the source: a frontend on an older build, or one driving a loop of
+         its own, says so here. *)
+      ( "maintenance",
+        `List
+          (List.map
+             (fun (t : Maintenance_lwt.task) ->
+               `String
+                 (Printf.sprintf "%s (%s)" t.Maintenance_lwt.name
+                    (String.concat ", "
+                       (List.map Maintenance_lwt.trigger_name
+                          t.Maintenance_lwt.triggers))))
+             maintenance) );
     ]
 end
 
