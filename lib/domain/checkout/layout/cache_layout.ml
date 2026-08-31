@@ -14,6 +14,10 @@ let scratch_dir ~cache_root domain_name = sub ~cache_root domain_name "scratch"
 let folders_dir ~cache_root domain_name = sub ~cache_root domain_name "folders"
 let chunks_dir ~cache_root domain_name = sub ~cache_root domain_name "chunks"
 
+(* The journal entries this client has already handled, month-sharded as the
+   published journal is. *)
+let applied_dir ~cache_root domain_name = sub ~cache_root domain_name "applied"
+
 let staged_manifests_dir ~cache_root domain_name =
   sub ~cache_root domain_name "staged/manifests"
 
@@ -51,8 +55,6 @@ let chunk_path ~cache_root ~domain_name chunk_key =
 let chunk_manifest_path ~cache_root ~domain_name chunk_key =
   chunk_path ~cache_root ~domain_name chunk_key ^ manifest_suffix
 
-(* For a full resync that rebuilds from the backend. Staged edits are kept:
-   nothing else holds those bytes. *)
 (* A component the filesystem cannot hold is stored as a handle, which is lossy,
    so a directory's real name is written beside it. A file needs no marker: its
    manifest body carries the name. *)
@@ -82,6 +84,8 @@ module Make (Io : Io.S) (F : FILES with type 'a io := 'a Io.t) = struct
       Option.value body ~default:""
     else Io.return name
 
+  (* For a full resync that rebuilds from the backend. Staged edits are kept:
+     nothing else holds those bytes. *)
   let clear ~cache_root ~domain_name =
     let* () = F.rm_rf (manifests_dir ~cache_root domain_name) in
     let* () = F.rm_rf (scratch_dir ~cache_root domain_name) in

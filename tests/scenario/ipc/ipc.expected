@@ -4,7 +4,20 @@
   write b.txt "world"
 --- listing
   list_dir root -> {"ok":true,"items":[{"ref":"f:.tsync-root/a.txt","parentRef":"root","name":"a.txt","kind":"file","size":5,"mtime":"<mtime>","etag":"650e58ac64da6e0a","isUploaded":true},{"ref":"f:.tsync-root/b.txt","parentRef":"root","name":"b.txt","kind":"file","size":5,"mtime":"<mtime>","etag":"0c85c7c61d1a6890","isUploaded":true}]}
-  list_all root -> {"ok":true,"items":[{"ref":"f:.tsync-root/a.txt","parentRef":"root","name":"a.txt","kind":"file","size":5,"mtime":"<mtime>","etag":"650e58ac64da6e0a","isUploaded":true},{"ref":"f:.tsync-root/b.txt","parentRef":"root","name":"b.txt","kind":"file","size":5,"mtime":"<mtime>","etag":"0c85c7c61d1a6890","isUploaded":true}]}
+--- paged
+  list_dir root limit=2 -> {"ok":true,"items":[{"ref":"f:.tsync-root/a.txt","parentRef":"root","name":"a.txt","kind":"file","size":5,"mtime":"<mtime>","etag":"650e58ac64da6e0a","isUploaded":true},{"ref":"f:.tsync-root/b.txt","parentRef":"root","name":"b.txt","kind":"file","size":5,"mtime":"<mtime>","etag":"0c85c7c61d1a6890","isUploaded":true}]}
+
+=== files and folders share one order
+  mkdir mid
+  drain
+  write aaa.txt "a"
+  write zzz.txt "z"
+--- listing
+  list_dir root -> {"ok":true,"items":[{"ref":"f:.tsync-root/aaa.txt","parentRef":"root","name":"aaa.txt","kind":"file","size":1,"mtime":"<mtime>","etag":"15da855801af627d","isUploaded":true},{"ref":"d:<folder-1>","parentRef":"root","name":"mid","kind":"dir","size":0,"mtime":"<zero>","etag":"<folder-1>","isUploaded":true},{"ref":"f:.tsync-root/zzz.txt","parentRef":"root","name":"zzz.txt","kind":"file","size":1,"mtime":"<mtime>","etag":"7dbefb508fa14bbd","isUploaded":true}]}
+  list_dir d:<folder-1> -> {"ok":true,"items":[]}
+--- paged
+  list_dir root limit=2 -> {"ok":true,"items":[{"ref":"f:.tsync-root/aaa.txt","parentRef":"root","name":"aaa.txt","kind":"file","size":1,"mtime":"<mtime>","etag":"15da855801af627d","isUploaded":true},{"ref":"d:<folder-1>","parentRef":"root","name":"mid","kind":"dir","size":0,"mtime":"<zero>","etag":"<folder-1>","isUploaded":true}],"next":"mid"}
+  list_dir root limit=2 after=mid -> {"ok":true,"items":[{"ref":"f:.tsync-root/zzz.txt","parentRef":"root","name":"zzz.txt","kind":"file","size":1,"mtime":"<mtime>","etag":"7dbefb508fa14bbd","isUploaded":true}]}
 
 === nested directories keyed as full paths
   mkdir sub
@@ -14,7 +27,8 @@
 --- listing
   list_dir root -> {"ok":true,"items":[{"ref":"d:<folder-1>","parentRef":"root","name":"sub","kind":"dir","size":0,"mtime":"<zero>","etag":"<folder-1>","isUploaded":true},{"ref":"f:.tsync-root/top.txt","parentRef":"root","name":"top.txt","kind":"file","size":3,"mtime":"<mtime>","etag":"97bb0a4a6df0d08e","isUploaded":true}]}
   list_dir d:<folder-1> -> {"ok":true,"items":[{"ref":"f:<folder-1>/c.txt","parentRef":"d:<folder-1>","name":"c.txt","kind":"file","size":6,"mtime":"<mtime>","etag":"7546f608548f4d0d","isUploaded":true}]}
-  list_all root -> {"ok":true,"items":[{"ref":"f:.tsync-root/top.txt","parentRef":"root","name":"top.txt","kind":"file","size":3,"mtime":"<mtime>","etag":"97bb0a4a6df0d08e","isUploaded":true},{"ref":"f:<folder-1>/c.txt","parentRef":"d:<folder-1>","name":"c.txt","kind":"file","size":6,"mtime":"<mtime>","etag":"7546f608548f4d0d","isUploaded":true}]}
+--- paged
+  list_dir root limit=2 -> {"ok":true,"items":[{"ref":"d:<folder-1>","parentRef":"root","name":"sub","kind":"dir","size":0,"mtime":"<zero>","etag":"<folder-1>","isUploaded":true},{"ref":"f:.tsync-root/top.txt","parentRef":"root","name":"top.txt","kind":"file","size":3,"mtime":"<mtime>","etag":"97bb0a4a6df0d08e","isUploaded":true}]}
 
 === a folder this client cannot name is counted, not dropped
   mkdir sub
@@ -25,7 +39,8 @@
   forget-folder-id sub
 --- listing
   list_dir root -> {"ok":true,"items":[{"ref":"f:.tsync-root/top.txt","parentRef":"root","name":"top.txt","kind":"file","size":3,"mtime":"<mtime>","etag":"97bb0a4a6df0d08e","isUploaded":true}],"unnamed":1}
-  list_all root -> {"ok":true,"items":[{"ref":"f:.tsync-root/top.txt","parentRef":"root","name":"top.txt","kind":"file","size":3,"mtime":"<mtime>","etag":"97bb0a4a6df0d08e","isUploaded":true}],"unnamed":1}
+--- paged
+  list_dir root limit=2 -> {"ok":true,"items":[{"ref":"f:.tsync-root/top.txt","parentRef":"root","name":"top.txt","kind":"file","size":3,"mtime":"<mtime>","etag":"97bb0a4a6df0d08e","isUploaded":true}],"unnamed":1}
 
 === identical content shares an etag
   write x.txt "same bytes"
@@ -33,7 +48,8 @@
   write y.txt "same bytes"
 --- listing
   list_dir root -> {"ok":true,"items":[{"ref":"f:.tsync-root/x.txt","parentRef":"root","name":"x.txt","kind":"file","size":10,"mtime":"<mtime>","etag":"83aa3fc9fadd8e79","isUploaded":true},{"ref":"f:.tsync-root/y.txt","parentRef":"root","name":"y.txt","kind":"file","size":10,"mtime":"<mtime>","etag":"83aa3fc9fadd8e79","isUploaded":true}]}
-  list_all root -> {"ok":true,"items":[{"ref":"f:.tsync-root/x.txt","parentRef":"root","name":"x.txt","kind":"file","size":10,"mtime":"<mtime>","etag":"83aa3fc9fadd8e79","isUploaded":true},{"ref":"f:.tsync-root/y.txt","parentRef":"root","name":"y.txt","kind":"file","size":10,"mtime":"<mtime>","etag":"83aa3fc9fadd8e79","isUploaded":true}]}
+--- paged
+  list_dir root limit=2 -> {"ok":true,"items":[{"ref":"f:.tsync-root/x.txt","parentRef":"root","name":"x.txt","kind":"file","size":10,"mtime":"<mtime>","etag":"83aa3fc9fadd8e79","isUploaded":true},{"ref":"f:.tsync-root/y.txt","parentRef":"root","name":"y.txt","kind":"file","size":10,"mtime":"<mtime>","etag":"83aa3fc9fadd8e79","isUploaded":true}]}
 
 ########## PARENT REFS ##########
 === create under a parent named by key is refused
@@ -44,15 +60,16 @@
 --- listing
   list_dir root -> {"ok":true,"items":[{"ref":"d:<folder-1>","parentRef":"root","name":"sub","kind":"dir","size":0,"mtime":"<zero>","etag":"<folder-1>","isUploaded":true}]}
   list_dir d:<folder-1> -> {"ok":true,"items":[]}
-  list_all root -> {"ok":true,"items":[]}
+--- paged
+  list_dir root limit=2 -> {"ok":true,"items":[{"ref":"d:<folder-1>","parentRef":"root","name":"sub","kind":"dir","size":0,"mtime":"<zero>","etag":"<folder-1>","isUploaded":true}]}
 
 ########## CHANGES ##########
 === foreign put
   A: write a.txt "hi"
   A: drain
---- B changes_since (A's ops are foreign to B)
-  changes_since from baseline (working) -> {"ok":true,"stale":false,"cursor":"<cursor>","ops":[{"op":"put","size":2,"ref":"f:.tsync-root/a.txt","parentRef":"root","name":"a.txt"}]}
-  changes_since from current (up to date) -> {"ok":true,"stale":false,"cursor":"<cursor>","ops":[]}
+--- B changes_since (A's ops, once B has applied them)
+  changes_since from baseline (working) -> {"ok":true,"stale":false,"cursor":"<cursor>","more":false,"ops":[{"op":"put","ref":"f:.tsync-root/a.txt","parentRef":"root","name":"a.txt","item":{"ref":"f:.tsync-root/a.txt","parentRef":"root","name":"a.txt","kind":"file","size":2,"mtime":"<mtime>","etag":"2a761c59a36be404","isUploaded":true}}]}
+  changes_since from current (up to date) -> {"ok":true,"stale":false,"cursor":"<cursor>","more":false,"ops":[]}
   changes_since from pruned anchor (stale) -> {"ok":true,"stale":true}
 
 === foreign mkdir then put
@@ -60,9 +77,9 @@
   A: drain
   A: write sub/f.txt "deep"
   A: drain
---- B changes_since (A's ops are foreign to B)
-  changes_since from baseline (working) -> {"ok":true,"stale":false,"cursor":"<cursor>","ops":[{"op":"mkdir","id":"<folder-1>","ref":"d:<folder-1>","parentRef":"root","name":"sub"},{"op":"put","size":4,"ref":"f:<folder-1>/f.txt","parentRef":"d:<folder-1>","name":"f.txt"}]}
-  changes_since from current (up to date) -> {"ok":true,"stale":false,"cursor":"<cursor>","ops":[]}
+--- B changes_since (A's ops, once B has applied them)
+  changes_since from baseline (working) -> {"ok":true,"stale":false,"cursor":"<cursor>","more":false,"ops":[{"op":"mkdir","ref":"d:<folder-1>","parentRef":"root","name":"sub","item":{"ref":"d:<folder-1>","parentRef":"root","name":"sub","kind":"dir","size":0,"mtime":"<zero>","etag":"<folder-1>","isUploaded":true}},{"op":"put","ref":"f:<folder-1>/f.txt","parentRef":"d:<folder-1>","name":"f.txt","item":{"ref":"f:<folder-1>/f.txt","parentRef":"d:<folder-1>","name":"f.txt","kind":"file","size":4,"mtime":"<mtime>","etag":"abe26074d853e1ed","isUploaded":true}}]}
+  changes_since from current (up to date) -> {"ok":true,"stale":false,"cursor":"<cursor>","more":false,"ops":[]}
   changes_since from pruned anchor (stale) -> {"ok":true,"stale":true}
 
 === foreign delete
@@ -70,9 +87,9 @@
   A: drain
   A: delete a.txt
   A: drain
---- B changes_since (A's ops are foreign to B)
-  changes_since from baseline (working) -> {"ok":true,"stale":false,"cursor":"<cursor>","ops":[{"op":"put","size":1,"ref":"f:.tsync-root/a.txt","parentRef":"root","name":"a.txt"},{"op":"delete","ref":"f:.tsync-root/a.txt","parentRef":"root","name":"a.txt"}]}
-  changes_since from current (up to date) -> {"ok":true,"stale":false,"cursor":"<cursor>","ops":[]}
+--- B changes_since (A's ops, once B has applied them)
+  changes_since from baseline (working) -> {"ok":true,"stale":false,"cursor":"<cursor>","more":false,"ops":[{"op":"put","ref":"f:.tsync-root/a.txt","parentRef":"root","name":"a.txt"},{"op":"delete","ref":"f:.tsync-root/a.txt","parentRef":"root","name":"a.txt"}]}
+  changes_since from current (up to date) -> {"ok":true,"stale":false,"cursor":"<cursor>","more":false,"ops":[]}
   changes_since from pruned anchor (stale) -> {"ok":true,"stale":true}
 
 === foreign rename
@@ -80,9 +97,9 @@
   A: drain
   A: rename a.txt -> b.txt
   A: drain
---- B changes_since (A's ops are foreign to B)
-  changes_since from baseline (working) -> {"ok":true,"stale":false,"cursor":"<cursor>","ops":[{"op":"put","size":1,"ref":"f:.tsync-root/a.txt","parentRef":"root","name":"a.txt"},{"op":"rename","is_dir":false,"ref":"f:.tsync-root/b.txt","parentRef":"root","name":"b.txt","srcRef":"f:.tsync-root/a.txt"}]}
-  changes_since from current (up to date) -> {"ok":true,"stale":false,"cursor":"<cursor>","ops":[]}
+--- B changes_since (A's ops, once B has applied them)
+  changes_since from baseline (working) -> {"ok":true,"stale":false,"cursor":"<cursor>","more":false,"ops":[{"op":"put","ref":"f:.tsync-root/a.txt","parentRef":"root","name":"a.txt"},{"op":"rename","is_dir":false,"srcRef":"f:.tsync-root/a.txt","srcParentRef":"root","ref":"f:.tsync-root/b.txt","parentRef":"root","name":"b.txt","item":{"ref":"f:.tsync-root/b.txt","parentRef":"root","name":"b.txt","kind":"file","size":1,"mtime":"<mtime>","etag":"8a9031792618daad","isUploaded":true}}]}
+  changes_since from current (up to date) -> {"ok":true,"stale":false,"cursor":"<cursor>","more":false,"ops":[]}
   changes_since from pruned anchor (stale) -> {"ok":true,"stale":true}
 
 === foreign rmdir carries the folder id
@@ -90,9 +107,9 @@
   A: drain
   A: rmdir gone
   A: drain
---- B changes_since (A's ops are foreign to B)
-  changes_since from baseline (working) -> {"ok":true,"stale":false,"cursor":"<cursor>","ops":[{"op":"mkdir","id":"<folder-1>","ref":"d:<folder-1>","parentRef":"root","name":"gone"},{"op":"rmdir","id":"<folder-1>","ref":"d:<folder-1>","parentRef":"root","name":"gone"}]}
-  changes_since from current (up to date) -> {"ok":true,"stale":false,"cursor":"<cursor>","ops":[]}
+--- B changes_since (A's ops, once B has applied them)
+  changes_since from baseline (working) -> {"ok":true,"stale":false,"cursor":"<cursor>","more":false,"ops":[{"op":"mkdir","ref":"d:<folder-1>","parentRef":"root","name":"gone","item":{"ref":"d:<folder-1>","parentRef":"root","name":"gone","kind":"dir","size":0,"mtime":"<zero>","etag":"<folder-1>","isUploaded":true}},{"op":"rmdir","id":"<folder-1>","ref":"d:<folder-1>","parentRef":"root","name":"gone"}]}
+  changes_since from current (up to date) -> {"ok":true,"stale":false,"cursor":"<cursor>","more":false,"ops":[]}
   changes_since from pruned anchor (stale) -> {"ok":true,"stale":true}
 
 === foreign dir rename carries the folder id
@@ -100,9 +117,9 @@
   A: drain
   A: rename before -> after
   A: drain
---- B changes_since (A's ops are foreign to B)
-  changes_since from baseline (working) -> {"ok":true,"stale":false,"cursor":"<cursor>","ops":[{"op":"mkdir","id":"<folder-1>","ref":"d:<folder-1>","parentRef":"root","name":"before"},{"op":"rename","is_dir":true,"id":"<folder-1>","ref":"d:<folder-1>","parentRef":"root","name":"after","srcRef":"d:<folder-1>"}]}
-  changes_since from current (up to date) -> {"ok":true,"stale":false,"cursor":"<cursor>","ops":[]}
+--- B changes_since (A's ops, once B has applied them)
+  changes_since from baseline (working) -> {"ok":true,"stale":false,"cursor":"<cursor>","more":false,"ops":[{"op":"mkdir","ref":"d:<folder-1>","parentRef":"root","name":"before","item":{"ref":"d:<folder-1>","parentRef":"root","name":"before","kind":"dir","size":0,"mtime":"<zero>","etag":"<folder-1>","isUploaded":true}},{"op":"rename","is_dir":true,"id":"<folder-1>","srcRef":"d:<folder-1>","srcParentRef":"root","ref":"d:<folder-1>","parentRef":"root","name":"after","item":{"ref":"d:<folder-1>","parentRef":"root","name":"after","kind":"dir","size":0,"mtime":"<zero>","etag":"<folder-1>","isUploaded":true}}]}
+  changes_since from current (up to date) -> {"ok":true,"stale":false,"cursor":"<cursor>","more":false,"ops":[]}
   changes_since from pruned anchor (stale) -> {"ok":true,"stale":true}
 
 ########## STATS ##########

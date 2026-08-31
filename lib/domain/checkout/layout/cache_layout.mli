@@ -15,6 +15,8 @@
     <cache_root>/<domain>/staged/whole/<uuid>     whole files from a frontend
     <cache_root>/<domain>/folders/<folder id>     {parent,name}: the folder tree
                                                   read the other way round
+    <cache_root>/<domain>/applied/<YYYY-MM>.log   journal entries this client
+                                                  has published or applied
     v}
 
     The manifest and scratch trees mirror each other by real path. Everything
@@ -28,6 +30,12 @@ val manifests_dir : cache_root:string -> string -> string
 val folders_dir : cache_root:string -> string -> string
 
 val chunks_dir : cache_root:string -> string -> string
+
+(** Where {!Applied_entries} keeps the journal entries this client has already
+    published or applied, so "what changed since" is answered without going back
+    to the store for entries it once held. *)
+val applied_dir : cache_root:string -> string -> string
+
 val staged_manifests_dir : cache_root:string -> string -> string
 val staged_chunks_dir : cache_root:string -> string -> string
 val staged_whole_dir : cache_root:string -> string -> string

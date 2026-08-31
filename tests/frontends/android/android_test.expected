@@ -1,7 +1,7 @@
 
 === a directory is made, then seen
   mkdir root photos
-    {"ok":true}
+    {"ok":true,"item":{"ref":"d:<id1>","parentRef":"root","name":"photos","kind":"dir","size":0,"mtime":0.0,"etag":"<id1>","isUploaded":true}}
   list root
     {"ok":true,"items":[{"ref":"d:<id1>","parentRef":"root","name":"photos","kind":"dir","size":0,"mtime":0.0,"etag":"<id1>","isUploaded":true}]}
   stat d:<id1>
@@ -11,7 +11,7 @@
 
 === a whole body is adopted by rename
   write-whole d:<id1> big.txt <root>/staged.bin
-    {"ok":true,"size":24,"mtime":1400000000.0}
+    {"ok":true,"size":24,"mtime":1400000000.0,"item":{"ref":"f:<id1>/big.txt","parentRef":"d:<id1>","name":"big.txt","kind":"file","size":24,"mtime":1400000000.0,"etag":"","isUploaded":false}}
   staging file still there: false
   stat f:<id1>/big.txt
     {"ok":true,"ref":"f:<id1>/big.txt","parentRef":"d:<id1>","name":"big.txt","kind":"file","size":24,"mtime":1400000000.0,"etag":"1294bbe85c2f380b","isUploaded":true}
@@ -49,7 +49,7 @@
 
 === a created file is empty until something is written to it
   create d:<id1> new.txt
-    {"ok":true}
+    {"ok":true,"item":{"ref":"f:<id1>/new.txt","parentRef":"d:<id1>","name":"new.txt","kind":"file","size":0,"mtime":<clock>,"etag":"","isUploaded":false}}
   stat f:<id1>/new.txt
     {"ok":true,"ref":"f:<id1>/new.txt","parentRef":"d:<id1>","name":"new.txt","kind":"file","size":0,"mtime":<clock>,"etag":"","isUploaded":false}
 
@@ -71,7 +71,7 @@
 
 === the namespace verbs move and remove
   rename f:<id1>/big.txt d:<id1> moved.txt
-    {"ok":true}
+    {"ok":true,"item":{"ref":"f:<id1>/moved.txt","parentRef":"d:<id1>","name":"moved.txt","kind":"file","size":24,"mtime":1400000000.0,"etag":"1294bbe85c2f380b","isUploaded":true}}
   list d:<id1>
     {"ok":true,"items":[{"ref":"f:<id1>/moved.txt","parentRef":"d:<id1>","name":"moved.txt","kind":"file","size":24,"mtime":1400000000.0,"etag":"1294bbe85c2f380b","isUploaded":true},{"ref":"f:<id1>/new.txt","parentRef":"d:<id1>","name":"new.txt","kind":"file","size":0,"mtime":<clock>,"etag":"06b4b04bae2346bf","isUploaded":true}]}
   delete f:<id1>/moved.txt

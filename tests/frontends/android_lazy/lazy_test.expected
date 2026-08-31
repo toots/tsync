@@ -17,5 +17,5 @@ photos/pic.txt
   mirror: photos/.tsync-dir
 
 === a staged file survives the pull that does not know about it
-  created: {"ok":true}
+  created: {"ok":true,"item":{"ref":"f:<photos>/draft.txt","parentRef":"d:<photos>","name":"draft.txt","kind":"file","size":0,"mtime":<clock>,"etag":"","isUploaded":false}}
   {"ok":true,"items":[{"ref":"f:<photos>/draft.txt","parentRef":"d:<photos>","name":"draft.txt","kind":"file","size":0,"mtime":<clock>,"etag":"","isUploaded":true}]}

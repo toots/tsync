@@ -1,5 +1,5 @@
 pendingUploads: 0
 uploadsCompleted: 1
-maintenance: ["mirror temp files (on demand)","staged orphans (on demand)","chunk cap (after each upload, every 60s)","deferred rescan (every 60s)"]
+maintenance: ["mirror temp files (on demand)","staged orphans (on demand)","applied journal entries (on demand, every 86400s)","chunk cap (after each upload, every 60s)","deferred rescan (every 60s)"]
 manifest in the store: true
 cursor published: true
