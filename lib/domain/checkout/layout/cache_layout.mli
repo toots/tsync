@@ -54,8 +54,8 @@ val chunk_path : cache_root:string -> domain_name:string -> string -> string
 val chunk_manifest_path :
   cache_root:string -> domain_name:string -> string -> string
 
-(** What {!chunk_manifest_path} adds, for a walk that has to tell the two
-    apart. *)
+(** What {!chunk_manifest_path} adds, for a walk that has to tell the two apart.
+*)
 val manifest_suffix : string
 
 (** {1 The three that touch the disk}

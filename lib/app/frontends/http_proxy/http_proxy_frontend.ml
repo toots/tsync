@@ -344,8 +344,8 @@ let parse_op meth uri body =
              the whole object: a client that sent a bad offset wants to hear so,
              and the body it would otherwise get back is the one this call
              exists to avoid. *)
-          | Some _, _ when range = None && (q "offset" <> None || q "length" <> None)
-            ->
+          | Some _, _
+            when range = None && (q "offset" <> None || q "length" <> None) ->
               Bad
           | Some key, None -> (
               match range with

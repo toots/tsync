@@ -184,9 +184,7 @@ struct
               | [] -> last ()
               | k :: rest -> (
                   let* found = probe m k in
-                  match found with
-                    | Some v -> Io.return v
-                    | None -> first rest)
+                  match found with Some v -> Io.return v | None -> first rest)
             in
             first keys
 
@@ -234,9 +232,7 @@ struct
         ~probe:(fun (module M : C.Store) k ->
           M.get_range ~key:k ~offset ~length ())
         ~last:(fun () ->
-          let* found =
-            B.get_range ~key:(L.key chunk_key) ~offset ~length ()
-          in
+          let* found = B.get_range ~key:(L.key chunk_key) ~offset ~length () in
           match found with
             | Some data -> Io.return data
             | None ->

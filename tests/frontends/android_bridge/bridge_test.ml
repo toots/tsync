@@ -15,17 +15,16 @@ let chunk_size = 64
 (* Spans several chunks and several cache groups, so a read crosses boundaries
    and the sequential heuristic has somewhere to run. *)
 let fixture = String.init 4096 (fun i -> Char.chr (33 + (i mod 90)))
-
 let sh fmt = Printf.ksprintf (fun cmd -> ignore (Sys.command cmd)) fmt
 let line fmt = Printf.printf (fmt ^^ "\n%!")
 
 let binary =
   let rec find dir depth =
     if depth = 0 then None
-    else
+    else (
       let candidate = Filename.concat dir "bin/tsync.exe" in
       if Sys.file_exists candidate then Some candidate
-      else find (Filename.dirname dir) (depth - 1)
+      else find (Filename.dirname dir) (depth - 1))
   in
   find (Sys.getcwd ()) 6
 

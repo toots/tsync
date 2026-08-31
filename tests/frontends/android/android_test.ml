@@ -164,7 +164,6 @@ let scrub s =
        (replace (replace s root "<root>") (Unix.gethostname ()) "<host>"))
 
 let exercised : (string, unit) Hashtbl.t = Hashtbl.create 16
-
 let with_home = Android_home.env ~home
 
 (* stderr carries the log, which the snapshot rule discards: what a caller parses

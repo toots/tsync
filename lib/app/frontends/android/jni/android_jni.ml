@@ -20,7 +20,6 @@ let pool_size = 16
 (* The chunk cap is enforced after an upload, so a process that only reads would
    never enforce it at all. *)
 let housekeeping_interval = 60.
-
 let engine : (module Domain_engine.S) option ref = ref None
 
 let serving () =
@@ -45,7 +44,8 @@ let boot domain =
     (* Detached work has no caller to fail, and the default hook ends the
        process over a background error the log would have carried. *)
     (Lwt.async_exception_hook :=
-       fun exn -> Log.err "android: async exception: %s" (Printexc.to_string exn));
+       fun exn ->
+         Log.err "android: async exception: %s" (Printexc.to_string exn));
     Domain_engine.start_detached (fun ~ready ->
         let open Lwt.Syntax in
         (* Ready on the manifest tree alone: [start_queue] replays the staged
@@ -122,9 +122,7 @@ let opened raw =
                       Lwt.return !last_handle)))
 
 let size handle =
-  match Hashtbl.find_opt handles handle with
-    | Some h -> h.size
-    | None -> -1L
+  match Hashtbl.find_opt handles handle with Some h -> h.size | None -> -1L
 
 let read handle offset buffer =
   guard "read" (fun () ->

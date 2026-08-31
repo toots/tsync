@@ -12,9 +12,9 @@ val set_prefix : string -> unit
     status endpoint, which has no log of its own to point at. *)
 val recent : unit -> (float * level * string) list
 
-(** Send every message somewhere else, for a frontend linked into a host
-    process with neither a stderr anyone reads nor a syslog: the Android app,
-    whose log is logcat. *)
+(** Send every message somewhere else, for a frontend linked into a host process
+    with neither a stderr anyone reads nor a syslog: the Android app, whose log
+    is logcat. *)
 val set_sink : (level -> string -> unit) -> unit
 
 val debug : ('a, unit, string, unit) format4 -> 'a

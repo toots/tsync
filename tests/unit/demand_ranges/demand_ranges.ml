@@ -39,7 +39,8 @@ module S = Chunk_store_lwt.Make (struct
     incr parked;
     fst (Lwt.wait ())
 
-  let fetch_body_range _ ~offset:_ ~length = Lwt.return (Bigstring.create length)
+  let fetch_body_range _ ~offset:_ ~length =
+    Lwt.return (Bigstring.create length)
 end)
 
 let settle () =

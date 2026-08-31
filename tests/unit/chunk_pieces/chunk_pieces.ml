@@ -34,9 +34,8 @@ let covering ~chunk_size ~offset ps =
 
 let cut name ~chunk_size ~count ~offset ~length =
   let ps = Chunks.pieces ~chunk_size ~count ~offset ~length in
-  Printf.printf "  %-28s chunk=%d count=%d [%d,%d) -> %s (%s)\n" name
-    chunk_size count offset (offset + length)
-    (show ps)
+  Printf.printf "  %-28s chunk=%d count=%d [%d,%d) -> %s (%s)\n" name chunk_size
+    count offset (offset + length) (show ps)
     (covering ~chunk_size ~offset ps)
 
 let () =
@@ -52,8 +51,7 @@ let () =
   (* Short rather than an error: a caller learns the file ended by being given
      fewer bytes, which is what [pread] reports. *)
   cut "past the last chunk" ~chunk_size:8 ~count:2 ~offset:12 ~length:16;
-  cut "starting past the last chunk" ~chunk_size:8 ~count:2 ~offset:16
-    ~length:8;
+  cut "starting past the last chunk" ~chunk_size:8 ~count:2 ~offset:16 ~length:8;
   cut "a file with no chunks" ~chunk_size:8 ~count:0 ~offset:0 ~length:8;
 
   print_endline "";

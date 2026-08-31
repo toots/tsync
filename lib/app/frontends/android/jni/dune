@@ -13,11 +13,31 @@
   (language c)
   (names tsync_bridge))
  (flags
-  (:standard -open Tsync_log -open Tsync_engine -open Tsync_conf_lwt
-   -open Tsync_frontend_register -open Tsync_runtime -open Tsync_conf_parsing -open Tsync_tls
-   -open Tsync_domain
-   -open Tsync_logical_key -open Tsync_staged -open Tsync_manifest
-   -open Tsync_lazy_checkout_lwt))
+  (:standard
+   -open
+   Tsync_log
+   -open
+   Tsync_engine
+   -open
+   Tsync_conf_lwt
+   -open
+   Tsync_frontend_register
+   -open
+   Tsync_runtime
+   -open
+   Tsync_conf_parsing
+   -open
+   Tsync_tls
+   -open
+   Tsync_domain
+   -open
+   Tsync_logical_key
+   -open
+   Tsync_staged
+   -open
+   Tsync_manifest
+   -open
+   Tsync_lazy_checkout_lwt))
  (libraries
   tsync-libs.lazy_checkout_lwt
   tsync_android_frontend
@@ -52,13 +72,17 @@
  (enabled_if
   (= %{context_name} default.android))
  (link_flags
-  (-cclib -Wl,-soname,libtsyncjni.so
+  (-cclib
+   -Wl,-soname,libtsyncjni.so
    ; lwt_unix.cmxa records -lev, and the cross sysroot's lib directory is not
    ; on the linker's search path; asked of the toolchain so it follows a switch.
-   -cclib -L%{ocaml-config:standard_library}/..
+   -cclib
+   -L%{ocaml-config:standard_library}/..
    ; Android 15 runs 16KB pages, and the loader rejects a library aligned for 4K.
-   -cclib -Wl,-z,max-page-size=16384
+   -cclib
+   -Wl,-z,max-page-size=16384
    ; __android_log_write lives in liblog, and without this the object links with
    ; it undefined and fails at dlopen instead.
-   -cclib -llog))
+   -cclib
+   -llog))
  (libraries tsync_android_jni))

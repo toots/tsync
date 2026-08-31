@@ -47,6 +47,7 @@ let paths ~tsync ~home ~scratch =
     match field name text with path :: _ -> path | [] -> fallback home
   in
   {
-    config = one "config" (fun h -> Filename.concat h ".config/tsync/config.json");
+    config =
+      one "config" (fun h -> Filename.concat h ".config/tsync/config.json");
     cache = one "cache" (fun h -> Filename.concat h ".cache/tsync");
   }

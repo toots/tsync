@@ -34,9 +34,7 @@ let () =
            | None -> "None"
            | Some got ->
                let n = Bigstring.length got in
-               let want =
-                 max 0 (min length (size - min offset size))
-               in
+               let want = max 0 (min length (size - min offset size)) in
                Printf.sprintf "%d bytes, %s" n
                  (if n <> want then "WRONG LENGTH"
                   else if

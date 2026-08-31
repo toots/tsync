@@ -75,7 +75,6 @@ module Make (Io : Io.S) (Fs : FS with type 'a io := 'a Io.t) = struct
      body then never completes. The in-memory update runs without an intervening
      wait, which is what makes it atomic. *)
   let now : (string, held) Hashtbl.t = Hashtbl.create 16
-
   let recorded ~body = Fs.file_exists (beside body)
 
   let load ~key ~body =
@@ -83,9 +82,7 @@ module Make (Io : Io.S) (Fs : FS with type 'a io := 'a Io.t) = struct
       | Some held -> Io.return held
       | None ->
           let+ text = Fs.read_file_opt (beside body) in
-          let held =
-            match text with None -> nothing | Some t -> parse t
-          in
+          let held = match text with None -> nothing | Some t -> parse t in
           Hashtbl.replace now key held;
           held
 

@@ -17,7 +17,8 @@ let ask label ~have ~want =
           (* Anything asked for that is neither wanted nor missing: the gap, or
              the middle of a surrounded interval. *)
           let overlap = max 0 (min hi b - max lo a) in
-          if overlap > 0 then Printf.sprintf " (%d already held)" overlap else ""
+          if overlap > 0 then Printf.sprintf " (%d already held)" overlap
+          else ""
       | _ -> ""
   in
   let held =
