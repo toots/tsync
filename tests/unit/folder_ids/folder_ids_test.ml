@@ -94,15 +94,22 @@ let main () =
   in
   let* wrong = rel_of other in
   (* "a" exists but is a different folder, so the check against the markers
-     rejects it; the rebuild that follows restores the truth. *)
-  check "a corrupted entry does not resolve to another folder"
-    (wrong = Some "elsewhere");
+     rejects it. A lookup answers that and stops: repairing means walking the
+     mirror, which is not a request's to pay. *)
+  check "a corrupted entry does not resolve to another folder" (wrong = None);
+  let* () = rebuild () in
+  let* repaired = rel_of other in
+  check "and a rebuild puts it right" (repaired = Some "elsewhere");
 
   let* () =
     Io_lwt.Fs.rm_rf (Cache_layout.folders_dir ~cache_root domain_name)
   in
+  let* lost = rel_of other in
+  check "a lost index answers nothing rather than rebuilding itself"
+    (lost = None);
+  let* () = rebuild () in
   let* healed = rel_of other in
-  check "a lost index is rebuilt on demand" (healed = Some "elsewhere");
+  check "a lost index is restored by a rebuild" (healed = Some "elsewhere");
 
   let* stale = ensure "temporary" in
   let* () = Io_lwt.Fs.rm_rf (mirror "temporary") in
@@ -118,8 +125,33 @@ let main () =
   let* () =
     Io_lwt.Fs.rm_rf (Cache_layout.folders_dir ~cache_root domain_name)
   in
+  let* () = rebuild () in
   let* got_odd = rel_of odd_id in
   check "a rebuilt index recovers an escaped name" (got_odd = Some odd);
+
+  (* Depth is whatever the tree is. Single-character names because the ceiling
+     that does exist is the filesystem's on the path, not this index's on the
+     chain, and the point is to clear any fixed hop count comfortably. *)
+  let deep_rel = String.concat "/" (List.init 300 (fun _ -> "a")) in
+  let* deep_id = ensure deep_rel in
+  let* deep_got = rel_of deep_id in
+  check "a folder nested past any fixed cap resolves" (deep_got = Some deep_rel);
+
+  (* Two entries naming each other: unreachable from the root, and the climb has
+     to notice rather than follow it forever. *)
+  let* () =
+    Io_lwt.Fs.atomic_write
+      (index_file "aaaaaaaaaaaaaaaa")
+      "{\"parent\":\"bbbbbbbbbbbbbbbb\",\"name\":\"x\"}"
+  in
+  let* () =
+    Io_lwt.Fs.atomic_write
+      (index_file "bbbbbbbbbbbbbbbb")
+      "{\"parent\":\"aaaaaaaaaaaaaaaa\",\"name\":\"y\"}"
+  in
+  let* looped = rel_of "aaaaaaaaaaaaaaaa" in
+  check "a cycle in the index answers nothing rather than looping"
+    (looped = None);
 
   Lwt.return_unit
 

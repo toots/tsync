@@ -12,6 +12,10 @@ the renamed folder is the same folder: ok
 a deleted folder resolves to nothing: ok
 its deleted parent does too: ok
 a corrupted entry does not resolve to another folder: ok
-a lost index is rebuilt on demand: ok
+and a rebuild puts it right: ok
+a lost index answers nothing rather than rebuilding itself: ok
+a lost index is restored by a rebuild: ok
 rebuild prunes entries for departed folders: ok
 a rebuilt index recovers an escaped name: ok
+a folder nested past any fixed cap resolves: ok
+a cycle in the index answers nothing rather than looping: ok

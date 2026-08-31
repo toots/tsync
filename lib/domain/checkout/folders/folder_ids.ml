@@ -60,20 +60,7 @@ module Over (Io : Io.S) (F : FILES with type 'a io := 'a Io.t) = struct
     let+ s = F.read_file_opt (index_path ~cache_root ~domain_name id) in
     Option.bind s entry_of_string
 
-  (* Ids no folder has any more, so the repeated lookups fileproviderd makes for a
-     deleted folder do not each cost a walk. Ids are random and minted once, so
-     anything that brings one back goes through [write_entry], which clears the
-     memo.
-
-     ponytail: one walk per distinct missing id; add a time floor if that is ever
-     felt. *)
-  let absent : (string, unit) Hashtbl.t = Hashtbl.create 64
-
-  let absent_key ~cache_root ~domain_name id =
-    String.concat "\000" [cache_root; domain_name; id]
-
   let write_entry ~cache_root ~domain_name ~id entry =
-    Hashtbl.remove absent (absent_key ~cache_root ~domain_name id);
     let path = index_path ~cache_root ~domain_name id in
     let* () = F.ensure_parent path in
     F.atomic_write path (entry_to_string entry)
@@ -183,76 +170,43 @@ module Over (Io : Io.S) (F : FILES with type 'a io := 'a Io.t) = struct
         else F.unlink_quiet (Filename.concat dir id))
       ids
 
-  (* One walk at a time per domain; concurrent lookups join the one in flight. *)
-  let rebuilds : (string, unit Io.t) Hashtbl.t = Hashtbl.create 4
-
-  let rebuild_once ~cache_root ~domain_name =
-    let key = cache_root ^ "\000" ^ domain_name in
-    match Hashtbl.find_opt rebuilds key with
-      | Some running -> running
-      | None ->
-          (* Being in the table is what says a walk is in flight, so it leaves on
-             the way out. The walk waits for [start] rather than beginning here:
-             one that finished first would remove a key not yet added, and the
-             replace below would then park a finished walk there for good. *)
-          let started, start = Io.wait () in
-          let running =
-            Io.finalize
-              (fun () ->
-                let* () = started in
-                rebuild ~cache_root ~domain_name)
-              (fun () ->
-                Hashtbl.remove rebuilds key;
-                return_unit)
-          in
-          Hashtbl.replace rebuilds key running;
-          Io.wakeup_later start ();
-          running
-
-  (* A cycle in a corrupted index would otherwise climb forever. *)
-  let max_depth = 256
-
+  (* The index is on-disk data, so a corrupted parent chain can loop and this is
+     finite only if it does not. An id seen twice is what says it does. The set
+     costs the order [names] already costs, and bounds the climb by the tree's
+     own depth. *)
   let climb ~cache_root ~domain_name id =
-    let rec go id names depth =
-      if depth > max_depth then Io.return None
-      else if id = Stored_key.root_id then return_some names
-      else
+    let seen = Hashtbl.create 16 in
+    let rec go id names =
+      if id = Stored_key.root_id then return_some names
+      else if Hashtbl.mem seen id then Io.return None
+      else (
+        Hashtbl.replace seen id ();
         let* entry = read_entry ~cache_root ~domain_name id in
         match entry with
           | None -> Io.return None
-          | Some { parent; name } -> go parent (name :: names) (depth + 1)
+          | Some { parent; name } -> go parent (name :: names))
     in
-    go id [] 0
+    go id []
 
   (* The climbed path is checked against the markers before it is believed, so a
-     stale entry costs an answer rather than naming some other folder, and a failed
-     check is the signal to rebuild and ask once more. *)
+     stale entry costs an answer rather than naming some other folder.
+
+     A failure is the answer. Naming a folder goes through {!Layout.ensure_id}
+     and so through {!write}, which keeps the index with the mirror whichever
+     process is writing; what a lookup meets instead is a folder that is gone,
+     and walking the mirror to learn that is not a request's to pay.
+     {!Cache_layout.clear} empties the index, and filling it again belongs to
+     whoever ran the resync: see {!rebuild}. *)
   let key_of_id ~cache_root ~domain_name ~root id =
     if id = Stored_key.root_id then return_some root
-    else (
-      let verified key =
-        let+ actual = lookup_id ~cache_root ~domain_name key in
-        if actual = Some id then Some key else None
-      in
-      let attempt () =
-        let* candidate = climb ~cache_root ~domain_name id in
-        match candidate with
-          | None -> Io.return None
-          | Some names ->
-              verified (List.fold_left Logical_key.dir_in root names)
-      in
-      let* first = attempt () in
-      match first with
-        | Some _ -> Io.return first
-        | None when Hashtbl.mem absent (absent_key ~cache_root ~domain_name id)
-          ->
-            Io.return None
-        | None ->
-            let* () = rebuild_once ~cache_root ~domain_name in
-            let+ second = attempt () in
-            if second = None then
-              Hashtbl.replace absent (absent_key ~cache_root ~domain_name id) ();
-            second)
+    else
+      let* candidate = climb ~cache_root ~domain_name id in
+      match candidate with
+        | None -> Io.return None
+        | Some names ->
+            let key = List.fold_left Logical_key.dir_in root names in
+            let+ actual = lookup_id ~cache_root ~domain_name key in
+            if actual = Some id then Some key else None
 
   (* A marker travels with its directory and so still spells the old leaf after a
      rename; {!rebuild} reads it, so the new name is written back. *)

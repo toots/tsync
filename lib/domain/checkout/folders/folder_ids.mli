@@ -6,10 +6,13 @@
 
     The markers are filed under the path and so cannot answer id to path: each
     is mirrored by an entry under {!Cache_layout.folders_dir} holding the
-    folder's parent id and real name, climbed to the root. Those entries hold
-    nothing the markers do not, so a lookup finding one missing or disagreeing
-    rebuilds them and retries, which is what makes the mirror tolerable to write
-    from another process ([tsync import], [tsync sync --full]). *)
+    folder's parent id and real name, climbed to the root.
+
+    Naming a folder goes through {!Layout.ensure_id} and so through
+    {!Over.Make.write}, which writes the entry with the marker: whichever
+    process writes the mirror keeps the index with it. {!Cache_layout.clear}
+    empties both together, and filling the index again is {!Over.Make.rebuild},
+    which the resync owes. *)
 
 (** What this needs of a filesystem, which is seven calls. *)
 module type FILES = sig
@@ -62,9 +65,15 @@ module Over (Io : Io.S) (_ : FILES with type 'a io := 'a Io.t) : sig
     Folder.marker ->
     unit Io.t
 
-  (** The domain-relative path of a folder id, or [None] when nothing records
-      it. A miss rebuilds the reverse index once and retries before answering.
-  *)
+  (** The domain-relative path of a folder id, or [None] when nothing records it
+      — a folder that is gone, or an index emptied by {!Cache_layout.clear} and
+      not yet rebuilt.
+
+      Climbs the index and holds the result against the markers before believing
+      it, so a wrong entry costs an answer rather than naming another folder.
+      Reads only: this is a request path, and a walk of the mirror is not one to
+      spend there. Depth is unbounded, a chain that meets itself answering
+      [None]. *)
   val key_of_id :
     cache_root:string ->
     domain_name:string ->
