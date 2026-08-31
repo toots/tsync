@@ -633,8 +633,7 @@ let setup_client (module C : Conf_lwt.S) root staging_prefix =
         done;
         Printf.printf "  read %s%s [%d,%d) = %S\n" path
           (match stream with None -> "" | Some s -> " <" ^ s ^ ">")
-          offset (offset + len)
-          (Bytes.to_string bytes);
+          offset (offset + len) (Bytes.to_string bytes);
         Lwt.return_unit
     | FetchRange { path; offset; len } ->
         (* Somewhere outside the cache and the data dir, so the destination is
@@ -1073,7 +1072,13 @@ let setup_client (module C : Conf_lwt.S) root staging_prefix =
             write_file (Filename.concat dir "orphan-uuid") "leaked bytes")
           [Cache_layout.staged_chunks_dir; Cache_layout.staged_whole_dir];
         Lwt.return_unit
-    | ReclaimStaged -> F.reclaim_staged_orphans ()
+    (* No grace: the bodies a step plants are the ones it means to see
+       collected, and they were written a moment ago. *)
+    | ReclaimStaged ->
+        let+ (_ : Staged_manifest.swept) =
+          Mfs.reclaim_orphan_bodies ~cutoff:(Unix.gettimeofday ()) ()
+        in
+        ()
     | ClearCache ->
         Cache_layout_lwt.clear ~cache_root:C.cache_root
           ~domain_name:C.domain_name

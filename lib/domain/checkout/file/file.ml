@@ -50,8 +50,10 @@ module type CONTENT = sig
       int io
 
     val published : Logical_key.t -> Manifest.t option io
+
     val pread_key :
       ?stream:string -> Logical_key.t -> Bigstring.t -> offset:int64 -> int io
+
     val write : Logical_key.t -> Bigstring.t -> offset:int64 -> int io
     val truncate : Logical_key.t -> int64 -> unit io
     val create : Logical_key.t -> unit io
@@ -82,7 +84,6 @@ module type CONTENT = sig
     val forget_chunks : Logical_key.t -> unit io
     val discard_staged : Logical_key.t -> unit io
     val staged_body_path : Logical_key.t -> string option io
-    val reclaim_staged_orphans : unit -> unit io
   end
 end
 
@@ -442,6 +443,7 @@ struct
 
     let create key = D.create key
     let write_whole key ~src_path = D.stage_whole key ~src_path
+
     let read ?stream key (buf : File_ops.buffer) ~offset =
       D.pread_key ?stream key buf ~offset
 
@@ -553,8 +555,6 @@ struct
         let* () = W.write entry_key record in
         let+ () = Owed.signal W.owed (entry_key, record) in
         true
-
-    let reclaim_staged_orphans = D.reclaim_staged_orphans
 
     let close key =
       let* staged = Mfs.exists key in

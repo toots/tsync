@@ -26,6 +26,8 @@
    -open
    Tsync_collection
    -open
+   Tsync_staged
+   -open
    Tsync_staged_lwt
    -open
    Tsync_checkout
@@ -98,6 +100,7 @@
   tsync_corruption_lwt
   tsync_collection
   tsync_staged_lwt
+  tsync_staged
   tsync_checkout
   tsync_checkout_lwt
   tsync_journal

@@ -80,16 +80,6 @@ module type S = sig
       a restart. *)
   val close : t -> unit io
 
-  (** Delete staged bodies no staged manifest names — what a crash between
-      staging a body and writing its manifest leaves behind — and prune the
-      empty directories left in the staged manifest tree.
-
-      Once per machine, before anything serves the domain. A body is judged an
-      orphan by the absence of a manifest naming it, which is also what a body
-      being staged right now looks like, so a second process running this
-      collects bytes a live write is about to use. *)
-  val reclaim_staged_orphans : unit -> unit io
-
   (** Keep the chunk store under [C.max_cache]; never touches staged data. *)
   val enforce_chunk_cap : unit -> unit io
 
@@ -146,8 +136,10 @@ module type S = sig
   val write_whole : t -> src_path:string -> unit io
 
   (** [stream] names the descriptor reading, so two open on one file each keep
-      their own place for the read-ahead heuristic; without it they share one. *)
+      their own place for the read-ahead heuristic; without it they share one.
+  *)
   val read : ?stream:string -> t -> buffer -> offset:int64 -> int io
+
   val write : t -> buffer -> offset:int64 -> int io
 
   (** Stop an upload of [t] that is under way. [false] when none was. Not only

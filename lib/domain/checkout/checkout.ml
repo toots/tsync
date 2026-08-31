@@ -6,6 +6,10 @@ open Manifest
 
 type listed = { key : Logical_key.t; size : int; mtime : float }
 
+(* The staged half counts its own sweep the same way, and a caller running both
+   adds the two up. *)
+type swept = Staged_manifest.swept = { files : int; bytes : int }
+
 let dir ~cache_root domain_name =
   Cache_layout.manifests_dir ~cache_root domain_name
 
@@ -47,6 +51,8 @@ module type FS = sig
   val mkdir_p : string -> unit io
   val is_directory : string -> bool io
   val readdir_list : string -> string list io
+  val readdir_list_quiet : string -> string list io
+  val stat_opt : string -> Unix.stats option io
   val atomic_write : string -> string -> unit io
   val rm_rf : string -> unit io
   val unlink_quiet : string -> unit io
@@ -133,19 +139,62 @@ struct
   let real_file_name name m =
     if Stored_key.is_escaped name then recorded_name m else name
 
-  let rec clean_tmp dir =
-    let* is_dir = Fs.is_directory dir in
-    if not is_dir then return_unit
-    else
-      let* names = Fs.readdir_list dir in
-      iter_s
-        (fun name ->
-          let path = Filename.concat dir name in
-          let* is_dir = Fs.is_directory path in
-          if is_dir then clean_tmp path
-          else if Filename.is_temp_name name then Fs.unlink_quiet path
-          else return_unit)
-        names
+  module Bounded = Bounded.Make (Io)
+
+  (* One stat per entry is what a sweep of the mirror costs, and a mirror holds
+     hundreds of thousands of them: taken one at a time that is minutes of round
+     trips for seconds of work.
+
+     Leaf level only. The recursion descends outside the pool, so a directory
+     never holds a slot while waiting for its children -- one pool nested inside
+     itself deadlocks. *)
+  let stat_slots = Bounded.create ~max:64 ()
+  let nothing_swept = { files = 0; bytes = 0 }
+
+  (* A temp name carries the pid that wrote it ({!Filename.temp_path}), so what
+     a crash left behind is told apart from what a live process is still writing
+     by asking after the owner. The same test {!Spool.reap} makes, and what lets
+     this run against a domain that is being served rather than only before
+     anything forks. *)
+  let orphaned_temp name =
+    match Filename.temp_owner name with
+      | Some pid -> not (Tsync_io.Fs.pid_alive pid)
+      | None -> false
+
+  (* Missing paths are ordinary here: the mirror is written by other processes
+     while this walks it, so an entry that vanishes is skipped rather than
+     ending the sweep -- unwinding leaves everything after it uncollected. *)
+  let reap_temp_files root =
+    let rec walk dir acc =
+      let* names = Fs.readdir_list_quiet dir in
+      let* entries =
+        Bounded.map_with stat_slots
+          (fun name ->
+            let path = Filename.concat dir name in
+            let+ st = Fs.stat_opt path in
+            (name, path, st))
+          names
+      in
+      let* acc =
+        fold_left_s
+          (fun acc (name, path, st) ->
+            match st with
+              | Some st when st.Unix.st_kind <> Unix.S_DIR && orphaned_temp name
+                ->
+                  let+ () = Fs.unlink_quiet path in
+                  { files = acc.files + 1; bytes = acc.bytes + st.Unix.st_size }
+              | _ -> Io.return acc)
+          acc entries
+      in
+      fold_left_s
+        (fun acc (_, path, st) ->
+          match st with
+            | Some { Unix.st_kind = Unix.S_DIR; _ } -> walk path acc
+            | _ -> Io.return acc)
+        acc entries
+    in
+    let* here = Fs.is_directory root in
+    if here then walk root nothing_swept else Io.return nothing_swept
 
   (* The store, per domain: manifests keyed by logical key and nothing else. *)
   module Make (C : Conf.S with type 'a io = 'a Io.t) = struct
@@ -312,8 +361,8 @@ struct
 
     let ensure_root () = Fs.mkdir_p (Mf.root ())
 
-    let reap_leftovers () =
-      let* () = ensure_root () in
-      clean_tmp (Mf.root ())
+    (* On demand only. Nothing about starting needs this, and the mirror is far
+       too large to walk on the way to serving. *)
+    let reap_temp_files () = reap_temp_files (Mf.root ())
   end
 end

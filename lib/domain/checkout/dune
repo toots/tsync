@@ -32,4 +32,5 @@
   tsync_cache_layout
   tsync_manifest
   tsync_io
-  tsync_retry))
+  tsync_retry
+  unix))
