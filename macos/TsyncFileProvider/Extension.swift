@@ -10,12 +10,14 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension,
     private let domain: NSFileProviderDomain
     private let client: DaemonClient
     private let readOnly: Bool
+    private let materialized: MaterializedSet
 
     required init(domain: NSFileProviderDomain) {
         self.domain = domain
         let config = (try? Config.load()) ?? Config(domains: [])
         self.readOnly = config.isReadOnly(domain.displayName)
         self.client = DaemonClient(domain: domain.displayName)
+        self.materialized = MaterializedSet(domain: domain)
         super.init()
         log.info("init: \(domain.identifier.rawValue, privacy: .public)")
     }
@@ -200,40 +202,37 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension,
             let name = itemTemplate.filename
             let pending = unsupported(fields)
             do {
-                // A reimport replays everything on disk through this call:
-                // matching an existing item is what stops it re-uploading the
-                // whole domain.
                 let isDirectory = itemTemplate.contentType == .folder
-                if options.contains(.mayAlreadyExist),
-                   let existing = try await lookup(parent: itemTemplate.parentItemIdentifier,
-                                                   name: name, isDirectory: isDirectory) {
+                // A reimport replays everything on disk through this call, and
+                // re-writing a file that is already there would re-upload the
+                // whole domain. A directory needs no such guard: mkdir answers
+                // with the folder whether or not it had to make one.
+                if options.contains(.mayAlreadyExist), !isDirectory,
+                   let existing = try await existingFile(in: itemTemplate.parentItemIdentifier,
+                                                         named: name) {
                     completionHandler(existing, pending, false, nil)
                     return
                 }
 
-                let created: TsyncItem?
+                // Each of these answers with the item it produced, so nothing
+                // lists the parent afterwards to find what it just made.
+                let reply: DaemonResponse
                 if isDirectory {
-                    _ = try await client.mkdir(parentRef: parent, name: name)
-                    created = try await lookup(parent: itemTemplate.parentItemIdentifier,
-                                               name: name, isDirectory: true)
+                    reply = try await client.mkdir(parentRef: parent, name: name)
                 } else if itemTemplate.contentType == .symbolicLink {
                     guard let target = itemTemplate.symlinkTargetPath ?? nil else {
                         throw DaemonError.remote(code: "invalid", message: "symlink without a target")
                     }
-                    _ = try await client.symlink(parentRef: parent, name: name, target: target)
-                    created = try await lookup(parent: itemTemplate.parentItemIdentifier,
-                                               name: name, isDirectory: false)
+                    reply = try await client.symlink(parentRef: parent, name: name, target: target)
                 } else if let url {
                     let staged = try stage(url)
                     defer { try? FileManager.default.removeItem(at: staged) }
-                    _ = try await client.write(parentRef: parent, name: name, staging: staged.path)
-                    created = try await lookup(parent: itemTemplate.parentItemIdentifier,
-                                               name: name, isDirectory: false)
+                    reply = try await client.write(parentRef: parent, name: name,
+                                                   staging: staged.path)
                 } else {
-                    _ = try await client.create(parentRef: parent, name: name)
-                    created = try await lookup(parent: itemTemplate.parentItemIdentifier,
-                                               name: name, isDirectory: false)
+                    reply = try await client.create(parentRef: parent, name: name)
                 }
+                let created = reply.item.flatMap { TsyncItem.make($0, readOnly: readOnly) }
                 progress.completedUnitCount = 100
                 completionHandler(created, pending, false, nil)
             } catch is CancellationError {
@@ -271,27 +270,28 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension,
                 // file — see `File.rename`.
                 _ = version
 
+                // Whichever call ran last is the one whose reply describes the
+                // item now, and each of them answers with it.
+                var reply: DaemonResponse?
                 if let contents = newContents, changedFields.contains(.contents) {
                     let staged = try stage(contents)
                     defer { try? FileManager.default.removeItem(at: staged) }
                     // Name and content must travel together, or the file shows
                     // up with an extension not matching its content.
-                    _ = try await client.write(
+                    reply = try await client.write(
                         parentRef: ItemID.wire(item.parentItemIdentifier),
                         name: item.filename, staging: staged.path)
                     if moved, ref != ItemID.wire(item.itemIdentifier) {
                         try await client.delete(ref: ref, isDirectory: false)
                     }
                 } else if moved {
-                    _ = try await client.rename(
+                    reply = try await client.rename(
                         ref: ref,
                         parentRef: ItemID.wire(item.parentItemIdentifier),
                         name: item.filename)
                 }
 
-                let updated = try await lookup(parent: item.parentItemIdentifier,
-                                               name: item.filename,
-                                               isDirectory: ItemID.folderID(of: item.itemIdentifier) != nil)
+                let updated = reply?.item.flatMap { TsyncItem.make($0, readOnly: readOnly) }
                 progress.completedUnitCount = 100
                 completionHandler(updated, pending, false, nil)
             } catch is CancellationError {
@@ -323,8 +323,9 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension,
                 // The daemon's directory delete always detaches the whole
                 // subtree, so a non-recursive delete is guarded here.
                 if isDirectory && !options.contains(.recursive) {
-                    let children = try await client.listDir(ref)
-                    if !children.isEmpty {
+                    // One entry is enough to answer "is it empty".
+                    let children = try await client.listDir(ref, limit: 1)
+                    if !children.items.isEmpty {
                         throw DaemonError.remote(code: "not_empty",
                                                  message: "the folder is not empty")
                     }
@@ -347,15 +348,34 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension,
 
     // MARK: - Enumeration
 
+    /// One enumerator per container contract, so neither has to ask what kind of
+    /// container it is holding.
+    ///
+    /// A directory gets items only. A replicated extension may signal nothing
+    /// but the working set, so a directory's change enumeration is never
+    /// triggered and the working set is where every change is reported.
     func enumerator(for containerItemIdentifier: NSFileProviderItemIdentifier,
                     request: NSFileProviderRequest) throws -> NSFileProviderEnumerator {
-        // supportsSyncingTrash = false, so the system should never ask; a
-        // request that does arrive must not list a literal "trash" key.
-        if containerItemIdentifier == .trashContainer {
+        switch containerItemIdentifier {
+        case .trashContainer:
+            // supportsSyncingTrash = false, so the system should never ask; a
+            // request that does arrive must not list a literal "trash" key.
             throw CocoaError(.featureUnsupported)
+        case .workingSet:
+            return WorkingSetEnumerator(client: client, materialized: materialized,
+                                        domainName: domain.displayName, readOnly: readOnly)
+        default:
+            return DirectoryEnumerator(container: containerItemIdentifier,
+                                       client: client, readOnly: readOnly)
         }
-        return TsyncEnumerator(container: containerItemIdentifier, client: client,
-                               domainName: domain.displayName, readOnly: readOnly)
+    }
+
+    /// The system telling us what it now holds on disk. It fires on every change
+    /// to that set, so the work is a refresh the next enumeration awaits rather
+    /// than anything done here.
+    func materializedItemsDidChange(completionHandler: @escaping () -> Void) {
+        Task { await materialized.refresh() }
+        completionHandler()
     }
 
     // MARK: - Helpers
@@ -366,21 +386,18 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension,
                             "'\(domain.displayName)' is read-only"])
     }
 
-    /// The item now at `name` inside `parent`.
+    /// The file already at `name` inside `parent`, if there is one.
     ///
-    /// A file's reference composes from its container and leaf, avoiding a
-    /// listing. A directory's does not — only the daemon assigns folder ids — so
-    /// it must be found by listing; the composed form would name it by the wrong
-    /// kind of reference, and callers build children's names from it.
-    private func lookup(parent: NSFileProviderItemIdentifier, name: String,
-                        isDirectory: Bool) async throws -> TsyncItem? {
-        if !isDirectory, let child = ItemID.file(in: parent, named: name),
-           let item = try? await client.stat(ItemID.wire(child.identifier)) {
-            return TsyncItem.make(item, readOnly: readOnly)
-        }
-        let siblings = try await client.listDir(ItemID.wire(parent))
-        guard let match = siblings.first(where: { $0.name == name }) else { return nil }
-        return TsyncItem.make(match, readOnly: readOnly)
+    /// A file's reference composes from its container and its leaf, so this is
+    /// one stat and never a listing. A directory has no composable reference —
+    /// only the daemon assigns folder ids — which is why the caller asks the
+    /// daemon to make one instead and takes back whatever it already had.
+    private func existingFile(in parent: NSFileProviderItemIdentifier,
+                              named name: String) async throws -> TsyncItem? {
+        guard let child = ItemID.file(in: parent, named: name),
+              let item = try? await client.stat(ItemID.wire(child.identifier))
+        else { return nil }
+        return TsyncItem.make(item, readOnly: readOnly)
     }
 
     /// Take our own copy: the system unlinks the URL it gave us once this call

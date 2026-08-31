@@ -108,7 +108,7 @@ final class DaemonProtocolTests: XCTestCase {
     }
 
     private func listRoot() async throws -> [DaemonItem] {
-        try await client.listDir(ItemID.rootForm)
+        try await client.listDir(ItemID.rootForm).items
     }
 
     // MARK: - Tests
@@ -203,9 +203,48 @@ final class DaemonProtocolTests: XCTestCase {
 
         _ = try await client.write(parentRef: folder.ref, name: "inside.txt",
                                    staging: try staged("deep"))
-        let children = try await client.listDir(folder.ref)
+        let children = try await client.listDir(folder.ref).items
         let child = try XCTUnwrap(children.first)
         XCTAssertEqual(child.parentRef, folder.ref)
+    }
+
+    /// A page is the last name served and nothing else, so the pages of one
+    /// listing lie end to end whoever asks for them. An offset into a listing
+    /// held in memory passes this and fails the moment the process serving it is
+    /// not the one that started.
+    func testAFolderPagesEndToEnd() async throws {
+        let names = ["a.txt", "b.txt", "c.txt", "d.txt", "e.txt"]
+        for name in names {
+            _ = try await client.write(parentRef: ItemID.rootForm, name: name,
+                                       staging: try staged(name))
+        }
+
+        var seen: [String] = []
+        var after: String? = nil
+        // One more round than there are pages, so a cursor that fails to advance
+        // shows up as a repeat rather than as a hang.
+        for _ in 0...names.count {
+            let page = try await client.listDir(ItemID.rootForm, after: after, limit: 2)
+            XCTAssertLessThanOrEqual(page.items.count, 2, "a page must honour its limit")
+            seen.append(contentsOf: page.items.map(\.name))
+            guard let next = page.next else { break }
+            XCTAssertEqual(next, page.items.last?.name,
+                           "the cursor is the last name served")
+            after = next
+        }
+        XCTAssertEqual(seen, names, "the pages laid end to end are the listing")
+    }
+
+    /// Resuming from a name that is no longer there still lands after it, which
+    /// is what stops a deletion mid-enumeration skipping the next item.
+    func testAPageResumesAfterADeletedName() async throws {
+        for name in ["a.txt", "b.txt", "c.txt"] {
+            _ = try await client.write(parentRef: ItemID.rootForm, name: name,
+                                       staging: try staged(name))
+        }
+        try await client.delete(ref: "f:\(ItemID.rootFolderID)/b.txt", isDirectory: false)
+        let page = try await client.listDir(ItemID.rootForm, after: "b.txt", limit: 10)
+        XCTAssertEqual(page.items.map(\.name), ["c.txt"])
     }
 
     /// The whole point of the identifier change: a folder that is renamed is
@@ -228,7 +267,7 @@ final class DaemonProtocolTests: XCTestCase {
                        "a renamed folder must keep its reference")
 
         // And its contents came with it, still reachable by the same reference.
-        let kept = try await client.listDir(after.ref)
+        let kept = try await client.listDir(after.ref).items
         let child = try XCTUnwrap(kept.first)
         XCTAssertEqual(child.name, "keep.txt")
     }
