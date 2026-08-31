@@ -85,10 +85,16 @@ module Make (Io : Io.S) (F : FILES with type 'a io := 'a Io.t) = struct
     else Io.return name
 
   (* For a full resync that rebuilds from the backend. Staged edits are kept:
-     nothing else holds those bytes. *)
+     nothing else holds those bytes.
+
+     The applied entries go with the rest of the projection. They describe the
+     mirror being replaced, and what they were for -- carrying a reader forward
+     from an anchor -- a resync answers by stamping a new token, which expires
+     every anchor outstanding. *)
   let clear ~cache_root ~domain_name =
     let* () = F.rm_rf (manifests_dir ~cache_root domain_name) in
     let* () = F.rm_rf (scratch_dir ~cache_root domain_name) in
     let* () = F.rm_rf (folders_dir ~cache_root domain_name) in
+    let* () = F.rm_rf (applied_dir ~cache_root domain_name) in
     F.rm_rf (chunks_dir ~cache_root domain_name)
 end
