@@ -761,6 +761,20 @@
   (action
    (diff versioning.expected versioning.output))))
 
+(subdir unit/applied_entries
+ (alias
+  (name default)
+  (deps applied_entries_test.exe))
+ (rule
+  (alias runtest)
+  (target applied_entries_test.output)
+  (action
+   (with-stdout-to applied_entries_test.output (ignore-stderr (run ./applied_entries_test.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff applied_entries_test.expected applied_entries_test.output))))
+
 (subdir unit/backend_render
  (alias
   (name default)

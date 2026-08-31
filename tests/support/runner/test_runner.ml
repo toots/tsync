@@ -343,12 +343,6 @@ and normalize_kv (k, v) =
     | "mtime", `Float f -> (k, `String (if f > 0. then "<mtime>" else "<zero>"))
     | "cursor", `String s ->
         (k, `String (if s = "" then "<empty>" else "<cursor>"))
-    | "items", `List l ->
-        ( k,
-          `List
-            (List.stable_sort
-               (fun a b -> compare (ipc_entry_key a) (ipc_entry_key b))
-               (List.map normalize_ipc l)) )
     | k, v -> (k, normalize_ipc v)
 
 let print_ipc label obj =
@@ -365,6 +359,7 @@ type client = {
   dump_contents : string list -> unit Lwt.t;
   dump_pending : unit -> unit Lwt.t;
   dump_listing : unit -> unit Lwt.t;
+  dump_paged : unit -> unit Lwt.t;
   dump_changes : label:string -> anchor:string -> unit Lwt.t;
   cursor : unit -> string Lwt.t;
   (* Whole JSON rather than a snapshot: most of it is pids, uptimes and
@@ -409,10 +404,9 @@ let setup_client (module C : Conf_lwt.S) root staging_prefix =
       Lwt.map (fun (_ : Maintenance_lwt.swept) -> ()) (F.enforce_chunk_cap ()));
   let staging_seq = ref 0 in
   let mark_time = ref 0. in
-  (* Where the body of a file's chunk [index] lives in the chunk store, for the
-     steps that damage it behind the daemon's back. *)
-  (* The cache file backing stored chunk [index] — the whole group it falls in,
-     which is one chunk only when the cache chunk size matches the stored one. *)
+  (* The cache file backing stored chunk [index], for the steps that damage it
+     behind the daemon's back. It is the whole group the chunk falls in, which is
+     one chunk only when the cache chunk size matches the stored one. *)
   let cached_chunk_path k index =
     let+ resolved = F.resolve k in
     let group =
@@ -1010,10 +1004,10 @@ let setup_client (module C : Conf_lwt.S) root staging_prefix =
         let+ dests = M.resync ~scope () in
         List.iteri
           (fun i (d : Mirror.dest_stats) ->
-            (* Only counts: copied keys carry non-deterministic folder ids /
-               version timestamps, and the aliased backend dump already shows the
-               resulting state. Bytes are omitted (manifests embed mtimes). *)
-            (* Numbered from the source, which is destination zero. *)
+            (* Only counts, numbered from the source at zero: copied keys carry
+               non-deterministic folder ids and version timestamps, the aliased
+               backend dump already shows the resulting state, and bytes are
+               omitted because manifests embed mtimes. *)
             Printf.printf "  resync backend #%d: %d checked, %d copied\n"
               (i + 2) d.Mirror.checked d.Mirror.copied)
           dests
@@ -1219,10 +1213,13 @@ let setup_client (module C : Conf_lwt.S) root staging_prefix =
           (String.concat "; " (List.map render_op r.Wal.ops)))
       pending
   in
-  (* Recursive list_dir (per directory) then the flat list_all working-set view —
-     the actual IPC responses, normalized. Walked by reference, which is how a
-     listing names what it holds and the only way the id-to-path resolution
-     behind it gets exercised. *)
+  (* Recursive list_dir, per directory: the actual IPC responses, normalized.
+     Walked by reference, which is how a listing names what it holds and the
+     only way the id-to-path resolution behind it gets exercised.
+
+     The order is the daemon's own and is printed as it came: it is by name, and
+     that a page's contents and their order survive being split is the whole of
+     the paging contract. *)
   let by_ref act r = request [("action", `String act); ("ref", `String r)] in
   let dir_refs obj =
     let items =
@@ -1241,11 +1238,35 @@ let setup_client (module C : Conf_lwt.S) root staging_prefix =
       print_ipc (Printf.sprintf "list_dir %s" r) obj;
       Lwt_list.iter_s walk (List.sort compare (dir_refs obj))
     in
-    let* () = walk "root" in
-    let* obj = by_ref "list_all" "root" in
-    must obj;
-    print_ipc "list_all root" obj;
-    Lwt.return_unit
+    walk "root"
+  in
+  (* The root walked two entries at a time, following the cursor the reply
+     names. What it proves is that the page tokens compose: a page holds no
+     more than it was asked for, the cursor is the last name served, and the
+     pages laid end to end are the listing. *)
+  let dump_paged () =
+    let rec page after n =
+      if n > 20 then Lwt.return_unit
+      else
+        let* obj =
+          request
+            ([
+               ("action", `String "list_dir");
+               ("ref", `String "root");
+               ("limit", `Int 2);
+             ]
+            @ match after with None -> [] | Some a -> [("after", `String a)])
+        in
+        must obj;
+        print_ipc
+          (Printf.sprintf "list_dir root limit=2%s"
+             (match after with None -> "" | Some a -> " after=" ^ a))
+          obj;
+        match List.assoc_opt "next" obj with
+          | Some (`String a) -> page (Some a) (n + 1)
+          | _ -> Lwt.return_unit
+    in
+    page None 0
   in
   let cursor () =
     let+ obj = action "cursor" in
@@ -1270,6 +1291,7 @@ let setup_client (module C : Conf_lwt.S) root staging_prefix =
     dump_contents;
     dump_pending;
     dump_listing;
+    dump_paged;
     dump_changes;
     cursor;
     stats;
@@ -1519,10 +1541,6 @@ let dump_backend_at ~backend_root ~domain_prefix ~chunk_prefix ~journal_prefix
         Lwt.return_unit))
     entries
 
-(* Seed the RNG so [Stored_key.new_id] is deterministic within a scenario: folder ids
-   are then stable across runs, which keeps both the backend-key ordering and the
-   snapshots reproducible (and makes the real ids readable in the dump). Each
-   scenario re-seeds so it stays independent of the ones before it. *)
 (* Ids are random every run; the snapshot aliases them instead of fixing them,
    so what resets between scenarios is the alias numbering. *)
 let reset_ids () = reset_folder_aliases ()
@@ -1638,6 +1656,31 @@ let run_scenario ?(versioning = false) ?(symlink_policy = `Keep)
      client.stop ());
   rm_rf root;
   print_newline ()
+
+(* A folder id is minted at random, so the op's own [id] field is aliased before
+   it is printed. By this point the tree dumps have numbered them, so the alias a
+   kept op shows is the one the tree showed. *)
+let shown_op op =
+  Yojson.Basic.to_string
+    (match Journal.to_json op with
+      | `Assoc kvs ->
+          `Assoc
+            (List.map
+               (function
+                 | "id", `String id -> ("id", `String (alias_id id)) | kv -> kv)
+               kvs)
+      | j -> j)
+
+(* What each client kept of the journal: its own entries as they were published,
+   and a peer's as they were applied. The change feed is served from these, so a
+   step that leaves nothing here is a change no frontend will hear about. Entry
+   keys are a timestamp and a client uuid, so only the ops are shown. *)
+let dump_kept ~cache_root ~domain_name =
+  let+ page = Applied_entries.since ~cache_root ~domain_name ~limit:1000 () in
+  List.iter
+    (fun (_, ops) ->
+      Printf.printf "  %s\n" (String.concat " " (List.map shown_op ops)))
+    page.Applied_entries.entries
 
 let run_two_client_scenario ?(versioning = false)
     ({ name; steps } : two_client_scenario) =
@@ -1755,6 +1798,14 @@ let run_two_client_scenario ?(versioning = false)
            let* () = client_b.dump_contents files_b in
            print_endline "--- pending B";
            let* () = client_b.dump_pending () in
+           print_endline "--- kept A";
+           let* () =
+             dump_kept ~cache_root:Ca.cache_root ~domain_name:Ca.domain_name
+           in
+           print_endline "--- kept B";
+           let* () =
+             dump_kept ~cache_root:Cb.cache_root ~domain_name:Cb.domain_name
+           in
            print_endline "--- backend";
            dump_backend_at ~backend_root ~domain_prefix:Cb.domain_prefix
              ~chunk_prefix:Cb.chunk_prefix ~journal_prefix:Cb.journal_prefix
@@ -1844,7 +1895,9 @@ let run_ipc_scenario ?versioning ({ name; steps } : scenario) =
            let* () = Lwt_list.iter_s client.do_step steps in
            let* () = client.drain () in
            print_endline "--- listing";
-           client.dump_listing ())
+           let* () = client.dump_listing () in
+           print_endline "--- paged";
+           client.dump_paged ())
          (fun exn ->
            Printf.printf "  ERROR %s\n" (Printexc.to_string exn);
            Lwt.return_unit)
@@ -1947,7 +2000,13 @@ let run_ipc_changes_scenario ?versioning ({ name; steps } : scenario) =
            let* baseline = b.cursor () in
            let* () = Lwt_list.iter_s a.do_step steps in
            let* () = a.drain () in
-           print_endline "--- B changes_since (A's ops are foreign to B)";
+           (* The feed reports what this client has applied, not what is in the
+              store, so B picks A's entries up the way the poller does before it
+              is asked. A client that never synced has nothing to report, and
+              saying so is the contract rather than a gap. *)
+           let* () = b.do_step Sync in
+           print_endline
+             "--- B changes_since (A's ops, once B has applied them)";
            let* () =
              b.dump_changes ~label:"from baseline (working)" ~anchor:baseline
            in

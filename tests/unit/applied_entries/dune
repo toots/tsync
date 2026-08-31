@@ -1,0 +1,20 @@
+(executable
+ (flags
+  (:standard
+   -open
+   Tsync_journal
+   -open
+   Tsync_cache_layout
+   -open
+   Tsync_io_lwt
+   -open
+   Tsync_test_harness))
+ (name applied_entries_test)
+ (libraries
+  tsync_journal
+  tsync_test_harness
+  tsync_cache_layout
+  tsync_io_lwt
+  yojson
+  lwt
+  lwt.unix))

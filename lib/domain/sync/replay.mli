@@ -21,6 +21,13 @@ module type JOURNAL = sig
       ?start_after:Journal.Entry_key.t -> unit -> Journal.Entry_key.t list io
 
     val get_journal_entry : Journal.Entry_key.t -> Journal.op list option io
+
+    (** Keep an entry this client has handled, so what changed since an anchor
+        is answered without fetching back from the store what was just read.
+        Called after the entry is applied, which is what lets a reader trust
+        that the mirror already agrees with it. *)
+    val note_applied : Journal.Entry_key.t -> Journal.op list -> unit io
+
     val journal_entry_published : Journal.Entry_key.t -> bool io
     val read_last_sync_key : unit -> Journal.Entry_key.t option
     val write_last_sync_key : Journal.Entry_key.t -> unit

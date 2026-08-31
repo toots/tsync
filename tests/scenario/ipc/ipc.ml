@@ -5,7 +5,8 @@
 
 open Test_runner
 
-(* list_dir / list_all: keys, logical size, etag (content hash), dirty state. *)
+(* list_dir, whole and in pages: keys, logical size, etag (content hash),
+   dirty state, and the order a page cursor resumes from. *)
 let listing_scenarios : scenario list =
   [
     {
@@ -14,6 +15,18 @@ let listing_scenarios : scenario list =
         [
           Write { path = "a.txt"; content = "hello" };
           Write { path = "b.txt"; content = "world" };
+        ];
+    };
+    (* Names that interleave, so ordering by name is distinguishable from
+       listing every directory before every file. *)
+    {
+      name = "files and folders share one order";
+      steps =
+        [
+          Mkdir "mid";
+          Drain;
+          Write { path = "aaa.txt"; content = "a" };
+          Write { path = "zzz.txt"; content = "z" };
         ];
     };
     {
@@ -96,8 +109,6 @@ let changes_scenarios : scenario list =
     };
   ]
 
-(* The daemon reporting on itself: what [tsync status] renders and what the
-   http-proxy serves over /stats. *)
 (* A parent spelled as a storage key, which names the folder without saying it
    is one. The daemon names items by reference and answers this as it answers
    anything it cannot name, rather than guessing a kind. *)
@@ -115,6 +126,8 @@ let parent_ref_scenarios : scenario list =
     };
   ]
 
+(* The daemon reporting on itself: what [tsync status] renders and what the
+   http-proxy serves over /stats. *)
 let stats_scenarios : scenario list =
   [
     {

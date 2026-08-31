@@ -219,15 +219,20 @@ val run :
 val run_two_client_scenarios :
   ?versioning:bool -> two_client_scenario list -> unit
 
-(** Run each scenario (draining uploads), then snapshot the raw [list_dir] and
-    [list_all] IPC responses — directory keys, logical size, content-hash etags,
-    normalized mtime — the actual FileProvider listing contract. *)
+(** Run each scenario (draining uploads), then snapshot the raw [list_dir]
+    responses — directory keys, logical size, content-hash etags, normalized
+    mtime — and the same root walked in pages, which is the FileProvider listing
+    contract. *)
 val run_ipc : ?versioning:bool -> scenario list -> unit
 
-(** Two clients on one backend: client A applies the steps, then client B's
-    change feed is snapshotted from several anchors — a baseline (working
-    delta), B's current cursor (up to date), and a pruned-past anchor (stale,
-    which drives a full re-list). *)
+(** Two clients on one backend: client A applies the steps, B syncs them, and
+    then B's change feed is snapshotted from several anchors — a baseline
+    (working delta), B's current cursor (up to date), and a pruned-past anchor
+    (stale, which drives a full re-list).
+
+    B syncs first because the feed answers with what this client has applied:
+    that is what lets a reader trust that every item an op names is already in
+    the mirror. *)
 val run_ipc_changes : ?versioning:bool -> scenario list -> unit
 
 (** Snapshot the structure of the daemon's own report — the [stats] IPC action

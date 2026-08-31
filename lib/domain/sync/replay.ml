@@ -16,6 +16,7 @@ module type JOURNAL = sig
       ?start_after:Journal.Entry_key.t -> unit -> Journal.Entry_key.t list io
 
     val get_journal_entry : Journal.Entry_key.t -> Journal.op list option io
+    val note_applied : Journal.Entry_key.t -> Journal.op list -> unit io
     val journal_entry_published : Journal.Entry_key.t -> bool io
     val read_last_sync_key : unit -> Journal.Entry_key.t option
     val write_last_sync_key : Journal.Entry_key.t -> unit
@@ -248,6 +249,9 @@ struct
                   | None -> return_unit
                   | Some ops ->
                       let* () = F.apply_foreign_ops ops in
+                      (* After applying, so a reader of the kept entries never
+                         meets one the mirror has not caught up with. *)
+                      let* () = Js.note_applied ek ops in
                       List.iter
                         (fun op ->
                           on_changed

@@ -4,7 +4,23 @@
 
 (library
  (flags
-  (:standard -open Tsync_id -open Tsync_conf -open Tsync_io_lwt))
+  (:standard
+   -open
+   Tsync_id
+   -open
+   Tsync_conf
+   -open
+   Tsync_cache_layout
+   -open
+   Tsync_io_lwt))
  (name tsync_journal)
  (public_name tsync-libs.journal)
- (libraries tsync_id tsync_conf tsync_io_lwt yojson unix lwt.unix))
+ (libraries
+  tsync_id
+  tsync_conf
+  tsync_cache_layout
+  tsync_io_lwt
+  yojson
+  unix
+  lwt
+  lwt.unix))

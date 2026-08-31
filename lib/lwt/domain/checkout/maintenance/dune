@@ -12,6 +12,8 @@
    -open
    Tsync_staged_lwt
    -open
+   Tsync_journal
+   -open
    Tsync_io_lwt
    -open
    Tsync_log))
@@ -22,6 +24,7 @@
   tsync_conf_lwt
   tsync_cache_layout_lwt
   tsync_staged_lwt
+  tsync_journal
   tsync_io_lwt
   tsync_log
   lwt

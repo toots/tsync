@@ -12,6 +12,10 @@
 --- content B
   foo.txt = "hello"
 --- pending B
+--- kept A
+  {"op":"put","key":"foo.txt","size":5}
+--- kept B
+  {"op":"put","key":"foo.txt","size":5}
 --- backend
   chunk 9555e8555c62dcfd-74b07ed397a89e92 size=5
   cursor = <entry-1>
@@ -32,6 +36,12 @@
 --- tree B
 --- content B
 --- pending B
+--- kept A
+  {"op":"put","key":"foo.txt","size":5}
+  {"op":"delete","key":"foo.txt"}
+--- kept B
+  {"op":"put","key":"foo.txt","size":5}
+  {"op":"delete","key":"foo.txt"}
 --- backend
   chunk 9555e8555c62dcfd-74b07ed397a89e92 size=5
   cursor = <entry-2>
@@ -56,6 +66,12 @@
 --- content B
   foo.txt = "hello, world!"
 --- pending B
+--- kept A
+  {"op":"put","key":"foo.txt","size":5}
+  {"op":"put","key":"foo.txt","size":13}
+--- kept B
+  {"op":"put","key":"foo.txt","size":5}
+  {"op":"put","key":"foo.txt","size":13}
 --- backend
   chunk 37d0952b447ba6cc-f3cf2ed32de60965 size=13
   chunk 9555e8555c62dcfd-74b07ed397a89e92 size=5
@@ -83,6 +99,12 @@
 --- content B
   bar.txt = "renamed content"
 --- pending B
+--- kept A
+  {"op":"put","key":"foo.txt","size":15}
+  {"op":"rename","key":"bar.txt","src":"foo.txt","is_dir":false,"size":15}
+--- kept B
+  {"op":"put","key":"foo.txt","size":15}
+  {"op":"rename","key":"bar.txt","src":"foo.txt","is_dir":false,"size":15}
 --- backend
   chunk 7ca14c1744b7cedc-339b870e9f742377 size=15
   cursor = <entry-2>
@@ -110,6 +132,14 @@
 --- content B
   baz.txt = "chained"
 --- pending B
+--- kept A
+  {"op":"put","key":"foo.txt","size":7}
+  {"op":"rename","key":"bar.txt","src":"foo.txt","is_dir":false,"size":7}
+  {"op":"rename","key":"baz.txt","src":"bar.txt","is_dir":false,"size":7}
+--- kept B
+  {"op":"put","key":"foo.txt","size":7}
+  {"op":"rename","key":"bar.txt","src":"foo.txt","is_dir":false,"size":7}
+  {"op":"rename","key":"baz.txt","src":"bar.txt","is_dir":false,"size":7}
 --- backend
   chunk e93e5e881ded4f7c-90a3b89755564bde size=7
   cursor = <entry-3>
@@ -137,6 +167,12 @@
 --- content B
   sub/a.txt = "nested"
 --- pending B
+--- kept A
+  {"op":"mkdir","key":"sub","id":"<folder-1>"}
+  {"op":"put","key":"sub/a.txt","size":6}
+--- kept B
+  {"op":"mkdir","key":"sub","id":"<folder-1>"}
+  {"op":"put","key":"sub/a.txt","size":6}
 --- backend
   chunk fa87ee5fc199e332-c7156c4359a54f81 size=6
   cursor = <entry-2>
@@ -163,6 +199,16 @@
 --- tree B
 --- content B
 --- pending B
+--- kept A
+  {"op":"mkdir","key":"sub","id":"<folder-1>"}
+  {"op":"put","key":"sub/a.txt","size":6}
+  {"op":"delete","key":"sub/a.txt"}
+  {"op":"rmdir","key":"sub","id":"<folder-1>"}
+--- kept B
+  {"op":"mkdir","key":"sub","id":"<folder-1>"}
+  {"op":"put","key":"sub/a.txt","size":6}
+  {"op":"delete","key":"sub/a.txt"}
+  {"op":"rmdir","key":"sub","id":"<folder-1>"}
 --- backend
   chunk fa87ee5fc199e332-c7156c4359a54f81 size=6
   cursor = <entry-4>
@@ -193,6 +239,20 @@
 --- tree B
 --- content B
 --- pending B
+--- kept A
+  {"op":"mkdir","key":"sub","id":"<folder-1>"}
+  {"op":"put","key":"sub/a.txt","size":6}
+  {"op":"mkdir","key":"sub","id":"<folder-1>"}
+  {"op":"mkdir","key":"sub","id":"<folder-1>"}
+  {"op":"delete","key":"sub/a.txt"}
+  {"op":"rmdir","key":"sub","id":"<folder-1>"}
+--- kept B
+  {"op":"mkdir","key":"sub","id":"<folder-1>"}
+  {"op":"put","key":"sub/a.txt","size":6}
+  {"op":"mkdir","key":"sub","id":"<folder-1>"}
+  {"op":"mkdir","key":"sub","id":"<folder-1>"}
+  {"op":"delete","key":"sub/a.txt"}
+  {"op":"rmdir","key":"sub","id":"<folder-1>"}
 --- backend
   chunk fa87ee5fc199e332-c7156c4359a54f81 size=6
   cursor = <entry-6>
@@ -231,6 +291,16 @@
   sub/from-a.txt = "a"
   sub/from-b.txt = "b"
 --- pending B
+--- kept A
+  {"op":"mkdir","key":"sub","id":"<folder-1>"}
+  {"op":"put","key":"sub/from-a.txt","size":1}
+  {"op":"mkdir","key":"sub","id":"<folder-1>"}
+  {"op":"put","key":"sub/from-b.txt","size":1}
+--- kept B
+  {"op":"mkdir","key":"sub","id":"<folder-1>"}
+  {"op":"put","key":"sub/from-b.txt","size":1}
+  {"op":"mkdir","key":"sub","id":"<folder-1>"}
+  {"op":"put","key":"sub/from-a.txt","size":1}
 --- backend
   chunk 575a0b1c44d8843f-99009138a3452320 size=1
   chunk e6c632b61e964e1f-d2f6d0996f37a720 size=1
@@ -261,6 +331,14 @@
 --- tree B
 --- content B
 --- pending B
+--- kept A
+  {"op":"mkdir","key":"sub","id":"<folder-1>"}
+  {"op":"mkdir","key":"sub","id":"<folder-1>"}
+  {"op":"rmdir","key":"sub","id":"<folder-1>"}
+--- kept B
+  {"op":"mkdir","key":"sub","id":"<folder-1>"}
+  {"op":"mkdir","key":"sub","id":"<folder-1>"}
+  {"op":"rmdir","key":"sub","id":"<folder-1>"}
 --- backend
   cursor = <entry-3>
   journal <entry-1> = mkdir sub
@@ -284,6 +362,11 @@
 --- content B
   foo.txt = "from client B"
 --- pending B
+--- kept A
+  {"op":"put","key":"foo.txt","size":6}
+  {"op":"put","key":"foo.txt","size":13}
+--- kept B
+  {"op":"put","key":"foo.txt","size":13}
 --- backend
   chunk 09f85c812b60aedb-57817316f91d176e size=13
   chunk 2ddcd7df4a530027-b16926580286588d size=6
@@ -310,6 +393,11 @@
 --- content B
   foo.txt = "NEW CONTENT, MUCH LONGER"
 --- pending B
+--- kept A
+  {"op":"put","key":"foo.txt","size":24}
+--- kept B
+  {"op":"put","key":"foo.txt","size":11}
+  {"op":"put","key":"foo.txt","size":24}
 --- backend
   chunk 28c76e4dce03a3c4-40c12ae687c32ec4 size=24
   chunk bad02738adfbeba0-e2449384da60a0ea size=11
@@ -336,6 +424,11 @@
 --- content B
   foo.txt = "NEW CONTENT, MUCH LONGER"
 --- pending B
+--- kept A
+  {"op":"put","key":"foo.txt","size":24}
+--- kept B
+  {"op":"put","key":"foo.txt","size":11}
+  {"op":"put","key":"foo.txt","size":24}
 --- backend
   chunk 28c76e4dce03a3c4-40c12ae687c32ec4 size=24
   chunk bad02738adfbeba0-e2449384da60a0ea size=11
@@ -364,6 +457,14 @@
 --- content B
   baz (conflicted copy from Client B).txt = "saved by rename"
 --- pending B
+--- kept A
+  {"op":"put","key":"foo.txt","size":15}
+  {"op":"delete","key":"foo.txt"}
+  {"op":"put","key":"baz (conflicted copy from Client B).txt","size":15}
+--- kept B
+  {"op":"put","key":"foo.txt","size":15}
+  {"op":"put","key":"baz (conflicted copy from Client B).txt","size":15}
+  {"op":"delete","key":"foo.txt"}
 --- backend
   chunk 7927fec27038e81c-3a112440cfdf156a size=15
   cursor = <entry-3>
@@ -396,6 +497,14 @@
   bar.txt = "conflict content"
   baz (conflicted copy from Client B).txt = "conflict content"
 --- pending B
+--- kept A
+  {"op":"put","key":"foo.txt","size":16}
+  {"op":"rename","key":"bar.txt","src":"foo.txt","is_dir":false,"size":16}
+  {"op":"put","key":"baz (conflicted copy from Client B).txt","size":16}
+--- kept B
+  {"op":"put","key":"foo.txt","size":16}
+  {"op":"put","key":"baz (conflicted copy from Client B).txt","size":16}
+  {"op":"rename","key":"bar.txt","src":"foo.txt","is_dir":false,"size":16}
 --- backend
   chunk 63867f7d13d542db-2d81578912f1ac43 size=16
   cursor = <entry-3>
@@ -420,6 +529,8 @@
 --- tree B
 --- content B
 --- pending B
+--- kept A
+--- kept B
 --- backend
   chunk 122bfe91acd98f69-bc6c6c3c246f7758 size=25
   file foo.txt [.tsync-root/b306717ed3feaa3f-615fce859cf8a12f] = manifest size=25 chunks=1 h1=1598b0980b85a4ef h2=22060f0758319965
@@ -442,6 +553,10 @@
 --- content B
   foo.txt = "written but not announced"
 --- pending B
+--- kept A
+  {"op":"put","key":"foo.txt","size":25}
+--- kept B
+  {"op":"put","key":"foo.txt","size":25}
 --- backend
   chunk 122bfe91acd98f69-bc6c6c3c246f7758 size=25
   cursor = <entry-1>
@@ -466,6 +581,10 @@
 --- content B
   kept.txt = "kept"
 --- pending B
+--- kept A
+  {"op":"put","key":"kept.txt","size":4}
+--- kept B
+  {"op":"put","key":"kept.txt","size":4}
 --- backend
   chunk 2fbef8c1952e19fd-2277f2bac962dc19 size=4
   cursor = <entry-1>
@@ -499,6 +618,14 @@
   sub/first.txt = "one"
   sub/second.txt = "two"
 --- pending B
+--- kept A
+  {"op":"mkdir","key":"sub","id":"<folder-1>"}
+  {"op":"put","key":"sub/first.txt","size":3}
+  {"op":"put","key":"sub/second.txt","size":3}
+--- kept B
+  {"op":"mkdir","key":"sub","id":"<folder-1>"}
+  {"op":"put","key":"sub/first.txt","size":3}
+  {"op":"put","key":"sub/second.txt","size":3}
 --- backend
   chunk 6c0560bdcb29998b-8f653076428650aa size=3
   chunk 911faba7321fe1a0-a3cf92cbf55153da size=3

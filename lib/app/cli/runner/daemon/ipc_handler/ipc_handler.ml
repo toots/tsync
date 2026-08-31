@@ -38,8 +38,6 @@ module Make
     (C : Conf_lwt.S)
     (F : File_ops.S with type 'a io := 'a Lwt.t)
     (Sq : Sync_queue.S with type 'a io := 'a Lwt.t) : S = struct
-  module Fs = File_store_lwt.Make (C)
-  module J = Journal.Make (C)
   module Diag = Diagnostics.Make (C)
 
   type hooks = {
@@ -114,102 +112,18 @@ module Make
       | Some (`String s) -> Ir.parse s
       | _ -> `Bad ""
 
-  (* Reference, container reference and leaf name: enough to describe an item to
-     a caller that does not know the key layout.
+  (* Rows, and the folder-id lookups that name them, live in {!Item_row}: a
+     listing, a stat and a change all answer with one shape. *)
+  module R = Item_row.Make (C) (F)
 
-     A directory costs one marker read for its own id, a file one for its
-     parent's — shared across a listing, so it resolves once, not per entry. *)
   let ref_str r = `String (Item_ref.to_string r)
 
-  (* The reference an item answers to. [container_id] is passed in because a
-     listing resolves the folder once and reuses it for every file under it. *)
-  let self_ref ~container_id key =
-    let body = Logical_key.path key in
-    if body = "" then Lwt.return_some `Root
-    else if Logical_key.kind key = `Dir then
-      let+ id =
-        Folder_ids_lwt.lookup_id ~cache_root:C.cache_root
-          ~domain_name:C.domain_name key
-      in
-      Option.map (fun id -> `Dir id) id
-    else Lwt.return_some (`File (container_id, Logical_key.leaf key))
-
-  let naming_fields ~container_id key =
-    let body = Logical_key.path key in
-    let name = if body = "" then C.domain_name else Logical_key.leaf key in
-    let parent =
-      if container_id = Stored_key.root_id then `Root else `Dir container_id
-    in
-    let+ self = self_ref ~container_id key in
-    match self with
-      | None -> []
-      | Some self ->
-          [
-            ("ref", ref_str self);
-            ("parentRef", ref_str parent);
-            ("name", `String name);
-          ]
-
-  let lookup_folder key =
-    if Logical_key.is_root key then Lwt.return_some Stored_key.root_id
-    else
-      Folder_ids_lwt.lookup_id ~cache_root:C.cache_root
-        ~domain_name:C.domain_name key
-
-  let rel_body = Logical_key.path
-
-  (* For a directory key: the id of the folder [key] is. *)
-  let own_folder_id key = lookup_folder key
-
-  (* The id of the folder [key] sits in. *)
-  let parent_folder_id key = lookup_folder (Logical_key.parent key)
-
-  (* The reference for an item a caller holds a key for. The kind comes from the
-     mirror rather than from how the key was spelled: a key says what an item is
-     called and not which kind it is, and whoever holds one holds the tree that
-     answers that. Resolves the folder itself, having no listing to share one
-     with. *)
-  let item_ref key =
-    let* mst = Io_lwt.Fs.stat_opt_large (F.manifest_path key) in
-    let key =
-      let rel = Logical_key.path key in
-      match mst with
-        | Some { Unix.LargeFile.st_kind = Unix.S_DIR; _ } -> Lk.dir rel
-        | Some _ -> Lk.file rel
-        (* Nothing on disk to correct it by, so what the caller said stands. *)
-        | None -> key
-    in
-    let* container = parent_folder_id key in
-    let container_id = Option.value container ~default:Stored_key.root_id in
-    let+ self = self_ref ~container_id key in
-    Option.map Item_ref.to_string self
-
-  (* One manifest resolution (sidecar, else a single GET) yields size, mtime,
-     etag and upload state; F.stat plus a separate etag lookup would fetch the
-     same manifest twice more per call, and fileproviderd stats constantly.
-
-     A directory reports mtime zero and its own id as etag, both constant for the
-     folder's lifetime, so a caller checking for change is not told the directory
-     just changed on every look. *)
-  let dir_fields id =
-    [
-      ("kind", `String "dir");
-      ("size", `Int 0);
-      ("mtime", `Float 0.);
-      ("etag", `String id);
-      ("isUploaded", `Bool true);
-    ]
-
-  let file_fields ~size ~mtime ~etag ~is_uploaded ~symlink =
-    [
-      ( "kind",
-        `String (match symlink with None -> "file" | Some _ -> "symlink") );
-      ("size", `Int size);
-      ("mtime", `Float mtime);
-      ("etag", `String etag);
-      ("isUploaded", `Bool is_uploaded);
-    ]
-    @ match symlink with None -> [] | Some t -> [("symlinkTarget", `String t)]
+  (* The id of a folder key, under two names because the call sites mean
+     different things by it: one holds the directory, the other is climbing to
+     a parent. *)
+  let own_folder_id = R.own_folder_id
+  let lookup_folder = R.own_folder_id
+  let item_ref = R.item_ref
 
   (* Every reference says which kind it names, and {!handle_stat} holds it to
      that against the tree: a [f:] reference must not answer for a folder. *)
@@ -219,76 +133,10 @@ module Make
     | `Bad _ -> `Any
 
   let handle_stat ?(expect = `Any) key =
-    let* mst = Io_lwt.Fs.stat_opt_large (F.manifest_path key) in
-    let is_dir =
-      match mst with
-        | Some { Unix.LargeFile.st_kind = Unix.S_DIR; _ } -> true
-        | _ -> false
-    in
-    if (expect = `File && is_dir) || (expect = `Dir && not is_dir) then
-      not_found (Logical_key.to_string key)
-    else
-      let* container = parent_folder_id key in
-      let container_id = Option.value container ~default:Stored_key.root_id in
-      let* naming = naming_fields ~container_id key in
-      if naming = [] then not_found (Logical_key.to_string key)
-      else (
-        match mst with
-          | Some { Unix.LargeFile.st_kind = Unix.S_DIR; _ } -> (
-              let* own = own_folder_id key in
-              match own with
-                | None -> not_found (Logical_key.to_string key)
-                | Some id -> Lwt.return (ok_json (naming @ dir_fields id)))
-          | _ -> (
-              (* The staged manifest is authoritative for size and mtime until
-               the upload publishes. *)
-              let* staged = F.resolve key in
-              match staged with
-                | Some (`Staged (st, _)) ->
-                    Lwt.return
-                      (ok_json
-                         (naming
-                         @ file_fields
-                             ~size:(Int64.to_int st.Staged_manifest.s_size)
-                             ~mtime:st.Staged_manifest.s_mtime ~etag:""
-                             ~is_uploaded:false ~symlink:None))
-                | Some (`Published _) | None -> (
-                    let* m = F.published key in
-                    match m with
-                      | Some m ->
-                          Lwt.return
-                            (ok_json
-                               (naming
-                               @ file_fields
-                                   ~size:(Int64.to_int (Manifest.size m))
-                                   ~mtime:(Manifest.mtime m)
-                                   ~etag:(Manifest.h1 m) ~is_uploaded:true
-                                   ~symlink:(Manifest.symlink m)))
-                      | None -> not_found (Logical_key.to_string key))))
-
-  (* Listed objects are manifests, so their backend size/mtime describe the
-     manifest, not the file. Resolving gives the logical size/mtime and h1 as the
-     etag — the identity stat returns. A dirty file has no clean hash: fall back
-     to the backend metadata with an empty etag. *)
-  let file_entry_json ~container_id (e : Checkout.listed) =
-    let key = e.key in
-    let* naming = naming_fields ~container_id key in
-    let+ m = F.published key in
-    match m with
-      | Some m ->
-          Some
-            (`Assoc
-               (naming
-               @ file_fields
-                   ~size:(Int64.to_int (Manifest.size m))
-                   ~mtime:(Manifest.mtime m) ~etag:(Manifest.h1 m)
-                   ~is_uploaded:true ~symlink:(Manifest.symlink m)))
-      | _ ->
-          Some
-            (`Assoc
-               (naming
-               @ file_fields ~size:e.size ~mtime:e.mtime ~etag:""
-                   ~is_uploaded:true ~symlink:None))
+    let* row = R.of_key ~expect key in
+    match row with
+      | None -> not_found (Logical_key.to_string key)
+      | Some row -> Lwt.return (ok_json (Item_row.fields row))
 
   (* An item under a folder this client holds no id for cannot be named to a
      caller, and both listings answer with what they could name. How many they
@@ -306,73 +154,69 @@ module Make
       [("unnamed", `Int n)]
     end
 
-  (* One list, each entry tagged by kind: files and directories differ in what
-     describes them, not in how they are named.
+  (* What a caller that names no limit gets. Large enough that one which does
+     not page still finishes in a call, small enough that no single reply is a
+     folder's or a domain's whole history. *)
+  let default_page_limit = 1000
+  let default_changes_limit = 512
 
-     A reference names a folder or it does not reach here. *)
-  let handle_list_dir prefix =
+  (* One page of a folder: one list, each entry tagged by kind, ordered by name.
+     A reference names a folder or it does not reach here.
+
+     By name and not by arrival, because the page cursor is the last name served
+     and nothing else: a caller resuming hands back a name, so a fresh process
+     answers the same as the one that started, and an item added or removed
+     between pages shifts nothing before it. An offset into a listing held in
+     memory cannot promise either.
+
+     Both of the system's initial-page sorts land here. What the contract turns
+     on is that the order is the same across the pages of one enumeration, which
+     a name gives whatever the caller meant to sort by. *)
+  let handle_list_dir ?after ?(limit = default_page_limit) prefix =
     let* container = own_folder_id prefix in
     match container with
       | None -> not_found (Logical_key.to_string prefix)
       | Some container_id ->
           let* files, dirs = F.list_children ~prefix in
-          let* files_json =
-            Lwt_list.filter_map_s (file_entry_json ~container_id) files
+          let entries =
+            List.map
+              (fun (e : Checkout.listed) ->
+                (Logical_key.leaf e.Checkout.key, `File e))
+              files
+            @ List.map (fun (d, _mtime) -> (d, `Dir d)) dirs
           in
-          let+ dirs_json =
+          let entries =
+            List.sort (fun (a, _) (b, _) -> compare (a : string) b) entries
+          in
+          let entries =
+            match after with
+              | None -> entries
+              | Some a -> List.filter (fun (n, _) -> compare n a > 0) entries
+          in
+          (* One past the page, which is how the cursor is answered without
+             asking whether the folder has more. *)
+          let page = List.filteri (fun i _ -> i <= limit) entries in
+          let+ rows =
             Lwt_list.map_s
-              (fun (d, _mtime) ->
-                let key = Logical_key.dir_in prefix d in
-                let* naming = naming_fields ~container_id key in
-                let+ id = own_folder_id key in
-                match (naming, id) with
-                  | [], _ | _, None -> None
-                  | naming, Some id -> Some (`Assoc (naming @ dir_fields id)))
-              dirs
+              (fun (_, entry) ->
+                match entry with
+                  | `File e -> R.of_listed ~container_id e
+                  | `Dir d ->
+                      R.of_dir ~container_id (Logical_key.dir_in prefix d))
+              (List.filteri (fun i _ -> i < limit) page)
           in
-          let named = List.filter_map Fun.id dirs_json in
-          let unnamed = List.length dirs_json - List.length named in
+          let named = List.filter_map Fun.id rows in
+          let unnamed = List.length rows - List.length named in
+          let next =
+            if List.length page > limit then (
+              match List.nth_opt page (limit - 1) with
+                | Some (name, _) -> [("next", `String name)]
+                | None -> [])
+            else []
+          in
           ok_json
-            (("items", `List (named @ files_json))
-            :: unnamed_field (Logical_key.to_string prefix) unnamed)
-
-  (* Grouped by containing folder, so each folder id resolves once, not per
-     file. *)
-  let handle_list_all prefix =
-    let* files = F.list_tree ~prefix in
-    let by_parent = Hashtbl.create 16 in
-    List.iter
-      (fun (entry : Checkout.listed) ->
-        let parent = Logical_key.parent entry.key in
-        Hashtbl.replace by_parent parent
-          (entry :: Option.value (Hashtbl.find_opt by_parent parent) ~default:[]))
-      files;
-    let+ groups =
-      Lwt_list.map_s
-        (fun (parent, entries) ->
-          let* id = lookup_folder parent in
-          match id with
-            (* The whole group, not one entry: an unnamed folder takes every
-               file under it out of the answer. *)
-            | None -> Lwt.return (`Unnamed (List.length entries))
-            | Some container_id ->
-                let+ json =
-                  Lwt_list.filter_map_p
-                    (file_entry_json ~container_id)
-                    (List.rev entries)
-                in
-                `Named json)
-        (Hashtbl.fold (fun k v acc -> (k, v) :: acc) by_parent [])
-    in
-    let named = List.concat_map (function `Named j -> j | _ -> []) groups in
-    let unnamed =
-      List.fold_left
-        (fun n g -> match g with `Unnamed k -> n + k | `Named _ -> n)
-        0 groups
-    in
-    ok_json
-      (("items", `List named)
-      :: unnamed_field (Logical_key.to_string prefix) unnamed)
+            ((("items", `List (List.map Item_row.to_json named)) :: next)
+            @ unnamed_field (Logical_key.to_string prefix) unnamed)
 
   let dir_id_field = function None -> [] | Some id -> [("id", `String id)]
 
@@ -411,65 +255,97 @@ module Make
             ]
       | _ -> None
 
+  (* An op names its item the way a listing does, and carries the whole of it.
+     An entry is kept only once it has been applied, so for anything but a
+     removal the mirror still holds the item and its row is read rather than
+     rebuilt from the op — which is what lets a reader turn a batch of changes
+     into items without a call per change.
+
+     A removal has nothing left to read, so it carries the naming alone. That is
+     all a deletion needs: what it names is going away. *)
   let op_to_json ~lookup op =
     let file_ref = file_ref ~lookup and dir_ref = dir_ref ~lookup in
     let parent_ref = parent_ref ~lookup in
-    let with_naming fields = function
-      | None -> None
-      | Some naming -> Some (`Assoc (fields @ naming))
+    let described ~self ~parent ~fields key =
+      match named self parent key with
+        | None -> Lwt.return_none
+        | Some naming ->
+            let+ row =
+              match (self, parent) with
+                (* The op carries the folder's id, and everything a directory's
+                   row says follows from it. Read back from the mirror instead
+                   and a renamed folder answers nothing: the marker the lookup
+                   wants moved with it. *)
+                | Some (`Dir id), Some parent ->
+                    Lwt.return_some
+                      (Item_row.dir_with_id ~self:(`Dir id) ~parent
+                         ~name:(Logical_key.leaf key) id)
+                | _ -> R.of_key key
+            in
+            let item =
+              match row with
+                | None -> []
+                | Some row -> [("item", Item_row.to_json row)]
+            in
+            Some (`Assoc (fields @ naming @ item))
+    in
+    let removed ~self ~parent ~fields key =
+      Lwt.return
+        (Option.map
+           (fun naming -> `Assoc (fields @ naming))
+           (named self parent key))
     in
     match op with
-      | `Put (rel, size) ->
+      | `Put (rel, _) ->
           let key = Lk.file rel in
           let* self = file_ref key in
-          let+ parent = parent_ref key in
-          with_naming
-            [("op", `String "put"); ("size", `Int (Int64.to_int size))]
-            (named self parent key)
+          let* parent = parent_ref key in
+          described ~self ~parent ~fields:[("op", `String "put")] key
       | `Delete rel ->
           let key = Lk.file rel in
           let* self = file_ref key in
-          let+ parent = parent_ref key in
-          with_naming [("op", `String "delete")] (named self parent key)
+          let* parent = parent_ref key in
+          removed ~self ~parent ~fields:[("op", `String "delete")] key
       | `Mkdir (rel, id) ->
           let key = Lk.dir rel in
           let* self = dir_ref key id in
-          let+ parent = parent_ref key in
-          with_naming
-            ([("op", `String "mkdir")] @ dir_id_field id)
-            (named self parent key)
+          let* parent = parent_ref key in
+          described ~self ~parent ~fields:[("op", `String "mkdir")] key
       | `Rmdir (rel, id) ->
           let key = Lk.dir rel in
           let* self = dir_ref key id in
-          let+ parent = parent_ref key in
-          with_naming
-            ([("op", `String "rmdir")] @ dir_id_field id)
-            (named self parent key)
+          let* parent = parent_ref key in
+          removed ~self ~parent
+            ~fields:([("op", `String "rmdir")] @ dir_id_field id)
+            key
       | `Rename { Journal.dst; src; is_dir; id; _ } -> (
           (* A directory keeps its id across a move, which is what marks the two
-             paths as one folder. A file's reference changes, so name both
-             ends. *)
+             paths as one folder. A file's reference changes, so name both ends —
+             and both containers, since a reader deciding whether a move concerns
+             it has to test the one it left as well as the one it arrived in. *)
           let as_key rel = if is_dir then Lk.dir rel else Lk.file rel in
           let dst = as_key dst and src = as_key src in
           let* self = if is_dir then dir_ref dst id else file_ref dst in
           let* parent = parent_ref dst in
-          let+ src_self = if is_dir then Lwt.return self else file_ref src in
+          let* src_self = if is_dir then Lwt.return self else file_ref src in
+          let* src_parent = parent_ref src in
           let fields =
             [("op", `String "rename"); ("is_dir", `Bool is_dir)]
             @ dir_id_field id
+            @ (match src_self with
+              | Some r -> [("srcRef", ref_str r)]
+              | None -> [])
+            @
+              match src_parent with
+              | Some r -> [("srcParentRef", ref_str r)]
+              | None -> []
           in
-          match (named self parent dst, src_self) with
-            | Some naming, Some src_self ->
-                Some (`Assoc (fields @ naming @ [("srcRef", ref_str src_self)]))
+          let+ described = described ~self ~parent ~fields dst in
+          match (described, src_self) with
+            | Some _, Some _ -> described
+            (* Both ends have to be nameable or the move cannot be reported as
+               one, and a half-reported move loses an item. *)
             | _ -> None)
-
-  let newest_key ~init keys =
-    List.fold_left
-      (fun acc k ->
-        match acc with
-          | Some a when Journal.Entry_key.compare k a <= 0 -> acc
-          | _ -> Some k)
-      init keys
 
   (* The wire carries the anchor as a string, [""] from a caller that has never
      synced. *)
@@ -477,91 +353,81 @@ module Make
     | Some c -> `String (Journal.Entry_key.to_string c)
     | None -> `String ""
 
-  let handle_changes_since anchor =
+  (* Named once: every call below passes the same pair. *)
+  let cache_root = C.cache_root
+  let domain_name = C.domain_name
+
+  (* Answered from the entries this client has kept rather than from the store:
+     the same keys, in the same order, but read locally and — because an entry is
+     kept only once it is applied — never naming an item the mirror has yet to
+     catch up with.
+
+     Which is also why nothing is filtered by who wrote it. A change this client
+     made is still a change every frontend but the one that made it has to hear
+     about, and the client uuid is one per machine, so filtering on it hid what
+     the CLI did from the mount. *)
+  let handle_changes_since ~limit anchor =
     let anchor =
       if anchor = "" then None else Journal.Entry_key.of_string anchor
     in
-    let* keys = Fs.list_journal_keys () in
-    let* fetched = Fs.fetch_cursor () in
-    let cursor = newest_key ~init:fetched keys in
+    let* head = Applied_entries.head ~cache_root ~domain_name in
     let up_to_date =
-      match (anchor, cursor) with
-        | Some a, Some c -> Journal.Entry_key.compare a c = 0
+      match (anchor, head) with
+        | Some a, Some h -> Journal.Entry_key.compare a h = 0
+        (* Nothing kept and nothing asked for: a domain that has not changed
+           since this client first saw it, not a gap. *)
+        | None, None -> true
         | _ -> false
     in
-    (* Up to date: safe even for an empty or pruned journal. *)
     if up_to_date then
       Lwt.return
         (ok_json
            [
              ("stale", `Bool false);
-             ("cursor", cursor_field cursor);
+             ("cursor", cursor_field head);
+             ("more", `Bool false);
              ("ops", `List []);
            ])
-    else if
-      match anchor with
-        | Some a -> Journal.Entry_key.cannot_bridge a keys
-        | None -> false
-    then Lwt.return (ok_json [("stale", `Bool true)])
-    else (
-      let my_uuid = J.client_uuid () in
-      let foreign =
-        keys
-        |> List.filter (fun k ->
-            match anchor with
-              | None -> true
-              | Some a -> Journal.Entry_key.compare k a > 0)
-        |> List.filter (fun k -> Journal.Entry_key.client_uuid k <> my_uuid)
+    else
+      let* oldest = Applied_entries.oldest ~cache_root ~domain_name in
+      let cannot_bridge =
+        match anchor with
+          | Some a -> Journal.Entry_key.cannot_bridge a (Option.to_list oldest)
+          | None -> false
       in
-      let* ops_lists = Lwt_list.map_s Fs.get_journal_entry foreign in
-      let ops =
-        List.concat_map (function Some o -> o | None -> []) ops_lists
-      in
-      (* A batch answers for itself: a folder created earlier in it is not in
-         the mirror yet, but its creating op carries the id, so a file put into
-         it can still be named. Otherwise every foreign "mkdir then write"
-         reports a gap. *)
-      let learned : (string, string) Hashtbl.t = Hashtbl.create 8 in
-      let lookup key =
-        match Hashtbl.find_opt learned (Logical_key.path key) with
-          | Some id -> Lwt.return_some id
-          | None -> lookup_folder key
-      in
-      let note = function
-        | `Mkdir (rel, Some id) -> Hashtbl.replace learned rel id
-        | `Rename { Journal.dst; is_dir = true; id = Some id; _ } ->
-            Hashtbl.replace learned dst id
-        | _ -> ()
-      in
-      let+ described =
-        Lwt_list.map_s
-          (fun op ->
-            note op;
-            op_to_json ~lookup op)
-          ops
-      in
-      (* An op naming a folder the poller has not applied yet is reported as a
-         gap rather than guessed at: the caller re-lists. The window is the
-         seconds between an entry being published and ingested.
-         ponytail: a whole re-list for a rare race. Carry the parent id on file
-         ops too, as directory ops already do, if it ever shows up in practice. *)
-      if List.exists Option.is_none described then
-        ok_json [("stale", `Bool true)]
+      if cannot_bridge then Lwt.return (ok_json [("stale", `Bool true)])
       else
-        ok_json
-          [
-            ("stale", `Bool false);
-            ("cursor", cursor_field cursor);
-            ("ops", `List (List.filter_map Fun.id described));
-          ])
+        let* page =
+          Applied_entries.since ~cache_root ~domain_name ?since:anchor ~limit ()
+        in
+        let entries = page.Applied_entries.entries in
+        let ops = List.concat_map snd entries in
+        (* Where the batch reached, which is not the head when it was capped.
+           Holding at the anchor when nothing followed is what stops a caller
+           being told to start over. *)
+        let cursor =
+          match List.rev entries with (k, _) :: _ -> Some k | [] -> anchor
+        in
+        let+ described =
+          Lwt_list.map_s (op_to_json ~lookup:lookup_folder) ops
+        in
+        (* A folder this client has no id for at all — the mirror and the folder
+           index disagreeing, not a poller yet to catch up. The caller re-lists,
+           which is the repair. *)
+        if List.exists Option.is_none described then
+          ok_json [("stale", `Bool true)]
+        else
+          ok_json
+            [
+              ("stale", `Bool false);
+              ("cursor", cursor_field cursor);
+              ("more", `Bool page.Applied_entries.more);
+              ("ops", `List (List.filter_map Fun.id described));
+            ]
 
-  (* The backend cursor key lags, so fold it with the newest journal entry (what
-     handle_changes_since reports) or the caller's starting anchor sits behind
-     what changes_since would return. *)
   let handle_current_cursor () =
-    let* keys = Fs.list_journal_keys () in
-    let+ fetched = Fs.fetch_cursor () in
-    ok_json [("cursor", cursor_field (newest_key ~init:fetched keys))]
+    let+ head = Applied_entries.head ~cache_root ~domain_name in
+    ok_json [("cursor", cursor_field head)]
 
   (* Content lives in the chunk store, not as a file. Writing straight to "dest"
      spares the caller a move it may not be permitted to make. *)
@@ -579,9 +445,19 @@ module Make
         ("length", `Int n);
       ]
 
+  (* What the item became, answered by the call that made it. A caller holding
+     this needs no listing to find what it just created, which is the round trip
+     a directory forced: only this side mints a folder id, so its reference
+     cannot be composed the way a file's can. *)
+  let with_item ?(fields = []) key =
+    let+ row = R.of_key key in
+    ok_json
+      (fields
+      @ match row with None -> [] | Some r -> [("item", Item_row.to_json r)])
+
   let handle_create key =
-    let+ () = F.create key in
-    ok_json []
+    let* () = F.create key in
+    with_item key
 
   (* The file is adopted where it is: no copy, no chunking pass. Answered from
      the staged metadata, which is what will be published. *)
@@ -589,38 +465,40 @@ module Make
     ignore (F.cancel_upload key);
     let* () = F.write_whole key ~src_path:staging_path in
     let* () = F.queue_put key in
-    let+ resolved = F.resolve key in
-    match resolved with
-      | Some (`Staged (st, _)) ->
-          ok_json
+    let* resolved = F.resolve key in
+    let fields =
+      match resolved with
+        | Some (`Staged (st, _)) ->
             [
               ("size", `Int (Int64.to_int st.Staged_manifest.s_size));
               ("mtime", `Float st.Staged_manifest.s_mtime);
             ]
-      | Some (`Published m) ->
-          (* Already uploaded and promoted. *)
-          ok_json
+        (* Already uploaded and promoted. *)
+        | Some (`Published m) ->
             [
               ("size", `Int (Int64.to_int (Manifest.size m)));
               ("mtime", `Float (Manifest.mtime m));
             ]
-      | None -> ok_json []
+        | None -> []
+    in
+    with_item ~fields key
 
   let handle_delete key =
     let+ () = F.delete key in
     ok_json []
 
+  (* The destination, since that is what the caller now holds. *)
   let handle_rename src_key dst_key =
-    let+ () = F.rename ~src:src_key ~dst:dst_key in
-    ok_json []
+    let* () = F.rename ~src:src_key ~dst:dst_key in
+    with_item dst_key
 
   let handle_mkdir key =
-    let+ () = F.mkdir key in
-    ok_json []
+    let* () = F.mkdir key in
+    with_item key
 
   let handle_symlink key target =
-    let+ () = F.symlink ~target key in
-    ok_json []
+    let* () = F.symlink ~target key in
+    with_item key
 
   let handle_rmdir key =
     let+ () = F.rmdir key in
@@ -708,10 +586,23 @@ module Make
                     | "stat" ->
                         with_target_ref (fun t key ->
                             handle_stat ~expect:(expected_kind t) key)
-                    | "list_dir" -> with_target handle_list_dir
-                    | "list_all" -> with_target handle_list_all
+                    | "list_dir" ->
+                        let after =
+                          match get_str obj "after" with
+                            | "" -> None
+                            | s -> Some s
+                        in
+                        with_target
+                          (handle_list_dir ?after
+                             ~limit:
+                               (Option.value (get_int obj "limit")
+                                  ~default:default_page_limit))
                     | "changes_since" ->
-                        handle_changes_since (get_str obj "arg")
+                        handle_changes_since
+                          ~limit:
+                            (Option.value (get_int obj "limit")
+                               ~default:default_changes_limit)
+                          (get_str obj "arg")
                     | "cursor" -> handle_current_cursor ()
                     | "ensure_cached" -> (
                         match get_str obj "dest" with

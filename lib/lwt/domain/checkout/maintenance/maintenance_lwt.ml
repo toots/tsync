@@ -53,6 +53,20 @@ let has_trigger want t = List.mem want t.triggers
    progress, whatever process is making it. *)
 let default_staged_grace = 3600.
 
+(* How much journal history a client keeps for its own change feed. Past this an
+   anchor cannot be bridged and whoever holds one re-lists, so the window is how
+   long a frontend may be away and still catch up incrementally.
+
+   The byte cap is the second bound the first one does not give: a busy domain
+   can write a month of entries far larger than a quiet one writes in a year. *)
+let applied_keep_days = 30
+let applied_keep_bytes = 64 * 1024 * 1024
+
+(* Shards are monthly, so nothing is collectable more often than that; running
+   it daily is only so a long-lived process never has to be restarted to shed
+   them. *)
+let applied_prune_interval = 86_400.
+
 (* The sweeps a domain owes that need nothing but its config. Separate from the
    ones the engine adds because a command can run these without building a
    serving stack, and because they are the whole of what [tsync cache --prune]
@@ -70,6 +84,22 @@ module Domain (C : Conf_lwt.S) = struct
         run =
           (fun () ->
             Orphans.run ~cutoff:(Unix.gettimeofday () -. staged_grace) ());
+      };
+      {
+        name = "applied journal entries";
+        (* Periodic as well as on demand: this is the one sweep whose growth
+           comes from the domain changing rather than from anything a command
+           does, so a daemon nobody prunes by hand still sheds it. *)
+        triggers = [`On_demand; `Periodic applied_prune_interval];
+        run =
+          (fun () ->
+            let open Lwt.Syntax in
+            let+ files, bytes =
+              Applied_entries.prune ~cache_root:C.cache_root
+                ~domain_name:C.domain_name ~keep_days:applied_keep_days
+                ~keep_bytes:applied_keep_bytes
+            in
+            { files; bytes });
       };
     ]
 end
