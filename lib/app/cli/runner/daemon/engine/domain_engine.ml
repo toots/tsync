@@ -170,6 +170,11 @@ module Make_over
   let drain () =
     let* () = Sq.drain () in
     let* () = Fs.flush_cursor () in
+    (* Notices are batched on a timer, which a command that returns first would
+       take with it. Here rather than at each command for the same reason the
+       cursor flush is: this is the one place that already means "settle what is
+       owed before going". *)
+    let* () = Change_notice.settle () in
     Backend_lwt.drain ()
 
   let stats_fields () =

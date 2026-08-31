@@ -12,6 +12,10 @@
    -open
    Tsync_store_lwt
    -open
+   Tsync_logical_key
+   -open
+   Tsync_ipc_lwt
+   -open
    Tsync_journal
    -open
    Tsync_bigstring
@@ -24,6 +28,8 @@
   tsync_conf_lwt
   tsync_layout_lwt
   tsync_store_lwt
+  tsync_logical_key
+  tsync_ipc_lwt
   tsync_journal
   tsync_bigstring
   tsync_io_lwt

@@ -14,3 +14,9 @@
     send happens on the next flush. Fire-and-forget, so this is what a
     {!Domain_engine.Converging} passes as [on_changed]. *)
 val send : domain:string -> sockets:string list -> string -> unit
+
+(** Post what is pending now rather than on the next flush, for a process about
+    to exit. A command that returns first would otherwise take its notices with
+    it. Best-effort like {!send}: a frontend that is down is the ordinary case.
+*)
+val settle : unit -> unit Lwt.t
