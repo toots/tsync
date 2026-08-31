@@ -387,73 +387,9 @@ struct
     in
     List.concat per_dir
 
-  (* Exact, so the count is set from it wherever it runs. *)
-  let recount items =
-    let h = held () in
-    h.anchored <- true;
-    h.files <- List.length items;
-    h.bytes <- List.fold_left (fun acc (_, bytes, _) -> acc + bytes) 0 items
-
-  (* The one walk left, and it is once per store per process rather than once
-     per upload and once per status request, which is what it used to be.
-
-     The existence check is not the walk: a resync drops the whole tree
-     ({!Cache_layout.clear}), which no delta reaches, so a count that outlived
-     its store is thrown away rather than trusted. One stat, against a walk of
-     every shard. *)
-  let anchor () =
-    let h = held () in
-    let* here = Retry.file_exists (root ()) in
-    if not here then (
-      h.anchored <- true;
-      h.files <- 0;
-      h.bytes <- 0;
-      return_unit)
-    else if h.anchored then return_unit
-    else
-      let+ items = Io.catch entries (fun _ -> Io.return []) in
-      recount items
-
-  let stats () =
-    let+ () = anchor () in
-    let h = held () in
-    (h.files, h.bytes)
-
-  (* Coldest first. Best-effort: a chunk deleted under an in-flight read is
-     fetched again ({!body}).
-
-     The count says whether there is anything to do; the walk happens only when
-     there is, because choosing what to drop needs an mtime per body and nothing
-     short of reading them has one. *)
-  let enforce_cap () =
-    match C.max_cache with
-      | None -> return_unit
-      | Some cap ->
-          let* () = anchor () in
-          if (held ()).bytes <= cap then return_unit
-          else
-            let* items = Io.catch entries (fun _ -> Io.return []) in
-            recount items;
-            if (held ()).bytes <= cap then return_unit
-            else (
-              let coldest =
-                List.sort (fun (_, _, a) (_, _, b) -> compare a b) items
-              in
-              let rec go = function
-                | [] -> return_unit
-                | _ when (held ()).bytes <= cap -> return_unit
-                | (path, bytes, _) :: rest ->
-                    Log.debug "chunk cache: dropping %s (%d bytes)"
-                      (Filename.basename path) bytes;
-                    let* () = Fs.unlink_quiet path in
-                    dropped bytes;
-                    (* After the body, so a crash leaves a record about a body
-                       that is gone -- read as an empty group -- rather than a
-                       partial body read as a whole one. *)
-                    let* () = Part.drop_beside ~body:path in
-                    go rest
-              in
-              go coldest)
+  (* What {!Chunk_cap} reads: the store can enumerate and count itself, and the
+     policy over that count lives beside the other file-layer sweeps. *)
+  let drop_record ~body = Part.drop_beside ~body
 
   let forget ~group =
     let p = path group in

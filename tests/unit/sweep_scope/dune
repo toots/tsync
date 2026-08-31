@@ -12,9 +12,9 @@
    -open
    Tsync_local_backend_lwt
    -open
-   Tsync_checkout
+   Tsync_checkout_maintenance
    -open
-   Tsync_checkout_lwt
+   Tsync_checkout_maintenance_lwt
    -open
    Tsync_staged
    -open
@@ -31,8 +31,8 @@
   tsync_cache_layout
   tsync_conf_lwt
   tsync_local_backend_lwt
-  tsync-libs.checkout
-  tsync-libs.checkout_lwt
+  tsync-libs.checkout_maintenance
+  tsync-libs.checkout_maintenance_lwt
   tsync-libs.staged
   tsync-libs.staged_lwt
   tsync_io_lwt

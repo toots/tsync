@@ -206,7 +206,7 @@ module Over
 
     (** Delete chunk bodies, oldest first, while the store is over
         [C.max_cache]. Never touches staged bodies. *)
-    val enforce_chunk_cap : unit -> unit Io.t
+    val enforce_chunk_cap : unit -> Sweep.swept Io.t
 
     (** [(chunks, bytes)] held locally. *)
     val chunk_stats : unit -> (int * int) Io.t

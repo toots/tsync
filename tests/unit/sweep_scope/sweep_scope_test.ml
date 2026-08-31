@@ -20,8 +20,8 @@ let conf =
 
 module C = (val conf : Conf_lwt.S)
 module E = Domain_engine.Make (C)
-module Mf = Checkout_lwt.Make (C)
-module Mfs = Staged_lwt.Manifest.Make (C)
+module Temp = Maintenance_lwt.Temp_files.Make (C)
+module Orphans = Maintenance_lwt.Staged_orphans.Make (C)
 
 let write path contents =
   let oc = open_out path in
@@ -77,17 +77,15 @@ let () =
      show "staged body, two hours old" stale;
 
      case "the temp sweep runs against a served domain";
-     let* swept = Mf.reap_temp_files () in
-     step "collected %d file(s), %d byte(s)" swept.Checkout.files
-       swept.Checkout.bytes;
+     let* swept = Temp.run () in
+     step "collected %d file(s), %d byte(s)" swept.Sweep.files swept.Sweep.bytes;
      show "temp file, owner alive" mine;
      show "temp file, owner gone" theirs;
 
      case "the staged sweep runs against a served domain, one hour of grace";
      let cutoff = Unix.gettimeofday () -. 3600. in
-     let* swept = Mfs.reclaim_orphan_bodies ~cutoff () in
-     step "collected %d body(s), %d byte(s)" swept.Staged_manifest.files
-       swept.Staged_manifest.bytes;
+     let* swept = Orphans.run ~cutoff () in
+     step "collected %d body(s), %d byte(s)" swept.Sweep.files swept.Sweep.bytes;
      show "staged body, written just now" fresh;
      show "staged body, two hours old" stale;
 

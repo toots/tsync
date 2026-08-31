@@ -13,6 +13,8 @@
    -open
    Tsync_chunk_cache
    -open
+   Tsync_checkout_maintenance
+   -open
    Tsync_manifest
    -open
    Tsync_conf
@@ -34,6 +36,7 @@
   tsync_logical_key
   tsync_staged
   tsync_chunk_cache
+  tsync_checkout_maintenance
   tsync_manifest
   tsync_conf
   tsync_cache_layout

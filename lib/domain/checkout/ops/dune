@@ -7,6 +7,8 @@
    -open
    Tsync_logical_key
    -open
+   Tsync_checkout_maintenance
+   -open
    Tsync_staged
    -open
    Tsync_manifest
@@ -22,6 +24,7 @@
  (public_name tsync-libs.file_ops)
  (libraries
   tsync_logical_key
+  tsync_checkout_maintenance
   tsync_staged
   tsync_manifest
   tsync_journal
