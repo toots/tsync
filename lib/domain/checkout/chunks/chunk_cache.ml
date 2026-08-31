@@ -65,6 +65,39 @@ end
    all. *)
 type served = { bytes : int; fetched : int; from_backend : bool }
 
+(* What a store holds, so asking whether it is over its cap is a comparison
+   rather than a walk of every shard.
+
+   Per store rather than per instantiation: two functor instances over one cache
+   root are two views of one directory, and a count kept per view is stale the
+   moment the other evicts. Keyed by the root the way {!Bounded.shared} keys a
+   pool, and for the same reason.
+
+   In file bytes, the unit {!Make.entries} answers in, so a count maintained
+   here and one re-derived from disk are the same number.
+
+   ponytail: in-process. Another process writing the same store drifts this, and
+   nothing here notices -- the cap is best-effort by construction, every chunk
+   being re-fetchable, and overshooting costs disk rather than correctness.
+   Persist the total beside the store if that stops holding. *)
+type held = {
+  mutable files : int;
+  mutable bytes : int;
+  (* A process that starts against a full store would otherwise believe it
+     empty, so the first read of it walks. *)
+  mutable anchored : bool;
+}
+
+let counts : (string, held) Hashtbl.t = Hashtbl.create 4
+
+let held_for root =
+  match Hashtbl.find_opt counts root with
+    | Some h -> h
+    | None ->
+        let h = { files = 0; bytes = 0; anchored = false } in
+        Hashtbl.replace counts root h;
+        h
+
 module Make
     (Io : Io.S)
     (Fs : FS with type 'a io := 'a Io.t)
@@ -87,6 +120,9 @@ struct
   let path group =
     Cache_layout.chunk_path ~cache_root:C.cache_root ~domain_name:C.domain_name
       (Manifest.Group.key group)
+
+  let root () = Cache_layout.chunks_dir ~cache_root:C.cache_root C.domain_name
+  let held () = held_for (root ())
 
   (* [file_exists] is the retrying one: a record is asked about on the read path
      as often as a body is. *)
@@ -127,6 +163,44 @@ struct
   let fetching : (string, inflight) Hashtbl.t = Hashtbl.create 64
   let in_flight () = Hashtbl.length fetching
 
+  let took bytes =
+    let h = held () in
+    h.files <- h.files + 1;
+    h.bytes <- h.bytes + bytes
+
+  let dropped bytes =
+    let h = held () in
+    h.files <- h.files - 1;
+    h.bytes <- h.bytes - bytes
+
+  (* The size a body occupies, or none where there is nothing to count: a path
+     the cap took mid-write, or one that was never there. *)
+  let body_size p =
+    Io.catch
+      (fun () ->
+        let+ st = Retry.stat p in
+        Some st.Unix.st_size)
+      (fun _ -> Io.return None)
+
+  (* Every route that puts bytes under a body's name goes through here, because
+     what the count owes is the same either way and is not what the caller
+     wrote: a range write extends a sparse file rather than adding a whole one,
+     and a write over a body already here replaces it. The difference in size is
+     the one answer that covers all three, and a body that was not there before
+     is one more file as well. *)
+  let counted_write body f =
+    let* before = body_size body in
+    let* r = f () in
+    let+ after = body_size body in
+    (match (before, after) with
+      | None, Some n -> took n
+      | Some a, Some b ->
+          let h = held () in
+          h.bytes <- h.bytes + (b - a)
+      | Some a, None -> dropped a
+      | None, None -> ());
+    r
+
   (* A member disagreeing with the manifest fails the write rather than reaching
      a caller as file content, wherever it was going to land. *)
   let sized group i data =
@@ -150,13 +224,14 @@ struct
     let p = path group in
     let* () = Fs.ensure_parent p in
     (* Atomic, so presence alone proves a complete body. *)
-    Fs.atomic_write_at p ~size:(Manifest.Group.bytes group) (fun put ->
-        Io.iter_p
-          (fun i ->
-            let* data = body i in
-            let* () = sized group i data in
-            put ~offset:(Manifest.Group.offset group i) data)
-          (Manifest.Group.indices group))
+    counted_write p (fun () ->
+        Fs.atomic_write_at p ~size:(Manifest.Group.bytes group) (fun put ->
+            Io.iter_p
+              (fun i ->
+                let* data = body i in
+                let* () = sized group i data in
+                put ~offset:(Manifest.Group.offset group i) data)
+              (Manifest.Group.indices group)))
 
   (* Bounds writes that have started, not groups asked for: a fetch opens its
      destination before waiting for a download slot, so without this every
@@ -168,7 +243,8 @@ struct
      Bounded here rather than at the callers so every route in gets it. *)
   let slots = Bounded.create ~max:C.max_downloads ()
 
-  let member group i = F.get_chunk ~chunk_key:(Manifest.Group.member_key group i)
+  let member group i =
+    F.get_chunk ~chunk_key:(Manifest.Group.member_key group i)
 
   (* Fills what a partly filled body is missing, in place. The members it
      already holds whole are the ones a reader paid for, and fetching them again
@@ -267,8 +343,6 @@ struct
   (* Every chunk here is re-fetchable, so holding the store under [C.max_cache]
      needs no residency, open counts or dirty checks. *)
 
-  let root () = Cache_layout.chunks_dir ~cache_root:C.cache_root C.domain_name
-
   (* One budget for the store, not per sweep: [stats] is answered per status
      request, so a per-call bound would limit each sweep and none of them
      together.
@@ -301,59 +375,92 @@ struct
                  partial body reading as a whole one. It goes where its body
                  goes. *)
               if Partial.is_record name then Io.return None
-              else
+              else (
                 let path = Filename.concat dir name in
                 Io.catch
                   (fun () ->
                     let+ st = Retry.stat path in
                     Some (path, st.Unix.st_size, st.Unix.st_mtime))
-                  (fun _ -> Io.return None))
+                  (fun _ -> Io.return None)))
             names)
         dirs
     in
     List.concat per_dir
 
+  (* Exact, so the count is set from it wherever it runs. *)
+  let recount items =
+    let h = held () in
+    h.anchored <- true;
+    h.files <- List.length items;
+    h.bytes <- List.fold_left (fun acc (_, bytes, _) -> acc + bytes) 0 items
+
+  (* The one walk left, and it is once per store per process rather than once
+     per upload and once per status request, which is what it used to be.
+
+     The existence check is not the walk: a resync drops the whole tree
+     ({!Cache_layout.clear}), which no delta reaches, so a count that outlived
+     its store is thrown away rather than trusted. One stat, against a walk of
+     every shard. *)
+  let anchor () =
+    let h = held () in
+    let* here = Retry.file_exists (root ()) in
+    if not here then (
+      h.anchored <- true;
+      h.files <- 0;
+      h.bytes <- 0;
+      return_unit)
+    else if h.anchored then return_unit
+    else
+      let+ items = Io.catch entries (fun _ -> Io.return []) in
+      recount items
+
   let stats () =
-    Io.catch
-      (fun () ->
-        let+ items = entries () in
-        ( List.length items,
-          List.fold_left (fun acc (_, bytes, _) -> acc + bytes) 0 items ))
-      (fun _ -> Io.return (0, 0))
+    let+ () = anchor () in
+    let h = held () in
+    (h.files, h.bytes)
 
   (* Coldest first. Best-effort: a chunk deleted under an in-flight read is
-     fetched again ({!body}). *)
+     fetched again ({!body}).
+
+     The count says whether there is anything to do; the walk happens only when
+     there is, because choosing what to drop needs an mtime per body and nothing
+     short of reading them has one. *)
   let enforce_cap () =
     match C.max_cache with
       | None -> return_unit
       | Some cap ->
-          let* items = Io.catch entries (fun _ -> Io.return []) in
-          let total =
-            List.fold_left (fun acc (_, bytes, _) -> acc + bytes) 0 items
-          in
-          if total <= cap then return_unit
-          else (
-            let coldest =
-              List.sort (fun (_, _, a) (_, _, b) -> compare a b) items
-            in
-            let rec go total = function
-              | [] -> return_unit
-              | _ when total <= cap -> return_unit
-              | (path, bytes, _) :: rest ->
-                  Log.debug "chunk cache: dropping %s (%d bytes)"
-                    (Filename.basename path) bytes;
-                  let* () = Fs.unlink_quiet path in
-                  (* After the body, so a crash leaves a record about a body
-                     that is gone -- read as an empty group -- rather than a
-                     partial body read as a whole one. *)
-                  let* () = Part.drop_beside ~body:path in
-                  go (total - bytes) rest
-            in
-            go total coldest)
+          let* () = anchor () in
+          if (held ()).bytes <= cap then return_unit
+          else
+            let* items = Io.catch entries (fun _ -> Io.return []) in
+            recount items;
+            if (held ()).bytes <= cap then return_unit
+            else (
+              let coldest =
+                List.sort (fun (_, _, a) (_, _, b) -> compare a b) items
+              in
+              let rec go = function
+                | [] -> return_unit
+                | _ when (held ()).bytes <= cap -> return_unit
+                | (path, bytes, _) :: rest ->
+                    Log.debug "chunk cache: dropping %s (%d bytes)"
+                      (Filename.basename path) bytes;
+                    let* () = Fs.unlink_quiet path in
+                    dropped bytes;
+                    (* After the body, so a crash leaves a record about a body
+                       that is gone -- read as an empty group -- rather than a
+                       partial body read as a whole one. *)
+                    let* () = Part.drop_beside ~body:path in
+                    go rest
+              in
+              go coldest)
 
   let forget ~group =
-    let* () = Fs.unlink_quiet (path group) in
-    Part.drop ~key:(key group) ~body:(path group)
+    let p = path group in
+    let* size = body_size p in
+    let* () = Fs.unlink_quiet p in
+    Option.iter dropped size;
+    Part.drop ~key:(key group) ~body:p
 
   (* Adopt [src] as this group's body by giving the same bytes a second name.
      The cache owns where a group body lives, so the staged half hands over the
@@ -379,10 +486,16 @@ struct
           let* () =
             if not incomplete then return_unit
             else
+              let* size = body_size dst in
               let* () = Fs.unlink_quiet dst in
+              Option.iter dropped size;
               Part.drop ~key:(key group) ~body:dst
           in
           let* () = Retry.link src dst in
+          (* A second name for the same inode still costs the cap what the body
+             occupies, and asking the file beats trusting the manifest. *)
+          let* linked = body_size dst in
+          Option.iter took linked;
           let now = Unix.gettimeofday () in
           (* Dated now, or the cap reads a freshly published group as being as
              old as the write that staged it. *)
@@ -442,8 +555,10 @@ struct
           if got = 0 then Io.return 0
           else
             let* (_ : int) =
-              Fs.write body data
-                ~offset:(Int64.of_int (Manifest.Group.offset group index + lo))
+              counted_write body (fun () ->
+                  Fs.write body data
+                    ~offset:
+                      (Int64.of_int (Manifest.Group.offset group index + lo)))
             in
             Part.take ~key index (lo, lo + got);
             let+ () = Part.publish ~key ~body ~complete:(whole group) in
@@ -475,14 +590,14 @@ struct
     in
     let* complete = exists group in
     if complete then read_or_refetch ~fetched:0 ~from_backend:false
-    else if F.fast_read then (
+    else if F.fast_read then
       (* A store on this machine reads the whole body for about what a range of
          it costs, and leaves every read after this one with nothing to fetch at
          all. Asking for less would be paying the same round trip for a worse
          cache. *)
       let* from_backend = ensure_fetched ~group () in
       read_or_refetch ~from_backend
-        ~fetched:(if from_backend then Manifest.Group.bytes group else 0))
+        ~fetched:(if from_backend then Manifest.Group.bytes group else 0)
     else (
       (* Whatever else is on its way, this reader asks for its own bytes and
          waits for nothing more. A fetch of the whole group may well be in
