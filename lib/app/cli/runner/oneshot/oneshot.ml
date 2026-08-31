@@ -43,5 +43,10 @@ let run ?report p =
            Lwt.fail exn)
      in
      let* () = Backend_lwt.drain () in
+     (* The same argument as the drain above, for the other thing a command
+        posts and does not wait for: notices are batched on a short timer, and a
+        command that returns inside it takes them with it -- which is how a file
+        imported here stayed invisible in a mount that was listening. *)
+     let* () = Change_notice.settle () in
      let+ () = Job_report_lwt.finish () in
      r)
