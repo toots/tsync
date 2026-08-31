@@ -20,9 +20,9 @@ module Q = Durable_queue_lwt.Make (J)
 
 (* The snapshot carries the verdict, so everything that decides one is a line on
    stdout: a status the rule reads instead would fail the run before the diff,
-   with whatever it was about on the stderr the rule discards. *)
-(* [Check.report] is deliberately not called: the exit status must stay zero so
-   the diff is what fails, carrying what it was about. *)
+   with whatever it was about on the stderr the rule discards. [Check.report] is
+   therefore deliberately not called — the exit status must stay zero so the diff
+   is what fails. *)
 open Check
 
 (* Waits for the state, not for a duration: a fixed sleep is a race a loaded

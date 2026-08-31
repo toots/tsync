@@ -179,12 +179,6 @@ let batches entries =
   in
   go [] [] 0 0 entries
 
-(* Object reads a batch stands in for, for a caller with no budget of its own.
-   Module-level, since a pool built per call is not a bound. *)
-(* The registries here are one per process: the drivers that register
-   themselves, the hooks a composite settles through, and the pool the batched
-   reads come out of. So this is applied once, in the layer that names a
-   scheduler. *)
 (* One store's own share of what {!Metrics} counts globally. Separate counters
    rather than a total each, so a rate comes off the same ring the process-wide
    figures do and nothing reimplements the window. *)
@@ -246,6 +240,10 @@ module type POOLS = sig
   val map_with : t -> ('a -> 'b io) -> 'a list -> 'b list io
 end
 
+(* The registries here are one per process: the drivers that register
+   themselves, the hooks a composite settles through, and the pool the batched
+   reads come out of. So this is applied once, in the layer that names a
+   scheduler. *)
 module Make (Io : Io.S) (Bounded : POOLS with type 'a io := 'a Io.t) = struct
   module type Store = S with type 'a io := 'a Io.t
 
@@ -259,6 +257,8 @@ module Make (Io : Io.S) (Bounded : POOLS with type 'a io := 'a Io.t) = struct
         let+ rest = map_s f rest in
         y :: rest
 
+  (* Object reads a batch stands in for, for a caller with no budget of its own.
+     Module-level, since a pool built per call is not a bound. *)
   let batch_slots = lazy (Bounded.create ~name:"batch reads" ~max:32 ())
 
   module Batched (B : Store) = struct

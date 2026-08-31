@@ -96,10 +96,6 @@ struct
         let+ ys = map_s f rest in
         y :: ys
 
-  (* Every queue in this process, whatever job it carries, so something about to
-     exit can let them all settle without knowing who created them. Outside the
-     functor deliberately: one per instantiation would quietly leave a second
-     kind of queue out of every drain. *)
   (* [f] runs only if no process claims [dir]. *)
   let with_claim dir f =
     if Hashtbl.mem owned dir then Io.return ()
@@ -118,6 +114,8 @@ struct
                 Unix.close fd;
                 Io.return ()))
 
+  (* Every queue in this process, whatever job it carries, so something about to
+     exit can let them all settle without knowing who created them. *)
   let registry : (unit -> unit Io.t) list ref = ref []
   let register_settle f = registry := !registry @ [f]
 

@@ -232,8 +232,9 @@ struct
 
        A chunk larger than the configured size — only reachable re-chunking a file
        whose manifest used a larger one — takes a single slot regardless, and so
-       costs more than a slot is reckoned to. *)
-    (* Workers as wide as the buffer pool, each taking the next index: a promise
+       costs more than a slot is reckoned to.
+
+       Workers as wide as the buffer pool, each taking the next index: a promise
        apiece is a fan-out the file's size chooses, and a terabyte's worth of them
        is allocated before the first chunk is read and outlives every buffer they
        queue for.
@@ -290,16 +291,16 @@ struct
          which is why the two are told apart rather than summed. *)
       on_progress ~bytes:len ~sent
 
-    (* A cancellation landing while the put is in flight unpublishes it again, or
-       a ghost object survives under a name that may no longer exist locally.
-
-       Chunks stay: they are content-addressed and the successor upload references
-       them. *)
     (* The key being published under is what names this file. *)
     let chunk_table ~key ~size ~chunk_size ~mtime ~count =
       Manifest.builder ~name:(Logical_key.leaf key) ~size ~chunk_size ~mtime
         ~symlink:None ~count
 
+    (* A cancellation landing while the put is in flight unpublishes it again, or
+       a ghost object survives under a name that may no longer exist locally.
+
+       Chunks stay: they are content-addressed and the successor upload
+       references them. *)
     let publish ~key ~size ~chunk_size ~mtime ~cancel table =
       if !cancel then raise Cancelled;
       let count = Manifest.builder_count table in

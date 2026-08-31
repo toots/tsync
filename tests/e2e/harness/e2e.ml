@@ -276,14 +276,14 @@ let write_config ~home ~name ~domains =
             ("domains", `List domains);
           ]))
 
-(* Every path derives from HOME, so redirecting it keeps a staged client off the
-   real cache, journal and socket — and off the shared client id, without which
-   two daemons each skip the other's journal entries as their own. *)
 (* Kept rather than discarded: a daemon dying at startup otherwise shows up only
    as whatever was waited for never happening, and "timed out after 60s" says
    nothing about why. *)
 let daemon_logs : (string * string) list ref = ref []
 
+(* Every path derives from HOME, so redirecting it keeps a staged client off the
+   real cache, journal and socket — and off the shared client id, without which
+   two daemons each skip the other's journal entries as their own. *)
 let spawn_daemon ?(args = []) ~exe ~home ~label () =
   let env =
     Array.append

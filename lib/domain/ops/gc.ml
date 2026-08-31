@@ -736,8 +736,6 @@ struct
             s.total <- List.length pending;
             Io.return s
 
-    (* Moves go out concurrently within the root: a big file naming thousands of
-       chunks is otherwise thousands of serial [rename] calls. *)
     (* Per chunk, not per root: one video's manifest names a hundred thousand of
        them, and reporting after the root left the line reading "1 file, 0 chunks"
        for minutes, which reads as wedged. *)
@@ -1077,6 +1075,8 @@ struct
       let+ names = Files.readdir_list_quiet dir in
       List.filter Chunks.is_chunk_key names
 
+    (* Moves go out concurrently within the root: a big file naming thousands of
+       chunks is otherwise thousands of serial [rename] calls. *)
     let move_into ~src_dir ~dst_dir names =
       iter_s
         (fun n ->

@@ -135,9 +135,6 @@ let foreign_rmdir_after_repeated_mkdir =
       ];
   }
 
-(* Both clients create the same directory before either deletes it. Each mints a
-   folder id locally when it has no marker, so this is where two markers for one
-   path could come from, and rmdir removes only one. *)
 (* Both clients create one directory before either has seen the other, then each
    writes into it. The directory's id is a claim, and only one client can hold
    it: whoever loses has to adopt the winner's rather than keep its own, or its
@@ -165,6 +162,9 @@ let concurrent_mkdir_then_write =
       ];
   }
 
+(* Both clients create the same directory before either deletes it. Each mints a
+   folder id locally when it has no marker, so this is where two markers for one
+   path could come from, and rmdir removes only one. *)
 let concurrent_mkdir_then_rmdir =
   {
     name = "concurrent_mkdir_then_rmdir";

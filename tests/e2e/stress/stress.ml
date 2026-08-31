@@ -524,7 +524,6 @@ let () =
       finish 2
     end;
 
-    (* Settle, then judge. *)
     (* Settle before judging: the checks are about the converged domain, and a
         sample taken mid-upload says nothing. Waiting on the store going quiet
         rather than on a fixed sleep, since how long the load takes to land

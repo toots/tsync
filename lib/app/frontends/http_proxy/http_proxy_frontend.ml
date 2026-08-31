@@ -422,9 +422,9 @@ let parse_op meth uri body =
     | _ -> Unknown
 
 (* [Head] is metadata only; [Copy] is settled by the backend without the bytes
-   passing through here. *)
-(* [Watch] is [`Meta] though it reads an object: it holds for seconds by design,
-   and a slot it kept for that long is one a caller doing real work has lost. *)
+   passing through here. [Watch] is [`Meta] though it reads an object: it holds
+   for seconds by design, and a slot it kept for that long is one a caller doing
+   real work has lost. *)
 let data_kind = function
   | Get _ | Get_range _ | Get_multi _ -> `Get
   | Put _ -> `Put

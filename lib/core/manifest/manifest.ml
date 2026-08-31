@@ -266,10 +266,9 @@ let body ~name m =
   if recorded_name m = name then bytes m
   else Bigstring.of_string (to_string ~name m)
 
-(* Encode then decode, so a [t] only ever exists as a decoded body and cannot
-   fail to round-trip. *)
 (* A chunkless manifest carrying its target; POSIX size is the target's byte
-   length. *)
+   length. Encoded then decoded, so a [t] only ever exists as a decoded body and
+   cannot fail to round-trip. *)
 let make_symlink ~name ~target ~mtime =
   of_string
     (encode ~name
