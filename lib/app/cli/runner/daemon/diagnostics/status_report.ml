@@ -524,6 +524,12 @@ let text json =
                (Metrics.human_bytes (int_of (mem e "size")))
                (duration (num (mem e "seconds")))))
         (list (mem f "downloading"));
+      (* What this process sweeps without being asked, and on what trigger. Read
+         off the running frontend rather than the source, so one serving a
+         different set of sweeps says so instead of looking like every other. *)
+        (match list (mem f "maintenance") with
+        | [] -> ()
+        | tasks -> row 4 "maintenance" (String.concat "; " (List.map str tasks)));
       (* This listener's stance on the domain, not the domain's own. *)
       if bool_of (mem f "readOnly") then
         row 4 "read-only" "yes, for proxy clients";

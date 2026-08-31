@@ -1,4 +1,5 @@
 pendingUploads: 0
 uploadsCompleted: 1
+maintenance: ["chunk cap (after each upload, every 60s)","deferred rescan (every 60s)"]
 manifest in the store: true
 cursor published: true
