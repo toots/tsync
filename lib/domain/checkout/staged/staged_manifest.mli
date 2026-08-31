@@ -66,6 +66,9 @@ val staged_of_string : string -> state
 val sidecar_path :
   cache_root:string -> domain_name:string -> Logical_key.t -> string
 
+(** What a sweep collected. *)
+type swept = { files : int; bytes : int }
+
 (** What this needs of a filesystem and of the retrying syscalls. *)
 module type FS = sig
   type 'a io
@@ -76,6 +79,7 @@ module type FS = sig
   val readdir_list : string -> string list io
   val read_file_opt : string -> string option io
   val reap_older_than : cutoff:float -> string -> bool io
+  val stat_opt : string -> Unix.stats option io
   val unlink_quiet : string -> unit io
 
   (** {!Cache_layout.Make.real_dir_name}. *)
@@ -140,6 +144,18 @@ module Over
 
     (** Remove empty directories left in the tree. *)
     val prune_dirs : unit -> unit Io.t
+
+    (** Delete every staged body no sidecar names and older than [cutoff], then
+        {!prune_dirs}.
+
+        On demand: it reads the whole staged tree to learn what is still named,
+        which is a command's business rather than something a start owes.
+
+        [cutoff] is what makes it safe against a domain being served. A body is
+        created before the sidecar that records it, so a young unnamed body may
+        be one a write is still assembling — whatever process is writing it —
+        and only bodies older than [cutoff] are taken. *)
+    val reclaim_orphan_bodies : cutoff:float -> unit -> swept Io.t
 
     (** The staged files under [rel_dir], each with what is staged for it. A
         locally created file has no published sidecar, so the published tree

@@ -1271,14 +1271,6 @@
   (action
    (diff queue_claim_test.expected queue_claim_test.output))))
 
-(subdir unit/recover_scope
- (alias
-  (name default)
-  (deps recover_scope_test.exe))
- (rule
-  (alias runtest)
-  (action (run ./recover_scope_test.exe))))
-
 (subdir unit/spool_reap
  (alias
   (name default)
@@ -1362,6 +1354,20 @@
   (alias runtest)
   (action
    (diff subs_test.expected subs_test.output))))
+
+(subdir unit/sweep_scope
+ (alias
+  (name default)
+  (deps sweep_scope_test.exe))
+ (rule
+  (alias runtest)
+  (target sweep_scope_test.output)
+  (action
+   (with-stdout-to sweep_scope_test.output (ignore-stderr (run ./sweep_scope_test.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff sweep_scope_test.expected sweep_scope_test.output))))
 
 (subdir unit/temp_names
  (alias

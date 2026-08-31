@@ -21,6 +21,7 @@ module type FS = sig
   val read_file_opt : string -> string option io
   val atomic_write : string -> string -> unit io
   val reap_older_than : cutoff:float -> string -> bool io
+  val stat_opt : string -> Unix.stats option io
   val unlink_quiet : string -> unit io
 
   val atomic_write_at :
@@ -491,8 +492,8 @@ struct
                   | None ->
                       Io.fail
                         (Backend.Backend_error
-                           (Printf.sprintf "staged %s: chunk %d inherits nothing"
-                              id i)))
+                           (Printf.sprintf
+                              "staged %s: chunk %d inherits nothing" id i)))
         in
         serve_pieces buf
           (Chunks.pieces ~chunk_size:cs ~count:n ~offset:start ~length:total)
@@ -511,9 +512,7 @@ struct
        it every reader of a key shares its position. *)
     let pread_key ?stream key buf ~offset =
       let id = Logical_key.to_string key in
-      let stream =
-        match stream with None -> id | Some s -> id ^ "\000" ^ s
-      in
+      let stream = match stream with None -> id | Some s -> id ^ "\000" ^ s in
       let attempt () =
         let* resolved = Mf.current key in
         match resolved with
@@ -888,38 +887,6 @@ struct
         match st with Some st -> discard_bodies st | None -> return_unit
       in
       Mfs.delete key
-
-    (* Staged bodies are named by uuid and referenced only from staged manifests,
-       so a body no manifest names is unreachable by construction.
-
-       Startup only: {!stage_slot} creates a body before the manifest records it,
-       so mid-session an unreferenced body can be one a write is about to use. *)
-    let reclaim_staged_orphans () =
-      let* uuids = Mfs.uuids () in
-      let live = Hashtbl.create (List.length uuids) in
-      List.iter (fun uuid -> Hashtbl.replace live uuid ()) uuids;
-      let sweep dir =
-        let* exists = Fs.is_directory dir in
-        if not exists then return_unit
-        else
-          let* names = Fs.readdir_list dir in
-          iter_s
-            (fun name ->
-              if Hashtbl.mem live name then return_unit
-              else (
-                Log.info "reclaiming orphaned staged body %s" name;
-                Fs.unlink_quiet (Filename.concat dir name)))
-            names
-      in
-      let* () =
-        sweep
-          (Cache_layout.staged_chunks_dir ~cache_root:C.cache_root C.domain_name)
-      in
-      let* () =
-        sweep
-          (Cache_layout.staged_whole_dir ~cache_root:C.cache_root C.domain_name)
-      in
-      Mfs.prune_dirs ()
 
     let discard_staged key = with_key key (fun () -> discard_staged_locked key)
 

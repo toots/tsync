@@ -12,10 +12,18 @@
    -open
    Tsync_local_backend_lwt
    -open
+   Tsync_checkout
+   -open
+   Tsync_checkout_lwt
+   -open
+   Tsync_staged
+   -open
+   Tsync_staged_lwt
+   -open
    Tsync_io_lwt
    -open
    Tsync_test_harness))
- (name recover_scope_test)
+ (name sweep_scope_test)
  (libraries
   tsync_filename
   tsync_test_harness
@@ -23,6 +31,11 @@
   tsync_cache_layout
   tsync_conf_lwt
   tsync_local_backend_lwt
+  tsync-libs.checkout
+  tsync-libs.checkout_lwt
+  tsync-libs.staged
+  tsync-libs.staged_lwt
   tsync_io_lwt
   lwt
-  lwt.unix))
+  lwt.unix
+  unix))

@@ -19,6 +19,7 @@ module type FS = sig
   val read_file_opt : string -> string option io
   val atomic_write : string -> string -> unit io
   val reap_older_than : cutoff:float -> string -> bool io
+  val stat_opt : string -> Unix.stats option io
   val unlink_quiet : string -> unit io
 
   val atomic_write_at :
@@ -284,13 +285,5 @@ module Over
         bytes an upload is sending. [None] once chunked, or for an unstaged key.
     *)
     val staged_body_path : Logical_key.t -> string option Io.t
-
-    (** Delete staged bodies no staged manifest names, and prune the empty
-        directories left in the staged manifest tree.
-
-        Once per machine, before anything serves: staging creates a body before
-        the manifest that names it, so mid-session an unreferenced body is
-        indistinguishable from one a write is about to use. *)
-    val reclaim_staged_orphans : unit -> unit Io.t
   end
 end

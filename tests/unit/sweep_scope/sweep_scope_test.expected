@@ -1,0 +1,18 @@
+
+=== a serving process starts
+  temp file, owner alive: present
+  temp file, owner gone: present
+  staged body, written just now: present
+  staged body, two hours old: present
+
+=== the temp sweep runs against a served domain
+  collected 1 file(s), 12 byte(s)
+  temp file, owner alive: present
+  temp file, owner gone: gone
+
+=== the staged sweep runs against a served domain, one hour of grace
+  collected 1 body(s), 33 byte(s)
+  staged body, written just now: present
+  staged body, two hours old: gone
+
+0 check(s), 0 failure(s)

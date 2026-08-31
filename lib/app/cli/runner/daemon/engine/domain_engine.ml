@@ -25,7 +25,6 @@ end
    poller applied reaches the frontends, which are elsewhere and have no other
    way to hear it. *)
 module type Converging = sig
-  val recover : unit -> unit Lwt.t
   val start : on_changed:(string -> unit) -> unit -> unit Lwt.t
   val drain : unit -> unit Lwt.t
   val stats_fields : unit -> (string * Yojson.Safe.t) list
@@ -35,7 +34,6 @@ module type S = sig
   include Domain
 
   val init : unit -> unit Lwt.t
-  val recover : unit -> unit Lwt.t
 
   (* Presenting, plus the records this client left behind. For a one-shot
      command, which is alone and so owes both. *)
@@ -70,16 +68,9 @@ module Make_over
      nothing else. *)
   let init () = Mf.ensure_root ()
 
-  (* Apart from {!init}, which every process calls: both of these name a
-     leftover by an absence a live write also produces. *)
-  let recover () =
-    let* () = Mf.reap_leftovers () in
-    F.reclaim_staged_orphans ()
-
   (* Every process serving this domain runs its own upload queue: the workers
-     are in-memory and each posts only what it was handed, which is why
-     {!Sync_queue} starts without [recover] and neither reads the other's log.
-     A process without one accepts writes it will never send.
+     are in-memory and each posts only what it was handed, so neither reads the
+     other's log. A process without one accepts writes it will never send.
 
      The bumps those uploads owe are {!File_store}'s to coalesce and publish;
      what this owes is the flush in {!drain}, so an entry uploaded here is one
@@ -136,7 +127,6 @@ module Make (C : Conf_lwt.S) : S = Make_over (Checkout_lwt) (C)
 (* The convergence half of an engine, for a caller holding several domains and
    presenting none of them. *)
 module Converge (E : S) : Converging = struct
-  let recover = E.recover
   let start = E.converge
   let drain = E.drain
   let stats_fields = E.stats_fields

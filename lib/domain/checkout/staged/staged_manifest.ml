@@ -149,6 +149,9 @@ let staged_of_string body =
 
 let sidecar_path = Cache_layout.staged_manifest_path
 
+(** What a sweep collected. *)
+type swept = { files : int; bytes : int }
+
 (* What this needs of a filesystem and of the retrying syscalls. *)
 module type FS = sig
   type 'a io
@@ -159,6 +162,7 @@ module type FS = sig
   val readdir_list : string -> string list io
   val read_file_opt : string -> string option io
   val reap_older_than : cutoff:float -> string -> bool io
+  val stat_opt : string -> Unix.stats option io
   val unlink_quiet : string -> unit io
 
   (* {!Cache_layout.Make.real_dir_name}. *)
@@ -324,6 +328,52 @@ struct
     let prune_dirs () =
       let+ (_ : bool) = Fs.reap_older_than ~cutoff:0. (root ()) in
       ()
+
+    (* Staged bodies are named by uuid and referenced only from staged manifests,
+       so a body no manifest names is unreachable by construction -- except while
+       it is being made, {!Staged_body.stage_slot} creating the body before the
+       manifest that records it.
+
+       [cutoff] is what tells those two apart, and it is why this needs neither a
+       lock nor a machine with nothing serving on it: a body younger than the
+       cutoff may be one some process is still assembling, so it is left, and one
+       older than it is a leftover whoever wrote it. *)
+    let reclaim_orphan_bodies ~cutoff () =
+      let* uuids = uuids () in
+      let live = Hashtbl.create (List.length uuids) in
+      List.iter (fun uuid -> Hashtbl.replace live uuid ()) uuids;
+      let sweep acc dir =
+        let* here = Fs.is_directory dir in
+        if not here then Io.return acc
+        else
+          let* names = Fs.readdir_list dir in
+          fold_left_s
+            (fun acc name ->
+              if Hashtbl.mem live name then Io.return acc
+              else (
+                let path = Filename.concat dir name in
+                let* st = Fs.stat_opt path in
+                match st with
+                  | Some st when st.Unix.st_mtime <= cutoff ->
+                      Log.info "reclaiming orphaned staged body %s" name;
+                      let+ () = Fs.unlink_quiet path in
+                      {
+                        files = acc.files + 1;
+                        bytes = acc.bytes + st.Unix.st_size;
+                      }
+                  | _ -> Io.return acc))
+            acc names
+      in
+      let* acc =
+        sweep { files = 0; bytes = 0 }
+          (Cache_layout.staged_chunks_dir ~cache_root:C.cache_root C.domain_name)
+      in
+      let* acc =
+        sweep acc
+          (Cache_layout.staged_whole_dir ~cache_root:C.cache_root C.domain_name)
+      in
+      let+ () = prune_dirs () in
+      acc
 
     (* A locally created file has no published sidecar, so the mirror alone would
        not list it; for one that does, the staged size and mtime are current. *)

@@ -58,8 +58,10 @@ module type CONTENT = sig
       int io
 
     val published : Logical_key.t -> Manifest.t option io
+
     val pread_key :
       ?stream:string -> Logical_key.t -> Bigstring.t -> offset:int64 -> int io
+
     val write : Logical_key.t -> Bigstring.t -> offset:int64 -> int io
     val truncate : Logical_key.t -> int64 -> unit io
     val create : Logical_key.t -> unit io
@@ -90,7 +92,6 @@ module type CONTENT = sig
     val forget_chunks : Logical_key.t -> unit io
     val discard_staged : Logical_key.t -> unit io
     val staged_body_path : Logical_key.t -> string option io
-    val reclaim_staged_orphans : unit -> unit io
   end
 end
 
