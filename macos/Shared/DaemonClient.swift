@@ -19,6 +19,9 @@ struct DaemonRequest: Encodable {
     var dest: String?
     var offset: Int64?
     var length: Int64?
+    /// Listing: resume after this name, and serve at most this many.
+    var after: String?
+    var limit: Int?
 }
 
 /// An item, as the daemon describes one. `ref`, `parentRef` and `name` build an
@@ -36,6 +39,11 @@ struct DaemonItem: Decodable {
     let isUploaded: Bool
     let symlinkTarget: String?
 
+    /// Written only when set, so a live item's row is unchanged. Carried now so
+    /// that turning trash on later is a change to how it is used, not to what
+    /// the daemon says.
+    let trashed: Bool?
+
     var isDirectory: Bool { kind == "dir" }
     var isSymlink: Bool { kind == "symlink" }
 }
@@ -48,6 +56,17 @@ struct DaemonOp: Decodable {
     let parentRef: String?
     let name: String?
     let srcRef: String?
+
+    /// The container the item moved out of, for a rename. The materialized-set
+    /// filter needs either end: an item leaving a folder we hold is as much a
+    /// change to that folder as one arriving in it.
+    let srcParentRef: String?
+
+    /// The whole item, so a batch of changes becomes items without a call each.
+    /// Absent for a removal, which has nothing left to describe.
+    let item: DaemonItem?
+
+    var isDeletion: Bool { op == "delete" || op == "rmdir" }
 }
 
 /// What a row does when clicked. Every case names a domain and a path under it
@@ -117,14 +136,21 @@ struct DaemonResponse: Decodable {
     let offset: Int64?
     let length: Int64?
 
-    /// `stat` answers with the item's fields at the top level rather than
-    /// nested, so it decodes from this same container and is nil elsewhere.
+    /// The item a call produced. A mutation nests it under `item`; `stat`
+    /// answers with the fields at the top level, so both shapes decode here and
+    /// it is nil for everything else.
     let item: DaemonItem?
+
+    /// `list_dir` only: resume the listing after this name. Absent at the end.
+    let next: String?
+
+    /// `changes_since` only: another call from `cursor` would answer with more.
+    let more: Bool?
 
     private enum CodingKeys: String, CodingKey {
         case ok, code, error, items, ops, stale, cursor, localPath, url
         case active, bytesDownloaded, totalBytes, offset, length
-        case menu, rows
+        case menu, rows, item, next, more
     }
 
     init(from decoder: Decoder) throws {
@@ -145,7 +171,10 @@ struct DaemonResponse: Decodable {
         length = try c.decodeIfPresent(Int64.self, forKey: .length)
         menu = try c.decodeIfPresent(DaemonMenu.self, forKey: .menu)
         rows = try c.decodeIfPresent([DaemonMenuRow].self, forKey: .rows)
-        item = try? DaemonItem(from: decoder)
+        next = try c.decodeIfPresent(String.self, forKey: .next)
+        more = try c.decodeIfPresent(Bool.self, forKey: .more)
+        item = (try? c.decodeIfPresent(DaemonItem.self, forKey: .item))
+            ?? (try? DaemonItem(from: decoder))
     }
 }
 
@@ -330,20 +359,21 @@ extension DaemonClient {
         return item
     }
 
-    func listDir(_ ref: String) async throws -> [DaemonItem] {
-        try await send(DaemonRequest(action: "list_dir", ref: ref)).items ?? []
-    }
-
-    func listAll(_ ref: String) async throws -> [DaemonItem] {
-        try await send(DaemonRequest(action: "list_all", ref: ref)).items ?? []
+    /// One page of a folder, ordered by name. `next` names where to resume and
+    /// is nil at the end.
+    func listDir(_ ref: String, after: String? = nil, limit: Int? = nil)
+        async throws -> (items: [DaemonItem], next: String?) {
+        let response = try await send(
+            DaemonRequest(action: "list_dir", ref: ref, after: after, limit: limit))
+        return (response.items ?? [], response.next)
     }
 
     func currentCursor() async throws -> String {
         try await send(DaemonRequest(action: "cursor")).cursor ?? ""
     }
 
-    func changesSince(_ anchor: String) async throws -> DaemonResponse {
-        try await send(DaemonRequest(action: "changes_since", arg: anchor))
+    func changesSince(_ anchor: String, limit: Int? = nil) async throws -> DaemonResponse {
+        try await send(DaemonRequest(action: "changes_since", arg: anchor, limit: limit))
     }
 
     /// The daemon assembles the file where the system wants it: this process may
@@ -397,6 +427,10 @@ extension DaemonClient {
     func setPaused(_ paused: Bool) async throws {
         _ = try await send(DaemonRequest(action: "pause", arg: paused ? "on" : "off"))
     }
+
+    // Each of these answers with the item it produced, in `item`. Nothing has to
+    // list the parent afterwards to find what it just made — which a directory
+    // forced, its reference being a folder id only the daemon mints.
 
     func create(parentRef: String, name: String) async throws -> DaemonResponse {
         try await send(DaemonRequest(action: "create", parentRef: parentRef, name: name))
