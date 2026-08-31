@@ -12,7 +12,9 @@
    -open
    Tsync_staged_lwt
    -open
-   Tsync_io_lwt))
+   Tsync_io_lwt
+   -open
+   Tsync_log))
  (name tsync_checkout_maintenance_lwt)
  (public_name tsync-libs.checkout_maintenance_lwt)
  (libraries
@@ -21,6 +23,7 @@
   tsync_cache_layout_lwt
   tsync_staged_lwt
   tsync_io_lwt
+  tsync_log
   lwt
   lwt.unix
   unix))

@@ -65,14 +65,23 @@ let cmd : unit Cmd.t =
     if paths <> [] then
       failwith "cache --prune takes no PATH; it collects the whole domain.";
     let (module C : Conf_lwt.S) = load_conf ?domain () in
-    let module Temp = Maintenance_lwt.Temp_files.Make (C) in
-    let module Orphans = Maintenance_lwt.Staged_orphans.Make (C) in
-    let temp = run_lwt (Temp.run ()) in
-    let cutoff = Unix.gettimeofday () -. grace in
-    let staged = run_lwt (Orphans.run ~cutoff ()) in
-    let freed = temp.Sweep.bytes + staged.Sweep.bytes in
-    Printf.printf "%s: %d temp file(s), %d staged body(s), %s reclaimed.\n"
-      C.domain_name temp.Sweep.files staged.Sweep.files (human_bytes freed)
+    let module Md = Maintenance_lwt.Domain (C) in
+    (* The declared list, not a call to each sweep: a sweep added there is one
+       this collects, and one this collects is one [tsync status] names. *)
+    let total =
+      List.fold_left
+        (fun acc (t : Maintenance_lwt.task) ->
+          let swept = run_lwt (Maintenance_lwt.run_task t) in
+          Printf.printf "  %-20s %d file(s), %s\n" t.Maintenance_lwt.name
+            swept.Sweep.files
+            (human_bytes swept.Sweep.bytes);
+          Maintenance_lwt.add acc swept)
+        Maintenance_lwt.nothing
+        (Md.tasks ~staged_grace:grace ())
+    in
+    Printf.printf "%s: %d file(s), %s reclaimed.\n" C.domain_name
+      total.Sweep.files
+      (human_bytes total.Sweep.bytes)
   in
   let run paths domain evict fetch prune_ grace =
     match (evict, fetch, prune_) with
@@ -80,7 +89,9 @@ let cmd : unit Cmd.t =
       | false, true, false -> act ~verb:"restore" ~done_:"Fetched" ~domain paths
       | false, false, true ->
           let grace =
-            match grace with Some d -> parse_duration d | None -> 3600.
+            match grace with
+              | Some d -> parse_duration d
+              | None -> Maintenance_lwt.default_staged_grace
           in
           prune ~domain ~grace paths
       | false, false, false ->
