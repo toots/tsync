@@ -379,6 +379,7 @@ let setup_client (module C : Conf_lwt.S) root staging_prefix =
   let module F = File_lwt.Make (C) in
   let module Sq = Sync_lwt.Sync_queue.Make (C) (F) in
   let module Mfs = Staged_lwt.Manifest.Make (C) in
+  let module Orphans = Maintenance_lwt.Staged_orphans.Make (C) in
   let module H = Ipc_handler.Make (C) (F) (Sq) in
   let module Rp = Sync_lwt.Replay.Make (C) (F) in
   let module Sp = Sync_lwt.Sync_poller.Make (C) (F) in
@@ -405,7 +406,7 @@ let setup_client (module C : Conf_lwt.S) root staging_prefix =
   in
   Sq.start ~on_upload_done:(fun ~key:_ ->
       (* Mirror the daemons: nudge cache-cap enforcement after each upload. *)
-      F.enforce_chunk_cap ());
+      Lwt.map (fun (_ : Maintenance_lwt.swept) -> ()) (F.enforce_chunk_cap ()));
   let staging_seq = ref 0 in
   let mark_time = ref 0. in
   (* Where the body of a file's chunk [index] lives in the chunk store, for the
@@ -617,7 +618,9 @@ let setup_client (module C : Conf_lwt.S) root staging_prefix =
         must_make ~extra:[("ref", `String src_ref)] "rename" (key dst)
     | Delete p -> must_by_ref "delete" (key p)
     | Evict p -> must_by_ref "evict" (key p)
-    | EnforceCache -> F.enforce_chunk_cap ()
+    | EnforceCache ->
+        let+ (_ : Maintenance_lwt.swept) = F.enforce_chunk_cap () in
+        ()
     | Restore p -> must_by_ref "restore" (key p)
     | RevertVersion { path; version } ->
         must_by_ref
@@ -1075,8 +1078,8 @@ let setup_client (module C : Conf_lwt.S) root staging_prefix =
     (* No grace: the bodies a step plants are the ones it means to see
        collected, and they were written a moment ago. *)
     | ReclaimStaged ->
-        let+ (_ : Staged_manifest.swept) =
-          Mfs.reclaim_orphan_bodies ~cutoff:(Unix.gettimeofday ()) ()
+        let+ (_ : Maintenance_lwt.swept) =
+          Orphans.run ~cutoff:(Unix.gettimeofday ()) ()
         in
         ()
     | ClearCache ->

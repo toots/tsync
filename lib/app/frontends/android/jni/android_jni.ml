@@ -16,10 +16,6 @@ let install_log_sink () =
    floor rather than a ceiling. [Frontend.cap_blocking_pool]'s range is a
    server's: its lower bound alone is twice what a phone should hold. *)
 let pool_size = 16
-
-(* The chunk cap is enforced after an upload, so a process that only reads would
-   never enforce it at all. *)
-let housekeeping_interval = 60.
 let engine : (module Domain_engine.S) option ref = ref None
 
 let serving () =
@@ -53,16 +49,15 @@ let boot domain =
         let* () = E.init () in
         ready ();
         let* () = E.start_queue () in
-        let rec sweep () =
-          let* () = Lwt_unix.sleep housekeeping_interval in
-          let* () =
-            Lwt.catch E.F.enforce_chunk_cap (fun exn ->
-                Log.err "chunk cap sweep: %s" (Printexc.to_string exn);
-                Lwt.return_unit)
-          in
-          sweep ()
-        in
-        sweep ());
+        (* The same driver the daemon runs, rather than a loop of this
+           frontend's own: one written here ran the chunk cap and silently not
+           the deferred rescan, and would have missed every sweep added since. *)
+        E.run_maintenance ();
+        (* [Lwt_main.run] returns when this does, and every query the JNI
+           answers needs the loop still turning. The sweep loop that used to sit
+           here kept it alive by never finishing, which read as housekeeping and
+           was load-bearing; this says so instead. *)
+        fst (Lwt.wait ()));
     engine := Some (module E : Domain_engine.S);
     ""
   with exn -> Printexc.to_string exn
