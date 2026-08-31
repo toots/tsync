@@ -65,11 +65,13 @@ let post t keys =
           let+ (_ : string) = Ipc_lwt.send_lwt ~socket_path line in
           ())
         (fun exn ->
-          (* Said once: a frontend that is down would otherwise put a line in
-             the log every time anything changed. *)
+          (* Said once, and loudly enough to be seen: a frontend that is down
+             would otherwise put a line in the log every time anything changed,
+             but at debug this was invisible at every verbosity a command
+             offers, which is how a notice that never left went unnoticed. *)
           if not t.warned then begin
             t.warned <- true;
-            Log.debug "change notice to %s: %s" socket_path
+            Log.warn "change notice to %s: %s" socket_path
               (Printexc.to_string exn)
           end;
           Lwt.return_unit))

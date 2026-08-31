@@ -67,8 +67,9 @@ module Make (C : Conf_lwt.S) = struct
      ops are read back from it rather than passed a second way. *)
   let write_journal_entry_body ?entry_key body =
     let entry_key = entry_key_of entry_key in
-    let* () =
-      note_applied entry_key (Journal.decode (Bigstring.to_string body))
-    in
-    write_journal_entry_body ~entry_key body
+    let ops = Journal.decode (Bigstring.to_string body) in
+    let* () = note_applied entry_key ops in
+    let+ published = write_journal_entry_body ~entry_key body in
+    announce ops;
+    published
 end
