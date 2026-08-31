@@ -74,6 +74,8 @@ module Make_over
 
      What each one does is in {!Tsync_checkout_maintenance}; what collects a
      backend store is [tsync gc] and is not here. *)
+  module Md = Maintenance_lwt.Domain (C)
+
   let maintenance : Maintenance_lwt.task list =
     let unit_task name triggers f =
       {
@@ -82,19 +84,22 @@ module Make_over
         run = (fun () -> Lwt.map (fun () -> Maintenance_lwt.nothing) (f ()));
       }
     in
-    [
-      {
-        Maintenance_lwt.name = "chunk cap";
-        (* Both: an upload is the growth this process caused and is worth
-           answering at once, and the periodic pass is what catches the growth
-           downloads cause in a process that only reads. *)
-        triggers = [`After_upload; `Periodic housekeeping_interval];
-        run = F.enforce_chunk_cap;
-      };
-      unit_task "deferred rescan"
-        [`Periodic housekeeping_interval]
-        Durable_queue_lwt.rescan_all;
-    ]
+    (* The on-demand half is the same list [tsync cache --prune] runs, so a
+       sweep is declared once and both the command and the report see it. *)
+    Md.tasks ()
+    @ [
+        {
+          Maintenance_lwt.name = "chunk cap";
+          (* Both: an upload is the growth this process caused and is worth
+             answering at once, and the periodic pass is what catches the growth
+             downloads cause in a process that only reads. *)
+          triggers = [`After_upload; `Periodic housekeeping_interval];
+          run = F.enforce_chunk_cap;
+        };
+        unit_task "deferred rescan"
+          [`Periodic housekeeping_interval]
+          Durable_queue_lwt.rescan_all;
+      ]
 
   (* One driver for every frontend, so a sweep added to the list above runs
      everywhere rather than wherever someone remembered to call it. *)
@@ -114,18 +119,7 @@ module Make_over
         Lwt.async (fun () ->
             let rec loop () =
               let* () = Lwt_unix.sleep seconds in
-              let* () =
-                Lwt.catch
-                  (fun () ->
-                    let+ (_ : Maintenance_lwt.swept) =
-                      t.Maintenance_lwt.run ()
-                    in
-                    ())
-                  (fun exn ->
-                    Log.err "%s: %s" t.Maintenance_lwt.name
-                      (Printexc.to_string exn);
-                    Lwt.return_unit)
-              in
+              let* (_ : Maintenance_lwt.swept) = Maintenance_lwt.run_task t in
               loop ()
             in
             loop ()))
@@ -133,17 +127,10 @@ module Make_over
 
   let after_upload () =
     Lwt_list.iter_s
-      (fun (t : Maintenance_lwt.task) ->
-        if List.mem `After_upload t.Maintenance_lwt.triggers then
-          Lwt.catch
-            (fun () ->
-              let+ (_ : Maintenance_lwt.swept) = t.Maintenance_lwt.run () in
-              ())
-            (fun exn ->
-              Log.err "%s: %s" t.Maintenance_lwt.name (Printexc.to_string exn);
-              Lwt.return_unit)
-        else Lwt.return_unit)
-      maintenance
+      (fun t ->
+        let+ (_ : Maintenance_lwt.swept) = Maintenance_lwt.run_task t in
+        ())
+      (List.filter (Maintenance_lwt.has_trigger `After_upload) maintenance)
 
   (* The manifest tree, which a caller needs before it can resolve a key at all.
      Separate from {!start_queue} because a read-only command needs this and
