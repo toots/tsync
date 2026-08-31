@@ -28,7 +28,9 @@ let is_local
   in
   Sys.file_exists (Staged_manifest.sidecar_path ~cache_root ~domain_name key)
   ||
-    match of_file (sidecar_path ~cache_root ~domain_name key) with
+  (* Mapped, not read: a listing wants name, size and mtime, and never
+       touches the chunk keys. *)
+  match of_file (sidecar_path ~cache_root ~domain_name key) with
     | m ->
         List.for_all
           (fun g -> held (Manifest.Group.key g))
@@ -38,8 +40,6 @@ let is_local
                   ~cache_chunk_size))
     | exception _ -> false
 
-(* Mapped, not read: a listing wants name, size and mtime, and never touches the
-   chunk keys. *)
 (* What this needs below it. *)
 module type FS = sig
   type 'a io
@@ -244,9 +244,9 @@ struct
       in
       (merge_entries files staged, dirs)
 
-    (* Backend keys are hashed, so only the mirror can answer this. *)
-    (* Inside the functor because it hands back the key each file is filed under,
-       which needs the domain the walk belongs to. *)
+    (* Backend keys are hashed, so only the mirror can answer this. Inside the
+       functor because it hands back the key each file is filed under, which
+       needs the domain the walk belongs to. *)
     let fold_files ~start ~key f acc =
       let rec walk dir key acc =
         let* names = Fs.readdir_list dir in

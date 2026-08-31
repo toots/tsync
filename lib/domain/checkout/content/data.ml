@@ -2,9 +2,8 @@
 
    A file is never assembled: a read maps its byte range onto the stored chunks
    backing it and fetches what is absent, the store answering "is it local?" by
-   the body existing. *)
+   the body existing. Read-ahead applies to sequential reads only. *)
 
-(* Read-ahead applies to sequential reads only. *)
 (* What this needs below it. *)
 module type FS = sig
   type 'a io
@@ -330,9 +329,6 @@ struct
       in
       upto 0 (List.combine pieces got)
 
-    (* Credits {!pulls} as a foreground read does: prefetch is what pulls the bytes
-       during sequential streaming, so leaving it out would empty the display
-       exactly when a large file is downloading well. *)
     (* One loop per sequential read, and a FUSE read is 128 KiB, so streaming a
        gigabyte fires thousands of these. They are mostly redundant —
        {!Chunk_cache.ensure_fetched} hands a second caller the in-flight promise —
@@ -341,6 +337,9 @@ struct
     let readahead_in_flight = ref 0
     let max_readahead_loops = 4
 
+    (* Credits {!pulls} as a foreground read does: prefetch is what pulls the
+       bytes during sequential streaming, so leaving it out would empty the
+       display exactly when a large file is downloading well. *)
     let read_ahead ~id ~size ~table ~per ~chunk_size ~last =
       let n = Manifest.count table in
       let window =
@@ -512,8 +511,9 @@ struct
     (* A promotion can retire the staged bodies between resolving the key and
        reading them, so a miss is resolved again and read once more. The retry
        finds the published manifest because {!promote} puts it in place before any
-       body goes, the same shape as {!Chunk_cache.read_into} against the cap. *)
-    (* [stream] names the descriptor asking, for callers that have one; without
+       body goes, the same shape as {!Chunk_cache.read_into} against the cap.
+
+       [stream] names the descriptor asking, for callers that have one; without
        it every reader of a key shares its position. *)
     let pread_key ?stream key buf ~offset =
       let id = Logical_key.to_string key in
@@ -1053,10 +1053,10 @@ struct
               | Staged_manifest.Inherit -> false)
           (Manifest.Group.indices group)
       in
-      (* Anything else -- a body per chunk from an older sidecar, or a group the
-         cache size no longer matches -- has to be written out. *)
       (* The staged record's own account of the group's length, which the link
-         refuses unless it matches the published group's. *)
+         refuses unless it matches the published group's. Anything else -- a body
+         per chunk from an older sidecar, or a group the cache size no longer
+         matches -- has to be written out. *)
       let staged_len group =
         let indices = Manifest.Group.indices group in
         match indices with

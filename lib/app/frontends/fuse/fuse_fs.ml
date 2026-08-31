@@ -234,8 +234,8 @@ module Make (C : Conf_lwt.S) (D : Domain_engine.Domain) = struct
   (* This mount has to be told a key changed: [cache_opts] turns off the
      attribute and entry timeouts, but that does not stop the kernel answering a
      lookup from a dentry it already holds, so a name another client renamed away
-     stays resolvable in a directory already open. *)
-  (* The path this mount shows for a key. *)
+     stays resolvable in a directory already open. Named by the path this mount
+     shows for the key. *)
   let invalidate key =
     let rel = Logical_key.path key in
     (* Never from inside an operation on this path: the kernel waits on the
@@ -466,8 +466,9 @@ module Make (C : Conf_lwt.S) (D : Domain_engine.Domain) = struct
       ~main_thread:(fun () ->
         Log.info "mounting FUSE at %s" mount_point;
         (* [allow_other] lets other users reach the mount; it also needs
-           [user_allow_other] in /etc/fuse.conf. *)
-        (* The kernel's own caches, turned off: they assume this filesystem
+           [user_allow_other] in /etc/fuse.conf.
+
+           The kernel's own caches, turned off: they assume this filesystem
            changes only through the kernel's own calls, which is false the moment
            a second client shares the domain, and freshness is bought instead by
            a LOOKUP per path access.

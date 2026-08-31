@@ -168,9 +168,9 @@ struct
                        either window leaves a record reconcile can finish from what
                        the backend says. Dropping the record first would leave the
                        bytes uploaded, no entry for peers to read, and nothing
-                       saying anything was owed. *)
-                          (* Recorded rather than published: a busy queue owes
-                       a cursor move per file, and they collapse to the newest. *)
+                       saying anything was owed. The cursor is recorded rather
+                       than published: a busy queue owes a move per file, and
+                       they collapse to the newest. *)
                           let* () =
                             W.discharge
                               ~publish:(fun ek ops ->

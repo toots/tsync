@@ -447,8 +447,8 @@ struct
     let read ?stream key (buf : File_ops.buffer) ~offset =
       D.pread_key ?stream key buf ~offset
 
-    (* What to call a row, and where the file sits under the domain root. *)
-    (* The queue and the pull tracker hold rendered keys, so this takes one back
+    (* What to call a row, and where the file sits under the domain root. The
+       queue and the pull tracker hold rendered keys, so this takes one back
        apart; a key from either is this domain's by construction. *)
     let describe key =
       match Option.map Lk.file (Lk.rel_of_string key) with

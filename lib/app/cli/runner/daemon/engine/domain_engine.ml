@@ -206,8 +206,9 @@ end
    served on it. [serve] calls [ready] once it is serving, which is what lets
    [main_thread] — a presentation whose own loop must hold the main thread, as
    FUSE's mount does — start against something already running. [after] runs on
-   the loop's thread once it has finished cleanly. *)
-(* An exception escaping [Lwt_main.run] does not stop the process: it leaves one
+   the loop's thread once it has finished cleanly.
+
+   An exception escaping [Lwt_main.run] does not stop the process: it leaves one
    with no loop, in which every call blocks on a thread that is gone, and nothing
    reports it until a stop is attempted and hangs — one of these sat silent for
    47 minutes after an SSL read raised inside libev's dispatch, outside any

@@ -68,8 +68,8 @@ module Make (C : Conf_lwt.S) (D : Domain_engine.Domain) = struct
       | Some r -> require_delivery (publish ~subs name [("ref", `String r)])
 
   (* A hint, not a request: the journal carries the same news and the next
-     enumeration reads it, so nobody listening is not a failure. *)
-  (* No item named: a subscriber answers this by re-reading the working set, so
+     enumeration reads it, so nobody listening is not a failure. No item is
+     named either — a subscriber answers this by re-reading the working set, so
      saying which one changed would be a field nobody acts on. *)
   let notify_changed ~subs (_ : Logical_key.t) =
     ignore (publish ~subs "changed" [])

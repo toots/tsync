@@ -53,11 +53,10 @@ let body ~name =
       ]
     ~mtime:0.
 
-(* What a listing would show for [rel], and what the body says on its own. Equal
-   for an ordinary name; only the second is available for an escaped one. *)
 (* The rule under test, spelled here rather than called: ask the location, and
    consult the body only for an escaped on-disk leaf, which is the one case a
-   path cannot express. *)
+   path cannot express. Equal for an ordinary name; only the body is available
+   for an escaped one. *)
 let name_of ~key m =
   let leaf = Logical_key.leaf key in
   if Stored_key.is_escaped leaf then Manifest.recorded_name m else leaf

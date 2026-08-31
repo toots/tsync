@@ -505,12 +505,13 @@ struct
          is asked with a request waiting on the answer. *)
       let concurrency = lazy (Device.max_concurrency root)
 
+      (* A filesystem read is not a round trip: {!Backend.Make.Batched} fans
+         these out. *)
+      let get_many = None
+
       (* A filesystem has nothing on its side to wake. Every write is already
          checked as it lands ({!verify_written}), and [tsync gc --verify] is the
          sweep over what is already there. *)
-      (* A filesystem read is not a round trip: {!Backend.Make.Batched} fans these
-         out. *)
-      let get_many = None
       let verify_all ~chunk_prefix:_ () = Io.return `Unsupported
 
       (* Nothing to wake here either, and a collection deleting on a filesystem is

@@ -328,8 +328,8 @@ module Make (C : Conf_lwt.S) = struct
         Lwt.return (`Assoc [("error", `String (Printexc.to_string exn))]))
 
   (* One walk at a time per store, or a page refreshing every few seconds stacks
-     them. *)
-  (* Separate samples: one precision must not be served in place of the other. *)
+     them. Separate samples per precision: one must not be served in place of
+     the other. *)
   let slot ~name ~exact = if exact then name ^ " (exact)" else name
 
   let refresh ~name ~exact backend =

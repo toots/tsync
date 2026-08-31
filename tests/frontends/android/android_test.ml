@@ -222,7 +222,6 @@ let sort_items reply =
                 fields))
     | _ | (exception _) -> reply
 
-(* A verb answering in JSON: the call, then the whole reply. *)
 (* A client learns a folder's reference by listing its parent, ids being minted
    by the daemon: the same walk the picker does. *)
 let child_ref parent name =
@@ -245,6 +244,7 @@ let child_ref parent name =
           | _ -> failwith ("no ref for " ^ name))
     | _ -> failwith ("no child " ^ name ^ " under " ^ parent)
 
+(* A verb answering in JSON: the call, then the whole reply. *)
 let json args =
   line "%s" (scrub (String.concat " " (List.tl args)));
   let reply = String.trim (invoke args) in

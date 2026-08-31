@@ -4,11 +4,10 @@
    A group is present iff its file exists and may be deleted at any moment, so
    callers must treat a miss as ordinary (see {!read_into}). *)
 
-(* Narrower than [Remote.S] so the store has no cycle with it and can be driven
-   by a stub in tests. *)
 (* What this needs below it: a filesystem, the syscalls that retry past EINTR,
    and pools to admit a few at a time. Each is a subset -- what the cache calls
-   and nothing else. *)
+   and nothing else, and narrower than [Remote.S] so the store has no cycle with
+   it and can be driven by a stub in tests. *)
 module type FS = sig
   type 'a io
 

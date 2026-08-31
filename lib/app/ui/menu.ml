@@ -1,3 +1,6 @@
+(* One shape for both directions, so a download row and an upload row cannot
+   drift apart. Which downloads are worth a row was settled by the daemon, which
+   is why nothing here has to weigh them. *)
 type transfer = {
   name : string;
   rel : string;
@@ -277,9 +280,6 @@ let file_icon name =
         "package-x-generic"
     | _ -> "text-x-generic"
 
-(* Up to three, newest first: enough to see that something is wrong and roughly
-   what, which is all a menu row can carry. The rest is what `tsync status' is
-   for. *)
 (* A mount path or a backend's complaint can run to any length, and a menu that
    wide is one that covers the screen it is meant to sit beside. Cut at the last
    space before the limit so a word is not split, and never inside a UTF-8
@@ -455,9 +455,6 @@ let stats_entries = function
              if i = 0 then daemon_section s else Separator :: daemon_section s)
            all)
 
-(* One shape for both directions, so a download row and an upload row cannot
-   drift apart. Which downloads are worth a row was settled by the daemon, which
-   is why nothing here has to weigh them. *)
 (* "752 MB of 14.5 GB · 1.6 MB/s · 2h 23m left", dropping whatever the daemon
    did not report. Under the name rather than beside it: a menu is as wide as
    its widest row, and file names are long enough already.

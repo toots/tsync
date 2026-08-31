@@ -4,9 +4,9 @@
    The only copy there is until an upload publishes them, which is why nothing
    here is reclaimable and the cap next door cannot see it. *)
 
-(* What the staged half needs of the cache: read a published chunk it is
-   overwriting part of, and hand a finished body over to be published. *)
-(* What this needs of a filesystem and of the retrying syscalls. *)
+(* What this needs of a filesystem, of the retrying syscalls, and of the cache:
+   read a published chunk it is overwriting part of, and hand a finished body
+   over to be published. *)
 module type FS = sig
   type 'a io
 

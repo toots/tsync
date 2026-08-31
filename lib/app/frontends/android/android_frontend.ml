@@ -98,8 +98,9 @@ module Make (C : Conf_lwt.S) = struct
 
      A request is "OFFSET LENGTH" on a line. Each answer is a JSON line carrying
      the count, then that many bytes, so a caller frames on the count rather
-     than looking for a delimiter in binary. *)
-  (* The argument is a storage key as the client spells it; one this domain
+     than looking for a delimiter in binary.
+
+     The argument is a storage key as the client spells it; one this domain
      cannot read names nothing here. *)
   let session raw =
     match Lwt_main.run (Ih.key_of_ref raw) with
@@ -212,9 +213,6 @@ module Make (C : Conf_lwt.S) = struct
                 ~domains:[json] [])))
 end
 
-(* Serving a socket here would put a second way to reach a domain beside the
-   commands, and the two would answer differently the moment one of them grew a
-   feature. *)
 (* A folder is read when it is asked for, so there is no replica for a resync to
    rebuild: it would drop what has been browsed and walk the domain to fill it
    again. *)
@@ -223,6 +221,9 @@ let tree =
     "the android frontend reads a folder when it is asked for, so there is \
      nothing for a resync to rebuild"
 
+(* Serving a socket here would put a second way to reach a domain beside the
+   commands, and the two would answer differently the moment one of them grew a
+   feature. *)
 let serving =
   Frontend.Commands
     "the android frontend is driven by commands, not by a daemon: see `tsync \

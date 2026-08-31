@@ -319,15 +319,16 @@ let () =
              "for d in %s/*/; do : > \"$d/deadbeefdeadbeef.$$.1.tmp\"; done"
              (Filename.quote from_dir)));
      step "planted a write in flight in each of %d shard(s)" strays;
-     (* A chunk in a shard the surviving space already has, but under a name it does
-        not. Marking promoted one chunk into shard 001, so that shard takes neither
-        the whole-directory rename nor the found-already-there path — it is the one
-        case where abandoning has to move something, and the only one that moves
-        data. Without this the moving branch is never run by any test. *)
-     (* Several, so the shard is lopsided enough to take the cheaper way round:
-        emptying the one chunk out of the surviving space and renaming the whole
-        directory in, rather than moving five across. One planted chunk would leave
-        the two sides even and exercise only the other branch. *)
+     (* Chunks in a shard the surviving space already has, but under names it
+        does not. Marking promoted one chunk into shard 001, so that shard takes
+        neither the whole-directory rename nor the found-already-there path — it
+        is the one case where abandoning has to move something, and without this
+        that branch is never run by any test.
+
+        Several of them, so the shard is lopsided enough to take the cheaper way
+        round: emptying the one chunk out of the surviving space and renaming the
+        whole directory in, rather than moving five across. One planted chunk
+        would leave the two sides even and exercise only the other branch. *)
      let orphans =
        List.init 5 (fun i -> Printf.sprintf "%03x%013x-%016x" 1 (900 + i) i)
      in
