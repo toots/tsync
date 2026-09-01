@@ -41,7 +41,6 @@ final class ChangeBatchTests: XCTestCase {
         try! JSONDecoder().decode(T.self, from: Data(json.utf8))
     }
 
-    private let everything: (String?) -> Bool = { _ in true }
 
     /// The observer's two sets are unordered, so reporting both the creation and
     /// the deletion would resurrect the file.
@@ -50,7 +49,7 @@ final class ChangeBatchTests: XCTestCase {
             op("put", ref: "f:d1/a.txt", parent: "d:d1", name: "a.txt"),
             op("delete", ref: "f:d1/a.txt", parent: "d:d1", name: "a.txt", withItem: false),
         ]
-        let (updated, deleted) = ChangeBatch.resolve(ops, holds: everything, readOnly: false)
+        let (updated, deleted) = ChangeBatch.resolve(ops, readOnly: false)
         XCTAssertTrue(updated.isEmpty, "the creation must not outlive the deletion")
         XCTAssertEqual(deleted.map(\.rawValue), ["f:d1/a.txt"])
     }
@@ -60,7 +59,7 @@ final class ChangeBatchTests: XCTestCase {
     func testARenamedFileRetiresItsOldReference() {
         let ops = [op("rename", ref: "f:d1/b.txt", parent: "d:d1", name: "b.txt",
                       srcRef: "f:d1/a.txt", srcParent: "d:d1")]
-        let (updated, deleted) = ChangeBatch.resolve(ops, holds: everything, readOnly: false)
+        let (updated, deleted) = ChangeBatch.resolve(ops, readOnly: false)
         XCTAssertEqual(updated.map(\.itemIdentifier.rawValue), ["f:d1/b.txt"])
         XCTAssertEqual(deleted.map(\.rawValue), ["f:d1/a.txt"])
     }
@@ -70,27 +69,19 @@ final class ChangeBatchTests: XCTestCase {
     func testARenamedFolderRetiresNothing() {
         let ops = [op("rename", ref: "d:d9", parent: "root", name: "after",
                       srcRef: "d:d9", srcParent: "root")]
-        let (_, deleted) = ChangeBatch.resolve(ops, holds: everything, readOnly: false)
+        let (_, deleted) = ChangeBatch.resolve(ops, readOnly: false)
         XCTAssertTrue(deleted.isEmpty, "a folder's reference survives its rename")
     }
 
     /// The filter's whole job: a change under a folder the system is not holding
     /// is one it would drop anyway.
-    func testAChangeOutsideTheMaterializedSetIsNotReported() {
-        let ops = [op("put", ref: "f:d2/x.txt", parent: "d:d2", name: "x.txt")]
-        let holds: (String?) -> Bool = { $0 == "d:d1" }
-        let (updated, deleted) = ChangeBatch.resolve(ops, holds: holds, readOnly: false)
-        XCTAssertTrue(updated.isEmpty)
-        XCTAssertTrue(deleted.isEmpty)
-    }
 
     /// Either end of a move counts. Testing only the destination leaves the old
     /// folder showing a file that has gone.
-    func testAMoveOutOfAHeldFolderIsStillReported() {
+    func testAMoveOutOfAFolderIsStillReported() {
         let ops = [op("rename", ref: "f:d2/a.txt", parent: "d:d2", name: "a.txt",
                       srcRef: "f:d1/a.txt", srcParent: "d:d1")]
-        let holds: (String?) -> Bool = { $0 == "d:d1" }
-        let (updated, deleted) = ChangeBatch.resolve(ops, holds: holds, readOnly: false)
+        let (updated, deleted) = ChangeBatch.resolve(ops, readOnly: false)
         XCTAssertEqual(updated.map(\.itemIdentifier.rawValue), ["f:d2/a.txt"])
         XCTAssertEqual(deleted.map(\.rawValue), ["f:d1/a.txt"])
     }
@@ -98,7 +89,7 @@ final class ChangeBatchTests: XCTestCase {
     /// A removal has no item to describe, and must still be reported.
     func testARemovalNeedsNoItem() {
         let ops = [op("rmdir", ref: "d:d5", parent: "root", name: "gone", withItem: false)]
-        let (updated, deleted) = ChangeBatch.resolve(ops, holds: everything, readOnly: false)
+        let (updated, deleted) = ChangeBatch.resolve(ops, readOnly: false)
         XCTAssertTrue(updated.isEmpty)
         XCTAssertEqual(deleted.map(\.rawValue), ["d:d5"])
     }
@@ -108,7 +99,7 @@ final class ChangeBatchTests: XCTestCase {
     func testAnUpdateWithoutItsItemIsNotInvented() {
         let ops = [op("put", ref: "f:d1/a.txt", parent: "d:d1", name: "a.txt",
                       withItem: false)]
-        let (updated, deleted) = ChangeBatch.resolve(ops, holds: everything, readOnly: false)
+        let (updated, deleted) = ChangeBatch.resolve(ops, readOnly: false)
         XCTAssertTrue(updated.isEmpty)
         XCTAssertTrue(deleted.isEmpty)
     }
