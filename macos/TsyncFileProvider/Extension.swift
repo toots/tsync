@@ -338,6 +338,7 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension,
             } catch is CancellationError {
                 completionHandler(CocoaError(.userCancelled))
             } catch {
+                log.error("deleteItem \(ref, privacy: .public): \(error, privacy: .public)")
                 completionHandler(FileProviderError.from(error, item: identifier))
             }
             progress.completedUnitCount = 1
