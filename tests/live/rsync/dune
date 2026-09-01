@@ -1,0 +1,5 @@
+(executable
+ (flags
+  (:standard -open Tsync_test_harness -open Tsync_live_harness))
+ (name live_rsync)
+ (libraries tsync_test_harness tsync_live_harness str unix))

@@ -1,0 +1,9 @@
+; Shared scaffolding for the live suites: the config they run against, the
+; command runner, and the declarative case list they are each written as. A
+; (library ...) stanza, so tests/gen-dune.sh leaves this directory alone.
+
+(library
+ (flags
+  (:standard -open Tsync_test_harness))
+ (name tsync_live_harness)
+ (libraries tsync_test_harness str unix))
