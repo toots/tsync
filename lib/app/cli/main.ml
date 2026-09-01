@@ -21,6 +21,7 @@ let run () =
          Cmd_mirror.cmd;
          Cmd_import.cmd;
          Cmd_export.cmd;
+         Cmd_rsync.cmd;
          Cmd_cache.cmd;
          Cmd_ls.cmd;
          Cmd_share.cmd;
