@@ -19,18 +19,16 @@
 
 === local -> domain
   target absent                    -> upload fresh           (the whole file)
-  size and mtime agree             -> skip identical         (0 bytes)
-  size differs                     -> upload replacing       (the whole file)
-  mtime differs                    -> upload replacing       (the whole file)
-  hashed, keys agree               -> skip identical         (0 bytes)
-  hashed, keys differ              -> upload replacing       (the whole file)
+  keys agree                       -> skip identical         (0 bytes)
+  keys differ                      -> upload replacing       (the whole file)
+  a different count                -> upload replacing       (the whole file)
 
 === domain -> local
   target absent                    -> assemble               (24 bytes)
-  not hashed                       -> skip identical         (0 bytes)
-  hashed, all match                -> skip identical         (0 bytes)
-  hashed, two differ               -> patch-local [1;2]      (16 bytes)
-  hashed at another size           -> assemble               (24 bytes)
+  nothing to compare against       -> assemble               (24 bytes)
+  keys agree                       -> skip identical         (0 bytes)
+  two differ                       -> patch-local [1;2]      (16 bytes)
+  cut at another size              -> assemble               (24 bytes)
 
 === links, compared by what they point at
   the same target                  -> skip identical         (0 bytes)

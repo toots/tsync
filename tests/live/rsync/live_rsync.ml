@@ -100,11 +100,6 @@ let groups =
             expect = [ Copied 0; Skipped 4 ];
           };
           {
-            name = "hashing what is already there";
-            command = rsync "--checksum %s %s" (q (in_domain "a")) (q out);
-            expect = [ Copied 0 ];
-          };
-          {
             name = "clobber one file";
             command =
               Shell
@@ -113,9 +108,9 @@ let groups =
             expect = [];
           };
           {
-            name = "hashing after a change";
-            command = rsync "-v --checksum %s %s" (q (in_domain "a")) (q out);
-            expect = [ Copied 1 ];
+            name = "after a change";
+            command = rsync "-v %s %s" (q (in_domain "a")) (q out);
+            expect = [ Copied 1; Says "patch" ];
           };
         ];
     };

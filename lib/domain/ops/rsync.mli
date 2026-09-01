@@ -4,17 +4,16 @@
     file whose chunks this domain already holds is published, not moved, however
     large it is. *)
 
-type local = {
-  size : int64;
-  mtime : float;
-  keys : string array option;
-      (** Chunk keys of the bytes on disk, cut at the manifest's chunk size so
-          that index [i] names the same span on both sides. Gathered only where
-          a caller asked for it: hashing a file costs what the answer saves. *)
-  link : string option;
-      (** What a symlink points at, which is the whole of its content and the
-          only thing worth comparing it by. *)
-}
+(** A local file, as the only thing worth comparing it by. A timestamp says
+    nothing about content and a manifest cannot hold one faithfully anyway, so
+    identity here is always the bytes. *)
+type local =
+  | Link of string  (** what a symlink points at, which is its whole content *)
+  | Hashed of string array
+      (** chunk keys of the bytes on disk, cut the way the manifest they are
+          compared against was cut, so index [i] names one span on both sides *)
+  | Unhashed
+      (** nothing on the other side to compare against, so nothing was read *)
 
 type side = [ `Local | `Domain ]
 type source = [ `Missing | `Dir | `File of local | `Key of Manifest.t ]
@@ -203,12 +202,11 @@ module Over
   module Make (C : Conf.S with type 'a io = 'a Io.t) : sig
     (** Copy every entry under [src] to [dst], deciding per entry what that
         comes to. [move] drops each source once its destination is published,
-        and takes the rename where both ends are in one domain. [checksum]
-        hashes local files so a comparison against a manifest is by content
-        rather than by size and mtime. *)
+        and takes the rename where both ends are in one domain. A local file is
+        hashed wherever there is a manifest to compare it against, so what is
+        skipped is skipped for having the same bytes. *)
     val run :
       ?move:bool ->
-      ?checksum:bool ->
       ?dry_run:bool ->
       ?on_entry:(rel:string -> t -> unit) ->
       src:endpoint ->

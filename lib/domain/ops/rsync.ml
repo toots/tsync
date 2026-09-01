@@ -1,9 +1,8 @@
-type local = {
-  size : int64;
-  mtime : float;
-  keys : string array option;
-  link : string option;
-}
+type local =
+  | Link of string
+  | Hashed of string array
+  | Unhashed
+
 type side = [ `Local | `Domain ]
 type source = [ `Missing | `Dir | `File of local | `Key of Manifest.t ]
 
@@ -41,33 +40,22 @@ let keys_match ~keys manifest =
   in
   same 0
 
-(* A manifest holds its mtime as a double, which cannot represent a nanosecond
-   timestamp: the value is rounded on the way in and a file written back from it
-   reads a little apart from what it was given. *)
-let same_time a b = Float.abs (a -. b) < 1e-6
-
-(* Size and mtime is rsync's own test, for rsync's own reason: hashing the file
-   to answer the question costs what the answer saves. *)
+(* A timestamp is not evidence about content and a manifest cannot hold one
+   faithfully anyway, its mtime being a double where the filesystem counts
+   nanoseconds, so identity is only ever the bytes. *)
 let unchanged ~local dst =
-  match (local.link, Manifest.symlink dst) with
-    | Some a, Some b -> a = b
-    | Some _, None | None, Some _ -> false
-    | None, None -> (
-        match local.keys with
-          | Some keys -> keys_match ~keys dst
-          | None ->
-              local.size = Manifest.size dst
-              && same_time local.mtime (Manifest.mtime dst))
+  match (local, Manifest.symlink dst) with
+    | Link a, Some b -> a = b
+    | Hashed keys, None -> keys_match ~keys dst
+    | Unhashed, _ -> false
+    | Link _, None | Hashed _, Some _ -> false
 
-(* No answer where index [i] does not name one span: nothing was hashed, or it
-   was cut at another size. *)
+(* No answer where index [i] does not name one span on both sides. *)
 let differing ~src local =
-  if local.link <> None || Manifest.symlink src <> None then None
-  else
-  match local.keys with
-    | None -> None
-    | Some keys when Array.length keys <> Manifest.count src -> None
-    | Some keys ->
+  match local with
+    | Link _ | Unhashed -> None
+    | Hashed keys when Array.length keys <> Manifest.count src -> None
+    | Hashed keys ->
         Some
           (List.filter
              (fun i -> keys.(i) <> Manifest.key src i)
@@ -454,16 +442,18 @@ struct
       in
       go 0 []
 
-    let local_facts ~checksum ~against path st =
-      let size = st.Unix.LargeFile.st_size in
-      let mtime = st.Unix.LargeFile.st_mtime in
-      let+ keys =
-        match (checksum, against) with
-          | true, Some m ->
-              local_keys ~chunk_size:(Manifest.chunk_size m) ~size path
-          | _ -> return None
-      in
-      { size; mtime; keys; link = None }
+    (* Cut the way the manifest it is compared against was cut, and not read at
+       all where there is no manifest to compare it to. *)
+    let local_facts ~against path st =
+      match against with
+        | None -> return Unhashed
+        | Some m ->
+            let+ keys =
+              local_keys
+                ~chunk_size:(Manifest.chunk_size m)
+                ~size:st.Unix.LargeFile.st_size path
+            in
+            (match keys with Some keys -> Hashed keys | None -> Unhashed)
 
     let rec iter_s_acc acc xs f =
       match xs with
@@ -517,72 +507,24 @@ struct
     let join_rel base rel =
       if rel = "" then base else if base = "" then rel else base ^ "/" ^ rel
 
-    let source_facts ~checksum src rel kind =
-      match (src, kind) with
-        | _, `Dir -> return `Dir
-        | Local root, `File -> (
-            let path = Filename.concat root rel in
-            let* kind = Fs.lstat_kind path in
-            match kind with
-              | `Missing -> return `Missing
-              | `Symlink target ->
-                  let+ st = Syscalls.lstat path in
-                  `File
-                    {
-                      size = Int64.of_int (String.length target);
-                      mtime = st.Unix.st_mtime;
-                      keys = None;
-                      link = Some target;
-                    }
-              | `Dir | `File _ -> (
-                  let* st = Fs.stat_opt_large path in
-                  match st with
-                    | None -> return `Missing
-                    | Some st ->
-                        let+ f = local_facts ~checksum ~against:None path st in
-                        `File f))
-        | Domain prefix, `File ->
-            let key = Lk.file (join_rel prefix rel) in
-            let* m = Mf.published key in
-            let* m =
-              match m with Some _ -> return m | None -> R.fetch_manifest ~key ()
-            in
-            return (match m with Some m -> `Key m | None -> `Missing)
+    let manifest_at prefix rel =
+      let key = Lk.file (join_rel prefix rel) in
+      let* m = Mf.published key in
+      match m with Some _ -> return m | None -> R.fetch_manifest ~key ()
 
-    let target_facts ~checksum ~src_manifest dst rel =
-      match dst with
-        | Local root ->
-            let path = Filename.concat root rel in
-            let* kind = Fs.lstat_kind path in
-            (match kind with
-              | `Dir -> return (`Dir `Local)
-              | `Missing -> return (`Absent `Local)
-              | `Symlink target ->
-                  let+ st = Syscalls.lstat path in
-                  `File
-                    {
-                      size = Int64.of_int (String.length target);
-                      mtime = st.Unix.st_mtime;
-                      keys = None;
-                      link = Some target;
-                    }
-              | `File _ ->
-                  let* st = Fs.stat_opt_large path in
-                  (match st with
-                    | None -> return (`Absent `Local)
-                    | Some st ->
-                        let+ f =
-                          local_facts ~checksum ~against:src_manifest path st
-                        in
-                        `File f))
-        | Domain prefix ->
-            let key = Lk.file (join_rel prefix rel) in
-            let* m = Mf.published key in
-            let* m =
-              match m with Some _ -> return m | None -> R.fetch_manifest ~key ()
-            in
-            return
-              (match m with Some m -> `Key m | None -> `Absent `Domain)
+    let local_side ~against path =
+      let* kind = Fs.lstat_kind path in
+      match kind with
+        | `Missing -> return None
+        | `Dir -> return None
+        | `Symlink target -> return (Some (Link target))
+        | `File _ -> (
+            let* st = Fs.stat_opt_large path in
+            match st with
+              | None -> return None
+              | Some st ->
+                  let+ f = local_facts ~against path st in
+                  Some f)
 
     let drop_source src rel =
       match src with
@@ -695,7 +637,7 @@ struct
       | Made_dir -> { summary with dirs = summary.dirs + 1 }
       | Failed _ -> { summary with failed = summary.failed + 1 }
 
-    let run ?(move = false) ?(checksum = false) ?(dry_run = false)
+    let run ?(move = false) ?(dry_run = false)
         ?(on_entry = fun ~rel:_ _ -> ()) ~src ~dst () =
       pending := [];
       pending_count := 0;
@@ -703,11 +645,45 @@ struct
       let* entries = entries_of src in
       let* summary =
         iter_s_acc empty_summary entries (fun summary (rel, kind) ->
-            let* s = source_facts ~checksum src rel kind in
-            let src_manifest =
-              match s with `Key m -> Some m | _ -> None
+            let* src_m =
+              match src with
+                | Domain p -> manifest_at p rel
+                | Local _ -> return None
             in
-            let* t = target_facts ~checksum ~src_manifest dst rel in
+            let* dst_m =
+              match dst with
+                | Domain p -> manifest_at p rel
+                | Local _ -> return None
+            in
+            let* s =
+              match (src, kind) with
+                | _, `Dir -> return `Dir
+                | Domain _, `File ->
+                    return (match src_m with Some m -> `Key m | None -> `Missing)
+                | Local root, `File -> (
+                    let+ f =
+                      local_side ~against:dst_m (Filename.concat root rel)
+                    in
+                    match f with Some f -> `File f | None -> `Missing)
+            in
+            let* t =
+              match dst with
+                | Domain _ ->
+                    return
+                      (match dst_m with
+                        | Some m -> `Key m
+                        | None -> `Absent `Domain)
+                | Local root -> (
+                    let path = Filename.concat root rel in
+                    let* kind = Fs.lstat_kind path in
+                    match kind with
+                      | `Dir -> return (`Dir `Local)
+                      | _ -> (
+                          let+ f = local_side ~against:src_m path in
+                          match f with
+                            | Some f -> `File f
+                            | None -> `Absent `Local))
+            in
             let decision = decide ~move ~src:s t in
             on_entry ~rel decision;
             if dry_run then
