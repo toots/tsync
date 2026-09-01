@@ -1,0 +1,58 @@
+
+=== either end missing or the wrong kind
+  source gone                      -> skip source-missing    (0 bytes)
+  dir onto nothing                 -> make-dir domain        (0 bytes)
+  dir onto nothing, local          -> make-dir local         (0 bytes)
+  dir onto a dir                   -> make-dir domain        (0 bytes)
+  dir onto a file                  -> skip target-not-a-dir  (0 bytes)
+  file onto a dir                  -> skip target-is-dir     (0 bytes)
+
+=== domain -> domain
+  target absent                    -> copy-manifest          (0 bytes, 3 chunks named)
+  target absent, --move            -> rename-in-domain       (0 bytes)
+  same chunk list                  -> skip identical         (0 bytes)
+  differing chunk list             -> copy-manifest          (0 bytes, 3 chunks named)
+  differing, --move                -> copy-manifest          (0 bytes, 3 chunks named, source dropped)
+  chunk size differs               -> copy-manifest          (0 bytes, 3 chunks named)
+  same symlink                     -> skip identical         (0 bytes)
+  two symlinks, one target each    -> copy-manifest          (0 bytes, 0 chunks named)
+
+=== local -> domain
+  target absent                    -> upload fresh           (the whole file)
+  size and mtime agree             -> skip identical         (0 bytes)
+  size differs                     -> upload replacing       (the whole file)
+  mtime differs                    -> upload replacing       (the whole file)
+  hashed, keys agree               -> skip identical         (0 bytes)
+  hashed, keys differ              -> upload replacing       (the whole file)
+
+=== domain -> local
+  target absent                    -> assemble               (24 bytes)
+  not hashed                       -> skip identical         (0 bytes)
+  hashed, all match                -> skip identical         (0 bytes)
+  hashed, two differ               -> patch-local [1;2]      (16 bytes)
+  hashed at another size           -> assemble               (24 bytes)
+
+=== links, compared by what they point at
+  the same target                  -> skip identical         (0 bytes)
+  another target                   -> assemble               (1 bytes)
+  a link where a file is published -> assemble               (24 bytes)
+  a file where a link is published -> assemble               (1 bytes)
+
+=== neither end in a domain
+  onto nothing                     -> skip not-in-domain     (0 bytes)
+  onto a file                      -> skip not-in-domain     (0 bytes)
+
+=== every decision the type can return is reached
+  skip-source-missing: ok
+  skip-identical: ok
+  skip-target-is-dir: ok
+  skip-target-not-a-dir: ok
+  skip-not-in-domain: ok
+  make-dir: ok
+  rename-in-domain: ok
+  copy-manifest: ok
+  upload: ok
+  assemble: ok
+  patch-local: ok
+
+11 check(s), 0 failure(s)
