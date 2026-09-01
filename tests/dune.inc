@@ -939,6 +939,20 @@
   (action
    (diff demand_ranges.expected demand_ranges.output))))
 
+(subdir unit/eintr
+ (alias
+  (name default)
+  (deps eintr_test.exe))
+ (rule
+  (alias runtest)
+  (target eintr_test.output)
+  (action
+   (with-stdout-to eintr_test.output (ignore-stderr (run ./eintr_test.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff eintr_test.expected eintr_test.output))))
+
 (subdir unit/field_spec
  (alias
   (name default)

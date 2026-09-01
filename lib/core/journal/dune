@@ -6,6 +6,8 @@
  (flags
   (:standard
    -open
+   Tsync_stdlib
+   -open
    Tsync_id
    -open
    Tsync_conf
@@ -16,6 +18,7 @@
  (name tsync_journal)
  (public_name tsync-libs.journal)
  (libraries
+  tsync_stdlib
   tsync_id
   tsync_conf
   tsync_cache_layout

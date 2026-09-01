@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_stdlib
+   -open
    Tsync_logical_key
    -open
    Tsync_checkout
@@ -31,6 +33,7 @@
  (private_modules fuse_fs hidden_ops internal_ops path_ops)
  (optional)
  (libraries
+  tsync_stdlib
   tsync_logical_key
   tsync_cache_layout
   tsync_conf_lwt

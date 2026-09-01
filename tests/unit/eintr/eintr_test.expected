@@ -1,0 +1,15 @@
+
+=== an interruption is retried, in either spelling
+  Unix_error (EINTR, _, _)           done after 3 attempt(s)
+  Sys_error "...: <EINTR>"           done after 3 attempt(s)
+
+=== anything else is the caller's
+  Unix_error (EACCES, _, _)          Unix.Unix_error(Unix.EACCES, "open", "f")
+  Sys_error, another errno           Sys_error("f: No such file or directory")
+  Sys_error, EINTR not the suffix    Sys_error("Interrupted system call: f")
+
+=== the shadowed Sys keeps Stdlib's answers
+  missing                            false (Stdlib: false)
+  a file                             true (Stdlib: true)
+  a directory                        true (Stdlib: true)
+  a dangling symlink                 false (Stdlib: false)
