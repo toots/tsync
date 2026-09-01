@@ -39,6 +39,18 @@ module Over (Io : Io.S) (F : FILES with type 'a io := 'a Io.t) = struct
   let index_path ~cache_root ~domain_name id =
     Filename.concat (Cache_layout.folders_dir ~cache_root domain_name) id
 
+  (* An op is described after the mirror has applied it, and a removal takes the
+     marker its id was read from — so a folder's id has to outlive the folder for
+     the ops under it to stay nameable. Kept beside the id index, which outlives
+     it for the same reason, and on disk because the process that applies an
+     entry is not the one that describes it. *)
+  let by_path_path ~cache_root ~domain_name key =
+    Filename.concat
+      (Filename.concat
+         (Cache_layout.folders_dir ~cache_root domain_name)
+         "by-path")
+      (Digest.to_hex (Digest.string (Logical_key.to_string key)))
+
   type entry = { parent : string; name : string }
 
   let entry_to_string { parent; name } =
@@ -73,6 +85,11 @@ module Over (Io : Io.S) (F : FILES with type 'a io := 'a Io.t) = struct
     let* () = F.mkdir_p dir in
     let path = Filename.concat dir marker_name in
     let* () = F.atomic_write path (Folder.marker_to_string m) in
+    let* () =
+      let p = by_path_path ~cache_root ~domain_name key in
+      let* () = F.ensure_parent p in
+      F.atomic_write p m.Folder.id
+    in
     if Logical_key.is_root key then return_unit
     else
       let* parent =
@@ -100,8 +117,14 @@ module Over (Io : Io.S) (F : FILES with type 'a io := 'a Io.t) = struct
   let lookup_id ~cache_root ~domain_name key =
     if Logical_key.is_root key then return_some Stored_key.root_id
     else
-      let+ existing = read ~cache_root ~domain_name key in
-      Option.map (fun m -> m.Folder.id) existing
+      let* existing = read ~cache_root ~domain_name key in
+      match Option.map (fun m -> m.Folder.id) existing with
+        | Some id -> return_some id
+        | None ->
+            let+ kept =
+              F.read_file_opt (by_path_path ~cache_root ~domain_name key)
+            in
+            Option.map String.trim kept
 
   (* Only a directory has a marker, so finding one is what says the key names a
      folder rather than a file — no stat, and no caller left to guess the kind.
