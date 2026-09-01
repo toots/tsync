@@ -1,12 +1,36 @@
 open Cmdliner
 open Common
 
-(* Which side of the wire each path names, from config alone: a domain root the
-   path sits under, or the local filesystem. *)
-let endpoint_of ?domain cfg path =
-  match Daemons.domain_for_path ?domain ~paths:runtime_paths cfg path with
-    | Some (d, rel) -> `Domain (d.Conf_parsing.name, rel)
-    | None | (exception _) -> `Local path
+(* [<domain>:<path>] names a domain whether or not it is mounted here, which a
+   path alone cannot do. Only a name the config knows is read that way, so a
+   local file whose name happens to carry a colon still reaches the filesystem. *)
+let split_named cfg arg =
+  match String.index_opt arg ':' with
+    | None -> None
+    | Some i ->
+        let name = String.sub arg 0 i in
+        let rel = String.sub arg (i + 1) (String.length arg - i - 1) in
+        if
+          List.exists
+            (fun (d : Conf_parsing.domain) -> d.Conf_parsing.name = name)
+            cfg.Conf_parsing.domains
+        then
+          Some
+            ( name,
+              if String.length rel > 0 && rel.[0] = '/' then
+                String.sub rel 1 (String.length rel - 1)
+              else rel )
+        else None
+
+(* Which side of the wire each argument names: a domain it says outright, a
+   domain root the path sits under, or the local filesystem. *)
+let endpoint_of ?domain cfg arg =
+  match split_named cfg arg with
+    | Some (name, rel) -> `Domain (name, rel)
+    | None -> (
+        match Daemons.domain_for_path ?domain ~paths:runtime_paths cfg arg with
+          | Some (d, rel) -> `Domain (d.Conf_parsing.name, rel)
+          | None | (exception _) -> `Local arg)
 
 let cmd : unit Cmd.t =
   let src_arg =
