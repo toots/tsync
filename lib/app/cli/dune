@@ -6,6 +6,8 @@
  (flags
   (:standard
    -open
+   Tsync_stdlib
+   -open
    Tsync_logical_key
    -open
    Tsync_chunk_integrity
@@ -93,6 +95,7 @@
    Tsync_runtime))
  (name tsync_cli)
  (libraries
+  tsync_stdlib
   tsync_logical_key
   tsync_chunk_integrity
   tsync_history

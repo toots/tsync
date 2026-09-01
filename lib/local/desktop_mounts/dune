@@ -9,5 +9,5 @@
  (enabled_if
   (= %{system} linux))
  (flags
-  (:standard -open Tsync_conf_parsing -open Tsync_runtime))
- (libraries tsync-libs.conf_parsing tsync_runtime))
+  (:standard -open Tsync_stdlib -open Tsync_conf_parsing -open Tsync_runtime))
+ (libraries tsync_stdlib tsync-libs.conf_parsing tsync_runtime))

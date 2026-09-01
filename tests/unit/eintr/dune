@@ -1,0 +1,5 @@
+(executable
+ (flags
+  (:standard -open Tsync_stdlib -open Tsync_test_harness))
+ (name eintr_test)
+ (libraries tsync_stdlib tsync_test_harness unix))

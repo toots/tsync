@@ -1,0 +1,7 @@
+; [Stdlib]'s file operations, minus the one way they go wrong that no caller can
+; see. Opened rather than called through, so a call site keeps the names it had.
+
+(library
+ (name tsync_stdlib)
+ (public_name tsync-libs.stdlib)
+ (libraries unix))

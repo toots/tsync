@@ -6,6 +6,8 @@
  (flags
   (:standard
    -open
+   Tsync_stdlib
+   -open
    Tsync_log
    -open
    Tsync_job_report_lwt
@@ -15,6 +17,7 @@
    Tsync_backend_lwt))
  (name tsync_oneshot)
  (libraries
+  tsync_stdlib
   tsync_ipc_lwt
   tsync_log
   tsync_job_report_lwt

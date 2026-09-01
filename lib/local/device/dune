@@ -10,11 +10,11 @@
   (= %{system} linux))
  (modules linux_device)
  (flags
-  (:standard -open Tsync_filename))
+  (:standard -open Tsync_stdlib -open Tsync_filename))
  (foreign_stubs
   (language c)
   (names linux_clone_stubs))
- (libraries unix tsync-libs.filename tsync_io))
+ (libraries tsync_stdlib unix tsync-libs.filename tsync_io))
 
 (library
  (name tsync_macos_device)

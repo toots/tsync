@@ -5,6 +5,8 @@
  (flags
   (:standard
    -open
+   Tsync_stdlib
+   -open
    Tsync_io
    -open
    Tsync_metrics
@@ -14,4 +16,4 @@
    Tsync_retry))
  (name tsync_durable_queue)
  (public_name tsync-libs.durable_queue)
- (libraries tsync_retry tsync_metrics tsync_log tsync_io unix))
+ (libraries tsync_stdlib tsync_retry tsync_metrics tsync_log tsync_io unix))

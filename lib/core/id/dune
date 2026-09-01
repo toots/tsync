@@ -3,5 +3,7 @@
 
 (library
  (name tsync_id)
+ (flags
+  (:standard -open Tsync_stdlib))
  (public_name tsync-libs.id)
- (libraries unix))
+ (libraries tsync_stdlib unix))
