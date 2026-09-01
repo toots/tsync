@@ -870,13 +870,27 @@ struct
       let* staged = Mfs.exists key in
       if staged then return_unit else f ()
 
+    (* Without the local copy moved aside, both ends keep different bytes under
+       one name, each with nothing left to apply. *)
+    let staged_aside key f =
+      let* staged = Mfs.exists key in
+      let* () =
+        if staged then (
+          let conflict = conflict_key key in
+          ignore (cancel_upload key);
+          let* () = rename_local ~src:key ~dst:conflict in
+          queue_put conflict)
+        else return_unit
+      in
+      f ()
+
     (* Failures propagate: the sync poller must not advance its high-water mark
        past an entry it could not apply, or the op is lost until a full resync. *)
     let apply_one op =
       match op with
         | `Put (rel, _) ->
             let key = Lk.file rel in
-            unless_staged key (fun () ->
+            staged_aside key (fun () ->
                 ignore (cancel_upload key);
                 (* Before the fetch, not after: the manifest's own key is built
                    from the parent folder's id, so a missing one does not fail
@@ -888,7 +902,7 @@ struct
                   | Some state -> write_manifest key state)
         | `Delete rel ->
             let key = Lk.file rel in
-            unless_staged key (fun () ->
+            staged_aside key (fun () ->
                 ignore (cancel_upload key);
                 clear_local key)
         (* The op's id is ignored: on a concurrent create the backend marker
