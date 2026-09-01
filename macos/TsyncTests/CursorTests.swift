@@ -64,26 +64,28 @@ final class CursorTests: XCTestCase {
         XCTAssertEqual(decoded.token, "")
     }
 
-    /// A working-set scan is at a container and a place within it, and both have
-    /// to survive being handed back.
-    func testAWorkingSetPageCarriesBothHalves() throws {
-        let page = try XCTUnwrap(WorkingSetPage.encode(container: "d:abc", after: "photo.jpg"))
+    /// A working-set scan is at a place within a directory with the rest of the
+    /// walk still ahead of it, and all of that has to survive being handed back.
+    func testAWorkingSetPageCarriesTheWalk() throws {
+        let walk = WorkingSetPage(pending: ["d:abc", "d:def"], after: "photo.jpg")
+        let page = try XCTUnwrap(WorkingSetPage.encode(walk))
         let decoded = WorkingSetPage.decode(Cursor.name(page))
-        XCTAssertEqual(decoded.container, "d:abc")
+        XCTAssertEqual(decoded.pending, ["d:abc", "d:def"])
         XCTAssertEqual(decoded.after, "photo.jpg")
     }
 
-    func testAWorkingSetPageAtTheStartOfAContainer() throws {
-        let page = try XCTUnwrap(WorkingSetPage.encode(container: "d:abc", after: nil))
+    func testAWorkingSetPageAtTheStartOfADirectory() throws {
+        let walk = WorkingSetPage(pending: ["d:abc"], after: nil)
+        let page = try XCTUnwrap(WorkingSetPage.encode(walk))
         let decoded = WorkingSetPage.decode(Cursor.name(page))
-        XCTAssertEqual(decoded.container, "d:abc")
+        XCTAssertEqual(decoded.pending, ["d:abc"])
         XCTAssertNil(decoded.after)
     }
 
-    /// No page at all is the start of the scan, not a container called "".
+    /// No page at all is the start of the scan, not a directory called "".
     func testNoWorkingSetPageStartsAtTheRoot() {
         let decoded = WorkingSetPage.decode(nil)
-        XCTAssertEqual(decoded.container, ItemID.rootForm)
+        XCTAssertEqual(decoded.pending, [ItemID.rootForm])
         XCTAssertNil(decoded.after)
     }
 }
