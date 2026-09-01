@@ -53,6 +53,15 @@ final class WorkingSetEnumerator: NSObject, NSFileProviderEnumerator, @unchecked
                 }
                 let (updated, deleted) = ChangeBatch.resolve(
                     batch.ops ?? [], holds: materialized.holds, readOnly: readOnly)
+                let seen = (batch.ops ?? []).map { "\($0.op):\($0.ref ?? "-")" }
+                    .joined(separator: " ")
+                let gone = deleted.map(\.rawValue).joined(separator: " ")
+                log.debug("""
+                    changes from \(since, privacy: .public): \
+                    ops[\(seen, privacy: .public)] \
+                    upd=\(updated.count, privacy: .public) \
+                    del[\(gone, privacy: .public)]
+                    """)
                 if !deleted.isEmpty { observer.didDeleteItems(withIdentifiers: deleted) }
                 if !updated.isEmpty { observer.didUpdate(updated) }
                 // Past the ops that were filtered out as well as the ones

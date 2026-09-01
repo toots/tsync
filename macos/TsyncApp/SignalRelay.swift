@@ -50,6 +50,7 @@ final class SignalRelay: @unchecked Sendable {
         case "changed", "resync":
             // A replicated extension may signal only the working set; the system
             // propagates from there. Signalling a specific item is ignored.
+            log.debug("signalling working set for \(event.event, privacy: .public)")
             manager.signalEnumerator(for: .workingSet) { error in
                 if let error { log.error("signalEnumerator: \(error, privacy: .public)") }
             }
