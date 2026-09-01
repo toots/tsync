@@ -10,14 +10,12 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension,
     private let domain: NSFileProviderDomain
     private let client: DaemonClient
     private let readOnly: Bool
-    private let materialized: MaterializedSet
 
     required init(domain: NSFileProviderDomain) {
         self.domain = domain
         let config = (try? Config.load()) ?? Config(domains: [])
         self.readOnly = config.isReadOnly(domain.displayName)
         self.client = DaemonClient(domain: domain.displayName)
-        self.materialized = MaterializedSet(domain: domain)
         super.init()
         log.info("init: \(domain.identifier.rawValue, privacy: .public)")
     }
@@ -363,7 +361,7 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension,
             // request that does arrive must not list a literal "trash" key.
             throw CocoaError(.featureUnsupported)
         case .workingSet:
-            return WorkingSetEnumerator(client: client, materialized: materialized,
+            return WorkingSetEnumerator(client: client,
                                         domainName: domain.displayName, readOnly: readOnly)
         default:
             return DirectoryEnumerator(container: containerItemIdentifier,
@@ -371,13 +369,6 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension,
         }
     }
 
-    /// The system telling us what it now holds on disk. It fires on every change
-    /// to that set, so the work is a refresh the next enumeration awaits rather
-    /// than anything done here.
-    func materializedItemsDidChange(completionHandler: @escaping () -> Void) {
-        Task { await materialized.refresh() }
-        completionHandler()
-    }
 
     // MARK: - Helpers
 
