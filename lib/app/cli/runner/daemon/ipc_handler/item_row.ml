@@ -67,6 +67,14 @@ struct
       Folder_ids_lwt.lookup_id ~cache_root:C.cache_root
         ~domain_name:C.domain_name key
 
+  (* Naming a removal is the one read that must answer after the mirror has
+     dropped the folder, so it asks the store that keeps an id past its marker. *)
+  let removed_folder_id key =
+    if Logical_key.is_root key then Lwt.return_some Stored_key.root_id
+    else
+      Folder_ids_lwt.lookup_id_removed ~cache_root:C.cache_root
+        ~domain_name:C.domain_name key
+
   (* For a directory key: the id of the folder [key] is. *)
   let own_folder_id key = lookup_folder key
 

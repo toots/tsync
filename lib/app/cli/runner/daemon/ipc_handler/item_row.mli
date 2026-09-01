@@ -45,6 +45,10 @@ module Make (C : Conf_lwt.S) (F : File_ops.S with type 'a io := 'a Lwt.t) : sig
       how a deleted folder comes back from a stat. *)
   val own_folder_id : Logical_key.t -> string option Lwt.t
 
+  (** The id of a folder the mirror may already have dropped, for naming a
+      removal and nothing else. *)
+  val removed_folder_id : Logical_key.t -> string option Lwt.t
+
   (** The id of the folder [key] sits in. *)
   val parent_folder_id : Logical_key.t -> string option Lwt.t
 

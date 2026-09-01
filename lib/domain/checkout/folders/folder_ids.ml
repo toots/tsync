@@ -117,14 +117,21 @@ module Over (Io : Io.S) (F : FILES with type 'a io := 'a Io.t) = struct
   let lookup_id ~cache_root ~domain_name key =
     if Logical_key.is_root key then return_some Stored_key.root_id
     else
-      let* existing = read ~cache_root ~domain_name key in
-      match Option.map (fun m -> m.Folder.id) existing with
-        | Some id -> return_some id
-        | None ->
-            let+ kept =
-              F.read_file_opt (by_path_path ~cache_root ~domain_name key)
-            in
-            Option.map String.trim kept
+      let+ existing = read ~cache_root ~domain_name key in
+      Option.map (fun m -> m.Folder.id) existing
+
+  (* Describing a removal is the one read that must answer for a folder the
+     mirror has already dropped, and it names what is going away rather than
+     resolving anything a caller could still reach. *)
+  let lookup_id_removed ~cache_root ~domain_name key =
+    let* live = lookup_id ~cache_root ~domain_name key in
+    match live with
+      | Some id -> return_some id
+      | None ->
+          let+ kept =
+            F.read_file_opt (by_path_path ~cache_root ~domain_name key)
+          in
+          Option.map String.trim kept
 
   (* Only a directory has a marker, so finding one is what says the key names a
      folder rather than a file — no stat, and no caller left to guess the kind.
