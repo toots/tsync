@@ -146,6 +146,25 @@ let groups =
         ];
     };
     {
+      title = "naming a domain outright";
+      cases =
+        [
+          {
+            name = "domain:path as the source";
+            command =
+              Tsync
+                (Printf.sprintf "rsync --dry-run -v %s:/%s %s" (q domain)
+                   (rel_in_domain "a") (q (local "named")));
+            expect = [ Copied 4; Silent_on "use rsync(1)" ];
+          };
+          {
+            name = "an unknown name is just a path";
+            command = rsync "%s %s" (q "nosuchdomain:/x") (q (local "named2"));
+            expect = [ Says "use rsync(1)" ];
+          };
+        ];
+    };
+    {
       title = "what it refuses";
       cases =
         [
