@@ -56,7 +56,16 @@ final class MaterializedSet: @unchecked Sendable {
         lock.lock()
         if refreshing {
             lock.unlock()
-            return
+            // The caller reads the set as soon as this returns, and an
+            // enumeration served from one no refresh has filled yet answers for
+            // an empty domain.
+            while true {
+                try? await Task.sleep(nanoseconds: 25_000_000)
+                lock.lock()
+                let busy = refreshing
+                lock.unlock()
+                if !busy { return }
+            }
         }
         refreshing = true
         lock.unlock()
