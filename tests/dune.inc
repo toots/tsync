@@ -1285,6 +1285,20 @@
   (action
    (diff queue_claim_test.expected queue_claim_test.output))))
 
+(subdir unit/rsync_plan
+ (alias
+  (name default)
+  (deps rsync_plan.exe))
+ (rule
+  (alias runtest)
+  (target rsync_plan.output)
+  (action
+   (with-stdout-to rsync_plan.output (ignore-stderr (run ./rsync_plan.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff rsync_plan.expected rsync_plan.output))))
+
 (subdir unit/spool_reap
  (alias
   (name default)

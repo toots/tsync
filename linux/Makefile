@@ -1,4 +1,4 @@
-.PHONY: build test deploy configure install-deps install-opam install-system install uninstall e2e conformance stress
+.PHONY: build test deploy configure install-deps install-opam install-system install uninstall e2e conformance stress live-rsync
 
 build:
 	dune build
@@ -85,3 +85,10 @@ conformance:
 # either way).
 stress:
 	cd .. && dune build bin/tsync.exe tests/e2e/stress/stress.exe && ./_build/default/tests/e2e/stress/stress.exe
+
+# The copy command against a real domain, which is where its one claim -- that a
+# copy inside a domain moves no bytes -- can actually be read off the wire.
+# TSYNC_LIVE_CONFIG names a config JSON holding one writable domain; without it
+# the suite exits 2 rather than reporting a pass it did not earn.
+live-rsync:
+	cd .. && dune build bin/tsync.exe tests/live/rsync/live_rsync.exe && ./_build/default/tests/live/rsync/live_rsync.exe
