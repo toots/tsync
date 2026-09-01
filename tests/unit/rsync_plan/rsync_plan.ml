@@ -20,8 +20,7 @@ let manifest ?(name = "f") ?(chunk_size = 8) keys =
 
 let symlink target = Manifest.make_symlink ~name:"l" ~target ~mtime
 
-let local ?keys ?link ?(size = 24L) ?(mtime = mtime) () =
-  { Rsync.size; mtime; keys; link }
+let hashed keys = Rsync.Hashed (Array.of_list keys)
 
 (* What the decision would put on the wire, which is the property the command
    exists to hold down. *)
@@ -124,44 +123,33 @@ let () =
     (`Key (symlink "b"));
 
   Check.case "local -> domain";
-  decided "target absent" ~src:(`File (local ())) (`Absent `Domain);
-  decided "size and mtime agree" ~src:(`File (local ())) (`Key src);
-  decided "size differs" ~src:(`File (local ~size:99L ())) (`Key src);
-  decided "mtime differs" ~src:(`File (local ~mtime:1. ())) (`Key src);
-  decided "hashed, keys agree"
-    ~src:(`File (local ~keys:(Array.of_list three) ()))
+  decided "target absent" ~src:(`File Rsync.Unhashed) (`Absent `Domain);
+  decided "keys agree" ~src:(`File (hashed three)) (`Key src);
+  decided "keys differ"
+    ~src:(`File (hashed [ chunk_key 1; chunk_key 9; chunk_key 3 ]))
     (`Key src);
-  decided "hashed, keys differ"
-    ~src:(`File (local ~keys:[| chunk_key 1; chunk_key 9; chunk_key 3 |] ()))
-    (`Key src);
+  decided "a different count" ~src:(`File (hashed [ chunk_key 1 ])) (`Key src);
 
   Check.case "domain -> local";
   decided "target absent" ~src:(`Key src) (`Absent `Local);
-  decided "not hashed" ~src:(`Key src) (`File (local ()));
-  decided "hashed, all match"
-    ~src:(`Key src)
-    (`File (local ~keys:(Array.of_list three) ()));
-  decided "hashed, two differ"
-    ~src:(`Key src)
-    (`File
-       (local ~keys:[| chunk_key 1; chunk_key 8; chunk_key 7 |] ()));
-  decided "hashed at another size"
-    ~src:(`Key src)
-    (`File (local ~keys:[| chunk_key 1; chunk_key 2 |] ()));
+  decided "nothing to compare against" ~src:(`Key src) (`File Rsync.Unhashed);
+  decided "keys agree" ~src:(`Key src) (`File (hashed three));
+  decided "two differ" ~src:(`Key src)
+    (`File (hashed [ chunk_key 1; chunk_key 8; chunk_key 7 ]));
+  decided "cut at another size" ~src:(`Key src)
+    (`File (hashed [ chunk_key 1; chunk_key 2 ]));
 
   Check.case "links, compared by what they point at";
-  decided "the same target" ~src:(`Key (symlink "a"))
-    (`File (local ~link:"a" ~size:1L ()));
-  decided "another target" ~src:(`Key (symlink "a"))
-    (`File (local ~link:"b" ~size:1L ()));
+  decided "the same target" ~src:(`Key (symlink "a")) (`File (Rsync.Link "a"));
+  decided "another target" ~src:(`Key (symlink "a")) (`File (Rsync.Link "b"));
   decided "a link where a file is published" ~src:(`Key src)
-    (`File (local ~link:"a" ~size:1L ()));
+    (`File (Rsync.Link "a"));
   decided "a file where a link is published" ~src:(`Key (symlink "a"))
-    (`File (local ()));
+    (`File (hashed three));
 
   Check.case "neither end in a domain";
-  decided "onto nothing" ~src:(`File (local ())) (`Absent `Local);
-  decided "onto a file" ~src:(`File (local ())) (`File (local ()));
+  decided "onto nothing" ~src:(`File Rsync.Unhashed) (`Absent `Local);
+  decided "onto a file" ~src:(`File Rsync.Unhashed) (`File Rsync.Unhashed);
 
   Check.case "every decision the type can return is reached";
   List.iter

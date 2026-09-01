@@ -13,13 +13,16 @@ let cmd : unit Cmd.t =
     Arg.(
       required
       & pos 0 (some string) None
-      & info [] ~docv:"SRC" ~doc:"Source path, in a domain or on this machine")
+      & info [] ~docv:"SRC"
+          ~doc:
+            "Source, as a path or as $(b,DOMAIN:/path). A path in a mounted \
+             domain names that domain.")
   in
   let dst_arg =
     Arg.(
       required
       & pos 1 (some string) None
-      & info [] ~docv:"DST" ~doc:"Destination path")
+      & info [] ~docv:"DST" ~doc:"Destination, named the same way as $(i,SRC).")
   in
   let move_arg =
     Arg.(
@@ -30,20 +33,12 @@ let cmd : unit Cmd.t =
              domain and onto nothing, this is a rename and costs one journal \
              entry.")
   in
-  let checksum_arg =
-    Arg.(
-      value & flag
-      & info [ "checksum" ]
-          ~doc:
-            "Compare local files by content rather than by size and mtime. \
-             Costs a full read of each.")
-  in
   let dry_run_arg =
     Arg.(
       value & flag
       & info [ "dry-run"; "n" ] ~doc:"Print what would be done and do nothing.")
   in
-  let run domain src dst move checksum dry_run v =
+  let run domain src dst move dry_run v =
     set_verbose v;
     let cfg = load_config () in
     let src_end = endpoint_of ?domain cfg src
@@ -79,7 +74,7 @@ let cmd : unit Cmd.t =
         (let open Lwt.Syntax in
          let module Rs = Rsync_lwt.Make (C) in
          let+ summary =
-           Rs.run ~move ~checksum ~dry_run
+           Rs.run ~move ~dry_run
              ~on_entry:(fun ~rel decision ->
                current := Some rel;
                (match decision with
@@ -106,5 +101,5 @@ let cmd : unit Cmd.t =
           chunks are already stored, so a copy publishes a manifest and moves \
           nothing; to or from this machine, only what differs is transferred.")
     Term.(
-      const run $ domain_arg $ src_arg $ dst_arg $ move_arg $ checksum_arg
-      $ dry_run_arg $ verbose_arg)
+      const run $ domain_arg $ src_arg $ dst_arg $ move_arg $ dry_run_arg
+      $ verbose_arg)
