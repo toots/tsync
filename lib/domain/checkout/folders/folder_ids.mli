@@ -47,6 +47,15 @@ module Over (Io : Io.S) (_ : FILES with type 'a io := 'a Io.t) : sig
     Logical_key.t ->
     string option Io.t
 
+  (** The id of a folder the mirror may already have dropped, for naming a
+      removal. Separate from {!lookup_id} because a caller resolving something it
+      means to reach must not be answered for a folder that is gone. *)
+  val lookup_id_removed :
+    cache_root:string ->
+    domain_name:string ->
+    Logical_key.t ->
+    string option Io.t
+
   (** The reference an item answers to, [None] for a folder this client cannot
       resolve. The inverse of what {!key_of_id} does for the daemon: a caller
       holding a path names the item before it asks anything over a socket. *)

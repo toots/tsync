@@ -263,7 +263,10 @@ module Make
 
      A removal has nothing left to read, so it carries the naming alone. That is
      all a deletion needs: what it names is going away. *)
-  let op_to_json ~lookup op =
+  let op_to_json ~lookup ~lookup_removed op =
+    let file_ref_removed = file_ref ~lookup:lookup_removed in
+    let dir_ref_removed = dir_ref ~lookup:lookup_removed in
+    let parent_ref_removed = parent_ref ~lookup:lookup_removed in
     let file_ref = file_ref ~lookup and dir_ref = dir_ref ~lookup in
     let parent_ref = parent_ref ~lookup in
     let described ~self ~parent ~fields key =
@@ -303,8 +306,8 @@ module Make
           described ~self ~parent ~fields:[("op", `String "put")] key
       | `Delete rel ->
           let key = Lk.file rel in
-          let* self = file_ref key in
-          let* parent = parent_ref key in
+          let* self = file_ref_removed key in
+          let* parent = parent_ref_removed key in
           removed ~self ~parent ~fields:[("op", `String "delete")] key
       | `Mkdir (rel, id) ->
           let key = Lk.dir rel in
@@ -313,8 +316,8 @@ module Make
           described ~self ~parent ~fields:[("op", `String "mkdir")] key
       | `Rmdir (rel, id) ->
           let key = Lk.dir rel in
-          let* self = dir_ref key id in
-          let* parent = parent_ref key in
+          let* self = dir_ref_removed key id in
+          let* parent = parent_ref_removed key in
           removed ~self ~parent
             ~fields:([("op", `String "rmdir")] @ dir_id_field id)
             key
@@ -409,7 +412,7 @@ module Make
           match List.rev entries with (k, _) :: _ -> Some k | [] -> anchor
         in
         let+ described =
-          Lwt_list.map_s (op_to_json ~lookup:lookup_folder) ops
+          Lwt_list.map_s (op_to_json ~lookup:lookup_folder ~lookup_removed:R.removed_folder_id) ops
         in
         (* A folder this client has no id for at all — the mirror and the folder
            index disagreeing, not a poller yet to catch up. The caller re-lists,
