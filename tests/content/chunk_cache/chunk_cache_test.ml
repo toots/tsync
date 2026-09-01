@@ -279,14 +279,23 @@ let () =
     (let* () = show "cold" g1 in
 
      (* Two readers, one GET, and both told it came from a backend -- the one
-        that only joined waited on the network just as the other did. *)
+        that only joined waited on the network just as the other did. The bytes
+        are the fetcher's alone: a file credited the group once per waiting
+        reader reads as more downloaded than it is long. *)
      let* () =
-       let+ fetched =
-         Lwt.all
-           [Cc.ensure_fetched ~group:g1 (); Cc.ensure_fetched ~group:g1 ()]
-       in
-       Printf.printf "%-28s backend=%s\n" "2 concurrent ensures"
-         (String.concat "," (List.map string_of_bool fetched))
+       (* Started by hand rather than inside the list, whose elements OCaml is
+          free to evaluate in either order: which of the two runs the fetch is
+          the whole point here. *)
+       let fetcher = Cc.ensure_fetched ~group:g1 () in
+       let joiner = Cc.ensure_fetched ~group:g1 () in
+       let+ fetched = Lwt.all [fetcher; joiner] in
+       Printf.printf "%-28s %s\n" "2 concurrent ensures"
+         (String.concat ", "
+            (List.map
+               (fun (f : Chunk_cache.fetch) ->
+                 Printf.sprintf "backend=%b pulled=%d" f.Chunk_cache.waited
+                   f.Chunk_cache.pulled)
+               fetched))
      in
      let* () = show "after 2 concurrent ensures" g1 in
 

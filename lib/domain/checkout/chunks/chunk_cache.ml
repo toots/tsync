@@ -64,6 +64,13 @@ end
    all. *)
 type served = { bytes : int; fetched : int; from_backend : bool }
 
+(* What a fetch cost the caller that asked for it, which is two questions rather
+   than one: [waited] covers a caller that joined an in-flight fetch as well as
+   the one that ran it, while [pulled] is the bytes this caller put on the wire.
+   A joiner pulled none of them, and a partly filled body only the members it
+   was missing. *)
+type fetch = { waited : bool; pulled : int }
+
 (* What a store holds, so asking whether it is over its cap is a comparison
    rather than a walk of every shard.
 
@@ -156,8 +163,14 @@ struct
 
      Owner and joiners share one record, so a reader that only waited on someone
      else's fetch is told the group came from a backend too -- which is what it
-     was held up by. *)
-  type inflight = { mutable done_ : unit Io.t; mutable from_backend : bool }
+     was held up by. The bytes stay the owner's: charging every joiner the
+     group as well counts one fetch as many, and a tray row built from that runs
+     past the size of the file it is drawn against. *)
+  type inflight = {
+    mutable done_ : unit Io.t;
+    mutable from_backend : bool;
+    mutable pulled : int;
+  }
 
   let fetching : (string, inflight) Hashtbl.t = Hashtbl.create 64
   let in_flight () = Hashtbl.length fetching
@@ -273,7 +286,8 @@ struct
           ())
         owed
     in
-    Part.drop ~key:(key group) ~body:(path group)
+    let+ () = Part.drop ~key:(key group) ~body:(path group) in
+    List.fold_left (fun acc i -> acc + Manifest.Group.size group i) 0 owed
 
   (* A record beside the body, not the body itself, is what says there is
      something here worth topping up. A forced re-fetch of a whole body is
@@ -288,18 +302,21 @@ struct
           let* () = write_group group (member group) in
           (* A record left behind by a body the cap took is about a body that
              is not there; the one just written is whole. *)
-          Part.drop ~key:(key group) ~body:(path group))
+          let+ () = Part.drop ~key:(key group) ~body:(path group) in
+          Manifest.Group.bytes group)
 
   (* Concurrent callers await the same fetch; [force] re-fetches a body believed
-     corrupt. Answers whether the body had to come from a backend. *)
+     corrupt. Answers what the body cost this caller. *)
   let ensure_fetched ?(force = false) ~group () =
     let key = Manifest.Group.key group in
     match Hashtbl.find_opt fetching key with
       | Some entry ->
           let+ () = entry.done_ in
-          entry.from_backend
+          { waited = entry.from_backend; pulled = 0 }
       | None ->
-          let entry = { done_ = return_unit; from_backend = false } in
+          let entry =
+            { done_ = return_unit; from_backend = false; pulled = 0 }
+          in
           (* Nothing below runs until this is woken, which is after the entry is
              in the table: a second caller must find it there rather than start
              a fetch of its own. *)
@@ -314,7 +331,8 @@ struct
                   (* Before [fetch], not inside it: the wait on [slots] is part
                      of what the network costs this reader. *)
                   entry.from_backend <- true;
-                  fetch group))
+                  let+ n = fetch group in
+                  entry.pulled <- n))
               (fun () ->
                 Hashtbl.remove fetching key;
                 return_unit)
@@ -323,7 +341,7 @@ struct
           Hashtbl.replace fetching key entry;
           Io.wakeup_later start ();
           let+ () = t in
-          entry.from_backend
+          { waited = entry.from_backend; pulled = entry.pulled }
 
   let ensure ?force ~group () =
     let+ _ = ensure_fetched ?force ~group () in
@@ -509,9 +527,9 @@ struct
     (* A refetch went to a backend by construction, whatever the first [ensure]
        answered. *)
     let refetch () =
-      let* _ = ensure_fetched ~force:true ~group () in
+      let* f = ensure_fetched ~force:true ~group () in
       let+ n = attempt () in
-      { bytes = n; fetched = Manifest.Group.bytes group; from_backend = true }
+      { bytes = n; fetched = f.pulled; from_backend = true }
     in
     let read_or_refetch ~fetched ~from_backend =
       Io.catch
@@ -530,9 +548,8 @@ struct
          it costs, and leaves every read after this one with nothing to fetch at
          all. Asking for less would be paying the same round trip for a worse
          cache. *)
-      let* from_backend = ensure_fetched ~group () in
-      read_or_refetch ~from_backend
-        ~fetched:(if from_backend then Manifest.Group.bytes group else 0)
+      let* f = ensure_fetched ~group () in
+      read_or_refetch ~from_backend:f.waited ~fetched:f.pulled
     else (
       (* Whatever else is on its way, this reader asks for its own bytes and
          waits for nothing more. A fetch of the whole group may well be in

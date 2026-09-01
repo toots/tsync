@@ -1,5 +1,5 @@
 cold                         present=false gets=0 in_flight=0
-2 concurrent ensures         backend=true,true
+2 concurrent ensures         backend=true pulled=16, backend=true pulled=0
 after 2 concurrent ensures   present=true  gets=1 in_flight=0
 cached read                  body="first chunk body" gets=1 backend=false
 layout                       testdom/chunks/abb/abbd5be7f7f1ea08-164c4bd493e0e119

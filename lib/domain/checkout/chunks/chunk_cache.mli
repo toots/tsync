@@ -71,6 +71,13 @@ end
     or nothing. *)
 type served = { bytes : int; fetched : int; from_backend : bool }
 
+(** What a fetch cost the caller that asked for it. [waited] covers a caller
+    that joined an in-flight fetch as well as the one that ran it, since both
+    were held up by the network; [pulled] is the bytes this caller put on the
+    wire, which a joiner did not pay for. Two answers because crediting a file
+    the group once per waiting reader counts one fetch as many. *)
+type fetch = { waited : bool; pulled : int }
+
 (** What a store holds, kept per store rather than per instantiation: two
     functor instances over one cache root are two views of one directory. The
     store maintains this on its write path, where the bytes are known;
@@ -96,11 +103,9 @@ module Make
       for a body believed corrupt. *)
   val ensure : ?force:bool -> group:Manifest.Group.t -> unit -> unit Io.t
 
-  (** {!ensure}, answering whether the body had to come from a backend. A caller
-      joining an in-flight fetch gets [true] as well: it waited on the network
-      just as the caller that started the fetch did. *)
+  (** {!ensure}, answering what the body cost this caller: see {!fetch}. *)
   val ensure_fetched :
-    ?force:bool -> group:Manifest.Group.t -> unit -> bool Io.t
+    ?force:bool -> group:Manifest.Group.t -> unit -> fetch Io.t
 
   (** Write a group from bytes the caller already holds, one member at a time —
       the tail of a promotion, where every member is a local staged body. No-op

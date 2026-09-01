@@ -154,6 +154,21 @@ let () =
      check "a row that has fallen quiet goes away" ~why:describe
        (D.pulling_now ~now:later () = []);
 
+     (* Two readers landing on one group share a single fetch, so the file is
+        credited what crossed the wire once and not once per reader. *)
+     let* shared = publish ~salt:4 "shared.bin" in
+     let* (_ : int list) =
+       Lwt_list.map_p (fun () -> read_at shared ~offset:0) [(); ()]
+     in
+     (match row_for shared with
+       | None -> check "one fetch is credited once" ~why:describe false
+       | Some row ->
+           check "one fetch is credited once"
+             ~why:(fun () ->
+               Printf.sprintf "bytes=%d want<=%d" row.D.bytes cache_chunk_size)
+             (row.D.bytes <= cache_chunk_size));
+     forget_rows ();
+
      (* A materialization has no read of its own to credit: it fetches every
         group up front, so the reassembly that follows finds them local. The
         fetch credits it instead, or a file pulled from the frontend shows in the

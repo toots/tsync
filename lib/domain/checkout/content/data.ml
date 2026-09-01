@@ -368,9 +368,9 @@ struct
                           match Manifest.Group.of_table ~table ~per i with
                             | Some group ->
                                 let+ fetched = Cc.ensure_fetched ~group () in
-                                if fetched then
+                                if fetched.Chunk_cache.pulled > 0 then
                                   credit_pull id ~size
-                                    (Manifest.Group.bytes group)
+                                    fetched.Chunk_cache.pulled
                             | None -> return_unit
                         in
                         go (i + per)
@@ -1263,13 +1263,13 @@ struct
       Bounded.iter_with group_slots
         (fun group ->
           let+ fetched = Cc.ensure_fetched ~group () in
-          let bytes = Manifest.Group.bytes group in
           (* The bar counts every group: one already on disk is progress toward a
              materialized file. The tray row counts only what crossed the wire, or
              a part-cached file credits its local groups at once and reads as a
              rate in the gigabytes. *)
-          credit key bytes;
-          if fetched then credit_pull key ~size:owed bytes)
+          credit key (Manifest.Group.bytes group);
+          if fetched.Chunk_cache.pulled > 0 then
+            credit_pull key ~size:owed fetched.Chunk_cache.pulled)
         groups
 
     (* Counted here, not at the callers, so every route to a materialized file is
