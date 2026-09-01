@@ -27,7 +27,12 @@ enum ChangeBatch {
             else { continue }
             // Either end of a move: an item leaving a folder the system holds is
             // as much a change to that folder as one arriving in it.
-            guard holds(op.parentRef) || holds(op.srcParentRef) else { continue }
+            //
+            // A removal is told whatever it sits under, since the folder above it
+            // goes in the same batch and the system keeps one it still holds a
+            // child of.
+            guard op.isDeletion || holds(op.parentRef) || holds(op.srcParentRef)
+            else { continue }
 
             // A directory keeps its reference across a move, so this fires only
             // for a file, or a directory that became something else.
