@@ -33,8 +33,7 @@ let folder_versions ~versions_prefix ~folder_id =
   Stored_key.namespace ~prefix:versions_prefix ~folder_id
 
 module Over (Io : Io.S) = struct
-  let ( let* ) = Io.bind
-  let ( let+ ) x f = Io.map f x
+  open Io_syntax.Make (Io)
 
   module Make
       (C : Conf.S with type 'a io = 'a Io.t)

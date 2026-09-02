@@ -80,21 +80,7 @@ module Make
     (Lock : Lock.S with type 'a io := 'a Io.t)
     (Files : FILES with type 'a io := 'a Io.t) =
 struct
-  let ( let* ) = Io.bind
-  let ( let+ ) x f = Io.map f x
-
-  let rec iter_s f = function
-    | [] -> Io.return ()
-    | x :: rest ->
-        let* () = f x in
-        iter_s f rest
-
-  let rec map_s f = function
-    | [] -> Io.return []
-    | x :: rest ->
-        let* y = f x in
-        let+ ys = map_s f rest in
-        y :: ys
+  open Io_syntax.Make (Io)
 
   (* [f] runs only if no process claims [dir]. *)
   let with_claim dir f =

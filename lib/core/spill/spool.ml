@@ -14,24 +14,12 @@ module type APPEND = sig
   val close : t -> unit io
 end
 
-(** The four calls a spool makes of a filesystem, spelled as {!Fs} spells them
-    so that one can be handed over as it stands. *)
-module type FILES = sig
-  type 'a io
-
-  val mkdir_p : string -> unit io
-  val unlink_quiet : string -> unit io
-  val readdir_list_quiet : string -> string list io
-  val stat_opt : string -> Unix.stats option io
-end
-
 module Make
     (Io : Io.S)
-    (Files : FILES with type 'a io := 'a Io.t)
+    (Files : Fs.S with type 'a io := 'a Io.t)
     (Append : APPEND with type 'a io := 'a Io.t) =
 struct
-  let ( let* ) = Io.bind
-  let ( let+ ) x f = Io.map f x
+  open Io_syntax.Make (Io)
 
   type t = { path : string; out : Append.t }
 

@@ -62,28 +62,6 @@ type listed = Checkout.listed = {
   mtime : float;
 }
 
-module type FS = sig
-  type 'a io
-
-  val mkdir_p : string -> unit io
-  val ensure_parent : string -> unit io
-  val unlink_quiet : string -> unit io
-  val readdir_list : string -> string list io
-  val read : string -> Bigstring.t -> offset:int64 -> int io
-  val stat_opt_large : string -> Unix.LargeFile.stats option io
-
-  val lstat_kind :
-    string -> [ `Dir | `File of int64 | `Symlink of string | `Missing ] io
-end
-
-module type SYSCALLS = sig
-  type 'a io
-
-  val symlink : ?to_dir:bool -> string -> string -> unit io
-  val utimes : string -> float -> float -> unit io
-  val lstat : string -> Unix.stats io
-end
-
 module type FOLDER_IDS = sig
   type 'a io
 
@@ -190,8 +168,8 @@ type summary = {
 
 module Over
     (Io : Io.S)
-    (_ : FS with type 'a io := 'a Io.t)
-    (_ : SYSCALLS with type 'a io := 'a Io.t)
+    (_ : Fs.S with type 'a io := 'a Io.t)
+    (_ : Syscalls.S with type 'a io := 'a Io.t)
     (_ : FOLDER_IDS with type 'a io := 'a Io.t)
     (_ : OBJECTS with type 'a io := 'a Io.t)
     (_ : MANIFESTS with type 'a io := 'a Io.t)

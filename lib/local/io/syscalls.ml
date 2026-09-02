@@ -2,11 +2,11 @@
    anything wrong, so every wrapper below just calls again; the daemon takes
    SIGCHLD and SIGWINCH often enough for this to matter.
 
-   The rule is here and the calls are the platform's, which is what {!Sys} is
+   The rule is here and the calls are the platform's, which is what {!S} is
    for: it lists what a platform owes, in the names and argument order the
    caller already knows. *)
 
-module type SYSCALLS = sig
+module type S = sig
   type 'a io
   type fd
 
@@ -39,7 +39,9 @@ module type SYSCALLS = sig
   end
 end
 
-module Make (Io : Io.S) (Sys : SYSCALLS with type 'a io := 'a Io.t) = struct
+module Make (Io : Io.S) (Sys : S with type 'a io := 'a Io.t) = struct
+  type fd = Sys.fd
+
   let rec retry_eintr f =
     Io.catch f (function
       | Unix.Unix_error (Unix.EINTR, _, _) -> retry_eintr f

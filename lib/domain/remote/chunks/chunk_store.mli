@@ -11,16 +11,7 @@
     supplies, so a collection moving the keyspace underneath it is invisible
     here. *)
 
-(** The bound on what runs at once. Only [use] is asked for: this decides what
-    to hold a slot for, never how wide the pool is. *)
-module type POOLS = sig
-  type 'a io
-  type t
-
-  val use : t -> (unit -> 'a io) -> 'a io
-end
-
-module Over (Io : Io.S) (Pools : POOLS with type 'a io := 'a Io.t) : sig
+module Over (Io : Io.S) (Pools : Bounded.S with type 'a io := 'a Io.t) : sig
   (** What the store needs of the domain below it. Presence rather than an
       entry: the only thing asked of a store is whether it holds a key, and
       answering less keeps the backend's vocabulary out of this one. *)

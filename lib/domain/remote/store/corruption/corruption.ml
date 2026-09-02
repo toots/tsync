@@ -12,15 +12,7 @@ type report = {
 let ttl = 5.
 
 module Over (Io : Io.S) = struct
-  let ( let* ) = Io.bind
-  let ( let+ ) x f = Io.map f x
-
-  let rec map_s f = function
-    | [] -> Io.return []
-    | x :: rest ->
-        let* y = f x in
-        let+ ys = map_s f rest in
-        y :: ys
+  open Io_syntax.Make (Io)
 
   (* [loaded] is what the listing settled on, kept beside the listing itself so
      that {!Make.forget} can drop a key without waiting: a caller clearing a

@@ -131,8 +131,8 @@ module Over
     (Io : Io.S)
     (Hc : HTTP with type 'a io := 'a Io.t)
     (Post : Gcs_auth.POST with type 'a io := 'a Io.t)
-    (Lock : Gcs_auth.LOCKS with type 'a io := 'a Io.t)
-    (Bounded : Verifier.POOLS with type 'a io := 'a Io.t)
+    (Lock : Lock.S with type 'a io := 'a Io.t)
+    (Bounded : Bounded.S with type 'a io := 'a Io.t)
     (Wall : Gcs_auth.CLOCK)
     (Clock : Clock.S with type 'a io := 'a Io.t) =
 struct
@@ -140,8 +140,7 @@ struct
 
   module type Store = Backend.S with type 'a io := 'a Io.t
 
-  let ( let* ) = Io.bind
-  let ( let+ ) x f = Io.map f x
+  open Io_syntax.Make (Io)
 
   (* Google Cloud Storage over the JSON API: every request carries a bearer token
      minted from a service-account key ({!Gcs_auth}), and unlike s3 there is no

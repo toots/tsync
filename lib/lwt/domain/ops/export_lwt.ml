@@ -11,6 +11,6 @@ module Content = struct
 end
 
 include
-  Export.Over (Io_lwt.Core) (Io_lwt.Fs) (Io_lwt.Retry) (Tree) (Checkout_lwt)
+  Export.Over (Io_lwt.Core) (Io_lwt.Fs) (Io_lwt.Syscalls) (Tree) (Checkout_lwt)
     (Staged_lwt.Manifest)
     (Content)

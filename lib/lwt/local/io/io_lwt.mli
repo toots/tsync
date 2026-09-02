@@ -3,8 +3,8 @@
 
 module Core : Io.S with type 'a t = 'a Lwt.t and type 'a u = 'a Lwt.u
 
-module Syscalls :
-  Retry.SYSCALLS with type 'a io := 'a Lwt.t and type fd = Lwt_unix.file_descr
+module Unix_syscalls :
+  Syscalls.S with type 'a io := 'a Lwt.t and type fd = Lwt_unix.file_descr
 
 module Fs_primitives :
   Fs.PRIMITIVES with type 'a io := 'a Lwt.t and type fd := Lwt_unix.file_descr
@@ -18,10 +18,10 @@ module Lock :
      and type condition = unit Lwt_condition.t
 
 module Bounded : module type of Tsync_io.Bounded.Make (Core)
-module Retry : module type of Tsync_io.Retry.Make (Core) (Syscalls)
+module Syscalls : module type of Tsync_io.Syscalls.Make (Core) (Unix_syscalls)
 
 module Fs : sig
-  include module type of Tsync_io.Fs.Make (Core) (Syscalls) (Fs_primitives)
+  include module type of Tsync_io.Fs.Make (Core) (Unix_syscalls) (Fs_primitives)
 
   (** {!mkdir_p} for callers running before there is a loop to run in: process
       startup, the CLI, the config writer. *)

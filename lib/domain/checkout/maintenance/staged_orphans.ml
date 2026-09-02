@@ -12,16 +12,6 @@
 
 open Sweep
 
-module type FILES = sig
-  type 'a io
-
-  val is_directory : string -> bool io
-  val readdir_list : string -> string list io
-  val reap_older_than : cutoff:float -> string -> bool io
-  val stat_opt : string -> Unix.stats option io
-  val unlink_quiet : string -> unit io
-end
-
 (** The staged tree, for the one question this asks of it: which bodies are
     still named. *)
 module type STAGED = sig
@@ -35,15 +25,10 @@ end
 
 module Over
     (Io : Io.S)
-    (Files : FILES with type 'a io := 'a Io.t)
+    (Files : Fs.S with type 'a io := 'a Io.t)
     (Staged : STAGED with type 'a io := 'a Io.t) =
 struct
-  let ( let* ) = Io.bind
-  let ( let+ ) x f = Io.map f x
-
-  let rec fold_left_s f acc = function
-    | [] -> Io.return acc
-    | x :: rest -> Io.bind (f acc x) (fun acc -> fold_left_s f acc rest)
+  open Io_syntax.Make (Io)
 
   module Make (C : Conf.S with type 'a io = 'a Io.t) = struct
     module Sm = Staged.Make (C)

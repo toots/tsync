@@ -107,20 +107,10 @@ module Over
     (Q : QUEUE with type 'a io := 'a Io.t)
     (W : WAL with type 'a io := 'a Io.t and type records := Q.Records.t) =
 struct
-  let ( let* ) = Io.bind
-  let ( let+ ) x f = Io.map f x
+  open Io_syntax.Make (Io)
 
   (* Bound before [Make] shadows [W] with its per-domain result. *)
   module Owed = W.Owed
-
-  let return_unit = Io.return ()
-  let return_some x = Io.return (Some x)
-  let return_true = Io.return true
-  let return_false = Io.return false
-
-  let rec iter_s f = function
-    | [] -> return_unit
-    | x :: rest -> Io.bind (f x) (fun () -> iter_s f rest)
 
   module Make
       (C : Conf.S with type 'a io = 'a Io.t)

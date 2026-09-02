@@ -22,24 +22,6 @@ type summary = {
   failed : int;
 }
 
-(** Reading the local tree an import walks. *)
-module type FS = sig
-  type 'a io
-
-  val lstat_kind :
-    string -> [ `Dir | `File of int64 | `Symlink of string | `Missing ] io
-
-  val readdir_list : string -> string list io
-  val stat_opt_large : string -> Unix.LargeFile.stats option io
-end
-
-module type SYSCALLS = sig
-  type 'a io
-
-  val stat : string -> Unix.stats io
-  val lstat : string -> Unix.stats io
-end
-
 (** The id naming a folder's own namespace, minted if this client has none. *)
 module type FOLDER_IDS = sig
   type 'a io
@@ -112,8 +94,8 @@ end
 
 module Over
     (Io : Io.S)
-    (_ : FS with type 'a io := 'a Io.t)
-    (_ : SYSCALLS with type 'a io := 'a Io.t)
+    (_ : Fs.S with type 'a io := 'a Io.t)
+    (_ : Syscalls.S with type 'a io := 'a Io.t)
     (_ : Listing.SPOOL with type 'a io := 'a Io.t)
     (_ : FOLDER_IDS with type 'a io := 'a Io.t)
     (_ : OBJECTS with type 'a io := 'a Io.t)

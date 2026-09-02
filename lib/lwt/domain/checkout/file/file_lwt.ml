@@ -5,7 +5,7 @@ include File
    not have this", while one that pulls a folder when asked reads it as "not
    fetched yet". Neither answer belongs here. *)
 module Over_tree (Ck : File.TREE with type 'a io := 'a Io_lwt.Core.t) =
-  File.Over (Io_lwt.Core) (Io_lwt.Fs) (Io_lwt.Retry) (Io_lwt.Lock) (Wal_lwt)
+  File.Over (Io_lwt.Core) (Io_lwt.Fs) (Io_lwt.Syscalls) (Io_lwt.Lock) (Wal_lwt)
     (Manifests_lwt)
     (Ck)
     (Staged_lwt.Manifest)

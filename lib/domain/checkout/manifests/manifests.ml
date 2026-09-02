@@ -7,24 +7,6 @@
 
 open Manifest
 
-(* What this needs of a filesystem, and of the marker the layout keeps
-   beside a directory. *)
-module type FILES = sig
-  type 'a io
-
-  val mkdir_p : string -> unit io
-  val stat_opt : string -> Unix.stats option io
-  val unlink_quiet : string -> unit io
-
-  val atomic_write_at :
-    string ->
-    size:int ->
-    ((offset:int -> Bigstring.t -> unit io) -> unit io) ->
-    unit io
-
-  val record_dir_name : string -> string -> unit io
-end
-
 (* What this needs of the staged half: the edits a client has over the
    published manifest, if any. *)
 module type STAGED = sig
@@ -37,19 +19,10 @@ end
 
 module Over
     (Io : Io.S)
-    (F : FILES with type 'a io := 'a Io.t)
+    (F : Cache_layout.FS with type 'a io := 'a Io.t)
     (Sm : STAGED with type 'a io := 'a Io.t) =
 struct
-  let ( let* ) = Io.bind
-  let ( let+ ) x f = Io.map f x
-  let return_unit = Io.return ()
-  let return_some x = Io.return (Some x)
-  let return_true = Io.return true
-  let return_false = Io.return false
-
-  let rec iter_s f = function
-    | [] -> return_unit
-    | x :: rest -> Io.bind (f x) (fun () -> iter_s f rest)
+  open Io_syntax.Make (Io)
 
   let dir ~cache_root domain_name =
     Cache_layout.manifests_dir ~cache_root domain_name

@@ -1,27 +1,5 @@
-(* What this needs of a filesystem, which is seven calls. *)
-module type FILES = sig
-  type 'a io
-
-  val read_file_opt : string -> string option io
-  val readdir_list_quiet : string -> string list io
-  val is_directory : string -> bool io
-  val mkdir_p : string -> unit io
-  val ensure_parent : string -> unit io
-  val atomic_write : string -> string -> unit io
-  val unlink_quiet : string -> unit io
-end
-
-module Over (Io : Io.S) (F : FILES with type 'a io := 'a Io.t) = struct
-  let ( let* ) = Io.bind
-  let ( let+ ) x f = Io.map f x
-  let return_unit = Io.return ()
-  let return_some x = Io.return (Some x)
-  let return_true = Io.return true
-  let return_false = Io.return false
-
-  let rec iter_s f = function
-    | [] -> return_unit
-    | x :: rest -> Io.bind (f x) (fun () -> iter_s f rest)
+module Over (Io : Io.S) (F : Fs.S with type 'a io := 'a Io.t) = struct
+  open Io_syntax.Make (Io)
 
   let marker_name = Stored_key.folder_marker_leaf
 

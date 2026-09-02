@@ -11,18 +11,6 @@
 
 open Sweep
 
-module type FILES = sig
-  type 'a io
-
-  val unlink_quiet : string -> unit io
-end
-
-module type SYSCALLS = sig
-  type 'a io
-
-  val file_exists : string -> bool io
-end
-
 (** The store, for what only it can answer: what it holds, and what it counts
     itself as holding. Already built for the domain — the cache is made with a
     backend to fetch through, so this takes the instance rather than making one.
@@ -44,14 +32,12 @@ end
 
 module Make
     (Io : Io.S)
-    (Files : FILES with type 'a io := 'a Io.t)
-    (Retry : SYSCALLS with type 'a io := 'a Io.t)
+    (Files : Fs.S with type 'a io := 'a Io.t)
+    (Retry : Syscalls.S with type 'a io := 'a Io.t)
     (S : STORE with type 'a io := 'a Io.t)
     (C : Conf.S with type 'a io = 'a Io.t) =
 struct
-  let ( let* ) = Io.bind
-  let ( let+ ) x f = Io.map f x
-  let return_unit = Io.return ()
+  open Io_syntax.Make (Io)
 
   (* Exact, so the count is set from it wherever it runs. *)
   let recount items =

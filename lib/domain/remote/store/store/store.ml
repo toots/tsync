@@ -15,8 +15,7 @@ module type BATCHED = sig
 end
 
 module Over (Io : Io.S) (Batched : BATCHED with type 'a io := 'a Io.t) = struct
-  let ( let* ) = Io.bind
-  let ( let+ ) x f = Io.map f x
+  open Io_syntax.Make (Io)
 
   module Make
       (C : Conf.S with type 'a io = 'a Io.t)

@@ -25,15 +25,7 @@ module Over
     (Inode_layout : INODE_LAYOUT with type 'a io := 'a Io.t)
     (Manifests : MANIFESTS with type 'a io := 'a Io.t) =
 struct
-  let ( let* ) = Io.bind
-  let ( let+ ) x f = Io.map f x
-
-  let rec filter_map_s f = function
-    | [] -> Io.return []
-    | x :: rest -> (
-        let* y = f x in
-        let+ ys = filter_map_s f rest in
-        match y with Some y -> y :: ys | None -> ys)
+  open Io_syntax.Make (Io)
 
   module Make (C : Conf.S with type 'a io = 'a Io.t) = struct
     module Lk = Logical_key.Make (C)

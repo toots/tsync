@@ -51,30 +51,6 @@ end
 let max_known = ref 100_000
 let set_max_known n = max_known := n
 
-(** The bound on what runs at once: chunk buffers and reads in flight. *)
-module type POOLS = sig
-  type 'a io
-  type t
-
-  val create : ?max_waiting:int -> ?name:string -> max:int -> unit -> t
-  val use : t -> (unit -> 'a io) -> 'a io
-  val width : t -> int
-  val each : width:int -> (unit -> (unit -> unit io) option) -> unit io
-end
-
-(** Opening the source file, and asking whether it moved while it was read. *)
-module type SYSCALLS = sig
-  type 'a io
-  type fd
-
-  val openfile : string -> Unix.open_flag list -> int -> fd io
-  val close : fd -> unit io
-
-  module LargeFile : sig
-    val fstat : fd -> Unix.LargeFile.stats io
-  end
-end
-
 (** The key scheme a caller holding real paths wants. *)
 module type INODE_LAYOUT = sig
   type 'a io
@@ -136,16 +112,15 @@ end
 
 module Over
     (Io : Io.S)
-    (Pools : POOLS with type 'a io := 'a Io.t)
-    (Syscalls : SYSCALLS with type 'a io := 'a Io.t)
+    (Pools : Bounded.S with type 'a io := 'a Io.t)
+    (Syscalls : Syscalls.S with type 'a io := 'a Io.t)
     (Inode_layout : INODE_LAYOUT with type 'a io := 'a Io.t)
     (Manifests : MANIFESTS with type 'a io := 'a Io.t)
     (Versions : VERSIONS with type 'a io := 'a Io.t)
     (Collection : COLLECTION with type 'a io := 'a Io.t)
     (Corruption : CORRUPTION with type 'a io := 'a Io.t) =
 struct
-  let ( let* ) = Io.bind
-  let ( let+ ) x f = Io.map f x
+  open Io_syntax.Make (Io)
 
   module Bodies = Chunk_store.Over (Io) (Pools)
 

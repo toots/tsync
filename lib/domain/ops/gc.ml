@@ -48,39 +48,6 @@ module type LOCKFILE = sig
   val drop : t -> unit io
 end
 
-(** The tree a collection walks and the two spaces it moves chunks between. *)
-module type FS = sig
-  type 'a io
-
-  val ensure_parent : string -> unit io
-  val mkdir_p : string -> unit io
-  val readdir_list : string -> string list io
-  val readdir_list_quiet : string -> string list io
-  val unlink_quiet : string -> unit io
-  val rm_rf : string -> unit io
-
-  val lstat_kind :
-    string -> [ `Dir | `File of int64 | `Symlink of string | `Missing ] io
-end
-
-module type SYSCALLS = sig
-  type 'a io
-
-  val rename : string -> string -> unit io
-  val rmdir : string -> unit io
-  val file_exists : string -> bool io
-end
-
-(** The bound on what runs at once. *)
-module type POOLS = sig
-  type 'a io
-  type t
-
-  val create : ?max_waiting:int -> ?name:string -> max:int -> unit -> t
-  val use : t -> (unit -> 'a io) -> 'a io
-  val filter_map_with : t -> ('a -> 'b option io) -> 'a list -> 'b list io
-end
-
 (** What a run records about itself, and the move that keeps a chunk alive. *)
 module type COLLECTION = sig
   type 'a io
@@ -95,52 +62,17 @@ module type COLLECTION = sig
   end
 end
 
-(** The pause between passes when a run is asked to keep going. *)
-module type CLOCK = sig
-  type 'a io
-
-  val sleep : float -> unit io
-end
-
 module Over
     (Io : Io.S)
-    (Files : FS with type 'a io := 'a Io.t)
-    (Syscalls : SYSCALLS with type 'a io := 'a Io.t)
-    (Pools : POOLS with type 'a io := 'a Io.t)
+    (Files : Fs.S with type 'a io := 'a Io.t)
+    (Syscalls : Syscalls.S with type 'a io := 'a Io.t)
+    (Pools : Bounded.S with type 'a io := 'a Io.t)
     (Lockfile : LOCKFILE with type 'a io := 'a Io.t)
-    (Clock : CLOCK with type 'a io := 'a Io.t)
+    (Clock : Clock.S with type 'a io := 'a Io.t)
     (Space : COLLECTION with type 'a io := 'a Io.t) =
 struct
-  let ( let* ) = Io.bind
-  let ( let+ ) x f = Io.map f x
-  let return_some x = Io.return (Some x)
+  open Io_syntax.Make (Io)
   let iter_p f xs = Io.iter_p f xs
-
-  let rec iter_s f = function
-    | [] -> Io.return ()
-    | x :: rest ->
-        let* () = f x in
-        iter_s f rest
-
-  let rec map_s f = function
-    | [] -> Io.return []
-    | x :: rest ->
-        let* y = f x in
-        let+ ys = map_s f rest in
-        y :: ys
-
-  let rec filter_map_s f = function
-    | [] -> Io.return []
-    | x :: rest -> (
-        let* y = f x in
-        let+ ys = filter_map_s f rest in
-        match y with Some y -> y :: ys | None -> ys)
-
-  let rec fold_left_s f acc = function
-    | [] -> Io.return acc
-    | x :: rest ->
-        let* acc = f acc x in
-        fold_left_s f acc rest
 
   module Make (C : Conf.S with type 'a io = 'a Io.t) = struct
     module L = Chunk_layout.Make (C)

@@ -10,46 +10,6 @@
     Bodies are shared: two files whose chunks group identically are one file on
     disk and one download. *)
 
-(** What this needs below it: a filesystem, the syscalls that retry past
-    [EINTR], and pools to admit a few at a time. Each is a subset — what the
-    cache calls and nothing else. *)
-module type FS = sig
-  type 'a io
-
-  val ensure_parent : string -> unit io
-  val readdir_list : string -> string list io
-  val unlink_quiet : string -> unit io
-  val read : string -> Bigstring.t -> offset:int64 -> int io
-  val write : string -> Bigstring.t -> offset:int64 -> int io
-  val read_file_opt : string -> string option io
-  val atomic_write : string -> string -> unit io
-
-  val atomic_write_at :
-    string ->
-    size:int ->
-    ((offset:int -> Bigstring.t -> unit io) -> unit io) ->
-    unit io
-end
-
-module type SYSCALLS = sig
-  type 'a io
-
-  val file_exists : string -> bool io
-  val stat : string -> Unix.stats io
-  val link : string -> string -> unit io
-  val utimes : string -> float -> float -> unit io
-end
-
-module type POOLS = sig
-  type 'a io
-  type t
-
-  val create : ?max_waiting:int -> ?name:string -> max:int -> unit -> t
-  val use : t -> (unit -> 'a io) -> 'a io
-  val map_with : t -> ('a -> 'b io) -> 'a list -> 'b list io
-  val filter_map_with : t -> ('a -> 'b option io) -> 'a list -> 'b list io
-end
-
 (** What the store needs from the backend layer. {!Remote.S} satisfies it.
     Grouping is invisible here: a cache chunk is fetched as its members. *)
 module type Fetch = sig
@@ -90,9 +50,9 @@ type held = {
 
 module Make
     (Io : Io.S)
-    (_ : FS with type 'a io := 'a Io.t)
-    (_ : SYSCALLS with type 'a io := 'a Io.t)
-    (_ : POOLS with type 'a io := 'a Io.t)
+    (_ : Fs.S with type 'a io := 'a Io.t)
+    (_ : Syscalls.S with type 'a io := 'a Io.t)
+    (_ : Bounded.S with type 'a io := 'a Io.t)
     (C : Conf.S with type 'a io = 'a Io.t)
     (F : Fetch with type 'a io := 'a Io.t) : sig
   (** Whether this group's body is local. *)

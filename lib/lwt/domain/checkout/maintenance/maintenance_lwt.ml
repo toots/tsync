@@ -27,7 +27,7 @@ module Temp_files = Temp_files.Over (Io_lwt.Core) (Io_lwt.Fs) (Io_lwt.Bounded)
 module Staged_orphans =
   Staged_orphans.Over (Io_lwt.Core) (Files) (Staged_lwt.Manifest)
 
-module Chunk_cap = Chunk_cap.Make (Io_lwt.Core) (Io_lwt.Fs) (Io_lwt.Retry)
+module Chunk_cap = Chunk_cap.Make (Io_lwt.Core) (Io_lwt.Fs) (Io_lwt.Syscalls)
 
 (* Running one, the same way wherever it is run from -- the driver, a command,
    a test. A sweep that fails is logged and does not take its siblings with it,

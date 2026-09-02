@@ -1,15 +1,6 @@
 (* What a partly filled cache-chunk body holds, and keeping that record straight
    while several reads fill one body at once. *)
 
-module type FS = sig
-  type 'a io
-
-  val file_exists : string -> bool io
-  val unlink_quiet : string -> unit io
-  val read_file_opt : string -> string option io
-  val atomic_write : string -> string -> unit io
-end
-
 type held = (int * (int * int)) list
 
 let nothing = []
@@ -64,10 +55,12 @@ let missing ~have ~want =
         else if c < a then Some (c, a)
         else Some (b, d)
 
-module Make (Io : Io.S) (Fs : FS with type 'a io := 'a Io.t) = struct
-  let ( let* ) = Io.bind
-  let ( let+ ) x f = Io.map f x
-  let return_unit = Io.return ()
+module Make
+    (Io : Io.S)
+    (Fs : Fs.S with type 'a io := 'a Io.t)
+    (Sys : Syscalls.S with type 'a io := 'a Io.t) =
+struct
+  open Io_syntax.Make (Io)
 
   (* Held in memory as well as beside the body. A fill is a read, a fetch and a
      write, so two fills of one body would each save what it read before the
@@ -75,7 +68,7 @@ module Make (Io : Io.S) (Fs : FS with type 'a io := 'a Io.t) = struct
      body then never completes. The in-memory update runs without an intervening
      wait, which is what makes it atomic. *)
   let now : (string, held) Hashtbl.t = Hashtbl.create 16
-  let recorded ~body = Fs.file_exists (beside body)
+  let recorded ~body = Sys.file_exists (beside body)
 
   let load ~key ~body =
     match Hashtbl.find_opt now key with

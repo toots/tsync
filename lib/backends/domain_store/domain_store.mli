@@ -30,7 +30,7 @@ end
 module Over
     (Io : Io.S)
     (Queues : Deferred.QUEUES with type 'a io := 'a Io.t)
-    (Lock : Deferred.LOCKS with type 'a io := 'a Io.t)
+    (Lock : Lock.S with type 'a io := 'a Io.t)
     (_ : DRAIN with type 'a io := 'a Io.t)
     (_ : sig
       type slots

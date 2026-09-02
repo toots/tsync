@@ -107,30 +107,6 @@ module type S = sig
   val fetch_manifest : key:Logical_key.t -> unit -> Manifest.t option io
 end
 
-(** The bound on what runs at once: chunk buffers and reads in flight. *)
-module type POOLS = sig
-  type 'a io
-  type t
-
-  val create : ?max_waiting:int -> ?name:string -> max:int -> unit -> t
-  val use : t -> (unit -> 'a io) -> 'a io
-  val width : t -> int
-  val each : width:int -> (unit -> (unit -> unit io) option) -> unit io
-end
-
-(** Opening the source file, and asking whether it moved while it was read. *)
-module type SYSCALLS = sig
-  type 'a io
-  type fd
-
-  val openfile : string -> Unix.open_flag list -> int -> fd io
-  val close : fd -> unit io
-
-  module LargeFile : sig
-    val fstat : fd -> Unix.LargeFile.stats io
-  end
-end
-
 (** The key scheme a caller holding real paths wants. *)
 module type INODE_LAYOUT = sig
   type 'a io
@@ -192,8 +168,8 @@ end
 
 module Over
     (Io : Io.S)
-    (_ : POOLS with type 'a io := 'a Io.t)
-    (_ : SYSCALLS with type 'a io := 'a Io.t)
+    (_ : Bounded.S with type 'a io := 'a Io.t)
+    (_ : Syscalls.S with type 'a io := 'a Io.t)
     (_ : INODE_LAYOUT with type 'a io := 'a Io.t)
     (_ : MANIFESTS with type 'a io := 'a Io.t)
     (_ : VERSIONS with type 'a io := 'a Io.t)

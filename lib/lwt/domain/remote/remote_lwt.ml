@@ -1,7 +1,7 @@
 (* Applied once: the chunk buffers and the reads in flight are one budget per
    chunk prefix, however many places name a domain — see {!Remote.Over}. *)
 module Syscalls = struct
-  include Io_lwt.Retry
+  include Io_lwt.Syscalls
 
   type fd = Io_lwt.Syscalls.fd
 end

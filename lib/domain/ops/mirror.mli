@@ -13,18 +13,6 @@ type dest_stats = {
   copied_bytes : int;
 }
 
-(** The bound on what runs at once. *)
-module type POOLS = sig
-  type 'a io
-  type t
-
-  val create : ?max_waiting:int -> ?name:string -> max:int -> unit -> t
-  val use : t -> (unit -> 'a io) -> 'a io
-  val width : t -> int
-  val map_with : t -> ('a -> 'b io) -> 'a list -> 'b list io
-  val each : width:int -> (unit -> (unit -> unit io) option) -> unit io
-end
-
 (** Walking one folder of the backend's tree. *)
 module type TREE = sig
   type 'a io
@@ -56,7 +44,7 @@ end
 module Over
     (Io : Io.S)
     (_ : Listing.SPOOL with type 'a io := 'a Io.t)
-    (Pools : POOLS with type 'a io := 'a Io.t)
+    (Pools : Bounded.S with type 'a io := 'a Io.t)
     (_ : TREE with type 'a io := 'a Io.t and type pool := Pools.t)
     (_ : COLLECTION with type 'a io := 'a Io.t) : sig
   module Make (C : Conf.S with type 'a io = 'a Io.t) : sig
