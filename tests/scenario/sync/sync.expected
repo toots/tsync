@@ -639,3 +639,55 @@
   file first.txt [<folder-1>/fb911c13b0312a04-e4d81e41f926300d] = manifest size=3 chunks=1 h1=927288390658e64d h2=b8b5ebbd37156bca
     chunk#0 911faba7321fe1a0-a3cf92cbf55153da size=3
 
+=== late_visible_entry
+  A: write a.txt "slow"
+  A: drain
+  A: hide newest journal entry
+  A: write b.txt "fast"
+  A: drain
+  B: sync
+  A: unhide journal entry
+  A: write c.txt "later"
+  A: drain
+  B: sync
+--- tree A
+  f a.txt size=4 cached=0/1 uploaded=true etag=f573d552be389489
+  f b.txt size=4 cached=0/1 uploaded=true etag=a67b99b5a77e4918
+  f c.txt size=5 cached=0/1 uploaded=true etag=d040ddb715213348
+--- content A
+  a.txt = "slow"
+  b.txt = "fast"
+  c.txt = "later"
+--- pending A
+--- tree B
+  f a.txt size=4 cached=0/1 uploaded=true etag=f573d552be389489
+  f b.txt size=4 cached=0/1 uploaded=true etag=a67b99b5a77e4918
+  f c.txt size=5 cached=0/1 uploaded=true etag=d040ddb715213348
+--- content B
+  a.txt = "slow"
+  b.txt = "fast"
+  c.txt = "later"
+--- pending B
+--- kept A
+  {"op":"put","key":"a.txt","size":4}
+  {"op":"put","key":"b.txt","size":4}
+  {"op":"put","key":"c.txt","size":5}
+--- kept B
+  {"op":"put","key":"b.txt","size":4}
+  {"op":"put","key":"a.txt","size":4}
+  {"op":"put","key":"c.txt","size":5}
+--- backend
+  chunk 0671df8bdff741c7-472f0a7b1ab4410a size=4
+  chunk 24522ba786f10659-51dc1aa0f5a5da8b size=4
+  chunk 990e0ad09db4530b-a30fcb17e735d069 size=5
+  cursor = <entry-3>
+  journal <entry-1> = put a.txt 4
+  journal <entry-2> = put b.txt 4
+  journal <entry-3> = put c.txt 5
+  file b.txt [.tsync-root/3c697ec236bbf61f-698ad1290042cc94] = manifest size=4 chunks=1 h1=a67b99b5a77e4918 h2=b0f09eeb81e58d0c
+    chunk#0 24522ba786f10659-51dc1aa0f5a5da8b size=4
+  file c.txt [.tsync-root/d6d50f267ed1aabb-7fe71c7d92c1e0c0] = manifest size=5 chunks=1 h1=d040ddb715213348 h2=a908ea5b8cba8651
+    chunk#0 990e0ad09db4530b-a30fcb17e735d069 size=5
+  file a.txt [.tsync-root/f01e5cbbc09d4fc4-9a0fcd66f030de75] = manifest size=4 chunks=1 h1=f573d552be389489 h2=d8439cae75ef9289
+    chunk#0 0671df8bdff741c7-472f0a7b1ab4410a size=4
+

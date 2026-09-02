@@ -7,6 +7,10 @@ module type JOURNAL = sig
     include File_store.S with type 'a io := 'a io
 
     val note_applied : Journal.Entry_key.t -> Journal.op list -> unit io
+
+    (** Every entry this client has applied or published, as far back as it
+        keeps them. *)
+    val applied_keys : unit -> Journal.Entry_key.t list io
   end
 end
 
@@ -15,6 +19,7 @@ module type S = sig
 
   val reconcile : unit -> unit io
   val apply_foreign : on_changed:(string -> unit) -> unit -> int io
+  val mark_handled : Journal.Entry_key.t list -> unit io
 end
 
 module type OVER = sig
@@ -194,10 +199,65 @@ struct
       in
       adopt_unrecorded ~recorded
 
+    (* The keys this client has handled, loaded once and kept as entries are
+       applied. *)
+    let handled : (string, unit) Hashtbl.t option ref = ref None
+
+    let handled_set () =
+      match !handled with
+        | Some set -> Io.return set
+        | None ->
+            let+ keys = Js.applied_keys () in
+            let set = Hashtbl.create 1024 in
+            List.iter (fun k -> Hashtbl.replace set (Ek.to_string k) ()) keys;
+            handled := Some set;
+            set
+
+    let remember set ek = Hashtbl.replace set (Ek.to_string ek) ()
+
+    (* Entries a rebuild has already read the effect of: remembered as handled so
+       they are not applied on top of the mirror they are in. *)
+    let mark_handled keys =
+      let* set = handled_set () in
+      iter_s
+        (fun ek ->
+          if Hashtbl.mem set (Ek.to_string ek) then return_unit
+          else begin
+            remember set ek;
+            Js.note_applied ek []
+          end)
+        keys
+
+    let window_ms = Int64.of_int (Applied_entries.keep_days * 86_400_000)
+
+    (* A key says when its writer minted it, not when the store showed it. An
+       entry can appear behind ones already applied -- a slow upload, a record
+       published after a crash under its original key -- and a listing cut at the
+       last-sync key would never see it. So every entry the memory reaches back
+       to is checked against it instead. Older than the memory, an entry cannot
+       be told from one handled and since forgotten, and is left alone; with no
+       mark at all nothing has been handled, and the whole journal is due. *)
     let apply_foreign ~on_changed () =
       let my_uuid = J.client_uuid () in
-      let* keys =
-        Js.list_journal_keys ?start_after:(Js.read_last_sync_key ()) ()
+      let* set = handled_set () in
+      let horizon =
+        match Js.read_last_sync_key () with
+          | None -> None
+          | Some _ ->
+              Some
+                (Int64.sub
+                   (Int64.of_float (Unix.gettimeofday () *. 1000.))
+                   window_ms)
+      in
+      let* keys = Js.list_journal_keys () in
+      let keys =
+        List.filter
+          (fun ek ->
+            (match horizon with
+              | None -> true
+              | Some h -> Int64.compare (Ek.timestamp_ms ek) h >= 0)
+            && not (Hashtbl.mem set (Ek.to_string ek)))
+          keys
       in
       let applied = ref 0 in
       let+ () =
@@ -214,6 +274,7 @@ struct
                       (* After applying, so a reader of the kept entries never
                          meets one the mirror has not caught up with. *)
                       let* () = Js.note_applied ek ops in
+                      remember set ek;
                       List.iter
                         (fun op ->
                           on_changed
@@ -223,8 +284,11 @@ struct
                       return_unit
             in
             (* Only after the entry applied cleanly, so a failure retries it rather
-               than skipping it and diverging until a full resync. *)
-            Js.write_last_sync_key ek;
+               than skipping it and diverging until a full resync. Never moved
+               back: an entry behind the mark is the ordinary case here. *)
+            (match Js.read_last_sync_key () with
+              | Some mark when Ek.compare mark ek >= 0 -> ()
+              | _ -> Js.write_last_sync_key ek);
             return_unit)
           keys
       in

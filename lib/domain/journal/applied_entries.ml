@@ -2,20 +2,24 @@ open Lwt.Syntax
 
 let suffix = ".log"
 
+(* How far back an entry is remembered, and so how far behind the present a
+   store entry can appear and still be told from one already handled. *)
+let keep_days = 30
+
 let dir ~cache_root ~domain_name =
   Cache_layout.applied_dir ~cache_root domain_name
 
-(* ["<YYYY-MM>/<entry key>"] is what the published journal files an entry under,
-   so the shard an entry belongs to is read from there rather than spelled a
-   second time here. *)
-let shard entry_key =
-  let rel = Journal.Entry_key.relative_path entry_key in
-  match String.index_opt rel '/' with
-    | Some i -> String.sub rel 0 i
-    | None -> rel
+(* Sharded by when an entry was applied, not by the month in its key. The log
+   is read as a sequence, and a peer's entry can be applied after entries whose
+   keys are newer: a slow upload, or a record published after a crash under the
+   key it was minted with. Filing it by its key would put it behind entries a
+   reader had already been given. *)
+let shard_of ~now =
+  let tm = Unix.gmtime now in
+  Printf.sprintf "%04d-%02d" (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1)
 
-let shard_path ~cache_root ~domain_name entry_key =
-  Filename.concat (dir ~cache_root ~domain_name) (shard entry_key ^ suffix)
+let shard_path ~cache_root ~domain_name ~now =
+  Filename.concat (dir ~cache_root ~domain_name) (shard_of ~now ^ suffix)
 
 (* Newline first, not last. A writer torn mid-record leaves no terminator, and a
    record that ended with one would then be glued onto the front of the next —
@@ -49,9 +53,11 @@ let rec write_all fd s off =
     if n <= 0 then Lwt.fail (Failure "applied entries: short write")
     else write_all fd s (off + n)
 
-let note ~cache_root ~domain_name entry_key ops =
+(* [now] is the application time, and is a parameter only so a test can cross a
+   shard boundary without waiting for the calendar. *)
+let note ?(now = Unix.gettimeofday ()) ~cache_root ~domain_name entry_key ops =
   let* () = Io_lwt.Fs.mkdir_p (dir ~cache_root ~domain_name) in
-  let path = shard_path ~cache_root ~domain_name entry_key in
+  let path = shard_path ~cache_root ~domain_name ~now in
   let* fd =
     Lwt_unix.openfile path [Unix.O_WRONLY; Unix.O_APPEND; Unix.O_CREAT] 0o600
   in
@@ -79,49 +85,57 @@ type page = {
   more : bool;
 }
 
+let rec following anchor = function
+  | [] -> None
+  | (k, _) :: rest ->
+      if Journal.Entry_key.compare k anchor = 0 then Some rest
+      else following anchor rest
+
+(* What was appended after the anchor, in the order it was appended, whatever
+   the keys say: the anchor is a position in this log, not a point in time. A
+   reader comparing keys would never hear of an entry applied late with an older
+   key. [None] when the anchor is no longer kept, so the reader starts over. *)
 let since ~cache_root ~domain_name ?since ~limit () =
   let* names = shards ~cache_root ~domain_name in
-  (* A shard before the anchor's own holds nothing after it, so it is not read.
-     The anchor's is, since it holds entries on both sides of it. *)
-  let names =
+  let read = read_shard ~cache_root ~domain_name in
+  let* found =
     match since with
-      | None -> names
-      | Some a ->
-          let first = shard a ^ suffix in
-          List.filter (fun n -> compare n first >= 0) names
+      | None ->
+          let+ all = Lwt_list.map_s read names in
+          Some (List.concat all)
+      | Some anchor ->
+          (* Newest shard first, so only the shards after the anchor are read. *)
+          let rec back newer = function
+            | [] -> Lwt.return_none
+            | name :: older -> (
+                let* entries = read name in
+                match following anchor entries with
+                  | Some tail -> Lwt.return_some (tail @ newer)
+                  | None -> back (entries @ newer) older)
+          in
+          back [] (List.rev names)
   in
-  let after entry_key =
-    match since with
-      | None -> true
-      | Some a -> Journal.Entry_key.compare entry_key a > 0
-  in
-  (* One past [limit], which is how [more] is answered without a second pass. *)
-  let want = limit + 1 in
-  let rec walk acc taken = function
-    | [] -> Lwt.return (List.rev acc)
-    | _ when taken >= want -> Lwt.return (List.rev acc)
-    | name :: rest ->
-        let* entries = read_shard ~cache_root ~domain_name name in
-        let acc, taken =
-          List.fold_left
-            (fun (acc, taken) entry ->
-              if taken >= want || not (after (fst entry)) then (acc, taken)
-              else (entry :: acc, taken + 1))
-            (acc, taken) entries
-        in
-        walk acc taken rest
-  in
-  let+ found = walk [] 0 names in
-  {
-    entries = List.filteri (fun i _ -> i < limit) found;
-    more = List.length found > limit;
-  }
+  Lwt.return
+    (Option.map
+       (fun found ->
+         {
+           entries = List.filteri (fun i _ -> i < limit) found;
+           more = List.length found > limit;
+         })
+       found)
 
-(* Enough of one end of a shard to hold a whole line, so neither of these reads
-   a month of entries to answer with one. *)
+(* Every key kept, for a reader deciding which of a store's entries it has
+   already handled. *)
+let keys ~cache_root ~domain_name =
+  let* names = shards ~cache_root ~domain_name in
+  let+ pages = Lwt_list.map_s (read_shard ~cache_root ~domain_name) names in
+  List.map fst (List.concat pages)
+
+(* Enough of the end of a shard to hold a whole line, so the head is not a
+   month of entries read to answer with one. *)
 let edge_bytes = 8192
 
-let read_edge ~cache_root ~domain_name ~last name =
+let read_tail ~cache_root ~domain_name name =
   let path = Filename.concat (dir ~cache_root ~domain_name) name in
   let* fd = Lwt_unix.openfile path [Unix.O_RDONLY] 0 in
   Lwt.finalize
@@ -129,8 +143,9 @@ let read_edge ~cache_root ~domain_name ~last name =
       let* st = Lwt_unix.LargeFile.fstat fd in
       let size = Int64.to_int st.Unix.LargeFile.st_size in
       let len = min size edge_bytes in
-      let off = if last then size - len else 0 in
-      let* _ = Lwt_unix.LargeFile.lseek fd (Int64.of_int off) Unix.SEEK_SET in
+      let* _ =
+        Lwt_unix.LargeFile.lseek fd (Int64.of_int (size - len)) Unix.SEEK_SET
+      in
       let buf = Bytes.create len in
       let rec fill got =
         if got >= len then Lwt.return got
@@ -140,27 +155,18 @@ let read_edge ~cache_root ~domain_name ~last name =
       in
       let+ got = fill 0 in
       let text = Bytes.sub_string buf 0 got in
-      (* The edge read cuts a line in half: at the tail that is the first line,
-         at the head the last. [decode] drops it either way. *)
+      (* The read cuts the first line in half, and [decode] drops it. *)
       List.filter_map decode (String.split_on_char '\n' text))
     (fun () -> Lwt_unix.close fd)
 
-let edge ~cache_root ~domain_name ~last () =
+(* The last entry appended, which is where a reader that has everything stands. *)
+let head ~cache_root ~domain_name =
   let* names = shards ~cache_root ~domain_name in
-  match if last then List.rev names else names with
+  match List.rev names with
     | [] -> Lwt.return_none
     | name :: _ -> (
-        let+ entries = read_edge ~cache_root ~domain_name ~last name in
-        match List.sort Journal.Entry_key.compare (List.map fst entries) with
-          | [] -> None
-          | sorted ->
-              Some
-                (List.nth sorted (if last then List.length sorted - 1 else 0)))
-
-let head ~cache_root ~domain_name = edge ~cache_root ~domain_name ~last:true ()
-
-let oldest ~cache_root ~domain_name =
-  edge ~cache_root ~domain_name ~last:false ()
+        let+ entries = read_tail ~cache_root ~domain_name name in
+        match List.rev entries with [] -> None | (k, _) :: _ -> Some k)
 
 type shard_stat = { name : string; size : int; mtime : float }
 

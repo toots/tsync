@@ -106,6 +106,10 @@ type step =
       (** Call [Sync_poller.sync_once]: read the journal, skip our own entries,
           apply any foreign entries — the same path the background poller takes.
       *)
+  | HideNewestJournalEntry
+      (** Take the newest journal object out of the store, as if its upload were
+          still in flight while later entries land. *)
+  | UnhideJournalEntry  (** Put it back, behind whatever was published since. *)
   | DeleteRemoteChunk of { path : string; index : int }
       (** Delete chunk [index] of [path]'s manifest from the backend, behind the
           daemon's back. *)

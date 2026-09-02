@@ -477,44 +477,40 @@ module Make
              ("ops", `List []);
            ])
     else
-      let* oldest = Applied_entries.oldest ~cache_root ~domain_name in
-      let cannot_bridge =
-        match anchor with
-          | Some a -> Journal.Entry_key.cannot_bridge a (Option.to_list oldest)
-          | None -> false
+      let* page =
+        Applied_entries.since ~cache_root ~domain_name ?since:anchor ~limit ()
       in
-      if cannot_bridge then Lwt.return (ok_json [("stale", `Bool true)])
-      else
-        let* page =
-          Applied_entries.since ~cache_root ~domain_name ?since:anchor ~limit ()
-        in
-        let entries = page.Applied_entries.entries in
-        let ops = List.concat_map snd entries in
-        (* Where the batch reached, which is not the head when it was capped.
+      match page with
+        (* The anchor is no longer kept, so no delta bridges it. *)
+        | None -> Lwt.return (ok_json [("stale", `Bool true)])
+        | Some page ->
+            let entries = page.Applied_entries.entries in
+            let ops = List.concat_map snd entries in
+            (* Where the batch reached, which is not the head when it was capped.
            Holding at the anchor when nothing followed is what stops a caller
            being told to start over. *)
-        let cursor =
-          match List.rev entries with (k, _) :: _ -> Some k | [] -> anchor
-        in
-        let+ described =
-          Lwt_list.map_s
-            (op_to_json ~lookup:lookup_folder
-               ~lookup_removed:R.removed_folder_id)
-            ops
-        in
-        (* A folder this client has no id for at all — the mirror and the folder
+            let cursor =
+              match List.rev entries with (k, _) :: _ -> Some k | [] -> anchor
+            in
+            let+ described =
+              Lwt_list.map_s
+                (op_to_json ~lookup:lookup_folder
+                   ~lookup_removed:R.removed_folder_id)
+                ops
+            in
+            (* A folder this client has no id for at all — the mirror and the folder
            index disagreeing, not a poller yet to catch up. The caller re-lists,
            which is the repair. *)
-        if List.exists Option.is_none described then
-          ok_json [("stale", `Bool true)]
-        else
-          ok_json
-            [
-              ("stale", `Bool false);
-              ("cursor", cursor_field cursor);
-              ("more", `Bool page.Applied_entries.more);
-              ("ops", `List (List.filter_map Fun.id described));
-            ]
+            if List.exists Option.is_none described then
+              ok_json [("stale", `Bool true)]
+            else
+              ok_json
+                [
+                  ("stale", `Bool false);
+                  ("cursor", cursor_field cursor);
+                  ("more", `Bool page.Applied_entries.more);
+                  ("ops", `List (List.filter_map Fun.id described));
+                ]
 
   let handle_current_cursor () =
     let+ head = Applied_entries.head ~cache_root ~domain_name in

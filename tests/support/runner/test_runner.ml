@@ -77,6 +77,10 @@ type step =
   | Drain
   | Uploads of [ `Paused | `Running ]
   | Sync
+  | HideNewestJournalEntry
+      (** Take the newest journal object out of the store, as if its upload were
+          still in flight while later entries land. *)
+  | UnhideJournalEntry  (** Put it back, behind whatever was published since. *)
   | DeleteRemoteChunk of { path : string; index : int }
   | CorruptRemoteChunk of { path : string; index : int }
   | ScrambleRemoteChunk of { path : string; index : int }
@@ -196,6 +200,8 @@ let rec render_step = function
   | Uploads `Paused -> "uploads paused"
   | Uploads `Running -> "uploads running"
   | Sync -> "sync"
+  | HideNewestJournalEntry -> "hide newest journal entry"
+  | UnhideJournalEntry -> "unhide journal entry"
   | DeleteRemoteChunk { path; index } ->
       Printf.sprintf "delete-remote-chunk %s #%d" path index
   | CorruptRemoteChunk { path; index } ->
@@ -596,7 +602,32 @@ let setup_client (module C : Conf_lwt.S) root staging_prefix =
           local_staging := Some d;
           d
   in
+  let hidden_entry = ref None in
   let do_step = function
+    | HideNewestJournalEntry -> (
+        let (module B : Backend_lwt.Store) =
+          (List.hd C.members).Backend.backend
+        in
+        let* keys = Fs.list_journal_keys () in
+        match List.rev keys with
+          | [] -> failwith "hide: no journal entry"
+          | newest :: _ ->
+              let key =
+                Stored_key.in_space ~prefix:C.journal_prefix
+                  (Journal.Entry_key.relative_path newest)
+              in
+              let* data = B.get ~key () in
+              hidden_entry := Some (key, data);
+              B.delete ~key ())
+    | UnhideJournalEntry -> (
+        let (module B : Backend_lwt.Store) =
+          (List.hd C.members).Backend.backend
+        in
+        match !hidden_entry with
+          | None -> failwith "unhide: nothing hidden"
+          | Some (key, data) ->
+              hidden_entry := None;
+              B.put ~key ~data ())
     | Write { path; content } ->
         incr staging_seq;
         let staging =
@@ -1693,10 +1724,11 @@ let shown_op op =
    keys are a timestamp and a client uuid, so only the ops are shown. *)
 let dump_kept ~cache_root ~domain_name =
   let+ page = Applied_entries.since ~cache_root ~domain_name ~limit:1000 () in
+  (* No anchor, so the answer is the whole log and never "gone". *)
   List.iter
     (fun (_, ops) ->
       Printf.printf "  %s\n" (String.concat " " (List.map shown_op ops)))
-    page.Applied_entries.entries
+    (match page with Some p -> p.Applied_entries.entries | None -> [])
 
 let run_two_client_scenario ?(versioning = false)
     ({ name; steps } : two_client_scenario) =
