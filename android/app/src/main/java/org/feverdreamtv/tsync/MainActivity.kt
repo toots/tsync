@@ -2,6 +2,9 @@ package org.feverdreamtv.tsync
 
 import android.app.Activity
 import android.app.AlertDialog
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Intent
 import android.graphics.Typeface
 import android.os.Build
 import android.os.Bundle
@@ -10,12 +13,16 @@ import android.view.View
 import android.view.WindowInsets
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
 import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
+import android.text.format.Formatter
+import android.view.ViewGroup
+import android.widget.AbsListView
 import android.widget.ArrayAdapter
 import android.widget.AutoCompleteTextView
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.LinearLayout
+import android.widget.ListView
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
@@ -25,31 +32,186 @@ import org.feverdreamtv.tsync.backup.MediaAccess
 import org.feverdreamtv.tsync.backup.NetworkGate
 import org.feverdreamtv.tsync.backup.UploadRecords
 import org.feverdreamtv.tsync.backup.UploadState
+import org.json.JSONObject
 import kotlin.concurrent.thread
 
 /**
- * Two states, not two screens: setup when there is no config, status once there
- * is. Everything shown on the status screen is `tsync status` verbatim, so it
- * cannot drift from what the desktop reports.
+ * Setup until there is a config, then the domain's files, with settings and
+ * status a button away. Everything shown on the status screen is `tsync status`
+ * verbatim, so it cannot drift from what the desktop reports.
  */
 class MainActivity : Activity() {
 
     private companion object {
         const val MEDIA_PERMISSIONS = 1
+
+        /** Rows fetched per listing call; the next page loads as the list
+         *  nears its end. */
+        const val PAGE = 200
     }
+
+    /** What back does on the screen showing; false hands it to the platform. */
+    private var onBack: () -> Boolean = { false }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         if (Config.exists(this)) {
             TsyncProvider.notifyRootsChanged(this)
-            showStatus()
+            showBrowser()
         } else showSetup()
+    }
+
+    @Suppress("DEPRECATION")
+    override fun onBackPressed() {
+        if (!onBack()) super.onBackPressed()
+    }
+
+    // ── Browser ──────────────────────────────────────────────────────────────
+
+    /** The folders opened to get here, root excluded: reference and name. */
+    private val trail = ArrayDeque<Pair<String, String>>()
+
+    private fun showBrowser() {
+        val here = trail.lastOrNull()?.first ?: Cli.ROOT
+        val rows = ArrayList<JSONObject>()
+        val adapter = object : ArrayAdapter<JSONObject>(
+            this, android.R.layout.simple_list_item_2, android.R.id.text1, rows
+        ) {
+            override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
+                val view = super.getView(position, convertView, parent)
+                val entry = getItem(position)!!
+                val isDir = entry.getString("kind") == "dir"
+                val name = entry.getString("name")
+                view.findViewById<TextView>(android.R.id.text1).text =
+                    if (isDir) "$name/" else name
+                view.findViewById<TextView>(android.R.id.text2).text =
+                    if (isDir) "folder"
+                    else Formatter.formatShortFileSize(context, entry.optLong("size"))
+                return view
+            }
+        }
+        val list = ListView(this).apply { this.adapter = adapter }
+        val notice = TextView(this).apply { setPadding(0, 8, 0, 8) }
+
+        // "" asks for the first page; null means the folder has been read.
+        var next: String? = ""
+        var loading = false
+        fun loadMore() {
+            val after = next ?: return
+            if (loading) return
+            loading = true
+            notice.text = "reading…"
+            thread {
+                val page = runCatching { Tsync.json(this, Cli.list(here, after, PAGE)) }
+                runOnUiThread {
+                    loading = false
+                    page.onFailure {
+                        next = null
+                        notice.text = "Cannot read this folder: ${it.message}"
+                    }
+                    page.onSuccess { reply ->
+                        val items = reply.getJSONArray("items")
+                        for (i in 0 until items.length()) rows += items.getJSONObject(i)
+                        adapter.notifyDataSetChanged()
+                        next = reply.optString("next", "").ifEmpty { null }
+                        notice.text = if (rows.isEmpty()) "Empty folder" else ""
+                    }
+                }
+            }
+        }
+
+        list.setOnScrollListener(object : AbsListView.OnScrollListener {
+            override fun onScrollStateChanged(view: AbsListView, state: Int) {}
+            override fun onScroll(view: AbsListView, first: Int, visible: Int, total: Int) {
+                if (first + visible >= total - 10) loadMore()
+            }
+        })
+        list.setOnItemClickListener { _, _, position, _ ->
+            val entry = rows[position]
+            if (entry.getString("kind") == "dir") {
+                trail.addLast(entry.getString("ref") to entry.getString("name"))
+                showBrowser()
+            } else offerLink(entry)
+        }
+        list.setOnItemLongClickListener { _, _, position, _ ->
+            offerLink(rows[position])
+            true
+        }
+
+        onBack = {
+            if (trail.isEmpty()) false
+            else {
+                trail.removeLast()
+                showBrowser()
+                true
+            }
+        }
+        setContentViewInsetAware(column {
+            addView(row {
+                addView(Button(this@MainActivity).apply {
+                    text = "Settings"; setOnClickListener { showSetup() }
+                })
+                addView(Button(this@MainActivity).apply {
+                    text = "Status"; setOnClickListener { showStatus() }
+                })
+            })
+            addView(heading(trail.joinToString("/") { it.second }.ifEmpty { "tsync" }))
+            addView(notice)
+            addView(list, LinearLayout.LayoutParams(MATCH_PARENT, 0, 1f))
+        })
+        loadMore()
+    }
+
+    private fun offerLink(entry: JSONObject) {
+        val name = entry.getString("name")
+        AlertDialog.Builder(this)
+            .setTitle(name)
+            .setItems(arrayOf("Share link")) { _, _ -> shareLink(entry.getString("ref"), name) }
+            .show()
+    }
+
+    /** The link is the server's to mint, so it is asked for and shown once it
+     *  answers, with the two things a person does with one. */
+    private fun shareLink(ref: String, name: String) {
+        toast("Publishing a link to $name…")
+        thread {
+            val link = runCatching { Tsync.json(this, Cli.share(ref)).getString("url") }
+            runOnUiThread {
+                link.onFailure { toast("Cannot share $name: ${it.message}") }
+                link.onSuccess { url ->
+                    AlertDialog.Builder(this)
+                        .setTitle("Link to $name")
+                        .setMessage(url)
+                        .setPositiveButton("Copy") { _, _ ->
+                            getSystemService(ClipboardManager::class.java)
+                                .setPrimaryClip(ClipData.newPlainText(name, url))
+                            toast("Link copied")
+                        }
+                        .setNeutralButton("Send") { _, _ ->
+                            startActivity(Intent.createChooser(
+                                Intent(Intent.ACTION_SEND).apply {
+                                    type = "text/plain"
+                                    putExtra(Intent.EXTRA_TEXT, url)
+                                }, null))
+                        }
+                        .setNegativeButton("Close", null)
+                        .show()
+                }
+            }
+        }
     }
 
     // ── Setup ────────────────────────────────────────────────────────────────
 
     private fun showSetup() {
         val existing = Config.load(this)
+        onBack = {
+            if (existing == null) false
+            else {
+                showBrowser()
+                true
+            }
+        }
         // Free text until "Check server" fills the dropdown: the server may be
         // unreachable from here, and a typed name still has to be allowed then.
         val domain = AutoCompleteTextView(this).apply {
@@ -126,7 +288,7 @@ class MainActivity : Activity() {
                 // The root's id and title come from the config, so the picker
                 // is holding a stale answer until it re-queries.
                 TsyncProvider.notifyRootsChanged(this@MainActivity)
-                showStatus()
+                showBrowser()
             }
         }
 
@@ -277,6 +439,10 @@ class MainActivity : Activity() {
     // ── Status ───────────────────────────────────────────────────────────────
 
     private fun showStatus() {
+        onBack = {
+            showBrowser()
+            true
+        }
         val output = TextView(this).apply {
             typeface = Typeface.MONOSPACE
             textSize = 10f
@@ -296,10 +462,10 @@ class MainActivity : Activity() {
         setContentViewInsetAware(column {
             addView(row {
                 addView(Button(this@MainActivity).apply {
-                    text = "Refresh"; setOnClickListener { refresh() }
+                    text = "Files"; setOnClickListener { showBrowser() }
                 })
                 addView(Button(this@MainActivity).apply {
-                    text = "Settings"; setOnClickListener { showSetup() }
+                    text = "Refresh"; setOnClickListener { refresh() }
                 })
             })
             addView(ScrollView(this@MainActivity).apply { addView(output) })
