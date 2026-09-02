@@ -8,8 +8,8 @@ let trash_list domain =
   run_lwt
     (let open Lwt.Syntax in
      let (module C : Conf_lwt.S) = load_conf ?domain () in
-     let module T = Trash_lwt.Make (C) in
-     let+ paths = T.list () in
+     let module T = Retention_lwt.Make (C) in
+     let+ paths = T.trashed () in
      List.iter (Printf.printf "%s\n") paths)
 
 (* Resolving a deleted file is syntax over the configured roots and never a
@@ -29,17 +29,17 @@ let trash_restore arg domain =
     run_lwt
       (let open Lwt.Syntax in
        let (module C : Conf_lwt.S) = make_conf ?domain cfg in
-       let module T = Trash_lwt.Make (C) in
+       let module T = Retention_lwt.Make (C) in
        let+ outcome = T.restore path in
        match outcome with
-         | Trash.Restored ->
+         | Retention.Restored ->
              Printf.printf
                "restored %s — run 'tsync sync' to rebuild it locally\n" path;
              0
-         | Trash.Not_in_trash ->
+         | Retention.Not_in_trash ->
              Printf.eprintf "not in trash: %s\n" path;
              0
-         | Trash.Parent_unknown ->
+         | Retention.Parent_unknown ->
              Printf.eprintf
                "cannot restore %s: this client has no record of the folder it \
                 belongs under — run 'tsync sync' first\n"
@@ -86,7 +86,7 @@ let cmd : unit Cmd.t =
       run_lwt
         (let open Lwt.Syntax in
          let (module C : Conf_lwt.S) = make_conf ?domain cfg in
-         let module E = Expire_lwt.Make (C) in
+         let module E = Retention_lwt.Make (C) in
          let+ outcome = E.purge_trashed ~path () in
          match outcome with
            | `Not_in_trash ->

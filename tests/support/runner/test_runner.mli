@@ -70,13 +70,13 @@ type step =
   | Mark
       (** Record the current time, usable later as an [Expire "mark"] cutoff. *)
   | Expire of string
-      (** Run [Expire.expire]: drop trashed folders, versions and journal
+      (** Run [Retention.expire]: drop trashed folders, versions and journal
           entries older than a cutoff. Selector is ["all"] (now), ["none"]
           (epoch), or ["mark"] (the time captured by the last [Mark] step — to
           expire across a boundary). Leaves the chunks it orphaned behind;
           collecting those is [Gc]. *)
   | PurgeTrashed of string
-      (** Run [Expire.purge_trashed]: drop one trashed folder and its subtree
+      (** Run [Retention.purge_trashed]: drop one trashed folder and its subtree
           now, whatever its age. Leaves the chunks it orphaned behind, as
           [Expire] does. *)
   | Gc  (** Run [Gc.run]: collect the chunks nothing references any more. *)

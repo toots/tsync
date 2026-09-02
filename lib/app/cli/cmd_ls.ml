@@ -75,8 +75,8 @@ let cmd : unit Cmd.t =
                    name e.size)
          items;
        if show_deleted then begin
-         let module D = Deleted_lwt.Make (C) in
-         let+ names = D.in_folder prefix in
+         let module D = Retention_lwt.Make (C) in
+         let+ names = D.deleted_in_folder prefix in
          List.iter (Printf.printf "deleted  %s\n") names
        end
        else Lwt.return_unit)
