@@ -1,4 +1,6 @@
-.PHONY: build test deploy configure install-deps install-opam install-system install uninstall e2e conformance stress live-rsync
+.PHONY: build test deploy configure install-deps install-opam install-system install uninstall e2e conformance stress live-rsync install-completion
+
+SHAREDIR ?= $(HOME)/.local/share
 
 build:
 	dune build
@@ -23,6 +25,16 @@ install-deps:
 install-opam:
 	cd .. && opam pin -ny .
 	opam install tsync
+	$(MAKE) install-completion
+
+# The scripts are cmdliner's own, and the tool answers its protocol already, so
+# there is nothing here to keep in step with the commands.
+install-completion:
+	cmdliner install generic-completion $(SHAREDIR)
+	cmdliner install tool-completion tsync $(SHAREDIR)
+	@echo "completion installed under $(SHAREDIR); it is read once that is on"
+	@echo "  zsh:  fpath   (or XDG_DATA_DIRS)"
+	@echo "  bash: XDG_DATA_DIRS, with bash-completion loaded"
 
 # The daemon, and nothing else. The tray and Dolphin's context-menu action
 # install system-wide, pull Qt, KDE Frameworks and libdbus, and are what
