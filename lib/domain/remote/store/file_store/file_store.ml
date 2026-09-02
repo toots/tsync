@@ -181,11 +181,15 @@ struct
         with _ -> None)
       else None
 
+    (* Through a rename, so a crash mid-write leaves the mark it had rather
+       than an empty file that reads as never synced. *)
     let write_last_sync_key key =
+      let tmp = Printf.sprintf "%s.%d.tmp" last_sync_file (Unix.getpid ()) in
       try
-        let oc = open_out last_sync_file in
+        let oc = open_out tmp in
         output_string oc (Ek.to_string key);
-        close_out oc
+        close_out oc;
+        Sys.rename tmp last_sync_file
       with exn ->
         Log.err "file_store: write_last_sync_key: %s" (Printexc.to_string exn)
 
