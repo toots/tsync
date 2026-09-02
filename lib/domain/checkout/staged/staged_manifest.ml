@@ -149,47 +149,12 @@ let staged_of_string body =
 
 let sidecar_path = Cache_layout.staged_manifest_path
 
-(* What this needs of a filesystem and of the retrying syscalls. *)
-module type FS = sig
-  type 'a io
-
-  val atomic_write : string -> string -> unit io
-  val ensure_parent : string -> unit io
-  val is_directory : string -> bool io
-  val readdir_list : string -> string list io
-  val read_file_opt : string -> string option io
-  val unlink_quiet : string -> unit io
-
-  (* {!Cache_layout.Make.real_dir_name}. *)
-  val real_dir_name : string -> string -> string io
-end
-
-module type SYSCALLS = sig
-  type 'a io
-
-  val file_exists : string -> bool io
-  val rename : string -> string -> unit io
-end
-
 module Over
     (Io : Io.S)
-    (Fs : FS with type 'a io := 'a Io.t)
-    (Retry : SYSCALLS with type 'a io := 'a Io.t) =
+    (Fs : Cache_layout.FS with type 'a io := 'a Io.t)
+    (Retry : Syscalls.S with type 'a io := 'a Io.t) =
 struct
-  let ( let* ) = Io.bind
-  let ( let+ ) x f = Io.map f x
-  let return_unit = Io.return ()
-  let return_some x = Io.return (Some x)
-  let return_true = Io.return true
-  let return_false = Io.return false
-
-  let rec fold_left_s f acc = function
-    | [] -> Io.return acc
-    | x :: rest -> Io.bind (f acc x) (fun acc -> fold_left_s f acc rest)
-
-  let rec iter_s f = function
-    | [] -> return_unit
-    | x :: rest -> Io.bind (f x) (fun () -> iter_s f rest)
+  open Io_syntax.Make (Io)
 
   module Make (C : Conf.S with type 'a io = 'a Io.t) = struct
     module Lk = Logical_key.Make (C)

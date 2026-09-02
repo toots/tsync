@@ -17,16 +17,6 @@ module type CACHE = sig
   val clear : cache_root:string -> domain_name:string -> unit io
 end
 
-(** The bound on what runs at once. *)
-module type POOLS = sig
-  type 'a io
-  type t
-
-  val create : ?max_waiting:int -> ?name:string -> max:int -> unit -> t
-  val use : t -> (unit -> 'a io) -> 'a io
-  val map_with : t -> ('a -> 'b io) -> 'a list -> 'b list io
-end
-
 (** Bringing this client's view of a domain back in line with the store.
 
     Two ways, and the choice between them is the point: apply the journal
@@ -144,7 +134,7 @@ module Over
     (Io : Io.S)
     (_ : FOLDER_IDS with type 'a io := 'a Io.t)
     (_ : CACHE with type 'a io := 'a Io.t)
-    (Pools : POOLS with type 'a io := 'a Io.t)
+    (Pools : Bounded.S with type 'a io := 'a Io.t)
     (_ : TREE with type 'a io := 'a Io.t and type pool := Pools.t)
     (_ : CURSOR with type 'a io := 'a Io.t)
     (_ : CHECKOUT with type 'a io := 'a Io.t)

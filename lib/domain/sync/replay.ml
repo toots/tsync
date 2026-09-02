@@ -41,31 +41,14 @@ module type STAGED = sig
   end
 end
 
-module type POOLS = sig
-  type 'a io
-  type t
-
-  val create : ?max_waiting:int -> ?name:string -> max:int -> unit -> t
-  val iter_with : t -> ('a -> unit io) -> 'a list -> unit io
-end
-
 module Over
     (Io : Io.S)
-    (Bounded : POOLS with type 'a io := 'a Io.t)
+    (Bounded : Bounded.S with type 'a io := 'a Io.t)
     (Js : JOURNAL with type 'a io := 'a Io.t)
     (W : WAL with type 'a io := 'a Io.t)
     (Sm : STAGED with type 'a io := 'a Io.t) =
 struct
-  let ( let* ) = Io.bind
-  let ( let+ ) x f = Io.map f x
-  let return_unit = Io.return ()
-  let return_some x = Io.return (Some x)
-  let return_true = Io.return true
-  let return_false = Io.return false
-
-  let rec iter_s f = function
-    | [] -> return_unit
-    | x :: rest -> Io.bind (f x) (fun () -> iter_s f rest)
+  open Io_syntax.Make (Io)
 
   module Make
       (C : Conf.S with type 'a io = 'a Io.t)

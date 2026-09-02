@@ -10,15 +10,9 @@ module type JOURNAL = sig
   end
 end
 
-module type CLOCK = sig
-  type 'a io
-
-  val sleep : float -> unit io
-end
-
 module Over
     (Io : Io.S)
-    (_ : CLOCK with type 'a io := 'a Io.t)
+    (_ : Clock.S with type 'a io := 'a Io.t)
     (_ : JOURNAL with type 'a io := 'a Io.t)
     (_ : sig
       module Make

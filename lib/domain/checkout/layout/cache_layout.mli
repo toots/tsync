@@ -72,17 +72,19 @@ val manifest_suffix : string
     lossy, so a directory's real name is written beside it. A file needs no
     marker: its manifest body carries the name. *)
 
-(** What this needs of a filesystem, which is four calls. *)
-module type FILES = sig
-  type 'a io
+(** {!Fs.S} plus the two marker questions {!Make} answers, which is what a
+    module of the checkout takes as its filesystem. *)
+module type FS = sig
+  include Fs.S
 
-  val file_exists : string -> bool io
-  val atomic_write : string -> string -> unit io
-  val read_file_opt : string -> string option io
-  val rm_rf : string -> unit io
+  val record_dir_name : string -> string -> unit io
+  val real_dir_name : string -> string -> string io
 end
 
-module Make (Io : Io.S) (_ : FILES with type 'a io := 'a Io.t) : sig
+module Make
+    (Io : Io.S)
+    (_ : Fs.S with type 'a io := 'a Io.t)
+    (_ : Syscalls.S with type 'a io := 'a Io.t) : sig
   (** Record what a directory stored under a handle is really called, unless it
       is already recorded. Both trees that mirror real paths keep these. *)
   val record_dir_name : string -> string -> unit Io.t

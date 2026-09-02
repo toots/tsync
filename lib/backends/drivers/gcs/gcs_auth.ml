@@ -7,14 +7,6 @@ module type POST = sig
     headers:Cohttp.Header.t -> body:string -> Uri.t -> (int * string) io
 end
 
-module type LOCKS = sig
-  type 'a io
-  type mutex
-
-  val mutex : unit -> mutex
-  val with_lock : mutex -> (unit -> 'a io) -> 'a io
-end
-
 module type CLOCK = sig
   val now : unit -> float
 end
@@ -22,11 +14,10 @@ end
 module Over
     (Io : Io.S)
     (Post : POST with type 'a io := 'a Io.t)
-    (Lock : LOCKS with type 'a io := 'a Io.t)
+    (Lock : Lock.S with type 'a io := 'a Io.t)
     (Clock : CLOCK) =
 struct
-  let ( let* ) = Io.bind
-  let ( let+ ) x f = Io.map f x
+  open Io_syntax.Make (Io)
 
   (* OAuth 2.0 for the GCS backend: turn a service-account JSON key into a
      short-lived bearer token (RFC 7523 JWT-bearer flow), cached and refreshed. *)

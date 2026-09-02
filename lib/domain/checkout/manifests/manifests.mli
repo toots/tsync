@@ -5,24 +5,6 @@
     it all sits in — listings, directories, renames — is {!Checkout}, which is
     built on this. *)
 
-(** What this needs of a filesystem, and of the marker the layout keeps beside a
-    directory. *)
-module type FILES = sig
-  type 'a io
-
-  val mkdir_p : string -> unit io
-  val stat_opt : string -> Unix.stats option io
-  val unlink_quiet : string -> unit io
-
-  val atomic_write_at :
-    string ->
-    size:int ->
-    ((offset:int -> Bigstring.t -> unit io) -> unit io) ->
-    unit io
-
-  val record_dir_name : string -> string -> unit io
-end
-
 (** What this needs of the staged half: the edits a client has over the
     published manifest, if any. *)
 module type STAGED = sig
@@ -35,7 +17,7 @@ end
 
 module Over
     (Io : Io.S)
-    (_ : FILES with type 'a io := 'a Io.t)
+    (_ : Cache_layout.FS with type 'a io := 'a Io.t)
     (_ : STAGED with type 'a io := 'a Io.t) : sig
   (** Create [rel] under [root] and every directory above it, recording the real
       name beside any component the filesystem cannot hold verbatim. *)

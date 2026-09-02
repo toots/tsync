@@ -363,21 +363,11 @@ val absent_code : string -> bool
     from a queue. *)
 val classify : exn -> Retry.kind
 
-(** What the batched reads need of a pool. *)
-module type POOLS = sig
-  type 'a io
-  type t
-
-  val create : ?max_waiting:int -> ?name:string -> max:int -> unit -> t
-  val use : t -> (unit -> 'a io) -> 'a io
-  val map_with : t -> ('a -> 'b io) -> 'a list -> 'b list io
-end
-
 (** The registries here are one per process — the drivers that register
     themselves, the hooks a composite settles through, and the pool the batched
     reads come out of — so this is applied once, in the layer that names a
     scheduler. *)
-module Make (Io : Io.S) (Bounded : POOLS with type 'a io := 'a Io.t) : sig
+module Make (Io : Io.S) (Bounded : Bounded.S with type 'a io := 'a Io.t) : sig
   module type Store = S with type 'a io := 'a Io.t
 
   (** [B]'s {!S.get_many} resolved: its own where it declared one, and [get_opt]

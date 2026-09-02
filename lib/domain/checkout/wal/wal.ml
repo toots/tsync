@@ -107,8 +107,7 @@ module type RECORDS = sig
 end
 
 module Make (Io : Io.S) (R : RECORDS with type 'a io := 'a Io.t) = struct
-  let ( let* ) = Io.bind
-  let ( let+ ) x f = Io.map f x
+  open Io_syntax.Make (Io)
 
   (* A hand-off between a file operation, which writes a record, and whoever
      sends the bytes, which is a worker pool with a width of its own.

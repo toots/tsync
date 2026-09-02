@@ -9,34 +9,13 @@ open Sweep
 
 (* The filesystem calls a sweep of the mirror makes, spelled as {!Fs} spells
    them so one can be handed over as it stands. *)
-module type FILES = sig
-  type 'a io
-
-  val is_directory : string -> bool io
-  val readdir_list_quiet : string -> string list io
-  val stat_opt : string -> Unix.stats option io
-  val unlink_quiet : string -> unit io
-end
-
-module type POOLS = sig
-  type 'a io
-  type t
-
-  val create : ?max_waiting:int -> ?name:string -> max:int -> unit -> t
-  val map_with : t -> ('a -> 'b io) -> 'a list -> 'b list io
-end
 
 module Over
     (Io : Io.S)
-    (Files : FILES with type 'a io := 'a Io.t)
-    (Bounded : POOLS with type 'a io := 'a Io.t) =
+    (Files : Fs.S with type 'a io := 'a Io.t)
+    (Bounded : Bounded.S with type 'a io := 'a Io.t) =
 struct
-  let ( let* ) = Io.bind
-  let ( let+ ) x f = Io.map f x
-
-  let rec fold_left_s f acc = function
-    | [] -> Io.return acc
-    | x :: rest -> Io.bind (f acc x) (fun acc -> fold_left_s f acc rest)
+  open Io_syntax.Make (Io)
 
   (* One stat per entry is what a sweep of the mirror costs, and a mirror holds
      hundreds of thousands of them: taken one at a time that is minutes of round

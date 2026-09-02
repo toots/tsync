@@ -42,7 +42,7 @@ let disk_space path =
     Some { avail; free; total }
   with _ -> None
 
-(** What a platform owes beyond {!Retry.SYSCALLS}: whole files, a directory's
+(** What a platform owes beyond {!Syscalls.S}: whole files, a directory's
     names, and bigstrings on a descriptor. Everything else below is built from
     these. *)
 module type PRIMITIVES = sig
@@ -72,27 +72,17 @@ module type PRIMITIVES = sig
   val pwrite : fd -> Bigstringaf.t -> file_offset:int -> int -> int -> int io
 end
 
+module type S = Fs_intf.S
+
 module Make
     (Io : Io.S)
-    (Sys : Retry.SYSCALLS with type 'a io := 'a Io.t)
+    (Sys : Syscalls.S with type 'a io := 'a Io.t)
     (P : PRIMITIVES with type 'a io := 'a Io.t and type fd := Sys.fd) =
 struct
-  module Retry = Retry.Make (Io) (Sys)
+  type fd = Sys.fd
+  module Sys = Syscalls.Make (Io) (Sys)
 
-  let ( let* ) = Io.bind
-  let ( let+ ) x f = Io.map f x
-
-  let rec iter_s f = function
-    | [] -> Io.return ()
-    | x :: rest ->
-        let* () = f x in
-        iter_s f rest
-
-  let rec fold_left_s f acc = function
-    | [] -> Io.return acc
-    | x :: rest ->
-        let* acc = f acc x in
-        fold_left_s f acc rest
+  open Io_syntax.Make (Io)
 
   type buffer = Bigstringaf.t
 
@@ -102,12 +92,12 @@ struct
   let pwrite = P.pwrite
 
   let rec mkdir_p path =
-    let* exists = Retry.file_exists path in
+    let* exists = Sys.file_exists path in
     if exists then Io.return ()
     else
       let* () = mkdir_p (Filename.dirname path) in
       Io.catch
-        (fun () -> Retry.mkdir path 0o755)
+        (fun () -> Sys.mkdir path 0o755)
         (function
           | Unix.Unix_error (Unix.EEXIST, _, _) -> Io.return ()
           | exn -> Io.fail exn)
@@ -121,10 +111,10 @@ struct
     Io.catch
       (fun () ->
         let* () = fill tmp in
-        Retry.rename tmp path)
+        Sys.rename tmp path)
       (fun exn ->
         let* () =
-          Io.catch (fun () -> Retry.unlink tmp) (fun _ -> Io.return ())
+          Io.catch (fun () -> Sys.unlink tmp) (fun _ -> Io.return ())
         in
         Io.fail exn)
 
@@ -134,13 +124,13 @@ struct
   let atomic_write_at path ~size write =
     with_temp_rename path (fun tmp ->
         let* fd =
-          Retry.openfile tmp [Unix.O_WRONLY; Unix.O_CREAT; Unix.O_TRUNC] 0o644
+          Sys.openfile tmp [Unix.O_WRONLY; Unix.O_CREAT; Unix.O_TRUNC] 0o644
         in
         Io.finalize
           (fun () ->
             (* Allocated before any piece is produced, so a full disk fails
                before the bytes are paid for. *)
-            let* () = Retry.LargeFile.ftruncate fd (Int64.of_int size) in
+            let* () = Sys.LargeFile.ftruncate fd (Int64.of_int size) in
             let put ~offset data =
               let total = Bigstringaf.length data in
               let rec go written =
@@ -160,21 +150,21 @@ struct
               go 0
             in
             write put)
-          (fun () -> Retry.close fd))
+          (fun () -> Sys.close fd))
 
   let copy_file ~src ~dst =
-    let* src_fd = Retry.openfile src [Unix.O_RDONLY] 0 in
+    let* src_fd = Sys.openfile src [Unix.O_RDONLY] 0 in
     Io.finalize
       (fun () ->
         let* dst_fd =
-          Retry.openfile dst [Unix.O_WRONLY; Unix.O_CREAT; Unix.O_TRUNC] 0o644
+          Sys.openfile dst [Unix.O_WRONLY; Unix.O_CREAT; Unix.O_TRUNC] 0o644
         in
         Io.finalize
           (fun () ->
             let buffer = Bytes.create (1 lsl 20) in
             let rec copy () =
               let* bytes_read =
-                Retry.read src_fd buffer 0 (Bytes.length buffer)
+                Sys.read src_fd buffer 0 (Bytes.length buffer)
               in
               if bytes_read = 0 then Io.return ()
               else (
@@ -182,15 +172,15 @@ struct
                   if pos >= bytes_read then copy ()
                   else
                     let* written =
-                      Retry.write dst_fd buffer pos (bytes_read - pos)
+                      Sys.write dst_fd buffer pos (bytes_read - pos)
                     in
                     write_all (pos + written)
                 in
                 write_all 0)
             in
             copy ())
-          (fun () -> Retry.close dst_fd))
-      (fun () -> Retry.close src_fd)
+          (fun () -> Sys.close dst_fd))
+      (fun () -> Sys.close src_fd)
 
   (* A directory that is not there holds nothing, which is the same answer a
      caller sweeping a layout wants for one that is. Only [Unix_error] is
@@ -203,7 +193,7 @@ struct
   let is_directory path =
     Io.catch
       (fun () ->
-        let+ st = Retry.stat path in
+        let+ st = Sys.stat path in
         st.Unix.st_kind = Unix.S_DIR)
       (fun _ -> Io.return false)
 
@@ -212,14 +202,14 @@ struct
   let stat_opt path =
     Io.catch
       (fun () ->
-        let+ st = Retry.stat path in
+        let+ st = Sys.stat path in
         Some st)
       (fun _ -> Io.return None)
 
   let stat_opt_large path =
     Io.catch
       (fun () ->
-        let+ st = Retry.LargeFile.stat path in
+        let+ st = Sys.LargeFile.stat path in
         Some st)
       (fun _ -> Io.return None)
 
@@ -229,11 +219,11 @@ struct
   let lstat_kind path =
     Io.catch
       (fun () ->
-        let* st = Retry.LargeFile.lstat path in
+        let* st = Sys.LargeFile.lstat path in
         match st.Unix.LargeFile.st_kind with
           | Unix.S_DIR -> Io.return `Dir
           | Unix.S_LNK ->
-              let+ target = Retry.readlink path in
+              let+ target = Sys.readlink path in
               `Symlink target
           | _ -> Io.return (`File st.Unix.LargeFile.st_size))
       (fun _ -> Io.return `Missing)
@@ -243,7 +233,7 @@ struct
   let rec rm_rf path =
     Io.catch
       (fun () ->
-        let* st = Retry.lstat path in
+        let* st = Sys.lstat path in
         match st.Unix.st_kind with
           | Unix.S_DIR ->
               let* names = readdir_list path in
@@ -251,11 +241,11 @@ struct
                 iter_s (fun n -> rm_rf (Filename.concat path n)) names
               in
               Io.catch
-                (fun () -> Retry.rmdir path)
+                (fun () -> Sys.rmdir path)
                 (function Unix.Unix_error _ -> Io.return () | e -> Io.fail e)
           | _ ->
               Io.catch
-                (fun () -> Retry.unlink path)
+                (fun () -> Sys.unlink path)
                 (function Unix.Unix_error _ -> Io.return () | e -> Io.fail e))
       (function
         | Unix.Unix_error (Unix.ENOENT, _, _) -> Io.return ()
@@ -268,7 +258,7 @@ struct
 
   (* Already gone is the outcome the caller wanted, and every cache and scratch
      path is re-derivable, so no unlink here is worth failing over. *)
-  let unlink_quiet path = quiet (fun () -> Retry.unlink path)
+  let unlink_quiet path = quiet (fun () -> Sys.unlink path)
 
   (* [true] when [dir] holds nothing afterwards. Best-effort: a missing path or
      failed unlink is ignored, and a file appearing mid-walk is seen by the next
@@ -286,20 +276,20 @@ struct
             if is_dir then
               let* empty = reap_older_than ~cutoff child in
               if empty then
-                let+ () = quiet (fun () -> Retry.rmdir child) in
+                let+ () = quiet (fun () -> Sys.rmdir child) in
                 kept
               else Io.return (kept + 1)
             else
               let* mtime =
                 Io.catch
                   (fun () ->
-                    let+ st = Retry.stat child in
+                    let+ st = Sys.stat child in
                     Some st.Unix.st_mtime)
                   (fun _ -> Io.return None)
               in
               match mtime with
                 | Some m when m < cutoff ->
-                    let+ () = quiet (fun () -> Retry.unlink child) in
+                    let+ () = quiet (fun () -> Sys.unlink child) in
                     kept
                 | _ -> Io.return (kept + 1))
           0 names
@@ -315,10 +305,10 @@ struct
     let size = Bigarray.Array1.dim buf in
     if size = 0 then Io.return 0
     else
-      let* fd = Retry.openfile path flags 0o644 in
+      let* fd = Sys.openfile path flags 0o644 in
       Io.finalize
         (fun () ->
-          let* _ = Retry.LargeFile.lseek fd offset Unix.SEEK_SET in
+          let* _ = Sys.LargeFile.lseek fd offset Unix.SEEK_SET in
           let rec loop pos =
             if pos >= size then Io.return pos
             else
@@ -326,7 +316,7 @@ struct
               if n = 0 then Io.return pos else loop (pos + n)
           in
           loop 0)
-        (fun () -> Retry.close fd)
+        (fun () -> Sys.close fd)
 
   let read path buf ~offset = rw P.bread path [Unix.O_RDONLY] buf ~offset
 

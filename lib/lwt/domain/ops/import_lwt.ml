@@ -5,7 +5,7 @@ module Manifests = struct
 end
 
 include
-  Import.Over (Io_lwt.Core) (Io_lwt.Fs) (Io_lwt.Retry) (Spool_lwt)
+  Import.Over (Io_lwt.Core) (Io_lwt.Fs) (Io_lwt.Syscalls) (Spool_lwt)
     (Folder_ids_lwt)
     (Remote_lwt)
     (Manifests)

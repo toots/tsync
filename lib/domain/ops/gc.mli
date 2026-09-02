@@ -106,39 +106,6 @@ module type LOCKFILE = sig
   val drop : t -> unit io
 end
 
-(** The tree a collection walks and the two spaces it moves chunks between. *)
-module type FS = sig
-  type 'a io
-
-  val ensure_parent : string -> unit io
-  val mkdir_p : string -> unit io
-  val readdir_list : string -> string list io
-  val readdir_list_quiet : string -> string list io
-  val unlink_quiet : string -> unit io
-  val rm_rf : string -> unit io
-
-  val lstat_kind :
-    string -> [ `Dir | `File of int64 | `Symlink of string | `Missing ] io
-end
-
-module type SYSCALLS = sig
-  type 'a io
-
-  val rename : string -> string -> unit io
-  val rmdir : string -> unit io
-  val file_exists : string -> bool io
-end
-
-(** The bound on what runs at once. *)
-module type POOLS = sig
-  type 'a io
-  type t
-
-  val create : ?max_waiting:int -> ?name:string -> max:int -> unit -> t
-  val use : t -> (unit -> 'a io) -> 'a io
-  val filter_map_with : t -> ('a -> 'b option io) -> 'a list -> 'b list io
-end
-
 (** What a run records about itself, and the move that keeps a chunk alive. *)
 module type COLLECTION = sig
   type 'a io
@@ -153,20 +120,13 @@ module type COLLECTION = sig
   end
 end
 
-(** The pause between passes when a run is asked to keep going. *)
-module type CLOCK = sig
-  type 'a io
-
-  val sleep : float -> unit io
-end
-
 module Over
     (Io : Io.S)
-    (_ : FS with type 'a io := 'a Io.t)
-    (_ : SYSCALLS with type 'a io := 'a Io.t)
-    (Pools : POOLS with type 'a io := 'a Io.t)
+    (_ : Fs.S with type 'a io := 'a Io.t)
+    (_ : Syscalls.S with type 'a io := 'a Io.t)
+    (Pools : Bounded.S with type 'a io := 'a Io.t)
     (_ : LOCKFILE with type 'a io := 'a Io.t)
-    (_ : CLOCK with type 'a io := 'a Io.t)
+    (_ : Clock.S with type 'a io := 'a Io.t)
     (_ : COLLECTION with type 'a io := 'a Io.t) : sig
   module Make (C : Conf.S with type 'a io = 'a Io.t) : sig
     (** {1 Stepping}

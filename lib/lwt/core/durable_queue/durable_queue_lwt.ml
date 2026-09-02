@@ -9,7 +9,7 @@ module Files = struct
     Lwt.catch
       (fun () ->
         let+ body =
-          Io_lwt.Retry.retry_eintr (fun () ->
+          Io_lwt.Syscalls.retry_eintr (fun () ->
               Lwt_io.with_file ~mode:Lwt_io.Input path Lwt_io.read)
         in
         `Body body)

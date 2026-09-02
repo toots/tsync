@@ -33,24 +33,10 @@ type run = { phase : phase; started : float; cursor : string }
 
 val string_of_phase : phase -> string
 
-(** Renaming a chunk between the two spaces, which is a move on one filesystem
-    rather than anything a store offers. *)
-module type SYSCALLS = sig
-  type 'a io
-
-  val rename : string -> string -> unit io
-end
-
-module type FS = sig
-  type 'a io
-
-  val ensure_parent : string -> unit io
-end
-
 module Over
     (Io : Io.S)
-    (_ : SYSCALLS with type 'a io := 'a Io.t)
-    (_ : FS with type 'a io := 'a Io.t) : sig
+    (_ : Syscalls.S with type 'a io := 'a Io.t)
+    (_ : Fs.S with type 'a io := 'a Io.t) : sig
   module Make (_ : Conf.S with type 'a io = 'a Io.t) : sig
     (** Re-exported, so a caller binding this functor's result to [Collection]
         can still name what it reads back. *)

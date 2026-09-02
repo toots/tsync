@@ -49,29 +49,13 @@ let of_string data =
     | _ -> None
     | exception _ -> None
 
-(** Renaming a chunk between the two spaces, which is a move on one filesystem
-    rather than anything a store offers. *)
-module type SYSCALLS = sig
-  type 'a io
-
-  val rename : string -> string -> unit io
-end
-
-module type FS = sig
-  type 'a io
-
-  val ensure_parent : string -> unit io
-end
-
 module Over
     (Io : Io.S)
-    (Syscalls : SYSCALLS with type 'a io := 'a Io.t)
-    (Files : FS with type 'a io := 'a Io.t) =
+    (Syscalls : Syscalls.S with type 'a io := 'a Io.t)
+    (Files : Fs.S with type 'a io := 'a Io.t) =
 struct
   module Make (C : Conf.S with type 'a io = 'a Io.t) = struct
-    let ( let* ) = Io.bind
-    let ( let+ ) x f = Io.map f x
-    let return_some x = Io.return (Some x)
+    open Io_syntax.Make (Io)
 
     (* Re-exported so a caller binding [Collection] to this can still name the
        record it reads back. *)

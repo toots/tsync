@@ -11,24 +11,6 @@ type summary = {
   failed : int;
 }
 
-(** Reading the local tree an import walks. *)
-module type FS = sig
-  type 'a io
-
-  val lstat_kind :
-    string -> [ `Dir | `File of int64 | `Symlink of string | `Missing ] io
-
-  val readdir_list : string -> string list io
-  val stat_opt_large : string -> Unix.LargeFile.stats option io
-end
-
-module type SYSCALLS = sig
-  type 'a io
-
-  val stat : string -> Unix.stats io
-  val lstat : string -> Unix.stats io
-end
-
 (** The id naming a folder's own namespace, minted if this client has none. *)
 module type FOLDER_IDS = sig
   type 'a io
@@ -101,8 +83,8 @@ end
 
 module Over
     (Io : Io.S)
-    (Files : FS with type 'a io := 'a Io.t)
-    (Syscalls : SYSCALLS with type 'a io := 'a Io.t)
+    (Files : Fs.S with type 'a io := 'a Io.t)
+    (Syscalls : Syscalls.S with type 'a io := 'a Io.t)
     (Spool : Listing.SPOOL with type 'a io := 'a Io.t)
     (Folder_ids : FOLDER_IDS with type 'a io := 'a Io.t)
     (Objects : OBJECTS with type 'a io := 'a Io.t)
@@ -116,36 +98,8 @@ struct
     include Listing.Make (Io) (Spool)
   end
 
-  let ( let* ) = Io.bind
-  let ( let+ ) x f = Io.map f x
-  let return_some x = Io.return (Some x)
+  open Io_syntax.Make (Io)
   let iter_p f xs = Io.iter_p f xs
-
-  let rec iter_s f = function
-    | [] -> Io.return ()
-    | x :: rest ->
-        let* () = f x in
-        iter_s f rest
-
-  let rec map_s f = function
-    | [] -> Io.return []
-    | x :: rest ->
-        let* y = f x in
-        let+ ys = map_s f rest in
-        y :: ys
-
-  let rec filter_map_s f = function
-    | [] -> Io.return []
-    | x :: rest -> (
-        let* y = f x in
-        let+ ys = filter_map_s f rest in
-        match y with Some y -> y :: ys | None -> ys)
-
-  let rec fold_left_s f acc = function
-    | [] -> Io.return acc
-    | x :: rest ->
-        let* acc = f acc x in
-        fold_left_s f acc rest
 
   module Make (C : Conf.S with type 'a io = 'a Io.t) = struct
     module Lk = Logical_key.Make (C)

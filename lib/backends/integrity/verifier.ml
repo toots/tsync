@@ -1,13 +1,6 @@
 (* What queueing the requests needs of a pool. *)
-module type POOLS = sig
-  type 'a io
-  type t
 
-  val create : ?max_waiting:int -> ?name:string -> max:int -> unit -> t
-  val use : t -> (unit -> 'a io) -> 'a io
-end
-
-module Over (Io : Io.S) (Bounded : POOLS with type 'a io := 'a Io.t) = struct
+module Over (Io : Io.S) (Bounded : Bounded.S with type 'a io := 'a Io.t) = struct
   let ( let+ ) x f = Io.map f x
 
   (* One request per shard, and the store's own object-created notification is what

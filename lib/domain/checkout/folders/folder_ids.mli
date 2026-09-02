@@ -14,20 +14,7 @@
     empties both together, and filling the index again is {!Over.Make.rebuild},
     which the resync owes. *)
 
-(** What this needs of a filesystem, which is seven calls. *)
-module type FILES = sig
-  type 'a io
-
-  val read_file_opt : string -> string option io
-  val readdir_list_quiet : string -> string list io
-  val is_directory : string -> bool io
-  val mkdir_p : string -> unit io
-  val ensure_parent : string -> unit io
-  val atomic_write : string -> string -> unit io
-  val unlink_quiet : string -> unit io
-end
-
-module Over (Io : Io.S) (_ : FILES with type 'a io := 'a Io.t) : sig
+module Over (Io : Io.S) (_ : Fs.S with type 'a io := 'a Io.t) : sig
   (** The per-directory marker file naming that folder's id. *)
   val marker_name : string
 

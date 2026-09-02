@@ -61,12 +61,7 @@ module Over
     (Fi : FOLDERS with type 'a io := 'a Io.t)
     (Mf : MANIFESTS with type 'a io := 'a Io.t) =
 struct
-  let ( let* ) = Io.bind
-  let ( let+ ) x f = Io.map f x
-
-  let rec iter_s f = function
-    | [] -> Io.return ()
-    | x :: rest -> Io.bind (f x) (fun () -> iter_s f rest)
+  open Io_syntax.Make (Io)
 
   (* Sequential: the width would otherwise be the folder's child count, which is
      the store's to choose and not ours. *)

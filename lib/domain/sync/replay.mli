@@ -52,17 +52,9 @@ module type STAGED = sig
   end
 end
 
-module type POOLS = sig
-  type 'a io
-  type t
-
-  val create : ?max_waiting:int -> ?name:string -> max:int -> unit -> t
-  val iter_with : t -> ('a -> unit io) -> 'a list -> unit io
-end
-
 module Over
     (Io : Io.S)
-    (_ : POOLS with type 'a io := 'a Io.t)
+    (_ : Bounded.S with type 'a io := 'a Io.t)
     (_ : JOURNAL with type 'a io := 'a Io.t)
     (_ : WAL with type 'a io := 'a Io.t)
     (_ : STAGED with type 'a io := 'a Io.t) : sig

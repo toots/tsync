@@ -231,31 +231,15 @@ let member ?(role = `Main) ?(readable = true) ?(backend_type = "local")
   }
 
 (* What the batched reads need of a pool. *)
-module type POOLS = sig
-  type 'a io
-  type t
-
-  val create : ?max_waiting:int -> ?name:string -> max:int -> unit -> t
-  val use : t -> (unit -> 'a io) -> 'a io
-  val map_with : t -> ('a -> 'b io) -> 'a list -> 'b list io
-end
 
 (* The registries here are one per process: the drivers that register
    themselves, the hooks a composite settles through, and the pool the batched
    reads come out of. So this is applied once, in the layer that names a
    scheduler. *)
-module Make (Io : Io.S) (Bounded : POOLS with type 'a io := 'a Io.t) = struct
+module Make (Io : Io.S) (Bounded : Bounded.S with type 'a io := 'a Io.t) = struct
   module type Store = S with type 'a io := 'a Io.t
 
-  let ( let* ) = Io.bind
-  let ( let+ ) x f = Io.map f x
-
-  let rec map_s f = function
-    | [] -> Io.return []
-    | x :: rest ->
-        let* y = f x in
-        let+ rest = map_s f rest in
-        y :: rest
+  open Io_syntax.Make (Io)
 
   (* Object reads a batch stands in for, for a caller with no budget of its own.
      Module-level, since a pool built per call is not a bound. *)

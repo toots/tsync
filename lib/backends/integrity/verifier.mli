@@ -10,16 +10,7 @@
     {!Backend.S.verify_all} with it: a filesystem has no event source to deliver
     anything, and [tsync gc --verify] is its sweep. *)
 
-(** What queueing the requests needs of a pool. *)
-module type POOLS = sig
-  type 'a io
-  type t
-
-  val create : ?max_waiting:int -> ?name:string -> max:int -> unit -> t
-  val use : t -> (unit -> 'a io) -> 'a io
-end
-
-module Over (Io : Io.S) (_ : POOLS with type 'a io := 'a Io.t) : sig
+module Over (Io : Io.S) (_ : Bounded.S with type 'a io := 'a Io.t) : sig
   (** Queue one request per shard. Answers how many, which is work started
       rather than work done: what came of it is read afterwards by listing
       {!Chunk_layout.corrupted_prefix}.

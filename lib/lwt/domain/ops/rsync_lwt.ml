@@ -10,7 +10,7 @@ module Content = struct
 end
 
 include
-  Rsync.Over (Io_lwt.Core) (Io_lwt.Fs) (Io_lwt.Retry) (Folder_ids_lwt)
+  Rsync.Over (Io_lwt.Core) (Io_lwt.Fs) (Io_lwt.Syscalls) (Folder_ids_lwt)
     (Remote_lwt)
     (Manifests)
     (File_store_lwt)

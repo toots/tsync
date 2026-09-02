@@ -53,7 +53,7 @@ module Make
     (Clock : Clock.S with type 'a io := 'a Io.t)
     (T : TRANSPORT with type 'a io := 'a Io.t) =
 struct
-  let ( let* ) = Io.bind
+  open Io_syntax.Make (Io)
 
   let send ?(timeout = 2.) ~socket_path cmd =
     Clock.with_timeout timeout (fun () ->

@@ -5,7 +5,7 @@ module Over
     (Io : Io.S)
     (S3io : Aws_s3.Types.Io with type 'a Deferred.t = 'a Io.t)
     (Loop : Retry.LOOP with type 'a io := 'a Io.t)
-    (Bounded : Verifier.POOLS with type 'a io := 'a Io.t)
+    (Bounded : Bounded.S with type 'a io := 'a Io.t)
     (Clock : Clock.S with type 'a io := 'a Io.t) =
 struct
   module Verify = Verifier.Over (Io) (Bounded)
@@ -13,8 +13,7 @@ struct
 
   module type Store = Backend.S with type 'a io := 'a Io.t
 
-  let ( let* ) = Io.bind
-  let ( let+ ) x f = Io.map f x
+  open Io_syntax.Make (Io)
 
   exception Cancelled = Retry.Cancelled
 

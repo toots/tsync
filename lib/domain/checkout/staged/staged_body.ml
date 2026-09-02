@@ -4,48 +4,12 @@
    The only copy there is until an upload publishes them, which is why nothing
    here is reclaimable and the cap next door cannot see it. *)
 
-(* What this needs of a filesystem, of the retrying syscalls, and of the cache:
-   read a published chunk it is overwriting part of, and hand a finished body
-   over to be published. *)
-module type FS = sig
-  type 'a io
-
-  val copy_file : src:string -> dst:string -> unit io
-  val ensure_parent : string -> unit io
-  val unlink_quiet : string -> unit io
-  val read : string -> Bigstring.t -> offset:int64 -> int io
-  val write : string -> Bigstring.t -> offset:int64 -> int io
-end
-
-module type SYSCALLS = sig
-  type 'a io
-  type fd
-
-  val openfile : string -> Unix.open_flag list -> Unix.file_perm -> fd io
-  val close : fd -> unit io
-  val rename : string -> string -> unit io
-
-  module LargeFile : sig
-    val stat : string -> Unix.LargeFile.stats io
-    val ftruncate : fd -> int64 -> unit io
-  end
-end
-
 module Over
     (Io : Io.S)
-    (Fs : FS with type 'a io := 'a Io.t)
-    (Retry : SYSCALLS with type 'a io := 'a Io.t) =
+    (Fs : Fs.S with type 'a io := 'a Io.t)
+    (Retry : Syscalls.S with type 'a io := 'a Io.t) =
 struct
-  let ( let* ) = Io.bind
-  let ( let+ ) x f = Io.map f x
-  let return_unit = Io.return ()
-  let return_some x = Io.return (Some x)
-  let return_true = Io.return true
-  let return_false = Io.return false
-
-  let rec iter_s f = function
-    | [] -> return_unit
-    | x :: rest -> Io.bind (f x) (fun () -> iter_s f rest)
+  open Io_syntax.Make (Io)
 
   module type Cache = sig
     val read_into :

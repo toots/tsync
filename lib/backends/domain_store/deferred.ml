@@ -31,15 +31,6 @@ module type QUEUES = sig
   end
 end
 
-module type LOCKS = sig
-  type 'a io
-  type condition
-
-  val condition : unit -> condition
-  val wait : condition -> unit io
-  val broadcast : condition -> unit
-end
-
 type op =
   | Put of { key : Stored_key.t; data : Bigstring.t }
   | Copy of { src_key : Stored_key.t; dst_key : Stored_key.t }
@@ -58,16 +49,11 @@ type job =
 module Over
     (Io : Io.S)
     (Queues : QUEUES with type 'a io := 'a Io.t)
-    (Lock : LOCKS with type 'a io := 'a Io.t) =
+    (Lock : Lock.S with type 'a io := 'a Io.t) =
 struct
   module type Store = Backend.S with type 'a io := 'a Io.t
 
-  let ( let* ) = Io.bind
-  let ( let+ ) x f = Io.map f x
-
-  let rec iter_s f = function
-    | [] -> Io.return ()
-    | x :: rest -> Io.bind (f x) (fun () -> iter_s f rest)
+  open Io_syntax.Make (Io)
 
   module Q = Queues.Make (struct
     type t = job

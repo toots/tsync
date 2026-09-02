@@ -66,32 +66,10 @@ val staged_of_string : string -> state
 val sidecar_path :
   cache_root:string -> domain_name:string -> Logical_key.t -> string
 
-(** What this needs of a filesystem and of the retrying syscalls. *)
-module type FS = sig
-  type 'a io
-
-  val atomic_write : string -> string -> unit io
-  val ensure_parent : string -> unit io
-  val is_directory : string -> bool io
-  val readdir_list : string -> string list io
-  val read_file_opt : string -> string option io
-  val unlink_quiet : string -> unit io
-
-  (** {!Cache_layout.Make.real_dir_name}. *)
-  val real_dir_name : string -> string -> string io
-end
-
-module type SYSCALLS = sig
-  type 'a io
-
-  val file_exists : string -> bool io
-  val rename : string -> string -> unit io
-end
-
 module Over
     (Io : Io.S)
-    (_ : FS with type 'a io := 'a Io.t)
-    (_ : SYSCALLS with type 'a io := 'a Io.t) : sig
+    (_ : Cache_layout.FS with type 'a io := 'a Io.t)
+    (_ : Syscalls.S with type 'a io := 'a Io.t) : sig
   module Make (C : Conf.S with type 'a io = 'a Io.t) : sig
     (** The staged tree's root. *)
     val root : unit -> string
