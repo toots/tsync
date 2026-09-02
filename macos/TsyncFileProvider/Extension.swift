@@ -230,7 +230,7 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension,
                 } else {
                     reply = try await client.create(parentRef: parent, name: name)
                 }
-                let created = reply.item.flatMap { TsyncItem.make($0, readOnly: readOnly) }
+                let created = try described(reply)
                 progress.completedUnitCount = 100
                 completionHandler(created, pending, false, nil)
             } catch is CancellationError {
@@ -290,7 +290,14 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension,
                         name: item.filename)
                 }
 
-                let updated = reply?.item.flatMap { TsyncItem.make($0, readOnly: readOnly) }
+                // No reply means only fields this side cannot store changed,
+                // and the item is answered as it stands.
+                let updated: TsyncItem
+                if let reply {
+                    updated = try described(reply)
+                } else {
+                    updated = try await resolve(item.itemIdentifier)
+                }
                 progress.completedUnitCount = 100
                 completionHandler(updated, pending, false, nil)
             } catch is CancellationError {
@@ -377,6 +384,14 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension,
         NSError(domain: NSCocoaErrorDomain, code: NSFileWriteVolumeReadOnlyError,
                 userInfo: [NSLocalizedDescriptionKey:
                             "'\(domain.displayName)' is read-only"])
+    }
+
+    /// The item a mutation answered with. Completing without one would tell the
+    /// system nothing about what it just changed, so a reply naming none fails.
+    private func described(_ reply: DaemonResponse) throws -> TsyncItem {
+        guard let item = reply.item, let built = TsyncItem.make(item, readOnly: readOnly)
+        else { throw DaemonError.remote(code: "internal", message: "reply names no item") }
+        return built
     }
 
     /// The file already at `name` inside `parent`, if there is one.
