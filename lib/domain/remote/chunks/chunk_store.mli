@@ -11,7 +11,27 @@
     supplies, so a collection moving the keyspace underneath it is invisible
     here. *)
 
+(** Chunk keys this session has seen present. Bounded: reaching [max_known]
+    clears it, which costs a HEAD per chunk again. *)
+module Dedup : sig
+  type t
+
+  val create : ?max_known:(unit -> int) -> unit -> t
+  val remember : t -> string -> unit
+  val count : t -> int
+end
+
 module Over (Io : Io.S) (Pools : Bounded.S with type 'a io := 'a Io.t) : sig
+  (** Whether [key] is already stored: the memo, then the corruption marker,
+      then the store. A marked chunk is never answered from the memo, or the bad
+      bytes would reach every later file containing it. *)
+  val known :
+    Dedup.t ->
+    corrupt:(string -> bool Io.t) ->
+    present:(string -> bool Io.t) ->
+    string ->
+    bool Io.t
+
   (** What the store needs of the domain below it. Presence rather than an
       entry: the only thing asked of a store is whether it holds a key, and
       answering less keeps the backend's vocabulary out of this one. *)

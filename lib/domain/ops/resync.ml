@@ -23,8 +23,8 @@ module Over
     (Pools : Bounded.S with type 'a io := 'a Io.t)
     (Tree : Inode_tree.OVER with type 'a io := 'a Io.t and type pool := Pools.t)
     (Cursor_of : File_store.OVER with type 'a io := 'a Io.t)
-    (Checkout : File.OVER with type 'a io := 'a Io.t)
-    (Filing : Filing.OVER with type 'a io := 'a Io.t)
+    (Files : File.OVER with type 'a io := 'a Io.t)
+    (Checkout : Checkout.OVER with type 'a io := 'a Io.t)
     (Sync : SYNC with type 'a io := 'a Io.t) =
 struct
   open Io_syntax.Make (Io)
@@ -35,8 +35,8 @@ struct
     module Lk = Logical_key.Make (C)
     module J = Journal.Make (C)
     module Cursor = Cursor_of.Make (C)
-    module F = Checkout.Make (C)
-    module Fl = Filing.Make (C)
+    module F = Files.Make (C)
+    module Ck = Checkout.Make (C)
     module Sq = Sync.Queue.Make (C) (F)
     module Rp = Sync.Replay.Make (C) (F)
     module Tree = Tree.Make (C)
@@ -60,7 +60,7 @@ struct
                 "unreadable manifest: " ^ Printexc.to_string exn)
       in
       let apply key (entry : Inode_tree.entry) =
-        let* filed = Fl.record ~parent:key entry in
+        let* filed = Ck.record ~parent:key entry in
         match entry.Inode_tree.body with
           | Inode_tree.Dir _ -> Io.return ()
           | Inode_tree.File _ ->

@@ -16,7 +16,6 @@ module Over
     (Io : Io.S)
     (Ck : Checkout.OVER with type 'a io := 'a Io.t)
     (P : PULL with type 'a io := 'a Io.t)
-    (Fl : Filing.OVER with type 'a io := 'a Io.t)
     (Fi : Folder_ids.S with type 'a io := 'a Io.t)
     (Mf : Manifests.OVER with type 'a io := 'a Io.t) =
 struct
@@ -34,7 +33,6 @@ struct
   module Make (C : Conf.S with type 'a io = 'a Io.t) = struct
     module T = Ck.Make (C)
     module Pull = P.Make (C)
-    module Filing = Fl.Make (C)
     module Manifests = Mf.Make (C)
     module Lk = Logical_key.Make (C)
 
@@ -44,6 +42,7 @@ struct
     let list_tree = T.list_tree
     let walk = T.walk
     let ensure_root = T.ensure_root
+    let record = T.record
 
     let folder_id prefix =
       if Logical_key.equal prefix Lk.root then
@@ -51,8 +50,8 @@ struct
       else
         Fi.lookup_id ~cache_root:C.cache_root ~domain_name:C.domain_name prefix
 
-    let record prefix entry =
-      let+ filed = Filing.record ~parent:prefix entry in
+    let file_child prefix entry =
+      let+ filed = T.record ~parent:prefix entry in
       Logical_key.leaf filed
 
     (* Only the published half is dropped: a staged body is this client's own
@@ -82,7 +81,7 @@ struct
         | None -> Io.return ()
         | Some folder_id ->
             let* entries = Pull.children ~folder_id () in
-            let* kept = map_s (record prefix) entries in
+            let* kept = map_s (file_child prefix) entries in
             prune prefix kept
 
     let list_children ~prefix () =
