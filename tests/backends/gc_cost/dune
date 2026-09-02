@@ -12,9 +12,9 @@
    -open
    Tsync_ops_lwt
    -open
-   Tsync_collection
+   Tsync_remote
    -open
-   Tsync_collection_lwt
+   Tsync_remote_lwt
    -open
    Tsync_bigstring
    -open
@@ -39,8 +39,8 @@
   tsync_test_harness
   tsync_ops
   tsync_ops_lwt
-  tsync_collection
-  tsync_collection_lwt
+  tsync_remote
+  tsync_remote_lwt
   tsync_conf_lwt
   tsync_bigstring
   tsync_backend_register

@@ -4,9 +4,9 @@
    -open
    Tsync_logical_key
    -open
-   Tsync_staged
+   Tsync_checkout
    -open
-   Tsync_staged_lwt
+   Tsync_checkout_lwt
    -open
    Tsync_cache_layout
    -open
@@ -20,8 +20,8 @@
  (name staged_codec_test)
  (libraries
   tsync_logical_key
-  tsync_staged
-  tsync_staged_lwt
+  tsync_checkout
+  tsync_checkout_lwt
   tsync_cache_layout
   tsync_conf_lwt
   tsync_backend_register

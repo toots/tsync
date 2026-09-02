@@ -12,29 +12,9 @@
    -open
    Tsync_chunk_integrity
    -open
-   Tsync_history
+   Tsync_remote
    -open
-   Tsync_history_lwt
-   -open
-   Tsync_layout_lwt
-   -open
-   Tsync_store_lwt
-   -open
-   Tsync_file_store_lwt
-   -open
-   Tsync_corruption
-   -open
-   Tsync_corruption_lwt
-   -open
-   Tsync_collection
-   -open
-   Tsync_checkout_maintenance
-   -open
-   Tsync_checkout_maintenance_lwt
-   -open
-   Tsync_staged
-   -open
-   Tsync_staged_lwt
+   Tsync_remote_lwt
    -open
    Tsync_checkout
    -open
@@ -48,7 +28,7 @@
    -open
    Tsync_ops_lwt
    -open
-   Tsync_folder_ids_lwt
+   Tsync_cache_layout_lwt
    -open
    Tsync_ipc
    -open
@@ -98,26 +78,16 @@
   tsync_stdlib
   tsync_logical_key
   tsync_chunk_integrity
-  tsync_history
-  tsync_history_lwt
-  tsync_layout_lwt
-  tsync_store_lwt
-  tsync_file_store_lwt
-  tsync_corruption
-  tsync_corruption_lwt
-  tsync_collection
-  tsync_staged_lwt
-  tsync_checkout_maintenance
-  tsync_checkout_maintenance_lwt
-  tsync_staged
-  tsync_checkout
+  tsync_remote
+  tsync_remote_lwt
   tsync_checkout_lwt
+  tsync_checkout
   tsync_journal
   tsync_io_lwt
   tsync-libs.field_spec
   tsync-libs.ops
   tsync-libs.ops_lwt
-  tsync_folder_ids_lwt
+  tsync_cache_layout_lwt
   tsync-libs.frontend_register
   tsync_launcher
   tsync-libs.backend_register

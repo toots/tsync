@@ -1,9 +1,0 @@
-; The local chunk cache on Lwt: group bodies on this process's filesystem, with
-; its pools bounding what is read and fetched at once.
-
-(library
- (flags
-  (:standard -open Tsync_chunk_cache -open Tsync_io_lwt))
- (name tsync_chunk_cache_lwt)
- (public_name tsync-libs.chunk_cache_lwt)
- (libraries tsync_chunk_cache tsync_io_lwt lwt))

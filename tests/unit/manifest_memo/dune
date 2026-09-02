@@ -4,9 +4,7 @@
    -open
    Tsync_logical_key
    -open
-   Tsync_staged_lwt
-   -open
-   Tsync_manifests_lwt
+   Tsync_checkout_lwt
    -open
    Tsync_manifest
    -open
@@ -20,8 +18,7 @@
  (name manifest_memo_test)
  (libraries
   tsync_logical_key
-  tsync_staged_lwt
-  tsync_manifests_lwt
+  tsync_checkout_lwt
   tsync_manifest
   tsync_test_harness
   tsync_conf_lwt

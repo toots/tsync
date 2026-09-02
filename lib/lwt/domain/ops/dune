@@ -9,39 +9,15 @@
    -open
    Tsync_conf_lwt
    -open
-   Tsync_folder_ids_lwt
-   -open
-   Tsync_layout_lwt
-   -open
-   Tsync_store_lwt
-   -open
-   Tsync_corruption_lwt
-   -open
-   Tsync_inode_tree_lwt
-   -open
-   Tsync_file_store_lwt
-   -open
-   Tsync_manifests_lwt
+   Tsync_cache_layout_lwt
    -open
    Tsync_remote_lwt
    -open
-   Tsync_content_lwt
-   -open
-   Tsync_staged_lwt
-   -open
    Tsync_checkout_lwt
-   -open
-   Tsync_collection_lwt
    -open
    Tsync_spill_lwt
    -open
    Tsync_sync_lwt
-   -open
-   Tsync_file_lwt
-   -open
-   Tsync_filing_lwt
-   -open
-   Tsync_cache_layout_lwt
    -open
    Tsync_io_lwt))
  (name tsync_ops_lwt)
@@ -49,23 +25,11 @@
  (libraries
   tsync_ops
   tsync_conf_lwt
-  tsync_folder_ids_lwt
-  tsync_layout_lwt
-  tsync_store_lwt
-  tsync_file_store_lwt
-  tsync_manifests_lwt
+  tsync_cache_layout_lwt
   tsync_remote_lwt
-  tsync_content_lwt
-  tsync_staged_lwt
   tsync_checkout_lwt
-  tsync_collection_lwt
   tsync_spill_lwt
   tsync_sync_lwt
-  tsync_file_lwt
-  tsync_filing_lwt
-  tsync_cache_layout_lwt
-  tsync_inode_tree_lwt
-  tsync_corruption_lwt
   tsync_io_lwt
   lwt
   lwt.unix

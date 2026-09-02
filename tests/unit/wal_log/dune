@@ -2,7 +2,7 @@
  (flags
   (:standard
    -open
-   Tsync_wal_lwt
+   Tsync_checkout_lwt
    -open
    Tsync_conf_lwt
    -open
@@ -13,7 +13,7 @@
    Tsync_test_harness))
  (name wal_log_test)
  (libraries
-  tsync_wal_lwt
+  tsync_checkout_lwt
   tsync_conf_lwt
   tsync_test_harness
   tsync_backend_lwt

@@ -33,13 +33,13 @@
    -open
    Tsync_logical_key
    -open
-   Tsync_staged
+   Tsync_checkout
    -open
    Tsync_manifest
    -open
-   Tsync_lazy_checkout_lwt))
+   Tsync_checkout_lwt))
  (libraries
-  tsync-libs.lazy_checkout_lwt
+  tsync-libs.checkout_lwt
   tsync_android_frontend
   tsync_backend
   tsync_runtime
@@ -54,7 +54,7 @@
   lwt.unix
   unix
   tsync_logical_key
-  tsync_staged
+  tsync_checkout
   tsync_manifest))
 
 ; [shared_object] rather than [object]: the single self-contained object links

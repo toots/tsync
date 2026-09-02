@@ -1,8 +1,0 @@
-; Chunk storage on Lwt: the pools a chunk waits in are this process's.
-
-(library
- (flags
-  (:standard -open Tsync_chunk_store -open Tsync_io_lwt))
- (name tsync_chunk_store_lwt)
- (public_name tsync-libs.chunk_store_lwt)
- (libraries tsync_chunk_store tsync_io_lwt lwt))

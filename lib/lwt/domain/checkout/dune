@@ -1,5 +1,7 @@
-; The working copy on Lwt: the manifest tree and the staged half over it, read
-; and written through this process's filesystem.
+; The working copy on Lwt: every functor of tsync_checkout applied to this
+; process's filesystem, syscalls, pools and clock.
+
+(include_subdirs unqualified)
 
 (library
  (flags
@@ -7,21 +9,30 @@
    -open
    Tsync_checkout
    -open
-   Tsync_manifests_lwt
-   -open
-   Tsync_staged_lwt
-   -open
-   Tsync_folder_ids_lwt
+   Tsync_io_lwt
    -open
    Tsync_cache_layout_lwt
    -open
-   Tsync_io_lwt))
+   Tsync_conf_lwt
+   -open
+   Tsync_remote_lwt
+   -open
+   Tsync_journal
+   -open
+   Tsync_log
+   -open
+   Tsync_durable_queue_lwt))
  (name tsync_checkout_lwt)
  (public_name tsync-libs.checkout_lwt)
  (libraries
   tsync_checkout
-  tsync_manifests_lwt
-  tsync_staged_lwt
-  tsync_folder_ids_lwt
+  tsync_io_lwt
+  lwt
   tsync_cache_layout_lwt
-  tsync_io_lwt))
+  tsync_conf_lwt
+  tsync_remote_lwt
+  tsync_journal
+  tsync_log
+  lwt.unix
+  unix
+  tsync_durable_queue_lwt))

@@ -6,13 +6,9 @@
    -open
    Tsync_remote_lwt
    -open
-   Tsync_layout_lwt
-   -open
-   Tsync_staged_lwt
-   -open
    Tsync_checkout_lwt
    -open
-   Tsync_folder_ids_lwt
+   Tsync_cache_layout_lwt
    -open
    Tsync_cache_layout
    -open
@@ -37,10 +33,8 @@
   cohttp
   tsync_logical_key
   tsync_remote_lwt
-  tsync_layout_lwt
-  tsync_staged_lwt
   tsync_checkout_lwt
-  tsync_folder_ids_lwt
+  tsync_cache_layout_lwt
   tsync_cache_layout
   tsync_bigstring
   tsync_backend_register

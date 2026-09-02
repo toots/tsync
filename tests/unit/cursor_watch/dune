@@ -14,9 +14,9 @@
    -open
    Tsync_backend_lwt
    -open
-   Tsync_file_store_lwt
+   Tsync_remote_lwt
    -open
-   Tsync_file_lwt
+   Tsync_checkout_lwt
    -open
    Tsync_sync_lwt
    -open
@@ -30,8 +30,8 @@
   tsync_bigstring
   tsync_backend_register
   tsync_backend_lwt
-  tsync_file_store_lwt
-  tsync_file_lwt
+  tsync_remote_lwt
+  tsync_checkout_lwt
   tsync_sync_lwt
   tsync_local_backend_lwt
   lwt

@@ -6,9 +6,9 @@
    -open
    Tsync_logical_key
    -open
-   Tsync_file_ops
+   Tsync_checkout
    -open
-   Tsync_folder_ids_lwt
+   Tsync_cache_layout_lwt
    -open
    Tsync_ipc
    -open
@@ -57,8 +57,8 @@
   tsync_conf_lwt
   tsync_logical_key
   tsync-libs.menu
-  tsync_file_ops
-  tsync_folder_ids_lwt
+  tsync_checkout
+  tsync_cache_layout_lwt
   tsync-libs.conf
   tsync-libs.ipc
   tsync-libs.ipc_lwt

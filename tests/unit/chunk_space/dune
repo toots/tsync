@@ -6,11 +6,9 @@
    -open
    Tsync_chunks
    -open
-   Tsync_store
+   Tsync_remote
    -open
-   Tsync_collection
-   -open
-   Tsync_collection_lwt
+   Tsync_remote_lwt
    -open
    Tsync_bigstring
    -open
@@ -28,9 +26,8 @@
   tsync-libs.logical_key
   tsync_chunks
   tsync_test_harness
-  tsync_store
-  tsync_collection
-  tsync_collection_lwt
+  tsync_remote
+  tsync_remote_lwt
   tsync_conf_lwt
   tsync_bigstring
   tsync_backend_register
