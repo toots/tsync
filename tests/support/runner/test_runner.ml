@@ -1048,7 +1048,7 @@ let setup_client (module C : Conf_lwt.S) root staging_prefix =
         let* m = F.published k in
         let size = match m with Some m -> Manifest.size m | None -> 0L in
         let ek = J.entry_key () in
-        let* () = W.record ek [`Put (F.rel_key k, size)] in
+        let* () = W.record ek [`Put (Logical_key.path k, size)] in
         W.advance ek Wal.Executed
     | StaleRecord ->
         let dir =

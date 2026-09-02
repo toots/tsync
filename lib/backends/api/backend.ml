@@ -230,6 +230,13 @@ let member ?(role = `Main) ?(readable = true) ?(backend_type = "local")
     local_path;
   }
 
+let main members = List.find_opt (fun m -> m.role = `Main) members
+
+let deferred members =
+  List.filter (fun m -> m.role = `Replica || m.role = `Backfill) members
+
+let named name members = List.find_opt (fun m -> m.name = name) members
+
 (* What the batched reads need of a pool. *)
 
 (* The registries here are one per process: the drivers that register

@@ -544,7 +544,7 @@ let text json =
        masked values are the ones the producer already decided say nothing. *)
     let identifying =
       List.find_opt
-        (fun (_, v) -> str v <> "***" && str v <> "")
+        (fun (_, v) -> str v <> Field_spec.masked && str v <> "")
         (assoc (mem m "config"))
     in
     line 2 "Backend %s (%s, %s)%s"

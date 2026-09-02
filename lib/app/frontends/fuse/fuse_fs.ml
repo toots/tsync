@@ -167,17 +167,15 @@ module Make (C : Conf_lwt.S) (D : Domain_engine.Domain) = struct
                     "fusermount3 -uz %s %s; the mount point is left behind"
                     mount_point (exit_status status))
 
-  (* Directories exist only in the manifest mirror. *)
   let is_dir_key key =
-    Logical_key.kind key = `Dir
-    ||
-    let mp = F.manifest_path key in
-    Sys.file_exists mp && Sys.is_directory mp
+    if Logical_key.kind key = `Dir then Lwt.return_true
+    else Lwt.map (fun k -> k = `Dir) (F.kind key)
 
   (* Given a directory this applies to the whole subtree, and one file's failure
      must not abort the rest. *)
   let on_subtree what f key =
-    if not (is_dir_key key) then f key
+    let* dir = is_dir_key key in
+    if not dir then f key
     else (
       let prefix = Lk.dir (Logical_key.path key) in
       let* files = F.list_tree ~prefix in

@@ -118,10 +118,7 @@ struct
             | _ -> None)
         (fun _ -> Io.return None)
 
-    let member_named name =
-      List.find_opt
-        (fun (m : (module C.Store) Backend.member) -> m.Backend.name = name)
-        C.members
+    let member_named name = Backend.named name C.members
 
     (* A backfill target is excluded by [readable]: it is not read from, and may
        not hold the chunk at all. *)

@@ -101,13 +101,11 @@ let build_backends ~paths ~resume (d : Conf_parsing.domain) :
           ~config:
             (List.map
                (fun (k, v) ->
-                 match
-                   Option.bind
-                     (Backend_lwt.spec_for bc.backend_type)
-                     (List.find_opt (fun (s : Field_spec.t) -> s.name = k))
-                 with
-                   | Some { secret = true; _ } when v <> "" -> (k, "***")
-                   | _ -> (k, v))
+                 ( k,
+                   Field_spec.mask_named
+                     (Option.value ~default:[]
+                        (Backend_lwt.spec_for bc.backend_type))
+                     k v ))
                bc.fields)
           ?pending:(stat (fun s -> s.Deferred.queued))
           ?in_flight:(stat (fun s -> s.Deferred.in_flight))

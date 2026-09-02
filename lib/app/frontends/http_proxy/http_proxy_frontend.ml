@@ -159,13 +159,11 @@ let make_route bindings ~peers (b : Frontend.binding) =
   let options =
     List.map
       (fun (name, value) ->
-        match
-          List.find_opt
-            (fun (s : Field_spec.t) -> s.name = name)
-            (Frontend.spec_for implementation)
-        with
-          | Some { secret = true; _ } when value <> "" -> (name, `String "***")
-          | _ -> (name, `String value))
+        ( name,
+          `String
+            (Field_spec.mask_named
+               (Frontend.spec_for implementation)
+               name value) ))
       b.Frontend.options
   in
   let module Diag = Diagnostics.Make (C) in
