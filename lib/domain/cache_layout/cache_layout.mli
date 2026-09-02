@@ -100,5 +100,4 @@ end
 module Make
     (Io : Io.S)
     (_ : Fs.S with type 'a io := 'a Io.t)
-    (_ : Syscalls.S with type 'a io := 'a Io.t) :
-  S with type 'a io := 'a Io.t
+    (_ : Syscalls.S with type 'a io := 'a Io.t) : S with type 'a io := 'a Io.t

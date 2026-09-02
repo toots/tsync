@@ -1,4 +1,7 @@
-; Uploading a file's bytes and fetching them back, on Lwt.
+; The store side on Lwt: every functor of tsync_remote applied once, so the
+; memos and pools keyed per domain are one table each.
+
+(include_subdirs unqualified)
 
 (library
  (flags
@@ -6,24 +9,31 @@
    -open
    Tsync_remote
    -open
-   Tsync_layout_lwt
+   Tsync_io_lwt
    -open
-   Tsync_store_lwt
+   Tsync_conf_lwt
    -open
-   Tsync_history_lwt
+   Tsync_logical_key
    -open
-   Tsync_collection_lwt
+   Tsync_ipc_lwt
    -open
-   Tsync_corruption_lwt
+   Tsync_journal
    -open
-   Tsync_io_lwt))
+   Tsync_bigstring
+   -open
+   Tsync_cache_layout_lwt
+   -open
+   Tsync_backend_lwt))
  (name tsync_remote_lwt)
  (public_name tsync-libs.remote_lwt)
  (libraries
   tsync_remote
-  tsync_layout_lwt
-  tsync_store_lwt
-  tsync_history_lwt
-  tsync_collection_lwt
-  tsync_corruption_lwt
-  tsync_io_lwt))
+  tsync_io_lwt
+  lwt
+  tsync_conf_lwt
+  tsync_logical_key
+  tsync_ipc_lwt
+  tsync_journal
+  tsync_bigstring
+  tsync_cache_layout_lwt
+  tsync_backend_lwt))

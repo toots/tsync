@@ -4,7 +4,7 @@
    -open
    Tsync_logical_key
    -open
-   Tsync_folder_ids_lwt
+   Tsync_cache_layout_lwt
    -open
    Tsync_cache_layout
    -open
@@ -15,7 +15,7 @@
  (libraries
   tsync_logical_key
   tsync_test_harness
-  tsync_folder_ids_lwt
+  tsync_cache_layout_lwt
   tsync_cache_layout
   tsync_io_lwt
   lwt

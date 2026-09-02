@@ -2,15 +2,10 @@
  (flags
   (:standard
    -open
-   Tsync_chunk_store
+   Tsync_remote
    -open
-   Tsync_chunk_store_lwt
+   Tsync_remote_lwt
    -open
    Tsync_test_harness))
  (name dedup_test)
- (libraries
-  tsync_test_harness
-  tsync_chunk_store
-  tsync_chunk_store_lwt
-  lwt
-  lwt.unix))
+ (libraries tsync_test_harness tsync_remote tsync_remote_lwt lwt lwt.unix))

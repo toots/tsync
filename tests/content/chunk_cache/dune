@@ -6,13 +6,9 @@
    -open
    Tsync_manifest
    -open
-   Tsync_staged_lwt
+   Tsync_checkout_lwt
    -open
-   Tsync_chunk_cache
-   -open
-   Tsync_checkout_maintenance_lwt
-   -open
-   Tsync_chunk_cache_lwt
+   Tsync_checkout
    -open
    Tsync_cache_layout
    -open
@@ -32,10 +28,8 @@
   unix
   tsync-libs.logical_key
   tsync_manifest
-  tsync_staged_lwt
-  tsync_chunk_cache
-  tsync_checkout_maintenance_lwt
-  tsync_chunk_cache_lwt
+  tsync_checkout_lwt
+  tsync_checkout
   tsync_test_harness
   tsync_cache_layout
   tsync_xxhash

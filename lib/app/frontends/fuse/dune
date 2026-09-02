@@ -8,8 +8,6 @@
    -open
    Tsync_checkout
    -open
-   Tsync_file_ops
-   -open
    Tsync_field_spec
    -open
    Tsync_cache_layout
@@ -38,7 +36,6 @@
   tsync_cache_layout
   tsync_conf_lwt
   tsync_checkout
-  tsync_file_ops
   tsync-libs.field_spec
   tsync-libs.frontend_register
   tsync-libs.log

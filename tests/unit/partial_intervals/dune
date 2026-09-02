@@ -1,5 +1,5 @@
 (executable
  (flags
-  (:standard -open Tsync_chunk_cache))
+  (:standard -open Tsync_checkout))
  (name partial_intervals)
- (libraries tsync-libs.chunk_cache))
+ (libraries tsync-libs.checkout))

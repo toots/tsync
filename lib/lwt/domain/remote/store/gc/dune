@@ -1,8 +1,0 @@
-; A store's collection on Lwt: the renames it makes are this filesystem's.
-
-(library
- (flags
-  (:standard -open Tsync_collection -open Tsync_io_lwt))
- (name tsync_collection_lwt)
- (public_name tsync-libs.collection_lwt)
- (libraries tsync_collection tsync_io_lwt lwt))

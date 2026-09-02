@@ -1,56 +1,57 @@
-; Uploading a file's bytes and fetching them back: what a store does for one
-; object, in logical keys. Above the store's naming and below the read path
-; that calls it.
+; A domain as its stores hold it: how a logical key becomes a stored one, the
+; manifests, versions, journal and cursor under those keys, the chunks a file is
+; cut into, and the collection that reclaims them.
+
+(include_subdirs unqualified)
 
 (library
  (flags
   (:standard
    -open
-   Tsync_history
+   Tsync_chunks
    -open
-   Tsync_store
+   Tsync_bigstring
    -open
    Tsync_io
    -open
-   Tsync_retry
+   Tsync_metrics
    -open
    Tsync_logical_key
+   -open
+   Tsync_retry
    -open
    Tsync_manifest
    -open
    Tsync_conf
    -open
-   Tsync_chunks
-   -open
-   Tsync_chunk_store
-   -open
-   Tsync_layout
-   -open
-   Tsync_corruption
-   -open
-   Tsync_collection
-   -open
-   Tsync_bigstring
-   -open
    Tsync_backend_register
    -open
-   Tsync_log))
+   Tsync_log
+   -open
+   Tsync_chunk_integrity
+   -open
+   Tsync_stdlib
+   -open
+   Tsync_journal
+   -open
+   Tsync_cache_layout))
  (name tsync_remote)
  (public_name tsync-libs.remote)
  (libraries
-  tsync_history
-  tsync_store
+  tsync-libs.logical_key
+  tsync_chunks
+  tsync_bigstring
   tsync_io
+  tsync_metrics
   tsync_retry
   tsync_logical_key
   tsync_manifest
   tsync_conf
-  tsync_chunks
-  tsync_chunk_store
-  tsync_layout
-  tsync_corruption
-  tsync_collection
-  tsync_bigstring
   tsync_backend_register
   tsync_log
-  unix))
+  unix
+  tsync_chunk_integrity
+  tsync_stdlib
+  tsync_journal
+  yojson
+  tsync_cache_layout))

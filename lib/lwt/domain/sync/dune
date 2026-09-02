@@ -7,18 +7,11 @@
    -open
    Tsync_sync
    -open
-   Tsync_file_store_lwt
+   Tsync_remote_lwt
    -open
-   Tsync_wal_lwt
-   -open
-   Tsync_staged_lwt
+   Tsync_checkout_lwt
    -open
    Tsync_io_lwt))
  (name tsync_sync_lwt)
  (public_name tsync-libs.sync_lwt)
- (libraries
-  tsync_sync
-  tsync_file_store_lwt
-  tsync_wal_lwt
-  tsync_staged_lwt
-  tsync_io_lwt))
+ (libraries tsync_sync tsync_remote_lwt tsync_checkout_lwt tsync_io_lwt))

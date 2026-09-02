@@ -1,45 +1,63 @@
-; This client's working copy of the domain: each published manifest filed under
-; the file's real path, and on top of it the staged tree of what this client has
-; changed and not published. Rebuildable from the store, apart from that staged
-; half, which is the only copy there is.
+; This client's working copy of the domain: the manifest tree, the staged half
+; over it, the chunk cache the bytes are read through, and the file operations a
+; frontend is handed. One library, because its modules only ever ship together.
+
+(include_subdirs unqualified)
 
 (library
  (flags
   (:standard
    -open
-   Tsync_folder_ids
-   -open
-   Tsync_manifests
-   -open
-   Tsync_stdlib
-   -open
-   Tsync_filename
-   -open
-   Tsync_logical_key
-   -open
-   Tsync_staged
+   Tsync_manifest
    -open
    Tsync_conf
    -open
    Tsync_cache_layout
    -open
-   Tsync_manifest
-   -open
    Tsync_io
    -open
-   Tsync_retry))
+   Tsync_backend_register
+   -open
+   Tsync_bigstring
+   -open
+   Tsync_log
+   -open
+   Tsync_remote
+   -open
+   Tsync_logical_key
+   -open
+   Tsync_chunks
+   -open
+   Tsync_stdlib
+   -open
+   Tsync_filename
+   -open
+   Tsync_retry
+   -open
+   Tsync_journal
+   -open
+   Tsync_id
+   -open
+   Tsync_durable_queue))
  (name tsync_checkout)
  (public_name tsync-libs.checkout)
  (libraries
-  tsync_folder_ids
-  tsync_manifests
-  tsync_stdlib
-  tsync_filename
-  tsync_logical_key
-  tsync_staged
+  tsync_manifest
   tsync_conf
   tsync_cache_layout
-  tsync_manifest
   tsync_io
+  tsync_backend_register
+  tsync_bigstring
+  tsync_log
+  unix
+  tsync_remote
+  tsync_logical_key
+  tsync_chunks
+  tsync_stdlib
+  tsync_filename
   tsync_retry
-  unix))
+  tsync_journal
+  tsync_id
+  yojson
+  base64
+  tsync_durable_queue))

@@ -10,7 +10,7 @@
    -open
    Tsync_field_spec
    -open
-   Tsync_file_store_lwt
+   Tsync_remote_lwt
    -open
    Tsync_io_lwt
    -open
@@ -48,7 +48,7 @@
   tsync_journal
   tsync_test_harness
   tsync_field_spec
-  tsync_file_store_lwt
+  tsync_remote_lwt
   tsync_http_proxy_frontend
   tsync_http_proxy
   tsync_bigstring
