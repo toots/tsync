@@ -79,6 +79,7 @@ module Over
     (Io : Io.S)
     (_ : Fs.S with type 'a io := 'a Io.t)
     (_ : Syscalls.S with type 'a io := 'a Io.t)
+    (_ : Listing.SPOOL with type 'a io := 'a Io.t)
     (_ : Folder_ids.S with type 'a io := 'a Io.t)
     (_ : Remote.OVER with type 'a io := 'a Io.t)
     (_ : Store.INODE with type 'a io := 'a Io.t)
