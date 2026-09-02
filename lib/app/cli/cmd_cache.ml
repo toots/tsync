@@ -47,7 +47,7 @@ let cmd : unit Cmd.t =
     if paths = [] then failwith "cache --evict and --fetch need a PATH.";
     List.iter
       (fun path ->
-        match item_for_path ?domain path with
+        match Location.item ?domain path with
           | Error msg -> Printf.eprintf "Error: %s\n" msg
           | Ok (domain, item) -> (
               match

@@ -25,7 +25,7 @@ let cmd : unit Cmd.t =
   (* The path names its own domain by sitting under one of that domain's roots,
      so [--domain] is only consulted when it was given. *)
   let revert path version domain =
-    match item_for_path ?domain path with
+    match Location.item ?domain path with
       | Error msg -> Printf.eprintf "Error: %s\n" msg
       | Ok (domain, item) -> (
           match
