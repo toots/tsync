@@ -16,21 +16,17 @@
    -open
    Tsync_core_lwt
    -open
-   Tsync_ipc_handler
+   Tsync_engine
    -open
    Tsync_io_lwt
    -open
-   Tsync_http_proxy
-   -open
-   Tsync_backend_register
+   Tsync_backend_api
    -open
    Tsync_backend_lwt
    -open
    Tsync_conf_lwt
    -open
    Tsync_frontend_register
-   -open
-   Tsync_engine
    -open
    Tsync_diagnostics
    -open
@@ -58,11 +54,9 @@
   tsync_io_lwt
   tsync-libs.frontend_register
   tsync-libs.engine
-  tsync-libs.http_proxy
+  tsync-libs.backend_api
   tsync-libs.core_lwt
-  tsync-libs.ipc_handler
   tsync-libs.diagnostics
-  tsync-libs.backend_register
   tsync-libs.backend_lwt
   tsync_runtime
   cohttp-lwt-unix

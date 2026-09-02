@@ -1,38 +1,65 @@
+; What a serving process gets for one domain: the file operations, the request
+; handler over them, and the queue that sends what it accepts.
+
 (library
  (flags
   (:standard
    -open
+   Tsync_core
+   -open
    Tsync_checkout
    -open
-   Tsync_core
+   Tsync_sync
+   -open
+   Tsync_manifest
+   -open
+   Tsync_journal
+   -open
+   Tsync_ops
+   -open
+   Tsync_ops_lwt
+   -open
+   Tsync_remote_lwt
+   -open
+   Tsync_cache_layout_lwt
+   -open
+   Tsync_io_lwt
+   -open
+   Tsync_conf_lwt
+   -open
+   Tsync_backend_api
+   -open
+   Tsync_diagnostics
    -open
    Tsync_checkout_lwt
    -open
    Tsync_sync_lwt
    -open
-   Tsync_remote_lwt
-   -open
    Tsync_core_lwt
    -open
-   Tsync_conf_lwt
-   -open
-   Tsync_backend_lwt
-   -open
-   Tsync_ipc_handler))
+   Tsync_backend_lwt))
  (name tsync_engine)
  (public_name tsync-libs.engine)
  (libraries
-  tsync_checkout
-  unix
-  lwt.unix
-  yojson
   tsync_core
+  tsync_checkout
+  tsync_sync
+  tsync_manifest
+  tsync_journal
+  tsync_ops
+  tsync_ops_lwt
+  tsync_remote_lwt
+  tsync_cache_layout_lwt
+  tsync_backend_api
+  tsync_io_lwt
+  tsync_conf_lwt
+  tsync_diagnostics
+  yojson
+  unix
+  lwt
+  lwt.unix
   tsync_checkout_lwt
   tsync_sync_lwt
-  tsync_remote_lwt
   tsync_backend_lwt
-  tsync_conf_lwt
   tsync_core_lwt
-  tsync_ipc_handler
-  lwt
   threads.posix))

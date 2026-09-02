@@ -19,7 +19,7 @@
    -open
    Tsync_io
    -open
-   Tsync_backend_register))
+   Tsync_backend_api))
  (name tsync_sync)
  (public_name tsync-libs.sync)
  (libraries
@@ -29,5 +29,5 @@
   tsync_journal
   tsync_conf
   tsync_io
-  tsync_backend_register
+  tsync_backend_api
   unix))

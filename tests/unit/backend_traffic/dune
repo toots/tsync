@@ -4,13 +4,11 @@
    -open
    Tsync_core
    -open
-   Tsync_backend_register
+   Tsync_backend_api
    -open
    Tsync_backend_lwt
    -open
    Tsync_local_backend_lwt
-   -open
-   Tsync_domain_store_lwt
    -open
    Tsync_test_harness))
  (name backend_traffic)
@@ -18,9 +16,8 @@
   tsync-libs.core
   tsync_test_harness
   tsync_core
-  tsync_backend_register
+  tsync_backend_api
   tsync_backend_lwt
   tsync_local_backend_lwt
-  tsync_domain_store_lwt
   lwt
   lwt.unix))

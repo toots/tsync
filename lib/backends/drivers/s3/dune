@@ -1,14 +1,6 @@
 (library
  (flags
-  (:standard
-   -open
-   Tsync_core
-   -open
-   Tsync_chunk_integrity
-   -open
-   Tsync_backend_register
-   -open
-   Tsync_io))
+  (:standard -open Tsync_core -open Tsync_backend_api -open Tsync_io))
  (name tsync_s3_backend)
  (optional)
  (libraries
@@ -16,5 +8,5 @@
   tsync-libs.core
   tsync_core
   tsync_io
-  tsync_chunk_integrity
-  tsync-libs.backend_register))
+  tsync_backend_api
+  tsync-libs.backend_api))

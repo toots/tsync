@@ -1,11 +1,5 @@
 (executable
  (flags
-  (:standard
-   -open
-   Tsync_core
-   -open
-   Tsync_chunk_integrity
-   -open
-   Tsync_journal))
+  (:standard -open Tsync_core -open Tsync_backend_api -open Tsync_journal))
  (name layout)
- (libraries tsync-libs.core tsync_chunk_integrity tsync_core tsync_journal))
+ (libraries tsync-libs.core tsync_backend_api tsync_core tsync_journal))

@@ -16,9 +16,7 @@
    -open
    Tsync_conf
    -open
-   Tsync_backend_register
-   -open
-   Tsync_chunk_integrity
+   Tsync_backend_api
    -open
    Tsync_stdlib
    -open
@@ -33,9 +31,8 @@
   tsync_io
   tsync_manifest
   tsync_conf
-  tsync_backend_register
+  tsync_backend_api
   unix
-  tsync_chunk_integrity
   tsync_stdlib
   tsync_journal
   yojson
