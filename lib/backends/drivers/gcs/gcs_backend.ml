@@ -106,8 +106,6 @@ module Over
     (Bounded : Bounded.S with type 'a io := 'a Io.t)
     (Clock : Clock.S with type 'a io := 'a Io.t) =
 struct
-  module Verify = Verifier.Over (Io) (Bounded)
-
   module type Store = Backend.S with type 'a io := 'a Io.t
 
   open Io_syntax.Make (Io)
@@ -354,6 +352,28 @@ struct
     in
     collect [] None
 
+  module Shell =
+    Object_store.Over (Io) (Bounded) (Clock)
+      (struct
+        type nonrec t = t
+
+        let put = put
+        let put_if_absent = put_if_absent
+        let get = get
+        let get_opt = get_opt
+        let get_range = get_range
+        let head_opt = head_opt
+        let delete = delete
+        let delete_multi = delete_multi
+        let copy = copy
+        let list_all = list_all
+
+        let put_text t ~key ~data () =
+          put t ~key ~data:(Bigstring.of_string data) ()
+
+        let share_url t = t.share_url
+      end)
+
   let make ?endpoint ?service_account_key ?share_url ~bucket () : (module Store)
       =
     let base =
@@ -377,76 +397,7 @@ struct
         share_url;
       }
     in
-    (* The verifier's job bodies are JSON, and it is handed this rather than the
-       module's [put] below, which speaks in chunks. *)
-    let put_text ~key ~data () =
-      put t ~key:(Stored_key.to_string key) ~data:(Bigstring.of_string data) ()
-    in
-    (* Every key the store is asked about is rendered here, this module being the
-       one place the driver is reached through. *)
-    let str = Stored_key.to_string in
-    (module struct
-      let put ~key ~data () = put t ~key:(str key) ~data ()
-      let put_if_absent ~key ~data () = put_if_absent t ~key:(str key) ~data ()
-      let get ~key () = get t ~key:(str key) ()
-      let get_opt ~key () = get_opt t ~key:(str key) ()
-      let fast_read = false
-
-      let get_range ~key ~offset ~length () =
-        get_range t ~key:(str key) ~offset ~length ()
-
-      let head_opt ~key () = head_opt t ~key:(str key) ()
-      let delete ~key () = delete t ~key:(str key) ()
-      let delete_multi keys = delete_multi t (List.map str keys)
-
-      let copy ~src_key ~dst_key () =
-        copy t ~src_key:(str src_key) ~dst_key:(str dst_key) ()
-
-      let list_prefix ?max_keys ~prefix () = list_all t ?max_keys ~prefix ()
-
-      (* The batch API carries metadata, not bodies: {!Backend.Make.Batched} fans
-         these out. *)
-      let get_many = None
-
-      let verify_all ~chunk_prefix () =
-        let+ n =
-          Verify.queue
-            ~on_progress:(fun ~done_ ~total ->
-              if done_ mod 256 = 0 || done_ = total then
-                Log.info "verify: queued %d/%d shard request(s)" done_ total)
-            ~put:put_text ~chunk_prefix ()
-        in
-        `Queued n
-
-      (* Taken as given, as [verified] is and for the same reason: the function
-         that consumes these is deployed by the terraform that makes the bucket,
-         and a deployment half applied is not a state this reports its way out of.
-         A request nothing picks up is reported by [tsync gc --status] and
-         re-delivered by [tsync gc --retry-jobs]. *)
-      let discard ~chunk_prefix ~run ~name ~keys () =
-        let+ () =
-          Discard_job.queue ~put:put_text ~chunk_prefix ~run ~name ~keys ()
-        in
-        `Queued
-
-      (* No chunk size or concurrency opinion: an object store is limited by the
-         network and its own concurrency, neither measurable from here.
-
-         [verified] is taken as given rather than probed or configured: the
-         function that checks these chunks is deployed by the same terraform that
-         makes the bucket, and a deployment half applied is not a state this
-         reports its way out of. *)
-      let capabilities ~prefix:_ () =
-        Io.return
-          { Backend.no_caps with share_url = t.share_url; verified = true }
-
-      (* Nothing native to be told by, so this is the sleep a caller would
-         otherwise spell itself. *)
-      let watch ~key:_ ~last_seen:_ () =
-        Clock.sleep Backend.default_watch_interval
-
-      let local_path = None
-    end)
+    Shell.make t
 
   let spec =
     Field_spec.
