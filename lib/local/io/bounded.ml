@@ -1,8 +1,9 @@
 exception Busy
 
+module type S = Bounded_intf.S
+
 module Make (Io : Io.S) = struct
-  let ( let* ) = Io.bind
-  let ( let+ ) x f = Io.map f x
+  open Io_syntax.Make (Io)
 
   type t = {
     limit : int;

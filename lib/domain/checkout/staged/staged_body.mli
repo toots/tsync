@@ -11,35 +11,10 @@
     the group will be, so publishing it is {!Make.link_group} rather than a
     copy. Its members are told apart by the offset each slot carries. *)
 
-(** What this needs of a filesystem and of the retrying syscalls. *)
-module type FS = sig
-  type 'a io
-
-  val copy_file : src:string -> dst:string -> unit io
-  val ensure_parent : string -> unit io
-  val unlink_quiet : string -> unit io
-  val read : string -> Bigstring.t -> offset:int64 -> int io
-  val write : string -> Bigstring.t -> offset:int64 -> int io
-end
-
-module type SYSCALLS = sig
-  type 'a io
-  type fd
-
-  val openfile : string -> Unix.open_flag list -> Unix.file_perm -> fd io
-  val close : fd -> unit io
-  val rename : string -> string -> unit io
-
-  module LargeFile : sig
-    val stat : string -> Unix.LargeFile.stats io
-    val ftruncate : fd -> int64 -> unit io
-  end
-end
-
 module Over
     (Io : Io.S)
-    (_ : FS with type 'a io := 'a Io.t)
-    (_ : SYSCALLS with type 'a io := 'a Io.t) : sig
+    (_ : Fs.S with type 'a io := 'a Io.t)
+    (_ : Syscalls.S with type 'a io := 'a Io.t) : sig
   (** What the staged half needs of the cache: read a published chunk it is
       overwriting part of, and take a finished body to publish. *)
   module type Cache = sig

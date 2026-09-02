@@ -6,7 +6,7 @@ module Files = struct
 end
 
 module Syscalls = struct
-  include Io_lwt.Retry
+  include Io_lwt.Syscalls
 
   type fd = Io_lwt.Syscalls.fd
 end

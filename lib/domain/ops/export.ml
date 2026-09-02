@@ -1,21 +1,6 @@
 type status = Exported | Exported_symlink | Missing_data
 type summary = { exported : int; missing : int }
 
-(** Making the destination tree, and the one symlink an export may write. *)
-module type FS = sig
-  type 'a io
-
-  val mkdir_p : string -> unit io
-  val ensure_parent : string -> unit io
-  val unlink_quiet : string -> unit io
-end
-
-module type SYSCALLS = sig
-  type 'a io
-
-  val symlink : ?to_dir:bool -> string -> string -> unit io
-end
-
 (** Walking the backend's folder tree, which is how a whole domain is reached
     from its root. *)
 module type TREE = sig
@@ -66,35 +51,14 @@ end
 
 module Over
     (Io : Io.S)
-    (Files : FS with type 'a io := 'a Io.t)
-    (Syscalls : SYSCALLS with type 'a io := 'a Io.t)
+    (Files : Fs.S with type 'a io := 'a Io.t)
+    (Syscalls : Syscalls.S with type 'a io := 'a Io.t)
     (Tree : TREE with type 'a io := 'a Io.t)
     (Checkout : CHECKOUT with type 'a io := 'a Io.t)
     (Staged : STAGED with type 'a io := 'a Io.t)
     (Content : CONTENT with type 'a io := 'a Io.t) =
 struct
-  let ( let* ) = Io.bind
-  let ( let+ ) x f = Io.map f x
-
-  let rec iter_s f = function
-    | [] -> Io.return ()
-    | x :: rest ->
-        let* () = f x in
-        iter_s f rest
-
-  let rec map_s f = function
-    | [] -> Io.return []
-    | x :: rest ->
-        let* y = f x in
-        let+ ys = map_s f rest in
-        y :: ys
-
-  let rec filter_map_s f = function
-    | [] -> Io.return []
-    | x :: rest -> (
-        let* y = f x in
-        let+ ys = filter_map_s f rest in
-        match y with Some y -> y :: ys | None -> ys)
+  open Io_syntax.Make (Io)
 
   module Make (C : Conf.S with type 'a io = 'a Io.t) = struct
     module Lk = Logical_key.Make (C)

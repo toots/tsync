@@ -23,16 +23,10 @@ module type SEND = sig
   val send : socket_path:string -> string -> string io
 end
 
-module type POOLS = sig
-  (** Every named pool as [(name, in_flight, waiting, width)]. Process-wide, and
-      so gathered here rather than threaded through by every command. *)
-  val totals : unit -> (string * int * int * int) list
-end
-
 module Make
     (Io : Io.S)
     (Clock : Clock.S with type 'a io := 'a Io.t)
-    (Pools : POOLS)
+    (Pools : Bounded.S with type 'a io := 'a Io.t)
     (Send : SEND with type 'a io := 'a Io.t) : sig
   val start :
     socket_path:string ->

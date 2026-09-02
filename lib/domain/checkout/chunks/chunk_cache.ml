@@ -4,47 +4,6 @@
    A group is present iff its file exists and may be deleted at any moment, so
    callers must treat a miss as ordinary (see {!read_into}). *)
 
-(* What this needs below it: a filesystem, the syscalls that retry past EINTR,
-   and pools to admit a few at a time. Each is a subset -- what the cache calls
-   and nothing else, and narrower than [Remote.S] so the store has no cycle with
-   it and can be driven by a stub in tests. *)
-module type FS = sig
-  type 'a io
-
-  val ensure_parent : string -> unit io
-  val readdir_list : string -> string list io
-  val unlink_quiet : string -> unit io
-  val read : string -> Bigstring.t -> offset:int64 -> int io
-  val write : string -> Bigstring.t -> offset:int64 -> int io
-  val read_file_opt : string -> string option io
-  val atomic_write : string -> string -> unit io
-
-  val atomic_write_at :
-    string ->
-    size:int ->
-    ((offset:int -> Bigstring.t -> unit io) -> unit io) ->
-    unit io
-end
-
-module type SYSCALLS = sig
-  type 'a io
-
-  val file_exists : string -> bool io
-  val stat : string -> Unix.stats io
-  val link : string -> string -> unit io
-  val utimes : string -> float -> float -> unit io
-end
-
-module type POOLS = sig
-  type 'a io
-  type t
-
-  val create : ?max_waiting:int -> ?name:string -> max:int -> unit -> t
-  val use : t -> (unit -> 'a io) -> 'a io
-  val map_with : t -> ('a -> 'b io) -> 'a list -> 'b list io
-  val filter_map_with : t -> ('a -> 'b option io) -> 'a list -> 'b list io
-end
-
 module type Fetch = sig
   type 'a io
 
@@ -106,22 +65,13 @@ let held_for root =
 
 module Make
     (Io : Io.S)
-    (Fs : FS with type 'a io := 'a Io.t)
-    (Retry : SYSCALLS with type 'a io := 'a Io.t)
-    (Bounded : POOLS with type 'a io := 'a Io.t)
+    (Fs : Fs.S with type 'a io := 'a Io.t)
+    (Retry : Syscalls.S with type 'a io := 'a Io.t)
+    (Bounded : Bounded.S with type 'a io := 'a Io.t)
     (C : Conf.S with type 'a io = 'a Io.t)
     (F : Fetch with type 'a io := 'a Io.t) =
 struct
-  let ( let* ) = Io.bind
-  let ( let+ ) x f = Io.map f x
-  let return_unit = Io.return ()
-  let return_some x = Io.return (Some x)
-  let return_true = Io.return true
-  let return_false = Io.return false
-
-  let rec iter_s f = function
-    | [] -> return_unit
-    | x :: rest -> Io.bind (f x) (fun () -> iter_s f rest)
+  open Io_syntax.Make (Io)
 
   let path group =
     Cache_layout.chunk_path ~cache_root:C.cache_root ~domain_name:C.domain_name
@@ -130,16 +80,7 @@ struct
   let root () = Cache_layout.chunks_dir ~cache_root:C.cache_root C.domain_name
   let held () = held_for (root ())
 
-  (* [file_exists] is the retrying one: a record is asked about on the read path
-     as often as a body is. *)
-  module Part =
-    Partial.Make
-      (Io)
-      (struct
-        include Fs
-
-        let file_exists = Retry.file_exists
-      end)
+  module Part = Partial.Make (Io) (Fs) (Retry)
 
   let key group = Manifest.Group.key group
 

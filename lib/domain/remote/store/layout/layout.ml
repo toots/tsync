@@ -52,7 +52,7 @@ end
 
 module Over (Io : Io.S) (Folder_ids : FOLDER_IDS with type 'a io := 'a Io.t) =
 struct
-  let return_some x = Io.return (Some x)
+  open Io_syntax.Make (Io)
 
   (* [manifests/<parent_folder_id>/<hash(leaf)>], the parent id resolved from the
      local [.tsync-dir] markers, so a folder rename never changes its descendants'
@@ -60,8 +60,6 @@ struct
   module Inode = struct
     module Make (C : Conf.S with type 'a io = 'a Io.t) :
       S with type 'a io := 'a Io.t = struct
-      let ( let* ) = Io.bind
-      let ( let+ ) x f = Io.map f x
 
       let lookup_id key =
         Folder_ids.lookup_id ~cache_root:C.cache_root ~domain_name:C.domain_name

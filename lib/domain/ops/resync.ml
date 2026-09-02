@@ -17,16 +17,6 @@ module type CACHE = sig
   val clear : cache_root:string -> domain_name:string -> unit io
 end
 
-(** The bound on what runs at once. *)
-module type POOLS = sig
-  type 'a io
-  type t
-
-  val create : ?max_waiting:int -> ?name:string -> max:int -> unit -> t
-  val use : t -> (unit -> 'a io) -> 'a io
-  val map_with : t -> ('a -> 'b io) -> 'a list -> 'b list io
-end
-
 type outcome =
   | Full of { manifests : int; failed : int; reason : string }
   | Incremental of { applied : int }
@@ -127,42 +117,14 @@ module Over
     (Io : Io.S)
     (Folder_ids : FOLDER_IDS with type 'a io := 'a Io.t)
     (Cache : CACHE with type 'a io := 'a Io.t)
-    (Pools : POOLS with type 'a io := 'a Io.t)
+    (Pools : Bounded.S with type 'a io := 'a Io.t)
     (Tree : TREE with type 'a io := 'a Io.t and type pool := Pools.t)
     (Cursor_of : CURSOR with type 'a io := 'a Io.t)
     (Checkout : CHECKOUT with type 'a io := 'a Io.t)
     (Filing : FILING with type 'a io := 'a Io.t)
     (Sync : SYNC with type 'a io := 'a Io.t) =
 struct
-  let ( let* ) = Io.bind
-  let ( let+ ) x f = Io.map f x
-  let return_some x = Io.return (Some x)
-
-  let rec iter_s f = function
-    | [] -> Io.return ()
-    | x :: rest ->
-        let* () = f x in
-        iter_s f rest
-
-  let rec map_s f = function
-    | [] -> Io.return []
-    | x :: rest ->
-        let* y = f x in
-        let+ ys = map_s f rest in
-        y :: ys
-
-  let rec filter_map_s f = function
-    | [] -> Io.return []
-    | x :: rest -> (
-        let* y = f x in
-        let+ ys = filter_map_s f rest in
-        match y with Some y -> y :: ys | None -> ys)
-
-  let rec fold_left_s f acc = function
-    | [] -> Io.return acc
-    | x :: rest ->
-        let* acc = f acc x in
-        fold_left_s f acc rest
+  open Io_syntax.Make (Io)
 
   let iter_p f xs = Io.iter_p f xs
 

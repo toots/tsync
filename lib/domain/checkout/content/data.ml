@@ -5,70 +5,6 @@
    the body existing. Read-ahead applies to sequential reads only. *)
 
 (* What this needs below it. *)
-module type FS = sig
-  type 'a io
-  type fd
-
-  val zero : Bigstring.t -> pos:int -> len:int -> unit
-  val pread : fd -> Bigstring.t -> file_offset:int -> int -> int -> int io
-  val read : string -> Bigstring.t -> offset:int64 -> int io
-  val write : string -> Bigstring.t -> offset:int64 -> int io
-  val copy_file : src:string -> dst:string -> unit io
-  val ensure_parent : string -> unit io
-  val is_directory : string -> bool io
-  val readdir_list : string -> string list io
-  val read_file_opt : string -> string option io
-  val atomic_write : string -> string -> unit io
-  val reap_older_than : cutoff:float -> string -> bool io
-  val stat_opt : string -> Unix.stats option io
-  val unlink_quiet : string -> unit io
-
-  val atomic_write_at :
-    string ->
-    size:int ->
-    ((offset:int -> Bigstring.t -> unit io) -> unit io) ->
-    unit io
-
-  val real_dir_name : string -> string -> string io
-end
-
-module type SYSCALLS = sig
-  type 'a io
-  type fd
-
-  val file_exists : string -> bool io
-  val stat : string -> Unix.stats io
-  val link : string -> string -> unit io
-  val rename : string -> string -> unit io
-  val utimes : string -> float -> float -> unit io
-  val openfile : string -> Unix.open_flag list -> Unix.file_perm -> fd io
-  val close : fd -> unit io
-
-  module LargeFile : sig
-    val stat : string -> Unix.LargeFile.stats io
-    val ftruncate : fd -> int64 -> unit io
-  end
-end
-
-module type POOLS = sig
-  type 'a io
-  type t
-
-  val create : ?max_waiting:int -> ?name:string -> max:int -> unit -> t
-  val use : t -> (unit -> 'a io) -> 'a io
-  val map_with : t -> ('a -> 'b io) -> 'a list -> 'b list io
-  val iter_with : t -> ('a -> unit io) -> 'a list -> unit io
-  val filter_map_with : t -> ('a -> 'b option io) -> 'a list -> 'b list io
-end
-
-module type LOCKS = sig
-  type 'a io
-  type mutex
-
-  val mutex : unit -> mutex
-  val with_lock : mutex -> (unit -> 'a io) -> 'a io
-end
-
 module type MIRROR = sig
   type 'a io
 
@@ -122,26 +58,13 @@ end
 
 module Over
     (Io : Io.S)
-    (Fs : FS with type 'a io := 'a Io.t)
-    (Retry : SYSCALLS with type 'a io := 'a Io.t and type fd = Fs.fd)
-    (Lock : LOCKS with type 'a io := 'a Io.t)
-    (Bounded : POOLS with type 'a io := 'a Io.t)
+    (Fs : Cache_layout.FS with type 'a io := 'a Io.t)
+    (Retry : Syscalls.S with type 'a io := 'a Io.t and type fd = Fs.fd)
+    (Lock : Lock.S with type 'a io := 'a Io.t)
+    (Bounded : Bounded.S with type 'a io := 'a Io.t)
     (Mf : MIRROR with type 'a io := 'a Io.t) =
 struct
-  let ( let* ) = Io.bind
-  let ( let+ ) x f = Io.map f x
-  let return_unit = Io.return ()
-  let return_some x = Io.return (Some x)
-  let return_true = Io.return true
-  let return_false = Io.return false
-
-  let rec iter_s f = function
-    | [] -> return_unit
-    | x :: rest -> Io.bind (f x) (fun () -> iter_s f rest)
-
-  let rec fold_left_s f acc = function
-    | [] -> Io.return acc
-    | x :: rest -> Io.bind (f acc x) (fun acc -> fold_left_s f acc rest)
+  open Io_syntax.Make (Io)
 
   let readahead_bytes = 4 * 1024 * 1024
   let max_readahead_groups = 8

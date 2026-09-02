@@ -19,7 +19,7 @@ module Core = struct
   let iter_p = Lwt_list.iter_p
 end
 
-module Syscalls = struct
+module Unix_syscalls = struct
   type fd = Lwt_unix.file_descr
 
   let file_exists = Lwt_unix.file_exists
@@ -66,26 +66,26 @@ module Lock = struct
 end
 
 module Bounded = Bounded.Make (Core)
-module Retry = Retry.Make (Core) (Syscalls)
+module Syscalls = Syscalls.Make (Core) (Unix_syscalls)
 
 module Fs_primitives = struct
   let read_file_opt path =
     Lwt.catch
       (fun () ->
         Lwt.map Option.some
-          (Retry.retry_eintr (fun () ->
+          (Syscalls.retry_eintr (fun () ->
                Lwt_io.with_file ~mode:Lwt_io.Input path Lwt_io.read)))
       (fun _ -> Lwt.return_none)
 
   let write_file path data =
-    Retry.retry_eintr (fun () ->
+    Syscalls.retry_eintr (fun () ->
         Lwt_io.with_file ~mode:Lwt_io.Output path (fun oc ->
             Lwt_io.write oc data))
 
   (* A stream, so the whole materialisation is wrapped: a signal interrupting
      opendir or readdir retries from the start. *)
   let readdir_list path =
-    Retry.retry_eintr (fun () ->
+    Syscalls.retry_eintr (fun () ->
         Lwt.map
           (List.filter (fun name -> name <> "." && name <> ".."))
           (Lwt_stream.to_list (Lwt_unix.files_of_directory path)))
@@ -115,5 +115,5 @@ end
 
 module Fs = struct
   include Tsync_io.Fs
-  include Tsync_io.Fs.Make (Core) (Syscalls) (Fs_primitives)
+  include Tsync_io.Fs.Make (Core) (Unix_syscalls) (Fs_primitives)
 end

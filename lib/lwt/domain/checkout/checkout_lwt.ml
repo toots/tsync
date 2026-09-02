@@ -12,6 +12,6 @@ module Mirror = struct
 end
 
 include
-  Checkout.Over (Io_lwt.Core) (Files) (Io_lwt.Retry) (Mirror)
+  Checkout.Over (Io_lwt.Core) (Files) (Io_lwt.Syscalls) (Mirror)
     (Staged_lwt.Manifest)
     (Folder_ids_lwt)

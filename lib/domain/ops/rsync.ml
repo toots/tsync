@@ -109,28 +109,6 @@ type listed = Checkout.listed = {
   mtime : float;
 }
 
-module type FS = sig
-  type 'a io
-
-  val mkdir_p : string -> unit io
-  val ensure_parent : string -> unit io
-  val unlink_quiet : string -> unit io
-  val readdir_list : string -> string list io
-  val read : string -> Bigstring.t -> offset:int64 -> int io
-  val stat_opt_large : string -> Unix.LargeFile.stats option io
-
-  val lstat_kind :
-    string -> [ `Dir | `File of int64 | `Symlink of string | `Missing ] io
-end
-
-module type SYSCALLS = sig
-  type 'a io
-
-  val symlink : ?to_dir:bool -> string -> string -> unit io
-  val utimes : string -> float -> float -> unit io
-  val lstat : string -> Unix.stats io
-end
-
 module type FOLDER_IDS = sig
   type 'a io
 
@@ -240,8 +218,8 @@ let empty_summary =
 
 module Over
     (Io : Io.S)
-    (Fs : FS with type 'a io := 'a Io.t)
-    (Syscalls : SYSCALLS with type 'a io := 'a Io.t)
+    (Fs : Fs.S with type 'a io := 'a Io.t)
+    (Syscalls : Syscalls.S with type 'a io := 'a Io.t)
     (Folder_ids : FOLDER_IDS with type 'a io := 'a Io.t)
     (Objects : OBJECTS with type 'a io := 'a Io.t)
     (Manifests : MANIFESTS with type 'a io := 'a Io.t)
@@ -250,16 +228,8 @@ module Over
     (Checkout : CHECKOUT with type 'a io := 'a Io.t)
     (Content : CONTENT with type 'a io := 'a Io.t) =
 struct
-  let ( let* ) = Io.bind
-  let ( let+ ) x f = Io.map f x
+  open Io_syntax.Make (Io)
   let return = Io.return
-  let return_unit = Io.return ()
-
-  let rec iter_s f = function
-    | [] -> Io.return ()
-    | x :: rest ->
-        let* () = f x in
-        iter_s f rest
 
   module Make (C : Conf.S with type 'a io = 'a Io.t) = struct
     module Lk = Logical_key.Make (C)
@@ -526,9 +496,7 @@ struct
           let+ found = walk "" [] in
           List.stable_sort compare (List.rev found))
 
-
     let at root rel = if rel = "" then root else at root rel
-
 
     let local_side ~against path =
       let* kind = Fs.lstat_kind path in

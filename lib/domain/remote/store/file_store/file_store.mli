@@ -5,23 +5,6 @@
     test observing a flush need not sleep it out. *)
 val set_cursor_flush_interval : float -> unit
 
-(** The one lock here: a timer flush and a drain flush landing together would be
-    two concurrent writes to the object this exists to write less often. *)
-module type LOCKS = sig
-  type 'a io
-  type mutex
-
-  val mutex : unit -> mutex
-  val with_lock : mutex -> (unit -> 'a io) -> 'a io
-end
-
-(** How long a cursor bump may wait to be collected with others. *)
-module type CLOCK = sig
-  type 'a io
-
-  val sleep : float -> unit io
-end
-
 (** The manifest-level reads a journal entry needs to name what it is about. *)
 module type MANIFESTS = sig
   type 'a io
@@ -36,8 +19,8 @@ end
 
 module Over
     (Io : Io.S)
-    (_ : LOCKS with type 'a io := 'a Io.t)
-    (_ : CLOCK with type 'a io := 'a Io.t)
+    (_ : Lock.S with type 'a io := 'a Io.t)
+    (_ : Clock.S with type 'a io := 'a Io.t)
     (_ : MANIFESTS with type 'a io := 'a Io.t) : sig
   (** {!Data.JOURNAL} asks which monad this answers in. *)
   type 'a io = 'a Io.t

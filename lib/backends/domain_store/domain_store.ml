@@ -10,7 +10,7 @@ end
 module Over
     (Io : Io.S)
     (Queues : Deferred.QUEUES with type 'a io := 'a Io.t)
-    (Lock : Deferred.LOCKS with type 'a io := 'a Io.t)
+    (Lock : Lock.S with type 'a io := 'a Io.t)
     (Drain : DRAIN with type 'a io := 'a Io.t)
     (Bk : sig
       type slots
@@ -28,19 +28,7 @@ struct
 
   module type Store = Backend.S with type 'a io := 'a Io.t
 
-  let ( let* ) = Io.bind
-  let ( let+ ) x f = Io.map f x
-
-  let rec iter_s f = function
-    | [] -> Io.return ()
-    | x :: rest -> Io.bind (f x) (fun () -> iter_s f rest)
-
-  let rec map_s f = function
-    | [] -> Io.return []
-    | x :: rest ->
-        let* y = f x in
-        let+ rest = map_s f rest in
-        y :: rest
+  open Io_syntax.Make (Io)
 
   type sub = { name : string; backend : (module Store) }
 

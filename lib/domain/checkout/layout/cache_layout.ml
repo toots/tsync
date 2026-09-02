@@ -59,21 +59,24 @@ let chunk_manifest_path ~cache_root ~domain_name chunk_key =
    so a directory's real name is written beside it. A file needs no marker: its
    manifest body carries the name. *)
 
-module type FILES = sig
-  type 'a io
+(** {!Fs.S} plus the two marker questions {!Make} answers, which is what a
+    module of the checkout takes as its filesystem. *)
+module type FS = sig
+  include Fs.S
 
-  val file_exists : string -> bool io
-  val atomic_write : string -> string -> unit io
-  val read_file_opt : string -> string option io
-  val rm_rf : string -> unit io
+  val record_dir_name : string -> string -> unit io
+  val real_dir_name : string -> string -> string io
 end
 
-module Make (Io : Io.S) (F : FILES with type 'a io := 'a Io.t) = struct
-  let ( let* ) = Io.bind
-  let ( let+ ) x f = Io.map f x
+module Make
+    (Io : Io.S)
+    (F : Fs.S with type 'a io := 'a Io.t)
+    (Sys : Syscalls.S with type 'a io := 'a Io.t) =
+struct
+  open Io_syntax.Make (Io)
 
   let record_dir_name path name =
-    let* exists = F.file_exists path in
+    let* exists = Sys.file_exists path in
     if exists then Io.return () else F.atomic_write path name
 
   let real_dir_name dir_path name =

@@ -41,25 +41,6 @@ let is_local
     | exception _ -> false
 
 (* What this needs below it. *)
-module type FS = sig
-  type 'a io
-
-  val mkdir_p : string -> unit io
-  val is_directory : string -> bool io
-  val readdir_list : string -> string list io
-  val atomic_write : string -> string -> unit io
-  val rm_rf : string -> unit io
-  val unlink_quiet : string -> unit io
-  val real_dir_name : string -> string -> string io
-end
-
-module type SYSCALLS = sig
-  type 'a io
-
-  val file_exists : string -> bool io
-  val rename : string -> string -> unit io
-end
-
 module type MIRROR = sig
   type 'a io
 
@@ -101,29 +82,16 @@ end
 
 module Over
     (Io : Io.S)
-    (Fs : FS with type 'a io := 'a Io.t)
-    (Retry : SYSCALLS with type 'a io := 'a Io.t)
+    (Fs : Cache_layout.FS with type 'a io := 'a Io.t)
+    (Retry : Syscalls.S with type 'a io := 'a Io.t)
     (Mf : MIRROR with type 'a io := 'a Io.t)
     (Sm : STAGED with type 'a io := 'a Io.t)
     (Folders : FOLDERS with type 'a io := 'a Io.t) =
 struct
-  let ( let* ) = Io.bind
-  let ( let+ ) x f = Io.map f x
-  let return_unit = Io.return ()
-  let return_some x = Io.return (Some x)
-  let return_true = Io.return true
-  let return_false = Io.return false
-
-  let rec iter_s f = function
-    | [] -> return_unit
-    | x :: rest -> Io.bind (f x) (fun () -> iter_s f rest)
+  open Io_syntax.Make (Io)
 
   (* Bound before [Make] shadows [Mf] with its per-domain result. *)
   let ensure_dirs = Mf.ensure_dirs
-
-  let rec fold_left_s f acc = function
-    | [] -> Io.return acc
-    | x :: rest -> Io.bind (f acc x) (fun acc -> fold_left_s f acc rest)
 
   let read_clean path =
     Io.return (match of_file path with m -> Some m | exception _ -> None)

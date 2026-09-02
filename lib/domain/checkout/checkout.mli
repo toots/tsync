@@ -22,26 +22,6 @@ type listed = { key : Logical_key.t; size : int; mtime : float }
     [false] for a partly cached file. *)
 val is_local : Conf.locality -> Logical_key.t -> bool
 
-(** What this needs below it. *)
-module type FS = sig
-  type 'a io
-
-  val mkdir_p : string -> unit io
-  val is_directory : string -> bool io
-  val readdir_list : string -> string list io
-  val atomic_write : string -> string -> unit io
-  val rm_rf : string -> unit io
-  val unlink_quiet : string -> unit io
-  val real_dir_name : string -> string -> string io
-end
-
-module type SYSCALLS = sig
-  type 'a io
-
-  val file_exists : string -> bool io
-  val rename : string -> string -> unit io
-end
-
 module type MIRROR = sig
   type 'a io
 
@@ -83,8 +63,8 @@ end
 
 module Over
     (Io : Io.S)
-    (Fs : FS with type 'a io := 'a Io.t)
-    (_ : SYSCALLS with type 'a io := 'a Io.t)
+    (Fs : Cache_layout.FS with type 'a io := 'a Io.t)
+    (_ : Syscalls.S with type 'a io := 'a Io.t)
     (_ : MIRROR with type 'a io := 'a Io.t)
     (_ : STAGED with type 'a io := 'a Io.t)
     (_ : FOLDERS with type 'a io := 'a Io.t) : sig

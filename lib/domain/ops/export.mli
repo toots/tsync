@@ -6,21 +6,6 @@
 type status = Exported | Exported_symlink | Missing_data
 type summary = { exported : int; missing : int }
 
-(** Making the destination tree, and the one symlink an export may write. *)
-module type FS = sig
-  type 'a io
-
-  val mkdir_p : string -> unit io
-  val ensure_parent : string -> unit io
-  val unlink_quiet : string -> unit io
-end
-
-module type SYSCALLS = sig
-  type 'a io
-
-  val symlink : ?to_dir:bool -> string -> string -> unit io
-end
-
 (** Walking the backend's folder tree, which is how a whole domain is reached
     from its root. *)
 module type TREE = sig
@@ -71,8 +56,8 @@ end
 
 module Over
     (Io : Io.S)
-    (_ : FS with type 'a io := 'a Io.t)
-    (_ : SYSCALLS with type 'a io := 'a Io.t)
+    (_ : Fs.S with type 'a io := 'a Io.t)
+    (_ : Syscalls.S with type 'a io := 'a Io.t)
     (_ : TREE with type 'a io := 'a Io.t)
     (_ : CHECKOUT with type 'a io := 'a Io.t)
     (_ : STAGED with type 'a io := 'a Io.t)

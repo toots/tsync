@@ -6,10 +6,10 @@ module Files = struct
 end
 
 module Syscalls = struct
-  include Io_lwt.Retry
+  include Io_lwt.Syscalls
 
   type fd = Io_lwt.Syscalls.fd
 end
 
 module Body = Staged_body.Over (Io_lwt.Core) (Io_lwt.Fs) (Syscalls)
-module Manifest = Staged_manifest.Over (Io_lwt.Core) (Files) (Io_lwt.Retry)
+module Manifest = Staged_manifest.Over (Io_lwt.Core) (Files) (Io_lwt.Syscalls)

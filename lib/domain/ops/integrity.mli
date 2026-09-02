@@ -20,15 +20,7 @@ type answer = { store : string; queued : int option }
     answer as zero markers out of one that did. *)
 val unhealthy : Corruption.report -> bool
 
-(** The pause between polls, so a store that is merely slow is given time to
-    drain before it is called stalled. *)
-module type CLOCK = sig
-  type 'a io
-
-  val sleep : float -> unit io
-end
-
-module Over (Io : Io.S) (_ : CLOCK with type 'a io := 'a Io.t) : sig
+module Over (Io : Io.S) (_ : Clock.S with type 'a io := 'a Io.t) : sig
   module Make (C : Conf.S with type 'a io = 'a Io.t) : sig
     (** Ask every member to check itself, then watch the ones that accepted
         until their requests drain.

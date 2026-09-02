@@ -10,7 +10,7 @@ let remember t key =
 let count t = Hashtbl.length t.known
 
 module Over (Io : Io.S) = struct
-  let ( let* ) = Io.bind
+  open Io_syntax.Make (Io)
 
   let known t ~corrupt ~present key =
     let* marked = corrupt key in

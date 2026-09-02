@@ -74,19 +74,10 @@ module type QUEUES = sig
   end
 end
 
-module type LOCKS = sig
-  type 'a io
-  type condition
-
-  val condition : unit -> condition
-  val wait : condition -> unit io
-  val broadcast : condition -> unit
-end
-
 module Over
     (Io : Io.S)
     (_ : QUEUES with type 'a io := 'a Io.t)
-    (_ : LOCKS with type 'a io := 'a Io.t) : sig
+    (_ : Lock.S with type 'a io := 'a Io.t) : sig
   module type Store = Backend.S with type 'a io := 'a Io.t
 
   module type S = sig

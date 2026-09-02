@@ -10,15 +10,6 @@ type entry = { bkey : Stored_key.t; body : body }
 type unusable = [ `Unreadable of exn | `Unclassifiable of exn ]
 type on_unusable = [ `Fail | `Skip of Stored_key.t -> unusable -> unit ]
 
-(** The bound on what runs at once, and the pool a domain's tree reads share. *)
-module type POOLS = sig
-  type 'a io
-  type t
-
-  val shared : key:string -> name:string -> max:int -> unit -> t
-  val map_with : t -> ('a -> 'b io) -> 'a list -> 'b list io
-end
-
 (** What reading the tree needs of the store under it: the four ways an object
     in a folder's namespace is reached. *)
 module type STORE = sig
@@ -40,17 +31,10 @@ end
 
 module Over
     (Io : Io.S)
-    (Pools : POOLS with type 'a io := 'a Io.t)
+    (Pools : Bounded.S with type 'a io := 'a Io.t)
     (Tree_store : STORE with type 'a io := 'a Io.t and type pool := Pools.t) =
 struct
-  let ( let* ) = Io.bind
-  let ( let+ ) x f = Io.map f x
-
-  let rec fold_left_s f acc = function
-    | [] -> Io.return acc
-    | x :: rest ->
-        let* acc = f acc x in
-        fold_left_s f acc rest
+  open Io_syntax.Make (Io)
 
   module Make (C : Conf.S with type 'a io = 'a Io.t) = struct
     module St = Tree_store.Make (C)

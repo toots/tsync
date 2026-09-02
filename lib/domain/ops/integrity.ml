@@ -11,32 +11,10 @@ let unhealthy (r : Corruption.report) =
   || r.Corruption.unverified <> []
   || r.Corruption.unreachable <> []
 
-(** The pause between polls, so a store that is merely slow is given time to
-    drain before it is called stalled. *)
-module type CLOCK = sig
-  type 'a io
-
-  val sleep : float -> unit io
-end
-
-module Over (Io : Io.S) (Clock : CLOCK with type 'a io := 'a Io.t) = struct
-  let ( let* ) = Io.bind
-  let ( let+ ) x f = Io.map f x
-
-  let rec map_s f = function
-    | [] -> Io.return []
-    | x :: rest ->
-        let* y = f x in
-        let+ ys = map_s f rest in
-        y :: ys
+module Over (Io : Io.S) (Clock : Clock.S with type 'a io := 'a Io.t) = struct
+  open Io_syntax.Make (Io)
 
   let iter_p f xs = Io.iter_p f xs
-
-  let rec iter_s f = function
-    | [] -> Io.return ()
-    | x :: rest ->
-        let* () = f x in
-        iter_s f rest
 
   module Make (C : Conf.S with type 'a io = 'a Io.t) = struct
     module L = Chunk_layout.Make (C)

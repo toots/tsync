@@ -209,33 +209,11 @@ module type STAGED = sig
   end
 end
 
-module type FS = sig
-  type 'a io
-
-  val stat_opt_large : string -> Unix.LargeFile.stats option io
-end
-
-module type SYSCALLS = sig
-  type 'a io
-
-  val file_exists : string -> bool io
-end
-
-module type LOCKS = sig
-  type 'a io
-  type mutex
-
-  val mutex : unit -> mutex
-  val with_lock : mutex -> (unit -> 'a io) -> 'a io
-  val is_locked : mutex -> bool
-  val has_waiters : mutex -> bool
-end
-
 module Over
     (Io : Io.S)
-    (_ : FS with type 'a io := 'a Io.t)
-    (_ : SYSCALLS with type 'a io := 'a Io.t)
-    (_ : LOCKS with type 'a io := 'a Io.t)
+    (_ : Fs.S with type 'a io := 'a Io.t)
+    (_ : Syscalls.S with type 'a io := 'a Io.t)
+    (_ : Lock.S with type 'a io := 'a Io.t)
     (_ : WAL with type 'a io := 'a Io.t)
     (_ : MIRROR with type 'a io := 'a Io.t)
     (_ : TREE with type 'a io := 'a Io.t)

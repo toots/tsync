@@ -22,37 +22,9 @@ module Over
     (Folder_ids : FOLDER_IDS with type 'a io := 'a Io.t)
     (Inode_layout : INODE_LAYOUT with type 'a io := 'a Io.t) =
 struct
-  let ( let* ) = Io.bind
-  let ( let+ ) x f = Io.map f x
-  let return_some x = Io.return (Some x)
+  open Io_syntax.Make (Io)
   let return_ok x = Io.return (Ok x)
   let return_error e = Io.return (Error e)
-
-  let rec iter_s f = function
-    | [] -> Io.return ()
-    | x :: rest ->
-        let* () = f x in
-        iter_s f rest
-
-  let rec map_s f = function
-    | [] -> Io.return []
-    | x :: rest ->
-        let* y = f x in
-        let+ ys = map_s f rest in
-        y :: ys
-
-  let rec filter_map_s f = function
-    | [] -> Io.return []
-    | x :: rest -> (
-        let* y = f x in
-        let+ ys = filter_map_s f rest in
-        match y with Some y -> y :: ys | None -> ys)
-
-  let rec fold_left_s f acc = function
-    | [] -> Io.return acc
-    | x :: rest ->
-        let* acc = f acc x in
-        fold_left_s f acc rest
 
   module Make (C : Conf.S with type 'a io = 'a Io.t) = struct
     module Lk = Logical_key.Make (C)

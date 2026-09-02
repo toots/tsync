@@ -1026,7 +1026,7 @@ let setup_client (module C : Conf_lwt.S) root staging_prefix =
     | DeleteCachedChunk { path; index } ->
         let* () = F.ensure_cached (key path) in
         let* p = cached_chunk_path (key path) index in
-        Lwt.catch (fun () -> Io_lwt.Retry.unlink p) (fun _ -> Lwt.return_unit)
+        Lwt.catch (fun () -> Io_lwt.Syscalls.unlink p) (fun _ -> Lwt.return_unit)
     | ForgetFolderId rel ->
         let marker =
           Filename.concat
@@ -1037,7 +1037,7 @@ let setup_client (module C : Conf_lwt.S) root staging_prefix =
             Folder_ids_lwt.marker_name
         in
         Lwt.catch
-          (fun () -> Io_lwt.Retry.unlink marker)
+          (fun () -> Io_lwt.Syscalls.unlink marker)
           (fun _ -> Lwt.return_unit)
     | RecoverStaged -> Rp.reconcile ()
     | CrashBeforeCommit path ->

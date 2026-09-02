@@ -75,8 +75,7 @@ module Make
     (Loop : Retry.LOOP with type 'a io := 'a Io.t)
     (Pool : POOL with type 'a io := 'a Io.t) =
 struct
-  let ( let* ) = Io.bind
-  let ( let+ ) x f = Io.map f x
+  open Io_syntax.Make (Io)
 
   (* Long enough to span the gaps between the bursts a sync or a demand-paged read
      arrives in, short enough not to hold sockets open indefinitely. *)

@@ -188,33 +188,11 @@ module type STAGED = sig
   end
 end
 
-module type FS = sig
-  type 'a io
-
-  val stat_opt_large : string -> Unix.LargeFile.stats option io
-end
-
-module type SYSCALLS = sig
-  type 'a io
-
-  val file_exists : string -> bool io
-end
-
-module type LOCKS = sig
-  type 'a io
-  type mutex
-
-  val mutex : unit -> mutex
-  val with_lock : mutex -> (unit -> 'a io) -> 'a io
-  val is_locked : mutex -> bool
-  val has_waiters : mutex -> bool
-end
-
 module Over
     (Io : Io.S)
-    (Fs : FS with type 'a io := 'a Io.t)
-    (Retry : SYSCALLS with type 'a io := 'a Io.t)
-    (Lock : LOCKS with type 'a io := 'a Io.t)
+    (Fs : Fs.S with type 'a io := 'a Io.t)
+    (Retry : Syscalls.S with type 'a io := 'a Io.t)
+    (Lock : Lock.S with type 'a io := 'a Io.t)
     (W : WAL with type 'a io := 'a Io.t)
     (Mf : MIRROR with type 'a io := 'a Io.t)
     (Ck : TREE with type 'a io := 'a Io.t)
@@ -222,27 +200,10 @@ module Over
     (D : CONTENT with type 'a io := 'a Io.t)
     (Folders : FOLDERS with type 'a io := 'a Io.t) =
 struct
-  let ( let* ) = Io.bind
-  let ( let+ ) x f = Io.map f x
-  let return_unit = Io.return ()
-  let return_some x = Io.return (Some x)
-  let return_true = Io.return true
-  let return_false = Io.return false
-
-  let rec iter_s f = function
-    | [] -> return_unit
-    | x :: rest -> Io.bind (f x) (fun () -> iter_s f rest)
+  open Io_syntax.Make (Io)
 
   (* Bound before [Make_with_layout] shadows [W] with its per-domain result. *)
   module Owed = W.Owed
-
-  let rec filter_map_s f = function
-    | [] -> Io.return []
-    | x :: rest ->
-        Io.bind (f x) (fun y ->
-            Io.map
-              (fun rest -> match y with Some y -> y :: rest | None -> rest)
-              (filter_map_s f rest))
 
   module type JOURNAL = sig
     val write_journal_entry :

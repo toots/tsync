@@ -34,8 +34,7 @@ module Over
 struct
   module type Store = Backend.S with type 'a io := 'a Io.t
 
-  let ( let* ) = Io.bind
-  let ( let+ ) x f = Io.map f x
+  open Io_syntax.Make (Io)
 
   (* Both at once, which is the point of asking this way: [join] is what starts
      them together, and neither result is read before it has landed. *)

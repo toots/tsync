@@ -15,23 +15,6 @@ module Ek = Journal.Entry_key
 let cursor_flush_interval = ref 2.
 let set_cursor_flush_interval s = cursor_flush_interval := s
 
-(** The one lock here: a timer flush and a drain flush landing together would be
-    two concurrent writes to the object this exists to write less often. *)
-module type LOCKS = sig
-  type 'a io
-  type mutex
-
-  val mutex : unit -> mutex
-  val with_lock : mutex -> (unit -> 'a io) -> 'a io
-end
-
-(** How long a cursor bump may wait to be collected with others. *)
-module type CLOCK = sig
-  type 'a io
-
-  val sleep : float -> unit io
-end
-
 (** The manifest-level reads a journal entry needs to name what it is about. *)
 module type MANIFESTS = sig
   type 'a io
@@ -46,12 +29,11 @@ end
 
 module Over
     (Io : Io.S)
-    (Locks : LOCKS with type 'a io := 'a Io.t)
-    (Clock : CLOCK with type 'a io := 'a Io.t)
+    (Locks : Lock.S with type 'a io := 'a Io.t)
+    (Clock : Clock.S with type 'a io := 'a Io.t)
     (Manifests : MANIFESTS with type 'a io := 'a Io.t) =
 struct
-  let ( let* ) = Io.bind
-  let ( let+ ) x f = Io.map f x
+  open Io_syntax.Make (Io)
 
   type 'a io = 'a Io.t
 

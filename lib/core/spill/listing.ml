@@ -30,8 +30,7 @@ let read_string body pos =
   take body pos n
 
 module Make (Io : Io.S) (Spool : SPOOL with type 'a io := 'a Io.t) = struct
-  let ( let* ) = Io.bind
-  let ( let+ ) x f = Io.map f x
+  open Io_syntax.Make (Io)
 
   type 'a t = {
     spool : Spool.t;

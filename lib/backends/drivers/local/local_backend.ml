@@ -1,36 +1,4 @@
 (* What a store on a filesystem needs below it. *)
-module type FS = sig
-  type 'a io
-
-  val mkdir_p : string -> unit io
-  val ensure_parent : string -> unit io
-  val readdir_list : string -> string list io
-  val rm_rf : string -> unit io
-  val unlink_quiet : string -> unit io
-end
-
-module type SYSCALLS = sig
-  type 'a io
-
-  val stat : string -> Unix.stats io
-  val link : string -> string -> unit io
-  val rename : string -> string -> unit io
-  val unlink : string -> unit io
-  val rmdir : string -> unit io
-
-  module LargeFile : sig
-    val stat : string -> Unix.LargeFile.stats io
-  end
-end
-
-module type POOLS = sig
-  type 'a io
-  type t
-
-  val create : ?max_waiting:int -> ?name:string -> max:int -> unit -> t
-  val use : t -> (unit -> 'a io) -> 'a io
-  val each : width:int -> (unit -> (unit -> unit io) option) -> unit io
-end
 
 module type WALL_CLOCK = sig
   val now : unit -> float
@@ -56,9 +24,9 @@ end
 
 module Over
     (Io : Io.S)
-    (Fs : FS with type 'a io := 'a Io.t)
-    (Sys : SYSCALLS with type 'a io := 'a Io.t)
-    (Bounded : POOLS with type 'a io := 'a Io.t)
+    (Fs : Fs.S with type 'a io := 'a Io.t)
+    (Sys : Syscalls.S with type 'a io := 'a Io.t)
+    (Bounded : Bounded.S with type 'a io := 'a Io.t)
     (Bytes : BYTES with type 'a io := 'a Io.t)
     (Wall : WALL_CLOCK)
     (Clock : Clock.S with type 'a io := 'a Io.t)
@@ -66,14 +34,7 @@ module Over
 struct
   module type Store = Backend.S with type 'a io := 'a Io.t
 
-  let ( let* ) = Io.bind
-  let ( let+ ) x f = Io.map f x
-  let return_unit = Io.return ()
-  let return_false = Io.return false
-
-  let rec iter_s f = function
-    | [] -> return_unit
-    | x :: rest -> Io.bind (f x) (fun () -> iter_s f rest)
+  open Io_syntax.Make (Io)
 
   let mkdir_p = Fs.mkdir_p
   let readdir_list = Fs.readdir_list

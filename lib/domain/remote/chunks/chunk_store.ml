@@ -1,11 +1,5 @@
-module type POOLS = sig
-  type 'a io
-  type t
 
-  val use : t -> (unit -> 'a io) -> 'a io
-end
-
-module Over (Io : Io.S) (Pools : POOLS with type 'a io := 'a Io.t) = struct
+module Over (Io : Io.S) (Pools : Bounded.S with type 'a io := 'a Io.t) = struct
   module Memo = Dedup.Over (Io)
 
   module type DEPS = sig
@@ -26,8 +20,7 @@ module Over (Io : Io.S) (Pools : POOLS with type 'a io := 'a Io.t) = struct
   end
 
   module Make (D : DEPS) = struct
-    let ( let* ) = Io.bind
-    let ( let+ ) x f = Io.map f x
+    open Io_syntax.Make (Io)
 
     (* Not pre-populated by listing the chunk prefix: that cost scales with the
        whole historical archive rather than the upload at hand. *)

@@ -12,15 +12,9 @@ module type JOURNAL = sig
   end
 end
 
-module type CLOCK = sig
-  type 'a io
-
-  val sleep : float -> unit io
-end
-
 module Over
     (Io : Io.S)
-    (Clock : CLOCK with type 'a io := 'a Io.t)
+    (Clock : Clock.S with type 'a io := 'a Io.t)
     (Js : JOURNAL with type 'a io := 'a Io.t)
     (Rp : sig
       module Make
@@ -30,16 +24,7 @@ module Over
       end
     end) =
 struct
-  let ( let* ) = Io.bind
-  let ( let+ ) x f = Io.map f x
-  let return_unit = Io.return ()
-  let return_some x = Io.return (Some x)
-  let return_true = Io.return true
-  let return_false = Io.return false
-
-  let rec iter_s f = function
-    | [] -> return_unit
-    | x :: rest -> Io.bind (f x) (fun () -> iter_s f rest)
+  open Io_syntax.Make (Io)
 
   module Make
       (C : Conf.S with type 'a io = 'a Io.t)

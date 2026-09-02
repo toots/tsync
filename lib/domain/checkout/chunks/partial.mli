@@ -10,15 +10,6 @@
     own leaves a body with holes that every reader takes for whole, and those
     holes reach a caller as content. *)
 
-module type FS = sig
-  type 'a io
-
-  val file_exists : string -> bool io
-  val unlink_quiet : string -> unit io
-  val read_file_opt : string -> string option io
-  val atomic_write : string -> string -> unit io
-end
-
 (** One interval per stored chunk in the body, in chunk-local coordinates.
     [nothing] is what a body no record is about holds. *)
 type held
@@ -39,7 +30,10 @@ val missing : have:(int * int) option -> want:int * int -> (int * int) option
 (** Whether a name in the store names a record rather than a body. *)
 val is_record : string -> bool
 
-module Make (Io : Io.S) (_ : FS with type 'a io := 'a Io.t) : sig
+module Make
+    (Io : Io.S)
+    (_ : Fs.S with type 'a io := 'a Io.t)
+    (_ : Syscalls.S with type 'a io := 'a Io.t) : sig
   (** Whether anything stands beside the body at [body], which is what says it
       is not whole. *)
   val recorded : body:string -> bool Io.t
