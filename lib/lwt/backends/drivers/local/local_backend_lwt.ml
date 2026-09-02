@@ -6,7 +6,8 @@ module Wall = struct
 end
 
 include
-  Local_backend.Over (Io_lwt.Core) (Io_lwt.Fs) (Io_lwt.Syscalls) (Io_lwt.Bounded)
+  Local_backend.Over (Io_lwt.Core) (Io_lwt.Fs) (Io_lwt.Syscalls)
+    (Io_lwt.Bounded)
     (Bigstring_lwt)
     (Wall)
     (Io_lwt.Clock)

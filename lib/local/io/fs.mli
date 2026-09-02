@@ -27,9 +27,9 @@ type disk_space = { avail : int64; free : int64; total : int64 }
     status request. *)
 val disk_space : string -> disk_space option
 
-(** What a platform owes beyond {!Syscalls.S}: whole files, a directory's
-    names, and bigstrings on a descriptor. Everything {!Make} adds is built from
-    these. *)
+(** What a platform owes beyond {!Syscalls.S}: whole files, a directory's names,
+    and bigstrings on a descriptor. Everything {!Make} adds is built from these.
+*)
 module type PRIMITIVES = sig
   type 'a io
   type fd

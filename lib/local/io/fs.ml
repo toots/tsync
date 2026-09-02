@@ -42,9 +42,9 @@ let disk_space path =
     Some { avail; free; total }
   with _ -> None
 
-(** What a platform owes beyond {!Syscalls.S}: whole files, a directory's
-    names, and bigstrings on a descriptor. Everything else below is built from
-    these. *)
+(** What a platform owes beyond {!Syscalls.S}: whole files, a directory's names,
+    and bigstrings on a descriptor. Everything else below is built from these.
+*)
 module type PRIMITIVES = sig
   type 'a io
   type fd
@@ -80,8 +80,8 @@ module Make
     (P : PRIMITIVES with type 'a io := 'a Io.t and type fd := Sys.fd) =
 struct
   type fd = Sys.fd
-  module Sys = Syscalls.Make (Io) (Sys)
 
+  module Sys = Syscalls.Make (Io) (Sys)
   open Io_syntax.Make (Io)
 
   type buffer = Bigstringaf.t
@@ -113,9 +113,7 @@ struct
         let* () = fill tmp in
         Sys.rename tmp path)
       (fun exn ->
-        let* () =
-          Io.catch (fun () -> Sys.unlink tmp) (fun _ -> Io.return ())
-        in
+        let* () = Io.catch (fun () -> Sys.unlink tmp) (fun _ -> Io.return ()) in
         Io.fail exn)
 
   let atomic_write path data =

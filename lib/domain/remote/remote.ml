@@ -68,7 +68,6 @@ module Over
     (Corruption : Corruption.OVER with type 'a io := 'a Io.t) =
 struct
   open Io_syntax.Make (Io)
-
   module Bodies = Chunk_store.Over (Io) (Pools)
 
   (* Keyed by the chunk prefix and not held in the functor: {!Make} is applied

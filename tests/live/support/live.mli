@@ -3,9 +3,9 @@
     A live suite is a list of commands and what each should say, so adding one
     is adding a record rather than writing a runner. TSYNC_LIVE_CONFIG names the
     config JSON and TSYNC_BIN the binary under test; without the first, a suite
-    exits 2 rather than reporting a pass it did not earn. {!domain} and
-    {!mount} are read from that config, so a suite holds no second copy of them
-    to disagree with. *)
+    exits 2 rather than reporting a pass it did not earn. {!domain} and {!mount}
+    are read from that config, so a suite holds no second copy of them to
+    disagree with. *)
 
 val domain : string
 val mount : string

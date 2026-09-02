@@ -71,13 +71,12 @@ end
 
 module type S = sig
   type 'a io
-
   type t
 
-    val create :
+  val create :
     name:string -> timeout:float -> classify:(exn -> Retry.kind) -> unit -> t
 
-    val call :
+  val call :
     t ->
     headers:(unit -> Cohttp.Header.t io) ->
     meth:Cohttp.Code.meth ->
@@ -85,7 +84,7 @@ module type S = sig
     Uri.t ->
     (Cohttp.Response.t * Bigstring.t) io
 
-    val call_retry :
+  val call_retry :
     t ->
     headers:(unit -> Cohttp.Header.t io) ->
     meth:Cohttp.Code.meth ->
@@ -94,7 +93,7 @@ module type S = sig
     Uri.t ->
     (Cohttp.Response.t * Bigstring.t) io
 
-    val call_text :
+  val call_text :
     t ->
     headers:(unit -> Cohttp.Header.t io) ->
     meth:Cohttp.Code.meth ->

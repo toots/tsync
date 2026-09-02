@@ -47,14 +47,12 @@ module type S = sig
   val create_dir : Logical_key.t -> unit io
   val delete_dir : Logical_key.t -> unit io
 
-    val list_children :
+  val list_children :
     prefix:Logical_key.t -> unit -> (listed list * string list) io
 
-    val list_tree : prefix:Logical_key.t -> unit -> listed list io
-
-    val walk : unit -> string list io
-
-    val ensure_root : unit -> unit io
+  val list_tree : prefix:Logical_key.t -> unit -> listed list io
+  val walk : unit -> string list io
+  val ensure_root : unit -> unit io
 end
 
 module type OVER = sig

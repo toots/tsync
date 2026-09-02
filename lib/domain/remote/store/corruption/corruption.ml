@@ -15,21 +15,17 @@ module type S = sig
   type 'a io
   type store
 
-    val list : unit -> report io
+  val list : unit -> report io
 
-    val member_entries :
+  val member_entries :
     ?max_keys:int ->
     store Backend.member ->
     [ `Unverified | `Entries of entry list ] io
 
-    val detail : entry -> Corruption_marker.t option io
-
-  
-    val is_marked : string -> bool io
-
-    val forget : string -> unit
-
-    val invalidate : unit -> unit
+  val detail : entry -> Corruption_marker.t option io
+  val is_marked : string -> bool io
+  val forget : string -> unit
+  val invalidate : unit -> unit
 end
 
 module type OVER = sig

@@ -11,10 +11,10 @@ let home = Filename.concat root "home"
 let binary =
   let rec upwards dir n =
     if n = 0 then None
-    else
+    else (
       let candidate = Filename.concat dir "bin/tsync.exe" in
       if Sys.file_exists candidate then Some candidate
-      else upwards (Filename.dirname dir) (n - 1)
+      else upwards (Filename.dirname dir) (n - 1))
   in
   upwards (Sys.getcwd ()) 6
 
@@ -49,10 +49,10 @@ let strip_ansi s =
   let b = Buffer.create (String.length s) in
   let rec go i =
     if i >= String.length s then Buffer.contents b
-    else if s.[i] = '\027' then
+    else if s.[i] = '\027' then (
       match String.index_from_opt s i 'm' with
         | Some j -> go (j + 1)
-        | None -> Buffer.contents b
+        | None -> Buffer.contents b)
     else begin
       Buffer.add_char b s.[i];
       go (i + 1)
@@ -89,7 +89,7 @@ let candidates output =
   go [] (String.split_on_char '\n' output)
 
 let complete args token =
-  snd (run ((["--__complete"] @ args) @ [ "--__complete=" ^ token ]))
+  snd (run ((["--__complete"] @ args) @ ["--__complete=" ^ token]))
 
 let offers name args token =
   Check.case name;
@@ -105,7 +105,7 @@ let offers name args token =
    says [gone] for a source it could not find. *)
 let accepted candidate =
   let status, out =
-    run [ "rsync"; "--dry-run"; candidate; Filename.concat root "probe" ]
+    run ["rsync"; "--dry-run"; candidate; Filename.concat root "probe"]
   in
   (* A prefix that is not there enumerates nothing and reports success, so what
      is asserted is that the run saw an entry at all. *)
@@ -124,34 +124,36 @@ let () =
     (fun d ->
       ignore
         (Sys.command
-           (Printf.sprintf "mkdir -p %s" (Filename.quote (Filename.concat root d)))))
-    [ "store-files"; "store-photos"; "seed/session" ];
+           (Printf.sprintf "mkdir -p %s"
+              (Filename.quote (Filename.concat root d)))))
+    ["store-files"; "store-photos"; "seed/session"];
   ignore
     (Sys.command
        (Printf.sprintf "printf 'x\\n' > %s; printf 'y\\n' > %s"
           (Filename.quote (Filename.concat root "seed/session/notes.txt"))
           (Filename.quote (Filename.concat root "seed/take.wav"))));
-  ignore (run [ "import"; "--domain"; "Files"; Filename.concat root "seed" ]);
+  ignore (run ["import"; "--domain"; "Files"; Filename.concat root "seed"]);
 
-  let names = offers "the domains a config knows" [ "ls"; "--domain" ] "" in
+  let names = offers "the domains a config knows" ["ls"; "--domain"] "" in
   Check.check "both domains are offered" (List.length names = 2);
 
-  ignore (offers "narrowed by what is typed" [ "ls"; "--domain" ] "Ph");
+  ignore (offers "narrowed by what is typed" ["ls"; "--domain"] "Ph");
 
-  let top = offers "inside a domain named outright" [ "rsync" ] "Files:/" in
+  let top = offers "inside a domain named outright" ["rsync"] "Files:/" in
   Check.check "the imported folder is offered" (top <> []);
 
-  let deep = offers "further in" [ "rsync" ] "Files:/session/" in
-  ignore (offers "narrowed by a partial leaf" [ "rsync" ] "Files:/session/no");
-  ignore (offers "a folder that is not there" [ "rsync" ] "Files:/nope/");
-  ignore (offers "a domain prefix" [ "rsync" ] "Fi");
+  let deep = offers "further in" ["rsync"] "Files:/session/" in
+  ignore (offers "narrowed by a partial leaf" ["rsync"] "Files:/session/no");
+  ignore (offers "a folder that is not there" ["rsync"] "Files:/nope/");
+  ignore (offers "a domain prefix" ["rsync"] "Fi");
 
   Check.case "every offer is a spelling the command accepts";
   List.iter accepted (top @ deep);
 
   (* Printed and then reported as success is the shape of the bug, so the code
      is asserted and not merely rendered. *)
-  Check.case "a path under no domain is refused in the exit code, not just on stderr";
+  Check.case
+    "a path under no domain is refused in the exit code, not just on stderr";
   List.iter
     (fun args ->
       let status, _ = run args in
@@ -160,9 +162,9 @@ let () =
         (Printf.sprintf "%s does not report success" (String.concat " " args))
         (status <> 0))
     [
-      [ "ls"; "--domain"; "Files"; "/nonsense" ];
-      [ "cache"; "--domain"; "Files"; "--evict"; "/nonsense" ];
-      [ "versions"; "--domain"; "Files"; "/nonsense" ];
+      ["ls"; "--domain"; "Files"; "/nonsense"];
+      ["cache"; "--domain"; "Files"; "--evict"; "/nonsense"];
+      ["versions"; "--domain"; "Files"; "/nonsense"];
     ];
 
   Check.report ()

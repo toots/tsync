@@ -59,9 +59,9 @@ module type OWED = sig
 
   val create : unit -> 'a t
 
-  (** Hand one over, answering once it has been taken up. Nothing is dropped
-      if no one is consuming: the record is already written, so the work is
-      owed whether or not anything is draining yet. *)
+  (** Hand one over, answering once it has been taken up. Nothing is dropped if
+      no one is consuming: the record is already written, so the work is owed
+      whether or not anything is draining yet. *)
   val signal : 'a t -> 'a -> unit io
 
   (** Take them from now on, displacing whoever was. One consumer at a time: a
@@ -81,38 +81,36 @@ module type S = sig
   (** This domain's records. Shared with {!Sync_queue}, which drains the ones
       that name an upload.
 
-      One value per domain however many times this functor is applied: a
-      second log over the same directory would keep an id counter of its own.
-  *)
+      One value per domain however many times this functor is applied: a second
+      log over the same directory would keep an id counter of its own. *)
   val log : records
 
   (** The records written here and not yet taken up by whoever sends them. One
       per domain, for the same reason the log is. *)
   val owed : (Journal.Entry_key.t * record) owed
 
-  (** Write the intent. The caller mints the key and keeps it: every later
-      call names the same unit of work. *)
+  (** Write the intent. The caller mints the key and keeps it: every later call
+      names the same unit of work. *)
   val record : Journal.Entry_key.t -> Journal.op list -> unit io
 
-  (** Write a whole record, for a caller that has one in hand: work whose
-      staged data has already been read says [Prepared] rather than [Intent],
-      and that same value is what it goes on to hand to whoever sends it. *)
+  (** Write a whole record, for a caller that has one in hand: work whose staged
+      data has already been read says [Prepared] rather than [Intent], and that
+      same value is what it goes on to hand to whoever sends it. *)
   val write : Journal.Entry_key.t -> record -> unit io
 
   val advance : Journal.Entry_key.t -> state -> unit io
 
   (** Carry a record through to done, the work it names having happened:
       [Executed], then the entry published, then the cursor moved, then the
-      record dropped. A crash in any of those windows leaves a record
-      reconcile can finish from what the backend says.
+      record dropped. A crash in any of those windows leaves a record reconcile
+      can finish from what the backend says.
 
       [publish] and [cursor] are the store's, and the caller's to choose: one
-      discharging a single operation in its own path moves the cursor there
-      and then, while one draining a queue records it and lets a busy run
-      collapse them. *)
+      discharging a single operation in its own path moves the cursor there and
+      then, while one draining a queue records it and lets a busy run collapse
+      them. *)
   val discharge :
-    publish:
-      (Journal.Entry_key.t -> Journal.op list -> Journal.Entry_key.t io) ->
+    publish:(Journal.Entry_key.t -> Journal.op list -> Journal.Entry_key.t io) ->
     cursor:(Journal.Entry_key.t -> unit io) ->
     Journal.Entry_key.t ->
     Journal.op list ->

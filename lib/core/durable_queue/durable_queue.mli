@@ -84,9 +84,9 @@ module type RECORDS = sig
   type job
   type t
 
-  (** [dir] should be per target and per domain: the records name one
-      target's work, and a shared directory would replay one domain's
-      against another's. *)
+  (** [dir] should be per target and per domain: the records name one target's
+      work, and a shared directory would replay one domain's against another's.
+  *)
   val create : dir:string -> t
 
   val write : t -> id:string -> job -> unit io
@@ -100,23 +100,24 @@ module type RECORDS = sig
 
   (** Everything on disk, in the order it was recorded.
 
-      [wanted] is asked of each id before its body is opened, so a caller
-      that will discard most of what it finds says so here rather than
-      after: a sweep over a large backlog is otherwise one open per record,
-      all but a few of them wasted. *)
+      [wanted] is asked of each id before its body is opened, so a caller that
+      will discard most of what it finds says so here rather than after: a sweep
+      over a large backlog is otherwise one open per record, all but a few of
+      them wasted. *)
   val list : ?wanted:(string -> bool) -> t -> (string * job) list io
 
-  (** Records {!list} discarded for being unreadable: work this log's owner
-      owes that no replay puts back, which is what a mirror repairs. Counted
-      on the log rather than returned, since the reader that discards one
-      need not be the one that reports on it. *)
+  (** Records {!list} discarded for being unreadable: work this log's owner owes
+      that no replay puts back, which is what a mirror repairs. Counted on the
+      log rather than returned, since the reader that discards one need not be
+      the one that reports on it. *)
   val dropped : t -> int
 end
 
 module type QUEUE = sig
   type 'a io
-  type job
+
   (** {1 The records} *)
+  type job
 
   module Records : RECORDS with type 'a io := 'a io and type job := job
 
@@ -125,8 +126,8 @@ module type QUEUE = sig
   type t
 
   (** One worker, jobs in the order recorded. A job stays at the head until it
-      is taken, so a failure that can clear is waited out rather than losing
-      the write and letting what follows overtake it. *)
+      is taken, so a failure that can clear is waited out rather than losing the
+      write and letting what follows overtake it. *)
   val ordered :
     ?max_queued:int ->
     name:string ->
@@ -137,14 +138,14 @@ module type QUEUE = sig
     unit ->
     t
 
-  (** [workers] jobs at once, at most one per [key]: posting a job whose key
-      is already busy cancels the running one and takes its place, so a file
-      rewritten while its upload is in flight uploads once, from the newer
-      bytes ([run] is handed the flag to poll for that).
+  (** [workers] jobs at once, at most one per [key]: posting a job whose key is
+      already busy cancels the running one and takes its place, so a file
+      rewritten while its upload is in flight uploads once, from the newer bytes
+      ([run] is handed the flag to poll for that).
 
-      A transient failure requeues at the back rather than the head, holding
-      the head being what would stall every other key behind one that is
-      failing; [weight] is what {!stats.bytes} sums. *)
+      A transient failure requeues at the back rather than the head, holding the
+      head being what would stall every other key behind one that is failing;
+      [weight] is what {!stats.bytes} sums. *)
   val keyed :
     ?max_queued:int ->
     ?workers:int ->
@@ -169,12 +170,12 @@ module type QUEUE = sig
 
   (** Run the workers.
 
-      [recover] reads the log first, and again on every {!rescan_all}, so work
-      a process left behind is picked up without waiting for a restart.
-      Without it the log is never read and this queue's records are only ever
-      its own, which is what a one-shot command wants: it claims the directory
-      for as long as it lives, and a recovering queue elsewhere leaves it
-      alone until it exits. *)
+      [recover] reads the log first, and again on every {!rescan_all}, so work a
+      process left behind is picked up without waiting for a restart. Without it
+      the log is never read and this queue's records are only ever its own,
+      which is what a one-shot command wants: it claims the directory for as
+      long as it lives, and a recovering queue elsewhere leaves it alone until
+      it exits. *)
   val start : ?recover:bool -> t -> unit
 
   (** Cancel the job running or queued under [key], and drop any replacement
@@ -187,8 +188,7 @@ module type QUEUE = sig
 
   val paused : t -> bool
 
-  (** Stop the workers and wait for them, leaving anything unstarted on disk.
-  *)
+  (** Stop the workers and wait for them, leaving anything unstarted on disk. *)
   val stop : t -> unit io
 
   val stats : t -> stats
@@ -227,13 +227,11 @@ module type S = sig
       to it. *)
   val rescan_all : unit -> unit io
 
-  module Make (J : JOB) :
-    QUEUE with type 'a io := 'a io and type job := J.t
+  module Make (J : JOB) : QUEUE with type 'a io := 'a io and type job := J.t
 end
 
 module Make
     (Io : Io.S)
     (Clock : Clock.S with type 'a io := 'a Io.t)
     (Lock : Lock.S with type 'a io := 'a Io.t)
-    (Files : FILES with type 'a io := 'a Io.t) :
-  S with type 'a io := 'a Io.t
+    (Files : FILES with type 'a io := 'a Io.t) : S with type 'a io := 'a Io.t

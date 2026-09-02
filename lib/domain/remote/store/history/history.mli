@@ -28,8 +28,8 @@ module type S = sig
   val version_dir : key:Logical_key.t -> Stored_key.t option io
 
   (** Snapshot the current manifest object under a fresh timestamped version
-      key, when the backend has one. Best-effort: a lost snapshot must not
-      wedge the write it precedes. *)
+      key, when the backend has one. Best-effort: a lost snapshot must not wedge
+      the write it precedes. *)
   val save_version : key:Logical_key.t -> unit io
 
   val list_versions : key:Logical_key.t -> Backend.file_entry list io

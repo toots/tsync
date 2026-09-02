@@ -29,8 +29,8 @@ module type Owing = sig
   val set_canceller : (Logical_key.t -> bool) -> unit
 end
 
-(** The file operations over one domain, as the Lwt binding builds them: what
-    a whole-domain job takes. *)
+(** The file operations over one domain, as the Lwt binding builds them: what a
+    whole-domain job takes. *)
 module type OVER = sig
   type 'a io
 
@@ -59,7 +59,7 @@ module Over
       {!Remote.S} is taken whole because {!Data.Make} is given it. {!Make} is
       where they are built. *)
 
-        (** What the sending pool needs of the file operations, and what it tells them
+  (** What the sending pool needs of the file operations, and what it tells them
       in return. *)
 
   (** [L] is still taken: a folder's id is resolved here, not by the store. *)

@@ -103,7 +103,8 @@ type group = { title : string; cases : case list }
 let describe = function
   | Copied n -> Printf.sprintf "copies %d" n
   | Skipped n -> Printf.sprintf "skips %d" n
-  | Dirs n -> Printf.sprintf "makes %d director%s" n (if n = 1 then "y" else "ies")
+  | Dirs n ->
+      Printf.sprintf "makes %d director%s" n (if n = 1 then "y" else "ies")
   | Failed n -> Printf.sprintf "fails %d" n
   | Says s -> Printf.sprintf "says %S" s
   | Silent_on s -> Printf.sprintf "does not say %S" s

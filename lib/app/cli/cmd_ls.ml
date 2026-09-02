@@ -33,9 +33,7 @@ let cmd : unit Cmd.t =
           this listing is of. *)
        let here = Option.map (Location.place ?domain cfg) path in
        let domain =
-         match here with
-           | Some (Ok p) -> Some p.Location.name
-           | _ -> domain
+         match here with Some (Ok p) -> Some p.Location.name | _ -> domain
        in
        let (module C : Conf_lwt.S) = make_conf ?domain cfg in
        let (module F : Frontend.S) =
