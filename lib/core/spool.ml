@@ -1,6 +1,4 @@
-(** The buffered writer nothing here can supply: a channel is state, and the
-    stream-to-stream copy in {!Make.append_file} is not a sequence of reads and
-    writes this could spell for itself. *)
+(** The buffered writer nothing here can supply: a channel is state. *)
 module type APPEND = sig
   type 'a io
   type t
@@ -32,7 +30,6 @@ struct
   let path t = t.path
   let append t s = Append.write t.out s
   let close t = Append.close t.out
-  let append_file t ~src = Append.write_file t.out ~src
 
   let close_quiet t =
     Io.catch (fun () -> Append.close t.out) (fun _ -> Io.return ())

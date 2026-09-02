@@ -39,7 +39,6 @@ module type S = sig
   val save_version : key:Logical_key.t -> unit io
   val list_versions : key:Logical_key.t -> Backend.file_entry list io
   val get_version : vkey:Stored_key.t -> string io
-  val parse : Stored_key.t -> (string * string) option
 end
 
 module type OVER = sig
@@ -105,8 +104,5 @@ module Over (Io : Io.S) = struct
     let get_version ~vkey =
       let+ body = B.get ~key:vkey () in
       Bigstring.to_string body
-
-    (* The other direction of the key {!version_dir} builds. *)
-    let parse key = parse ~versions_prefix:C.versions_prefix key
   end
 end

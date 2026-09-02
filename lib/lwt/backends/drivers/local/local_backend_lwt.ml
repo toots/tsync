@@ -1,15 +1,10 @@
 (* The store on this machine's filesystem, and the registration that makes it
    reachable by name. The registry is the instance's, so this is where a driver
    announces itself. *)
-module Wall = struct
-  let now = Unix.gettimeofday
-end
-
 include
   Local_backend.Over (Io_lwt.Core) (Io_lwt.Fs) (Io_lwt.Syscalls)
     (Io_lwt.Bounded)
     (Bigstring_lwt)
-    (Wall)
     (Io_lwt.Clock)
     (Watch_lwt)
 

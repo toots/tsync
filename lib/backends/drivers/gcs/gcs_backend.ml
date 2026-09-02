@@ -104,7 +104,6 @@ module Over
     (Post : Gcs_auth.POST with type 'a io := 'a Io.t)
     (Lock : Lock.S with type 'a io := 'a Io.t)
     (Bounded : Bounded.S with type 'a io := 'a Io.t)
-    (Wall : Gcs_auth.CLOCK)
     (Clock : Clock.S with type 'a io := 'a Io.t) =
 struct
   module Verify = Verifier.Over (Io) (Bounded)
@@ -117,9 +116,7 @@ struct
      minted from a service-account key ({!Gcs_auth}), and unlike s3 there is no
      per-request signing. *)
 
-  module Auth = Gcs_auth.Over (Io) (Post) (Lock) (Wall)
-
-  exception Cancelled = Retry.Cancelled
+  module Auth = Gcs_auth.Over (Io) (Post) (Lock)
 
   type t = {
     client : Hc.t;

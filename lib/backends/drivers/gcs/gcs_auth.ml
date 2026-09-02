@@ -7,15 +7,10 @@ module type POST = sig
     headers:Cohttp.Header.t -> body:string -> Uri.t -> (int * string) io
 end
 
-module type CLOCK = sig
-  val now : unit -> float
-end
-
 module Over
     (Io : Io.S)
     (Post : POST with type 'a io := 'a Io.t)
-    (Lock : Lock.S with type 'a io := 'a Io.t)
-    (Clock : CLOCK) =
+    (Lock : Lock.S with type 'a io := 'a Io.t) =
 struct
   open Io_syntax.Make (Io)
 
@@ -81,7 +76,7 @@ struct
      signed before any TLS connection exists to seed one, and blinding only guards
      local timing channels. *)
   let make_jwt t =
-    let now = int_of_float (Clock.now ()) in
+    let now = int_of_float (Unix.gettimeofday ()) in
     let header = `Assoc [("alg", `String "RS256"); ("typ", `String "JWT")] in
     let claims =
       `Assoc
@@ -125,7 +120,7 @@ struct
           | `Float f -> f
           | _ -> 3600.
       in
-      Io.return (token, Clock.now () +. expires_in)
+      Io.return (token, Unix.gettimeofday () +. expires_in)
     end
 
   (* A minute early, to absorb clock skew. *)
@@ -133,7 +128,8 @@ struct
 
   let fresh t =
     match t.cached with
-      | Some (tok, exp) when Clock.now () < exp -. refresh_margin -> Some tok
+      | Some (tok, exp) when Unix.gettimeofday () < exp -. refresh_margin ->
+          Some tok
       | _ -> None
 
   (* Concurrent callers on a cold cache share one refresh: the mutex serializes

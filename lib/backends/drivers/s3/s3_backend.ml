@@ -15,8 +15,6 @@ struct
 
   open Io_syntax.Make (Io)
 
-  exception Cancelled = Retry.Cancelled
-
   type t = {
     bucket : string;
     credentials : Aws_s3.Credentials.t;

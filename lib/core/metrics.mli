@@ -67,9 +67,7 @@ type mem = {
 val mem_stats : unit -> mem
 
 (** [(mem_stats ()).rss]. *)
-val rss_bytes : unit -> int
-
-(** OCaml heap figures, to read next to {!rss_bytes}: a large RSS over a small
+(** OCaml heap figures, beside the RSS: a large RSS over a small
     heap is buffers and cache reads rather than OCaml allocation. *)
 type gc = {
   heap_bytes : int;

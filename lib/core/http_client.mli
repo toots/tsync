@@ -17,12 +17,8 @@
 val code : Cohttp.Response.t -> int
 val is_ok : Cohttp.Response.t -> bool
 
-(** Whether a status clears on its own. One answer, so two drivers cannot drift
-    into retrying different things. *)
-val is_transient_code : int -> bool
-
 (** A {!Retry.Failed} carrying the status and a bounded excerpt of the body,
-    classified by {!is_transient_code}. *)
+    transient for a 5xx or a 429. *)
 val failed : string -> int -> string -> exn
 
 (** A bounded, single-line rendering of a response body, for a log. A failing

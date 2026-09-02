@@ -26,7 +26,6 @@ val str : Buffer.t -> string -> unit
 val int64 : Buffer.t -> int64 -> unit
 val read_string : Bigstring.t -> int ref -> string
 val read_int64 : Bigstring.t -> int ref -> int64
-val read_int : Bigstring.t -> int ref -> int
 
 module Make (Io : Io.S) (Spool : SPOOL with type 'a io := 'a Io.t) : sig
   type 'a t

@@ -54,13 +54,6 @@ val edits : state -> staged
 (** A fresh staged-body id. *)
 val new_uuid : unit -> string
 
-(** The staged record as it is kept on disk. Versioned: a body written by a
-    newer build raises rather than being read as something it is not, since what
-    it describes is the only copy of unsynced work. *)
-val staged_to_string : state -> string
-
-val staged_of_string : string -> state
-
 (** Where the sidecar for [key] sits, for the synchronous CLI paths that hold no
     functor instance. *)
 val sidecar_path :
