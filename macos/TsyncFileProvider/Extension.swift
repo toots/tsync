@@ -414,9 +414,10 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension,
         }
     }
 
-    /// Take our own copy: the system unlinks the URL it gave us once this call
-    /// returns, and the daemon's upload outlives that. Same volume, so this is a
-    /// clone and copies no data.
+    /// Take our own name for the file: the system unlinks the URL it gave us
+    /// once this call returns, and the daemon's upload outlives that. Same
+    /// volume, so this is a hard link and copies no data; the daemon renames it
+    /// into its store before answering.
     ///
     /// It lands in this process's container, not the group container: the
     /// extension's sandbox can read that one but not write to it (EPERM). The

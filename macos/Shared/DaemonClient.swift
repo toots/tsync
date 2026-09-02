@@ -57,11 +57,6 @@ struct DaemonOp: Decodable {
     let name: String?
     let srcRef: String?
 
-    /// The container the item moved out of, for a rename. The materialized-set
-    /// filter needs either end: an item leaving a folder we hold is as much a
-    /// change to that folder as one arriving in it.
-    let srcParentRef: String?
-
     /// The whole item, so a batch of changes becomes items without a call each.
     /// Absent for a removal, which has nothing left to describe.
     let item: DaemonItem?
@@ -136,9 +131,8 @@ struct DaemonResponse: Decodable {
     let offset: Int64?
     let length: Int64?
 
-    /// The item a call produced. A mutation nests it under `item`; `stat`
-    /// answers with the fields at the top level, so both shapes decode here and
-    /// it is nil for everything else.
+    /// The item a mutation produced. `stat` answers with the fields at the top
+    /// level instead and is read as a `DaemonItem` outright.
     let item: DaemonItem?
 
     /// `list_dir` and `list_all`: resume the listing after this cursor. Absent
@@ -147,36 +141,14 @@ struct DaemonResponse: Decodable {
 
     /// `changes_since` only: another call from `cursor` would answer with more.
     let more: Bool?
+}
 
-    private enum CodingKeys: String, CodingKey {
-        case ok, code, error, items, ops, stale, cursor, localPath, url
-        case active, bytesDownloaded, totalBytes, offset, length
-        case menu, rows, item, next, more
-    }
-
-    init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        ok = try c.decode(Bool.self, forKey: .ok)
-        code = try c.decodeIfPresent(String.self, forKey: .code)
-        error = try c.decodeIfPresent(String.self, forKey: .error)
-        items = try c.decodeIfPresent([DaemonItem].self, forKey: .items)
-        ops = try c.decodeIfPresent([DaemonOp].self, forKey: .ops)
-        stale = try c.decodeIfPresent(Bool.self, forKey: .stale)
-        cursor = try c.decodeIfPresent(String.self, forKey: .cursor)
-        localPath = try c.decodeIfPresent(String.self, forKey: .localPath)
-        url = try c.decodeIfPresent(String.self, forKey: .url)
-        active = try c.decodeIfPresent(Bool.self, forKey: .active)
-        bytesDownloaded = try c.decodeIfPresent(Int64.self, forKey: .bytesDownloaded)
-        totalBytes = try c.decodeIfPresent(Int64.self, forKey: .totalBytes)
-        offset = try c.decodeIfPresent(Int64.self, forKey: .offset)
-        length = try c.decodeIfPresent(Int64.self, forKey: .length)
-        menu = try c.decodeIfPresent(DaemonMenu.self, forKey: .menu)
-        rows = try c.decodeIfPresent([DaemonMenuRow].self, forKey: .rows)
-        next = try c.decodeIfPresent(String.self, forKey: .next)
-        more = try c.decodeIfPresent(Bool.self, forKey: .more)
-        item = (try? c.decodeIfPresent(DaemonItem.self, forKey: .item))
-            ?? (try? DaemonItem(from: decoder))
-    }
+/// The daemon's verdict on a request, read before the reply is read as
+/// anything else.
+private struct DaemonVerdict: Decodable {
+    let ok: Bool
+    let code: String?
+    let error: String?
 }
 
 /// An event the daemon pushes to a subscriber.
@@ -286,15 +258,23 @@ struct DaemonClient: Sendable {
     /// replies carry no request id, so reusing one means serialising against it —
     /// worth a pool only if the connect ever shows up in a profile.
     func send(_ request: DaemonRequest) async throws -> DaemonResponse {
+        try await send(request, as: DaemonResponse.self)
+    }
+
+    /// A reply read as `Reply`, for the actions whose answer is not the common
+    /// shape. The daemon's verdict is checked first whatever the shape.
+    func send<Reply: Decodable>(_ request: DaemonRequest,
+                                as reply: Reply.Type) async throws -> Reply {
         try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
-                do { continuation.resume(returning: try sendSync(request)) }
+                do { continuation.resume(returning: try sendSync(request, as: reply)) }
                 catch { continuation.resume(throwing: error) }
             }
         }
     }
 
-    func sendSync(_ request: DaemonRequest) throws -> DaemonResponse {
+    func sendSync<Reply: Decodable>(_ request: DaemonRequest,
+                                    as reply: Reply.Type) throws -> Reply {
         var request = request
         if request.domain == nil { request.domain = domain }
         let fd = try Self.connect(to: socketPath)
@@ -307,13 +287,13 @@ struct DaemonClient: Sendable {
         guard let line = try LineReader(fd: fd).next(), !line.isEmpty else {
             throw DaemonError.transport("no response from daemon")
         }
-        let response = try JSONDecoder().decode(DaemonResponse.self,
-                                                from: Data(line.utf8))
-        guard response.ok else {
-            throw DaemonError.remote(code: response.code ?? "internal",
-                                     message: response.error ?? "unknown error")
+        let data = Data(line.utf8)
+        let verdict = try JSONDecoder().decode(DaemonVerdict.self, from: data)
+        guard verdict.ok else {
+            throw DaemonError.remote(code: verdict.code ?? "internal",
+                                     message: verdict.error ?? "unknown error")
         }
-        return response
+        return try JSONDecoder().decode(reply, from: data)
     }
 
     // MARK: Events
@@ -353,11 +333,7 @@ struct DaemonClient: Sendable {
 
 extension DaemonClient {
     func stat(_ ref: String) async throws -> DaemonItem {
-        let response = try await send(DaemonRequest(action: "stat", ref: ref))
-        guard let item = response.item else {
-            throw DaemonError.remote(code: "internal", message: "stat returned no item")
-        }
-        return item
+        try await send(DaemonRequest(action: "stat", ref: ref), as: DaemonItem.self)
     }
 
     /// One page of a folder, ordered by name. `next` names where to resume and
