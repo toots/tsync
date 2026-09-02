@@ -1,5 +1,3 @@
-(* What queueing the requests needs of a pool. *)
-
 module Over (Io : Io.S) (Bounded : Bounded.S with type 'a io := 'a Io.t) = struct
   let ( let+ ) x f = Io.map f x
 

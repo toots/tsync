@@ -106,20 +106,6 @@ module type LOCKFILE = sig
   val drop : t -> unit io
 end
 
-(** What a run records about itself, and the move that keeps a chunk alive. *)
-module type COLLECTION = sig
-  type 'a io
-
-  module Make (_ : Conf.S with type 'a io = 'a io) : sig
-    val marker_key : Stored_key.t
-    val string_of_phase : Collection.phase -> string
-    val read_run : unit -> Collection.run option io
-    val write_run : Collection.run -> unit io
-    val clear_run : unit -> unit io
-    val promote : string -> bool io
-  end
-end
-
 module Over
     (Io : Io.S)
     (_ : Fs.S with type 'a io := 'a Io.t)
@@ -127,7 +113,7 @@ module Over
     (Pools : Bounded.S with type 'a io := 'a Io.t)
     (_ : LOCKFILE with type 'a io := 'a Io.t)
     (_ : Clock.S with type 'a io := 'a Io.t)
-    (_ : COLLECTION with type 'a io := 'a Io.t) : sig
+    (_ : Collection.OVER with type 'a io := 'a Io.t) : sig
   module Make (C : Conf.S with type 'a io = 'a Io.t) : sig
     (** {1 Stepping}
 

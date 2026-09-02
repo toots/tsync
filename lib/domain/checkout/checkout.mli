@@ -22,79 +22,47 @@ type listed = { key : Logical_key.t; size : int; mtime : float }
     [false] for a partly cached file. *)
 val is_local : Conf.locality -> Logical_key.t -> bool
 
-module type MIRROR = sig
+module type S = sig
   type 'a io
 
-  module Make (_ : Conf.S with type 'a io = 'a io) : sig
-    val root : unit -> string
-    val path : Logical_key.t -> string
-    val ensure_parent : Logical_key.t -> unit io
-    val write : Logical_key.t -> Manifest.t -> unit io
-    val forget : Logical_key.t -> unit
-  end
+  val rename : src_key:Logical_key.t -> dst_key:Logical_key.t -> unit io
+  val create_dir : Logical_key.t -> unit io
+  val delete_dir : Logical_key.t -> unit io
 
-  val ensure_dirs : string -> string -> unit io
+  (** Immediate children of [prefix]: file entries (logical keys, size, mtime)
+      and real subdirectory names, serving both readdir and frontend
+      enumeration.
+
+      Internal markers are filtered, names are real rather than escaped, and a
+      staged file's own size and mtime win — it is listed even when nothing of
+      it has been published. *)
+  val list_children :
+    prefix:Logical_key.t -> unit -> (listed list * string list) io
+
+  (** Every file entry under [prefix], recursively. *)
+  val list_tree : prefix:Logical_key.t -> unit -> listed list io
+
+  (** Domain-relative real path of every file the domain holds locally,
+      published or only staged (unsorted). *)
+  val walk : unit -> string list io
+
+  (** Create the checkout root. Every process serving the domain needs this
+      and nothing more. *)
+  val ensure_root : unit -> unit io
 end
 
-module type STAGED = sig
+(** The shape a consumer takes: {!S} for whichever domain it is applied to. *)
+module type OVER = sig
   type 'a io
 
-  module Make (_ : Conf.S with type 'a io = 'a io) : sig
-    val fold :
-      rel_dir:string ->
-      deep:bool ->
-      ('a -> Logical_key.t -> Staged_manifest.staged -> 'a) ->
-      'a ->
-      'a io
-
-    val entries :
-      rel_dir:string ->
-      deep:bool ->
-      (Logical_key.t * Staged_manifest.staged) list io
-  end
-end
-
-module type FOLDERS = sig
-  type 'a io
-
-  val reparent :
-    cache_root:string -> domain_name:string -> Logical_key.t -> unit io
+  module Make (C : Conf.S with type 'a io = 'a io) : S with type 'a io := 'a io
 end
 
 module Over
     (Io : Io.S)
     (Fs : Cache_layout.FS with type 'a io := 'a Io.t)
     (_ : Syscalls.S with type 'a io := 'a Io.t)
-    (_ : MIRROR with type 'a io := 'a Io.t)
-    (_ : STAGED with type 'a io := 'a Io.t)
-    (_ : FOLDERS with type 'a io := 'a Io.t) : sig
-  (** The local manifest mirror for one domain: where manifests live, how the
-      tree is walked, and the parsed-sidecar cache. Callers name logical keys
-      only — no cache paths, no domain prefixes, no raw bodies. *)
-  module Make (C : Conf.S with type 'a io = 'a Io.t) : sig
-    val rename : src_key:Logical_key.t -> dst_key:Logical_key.t -> unit Io.t
-    val create_dir : Logical_key.t -> unit Io.t
-    val delete_dir : Logical_key.t -> unit Io.t
-
-    (** Immediate children of [prefix]: file entries (logical keys, size, mtime)
-        and real subdirectory names, serving both readdir and frontend
-        enumeration.
-
-        Internal markers are filtered, names are real rather than escaped, and a
-        staged file's own size and mtime win — it is listed even when nothing of
-        it has been published. *)
-    val list_children :
-      prefix:Logical_key.t -> unit -> (listed list * string list) Io.t
-
-    (** Every file entry under [prefix], recursively. *)
-    val list_tree : prefix:Logical_key.t -> unit -> listed list Io.t
-
-    (** Domain-relative real path of every file the domain holds locally,
-        published or only staged (unsorted). *)
-    val walk : unit -> string list Io.t
-
-    (** Create the checkout root. Every process serving the domain needs this
-        and nothing more. *)
-    val ensure_root : unit -> unit Io.t
-  end
-end
+    (_ : Manifests.OVER with type 'a io := 'a Io.t)
+    (_ : Staged_manifest.OVER with type 'a io := 'a Io.t)
+    (_ : Folder_ids.S with type 'a io := 'a Io.t) :
+  OVER with type 'a io := 'a Io.t

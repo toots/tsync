@@ -1,32 +1,3 @@
-(* The client this driver speaks through: {!Http_client.Make}'s result, of
-   which it uses four members. The predicates that read a response are pure and
-   come from {!Http_client} itself. *)
-module type HTTP = sig
-  type 'a io
-  type t
-
-  val create :
-    name:string -> timeout:float -> classify:(exn -> Retry.kind) -> unit -> t
-
-  val call_retry :
-    t ->
-    headers:(unit -> Cohttp.Header.t io) ->
-    meth:Cohttp.Code.meth ->
-    ?body:Bigstring.t ->
-    string ->
-    Uri.t ->
-    (Cohttp.Response.t * Bigstring.t) io
-
-  val call_text :
-    t ->
-    headers:(unit -> Cohttp.Header.t io) ->
-    meth:Cohttp.Code.meth ->
-    ?body:Bigstring.t ->
-    string ->
-    Uri.t ->
-    (Cohttp.Response.t * string) io
-end
-
 let xml_escape s =
   let b = Buffer.create (String.length s + 16) in
   String.iter
@@ -129,7 +100,7 @@ let parse_list body =
 
 module Over
     (Io : Io.S)
-    (Hc : HTTP with type 'a io := 'a Io.t)
+    (Hc : Http_client.S with type 'a io := 'a Io.t)
     (Post : Gcs_auth.POST with type 'a io := 'a Io.t)
     (Lock : Lock.S with type 'a io := 'a Io.t)
     (Bounded : Bounded.S with type 'a io := 'a Io.t)

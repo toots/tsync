@@ -1,3 +1,49 @@
+module type S = sig
+  type 'a io
+
+    val marker_name : string
+
+    val ensure_id :
+    cache_root:string -> domain_name:string -> Logical_key.t -> string io
+
+    val lookup_id :
+    cache_root:string ->
+    domain_name:string ->
+    Logical_key.t ->
+    string option io
+
+    val lookup_id_removed :
+    cache_root:string ->
+    domain_name:string ->
+    Logical_key.t ->
+    string option io
+
+    val ref_of_key :
+    cache_root:string ->
+    domain_name:string ->
+    Logical_key.t ->
+    Item_ref.t option io
+
+    val write :
+    cache_root:string ->
+    domain_name:string ->
+    Logical_key.t ->
+    Folder.marker ->
+    unit io
+
+    val key_of_id :
+    cache_root:string ->
+    domain_name:string ->
+    root:Logical_key.t ->
+    string ->
+    Logical_key.t option io
+
+    val reparent :
+    cache_root:string -> domain_name:string -> Logical_key.t -> unit io
+
+    val rebuild : cache_root:string -> domain_name:string -> unit io
+end
+
 module Over (Io : Io.S) (F : Fs.S with type 'a io := 'a Io.t) = struct
   open Io_syntax.Make (Io)
 

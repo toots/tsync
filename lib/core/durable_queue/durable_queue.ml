@@ -74,6 +74,90 @@ module type FILES = sig
   val read_file : string -> [ `Body of string | `Gone | `Failed of exn ] io
 end
 
+module type RECORDS = sig
+  type 'a io
+  type job
+  type t
+
+        val create : dir:string -> t
+
+  val write : t -> id:string -> job -> unit io
+
+        val update : t -> string -> (job -> job) -> unit io
+
+        val complete : t -> string -> unit io
+
+        val list : ?wanted:(string -> bool) -> t -> (string * job) list io
+
+        val dropped : t -> int
+end
+
+module type QUEUE = sig
+  type 'a io
+  type job
+  
+  module Records : RECORDS with type 'a io := 'a io and type job := job
+
+  
+  type t
+
+      val ordered :
+    ?max_queued:int ->
+    name:string ->
+    log:Records.t ->
+    classify:(exn -> Retry.kind) ->
+    poison:poison ->
+    run:(job -> unit io) ->
+    unit ->
+    t
+
+      val keyed :
+    ?max_queued:int ->
+    ?workers:int ->
+    ?weight:(job -> int64) ->
+    name:string ->
+    log:Records.t ->
+    key:(job -> string) ->
+    classify:(exn -> Retry.kind) ->
+    poison:poison ->
+    run:(id:string -> job -> cancel:bool ref -> unit io) ->
+    unit ->
+    t
+
+      val post : ?id:string -> t -> job -> unit io
+
+      val adopt : t -> id:string -> job -> unit io
+
+      val start : ?recover:bool -> t -> unit
+
+      val cancel : t -> string -> bool
+
+      val set_paused : t -> bool -> unit
+
+  val paused : t -> bool
+
+      val stop : t -> unit io
+
+  val stats : t -> stats
+
+      val in_flight : t -> job list
+
+      val owed : t -> int
+end
+
+module type S = sig
+  type 'a io
+
+    val settle_all : ?timeout:float -> unit -> unit io
+
+    val register_settle : (unit -> unit io) -> unit
+
+    val rescan_all : unit -> unit io
+
+  module Make (J : JOB) :
+    QUEUE with type 'a io := 'a io and type job := J.t
+end
+
 module Make
     (Io : Io.S)
     (Clock : Clock.S with type 'a io := 'a Io.t)

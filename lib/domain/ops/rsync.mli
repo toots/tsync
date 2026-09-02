@@ -62,97 +62,6 @@ type listed = Checkout.listed = {
   mtime : float;
 }
 
-module type FOLDER_IDS = sig
-  type 'a io
-
-  val ensure_id :
-    cache_root:string -> domain_name:string -> Logical_key.t -> string io
-end
-
-module type OBJECTS = sig
-  type 'a io
-
-  module Make (_ : Conf.S with type 'a io = 'a io) : sig
-    val chunk_size : unit -> int io
-
-    val upload :
-      key:Logical_key.t ->
-      src_path:string ->
-      mtime:float ->
-      chunk_size:int ->
-      ?cancel:bool ref ->
-      ?on_progress:(bytes:int -> sent:bool -> unit) ->
-      unit ->
-      Manifest.t io
-
-    val upload_chunks :
-      key:Logical_key.t ->
-      size:int64 ->
-      chunk_size:int ->
-      mtime:float ->
-      source:(int -> unit io Chunk_source.t io) ->
-      ?cancel:bool ref ->
-      unit ->
-      Manifest.t io
-
-    val fetch_manifest : key:Logical_key.t -> unit -> Manifest.t option io
-  end
-end
-
-module type MANIFESTS = sig
-  type 'a io
-
-  module Make (_ : Conf.S with type 'a io = 'a io) : sig
-    val put_manifest : key:Logical_key.t -> data:Bigstring.t -> unit io
-    val put_folder_marker : key:Logical_key.t -> unit io
-    val delete_manifest : key:Logical_key.t -> unit io
-  end
-end
-
-module type JOURNAL = sig
-  type 'a io
-
-  module Make (_ : Conf.S with type 'a io = 'a io) : sig
-    val write_journal_entry_body :
-      ?entry_key:Journal.Entry_key.t -> Bigstring.t -> Journal.Entry_key.t io
-
-    val bump_cursor : Journal.Entry_key.t -> unit io
-    val flush_cursor : unit -> unit io
-  end
-end
-
-module type MIRROR = sig
-  type 'a io
-
-  module Make (_ : Conf.S with type 'a io = 'a io) : sig
-    val published : Logical_key.t -> Manifest.t option io
-    val write : Logical_key.t -> Manifest.t -> unit io
-    val delete : Logical_key.t -> unit io
-  end
-end
-
-module type CHECKOUT = sig
-  type 'a io
-
-  module Make (_ : Conf.S with type 'a io = 'a io) : sig
-    val create_dir : Logical_key.t -> unit io
-
-    val list_children :
-      prefix:Logical_key.t -> unit -> (listed list * string list) io
-  end
-end
-
-module type CONTENT = sig
-  type 'a io
-
-  module Make (_ : Conf.S with type 'a io = 'a io) : sig
-    val assemble_to : Logical_key.t -> dst_path:string -> unit io
-
-    val fetch_range :
-      Logical_key.t -> dst_path:string -> offset:int -> length:int -> int io
-  end
-end
-
 (** One end of the copy, named the way the command's caller named it. *)
 type endpoint = Local of string | Domain of string
 
@@ -170,13 +79,13 @@ module Over
     (Io : Io.S)
     (_ : Fs.S with type 'a io := 'a Io.t)
     (_ : Syscalls.S with type 'a io := 'a Io.t)
-    (_ : FOLDER_IDS with type 'a io := 'a Io.t)
-    (_ : OBJECTS with type 'a io := 'a Io.t)
-    (_ : MANIFESTS with type 'a io := 'a Io.t)
-    (_ : JOURNAL with type 'a io := 'a Io.t)
-    (_ : MIRROR with type 'a io := 'a Io.t)
-    (_ : CHECKOUT with type 'a io := 'a Io.t)
-    (_ : CONTENT with type 'a io := 'a Io.t) : sig
+    (_ : Folder_ids.S with type 'a io := 'a Io.t)
+    (_ : Remote.OVER with type 'a io := 'a Io.t)
+    (_ : Store.INODE with type 'a io := 'a Io.t)
+    (_ : File_store.OVER with type 'a io := 'a Io.t)
+    (_ : Manifests.OVER with type 'a io := 'a Io.t)
+    (_ : Checkout.OVER with type 'a io := 'a Io.t)
+    (_ : Data.OVER with type 'a io := 'a Io.t) : sig
   module Make (C : Conf.S with type 'a io = 'a Io.t) : sig
     (** Copy every entry under [src] to [dst], deciding per entry what that
         comes to. [move] drops each source once its destination is published,

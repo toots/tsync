@@ -41,42 +41,9 @@ type op =
     dropped or the log overflowed. *)
 type stats = { queued : int; in_flight : int; degraded : bool }
 
-(** The durable queues this composite drains through: one per target, and the
-    process-wide settling every one of them registers with. *)
-module type QUEUES = sig
-  type 'a io
-
-  val settle_all : ?timeout:float -> unit -> unit io
-  val register_settle : (unit -> unit io) -> unit
-
-  module Make (J : Durable_queue.JOB) : sig
-    type t
-
-    module Records : sig
-      type t
-
-      val create : dir:string -> t
-    end
-
-    val ordered :
-      ?max_queued:int ->
-      name:string ->
-      log:Records.t ->
-      classify:(exn -> Retry.kind) ->
-      poison:Durable_queue.poison ->
-      run:(J.t -> unit io) ->
-      unit ->
-      t
-
-    val post : ?id:string -> t -> J.t -> unit io
-    val start : ?recover:bool -> t -> unit
-    val stats : t -> Durable_queue.stats
-  end
-end
-
 module Over
     (Io : Io.S)
-    (_ : QUEUES with type 'a io := 'a Io.t)
+    (_ : Durable_queue.S with type 'a io := 'a Io.t)
     (_ : Lock.S with type 'a io := 'a Io.t) : sig
   module type Store = Backend.S with type 'a io := 'a Io.t
 

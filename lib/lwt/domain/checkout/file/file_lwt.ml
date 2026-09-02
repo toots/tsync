@@ -4,7 +4,7 @@ include File
    means: one that keeps the whole domain locally reads it as "the domain does
    not have this", while one that pulls a folder when asked reads it as "not
    fetched yet". Neither answer belongs here. *)
-module Over_tree (Ck : File.TREE with type 'a io := 'a Io_lwt.Core.t) =
+module Over_tree (Ck : Checkout.OVER with type 'a io := 'a Io_lwt.Core.t) =
   File.Over (Io_lwt.Core) (Io_lwt.Fs) (Io_lwt.Syscalls) (Io_lwt.Lock) (Wal_lwt)
     (Manifests_lwt)
     (Ck)
@@ -17,7 +17,7 @@ module Over = Over_tree (Checkout_lwt)
 (* The one place the store modules are built, so everything above takes them
    rather than knowing which they are. *)
 module Make_over
-    (Ck : File.TREE with type 'a io := 'a Io_lwt.Core.t)
+    (Ck : Checkout.OVER with type 'a io := 'a Io_lwt.Core.t)
     (C : Conf_lwt.S) =
 struct
   module O = Over_tree (Ck)

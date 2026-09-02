@@ -7,3 +7,9 @@ module Batched = struct
 end
 
 include Store.Over (Io_lwt.Core) (Batched)
+
+module Inode = struct
+  type pool = Io_lwt.Bounded.t
+
+  module Make (C : Conf_lwt.S) = Make (C) (Layout_lwt.Inode.Make (C))
+end

@@ -4,6 +4,10 @@
  (flags
   (:standard
    -open
+   Tsync_manifests
+   -open
+   Tsync_folder_ids
+   -open
    Tsync_logical_key
    -open
    Tsync_manifest
@@ -16,6 +20,8 @@
  (name tsync_filing)
  (public_name tsync-libs.filing)
  (libraries
+  tsync_manifests
+  tsync_folder_ids
   tsync_logical_key
   tsync_manifest
   tsync_inode_tree

@@ -12,21 +12,10 @@
 
 open Sweep
 
-(** The staged tree, for the one question this asks of it: which bodies are
-    still named. *)
-module type STAGED = sig
-  type 'a io
-
-  module Make (_ : Conf.S with type 'a io = 'a io) : sig
-    val root : unit -> string
-    val uuids : unit -> string list io
-  end
-end
-
 module Over
     (Io : Io.S)
     (Files : Fs.S with type 'a io := 'a Io.t)
-    (Staged : STAGED with type 'a io := 'a Io.t) =
+    (Staged : Staged_manifest.OVER with type 'a io := 'a Io.t) =
 struct
   open Io_syntax.Make (Io)
 

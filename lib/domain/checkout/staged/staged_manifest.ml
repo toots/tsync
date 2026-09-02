@@ -149,6 +149,46 @@ let staged_of_string body =
 
 let sidecar_path = Cache_layout.staged_manifest_path
 
+module type S = sig
+  type 'a io
+
+    val root : unit -> string
+
+  val path : Logical_key.t -> string
+  val exists : Logical_key.t -> bool io
+
+    val read : Logical_key.t -> state option io
+
+    val read_edits : Logical_key.t -> staged option io
+
+    val write : Logical_key.t -> staged -> unit io
+
+    val commit : Logical_key.t -> staged -> Manifest.t -> unit io
+
+  val delete : Logical_key.t -> unit io
+  val rename : src_key:Logical_key.t -> dst_key:Logical_key.t -> unit io
+
+    val fold :
+    rel_dir:string ->
+    deep:bool ->
+    ('a -> Logical_key.t -> staged -> 'a) ->
+    'a ->
+    'a io
+
+    val list : unit -> Logical_key.t list io
+
+    val uuids : unit -> string list io
+
+    val entries :
+    rel_dir:string -> deep:bool -> (Logical_key.t * staged) list io
+end
+
+module type OVER = sig
+  type 'a io
+
+  module Make (C : Conf.S with type 'a io = 'a io) : S with type 'a io := 'a io
+end
+
 module Over
     (Io : Io.S)
     (Fs : Cache_layout.FS with type 'a io := 'a Io.t)

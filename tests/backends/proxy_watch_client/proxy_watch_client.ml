@@ -28,6 +28,7 @@ module Fake_http = struct
           (),
         Bigstring.empty )
 
+  let call () ~headers:_ ~meth:_ ?body:_ uri = respond uri
   let call_retry () ~headers:_ ~meth:_ ?body:_ (_ : string) uri = respond uri
 
   let call_text () ~headers:_ ~meth:_ ?body:_ (_ : string) uri =

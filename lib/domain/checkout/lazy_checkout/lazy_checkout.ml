@@ -1,49 +1,8 @@
-(* What this needs below it: the tree it stands in front of, the store it reads a
-   folder from, and the two writers that record what came back. Prose for each
-   member lives with the module that implements it. *)
-module type TREE = sig
-  type 'a io
-
-  module Make (_ : Conf.S with type 'a io = 'a io) : sig
-    val rename : src_key:Logical_key.t -> dst_key:Logical_key.t -> unit io
-    val create_dir : Logical_key.t -> unit io
-    val delete_dir : Logical_key.t -> unit io
-
-    val list_children :
-      prefix:Logical_key.t -> unit -> (Checkout.listed list * string list) io
-
-    val list_tree : prefix:Logical_key.t -> unit -> Checkout.listed list io
-  end
-end
-
 module type PULL = sig
   type 'a io
 
   module Make (_ : Conf.S with type 'a io = 'a io) : sig
     val children : folder_id:string -> unit -> Inode_tree.entry list io
-  end
-end
-
-module type FILING = sig
-  type 'a io
-
-  module Make (_ : Conf.S with type 'a io = 'a io) : sig
-    val record : parent:Logical_key.t -> Inode_tree.entry -> Logical_key.t io
-  end
-end
-
-module type FOLDERS = sig
-  type 'a io
-
-  val lookup_id :
-    cache_root:string -> domain_name:string -> Logical_key.t -> string option io
-end
-
-module type MANIFESTS = sig
-  type 'a io
-
-  module Make (_ : Conf.S with type 'a io = 'a io) : sig
-    val delete : Logical_key.t -> unit io
   end
 end
 
@@ -55,11 +14,11 @@ end
    the two are implementations a caller picks between rather than a flag. *)
 module Over
     (Io : Io.S)
-    (Ck : TREE with type 'a io := 'a Io.t)
+    (Ck : Checkout.OVER with type 'a io := 'a Io.t)
     (P : PULL with type 'a io := 'a Io.t)
-    (Fl : FILING with type 'a io := 'a Io.t)
-    (Fi : FOLDERS with type 'a io := 'a Io.t)
-    (Mf : MANIFESTS with type 'a io := 'a Io.t) =
+    (Fl : Filing.OVER with type 'a io := 'a Io.t)
+    (Fi : Folder_ids.S with type 'a io := 'a Io.t)
+    (Mf : Manifests.OVER with type 'a io := 'a Io.t) =
 struct
   open Io_syntax.Make (Io)
 
@@ -83,6 +42,8 @@ struct
     let create_dir = T.create_dir
     let delete_dir = T.delete_dir
     let list_tree = T.list_tree
+    let walk = T.walk
+    let ensure_root = T.ensure_root
 
     let folder_id prefix =
       if Logical_key.equal prefix Lk.root then

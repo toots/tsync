@@ -91,6 +91,7 @@ module R = struct
 
   let fetch_manifest ~key:_ () = Lwt.return None
   let fast_read = false
+  let known_chunk_count () = 0
 end
 
 module D = Data_lwt.Make (C) (R)

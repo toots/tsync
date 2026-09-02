@@ -20,17 +20,7 @@ let describe ~chunk_key ~store = function
       Printf.sprintf "LOST  %s on %s (no store holds these bytes)" chunk_key
         store
 
-(** The chunks a store filed as not holding what their names say. *)
-module type CORRUPTION = sig
-  type 'a io
-
-  module Make (_ : Conf.S with type 'a io = 'a io) : sig
-    val list : unit -> Corruption.report io
-    val invalidate : unit -> unit
-  end
-end
-
-module Over (Io : Io.S) (Markers : CORRUPTION with type 'a io := 'a Io.t) =
+module Over (Io : Io.S) (Markers : Corruption.OVER with type 'a io := 'a Io.t) =
 struct
   open Io_syntax.Make (Io)
 

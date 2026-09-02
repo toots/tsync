@@ -1,35 +1,6 @@
-(* The client this driver speaks through: {!Http_client.Make}'s result, of
-   which it uses four members. The predicates that read a response are pure and
-   come from {!Http_client} itself. *)
-module type HTTP = sig
-  type 'a io
-  type t
-
-  val create :
-    name:string -> timeout:float -> classify:(exn -> Retry.kind) -> unit -> t
-
-  val call_retry :
-    t ->
-    headers:(unit -> Cohttp.Header.t io) ->
-    meth:Cohttp.Code.meth ->
-    ?body:Bigstring.t ->
-    string ->
-    Uri.t ->
-    (Cohttp.Response.t * Bigstring.t) io
-
-  val call_text :
-    t ->
-    headers:(unit -> Cohttp.Header.t io) ->
-    meth:Cohttp.Code.meth ->
-    ?body:Bigstring.t ->
-    string ->
-    Uri.t ->
-    (Cohttp.Response.t * string) io
-end
-
 module Over
     (Io : Io.S)
-    (Hc : HTTP with type 'a io := 'a Io.t)
+    (Hc : Http_client.S with type 'a io := 'a Io.t)
     (Clock : Clock.S with type 'a io := 'a Io.t) =
 struct
   module type Store = Backend.S with type 'a io := 'a Io.t

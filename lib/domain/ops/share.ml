@@ -1,26 +1,10 @@
 exception Share_unavailable of string
 exception Share_not_found of string
 
-(** The key scheme a caller holding real paths wants. *)
-module type INODE_LAYOUT = sig
-  type 'a io
-
-  module Make (_ : Conf.S with type 'a io = 'a io) :
-    Layout.S with type 'a io := 'a io
-end
-
-(** The folder id this client already records, if any. *)
-module type FOLDER_IDS = sig
-  type 'a io
-
-  val lookup_id :
-    cache_root:string -> domain_name:string -> Logical_key.t -> string option io
-end
-
 module Over
     (Io : Io.S)
-    (Folder_ids : FOLDER_IDS with type 'a io := 'a Io.t)
-    (Inode_layout : INODE_LAYOUT with type 'a io := 'a Io.t) =
+    (Folder_ids : Folder_ids.S with type 'a io := 'a Io.t)
+    (Inode_layout : Layout.OVER with type 'a io := 'a Io.t) =
 struct
   open Io_syntax.Make (Io)
   let return_ok x = Io.return (Ok x)

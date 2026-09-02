@@ -79,23 +79,144 @@ val release : string -> unit
     the default minute. *)
 val set_stall_warning_interval : float -> unit
 
-module Make
-    (Io : Io.S)
-    (Clock : Clock.S with type 'a io := 'a Io.t)
-    (Lock : Lock.S with type 'a io := 'a Io.t)
-    (Files : FILES with type 'a io := 'a Io.t) : sig
+module type RECORDS = sig
+  type 'a io
+  type job
+  type t
+
+  (** [dir] should be per target and per domain: the records name one
+      target's work, and a shared directory would replay one domain's
+      against another's. *)
+  val create : dir:string -> t
+
+  val write : t -> id:string -> job -> unit io
+
+  (** Read, transform, write back. A record that is already gone is not an
+      error: whatever owns it may have finished first. *)
+  val update : t -> string -> (job -> job) -> unit io
+
+  (** The work is done and the record is no longer owed. *)
+  val complete : t -> string -> unit io
+
+  (** Everything on disk, in the order it was recorded.
+
+      [wanted] is asked of each id before its body is opened, so a caller
+      that will discard most of what it finds says so here rather than
+      after: a sweep over a large backlog is otherwise one open per record,
+      all but a few of them wasted. *)
+  val list : ?wanted:(string -> bool) -> t -> (string * job) list io
+
+  (** Records {!list} discarded for being unreadable: work this log's owner
+      owes that no replay puts back, which is what a mirror repairs. Counted
+      on the log rather than returned, since the reader that discards one
+      need not be the one that reports on it. *)
+  val dropped : t -> int
+end
+
+module type QUEUE = sig
+  type 'a io
+  type job
+  (** {1 The records} *)
+
+  module Records : RECORDS with type 'a io := 'a io and type job := job
+
+  (** {1 Draining it} *)
+
+  type t
+
+  (** One worker, jobs in the order recorded. A job stays at the head until it
+      is taken, so a failure that can clear is waited out rather than losing
+      the write and letting what follows overtake it. *)
+  val ordered :
+    ?max_queued:int ->
+    name:string ->
+    log:Records.t ->
+    classify:(exn -> Retry.kind) ->
+    poison:poison ->
+    run:(job -> unit io) ->
+    unit ->
+    t
+
+  (** [workers] jobs at once, at most one per [key]: posting a job whose key
+      is already busy cancels the running one and takes its place, so a file
+      rewritten while its upload is in flight uploads once, from the newer
+      bytes ([run] is handed the flag to poll for that).
+
+      A transient failure requeues at the back rather than the head, holding
+      the head being what would stall every other key behind one that is
+      failing; [weight] is what {!stats.bytes} sums. *)
+  val keyed :
+    ?max_queued:int ->
+    ?workers:int ->
+    ?weight:(job -> int64) ->
+    name:string ->
+    log:Records.t ->
+    key:(job -> string) ->
+    classify:(exn -> Retry.kind) ->
+    poison:poison ->
+    run:(id:string -> job -> cancel:bool ref -> unit io) ->
+    unit ->
+    t
+
+  (** Record [job], then queue it. Returns once it is durable, not once it has
+      run — that is the point. *)
+  val post : ?id:string -> t -> job -> unit io
+
+  (** Take up a job already written to the log, for a caller that owns the
+      durable half itself: {!post} is this plus the write. Idempotent on [id],
+      so a record offered twice is queued once. *)
+  val adopt : t -> id:string -> job -> unit io
+
+  (** Run the workers.
+
+      [recover] reads the log first, and again on every {!rescan_all}, so work
+      a process left behind is picked up without waiting for a restart.
+      Without it the log is never read and this queue's records are only ever
+      its own, which is what a one-shot command wants: it claims the directory
+      for as long as it lives, and a recovering queue elsewhere leaves it
+      alone until it exits. *)
+  val start : ?recover:bool -> t -> unit
+
+  (** Cancel the job running or queued under [key], and drop any replacement
+      waiting behind it. [false] when nothing is owed for that key. Only
+      meaningful for {!keyed}. *)
+  val cancel : t -> string -> bool
+
+  (** Hold the workers without losing what is queued. A stop still drains. *)
+  val set_paused : t -> bool -> unit
+
+  val paused : t -> bool
+
+  (** Stop the workers and wait for them, leaving anything unstarted on disk.
+  *)
+  val stop : t -> unit io
+
+  val stats : t -> stats
+
+  (** The jobs a worker is running right now. The jobs themselves, not their
+      keys: a caller wanting the key derives it the way it was derived to post
+      them, rather than taking a rendered one back apart. *)
+  val in_flight : t -> job list
+
+  (** Distinct keys still owed, running or queued. *)
+  val owed : t -> int
+end
+
+module type S = sig
+  type 'a io
+
   (** Wait for every queue in this process to catch up.
 
       Stops waiting on a queue that has started failing, and on everything after
       [timeout]: what is left is on disk and resumes on the next start, so
       holding a command open for a store that is down buys nothing. *)
-  val settle_all : ?timeout:float -> unit -> unit Io.t
+  val settle_all : ?timeout:float -> unit -> unit io
 
   (** Also wait for this, under the same [timeout]. For background work a
       queue's owner runs beside it without recording: not owed, but still in
       flight, and a caller that has waited for quiet should not have it land
       afterwards. *)
-  val register_settle : (unit -> unit Io.t) -> unit
+  val register_settle : (unit -> unit io) -> unit
 
   (** Have every recovering queue in this process look at its log again.
 
@@ -104,122 +225,15 @@ module Make
       would carry those until it restarts. Each queue reads only a log no live
       process claims, so records another process is running from memory are left
       to it. *)
-  val rescan_all : unit -> unit Io.t
+  val rescan_all : unit -> unit io
 
-  module Make (J : JOB) : sig
-    (** {1 The records} *)
-
-    module Records : sig
-      type t
-
-      (** [dir] should be per target and per domain: the records name one
-          target's work, and a shared directory would replay one domain's
-          against another's. *)
-      val create : dir:string -> t
-
-      val write : t -> id:string -> J.t -> unit Io.t
-
-      (** Read, transform, write back. A record that is already gone is not an
-          error: whatever owns it may have finished first. *)
-      val update : t -> string -> (J.t -> J.t) -> unit Io.t
-
-      (** The work is done and the record is no longer owed. *)
-      val complete : t -> string -> unit Io.t
-
-      (** Everything on disk, in the order it was recorded.
-
-          [wanted] is asked of each id before its body is opened, so a caller
-          that will discard most of what it finds says so here rather than
-          after: a sweep over a large backlog is otherwise one open per record,
-          all but a few of them wasted. *)
-      val list : ?wanted:(string -> bool) -> t -> (string * J.t) list Io.t
-
-      (** Records {!list} discarded for being unreadable: work this log's owner
-          owes that no replay puts back, which is what a mirror repairs. Counted
-          on the log rather than returned, since the reader that discards one
-          need not be the one that reports on it. *)
-      val dropped : t -> int
-    end
-
-    (** {1 Draining it} *)
-
-    type t
-
-    (** One worker, jobs in the order recorded. A job stays at the head until it
-        is taken, so a failure that can clear is waited out rather than losing
-        the write and letting what follows overtake it. *)
-    val ordered :
-      ?max_queued:int ->
-      name:string ->
-      log:Records.t ->
-      classify:(exn -> Retry.kind) ->
-      poison:poison ->
-      run:(J.t -> unit Io.t) ->
-      unit ->
-      t
-
-    (** [workers] jobs at once, at most one per [key]: posting a job whose key
-        is already busy cancels the running one and takes its place, so a file
-        rewritten while its upload is in flight uploads once, from the newer
-        bytes ([run] is handed the flag to poll for that).
-
-        A transient failure requeues at the back rather than the head, holding
-        the head being what would stall every other key behind one that is
-        failing; [weight] is what {!stats.bytes} sums. *)
-    val keyed :
-      ?max_queued:int ->
-      ?workers:int ->
-      ?weight:(J.t -> int64) ->
-      name:string ->
-      log:Records.t ->
-      key:(J.t -> string) ->
-      classify:(exn -> Retry.kind) ->
-      poison:poison ->
-      run:(id:string -> J.t -> cancel:bool ref -> unit Io.t) ->
-      unit ->
-      t
-
-    (** Record [job], then queue it. Returns once it is durable, not once it has
-        run — that is the point. *)
-    val post : ?id:string -> t -> J.t -> unit Io.t
-
-    (** Take up a job already written to the log, for a caller that owns the
-        durable half itself: {!post} is this plus the write. Idempotent on [id],
-        so a record offered twice is queued once. *)
-    val adopt : t -> id:string -> J.t -> unit Io.t
-
-    (** Run the workers.
-
-        [recover] reads the log first, and again on every {!rescan_all}, so work
-        a process left behind is picked up without waiting for a restart.
-        Without it the log is never read and this queue's records are only ever
-        its own, which is what a one-shot command wants: it claims the directory
-        for as long as it lives, and a recovering queue elsewhere leaves it
-        alone until it exits. *)
-    val start : ?recover:bool -> t -> unit
-
-    (** Cancel the job running or queued under [key], and drop any replacement
-        waiting behind it. [false] when nothing is owed for that key. Only
-        meaningful for {!keyed}. *)
-    val cancel : t -> string -> bool
-
-    (** Hold the workers without losing what is queued. A stop still drains. *)
-    val set_paused : t -> bool -> unit
-
-    val paused : t -> bool
-
-    (** Stop the workers and wait for them, leaving anything unstarted on disk.
-    *)
-    val stop : t -> unit Io.t
-
-    val stats : t -> stats
-
-    (** The jobs a worker is running right now. The jobs themselves, not their
-        keys: a caller wanting the key derives it the way it was derived to post
-        them, rather than taking a rendered one back apart. *)
-    val in_flight : t -> J.t list
-
-    (** Distinct keys still owed, running or queued. *)
-    val owed : t -> int
-  end
+  module Make (J : JOB) :
+    QUEUE with type 'a io := 'a io and type job := J.t
 end
+
+module Make
+    (Io : Io.S)
+    (Clock : Clock.S with type 'a io := 'a Io.t)
+    (Lock : Lock.S with type 'a io := 'a Io.t)
+    (Files : FILES with type 'a io := 'a Io.t) :
+  S with type 'a io := 'a Io.t

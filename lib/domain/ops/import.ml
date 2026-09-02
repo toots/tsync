@@ -11,87 +11,17 @@ type summary = {
   failed : int;
 }
 
-(** The id naming a folder's own namespace, minted if this client has none. *)
-module type FOLDER_IDS = sig
-  type 'a io
-
-  val ensure_id :
-    cache_root:string -> domain_name:string -> Logical_key.t -> string io
-end
-
-(** Sending a file's bytes, which is what an import does with each one. *)
-module type OBJECTS = sig
-  type 'a io
-
-  module Make (_ : Conf.S with type 'a io = 'a io) : sig
-    val chunk_size : unit -> int io
-
-    val upload :
-      key:Logical_key.t ->
-      src_path:string ->
-      mtime:float ->
-      chunk_size:int ->
-      ?cancel:bool ref ->
-      ?on_progress:(bytes:int -> sent:bool -> unit) ->
-      unit ->
-      Manifest.t io
-  end
-end
-
-(** Publishing a manifest and the folder marker above it. *)
-module type MANIFESTS = sig
-  type 'a io
-
-  module Make (_ : Conf.S with type 'a io = 'a io) : sig
-    val put_manifest : key:Logical_key.t -> data:Bigstring.t -> unit io
-    val put_folder_marker : key:Logical_key.t -> unit io
-  end
-end
-
-(** The journal an import records itself in, and the cursor behind it. *)
-module type JOURNAL = sig
-  type 'a io
-
-  module Make (_ : Conf.S with type 'a io = 'a io) : sig
-    val head_manifest_opt : key:Logical_key.t -> Backend.file_entry option io
-
-    val write_journal_entry_body :
-      ?entry_key:Journal.Entry_key.t -> Bigstring.t -> Journal.Entry_key.t io
-
-    val bump_cursor : Journal.Entry_key.t -> unit io
-    val flush_cursor : unit -> unit io
-  end
-end
-
-(** The local mirror of what has been published, and the checkout beside it. *)
-module type MIRROR = sig
-  type 'a io
-
-  module Make (_ : Conf.S with type 'a io = 'a io) : sig
-    val published : Logical_key.t -> Manifest.t option io
-    val write : Logical_key.t -> Manifest.t -> unit io
-  end
-end
-
-module type CHECKOUT = sig
-  type 'a io
-
-  module Make (_ : Conf.S with type 'a io = 'a io) : sig
-    val create_dir : Logical_key.t -> unit io
-  end
-end
-
 module Over
     (Io : Io.S)
     (Files : Fs.S with type 'a io := 'a Io.t)
     (Syscalls : Syscalls.S with type 'a io := 'a Io.t)
     (Spool : Listing.SPOOL with type 'a io := 'a Io.t)
-    (Folder_ids : FOLDER_IDS with type 'a io := 'a Io.t)
-    (Objects : OBJECTS with type 'a io := 'a Io.t)
-    (Manifests : MANIFESTS with type 'a io := 'a Io.t)
-    (Cursor_of : JOURNAL with type 'a io := 'a Io.t)
-    (Mirror : MIRROR with type 'a io := 'a Io.t)
-    (Checkout : CHECKOUT with type 'a io := 'a Io.t) =
+    (Folder_ids : Folder_ids.S with type 'a io := 'a Io.t)
+    (Objects : Remote.OVER with type 'a io := 'a Io.t)
+    (Store : Store.INODE with type 'a io := 'a Io.t)
+    (Cursor_of : File_store.OVER with type 'a io := 'a Io.t)
+    (Mirror : Manifests.OVER with type 'a io := 'a Io.t)
+    (Checkout : Checkout.OVER with type 'a io := 'a Io.t) =
 struct
   module Listing = struct
     include Listing
@@ -105,7 +35,7 @@ struct
     module Lk = Logical_key.Make (C)
     module R = Objects.Make (C)
     module Cursor = Cursor_of.Make (C)
-    module St = Manifests.Make (C)
+    module St = Store.Make (C)
     module Mf = Mirror.Make (C)
     module Ck = Checkout.Make (C)
 

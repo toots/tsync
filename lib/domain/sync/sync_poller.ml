@@ -2,20 +2,10 @@
    {!Replay}, which [tsync sync] calls too. Even the when is mostly the store's,
    which says how long a wait for its cursor is worth. *)
 
-(* What this needs below it. *)
-module type JOURNAL = sig
-  type 'a io
-
-  module Make (_ : Conf.S with type 'a io = 'a io) : sig
-    val fetch_cursor : unit -> Journal.Entry_key.t option io
-    val wait_cursor_change : Journal.Entry_key.t option -> unit io
-  end
-end
-
 module Over
     (Io : Io.S)
     (Clock : Clock.S with type 'a io := 'a Io.t)
-    (Js : JOURNAL with type 'a io := 'a Io.t)
+    (Js : File_store.OVER with type 'a io := 'a Io.t)
     (Rp : sig
       module Make
           (_ : Conf.S with type 'a io = 'a Io.t)
