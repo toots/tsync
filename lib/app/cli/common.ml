@@ -18,13 +18,37 @@ let mount_point_of = Conf_parsing.mount_point_of
 let frontend_names = Daemons.frontend_names
 let resolve_frontend = Daemons.frontend_for
 
+let load_config () = Conf_parsing.load runtime_paths.Runtime.config_path
+
+let domain_names cfg =
+  List.map
+    (fun (d : Conf_parsing.domain) -> d.Conf_parsing.name)
+    cfg.Conf_parsing.domains
+
+(* The config is read when the shell asks rather than when the term is built,
+   a term being built before the command knows it will need one, and a caller
+   with no config gets no names rather than an error on every keystroke. *)
+let complete_domain_name _ ~token =
+  match domain_names (load_config ()) with
+    | names ->
+        Ok
+          (List.filter_map
+             (fun n ->
+               if String.starts_with ~prefix:token n then
+                 Some (Arg.Completion.string n)
+               else None)
+             names)
+    | exception _ -> Ok []
+
+let domain_name_conv =
+  Arg.Conv.of_conv Arg.string
+    ~completion:(Arg.Completion.make complete_domain_name)
+
 let domain_arg =
   Arg.(
     value
-    & opt (some string) None
+    & opt (some domain_name_conv) None
     & info ["domain"] ~docv:"NAME" ~doc:"Domain name (default: from config)")
-
-let load_config () = Conf_parsing.load runtime_paths.Runtime.config_path
 
 (* Conduit picks its TLS backend once per process, so it is set here rather
    than inside a per-domain constructor. *)
