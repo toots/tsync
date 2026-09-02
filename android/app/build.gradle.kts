@@ -26,8 +26,30 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    // One key for every build that leaves CI, or a phone refuses each one as an
+    // update to the last: AGP mints a debug key per runner, and the runners are
+    // ephemeral. The keystore reaches a run through scripts/setup_android_signing.sh;
+    // without it a release build falls back to the local debug key, so a build
+    // on a developer's machine still installs over its predecessors there.
+    val keystore = System.getenv("ANDROID_KEYSTORE")?.let(::file)?.takeIf { it.isFile }
+    signingConfigs {
+        if (keystore != null) {
+            create("release") {
+                storeFile = keystore
+                storePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+                keyAlias = "tsync"
+                keyPassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
-        release { isMinifyEnabled = false }
+        release {
+            isMinifyEnabled = false
+            signingConfig =
+                if (keystore != null) signingConfigs.getByName("release")
+                else signingConfigs.getByName("debug")
+        }
     }
 
     compileOptions {
