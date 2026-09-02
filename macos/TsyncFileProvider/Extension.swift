@@ -338,7 +338,7 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension,
                 }
                 try await client.delete(ref: ref, isDirectory: isDirectory)
                 completionHandler(nil)
-            } catch let error as DaemonError where error.code == "not_found" {
+            } catch let error as DaemonError where error.isNotFound {
                 // Already gone remotely: the outcome that was wanted.
                 completionHandler(nil)
             } catch is CancellationError {
@@ -400,12 +400,18 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension,
     /// one stat and never a listing. A directory has no composable reference —
     /// only the daemon assigns folder ids — which is why the caller asks the
     /// daemon to make one instead and takes back whatever it already had.
+    ///
+    /// Only "gone" means absent. Anything else propagates: read as absent, a
+    /// daemon hiccup during a reimport re-uploads the file.
     private func existingFile(in parent: NSFileProviderItemIdentifier,
                               named name: String) async throws -> TsyncItem? {
-        guard let child = ItemID.file(in: parent, named: name),
-              let item = try? await client.stat(ItemID.wire(child.identifier))
-        else { return nil }
-        return TsyncItem.make(item, readOnly: readOnly)
+        guard let child = ItemID.file(in: parent, named: name) else { return nil }
+        do {
+            let item = try await client.stat(ItemID.wire(child.identifier))
+            return TsyncItem.make(item, readOnly: readOnly)
+        } catch let error as DaemonError where error.isNotFound {
+            return nil
+        }
     }
 
     /// Take our own copy: the system unlinks the URL it gave us once this call
