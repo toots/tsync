@@ -12,11 +12,23 @@ let trash_list domain =
      let+ paths = T.list () in
      List.iter (Printf.printf "%s\n") paths)
 
-let trash_restore path domain =
+(* Resolving a deleted file is syntax over the configured roots and never a
+   stat, so a path to something already gone still names where it was. *)
+let trash_restore arg domain =
+  let cfg = load_config () in
+  let place =
+    match Location.place ?domain cfg arg with
+      | Ok p -> p
+      | Error msg ->
+          Printf.eprintf "%s\n" msg;
+          exit 1
+  in
+  let path = place.Location.rel in
+  let domain = Some place.Location.name in
   let code =
     run_lwt
       (let open Lwt.Syntax in
-       let (module C : Conf_lwt.S) = load_conf ?domain () in
+       let (module C : Conf_lwt.S) = make_conf ?domain cfg in
        let module T = Trash_lwt.Make (C) in
        let+ outcome = T.restore path in
        match outcome with
@@ -40,7 +52,11 @@ let trash_restore path domain =
 
 let cmd : unit Cmd.t =
   let path_arg =
-    Arg.(value & pos 0 (some string) None & info [] ~docv:"PATH")
+    Arg.(
+      value
+      & pos 0 (some (Location.conv `In_domain)) None
+      & info [] ~docv:"PATH"
+          ~doc:"A deleted file, domain-relative or as $(b,DOMAIN:/path).")
   in
   let restore_arg =
     Arg.(
@@ -55,11 +71,21 @@ let cmd : unit Cmd.t =
       value & flag
       & info ["purge"] ~doc:"Delete every version of $(i,PATH) from the trash.")
   in
-  let purge path domain =
+  let purge arg domain =
+    let cfg = load_config () in
+    let place =
+      match Location.place ?domain cfg arg with
+        | Ok p -> p
+        | Error msg ->
+            Printf.eprintf "%s\n" msg;
+            exit 1
+    in
+    let path = place.Location.rel in
+    let domain = Some place.Location.name in
     let code =
       run_lwt
         (let open Lwt.Syntax in
-         let (module C : Conf_lwt.S) = load_conf ?domain () in
+         let (module C : Conf_lwt.S) = make_conf ?domain cfg in
          let module E = Expire_lwt.Make (C) in
          let+ outcome = E.purge_trashed ~path () in
          match outcome with
