@@ -81,19 +81,24 @@ module type FS = sig
   val real_dir_name : string -> string -> string io
 end
 
-module Make
-    (Io : Io.S)
-    (_ : Fs.S with type 'a io := 'a Io.t)
-    (_ : Syscalls.S with type 'a io := 'a Io.t) : sig
+module type S = sig
+  type 'a io
+
   (** Record what a directory stored under a handle is really called, unless it
       is already recorded. Both trees that mirror real paths keep these. *)
-  val record_dir_name : string -> string -> unit Io.t
+  val record_dir_name : string -> string -> unit io
 
   (** [real_dir_name dir_path name] is [name] itself, or what the marker in
       [dir_path] records when [name] is a handle. *)
-  val real_dir_name : string -> string -> string Io.t
+  val real_dir_name : string -> string -> string io
 
   (** Drop everything rebuildable, for a resync that restates the domain from
       the backend. Staged edits are kept: nothing else holds those bytes. *)
-  val clear : cache_root:string -> domain_name:string -> unit Io.t
+  val clear : cache_root:string -> domain_name:string -> unit io
 end
+
+module Make
+    (Io : Io.S)
+    (_ : Fs.S with type 'a io := 'a Io.t)
+    (_ : Syscalls.S with type 'a io := 'a Io.t) :
+  S with type 'a io := 'a Io.t

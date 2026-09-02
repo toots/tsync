@@ -6,6 +6,8 @@
  (flags
   (:standard
    -open
+   Tsync_store
+   -open
    Tsync_stdlib
    -open
    Tsync_logical_key
@@ -24,6 +26,7 @@
  (name tsync_file_store)
  (public_name tsync-libs.file_store)
  (libraries
+  tsync_store
   tsync_stdlib
   tsync_logical_key
   tsync_journal

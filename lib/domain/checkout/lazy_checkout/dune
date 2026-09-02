@@ -6,6 +6,12 @@
  (flags
   (:standard
    -open
+   Tsync_filing
+   -open
+   Tsync_folder_ids
+   -open
+   Tsync_manifests
+   -open
    Tsync_checkout
    -open
    Tsync_logical_key
@@ -20,6 +26,9 @@
  (name tsync_lazy_checkout)
  (public_name tsync-libs.lazy_checkout)
  (libraries
+  tsync_filing
+  tsync_folder_ids
+  tsync_manifests
   tsync_checkout
   tsync_logical_key
   tsync_manifest

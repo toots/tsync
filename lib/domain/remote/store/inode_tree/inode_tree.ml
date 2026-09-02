@@ -10,33 +10,52 @@ type entry = { bkey : Stored_key.t; body : body }
 type unusable = [ `Unreadable of exn | `Unclassifiable of exn ]
 type on_unusable = [ `Fail | `Skip of Stored_key.t -> unusable -> unit ]
 
-(** What reading the tree needs of the store under it: the four ways an object
-    in a folder's namespace is reached. *)
-module type STORE = sig
+module type S = sig
   type 'a io
   type pool
 
-  module Make (_ : Conf.S with type 'a io = 'a io) : sig
-    val get_objects :
-      ?slots:pool ->
-      entries:Backend.file_entry list ->
-      unit ->
-      (Stored_key.t * string option) list io
+    val namespace_prefix : string -> Stored_key.t
 
-    val list_namespace : folder_id:string -> Backend.file_entry list io
-    val get_object : bkey:Stored_key.t -> string io
-    val put_raw : bkey:Stored_key.t -> data:string -> unit io
-  end
+    val children :
+    ?on_unusable:on_unusable ->
+    ?refresh_index:bool ->
+    ?on_index:(Stored_key.t -> unit) ->
+    ?slots:pool ->
+    folder_id:string ->
+    unit ->
+    entry list io
+
+    val fold_tree :
+    ?on_unusable:on_unusable ->
+    ?refresh_index:bool ->
+    ?on_index:(Stored_key.t -> unit) ->
+    ?slots:pool ->
+    folder_id:string ->
+    key:Logical_key.t ->
+    ('a -> Logical_key.t -> entry -> 'a io) ->
+    'a ->
+    'a io
+end
+
+module type OVER = sig
+  type 'a io
+  type pool
+
+  module Make (C : Conf.S with type 'a io = 'a io) : S with type 'a io := 'a io and type pool = pool
 end
 
 module Over
     (Io : Io.S)
     (Pools : Bounded.S with type 'a io := 'a Io.t)
-    (Tree_store : STORE with type 'a io := 'a Io.t and type pool := Pools.t) =
+    (Tree_store : Store.INODE with type 'a io := 'a Io.t and type pool := Pools.t) =
 struct
+  type pool = Pools.t
+
   open Io_syntax.Make (Io)
 
   module Make (C : Conf.S with type 'a io = 'a Io.t) = struct
+    type pool = Pools.t
+
     module St = Tree_store.Make (C)
 
     let namespace_prefix folder_id =

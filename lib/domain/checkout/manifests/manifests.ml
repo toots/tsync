@@ -7,20 +7,45 @@
 
 open Manifest
 
-(* What this needs of the staged half: the edits a client has over the
-   published manifest, if any. *)
-module type STAGED = sig
+module type S = sig
   type 'a io
 
-  module Make (_ : Conf.S with type 'a io = 'a io) : sig
-    val read_edits : Logical_key.t -> Staged_manifest.staged option io
-  end
+    val root : unit -> string
+
+    val path : Logical_key.t -> string
+
+    val ensure_parent : Logical_key.t -> unit io
+
+    val published : Logical_key.t -> Manifest.t option io
+
+    val write : Logical_key.t -> Manifest.t -> unit io
+
+  val delete : Logical_key.t -> unit io
+
+    val current :
+    Logical_key.t ->
+    [ `Staged of Staged_manifest.staged * Manifest.t option
+    | `Published of Manifest.t ]
+    option
+    io
+
+    val forget : Logical_key.t -> unit
+
+    val memo_size : unit -> int
+end
+
+module type OVER = sig
+  type 'a io
+
+    val ensure_dirs : string -> string -> unit io
+
+  module Make (C : Conf.S with type 'a io = 'a io) : S with type 'a io := 'a io
 end
 
 module Over
     (Io : Io.S)
     (F : Cache_layout.FS with type 'a io := 'a Io.t)
-    (Sm : STAGED with type 'a io := 'a Io.t) =
+    (Sm : Staged_manifest.OVER with type 'a io := 'a Io.t) =
 struct
   open Io_syntax.Make (Io)
 

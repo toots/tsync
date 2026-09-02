@@ -107,74 +107,22 @@ module type S = sig
   val fetch_manifest : key:Logical_key.t -> unit -> Manifest.t option io
 end
 
-(** The key scheme a caller holding real paths wants. *)
-module type INODE_LAYOUT = sig
+(** {!S} for whichever domain it is applied to: what a consumer takes. *)
+module type OVER = sig
   type 'a io
 
-  module Make (_ : Conf.S with type 'a io = 'a io) :
-    Layout.S with type 'a io := 'a io
-end
-
-(** Publishing a manifest and taking it back, which is all this does with one.
-*)
-module type MANIFESTS = sig
-  type 'a io
-
-  module Make
-      (_ : Conf.S with type 'a io = 'a io)
-      (_ : Layout.S with type 'a io := 'a io) : sig
-    val put_manifest : key:Logical_key.t -> data:Bigstring.t -> unit io
-
-    val get_manifest_state :
-      key:Logical_key.t -> [ `Body of string | `Absent | `Unresolved ] io
-
-    val delete_manifest : key:Logical_key.t -> unit io
-  end
-end
-
-(** Snapshotting what a write is about to replace. *)
-module type VERSIONS = sig
-  type 'a io
-
-  module Make
-      (_ : Conf.S with type 'a io = 'a io)
-      (_ : Layout.S with type 'a io := 'a io) : sig
-    val save_version : key:Logical_key.t -> unit io
-  end
-end
-
-(** Where a chunk is while a collection is under way, and what keeps one alive
-    across it. *)
-module type COLLECTION = sig
-  type 'a io
-
-  module Make (_ : Conf.S with type 'a io = 'a io) : sig
-    val get : string -> Bigstring.t io
-    val get_range : string -> offset:int -> length:int -> Bigstring.t io
-    val head : string -> Backend.file_entry option io
-    val promote_all : count:int -> (int -> string) -> unit io
-  end
-end
-
-(** Which chunks a store filed as not holding what their names say. *)
-module type CORRUPTION = sig
-  type 'a io
-
-  module Make (_ : Conf.S with type 'a io = 'a io) : sig
-    val is_marked : string -> bool io
-    val forget : string -> unit
-  end
+  module Make (_ : Conf.S with type 'a io = 'a io) : S with type 'a io := 'a io
 end
 
 module Over
     (Io : Io.S)
     (_ : Bounded.S with type 'a io := 'a Io.t)
     (_ : Syscalls.S with type 'a io := 'a Io.t)
-    (_ : INODE_LAYOUT with type 'a io := 'a Io.t)
-    (_ : MANIFESTS with type 'a io := 'a Io.t)
-    (_ : VERSIONS with type 'a io := 'a Io.t)
-    (_ : COLLECTION with type 'a io := 'a Io.t)
-    (_ : CORRUPTION with type 'a io := 'a Io.t) : sig
+    (_ : Layout.OVER with type 'a io := 'a Io.t)
+    (_ : Store.OVER with type 'a io := 'a Io.t)
+    (_ : History.OVER with type 'a io := 'a Io.t)
+    (_ : Collection.OVER with type 'a io := 'a Io.t)
+    (_ : Corruption.OVER with type 'a io := 'a Io.t) : sig
   (** Keys are mapped to backend keys through [L]. Callers holding real paths
       want {!Make}; {!Layout.Identity} serves callers that already hold backend
       keys. *)

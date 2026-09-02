@@ -1,62 +1,15 @@
 type status = Exported | Exported_symlink | Missing_data
 type summary = { exported : int; missing : int }
 
-(** Walking the backend's folder tree, which is how a whole domain is reached
-    from its root. *)
-module type TREE = sig
-  type 'a io
-  type pool
-
-  module Make (_ : Conf.S with type 'a io = 'a io) : sig
-    val fold_tree :
-      ?on_unusable:Inode_tree.on_unusable ->
-      ?refresh_index:bool ->
-      ?on_index:(Stored_key.t -> unit) ->
-      ?slots:pool ->
-      folder_id:string ->
-      key:Logical_key.t ->
-      ('a -> Logical_key.t -> Inode_tree.entry -> 'a io) ->
-      'a ->
-      'a io
-  end
-end
-
-(** What is already in the checkout, and what the staged half is holding. *)
-module type CHECKOUT = sig
-  type 'a io
-
-  module Make (_ : Conf.S with type 'a io = 'a io) : sig
-    val walk : unit -> string list io
-  end
-end
-
-module type STAGED = sig
-  type 'a io
-
-  module Make (_ : Conf.S with type 'a io = 'a io) : sig
-    val exists : Logical_key.t -> bool io
-  end
-end
-
-(** Putting a file's bytes somewhere, which is the export itself. Its own store
-    is wired in where the modules are built, since nothing here names one. *)
-module type CONTENT = sig
-  type 'a io
-
-  module Make (_ : Conf.S with type 'a io = 'a io) : sig
-    val published : Logical_key.t -> Manifest.t option io
-    val assemble_to : Logical_key.t -> dst_path:string -> unit io
-  end
-end
-
 module Over
     (Io : Io.S)
     (Files : Fs.S with type 'a io := 'a Io.t)
     (Syscalls : Syscalls.S with type 'a io := 'a Io.t)
-    (Tree : TREE with type 'a io := 'a Io.t)
-    (Checkout : CHECKOUT with type 'a io := 'a Io.t)
-    (Staged : STAGED with type 'a io := 'a Io.t)
-    (Content : CONTENT with type 'a io := 'a Io.t) =
+    (Tree : Inode_tree.OVER with type 'a io := 'a Io.t)
+    (Checkout : Checkout.OVER with type 'a io := 'a Io.t)
+    (Staged : Staged_manifest.OVER with type 'a io := 'a Io.t)
+    (Remote : Remote.OVER with type 'a io := 'a Io.t)
+    (Content : Data.OVER with type 'a io := 'a Io.t) =
 struct
   open Io_syntax.Make (Io)
 
@@ -65,7 +18,7 @@ struct
     module Tree = Tree.Make (C)
     module Mf = Checkout.Make (C)
     module Mfs = Staged.Make (C)
-    module D = Content.Make (C)
+    module D = Content.Make (C) (Remote.Make (C))
 
     (* Assembling through the read path covers unsynced staged edits, a partially
        cached file and a never-cached one alike. Only symlinks are special, having

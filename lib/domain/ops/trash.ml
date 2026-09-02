@@ -1,29 +1,9 @@
 type outcome = Restored | Not_in_trash | Parent_unknown
 
-(** The key scheme a caller holding real paths wants. *)
-module type INODE_LAYOUT = sig
-  type 'a io
-
-  module Make (_ : Conf.S with type 'a io = 'a io) :
-    Layout.S with type 'a io := 'a io
-end
-
-(** Writing and removing a folder marker by the key it already has. *)
-module type MANIFESTS = sig
-  type 'a io
-
-  module Make
-      (_ : Conf.S with type 'a io = 'a io)
-      (_ : Layout.S with type 'a io := 'a io) : sig
-    val put_raw : bkey:Stored_key.t -> data:string -> unit io
-    val delete_raw : bkey:Stored_key.t -> unit io
-  end
-end
-
 module Over
     (Io : Io.S)
-    (Inode_layout : INODE_LAYOUT with type 'a io := 'a Io.t)
-    (Manifests : MANIFESTS with type 'a io := 'a Io.t) =
+    (Inode_layout : Layout.OVER with type 'a io := 'a Io.t)
+    (Manifests : Store.OVER with type 'a io := 'a Io.t) =
 struct
   open Io_syntax.Make (Io)
 

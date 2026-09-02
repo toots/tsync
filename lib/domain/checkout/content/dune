@@ -7,6 +7,10 @@
  (flags
   (:standard
    -open
+   Tsync_manifests
+   -open
+   Tsync_remote
+   -open
    Tsync_logical_key
    -open
    Tsync_staged
@@ -33,6 +37,8 @@
  (name tsync_content)
  (public_name tsync-libs.content)
  (libraries
+  tsync_manifests
+  tsync_remote
   tsync_logical_key
   tsync_staged
   tsync_chunk_cache

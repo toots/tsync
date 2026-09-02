@@ -5,6 +5,8 @@
  (flags
   (:standard
    -open
+   Tsync_store
+   -open
    Tsync_logical_key
    -open
    Tsync_manifest
@@ -21,6 +23,7 @@
  (name tsync_inode_tree)
  (public_name tsync-libs.inode_tree)
  (libraries
+  tsync_store
   tsync_logical_key
   tsync_manifest
   tsync_retry

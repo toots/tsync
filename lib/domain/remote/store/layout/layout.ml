@@ -34,23 +34,14 @@ module type S = sig
   val ensure_folder_id : Logical_key.t -> string io
 end
 
-(** The local index of which directory carries which id. Two calls: what this
-    client already knows, and what it has just learned. *)
-module type FOLDER_IDS = sig
+(** The inode scheme for one domain, which is what a consumer takes. *)
+module type OVER = sig
   type 'a io
 
-  val lookup_id :
-    cache_root:string -> domain_name:string -> Logical_key.t -> string option io
-
-  val write :
-    cache_root:string ->
-    domain_name:string ->
-    Logical_key.t ->
-    Folder.marker ->
-    unit io
+  module Make (_ : Conf.S with type 'a io = 'a io) : S with type 'a io := 'a io
 end
 
-module Over (Io : Io.S) (Folder_ids : FOLDER_IDS with type 'a io := 'a Io.t) =
+module Over (Io : Io.S) (Folder_ids : Folder_ids.S with type 'a io := 'a Io.t) =
 struct
   open Io_syntax.Make (Io)
 

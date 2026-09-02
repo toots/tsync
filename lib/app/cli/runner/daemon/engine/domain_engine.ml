@@ -50,7 +50,7 @@ end
 (* The tree decides what an absent entry means, so it is the caller's to choose;
    the checkout root below is the same either way. *)
 module Make_over
-    (Ck : File_lwt.TREE with type 'a io := 'a Lwt.t)
+    (Ck : Checkout.OVER with type 'a io := 'a Lwt.t)
     (C : Conf_lwt.S) : S = struct
   module Lk = Logical_key.Make (C)
   module F = File_lwt.Make_over (Ck) (C)

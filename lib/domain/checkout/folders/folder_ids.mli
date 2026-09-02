@@ -14,14 +14,16 @@
     empties both together, and filling the index again is {!Over.Make.rebuild},
     which the resync owes. *)
 
-module Over (Io : Io.S) (_ : Fs.S with type 'a io := 'a Io.t) : sig
+module type S = sig
+  type 'a io
+
   (** The per-directory marker file naming that folder's id. *)
   val marker_name : string
 
   (** The folder's id, minting and persisting one when it has no marker yet. For
       the write paths, which may bring a folder into existence. *)
   val ensure_id :
-    cache_root:string -> domain_name:string -> Logical_key.t -> string Io.t
+    cache_root:string -> domain_name:string -> Logical_key.t -> string io
 
   (** The folder's id if this client already records one, [None] otherwise.
 
@@ -32,7 +34,7 @@ module Over (Io : Io.S) (_ : Fs.S with type 'a io := 'a Io.t) : sig
     cache_root:string ->
     domain_name:string ->
     Logical_key.t ->
-    string option Io.t
+    string option io
 
   (** The id of a folder the mirror may already have dropped, for naming a
       removal. Separate from {!lookup_id} because a caller resolving something it
@@ -41,7 +43,7 @@ module Over (Io : Io.S) (_ : Fs.S with type 'a io := 'a Io.t) : sig
     cache_root:string ->
     domain_name:string ->
     Logical_key.t ->
-    string option Io.t
+    string option io
 
   (** The reference an item answers to, [None] for a folder this client cannot
       resolve. The inverse of what {!key_of_id} does for the daemon: a caller
@@ -50,7 +52,7 @@ module Over (Io : Io.S) (_ : Fs.S with type 'a io := 'a Io.t) : sig
     cache_root:string ->
     domain_name:string ->
     Logical_key.t ->
-    Item_ref.t option Io.t
+    Item_ref.t option io
 
   (** Write a folder's marker, and the reverse entry that makes {!rel_of_id}
       answerable. *)
@@ -59,7 +61,7 @@ module Over (Io : Io.S) (_ : Fs.S with type 'a io := 'a Io.t) : sig
     domain_name:string ->
     Logical_key.t ->
     Folder.marker ->
-    unit Io.t
+    unit io
 
   (** The domain-relative path of a folder id, or [None] when nothing records it
       — a folder that is gone, or an index emptied by {!Cache_layout.clear} and
@@ -75,14 +77,17 @@ module Over (Io : Io.S) (_ : Fs.S with type 'a io := 'a Io.t) : sig
     domain_name:string ->
     root:Logical_key.t ->
     string ->
-    Logical_key.t option Io.t
+    Logical_key.t option io
 
   (** Restate a folder's marker after it moved, taking the name from the new
       path. Every path that moves a directory locally owes this call, or the
       folder becomes unreachable by id. *)
   val reparent :
-    cache_root:string -> domain_name:string -> Logical_key.t -> unit Io.t
+    cache_root:string -> domain_name:string -> Logical_key.t -> unit io
 
   (** Restate the whole reverse index from the markers, which are the truth. *)
-  val rebuild : cache_root:string -> domain_name:string -> unit Io.t
+  val rebuild : cache_root:string -> domain_name:string -> unit io
 end
+
+module Over (Io : Io.S) (_ : Fs.S with type 'a io := 'a Io.t) :
+  S with type 'a io := 'a Io.t

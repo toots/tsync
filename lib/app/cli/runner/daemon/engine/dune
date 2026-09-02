@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_checkout
+   -open
    Tsync_logical_key
    -open
    Tsync_checkout_maintenance_lwt
@@ -32,6 +34,7 @@
  (name tsync_engine)
  (public_name tsync-libs.engine)
  (libraries
+  tsync_checkout
   unix
   lwt.unix
   yojson

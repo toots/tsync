@@ -40,53 +40,36 @@ let is_local
                   ~cache_chunk_size))
     | exception _ -> false
 
-(* What this needs below it. *)
-module type MIRROR = sig
+module type S = sig
   type 'a io
 
-  module Make (_ : Conf.S with type 'a io = 'a io) : sig
-    val root : unit -> string
-    val path : Logical_key.t -> string
-    val ensure_parent : Logical_key.t -> unit io
-    val write : Logical_key.t -> Manifest.t -> unit io
-    val forget : Logical_key.t -> unit
-  end
+  val rename : src_key:Logical_key.t -> dst_key:Logical_key.t -> unit io
+  val create_dir : Logical_key.t -> unit io
+  val delete_dir : Logical_key.t -> unit io
 
-  val ensure_dirs : string -> string -> unit io
+    val list_children :
+    prefix:Logical_key.t -> unit -> (listed list * string list) io
+
+    val list_tree : prefix:Logical_key.t -> unit -> listed list io
+
+    val walk : unit -> string list io
+
+    val ensure_root : unit -> unit io
 end
 
-module type STAGED = sig
+module type OVER = sig
   type 'a io
 
-  module Make (_ : Conf.S with type 'a io = 'a io) : sig
-    val fold :
-      rel_dir:string ->
-      deep:bool ->
-      ('a -> Logical_key.t -> Staged_manifest.staged -> 'a) ->
-      'a ->
-      'a io
-
-    val entries :
-      rel_dir:string ->
-      deep:bool ->
-      (Logical_key.t * Staged_manifest.staged) list io
-  end
-end
-
-module type FOLDERS = sig
-  type 'a io
-
-  val reparent :
-    cache_root:string -> domain_name:string -> Logical_key.t -> unit io
+  module Make (C : Conf.S with type 'a io = 'a io) : S with type 'a io := 'a io
 end
 
 module Over
     (Io : Io.S)
     (Fs : Cache_layout.FS with type 'a io := 'a Io.t)
     (Retry : Syscalls.S with type 'a io := 'a Io.t)
-    (Mf : MIRROR with type 'a io := 'a Io.t)
-    (Sm : STAGED with type 'a io := 'a Io.t)
-    (Folders : FOLDERS with type 'a io := 'a Io.t) =
+    (Mf : Manifests.OVER with type 'a io := 'a Io.t)
+    (Sm : Staged_manifest.OVER with type 'a io := 'a Io.t)
+    (Folders : Folder_ids.S with type 'a io := 'a Io.t) =
 struct
   open Io_syntax.Make (Io)
 

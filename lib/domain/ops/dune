@@ -7,6 +7,20 @@
  (flags
   (:standard
    -open
+   Tsync_cache_layout
+   -open
+   Tsync_filing
+   -open
+   Tsync_content
+   -open
+   Tsync_staged
+   -open
+   Tsync_remote
+   -open
+   Tsync_store
+   -open
+   Tsync_file_store
+   -open
    Tsync_io
    -open
    Tsync_retry
@@ -61,6 +75,13 @@
  (name tsync_ops)
  (public_name tsync-libs.ops)
  (libraries
+  tsync_cache_layout
+  tsync_filing
+  tsync_content
+  tsync_staged
+  tsync_remote
+  tsync_store
+  tsync_file_store
   tsync_io
   tsync_retry
   tsync_logical_key

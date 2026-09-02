@@ -5,6 +5,20 @@
  (flags
   (:standard
    -open
+   Tsync_content
+   -open
+   Tsync_folder_ids
+   -open
+   Tsync_manifests
+   -open
+   Tsync_remote
+   -open
+   Tsync_store
+   -open
+   Tsync_file_store
+   -open
+   Tsync_layout
+   -open
    Tsync_logical_key
    -open
    Tsync_history
@@ -37,6 +51,13 @@
  (name tsync_file)
  (public_name tsync-libs.file)
  (libraries
+  tsync_content
+  tsync_folder_ids
+  tsync_manifests
+  tsync_remote
+  tsync_store
+  tsync_file_store
+  tsync_layout
   tsync_logical_key
   tsync_history
   tsync_checkout_maintenance

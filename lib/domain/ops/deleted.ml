@@ -1,14 +1,6 @@
 type entry = { path : string; latest : int64; versions : int }
 
-(** The id naming a folder's own namespace, minted if this client has none. *)
-module type FOLDER_IDS = sig
-  type 'a io
-
-  val ensure_id :
-    cache_root:string -> domain_name:string -> Logical_key.t -> string io
-end
-
-module Over (Io : Io.S) (Folder_ids : FOLDER_IDS with type 'a io := 'a Io.t) =
+module Over (Io : Io.S) (Folder_ids : Folder_ids.S with type 'a io := 'a Io.t) =
 struct
   open Io_syntax.Make (Io)
 

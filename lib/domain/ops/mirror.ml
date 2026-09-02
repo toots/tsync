@@ -5,40 +5,12 @@ type dest_stats = {
   copied_bytes : int;
 }
 
-(** Walking one folder of the backend's tree. *)
-module type TREE = sig
-  type 'a io
-  type pool
-
-  module Make (_ : Conf.S with type 'a io = 'a io) : sig
-    val children :
-      ?on_unusable:Inode_tree.on_unusable ->
-      ?refresh_index:bool ->
-      ?on_index:(Stored_key.t -> unit) ->
-      ?slots:pool ->
-      folder_id:string ->
-      unit ->
-      Inode_tree.entry list io
-  end
-end
-
-(** Whether a collection is under way, which decides where a chunk is read from.
-*)
-module type COLLECTION = sig
-  type 'a io
-
-  module Make (_ : Conf.S with type 'a io = 'a io) : sig
-    val read_run : unit -> Collection.run option io
-    val string_of_phase : Collection.phase -> string
-  end
-end
-
 module Over
     (Io : Io.S)
     (Spool : Listing.SPOOL with type 'a io := 'a Io.t)
     (Pools : Bounded.S with type 'a io := 'a Io.t)
-    (Tree : TREE with type 'a io := 'a Io.t and type pool := Pools.t)
-    (Space : COLLECTION with type 'a io := 'a Io.t) =
+    (Tree : Inode_tree.OVER with type 'a io := 'a Io.t and type pool := Pools.t)
+    (Space : Collection.OVER with type 'a io := 'a Io.t) =
 struct
   module Listing = struct
     include Listing
