@@ -138,13 +138,13 @@ let cmd : unit Cmd.t =
   in
   let repair (module C : Conf_lwt.S) source dry_run verbose =
     let open Lwt.Syntax in
-    let module Rp = Repair_lwt.Make (C) in
+    let module Rp = Integrity_lwt.Make (C) in
     (* Verbose says every chunk and where it has got to; quiet says only what it
        changed. A stale marker is the one outcome quiet leaves out: it is the
        common case on a store whose events arrived out of order, and it means
        nothing was wrong. *)
     let+ s =
-      Rp.run ?source ~dry_run
+      Rp.repair ?source ~dry_run
         ~on_start:(fun ~total ->
           planned := total;
           if verbose then
@@ -152,28 +152,28 @@ let cmd : unit Cmd.t =
               (if total = 1 then "" else "s"))
         ~on_chunk:(fun ~done_ ~total ~chunk_key ~store outcome ->
           checked := done_;
-          if outcome = Repair.Unrepairable then incr unrepairable;
+          if outcome = Integrity.Unrepairable then incr unrepairable;
           current := Some (doing store chunk_key);
-          let line = Repair.describe ~chunk_key ~store outcome in
+          let line = Integrity.describe_repair ~chunk_key ~store outcome in
           if verbose then
             Printf.printf "[%*d/%d] %s\n%!"
               (String.length (string_of_int total))
               done_ total line
-          else if outcome <> Repair.Cleared then Printf.printf "%s\n%!" line)
+          else if outcome <> Integrity.Cleared then Printf.printf "%s\n%!" line)
         ()
     in
     Printf.printf
       "%d chunk%s: %d repaired, %d stale marker%s cleared, %d unrepairable%s\n"
-      s.Repair.checked
-      (if s.Repair.checked = 1 then "" else "s")
-      s.Repair.repaired s.Repair.cleared
-      (if s.Repair.cleared = 1 then "" else "s")
-      s.Repair.unrepairable
+      s.Integrity.checked
+      (if s.Integrity.checked = 1 then "" else "s")
+      s.Integrity.repaired s.Integrity.cleared
+      (if s.Integrity.cleared = 1 then "" else "s")
+      s.Integrity.unrepairable
       (if dry_run then " (dry run, nothing written)" else "");
-    if s.Repair.unrepairable > 0 then (
+    if s.Integrity.unrepairable > 0 then (
       Printf.eprintf
         "\nNo copy of these chunks hashes to its own key anywhere:\n";
-      List.iter (fun k -> Printf.eprintf "  %s\n" k) s.Repair.lost;
+      List.iter (fun k -> Printf.eprintf "  %s\n" k) s.Integrity.lost;
       Printf.eprintf
         "Nothing here can supply them: re-upload the files that use them, or \
          fill this backend from one that still has them (tsync mirror).\n";

@@ -747,7 +747,7 @@ let setup_client (module C : Conf_lwt.S) root staging_prefix =
         mark_time := Unix.gettimeofday ();
         Lwt.return_unit
     | Expire selector ->
-        let module E = Expire_lwt.Make (C) in
+        let module E = Retention_lwt.Make (C) in
         let cutoff =
           match selector with
             | "all" -> Unix.gettimeofday ()
@@ -757,9 +757,9 @@ let setup_client (module C : Conf_lwt.S) root staging_prefix =
         in
         let+ s = E.expire ~cutoff () in
         Printf.printf "  expire %s -> %d version(s), %d journal entr(ies)\n"
-          selector s.Expire.versions_deleted s.journal_deleted
+          selector s.Retention.versions_deleted s.journal_deleted
     | PurgeTrashed path -> (
-        let module E = Expire_lwt.Make (C) in
+        let module E = Retention_lwt.Make (C) in
         let+ outcome = E.purge_trashed ~path () in
         match outcome with
           | `Not_in_trash -> Printf.printf "  purge %s -> not in trash\n" path
@@ -895,20 +895,20 @@ let setup_client (module C : Conf_lwt.S) root staging_prefix =
         Cor.invalidate ();
         Lwt.return_unit
     | Repair ->
-        let module Rp = Repair_lwt.Make (C) in
+        let module Rp = Integrity_lwt.Make (C) in
         let+ s =
-          Rp.run
+          Rp.repair
             ~on_start:(fun ~total ->
               Printf.printf "  repair: %d marked\n%!" total)
             ~on_chunk:(fun ~done_ ~total ~chunk_key ~store outcome ->
               Printf.printf "  [%d/%d] %s\n%!" done_ total
-                (Repair.describe ~chunk_key ~store outcome))
+                (Integrity.describe_repair ~chunk_key ~store outcome))
             ()
         in
         Printf.printf
           "  repair: %d checked, %d repaired, %d cleared, %d lost\n%!"
-          s.Repair.checked s.Repair.repaired s.Repair.cleared
-          s.Repair.unrepairable
+          s.Integrity.checked s.Integrity.repaired s.Integrity.cleared
+          s.Integrity.unrepairable
     | OnSecondary s -> (
         match C.members with
           | _ :: dst :: _ -> damage dst s

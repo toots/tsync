@@ -134,15 +134,14 @@ struct
     let to_dir root = Filename.concat root (dir_of_prefix C.chunk_prefix)
     let from_dir root = Filename.concat root (dir_of_prefix L.from_prefix)
 
-    (* Keys per delete against a copy. 1000 is what s3 and gcs both cap a bulk
-       delete at; an http-proxy posts the whole list and its ceiling is the peer's
-       body limit, a local store unlinks in turn. A knob rather than a constant
-       because the ceiling is the store's, not ours.
+    (* Keys per delete against a copy. A knob rather than {!Batch.per_delete}
+       alone because the ceiling is the store's: an http-proxy posts the whole
+       list under its peer's body limit, a local store unlinks in turn.
 
        A key count rather than a shard count: shards hold anything from nothing to
        thousands, so a fixed number of them is a round trip wasted on the empty
        ones and a batch over the limit on the full ones. *)
-    let default_delete_batch = 1000
+    let default_delete_batch = Batch.per_delete
 
     let deferred_members () =
       List.filter
