@@ -90,8 +90,7 @@ module type S = sig
 
   (** Record what an upload published for the edits it hashed. Written before
       anything local moves, so a crash after it leaves only local work to
-      replay, and the next start finishes the promotion without re-uploading.
-  *)
+      replay, and the next start finishes the promotion without re-uploading. *)
   val commit : Logical_key.t -> staged -> Manifest.t -> unit io
 
   val delete : Logical_key.t -> unit io
@@ -114,11 +113,10 @@ module type S = sig
   val uuids : unit -> string list io
 
   (** The staged files under [rel_dir], each with what is staged for it. A
-      locally created file has no published sidecar, so the published tree
-      alone would not list it; for one that does, the staged size and mtime
-      are the current ones. *)
-  val entries :
-    rel_dir:string -> deep:bool -> (Logical_key.t * staged) list io
+      locally created file has no published sidecar, so the published tree alone
+      would not list it; for one that does, the staged size and mtime are the
+      current ones. *)
+  val entries : rel_dir:string -> deep:bool -> (Logical_key.t * staged) list io
 end
 
 (** The shape a consumer takes: {!S} for whichever domain it is applied to. *)

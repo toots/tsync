@@ -14,22 +14,22 @@ module type S = sig
   (** Where [key]'s manifest is filed. *)
   val path : Logical_key.t -> string
 
-  (** Create the directory [key]'s manifest is filed in, and every one above
-      it. *)
+  (** Create the directory [key]'s manifest is filed in, and every one above it.
+  *)
   val ensure_parent : Logical_key.t -> unit io
 
   (** What the store has published for [key], read through the mirror. Answers
       [None] for a key with no manifest filed. *)
   val published : Logical_key.t -> Manifest.t option io
 
-  (** Sole writer of a manifest body in the cache. Stamps the name from the
-      key, so a mirror manifest always records the name it is filed under. *)
+  (** Sole writer of a manifest body in the cache. Stamps the name from the key,
+      so a mirror manifest always records the name it is filed under. *)
   val write : Logical_key.t -> Manifest.t -> unit io
 
   val delete : Logical_key.t -> unit io
 
-  (** The single resolution point, and no caller decides it itself: staged
-      edits where this client has any, otherwise what was published. *)
+  (** The single resolution point, and no caller decides it itself: staged edits
+      where this client has any, otherwise what was published. *)
   val current :
     Logical_key.t ->
     [ `Staged of Staged_manifest.staged * Manifest.t option
@@ -46,8 +46,8 @@ module type S = sig
   val memo_size : unit -> int
 end
 
-(** The shape a consumer takes: {!S} for whichever domain it is applied to,
-    and what stands beside it. *)
+(** The shape a consumer takes: {!S} for whichever domain it is applied to, and
+    what stands beside it. *)
 module type OVER = sig
   type 'a io
 

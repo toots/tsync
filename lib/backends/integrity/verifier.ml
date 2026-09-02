@@ -1,4 +1,5 @@
-module Over (Io : Io.S) (Bounded : Bounded.S with type 'a io := 'a Io.t) = struct
+module Over (Io : Io.S) (Bounded : Bounded.S with type 'a io := 'a Io.t) =
+struct
   let ( let+ ) x f = Io.map f x
 
   (* One request per shard, and the store's own object-created notification is what

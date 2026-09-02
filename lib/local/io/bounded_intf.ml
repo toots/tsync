@@ -1,6 +1,5 @@
 module type S = sig
   type 'a io
-
   type t
 
   (** [create ?max_waiting ?name ~max ()] admits [max] at once. [max_waiting]

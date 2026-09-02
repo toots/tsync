@@ -35,14 +35,11 @@ let folder_versions ~versions_prefix ~folder_id =
 module type S = sig
   type 'a io
 
-    val version_dir : key:Logical_key.t -> Stored_key.t option io
-
-    val save_version : key:Logical_key.t -> unit io
-
+  val version_dir : key:Logical_key.t -> Stored_key.t option io
+  val save_version : key:Logical_key.t -> unit io
   val list_versions : key:Logical_key.t -> Backend.file_entry list io
   val get_version : vkey:Stored_key.t -> string io
-
-    val parse : Stored_key.t -> (string * string) option
+  val parse : Stored_key.t -> (string * string) option
 end
 
 module type OVER = sig

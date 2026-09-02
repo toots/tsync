@@ -6,9 +6,9 @@
 type place = { name : string; rel : string }
 type t = [ `Domain of place | `Local of string ]
 
-(** Which side a bare relative token falls on: [`Either] for a command acting
-    on either end of the wire, where [foo] is the local [foo]; [`In_domain] for
-    one that only ever means the domain, where [foo] is the domain's. *)
+(** Which side a bare relative token falls on: [`Either] for a command acting on
+    either end of the wire, where [foo] is the local [foo]; [`In_domain] for one
+    that only ever means the domain, where [foo] is the domain's. *)
 type reading = [ `Either | `In_domain ]
 
 type arg

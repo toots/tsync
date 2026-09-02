@@ -13,9 +13,8 @@ end
 module type S = sig
   type 'a io
 
-    val reconcile : unit -> unit io
-
-    val apply_foreign : on_changed:(string -> unit) -> unit -> int io
+  val reconcile : unit -> unit io
+  val apply_foreign : on_changed:(string -> unit) -> unit -> int io
 end
 
 module type OVER = sig

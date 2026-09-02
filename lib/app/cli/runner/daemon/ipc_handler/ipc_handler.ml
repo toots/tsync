@@ -412,7 +412,10 @@ module Make
           match List.rev entries with (k, _) :: _ -> Some k | [] -> anchor
         in
         let+ described =
-          Lwt_list.map_s (op_to_json ~lookup:lookup_folder ~lookup_removed:R.removed_folder_id) ops
+          Lwt_list.map_s
+            (op_to_json ~lookup:lookup_folder
+               ~lookup_removed:R.removed_folder_id)
+            ops
         in
         (* A folder this client has no id for at all — the mirror and the folder
            index disagreeing, not a poller yet to catch up. The caller re-lists,

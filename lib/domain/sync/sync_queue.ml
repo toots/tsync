@@ -40,7 +40,8 @@ end
 module Over
     (Io : Io.S)
     (Js : File_store.OVER with type 'a io := 'a Io.t)
-    (Q : Durable_queue.QUEUE with type 'a io := 'a Io.t and type job := Wal.record)
+    (Q :
+      Durable_queue.QUEUE with type 'a io := 'a Io.t and type job := Wal.record)
     (W : Wal.OVER with type 'a io := 'a Io.t and type records := Q.Records.t) =
 struct
   open Io_syntax.Make (Io)

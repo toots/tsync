@@ -17,7 +17,6 @@ let runtime_paths = Runtime.default_paths ()
 let mount_point_of = Conf_parsing.mount_point_of
 let frontend_names = Daemons.frontend_names
 let resolve_frontend = Daemons.frontend_for
-
 let load_config () = Conf_parsing.load runtime_paths.Runtime.config_path
 
 let domain_names cfg =
@@ -65,7 +64,6 @@ let domain_target ?domain () =
   Domain.target ?domain ~paths:runtime_paths (load_config ())
 
 let domain_socket ?domain () = snd (domain_target ?domain ())
-
 let domain_targets () = Daemons.all ~paths:runtime_paths (load_config ())
 
 (* What the deferred targets still owe, summed: whether work is outstanding is

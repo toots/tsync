@@ -10,7 +10,9 @@ let session = Filename.concat src "session"
 let fetched = Filename.concat out "session"
 
 let rsync fmt =
-  Printf.ksprintf (fun args -> Tsync (Printf.sprintf "rsync --domain %s %s" (q domain) args)) fmt
+  Printf.ksprintf
+    (fun args -> Tsync (Printf.sprintf "rsync --domain %s %s" (q domain) args))
+    fmt
 
 let ls rel =
   Tsync (Printf.sprintf "ls --domain %s %s" (q domain) (q (rel_in_domain rel)))
@@ -51,12 +53,12 @@ let groups =
           {
             name = "a first run";
             command = rsync "-v %s %s" (q src) (q (in_domain "a"));
-            expect = [ Copied 4; Dirs 3; Failed 0 ];
+            expect = [Copied 4; Dirs 3; Failed 0];
           };
           {
             name = "a second";
             command = rsync "%s %s" (q src) (q (in_domain "a"));
-            expect = [ Copied 0; Skipped 4 ];
+            expect = [Copied 0; Skipped 4];
           };
         ];
     };
@@ -68,12 +70,12 @@ let groups =
             name = "a first run";
             command = rsync "-v %s %s" (q (in_domain "a")) (q (in_domain "b"));
             expect =
-              [ Copied 4; Dirs 3; Failed 0; Moved_nothing; Says "publish " ];
+              [Copied 4; Dirs 3; Failed 0; Moved_nothing; Says "publish "];
           };
           {
             name = "a second";
             command = rsync "%s %s" (q (in_domain "a")) (q (in_domain "b"));
-            expect = [ Copied 0; Skipped 4 ];
+            expect = [Copied 0; Skipped 4];
           };
         ];
     };
@@ -88,7 +90,9 @@ let groups =
               [
                 Copied 4;
                 Failed 0;
-                Holds ("brings the tree back byte for byte", same_tree session fetched);
+                Holds
+                  ( "brings the tree back byte for byte",
+                    same_tree session fetched );
                 Holds
                   ( "keeps a symlink a symlink",
                     is_symlink (Filename.concat fetched "link.txt") );
@@ -97,7 +101,7 @@ let groups =
           {
             name = "a second";
             command = rsync "%s %s" (q (in_domain "a")) (q out);
-            expect = [ Copied 0; Skipped 4 ];
+            expect = [Copied 0; Skipped 4];
           };
           {
             name = "clobber one file";
@@ -110,7 +114,7 @@ let groups =
           {
             name = "after a change";
             command = rsync "-v %s %s" (q (in_domain "a")) (q out);
-            expect = [ Copied 1; Says "patch" ];
+            expect = [Copied 1; Says "patch"];
           };
         ];
     };
@@ -120,28 +124,30 @@ let groups =
         [
           {
             name = "a dry run";
-            command = rsync "--dry-run %s %s" (q (in_domain "a")) (q (in_domain "dry"));
-            expect = [ Copied 4 ];
+            command =
+              rsync "--dry-run %s %s" (q (in_domain "a")) (q (in_domain "dry"));
+            expect = [Copied 4];
           };
           {
             name = "what the dry run left";
             command = ls "dry";
-            expect = [ Silent_on "session" ];
+            expect = [Silent_on "session"];
           };
           {
             name = "a move inside one domain";
-            command = rsync "-v --move %s %s" (q (in_domain "b")) (q (in_domain "c"));
-            expect = [ Says "rename "; Moved_nothing; Failed 0 ];
+            command =
+              rsync "-v --move %s %s" (q (in_domain "b")) (q (in_domain "c"));
+            expect = [Says "rename "; Moved_nothing; Failed 0];
           };
           {
             name = "where it moved to";
             command = ls "c/session";
-            expect = [ Says "notes.txt" ];
+            expect = [Says "notes.txt"];
           };
           {
             name = "where it moved from";
             command = ls "b/session";
-            expect = [ Silent_on "notes.txt" ];
+            expect = [Silent_on "notes.txt"];
           };
         ];
     };
@@ -154,13 +160,14 @@ let groups =
             command =
               Tsync
                 (Printf.sprintf "rsync --dry-run -v %s:/%s %s" (q domain)
-                   (rel_in_domain "a") (q (local "named")));
-            expect = [ Copied 4; Silent_on "use rsync(1)" ];
+                   (rel_in_domain "a")
+                   (q (local "named")));
+            expect = [Copied 4; Silent_on "use rsync(1)"];
           };
           {
             name = "an unknown name is just a path";
             command = rsync "%s %s" (q "nosuchdomain:/x") (q (local "named2"));
-            expect = [ Says "use rsync(1)" ];
+            expect = [Says "use rsync(1)"];
           };
         ];
     };
@@ -171,7 +178,7 @@ let groups =
           {
             name = "neither end in a domain";
             command = rsync "%s %s" (q src) (q out);
-            expect = [ Says "use rsync(1)" ];
+            expect = [Says "use rsync(1)"];
           };
           {
             name = "a file onto a directory";
@@ -179,7 +186,7 @@ let groups =
               rsync "%s %s"
                 (q (Filename.concat src "session/notes.txt"))
                 (q (in_domain "a/session"));
-            expect = [ Silent_on "Fatal" ];
+            expect = [Silent_on "Fatal"];
           };
         ];
     };

@@ -47,7 +47,8 @@ end
 module Over
     (Io : Io.S)
     (_ : File_store.OVER with type 'a io := 'a Io.t)
-    (Q : Durable_queue.QUEUE with type 'a io := 'a Io.t and type job := Wal.record)
+    (Q :
+      Durable_queue.QUEUE with type 'a io := 'a Io.t and type job := Wal.record)
     (_ : Wal.OVER with type 'a io := 'a Io.t and type records := Q.Records.t) : sig
   (** The sending half of a domain: it takes up the records the file operations
       write and hand over, and drains them to the store on a pool of its own.

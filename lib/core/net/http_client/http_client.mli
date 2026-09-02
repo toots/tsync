@@ -55,7 +55,6 @@ end
 
 module type S = sig
   type 'a io
-
   type t
 
   (** Holds a pool of its own. [name] is what a retry names in the log;
@@ -111,5 +110,4 @@ module Make
     (Io : Io.S)
     (Clock : Clock.S with type 'a io := 'a Io.t)
     (Loop : Retry.LOOP with type 'a io := 'a Io.t)
-    (Pool : POOL with type 'a io := 'a Io.t) :
-  S with type 'a io := 'a Io.t
+    (Pool : POOL with type 'a io := 'a Io.t) : S with type 'a io := 'a Io.t

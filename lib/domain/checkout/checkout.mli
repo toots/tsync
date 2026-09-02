@@ -46,8 +46,8 @@ module type S = sig
       published or only staged (unsorted). *)
   val walk : unit -> string list io
 
-  (** Create the checkout root. Every process serving the domain needs this
-      and nothing more. *)
+  (** Create the checkout root. Every process serving the domain needs this and
+      nothing more. *)
   val ensure_root : unit -> unit io
 end
 

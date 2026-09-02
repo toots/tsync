@@ -14,9 +14,9 @@ module type S = sig
   type 'a io
   type pool
 
-    val namespace_prefix : string -> Stored_key.t
+  val namespace_prefix : string -> Stored_key.t
 
-    val children :
+  val children :
     ?on_unusable:on_unusable ->
     ?refresh_index:bool ->
     ?on_index:(Stored_key.t -> unit) ->
@@ -25,7 +25,7 @@ module type S = sig
     unit ->
     entry list io
 
-    val fold_tree :
+  val fold_tree :
     ?on_unusable:on_unusable ->
     ?refresh_index:bool ->
     ?on_index:(Stored_key.t -> unit) ->
@@ -41,13 +41,15 @@ module type OVER = sig
   type 'a io
   type pool
 
-  module Make (C : Conf.S with type 'a io = 'a io) : S with type 'a io := 'a io and type pool = pool
+  module Make (C : Conf.S with type 'a io = 'a io) :
+    S with type 'a io := 'a io and type pool = pool
 end
 
 module Over
     (Io : Io.S)
     (Pools : Bounded.S with type 'a io := 'a Io.t)
-    (Tree_store : Store.INODE with type 'a io := 'a Io.t and type pool := Pools.t) =
+    (Tree_store :
+      Store.INODE with type 'a io := 'a Io.t and type pool := Pools.t) =
 struct
   type pool = Pools.t
 

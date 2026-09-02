@@ -20,7 +20,7 @@ let cmd : unit Cmd.t =
   let move_arg =
     Arg.(
       value & flag
-      & info [ "move" ]
+      & info ["move"]
           ~doc:
             "Remove each source once its destination is published. Within one \
              domain and onto nothing, this is a rename and costs one journal \
@@ -29,7 +29,7 @@ let cmd : unit Cmd.t =
   let dry_run_arg =
     Arg.(
       value & flag
-      & info [ "dry-run"; "n" ] ~doc:"Print what would be done and do nothing.")
+      & info ["dry-run"; "n"] ~doc:"Print what would be done and do nothing.")
   in
   let run domain src dst move dry_run v =
     set_verbose v;
@@ -48,8 +48,9 @@ let cmd : unit Cmd.t =
                   rather than a manifest one -- see tsync mirror"
                  a.Location.name b.Location.name)
         | `Domain a, `Domain b ->
-            (a.Location.name, Rsync.Domain a.Location.rel,
-             Rsync.Domain b.Location.rel)
+            ( a.Location.name,
+              Rsync.Domain a.Location.rel,
+              Rsync.Domain b.Location.rel )
         | `Domain a, `Local p ->
             (a.Location.name, Rsync.Domain a.Location.rel, Rsync.Local p)
         | `Local p, `Domain b ->
@@ -64,8 +65,7 @@ let cmd : unit Cmd.t =
             (module C)
             ~kind:"rsync" ~target:(Location.typed dst)
             ~current:(fun () -> !current)
-            ~counters:(fun () ->
-              [ ("copied", !copied); ("skipped", !skipped) ])
+            ~counters:(fun () -> [("copied", !copied); ("skipped", !skipped)])
             ())
         (let open Lwt.Syntax in
          let module Rs = Rsync_lwt.Make (C) in
@@ -75,7 +75,8 @@ let cmd : unit Cmd.t =
                (* A source naming one file reports no relative path, that file
                   being the whole of what was asked for. *)
                let rel =
-                 if rel = "" then Filename.basename (Location.typed src) else rel
+                 if rel = "" then Filename.basename (Location.typed src)
+                 else rel
                in
                current := Some rel;
                (match decision with

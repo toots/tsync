@@ -25,6 +25,7 @@ module Lockfile = struct
 end
 
 include
-  Gc.Over (Io_lwt.Core) (Io_lwt.Fs) (Io_lwt.Syscalls) (Io_lwt.Bounded) (Lockfile)
+  Gc.Over (Io_lwt.Core) (Io_lwt.Fs) (Io_lwt.Syscalls) (Io_lwt.Bounded)
+    (Lockfile)
     (Io_lwt.Clock)
     (Collection_lwt)

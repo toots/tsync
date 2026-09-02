@@ -18,24 +18,19 @@ module type S = sig
   type 'a io
   type pool
 
-    val put_manifest : key:Logical_key.t -> data:Bigstring.t -> unit io
+  val put_manifest : key:Logical_key.t -> data:Bigstring.t -> unit io
 
-    val get_manifest_state :
+  val get_manifest_state :
     key:Logical_key.t -> [ `Body of string | `Absent | `Unresolved ] io
 
   val head_manifest : key:Logical_key.t -> Backend.file_entry option io
   val delete_manifest : key:Logical_key.t -> unit io
-
-    val copy_manifest :
-    src_key:Logical_key.t -> dst_key:Logical_key.t -> unit io
-
-    val put_folder_marker : key:Logical_key.t -> unit io
-
-  
+  val copy_manifest : src_key:Logical_key.t -> dst_key:Logical_key.t -> unit io
+  val put_folder_marker : key:Logical_key.t -> unit io
   val list_namespace : folder_id:string -> Backend.file_entry list io
   val get_object : bkey:Stored_key.t -> string io
 
-    val get_objects :
+  val get_objects :
     ?slots:pool ->
     entries:Backend.file_entry list ->
     unit ->
@@ -51,7 +46,8 @@ module type OVER = sig
 
   module Make
       (C : Conf.S with type 'a io = 'a io)
-      (L : Layout.S with type 'a io := 'a io) : S with type 'a io := 'a io and type pool = pool
+      (L : Layout.S with type 'a io := 'a io) :
+    S with type 'a io := 'a io and type pool = pool
 end
 
 module type INODE = sig

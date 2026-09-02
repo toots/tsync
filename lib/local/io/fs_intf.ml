@@ -17,9 +17,9 @@ module type S = sig
 
   val write : string -> buffer -> offset:int64 -> int io
 
-  (** [pread fd buf ~file_offset pos len] fills [len] bytes of [buf] from
-      [pos], reading [fd] at [file_offset]. The offset travels with the
-      call, so several ranges of one file can be moved concurrently through one
+  (** [pread fd buf ~file_offset pos len] fills [len] bytes of [buf] from [pos],
+      reading [fd] at [file_offset]. The offset travels with the call, so
+      several ranges of one file can be moved concurrently through one
       descriptor. *)
   val pread : fd -> buffer -> file_offset:int -> int -> int -> int io
 

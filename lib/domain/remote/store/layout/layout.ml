@@ -51,7 +51,6 @@ struct
   module Inode = struct
     module Make (C : Conf.S with type 'a io = 'a Io.t) :
       S with type 'a io := 'a Io.t = struct
-
       let lookup_id key =
         Folder_ids.lookup_id ~cache_root:C.cache_root ~domain_name:C.domain_name
           key
