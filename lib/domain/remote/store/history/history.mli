@@ -34,9 +34,6 @@ module type S = sig
 
   val list_versions : key:Logical_key.t -> Backend.file_entry list io
   val get_version : vkey:Stored_key.t -> string io
-
-  (** {!parse} against this domain's prefix. *)
-  val parse : Stored_key.t -> (string * string) option
 end
 
 (** The shape a consumer takes: {!S} for whichever domain it is applied to. *)

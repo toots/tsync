@@ -1,9 +1,3 @@
-(* What a store on a filesystem needs below it. *)
-
-module type WALL_CLOCK = sig
-  val now : unit -> float
-end
-
 (* Being told a directory changed. [None] from [open_dir] is a directory this
    platform or filesystem will not watch, which is not a failure: the caller
    goes back to asking on a timer. *)
@@ -28,7 +22,6 @@ module Over
     (Sys : Syscalls.S with type 'a io := 'a Io.t)
     (Bounded : Bounded.S with type 'a io := 'a Io.t)
     (Bytes : BYTES with type 'a io := 'a Io.t)
-    (Wall : WALL_CLOCK)
     (Clock : Clock.S with type 'a io := 'a Io.t)
     (Watcher : WATCHER with type 'a io := 'a Io.t) =
 struct
@@ -187,7 +180,7 @@ struct
                        {
                          computed = None;
                          size = None;
-                         at = Some (Wall.now ());
+                         at = Some (Unix.gettimeofday ());
                          reason = Some why;
                        })
               | `Body stored ->
@@ -213,7 +206,7 @@ struct
                          {
                            computed = Some computed;
                            size = Some (Bigstring.length stored);
-                           at = Some (Wall.now ());
+                           at = Some (Unix.gettimeofday ());
                            reason = None;
                          })))
     in

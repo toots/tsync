@@ -4,6 +4,7 @@
  (name tsync_gcs_backend)
  (private_modules gcs_auth)
  (libraries
+  unix
   cohttp
   tsync-libs.core
   tsync_core

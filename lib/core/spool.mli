@@ -6,9 +6,7 @@
     the channel is closed before the mapping is made, and a file still open for
     append is exactly what that rules out. *)
 
-(** The buffered writer nothing here can supply: a channel is state, and the
-    stream-to-stream copy behind {!Make.append_file} is not a sequence of reads
-    and writes this could spell for itself. *)
+(** The buffered writer nothing here can supply: a channel is state. *)
 module type APPEND = sig
   type 'a io
   type t
@@ -36,7 +34,6 @@ module Make
   val append : t -> string -> unit Io.t
 
   (** Append the whole contents of [src], which must already be flushed. *)
-  val append_file : t -> src:string -> unit Io.t
 
   (** Close the channel and map the whole finished file. Fails naming the spool
       if it is no longer there to be stat'd. *)

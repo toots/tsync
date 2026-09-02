@@ -190,32 +190,24 @@ struct
 
     let known_chunk_count = Chunks_store.known_count
 
-    (* Mapped rather than read, so the pages reach the store without being copied
-       into a buffer first, and mapped from a snapshot, so what the user writes
-       next reaches neither these pages nor the ones still to come. *)
-    let upload_chunk fd ~cancel ~on_progress ~file_size ~chunk_size ~table index
-        =
-      if !cancel then raise Cancelled;
-      let offset = Chunks.offset_of ~chunk_size index in
-      let len =
-        Chunks.length_of ~size:(Int64.of_int file_size) ~chunk_size index
+    (* The table every upload fills: one chunk per index, each taking its slot
+       inside [Chunks_store.store]. [on_progress] is told a deduplicated chunk
+       apart from a written one, since it cost no transfer. *)
+    let fill ~key ~size ~chunk_size ~mtime ~cancel ~on_progress source =
+      let count = max 1 (Chunks.count ~size ~chunk_size) in
+      let table =
+        Manifest.builder ~name:(Logical_key.leaf key) ~size ~chunk_size ~mtime
+          ~symlink:None ~count
       in
-      let+ ck_rel, sent =
-        Chunks_store.store
-          (Chunk_source.Mapped
-             (fun () ->
-               try Bigstring.map_fd fd ~offset ~len
-               with Unix.Unix_error _ -> raise Cancelled))
+      let one index =
+        if !cancel then raise Cancelled;
+        let* src = source index in
+        let+ ck_rel, sent = Chunks_store.store src in
+        Manifest.set table index ck_rel;
+        on_progress ~bytes:(Chunks.length_of ~size ~chunk_size index) ~sent
       in
-      Manifest.set table index ck_rel;
-      (* A deduplicated chunk is as done as a written one and cost no transfer,
-         which is why the two are told apart rather than summed. *)
-      on_progress ~bytes:len ~sent
-
-    (* The key being published under is what names this file. *)
-    let chunk_table ~key ~size ~chunk_size ~mtime ~count =
-      Manifest.builder ~name:(Logical_key.leaf key) ~size ~chunk_size ~mtime
-        ~symlink:None ~count
+      let+ () = each_chunk ~count one in
+      table
 
     (* A cancellation landing while the put is in flight unpublishes it again, or
        a ghost object survives under a name that may no longer exist locally.
@@ -256,45 +248,39 @@ struct
 
     (* For a file handed over whole: import, and the FileProvider's re-import.
 
-       Sized from the descriptor the chunks are mapped through, so the length the
-       chunking is laid out for and the bytes that reach the store come from one
-       file however the name is reused meanwhile.
-
-       [fd] is the source itself, kept alongside the snapshot only to be stat'd
-       for whether the file moved while this ran. *)
+       Mapped rather than read, so the pages reach the store without being copied
+       into a buffer first, and mapped from a snapshot, so what the user writes
+       next reaches neither these pages nor the ones still to come. The snapshot
+       is sized once, so the chunking and the bytes come from one file however
+       the name is reused meanwhile; [fd] is the source itself, kept only to be
+       stat'd for whether the file moved while this ran. *)
     let upload ~key ~src_path ~mtime ~chunk_size ?(cancel = ref false)
         ?(on_progress = fun ~bytes:_ ~sent:_ -> ()) () =
       let* fd = Syscalls.openfile src_path [Unix.O_RDONLY] 0 in
-      let* table, file_size =
+      let* table, size =
         Io.finalize
           (fun () ->
             let* before = Syscalls.LargeFile.fstat fd in
-            (* Frozen here, so a source truncated mid-upload is a manifest never
-               published rather than a SIGBUS on a page past its new end. *)
             let snapshot = Bigstring.open_snapshot src_path in
             Io.finalize
               (fun () ->
-                let file_size =
-                  Int64.to_int
-                    (Unix.LargeFile.fstat snapshot).Unix.LargeFile.st_size
+                let size =
+                  (Unix.LargeFile.fstat snapshot).Unix.LargeFile.st_size
                 in
-                Log.debug "upload %s: file_size=%d"
+                Log.debug "upload %s: file_size=%Ld"
                   (Logical_key.to_string key)
-                  file_size;
-                (* An empty file is one chunk of no bytes, where covering zero
-                   bytes takes none. *)
-                let num_chunks =
-                  max 1
-                    (Chunks.count ~size:(Int64.of_int file_size) ~chunk_size)
+                  size;
+                let mapped index =
+                  let offset = Chunks.offset_of ~chunk_size index
+                  and len = Chunks.length_of ~size ~chunk_size index in
+                  Io.return
+                    (Chunk_source.Mapped
+                       (fun () ->
+                         try Bigstring.map_fd snapshot ~offset ~len
+                         with Unix.Unix_error _ -> raise Cancelled))
                 in
-                let table =
-                  chunk_table ~key ~size:(Int64.of_int file_size) ~chunk_size
-                    ~mtime ~count:num_chunks
-                in
-                let* () =
-                  each_chunk ~count:num_chunks
-                    (upload_chunk snapshot ~cancel ~on_progress ~file_size
-                       ~chunk_size ~table)
+                let* table =
+                  fill ~key ~size ~chunk_size ~mtime ~cancel ~on_progress mapped
                 in
                 (* The snapshot makes the chunks agree with each other; this is
                    what says they still describe the file the user has. *)
@@ -304,14 +290,13 @@ struct
                   || after.Unix.LargeFile.st_mtime
                      <> before.Unix.LargeFile.st_mtime
                 then raise (Source_changed src_path);
-                (table, file_size))
+                (table, size))
               (fun () ->
                 Unix.close snapshot;
                 Io.return ()))
           (fun () -> Syscalls.close fd)
       in
-      publish ~key ~size:(Int64.of_int file_size) ~chunk_size ~mtime ~cancel
-        table
+      publish ~key ~size ~chunk_size ~mtime ~cancel table
 
     (* Fillers write into a pooled buffer, which is what holds this path to
        [max_chunk_buffers] chunks however wide the fan-out below runs.
@@ -321,15 +306,11 @@ struct
     let upload_chunks ~key ~size ~chunk_size ~mtime
         ~(source : int -> unit Io.t Chunk_source.t Io.t) ?(cancel = ref false)
         () =
-      let n = max 1 (Chunks.count ~size ~chunk_size) in
-      let table = chunk_table ~key ~size ~chunk_size ~mtime ~count:n in
-      let one index =
-        if !cancel then raise Cancelled;
-        let* src = source index in
-        let+ ck_rel, (_ : bool) = Chunks_store.store src in
-        Manifest.set table index ck_rel
+      let* table =
+        fill ~key ~size ~chunk_size ~mtime ~cancel
+          ~on_progress:(fun ~bytes:_ ~sent:_ -> ())
+          source
       in
-      let* () = each_chunk ~count:n one in
       publish ~key ~size ~chunk_size ~mtime ~cancel table
 
     (* An unknown folder, an absent object and a body caught mid-write all read

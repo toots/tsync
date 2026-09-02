@@ -56,14 +56,6 @@ let domain_for_path ?domain ~paths cfg path =
       match domain with Some n -> d.Conf_parsing.name = n | None -> true)
   |> List.find_map (fun d -> Option.map (fun r -> (d, r)) (under d))
 
-(* A path under no domain's root falls back to the default domain, so the answer
-   is a daemon saying it does not know the file rather than a connection to
-   nothing. *)
-let socket_for_path ~paths cfg path =
-  match domain_for_path ~paths cfg path with
-    | Some (d, _) -> Runtime.domain_socket_path paths d.Conf_parsing.name
-    | None | (exception _) -> Domain.socket ~paths cfg
-
 (* For a command that reports rather than acts: every configured domain, never
    one. The default domain, and [--domain] with it, say which domain a command
    acts on; a report answers for the machine, and narrowing it would leave the

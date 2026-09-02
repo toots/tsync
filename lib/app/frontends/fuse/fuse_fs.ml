@@ -167,22 +167,6 @@ module Make (C : Conf_lwt.S) (D : Domain_engine.Domain) = struct
                     "fusermount3 -uz %s %s; the mount point is left behind"
                     mount_point (exit_status status))
 
-  let key_of_path mount_point path =
-    let path =
-      if String.length path >= 2 && path.[0] = '~' && path.[1] = '/' then
-        Sys.getenv "HOME" ^ String.sub path 1 (String.length path - 1)
-      else path
-    in
-    if
-      String.length path > String.length mount_point
-      && String.sub path 0 (String.length mount_point) = mount_point
-    then
-      fuse_to_key
-        (String.sub path
-           (String.length mount_point)
-           (String.length path - String.length mount_point))
-    else fuse_to_key path
-
   (* Directories exist only in the manifest mirror. *)
   let is_dir_key key =
     Logical_key.kind key = `Dir
