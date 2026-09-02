@@ -73,9 +73,6 @@ final class ChangeBatchTests: XCTestCase {
         XCTAssertTrue(deleted.isEmpty, "a folder's reference survives its rename")
     }
 
-    /// The filter's whole job: a change under a folder the system is not holding
-    /// is one it would drop anyway.
-
     /// Either end of a move counts. Testing only the destination leaves the old
     /// folder showing a file that has gone.
     func testAMoveOutOfAFolderIsStillReported() {
@@ -84,6 +81,33 @@ final class ChangeBatchTests: XCTestCase {
         let (updated, deleted) = ChangeBatch.resolve(ops, readOnly: false)
         XCTAssertEqual(updated.map(\.itemIdentifier.rawValue), ["f:d2/a.txt"])
         XCTAssertEqual(deleted.map(\.rawValue), ["f:d1/a.txt"])
+    }
+
+    /// A rename followed by the removal of the new name is not "the new name's
+    /// last op wins": the old name has to go too, or it stays on disk for good.
+    func testARenamedThenDeletedFileRetiresBothNames() {
+        let ops = [
+            op("rename", ref: "f:d1/b.txt", parent: "d:d1", name: "b.txt",
+               srcRef: "f:d1/a.txt", srcParent: "d:d1"),
+            op("delete", ref: "f:d1/b.txt", parent: "d:d1", name: "b.txt", withItem: false),
+        ]
+        let (updated, deleted) = ChangeBatch.resolve(ops, readOnly: false)
+        XCTAssertTrue(updated.isEmpty)
+        XCTAssertEqual(Set(deleted.map(\.rawValue)), ["f:d1/a.txt", "f:d1/b.txt"])
+    }
+
+    /// Two renames in a row leave one item, under the last name. The middle name
+    /// was reported updated and deleted at once, and the two sets are unordered.
+    func testARenameChainLeavesOnlyTheLastName() {
+        let ops = [
+            op("rename", ref: "f:d1/b.txt", parent: "d:d1", name: "b.txt",
+               srcRef: "f:d1/a.txt", srcParent: "d:d1"),
+            op("rename", ref: "f:d1/c.txt", parent: "d:d1", name: "c.txt",
+               srcRef: "f:d1/b.txt", srcParent: "d:d1"),
+        ]
+        let (updated, deleted) = ChangeBatch.resolve(ops, readOnly: false)
+        XCTAssertEqual(updated.map(\.itemIdentifier.rawValue), ["f:d1/c.txt"])
+        XCTAssertEqual(Set(deleted.map(\.rawValue)), ["f:d1/a.txt", "f:d1/b.txt"])
     }
 
     /// A removal has no item to describe, and must still be reported.
