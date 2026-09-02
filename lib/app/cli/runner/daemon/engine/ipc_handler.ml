@@ -95,6 +95,8 @@ module Make
   let get_int obj key =
     match List.assoc_opt key obj with Some (`Int n) -> Some n | _ -> None
 
+  let page_after obj = match get_str obj "after" with "" -> None | s -> Some s
+
   (* A request names its target by reference or, for the callers that predate
      them, by logical key. Everything below works in keys: references are
      resolved here and nowhere else. *)
@@ -175,63 +177,131 @@ module Make
   let default_page_limit = 1000
   let default_changes_limit = 512
 
-  (* One page of a folder: one list, each entry tagged by kind, ordered by name.
-     A reference names a folder or it does not reach here.
+  let page_limit obj =
+    Option.value (get_int obj "limit") ~default:default_page_limit
 
-     By name and not by arrival, because the page cursor is the last name served
-     and nothing else: a caller resuming hands back a name, so a fresh process
-     answers the same as the one that started, and an item added or removed
-     between pages shifts nothing before it. An offset into a listing held in
-     memory cannot promise either.
+  (* One page of an ordered listing: the entries after [after], [limit] of them
+     as rows, and the cursor to resume from when more follow.
+
+     An entry is ordered by one string and resumed from by another, so that a
+     listing can order by path and still hand out a cursor bounded like a
+     reference. For one folder the two are the same name.
+
+     By name and not by arrival, because the page cursor is the last entry
+     served and nothing else: a caller resuming hands back a cursor, so a fresh
+     process answers the same as the one that started, and an item added or
+     removed between pages shifts nothing before it. An offset into a listing
+     held in memory cannot promise either.
 
      Both of the system's initial-page sorts land here. What the contract turns
      on is that the order is the same across the pages of one enumeration, which
      a name gives whatever the caller meant to sort by. *)
-  let handle_list_dir ?after ?(limit = default_page_limit) prefix =
+  let page ?after ?(skipped = 0) ~limit ~label ~row entries =
+    let entries =
+      List.sort (fun (a, _, _) (b, _, _) -> compare (a : string) b) entries
+    in
+    let entries =
+      match after with
+        | None -> entries
+        | Some a -> List.filter (fun (n, _, _) -> compare n a > 0) entries
+    in
+    (* One past the page, which is how the cursor is answered without asking
+       whether the listing has more. *)
+    let slice = List.filteri (fun i _ -> i <= limit) entries in
+    let+ rows =
+      Lwt_list.map_s
+        (fun (_, _, e) -> row e)
+        (List.filteri (fun i _ -> i < limit) slice)
+    in
+    let named = List.filter_map Fun.id rows in
+    let unnamed = List.length rows - List.length named in
+    let next =
+      if List.length slice > limit then (
+        match List.nth_opt slice (limit - 1) with
+          | Some (_, cursor, _) -> [("next", `String cursor)]
+          | None -> [])
+      else []
+    in
+    ok_json
+      ((("items", `List (List.map Item_row.to_json named)) :: next)
+      @ unnamed_field label (unnamed + skipped))
+
+  let row_of ~container_id = function
+    | `File e -> R.of_listed ~container_id e
+    | `Dir key -> R.of_dir ~container_id key
+
+  (* The entries of one folder, each under its name and its key. *)
+  let children ~container_id prefix =
+    let+ files, dirs = F.list_children ~prefix in
+    List.map
+      (fun (e : Checkout.listed) ->
+        let key = e.Checkout.key in
+        (Logical_key.leaf key, key, (container_id, `File e)))
+      files
+    @ List.map
+        (fun (d, _mtime) ->
+          let key = Logical_key.dir_in prefix d in
+          (d, key, (container_id, `Dir key)))
+        dirs
+
+  (* One page of a folder: one list, each entry tagged by kind, ordered by name.
+     A reference names a folder or it does not reach here. *)
+  let handle_list_dir ?after ~limit prefix =
     let* container = own_folder_id prefix in
     match container with
       | None -> not_found (Logical_key.to_string prefix)
       | Some container_id ->
-          let* files, dirs = F.list_children ~prefix in
-          let entries =
-            List.map
-              (fun (e : Checkout.listed) ->
-                (Logical_key.leaf e.Checkout.key, `File e))
-              files
-            @ List.map (fun (d, _mtime) -> (d, `Dir d)) dirs
-          in
-          let entries =
-            List.sort (fun (a, _) (b, _) -> compare (a : string) b) entries
-          in
-          let entries =
-            match after with
-              | None -> entries
-              | Some a -> List.filter (fun (n, _) -> compare n a > 0) entries
-          in
-          (* One past the page, which is how the cursor is answered without
-             asking whether the folder has more. *)
-          let page = List.filteri (fun i _ -> i <= limit) entries in
-          let+ rows =
-            Lwt_list.map_s
-              (fun (_, entry) ->
+          let* entries = children ~container_id prefix in
+          page ?after ~limit
+            ~label:(Logical_key.to_string prefix)
+            ~row:(fun (container_id, e) -> row_of ~container_id e)
+            (List.map (fun (name, _, e) -> (name, name, e)) entries)
+
+  (* Every item of the domain in one order, a page at a time: what a frontend
+     that must enumerate the whole domain asks for, with nothing held between
+     pages. Ordered by path, resumed from "<container id>/<name>": a path can
+     outgrow what a caller may hand back, a reference cannot.
+
+     A cursor whose folder is gone places nothing, and the listing starts over:
+     an item served twice costs a call, one skipped is never asked for again.
+
+     A folder this client has no id for is unnamed like any row, and its
+     subtree, which nothing could name, counts once more. *)
+  let handle_list_all ?after ~limit () =
+    let rec collect prefix (acc, unnamed) =
+      let* container = own_folder_id prefix in
+      match container with
+        | None -> Lwt.return (acc, unnamed + 1)
+        | Some container_id ->
+            let* here = children ~container_id prefix in
+            let acc =
+              List.rev_append
+                (List.map
+                   (fun (name, key, e) ->
+                     (Logical_key.path key, container_id ^ "/" ^ name, e))
+                   here)
+                acc
+            in
+            Lwt_list.fold_left_s
+              (fun acc (_, _, (_, entry)) ->
                 match entry with
-                  | `File e -> R.of_listed ~container_id e
-                  | `Dir d ->
-                      R.of_dir ~container_id (Logical_key.dir_in prefix d))
-              (List.filteri (fun i _ -> i < limit) page)
-          in
-          let named = List.filter_map Fun.id rows in
-          let unnamed = List.length rows - List.length named in
-          let next =
-            if List.length page > limit then (
-              match List.nth_opt page (limit - 1) with
-                | Some (name, _) -> [("next", `String name)]
-                | None -> [])
-            else []
-          in
-          ok_json
-            ((("items", `List (List.map Item_row.to_json named)) :: next)
-            @ unnamed_field (Logical_key.to_string prefix) unnamed)
+                  | `Dir key -> collect key acc
+                  | `File _ -> Lwt.return acc)
+              (acc, unnamed) here
+    in
+    let* after =
+      match Option.map (String.split_on_char '/') after with
+        | Some [id; name] ->
+            let+ key = resolve (`File (id, name)) in
+            Option.map Logical_key.path key
+        | _ -> Lwt.return_none
+    in
+    (* ponytail: the mirror is walked whole for every page; an index by path if
+       a domain grows past what a readdir sweep can page. *)
+    let* entries, skipped = collect Lk.root ([], 0) in
+    page ?after ~skipped ~limit ~label:"list_all"
+      ~row:(fun (container_id, e) -> row_of ~container_id e)
+      entries
 
   let dir_id_field = function None -> [] | Some id -> [("id", `String id)]
 
@@ -595,16 +665,12 @@ module Make
                         with_target_ref (fun t key ->
                             handle_stat ~expect:(expected_kind t) key)
                     | "list_dir" ->
-                        let after =
-                          match get_str obj "after" with
-                            | "" -> None
-                            | s -> Some s
-                        in
                         with_target
-                          (handle_list_dir ?after
-                             ~limit:
-                               (Option.value (get_int obj "limit")
-                                  ~default:default_page_limit))
+                          (handle_list_dir ?after:(page_after obj)
+                             ~limit:(page_limit obj))
+                    | "list_all" ->
+                        handle_list_all ?after:(page_after obj)
+                          ~limit:(page_limit obj) ()
                     | "changes_since" ->
                         handle_changes_since
                           ~limit:
