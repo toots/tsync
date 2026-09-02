@@ -126,6 +126,7 @@ module Over
     (Io : Io.S)
     (Fs : Fs.S with type 'a io := 'a Io.t)
     (Syscalls : Syscalls.S with type 'a io := 'a Io.t)
+    (Spool : Listing.SPOOL with type 'a io := 'a Io.t)
     (Folder_ids : Folder_ids.S with type 'a io := 'a Io.t)
     (Objects : Remote.OVER with type 'a io := 'a Io.t)
     (Store : Store.INODE with type 'a io := 'a Io.t)
@@ -134,6 +135,12 @@ module Over
     (Checkout : Checkout.OVER with type 'a io := 'a Io.t)
     (Content : Data.OVER with type 'a io := 'a Io.t) =
 struct
+  module Pub =
+    Publish.Over (Io) (Syscalls) (Spool) (Folder_ids) (Objects) (Store)
+      (Journal_store)
+      (Mirror)
+      (Checkout)
+
   open Io_syntax.Make (Io)
 
   let return = Io.return
@@ -146,6 +153,7 @@ struct
     module Mf = Mirror.Make (C)
     module Ck = Checkout.Make (C)
     module D = Content.Make (C) (R)
+    module P = Pub.Make (C)
 
     let join_rel base rel =
       if rel = "" then base else if base = "" then rel else base ^ "/" ^ rel
@@ -160,45 +168,12 @@ struct
     (* A source naming one file is that file, not a folder with nothing in it:
        enumerating its children would copy nothing and report success. *)
     let one_file = [("", `File)]
-    let entry_ops = 2000
-
-    (* A count alone bounds nothing a reader can feel: a run over a few hundred
-       large files never reaches the cap, so every peer would see the run's
-       folders and none of its files until it ended. *)
-    let entry_age = 10.
     let rel_of key = Logical_key.path key
-
-    (* Ops are published as they accumulate rather than at the end, so a run over
-       a large tree stays visible to peers while it goes. *)
-    let pending = ref []
-    let pending_count = ref 0
-    let published_at = ref 0.
-
-    let publish () =
-      match List.rev !pending with
-        | [] -> return_unit
-        | ops ->
-            pending := [];
-            pending_count := 0;
-            published_at := Unix.gettimeofday ();
-            let* ek =
-              Js.write_journal_entry_body
-                (Bigstring.of_string (Journal.encode ops))
-            in
-            Js.bump_cursor ek
-
-    let add ops =
-      pending := List.rev_append ops !pending;
-      pending_count := !pending_count + List.length ops;
-      if
-        !pending_count >= entry_ops
-        || Unix.gettimeofday () -. !published_at >= entry_age
-      then publish ()
-      else return_unit
+    let spool_dir = Filename.concat C.cache_root "rsync"
 
     (* A symlink's manifest names no chunks, so there is nothing for an upload to
        inherit and the body itself is the whole copy. *)
-    let copy_manifest ~src dst_key =
+    let copy_manifest ~batch ~src dst_key =
       match Manifest.symlink src with
         | Some _ ->
             let* () =
@@ -206,7 +181,9 @@ struct
                 ~data:(Manifest.body ~name:(Logical_key.leaf dst_key) src)
             in
             let* () = Mf.write dst_key src in
-            let+ () = add [`Put (rel_of dst_key, Manifest.size src)] in
+            let+ () =
+              P.Batch.add batch [`Put (rel_of dst_key, Manifest.size src)]
+            in
             Copied 0L
         | None ->
             let* m =
@@ -218,41 +195,29 @@ struct
                 ()
             in
             let* () = Mf.write dst_key m in
-            let+ () = add [`Put (rel_of dst_key, Manifest.size m)] in
+            let+ () =
+              P.Batch.add batch [`Put (rel_of dst_key, Manifest.size m)]
+            in
             Copied 0L
 
-    let publish_symlink ~target ~mtime dst_key =
-      let m =
-        Manifest.make_symlink ~name:(Logical_key.leaf dst_key) ~target ~mtime
-      in
-      let* () =
-        St.put_manifest ~key:dst_key
-          ~data:(Manifest.body ~name:(Logical_key.leaf dst_key) m)
-      in
-      let* () = Mf.write dst_key m in
-      let+ () = add [`Put (rel_of dst_key, Manifest.size m)] in
-      Copied 0L
-
-    let upload_local ~src_path dst_key =
+    let upload_local ~batch ~src_path dst_key =
       let* kind = Fs.lstat_kind src_path in
       match (kind, C.symlink_policy) with
         | `Symlink _, `Skip -> return (Skipped `Source_missing)
         | `Symlink target, `Keep ->
             let* st = Syscalls.lstat src_path in
-            publish_symlink ~target ~mtime:st.Unix.st_mtime dst_key
-        | _ -> (
-            let* st = Fs.stat_opt_large src_path in
-            match st with
-              | None -> return (Failed "vanished")
-              | Some st ->
-                  let* chunk_size = R.chunk_size () in
-                  let* m =
-                    R.upload ~key:dst_key ~src_path
-                      ~mtime:st.Unix.LargeFile.st_mtime ~chunk_size ()
-                  in
-                  let* () = Mf.write dst_key m in
-                  let+ () = add [`Put (rel_of dst_key, Manifest.size m)] in
-                  Copied (Manifest.size m))
+            let* m = P.symlink ~target ~mtime:st.Unix.st_mtime dst_key in
+            let+ () =
+              P.Batch.add batch [`Put (rel_of dst_key, Manifest.size m)]
+            in
+            Copied 0L
+        | `Missing, _ -> return (Failed "vanished")
+        | _ ->
+            let* m = P.file ~src_path dst_key in
+            let+ () =
+              P.Batch.add batch [`Put (rel_of dst_key, Manifest.size m)]
+            in
+            Copied (Manifest.size m)
 
     let assemble ~src_key dst_path =
       let* () = Fs.ensure_parent dst_path in
@@ -300,19 +265,14 @@ struct
       in
       Copied (Int64.of_int (List.length chunks * chunk_size))
 
-    let make_dir side key path =
+    let make_dir ~batch side key path =
       match side with
         | `Local ->
             let+ () = Fs.mkdir_p path in
             Made_dir
         | `Domain ->
-            let* () = Ck.create_dir key in
-            let* () = St.put_folder_marker ~key in
-            let* id =
-              Folder_ids.ensure_id ~cache_root:C.cache_root
-                ~domain_name:C.domain_name key
-            in
-            let+ () = add [`Mkdir (rel_of key, Some id)] in
+            let* id = P.dir key in
+            let+ () = P.Batch.add batch [`Mkdir (rel_of key, Some id)] in
             Made_dir
 
     (* Cut at the manifest's size rather than this domain's, so index [i] names
@@ -418,16 +378,16 @@ struct
                   let+ f = local_facts ~against path st in
                   Some f)
 
-    let drop_source src rel =
+    let drop_source ~batch src rel =
       match src with
         | Local root -> Fs.unlink_quiet (at root rel)
         | Domain prefix ->
             let key = Lk.file (join_rel prefix rel) in
             let* () = St.delete_manifest ~key in
             let* () = Mf.delete key in
-            add [`Delete (rel_of key)]
+            P.Batch.add batch [`Delete (rel_of key)]
 
-    let act ~src ~dst rel decision =
+    let act ~batch ~src ~dst rel decision =
       match decision with
         | Skip s -> return (Skipped s)
         | Make_dir side ->
@@ -439,7 +399,7 @@ struct
                 | Domain prefix -> Lk.dir (join_rel prefix rel)
                 | Local _ -> Lk.root
             in
-            make_dir side key path
+            make_dir ~batch side key path
         | Rename_in_domain ->
             let src_key =
               match src with
@@ -464,7 +424,7 @@ struct
             let* () = St.delete_manifest ~key:src_key in
             let* () = Mf.delete src_key in
             let+ () =
-              add
+              P.Batch.add batch
                 [
                   `Rename
                     {
@@ -483,7 +443,7 @@ struct
                 | Domain prefix -> Lk.file (join_rel prefix rel)
                 | Local _ -> Lk.root
             in
-            copy_manifest ~src:m dst_key
+            copy_manifest ~batch ~src:m dst_key
         | Upload _ ->
             let src_path =
               match src with Local root -> at root rel | Domain _ -> ""
@@ -493,7 +453,7 @@ struct
                 | Domain prefix -> Lk.file (join_rel prefix rel)
                 | Local _ -> Lk.root
             in
-            upload_local ~src_path dst_key
+            upload_local ~batch ~src_path dst_key
         | Assemble _ ->
             let src_key =
               match src with
@@ -528,9 +488,7 @@ struct
 
     let run ?(move = false) ?(dry_run = false) ?(on_entry = fun ~rel:_ _ -> ())
         ~src ~dst () =
-      pending := [];
-      pending_count := 0;
-      published_at := Unix.gettimeofday ();
+      let* batch = P.Batch.create ~dir:spool_dir () in
       let* entries = entries_of src in
       let* summary =
         iter_s_acc empty_summary entries (fun summary (rel, kind) ->
@@ -584,17 +542,18 @@ struct
             else
               let* outcome =
                 Io.catch
-                  (fun () -> act ~src ~dst rel decision)
+                  (fun () -> act ~batch ~src ~dst rel decision)
                   (fun exn -> return (Failed (Printexc.to_string exn)))
               in
               let* () =
                 match (outcome, source_disposal ~move decision) with
-                  | Copied _, `Drop -> drop_source src rel
+                  | Copied _, `Drop -> drop_source ~batch src rel
                   | _ -> return_unit
               in
               return (tally summary outcome))
       in
-      let* () = publish () in
+      let* () = P.Batch.publish batch in
+      let* () = P.Batch.drop batch in
       let+ () = Js.flush_cursor () in
       summary
   end
