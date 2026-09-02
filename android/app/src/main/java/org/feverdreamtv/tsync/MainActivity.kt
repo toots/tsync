@@ -21,6 +21,7 @@ import android.widget.AutoCompleteTextView
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.EditText
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ListView
 import android.widget.ScrollView
@@ -74,18 +75,18 @@ class MainActivity : Activity() {
     private fun showBrowser() {
         val here = trail.lastOrNull()?.first ?: Cli.ROOT
         val rows = ArrayList<JSONObject>()
-        val adapter = object : ArrayAdapter<JSONObject>(
-            this, android.R.layout.simple_list_item_2, android.R.id.text1, rows
-        ) {
+        val adapter = object : ArrayAdapter<JSONObject>(this, 0, rows) {
             override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
-                val view = super.getView(position, convertView, parent)
+                val view = convertView ?: fileRow()
                 val entry = getItem(position)!!
                 val isDir = entry.getString("kind") == "dir"
                 val name = entry.getString("name")
-                view.findViewById<TextView>(android.R.id.text1).text =
-                    if (isDir) "$name/" else name
+                view.findViewById<ImageView>(android.R.id.icon).setImageResource(
+                    if (isDir) R.drawable.ic_folder else Mime.icon(Mime.of(name))
+                )
+                view.findViewById<TextView>(android.R.id.text1).text = name
                 view.findViewById<TextView>(android.R.id.text2).text =
-                    if (isDir) "folder"
+                    if (isDir) "Folder"
                     else Formatter.formatShortFileSize(context, entry.optLong("size"))
                 return view
             }
@@ -131,10 +132,10 @@ class MainActivity : Activity() {
             if (entry.getString("kind") == "dir") {
                 trail.addLast(entry.getString("ref") to entry.getString("name"))
                 showBrowser()
-            } else offerLink(entry)
+            } else offerActions(entry)
         }
         list.setOnItemLongClickListener { _, _, position, _ ->
-            offerLink(rows[position])
+            offerActions(rows[position])
             true
         }
 
@@ -162,12 +163,69 @@ class MainActivity : Activity() {
         loadMore()
     }
 
-    private fun offerLink(entry: JSONObject) {
+    /** An icon, a name and a line under it, the way the platform's own lists
+     *  read; built here since there is no layout to inflate. */
+    private fun fileRow(): View {
+        val icon = ImageView(this).apply {
+            id = android.R.id.icon
+            layoutParams = LinearLayout.LayoutParams(dp(40), dp(40)).apply { rightMargin = dp(16) }
+        }
+        val name = TextView(this).apply {
+            id = android.R.id.text1
+            textSize = 16f
+            setSingleLine()
+            ellipsize = android.text.TextUtils.TruncateAt.MIDDLE
+        }
+        val detail = TextView(this).apply {
+            id = android.R.id.text2
+            textSize = 13f
+        }
+        val text = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(name)
+            addView(detail)
+        }
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            setPadding(dp(8), dp(12), dp(8), dp(12))
+            addView(icon)
+            addView(text, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+        }
+    }
+
+    private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
+
+    /** What can be done with an item: a file opens in another app or is
+     *  shared; a folder is shared. */
+    private fun offerActions(entry: JSONObject) {
         val name = entry.getString("name")
+        val ref = entry.getString("ref")
+        val isDir = entry.getString("kind") == "dir"
+        val actions = if (isDir) arrayOf("Share link") else arrayOf("Open", "Share link")
         AlertDialog.Builder(this)
             .setTitle(name)
-            .setItems(arrayOf("Share link")) { _, _ -> shareLink(entry.getString("ref"), name) }
+            .setItems(actions) { _, which ->
+                when (actions[which]) {
+                    "Open" -> open(ref, name)
+                    else -> shareLink(ref, name)
+                }
+            }
             .show()
+    }
+
+    /** Hands the file to whichever app takes its type, through the provider:
+     *  the reads it makes are served here, the same as from the picker. */
+    private fun open(ref: String, name: String) {
+        val uri = android.provider.DocumentsContract.buildDocumentUri(TsyncProvider.AUTHORITY, ref)
+        val view = Intent(Intent.ACTION_VIEW)
+            .setDataAndType(uri, Mime.of(name))
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        try {
+            startActivity(Intent.createChooser(view, name))
+        } catch (nothing: android.content.ActivityNotFoundException) {
+            toast("No app on this phone opens $name")
+        }
     }
 
     /** The link is the server's to mint, so it is asked for and shown once it
@@ -320,7 +378,8 @@ class MainActivity : Activity() {
     private fun offerRestart() {
         AlertDialog.Builder(this)
             .setTitle("Settings saved")
-            .setMessage("tsync will connect to the new server when it next starts.")
+            .setMessage("tsync will connect to the new server when it next starts. " +
+                "An upload in progress resumes then.")
             .setPositiveButton("Restart now") { _, _ ->
                 finishAffinity()
                 Runtime.getRuntime().exit(0)

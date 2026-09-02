@@ -14,7 +14,6 @@ import android.provider.DocumentsContract.Document
 import android.provider.DocumentsContract.Root
 import android.provider.DocumentsProvider
 import android.util.Log
-import android.webkit.MimeTypeMap
 import java.io.File
 
 /**
@@ -354,18 +353,12 @@ class TsyncProvider : DocumentsProvider() {
         cursor.newRow()
             .add(Document.COLUMN_DOCUMENT_ID, documentId)
             .add(Document.COLUMN_DISPLAY_NAME, name)
-            .add(Document.COLUMN_MIME_TYPE, mimeType(name))
+            .add(Document.COLUMN_MIME_TYPE, Mime.of(name))
             .add(Document.COLUMN_FLAGS,
                 Document.FLAG_SUPPORTS_WRITE or Document.FLAG_SUPPORTS_DELETE or
                     Document.FLAG_SUPPORTS_RENAME)
             .add(Document.COLUMN_SIZE, size)
             .add(Document.COLUMN_LAST_MODIFIED, modified.takeIf { it > 0 })
-    }
-
-    private fun mimeType(name: String): String {
-        val extension = name.substringAfterLast('.', "").lowercase()
-        return MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension)
-            ?: "application/octet-stream"
     }
 
     companion object {
