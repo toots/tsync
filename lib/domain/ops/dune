@@ -9,17 +9,9 @@
    -open
    Tsync_cache_layout
    -open
-   Tsync_filing
-   -open
-   Tsync_content
-   -open
-   Tsync_staged
+   Tsync_checkout
    -open
    Tsync_remote
-   -open
-   Tsync_store
-   -open
-   Tsync_file_store
    -open
    Tsync_io
    -open
@@ -31,16 +23,6 @@
    -open
    Tsync_chunk_integrity
    -open
-   Tsync_history
-   -open
-   Tsync_checkout
-   -open
-   Tsync_file
-   -open
-   Tsync_file_ops
-   -open
-   Tsync_manifests
-   -open
    Tsync_manifest
    -open
    Tsync_journal
@@ -48,16 +30,6 @@
    Tsync_chunks
    -open
    Tsync_conf
-   -open
-   Tsync_folder_ids
-   -open
-   Tsync_layout
-   -open
-   Tsync_inode_tree
-   -open
-   Tsync_corruption
-   -open
-   Tsync_collection
    -open
    Tsync_sync
    -open
@@ -76,31 +48,17 @@
  (public_name tsync-libs.ops)
  (libraries
   tsync_cache_layout
-  tsync_filing
-  tsync_content
-  tsync_staged
+  tsync_checkout
   tsync_remote
-  tsync_store
-  tsync_file_store
   tsync_io
   tsync_retry
   tsync_logical_key
   tsync_id
   tsync_chunk_integrity
-  tsync_history
-  tsync_checkout
-  tsync_file
-  tsync_file_ops
-  tsync_manifests
   tsync_manifest
   tsync_journal
   tsync_chunks
   tsync_conf
-  tsync_folder_ids
-  tsync_layout
-  tsync_inode_tree
-  tsync_corruption
-  tsync_collection
   tsync_sync
   tsync_glob
   tsync_bigstring

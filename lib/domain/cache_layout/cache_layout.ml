@@ -71,11 +71,9 @@ end
 module type S = sig
   type 'a io
 
-    val record_dir_name : string -> string -> unit io
-
-    val real_dir_name : string -> string -> string io
-
-    val clear : cache_root:string -> domain_name:string -> unit io
+  val record_dir_name : string -> string -> unit io
+  val real_dir_name : string -> string -> string io
+  val clear : cache_root:string -> domain_name:string -> unit io
 end
 
 module Make

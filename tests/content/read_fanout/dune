@@ -6,7 +6,7 @@
    -open
    Tsync_manifest
    -open
-   Tsync_content_lwt
+   Tsync_checkout_lwt
    -open
    Tsync_bigstring
    -open
@@ -19,7 +19,7 @@
  (libraries
   tsync-libs.logical_key
   tsync_manifest
-  tsync_content_lwt
+  tsync_checkout_lwt
   tsync_test_harness
   tsync_bigstring
   tsync_backend_lwt

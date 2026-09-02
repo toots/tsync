@@ -6,11 +6,7 @@
    -open
    Tsync_remote_lwt
    -open
-   Tsync_layout_lwt
-   -open
-   Tsync_inode_tree
-   -open
-   Tsync_inode_tree_lwt
+   Tsync_remote
    -open
    Tsync_checkout
    -open
@@ -18,7 +14,7 @@
    -open
    Tsync_field_spec
    -open
-   Tsync_content_lwt
+   Tsync_checkout_lwt
    -open
    Tsync_ipc_lwt
    -open
@@ -63,14 +59,12 @@
   cohttp
   tsync_logical_key
   tsync_remote_lwt
-  tsync_layout_lwt
-  tsync_inode_tree
-  tsync_inode_tree_lwt
+  tsync_remote
   tsync_conf_lwt
   tsync_checkout
   tsync_manifest
   tsync-libs.field_spec
-  tsync-libs.content_lwt
+  tsync-libs.checkout_lwt
   tsync_io_lwt
   tsync-libs.frontend_register
   tsync-libs.engine

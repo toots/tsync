@@ -1,6 +1,13 @@
 (executable
  (flags
-  (:standard -open Tsync_ops -open Tsync_manifest -open Tsync_chunks -open
-    Tsync_test_harness))
+  (:standard
+   -open
+   Tsync_ops
+   -open
+   Tsync_manifest
+   -open
+   Tsync_chunks
+   -open
+   Tsync_test_harness))
  (name rsync_plan)
  (libraries tsync-libs.ops tsync_manifest tsync_chunks tsync_test_harness))

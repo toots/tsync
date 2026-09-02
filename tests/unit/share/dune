@@ -4,7 +4,7 @@
    -open
    Tsync_logical_key
    -open
-   Tsync_layout_lwt
+   Tsync_remote_lwt
    -open
    Tsync_ops_lwt
    -open
@@ -22,7 +22,7 @@
  (name share_test)
  (libraries
   tsync_logical_key
-  tsync_layout_lwt
+  tsync_remote_lwt
   tsync_ops_lwt
   tsync_conf_lwt
   tsync_bigstring

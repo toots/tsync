@@ -2,19 +2,15 @@
  (flags
   (:standard
    -open
-   Tsync_wal
+   Tsync_checkout
    -open
-   Tsync_wal_lwt
+   Tsync_checkout_lwt
    -open
    Tsync_logical_key
    -open
    Tsync_journal
    -open
    Tsync_sync_lwt
-   -open
-   Tsync_file
-   -open
-   Tsync_file_lwt
    -open
    Tsync_io_lwt
    -open
@@ -25,14 +21,12 @@
    Tsync_test_harness))
  (name queue_bytes_test)
  (libraries
-  tsync_wal
-  tsync_wal_lwt
+  tsync_checkout
+  tsync_checkout_lwt
   tsync_logical_key
   tsync_journal
   tsync_test_harness
   tsync_sync_lwt
-  tsync_file
-  tsync_file_lwt
   tsync_conf_lwt
   tsync_local_backend_lwt
   tsync_io_lwt

@@ -2,9 +2,9 @@
  (flags
   (:standard
    -open
-   Tsync_wal
+   Tsync_checkout
    -open
-   Tsync_wal_lwt
+   Tsync_checkout_lwt
    -open
    Tsync_retry
    -open
@@ -16,17 +16,7 @@
    -open
    Tsync_journal
    -open
-   Tsync_content_lwt
-   -open
-   Tsync_layout_lwt
-   -open
-   Tsync_file_store_lwt
-   -open
-   Tsync_corruption_lwt
-   -open
-   Tsync_collection
-   -open
-   Tsync_collection_lwt
+   Tsync_remote
    -open
    Tsync_cache_layout
    -open
@@ -54,20 +44,15 @@
  (name tsync_diagnostics)
  (public_name tsync-libs.diagnostics)
  (libraries
-  tsync_wal
-  tsync_wal_lwt
+  tsync_checkout
+  tsync_checkout_lwt
   tsync-libs.conf_parsing
   tsync_retry
   tsync_logical_key
   tsync_chunks
   tsync_remote_lwt
   tsync_journal
-  tsync_content_lwt
-  tsync_layout_lwt
-  tsync_file_store_lwt
-  tsync_corruption_lwt
-  tsync_collection
-  tsync_collection_lwt
+  tsync_remote
   tsync_cache_layout
   tsync_io
   tsync_io_lwt

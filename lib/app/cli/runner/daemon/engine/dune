@@ -6,19 +6,11 @@
    -open
    Tsync_logical_key
    -open
-   Tsync_checkout_maintenance_lwt
-   -open
-   Tsync_staged_lwt
-   -open
    Tsync_checkout_lwt
-   -open
-   Tsync_file_ops
-   -open
-   Tsync_file_lwt
    -open
    Tsync_sync_lwt
    -open
-   Tsync_file_store_lwt
+   Tsync_remote_lwt
    -open
    Tsync_ipc_lwt
    -open
@@ -39,13 +31,9 @@
   lwt.unix
   yojson
   tsync_logical_key
-  tsync_checkout_maintenance_lwt
-  tsync_staged_lwt
   tsync_checkout_lwt
-  tsync_file_ops
-  tsync_file_lwt
   tsync_sync_lwt
-  tsync_file_store_lwt
+  tsync_remote_lwt
   tsync_backend_lwt
   tsync_conf_lwt
   tsync_ipc_lwt

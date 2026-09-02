@@ -8,9 +8,9 @@
    -open
    Tsync_test_harness
    -open
-   Tsync_store
+   Tsync_remote
    -open
-   Tsync_inode_tree_lwt
+   Tsync_remote_lwt
    -open
    Tsync_bigstring
    -open
@@ -26,8 +26,8 @@
   tsync_logical_key
   tsync_manifest
   tsync_test_harness
-  tsync_store
-  tsync_inode_tree_lwt
+  tsync_remote
+  tsync_remote_lwt
   tsync_bigstring
   tsync_conf_lwt
   tsync_backend_register

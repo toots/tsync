@@ -10,13 +10,9 @@
    -open
    Tsync_checkout_lwt
    -open
-   Tsync_manifests_lwt
-   -open
    Tsync_test_harness
    -open
-   Tsync_content_lwt
-   -open
-   Tsync_store
+   Tsync_remote
    -open
    Tsync_bigstring
    -open
@@ -31,10 +27,8 @@
   tsync_manifest
   tsync_remote_lwt
   tsync_checkout_lwt
-  tsync_manifests_lwt
   tsync_test_harness
-  tsync_content_lwt
-  tsync_store
+  tsync_remote
   tsync_bigstring
   tsync_conf_lwt
   tsync_backend_lwt
