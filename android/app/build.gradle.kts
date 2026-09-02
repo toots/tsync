@@ -48,7 +48,7 @@ dependencies {
     // api, not implementation: keys and the wire's error type are part of what
     // the app's own classes hand each other.
     api(project(":core"))
-    implementation("androidx.work:work-runtime-ktx:2.9.1")
+    implementation("androidx.work:work-runtime-ktx:2.10.1")
 
     testImplementation("junit:junit:4.13.2")
     // The real thing: android.jar is stubbed for unit tests, and the protocol
@@ -56,7 +56,7 @@ dependencies {
     testImplementation("org.json:json:20240303")
     testImplementation("org.robolectric:robolectric:4.14.1")
     testImplementation("androidx.test:core:1.6.1")
-    testImplementation("androidx.work:work-testing:2.9.1")
+    testImplementation("androidx.work:work-testing:2.10.1")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")
 
     androidTestImplementation("androidx.test:core:1.6.1")
