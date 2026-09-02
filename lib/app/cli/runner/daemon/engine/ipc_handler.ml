@@ -482,10 +482,12 @@ module Make
 
   (* The file is adopted where it is: no copy, no chunking pass. Answered from
      the staged metadata, which is what will be published. *)
-  let handle_write key staging_path =
+  let handle_write ~await key staging_path =
     ignore (F.cancel_upload key);
     let* () = F.write_whole key ~src_path:staging_path in
     let* () = F.queue_put key in
+    (* [isUploaded] in the answer says how the wait ended. *)
+    let* () = if await then Sq.wait_uploaded key else Lwt.return_unit in
     let* resolved = F.resolve key in
     let fields =
       match resolved with
@@ -638,7 +640,10 @@ module Make
                     | "create" -> with_file_destination handle_create
                     | "write" ->
                         with_file_destination (fun key ->
-                            handle_write key (get_str obj "staging"))
+                            handle_write
+                              ~await:
+                                (List.assoc_opt "await" obj = Some (`Bool true))
+                              key (get_str obj "staging"))
                     | "delete" -> with_target handle_delete
                     | "rename" -> (
                         (* Source is named as anywhere else; the target is a

@@ -2,6 +2,7 @@ booted
 request lists the fixture: true
 request makes a folder: true
 the folder is listed once made: true
+a write after a change is sent before it answers: true
 a request that is not JSON is refused, not raised: {"ok":false,"code":"invalid","error":"invalid JSON"}
 status reports the domain: true
 size matches: true

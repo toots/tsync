@@ -31,6 +31,11 @@ module type S = sig
       {!File_store.flush_cursor}'s to publish — see {!Domain_engine.drain} for
       the order the two go in. *)
   val drain : unit -> unit io
+
+  (** Wait for what is owed under one key to be sent, or to start failing,
+      leaving the queue running: for a caller that wants its own write published
+      before it goes on, and nobody else's. *)
+  val wait_uploaded : Logical_key.t -> unit io
 end
 
 (** {!S} over a domain's conf and its file operations: what a consumer takes. *)

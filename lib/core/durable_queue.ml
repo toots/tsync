@@ -128,6 +128,7 @@ module type QUEUE = sig
   val stats : t -> stats
   val in_flight : t -> job list
   val owed : t -> int
+  val settle_key : t -> string -> unit io
 end
 
 module type S = sig
@@ -492,6 +493,21 @@ struct
       else
         let* () = Lock.wait t.settled in
         settle t
+
+    (* One key's job leaving the queue: done, dropped or cancelled. Ends the
+       way [settle] does once that key has started failing -- the record is on
+       disk and outlives the process -- so a caller is never held for a store
+       that is down. An ordered queue has no keys, so it is the whole queue. *)
+    let rec settle_key t key =
+      match t.topo with
+        | Ordered -> settle t
+        | Keyed k -> (
+            match Hashtbl.find_opt k.slots key with
+              | None -> Io.return ()
+              | Some slot when slot.failures > 0 -> Io.return ()
+              | Some _ ->
+                  let* () = Lock.wait t.settled in
+                  settle_key t key)
 
     let slot_of t e =
       match t.topo with
