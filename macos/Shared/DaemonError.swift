@@ -18,6 +18,9 @@ enum DaemonError: Error {
         return nil
     }
 
+    /// The item is gone, which a delete takes as done and a lookup as absent.
+    var isNotFound: Bool { code == "not_found" }
+
     var message: String {
         switch self {
         case .transport(let m): return m
