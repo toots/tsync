@@ -83,34 +83,21 @@ final class WorkingSetEnumerator: NSObject, NSFileProviderEnumerator, @unchecked
 
     // MARK: - Items
 
-    /// The domain walked depth first, a page per directory listing.
+    /// The whole domain, a page at a time: a fresh anchor is paired with a full
+    /// enumeration, which is what the system asks for here.
     ///
-    /// The page carries the directories still to visit and where the current one
-    /// stopped, so nothing is held between calls and a page names its own place
-    /// in the walk.
+    /// The page is the daemon's cursor for the last item served, bounded like a
+    /// reference, so nothing is held between calls and a page means the same to
+    /// a process that did not issue it.
     func enumerateItems(for observer: any NSFileProviderEnumerationObserver,
                         startingAt page: NSFileProviderPage) {
         Task {
             do {
                 let size = max(1, observer.suggestedPageSize ?? 100)
-                var walk = WorkingSetPage.decode(Cursor.name(page))
-                guard let container = walk.pending.first else {
-                    observer.finishEnumerating(upTo: nil)
-                    return
-                }
-                let batch = try await client.listDir(container, after: walk.after, limit: size)
+                let batch = try await client.listAll(after: Cursor.name(page), limit: size)
                 observer.didEnumerate(
                     batch.items.compactMap { TsyncItem.make($0, readOnly: readOnly) })
-
-                let found = batch.items.filter(\.isDirectory).map(\.ref)
-                if let next = batch.next {
-                    walk = WorkingSetPage(pending: walk.pending, after: next)
-                } else {
-                    walk = WorkingSetPage(pending: Array(walk.pending.dropFirst()) + found,
-                                          after: nil)
-                }
-                observer.finishEnumerating(
-                    upTo: walk.pending.isEmpty ? nil : WorkingSetPage.encode(walk))
+                observer.finishEnumerating(upTo: batch.next.flatMap(Cursor.page))
             } catch {
                 log.error("enumerateItems(workingSet): \(error, privacy: .public)")
                 observer.finishEnumeratingWithError(FileProviderError.from(error))

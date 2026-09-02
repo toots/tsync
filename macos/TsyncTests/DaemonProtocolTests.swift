@@ -235,6 +235,32 @@ final class DaemonProtocolTests: XCTestCase {
         XCTAssertEqual(seen, names, "the pages laid end to end are the listing")
     }
 
+    /// The working set is the whole domain in one order, paged across folders
+    /// by a cursor a fresh process can hand back.
+    func testTheWholeDomainPagesEndToEnd() async throws {
+        _ = try await client.mkdir(parentRef: ItemID.rootForm, name: "sub")
+        for name in ["a.txt", "z.txt"] {
+            _ = try await client.write(parentRef: ItemID.rootForm, name: name,
+                                       staging: try staged(name))
+        }
+        let root = try await listRoot()
+        let sub = try XCTUnwrap(root.first(where: \.isDirectory))
+        _ = try await client.write(parentRef: sub.ref, name: "deep.txt",
+                                   staging: try staged("deep"))
+
+        var seen: [String] = []
+        var after: String? = nil
+        for _ in 0...4 {
+            let page = try await client.listAll(after: after, limit: 2)
+            XCTAssertLessThanOrEqual(page.items.count, 2, "a page must honour its limit")
+            seen.append(contentsOf: page.items.map(\.name))
+            guard let next = page.next else { break }
+            after = next
+        }
+        XCTAssertEqual(seen, ["a.txt", "sub", "deep.txt", "z.txt"],
+                       "by path, a folder's children right after it")
+    }
+
     /// Resuming from a name that is no longer there still lands after it, which
     /// is what stops a deletion mid-enumeration skipping the next item.
     func testAPageResumesAfterADeletedName() async throws {

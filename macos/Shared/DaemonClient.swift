@@ -141,7 +141,8 @@ struct DaemonResponse: Decodable {
     /// it is nil for everything else.
     let item: DaemonItem?
 
-    /// `list_dir` only: resume the listing after this name. Absent at the end.
+    /// `list_dir` and `list_all`: resume the listing after this cursor. Absent
+    /// at the end.
     let next: String?
 
     /// `changes_since` only: another call from `cursor` would answer with more.
@@ -365,6 +366,15 @@ extension DaemonClient {
         async throws -> (items: [DaemonItem], next: String?) {
         let response = try await send(
             DaemonRequest(action: "list_dir", ref: ref, after: after, limit: limit))
+        return (response.items ?? [], response.next)
+    }
+
+    /// One page of the whole domain, in one order across folders. `next` is the
+    /// cursor to resume from and is nil at the end.
+    func listAll(after: String? = nil, limit: Int? = nil)
+        async throws -> (items: [DaemonItem], next: String?) {
+        let response = try await send(
+            DaemonRequest(action: "list_all", after: after, limit: limit))
         return (response.items ?? [], response.next)
     }
 

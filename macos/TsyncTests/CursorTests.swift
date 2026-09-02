@@ -63,29 +63,4 @@ final class CursorTests: XCTestCase {
         let decoded = Anchor.decode(NSFileProviderSyncAnchor(Data("nonsense".utf8)))
         XCTAssertEqual(decoded.token, "")
     }
-
-    /// A working-set scan is at a place within a directory with the rest of the
-    /// walk still ahead of it, and all of that has to survive being handed back.
-    func testAWorkingSetPageCarriesTheWalk() throws {
-        let walk = WorkingSetPage(pending: ["d:abc", "d:def"], after: "photo.jpg")
-        let page = try XCTUnwrap(WorkingSetPage.encode(walk))
-        let decoded = WorkingSetPage.decode(Cursor.name(page))
-        XCTAssertEqual(decoded.pending, ["d:abc", "d:def"])
-        XCTAssertEqual(decoded.after, "photo.jpg")
-    }
-
-    func testAWorkingSetPageAtTheStartOfADirectory() throws {
-        let walk = WorkingSetPage(pending: ["d:abc"], after: nil)
-        let page = try XCTUnwrap(WorkingSetPage.encode(walk))
-        let decoded = WorkingSetPage.decode(Cursor.name(page))
-        XCTAssertEqual(decoded.pending, ["d:abc"])
-        XCTAssertNil(decoded.after)
-    }
-
-    /// No page at all is the start of the scan, not a directory called "".
-    func testNoWorkingSetPageStartsAtTheRoot() {
-        let decoded = WorkingSetPage.decode(nil)
-        XCTAssertEqual(decoded.pending, [ItemID.rootForm])
-        XCTAssertNil(decoded.after)
-    }
 }
