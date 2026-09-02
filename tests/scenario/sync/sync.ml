@@ -368,6 +368,41 @@ let late_visible_entry =
       ];
   }
 
+(* A renames a folder B holds with a file inside: B's tree must follow. *)
+let foreign_dir_rename =
+  {
+    name = "foreign_dir_rename";
+    steps =
+      [
+        A (Mkdir "sub");
+        A (Write { path = "sub/x.txt"; content = "in" });
+        A Drain;
+        B Sync;
+        A (Rename { src = "sub"; dst = "sub-renamed" });
+        A Drain;
+        B Sync;
+      ];
+  }
+
+(* The folder B renames was A's own, with A's own file in it and a file B had
+   just moved in: what a peer renaming this client's folder looks like. *)
+let foreign_dir_rename_of_own_folder =
+  {
+    name = "foreign_dir_rename_of_own_folder";
+    steps =
+      [
+        B (Mkdir "sub");
+        B (Write { path = "sub/g1.txt"; content = "mine" });
+        B (Write { path = "f4.txt"; content = "moved" });
+        B Drain;
+        A Sync;
+        A (Rename { src = "f4.txt"; dst = "sub/f4.txt" });
+        A (Rename { src = "sub"; dst = "sub-renamed" });
+        A Drain;
+        B Sync;
+      ];
+  }
+
 let () =
   run_two_client_scenarios
     [
@@ -391,4 +426,6 @@ let () =
       stale_record_discarded;
       foreign_put_readopts_a_forgotten_folder_id;
       late_visible_entry;
+      foreign_dir_rename;
+      foreign_dir_rename_of_own_folder;
     ]
