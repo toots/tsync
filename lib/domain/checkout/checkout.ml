@@ -53,6 +53,7 @@ module type S = sig
   val list_tree : prefix:Logical_key.t -> unit -> listed list io
   val walk : unit -> string list io
   val ensure_root : unit -> unit io
+  val record : parent:Logical_key.t -> Inode_tree.entry -> Logical_key.t io
 end
 
 module type OVER = sig
@@ -246,5 +247,24 @@ struct
       List.sort_uniq compare (published @ staged)
 
     let ensure_root () = Fs.mkdir_p (Mf.root ())
+
+    (* Where a folder's child is filed and under what name, shared so a resync
+       and a browse leave the same tree behind. The name is in the body: the key
+       a child was read by is hashed. *)
+    let record ~parent (entry : Inode_tree.entry) =
+      match entry.Inode_tree.body with
+        | Inode_tree.Dir marker ->
+            let key = Logical_key.dir_in parent marker.Folder.name in
+            let+ () =
+              Folders.write ~cache_root:C.cache_root ~domain_name:C.domain_name
+                key marker
+            in
+            key
+        | Inode_tree.File manifest ->
+            let key =
+              Logical_key.file_in parent (Manifest.recorded_name manifest)
+            in
+            let+ () = Mf.write key manifest in
+            key
   end
 end

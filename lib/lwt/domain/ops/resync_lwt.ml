@@ -10,5 +10,5 @@ include
     (Inode_tree_lwt)
     (File_store_lwt)
     (File_lwt)
-    (Filing_lwt)
+    (Checkout_lwt)
     (Sync)

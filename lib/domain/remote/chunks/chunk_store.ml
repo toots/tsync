@@ -1,5 +1,29 @@
+(* Chunk keys this session has seen present, bounded so it counts what the memo
+   holds rather than what the session uploaded. *)
+module Dedup = struct
+  type t = { known : (string, unit) Hashtbl.t; max_known : unit -> int }
+
+  let create ?(max_known = fun () -> 100_000) () =
+    { known = Hashtbl.create 4096; max_known }
+
+  let remember t key =
+    if Hashtbl.length t.known >= t.max_known () then Hashtbl.reset t.known;
+    Hashtbl.replace t.known key ()
+
+  let count t = Hashtbl.length t.known
+end
+
 module Over (Io : Io.S) (Pools : Bounded.S with type 'a io := 'a Io.t) = struct
-  module Memo = Dedup.Over (Io)
+  open Io_syntax.Make (Io)
+
+  (* The memo, then the marker, then the store: a chunk this session placed
+     whose marker says it is not what landed must not read as stored, or the
+     bad bytes reach every later file containing it. *)
+  let known t ~corrupt ~present key =
+    let* marked = corrupt key in
+    if marked then Io.return false
+    else if Hashtbl.mem t.Dedup.known key then Io.return true
+    else present key
 
   module type DEPS = sig
     val put : key:Stored_key.t -> data:Bigstring.t -> unit -> unit Io.t
@@ -31,7 +55,7 @@ module Over (Io : Io.S) (Pools : Bounded.S with type 'a io := 'a Io.t) = struct
     let put data =
       let key = Chunks.key_of_body data in
       Metrics.add_hashed 1;
-      let* known = Memo.known dedup ~corrupt:D.corrupt ~present:D.present key in
+      let* known = known dedup ~corrupt:D.corrupt ~present:D.present key in
       let+ () =
         if known then (
           Dedup.remember dedup key;

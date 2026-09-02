@@ -27,7 +27,11 @@ let probes () =
   in
   (asked, record)
 
-module Dedup = Dedup_lwt
+module Dedup = struct
+  include Chunk_store.Dedup
+
+  let known = Chunk_store_lwt.known
+end
 
 let () =
   Lwt_main.run
