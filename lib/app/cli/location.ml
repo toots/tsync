@@ -167,12 +167,13 @@ let mounted_elsewhere ?domain cfg path =
    The kind is not asked for. Every part of the key this reads — its path, its
    leaf, its parent — is the same whichever it is, and whether a marker exists
    is what says the item is a folder. *)
-let item ?domain path =
+let item ?domain a =
   let cfg = Common.load_config () in
+  let path = a.token in
   let found =
-    match Daemons.domain_for_path ?domain ~paths:Common.runtime_paths cfg path with
-      | Some (d, rel) -> Some (d.Conf_parsing.name, rel)
-      | None -> mounted_elsewhere ?domain cfg path
+    match resolve ?domain cfg a with
+      | `Domain { name; rel } -> Some (name, rel)
+      | `Local p -> mounted_elsewhere ?domain cfg p
   in
   match found with
     | None -> Error (path ^ ": under no domain this machine serves")

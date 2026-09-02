@@ -3,7 +3,11 @@ open Common
 
 let cmd : unit Cmd.t =
   let path_arg =
-    Arg.(value & pos 0 (some string) None & info [] ~docv:"PATH")
+    Arg.(
+      value
+      & pos 0 (some (Location.conv `In_domain)) None
+      & info [] ~docv:"PATH"
+          ~doc:"A file, domain-relative or as $(b,DOMAIN:/path).")
   in
   let revert_arg =
     Arg.(
@@ -26,27 +30,34 @@ let cmd : unit Cmd.t =
      so [--domain] is only consulted when it was given. *)
   let revert path version domain =
     match Location.item ?domain path with
-      | Error msg -> Printf.eprintf "Error: %s\n" msg
+      | Error msg ->
+          Printf.eprintf "Error: %s\n" msg;
+          exit 1
       | Ok (domain, item) -> (
           match
             Ipc.action ~socket_path:(domain_socket ~domain ()) ~domain ~item
               ?arg:version "revert"
           with
-            | _ -> Printf.printf "Reverted: %s\n" path
-            | exception Failure msg -> Printf.eprintf "Error: %s\n" msg)
+            | _ -> Printf.printf "Reverted: %s\n" (Location.typed path)
+            | exception Failure msg ->
+                Printf.eprintf "Error: %s\n" msg;
+                exit 1)
   in
   let list path domain =
     run_lwt
       (let open Lwt.Syntax in
-       let (module C : Conf_lwt.S) = load_conf ?domain () in
+       let cfg = load_config () in
+       let (module C : Conf_lwt.S) = make_conf ?domain cfg in
        let module L = Layout_lwt.Inode.Make (C) in
        let module St = Store_lwt.Make (C) (L) in
        let module Hs = History_lwt.Make (C) (L) in
        let module Lk = Logical_key.Make (C) in
        let module B = (val C.store : C.Store) in
        let parse = History.parse ~versions_prefix:C.versions_prefix in
-       match path with
-         | Some rel ->
+       match Option.map (fun a -> Location.place ?domain cfg a) path with
+         | Some (Error msg) -> failwith msg
+         | Some (Ok p) ->
+             let rel = p.Location.rel in
              let* dir = Hs.version_dir ~key:(Lk.file rel) in
              let+ entries =
                match dir with

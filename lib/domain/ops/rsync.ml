@@ -270,6 +270,19 @@ struct
     module Ck = Checkout.Make (C)
     module D = Content.Make (C)
 
+    let join_rel base rel =
+      if rel = "" then base else if base = "" then rel else base ^ "/" ^ rel
+    let at root rel = if rel = "" then root else Filename.concat root rel
+
+    let manifest_at prefix rel =
+      let key = Lk.file (join_rel prefix rel) in
+      let* m = Mf.published key in
+      match m with Some _ -> return m | None -> R.fetch_manifest ~key ()
+
+    (* A source naming one file is that file, not a folder with nothing in it:
+       enumerating its children would copy nothing and report success. *)
+    let one_file = [ ("", `File) ]
+
     let entry_ops = 2000
 
     (* A count alone bounds nothing a reader can feel: a run over a few hundred
@@ -463,7 +476,7 @@ struct
             iter_s_acc acc rest f
 
     let rec walk_local ~root rel acc =
-      let path = if rel = "" then root else Filename.concat root rel in
+      let path = at root rel in
       let* names = Fs.readdir_list path in
       let* acc =
         iter_s_acc acc (List.sort compare names) (fun acc name ->
@@ -481,10 +494,19 @@ struct
     (* Directories first and in path order, so a folder marker is published
        before anything filed under it. *)
     let entries_of = function
-      | Local root ->
-          let+ found = walk_local ~root "" [] in
-          List.stable_sort compare (List.rev found)
-      | Domain prefix ->
+      | Local root -> (
+          let* kind = Fs.lstat_kind root in
+          match kind with
+            | `File _ | `Symlink _ -> return one_file
+            | `Missing -> return []
+            | `Dir ->
+                let+ found = walk_local ~root "" [] in
+                List.stable_sort compare (List.rev found))
+      | Domain prefix -> (
+          let* named = manifest_at prefix "" in
+          match named with
+          | Some _ -> return one_file
+          | None ->
           let rec walk rel acc =
             let key =
               if rel = "" then Lk.dir prefix else Lk.dir (prefix ^ "/" ^ rel)
@@ -502,15 +524,11 @@ struct
                 walk child ((child, `Dir) :: acc))
           in
           let+ found = walk "" [] in
-          List.stable_sort compare (List.rev found)
+          List.stable_sort compare (List.rev found))
 
-    let join_rel base rel =
-      if rel = "" then base else if base = "" then rel else base ^ "/" ^ rel
 
-    let manifest_at prefix rel =
-      let key = Lk.file (join_rel prefix rel) in
-      let* m = Mf.published key in
-      match m with Some _ -> return m | None -> R.fetch_manifest ~key ()
+    let at root rel = if rel = "" then root else at root rel
+
 
     let local_side ~against path =
       let* kind = Fs.lstat_kind path in
@@ -528,7 +546,7 @@ struct
 
     let drop_source src rel =
       match src with
-        | Local root -> Fs.unlink_quiet (Filename.concat root rel)
+        | Local root -> Fs.unlink_quiet (at root rel)
         | Domain prefix ->
             let key = Lk.file (join_rel prefix rel) in
             let* () = St.delete_manifest ~key in
@@ -541,7 +559,7 @@ struct
         | Make_dir side ->
             let path =
               match dst with
-                | Local root -> Filename.concat root rel
+                | Local root -> at root rel
                 | Domain _ -> ""
             in
             let key =
@@ -592,7 +610,7 @@ struct
         | Upload _ ->
             let src_path =
               match src with
-                | Local root -> Filename.concat root rel
+                | Local root -> at root rel
                 | Domain _ -> ""
             in
             let dst_key =
@@ -609,7 +627,7 @@ struct
             in
             let dst_path =
               match dst with
-                | Local root -> Filename.concat root rel
+                | Local root -> at root rel
                 | Domain _ -> ""
             in
             assemble ~src_key dst_path
@@ -621,7 +639,7 @@ struct
             in
             let dst_path =
               match dst with
-                | Local root -> Filename.concat root rel
+                | Local root -> at root rel
                 | Domain _ -> ""
             in
             patch_local ~src:m ~src_key dst_path chunks
@@ -662,7 +680,7 @@ struct
                     return (match src_m with Some m -> `Key m | None -> `Missing)
                 | Local root, `File -> (
                     let+ f =
-                      local_side ~against:dst_m (Filename.concat root rel)
+                      local_side ~against:dst_m (at root rel)
                     in
                     match f with Some f -> `File f | None -> `Missing)
             in
@@ -674,7 +692,7 @@ struct
                         | Some m -> `Key m
                         | None -> `Absent `Domain)
                 | Local root -> (
-                    let path = Filename.concat root rel in
+                    let path = at root rel in
                     let* kind = Fs.lstat_kind path in
                     match kind with
                       | `Dir -> return (`Dir `Local)

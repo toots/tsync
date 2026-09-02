@@ -1,0 +1,43 @@
+
+=== the domains a config knows
+  offers Files
+  offers Photos
+both domains are offered: ok
+
+=== narrowed by what is typed
+  offers Photos
+
+=== inside a domain named outright
+  offers Files:/session/
+  offers Files:/take.wav
+the imported folder is offered: ok
+
+=== further in
+  offers Files:/session/notes.txt
+
+=== narrowed by a partial leaf
+  offers Files:/session/notes.txt
+
+=== a folder that is not there
+  offers nothing
+
+=== a domain prefix
+  offers Files:/
+
+=== every offer is a spelling the command accepts
+  Files:/session/ -> exit 0, found
+Files:/session/ names something that is there: ok
+  Files:/take.wav -> exit 0, found
+Files:/take.wav names something that is there: ok
+  Files:/session/notes.txt -> exit 0, found
+Files:/session/notes.txt names something that is there: ok
+
+=== a path under no domain is refused in the exit code, not just on stderr
+  ls --domain Files /nonsense -> exit 1
+ls --domain Files /nonsense does not report success: ok
+  cache --domain Files --evict /nonsense -> exit 1
+cache --domain Files --evict /nonsense does not report success: ok
+  versions --domain Files /nonsense -> exit 1
+versions --domain Files /nonsense does not report success: ok
+
+8 check(s), 0 failure(s)

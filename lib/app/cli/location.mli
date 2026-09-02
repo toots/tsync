@@ -30,4 +30,4 @@ val place : ?domain:string -> Conf_parsing.t -> arg -> (place, string) result
     asks a daemon rather than reading the mirror itself. Falls back to asking a
     running daemon where it mounted, which [tsync start --mount] can have moved
     without touching the config. *)
-val item : ?domain:string -> string -> (string * Item_ref.t, string) result
+val item : ?domain:string -> arg -> (string * Item_ref.t, string) result
