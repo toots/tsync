@@ -1,16 +1,36 @@
 ; Every command the binary offers, one module each, over the shared half in
-; Common. Private: it depends on the frontend and backend aggregators, which are
-; private so their (select ...) is re-asked on each build of the binary.
+; Common; the launcher that forks the daemon's processes and the one-shot runner
+; a command goes through are here too, being the CLI's own. Private: it depends
+; on the frontend and backend aggregators, whose (select ...) is re-asked on
+; each build of the binary.
 
 (library
  (flags
   (:standard
    -open
-   Tsync_stdlib
+   Tsync_frontend_register
+   -open
+   Tsync_conf_parsing
+   -open
+   Tsync_domain
+   -open
+   Tsync_engine
+   -open
+   Tsync_conf_lwt
    -open
    Tsync_core
    -open
-   Tsync_chunk_integrity
+   Tsync_core_lwt
+   -open
+   Tsync_runtime
+   -open
+   Tsync_diagnostics
+   -open
+   Tsync_stdlib
+   -open
+   Tsync_backend_lwt
+   -open
+   Tsync_backend_api
    -open
    Tsync_remote
    -open
@@ -28,75 +48,56 @@
    -open
    Tsync_cache_layout_lwt
    -open
-   Tsync_conf_parsing
-   -open
    Tsync_wizard
    -open
    Tsync_io_lwt
-   -open
-   Tsync_core_lwt
    -open
    Tsync_tls
    -open
    Tsync_conf
    -open
-   Tsync_conf_lwt
-   -open
-   Tsync_backend_register
-   -open
-   Tsync_backend_lwt
-   -open
-   Tsync_domain
-   -open
-   Tsync_oneshot
-   -open
    Tsync_backend
-   -open
-   Tsync_diagnostics
-   -open
-   Tsync_frontend_register
-   -open
-   Tsync_launcher
    -open
    Tsync_frontend
    -open
-   Tsync_device
-   -open
-   Tsync_runtime))
+   Tsync_device))
  (name tsync_cli)
  (libraries
+  unix
+  lwt.unix
+  tsync_frontend_register
+  tsync-libs.conf_parsing
+  tsync_conf_lwt
+  tsync_domain
+  tsync-libs.engine
+  tsync-libs.core
+  tsync-libs.core_lwt
+  tsync-libs.diagnostics
+  tsync_runtime
+  yojson
+  lwt
   tsync_stdlib
+  tsync_core_lwt
   tsync_core
-  tsync_chunk_integrity
+  tsync_backend_lwt
+  memtrace
+  tsync_backend_api
   tsync_remote
   tsync_remote_lwt
   tsync_checkout_lwt
   tsync_checkout
   tsync_journal
   tsync_io_lwt
-  tsync-libs.core
   tsync-libs.ops
   tsync-libs.ops_lwt
   tsync_cache_layout_lwt
   tsync-libs.frontend_register
-  tsync_launcher
-  tsync-libs.backend_register
+  tsync-libs.backend_api
   tsync-libs.backend_lwt
-  tsync-libs.core_lwt
-  tsync-libs.conf_parsing
   tsync_wizard
   tsync-libs.conf
   tsync_backend
-  tsync-libs.diagnostics
-  tsync_conf_lwt
-  tsync_domain
-  tsync_oneshot
-  tsync_runtime
   tsync_device
   tsync_frontend
   tsync-libs.tls
-  cmdliner
-  yojson
-  lwt
-  lwt.unix
-  unix))
+  cmdliner))

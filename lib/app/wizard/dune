@@ -12,7 +12,7 @@
    -open
    Tsync_conf_parsing
    -open
-   Tsync_backend_register
+   Tsync_backend_api
    -open
    Tsync_backend_lwt
    -open
@@ -26,7 +26,7 @@
   tsync_stdlib
   tsync_core
   tsync_conf_parsing
-  tsync_backend_register
+  tsync_backend_api
   tsync_backend_lwt
   tsync_frontend_register
   tsync_io_lwt

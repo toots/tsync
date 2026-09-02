@@ -1,6 +1,18 @@
+; What a backend is, the wire the http-proxy driver and frontend both speak, the
+; integrity markers a store files, and the composite that presents a domain's
+; stores as one.
+
 (library
  (flags
   (:standard -open Tsync_core -open Tsync_io))
- (name tsync_backend_register)
- (public_name tsync-libs.backend_register)
- (libraries tsync_core tsync_io))
+ (name tsync_backend_api)
+ (public_name tsync-libs.backend_api)
+ (libraries
+  tsync-libs.core
+  tsync_core
+  tsync_io
+  yojson
+  digestif
+  eqaf
+  base64
+  unix))

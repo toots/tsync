@@ -16,7 +16,7 @@
    -open
    Tsync_io
    -open
-   Tsync_backend_register
+   Tsync_backend_api
    -open
    Tsync_core
    -open
@@ -32,7 +32,7 @@
   tsync_conf
   tsync_cache_layout
   tsync_io
-  tsync_backend_register
+  tsync_backend_api
   tsync_core
   unix
   tsync_remote

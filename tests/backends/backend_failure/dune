@@ -1,17 +1,5 @@
 (executable
  (flags
-  (:standard
-   -open
-   Tsync_core
-   -open
-   Tsync_core_lwt
-   -open
-   Tsync_backend_register))
+  (:standard -open Tsync_core -open Tsync_core_lwt -open Tsync_backend_api))
  (name backend_failure)
- (libraries
-  unix
-  tsync_core
-  tsync_core_lwt
-  tsync_backend_register
-  lwt
-  lwt.unix))
+ (libraries unix tsync_core tsync_core_lwt tsync_backend_api lwt lwt.unix))
