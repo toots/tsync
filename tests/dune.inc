@@ -889,6 +889,21 @@
   (action
    (diff chunk_space_test.expected chunk_space_test.output))))
 
+(subdir unit/completion
+ (alias
+  (name default)
+  (deps completion_test.exe))
+ (rule
+  (alias runtest)
+  (deps %{exe:../../../bin/tsync.exe})
+  (target completion_test.output)
+  (action
+   (with-stdout-to completion_test.output (ignore-stderr (run ./completion_test.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff completion_test.expected completion_test.output))))
+
 (subdir unit/cursor_debounce
  (alias
   (name default)

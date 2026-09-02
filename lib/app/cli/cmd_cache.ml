@@ -11,7 +11,13 @@ open Common
    chunks in a store, needs a local main one, and has nothing to say about a
    domain served out of a remote. *)
 let cmd : unit Cmd.t =
-  let path_arg = Arg.(value & pos_all string [] & info [] ~docv:"PATH") in
+  let path_arg =
+    Arg.(
+      value
+      & pos_all (Location.conv `In_domain) []
+      & info [] ~docv:"PATH"
+          ~doc:"Files or folders, domain-relative or as $(b,DOMAIN:/path).")
+  in
   let evict_arg =
     Arg.(
       value & flag
@@ -43,20 +49,29 @@ let cmd : unit Cmd.t =
              it, so a young one nothing names may be a write still in \
              progress. One count and one unit: $(b,30s), $(b,10m), $(b,2h).")
   in
+  (* One path this cannot name must cost its own line and the exit code, not the
+     rest of the run: a report that ends in success is read as one. *)
   let act ~verb ~done_ ~domain paths =
     if paths = [] then failwith "cache --evict and --fetch need a PATH.";
+    let failed = ref false in
+    let fail msg =
+      failed := true;
+      Printf.eprintf "Error: %s\n" msg
+    in
     List.iter
-      (fun path ->
-        match Location.item ?domain path with
-          | Error msg -> Printf.eprintf "Error: %s\n" msg
+      (fun arg ->
+        let path = Location.typed arg in
+        match Location.item ?domain arg with
+          | Error msg -> fail msg
           | Ok (domain, item) -> (
               match
                 Ipc.action ~socket_path:(domain_socket ~domain ()) ~domain ~item
                   verb
               with
                 | _ -> Printf.printf "%s: %s\n" done_ path
-                | exception Failure msg -> Printf.eprintf "Error: %s\n" msg))
-      paths
+                | exception Failure msg -> fail msg))
+      paths;
+    if !failed then exit 1
   in
   (* Straight at the cache rather than through the daemon: there may not be one,
      and what this collects is named by what is on disk rather than by anything

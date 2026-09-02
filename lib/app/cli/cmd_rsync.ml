@@ -72,6 +72,11 @@ let cmd : unit Cmd.t =
          let+ summary =
            Rs.run ~move ~dry_run
              ~on_entry:(fun ~rel decision ->
+               (* A source naming one file reports no relative path, that file
+                  being the whole of what was asked for. *)
+               let rel =
+                 if rel = "" then Filename.basename (Location.typed src) else rel
+               in
                current := Some rel;
                (match decision with
                  | Rsync.Skip _ -> incr skipped
