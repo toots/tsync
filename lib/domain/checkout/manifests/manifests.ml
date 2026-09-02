@@ -10,34 +10,28 @@ open Manifest
 module type S = sig
   type 'a io
 
-    val root : unit -> string
-
-    val path : Logical_key.t -> string
-
-    val ensure_parent : Logical_key.t -> unit io
-
-    val published : Logical_key.t -> Manifest.t option io
-
-    val write : Logical_key.t -> Manifest.t -> unit io
-
+  val root : unit -> string
+  val path : Logical_key.t -> string
+  val ensure_parent : Logical_key.t -> unit io
+  val published : Logical_key.t -> Manifest.t option io
+  val write : Logical_key.t -> Manifest.t -> unit io
   val delete : Logical_key.t -> unit io
 
-    val current :
+  val current :
     Logical_key.t ->
     [ `Staged of Staged_manifest.staged * Manifest.t option
     | `Published of Manifest.t ]
     option
     io
 
-    val forget : Logical_key.t -> unit
-
-    val memo_size : unit -> int
+  val forget : Logical_key.t -> unit
+  val memo_size : unit -> int
 end
 
 module type OVER = sig
   type 'a io
 
-    val ensure_dirs : string -> string -> unit io
+  val ensure_dirs : string -> string -> unit io
 
   module Make (C : Conf.S with type 'a io = 'a io) : S with type 'a io := 'a io
 end

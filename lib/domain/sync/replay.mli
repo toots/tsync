@@ -22,9 +22,9 @@ end
 module type S = sig
   type 'a io
 
-  (** Finish or discard every record this client left behind, oldest first,
-      each under the entry key it already has. Startup only: it replays ops
-      and re-queues uploads, so it must not run while writes are staging.
+  (** Finish or discard every record this client left behind, oldest first, each
+      under the entry key it already has. Startup only: it replays ops and
+      re-queues uploads, so it must not run while writes are staging.
 
       Also adopts staged data no record names — a crash between staging and
       recording. Collecting staged bodies nothing references is
@@ -34,12 +34,11 @@ module type S = sig
 
   (** Apply every journal entry from another client since the applied mark, in
       order, advancing the mark behind each one. A failure stops the pass and
-      leaves the mark where it was, so the entry is retried rather than
-      skipped.
+      leaves the mark where it was, so the entry is retried rather than skipped.
 
-      [on_changed] is called with each affected backend key, for a frontend
-      that invalidates its own view. Returns how many foreign entries were
-      applied. *)
+      [on_changed] is called with each affected backend key, for a frontend that
+      invalidates its own view. Returns how many foreign entries were applied.
+  *)
   val apply_foreign : on_changed:(string -> unit) -> unit -> int io
 end
 

@@ -7,6 +7,7 @@ module Over
     (Inode_layout : Layout.OVER with type 'a io := 'a Io.t) =
 struct
   open Io_syntax.Make (Io)
+
   let return_ok x = Io.return (Ok x)
   let return_error e = Io.return (Error e)
 

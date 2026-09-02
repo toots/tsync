@@ -8,43 +8,38 @@ val set_cursor_flush_interval : float -> unit
 module type S = sig
   type 'a io
 
-  val rename_file :
-    src_key:Logical_key.t -> dst_key:Logical_key.t -> unit io
+  val rename_file : src_key:Logical_key.t -> dst_key:Logical_key.t -> unit io
 
   (** Heads a *file key*'s manifest object, resolving it through the layout.
       Journal objects are not manifests — see {!journal_entry_published}. *)
   val head_manifest_opt : key:Logical_key.t -> Backend.file_entry option io
 
   val write_journal_entry :
-    ?entry_key:Journal.Entry_key.t ->
-    Journal.op list ->
-    Journal.Entry_key.t io
+    ?entry_key:Journal.Entry_key.t -> Journal.op list -> Journal.Entry_key.t io
 
-  (** {!write_journal_entry} for a body already encoded, and for the caller
-      that assembled it somewhere other than the heap: an import records one
-      op per file, and their encoding is the largest string it would otherwise
-      hold. *)
+  (** {!write_journal_entry} for a body already encoded, and for the caller that
+      assembled it somewhere other than the heap: an import records one op per
+      file, and their encoding is the largest string it would otherwise hold. *)
   val write_journal_entry_body :
     ?entry_key:Journal.Entry_key.t -> Bigstring.t -> Journal.Entry_key.t io
 
   (** Point peers at [entry_key]. The cursor is one object name and a store
       rate-limits writes to it, so bumps are coalesced: this publishes at once
-      when the cursor has been quiet and otherwise records the key and
-      returns, leaving a timer to publish the newest of the burst.
+      when the cursor has been quiet and otherwise records the key and returns,
+      leaving a timer to publish the newest of the burst.
 
-      It may therefore return before the write lands. Every path that bumps
-      must be reachable by a {!flush_cursor} before the process exits, or the
-      last bump of a run is lost and peers never go looking for what it
-      published. *)
+      It may therefore return before the write lands. Every path that bumps must
+      be reachable by a {!flush_cursor} before the process exits, or the last
+      bump of a run is lost and peers never go looking for what it published. *)
   val bump_cursor : Journal.Entry_key.t -> unit io
 
-  (** {!bump_cursor} that never publishes inline, for a caller that cannot
-      await one — the upload queue's hook is synchronous. *)
+  (** {!bump_cursor} that never publishes inline, for a caller that cannot await
+      one — the upload queue's hook is synchronous. *)
   val note_cursor : Journal.Entry_key.t -> unit
 
-  (** Publish what is pending now rather than waiting the interval out. A
-      no-op with nothing pending, and it swallows a backend failure: it runs
-      from a timer and from drain, neither of which may die of one. *)
+  (** Publish what is pending now rather than waiting the interval out. A no-op
+      with nothing pending, and it swallows a backend failure: it runs from a
+      timer and from drain, neither of which may die of one. *)
   val flush_cursor : unit -> unit io
 
   val fetch_cursor : unit -> Journal.Entry_key.t option io
@@ -54,8 +49,8 @@ module type S = sig
       returning means read and compare, not that anything changed.
 
       [last_seen] is the entry key the caller last read and finished with; a
-      store able to compare answers at once when the cursor already points
-      past it. *)
+      store able to compare answers at once when the cursor already points past
+      it. *)
   val wait_cursor_change : Journal.Entry_key.t option -> unit io
 
   (** How far this client has applied the shared journal. [None] when it has
@@ -74,8 +69,8 @@ module type S = sig
 
   (** Whether the entry's object is on the backend, i.e. this entry was
       published. The entry-key-to-backend-key mapping lives here so a caller
-      cannot forget the month directory {!Journal.Entry_key.relative_path}
-      adds. *)
+      cannot forget the month directory {!Journal.Entry_key.relative_path} adds.
+  *)
   val journal_entry_published : Journal.Entry_key.t -> bool io
 end
 

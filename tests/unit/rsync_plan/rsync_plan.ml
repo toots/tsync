@@ -19,7 +19,6 @@ let manifest ?(name = "f") ?(chunk_size = 8) keys =
     (Manifest.encode ~name ~size ~chunk_size ~mtime ~h1 ~h2 ~symlink:None ~keys)
 
 let symlink target = Manifest.make_symlink ~name:"l" ~target ~mtime
-
 let hashed keys = Rsync.Hashed (Array.of_list keys)
 
 (* What the decision would put on the wire, which is the property the command
@@ -31,8 +30,7 @@ let cost = function
   | Rsync.Upload _ -> "the whole file"
   | Rsync.Assemble m -> Printf.sprintf "%Ld bytes" (Manifest.size m)
   | Rsync.Patch_local { src; chunks } ->
-      Printf.sprintf "%d bytes"
-        (List.length chunks * Manifest.chunk_size src)
+      Printf.sprintf "%d bytes" (List.length chunks * Manifest.chunk_size src)
 
 let show = function
   | Rsync.Skip `Source_missing -> "skip source-missing"
@@ -48,9 +46,7 @@ let show = function
   | Rsync.Upload `Replacing -> "upload replacing"
   | Rsync.Assemble _ -> "assemble"
   | Rsync.Patch_local { chunks; _ } ->
-      "patch-local ["
-      ^ String.concat ";" (List.map string_of_int chunks)
-      ^ "]"
+      "patch-local [" ^ String.concat ";" (List.map string_of_int chunks) ^ "]"
 
 (* Which constructors a run reached, so a case added to the type and driven by
    nothing fails the roll-call rather than passing unnoticed. *)
@@ -97,9 +93,9 @@ let outcomes =
   ]
 
 let () =
-  let three = [ chunk_key 1; chunk_key 2; chunk_key 3 ] in
+  let three = [chunk_key 1; chunk_key 2; chunk_key 3] in
   let src = manifest three in
-  let other = manifest [ chunk_key 1; chunk_key 9; chunk_key 3 ] in
+  let other = manifest [chunk_key 1; chunk_key 9; chunk_key 3] in
 
   Check.case "either end missing or the wrong kind";
   decided "source gone" ~src:`Missing (`Absent `Domain);
@@ -126,25 +122,26 @@ let () =
   decided "target absent" ~src:(`File Rsync.Unhashed) (`Absent `Domain);
   decided "keys agree" ~src:(`File (hashed three)) (`Key src);
   decided "keys differ"
-    ~src:(`File (hashed [ chunk_key 1; chunk_key 9; chunk_key 3 ]))
+    ~src:(`File (hashed [chunk_key 1; chunk_key 9; chunk_key 3]))
     (`Key src);
-  decided "a different count" ~src:(`File (hashed [ chunk_key 1 ])) (`Key src);
+  decided "a different count" ~src:(`File (hashed [chunk_key 1])) (`Key src);
 
   Check.case "domain -> local";
   decided "target absent" ~src:(`Key src) (`Absent `Local);
   decided "nothing to compare against" ~src:(`Key src) (`File Rsync.Unhashed);
   decided "keys agree" ~src:(`Key src) (`File (hashed three));
   decided "two differ" ~src:(`Key src)
-    (`File (hashed [ chunk_key 1; chunk_key 8; chunk_key 7 ]));
+    (`File (hashed [chunk_key 1; chunk_key 8; chunk_key 7]));
   decided "cut at another size" ~src:(`Key src)
-    (`File (hashed [ chunk_key 1; chunk_key 2 ]));
+    (`File (hashed [chunk_key 1; chunk_key 2]));
 
   Check.case "links, compared by what they point at";
   decided "the same target" ~src:(`Key (symlink "a")) (`File (Rsync.Link "a"));
   decided "another target" ~src:(`Key (symlink "a")) (`File (Rsync.Link "b"));
   decided "a link where a file is published" ~src:(`Key src)
     (`File (Rsync.Link "a"));
-  decided "a file where a link is published" ~src:(`Key (symlink "a"))
+  decided "a file where a link is published"
+    ~src:(`Key (symlink "a"))
     (`File (hashed three));
 
   Check.case "neither end in a domain";
@@ -154,8 +151,6 @@ let () =
   Check.case "every decision the type can return is reached";
   List.iter
     (fun name ->
-      Check.check
-        (Printf.sprintf "  %s" name)
-        (Hashtbl.mem reached name))
+      Check.check (Printf.sprintf "  %s" name) (Hashtbl.mem reached name))
     outcomes;
   Check.report ~expected:(List.length outcomes) ()

@@ -28,8 +28,8 @@ type skip =
   | `Identical
   | `Target_is_dir
   | `Target_not_a_dir
-  | `Not_in_domain  (** neither end is in a domain, which is plain rsync's job *)
-  ]
+  | `Not_in_domain
+    (** neither end is in a domain, which is plain rsync's job *) ]
 
 type t =
   | Skip of skip

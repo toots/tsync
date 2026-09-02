@@ -6,8 +6,7 @@ type arg = { token : string; reading : reading }
 let typed a = a.token
 
 let strip_leading_slash s =
-  if String.length s > 0 && s.[0] = '/' then
-    String.sub s 1 (String.length s - 1)
+  if String.length s > 0 && s.[0] = '/' then String.sub s 1 (String.length s - 1)
   else s
 
 (* [<domain>:<path>] names a domain whether or not it is mounted here, which a
@@ -32,7 +31,9 @@ let resolve ?domain cfg a =
     | None -> (
         match (a.reading, Filename.is_relative a.token) with
           | `In_domain, true ->
-              let name, _ = Domain.target ?domain ~paths:Common.runtime_paths cfg in
+              let name, _ =
+                Domain.target ?domain ~paths:Common.runtime_paths cfg
+              in
               `Domain { name; rel = strip_leading_slash a.token }
           | _ -> (
               match
@@ -57,24 +58,20 @@ let children_of ~name ~rel cfg =
   (* ponytail: one manifest parse per entry, which is what recovers an escaped
      leaf's real name; a folder in the tens of thousands would want the names
      kept beside the tree. *)
-  let files, dirs =
-    Lwt_main.run (Mf.list_children ~prefix:(Lk.dir rel) ())
-  in
+  let files, dirs = Lwt_main.run (Mf.list_children ~prefix:(Lk.dir rel) ()) in
   List.map (fun d -> d ^ "/") dirs
   @ List.map
       (fun (l : Checkout.listed) -> Logical_key.leaf l.Checkout.key)
       files
 
-let matching ~prefix xs =
-  List.filter (fun x -> String.starts_with ~prefix x) xs
+let matching ~prefix xs = List.filter (fun x -> String.starts_with ~prefix x) xs
 
 (* The directory the token is inside, and the part of a name it has typed. *)
 let split_at_slash rel =
   match String.rindex_opt rel '/' with
     | None -> ("", rel)
     | Some i ->
-        ( String.sub rel 0 i,
-          String.sub rel (i + 1) (String.length rel - i - 1) )
+        (String.sub rel 0 i, String.sub rel (i + 1) (String.length rel - i - 1))
 
 let in_domain_items ~name ~token ~rel cfg =
   let dir, typed = split_at_slash rel in
@@ -82,7 +79,7 @@ let in_domain_items ~name ~token ~rel cfg =
     let full = if dir = "" then child else dir ^ "/" ^ child in
     (* The token is replaced whole, so what is offered carries back whatever
        named the domain. *)
-    match String.index_opt token ':' with
+      match String.index_opt token ':' with
       | Some i -> String.sub token 0 i ^ ":/" ^ full
       | None -> full
   in
@@ -94,7 +91,7 @@ let in_domain_items ~name ~token ~rel cfg =
    gets ordinary paths rather than an error reported on every keystroke. *)
 let complete reading ctx ~token =
   let domain = Option.join ctx in
-  let paths = Cmdliner.Arg.Completion.[ files; dirs ] in
+  let paths = Cmdliner.Arg.Completion.[files; dirs] in
   match
     let cfg = Common.load_config () in
     match said_outright cfg token with
@@ -121,8 +118,9 @@ let complete reading ctx ~token =
 
 let conv reading =
   Cmdliner.Arg.Conv.make ~docv:"PATH"
-    ~completion:(Cmdliner.Arg.Completion.make ~context:Common.domain_arg
-                   (complete reading))
+    ~completion:
+      (Cmdliner.Arg.Completion.make ~context:Common.domain_arg
+         (complete reading))
     ~parser:(fun token -> Ok { token; reading })
     ~pp:(fun ppf a -> Format.pp_print_string ppf a.token)
     ()
@@ -131,7 +129,9 @@ let conv reading =
    ever for a lone domain ({!Cmd_start}), so a path under one belongs to that
    domain and the running daemon is the only thing that knows where it put it. *)
 let mounted_elsewhere ?domain cfg path =
-  let name, socket_path = Domain.target ?domain ~paths:Common.runtime_paths cfg in
+  let name, socket_path =
+    Domain.target ?domain ~paths:Common.runtime_paths cfg
+  in
   let field k = function `Assoc o -> List.assoc_opt k o | _ -> None in
   let mount =
     match Ipc.action ~socket_path ~domain:name "stats" with
@@ -188,4 +188,3 @@ let item ?domain a =
         match found with
           | Some item -> Ok (C.domain_name, item)
           | None -> Error (path ^ ": this client has not resolved its folder"))
-

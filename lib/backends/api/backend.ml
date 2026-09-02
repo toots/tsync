@@ -236,7 +236,8 @@ let member ?(role = `Main) ?(readable = true) ?(backend_type = "local")
    themselves, the hooks a composite settles through, and the pool the batched
    reads come out of. So this is applied once, in the layer that names a
    scheduler. *)
-module Make (Io : Io.S) (Bounded : Bounded.S with type 'a io := 'a Io.t) = struct
+module Make (Io : Io.S) (Bounded : Bounded.S with type 'a io := 'a Io.t) =
+struct
   module type Store = S with type 'a io := 'a Io.t
 
   open Io_syntax.Make (Io)

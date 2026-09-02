@@ -27,25 +27,24 @@ module type S = sig
   type pool
 
   (** Publish a manifest, bringing its folder into existence if needed. Every
-      other operation here resolves what is already there and treats an
-      unknown folder as absent. *)
+      other operation here resolves what is already there and treats an unknown
+      folder as absent. *)
   val put_manifest : key:Logical_key.t -> data:Bigstring.t -> unit io
 
   (** A manifest, or which nothing it found: [`Absent] is the store's answer
-      about the domain, while [`Unresolved] is this client not knowing the
-      key's folder yet and says nothing about what the store holds. For a
-      caller that remembers an answer — the two are not equally rememberable,
-      one changing without the domain changing. *)
+      about the domain, while [`Unresolved] is this client not knowing the key's
+      folder yet and says nothing about what the store holds. For a caller that
+      remembers an answer — the two are not equally rememberable, one changing
+      without the domain changing. *)
   val get_manifest_state :
     key:Logical_key.t -> [ `Body of string | `Absent | `Unresolved ] io
 
   val head_manifest : key:Logical_key.t -> Backend.file_entry option io
   val delete_manifest : key:Logical_key.t -> unit io
 
-  (** Move a manifest. The destination may be brought into existence; the
-      source has to be there already or there is nothing to move. *)
-  val copy_manifest :
-    src_key:Logical_key.t -> dst_key:Logical_key.t -> unit io
+  (** Move a manifest. The destination may be brought into existence; the source
+      has to be there already or there is nothing to move. *)
+  val copy_manifest : src_key:Logical_key.t -> dst_key:Logical_key.t -> unit io
 
   (** Record a directory under its parent's namespace, so a resync can rebuild
       the tree. A no-op for a layout with no folder tree. *)
@@ -81,7 +80,8 @@ module type OVER = sig
 
   module Make
       (C : Conf.S with type 'a io = 'a io)
-      (L : Layout.S with type 'a io := 'a io) : S with type 'a io := 'a io and type pool = pool
+      (L : Layout.S with type 'a io := 'a io) :
+    S with type 'a io := 'a io and type pool = pool
 end
 
 (** {!OVER} with the key scheme chosen, for a consumer holding real paths. *)

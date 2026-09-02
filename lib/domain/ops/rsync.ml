@@ -1,8 +1,4 @@
-type local =
-  | Link of string
-  | Hashed of string array
-  | Unhashed
-
+type local = Link of string | Hashed of string array | Unhashed
 type side = [ `Local | `Domain ]
 type source = [ `Missing | `Dir | `File of local | `Key of Manifest.t ]
 
@@ -77,7 +73,8 @@ let decide ~move ~src target =
     | `Key src, `Absent `Local -> Assemble src
     | `Key src, `File local -> (
         match differing ~src local with
-          | None -> if unchanged ~local src then Skip `Identical else Assemble src
+          | None ->
+              if unchanged ~local src then Skip `Identical else Assemble src
           | Some [] -> Skip `Identical
           | Some chunks -> Patch_local { src; chunks })
     | `File _, (`Absent `Local | `File _) -> Skip `Not_in_domain
@@ -138,6 +135,7 @@ module Over
     (Content : Data.OVER with type 'a io := 'a Io.t) =
 struct
   open Io_syntax.Make (Io)
+
   let return = Io.return
 
   module Make (C : Conf.S with type 'a io = 'a Io.t) = struct
@@ -151,6 +149,7 @@ struct
 
     let join_rel base rel =
       if rel = "" then base else if base = "" then rel else base ^ "/" ^ rel
+
     let at root rel = if rel = "" then root else Filename.concat root rel
 
     let manifest_at prefix rel =
@@ -160,8 +159,7 @@ struct
 
     (* A source naming one file is that file, not a folder with nothing in it:
        enumerating its children would copy nothing and report success. *)
-    let one_file = [ ("", `File) ]
-
+    let one_file = [("", `File)]
     let entry_ops = 2000
 
     (* A count alone bounds nothing a reader can feel: a run over a few hundred
@@ -208,18 +206,19 @@ struct
                 ~data:(Manifest.body ~name:(Logical_key.leaf dst_key) src)
             in
             let* () = Mf.write dst_key src in
-            let+ () = add [ `Put (rel_of dst_key, Manifest.size src) ] in
+            let+ () = add [`Put (rel_of dst_key, Manifest.size src)] in
             Copied 0L
         | None ->
             let* m =
               R.upload_chunks ~key:dst_key ~size:(Manifest.size src)
-                ~chunk_size:(Manifest.chunk_size src) ~mtime:(Manifest.mtime src)
+                ~chunk_size:(Manifest.chunk_size src)
+                ~mtime:(Manifest.mtime src)
                 ~source:(fun i ->
                   return (Chunk_source.Stored (Manifest.key src i)))
                 ()
             in
             let* () = Mf.write dst_key m in
-            let+ () = add [ `Put (rel_of dst_key, Manifest.size m) ] in
+            let+ () = add [`Put (rel_of dst_key, Manifest.size m)] in
             Copied 0L
 
     let publish_symlink ~target ~mtime dst_key =
@@ -231,7 +230,7 @@ struct
           ~data:(Manifest.body ~name:(Logical_key.leaf dst_key) m)
       in
       let* () = Mf.write dst_key m in
-      let+ () = add [ `Put (rel_of dst_key, Manifest.size m) ] in
+      let+ () = add [`Put (rel_of dst_key, Manifest.size m)] in
       Copied 0L
 
     let upload_local ~src_path dst_key =
@@ -242,18 +241,18 @@ struct
             let* st = Syscalls.lstat src_path in
             publish_symlink ~target ~mtime:st.Unix.st_mtime dst_key
         | _ -> (
-      let* st = Fs.stat_opt_large src_path in
-      match st with
-        | None -> return (Failed "vanished")
-        | Some st ->
-            let* chunk_size = R.chunk_size () in
-            let* m =
-              R.upload ~key:dst_key ~src_path ~mtime:st.Unix.LargeFile.st_mtime
-                ~chunk_size ()
-            in
-            let* () = Mf.write dst_key m in
-            let+ () = add [ `Put (rel_of dst_key, Manifest.size m) ] in
-            Copied (Manifest.size m))
+            let* st = Fs.stat_opt_large src_path in
+            match st with
+              | None -> return (Failed "vanished")
+              | Some st ->
+                  let* chunk_size = R.chunk_size () in
+                  let* m =
+                    R.upload ~key:dst_key ~src_path
+                      ~mtime:st.Unix.LargeFile.st_mtime ~chunk_size ()
+                  in
+                  let* () = Mf.write dst_key m in
+                  let+ () = add [`Put (rel_of dst_key, Manifest.size m)] in
+                  Copied (Manifest.size m))
 
     let assemble ~src_key dst_path =
       let* () = Fs.ensure_parent dst_path in
@@ -264,9 +263,7 @@ struct
             let+ () = Syscalls.symlink target dst_path in
             Copied 0L
         | None ->
-            let size =
-              Option.fold ~none:0L ~some:Manifest.size published
-            in
+            let size = Option.fold ~none:0L ~some:Manifest.size published in
             let+ () = D.assemble_to src_key ~dst_path in
             Copied size
 
@@ -298,9 +295,10 @@ struct
             ())
           (runs_of chunks)
       in
-      let+ () = Syscalls.utimes dst_path (Manifest.mtime src) (Manifest.mtime src) in
-      Copied
-        (Int64.of_int (List.length chunks * chunk_size))
+      let+ () =
+        Syscalls.utimes dst_path (Manifest.mtime src) (Manifest.mtime src)
+      in
+      Copied (Int64.of_int (List.length chunks * chunk_size))
 
     let make_dir side key path =
       match side with
@@ -314,7 +312,7 @@ struct
               Folder_ids.ensure_id ~cache_root:C.cache_root
                 ~domain_name:C.domain_name key
             in
-            let+ () = add [ `Mkdir (rel_of key, Some id) ] in
+            let+ () = add [`Mkdir (rel_of key, Some id)] in
             Made_dir
 
     (* Cut at the manifest's size rather than this domain's, so index [i] names
@@ -323,14 +321,14 @@ struct
       let count = Chunks.count ~size ~chunk_size in
       let rec go i acc =
         if i >= count then return (Some (Array.of_list (List.rev acc)))
-        else
+        else (
           let len = Chunks.length_of ~size ~chunk_size i in
           let buf = Bigstring.create len in
           let* (_ : int) =
             Fs.read path buf
               ~offset:(Int64.of_int (Chunks.offset_of ~chunk_size i))
           in
-          go (i + 1) (Chunks.key_of_body buf :: acc)
+          go (i + 1) (Chunks.key_of_body buf :: acc))
       in
       go 0 []
 
@@ -339,13 +337,12 @@ struct
     let local_facts ~against path st =
       match against with
         | None -> return Unhashed
-        | Some m ->
+        | Some m -> (
             let+ keys =
-              local_keys
-                ~chunk_size:(Manifest.chunk_size m)
+              local_keys ~chunk_size:(Manifest.chunk_size m)
                 ~size:st.Unix.LargeFile.st_size path
             in
-            (match keys with Some keys -> Hashed keys | None -> Unhashed)
+            match keys with Some keys -> Hashed keys | None -> Unhashed)
 
     let rec iter_s_acc acc xs f =
       match xs with
@@ -384,26 +381,28 @@ struct
       | Domain prefix -> (
           let* named = manifest_at prefix "" in
           match named with
-          | Some _ -> return one_file
-          | None ->
-          let rec walk rel acc =
-            let key =
-              if rel = "" then Lk.dir prefix else Lk.dir (prefix ^ "/" ^ rel)
-            in
-            let* files, dirs = Ck.list_children ~prefix:key () in
-            let acc =
-              List.fold_left
-                (fun acc (l : listed) ->
-                  let leaf = Logical_key.leaf l.key in
-                  ((if rel = "" then leaf else rel ^ "/" ^ leaf), `File) :: acc)
-                acc files
-            in
-            iter_s_acc acc (List.sort compare dirs) (fun acc d ->
-                let child = if rel = "" then d else rel ^ "/" ^ d in
-                walk child ((child, `Dir) :: acc))
-          in
-          let+ found = walk "" [] in
-          List.stable_sort compare (List.rev found))
+            | Some _ -> return one_file
+            | None ->
+                let rec walk rel acc =
+                  let key =
+                    if rel = "" then Lk.dir prefix
+                    else Lk.dir (prefix ^ "/" ^ rel)
+                  in
+                  let* files, dirs = Ck.list_children ~prefix:key () in
+                  let acc =
+                    List.fold_left
+                      (fun acc (l : listed) ->
+                        let leaf = Logical_key.leaf l.key in
+                        ((if rel = "" then leaf else rel ^ "/" ^ leaf), `File)
+                        :: acc)
+                      acc files
+                  in
+                  iter_s_acc acc (List.sort compare dirs) (fun acc d ->
+                      let child = if rel = "" then d else rel ^ "/" ^ d in
+                      walk child ((child, `Dir) :: acc))
+                in
+                let+ found = walk "" [] in
+                List.stable_sort compare (List.rev found))
 
     let at root rel = if rel = "" then root else at root rel
 
@@ -428,16 +427,14 @@ struct
             let key = Lk.file (join_rel prefix rel) in
             let* () = St.delete_manifest ~key in
             let* () = Mf.delete key in
-            add [ `Delete (rel_of key) ]
+            add [`Delete (rel_of key)]
 
     let act ~src ~dst rel decision =
       match decision with
         | Skip s -> return (Skipped s)
         | Make_dir side ->
             let path =
-              match dst with
-                | Local root -> at root rel
-                | Domain _ -> ""
+              match dst with Local root -> at root rel | Domain _ -> ""
             in
             let key =
               match dst with
@@ -458,23 +455,28 @@ struct
             in
             let* m = Mf.published src_key in
             let size = Option.map Manifest.size m in
-            let* () = St.put_manifest ~key:dst_key
-                ~data:(Manifest.body ~name:(Logical_key.leaf dst_key)
-                         (Option.get m))
+            let* () =
+              St.put_manifest ~key:dst_key
+                ~data:
+                  (Manifest.body ~name:(Logical_key.leaf dst_key) (Option.get m))
             in
-            let* () = Option.fold ~none:return_unit ~some:(Mf.write dst_key) m in
+            let* () =
+              Option.fold ~none:return_unit ~some:(Mf.write dst_key) m
+            in
             let* () = St.delete_manifest ~key:src_key in
             let* () = Mf.delete src_key in
             let+ () =
               add
-                [ `Rename
+                [
+                  `Rename
                     {
                       Journal.dst = rel_of dst_key;
                       src = rel_of src_key;
                       size;
                       is_dir = false;
                       id = None;
-                    } ]
+                    };
+                ]
             in
             Copied 0L
         | Copy_manifest m ->
@@ -486,9 +488,7 @@ struct
             copy_manifest ~src:m dst_key
         | Upload _ ->
             let src_path =
-              match src with
-                | Local root -> at root rel
-                | Domain _ -> ""
+              match src with Local root -> at root rel | Domain _ -> ""
             in
             let dst_key =
               match dst with
@@ -503,9 +503,7 @@ struct
                 | Local _ -> Lk.root
             in
             let dst_path =
-              match dst with
-                | Local root -> at root rel
-                | Domain _ -> ""
+              match dst with Local root -> at root rel | Domain _ -> ""
             in
             assemble ~src_key dst_path
         | Patch_local { src = m; chunks } ->
@@ -515,9 +513,7 @@ struct
                 | Local _ -> Lk.root
             in
             let dst_path =
-              match dst with
-                | Local root -> at root rel
-                | Domain _ -> ""
+              match dst with Local root -> at root rel | Domain _ -> ""
             in
             patch_local ~src:m ~src_key dst_path chunks
 
@@ -532,8 +528,8 @@ struct
       | Made_dir -> { summary with dirs = summary.dirs + 1 }
       | Failed _ -> { summary with failed = summary.failed + 1 }
 
-    let run ?(move = false) ?(dry_run = false)
-        ?(on_entry = fun ~rel:_ _ -> ()) ~src ~dst () =
+    let run ?(move = false) ?(dry_run = false) ?(on_entry = fun ~rel:_ _ -> ())
+        ~src ~dst () =
       pending := [];
       pending_count := 0;
       published_at := Unix.gettimeofday ();
@@ -554,11 +550,10 @@ struct
               match (src, kind) with
                 | _, `Dir -> return `Dir
                 | Domain _, `File ->
-                    return (match src_m with Some m -> `Key m | None -> `Missing)
+                    return
+                      (match src_m with Some m -> `Key m | None -> `Missing)
                 | Local root, `File -> (
-                    let+ f =
-                      local_side ~against:dst_m (at root rel)
-                    in
+                    let+ f = local_side ~against:dst_m (at root rel) in
                     match f with Some f -> `File f | None -> `Missing)
             in
             let* t =

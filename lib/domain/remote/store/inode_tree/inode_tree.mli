@@ -34,18 +34,18 @@ module type S = sig
 
   (** Direct children of [folder_id], [`Fail] by default.
 
-      One listing, then whatever {!Folder_index} does not already hold, read
-      in one request where the store has a way to make one. [slots] bounds
-      those reads — the domain's download budget unless a caller passes a
-      bound of its own, which is how [tsync sync --full] honours
-      [--parallelism]. A pool passed here must outlive the call and must not
-      be one the fold body asks again.
+      One listing, then whatever {!Folder_index} does not already hold, read in
+      one request where the store has a way to make one. [slots] bounds those
+      reads — the domain's download budget unless a caller passes a bound of its
+      own, which is how [tsync sync --full] honours [--parallelism]. A pool
+      passed here must outlive the call and must not be one the fold body asks
+      again.
 
       [refresh_index] writes the folder's index back when enough of it was not
-      covered to pay for the round trip, and is for a caller that walks the
-      tree and may write: a read-only domain and a share being served must
-      leave it alone. Best effort either way — a read does not fail because
-      its cache could not be refreshed.
+      covered to pay for the round trip, and is for a caller that walks the tree
+      and may write: a read-only domain and a share being served must leave it
+      alone. Best effort either way — a read does not fail because its cache
+      could not be refreshed.
 
       [on_index] is told the folder's index key where the listing offered one.
       It is not a child and no fold sees it, but it is an object in the
@@ -81,7 +81,8 @@ module type OVER = sig
   type 'a io
   type pool
 
-  module Make (C : Conf.S with type 'a io = 'a io) : S with type 'a io := 'a io and type pool = pool
+  module Make (C : Conf.S with type 'a io = 'a io) :
+    S with type 'a io := 'a io and type pool = pool
 end
 
 module Over

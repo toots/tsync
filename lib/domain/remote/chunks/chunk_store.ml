@@ -1,4 +1,3 @@
-
 module Over (Io : Io.S) (Pools : Bounded.S with type 'a io := 'a Io.t) = struct
   module Memo = Dedup.Over (Io)
 
