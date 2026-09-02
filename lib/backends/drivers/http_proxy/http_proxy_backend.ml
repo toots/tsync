@@ -128,9 +128,12 @@ struct
     else if code resp = 404 then None
     else raise (failed "head" (code resp) body)
 
+  (* A key that is not there is not a failure, as {!Backend.S.delete} promises
+     and the other drivers keep. *)
   let delete t ~key () =
     let+ resp, body = call_text t ~meth:`DELETE "delete" (obj_uri t key) in
-    if not (is_ok resp) then raise (failed "delete" (code resp) body)
+    if not (is_ok resp) && code resp <> 404 then
+      raise (failed "delete" (code resp) body)
 
   let delete_multi t keys =
     let body =
