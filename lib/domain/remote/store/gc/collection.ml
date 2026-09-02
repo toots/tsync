@@ -94,11 +94,7 @@ struct
 
     (* The main is where both spaces are: a run renames a directory and links
        within it, so only the store holding the chunks can be mid-run. *)
-    let main_backend =
-      lazy
-        (List.find_opt
-           (fun (m : (module C.Store) Backend.member) -> m.Backend.role = `Main)
-           C.members)
+    let main_backend = lazy (Backend.main C.members)
 
     let main () =
       match Lazy.force main_backend with

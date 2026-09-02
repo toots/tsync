@@ -3,21 +3,12 @@ open Common
 
 let cmd : unit Cmd.t =
   let mask (b : Conf_parsing.backend_config) k v =
-    match Backend_lwt.spec_for b.backend_type with
-      | None -> v
-      | Some specs -> (
-          match List.find_opt (fun (s : Field_spec.t) -> s.name = k) specs with
-            | Some { secret = true; _ } when v <> "" -> "***"
-            | _ -> v)
+    Field_spec.mask_named
+      (Option.value ~default:[] (Backend_lwt.spec_for b.backend_type))
+      k v
   in
   let mask_frontend ftype k v =
-    match
-      List.find_opt
-        (fun (s : Field_spec.t) -> s.name = k)
-        (Frontend.spec_for ftype)
-    with
-      | Some { secret = true; _ } when v <> "" -> "***"
-      | _ -> v
+    Field_spec.mask_named (Frontend.spec_for ftype) k v
   in
   let symlink_str = function
     | `Keep -> "keep"

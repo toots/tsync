@@ -29,8 +29,9 @@ module type S = sig
   type 'a io
   type t = Logical_key.t
 
-  val manifest_path : t -> string
-  val rel_key : t -> string
+  (** What the mirror holds at [t]: a directory, a file, or nothing. The one
+      answer to that question, so no frontend stats the mirror itself. *)
+  val kind : t -> [ `Dir | `File | `Absent ] io
 
   (** What has been published for [t], read from the local manifest mirror. The
       mirror is the whole answer: the poller replays what peers published into

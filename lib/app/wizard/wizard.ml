@@ -486,7 +486,7 @@ module Make (E : ENV) = struct
         (fun i (s : Field_spec.t) ->
           let v = get s.name in
           Printf.printf "  %d. %-16s %s\n" (i + 2) (s.name ^ ":")
-            (if s.secret && v <> "" then "***" else v))
+            (Field_spec.mask s v))
         spec;
       let role_n = List.length spec + 2 in
       Printf.printf "  %d. %-16s %s\n" role_n "role:" (role_of !l);
@@ -644,7 +644,7 @@ module Make (E : ENV) = struct
         (fun i (s : Field_spec.t) ->
           let v = get s.name in
           Printf.printf "  %d. %-16s %s\n" (i + 1) (s.name ^ ":")
-            (if s.secret && v <> "" then "***" else v))
+            (Field_spec.mask s v))
         spec;
       if !status <> "" then Printf.printf "\n%s\n" !status;
       Printf.printf "\nEnter a field number to edit, or [d]one:\n> %!";

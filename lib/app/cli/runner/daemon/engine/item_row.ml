@@ -130,16 +130,8 @@ struct
   (* The kind comes from the mirror rather than from how the key was spelled: a
      key says what an item is called and not which kind it is, and whoever holds
      one holds the tree that answers that. *)
-  let stat_kind key =
-    let+ mst = Io_lwt.Fs.stat_opt_large (F.manifest_path key) in
-    match mst with
-      | Some { Unix.LargeFile.st_kind = Unix.S_DIR; _ } -> `Dir
-      | Some _ -> `File
-      (* Nothing on disk to correct it by, so what the caller said stands. *)
-      | None -> `Absent
-
   let item_ref key =
-    let* kind = stat_kind key in
+    let* kind = F.kind key in
     let key =
       let rel = Logical_key.path key in
       match kind with
@@ -153,7 +145,7 @@ struct
     Option.map Item_ref.to_string self
 
   let of_key ?(expect = `Any) key =
-    let* kind = stat_kind key in
+    let* kind = F.kind key in
     let is_dir = kind = `Dir in
     if (expect = `File && is_dir) || (expect = `Dir && not is_dir) then
       Lwt.return_none
