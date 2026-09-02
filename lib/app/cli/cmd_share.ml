@@ -4,7 +4,11 @@ open Common
 (* "<N>d" / "<N>h" -> seconds *)
 let cmd : unit Cmd.t =
   let path_arg =
-    Arg.(value & pos 0 (some string) None & info [] ~docv:"PATH")
+    Arg.(
+      value
+      & pos 0 (some (Location.conv `In_domain)) None
+      & info [] ~docv:"PATH"
+          ~doc:"What to share, domain-relative or as $(b,DOMAIN:/path).")
   in
   let clear_cache_arg =
     Arg.(
@@ -60,19 +64,13 @@ let cmd : unit Cmd.t =
       | _ -> ());
     let cfg = load_config () in
     let ttl = parse_duration expires in
-    (* An absolute path names its own domain, which need not be the default one,
-       while a relative one is already the domain-relative path the share core
-       wants. Either way an empty one means the whole domain. *)
+    (* An empty path means the whole domain. *)
     let domain, rel =
-      if Filename.is_relative path then
-        ( (match domain with Some _ -> domain | None -> read_default_domain ()),
-          path )
-      else (
-        match Daemons.domain_for_path ?domain ~paths:runtime_paths cfg path with
-          | Some (d, rel) -> (Some d.Conf_parsing.name, rel)
-          | None ->
-              Printf.eprintf "%s: under no domain this machine serves\n" path;
-              exit 1)
+      match Location.place ?domain cfg path with
+        | Ok p -> (Some p.Location.name, p.Location.rel)
+        | Error msg ->
+            Printf.eprintf "%s\n" msg;
+            exit 1
     in
     let rel =
       if rel <> "" && rel.[String.length rel - 1] = '/' then
