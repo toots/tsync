@@ -226,11 +226,18 @@ class TsyncProvider : DocumentsProvider() {
         }
 
         val staging = Ingest.newStaging(context!!)
-        if (mode.contains("r")) {
-            // Edit in place: start from the current contents, assembled straight
-            // into the file the write will hand back.
-            runCatching {
+        // Edit in place, or append: start from the current contents, assembled
+        // straight into the file the write will hand back. Refused rather than
+        // started empty when they cannot be had, since the close that follows
+        // would publish whatever was written over a body it never saw.
+        if (mode.contains('r') || mode.contains('a')) {
+            try {
                 Tsync.json(context!!, Cli.fetch(documentId, staging.absolutePath))
+            } catch (failure: Exception) {
+                staging.delete()
+                throw java.io.FileNotFoundException(
+                    "$documentId: cannot fetch the current content: ${failure.message}"
+                )
             }
         }
         if (!staging.exists()) staging.createNewFile()
@@ -245,15 +252,20 @@ class TsyncProvider : DocumentsProvider() {
                 Log.w(TAG, "write $documentId aborted: $error")
                 staging.delete()
             } else {
+                // Off the handler: a commit returns once the upload has
+                // drained, and the handler's thread is one of the few that
+                // answer reads of every other open file.
                 // The folder and leaf, which the item names rather than the
                 // reference: what is written is where it already is.
-                runCatching {
-                    val stat = Tsync.json(context!!, Cli.stat(documentId))
-                    Ingest.commit(
-                        context!!, stat.getString("parentRef"),
-                        stat.getString("name"), staging
-                    )
-                }.onFailure { Log.w(TAG, "write $documentId: ${it.message}") }
+                kotlin.concurrent.thread {
+                    runCatching {
+                        val stat = Tsync.json(context!!, Cli.stat(documentId))
+                        Ingest.commit(
+                            context!!, stat.getString("parentRef"),
+                            stat.getString("name"), staging
+                        )
+                    }.onFailure { Log.w(TAG, "write $documentId: ${it.message}") }
+                }
             }
         }
     }
