@@ -69,6 +69,41 @@ module type POOL = sig
     (Cohttp.Response.t * Bigstring.t) io
 end
 
+module type S = sig
+  type 'a io
+
+  type t
+
+    val create :
+    name:string -> timeout:float -> classify:(exn -> Retry.kind) -> unit -> t
+
+    val call :
+    t ->
+    headers:(unit -> Cohttp.Header.t io) ->
+    meth:Cohttp.Code.meth ->
+    ?body:Bigstring.t ->
+    Uri.t ->
+    (Cohttp.Response.t * Bigstring.t) io
+
+    val call_retry :
+    t ->
+    headers:(unit -> Cohttp.Header.t io) ->
+    meth:Cohttp.Code.meth ->
+    ?body:Bigstring.t ->
+    string ->
+    Uri.t ->
+    (Cohttp.Response.t * Bigstring.t) io
+
+    val call_text :
+    t ->
+    headers:(unit -> Cohttp.Header.t io) ->
+    meth:Cohttp.Code.meth ->
+    ?body:Bigstring.t ->
+    string ->
+    Uri.t ->
+    (Cohttp.Response.t * string) io
+end
+
 module Make
     (Io : Io.S)
     (Clock : Clock.S with type 'a io := 'a Io.t)

@@ -1,22 +1,13 @@
-(* What this needs below it: the two writers a filed child is recorded through.
-   Prose for each member lives with the module that implements it. *)
-module type FOLDERS = sig
+module type S = sig
   type 'a io
 
-  val write :
-    cache_root:string ->
-    domain_name:string ->
-    Logical_key.t ->
-    Folder.marker ->
-    unit io
+  val record : parent:Logical_key.t -> Inode_tree.entry -> Logical_key.t io
 end
 
-module type MANIFESTS = sig
+module type OVER = sig
   type 'a io
 
-  module Make (_ : Conf.S with type 'a io = 'a io) : sig
-    val write : Logical_key.t -> Manifest.t -> unit io
-  end
+  module Make (_ : Conf.S with type 'a io = 'a io) : S with type 'a io := 'a io
 end
 
 (* Where a folder's child is filed in the working copy, and under what name.
@@ -26,8 +17,8 @@ end
    depending on which had run last, and every reader below reads only the tree. *)
 module Over
     (Io : Io.S)
-    (Fi : FOLDERS with type 'a io := 'a Io.t)
-    (Mf : MANIFESTS with type 'a io := 'a Io.t) =
+    (Fi : Folder_ids.S with type 'a io := 'a Io.t)
+    (Mf : Manifests.OVER with type 'a io := 'a Io.t) =
 struct
   let ( let+ ) x f = Io.map f x
 

@@ -15,39 +15,10 @@
 
 type stats = { versions_deleted : int; journal_deleted : int }
 
-(** Walking the backend's folder tree, which is how a whole domain is reached
-    from its root. *)
-module type TREE = sig
-  type 'a io
-  type pool
-
-  module Make (_ : Conf.S with type 'a io = 'a io) : sig
-    val fold_tree :
-      ?on_unusable:Inode_tree.on_unusable ->
-      ?refresh_index:bool ->
-      ?on_index:(Stored_key.t -> unit) ->
-      ?slots:pool ->
-      folder_id:string ->
-      key:Logical_key.t ->
-      ('a -> Logical_key.t -> Inode_tree.entry -> 'a io) ->
-      'a ->
-      'a io
-  end
-end
-
-(** How far this client has read the shared journal. *)
-module type CURSOR = sig
-  type 'a io
-
-  module Make (_ : Conf.S with type 'a io = 'a io) : sig
-    val fetch_cursor : unit -> Journal.Entry_key.t option io
-  end
-end
-
 module Over
     (Io : Io.S)
-    (_ : TREE with type 'a io := 'a Io.t)
-    (_ : CURSOR with type 'a io := 'a Io.t) : sig
+    (_ : Inode_tree.OVER with type 'a io := 'a Io.t)
+    (_ : File_store.OVER with type 'a io := 'a Io.t) : sig
   module Make (C : Conf.S with type 'a io = 'a Io.t) : sig
     (** Delete one trashed folder and everything under it, now, answering how
         many objects went. [`Not_in_trash] when [path] names nothing there.

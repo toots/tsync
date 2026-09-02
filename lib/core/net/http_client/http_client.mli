@@ -53,11 +53,9 @@ module type POOL = sig
     (Cohttp.Response.t * Bigstring.t) io
 end
 
-module Make
-    (Io : Io.S)
-    (Clock : Clock.S with type 'a io := 'a Io.t)
-    (Loop : Retry.LOOP with type 'a io := 'a Io.t)
-    (Pool : POOL with type 'a io := 'a Io.t) : sig
+module type S = sig
+  type 'a io
+
   type t
 
   (** Holds a pool of its own. [name] is what a retry names in the log;
@@ -79,32 +77,39 @@ module Make
       it. *)
   val call :
     t ->
-    headers:(unit -> Cohttp.Header.t Io.t) ->
+    headers:(unit -> Cohttp.Header.t io) ->
     meth:Cohttp.Code.meth ->
     ?body:Bigstring.t ->
     Uri.t ->
-    (Cohttp.Response.t * Bigstring.t) Io.t
+    (Cohttp.Response.t * Bigstring.t) io
 
   (** {!call} under the retry loop, raising on a transient status so the shared
       ladder retries it. Every other response comes back for the verb to
       interpret, 404 included. *)
   val call_retry :
     t ->
-    headers:(unit -> Cohttp.Header.t Io.t) ->
+    headers:(unit -> Cohttp.Header.t io) ->
     meth:Cohttp.Code.meth ->
     ?body:Bigstring.t ->
     string ->
     Uri.t ->
-    (Cohttp.Response.t * Bigstring.t) Io.t
+    (Cohttp.Response.t * Bigstring.t) io
 
   (** {!call_retry} reading the body as a string, for the verbs that answer with
       JSON or a sentence and have to parse it anyway. *)
   val call_text :
     t ->
-    headers:(unit -> Cohttp.Header.t Io.t) ->
+    headers:(unit -> Cohttp.Header.t io) ->
     meth:Cohttp.Code.meth ->
     ?body:Bigstring.t ->
     string ->
     Uri.t ->
-    (Cohttp.Response.t * string) Io.t
+    (Cohttp.Response.t * string) io
 end
+
+module Make
+    (Io : Io.S)
+    (Clock : Clock.S with type 'a io := 'a Io.t)
+    (Loop : Retry.LOOP with type 'a io := 'a Io.t)
+    (Pool : POOL with type 'a io := 'a Io.t) :
+  S with type 'a io := 'a Io.t

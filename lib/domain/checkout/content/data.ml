@@ -4,56 +4,75 @@
    backing it and fetches what is absent, the store answering "is it local?" by
    the body existing. Read-ahead applies to sequential reads only. *)
 
-(* What this needs below it. *)
-module type MIRROR = sig
+module type S = sig
   type 'a io
 
-  module Make (_ : Conf.S with type 'a io = 'a io) : sig
-    val published : Logical_key.t -> Manifest.t option io
-    val write : Logical_key.t -> Manifest.t -> unit io
+    val pread :
+    id:string ->
+    ?stream:string ->
+    manifest:Manifest.t ->
+    Bigstring.t ->
+    offset:int64 ->
+    int io
 
-    val current :
-      Logical_key.t ->
-      [ `Staged of Staged_manifest.staged * Manifest.t option
-      | `Published of Manifest.t ]
-      option
-      io
-  end
+    val published : Logical_key.t -> Manifest.t option io
+
+    val pread_key :
+    ?stream:string -> Logical_key.t -> Bigstring.t -> offset:int64 -> int io
+
+  
+    val write : Logical_key.t -> Bigstring.t -> offset:int64 -> int io
+
+    val truncate : Logical_key.t -> int64 -> unit io
+
+    val create : Logical_key.t -> unit io
+
+    val sync : Logical_key.t -> ?cancel:bool ref -> unit -> unit io
+
+  
+    val enforce_chunk_cap : unit -> Sweep.swept io
+
+    val chunk_stats : unit -> (int * int) io
+
+  val downloads_in_flight : unit -> int
+
+    val downloads_completed_count : unit -> int
+
+    val stage_whole : Logical_key.t -> src_path:string -> unit io
+
+    val chunk_residency : Logical_key.t -> (int * int) io
+
+    val ensure_local : Logical_key.t -> unit io
+
+    val assemble_to : Logical_key.t -> dst_path:string -> unit io
+
+    val fetch_range :
+    Logical_key.t -> dst_path:string -> offset:int -> length:int -> int io
+
+    val download_progress : Logical_key.t -> (int * int) option
+
+    type pulling = {
+    key : string;
+    bytes : int;
+    size : int;
+    seconds : float;
+    rate : float;    }
+
+    val pulling_now : ?now:float -> unit -> pulling list
+
+    val forget_chunks : Logical_key.t -> unit io
+
+    val discard_staged : Logical_key.t -> unit io
+
+    val staged_body_path : Logical_key.t -> string option io
 end
 
-(* What this needs of the store above it. *)
-module type REMOTE = sig
+module type OVER = sig
   type 'a io
 
-  val chunk_size : unit -> int io
-  val get_chunk : chunk_key:string -> Bigstring.t io
-
-  val get_chunk_range :
-    chunk_key:string -> offset:int -> length:int -> Bigstring.t io
-
-  val fast_read : bool
-
-  val upload :
-    key:Logical_key.t ->
-    src_path:string ->
-    mtime:float ->
-    chunk_size:int ->
-    ?cancel:bool ref ->
-    ?on_progress:(bytes:int -> sent:bool -> unit) ->
-    unit ->
-    Manifest.t io
-
-  val upload_chunks :
-    key:Logical_key.t ->
-    size:int64 ->
-    chunk_size:int ->
-    mtime:float ->
-    source:(int -> unit io Chunk_source.t io) ->
-    ?cancel:bool ref ->
-    unit ->
-    Manifest.t io
-
-  val fetch_manifest : key:Logical_key.t -> unit -> Manifest.t option io
+  module Make
+      (C : Conf.S with type 'a io = 'a io)
+      (R : Remote.S with type 'a io := 'a io) : S with type 'a io := 'a io
 end
 
 module Over
@@ -62,7 +81,7 @@ module Over
     (Retry : Syscalls.S with type 'a io := 'a Io.t and type fd = Fs.fd)
     (Lock : Lock.S with type 'a io := 'a Io.t)
     (Bounded : Bounded.S with type 'a io := 'a Io.t)
-    (Mf : MIRROR with type 'a io := 'a Io.t) =
+    (Mf : Manifests.OVER with type 'a io := 'a Io.t) =
 struct
   open Io_syntax.Make (Io)
 
@@ -71,7 +90,7 @@ struct
 
   module Make
       (C : Conf.S with type 'a io = 'a Io.t)
-      (R : REMOTE with type 'a io := 'a Io.t) =
+      (R : Remote.S with type 'a io := 'a Io.t) =
   struct
     module Cc = Chunk_cache.Make (Io) (Fs) (Retry) (Bounded) (C) (R)
 

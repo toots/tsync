@@ -32,6 +32,27 @@ let manifest_of ~domain_prefix ~grouping =
 let folder_versions ~versions_prefix ~folder_id =
   Stored_key.namespace ~prefix:versions_prefix ~folder_id
 
+module type S = sig
+  type 'a io
+
+    val version_dir : key:Logical_key.t -> Stored_key.t option io
+
+    val save_version : key:Logical_key.t -> unit io
+
+  val list_versions : key:Logical_key.t -> Backend.file_entry list io
+  val get_version : vkey:Stored_key.t -> string io
+
+    val parse : Stored_key.t -> (string * string) option
+end
+
+module type OVER = sig
+  type 'a io
+
+  module Make
+      (C : Conf.S with type 'a io = 'a io)
+      (L : Layout.S with type 'a io := 'a io) : S with type 'a io := 'a io
+end
+
 module Over (Io : Io.S) = struct
   open Io_syntax.Make (Io)
 

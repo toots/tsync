@@ -66,60 +66,70 @@ val staged_of_string : string -> state
 val sidecar_path :
   cache_root:string -> domain_name:string -> Logical_key.t -> string
 
+module type S = sig
+  type 'a io
+
+  (** The staged tree's root. *)
+  val root : unit -> string
+
+  val path : Logical_key.t -> string
+  val exists : Logical_key.t -> bool io
+
+  (** [None] when nothing is staged. A sidecar that cannot be decoded is moved
+      aside rather than dropped: it is unsynced user data, and the next start
+      must not trip over it again. *)
+  val read : Logical_key.t -> state option io
+
+  (** {!read}, keeping only what the file holds. For the callers — the read
+      path, the listings — that have no business with the lifecycle. *)
+  val read_edits : Logical_key.t -> staged option io
+
+  (** The leaf name is stamped from [key], as the published tree does, so a
+      listing shows the right name before an upload lands. *)
+  val write : Logical_key.t -> staged -> unit io
+
+  (** Record what an upload published for the edits it hashed. Written before
+      anything local moves, so a crash after it leaves only local work to
+      replay, and the next start finishes the promotion without re-uploading.
+  *)
+  val commit : Logical_key.t -> staged -> Manifest.t -> unit io
+
+  val delete : Logical_key.t -> unit io
+  val rename : src_key:Logical_key.t -> dst_key:Logical_key.t -> unit io
+
+  (** Fold over the sidecars under [rel_dir], by on-disk position: a sidecar
+      records its leaf name, but where it sits is what identifies the file. *)
+  val fold :
+    rel_dir:string ->
+    deep:bool ->
+    ('a -> Logical_key.t -> staged -> 'a) ->
+    'a ->
+    'a io
+
+  (** Logical keys of every file owing an upload. *)
+  val list : unit -> Logical_key.t list io
+
+  (** Uuids of every staged body some sidecar names: what a sweep of the body
+      trees must keep. *)
+  val uuids : unit -> string list io
+
+  (** The staged files under [rel_dir], each with what is staged for it. A
+      locally created file has no published sidecar, so the published tree
+      alone would not list it; for one that does, the staged size and mtime
+      are the current ones. *)
+  val entries :
+    rel_dir:string -> deep:bool -> (Logical_key.t * staged) list io
+end
+
+(** The shape a consumer takes: {!S} for whichever domain it is applied to. *)
+module type OVER = sig
+  type 'a io
+
+  module Make (C : Conf.S with type 'a io = 'a io) : S with type 'a io := 'a io
+end
+
 module Over
     (Io : Io.S)
     (_ : Cache_layout.FS with type 'a io := 'a Io.t)
-    (_ : Syscalls.S with type 'a io := 'a Io.t) : sig
-  module Make (C : Conf.S with type 'a io = 'a Io.t) : sig
-    (** The staged tree's root. *)
-    val root : unit -> string
-
-    val path : Logical_key.t -> string
-    val exists : Logical_key.t -> bool Io.t
-
-    (** [None] when nothing is staged. A sidecar that cannot be decoded is moved
-        aside rather than dropped: it is unsynced user data, and the next start
-        must not trip over it again. *)
-    val read : Logical_key.t -> state option Io.t
-
-    (** {!read}, keeping only what the file holds. For the callers — the read
-        path, the listings — that have no business with the lifecycle. *)
-    val read_edits : Logical_key.t -> staged option Io.t
-
-    (** The leaf name is stamped from [key], as the published tree does, so a
-        listing shows the right name before an upload lands. *)
-    val write : Logical_key.t -> staged -> unit Io.t
-
-    (** Record what an upload published for the edits it hashed. Written before
-        anything local moves, so a crash after it leaves only local work to
-        replay, and the next start finishes the promotion without re-uploading.
-    *)
-    val commit : Logical_key.t -> staged -> Manifest.t -> unit Io.t
-
-    val delete : Logical_key.t -> unit Io.t
-    val rename : src_key:Logical_key.t -> dst_key:Logical_key.t -> unit Io.t
-
-    (** Fold over the sidecars under [rel_dir], by on-disk position: a sidecar
-        records its leaf name, but where it sits is what identifies the file. *)
-    val fold :
-      rel_dir:string ->
-      deep:bool ->
-      ('a -> Logical_key.t -> staged -> 'a) ->
-      'a ->
-      'a Io.t
-
-    (** Logical keys of every file owing an upload. *)
-    val list : unit -> Logical_key.t list Io.t
-
-    (** Uuids of every staged body some sidecar names: what a sweep of the body
-        trees must keep. *)
-    val uuids : unit -> string list Io.t
-
-    (** The staged files under [rel_dir], each with what is staged for it. A
-        locally created file has no published sidecar, so the published tree
-        alone would not list it; for one that does, the staged size and mtime
-        are the current ones. *)
-    val entries :
-      rel_dir:string -> deep:bool -> (Logical_key.t * staged) list Io.t
-  end
-end
+    (_ : Syscalls.S with type 'a io := 'a Io.t) :
+  OVER with type 'a io := 'a Io.t

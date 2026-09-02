@@ -1,22 +1,3 @@
-(** The local index of which directory carries which id, and the cache tree
-    beside it — both rebuilt from what the walk finds. *)
-module type FOLDER_IDS = sig
-  type 'a io
-
-  val write :
-    cache_root:string ->
-    domain_name:string ->
-    Logical_key.t ->
-    Folder.marker ->
-    unit io
-end
-
-module type CACHE = sig
-  type 'a io
-
-  val clear : cache_root:string -> domain_name:string -> unit io
-end
-
 type outcome =
   | Full of { manifests : int; failed : int; reason : string }
   | Incremental of { applied : int }
@@ -28,100 +9,22 @@ type progress = {
 
 let no_progress = { on_phase = (fun _ -> ()); on_current = (fun _ -> ()) }
 
-(** Walking the backend's folder tree, which is how a whole domain is reached
-    from its root. *)
-module type TREE = sig
-  type 'a io
-  type pool
-
-  module Make (_ : Conf.S with type 'a io = 'a io) : sig
-    val children :
-      ?on_unusable:Inode_tree.on_unusable ->
-      ?refresh_index:bool ->
-      ?on_index:(Stored_key.t -> unit) ->
-      ?slots:pool ->
-      folder_id:string ->
-      unit ->
-      Inode_tree.entry list io
-
-    val fold_tree :
-      ?on_unusable:Inode_tree.on_unusable ->
-      ?refresh_index:bool ->
-      ?on_index:(Stored_key.t -> unit) ->
-      ?slots:pool ->
-      folder_id:string ->
-      key:Logical_key.t ->
-      ('a -> Logical_key.t -> Inode_tree.entry -> 'a io) ->
-      'a ->
-      'a io
-  end
-end
-
-(** The local mark on the shared journal, and the entries behind it. *)
-module type CURSOR = sig
-  type 'a io
-
-  module Make (_ : Conf.S with type 'a io = 'a io) : sig
-    val read_last_sync_key : unit -> Journal.Entry_key.t option
-    val write_last_sync_key : Journal.Entry_key.t -> unit
-
-    val list_journal_keys :
-      ?start_after:Journal.Entry_key.t -> unit -> Journal.Entry_key.t list io
-
-    val flush_cursor : unit -> unit io
-  end
-end
-
-(** Writing a manifest into the local mirror, which is what a resync rebuilds,
-    and the record half a queue drains. *)
-module type CHECKOUT = sig
-  type 'a io
-
-  module Make (_ : Conf.S with type 'a io = 'a io) : sig
-    include File.Owing with type 'a io := 'a io
-    include File_ops.S with type 'a io := 'a io
-
-    val write_manifest : Logical_key.t -> Manifest.t -> unit io
-  end
-end
-
-(** The two directions of the journal: what a peer left to apply, and what this
-    client left to finish. *)
 module type SYNC = sig
   type 'a io
 
-  module Queue
-      (_ : Conf.S with type 'a io = 'a io)
-      (_ : File.Owing with type 'a io := 'a io) : sig
-    val start : on_upload_done:(key:Logical_key.t -> unit io) -> unit
-    val drain : unit -> unit io
-  end
-
-  module Replay
-      (_ : Conf.S with type 'a io = 'a io)
-      (_ : File_ops.S with type 'a io := 'a io) : sig
-    val reconcile : unit -> unit io
-    val apply_foreign : on_changed:(string -> unit) -> unit -> int io
-  end
-end
-
-module type FILING = sig
-  type 'a io
-
-  module Make (_ : Conf.S with type 'a io = 'a io) : sig
-    val record : parent:Logical_key.t -> Inode_tree.entry -> Logical_key.t io
-  end
+  module Queue : Sync_queue.OVER with type 'a io := 'a io
+  module Replay : Replay.OVER with type 'a io := 'a io
 end
 
 module Over
     (Io : Io.S)
-    (Folder_ids : FOLDER_IDS with type 'a io := 'a Io.t)
-    (Cache : CACHE with type 'a io := 'a Io.t)
+    (Folder_ids : Folder_ids.S with type 'a io := 'a Io.t)
+    (Cache : Cache_layout.S with type 'a io := 'a Io.t)
     (Pools : Bounded.S with type 'a io := 'a Io.t)
-    (Tree : TREE with type 'a io := 'a Io.t and type pool := Pools.t)
-    (Cursor_of : CURSOR with type 'a io := 'a Io.t)
-    (Checkout : CHECKOUT with type 'a io := 'a Io.t)
-    (Filing : FILING with type 'a io := 'a Io.t)
+    (Tree : Inode_tree.OVER with type 'a io := 'a Io.t and type pool := Pools.t)
+    (Cursor_of : File_store.OVER with type 'a io := 'a Io.t)
+    (Checkout : File.OVER with type 'a io := 'a Io.t)
+    (Filing : Filing.OVER with type 'a io := 'a Io.t)
     (Sync : SYNC with type 'a io := 'a Io.t) =
 struct
   open Io_syntax.Make (Io)
@@ -134,8 +37,8 @@ struct
     module Cursor = Cursor_of.Make (C)
     module F = Checkout.Make (C)
     module Fl = Filing.Make (C)
-    module Sq = Sync.Queue (C) (F)
-    module Rp = Sync.Replay (C) (F)
+    module Sq = Sync.Queue.Make (C) (F)
+    module Rp = Sync.Replay.Make (C) (F)
     module Tree = Tree.Make (C)
 
     (* Walks the inode tree through the module that owns the walk, so a resync and

@@ -14,26 +14,10 @@ exception Share_unavailable of string
 (** There is nothing at that path to link to. *)
 exception Share_not_found of string
 
-(** The key scheme a caller holding real paths wants. *)
-module type INODE_LAYOUT = sig
-  type 'a io
-
-  module Make (_ : Conf.S with type 'a io = 'a io) :
-    Layout.S with type 'a io := 'a io
-end
-
-(** The folder id this client already records, if any. *)
-module type FOLDER_IDS = sig
-  type 'a io
-
-  val lookup_id :
-    cache_root:string -> domain_name:string -> Logical_key.t -> string option io
-end
-
 module Over
     (Io : Io.S)
-    (_ : FOLDER_IDS with type 'a io := 'a Io.t)
-    (_ : INODE_LAYOUT with type 'a io := 'a Io.t) : sig
+    (_ : Folder_ids.S with type 'a io := 'a Io.t)
+    (_ : Layout.OVER with type 'a io := 'a Io.t) : sig
   module Make (C : Conf.S with type 'a io = 'a Io.t) : sig
     (** Publish a share for [rel], answering its token. [expires] is a Unix
         timestamp; [token] reuses an existing one instead of minting a fresh

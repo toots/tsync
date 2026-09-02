@@ -1,52 +1,37 @@
 module Ek = Journal.Entry_key
 
-(* What this needs below it. *)
 module type JOURNAL = sig
   type 'a io
 
   module Make (_ : Conf.S with type 'a io = 'a io) : sig
-    val write_journal_entry :
-      ?entry_key:Journal.Entry_key.t ->
-      Journal.op list ->
-      Journal.Entry_key.t io
+    include File_store.S with type 'a io := 'a io
 
-    val bump_cursor : Journal.Entry_key.t -> unit io
-
-    val list_journal_keys :
-      ?start_after:Journal.Entry_key.t -> unit -> Journal.Entry_key.t list io
-
-    val get_journal_entry : Journal.Entry_key.t -> Journal.op list option io
     val note_applied : Journal.Entry_key.t -> Journal.op list -> unit io
-    val journal_entry_published : Journal.Entry_key.t -> bool io
-    val read_last_sync_key : unit -> Journal.Entry_key.t option
-    val write_last_sync_key : Journal.Entry_key.t -> unit
   end
 end
 
-module type WAL = sig
+module type S = sig
   type 'a io
 
-  module Make (_ : Conf.S with type 'a io = 'a io) : sig
-    val list : unit -> (Journal.Entry_key.t * Wal.record) list io
-    val complete : Journal.Entry_key.t -> unit io
-    val note_failure : Journal.Entry_key.t -> Retry.kind -> string -> unit io
-  end
+    val reconcile : unit -> unit io
+
+    val apply_foreign : on_changed:(string -> unit) -> unit -> int io
 end
 
-module type STAGED = sig
+module type OVER = sig
   type 'a io
 
-  module Make (_ : Conf.S with type 'a io = 'a io) : sig
-    val list : unit -> Logical_key.t list io
-  end
+  module Make
+      (C : Conf.S with type 'a io = 'a io)
+      (F : File_ops.S with type 'a io := 'a io) : S with type 'a io := 'a io
 end
 
 module Over
     (Io : Io.S)
     (Bounded : Bounded.S with type 'a io := 'a Io.t)
     (Js : JOURNAL with type 'a io := 'a Io.t)
-    (W : WAL with type 'a io := 'a Io.t)
-    (Sm : STAGED with type 'a io := 'a Io.t) =
+    (W : Wal.OVER with type 'a io := 'a Io.t)
+    (Sm : Staged_manifest.OVER with type 'a io := 'a Io.t) =
 struct
   open Io_syntax.Make (Io)
 

@@ -1,22 +1,3 @@
-(** The local index of which directory carries which id, and the cache tree
-    beside it — both rebuilt from what the walk finds. *)
-module type FOLDER_IDS = sig
-  type 'a io
-
-  val write :
-    cache_root:string ->
-    domain_name:string ->
-    Logical_key.t ->
-    Folder.marker ->
-    unit io
-end
-
-module type CACHE = sig
-  type 'a io
-
-  val clear : cache_root:string -> domain_name:string -> unit io
-end
-
 (** Bringing this client's view of a domain back in line with the store.
 
     Two ways, and the choice between them is the point: apply the journal
@@ -43,102 +24,22 @@ type progress = {
       (** The folder being walked, [None] once the walk is done. *)
 }
 
-(** Walking the backend's folder tree, which is how a whole domain is reached
-    from its root. *)
-module type TREE = sig
-  type 'a io
-  type pool
-
-  module Make (_ : Conf.S with type 'a io = 'a io) : sig
-    val children :
-      ?on_unusable:Inode_tree.on_unusable ->
-      ?refresh_index:bool ->
-      ?on_index:(Stored_key.t -> unit) ->
-      ?slots:pool ->
-      folder_id:string ->
-      unit ->
-      Inode_tree.entry list io
-
-    val fold_tree :
-      ?on_unusable:Inode_tree.on_unusable ->
-      ?refresh_index:bool ->
-      ?on_index:(Stored_key.t -> unit) ->
-      ?slots:pool ->
-      folder_id:string ->
-      key:Logical_key.t ->
-      ('a -> Logical_key.t -> Inode_tree.entry -> 'a io) ->
-      'a ->
-      'a io
-  end
-end
-
-(** The local mark on the shared journal, and the entries behind it. *)
-module type CURSOR = sig
-  type 'a io
-
-  module Make (_ : Conf.S with type 'a io = 'a io) : sig
-    val read_last_sync_key : unit -> Journal.Entry_key.t option
-    val write_last_sync_key : Journal.Entry_key.t -> unit
-
-    val list_journal_keys :
-      ?start_after:Journal.Entry_key.t -> unit -> Journal.Entry_key.t list io
-
-    val flush_cursor : unit -> unit io
-  end
-end
-
-(** Writing a manifest into the local mirror, which is what a resync rebuilds,
-    and the record half a queue drains. *)
-module type CHECKOUT = sig
-  type 'a io
-
-  module Make (_ : Conf.S with type 'a io = 'a io) : sig
-    include File.Owing with type 'a io := 'a io
-    include File_ops.S with type 'a io := 'a io
-
-    val write_manifest : Logical_key.t -> Manifest.t -> unit io
-  end
-end
-
-(** The two directions of the journal: what a peer left to apply, and what this
-    client left to finish. *)
 module type SYNC = sig
   type 'a io
 
-  module Queue
-      (_ : Conf.S with type 'a io = 'a io)
-      (_ : File.Owing with type 'a io := 'a io) : sig
-    val start : on_upload_done:(key:Logical_key.t -> unit io) -> unit
-    val drain : unit -> unit io
-  end
-
-  module Replay
-      (_ : Conf.S with type 'a io = 'a io)
-      (_ : File_ops.S with type 'a io := 'a io) : sig
-    val reconcile : unit -> unit io
-    val apply_foreign : on_changed:(string -> unit) -> unit -> int io
-  end
-end
-
-(** Where a folder's child is filed in the working copy: shared with the browse
-    path, so a resync and a browse leave the same tree behind. *)
-module type FILING = sig
-  type 'a io
-
-  module Make (_ : Conf.S with type 'a io = 'a io) : sig
-    val record : parent:Logical_key.t -> Inode_tree.entry -> Logical_key.t io
-  end
+  module Queue : Sync_queue.OVER with type 'a io := 'a io
+  module Replay : Replay.OVER with type 'a io := 'a io
 end
 
 module Over
     (Io : Io.S)
-    (_ : FOLDER_IDS with type 'a io := 'a Io.t)
-    (_ : CACHE with type 'a io := 'a Io.t)
+    (_ : Folder_ids.S with type 'a io := 'a Io.t)
+    (_ : Cache_layout.S with type 'a io := 'a Io.t)
     (Pools : Bounded.S with type 'a io := 'a Io.t)
-    (_ : TREE with type 'a io := 'a Io.t and type pool := Pools.t)
-    (_ : CURSOR with type 'a io := 'a Io.t)
-    (_ : CHECKOUT with type 'a io := 'a Io.t)
-    (_ : FILING with type 'a io := 'a Io.t)
+    (_ : Inode_tree.OVER with type 'a io := 'a Io.t and type pool := Pools.t)
+    (_ : File_store.OVER with type 'a io := 'a Io.t)
+    (_ : File.OVER with type 'a io := 'a Io.t)
+    (_ : Filing.OVER with type 'a io := 'a Io.t)
     (_ : SYNC with type 'a io := 'a Io.t) : sig
   module Make (C : Conf.S with type 'a io = 'a Io.t) : sig
     (** [notify] is called once the rebuild is complete and never before, or a

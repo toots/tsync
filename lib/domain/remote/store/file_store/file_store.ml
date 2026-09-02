@@ -15,27 +15,57 @@ module Ek = Journal.Entry_key
 let cursor_flush_interval = ref 2.
 let set_cursor_flush_interval s = cursor_flush_interval := s
 
-(** The manifest-level reads a journal entry needs to name what it is about. *)
-module type MANIFESTS = sig
+module type S = sig
   type 'a io
 
-  module Make (_ : Conf.S with type 'a io = 'a io) : sig
-    val copy_manifest :
-      src_key:Logical_key.t -> dst_key:Logical_key.t -> unit io
+  val rename_file :
+    src_key:Logical_key.t -> dst_key:Logical_key.t -> unit io
 
-    val head_manifest : key:Logical_key.t -> Backend.file_entry option io
-  end
+    val head_manifest_opt : key:Logical_key.t -> Backend.file_entry option io
+
+  val write_journal_entry :
+    ?entry_key:Journal.Entry_key.t ->
+    Journal.op list ->
+    Journal.Entry_key.t io
+
+    val write_journal_entry_body :
+    ?entry_key:Journal.Entry_key.t -> Bigstring.t -> Journal.Entry_key.t io
+
+    val bump_cursor : Journal.Entry_key.t -> unit io
+
+    val note_cursor : Journal.Entry_key.t -> unit
+
+    val flush_cursor : unit -> unit io
+
+  val fetch_cursor : unit -> Journal.Entry_key.t option io
+
+    val wait_cursor_change : Journal.Entry_key.t option -> unit io
+
+    val read_last_sync_key : unit -> Journal.Entry_key.t option
+
+  val write_last_sync_key : Journal.Entry_key.t -> unit
+
+    val list_journal_keys :
+    ?start_after:Journal.Entry_key.t -> unit -> Journal.Entry_key.t list io
+
+  val get_journal_entry : Journal.Entry_key.t -> Journal.op list option io
+
+    val journal_entry_published : Journal.Entry_key.t -> bool io
+end
+
+module type OVER = sig
+  type 'a io
+
+  module Make (C : Conf.S with type 'a io = 'a io) : S with type 'a io := 'a io
 end
 
 module Over
     (Io : Io.S)
     (Locks : Lock.S with type 'a io := 'a Io.t)
     (Clock : Clock.S with type 'a io := 'a Io.t)
-    (Manifests : MANIFESTS with type 'a io := 'a Io.t) =
+    (Manifests : Store.INODE with type 'a io := 'a Io.t) =
 struct
   open Io_syntax.Make (Io)
-
-  type 'a io = 'a Io.t
 
   type cursor_state = {
     mutable pending : Ek.t option;

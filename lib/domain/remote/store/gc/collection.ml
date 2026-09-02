@@ -49,6 +49,42 @@ let of_string data =
     | _ -> None
     | exception _ -> None
 
+module type S = sig
+  type 'a io
+
+    type nonrec phase = phase = Opening | Marking | Abandoning | Closing
+
+  type nonrec run = run = { phase : phase; started : float; cursor : string }
+
+  val string_of_phase : phase -> string
+
+    val marker_key : Stored_key.t
+
+    val read_run : unit -> run option io
+
+    val write_run : run -> unit io
+
+    val clear_run : unit -> unit io
+
+  
+    val head : string -> Backend.file_entry option io
+
+    val get : string -> Bigstring.t io
+
+    val get_range : string -> offset:int -> length:int -> Bigstring.t io
+
+  
+    val promote : string -> bool io
+
+    val promote_all : count:int -> (int -> string) -> unit io
+end
+
+module type OVER = sig
+  type 'a io
+
+  module Make (_ : Conf.S with type 'a io = 'a io) : S with type 'a io := 'a io
+end
+
 module Over
     (Io : Io.S)
     (Syscalls : Syscalls.S with type 'a io := 'a Io.t)

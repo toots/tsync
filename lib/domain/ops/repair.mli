@@ -28,17 +28,7 @@ type stats = {
 (** One line for a report, e.g. ["FIXED <key> on cloud (from disk)"]. *)
 val describe : chunk_key:string -> store:string -> outcome -> string
 
-(** The chunks a store filed as not holding what their names say. *)
-module type CORRUPTION = sig
-  type 'a io
-
-  module Make (_ : Conf.S with type 'a io = 'a io) : sig
-    val list : unit -> Corruption.report io
-    val invalidate : unit -> unit
-  end
-end
-
-module Over (Io : Io.S) (_ : CORRUPTION with type 'a io := 'a Io.t) : sig
+module Over (Io : Io.S) (_ : Corruption.OVER with type 'a io := 'a Io.t) : sig
   module Make (C : Conf.S with type 'a io = 'a Io.t) : sig
     (** Repair every marked chunk. [source] narrows the candidate copies to one
         named store; by default every readable member is tried in configuration

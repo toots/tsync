@@ -5,6 +5,8 @@
  (flags
   (:standard
    -open
+   Tsync_checkout
+   -open
    Tsync_file
    -open
    Tsync_conf_lwt
@@ -35,6 +37,7 @@
  (name tsync_file_lwt)
  (public_name tsync-libs.file_lwt)
  (libraries
+  tsync_checkout
   tsync_file
   tsync_conf_lwt
   tsync_layout_lwt
