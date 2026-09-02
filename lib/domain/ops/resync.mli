@@ -39,7 +39,7 @@ module Over
     (_ : Inode_tree.OVER with type 'a io := 'a Io.t and type pool := Pools.t)
     (_ : File_store.OVER with type 'a io := 'a Io.t)
     (_ : File.OVER with type 'a io := 'a Io.t)
-    (_ : Filing.OVER with type 'a io := 'a Io.t)
+    (_ : Checkout.OVER with type 'a io := 'a Io.t)
     (_ : SYNC with type 'a io := 'a Io.t) : sig
   module Make (C : Conf.S with type 'a io = 'a Io.t) : sig
     (** [notify] is called once the rebuild is complete and never before, or a

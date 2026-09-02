@@ -6,6 +6,7 @@ module type S = sig
 
   (** Files with an active or queued upload. *)
   val pending : unit -> int
+
   val uploading : unit -> Logical_key.t list
 
   (** Bytes still owed: everything queued plus everything in flight. Counted

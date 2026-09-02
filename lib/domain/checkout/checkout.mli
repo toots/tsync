@@ -49,6 +49,11 @@ module type S = sig
   (** Create the checkout root. Every process serving the domain needs this and
       nothing more. *)
   val ensure_root : unit -> unit io
+
+  (** File one child of [parent] as the store lists it, answering the key it was
+      filed under. A resync and a browse both go through this, so the tree they
+      leave behind is the same one. *)
+  val record : parent:Logical_key.t -> Inode_tree.entry -> Logical_key.t io
 end
 
 (** The shape a consumer takes: {!S} for whichever domain it is applied to. *)
