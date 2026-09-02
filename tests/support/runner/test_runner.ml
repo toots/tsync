@@ -289,19 +289,25 @@ let is_minted_id s =
   String.length s = 16
   && String.for_all (function '0' .. '9' | 'a' .. 'f' -> true | _ -> false) s
 
-(* A reference names a folder by id: ["d:<id>"] or ["f:<id>/<leaf>"]. *)
+(* A folder id, alone or leading a "<id>/<leaf>" cursor. A folder's own page
+   cursor is a plain name and passes through. *)
+let alias_cursor s =
+  let head, rest =
+    match String.index_opt s '/' with
+      | Some i -> (String.sub s 0 i, String.sub s i (String.length s - i))
+      | None -> (s, "")
+  in
+  (if is_minted_id head then alias_id head else head) ^ rest
+
+(* A reference names a folder by id: ["d:<id>"] or ["f:<id>/<leaf>"]. A flat
+   listing's cursor drops the kind. *)
 let alias_ref s =
   let alias_after n =
-    let rest = String.sub s n (String.length s - n) in
-    match String.index_opt rest '/' with
-      | Some i ->
-          String.sub s 0 n
-          ^ alias_id (String.sub rest 0 i)
-          ^ String.sub rest i (String.length rest - i)
-      | None -> String.sub s 0 n ^ alias_id rest
+    String.sub s 0 n ^ alias_cursor (String.sub s n (String.length s - n))
   in
   if starts_with "d:" s then alias_after 2
   else if starts_with "f:" s then alias_after 2
+  else if starts_with "after=" s then alias_after 6
   else s
 
 (* Counts, not bytes: byte totals are the test's own payload sizes and would pin
@@ -334,6 +340,8 @@ let rec normalize_ipc (j : Yojson.Safe.t) : Yojson.Safe.t =
 and normalize_kv (k, v) =
   match (k, v) with
     | ("ref" | "parentRef" | "srcRef"), `String s -> (k, `String (alias_ref s))
+    | "next", `String s when String.contains s '/' ->
+        (k, `String (alias_cursor s))
     (* A bare "id" in a journal op names a folder. Unlike an etag, it cannot be
        a content hash, so it needs no table lookup to tell the two apart. *)
     | "id", `String s when is_minted_id s -> (k, `String (alias_id s))
@@ -360,6 +368,7 @@ type client = {
   dump_pending : unit -> unit Lwt.t;
   dump_listing : unit -> unit Lwt.t;
   dump_paged : unit -> unit Lwt.t;
+  dump_flat : unit -> unit Lwt.t;
   dump_changes : label:string -> anchor:string -> unit Lwt.t;
   cursor : unit -> string Lwt.t;
   (* Whole JSON rather than a snapshot: most of it is pids, uptimes and
@@ -1242,26 +1251,23 @@ let setup_client (module C : Conf_lwt.S) root staging_prefix =
     in
     walk "root"
   in
-  (* The root walked two entries at a time, following the cursor the reply
+  (* A listing walked two entries at a time, following the cursor the reply
      names. What it proves is that the page tokens compose: a page holds no
-     more than it was asked for, the cursor is the last name served, and the
+     more than it was asked for, the cursor is the last entry served, and the
      pages laid end to end are the listing. *)
-  let dump_paged () =
+  let paged label fields =
     let rec page after n =
       if n > 20 then Lwt.return_unit
       else
         let* obj =
           request
-            ([
-               ("action", `String "list_dir");
-               ("ref", `String "root");
-               ("limit", `Int 2);
-             ]
+            (fields
+            @ [("limit", `Int 2)]
             @ match after with None -> [] | Some a -> [("after", `String a)])
         in
         must obj;
         print_ipc
-          (Printf.sprintf "list_dir root limit=2%s"
+          (Printf.sprintf "%s limit=2%s" label
              (match after with None -> "" | Some a -> " after=" ^ a))
           obj;
         match List.assoc_opt "next" obj with
@@ -1270,6 +1276,13 @@ let setup_client (module C : Conf_lwt.S) root staging_prefix =
     in
     page None 0
   in
+  let dump_paged () =
+    paged "list_dir root"
+      [("action", `String "list_dir"); ("ref", `String "root")]
+  in
+  (* The whole domain, the way a frontend that must enumerate everything asks
+     for it: one order across folders. *)
+  let dump_flat () = paged "list_all" [("action", `String "list_all")] in
   let cursor () =
     let+ obj = action "cursor" in
     Option.value ~default:"" (get_str obj "cursor")
@@ -1294,6 +1307,7 @@ let setup_client (module C : Conf_lwt.S) root staging_prefix =
     dump_pending;
     dump_listing;
     dump_paged;
+    dump_flat;
     dump_changes;
     cursor;
     stats;
@@ -1899,7 +1913,9 @@ let run_ipc_scenario ?versioning ({ name; steps } : scenario) =
            print_endline "--- listing";
            let* () = client.dump_listing () in
            print_endline "--- paged";
-           client.dump_paged ())
+           let* () = client.dump_paged () in
+           print_endline "--- flat";
+           client.dump_flat ())
          (fun exn ->
            Printf.printf "  ERROR %s\n" (Printexc.to_string exn);
            Lwt.return_unit)

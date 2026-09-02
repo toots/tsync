@@ -6,6 +6,8 @@
   list_dir root -> {"ok":true,"items":[{"ref":"f:.tsync-root/a.txt","parentRef":"root","name":"a.txt","kind":"file","size":5,"mtime":"<mtime>","etag":"650e58ac64da6e0a","isUploaded":true},{"ref":"f:.tsync-root/b.txt","parentRef":"root","name":"b.txt","kind":"file","size":5,"mtime":"<mtime>","etag":"0c85c7c61d1a6890","isUploaded":true}]}
 --- paged
   list_dir root limit=2 -> {"ok":true,"items":[{"ref":"f:.tsync-root/a.txt","parentRef":"root","name":"a.txt","kind":"file","size":5,"mtime":"<mtime>","etag":"650e58ac64da6e0a","isUploaded":true},{"ref":"f:.tsync-root/b.txt","parentRef":"root","name":"b.txt","kind":"file","size":5,"mtime":"<mtime>","etag":"0c85c7c61d1a6890","isUploaded":true}]}
+--- flat
+  list_all limit=2 -> {"ok":true,"items":[{"ref":"f:.tsync-root/a.txt","parentRef":"root","name":"a.txt","kind":"file","size":5,"mtime":"<mtime>","etag":"650e58ac64da6e0a","isUploaded":true},{"ref":"f:.tsync-root/b.txt","parentRef":"root","name":"b.txt","kind":"file","size":5,"mtime":"<mtime>","etag":"0c85c7c61d1a6890","isUploaded":true}]}
 
 === files and folders share one order
   mkdir mid
@@ -18,6 +20,9 @@
 --- paged
   list_dir root limit=2 -> {"ok":true,"items":[{"ref":"f:.tsync-root/aaa.txt","parentRef":"root","name":"aaa.txt","kind":"file","size":1,"mtime":"<mtime>","etag":"15da855801af627d","isUploaded":true},{"ref":"d:<folder-1>","parentRef":"root","name":"mid","kind":"dir","size":0,"mtime":"<zero>","etag":"<folder-1>","isUploaded":true}],"next":"mid"}
   list_dir root limit=2 after=mid -> {"ok":true,"items":[{"ref":"f:.tsync-root/zzz.txt","parentRef":"root","name":"zzz.txt","kind":"file","size":1,"mtime":"<mtime>","etag":"7dbefb508fa14bbd","isUploaded":true}]}
+--- flat
+  list_all limit=2 -> {"ok":true,"items":[{"ref":"f:.tsync-root/aaa.txt","parentRef":"root","name":"aaa.txt","kind":"file","size":1,"mtime":"<mtime>","etag":"15da855801af627d","isUploaded":true},{"ref":"d:<folder-1>","parentRef":"root","name":"mid","kind":"dir","size":0,"mtime":"<zero>","etag":"<folder-1>","isUploaded":true}],"next":".tsync-root/mid"}
+  list_all limit=2 after=.tsync-root/mid -> {"ok":true,"items":[{"ref":"f:.tsync-root/zzz.txt","parentRef":"root","name":"zzz.txt","kind":"file","size":1,"mtime":"<mtime>","etag":"7dbefb508fa14bbd","isUploaded":true}]}
 
 === nested directories keyed as full paths
   mkdir sub
@@ -29,6 +34,9 @@
   list_dir d:<folder-1> -> {"ok":true,"items":[{"ref":"f:<folder-1>/c.txt","parentRef":"d:<folder-1>","name":"c.txt","kind":"file","size":6,"mtime":"<mtime>","etag":"7546f608548f4d0d","isUploaded":true}]}
 --- paged
   list_dir root limit=2 -> {"ok":true,"items":[{"ref":"d:<folder-1>","parentRef":"root","name":"sub","kind":"dir","size":0,"mtime":"<zero>","etag":"<folder-1>","isUploaded":true},{"ref":"f:.tsync-root/top.txt","parentRef":"root","name":"top.txt","kind":"file","size":3,"mtime":"<mtime>","etag":"97bb0a4a6df0d08e","isUploaded":true}]}
+--- flat
+  list_all limit=2 -> {"ok":true,"items":[{"ref":"d:<folder-1>","parentRef":"root","name":"sub","kind":"dir","size":0,"mtime":"<zero>","etag":"<folder-1>","isUploaded":true},{"ref":"f:<folder-1>/c.txt","parentRef":"d:<folder-1>","name":"c.txt","kind":"file","size":6,"mtime":"<mtime>","etag":"7546f608548f4d0d","isUploaded":true}],"next":"<folder-1>/c.txt"}
+  list_all limit=2 after=<folder-1>/c.txt -> {"ok":true,"items":[{"ref":"f:.tsync-root/top.txt","parentRef":"root","name":"top.txt","kind":"file","size":3,"mtime":"<mtime>","etag":"97bb0a4a6df0d08e","isUploaded":true}]}
 
 === a folder this client cannot name is counted, not dropped
   mkdir sub
@@ -41,6 +49,8 @@
   list_dir root -> {"ok":true,"items":[{"ref":"f:.tsync-root/top.txt","parentRef":"root","name":"top.txt","kind":"file","size":3,"mtime":"<mtime>","etag":"97bb0a4a6df0d08e","isUploaded":true}],"unnamed":1}
 --- paged
   list_dir root limit=2 -> {"ok":true,"items":[{"ref":"f:.tsync-root/top.txt","parentRef":"root","name":"top.txt","kind":"file","size":3,"mtime":"<mtime>","etag":"97bb0a4a6df0d08e","isUploaded":true}],"unnamed":1}
+--- flat
+  list_all limit=2 -> {"ok":true,"items":[{"ref":"f:.tsync-root/top.txt","parentRef":"root","name":"top.txt","kind":"file","size":3,"mtime":"<mtime>","etag":"97bb0a4a6df0d08e","isUploaded":true}],"unnamed":2}
 
 === identical content shares an etag
   write x.txt "same bytes"
@@ -50,6 +60,8 @@
   list_dir root -> {"ok":true,"items":[{"ref":"f:.tsync-root/x.txt","parentRef":"root","name":"x.txt","kind":"file","size":10,"mtime":"<mtime>","etag":"83aa3fc9fadd8e79","isUploaded":true},{"ref":"f:.tsync-root/y.txt","parentRef":"root","name":"y.txt","kind":"file","size":10,"mtime":"<mtime>","etag":"83aa3fc9fadd8e79","isUploaded":true}]}
 --- paged
   list_dir root limit=2 -> {"ok":true,"items":[{"ref":"f:.tsync-root/x.txt","parentRef":"root","name":"x.txt","kind":"file","size":10,"mtime":"<mtime>","etag":"83aa3fc9fadd8e79","isUploaded":true},{"ref":"f:.tsync-root/y.txt","parentRef":"root","name":"y.txt","kind":"file","size":10,"mtime":"<mtime>","etag":"83aa3fc9fadd8e79","isUploaded":true}]}
+--- flat
+  list_all limit=2 -> {"ok":true,"items":[{"ref":"f:.tsync-root/x.txt","parentRef":"root","name":"x.txt","kind":"file","size":10,"mtime":"<mtime>","etag":"83aa3fc9fadd8e79","isUploaded":true},{"ref":"f:.tsync-root/y.txt","parentRef":"root","name":"y.txt","kind":"file","size":10,"mtime":"<mtime>","etag":"83aa3fc9fadd8e79","isUploaded":true}]}
 
 ########## PARENT REFS ##########
 === create under a parent named by key is refused
@@ -62,6 +74,8 @@
   list_dir d:<folder-1> -> {"ok":true,"items":[]}
 --- paged
   list_dir root limit=2 -> {"ok":true,"items":[{"ref":"d:<folder-1>","parentRef":"root","name":"sub","kind":"dir","size":0,"mtime":"<zero>","etag":"<folder-1>","isUploaded":true}]}
+--- flat
+  list_all limit=2 -> {"ok":true,"items":[{"ref":"d:<folder-1>","parentRef":"root","name":"sub","kind":"dir","size":0,"mtime":"<zero>","etag":"<folder-1>","isUploaded":true}]}
 
 ########## CHANGES ##########
 === foreign put
