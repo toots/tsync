@@ -26,6 +26,15 @@ class OpenDocumentsService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    /** Android 15 gives a dataSync service a few hours a day and then asks it
+     *  to stop, killing the process if it does not. Reads go on being served
+     *  for as long as the process lives, which is what happens without the
+     *  service at all. */
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        Log.i(TAG, "foreground time is up; serving without it")
+        stopSelf()
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val open = OpenDescriptors.count
         val notification = Notifications.build(
