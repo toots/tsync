@@ -68,15 +68,31 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
+      # The same key every time, so a phone takes each build as an update of the
+      # one before and keeps its settings. Provisioned by
+      # scripts/setup_android_signing.sh.
+      - name: Unpack the signing key
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+        run: |
+          test -n "$KEYSTORE_B64" || { echo "ANDROID_KEYSTORE_B64 is not set"; exit 1; }
+          echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/tsync.jks"
+          echo "ANDROID_KEYSTORE=$RUNNER_TEMP/tsync.jks" >> "$GITHUB_ENV"
       - name: Build the APK
         env:
           BUILD_NUMBER: ${{ github.run_number }}
-        run: ./gradlew assembleDebug -PrequireDaemon
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: ./gradlew assembleRelease -PrequireDaemon
         working-directory: android
       - name: Name the artifact
         run: |
           mkdir dist
-          cp android/app/build/outputs/apk/debug/app-debug.apk dist/tsync-arm64-v8a.apk
+          cp android/app/build/outputs/apk/release/app-release.apk dist/tsync-arm64-v8a.apk
+          # A build signed by anything but our key would make every phone reinstall.
+          "$(ls "$ANDROID_HOME"/build-tools/*/apksigner | tail -1)" verify --print-certs \
+              dist/tsync-arm64-v8a.apk \
+            | grep -q "certificate DN: CN=tsync" \
+            || { echo "the APK is not signed by the tsync key"; exit 1; }
       - uses: actions/upload-artifact@v4
         with:
           name: tsync-apk
