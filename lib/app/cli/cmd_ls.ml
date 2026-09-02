@@ -3,7 +3,11 @@ open Common
 
 let cmd : unit Cmd.t =
   let path_arg =
-    Arg.(value & pos 0 (some string) None & info [] ~docv:"PATH")
+    Arg.(
+      value
+      & pos 0 (some (Location.conv `In_domain)) None
+      & info [] ~docv:"PATH"
+          ~doc:"Folder to list, domain-relative or as $(b,DOMAIN:/path).")
   in
   let deleted_arg =
     Arg.(
@@ -25,32 +29,25 @@ let cmd : unit Cmd.t =
        let domain =
          match domain with Some _ -> domain | None -> read_default_domain ()
        in
+       (* The argument may name a domain outright, and then it says which one
+          this listing is of. *)
+       let here = Option.map (Location.place ?domain cfg) path in
+       let domain =
+         match here with
+           | Some (Ok p) -> Some p.Location.name
+           | _ -> domain
+       in
        let (module C : Conf_lwt.S) = make_conf ?domain cfg in
        let (module F : Frontend.S) =
          resolve_frontend ?frontend (Conf_parsing.pick_domain ?domain cfg)
        in
        let module Fs = File_store_lwt.Make (C) in
-       let mount_point =
-         mount_point_of (Conf_parsing.pick_domain ?domain cfg)
-       in
        let module Lk = Logical_key.Make (C) in
        let prefix =
-         match path with
+         match here with
            | None -> Lk.root
-           | Some p ->
-               (* Accepts a domain-relative path or an absolute one under the
-                  mount point. *)
-               let rel =
-                 let mp = mount_point ^ "/" in
-                 if
-                   String.length p >= String.length mp
-                   && String.sub p 0 (String.length mp) = mp
-                 then
-                   String.sub p (String.length mp)
-                     (String.length p - String.length mp)
-                 else p
-               in
-               Lk.dir rel
+           | Some (Ok p) -> Lk.dir p.Location.rel
+           | Some (Error msg) -> failwith msg
        in
        let module Mf = Checkout_lwt.Make (C) in
        let module Mfs = Staged_lwt.Manifest.Make (C) in
