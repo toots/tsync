@@ -132,7 +132,7 @@ struct
      and the other drivers keep. *)
   let delete t ~key () =
     let+ resp, body = call_text t ~meth:`DELETE "delete" (obj_uri t key) in
-    if not (is_ok resp) && code resp <> 404 then
+    if (not (is_ok resp)) && code resp <> 404 then
       raise (failed "delete" (code resp) body)
 
   let delete_multi t keys =
