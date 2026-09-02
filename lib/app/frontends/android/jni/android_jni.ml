@@ -18,23 +18,62 @@ let install_log_sink () =
 let pool_size = 16
 let engine : (module Domain_engine.S) option ref = ref None
 
+(* The request and status answers, built over the engine at boot: what the
+   frontend's verbs do, without a process per call. *)
+type serving = {
+  request : string -> string Lwt.t;
+  status : unit -> string Lwt.t;
+}
+
+let served : serving option ref = ref None
+
 let serving () =
   match !engine with
     | Some e -> e
     | None -> failwith "tsync: the domain was never started"
+
+let answering () =
+  match !served with
+    | Some s -> s
+    | None -> failwith "tsync: the domain was never started"
+
+(* HOME is read as the runtime starts, so this runs after it; the domain name
+   is the app's, [""] meaning whichever the config names alone. *)
+let load_domain domain =
+  let paths = Runtime.default_paths () in
+  let cfg = Conf_parsing.load paths.Runtime.config_path in
+  Tls_conf.apply cfg.Conf_parsing.tls;
+  let domain = if domain = "" then None else Some domain in
+  Domain.of_config ?domain ~paths cfg
+
+(* Whether the config on disk names a domain this runtime could serve, without
+   starting one: the setup form asks before the app commits to it. Answers the
+   empty string, else what is wrong. *)
+let check_config domain =
+  match load_domain domain with
+    | (_ : (module Conf_lwt.S)) -> ""
+    | exception exn -> Printexc.to_string exn
+
+(* [on_loop] wraps what it caught with the backtrace of the raise; a failure
+   outside it has none. *)
+let report what = function
+  | Domain_engine.With_backtrace (exn, bt) ->
+      Log.err "%s: %s\n%s" what (Printexc.to_string exn)
+        (Printexc.raw_backtrace_to_string bt);
+      exn
+  | exn ->
+      Log.err "%s: %s" what (Printexc.to_string exn);
+      exn
 
 (* [""] for the domain the config names by itself. Answers the empty string when
    the domain is serving, else what went wrong. *)
 let boot domain =
   try
     install_log_sink ();
-    let paths = Runtime.default_paths () in
-    let cfg = Conf_parsing.load paths.Runtime.config_path in
-    Tls_conf.apply cfg.Conf_parsing.tls;
-    let domain = if domain = "" then None else Some domain in
-    let conf = Domain.of_config ?domain ~paths cfg in
+    let conf = load_domain domain in
     let module C = (val conf : Conf_lwt.S) in
     let module E = Domain_engine.Make_over (Lazy_checkout_lwt) (C) in
+    let module S = Android_frontend.Serve (E) (C) in
     Frontend.use_libev ();
     Lwt_unix.set_pool_size pool_size;
     (* Detached work has no caller to fail, and the default hook ends the
@@ -59,8 +98,22 @@ let boot domain =
            was load-bearing; this says so instead. *)
         fst (Lwt.wait ()));
     engine := Some (module E : Domain_engine.S);
+    served := Some { request = S.request; status = S.status };
     ""
   with exn -> Printexc.to_string exn
+
+(* A reply whatever happens: the caller parses JSON and has no other channel.
+   [Unix_error] included, since a request is not a descriptor and has no errno
+   to answer with. *)
+let request raw =
+  try Domain_engine.on_loop (fun () -> (answering ()).request raw)
+  with exn ->
+    Ipc_handler.error_reply `Internal
+      (Printexc.to_string (report "request" exn))
+
+let status () =
+  try Domain_engine.on_loop (fun () -> (answering ()).status ())
+  with exn -> "tsync could not report: " ^ Printexc.to_string exn
 
 (* Errno rather than an exception: the caller is a platform callback whose only
    vocabulary is a number, and flattening everything to EIO loses the difference
@@ -73,18 +126,12 @@ let errno = function
   | Unix.ENOSPC -> 28
   | _ -> 5
 
-let failed what exn backtrace =
-  Log.err "%s: %s%s" what (Printexc.to_string exn)
-    (match backtrace with
-      | None -> ""
-      | Some bt -> "\n" ^ Printexc.raw_backtrace_to_string bt);
-  -5
-
 let guard what f =
   try f () with
     | Unix.Unix_error (e, _, _) -> -errno e
-    | Domain_engine.With_backtrace (exn, bt) -> failed what exn (Some bt)
-    | exn -> failed what exn None
+    | exn ->
+        ignore (report what exn);
+        -5
 
 (* An open document is a key and the size it had when opened, the way FUSE keeps
    nothing per descriptor; the handle spares a manifest lookup per read. *)
@@ -135,7 +182,10 @@ let close handle =
       Hashtbl.remove handles handle;
       0)
 
+let () = Callback.register "tsync_jni_check_config" check_config
 let () = Callback.register "tsync_jni_boot" boot
+let () = Callback.register "tsync_jni_request" request
+let () = Callback.register "tsync_jni_status" status
 let () = Callback.register "tsync_jni_open" opened
 let () = Callback.register "tsync_jni_size" size
 let () = Callback.register "tsync_jni_read" read

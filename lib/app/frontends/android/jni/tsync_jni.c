@@ -1,6 +1,10 @@
 /* The Java side of the bridge, and nothing else: every rule about threads, the
    runtime lock and the domain lives in tsync_bridge.c, which a host test can
-   reach without a JVM. What is left here is marshalling. */
+   reach without a JVM. What is left here is marshalling.
+
+   Strings cross as byte arrays: a JNI jstring is modified UTF-8, which a name
+   holding a character outside the basic plane neither arrives as nor may be
+   handed back as -- NewStringUTF on such bytes is a JNI abort. */
 
 #include <caml/alloc.h>
 #include <caml/bigarray.h>
@@ -10,6 +14,7 @@
 #include <caml/threads.h>
 #include <jni.h>
 #include <stdlib.h>
+#include <string.h>
 
 void tsync_bridge_init(void);
 void tsync_enter_ocaml(void);
@@ -25,68 +30,143 @@ static int runtime_started = 0;
     static const value *var = NULL;                                            \
     if (!var) var = caml_named_value(name);
 
-JNIEXPORT jstring JNICALL Java_org_feverdreamtv_tsync_Native_nativeInit(
-    JNIEnv *env, jclass cls, jstring _home, jstring _certificates,
-    jstring _domain) {
-    (void)cls;
+/* Returns holding the runtime lock, starting the runtime the first time.
+   Before caml_startup, not after: module initialisers derive every path from
+   HOME as they run, and Sys.getenv raising there is an exit(2) printed to a
+   stderr nobody reads. SSL_CERT_FILE for the same reason -- conduit builds its
+   authenticator whether or not TLS is used. */
+static void ensure_runtime(JNIEnv *env, jstring _home, jstring _certificates) {
+    if (runtime_started) {
+        tsync_enter_ocaml();
+        return;
+    }
     const char *home = (*env)->GetStringUTFChars(env, _home, NULL);
     const char *certificates =
         (*env)->GetStringUTFChars(env, _certificates, NULL);
-    const char *domain =
-        _domain ? (*env)->GetStringUTFChars(env, _domain, NULL) : "";
+    setenv("HOME", home, 1);
+    setenv("SSL_CERT_FILE", certificates, 1);
+    (*env)->ReleaseStringUTFChars(env, _home, home);
+    (*env)->ReleaseStringUTFChars(env, _certificates, certificates);
+    char program[] = "tsync";
+    char *argv[] = {program, NULL};
+    caml_startup(argv);
+    /* caml_startup leaves this thread holding the lock as the runtime's own,
+       so it is marked rather than registered. */
+    tsync_bridge_init();
+    runtime_started = 1;
+}
 
-    if (!runtime_started) {
-        /* Before caml_startup, not after: module initialisers derive every path
-           from HOME as they run, and Sys.getenv raising there is an exit(2)
-           printed to a stderr nobody reads. SSL_CERT_FILE for the same reason
-           -- conduit builds its authenticator whether or not TLS is used. */
-        setenv("HOME", home, 1);
-        setenv("SSL_CERT_FILE", certificates, 1);
-        char program[] = "tsync";
-        char *argv[] = {program, NULL};
-        caml_startup(argv);
-        /* caml_startup leaves this thread holding the lock as the runtime's
-           own, so it is marked rather than registered. */
-        tsync_bridge_init();
-        runtime_started = 1;
-    } else {
-        tsync_enter_ocaml();
+/* Under the runtime lock: allocates. */
+static value string_of_bytes(JNIEnv *env, jbyteArray bytes) {
+    CAMLparam0();
+    CAMLlocal1(result);
+    jsize length = (*env)->GetArrayLength(env, bytes);
+    result = caml_alloc_string(length);
+    (*env)->GetByteArrayRegion(env, bytes, 0, length,
+                               (jbyte *)Bytes_val(result));
+    CAMLreturn(result);
+}
+
+/* Under the runtime lock, so [text] cannot move while the region is copied;
+   SetByteArrayRegion allocates nothing on the JVM side. */
+static jbyteArray bytes_of_string(JNIEnv *env, value text) {
+    jsize length = (jsize)caml_string_length(text);
+    jbyteArray bytes = (*env)->NewByteArray(env, length);
+    if (bytes)
+        (*env)->SetByteArrayRegion(env, bytes, 0, length,
+                                   (const jbyte *)String_val(text));
+    return bytes;
+}
+
+/* An empty answer is success; anything else is what went wrong. */
+static jbyteArray failure_of(JNIEnv *env, value answer) {
+    return caml_string_length(answer) ? bytes_of_string(env, answer) : NULL;
+}
+
+JNIEXPORT jbyteArray JNICALL Java_org_feverdreamtv_tsync_Native_nativeCheckConfig(
+    JNIEnv *env, jclass cls, jstring _home, jstring _certificates,
+    jbyteArray _domain) {
+    (void)cls;
+    ensure_runtime(env, _home, _certificates);
+    jbyteArray failure;
+    {
+        CAMLparam0();
+        CAMLlocal1(answer);
+        TSYNC_ENTRY(check, "tsync_jni_check_config");
+        answer = caml_callback(*check, string_of_bytes(env, _domain));
+        failure = failure_of(env, answer);
+        CAMLdrop;
     }
+    tsync_leave_ocaml();
+    return failure;
+}
 
-    jstring failure = NULL;
+JNIEXPORT jbyteArray JNICALL Java_org_feverdreamtv_tsync_Native_nativeInit(
+    JNIEnv *env, jclass cls, jstring _home, jstring _certificates,
+    jbyteArray _domain) {
+    (void)cls;
+    ensure_runtime(env, _home, _certificates);
+    jbyteArray failure;
     {
         CAMLparam0();
         CAMLlocal1(answer);
         TSYNC_ENTRY(boot, "tsync_jni_boot");
-        answer = caml_callback(*boot, caml_copy_string(domain));
-        if (String_val(answer)[0])
-            failure = (*env)->NewStringUTF(env, String_val(answer));
+        answer = caml_callback(*boot, string_of_bytes(env, _domain));
+        failure = failure_of(env, answer);
         CAMLdrop;
     }
     tsync_leave_ocaml();
-
-    (*env)->ReleaseStringUTFChars(env, _home, home);
-    (*env)->ReleaseStringUTFChars(env, _certificates, certificates);
-    if (_domain) (*env)->ReleaseStringUTFChars(env, _domain, domain);
     return failure;
 }
 
-JNIEXPORT jint JNICALL Java_org_feverdreamtv_tsync_Native_nativeOpen(
-    JNIEnv *env, jclass cls, jstring _reference) {
+JNIEXPORT jbyteArray JNICALL Java_org_feverdreamtv_tsync_Native_nativeRequest(
+    JNIEnv *env, jclass cls, jbyteArray _request) {
     (void)cls;
-    const char *reference = (*env)->GetStringUTFChars(env, _reference, NULL);
+    tsync_enter_ocaml();
+    jbyteArray reply;
+    {
+        CAMLparam0();
+        CAMLlocal1(answer);
+        TSYNC_ENTRY(request, "tsync_jni_request");
+        answer = caml_callback(*request, string_of_bytes(env, _request));
+        reply = bytes_of_string(env, answer);
+        CAMLdrop;
+    }
+    tsync_leave_ocaml();
+    return reply;
+}
+
+JNIEXPORT jbyteArray JNICALL Java_org_feverdreamtv_tsync_Native_nativeStatus(
+    JNIEnv *env, jclass cls) {
+    (void)cls;
+    tsync_enter_ocaml();
+    jbyteArray report;
+    {
+        CAMLparam0();
+        CAMLlocal1(answer);
+        TSYNC_ENTRY(status, "tsync_jni_status");
+        answer = caml_callback(*status, Val_unit);
+        report = bytes_of_string(env, answer);
+        CAMLdrop;
+    }
+    tsync_leave_ocaml();
+    return report;
+}
+
+JNIEXPORT jint JNICALL Java_org_feverdreamtv_tsync_Native_nativeOpen(
+    JNIEnv *env, jclass cls, jbyteArray _reference) {
+    (void)cls;
     tsync_enter_ocaml();
     jint handle;
     {
         CAMLparam0();
         CAMLlocal1(answer);
         TSYNC_ENTRY(open_entry, "tsync_jni_open");
-        answer = caml_callback(*open_entry, caml_copy_string(reference));
+        answer = caml_callback(*open_entry, string_of_bytes(env, _reference));
         handle = (jint)Long_val(answer);
         CAMLdrop;
     }
     tsync_leave_ocaml();
-    (*env)->ReleaseStringUTFChars(env, _reference, reference);
     return handle;
 }
 

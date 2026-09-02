@@ -17,11 +17,12 @@ import java.util.UUID
 import java.util.concurrent.TimeUnit
 
 /**
- * The argv and reply contract, driven against the real binary.
+ * The request and reply contract, driven against the real binary.
  *
- * Both halves are written out by hand — the verbs in OCaml, [Cli] here — so this
- * is the seam that drifts, and only running the two together says they still
- * agree. Every call is its own process, which is how the app makes them.
+ * Both halves are written out by hand — the actions in OCaml, [Cli] here — so
+ * this is the seam that drifts, and only running the two together says they
+ * still agree. Each request goes through `tsync android request`, which answers
+ * it the way the runtime linked into the app does.
  */
 class CliProtocolTest {
 
@@ -145,7 +146,8 @@ class CliProtocolTest {
         return process.exitValue() to out
     }
 
-    private fun send(args: List<String>): JSONObject = Cli.reply(String(raw(args).second))
+    private fun send(request: String): JSONObject =
+        Cli.reply(String(raw(listOf("android", "request", request)).second))
 
     /** The daemon names items by reference, and mints folder ids itself, so a
      *  client learns one by listing the folder that holds it. */
@@ -310,95 +312,6 @@ class CliProtocolTest {
         send(Cli.writeWhole(Cli.ROOT, name, staged("one".toByteArray()).absolutePath))
         send(Cli.writeWhole(Cli.ROOT, name, staged("three!".toByteArray()).absolutePath))
         assertEquals(6, send(Cli.stat(childRef(Cli.ROOT, name))).getInt("size"))
-    }
-
-    /** The range lands at its own offset, so ranges written into one file
-     *  reassemble it however they are ordered. */
-    @Test
-    fun `ranges written into one file reassemble it`() {
-        val name = "bytes.txt"
-        send(Cli.writeWhole(Cli.ROOT, name, staged("0123456789".toByteArray()).absolutePath))
-        val key = childRef(Cli.ROOT, name)
-        val dest = File(root, "ranges")
-        send(Cli.read(key, dest.absolutePath, 5, 5))
-        send(Cli.read(key, dest.absolutePath, 0, 5))
-        assertEquals("0123456789", dest.readText())
-    }
-
-    /** Short at end of file, never padded. */
-    @Test
-    fun `a read past the end is short`() {
-        val name = "short.txt"
-        send(Cli.writeWhole(Cli.ROOT, name, staged("0123456789".toByteArray()).absolutePath))
-        val key = childRef(Cli.ROOT, name)
-        val dest = File(root, "short")
-        assertEquals(2, send(Cli.read(key, dest.absolutePath, 8, 64)).getInt("length"))
-        assertEquals(0, send(Cli.read(key, dest.absolutePath, 99, 8)).getInt("length"))
-    }
-
-    /** How many of its chunks are here, which is what tells a caller whether
-     *  assembling the whole file would cost a download. */
-    @Test
-    fun `residency counts the chunks on this device`() {
-        val name = "resident.txt"
-        send(Cli.writeWhole(Cli.ROOT, name, staged("0123456789".toByteArray()).absolutePath))
-        val key = childRef(Cli.ROOT, name)
-        val before = send(Cli.residency(key))
-        assertTrue(before.getInt("total") > 0)
-        send(Cli.read(key, File(root, "warm").absolutePath, 0, 10))
-        assertEquals(
-            before.getInt("total"),
-            send(Cli.residency(key)).getInt("cached")
-        )
-    }
-
-    /**
-     * The session, driven as the verb documents it: a size line, then a header
-     * and that many bytes per request, until stdin closes.
-     *
-     * One process is the point — reads in it are sequential to
-     * lib/content/data.ml, which is what lets it fetch ahead of the reader.
-     */
-    @Test
-    fun `one process serves every range of an open file`() {
-        val name = "session.txt"
-        send(Cli.writeWhole(Cli.ROOT, name, staged("0123456789".toByteArray()).absolutePath))
-        val key = childRef(Cli.ROOT, name)
-
-        val process = launcher(Cli.open(key))
-            .apply { redirectError(ProcessBuilder.Redirect.DISCARD) }
-            .start()
-        try {
-            val input = java.io.BufferedInputStream(process.inputStream)
-            fun header(): String {
-                val line = java.io.ByteArrayOutputStream()
-                while (true) {
-                    val b = input.read()
-                    if (b < 0 || b == '\n'.code) return line.toString()
-                    line.write(b)
-                }
-            }
-            assertEquals(10L, Cli.reply(header()).getLong("size"))
-
-            fun range(offset: Int, length: Int): String {
-                process.outputStream.write("$offset $length\n".toByteArray())
-                process.outputStream.flush()
-                val n = Cli.reply(header()).getInt("length")
-                val body = ByteArray(n)
-                var done = 0
-                while (done < n) done += input.read(body, done, n - done)
-                return String(body)
-            }
-            assertEquals("01234", range(0, 5))
-            assertEquals("56789", range(5, 5))
-            assertEquals("", range(99, 5))
-
-            // Closing stdin is what ends it.
-            process.outputStream.close()
-            assertTrue(process.waitFor(CALL_TIMEOUT_SECONDS, TimeUnit.SECONDS))
-        } finally {
-            process.destroyForcibly()
-        }
     }
 
     /** Editing in place starts from the current contents. */

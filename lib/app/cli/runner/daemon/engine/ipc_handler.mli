@@ -11,6 +11,10 @@
     match on the code instead of the wording. *)
 val error_reply : Ipc_error.t -> string -> string
 
+(** Whether a request line names an action that changes the domain, and so may
+    leave an upload owed once answered. *)
+val mutates : string -> bool
+
 (** Named so a domain's wiring can be handed to a frontend as one signature. *)
 module type S = sig
   type hooks = {

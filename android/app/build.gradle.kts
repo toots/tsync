@@ -26,10 +26,6 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
-    // The daemon is an executable, not a library: it has to be unpacked to disk
-    // before it can be exec'd. Pairs with extractNativeLibs in the manifest.
-    packaging { jniLibs { useLegacyPackaging = true } }
-
     buildTypes {
         release { isMinifyEnabled = false }
     }
@@ -87,8 +83,8 @@ tasks.withType<Test>().configureEach {
     }
 }
 
-// The daemon is built by dune, not gradle. Stage it straight out of the cross
-// build so the APK can never ship a stale binary, and so a 14MB artifact stays
+// The domain is built by dune, not gradle. Stage it straight out of the cross
+// build so the APK can never ship a stale library, and so a 14MB artifact stays
 // out of git.
 // One prebuilt directory per host platform, so it is looked up rather than
 // spelled out: a CI runner's NDK is not where a homebrew cask puts one.
@@ -101,8 +97,8 @@ val ndkStrip: File by lazy {
     requireNotNull(strip) { "no llvm-strip under $ndk — set ANDROID_NDK_ROOT" }
 }
 
-// An APK without the daemon is useless, but a *test* without it is not: the unit
-// suites drive the protocol against a natively built daemon, or against a fake.
+// An APK without the domain is useless, but a *test* without it is not: the unit
+// suites drive the protocol against a natively built binary, or against a fake.
 // So a missing cross build skips the staging rather than failing every task in
 // the project, and the release build asks for the hard failure with
 // -PrequireDaemon.
@@ -130,18 +126,10 @@ fun stage(name: String, from: String, to: String) =
         }
     }
 
-// The library the app calls into, and the binary it still execs for the verbs
-// that have not moved in-process yet.
 val stageLibrary = stage(
     "stageLibrary",
     "../_build/default.android/lib/app/frontends/android/jni/libtsyncjni.so",
     "src/main/jniLibs/arm64-v8a/libtsyncjni.so"
 )
 
-val stageDaemon = stage(
-    "stageDaemon",
-    "../_build/default.android/bin/tsync.exe",
-    "src/main/jniLibs/arm64-v8a/libtsync.so"
-)
-
-tasks.named("preBuild") { dependsOn(stageLibrary, stageDaemon) }
+tasks.named("preBuild") { dependsOn(stageLibrary) }

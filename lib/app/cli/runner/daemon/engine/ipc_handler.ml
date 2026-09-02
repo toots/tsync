@@ -11,6 +11,21 @@ let error_reply code msg =
          ("error", `String msg);
        ])
 
+(* Actions that change a domain: what a read-only domain refuses here rather
+   than trusting a frontend's advertised capabilities, which a direct request
+   need not honour, and what leaves an upload owed once accepted. Sharing is
+   absent: a share manifest lives outside every domain root. *)
+let mutating_actions =
+  ["create"; "write"; "delete"; "rename"; "mkdir"; "rmdir"; "symlink"; "revert"]
+
+let mutates line =
+  match Yojson.Safe.from_string line with
+    | `Assoc obj -> (
+        match List.assoc_opt "action" obj with
+          | Some (`String action) -> List.mem action mutating_actions
+          | _ -> false)
+    | _ | (exception _) -> false
+
 module type S = sig
   type hooks = {
     evict : Logical_key.t -> unit Lwt.t;
@@ -530,21 +545,6 @@ module Make
   (* The action strings are a wire contract with the FileProvider extension (see
      macos/TsyncFileProvider/IPC.swift): rename handlers freely, never these. *)
 
-  (* Actions a read-only domain refuses here rather than trusting a frontend's
-     advertised capabilities, which a direct request need not honour. Sharing is
-     absent: a share manifest lives outside every domain root. *)
-  let mutating =
-    [
-      "create";
-      "write";
-      "delete";
-      "rename";
-      "mkdir";
-      "rmdir";
-      "symlink";
-      "revert";
-    ]
-
   let handler hooks line =
     match Yojson.Safe.from_string line with
       | exception _ ->
@@ -584,7 +584,7 @@ module Make
           let* resp =
             Lwt.catch
               (fun () ->
-                if C.read_only && List.mem action mutating then
+                if C.read_only && List.mem action mutating_actions then
                   fail `Read_only
                     (Printf.sprintf "'%s' is read-only" C.domain_name)
                 else (

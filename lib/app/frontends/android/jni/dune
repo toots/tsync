@@ -35,8 +35,11 @@
    -open
    Tsync_manifest
    -open
-   Tsync_checkout_lwt))
+   Tsync_checkout_lwt
+   -open
+   Tsync_android_frontend))
  (libraries
+  yojson
   tsync-libs.checkout_lwt
   tsync_android_frontend
   tsync_backend

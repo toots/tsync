@@ -59,13 +59,11 @@ jobs:
             x509-android mirage-crypto-pk-android cmdliner-android \
             memtrace-android bigstringaf-android
       - name: Cross-build the domain
-        # The context paths, not the bare targets: those build the host context
-        # too, which wants FUSE. The library is what the app calls into; the
-        # binary serves the verbs that have not moved in-process yet.
+        # The context path, not the bare target: that builds the host context
+        # too, which wants FUSE.
         run: |
           opam exec -- dune build -x android \
-            _build/default.android/lib/app/frontends/android/jni/libtsyncjni.so \
-            _build/default.android/bin/tsync.exe
+            _build/default.android/lib/app/frontends/android/jni/libtsyncjni.so
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
