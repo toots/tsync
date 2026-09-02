@@ -1,42 +1,11 @@
 open Cmdliner
 open Common
 
-(* [<domain>:<path>] names a domain whether or not it is mounted here, which a
-   path alone cannot do. Only a name the config knows is read that way, so a
-   local file whose name happens to carry a colon still reaches the filesystem. *)
-let split_named cfg arg =
-  match String.index_opt arg ':' with
-    | None -> None
-    | Some i ->
-        let name = String.sub arg 0 i in
-        let rel = String.sub arg (i + 1) (String.length arg - i - 1) in
-        if
-          List.exists
-            (fun (d : Conf_parsing.domain) -> d.Conf_parsing.name = name)
-            cfg.Conf_parsing.domains
-        then
-          Some
-            ( name,
-              if String.length rel > 0 && rel.[0] = '/' then
-                String.sub rel 1 (String.length rel - 1)
-              else rel )
-        else None
-
-(* Which side of the wire each argument names: a domain it says outright, a
-   domain root the path sits under, or the local filesystem. *)
-let endpoint_of ?domain cfg arg =
-  match split_named cfg arg with
-    | Some (name, rel) -> `Domain (name, rel)
-    | None -> (
-        match Daemons.domain_for_path ?domain ~paths:runtime_paths cfg arg with
-          | Some (d, rel) -> `Domain (d.Conf_parsing.name, rel)
-          | None | (exception _) -> `Local arg)
-
 let cmd : unit Cmd.t =
   let src_arg =
     Arg.(
       required
-      & pos 0 (some string) None
+      & pos 0 (some (Location.conv `Either)) None
       & info [] ~docv:"SRC"
           ~doc:
             "Source, as a path or as $(b,DOMAIN:/path). A path in a mounted \
@@ -45,7 +14,7 @@ let cmd : unit Cmd.t =
   let dst_arg =
     Arg.(
       required
-      & pos 1 (some string) None
+      & pos 1 (some (Location.conv `Either)) None
       & info [] ~docv:"DST" ~doc:"Destination, named the same way as $(i,SRC).")
   in
   let move_arg =
@@ -65,23 +34,26 @@ let cmd : unit Cmd.t =
   let run domain src dst move dry_run v =
     set_verbose v;
     let cfg = load_config () in
-    let src_end = endpoint_of ?domain cfg src
-    and dst_end = endpoint_of ?domain cfg dst in
+    let src_end = Location.resolve ?domain cfg src
+    and dst_end = Location.resolve ?domain cfg dst in
     let domain_name, src_e, dst_e =
       match (src_end, dst_end) with
         | `Local _, `Local _ ->
             failwith
               "neither path is under a tsync domain -- use rsync(1) for that"
-        | `Domain (a, _), `Domain (b, _) when a <> b ->
+        | `Domain a, `Domain b when a.Location.name <> b.Location.name ->
             failwith
               (Printf.sprintf
                  "%s and %s are in different domains, which is a chunk copy \
                   rather than a manifest one -- see tsync mirror"
-                 a b)
-        | `Domain (a, ra), `Domain (_, rb) ->
-            (a, Rsync.Domain ra, Rsync.Domain rb)
-        | `Domain (a, ra), `Local p -> (a, Rsync.Domain ra, Rsync.Local p)
-        | `Local p, `Domain (a, rb) -> (a, Rsync.Local p, Rsync.Domain rb)
+                 a.Location.name b.Location.name)
+        | `Domain a, `Domain b ->
+            (a.Location.name, Rsync.Domain a.Location.rel,
+             Rsync.Domain b.Location.rel)
+        | `Domain a, `Local p ->
+            (a.Location.name, Rsync.Domain a.Location.rel, Rsync.Local p)
+        | `Local p, `Domain b ->
+            (b.Location.name, Rsync.Local p, Rsync.Domain b.Location.rel)
     in
     let (module C : Conf_lwt.S) = make_conf ~domain:domain_name cfg in
     let current = ref None and copied = ref 0 and skipped = ref 0 in
@@ -90,7 +62,7 @@ let cmd : unit Cmd.t =
         ~report:(fun () ->
           report_job
             (module C)
-            ~kind:"rsync" ~target:dst
+            ~kind:"rsync" ~target:(Location.typed dst)
             ~current:(fun () -> !current)
             ~counters:(fun () ->
               [ ("copied", !copied); ("skipped", !skipped) ])
