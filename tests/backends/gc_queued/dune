@@ -4,15 +4,13 @@
    -open
    Tsync_core
    -open
-   Tsync_chunk_integrity
+   Tsync_backend_api
    -open
    Tsync_manifest
    -open
    Tsync_ops
    -open
    Tsync_ops_lwt
-   -open
-   Tsync_backend_register
    -open
    Tsync_backend_lwt
    -open
@@ -22,12 +20,11 @@
  (name gc_queued)
  (libraries
   tsync_core
-  tsync_chunk_integrity
+  tsync_backend_api
   tsync_manifest
   tsync_test_harness
   tsync_ops
   tsync_ops_lwt
-  tsync_backend_register
   tsync_backend_lwt
   tsync_local_backend_lwt
   lwt

@@ -4,17 +4,14 @@
    -open
    Tsync_core
    -open
-   Tsync_domain_store_lwt
+   Tsync_backend_lwt
    -open
-   Tsync_backend_register
-   -open
-   Tsync_backend_lwt))
+   Tsync_backend_api))
  (name batch_nesting)
  (libraries
   tsync-libs.core
-  tsync_domain_store_lwt
-  tsync_core
-  tsync_backend_register
   tsync_backend_lwt
+  tsync_core
+  tsync_backend_api
   lwt
   lwt.unix))

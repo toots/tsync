@@ -4,8 +4,8 @@
    -open
    Tsync_core
    -open
-   Tsync_http_proxy
+   Tsync_backend_api
    -open
    Tsync_test_harness))
  (name wire_bodies_test)
- (libraries tsync-libs.core tsync_test_harness tsync_http_proxy tsync_core))
+ (libraries tsync-libs.core tsync_test_harness tsync_backend_api tsync_core))

@@ -4,7 +4,7 @@
    -open
    Tsync_core
    -open
-   Tsync_chunk_integrity
+   Tsync_backend_api
    -open
    Tsync_remote_lwt
    -open
@@ -14,8 +14,6 @@
    -open
    Tsync_remote
    -open
-   Tsync_backend_register
-   -open
    Tsync_backend_lwt
    -open
    Tsync_local_backend_lwt
@@ -24,13 +22,12 @@
  (name corruption_test)
  (libraries
   tsync_core
-  tsync_chunk_integrity
+  tsync_backend_api
   tsync_remote_lwt
   tsync_manifest
   tsync_test_harness
   tsync_conf_lwt
   tsync_remote
-  tsync_backend_register
   tsync_backend_lwt
   tsync_local_backend_lwt
   lwt

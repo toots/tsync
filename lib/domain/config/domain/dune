@@ -16,13 +16,9 @@
    -open
    Tsync_conf_parsing
    -open
-   Tsync_backend_register
+   Tsync_backend_api
    -open
    Tsync_backend_lwt
-   -open
-   Tsync_domain_store
-   -open
-   Tsync_domain_store_lwt
    -open
    Tsync_runtime))
  (name tsync_domain)
@@ -32,8 +28,6 @@
   tsync_manifest
   tsync_conf_lwt
   tsync_conf_parsing
-  tsync_backend_register
+  tsync_backend_api
   tsync_backend_lwt
-  tsync_domain_store
-  tsync_domain_store_lwt
   tsync_runtime))
