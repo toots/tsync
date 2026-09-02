@@ -1,0 +1,28 @@
+; The vocabulary and the tools every layer above shares: keys, chunks, the retry
+; ladder, the durable queue, the log, metrics, and bytes outside the heap.
+; Nothing here takes a conf.
+
+(library
+ (flags
+  (:standard -open Tsync_stdlib -open Tsync_io -open Tsync_device))
+ (name tsync_core)
+ (public_name tsync-libs.core)
+ (libraries
+  (select
+   log_syslog_provider.ml
+   from
+   (syslog -> log_syslog_provider.available.ml)
+   (-> log_syslog_provider.stub.ml))
+  unix
+  tsync_stdlib
+  tsync_io
+  yojson
+  mem_usage
+  cohttp
+  uri
+  bigstringaf
+  tsync_device)
+ (private_modules log_printf log_syslog_provider)
+ (foreign_stubs
+  (language c)
+  (names xxhash_stubs)))

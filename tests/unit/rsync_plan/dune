@@ -6,8 +6,8 @@
    -open
    Tsync_manifest
    -open
-   Tsync_chunks
+   Tsync_core
    -open
    Tsync_test_harness))
  (name rsync_plan)
- (libraries tsync-libs.ops tsync_manifest tsync_chunks tsync_test_harness))
+ (libraries tsync-libs.ops tsync_manifest tsync_core tsync_test_harness))

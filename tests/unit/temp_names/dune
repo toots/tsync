@@ -1,5 +1,5 @@
 (executable
  (flags
-  (:standard -open Tsync_filename -open Tsync_test_harness))
+  (:standard -open Tsync_io -open Tsync_test_harness))
  (name temp_names_test)
- (libraries tsync_filename tsync_test_harness lwt lwt.unix unix))
+ (libraries tsync_io tsync_test_harness lwt lwt.unix unix))

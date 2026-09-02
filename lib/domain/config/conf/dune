@@ -1,12 +1,6 @@
 (library
  (flags
-  (:standard
-   -open
-   Tsync_backend_register
-   -open
-   Tsync_logical_key
-   -open
-   Tsync_io))
+  (:standard -open Tsync_backend_register -open Tsync_core -open Tsync_io))
  (name tsync_conf)
  (public_name tsync-libs.conf)
- (libraries tsync-libs.logical_key tsync_backend_register tsync_io))
+ (libraries tsync-libs.core tsync_backend_register tsync_io))

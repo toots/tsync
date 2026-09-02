@@ -19,9 +19,9 @@
    -open
    Tsync_journal
    -open
-   Tsync_log
+   Tsync_core
    -open
-   Tsync_durable_queue_lwt))
+   Tsync_core_lwt))
  (name tsync_checkout_lwt)
  (public_name tsync-libs.checkout_lwt)
  (libraries
@@ -32,7 +32,7 @@
   tsync_conf_lwt
   tsync_remote_lwt
   tsync_journal
-  tsync_log
+  tsync_core
   lwt.unix
   unix
-  tsync_durable_queue_lwt))
+  tsync_core_lwt))

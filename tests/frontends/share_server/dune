@@ -2,7 +2,7 @@
  (flags
   (:standard
    -open
-   Tsync_logical_key
+   Tsync_core
    -open
    Tsync_remote_lwt
    -open
@@ -14,8 +14,6 @@
    -open
    Tsync_conf_lwt
    -open
-   Tsync_bigstring
-   -open
    Tsync_backend_register
    -open
    Tsync_backend_lwt
@@ -24,24 +22,21 @@
    -open
    Tsync_http_proxy_frontend
    -open
-   Tsync_io_lwt
-   -open
-   Tsync_metrics))
+   Tsync_io_lwt))
  (name share_server_test)
  (libraries
   cohttp-lwt
   cohttp
-  tsync_logical_key
+  tsync_core
   tsync_remote_lwt
   tsync_checkout_lwt
   tsync_cache_layout_lwt
   tsync_cache_layout
-  tsync_bigstring
   tsync_backend_register
   tsync_backend_lwt
   tsync_http_proxy_frontend
   tsync_io_lwt
-  tsync-libs.metrics
+  tsync-libs.core
   tsync_local_backend_lwt
   tsync_conf_lwt
   yojson

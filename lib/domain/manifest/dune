@@ -4,23 +4,7 @@
 
 (library
  (flags
-  (:standard
-   -open
-   Tsync_io_lwt
-   -open
-   Tsync_chunks
-   -open
-   Tsync_bigstring
-   -open
-   Tsync_xxhash
-   -open
-   Tsync_conf))
+  (:standard -open Tsync_io_lwt -open Tsync_core -open Tsync_conf))
  (name tsync_manifest)
  (public_name tsync-libs.manifest)
- (libraries
-  unix
-  tsync_io_lwt
-  tsync_chunks
-  tsync_bigstring
-  tsync_xxhash
-  tsync_conf))
+ (libraries unix tsync_io_lwt tsync_core tsync_conf))

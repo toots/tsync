@@ -2,29 +2,19 @@
  (flags
   (:standard
    -open
-   Tsync_logical_key
-   -open
-   Tsync_retry
+   Tsync_core
    -open
    Tsync_chunk_integrity
    -open
-   Tsync_field_spec
-   -open
-   Tsync_log
-   -open
    Tsync_backend_register
    -open
-   Tsync_io
-   -open
-   Tsync_retry))
+   Tsync_io))
  (name tsync_s3_backend)
  (optional)
  (libraries
   aws-s3
-  tsync-libs.logical_key
-  tsync_retry
+  tsync-libs.core
+  tsync_core
   tsync_io
   tsync_chunk_integrity
-  tsync-libs.field_spec
-  tsync-libs.backend_register
-  tsync-libs.log))
+  tsync-libs.backend_register))

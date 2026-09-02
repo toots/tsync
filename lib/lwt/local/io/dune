@@ -5,8 +5,8 @@
  (name tsync_io_lwt)
  (public_name tsync-libs.io_lwt)
  (flags
-  (:standard -open Tsync_io))
+  (:standard -open Tsync_io -open Tsync_core -open Tsync_device))
  (foreign_stubs
   (language c)
   (names positioned_stubs))
- (libraries tsync_io unix lwt lwt.unix bigstringaf))
+ (libraries tsync_io tsync_core tsync_device unix lwt lwt.unix bigstringaf))

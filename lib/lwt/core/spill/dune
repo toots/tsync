@@ -1,9 +1,0 @@
-; Lwt's buffered channels, as the append tsync-libs.spill asks for. The
-; filesystem it also asks for is Io_lwt.Fs as it stands.
-
-(library
- (flags
-  (:standard -open Tsync_spill -open Tsync_io_lwt))
- (name tsync_spill_lwt)
- (public_name tsync-libs.spill_lwt)
- (libraries tsync_spill tsync_io_lwt lwt lwt.unix))

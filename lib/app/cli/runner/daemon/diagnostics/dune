@@ -6,11 +6,7 @@
    -open
    Tsync_checkout_lwt
    -open
-   Tsync_retry
-   -open
-   Tsync_logical_key
-   -open
-   Tsync_chunks
+   Tsync_core
    -open
    Tsync_remote_lwt
    -open
@@ -20,21 +16,13 @@
    -open
    Tsync_cache_layout
    -open
-   Tsync_log
-   -open
-   Tsync_metrics
-   -open
-   Tsync_metrics_lwt
+   Tsync_core_lwt
    -open
    Tsync_io_lwt
-   -open
-   Tsync_bigstring
    -open
    Tsync_backend_register
    -open
    Tsync_backend_lwt
-   -open
-   Tsync_ipc_lwt
    -open
    Tsync_conf
    -open
@@ -47,9 +35,7 @@
   tsync_checkout
   tsync_checkout_lwt
   tsync-libs.conf_parsing
-  tsync_retry
-  tsync_logical_key
-  tsync_chunks
+  tsync_core
   tsync_remote_lwt
   tsync_journal
   tsync_remote
@@ -58,13 +44,9 @@
   tsync_io_lwt
   tsync_conf
   tsync_conf_lwt
-  tsync_bigstring
   tsync_backend_register
   tsync_backend_lwt
-  tsync_ipc_lwt
-  tsync_metrics
-  tsync_metrics_lwt
-  tsync_log
+  tsync_core_lwt
   yojson
   unix
   lwt

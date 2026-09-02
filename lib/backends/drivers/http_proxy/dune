@@ -2,31 +2,20 @@
  (flags
   (:standard
    -open
-   Tsync_logical_key
-   -open
-   Tsync_field_spec
+   Tsync_core
    -open
    Tsync_http_proxy
    -open
-   Tsync_bigstring
-   -open
    Tsync_backend_register
    -open
-   Tsync_http_client
-   -open
-   Tsync_io
-   -open
-   Tsync_retry))
+   Tsync_io))
  (name tsync_http_proxy_backend)
  (libraries
   cohttp
-  tsync-libs.logical_key
-  tsync_retry
+  tsync-libs.core
+  tsync_core
   tsync_io
-  tsync-libs.field_spec
-  tsync-libs.bigstring
   tsync-libs.backend_register
-  tsync_http_client
   tsync-libs.http_proxy
   uri
   yojson))

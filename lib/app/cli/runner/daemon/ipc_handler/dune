@@ -2,7 +2,7 @@
  (flags
   (:standard
    -open
-   Tsync_logical_key
+   Tsync_core
    -open
    Tsync_checkout
    -open
@@ -20,10 +20,6 @@
    -open
    Tsync_cache_layout_lwt
    -open
-   Tsync_log
-   -open
-   Tsync_metrics
-   -open
    Tsync_io_lwt
    -open
    Tsync_conf_lwt
@@ -34,7 +30,7 @@
  (name tsync_ipc_handler)
  (public_name tsync-libs.ipc_handler)
  (libraries
-  tsync_logical_key
+  tsync_core
   tsync_checkout
   tsync_sync
   tsync_manifest
@@ -46,9 +42,7 @@
   tsync_backend_register
   tsync_io_lwt
   tsync_conf_lwt
-  tsync_metrics
   tsync_diagnostics
-  tsync_log
   yojson
   unix
   lwt))

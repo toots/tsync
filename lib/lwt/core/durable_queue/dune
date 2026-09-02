@@ -1,9 +1,0 @@
-; Lwt's mutex, condition and channels, as the durable queue asks for them. The
-; filesystem it also asks for is Io_lwt.Fs as it stands.
-
-(library
- (flags
-  (:standard -open Tsync_durable_queue -open Tsync_io_lwt))
- (name tsync_durable_queue_lwt)
- (public_name tsync-libs.durable_queue_lwt)
- (libraries tsync_durable_queue tsync_io_lwt lwt lwt.unix unix))

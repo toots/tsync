@@ -2,17 +2,13 @@
  (flags
   (:standard
    -open
-   Tsync_logical_key
+   Tsync_core
    -open
-   Tsync_filename
-   -open
-   Tsync_chunks
+   Tsync_io
    -open
    Tsync_ops
    -open
    Tsync_ops_lwt
-   -open
-   Tsync_bigstring
    -open
    Tsync_conf_lwt
    -open
@@ -29,13 +25,12 @@
    Tsync_test_harness))
  (name writes_in_flight)
  (libraries
-  tsync-libs.logical_key
-  tsync_filename
-  tsync_chunks
+  tsync-libs.core
+  tsync_io
+  tsync_core
   tsync_test_harness
   tsync_ops
   tsync_ops_lwt
-  tsync_bigstring
   tsync_conf_lwt
   tsync_io_lwt
   tsync_backend_register

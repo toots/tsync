@@ -2,13 +2,11 @@
  (flags
   (:standard
    -open
-   Tsync_logical_key
+   Tsync_core
    -open
    Tsync_remote_lwt
    -open
    Tsync_manifest
-   -open
-   Tsync_chunks
    -open
    Tsync_backend_register
    -open
@@ -21,10 +19,9 @@
    Tsync_test_harness))
  (name staged_fanout_test)
  (libraries
-  tsync_logical_key
+  tsync_core
   tsync_remote_lwt
   tsync_manifest
-  tsync_chunks
   tsync_test_harness
   tsync_conf_lwt
   tsync_backend_register

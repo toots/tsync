@@ -2,13 +2,9 @@
  (flags
   (:standard
    -open
-   Tsync_logical_key
+   Tsync_core
    -open
    Tsync_manifest
-   -open
-   Tsync_chunks
-   -open
-   Tsync_bigstring
    -open
    Tsync_backend_lwt
    -open
@@ -21,11 +17,10 @@
    Tsync_test_harness))
  (name backfill)
  (libraries
-  tsync-libs.logical_key
+  tsync-libs.core
   tsync_manifest
-  tsync_chunks
+  tsync_core
   tsync_test_harness
-  tsync_bigstring
   tsync_backend_lwt
   tsync_domain_store
   tsync_domain_store_lwt

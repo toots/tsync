@@ -2,7 +2,7 @@
  (flags
   (:standard
    -open
-   Tsync_filename
+   Tsync_io
    -open
    Tsync_engine
    -open
@@ -21,7 +21,7 @@
    Tsync_test_harness))
  (name sweep_scope_test)
  (libraries
-  tsync_filename
+  tsync_io
   tsync_test_harness
   tsync-libs.engine
   tsync_cache_layout

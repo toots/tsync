@@ -1,5 +1,5 @@
 (executable
  (flags
-  (:standard -open Tsync_hashtbl_mmap -open Tsync_test_harness))
+  (:standard -open Tsync_core -open Tsync_test_harness))
  (name hashtbl_mmap_test)
- (libraries tsync_test_harness tsync_hashtbl_mmap unix))
+ (libraries tsync_test_harness tsync_core unix))

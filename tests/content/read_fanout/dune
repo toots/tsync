@@ -2,13 +2,11 @@
  (flags
   (:standard
    -open
-   Tsync_logical_key
+   Tsync_core
    -open
    Tsync_manifest
    -open
    Tsync_checkout_lwt
-   -open
-   Tsync_bigstring
    -open
    Tsync_backend_lwt
    -open
@@ -17,11 +15,11 @@
    Tsync_test_harness))
  (name read_fanout)
  (libraries
-  tsync-libs.logical_key
+  tsync-libs.core
   tsync_manifest
   tsync_checkout_lwt
   tsync_test_harness
-  tsync_bigstring
+  tsync_core
   tsync_backend_lwt
   tsync_conf_lwt
   lwt

@@ -18,27 +18,13 @@
    -open
    Tsync_backend_register
    -open
-   Tsync_bigstring
-   -open
-   Tsync_log
+   Tsync_core
    -open
    Tsync_remote
    -open
-   Tsync_logical_key
-   -open
-   Tsync_chunks
-   -open
    Tsync_stdlib
    -open
-   Tsync_filename
-   -open
-   Tsync_retry
-   -open
-   Tsync_journal
-   -open
-   Tsync_id
-   -open
-   Tsync_durable_queue))
+   Tsync_journal))
  (name tsync_checkout)
  (public_name tsync-libs.checkout)
  (libraries
@@ -47,17 +33,10 @@
   tsync_cache_layout
   tsync_io
   tsync_backend_register
-  tsync_bigstring
-  tsync_log
+  tsync_core
   unix
   tsync_remote
-  tsync_logical_key
-  tsync_chunks
   tsync_stdlib
-  tsync_filename
-  tsync_retry
   tsync_journal
-  tsync_id
   yojson
-  base64
-  tsync_durable_queue))
+  base64))

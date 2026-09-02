@@ -2,7 +2,7 @@
  (flags
   (:standard
    -open
-   Tsync_logical_key
+   Tsync_core
    -open
    Tsync_manifest
    -open
@@ -18,8 +18,6 @@
    -open
    Tsync_conf_lwt
    -open
-   Tsync_bigstring
-   -open
    Tsync_backend_register
    -open
    Tsync_backend_lwt
@@ -29,7 +27,7 @@
    Tsync_test_harness))
  (name resync_test)
  (libraries
-  tsync_logical_key
+  tsync_core
   tsync_manifest
   tsync_journal
   tsync_test_harness
@@ -38,7 +36,6 @@
   tsync_remote
   tsync_remote_lwt
   tsync_conf_lwt
-  tsync_bigstring
   tsync_backend_register
   tsync_backend_lwt
   tsync_local_backend_lwt

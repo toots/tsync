@@ -4,17 +4,13 @@
    -open
    Tsync_stdlib
    -open
-   Tsync_logical_key
+   Tsync_core
    -open
    Tsync_checkout
    -open
-   Tsync_field_spec
-   -open
    Tsync_cache_layout
    -open
-   Tsync_ipc_lwt
-   -open
-   Tsync_metrics
+   Tsync_core_lwt
    -open
    Tsync_io_lwt
    -open
@@ -24,25 +20,21 @@
    -open
    Tsync_engine
    -open
-   Tsync_frontend_register
-   -open
-   Tsync_log))
+   Tsync_frontend_register))
  (name tsync_fuse_frontend)
  (private_modules fuse_fs hidden_ops internal_ops path_ops)
  (optional)
  (libraries
   tsync_stdlib
-  tsync_logical_key
+  tsync_core
   tsync_cache_layout
   tsync_conf_lwt
   tsync_checkout
-  tsync-libs.field_spec
+  tsync-libs.core
   tsync-libs.frontend_register
-  tsync-libs.log
   tsync-libs.conf
   tsync-libs.engine
-  tsync-libs.ipc_lwt
-  tsync-libs.metrics
+  tsync-libs.core_lwt
   tsync_io_lwt
   fuse3
   unix

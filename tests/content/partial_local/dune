@@ -2,7 +2,7 @@
  (flags
   (:standard
    -open
-   Tsync_logical_key
+   Tsync_core
    -open
    Tsync_manifest
    -open
@@ -18,8 +18,6 @@
    -open
    Tsync_remote
    -open
-   Tsync_bigstring
-   -open
    Tsync_backend_lwt
    -open
    Tsync_conf_lwt
@@ -27,7 +25,7 @@
    Tsync_local_backend_lwt))
  (name partial_local)
  (libraries
-  tsync_logical_key
+  tsync_core
   tsync_manifest
   tsync_remote_lwt
   tsync_checkout
@@ -35,7 +33,6 @@
   tsync_conf
   tsync_test_harness
   tsync_remote
-  tsync_bigstring
   tsync_conf_lwt
   tsync_backend_lwt
   tsync_local_backend_lwt
