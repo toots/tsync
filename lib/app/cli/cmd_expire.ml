@@ -35,7 +35,7 @@ let cmd : unit Cmd.t =
       run_lwt
         (let cutoff = parse_date date in
          let (module C : Conf_lwt.S) = load_conf ?domain () in
-         let module E = Expire_lwt.Make (C) in
+         let module E = Retention_lwt.Make (C) in
          (* A domain with a long history spends minutes listing before it deletes
             anything, so say what is happening rather than sit silent. Progress
             goes to stderr, leaving stdout to the one summary line a script would
@@ -55,7 +55,7 @@ let cmd : unit Cmd.t =
        exits nonzero: a run that could not reach a backend must not tell a
        script it expired anything. *)
     Printf.printf "Removed %d version(s), %d journal entr(ies)\n"
-      s.Expire.versions_deleted s.journal_deleted
+      s.Retention.versions_deleted s.journal_deleted
   in
   Cmd.v
     (Cmd.info "expire"

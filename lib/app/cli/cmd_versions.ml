@@ -80,18 +80,18 @@ let cmd : unit Cmd.t =
                    Printf.printf "%Ld  %s  %d bytes\n" ts (human_ts ts) size)
                  versions
          | None ->
-             let module D = Deleted_lwt.Make (C) in
-             let+ deleted = D.in_domain () in
+             let module D = Retention_lwt.Make (C) in
+             let+ deleted = D.deleted_in_domain () in
              let deleted = List.sort compare deleted in
              if deleted = [] then print_endline "No deleted files"
              else
                List.iter
-                 (fun (e : Deleted.entry) ->
+                 (fun (e : Retention.deleted) ->
                    Printf.printf "%s  (deleted %s, %d version%s)\n"
-                     e.Deleted.path
-                     (human_ts e.Deleted.latest)
-                     e.Deleted.versions
-                     (if e.Deleted.versions = 1 then "" else "s"))
+                     e.Retention.path
+                     (human_ts e.Retention.latest)
+                     e.Retention.versions
+                     (if e.Retention.versions = 1 then "" else "s"))
                  deleted)
   in
   let run path domain do_revert version =

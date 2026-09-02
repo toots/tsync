@@ -5,3 +5,5 @@ let take n l =
     | x :: rest -> go (x :: acc) (n - 1) rest
   in
   go [] n l
+
+let per_delete = 1000
