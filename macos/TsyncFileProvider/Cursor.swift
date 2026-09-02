@@ -63,27 +63,3 @@ enum Anchor {
         NSFileProviderSyncAnchor(Data("\(token)|\(cursor)".utf8))
     }
 }
-
-/// Where a working-set scan has got to: the container it is in, and the last
-/// name served from it. Content-derived like every other page token, so it means
-/// the same to a process that did not issue it.
-struct WorkingSetPage {
-    /// Directories still to list, the first being the one in progress.
-    let pending: [String]
-    /// The last name served in that directory.
-    let after: String?
-
-    static func decode(_ raw: String?) -> WorkingSetPage {
-        guard let raw, let separator = raw.firstIndex(of: "|") else {
-            return WorkingSetPage(pending: [ItemID.rootForm], after: nil)
-        }
-        let after = String(raw[raw.startIndex..<separator])
-        let pending = String(raw[raw.index(after: separator)...])
-            .split(separator: "\u{1}").map(String.init)
-        return WorkingSetPage(pending: pending, after: after.isEmpty ? nil : after)
-    }
-
-    static func encode(_ walk: WorkingSetPage) -> NSFileProviderPage? {
-        Cursor.page("\(walk.after ?? "")|\(walk.pending.joined(separator: "\u{1}"))")
-    }
-}
