@@ -145,6 +145,13 @@ struct
         ~mtime:(Unix.gettimeofday ())
 
     (* Directories exist only in the manifest mirror. *)
+    let kind key =
+      let+ mst = Fs.stat_opt_large (manifest_path key) in
+      match mst with
+        | Some { Unix.LargeFile.st_kind = Unix.S_DIR; _ } -> `Dir
+        | Some _ -> `File
+        | None -> `Absent
+
     let stat key =
       let* mst = Fs.stat_opt_large (manifest_path key) in
       match mst with
@@ -408,13 +415,8 @@ struct
         | None -> return_unit
 
     let rename_body ~src ~dst =
-      let mp = manifest_path src in
-      let* mst = Fs.stat_opt_large mp in
-      let is_dir =
-        match mst with
-          | Some { Unix.LargeFile.st_kind = Unix.S_DIR; _ } -> true
-          | _ -> false
-      in
+      let* k = kind src in
+      let is_dir = k = `Dir in
       (* What it is is discovered here, from the tree, so the keys are renamed
          into folders once it is known. *)
       let as_dir k = if is_dir then Lk.dir (Logical_key.path k) else k in

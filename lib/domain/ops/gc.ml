@@ -98,12 +98,7 @@ struct
     (* Opening and closing a run are a rename and an [rm -rf] within the main's own
        directory, which is what having a {!C.Store.local_path} grants. *)
     let collector () =
-      let main =
-        List.find_opt
-          (fun (m : (module C.Store) Backend.member) -> m.Backend.role = `Main)
-          C.members
-      in
-      match main with
+      match Backend.main C.members with
         | None ->
             Io.fail
               (Unsupported
@@ -142,12 +137,7 @@ struct
        thousands, so a fixed number of them is a round trip wasted on the empty
        ones and a batch over the limit on the full ones. *)
     let default_delete_batch = Batch.per_delete
-
-    let deferred_members () =
-      List.filter
-        (fun (m : (module C.Store) Backend.member) ->
-          m.Backend.role = `Replica || m.Backend.role = `Backfill)
-        C.members
+    let deferred_members () = Backend.deferred C.members
 
     (* Two processes stepping one run lose chunks: both resume from the same
        cursor, so their root lists can partition, and whichever finishes its share

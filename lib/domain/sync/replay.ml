@@ -168,7 +168,7 @@ struct
       let* keys = Mfs.list () in
       iter_s
         (fun key ->
-          if List.mem (F.rel_key key) recorded then return_unit
+          if List.mem (Logical_key.path key) recorded then return_unit
           else begin
             Log.info "adopting staged upload for %s" (Logical_key.to_string key);
             Io.catch

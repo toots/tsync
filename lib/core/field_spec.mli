@@ -25,3 +25,13 @@ type t = {
     [default] is what an absent or unrecognised value means, and is why this is
     shared rather than spelled at each reader. *)
 val bool : default:bool -> string option -> bool
+
+(** What a report or a prompt shows in place of a secret that is set. *)
+val masked : string
+
+(** [v] as it may be shown: {!masked} for a secret field that is set. *)
+val mask : t -> string -> string
+
+(** {!mask} for the field named [name] in [spec]; a name the spec does not know
+    is shown as it is. *)
+val mask_named : t list -> string -> string -> string

@@ -331,6 +331,14 @@ val member :
   'store ->
   'store member
 
+(** The members by role, decided here so a collector, a copy and the composite
+    agree on which is which: the mains take every write and serve reads first,
+    the deferred ones are the copies filled behind a write. *)
+val main : 'store member list -> 'store member option
+
+val deferred : 'store member list -> 'store member list
+val named : string -> 'store member list -> 'store member option
+
 (** {1 Failure} *)
 
 (** A store's considered answer that the object is not there or not as recorded,
