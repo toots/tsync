@@ -111,6 +111,32 @@ let () =
               Printf.printf "boot failed: %s\n" failure;
               exit 1);
 
+        (* The verbs the app once exec'd, answered on the same loop: a listing
+           first, then a change that returns drained, then a read of what it
+           made. *)
+        let listed =
+          Tsync_android_jni.Android_jni.request
+            {|{"action":"list_dir","ref":"root"}|}
+        in
+        line "request lists the fixture: %b"
+          (ref_of listed "big.bin" = Some item);
+        let made =
+          Tsync_android_jni.Android_jni.request
+            {|{"action":"mkdir","parentRef":"root","name":"made"}|}
+        in
+        line "request makes a folder: %b"
+          (String.length made >= 10 && String.sub made 0 10 = {|{"ok":true|});
+        let again =
+          Tsync_android_jni.Android_jni.request
+            {|{"action":"list_dir","ref":"root"}|}
+        in
+        line "the folder is listed once made: %b" (ref_of again "made" <> None);
+        line "a request that is not JSON is refused, not raised: %s"
+          (Tsync_android_jni.Android_jni.request "nonsense");
+        line "status reports the domain: %b"
+          (let report = Tsync_android_jni.Android_jni.status () in
+           String.length report > 0);
+
         let handle = Tsync_android_jni.Android_jni.opened item in
         if handle < 0 then (
           Printf.printf "open failed: %d\n" handle;

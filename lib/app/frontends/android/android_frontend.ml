@@ -1,15 +1,16 @@
-(* A domain the Android app drives one command at a time.
+(* A domain the Android app links into its own process and drives one request
+   at a time, through {!Serve}; the verbs below put the same answers on a
+   command line, for a shell and for the JVM test that holds the app's wire to
+   the real thing.
 
    There is no daemon because a long-lived process fights the platform: a
    dataSync foreground service is stopped after about six hours a day, and the
-   app's exec'd child is reaped while its Service object survives.
-
-   Exiting between calls loses nothing, which is why there is no ranged write
-   and no close though FUSE has both: every operation is a function of key and
-   offset whose state is already on disk, and a command may not leave a file
-   staged for the next one to finish -- [Replay.reconcile] runs first and
-   publishes what it finds. Android needs neither, its DocumentsProvider
-   committing a whole staged body through [write-whole]. *)
+   app's exec'd child is reaped while its Service object survives. The runtime
+   lives as long as the app's process does, and nothing it leaves behind is
+   lost: every operation is a function of key and offset whose state is already
+   on disk, and [Replay.reconcile] runs at the next start and publishes what it
+   finds. So there is no ranged write and no close though FUSE has both, the
+   DocumentsProvider committing a whole staged body through [write]. *)
 
 let implementation = "android"
 let is_local = Checkout.is_local
@@ -30,22 +31,21 @@ let int_arg verb what s =
     | Some n -> n
     | None -> usage verb (Printf.sprintf "%s must be a number, got %S" what s)
 
-module Make (C : Conf_lwt.S) = struct
-  module Lk = Logical_key.Make (C)
-  module E = Domain_engine.Make_over (Lazy_checkout_lwt) (C)
-  module F = E.F
-  module Ih = E.Ih
-
+(* What the app asks of a running domain, as functions of the engine serving
+   it: the same code answers whether the caller is the exec'd binary, which
+   runs a loop per command, or the linked runtime, which hands each call to a
+   loop that outlives it. *)
+module Serve (E : Domain_engine.S) (C : Conf_lwt.S) = struct
   let hooks =
-    Ih.
+    E.Ih.
       {
         (* The client addresses files by storage key, not by a path in some
            mount it can see, so evict/restore/revert arrive already resolved. *)
         (* ponytail: single key only. FUSE walks a directory subtree here
            (fuse_fs.ml:184) because a user can point at a folder in Finder;
            lift that if a client ever offers the same gesture. *)
-        evict = F.evict;
-        restore = F.ensure_cached;
+        evict = E.F.evict;
+        restore = E.F.ensure_cached;
         (* Nothing here holds a materialised copy to invalidate: the client
            re-queries, and [sync --full] has already rebuilt the mirror before
            it signals us. *)
@@ -59,10 +59,40 @@ module Make (C : Conf_lwt.S) = struct
         on_stop = (fun () -> ());
       }
 
-  (* [staging] says whether the verb may leave work owed, which is what needs
-     the upload queue running; every verb needs the manifest tree either way.
-     Draining is unconditional: with no daemon holding a queue, this returning is
-     the only backpressure a caller gets. *)
+  (* One request, one reply. A mutating one returns once its upload has
+     drained: with no queue a caller can ask about, this returning is the only
+     backpressure it gets, and what a camera sweep paces on. The handler's
+     continuation is meaningless here, every one of `Continue, `Stop and
+     `Subscribe being "answer the next call the same way". *)
+  let request req =
+    let open Lwt.Syntax in
+    let* reply, _ = E.Ih.handler hooks req in
+    let+ () = if Ipc_handler.mutates req then E.drain () else Lwt.return_unit in
+    reply
+
+  (* No daemon to describe, so this reports the domain alone: the same fold with
+     nobody to ask, so a report from a phone reads like any other. *)
+  let status () =
+    let open Lwt.Syntax in
+    let module D = Diagnostics.Make (C) in
+    let+ json = D.domain_json () in
+    Status_report.text
+      (Status_report.of_answers
+         ~local:
+           (Diagnostics.self_json
+              ~extra:[("frontend", `String implementation)]
+              ())
+         ~domains:[json] [])
+end
+
+module Make (C : Conf_lwt.S) = struct
+  module E = Domain_engine.Make_over (Lazy_checkout_lwt) (C)
+  module F = E.F
+  module Ih = E.Ih
+  module S = Serve (E) (C)
+
+  (* [staging] says whether the verb may leave work owed, which is what needs the
+     upload queue running; every verb needs the manifest tree either way. *)
   let run ~staging f =
     let open Lwt.Syntax in
     (* Detached work has no caller to fail, and the default hook ends the
@@ -76,12 +106,10 @@ module Make (C : Conf_lwt.S) = struct
        let* () = f () in
        E.drain ())
 
-  (* The handler's continuation is meaningless here: a process that has answered
-     is about to exit, which is every one of `Continue, `Stop and `Subscribe. *)
-  let answer ~staging req =
-    run ~staging (fun () ->
+  let answer req =
+    run ~staging:(Ipc_handler.mutates req) (fun () ->
         let open Lwt.Syntax in
-        let+ reply, _ = Ih.handler hooks req in
+        let+ reply = S.request req in
         print_string reply;
         print_newline ())
 
@@ -196,21 +224,8 @@ module Make (C : Conf_lwt.S) = struct
                         ("total", `Int total);
                       ])))
 
-  (* No daemon to describe, so this reports the domain alone: the same fold with
-     nobody to ask, so a report from a phone reads like any other. *)
   let status () =
-    run ~staging:false (fun () ->
-        let open Lwt.Syntax in
-        let module D = Diagnostics.Make (C) in
-        let+ json = D.domain_json () in
-        print_endline
-          (Status_report.text
-             (Status_report.of_answers
-                ~local:
-                  (Diagnostics.self_json
-                     ~extra:[("frontend", `String implementation)]
-                     ())
-                ~domains:[json] [])))
+    run ~staging:false (fun () -> Lwt.map print_endline (S.status ()))
 end
 
 (* A folder is read when it is asked for, so there is no replica for a resync to
@@ -222,12 +237,12 @@ let tree =
      nothing for a resync to rebuild"
 
 (* Serving a socket here would put a second way to reach a domain beside the
-   commands, and the two would answer differently the moment one of them grew a
-   feature. *)
+   app's own runtime, and the two would answer differently the moment one of
+   them grew a feature. *)
 let serving =
   Frontend.Commands
-    "the android frontend is driven by commands, not by a daemon: see `tsync \
-     android --help'"
+    "the android frontend is linked into the app, not served by a daemon: see \
+     `tsync android --help'"
 
 (* Positional arguments: the caller is an app, and a flag grammar would have to
    be parsed by the binary, which does not know this frontend's verbs. *)
@@ -239,7 +254,7 @@ let commands =
       (fun (module C : Conf_lwt.S) args ->
         let module R = Make (C) in
         match args with
-          | [r] -> R.answer ~staging:false (request "stat" [("ref", `String r)])
+          | [r] -> R.answer (request "stat" [("ref", `String r)])
           | _ -> usage "stat" "REF");
     command "list"
       "List the children of one directory reference, LIMIT at a time from the \
@@ -247,7 +262,7 @@ let commands =
       (fun (module C : Conf_lwt.S) args ->
         let module R = Make (C) in
         let page r ~after ~limit =
-          R.answer ~staging:false
+          R.answer
             (request "list_dir"
                (("ref", `String r)
                :: ("after", `String after)
@@ -266,7 +281,7 @@ let commands =
         let module R = Make (C) in
         match args with
           | [r; dest; offset; length] ->
-              R.answer ~staging:false
+              R.answer
                 (request "fetch_range"
                    [
                      ("ref", `String r);
@@ -291,7 +306,7 @@ let commands =
         let module R = Make (C) in
         match args with
           | [r; dest] ->
-              R.answer ~staging:false
+              R.answer
                 (request "ensure_cached"
                    [("ref", `String r); ("dest", `String dest)])
           | _ -> usage "fetch" "REF DEST");
@@ -302,7 +317,7 @@ let commands =
         let module R = Make (C) in
         match args with
           | [parent; name; staging] ->
-              R.answer ~staging:true
+              R.answer
                 (request "write"
                    [
                      ("parentRef", `String parent);
@@ -315,7 +330,7 @@ let commands =
         let module R = Make (C) in
         match args with
           | [parent; name] ->
-              R.answer ~staging:true
+              R.answer
                 (request "create"
                    [("parentRef", `String parent); ("name", `String name)])
           | _ -> usage "create" "PARENT NAME");
@@ -324,28 +339,27 @@ let commands =
         let module R = Make (C) in
         match args with
           | [parent; name] ->
-              R.answer ~staging:true
+              R.answer
                 (request "mkdir"
                    [("parentRef", `String parent); ("name", `String name)])
           | _ -> usage "mkdir" "PARENT NAME");
     command "delete" "Delete the file KEY." (fun (module C : Conf_lwt.S) args ->
         let module R = Make (C) in
         match args with
-          | [r] ->
-              R.answer ~staging:true (request "delete" [("ref", `String r)])
+          | [r] -> R.answer (request "delete" [("ref", `String r)])
           | _ -> usage "delete" "REF");
     command "rmdir" "Remove the directory KEY."
       (fun (module C : Conf_lwt.S) args ->
         let module R = Make (C) in
         match args with
-          | [r] -> R.answer ~staging:true (request "rmdir" [("ref", `String r)])
+          | [r] -> R.answer (request "rmdir" [("ref", `String r)])
           | _ -> usage "rmdir" "REF");
     command "rename" "Move SRC under PARENT, naming it NAME."
       (fun (module C : Conf_lwt.S) args ->
         let module R = Make (C) in
         match args with
           | [src; parent; name] ->
-              R.answer ~staging:true
+              R.answer
                 (request "rename"
                    [
                      ("ref", `String src);
@@ -357,9 +371,14 @@ let commands =
       (fun (module C : Conf_lwt.S) args ->
         let module R = Make (C) in
         match args with
-          | [r] ->
-              R.answer ~staging:false (request "share" [("ref", `String r)])
+          | [r] -> R.answer (request "share" [("ref", `String r)])
           | _ -> usage "share" "REF");
+    command "request"
+      "Answer one JSON request the way the linked runtime does: the wire the \
+       app speaks, driven from a shell or a JVM test."
+      (fun (module C : Conf_lwt.S) args ->
+        let module R = Make (C) in
+        match args with [req] -> R.answer req | _ -> usage "request" "JSON");
     command "status" "Report this domain: cache, backlog and backends."
       (fun (module C : Conf_lwt.S) args ->
         let module R = Make (C) in

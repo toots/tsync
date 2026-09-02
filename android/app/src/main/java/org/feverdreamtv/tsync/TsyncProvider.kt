@@ -157,7 +157,7 @@ class TsyncProvider : DocumentsProvider() {
      *  reads it will serve are answered in this process, and a process the
      *  system has frozen answers none of them. */
     private fun openHandle(documentId: String): Int {
-        val handle = Native.nativeOpen(documentId)
+        val handle = Native.nativeOpen(documentId.toByteArray())
         if (handle < 0) throw ErrnoException("openDocument", -handle)
         OpenDocumentsService.retain(context!!)
         Log.i(TAG, "open $documentId (${OpenDescriptors.count} open)")

@@ -390,6 +390,15 @@ let snapshot () =
         ignore (json ["android"; "list"; photos; ""; "1"]);
         ignore (json ["android"; "list"; photos; "big.txt"; "1"]);
 
+        case "one request on the wire the app speaks";
+        ignore
+          (json
+             [
+               "android";
+               "request";
+               Printf.sprintf {|{"action":"stat","ref":%S}|} big;
+             ]);
+
         case "a link where no backend can hold a share";
         ignore (json ["android"; "share"; big]);
 

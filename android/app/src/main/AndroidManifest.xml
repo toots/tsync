@@ -22,17 +22,12 @@
         android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.ACCESS_MEDIA_LOCATION" />
 
-    <!-- extractNativeLibs: without it nativeLibraryDir points inside the APK and
-         there is no file on disk to exec. Pairs with useLegacyPackaging in the
-         build script; both are required.
-
-         usesCleartextTraffic: the daemon is a native binary and reaches a
+    <!-- usesCleartextTraffic: the domain is native code and reaches a
          plain-http proxy on a LAN whatever the platform thinks. Blocking only
          the setup form's check would refuse a server that then works. -->
     <application
         android:label="tsync"
         android:theme="@android:style/Theme.Material.Light.NoActionBar"
-        android:extractNativeLibs="true"
         android:usesCleartextTraffic="true"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher">

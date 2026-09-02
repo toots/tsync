@@ -278,17 +278,26 @@ class MainActivity : Activity() {
                 }
 
                 Config.save(this@MainActivity, settings)
-                // The binary is the authority on whether its own config parses;
-                // anything else here would be a second implementation that drifts.
-                val (code, output) = Tsync.plain(this@MainActivity, "config")
-                if (code != 0) {
-                    error.text = "tsync rejected the config:\n$output"
-                    return@setOnClickListener
+                isEnabled = false
+                thread {
+                    // The runtime is the authority on whether its own config
+                    // parses; anything else here would be a second
+                    // implementation that drifts.
+                    val problem = Native.checkConfig(this@MainActivity)
+                    runOnUiThread {
+                        isEnabled = true
+                        if (problem != null) {
+                            error.text = "tsync rejected the config:\n$problem"
+                            return@runOnUiThread
+                        }
+                        // The root's id and title come from the config, so the
+                        // picker is holding a stale answer until it re-queries.
+                        TsyncProvider.notifyRootsChanged(this@MainActivity)
+                        // A domain already serving was opened on the old config
+                        // and cannot be reopened in this process.
+                        if (Native.started) offerRestart() else showBrowser()
+                    }
                 }
-                // The root's id and title come from the config, so the picker
-                // is holding a stale answer until it re-queries.
-                TsyncProvider.notifyRootsChanged(this@MainActivity)
-                showBrowser()
             }
         }
 
@@ -306,6 +315,19 @@ class MainActivity : Activity() {
                 backupControls().forEach { addView(it) }
             })
         })
+    }
+
+    private fun offerRestart() {
+        AlertDialog.Builder(this)
+            .setTitle("Settings saved")
+            .setMessage("tsync will connect to the new server when it next starts.")
+            .setPositiveButton("Restart now") { _, _ ->
+                finishAffinity()
+                Runtime.getRuntime().exit(0)
+            }
+            .setNegativeButton("Later") { _, _ -> showBrowser() }
+            .setCancelable(false)
+            .show()
     }
 
     // ── Camera backup ────────────────────────────────────────────────────────
@@ -450,13 +472,10 @@ class MainActivity : Activity() {
 
         fun refresh() = thread {
             runOnUiThread { output.text = "reading…" }
-            val (code, text) = Tsync.plain(this, Cli.status())
+            val text = runCatching { Native.status(this) }
+                .getOrElse { "tsync could not start: ${it.message}" }
             val backup = backupLine()
-            runOnUiThread {
-                output.text = backup + text.ifBlank {
-                    "tsync reported nothing (exit $code) — check `adb logcat -s tsync`"
-                }
-            }
+            runOnUiThread { output.text = backup + text }
         }
 
         setContentViewInsetAware(column {

@@ -1,4 +1,9 @@
 booted
+request lists the fixture: true
+request makes a folder: true
+the folder is listed once made: true
+a request that is not JSON is refused, not raised: {"ok":false,"code":"invalid","error":"invalid JSON"}
+status reports the domain: true
 size matches: true
 concurrent reads served wrong bytes: 0
 close: 0
