@@ -28,17 +28,21 @@ struct
     include Listing.Make (Io) (Spool)
   end
 
+  module Pub =
+    Publish.Over (Io) (Syscalls) (Spool) (Folder_ids) (Objects) (Store)
+      (Cursor_of)
+      (Mirror)
+      (Checkout)
+
   open Io_syntax.Make (Io)
 
   let iter_p f xs = Io.iter_p f xs
 
   module Make (C : Conf.S with type 'a io = 'a Io.t) = struct
     module Lk = Logical_key.Make (C)
-    module R = Objects.Make (C)
     module Cursor = Cursor_of.Make (C)
-    module St = Store.Make (C)
     module Mf = Mirror.Make (C)
-    module Ck = Checkout.Make (C)
+    module P = Pub.Make (C)
 
     (* [rel] is excluded when any glob matches either the full relative path or
        the basename, so [node_modules] prunes any directory of that name and
@@ -207,55 +211,24 @@ struct
       let key = Lk.file rel in
       let* skip = if force_rehash then Io.return false else exists key in
       if skip then Io.return Skipped_exists
-      else (
-        let src_path = Filename.concat src_root rel in
-        let* st = Syscalls.stat src_path in
-        let* chunk_size = R.chunk_size () in
-        let* state =
-          R.upload ~key ~src_path ~mtime:st.Unix.st_mtime ~chunk_size
+      else
+        let+ state =
+          P.file
             ~on_progress:(fun ~bytes ~sent ->
               on_progress ~bytes:(Int64.of_int bytes) ~sent)
-            ()
+            ~src_path:(Filename.concat src_root rel)
+            key
         in
-        let+ () = Mf.write key state in
-        Imported (Manifest.size state))
+        Imported (Manifest.size state)
 
-    (* No cache entry: a symlink has no file data. *)
     let import_symlink ~force_rehash ~src_root rel target =
       let key = Lk.file rel in
       let* skip = if force_rehash then Io.return false else exists key in
       if skip then Io.return Skipped_exists
-      else (
-        let src_path = Filename.concat src_root rel in
-        let* st = Syscalls.lstat src_path in
-        let name = Filename.basename rel in
-        let state =
-          Manifest.make_symlink ~name ~target ~mtime:st.Unix.st_mtime
-        in
-        let* () = St.put_manifest ~key ~data:(Manifest.body ~name state) in
-        let* () = Mf.write key state in
-        Io.return (Imported (Manifest.size state)))
-
-    (* A journal entry is one JSON object per line, so an import records its ops
-       where they are already in that form. Spooled to disk rather than held in
-       memory, where they and the string they encode grow with the tree rather
-       than with what is in flight. *)
-    module Spool = struct
-      let create () = Spool.create ~dir:spool_dir ~name:"journal"
-      let add t ops = Spool.append t (Journal.encode ops)
-      let remove t = Spool.drop t
-      let body t = Spool.seal t
-    end
-
-    (* A deferred replica queues an entry behind the objects it names, so
-       covering a whole run with one entry hides everything the run imported from
-       that replica's readers until its backlog drains. *)
-    let entry_ops = 2000
-
-    (* A count alone bounds nothing a reader can feel: an import of a few hundred
-       large files runs for minutes and never reaches the cap, so every peer sees
-       the run's folders and none of its files until it ends. *)
-    let entry_age = 10.
+      else
+        let* st = Syscalls.lstat (Filename.concat src_root rel) in
+        let+ state = P.symlink ~target ~mtime:st.Unix.st_mtime key in
+        Imported (Manifest.size state)
 
     let tally summary = function
       | Imported _ -> { summary with imported = summary.imported + 1 }
@@ -265,7 +238,7 @@ struct
       | Failed _ -> { summary with failed = summary.failed + 1 }
 
     let run ?(only = []) ?(exclude = []) ?(force_rehash = false)
-        ?(entry_ops = entry_ops) ?(entry_age = entry_age)
+        ?(entry_ops = Publish.entry_ops) ?(entry_age = Publish.entry_age)
         ?(on_dir = fun ~rel:_ -> ()) ?(on_plan = fun ~files:_ ~bytes:_ -> ())
         ?(on_start = fun ~rel:_ ~size:_ -> ())
         ?(on_progress = fun ~bytes:_ ~sent:_ -> ()) ~src ~on_file () =
@@ -295,42 +268,11 @@ struct
       let counts =
         ref { imported = 0; skipped = 0; skipped_symlinks = 0; failed = 0 }
       in
-      let* spool = Spool.create () in
-      let spool = ref spool in
-      let batched = ref 0 in
-      let published_at = ref (Unix.gettimeofday ()) in
-      (* The spool is sealed to be read back, so what is published is replaced
-         rather than reused. Every pass below adds in sequence: an op appended
-         in parallel with this would land in a spool already sealed. *)
-      let publish () =
-        if !batched = 0 then Io.return ()
-        else (
-          let full = !spool in
-          let* fresh = Spool.create () in
-          spool := fresh;
-          batched := 0;
-          published_at := Unix.gettimeofday ();
-          Io.finalize
-            (fun () ->
-              let* body = Spool.body full in
-              let* entry_key = Cursor.write_journal_entry_body body in
-              Cursor.bump_cursor entry_key)
-            (fun () -> Spool.remove full))
+      let* batch =
+        P.Batch.create ~ops:entry_ops ~age:entry_age ~dir:spool_dir ()
       in
-      (* One op at a time, so a caller handing over a whole tree's worth at once
-         is split the same as a file arriving per call. *)
-      let add ops =
-        iter_s
-          (fun op ->
-            let* () = Spool.add !spool [op] in
-            incr batched;
-            if
-              !batched >= entry_ops
-              || Unix.gettimeofday () -. !published_at >= entry_age
-            then publish ()
-            else Io.return ())
-          ops
-      in
+      let add = P.Batch.add batch in
+      let publish () = P.Batch.publish batch in
       Io.finalize
         (fun () ->
           let record ~rel status =
@@ -345,15 +287,7 @@ struct
              id resolution finds them. *)
           let* () =
             Listing.iter plan.dirs (fun rel ->
-                let key = Lk.dir rel in
-                let* () = Ck.create_dir key in
-                let* () = St.put_folder_marker ~key in
-                (* Minted by the marker above; read back so the journal entry
-                   carries the id a peer resolves the folder by. *)
-                let* id =
-                  Folder_ids.ensure_id ~cache_root:C.cache_root
-                    ~domain_name:C.domain_name (Lk.dir rel)
-                in
+                let* id = P.dir (Lk.dir rel) in
                 on_dir ~rel;
                 add [`Mkdir (rel, Some id)])
           in
@@ -399,6 +333,6 @@ struct
           let* () = Listing.drop plan.dirs in
           let* () = Listing.drop plan.files in
           let* () = Listing.drop plan.symlinks in
-          Spool.remove !spool)
+          P.Batch.drop batch)
   end
 end
