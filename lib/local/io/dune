@@ -6,8 +6,8 @@
  (name tsync_io)
  (public_name tsync-libs.io)
  (flags
-  (:standard -open Tsync_stdlib -open Tsync_filename))
+  (:standard -open Tsync_stdlib))
  (foreign_stubs
   (language c)
   (names statvfs_stubs))
- (libraries tsync_stdlib tsync_filename unix bigstringaf))
+ (libraries tsync_stdlib unix bigstringaf))

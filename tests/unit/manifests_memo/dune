@@ -2,7 +2,7 @@
  (flags
   (:standard
    -open
-   Tsync_logical_key
+   Tsync_core
    -open
    Tsync_checkout_lwt
    -open
@@ -17,7 +17,7 @@
    Tsync_test_harness))
  (name manifests_memo_test)
  (libraries
-  tsync_logical_key
+  tsync_core
   tsync_checkout_lwt
   tsync_manifest
   tsync_test_harness

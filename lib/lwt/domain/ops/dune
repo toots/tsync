@@ -15,7 +15,7 @@
    -open
    Tsync_checkout_lwt
    -open
-   Tsync_spill_lwt
+   Tsync_core_lwt
    -open
    Tsync_sync_lwt
    -open
@@ -28,7 +28,7 @@
   tsync_cache_layout_lwt
   tsync_remote_lwt
   tsync_checkout_lwt
-  tsync_spill_lwt
+  tsync_core_lwt
   tsync_sync_lwt
   tsync_io_lwt
   lwt

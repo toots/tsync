@@ -1,9 +1,0 @@
-; Work too large to hold: it goes to a temp file and comes back mapped. Listing
-; is that same idea one layer up, for a sequence of records rather than bytes.
-
-(library
- (flags
-  (:standard -open Tsync_filename -open Tsync_io -open Tsync_bigstring))
- (name tsync_spill)
- (public_name tsync-libs.spill)
- (libraries tsync_filename unix tsync_io tsync-libs.bigstring))

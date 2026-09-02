@@ -2,38 +2,21 @@
  (flags
   (:standard
    -open
-   Tsync_logical_key
-   -open
-   Tsync_filename
-   -open
-   Tsync_chunk_integrity
-   -open
-   Tsync_chunks
-   -open
-   Tsync_field_spec
+   Tsync_core
    -open
    Tsync_io
    -open
-   Tsync_retry
-   -open
-   Tsync_bigstring
+   Tsync_chunk_integrity
    -open
    Tsync_backend_register
-   -open
-   Tsync_log
    -open
    Tsync_device))
  (name tsync_local_backend)
  (libraries
-  tsync-libs.logical_key
-  tsync_retry
-  tsync_filename
-  tsync_chunk_integrity
-  tsync_chunks
-  tsync-libs.field_spec
-  tsync-libs.bigstring
-  tsync-libs.backend_register
-  tsync-libs.log
-  tsync_device
+  tsync-libs.core
+  tsync_core
   tsync_io
+  tsync_chunk_integrity
+  tsync-libs.backend_register
+  tsync_device
   unix))

@@ -2,7 +2,7 @@
  (flags
   (:standard
    -open
-   Tsync_logical_key
+   Tsync_core
    -open
    Tsync_manifest
    -open
@@ -11,10 +11,6 @@
    Tsync_checkout
    -open
    Tsync_cache_layout
-   -open
-   Tsync_xxhash
-   -open
-   Tsync_bigstring
    -open
    Tsync_backend_register
    -open
@@ -26,15 +22,14 @@
  (name chunk_cache_test)
  (libraries
   unix
-  tsync-libs.logical_key
+  tsync-libs.core
   tsync_manifest
   tsync_checkout_lwt
   tsync_checkout
   tsync_test_harness
   tsync_cache_layout
-  tsync_xxhash
+  tsync_core
   tsync_conf_lwt
-  tsync_bigstring
   tsync_backend_register
   tsync_backend_lwt
   lwt

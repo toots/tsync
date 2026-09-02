@@ -1,4 +1,0 @@
-(library
- (name tsync_metrics)
- (public_name tsync-libs.metrics)
- (libraries unix mem_usage))

@@ -1,5 +1,5 @@
 (executable
  (flags
-  (:standard -open Tsync_logical_key -open Tsync_chunks))
+  (:standard -open Tsync_core))
  (name gc_job)
- (libraries tsync-libs.logical_key tsync_chunks unix))
+ (libraries tsync-libs.core tsync_core unix))

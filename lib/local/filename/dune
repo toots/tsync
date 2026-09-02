@@ -1,8 +1,0 @@
-; The standard Filename, plus the staging-name convention this program writes
-; through. Kept apart from the I/O it serves so that naming can depend on it
-; without depending on a filesystem.
-
-(library
- (name tsync_filename)
- (public_name tsync-libs.filename)
- (libraries unix))

@@ -2,7 +2,7 @@
  (flags
   (:standard
    -open
-   Tsync_logical_key
+   Tsync_core
    -open
    Tsync_remote_lwt
    -open
@@ -18,7 +18,7 @@
  (name promote_race)
  (libraries
   unix
-  tsync_logical_key
+  tsync_core
   tsync_remote_lwt
   tsync_checkout_lwt
   tsync_conf_lwt

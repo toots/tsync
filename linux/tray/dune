@@ -8,15 +8,13 @@
    -open
    Tsync_dbus
    -open
-   Tsync_ipc
+   Tsync_core
    -open
-   Tsync_ipc_lwt
+   Tsync_core_lwt
    -open
    Tsync_conf_parsing
    -open
    Tsync_runtime
-   -open
-   Tsync_log
    -open
    Tsync_menu))
  (name tsync_tray)
@@ -26,11 +24,10 @@
  (libraries
   tsync_dbus
   tsync-libs.menu
-  tsync-libs.ipc
-  tsync-libs.ipc_lwt
+  tsync-libs.core
+  tsync-libs.core_lwt
   tsync-libs.conf_parsing
   tsync_runtime
-  tsync-libs.log
   yojson
   lwt
   lwt.unix
@@ -38,11 +35,11 @@
 
 (executable
  (flags
-  (:standard -open Tsync_tray -open Tsync_log))
+  (:standard -open Tsync_tray -open Tsync_core))
  (name main)
  (modules main)
  (public_name tsync-tray)
  (package tsync-tray)
  (enabled_if
   (= %{system} linux))
- (libraries tsync_tray tsync-libs.log cmdliner))
+ (libraries tsync_tray tsync-libs.core cmdliner))

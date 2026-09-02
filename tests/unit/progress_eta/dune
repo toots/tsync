@@ -1,5 +1,5 @@
 (executable
  (flags
-  (:standard -open Tsync_job_progress -open Tsync_test_harness))
+  (:standard -open Tsync_core -open Tsync_test_harness))
  (name progress_eta)
- (libraries tsync_test_harness tsync_job_progress yojson unix))
+ (libraries tsync_test_harness tsync_core yojson unix))

@@ -1,7 +1,7 @@
 ; [tsync_local_backend_lwt] is linked for its registration alone: a member needs a
 ; store module, and capacity reads only the fields beside it.
 ;
-; [tsync_metrics] for the one assertion that spans both: what [human_bytes]
+; [tsync_core] for the one assertion that spans both: what [human_bytes]
 ; prints is what [configure] offers back as a default, so it has to parse.
 
 (test
@@ -10,7 +10,7 @@
    -open
    Tsync_conf_parsing
    -open
-   Tsync_metrics
+   Tsync_core
    -open
    Tsync_conf
    -open
@@ -23,7 +23,7 @@
  (libraries
   unix
   tsync_conf_parsing
-  tsync_metrics
+  tsync_core
   tsync-libs.conf
   tsync-libs.backend_register
   tsync-libs.backend_lwt

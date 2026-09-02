@@ -1,0 +1,16 @@
+; The core tools on Lwt: each functor applied once to this process's loop.
+
+(library
+ (flags
+  (:standard -open Tsync_core -open Tsync_io_lwt))
+ (name tsync_core_lwt)
+ (public_name tsync-libs.core_lwt)
+ (libraries
+  tsync_core
+  tsync_io_lwt
+  lwt
+  lwt.unix
+  unix
+  cohttp-lwt
+  cohttp-lwt-unix
+  yojson))

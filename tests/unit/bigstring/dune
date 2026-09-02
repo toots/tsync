@@ -2,25 +2,22 @@
  (flags
   (:standard
    -open
-   Tsync_filename
+   Tsync_io
    -open
-   Tsync_bigstring
+   Tsync_core
    -open
-   Tsync_bigstring_lwt
-   -open
-   Tsync_xxhash
+   Tsync_io_lwt
    -open
    Tsync_test_harness
    -open
    Tsync_device))
  (name bigstring_test)
  (libraries
-  tsync_filename
+  tsync_io
   tsync_test_harness
   unix
   lwt.unix
   bigstringaf
-  tsync_bigstring
-  tsync_bigstring_lwt
-  tsync_xxhash
+  tsync_core
+  tsync_io_lwt
   tsync-libs.device))

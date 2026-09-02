@@ -1,19 +1,5 @@
 (executable
  (flags
-  (:standard
-   -open
-   Tsync_retry
-   -open
-   Tsync_durable_queue_lwt
-   -open
-   Tsync_log
-   -open
-   Tsync_test_harness))
+  (:standard -open Tsync_core -open Tsync_core_lwt -open Tsync_test_harness))
  (name queue_stall)
- (libraries
-  tsync_retry
-  tsync_test_harness
-  tsync_durable_queue_lwt
-  tsync_log
-  lwt
-  lwt.unix))
+ (libraries tsync_core tsync_test_harness tsync_core_lwt lwt lwt.unix))

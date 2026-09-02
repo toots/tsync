@@ -2,16 +2,16 @@
  (flags
   (:standard
    -open
-   Tsync_retry
+   Tsync_core
    -open
-   Tsync_retry_lwt
+   Tsync_core_lwt
    -open
    Tsync_backend_register))
  (name backend_failure)
  (libraries
   unix
-  tsync_retry
-  tsync_retry_lwt
+  tsync_core
+  tsync_core_lwt
   tsync_backend_register
   lwt
   lwt.unix))

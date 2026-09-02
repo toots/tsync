@@ -3,21 +3,7 @@
 
 (library
  (flags
-  (:standard
-   -open
-   Tsync_filename
-   -open
-   Tsync_logical_key
-   -open
-   Tsync_chunks
-   -open
-   Tsync_io))
+  (:standard -open Tsync_io -open Tsync_core))
  (name tsync_cache_layout)
  (public_name tsync-libs.cache_layout)
- (libraries
-  tsync_filename
-  tsync_logical_key
-  tsync_chunks
-  tsync_io
-  unix
-  yojson))
+ (libraries tsync_io tsync_core unix yojson))

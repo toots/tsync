@@ -1,8 +1,0 @@
-; The bytes half of what a long-running command is doing: an accounting of
-; planned, moved and skipped, and the ETA that follows from it. Synchronous
-; throughout, and apart from the reporting so that it stays that way.
-
-(library
- (name tsync_job_progress)
- (public_name tsync-libs.job_progress)
- (libraries unix yojson))

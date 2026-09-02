@@ -2,7 +2,7 @@
  (flags
   (:standard
    -open
-   Tsync_logical_key
+   Tsync_core
    -open
    Tsync_checkout
    -open
@@ -19,7 +19,7 @@
    Tsync_test_harness))
  (name rename_listing_test)
  (libraries
-  tsync_logical_key
+  tsync_core
   tsync_checkout
   tsync_checkout_lwt
   tsync_manifest

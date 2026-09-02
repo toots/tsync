@@ -2,11 +2,7 @@
  (flags
   (:standard
    -open
-   Tsync_logical_key
-   -open
-   Tsync_chunks
-   -open
-   Tsync_bigstring
+   Tsync_core
    -open
    Tsync_backend_lwt
    -open
@@ -17,9 +13,8 @@
    Tsync_local_backend_lwt))
  (name deferred_shards)
  (libraries
-  tsync-libs.logical_key
-  tsync_chunks
-  tsync_bigstring
+  tsync-libs.core
+  tsync_core
   tsync_backend_lwt
   tsync_domain_store
   tsync_domain_store_lwt

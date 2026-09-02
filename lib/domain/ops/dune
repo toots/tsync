@@ -15,11 +15,7 @@
    -open
    Tsync_io
    -open
-   Tsync_retry
-   -open
-   Tsync_logical_key
-   -open
-   Tsync_id
+   Tsync_core
    -open
    Tsync_chunk_integrity
    -open
@@ -27,23 +23,11 @@
    -open
    Tsync_journal
    -open
-   Tsync_chunks
-   -open
    Tsync_conf
    -open
    Tsync_sync
    -open
-   Tsync_glob
-   -open
-   Tsync_bigstring
-   -open
-   Tsync_spill
-   -open
-   Tsync_hashtbl_mmap
-   -open
-   Tsync_backend_register
-   -open
-   Tsync_log))
+   Tsync_backend_register))
  (name tsync_ops)
  (public_name tsync-libs.ops)
  (libraries
@@ -51,20 +35,12 @@
   tsync_checkout
   tsync_remote
   tsync_io
-  tsync_retry
-  tsync_logical_key
-  tsync_id
+  tsync_core
   tsync_chunk_integrity
   tsync_manifest
   tsync_journal
-  tsync_chunks
   tsync_conf
   tsync_sync
-  tsync_glob
-  tsync_bigstring
-  tsync_spill
-  tsync_hashtbl_mmap
   tsync_backend_register
-  tsync_log
   yojson
   unix))

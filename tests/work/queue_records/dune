@@ -1,17 +1,5 @@
 (executable
  (flags
-  (:standard
-   -open
-   Tsync_durable_queue_lwt
-   -open
-   Tsync_log
-   -open
-   Tsync_test_harness))
+  (:standard -open Tsync_core_lwt -open Tsync_core -open Tsync_test_harness))
  (name queue_records)
- (libraries
-  tsync_test_harness
-  tsync_durable_queue_lwt
-  tsync_log
-  lwt
-  lwt.unix
-  unix))
+ (libraries tsync_test_harness tsync_core_lwt tsync_core lwt lwt.unix unix))

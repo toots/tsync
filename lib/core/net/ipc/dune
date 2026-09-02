@@ -1,6 +1,0 @@
-(library
- (flags
-  (:standard -open Tsync_log -open Tsync_logical_key -open Tsync_io))
- (name tsync_ipc)
- (public_name tsync-libs.ipc)
- (libraries tsync_io tsync-libs.logical_key tsync_log yojson unix))

@@ -1,9 +1,0 @@
-; Ids that only need not to collide, and the rarer ones whose unguessability is
-; load-bearing. Nothing here knows what an id names.
-
-(library
- (name tsync_id)
- (flags
-  (:standard -open Tsync_stdlib))
- (public_name tsync-libs.id)
- (libraries tsync_stdlib unix))

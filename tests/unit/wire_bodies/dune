@@ -2,16 +2,10 @@
  (flags
   (:standard
    -open
-   Tsync_logical_key
-   -open
-   Tsync_bigstring
+   Tsync_core
    -open
    Tsync_http_proxy
    -open
    Tsync_test_harness))
  (name wire_bodies_test)
- (libraries
-  tsync-libs.logical_key
-  tsync_test_harness
-  tsync_http_proxy
-  tsync_bigstring))
+ (libraries tsync-libs.core tsync_test_harness tsync_http_proxy tsync_core))

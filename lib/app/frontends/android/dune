@@ -2,7 +2,7 @@
  (flags
   (:standard
    -open
-   Tsync_logical_key
+   Tsync_core
    -open
    Tsync_checkout
    -open
@@ -16,14 +16,12 @@
    -open
    Tsync_diagnostics
    -open
-   Tsync_frontend_register
-   -open
-   Tsync_log))
+   Tsync_frontend_register))
  (name tsync_android_frontend)
  (public_name tsync-android)
  (libraries
   bigstringaf
-  tsync_logical_key
+  tsync_core
   tsync_checkout
   tsync_conf_lwt
   tsync-libs.checkout_lwt
@@ -31,7 +29,7 @@
   tsync-libs.engine
   tsync-libs.diagnostics
   tsync-libs.frontend_register
-  tsync-libs.log
+  tsync-libs.core
   yojson
   lwt
   lwt.unix))

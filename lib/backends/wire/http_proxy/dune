@@ -1,17 +1,11 @@
 (library
  (flags
-  (:standard
-   -open
-   Tsync_bigstring
-   -open
-   Tsync_backend_register
-   -open
-   Tsync_logical_key))
+  (:standard -open Tsync_core -open Tsync_backend_register))
  (name tsync_http_proxy)
  (public_name tsync-libs.http_proxy)
  (libraries
-  tsync-libs.logical_key
-  tsync_bigstring
+  tsync-libs.core
+  tsync_core
   tsync_backend_register
   digestif
   eqaf
