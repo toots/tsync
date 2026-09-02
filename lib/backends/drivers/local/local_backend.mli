@@ -5,10 +5,6 @@
     {!Backend.Make.make}. The library still has to be linked — [-linkall] is
     what puts the registration in the binary. *)
 
-module type WALL_CLOCK = sig
-  val now : unit -> float
-end
-
 (** Being told a directory changed. [None] from [open_dir] is a directory this
     platform or filesystem will not watch, which is not a failure: the caller
     goes back to asking on a timer. *)
@@ -33,7 +29,6 @@ module Over
     (_ : Syscalls.S with type 'a io := 'a Io.t)
     (_ : Bounded.S with type 'a io := 'a Io.t)
     (_ : BYTES with type 'a io := 'a Io.t)
-    (_ : WALL_CLOCK)
     (_ : Clock.S with type 'a io := 'a Io.t)
     (_ : WATCHER with type 'a io := 'a Io.t) : sig
   module type Store = Backend.S with type 'a io := 'a Io.t

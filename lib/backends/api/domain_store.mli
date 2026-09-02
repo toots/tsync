@@ -31,18 +31,7 @@ module Over
     (Io : Io.S)
     (Queues : Durable_queue.S with type 'a io := 'a Io.t)
     (Lock : Lock.S with type 'a io := 'a Io.t)
-    (_ : DRAIN with type 'a io := 'a Io.t)
-    (_ : sig
-      type slots
-
-      module Batched (_ : Backend.S with type 'a io := 'a Io.t) : sig
-        val get_many :
-          ?slots:slots ->
-          entries:Backend.file_entry list ->
-          unit ->
-          (Stored_key.t * Bigstring.t option) list Io.t
-      end
-    end) : sig
+    (_ : DRAIN with type 'a io := 'a Io.t) : sig
   module Dt : module type of Deferred.Over (Io) (Queues) (Lock)
 
   module type Store = Backend.S with type 'a io := 'a Io.t
@@ -60,10 +49,4 @@ module Over
     targets:(source:(module Store) -> (module Dt.S)) list ->
     archives:sub list ->
     (module Store)
-
-  (** Wait for every deferred target in this process to catch up. Registered
-      with {!Drain.on_drain} by {!make}, so callers normally reach it through
-      [Backend_lwt.drain]; exposed for tests that assert on what a target holds.
-  *)
-  val drain : unit -> unit Io.t
 end

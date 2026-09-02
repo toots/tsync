@@ -94,8 +94,6 @@ let mem_stats () =
     system_total = m.Mem_usage.total_physical_memory;
   }
 
-let rss_bytes () = (mem_stats ()).rss
-
 (* Read next to the RSS above: a large RSS over a small heap is buffers and
    mapped cache reads, not an OCaml leak. *)
 type gc = {

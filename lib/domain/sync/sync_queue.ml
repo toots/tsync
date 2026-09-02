@@ -4,12 +4,8 @@ module Ek = Journal.Entry_key
 module type S = sig
   type 'a io
 
-  val cancel_put : string -> bool
-
   (** Files with an active or queued upload. *)
   val pending : unit -> int
-
-  (** The files a worker is uploading right now. *)
   val uploading : unit -> Logical_key.t list
 
   (** Bytes still owed: everything queued plus everything in flight. Counted

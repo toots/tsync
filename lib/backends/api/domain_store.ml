@@ -11,18 +11,7 @@ module Over
     (Io : Io.S)
     (Queues : Durable_queue.S with type 'a io := 'a Io.t)
     (Lock : Lock.S with type 'a io := 'a Io.t)
-    (Drain : DRAIN with type 'a io := 'a Io.t)
-    (Bk : sig
-      type slots
-
-      module Batched (_ : Backend.S with type 'a io := 'a Io.t) : sig
-        val get_many :
-          ?slots:slots ->
-          entries:Backend.file_entry list ->
-          unit ->
-          (Stored_key.t * Bigstring.t option) list Io.t
-      end
-    end) =
+    (Drain : DRAIN with type 'a io := 'a Io.t) =
 struct
   module Dt = Deferred.Over (Io) (Queues) (Lock)
 
@@ -194,7 +183,7 @@ struct
         ()
 
       (* Declared only where the first readable store has a batch of its own, and
-         forwarding to it directly rather than through {!Bk.Batched}: the
+         forwarding to it directly rather than through {!Backend.Make.Batched}: the
          caller asking already holds a slot for this read, and taking a second
          from the same pool is how a fan-out deadlocks against itself. What it is
          handed is already packed to one request.

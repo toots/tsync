@@ -404,8 +404,6 @@ struct
                 let+ found = walk "" [] in
                 List.stable_sort compare (List.rev found))
 
-    let at root rel = if rel = "" then root else at root rel
-
     let local_side ~against path =
       let* kind = Fs.lstat_kind path in
       match kind with
