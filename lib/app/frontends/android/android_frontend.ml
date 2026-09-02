@@ -241,13 +241,25 @@ let commands =
         match args with
           | [r] -> R.answer ~staging:false (request "stat" [("ref", `String r)])
           | _ -> usage "stat" "REF");
-    command "list" "List the children of one directory reference."
+    command "list"
+      "List the children of one directory reference, LIMIT at a time from the \
+       name after AFTER; the reply names the next page's AFTER as \"next\"."
       (fun (module C : Conf_lwt.S) args ->
         let module R = Make (C) in
+        let page r ~after ~limit =
+          R.answer ~staging:false
+            (request "list_dir"
+               (("ref", `String r)
+               :: ("after", `String after)
+               :: Option.to_list (Option.map (fun l -> ("limit", `Int l)) limit)
+               ))
+        in
         match args with
-          | [r] ->
-              R.answer ~staging:false (request "list_dir" [("ref", `String r)])
-          | _ -> usage "list" "REF");
+          | [r] -> page r ~after:"" ~limit:None
+          | [r; after] -> page r ~after ~limit:None
+          | [r; after; limit] ->
+              page r ~after ~limit:(Some (int_arg "list" "LIMIT" limit))
+          | _ -> usage "list" "REF [AFTER [LIMIT]]");
     command "read"
       "Write LENGTH bytes of KEY from OFFSET into DEST at that same offset, \
        leaving the rest of DEST sparse." (fun (module C : Conf_lwt.S) args ->
@@ -341,6 +353,13 @@ let commands =
                      ("name", `String name);
                    ])
           | _ -> usage "rename" "SRC PARENT NAME");
+    command "share" "Publish a link to REF, answering its URL."
+      (fun (module C : Conf_lwt.S) args ->
+        let module R = Make (C) in
+        match args with
+          | [r] ->
+              R.answer ~staging:false (request "share" [("ref", `String r)])
+          | _ -> usage "share" "REF");
     command "status" "Report this domain: cache, backlog and backends."
       (fun (module C : Conf_lwt.S) args ->
         let module R = Make (C) in

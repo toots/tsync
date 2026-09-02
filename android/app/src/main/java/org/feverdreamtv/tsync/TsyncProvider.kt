@@ -110,18 +110,26 @@ class TsyncProvider : DocumentsProvider() {
     ): Cursor {
         val cursor = MatrixCursor(projection ?: defaultDocumentColumns)
         try {
-            val response = Tsync.json(context!!, Cli.list(parentDocumentId))
-            // One list, each entry tagged by kind and naming itself by the
-            // reference a caller addresses it with.
-            val items = response.getJSONArray("items")
-            for (i in 0 until items.length()) {
-                val entry = items.getJSONObject(i)
-                val ref = entry.getString("ref")
-                val name = entry.getString("name")
-                val modified = (entry.optDouble("mtime", 0.0) * 1000).toLong()
-                if (entry.getString("kind") == "dir") addDirectory(cursor, ref, name, modified)
-                else addFile(cursor, ref, name, entry.optLong("size"), modified)
-            }
+            // A cursor is the whole folder, so every page is walked here: each
+            // reply stays a bounded size however large the folder is.
+            var after = ""
+            do {
+                val response = Tsync.json(
+                    context!!, Cli.list(parentDocumentId, after, PAGE)
+                )
+                // One list, each entry tagged by kind and naming itself by the
+                // reference a caller addresses it with.
+                val items = response.getJSONArray("items")
+                for (i in 0 until items.length()) {
+                    val entry = items.getJSONObject(i)
+                    val ref = entry.getString("ref")
+                    val name = entry.getString("name")
+                    val modified = (entry.optDouble("mtime", 0.0) * 1000).toLong()
+                    if (entry.getString("kind") == "dir") addDirectory(cursor, ref, name, modified)
+                    else addFile(cursor, ref, name, entry.optLong("size"), modified)
+                }
+                after = response.optString("next", "")
+            } while (after.isNotEmpty())
         } catch (e: Exception) {
             // A banner in the picker beats an empty folder that looks like truth.
             // A folder is read when it is opened, so a failure here is the
@@ -349,6 +357,9 @@ class TsyncProvider : DocumentsProvider() {
         /** Concurrent reads in flight; beyond this a caller waits rather than
          *  falling into anything slower. */
         const val CALLBACK_THREADS = 4
+
+        /** Children per listing call. */
+        const val PAGE = 500
 
         /** Long enough that only a read worth knowing about is logged. */
         const val SLOW_READ_MILLIS = 1_000L

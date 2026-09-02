@@ -386,6 +386,13 @@ let snapshot () =
         case "what of the file is on this device";
         ignore (json ["android"; "residency"; big]);
 
+        case "a folder is read a page at a time, resumed by name";
+        ignore (json ["android"; "list"; photos; ""; "1"]);
+        ignore (json ["android"; "list"; photos; "big.txt"; "1"]);
+
+        case "a link where no backend can hold a share";
+        ignore (json ["android"; "share"; big]);
+
         case "one process serves every range of an open file";
         (* The reason it exists: reads in one process are sequential to
            lib/content/data.ml, which is what lets it fetch ahead of them. *)

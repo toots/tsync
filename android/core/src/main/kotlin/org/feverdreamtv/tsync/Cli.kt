@@ -46,7 +46,13 @@ object Cli {
 
     fun stat(ref: String) = listOf("android", "stat", ref)
 
-    fun list(ref: String) = listOf("android", "list", ref)
+    /** One page of [ref]'s children: [limit] of them past the name [after],
+     *  the reply naming the next page's [after] as "next" while there is one. */
+    fun list(ref: String, after: String = "", limit: Int? = null) =
+        listOf("android", "list", ref, after) + listOfNotNull(limit?.toString())
+
+    /** A link to [ref], file or folder, for anyone holding it. */
+    fun share(ref: String) = listOf("android", "share", ref)
 
     fun read(ref: String, dest: String, offset: Long, length: Int) =
         listOf("android", "read", ref, dest, offset.toString(), length.toString())

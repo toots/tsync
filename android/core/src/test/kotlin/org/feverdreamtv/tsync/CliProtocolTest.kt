@@ -221,6 +221,29 @@ class CliProtocolTest {
         assertEquals("shot.jpg", items.getJSONObject(0).getString("name"))
     }
 
+    /** A page ends with the name to resume from, and resuming there yields the
+     *  rest and nothing twice. */
+    @Test
+    fun `a folder is listed a page at a time`() {
+        val folder = mkdirs("paged")
+        for (name in listOf("a.txt", "b.txt", "c.txt")) {
+            send(Cli.writeWhole(folder, name, staged(name.toByteArray()).absolutePath))
+        }
+        val seen = mutableListOf<String>()
+        var after = ""
+        var pages = 0
+        do {
+            val page = send(Cli.list(folder, after, 2))
+            val items = page.getJSONArray("items")
+            assertTrue("no page holds more than asked", items.length() <= 2)
+            for (i in 0 until items.length()) seen += items.getJSONObject(i).getString("name")
+            after = page.optString("next", "")
+            pages++
+        } while (after.isNotEmpty())
+        assertEquals(listOf("a.txt", "b.txt", "c.txt"), seen)
+        assertEquals(2, pages)
+    }
+
     /** The staged file is adopted by rename, so deleting it afterwards would
      *  delete the content just taken over. */
     @Test

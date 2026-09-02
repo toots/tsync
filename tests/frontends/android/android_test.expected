@@ -62,6 +62,16 @@
   residency f:<id1>/big.txt
     {"ok":true,"cached":3,"total":3}
 
+=== a folder is read a page at a time, resumed by name
+  list d:<id1>  1
+    {"ok":true,"items":[{"ref":"f:<id1>/big.txt","parentRef":"d:<id1>","name":"big.txt","kind":"file","size":24,"mtime":1400000000.0,"etag":"1294bbe85c2f380b","isUploaded":true}],"next":"big.txt"}
+  list d:<id1> big.txt 1
+    {"ok":true,"items":[{"ref":"f:<id1>/new.txt","parentRef":"d:<id1>","name":"new.txt","kind":"file","size":0,"mtime":<clock>,"etag":"","isUploaded":true}]}
+
+=== a link where no backend can hold a share
+  share f:<id1>/big.txt
+    {"ok":false,"code":"internal","error":"Sharing is not available for media."}
+
 === one process serves every range of an open file
   open {"ok":true,"size":24}
   range 0+8 -> 8 "01234567"
@@ -89,5 +99,5 @@
   concurrency      4 uploads, 4 chunk buffers, 8 downloads
 
 === every verb the frontend registers is driven above
-  registered: create delete fetch list mkdir open read rename residency rmdir stat status write-whole
+  registered: create delete fetch list mkdir open read rename residency rmdir share stat status write-whole
   untested:   (none)
