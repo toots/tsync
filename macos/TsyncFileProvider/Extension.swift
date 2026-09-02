@@ -266,7 +266,6 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension,
                 // this ships against. Conflicts are settled in the daemon, which
                 // publishes the losing side as a "(conflicted copy from …)"
                 // file — see `File.rename`.
-                _ = version
 
                 // Whichever call ran last is the one whose reply describes the
                 // item now, and each of them answers with it.
@@ -279,7 +278,9 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension,
                     reply = try await client.write(
                         parentRef: ItemID.wire(item.parentItemIdentifier),
                         name: item.filename, staging: staged.path)
-                    if moved, ref != ItemID.wire(item.itemIdentifier) {
+                    // A file's reference is its container and its name, so a
+                    // move wrote a new one and the old has to go.
+                    if moved {
                         try await client.delete(ref: ref, isDirectory: false)
                     }
                 } else if moved {
