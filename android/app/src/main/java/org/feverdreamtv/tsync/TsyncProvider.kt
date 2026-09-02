@@ -264,7 +264,12 @@ class TsyncProvider : DocumentsProvider() {
                             context!!, stat.getString("parentRef"),
                             stat.getString("name"), staging
                         )
-                    }.onFailure { Log.w(TAG, "write $documentId: ${it.message}") }
+                    }.onFailure {
+                        Log.w(TAG, "write $documentId: ${it.message}")
+                        Notifications.problem(
+                            context!!, "Could not save $documentId: ${it.message}"
+                        )
+                    }
                 }
             }
         }

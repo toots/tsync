@@ -8,9 +8,9 @@ import android.content.Context
 /**
  * The notifications the app posts, and the channels behind them.
  *
- * Both of them exist to say why the app is holding the foreground, so both are
- * quiet by design: [NotificationManager.IMPORTANCE_LOW] posts without a sound
- * and stays out of the way of whatever the user is actually doing.
+ * The two that say why the app is holding the foreground are quiet by design:
+ * [NotificationManager.IMPORTANCE_LOW] posts without a sound and stays out of
+ * the way of whatever the user is actually doing. A problem is not.
  */
 object Notifications {
 
@@ -19,9 +19,21 @@ object Notifications {
      *  notification, which reads as one of them never having posted. */
     const val BACKUP_ID = 2
     const val OPEN_DOCUMENTS_ID = 3
+    const val PROBLEM_ID = 4
 
     const val BACKUP_CHANNEL = "tsync-backup"
     const val OPEN_DOCUMENTS_CHANNEL = "tsync-open-documents"
+    const val PROBLEM_CHANNEL = "tsync-problems"
+
+    /** Something the user did that did not take, said out loud: a save whose
+     *  body the domain would not adopt is otherwise a log line nobody reads. */
+    fun problem(context: Context, text: String) {
+        context.getSystemService(NotificationManager::class.java).notify(
+            PROBLEM_ID,
+            build(context, PROBLEM_CHANNEL, "Problems", text,
+                NotificationManager.IMPORTANCE_DEFAULT)
+        )
+    }
 
     /**
      * A notification on [channel], whose channel is created if it is not there.
@@ -34,15 +46,17 @@ object Notifications {
         context: Context,
         channel: String,
         channelName: String,
-        text: String
+        text: String,
+        importance: Int = NotificationManager.IMPORTANCE_LOW
     ): Notification {
         val manager = context.getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(
-            NotificationChannel(channel, channelName, NotificationManager.IMPORTANCE_LOW)
+            NotificationChannel(channel, channelName, importance)
         )
         return Notification.Builder(context, channel)
             .setContentTitle("tsync")
             .setContentText(text)
+            .setStyle(Notification.BigTextStyle().bigText(text))
             .setSmallIcon(R.drawable.ic_notification)
             .build()
     }

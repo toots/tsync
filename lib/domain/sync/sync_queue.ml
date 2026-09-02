@@ -24,6 +24,7 @@ module type S = sig
   val paused : unit -> bool
   val start : on_upload_done:(key:Logical_key.t -> unit io) -> unit
   val drain : unit -> unit io
+  val wait_uploaded : Logical_key.t -> unit io
 end
 
 module type OVER = sig
@@ -156,6 +157,7 @@ struct
          still owed against the shared journal, and re-writes only that. *)
       Q.start queue
 
+    let wait_uploaded key = Q.settle_key queue (Logical_key.to_string key)
     let drain () = Q.stop queue
   end
 end

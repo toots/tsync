@@ -11,7 +11,7 @@
 
 === a whole body is adopted by rename
   write-whole d:<id1> big.txt <root>/staged.bin
-    {"ok":true,"size":24,"mtime":1400000000.0,"item":{"ref":"f:<id1>/big.txt","parentRef":"d:<id1>","name":"big.txt","kind":"file","size":24,"mtime":1400000000.0,"etag":"","isUploaded":false}}
+    {"ok":true,"size":24,"mtime":1400000000.0,"item":{"ref":"f:<id1>/big.txt","parentRef":"d:<id1>","name":"big.txt","kind":"file","size":24,"mtime":1400000000.0,"etag":"1294bbe85c2f380b","isUploaded":true}}
   staging file still there: false
   stat f:<id1>/big.txt
     {"ok":true,"ref":"f:<id1>/big.txt","parentRef":"d:<id1>","name":"big.txt","kind":"file","size":24,"mtime":1400000000.0,"etag":"1294bbe85c2f380b","isUploaded":true}

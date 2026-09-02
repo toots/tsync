@@ -200,6 +200,11 @@ module type QUEUE = sig
 
   (** Distinct keys still owed, running or queued. *)
   val owed : t -> int
+
+  (** Wait for one key's job to leave the queue, or for that key to start
+      failing: what is left then is on disk. Immediate when nothing is owed
+      under it. *)
+  val settle_key : t -> string -> unit io
 end
 
 module type S = sig

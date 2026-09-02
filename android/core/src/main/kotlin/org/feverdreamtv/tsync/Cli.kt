@@ -62,9 +62,12 @@ object Cli {
     fun fetch(ref: String, dest: String) =
         request("ensure_cached", "ref" to ref, "dest" to dest)
 
-    /** The domain adopts [staging] by rename, so it is gone on success. */
+    /** The domain adopts [staging] by rename, so it is gone on success. Answers
+     *  once the upload has been sent or has started failing, which is what a
+     *  caller feeding it files paces on; "isUploaded" says which. */
     fun writeWhole(parent: String, name: String, staging: String) =
-        request("write", "parentRef" to parent, "name" to name, "staging" to staging)
+        request("write", "parentRef" to parent, "name" to name,
+            "staging" to staging, "await" to true)
 
     fun create(parent: String, name: String) =
         request("create", "parentRef" to parent, "name" to name)

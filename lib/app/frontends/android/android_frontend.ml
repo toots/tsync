@@ -59,15 +59,14 @@ module Serve (E : Domain_engine.S) (C : Conf_lwt.S) = struct
         on_stop = (fun () -> ());
       }
 
-  (* One request, one reply. A mutating one returns once its upload has
-     drained: with no queue a caller can ask about, this returning is the only
-     backpressure it gets, and what a camera sweep paces on. The handler's
-     continuation is meaningless here, every one of `Continue, `Stop and
-     `Subscribe being "answer the next call the same way". *)
+  (* One request, one reply, on a queue that keeps running: a write that wants
+     its upload done before it returns says so with ["await"], which is what a
+     camera sweep paces on. The handler's continuation is meaningless here,
+     every one of `Continue, `Stop and `Subscribe being "answer the next call
+     the same way". *)
   let request req =
     let open Lwt.Syntax in
-    let* reply, _ = E.Ih.handler hooks req in
-    let+ () = if Ipc_handler.mutates req then E.drain () else Lwt.return_unit in
+    let+ reply, _ = E.Ih.handler hooks req in
     reply
 
   (* No daemon to describe, so this reports the domain alone: the same fold with
@@ -311,8 +310,8 @@ let commands =
                    [("ref", `String r); ("dest", `String dest)])
           | _ -> usage "fetch" "REF DEST");
     command "write-whole"
-      "Make STAGING the whole content of NAME under PARENT. The file is \
-       adopted by rename, so it is gone on success."
+      "Make STAGING the whole content of NAME under PARENT, answering once it \
+       is sent. The file is adopted by rename, so it is gone on success."
       (fun (module C : Conf_lwt.S) args ->
         let module R = Make (C) in
         match args with
@@ -323,6 +322,7 @@ let commands =
                      ("parentRef", `String parent);
                      ("name", `String name);
                      ("staging", `String staging);
+                     ("await", `Bool true);
                    ])
           | _ -> usage "write-whole" "PARENT NAME STAGING");
     command "create" "Create an empty file NAME under PARENT."

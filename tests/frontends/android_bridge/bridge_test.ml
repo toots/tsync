@@ -131,6 +131,26 @@ let () =
             {|{"action":"list_dir","ref":"root"}|}
         in
         line "the folder is listed once made: %b" (ref_of again "made" <> None);
+        let second = Filename.concat root "second.bin" in
+        write_file second fixture;
+        let written =
+          Tsync_android_jni.Android_jni.request
+            (Printf.sprintf
+               {|{"action":"write","parentRef":"root","name":"second.bin","staging":%S,"await":true}|}
+               second)
+        in
+        line "a write after a change is sent before it answers: %b"
+          (ref_of written "second.bin" <> None
+          && String.length written > 0
+          && (not (Sys.file_exists second))
+          &&
+          let needle = {|"isUploaded":true|} in
+          let n = String.length needle in
+          let rec has i =
+            i + n <= String.length written
+            && (String.sub written i n = needle || has (i + 1))
+          in
+          has 0);
         line "a request that is not JSON is refused, not raised: %s"
           (Tsync_android_jni.Android_jni.request "nonsense");
         line "status reports the domain: %b"

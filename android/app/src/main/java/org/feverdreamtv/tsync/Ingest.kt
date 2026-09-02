@@ -32,8 +32,9 @@ object Ingest {
      * so it is gone on success and must not be deleted here; one it could not
      * take over is, a truncated write being worse than a dropped edit.
      *
-     * The call returns once the upload has drained, so it is also what paces a
-     * sweep: there is no queue to hand work to and ask about later.
+     * The call returns once the upload has been sent, or has started failing
+     * and is left to the domain's own retries, so it is also what paces a
+     * sweep.
      */
     fun commit(
         context: Context,
