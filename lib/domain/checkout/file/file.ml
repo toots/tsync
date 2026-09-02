@@ -628,8 +628,19 @@ struct
 
     (* A foreign op must never clobber unsynced local edits. The staged manifest
        is that flag and survives a restart. *)
+    (* For a folder, "staged" means a staged manifest somewhere under it. The
+       folder's own path in the staged tree proves nothing: a file written here
+       leaves its directory behind, empty, once the upload publishes. *)
     let unless_staged key f =
-      let* staged = Mfs.exists key in
+      let* staged =
+        match Logical_key.kind key with
+          | `File -> Mfs.exists key
+          | `Dir ->
+              let+ under =
+                Mfs.entries ~rel_dir:(Logical_key.path key) ~deep:true
+              in
+              under <> []
+      in
       if staged then return_unit else f ()
 
     (* Without the local copy moved aside, both ends keep different bytes under

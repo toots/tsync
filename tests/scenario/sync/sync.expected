@@ -691,3 +691,94 @@
   file a.txt [.tsync-root/f01e5cbbc09d4fc4-9a0fcd66f030de75] = manifest size=4 chunks=1 h1=f573d552be389489 h2=d8439cae75ef9289
     chunk#0 0671df8bdff741c7-472f0a7b1ab4410a size=4
 
+=== foreign_dir_rename
+  A: mkdir sub
+  A: write sub/x.txt "in"
+  A: drain
+  B: sync
+  A: rename sub -> sub-renamed
+  A: drain
+  B: sync
+--- tree A
+  d sub-renamed
+  f sub-renamed/x.txt size=2 cached=0/1 uploaded=true etag=d108c63e08afaabf
+--- content A
+  sub-renamed/x.txt = "in"
+--- pending A
+--- tree B
+  d sub-renamed
+  f sub-renamed/x.txt size=2 cached=0/1 uploaded=true etag=d108c63e08afaabf
+--- content B
+  sub-renamed/x.txt = "in"
+--- pending B
+--- kept A
+  {"op":"mkdir","key":"sub","id":"<folder-1>"}
+  {"op":"put","key":"sub/x.txt","size":2}
+  {"op":"rename","key":"sub-renamed","src":"sub","is_dir":true,"id":"<folder-1>"}
+--- kept B
+  {"op":"mkdir","key":"sub","id":"<folder-1>"}
+  {"op":"put","key":"sub/x.txt","size":2}
+  {"op":"rename","key":"sub-renamed","src":"sub","is_dir":true,"id":"<folder-1>"}
+--- backend
+  chunk 48068d8a56def9a6-8003781d32b4cf50 size=2
+  cursor = <entry-3>
+  journal <entry-1> = mkdir sub
+  journal <entry-2> = put sub/x.txt 2
+  journal <entry-3> = rename sub -> sub-renamed dir
+  folder sub-renamed [.tsync-root/c5c30a85bac19946-a5e511ba81829bb3] -> <folder-1>
+  file x.txt [<folder-1>/fecd6e94d21b3dc7-d6d12967f4c00d3d] = manifest size=2 chunks=1 h1=d108c63e08afaabf h2=d327f52fbae8b749
+    chunk#0 48068d8a56def9a6-8003781d32b4cf50 size=2
+
+=== foreign_dir_rename_of_own_folder
+  B: mkdir sub
+  B: write sub/g1.txt "mine"
+  B: write f4.txt "moved"
+  B: drain
+  A: sync
+  A: rename f4.txt -> sub/f4.txt
+  A: rename sub -> sub-renamed
+  A: drain
+  B: sync
+--- tree A
+  d sub-renamed
+  f sub-renamed/f4.txt size=5 cached=0/1 uploaded=true etag=c2743db5bb64af1b
+  f sub-renamed/g1.txt size=4 cached=0/1 uploaded=true etag=85df471f7bba8615
+--- content A
+  sub-renamed/f4.txt = "moved"
+  sub-renamed/g1.txt = "mine"
+--- pending A
+--- tree B
+  d sub-renamed
+  f sub-renamed/f4.txt size=5 cached=0/1 uploaded=true etag=c2743db5bb64af1b
+  f sub-renamed/g1.txt size=4 cached=0/1 uploaded=true etag=85df471f7bba8615
+--- content B
+  sub-renamed/f4.txt = "moved"
+  sub-renamed/g1.txt = "mine"
+--- pending B
+--- kept A
+  {"op":"mkdir","key":"sub","id":"<folder-1>"}
+  {"op":"put","key":"sub/g1.txt","size":4}
+  {"op":"put","key":"f4.txt","size":5}
+  {"op":"rename","key":"sub/f4.txt","src":"f4.txt","is_dir":false,"size":5}
+  {"op":"rename","key":"sub-renamed","src":"sub","is_dir":true,"id":"<folder-1>"}
+--- kept B
+  {"op":"mkdir","key":"sub","id":"<folder-1>"}
+  {"op":"put","key":"sub/g1.txt","size":4}
+  {"op":"put","key":"f4.txt","size":5}
+  {"op":"rename","key":"sub/f4.txt","src":"f4.txt","is_dir":false,"size":5}
+  {"op":"rename","key":"sub-renamed","src":"sub","is_dir":true,"id":"<folder-1>"}
+--- backend
+  chunk 6bceea5f3c7fe0a6-faf00891f8013689 size=4
+  chunk 91e75a14034af1d0-d3be400c101eec7c size=5
+  cursor = <entry-5>
+  journal <entry-1> = mkdir sub
+  journal <entry-2> = put sub/g1.txt 4
+  journal <entry-3> = put f4.txt 5
+  journal <entry-4> = rename f4.txt -> sub/f4.txt 5
+  journal <entry-5> = rename sub -> sub-renamed dir
+  folder sub-renamed [.tsync-root/c5c30a85bac19946-a5e511ba81829bb3] -> <folder-1>
+  file g1.txt [<folder-1>/082ac4576d0dd2bd-e107f214a54fba1f] = manifest size=4 chunks=1 h1=85df471f7bba8615 h2=342eaa68ba60cbfa
+    chunk#0 6bceea5f3c7fe0a6-faf00891f8013689 size=4
+  file f4.txt [<folder-1>/22ca04f2818589b7-0fd485a9a6e7ad40] = manifest size=5 chunks=1 h1=c2743db5bb64af1b h2=39424f30da971bb9
+    chunk#0 91e75a14034af1d0-d3be400c101eec7c size=5
+
