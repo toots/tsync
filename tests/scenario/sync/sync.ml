@@ -347,6 +347,27 @@ let foreign_put_readopts_a_forgotten_folder_id =
       ];
   }
 
+(* A's entry for a.txt reaches the store after b.txt's, though its key is
+   older: what a slow upload looks like from B. B syncs past it, then must still
+   pick it up once it lands; cut at the last-sync key, it never would. *)
+let late_visible_entry =
+  {
+    name = "late_visible_entry";
+    steps =
+      [
+        A (Write { path = "a.txt"; content = "slow" });
+        A Drain;
+        A HideNewestJournalEntry;
+        A (Write { path = "b.txt"; content = "fast" });
+        A Drain;
+        B Sync;
+        A UnhideJournalEntry;
+        A (Write { path = "c.txt"; content = "later" });
+        A Drain;
+        B Sync;
+      ];
+  }
+
 let () =
   run_two_client_scenarios
     [
@@ -369,4 +390,5 @@ let () =
       crash_before_commit;
       stale_record_discarded;
       foreign_put_readopts_a_forgotten_folder_id;
+      late_visible_entry;
     ]

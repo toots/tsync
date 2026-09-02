@@ -16,6 +16,9 @@ module type JOURNAL = sig
         Called after the entry is applied, which is what lets a reader trust
         that the mirror already agrees with it. *)
     val note_applied : Journal.Entry_key.t -> Journal.op list -> unit io
+
+    (** Every entry this client has handled, as far back as it keeps them. *)
+    val applied_keys : unit -> Journal.Entry_key.t list io
   end
 end
 
@@ -32,14 +35,23 @@ module type S = sig
       rather than once per process and so has a caller of its own. *)
   val reconcile : unit -> unit io
 
-  (** Apply every journal entry from another client since the applied mark, in
+  (** Apply every journal entry from another client not yet handled, in key
       order, advancing the mark behind each one. A failure stops the pass and
       leaves the mark where it was, so the entry is retried rather than skipped.
+
+      Not "since the mark": a key says when its writer minted the entry, not
+      when the store showed it, so an entry can appear behind the mark. The
+      listing reaches back as far as the handled entries are remembered, and
+      each is checked against them.
 
       [on_changed] is called with each affected backend key, for a frontend that
       invalidates its own view. Returns how many foreign entries were applied.
   *)
   val apply_foreign : on_changed:(string -> unit) -> unit -> int io
+
+  (** Remember these entries as handled without applying them: a rebuild has
+      read the store they describe, so their effect is already in the mirror. *)
+  val mark_handled : Journal.Entry_key.t list -> unit io
 end
 
 (** The shape a consumer takes: {!S} for whichever domain it is applied to. *)

@@ -57,7 +57,6 @@ let default_staged_grace = 3600.
 
    The byte cap is the second bound the first one does not give: a busy domain
    can write a month of entries far larger than a quiet one writes in a year. *)
-let applied_keep_days = 30
 let applied_keep_bytes = 64 * 1024 * 1024
 
 (* Shards are monthly, so nothing is collectable more often than that; running
@@ -94,7 +93,7 @@ module Domain (C : Conf_lwt.S) = struct
             let open Lwt.Syntax in
             let+ files, bytes =
               Applied_entries.prune ~cache_root:C.cache_root
-                ~domain_name:C.domain_name ~keep_days:applied_keep_days
+                ~domain_name:C.domain_name ~keep_days:Applied_entries.keep_days
                 ~keep_bytes:applied_keep_bytes
             in
             { files; bytes });

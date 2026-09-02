@@ -14,9 +14,8 @@ the anchor's own entry is not repeated: ok
 a full page says another would answer: ok
 and holds exactly the limit: ok
 
-=== the ends of the window
+=== the head is the entry handled last
 head is the newest kept: ok
-oldest is the far end: ok
 
 === a shard boundary is crossed by the calendar, not by the reader
   shards: 2026-08.log 2026-09.log
@@ -30,16 +29,22 @@ head follows into it: ok
 === a rename survives the round trip whole
 both ends of the move are kept: ok
 
+=== an entry handled late with an older key still follows the anchor
+  1788134400002-aaaaaaaaaaaaaaaa [{"op":"put","key":"photos/late.jpg","size":8}]
+  more: false
+the reader is given it: ok
+and it is the head, whatever its key says: ok
+
 === a line one writer tore does not stop the reader
-  1788307200000-aaaaaaaaaaaaaaaa [{"op":"rename","key":"photos/two.jpg","src":"photos/one.jpg","is_dir":false,"size":1024}]
+  1788134400002-aaaaaaaaaaaaaaaa [{"op":"put","key":"photos/late.jpg","size":8}]
   1788307200001-aaaaaaaaaaaaaaaa [{"op":"delete","key":"photos/two.jpg"}]
   more: false
 the entries around it still read: ok
 
-=== an anchor older than what is kept cannot be bridged
+=== an anchor no longer kept cannot be bridged
   pruned 2 shard(s)
 a sweep says what it took: ok
-nothing is left after its window: ok
+  anchor gone
 which is what stales an anchor: ok
 
 16 check(s), 0 failure(s)

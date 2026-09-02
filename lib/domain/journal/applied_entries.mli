@@ -9,10 +9,14 @@
     peer's entry once it is applied, so answering "what changed since" meant
     fetching back from the store what this client held minutes ago.
 
-    Month-sharded as the published journal is
-    ({!Journal.Entry_key
-    .relative_path}), which is also the unit retention
-    drops. *)
+    A sequence in the order entries were handled, month-sharded by that time,
+    which is also the unit retention drops. Not by the month in the key: a
+    peer's entry can be handled after entries whose keys are newer, and a reader
+    is given what follows its anchor in this order, whatever the keys say. *)
+
+(** How many days of handled entries are kept: the horizon behind which a store
+    entry can no longer be told from one handled and since forgotten. *)
+val keep_days : int
 
 (** Keep [ops] under [entry_key].
 
@@ -26,9 +30,13 @@
     newline-terminated, so a torn write is closed by the next one and costs only
     itself; the reader skips what will not parse rather than failing on it.
 
+    [now] is when the entry was handled, a parameter only so a test can cross a
+    shard boundary without waiting for the calendar.
+
     ponytail: no lock. Add a per-file one only if two writers ever tear more
     than the record between them. *)
 val note :
+  ?now:float ->
   cache_root:string ->
   domain_name:string ->
   Journal.Entry_key.t ->
@@ -43,27 +51,27 @@ type page = {
           so a caller reporting in batches knows to come back. *)
 }
 
-(** Entries after [since], exclusive, oldest first. [None] starts at the oldest
-    kept. *)
+(** Entries handled after [since], exclusive, in that order; [None] starts at
+    the oldest kept. Answers [None] when [since] is no longer kept, which is the
+    whole of the staleness test: no delta bridges an anchor that is gone. *)
 val since :
   cache_root:string ->
   domain_name:string ->
   ?since:Journal.Entry_key.t ->
   limit:int ->
   unit ->
-  page Lwt.t
+  page option Lwt.t
 
-(** The newest entry kept, [None] before there is one. Reads the tail of one
+(** The entry handled last, [None] before there is one. Reads the tail of one
     shard, so it stays cheap enough for the caller that asks before every
     enumeration. *)
 val head :
   cache_root:string -> domain_name:string -> Journal.Entry_key.t option Lwt.t
 
-(** The oldest entry kept. An anchor older than this cannot be bridged, which is
-    the whole of the staleness test — {!Journal.Entry_key.cannot_bridge} asks
-    the same question of the published journal. *)
-val oldest :
-  cache_root:string -> domain_name:string -> Journal.Entry_key.t option Lwt.t
+(** Every key kept, for a reader deciding which of a store's entries it has
+    already handled. *)
+val keys :
+  cache_root:string -> domain_name:string -> Journal.Entry_key.t list Lwt.t
 
 (** Drop whole shards once they are older than [keep_days], and oldest-first
     while what is left exceeds [keep_bytes]. Answers with how many shards went

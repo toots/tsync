@@ -89,7 +89,8 @@ struct
       in
       (!count, !failed)
 
-    let full_resync ~parallelism ~progress ~on_manifest ~notify reason =
+    let full_resync ~parallelism ~progress ~on_manifest ~notify ~handled reason
+        =
       progress.on_phase "clearing the cache";
       (* Unsynced edits are kept: nothing else holds those bytes. *)
       let* () =
@@ -105,7 +106,15 @@ struct
          after a partial walk moves the cursor past folders that were never
          fetched, and nothing revisits them: their files arrive later as journal
          puts, into directories no id names. *)
-      if failed = 0 then Cursor.write_last_sync_key (J.entry_key ());
+      let* () =
+        if failed = 0 then begin
+          Cursor.write_last_sync_key (J.entry_key ());
+          (* The rebuild read what these describe, so they are not applied on
+             top of it. *)
+          Rp.mark_handled handled
+        end
+        else Io.return ()
+      in
       (* After the rebuild, or the daemon re-reads an empty mirror mid-rebuild. *)
       notify ();
       Io.return (Full { manifests; failed; reason })
@@ -147,7 +156,8 @@ struct
       on_decision last_sync_key all_keys reason;
       match reason with
         | Some reason ->
-            full_resync ~parallelism ~progress ~on_manifest ~notify reason
+            full_resync ~parallelism ~progress ~on_manifest ~notify
+              ~handled:all_keys reason
         | None -> incremental ~progress ()
 
     let client_uuid = J.client_uuid

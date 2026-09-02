@@ -46,6 +46,9 @@ module Make (C : Conf_lwt.S) = struct
     Applied_entries.note ~cache_root:C.cache_root ~domain_name:C.domain_name
       entry_key ops
 
+  let applied_keys () =
+    Applied_entries.keys ~cache_root:C.cache_root ~domain_name:C.domain_name
+
   (* Minted here when the caller named none, so the key is known before the
      entry goes out and both records carry the same one. *)
   let entry_key_of = function Some k -> k | None -> J.entry_key ()
