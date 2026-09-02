@@ -1,5 +1,5 @@
 (executable
  (flags
-  (:standard -open Tsync_field_spec))
+  (:standard -open Tsync_core))
  (name field_spec_test)
- (libraries tsync_field_spec))
+ (libraries tsync_core))

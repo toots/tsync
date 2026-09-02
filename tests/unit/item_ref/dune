@@ -1,11 +1,5 @@
 (executable
  (flags
-  (:standard
-   -open
-   Tsync_logical_key
-   -open
-   Tsync_logical_key
-   -open
-   Tsync_test_harness))
+  (:standard -open Tsync_core -open Tsync_test_harness))
  (name item_ref_test)
- (libraries tsync_logical_key tsync_test_harness))
+ (libraries tsync_core tsync_test_harness))

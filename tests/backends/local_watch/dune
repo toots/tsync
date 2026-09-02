@@ -2,9 +2,7 @@
  (flags
   (:standard
    -open
-   Tsync_logical_key
-   -open
-   Tsync_bigstring
+   Tsync_core
    -open
    Tsync_backend_register
    -open
@@ -12,17 +10,17 @@
    -open
    Tsync_local_backend_lwt
    -open
-   Tsync_device_lwt
+   Tsync_io_lwt
    -open
    Tsync_test_harness))
  (name local_watch)
  (libraries
-  tsync-libs.logical_key
-  tsync_bigstring
+  tsync-libs.core
+  tsync_core
   tsync_backend_register
   tsync_backend_lwt
   tsync_local_backend_lwt
-  tsync_device_lwt
+  tsync_io_lwt
   tsync_test_harness
   lwt
   lwt.unix

@@ -10,11 +10,11 @@
   (= %{system} linux))
  (modules linux_device)
  (flags
-  (:standard -open Tsync_stdlib -open Tsync_filename))
+  (:standard -open Tsync_stdlib -open Tsync_io))
  (foreign_stubs
   (language c)
   (names linux_clone_stubs))
- (libraries tsync_stdlib unix tsync-libs.filename tsync_io))
+ (libraries tsync_stdlib unix tsync-libs.io tsync_io))
 
 (library
  (name tsync_macos_device)
@@ -23,11 +23,11 @@
   (= %{system} macosx))
  (modules macos_device)
  (flags
-  (:standard -open Tsync_filename))
+  (:standard -open Tsync_io))
  (foreign_stubs
   (language c)
   (names macos_clone_stubs))
- (libraries unix tsync-libs.filename tsync_io))
+ (libraries unix tsync-libs.io tsync_io))
 
 ; [descriptors] and [watch] are not per-OS in the way [device] is: both are one
 ; C file with the platform branch inside it, because what differs is which
@@ -44,7 +44,7 @@
   (names descriptors_stubs watch_stubs))
  (libraries
   unix
-  tsync_filename
+  tsync_io
   (select
    device.ml
    from

@@ -2,7 +2,7 @@
  (flags
   (:standard
    -open
-   Tsync_logical_key
+   Tsync_core
    -open
    Tsync_remote_lwt
    -open
@@ -14,8 +14,6 @@
    -open
    Tsync_cache_layout
    -open
-   Tsync_metrics
-   -open
    Tsync_backend_lwt
    -open
    Tsync_conf_lwt
@@ -25,7 +23,7 @@
    Tsync_test_harness))
  (name staged_test)
  (libraries
-  tsync_logical_key
+  tsync_core
   tsync_remote_lwt
   tsync_checkout
   tsync_checkout_lwt
@@ -35,6 +33,5 @@
   tsync_conf_lwt
   tsync_backend_lwt
   tsync_local_backend_lwt
-  tsync_metrics
   lwt
   lwt.unix))

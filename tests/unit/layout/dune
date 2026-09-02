@@ -2,16 +2,10 @@
  (flags
   (:standard
    -open
-   Tsync_logical_key
+   Tsync_core
    -open
    Tsync_chunk_integrity
    -open
-   Tsync_chunks
-   -open
    Tsync_journal))
  (name layout)
- (libraries
-  tsync-libs.logical_key
-  tsync_chunk_integrity
-  tsync_chunks
-  tsync_journal))
+ (libraries tsync-libs.core tsync_chunk_integrity tsync_core tsync_journal))

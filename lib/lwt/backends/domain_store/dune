@@ -9,13 +9,9 @@
    -open
    Tsync_backend_lwt
    -open
-   Tsync_durable_queue_lwt
+   Tsync_core_lwt
    -open
    Tsync_io_lwt))
  (name tsync_domain_store_lwt)
  (public_name tsync-libs.domain_store_lwt)
- (libraries
-  tsync_domain_store
-  tsync_backend_lwt
-  tsync_durable_queue_lwt
-  tsync_io_lwt))
+ (libraries tsync_domain_store tsync_backend_lwt tsync_core_lwt tsync_io_lwt))

@@ -1,6 +1,6 @@
 (library
  (flags
-  (:standard -open Tsync_log))
+  (:standard -open Tsync_core))
  (name tsync_tls)
  (public_name tsync-libs.tls)
- (libraries conduit-lwt-unix tsync_log))
+ (libraries conduit-lwt-unix tsync_core))

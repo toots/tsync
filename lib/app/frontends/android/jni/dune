@@ -15,7 +15,7 @@
  (flags
   (:standard
    -open
-   Tsync_log
+   Tsync_core
    -open
    Tsync_engine
    -open
@@ -30,8 +30,6 @@
    Tsync_tls
    -open
    Tsync_domain
-   -open
-   Tsync_logical_key
    -open
    Tsync_checkout
    -open
@@ -49,11 +47,11 @@
   tsync-libs.conf_lwt
   tsync-libs.engine
   tsync-libs.frontend_register
-  tsync-libs.log
+  tsync-libs.core
   lwt
   lwt.unix
   unix
-  tsync_logical_key
+  tsync_core
   tsync_checkout
   tsync_manifest))
 

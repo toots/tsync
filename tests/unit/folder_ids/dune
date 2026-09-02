@@ -2,7 +2,7 @@
  (flags
   (:standard
    -open
-   Tsync_logical_key
+   Tsync_core
    -open
    Tsync_cache_layout_lwt
    -open
@@ -13,7 +13,7 @@
    Tsync_test_harness))
  (name folder_ids_test)
  (libraries
-  tsync_logical_key
+  tsync_core
   tsync_test_harness
   tsync_cache_layout_lwt
   tsync_cache_layout

@@ -2,7 +2,7 @@
  (flags
   (:standard
    -open
-   Tsync_logical_key
+   Tsync_core
    -open
    Tsync_remote_lwt
    -open
@@ -22,7 +22,7 @@
  (name pulling_test)
  (libraries
   unix
-  tsync_logical_key
+  tsync_core
   tsync_remote_lwt
   tsync_checkout_lwt
   tsync_manifest

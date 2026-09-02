@@ -1,7 +1,0 @@
-(library
- (name tsync_xxhash)
- (public_name tsync-libs.xxhash)
- (libraries bigstringaf)
- (foreign_stubs
-  (language c)
-  (names xxhash_stubs)))

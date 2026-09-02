@@ -2,7 +2,7 @@
  (flags
   (:standard
    -open
-   Tsync_logical_key
+   Tsync_core
    -open
    Tsync_remote_lwt
    -open
@@ -21,7 +21,7 @@
    Tsync_test_harness))
  (name download_progress_test)
  (libraries
-  tsync_logical_key
+  tsync_core
   tsync_remote_lwt
   tsync_manifest
   tsync_test_harness

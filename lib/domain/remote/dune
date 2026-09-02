@@ -8,25 +8,15 @@
  (flags
   (:standard
    -open
-   Tsync_chunks
-   -open
-   Tsync_bigstring
+   Tsync_core
    -open
    Tsync_io
-   -open
-   Tsync_metrics
-   -open
-   Tsync_logical_key
-   -open
-   Tsync_retry
    -open
    Tsync_manifest
    -open
    Tsync_conf
    -open
    Tsync_backend_register
-   -open
-   Tsync_log
    -open
    Tsync_chunk_integrity
    -open
@@ -38,17 +28,12 @@
  (name tsync_remote)
  (public_name tsync-libs.remote)
  (libraries
-  tsync-libs.logical_key
-  tsync_chunks
-  tsync_bigstring
+  tsync-libs.core
+  tsync_core
   tsync_io
-  tsync_metrics
-  tsync_retry
-  tsync_logical_key
   tsync_manifest
   tsync_conf
   tsync_backend_register
-  tsync_log
   unix
   tsync_chunk_integrity
   tsync_stdlib

@@ -1,6 +1,0 @@
-(library
- (flags
-  (:standard -open Tsync_io -open Tsync_retry -open Tsync_bigstring))
- (name tsync_http_client)
- (public_name tsync-libs.http_client)
- (libraries cohttp uri tsync_io tsync_retry tsync_bigstring))

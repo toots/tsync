@@ -4,15 +4,13 @@
    -open
    Tsync_stdlib
    -open
-   Tsync_logical_key
+   Tsync_core
    -open
    Tsync_checkout
    -open
    Tsync_cache_layout_lwt
    -open
-   Tsync_ipc
-   -open
-   Tsync_ipc_lwt
+   Tsync_core_lwt
    -open
    Tsync_conf
    -open
@@ -25,8 +23,6 @@
    Tsync_runtime
    -open
    Tsync_frontend_register
-   -open
-   Tsync_log
    -open
    Tsync_menu))
  (name tsync_file_provider_frontend)
@@ -55,17 +51,16 @@
   tsync_stdlib
   tsync-libs.conf_parsing
   tsync_conf_lwt
-  tsync_logical_key
+  tsync_core
   tsync-libs.menu
   tsync_checkout
   tsync_cache_layout_lwt
   tsync-libs.conf
-  tsync-libs.ipc
-  tsync-libs.ipc_lwt
+  tsync-libs.core
+  tsync-libs.core_lwt
   tsync-libs.engine
   tsync_runtime
   tsync-libs.frontend_register
-  tsync-libs.log
   yojson
   base64
   unix

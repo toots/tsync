@@ -2,13 +2,11 @@
  (flags
   (:standard
    -open
-   Tsync_logical_key
+   Tsync_core
    -open
    Tsync_remote_lwt
    -open
    Tsync_manifest
-   -open
-   Tsync_bigstring
    -open
    Tsync_conf_lwt
    -open
@@ -17,11 +15,10 @@
    Tsync_test_harness))
  (name upload_fanout)
  (libraries
-  tsync_logical_key
+  tsync_core
   tsync_remote_lwt
   tsync_manifest
   tsync_test_harness
-  tsync_bigstring
   tsync_conf_lwt
   tsync_local_backend_lwt
   lwt

@@ -1,9 +1,0 @@
-; The daemon socket and the pool registry, as the reporting in
-; tsync-libs.job_report asks for them.
-
-(library
- (flags
-  (:standard -open Tsync_job_report -open Tsync_ipc_lwt -open Tsync_io_lwt))
- (name tsync_job_report_lwt)
- (public_name tsync-libs.job_report_lwt)
- (libraries tsync_job_report tsync_ipc_lwt tsync_io_lwt lwt))

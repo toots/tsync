@@ -2,7 +2,7 @@
  (flags
   (:standard
    -open
-   Tsync_logical_key
+   Tsync_core
    -open
    Tsync_remote
    -open
@@ -24,7 +24,7 @@
   unix
   lwt.unix
   lwt
-  tsync_logical_key
+  tsync_core
   tsync_remote
   tsync_remote_lwt
   tsync_manifest

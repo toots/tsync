@@ -7,5 +7,5 @@
  (name tsync_menu)
  (public_name tsync-libs.menu)
  (flags
-  (:standard -open Tsync_metrics))
- (libraries tsync_metrics yojson))
+  (:standard -open Tsync_core))
+ (libraries tsync_core yojson))

@@ -2,7 +2,7 @@
  (flags
   (:standard
    -open
-   Tsync_logical_key
+   Tsync_core
    -open
    Tsync_remote_lwt
    -open
@@ -12,25 +12,15 @@
    -open
    Tsync_manifest
    -open
-   Tsync_field_spec
-   -open
    Tsync_checkout_lwt
    -open
-   Tsync_ipc_lwt
+   Tsync_core_lwt
    -open
    Tsync_ipc_handler
-   -open
-   Tsync_log
-   -open
-   Tsync_metrics
-   -open
-   Tsync_zip
    -open
    Tsync_io_lwt
    -open
    Tsync_http_proxy
-   -open
-   Tsync_bigstring
    -open
    Tsync_backend_register
    -open
@@ -57,27 +47,23 @@
   cohttp-lwt
   unix
   cohttp
-  tsync_logical_key
+  tsync_core
   tsync_remote_lwt
   tsync_remote
   tsync_conf_lwt
   tsync_checkout
   tsync_manifest
-  tsync-libs.field_spec
+  tsync-libs.core
   tsync-libs.checkout_lwt
   tsync_io_lwt
   tsync-libs.frontend_register
   tsync-libs.engine
   tsync-libs.http_proxy
-  tsync-libs.ipc_lwt
+  tsync-libs.core_lwt
   tsync-libs.ipc_handler
   tsync-libs.diagnostics
-  tsync-libs.metrics
-  tsync-libs.bigstring
   tsync-libs.backend_register
   tsync-libs.backend_lwt
-  tsync-libs.zip
-  tsync-libs.log
   tsync_runtime
   cohttp-lwt-unix
   bigstringaf

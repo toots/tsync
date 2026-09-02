@@ -2,20 +2,18 @@
  (flags
   (:standard
    -open
-   Tsync_logical_key
+   Tsync_core
    -open
    Tsync_domain_store_lwt
-   -open
-   Tsync_bigstring
    -open
    Tsync_backend_register
    -open
    Tsync_backend_lwt))
  (name batch_nesting)
  (libraries
-  tsync-libs.logical_key
+  tsync-libs.core
   tsync_domain_store_lwt
-  tsync_bigstring
+  tsync_core
   tsync_backend_register
   tsync_backend_lwt
   lwt

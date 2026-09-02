@@ -1,19 +1,11 @@
 (executable
  (flags
-  (:standard
-   -open
-   Tsync_logical_key
-   -open
-   Tsync_remote_lwt
-   -open
-   Tsync_bigstring
-   -open
-   Tsync_io_lwt))
+  (:standard -open Tsync_core -open Tsync_remote_lwt -open Tsync_io_lwt))
  (name demand_ranges)
  (libraries
-  tsync-libs.logical_key
+  tsync-libs.core
   tsync_remote_lwt
-  tsync_bigstring
+  tsync_core
   tsync_io_lwt
   lwt
   lwt.unix))

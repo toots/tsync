@@ -11,7 +11,7 @@
    -open
    Tsync_remote
    -open
-   Tsync_logical_key
+   Tsync_core
    -open
    Tsync_journal
    -open
@@ -19,24 +19,15 @@
    -open
    Tsync_io
    -open
-   Tsync_retry
-   -open
-   Tsync_backend_register
-   -open
-   Tsync_log
-   -open
-   Tsync_durable_queue))
+   Tsync_backend_register))
  (name tsync_sync)
  (public_name tsync-libs.sync)
  (libraries
   tsync_checkout
   tsync_remote
-  tsync_retry
-  tsync_logical_key
+  tsync_core
   tsync_journal
   tsync_conf
   tsync_io
-  tsync_durable_queue
   tsync_backend_register
-  tsync_log
   unix))

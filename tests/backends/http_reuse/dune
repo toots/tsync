@@ -1,19 +1,12 @@
 (executable
  (flags
-  (:standard
-   -open
-   Tsync_bigstring
-   -open
-   Tsync_http_client_lwt
-   -open
-   Tsync_retry))
+  (:standard -open Tsync_core -open Tsync_core_lwt))
  (name http_reuse)
  (libraries
   cohttp-lwt
   cohttp
-  tsync_bigstring
-  tsync_http_client_lwt
-  tsync_retry
+  tsync_core
+  tsync_core_lwt
   cohttp-lwt-unix
   uri
   lwt

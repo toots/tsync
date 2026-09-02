@@ -8,7 +8,7 @@
    -open
    Tsync_stdlib
    -open
-   Tsync_field_spec
+   Tsync_core
    -open
    Tsync_conf_parsing
    -open
@@ -18,20 +18,17 @@
    -open
    Tsync_frontend_register
    -open
-   Tsync_metrics
-   -open
    Tsync_io_lwt
    -open
    Tsync_tls))
  (name tsync_wizard)
  (libraries
   tsync_stdlib
-  tsync_field_spec
+  tsync_core
   tsync_conf_parsing
   tsync_backend_register
   tsync_backend_lwt
   tsync_frontend_register
-  tsync_metrics
   tsync_io_lwt
   tsync_tls
   yojson

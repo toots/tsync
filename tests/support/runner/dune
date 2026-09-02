@@ -2,7 +2,7 @@
  (flags
   (:standard
    -open
-   Tsync_logical_key
+   Tsync_core
    -open
    Tsync_remote
    -open
@@ -13,8 +13,6 @@
    Tsync_manifest
    -open
    Tsync_journal
-   -open
-   Tsync_chunks
    -open
    Tsync_test_harness
    -open
@@ -34,8 +32,6 @@
    -open
    Tsync_io_lwt
    -open
-   Tsync_bigstring
-   -open
    Tsync_backend_register
    -open
    Tsync_backend_lwt
@@ -53,13 +49,12 @@
    Tsync_ipc_handler))
  (name tsync_test_runner)
  (libraries
-  tsync_logical_key
+  tsync_core
   tsync_remote
   tsync_checkout
   tsync_checkout_lwt
   tsync_manifest
   tsync_journal
-  tsync_chunks
   tsync_test_harness
   tsync_ops
   tsync_ops_lwt
@@ -70,7 +65,6 @@
   tsync_io_lwt
   tsync_conf
   tsync_conf_lwt
-  tsync_bigstring
   tsync_backend_register
   tsync_backend_lwt
   tsync_domain_store_lwt
