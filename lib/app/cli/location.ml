@@ -47,8 +47,82 @@ let place ?domain cfg a =
     | `Domain p -> Ok p
     | `Local p -> Error (p ^ ": under no domain this machine serves")
 
+(* The mirror holds a sidecar for every published file whether or not its bytes
+   are cached, so this is the same source [tsync ls] reads and it costs no round
+   trip. *)
+let children_of ~name ~rel cfg =
+  let (module C : Conf_lwt.S) = Common.make_conf ~domain:name cfg in
+  let module Lk = Logical_key.Make (C) in
+  let module Mf = Checkout_lwt.Make (C) in
+  (* ponytail: one manifest parse per entry, which is what recovers an escaped
+     leaf's real name; a folder in the tens of thousands would want the names
+     kept beside the tree. *)
+  let files, dirs =
+    Lwt_main.run (Mf.list_children ~prefix:(Lk.dir rel) ())
+  in
+  List.map (fun d -> d ^ "/") dirs
+  @ List.map
+      (fun (l : Checkout.listed) -> Logical_key.leaf l.Checkout.key)
+      files
+
+let matching ~prefix xs =
+  List.filter (fun x -> String.starts_with ~prefix x) xs
+
+(* The directory the token is inside, and the part of a name it has typed. *)
+let split_at_slash rel =
+  match String.rindex_opt rel '/' with
+    | None -> ("", rel)
+    | Some i ->
+        ( String.sub rel 0 i,
+          String.sub rel (i + 1) (String.length rel - i - 1) )
+
+let in_domain_items ~name ~token ~rel cfg =
+  let dir, typed = split_at_slash rel in
+  let shown child =
+    let full = if dir = "" then child else dir ^ "/" ^ child in
+    (* The token is replaced whole, so what is offered carries back whatever
+       named the domain. *)
+    match String.index_opt token ':' with
+      | Some i -> String.sub token 0 i ^ ":/" ^ full
+      | None -> full
+  in
+  List.map
+    (fun c -> Cmdliner.Arg.Completion.string (shown c))
+    (matching ~prefix:typed (children_of ~name ~rel:dir cfg))
+
+(* A caller with no config, or one naming a domain this machine cannot build,
+   gets ordinary paths rather than an error reported on every keystroke. *)
+let complete reading ctx ~token =
+  let domain = Option.join ctx in
+  let paths = Cmdliner.Arg.Completion.[ files; dirs ] in
+  match
+    let cfg = Common.load_config () in
+    match said_outright cfg token with
+      | Some { name; rel } -> in_domain_items ~name ~token ~rel cfg
+      | None ->
+          let named =
+            List.map
+              (fun n -> Cmdliner.Arg.Completion.string (n ^ ":/"))
+              (matching ~prefix:token (Common.domain_names cfg))
+          in
+          let here =
+            match reading with
+              | `Either -> []
+              | `In_domain ->
+                  let name, _ =
+                    Domain.target ?domain ~paths:Common.runtime_paths cfg
+                  in
+                  in_domain_items ~name ~token ~rel:token cfg
+          in
+          named @ here @ paths
+  with
+    | items -> Ok items
+    | exception _ -> Ok paths
+
 let conv reading =
   Cmdliner.Arg.Conv.make ~docv:"PATH"
+    ~completion:(Cmdliner.Arg.Completion.make ~context:Common.domain_arg
+                   (complete reading))
     ~parser:(fun token -> Ok { token; reading })
     ~pp:(fun ppf a -> Format.pp_print_string ppf a.token)
     ()
