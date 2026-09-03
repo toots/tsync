@@ -254,24 +254,26 @@ struct
   let batch_slots = lazy (Bounded.create ~name:"batch reads" ~max:32 ())
 
   module Batched (B : Store) = struct
+    (* The pool is taken once on either path: a run under a slot, or a key under
+       a slot, never a run holding one while its keys wait for theirs. *)
     let get_many ?slots ~entries () =
       let slots =
         match slots with Some s -> s | None -> Lazy.force batch_slots
       in
-      let ask run =
-        match B.get_many with
-          | Some f -> Bounded.use slots (fun () -> f ~entries:run ())
-          | None ->
+      match B.get_many with
+        | Some f ->
+            let+ answered =
               Bounded.map_with slots
-                (fun (e : file_entry) ->
-                  let+ body = B.get_opt ~key:e.key () in
-                  (e.key, body))
-                run
-      in
-      (* A run at a time, so what is held is one request's bodies rather than the
-         whole folder's twice over. *)
-      let+ answered = map_s ask (batches entries) in
-      List.concat answered
+                (fun run -> f ~entries:run ())
+                (batches entries)
+            in
+            List.concat answered
+        | None ->
+            Bounded.map_with slots
+              (fun (e : file_entry) ->
+                let+ body = B.get_opt ~key:e.key () in
+                (e.key, body))
+              entries
   end
 
   type factory = (string -> string option) -> (module Store)

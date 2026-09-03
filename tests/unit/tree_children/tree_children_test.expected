@@ -17,4 +17,11 @@ the readable siblings still arrive: ok
 and only the unreadable one is reported: ok
 `Fail refuses the folder rather than shortening it: ok
 
-10 check(s), 0 failure(s)
+=== a walk fetches folders ahead of visiting them, in visit order
+every folder is listed once: ok
+every entry is visited once: ok
+and the listings overlapped: ok
+in depth-first order: ok
+and the visit order does not depend on the width: ok
+
+15 check(s), 0 failure(s)

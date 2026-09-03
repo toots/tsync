@@ -266,13 +266,48 @@ struct
 
     (* [f acc key entry] sees each entry with the key of the folder holding it. A
        folder is visited before it is descended into, so a caller collecting keys
-       gets the marker too. *)
+       gets the marker too.
+
+       Folders are fetched ahead of their visit, at most the pool's width at
+       once and never under a slot since the reads inside take those, with a
+       stack pushed first-child-last so the fetch order is the depth-first visit
+       order. *)
     let fold_tree ?on_unusable ?refresh_index ?on_index ?slots ~folder_id ~key f
         acc =
+      let slots =
+        match slots with Some s -> s | None -> Lazy.force default_slots
+      in
+      let fetch folder_id =
+        children ?on_unusable ?refresh_index ?on_index ~slots ~folder_id ()
+      in
+      let width = Pools.width slots in
+      let ahead = Stack.create () and fetched = Hashtbl.create 16 in
+      let outstanding = ref 0 in
+      let fill () =
+        while !outstanding < width && not (Stack.is_empty ahead) do
+          let id = Stack.pop ahead in
+          incr outstanding;
+          Hashtbl.replace fetched id (fetch id)
+        done
+      in
+      let take folder_id =
+        match Hashtbl.find_opt fetched folder_id with
+          | Some p ->
+              Hashtbl.remove fetched folder_id;
+              decr outstanding;
+              fill ();
+              p
+          | None -> fetch folder_id
+      in
       let rec walk folder_id key acc =
-        let* entries =
-          children ?on_unusable ?refresh_index ?on_index ?slots ~folder_id ()
-        in
+        let* entries = take folder_id in
+        List.iter
+          (fun entry ->
+            match entry.body with
+              | Dir m -> Stack.push m.Folder.id ahead
+              | File _ -> ())
+          (List.rev entries);
+        fill ();
         fold_left_s
           (fun acc entry ->
             let* acc = f acc key entry in

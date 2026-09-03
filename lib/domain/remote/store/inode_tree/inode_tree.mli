@@ -63,7 +63,11 @@ module type S = sig
   (** Depth-first over the subtree under [folder_id]. [f acc rel entry] sees
       each entry with the real relative path of the folder holding it, [rel]
       naming that starting folder. A folder is visited before it is descended
-      into. *)
+      into.
+
+      Folders are fetched ahead of the visit, up to the width of [slots] at
+      once, so a deep tree does not pay a round trip per folder in series; the
+      visits themselves stay in order. *)
   val fold_tree :
     ?on_unusable:on_unusable ->
     ?refresh_index:bool ->

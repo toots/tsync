@@ -49,6 +49,29 @@ module Cf =
 
 module Tf = Inode_tree_lwt.Make (Cf)
 
+(* Every listing costs a round trip's worth of waiting and is counted, so a
+   walk shows how many it made and whether it made them in series. *)
+let listings = ref 0
+let listing_delay = 0.02
+
+module Slow : Backend_lwt.Store = struct
+  include Store
+
+  let list_prefix ?max_keys ~prefix () =
+    incr listings;
+    let* () = Lwt_unix.sleep listing_delay in
+    Store.list_prefix ?max_keys ~prefix ()
+end
+
+module Cs =
+  (val Fixture.conf ~domain:"testdom"
+         ~store:(module Slow : Backend_lwt.Store)
+         ~cache_root:root ~data_dir:root ~root ()
+      : Conf_lwt.S)
+
+module Ts = Inode_tree_lwt.Make (Cs)
+module Lk = Logical_key.Make (Cs)
+
 let ns id = C.domain_prefix ^ id ^ "/"
 
 let put id name body =
@@ -148,5 +171,77 @@ let () =
      in
      check "`Fail refuses the folder rather than shortening it" refused;
      broken := Stored_key.listed "";
+
+     case "a walk fetches folders ahead of visiting them, in visit order";
+     (* A root of eight folders holding seven each: 65 folders, 64 files. *)
+     let top = Stored_key.new_id () in
+     let mkdir parent name =
+       let id = Stored_key.new_id () in
+       let+ () =
+         put parent name (Folder.marker_to_string { Folder.name; id })
+       in
+       id
+     in
+     let* () =
+       Lwt_list.iter_s
+         (fun i ->
+           let* d = mkdir top (Printf.sprintf "d%d" i) in
+           let* () = put d "f" (manifest_body "f.txt") in
+           Lwt_list.iter_s
+             (fun j ->
+               let* e = mkdir d (Printf.sprintf "e%d" j) in
+               put e "f" (manifest_body "f.txt"))
+             (List.init 7 Fun.id))
+         (List.init 8 Fun.id)
+     in
+     let walk ~width =
+       let seen = ref [] in
+       let slots = Io_lwt.Bounded.create ~max:width () in
+       let+ () =
+         Ts.fold_tree ~slots ~folder_id:top ~key:Lk.root
+           (fun () key entry ->
+             let opens =
+               match entry.Inode_tree.body with
+                 | Inode_tree.Dir m ->
+                     Some
+                       (Logical_key.path (Logical_key.dir_in key m.Folder.name))
+                 | Inode_tree.File _ -> None
+             in
+             seen := (Logical_key.path key, opens) :: !seen;
+             Lwt.return_unit)
+           ()
+       in
+       List.rev !seen
+     in
+     listings := 0;
+     let started = Unix.gettimeofday () in
+     let* visits = walk ~width:8 in
+     let elapsed = Unix.gettimeofday () -. started in
+     let serial = 65. *. listing_delay in
+     check "every folder is listed once" (!listings = 65);
+     check "every entry is visited once" (List.length visits = 128);
+     check "and the listings overlapped"
+       (elapsed < serial /. 2.)
+       ~why:(fun () ->
+         Printf.sprintf "%.2fs for 65 listings of %.2fs" elapsed listing_delay);
+     (* Depth-first: each visit is in the innermost folder still open, and a
+        folder entry opens its folder for the visits that follow. *)
+     let depth_first =
+       let open_dirs = ref [""] in
+       List.for_all
+         (fun (dir, opens) ->
+           let rec close = function
+             | d :: rest when d <> dir -> close rest
+             | stack -> stack
+           in
+           open_dirs := close !open_dirs;
+           let ok = !open_dirs <> [] in
+           Option.iter (fun d -> open_dirs := d :: !open_dirs) opens;
+           ok)
+         visits
+     in
+     check "in depth-first order" depth_first;
+     let* single = walk ~width:1 in
+     check "and the visit order does not depend on the width" (visits = single);
      Lwt.return_unit);
-  report ~expected:10 ()
+  report ~expected:15 ()
