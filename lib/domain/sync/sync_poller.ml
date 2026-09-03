@@ -51,11 +51,34 @@ struct
        something that fails without taking any time would otherwise spin. *)
     let retry_floor = 2.
 
+    (* How long a peer's change may go unseen when its cursor bump never lands
+       or lands behind a later one from another of its processes. The wait for
+       the cursor is raced against it, and losing means reading the journal
+       regardless of what the cursor says.
+
+       ponytail: one listing per client per minute while nothing changes; an
+       hour or a jittered interval if a fleet of idle clients ever shows up in a
+       store's request bill. *)
+    let sweep_interval = 60.
+
     let start ~on_changed () =
       Io.async (fun () ->
           let step () =
-            let* () = Js.wait_cursor_change !last_version in
-            let+ (_ : int) = sync_once ~on_changed () in
+            let* woke =
+              Io.catch
+                (fun () ->
+                  let+ () =
+                    Clock.with_timeout sweep_interval (fun () ->
+                        Js.wait_cursor_change !last_version)
+                  in
+                  true)
+                (fun exn ->
+                  if Clock.is_timeout exn then Io.return false else Io.fail exn)
+            in
+            let+ (_ : int) =
+              if woke then sync_once ~on_changed ()
+              else Rp.apply_foreign ~on_changed ()
+            in
             ()
           in
           let rec loop () =
