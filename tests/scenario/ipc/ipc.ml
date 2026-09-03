@@ -102,6 +102,21 @@ let changes_scenarios : scenario list =
       name = "foreign rmdir carries the folder id";
       steps = [Mkdir "gone"; Drain; Rmdir "gone"; Drain];
     };
+    (* Described after the folder moved: the op spells a path that is gone, and
+       has to be named by the id the folder kept, or the whole page is stale
+       and a reader re-lists — which never removes what it already holds. *)
+    {
+      name = "foreign move into a folder renamed since";
+      steps =
+        [
+          Mkdir "sub";
+          Write { path = "f4.txt"; content = "moved" };
+          Drain;
+          Rename { src = "f4.txt"; dst = "sub/f4.txt" };
+          Rename { src = "sub"; dst = "sub2" };
+          Drain;
+        ];
+    };
     {
       name = "foreign dir rename carries the folder id";
       steps =

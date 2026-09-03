@@ -347,11 +347,13 @@ module Make
      into items without a call per change.
 
      A removal has nothing left to read, so it carries the naming alone. That is
-     all a deletion needs: what it names is going away. *)
-  let op_to_json ~lookup ~lookup_removed op =
-    let file_ref_removed = file_ref ~lookup:lookup_removed in
-    let dir_ref_removed = dir_ref ~lookup:lookup_removed in
-    let parent_ref_removed = parent_ref ~lookup:lookup_removed in
+     all a deletion needs: what it names is going away.
+
+     Every end is named through the lookup that outlives a path: an op is read
+     back after the mirror has moved on, and the folder it spelled may since
+     have been renamed or removed. The id it kept is what the reader knows the
+     folder by, so the op names the right item either way. *)
+  let op_to_json ~lookup op =
     let file_ref = file_ref ~lookup and dir_ref = dir_ref ~lookup in
     let parent_ref = parent_ref ~lookup in
     let described ~self ~parent ~fields key =
@@ -368,7 +370,15 @@ module Make
                     Lwt.return_some
                       (Item_row.dir_with_id ~self:(`Dir id) ~parent
                          ~name:(Logical_key.leaf key) id)
-                | _ -> R.of_key key
+                | _ ->
+                    (* The item as it is now, found by its reference: the path
+                       the op spelled may have moved with its folder since. *)
+                    let* current =
+                      match self with
+                        | Some r -> resolve r
+                        | None -> Lwt.return_none
+                    in
+                    R.of_key (Option.value current ~default:key)
             in
             let item =
               match row with
@@ -391,8 +401,8 @@ module Make
           described ~self ~parent ~fields:[("op", `String "put")] key
       | `Delete rel ->
           let key = Lk.file rel in
-          let* self = file_ref_removed key in
-          let* parent = parent_ref_removed key in
+          let* self = file_ref key in
+          let* parent = parent_ref key in
           removed ~self ~parent ~fields:[("op", `String "delete")] key
       | `Mkdir (rel, id) ->
           let key = Lk.dir rel in
@@ -401,8 +411,8 @@ module Make
           described ~self ~parent ~fields:[("op", `String "mkdir")] key
       | `Rmdir (rel, id) ->
           let key = Lk.dir rel in
-          let* self = dir_ref_removed key id in
-          let* parent = parent_ref_removed key in
+          let* self = dir_ref key id in
+          let* parent = parent_ref key in
           removed ~self ~parent
             ~fields:([("op", `String "rmdir")] @ dir_id_field id)
             key
@@ -493,10 +503,7 @@ module Make
               match List.rev entries with (k, _) :: _ -> Some k | [] -> anchor
             in
             let+ described =
-              Lwt_list.map_s
-                (op_to_json ~lookup:lookup_folder
-                   ~lookup_removed:R.removed_folder_id)
-                ops
+              Lwt_list.map_s (op_to_json ~lookup:R.removed_folder_id) ops
             in
             (* A folder this client has no id for at all — the mirror and the folder
            index disagreeing, not a poller yet to catch up. The caller re-lists,

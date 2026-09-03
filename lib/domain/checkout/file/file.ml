@@ -578,27 +578,33 @@ struct
           Js.bump_cursor ek)
 
     (* Adopt the id from the backend marker: resolving the folder locally would
-       mint a different one and split the namespace in two. *)
-    let adopt_folder_id rel =
+       mint a different one and split the namespace in two. The store's marker
+       settles a concurrent create; the id the op carries stands in when the
+       store no longer has a marker under this name -- the folder was renamed
+       before this client caught up -- or the folder is id-less until a full
+       sync and nothing under it can be named. *)
+    let adopt_folder_id ?id rel =
       if rel = "" then return_unit
-      else
+      else (
+        let write id =
+          Folders.write ~cache_root:C.cache_root ~domain_name:C.domain_name
+            (Lk.dir rel)
+            { Folder.name = Filename.basename rel; id }
+        in
+        let from_op () =
+          match id with Some id -> write id | None -> return_unit
+        in
         let* marker_key = folder_marker_bkey (Lk.dir rel) in
         match marker_key with
-          | None -> return_unit
+          | None -> from_op ()
           | Some marker_key ->
               Io.catch
                 (fun () ->
                   let* data = St.get_object ~bkey:marker_key in
                   match Folder.marker_of_string data with
-                    | Some m ->
-                        Folders.write ~cache_root:C.cache_root
-                          ~domain_name:C.domain_name (Lk.dir rel)
-                          {
-                            Folder.name = Filename.basename rel;
-                            id = m.Folder.id;
-                          }
-                    | None -> return_unit)
-                (fun _ -> return_unit)
+                    | Some m -> write m.Folder.id
+                    | None -> from_op ())
+                (fun _ -> from_op ()))
 
     (* A [Put] materialises the directories above it as a side effect of writing
        the manifest, and those carry no id: only a [Mkdir] op adopts one, and the
@@ -678,13 +684,10 @@ struct
             staged_aside key (fun () ->
                 ignore (cancel_upload key);
                 clear_local key)
-        (* The op's id is ignored: on a concurrent create the backend marker
-           settles which id wins. The op carries it for readers naming a folder
-           the mirror no longer has. *)
-        | `Mkdir (rel, _) ->
+        | `Mkdir (rel, id) ->
             let* () = Ck.create_dir (Lk.dir rel) in
             let* () = adopt_ancestor_ids rel in
-            adopt_folder_id rel
+            adopt_folder_id ?id rel
         | `Rmdir (rel, _) -> Ck.delete_dir (Lk.dir rel)
         | `Rename { Journal.src; dst; is_dir = true; _ } ->
             let src_key = Lk.dir src in
