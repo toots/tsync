@@ -63,7 +63,11 @@ module Make (Io : Io.S) (Clock : Clock.S with type 'a io := 'a Io.t) :
                same number of retries and very different problems. *)
             Metrics.add_retry 1;
             if Clock.is_timeout exn then Metrics.add_timeout 1;
-            Log.warn "%s %s: %s; retrying (%d/%d) in %.1fs" name op (reason exn)
+            (* A first or second attempt lost is the link's ordinary weather and
+               is counted; from the third on it is worth a line at default
+               verbosity. *)
+            (if attempt < 3 then Log.info else Log.warn)
+              "%s %s: %s; retrying (%d/%d) in %.1fs" name op (reason exn)
               attempt max_attempts delay;
             Io.bind (Clock.sleep delay) (fun () -> go (attempt + 1))
         | exn ->

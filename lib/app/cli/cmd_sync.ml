@@ -136,9 +136,14 @@ let cmd : unit Cmd.t =
              Option.iter (Log.info "full resync: %s") reason
            end
          in
-         let on_manifest rel =
+         (* A line per thousand rather than per manifest: a large domain is
+            hundreds of thousands, and the live report carries the rest. *)
+         let on_manifest _ =
            incr manifests;
-           if !verbose then Log.info "manifest %s" rel
+           if !verbose && !manifests mod 1000 = 0 then
+             Log.info "%d manifests, %d folders, %d failed; at %s" !manifests
+               !folders !failures
+               (Option.value !current ~default:"/")
          in
          let+ outcome =
            R.run ~full ~progress ~on_manifest ~on_decision ~parallelism ~notify

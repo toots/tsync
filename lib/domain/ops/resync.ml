@@ -47,11 +47,17 @@ struct
       let slots = Pools.create ~name:"resync" ~max:(max 1 parallelism) () in
       let count = ref 0 and failed = ref 0 in
       (* Counted, so a store whose manifests all fail to parse cannot resync
-         "successfully" writing nothing. *)
-      let unusable bkey reason =
+         "successfully" writing nothing; a sample is kept for one line at the
+         end rather than a line each, a lost link failing folders by the
+         hundred. *)
+      let sample = ref [] and sample_size = 10 in
+      let note bkey what =
         incr failed;
-        Log.warn "resync %s: %s"
-          (Stored_key.to_string bkey)
+        if List.length !sample < sample_size then
+          sample := (Stored_key.to_string bkey ^ ": " ^ what) :: !sample
+      in
+      let unusable bkey reason =
+        note bkey
           (match reason with
             | `Unreadable exn -> Printexc.to_string exn
             | `Unclassifiable (Manifest.Malformed m) ->
@@ -74,10 +80,7 @@ struct
         Io.catch
           (fun () -> apply key entry)
           (fun exn ->
-            incr failed;
-            Log.warn "resync %s: %s"
-              (Stored_key.to_string entry.Inode_tree.bkey)
-              (Printexc.to_string exn);
+            note entry.Inode_tree.bkey (Printexc.to_string exn);
             Io.return ())
       in
       let+ () =
@@ -87,6 +90,9 @@ struct
           ~refresh_index:(not C.read_only) ~slots ~folder_id:Stored_key.root_id
           ~key:Lk.root visit ()
       in
+      if !failed > 0 then
+        Log.warn "resync: %d unreadable, e.g.\n  %s" !failed
+          (String.concat "\n  " (List.rev !sample));
       (!count, !failed)
 
     let full_resync ~parallelism ~progress ~on_manifest ~notify ~handled reason
