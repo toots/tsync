@@ -173,8 +173,9 @@ type step =
   | ReclaimStaged
       (** Sweep staged bodies nothing references, as a restart does. *)
   | ClearCache
-      (** Wipe the local cache the way a full resync does — manifest mirror,
-          chunk store and scratch — keeping only the staged tree. *)
+      (** Wipe the local cache — manifest mirror, folder index, chunk store and
+          applied entries — keeping only the staged tree, which is what a client
+          that lost its cache still holds. *)
   | OnSecondary of step
       (** Apply a backend-damage step (delete/corrupt chunk, delete manifest) to
           the secondary backend instead of the primary. *)

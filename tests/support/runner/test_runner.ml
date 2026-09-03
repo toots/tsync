@@ -1119,8 +1119,10 @@ let setup_client (module C : Conf_lwt.S) root staging_prefix =
         in
         ()
     | ClearCache ->
-        Cache_layout_lwt.clear ~cache_root:C.cache_root
-          ~domain_name:C.domain_name
+        List.iter
+          (fun dir -> rm_rf (dir ~cache_root:C.cache_root C.domain_name))
+          Cache_layout.[manifests_dir; folders_dir; chunks_dir; applied_dir];
+        Lwt.return_unit
   in
   (* The daemon's order: the queue settles, then the bumps its uploads owe are
      published. A step must have moved the cursor by the time it returns, since
