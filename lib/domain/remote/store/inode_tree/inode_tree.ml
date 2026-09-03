@@ -216,7 +216,9 @@ struct
       in
       (* A batch is all or nothing, so one object that cannot be read would cost
          every sibling it was asked for alongside. Only a caller that wanted the
-         rest pays this second pass. *)
+         rest pays this second pass, and only for a store's refusal: a link that
+         stopped answering would lose every key the same way, one retry loop at
+         a time. *)
       let key_by_key () =
         Pools.map_with slots
           (fun (e : Backend.file_entry) ->
@@ -231,7 +233,10 @@ struct
       let* read =
         match on_unusable with
           | `Fail -> in_one_batch ()
-          | `Skip _ -> Io.catch in_one_batch (fun _ -> key_by_key ())
+          | `Skip _ ->
+              Io.catch in_one_batch (fun exn ->
+                  if Backend.classify exn = Retry.Permanent then key_by_key ()
+                  else Io.fail exn)
       in
       (* Classified once, then reported and filtered from the same list: two
          passes over [classify] would be the same rule answered twice. *)
@@ -271,7 +276,11 @@ struct
        Folders are fetched ahead of their visit, at most the pool's width at
        once and never under a slot since the reads inside take those, with a
        stack pushed first-child-last so the fetch order is the depth-first visit
-       order. *)
+       order.
+
+       A folder the link lost is walked again after everything else, and only a
+       second loss is reported, so a burst of failures costs a retry rather than
+       the run. *)
     let fold_tree ?on_unusable ?refresh_index ?on_index ?slots ~folder_id ~key f
         acc =
       let slots =
@@ -299,24 +308,45 @@ struct
               p
           | None -> fetch folder_id
       in
-      let rec walk folder_id key acc =
-        let* entries = take folder_id in
-        List.iter
-          (fun entry ->
-            match entry.body with
-              | Dir m -> Stack.push m.Folder.id ahead
-              | File _ -> ())
-          (List.rev entries);
-        fill ();
-        fold_left_s
-          (fun acc entry ->
-            let* acc = f acc key entry in
-            match entry.body with
-              | Dir m ->
-                  walk m.Folder.id (Logical_key.dir_in key m.Folder.name) acc
-              | File _ -> Io.return acc)
-          acc entries
+      let lost = ref [] in
+      let rec walk ~again folder_id key acc =
+        let* entries =
+          Io.catch
+            (fun () -> Io.map Option.some (take folder_id))
+            (fun exn ->
+              match on_unusable with
+                | Some (`Skip report)
+                  when Backend.classify exn = Retry.Transient ->
+                    if again then
+                      report (namespace_prefix folder_id) (`Unreadable exn)
+                    else lost := (folder_id, key) :: !lost;
+                    Io.return None
+                | _ -> Io.fail exn)
+        in
+        match entries with
+          | None -> Io.return acc
+          | Some entries ->
+              List.iter
+                (fun entry ->
+                  match entry.body with
+                    | Dir m -> Stack.push m.Folder.id ahead
+                    | File _ -> ())
+                (List.rev entries);
+              fill ();
+              fold_left_s
+                (fun acc entry ->
+                  let* acc = f acc key entry in
+                  match entry.body with
+                    | Dir m ->
+                        walk ~again m.Folder.id
+                          (Logical_key.dir_in key m.Folder.name)
+                          acc
+                    | File _ -> Io.return acc)
+                acc entries
       in
-      walk folder_id key acc
+      let* acc = walk ~again:false folder_id key acc in
+      fold_left_s
+        (fun acc (folder_id, key) -> walk ~again:true folder_id key acc)
+        acc (List.rev !lost)
   end
 end

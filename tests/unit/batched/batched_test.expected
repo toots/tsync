@@ -9,4 +9,8 @@ with one, the whole run is a request: ok
 300 keys is two requests, not one: ok
 and so is 12 MB of bodies: ok
 
-6 check(s), 0 failure(s)
+=== a refused batch is asked key by key; a lost one is not
+a store's refusal costs a read per key: ok
+a link's loss reaches the caller, with no key asked: ok
+
+8 check(s), 0 failure(s)

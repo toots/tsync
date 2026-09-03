@@ -27,10 +27,17 @@ a chunk survives the rebuild: ok
 a manifest the store no longer has is dropped: ok
 and one it still has is kept: ok
 
+=== a batch the link lost is asked again, not given up on
+  full(1 manifests, 0 failed, --full flag)
+the walk reached everything: ok
+and the bookmark moved: ok
+  full(0 manifests, 1 failed, --full flag)
+lost twice, the folder is counted against the run: ok
+
 === a walk that did not reach everything leaves the bookmark alone
   full(1 manifests, 1 failed, --full flag)
 the failure is counted: ok
 and the bookmark did not move: ok
 nor was anything swept: ok
 
-17 check(s), 0 failure(s)
+20 check(s), 0 failure(s)

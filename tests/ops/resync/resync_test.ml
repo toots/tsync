@@ -21,6 +21,11 @@ module Store =
    the suite must behave the same as root. *)
 let broken = ref (Stored_key.listed "")
 
+(* Batches lost to the link before one is answered, so a walk has a failure to
+   retry that is nobody's refusal. A refused key still fails the batch whole, as
+   a store's own batch would. *)
+let lose = ref 0
+
 module Flaky : Backend_lwt.Store = struct
   include Store
 
@@ -32,7 +37,19 @@ module Flaky : Backend_lwt.Store = struct
   let get_opt ~key () =
     if key = !broken then refuse key else Store.get_opt ~key ()
 
-  let get_many = None
+  let get_many =
+    Some
+      (fun ~entries () ->
+        if !lose > 0 then begin
+          decr lose;
+          Lwt.fail (Retry.failed ~kind:Retry.Transient ~op:"get_many" "502")
+        end
+        else
+          Lwt_list.map_s
+            (fun (e : Backend.file_entry) ->
+              let+ body = get_opt ~key:e.Backend.key () in
+              (e.Backend.key, body))
+            entries)
 end
 
 module C =
@@ -150,6 +167,26 @@ let () =
      check "and one it still has is kept"
        (Sys.file_exists (mirror_path "a.txt"));
 
+     case "a batch the link lost is asked again, not given up on";
+     let before = Fs.read_last_sync_key () in
+     lose := 1;
+     let* outcome = run ~full:true () in
+     step "%s" (describe outcome);
+     check "the walk reached everything"
+       (match outcome with
+         | Resync.Full { failed; manifests; _ } -> failed = 0 && manifests = 1
+         | _ -> false)
+       ~why:(fun () -> describe outcome);
+     check "and the bookmark moved" (Fs.read_last_sync_key () <> before);
+     lose := 2;
+     let* outcome = run ~full:true () in
+     step "%s" (describe outcome);
+     check "lost twice, the folder is counted against the run"
+       (match outcome with
+         | Resync.Full { failed; _ } -> failed = 1
+         | _ -> false)
+       ~why:(fun () -> describe outcome);
+
      case "a walk that did not reach everything leaves the bookmark alone";
      plant (mirror_path "gone.txt") (manifest_body "gone.txt");
      let before = Fs.read_last_sync_key () in
@@ -170,5 +207,5 @@ let () =
        ~why:(fun () -> "a partial walk advanced the mark");
      check "nor was anything swept" (Sys.file_exists (mirror_path "gone.txt"));
 
-     report ~expected:17 ();
+     report ~expected:20 ();
      Lwt.return_unit)

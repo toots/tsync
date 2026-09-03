@@ -196,7 +196,11 @@ struct
          asks are per key and sequential, which is what a miss costs: a batch's
          keys come from a listing of the very store being asked, so a miss is the
          rare case, and paying [read] for it keeps the archive fallback that makes
-         a miss trustworthy. *)
+         a miss trustworthy.
+
+         A batch the store refused is asked key by key; a batch the link lost is
+         not, since every key would be lost the same way, one retry loop at a
+         time. *)
       let get_many =
         let native =
           match readable with
@@ -214,11 +218,15 @@ struct
                     Io.catch
                       (fun () -> native ~entries ())
                       (fun exn ->
-                        Log.warn
-                          "domain store get_many: %s unavailable (%s); asking \
-                           key by key"
-                          name (Printexc.to_string exn);
-                        Io.return [])
+                        if Backend.classify exn = Retry.Transient then
+                          Io.fail exn
+                        else begin
+                          Log.warn
+                            "domain store get_many: %s refused (%s); asking \
+                             key by key"
+                            name (Printexc.to_string exn);
+                          Io.return []
+                        end)
                   in
                   let held = Hashtbl.create (List.length entries) in
                   List.iter

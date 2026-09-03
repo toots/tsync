@@ -67,7 +67,11 @@ module type S = sig
 
       Folders are fetched ahead of the visit, up to the width of [slots] at
       once, so a deep tree does not pay a round trip per folder in series; the
-      visits themselves stay in order. *)
+      visits themselves stay in order.
+
+      Under [`Skip], a folder whose fetch failed transiently is walked again
+      after the rest, and only a second failure is reported, under the folder's
+      namespace key. *)
   val fold_tree :
     ?on_unusable:on_unusable ->
     ?refresh_index:bool ->

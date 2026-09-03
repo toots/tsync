@@ -70,6 +70,38 @@ end
 module Bp = Backend_lwt.Batched (Plain)
 module Bn = Backend_lwt.Batched (Native)
 
+(* A batch that fails the way the caller says, behind a composite: what the
+   composite does about it is the question. *)
+let refusal : exn option ref = ref None
+
+module Failing : Backend_lwt.Store = struct
+  include Base
+
+  let fast_read = false
+
+  let get_many =
+    Some
+      (fun ~entries () ->
+        incr batches;
+        match !refusal with
+          | Some exn -> Lwt.fail exn
+          | None ->
+              Lwt.return
+                (List.map
+                   (fun (e : Backend.file_entry) ->
+                     (e.Backend.key, body e.Backend.key))
+                   entries))
+
+  let local_path = None
+end
+
+module Composite =
+  (val Domain_store_lwt.make
+         ~mains:[{ Domain_store_lwt.name = "main"; backend = (module Failing) }]
+         ~targets:[] ~archives:[])
+
+module Bc = Backend_lwt.Batched (Composite)
+
 let entry ?(size = 1) key =
   Backend.{ key; size; last_modified = 0.; etag = None }
 
@@ -117,5 +149,24 @@ let () =
      in
      let* _ = Bn.get_many ~entries:big () in
      check "and so is 12 MB of bodies" (!batches = 2);
+
+     case "a refused batch is asked key by key; a lost one is not";
+     reads := 0;
+     refusal := Some (Retry.failed ~kind:Retry.Permanent ~op:"get_many" "400");
+     let* refused = Bc.get_many ~entries:mixed () in
+     check "a store's refusal costs a read per key"
+       (rendered refused = rendered with_ && !reads = 3);
+     reads := 0;
+     refusal := Some (Retry.failed ~kind:Retry.Transient ~op:"get_many" "502");
+     let* lost =
+       Lwt.catch
+         (fun () ->
+           let+ _ = Bc.get_many ~entries:mixed () in
+           false)
+         (fun _ -> Lwt.return_true)
+     in
+     check "a link's loss reaches the caller, with no key asked"
+       (lost && !reads = 0);
+     refusal := None;
      Lwt.return_unit);
-  report ~expected:6 ()
+  report ~expected:8 ()
