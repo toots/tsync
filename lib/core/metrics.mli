@@ -36,13 +36,16 @@ val upload_rate : unit -> float
 val download_rate : unit -> float
 val hash_rate : unit -> float
 
-(** Backend requests retried, requests that timed out (a subset of the retried),
-    and requests that reached their caller as a failure. A run that recovered
-    from everything still reports what it recovered from. *)
-val add_retry : int -> unit
+(** Backend requests sent (every attempt counted), requests retried, requests
+    that timed out (a subset of the retried), and requests that reached their
+    caller as a failure. A run that recovered from everything still reports what
+    it recovered from. *)
+val add_request : int -> unit
 
+val add_retry : int -> unit
 val add_timeout : int -> unit
 val add_failure : int -> unit
+val requests : unit -> int
 val retries : unit -> int
 val timeouts : unit -> int
 val failures : unit -> int

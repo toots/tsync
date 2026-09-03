@@ -143,6 +143,7 @@ struct
      redial. *)
   let call t ~headers ~meth ?(body = Bigstring.empty) uri =
     let attempt cache =
+      Metrics.add_request 1;
       Clock.with_timeout t.timeout (fun () ->
           let* headers = headers () in
           Pool.call cache ~headers ~body meth uri)

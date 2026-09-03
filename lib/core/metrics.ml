@@ -54,12 +54,15 @@ let hash_rate () = rate hashed_c
 
 (* Counted where the retry happens rather than where a caller notices, so a run
    that recovered every time still says how hard it worked to. *)
+let requests_c = make ()
 let retries_c = make ()
 let timeouts_c = make ()
 let failures_c = make ()
+let add_request n = add requests_c n
 let add_retry n = add retries_c n
 let add_timeout n = add timeouts_c n
 let add_failure n = add failures_c n
+let requests () = requests_c.total
 let retries () = retries_c.total
 let timeouts () = timeouts_c.total
 let failures () = failures_c.total

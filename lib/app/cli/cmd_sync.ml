@@ -53,21 +53,45 @@ let cmd : unit Cmd.t =
     in
     let module R = Resync_lwt.Make (C) in
     let phase = ref "starting" and current = ref None in
-    let manifests = ref 0 and failures = ref 0 in
+    let manifests = ref 0 and failures = ref 0 and folders = ref 0 in
     (* An incremental pass counts no manifests, and a fixed set of counters
        would print zeroes reading as "nothing happened" rather than as "this
        pass does not count that". *)
     let rebuilding = ref false in
+    let started = Unix.gettimeofday () in
+    let phase_started = ref started in
+    (* Where a slow run spends its time is the number every change to it is
+       judged by, so each phase reports its own duration as it ends. *)
+    let end_phase () =
+      let now = Unix.gettimeofday () in
+      if !verbose && !phase <> "starting" then
+        Log.info "%s: %.1fs" !phase (now -. !phase_started);
+      phase_started := now
+    in
     let progress =
       {
         Resync.on_phase =
           (fun p ->
+            end_phase ();
             phase := p;
             if p = "clearing the cache" then rebuilding := true;
             if p = "draining uploads" && !verbose then
               Log.info "draining upload queue");
-        on_current = (fun c -> current := c);
+        on_current =
+          (fun c ->
+            if c <> None then incr folders;
+            current := c);
       }
+    in
+    let summary () =
+      end_phase ();
+      if !verbose then
+        Log.info
+          "%.1fs total: %d folders, %d manifests, %d failed; %d requests, %d \
+           retries, %d timeouts, %d failures"
+          (Unix.gettimeofday () -. started)
+          !folders !manifests !failures (Metrics.requests ())
+          (Metrics.retries ()) (Metrics.timeouts ()) (Metrics.failures ())
     in
     let notify () =
       try
@@ -122,6 +146,7 @@ let cmd : unit Cmd.t =
          match outcome with
            | Resync.Full { manifests = n; failed; reason = _ } ->
                failures := failed;
+               summary ();
                Printf.printf "full resync: %d manifest%s downloaded%s\n" n
                  (if n = 1 then "" else "s")
                  (if failed > 0 then
@@ -131,6 +156,7 @@ let cmd : unit Cmd.t =
                   else "");
                if failed > 0 then 1 else 0
            | Resync.Incremental { applied } ->
+               summary ();
                (match R.bookmark () with
                  | Some k when !verbose ->
                      Log.info "applied through %s"
