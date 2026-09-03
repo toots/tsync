@@ -247,6 +247,28 @@ struct
                             (e.Backend.key, body))
                     entries)
 
+      (* The first readable store's, like [get_many], and a refusal answers
+         nothing so the caller asks folder by folder; a loss reaches it. *)
+      let list_many =
+        match readable with
+          | [] -> None
+          | s :: _ ->
+              let module B = (val s.backend : Store) in
+              Option.map
+                (fun native ~prefixes () ->
+                  Io.catch
+                    (fun () -> native ~prefixes ())
+                    (fun exn ->
+                      if Backend.classify exn = Retry.Transient then Io.fail exn
+                      else begin
+                        Log.warn
+                          "domain store list_many: %s refused (%s); asking \
+                           folder by folder"
+                          s.name (Printexc.to_string exn);
+                        Io.return []
+                      end))
+                B.list_many
+
       let get ~key () =
         let* d = read "get" (fun (module B : Store) -> B.get_opt ~key ()) in
         match d with

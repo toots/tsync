@@ -30,6 +30,7 @@ struct
     secret : string;
     client : Hc.t;
     mutable caps_cache : Backend.caps Io.t option;
+    mutable no_list_many : bool;
   }
 
   let code = Http_client.code
@@ -165,6 +166,27 @@ struct
     if is_ok resp then
       Http_proxy.Wire.bodies_of_string ~keys (Bigstring.to_string answer)
     else raise (failed "get_many" (code resp) (Bigstring.to_string answer))
+
+  (* Remembered once refused: a peer too old for the route answers 404 to every
+     ask, and a walk asks once per batch of folders. *)
+  let list_many t ~prefixes () =
+    if t.no_list_many then Io.return []
+    else (
+      let body =
+        Yojson.Safe.to_string (`List (List.map (fun p -> `String p) prefixes))
+      in
+      let uri = Uri.with_path t.base_uri "/children-multi" in
+      let+ resp, answer =
+        call_retry t ~meth:`POST ~body:(Bigstring.of_string body) "list_many"
+          uri
+      in
+      if is_ok resp then
+        Http_proxy.Wire.children_of_string (Bigstring.to_string answer)
+      else if code resp = 404 then begin
+        t.no_list_many <- true;
+        []
+      end
+      else raise (failed "list_many" (code resp) (Bigstring.to_string answer)))
 
   let copy t ~src_key ~dst_key () =
     let uri =
@@ -309,6 +331,7 @@ struct
           Hc.create ~name:"http-proxy" ~timeout:request_timeout
             ~classify:Backend.classify ();
         caps_cache = None;
+        no_list_many = false;
       }
     in
     (* Every key the store is asked about is rendered here, this module being the
@@ -333,6 +356,7 @@ struct
 
       let list_prefix ?max_keys ~prefix () = list_all t ?max_keys ~prefix ()
       let get_many = Some (fun ~entries () -> get_many t ~entries ())
+      let list_many = Some (fun ~prefixes () -> list_many t ~prefixes ())
 
       (* The peer owns that store and whatever checks it; asking it to start a
          sweep on our behalf is a decision for whoever administers it. *)

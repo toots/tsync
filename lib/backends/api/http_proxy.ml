@@ -117,6 +117,70 @@ module Wire = struct
       answered;
     Buffer.contents buf
 
+  let add_field buf s =
+    add_be32 buf (String.length s);
+    Buffer.add_string buf s
+
+  (* Per folder: its prefix, its listing as JSON, then a count and a key with a
+     body or [absent] for each child object answered. *)
+  let children_to_string answered =
+    let buf = Buffer.create 4096 in
+    List.iter
+      (fun (prefix, (c : Backend.children)) ->
+        add_field buf prefix;
+        add_field buf (entries_to_json c.Backend.listed);
+        add_be32 buf (List.length c.Backend.bodies);
+        List.iter
+          (fun (key, body) ->
+            add_field buf (Stored_key.to_string key);
+            match body with
+              | None -> add_be32 buf absent
+              | Some b ->
+                  add_be32 buf (Bigstring.length b);
+                  Buffer.add_string buf (Bigstring.to_string b))
+          c.Backend.bodies)
+      answered;
+    Buffer.contents buf
+
+  let children_of_string s =
+    let len = String.length s in
+    let short () = failwith "children-multi: truncated answer" in
+    let count pos =
+      if pos + 4 > len then short ();
+      (be32_at s pos, pos + 4)
+    in
+    (* Compared against what is left rather than added to [pos]: a hostile
+       length near [max_int] overflows the sum on a 32-bit build. *)
+    let field pos =
+      let n, pos = count pos in
+      if n < 0 || n > len - pos then short ();
+      (String.sub s pos n, pos + n)
+    in
+    let rec bodies n pos acc =
+      if n = 0 then (List.rev acc, pos)
+      else (
+        let key, pos = field pos in
+        let size, pos = count pos in
+        let key = Stored_key.listed key in
+        if size = absent then bodies (n - 1) pos ((key, None) :: acc)
+        else begin
+          if size < 0 || size > len - pos then short ();
+          let body = Bigstring.of_string (String.sub s pos size) in
+          bodies (n - 1) (pos + size) ((key, Some body) :: acc)
+        end)
+    in
+    let rec folders pos acc =
+      if pos = len then List.rev acc
+      else (
+        let prefix, pos = field pos in
+        let listed, pos = field pos in
+        let n, pos = count pos in
+        let bodies, pos = bodies n pos [] in
+        folders pos
+          ((prefix, { Backend.listed = entries_of_json listed; bodies }) :: acc))
+    in
+    folders 0 []
+
   let bodies_of_string ~keys s =
     let len = String.length s in
     let short () =

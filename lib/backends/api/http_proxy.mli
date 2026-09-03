@@ -81,4 +81,13 @@ module Wire : sig
   (** Raises [Failure] on a body that does not frame [keys] exactly. *)
   val bodies_of_string :
     keys:Stored_key.t list -> string -> (Stored_key.t * Bigstring.t option) list
+
+  (** Many folders' children, each self-describing: the folder's prefix, its
+      listing as JSON, then a key and a body (or the all-ones length) for every
+      child object answered. Self-describing where {!bodies_to_string} is not,
+      because the answer may stop short of the folders asked for. *)
+  val children_to_string : (string * Backend.children) list -> string
+
+  (** Raises [Failure] on a body that does not frame whole folders. *)
+  val children_of_string : string -> (string * Backend.children) list
 end

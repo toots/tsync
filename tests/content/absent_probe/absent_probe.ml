@@ -28,6 +28,7 @@ module Store : Backend_lwt.Store = struct
     Disk.get_opt ~key ()
 
   let get_many = None
+  let list_many = None
 end
 
 module C =

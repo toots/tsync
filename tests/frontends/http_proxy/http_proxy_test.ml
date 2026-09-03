@@ -298,6 +298,70 @@ let () =
       Bigstring.empty
     = Http_proxy_frontend.Bad);
 
+  (* A batch of folders routes and is authorised by its first prefix and then
+     checked whole, like the other bulk ops, and holds a read slot: it carries
+     bodies. *)
+  let children_op prefixes =
+    Http_proxy_frontend.parse_op `POST
+      (Uri.of_string "/children-multi")
+      (Bigstring.of_string
+         (Yojson.Safe.to_string
+            (`List (List.map (fun p -> `String p) prefixes))))
+  in
+  let two = ["tsync/one/manifests/a/"; "tsync/one/manifests/b/"] in
+  assert (children_op two = Http_proxy_frontend.Children_multi two);
+  assert (
+    Http_proxy_frontend.route_key (children_op two)
+    = Some "tsync/one/manifests/a/");
+  assert (Http_proxy_frontend.op_keys (children_op two) = two);
+  assert (Http_proxy_frontend.data_kind (children_op two) = `Get);
+  assert (
+    children_op (List.init (Backend.max_batch_folders + 1) string_of_int)
+    = Http_proxy_frontend.Bad);
+  (* The answer frames whole folders, an absent body included, and reads back
+     as it was written. *)
+  let entry key size =
+    Backend.
+      { key = Stored_key.listed key; size; last_modified = 1.; etag = None }
+  in
+  let answered =
+    [
+      ( "tsync/one/manifests/a/",
+        {
+          Backend.listed =
+            [
+              entry "tsync/one/manifests/a/x" 5;
+              entry "tsync/one/manifests/a/y" 0;
+            ];
+          bodies =
+            [
+              ( Stored_key.listed "tsync/one/manifests/a/x",
+                Some (Bigstring.of_string "hello") );
+              (Stored_key.listed "tsync/one/manifests/a/y", None);
+            ];
+        } );
+      ("tsync/one/manifests/b/", { Backend.listed = []; bodies = [] });
+    ]
+  in
+  let rendered =
+    List.map (fun (p, (c : Backend.children)) ->
+        ( p,
+          c.Backend.listed,
+          List.map
+            (fun (k, b) -> (k, Option.map Bigstring.to_string b))
+            c.Backend.bodies ))
+  in
+  assert (
+    rendered
+      (Http_proxy.Wire.children_of_string
+         (Http_proxy.Wire.children_to_string answered))
+    = rendered answered);
+  assert (Http_proxy.Wire.children_of_string "" = []);
+  assert (
+    match Http_proxy.Wire.children_of_string "\000\000\000\009tsync" with
+      | exception Failure _ -> true
+      | _ -> false);
+
   assert (pick "tsync/two/manifests/x" "one" = Some "two");
   (* No route here serves /s/, so nothing on this listener reads the manifest
      back and the signer's own store is where it belongs. *)

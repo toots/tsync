@@ -12,6 +12,7 @@ open Check
 
 let asked : Uri.t list ref = ref []
 let answer_header : (string * string) list ref = ref []
+let answer_status : Cohttp.Code.status_code ref = ref `OK
 
 (* Answers whatever the test has set, recording what it was asked, so the query
    the driver builds is asserted rather than assumed. *)
@@ -23,7 +24,7 @@ module Fake_http = struct
   let respond uri =
     asked := uri :: !asked;
     Lwt.return
-      ( Cohttp.Response.make ~status:`OK
+      ( Cohttp.Response.make ~status:!answer_status
           ~headers:(Cohttp.Header.of_list !answer_header)
           (),
         Bigstring.empty )
@@ -84,4 +85,17 @@ let () =
      (* Without this the caller above spins as fast as the link allows. *)
      check "an answer that cost no time is floored before returning"
        (not (promptly seconds));
+
+     case "a peer without children-multi is asked once, then not again";
+     let list_many prefixes =
+       match B.list_many with Some f -> f ~prefixes () | None -> Lwt.return []
+     in
+     answer_status := `Not_found;
+     asked := [];
+     let* answered = list_many ["tsync/watchdom/manifests/x/"] in
+     check "a 404 answers no folder" (answered = [] && List.length !asked = 1);
+     let* answered = list_many ["tsync/watchdom/manifests/y/"] in
+     check "and the peer is not asked again"
+       (answered = [] && List.length !asked = 1);
+     answer_status := `OK;
      Lwt.return_unit)

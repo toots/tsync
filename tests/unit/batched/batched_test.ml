@@ -45,6 +45,7 @@ module Plain : Backend_lwt.Store = struct
   include Base
 
   let get_many = None
+  let list_many = None
   let fast_read = false
   let local_path = None
 end
@@ -64,6 +65,7 @@ module Native : Backend_lwt.Store = struct
                (e.Backend.key, body e.Backend.key))
              entries))
 
+  let list_many = None
   let local_path = None
 end
 
@@ -92,6 +94,7 @@ module Failing : Backend_lwt.Store = struct
                      (e.Backend.key, body e.Backend.key))
                    entries))
 
+  let list_many = None
   let local_path = None
 end
 

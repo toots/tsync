@@ -97,6 +97,7 @@ module Counting : Backend_lwt.Store = struct
     Lwt.return `Unsupported
 
   let get_many = None
+  let list_many = None
   let capabilities ~prefix:_ () = Lwt.return Backend.no_caps
   let fast_read = false
   let local_path = None

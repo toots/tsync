@@ -252,5 +252,6 @@ let reading_from name (module C : Conf_lwt.S) : (module Conf_lwt.S) =
            this one store. [None] where [Src] has no batch of its own, so the
            fan-out asks the [get_opt] above. *)
         let get_many = Src.get_many
+        let list_many = Src.list_many
       end : Backend_lwt.Store)
   end : Conf_lwt.S)

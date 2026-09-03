@@ -19,6 +19,7 @@ module Shareable : Backend_lwt.Store = struct
         : Backend_lwt.Store)
 
   let get_many = None
+  let list_many = None
 
   let capabilities ~prefix:_ () =
     Lwt.return { Backend.no_caps with share_url = Some share_base }

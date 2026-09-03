@@ -9,3 +9,7 @@ a client that has nothing to compare sends no token: ok
 
 === a peer too old to know the parameter is paced from this end
 an answer that cost no time is floored before returning: ok
+
+=== a peer without children-multi is asked once, then not again
+a 404 answers no folder: ok
+and the peer is not asked again: ok

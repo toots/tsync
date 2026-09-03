@@ -14,6 +14,13 @@ module type BATCHED = sig
   end
 end
 
+(** One folder as {!S.list_many} answers it. *)
+type listed_folder = {
+  folder_id : string;
+  listed : Backend.file_entry list;
+  bodies : (Stored_key.t * string option) list;
+}
+
 module type S = sig
   type 'a io
   type pool
@@ -35,6 +42,12 @@ module type S = sig
     entries:Backend.file_entry list ->
     unit ->
     (Stored_key.t * string option) list io
+
+  (** Many folders' children in one request, where the store has a way to ask
+      for them; a folder left out of the answer is the caller's to ask for
+      singly. [None] from a store with none. *)
+  val list_many :
+    (folder_ids:string list -> unit -> listed_folder list io) option
 
   val put_raw : bkey:Stored_key.t -> data:string -> unit io
   val delete_raw : bkey:Stored_key.t -> unit io
@@ -134,6 +147,37 @@ module Over (Io : Io.S) (Batched : BATCHED with type 'a io := 'a Io.t) = struct
       List.map
         (fun (key, body) -> (key, Option.map Bigstring.to_string body))
         answered
+
+    let namespace_of folder_id =
+      Stored_key.to_string
+        (Stored_key.namespace ~prefix:C.domain_prefix ~folder_id)
+
+    let list_many =
+      Option.map
+        (fun native ~folder_ids () ->
+          let ids = Hashtbl.create (List.length folder_ids) in
+          List.iter
+            (fun id -> Hashtbl.replace ids (namespace_of id) id)
+            folder_ids;
+          let+ answered =
+            native ~prefixes:(List.map namespace_of folder_ids) ()
+          in
+          List.filter_map
+            (fun (prefix, (c : Backend.children)) ->
+              Option.map
+                (fun folder_id ->
+                  {
+                    folder_id;
+                    listed = c.Backend.listed;
+                    bodies =
+                      List.map
+                        (fun (key, body) ->
+                          (key, Option.map Bigstring.to_string body))
+                        c.Backend.bodies;
+                  })
+                (Hashtbl.find_opt ids prefix))
+            answered)
+        B.list_many
 
     let delete_raw ~bkey = B.delete ~key:bkey ()
 

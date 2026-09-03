@@ -22,6 +22,13 @@ module type BATCHED = sig
   end
 end
 
+(** One folder as {!S.list_many} answers it. *)
+type listed_folder = {
+  folder_id : string;
+  listed : Backend.file_entry list;
+  bodies : (Stored_key.t * string option) list;
+}
+
 module type S = sig
   type 'a io
   type pool
@@ -68,6 +75,13 @@ module type S = sig
     entries:Backend.file_entry list ->
     unit ->
     (Stored_key.t * string option) list io
+
+  (** Many folders' children in one request, where the store has a way to ask
+      for them: each folder's listing and the bodies of its child objects. A
+      folder left out of the answer is the caller's to ask for singly. [None]
+      from a store with none. *)
+  val list_many :
+    (folder_ids:string list -> unit -> listed_folder list io) option
 
   val put_raw : bkey:Stored_key.t -> data:string -> unit io
   val delete_raw : bkey:Stored_key.t -> unit io

@@ -89,6 +89,19 @@ val no_caps : caps
     drift into merging differently. *)
 val merge_caps : caps list -> caps
 
+(** What {!S.list_many} answers for one folder: its listing whole, and a body
+    for each child object in it. *)
+type children = {
+  listed : file_entry list;
+  bodies : (Stored_key.t * Bigstring.t option) list;
+}
+
+(** Folders one {!S.list_many} request may name, and the bytes of bodies one
+    answer is packed to, on both ends of the wire. *)
+val max_batch_folders : int
+
+val max_batch_bytes : int
+
 module type S = sig
   type 'a io
 
@@ -204,6 +217,14 @@ module type S = sig
     unit ->
     (Stored_key.t * Bigstring.t option) list io)
     option
+
+  (** A folder's listing with the bodies of its child objects, for many folders
+      in one request, or [None] from a store with none. Answered in request
+      order; a folder the store left out, for a byte budget it alone knows, is
+      the caller's to ask for singly. Every store but http-proxy answers [None]:
+      only a peer holding the objects can list and read in one act. *)
+  val list_many :
+    (prefixes:string list -> unit -> (string * children) list io) option
 
   (** Ask the store to check every chunk it holds against its own name and file
       what fails under {!Chunk_layout.corrupted_prefix}, answering how many

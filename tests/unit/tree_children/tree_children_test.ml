@@ -39,6 +39,7 @@ module Flaky : Backend_lwt.Store = struct
     if key = !broken then refuse key else Store.get_opt ~key ()
 
   let get_many = None
+  let list_many = None
 end
 
 module Cf =
@@ -71,6 +72,45 @@ module Cs =
 
 module Ts = Inode_tree_lwt.Make (Cs)
 module Lk = Logical_key.Make (Cs)
+
+(* A store that answers many folders per request, as the proxy does, and can be
+   made to answer fewer than it was asked for. Bodies come through [get_opt] so
+   the walk's per-key reads are counted apart from the batch. *)
+let batches = ref 0
+let answer_at_most = ref max_int
+
+module Many : Backend_lwt.Store = struct
+  include Slow
+
+  let list_many =
+    Some
+      (fun ~prefixes () ->
+        incr batches;
+        let asked = List.filteri (fun i _ -> i < !answer_at_most) prefixes in
+        Lwt_list.map_s
+          (fun prefix ->
+            let* listed = Store.list_prefix ~prefix () in
+            let+ bodies =
+              Lwt_list.map_s
+                (fun (e : Backend.file_entry) ->
+                  let+ body = Store.get_opt ~key:e.Backend.key () in
+                  (e.Backend.key, body))
+                (List.filter
+                   (fun (e : Backend.file_entry) ->
+                     Stored_key.is_child_object e.Backend.key)
+                   listed)
+            in
+            (prefix, { Backend.listed; bodies }))
+          asked)
+end
+
+module Cm =
+  (val Fixture.conf ~domain:"testdom"
+         ~store:(module Many : Backend_lwt.Store)
+         ~cache_root:root ~data_dir:root ~root ()
+      : Conf_lwt.S)
+
+module Tm = Inode_tree_lwt.Make (Cm)
 
 let ns id = C.domain_prefix ^ id ^ "/"
 
@@ -243,5 +283,46 @@ let () =
      check "in depth-first order" depth_first;
      let* single = walk ~width:1 in
      check "and the visit order does not depend on the width" (visits = single);
+
+     case "a store that lists many folders at once is asked per batch";
+     let walk_many ~width =
+       let seen = ref [] in
+       let slots = Io_lwt.Bounded.create ~max:width () in
+       let+ () =
+         Tm.fold_tree ~slots ~folder_id:top ~key:Lk.root
+           (fun () key entry ->
+             let opens =
+               match entry.Inode_tree.body with
+                 | Inode_tree.Dir m ->
+                     Some
+                       (Logical_key.path (Logical_key.dir_in key m.Folder.name))
+                 | Inode_tree.File _ -> None
+             in
+             seen := (Logical_key.path key, opens) :: !seen;
+             Lwt.return_unit)
+           ()
+       in
+       List.rev !seen
+     in
+     listings := 0;
+     batches := 0;
+     let* batched = walk_many ~width:8 in
+     check "the same tree comes back" (batched = visits);
+     (* The root alone is fetched singly, nothing having listed it yet. *)
+     check "the root is the only folder listed on its own" (!listings = 1);
+     (* Its eight children in one request, and their fifty-six in another:
+        each answer's subfolders are asked for together. *)
+     check "and the rest come in two batches" (!batches = 2) ~why:(fun () ->
+         Printf.sprintf "%d batches" !batches);
+
+     case "a folder the store left out of its answer is asked for singly";
+     listings := 0;
+     batches := 0;
+     answer_at_most := 1;
+     let* partial = walk_many ~width:8 in
+     check "the tree is still whole" (partial = visits);
+     check "and the folders left out were listed on their own" (!listings > 1)
+       ~why:(fun () -> Printf.sprintf "%d listings" !listings);
+     answer_at_most := max_int;
      Lwt.return_unit);
-  report ~expected:15 ()
+  report ~expected:20 ()

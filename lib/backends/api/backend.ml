@@ -96,6 +96,13 @@ let merge_caps cs =
      is nobody's claim, so it is not one either. *)
   { merged with verified = cs <> [] && List.for_all (fun c -> c.verified) cs }
 
+(** What {!S.list_many} answers for one folder: its listing whole, and a body
+    for each child object in it. *)
+type children = {
+  listed : file_entry list;
+  bodies : (Stored_key.t * Bigstring.t option) list;
+}
+
 module type S = sig
   type 'a io
 
@@ -141,6 +148,13 @@ module type S = sig
     (Stored_key.t * Bigstring.t option) list io)
     option
 
+  (** A folder's listing with the bodies of its child objects, for many folders
+      in one request, or [None] from a store with none. Answered in request
+      order; a folder the store left out, for a byte budget it alone knows, is
+      the caller's to ask for singly. *)
+  val list_many :
+    (prefixes:string list -> unit -> (string * children) list io) option
+
   val verify_all :
     chunk_prefix:string -> unit -> [ `Queued of int | `Unsupported ] io
 
@@ -166,6 +180,9 @@ end
    memory, which a folder of large manifests reaches first. *)
 let max_batch_keys = 256
 let max_batch_bytes = 8 * 1024 * 1024
+
+(* Folders one {!S.list_many} request may name. *)
+let max_batch_folders = 64
 
 let batches entries =
   let rec go done_ run keys bytes = function
@@ -358,6 +375,20 @@ struct
               answered;
             answered)
           Inner.get_many
+
+      let list_many =
+        Option.map
+          (fun f ~prefixes () ->
+            let+ answered = f ~prefixes () in
+            List.iter
+              (fun (_, c) ->
+                List.iter
+                  (fun (_, body) ->
+                    Option.iter (fun b -> down (Bigstring.length b)) body)
+                  c.bodies)
+              answered;
+            answered)
+          Inner.list_many
 
       let local_path = Inner.local_path
     end : Store)

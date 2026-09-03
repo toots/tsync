@@ -92,6 +92,7 @@ let opinionated n : (module Backend_lwt.Store) =
           : Backend_lwt.Store)
 
     let get_many = None
+    let list_many = None
 
     let capabilities ~prefix:_ () =
       Lwt.return { Backend.no_caps with chunk_size = n }

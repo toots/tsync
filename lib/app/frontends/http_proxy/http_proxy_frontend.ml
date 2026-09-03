@@ -218,6 +218,10 @@ type op =
       (** A folder's manifests in one answer. The only op that saves a round
           trip rather than merely proxying one: the peer holds the objects,
           where an object store would have to be asked key by key. *)
+  | Children_multi of string list
+      (** Many folders' listings with their children's bodies, in one answer:
+          what a walk of the tree asks for, one request per batch of folders
+          rather than two per folder. *)
   | Delete_multi of Stored_key.t list
   | Copy of Stored_key.t * Stored_key.t
   | List_all of string * int option
@@ -385,6 +389,15 @@ let parse_op meth uri body =
                      | `String x -> Some (Stored_key.listed x) | _ -> None)
                    l)
           | _ -> Bad)
+    | `POST, "/children-multi" -> (
+        match
+          try Some (Yojson.Safe.from_string (Bigstring.to_string body))
+          with _ -> None
+        with
+          | Some (`List l) when List.length l <= Backend.max_batch_folders ->
+              Children_multi
+                (List.filter_map (function `String p -> Some p | _ -> None) l)
+          | _ -> Bad)
     | `POST, "/delete-multi" -> (
         match
           try Some (Yojson.Safe.from_string (Bigstring.to_string body))
@@ -424,7 +437,7 @@ let parse_op meth uri body =
    for seconds by design, and a slot it kept for that long is one a caller doing
    real work has lost. *)
 let data_kind = function
-  | Get _ | Get_range _ | Get_multi _ -> `Get
+  | Get _ | Get_range _ | Get_multi _ | Children_multi _ -> `Get
   | Put _ -> `Put
   | _ -> `Meta
 
@@ -437,6 +450,7 @@ let op_name = function
   | Put_if_absent _ -> "putIfAbsent"
   | Delete _ -> "delete"
   | Get_multi _ -> "getMulti"
+  | Children_multi _ -> "childrenMulti"
   | Delete_multi _ -> "deleteMulti"
   | Copy _ -> "copy"
   | List_all _ -> "list"
@@ -465,6 +479,7 @@ let op_keys = function
   | Max_concurrency p
   | Verified p ->
       [p]
+  | Children_multi prefixes -> prefixes
   | Bad | Unknown -> []
 
 (* A name, not a key: an op may target a region rather than an object. *)
@@ -478,7 +493,8 @@ let route_key = function
       Some (Stored_key.to_string k)
   | Watch { key; _ } | Get_range { key; _ } -> Some (Stored_key.to_string key)
   | Delete_multi (k :: _) | Get_multi (k :: _) -> Some (Stored_key.to_string k)
-  | Delete_multi [] | Get_multi [] -> None
+  | Children_multi (p :: _) -> Some p
+  | Delete_multi [] | Get_multi [] | Children_multi [] -> None
   | Copy (src, _) -> Some (Stored_key.to_string src)
   | List_all (p, _)
   | Share_url p
@@ -623,6 +639,38 @@ let exec route op ~body =
         in
         let* answered = Bb.get_many ~entries () in
         let framed = Http_proxy.Wire.bodies_to_string answered in
+        Metrics.count read_bytes (String.length framed);
+        respond_chunk (Bigstring.of_string framed)
+    | Children_multi prefixes ->
+        let module B = (val route.store : Backend_lwt.Store) in
+        let module Bb = Backend_lwt.Batched (B) in
+        (* Folders in the order asked, until the bodies pass the byte budget a
+           get-multi is packed to; what is left out the client asks for singly.
+           The listing carries sizes, so each folder's bodies are batched to
+           that same budget on the way in. *)
+        let rec answer acc bytes = function
+          | [] -> Lwt.return (List.rev acc)
+          | prefix :: rest ->
+              let* listed = B.list_prefix ~prefix () in
+              let entries =
+                List.filter
+                  (fun (e : Backend.file_entry) ->
+                    Stored_key.is_child_object e.Backend.key)
+                  listed
+              in
+              let* bodies = Bb.get_many ~entries () in
+              let bytes =
+                List.fold_left
+                  (fun n (_, body) ->
+                    n + Option.fold ~none:0 ~some:Bigstring.length body)
+                  bytes bodies
+              in
+              let acc = (prefix, { Backend.listed; bodies }) :: acc in
+              if bytes >= Backend.max_batch_bytes then Lwt.return (List.rev acc)
+              else answer acc bytes rest
+        in
+        let* answered = answer [] 0 prefixes in
+        let framed = Http_proxy.Wire.children_to_string answered in
         Metrics.count read_bytes (String.length framed);
         respond_chunk (Bigstring.of_string framed)
     | Delete_multi keys ->

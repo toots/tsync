@@ -69,6 +69,7 @@ struct
 
       let list_prefix ?max_keys ~prefix () = V.list_all t ?max_keys ~prefix ()
       let get_many = None
+      let list_many = None
 
       let verify_all ~chunk_prefix () =
         let+ n =

@@ -14,6 +14,7 @@ end) : Backend_lwt.Store = struct
   let list_prefix ?max_keys:_ ~prefix:_ () = fail ()
   let watch ~key:_ ~last_seen:_ () = fail ()
   let get_many = None
+  let list_many = None
   let fast_read = false
   let verify_all ~chunk_prefix:_ () = Lwt.return `Unsupported
 
@@ -38,6 +39,7 @@ module Hung : Backend_lwt.Store = struct
   let list_prefix ?max_keys:_ ~prefix:_ () = never ()
   let watch ~key:_ ~last_seen:_ () = never ()
   let get_many = None
+  let list_many = None
   let fast_read = false
   let verify_all ~chunk_prefix:_ () = Lwt.return `Unsupported
 
@@ -62,6 +64,7 @@ module Refuses : Backend_lwt.Store = struct
   let list_prefix ?max_keys:_ ~prefix:_ () = Lwt.return_nil
   let watch ~key:_ ~last_seen:_ () = Lwt.return_unit
   let get_many = None
+  let list_many = None
   let fast_read = false
   let verify_all ~chunk_prefix:_ () = Lwt.return `Unsupported
 

@@ -462,6 +462,7 @@ struct
       (* A filesystem read is not a round trip: {!Backend.Make.Batched} fans
          these out. *)
       let get_many = None
+      let list_many = None
 
       (* A filesystem has nothing on its side to wake. Every write is already
          checked as it lands ({!verify_written}), and [tsync gc --verify] is the
