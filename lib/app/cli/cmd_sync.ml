@@ -16,8 +16,9 @@ let cmd : unit Cmd.t =
       value & flag
       & info ["full"]
           ~doc:
-            "Force a full resync: clear the local cache and re-download all \
-             manifests from the backend")
+            "Force a full resync: re-read every manifest from the backend, \
+             rewriting the local mirror in place and dropping what the backend \
+             no longer has")
   in
   let parallelism_arg =
     Arg.(
@@ -74,7 +75,7 @@ let cmd : unit Cmd.t =
           (fun p ->
             end_phase ();
             phase := p;
-            if p = "clearing the cache" then rebuilding := true;
+            if p = "rebuilding" then rebuilding := true;
             if p = "draining uploads" && !verbose then
               Log.info "draining upload queue");
         on_current =
@@ -177,8 +178,8 @@ let cmd : unit Cmd.t =
          "Sync local cache with remote changes. Replays pending local journal \
           entries, then applies new journal entries from other clients. A full \
           resync (triggered by --full or when the local bookmark is stale) \
-          clears the cache and re-downloads all manifests. Pass --verbose to \
-          see a step-by-step breakdown.")
+          re-reads every manifest from the backend. Pass --verbose to see a \
+          step-by-step breakdown.")
     Term.(
       const run $ domain_arg $ source_arg $ full_arg $ parallelism_arg
       $ verbose_arg)

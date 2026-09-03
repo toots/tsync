@@ -63,6 +63,21 @@ let notify () = incr notified
 let run ?(full = false) () =
   R.run ~full ~parallelism:2 ~notify:(fun () -> notify ()) ()
 
+(* Planted as the last walk would have left it, an hour old, so a sweep by
+   mtime has something older than the cutoff to decide about. *)
+let plant path body =
+  Tsync_io.Fs.mkdir_p_sync (Filename.dirname path);
+  let oc = open_out_bin path in
+  output_string oc body;
+  close_out oc;
+  let old = Unix.gettimeofday () -. 3600. in
+  Unix.utimes path old old
+
+let mirror_path name =
+  Tsync_cache_layout.Cache_layout.manifest_path ~cache_root:root
+    ~domain_name:C.domain_name
+    (Logical_key.file_in Lk.root name)
+
 let describe = function
   | Resync.Full { manifests; failed; reason } ->
       Printf.sprintf "full(%d manifests, %d failed, %s)" manifests failed reason
@@ -116,7 +131,27 @@ let () =
          | Resync.Full { reason; _ } -> reason = "--full flag"
          | _ -> false);
 
+     case "a rebuild rewrites the mirror in place";
+     let chunk =
+       Filename.concat
+         (Tsync_cache_layout.Cache_layout.chunks_dir ~cache_root:root
+            C.domain_name)
+         "held"
+     in
+     plant chunk "bytes";
+     plant (mirror_path "gone.txt") (manifest_body "gone.txt");
+     check "the mirror holds what the last walk left"
+       (Sys.file_exists (mirror_path "a.txt"));
+     let* outcome = run ~full:true () in
+     step "%s" (describe outcome);
+     check "a chunk survives the rebuild" (Sys.file_exists chunk);
+     check "a manifest the store no longer has is dropped"
+       (not (Sys.file_exists (mirror_path "gone.txt")));
+     check "and one it still has is kept"
+       (Sys.file_exists (mirror_path "a.txt"));
+
      case "a walk that did not reach everything leaves the bookmark alone";
+     plant (mirror_path "gone.txt") (manifest_body "gone.txt");
      let before = Fs.read_last_sync_key () in
      let* () = put Stored_key.root_id "b" (manifest_body "b.txt") in
      broken := Stored_key.in_space ~prefix:(ns Stored_key.root_id) "b";
@@ -133,6 +168,7 @@ let () =
      check "and the bookmark did not move"
        (Fs.read_last_sync_key () = before)
        ~why:(fun () -> "a partial walk advanced the mark");
+     check "nor was anything swept" (Sys.file_exists (mirror_path "gone.txt"));
 
-     report ~expected:12 ();
+     report ~expected:17 ();
      Lwt.return_unit)

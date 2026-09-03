@@ -216,7 +216,7 @@ other's changes through a journal kept alongside the data.
 
 ```bash
 tsync sync          # apply changes made elsewhere, incrementally
-tsync sync --full   # clear the local cache, re-read everything from the backend
+tsync sync --full   # re-read every manifest from the backend, dropping what it no longer has
 ```
 
 The daemon picks changes up on its own, as soon as the backend can say there are any — immediately for a `local` disk or through an `http-proxy`, within a couple of seconds for a bucket. `tsync sync` is for when you want it now.

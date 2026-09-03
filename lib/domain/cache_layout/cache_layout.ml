@@ -73,7 +73,10 @@ module type S = sig
 
   val record_dir_name : string -> string -> unit io
   val real_dir_name : string -> string -> string io
-  val clear : cache_root:string -> domain_name:string -> unit io
+  val clear_projection : cache_root:string -> domain_name:string -> unit io
+
+  val sweep_stale :
+    cutoff:float -> cache_root:string -> domain_name:string -> unit io
 end
 
 module Make
@@ -95,17 +98,31 @@ struct
       Option.value body ~default:""
     else Io.return name
 
-  (* For a full resync that rebuilds from the backend. Staged edits are kept:
-     nothing else holds those bytes.
+  (* For a full resync. The applied entries describe the mirror being
+     replaced, and what they were for -- carrying a reader forward from an
+     anchor -- a resync answers by stamping a new token, which expires every
+     anchor outstanding.
 
-     The applied entries go with the rest of the projection. They describe the
-     mirror being replaced, and what they were for -- carrying a reader forward
-     from an anchor -- a resync answers by stamping a new token, which expires
-     every anchor outstanding. *)
-  let clear ~cache_root ~domain_name =
-    let* () = F.rm_rf (manifests_dir ~cache_root domain_name) in
+     The mirror, the folder index and the chunks stay: the walk rewrites the
+     first two in place so a mount keeps serving them meanwhile, and a chunk is
+     named by its content, which no resync changes. *)
+  let clear_projection ~cache_root ~domain_name =
     let* () = F.rm_rf (scratch_dir ~cache_root domain_name) in
-    let* () = F.rm_rf (folders_dir ~cache_root domain_name) in
-    let* () = F.rm_rf (applied_dir ~cache_root domain_name) in
-    F.rm_rf (chunks_dir ~cache_root domain_name)
+    F.rm_rf (applied_dir ~cache_root domain_name)
+
+  (* An entry the walk rewrote carries its mtime; one it did not is one the
+     store no longer has. Every live marker is rewritten on each visit,
+     including the name marker of an escaped directory, so a directory whose
+     markers are all stale is emptied and removed with them. *)
+  let sweep_stale ~cutoff ~cache_root ~domain_name =
+    (* An mtime comes from a coarser clock than the cutoff: a write in the first
+       tick of the walk can predate it by a few milliseconds. *)
+    let cutoff = cutoff -. 1. in
+    let* (_ : bool) =
+      F.reap_older_than ~cutoff (manifests_dir ~cache_root domain_name)
+    in
+    let+ (_ : bool) =
+      F.reap_older_than ~cutoff (folders_dir ~cache_root domain_name)
+    in
+    ()
 end

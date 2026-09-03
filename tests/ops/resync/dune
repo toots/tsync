@@ -39,5 +39,8 @@
   tsync_backend_api
   tsync_backend_lwt
   tsync_local_backend_lwt
+  tsync_cache_layout
+  tsync_io
+  unix
   lwt
   lwt.unix))

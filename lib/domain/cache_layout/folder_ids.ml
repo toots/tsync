@@ -101,6 +101,14 @@ module Over (Io : Io.S) (F : Fs.S with type 'a io := 'a Io.t) = struct
   let rec write ~cache_root ~domain_name key (m : Folder.marker) =
     let dir = dir_of ~cache_root ~domain_name key in
     let* () = F.mkdir_p dir in
+    (* Rewritten rather than kept, so a sweep by mtime after a rebuild sees the
+       name marker as live along with the folder marker beside it. *)
+    let* () =
+      let leaf = Logical_key.leaf key in
+      if leaf <> "" && Stored_key.is_escaped (Stored_key.escape leaf) then
+        F.atomic_write (Filename.concat dir Stored_key.dir_name_leaf) leaf
+      else return_unit
+    in
     let path = Filename.concat dir marker_name in
     let* () = F.atomic_write path (Folder.marker_to_string m) in
     let* () =

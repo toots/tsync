@@ -91,23 +91,31 @@ struct
 
     let full_resync ~parallelism ~progress ~on_manifest ~notify ~handled reason
         =
-      progress.on_phase "clearing the cache";
-      (* Unsynced edits are kept: nothing else holds those bytes. *)
-      let* () =
-        Cache.clear ~cache_root:C.cache_root ~domain_name:C.domain_name
-      in
       progress.on_phase "rebuilding";
+      let started = Unix.gettimeofday () in
+      (* The mirror is rewritten in place, so a mount keeps serving it meanwhile
+         and unsynced edits are kept: nothing else holds those bytes. *)
+      let* () =
+        Cache.clear_projection ~cache_root:C.cache_root
+          ~domain_name:C.domain_name
+      in
       let* manifests, failed =
         rebuild_mirror ~parallelism ~progress ~on_manifest ()
       in
       progress.on_current None;
-      progress.on_phase "notifying the daemon";
       (* Only a rebuild that reached everything may say so. Recording the mark
          after a partial walk moves the cursor past folders that were never
          fetched, and nothing revisits them: their files arrive later as journal
-         puts, into directories no id names. *)
+         puts, into directories no id names. The sweep is under the same rule,
+         a folder the walk could not read being not one that is gone. *)
       let* () =
         if failed = 0 then begin
+          progress.on_phase "sweeping stale entries";
+          let* () =
+            Cache.sweep_stale ~cutoff:started ~cache_root:C.cache_root
+              ~domain_name:C.domain_name
+          in
+          progress.on_phase "notifying the daemon";
           Cursor.write_last_sync_key (J.entry_key ());
           (* The rebuild read what these describe, so they are not applied on
              top of it. *)

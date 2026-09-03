@@ -92,9 +92,18 @@ module type S = sig
       [dir_path] records when [name] is a handle. *)
   val real_dir_name : string -> string -> string io
 
-  (** Drop everything rebuildable, for a resync that restates the domain from
-      the backend. Staged edits are kept: nothing else holds those bytes. *)
-  val clear : cache_root:string -> domain_name:string -> unit io
+  (** What a resync starts without: the applied entries and the scratch space.
+      The mirror, the folder index and the chunks stay; the walk rewrites the
+      first two in place, and staged edits are kept since nothing else holds
+      those bytes. *)
+  val clear_projection : cache_root:string -> domain_name:string -> unit io
+
+  (** Drop every mirror manifest and folder record last written before [cutoff]:
+      what a walk that rewrote everything the store still has did not touch.
+      Only after a walk that reached everything, a folder it could not read
+      being not one that is gone. *)
+  val sweep_stale :
+    cutoff:float -> cache_root:string -> domain_name:string -> unit io
 end
 
 module Make

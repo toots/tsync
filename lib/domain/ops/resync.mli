@@ -2,8 +2,9 @@
 
     Two ways, and the choice between them is the point: apply the journal
     entries published since the local bookmark, or — when there is no bookmark,
-    when the journal cannot carry one to now, or when the caller insists — clear
-    the cache and rebuild the manifest mirror by walking the folder tree whole.
+    when the journal cannot carry one to now, or when the caller insists —
+    rewrite the manifest mirror in place by walking the folder tree whole, then
+    drop what the walk did not reach.
 
     One pass of the same engine the daemon polls with, so the two cannot drift
     apart. *)
