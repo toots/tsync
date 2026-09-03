@@ -55,6 +55,16 @@ module Make
     (Sq : Sync_queue.S with type 'a io := 'a Lwt.t) : S = struct
   module Diag = Diagnostics.Make (C)
 
+  (* One mutation at a time. A reference is resolved to a path before the
+     mutation takes the mirror's lock, so two requests in flight at once -- the
+     File Provider sends them so -- could rename a folder and, resolved against
+     its old path, drop a file into a folder that no longer existed there. *)
+  let mutations = Lwt_mutex.create ()
+
+  let serialized action f =
+    if List.mem action mutating_actions then Lwt_mutex.with_lock mutations f
+    else f ()
+
   type hooks = {
     evict : Logical_key.t -> unit Lwt.t;
     restore : Logical_key.t -> unit Lwt.t;
@@ -662,153 +672,159 @@ module Make
                 if C.read_only && List.mem action mutating_actions then
                   fail `Read_only
                     (Printf.sprintf "'%s' is read-only" C.domain_name)
-                else (
-                  match action with
-                    | "stat" ->
-                        with_target_ref (fun t key ->
-                            handle_stat ~expect:(expected_kind t) key)
-                    | "list_dir" ->
-                        with_target
-                          (handle_list_dir ?after:(page_after obj)
-                             ~limit:(page_limit obj))
-                    | "list_all" ->
-                        handle_list_all ?after:(page_after obj)
-                          ~limit:(page_limit obj) ()
-                    | "changes_since" ->
-                        handle_changes_since
-                          ~limit:
-                            (Option.value (get_int obj "limit")
-                               ~default:default_changes_limit)
-                          (get_str obj "arg")
-                    | "cursor" -> handle_current_cursor ()
-                    | "ensure_cached" -> (
-                        match get_str obj "dest" with
-                          | "" ->
-                              fail `Invalid "ensure_cached requires \"dest\""
-                          | dst_path ->
-                              with_target (handle_ensure_cached ~dst_path))
-                    | "fetch_range" -> (
-                        match
-                          ( get_str obj "dest",
-                            get_int obj "offset",
-                            get_int obj "length" )
-                        with
-                          | "", _, _ ->
-                              fail `Invalid "fetch_range requires \"dest\""
-                          | _, None, _ | _, _, None ->
-                              fail `Invalid
-                                "fetch_range requires \"offset\" and \"length\""
-                          | _, Some offset, Some length
-                            when offset < 0 || length <= 0 ->
-                              fail `Invalid
-                                "fetch_range needs a non-negative \"offset\" \
-                                 and a positive \"length\""
-                          | dst_path, Some offset, Some length ->
-                              with_target
-                                (handle_fetch_range ~dst_path ~offset ~length))
-                    | "create" -> with_file_destination handle_create
-                    | "write" ->
-                        with_file_destination (fun key ->
-                            handle_write
-                              ~await:
-                                (List.assoc_opt "await" obj = Some (`Bool true))
-                              key (get_str obj "staging"))
-                    | "delete" -> with_target handle_delete
-                    | "rename" -> (
-                        (* Source is named as anywhere else; the target is a
+                else
+                  serialized action (fun () ->
+                      match action with
+                        | "stat" ->
+                            with_target_ref (fun t key ->
+                                handle_stat ~expect:(expected_kind t) key)
+                        | "list_dir" ->
+                            with_target
+                              (handle_list_dir ?after:(page_after obj)
+                                 ~limit:(page_limit obj))
+                        | "list_all" ->
+                            handle_list_all ?after:(page_after obj)
+                              ~limit:(page_limit obj) ()
+                        | "changes_since" ->
+                            handle_changes_since
+                              ~limit:
+                                (Option.value (get_int obj "limit")
+                                   ~default:default_changes_limit)
+                              (get_str obj "arg")
+                        | "cursor" -> handle_current_cursor ()
+                        | "ensure_cached" -> (
+                            match get_str obj "dest" with
+                              | "" ->
+                                  fail `Invalid
+                                    "ensure_cached requires \"dest\""
+                              | dst_path ->
+                                  with_target (handle_ensure_cached ~dst_path))
+                        | "fetch_range" -> (
+                            match
+                              ( get_str obj "dest",
+                                get_int obj "offset",
+                                get_int obj "length" )
+                            with
+                              | "", _, _ ->
+                                  fail `Invalid "fetch_range requires \"dest\""
+                              | _, None, _ | _, _, None ->
+                                  fail `Invalid
+                                    "fetch_range requires \"offset\" and \
+                                     \"length\""
+                              | _, Some offset, Some length
+                                when offset < 0 || length <= 0 ->
+                                  fail `Invalid
+                                    "fetch_range needs a non-negative \
+                                     \"offset\" and a positive \"length\""
+                              | dst_path, Some offset, Some length ->
+                                  with_target
+                                    (handle_fetch_range ~dst_path ~offset
+                                       ~length))
+                        | "create" -> with_file_destination handle_create
+                        | "write" ->
+                            with_file_destination (fun key ->
+                                handle_write
+                                  ~await:
+                                    (List.assoc_opt "await" obj
+                                    = Some (`Bool true))
+                                  key (get_str obj "staging"))
+                        | "delete" -> with_target handle_delete
+                        | "rename" -> (
+                            (* Source is named as anywhere else; the target is a
                            destination. *)
-                        let src_ref = target obj in
-                        let* src = resolve src_ref in
-                        match src with
-                          | None -> not_found (Item_ref.to_string src_ref)
-                          | Some src ->
-                              (* A rename keeps the kind it moves: a folder
+                            let src_ref = target obj in
+                            let* src = resolve src_ref in
+                            match src with
+                              | None -> not_found (Item_ref.to_string src_ref)
+                              | Some src ->
+                                  (* A rename keeps the kind it moves: a folder
                                  stays one, and its id travels with it. *)
-                              with_destination (fun parent name ->
-                                  handle_rename src
-                                    (if Logical_key.kind src = `Dir then
-                                       Logical_key.dir_in parent name
-                                     else Logical_key.file_in parent name)))
-                    | "mkdir" ->
-                        with_destination (fun parent name ->
-                            handle_mkdir (Logical_key.dir_in parent name))
-                    | "symlink" ->
-                        with_file_destination (fun key ->
-                            handle_symlink key (get_str obj "target"))
-                    | "rmdir" -> with_target handle_rmdir
-                    (* A caller holding a real path names it directly, which
+                                  with_destination (fun parent name ->
+                                      handle_rename src
+                                        (if Logical_key.kind src = `Dir then
+                                           Logical_key.dir_in parent name
+                                         else Logical_key.file_in parent name)))
+                        | "mkdir" ->
+                            with_destination (fun parent name ->
+                                handle_mkdir (Logical_key.dir_in parent name))
+                        | "symlink" ->
+                            with_file_destination (fun key ->
+                                handle_symlink key (get_str obj "target"))
+                        | "rmdir" -> with_target handle_rmdir
+                        (* A caller holding a real path names it directly, which
                        skips the folder resolution a reference costs. *)
-                    | "share" -> (
-                        match List.assoc_opt "rel" obj with
-                          | Some (`String rel) -> handle_share rel
-                          | _ ->
-                              with_target (fun key ->
-                                  handle_share (Logical_key.path key)))
-                    | "evict" ->
-                        with_target (fun key ->
-                            let+ () = hooks.evict key in
-                            ok_json [])
-                    | "restore" ->
-                        with_target (fun key ->
-                            let+ () = hooks.restore key in
-                            ok_json [])
-                    | "revert" ->
-                        with_target (fun key ->
-                            handle_revert hooks key (get_str obj "arg"))
-                    | "full_resync" ->
-                        let+ () = hooks.full_resync () in
-                        ok_json []
-                    (* Cheap by design: no store access, no backend health, so a
+                        | "share" -> (
+                            match List.assoc_opt "rel" obj with
+                              | Some (`String rel) -> handle_share rel
+                              | _ ->
+                                  with_target (fun key ->
+                                      handle_share (Logical_key.path key)))
+                        | "evict" ->
+                            with_target (fun key ->
+                                let+ () = hooks.evict key in
+                                ok_json [])
+                        | "restore" ->
+                            with_target (fun key ->
+                                let+ () = hooks.restore key in
+                                ok_json [])
+                        | "revert" ->
+                            with_target (fun key ->
+                                handle_revert hooks key (get_str obj "arg"))
+                        | "full_resync" ->
+                            let+ () = hooks.full_resync () in
+                            ok_json []
+                        (* Cheap by design: no store access, no backend health, so a
                        menu-bar poll costs one socket round trip. The whole
                        report is [stats]. *)
-                    | "status" ->
-                        (* The one store read here: where the bytes of an
+                        | "status" ->
+                            (* The one store read here: where the bytes of an
                            in-flight upload are, so a previewer can look at
                            them. A handful of local reads, not a walk. *)
-                        let+ uploading = F.uploads_in_flight () in
-                        ok_json
-                          (("domain", `String C.domain_name)
-                          :: ("running", `Bool true)
-                          :: ("paused", `Bool (Sq.paused ()))
-                          :: ("pendingUploads", `Int (Sq.pending ()))
-                          :: ( "pendingDownloads",
-                               `Int (F.downloads_in_flight ()) )
-                          :: ( "uploading",
-                               `List
-                                 (List.map
-                                    (fun ({ name; rel; body; size } :
-                                           File_ops.in_flight) ->
-                                      `Assoc
-                                        (("name", `String name)
-                                         :: ("rel", `String rel)
-                                         ::
-                                           (match body with
-                                           | Some body ->
-                                               [("body", `String body)]
-                                           | None -> [])
-                                        @
-                                          match size with
-                                          | Some size ->
-                                              [
-                                                ( "size",
-                                                  `Int (Int64.to_int size) );
-                                              ]
-                                          | None -> []))
-                                    uploading) )
-                          :: ("downloading", `List (downloading_json ()))
-                          :: ( "pendingBytes",
-                               `Int (Int64.to_int (Sq.pending_bytes ())) )
-                             (* Process-wide, not per domain: one uplink is
+                            let+ uploading = F.uploads_in_flight () in
+                            ok_json
+                              (("domain", `String C.domain_name)
+                              :: ("running", `Bool true)
+                              :: ("paused", `Bool (Sq.paused ()))
+                              :: ("pendingUploads", `Int (Sq.pending ()))
+                              :: ( "pendingDownloads",
+                                   `Int (F.downloads_in_flight ()) )
+                              :: ( "uploading",
+                                   `List
+                                     (List.map
+                                        (fun ({ name; rel; body; size } :
+                                               File_ops.in_flight) ->
+                                          `Assoc
+                                            (("name", `String name)
+                                             :: ("rel", `String rel)
+                                             ::
+                                               (match body with
+                                               | Some body ->
+                                                   [("body", `String body)]
+                                               | None -> [])
+                                            @
+                                              match size with
+                                              | Some size ->
+                                                  [
+                                                    ( "size",
+                                                      `Int (Int64.to_int size)
+                                                    );
+                                                  ]
+                                              | None -> []))
+                                        uploading) )
+                              :: ("downloading", `List (downloading_json ()))
+                              :: ( "pendingBytes",
+                                   `Int (Int64.to_int (Sq.pending_bytes ())) )
+                                 (* Process-wide, not per domain: one uplink is
                                   what an ETA is against. *)
-                          :: ("bytesUploaded", `Int (Metrics.uploaded ()))
-                          :: ( "uploadBytesPerSec",
-                               `Float (Metrics.upload_rate ()) )
-                          :: hooks.status_fields ())
-                    | "pause" ->
-                        Sq.set_paused (get_str obj "arg" <> "off");
-                        Lwt.return (ok_json [])
-                    | "stats" ->
-                        (* This daemon reports itself twice: at the top as the
+                              :: ("bytesUploaded", `Int (Metrics.uploaded ()))
+                              :: ( "uploadBytesPerSec",
+                                   `Float (Metrics.upload_rate ()) )
+                              :: hooks.status_fields ())
+                        | "pause" ->
+                            Sq.set_paused (get_str obj "arg" <> "off");
+                            Lwt.return (ok_json [])
+                        | "stats" ->
+                            (* This daemon reports itself twice: at the top as the
                          answering process, and in the domain's [frontends] with
                          the queues only it knows, where a proxy asking over IPC
                          picks it up.
@@ -817,117 +833,122 @@ module Make
                          store, [exact] counts every chunk instead of sampling
                          shards, [reload] recomputes, and [frontend] asks for
                          this frontend alone. *)
-                        let flags =
-                          String.split_on_char ',' (get_str obj "arg")
-                        in
-                        let has f = List.mem f flags in
-                        let exact = has "exact" in
-                        let reload = has "reload" in
-                        let totals = has "totals" in
-                        let frontend_only = has Status_report.frontend_only in
-                        let* staged = F.staged_count () in
-                        (* What this frontend knows and nobody else does. The
+                            let flags =
+                              String.split_on_char ',' (get_str obj "arg")
+                            in
+                            let has f = List.mem f flags in
+                            let exact = has "exact" in
+                            let reload = has "reload" in
+                            let totals = has "totals" in
+                            let frontend_only =
+                              has Status_report.frontend_only
+                            in
+                            let* staged = F.staged_count () in
+                            (* What this frontend knows and nobody else does. The
                          bounds it runs under are the domain's, reported
                          there. *)
-                        let queues =
-                          [
-                            ("reachable", `Bool true);
-                            ("pendingDownloads", `Int (F.downloads_in_flight ()));
-                            ("downloading", `List (downloading_json ()));
-                            ("stagedFiles", `Int staged);
-                            ( "downloadsCompleted",
-                              `Int (F.downloads_completed_count ()) );
-                            (* Usual cause of a mount gone quiet while its
+                            let queues =
+                              [
+                                ("reachable", `Bool true);
+                                ( "pendingDownloads",
+                                  `Int (F.downloads_in_flight ()) );
+                                ("downloading", `List (downloading_json ()));
+                                ("stagedFiles", `Int staged);
+                                ( "downloadsCompleted",
+                                  `Int (F.downloads_completed_count ()) );
+                                (* Usual cause of a mount gone quiet while its
                              backends answer fine. *)
-                            ("metaLocked", `Bool (F.meta_locked ()));
-                            ("metaWaiting", `Bool (F.meta_waiters ()));
-                          ]
-                          @ hooks.stats_fields ()
-                        in
-                        let frontend_type =
-                          match List.assoc_opt "frontend" queues with
-                            | Some (`String t) -> t
-                            | _ -> "unknown"
-                        in
-                        (* Frontends supply their name as [frontend]; entries use
+                                ("metaLocked", `Bool (F.meta_locked ()));
+                                ("metaWaiting", `Bool (F.meta_waiters ()));
+                              ]
+                              @ hooks.stats_fields ()
+                            in
+                            let frontend_type =
+                              match List.assoc_opt "frontend" queues with
+                                | Some (`String t) -> t
+                                | _ -> "unknown"
+                            in
+                            (* Frontends supply their name as [frontend]; entries use
                          [type], as backend entries do. Normalised once here so no
                          reader has to know both spellings. *)
-                        let queues =
-                          ("type", `String frontend_type)
-                          :: List.remove_assoc "frontend" queues
-                        in
-                        let+ domain =
-                          (* Under [frontend] the cache walk, the WAL read and a
+                            let queues =
+                              ("type", `String frontend_type)
+                              :: List.remove_assoc "frontend" queues
+                            in
+                            let+ domain =
+                              (* Under [frontend] the cache walk, the WAL read and a
                              probe of every backend are somebody else's: the
                              domain belongs to whoever converges it, and every
                              process answering for it is that work done again
                              for the same answer. *)
-                          if frontend_only then
-                            Lwt.return
-                              (`Assoc
-                                 [
-                                   ("name", `String C.domain_name);
-                                   ("frontends", `List [`Assoc queues]);
-                                 ])
-                          else
-                            Diag.domain_json ~totals ~exact ~reload
-                              ~frontends:[`Assoc queues]
-                              ()
-                        in
-                        ok_json
-                          (Diagnostics.self_json
-                             ~extra:
-                               [
-                                 ("frontend", `String frontend_type);
-                                 ("serves", `List [`String C.domain_name]);
-                               ]
-                             ()
-                          @ [("domains", `List [domain])])
-                    | "download_progress" ->
-                        with_target (fun key ->
-                            Lwt.return
-                              (match F.download_progress key with
-                                | None -> ok_json [("active", `Bool false)]
-                                | Some (done_, total) ->
-                                    ok_json
-                                      [
-                                        ("active", `Bool true);
-                                        ("bytesDownloaded", `Int done_);
-                                        ("totalBytes", `Int total);
-                                      ]))
-                    (* From whoever converges this domain, which is another
+                              if frontend_only then
+                                Lwt.return
+                                  (`Assoc
+                                     [
+                                       ("name", `String C.domain_name);
+                                       ("frontends", `List [`Assoc queues]);
+                                     ])
+                              else
+                                Diag.domain_json ~totals ~exact ~reload
+                                  ~frontends:[`Assoc queues]
+                                  ()
+                            in
+                            ok_json
+                              (Diagnostics.self_json
+                                 ~extra:
+                                   [
+                                     ("frontend", `String frontend_type);
+                                     ("serves", `List [`String C.domain_name]);
+                                   ]
+                                 ()
+                              @ [("domains", `List [domain])])
+                        | "download_progress" ->
+                            with_target (fun key ->
+                                Lwt.return
+                                  (match F.download_progress key with
+                                    | None -> ok_json [("active", `Bool false)]
+                                    | Some (done_, total) ->
+                                        ok_json
+                                          [
+                                            ("active", `Bool true);
+                                            ("bytesDownloaded", `Int done_);
+                                            ("totalBytes", `Int total);
+                                          ]))
+                        (* From whoever converges this domain, which is another
                        process and has no other way to reach the view a frontend
                        keeps. Not mutating: the ops are already applied and the
                        mirror already says so, and what this buys is only that
                        the frontend looks again. *)
-                    | "changed" ->
-                        (* A key the sender names and this domain cannot read
+                        | "changed" ->
+                            (* A key the sender names and this domain cannot read
                            means the two disagree about the namespace, which is
                            worth hearing about rather than a shorter list. *)
-                        let named k =
-                          match Option.map Lk.file (Lk.rel_of_string k) with
-                            | Some key -> Some key
-                            | None ->
-                                Log.warn "changed: not this domain's key %s" k;
-                                None
-                        in
-                        List.iter hooks.changed
-                          (match List.assoc_opt "keys" obj with
-                            | Some (`List l) ->
-                                List.filter_map
-                                  (function `String k -> named k | _ -> None)
-                                  l
-                            | _ -> []);
-                        Lwt.return (ok_json [])
-                    | "stop" ->
-                        hooks.on_stop ();
-                        Lwt.return (ok_json [])
-                    (* Answered here so the connection can be handed over; the
+                            let named k =
+                              match Option.map Lk.file (Lk.rel_of_string k) with
+                                | Some key -> Some key
+                                | None ->
+                                    Log.warn "changed: not this domain's key %s"
+                                      k;
+                                    None
+                            in
+                            List.iter hooks.changed
+                              (match List.assoc_opt "keys" obj with
+                                | Some (`List l) ->
+                                    List.filter_map
+                                      (function
+                                        | `String k -> named k | _ -> None)
+                                      l
+                                | _ -> []);
+                            Lwt.return (ok_json [])
+                        | "stop" ->
+                            hooks.on_stop ();
+                            Lwt.return (ok_json [])
+                        (* Answered here so the connection can be handed over; the
                      stream itself belongs to {!Ipc_lwt.serve}. *)
-                    | "subscribe" when get_str obj "domain" = "" ->
-                        fail `Invalid "subscribe requires \"domain\""
-                    | "subscribe" -> Lwt.return (ok_json [])
-                    | _ -> fail `Invalid ("unknown action: " ^ action)))
+                        | "subscribe" when get_str obj "domain" = "" ->
+                            fail `Invalid "subscribe requires \"domain\""
+                        | "subscribe" -> Lwt.return (ok_json [])
+                        | _ -> fail `Invalid ("unknown action: " ^ action)))
               (fun exn ->
                 Lwt.return
                   (error_code_json (Ipc_error.of_exn exn)
