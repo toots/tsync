@@ -126,6 +126,18 @@
   changes_since from current (up to date) -> {"ok":true,"stale":false,"cursor":"<cursor>","more":false,"ops":[]}
   changes_since from pruned anchor (stale) -> {"ok":true,"stale":true}
 
+=== foreign move into a folder renamed since
+  A: mkdir sub
+  A: write f4.txt "moved"
+  A: drain
+  A: rename f4.txt -> sub/f4.txt
+  A: rename sub -> sub2
+  A: drain
+--- B changes_since (A's ops, once B has applied them)
+  changes_since from baseline (working) -> {"ok":true,"stale":false,"cursor":"<cursor>","more":false,"ops":[{"op":"mkdir","ref":"d:<folder-1>","parentRef":"root","name":"sub","item":{"ref":"d:<folder-1>","parentRef":"root","name":"sub","kind":"dir","size":0,"mtime":"<zero>","etag":"<folder-1>","isUploaded":true}},{"op":"put","ref":"f:.tsync-root/f4.txt","parentRef":"root","name":"f4.txt"},{"op":"rename","is_dir":false,"srcRef":"f:.tsync-root/f4.txt","srcParentRef":"root","ref":"f:<folder-1>/f4.txt","parentRef":"d:<folder-1>","name":"f4.txt","item":{"ref":"f:<folder-1>/f4.txt","parentRef":"d:<folder-1>","name":"f4.txt","kind":"file","size":5,"mtime":"<mtime>","etag":"c2743db5bb64af1b","isUploaded":true}},{"op":"rename","is_dir":true,"id":"<folder-1>","srcRef":"d:<folder-1>","srcParentRef":"root","ref":"d:<folder-1>","parentRef":"root","name":"sub2","item":{"ref":"d:<folder-1>","parentRef":"root","name":"sub2","kind":"dir","size":0,"mtime":"<zero>","etag":"<folder-1>","isUploaded":true}}]}
+  changes_since from current (up to date) -> {"ok":true,"stale":false,"cursor":"<cursor>","more":false,"ops":[]}
+  changes_since from pruned anchor (stale) -> {"ok":true,"stale":true}
+
 === foreign dir rename carries the folder id
   A: mkdir before
   A: drain
