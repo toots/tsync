@@ -53,14 +53,14 @@ module Tf = Inode_tree_lwt.Make (Cf)
 (* Every listing costs a round trip's worth of waiting and is counted, so a
    walk shows how many it made and whether it made them in series. *)
 let listings = ref 0
-let listing_delay = 0.02
+let listing_delay = ref 0.02
 
 module Slow : Backend_lwt.Store = struct
   include Store
 
   let list_prefix ?max_keys ~prefix () =
     incr listings;
-    let* () = Lwt_unix.sleep listing_delay in
+    let* () = Lwt_unix.sleep !listing_delay in
     Store.list_prefix ?max_keys ~prefix ()
 end
 
@@ -253,17 +253,29 @@ let () =
        in
        List.rev !seen
      in
+     let timed ~width =
+       let started = Unix.gettimeofday () in
+       let+ visits = walk ~width in
+       (visits, Unix.gettimeofday () -. started)
+     in
+     (* The same walk with no delay first, so the disk's share is measured on
+        this machine at this moment rather than assumed: a slow one moves both
+        figures, and only the waiting that did not overlap separates them. *)
+     listing_delay := 0.;
+     let* _, disk = timed ~width:8 in
+     listing_delay := 0.02;
      listings := 0;
-     let started = Unix.gettimeofday () in
-     let* visits = walk ~width:8 in
-     let elapsed = Unix.gettimeofday () -. started in
-     let serial = 65. *. listing_delay in
+     let* visits, wide = timed ~width:8 in
      check "every folder is listed once" (!listings = 65);
      check "every entry is visited once" (List.length visits = 128);
+     let serial = 65. *. !listing_delay in
      check "and the listings overlapped"
-       (elapsed < serial /. 2.)
+       (wide -. disk < serial /. 2.)
        ~why:(fun () ->
-         Printf.sprintf "%.2fs for 65 listings of %.2fs" elapsed listing_delay);
+         Printf.sprintf
+           "%.2fs with the delay, %.2fs without, 65 listings of %.2fs" wide disk
+           !listing_delay);
+     let* single, _ = timed ~width:1 in
      (* Depth-first: each visit is in the innermost folder still open, and a
         folder entry opens its folder for the visits that follow. *)
      let depth_first =
@@ -281,7 +293,6 @@ let () =
          visits
      in
      check "in depth-first order" depth_first;
-     let* single = walk ~width:1 in
      check "and the visit order does not depend on the width" (visits = single);
 
      case "a store that lists many folders at once is asked per batch";
