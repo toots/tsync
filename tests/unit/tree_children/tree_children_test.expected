@@ -20,7 +20,10 @@ and only the unreadable one is reported: ok
 === a walk fetches folders ahead of visiting them, in visit order
 every folder is listed once: ok
 every entry is visited once: ok
-and the listings overlapped: ok
+  8 listings at once, eight wide
+the listings overlapped: ok
+and no wider than the pool: ok
+a pool of one is a walk in series: ok
 in depth-first order: ok
 and the visit order does not depend on the width: ok
 
@@ -33,4 +36,4 @@ and the rest come in two batches: ok
 the tree is still whole: ok
 and the folders left out were listed on their own: ok
 
-20 check(s), 0 failure(s)
+22 check(s), 0 failure(s)

@@ -50,18 +50,24 @@ module Cf =
 
 module Tf = Inode_tree_lwt.Make (Cf)
 
-(* Every listing costs a round trip's worth of waiting and is counted, so a
-   walk shows how many it made and whether it made them in series. *)
+(* Every listing waits, and how many are waiting at once is the whole question:
+   counted rather than timed, so what a walk overlapped is exact on any machine
+   however slow its disk. *)
 let listings = ref 0
-let listing_delay = ref 0.02
+let in_flight = ref 0
+let peak = ref 0
 
 module Slow : Backend_lwt.Store = struct
   include Store
 
   let list_prefix ?max_keys ~prefix () =
     incr listings;
-    let* () = Lwt_unix.sleep !listing_delay in
-    Store.list_prefix ?max_keys ~prefix ()
+    incr in_flight;
+    if !in_flight > !peak then peak := !in_flight;
+    let* () = Lwt_unix.sleep 0.02 in
+    let+ listed = Store.list_prefix ?max_keys ~prefix () in
+    decr in_flight;
+    listed
 end
 
 module Cs =
@@ -253,29 +259,20 @@ let () =
        in
        List.rev !seen
      in
-     let timed ~width =
-       let started = Unix.gettimeofday () in
+     let measured ~width =
+       listings := 0;
+       peak := 0;
        let+ visits = walk ~width in
-       (visits, Unix.gettimeofday () -. started)
+       (visits, !peak)
      in
-     (* The same walk with no delay first, so the disk's share is measured on
-        this machine at this moment rather than assumed: a slow one moves both
-        figures, and only the waiting that did not overlap separates them. *)
-     listing_delay := 0.;
-     let* _, disk = timed ~width:8 in
-     listing_delay := 0.02;
-     listings := 0;
-     let* visits, wide = timed ~width:8 in
+     let* visits, wide = measured ~width:8 in
      check "every folder is listed once" (!listings = 65);
      check "every entry is visited once" (List.length visits = 128);
-     let serial = 65. *. !listing_delay in
-     check "and the listings overlapped"
-       (wide -. disk < serial /. 2.)
-       ~why:(fun () ->
-         Printf.sprintf
-           "%.2fs with the delay, %.2fs without, 65 listings of %.2fs" wide disk
-           !listing_delay);
-     let* single, _ = timed ~width:1 in
+     step "%d listings at once, eight wide" wide;
+     check "the listings overlapped" (wide > 1);
+     check "and no wider than the pool" (wide <= 8);
+     let* single, narrow = measured ~width:1 in
+     check "a pool of one is a walk in series" (narrow = 1);
      (* Depth-first: each visit is in the innermost folder still open, and a
         folder entry opens its folder for the visits that follow. *)
      let depth_first =
@@ -336,4 +333,4 @@ let () =
        ~why:(fun () -> Printf.sprintf "%d listings" !listings);
      answer_at_most := max_int;
      Lwt.return_unit);
-  report ~expected:20 ()
+  report ~expected:22 ()

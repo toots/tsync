@@ -440,12 +440,16 @@ struct
         match Hashtbl.find_opt parked id with
           | Some (answer, left) ->
               Hashtbl.remove parked id;
+              (* Freed once the answer is in hand rather than when it is asked
+                 for, or a request still in flight would go uncounted against
+                 the width and the next would start beside it. *)
+              let* entries = answer in
               decr left;
               if !left = 0 then begin
                 decr requests;
                 fill ()
               end;
-              answer
+              Io.return entries
           | None ->
               Option.iter
                 (fun n -> n.requested <- true)
