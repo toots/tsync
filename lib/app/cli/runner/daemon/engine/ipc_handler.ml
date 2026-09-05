@@ -267,10 +267,123 @@ module Make
             ~row:(fun (container_id, e) -> row_of ~container_id e)
             (List.map (fun (name, _, e) -> (name, name, e)) entries)
 
+  (* The walk's entries, kept between pages under the scratch space so a page
+     costs a scan of one file rather than a walk of the whole mirror. Written by
+     a first page and whenever missing — a resync empties the scratch space —
+     and never invalidated by a change: what moves while an enumeration runs is
+     the change feed's to carry, the anchor having been taken before the first
+     page.
+
+     One line per entry in path order, the path first and set off by a byte no
+     path holds, so finding a page is a string comparison per line and only the
+     page's own lines are parsed.
+
+     ponytail: scanned from the top on every page; an offset index if that is
+     ever the cost. *)
+  let listing_path =
+    Filename.concat
+      (Cache_layout_lwt.scratch_dir ~cache_root:C.cache_root C.domain_name)
+      ".tsync-list-all"
+
+  let listing_row (path, cursor, (container_id, entry)) =
+    `Assoc
+      ([
+         ("path", `String path);
+         ("cursor", `String cursor);
+         ("container", `String container_id);
+       ]
+      @
+        match entry with
+        | `Dir _ -> [("kind", `String "dir")]
+        | `File (e : Checkout.listed) ->
+            [
+              ("kind", `String "file");
+              ("size", `Int e.Checkout.size);
+              ("mtime", `Float e.Checkout.mtime);
+            ])
+
+  let listing_entry = function
+    | `Assoc o -> (
+        let str k = get_str o k in
+        let path = str "path" in
+        match str "kind" with
+          | "dir" ->
+              Some (path, str "cursor", (str "container", `Dir (Lk.dir path)))
+          | "file" ->
+              let size = Option.value (get_int o "size") ~default:0 in
+              let mtime =
+                match List.assoc_opt "mtime" o with
+                  | Some (`Float f) -> f
+                  | Some (`Int n) -> float_of_int n
+                  | _ -> 0.
+              in
+              Some
+                ( path,
+                  str "cursor",
+                  ( str "container",
+                    `File { Checkout.key = Lk.file path; size; mtime } ) )
+          | _ -> None)
+    | _ -> None
+
+  (* Best effort: a page is served from the walk it just made either way. *)
+  let keep_listing ~skipped entries =
+    let sorted =
+      List.sort (fun (a, _, _) (b, _, _) -> String.compare a b) entries
+    in
+    Lwt.catch
+      (fun () ->
+        let* () = Io_lwt.Fs.ensure_parent listing_path in
+        Io_lwt.Fs.atomic_write listing_path
+          (String.concat "\n"
+             (Yojson.Safe.to_string (`Assoc [("skipped", `Int skipped)])
+             :: List.map
+                  (fun ((path, _, _) as row) ->
+                    path ^ "\000" ^ Yojson.Safe.to_string (listing_row row))
+                  sorted)))
+      (fun exn ->
+        Log.warn "list_all: not kept between pages: %s" (Printexc.to_string exn);
+        Lwt.return_unit)
+
+  (* The [limit + 1] entries past [after], which is all a page asks of the
+     listing: the one beyond the page is what tells [page] there is more. *)
+  let kept_listing ?after ~limit () =
+    let+ body = Io_lwt.Fs.read_file_opt listing_path in
+    match Option.map (String.split_on_char '\n') body with
+      | Some (header :: rows) -> (
+          match Yojson.Safe.from_string header with
+            | `Assoc [("skipped", `Int skipped)] ->
+                let past line =
+                  match (after, String.index_opt line '\000') with
+                    | None, Some _ -> true
+                    | Some a, Some i ->
+                        String.compare (String.sub line 0 i) a > 0
+                    | _, None -> false
+                in
+                let rec take n = function
+                  | line :: rest when n > 0 ->
+                      if not (past line) then take n rest
+                      else (
+                        let i = String.index line '\000' in
+                        let json =
+                          String.sub line (i + 1) (String.length line - i - 1)
+                        in
+                        match Yojson.Safe.from_string json with
+                          | json -> (
+                              match listing_entry json with
+                                | Some e -> e :: take (n - 1) rest
+                                | None -> take n rest)
+                          | exception _ -> take n rest)
+                  | _ -> []
+                in
+                Some (take (limit + 1) rows, skipped)
+            | _ | (exception _) -> None)
+      | _ -> None
+
   (* Every item of the domain in one order, a page at a time: what a frontend
      that must enumerate the whole domain asks for, with nothing held between
-     pages. Ordered by path, resumed from "<container id>/<name>": a path can
-     outgrow what a caller may hand back, a reference cannot.
+     pages but the listing above. Ordered by path, resumed from
+     "<container id>/<name>": a path can outgrow what a caller may hand back, a
+     reference cannot.
 
      A cursor whose folder is gone places nothing, and the listing starts over:
      an item served twice costs a call, one skipped is never asked for again.
@@ -299,17 +412,26 @@ module Make
                   | `File _ -> Lwt.return acc)
               (acc, unnamed) here
     in
-    let* after =
+    let* placed =
       match Option.map (String.split_on_char '/') after with
         | Some [id; name] ->
             let+ key = resolve (`File (id, name)) in
             Option.map Logical_key.path key
         | _ -> Lwt.return_none
     in
-    (* ponytail: the mirror is walked whole for every page; an index by path if
-       a domain grows past what a readdir sweep can page. *)
-    let* entries, skipped = collect Lk.root ([], 0) in
-    page ?after ~skipped ~limit ~label:"list_all"
+    let walked () =
+      let* entries, skipped = collect Lk.root ([], 0) in
+      let+ () = keep_listing ~skipped entries in
+      (entries, skipped)
+    in
+    let* entries, skipped =
+      match after with
+        | None -> walked ()
+        | Some _ -> (
+            let* kept = kept_listing ?after:placed ~limit () in
+            match kept with Some kept -> Lwt.return kept | None -> walked ())
+    in
+    page ?after:placed ~skipped ~limit ~label:"list_all"
       ~row:(fun (container_id, e) -> row_of ~container_id e)
       entries
 

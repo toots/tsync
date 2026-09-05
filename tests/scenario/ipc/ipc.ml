@@ -162,5 +162,10 @@ let () =
   run_ipc parent_ref_scenarios;
   print_endline "########## CHANGES ##########";
   run_ipc_changes changes_scenarios;
+  print_endline "########## KEPT WALK ##########";
+  run_ipc_snapshot
+    (List.filter
+       (fun (s : scenario) -> s.name = "files and folders share one order")
+       listing_scenarios);
   print_endline "########## STATS ##########";
   run_stats stats_scenarios
