@@ -42,25 +42,18 @@ final class CursorTests: XCTestCase {
         XCTAssertNotNil(Cursor.page(String(repeating: "n", count: Cursor.limit)))
     }
 
-    func testAnAnchorCarriesItsGenerationAndCursor() {
-        let anchor = Anchor.encode(token: "1756600000000", cursor: "0001756600000-abc")
-        let decoded = Anchor.decode(anchor)
-        XCTAssertEqual(decoded.token, "1756600000000")
-        XCTAssertEqual(decoded.cursor, "0001756600000-abc")
+    /// The daemon compares both halves of its cursor, so what it is handed
+    /// back must be what it issued, byte for byte.
+    func testAnAnchorCarriesTheDaemonsCursorVerbatim() {
+        for cursor in ["1756600000000|0001756600000-abc", "|", ""] {
+            XCTAssertEqual(Anchor.decode(Anchor.encode(cursor)), cursor)
+        }
     }
 
-    /// A client that has never synced holds no cursor, and the generation is
-    /// still what decides whether its anchor survives a resync.
-    func testAnEmptyCursorStillCarriesTheGeneration() {
-        let decoded = Anchor.decode(Anchor.encode(token: "gen", cursor: ""))
-        XCTAssertEqual(decoded.token, "gen")
-        XCTAssertEqual(decoded.cursor, "")
-    }
-
-    /// Anything that is not one of ours reads as "no generation", which fails
-    /// the comparison and expires — the safe direction.
-    func testAGarbageAnchorDoesNotDecodeAsAGeneration() {
-        let decoded = Anchor.decode(NSFileProviderSyncAnchor(Data("nonsense".utf8)))
-        XCTAssertEqual(decoded.token, "")
+    /// Bytes that are not text read as no cursor, which the daemon answers as
+    /// "never synced": a full listing, the safe direction.
+    func testBytesThatAreNotTextReadAsNoCursor() {
+        let anchor = NSFileProviderSyncAnchor(Data([0xff, 0xfe, 0x00]))
+        XCTAssertEqual(Anchor.decode(anchor), "")
     }
 }

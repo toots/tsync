@@ -369,8 +369,7 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension,
             // request that does arrive must not list a literal "trash" key.
             throw CocoaError(.featureUnsupported)
         case .workingSet:
-            return WorkingSetEnumerator(client: client,
-                                        domainName: domain.displayName, readOnly: readOnly)
+            return WorkingSetEnumerator(client: client, readOnly: readOnly)
         default:
             return DirectoryEnumerator(container: containerItemIdentifier,
                                        client: client, readOnly: readOnly)

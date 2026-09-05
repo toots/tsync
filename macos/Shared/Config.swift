@@ -50,15 +50,4 @@ public struct Config: Codable, Sendable {
     public func isReadOnly(_ domainName: String) -> Bool {
         domains.first(where: { $0.name == domainName })?.readOnly ?? false
     }
-
-    /// Stamped by the daemon whenever it rebuilds a domain's local mirror.
-    /// Nothing journals a change made straight in the store, so no delta can
-    /// bridge an anchor issued before the rebuild. Anchors carry this token and a
-    /// mismatch expires them on sight, which also works when the stamp lands
-    /// while this extension is not running — as it usually does.
-    public static func resyncToken(domain: String) -> String {
-        let url = dataDirURL.appendingPathComponent("resync-\(domain)")
-        return ((try? String(contentsOf: url, encoding: .utf8)) ?? "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-    }
 }

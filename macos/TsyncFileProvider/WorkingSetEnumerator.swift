@@ -11,12 +11,10 @@ private let log = Logger(subsystem: "org.feverdreamtv.tsync", category: "Working
 /// container: the working set is a view, not a folder.
 final class WorkingSetEnumerator: NSObject, NSFileProviderEnumerator, @unchecked Sendable {
     private let client: DaemonClient
-    private let domainName: String
     private let readOnly: Bool
 
-    init(client: DaemonClient, domainName: String, readOnly: Bool) {
+    init(client: DaemonClient, readOnly: Bool) {
         self.client = client
-        self.domainName = domainName
         self.readOnly = readOnly
     }
 
@@ -27,19 +25,13 @@ final class WorkingSetEnumerator: NSObject, NSFileProviderEnumerator, @unchecked
     func enumerateChanges(for observer: any NSFileProviderChangeObserver,
                           from anchor: NSFileProviderSyncAnchor) {
         Task {
-            let (token, since) = Anchor.decode(anchor)
-            guard token == Config.resyncToken(domain: domainName) else {
-                // The mirror was rebuilt after this anchor was issued, so no
-                // delta bridges it.
-                observer.finishEnumeratingWithError(NSFileProviderError(.syncAnchorExpired))
-                return
-            }
+            let since = Anchor.decode(anchor)
             do {
                 let size = max(1, observer.suggestedBatchSize ?? 100)
                 let batch = try await client.changesSince(since, limit: size)
                 if batch.stale == true {
-                    // Entries reaching back this far are past the daemon's
-                    // retention, so the delta has a hole in it.
+                    // Past the daemon's retention, or issued against a mirror a
+                    // reimport has since replaced: no delta bridges it.
                     observer.finishEnumeratingWithError(NSFileProviderError(.syncAnchorExpired))
                     return
                 }
@@ -55,7 +47,7 @@ final class WorkingSetEnumerator: NSObject, NSFileProviderEnumerator, @unchecked
                 if !deleted.isEmpty { observer.didDeleteItems(withIdentifiers: deleted) }
                 if !updated.isEmpty { observer.didUpdate(updated) }
                 observer.finishEnumeratingChanges(
-                    upTo: Anchor.encode(token: token, cursor: batch.cursor ?? since),
+                    upTo: Anchor.encode(batch.cursor ?? since),
                     moreComing: batch.more ?? false)
             } catch {
                 // Never finish at the anchor we started from: that claims the
@@ -70,9 +62,7 @@ final class WorkingSetEnumerator: NSObject, NSFileProviderEnumerator, @unchecked
     func currentSyncAnchor(completionHandler: @escaping (NSFileProviderSyncAnchor?) -> Void) {
         Task {
             do {
-                completionHandler(Anchor.encode(
-                    token: Config.resyncToken(domain: domainName),
-                    cursor: try await client.currentCursor()))
+                completionHandler(Anchor.encode(try await client.currentCursor()))
             } catch {
                 // No anchor rather than an invented one: a made-up cursor comes
                 // back unparseable and costs a full rescan.

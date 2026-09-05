@@ -356,7 +356,14 @@ and normalize_kv (k, v) =
         (k, `String (alias_id s))
     | "mtime", `Float f -> (k, `String (if f > 0. then "<mtime>" else "<zero>"))
     | "cursor", `String s ->
-        (k, `String (if s = "" then "<empty>" else "<cursor>"))
+        (* The generation before the "|" is what a reimport changes; what a
+           snapshot looks at is whether an entry follows it. *)
+        let entry =
+          match String.index_opt s '|' with
+            | Some i -> String.sub s (i + 1) (String.length s - i - 1)
+            | None -> s
+        in
+        (k, `String (if entry = "" then "<empty>" else "<cursor>"))
     | k, v -> (k, normalize_ipc v)
 
 let print_ipc label obj =
@@ -377,6 +384,9 @@ type client = {
   dump_flat : unit -> unit Lwt.t;
   dump_changes : label:string -> anchor:string -> unit Lwt.t;
   cursor : unit -> string Lwt.t;
+  (* What `tsync fileprovider reimport` does: every anchor issued before it is
+     answered stale. *)
+  bump_generation : unit -> unit Lwt.t;
   (* Whole JSON rather than a snapshot: most of it is pids, uptimes and
      paths. *)
   stats : unit -> (string * Yojson.Safe.t) list Lwt.t;
@@ -1320,6 +1330,10 @@ let setup_client (module C : Conf_lwt.S) root staging_prefix =
     let+ obj = action "cursor" in
     Option.value ~default:"" (get_str obj "cursor")
   in
+  let bump_generation () =
+    let+ obj = action "full_resync" in
+    must obj
+  in
   let dump_changes ~label ~anchor =
     let* obj = action ~arg:anchor "changes_since" in
     must obj;
@@ -1343,6 +1357,7 @@ let setup_client (module C : Conf_lwt.S) root staging_prefix =
     dump_flat;
     dump_changes;
     cursor;
+    bump_generation;
     stats;
   }
 
@@ -2066,8 +2081,13 @@ let run_ipc_changes_scenario ?versioning ({ name; steps } : scenario) =
            let* () =
              b.dump_changes ~label:"from current (up to date)" ~anchor:current
            in
-           b.dump_changes ~label:"from pruned anchor (stale)"
-             ~anchor:"0000000000001-deadbeef")
+           let* () =
+             b.dump_changes ~label:"from pruned anchor (stale)"
+               ~anchor:"0000000000001-deadbeef"
+           in
+           let* () = b.bump_generation () in
+           b.dump_changes ~label:"from current after a reimport (stale)"
+             ~anchor:current)
          (fun exn ->
            Printf.printf "  ERROR %s\n" (Printexc.to_string exn);
            Lwt.return_unit)

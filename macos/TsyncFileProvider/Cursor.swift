@@ -6,7 +6,8 @@ import FileProvider
 /// extension is stopped and restarted at the system's convenience, and a page
 /// or an anchor may outlive the object that produced it. So neither carries an
 /// offset into anything held in memory — a page names the last entry served,
-/// and an anchor names a journal entry the daemon still has.
+/// and an anchor is the daemon's own cursor, which names a journal entry it
+/// still has.
 ///
 /// Both are capped at 500 bytes by the framework. A name is at most 255, and a
 /// folder id and a journal key are short and fixed, so nothing here approaches
@@ -44,22 +45,20 @@ enum Cursor {
     }
 }
 
-/// A sync anchor: the mirror generation it was issued against, then the journal
-/// entry it reached.
+/// A sync anchor: the daemon's own string, carried back to it verbatim.
 ///
-/// The generation is what makes a resync durable. A rebuilt mirror has no delta
-/// bridging it, and the daemon stamps a new token on disk — so an anchor issued
-/// before it expires on sight, including when the stamp landed while this
-/// extension was not running, which is the usual case.
+/// It spells the mirror generation the anchor was issued against and the
+/// journal entry it reached, and the daemon is the one to compare either. A
+/// reimport stamps a new generation there, so an anchor from before it expires
+/// on sight, including when the stamp landed while this extension was not
+/// running, which is the usual case. Nothing here reads that stamp: a file the
+/// daemon writes is not one this process may open.
 enum Anchor {
-    static func decode(_ anchor: NSFileProviderSyncAnchor) -> (token: String, cursor: String) {
-        let raw = String(data: anchor.rawValue, encoding: .utf8) ?? ""
-        guard let separator = raw.firstIndex(of: "|") else { return ("", raw) }
-        return (String(raw[raw.startIndex..<separator]),
-                String(raw[raw.index(after: separator)...]))
+    static func decode(_ anchor: NSFileProviderSyncAnchor) -> String {
+        String(data: anchor.rawValue, encoding: .utf8) ?? ""
     }
 
-    static func encode(token: String, cursor: String) -> NSFileProviderSyncAnchor {
-        NSFileProviderSyncAnchor(Data("\(token)|\(cursor)".utf8))
+    static func encode(_ cursor: String) -> NSFileProviderSyncAnchor {
+        NSFileProviderSyncAnchor(Data(cursor.utf8))
     }
 }
