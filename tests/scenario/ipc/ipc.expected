@@ -21,8 +21,8 @@
   list_dir root limit=2 -> {"ok":true,"items":[{"ref":"f:.tsync-root/aaa.txt","parentRef":"root","name":"aaa.txt","kind":"file","size":1,"mtime":"<mtime>","etag":"15da855801af627d","isUploaded":true},{"ref":"d:<folder-1>","parentRef":"root","name":"mid","kind":"dir","size":0,"mtime":"<zero>","etag":"<folder-1>","isUploaded":true}],"next":"mid"}
   list_dir root limit=2 after=mid -> {"ok":true,"items":[{"ref":"f:.tsync-root/zzz.txt","parentRef":"root","name":"zzz.txt","kind":"file","size":1,"mtime":"<mtime>","etag":"7dbefb508fa14bbd","isUploaded":true}]}
 --- flat
-  list_all limit=2 -> {"ok":true,"items":[{"ref":"f:.tsync-root/aaa.txt","parentRef":"root","name":"aaa.txt","kind":"file","size":1,"mtime":"<mtime>","etag":"15da855801af627d","isUploaded":true},{"ref":"d:<folder-1>","parentRef":"root","name":"mid","kind":"dir","size":0,"mtime":"<zero>","etag":"<folder-1>","isUploaded":true}],"next":".tsync-root/mid"}
-  list_all limit=2 after=.tsync-root/mid -> {"ok":true,"items":[{"ref":"f:.tsync-root/zzz.txt","parentRef":"root","name":"zzz.txt","kind":"file","size":1,"mtime":"<mtime>","etag":"7dbefb508fa14bbd","isUploaded":true}]}
+  list_all limit=2 -> {"ok":true,"items":[{"ref":"f:.tsync-root/aaa.txt","parentRef":"root","name":"aaa.txt","kind":"file","size":1,"mtime":"<mtime>","etag":"15da855801af627d","isUploaded":true},{"ref":"d:<folder-1>","parentRef":"root","name":"mid","kind":"dir","size":0,"mtime":"<zero>","etag":"<folder-1>","isUploaded":true}],"next":"<walk>:1"}
+  list_all limit=2 after=<walk>:1 -> {"ok":true,"items":[{"ref":"f:.tsync-root/zzz.txt","parentRef":"root","name":"zzz.txt","kind":"file","size":1,"mtime":"<mtime>","etag":"7dbefb508fa14bbd","isUploaded":true}]}
 
 === nested directories keyed as full paths
   mkdir sub
@@ -35,8 +35,8 @@
 --- paged
   list_dir root limit=2 -> {"ok":true,"items":[{"ref":"d:<folder-1>","parentRef":"root","name":"sub","kind":"dir","size":0,"mtime":"<zero>","etag":"<folder-1>","isUploaded":true},{"ref":"f:.tsync-root/top.txt","parentRef":"root","name":"top.txt","kind":"file","size":3,"mtime":"<mtime>","etag":"97bb0a4a6df0d08e","isUploaded":true}]}
 --- flat
-  list_all limit=2 -> {"ok":true,"items":[{"ref":"d:<folder-1>","parentRef":"root","name":"sub","kind":"dir","size":0,"mtime":"<zero>","etag":"<folder-1>","isUploaded":true},{"ref":"f:<folder-1>/c.txt","parentRef":"d:<folder-1>","name":"c.txt","kind":"file","size":6,"mtime":"<mtime>","etag":"7546f608548f4d0d","isUploaded":true}],"next":"<folder-1>/c.txt"}
-  list_all limit=2 after=<folder-1>/c.txt -> {"ok":true,"items":[{"ref":"f:.tsync-root/top.txt","parentRef":"root","name":"top.txt","kind":"file","size":3,"mtime":"<mtime>","etag":"97bb0a4a6df0d08e","isUploaded":true}]}
+  list_all limit=2 -> {"ok":true,"items":[{"ref":"d:<folder-1>","parentRef":"root","name":"sub","kind":"dir","size":0,"mtime":"<zero>","etag":"<folder-1>","isUploaded":true},{"ref":"f:<folder-1>/c.txt","parentRef":"d:<folder-1>","name":"c.txt","kind":"file","size":6,"mtime":"<mtime>","etag":"7546f608548f4d0d","isUploaded":true}],"next":"<walk>:1"}
+  list_all limit=2 after=<walk>:1 -> {"ok":true,"items":[{"ref":"f:.tsync-root/top.txt","parentRef":"root","name":"top.txt","kind":"file","size":3,"mtime":"<mtime>","etag":"97bb0a4a6df0d08e","isUploaded":true}]}
 
 === a folder this client cannot name is counted, not dropped
   mkdir sub
@@ -162,11 +162,11 @@
   write aaa.txt "a"
   write zzz.txt "z"
 --- flat, the kept walk dropped between pages
-  list_all limit=2 -> {"ok":true,"items":[{"ref":"f:.tsync-root/aaa.txt","parentRef":"root","name":"aaa.txt","kind":"file","size":1,"mtime":"<mtime>","etag":"15da855801af627d","isUploaded":true},{"ref":"d:<folder-1>","parentRef":"root","name":"mid","kind":"dir","size":0,"mtime":"<zero>","etag":"<folder-1>","isUploaded":true}],"next":".tsync-root/mid"}
-  list_all limit=2 after=.tsync-root/mid -> {"ok":true,"items":[{"ref":"f:.tsync-root/zzz.txt","parentRef":"root","name":"zzz.txt","kind":"file","size":1,"mtime":"<mtime>","etag":"7dbefb508fa14bbd","isUploaded":true}]}
+  list_all limit=2 -> {"ok":true,"items":[{"ref":"f:.tsync-root/aaa.txt","parentRef":"root","name":"aaa.txt","kind":"file","size":1,"mtime":"<mtime>","etag":"15da855801af627d","isUploaded":true},{"ref":"d:<folder-1>","parentRef":"root","name":"mid","kind":"dir","size":0,"mtime":"<zero>","etag":"<folder-1>","isUploaded":true}],"next":"<walk>:1"}
+  list_all limit=2 after=<walk>:1 -> {"ok":true,"items":[{"ref":"f:.tsync-root/zzz.txt","parentRef":"root","name":"zzz.txt","kind":"file","size":1,"mtime":"<mtime>","etag":"7dbefb508fa14bbd","isUploaded":true}]}
 --- flat, a file written between pages
-  list_all limit=2 -> {"ok":true,"items":[{"ref":"f:.tsync-root/aaa.txt","parentRef":"root","name":"aaa.txt","kind":"file","size":1,"mtime":"<mtime>","etag":"15da855801af627d","isUploaded":true},{"ref":"d:<folder-1>","parentRef":"root","name":"mid","kind":"dir","size":0,"mtime":"<zero>","etag":"<folder-1>","isUploaded":true}],"next":".tsync-root/mid"}
-  list_all limit=2 after=.tsync-root/mid -> {"ok":true,"items":[{"ref":"f:.tsync-root/zzz.txt","parentRef":"root","name":"zzz.txt","kind":"file","size":1,"mtime":"<mtime>","etag":"7dbefb508fa14bbd","isUploaded":true}]}
+  list_all limit=2 -> {"ok":true,"items":[{"ref":"f:.tsync-root/aaa.txt","parentRef":"root","name":"aaa.txt","kind":"file","size":1,"mtime":"<mtime>","etag":"15da855801af627d","isUploaded":true},{"ref":"d:<folder-1>","parentRef":"root","name":"mid","kind":"dir","size":0,"mtime":"<zero>","etag":"<folder-1>","isUploaded":true}],"next":"<walk>:1"}
+  list_all limit=2 after=<walk>:1 -> {"ok":true,"items":[{"ref":"f:.tsync-root/zzz.txt","parentRef":"root","name":"zzz.txt","kind":"file","size":1,"mtime":"<mtime>","etag":"7dbefb508fa14bbd","isUploaded":true}]}
 
 ########## STATS ##########
 === after uploads: cache filled, nothing left unpublished

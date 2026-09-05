@@ -337,6 +337,15 @@ let ipc_entry_key = function
       match List.assoc_opt "ref" kvs with Some (`String s) -> s | _ -> "")
   | _ -> ""
 
+(* A working-set page is resumed by line of the walk that made it, and the
+   walk is named by when it was made. *)
+let alias_walk s =
+  match String.index_opt s ':' with
+    | Some i
+      when String.for_all (fun c -> c >= '0' && c <= '9') (String.sub s 0 i) ->
+        "<walk>" ^ String.sub s i (String.length s - i)
+    | _ -> s
+
 let rec normalize_ipc (j : Yojson.Safe.t) : Yojson.Safe.t =
   match j with
     | `Assoc kvs -> `Assoc (List.map normalize_kv kvs)
@@ -348,6 +357,7 @@ and normalize_kv (k, v) =
     | ("ref" | "parentRef" | "srcRef"), `String s -> (k, `String (alias_ref s))
     | "next", `String s when String.contains s '/' ->
         (k, `String (alias_cursor s))
+    | "next", `String s when String.contains s ':' -> (k, `String (alias_walk s))
     (* A bare "id" in a journal op names a folder. Unlike an etag, it cannot be
        a content hash, so it needs no table lookup to tell the two apart. *)
     | "id", `String s when is_minted_id s -> (k, `String (alias_id s))
@@ -1316,7 +1326,9 @@ let setup_client (module C : Conf_lwt.S) root staging_prefix =
         must obj;
         print_ipc
           (Printf.sprintf "%s limit=2%s" label
-             (match after with None -> "" | Some a -> " after=" ^ a))
+             (match after with
+               | None -> ""
+               | Some a -> " after=" ^ alias_walk a))
           obj;
         match List.assoc_opt "next" obj with
           | Some (`String a) -> page (Some a) (n + 1)
