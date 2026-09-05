@@ -85,6 +85,7 @@
   changes_since from baseline (working) -> {"ok":true,"stale":false,"cursor":"<cursor>","more":false,"ops":[{"op":"put","ref":"f:.tsync-root/a.txt","parentRef":"root","name":"a.txt","item":{"ref":"f:.tsync-root/a.txt","parentRef":"root","name":"a.txt","kind":"file","size":2,"mtime":"<mtime>","etag":"2a761c59a36be404","isUploaded":true}}]}
   changes_since from current (up to date) -> {"ok":true,"stale":false,"cursor":"<cursor>","more":false,"ops":[]}
   changes_since from pruned anchor (stale) -> {"ok":true,"stale":true}
+  changes_since from current after a reimport (stale) -> {"ok":true,"stale":true}
 
 === foreign mkdir then put
   A: mkdir sub
@@ -95,6 +96,7 @@
   changes_since from baseline (working) -> {"ok":true,"stale":false,"cursor":"<cursor>","more":false,"ops":[{"op":"mkdir","ref":"d:<folder-1>","parentRef":"root","name":"sub","item":{"ref":"d:<folder-1>","parentRef":"root","name":"sub","kind":"dir","size":0,"mtime":"<zero>","etag":"<folder-1>","isUploaded":true}},{"op":"put","ref":"f:<folder-1>/f.txt","parentRef":"d:<folder-1>","name":"f.txt","item":{"ref":"f:<folder-1>/f.txt","parentRef":"d:<folder-1>","name":"f.txt","kind":"file","size":4,"mtime":"<mtime>","etag":"abe26074d853e1ed","isUploaded":true}}]}
   changes_since from current (up to date) -> {"ok":true,"stale":false,"cursor":"<cursor>","more":false,"ops":[]}
   changes_since from pruned anchor (stale) -> {"ok":true,"stale":true}
+  changes_since from current after a reimport (stale) -> {"ok":true,"stale":true}
 
 === foreign delete
   A: write a.txt "x"
@@ -105,6 +107,7 @@
   changes_since from baseline (working) -> {"ok":true,"stale":false,"cursor":"<cursor>","more":false,"ops":[{"op":"put","ref":"f:.tsync-root/a.txt","parentRef":"root","name":"a.txt"},{"op":"delete","ref":"f:.tsync-root/a.txt","parentRef":"root","name":"a.txt"}]}
   changes_since from current (up to date) -> {"ok":true,"stale":false,"cursor":"<cursor>","more":false,"ops":[]}
   changes_since from pruned anchor (stale) -> {"ok":true,"stale":true}
+  changes_since from current after a reimport (stale) -> {"ok":true,"stale":true}
 
 === foreign rename
   A: write a.txt "x"
@@ -115,6 +118,7 @@
   changes_since from baseline (working) -> {"ok":true,"stale":false,"cursor":"<cursor>","more":false,"ops":[{"op":"put","ref":"f:.tsync-root/a.txt","parentRef":"root","name":"a.txt"},{"op":"rename","is_dir":false,"srcRef":"f:.tsync-root/a.txt","srcParentRef":"root","ref":"f:.tsync-root/b.txt","parentRef":"root","name":"b.txt","item":{"ref":"f:.tsync-root/b.txt","parentRef":"root","name":"b.txt","kind":"file","size":1,"mtime":"<mtime>","etag":"8a9031792618daad","isUploaded":true}}]}
   changes_since from current (up to date) -> {"ok":true,"stale":false,"cursor":"<cursor>","more":false,"ops":[]}
   changes_since from pruned anchor (stale) -> {"ok":true,"stale":true}
+  changes_since from current after a reimport (stale) -> {"ok":true,"stale":true}
 
 === foreign rmdir carries the folder id
   A: mkdir gone
@@ -125,6 +129,7 @@
   changes_since from baseline (working) -> {"ok":true,"stale":false,"cursor":"<cursor>","more":false,"ops":[{"op":"mkdir","ref":"d:<folder-1>","parentRef":"root","name":"gone","item":{"ref":"d:<folder-1>","parentRef":"root","name":"gone","kind":"dir","size":0,"mtime":"<zero>","etag":"<folder-1>","isUploaded":true}},{"op":"rmdir","id":"<folder-1>","ref":"d:<folder-1>","parentRef":"root","name":"gone"}]}
   changes_since from current (up to date) -> {"ok":true,"stale":false,"cursor":"<cursor>","more":false,"ops":[]}
   changes_since from pruned anchor (stale) -> {"ok":true,"stale":true}
+  changes_since from current after a reimport (stale) -> {"ok":true,"stale":true}
 
 === foreign move into a folder renamed since
   A: mkdir sub
@@ -137,6 +142,7 @@
   changes_since from baseline (working) -> {"ok":true,"stale":false,"cursor":"<cursor>","more":false,"ops":[{"op":"mkdir","ref":"d:<folder-1>","parentRef":"root","name":"sub","item":{"ref":"d:<folder-1>","parentRef":"root","name":"sub","kind":"dir","size":0,"mtime":"<zero>","etag":"<folder-1>","isUploaded":true}},{"op":"put","ref":"f:.tsync-root/f4.txt","parentRef":"root","name":"f4.txt"},{"op":"rename","is_dir":false,"srcRef":"f:.tsync-root/f4.txt","srcParentRef":"root","ref":"f:<folder-1>/f4.txt","parentRef":"d:<folder-1>","name":"f4.txt","item":{"ref":"f:<folder-1>/f4.txt","parentRef":"d:<folder-1>","name":"f4.txt","kind":"file","size":5,"mtime":"<mtime>","etag":"c2743db5bb64af1b","isUploaded":true}},{"op":"rename","is_dir":true,"id":"<folder-1>","srcRef":"d:<folder-1>","srcParentRef":"root","ref":"d:<folder-1>","parentRef":"root","name":"sub2","item":{"ref":"d:<folder-1>","parentRef":"root","name":"sub2","kind":"dir","size":0,"mtime":"<zero>","etag":"<folder-1>","isUploaded":true}}]}
   changes_since from current (up to date) -> {"ok":true,"stale":false,"cursor":"<cursor>","more":false,"ops":[]}
   changes_since from pruned anchor (stale) -> {"ok":true,"stale":true}
+  changes_since from current after a reimport (stale) -> {"ok":true,"stale":true}
 
 === foreign dir rename carries the folder id
   A: mkdir before
@@ -147,6 +153,7 @@
   changes_since from baseline (working) -> {"ok":true,"stale":false,"cursor":"<cursor>","more":false,"ops":[{"op":"mkdir","ref":"d:<folder-1>","parentRef":"root","name":"before","item":{"ref":"d:<folder-1>","parentRef":"root","name":"before","kind":"dir","size":0,"mtime":"<zero>","etag":"<folder-1>","isUploaded":true}},{"op":"rename","is_dir":true,"id":"<folder-1>","srcRef":"d:<folder-1>","srcParentRef":"root","ref":"d:<folder-1>","parentRef":"root","name":"after","item":{"ref":"d:<folder-1>","parentRef":"root","name":"after","kind":"dir","size":0,"mtime":"<zero>","etag":"<folder-1>","isUploaded":true}}]}
   changes_since from current (up to date) -> {"ok":true,"stale":false,"cursor":"<cursor>","more":false,"ops":[]}
   changes_since from pruned anchor (stale) -> {"ok":true,"stale":true}
+  changes_since from current after a reimport (stale) -> {"ok":true,"stale":true}
 
 ########## STATS ##########
 === after uploads: cache filled, nothing left unpublished

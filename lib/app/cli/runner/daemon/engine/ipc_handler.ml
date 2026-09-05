@@ -455,11 +455,34 @@ module Make
                one, and a half-reported move loses an item. *)
             | _ -> None)
 
-  (* The wire carries the anchor as a string, [""] from a caller that has never
-     synced. *)
-  let cursor_field = function
-    | Some c -> `String (Journal.Entry_key.to_string c)
-    | None -> `String ""
+  (* An anchor is the generation of the mirror it was issued against, then the
+     entry it reached, [""] for a caller that has never synced. A reimport
+     stamps a new generation, and an anchor from before it is answered stale
+     whatever entry it names: the reader re-lists, which is what a reimport
+     asks for. Read and compared here, since the extension holding the anchor
+     cannot read a file this process wrote. *)
+  let generation_path = Filename.concat C.data_dir ("resync-" ^ C.domain_name)
+
+  let generation () =
+    let+ stamped = Io_lwt.Fs.read_file_opt generation_path in
+    String.trim (Option.value stamped ~default:"")
+
+  let stamp_generation () =
+    let* () = Io_lwt.Fs.ensure_parent generation_path in
+    Io_lwt.Fs.atomic_write generation_path
+      (Printf.sprintf "%.0f" (Unix.gettimeofday () *. 1000.))
+
+  let anchor_field generation entry =
+    `String
+      (generation ^ "|"
+      ^ match entry with Some c -> Journal.Entry_key.to_string c | None -> "")
+
+  let split_anchor anchor =
+    match String.index_opt anchor '|' with
+      | None -> ("", anchor)
+      | Some i ->
+          ( String.sub anchor 0 i,
+            String.sub anchor (i + 1) (String.length anchor - i - 1) )
 
   (* Named once: every call below passes the same pair. *)
   let cache_root = C.cache_root
@@ -475,63 +498,71 @@ module Make
      about, and the client uuid is one per machine, so filtering on it hid what
      the CLI did from the mount. *)
   let handle_changes_since ~limit anchor =
-    let anchor =
-      if anchor = "" then None else Journal.Entry_key.of_string anchor
-    in
-    let* head = Applied_entries.head ~cache_root ~domain_name in
-    let up_to_date =
-      match (anchor, head) with
-        | Some a, Some h -> Journal.Entry_key.compare a h = 0
-        (* Nothing kept and nothing asked for: a domain that has not changed
-           since this client first saw it, not a gap. *)
-        | None, None -> true
-        | _ -> false
-    in
-    if up_to_date then
-      Lwt.return
-        (ok_json
-           [
-             ("stale", `Bool false);
-             ("cursor", cursor_field head);
-             ("more", `Bool false);
-             ("ops", `List []);
-           ])
-    else
-      let* page =
-        Applied_entries.since ~cache_root ~domain_name ?since:anchor ~limit ()
+    let issued, anchor = split_anchor anchor in
+    let* generation = generation () in
+    if issued <> generation then Lwt.return (ok_json [("stale", `Bool true)])
+    else (
+      let anchor =
+        if anchor = "" then None else Journal.Entry_key.of_string anchor
       in
-      match page with
-        (* The anchor is no longer kept, so no delta bridges it. *)
-        | None -> Lwt.return (ok_json [("stale", `Bool true)])
-        | Some page ->
-            let entries = page.Applied_entries.entries in
-            let ops = List.concat_map snd entries in
-            (* Where the batch reached, which is not the head when it was capped.
+      let* head = Applied_entries.head ~cache_root ~domain_name in
+      let up_to_date =
+        match (anchor, head) with
+          | Some a, Some h -> Journal.Entry_key.compare a h = 0
+          (* Nothing kept and nothing asked for: a domain that has not changed
+           since this client first saw it, not a gap. *)
+          | None, None -> true
+          | _ -> false
+      in
+      if up_to_date then
+        Lwt.return
+          (ok_json
+             [
+               ("stale", `Bool false);
+               ("cursor", anchor_field generation head);
+               ("more", `Bool false);
+               ("ops", `List []);
+             ])
+      else
+        let* page =
+          Applied_entries.since ~cache_root ~domain_name ?since:anchor ~limit ()
+        in
+        match page with
+          (* The anchor is no longer kept, so no delta bridges it. *)
+          | None -> Lwt.return (ok_json [("stale", `Bool true)])
+          | Some page ->
+              let entries = page.Applied_entries.entries in
+              let ops = List.concat_map snd entries in
+              (* Where the batch reached, which is not the head when it was capped.
            Holding at the anchor when nothing followed is what stops a caller
            being told to start over. *)
-            let cursor =
-              match List.rev entries with (k, _) :: _ -> Some k | [] -> anchor
-            in
-            let+ described =
-              Lwt_list.map_s (op_to_json ~lookup:R.removed_folder_id) ops
-            in
-            (* A folder this client has no id for at all — the mirror and the folder
-           index disagreeing, not a poller yet to catch up. The caller re-lists,
-           which is the repair. *)
-            if List.exists Option.is_none described then
-              ok_json [("stale", `Bool true)]
-            else
+              let cursor =
+                match List.rev entries with
+                  | (k, _) :: _ -> Some k
+                  | [] -> anchor
+              in
+              let+ described =
+                Lwt_list.map_s (op_to_json ~lookup:R.removed_folder_id) ops
+              in
+              (* An op naming a folder this client has no id for cannot be given
+               to a reader at all. Counted, as a listing counts one, and the
+               rest of the batch answered: re-listing the domain over it would
+               be paying for one folder with every other. *)
+              let named = List.filter_map Fun.id described in
               ok_json
-                [
-                  ("stale", `Bool false);
-                  ("cursor", cursor_field cursor);
-                  ("more", `Bool page.Applied_entries.more);
-                  ("ops", `List (List.filter_map Fun.id described));
-                ]
+                ([
+                   ("stale", `Bool false);
+                   ("cursor", anchor_field generation cursor);
+                   ("more", `Bool page.Applied_entries.more);
+                   ("ops", `List named);
+                 ]
+                @ unnamed_field "changes_since"
+                    (List.length described - List.length named)))
 
   let handle_current_cursor () =
+    let* generation = generation () in
     let+ head = Applied_entries.head ~cache_root ~domain_name in
-    ok_json [("cursor", cursor_field head)]
+    ok_json [("cursor", anchor_field generation head)]
 
   (* Content lives in the chunk store, not as a file. Writing straight to "dest"
      spares the caller a move it may not be permitted to make. *)
@@ -771,6 +802,7 @@ module Make
                             with_target (fun key ->
                                 handle_revert hooks key (get_str obj "arg"))
                         | "full_resync" ->
+                            let* () = stamp_generation () in
                             let+ () = hooks.full_resync () in
                             ok_json []
                         (* Cheap by design: no store access, no backend health, so a

@@ -9,20 +9,6 @@ module Make (C : Conf_lwt.S) (D : Domain_engine.Domain) = struct
   module F = D.F
   module H = D.Ih
 
-  (* Nothing journals a change made straight in the bucket, so no delta can
-     bridge an anchor issued beforehand and every enumerator must re-list. The
-     extension stamps anchors with this token and expires mismatches, which is
-     what makes the invalidation durable: the notify below only reaches an
-     extension that happens to be running. *)
-  let resync_token_path = Filename.concat C.data_dir ("resync-" ^ C.domain_name)
-
-  let stamp_resync_token () =
-    try
-      let oc = open_out resync_token_path in
-      output_string oc (Printf.sprintf "%.0f" (Unix.gettimeofday () *. 1000.));
-      close_out oc
-    with Sys_error msg -> Log.err "resync token: %s" msg
-
   (* Only a process holding an [NSFileProviderManager] can move content in or out
      of the replica, so the daemon asks one to; that process subscribes to us, we
      never reach out. Events are numbered so an acknowledgement can be threaded
@@ -70,21 +56,32 @@ module Make (C : Conf_lwt.S) (D : Domain_engine.Domain) = struct
   (* A hint, not a request: the journal carries the same news and the next
      enumeration reads it, so nobody listening is not a failure. No item is
      named either — a subscriber answers this by re-reading the working set, so
-     saying which one changed would be a field nobody acts on. *)
+     saying which one changed would be a field nobody acts on. One event for a
+     burst of keys, for the same reason: a catch-up names every key it applied,
+     and the answer to each is the same look. *)
+  let changed_pending = ref false
+
   let notify_changed ~subs (_ : Logical_key.t) =
-    ignore (publish ~subs "changed" [])
+    if not !changed_pending then begin
+      changed_pending := true;
+      Lwt.async (fun () ->
+          let open Lwt.Syntax in
+          let+ () = Lwt_unix.sleep 0.2 in
+          changed_pending := false;
+          ignore (publish ~subs "changed" []))
+    end
 
   let hooks ~subs =
     H.
       {
         evict = (fun key -> act ~subs "evict" key);
         restore = (fun key -> act ~subs "restore" key);
-        (* [full_resync]'s token is on disk before its event is attempted, which
-           is what makes that one durable where this is a hint. *)
         changed = notify_changed ~subs;
+        (* A reimport: the handler has stamped a new generation, so every anchor
+           outstanding is answered stale and the reader re-lists. The event is
+           the hint that it may do so now. *)
         full_resync =
           (fun () ->
-            stamp_resync_token ();
             (* The mirror may have just been replaced wholesale by a command in
                another process, and this is the one moment we know a rebuild is
                owed. *)
