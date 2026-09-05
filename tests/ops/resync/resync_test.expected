@@ -5,7 +5,8 @@ nothing is recorded yet: ok
 it rebuilt: ok
 saying why: ok
 it found the manifest: ok
-and told the daemon once: ok
+  reported: put a.txt 0
+and the file it found is on the applied entries: ok
 
 === a clean rebuild records how far it got
 the bookmark is set: ok
@@ -13,12 +14,13 @@ the bookmark is set: ok
 === a client already caught up applies the journal instead
   incremental(0)
 it did not rebuild: ok
-and told the daemon nothing: ok
+and reported nothing: ok
 
 === --full rebuilds a client that had no need to
   full(1 manifests, 0 failed, --full flag)
 it rebuilt: ok
 saying the caller asked: ok
+and a file the store still has as it was reports nothing: ok
 
 === a rebuild rewrites the mirror in place
 the mirror holds what the last walk left: ok
@@ -26,6 +28,27 @@ the mirror holds what the last walk left: ok
 a chunk survives the rebuild: ok
 a manifest the store no longer has is dropped: ok
 and one it still has is kept: ok
+  reported: delete gone.txt
+the drop is reported: ok
+
+=== a rebuild is a delta on the applied entries, not a new log
+an anchor from before the rebuild is still bridged: ok
+
+=== a folder that moved is reported once, where it now is
+  full(1 manifests, 0 failed, --full flag)
+  reported: mkdir new X
+arrived under its id at the new path, and left nowhere: ok
+the old path is gone from the mirror: ok
+
+=== a folder recreated under its name is a new folder
+  full(1 manifests, 0 failed, --full flag)
+  reported: rmdir new X, mkdir new Y
+the old id leaves and the new one arrives, in that order: ok
+
+=== a folder the store no longer has is reported gone
+  full(1 manifests, 0 failed, --full flag)
+  reported: rmdir new Y
+under the id it had: ok
 
 === a batch the link lost is asked again, not given up on
   full(1 manifests, 0 failed, --full flag)
@@ -40,4 +63,4 @@ the failure is counted: ok
 and the bookmark did not move: ok
 nor was anything swept: ok
 
-20 check(s), 0 failure(s)
+27 check(s), 0 failure(s)

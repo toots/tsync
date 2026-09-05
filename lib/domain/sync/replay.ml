@@ -11,6 +11,8 @@ module type JOURNAL = sig
     (** Every entry this client has applied or published, as far back as it
         keeps them. *)
     val applied_keys : unit -> Journal.Entry_key.t list io
+
+    val note_local : Journal.op list -> unit io
   end
 end
 

@@ -53,7 +53,13 @@ module type S = sig
   val list_tree : prefix:Logical_key.t -> unit -> listed list io
   val walk : unit -> string list io
   val ensure_root : unit -> unit io
-  val record : parent:Logical_key.t -> Inode_tree.entry -> Logical_key.t io
+
+  val record :
+    parent:Logical_key.t ->
+    Inode_tree.entry ->
+    (Logical_key.t * [ `Same | `Changed | `Replaced of string ]) io
+
+  val sweep_stale : cutoff:float -> unit -> Journal.op list io
 end
 
 module type OVER = sig
@@ -250,21 +256,122 @@ struct
 
     (* Where a folder's child is filed and under what name, shared so a resync
        and a browse leave the same tree behind. The name is in the body: the key
-       a child was read by is hashed. *)
+       a child was read by is hashed. What was there before is read first, so a
+       resync can tell what it changed without a second copy of the tree. *)
     let record ~parent (entry : Inode_tree.entry) =
       match entry.Inode_tree.body with
         | Inode_tree.Dir marker ->
             let key = Logical_key.dir_in parent marker.Folder.name in
+            let* held =
+              Folders.lookup_id ~cache_root:C.cache_root
+                ~domain_name:C.domain_name key
+            in
             let+ () =
               Folders.write ~cache_root:C.cache_root ~domain_name:C.domain_name
                 key marker
             in
-            key
+            let state =
+              match held with
+                | None -> `Changed
+                | Some id when id = marker.Folder.id -> `Same
+                | Some id -> `Replaced id
+            in
+            (key, state)
         | Inode_tree.File manifest ->
             let key =
               Logical_key.file_in parent (Manifest.recorded_name manifest)
             in
+            let* held = Mf.published key in
             let+ () = Mf.write key manifest in
-            key
+            (* The fields a reader is told about: a manifest that differs in
+               none of them is the same item to it. *)
+            let same =
+              match held with
+                | Some m ->
+                    h1 m = h1 manifest
+                    && size m = size manifest
+                    && mtime m = mtime manifest
+                    && symlink m = symlink manifest
+                | None -> false
+            in
+            (key, if same then `Same else `Changed)
+
+    (* An entry the walk rewrote carries its mtime; one it did not is one the
+       store no longer has. Every live marker is rewritten on each visit, so a
+       folder whose own marker is stale was not visited and nothing under it
+       was: it goes whole. A folder whose id the index now places elsewhere
+       moved, and the walk reported it there under that id. *)
+    let sweep_stale ~cutoff () =
+      (* An mtime comes from a coarser clock than the cutoff: a write in the
+         first tick of the walk can predate it by a few milliseconds. *)
+      let cutoff = cutoff -. 1. in
+      let stale path =
+        let+ st = Fs.stat_opt path in
+        match st with Some st -> st.Unix.st_mtime < cutoff | None -> false
+      in
+      let quiet f = Io.catch f (fun _ -> return_unit) in
+      let stale_folder path key ops =
+        let marker_path = Filename.concat path Folders.marker_name in
+        let* marker = Fs.read_file_opt marker_path in
+        match Option.bind marker Folder.marker_of_string with
+          | None -> Io.return None
+          | Some m ->
+              let* is_stale = stale marker_path in
+              if not is_stale then Io.return None
+              else
+                let* elsewhere =
+                  Folders.key_of_id ~cache_root:C.cache_root
+                    ~domain_name:C.domain_name ~root:Lk.root m.Folder.id
+                in
+                let+ () = Fs.rm_rf path in
+                let gone =
+                  match elsewhere with
+                    | None -> true
+                    | Some k -> Logical_key.equal k key
+                in
+                Some
+                  (if gone then `Rmdir (rel_of key, Some m.Folder.id) :: ops
+                   else ops)
+      in
+      (* Answers the ops so far and how many entries the directory still holds:
+         one left empty is removed, as before the walk had anything to say. *)
+      let rec walk dir key ops =
+        let* names = Fs.readdir_list_quiet dir in
+        fold_left_s
+          (fun (ops, left) name ->
+            let path = Filename.concat dir name in
+            let* is_dir = Fs.is_directory path in
+            if is_dir then
+              let* real = Fs.real_dir_name path name in
+              let child = Logical_key.dir_in key real in
+              let* dropped = stale_folder path child ops in
+              match dropped with
+                | Some ops -> Io.return (ops, left)
+                | None ->
+                    let* ops, held = walk path child ops in
+                    if held = 0 then
+                      let+ () = quiet (fun () -> Retry.rmdir path) in
+                      (ops, left)
+                    else Io.return (ops, left + 1)
+            else
+              let* is_stale = stale path in
+              if not is_stale then Io.return (ops, left + 1)
+              else
+                let* m =
+                  if Stored_key.internal_leaf name then Io.return None
+                  else read_clean path
+                in
+                let+ () = quiet (fun () -> Retry.unlink path) in
+                match m with
+                  | Some m ->
+                      let file =
+                        Logical_key.file_in key (real_file_name name m)
+                      in
+                      (`Delete (rel_of file) :: ops, left)
+                  | None -> (ops, left))
+          (ops, 0) names
+      in
+      let+ ops, _ = walk (Mf.root ()) Lk.root [] in
+      List.rev ops
   end
 end

@@ -49,6 +49,12 @@ module Make (C : Conf_lwt.S) = struct
   let applied_keys () =
     Applied_entries.keys ~cache_root:C.cache_root ~domain_name:C.domain_name
 
+  (* A rebuild's own finding: nothing to publish, since the store already says
+     it, and everything to tell a reader of the kept entries. *)
+  let note_local ops =
+    let+ () = note_applied (J.entry_key ()) ops in
+    announce ops
+
   (* Minted here when the caller named none, so the key is known before the
      entry goes out and both records carry the same one. *)
   let entry_key_of = function Some k -> k | None -> J.entry_key ()

@@ -10,9 +10,9 @@
 
     Naming a folder goes through {!Layout.ensure_id} and so through
     {!Over.Make.write}, which writes the entry with the marker: whichever
-    process writes the mirror keeps the index with it. {!Cache_layout.clear}
-    empties both together, and filling the index again is {!Over.Make.rebuild},
-    which the resync owes. *)
+    process writes the mirror keeps the index with it. A resync's walk rewrites
+    both, and restating the index from the markers alone is
+    {!Over.Make.rebuild}. *)
 
 module type S = sig
   type 'a io
@@ -58,8 +58,7 @@ module type S = sig
     unit io
 
   (** The domain-relative path of a folder id, or [None] when nothing records it
-      — a folder that is gone, or an index emptied by {!Cache_layout.clear} and
-      not yet rebuilt.
+      — a folder that is gone, or an index not yet rebuilt from the markers.
 
       Climbs the index and holds the result against the markers before believing
       it, so a wrong entry costs an answer rather than naming another folder.

@@ -24,6 +24,10 @@
 
 val manifests_dir : cache_root:string -> string -> string
 
+(** What a resync starts by emptying; the two things under it are otherwise what
+    a caller wants. *)
+val scratch_dir : cache_root:string -> string -> string
+
 (** The [.tsync-dir] markers say what id a path has; this tree says where an id
     lives, which is what an item identifier asks. Rebuildable from the markers
     at any time by whoever keeps both. *)
@@ -92,16 +96,17 @@ module type S = sig
       [dir_path] records when [name] is a handle. *)
   val real_dir_name : string -> string -> string io
 
-  (** What a resync starts without: the applied entries and the scratch space.
-      The mirror, the folder index and the chunks stay; the walk rewrites the
-      first two in place, and staged edits are kept since nothing else holds
-      those bytes. *)
+  (** What a resync starts without: the scratch space. The mirror, the folder
+      index and the chunks stay; the walk rewrites the first two in place, and
+      staged edits are kept since nothing else holds those bytes. The applied
+      entries stay as well: the rebuild is reported there. *)
   val clear_projection : cache_root:string -> domain_name:string -> unit io
 
-  (** Drop every mirror manifest and folder record last written before [cutoff]:
-      what a walk that rewrote everything the store still has did not touch.
-      Only after a walk that reached everything, a folder it could not read
-      being not one that is gone. *)
+  (** Drop every folder record last written before [cutoff]: what a walk that
+      rewrote everything the store still has did not touch. The mirror's own
+      sweep is {!Checkout.S.sweep_stale}, which reports what it drops. Only
+      after a walk that reached everything, a folder it could not read being not
+      one that is gone. *)
   val sweep_stale :
     cutoff:float -> cache_root:string -> domain_name:string -> unit io
 end
