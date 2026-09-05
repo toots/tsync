@@ -1,0 +1,36 @@
+(executable
+ (flags
+  (:standard
+   -open
+   Tsync_core
+   -open
+   Tsync_backend_api
+   -open
+   Tsync_backend_lwt
+   -open
+   Tsync_conf_lwt
+   -open
+   Tsync_local_backend_lwt
+   -open
+   Tsync_diagnostics
+   -open
+   Tsync_remote_lwt
+   -open
+   Tsync_journal
+   -open
+   Tsync_test_harness))
+ (name status_cost)
+ (libraries
+  tsync-libs.core
+  tsync_test_harness
+  tsync_backend_api
+  tsync_backend_lwt
+  tsync_local_backend_lwt
+  tsync_diagnostics
+  tsync_remote_lwt
+  tsync_journal
+  tsync_conf_lwt
+  yojson
+  unix
+  lwt
+  lwt.unix))

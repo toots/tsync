@@ -1370,6 +1370,14 @@
   (action
    (diff status_ask.expected status_ask.output))))
 
+(subdir unit/status_cost
+ (alias
+  (name default)
+  (deps status_cost.exe))
+ (rule
+  (alias runtest)
+  (action (run ./status_cost.exe))))
+
 (subdir unit/status_report
  (alias
   (name default)
