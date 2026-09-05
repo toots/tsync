@@ -176,4 +176,11 @@ module Make (S : Store) = struct
     Stored_key.in_space ~prefix:from_prefix (relative_path chunk_key)
 
   let from_shard_prefix shard = from_prefix ^ shard ^ "/"
+
+  (* Not one prefix: corruption markers and job requests are filed beside the
+     domain root rather than inside it, and a reader that knows only the root
+     — the proxy frontend routing a request to a domain — takes them for
+     another domain's keys. *)
+  let domain_roots =
+    [domain_root; corrupted_prefix; verify_jobs_prefix; gc_jobs_prefix]
 end

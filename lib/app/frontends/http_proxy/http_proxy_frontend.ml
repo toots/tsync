@@ -118,7 +118,7 @@ let inherited bindings b name =
         match distinct_values bindings name with [v] -> Some v | _ -> None)
 
 type route = {
-  domain_root : string;
+  roots : string list;  (** {!Chunk_layout.Make.domain_roots} for this domain. *)
   shares_prefix : string;
   secret : string;
   read_only : bool;
@@ -210,8 +210,9 @@ let make_route bindings ~peers (b : Frontend.binding) =
       b.Frontend.options
   in
   let module Diag = Diagnostics.Make (C) in
+  let module L = Chunk_layout.Make (C) in
   {
-    domain_root = "tsync/" ^ C.domain_name ^ "/";
+    roots = L.domain_roots;
     shares_prefix = C.shares_prefix;
     secret;
     read_only;
@@ -528,10 +529,10 @@ let op_keys = function
 
 (* A name, not a key: an op may target a region rather than an object. *)
 let within route name =
-  String.starts_with ~prefix:route.domain_root name
+  List.exists (fun r -> String.starts_with ~prefix:r name) route.roots
   || String.starts_with ~prefix:route.shares_prefix name
 
-(* A request targets the route whose [domain_root] prefixes its key. *)
+(* A request targets the route one of whose [roots] prefixes its key. *)
 let route_key = function
   | Get k | Head k | Put k | Put_if_absent k | Delete k ->
       Some (Stored_key.to_string k)
@@ -823,7 +824,10 @@ let share_route routes = List.find_opt (fun r -> r.serve_share <> None) routes
    signed the request is the right one. *)
 let route_for routes ~key ~authed =
   match
-    List.find_opt (fun r -> String.starts_with ~prefix:r.domain_root key) routes
+    List.find_opt
+      (fun r ->
+        List.exists (fun root -> String.starts_with ~prefix:root key) r.roots)
+      routes
   with
     | Some r -> Some r
     | None

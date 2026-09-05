@@ -108,4 +108,10 @@ module Make (S : Store) : sig
   val gc_jobs_prefix : string
 
   val gc_job_key : run:string -> string -> Stored_key.t
+
+  (** Every prefix this domain's keys live under. More than one because the
+      corruption and job roots are siblings of ["tsync/<domain>/"], not children
+      of it: whoever decides that a key belongs to a domain has to ask for all
+      of them. *)
+  val domain_roots : string list
 end

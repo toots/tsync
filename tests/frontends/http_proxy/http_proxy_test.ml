@@ -226,7 +226,11 @@ let () =
      every domain root) go to the route whose secret signed the request. *)
   let route name =
     {
-      Http_proxy_frontend.domain_root = "tsync/" ^ name ^ "/";
+      Http_proxy_frontend.roots =
+        (let module L = Chunk_layout.Make (struct
+           let chunk_prefix = "tsync/" ^ name ^ "/chunks/"
+         end) in
+         L.domain_roots);
       shares_prefix = "tsync/shares/";
       secret = name;
       read_only = false;
@@ -400,6 +404,17 @@ let () =
   assert (pick "tsync/shares/deadbeef" "two" = Some "two");
   assert (pick "tsync/shares/deadbeef" "nobody" = None);
   assert (pick "elsewhere/x" "one" = None);
+  (* Corruption markers and job requests sit beside a domain's root, not inside
+     it, and belong to the domain named in them: a listing of them through a
+     proxy is not a request for some other domain, and must not 404. *)
+  let module L = Chunk_layout.Make (struct
+    let chunk_prefix = "tsync/one/chunks/"
+  end) in
+  assert (pick L.corrupted_prefix "one" = Some "one");
+  assert (pick L.verify_jobs_prefix "one" = Some "one");
+  assert (pick L.gc_jobs_prefix "one" = Some "one");
+  assert (Http_proxy_frontend.within (route "one") L.corrupted_prefix);
+  assert (not (Http_proxy_frontend.within (route "one") "tsync/corrupted/two/"));
 
   (* A bulk op is routed and authorised by its first key and then run whole, so
      every key past the first is held against the route that first one chose.
