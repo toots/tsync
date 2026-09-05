@@ -24,61 +24,63 @@ struct
     module Rp = Rp.Make (C) (F)
 
     let last_version = ref None
+    let last_swept = ref 0.
 
     let same v =
       match !last_version with
         | Some prev -> Journal.Entry_key.compare prev v = 0
         | None -> false
 
+    (* How long a peer's change may go unseen when its cursor bump never lands
+       or lands behind a later one from another of its processes. Timed from the
+       last listing rather than from a wait that outran a timeout: every store
+       answers a wait well inside this — a peer holds a watch for at most
+       {!Http_proxy.Watch.max_seconds}, an object store sleeps a couple of
+       seconds — so a sweep raced against the wait is one that never runs.
+
+       ponytail: one listing per client per minute while nothing changes; an
+       hour or a jittered interval if a fleet of idle clients ever shows up in a
+       store's request bill. *)
+    let sweep_interval = ref 60.
+    let set_sweep_interval s = sweep_interval := s
+
     (* The cursor first, and only then the journal. A peer publishes an entry and
        bumps the cursor after it; reading the journal on every tick regardless
        would cost a listing per client per interval for the state that says
-       nothing has changed. It also means an entry whose bump never landed is one
-       nobody comes looking for. *)
+       nothing has changed. An entry whose bump never landed is one only the
+       sweep goes looking for. *)
     let sync_once ~on_changed () =
       let* cursor = Js.fetch_cursor () in
-      match cursor with
-        | None -> Io.return 0
-        | Some v when same v -> Io.return 0
-        | Some v ->
-            (* Recorded only after a clean pass, so a failed one is retried on the
-               next tick. *)
-            let* n = Rp.apply_foreign ~on_changed () in
-            last_version := Some v;
-            Io.return n
+      let moved = match cursor with None -> false | Some v -> not (same v) in
+      let due = Unix.gettimeofday () -. !last_swept >= !sweep_interval in
+      if not (moved || due) then Io.return 0
+      else begin
+        last_swept := Unix.gettimeofday ();
+        (* Recorded only after a clean pass, so a failed one is retried on the
+           next tick. *)
+        let* n = Rp.apply_foreign ~on_changed () in
+        Option.iter (fun v -> last_version := Some v) cursor;
+        Io.return n
+      end
 
     (* Only ever reached by a failure. The wait is what paces this loop, so
        something that fails without taking any time would otherwise spin. *)
     let retry_floor = 2.
 
-    (* How long a peer's change may go unseen when its cursor bump never lands
-       or lands behind a later one from another of its processes. The wait for
-       the cursor is raced against it, and losing means reading the journal
-       regardless of what the cursor says.
-
-       ponytail: one listing per client per minute while nothing changes; an
-       hour or a jittered interval if a fleet of idle clients ever shows up in a
-       store's request bill. *)
-    let sweep_interval = 60.
-
     let start ~on_changed () =
       Io.async (fun () ->
           let step () =
-            let* woke =
+            (* A ceiling on the wait, not what times the sweep: a store that
+               answers none at all must not park this loop for good. *)
+            let* () =
               Io.catch
                 (fun () ->
-                  let+ () =
-                    Clock.with_timeout sweep_interval (fun () ->
-                        Js.wait_cursor_change !last_version)
-                  in
-                  true)
+                  Clock.with_timeout !sweep_interval (fun () ->
+                      Js.wait_cursor_change !last_version))
                 (fun exn ->
-                  if Clock.is_timeout exn then Io.return false else Io.fail exn)
+                  if Clock.is_timeout exn then Io.return () else Io.fail exn)
             in
-            let+ (_ : int) =
-              if woke then sync_once ~on_changed ()
-              else Rp.apply_foreign ~on_changed ()
-            in
+            let+ (_ : int) = sync_once ~on_changed () in
             ()
           in
           let rec loop () =

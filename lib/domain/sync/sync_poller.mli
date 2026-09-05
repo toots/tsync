@@ -14,14 +14,19 @@ module Over
   module Make
       (C : Conf.S with type 'a io = 'a Io.t)
       (F : File_ops.S with type 'a io := 'a Io.t) : sig
-    (** One pass: read the cursor, and if it has moved since the last pass apply
-        whatever {!Replay.apply_foreign} finds, answering how many entries that
-        was. The cursor is the gate — a peer bumps it after publishing — so an
-        entry it does not point past is one this never goes looking for.
+    (** One pass: read the cursor, and if it has moved since the last pass —
+        or a sweep is due — apply whatever {!Replay.apply_foreign} finds,
+        answering how many entries that was. The cursor is the gate a peer bumps
+        after publishing, and the sweep is what finds an entry whose bump never
+        landed.
 
         [on_changed key] is called for each key a foreign op touched, after the
         op is applied. *)
     val sync_once : on_changed:(string -> unit) -> unit -> int Io.t
+
+    (** How long the journal may go unread while the cursor stands still.
+        Defaults to a minute; a test shortens it. *)
+    val set_sweep_interval : float -> unit
 
     (** {!sync_once} whenever the store says the cursor is worth reading again,
         detached. What paces it is {!File_store.wait_cursor_change}, so the

@@ -192,5 +192,17 @@ let () =
        (Backend.Watch_token.equal
           (token_of "0000000000200-peer")
           (Backend.Watch_token.of_wire " 0000000000200-peer\n"));
+
+     (* Every store answers a wait sooner than a sweep falls due, so a sweep
+        timed by racing the wait is one that never runs, and an entry whose
+        cursor bump was lost is never looked for again. *)
+     case "a sweep falling due lists the journal though the cursor stood still";
+     let (_ : int * int) = since () in
+     Sp.set_sweep_interval 0.;
+     let* (_ : int) = Sp.sync_once ~on_changed:(fun _ -> ()) () in
+     let r, l = since () in
+     step "cursor reads: %d, journal listings: %d" r l;
+     check "the cursor was read" (r = 1);
+     check "and the journal listed anyway" (l = 1);
      Lwt.return_unit);
   Scratch.cleanup root

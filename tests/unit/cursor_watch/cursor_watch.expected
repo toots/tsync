@@ -23,3 +23,8 @@ the token is the one from the last clean pass: ok
 === and it advances again once a pass completes
 the token has caught up with the cursor: ok
 a token off a body compares equal to one off the wire: ok
+
+=== a sweep falling due lists the journal though the cursor stood still
+  cursor reads: 1, journal listings: 1
+the cursor was read: ok
+and the journal listed anyway: ok
