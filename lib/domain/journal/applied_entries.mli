@@ -64,7 +64,8 @@ val since :
 
 (** The entry handled last, [None] before there is one. Reads the tail of one
     shard, so it stays cheap enough for the caller that asks before every
-    enumeration. *)
+    enumeration, and the whole shard only when its last line is longer than the
+    tail. *)
 val head :
   cache_root:string -> domain_name:string -> Journal.Entry_key.t option Lwt.t
 

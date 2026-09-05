@@ -165,7 +165,14 @@ let head ~cache_root ~domain_name =
   match List.rev names with
     | [] -> Lwt.return_none
     | name :: _ -> (
-        let+ entries = read_tail ~cache_root ~domain_name name in
+        let* entries = read_tail ~cache_root ~domain_name name in
+        (* A last line longer than the tail is the cut fragment the tail drops,
+           so the shard is read whole then. *)
+        let+ entries =
+          match entries with
+            | [] -> read_shard ~cache_root ~domain_name name
+            | entries -> Lwt.return entries
+        in
         match List.rev entries with [] -> None | (k, _) :: _ -> Some k)
 
 type shard_stat = { name : string; size : int; mtime : float }

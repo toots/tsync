@@ -149,6 +149,16 @@ let main () =
   show page;
   check "the entries around it still read" (List.length (entries page) = 2);
 
+  case "the head is found past a line longer than the tail read";
+  let wide = key (Int64.add september 2L) in
+  let* () =
+    note ~now:in_september wide
+      (List.init 200 (fun i ->
+           `Put (Printf.sprintf "photos/%s-%03d.jpg" (String.make 100 'w') i, 1L)))
+  in
+  let* h = head () in
+  check "an entry wider than the tail is still the head" (h = Some wide);
+
   case "an anchor no longer kept cannot be bridged";
   let* shards, bytes =
     Applied_entries.prune ~cache_root ~domain_name ~keep_days:0
@@ -160,7 +170,7 @@ let main () =
   show page;
   check "which is what stales an anchor" (page = None);
 
-  report ~expected:16 ();
+  report ~expected:17 ();
   Lwt.return_unit
 
 let () =
