@@ -74,7 +74,8 @@ CAMLprim value tsync_statvfs(value _path) {
    a process is on rather than for the process. */
 CAMLprim value tsync_loadavg(value unit) {
   CAMLparam1(unit);
-#if defined(__linux__) || defined(__APPLE__)
+/* Android is Linux with a libc that declares this only from API 29. */
+#if (defined(__linux__) && !defined(__ANDROID__)) || defined(__APPLE__)
   double load[1];
   if (getloadavg(load, 1) == 1) CAMLreturn(caml_copy_double(load[0]));
 #endif
