@@ -382,6 +382,10 @@ type client = {
   dump_listing : unit -> unit Lwt.t;
   dump_paged : unit -> unit Lwt.t;
   dump_flat : unit -> unit Lwt.t;
+  (* The flat listing with something done between its pages. *)
+  dump_flat_between : (unit -> unit Lwt.t) -> unit Lwt.t;
+  (* Where the daemon keeps its walk between pages. *)
+  kept_walk : string;
   dump_changes : label:string -> anchor:string -> unit Lwt.t;
   cursor : unit -> string Lwt.t;
   (* What `tsync fileprovider reimport` does: every anchor issued before it is
@@ -1298,10 +1302,11 @@ let setup_client (module C : Conf_lwt.S) root staging_prefix =
      names. What it proves is that the page tokens compose: a page holds no
      more than it was asked for, the cursor is the last entry served, and the
      pages laid end to end are the listing. *)
-  let paged label fields =
+  let paged ?(between = fun () -> Lwt.return_unit) label fields =
     let rec page after n =
       if n > 20 then Lwt.return_unit
       else
+        let* () = if after = None then Lwt.return_unit else between () in
         let* obj =
           request
             (fields
@@ -1326,6 +1331,14 @@ let setup_client (module C : Conf_lwt.S) root staging_prefix =
   (* The whole domain, the way a frontend that must enumerate everything asks
      for it: one order across folders. *)
   let dump_flat () = paged "list_all" [("action", `String "list_all")] in
+  let dump_flat_between between =
+    paged ~between "list_all" [("action", `String "list_all")]
+  in
+  let kept_walk =
+    Filename.concat
+      (Cache_layout.scratch_dir ~cache_root:C.cache_root C.domain_name)
+      ".tsync-list-all"
+  in
   let cursor () =
     let+ obj = action "cursor" in
     Option.value ~default:"" (get_str obj "cursor")
@@ -1355,6 +1368,8 @@ let setup_client (module C : Conf_lwt.S) root staging_prefix =
     dump_listing;
     dump_paged;
     dump_flat;
+    dump_flat_between;
+    kept_walk;
     dump_changes;
     cursor;
     bump_generation;
@@ -2099,6 +2114,49 @@ let run_ipc_changes_scenario ?versioning ({ name; steps } : scenario) =
 
 let run_ipc ?versioning scenarios =
   List.iter (run_ipc_scenario ?versioning) scenarios
+
+(* The flat listing with the walk the daemon keeps between pages gone by the
+   next one, and then with a file written between pages: the pages laid end to
+   end must still be the listing, and a page is the walk it started from — what
+   lands meanwhile is the change feed's to carry. *)
+let run_ipc_snapshot_scenario ?versioning ({ name; steps } : scenario) =
+  reset_ids ();
+  Printf.printf "=== %s\n" name;
+  List.iter (fun s -> Printf.printf "  %s\n" (render_step s)) steps;
+  let root = Scratch.dir "ipc3" in
+  let module C =
+    (val make_conf ?versioning ~client_name:"Test Client"
+           ~backend_root:(Filename.concat root "backend")
+           ~cache_root:(Filename.concat root "cache")
+           ~data_dir:(Filename.concat root "data")
+           ~socket_path:(Filename.concat root "s.sock")
+           ())
+  in
+  Lwt_main.run
+    (let client = setup_client (module C) root "" in
+     let* () =
+       Lwt.catch
+         (fun () ->
+           let* () = Lwt_list.iter_s client.do_step steps in
+           let* () = client.drain () in
+           print_endline "--- flat, the kept walk dropped between pages";
+           let* () =
+             client.dump_flat_between (fun () ->
+                 Io_lwt.Fs.unlink_quiet client.kept_walk)
+           in
+           print_endline "--- flat, a file written between pages";
+           client.dump_flat_between (fun () ->
+               client.do_step (Write { path = "mmm.txt"; content = "m" })))
+         (fun exn ->
+           Printf.printf "  ERROR %s\n" (Printexc.to_string exn);
+           Lwt.return_unit)
+     in
+     client.stop ());
+  rm_rf root;
+  print_newline ()
+
+let run_ipc_snapshot ?versioning scenarios =
+  List.iter (run_ipc_snapshot_scenario ?versioning) scenarios
 
 let run_ipc_changes ?versioning scenarios =
   List.iter (run_ipc_changes_scenario ?versioning) scenarios

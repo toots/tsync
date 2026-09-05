@@ -240,6 +240,12 @@ val run_ipc : ?versioning:bool -> scenario list -> unit
     the mirror. *)
 val run_ipc_changes : ?versioning:bool -> scenario list -> unit
 
+(** The flat listing with the walk the daemon keeps between pages removed before
+    the next page, and then with a file written between pages: the pages laid
+    end to end must still be the listing, and a page is the walk it started
+    from. *)
+val run_ipc_snapshot : ?versioning:bool -> scenario list -> unit
+
 (** Snapshot the structure of the daemon's own report — the [stats] IPC action
     behind [tsync status], and the same collection the http-proxy serves. Values
     that move between runs (pids, uptimes, paths, timings) are left out. *)

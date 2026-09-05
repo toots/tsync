@@ -155,6 +155,19 @@
   changes_since from pruned anchor (stale) -> {"ok":true,"stale":true}
   changes_since from current after a reimport (stale) -> {"ok":true,"stale":true}
 
+########## KEPT WALK ##########
+=== files and folders share one order
+  mkdir mid
+  drain
+  write aaa.txt "a"
+  write zzz.txt "z"
+--- flat, the kept walk dropped between pages
+  list_all limit=2 -> {"ok":true,"items":[{"ref":"f:.tsync-root/aaa.txt","parentRef":"root","name":"aaa.txt","kind":"file","size":1,"mtime":"<mtime>","etag":"15da855801af627d","isUploaded":true},{"ref":"d:<folder-1>","parentRef":"root","name":"mid","kind":"dir","size":0,"mtime":"<zero>","etag":"<folder-1>","isUploaded":true}],"next":".tsync-root/mid"}
+  list_all limit=2 after=.tsync-root/mid -> {"ok":true,"items":[{"ref":"f:.tsync-root/zzz.txt","parentRef":"root","name":"zzz.txt","kind":"file","size":1,"mtime":"<mtime>","etag":"7dbefb508fa14bbd","isUploaded":true}]}
+--- flat, a file written between pages
+  list_all limit=2 -> {"ok":true,"items":[{"ref":"f:.tsync-root/aaa.txt","parentRef":"root","name":"aaa.txt","kind":"file","size":1,"mtime":"<mtime>","etag":"15da855801af627d","isUploaded":true},{"ref":"d:<folder-1>","parentRef":"root","name":"mid","kind":"dir","size":0,"mtime":"<zero>","etag":"<folder-1>","isUploaded":true}],"next":".tsync-root/mid"}
+  list_all limit=2 after=.tsync-root/mid -> {"ok":true,"items":[{"ref":"f:.tsync-root/zzz.txt","parentRef":"root","name":"zzz.txt","kind":"file","size":1,"mtime":"<mtime>","etag":"7dbefb508fa14bbd","isUploaded":true}]}
+
 ########## STATS ##########
 === after uploads: cache filled, nothing left unpublished
   sections: server process lwt traffic domains
