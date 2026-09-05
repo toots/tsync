@@ -584,9 +584,8 @@ let text json =
       | `String e -> row 4 "journal" ("error: " ^ e)
       | _ ->
           row 4 "journal"
-            (Printf.sprintf "%d entries%s, %d to apply"
+            (Printf.sprintf "%d entries, %d to apply"
                (int_of (mem j "entries"))
-               (if bool_of (mem j "truncated") then "+" else "")
                (int_of (mem j "behind"))));
     (* Silent on a store that is checked and clean, which is every store almost
        always. Not silent when nothing is checking, because that zero means

@@ -21,9 +21,6 @@ let level_name = function
   | `warn -> "warn"
   | `err -> "err"
 
-(* A domain's journal is unbounded and this is a diagnosis page. *)
-let journal_sample = 1000
-
 (* Enough that a store in real trouble reads as such rather than as a handful,
    and bounded because a listing that grew with the damage would make the report
    worse exactly when it matters most. *)
@@ -171,14 +168,19 @@ module Make (C : Conf_lwt.S) = struct
             None ))
 
   (* [behind] is what a sync pass would still have to do, our own entries
-     excluded. *)
+     excluded.
+
+     Listed whole, though a journal is unbounded and this is a diagnosis page:
+     [max_keys] cuts the listing where the store chooses to, and the entries a
+     reader is behind on are the newest — the ones such a cut drops. A count
+     that read "caught up" from the oldest thousand keys is the one number here
+     nobody could act on. *)
   let journal ~cursor (module B : Backend_lwt.Store) =
     Lwt.catch
       (fun () ->
         let+ entries =
           Lwt_unix.with_timeout probe_timeout (fun () ->
-              B.list_prefix ~max_keys:(journal_sample + 1)
-                ~prefix:C.journal_prefix ())
+              B.list_prefix ~prefix:C.journal_prefix ())
         in
         let my_uuid = J.client_uuid () in
         let last = Fs.read_last_sync_key () in
@@ -201,7 +203,6 @@ module Make (C : Conf_lwt.S) = struct
           [
             ("entries", `Int (List.length keys));
             ("behind", `Int (List.length behind));
-            ("truncated", `Bool (List.length keys > journal_sample));
             ( "cursor",
               match cursor with
                 | Some c -> `String (String.trim c)

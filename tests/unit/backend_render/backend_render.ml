@@ -18,13 +18,7 @@ let backend ?traffic ?deferred ~name ~typ ~role () =
        ("config", `Assoc [("bucket", `String ("tsync-" ^ name))]);
        ("reachable", `Bool true);
        ("latencyMs", `Float 138.);
-       ( "journal",
-         `Assoc
-           [
-             ("entries", `Int 135);
-             ("behind", `Int 0);
-             ("truncated", `Bool false);
-           ] );
+       ("journal", `Assoc [("entries", `Int 135); ("behind", `Int 0)]);
        ("corrupted", `Assoc [("checked", `Bool true); ("chunks", `Int 0)]);
      ]
     @ (match traffic with None -> [] | Some t -> [("traffic", t)])
