@@ -65,7 +65,7 @@ let member name j = Yojson.Safe.Util.member name j
 let bound = 120.
 
 let main () =
-  let+ domain = Lwt_unix.with_timeout bound (fun () -> Diag.domain_json ()) in
+  let* domain = Lwt_unix.with_timeout bound (fun () -> Diag.domain_json ()) in
   let wedged =
     match member "backends" domain with
       | `List [b] -> b
@@ -77,6 +77,16 @@ let main () =
   Printf.printf "  error     %s\n"
     (Yojson.Safe.to_string (member "error" wedged));
   Printf.printf "  journal   %s\n"
-    (Yojson.Safe.to_string (member "error" (member "journal" wedged)))
+    (Yojson.Safe.to_string (member "error" (member "journal" wedged)));
+  (* A page redrawn within the window is served what the first report found,
+     rather than waiting out the deadline again: the same wedged store, asked
+     again straight away, answers at once. *)
+  let started = Unix.gettimeofday () in
+  let+ again = Lwt_unix.with_timeout bound (fun () -> Diag.domain_json ()) in
+  let elapsed = Unix.gettimeofday () -. started in
+  print_endline "asked again within the window";
+  Printf.printf "  answered at once %b\n" (elapsed < 1.);
+  Printf.printf "  same finding    %b\n"
+    (member "backends" again = member "backends" domain)
 
 let () = Lwt_main.run (main ())

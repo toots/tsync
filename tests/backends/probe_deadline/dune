@@ -25,5 +25,6 @@
   tsync_diagnostics
   tsync_conf_lwt
   yojson
+  unix
   lwt
   lwt.unix))

@@ -397,12 +397,39 @@ module Make (C : Conf_lwt.S) = struct
                 ] );
           ]
 
+  (* A store's health, journal and corruption figures are three round trips,
+     one of them a listing of a thousand keys; a page redrawn every second
+     asked them of the disk every second. They are held for a window and
+     shared by every asker in it, and a window that has passed is refreshed
+     behind the answer rather than in front of it, so a redraw never waits on
+     the store and a store that is slow slows nobody but itself. *)
+  let store_window = 5.
+  let store_states = Hashtbl.create 4
+
+  let store_state (m : (module Backend_lwt.Store) Backend.member) =
+    let name = m.Backend.name in
+    let now = Unix.gettimeofday () in
+    let refresh () =
+      let p =
+        let* probed, cursor = probe m.Backend.backend in
+        let cursor = Option.map Bigstring.to_string cursor in
+        let* jrnl = journal ~cursor m.Backend.backend in
+        let+ corrupt = corrupted m in
+        (probed, jrnl, corrupt)
+      in
+      Hashtbl.replace store_states name (now, p);
+      p
+    in
+    match Hashtbl.find_opt store_states name with
+      | None -> refresh ()
+      | Some (at, p) ->
+          if now -. at >= store_window && Lwt.state p <> Lwt.Sleep then
+            ignore (refresh ());
+          p
+
   let member_json ~totals ~exact ~reload
       (m : (module Backend_lwt.Store) Backend.member) =
-    let* probed, cursor = probe m.Backend.backend in
-    let cursor = Option.map Bigstring.to_string cursor in
-    let* jrnl = journal ~cursor m.Backend.backend in
-    let+ corrupt = corrupted m in
+    let+ probed, jrnl, corrupt = store_state m in
     (* Synchronous: reads the last sample and leaves any walk it started running
        behind us. *)
     let tot =
