@@ -105,6 +105,30 @@ module Composite =
 
 module Bc = Backend_lwt.Batched (Composite)
 
+(* What a pool handed to a batch bounds: the reads it makes at once. A server
+   sizing one to its storage has nothing else standing between a bulk request
+   and that storage. *)
+let live = ref 0
+let peak = ref 0
+
+module Counted : Backend_lwt.Store = struct
+  include Base
+
+  let get_opt ~key () =
+    incr live;
+    if !live > !peak then peak := !live;
+    let* () = Lwt_unix.sleep 0.01 in
+    decr live;
+    Lwt.return (body key)
+
+  let get_many = None
+  let list_many = None
+  let fast_read = false
+  let local_path = None
+end
+
+module Bk = Backend_lwt.Batched (Counted)
+
 let entry ?(size = 1) key =
   Backend.{ key; size; last_modified = 0.; etag = None }
 
@@ -171,5 +195,23 @@ let () =
      check "a link's loss reaches the caller, with no key asked"
        (lost && !reads = 0);
      refusal := None;
+
+     case "a pool bounds the reads a batch makes at once";
+     let forty =
+       List.init 40 (fun i -> entry (Stored_key.listed (string_of_int i)))
+     in
+     peak := 0;
+     let* (_ : (Stored_key.t * Bigstring.t option) list) =
+       Bk.get_many ~slots:(Io_lwt.Bounded.create ~max:3 ()) ~entries:forty ()
+     in
+     step "%d read(s) at once under a pool of three" !peak;
+     check "no more run at once than the pool admits" (!peak <= 3);
+     check "and the bound is what capped it" (!peak = 3);
+     peak := 0;
+     let* (_ : (Stored_key.t * Bigstring.t option) list) =
+       Bk.get_many ~slots:(Io_lwt.Bounded.create ~max:16 ()) ~entries:forty ()
+     in
+     step "%d read(s) at once under a pool of sixteen" !peak;
+     check "a wider pool runs more of them at once" (!peak > 3);
      Lwt.return_unit);
-  report ~expected:8 ()
+  report ~expected:11 ()

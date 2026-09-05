@@ -74,9 +74,16 @@ struct
               on_manifest (Logical_key.path filed);
               Io.return ()
       in
+      (* Named once per folder, which is what the hook is for and what a caller
+         counting them reports: every entry would be one call and one count per
+         file. *)
+      let at = ref None in
       let visit () key entry =
         let rel = Logical_key.path key in
-        progress.on_current (Some (if rel = "" then "/" else rel));
+        if !at <> Some rel then begin
+          at := Some rel;
+          progress.on_current (Some (if rel = "" then "/" else rel))
+        end;
         Io.catch
           (fun () -> apply key entry)
           (fun exn ->

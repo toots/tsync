@@ -38,8 +38,22 @@ let make_gate limit =
   Io_lwt.Bounded.create ~name:"proxy objects" ~max:limit
     ~max_waiting:(limit * 16) ()
 
+(* The object reads a bulk request makes on its way to one answer. The gate
+   above admits requests; without this a single one of them fans out to the
+   batch layer's own default and the promise the gate stands for -- this many
+   reads of the storage at once -- is off by that width, which a batch covering
+   sixty-four folders multiplies again. Shared across requests, since what it
+   stands for is the storage, not the caller. *)
+let batch_reads : Io_lwt.Bounded.t option ref = ref None
+
 (* Published to clients so they hold their own excess. *)
 let effective_max_concurrent : int option ref = ref None
+
+let set_limits n =
+  gate := Some (make_gate n);
+  batch_reads :=
+    Some (Io_lwt.Bounded.create ~name:"proxy batch reads" ~max:n ());
+  effective_max_concurrent := Some n
 
 let bounded op ~busy run =
   match (!gate, op) with
@@ -637,10 +651,12 @@ let exec route op ~body =
               Backend.{ key; size = 0; last_modified = 0.; etag = None })
             keys
         in
-        let* answered = Bb.get_many ~entries () in
+        let* answered = Bb.get_many ?slots:!batch_reads ~entries () in
         let framed = Http_proxy.Wire.bodies_to_string answered in
         Metrics.count read_bytes (String.length framed);
-        respond_chunk (Bigstring.of_string framed)
+        (* The frame is already a string of the whole answer, so it goes out as
+           one rather than being copied into a chunk to say the same thing. *)
+        respond framed
     | Children_multi prefixes ->
         let module B = (val route.store : Backend_lwt.Store) in
         let module Bb = Backend_lwt.Batched (B) in
@@ -658,7 +674,7 @@ let exec route op ~body =
                     Stored_key.is_child_object e.Backend.key)
                   listed
               in
-              let* bodies = Bb.get_many ~entries () in
+              let* bodies = Bb.get_many ?slots:!batch_reads ~entries () in
               let bytes =
                 List.fold_left
                   (fun n (_, body) ->
@@ -672,7 +688,7 @@ let exec route op ~body =
         let* answered = answer [] 0 prefixes in
         let framed = Http_proxy.Wire.children_to_string answered in
         Metrics.count read_bytes (String.length framed);
-        respond_chunk (Bigstring.of_string framed)
+        respond framed
     | Delete_multi keys ->
         if route.read_only then reject_ro ()
         else
@@ -1150,8 +1166,7 @@ let start served =
           | Some _, _ -> "configured"
           | None, Some _ -> "from the storage"
           | None, None -> "default");
-      gate := Some (make_gate max_concurrent);
-      effective_max_concurrent := Some max_concurrent;
+      set_limits max_concurrent;
       let* () =
         Lwt_list.iter_s
           (fun (sv : Frontend.served) ->

@@ -13,4 +13,11 @@ and so is 12 MB of bodies: ok
 a store's refusal costs a read per key: ok
 a link's loss reaches the caller, with no key asked: ok
 
-8 check(s), 0 failure(s)
+=== a pool bounds the reads a batch makes at once
+  3 read(s) at once under a pool of three
+no more run at once than the pool admits: ok
+and the bound is what capped it: ok
+  16 read(s) at once under a pool of sixteen
+a wider pool runs more of them at once: ok
+
+11 check(s), 0 failure(s)

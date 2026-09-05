@@ -8,6 +8,8 @@
    -open
    Tsync_backend_lwt
    -open
+   Tsync_io_lwt
+   -open
    Tsync_test_harness))
  (name batched_test)
  (libraries
@@ -15,6 +17,7 @@
   tsync_test_harness
   tsync_backend_api
   tsync_backend_lwt
+  tsync_io_lwt
   tsync_core
   lwt
   lwt.unix))

@@ -54,7 +54,7 @@ let cmd : unit Cmd.t =
     in
     let module R = Resync_lwt.Make (C) in
     let phase = ref "starting" and current = ref None in
-    let manifests = ref 0 and failures = ref 0 and folders = ref 0 in
+    let manifests = ref 0 and failures = ref 0 in
     (* An incremental pass counts no manifests, and a fixed set of counters
        would print zeroes reading as "nothing happened" rather than as "this
        pass does not count that". *)
@@ -78,21 +78,18 @@ let cmd : unit Cmd.t =
             if p = "rebuilding" then rebuilding := true;
             if p = "draining uploads" && !verbose then
               Log.info "draining upload queue");
-        on_current =
-          (fun c ->
-            if c <> None then incr folders;
-            current := c);
+        on_current = (fun c -> current := c);
       }
     in
     let summary () =
       end_phase ();
       if !verbose then
         Log.info
-          "%.1fs total: %d folders, %d manifests, %d failed; %d requests, %d \
-           retries, %d timeouts, %d failures"
+          "%.1fs total: %d manifests, %d failed; %d requests, %d retries, %d \
+           timeouts, %d failures"
           (Unix.gettimeofday () -. started)
-          !folders !manifests !failures (Metrics.requests ())
-          (Metrics.retries ()) (Metrics.timeouts ()) (Metrics.failures ())
+          !manifests !failures (Metrics.requests ()) (Metrics.retries ())
+          (Metrics.timeouts ()) (Metrics.failures ())
     in
     let notify () =
       try
@@ -141,8 +138,7 @@ let cmd : unit Cmd.t =
          let on_manifest _ =
            incr manifests;
            if !verbose && !manifests mod 1000 = 0 then
-             Log.info "%d manifests, %d folders, %d failed; at %s" !manifests
-               !folders !failures
+             Log.info "%d manifests, %d failed; at %s" !manifests !failures
                (Option.value !current ~default:"/")
          in
          let+ outcome =
