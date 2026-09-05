@@ -41,10 +41,13 @@ and it is the head, whatever its key says: ok
   more: false
 the entries around it still read: ok
 
+=== the head is found past a line longer than the tail read
+an entry wider than the tail is still the head: ok
+
 === an anchor no longer kept cannot be bridged
   pruned 2 shard(s)
 a sweep says what it took: ok
   anchor gone
 which is what stales an anchor: ok
 
-16 check(s), 0 failure(s)
+17 check(s), 0 failure(s)
