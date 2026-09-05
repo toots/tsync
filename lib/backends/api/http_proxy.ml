@@ -105,42 +105,43 @@ module Wire = struct
     lor (Char.code s.[pos + 2] lsl 8)
     lor Char.code s.[pos + 3]
 
-  let bodies_to_string answered =
-    let buf = Buffer.create 4096 in
-    List.iter
-      (fun (_, body) ->
-        match body with
-          | None -> add_be32 buf absent
-          | Some b ->
-              add_be32 buf (Bigstring.length b);
-              Buffer.add_string buf (Bigstring.to_string b))
-      answered;
+  let be32 n =
+    let buf = Buffer.create 4 in
+    add_be32 buf n;
     Buffer.contents buf
+
+  (* One body's frame as pieces, so an answer can go out piece by piece and
+     is never held whole beside the bodies it was made from. *)
+  let body_parts (_, body) =
+    match body with
+      | None -> [be32 absent]
+      | Some b -> [be32 (Bigstring.length b); Bigstring.to_string b]
+
+  let bodies_to_string answered =
+    String.concat "" (List.concat_map body_parts answered)
 
   let add_field buf s =
     add_be32 buf (String.length s);
     Buffer.add_string buf s
 
   (* Per folder: its prefix, its listing as JSON, then a count and a key with a
-     body or [absent] for each child object answered. *)
-  let children_to_string answered =
-    let buf = Buffer.create 4096 in
-    List.iter
-      (fun (prefix, (c : Backend.children)) ->
-        add_field buf prefix;
-        add_field buf (entries_to_json c.Backend.listed);
-        add_be32 buf (List.length c.Backend.bodies);
-        List.iter
-          (fun (key, body) ->
-            add_field buf (Stored_key.to_string key);
-            match body with
-              | None -> add_be32 buf absent
-              | Some b ->
-                  add_be32 buf (Bigstring.length b);
-                  Buffer.add_string buf (Bigstring.to_string b))
-          c.Backend.bodies)
-      answered;
+     body or [absent] for each child object answered. In pieces, as
+     {!body_parts} is, and for the same reason. *)
+  let folder_parts (prefix, (c : Backend.children)) =
+    let buf = Buffer.create 256 in
+    add_field buf prefix;
+    add_field buf (entries_to_json c.Backend.listed);
+    add_be32 buf (List.length c.Backend.bodies);
     Buffer.contents buf
+    :: List.concat_map
+         (fun ((key, _) as answered) ->
+           let k = Buffer.create 64 in
+           add_field k (Stored_key.to_string key);
+           Buffer.contents k :: body_parts answered)
+         c.Backend.bodies
+
+  let children_to_string answered =
+    String.concat "" (List.concat_map folder_parts answered)
 
   let children_of_string s =
     let len = String.length s in

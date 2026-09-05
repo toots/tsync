@@ -88,6 +88,13 @@ module Wire : sig
       because the answer may stop short of the folders asked for. *)
   val children_to_string : (string * Backend.children) list -> string
 
+  (** The same frames in pieces, one body or one folder at a time, for a writer
+      that must not hold the answer whole beside the bodies. Concatenated they
+      are exactly what the functions above return. *)
+  val body_parts : Stored_key.t * Bigstring.t option -> string list
+
+  val folder_parts : string * Backend.children -> string list
+
   (** Raises [Failure] on a body that does not frame whole folders. *)
   val children_of_string : string -> (string * Backend.children) list
 end

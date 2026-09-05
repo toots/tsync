@@ -157,6 +157,15 @@ and share_handler =
   range:string option ->
   (Cohttp.Response.t * Cohttp_lwt.Body.t) Lwt.t
 
+(* Whether a folder whose child bodies total [size] joins an answer already
+   holding [bytes]: never past the budget, and a folder too big for a whole
+   budget is skipped rather than ending the answer, since the ones behind it
+   may fit. *)
+let fits ~bytes ~size ~first =
+  if size > Backend.max_batch_bytes then `Skip
+  else if (not first) && bytes + size > Backend.max_batch_bytes then `Stop
+  else `Take
+
 (* Counted twice on purpose: once for the listener, once for the domain. *)
 let sent route n =
   Metrics.count read_bytes n;
@@ -557,6 +566,21 @@ let respond_chunk data =
     ~body:(Cohttp_lwt.Body.of_bigstring (`Passthrough data))
     ()
 
+(* A bulk answer written as it is framed, one item's pieces at a time: the
+   bodies are held once, in the store's bigstrings, and the frame is never a
+   second copy of all of them. *)
+let respond_parts ~route ~parts items =
+  let stream =
+    Lwt_stream.map
+      (fun s ->
+        sent route (String.length s);
+        s)
+      (Lwt_stream.map_list parts (Lwt_stream.of_list items))
+  in
+  Cohttp_lwt_unix.Server.respond ~status:`OK
+    ~body:(Cohttp_lwt.Body.of_stream stream)
+    ()
+
 let authed route req body =
   let meth = Cohttp.Code.string_of_method (Cohttp.Request.meth req) in
   let path = Uri.path_and_query (Cohttp.Request.uri req) in
@@ -673,21 +697,19 @@ let exec route op ~body =
             keys
         in
         let* answered = Bb.get_many ?slots:!batch_reads ~entries () in
-        let framed = Http_proxy.Wire.bodies_to_string answered in
-        sent route (String.length framed);
-        (* The frame is already a string of the whole answer, so it goes out as
-           one rather than being copied into a chunk to say the same thing. *)
-        respond framed
+        respond_parts ~route ~parts:Http_proxy.Wire.body_parts answered
     | Children_multi prefixes ->
         let module B = (val route.store : Backend_lwt.Store) in
         let module Bb = Backend_lwt.Batched (B) in
-        (* Folders in the order asked, until the bodies pass the byte budget a
-           get-multi is packed to; what is left out the client asks for singly.
-           The listing carries sizes, so each folder's bodies are batched to
-           that same budget on the way in. *)
+        (* Folders in the order asked, each whole or not at all, and only while
+           what is listed fits the byte budget a get-multi is packed to; decided
+           from the listing's sizes, before a body is read. One too big on its
+           own is left out and continues: the client fetches it by the
+           key-packed route, which is where a folder of twenty thousand
+           manifests belongs. Whatever is left out the client asks for itself. *)
         let rec answer acc bytes = function
           | [] -> Lwt.return (List.rev acc)
-          | prefix :: rest ->
+          | prefix :: rest -> (
               let* listed = B.list_prefix ~prefix () in
               let entries =
                 List.filter
@@ -695,21 +717,22 @@ let exec route op ~body =
                     Stored_key.is_child_object e.Backend.key)
                   listed
               in
-              let* bodies = Bb.get_many ?slots:!batch_reads ~entries () in
-              let bytes =
+              let size =
                 List.fold_left
-                  (fun n (_, body) ->
-                    n + Option.fold ~none:0 ~some:Bigstring.length body)
-                  bytes bodies
+                  (fun n (e : Backend.file_entry) -> n + e.Backend.size)
+                  0 entries
               in
-              let acc = (prefix, { Backend.listed; bodies }) :: acc in
-              if bytes >= Backend.max_batch_bytes then Lwt.return (List.rev acc)
-              else answer acc bytes rest
+              match fits ~bytes ~size ~first:(acc = []) with
+                | `Skip -> answer acc bytes rest
+                | `Stop -> Lwt.return (List.rev acc)
+                | `Take ->
+                    let* bodies = Bb.get_many ?slots:!batch_reads ~entries () in
+                    answer
+                      ((prefix, { Backend.listed; bodies }) :: acc)
+                      (bytes + size) rest)
         in
         let* answered = answer [] 0 prefixes in
-        let framed = Http_proxy.Wire.children_to_string answered in
-        sent route (String.length framed);
-        respond framed
+        respond_parts ~route ~parts:Http_proxy.Wire.folder_parts answered
     | Delete_multi keys ->
         if route.read_only then reject_ro ()
         else

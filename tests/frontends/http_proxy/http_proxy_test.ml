@@ -248,6 +248,16 @@ let () =
           Lwt.return (`Assoc []));
     }
   in
+  (* A batch of folders never passes the byte budget, and a folder too big for
+     a whole budget is left out rather than ending the answer. *)
+  let budget = Backend.max_batch_bytes in
+  assert (Http_proxy_frontend.fits ~bytes:0 ~size:budget ~first:true = `Take);
+  assert (
+    Http_proxy_frontend.fits ~bytes:0 ~size:(budget + 1) ~first:true = `Skip);
+  assert (Http_proxy_frontend.fits ~bytes:1 ~size:budget ~first:false = `Stop);
+  assert (
+    Http_proxy_frontend.fits ~bytes:budget ~size:(budget + 1) ~first:false
+    = `Skip);
   let routes = [route "one"; route "two"] in
   (* A domain's link figures ride with its frontend entry, so a listener's
      status can say what each domain's clients moved. *)
