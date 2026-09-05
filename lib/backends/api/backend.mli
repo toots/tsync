@@ -299,7 +299,10 @@ end
     report summing its members would get the process figure back; what it cannot
     get back is which link the bytes crossed, which is the question a domain
     with a fast main and a slow replica actually raises. *)
-type traffic = { uploaded : Metrics.counter; downloaded : Metrics.counter }
+type traffic = Metrics.traffic = {
+  uploaded : Metrics.counter;
+  downloaded : Metrics.counter;
+}
 
 val new_traffic : unit -> traffic
 

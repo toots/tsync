@@ -88,21 +88,12 @@ struct
       ("gc", `Assoc gc);
       ( "traffic",
         `Assoc
-          [
-            ("bytesUploaded", `Int (Metrics.uploaded ()));
-            ("uploadBytesPerSec", `Int (int_of_float (Metrics.upload_rate ())));
-            ("bytesDownloaded", `Int (Metrics.downloaded ()));
-            ( "downloadBytesPerSec",
-              `Int (int_of_float (Metrics.download_rate ())) );
-            ("chunksHashed", `Int (Metrics.hashed ()));
-          ] );
+          (List.map
+             (fun (k, v) -> (k, `Int v))
+             (Metrics.process_traffic_fields ())) );
       ( "backend",
         `Assoc
-          [
-            ("retries", `Int (Metrics.retries ()));
-            ("timeouts", `Int (Metrics.timeouts ()));
-            ("failures", `Int (Metrics.failures ()));
-          ] );
+          (List.map (fun (k, v) -> (k, `Int v)) (Metrics.backend_fields ())) );
       ("pools", pools_json ());
       ("counters", ints (t.counters ()));
     ]

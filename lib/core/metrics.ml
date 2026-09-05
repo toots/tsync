@@ -42,6 +42,31 @@ let total c = c.total
 let uploaded_c = make ()
 let downloaded_c = make ()
 let hashed_c = make ()
+
+(* One link, both directions. The process keeps a pair for everything it moves
+   and a store or a listener's domain keeps its own, so a report can say which
+   link a figure is on. *)
+type traffic = { uploaded : counter; downloaded : counter }
+
+let traffic () = { uploaded = make (); downloaded = make () }
+let process = { uploaded = uploaded_c; downloaded = downloaded_c }
+let per_sec c = int_of_float (rate c)
+
+(* The one spelling of a link's four figures, and of the hashing beside them:
+   four reports built the same names by hand and one of them dropped a rate. *)
+let traffic_fields ?hashed t =
+  [
+    ("bytesUploaded", total t.uploaded);
+    ("bytesDownloaded", total t.downloaded);
+    ("uploadBytesPerSec", per_sec t.uploaded);
+    ("downloadBytesPerSec", per_sec t.downloaded);
+  ]
+  @
+    match hashed with
+    | None -> []
+    | Some h -> [("chunksHashed", total h); ("hashesPerSec", per_sec h)]
+
+let process_traffic_fields () = traffic_fields ~hashed:hashed_c process
 let add_uploaded n = add uploaded_c n
 let add_downloaded n = add downloaded_c n
 let add_hashed n = add hashed_c n
@@ -66,6 +91,14 @@ let requests () = requests_c.total
 let retries () = retries_c.total
 let timeouts () = timeouts_c.total
 let failures () = failures_c.total
+
+let backend_fields () =
+  [
+    ("requests", requests ());
+    ("retries", retries ());
+    ("timeouts", timeouts ());
+    ("failures", failures ());
+  ]
 
 (* Cumulative CPU seconds (user + system); callers diff consecutive samples for a
    percentage. *)
@@ -133,3 +166,6 @@ let human_bytes n =
   done;
   if !i = 0 then Printf.sprintf "%d B" n
   else Printf.sprintf "%.1f %s" !v units.(!i)
+
+let with_rate total rate =
+  Printf.sprintf "%s (%s/s)" (human_bytes total) (human_bytes rate)

@@ -85,11 +85,15 @@ let frontend_entry a =
   match mem a.reply "error" with
     | `String detail -> unreachable detail
     | _ -> (
-        let carried =
+        let carried fields =
           List.filter_map
             (fun (key, path) ->
               let from = List.fold_left mem a.reply path in
-              match mem from key with `Null -> None | v -> Some (key, v))
+              (* A frontend that reports the figure for itself -- a listener's
+                 per-domain traffic -- is not overruled by its process's. *)
+              if List.mem_assoc key fields then None
+              else (
+                match mem from key with `Null -> None | v -> Some (key, v)))
             carried_keys
         in
         (* The domain it was asked about, not whichever it listed first: a
@@ -105,7 +109,7 @@ let frontend_entry a =
             | _ -> None
         in
         match Option.map (fun d -> mem d "frontends") for_domain with
-          | Some (`List (`Assoc fields :: _)) -> `Assoc (fields @ carried)
+          | Some (`List (`Assoc fields :: _)) -> `Assoc (fields @ carried fields)
           | _ -> unreachable "daemon reported no frontend")
 
 let assoc = function `Assoc fields -> fields | _ -> []
@@ -360,11 +364,30 @@ let elide path =
    each report the same four figures, and four copies of the format is how two of
    them come to disagree about what "up" means. *)
 let traffic_row t =
-  Printf.sprintf "up %s (%s/s), down %s (%s/s)"
-    (Metrics.human_bytes (int_of (mem t "bytesUploaded")))
-    (Metrics.human_bytes (int_of (mem t "uploadBytesPerSec")))
-    (Metrics.human_bytes (int_of (mem t "bytesDownloaded")))
-    (Metrics.human_bytes (int_of (mem t "downloadBytesPerSec")))
+  Printf.sprintf "up %s, down %s%s"
+    (Metrics.with_rate
+       (int_of (mem t "bytesUploaded"))
+       (int_of (mem t "uploadBytesPerSec")))
+    (Metrics.with_rate
+       (int_of (mem t "bytesDownloaded"))
+       (int_of (mem t "downloadBytesPerSec")))
+    (match int_of (mem t "chunksHashed") with
+      | 0 -> ""
+      | n ->
+          Printf.sprintf ", %d chunks hashed (%d/s)" n
+            (int_of (mem t "hashesPerSec")))
+
+(* What crossed between clients and a listener, in the client's words so a
+   mount's backend row and the listener it talks to read alike: up is what
+   clients sent, down what they were sent. [None] when nothing has. *)
+let clients_row f =
+  match (int_of (mem f "bytesWritten"), int_of (mem f "bytesRead")) with
+    | 0, 0 -> None
+    | up, down ->
+        Some
+          (Printf.sprintf "up %s, down %s"
+             (Metrics.with_rate up (int_of (mem f "bytesWrittenPerSec")))
+             (Metrics.with_rate down (int_of (mem f "bytesReadPerSec"))))
 
 let moved t =
   int_of (mem t "bytesUploaded") > 0 || int_of (mem t "bytesDownloaded") > 0
@@ -429,11 +452,17 @@ let text json =
       (fun acc p -> Float.max acc (num (mem p "uptimeSeconds")))
       0. processes
   in
-  line 0 "tsync%s — %s, %s%s"
+  let load =
+    List.find_map
+      (fun p -> match mem p "loadAvg" with `Null -> None | v -> Some (num v))
+      processes
+  in
+  line 0 "tsync%s — %s, %s%s%s"
     (if host = "" then "" else " on " ^ host)
     (plural (List.length domains) "domain")
     (plural (List.length processes) "process")
-    (if uptime > 0. then ", up " ^ duration uptime else "");
+    (if uptime > 0. then ", up " ^ duration uptime else "")
+    (match load with Some l -> Printf.sprintf ", load %.1f" l | None -> "");
 
   (* A frontend's own state: what only the process serving the domain knows.
 
@@ -473,15 +502,7 @@ let text json =
       (match mem f "traffic" with
         | t when moved t -> row 4 "traffic" (traffic_row t)
         | _ -> ());
-      (match (int_of (mem f "bytesRead"), int_of (mem f "bytesWritten")) with
-        | 0, 0 -> ()
-        | r, w ->
-            row 4 "served"
-              (Printf.sprintf "%s read (%s/s), %s written (%s/s)"
-                 (Metrics.human_bytes r)
-                 (Metrics.human_bytes (int_of (mem f "bytesReadPerSec")))
-                 (Metrics.human_bytes w)
-                 (Metrics.human_bytes (int_of (mem f "bytesWrittenPerSec")))));
+      Option.iter (row 4 "clients") (clients_row f);
       (match (int_of (mem f "openHandles"), int_of (mem f "filesOpened")) with
         | 0, 0 -> ()
         | open_, since ->
@@ -707,7 +728,9 @@ let text json =
               (str ~default:"?" (mem p "frontend"))
               (int_of (mem p "pid"))
               (duration (num (mem p "uptimeSeconds")))
-              (num (mem p "cpuPercentAvg"))
+              (match mem p "cpuPercent" with
+                | `Null -> num (mem p "cpuPercentAvg")
+                | v -> num v)
               (Metrics.human_bytes (int_of (mem p "rssBytes")))
               (String.concat ", " (List.map str (list (mem p "serves"))));
             (* Everything below is silent when clean: the second line appearing
@@ -718,18 +741,7 @@ let text json =
                   row 4 "listening"
                     (Printf.sprintf "port %d, %s" (int_of port)
                        (if bool_of (mem p "tls") then "https" else "http")));
-            (match
-               (int_of (mem p "bytesRead"), int_of (mem p "bytesWritten"))
-             with
-              | 0, 0 -> ()
-              | r, w ->
-                  row 4 "served"
-                    (Printf.sprintf "%s read (%s/s), %s written (%s/s)"
-                       (Metrics.human_bytes r)
-                       (Metrics.human_bytes (int_of (mem p "bytesReadPerSec")))
-                       (Metrics.human_bytes w)
-                       (Metrics.human_bytes
-                          (int_of (mem p "bytesWrittenPerSec")))));
+            Option.iter (row 4 "clients") (clients_row p);
             (match mem p "requests" with
               | `Assoc fields ->
                   (* Counters and gauges are kept apart: a gauge of zero is an
@@ -737,7 +749,13 @@ let text json =
                      "0 dataWaiting" beside "2 stats" invites reading the first
                      as the second. *)
                   let is_gauge k =
-                    List.mem k ["inFlight"; "dataInFlight"; "dataWaiting"]
+                    List.mem k
+                      [
+                        "inFlight";
+                        "dataInFlight";
+                        "dataWaiting";
+                        "requestsPerSec";
+                      ]
                   in
                   let gauges, served =
                     List.partition (fun (k, _) -> is_gauge k) fields
@@ -754,6 +772,7 @@ let text json =
                           | 0 -> None
                           | n -> Some (Printf.sprintf "%d %s" n label))
                       [
+                        ("req/s", "requestsPerSec");
                         ("in flight", "inFlight");
                         ("waiting on storage", "dataWaiting");
                       ]
@@ -771,14 +790,7 @@ let text json =
                         else " (" ^ String.concat ", " live ^ ")"))
               | _ -> ());
             (match mem p "traffic" with
-              | t when moved t ->
-                  row 4 "traffic"
-                    (Printf.sprintf "%s%s" (traffic_row t)
-                       (match int_of (mem t "chunksHashed") with
-                         | 0 -> ""
-                         | n ->
-                             Printf.sprintf ", %d chunks hashed (%d/s)" n
-                               (int_of (mem t "hashesPerSec"))))
+              | t when moved t -> row 4 "traffic" (traffic_row t)
               | _ -> ());
             (* Only the pools something is waiting on: a report of empty queues
                is a report of nothing. *)
@@ -915,10 +927,7 @@ let text json =
                                  Printf.sprintf "%d of %d %s" v total k
                              | _ -> Printf.sprintf "%d %s" v k)))
               | _ -> ());
-            sub "traffic" (fun t ->
-                row 4 "traffic"
-                  (Printf.sprintf "%s, %d chunks hashed" (traffic_row t)
-                     (int_of (mem t "chunksHashed"))));
+            sub "traffic" (fun t -> row 4 "traffic" (traffic_row t));
             (* Live words beside the heap the process holds: the heap grows in
                steps and shrinks never, so the two together are the difference
                between something retained and an allocator that has not given

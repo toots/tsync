@@ -14,6 +14,7 @@
  * no Windows target, so there it fails and the caller reports no capacity rather
  * than the build breaking. Implement that branch if a Windows port happens. */
 
+#include <stdlib.h>
 #include <caml/alloc.h>
 #include <caml/fail.h>
 #include <caml/memory.h>
@@ -66,4 +67,16 @@ CAMLprim value tsync_statvfs(value _path) {
               caml_copy_int64((int64_t)buf.f_blocks * (int64_t)buf.f_frsize));
   CAMLreturn(result);
 #endif
+}
+
+/* The machine's one-minute load average, or a negative value where the
+   platform has no way to say. Beside statvfs because both answer for the box
+   a process is on rather than for the process. */
+CAMLprim value tsync_loadavg(value unit) {
+  CAMLparam1(unit);
+#if defined(__linux__) || defined(__APPLE__)
+  double load[1];
+  if (getloadavg(load, 1) == 1) CAMLreturn(caml_copy_double(load[0]));
+#endif
+  CAMLreturn(caml_copy_double(-1.0));
 }

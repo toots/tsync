@@ -10,6 +10,28 @@ val count : counter -> int -> unit
 val total : counter -> int
 val rate : counter -> float
 
+(** One link, both directions: the process's own pair in [process], and a pair
+    of its own for anything with a link worth reporting apart. *)
+type traffic = { uploaded : counter; downloaded : counter }
+
+val traffic : unit -> traffic
+val process : traffic
+
+(** A rate as whole bytes, which is what a report carries. *)
+val per_sec : counter -> int
+
+(** A link's figures under the names every report uses: [bytesUploaded],
+    [bytesDownloaded], [uploadBytesPerSec], [downloadBytesPerSec], and with
+    [hashed] also [chunksHashed] and [hashesPerSec]. Rates are the last ten
+    seconds' average, as whole bytes. *)
+val traffic_fields : ?hashed:counter -> traffic -> (string * int) list
+
+(** {!traffic_fields} for the process, hashing included. *)
+val process_traffic_fields : unit -> (string * int) list
+
+(** [requests], [retries], [timeouts] and [failures], under those names. *)
+val backend_fields : unit -> (string * int) list
+
 (** Record bytes sent to / received from the backend, and chunks hashed.
 
     Counted in {!Backend_lwt.make}'s wrapper, where a body crosses a link, so a
@@ -89,3 +111,7 @@ val live_bytes : unit -> int
 (** A byte count as a person reads it ([1.5 GB]). Shared so every report spells
     a size the same way. *)
 val human_bytes : int -> string
+
+(** A total beside its rate, ["1.5 GB (2.0 MB/s)"], spelled once for every
+    report that shows one. *)
+val with_rate : int -> int -> string

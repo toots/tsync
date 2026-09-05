@@ -47,4 +47,8 @@ module Make
       Returns once the send has been attempted; a failure is swallowed like any
       other, and a second call reports nothing. *)
   val finish : ?error:string -> unit -> unit Io.t
+
+  (** Every named pool as [{name,inFlight,waiting,max}], the one spelling of it
+      for a job and for a daemon alike. *)
+  val pools_json : unit -> Yojson.Safe.t
 end

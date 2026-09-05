@@ -199,10 +199,12 @@ let batches entries =
 (* One store's own share of what {!Metrics} counts globally. Separate counters
    rather than a total each, so a rate comes off the same ring the process-wide
    figures do and nothing reimplements the window. *)
-type traffic = { uploaded : Metrics.counter; downloaded : Metrics.counter }
+type traffic = Metrics.traffic = {
+  uploaded : Metrics.counter;
+  downloaded : Metrics.counter;
+}
 
-let new_traffic () =
-  { uploaded = Metrics.counter (); downloaded = Metrics.counter () }
+let new_traffic = Metrics.traffic
 
 type role = [ `Main | `Replica | `Backfill | `ReadOnly ]
 

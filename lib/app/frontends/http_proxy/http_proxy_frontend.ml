@@ -60,7 +60,13 @@ let bounded op ~busy run =
     | Some g, (`Get | `Put) -> Io_lwt.Bounded.use_or g ~busy run
     | _ -> run ()
 
+(* Requests answered, for the rate beside the tallies: the tallies say what this
+   listener has been asked since it started, and the rate what it is being asked
+   now. *)
+let served_c = Metrics.counter ()
+
 let bump name =
+  Metrics.count served_c 1;
   Hashtbl.replace counters name
     (1 + Option.value ~default:0 (Hashtbl.find_opt counters name))
 
@@ -78,7 +84,8 @@ let counters_json () =
   in
   `Assoc
     (("inFlight", `Int !in_flight)
-     (* [dataWaiting] above zero means storage is the limit; [busy] climbing
+    :: ("requestsPerSec", `Int (Metrics.per_sec served_c))
+       (* [dataWaiting] above zero means storage is the limit; [busy] climbing
        means the queue is overflowing. *)
     :: ("dataInFlight", `Int held)
     :: ("dataWaiting", `Int waiting)
@@ -126,6 +133,10 @@ type route = {
           when none does, which is what keeps a domain served only by this
           listener from being reported as a daemon that is down. *)
   domain_name : string;
+  traffic : Metrics.traffic;
+      (** What crossed between this domain's clients and the listener, in the
+          client's words: up is what they sent, down what they were sent. The
+          process-wide counters above sum every domain and the shares. *)
   self_frontend : Yojson.Safe.t;
       (** Per-domain settings only; shared process figures are reported once at
           the top. *)
@@ -145,6 +156,15 @@ and share_handler =
   query:(string -> string option) ->
   range:string option ->
   (Cohttp.Response.t * Cohttp_lwt.Body.t) Lwt.t
+
+(* Counted twice on purpose: once for the listener, once for the domain. *)
+let sent route n =
+  Metrics.count read_bytes n;
+  Metrics.count route.traffic.Metrics.downloaded n
+
+let received route n =
+  Metrics.count written_bytes n;
+  Metrics.count route.traffic.Metrics.uploaded n
 
 let make_route bindings ~peers (b : Frontend.binding) =
   let module C = (val b.Frontend.conf : Conf_lwt.S) in
@@ -191,6 +211,7 @@ let make_route bindings ~peers (b : Frontend.binding) =
     serve_share;
     peers;
     domain_name = C.domain_name;
+    traffic = Metrics.traffic ();
     self_frontend =
       `Assoc
         [
@@ -562,7 +583,7 @@ let exec route op ~body =
         let* data = B.get_opt ~key () in
         match data with
           | Some data ->
-              Metrics.count read_bytes (Bigstring.length data);
+              sent route (Bigstring.length data);
               respond_chunk data
           | None -> respond ~status:`Not_found "")
     | Get_range { key; offset; length } -> (
@@ -570,7 +591,7 @@ let exec route op ~body =
         let* data = B.get_range ~key ~offset ~length () in
         match data with
           | Some data ->
-              Metrics.count read_bytes (Bigstring.length data);
+              sent route (Bigstring.length data);
               respond_chunk data
           | None -> respond ~status:`Not_found "")
     | Watch { key; wait; last_seen } ->
@@ -617,8 +638,8 @@ let exec route op ~body =
         else
           let module B = (val route.store : Backend_lwt.Store) in
           let* held = B.put_if_absent ~key ~data:body () in
-          Metrics.count written_bytes (Bigstring.length body);
-          Metrics.count read_bytes (Bigstring.length held);
+          received route (Bigstring.length body);
+          sent route (Bigstring.length held);
           (* The body that won, so the caller learns whether it was theirs
              without a second round trip. *)
           respond_chunk held
@@ -629,7 +650,7 @@ let exec route op ~body =
             let module B = (val route.store : Backend_lwt.Store) in
             B.put ~key ~data:body ()
           in
-          Metrics.count written_bytes (Bigstring.length body);
+          received route (Bigstring.length body);
           respond ""
     | Delete key ->
         if not (writable key) then reject_ro ()
@@ -653,7 +674,7 @@ let exec route op ~body =
         in
         let* answered = Bb.get_many ?slots:!batch_reads ~entries () in
         let framed = Http_proxy.Wire.bodies_to_string answered in
-        Metrics.count read_bytes (String.length framed);
+        sent route (String.length framed);
         (* The frame is already a string of the whole answer, so it goes out as
            one rather than being copied into a chunk to say the same thing. *)
         respond framed
@@ -687,7 +708,7 @@ let exec route op ~body =
         in
         let* answered = answer [] 0 prefixes in
         let framed = Http_proxy.Wire.children_to_string answered in
-        Metrics.count read_bytes (String.length framed);
+        sent route (String.length framed);
         respond framed
     | Delete_multi keys ->
         if route.read_only then reject_ro ()
@@ -842,6 +863,17 @@ let self_json ~port ~tls routes =
    answer that keeps the fan-out from squaring. A collector asks every frontend
    of every domain; if this one answered by asking the mounts in turn, one
    report would cost frontends × frontends round trips. *)
+(* The domain's own link figures beside its settings, live where the settings
+   are fixed. *)
+let with_traffic r =
+  let traffic =
+    `Assoc
+      (List.map (fun (k, v) -> (k, `Int v)) (Metrics.traffic_fields r.traffic))
+  in
+  match r.self_frontend with
+    | `Assoc fields -> `Assoc (fields @ [("traffic", traffic)])
+    | other -> other
+
 let self_report ~port ~tls ~domain routes =
   let mine =
     match List.filter (fun r -> r.domain_name = domain) routes with
@@ -857,7 +889,7 @@ let self_report ~port ~tls ~domain routes =
                `Assoc
                  [
                    ("name", `String r.domain_name);
-                   ("frontends", `List [r.self_frontend]);
+                   ("frontends", `List [with_traffic r]);
                  ])
              mine) );
     ]

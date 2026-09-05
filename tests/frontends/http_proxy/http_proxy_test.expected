@@ -89,16 +89,23 @@ stop: {"ok":true} closes=true asked=1
       "pid": 1234,
       "startedAt": 1700000000.0,
       "uptimeSeconds": 3600.0,
+      "loadAvg": 0.5,
       "frontend": "http-proxy",
       "port": 8443,
       "tls": true,
       "serves": [ "statusdom" ],
-      "requests": { "inFlight": 0, "dataInFlight": 0, "dataWaiting": 0 },
+      "requests": {
+        "inFlight": 0,
+        "requestsPerSec": 0,
+        "dataInFlight": 0,
+        "dataWaiting": 0
+      },
       "bytesRead": 0,
       "bytesWritten": 2,
       "bytesReadPerSec": 0,
       "bytesWrittenPerSec": 0,
       "cpuSeconds": 12.5,
+      "cpuPercent": 0.3,
       "cpuPercentAvg": 0.3,
       "rssBytes": 41943040,
       "privateBytes": 39845888,
@@ -127,14 +134,19 @@ stop: {"ok":true} closes=true asked=1
         "timers": 0,
         "poolSize": 1000
       },
-      "backend": { "retries": 0, "timeouts": 0, "failures": 0 }
+      "backend": {
+        "requests": 0,
+        "retries": 0,
+        "timeouts": 0,
+        "failures": 0
+      }
     }
   ],
   "jobs": [],
   "warnings": []
 }
 ########## /stats ##########
-tsync on testhost — 1 domain, 1 process, up 1h 0m
+tsync on testhost — 1 domain, 1 process, up 1h 0m, load 0.5
 
 Domain statusdom
   settings         versioning off, symlinks keep, chunk 64.0 KB, cache chunk 64.0 KB
@@ -157,11 +169,11 @@ Domain statusdom
 Processes
   http-proxy  pid 1234    up 1h 0m     0.3% cpu    40.0 MB rss   statusdom
     listening        port 8443, https
-    served           0 B read (0 B/s), 2 B written (0 B/s)
+    clients          up 2 B (0 B/s), down 0 B (0 B/s)
     requests         none served
     traffic          up 4.0 KB (0 B/s), down 2.0 KB (0 B/s)
 ########## /stats with a mount daemon ##########
-tsync on testhost — 1 domain, 1 process, up 1h 0m
+tsync on testhost — 1 domain, 1 process, up 1h 0m, load 0.5
 
 Domain statusdom
   settings         versioning off, symlinks keep, chunk 64.0 KB, cache chunk 64.0 KB
@@ -172,7 +184,7 @@ Domain statusdom
     public shares    off
   Frontend fuse         pid 18103  /home/u/tsync/statusdom
     traffic          up 0 B (0 B/s), down 751.5 MB (1.0 MB/s)
-    served           2.0 GB read (5.0 MB/s), 0 B written (0 B/s)
+    clients          up 0 B (0 B/s), down 2.0 GB (5.0 MB/s)
     handles          3 open, 41 since start
     in flight        2 uploads
   Backend disk (local, main)  path /tmp/tsync-http-proxy-status-test/store
@@ -189,11 +201,11 @@ Domain statusdom
 Processes
   http-proxy  pid 1234    up 1h 0m     0.3% cpu    40.0 MB rss   statusdom
     listening        port 8443, https
-    served           0 B read (0 B/s), 2 B written (0 B/s)
+    clients          up 2 B (0 B/s), down 0 B (0 B/s)
     requests         none served
     traffic          up 4.0 KB (0 B/s), down 2.0 KB (0 B/s)
 ########## /stats?totals=1 ##########
-tsync on testhost — 1 domain, 1 process, up 1h 0m
+tsync on testhost — 1 domain, 1 process, up 1h 0m, load 0.5
 
 Domain statusdom
   settings         versioning off, symlinks keep, chunk 64.0 KB, cache chunk 64.0 KB
@@ -218,14 +230,14 @@ Domain statusdom
 Processes
   http-proxy  pid 1234    up 1h 0m     0.3% cpu    40.0 MB rss   statusdom
     listening        port 8443, https
-    served           0 B read (0 B/s), 2 B written (0 B/s)
+    clients          up 2 B (0 B/s), down 0 B (0 B/s)
     requests         2 stats, 2 unauthorized
     traffic          up 4.0 KB (0 B/s), down 2.0 KB (0 B/s)
 
 Warnings (newest first)
    ×3  22:13:20  warn  diagnostics: counting archive: Backend.Backend_error("connection refused")
 ########## /stats?totals=exact ##########
-tsync on testhost — 1 domain, 1 process, up 1h 0m
+tsync on testhost — 1 domain, 1 process, up 1h 0m, load 0.5
 
 Domain statusdom
   settings         versioning off, symlinks keep, chunk 64.0 KB, cache chunk 64.0 KB
@@ -250,7 +262,7 @@ Domain statusdom
 Processes
   http-proxy  pid 1234    up 1h 0m     0.3% cpu    40.0 MB rss   statusdom
     listening        port 8443, https
-    served           0 B read (0 B/s), 2 B written (0 B/s)
+    clients          up 2 B (0 B/s), down 0 B (0 B/s)
     requests         2 stats, 2 unauthorized
     traffic          up 4.0 KB (0 B/s), down 2.0 KB (0 B/s)
 

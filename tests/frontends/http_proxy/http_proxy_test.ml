@@ -76,6 +76,8 @@ let stable_values =
     ("uptimeSeconds", `Float 3600.);
     ("cpuSeconds", `Float 12.5);
     ("cpuPercentAvg", `Float 0.3);
+    ("cpuPercent", `Float 0.3);
+    ("loadAvg", `Float 0.5);
     ("rssBytes", `Int 41943040);
     ("privateBytes", `Int 39845888);
     ("swappedBytes", `Int 0);
@@ -239,6 +241,7 @@ let () =
       serve_share = None;
       peers = [];
       domain_name = "one";
+      traffic = Metrics.traffic ();
       self_frontend = `Assoc [];
       diagnose =
         (fun ~totals:_ ~exact:_ ~reload:_ ~frontends:_ ->
@@ -246,6 +249,25 @@ let () =
     }
   in
   let routes = [route "one"; route "two"] in
+  (* A domain's link figures ride with its frontend entry, so a listener's
+     status can say what each domain's clients moved. *)
+  let one = List.hd routes in
+  Metrics.count one.Http_proxy_frontend.traffic.Metrics.uploaded 5;
+  let reported =
+    Http_proxy_frontend.self_report ~port:1 ~tls:false ~domain:"one" routes
+  in
+  let uploaded =
+    match List.assoc_opt "domains" reported with
+      | Some (`List (`Assoc d :: _)) -> (
+          match List.assoc_opt "frontends" d with
+            | Some (`List (`Assoc f :: _)) -> (
+                match List.assoc_opt "traffic" f with
+                  | Some (`Assoc t) -> List.assoc_opt "bytesUploaded" t
+                  | _ -> None)
+            | _ -> None)
+      | _ -> None
+  in
+  assert (uploaded = Some (`Int 5));
   let pick key signer =
     Option.map
       (fun r -> r.Http_proxy_frontend.secret)

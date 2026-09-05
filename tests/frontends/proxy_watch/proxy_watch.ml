@@ -100,6 +100,7 @@ let route =
     serve_share = None;
     peers = [];
     domain_name = "watchdom";
+    traffic = Metrics.traffic ();
     self_frontend = `Assoc [];
     diagnose =
       (fun ~totals:_ ~exact:_ ~reload:_ ~frontends:_ -> Lwt.return (`Assoc []));

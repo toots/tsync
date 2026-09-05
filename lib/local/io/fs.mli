@@ -27,6 +27,11 @@ type disk_space = { avail : int64; free : int64; total : int64 }
     status request. *)
 val disk_space : string -> disk_space option
 
+(** The machine's one-minute load average, where the platform reports one: what
+    else the box is carrying is the first thing a process figure is read
+    against. *)
+val load_average : unit -> float option
+
 (** What a platform owes beyond {!Syscalls.S}: whole files, a directory's names,
     and bigstrings on a descriptor. Everything {!Make} adds is built from these.
 *)

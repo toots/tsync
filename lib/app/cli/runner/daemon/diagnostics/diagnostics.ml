@@ -35,9 +35,35 @@ let corrupted_sample = 1000
    one: an http-proxy listener's figures cover every domain it serves at once,
    listed in [serves]. A fuse mount is per-domain and appears again in that
    domain's [frontends]. *)
+(* CPU over the interval since the last report rather than since start: a
+   process that worked hard an hour ago and idles now is idle. The first report
+   has no interval and answers with the lifetime average. *)
+let last_cpu : (float * float * float) option ref = ref None
+
+(* Two reports within a second answer alike, rather than the second measuring
+   the first. *)
+let cpu_percent ~now ~cpu ~uptime =
+  let avg = if uptime > 0. then 100. *. cpu /. uptime else 0. in
+  let current =
+    match !last_cpu with
+      | Some (t, _, pct) when now -. t < 1. -> pct
+      | Some (t, c, _) ->
+          let pct = 100. *. (cpu -. c) /. (now -. t) in
+          last_cpu := Some (now, cpu, pct);
+          pct
+      | None ->
+          last_cpu := Some (now, cpu, avg);
+          avg
+  in
+  (current, avg)
+
+let ints l = List.map (fun (k, v) -> (k, `Int v)) l
+
 let self_json ?(extra = []) () =
-  let uptime = Unix.gettimeofday () -. !started_at in
+  let now = Unix.gettimeofday () in
+  let uptime = now -. !started_at in
   let cpu = Metrics.cpu_seconds () in
+  let cpu_now, cpu_avg = cpu_percent ~now ~cpu ~uptime in
   let gc = Metrics.gc_stats () in
   let lwt = Metrics_lwt.stats () in
   let mem = Metrics.mem_stats () in
@@ -50,13 +76,16 @@ let self_json ?(extra = []) () =
            ("startedAt", `Float !started_at);
            ("uptimeSeconds", `Float uptime);
          ]
+        @ (match Io_lwt.Fs.load_average () with
+          | Some l -> [("loadAvg", `Float l)]
+          | None -> [])
         @ extra) );
     ( "process",
       `Assoc
         [
           ("cpuSeconds", `Float cpu);
-          ( "cpuPercentAvg",
-            `Float (if uptime > 0. then 100. *. cpu /. uptime else 0.) );
+          ("cpuPercent", `Float cpu_now);
+          ("cpuPercentAvg", `Float cpu_avg);
           ("rssBytes", `Int mem.Metrics.rss);
           (* Swapped-out anonymous pages are still this process's own, so
              resident alone understates it by whatever the kernel pushed out. *)
@@ -67,25 +96,8 @@ let self_json ?(extra = []) () =
           ("minorCollections", `Int gc.Metrics.minor_collections);
           ("majorCollections", `Int gc.Metrics.major_collections);
         ] );
-    ( "backend",
-      `Assoc
-        [
-          ("retries", `Int (Metrics.retries ()));
-          ("timeouts", `Int (Metrics.timeouts ()));
-          ("failures", `Int (Metrics.failures ()));
-        ] );
-    ( "pools",
-      `List
-        (List.map
-           (fun (name, in_flight, waiting, limit) ->
-             `Assoc
-               [
-                 ("name", `String name);
-                 ("inFlight", `Int in_flight);
-                 ("waiting", `Int waiting);
-                 ("max", `Int limit);
-               ])
-           (Io_lwt.Bounded.totals ())) );
+    ("backend", `Assoc (ints (Metrics.backend_fields ())));
+    ("pools", Job_report_lwt.pools_json ());
     ( "lwt",
       `Assoc
         [
@@ -94,16 +106,7 @@ let self_json ?(extra = []) () =
           ("timers", `Int lwt.Metrics_lwt.timers);
           ("poolSize", `Int lwt.Metrics_lwt.pool_size);
         ] );
-    ( "traffic",
-      `Assoc
-        [
-          ("bytesUploaded", `Int (Metrics.uploaded ()));
-          ("bytesDownloaded", `Int (Metrics.downloaded ()));
-          ("uploadBytesPerSec", `Int (int_of_float (Metrics.upload_rate ())));
-          ("downloadBytesPerSec", `Int (int_of_float (Metrics.download_rate ())));
-          ("chunksHashed", `Int (Metrics.hashed ()));
-          ("hashesPerSec", `Int (int_of_float (Metrics.hash_rate ())));
-        ] );
+    ("traffic", `Assoc (ints (Metrics.process_traffic_fields ())));
     ( "recentErrors",
       `List
         (List.map
@@ -416,19 +419,7 @@ module Make (C : Conf_lwt.S) = struct
     let traffic =
       match m.Backend.traffic with
         | None -> []
-        | Some { Backend.uploaded; downloaded } ->
-            [
-              ( "traffic",
-                `Assoc
-                  [
-                    ("bytesUploaded", `Int (Metrics.total uploaded));
-                    ("bytesDownloaded", `Int (Metrics.total downloaded));
-                    ( "uploadBytesPerSec",
-                      `Int (int_of_float (Metrics.rate uploaded)) );
-                    ( "downloadBytesPerSec",
-                      `Int (int_of_float (Metrics.rate downloaded)) );
-                  ] );
-            ]
+        | Some t -> [("traffic", `Assoc (ints (Metrics.traffic_fields t)))]
     in
     let deferred =
       match (m.Backend.pending, m.in_flight, m.degraded) with

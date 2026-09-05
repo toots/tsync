@@ -49,4 +49,7 @@ module Fs : sig
       [None] when [path] cannot be stat'd. One syscall: cheap enough to call per
       status request. *)
   val disk_space : string -> disk_space option
+
+  (** The machine's one-minute load average, where the platform reports one. *)
+  val load_average : unit -> float option
 end

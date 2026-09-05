@@ -783,43 +783,43 @@ module Make
                             let+ uploading = F.uploads_in_flight () in
                             ok_json
                               (("domain", `String C.domain_name)
-                              :: ("running", `Bool true)
-                              :: ("paused", `Bool (Sq.paused ()))
-                              :: ("pendingUploads", `Int (Sq.pending ()))
-                              :: ( "pendingDownloads",
-                                   `Int (F.downloads_in_flight ()) )
-                              :: ( "uploading",
-                                   `List
-                                     (List.map
-                                        (fun ({ name; rel; body; size } :
-                                               File_ops.in_flight) ->
-                                          `Assoc
-                                            (("name", `String name)
-                                             :: ("rel", `String rel)
-                                             ::
-                                               (match body with
-                                               | Some body ->
-                                                   [("body", `String body)]
-                                               | None -> [])
-                                            @
-                                              match size with
-                                              | Some size ->
-                                                  [
-                                                    ( "size",
-                                                      `Int (Int64.to_int size)
-                                                    );
-                                                  ]
-                                              | None -> []))
-                                        uploading) )
-                              :: ("downloading", `List (downloading_json ()))
-                              :: ( "pendingBytes",
-                                   `Int (Int64.to_int (Sq.pending_bytes ())) )
-                                 (* Process-wide, not per domain: one uplink is
+                               :: ("running", `Bool true)
+                               :: ("paused", `Bool (Sq.paused ()))
+                               :: ("pendingUploads", `Int (Sq.pending ()))
+                               :: ( "pendingDownloads",
+                                    `Int (F.downloads_in_flight ()) )
+                               :: ( "uploading",
+                                    `List
+                                      (List.map
+                                         (fun ({ name; rel; body; size } :
+                                                File_ops.in_flight) ->
+                                           `Assoc
+                                             (("name", `String name)
+                                              :: ("rel", `String rel)
+                                              ::
+                                                (match body with
+                                                | Some body ->
+                                                    [("body", `String body)]
+                                                | None -> [])
+                                             @
+                                               match size with
+                                               | Some size ->
+                                                   [
+                                                     ( "size",
+                                                       `Int (Int64.to_int size)
+                                                     );
+                                                   ]
+                                               | None -> []))
+                                         uploading) )
+                               :: ("downloading", `List (downloading_json ()))
+                               :: ( "pendingBytes",
+                                    `Int (Int64.to_int (Sq.pending_bytes ())) )
+                                  (* Process-wide, not per domain: one uplink is
                                   what an ETA is against. *)
-                              :: ("bytesUploaded", `Int (Metrics.uploaded ()))
-                              :: ( "uploadBytesPerSec",
-                                   `Float (Metrics.upload_rate ()) )
-                              :: hooks.status_fields ())
+                               :: List.map
+                                    (fun (k, v) -> (k, `Int v))
+                                    (Metrics.traffic_fields Metrics.process)
+                              @ hooks.status_fields ())
                         | "pause" ->
                             Sq.set_paused (get_str obj "arg" <> "off");
                             Lwt.return (ok_json [])

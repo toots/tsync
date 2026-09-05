@@ -36,6 +36,12 @@ external statvfs : string -> int64 * int64 * int64 = "tsync_statvfs"
 (* One syscall, so it is cheap enough for every status request. [None] rather
    than an exception when the path cannot be stat'd: capacity is not worth
    failing a report over. *)
+external loadavg : unit -> float = "tsync_loadavg"
+
+(* [None] where the platform does not say. *)
+let load_average () =
+  match loadavg () with l when l >= 0. -> Some l | _ -> None
+
 let disk_space path =
   try
     let avail, free, total = statvfs path in

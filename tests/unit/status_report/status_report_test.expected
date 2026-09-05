@@ -25,7 +25,6 @@
           "openHandles": 2,
           "filesOpened": 41,
           "pid": 4242,
-          "pid": 4242,
           "uptimeSeconds": 3720.0,
           "cpuSeconds": 12.5,
           "rssBytes": 1048576,
@@ -79,7 +78,6 @@
           "stagedFiles": 3,
           "openHandles": 2,
           "filesOpened": 41,
-          "pid": 4243,
           "pid": 4243,
           "uptimeSeconds": 3720.0,
           "cpuSeconds": 12.5,
@@ -182,7 +180,7 @@ Domain alpha
   concurrency      4 uploads, 4 chunk buffers, 8 downloads
   cache            2 chunks, 8.0 KB of unlimited
   Frontend fuse         pid 4242  /home/u/tsync/alpha
-    traffic          up 2.0 KB (0 B/s), down 4.0 KB (0 B/s)
+    traffic          up 2.0 KB (0 B/s), down 4.0 KB (0 B/s), 5 chunks hashed (0/s)
     handles          2 open, 41 since start
     in flight        3 staged
   Frontend http-proxy
@@ -196,7 +194,7 @@ Domain beta
   concurrency      4 uploads, 4 chunk buffers, 8 downloads
   cache            2 chunks, 8.0 KB of unlimited
   Frontend fuse         pid 4243  /home/u/tsync/beta
-    traffic          up 2.0 KB (0 B/s), down 4.0 KB (0 B/s)
+    traffic          up 2.0 KB (0 B/s), down 4.0 KB (0 B/s), 5 chunks hashed (0/s)
     handles          2 open, 41 since start
     in flight        3 staged
   Backend store (local, main)  path /srv/tsync
@@ -223,7 +221,7 @@ Domain alpha
   concurrency      4 uploads, 4 chunk buffers, 8 downloads
   cache            2 chunks, 8.0 KB of unlimited
   Frontend fuse         pid 4242  /home/u/tsync/alpha
-    traffic          up 2.0 KB (0 B/s), down 4.0 KB (0 B/s)
+    traffic          up 2.0 KB (0 B/s), down 4.0 KB (0 B/s), 5 chunks hashed (0/s)
     handles          2 open, 41 since start
     in flight        3 staged
   Backend store (local, main)  path /srv/tsync
@@ -235,7 +233,7 @@ Domain beta
   concurrency      4 uploads, 4 chunk buffers, 8 downloads
   cache            2 chunks, 8.0 KB of unlimited
   Frontend fuse         pid 4242  /home/u/tsync/beta
-    traffic          up 2.0 KB (0 B/s), down 4.0 KB (0 B/s)
+    traffic          up 2.0 KB (0 B/s), down 4.0 KB (0 B/s), 5 chunks hashed (0/s)
     handles          2 open, 41 since start
     in flight        3 staged
   Backend store (local, main)  path /srv/tsync
