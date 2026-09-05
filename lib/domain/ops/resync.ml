@@ -22,7 +22,7 @@ module Over
     (Cache : Cache_layout.S with type 'a io := 'a Io.t)
     (Pools : Bounded.S with type 'a io := 'a Io.t)
     (Tree : Inode_tree.OVER with type 'a io := 'a Io.t and type pool := Pools.t)
-    (Cursor_of : File_store.OVER with type 'a io := 'a Io.t)
+    (Cursor_of : Replay.JOURNAL with type 'a io := 'a Io.t)
     (Files : File.OVER with type 'a io := 'a Io.t)
     (Checkout : Checkout.OVER with type 'a io := 'a Io.t)
     (Sync : SYNC with type 'a io := 'a Io.t) =
@@ -43,7 +43,7 @@ struct
 
     (* Walks the inode tree through the module that owns the walk, so a resync and
        [tsync mirror] classify a child the same way. *)
-    let rebuild_mirror ~parallelism ~progress ~on_manifest () =
+    let rebuild_mirror ~parallelism ~progress ~on_manifest ~report () =
       let slots = Pools.create ~name:"resync" ~max:(max 1 parallelism) () in
       let count = ref 0 and failed = ref 0 in
       (* Counted, so a store whose manifests all fail to parse cannot resync
@@ -66,12 +66,25 @@ struct
                 "unreadable manifest: " ^ Printexc.to_string exn)
       in
       let apply key (entry : Inode_tree.entry) =
-        let* filed = Ck.record ~parent:key entry in
+        let* filed, held = Ck.record ~parent:key entry in
+        let rel = Logical_key.path filed in
+        (* What the mirror now says that it did not before, as the op a reader
+           of the applied entries takes for it. *)
+        let* () =
+          match (entry.Inode_tree.body, held) with
+            | _, `Same -> return_unit
+            | Inode_tree.File m, _ -> report (`Put (rel, Manifest.size m))
+            | Inode_tree.Dir m, `Changed ->
+                report (`Mkdir (rel, Some m.Folder.id))
+            | Inode_tree.Dir m, `Replaced old ->
+                let* () = report (`Rmdir (rel, Some old)) in
+                report (`Mkdir (rel, Some m.Folder.id))
+        in
         match entry.Inode_tree.body with
           | Inode_tree.Dir _ -> Io.return ()
           | Inode_tree.File _ ->
               incr count;
-              on_manifest (Logical_key.path filed);
+              on_manifest rel;
               Io.return ()
       in
       (* Named once per folder, which is what the hook is for and what a caller
@@ -102,8 +115,12 @@ struct
           (String.concat "\n  " (List.rev !sample));
       (!count, !failed)
 
-    let full_resync ~parallelism ~progress ~on_manifest ~notify ~handled reason
-        =
+    (* ponytail: a fixed chunk. A page of the change feed is a count of
+       entries, so this bounds what one reply carries; and one line has to fit
+       the tail read that answers the feed's head. *)
+    let ops_per_entry = 64
+
+    let full_resync ~parallelism ~progress ~on_manifest ~handled reason =
       progress.on_phase "rebuilding";
       let started = Unix.gettimeofday () in
       (* The mirror is rewritten in place, so a mount keeps serving it meanwhile
@@ -112,9 +129,26 @@ struct
         Cache.clear_projection ~cache_root:C.cache_root
           ~domain_name:C.domain_name
       in
-      let* manifests, failed =
-        rebuild_mirror ~parallelism ~progress ~on_manifest ()
+      (* The difference the rebuild makes, kept as it is found rather than at
+         the end: what a walk that dies part way wrote is still true. *)
+      let pending = ref [] and held = ref 0 in
+      let flush () =
+        match !pending with
+          | [] -> return_unit
+          | ops ->
+              pending := [];
+              held := 0;
+              Cursor.note_local (List.rev ops)
       in
+      let report op =
+        pending := op :: !pending;
+        incr held;
+        if !held >= ops_per_entry then flush () else return_unit
+      in
+      let* manifests, failed =
+        rebuild_mirror ~parallelism ~progress ~on_manifest ~report ()
+      in
+      let* () = flush () in
       progress.on_current None;
       (* Only a rebuild that reached everything may say so. Recording the mark
          after a partial walk moves the cursor past folders that were never
@@ -124,11 +158,13 @@ struct
       let* () =
         if failed = 0 then begin
           progress.on_phase "sweeping stale entries";
+          let* removed = Ck.sweep_stale ~cutoff:started () in
           let* () =
             Cache.sweep_stale ~cutoff:started ~cache_root:C.cache_root
               ~domain_name:C.domain_name
           in
-          progress.on_phase "notifying the daemon";
+          let* () = iter_s report removed in
+          let* () = flush () in
           Cursor.write_last_sync_key (J.entry_key ());
           (* The rebuild read what these describe, so they are not applied on
              top of it. *)
@@ -136,8 +172,6 @@ struct
         end
         else Io.return ()
       in
-      (* After the rebuild, or the daemon re-reads an empty mirror mid-rebuild. *)
-      notify ();
       Io.return (Full { manifests; failed; reason })
 
     (* One pass of the same engine the daemon polls with, so the two cannot drift
@@ -152,7 +186,7 @@ struct
 
     let run ?(full = false) ?(progress = no_progress)
         ?(on_manifest = fun _ -> ()) ?(on_decision = fun _ _ _ -> ())
-        ~parallelism ~notify () =
+        ~parallelism () =
       (* Every process serving this domain runs its own upload queue, so recovery
          has one to go through for the journal entry and cursor bump an upload
          owes — the same start {!Domain_engine} does for a daemon. *)
@@ -177,8 +211,8 @@ struct
       on_decision last_sync_key all_keys reason;
       match reason with
         | Some reason ->
-            full_resync ~parallelism ~progress ~on_manifest ~notify
-              ~handled:all_keys reason
+            full_resync ~parallelism ~progress ~on_manifest ~handled:all_keys
+              reason
         | None -> incremental ~progress ()
 
     let client_uuid = J.client_uuid

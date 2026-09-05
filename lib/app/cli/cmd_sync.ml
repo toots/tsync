@@ -91,16 +91,6 @@ let cmd : unit Cmd.t =
           !manifests !failures (Metrics.requests ()) (Metrics.retries ())
           (Metrics.timeouts ()) (Metrics.failures ())
     in
-    let notify () =
-      try
-        if !verbose then Log.info "notifying daemon of completed resync";
-        ignore
-          (Ipc.action ~socket_path:C.socket_path ~domain:C.domain_name
-             "full_resync")
-      with
-        | Failure msg -> Printf.eprintf "Warning: full_resync: %s\n" msg
-        | _ -> ()
-    in
     let code =
       run_lwt
         ~report:(fun () ->
@@ -142,8 +132,7 @@ let cmd : unit Cmd.t =
                (Option.value !current ~default:"/")
          in
          let+ outcome =
-           R.run ~full ~progress ~on_manifest ~on_decision ~parallelism ~notify
-             ()
+           R.run ~full ~progress ~on_manifest ~on_decision ~parallelism ()
          in
          match outcome with
            | Resync.Full { manifests = n; failed; reason = _ } ->

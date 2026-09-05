@@ -4,7 +4,9 @@
     entries published since the local bookmark, or — when there is no bookmark,
     when the journal cannot carry one to now, or when the caller insists —
     rewrite the manifest mirror in place by walking the folder tree whole, then
-    drop what the walk did not reach.
+    drop what the walk did not reach — and report both, as the ops a reader of
+    the applied entries would have been given had the changes arrived one by
+    one, so no reader has to start over.
 
     One pass of the same engine the daemon polls with, so the two cannot drift
     apart. *)
@@ -38,14 +40,12 @@ module Over
     (_ : Cache_layout.S with type 'a io := 'a Io.t)
     (Pools : Bounded.S with type 'a io := 'a Io.t)
     (_ : Inode_tree.OVER with type 'a io := 'a Io.t and type pool := Pools.t)
-    (_ : File_store.OVER with type 'a io := 'a Io.t)
+    (_ : Replay.JOURNAL with type 'a io := 'a Io.t)
     (_ : File.OVER with type 'a io := 'a Io.t)
     (_ : Checkout.OVER with type 'a io := 'a Io.t)
     (_ : SYNC with type 'a io := 'a Io.t) : sig
   module Make (C : Conf.S with type 'a io = 'a Io.t) : sig
-    (** [notify] is called once the rebuild is complete and never before, or a
-        daemon told earlier re-reads a mirror that is still being written.
-        [on_decision] receives the local mark, the published journal and why a
+    (** [on_decision] receives the local mark, the published journal and why a
         rebuild was chosen (or [None] for an incremental pass), once that is
         settled and before anything acts on it.
 
@@ -61,7 +61,6 @@ module Over
         string option ->
         unit) ->
       parallelism:int ->
-      notify:(unit -> unit) ->
       unit ->
       outcome Io.t
 

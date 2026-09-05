@@ -19,6 +19,11 @@ module type JOURNAL = sig
 
     (** Every entry this client has handled, as far back as it keeps them. *)
     val applied_keys : unit -> Journal.Entry_key.t list io
+
+    (** Keep, under a freshly minted key, ops this client found in the mirror
+        and will not publish, and announce them as a published entry is. What a
+        rebuild says about the difference it made. *)
+    val note_local : Journal.op list -> unit io
   end
 end
 

@@ -73,12 +73,31 @@ let manifest_body name =
   Manifest.encode ~name ~size:0L ~chunk_size:4 ~mtime:0.
     ~h1:(String.make 16 'a') ~h2:(String.make 16 'b') ~symlink:None ~keys:[]
 
-(* Nothing listens, so a notify that fired is recorded rather than sent. *)
-let notified = ref 0
-let notify () = incr notified
+let run ?(full = false) () = R.run ~full ~parallelism:2 ()
 
-let run ?(full = false) () =
-  R.run ~full ~parallelism:2 ~notify:(fun () -> notify ()) ()
+(* The rebuild's own report: what the applied entries gained after [anchor]. *)
+let head () = Applied_entries.head ~cache_root:root ~domain_name:C.domain_name
+
+let reported ?since () =
+  let+ page =
+    Applied_entries.since ~cache_root:root ~domain_name:C.domain_name ?since
+      ~limit:1000 ()
+  in
+  match page with
+    | None -> failwith "the applied entries no longer reach the anchor"
+    | Some page -> List.concat_map snd page.Applied_entries.entries
+
+let show_op = function
+  | `Put (k, size) -> Printf.sprintf "put %s %Ld" k size
+  | `Delete k -> "delete " ^ k
+  | `Mkdir (k, id) ->
+      Printf.sprintf "mkdir %s %s" k (Option.value id ~default:"-")
+  | `Rmdir (k, id) ->
+      Printf.sprintf "rmdir %s %s" k (Option.value id ~default:"-")
+  | `Rename { Journal.dst; src; _ } -> Printf.sprintf "rename %s -> %s" src dst
+
+let show_ops ops =
+  step "reported: %s" (String.concat ", " (List.map show_op ops))
 
 (* Planted as the last walk would have left it, an hour old, so a sweep by
    mtime has something older than the cutoff to decide about. *)
@@ -87,6 +106,12 @@ let plant path body =
   let oc = open_out_bin path in
   output_string oc body;
   close_out oc;
+  let old = Unix.gettimeofday () -. 3600. in
+  Unix.utimes path old old
+
+(* As the last walk would have left it, an hour old: a marker written by the
+   run just before is inside the tolerance the sweep gives a coarse clock. *)
+let age path =
   let old = Unix.gettimeofday () -. 3600. in
   Unix.utimes path old old
 
@@ -111,6 +136,7 @@ let () =
        Fs.write_journal_entry [`Put ("a.txt", 0L)]
      in
      check "nothing is recorded yet" (Fs.read_last_sync_key () = None);
+     let* before = head () in
      let* outcome = run () in
      step "%s" (describe outcome);
      check "it rebuilt"
@@ -124,20 +150,26 @@ let () =
        (match outcome with
          | Resync.Full { manifests; failed; _ } -> manifests = 1 && failed = 0
          | _ -> false);
-     check "and told the daemon once" (!notified = 1);
+     let* ops = reported ?since:before () in
+     show_ops ops;
+     check "and the file it found is on the applied entries"
+       (List.mem (`Put ("a.txt", 0L)) ops);
 
      case "a clean rebuild records how far it got";
      check "the bookmark is set" (Fs.read_last_sync_key () <> None);
 
      case "a client already caught up applies the journal instead";
+     let* before = head () in
      let* outcome = run () in
      step "%s" (describe outcome);
      check "it did not rebuild"
        (match outcome with Resync.Incremental _ -> true | _ -> false)
        ~why:(fun () -> describe outcome);
-     check "and told the daemon nothing" (!notified = 1);
+     let* ops = reported ?since:before () in
+     check "and reported nothing" (ops = []);
 
      case "--full rebuilds a client that had no need to";
+     let* before = head () in
      let* outcome = run ~full:true () in
      step "%s" (describe outcome);
      check "it rebuilt"
@@ -147,6 +179,8 @@ let () =
        (match outcome with
          | Resync.Full { reason; _ } -> reason = "--full flag"
          | _ -> false);
+     let* ops = reported ?since:before () in
+     check "and a file the store still has as it was reports nothing" (ops = []);
 
      case "a rebuild rewrites the mirror in place";
      let chunk =
@@ -159,6 +193,7 @@ let () =
      plant (mirror_path "gone.txt") (manifest_body "gone.txt");
      check "the mirror holds what the last walk left"
        (Sys.file_exists (mirror_path "a.txt"));
+     let* before = head () in
      let* outcome = run ~full:true () in
      step "%s" (describe outcome);
      check "a chunk survives the rebuild" (Sys.file_exists chunk);
@@ -166,6 +201,58 @@ let () =
        (not (Sys.file_exists (mirror_path "gone.txt")));
      check "and one it still has is kept"
        (Sys.file_exists (mirror_path "a.txt"));
+     let* ops = reported ?since:before () in
+     show_ops ops;
+     check "the drop is reported" (ops = [`Delete "gone.txt"]);
+
+     case "a rebuild is a delta on the applied entries, not a new log";
+     let* page =
+       Applied_entries.since ~cache_root:root ~domain_name:C.domain_name
+         ?since:before ~limit:10 ()
+     in
+     check "an anchor from before the rebuild is still bridged" (page <> None);
+
+     case "a folder that moved is reported once, where it now is";
+     let marker id name = Folder.marker_to_string { Folder.name; id } in
+     let dir_marker name =
+       Filename.concat (Filename.dirname (mirror_path name)) name |> fun d ->
+       Filename.concat d Stored_key.folder_marker_leaf
+     in
+     plant (dir_marker "old") (marker "X" "old");
+     let* () = put Stored_key.root_id "d" (marker "X" "new") in
+     let* before = head () in
+     let* outcome = run ~full:true () in
+     step "%s" (describe outcome);
+     let* ops = reported ?since:before () in
+     show_ops ops;
+     check "arrived under its id at the new path, and left nowhere"
+       (ops = [`Mkdir ("new", Some "X")]);
+     check "the old path is gone from the mirror"
+       (not (Sys.file_exists (dir_marker "old")));
+
+     case "a folder recreated under its name is a new folder";
+     let* () = put Stored_key.root_id "d" (marker "Y" "new") in
+     let* before = head () in
+     let* outcome = run ~full:true () in
+     step "%s" (describe outcome);
+     let* ops = reported ?since:before () in
+     show_ops ops;
+     check "the old id leaves and the new one arrives, in that order"
+       (ops = [`Rmdir ("new", Some "X"); `Mkdir ("new", Some "Y")]);
+
+     case "a folder the store no longer has is reported gone";
+     let* () =
+       Store.delete
+         ~key:(Stored_key.in_space ~prefix:(ns Stored_key.root_id) "d")
+         ()
+     in
+     age (dir_marker "new");
+     let* before = head () in
+     let* outcome = run ~full:true () in
+     step "%s" (describe outcome);
+     let* ops = reported ?since:before () in
+     show_ops ops;
+     check "under the id it had" (ops = [`Rmdir ("new", Some "Y")]);
 
      case "a batch the link lost is asked again, not given up on";
      let before = Fs.read_last_sync_key () in
@@ -207,5 +294,5 @@ let () =
        ~why:(fun () -> "a partial walk advanced the mark");
      check "nor was anything swept" (Sys.file_exists (mirror_path "gone.txt"));
 
-     report ~expected:20 ();
+     report ~expected:27 ();
      Lwt.return_unit)

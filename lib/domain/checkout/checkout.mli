@@ -3,10 +3,11 @@
     over the top of that whatever {!Staged_manifest} says this client has
     changed.
 
-    The published half is a projection — {!Cache_layout.clear} drops it and a
-    resync rebuilds it — which is why the staged half it reads through is a
-    store of its own. This module is where the two are put together: it owns the
-    published tree, and the overlay is the only thing that consults both. *)
+    The published half is a projection — a resync's walk rewrites it in place
+    and {!S.sweep_stale} drops what the walk did not reach — which is why the
+    staged half it reads through is a store of its own. This module is where the
+    two are put together: it owns the published tree, and the overlay is the
+    only thing that consults both. *)
 
 (** What the mirror knows is in a folder: the domain's name for an item, and the
     size and mtime held for it.
@@ -51,9 +52,24 @@ module type S = sig
   val ensure_root : unit -> unit io
 
   (** File one child of [parent] as the store lists it, answering the key it was
-      filed under. A resync and a browse both go through this, so the tree they
-      leave behind is the same one. *)
-  val record : parent:Logical_key.t -> Inode_tree.entry -> Logical_key.t io
+      filed under and what the mirror held there before: nothing or a different
+      item ([`Changed]), the same item ([`Same]), or for a folder another id
+      ([`Replaced id]). A resync and a browse both go through this, so the tree
+      they leave behind is the same one, and a resync reports from the answer.
+  *)
+  val record :
+    parent:Logical_key.t ->
+    Inode_tree.entry ->
+    (Logical_key.t * [ `Same | `Changed | `Replaced of string ]) io
+
+  (** Drop every published entry last written before [cutoff]: what a walk that
+      rewrote everything the store still has did not touch. Answers the ops a
+      reader of the applied entries takes for it, named as the walk names what
+      arrives. A folder whose id the index now places elsewhere moved, and the
+      walk reported it there, so it is dropped here without an op; nothing
+      beneath a dropped folder is reported. Only after a walk that reached
+      everything, a folder it could not read being not one that is gone. *)
+  val sweep_stale : cutoff:float -> unit -> Journal.op list io
 end
 
 (** The shape a consumer takes: {!S} for whichever domain it is applied to. *)

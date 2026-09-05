@@ -6,7 +6,6 @@ let sub ~cache_root domain_name name =
 let manifests_dir ~cache_root domain_name =
   sub ~cache_root domain_name "manifests"
 
-(* Not exported: the two things under it are what a caller wants. *)
 let scratch_dir ~cache_root domain_name = sub ~cache_root domain_name "scratch"
 
 (* The [.tsync-dir] markers say what id a path has; this says where an id lives,
@@ -98,29 +97,21 @@ struct
       Option.value body ~default:""
     else Io.return name
 
-  (* For a full resync. The applied entries describe the mirror being
-     replaced, and what they were for -- carrying a reader forward from an
-     anchor -- a resync answers by stamping a new token, which expires every
-     anchor outstanding.
-
-     The mirror, the folder index and the chunks stay: the walk rewrites the
-     first two in place so a mount keeps serving them meanwhile, and a chunk is
-     named by its content, which no resync changes. *)
+  (* For a full resync. Only the scratch space: the mirror, the folder index
+     and the chunks stay, the walk rewriting the first two in place so a mount
+     keeps serving them meanwhile, and a chunk being named by its content, which
+     no resync changes. The applied entries stay too, the rebuild being reported
+     there as what it changed. *)
   let clear_projection ~cache_root ~domain_name =
-    let* () = F.rm_rf (scratch_dir ~cache_root domain_name) in
-    F.rm_rf (applied_dir ~cache_root domain_name)
+    F.rm_rf (scratch_dir ~cache_root domain_name)
 
-  (* An entry the walk rewrote carries its mtime; one it did not is one the
-     store no longer has. Every live marker is rewritten on each visit,
-     including the name marker of an escaped directory, so a directory whose
-     markers are all stale is emptied and removed with them. *)
+  (* An entry the walk rewrote carries its mtime; one it did not names a folder
+     the store no longer has. The mirror's own sweep, which reports what it
+     drops, is the checkout's; this reaps the index behind it. *)
   let sweep_stale ~cutoff ~cache_root ~domain_name =
     (* An mtime comes from a coarser clock than the cutoff: a write in the first
        tick of the walk can predate it by a few milliseconds. *)
     let cutoff = cutoff -. 1. in
-    let* (_ : bool) =
-      F.reap_older_than ~cutoff (manifests_dir ~cache_root domain_name)
-    in
     let+ (_ : bool) =
       F.reap_older_than ~cutoff (folders_dir ~cache_root domain_name)
     in

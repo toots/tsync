@@ -43,6 +43,7 @@ struct
     let walk = T.walk
     let ensure_root = T.ensure_root
     let record = T.record
+    let sweep_stale = T.sweep_stale
 
     let folder_id prefix =
       if Logical_key.equal prefix Lk.root then
@@ -51,7 +52,7 @@ struct
         Fi.lookup_id ~cache_root:C.cache_root ~domain_name:C.domain_name prefix
 
     let file_child prefix entry =
-      let+ filed = T.record ~parent:prefix entry in
+      let+ filed, _ = T.record ~parent:prefix entry in
       Logical_key.leaf filed
 
     (* Only the published half is dropped: a staged body is this client's own
