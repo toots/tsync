@@ -16,6 +16,21 @@ let cmd : unit Cmd.t =
   let sum_stores which =
     Hashtbl.fold (fun _ v acc -> acc + which v) per_store 0
   in
+  (* The shape of the folder tree, after the chunks: what a walk from the root
+     found at two places, disowned, unanchored or reachable from nowhere. *)
+  let tree_lines (module C : Conf_lwt.S) =
+    let open Lwt.Syntax in
+    let module I = Integrity_lwt.Make (C) in
+    let+ t = I.tree_report () in
+    List.iter
+      (fun f -> Printf.printf "%s\n%!" (Integrity.describe_finding f))
+      t.Integrity.findings;
+    if not t.Integrity.orphans_checked then
+      Printf.printf "ORPHANS not checked — no main store on this disk\n%!";
+    let n = List.length t.Integrity.findings in
+    Printf.printf "%d folder tree finding%s\n%!" n (if n = 1 then "" else "s");
+    Integrity.tree_unhealthy t
+  in
   let report (module C : Conf_lwt.S) detail =
     let open Lwt.Syntax in
     let module Cor = Corruption_lwt.Make (C) in
@@ -72,7 +87,8 @@ let cmd : unit Cmd.t =
         | [] -> ""
         | names ->
             Printf.sprintf ", and nothing checked %s" (String.concat ", " names));
-    Lwt.return (if Integrity.unhealthy r then 1 else 0)
+    let+ tree_bad = tree_lines (module C) in
+    if Integrity.unhealthy r || tree_bad then 1 else 0
   in
   (* What the sweep is doing, from outside it. The requests delete themselves as
      each shard finishes, so counting what is left is the progress bar — and
@@ -127,14 +143,17 @@ let cmd : unit Cmd.t =
             | Some _ -> ())
         answers
     in
-    let+ outcome = I.verify ~on_answers ~on_progress ~on_done ~on_stalled () in
-    match outcome with
+    let* outcome = I.verify ~on_answers ~on_progress ~on_done ~on_stalled () in
+    (match outcome with
       | `Nothing_queued ->
           Printf.eprintf
-            "Nothing was asked to check anything. A local store is swept by \
-             tsync gc --verify instead.\n";
-          1
-      | `Watched -> 0
+            "No store was asked to check its chunks. A local store is swept by \
+             tsync gc --verify instead.\n"
+      | `Watched -> ());
+    (* The tree is walked from here whatever the stores can do for their
+       chunks, so a domain on a local store still gets a verdict. *)
+    let+ tree_bad = tree_lines (module C) in
+    if tree_bad then 1 else 0
   in
   let repair (module C : Conf_lwt.S) source dry_run verbose =
     let open Lwt.Syntax in
@@ -143,7 +162,7 @@ let cmd : unit Cmd.t =
        changed. A stale marker is the one outcome quiet leaves out: it is the
        common case on a store whose events arrived out of order, and it means
        nothing was wrong. *)
-    let+ s =
+    let* s =
       Rp.repair ?source ~dry_run
         ~on_start:(fun ~total ->
           planned := total;
@@ -170,6 +189,19 @@ let cmd : unit Cmd.t =
       (if s.Integrity.cleared = 1 then "" else "s")
       s.Integrity.unrepairable
       (if dry_run then " (dry run, nothing written)" else "");
+    let* t = Rp.repair_tree ~dry_run () in
+    Printf.printf
+      "folder tree: %d disowned marker%s removed, %d anchor%s written%s\n"
+      t.Integrity.removed
+      (if t.Integrity.removed = 1 then "" else "s")
+      t.Integrity.anchored
+      (if t.Integrity.anchored = 1 then "" else "s")
+      (if dry_run then " (dry run, nothing written)" else "");
+    List.iter
+      (fun f -> Printf.printf "LEFT %s\n%!" (Integrity.describe_finding f))
+      t.Integrity.left;
+    Lwt.return
+    @@
     if s.Integrity.unrepairable > 0 then (
       Printf.eprintf
         "\nNo copy of these chunks hashes to its own key anywhere:\n";
@@ -229,9 +261,11 @@ let cmd : unit Cmd.t =
       value & flag
       & info ["repair"]
           ~doc:
-            "Rewrite what was found, from a copy that hashes to the right key. \
-             With $(b,--verbose), every chunk is reported as it is done, with \
-             its position in the total.")
+            "Rewrite what was found, from a copy that hashes to the right key, \
+             then put the folder tree right: a marker a move left behind is \
+             removed and a folder without an anchor gets one. With \
+             $(b,--verbose), every chunk is reported as it is done, with its \
+             position in the total.")
   in
   let detail_arg =
     Arg.(
@@ -257,9 +291,9 @@ let cmd : unit Cmd.t =
   Cmd.v
     (Cmd.info "data-integrity"
        ~doc:
-         "Chunks that are not what their names say: ask for a check \
-          ($(b,--verify)), list what was found (the default), or put it right \
-          ($(b,--repair)).")
+         "Chunks that are not what their names say, and folders the tree names \
+          twice or not at all: ask for a check ($(b,--verify)), list what was \
+          found (the default), or put it right ($(b,--repair)).")
     Term.(
       const run $ domain_arg $ verify_arg $ repair_arg $ detail_arg $ source_arg
       $ dry_run_arg $ verbose_arg)

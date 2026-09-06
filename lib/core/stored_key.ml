@@ -66,6 +66,17 @@ let escape_path rel =
 let dir_name_leaf = sentinel ^ "name"
 let folder_marker_leaf = sentinel ^ "dir"
 
+(* Inside a folder's own namespace: which folder holds it and under what name.
+   The marker under the parent says the same thing from the other side, and
+   the anchor is what settles it when two markers disagree. *)
+let anchor_leaf = sentinel ^ "parent"
+
+let anchor_key ~prefix ~folder_id =
+  in_space ~prefix (folder_id ^ "/" ^ anchor_leaf)
+
+(* The id of the namespace a child key sits in. *)
+let parent_folder_id key = Filename.basename (Filename.dirname (to_string key))
+
 let folder_id_of ns =
   let path = to_string ns in
   Filename.basename

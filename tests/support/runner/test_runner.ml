@@ -831,6 +831,9 @@ let setup_client (module C : Conf_lwt.S) root staging_prefix =
         let+ outcome = E.purge_trashed ~path () in
         match outcome with
           | `Not_in_trash -> Printf.printf "  purge %s -> not in trash\n" path
+          | `Live_elsewhere ->
+              Printf.printf "  purge %s -> refused, the folder lives elsewhere\n"
+                path
           | `Purged n -> Printf.printf "  purge %s -> %d object(s)\n" path n)
     | Gc ->
         let module G = Gc_lwt.Make (C) in
@@ -1585,6 +1588,16 @@ let dump_backend_at ~backend_root ~domain_prefix ~chunk_prefix ~journal_prefix
           (* Empty-namespace directories are a local-backend artifact (S3 has no
              such object); skip them. *)
           Lwt.return_unit
+        else if Stored_key.is_internal e.Backend.key then
+          (* A folder's own record of where it lives, which is what proves a
+             move took it along. *)
+          let+ data = B.get ~key:e.Backend.key () in
+          match Folder.anchor_of_string (Bigstring.to_string data) with
+            | Some a ->
+                Printf.printf "  anchor %s in %s as %s\n"
+                  (alias_id (Stored_key.parent_folder_id e.Backend.key))
+                  (alias_id a.Folder.parent) a.Folder.name
+            | None -> Printf.printf "  internal %s\n" (alias_rel rel)
         else
           let+ data = B.get ~key:e.Backend.key () in
           match Folder.marker_of_string (Bigstring.to_string data) with

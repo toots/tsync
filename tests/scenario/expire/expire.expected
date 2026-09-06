@@ -71,6 +71,7 @@
   chunk 5e4c66b9cb232332-2fc4674f963b00e3 size=8
   cursor = <entry-1>
   journal <entry-1> = rmdir d
+  anchor <folder-1> in .tsync-trash as d
 
 === expire all: trashed folder emptied first
   mkdir d
@@ -89,6 +90,7 @@
   chunk 6e60aa731ca17a23-98d370f11239d9ba size=22
   cursor = <entry-1>
   journal <entry-1> = rmdir d
+  anchor <folder-1> in .tsync-trash as d
 
 === purge drops one trashed folder that expire none leaves
   mkdir d
@@ -117,6 +119,7 @@
   journal <entry-4> = rmdir d
   file keep.txt [.tsync-root/18954525e207201b-dcfdae3db302a2bd] = manifest size=12 chunks=1 h1=b500d7bf771db830 h2=c49c64b6f769cf41
     chunk#0 78bdd50ffdb89f28-110ae84095eebccf size=12
+  anchor <folder-1> in .tsync-trash as d
 
 === purge of an untrashed path is refused
   write keep.txt "still here"

@@ -4,8 +4,10 @@
    What went wrong on 2026-09-03 was neither: the new marker landed and the old
    one stayed, silently, so one folder id had two parents. Two silences did it,
    a parent this client held no id for (no key to delete, so no delete) and a
-   delete that found nothing and said nothing. Both are failures now, and a
-   failure leaves the local mirror where it was. *)
+   delete that found nothing and said nothing. The first is a refusal now, and
+   nothing moves. The second cannot silently split a folder any more: the
+   folder's anchor is written with the new marker, before the old one goes, so
+   whatever the delete left behind is a marker no reader believes. *)
 
 open Lwt.Syntax
 open Check
@@ -37,8 +39,17 @@ module C =
 module F = File_lwt.Make (C)
 module Lk = Logical_key.Make (C)
 module Ck = Checkout_lwt.Make (C)
+module Tree = Inode_tree_lwt.Make (C)
 
 let ns id = C.domain_prefix ^ id ^ "/"
+
+let anchor_of id =
+  let+ body =
+    Store.get_opt
+      ~key:(Stored_key.anchor_key ~prefix:C.domain_prefix ~folder_id:id)
+      ()
+  in
+  Option.bind body (fun b -> Folder.anchor_of_string (Bigstring.to_string b))
 
 (* The folder markers under one namespace, by name. *)
 let markers id =
@@ -60,12 +71,23 @@ let markers id =
 let aliases : (string, string) Hashtbl.t = Hashtbl.create 4
 
 let alias id =
-  match Hashtbl.find_opt aliases id with
-    | Some a -> a
-    | None ->
-        let a = Printf.sprintf "<folder-%d>" (Hashtbl.length aliases + 1) in
-        Hashtbl.replace aliases id a;
-        a
+  if id = Stored_key.root_id || id = Stored_key.trash_id then id
+  else (
+    match Hashtbl.find_opt aliases id with
+      | Some a -> a
+      | None ->
+          let a = Printf.sprintf "<folder-%d>" (Hashtbl.length aliases + 1) in
+          Hashtbl.replace aliases id a;
+          a)
+
+let show_anchor id =
+  let+ a = anchor_of id in
+  step "anchor of %s: %s" (alias id)
+    (match a with
+      | Some a ->
+          Printf.sprintf "in %s as %s" (alias a.Folder.parent) a.Folder.name
+      | None -> "none");
+  a
 
 let show_markers label id =
   let+ ms = markers id in
@@ -109,8 +131,11 @@ let () =
      check "one marker, under the new name, same id" (after = [("d2", id)]);
      let* dirs = local_dirs () in
      check "the mirror agrees" (dirs = ["d2"]);
+     let* anchor = show_anchor id in
+     check "and the anchor names the new place"
+       (anchor = Some { Folder.parent = Stored_key.root_id; name = "d2" });
 
-     case "a delete that removes nothing is a rename that did not happen";
+     case "a delete that removes nothing leaves a marker no reader believes";
      silent :=
        Stored_key.child_key ~prefix:C.domain_prefix
          ~folder_id:Stored_key.root_id "d2";
@@ -119,12 +144,32 @@ let () =
            F.rename ~src:(Lk.dir "d2") ~dst:(Lk.dir "d3"))
      in
      let* after = show_markers "root after" Stored_key.root_id in
-     check "it was refused" (not ok);
-     check "the store holds one marker, under the old name"
-       (after = [("d2", id)]);
-     let* dirs = local_dirs () in
-     check "and the mirror is back where it was" (dirs = ["d2"]);
+     check "it went through" ok;
+     check "both markers are on the store" (after = [("d2", id); ("d3", id)]);
+     let* anchor = show_anchor id in
+     check "the anchor names the new one"
+       (anchor = Some { Folder.parent = Stored_key.root_id; name = "d3" });
+     let* listed = Tree.children ~folder_id:Stored_key.root_id () in
+     let names =
+       List.filter_map
+         (function
+           | { Inode_tree.body = Inode_tree.Dir m; _ } -> Some m.Folder.name
+           | _ -> None)
+         listed
+       |> List.sort compare
+     in
+     step "the store lists: %s" (String.concat ", " names);
+     check "and a reader sees the folder once, at the new name" (names = ["d3"]);
      silent := Stored_key.listed "";
+     (* Back to one marker, so the cases below start clean. *)
+     let* (_ : bool) =
+       Store.delete
+         ~key:
+           (Stored_key.child_key ~prefix:C.domain_prefix
+              ~folder_id:Stored_key.root_id "d2")
+         ()
+     in
+     let* () = F.rename ~src:(Lk.dir "d3") ~dst:(Lk.dir "d2") in
 
      case "a parent this client holds no id for is not renamed from";
      (* A folder materialised by a peer's put, with a marker of its own but
@@ -143,17 +188,15 @@ let () =
      let* _, under_p = Ck.list_children ~prefix:(Lk.dir "p") () in
      check "the child is still where it was" (under_p = ["child"]);
 
-     case "a folder retired without its marker is not retired";
-     silent :=
-       Stored_key.child_key ~prefix:C.domain_prefix
-         ~folder_id:Stored_key.root_id "d2";
+     case "a folder retired is anchored to the trash first";
      let* ok = attempt "rmdir d2" (fun () -> F.rmdir (Lk.dir "d2")) in
      let* after = show_markers "root after" Stored_key.root_id in
-     check "it was refused" (not ok);
-     check "the marker is still there" (List.mem_assoc "d2" after);
-     let* dirs = local_dirs () in
-     check "and so is the directory" (List.mem "d2" dirs);
+     check "it went through" ok;
+     check "the marker is gone from the root" (not (List.mem_assoc "d2" after));
+     let* anchor = show_anchor id in
+     check "and the anchor names the trash"
+       (anchor = Some { Folder.parent = Stored_key.trash_id; name = "d2" });
 
-     report ~expected:12 ();
+     report ~expected:14 ();
      Lwt.return_unit);
   Scratch.cleanup root

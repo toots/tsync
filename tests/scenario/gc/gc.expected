@@ -50,6 +50,7 @@
 --- backend
   cursor = <entry-1>
   journal <entry-1> = rmdir d
+  anchor <folder-1> in .tsync-trash as d
 
 === nothing expired: every chunk kept
   write foo.txt "one"

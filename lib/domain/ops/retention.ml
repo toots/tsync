@@ -78,6 +78,11 @@ struct
                     Folder.marker_to_string
                       { Folder.name = m.Folder.name; id = m.Folder.id }
                   in
+                  let* () =
+                    St.put_anchor ~folder_id:m.Folder.id
+                      ~parent:(Stored_key.parent_folder_id new_key)
+                      ~name:m.Folder.name
+                  in
                   let* () = St.put_raw ~bkey:new_key ~data:marker in
                   let+ removed = St.delete_raw ~bkey:trash_key in
                   (* The marker is back either way; a trash entry that was
@@ -199,6 +204,22 @@ struct
       in
       !indexes @ children
 
+    (* A trash entry names a folder by id, and a folder restored or re-filed
+       since lives elsewhere under that same id: reclaiming its subtree from
+       the trash entry would delete the live folder. The folder's anchor says
+       where it is, and a trash entry it does not name is passed over, loudly.
+       A folder with no anchor is taken at the entry's word, as before. *)
+    let still_trashed (m : Folder.marker) =
+      let+ anchor = St.get_anchor ~folder_id:m.Folder.id in
+      match anchor with
+        | Some a when a.Folder.parent <> Stored_key.trash_id ->
+            Log.err
+              "trash entry for %s (%s) names a folder that lives under %s as \
+               %s; not reclaimed. Run tsync data-integrity --repair."
+              m.Folder.name m.Folder.id a.Folder.parent a.Folder.name;
+            false
+        | _ -> true
+
     (* One named folder whatever its age: {!expire} selects by cutoff, and that
        one cutoff governs versions and the journal too. *)
     let purge_trashed ?(on_delete = fun ~name:_ ~deleted:_ -> ()) ~path () =
@@ -206,13 +227,18 @@ struct
       match found with
         | None -> Io.return `Not_in_trash
         | Some (trash_key, m) ->
-            Log.debug "purge: reclaiming trashed folder %s" m.Folder.name;
-            let* subtree = collect_namespace m.Folder.id [] in
-            (* The marker last: it is what names the subtree, so losing it first
-               would strand every key under it with nothing pointing at them. *)
-            let keys = subtree @ [trash_key] in
-            let+ () = delete_all ~name:"trash" ~on_delete keys in
-            `Purged (List.length keys)
+            let* trashed = still_trashed m in
+            if not trashed then Io.return `Live_elsewhere
+            else begin
+              Log.debug "purge: reclaiming trashed folder %s" m.Folder.name;
+              let* subtree = collect_namespace m.Folder.id [] in
+              (* The marker last: it is what names the subtree, so losing it
+                 first would strand every key under it with nothing pointing at
+                 them. *)
+              let keys = subtree @ [trash_key] in
+              let+ () = delete_all ~name:"trash" ~on_delete keys in
+              `Purged (List.length keys)
+            end
 
     let expire ?(on_list = fun ~name:_ -> ())
         ?(on_scan = fun ~name:_ ~objects:_ -> ())
@@ -230,9 +256,14 @@ struct
           (fun acc ((e : Backend.file_entry), body) ->
             match Folder.marker_of_string body with
               | Some m ->
-                  Log.debug "expire: reclaiming trashed folder %s" m.Folder.name;
-                  let+ subtree = collect_namespace m.Folder.id [] in
-                  (e.key :: subtree) @ acc
+                  let* trashed = still_trashed m in
+                  if not trashed then Io.return acc
+                  else begin
+                    Log.debug "expire: reclaiming trashed folder %s"
+                      m.Folder.name;
+                    let+ subtree = collect_namespace m.Folder.id [] in
+                    (e.key :: subtree) @ acc
+                  end
               | None -> Io.return acc)
           [] trash
       in

@@ -36,4 +36,13 @@ and the rest come in two batches: ok
 the tree is still whole: ok
 and the folders left out were listed on their own: ok
 
-22 check(s), 0 failure(s)
+=== a marker the folder's anchor contradicts is skipped and reported
+listed where the anchor says it lives: ok
+and not where it does not: ok
+the leftover marker is reported with where the folder is: ok
+and `Fail skips it just the same: ok
+
+=== a folder with no anchor is taken at its marker's word
+listed at both, as before anchors: ok
+
+27 check(s), 0 failure(s)

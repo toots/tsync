@@ -54,8 +54,16 @@ module type S = sig
   val copy_manifest : src_key:Logical_key.t -> dst_key:Logical_key.t -> unit io
 
   (** Record a directory under its parent's namespace, so a resync can rebuild
-      the tree. A no-op for a layout with no folder tree. *)
+      the tree, its anchor written first so a marker left behind elsewhere is
+      stale from this moment. A no-op for a layout with no folder tree. *)
   val put_folder_marker : key:Logical_key.t -> unit io
+
+  (** Where a folder lives, by its id: see {!Folder.anchor}. *)
+  val put_anchor : folder_id:string -> parent:string -> name:string -> unit io
+
+  (** [None] for a folder written before anchors were, which is taken at its
+      marker's word. *)
+  val get_anchor : folder_id:string -> Folder.anchor option io
 
   (** {2 By backend key}
 

@@ -332,5 +332,54 @@ let () =
      check "and the folders left out were listed on their own" (!listings > 1)
        ~why:(fun () -> Printf.sprintf "%d listings" !listings);
      answer_at_most := max_int;
+
+     case "a marker the folder's anchor contradicts is skipped and reported";
+     (* The 2026-09-03 shape: one folder, a marker under two parents. The
+        anchor names one of them, so the other marker is a leftover. *)
+     let home = Stored_key.new_id () and away = Stored_key.new_id () in
+     let shared = Stored_key.new_id () in
+     let marker =
+       Folder.marker_to_string { Folder.name = "songs"; id = shared }
+     in
+     let* () = put home "songs" marker in
+     let* () = put away "songs" marker in
+     let* () =
+       Store.put
+         ~key:(Stored_key.anchor_key ~prefix:C.domain_prefix ~folder_id:shared)
+         ~data:
+           (Bigstring.of_string
+              (Folder.anchor_to_string { Folder.parent = home; name = "songs" }))
+         ()
+     in
+     let* at_home = Tree.children ~folder_id:home () in
+     check "listed where the anchor says it lives" (List.length at_home = 1);
+     let seen = ref [] in
+     let* at_away =
+       Tree.children
+         ~on_unusable:(`Skip (fun bkey r -> seen := (bkey, r) :: !seen))
+         ~folder_id:away ()
+     in
+     check "and not where it does not" (at_away = []);
+     check "the leftover marker is reported with where the folder is"
+       (match !seen with
+         | [(bkey, `Disowned a)] ->
+             bkey = Stored_key.in_space ~prefix:(ns away) "songs"
+             && a.Folder.parent = home
+         | _ -> false);
+     let* under_fail = Tree.children ~folder_id:away () in
+     check "and `Fail skips it just the same" (under_fail = []);
+
+     case "a folder with no anchor is taken at its marker's word";
+     let old_home = Stored_key.new_id () and old_away = Stored_key.new_id () in
+     let old = Stored_key.new_id () in
+     let marker =
+       Folder.marker_to_string { Folder.name = "legacy"; id = old }
+     in
+     let* () = put old_home "legacy" marker in
+     let* () = put old_away "legacy" marker in
+     let* a = Tree.children ~folder_id:old_home () in
+     let* b = Tree.children ~folder_id:old_away () in
+     check "listed at both, as before anchors"
+       (List.length a = 1 && List.length b = 1);
      Lwt.return_unit);
-  report ~expected:22 ()
+  report ~expected:27 ()

@@ -92,6 +92,17 @@ val dir_name_leaf : string
 (** The leaf naming which folder id a directory has. *)
 val folder_marker_leaf : string
 
+(** The leaf, inside a folder's own namespace, naming which folder holds it and
+    under what name: see {!Folder.anchor}. *)
+val anchor_leaf : string
+
+(** Where a folder's anchor is filed. *)
+val anchor_key : prefix:string -> folder_id:string -> t
+
+(** The id of the namespace a child key sits in: the parent of the folder or
+    file the key names. *)
+val parent_folder_id : t -> string
+
 (** A namespace listed as itself, which every store does for a folder: it names
     no object, so a reader wanting bodies passes over it and a copy writes an
     empty one to keep the folder. *)

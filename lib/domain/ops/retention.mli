@@ -47,12 +47,14 @@ module Over
     val restore : string -> restored Io.t
 
     (** Delete one trashed folder and everything under it, now, answering how
-        many objects went. [`Not_in_trash] when [path] names nothing there. *)
+        many objects went. [`Not_in_trash] when [path] names nothing there;
+        [`Live_elsewhere] when the trash entry names a folder whose anchor says
+        it lives somewhere else, which reclaiming would delete. *)
     val purge_trashed :
       ?on_delete:(name:string -> deleted:int -> unit) ->
       path:string ->
       unit ->
-      [ `Purged of int | `Not_in_trash ] Io.t
+      [ `Purged of int | `Not_in_trash | `Live_elsewhere ] Io.t
 
     (** Deleted files directly under the folder at [key], by name. Mints a
         folder id if this client has none, since a listing of somewhere that

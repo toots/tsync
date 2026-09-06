@@ -179,6 +179,7 @@
   journal <entry-1> = mkdir sub
   journal <entry-2> = put sub/a.txt 6
   folder sub [.tsync-root/4f7b4244079f8bf6-67a7ed7af26470c3] -> <folder-1>
+  anchor <folder-1> in .tsync-root as sub
   file a.txt [<folder-1>/f01e5cbbc09d4fc4-9a0fcd66f030de75] = manifest size=6 chunks=1 h1=7546f608548f4d0d h2=aaeab951ddf2968e
     chunk#0 fa87ee5fc199e332-c7156c4359a54f81 size=6
 
@@ -217,6 +218,7 @@
   journal <entry-3> = delete sub/a.txt
   journal <entry-4> = rmdir sub
   trash sub -> <folder-1>
+  anchor <folder-1> in .tsync-trash as sub
 
 === foreign_rmdir_after_repeated_mkdir
   A: mkdir sub
@@ -263,6 +265,7 @@
   journal <entry-5> = delete sub/a.txt
   journal <entry-6> = rmdir sub
   trash sub -> <folder-1>
+  anchor <folder-1> in .tsync-trash as sub
 
 === concurrent_mkdir_then_write
   A: mkdir sub
@@ -310,6 +313,7 @@
   journal <entry-3> = put sub/from-a.txt 1
   journal <entry-4> = put sub/from-b.txt 1
   folder sub [.tsync-root/4f7b4244079f8bf6-67a7ed7af26470c3] -> <folder-1>
+  anchor <folder-1> in .tsync-root as sub
   file from-a.txt [<folder-1>/3958c931de20fdc1-cf2927274a2ee417] = manifest size=1 chunks=1 h1=15da855801af627d h2=206c8135a9dd3b50
     chunk#0 e6c632b61e964e1f-d2f6d0996f37a720 size=1
   file from-b.txt [<folder-1>/f87da0e66b299a40-05ed2ebb07efe2e0] = manifest size=1 chunks=1 h1=6c25cc3db3ce7928 h2=6816a4fbbf51c9a5
@@ -345,6 +349,7 @@
   journal <entry-2> = mkdir sub
   journal <entry-3> = rmdir sub
   trash sub -> <folder-1>
+  anchor <folder-1> in .tsync-trash as sub
 
 === concurrent_create
   A: write foo.txt "from A"
@@ -634,6 +639,7 @@
   journal <entry-2> = put sub/first.txt 3
   journal <entry-3> = put sub/second.txt 3
   folder sub [.tsync-root/4f7b4244079f8bf6-67a7ed7af26470c3] -> <folder-1>
+  anchor <folder-1> in .tsync-root as sub
   file second.txt [<folder-1>/5f6e39261bd1cacd-9908fb8a30dc8930] = manifest size=3 chunks=1 h1=f7cd621f4f189919 h2=e85ff58d754105ea
     chunk#0 6c0560bdcb29998b-8f653076428650aa size=3
   file first.txt [<folder-1>/fb911c13b0312a04-e4d81e41f926300d] = manifest size=3 chunks=1 h1=927288390658e64d h2=b8b5ebbd37156bca
@@ -726,6 +732,7 @@
   journal <entry-2> = put sub/x.txt 2
   journal <entry-3> = rename sub -> sub-renamed dir
   folder sub-renamed [.tsync-root/c5c30a85bac19946-a5e511ba81829bb3] -> <folder-1>
+  anchor <folder-1> in .tsync-root as sub-renamed
   file x.txt [<folder-1>/fecd6e94d21b3dc7-d6d12967f4c00d3d] = manifest size=2 chunks=1 h1=d108c63e08afaabf h2=d327f52fbae8b749
     chunk#0 48068d8a56def9a6-8003781d32b4cf50 size=2
 
@@ -777,6 +784,7 @@
   journal <entry-4> = rename f4.txt -> sub/f4.txt 5
   journal <entry-5> = rename sub -> sub-renamed dir
   folder sub-renamed [.tsync-root/c5c30a85bac19946-a5e511ba81829bb3] -> <folder-1>
+  anchor <folder-1> in .tsync-root as sub-renamed
   file g1.txt [<folder-1>/082ac4576d0dd2bd-e107f214a54fba1f] = manifest size=4 chunks=1 h1=85df471f7bba8615 h2=342eaa68ba60cbfa
     chunk#0 6bceea5f3c7fe0a6-faf00891f8013689 size=4
   file f4.txt [<folder-1>/22ca04f2818589b7-0fd485a9a6e7ad40] = manifest size=5 chunks=1 h1=c2743db5bb64af1b h2=39424f30da971bb9

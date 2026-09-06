@@ -141,6 +141,7 @@
   folder keep [.tsync-root/5af16eb25f0f29f5-46117405e5f6bd85] -> <folder-1>
   file outside.bin [.tsync-root/b01e15e64c256ab6-1f96600a8f673bd5] = manifest size=12 chunks=1 h1=b500d7bf771db830 h2=c49c64b6f769cf41
     chunk#0 78bdd50ffdb89f28-110ae84095eebccf size=12
+  anchor <folder-1> in .tsync-root as keep
   file inside.bin [<folder-1>/395d52333e1982bb-f3afad5a5b4c4eda] = manifest size=8 chunks=1 h1=269ee2e0bf23feba h2=0fa8b80b1a0c56ef
     chunk#0 3165358206e16abf-241df034ca91c411 size=8
 --- backend 2
@@ -152,6 +153,7 @@
   folder keep [.tsync-root/5af16eb25f0f29f5-46117405e5f6bd85] -> <folder-1>
   file outside.bin [.tsync-root/b01e15e64c256ab6-1f96600a8f673bd5] = manifest size=12 chunks=1 h1=b500d7bf771db830 h2=c49c64b6f769cf41
     chunk#0 78bdd50ffdb89f28-110ae84095eebccf size=12
+  anchor <folder-1> in .tsync-root as keep
   file inside.bin [<folder-1>/395d52333e1982bb-f3afad5a5b4c4eda] = manifest size=8 chunks=1 h1=269ee2e0bf23feba h2=0fa8b80b1a0c56ef
     chunk#0 3165358206e16abf-241df034ca91c411 size=8
 
@@ -182,6 +184,7 @@
   file ok.bin [.tsync-root/4675454c5194c6a7-5f00ae60e6d18820] = manifest size=4 chunks=1 h1=4adfcb2ace61a6a1 h2=5872029ca96b3c51
     chunk#0 002783db772ad77d-0760f49141bb4bb5 size=4
   folder sub [.tsync-root/4f7b4244079f8bf6-67a7ed7af26470c3] -> <folder-1>
+  anchor <folder-1> in .tsync-root as sub
   file nested.bin [<folder-1>/1427ec502d51cc85-a6b2693498cea2e1] = manifest size=6 chunks=1 h1=7546f608548f4d0d h2=aaeab951ddf2968e
     chunk#0 fa87ee5fc199e332-c7156c4359a54f81 size=6
 --- backend 2
@@ -194,6 +197,7 @@
   file ok.bin [.tsync-root/4675454c5194c6a7-5f00ae60e6d18820] = manifest size=4 chunks=1 h1=4adfcb2ace61a6a1 h2=5872029ca96b3c51
     chunk#0 002783db772ad77d-0760f49141bb4bb5 size=4
   folder sub [.tsync-root/4f7b4244079f8bf6-67a7ed7af26470c3] -> <folder-1>
+  anchor <folder-1> in .tsync-root as sub
   file nested.bin [<folder-1>/1427ec502d51cc85-a6b2693498cea2e1] = manifest size=6 chunks=1 h1=7546f608548f4d0d h2=aaeab951ddf2968e
     chunk#0 fa87ee5fc199e332-c7156c4359a54f81 size=6
 

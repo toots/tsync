@@ -523,6 +523,20 @@
   (action
    (diff share_server_test.expected share_server_test.output))))
 
+(subdir ops/integrity_tree
+ (alias
+  (name default)
+  (deps integrity_tree_test.exe))
+ (rule
+  (alias runtest)
+  (target integrity_tree_test.output)
+  (action
+   (with-stdout-to integrity_tree_test.output (ignore-stderr (run ./integrity_tree_test.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff integrity_tree_test.expected integrity_tree_test.output))))
+
 (subdir ops/rename
  (alias
   (name default)

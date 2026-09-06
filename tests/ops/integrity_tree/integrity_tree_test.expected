@@ -1,0 +1,30 @@
+
+=== a tree with no anchors: one folder at two paths, and an orphan
+  TWICE <folder-3> at Archived/Tetris | Backup/Tetris
+  TRASHED-LIVE <folder-1> at Archived (a trash entry still names it; expire would remove it)
+  UNANCHORED Archived (<folder-1>)
+  UNANCHORED Archived/Tetris (<folder-3>)
+  UNANCHORED Backup (<folder-2>)
+  UNANCHORED Backup/Tetris (<folder-3>)
+  ORPHAN <folder-4> (1 object, e.g. lost.pdf)
+  orphans checked: true
+the shared folder is found twice, the trash names a live one, the rest unanchored: ok
+
+=== an anchor decides which path is the folder's
+  DISOWNED tsync/testdom/manifests/<folder-1>/tetris (the folder lives under <folder-2> as Tetris)
+  TRASHED-LIVE <folder-1> at Archived (a trash entry still names it; expire would remove it)
+  UNANCHORED Archived (<folder-1>)
+  UNANCHORED Backup (<folder-2>)
+  ORPHAN <folder-4> (1 object, e.g. lost.pdf)
+  orphans checked: true
+the marker under the other parent is disowned: ok
+
+=== a repair removes the disowned marker and anchors the rest
+  removed 2, anchored 2, left 1
+the marker and the trash entry removed, two folders anchored: ok
+  ORPHAN <folder-4> (1 object, e.g. lost.pdf)
+  orphans checked: true
+what is left is the orphan, which a repair does not touch: ok
+the leftover marker is gone from the store: ok
+
+5 check(s), 0 failure(s)

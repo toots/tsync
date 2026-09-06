@@ -12,8 +12,11 @@ type entry = { bkey : Stored_key.t; body : body }
 (** Why a child yielded no {!entry}: it could not be fetched, or its body is
     neither a marker nor a clean manifest, which is what a write in flight looks
     like. [`Unclassifiable] carries the parse failure, since that is the only
-    account of what the body was. *)
-type unusable = [ `Unreadable of exn | `Unclassifiable of exn ]
+    account of what the body was. [`Disowned] is a folder marker the folder's
+    own anchor contradicts: the folder lives elsewhere and this marker is what a
+    move left behind; it carries the anchor, which says where. *)
+type unusable =
+  [ `Unreadable of exn | `Unclassifiable of exn | `Disowned of Folder.anchor ]
 
 (** What a child that yields no entry costs the walk. [`Fail] propagates the
     fetch error, so a caller deciding what to delete cannot mistake it for an
@@ -22,7 +25,8 @@ type unusable = [ `Unreadable of exn | `Unclassifiable of exn ]
     Reported rather than merely skipped because callers disagree about what a
     skip means: a resync that parsed nothing has to say so rather than claiming
     success, while a listing that only renders what it found does not care. An
-    unclassifiable body is skipped under both, being mid-write. *)
+    unclassifiable body is skipped under both, being mid-write, and so is a
+    disowned marker, being no folder at all. *)
 type on_unusable = [ `Fail | `Skip of Stored_key.t -> unusable -> unit ]
 
 module type S = sig
