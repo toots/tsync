@@ -34,6 +34,8 @@ module type S = sig
   val delete_manifest : key:Logical_key.t -> unit io
   val copy_manifest : src_key:Logical_key.t -> dst_key:Logical_key.t -> unit io
   val put_folder_marker : key:Logical_key.t -> unit io
+  val put_anchor : folder_id:string -> parent:string -> name:string -> unit io
+  val get_anchor : folder_id:string -> Folder.anchor option io
   val list_namespace : folder_id:string -> Backend.file_entry list io
   val get_object : bkey:Stored_key.t -> string io
 
@@ -127,11 +129,34 @@ module Over (Io : Io.S) (Batched : BATCHED with type 'a io := 'a Io.t) = struct
 
     (* Records a directory under its parent's namespace so resync can rebuild the
        tree. No-op for layouts with no folder tree. *)
+    let anchor_key folder_id =
+      Stored_key.anchor_key ~prefix:C.domain_prefix ~folder_id
+
+    let put_anchor ~folder_id ~parent ~name =
+      B.put ~key:(anchor_key folder_id)
+        ~data:(Bigstring.of_string (Folder.anchor_to_string { parent; name }))
+        ()
+
+    let get_anchor ~folder_id =
+      let+ body = B.get_opt ~key:(anchor_key folder_id) () in
+      Option.bind body (fun b ->
+          Folder.anchor_of_string (Bigstring.to_string b))
+
+    (* The anchor first: from then on any other marker naming this folder is
+       stale, whether or not the delete that should remove it ever lands. *)
     let put_folder_marker ~key =
       let* m = L.ensure_folder_marker key in
       match m with
         | None -> Io.return ()
         | Some (bkey, data) ->
+            let* () =
+              match Folder.marker_of_string data with
+                | Some m ->
+                    put_anchor ~folder_id:m.Folder.id
+                      ~parent:(Stored_key.parent_folder_id bkey)
+                      ~name:m.Folder.name
+                | None -> Io.return ()
+            in
             B.put ~key:bkey ~data:(Bigstring.of_string data) ()
 
     (* Direct children (file manifests and folder markers) of a folder namespace,

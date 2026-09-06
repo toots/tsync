@@ -89,6 +89,12 @@ let cmd : unit Cmd.t =
          let module E = Retention_lwt.Make (C) in
          let+ outcome = E.purge_trashed ~path () in
          match outcome with
+           | `Live_elsewhere ->
+               Printf.eprintf
+                 "not purged: the trash entry for %s names a folder that lives \
+                  elsewhere; run tsync data-integrity --repair\n"
+                 path;
+               1
            | `Not_in_trash ->
                Printf.eprintf "not in trash: %s\n" path;
                1

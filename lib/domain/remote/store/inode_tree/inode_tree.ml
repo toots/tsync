@@ -7,7 +7,10 @@
 
 type body = Dir of Folder.marker | File of Manifest.t
 type entry = { bkey : Stored_key.t; body : body }
-type unusable = [ `Unreadable of exn | `Unclassifiable of exn ]
+
+type unusable =
+  [ `Unreadable of exn | `Unclassifiable of exn | `Disowned of Folder.anchor ]
+
 type on_unusable = [ `Fail | `Skip of Stored_key.t -> unusable -> unit ]
 
 module type S = sig
@@ -223,8 +226,42 @@ struct
               outcomes;
             Io.return kept
 
+    (* A marker is believed only if the folder's own anchor agrees it lives
+       here under this name. A folder with no anchor is taken at its marker's
+       word: it was written before anchors were. One read per subfolder, the
+       anchor living in the child's namespace where no listing of the parent
+       reaches it; the reads are bounded by [slots] like the bodies were. *)
+    let owned ~on_unusable ~slots ~folder_id kept =
+      let+ verdicts =
+        Pools.map_with slots
+          (fun entry ->
+            match entry.body with
+              | File _ -> Io.return (entry, None)
+              | Dir m -> (
+                  let+ anchor = St.get_anchor ~folder_id:m.Folder.id in
+                  ( entry,
+                    match anchor with
+                      | Some a
+                        when a.Folder.parent <> folder_id
+                             || a.Folder.name <> m.Folder.name ->
+                          Some a
+                      | _ -> None )))
+          kept
+      in
+      List.filter_map
+        (fun (entry, disowned) ->
+          match disowned with
+            | None -> Some entry
+            | Some a ->
+                (match on_unusable with
+                  | `Skip f -> f entry.bkey (`Disowned a)
+                  | `Fail -> ());
+                None)
+        verdicts
+
     (* A folder answered with its bodies, as a batched listing hands one over. *)
-    let of_answered ~on_unusable ~on_index (folder : Store.listed_folder) =
+    let of_answered ~on_unusable ~on_index ~slots (folder : Store.listed_folder)
+        =
       tell_index on_index folder.Store.listed;
       let fetched = Hashtbl.create (List.length folder.Store.bodies) in
       List.iter
@@ -233,8 +270,11 @@ struct
       let body_of (e : Backend.file_entry) =
         Option.join (Hashtbl.find_opt fetched e.Backend.key)
       in
-      classified ~on_unusable
-        (read_of ~body_of (child_objects folder.Store.listed))
+      let* kept =
+        classified ~on_unusable
+          (read_of ~body_of (child_objects folder.Store.listed))
+      in
+      owned ~on_unusable ~slots ~folder_id:folder.Store.folder_id kept
 
     let children ?(on_unusable = `Fail) ?(refresh_index = false)
         ?(on_index = fun _ -> ()) ?slots ~folder_id () =
@@ -287,7 +327,8 @@ struct
                   if Backend.classify exn = Retry.Permanent then key_by_key ()
                   else Io.fail exn)
       in
-      classified ~on_unusable read
+      let* kept = classified ~on_unusable read in
+      owned ~on_unusable ~slots ~folder_id kept
 
     (* The frontier of a walk: folders known and not yet answered, in visit
        order, a folder's children taking its place when its answer arrives. *)
@@ -423,7 +464,7 @@ struct
         let+ classified =
           map_s
             (fun (folder : Store.listed_folder) ->
-              let+ entries = of_answered ~on_unusable ~on_index folder in
+              let+ entries = of_answered ~on_unusable ~on_index ~slots folder in
               (folder.Store.folder_id, entries))
             answered
         in

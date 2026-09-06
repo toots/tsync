@@ -365,17 +365,17 @@ struct
                      'tsync sync' first"
                     (Logical_key.to_string key)))
 
-    (* A delete that found nothing left a marker where it was, or another
-       client moved it meanwhile; either way this rename did not move it. *)
-    let remove_marker_or_fail key bkey =
-      let* removed = St.delete_raw ~bkey in
-      if removed then return_unit
-      else
-        Io.fail
-          (Backend.Backend_error
-             (Printf.sprintf "%s: the store no longer holds its marker at %s"
-                (Logical_key.to_string key)
-                (Stored_key.to_string bkey)))
+    (* The folder already lives at its new place by the time this runs, its
+       anchor and marker written, so a delete that found nothing costs no
+       correctness: whatever sits at the old key is disowned by the anchor and
+       skipped by every reader until a repair removes it. Said out loud all the
+       same, being a store that did not do what it was asked. *)
+    let remove_old_marker key bkey =
+      let+ removed = St.delete_raw ~bkey in
+      if not removed then
+        Log.err "%s: the store held no marker at %s; nothing was left behind"
+          (Logical_key.to_string key)
+          (Stored_key.to_string bkey)
 
     (* O(1) delete: move the parent marker into the trash namespace. The subtree
        stays on the backend for undo, dropped later by [expire] and its chunks
@@ -385,7 +385,7 @@ struct
           let rel = rel_key key in
           let* old_marker = old_marker_or_fail key in
           let* fid = L.ensure_folder_id key in
-          let delete_old_marker () = remove_marker_or_fail key old_marker in
+          let delete_old_marker () = remove_old_marker key old_marker in
           let trash_key =
             Stored_key.under
               (Stored_key.trash_namespace ~prefix:C.domain_prefix)
@@ -399,6 +399,12 @@ struct
             with_journal key
               [`Rmdir (rel_key key, Some fid)]
               (fun () ->
+                (* Anchored to the trash before the live marker goes, so the
+                   marker is stale from here whether or not its delete lands. *)
+                let* () =
+                  St.put_anchor ~folder_id:fid ~parent:Stored_key.trash_id
+                    ~name:(Filename.basename rel)
+                in
                 let* () = St.put_raw ~bkey:trash_key ~data:marker in
                 delete_old_marker ())
           in
@@ -501,8 +507,11 @@ struct
                      encodes its leaf, so the object itself moves. *)
                     match old_marker with
                     | Some bkey ->
-                        let* () = remove_marker_or_fail src bkey in
-                        St.put_folder_marker ~key:dst
+                        (* The new place first, anchor and marker, then the
+                           old marker: a crash between the two leaves a stale
+                           marker readers skip, not a folder nobody lists. *)
+                        let* () = St.put_folder_marker ~key:dst in
+                        remove_old_marker src bkey
                     | None -> Js.rename_file ~src_key:src ~dst_key:dst)
             in
             if is_dir then return_unit else resync_manifest_name dst)
@@ -637,7 +646,17 @@ struct
                 (fun () ->
                   let* data = St.get_object ~bkey:marker_key in
                   match Folder.marker_of_string data with
-                    | Some m -> write m.Folder.id
+                    | Some m -> (
+                        (* A marker the folder's own anchor contradicts is one
+                           a move left behind: adopting its id would file this
+                           path under a folder that lives elsewhere. *)
+                        let* anchor = St.get_anchor ~folder_id:m.Folder.id in
+                        match anchor with
+                          | Some a
+                            when a.Folder.parent
+                                 <> Stored_key.parent_folder_id marker_key ->
+                              from_op ()
+                          | _ -> write m.Folder.id)
                     | None -> from_op ())
                 (fun _ -> from_op ()))
 

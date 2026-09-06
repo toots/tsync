@@ -63,7 +63,10 @@ struct
             | `Unclassifiable (Manifest.Malformed m) ->
                 "unreadable manifest: " ^ m
             | `Unclassifiable exn ->
-                "unreadable manifest: " ^ Printexc.to_string exn)
+                "unreadable manifest: " ^ Printexc.to_string exn
+            | `Disowned a ->
+                Printf.sprintf "stale marker: the folder lives under %s as %s"
+                  a.Folder.parent a.Folder.name)
       in
       let apply key (entry : Inode_tree.entry) =
         let* filed, held = Ck.record ~parent:key entry in

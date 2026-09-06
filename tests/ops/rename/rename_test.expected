@@ -6,13 +6,18 @@
 it went through: ok
 one marker, under the new name, same id: ok
 the mirror agrees: ok
+  anchor of <folder-1>: in .tsync-root as d2
+and the anchor names the new place: ok
 
-=== a delete that removes nothing is a rename that did not happen
-  rename d2 -> d3: refused (Backend.Backend_error("tsync/testdom/manifests/d2: the store no longer holds its marker at tsync/testdom/manifests/.tsync-root/9300b48b23e547eb-b163fe9e56d6ceb1"))
-  root after: d2=<folder-1>
-it was refused: ok
-the store holds one marker, under the old name: ok
-and the mirror is back where it was: ok
+=== a delete that removes nothing leaves a marker no reader believes
+  rename d2 -> d3: succeeded
+  root after: d2=<folder-1>, d3=<folder-1>
+it went through: ok
+both markers are on the store: ok
+  anchor of <folder-1>: in .tsync-root as d3
+the anchor names the new one: ok
+  the store lists: d3
+and a reader sees the folder once, at the new name: ok
 
 === a parent this client holds no id for is not renamed from
   rename p/child -> orphan: refused (Backend.Backend_error("tsync/testdom/manifests/p/child: this client holds no id for the folder it is in; run 'tsync sync' first"))
@@ -20,11 +25,12 @@ it was refused: ok
 and nothing moved locally: ok
 the child is still where it was: ok
 
-=== a folder retired without its marker is not retired
-  rmdir d2: refused (Backend.Backend_error("tsync/testdom/manifests/d2: the store no longer holds its marker at tsync/testdom/manifests/.tsync-root/9300b48b23e547eb-b163fe9e56d6ceb1"))
-  root after: d2=<folder-1>, p=<folder-2>
-it was refused: ok
-the marker is still there: ok
-and so is the directory: ok
+=== a folder retired is anchored to the trash first
+  rmdir d2: succeeded
+  root after: p=<folder-2>
+it went through: ok
+the marker is gone from the root: ok
+  anchor of <folder-1>: in .tsync-trash as d2
+and the anchor names the trash: ok
 
-12 check(s), 0 failure(s)
+14 check(s), 0 failure(s)

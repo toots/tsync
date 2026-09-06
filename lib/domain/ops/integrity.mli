@@ -50,11 +50,65 @@ type repair_stats = {
 (** One line for a report, e.g. ["FIXED <key> on cloud (from disk)"]. *)
 val describe_repair : chunk_key:string -> store:string -> repair -> string
 
+(** {1 The folder tree}
+
+    What a walk of the store's folder tree found wrong with its shape. A folder
+    id is meant to live at one place; a marker a move left behind gives it two,
+    and a client naming folders by id then shows it at one of them and not the
+    other, with nothing looking wrong. Only a client can find these: they are a
+    property of the tree, not of any one object. *)
+type tree_finding =
+  | Twice of { id : string; paths : string list }
+      (** One folder id reachable from more than one path. *)
+  | Disowned of { marker : Stored_key.t; anchor : Folder.anchor }
+      (** A marker the folder's anchor contradicts: the marker names a place the
+          folder no longer lives at. Its own path is not known, the walk having
+          skipped it; [anchor] says where the folder is. *)
+  | Unanchored of { path : string; id : string; parent : string }
+      (** A folder written before anchors were, taken at its marker's word. *)
+  | Orphan of { id : string; objects : int; sample : string list }
+      (** A namespace no marker reaches from the root or the trash. Never
+          removed here: it may hold files a client wrote and nobody can name. *)
+  | Trashed_live of { id : string; path : string; entry : Stored_key.t }
+      (** A trash entry naming a folder that is reachable from the root: it was
+          restored or re-filed and the entry never went. Reclaiming the trash
+          would delete the live folder, so {!Retention} passes such an entry
+          over once the folder is anchored, and a repair removes it. *)
+
+type tree_report = {
+  findings : tree_finding list;
+  orphans_checked : bool;
+      (** False when no main store is on this machine's disk: an orphan is only
+          findable by reading the store's directory. *)
+}
+
+val tree_unhealthy : tree_report -> bool
+val describe_finding : tree_finding -> string
+
+type tree_repair = {
+  removed : int;  (** disowned markers and stale trash entries deleted *)
+  anchored : int;  (** anchors written for folders that had none *)
+  left : tree_finding list;
+      (** what a repair does not touch, and what it could not remove *)
+}
+
 module Over
     (Io : Io.S)
     (_ : Clock.S with type 'a io := 'a Io.t)
-    (_ : Corruption.OVER with type 'a io := 'a Io.t) : sig
+    (_ : Corruption.OVER with type 'a io := 'a Io.t)
+    (_ : Fs.S with type 'a io := 'a Io.t)
+    (_ : Inode_tree.OVER with type 'a io := 'a Io.t)
+    (_ : Store.INODE with type 'a io := 'a Io.t) : sig
   module Make (C : Conf.S with type 'a io = 'a Io.t) : sig
+    (** Walk the tree from the root and say what is wrong with its shape. Reads
+        only. *)
+    val tree_report : unit -> tree_report Io.t
+
+    (** Delete every disowned marker and anchor every folder that has none. A
+        delete that removed nothing is reported in [left] rather than counted.
+        Raises [Failure] on a read-only domain. *)
+    val repair_tree : ?dry_run:bool -> unit -> tree_repair Io.t
+
     (** Ask every member to check itself, then watch the ones that accepted
         until their requests drain.
 

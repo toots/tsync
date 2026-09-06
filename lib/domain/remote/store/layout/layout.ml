@@ -113,6 +113,21 @@ struct
                     (Folder.marker_of_string (Bigstring.to_string held))
                     ~default:candidate
                 in
+                (* The winner anchors the folder it brought into existence; a
+                   loser leaves that to it. *)
+                let* () =
+                  if winner.Folder.id = candidate.Folder.id then
+                    B.put
+                      ~key:
+                        (Stored_key.anchor_key ~prefix:C.domain_prefix
+                           ~folder_id:winner.Folder.id)
+                      ~data:
+                        (Bigstring.of_string
+                           (Folder.anchor_to_string
+                              { Folder.parent = pid; name }))
+                      ()
+                  else Io.return ()
+                in
                 let+ () =
                   Folder_ids.write ~cache_root:C.cache_root
                     ~domain_name:C.domain_name key winner
