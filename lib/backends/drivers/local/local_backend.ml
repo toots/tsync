@@ -291,13 +291,22 @@ struct
 
       let delete ~key () =
         let path = resolve (Stored_key.to_string key) in
+        let* held = head_opt ~key () in
         let* () = Fs.rm_rf path in
         (* A collection deletes a chunk's marker along with the chunk ({!Gc}), and
            that is the other way a shard empties. *)
-        if Chunk_layout.is_marker_key key then prune_marker_dirs path
-        else return_unit
+        let+ () =
+          if Chunk_layout.is_marker_key key then prune_marker_dirs path
+          else return_unit
+        in
+        held <> None
 
-      let delete_multi keys = iter_s (fun key -> delete ~key ()) keys
+      let delete_multi keys =
+        iter_s
+          (fun key ->
+            let+ (_ : bool) = delete ~key () in
+            ())
+          keys
 
       (* A hard link when the filesystem allows one, so copying within a store
          costs a directory entry instead of the body, and the body only where there

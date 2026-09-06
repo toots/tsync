@@ -266,7 +266,7 @@ let () =
      let* () =
        B3.copy ~src_key:(manifest_key "three") ~dst_key:(manifest_key "four") ()
      in
-     let* () = B3.delete ~key:(manifest_key "three") () in
+     let* (_ : bool) = B3.delete ~key:(manifest_key "three") () in
      step
        "put chunk c2, put manifest three [c2], copy three -> four, delete three";
      step "owed with the target unreachable: %d" (owed "offline");

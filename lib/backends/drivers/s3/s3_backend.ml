@@ -168,14 +168,17 @@ struct
           Log.err "s3 head %s: %s" key (string_of_error e);
           raise (failed "head" e)
 
+  (* S3 answers a delete the same whether or not the key was there, so the
+     answer is a head first. *)
   let delete t ~key () =
+    let* held = head_opt t ~key () in
     let+ res =
       with_retry "delete" (fun () ->
           S3.delete ~credentials:t.credentials ~endpoint:t.endpoint
             ~bucket:t.bucket ~key ())
     in
     match res with
-      | Ok _ | Error S3.Not_found -> ()
+      | Ok _ | Error S3.Not_found -> held <> None
       | Error e -> raise (failed "delete" e)
 
   let delete_multi t keys =

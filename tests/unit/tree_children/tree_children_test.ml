@@ -142,7 +142,7 @@ let () =
     (case "an emptied namespace has no children";
      let emptied = Stored_key.new_id () in
      let* () = put emptied "gone" (manifest_body "gone.txt") in
-     let* () =
+     let* (_ : bool) =
        Store.delete ~key:(Stored_key.in_space ~prefix:(ns emptied) "gone") ()
      in
      let* listed = Store.list_prefix ~prefix:(ns emptied) () in

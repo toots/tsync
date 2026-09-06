@@ -79,7 +79,12 @@ struct
                       { Folder.name = m.Folder.name; id = m.Folder.id }
                   in
                   let* () = St.put_raw ~bkey:new_key ~data:marker in
-                  let+ () = St.delete_raw ~bkey:trash_key in
+                  let+ removed = St.delete_raw ~bkey:trash_key in
+                  (* The marker is back either way; a trash entry that was
+                     already gone is worth a line, not a failure. *)
+                  if not removed then
+                    Log.err "restore %s: trash entry %s was already gone" path
+                      (Stored_key.to_string trash_key);
                   Restored)
 
     (* Version keys are hashed, so the real name is read out of the body a version

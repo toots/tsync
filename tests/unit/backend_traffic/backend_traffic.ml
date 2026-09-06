@@ -57,8 +57,9 @@ module Memory () : Backend_lwt.Store = struct
          (Hashtbl.find_opt objects key))
 
   let delete ~key () =
+    let held = Hashtbl.mem objects key in
     Hashtbl.remove objects key;
-    Lwt.return_unit
+    Lwt.return held
 
   let delete_multi keys =
     List.iter (Hashtbl.remove objects) keys;
@@ -180,7 +181,10 @@ let () =
         the whole namespace as traffic on a call that fetched no bytes. *)
      let* r = moved (fun () -> Lwt.map ignore (R.list_prefix ~prefix:"" ())) in
      expect "list_prefix" ~up:0 ~down:0 r;
-     let* r = moved (fun () -> R.delete ~key:(Stored_key.listed "gone") ()) in
+     let* r =
+       moved (fun () ->
+           Lwt.map ignore (R.delete ~key:(Stored_key.listed "gone") ()))
+     in
      expect "delete" ~up:0 ~down:0 r;
      let* r =
        moved (fun () -> R.delete_multi (List.map Stored_key.listed ["a"; "b"]))

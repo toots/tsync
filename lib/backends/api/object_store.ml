@@ -20,7 +20,7 @@ module type VERBS = sig
     t -> key:string -> offset:int -> length:int -> unit -> Bigstring.t option io
 
   val head_opt : t -> key:string -> unit -> Backend.file_entry option io
-  val delete : t -> key:string -> unit -> unit io
+  val delete : t -> key:string -> unit -> bool io
   val delete_multi : t -> string list -> unit io
   val copy : t -> src_key:string -> dst_key:string -> unit -> unit io
 

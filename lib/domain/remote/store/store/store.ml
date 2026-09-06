@@ -50,7 +50,7 @@ module type S = sig
     (folder_ids:string list -> unit -> listed_folder list io) option
 
   val put_raw : bkey:Stored_key.t -> data:string -> unit io
-  val delete_raw : bkey:Stored_key.t -> unit io
+  val delete_raw : bkey:Stored_key.t -> bool io
 end
 
 module type OVER = sig
@@ -107,7 +107,11 @@ module Over (Io : Io.S) (Batched : BATCHED with type 'a io := 'a Io.t) = struct
 
     let delete_manifest ~key =
       let* bk = L.manifest_key key in
-      match bk with None -> Io.return () | Some bk -> B.delete ~key:bk ()
+      match bk with
+        | None -> Io.return ()
+        | Some bk ->
+            let+ (_ : bool) = B.delete ~key:bk () in
+            ()
 
     (* The destination may be brought into existence; the source has to be there
        already or there is nothing to move. *)
@@ -118,7 +122,8 @@ module Over (Io : Io.S) (Batched : BATCHED with type 'a io := 'a Io.t) = struct
         | Some src ->
             let* dst = L.ensure_manifest_key dst_key in
             let* () = B.copy ~src_key:src ~dst_key:dst () in
-            B.delete ~key:src ()
+            let+ (_ : bool) = B.delete ~key:src () in
+            ()
 
     (* Records a directory under its parent's namespace so resync can rebuild the
        tree. No-op for layouts with no folder tree. *)

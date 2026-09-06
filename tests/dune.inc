@@ -523,6 +523,20 @@
   (action
    (diff share_server_test.expected share_server_test.output))))
 
+(subdir ops/rename
+ (alias
+  (name default)
+  (deps rename_test.exe))
+ (rule
+  (alias runtest)
+  (target rename_test.output)
+  (action
+   (with-stdout-to rename_test.output (ignore-stderr (run ./rename_test.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff rename_test.expected rename_test.output))))
+
 (subdir ops/resync
  (alias
   (name default)

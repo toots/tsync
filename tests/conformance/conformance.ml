@@ -170,7 +170,7 @@ let suite name (module B : Backend_lwt.Store) =
     in
     check "a refused claim answers with the chunk-sized holder"
       (Bigstring.length held = size && Xxhash.hash_bigstring_hex held 0 = digest);
-    let* () = B.delete ~key:big () in
+    let* (_ : bool) = B.delete ~key:big () in
     Lwt.return_unit
   in
   (* Ranges of a chunk-sized object, which is both the size the product asks for
@@ -222,7 +222,8 @@ let suite name (module B : Backend_lwt.Store) =
     in
     let* missing = B.get_range ~key:(key "nope") ~offset:0 ~length:16 () in
     check "a range of an absent key is None" (missing = None);
-    B.delete ~key:ranged ()
+    let+ (_ : bool) = B.delete ~key:ranged () in
+    ()
   in
   (* The reason this file exists. *)
   let racing_claims () =
@@ -265,7 +266,10 @@ let suite name (module B : Backend_lwt.Store) =
     check "capabilities answers" true
   in
   let deleting () =
-    let* () = B.delete ~key:(key "a") () in
+    let* removed = B.delete ~key:(key "a") () in
+    check "delete answers that it removed something" removed;
+    let* again = B.delete ~key:(key "a") () in
+    check "and that a second delete found nothing" (not again);
     let* got = B.get_opt ~key:(key "a") () in
     check "delete removes it" (got = None);
     let* () = B.delete_multi [key "b"; key "claimed"; key "free"] in

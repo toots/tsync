@@ -514,7 +514,8 @@ let () =
      the domain root and publishing one changes no content. Revoking likewise. *)
   let share_key = Stored_key.listed "tsync/shares/deadbeef" in
   assert (status (Http_proxy_frontend.Put share_key) ~read_only:true = 200);
-  assert (status (Http_proxy_frontend.Delete share_key) ~read_only:true = 200);
+  (* 204: permitted, and nothing was there to remove. *)
+  assert (status (Http_proxy_frontend.Delete share_key) ~read_only:true = 204);
 
   (* The store directory has to exist for its filesystem to be measurable — a
      capacity of "unknown" is what an absent path correctly reports. *)

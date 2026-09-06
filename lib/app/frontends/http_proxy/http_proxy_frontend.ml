@@ -680,11 +680,13 @@ let exec route op ~body =
     | Delete key ->
         if not (writable key) then reject_ro ()
         else
-          let* () =
+          let* removed =
             let module B = (val route.store : Backend_lwt.Store) in
             B.delete ~key ()
           in
-          respond ""
+          (* 204 says nothing was there, which a client moving a marker acts
+             on; an object removed is a plain 200. *)
+          respond ~status:(if removed then `OK else `No_content) ""
     | Get_multi keys ->
         let module B = (val route.store : Backend_lwt.Store) in
         let module Bb = Backend_lwt.Batched (B) in

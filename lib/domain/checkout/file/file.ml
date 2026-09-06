@@ -348,19 +348,44 @@ struct
             [`Mkdir (rel_key key, Some fid)]
             (fun () -> St.put_folder_marker ~key))
 
+    (* The marker a folder is filed under, or a failure: a caller about to move
+       or retire a folder without removing its marker would leave the folder's
+       id at two places, which is what a client resolving by id cannot tell
+       apart. [None] is a parent this client holds no id for, and the repair is
+       a sync. *)
+    let old_marker_or_fail key =
+      let* old_marker = folder_marker_bkey key in
+      match old_marker with
+        | Some bkey -> Io.return bkey
+        | None ->
+            Io.fail
+              (Backend.Backend_error
+                 (Printf.sprintf
+                    "%s: this client holds no id for the folder it is in; run \
+                     'tsync sync' first"
+                    (Logical_key.to_string key)))
+
+    (* A delete that found nothing left a marker where it was, or another
+       client moved it meanwhile; either way this rename did not move it. *)
+    let remove_marker_or_fail key bkey =
+      let* removed = St.delete_raw ~bkey in
+      if removed then return_unit
+      else
+        Io.fail
+          (Backend.Backend_error
+             (Printf.sprintf "%s: the store no longer holds its marker at %s"
+                (Logical_key.to_string key)
+                (Stored_key.to_string bkey)))
+
     (* O(1) delete: move the parent marker into the trash namespace. The subtree
        stays on the backend for undo, dropped later by [expire] and its chunks
        reclaimed by [gc]. *)
     let rmdir key =
       with_meta (fun () ->
           let rel = rel_key key in
-          let* old_marker = folder_marker_bkey key in
+          let* old_marker = old_marker_or_fail key in
           let* fid = L.ensure_folder_id key in
-          let delete_old_marker () =
-            match old_marker with
-              | None -> return_unit
-              | Some bkey -> St.delete_raw ~bkey
-          in
+          let delete_old_marker () = remove_marker_or_fail key old_marker in
           let trash_key =
             Stored_key.under
               (Stored_key.trash_namespace ~prefix:C.domain_prefix)
@@ -434,6 +459,15 @@ struct
             | Some (`Published m) -> Some (Manifest.size m)
             | None -> None
       in
+      (* Resolved before anything moves: a folder whose marker cannot be named
+         is not renamed at all, rather than moved locally and left at two
+         places on the store. *)
+      let* old_marker =
+        if is_dir then
+          let+ bkey = old_marker_or_fail src in
+          Some bkey
+        else Io.return None
+      in
       let* () = rename_local ~src ~dst in
       (* Read after the move, where the folder now is. *)
       let* dir_id =
@@ -465,18 +499,19 @@ struct
                      travelled with the local [.tsync-dir] marker in
                      [rename_local]: only the parent's marker moves. A file's key
                      encodes its leaf, so the object itself moves. *)
-                  if is_dir then
-                    let* old_marker = folder_marker_bkey src in
-                    let* () =
-                      match old_marker with
-                        | None -> return_unit
-                        | Some bkey -> St.delete_raw ~bkey
-                    in
-                    St.put_folder_marker ~key:dst
-                  else Js.rename_file ~src_key:src ~dst_key:dst)
+                    match old_marker with
+                    | Some bkey ->
+                        let* () = remove_marker_or_fail src bkey in
+                        St.put_folder_marker ~key:dst
+                    | None -> Js.rename_file ~src_key:src ~dst_key:dst)
             in
             if is_dir then return_unit else resync_manifest_name dst)
           (fun exn ->
+            (* A directory whose marker did not move goes back where it was,
+               so the mirror keeps agreeing with the store. *)
+            let* () =
+              if is_dir then rename_local ~src:dst ~dst:src else return_unit
+            in
             (* src gone from the backend: a concurrent rename or delete by another
                client. The file already moved locally, so republish it under a
                conflict name; its chunks are still there. *)

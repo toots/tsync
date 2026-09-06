@@ -241,7 +241,7 @@ let () =
        (ops = [`Rmdir ("new", Some "X"); `Mkdir ("new", Some "Y")]);
 
      case "a folder the store no longer has is reported gone";
-     let* () =
+     let* (_ : bool) =
        Store.delete
          ~key:(Stored_key.in_space ~prefix:(ns Stored_key.root_id) "d")
          ()

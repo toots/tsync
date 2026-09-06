@@ -265,7 +265,8 @@ struct
 
     let clear_run () =
       let (module Mk : C.Store) = marker_store () in
-      Mk.delete ~key:marker_key ()
+      let+ (_ : bool) = Mk.delete ~key:marker_key () in
+      ()
 
     (* A move, not a copy: what stays behind in the space on its way out is then
        the garbage itself, which is what lets a collection delete by name instead
