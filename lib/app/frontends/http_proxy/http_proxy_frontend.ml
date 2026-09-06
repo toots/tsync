@@ -118,7 +118,8 @@ let inherited bindings b name =
         match distinct_values bindings name with [v] -> Some v | _ -> None)
 
 type route = {
-  roots : string list;  (** {!Chunk_layout.Make.domain_roots} for this domain. *)
+  roots : string list;
+      (** {!Chunk_layout.Make.domain_roots} for this domain. *)
   shares_prefix : string;
   secret : string;
   read_only : bool;

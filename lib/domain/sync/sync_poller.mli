@@ -14,10 +14,10 @@ module Over
   module Make
       (C : Conf.S with type 'a io = 'a Io.t)
       (F : File_ops.S with type 'a io := 'a Io.t) : sig
-    (** One pass: read the cursor, and if it has moved since the last pass —
-        or a sweep is due — apply whatever {!Replay.apply_foreign} finds,
-        answering how many entries that was. The cursor is the gate a peer bumps
-        after publishing, and the sweep is what finds an entry whose bump never
+    (** One pass: read the cursor, and if it has moved since the last pass — or
+        a sweep is due — apply whatever {!Replay.apply_foreign} finds, answering
+        how many entries that was. The cursor is the gate a peer bumps after
+        publishing, and the sweep is what finds an entry whose bump never
         landed.
 
         [on_changed key] is called for each key a foreign op touched, after the

@@ -65,10 +65,10 @@ module type S = sig
   (** Drop every published entry last written before [cutoff]: what a walk that
       rewrote everything the store still has did not touch. Answers the ops a
       reader of the applied entries takes for it, named as the walk names what
-      arrives. A folder whose id the index now places elsewhere moved, and the
-      walk reported it there, so it is dropped here without an op; nothing
-      beneath a dropped folder is reported. Only after a walk that reached
-      everything, a folder it could not read being not one that is gone. *)
+      arrives. A folder whose id the index now places elsewhere is reported as
+      the move from here to there; nothing beneath a dropped folder is reported.
+      Only after a walk that reached everything, a folder it could not read
+      being not one that is gone. *)
   val sweep_stale : cutoff:float -> unit -> Journal.op list io
 end
 

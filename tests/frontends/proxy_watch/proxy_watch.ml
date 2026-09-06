@@ -96,7 +96,7 @@ let route =
       (let module L = Chunk_layout.Make (struct
          let chunk_prefix = "tsync/watchdom/chunks/"
        end) in
-       L.domain_roots);
+      L.domain_roots);
     shares_prefix = "tsync/shares/";
     secret = "s";
     read_only = false;

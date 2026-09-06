@@ -212,7 +212,9 @@ let () =
      in
      check "an anchor from before the rebuild is still bridged" (page <> None);
 
-     case "a folder that moved is reported once, where it now is";
+     case
+       "a folder that moved is reported as the move, wherever the copy came \
+        from";
      let marker id name = Folder.marker_to_string { Folder.name; id } in
      let dir_marker name =
        Filename.concat (Filename.dirname (mirror_path name)) name |> fun d ->
@@ -225,8 +227,19 @@ let () =
      step "%s" (describe outcome);
      let* ops = reported ?since:before () in
      show_ops ops;
-     check "arrived under its id at the new path, and left nowhere"
-       (ops = [`Mkdir ("new", Some "X")]);
+     check "arrived under its id at the new path, and moved from the old one"
+       (ops
+       = [
+           `Mkdir ("new", Some "X");
+           `Rename
+             {
+               Journal.dst = "new";
+               src = "old";
+               size = None;
+               is_dir = true;
+               id = Some "X";
+             };
+         ]);
      check "the old path is gone from the mirror"
        (not (Sys.file_exists (dir_marker "old")));
 
