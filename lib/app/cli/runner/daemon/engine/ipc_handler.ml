@@ -274,9 +274,9 @@ module Make
      the change feed's to carry, the anchor having been taken before the first
      page.
 
-     One line per entry in path order, the path first and set off by a byte no
-     path holds, and a page is resumed by line number: "<walk>:<n>", the walk
-     being when the listing was made. A folder id names one folder in the
+     One JSON line per entry in path order — JSON, so a name holding a newline
+     stays on its line — and a page is resumed by line number: "<walk>:<n>",
+     the walk being when the listing was made. A folder id names one folder in the
      store and may sit at several paths in the mirror, so "<container>/<name>"
      resolves to whichever of them the index spells, and a listing resumed from
      one can jump to another copy and go round for ever. A line number cannot.
@@ -355,15 +355,15 @@ module Make
              (Yojson.Safe.to_string
                 (`Assoc [("walk", `String walk); ("skipped", `Int skipped)])
              :: List.map
-                  (fun ((path, _) as row) ->
-                    path ^ "\000" ^ Yojson.Safe.to_string (listing_row row))
+                  (fun row -> Yojson.Safe.to_string (listing_row row))
                   sorted)))
       (fun exn ->
         Log.warn "list_all: not kept between pages: %s" (Printexc.to_string exn);
         Lwt.return_unit)
 
-  (* Lines [from] onwards, [count] of them, each with the cursor that resumes
-     after it. *)
+  (* [count] entries from line [from] onwards, each with the cursor that
+     resumes after it. Entries, not lines: a line that will not parse is
+     skipped, and a page one short of what it asked for reads as the end. *)
   let kept_listing ~from ~count () =
     let+ body = Io_lwt.Fs.read_file_opt listing_path in
     match Option.map (String.split_on_char '\n') body with
@@ -372,29 +372,23 @@ module Make
             | `Assoc o when get_str o "walk" <> "" ->
                 let walk = get_str o "walk" in
                 let skipped = Option.value (get_int o "skipped") ~default:0 in
-                let rec take n = function
-                  | line :: rest when n < from + count ->
-                      if n < from then take (n + 1) rest
+                let rec take n left = function
+                  | line :: rest when left > 0 ->
+                      if n < from then take (n + 1) left rest
                       else (
                         let parsed =
-                          match String.index_opt line '\000' with
-                            | None -> None
-                            | Some i -> (
-                                match
-                                  Yojson.Safe.from_string
-                                    (String.sub line (i + 1)
-                                       (String.length line - i - 1))
-                                with
-                                  | json -> listing_entry json
-                                  | exception _ -> None)
+                          match Yojson.Safe.from_string line with
+                            | json -> listing_entry json
+                            | exception _ -> None
                         in
                         match parsed with
                           | Some (path, e) ->
-                              (path, line_cursor walk n, e) :: take (n + 1) rest
-                          | None -> take (n + 1) rest)
+                              (path, line_cursor walk n, e)
+                              :: take (n + 1) (left - 1) rest
+                          | None -> take (n + 1) left rest)
                   | _ -> []
                 in
-                Some (walk, skipped, take 0 rows)
+                Some (walk, skipped, take 0 count rows)
             | _ | (exception _) -> None)
       | _ -> None
 

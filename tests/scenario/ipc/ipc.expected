@@ -168,6 +168,19 @@
   list_all limit=2 -> {"ok":true,"items":[{"ref":"f:.tsync-root/aaa.txt","parentRef":"root","name":"aaa.txt","kind":"file","size":1,"mtime":"<mtime>","etag":"15da855801af627d","isUploaded":true},{"ref":"d:<folder-1>","parentRef":"root","name":"mid","kind":"dir","size":0,"mtime":"<zero>","etag":"<folder-1>","isUploaded":true}],"next":"<walk>:1"}
   list_all limit=2 after=<walk>:1 -> {"ok":true,"items":[{"ref":"f:.tsync-root/zzz.txt","parentRef":"root","name":"zzz.txt","kind":"file","size":1,"mtime":"<mtime>","etag":"7dbefb508fa14bbd","isUploaded":true}]}
 
+=== a name with a newline does not end the listing
+  write aaa.txt "a"
+  write bb
+b.txt "b"
+  write ccc.txt "c"
+  write ddd.txt "d"
+--- flat, the kept walk dropped between pages
+  list_all limit=2 -> {"ok":true,"items":[{"ref":"f:.tsync-root/aaa.txt","parentRef":"root","name":"aaa.txt","kind":"file","size":1,"mtime":"<mtime>","etag":"15da855801af627d","isUploaded":true},{"ref":"f:.tsync-root/bb\nb.txt","parentRef":"root","name":"bb\nb.txt","kind":"file","size":1,"mtime":"<mtime>","etag":"6c25cc3db3ce7928","isUploaded":true}],"next":"<walk>:1"}
+  list_all limit=2 after=<walk>:1 -> {"ok":true,"items":[{"ref":"f:.tsync-root/ccc.txt","parentRef":"root","name":"ccc.txt","kind":"file","size":1,"mtime":"<mtime>","etag":"bc7dbcf0d80967e1","isUploaded":true},{"ref":"f:.tsync-root/ddd.txt","parentRef":"root","name":"ddd.txt","kind":"file","size":1,"mtime":"<mtime>","etag":"f1a1f45e41a0bae6","isUploaded":true}]}
+--- flat, a file written between pages
+  list_all limit=2 -> {"ok":true,"items":[{"ref":"f:.tsync-root/aaa.txt","parentRef":"root","name":"aaa.txt","kind":"file","size":1,"mtime":"<mtime>","etag":"15da855801af627d","isUploaded":true},{"ref":"f:.tsync-root/bb\nb.txt","parentRef":"root","name":"bb\nb.txt","kind":"file","size":1,"mtime":"<mtime>","etag":"6c25cc3db3ce7928","isUploaded":true}],"next":"<walk>:1"}
+  list_all limit=2 after=<walk>:1 -> {"ok":true,"items":[{"ref":"f:.tsync-root/ccc.txt","parentRef":"root","name":"ccc.txt","kind":"file","size":1,"mtime":"<mtime>","etag":"bc7dbcf0d80967e1","isUploaded":true},{"ref":"f:.tsync-root/ddd.txt","parentRef":"root","name":"ddd.txt","kind":"file","size":1,"mtime":"<mtime>","etag":"f1a1f45e41a0bae6","isUploaded":true}]}
+
 ########## STATS ##########
 === after uploads: cache filled, nothing left unpublished
   sections: server process lwt traffic domains

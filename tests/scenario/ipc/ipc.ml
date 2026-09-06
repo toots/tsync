@@ -166,6 +166,21 @@ let () =
   run_ipc_snapshot
     (List.filter
        (fun (s : scenario) -> s.name = "files and folders share one order")
-       listing_scenarios);
+       listing_scenarios
+    @ [
+        (* A name may hold a newline. The kept walk is one line per entry, and
+           a page that met a split line came back one entry short, which read
+           as the end of the listing. *)
+        {
+          name = "a name with a newline does not end the listing";
+          steps =
+            [
+              Write { path = "aaa.txt"; content = "a" };
+              Write { path = "bb\nb.txt"; content = "b" };
+              Write { path = "ccc.txt"; content = "c" };
+              Write { path = "ddd.txt"; content = "d" };
+            ];
+        };
+      ]);
   print_endline "########## STATS ##########";
   run_stats stats_scenarios
