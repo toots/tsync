@@ -13,6 +13,8 @@
   and that is what landed: true
 
 === a name released, then claimed again
+  the release removed something: true
+  released twice, the second found nothing: true
   the next claimant wins it: true
 
 === nothing left over

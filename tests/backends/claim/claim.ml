@@ -66,7 +66,10 @@ let () =
      step "and that is what landed: %b" (stored = "mine");
 
      case "a name released, then claimed again";
-     let* () = B.delete ~key:(Stored_key.listed "free") () in
+     let* removed = B.delete ~key:(Stored_key.listed "free") () in
+     step "the release removed something: %b" removed;
+     let* removed = B.delete ~key:(Stored_key.listed "free") () in
+     step "released twice, the second found nothing: %b" (not removed);
      let* answer =
        B.put_if_absent ~key:(Stored_key.listed "free")
          ~data:(Bigstring.of_string "second")

@@ -726,7 +726,8 @@ struct
                     (* Clears a marker whose chunk has since been put right; the
                        store's own delete prunes the shard it empties. *)
                     s.chunks_cleared <- s.chunks_cleared + 1;
-                    M.delete ~key:marker ())
+                    let+ (_ : bool) = M.delete ~key:marker () in
+                    ())
                   else (
                     Log.err "gc: chunk %s hashed to %s: filing %s" ck computed
                       (Stored_key.to_string marker);

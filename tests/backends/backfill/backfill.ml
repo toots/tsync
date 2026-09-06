@@ -197,7 +197,7 @@ let () =
        B.copy ~src_key:(manifest_key "one") ~dst_key:(manifest_key "moved") ()
      in
      step "copy one -> moved";
-     let* () = B.delete ~key:(manifest_key "one") () in
+     let* (_ : bool) = B.delete ~key:(manifest_key "one") () in
      step "delete one";
      let* () = drain () in
      dump_target ();
@@ -242,7 +242,7 @@ let () =
 
      case "a deleted chunk is pushed again when it is written again";
      (* The dedup memo must not outlive the object it remembers. *)
-     let* () = B.delete ~key:(Stored_key.listed c0) () in
+     let* (_ : bool) = B.delete ~key:(Stored_key.listed c0) () in
      step "delete chunk c0";
      let* () = drain () in
      dump_target ();
@@ -282,7 +282,7 @@ let () =
      let* () =
        D.copy ~src_key:(manifest_key "safe") ~dst_key:(manifest_key "safe2") ()
      in
-     let* () = D.delete ~key:(manifest_key "safe2") () in
+     let* (_ : bool) = D.delete ~key:(manifest_key "safe2") () in
      step "put chunk c8, put manifest safe, copy safe -> safe2, delete safe2";
      let* () = drain () in
      let* h = M.head_opt ~key:(manifest_key "safe") () in

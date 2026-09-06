@@ -151,7 +151,12 @@ module type S = sig
     key:Stored_key.t -> data:Bigstring.t -> unit -> Bigstring.t io
 
   val head_opt : key:Stored_key.t -> unit -> file_entry option io
-  val delete : key:Stored_key.t -> unit -> unit io
+
+  (** Delete one key, answering whether an object was there. A caller moving a
+      folder marker needs the answer: a delete that removed nothing is a marker
+      left where it was, and a silent one is how a folder ends up at two paths.
+      A caller collecting chunks does not, and uses {!delete_multi}. *)
+  val delete : key:Stored_key.t -> unit -> bool io
 
   (** Delete every key, or raise. Two things callers depend on and every driver
       owes them:

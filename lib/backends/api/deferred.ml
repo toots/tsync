@@ -219,7 +219,8 @@ struct
                 run (Job_put dst))
         | Job_delete key ->
             Hashtbl.remove ensured key;
-            Target.delete ~key ()
+            let+ (_ : bool) = Target.delete ~key () in
+            ()
         | Job_delete_multi keys ->
             List.iter (fun k -> Hashtbl.remove ensured k) keys;
             Target.delete_multi keys

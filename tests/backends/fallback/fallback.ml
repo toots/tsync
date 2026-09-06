@@ -205,7 +205,7 @@ let () =
      step "put fresh -> on main: %b, on archive: %b"
        (holds main_root (k "fresh"))
        (holds archive_root (k "fresh"));
-     let* () = WithArc.delete ~key:(k "on-archive") () in
+     let* (_ : bool) = WithArc.delete ~key:(k "on-archive") () in
      step "delete on-archive -> still on archive: %b"
        (holds archive_root (k "on-archive"));
 
@@ -263,7 +263,7 @@ let () =
        outcome
          (fun () -> "ok")
          (fun () ->
-           let+ () = Ro.delete ~key:(k "on-archive") () in
+           let+ (_ : bool) = Ro.delete ~key:(k "on-archive") () in
            Some ())
      in
      step "delete on-archive = %s" r;

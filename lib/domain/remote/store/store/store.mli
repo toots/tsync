@@ -84,7 +84,8 @@ module type S = sig
     (folder_ids:string list -> unit -> listed_folder list io) option
 
   val put_raw : bkey:Stored_key.t -> data:string -> unit io
-  val delete_raw : bkey:Stored_key.t -> unit io
+  (** Delete one object by its backend key, answering whether it was there. *)
+  val delete_raw : bkey:Stored_key.t -> bool io
 end
 
 (** The shape a consumer takes: {!S} for whichever domain it is applied to. *)

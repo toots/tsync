@@ -141,9 +141,16 @@ struct
               let+ () = fill (Deferred.Put { key; data = held }) key in
               held
 
+      (* Removed on any main is removed: a main that never held the object is
+         not the one the caller is asking about. A replica takes the delete
+         whether or not it holds the object, as it takes every write. *)
       let delete ~key () =
-        let* () = write (fun (module B : Store) -> B.delete ~key ()) in
-        fill (Deferred.Delete key) key
+        let* removed =
+          if writers = [] then Io.fail Backend.Not_writable
+          else map_s (fun (module B : Store) -> B.delete ~key ()) writers
+        in
+        let+ () = fill (Deferred.Delete key) key in
+        List.exists Fun.id removed
 
       let delete_multi keys =
         let* () = write (fun (module B : Store) -> B.delete_multi keys) in

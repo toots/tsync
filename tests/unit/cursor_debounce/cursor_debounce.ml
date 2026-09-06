@@ -62,8 +62,9 @@ module Counting : Backend_lwt.Store = struct
          (Hashtbl.find_opt objects key))
 
   let delete ~key () =
+    let held = Hashtbl.mem objects key in
     Hashtbl.remove objects key;
-    Lwt.return_unit
+    Lwt.return held
 
   let delete_multi keys =
     List.iter (Hashtbl.remove objects) keys;

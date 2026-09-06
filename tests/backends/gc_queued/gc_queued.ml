@@ -88,7 +88,7 @@ let consume_requests (module B : Backend_lwt.Store) =
                 B.delete_multi
                   (keys @ List.filter_map Chunk_layout.marker_key keys)
               in
-              let+ () = B.delete ~key:e.Backend.key () in
+              let+ (_ : bool) = B.delete ~key:e.Backend.key () in
               Some (List.length keys))
       entries
   in

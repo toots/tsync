@@ -560,7 +560,8 @@ let setup_client (module C : Conf_lwt.S) root staging_prefix =
     function
     | DeleteRemoteChunk { path; index } ->
         let* ck = remote_chunk_key path index in
-        B.delete ~key:ck ()
+        let+ (_ : bool) = B.delete ~key:ck () in
+        ()
     | CorruptRemoteChunk { path; index } ->
         let* ck = remote_chunk_key path index in
         B.put ~key:ck ~data:(Bigstring.of_string "garbage") ()
@@ -600,7 +601,9 @@ let setup_client (module C : Conf_lwt.S) root staging_prefix =
         let* bk = L.manifest_key (key p) in
         match bk with
           | None -> failwith ("no backend key for " ^ p)
-          | Some bk -> B.delete ~key:bk ())
+          | Some bk ->
+              let+ (_ : bool) = B.delete ~key:bk () in
+              ())
     | s -> failwith ("not a backend-damage step: " ^ render_step s)
   in
   let mkdir_p d =
@@ -642,7 +645,8 @@ let setup_client (module C : Conf_lwt.S) root staging_prefix =
               in
               let* data = B.get ~key () in
               hidden_entry := Some (key, data);
-              B.delete ~key ())
+              let+ (_ : bool) = B.delete ~key () in
+              ())
     | UnhideJournalEntry -> (
         let (module B : Backend_lwt.Store) =
           (List.hd C.members).Backend.backend

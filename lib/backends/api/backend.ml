@@ -124,7 +124,7 @@ module type S = sig
     key:Stored_key.t -> data:Bigstring.t -> unit -> Bigstring.t io
 
   val head_opt : key:Stored_key.t -> unit -> file_entry option io
-  val delete : key:Stored_key.t -> unit -> unit io
+  val delete : key:Stored_key.t -> unit -> bool io
   val delete_multi : Stored_key.t list -> unit io
   val copy : src_key:Stored_key.t -> dst_key:Stored_key.t -> unit -> unit io
   val list_prefix : ?max_keys:int -> prefix:string -> unit -> file_entry list io

@@ -245,7 +245,8 @@ struct
   let delete t ~key () =
     let uri = Uri.of_string (obj_path t key) in
     let+ resp, body = call_text t ~meth:`DELETE "delete" uri in
-    if is_ok resp || code resp = 404 then ()
+    if is_ok resp then true
+    else if code resp = 404 then false
     else raise (failed "delete" (code resp) body)
 
   (* Bulk delete is the one verb that leaves the JSON API, which has no equivalent:
