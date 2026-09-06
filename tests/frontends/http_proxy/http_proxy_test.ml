@@ -230,7 +230,7 @@ let () =
         (let module L = Chunk_layout.Make (struct
            let chunk_prefix = "tsync/" ^ name ^ "/chunks/"
          end) in
-         L.domain_roots);
+        L.domain_roots);
       shares_prefix = "tsync/shares/";
       secret = name;
       read_only = false;

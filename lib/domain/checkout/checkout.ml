@@ -324,14 +324,24 @@ struct
                     ~domain_name:C.domain_name ~root:Lk.root m.Folder.id
                 in
                 let+ () = Fs.rm_rf path in
-                let gone =
+                (* A folder found elsewhere is reported as the move from here
+                   to there, whether the walk brought that copy in or it was
+                   already held: a reader that filed the folder here learns
+                   where it went either way. *)
+                let op =
                   match elsewhere with
-                    | None -> true
-                    | Some k -> Logical_key.equal k key
+                    | Some k when not (Logical_key.equal k key) ->
+                        `Rename
+                          {
+                            Journal.dst = rel_of k;
+                            src = rel_of key;
+                            size = None;
+                            is_dir = true;
+                            id = Some m.Folder.id;
+                          }
+                    | _ -> `Rmdir (rel_of key, Some m.Folder.id)
                 in
-                Some
-                  (if gone then `Rmdir (rel_of key, Some m.Folder.id) :: ops
-                   else ops)
+                Some (op :: ops)
       in
       (* Answers the ops so far and how many entries the directory still holds:
          one left empty is removed, as before the walk had anything to say. *)

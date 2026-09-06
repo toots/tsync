@@ -34,10 +34,10 @@ the drop is reported: ok
 === a rebuild is a delta on the applied entries, not a new log
 an anchor from before the rebuild is still bridged: ok
 
-=== a folder that moved is reported once, where it now is
+=== a folder that moved is reported as the move, wherever the copy came from
   full(1 manifests, 0 failed, --full flag)
-  reported: mkdir new X
-arrived under its id at the new path, and left nowhere: ok
+  reported: mkdir new X, rename old -> new
+arrived under its id at the new path, and moved from the old one: ok
 the old path is gone from the mirror: ok
 
 === a folder recreated under its name is a new folder
