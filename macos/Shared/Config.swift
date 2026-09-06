@@ -2,21 +2,21 @@ import Foundation
 
 public struct DomainConfig: Codable, Sendable {
     public let name: String
-    public let readOnly: Bool
 
     enum CodingKeys: String, CodingKey {
-        case name, readOnly
+        case name
     }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         name = try c.decode(String.self, forKey: .name)
-        readOnly = (try? c.decodeIfPresent(Bool.self, forKey: .readOnly)) ?? false
     }
 }
 
-/// What this side needs to know: which domains exist, whether each is writable,
-/// and where to reach the daemon.
+/// What the app needs to know: which domains exist, and where to reach the
+/// daemon. Read by the app only: the extension is denied this file by the
+/// sandbox (it is data the daemon wrote), so anything it needs about a domain
+/// it asks the daemon for.
 ///
 /// Deliberately not the storage layout — items are named by reference, so where
 /// they are stored is the daemon's business.
@@ -47,7 +47,4 @@ public struct Config: Codable, Sendable {
         return try JSONDecoder().decode(Config.self, from: data)
     }
 
-    public func isReadOnly(_ domainName: String) -> Bool {
-        domains.first(where: { $0.name == domainName })?.readOnly ?? false
-    }
 }
