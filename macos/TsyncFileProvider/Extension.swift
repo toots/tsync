@@ -9,12 +9,24 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension,
                             NSFileProviderPartialContentFetching, @unchecked Sendable {
     private let domain: NSFileProviderDomain
     private let client: DaemonClient
-    private let readOnly: Bool
+
+    /// Whether the domain refuses writes, as the daemon says. Asked on first
+    /// use and kept once answered: the config file that records it is one this
+    /// sandbox may not read, and the daemon may not be up when this process
+    /// is. Unanswered, the domain is taken as writable, and the daemon refuses
+    /// the write itself.
+    private var readOnlyAnswered: Bool?
+    private var readOnly: Bool {
+        if let answered = readOnlyAnswered { return answered }
+        guard let reply = try? client.sendSync(DaemonRequest(action: "status"),
+                                               as: DaemonResponse.self),
+              let answer = reply.readOnly else { return false }
+        readOnlyAnswered = answer
+        return answer
+    }
 
     required init(domain: NSFileProviderDomain) {
         self.domain = domain
-        let config = (try? Config.load()) ?? Config(domains: [])
-        self.readOnly = config.isReadOnly(domain.displayName)
         self.client = DaemonClient(domain: domain.displayName)
         super.init()
         log.info("init: \(domain.identifier.rawValue, privacy: .public)")

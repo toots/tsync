@@ -139,6 +139,9 @@ struct DaemonResponse: Decodable {
     /// at the end.
     let next: String?
 
+    /// `status` only: whether the domain refuses writes.
+    let readOnly: Bool?
+
     /// `changes_since` only: another call from `cursor` would answer with more.
     let more: Bool?
 }

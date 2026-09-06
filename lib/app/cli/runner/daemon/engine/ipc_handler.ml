@@ -952,6 +952,10 @@ module Make
                             ok_json
                               (("domain", `String C.domain_name)
                                :: ("running", `Bool true)
+                                  (* Asked here rather than read from the config
+                                  file: the sandboxed extension may not open
+                                  a file the daemon wrote. *)
+                               :: ("readOnly", `Bool C.read_only)
                                :: ("paused", `Bool (Sq.paused ()))
                                :: ("pendingUploads", `Int (Sq.pending ()))
                                :: ( "pendingDownloads",

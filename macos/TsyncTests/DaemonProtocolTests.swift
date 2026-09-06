@@ -113,6 +113,14 @@ final class DaemonProtocolTests: XCTestCase {
 
     // MARK: - Tests
 
+    /// The extension cannot read the config file (the sandbox refuses a file
+    /// the daemon wrote), so whether a domain is writable has to come over the
+    /// socket.
+    func testStatusSaysWhetherTheDomainIsReadOnly() async throws {
+        let reply = try await client.send(DaemonRequest(action: "status"))
+        XCTAssertEqual(reply.readOnly, false)
+    }
+
     func testEmptyDomainListsNothing() async throws {
         let items = try await listRoot()
         XCTAssertTrue(items.isEmpty, "a fresh domain should have no items")

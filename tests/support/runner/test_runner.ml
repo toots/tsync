@@ -832,8 +832,8 @@ let setup_client (module C : Conf_lwt.S) root staging_prefix =
         match outcome with
           | `Not_in_trash -> Printf.printf "  purge %s -> not in trash\n" path
           | `Live_elsewhere ->
-              Printf.printf "  purge %s -> refused, the folder lives elsewhere\n"
-                path
+              Printf.printf
+                "  purge %s -> refused, the folder lives elsewhere\n" path
           | `Purged n -> Printf.printf "  purge %s -> %d object(s)\n" path n)
     | Gc ->
         let module G = Gc_lwt.Make (C) in
