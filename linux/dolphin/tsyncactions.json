@@ -1,10 +1,10 @@
 {
     "KPlugin": {
-        "Description": "Copy a public download link for a file or folder in a tsync mount",
+        "Description": "Share links and offline availability for files and folders in a tsync mount",
         "MimeTypes": [
             "application/octet-stream",
             "inode/directory"
         ],
-        "Name": "tsync Share Link"
+        "Name": "tsync"
     }
 }

@@ -42,7 +42,7 @@ if(OCAML_WHERE_FAILED)
   message(FATAL_ERROR "ocamlc -where failed; no OCaml toolchain on PATH")
 endif()
 
-add_library(tsyncdolphin MODULE tsync_share_action.cpp tsync_mounts.cpp)
+add_library(tsyncdolphin MODULE tsync_actions.cpp tsync_mounts.cpp)
 # KIO finds the plugin by scanning the directory, but every plugin beside it is
 # named without the prefix CMake gives a module by default.
 set_target_properties(tsyncdolphin PROPERTIES PREFIX "")
