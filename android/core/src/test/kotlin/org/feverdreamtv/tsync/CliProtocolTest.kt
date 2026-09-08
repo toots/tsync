@@ -325,6 +325,23 @@ class CliProtocolTest {
         assertEquals("0123456789", dest.readText())
     }
 
+    /** A restore is a promise the cache keeps until a deadline, and the row
+     *  says so; an evict takes it back. */
+    @Test
+    fun `restore pins a file until a deadline and evict hands it back`() {
+        val name = "keep.txt"
+        send(Cli.writeWhole(Cli.ROOT, name, staged("keep me".toByteArray()).absolutePath))
+        val key = childRef(Cli.ROOT, name)
+        send(Cli.evict(key))
+        assertEquals("online-only", send(Cli.stat(key)).getString("availability"))
+        send(Cli.restore(key))
+        val pinned = send(Cli.stat(key))
+        assertEquals("pinned", pinned.getString("availability"))
+        assertTrue(pinned.getDouble("pinnedUntil") > System.currentTimeMillis() / 1000.0)
+        send(Cli.evict(key))
+        assertEquals("online-only", send(Cli.stat(key)).getString("availability"))
+    }
+
     @Test
     fun `the store on disk is what the binary was pointed at`() {
         assertTrue(Files.exists(Paths.get(root.absolutePath, "store")))
