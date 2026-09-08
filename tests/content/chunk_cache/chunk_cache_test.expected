@@ -30,6 +30,8 @@ and the group still arrives  present=true
 trio member 1 at +2          body="BB"
 trio in another file         same_key=true
 missing chunk                Backend.Backend_error("no such chunk: 8f2a5dd2e287e4d1-2661a4d28dde64aa") in_flight=0
+read of a stale body         body="first chunk body" gets=2 backend=false
+read touches mtime           fresh=true
 uncapped                     chunks=6 bytes=62 first=true  second=true
 cap=none (no-op)             chunks=6 bytes=62 first=true  second=true
 cap=20 (drops coldest)       chunks=2 bytes=20 first=false second=false

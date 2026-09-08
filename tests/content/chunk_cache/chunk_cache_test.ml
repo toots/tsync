@@ -438,6 +438,12 @@ let () =
         resolution. *)
      Unix.utimes (path g1) 1000. 1000.;
      Unix.utimes (path g2) 2000. 2000.;
+     (* A read of a stale body re-dates it; the stamp is put back so the sweep
+        below still has a coldest to choose. *)
+     let* () = show_body "read of a stale body" g1 0 in
+     Printf.printf "%-28s fresh=%b\n" "read touches mtime"
+       ((Unix.stat (path g1)).Unix.st_mtime > 1000.);
+     Unix.utimes (path g1) 1000. 1000.;
      let show_cap label =
        let+ chunks, bytes = Cap.stats () in
        let p1 = Sys.file_exists (path g1) in

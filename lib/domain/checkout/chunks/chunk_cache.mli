@@ -82,7 +82,9 @@ module Make
       fetch: one of the whole group may be in flight, and waiting for that would
       turn a small read into a cache chunk's worth of latency. Those bytes are
       kept: a body may hold part of a stored chunk, and a later fetch of the
-      whole group skips the members it already holds whole. *)
+      whole group skips the members it already holds whole.
+
+      A body this serves is kept warm for {!enforce_cap}. *)
   val read_into :
     group:Manifest.Group.t ->
     index:int ->

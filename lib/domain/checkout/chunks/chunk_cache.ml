@@ -454,13 +454,32 @@ struct
             let+ () = Part.publish ~key ~body ~complete:(whole group) in
             got
 
+  (* The cap orders by mtime, so a body written once and read every day would
+     otherwise be the coldest thing in the store. Only when the stamp is older
+     than [touch_interval]: an inode write per 128 KiB FUSE read is the sweep's
+     resolution bought at streaming rate. *)
+  let touch_interval = 60.
+
+  let touch p =
+    Io.catch
+      (fun () ->
+        let* st = Retry.stat p in
+        let now = Unix.gettimeofday () in
+        if now -. st.Unix.st_mtime < touch_interval then return_unit
+        else Retry.utimes p now now)
+      (fun _ -> return_unit)
+
   (* The cap may delete a group between the fetch and the read, or mid-read, so a
      miss or short read is retried once against a freshly fetched body. A second
      failure is real and raised. *)
   let read_into ~group ~index buf ~chunk_off =
     let want = Bigarray.Array1.dim buf in
     let offset = Int64.of_int (Manifest.Group.offset group index + chunk_off) in
-    let attempt () = Fs.read (path group) buf ~offset in
+    let attempt () =
+      let* n = Fs.read (path group) buf ~offset in
+      let+ () = touch (path group) in
+      n
+    in
     (* A refetch went to a backend by construction, whatever the first [ensure]
        answered. *)
     let refetch () =
