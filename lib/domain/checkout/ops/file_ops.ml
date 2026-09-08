@@ -41,10 +41,11 @@ module type S = sig
   val write_manifest : t -> Manifest.t -> unit io
   val upload : ?cancel:bool ref -> t -> unit io
 
-  (** Fetch every chunk [t] needs, so later reads are served locally. Produces
-      no file — see {!assemble_to}. Idempotent, and concurrent calls for one key
-      share the fetching. *)
-  val ensure_cached : t -> unit io
+  (** Fetch every chunk [t] needs, so later reads are served locally, and pin
+      them for [keep] seconds (ten days unless said). Produces no file — see
+      {!assemble_to}. Idempotent, and concurrent calls for one key share the
+      fetching; a repeat moves the deadline. *)
+  val ensure_cached : ?keep:float -> t -> unit io
 
   (** Write [t]'s whole content to [dst_path], fetching whatever it still needs.
       The daemon keeps no other copy; the content lives in the chunk store.
@@ -84,8 +85,8 @@ module type S = sig
   (** Keep the chunk store under [C.max_cache]; never touches staged data. *)
   val enforce_chunk_cap : unit -> Sweep.swept io
 
-  (** [(chunks, bytes)] held in the chunk store. *)
-  val chunk_stats : unit -> (int * int) io
+  (** [(chunks, bytes, pinned bytes)] held in the chunk store. *)
+  val chunk_stats : unit -> (int * int * int) io
 
   (** [t]'s content: staged edits if any, else what was published. *)
   val resolve :

@@ -26,7 +26,12 @@ stop: {"ok":true} closes=true asked=1
       "socketPath": "/tmp/tsync-http-proxy-status-test/absent.sock",
       "domainPrefix": "tsync/statusdom/manifests/",
       "chunkPrefix": "tsync/statusdom/chunks/",
-      "cache": { "chunks": 0, "bytes": 0, "maxCache": null },
+      "cache": {
+        "chunks": 0,
+        "bytes": 0,
+        "pinnedBytes": 0,
+        "maxCache": null
+      },
       "wal": {
         "pending": 0,
         "intent": 0,

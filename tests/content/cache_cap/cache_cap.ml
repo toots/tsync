@@ -42,6 +42,41 @@ let scenarios : scenario list =
           ];
     };
     {
+      name = "a restored file is pinned: spared by the cap and not counted";
+      steps =
+        [
+          Write { path = "p.txt"; content = "pppppppp" };
+          Drain;
+          Write { path = "q.txt"; content = "qqqqqqqq" };
+          Drain;
+          Write { path = "r.txt"; content = "rrrrrrrr" };
+          Drain;
+          Evict "p.txt";
+          Evict "q.txt";
+          Evict "r.txt";
+          (* An explicit fetch, and the oldest body in the store from here on. *)
+          Restore "p.txt";
+          Drain;
+        ]
+        @ cache "q.txt" @ cache "r.txt"
+        @ [
+            ShowLocal "p.txt";
+            ShowLocal "q.txt";
+            ShowChunkCache;
+            (* Two unpinned bodies over a one-body cap: the colder of the two
+               goes, and the pinned one is neither dropped nor counted. *)
+            EnforceCache;
+            ShowChunkCache;
+            ShowChunks "p.txt";
+            ShowChunks "q.txt";
+            ShowChunks "r.txt";
+            (* An explicit evict hands the body back. *)
+            Evict "p.txt";
+            ShowLocal "p.txt";
+            ShowChunkCache;
+          ];
+    };
+    {
       name = "a staged file's bodies are never dropped";
       steps =
         [Write { path = "x.txt"; content = "xxxxxxxx" }; Drain; Evict "x.txt"]

@@ -519,7 +519,7 @@ module Make (C : Conf_lwt.S) = struct
       0 names
 
   let cache_json ~totals =
-    let* chunks, bytes = D.chunk_stats () in
+    let* chunks, bytes, pinned = D.chunk_stats () in
     let+ manifests =
       if totals then
         let+ n =
@@ -533,6 +533,7 @@ module Make (C : Conf_lwt.S) = struct
       ([
          ("chunks", `Int chunks);
          ("bytes", `Int bytes);
+         ("pinnedBytes", `Int pinned);
          ("maxCache", int_opt C.max_cache);
        ]
       @ manifests)

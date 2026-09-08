@@ -763,8 +763,9 @@ let setup_client (module C : Conf_lwt.S) root staging_prefix =
           (if p = "" then "/" else p)
           (String.concat " " (List.sort compare names))
     | ShowChunkCache ->
-        let+ chunks, bytes = F.chunk_stats () in
-        Printf.printf "  chunk-cache chunks=%d bytes=%d\n" chunks bytes
+        let+ chunks, bytes, pinned = F.chunk_stats () in
+        Printf.printf "  chunk-cache chunks=%d bytes=%d pinned=%d\n" chunks
+          bytes pinned
     | ShowStaged ->
         let count dir =
           let rec walk dir =

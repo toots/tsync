@@ -191,7 +191,9 @@ module Make (C : Conf_lwt.S) (D : Domain_engine.Domain) = struct
         files)
 
   let evict_key = on_subtree "evict" F.evict
-  let restore_key = on_subtree "restore" F.ensure_cached
+
+  let restore_key ?keep key =
+    on_subtree "restore" (fun key -> F.ensure_cached ?keep key) key
 
   (* The [sync --full] client clears and rebuilds the mirror before signalling
      us, and FUSE re-reads it on the next lookup. *)
