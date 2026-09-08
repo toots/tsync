@@ -14,7 +14,7 @@
       "maxUploads": 4,
       "maxChunkBuffers": 4,
       "maxDownloads": 8,
-      "cache": { "chunks": 2, "bytes": 8192 },
+      "cache": { "chunks": 2, "bytes": 8192, "pinnedBytes": 4096 },
       "wal": { "pending": 0 },
       "frontends": [
         {
@@ -68,7 +68,7 @@
       "maxUploads": 4,
       "maxChunkBuffers": 4,
       "maxDownloads": 8,
-      "cache": { "chunks": 2, "bytes": 8192 },
+      "cache": { "chunks": 2, "bytes": 8192, "pinnedBytes": 4096 },
       "wal": { "pending": 0 },
       "frontends": [
         {
@@ -178,7 +178,7 @@ tsync on testhost — 2 domains, 3 processes, up 1h 2m
 Domain alpha
   settings         versioning on, symlinks keep, chunk 8.0 MB (default), cache chunk 16.0 MB
   concurrency      4 uploads, 4 chunk buffers, 8 downloads
-  cache            2 chunks, 8.0 KB of unlimited
+  cache            2 chunks, 8.0 KB of unlimited, 4.0 KB pinned
   Frontend fuse         pid 4242  /home/u/tsync/alpha
     traffic          up 2.0 KB (0 B/s), down 4.0 KB (0 B/s), 5 chunks hashed (0/s)
     handles          2 open, 41 since start
@@ -192,7 +192,7 @@ Domain alpha
 Domain beta
   settings         versioning on, symlinks keep, chunk 8.0 MB (default), cache chunk 16.0 MB
   concurrency      4 uploads, 4 chunk buffers, 8 downloads
-  cache            2 chunks, 8.0 KB of unlimited
+  cache            2 chunks, 8.0 KB of unlimited, 4.0 KB pinned
   Frontend fuse         pid 4243  /home/u/tsync/beta
     traffic          up 2.0 KB (0 B/s), down 4.0 KB (0 B/s), 5 chunks hashed (0/s)
     handles          2 open, 41 since start
@@ -219,7 +219,7 @@ tsync on testhost — 2 domains, 1 process, up 1h 2m
 Domain alpha
   settings         versioning on, symlinks keep, chunk 8.0 MB (default), cache chunk 16.0 MB
   concurrency      4 uploads, 4 chunk buffers, 8 downloads
-  cache            2 chunks, 8.0 KB of unlimited
+  cache            2 chunks, 8.0 KB of unlimited, 4.0 KB pinned
   Frontend fuse         pid 4242  /home/u/tsync/alpha
     traffic          up 2.0 KB (0 B/s), down 4.0 KB (0 B/s), 5 chunks hashed (0/s)
     handles          2 open, 41 since start
@@ -231,7 +231,7 @@ Domain alpha
 Domain beta
   settings         versioning on, symlinks keep, chunk 8.0 MB (default), cache chunk 16.0 MB
   concurrency      4 uploads, 4 chunk buffers, 8 downloads
-  cache            2 chunks, 8.0 KB of unlimited
+  cache            2 chunks, 8.0 KB of unlimited, 4.0 KB pinned
   Frontend fuse         pid 4242  /home/u/tsync/beta
     traffic          up 2.0 KB (0 B/s), down 4.0 KB (0 B/s), 5 chunks hashed (0/s)
     handles          2 open, 41 since start

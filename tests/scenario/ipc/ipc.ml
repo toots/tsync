@@ -9,6 +9,27 @@ open Test_runner
    dirty state, and the order a page cursor resumes from. *)
 let listing_scenarios : scenario list =
   [
+    (* A desktop menu holds a path and nothing else, so an item may be named
+       by one; and a restore names how long its pin holds. *)
+    {
+      name = "an item named by path: stat, restore with a keep, evict";
+      steps =
+        [
+          Write { path = "a.txt"; content = "hello" };
+          Mkdir "sub";
+          Drain;
+          Evict "a.txt";
+          StatByPath "a.txt";
+          StatByPath "sub";
+          StatByPath "";
+          StatByPath "missing.txt";
+          RestoreByPath { path = "a.txt"; keep = 3600. };
+          StatByPath "a.txt";
+          ShowLocal "a.txt";
+          Evict "a.txt";
+          StatByPath "a.txt";
+        ];
+    };
     {
       name = "files: dirty then clean etag";
       steps =

@@ -54,6 +54,8 @@ type step =
   | ShowNames of string
       (** Print the raw entry names FUSE readdir serves for a directory. *)
   | Stat of string
+  | StatByPath of string
+  | RestoreByPath of { path : string; keep : float }
       (** Query a path through the IPC [stat] action. A query leaves nothing
           behind: an absent path answers "not found" and stays absent. *)
   | ShowLocal of string
@@ -185,6 +187,9 @@ let rec render_step = function
   | ShowStaged -> "staged"
   | ShowNames p -> "names " ^ if p = "" then "/" else p
   | Stat p -> "stat " ^ p
+  | StatByPath p -> "stat by path " ^ p
+  | RestoreByPath { path; keep } ->
+      Printf.sprintf "restore by path %s keep=%.0fs" path keep
   | ShowLocal p -> "local? " ^ p
   | CreateUnder { parent; name } -> "create " ^ name ^ " under " ^ parent
   | Mark -> "mark"
@@ -364,6 +369,7 @@ and normalize_kv (k, v) =
     | "etag", `String s when Hashtbl.mem folder_alias s ->
         (k, `String (alias_id s))
     | "mtime", `Float f -> (k, `String (if f > 0. then "<mtime>" else "<zero>"))
+    | "pinnedUntil", `Float _ -> (k, `String "<deadline>")
     | "cursor", `String s ->
         (* The generation before the "|" is what a reimport changes; what a
            snapshot looks at is whether an entry follows it. *)
@@ -745,6 +751,19 @@ let setup_client (module C : Conf_lwt.S) root staging_prefix =
         in
         Printf.printf "  create %s under %s: %s\n" name parent
           (if response_ok obj then "ok" else response_error obj)
+    | StatByPath p ->
+        let+ obj = request [("action", `String "stat"); ("rel", `String p)] in
+        print_ipc ("stat rel=" ^ p) obj
+    | RestoreByPath { path; keep } ->
+        let+ obj =
+          request
+            [
+              ("action", `String "restore");
+              ("rel", `String path);
+              ("keep", `Float keep);
+            ]
+        in
+        print_ipc (Printf.sprintf "restore rel=%s keep=%.0fs" path keep) obj
     | Stat p ->
         let+ obj = by_ref "stat" (key p) in
         if response_ok obj then

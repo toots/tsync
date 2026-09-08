@@ -63,6 +63,11 @@ type step =
           domain root), subdirectories with a trailing slash. A file with only
           staged edits must appear; internal markers must not. *)
   | Stat of string
+  | StatByPath of string
+      (** [stat] naming the item by domain-relative path rather than by
+          reference, as the desktop menus do; prints the normalized reply. *)
+  | RestoreByPath of { path : string; keep : float }
+      (** [restore] by path with an explicit [keep], in seconds. *)
   | ShowLocal of string
   | CreateUnder of { parent : string; name : string }
       (** Query a path through the IPC [stat] action. A query changes nothing: a

@@ -87,7 +87,10 @@ let domain_body ~name ?(frontends = []) () =
       ("maxUploads", `Int 4);
       ("maxChunkBuffers", `Int 4);
       ("maxDownloads", `Int 8);
-      ("cache", `Assoc [("chunks", `Int 2); ("bytes", `Int 8192)]);
+      ( "cache",
+        `Assoc
+          [("chunks", `Int 2); ("bytes", `Int 8192); ("pinnedBytes", `Int 4096)]
+      );
       ("wal", `Assoc [("pending", `Int 0)]);
       ("frontends", `List frontends);
       ( "backends",

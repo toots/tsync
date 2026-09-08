@@ -682,10 +682,16 @@ let text json =
         | `Null -> ()
         | cache ->
             row 2 "cache"
-              (Printf.sprintf "%d chunks, %s of %s%s"
+              (Printf.sprintf "%d chunks, %s of %s%s%s"
                  (int_of (mem cache "chunks"))
                  (Metrics.human_bytes (int_of (mem cache "bytes")))
                  (bytes_or_unlimited (mem cache "maxCache"))
+                 (match mem cache "pinnedBytes" with
+                   | `Null -> ""
+                   | p when int_of p > 0 ->
+                       Printf.sprintf ", %s pinned"
+                         (Metrics.human_bytes (int_of p))
+                   | _ -> "")
                  (match mem cache "manifests" with
                    | `Null -> ""
                    | m -> Printf.sprintf ", %d manifests" (int_of m))));

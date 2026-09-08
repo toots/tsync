@@ -13,6 +13,7 @@ type t = {
   is_uploaded : bool;
   symlink : string option;
   trashed : bool;
+  availability : Checkout.availability option;
 }
 
 let kind_string = function
@@ -34,7 +35,16 @@ let fields r =
   @ (match r.symlink with
     | None -> []
     | Some t -> [("symlinkTarget", `String t)])
-  @ if r.trashed then [("trashed", `Bool true)] else []
+  @ (if r.trashed then [("trashed", `Bool true)] else [])
+  @
+    match r.availability with
+    | None -> []
+    | Some (`Pinned until as a) ->
+        [
+          ("availability", `String (Checkout.availability_name a));
+          ("pinnedUntil", `Float until);
+        ]
+    | Some a -> [("availability", `String (Checkout.availability_name a))]
 
 let to_json r = `Assoc (fields r)
 
@@ -53,6 +63,7 @@ let dir_row ~self ~parent ~name id =
     is_uploaded = true;
     symlink = None;
     trashed = false;
+    availability = None;
   }
 
 let dir_with_id = dir_row
@@ -107,7 +118,8 @@ struct
     let+ self = self_ref ~container_id key in
     Option.map (fun self -> (self, parent_ref container_id, name)) self
 
-  let file_row ~self ~parent ~name ~size ~mtime ~etag ~is_uploaded ~symlink =
+  let file_row ~self ~parent ~name ~key ~size ~mtime ~etag ~is_uploaded ~symlink
+      =
     {
       self;
       parent;
@@ -119,10 +131,12 @@ struct
       is_uploaded;
       symlink;
       trashed = false;
+      availability =
+        Some (Checkout.availability (Tsync_conf.Conf.locality (module C)) key);
     }
 
-  let published_row ~self ~parent ~name m =
-    file_row ~self ~parent ~name
+  let published_row ~self ~parent ~name ~key m =
+    file_row ~self ~parent ~name ~key
       ~size:(Int64.to_int (Manifest.size m))
       ~mtime:(Manifest.mtime m) ~etag:(Manifest.h1 m) ~is_uploaded:true
       ~symlink:(Manifest.symlink m)
@@ -166,13 +180,13 @@ struct
               match staged with
                 | Some (`Staged (st, _)) ->
                     Lwt.return_some
-                      (file_row ~self ~parent ~name
+                      (file_row ~self ~parent ~name ~key
                          ~size:(Int64.to_int st.Staged_manifest.s_size)
                          ~mtime:st.Staged_manifest.s_mtime ~etag:""
                          ~is_uploaded:false ~symlink:None)
                 | Some (`Published _) | None ->
                     let+ m = F.published key in
-                    Option.map (published_row ~self ~parent ~name) m)
+                    Option.map (published_row ~self ~parent ~name ~key) m)
 
   let of_dir ~container_id key =
     let* named = naming ~container_id key in
@@ -191,9 +205,9 @@ struct
           let+ m = F.published key in
           Some
             (match m with
-              | Some m -> published_row ~self ~parent ~name m
+              | Some m -> published_row ~self ~parent ~name ~key m
               | None ->
-                  file_row ~self ~parent ~name ~size:e.Checkout.size
+                  file_row ~self ~parent ~name ~key ~size:e.Checkout.size
                     ~mtime:e.Checkout.mtime ~etag:"" ~is_uploaded:true
                     ~symlink:None)
 end

@@ -11,10 +11,10 @@
 
 === a whole body is adopted by rename
   write-whole d:<id1> big.txt <root>/staged.bin
-    {"ok":true,"size":24,"mtime":1400000000.0,"item":{"ref":"f:<id1>/big.txt","parentRef":"d:<id1>","name":"big.txt","kind":"file","size":24,"mtime":1400000000.0,"etag":"1294bbe85c2f380b","isUploaded":true}}
+    {"ok":true,"size":24,"mtime":1400000000.0,"item":{"ref":"f:<id1>/big.txt","parentRef":"d:<id1>","name":"big.txt","kind":"file","size":24,"mtime":1400000000.0,"etag":"1294bbe85c2f380b","isUploaded":true,"availability":"online-only"}}
   staging file still there: false
   stat f:<id1>/big.txt
-    {"ok":true,"ref":"f:<id1>/big.txt","parentRef":"d:<id1>","name":"big.txt","kind":"file","size":24,"mtime":1400000000.0,"etag":"1294bbe85c2f380b","isUploaded":true}
+    {"ok":true,"ref":"f:<id1>/big.txt","parentRef":"d:<id1>","name":"big.txt","kind":"file","size":24,"mtime":1400000000.0,"etag":"1294bbe85c2f380b","isUploaded":true,"availability":"online-only"}
 
 === ranges, each served by its own process, reassemble the file
   read f:<id1>/big.txt <root>/ranges.bin 0 8
@@ -49,9 +49,9 @@
 
 === a created file is empty until something is written to it
   create d:<id1> new.txt
-    {"ok":true,"item":{"ref":"f:<id1>/new.txt","parentRef":"d:<id1>","name":"new.txt","kind":"file","size":0,"mtime":<clock>,"etag":"","isUploaded":false}}
+    {"ok":true,"item":{"ref":"f:<id1>/new.txt","parentRef":"d:<id1>","name":"new.txt","kind":"file","size":0,"mtime":<clock>,"etag":"","isUploaded":false,"availability":"cached"}}
   stat f:<id1>/new.txt
-    {"ok":true,"ref":"f:<id1>/new.txt","parentRef":"d:<id1>","name":"new.txt","kind":"file","size":0,"mtime":<clock>,"etag":"","isUploaded":false}
+    {"ok":true,"ref":"f:<id1>/new.txt","parentRef":"d:<id1>","name":"new.txt","kind":"file","size":0,"mtime":<clock>,"etag":"","isUploaded":false,"availability":"cached"}
 
 === the whole content, assembled into a file for editing in place
   fetch f:<id1>/big.txt <root>/fetched.bin
@@ -64,13 +64,13 @@
 
 === a folder is read a page at a time, resumed by name
   list d:<id1>  1
-    {"ok":true,"items":[{"ref":"f:<id1>/big.txt","parentRef":"d:<id1>","name":"big.txt","kind":"file","size":24,"mtime":1400000000.0,"etag":"1294bbe85c2f380b","isUploaded":true}],"next":"big.txt"}
+    {"ok":true,"items":[{"ref":"f:<id1>/big.txt","parentRef":"d:<id1>","name":"big.txt","kind":"file","size":24,"mtime":1400000000.0,"etag":"1294bbe85c2f380b","isUploaded":true,"availability":"cached"}],"next":"big.txt"}
   list d:<id1> big.txt 1
-    {"ok":true,"items":[{"ref":"f:<id1>/new.txt","parentRef":"d:<id1>","name":"new.txt","kind":"file","size":0,"mtime":<clock>,"etag":"","isUploaded":true}]}
+    {"ok":true,"items":[{"ref":"f:<id1>/new.txt","parentRef":"d:<id1>","name":"new.txt","kind":"file","size":0,"mtime":<clock>,"etag":"","isUploaded":true,"availability":"cached"}]}
 
 === one request on the wire the app speaks
   request {"action":"stat","ref":"f:<id1>/big.txt"}
-    {"ok":true,"ref":"f:<id1>/big.txt","parentRef":"d:<id1>","name":"big.txt","kind":"file","size":24,"mtime":1400000000.0,"etag":"1294bbe85c2f380b","isUploaded":true}
+    {"ok":true,"ref":"f:<id1>/big.txt","parentRef":"d:<id1>","name":"big.txt","kind":"file","size":24,"mtime":1400000000.0,"etag":"1294bbe85c2f380b","isUploaded":true,"availability":"cached"}
 
 === a link where no backend can hold a share
   share f:<id1>/big.txt
@@ -85,9 +85,9 @@
 
 === the namespace verbs move and remove
   rename f:<id1>/big.txt d:<id1> moved.txt
-    {"ok":true,"item":{"ref":"f:<id1>/moved.txt","parentRef":"d:<id1>","name":"moved.txt","kind":"file","size":24,"mtime":1400000000.0,"etag":"1294bbe85c2f380b","isUploaded":true}}
+    {"ok":true,"item":{"ref":"f:<id1>/moved.txt","parentRef":"d:<id1>","name":"moved.txt","kind":"file","size":24,"mtime":1400000000.0,"etag":"1294bbe85c2f380b","isUploaded":true,"availability":"cached"}}
   list d:<id1>
-    {"ok":true,"items":[{"ref":"f:<id1>/moved.txt","parentRef":"d:<id1>","name":"moved.txt","kind":"file","size":24,"mtime":1400000000.0,"etag":"1294bbe85c2f380b","isUploaded":true},{"ref":"f:<id1>/new.txt","parentRef":"d:<id1>","name":"new.txt","kind":"file","size":0,"mtime":<clock>,"etag":"06b4b04bae2346bf","isUploaded":true}]}
+    {"ok":true,"items":[{"ref":"f:<id1>/moved.txt","parentRef":"d:<id1>","name":"moved.txt","kind":"file","size":24,"mtime":1400000000.0,"etag":"1294bbe85c2f380b","isUploaded":true,"availability":"cached"},{"ref":"f:<id1>/new.txt","parentRef":"d:<id1>","name":"new.txt","kind":"file","size":0,"mtime":<clock>,"etag":"06b4b04bae2346bf","isUploaded":true,"availability":"online-only"}]}
   delete f:<id1>/moved.txt
     {"ok":true}
   delete f:<id1>/new.txt
