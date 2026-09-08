@@ -7,6 +7,10 @@
     is re-fetchable, which is what lets {!Make.enforce_cap} delete by age alone.
     Unpublished bytes live in {!Staged_body}, out of its reach.
 
+    A pinned body is the one exception, and only until its deadline: a marker
+    beside it names the moment the cap may have it back, and until then it is
+    neither deleted nor counted against the cap.
+
     Bodies are shared: two files whose chunks group identically are one file on
     disk and one download. *)
 
@@ -45,8 +49,13 @@ type fetch = { waited : bool; pulled : int }
 type held = {
   mutable files : int;
   mutable bytes : int;
+  mutable pinned_bytes : int;
+  mutable next_expiry : float;
   mutable anchored : bool;
 }
+
+(** How long a pin holds when the caller names no deadline: ten days. *)
+val default_pin_keep : float
 
 module Make
     (Io : Io.S)
@@ -104,17 +113,27 @@ module Make
       — {!Staged.link_group} is that caller. *)
   val link_in : src:string -> group:Manifest.Group.t -> bool Io.t
 
-  (** Drop one group body. It is re-fetched on the next read. *)
+  (** Keep this group's body until [until] (a Unix time), whatever the cap says.
+      Re-pinning moves the deadline. Nothing happens for a body that is not
+      here: fetch first. *)
+  val pin : group:Manifest.Group.t -> until:float -> unit Io.t
+
+  (** Hand the body back to the cap. *)
+  val unpin : group:Manifest.Group.t -> unit Io.t
+
+  (** Drop one group body and its pin. It is re-fetched on the next read. *)
   val forget : group:Manifest.Group.t -> unit Io.t
 
   (** Number of downloads currently in flight. *)
   val in_flight : unit -> int
 
-  (** [(chunks, bytes)] held locally, counted once by walking the store and kept
-      current by every write after that. *)
-  val stats : unit -> (int * int) Io.t
+  (** [(chunks, bytes, pinned bytes)] held locally, counted once by walking the
+      store and kept current by every write after that. *)
+  val stats : unit -> (int * int * int) Io.t
 
-  (** Delete bodies, coldest first, while the store is over [C.max_cache]. Every
-      body here is re-fetchable, so nothing is consulted beyond age. *)
+  (** Delete unpinned bodies, coldest first, while they are over [C.max_cache].
+      Every body here is re-fetchable, so nothing is consulted beyond age. Pins
+      past their deadline are dropped first, which is the only place they are.
+  *)
   val enforce_cap : unit -> Sweep.swept Io.t
 end

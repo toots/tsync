@@ -445,7 +445,7 @@ let () =
        ((Unix.stat (path g1)).Unix.st_mtime > 1000.);
      Unix.utimes (path g1) 1000. 1000.;
      let show_cap label =
-       let+ chunks, bytes = Cap.stats () in
+       let+ chunks, bytes, _ = Cap.stats () in
        let p1 = Sys.file_exists (path g1) in
        let p2 = Sys.file_exists (path g2) in
        Printf.printf "%-28s chunks=%d bytes=%2d first=%-5b second=%b\n" label
@@ -485,6 +485,44 @@ let () =
        (Sys.file_exists partial);
      (* And what it reads afterwards is the chunk, not the hole. *)
      let* () = show_body "read after the pair goes" whole_trio 0 in
+
+     (* A pinned body is spared by the cap and not counted against it, until
+        its deadline passes; then it is a body like any other. *)
+     let marker = path g1 ^ Cache_layout.pin_suffix in
+     let show_pins label =
+       let+ chunks, bytes, pinned = Cap.stats () in
+       Printf.printf
+         "%-28s chunks=%d bytes=%2d pinned=%2d g1=%-5b g2=%-5b pin=%b\n" label
+         chunks bytes pinned
+         (Sys.file_exists (path g1))
+         (Sys.file_exists (path g2))
+         (Sys.file_exists marker)
+     in
+     let* () = Cc.forget ~group:whole_trio in
+     let* () = Cc.ensure ~group:g1 () in
+     let* () = Cc.ensure ~group:g2 () in
+     let now = Unix.gettimeofday () in
+     let* () = Cc.pin ~group:g1 ~until:(now +. Chunk_cache.default_pin_keep) in
+     let* () = show_pins "pinned g1" in
+     let* () =
+       Lwt.map (fun (_ : Maintenance_lwt.swept) -> ()) (Capped0.enforce_cap ())
+     in
+     let* () = show_pins "cap=0 spares the pin" in
+     let* () = Cc.pin ~group:g1 ~until:(now +. 1.) in
+     Printf.printf "%-28s later=%b\n" "re-pin moves the deadline"
+       ((Unix.stat marker).Unix.st_mtime > now);
+     let* () = Cc.pin ~group:g1 ~until:(now -. 1.) in
+     let* () =
+       Lwt.map (fun (_ : Maintenance_lwt.swept) -> ()) (Capped0.enforce_cap ())
+     in
+     let* () = show_pins "cap=0 after the pin lapsed" in
+     let* () = Cc.ensure ~group:g1 () in
+     let* () = Cc.pin ~group:g1 ~until:(now +. Chunk_cache.default_pin_keep) in
+     let* () = Cc.unpin ~group:g1 in
+     let* () = show_pins "unpinned" in
+     let* () = Cc.pin ~group:g1 ~until:(now +. Chunk_cache.default_pin_keep) in
+     let* () = Cc.forget ~group:g1 in
+     let* () = show_pins "forget drops the pin" in
 
      (* Publishing a group that was staged in its own layout: the bytes get a
         second name rather than a second copy, so both are readable until the
@@ -527,7 +565,7 @@ let () =
      let* () =
        Lwt.map (fun (_ : Maintenance_lwt.swept) -> ()) (Capped0.enforce_cap ())
      in
-     let+ chunks, _ = Cap.stats () in
+     let+ chunks, _, _ = Cap.stats () in
      Printf.printf "%-28s staged=%b cache chunks=%d\n"
        "cap=0 over a staged body"
        (Sys.file_exists (Sb.path unpublished))

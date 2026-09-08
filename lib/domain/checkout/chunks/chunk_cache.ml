@@ -48,18 +48,33 @@ type fetch = { waited : bool; pulled : int }
 type held = {
   mutable files : int;
   mutable bytes : int;
+  (* The part of [bytes] under a pin, which the cap leaves alone and does not
+     count against itself. *)
+  mutable pinned_bytes : int;
+  (* The earliest pin deadline known, so asking whether any pin has lapsed is a
+     comparison and the walk that drops it runs only once one has. *)
+  mutable next_expiry : float;
   (* A process that starts against a full store would otherwise believe it
      empty, so the first read of it walks. *)
   mutable anchored : bool;
 }
 
+let default_pin_keep = 10. *. 86400.
 let counts : (string, held) Hashtbl.t = Hashtbl.create 4
 
 let held_for root =
   match Hashtbl.find_opt counts root with
     | Some h -> h
     | None ->
-        let h = { files = 0; bytes = 0; anchored = false } in
+        let h =
+          {
+            files = 0;
+            bytes = 0;
+            pinned_bytes = 0;
+            next_expiry = infinity;
+            anchored = false;
+          }
+        in
         Hashtbl.replace counts root h;
         h
 
@@ -79,6 +94,8 @@ struct
 
   let root () = Cache_layout.chunks_dir ~cache_root:C.cache_root C.domain_name
   let held () = held_for (root ())
+  let pin_beside body = body ^ Cache_layout.pin_suffix
+  let is_pin name = Filename.check_suffix name Cache_layout.pin_suffix
 
   module Part = Partial.Make (Io) (Fs) (Retry)
 
@@ -317,8 +334,9 @@ struct
      nesting one pool inside itself deadlocks. *)
   let dir_slots = Bounded.create ~max:16 ()
 
-  (* (path, bytes, mtime) per chunk body. Stat'd in parallel: one at a time is a
-     round trip each, milliseconds against seconds on a few thousand chunks. *)
+  (* (path, bytes, mtime) per chunk body, and (body path, deadline) per pin.
+     Stat'd in parallel: one at a time is a round trip each, milliseconds
+     against seconds on a few thousand chunks. *)
   let entries () =
     let* dirs = Fs.readdir_list (root ()) in
     let+ per_dir =
@@ -338,15 +356,62 @@ struct
                 Io.catch
                   (fun () ->
                     let+ st = Retry.stat path in
-                    Some (path, st.Unix.st_size, st.Unix.st_mtime))
+                    if is_pin name then
+                      Some
+                        (`Pin
+                           ( Filename.chop_suffix path Cache_layout.pin_suffix,
+                             st.Unix.st_mtime ))
+                    else Some (`Body (path, st.Unix.st_size, st.Unix.st_mtime)))
                   (fun _ -> Io.return None)))
             names)
         dirs
     in
-    List.concat per_dir
+    List.partition_map
+      (function `Body b -> Left b | `Pin p -> Right p)
+      (List.concat per_dir)
+
+  (* Whether a pin stood beside [body], taking it away. *)
+  let drop_pin body =
+    let marker = pin_beside body in
+    let* was = Retry.file_exists marker in
+    let+ () = if was then Fs.unlink_quiet marker else return_unit in
+    was
+
+  let unpinned body was =
+    if was then
+      let+ size = body_size body in
+      Option.iter
+        (fun n ->
+          let h = held () in
+          h.pinned_bytes <- h.pinned_bytes - n)
+        size
+    else return_unit
+
+  (* A pin on a body that is not there would be a marker beside nothing, and a
+     fetch landing later would not know to count it: the caller fetches first.
+     Re-pinning only moves the deadline. *)
+  let pin ~group ~until =
+    let body = path group in
+    let* size = body_size body in
+    match size with
+      | None -> return_unit
+      | Some n ->
+          let marker = pin_beside body in
+          let* was = Retry.file_exists marker in
+          let* () = if was then return_unit else Fs.atomic_write marker "" in
+          let+ () = Retry.utimes marker until until in
+          let h = held () in
+          if until < h.next_expiry then h.next_expiry <- until;
+          if not was then h.pinned_bytes <- h.pinned_bytes + n
+
+  let unpin ~group =
+    let body = path group in
+    let* was = drop_pin body in
+    unpinned body was
 
   let forget ~group =
     let p = path group in
+    let* () = unpin ~group in
     let* size = body_size p in
     let* () = Fs.unlink_quiet p in
     Option.iter dropped size;
@@ -523,11 +588,22 @@ struct
       read_or_refetch ~fetched ~from_backend:(fetched > 0))
 
   (* Exact, so the count is set from it wherever it runs. *)
-  let recount items =
+  let recount bodies pins =
     let h = held () in
+    let pinned = Hashtbl.create (List.length pins) in
+    List.iter (fun (body, _) -> Hashtbl.replace pinned body ()) pins;
     h.anchored <- true;
-    h.files <- List.length items;
-    h.bytes <- List.fold_left (fun acc (_, bytes, _) -> acc + bytes) 0 items
+    h.files <- List.length bodies;
+    h.bytes <- List.fold_left (fun acc (_, bytes, _) -> acc + bytes) 0 bodies;
+    h.pinned_bytes <-
+      List.fold_left
+        (fun acc (body, bytes, _) ->
+          if Hashtbl.mem pinned body then acc + bytes else acc)
+        0 bodies;
+    h.next_expiry <-
+      List.fold_left (fun acc (_, until) -> min acc until) infinity pins
+
+  let walk () = Io.catch entries (fun _ -> Io.return ([], []))
 
   (* The one walk, once per store per process. The existence check is not the
      walk: a resync drops the whole tree ({!Cache_layout.clear}), which no delta
@@ -537,50 +613,67 @@ struct
     let h = held () in
     let* here = Retry.file_exists (root ()) in
     if not here then (
-      h.anchored <- true;
-      h.files <- 0;
-      h.bytes <- 0;
+      recount [] [];
       return_unit)
     else if h.anchored then return_unit
     else
-      let+ items = Io.catch entries (fun _ -> Io.return []) in
-      recount items
+      let+ bodies, pins = walk () in
+      recount bodies pins
 
   let stats () =
     let+ () = anchor () in
     let h = held () in
-    (h.files, h.bytes)
+    (h.files, h.bytes, h.pinned_bytes)
 
   (* Coldest first, and best-effort: a chunk deleted under an in-flight read is
-     fetched again. The walk happens only when the count says the store is over,
-     because choosing what to drop needs an mtime per body. *)
+     fetched again. The walk happens only when the count says the store is over
+     or a pin has lapsed, because choosing what to drop needs an mtime per body
+     and finding a lapsed pin needs its deadline.
+
+     A lapsed pin is dropped here rather than by a sweep of its own: the marker
+     is only ever read beside the bodies, and the count it frees is this one. *)
   let enforce_cap () =
-    match C.max_cache with
-      | None -> Io.return Sweep.nothing
-      | Some cap ->
-          let* () = anchor () in
-          if (held ()).bytes <= cap then Io.return Sweep.nothing
-          else
-            let* items = Io.catch entries (fun _ -> Io.return []) in
-            recount items;
-            if (held ()).bytes <= cap then Io.return Sweep.nothing
-            else (
-              let coldest =
-                List.sort (fun (_, _, a) (_, _, b) -> compare a b) items
-              in
-              let rec go (acc : Sweep.swept) = function
-                | [] -> Io.return acc
-                | _ when (held ()).bytes <= cap -> Io.return acc
-                | (path, bytes, _) :: rest ->
-                    Log.debug "chunk cache: dropping %s (%d bytes)"
-                      (Filename.basename path) bytes;
-                    let* () = Fs.unlink_quiet path in
-                    dropped bytes;
-                    (* After the body, so a crash leaves a record about a body
-                       that is gone -- read as an empty group -- rather than a
-                       partial body read as a whole one. *)
-                    let* () = Part.drop_beside ~body:path in
-                    go { files = acc.files + 1; bytes = acc.bytes + bytes } rest
-              in
-              go Sweep.nothing coldest)
+    let* () = anchor () in
+    let h = held () in
+    let now = Unix.gettimeofday () in
+    let over () =
+      match C.max_cache with
+        | None -> false
+        | Some cap -> h.bytes - h.pinned_bytes > cap
+    in
+    if now < h.next_expiry && not (over ()) then Io.return Sweep.nothing
+    else
+      let* bodies, pins = walk () in
+      let lapsed, live = List.partition (fun (_, until) -> until < now) pins in
+      let* () =
+        iter_s (fun (body, _) -> Fs.unlink_quiet (pin_beside body)) lapsed
+      in
+      recount bodies live;
+      match C.max_cache with
+        | Some cap when over () ->
+            let pinned = Hashtbl.create (List.length live) in
+            List.iter (fun (body, _) -> Hashtbl.replace pinned body ()) live;
+            let coldest =
+              List.sort
+                (fun (_, _, a) (_, _, b) -> compare a b)
+                (List.filter
+                   (fun (p, _, _) -> not (Hashtbl.mem pinned p))
+                   bodies)
+            in
+            let rec go (acc : Sweep.swept) = function
+              | [] -> Io.return acc
+              | _ when h.bytes - h.pinned_bytes <= cap -> Io.return acc
+              | (path, bytes, _) :: rest ->
+                  Log.debug "chunk cache: dropping %s (%d bytes)"
+                    (Filename.basename path) bytes;
+                  let* () = Fs.unlink_quiet path in
+                  dropped bytes;
+                  (* After the body, so a crash leaves a record about a body
+                     that is gone -- read as an empty group -- rather than a
+                     partial body read as a whole one. *)
+                  let* () = Part.drop_beside ~body:path in
+                  go { files = acc.files + 1; bytes = acc.bytes + bytes } rest
+            in
+            go Sweep.nothing coldest
+        | _ -> Io.return Sweep.nothing
 end
