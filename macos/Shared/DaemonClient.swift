@@ -44,6 +44,12 @@ struct DaemonItem: Decodable {
     /// the daemon says.
     let trashed: Bool?
 
+    /// Where the file's bytes are in the daemon's cache: `online-only`,
+    /// `cached` or `pinned`, the last with the deadline. Absent for a
+    /// directory.
+    let availability: String?
+    let pinnedUntil: Double?
+
     var isDirectory: Bool { kind == "dir" }
     var isSymlink: Bool { kind == "symlink" }
 }
@@ -454,5 +460,16 @@ extension DaemonClient {
             throw DaemonError.remote(code: "internal", message: "share returned no URL")
         }
         return url
+    }
+
+    /// Fetch every chunk of `ref` into the daemon's cache and pin it there; a
+    /// repeat moves the pin's deadline.
+    func restore(ref: String) async throws {
+        _ = try await send(DaemonRequest(action: "restore", ref: ref))
+    }
+
+    /// Drop `ref`'s chunks from the daemon's cache, pin included.
+    func evict(ref: String) async throws {
+        _ = try await send(DaemonRequest(action: "evict", ref: ref))
     }
 }

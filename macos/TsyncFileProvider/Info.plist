@@ -45,6 +45,26 @@
                 <key>NSExtensionFileProviderActionActivationRule</key>
                 <string>TRUEPREDICATE</string>
             </dict>
+            <!-- Both reach the daemon's chunk cache, which is what a pin is
+                 about; Finder's own Download Now and Remove Download act on
+                 the replica and leave the pin alone. A repeat on a pinned item
+                 moves its deadline, which is the whole of keeping it longer. -->
+            <dict>
+                <key>NSExtensionFileProviderActionIdentifier</key>
+                <string>org.feverdreamtv.tsync.makeAvailableOffline</string>
+                <key>NSExtensionFileProviderActionName</key>
+                <string>Make Available Offline</string>
+                <key>NSExtensionFileProviderActionActivationRule</key>
+                <string>TRUEPREDICATE</string>
+            </dict>
+            <dict>
+                <key>NSExtensionFileProviderActionIdentifier</key>
+                <string>org.feverdreamtv.tsync.makeOnlineOnly</string>
+                <key>NSExtensionFileProviderActionName</key>
+                <string>Make Online Only</string>
+                <key>NSExtensionFileProviderActionActivationRule</key>
+                <string>TRUEPREDICATE</string>
+            </dict>
         </array>
         <key>NSExtensionPointIdentifier</key>
         <string>com.apple.fileprovider-nonui</string>
