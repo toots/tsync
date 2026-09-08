@@ -58,6 +58,13 @@ object Cli {
     /** A link to [ref], file or folder, for anyone holding it. */
     fun share(ref: String) = request("share", "ref" to ref)
 
+    /** Every chunk of [ref] into the cache, pinned there; a repeat moves the
+     *  pin's deadline. The reply to a later [stat] says "pinned". */
+    fun restore(ref: String) = request("restore", "ref" to ref)
+
+    /** [ref]'s chunks out of the cache, pin included. */
+    fun evict(ref: String) = request("evict", "ref" to ref)
+
     /** The whole content into [dest], for editing in place. */
     fun fetch(ref: String, dest: String) =
         request("ensure_cached", "ref" to ref, "dest" to dest)

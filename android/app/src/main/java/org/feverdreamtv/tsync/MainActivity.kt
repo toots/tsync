@@ -197,21 +197,42 @@ class MainActivity : Activity() {
     private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
 
     /** What can be done with an item: a file opens in another app or is
-     *  shared; a folder is shared. */
+     *  shared; a folder is shared; either is kept on the phone or handed back
+     *  to the network, as its row says it stands. */
     private fun offerActions(entry: JSONObject) {
         val name = entry.getString("name")
         val ref = entry.getString("ref")
         val isDir = entry.getString("kind") == "dir"
-        val actions = if (isDir) arrayOf("Share link") else arrayOf("Open", "Share link")
+        val availability = entry.optString("availability")
+        val actions = buildList {
+            if (!isDir) add("Open")
+            add("Share link")
+            add(if (availability == "pinned") "Keep offline longer" else "Make available offline")
+            if (availability != "online-only") add("Make online only")
+        }.toTypedArray()
         AlertDialog.Builder(this)
             .setTitle(name)
             .setItems(actions) { _, which ->
                 when (actions[which]) {
                     "Open" -> open(ref, name)
-                    else -> shareLink(ref, name)
+                    "Share link" -> shareLink(ref, name)
+                    "Make online only" -> cacheAction(Cli.evict(ref), "$name is online only")
+                    else -> cacheAction(Cli.restore(ref), "$name is available offline")
                 }
             }
             .show()
+    }
+
+    /** A restore reaches the network, so it is asked for off the UI thread and
+     *  reported once it answers. */
+    private fun cacheAction(request: String, done: String) {
+        thread {
+            val result = runCatching { Tsync.json(this, request) }
+            runOnUiThread {
+                result.onFailure { toast("Failed: ${it.message}") }
+                result.onSuccess { toast(done) }
+            }
+        }
     }
 
     /** Hands the file to whichever app takes its type, through the provider:
