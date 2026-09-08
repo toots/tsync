@@ -454,20 +454,34 @@ extension TsyncExtension: NSFileProviderCustomAction {
                        onItemsWithIdentifiers itemIdentifiers: [NSFileProviderItemIdentifier],
                        completionHandler: @escaping (Error?) -> Void) -> Progress {
         let progress = Progress(totalUnitCount: 1)
-        guard actionIdentifier.rawValue == "org.feverdreamtv.tsync.copyShareURL",
-              let identifier = itemIdentifiers.first else {
+        guard let identifier = itemIdentifiers.first else {
             completionHandler(nil)
             progress.completedUnitCount = 1
             return progress
         }
         let task = Task {
             do {
-                let url = try await client.share(ref: ItemID.wire(identifier))
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(url, forType: .string)
+                switch actionIdentifier.rawValue {
+                case "org.feverdreamtv.tsync.copyShareURL":
+                    let url = try await client.share(ref: ItemID.wire(identifier))
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(url, forType: .string)
+                // Every item selected, one at a time: a pin is per file, and a
+                // selection of several is several pins.
+                case "org.feverdreamtv.tsync.makeAvailableOffline":
+                    for item in itemIdentifiers {
+                        try await client.restore(ref: ItemID.wire(item))
+                    }
+                case "org.feverdreamtv.tsync.makeOnlineOnly":
+                    for item in itemIdentifiers {
+                        try await client.evict(ref: ItemID.wire(item))
+                    }
+                default:
+                    break
+                }
                 completionHandler(nil)
             } catch {
-                log.error("copyShareURL failed: \(error, privacy: .public)")
+                log.error("\(actionIdentifier.rawValue, privacy: .public) failed: \(error, privacy: .public)")
                 completionHandler(FileProviderError.from(error, item: identifier))
             }
             progress.completedUnitCount = 1
