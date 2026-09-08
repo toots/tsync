@@ -40,6 +40,12 @@ cap=0 (drops all)            chunks=0 bytes= 0 first=false second=false
 partly filled again          body=true manifest=true
 cap=0 over a partial body    body=false manifest=false
 read after the pair goes     body="DDDD"             gets=3 backend=true
+pinned g1                    chunks=2 bytes=22 pinned=16 g1=true  g2=true  pin=true
+cap=0 spares the pin         chunks=1 bytes=16 pinned=16 g1=true  g2=false pin=true
+re-pin moves the deadline    later=true
+cap=0 after the pin lapsed   chunks=0 bytes= 0 pinned= 0 g1=false g2=false pin=false
+unpinned                     chunks=1 bytes=16 pinned= 0 g1=true  g2=false pin=false
+forget drops the pin         chunks=0 bytes= 0 pinned= 0 g1=false g2=false pin=false
 publish by link              linked=true one body=true names=2
 publishing it again          linked=true
 a length that disagrees      linked=false

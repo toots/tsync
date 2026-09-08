@@ -54,6 +54,11 @@ let chunk_path ~cache_root ~domain_name chunk_key =
 let chunk_manifest_path ~cache_root ~domain_name chunk_key =
   chunk_path ~cache_root ~domain_name chunk_key ^ manifest_suffix
 
+let pin_suffix = ".pin"
+
+let chunk_pin_path ~cache_root ~domain_name chunk_key =
+  chunk_path ~cache_root ~domain_name chunk_key ^ pin_suffix
+
 (* A component the filesystem cannot hold is stored as a handle, which is lossy,
    so a directory's real name is written beside it. A file needs no marker: its
    manifest body carries the name. *)

@@ -1060,7 +1060,11 @@ struct
        each keep their own in-flight table and stop deduplicating downloads. *)
 
     let enforce_chunk_cap = Cc.enforce_cap
-    let chunk_stats = Cc.stats
+
+    let chunk_stats () =
+      let+ files, bytes, _ = Cc.stats () in
+      (files, bytes)
+
     let downloads_in_flight = Cc.in_flight
 
     (* Adopts [src_path] by rename: no copy, no chunking pass; the upload reads it

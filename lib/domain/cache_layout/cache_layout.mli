@@ -8,6 +8,8 @@
                                                   per {!Manifest.Group}
     <cache_root>/<domain>/chunks/<xxx>/<key>.manifest   what a partly filled
                                                   one holds; absent once whole
+    <cache_root>/<domain>/chunks/<xxx>/<key>.pin  present while pinned; its
+                                                  mtime is the deadline
     <cache_root>/<domain>/staged/manifests/<path> staged manifests (unsynced edits)
     <cache_root>/<domain>/staged/chunks/<uuid>    staged bodies, one per
                                                   {!Manifest.Group} in that
@@ -69,6 +71,12 @@ val chunk_manifest_path :
 (** What {!chunk_manifest_path} adds, for a walk that has to tell the two apart.
 *)
 val manifest_suffix : string
+
+(** Beside the body while it is pinned. Its mtime is the deadline: past it the
+    cap treats the body like any other. *)
+val chunk_pin_path : cache_root:string -> domain_name:string -> string -> string
+
+val pin_suffix : string
 
 (** {1 The three that touch the disk}
 
