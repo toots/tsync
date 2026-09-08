@@ -41,7 +41,9 @@ module Mf = Checkout_lwt.Make (C)
 
 let body = "0123456789ABCDEFghijklmn"
 let key = Lk.file "big.txt"
-let local () = Checkout.is_local (Conf.locality (module C)) key
+
+let local () =
+  Checkout.availability (Conf.locality (module C)) key <> `Online_only
 
 let read ~offset ~len =
   let buf = Bigarray.Array1.create Bigarray.char Bigarray.c_layout len in

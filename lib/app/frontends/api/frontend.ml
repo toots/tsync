@@ -24,8 +24,10 @@ type serving = Daemon of daemon | Commands of string
 type tree = [ `Replicated | `Pulled of string ]
 
 module type S = sig
-  (* Whether every byte of [key] is on this machine, for `tsync ls`. *)
-  val is_local : Conf.locality -> Logical_key.t -> bool
+  (* Where [key]'s bytes are, for `tsync ls` and the item rows. *)
+  val availability :
+    Conf.locality -> Logical_key.t -> Tsync_checkout.Checkout.availability
+
   val serving : serving
   val tree : tree
 end

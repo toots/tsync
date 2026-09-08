@@ -95,8 +95,8 @@
   local? cached.bin
   local? evicted.bin
   export-dir
-  local? cached.bin = cloud
-  local? evicted.bin = cloud
+  local? cached.bin = online-only
+  local? evicted.bin = online-only
   export cached.bin (assembled)
   export evicted.bin (assembled)
   export: 2 exported, 0 missing
@@ -150,13 +150,13 @@
   imported a.txt (5 bytes)
   imported sub/b.txt (5 bytes)
   import: 2 imported, 0 skipped, 0 symlinks skipped
-  local? a.txt = cloud
+  local? a.txt = online-only
   export a.txt (assembled)
   export sub/b.txt (assembled)
   export: 2 exported, 0 missing
   exported-file a.txt = "alpha"
   exported-file sub/b.txt = "bravo"
-  local? a.txt = local
+  local? a.txt = cached
 --- tree
   f a.txt size=5 cached=1/1 uploaded=true etag=b52128e828cdaed2
   d sub

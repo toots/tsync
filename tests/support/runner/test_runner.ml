@@ -57,9 +57,8 @@ type step =
       (** Query a path through the IPC [stat] action. A query leaves nothing
           behind: an absent path answers "not found" and stays absent. *)
   | ShowLocal of string
-      (** The [local]/[cloud] column [tsync ls] prints, which is
-          {!Checkout.is_local}: whether every cache chunk this file's chunks
-          group into is held locally. *)
+      (** The state column [tsync ls] prints, which is {!Checkout.availability}:
+          online-only, cached or pinned. *)
   | CreateUnder of { parent : string; name : string }
       (** Create through [parentRef] rather than a whole path, the way a
           reference-speaking client does. [parent] is passed to the daemon
@@ -733,9 +732,8 @@ let setup_client (module C : Conf_lwt.S) root staging_prefix =
     | ShowLocal p ->
         Lwt.return
           (Printf.printf "  local? %s = %s\n" p
-             (if Checkout.is_local (Conf.locality (module C)) (key p) then
-                "local"
-              else "cloud"))
+             (Checkout.availability_name
+                (Checkout.availability (Conf.locality (module C)) (key p))))
     | CreateUnder { parent; name } ->
         let+ obj =
           request

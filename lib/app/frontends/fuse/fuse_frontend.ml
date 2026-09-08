@@ -1,5 +1,5 @@
 let implementation = "fuse"
-let is_local = Checkout.is_local
+let availability = Checkout.availability
 
 (* Clear a stale mount left by a previous crash, then (re)create the mount point. *)
 let prepare_mount_point mount_point =
@@ -59,7 +59,7 @@ let spec =
 let register () =
   Frontend.register ~spec implementation
     (module struct
-      let is_local = is_local
+      let availability = availability
       let tree = `Replicated
 
       let serving =

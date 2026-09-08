@@ -11,11 +11,18 @@ let dir ~cache_root domain_name =
 
 let sidecar_path = Cache_layout.manifest_path
 
+type availability = [ `Online_only | `Cached | `Pinned of float ]
+
+let availability_name = function
+  | `Online_only -> "online-only"
+  | `Cached -> "cached"
+  | `Pinned _ -> "pinned"
+
 (* Synchronous, for the CLI listing, which has no loop to run in.
 
-   ponytail: a bool, so a partly cached file reads as remote. Return the chunk
-   counts here if `tsync ls` should distinguish "partial n/m". *)
-let is_local
+   ponytail: three states, so a partly cached file reads as online-only. Return
+   the chunk counts here if `tsync ls` should distinguish "partial n/m". *)
+let availability
     ({ Conf.cache_root; domain_name; cache_chunk_size } : Conf.locality) key =
   (* A cache chunk is whole when nothing stands beside it: a body a read filled
      part of is on disk under the same name, and taking its presence for the
@@ -26,19 +33,36 @@ let is_local
          (Sys.file_exists
             (Cache_layout.chunk_manifest_path ~cache_root ~domain_name key))
   in
-  Sys.file_exists (Staged_manifest.sidecar_path ~cache_root ~domain_name key)
-  ||
-  (* Mapped, not read: a listing wants name, size and mtime, and never
+  (* A lapsed pin the sweep has not reached yet is no pin. *)
+  let pinned_until key =
+    match
+      Unix.stat (Cache_layout.chunk_pin_path ~cache_root ~domain_name key)
+    with
+      | st when st.Unix.st_mtime >= Unix.gettimeofday () ->
+          Some st.Unix.st_mtime
+      | _ | (exception Unix.Unix_error _) -> None
+  in
+  if Sys.file_exists (Staged_manifest.sidecar_path ~cache_root ~domain_name key)
+  then `Cached
+  else (
+    (* Mapped, not read: a listing wants name, size and mtime, and never
        touches the chunk keys. *)
-  match of_file (sidecar_path ~cache_root ~domain_name key) with
-    | m ->
-        List.for_all
-          (fun g -> held (Manifest.Group.key g))
-          (Manifest.Group.all ~table:m
-             ~per:
-               (Conf.chunks_per_group ~chunk_size:(chunk_size m)
-                  ~cache_chunk_size))
-    | exception _ -> false
+      match of_file (sidecar_path ~cache_root ~domain_name key) with
+      | m ->
+          let keys =
+            List.map Manifest.Group.key
+              (Manifest.Group.all ~table:m
+                 ~per:
+                   (Conf.chunks_per_group ~chunk_size:(chunk_size m)
+                      ~cache_chunk_size))
+          in
+          if not (List.for_all held keys) then `Online_only
+          else (
+            let untils = List.filter_map pinned_until keys in
+            if keys <> [] && List.length untils = List.length keys then
+              `Pinned (List.fold_left min infinity untils)
+            else `Cached)
+      | exception _ -> `Online_only)
 
 module type S = sig
   type 'a io
