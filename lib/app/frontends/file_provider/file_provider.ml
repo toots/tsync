@@ -71,11 +71,17 @@ module Make (C : Conf_lwt.S) (D : Domain_engine.Domain) = struct
           ignore (publish ~subs "changed" []))
     end
 
+  (* The chunk store first, then the replica: a pin is the daemon's promise and
+     holds whether or not anything is listening to move the system's copy. *)
   let hooks ~subs =
     H.
       {
-        evict = (fun key -> act ~subs "evict" key);
-        restore = (fun key -> act ~subs "restore" key);
+        evict =
+          (fun key -> Lwt.bind (F.evict key) (fun () -> act ~subs "evict" key));
+        restore =
+          (fun ?keep key ->
+            Lwt.bind (F.ensure_cached ?keep key) (fun () ->
+                act ~subs "restore" key));
         changed = notify_changed ~subs;
         (* A reimport: the handler has stamped a new generation, so every anchor
            outstanding is answered stale and the reader re-lists. The event is
