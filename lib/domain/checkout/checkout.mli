@@ -18,10 +18,17 @@
     contains, not what a bucket does. *)
 type listed = { key : Logical_key.t; size : int; mtime : float }
 
-(** True when [key] has unsynced edits, or the chunk store holds every cache
-    chunk its sidecar's chunks group into. Synchronous, for the CLI listing;
-    [false] for a partly cached file. *)
-val is_local : Conf.locality -> Logical_key.t -> bool
+(** Where a file's bytes are. [`Online_only] when any cache chunk its sidecar's
+    chunks group into is not held whole; [`Cached] when every one is, or the
+    file has unsynced edits; [`Pinned until] when every one also carries a live
+    pin, [until] being the earliest deadline among them. Synchronous, for the
+    CLI listing. *)
+type availability = [ `Online_only | `Cached | `Pinned of float ]
+
+val availability : Conf.locality -> Logical_key.t -> availability
+
+(** The wire and listing spelling: [online-only], [cached] or [pinned]. *)
+val availability_name : availability -> string
 
 module type S = sig
   type 'a io

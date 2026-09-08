@@ -1,11 +1,19 @@
 let implementation = "file_provider"
 
-let is_local ({ Conf.domain_name; _ } : Conf.locality) key =
+(* The system's replica is what a user of this frontend reads, so a dataless
+   file there is online-only whatever the chunk store holds; a pin is the chunk
+   store's to know. *)
+let availability ({ Conf.domain_name; _ } as locality : Conf.locality) key =
   match File_provider.domain_dir ~domain_name with
-    | None -> false
+    | None -> `Online_only
     | Some dir ->
         let p = Filename.concat dir (Logical_key.path key) in
-        Sys.file_exists p && not (File_provider.is_dataless p)
+        if (not (Sys.file_exists p)) || File_provider.is_dataless p then
+          `Online_only
+        else (
+          match Checkout.availability locality key with
+            | `Pinned _ as pinned -> pinned
+            | `Online_only | `Cached -> `Cached)
 
 (* All domains share one IPC socket; the daemon routes by domain prefix. *)
 let start served =
@@ -156,7 +164,7 @@ let register () =
         };
       ]
     (module struct
-      let is_local = is_local
+      let availability = availability
       let tree = `Replicated
 
       let serving =

@@ -19,5 +19,6 @@
   tsync_diagnostics
   tsync_conf
   tsync_conf_lwt
+  tsync_checkout
   unix
   lwt.unix))

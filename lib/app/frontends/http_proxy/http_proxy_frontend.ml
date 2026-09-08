@@ -5,7 +5,7 @@ let implementation = "http-proxy"
 (* A share streams out of the domain's chunk cache and a proxy may be the
    process keeping that domain's mirror, so what is here is the same question it
    is anywhere else. *)
-let is_local = Checkout.is_local
+let availability = Checkout.availability
 
 (* The login page for [/stats]. The report is server-rendered, so the page only
    signs a request and shows what comes back. *)
@@ -1317,7 +1317,7 @@ let spec =
 let register () =
   Frontend.register ~spec implementation
     (module struct
-      let is_local = is_local
+      let availability = availability
       let tree = `Replicated
 
       let serving =

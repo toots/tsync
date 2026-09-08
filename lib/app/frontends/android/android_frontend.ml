@@ -13,7 +13,7 @@
    DocumentsProvider committing a whole staged body through [write]. *)
 
 let implementation = "android"
-let is_local = Checkout.is_local
+let availability = Checkout.availability
 
 (* Through the daemon's own request handler rather than a second implementation
    of it: [ref]/[parentRef] naming, the staged-versus-published rules and the
@@ -388,7 +388,7 @@ let commands =
 let register () =
   Frontend.register implementation ~cli_group:"android" ~commands
     (module struct
-      let is_local = is_local
+      let availability = availability
       let serving = serving
       let tree = tree
     end : Frontend.S)
