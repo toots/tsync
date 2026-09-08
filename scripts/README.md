@@ -57,6 +57,24 @@ bucket and stored, so a failure part-way never leaves CI holding a revoked key.
 Needs `gh`, `gcloud` and `aws` logged in. Without the aws cli it does the GCS
 half and says so.
 
+## The package repository signing key
+
+`setup_repo_signing.sh` mints the GPG key `release-repo` signs the apt and dnf
+repositories with, and stores it as the `REPO_SIGNING_KEY` secret. apt refuses
+an unsigned repository outright, so without it the publish fails rather than
+shipping something no client will accept.
+
+```sh
+bash scripts/setup_repo_signing.sh
+```
+
+Safe to re-run: an existing key at `~/.config/tsync/repo-signing.asc` is reused.
+Back that file up — replacing the key makes every machine that already trusts
+the old one stop updating until it re-adds the repository by hand.
+
+Publishing also needs Pages set to build from GitHub Actions
+(*Settings → Pages → Source*), which is a one-time click.
+
 ## The chunk verifier on the CI buckets
 
 `setup_ci_secrets.sh` also deploys the chunk verifier onto the buckets it

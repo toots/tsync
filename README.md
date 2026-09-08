@@ -76,17 +76,25 @@ Uninstalling is `tsync fileprovider purge`.
 
 ### Linux
 
-Grab a package for your distribution from the [nightly
-release](https://github.com/toots/tsync/releases/tag/nightly) — Debian 13,
-Ubuntu 26.04 LTS and Fedora 44, each for x86-64 and arm64.
+Add the package repository, which covers Debian 13, Ubuntu 26.04 LTS and
+Fedora 44, each for x86-64 and arm64:
 
 ```bash
-sudo apt install ./tsync_*.deb     # Debian / Ubuntu
-sudo dnf install ./tsync-*.rpm     # Fedora
+curl -fsSL https://toots.github.io/tsync/setup.sh | sudo sh
+
+sudo apt install tsync     # Debian / Ubuntu
+sudo dnf install tsync     # Fedora
 
 tsync config --edit                    # folder name and a storage backend
 sudo systemctl enable --now tsync@$USER
 ```
+
+`apt-get upgrade` and `dnf upgrade` then pick up each new build. The commands
+the script runs, and the one-off packages, are at
+[toots.github.io/tsync](https://toots.github.io/tsync/).
+
+Two optional packages sit alongside: `tsync-tray` for the system tray icon, and
+`tsync-dolphin` for the Dolphin *Copy Share Link* menu entry.
 
 The service is a systemd template instanced on the user to run as, so it starts
 at boot without anyone logging in. Uninstall with `apt remove tsync` or

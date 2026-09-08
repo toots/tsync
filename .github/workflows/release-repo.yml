@@ -1,0 +1,99 @@
+name: release-repo
+
+# Republishes the apt and dnf repositories from whatever the nightly release
+# holds, so `apt-get upgrade` and `dnf upgrade` reach the same builds the
+# download links do. Triggered by either packaging workflow: each run rebuilds
+# the whole site from the release, so running twice is running once.
+#
+# Needs Pages set to build from GitHub Actions, and REPO_SIGNING_KEY -- see
+# scripts/setup_repo_signing.sh.
+on:
+  workflow_run:
+    workflows: [release-deb, release-rpm]
+    types: [completed]
+  workflow_dispatch:
+
+# Serialized and never cancelled: a queued run supersedes its predecessor's
+# output anyway, and cancelling one mid-deploy is the only way to leave Pages
+# half-written.
+concurrency:
+  group: release-repo
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install repository tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            dpkg-dev apt-utils createrepo-c gnupg
+
+      - name: Download the nightly packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p pkgs
+          gh release download nightly -D pkgs -p '*.deb' -p '*.rpm' \
+            -R ${{ github.repository }}
+          ls -l pkgs
+
+      - name: Import the signing key
+        env:
+          KEY: ${{ secrets.REPO_SIGNING_KEY }}
+        run: |
+          test -n "$KEY" || {
+            echo "REPO_SIGNING_KEY is unset; run scripts/setup_repo_signing.sh" >&2
+            exit 1
+          }
+          printf '%s' "$KEY" | gpg --batch --import
+
+      - name: Verify a client can install from it
+        # The one check that could say the opposite: a repository publishes
+        # perfectly well and still fails at `apt-get update` over a bad Release
+        # or an unreadable key, and nothing before this step would notice.
+        # Built against a local URL and thrown away, so what deploys below is
+        # generated fresh with the real one.
+        run: |
+          REPO_BASE_URL=http://localhost:8000 ./linux/repo/build.sh pkgs check
+          python3 -m http.server 8000 --directory check &
+          server=$!
+          trap 'kill $server' EXIT
+          sleep 2
+          docker run --rm --network host -v "$PWD/check:/check:ro" debian:13 sh -c '
+            set -eux
+            apt-get update
+            apt-get install -y --no-install-recommends curl ca-certificates
+            sh /check/setup.sh
+            apt-get install -y tsync tsync-tray
+            command -v tsync'
+          docker run --rm --network host -v "$PWD/check:/check:ro" fedora:44 sh -c '
+            set -eux
+            command -v curl || dnf install -y curl
+            sh /check/setup.sh
+            dnf install -y tsync tsync-tray
+            command -v tsync'
+
+      - name: Build the site
+        run: ./linux/repo/build.sh pkgs site
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - id: deploy
+        uses: actions/deploy-pages@v4
