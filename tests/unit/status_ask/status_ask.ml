@@ -58,17 +58,26 @@ let mount_reply =
         ] );
   ]
 
-(* Bound, rather than a guess at how long binding takes: [serve] binds in a
-   thread of its own, and the pause this replaces was fifty milliseconds, which
-   a loaded runner spends without getting there. What that produced was not a
-   timeout but a snapshot of an answer nobody gave. *)
-let rec await_bound tries =
-  if Sys.file_exists socket_path then Lwt.return_unit
-  else if tries <= 0 then
-    Lwt.fail (Failure "status_ask: the daemon never bound its socket")
-  else
-    let* () = Lwt_unix.sleep 0.01 in
-    await_bound (tries - 1)
+(* Listening, rather than a guess at how long it takes: [serve] gets there in
+   a thread of its own. The socket file is not the signal, since it appears at
+   bind and a connect between bind and listen is refused -- which on a loaded
+   runner produced a snapshot of an answer nobody gave. So the wait is for a
+   connect to succeed, and the server sees a client that says nothing. *)
+let rec await_listening tries =
+  let probe = Lwt_unix.socket Unix.PF_UNIX Unix.SOCK_STREAM 0 in
+  Lwt.catch
+    (fun () ->
+      let* () = Lwt_unix.connect probe (Unix.ADDR_UNIX socket_path) in
+      Lwt_unix.close probe)
+    (function
+      | Unix.Unix_error ((Unix.ENOENT | Unix.ECONNREFUSED), _, _) when tries > 0
+        ->
+          let* () = Lwt_unix.close probe in
+          let* () = Lwt_unix.sleep 0.01 in
+          await_listening (tries - 1)
+      | exn ->
+          let* () = Lwt_unix.close probe in
+          Lwt.fail exn)
 
 let show name json =
   Printf.printf "=== %s\n%s\n\n" name (Yojson.Safe.pretty_to_string json)
@@ -77,7 +86,7 @@ let () =
   (try Unix.unlink socket_path with _ -> ());
   Lwt_main.run
     (let server = serve ~reply:mount_reply in
-     let* () = await_bound 500 in
+     let* () = await_listening 500 in
      (* The domain travels, and the arg with it. *)
      let* a =
        Status_report.ask ~arg:Status_report.frontend_only ~frontend:"fuse"
