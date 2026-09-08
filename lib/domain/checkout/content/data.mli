@@ -84,8 +84,8 @@ module type S = sig
       Never touches staged bodies. *)
   val enforce_chunk_cap : unit -> Sweep.swept io
 
-  (** [(chunks, bytes)] held locally. *)
-  val chunk_stats : unit -> (int * int) io
+  (** [(chunks, bytes, pinned bytes)] held locally. *)
+  val chunk_stats : unit -> (int * int * int) io
 
   val downloads_in_flight : unit -> int
 
@@ -100,9 +100,11 @@ module type S = sig
       no manifest at all. Staged bodies count as present. *)
   val chunk_residency : Logical_key.t -> (int * int) io
 
-  (** Fetch every chunk [key] needs, so reads are served locally afterwards.
-      Writes the sidecar first for a file that has no local metadata yet. *)
-  val ensure_local : Logical_key.t -> unit io
+  (** Fetch every chunk [key] needs, so reads are served locally afterwards, and
+      pin them for [keep] seconds ({!Chunk_cache.default_pin_keep} unless said):
+      an explicit fetch is a promise the cap keeps. Writes the sidecar first for
+      a file that has no local metadata yet. *)
+  val ensure_local : ?keep:float -> Logical_key.t -> unit io
 
   (** Write [key]'s whole content to [dst_path] (mtime included) through the
       normal read path — for a caller that needs a real file: an export, or the

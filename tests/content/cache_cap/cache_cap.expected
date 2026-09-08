@@ -25,8 +25,8 @@
   read a.txt [0,8) = "aaaaaaaa"
   read b.txt [0,8) = "bbbbbbbb"
   read c.txt [0,8) = "cccccccc"
-  chunk-cache chunks=3 bytes=24
-  chunk-cache chunks=1 bytes=8
+  chunk-cache chunks=3 bytes=24 pinned=0
+  chunk-cache chunks=1 bytes=8 pinned=0
   chunks a.txt published size=8 chunks=1 cached=0/1
   chunks b.txt published size=8 chunks=1 cached=0/1
   chunks c.txt published size=8 chunks=1 cached=1/1
@@ -54,6 +54,67 @@
     chunk#0 1cfa5c47cb2f402e-c44f3339ad38b68a size=8
   file a.txt [.tsync-root/f01e5cbbc09d4fc4-9a0fcd66f030de75] = manifest size=8 chunks=1 h1=205e7be268ad065e h2=d54b96d6efd47935
     chunk#0 c9dbc05573cd5d9a-1ae64e03afa5a78e size=8
+
+=== a restored file is pinned: spared by the cap and not counted
+  write p.txt "pppppppp"
+  drain
+  write q.txt "qqqqqqqq"
+  drain
+  write r.txt "rrrrrrrr"
+  drain
+  evict p.txt
+  evict q.txt
+  evict r.txt
+  restore p.txt
+  drain
+  read q.txt [0,8)
+  drain
+  read r.txt [0,8)
+  drain
+  local? p.txt
+  local? q.txt
+  chunk-cache
+  enforce-cache
+  chunk-cache
+  chunks p.txt
+  chunks q.txt
+  chunks r.txt
+  evict p.txt
+  local? p.txt
+  chunk-cache
+  read q.txt [0,8) = "qqqqqqqq"
+  read r.txt [0,8) = "rrrrrrrr"
+  local? p.txt = pinned
+  local? q.txt = cached
+  chunk-cache chunks=3 bytes=24 pinned=8
+  chunk-cache chunks=2 bytes=16 pinned=8
+  chunks p.txt published size=8 chunks=1 cached=1/1
+  chunks q.txt published size=8 chunks=1 cached=0/1
+  chunks r.txt published size=8 chunks=1 cached=1/1
+  local? p.txt = online-only
+  chunk-cache chunks=1 bytes=8 pinned=0
+--- tree
+  f p.txt size=8 cached=0/1 uploaded=true etag=4fdbbf4bbcc59162
+  f q.txt size=8 cached=0/1 uploaded=true etag=803f170d32b6fbaa
+  f r.txt size=8 cached=1/1 uploaded=true etag=ce563c13bf833f82
+--- content
+  p.txt = "pppppppp"
+  q.txt = "qqqqqqqq"
+  r.txt = "rrrrrrrr"
+--- backend
+  chunk 58f36208a142d878-920c93bde43403d4 size=8
+  chunk 7a906f7753489a10-0f9c2270fb34af66 size=8
+  chunk a6b83f4bf37bc3b4-4299d1a986ef146a size=8
+  cursor = <entry-3>
+  journal <entry-1> = put p.txt 8
+  journal <entry-2> = put q.txt 8
+  journal <entry-3> = put r.txt 8
+  file p.txt [.tsync-root/26b9f15f44bd9fb5-ca63f682a0a9ee95] = manifest size=8 chunks=1 h1=4fdbbf4bbcc59162 h2=d9d2a2c27894759e
+    chunk#0 7a906f7753489a10-0f9c2270fb34af66 size=8
+  file r.txt [.tsync-root/8f54fe1de92fc890-a211cf679fcef380] = manifest size=8 chunks=1 h1=ce563c13bf833f82 h2=2ba095518cb6bf78
+    chunk#0 a6b83f4bf37bc3b4-4299d1a986ef146a size=8
+  file q.txt [.tsync-root/a0328d5264144284-1d75ad77096f5803] = manifest size=8 chunks=1 h1=803f170d32b6fbaa h2=485f166733c3ac99
+    chunk#0 58f36208a142d878-920c93bde43403d4 size=8
 
 === a staged file's bodies are never dropped
   write x.txt "xxxxxxxx"
@@ -94,11 +155,11 @@
   chunk-cache
   evict a.txt
   chunk-cache
-  chunk-cache chunks=0 bytes=0
-  chunk-cache chunks=0 bytes=0
+  chunk-cache chunks=0 bytes=0 pinned=0
+  chunk-cache chunks=0 bytes=0 pinned=0
   read a.txt [0,8) = "aaaaaaaa"
-  chunk-cache chunks=1 bytes=8
-  chunk-cache chunks=0 bytes=0
+  chunk-cache chunks=1 bytes=8 pinned=0
+  chunk-cache chunks=0 bytes=0 pinned=0
 --- tree
   f a.txt size=8 cached=0/1 uploaded=true etag=205e7be268ad065e
 --- content

@@ -25,12 +25,12 @@ module type S = sig
   val create : Logical_key.t -> unit io
   val sync : Logical_key.t -> ?cancel:bool ref -> unit -> unit io
   val enforce_chunk_cap : unit -> Sweep.swept io
-  val chunk_stats : unit -> (int * int) io
+  val chunk_stats : unit -> (int * int * int) io
   val downloads_in_flight : unit -> int
   val downloads_completed_count : unit -> int
   val stage_whole : Logical_key.t -> src_path:string -> unit io
   val chunk_residency : Logical_key.t -> (int * int) io
-  val ensure_local : Logical_key.t -> unit io
+  val ensure_local : ?keep:float -> Logical_key.t -> unit io
   val assemble_to : Logical_key.t -> dst_path:string -> unit io
 
   val fetch_range :
@@ -1060,11 +1060,7 @@ struct
        each keep their own in-flight table and stop deduplicating downloads. *)
 
     let enforce_chunk_cap = Cc.enforce_cap
-
-    let chunk_stats () =
-      let+ files, bytes, _ = Cc.stats () in
-      (files, bytes)
-
+    let chunk_stats = Cc.stats
     let downloads_in_flight = Cc.in_flight
 
     (* Adopts [src_path] by rename: no copy, no chunking pass; the upload reads it
@@ -1243,14 +1239,18 @@ struct
         | Some (`Staged (st, _)) -> Int64.to_int st.Staged_manifest.s_size
         | None -> 0
 
-    let ensure_local key =
+    (* Pinned after the fetch, since a pin needs a body to stand beside; an
+       explicit fetch is what a pin is for, and [keep] is how long it holds. *)
+    let ensure_local ?(keep = Chunk_cache.default_pin_keep) key =
       let* plan = fetch_plan key in
       match plan with
         | None -> return_unit
         | Some groups ->
             with_span key ~total:(groups_bytes groups) (fun () ->
-                let+ () = fetch_groups key groups in
-                incr downloads_completed)
+                let* () = fetch_groups key groups in
+                incr downloads_completed;
+                let until = Unix.gettimeofday () +. keep in
+                iter_s (fun group -> Cc.pin ~group ~until) groups)
 
     (* Goes through the ordinary read path, so staged edits, inherited chunks and
        holes all come out right and the chunk store is populated on the way. *)

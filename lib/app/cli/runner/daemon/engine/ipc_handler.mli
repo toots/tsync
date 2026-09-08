@@ -19,7 +19,7 @@ val mutates : string -> bool
 module type S = sig
   type hooks = {
     evict : Logical_key.t -> unit Lwt.t;
-    restore : Logical_key.t -> unit Lwt.t;
+    restore : ?keep:float -> Logical_key.t -> unit Lwt.t;
     changed : Logical_key.t -> unit;
     full_resync : unit -> unit Lwt.t;
     status_fields : unit -> (string * Yojson.Safe.t) list;
