@@ -1,0 +1,16 @@
+#!/bin/sh
+set -e
+
+if [ "$1" = remove ] || [ "$1" = purge ]; then
+  # The unit is a template with no default instance, so nothing enabled these
+  # but a person, and dpkg does not know they exist. Left behind they point at
+  # a unit file that is gone, which systemd reports on every reload.
+  for link in /etc/systemd/system/*.wants/tsync@*.service; do
+    if [ -L "$link" ] || [ -e "$link" ]; then
+      rm -f "$link"
+    fi
+  done
+  if [ -d /run/systemd/system ]; then
+    systemctl --system daemon-reload >/dev/null 2>&1 || true
+  fi
+fi

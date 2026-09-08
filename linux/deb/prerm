@@ -1,0 +1,11 @@
+#!/bin/sh
+# Stopped while the binary is still on disk, so `tsync stop` can unmount.
+set -e
+
+if [ "$1" = remove ] && [ -d /run/systemd/system ]; then
+  units=$(systemctl list-units --full --plain --no-legend --state=active \
+    'tsync@*.service' 2>/dev/null | cut -d' ' -f1)
+  if [ -n "$units" ]; then
+    deb-systemd-invoke stop $units >/dev/null 2>&1 || true
+  fi
+fi

@@ -71,6 +71,11 @@ root=$(mktemp -d)
 install -Dm755 _build/default/bin/tsync.exe "$root/usr/bin/tsync"
 strip "$root/usr/bin/tsync"
 install -Dm644 'linux/tsync@.service' "$root/usr/lib/systemd/system/tsync@.service"
+# Only this package ships the unit, so only this one carries the scripts that
+# restart an instance across an upgrade and stop it on removal.
+for script in postinst prerm postrm; do
+  install -Dm755 "linux/deb/$script" "$root/DEBIAN/$script"
+done
 # The application icon, here rather than with the tray because both desktop
 # packages want it and dpkg gives a file one owner. Costs a headless install
 # 4K and no dependency: every theme inherits hicolor.

@@ -82,6 +82,12 @@ jobs:
           for b in tsync tsync-tray; do
             test "$(ldd "$(command -v $b)" | grep -c 'not found')" = 0
           done
+          # Nothing in an install proves these shipped -- they no-op in a
+          # container, where /run/systemd/system does not exist.
+          for s in postinst prerm postrm; do
+            dpkg-deb --ctrl-tarfile dist/tsync_*.deb | tar t | grep -q "\./$s"
+          done
+          ! dpkg-deb --ctrl-tarfile dist/tsync-tray_*.deb | tar t | grep -q '\./postinst'
           dpkg-deb -f dist/tsync-tray_*.deb Depends | grep -q libdbus-1
           ! dpkg-deb -f dist/tsync_*.deb Depends | grep -q libdbus-1
           dpkg-deb -f dist/tsync-dolphin_*.deb Depends | grep -qi kf6

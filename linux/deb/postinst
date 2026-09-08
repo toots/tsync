@@ -1,0 +1,18 @@
+#!/bin/sh
+# The rpm gets this from %systemd_post and %systemd_postun_with_restart; dpkg
+# has no equivalent, so the deb spells it out.
+set -e
+
+if [ "$1" = configure ] && [ -d /run/systemd/system ]; then
+  systemctl --system daemon-reload >/dev/null 2>&1 || true
+  # $2 is the version upgraded from, empty on a first install. Only instances
+  # already running are restarted: which users to run for is a choice the
+  # package never makes, so starting one here would invent it.
+  if [ -n "$2" ]; then
+    units=$(systemctl list-units --full --plain --no-legend --state=active \
+      'tsync@*.service' 2>/dev/null | cut -d' ' -f1)
+    if [ -n "$units" ]; then
+      deb-systemd-invoke restart $units >/dev/null 2>&1 || true
+    fi
+  fi
+fi
