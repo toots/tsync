@@ -19,6 +19,7 @@ val action :
   socket_path:string ->
   ?item:Item_ref.t ->
   ?arg:string ->
+  ?fields:(string * Yojson.Safe.t) list ->
   ?domain:string ->
   string ->
   (string * Yojson.Safe.t) list

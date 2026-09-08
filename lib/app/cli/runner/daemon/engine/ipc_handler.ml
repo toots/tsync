@@ -806,13 +806,22 @@ module Make
           (* [None] means the reference points at something no longer there,
              which is an answer, not a failure. *)
           let with_target_ref f =
-            match target obj with
-              | `Bad "" -> fail `Invalid "\"ref\" is required"
-              | t -> (
+            match (target obj, List.assoc_opt "rel" obj) with
+              | `Bad "", Some (`String "") -> f `Any Lk.root
+              | `Bad "", Some (`String rel) -> (
+                  (* A path, from a caller holding nothing else: the desktop
+                     menus. Which kind it names is the mirror's to say. *)
+                  let* kind = F.kind (Lk.file rel) in
+                  match kind with
+                    | `Absent -> not_found rel
+                    | `Dir -> f `Any (Lk.dir rel)
+                    | `File -> f `Any (Lk.file rel))
+              | `Bad "", _ -> fail `Invalid "\"ref\" or \"rel\" is required"
+              | t, _ -> (
                   let* key = resolve t in
                   match key with
                     | None -> not_found (Item_ref.to_string t)
-                    | Some key -> f t key)
+                    | Some key -> f (expected_kind t) key)
           in
           let with_target f = with_target_ref (fun _ key -> f key) in
           (* The folder and the leaf, not a key: which kind is being made is the
@@ -843,8 +852,8 @@ module Make
                   serialized action (fun () ->
                       match action with
                         | "stat" ->
-                            with_target_ref (fun t key ->
-                                handle_stat ~expect:(expected_kind t) key)
+                            with_target_ref (fun expect key ->
+                                handle_stat ~expect key)
                         | "list_dir" ->
                             with_target
                               (handle_list_dir ?after:(page_after obj)
@@ -920,19 +929,22 @@ module Make
                         | "rmdir" -> with_target handle_rmdir
                         (* A caller holding a real path names it directly, which
                        skips the folder resolution a reference costs. *)
-                        | "share" -> (
-                            match List.assoc_opt "rel" obj with
-                              | Some (`String rel) -> handle_share rel
-                              | _ ->
-                                  with_target (fun key ->
-                                      handle_share (Logical_key.path key)))
+                        | "share" ->
+                            with_target (fun key ->
+                                handle_share (Logical_key.path key))
                         | "evict" ->
                             with_target (fun key ->
                                 let+ () = hooks.evict key in
                                 ok_json [])
                         | "restore" ->
+                            let keep =
+                              match List.assoc_opt "keep" obj with
+                                | Some (`Int n) -> Some (float_of_int n)
+                                | Some (`Float f) -> Some f
+                                | _ -> None
+                            in
                             with_target (fun key ->
-                                let+ () = hooks.restore key in
+                                let+ () = hooks.restore ?keep key in
                                 ok_json [])
                         | "revert" ->
                             with_target (fun key ->

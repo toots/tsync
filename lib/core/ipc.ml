@@ -22,14 +22,15 @@ let request ~socket_path fields =
         failwith msg
     | _ -> failwith "unexpected response"
 
-let action ~socket_path ?item ?arg ?domain action =
+let action ~socket_path ?item ?arg ?(fields = []) ?domain action =
   request ~socket_path
     ([("action", `String action)]
     @ (match item with
       | Some r -> [("ref", `String (Item_ref.to_string r))]
       | None -> [])
     @ (match domain with Some d -> [("domain", `String d)] | None -> [])
-    @ match arg with Some a -> [("arg", `String a)] | None -> [])
+    @ (match arg with Some a -> [("arg", `String a)] | None -> [])
+    @ fields)
 
 (* The same socket for a caller that has a loop to keep turning. *)
 module type TRANSPORT = sig

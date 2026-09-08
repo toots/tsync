@@ -21,6 +21,8 @@ type t = {
   is_uploaded : bool;
   symlink : string option;
   trashed : bool;
+  availability : Checkout.availability option;
+      (** Where a file's bytes are; a directory has none. *)
 }
 
 (** The wire fields, in the order every reply has spelled them. [trashed] is

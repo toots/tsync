@@ -70,6 +70,7 @@ type domain_stats = {
   versioning : bool;
   cache_chunks : int option;
   cache_bytes : int64 option;
+  cache_pinned : int64 option;
   cache_max : int64 option;
   in_uploads : int option;
   in_downloads : int option;

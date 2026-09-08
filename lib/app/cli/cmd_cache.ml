@@ -38,6 +38,17 @@ let cmd : unit Cmd.t =
              whose writer is gone, and staged bodies no manifest names. Takes \
              no PATH. Safe to run while the daemon serves the domain.")
   in
+  let keep_arg =
+    Arg.(
+      value
+      & opt (some string) None
+      & info ["keep"] ~docv:"DUR"
+          ~doc:
+            "With $(b,--fetch), keep what it fetched pinned in the cache for \
+             this long (default: 10d); the cap does not touch it or count it \
+             until then. Fetching again moves the deadline. One count and one \
+             unit: $(b,12h), $(b,30d).")
+  in
   let grace_arg =
     Arg.(
       value
@@ -51,7 +62,7 @@ let cmd : unit Cmd.t =
   in
   (* One path this cannot name must cost its own line and the exit code, not the
      rest of the run: a report that ends in success is read as one. *)
-  let act ~verb ~done_ ~domain paths =
+  let act ?fields ~verb ~done_ ~domain paths =
     if paths = [] then failwith "cache --evict and --fetch need a PATH.";
     let failed = ref false in
     let fail msg =
@@ -65,8 +76,8 @@ let cmd : unit Cmd.t =
           | Error msg -> fail msg
           | Ok (domain, item) -> (
               match
-                Ipc.action ~socket_path:(domain_socket ~domain ()) ~domain ~item
-                  verb
+                Ipc.action ?fields ~socket_path:(domain_socket ~domain ())
+                  ~domain ~item verb
               with
                 | _ -> Printf.printf "%s: %s\n" done_ path
                 | exception Failure msg -> fail msg))
@@ -98,10 +109,14 @@ let cmd : unit Cmd.t =
       total.Sweep.files
       (human_bytes total.Sweep.bytes)
   in
-  let run paths domain evict fetch prune_ grace =
+  let run paths domain evict fetch prune_ keep grace =
     match (evict, fetch, prune_) with
       | true, false, false -> act ~verb:"evict" ~done_:"Evicted" ~domain paths
-      | false, true, false -> act ~verb:"restore" ~done_:"Fetched" ~domain paths
+      | false, true, false ->
+          let fields =
+            Option.map (fun d -> [("keep", `Float (parse_duration d))]) keep
+          in
+          act ?fields ~verb:"restore" ~done_:"Fetched" ~domain paths
       | false, false, true ->
           let grace =
             match grace with
@@ -122,4 +137,4 @@ let cmd : unit Cmd.t =
           what a crash left behind.")
     Term.(
       const run $ path_arg $ domain_arg $ evict_arg $ fetch_arg $ prune_arg
-      $ grace_arg)
+      $ keep_arg $ grace_arg)

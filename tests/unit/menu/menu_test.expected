@@ -167,7 +167,7 @@ tooltip tsync — No domains configured
         ---
         Jellyfin Media — read-only, versioned
             /home/u/tsync/Jellyfin Media
-            cache 1216 chunks · 10.0 GB of 10.0 GB
+            cache 1216 chunks · 10.0 GB of 10.0 GB · 2.0 GB pinned
             0 uploading · 2 downloading · 0 staged
             read 515.4 MB · written 0 B
             http-proxy (main) — reachable, 11 ms · journal 402 entries

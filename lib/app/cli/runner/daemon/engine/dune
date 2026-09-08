@@ -43,6 +43,7 @@
  (libraries
   tsync_core
   tsync_checkout
+  tsync_conf
   tsync_sync
   tsync_manifest
   tsync_journal

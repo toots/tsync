@@ -56,6 +56,7 @@ type domain_stats = {
   versioning : bool;
   cache_chunks : int option;
   cache_bytes : int64 option;
+  cache_pinned : int64 option;
   cache_max : int64 option;
   in_uploads : int option;
   in_downloads : int option;
@@ -360,10 +361,15 @@ let cache_row (d : domain_stats) =
             | Some max when max > 0L -> " of " ^ human_bytes max
             | _ -> ""
         in
+        let pinned =
+          match d.cache_pinned with
+            | Some p when p > 0L -> " · " ^ human_bytes p ^ " pinned"
+            | _ -> ""
+        in
         [
           info ~indent:1
-            (Printf.sprintf "cache %d chunks · %s%s" chunks (human_bytes bytes)
-               of_max);
+            (Printf.sprintf "cache %d chunks · %s%s%s" chunks
+               (human_bytes bytes) of_max pinned);
         ]
     | _ -> []
 
@@ -742,6 +748,7 @@ let domain_stats_of json =
     versioning = Option.value (bool_field json "versioning") ~default:false;
     cache_chunks = sub json "cache" int_field "chunks";
     cache_bytes = sub json "cache" int64_field "bytes";
+    cache_pinned = sub json "cache" int64_field "pinnedBytes";
     cache_max = sub json "cache" int64_field "maxCache";
     in_uploads = frontend_sum json "pendingUploads" int_field;
     in_downloads = frontend_sum json "pendingDownloads" int_field;
