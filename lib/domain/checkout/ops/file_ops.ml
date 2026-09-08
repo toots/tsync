@@ -102,6 +102,9 @@ module type S = sig
   (** Chunk downloads currently in flight. *)
   val downloads_in_flight : unit -> int
 
+  (** Read-ahead loops still running; see {!Data.read_ahead_in_flight}. *)
+  val read_ahead_in_flight : unit -> int
+
   (** Files with unsynced local edits, i.e. owing an upload. *)
   val staged_count : unit -> int io
 

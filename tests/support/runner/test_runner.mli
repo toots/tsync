@@ -99,6 +99,10 @@ type step =
       (** Wait for queued uploads to finish. Also puts the next journal entry in
           a later millisecond, keeping snapshots deterministic: entry keys are
           ms-timestamped and collide within one ms. *)
+  | SettleReadAhead
+      (** Wait for the read-ahead a read fired to finish. A prefetch is fired
+          and forgotten, so a count taken straight after a read is a race: it
+          sees whatever happened to land. Fails rather than hangs. *)
   | Uploads of [ `Paused | `Running ]
       (** Park the upload workers, or let them go again. A scenario that leaves
           a write unsynced has to hold the queue rather than outrun it: how far

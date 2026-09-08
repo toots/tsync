@@ -189,6 +189,7 @@ struct
     let resolve = Mf.current
     let chunk_residency = D.chunk_residency
     let downloads_in_flight = D.downloads_in_flight
+    let read_ahead_in_flight = D.read_ahead_in_flight
 
     let staged_count () =
       let+ keys = Mfs.list () in

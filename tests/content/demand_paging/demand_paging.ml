@@ -37,12 +37,16 @@ let scenarios : scenario list =
     };
     {
       (* A player opens one file twice: one handle probes the end for the index
-         while the other plays from the start. Each keeps its own place, so
-         neither reads the other's bytes.
+         while the other plays from the start. Each keeps its own place, which
+         is what the prefetch runs on: the play stream's third read continues
+         where its second left off, and the probe's read at the far end does not
+         take that away.
 
-         What is not covered here is the prefetch the separate places exist for:
-         [read_ahead] is fired and forgotten, so nothing it fetches has landed
-         by the time the chunks are counted. *)
+         So the count below is of what the prefetch reached, settled first --
+         it is fired and forgotten, and a count taken straight after the read
+         sees whatever happened to land by then. Were the place kept per file
+         rather than per stream, no prefetch would fire at all and only the
+         three chunks the reads touched would be here. *)
       name = "two readers of one file keep their own place";
       steps =
         [
@@ -56,9 +60,10 @@ let scenarios : scenario list =
             { path = "two.txt"; offset = 72; len = 8; stream = Some "probe" };
           ReadRange
             { path = "two.txt"; offset = 8; len = 8; stream = Some "play" };
+          SettleReadAhead;
           ShowChunks "two.txt";
-          (* Settles the file, so what the fired-and-forgotten prefetch had
-             reached by the end does not decide the count. *)
+          (* And the rest of the file is there to be read whatever the
+             prefetch left. *)
           ReadRange { path = "two.txt"; offset = 0; len = 80; stream = None };
           ShowChunks "two.txt";
         ];

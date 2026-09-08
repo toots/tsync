@@ -89,6 +89,12 @@ module type S = sig
 
   val downloads_in_flight : unit -> int
 
+  (** Read-ahead loops still running. Counted from before {!pread} fires one, so
+      a caller that has just read knows whether a prefetch is owed rather than
+      guessing at how long one takes: nobody awaits these, and what they fetch
+      lands whenever it lands. *)
+  val read_ahead_in_flight : unit -> int
+
   (** Whole files pulled in since start-up, by any route. *)
   val downloads_completed_count : unit -> int
 

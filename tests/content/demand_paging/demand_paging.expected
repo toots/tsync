@@ -39,6 +39,7 @@
   read two.txt <play> [0,8)
   read two.txt <probe> [72,80)
   read two.txt <play> [8,16)
+  settle read-ahead
   chunks two.txt
   read two.txt [0,80)
   chunks two.txt
@@ -46,7 +47,7 @@
   read two.txt <play> [0,8) = "00000000"
   read two.txt <probe> [72,80) = "99999999"
   read two.txt <play> [8,16) = "11111111"
-  chunks two.txt published size=80 chunks=10 cached=3/10
+  chunks two.txt published size=80 chunks=10 cached=10/10
   read two.txt [0,80) = "00000000111111112222222233333333444444445555555566666666777777778888888899999999"
   chunks two.txt published size=80 chunks=10 cached=10/10
 --- tree

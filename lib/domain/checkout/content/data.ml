@@ -27,6 +27,7 @@ module type S = sig
   val enforce_chunk_cap : unit -> Sweep.swept io
   val chunk_stats : unit -> (int * int * int) io
   val downloads_in_flight : unit -> int
+  val read_ahead_in_flight : unit -> int
   val downloads_completed_count : unit -> int
   val stage_whole : Logical_key.t -> src_path:string -> unit io
   val chunk_residency : Logical_key.t -> (int * int) io
@@ -1062,6 +1063,7 @@ struct
     let enforce_chunk_cap = Cc.enforce_cap
     let chunk_stats = Cc.stats
     let downloads_in_flight = Cc.in_flight
+    let read_ahead_in_flight () = !readahead_in_flight
 
     (* Adopts [src_path] by rename: no copy, no chunking pass; the upload reads it
        directly. *)

@@ -76,6 +76,7 @@ type step =
   | GcClose  (** Finish what [GcMark] left open. *)
   | GcAbort  (** Abandon an open collection, keeping everything. *)
   | Drain
+  | SettleReadAhead
   | Uploads of [ `Paused | `Running ]
   | Sync
   | HideNewestJournalEntry
@@ -201,6 +202,7 @@ let rec render_step = function
   | GcClose -> "gc (close)"
   | GcAbort -> "gc --abort"
   | Drain -> "drain"
+  | SettleReadAhead -> "settle read-ahead"
   | Uploads `Paused -> "uploads paused"
   | Uploads `Running -> "uploads running"
   | Sync -> "sync"
@@ -896,6 +898,17 @@ let setup_client (module C : Conf_lwt.S) root staging_prefix =
            too, so this is the count that shrinks as a mark gets further along. *)
         Printf.printf "  gc abandoned, %d chunk(s) moved back\n"
           s.Gc.chunks_promoted
+    | SettleReadAhead ->
+        (* Bounded: a prefetch that never finishes is a failure to report, not
+           a suite that hangs until the runner is killed. *)
+        let rec wait tries =
+          if F.read_ahead_in_flight () = 0 then Lwt.return_unit
+          else if tries <= 0 then Lwt.fail (Failure "read-ahead never settled")
+          else
+            let* () = Lwt_unix.sleep 0.005 in
+            wait (tries - 1)
+        in
+        wait 2000
     | Drain ->
         let rec wait () =
           if Sq.pending () = 0 then Lwt.return_unit
