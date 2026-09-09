@@ -45,7 +45,7 @@ credentials and the release workflow.
 
 On **Linux**, install a package from the [nightly
 release](https://github.com/toots/tsync/releases/tag/nightly) — Debian 13,
-Ubuntu 26.04 LTS and Fedora 44, for x86-64 and arm64. It puts `tsync` in
+Ubuntu 26.04 LTS and Fedora 43 and 44, for x86-64 and arm64. It puts `tsync` in
 `/usr/bin` and ships a systemd template unit instanced on the user to run as,
 so it starts at boot with nobody logged in:
 

@@ -24,13 +24,18 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        image: ["fedora:43", "fedora:44"]
+        arch: [amd64, arm64]
+        # `arch` has to be a matrix key, not only an include key: an include
+        # entry sharing no key with the matrix is merged into every combination
+        # instead of selecting one, which collapses this to two jobs.
         include:
           - arch: amd64
             runner: ubuntu-latest
           - arch: arm64
             runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
-    container: fedora:44
+    container: ${{ matrix.image }}
     timeout-minutes: 90
     permissions:
       contents: write
@@ -67,7 +72,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.opam
-          key: opam-fedora44-${{ matrix.arch }}-${{ hashFiles('opam/*.opam', 'linux/build.sh', 'scripts/opam_deps.sh') }}
+          key: opam-${{ matrix.image }}-${{ matrix.arch }}-${{ hashFiles('opam/*.opam', 'linux/build.sh', 'scripts/opam_deps.sh') }}
 
       - name: Build
         run: ./linux/build.sh
@@ -108,7 +113,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: tsync-rpm-${{ matrix.arch }}
+          name: tsync-rpm-${{ matrix.arch }}-${{ strategy.job-index }}
           path: dist/*.rpm
 
       - uses: ./.github/actions/publish-nightly

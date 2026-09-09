@@ -77,7 +77,7 @@ Uninstalling is `tsync fileprovider purge`.
 ### Linux
 
 Add the package repository, which covers Debian 13, Ubuntu 26.04 LTS and
-Fedora 44, each for x86-64 and arm64:
+Fedora 43 and 44, each for x86-64 and arm64:
 
 ```bash
 curl -fsSL https://toots.github.io/tsync/setup.sh | sudo sh

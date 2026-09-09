@@ -74,19 +74,34 @@ jobs:
           server=$!
           trap 'kill $server' EXIT
           sleep 2
-          docker run --rm --network host -v "$PWD/check:/check:ro" debian:13 sh -c '
-            set -eux
-            apt-get update
-            apt-get install -y --no-install-recommends curl ca-certificates
-            sh /check/setup.sh
-            apt-get install -y tsync tsync-tray
-            command -v tsync'
-          docker run --rm --network host -v "$PWD/check:/check:ro" fedora:44 sh -c '
-            set -eux
-            command -v curl || dnf install -y curl
-            sh /check/setup.sh
-            dnf install -y tsync tsync-tray
-            command -v tsync'
+          # The images come from what the build actually produced, so a
+          # distribution added to the packaging workflows is checked here with
+          # no edit, and one whose packages have not been uploaded yet is not
+          # asked for. The names invert the ones linux/repo/build.sh files
+          # under: deb13 is debian:13, ubuntu26.04 is ubuntu:26.04.
+          for d in check/deb/*/; do
+            n=$(basename "$d")
+            case "$n" in
+              deb*) img="debian:${n#deb}" ;;
+              *) img=$(echo "$n" | sed -E 's/([0-9])/:\1/') ;;
+            esac
+            docker run --rm --network host -v "$PWD/check:/check:ro" "$img" sh -c '
+              set -eux
+              apt-get update
+              apt-get install -y --no-install-recommends curl ca-certificates
+              sh /check/setup.sh
+              apt-get install -y tsync tsync-tray
+              command -v tsync'
+          done
+          for d in check/rpm/*/; do
+            docker run --rm --network host -v "$PWD/check:/check:ro" \
+              "fedora:$(basename "$d" | sed 's/^fc//')" sh -c '
+              set -eux
+              command -v curl || dnf install -y curl
+              sh /check/setup.sh
+              dnf install -y tsync tsync-tray
+              command -v tsync'
+          done
 
       - name: Build the site
         run: ./linux/repo/build.sh pkgs site
