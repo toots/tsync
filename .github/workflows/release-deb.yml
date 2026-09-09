@@ -64,6 +64,20 @@ jobs:
         with:
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
+      # linux/build.sh builds a whole opam switch, which is nearly all of this
+      # job. The key covers everything that decides what the switch should hold
+      # -- the opam files, the compiler build.sh names, the pin list. What a
+      # restored switch cannot know, a git pin that moved or a new release in
+      # opam-repository, is what scripts/opam_deps.sh updates and upgrades to
+      # before it installs, so a hit is fast rather than stale. build.sh runs
+      # `opam clean` after: every container job keeps one of these and they
+      # share the repository's cache budget.
+      - name: Cache the opam root
+        uses: actions/cache@v4
+        with:
+          path: ~/.opam
+          key: opam-${{ matrix.image }}-${{ matrix.arch }}-${{ hashFiles('opam/*.opam', 'linux/build.sh', 'scripts/opam_deps.sh') }}
+
       - name: Build
         run: ./linux/build.sh
 

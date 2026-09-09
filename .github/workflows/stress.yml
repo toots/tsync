@@ -51,15 +51,16 @@ jobs:
         with:
           ocaml-compiler: "5.5"
           dune-cache: true
-      - name: Pin packages
-        run: |
-          opam pin -ny .
-          opam pin add -ny fuse3 git+https://github.com/toots/ocamlfuse.git
-          opam pin add -ny git+https://github.com/toots/aws-s3.git#tsync
-          opam pin add -ny git+https://github.com/toots/ocaml-cohttp.git#bigstring-body
-          opam pin add -ny git+https://github.com/janestreet/memtrace.git#master
+      # The dependencies setup-ocaml leaves out of its own cache; see the linux
+      # job of test.yml for why that is its default and why restoring them here
+      # is not the stale-cache trap it looks like.
+      - name: Cache the opam switch
+        uses: actions/cache@v4
+        with:
+          path: _opam
+          key: opam-stress-${{ hashFiles('opam/*.opam', 'scripts/opam_deps.sh', '.github/workflows/stress.yml') }}
       - name: Install OCaml dependencies
-        run: opam install --deps-only -y tsync tsync-libs tsync-tls tsync-fuse
+        run: ./scripts/opam_deps.sh tsync tsync-libs tsync-tls tsync-fuse
       - name: Build
         run: opam exec -- dune build bin/tsync.exe tests/e2e/stress/stress.exe
 

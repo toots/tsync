@@ -15,12 +15,7 @@ configure:
 	./configure.sh
 
 install-deps:
-	opam pin add -ny fuse3 git+https://github.com/toots/ocamlfuse.git
-	opam pin add -ny git+https://github.com/toots/aws-s3.git#tsync
-	opam pin add -ny git+https://github.com/toots/ocaml-cohttp.git#bigstring-body
-	opam pin add -ny git+https://github.com/janestreet/memtrace.git#master
-	cd .. && opam pin -ny .
-	opam install --deps-only tsync tsync-s3 tsync-ssl
+	../scripts/opam_deps.sh tsync tsync-s3 tsync-ssl
 
 install-opam:
 	cd .. && opam pin -ny .

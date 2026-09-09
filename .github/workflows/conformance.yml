@@ -40,16 +40,18 @@ jobs:
         with:
           ocaml-compiler: "5.5"
           dune-cache: true
-      - name: Pin packages
-        run: |
-          opam pin -ny .
-          opam pin add -ny git+https://github.com/toots/aws-s3.git#tsync
-          opam pin add -ny git+https://github.com/toots/ocaml-cohttp.git#bigstring-body
-          opam pin add -ny git+https://github.com/janestreet/memtrace.git#master
+      # The dependencies setup-ocaml leaves out of its own cache; see the linux
+      # job of test.yml for why that is its default and why restoring them here
+      # is not the stale-cache trap it looks like.
+      - name: Cache the opam switch
+        uses: actions/cache@v4
+        with:
+          path: _opam
+          key: opam-conformance-${{ hashFiles('opam/*.opam', 'scripts/opam_deps.sh', '.github/workflows/conformance.yml') }}
       # No fuse: this builds one executable over the backend drivers, and the
       # frontends are no part of what it asks.
       - name: Install OCaml dependencies
-        run: opam install --deps-only -y tsync tsync-libs tsync-tls tsync-s3
+        run: ./scripts/opam_deps.sh tsync tsync-libs tsync-tls tsync-s3
       - name: Backend conformance (real GCS and S3)
         env:
           TSYNC_CI_GCS_BUCKET: ${{ secrets.TSYNC_CI_GCS_BUCKET }}

@@ -1,6 +1,7 @@
 #!/bin/sh
-# Builds bin/tsync.exe and linux/tray/main.exe in a fresh opam switch. Distro-agnostic:
-# the caller installs the system libraries first, since the package names differ.
+# Builds bin/tsync.exe and linux/tray/main.exe in an opam switch, creating it if
+# the CI cache did not carry one in. Distro-agnostic: the caller installs the
+# system libraries first, since the package names differ.
 # opam's depexts cover the rest -- conf-dbus pulls the dbus headers the tray
 # needs, the way fuse3 pulls libfuse3's.
 #
@@ -25,26 +26,16 @@ export OPAMCONFIRMLEVEL=unsafe-yes
 opam switch list --short | grep -qx "$SWITCH" || opam switch create "$SWITCH" "$COMPILER"
 eval "$(opam env --switch="$SWITCH" --set-switch)"
 
-opam pin -ny .
-opam pin add -ny fuse3 git+https://github.com/toots/ocamlfuse.git
-opam pin add -ny git+https://github.com/toots/aws-s3.git#tsync
-opam pin add -ny git+https://github.com/toots/ocaml-cohttp.git#bigstring-body
-opam pin add -ny git+https://github.com/janestreet/memtrace.git#master
-
-# A branch pin keeps its version string, so a restored opam root already
-# holding an older build of these satisfies the dependency and nothing rebuilds.
-# Only reached when the cache carried one in: on a fresh switch they are absent
-# and the install below fetches the current revision.
-for pkg in fuse3 aws-s3 aws-s3-lwt cohttp cohttp-lwt cohttp-lwt-unix memtrace; do
-  if opam list --installed --short | grep -qx "$pkg"; then
-    opam reinstall -y "$pkg"
-  fi
-done
-
 # tsync-tls and tsync-ssl are the two TLS backends. tsync alone would pull the
 # first, and a released build ships both: OpenSSL is preferred at runtime and
 # native is what the endpoints OpenSSL trips over fall back to.
-opam install --deps-only tsync tsync-tls tsync-ssl tsync-s3 tsync-fuse tsync-tray
+"$(dirname "$0")/../scripts/opam_deps.sh" \
+  tsync tsync-tls tsync-ssl tsync-s3 tsync-fuse tsync-tray
+
+# Sources, build trees and logs opam keeps for its own convenience, which are
+# most of what a switch weighs and none of what the next run needs. The CI jobs
+# cache this root, and it has to fit alongside every other job's.
+opam clean -y
 
 opam exec -- dune build --profile release bin/tsync.exe linux/tray/main.exe \
   linux/dolphin/ml/libtsync_mounts.so linux/dolphin/ml/libtsync_mounts_fake.so

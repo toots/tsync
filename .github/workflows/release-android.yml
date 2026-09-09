@@ -39,11 +39,24 @@ jobs:
         with:
           ocaml-compiler: "5.4.1"
           dune-cache: true
+      # The cross packages below are the whole of this job's build time, and
+      # setup-ocaml caches only the compiler. Keyed on this file because the
+      # package list lives here rather than in an opam file. Staleness is
+      # handled the same way scripts/opam_deps.sh handles it: the update and
+      # upgrade below re-fetch both repositories -- the cross one is a branch
+      # pin, so nothing else would look at a new revision -- and rebuild
+      # whatever moved.
+      - name: Cache the opam switch
+        uses: actions/cache@v4
+        with:
+          path: _opam
+          key: opam-android-${{ hashFiles('.github/workflows/release-android.yml') }}
       - name: Register the cross repository
         run: |
           opam repository remove android --all >/dev/null 2>&1 || true
           opam repository add android git+https://github.com/toots/opam-cross-android.git#tsync
-          opam update android
+          opam update
+          opam upgrade -y
       - name: Install OCaml dependencies
         run: |
           opam install -y ppx_blob
@@ -68,6 +81,7 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
+          cache: gradle
       # The same key every time, so a phone takes each build as an update of the
       # one before and keeps its settings. Provisioned by
       # scripts/setup_android_signing.sh.
