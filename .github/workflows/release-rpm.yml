@@ -104,9 +104,14 @@ jobs:
           # container, where /run/systemd/system does not exist. Unqualified
           # %post in the spec means the base package and nothing else, which is
           # what the tray assertion holds to.
-          for s in postinstall preuninstall postuninstall; do
+          for s in postinstall preuninstall; do
             rpm -qp --scripts dist/tsync_*.rpm | grep -q "^$s scriptlet"
           done
+          # And that both of them name the instances rather than the template
+          # alone: the systemd macros act on tsync@.service, which no running
+          # tsync@<user> answers to, so a spec that only calls them restarts
+          # nothing and stops nothing.
+          test "$(rpm -qp --scripts dist/tsync_*.rpm | grep -c "'tsync@\*\.service'")" = 2
           ! rpm -qp --scripts dist/tsync-tray_*.rpm | grep -q 'scriptlet'
           rpm -qpR dist/tsync-tray_*.rpm | grep -q libdbus-1
           rpm -qpR dist/tsync-dolphin_*.rpm | grep -q libKF6

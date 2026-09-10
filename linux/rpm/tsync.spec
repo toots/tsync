@@ -90,13 +90,24 @@ strip %{buildroot}%{_libdir}/tsync/libtsync_mounts.so
 %files dolphin
 %{_libdir}/qt6/plugins/kf6/kfileitemaction/tsyncdolphin.so
 
-# The unit is a template with no default instance, so these only refresh
-# already-enabled tsync@<user> instances across an upgrade.
+# The unit is a template with no default instance, so the systemd macros carry
+# it only as far as the unit file: preset and disable take a template's name,
+# but a running tsync@<user> is a unit that name never reaches -- systemd
+# answers that tsync@.service is not a unit at all. So the instances are
+# enumerated here, as the deb's postinst and prerm do.
 %post
 %systemd_post tsync@.service
+if [ $1 -ge 2 ] && [ -d /run/systemd/system ]; then
+    units=$(systemctl list-units --full --plain --no-legend --state=active \
+        'tsync@*.service' 2>/dev/null | cut -d' ' -f1)
+    [ -z "$units" ] || systemctl try-restart $units >/dev/null 2>&1 || :
+fi
 
+# Stopped while the binary is still on disk, so `tsync stop` can unmount.
 %preun
+if [ $1 -eq 0 ] && [ -d /run/systemd/system ]; then
+    units=$(systemctl list-units --full --plain --no-legend --state=active \
+        'tsync@*.service' 2>/dev/null | cut -d' ' -f1)
+    [ -z "$units" ] || systemctl stop $units >/dev/null 2>&1 || :
+fi
 %systemd_preun tsync@.service
-
-%postun
-%systemd_postun_with_restart tsync@.service

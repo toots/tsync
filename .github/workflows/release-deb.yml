@@ -109,6 +109,11 @@ jobs:
           for s in postinst prerm postrm; do
             dpkg-deb --ctrl-tarfile dist/tsync_*.deb | tar t | grep -q "\./$s"
           done
+          # And that the restart and the stop name the instances: the unit is a
+          # template, and a template's own name is not a unit systemd will
+          # restart or stop, so a script naming only that one does neither.
+          test "$(dpkg-deb --ctrl-tarfile dist/tsync_*.deb \
+            | tar xO ./postinst ./prerm | grep -c "'tsync@\*\.service'")" = 2
           ! dpkg-deb --ctrl-tarfile dist/tsync-tray_*.deb | tar t | grep -q '\./postinst'
           dpkg-deb -f dist/tsync-tray_*.deb Depends | grep -q libdbus-1
           ! dpkg-deb -f dist/tsync_*.deb Depends | grep -q libdbus-1
