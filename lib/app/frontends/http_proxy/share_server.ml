@@ -8,11 +8,16 @@
 
 open Lwt.Syntax
 
+(* What a share points at, within the domain that published it. *)
+type target =
+  | File of Stored_key.t  (** the file's backend manifest key *)
+  | Dir of string
+      (** the folder's id: its namespace holds the children, listed lazily *)
+
 type share = {
-  typ : string;  (** "file" | "dir" *)
-  filename : string;
-  key : Stored_key.t;  (** file shares: the file's backend manifest key *)
-  dir_prefix : Stored_key.t;  (** dir shares: the folder's namespace prefix *)
+  domain : string;  (** the domain the share points into *)
+  filename : string;  (** the download's name; a folder downloads as a zip *)
+  target : target;
 }
 
 type child = {
@@ -166,13 +171,32 @@ module Make (C : Conf_lwt.S) = struct
               | _ -> 0.
           in
           if Unix.time () > expires then fail `Gone "link expired";
-          Lwt.return
-            {
-              typ = str "type" j;
-              filename = str "filename" j;
-              key = Stored_key.listed (str "key" j);
-              dir_prefix = Stored_key.listed (str "dirPrefix" j);
-            }
+          let domain = str "domain" j in
+          if domain = "" then fail `Bad_gateway "share manifest names no domain";
+          let target =
+            match str "type" j with
+              | "file" -> File (Stored_key.listed (str "key" j))
+              | "dir" -> Dir (str "folderId" j)
+              | _ -> fail `Bad_gateway "unknown share type"
+          in
+          Lwt.return { domain; filename = str "filename" j; target }
+
+  let mine (share : share) = share.domain = C.domain_name
+
+  (* Whether the token's manifest names this domain. Every share-enabled domain
+     files its manifests in the one shares prefix, and a token names no domain,
+     so a listener fronting several asks each; anything short of a manifest
+     found here and naming this domain is a no, the refusal itself being left to
+     [handle]. *)
+  let serves ~token =
+    Lwt.catch
+      (fun () ->
+        let+ share = load token in
+        mine share)
+      (function Error _ -> Lwt.return_false | exn -> Lwt.fail exn)
+
+  (* The shared folder's namespace, in this domain. *)
+  let shared_folder folder_id = Tree.namespace_prefix folder_id
 
   (* A subdirectory's [key] is its own namespace, so [resolve] descends by
      handing it straight back. *)
@@ -431,36 +455,36 @@ module Make (C : Conf_lwt.S) = struct
                  (byte_stream ~manifest key ~offset:0L ~len:size))
             ()
 
-  (* The file share's own manifest: its real name and size. *)
-  let file_target (share : share) =
-    let* m = manifest_of share.key in
+  (* The shared file's own manifest: its real name and size. *)
+  let shared_file key =
+    let* m = manifest_of key in
     match m with
       | Some m when Manifest.symlink m = None -> Lwt.return m
       | Some _ -> fail `Bad_request "cannot serve a symlink directly"
       | None -> fail `Not_found "file not found"
 
-  let download (share : share) ~range =
-    if share.typ = "file" then
-      let* manifest = file_target share in
-      serve_bytes ~manifest ~key:share.key ~size:(Manifest.size manifest)
-        ~name:(Manifest.recorded_name manifest)
-        ~inline:false ~range
-    else (
-      let root = Filename.remove_extension share.filename in
-      let* members = walk share.dir_prefix root in
-      (* Length is unknown until the archive is built, so this streams chunked. *)
-      Cohttp_lwt_unix.Server.respond ~status:`OK
-        ~headers:
-          (Cohttp.Header.of_list
-             [
-               ("content-type", "application/zip");
-               ("content-disposition", disposition ~inline:false share.filename);
-             ])
-        ~body:(Cohttp_lwt.Body.of_stream (zip_stream members))
-        ())
+  let download_file key ~range =
+    let* manifest = shared_file key in
+    serve_bytes ~manifest ~key ~size:(Manifest.size manifest)
+      ~name:(Manifest.recorded_name manifest)
+      ~inline:false ~range
 
-  let list_response (share : share) path =
-    let* target = resolve share.dir_prefix (safe_parts path) in
+  let download_folder folder_id ~filename =
+    let root = Filename.remove_extension filename in
+    let* members = walk (shared_folder folder_id) root in
+    (* Length is unknown until the archive is built, so this streams chunked. *)
+    Cohttp_lwt_unix.Server.respond ~status:`OK
+      ~headers:
+        (Cohttp.Header.of_list
+           [
+             ("content-type", "application/zip");
+             ("content-disposition", disposition ~inline:false filename);
+           ])
+      ~body:(Cohttp_lwt.Body.of_stream (zip_stream members))
+      ()
+
+  let list_response folder_id path =
+    let* target = resolve (shared_folder folder_id) (safe_parts path) in
     match target with
       | Some (`Dir ns) ->
           let* cs = children ns in
@@ -497,10 +521,10 @@ module Make (C : Conf_lwt.S) = struct
                ])
       | _ -> fail `Not_found "not found"
 
-  let serve_child (share : share) ~token ~path ~as_download ~want_json ~range =
+  let serve_child folder_id ~token ~path ~as_download ~want_json ~range =
     let parts = safe_parts path in
     if parts = [] then fail `Bad_request "not a file";
-    let* target = resolve share.dir_prefix parts in
+    let* target = resolve (shared_folder folder_id) parts in
     match target with
       | Some (`File c) -> (
           if want_json then
@@ -579,13 +603,18 @@ module Make (C : Conf_lwt.S) = struct
     Lwt.catch
       (fun () ->
         let* share = load token in
-        let is_dir = share.typ = "dir" in
-        match sub with
-          | "" when is_dir -> browse share token
-          | "" | "download" -> download share ~range
-          | "list" when is_dir -> list_response share (query "path")
-          | "f" when is_dir ->
-              serve_child share ~token ~path:(query "path")
+        (* Another domain's share is served by that domain's server; answered
+           here, its folder ids and keys would be looked up in the wrong
+           namespace. *)
+        if not (mine share) then fail `Not_found "not found";
+        match (share.target, sub) with
+          | File key, ("" | "download") -> download_file key ~range
+          | Dir _, "" -> browse share token
+          | Dir folder_id, "download" ->
+              download_folder folder_id ~filename:share.filename
+          | Dir folder_id, "list" -> list_response folder_id (query "path")
+          | Dir folder_id, "f" ->
+              serve_child folder_id ~token ~path:(query "path")
                 ~as_download:(Field_spec.bool ~default:false (query "dl"))
                 ~want_json:(Field_spec.bool ~default:false (query "json"))
                 ~range

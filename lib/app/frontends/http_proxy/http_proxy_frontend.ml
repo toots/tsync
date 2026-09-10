@@ -127,7 +127,7 @@ type route = {
   store : (module Backend_lwt.Store);
       (** The domain's stores as one. It resolves the read order and carries the
           deferred targets internally, so this side never sees a role. *)
-  serve_share : share_handler option;
+  serve_share : share_server option;
       (** [None] when this domain has no shares. *)
   peers : string list;
       (** Where this domain's other frontends answer, from the launcher. Empty
@@ -151,6 +151,12 @@ type route = {
 }
 
 (* Public share serving, when enabled for the domain. *)
+and share_server = {
+  serves : token:string -> bool Lwt.t;
+      (** Whether the token's manifest names this domain. *)
+  handle : share_handler;
+}
+
 and share_handler =
   token:string ->
   sub:string ->
@@ -188,7 +194,12 @@ let make_route bindings ~peers (b : Frontend.binding) =
     if Field_spec.bool ~default:false (inherited bindings b "shares") then
       let module Sh = Share_server.Make (C) in
       Some
-        (fun ~token ~sub ~query ~range -> Sh.handle ~token ~sub ~query ~range)
+        {
+          serves = (fun ~token -> Sh.serves ~token);
+          handle =
+            (fun ~token ~sub ~query ~range ->
+              Sh.handle ~token ~sub ~query ~range);
+        }
     else None
   in
   (* Serve-side write ban, independent of the domain's own [read_only]: it bars
@@ -808,19 +819,16 @@ let exec route op ~body =
              (`Assoc [("verified", `Bool caps.Backend.verified)]))
     | Bad | Unknown -> respond ~status:`Bad_request "bad request"
 
-(* Which route serves [/s/]. One predicate, used by both sides: a share manifest
+(* The routes serving [/s/]. One predicate, used by both sides: a share manifest
    written to one store and read from another is a link that 404s, and picking
    the writer by "whose secret signed it" and the reader by "who serves shares"
-   is two rules that agree only by luck.
-
-   ponytail: the first share-enabled domain answers; probe each here if one
-   listener ever fronts several share stores. *)
-let share_route routes = List.find_opt (fun r -> r.serve_share <> None) routes
+   is two rules that agree only by luck. *)
+let share_routes routes = List.filter (fun r -> r.serve_share <> None) routes
 
 (* [shares_prefix] is domain-independent, so a share key has no domain to match
    on.
 
-   When this listener serves [/s/], the manifest goes to the store that will be
+   When this listener serves [/s/], the manifest goes to a store that will be
    read for it, and a caller holding some other route's secret is refused rather
    than writing a link that would 404. When it does not, nothing here reads the
    manifest back -- the store's own share URL does -- so the route whose secret
@@ -837,9 +845,9 @@ let route_for routes ~key ~authed =
       when List.exists
              (fun r -> String.starts_with ~prefix:r.shares_prefix key)
              routes -> (
-        match share_route routes with
-          | Some r -> if authed r then Some r else None
-          | None -> List.find_opt authed routes)
+        match share_routes routes with
+          | [] -> List.find_opt authed routes
+          | sharing -> List.find_opt authed sharing)
     | None -> None
 
 (* Share links go to recipients holding no secret, so these routes carry no HMAC:
@@ -847,20 +855,31 @@ let route_for routes ~key ~authed =
    shares prefix. *)
 let share_request routes uri =
   let path = Uri.path uri in
-  if not (String.starts_with ~prefix:"/s/" path) then None
+  if (not (String.starts_with ~prefix:"/s/" path)) || share_routes routes = []
+  then None
   else (
-    match share_route routes with
-      | None -> None
-      | Some r ->
-          let rest = String.sub path 3 (String.length path - 3) in
-          let token, sub =
-            match String.index_opt rest '/' with
-              | None -> (rest, "")
-              | Some i ->
-                  ( String.sub rest 0 i,
-                    String.sub rest (i + 1) (String.length rest - i - 1) )
-          in
-          Some (Option.get r.serve_share, token, sub))
+    let rest = String.sub path 3 (String.length path - 3) in
+    match String.index_opt rest '/' with
+      | None -> Some (rest, "")
+      | Some i ->
+          Some
+            ( String.sub rest 0 i,
+              String.sub rest (i + 1) (String.length rest - i - 1) ))
+
+(* A token names no domain; its manifest does. Every share-enabled domain files
+   its manifests in the one shares prefix, so each is asked in turn whether the
+   manifest is its own. When none claims it, the first answers: its refusal (a
+   bad token, no manifest, an expired one) is the right one. The probe costs a
+   listener with one share-enabled domain nothing. *)
+let share_server_for routes ~token =
+  let sharing = List.filter_map (fun r -> r.serve_share) routes in
+  let rec claim = function
+    | [] -> Lwt.return (List.hd sharing)
+    | (s : share_server) :: rest ->
+        let* mine = s.serves ~token in
+        if mine then Lwt.return s else claim rest
+  in
+  match sharing with [only] -> Lwt.return only | _ -> claim sharing
 
 (* One listener serves every domain configured on it, so its cpu, bytes and
    request counts belong to no single domain and go in one labelled block at the
@@ -1058,7 +1077,7 @@ let callback ~port ~tls routes _conn req body =
   let meth = Cohttp.Request.meth req in
   let uri = Cohttp.Request.uri req in
   match share_request routes uri with
-    | Some (handle, token, sub) ->
+    | Some (token, sub) ->
         (* ponytail: matched before the gate, so how many share responses are
            open at once is the public's to choose. What each one holds is bounded
            — {!Share_server.read_slots} caps the blocks in flight — but the
@@ -1066,7 +1085,8 @@ let callback ~port ~tls routes _conn req body =
            exposed to a load that reaches it; the memo at {!Share_server} and a
            folder zip's member list are what run out first. *)
         bump "share";
-        handle ~token ~sub ~query:(Uri.get_query_param uri)
+        let* server = share_server_for routes ~token in
+        server.handle ~token ~sub ~query:(Uri.get_query_param uri)
           ~range:(Cohttp.Header.get (Cohttp.Request.headers req) "range")
     | None -> (
         let* body = Cohttp_lwt.Body.to_bigstring body in

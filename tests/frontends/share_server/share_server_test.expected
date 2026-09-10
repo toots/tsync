@@ -83,6 +83,20 @@ content-type: text/plain
 content-length: 13
 body: "link expired\n"
 
+=== another domain's token
+status: 404
+content-type: text/plain
+content-length: 10
+body: "not found\n"
+
+=== serves
+aa: true
+bb: true
+cc: false
+dd: false
+deadbeef: false
+nothex!: false
+
 === path traversal rejected
 status: 400
 content-type: text/plain

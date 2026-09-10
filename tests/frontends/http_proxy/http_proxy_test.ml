@@ -440,6 +440,15 @@ let () =
   (* The same shape on the write side, which predates the batch. *)
   assert (not (scoped (bulk "/delete-multi" [mine; theirs])));
 
+  (* A share server that claims the tokens naming its domain and serves nothing:
+     what is under test is which server a token reaches. *)
+  let sharer name =
+    {
+      Http_proxy_frontend.serves =
+        (fun ~token -> Lwt.return (String.starts_with ~prefix:name token));
+      handle = (fun ~token:_ ~sub:_ ~query:_ ~range:_ -> assert false);
+    }
+  in
   (* Once a route does serve /s/, the manifest has to land in the store that will
      be read for it: written to one store and served from another, the link
      404s. So the share-enabled route answers whoever is asking... *)
@@ -448,8 +457,7 @@ let () =
       { (route "one") with Http_proxy_frontend.serve_share = None };
       {
         (route "two") with
-        Http_proxy_frontend.serve_share =
-          Some (fun ~token:_ ~sub:_ ~query:_ ~range:_ -> assert false);
+        Http_proxy_frontend.serve_share = Some (sharer "two");
       };
     ]
   in
@@ -463,6 +471,46 @@ let () =
   (* ...and a caller holding only the other domain's secret is refused, rather
      than publishing a link into a store /s/ will never look in. *)
   assert (pick_sharing "tsync/shares/deadbeef" "one" = None);
+
+  (* Two share-enabled domains on one listener file their manifests in the same
+     shares prefix, so a token names no domain and the manifest has to: each
+     domain publishes under its own secret, and a request is served by the domain
+     whose manifest it is, wherever that domain sits in the list. A token no
+     domain claims reaches the first, whose refusal is the one to give. *)
+  let both =
+    [
+      {
+        (route "one") with
+        Http_proxy_frontend.serve_share = Some (sharer "one");
+      };
+      {
+        (route "two") with
+        Http_proxy_frontend.serve_share = Some (sharer "two");
+      };
+    ]
+  in
+  let pick_both key signer =
+    Option.map
+      (fun r -> r.Http_proxy_frontend.secret)
+      (Http_proxy_frontend.route_for both ~key ~authed:(fun r ->
+           r.Http_proxy_frontend.secret = signer))
+  in
+  assert (pick_both "tsync/shares/deadbeef" "one" = Some "one");
+  assert (pick_both "tsync/shares/deadbeef" "two" = Some "two");
+  let served_by token =
+    let server =
+      Lwt_main.run (Http_proxy_frontend.share_server_for both ~token)
+    in
+    List.find_map
+      (fun r ->
+        match r.Http_proxy_frontend.serve_share with
+          | Some s when s == server -> Some r.Http_proxy_frontend.secret
+          | _ -> None)
+      both
+  in
+  assert (served_by "one1" = Some "one");
+  assert (served_by "two2" = Some "two");
+  assert (served_by "nobody" = Some "one");
 
   (* Specs are what [tsync config --edit] prompts from, so a field missing here is
      silently unconfigurable. [shares] is on the frontend only: the client asks

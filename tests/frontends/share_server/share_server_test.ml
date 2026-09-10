@@ -100,45 +100,51 @@ let build_fixture () =
       ()
   in
   (* Share manifests, written the way [tsync share] writes them. *)
-  let share token json =
+  let share ?(domain = C.domain_name) token fields =
     B.put
       ~key:(Stored_key.in_space ~prefix:C.shares_prefix token)
-      ~data:(Bigstring.of_string (Yojson.Safe.to_string json))
+      ~data:
+        (Bigstring.of_string
+           (Yojson.Safe.to_string
+              (`Assoc ([("v", `Int 1); ("domain", `String domain)] @ fields))))
       ()
   in
   let* () =
     share "aa"
-      (`Assoc
-         [
-           ("v", `Int 1);
-           ("expires", `Int expires);
-           ("type", `String "file");
-           ("key", `String (Stored_key.to_string hello_key));
-           ("chunkPrefix", `String C.chunk_prefix);
-           ("filename", `String "hello.txt");
-         ])
+      [
+        ("expires", `Int expires);
+        ("type", `String "file");
+        ("key", `String (Stored_key.to_string hello_key));
+        ("filename", `String "hello.txt");
+      ]
   in
   let* () =
     share "bb"
-      (`Assoc
-         [
-           ("v", `Int 1);
-           ("expires", `Int expires);
-           ("type", `String "dir");
-           ("chunkPrefix", `String C.chunk_prefix);
-           ("dirPrefix", `String (C.domain_prefix ^ Stored_key.root_id ^ "/"));
-           ("filename", `String "testdom.zip");
-         ])
+      [
+        ("expires", `Int expires);
+        ("type", `String "dir");
+        ("folderId", `String Stored_key.root_id);
+        ("filename", `String "testdom.zip");
+      ]
   in
-  share "cc"
-    (`Assoc
-       [
-         ("v", `Int 1);
-         ("expires", `Int 1);
-         ("type", `String "file");
-         ("key", `String (Stored_key.to_string hello_key));
-         ("filename", `String "hello.txt");
-       ])
+  let* () =
+    share "cc"
+      [
+        ("expires", `Int 1);
+        ("type", `String "file");
+        ("key", `String (Stored_key.to_string hello_key));
+        ("filename", `String "hello.txt");
+      ]
+  in
+  (* Another domain's share of the same folder id, filed in the same shares
+     prefix: it is that domain's to serve. *)
+  share ~domain:"otherdom" "dd"
+    [
+      ("expires", `Int expires);
+      ("type", `String "dir");
+      ("folderId", `String Stored_key.root_id);
+      ("filename", `String "otherdom.zip");
+    ]
 
 let show label ?(body = true) ?range ?(query = []) ~token ~sub () =
   Printf.printf "\n=== %s\n" label;
@@ -210,6 +216,15 @@ let () =
      let* _ = show "bad token" ~token:"nothex!" ~sub:"" () in
      let* _ = show "unknown token" ~token:"deadbeef" ~sub:"" () in
      let* _ = show "expired token" ~token:"cc" ~sub:"" () in
+     let* _ = show "another domain's token" ~token:"dd" ~sub:"list" () in
+     Printf.printf "\n=== serves\n";
+     let* () =
+       Lwt_list.iter_s
+         (fun token ->
+           let+ mine = Sh.serves ~token in
+           Printf.printf "%s: %b\n" token mine)
+         ["aa"; "bb"; "cc"; "dd"; "deadbeef"; "nothex!"]
+     in
      let* _ =
        show "path traversal rejected" ~token:"bb" ~sub:"f"
          ~query:[("path", "../../etc/passwd")]

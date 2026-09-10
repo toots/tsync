@@ -82,6 +82,8 @@ let () =
        B.get ~key:(Stored_key.in_space ~prefix:shares_prefix "aa") ()
      in
      let m = Yojson.Basic.from_string (Bigstring.to_string body) in
+     assert (member "v" m = `Int 1);
+     assert (member "domain" m = `String C.domain_name);
      assert (member "type" m = `String "file");
      assert (member "key" m = `String (Stored_key.to_string file_key));
      assert (member "filename" m = `String "foo");
@@ -101,11 +103,10 @@ let () =
        B.get ~key:(Stored_key.in_space ~prefix:shares_prefix "bb") ()
      in
      let m = Yojson.Basic.from_string (Bigstring.to_string body) in
+     assert (member "domain" m = `String C.domain_name);
      assert (member "type" m = `String "dir");
      assert (member "filename" m = `String "testdom.zip");
-     assert (
-       member "dirPrefix" m
-       = `String (C.domain_prefix ^ Stored_key.root_id ^ "/"));
+     assert (member "folderId" m = `String Stored_key.root_id);
      Lwt.return_unit);
 
   let module NoShare : Backend_lwt.Store = struct
