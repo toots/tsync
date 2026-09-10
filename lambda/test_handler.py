@@ -24,14 +24,16 @@ from moto import mock_aws
 import manifest
 
 BUCKET = "tsync-test"
-PREFIX = "p/.shares/"  # == SHARES_PREFIX; share manifest key is PREFIX + token
-CHUNK_PREFIX = "p/.chunks/"
-DOMAIN_PREFIX = "p/d/"  # manifests base; a folder's namespace is DOMAIN_PREFIX + <id> + "/"
+PREFIX = "p/shares/"  # == SHARES_PREFIX; share manifest key is PREFIX + token
+# A share names its domain; the handler finds the domain's tree beside the shares.
+DOMAIN = "d"
+CHUNK_PREFIX = "p/d/chunks/"
+DOMAIN_PREFIX = "p/d/manifests/"  # a folder's namespace is DOMAIN_PREFIX + <id> + "/"
 
 
 def load_handler(max_bytes=10 * 1024**3):
     os.environ.update(
-        BUCKET=BUCKET, SHARES_PREFIX="p/.shares/", PRESIGN_TTL="600",
+        BUCKET=BUCKET, SHARES_PREFIX=PREFIX, PRESIGN_TTL="600",
         MAX_BYTES=str(max_bytes),
     )
     import handler
@@ -117,17 +119,17 @@ def share_manifest(s3, sid, doc):
     return sid
 
 
-def file_share(s3, sid, key, filename):
+def file_share(s3, sid, key, filename, expires=9_999_999_999):
     return share_manifest(s3, sid, {
-        "v": 1, "type": "file", "key": key, "chunkPrefix": CHUNK_PREFIX,
-        "filename": filename, "expires": 9_999_999_999,
+        "v": 1, "domain": DOMAIN, "type": "file", "key": key,
+        "filename": filename, "expires": expires,
     })
 
 
-def dir_share(s3, sid, dir_id, filename="folder.zip"):
+def dir_share(s3, sid, dir_id, filename="folder.zip", expires=9_999_999_999):
     return share_manifest(s3, sid, {
-        "v": 1, "type": "dir", "chunkPrefix": CHUNK_PREFIX,
-        "dirPrefix": ns(dir_id), "filename": filename, "expires": 9_999_999_999,
+        "v": 1, "domain": DOMAIN, "type": "dir", "folderId": dir_id,
+        "filename": filename, "expires": expires,
     })
 
 
@@ -377,27 +379,22 @@ def test_utf8_disposition_is_ascii(s3):
 
 def test_expired(s3):
     h = load_handler()
-    tok = file_share(s3, "a4", DOMAIN_PREFIX + "r/x", "x")
-    s3.put_object(  # overwrite with an expired manifest
-        Bucket=BUCKET, Key=PREFIX + "a4",
-        Body=json.dumps({
-            "v": 1, "type": "file", "key": DOMAIN_PREFIX + "r/x",
-            "chunkPrefix": CHUNK_PREFIX, "filename": "x", "expires": 1,
-        }).encode(),
-    )
+    tok = file_share(s3, "a4", DOMAIN_PREFIX + "r/x", "x", expires=1)
     assert h.handler(event(tok), None)["statusCode"] == 410
+
+
+def test_unsupported_manifest_version(s3):
+    h = load_handler()
+    tok = share_manifest(s3, "a7", {
+        "v": 2, "domain": DOMAIN, "type": "file", "key": DOMAIN_PREFIX + "r/x",
+        "filename": "x", "expires": 9_999_999_999,
+    })
+    assert h.handler(event(tok), None)["statusCode"] == 502
 
 
 def test_expired_on_subroute(s3):
     h = load_handler()
-    tok = dir_share(s3, "a9", "gone", "x.zip")
-    s3.put_object(  # overwrite with an expired manifest
-        Bucket=BUCKET, Key=PREFIX + "a9",
-        Body=json.dumps({
-            "v": 1, "type": "dir", "chunkPrefix": CHUNK_PREFIX,
-            "dirPrefix": ns("gone"), "filename": "x.zip", "expires": 1,
-        }).encode(),
-    )
+    tok = dir_share(s3, "a9", "gone", "x.zip", expires=1)
     assert h.handler(event(tok, "list", {"path": ""}), None)["statusCode"] == 410
 
 

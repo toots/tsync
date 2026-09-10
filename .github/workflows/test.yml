@@ -128,21 +128,32 @@ jobs:
         with:
           ocaml-compiler: "5.5"
           dune-cache: true
-      # The dependencies setup-ocaml leaves out of its own cache; see the linux
-      # job of test.yml for why that is its default and why restoring them here
-      # is not the stale-cache trap it looks like.
-      - name: Cache the opam switch
-        uses: actions/cache@v4
-        with:
-          path: _opam
-          key: opam-test-macos-${{ hashFiles('opam/*.opam', 'scripts/opam_deps.sh', '.github/workflows/test.yml') }}
       - name: Install dependencies
+        id: brew
         run: |
-          brew install xcodegen libev coreutils pkg-config openssl@3
+          brew install xcodegen libev coreutils pkg-config openssl@3 pcre2 gmp
           echo "CPATH=$(brew --prefix libev)/include:$CPATH" >> $GITHUB_ENV
           echo "LIBRARY_PATH=$(brew --prefix libev)/lib:$LIBRARY_PATH" >> $GITHUB_ENV
           # openssl@3 is keg-only, so conf-libssl only finds it via pkg-config.
           echo "PKG_CONFIG_PATH=$(brew --prefix openssl@3)/lib/pkgconfig:$PKG_CONFIG_PATH" >> $GITHUB_ENV
+          # The libraries the switch links through pkg-config, which resolves
+          # to the versioned Cellar directory. See the cache key below.
+          echo "linked=$(brew list --versions openssl@3 pcre2 gmp | tr ' ' '-' | paste -sd_ -)" >> $GITHUB_OUTPUT
+      # The dependencies setup-ocaml leaves out of its own cache; see the linux
+      # job of test.yml for why that is its default and why restoring them here
+      # is not the stale-cache trap it looks like.
+      #
+      # Except for one thing opam_deps.sh cannot see: ssl, pcre2 and zarith
+      # bake the Cellar path of the brew formula they were built against into
+      # their link flags, and a runner image that bumps that formula leaves a
+      # restored switch pointing at a directory that is gone -- `ld: library
+      # 'ssl' not found`, with no opam package having changed. So those
+      # versions are part of the key.
+      - name: Cache the opam switch
+        uses: actions/cache@v4
+        with:
+          path: _opam
+          key: opam-test-macos-${{ hashFiles('opam/*.opam', 'scripts/opam_deps.sh', '.github/workflows/test.yml') }}-${{ steps.brew.outputs.linked }}
       - name: Install OCaml dependencies
         # Both TLS backends: tsync alone would pull tsync-tls, and a released
         # build should also carry tsync-ssl, the faster one.

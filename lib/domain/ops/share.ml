@@ -56,7 +56,15 @@ struct
           (* Read through the domain's own read path; the store serving the link
              is chosen for where the link points, not for holding the newest
              copy. *)
-          let base_json = [("v", `Int 1); ("expires", `Int expires)] in
+          (* The domain is what a reader needs to find everything else: the
+             chunks and the folder namespaces follow from its name. *)
+          let base_json =
+            [
+              ("v", `Int 1);
+              ("expires", `Int expires);
+              ("domain", `String C.domain_name);
+            ]
+          in
           let* manifest =
             let* file_key = L.manifest_key (Lk.file rel) in
             (* A file manifest and a folder marker occupy the same key within a
@@ -83,12 +91,11 @@ struct
                        @ [
                            ("type", `String "file");
                            ("key", `String (Stored_key.to_string file_key));
-                           ("chunkPrefix", `String C.chunk_prefix);
                            ("filename", `String (Filename.basename rel));
                          ]))
               | _ ->
-                  (* Directory: store the folder's namespace prefix by id and let
-                     the Lambda list it lazily, keeping creation O(1).
+                  (* Directory: store the folder's id and let the reader list its
+                     namespace lazily, keeping creation O(1).
 
                      Never mint an id here: no marker means the folder does not
                      exist remotely, so a fresh id names a namespace nothing wrote
@@ -101,17 +108,18 @@ struct
                           Folder_ids.lookup_id ~cache_root:C.cache_root
                             ~domain_name:C.domain_name (Lk.dir rel)
                   in
-                  let* dir_prefix =
+                  let* dir_id =
                     match dir_id with
-                      | Some id ->
-                          Io.return
-                            (Stored_key.to_string
-                               (Stored_key.namespace ~prefix:C.domain_prefix
-                                  ~folder_id:id))
+                      | Some id -> Io.return id
                       | None ->
                           Io.fail
                             (Share_not_found
                                (Printf.sprintf "not found: %s" rel))
+                  in
+                  let dir_prefix =
+                    Stored_key.to_string
+                      (Stored_key.namespace ~prefix:C.domain_prefix
+                         ~folder_id:dir_id)
                   in
                   (* Two, because one of them may be the folder's index, which
                      is a cache of its children rather than one of them. *)
@@ -136,8 +144,7 @@ struct
                          (base_json
                          @ [
                              ("type", `String "dir");
-                             ("chunkPrefix", `String C.chunk_prefix);
-                             ("dirPrefix", `String dir_prefix);
+                             ("folderId", `String dir_id);
                              ("filename", `String (base ^ ".zip"));
                            ])))
           in

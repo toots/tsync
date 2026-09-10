@@ -11,8 +11,9 @@ Serves shared files/folders from the tsync S3 chunk store. A request path is
                           (``?json=1`` returns the URL as JSON for inline media
                           preview, ``?dl=1`` forces an attachment download)
 
-A dir share stores only the directory's key prefix; the browser lists one folder
-at a time via ``/list``, so ``tsync share`` and page load stay O(1) regardless of
+A share manifest names its domain, from which the chunk and manifest prefixes
+follow. A dir share stores only the folder's id; the browser lists one folder at
+a time via ``/list``, so ``tsync share`` and page load stay O(1) regardless of
 how many files the directory holds. Assembled artifacts are cached under
 ``SHARES_PREFIX + "cache/"`` and served via a short-lived presigned GET (responses
 are size-capped, so we never stream bodies ourselves). Everything in that subtree
@@ -38,6 +39,9 @@ from share_common import ShareError, cache_prefix
 SHARES_PREFIX = os.environ.get("SHARES_PREFIX", "tsync/shares/")  # guard: keys must start with this
 # A token is hex, so nothing published can ever land in here.
 CACHE_PREFIX = cache_prefix(SHARES_PREFIX)
+# Domains sit beside the shares: <root>/<domain>/{manifests,chunks}/.
+_root, _sep, _ = SHARES_PREFIX.rstrip("/").rpartition("/")
+ROOT_PREFIX = _root + "/" if _sep else ""
 MAX_BYTES = int(os.environ.get("MAX_BYTES", str(10 * 1024**3)))
 
 # Pick the storage backend by env; import lazily so one deployment zip runs on
@@ -52,6 +56,19 @@ store = Store()
 
 def too_large():
     return ShareError(413, "too large to assemble (limit %d bytes)" % MAX_BYTES)
+
+
+def domain_root(share):
+    return ROOT_PREFIX + share["domain"] + "/"
+
+
+def chunk_prefix(share):
+    return domain_root(share) + "chunks/"
+
+
+def shared_folder(share):
+    """The shared folder's namespace prefix."""
+    return domain_root(share) + "manifests/" + share["folderId"] + "/"
 
 
 # ── S3 helpers ──────────────────────────────────────────────────────────────
@@ -85,8 +102,8 @@ def chunk_key(chunk_prefix, key):
 # live flat under manifests/<id>/<hash>, each object being either a file manifest
 # (body has "name", "chunks", "size") or a folder marker (body {dir,name,id}).
 # Names live in the bodies, so the Lambda never hashes — it lists a namespace and
-# reads each child. A dir share stores the folder's namespace prefix (dirPrefix =
-# <...>/manifests/<id>/); resync/tsync never expose the .tsync-trash namespace.
+# reads each child. A dir share stores the folder's id, whose namespace is
+# <...>/manifests/<id>/; resync/tsync never expose the .tsync-trash namespace.
 
 
 def ns_base(dir_prefix):
@@ -257,9 +274,7 @@ def build_dir_zip(share, cache_key):
     root = share.get("filename", "share")
     if root.endswith(".zip"):
         root = root[:-4]
-    write_zip(
-        iter_dir_entries(share["dirPrefix"], root), share["chunkPrefix"], cache_key
-    )
+    write_zip(iter_dir_entries(shared_folder(share), root), chunk_prefix(share), cache_key)
 
 
 # ── Content types ───────────────────────────────────────────────────────────
@@ -336,6 +351,8 @@ def load_share(token):
         share = get_json(manifest_key)
     except FileNotFoundError:
         raise ShareError(404, "not found")
+    if share.get("v") != 1:
+        raise ShareError(502, "unsupported share manifest")
     if time.time() > share.get("expires", 0):
         raise ShareError(410, "link expired")
     return share
@@ -348,7 +365,7 @@ def download_artifact(token, share):
     cache_key = CACHE_PREFIX + token + ".data"
     if not object_exists(cache_key):
         if share["type"] == "file":
-            build_file(share["key"], share["chunkPrefix"], cache_key)
+            build_file(share["key"], chunk_prefix(share), cache_key)
         elif share["type"] == "dir":
             build_dir_zip(share, cache_key)
         else:
@@ -360,7 +377,7 @@ def list_dir(share, rel):
     """One directory level under the share: (subdir names, [(name, size)]).
     ponytail: one GET per child to read names/sizes from bodies — fine for normal
     folders; a folder with thousands of direct children pays that many GETs."""
-    ns = share["dirPrefix"]
+    ns = shared_folder(share)
     if rel:
         r = resolve(ns, rel)
         if not r or r[0] != "dir":
@@ -392,13 +409,13 @@ def serve_file(share, path, as_download, want_json):
     rel = safe_rel(path)
     if not rel:
         raise ShareError(400, "not a file")
-    r = resolve(share["dirPrefix"], rel)
+    r = resolve(shared_folder(share), rel)
     if not r or r[0] != "file":
         raise ShareError(404, "file not found")
     m = file_manifest(r[1])
     cache_key = CACHE_PREFIX + m.h1 + "-" + m.h2 + ".data"
     if not object_exists(cache_key):
-        assemble(m, share["chunkPrefix"], cache_key)
+        assemble(m, chunk_prefix(share), cache_key)
     name = os.path.basename(rel)
     ctype = mime_type(name)
     url = store.signed_url(cache_key, name, content_type=ctype, inline=not as_download)
