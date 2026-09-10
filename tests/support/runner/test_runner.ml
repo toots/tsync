@@ -14,6 +14,11 @@ let chunk_size = env_int "TSYNC_CHUNK_SIZE" ~default:Conf.default_chunk_size
    grouping is opt-in. *)
 let cache_chunk_size = env_int "TSYNC_CACHE_CHUNK_SIZE" ~default:chunk_size
 
+(* One upload at a time. An entry is kept when it is published, so two in flight
+   leave the kept log in whichever order they happened to finish, and a snapshot
+   of it is then a race. *)
+let max_uploads = 1
+
 type step =
   | Write of { path : string; content : string }
   | Symlink of { path : string; target : string }
@@ -1743,7 +1748,7 @@ let run_scenario ?(versioning = false) ?(symlink_policy = `Keep)
     let cache_root = Filename.concat root "cache"
     let data_dir = Filename.concat root "data"
     let socket_path = Filename.concat root "tsync.sock"
-    let max_uploads = 4
+    let max_uploads = max_uploads
     let max_chunk_buffers = 4
     let max_downloads = 8
     let chunk_size = Some chunk_size
@@ -1866,7 +1871,7 @@ let run_two_client_scenario ?(versioning = false)
     let cache_root = Filename.concat root "cache-a"
     let data_dir = Filename.concat root "data-a"
     let socket_path = Filename.concat root "tsync-a.sock"
-    let max_uploads = 4
+    let max_uploads = max_uploads
     let max_chunk_buffers = 4
     let max_downloads = 8
     let chunk_size = Some chunk_size
@@ -1897,7 +1902,7 @@ let run_two_client_scenario ?(versioning = false)
     let cache_root = Filename.concat root "cache-b"
     let data_dir = Filename.concat root "data-b"
     let socket_path = Filename.concat root "tsync-b.sock"
-    let max_uploads = 4
+    let max_uploads = max_uploads
     let max_chunk_buffers = 4
     let max_downloads = 8
     let chunk_size = Some chunk_size
@@ -1995,7 +2000,7 @@ let make_conf ?(versioning = false) ~client_name ~backend_root ~cache_root
     let cache_root = cache_root
     let data_dir = data_dir
     let socket_path = socket_path
-    let max_uploads = 4
+    let max_uploads = max_uploads
     let max_chunk_buffers = 4
     let max_downloads = 8
     let chunk_size = Some chunk_size
