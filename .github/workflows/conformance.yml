@@ -39,12 +39,12 @@ jobs:
       - uses: ocaml/setup-ocaml@v3
         with:
           ocaml-compiler: "5.5"
-          dune-cache: true
       # The dependencies setup-ocaml leaves out of its own cache; see the linux
       # job of test.yml for why that is its default and why restoring them here
       # is not the stale-cache trap it looks like.
-      - name: Cache the opam switch
-        uses: actions/cache@v4
+      - name: Restore the opam switch
+        id: opam-switch
+        uses: actions/cache/restore@v4
         with:
           path: _opam
           key: opam-conformance-${{ hashFiles('opam/*.opam', 'scripts/opam_deps.sh', '.github/workflows/conformance.yml') }}
@@ -52,6 +52,12 @@ jobs:
       # frontends are no part of what it asks.
       - name: Install OCaml dependencies
         run: ./scripts/opam_deps.sh tsync tsync-libs tsync-tls tsync-s3
+      - name: Save the opam switch
+        if: steps.opam-switch.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: _opam
+          key: opam-conformance-${{ hashFiles('opam/*.opam', 'scripts/opam_deps.sh', '.github/workflows/conformance.yml') }}
       - name: Backend conformance (real GCS and S3)
         env:
           TSYNC_CI_GCS_BUCKET: ${{ secrets.TSYNC_CI_GCS_BUCKET }}

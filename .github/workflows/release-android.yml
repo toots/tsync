@@ -38,7 +38,6 @@ jobs:
       - uses: ocaml/setup-ocaml@v3
         with:
           ocaml-compiler: "5.4.1"
-          dune-cache: true
       # The cross packages below are the whole of this job's build time, and
       # setup-ocaml caches only the compiler. Keyed on this file because the
       # package list lives here rather than in an opam file. Staleness is
@@ -46,8 +45,9 @@ jobs:
       # upgrade below re-fetch both repositories -- the cross one is a branch
       # pin, so nothing else would look at a new revision -- and rebuild
       # whatever moved.
-      - name: Cache the opam switch
-        uses: actions/cache@v4
+      - name: Restore the opam switch
+        id: opam-switch
+        uses: actions/cache/restore@v4
         with:
           path: _opam
           key: opam-android-${{ hashFiles('.github/workflows/release-android.yml') }}
@@ -71,6 +71,12 @@ jobs:
             ppx_blob-android mem_usage-android base64-android tls-lwt-android \
             x509-android mirage-crypto-pk-android cmdliner-android \
             memtrace-android bigstringaf-android
+      - name: Save the opam switch
+        if: steps.opam-switch.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: _opam
+          key: opam-android-${{ hashFiles('.github/workflows/release-android.yml') }}
       - name: Cross-build the domain
         # The context path, not the bare target: that builds the host context
         # too, which wants FUSE.

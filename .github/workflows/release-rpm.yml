@@ -68,14 +68,22 @@ jobs:
       # before it installs, so a hit is fast rather than stale. build.sh runs
       # `opam clean` after: every container job keeps one of these and they
       # share the repository's cache budget.
-      - name: Cache the opam root
-        uses: actions/cache@v4
+      - name: Restore the opam root
+        id: opam-root
+        uses: actions/cache/restore@v4
         with:
           path: ~/.opam
           key: opam-${{ matrix.image }}-${{ matrix.arch }}-${{ hashFiles('opam/*.opam', 'linux/build.sh', 'scripts/opam_deps.sh') }}
 
       - name: Build
         run: ./linux/build.sh
+
+      - name: Save the opam root
+        if: steps.opam-root.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.opam
+          key: opam-${{ matrix.image }}-${{ matrix.arch }}-${{ hashFiles('opam/*.opam', 'linux/build.sh', 'scripts/opam_deps.sh') }}
 
       - name: Package
         run: ./linux/rpm/build.sh

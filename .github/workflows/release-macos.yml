@@ -34,7 +34,6 @@ jobs:
       - uses: ocaml/setup-ocaml@v3
         with:
           ocaml-compiler: "5.5"
-          dune-cache: true
       - name: Install dependencies
         id: brew
         run: |
@@ -56,8 +55,9 @@ jobs:
       # restored switch pointing at a directory that is gone -- `ld: library
       # 'ssl' not found`, with no opam package having changed. So those
       # versions are part of the key.
-      - name: Cache the opam switch
-        uses: actions/cache@v4
+      - name: Restore the opam switch
+        id: opam-switch
+        uses: actions/cache/restore@v4
         with:
           path: _opam
           key: opam-release-macos-${{ hashFiles('opam/*.opam', 'scripts/opam_deps.sh', '.github/workflows/release-macos.yml') }}-${{ steps.brew.outputs.linked }}
@@ -65,6 +65,12 @@ jobs:
         # Both TLS backends: tsync alone would pull tsync-tls, and a released
         # build should also carry tsync-ssl, the faster one.
         run: ./scripts/opam_deps.sh tsync tsync-libs tsync-tls tsync-ssl tsync-s3
+      - name: Save the opam switch
+        if: steps.opam-switch.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: _opam
+          key: opam-release-macos-${{ hashFiles('opam/*.opam', 'scripts/opam_deps.sh', '.github/workflows/release-macos.yml') }}-${{ steps.brew.outputs.linked }}
 
       - name: Import signing assets
         env:
