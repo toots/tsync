@@ -54,7 +54,20 @@ let () =
      Job_report_lwt.start ~socket_path:path ~domain:"d" ~kind:"import"
        ~interval:0.1 ~target:"/media/files/stage"
        ~current:(fun () -> Some "big.mov")
-       ~deferred:(fun () -> Some (207, 3, false))
+       ~backends:(fun () ->
+         [
+           `Assoc
+             [
+               ("name", `String "gcs");
+               ( "deferred",
+                 `Assoc
+                   [
+                     ("queued", `Int 207);
+                     ("inFlight", `Int 3);
+                     ("degraded", `Bool false);
+                   ] );
+             ];
+         ])
        ~counters:(fun () -> [("files", 30433); ("failed", 0)])
        ();
      (* A run whose plan is 1000 bytes: one entry of 400 already in the domain,
@@ -76,8 +89,22 @@ let () =
      check "it carries the pid" (mem "pid" = `Int (Unix.getpid ()));
      check "it carries what the command is working on"
        (mem "current" = `String "big.mov");
-     check "it carries the deferred queue"
-       (Yojson.Safe.Util.member "queued" (mem "deferred") = `Int 207);
+     check "it carries each linked store's queue"
+       (mem "backends"
+       = `List
+           [
+             `Assoc
+               [
+                 ("name", `String "gcs");
+                 ( "deferred",
+                   `Assoc
+                     [
+                       ("queued", `Int 207);
+                       ("inFlight", `Int 3);
+                       ("degraded", `Bool false);
+                     ] );
+               ];
+           ]);
      check "it carries the command's own counters"
        (mem "counters"
        = `List

@@ -103,7 +103,7 @@ let self_json ?(extra = []) () =
           ("timers", `Int lwt.Metrics_lwt.timers);
           ("poolSize", `Int lwt.Metrics_lwt.pool_size);
         ] );
-    ("traffic", `Assoc (ints (Metrics.process_traffic_fields ())));
+    ("traffic", `Assoc (Metrics.process_traffic_fields ()));
     ( "recentErrors",
       `List
         (List.map
@@ -441,28 +441,6 @@ module Make (C : Conf_lwt.S) = struct
         | `Null -> []
         | counts -> [("totals", counts)]
     in
-    (* Same keys and same units as the process-wide [traffic] row, so a reader
-       comparing one store against the whole moves between figures that mean the
-       same thing. Absent for a store with no link, rather than zeroed. *)
-    let traffic =
-      match m.Backend.traffic with
-        | None -> []
-        | Some t -> [("traffic", `Assoc (ints (Metrics.traffic_fields t)))]
-    in
-    let deferred =
-      match (m.Backend.pending, m.in_flight, m.degraded) with
-        | Some queued, Some in_flight, Some degraded ->
-            [
-              ( "deferred",
-                `Assoc
-                  [
-                    ("queued", `Int (queued ()));
-                    ("inFlight", `Int (in_flight ()));
-                    ("degraded", `Bool (degraded ()));
-                  ] );
-            ]
-        | _ -> []
-    in
     `Assoc
       (("name", `String m.Backend.name)
        :: ("type", `String m.backend_type)
@@ -471,7 +449,7 @@ module Make (C : Conf_lwt.S) = struct
             `Assoc (List.map (fun (k, v) -> (k, `String v)) m.Backend.config) )
        :: probed
       @ [("journal", jrnl); ("corrupted", corrupt)]
-      @ disk_json m @ traffic @ deferred @ tot)
+      @ disk_json m @ Backend.link_json m @ tot)
 
   let symlink_policy =
     match C.symlink_policy with

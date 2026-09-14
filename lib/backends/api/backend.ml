@@ -251,6 +251,24 @@ let member ?(role = `Main) ?(readable = true) ?(backend_type = "local")
 
 let main members = List.find_opt (fun m -> m.role = `Main) members
 
+let link_json m =
+  (match m.traffic with
+    | None -> []
+    | Some t -> [("traffic", `Assoc (Metrics.traffic_fields t))])
+  @
+    match (m.pending, m.in_flight, m.degraded) with
+    | Some queued, Some in_flight, Some degraded ->
+        [
+          ( "deferred",
+            `Assoc
+              [
+                ("queued", `Int (queued ()));
+                ("inFlight", `Int (in_flight ()));
+                ("degraded", `Bool (degraded ()));
+              ] );
+        ]
+    | _ -> []
+
 let deferred members =
   List.filter (fun m -> m.role = `Replica || m.role = `Backfill) members
 

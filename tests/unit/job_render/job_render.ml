@@ -52,10 +52,28 @@ let import ?error ?(progress = []) ~state () =
              ("downloadBytesPerSec", `Int 2097152);
              ("chunksHashed", `Int 2500);
            ] );
-       ( "deferred",
-         `Assoc
+       ( "backends",
+         `List
            [
-             ("queued", `Int 207); ("inFlight", `Int 3); ("degraded", `Bool true);
+             `Assoc
+               [
+                 ("name", `String "gcs");
+                 ( "traffic",
+                   `Assoc
+                     [
+                       ("bytesUploaded", `Int 756640839270);
+                       ("uploadBytesPerSec", `Int 8178892);
+                       ("bytesDownloaded", `Int 0);
+                       ("downloadBytesPerSec", `Int 0);
+                     ] );
+                 ( "deferred",
+                   `Assoc
+                     [
+                       ("queued", `Int 207);
+                       ("inFlight", `Int 3);
+                       ("degraded", `Bool true);
+                     ] );
+               ];
            ] );
        ( "pools",
          `List
@@ -114,10 +132,22 @@ let mirror ?(progress = []) () =
              ("downloadBytesPerSec", `Int 0);
              ("chunksHashed", `Int 0);
            ] );
-       ( "deferred",
-         `Assoc
-           [("queued", `Int 0); ("inFlight", `Int 0); ("degraded", `Bool false)]
-       );
+       ( "backends",
+         `List
+           [
+             `Assoc
+               [
+                 ("name", `String "gcs");
+                 ( "traffic",
+                   `Assoc
+                     [
+                       ("bytesUploaded", `Int 0);
+                       ("uploadBytesPerSec", `Int 0);
+                       ("bytesDownloaded", `Int 59244544);
+                       ("downloadBytesPerSec", `Int 0);
+                     ] );
+               ];
+           ] );
        ( "pools",
          `List
            [

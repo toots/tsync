@@ -366,6 +366,12 @@ val member :
 val main : 'store member list -> 'store member option
 
 val deferred : 'store member list -> 'store member list
+
+(** What crossed a store's link and what it is still owed, as the [traffic] and
+    [deferred] fields every report spells them in: the daemon's per-store rows
+    and a job's alike. Empty for a store that is a tree here. *)
+val link_json : 'store member -> (string * Yojson.Safe.t) list
+
 val named : string -> 'store member list -> 'store member option
 
 (** {1 Failure} *)

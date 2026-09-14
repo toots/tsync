@@ -23,11 +23,11 @@ val per_sec : counter -> int
 (** A link's figures under the names every report uses: [bytesUploaded],
     [bytesDownloaded], [uploadBytesPerSec], [downloadBytesPerSec], and with
     [hashed] also [chunksHashed] and [hashesPerSec]. Rates are the last ten
-    seconds' average, as whole bytes. *)
-val traffic_fields : ?hashed:counter -> traffic -> (string * int) list
+    seconds' average: whole bytes, and a fraction of a chunk. *)
+val traffic_fields : ?hashed:counter -> traffic -> (string * Yojson.Safe.t) list
 
 (** {!traffic_fields} for the process, hashing included. *)
-val process_traffic_fields : unit -> (string * int) list
+val process_traffic_fields : unit -> (string * Yojson.Safe.t) list
 
 (** [requests], [retries], [timeouts] and [failures], under those names. *)
 val backend_fields : unit -> (string * int) list

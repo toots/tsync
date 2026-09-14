@@ -1000,9 +1000,7 @@ module Make
                                     `Int (Int64.to_int (Sq.pending_bytes ())) )
                                   (* Process-wide, not per domain: one uplink is
                                   what an ETA is against. *)
-                               :: List.map
-                                    (fun (k, v) -> (k, `Int v))
-                                    (Metrics.traffic_fields Metrics.process)
+                               :: Metrics.traffic_fields Metrics.process
                               @ hooks.status_fields ())
                         | "pause" ->
                             Sq.set_paused (get_str obj "arg" <> "off");

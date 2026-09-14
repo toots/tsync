@@ -10,11 +10,13 @@
 
     [target] is what the command was pointed at, as the person who typed it
     would recognise it: a folder for an import or an export, the backend being
-    copied from for a mirror. [counters], [current] and [deferred] are what the
-    command supplies; memory, GC, transfer totals, pool saturation, backend
-    retries and {!Job_progress} are process-wide and gathered here, so a command
-    threads nothing through for those. Every closure is sampled on the reporting
-    thread and must not block. *)
+    copied from for a mirror. [counters], [current] and [backends] are what the
+    command supplies, the last being each linked store's {!Backend.link_json}
+    under its name — the process-wide totals below cannot say which link a byte
+    went over; memory, GC, transfer totals, pool saturation, backend retries and
+    {!Job_progress} are process-wide and gathered here, so a command threads
+    nothing through for those. Every closure is sampled on the reporting thread
+    and must not block. *)
 module type SEND = sig
   type 'a io
 
@@ -35,7 +37,7 @@ module Make
     ?target:string ->
     ?interval:float ->
     ?current:(unit -> string option) ->
-    ?deferred:(unit -> (int * int * bool) option) ->
+    ?backends:(unit -> Yojson.Safe.t list) ->
     counters:(unit -> (string * int) list) ->
     unit ->
     unit

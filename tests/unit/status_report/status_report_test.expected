@@ -180,7 +180,7 @@ Domain alpha
   concurrency      4 uploads, 4 chunk buffers, 8 downloads
   cache            2 chunks, 8.0 KB of unlimited, 4.0 KB pinned
   Frontend fuse         pid 4242  /home/u/tsync/alpha
-    traffic          up 2.0 KB (0 B/s), down 4.0 KB (0 B/s), 5 chunks hashed (0/s)
+    traffic          up 2.0 KB (0 B/s), down 4.0 KB (0 B/s), 5 chunks hashed (0.0/s)
     handles          2 open, 41 since start
     in flight        3 staged
   Frontend http-proxy
@@ -194,7 +194,7 @@ Domain beta
   concurrency      4 uploads, 4 chunk buffers, 8 downloads
   cache            2 chunks, 8.0 KB of unlimited, 4.0 KB pinned
   Frontend fuse         pid 4243  /home/u/tsync/beta
-    traffic          up 2.0 KB (0 B/s), down 4.0 KB (0 B/s), 5 chunks hashed (0/s)
+    traffic          up 2.0 KB (0 B/s), down 4.0 KB (0 B/s), 5 chunks hashed (0.0/s)
     handles          2 open, 41 since start
     in flight        3 staged
   Backend store (local, main)  path /srv/tsync
@@ -204,9 +204,9 @@ Domain beta
 Processes
   sync        pid 4200    up 1h 2m     2.1% cpu     2.0 MB rss   alpha, beta
   fuse        pid 4242    up 1h 2m     0.3% cpu     1.0 MB rss   alpha
-    traffic          up 2.0 KB (0 B/s), down 4.0 KB (0 B/s), 5 chunks hashed (0/s)
+    traffic          up 2.0 KB (0 B/s), down 4.0 KB (0 B/s), 5 chunks hashed (0.0/s)
   fuse        pid 4243    up 1h 2m     0.3% cpu     1.0 MB rss   beta
-    traffic          up 2.0 KB (0 B/s), down 4.0 KB (0 B/s), 5 chunks hashed (0/s)
+    traffic          up 2.0 KB (0 B/s), down 4.0 KB (0 B/s), 5 chunks hashed (0.0/s)
 
 Jobs
   import  pid 9001  running 5m 0s  /media/stage
@@ -221,7 +221,7 @@ Domain alpha
   concurrency      4 uploads, 4 chunk buffers, 8 downloads
   cache            2 chunks, 8.0 KB of unlimited, 4.0 KB pinned
   Frontend fuse         pid 4242  /home/u/tsync/alpha
-    traffic          up 2.0 KB (0 B/s), down 4.0 KB (0 B/s), 5 chunks hashed (0/s)
+    traffic          up 2.0 KB (0 B/s), down 4.0 KB (0 B/s), 5 chunks hashed (0.0/s)
     handles          2 open, 41 since start
     in flight        3 staged
   Backend store (local, main)  path /srv/tsync
@@ -233,7 +233,7 @@ Domain beta
   concurrency      4 uploads, 4 chunk buffers, 8 downloads
   cache            2 chunks, 8.0 KB of unlimited, 4.0 KB pinned
   Frontend fuse         pid 4242  /home/u/tsync/beta
-    traffic          up 2.0 KB (0 B/s), down 4.0 KB (0 B/s), 5 chunks hashed (0/s)
+    traffic          up 2.0 KB (0 B/s), down 4.0 KB (0 B/s), 5 chunks hashed (0.0/s)
     handles          2 open, 41 since start
     in flight        3 staged
   Backend store (local, main)  path /srv/tsync
@@ -242,4 +242,4 @@ Domain beta
 
 Processes
   fuse        pid 4242    up 1h 2m     0.3% cpu     1.0 MB rss   alpha, beta
-    traffic          up 2.0 KB (0 B/s), down 4.0 KB (0 B/s), 5 chunks hashed (0/s)
+    traffic          up 2.0 KB (0 B/s), down 4.0 KB (0 B/s), 5 chunks hashed (0.0/s)

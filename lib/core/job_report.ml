@@ -26,7 +26,7 @@ struct
     target : string option;
     started : float;
     current : unit -> string option;
-    deferred : unit -> (int * int * bool) option;
+    backends : unit -> Yojson.Safe.t list;
     counters : unit -> (string * int) list;
     mutable ticks : int;
     mutable live : int option;
@@ -86,11 +86,7 @@ struct
             ("systemTotalBytes", `Int m.Metrics.system_total);
           ] );
       ("gc", `Assoc gc);
-      ( "traffic",
-        `Assoc
-          (List.map
-             (fun (k, v) -> (k, `Int v))
-             (Metrics.process_traffic_fields ())) );
+      ("traffic", `Assoc (Metrics.process_traffic_fields ()));
       ( "backend",
         `Assoc
           (List.map (fun (k, v) -> (k, `Int v)) (Metrics.backend_fields ())) );
@@ -103,19 +99,7 @@ struct
       | None -> []
       | Some s -> [("current", `String s)])
     @ Job_progress.json ()
-    @
-      match t.deferred () with
-      | None -> []
-      | Some (queued, in_flight, degraded) ->
-          [
-            ( "deferred",
-              `Assoc
-                [
-                  ("queued", `Int queued);
-                  ("inFlight", `Int in_flight);
-                  ("degraded", `Bool degraded);
-                ] );
-          ]
+    @ match t.backends () with [] -> [] | l -> [("backends", `List l)]
 
   (* Every failure here is silence in a status listing, so it is swallowed: a
      command must not die because nothing was listening, and the daemon being
@@ -146,7 +130,7 @@ struct
     end
 
   let start ~socket_path ~domain ~kind ?target ?(interval = 10.)
-      ?(current = fun () -> None) ?(deferred = fun () -> None) ~counters () =
+      ?(current = fun () -> None) ?(backends = fun () -> []) ~counters () =
     let t =
       {
         socket_path;
@@ -156,7 +140,7 @@ struct
         target;
         started = Unix.gettimeofday ();
         current;
-        deferred;
+        backends;
         counters;
         ticks = 0;
         live = None;

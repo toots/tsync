@@ -56,15 +56,18 @@ let per_sec c = int_of_float (rate c)
    four reports built the same names by hand and one of them dropped a rate. *)
 let traffic_fields ?hashed t =
   [
-    ("bytesUploaded", total t.uploaded);
-    ("bytesDownloaded", total t.downloaded);
-    ("uploadBytesPerSec", per_sec t.uploaded);
-    ("downloadBytesPerSec", per_sec t.downloaded);
+    ("bytesUploaded", `Int (total t.uploaded));
+    ("bytesDownloaded", `Int (total t.downloaded));
+    ("uploadBytesPerSec", `Int (per_sec t.uploaded));
+    ("downloadBytesPerSec", `Int (per_sec t.downloaded));
   ]
   @
     match hashed with
     | None -> []
-    | Some h -> [("chunksHashed", total h); ("hashesPerSec", per_sec h)]
+    | Some h ->
+        (* A fraction: a chunk is megabytes, and whole chunks a second rounds
+           every rate a real link runs at down to zero. *)
+        [("chunksHashed", `Int (total h)); ("hashesPerSec", `Float (rate h))]
 
 let process_traffic_fields () = traffic_fields ~hashed:hashed_c process
 let add_uploaded n = add uploaded_c n

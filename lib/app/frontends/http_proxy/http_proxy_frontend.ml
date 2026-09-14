@@ -915,10 +915,7 @@ let self_json ~port ~tls routes =
 (* The domain's own link figures beside its settings, live where the settings
    are fixed. *)
 let with_traffic r =
-  let traffic =
-    `Assoc
-      (List.map (fun (k, v) -> (k, `Int v)) (Metrics.traffic_fields r.traffic))
-  in
+  let traffic = `Assoc (Metrics.traffic_fields r.traffic) in
   match r.self_frontend with
     | `Assoc fields -> `Assoc (fields @ [("traffic", traffic)])
     | other -> other

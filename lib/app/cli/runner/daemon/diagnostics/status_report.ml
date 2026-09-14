@@ -374,8 +374,14 @@ let traffic_row t =
     (match int_of (mem t "chunksHashed") with
       | 0 -> ""
       | n ->
-          Printf.sprintf ", %d chunks hashed (%d/s)" n
-            (int_of (mem t "hashesPerSec")))
+          Printf.sprintf ", %d chunks hashed (%.1f/s)" n
+            (num (mem t "hashesPerSec")))
+
+let behind_row bf =
+  Printf.sprintf "%d queued, %d in flight%s"
+    (int_of (mem bf "queued"))
+    (int_of (mem bf "inFlight"))
+    (if bool_of (mem bf "degraded") then " — DEGRADED, run tsync mirror" else "")
 
 (* What crossed between clients and a listener, in the client's words so a
    mount's backend row and the listener it talks to read alike: up is what
@@ -609,14 +615,7 @@ let text json =
       | t -> row 4 "traffic" (traffic_row t));
     (match mem m "deferred" with
       | `Null -> ()
-      | bf ->
-          row 4 "behind"
-            (Printf.sprintf "%d queued, %d in flight%s"
-               (int_of (mem bf "queued"))
-               (int_of (mem bf "inFlight"))
-               (if bool_of (mem bf "degraded") then
-                  " — DEGRADED, run tsync mirror"
-                else "")));
+      | bf -> row 4 "behind" (behind_row bf));
     (* One syscall, so unlike the counts below this is on every request. *)
     (match mem m "disk" with
       | `Null -> ()
@@ -953,13 +952,19 @@ let text json =
                        | b ->
                            Printf.sprintf ", %s live"
                              (Metrics.human_bytes (int_of b)))));
-            sub "deferred" (fun d ->
-                row 4 "deferred"
-                  (Printf.sprintf "%d queued, %d in flight"
-                     (int_of (mem d "queued"))
-                     (int_of (mem d "inFlight")));
-                if bool_of (mem d "degraded") then
-                  row 4 "" "DEGRADED, run tsync mirror");
+            (* The process row above is every link summed, and a local main
+               is on none of them: what it says went up is what the replicas
+               got, which only a row per store can say. *)
+            List.iter
+              (fun bk ->
+                row 4
+                  (str (mem bk "name"))
+                  (String.concat " · "
+                     (List.filter_map
+                        (fun (k, f) ->
+                          match mem bk k with `Null -> None | v -> Some (f v))
+                        [("traffic", traffic_row); ("deferred", behind_row)])))
+              (list (mem j "backends"));
             (match list (mem j "pools") with
               | [] -> ()
               | pools -> row 4 "slots" (slots_row pools));

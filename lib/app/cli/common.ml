@@ -66,25 +66,15 @@ let domain_target ?domain () =
 let domain_socket ?domain () = snd (domain_target ?domain ())
 let domain_targets () = Daemons.all ~paths:runtime_paths (load_config ())
 
-(* What the deferred targets still owe, summed: whether work is outstanding is
-   the question, and which target holds it is answered by [tsync status]'s own
-   per-backend listing. [None] where no target defers at all, so a domain
-   writing straight through reports no queue rather than an empty one. *)
-let deferred_totals members =
-  let sum f =
-    List.fold_left
-      (fun acc m -> acc + match f m with Some g -> g () | None -> 0)
-      0 members
-  in
-  if not (List.exists (fun m -> m.Backend.pending <> None) members) then None
-  else
-    Some
-      ( sum (fun m -> m.Backend.pending),
-        sum (fun m -> m.Backend.in_flight),
-        List.exists
-          (fun m ->
-            match m.Backend.degraded with Some g -> g () | None -> false)
-          members )
+(* Each store a job's bytes can cross a link to, with what it owes: a local tree
+   has no traffic and defers nothing, so it is left out rather than zeroed. *)
+let linked_backends members =
+  List.filter_map
+    (fun m ->
+      match Backend.link_json m with
+        | [] -> None
+        | fields -> Some (`Assoc (("name", `String m.Backend.name) :: fields)))
+    members
 
 (* The half of a job report that is every command's alike: where to send it,
    which domain it belongs to, and what that domain's targets still owe. A
@@ -102,7 +92,7 @@ let report_job ?target ?current ~kind (module C : Conf_lwt.S) ~counters () =
   Job_report_lwt.start
     ~socket_path:(Runtime.sync_socket_path runtime_paths)
     ~domain:C.domain_name ~kind ?target ?current
-    ~deferred:(fun () -> deferred_totals C.members)
+    ~backends:(fun () -> linked_backends C.members)
     ~counters ()
 
 let doing phase detail = phase ^ " · " ^ detail
