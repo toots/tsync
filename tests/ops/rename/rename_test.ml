@@ -250,6 +250,48 @@ let () =
      check "ours is published under a name of its own"
        (List.exists (fun (name, id) -> id = ours && name <> "y") after);
 
+     case "a second conflict on one name finds a name of its own";
+     (* Local y is the peer's folder now, and its conflicted copy is taken: a
+        third folder moved onto y has to set the peer's aside under a name
+        neither holds. *)
+     let* () = F.mkdir (Lk.dir "w") in
+     let* () = settle () in
+     let* markers = show_markers "root before" Stored_key.root_id in
+     let third = List.assoc "w" markers in
+     let* () =
+       Store.put
+         ~key:
+           (Stored_key.child_key ~prefix:C.domain_prefix
+              ~folder_id:Stored_key.root_id "y")
+         ~data:
+           (Bigstring.of_string
+              (Folder.marker_to_string { Folder.name = "y"; id = third }))
+         ()
+     in
+     let* ok =
+       attempt "apply the peer's rename w -> y" (fun () ->
+           F.apply_foreign_ops
+             [
+               `Rename
+                 Journal.
+                   {
+                     src = "w";
+                     dst = "y";
+                     size = None;
+                     is_dir = true;
+                     id = Some third;
+                   };
+             ])
+     in
+     let* dirs = local_dirs () in
+     step "local: %s" (String.concat ", " dirs);
+     let* after = show_markers "root after" Stored_key.root_id in
+     check "it applied" ok;
+     check "the earlier copy is left where it was"
+       (List.assoc_opt "y (conflicted copy from test)" after = Some ours);
+     check "and the folder it displaced takes a name of its own"
+       (List.assoc_opt "y (conflicted copy 2 from test)" after = Some peers);
+
      case "a peer's rename onto the same folder retires the stale source";
      let* () = F.mkdir (Lk.dir "s") in
      let* () = settle () in
@@ -309,6 +351,6 @@ let () =
      check "the store is not told"
        (not (List.mem_assoc "s (conflicted copy from test)" after));
 
-     report ~expected:23 ();
+     report ~expected:26 ();
      Lwt.return_unit);
   Scratch.cleanup root
