@@ -33,4 +33,13 @@ the marker is gone from the root: ok
   anchor of <folder-1>: in .tsync-trash as d2
 and the anchor names the trash: ok
 
-14 check(s), 0 failure(s)
+=== a peer's rename onto a folder of ours moves ours aside
+  root before: p=<folder-2>, x=<folder-3>, y=<folder-4>
+  apply the peer's rename x -> y: succeeded
+  local: p, y, y (conflicted copy from test)
+  root after: p=<folder-2>, x=<folder-3>, y=<folder-3>, y (conflicted copy from test)=<folder-4>
+it applied: ok
+the peer's folder has the name: ok
+ours is published under a name of its own: ok
+
+17 check(s), 0 failure(s)

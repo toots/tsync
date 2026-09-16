@@ -403,6 +403,29 @@ let foreign_dir_rename_of_own_folder =
       ];
   }
 
+(* A renames its folder d onto a name B has independently given a folder of its
+   own. The two are different folders under one name, which is a conflict: A's
+   copy takes a conflict-marked name rather than B's marker being overwritten
+   and its subtree stranded under an id nothing names any more. *)
+let dir_rename_onto_foreign_dir =
+  {
+    name = "dir_rename_onto_foreign_dir";
+    steps =
+      [
+        A (Mkdir "d");
+        A (Write { path = "d/a.txt"; content = "from A" });
+        A Drain;
+        B Sync;
+        B (Mkdir "e");
+        B (Write { path = "e/b.txt"; content = "from B" });
+        B Drain;
+        A (Rename { src = "d"; dst = "e" });
+        A Drain;
+        A Sync;
+        B Sync;
+      ];
+  }
+
 let () =
   run_two_client_scenarios
     [
@@ -428,4 +451,5 @@ let () =
       late_visible_entry;
       foreign_dir_rename;
       foreign_dir_rename_of_own_folder;
+      dir_rename_onto_foreign_dir;
     ]

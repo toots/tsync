@@ -208,6 +208,48 @@ let () =
      check "and the anchor names the trash"
        (anchor = Some { Folder.parent = Stored_key.trash_id; name = "d2" });
 
-     report ~expected:14 ();
+     case "a peer's rename onto a folder of ours moves ours aside";
+     let* () = F.mkdir (Lk.dir "x") in
+     let* () = F.mkdir (Lk.dir "y") in
+     let* () = settle () in
+     let* before = show_markers "root before" Stored_key.root_id in
+     let peers = List.assoc "x" before and ours = List.assoc "y" before in
+     (* What the peer's own rename left on the store: its folder filed under y,
+        over ours. *)
+     let* () =
+       Store.put
+         ~key:
+           (Stored_key.child_key ~prefix:C.domain_prefix
+              ~folder_id:Stored_key.root_id "y")
+         ~data:
+           (Bigstring.of_string
+              (Folder.marker_to_string { Folder.name = "y"; id = peers }))
+         ()
+     in
+     let* ok =
+       attempt "apply the peer's rename x -> y" (fun () ->
+           F.apply_foreign_ops
+             [
+               `Rename
+                 Journal.
+                   {
+                     src = "x";
+                     dst = "y";
+                     size = None;
+                     is_dir = true;
+                     id = Some peers;
+                   };
+             ])
+     in
+     let* dirs = local_dirs () in
+     step "local: %s" (String.concat ", " dirs);
+     let* after = show_markers "root after" Stored_key.root_id in
+     check "it applied" ok;
+     check "the peer's folder has the name"
+       (List.assoc_opt "y" after = Some peers);
+     check "ours is published under a name of its own"
+       (List.exists (fun (name, id) -> id = ours && name <> "y") after);
+
+     report ~expected:17 ();
      Lwt.return_unit);
   Scratch.cleanup root

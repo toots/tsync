@@ -73,6 +73,11 @@ module type S = sig
   val list_namespace : folder_id:string -> Backend.file_entry list io
   val get_object : bkey:Stored_key.t -> string io
 
+  (** {!get_object} answering [None] for an object that is not there, where
+      reading and catching the failure could not tell that from a store that
+      cannot answer. *)
+  val get_object_opt : bkey:Stored_key.t -> string option io
+
   (** Bodies of several at once, in one request where the store has a way to
       make one and a bounded fan-out where it has not. [None] for a key the
       store no longer holds, a listing and the reads that follow it not being

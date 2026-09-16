@@ -373,6 +373,16 @@ struct
        id at two places, which is what a client resolving by id cannot tell
        apart. [None] is a parent this client holds no id for, and the repair is
        a sync. *)
+    (* The folder a marker on the store names, or [None] when there is none. A
+       store that cannot answer raises instead, so an outage is retried rather
+       than read as a free name. *)
+    let marker_id_at bkey =
+      let+ body = St.get_object_opt ~bkey in
+      Option.bind body (fun data ->
+          Option.map
+            (fun (m : Folder.marker) -> m.Folder.id)
+            (Folder.marker_of_string data))
+
     let old_marker_or_fail key =
       let* old_marker = folder_marker_bkey key in
       match old_marker with
@@ -390,12 +400,26 @@ struct
        correctness: whatever sits at the old key is disowned by the anchor and
        skipped by every reader until a repair removes it. Said out loud all the
        same, being a store that did not do what it was asked. *)
-    let remove_old_marker key bkey =
-      let+ removed = St.delete_raw ~bkey in
-      if not removed then
-        Log.err "%s: the store held no marker at %s; nothing was left behind"
-          (Logical_key.to_string key)
-          (Stored_key.to_string bkey)
+    let remove_old_marker key bkey ~id =
+      let* there = marker_id_at bkey in
+      match there with
+        | Some other when other <> id ->
+            (* Another folder has taken the name since, and its marker is not
+               this one's to remove. *)
+            Log.info "%s: the marker at %s now names %s, not %s; left in place"
+              (Logical_key.to_string key)
+              (Stored_key.to_string bkey)
+              other id;
+            return_unit
+        | Some _ ->
+            let+ (_ : bool) = St.delete_raw ~bkey in
+            ()
+        | None ->
+            Log.err
+              "%s: the store held no marker at %s; nothing was left behind"
+              (Logical_key.to_string key)
+              (Stored_key.to_string bkey);
+            return_unit
 
     (* O(1) delete: move the parent marker into the trash namespace. The subtree
        stays on the backend for undo, dropped later by [expire] and its chunks
@@ -422,18 +446,28 @@ struct
       let* ek = Js.write_journal_entry [`Put (rel_key key, Manifest.size m)] in
       Js.bump_cursor ek
 
+    (* A conflict is settled by giving the loser a name of its own, which is the
+       only settlement a directory admits: its subtree cannot be replaced the way
+       a file's bytes can.
+
+       A folder keeps its whole leaf, having no extension to preserve, and stays
+       a folder: splitting [v1.2] would file the subtree under
+       [v1 (conflicted copy from x).2]. *)
     let conflict_key key =
       let base = Logical_key.leaf key in
+      let is_dir = Logical_key.kind key = `Dir in
       let name, ext =
         match String.rindex_opt base '.' with
-          | None -> (base, "")
-          | Some i ->
+          | Some i when not is_dir ->
               (String.sub base 0 i, String.sub base i (String.length base - i))
+          | Some _ | None -> (base, "")
       in
       let base =
         Printf.sprintf "%s (conflicted copy from %s)%s" name C.client_name ext
       in
-      Logical_key.file_in (Logical_key.parent key) base
+      let parent = Logical_key.parent key in
+      if is_dir then Logical_key.dir_in parent base
+      else Logical_key.file_in parent base
 
     (* Moving an object on the backend does not rewrite its body, so the copy at
        the new key still records the old leaf. Unconditional: the mirror is
@@ -464,7 +498,7 @@ struct
         St.put_anchor ~folder_id:fid ~parent:Stored_key.trash_id ~name
       in
       let* () = St.put_raw ~bkey:trash_key ~data:marker in
-      remove_old_marker key old_marker
+      remove_old_marker key old_marker ~id:fid
 
     (* A peer removed the source while the rename was owed. The local side moved
        long ago and may have been worked in since, so it keeps a name of its own
@@ -485,6 +519,34 @@ struct
             publish_manifest conflict m
         | None -> Io.fail exn
 
+    (* Whether the store already files a different folder under [dst]'s name. *)
+    let taken_by_another ~dst ~id =
+      let* bkey = folder_marker_bkey dst in
+      match bkey with
+        | None -> return_false
+        | Some bkey -> (
+            let+ there = marker_id_at bkey in
+            match there with Some other -> other <> id | None -> false)
+
+    (* Another folder took the name on the store while this rename was owed.
+       Ours takes a name of its own, locally and then as a rename of its own,
+       rather than having its marker written over the other's. *)
+    let rename_dir_aside ~src ~dst ~id =
+      let conflict = conflict_key dst in
+      let* () = with_meta (fun () -> rename_local ~src:dst ~dst:conflict) in
+      with_journal
+        [
+          `Rename
+            Journal.
+              {
+                src = rel_key src;
+                dst = rel_key conflict;
+                size = None;
+                is_dir = true;
+                id = Some id;
+              };
+        ]
+
     let rename_remote (r : Journal.rename_op) =
       let is_dir = r.Journal.is_dir in
       let key rel = if is_dir then Lk.dir rel else Lk.file rel in
@@ -494,12 +556,23 @@ struct
           (* A directory's backend keys hang off its folder id, which travelled
              with the local [.tsync-dir] marker: only the parent's marker moves.
              A file's key encodes its leaf, so the object itself moves. *)
+          let* id =
+            match r.Journal.id with
+              | Some id -> Io.return id
+              | None -> L.ensure_folder_id dst
+          in
           let* old_marker = old_marker_or_fail src in
-          (* The new place first, anchor and marker, then the old marker: a crash
-             between the two leaves a stale marker readers skip, not a folder
-             nobody lists. *)
-          let* () = St.put_folder_marker ~key:dst in
-          remove_old_marker src old_marker
+          let* taken = taken_by_another ~dst ~id in
+          if taken then
+            let* () = rename_dir_aside ~src ~dst ~id in
+            (* Superseded by the rename to the conflicted name. *)
+            Io.fail Retry.Cancelled
+          else
+            (* The new place first, anchor and marker, then the old marker: a
+               crash between the two leaves a stale marker readers skip, not a
+               folder nobody lists. *)
+            let* () = St.put_folder_marker ~key:dst in
+            remove_old_marker src old_marker ~id
         else
           let* () = save_version src in
           let* () = Js.rename_file ~src_key:src ~dst_key:dst in
@@ -755,6 +828,38 @@ struct
       in
       f ()
 
+    (* A peer's folder is moving onto a name one of ours holds locally. Ours
+       takes a name of its own and publishes it, rather than the move failing on
+       a directory that is not empty and blocking every entry behind it.
+
+       Called under {!with_meta}, so the rename is recorded directly rather than
+       through {!rename}. *)
+    let make_room_for ~dst ~id =
+      let* present = Syscalls.file_exists (manifest_path dst) in
+      if not present then return_unit
+      else
+        let* ours =
+          Folders.lookup_id ~cache_root:C.cache_root ~domain_name:C.domain_name
+            dst
+        in
+        match (ours, id) with
+          | Some ours, Some theirs when ours <> theirs ->
+              let conflict = conflict_key dst in
+              let* () = rename_local ~src:dst ~dst:conflict in
+              with_journal
+                [
+                  `Rename
+                    Journal.
+                      {
+                        src = rel_key dst;
+                        dst = rel_key conflict;
+                        size = None;
+                        is_dir = true;
+                        id = Some ours;
+                      };
+                ]
+          | _ -> return_unit
+
     (* Failures propagate: the sync poller must not advance its high-water mark
        past an entry it could not apply, or the op is lost until a full resync. *)
     let apply_one op =
@@ -781,13 +886,14 @@ struct
             let* () = adopt_ancestor_ids rel in
             adopt_folder_id ?id rel
         | `Rmdir (rel, _) -> Ck.delete_dir (Lk.dir rel)
-        | `Rename { Journal.src; dst; is_dir = true; _ } ->
+        | `Rename { Journal.src; dst; is_dir = true; id; _ } ->
             let src_key = Lk.dir src in
             let dst_key = Lk.dir dst in
             let* exists = Syscalls.file_exists (manifest_path src_key) in
             if exists then
               unless_staged src_key (fun () ->
                   let* () = adopt_ancestor_ids dst in
+                  let* () = make_room_for ~dst:dst_key ~id in
                   rename_local ~src:src_key ~dst:dst_key)
             else return_unit
         | `Rename { Journal.src; dst; is_dir = false; _ } ->
