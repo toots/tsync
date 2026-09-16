@@ -428,6 +428,26 @@ let dir_rename_onto_foreign_dir =
       ];
   }
 
+(* A folder renamed while a file inside it still owes its upload. The record
+   names the old path, which the queue gives up on once the bytes have moved, so
+   the rename has to queue the new one: the file reaches the store, and the peer
+   finds it under the folder's new name. *)
+let rename_folder_with_owed_upload =
+  {
+    name = "rename_folder_with_owed_upload";
+    steps =
+      [
+        A (Mkdir "d");
+        A Drain;
+        A (Uploads `Paused);
+        A (Write { path = "d/f.txt"; content = "owed" });
+        A (Rename { src = "d"; dst = "e" });
+        A (Uploads `Running);
+        A Drain;
+        B Sync;
+      ];
+  }
+
 let () =
   run_two_client_scenarios
     [
@@ -454,4 +474,5 @@ let () =
       foreign_dir_rename;
       foreign_dir_rename_of_own_folder;
       dir_rename_onto_foreign_dir;
+      rename_folder_with_owed_upload;
     ]
