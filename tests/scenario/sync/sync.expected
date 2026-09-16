@@ -790,3 +790,63 @@
   file f4.txt [<folder-1>/22ca04f2818589b7-0fd485a9a6e7ad40] = manifest size=5 chunks=1 h1=c2743db5bb64af1b h2=39424f30da971bb9
     chunk#0 91e75a14034af1d0-d3be400c101eec7c size=5
 
+=== dir_rename_onto_foreign_dir
+  A: mkdir d
+  A: write d/a.txt "from A"
+  A: drain
+  B: sync
+  B: mkdir e
+  B: write e/b.txt "from B"
+  B: drain
+  A: rename d -> e
+  A: drain
+  A: sync
+  B: sync
+--- tree A
+  d e
+  f e/b.txt size=6 cached=0/1 uploaded=true etag=4d9146b94e2350b5
+  d e (conflicted copy from Client A)
+  f e (conflicted copy from Client A)/a.txt size=6 cached=0/1 uploaded=true etag=9a7e1bd5bb713248
+--- content A
+  e/b.txt = "from B"
+  e (conflicted copy from Client A)/a.txt = "from A"
+--- pending A
+--- tree B
+  d e
+  f e/b.txt size=6 cached=0/1 uploaded=true etag=4d9146b94e2350b5
+  d e (conflicted copy from Client A)
+  f e (conflicted copy from Client A)/a.txt size=6 cached=0/1 uploaded=true etag=9a7e1bd5bb713248
+--- content B
+  e/b.txt = "from B"
+  e (conflicted copy from Client A)/a.txt = "from A"
+--- pending B
+--- kept A
+  {"op":"mkdir","key":"d","id":"<folder-1>"}
+  {"op":"put","key":"d/a.txt","size":6}
+  {"op":"rename","key":"e (conflicted copy from Client A)","src":"d","is_dir":true,"id":"<folder-1>"}
+  {"op":"mkdir","key":"e","id":"<folder-2>"}
+  {"op":"put","key":"e/b.txt","size":6}
+--- kept B
+  {"op":"mkdir","key":"d","id":"<folder-1>"}
+  {"op":"put","key":"d/a.txt","size":6}
+  {"op":"mkdir","key":"e","id":"<folder-2>"}
+  {"op":"put","key":"e/b.txt","size":6}
+  {"op":"rename","key":"e (conflicted copy from Client A)","src":"d","is_dir":true,"id":"<folder-1>"}
+--- backend
+  chunk 1a98ff662c842135-ee745726079032de size=6
+  chunk 2ddcd7df4a530027-b16926580286588d size=6
+  cursor = <entry-5>
+  journal <entry-1> = mkdir d
+  journal <entry-2> = put d/a.txt 6
+  journal <entry-3> = mkdir e
+  journal <entry-4> = put e/b.txt 6
+  journal <entry-5> = rename d -> e (conflicted copy from Client A) dir
+  folder e (conflicted copy from Client A) [.tsync-root/a6ef5d1f9ac7fe45-fa0699bd6258e2ef] -> <folder-1>
+  folder e [.tsync-root/e5e72e5e3bec4a78-6881790369f3a86a] -> <folder-2>
+  anchor <folder-1> in .tsync-root as e (conflicted copy from Client A)
+  file a.txt [<folder-1>/f01e5cbbc09d4fc4-9a0fcd66f030de75] = manifest size=6 chunks=1 h1=9a7e1bd5bb713248 h2=465e3059f135d30e
+    chunk#0 2ddcd7df4a530027-b16926580286588d size=6
+  anchor <folder-2> in .tsync-root as e
+  file b.txt [<folder-2>/3c697ec236bbf61f-698ad1290042cc94] = manifest size=6 chunks=1 h1=4d9146b94e2350b5 h2=d271c5246fa6a5e0
+    chunk#0 1a98ff662c842135-ee745726079032de size=6
+

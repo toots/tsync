@@ -28,6 +28,8 @@
    -open
    Tsync_core_lwt
    -open
+   Tsync_journal
+   -open
    Tsync_test_harness))
  (name rename_test)
  (libraries
@@ -45,5 +47,6 @@
   tsync_remote_lwt
   tsync_sync_lwt
   tsync_core_lwt
+  tsync_journal
   lwt
   lwt.unix))
