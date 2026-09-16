@@ -258,7 +258,7 @@ module Over (Io : Io.S) (F : Fs.S with type 'a io := 'a Io.t) = struct
   (* The climbed path is checked against the markers before it is believed, so a
      stale entry costs an answer rather than naming some other folder.
 
-     A failure is the answer. Naming a folder goes through {!Layout.ensure_id}
+     A failure is the answer. Naming a folder goes through {!Store.S.ensure_folder_id}
      and so through {!write}, which keeps the index with the mirror whichever
      process is writing; what a lookup meets instead is a folder that is gone,
      and walking the mirror to learn that is not a request's to pay.

@@ -8,7 +8,7 @@
     is mirrored by an entry under {!Cache_layout.folders_dir} holding the
     folder's parent id and real name, climbed to the root.
 
-    Naming a folder goes through {!Layout.ensure_id} and so through
+    Naming a folder goes through {!Store.S.ensure_folder_id} and so through
     {!Over.Make.write}, which writes the entry with the marker: whichever
     process writes the mirror keeps the index with it. A resync's walk rewrites
     both, and restating the index from the markers alone is
