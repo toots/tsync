@@ -110,6 +110,7 @@ struct
     module B = (val C.store : C.Store)
     module Bb = Batched.Make (B)
     module J = Journal.Make (C)
+    module Lk = Logical_key.Make (C)
 
     let anchor_key folder_id =
       Stored_key.anchor_key ~prefix:C.domain_prefix ~folder_id
@@ -245,13 +246,21 @@ struct
               in
               match gone with
                 (* Moved or removed here while this was owed: naming it again
-                   would bring back a folder that is gone, and the write aimed
-                   at it is settled by whatever moved it. *)
-                | Some _ ->
-                    Io.fail
-                      (Retry.failed ~kind:Retry.Transient ~op:"claim"
-                         (Logical_key.to_string key
-                        ^ ": moved or removed here since"))
+                   would bring back a folder that is gone. A folder that moved
+                   is published where it went by its own ops, and the layout
+                   files what is written under its old path by its id. *)
+                | Some id -> (
+                    let* moved =
+                      Folder_ids.key_of_id ~cache_root:C.cache_root
+                        ~domain_name:C.domain_name ~root:Lk.root id
+                    in
+                    match moved with
+                      | Some _ -> Io.return `Held
+                      | None ->
+                          Io.fail
+                            (Retry.failed ~kind:Retry.Transient ~op:"claim"
+                               (Logical_key.to_string key
+                              ^ ": removed here since")))
                 | None ->
                     let* () = claim_parent key in
                     let+ (_ : string) = ensure_folder_id key in

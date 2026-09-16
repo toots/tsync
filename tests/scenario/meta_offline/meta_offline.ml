@@ -283,5 +283,43 @@ let () =
      let* keys = journal_keys () in
      check "which follows" (List.mem "early" keys);
 
-     report ~expected:18 ();
+     (* Both ops are queued before either drains, so the rename into the folder
+        names it by a path it has left by the time it is published. *)
+     case "a file renamed into a folder that moves before it is published";
+     let* () = F.mkdir (Lk.dir "into") in
+     let* () = write "loose.txt" "foxtrot" in
+     let* () = settle () in
+     Mq.set_paused true;
+     let* () =
+       F.rename ~src:(Lk.file "loose.txt") ~dst:(Lk.file "into/loose.txt")
+     in
+     let* () = F.rename ~src:(Lk.dir "into") ~dst:(Lk.dir "moved-on") in
+     Mq.set_paused false;
+     let* () = settle () in
+     let* n = owed () in
+     let* names = root_markers () in
+     let* back = lookup "into" in
+     let* moved_on = lookup "moved-on" in
+     let* inside =
+       Real.list_prefix
+         ~prefix:(C.domain_prefix ^ Option.value moved_on ~default:"?" ^ "/")
+         ()
+     in
+     let inside =
+       List.filter
+         (fun (e : Backend.file_entry) ->
+           Stored_key.is_child_object e.Backend.key)
+         inside
+     in
+     step "objects under moved-on: %d" (List.length inside);
+     step "store: %s" (String.concat ", " names);
+     check "both are published" (n = 0);
+     check
+       "the file is filed in the folder under its new name, and the old one is \
+        not brought back"
+       (List.mem "moved-on" names
+       && (not (List.mem "into" names))
+       && back = None && inside <> []);
+
+     report ~expected:20 ();
      Lwt.return_unit)
