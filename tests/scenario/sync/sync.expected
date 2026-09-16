@@ -852,3 +852,43 @@
   file b.txt [<folder-2>/3c697ec236bbf61f-698ad1290042cc94] = manifest size=6 chunks=1 h1=4d9146b94e2350b5 h2=d271c5246fa6a5e0
     chunk#0 1a98ff662c842135-ee745726079032de size=6
 
+=== rename_folder_with_owed_upload
+  A: mkdir d
+  A: drain
+  A: uploads paused
+  A: write d/f.txt "owed"
+  A: rename d -> e
+  A: uploads running
+  A: drain
+  B: sync
+--- tree A
+  d e
+  f e/f.txt size=4 cached=0/1 uploaded=true etag=d483929c63df617d
+--- content A
+  e/f.txt = "owed"
+--- pending A
+--- tree B
+  d e
+  f e/f.txt size=4 cached=0/1 uploaded=true etag=d483929c63df617d
+--- content B
+  e/f.txt = "owed"
+--- pending B
+--- kept A
+  {"op":"mkdir","key":"d","id":"<folder-1>"}
+  {"op":"rename","key":"e","src":"d","is_dir":true,"id":"<folder-1>"}
+  {"op":"put","key":"e/f.txt","size":4}
+--- kept B
+  {"op":"mkdir","key":"d","id":"<folder-1>"}
+  {"op":"put","key":"e/f.txt","size":4}
+  {"op":"rename","key":"e","src":"d","is_dir":true,"id":"<folder-1>"}
+--- backend
+  chunk 5392d821e2ef6546-1d8e96417df95f17 size=4
+  cursor = <entry-3>
+  journal <entry-1> = mkdir d
+  journal <entry-2> = put e/f.txt 4
+  journal <entry-3> = rename d -> e dir
+  folder e [.tsync-root/e5e72e5e3bec4a78-6881790369f3a86a] -> <folder-1>
+  anchor <folder-1> in .tsync-root as e
+  file f.txt [<folder-1>/9b84998f74a137e7-901368d25b5bd524] = manifest size=4 chunks=1 h1=d483929c63df617d h2=2a546e64abb87ed8
+    chunk#0 5392d821e2ef6546-1d8e96417df95f17 size=4
+

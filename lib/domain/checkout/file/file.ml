@@ -274,10 +274,6 @@ struct
       ignore (cancel_upload key);
       D.truncate key size
 
-    let rename_local ~src ~dst =
-      let* () = Mfs.rename ~src_key:src ~dst_key:dst in
-      Ck.rename ~src_key:src ~dst_key:dst
-
     (* The caller's local half has happened; the backend's is the metadata
        queue's, which runs it whenever the store can be reached.
 
@@ -327,6 +323,39 @@ struct
             in
             let* () = W.write entry_key record in
             Owed.signal W.owed (entry_key, record)
+
+    (* A staged file that moves keeps the upload it was owed. The queued record
+       names the old path, which the upload gives up on once the bytes have gone
+       from there, so that one is cancelled and the new path queued.
+
+       Only what was owed is queued again: a file still open is queued when it
+       is closed. Answers the keys queued, for a caller deciding what else the
+       move needs. *)
+    let rename_local ~src ~dst =
+      let from = Logical_key.path src and onto = Logical_key.path dst in
+      let rebase key =
+        let rel = Logical_key.path key in
+        Lk.file
+          (onto
+          ^ String.sub rel (String.length from)
+              (String.length rel - String.length from))
+      in
+      let* moved =
+        match Logical_key.kind src with
+          | `File -> Io.return [(src, dst)]
+          | `Dir ->
+              let+ staged = Mfs.entries ~rel_dir:from ~deep:true in
+              List.map (fun (key, _) -> (key, rebase key)) staged
+      in
+      let owed =
+        List.filter_map
+          (fun (old, key) -> if cancel_upload old then Some key else None)
+          moved
+      in
+      let* () = Mfs.rename ~src_key:src ~dst_key:dst in
+      let* () = Ck.rename ~src_key:src ~dst_key:dst in
+      let+ () = iter_s queue_put owed in
+      owed
 
     (* The record already exists and already names this work; writing it under
        its own key is what keeps one unit of work to one key across a restart. *)
@@ -513,7 +542,7 @@ struct
             queue_put dst
         | Some (`Published m) ->
             let conflict = conflict_key dst in
-            let* () =
+            let* (_ : Logical_key.t list) =
               with_meta (fun () -> rename_local ~src:dst ~dst:conflict)
             in
             publish_manifest conflict m
@@ -533,7 +562,9 @@ struct
        rather than having its marker written over the other's. *)
     let rename_dir_aside ~src ~dst ~id =
       let conflict = conflict_key dst in
-      let* () = with_meta (fun () -> rename_local ~src:dst ~dst:conflict) in
+      let* (_ : Logical_key.t list) =
+        with_meta (fun () -> rename_local ~src:dst ~dst:conflict)
+      in
       with_journal
         [
           `Rename
@@ -614,7 +645,6 @@ struct
       let as_dir k = if is_dir then Lk.dir (Logical_key.path k) else k in
       let src = as_dir src in
       let dst = as_dir dst in
-      let src_was_uploading = cancel_upload src in
       ignore (cancel_upload dst);
       (* Staged size wins: it is what a peer will fetch next. *)
       let* size =
@@ -635,7 +665,7 @@ struct
           ()
         else return_unit
       in
-      let* () = rename_local ~src ~dst in
+      let* requeued = rename_local ~src ~dst in
       (* Read after the move, where the folder now is. *)
       let* dir_id =
         if is_dir then
@@ -644,7 +674,9 @@ struct
         else Io.return None
       in
       let* dst_staged = Mfs.exists dst in
-      if src_was_uploading && dst_staged then queue_put dst
+      (* Never published under its old name: its upload, now under the new one,
+         is all it owes. *)
+      if List.mem dst requeued && dst_staged then return_unit
       else
         with_journal
           [
@@ -821,8 +853,7 @@ struct
       let* () =
         if staged then (
           let conflict = conflict_key key in
-          ignore (cancel_upload key);
-          let* () = rename_local ~src:key ~dst:conflict in
+          let* (_ : Logical_key.t list) = rename_local ~src:key ~dst:conflict in
           queue_put conflict)
         else return_unit
       in
@@ -852,7 +883,7 @@ struct
        through {!rename}. *)
     let rename_ours_aside ~dst ~ours =
       let conflict = conflict_key dst in
-      let* () = rename_local ~src:dst ~dst:conflict in
+      let* (_ : Logical_key.t list) = rename_local ~src:dst ~dst:conflict in
       with_journal
         [
           `Rename
@@ -873,7 +904,7 @@ struct
        folder where it now is. *)
     let retire_stale_copy ~src ~dst =
       let conflict = conflict_key src in
-      let* () = rename_local ~src ~dst:conflict in
+      let* (_ : Logical_key.t list) = rename_local ~src ~dst:conflict in
       let* () =
         Folders.forget ~cache_root:C.cache_root ~domain_name:C.domain_name
           conflict
@@ -920,8 +951,9 @@ struct
                         retire_stale_copy ~src:src_key ~dst:dst_key
                     | `Another_folder ours ->
                         let* () = rename_ours_aside ~dst:dst_key ~ours in
-                        rename_local ~src:src_key ~dst:dst_key
-                    | `Free -> rename_local ~src:src_key ~dst:dst_key)
+                        Io.map ignore (rename_local ~src:src_key ~dst:dst_key)
+                    | `Free ->
+                        Io.map ignore (rename_local ~src:src_key ~dst:dst_key))
             else return_unit
         | `Rename { Journal.src; dst; is_dir = false; _ } ->
             let src_key = Lk.file src in
@@ -930,7 +962,7 @@ struct
             if exists then
               unless_staged src_key (fun () ->
                   let* () = adopt_ancestor_ids dst in
-                  rename_local ~src:src_key ~dst:dst_key)
+                  Io.map ignore (rename_local ~src:src_key ~dst:dst_key))
             else
               unless_staged dst_key (fun () ->
                   (* No local src (e.g. we renamed it ourselves and published the
