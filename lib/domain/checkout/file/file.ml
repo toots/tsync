@@ -538,23 +538,39 @@ struct
 
     (* The trash marker a removal leaves, built from the entry: the folder's own
        id outlives its marker nowhere else. *)
+    (* Whether the store was ever told of a folder: an anchor anywhere, or, for
+       one written before anchors were, its marker where the op found it. *)
+    let ever_published ~bkey id =
+      let* anchor = St.get_anchor ~folder_id:id in
+      match anchor with
+        | Some _ -> return_true
+        | None ->
+            let+ there = St.marker_id_at ~bkey in
+            there = Some id
+
+    (* Answers whether there was anything to retire: a folder removed before
+       the store heard of it leaves nothing there, and nothing for a peer. *)
     let rmdir_remote rel fid =
       let key = Lk.dir rel in
       let name = Filename.basename rel in
       let* old_marker = old_marker_or_fail key in
-      let trash_key =
-        Stored_key.under
-          (Stored_key.trash_namespace ~prefix:C.domain_prefix)
-          (Id.short ())
-      in
-      let marker = Folder.trash_marker_to_string ~name ~id:fid ~path:rel in
-      (* Anchored to the trash before the live marker goes, so the marker is
+      let* published = ever_published ~bkey:old_marker fid in
+      if not published then return_false
+      else (
+        let trash_key =
+          Stored_key.under
+            (Stored_key.trash_namespace ~prefix:C.domain_prefix)
+            (Id.short ())
+        in
+        let marker = Folder.trash_marker_to_string ~name ~id:fid ~path:rel in
+        (* Anchored to the trash before the live marker goes, so the marker is
          stale from here whether or not its delete lands. *)
-      let* () =
-        St.put_anchor ~folder_id:fid ~parent:Stored_key.trash_id ~name
-      in
-      let* () = St.put_raw ~bkey:trash_key ~data:marker in
-      remove_old_marker key old_marker ~id:fid
+        let* () =
+          St.put_anchor ~folder_id:fid ~parent:Stored_key.trash_id ~name
+        in
+        let* () = St.put_raw ~bkey:trash_key ~data:marker in
+        let+ () = remove_old_marker key old_marker ~id:fid in
+        true)
 
     (* A peer removed the source while the rename was owed. The local side moved
        long ago and may have been worked in since, so it keeps a name of its own
@@ -629,6 +645,8 @@ struct
             St.placed ~folder_id:id
               ~at:{ Folder.parent; name = Logical_key.leaf key }
 
+    (* Answers whether the rename is published: a folder the store never heard
+       of has nothing to move. *)
     let rename_remote (r : Journal.rename_op) =
       let is_dir = r.Journal.is_dir in
       let key rel = if is_dir then Lk.dir rel else Lk.file rel in
@@ -652,24 +670,29 @@ struct
           (* Already filed where it is: a creation published after this rename
              was recorded put it there, under a conflicted name if this one was
              taken, and there is nothing left to move. *)
-          if placed = `Here then return_unit
+          if placed = `Here then return_true
           else
             let* old_marker = old_marker_or_fail src in
-            let* taken = taken_by_another ~dst ~id in
-            if taken then
-              let* () = rename_dir_aside ~src ~dst ~id in
-              (* Superseded by the rename to the conflicted name. *)
-              Io.fail Retry.Cancelled
+            let* published = ever_published ~bkey:old_marker id in
+            if not published then return_false
             else
-              (* The new place first, anchor and marker, then the old marker: a
-               crash between the two leaves a stale marker readers skip, not a
-               folder nobody lists. *)
-              let* () = St.put_folder_marker ~key:dst in
-              remove_old_marker src old_marker ~id
+              let* taken = taken_by_another ~dst ~id in
+              if taken then
+                let* () = rename_dir_aside ~src ~dst ~id in
+                (* Superseded by the rename to the conflicted name. *)
+                Io.fail Retry.Cancelled
+              else
+                (* The new place first, anchor and marker, then the old marker:
+                   a crash between the two leaves a stale marker readers skip,
+                   not a folder nobody lists. *)
+                let* () = St.put_folder_marker ~key:dst in
+                let+ () = remove_old_marker src old_marker ~id in
+                true
         else
           let* () = save_version src in
           let* () = Js.rename_file ~src_key:src ~dst_key:dst in
-          resync_manifest_name dst
+          let+ () = resync_manifest_name dst in
+          true
       in
       Io.catch move (fun exn ->
           (* A directory's move cannot find its source gone: its marker is put
@@ -686,8 +709,9 @@ struct
 
     (* Published where the folder now is, or not at all: a folder removed
        before the store heard of it is not brought back, and one the store
-       already files elsewhere was moved by an op that says so. A name another folder took sends ours aside under a
-       conflicted name, same id, and it is claimed there. *)
+       already files elsewhere was moved by an op that says so. A name another
+       folder took sends ours aside under a conflicted name, same id, and it is
+       claimed there. *)
     let rec mkdir_remote rel id =
       let* place = current_place rel id in
       match place with
@@ -728,14 +752,14 @@ struct
             let+ () = St.put_folder_marker ~key:(Lk.dir rel) in
             [op]
         | `Rmdir (rel, Some fid) ->
-            let+ () = rmdir_remote rel fid in
-            [op]
+            let+ published = rmdir_remote rel fid in
+            if published then [op] else []
         | `Rmdir (rel, None) ->
             Log.err "rmdir %s: the entry carries no folder id" rel;
             Io.return [op]
         | `Rename r ->
-            let+ () = rename_remote r in
-            [op]
+            let+ published = rename_remote r in
+            if published then [op] else []
 
     let backend_ops ops =
       let+ published = map_s backend_op ops in

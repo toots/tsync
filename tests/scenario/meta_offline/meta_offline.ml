@@ -219,6 +219,12 @@ let () =
      in
      let* moved_id = lookup "moved2" in
      check "a new folder renamed makes no round trip" (calls = 0);
+     let* (_ : unit Lwt.t * int) =
+       offline "mkdir brief; rename brief -> brief2; rmdir brief2" (fun () ->
+           let* () = F.mkdir (Lk.dir "brief") in
+           let* () = F.rename ~src:(Lk.dir "brief") ~dst:(Lk.dir "brief2") in
+           F.rmdir (Lk.dir "brief2"))
+     in
 
      case "the link comes back";
      Link.set_up true;
@@ -235,6 +241,26 @@ let () =
        (not (List.mem "gone" names));
      let* _, dirs = Ck.list_children ~prefix:Lk.root () in
      check "nor brought back here" (not (List.mem "gone" dirs));
+     let* keys = journal_keys () in
+     let* trash =
+       Real.list_prefix
+         ~prefix:
+           (Stored_key.to_string
+              (Stored_key.trash_namespace ~prefix:C.domain_prefix))
+         ()
+     in
+     let trashed =
+       List.filter
+         (fun (e : Backend.file_entry) ->
+           Stored_key.is_child_object e.Backend.key)
+         trash
+     in
+     step "trash entries: %d" (List.length trashed);
+     check
+       "and neither its removal nor a rename of one is published, nor trashed"
+       ((not
+           (List.exists (fun k -> List.mem k ["gone"; "brief"; "brief2"]) keys))
+       && List.length trashed = 1);
      let* still = lookup "moved2" in
      check
        "a folder renamed before the store heard of it is filed where it is, \
@@ -321,5 +347,5 @@ let () =
        && (not (List.mem "into" names))
        && back = None && inside <> []);
 
-     report ~expected:20 ();
+     report ~expected:21 ();
      Lwt.return_unit)
