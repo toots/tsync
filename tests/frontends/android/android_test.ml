@@ -102,26 +102,25 @@ let scrub_clock s =
    etag is its own id and follows, while a file's is a content hash, which is
    stable and worth reading. *)
 let seen_ids : (string, string) Hashtbl.t = Hashtbl.create 8
-let is_hex c = match c with '0' .. '9' | 'a' .. 'f' -> true | _ -> false
 
-let hex_at s i =
-  i + 16 <= String.length s
-  &&
-  let rec all j = j = 16 || (is_hex s.[i + j] && all (j + 1)) in
-  all 0
+let is_id_char c =
+  match c with '0' .. '9' | 'a' .. 'f' | '-' -> true | _ -> false
+
+(* The run of id characters from [i]; a file reference's ends at its '/'. *)
+let run_at s i =
+  let j = ref i in
+  while !j < String.length s && is_id_char s.[!j] do
+    incr j
+  done;
+  String.sub s i (!j - i)
 
 (* Learn the ids from the reference forms, then replace those and nothing else. *)
 let scrub_ids s =
   String.iteri
     (fun i c ->
-      if
-        (c = 'd' || c = 'f')
-        && i + 1 < String.length s
-        && s.[i + 1] = ':'
-        && hex_at s (i + 2)
-      then (
-        let id = String.sub s (i + 2) 16 in
-        if not (Hashtbl.mem seen_ids id) then
+      if (c = 'd' || c = 'f') && i + 1 < String.length s && s.[i + 1] = ':' then (
+        let id = run_at s (i + 2) in
+        if id <> "" && not (Hashtbl.mem seen_ids id) then
           Hashtbl.replace seen_ids id
             (Printf.sprintf "<id%d>" (Hashtbl.length seen_ids + 1))))
     s;
@@ -129,9 +128,11 @@ let scrub_ids s =
   let buf = Buffer.create h in
   let rec go i =
     if i >= h then Buffer.contents buf
-    else if hex_at s i && Hashtbl.mem seen_ids (String.sub s i 16) then begin
-      Buffer.add_string buf (Hashtbl.find seen_ids (String.sub s i 16));
-      go (i + 16)
+    else if (i = 0 || not (is_id_char s.[i - 1])) && is_id_char s.[i] then begin
+      let run = run_at s i in
+      Buffer.add_string buf
+        (Option.value (Hashtbl.find_opt seen_ids run) ~default:run);
+      go (i + String.length run)
     end
     else begin
       Buffer.add_char buf s.[i];

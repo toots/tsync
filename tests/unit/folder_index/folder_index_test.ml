@@ -85,13 +85,13 @@ module Two =
 
 module Tree_two = Inode_tree_lwt.Make (Two)
 
-let folder = Stored_key.new_id ()
+let folder = Id.short ()
 
 let manifest name =
   Manifest.encode ~name ~size:0L ~chunk_size:4 ~mtime:0.
     ~h1:(String.make 16 'a') ~h2:(String.make 16 'b') ~symlink:None ~keys:[]
 
-let other = Stored_key.new_id ()
+let other = Id.short ()
 
 let write_in folder_id name body =
   Store.put

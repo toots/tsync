@@ -4,7 +4,11 @@ module type S = sig
   val marker_name : string
 
   val ensure_id :
-    cache_root:string -> domain_name:string -> Logical_key.t -> string io
+    mint:(unit -> string) ->
+    cache_root:string ->
+    domain_name:string ->
+    Logical_key.t ->
+    string io
 
   val lookup_id :
     cache_root:string -> domain_name:string -> Logical_key.t -> string option io
@@ -98,10 +102,18 @@ module Over (Io : Io.S) (F : Fs.S with type 'a io := 'a Io.t) = struct
     let* () = F.ensure_parent path in
     F.atomic_write path (entry_to_string entry)
 
+  (* What a read must use: minting here would persist a marker that re-creates the
+     local directory, which is how a deleted folder comes back from a stat. *)
+  let lookup_id ~cache_root ~domain_name key =
+    if Logical_key.is_root key then return_some Stored_key.root_id
+    else
+      let+ existing = read ~cache_root ~domain_name key in
+      Option.map (fun m -> m.Folder.id) existing
+
   (* The name comes from where the folder actually sits, not from the marker being
      written: a marker that travelled with a renamed directory still carries the old
      leaf, and the index has to spell the path back out. *)
-  let rec write ~cache_root ~domain_name key (m : Folder.marker) =
+  let write ~cache_root ~domain_name key (m : Folder.marker) =
     let dir = dir_of ~cache_root ~domain_name key in
     let* () = F.mkdir_p dir in
     (* Rewritten rather than kept, so a sweep by mtime after a rebuild sees the
@@ -121,33 +133,29 @@ module Over (Io : Io.S) (F : Fs.S with type 'a io := 'a Io.t) = struct
     in
     if Logical_key.is_root key then return_unit
     else
+      (* Looked up rather than minted: a parent without an id is one this client
+         has not been told of, and naming it here would fork a namespace the
+         store already holds under another id. Unindexed until it is recorded. *)
       let* parent =
-        ensure_id ~cache_root ~domain_name (Logical_key.parent key)
+        lookup_id ~cache_root ~domain_name (Logical_key.parent key)
       in
-      write_entry ~cache_root ~domain_name ~id:m.Folder.id
-        { parent; name = Logical_key.leaf key }
+      match parent with
+        | Some parent ->
+            write_entry ~cache_root ~domain_name ~id:m.Folder.id
+              { parent; name = Logical_key.leaf key }
+        | None -> return_unit
 
   (* Mints and persists a marker, so this is for the write paths only. *)
-  and ensure_id ~cache_root ~domain_name key =
+  let ensure_id ~mint ~cache_root ~domain_name key =
     if Logical_key.is_root key then Io.return Stored_key.root_id
     else
       let* existing = read ~cache_root ~domain_name key in
       match existing with
         | Some m -> Io.return m.Folder.id
         | None ->
-            let m =
-              { Folder.name = Logical_key.leaf key; id = Stored_key.new_id () }
-            in
+            let m = { Folder.name = Logical_key.leaf key; id = mint () } in
             let+ () = write ~cache_root ~domain_name key m in
             m.Folder.id
-
-  (* What a read must use: minting here would persist a marker that re-creates the
-     local directory, which is how a deleted folder comes back from a stat. *)
-  let lookup_id ~cache_root ~domain_name key =
-    if Logical_key.is_root key then return_some Stored_key.root_id
-    else
-      let+ existing = read ~cache_root ~domain_name key in
-      Option.map (fun m -> m.Folder.id) existing
 
   (* Describing a removal is the one read that must answer for a folder the
      mirror has already dropped, and it names what is going away rather than

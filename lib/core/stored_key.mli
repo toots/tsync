@@ -12,11 +12,8 @@ val root_id : string
 (** Where a deleted folder's marker moves: unreachable from the root, so the
     subtree leaves listings and resync until [expire] drops it. Both reserved
     ids share the [.tsync-] sentinel used for internal markers, so neither
-    collides with a folder id, which is random hex. *)
+    collides with a folder id, which is [<12 hex>-<counter>]. *)
 val trash_id : string
-
-(** Minted at mkdir. *)
-val new_id : unit -> string
 
 (** {1 The name itself}
 

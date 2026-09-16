@@ -140,7 +140,7 @@ let is_dir = function
 let () =
   Lwt_main.run
     (case "an emptied namespace has no children";
-     let emptied = Stored_key.new_id () in
+     let emptied = Id.short () in
      let* () = put emptied "gone" (manifest_body "gone.txt") in
      let* (_ : bool) =
        Store.delete ~key:(Stored_key.in_space ~prefix:(ns emptied) "gone") ()
@@ -156,19 +156,18 @@ let () =
      check "and it yields no children" (children = []);
 
      case "children are classified by their body";
-     let mixed = Stored_key.new_id () in
+     let mixed = Id.short () in
      let* () = put mixed "a" (manifest_body "a.txt") in
      let* () =
        put mixed "b"
-         (Folder.marker_to_string
-            { Folder.name = "sub"; id = Stored_key.new_id () })
+         (Folder.marker_to_string { Folder.name = "sub"; id = Id.short () })
      in
      let* children = Tree.children ~folder_id:mixed () in
      check "one manifest" (List.length (List.filter is_file children) = 1);
      check "one marker" (List.length (List.filter is_dir children) = 1);
 
      case "an unusable body is reported, not raised";
-     let junk = Stored_key.new_id () in
+     let junk = Id.short () in
      let* () = put junk "a" (manifest_body "a.txt") in
      let* () = put junk "bad" "neither a marker nor a manifest" in
      let seen = ref [] in
@@ -190,7 +189,7 @@ let () =
      check "and `Fail skips it just the same" (List.length children = 1);
 
      case "one object that will not read does not cost its siblings";
-     let flaky = Stored_key.new_id () in
+     let flaky = Id.short () in
      let* () = put flaky "good" (manifest_body "good.txt") in
      let* () = put flaky "other" (manifest_body "other.txt") in
      let* () = put flaky "nope" (manifest_body "nope.txt") in
@@ -220,9 +219,9 @@ let () =
 
      case "a walk fetches folders ahead of visiting them, in visit order";
      (* A root of eight folders holding seven each: 65 folders, 64 files. *)
-     let top = Stored_key.new_id () in
+     let top = Id.short () in
      let mkdir parent name =
-       let id = Stored_key.new_id () in
+       let id = Id.short () in
        let+ () =
          put parent name (Folder.marker_to_string { Folder.name; id })
        in
@@ -336,8 +335,8 @@ let () =
      case "a marker the folder's anchor contradicts is skipped and reported";
      (* The 2026-09-03 shape: one folder, a marker under two parents. The
         anchor names one of them, so the other marker is a leftover. *)
-     let home = Stored_key.new_id () and away = Stored_key.new_id () in
-     let shared = Stored_key.new_id () in
+     let home = Id.short () and away = Id.short () in
+     let shared = Id.short () in
      let marker =
        Folder.marker_to_string { Folder.name = "songs"; id = shared }
      in
@@ -370,8 +369,8 @@ let () =
      check "and `Fail skips it just the same" (under_fail = []);
 
      case "a folder with no anchor is taken at its marker's word";
-     let old_home = Stored_key.new_id () and old_away = Stored_key.new_id () in
-     let old = Stored_key.new_id () in
+     let old_home = Id.short () and old_away = Id.short () in
+     let old = Id.short () in
      let marker =
        Folder.marker_to_string { Folder.name = "legacy"; id = old }
      in

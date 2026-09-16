@@ -300,11 +300,17 @@ let sort_key k =
            | None -> part)
        (String.split_on_char '/' k))
 
-(* A minted id is 16 lowercase hex characters. Distinguishes one from a name or
-   from the [root_id]/[trash_id] constants. *)
+(* A minted folder id is [<12 hex>-<hex>]. Distinguishes one from a name, from
+   the [root_id]/[trash_id] constants, and from a child's [<16 hex>-<16 hex>]
+   leaf. *)
 let is_minted_id s =
-  String.length s = 16
-  && String.for_all (function '0' .. '9' | 'a' .. 'f' -> true | _ -> false) s
+  let hex =
+    String.for_all (function '0' .. '9' | 'a' .. 'f' -> true | _ -> false)
+  in
+  String.length s > 13
+  && s.[12] = '-'
+  && hex (String.sub s 0 12)
+  && hex (String.sub s 13 (String.length s - 13))
 
 (* A folder id, alone or leading a "<id>/<leaf>" cursor. A folder's own page
    cursor is a plain name and passes through. *)

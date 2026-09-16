@@ -1,0 +1,17 @@
+
+=== one id
+names the client by the first 12 hex of its uuid: ok
+and a counter in hex after it: ok
+
+=== processes minting at once
+  8232 ids from 4 processes
+each process minted what it was asked: ok
+and no two ids are the same: ok
+
+=== a process started later
+counts on from above everything minted before: ok
+
+=== processes naming a new client at once
+all read one uuid: ok
+
+6 check(s), 0 failure(s)
