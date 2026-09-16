@@ -70,4 +70,23 @@ the folder is anchored under the root: ok
 it applied: ok
 the folder takes no id from the stale marker: ok
 
-29 check(s), 0 failure(s)
+=== a peer's folder op leaves alone a folder holding another id
+  apply a peer's rename m -> m2 and rmdir m, of another folder: succeeded
+it applied: ok
+ours is where it was, with its id: ok
+
+=== a peer's mkdir onto a folder of ours moves ours aside
+  apply a peer's mkdir m: succeeded
+  local m: <folder-8>, copy: <folder-7>
+  root after: m (conflicted copy from test)=<folder-7>, p=<folder-2>, s=<folder-6>, stale=<folder-6>, w=<folder-5>, x=<folder-3>, y=<folder-5>, y (conflicted copy 2 from test)=<folder-3>, y (conflicted copy from test)=<folder-4>
+it applied: ok
+the peer's folder has the name and its id: ok
+ours keeps its id under a name of its own: ok
+and the store is told ours moved: ok
+
+=== a peer's mkdir of a folder that lives here under another name
+  apply a peer's mkdir gone, naming ours: succeeded
+it applied: ok
+nothing is created, and the id still names ours: ok
+
+37 check(s), 0 failure(s)

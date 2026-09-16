@@ -848,11 +848,11 @@ struct
             | None -> adopt_folder_id (Logical_key.path dir))
         (ancestors [] (Lk.dir rel))
 
-    (* A foreign op must never clobber unsynced local edits. The staged manifest
-       is that flag and survives a restart. *)
-    (* For a folder, "staged" means a staged manifest somewhere under it. The
-       folder's own path in the staged tree proves nothing: a file written here
-       leaves its directory behind, empty, once the upload publishes. *)
+    (* A foreign op must never clobber unsynced local edits, and a staged
+       manifest is that flag.
+
+       For a folder it means one somewhere under it: a file written there
+       leaves its directory behind, empty, once it publishes. *)
     let unless_staged key f =
       let* staged =
         match Logical_key.kind key with
@@ -928,6 +928,33 @@ struct
       (* [rename_local] pointed the shared id at the copy; this points it back. *)
       Folders.reparent ~cache_root:C.cache_root ~domain_name:C.domain_name dst
 
+    (* A peer's folder op names its folder by id, and a local folder holding
+       another id at that path is a different folder the op must leave alone. *)
+    let another_folder_at key id =
+      match id with
+        | None -> Io.return None
+        | Some id -> (
+            let+ held =
+              Folders.lookup_id ~cache_root:C.cache_root
+                ~domain_name:C.domain_name key
+            in
+            match held with Some held when held <> id -> Some held | _ -> None)
+
+    (* The folder a peer created already lives here under another path: a
+       rename moved it before this entry arrived, and creating it again would
+       put its id at two places. *)
+    let lives_elsewhere key id =
+      match id with
+        | None -> return_false
+        | Some id ->
+            let+ found =
+              Folders.key_of_id ~cache_root:C.cache_root
+                ~domain_name:C.domain_name ~root:Lk.root id
+            in
+            Option.fold ~none:false
+              ~some:(fun found -> not (Logical_key.equal found key))
+              found
+
     (* Failures propagate: the sync poller must not advance its high-water mark
        past an entry it could not apply, or the op is lost until a full resync. *)
     let apply_one op =
@@ -949,16 +976,36 @@ struct
             staged_aside key (fun () ->
                 ignore (cancel_upload key);
                 clear_local key)
-        | `Mkdir (rel, id) ->
-            let* () = Ck.create_dir (Lk.dir rel) in
-            let* () = adopt_ancestor_ids rel in
-            adopt_folder_id ?id rel
-        | `Rmdir (rel, _) -> Ck.delete_dir (Lk.dir rel)
+        | `Mkdir (rel, id) -> (
+            let key = Lk.dir rel in
+            let* elsewhere = lives_elsewhere key id in
+            if elsewhere then return_unit
+            else
+              let* () = adopt_ancestor_ids rel in
+              let* taken = another_folder_at key id in
+              match (taken, id) with
+                | Some ours, Some id ->
+                    (* The store still files ours under this name until the
+                       queued rename lands, so the op's id is taken as is. *)
+                    let* () = rename_ours_aside ~dst:key ~ours in
+                    let* () = Ck.create_dir key in
+                    Io.map ignore
+                      (Folders.write ~cache_root:C.cache_root
+                         ~domain_name:C.domain_name key
+                         { Folder.name = Logical_key.leaf key; id })
+                | _ ->
+                    let* () = Ck.create_dir key in
+                    adopt_folder_id ?id rel)
+        | `Rmdir (rel, id) ->
+            let key = Lk.dir rel in
+            let* taken = another_folder_at key id in
+            if taken <> None then return_unit else Ck.delete_dir key
         | `Rename { Journal.src; dst; is_dir = true; id; _ } ->
             let src_key = Lk.dir src in
             let dst_key = Lk.dir dst in
             let* exists = Syscalls.file_exists (manifest_path src_key) in
-            if exists then
+            let* taken = another_folder_at src_key id in
+            if exists && taken = None then
               unless_staged src_key (fun () ->
                   let* () = adopt_ancestor_ids dst in
                   let* found = at_destination ~dst:dst_key ~id in

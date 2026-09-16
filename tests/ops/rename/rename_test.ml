@@ -378,6 +378,71 @@ let () =
      check "it applied" ok;
      check "the folder takes no id from the stale marker" (at_stale = None);
 
-     report ~expected:29 ();
+     case "a peer's folder op leaves alone a folder holding another id";
+     let* () = F.mkdir (Lk.dir "m") in
+     let* () = settle () in
+     let* m_id = lookup "m" in
+     let m_id = Option.get m_id in
+     let dir_op id = Some ("peer-" ^ id) in
+     let* ok =
+       attempt "apply a peer's rename m -> m2 and rmdir m, of another folder"
+         (fun () ->
+           F.apply_foreign_ops
+             [
+               `Rename
+                 Journal.
+                   {
+                     src = "m";
+                     dst = "m2";
+                     size = None;
+                     is_dir = true;
+                     id = dir_op "other";
+                   };
+               `Rmdir ("m", dir_op "other");
+             ])
+     in
+     let* dirs = local_dirs () in
+     let* at_m = lookup "m" in
+     check "it applied" ok;
+     check "ours is where it was, with its id"
+       (List.mem "m" dirs && (not (List.mem "m2" dirs)) && at_m = Some m_id);
+
+     case "a peer's mkdir onto a folder of ours moves ours aside";
+     let* ok =
+       attempt "apply a peer's mkdir m" (fun () ->
+           F.apply_foreign_ops [`Mkdir ("m", dir_op "mkdir")])
+     in
+     let* dirs = local_dirs () in
+     let* at_m = lookup "m" in
+     let* at_copy = lookup "m (conflicted copy from test)" in
+     step "local m: %s, copy: %s"
+       (Option.fold ~none:"none" ~some:alias at_m)
+       (Option.fold ~none:"none" ~some:alias at_copy);
+     let* after = show_markers "root after" Stored_key.root_id in
+     check "it applied" ok;
+     check "the peer's folder has the name and its id"
+       (List.mem "m" dirs && at_m = dir_op "mkdir");
+     check "ours keeps its id under a name of its own"
+       (at_copy = Some m_id);
+     check "and the store is told ours moved"
+       (List.assoc_opt "m (conflicted copy from test)" after = Some m_id
+       && not (List.mem_assoc "m" after));
+
+     case "a peer's mkdir of a folder that lives here under another name";
+     let* ok =
+       attempt "apply a peer's mkdir gone, naming ours" (fun () ->
+           F.apply_foreign_ops [`Mkdir ("gone", Some m_id)])
+     in
+     let* dirs = local_dirs () in
+     let* named =
+       Folder_ids_lwt.key_of_id ~cache_root:root ~domain_name:C.domain_name
+         ~root:Lk.root m_id
+     in
+     check "it applied" ok;
+     check "nothing is created, and the id still names ours"
+       ((not (List.mem "gone" dirs))
+       && named = Some (Lk.dir "m (conflicted copy from test)"));
+
+     report ~expected:37 ();
      Lwt.return_unit);
   Scratch.cleanup root
