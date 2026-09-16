@@ -40,6 +40,8 @@
   tsync_backend_lwt
   tsync_local_backend_lwt
   tsync_cache_layout
+  tsync_checkout
+  tsync_checkout_lwt
   tsync_io
   unix
   lwt

@@ -307,5 +307,37 @@ let () =
        ~why:(fun () -> "a partial walk advanced the mark");
      check "nor was anything swept" (Sys.file_exists (mirror_path "gone.txt"));
 
-     report ~expected:27 ();
+     (* A daemon's owed mkdir is on disk and nowhere else this process could
+        drain it from; the store has never heard of the folder, so a rebuild
+        would take it away. *)
+     case "a rebuild waits for metadata this client still owes";
+     broken := Stored_key.listed "";
+     let module W = Tsync_checkout_lwt.Wal_lwt.Make (C) in
+     let module J = Journal.Make (C) in
+     plant (dir_marker "owed") (marker "Z" "owed");
+     let entry_key = J.entry_key () in
+     let* () =
+       W.write entry_key
+         {
+           Tsync_checkout.Wal.ops = [`Mkdir ("owed", Some "Z")];
+           state = Tsync_checkout.Wal.Prepared;
+           attempts = 0;
+           last_error = None;
+         }
+     in
+     let* refused =
+       Lwt.catch
+         (fun () ->
+           let+ outcome = run ~full:true () in
+           step "%s" (describe outcome);
+           None)
+         (fun exn -> Lwt.return_some (Printexc.to_string exn))
+     in
+     Option.iter (step "refused: %s") refused;
+     check "it is refused" (refused <> None);
+     check "and the folder is left as it was"
+       (Sys.file_exists (dir_marker "owed"));
+     let* () = W.complete entry_key in
+
+     report ~expected:29 ();
      Lwt.return_unit)

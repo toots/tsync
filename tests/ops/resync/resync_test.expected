@@ -63,4 +63,9 @@ the failure is counted: ok
 and the bookmark did not move: ok
 nor was anything swept: ok
 
-27 check(s), 0 failure(s)
+=== a rebuild waits for metadata this client still owes
+  refused: Failure("1 metadata operation(s) are not published yet, and a rebuild would undo them; run this again once they are")
+it is refused: ok
+and the folder is left as it was: ok
+
+29 check(s), 0 failure(s)
