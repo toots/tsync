@@ -36,6 +36,10 @@ module type S = sig
   val put_folder_marker : key:Logical_key.t -> unit io
   val put_anchor : folder_id:string -> parent:string -> name:string -> unit io
   val get_anchor : folder_id:string -> Folder.anchor option io
+
+  val filed :
+    bkey:Stored_key.t -> Folder.marker -> [ `Here | `Elsewhere of Folder.anchor ] io
+
   val list_namespace : folder_id:string -> Backend.file_entry list io
   val get_object : bkey:Stored_key.t -> string io
   val get_object_opt : bkey:Stored_key.t -> string option io
@@ -142,6 +146,15 @@ module Over (Io : Io.S) (Batched : BATCHED with type 'a io := 'a Io.t) = struct
       let+ body = B.get_opt ~key:(anchor_key folder_id) () in
       Option.bind body (fun b ->
           Folder.anchor_of_string (Bigstring.to_string b))
+
+    let filed ~bkey (m : Folder.marker) =
+      let+ anchor = get_anchor ~folder_id:m.Folder.id in
+      match anchor with
+        | Some a
+          when a.Folder.parent <> Stored_key.parent_folder_id bkey
+               || a.Folder.name <> m.Folder.name ->
+            `Elsewhere a
+        | _ -> `Here
 
     (* The anchor first: from then on any other marker naming this folder is
        stale, whether or not the delete that should remove it ever lands. *)

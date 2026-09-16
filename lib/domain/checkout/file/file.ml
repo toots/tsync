@@ -812,16 +812,12 @@ struct
                   let* data = St.get_object ~bkey:marker_key in
                   match Folder.marker_of_string data with
                     | Some m -> (
-                        (* A marker the folder's own anchor contradicts is one
-                           a move left behind: adopting its id would file this
+                        (* Adopting a marker a move left behind would file this
                            path under a folder that lives elsewhere. *)
-                        let* anchor = St.get_anchor ~folder_id:m.Folder.id in
-                        match anchor with
-                          | Some a
-                            when a.Folder.parent
-                                 <> Stored_key.parent_folder_id marker_key ->
-                              from_op ()
-                          | _ -> write m.Folder.id)
+                        let* filed = St.filed ~bkey:marker_key m in
+                        match filed with
+                          | `Elsewhere _ -> from_op ()
+                          | `Here -> write m.Folder.id)
                     | None -> from_op ())
                 (fun _ -> from_op ()))
 
