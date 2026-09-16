@@ -25,10 +25,22 @@ let seed_from_kernel () =
     | exception _ ->
         [| Unix.getpid (); int_of_float (Unix.gettimeofday () *. 1e6) |]
 
-let state = ref (Random.State.make (seed_from_kernel ()))
+(* Tagged with the process that seeded it: a forked child inherits the state
+   and would otherwise draw exactly its parent's sequence. *)
+let seeded = ref (Unix.getpid (), Random.State.make (seed_from_kernel ()))
+
+let state () =
+  let pid = Unix.getpid () in
+  match !seeded with
+    | owner, state when owner = pid -> state
+    | _ ->
+        let state = Random.State.make (seed_from_kernel ()) in
+        seeded := (pid, state);
+        state
 
 (* 64 bits: enough that the staged bodies alive at any moment never collide. *)
 let short () =
+  let state = state () in
   Printf.sprintf "%08Lx%08Lx"
-    (Random.State.int64 !state 0x1_0000_0000L)
-    (Random.State.int64 !state 0x1_0000_0000L)
+    (Random.State.int64 state 0x1_0000_0000L)
+    (Random.State.int64 state 0x1_0000_0000L)

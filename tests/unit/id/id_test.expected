@@ -1,0 +1,7 @@
+
+=== a forked child
+draws ids its parent does not: ok
+and so does the next child: ok
+of the same shape: ok
+
+3 check(s), 0 failure(s)
