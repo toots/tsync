@@ -281,7 +281,15 @@ struct
       in
       W.discharge
         ~publish:(fun ek ops -> Js.write_journal_entry ~entry_key:ek ops)
-        ~cursor:Js.bump_cursor ek ops
+        (* [bump_cursor] publishes inline once the cursor has been quiet, which
+           is a round trip under {!with_meta} and so in a FUSE handler's path.
+
+           Safe to defer because every caller here is the daemon, whose drain
+           flushes what the timer has not. *)
+        ~cursor:(fun ek ->
+          Js.note_cursor ek;
+          return_unit)
+        ek ops
 
     let save_version key =
       if C.versioning then Hs.save_version ~key else return_unit
