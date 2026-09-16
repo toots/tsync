@@ -492,7 +492,7 @@ struct
        A folder keeps its whole leaf, having no extension to preserve, and stays
        a folder: splitting [v1.2] would file the subtree under
        [v1 (conflicted copy from x).2]. *)
-    let conflict_key key =
+    let conflict_key ?(n = 1) key =
       let base = Logical_key.leaf key in
       let is_dir = Logical_key.kind key = `Dir in
       let name, ext =
@@ -501,12 +501,30 @@ struct
               (String.sub base 0 i, String.sub base i (String.length base - i))
           | Some _ | None -> (base, "")
       in
+      let copy =
+        if n = 1 then "conflicted copy"
+        else Printf.sprintf "conflicted copy %d" n
+      in
       let base =
-        Printf.sprintf "%s (conflicted copy from %s)%s" name C.client_name ext
+        Printf.sprintf "%s (%s from %s)%s" name copy C.client_name ext
       in
       let parent = Logical_key.parent key in
       if is_dir then Logical_key.dir_in parent base
       else Logical_key.file_in parent base
+
+    (* Gives the loser of a conflict a name of its own and moves it there. Free
+       locally, so a second conflict on one name does not move onto the first
+       one's copy. The caller holds the metadata lock and says what the move is
+       published as. *)
+    let move_aside key =
+      let rec free n =
+        let candidate = conflict_key ~n key in
+        let* k = kind candidate in
+        if k = `Absent then Io.return candidate else free (n + 1)
+      in
+      let* conflict = free 1 in
+      let+ (_ : Logical_key.t list) = rename_local ~src:key ~dst:conflict in
+      conflict
 
     (* Moving an object on the backend does not rewrite its body, so the copy at
        the new key still records the old leaf. Unconditional: the mirror is
@@ -551,10 +569,7 @@ struct
                follow-up accesses (rclone stat'ing its renamed .partial). *)
             queue_put dst
         | Some (`Published m) ->
-            let conflict = conflict_key dst in
-            let* (_ : Logical_key.t list) =
-              with_meta (fun () -> rename_local ~src:dst ~dst:conflict)
-            in
+            let* conflict = with_meta (fun () -> move_aside dst) in
             publish_manifest conflict m
         | None -> Io.fail exn
 
@@ -571,10 +586,7 @@ struct
        Ours takes a name of its own, locally and then as a rename of its own,
        rather than having its marker written over the other's. *)
     let rename_dir_aside ~src ~dst ~id =
-      let conflict = conflict_key dst in
-      let* (_ : Logical_key.t list) =
-        with_meta (fun () -> rename_local ~src:dst ~dst:conflict)
-      in
+      let* conflict = with_meta (fun () -> move_aside dst) in
       with_journal
         [
           `Rename
@@ -861,10 +873,9 @@ struct
     let staged_aside key f =
       let* staged = Mfs.exists key in
       let* () =
-        if staged then (
-          let conflict = conflict_key key in
-          let* (_ : Logical_key.t list) = rename_local ~src:key ~dst:conflict in
-          queue_put conflict)
+        if staged then
+          let* conflict = move_aside key in
+          queue_put conflict
         else return_unit
       in
       f ()
@@ -892,8 +903,7 @@ struct
        Called under {!with_meta}, so the rename is recorded directly rather than
        through {!rename}. *)
     let rename_ours_aside ~dst ~ours =
-      let conflict = conflict_key dst in
-      let* (_ : Logical_key.t list) = rename_local ~src:dst ~dst:conflict in
+      let* conflict = move_aside dst in
       with_journal
         [
           `Rename
@@ -913,8 +923,7 @@ struct
        paths claiming one folder; the store is not told, already filing the
        folder where it now is. *)
     let retire_stale_copy ~src ~dst =
-      let conflict = conflict_key src in
-      let* (_ : Logical_key.t list) = rename_local ~src ~dst:conflict in
+      let* conflict = move_aside src in
       let* () =
         Folders.forget ~cache_root:C.cache_root ~domain_name:C.domain_name
           conflict
