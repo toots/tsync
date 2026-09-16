@@ -49,8 +49,13 @@ module type OVER = sig
       (L : Layout.S with type 'a io := 'a io) : S with type 'a io := 'a io
 end
 
-module Over (Io : Io.S) = struct
+module Over (Io : Io.S) (Clock : Clock.S with type 'a io := 'a Io.t) = struct
   open Io_syntax.Make (Io)
+
+  (* Deadline for the whole snapshot, retries included: a backend's own ladder
+     backs off to 20s, which is right for work that must land and wrong for a
+     copy whose loss is already tolerated. *)
+  let deadline = 10.
 
   module Make
       (C : Conf.S with type 'a io = 'a Io.t)
@@ -70,30 +75,32 @@ module Over (Io : Io.S) = struct
        when it exists on the backend. Best-effort: a lost snapshot must not wedge
        the write it precedes. *)
     let save_version ~key =
-      let* bk = L.manifest_key key in
-      match bk with
-        | None -> Io.return ()
-        | Some bk -> (
-            let* head = B.head_opt ~key:bk () in
-            match head with
-              | None -> Io.return ()
-              | Some _ -> (
-                  let ts = Int64.of_float (Unix.gettimeofday () *. 1e9) in
-                  let* dir = version_dir ~key in
-                  match dir with
-                    | None -> Io.return ()
-                    | Some dir ->
-                        Io.catch
-                          (fun () ->
-                            B.copy ~src_key:bk
-                              ~dst_key:
-                                (Stored_key.under dir (Int64.to_string ts))
-                              ())
-                          (fun exn ->
-                            Log.warn "save_version %s: %s"
-                              (Logical_key.to_string key)
-                              (Printexc.to_string exn);
-                            Io.return ())))
+      let snapshot () =
+        let* bk = L.manifest_key key in
+        match bk with
+          | None -> Io.return ()
+          | Some bk -> (
+              let* head = B.head_opt ~key:bk () in
+              match head with
+                | None -> Io.return ()
+                | Some _ -> (
+                    let ts = Int64.of_float (Unix.gettimeofday () *. 1e9) in
+                    let* dir = version_dir ~key in
+                    match dir with
+                      | None -> Io.return ()
+                      | Some dir ->
+                          B.copy ~src_key:bk
+                            ~dst_key:(Stored_key.under dir (Int64.to_string ts))
+                            ()))
+      in
+      (* Around the head as well as the copy: a store that cannot answer the one
+         wedges the write just as surely as one that cannot take the other. *)
+      Io.catch
+        (fun () -> Clock.with_timeout deadline snapshot)
+        (fun exn ->
+          Log.warn "save_version %s: %s" (Logical_key.to_string key)
+            (Printexc.to_string exn);
+          Io.return ())
 
     let list_versions ~key =
       let* dir = version_dir ~key in
