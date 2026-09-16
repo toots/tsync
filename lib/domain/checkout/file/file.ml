@@ -828,37 +828,58 @@ struct
       in
       f ()
 
-    (* A peer's folder is moving onto a name one of ours holds locally. Ours
-       takes a name of its own and publishes it, rather than the move failing on
-       a directory that is not empty and blocking every entry behind it.
-
-       Called under {!with_meta}, so the rename is recorded directly rather than
-       through {!rename}. *)
-    let make_room_for ~dst ~id =
+    (* What a peer's folder rename finds at its destination in this mirror. A
+       folder with no id, or an entry naming none, leaves nothing to compare and
+       reads as free. *)
+    let at_destination ~dst ~id =
       let* present = Syscalls.file_exists (manifest_path dst) in
-      if not present then return_unit
+      if not present then Io.return `Free
       else
-        let* ours =
+        let+ held =
           Folders.lookup_id ~cache_root:C.cache_root ~domain_name:C.domain_name
             dst
         in
-        match (ours, id) with
-          | Some ours, Some theirs when ours <> theirs ->
-              let conflict = conflict_key dst in
-              let* () = rename_local ~src:dst ~dst:conflict in
-              with_journal
-                [
-                  `Rename
-                    Journal.
-                      {
-                        src = rel_key dst;
-                        dst = rel_key conflict;
-                        size = None;
-                        is_dir = true;
-                        id = Some ours;
-                      };
-                ]
-          | _ -> return_unit
+        match (held, id) with
+          | Some held, Some moving when held = moving -> `Same_folder
+          | Some held, Some _ -> `Another_folder held
+          | _ -> `Free
+
+    (* A peer's folder is moving onto a name one of ours holds. Ours takes a name
+       of its own and publishes it, rather than the move failing on a directory
+       that is not empty and blocking every entry behind it.
+
+       Called under {!with_meta}, so the rename is recorded directly rather than
+       through {!rename}. *)
+    let rename_ours_aside ~dst ~ours =
+      let conflict = conflict_key dst in
+      let* () = rename_local ~src:dst ~dst:conflict in
+      with_journal
+        [
+          `Rename
+            Journal.
+              {
+                src = rel_key dst;
+                dst = rel_key conflict;
+                size = None;
+                is_dir = true;
+                id = Some ours;
+              };
+        ]
+
+    (* The destination already holds the folder being moved: the rename was
+       applied here once and its source came back. The source takes a conflicted
+       name and gives up the id it shares, keeping what it holds without two
+       paths claiming one folder; the store is not told, already filing the
+       folder where it now is. *)
+    let retire_stale_copy ~src ~dst =
+      let conflict = conflict_key src in
+      let* () = rename_local ~src ~dst:conflict in
+      let* () =
+        Folders.forget ~cache_root:C.cache_root ~domain_name:C.domain_name
+          conflict
+      in
+      (* [rename_local] pointed the shared id at the copy; this points it back. *)
+      Folders.reparent ~cache_root:C.cache_root ~domain_name:C.domain_name dst
 
     (* Failures propagate: the sync poller must not advance its high-water mark
        past an entry it could not apply, or the op is lost until a full resync. *)
@@ -893,8 +914,14 @@ struct
             if exists then
               unless_staged src_key (fun () ->
                   let* () = adopt_ancestor_ids dst in
-                  let* () = make_room_for ~dst:dst_key ~id in
-                  rename_local ~src:src_key ~dst:dst_key)
+                  let* found = at_destination ~dst:dst_key ~id in
+                  match found with
+                    | `Same_folder ->
+                        retire_stale_copy ~src:src_key ~dst:dst_key
+                    | `Another_folder ours ->
+                        let* () = rename_ours_aside ~dst:dst_key ~ours in
+                        rename_local ~src:src_key ~dst:dst_key
+                    | `Free -> rename_local ~src:src_key ~dst:dst_key)
             else return_unit
         | `Rename { Journal.src; dst; is_dir = false; _ } ->
             let src_key = Lk.file src in

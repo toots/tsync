@@ -10,6 +10,8 @@
    -open
    Tsync_cache_layout
    -open
+   Tsync_cache_layout_lwt
+   -open
    Tsync_conf_lwt
    -open
    Tsync_backend_api
@@ -37,6 +39,7 @@
   tsync_checkout
   tsync_checkout_lwt
   tsync_cache_layout
+  tsync_cache_layout_lwt
   tsync_test_harness
   tsync_conf_lwt
   tsync_backend_api

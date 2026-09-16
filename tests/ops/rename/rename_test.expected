@@ -42,4 +42,15 @@ it applied: ok
 the peer's folder has the name: ok
 ours is published under a name of its own: ok
 
-17 check(s), 0 failure(s)
+=== a peer's rename onto the same folder retires the stale source
+  apply the peer's rename s -> t: succeeded
+  local: p, s (conflicted copy from test), t, y, y (conflicted copy from test)
+it applied: ok
+the folder keeps its id at the destination: ok
+the stale source kept its content under a name holding no id: ok
+the id names the destination: ok
+and names nothing under the copy's path, even for a removal: ok
+  root after: p=<folder-2>, s=<folder-5>, x=<folder-3>, y=<folder-3>, y (conflicted copy from test)=<folder-4>
+the store is not told: ok
+
+23 check(s), 0 failure(s)

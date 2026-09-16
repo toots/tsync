@@ -32,6 +32,9 @@ module type S = sig
     string ->
     Logical_key.t option io
 
+  val forget :
+    cache_root:string -> domain_name:string -> Logical_key.t -> unit io
+
   val reparent :
     cache_root:string -> domain_name:string -> Logical_key.t -> unit io
 
@@ -266,6 +269,22 @@ module Over (Io : Io.S) (F : Fs.S with type 'a io := 'a Io.t) = struct
 
   (* A marker travels with its directory and so still spells the old leaf after a
      rename; {!rebuild} reads it, so the new name is written back. *)
+  let forget ~cache_root ~domain_name key =
+    if Logical_key.is_root key then return_unit
+    else (
+      let rec strip dir =
+        let* () = F.unlink_quiet (Filename.concat dir marker_name) in
+        let* names = F.readdir_list_quiet dir in
+        iter_s
+          (fun name ->
+            let path = Filename.concat dir name in
+            let* is_dir = F.is_directory path in
+            if is_dir then strip path else return_unit)
+          names
+      in
+      let* () = strip (dir_of ~cache_root ~domain_name key) in
+      F.unlink_quiet (by_path_path ~cache_root ~domain_name key))
+
   let reparent ~cache_root ~domain_name key =
     if Logical_key.is_root key then return_unit
     else

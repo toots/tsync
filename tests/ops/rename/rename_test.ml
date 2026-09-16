@@ -250,6 +250,65 @@ let () =
      check "ours is published under a name of its own"
        (List.exists (fun (name, id) -> id = ours && name <> "y") after);
 
-     report ~expected:17 ();
+     case "a peer's rename onto the same folder retires the stale source";
+     let* () = F.mkdir (Lk.dir "s") in
+     let* () = settle () in
+     let* id =
+       Folder_ids_lwt.lookup_id ~cache_root:root ~domain_name:C.domain_name
+         (Lk.dir "s")
+     in
+     let id = Option.get id in
+     (* The mirror as droppy's was: the folder already at the rename's
+        destination, and its source back beside it under the same id. *)
+     let* () = Ck.create_dir (Lk.dir "t") in
+     let* () =
+       Io_lwt.Fs.atomic_write (marker_path "t")
+         (Folder.marker_to_string { Folder.name = "t"; id })
+     in
+     let* ok =
+       attempt "apply the peer's rename s -> t" (fun () ->
+           F.apply_foreign_ops
+             [
+               `Rename
+                 Journal.
+                   {
+                     src = "s";
+                     dst = "t";
+                     size = None;
+                     is_dir = true;
+                     id = Some id;
+                   };
+             ])
+     in
+     let* dirs = local_dirs () in
+     step "local: %s" (String.concat ", " dirs);
+     let lookup rel =
+       Folder_ids_lwt.lookup_id ~cache_root:root ~domain_name:C.domain_name
+         (Lk.dir rel)
+     in
+     let* at_t = lookup "t" in
+     let* at_copy = lookup "s (conflicted copy from test)" in
+     check "it applied" ok;
+     check "the folder keeps its id at the destination" (at_t = Some id);
+     check "the stale source kept its content under a name holding no id"
+       (List.mem "s (conflicted copy from test)" dirs && at_copy = None);
+     let* named =
+       Folder_ids_lwt.key_of_id ~cache_root:root ~domain_name:C.domain_name
+         ~root:Lk.root id
+     in
+     let* removal =
+       Folder_ids_lwt.lookup_id_removed ~cache_root:root
+         ~domain_name:C.domain_name
+         (Lk.dir "s (conflicted copy from test)")
+     in
+     check "the id names the destination" (named = Some (Lk.dir "t"));
+     check "and names nothing under the copy's path, even for a removal"
+       (removal = None);
+     let* () = settle () in
+     let* after = show_markers "root after" Stored_key.root_id in
+     check "the store is not told"
+       (not (List.mem_assoc "s (conflicted copy from test)" after));
+
+     report ~expected:23 ();
      Lwt.return_unit);
   Scratch.cleanup root

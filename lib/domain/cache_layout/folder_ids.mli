@@ -72,6 +72,13 @@ module type S = sig
     string ->
     Logical_key.t option io
 
+  (** Stop [key] and every folder under it being folders the store knows: their
+      markers go, and so does the path [key] was named by, so neither a lookup
+      nor the naming of a removal answers with an id another path holds. What
+      the folders contain stays. *)
+  val forget :
+    cache_root:string -> domain_name:string -> Logical_key.t -> unit io
+
   (** Restate a folder's marker after it moved, taking the name from the new
       path. Every path that moves a directory locally owes this call, or the
       folder becomes unreachable by id. *)
