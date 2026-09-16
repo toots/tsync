@@ -29,6 +29,17 @@ module type Owing = sig
   val set_canceller : (Logical_key.t -> bool) -> unit
 end
 
+(** What the metadata queue needs of the file operations. *)
+module type Publishing = sig
+  type 'a io
+
+  (** The backend half of ops whose local half the caller has already applied.
+      Everything it needs comes from the ops: the mirror has moved on, so a
+      removed folder's id is read from the entry rather than from the marker it
+      went with. *)
+  val backend_ops : Journal.op list -> unit io
+end
+
 (** The file operations over one domain, as the Lwt binding builds them: what a
     whole-domain job takes. *)
 module type OVER = sig
@@ -37,6 +48,7 @@ module type OVER = sig
   module Make (_ : Conf.S with type 'a io = 'a io) : sig
     include File_ops.S with type 'a io := 'a io
     include Owing with type 'a io := 'a io
+    include Publishing with type 'a io := 'a io
   end
 end
 
@@ -72,5 +84,6 @@ module Over
       (_ : Remote.S with type 'a io := 'a Io.t) : sig
     include File_ops.S with type 'a io := 'a Io.t
     include Owing with type 'a io := 'a Io.t
+    include Publishing with type 'a io := 'a Io.t
   end
 end

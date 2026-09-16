@@ -89,6 +89,12 @@ module type S = sig
       per domain, for the same reason the log is. *)
   val owed : (Journal.Entry_key.t * record) owed
 
+  (** {!owed} for the records naming a metadata operation, whose backend half is
+      drained in the order it was recorded rather than on a pool. Separate
+      because {!Owed.consume} takes one consumer, and a record handed to the
+      wrong drainer is one nothing finishes. *)
+  val meta_owed : (Journal.Entry_key.t * record) owed
+
   (** Write the intent. The caller mints the key and keeps it: every later call
       names the same unit of work. *)
   val record : Journal.Entry_key.t -> Journal.op list -> unit io

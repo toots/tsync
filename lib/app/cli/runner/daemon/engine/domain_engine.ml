@@ -55,6 +55,7 @@ module Make_over
   module Lk = Logical_key.Make (C)
   module F = File_lwt.Make_over (Ck) (C)
   module Sq = Sync_lwt.Sync_queue.Make (C) (F)
+  module Mq = Sync_lwt.Meta_queue.Make (C) (F)
   module Ih = Ipc_handler.Make (C) (F) (Sq)
   module Sp = Sync_lwt.Sync_poller.Make (C) (F)
   module Rp = Sync_lwt.Replay.Make (C) (F)
@@ -99,6 +100,9 @@ module Make_over
         unit_task "deferred rescan"
           [`Periodic housekeeping_interval]
           Durable_queue_lwt.rescan_all;
+        (* A metadata op the queue parked steps aside so the rest keeps
+           publishing; this is what brings it back to try again. *)
+        unit_task "metadata retry" [`Periodic housekeeping_interval] Mq.rearm;
       ]
 
   (* One driver for every frontend, so a sweep added to the list above runs
@@ -149,6 +153,7 @@ module Make_over
     Sq.start ~on_upload_done:(fun ~key ->
         let* () = on_upload_done ~key in
         after_upload ());
+    Mq.start ();
     Lwt.return_unit
 
   (* The queue must be running first: recovery goes through it, for the journal
@@ -168,6 +173,9 @@ module Make_over
      owes none, and a peer must not wait for this client to run again to learn
      what it already uploaded. *)
   let drain () =
+    (* The metadata queue first: a rename it publishes is what names the file an
+       upload behind it is for. *)
+    let* () = Mq.drain () in
     let* () = Sq.drain () in
     let* () = Fs.flush_cursor () in
     (* Notices are batched on a timer, which a command that returns first would
@@ -181,6 +189,8 @@ module Make_over
     [
       ("pendingUploads", `Int (Sq.pending ()));
       ("uploadsCompleted", `Int (Sq.completed_count ()));
+      ("pendingMetadata", `Int (Mq.pending ()));
+      ("metadataDegraded", `Bool (Mq.degraded ()));
       (* What runs unasked, answered by the running process rather than read out
          of the source: a frontend on an older build, or one driving a loop of
          its own, says so here. *)

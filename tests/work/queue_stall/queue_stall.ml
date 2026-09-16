@@ -44,7 +44,8 @@ let () =
     (let before = List.length (stalls ()) in
 
      let done_q =
-       queue ~name:"working" ~dir:"working" ~run:(fun _ -> Lwt.return_unit)
+       queue ~name:"working" ~dir:"working" ~run:(fun ~id:_ _ ->
+           Lwt.return_unit)
      in
      Q.start done_q;
      let* () = Q.post done_q "a" in
@@ -57,7 +58,9 @@ let () =
      (* A job that never finishes, which is what a request with no reply and no
         timeout looks like from here. *)
      let forever, _ = Lwt.wait () in
-     let stuck_q = queue ~name:"stuck" ~dir:"stuck" ~run:(fun _ -> forever) in
+     let stuck_q =
+       queue ~name:"stuck" ~dir:"stuck" ~run:(fun ~id:_ _ -> forever)
+     in
      Q.start stuck_q;
      let* () = Q.post stuck_q "one" in
      let* () = Q.post stuck_q "two" in

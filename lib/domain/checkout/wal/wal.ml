@@ -123,6 +123,7 @@ module type S = sig
 
   val log : records
   val owed : (Journal.Entry_key.t * record) owed
+  val meta_owed : (Journal.Entry_key.t * record) owed
   val record : Journal.Entry_key.t -> Journal.op list -> unit io
   val write : Journal.Entry_key.t -> record -> unit io
   val advance : Journal.Entry_key.t -> state -> unit io
@@ -176,16 +177,23 @@ module Make (Io : Io.S) (R : RECORDS with type 'a io := 'a Io.t) = struct
 
   (* The records of a domain are one thing however many places name them: the
      functor below is applied wherever the log is read or written, and a second
-     [t] over the same directory would keep its own id counter. *)
-  let logs : (string, R.t * (Ek.t * record) Owed.t) Hashtbl.t = Hashtbl.create 4
+     [t] over the same directory would keep its own id counter.
+
+     Two hand-offs over that one log, because {!Owed.consume} takes a single
+     consumer and a put's bytes and a metadata operation's backend half are
+     drained at different widths and in different orders. *)
+  let logs :
+      (string, R.t * (Ek.t * record) Owed.t * (Ek.t * record) Owed.t) Hashtbl.t
+      =
+    Hashtbl.create 4
 
   let log_for dir =
     match Hashtbl.find_opt logs dir with
-      | Some both -> both
+      | Some all -> all
       | None ->
-          let both = (R.create ~dir, Owed.create ()) in
-          Hashtbl.replace logs dir both;
-          both
+          let all = (R.create ~dir, Owed.create (), Owed.create ()) in
+          Hashtbl.replace logs dir all;
+          all
 
   module Make (C : Conf.S with type 'a io = 'a Io.t) = struct
     module J = Journal.Make (C)
@@ -193,7 +201,7 @@ module Make (Io : Io.S) (R : RECORDS with type 'a io := 'a Io.t) = struct
     (* One directory per domain: the ops carry domain-relative keys, so a shared
        store would let one domain's replay run another's entries against the wrong
        backend. *)
-    let log, owed =
+    let log, owed, meta_owed =
       log_for
         (Filename.concat
            (Filename.concat C.data_dir "journal-pending")

@@ -8,19 +8,28 @@ module type Owing = sig
   val set_canceller : (Logical_key.t -> bool) -> unit
 end
 
+(* What the metadata queue needs of the file operations: the backend half of an
+   op whose local half the caller has already applied. *)
+module type Publishing = sig
+  type 'a io
+
+  val backend_ops : Journal.op list -> unit io
+end
+
 module type OVER = sig
   type 'a io
 
   module Make (_ : Conf.S with type 'a io = 'a io) : sig
     include File_ops.S with type 'a io := 'a io
     include Owing with type 'a io := 'a io
+    include Publishing with type 'a io := 'a io
   end
 end
 
 module Over
     (Io : Io.S)
     (Fs : Fs.S with type 'a io := 'a Io.t)
-    (Retry : Syscalls.S with type 'a io := 'a Io.t)
+    (Syscalls : Syscalls.S with type 'a io := 'a Io.t)
     (Lock : Lock.S with type 'a io := 'a Io.t)
     (W : Wal.OVER with type 'a io := 'a Io.t)
     (Mf : Manifests.OVER with type 'a io := 'a Io.t)
@@ -269,34 +278,31 @@ struct
       let* () = Mfs.rename ~src_key:src ~dst_key:dst in
       Ck.rename ~src_key:src ~dst_key:dst
 
-    let with_journal key ops s3_op =
-      let ek = J.entry_key () in
-      let* () = W.record ek ops in
-      (* Dropped on a synchronous failure, or reconcile replays a known-failed op
-         at every startup. *)
-      let* () =
-        Io.catch s3_op (fun exn ->
-            let* () = W.complete ek in
-            Io.fail exn)
-      in
-      W.discharge
-        ~publish:(fun ek ops -> Js.write_journal_entry ~entry_key:ek ops)
-        (* [bump_cursor] publishes inline once the cursor has been quiet, which
-           is a round trip under {!with_meta} and so in a FUSE handler's path.
+    (* The caller's local half has happened; the backend's is the metadata
+       queue's, which runs it whenever the store can be reached.
 
-           Safe to defer because every caller here is the daemon, whose drain
-           flushes what the timer has not. *)
-        ~cursor:(fun ek ->
-          Js.note_cursor ek;
-          return_unit)
-        ek ops
+       [Prepared] for the same reason a staged upload says so: the record names
+       work already begun, so a reconcile owes its backend half and must not
+       repeat the local one. *)
+    let with_journal ops =
+      let entry_key = J.entry_key () in
+      let record =
+        { Wal.ops; state = Wal.Prepared; attempts = 0; last_error = None }
+      in
+      let* () = W.write entry_key record in
+      Owed.signal W.meta_owed (entry_key, record)
 
     let save_version key =
       if C.versioning then Hs.save_version ~key else return_unit
 
-    let apply_delete key =
+    (* The backend half alone, which is what the queue owes; [apply_delete] is
+       the whole op, owed by a replay of an intent that never started. *)
+    let delete_remote key =
       let* () = save_version key in
-      let* () = St.delete_manifest ~key in
+      St.delete_manifest ~key
+
+    let apply_delete key =
+      let* () = delete_remote key in
       clear_local key
 
     let queue_put key =
@@ -332,6 +338,12 @@ struct
         let+ () = Owed.signal W.owed (entry_key, record) in
         true
 
+    (* The record already names this work; writing it under its own key is what
+       keeps one unit of work to one key across a restart. *)
+    let resume_meta ~entry_key ~record =
+      let* () = W.write entry_key record in
+      Owed.signal W.meta_owed (entry_key, record)
+
     let close key =
       let* staged = Mfs.exists key in
       if staged then queue_put key else return_unit
@@ -339,7 +351,8 @@ struct
     let delete key =
       with_meta (fun () ->
           ignore (cancel_upload key);
-          with_journal key [`Delete (rel_key key)] (fun () -> apply_delete key))
+          let* () = clear_local key in
+          with_journal [`Delete (rel_key key)])
 
     (* Backend key of a directory's folder marker, under its parent's namespace.
        [None] at the domain root, or for a parent this client never recorded;
@@ -353,9 +366,7 @@ struct
           (* Minted here, not in [put_folder_marker], so the same id reaches the
              journal entry a peer will read. *)
           let* fid = L.ensure_folder_id key in
-          with_journal key
-            [`Mkdir (rel_key key, Some fid)]
-            (fun () -> St.put_folder_marker ~key))
+          with_journal [`Mkdir (rel_key key, Some fid)])
 
     (* The marker a folder is filed under, or a failure: a caller about to move
        or retire a folder without removing its marker would leave the folder's
@@ -391,33 +402,14 @@ struct
        reclaimed by [gc]. *)
     let rmdir key =
       with_meta (fun () ->
-          let rel = rel_key key in
-          let* old_marker = old_marker_or_fail key in
+          (* Read while the folder is still here: [Ck.delete_dir] takes the
+             marker the id comes from, and the entry is the only place it goes
+             on existing. *)
           let* fid = L.ensure_folder_id key in
-          let delete_old_marker () = remove_old_marker key old_marker in
-          let trash_key =
-            Stored_key.under
-              (Stored_key.trash_namespace ~prefix:C.domain_prefix)
-              (Stored_key.new_id ())
-          in
-          let marker =
-            Folder.trash_marker_to_string ~name:(Filename.basename rel) ~id:fid
-              ~path:rel
-          in
-          let* () =
-            with_journal key
-              [`Rmdir (rel_key key, Some fid)]
-              (fun () ->
-                (* Anchored to the trash before the live marker goes, so the
-                   marker is stale from here whether or not its delete lands. *)
-                let* () =
-                  St.put_anchor ~folder_id:fid ~parent:Stored_key.trash_id
-                    ~name:(Filename.basename rel)
-                in
-                let* () = St.put_raw ~bkey:trash_key ~data:marker in
-                delete_old_marker ())
-          in
-          Ck.delete_dir key)
+          (* Refused before anything is removed rather than parked after. *)
+          let* (_ : Stored_key.t) = old_marker_or_fail key in
+          let* () = Ck.delete_dir key in
+          with_journal [`Rmdir (rel_key key, Some fid)])
 
     (* For a file whose chunks are already on the backend: only the manifest key
        and journal entry are missing. *)
@@ -454,6 +446,93 @@ struct
         | Some man -> St.put_manifest ~key ~data:(Manifest.body ~name man)
         | None -> return_unit
 
+    (* The trash marker a removal leaves, built from the entry: the folder's own
+       id outlives its marker nowhere else. *)
+    let rmdir_remote rel fid =
+      let key = Lk.dir rel in
+      let name = Filename.basename rel in
+      let* old_marker = old_marker_or_fail key in
+      let trash_key =
+        Stored_key.under
+          (Stored_key.trash_namespace ~prefix:C.domain_prefix)
+          (Stored_key.new_id ())
+      in
+      let marker = Folder.trash_marker_to_string ~name ~id:fid ~path:rel in
+      (* Anchored to the trash before the live marker goes, so the marker is
+         stale from here whether or not its delete lands. *)
+      let* () =
+        St.put_anchor ~folder_id:fid ~parent:Stored_key.trash_id ~name
+      in
+      let* () = St.put_raw ~bkey:trash_key ~data:marker in
+      remove_old_marker key old_marker
+
+    (* A peer removed the source while the rename was owed. The local side moved
+       long ago and may have been worked in since, so it keeps a name of its own
+       rather than being put back under whoever is using it. *)
+    let settle_rename_conflict dst exn =
+      let* m = Mf.current dst in
+      match m with
+        | Some (`Staged _) ->
+            (* src never reached the backend: a rename before the first upload,
+               not a conflict. A conflict name here would break the writer's own
+               follow-up accesses (rclone stat'ing its renamed .partial). *)
+            queue_put dst
+        | Some (`Published m) ->
+            let conflict = conflict_key dst in
+            let* () =
+              with_meta (fun () -> rename_local ~src:dst ~dst:conflict)
+            in
+            publish_manifest conflict m
+        | None -> Io.fail exn
+
+    let rename_remote (r : Journal.rename_op) =
+      let is_dir = r.Journal.is_dir in
+      let key rel = if is_dir then Lk.dir rel else Lk.file rel in
+      let src = key r.Journal.src and dst = key r.Journal.dst in
+      let move () =
+        if is_dir then
+          (* A directory's backend keys hang off its folder id, which travelled
+             with the local [.tsync-dir] marker: only the parent's marker moves.
+             A file's key encodes its leaf, so the object itself moves. *)
+          let* old_marker = old_marker_or_fail src in
+          (* The new place first, anchor and marker, then the old marker: a crash
+             between the two leaves a stale marker readers skip, not a folder
+             nobody lists. *)
+          let* () = St.put_folder_marker ~key:dst in
+          remove_old_marker src old_marker
+        else
+          let* () = save_version src in
+          let* () = Js.rename_file ~src_key:src ~dst_key:dst in
+          resync_manifest_name dst
+      in
+      Io.catch move (fun exn ->
+          (* A directory's move cannot find its source gone: its marker is put
+             unconditionally, so a failure there is the store's. *)
+          if is_dir then Io.fail exn
+          else
+            let* src_head = Js.head_manifest_opt ~key:src in
+            if Option.is_some src_head then Io.fail exn
+            else
+              let* () = settle_rename_conflict dst exn in
+              (* The move the record names cannot happen, and what replaced it is
+                 queued or published under its own entry. *)
+              Io.fail Retry.Cancelled)
+
+    (* The backend half of ops whose local half the caller has already applied,
+       which is all the metadata queue owes. *)
+    let backend_op = function
+      (* A put's bytes and its entry are the upload queue's. *)
+      | `Put _ -> return_unit
+      | `Delete rel -> delete_remote (Lk.file rel)
+      | `Mkdir (rel, _) -> St.put_folder_marker ~key:(Lk.dir rel)
+      | `Rmdir (rel, Some fid) -> rmdir_remote rel fid
+      | `Rmdir (rel, None) ->
+          Log.err "rmdir %s: the entry carries no folder id" rel;
+          return_unit
+      | `Rename r -> rename_remote r
+
+    let backend_ops ops = iter_s backend_op ops
+
     let rename_body ~src ~dst =
       let* k = kind src in
       let is_dir = k = `Dir in
@@ -474,14 +553,14 @@ struct
             | Some (`Published m) -> Some (Manifest.size m)
             | None -> None
       in
-      (* Resolved before anything moves: a folder whose marker cannot be named
-         is not renamed at all, rather than moved locally and left at two
-         places on the store. *)
-      let* old_marker =
+      (* Refused before anything moves: a folder whose marker cannot be named is
+         not renamed at all, rather than moved locally and left at two places on
+         the store. *)
+      let* () =
         if is_dir then
-          let+ bkey = old_marker_or_fail src in
-          Some bkey
-        else Io.return None
+          let+ (_ : Stored_key.t) = old_marker_or_fail src in
+          ()
+        else return_unit
       in
       let* () = rename_local ~src ~dst in
       (* Read after the move, where the folder now is. *)
@@ -494,68 +573,18 @@ struct
       let* dst_staged = Mfs.exists dst in
       if src_was_uploading && dst_staged then queue_put dst
       else
-        let* () = if not is_dir then save_version src else return_unit in
-        let rename_op =
-          `Rename
-            Journal.
-              {
-                dst = rel_key dst;
-                src = rel_key src;
-                size;
-                is_dir;
-                id = dir_id;
-              }
-        in
-        Io.catch
-          (fun () ->
-            let* () =
-              with_journal dst [rename_op] (fun () ->
-                  (* A directory's backend keys hang off its folder id, which
-                     travelled with the local [.tsync-dir] marker in
-                     [rename_local]: only the parent's marker moves. A file's key
-                     encodes its leaf, so the object itself moves. *)
-                    match old_marker with
-                    | Some bkey ->
-                        (* The new place first, anchor and marker, then the
-                           old marker: a crash between the two leaves a stale
-                           marker readers skip, not a folder nobody lists. *)
-                        let* () = St.put_folder_marker ~key:dst in
-                        remove_old_marker src bkey
-                    | None -> Js.rename_file ~src_key:src ~dst_key:dst)
-            in
-            if is_dir then return_unit else resync_manifest_name dst)
-          (fun exn ->
-            (* A directory whose marker did not move goes back where it was,
-               so the mirror keeps agreeing with the store. *)
-            let* () =
-              if is_dir then rename_local ~src:dst ~dst:src else return_unit
-            in
-            (* src gone from the backend: a concurrent rename or delete by another
-               client. The file already moved locally, so republish it under a
-               conflict name; its chunks are still there. *)
-            let* src_head =
-              if is_dir then return_some ()
-              else
-                let+ h = Js.head_manifest_opt ~key:src in
-                Option.map (fun _ -> ()) h
-            in
-            if is_dir || Option.is_some src_head then Io.fail exn
-            else
-              let* m = Mf.current dst in
-              match m with
-                | Some (`Staged _) ->
-                    (* src never reached the backend: a rename before first
-                       upload, not a conflict. A conflict name here would break
-                       the writer's own follow-up accesses (rclone stat'ing its
-                       renamed .partial). *)
-                    queue_put dst
-                | Some (`Published m) ->
-                    (* src was uploaded and has since vanished remotely: keep both
-                       sides under a conflict-marked name. *)
-                    let conflict = conflict_key dst in
-                    let* () = rename_local ~src:dst ~dst:conflict in
-                    publish_manifest conflict m
-                | None -> Io.fail exn)
+        with_journal
+          [
+            `Rename
+              Journal.
+                {
+                  dst = rel_key dst;
+                  src = rel_key src;
+                  size;
+                  is_dir;
+                  id = dir_id;
+                };
+          ]
 
     let rename ~src ~dst = with_meta (fun () -> rename_body ~src ~dst)
 
@@ -755,7 +784,7 @@ struct
         | `Rename { Journal.src; dst; is_dir = true; _ } ->
             let src_key = Lk.dir src in
             let dst_key = Lk.dir dst in
-            let* exists = Retry.file_exists (manifest_path src_key) in
+            let* exists = Syscalls.file_exists (manifest_path src_key) in
             if exists then
               unless_staged src_key (fun () ->
                   let* () = adopt_ancestor_ids dst in
@@ -764,7 +793,7 @@ struct
         | `Rename { Journal.src; dst; is_dir = false; _ } ->
             let src_key = Lk.file src in
             let dst_key = Lk.file dst in
-            let* exists = Retry.file_exists (manifest_path src_key) in
+            let* exists = Syscalls.file_exists (manifest_path src_key) in
             if exists then
               unless_staged src_key (fun () ->
                   let* () = adopt_ancestor_ids dst in
