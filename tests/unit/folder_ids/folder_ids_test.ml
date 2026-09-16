@@ -16,7 +16,9 @@ module Lk = Logical_key.Make (struct
   let domain_prefix = "tsync/testdom/manifests/"
 end)
 
-let ensure rel = Folder_ids_lwt.ensure_id ~cache_root ~domain_name (Lk.dir rel)
+let ensure rel =
+  Folder_ids_lwt.ensure_id ~mint:Id.short ~cache_root ~domain_name (Lk.dir rel)
+
 let lookup rel = Folder_ids_lwt.lookup_id ~cache_root ~domain_name (Lk.dir rel)
 
 let rel_of id =
@@ -44,15 +46,23 @@ let index_file id =
   Filename.concat (Cache_layout.folders_dir ~cache_root domain_name) id
 
 let main () =
+  (* A parent without an id is one this client was never told of, so a child
+     does not name it: an id comes into being with its own mkdir, and one made up
+     on a child's behalf would be published by nothing. *)
+  let* orphan = ensure "x/y" in
+  let* x = lookup "x" in
+  check "a parent is not named on a child's behalf" (x = None);
+  let* orphan_rel = rel_of orphan in
+  check "and the child stays unindexed until its parent is" (orphan_rel = None);
+
+  let* (_ : string) = ensure "a" in
+  let* (_ : string) = ensure "a/b" in
   let* deep = ensure "a/b/c" in
   let* got = rel_of deep in
   check "a minted folder resolves back to its path" (got = Some "a/b/c");
-
-  (* Intermediates are minted on the way: a folder with no id could not be named
-     in a listing. *)
   let* a = lookup "a" in
   let* b = lookup "a/b" in
-  check "ancestors are minted too" (a <> None && b <> None);
+  check "each level holds an id of its own" (a <> None && b <> None);
   let* got_a = rel_of (Option.get a) in
   check "an ancestor resolves too" (got_a = Some "a");
 
@@ -133,7 +143,16 @@ let main () =
      that does exist is the filesystem's on the path, not this index's on the
      chain, and the point is to clear any fixed hop count comfortably. *)
   let deep_rel = String.concat "/" (List.init 300 (fun _ -> "a")) in
-  let* deep_id = ensure deep_rel in
+  (* Each level recorded before the one below it, the order a tree is made in. *)
+  let* deep_id =
+    Lwt_list.fold_left_s
+      (fun (rel, _) _ ->
+        let rel = if rel = "" then "a" else rel ^ "/a" in
+        let+ id = ensure rel in
+        (rel, id))
+      ("", "") (List.init 300 Fun.id)
+    |> Lwt.map snd
+  in
   let* deep_got = rel_of deep_id in
   check "a folder nested past any fixed cap resolves" (deep_got = Some deep_rel);
 

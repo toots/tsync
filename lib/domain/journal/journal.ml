@@ -20,27 +20,97 @@ type op =
    [entry_key], which is called on every journal write. *)
 let uuid_cache : (string, string) Hashtbl.t = Hashtbl.create 1
 
+let read_first_line path =
+  let ic = open_in path in
+  Fun.protect
+    ~finally:(fun () -> close_in ic)
+    (fun () -> String.trim (input_line ic))
+
+(* Linked into place, so two processes starting at once agree on one uuid: the
+   second [link] fails and reads the first's. Written in place, each kept its
+   own and a reader could catch the file empty. *)
+let create_client_uuid ~share_dir uuid_file =
+  Io_lwt.Fs.mkdir_p_sync ~perm:0o700 share_dir;
+  let tmp = Printf.sprintf "%s.%d.tmp" uuid_file (Unix.getpid ()) in
+  let oc = open_out tmp in
+  output_string oc (Id.token 16);
+  close_out oc;
+  Fun.protect
+    ~finally:(fun () -> try Sys.remove tmp with Sys_error _ -> ())
+    (fun () ->
+      (try Unix.link tmp uuid_file
+       with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+      read_first_line uuid_file)
+
 let get_client_uuid ~share_dir =
   match Hashtbl.find_opt uuid_cache share_dir with
     | Some uuid -> uuid
     | None ->
         let uuid_file = Filename.concat share_dir "client-uuid" in
         let uuid =
-          if Sys.file_exists uuid_file then (
-            let ic = open_in uuid_file in
-            let s = input_line ic in
-            close_in ic;
-            String.trim s)
-          else (
-            let uuid = Id.token 16 in
-            Io_lwt.Fs.mkdir_p_sync ~perm:0o700 share_dir;
-            let oc = open_out uuid_file in
-            output_string oc uuid;
-            close_out oc;
-            uuid)
+          if Sys.file_exists uuid_file then read_first_line uuid_file
+          else create_client_uuid ~share_dir uuid_file
         in
         Hashtbl.replace uuid_cache share_dir uuid;
         uuid
+
+(* A folder id names a folder in every client's copy of the store, so it has to
+   be unique without asking anyone: this client's uuid sets it apart from other
+   clients, and a counter no other process of this client hands out sets it
+   apart within.
+
+   [<first 12 hex of the uuid>-<counter in hex>]. *)
+let lease_size = 1024
+let leases_dir share_dir = Filename.concat share_dir "id-leases"
+
+(* A block of the counter is this process's once it has created the block's
+   file: any number of processes can race for one and exactly one creation
+   succeeds, with no lock held and nothing waited on.
+
+   ponytail: one file per leasing process, never removed; prune them only if the
+   directory ever measurably grows. *)
+let rec lease ~dir block =
+  match
+    Unix.openfile
+      (Filename.concat dir (Printf.sprintf "%x" block))
+      [Unix.O_WRONLY; Unix.O_CREAT; Unix.O_EXCL]
+      0o600
+  with
+    | fd ->
+        Unix.close fd;
+        block
+    | exception Unix.Unix_error (Unix.EEXIST, _, _) -> lease ~dir (block + 1)
+
+let highest_lease dir =
+  Array.fold_left
+    (fun highest name ->
+      match int_of_string_opt ("0x" ^ name) with
+        | Some block -> max highest block
+        | None -> highest)
+    (-1)
+    (try Sys.readdir dir with Sys_error _ -> [||])
+
+(* Keyed by the process holding the block as well as the data directory: a forked
+   child inherits the parent's and has to lease one of its own. *)
+let leases : (string, int * int * int ref) Hashtbl.t = Hashtbl.create 1
+
+let folder_id ~share_dir () =
+  let pid = Unix.getpid () in
+  let block, next =
+    match Hashtbl.find_opt leases share_dir with
+      | Some (owner, block, next) when owner = pid && !next < lease_size ->
+          (block, next)
+      | _ ->
+          let dir = leases_dir share_dir in
+          Io_lwt.Fs.mkdir_p_sync ~perm:0o700 dir;
+          let block = lease ~dir (highest_lease dir + 1) in
+          let next = ref 0 in
+          Hashtbl.replace leases share_dir (pid, block, next);
+          (block, next)
+  in
+  let counter = (block * lease_size) + !next in
+  incr next;
+  Printf.sprintf "%s-%x" (String.sub (get_client_uuid ~share_dir) 0 12) counter
 
 (* An entry key names one unit of work for its whole life — in the local WAL, in
    the backend journal, in the cursor a peer compares against. It had three
@@ -203,4 +273,5 @@ module Make (C : Conf.S) = struct
   let share_dir = C.data_dir
   let client_uuid () = get_client_uuid ~share_dir
   let entry_key () = Entry_key.make ~share_dir ()
+  let folder_id () = folder_id ~share_dir ()
 end

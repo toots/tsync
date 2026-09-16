@@ -112,18 +112,23 @@ struct
       head <> None
 
     let deleted_in_folder key =
-      (* Versions of the files in a folder share the folder's id. *)
+      (* Versions of the files in a folder share the folder's id. Looked up, not
+         minted: this is a listing, and a folder this client holds no id for has
+         nothing it could have filed versions under. *)
       let* fid =
-        Folder_ids.ensure_id ~cache_root:C.cache_root ~domain_name:C.domain_name
+        Folder_ids.lookup_id ~cache_root:C.cache_root ~domain_name:C.domain_name
           key
       in
       let* entries =
-        B.list_prefix
-          ~prefix:
-            (Stored_key.to_string
-               (History.folder_versions ~versions_prefix:C.versions_prefix
-                  ~folder_id:fid))
-          ()
+        match fid with
+          | None -> Io.return []
+          | Some fid ->
+              B.list_prefix
+                ~prefix:
+                  (Stored_key.to_string
+                     (History.folder_versions ~versions_prefix:C.versions_prefix
+                        ~folder_id:fid))
+                ()
       in
       let seen = Hashtbl.create 16 in
       filter_map_s

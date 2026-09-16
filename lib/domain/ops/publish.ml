@@ -25,6 +25,7 @@ struct
   module Make (C : Conf.S with type 'a io = 'a Io.t) = struct
     module R = Objects.Make (C)
     module St = Store.Make (C)
+    module J = Journal.Make (C)
     module Js = Journal_store.Make (C)
     module Mf = Mirror.Make (C)
     module Ck = Checkout.Make (C)
@@ -101,7 +102,7 @@ struct
     let dir key =
       let* () = Ck.create_dir key in
       let* () = St.put_folder_marker ~key in
-      Folder_ids.ensure_id ~cache_root:C.cache_root ~domain_name:C.domain_name
-        key
+      Folder_ids.ensure_id ~mint:J.folder_id ~cache_root:C.cache_root
+        ~domain_name:C.domain_name key
   end
 end

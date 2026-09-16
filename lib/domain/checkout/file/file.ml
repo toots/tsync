@@ -489,7 +489,7 @@ struct
       let trash_key =
         Stored_key.under
           (Stored_key.trash_namespace ~prefix:C.domain_prefix)
-          (Stored_key.new_id ())
+          (Id.short ())
       in
       let marker = Folder.trash_marker_to_string ~name ~id:fid ~path:rel in
       (* Anchored to the trash before the live marker goes, so the marker is

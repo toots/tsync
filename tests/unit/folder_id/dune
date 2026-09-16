@@ -1,0 +1,18 @@
+(executable
+ (flags
+  (:standard
+   -open
+   Tsync_journal
+   -open
+   Tsync_conf_lwt
+   -open
+   Tsync_local_backend_lwt
+   -open
+   Tsync_test_harness))
+ (name folder_id_test)
+ (libraries
+  tsync_journal
+  tsync_conf_lwt
+  tsync_local_backend_lwt
+  tsync_test_harness
+  unix))

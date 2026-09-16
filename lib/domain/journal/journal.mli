@@ -76,4 +76,9 @@ val decode : string -> op list
 module Make (C : Conf.S) : sig
   val client_uuid : unit -> string
   val entry_key : unit -> Entry_key.t
+
+  (** A fresh folder id no other client and no other process of this one can
+      mint: [<first 12 hex of {!client_uuid}>-<counter in hex>]. Local only, and
+      never waits. *)
+  val folder_id : unit -> string
 end

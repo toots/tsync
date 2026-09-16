@@ -51,6 +51,8 @@ struct
   module Inode = struct
     module Make (C : Conf.S with type 'a io = 'a Io.t) :
       S with type 'a io := 'a Io.t = struct
+      module J = Journal.Make (C)
+
       let lookup_id key =
         Folder_ids.lookup_id ~cache_root:C.cache_root ~domain_name:C.domain_name
           key
@@ -83,7 +85,7 @@ struct
                 (* The parent is claimed first, so the key this claim names is
                    already the agreed one. *)
                 let* pid = ensure_id (Logical_key.parent key) in
-                let candidate = { Folder.name; id = Stored_key.new_id () } in
+                let candidate = { Folder.name; id = J.folder_id () } in
                 let bkey = child_key ~folder_id:pid name in
                 let module B = (val C.store : C.Store) in
                 let* held =

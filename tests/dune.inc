@@ -1024,6 +1024,20 @@
   (action
    (diff field_spec_test.expected field_spec_test.output))))
 
+(subdir unit/folder_id
+ (alias
+  (name default)
+  (deps folder_id_test.exe))
+ (rule
+  (alias runtest)
+  (target folder_id_test.output)
+  (action
+   (with-stdout-to folder_id_test.output (ignore-stderr (run ./folder_id_test.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff folder_id_test.expected folder_id_test.output))))
+
 (subdir unit/folder_ids
  (alias
   (name default)

@@ -15,10 +15,6 @@ let () =
   print_endline "=== the ids that anchor the tree";
   show "root" Stored_key.root_id;
   show "trash" Stored_key.trash_id;
-  show "a minted id's shape"
-    (Printf.sprintf "%d hex characters" (String.length (Stored_key.new_id ())));
-  show "two mints differ"
-    (string_of_bool (Stored_key.new_id () <> Stored_key.new_id ()));
 
   print_endline "\n=== where a child is filed";
   show_key "img.jpg" (child ~folder_id:fid "img.jpg");

@@ -74,8 +74,8 @@ let kinds (r : Integrity.tree_report) =
 
 let () =
   Lwt_main.run
-    (let archived = Stored_key.new_id () and backup = Stored_key.new_id () in
-     let song = Stored_key.new_id () and orphan = Stored_key.new_id () in
+    (let archived = Id.short () and backup = Id.short () in
+     let song = Id.short () and orphan = Id.short () in
      List.iter (fun id -> ignore (alias id)) [archived; backup; song; orphan];
      let* () = put Stored_key.root_id "archived" (marker "Archived" archived) in
      let* () = put Stored_key.root_id "backup" (marker "Backup" backup) in

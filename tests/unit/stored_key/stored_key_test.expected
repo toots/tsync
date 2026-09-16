@@ -1,8 +1,6 @@
 === the ids that anchor the tree
 root                       .tsync-root
 trash                      .tsync-trash
-a minted id's shape        16 hex characters
-two mints differ           true
 
 === where a child is filed
 img.jpg                    9f3a1c0428b6d5e7/066843ea47b80079-e0e3d2bb9b72c14d

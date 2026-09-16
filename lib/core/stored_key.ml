@@ -5,7 +5,6 @@ let sentinel = ".tsync-"
 let reserved leaf = String.starts_with ~prefix:sentinel leaf
 let root_id = sentinel ^ "root"
 let trash_id = sentinel ^ "trash"
-let new_id = Id.short
 
 (* The dual-seed xxHash of the leaf name, matching the chunk-key convention:
    fixed length and filesystem-safe regardless of the real name. *)

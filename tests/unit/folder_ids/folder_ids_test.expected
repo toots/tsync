@@ -1,5 +1,7 @@
+a parent is not named on a child's behalf: ok
+and the child stays unindexed until its parent is: ok
 a minted folder resolves back to its path: ok
-ancestors are minted too: ok
+each level holds an id of its own: ok
 an ancestor resolves too: ok
 a folder is named by its own id: ok
 a file is named by its folder and its leaf: ok
