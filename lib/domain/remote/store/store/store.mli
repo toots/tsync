@@ -53,6 +53,12 @@ module type S = sig
       has to be there already or there is nothing to move. *)
   val copy_manifest : src_key:Logical_key.t -> dst_key:Logical_key.t -> unit io
 
+  (** A directory's id, claimed on the store for it and any ancestor this client
+      holds none for. For a caller entitled to bring a folder into existence:
+      the local marker a claim records re-creates the directory the key names.
+  *)
+  val ensure_folder_id : Logical_key.t -> string io
+
   (** Record a directory under its parent's namespace, so a resync can rebuild
       the tree, its anchor written first so a marker left behind elsewhere is
       stale from this moment. A no-op for a layout with no folder tree. *)
@@ -128,5 +134,8 @@ module type INODE = sig
     S with type 'a io := 'a io and type pool = pool
 end
 
-module Over (Io : Io.S) (Batched : BATCHED with type 'a io := 'a Io.t) :
+module Over
+    (Io : Io.S)
+    (_ : Folder_ids.S with type 'a io := 'a Io.t)
+    (Batched : BATCHED with type 'a io := 'a Io.t) :
   OVER with type 'a io := 'a Io.t and type pool = Batched.pool

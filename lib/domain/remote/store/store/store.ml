@@ -33,12 +33,15 @@ module type S = sig
   val head_manifest : key:Logical_key.t -> Backend.file_entry option io
   val delete_manifest : key:Logical_key.t -> unit io
   val copy_manifest : src_key:Logical_key.t -> dst_key:Logical_key.t -> unit io
+  val ensure_folder_id : Logical_key.t -> string io
   val put_folder_marker : key:Logical_key.t -> unit io
   val put_anchor : folder_id:string -> parent:string -> name:string -> unit io
   val get_anchor : folder_id:string -> Folder.anchor option io
 
   val filed :
-    bkey:Stored_key.t -> Folder.marker -> [ `Here | `Elsewhere of Folder.anchor ] io
+    bkey:Stored_key.t ->
+    Folder.marker ->
+    [ `Here | `Elsewhere of Folder.anchor ] io
 
   val list_namespace : folder_id:string -> Backend.file_entry list io
   val get_object : bkey:Stored_key.t -> string io
@@ -78,7 +81,11 @@ module type INODE = sig
     S with type 'a io := 'a io and type pool = pool
 end
 
-module Over (Io : Io.S) (Batched : BATCHED with type 'a io := 'a Io.t) = struct
+module Over
+    (Io : Io.S)
+    (Folder_ids : Folder_ids.S with type 'a io := 'a Io.t)
+    (Batched : BATCHED with type 'a io := 'a Io.t) =
+struct
   type pool = Batched.pool
 
   open Io_syntax.Make (Io)
@@ -91,11 +98,118 @@ module Over (Io : Io.S) (Batched : BATCHED with type 'a io := 'a Io.t) = struct
 
     module B = (val C.store : C.Store)
     module Bb = Batched.Make (B)
+    module J = Journal.Make (C)
+
+    let anchor_key folder_id =
+      Stored_key.anchor_key ~prefix:C.domain_prefix ~folder_id
+
+    let put_anchor ~folder_id ~parent ~name =
+      B.put ~key:(anchor_key folder_id)
+        ~data:(Bigstring.of_string (Folder.anchor_to_string { parent; name }))
+        ()
+
+    let get_anchor ~folder_id =
+      let+ body = B.get_opt ~key:(anchor_key folder_id) () in
+      Option.bind body (fun b ->
+          Folder.anchor_of_string (Bigstring.to_string b))
+
+    let filed ~bkey (m : Folder.marker) =
+      let+ anchor = get_anchor ~folder_id:m.Folder.id in
+      match anchor with
+        | Some a
+          when a.Folder.parent <> Stored_key.parent_folder_id bkey
+               || a.Folder.name <> m.Folder.name ->
+            `Elsewhere a
+        | _ -> `Here
+
+    let unresolved what key =
+      Io.fail
+        (Invalid_argument
+           (Printf.sprintf "%s: no %s for %s" C.domain_name what
+              (Logical_key.to_string key)))
+
+    (* A store that cannot arbitrate falls back to minting locally, said once
+       because it is a real weakening: two clients creating one directory can
+       then still strand each other. *)
+    let warned_unarbitrated = ref false
+
+    (* The marker {i is} the claim: two clients that have not yet seen each
+       other both put one under the same key, and only the first lands. The
+       winner anchors the folder it brought into existence; a loser leaves that
+       to it. *)
+    let claim_name ~key ~id =
+      let* bkey = L.folder_marker_key key in
+      let* parent = L.folder_id (Logical_key.parent key) in
+      match (bkey, parent) with
+        | None, _ | _, None -> unresolved "folder marker key" key
+        | Some bkey, Some parent ->
+            let name = Logical_key.leaf key in
+            let candidate =
+              Bigstring.of_string (Folder.marker_to_string { Folder.name; id })
+            in
+            let* held =
+              Io.catch
+                (fun () -> B.put_if_absent ~key:bkey ~data:candidate ())
+                (fun exn ->
+                  if not !warned_unarbitrated then begin
+                    warned_unarbitrated := true;
+                    Log.warn
+                      "%s: this store cannot claim a name (%s); folder ids are \
+                       minted locally and concurrent creation of one directory \
+                       can strand files"
+                      C.domain_name (Printexc.to_string exn)
+                  end;
+                  Io.return candidate)
+            in
+            let winner =
+              Option.fold ~none:id
+                ~some:(fun (m : Folder.marker) -> m.Folder.id)
+                (Folder.marker_of_string (Bigstring.to_string held))
+            in
+            if winner = id then
+              let+ () = put_anchor ~folder_id:id ~parent ~name in
+              `Held
+            else Io.return (`Taken winner)
+
+    (* A folder's id is claimed from the store rather than chosen here, so every
+       client puts its children under the id the store accepted. Still
+       local-first: a folder already resolved costs no round trip. The parent is
+       claimed first, so the key a claim names is already the agreed one. *)
+    let rec ensure_folder_id key =
+      let* known = L.folder_id key in
+      match known with
+        | Some id -> Io.return id
+        | None ->
+            let* (_ : string) = ensure_folder_id (Logical_key.parent key) in
+            let candidate = J.folder_id () in
+            let* claimed = claim_name ~key ~id:candidate in
+            let id =
+              match claimed with `Held -> candidate | `Taken other -> other
+            in
+            let+ () =
+              Folder_ids.write ~cache_root:C.cache_root
+                ~domain_name:C.domain_name key
+                { Folder.name = Logical_key.leaf key; id }
+            in
+            id
+
+    (* Only a caller entitled to bring a folder into existence: the marker a
+       claim persists re-creates the local directory the key names. *)
+    let ensure_manifest_key key =
+      let* known = L.manifest_key key in
+      match known with
+        | Some bk -> Io.return bk
+        | None -> (
+            let* (_ : string) = ensure_folder_id (Logical_key.parent key) in
+            let* bk = L.manifest_key key in
+            match bk with
+              | Some bk -> Io.return bk
+              | None -> unresolved "manifest key" key)
 
     (* Publishing may bring the folder into existence; every other operation
        resolves what is already there and treats an unknown folder as absent. *)
     let put_manifest ~key ~data =
-      let* bk = L.ensure_manifest_key key in
+      let* bk = ensure_manifest_key key in
       B.put ~key:bk ~data ()
 
     let get_manifest_state ~key =
@@ -127,51 +241,31 @@ module Over (Io : Io.S) (Batched : BATCHED with type 'a io := 'a Io.t) = struct
       match src with
         | None -> Io.return ()
         | Some src ->
-            let* dst = L.ensure_manifest_key dst_key in
+            let* dst = ensure_manifest_key dst_key in
             let* () = B.copy ~src_key:src ~dst_key:dst () in
             let+ (_ : bool) = B.delete ~key:src () in
             ()
 
-    (* Records a directory under its parent's namespace so resync can rebuild the
-       tree. No-op for layouts with no folder tree. *)
-    let anchor_key folder_id =
-      Stored_key.anchor_key ~prefix:C.domain_prefix ~folder_id
-
-    let put_anchor ~folder_id ~parent ~name =
-      B.put ~key:(anchor_key folder_id)
-        ~data:(Bigstring.of_string (Folder.anchor_to_string { parent; name }))
-        ()
-
-    let get_anchor ~folder_id =
-      let+ body = B.get_opt ~key:(anchor_key folder_id) () in
-      Option.bind body (fun b ->
-          Folder.anchor_of_string (Bigstring.to_string b))
-
-    let filed ~bkey (m : Folder.marker) =
-      let+ anchor = get_anchor ~folder_id:m.Folder.id in
-      match anchor with
-        | Some a
-          when a.Folder.parent <> Stored_key.parent_folder_id bkey
-               || a.Folder.name <> m.Folder.name ->
-            `Elsewhere a
-        | _ -> `Here
-
     (* The anchor first: from then on any other marker naming this folder is
-       stale, whether or not the delete that should remove it ever lands. *)
+       stale, whether or not the delete that should remove it ever lands. Both
+       ids are ensured, the parent's because a marker must be filed under a
+       namespace even on a client that has not learned the parent. *)
     let put_folder_marker ~key =
-      let* m = L.ensure_folder_marker key in
-      match m with
-        | None -> Io.return ()
-        | Some (bkey, data) ->
-            let* () =
-              match Folder.marker_of_string data with
-                | Some m ->
-                    put_anchor ~folder_id:m.Folder.id
-                      ~parent:(Stored_key.parent_folder_id bkey)
-                      ~name:m.Folder.name
-                | None -> Io.return ()
-            in
-            B.put ~key:bkey ~data:(Bigstring.of_string data) ()
+      if Logical_key.is_root key then Io.return ()
+      else
+        let* parent = ensure_folder_id (Logical_key.parent key) in
+        let* id = ensure_folder_id key in
+        let* bkey = L.folder_marker_key key in
+        match bkey with
+          | None -> Io.return ()
+          | Some bkey ->
+              let name = Logical_key.leaf key in
+              let* () = put_anchor ~folder_id:id ~parent ~name in
+              B.put ~key:bkey
+                ~data:
+                  (Bigstring.of_string
+                     (Folder.marker_to_string { Folder.name; id }))
+                ()
 
     (* Direct children (file manifests and folder markers) of a folder namespace,
        and a raw object fetch — used by resync to walk the inode tree by id. *)

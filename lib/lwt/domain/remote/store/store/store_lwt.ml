@@ -6,7 +6,7 @@ module Batched = struct
   module Make = Backend_lwt.Batched
 end
 
-include Store.Over (Io_lwt.Core) (Batched)
+include Store.Over (Io_lwt.Core) (Folder_ids_lwt) (Batched)
 
 module Inode = struct
   type pool = Io_lwt.Bounded.t

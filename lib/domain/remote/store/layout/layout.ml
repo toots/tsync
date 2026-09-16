@@ -1,37 +1,22 @@
 (* How a logical manifest key ([domain_prefix ^ real-path]) maps to the key an
    object lives under. Behind one module type, so call sites speak only in
    logical keys through {!Store}. Answers in a monad because the inode scheme
-   resolves folder ids from local state. *)
+   resolves folder ids from local state. Reads only: bringing a folder into
+   existence is a claim on the store, and {!Store} makes it. *)
 module type S = sig
   type 'a io
 
   (** Logical manifest key (or directory prefix) -> backend key, resolving only
-      folder ids this client already holds: [None] when one is unknown.
-
-      The plain name is the one that changes nothing, so a call site that has
-      not thought about it gets the harmless behaviour. *)
+      folder ids this client already holds: [None] when one is unknown. *)
   val manifest_key : Logical_key.t -> Stored_key.t option io
 
-  (** {!manifest_key}, minting and persisting any missing folder id. Only for a
-      caller entitled to bring a folder into existence: the marker a mint
-      persists re-creates the local directory the key names. *)
-  val ensure_manifest_key : Logical_key.t -> Stored_key.t io
-
-  (** For a directory's logical key: the backend key of its folder marker (under
-      the parent's namespace) and the marker's JSON body, or [None] for layouts
-      with no folder tree. Mints the folder's own id — this is what records a
-      directory's existence, and what lets resync rebuild the structure. *)
-  val ensure_folder_marker : Logical_key.t -> (Stored_key.t * string) option io
-
-  (** Just the marker's backend key, minting nothing: a caller moving or
-      removing a marker does so once the local directory is gone, and an
-      unresolvable id names a marker that cannot exist. *)
+  (** A directory's folder marker key, under its parent's namespace. [None] at
+      the domain root, for a parent this client holds no id for, or for a layout
+      with no folder tree. *)
   val folder_marker_key : Logical_key.t -> Stored_key.t option io
 
-  (** The id naming a directory's own namespace, minted if this client has none.
-      For callers moving a folder around (rmdir into the trash), which need it
-      without the marker body {!ensure_folder_marker} builds. *)
-  val ensure_folder_id : Logical_key.t -> string io
+  (** The id naming a directory's own namespace, if this client holds one. *)
+  val folder_id : Logical_key.t -> string option io
 end
 
 (** The inode scheme for one domain, which is what a consumer takes. *)
@@ -51,132 +36,29 @@ struct
   module Inode = struct
     module Make (C : Conf.S with type 'a io = 'a Io.t) :
       S with type 'a io := 'a Io.t = struct
-      module J = Journal.Make (C)
-
-      let lookup_id key =
+      let folder_id key =
         Folder_ids.lookup_id ~cache_root:C.cache_root ~domain_name:C.domain_name
           key
-
-      let rel_of = Logical_key.path
 
       let child_key ~folder_id leaf =
         Stored_key.child_key ~prefix:C.domain_prefix ~folder_id leaf
 
-      (* A store that cannot arbitrate falls back to minting locally, said once
-         because it is a real weakening: two clients creating one directory can
-         then still strand each other. *)
-      let warned_unarbitrated = ref false
-
-      (* A folder's id is claimed from the store rather than chosen here: two
-         clients that have not yet seen each other would both mint and both write
-         the same marker key, the second silently taking the name and leaving the
-         first's namespace unreachable. The marker {i is} the claim, so every
-         client puts its children under the id the store accepted.
-
-         Still local-first: a folder already resolved costs no round trip. *)
-      let rec ensure_id key =
-        if Logical_key.is_root key then Io.return Stored_key.root_id
-        else
-          let* known = lookup_id key in
-          match known with
-            | Some id -> Io.return id
-            | None ->
-                let name = Logical_key.leaf key in
-                (* The parent is claimed first, so the key this claim names is
-                   already the agreed one. *)
-                let* pid = ensure_id (Logical_key.parent key) in
-                let candidate = { Folder.name; id = J.folder_id () } in
-                let bkey = child_key ~folder_id:pid name in
-                let module B = (val C.store : C.Store) in
-                let* held =
-                  Io.catch
-                    (fun () ->
-                      B.put_if_absent ~key:bkey
-                        ~data:
-                          (Bigstring.of_string
-                             (Folder.marker_to_string candidate))
-                        ())
-                    (fun exn ->
-                      if not !warned_unarbitrated then begin
-                        warned_unarbitrated := true;
-                        Log.warn
-                          "%s: this store cannot claim a name (%s); folder \
-                           ids                          are minted locally and \
-                           concurrent creation of one                          \
-                           directory can strand files"
-                          C.domain_name (Printexc.to_string exn)
-                      end;
-                      Io.return
-                        (Bigstring.of_string
-                           (Folder.marker_to_string candidate)))
-                in
-                let winner =
-                  Option.value
-                    (Folder.marker_of_string (Bigstring.to_string held))
-                    ~default:candidate
-                in
-                (* The winner anchors the folder it brought into existence; a
-                   loser leaves that to it. *)
-                let* () =
-                  if winner.Folder.id = candidate.Folder.id then
-                    B.put
-                      ~key:
-                        (Stored_key.anchor_key ~prefix:C.domain_prefix
-                           ~folder_id:winner.Folder.id)
-                      ~data:
-                        (Bigstring.of_string
-                           (Folder.anchor_to_string
-                              { Folder.parent = pid; name }))
-                      ()
-                  else Io.return ()
-                in
-                let+ () =
-                  Folder_ids.write ~cache_root:C.cache_root
-                    ~domain_name:C.domain_name key winner
-                in
-                winner.Folder.id
-
       (* A folder is not filed as a manifest — it is named by its marker under the
          parent's namespace — so this resolves a file either way. *)
-      let ensure_manifest_key key =
-        let+ pid = ensure_id (Logical_key.parent key) in
-        child_key ~folder_id:pid (Logical_key.leaf key)
-
-      (* Same mapping, resolving only what is already known. *)
       let manifest_key key =
-        let+ pid = lookup_id (Logical_key.parent key) in
+        let+ pid = folder_id (Logical_key.parent key) in
         Option.map
           (fun pid -> child_key ~folder_id:pid (Logical_key.leaf key))
           pid
 
-      let ensure_folder_id key = ensure_id key
-
       let folder_marker_key key =
-        if Logical_key.is_root key then Io.return None
-        else
-          let+ pid = lookup_id (Logical_key.parent key) in
-          Option.map
-            (fun pid -> child_key ~folder_id:pid (Logical_key.leaf key))
-            pid
-
-      (* Both ids are minted if missing: the folder's own because the marker is
-         what gives it one, the parent's because a marker must be filed under a
-         namespace even on a client that has not learned the parent. *)
-      let ensure_folder_marker key =
-        if Logical_key.is_root key then Io.return None
-        else
-          let* pid = ensure_id (Logical_key.parent key) in
-          let+ id = ensure_id key in
-          Some
-            ( child_key ~folder_id:pid (Logical_key.leaf key),
-              Folder.marker_to_string { Folder.name = Logical_key.leaf key; id }
-            )
+        if Logical_key.is_root key then Io.return None else manifest_key key
     end
   end
 
   (* The logical key already is the backend key, so callers holding inode-space
      keys and no path (share serving walks the folder tree by id) can reuse the
-     path-keyed read machinery. Read-only: there is no folder tree to record. *)
+     path-keyed read machinery. There is no folder tree to record. *)
   module Identity : S with type 'a io := 'a Io.t = struct
     (* This layout's space is the logical spelling itself, so a key is a path
        under no prefix at all. *)
@@ -184,11 +66,9 @@ struct
       Stored_key.in_space ~prefix:"" (Logical_key.to_string key)
 
     let manifest_key key = return_some (of_logical key)
-    let ensure_manifest_key key = Io.return (of_logical key)
-    let ensure_folder_marker _ = Io.return None
     let folder_marker_key _ = Io.return None
 
     (* The key already names the namespace; there is no path to resolve. *)
-    let ensure_folder_id key = Io.return (Logical_key.leaf key)
+    let folder_id key = return_some (Logical_key.leaf key)
   end
 end

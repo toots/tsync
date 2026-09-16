@@ -404,14 +404,9 @@ struct
           let* () = Ck.create_dir key in
           (* Minted here, not in [put_folder_marker], so the same id reaches the
              journal entry a peer will read. *)
-          let* fid = L.ensure_folder_id key in
+          let* fid = St.ensure_folder_id key in
           with_journal [`Mkdir (rel_key key, Some fid)])
 
-    (* The marker a folder is filed under, or a failure: a caller about to move
-       or retire a folder without removing its marker would leave the folder's
-       id at two places, which is what a client resolving by id cannot tell
-       apart. [None] is a parent this client holds no id for, and the repair is
-       a sync. *)
     (* The folder a marker on the store names, or [None] when there is none. A
        store that cannot answer raises instead, so an outage is retried rather
        than read as a free name. *)
@@ -422,6 +417,11 @@ struct
             (fun (m : Folder.marker) -> m.Folder.id)
             (Folder.marker_of_string data))
 
+    (* The marker a folder is filed under, or a failure: a caller about to move
+       or retire a folder without removing its marker would leave the folder's
+       id at two places, which is what a client resolving by id cannot tell
+       apart. A parent this client holds no id for is refused, and the repair
+       is a sync. *)
     let old_marker_or_fail key =
       let* old_marker = folder_marker_bkey key in
       match old_marker with
@@ -468,7 +468,7 @@ struct
           (* Read while the folder is still here: [Ck.delete_dir] takes the
              marker the id comes from, and the entry is the only place it goes
              on existing. *)
-          let* fid = L.ensure_folder_id key in
+          let* fid = St.ensure_folder_id key in
           (* Refused before anything is removed rather than parked after. *)
           let* (_ : Stored_key.t) = old_marker_or_fail key in
           let* () = Ck.delete_dir key in
@@ -612,7 +612,7 @@ struct
           let* id =
             match r.Journal.id with
               | Some id -> Io.return id
-              | None -> L.ensure_folder_id dst
+              | None -> St.ensure_folder_id dst
           in
           let* old_marker = old_marker_or_fail src in
           let* taken = taken_by_another ~dst ~id in
@@ -691,7 +691,7 @@ struct
       (* Read after the move, where the folder now is. *)
       let* dir_id =
         if is_dir then
-          let+ id = L.ensure_folder_id dst in
+          let+ id = St.ensure_folder_id dst in
           Some id
         else Io.return None
       in
