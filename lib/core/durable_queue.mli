@@ -127,14 +127,17 @@ module type QUEUE = sig
 
   (** One worker, jobs in the order recorded. A job stays at the head until it
       is taken, so a failure that can clear is waited out rather than losing the
-      write and letting what follows overtake it. *)
+      write and letting what follows overtake it.
+
+      [run] is handed the record's id, which is the only name a job has: what it
+      means is the log's, not this queue's. *)
   val ordered :
     ?max_queued:int ->
     name:string ->
     log:Records.t ->
     classify:(exn -> Retry.kind) ->
     poison:poison ->
-    run:(job -> unit io) ->
+    run:(id:string -> job -> unit io) ->
     unit ->
     t
 

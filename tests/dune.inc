@@ -649,6 +649,20 @@
   (action
    (diff ipc.expected ipc.output))))
 
+(subdir scenario/meta_offline
+ (alias
+  (name default)
+  (deps meta_offline.exe))
+ (rule
+  (alias runtest)
+  (target meta_offline.output)
+  (action
+   (with-stdout-to meta_offline.output (ignore-stderr (run ./meta_offline.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff meta_offline.expected meta_offline.output))))
+
 (subdir scenario/pause
  (alias
   (name default)

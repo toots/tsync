@@ -156,12 +156,34 @@ struct
               W.complete key
             end
 
+    (* The local half of a prepared record has happened, so it goes back to
+       whichever queue owes its backend half rather than being applied a second
+       time.
+
+       No {!overridden_since} here: the local side is already what this client
+       holds, and publishing it is what brings the two back into agreement --
+       skipping it would leave them apart with nothing left saying so. *)
+    let resume_prepared key (r : Wal.record) =
+      let puts, meta =
+        List.partition (function `Put _ -> true | _ -> false) r.Wal.ops
+      in
+      match (puts, meta) with
+        | [(`Put (rel, _) as op)], [] ->
+            let* resumed =
+              F.resume_put (full_key rel) ~entry_key:key
+                ~record:{ r with Wal.ops = [op] }
+            in
+            if resumed then return_unit else W.complete key
+        | [], _ :: _ -> F.resume_meta ~entry_key:key ~record:r
+        | _ -> replay_unpublished key r
+
     let reconcile_record (key, (r : Wal.record)) =
       Io.catch
         (fun () ->
           match r.Wal.state with
             | Wal.Executed -> finish_executed key r
-            | Wal.Intent | Wal.Prepared -> replay_unpublished key r)
+            | Wal.Prepared -> resume_prepared key r
+            | Wal.Intent -> replay_unpublished key r)
         (fun exn ->
           (* Left in place: a record that could not be reconciled is tried again
              next start, and stats reports it in the meantime. *)

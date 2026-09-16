@@ -47,7 +47,7 @@ let hold dir =
   let q =
     Q.ordered ~name:"holder" ~classify:Retry.classify ~log
       ~poison:Durable_queue_lwt.Drop
-      ~run:(fun _ -> Lwt.return_unit)
+      ~run:(fun ~id:_ _ -> Lwt.return_unit)
       ()
   in
   Q.start ~recover:false q;
@@ -82,7 +82,7 @@ let run ~dir ~kill_child () =
   let q =
     Q.ordered ~name:"taker" ~classify:Retry.classify ~log
       ~poison:Durable_queue_lwt.Drop
-      ~run:(fun job ->
+      ~run:(fun ~id:_ job ->
         ran := !ran @ [job];
         if !holding then gate else Lwt.return_unit)
       ()

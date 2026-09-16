@@ -101,7 +101,7 @@ module type QUEUE = sig
     log:Records.t ->
     classify:(exn -> Retry.kind) ->
     poison:poison ->
-    run:(job -> unit io) ->
+    run:(id:string -> job -> unit io) ->
     unit ->
     t
 
@@ -726,7 +726,7 @@ struct
     let ordered ?(max_queued = default_max_queued) ~name ~log ~classify ~poison
         ~run () =
       make ~name ~log ~poison ~max_queued ~topo:Ordered ~workers:1 ~classify
-        ~run:(fun ~id:_ job ~cancel:_ -> run job)
+        ~run:(fun ~id job ~cancel:_ -> run ~id job)
 
     let keyed ?(max_queued = default_max_queued) ?(workers = 1)
         ?(weight = fun _ -> 0L) ~name ~log ~key ~classify ~poison ~run () =

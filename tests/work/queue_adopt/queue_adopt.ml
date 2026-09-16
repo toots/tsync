@@ -24,7 +24,7 @@ let log = Q.Records.create ~dir:log_dir
 let queue =
   Q.ordered ~name:"adopt" ~classify:Retry.classify ~log
     ~poison:Durable_queue_lwt.Drop
-    ~run:(fun _ -> fst (Lwt.wait ()))
+    ~run:(fun ~id:_ _ -> fst (Lwt.wait ()))
     ()
 
 let () =

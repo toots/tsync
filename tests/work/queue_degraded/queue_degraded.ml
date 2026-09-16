@@ -41,7 +41,7 @@ let () =
      let q =
        Q.ordered ~name:"degraded" ~classify:Retry.classify ~log
          ~poison:Durable_queue_lwt.Drop
-         ~run:(fun job ->
+         ~run:(fun ~id:_ job ->
            ran := job :: !ran;
            Lwt.return_unit)
          ()

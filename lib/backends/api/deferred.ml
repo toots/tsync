@@ -231,7 +231,9 @@ struct
           (* A permanent failure is dropped: the same request would be refused
              again, and every later rename would queue behind it forever. The
              target is degraded from then on and needs tsync mirror. *)
-        ~classify:Backend.classify ~poison:Durable_queue.Drop ~run ()
+        ~classify:Backend.classify ~poison:Durable_queue.Drop
+        ~run:(fun ~id:_ job -> run job)
+        ()
     in
     Q.start ~recover:resume queue;
     (* Chunk pushes are not owed — a manifest job fetches whatever is missing — but

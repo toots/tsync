@@ -167,6 +167,12 @@ module type S = sig
   val resume_put :
     t -> entry_key:Journal.Entry_key.t -> record:Wal.record -> bool io
 
+  (** {!resume_put} for a metadata record, whose local half has happened and
+      whose backend half is owed. It names no staged data, so there is nothing
+      to find missing and nothing to answer. *)
+  val resume_meta :
+    entry_key:Journal.Entry_key.t -> record:Wal.record -> unit io
+
   val delete : t -> unit io
   val mkdir : t -> unit io
   val rmdir : t -> unit io

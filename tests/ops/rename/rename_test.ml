@@ -37,6 +37,7 @@ module C =
       : Conf_lwt.S)
 
 module F = File_lwt.Make (C)
+module Mq = Sync_lwt.Meta_queue.Make (C) (F)
 module Lk = Logical_key.Make (C)
 module Ck = Checkout_lwt.Make (C)
 module Tree = Inode_tree_lwt.Make (C)
@@ -99,10 +100,16 @@ let local_dirs () =
   let+ _, dirs = Ck.list_children ~prefix:Lk.root () in
   List.sort compare dirs
 
+(* A metadata operation returns once its local half is done; what the store
+   holds is the queue's to publish, so every assertion about the store waits for
+   it. *)
+let settle () = Durable_queue_lwt.settle_all ~timeout:10. ()
+
 let attempt what f =
   Lwt.catch
     (fun () ->
-      let+ () = f () in
+      let* () = f () in
+      let+ () = settle () in
       step "%s: succeeded" what;
       true)
     (fun exn ->
@@ -118,8 +125,10 @@ let marker_path rel =
 let () =
   Lwt_main.run
     (let* () = Ck.ensure_root () in
+     Mq.start ();
      case "a rename moves the marker and nothing else";
      let* () = F.mkdir (Lk.dir "d") in
+     let* () = settle () in
      let* before = show_markers "root before" Stored_key.root_id in
      let id = List.assoc "d" before in
      let* ok =
@@ -170,6 +179,7 @@ let () =
          ()
      in
      let* () = F.rename ~src:(Lk.dir "d3") ~dst:(Lk.dir "d2") in
+     let* () = settle () in
 
      case "a parent this client holds no id for is not renamed from";
      (* A folder materialised by a peer's put, with a marker of its own but
@@ -177,6 +187,7 @@ let () =
         to repair, and the one that turned a delete into a no-op. *)
      let* () = F.mkdir (Lk.dir "p") in
      let* () = F.mkdir (Lk.dir "p/child") in
+     let* () = settle () in
      let* () = Io_lwt.Fs.unlink_quiet (marker_path "p") in
      let* ok =
        attempt "rename p/child -> orphan" (fun () ->

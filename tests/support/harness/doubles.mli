@@ -14,6 +14,19 @@ end) : Backend_lwt.Store
     the tests whose subject is the answer that does not come. *)
 module Hung : Backend_lwt.Store
 
+(** [Real] behind a link that can go down. A request made while it is down
+    stalls until the link returns and then goes through, which is what an outage
+    is, as opposed to a store that refuses. Every request is counted, stalled
+    ones included, so a test can say how many round trips an operation made
+    rather than how long it took. *)
+module Outage (_ : Backend_lwt.Store) : sig
+  include Backend_lwt.Store
+
+  val set_up : bool -> unit
+  val calls : unit -> int
+  val reset : unit -> unit
+end
+
 (** Readable and never writable — a wrong credential, a bucket that refuses
     writes. Reads answer empty rather than failing; writes raise
     {!Backend.Not_writable}. *)

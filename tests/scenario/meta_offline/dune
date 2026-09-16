@@ -28,8 +28,10 @@
    -open
    Tsync_core_lwt
    -open
+   Tsync_journal
+   -open
    Tsync_test_harness))
- (name rename_test)
+ (name meta_offline)
  (libraries
   tsync_core
   tsync_checkout
@@ -45,5 +47,7 @@
   tsync_remote_lwt
   tsync_sync_lwt
   tsync_core_lwt
+  tsync_journal
+  yojson
   lwt
   lwt.unix))

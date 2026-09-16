@@ -50,6 +50,58 @@ module Hung : Backend_lwt.Store = struct
   let local_path = None
 end
 
+module Outage (Real : Backend_lwt.Store) = struct
+  include Real
+
+  let up = ref true
+  let returned = Lwt_condition.create ()
+  let count = ref 0
+
+  let set_up b =
+    up := b;
+    if b then Lwt_condition.broadcast returned ()
+
+  let calls () = !count
+  let reset () = count := 0
+
+  (* Counted on entry, so a request stalled by the outage is one the caller made
+     all the same. *)
+  let gate f =
+    incr count;
+    let rec wait () =
+      if !up then f () else Lwt.bind (Lwt_condition.wait returned) wait
+    in
+    wait ()
+
+  let put ~key ~data () = gate (fun () -> Real.put ~key ~data ())
+
+  let put_if_absent ~key ~data () =
+    gate (fun () -> Real.put_if_absent ~key ~data ())
+
+  let get ~key () = gate (fun () -> Real.get ~key ())
+  let get_opt ~key () = gate (fun () -> Real.get_opt ~key ())
+
+  let get_range ~key ~offset ~length () =
+    gate (fun () -> Real.get_range ~key ~offset ~length ())
+
+  let head_opt ~key () = gate (fun () -> Real.head_opt ~key ())
+  let delete ~key () = gate (fun () -> Real.delete ~key ())
+  let delete_multi keys = gate (fun () -> Real.delete_multi keys)
+
+  let copy ~src_key ~dst_key () =
+    gate (fun () -> Real.copy ~src_key ~dst_key ())
+
+  let list_prefix ?max_keys ~prefix () =
+    gate (fun () -> Real.list_prefix ?max_keys ~prefix ())
+
+  let watch ~key ~last_seen () = gate (fun () -> Real.watch ~key ~last_seen ())
+
+  (* Declared absent rather than inherited: a native batch passed through from
+     [Real] would answer while the link is down. *)
+  let get_many = None
+  let list_many = None
+end
+
 module Refuses : Backend_lwt.Store = struct
   let fail () = Lwt.fail Backend.Not_writable
   let put ~key:_ ~data:_ () = fail ()

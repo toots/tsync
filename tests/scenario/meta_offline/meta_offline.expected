@@ -1,0 +1,31 @@
+
+=== set up while the link is up
+nothing is owed before the outage: ok
+
+=== the link goes down
+  rename b.txt -> c.txt: returned, 0 round trip(s), 1 owed
+a file rename makes no round trip: ok
+  delete c.txt: returned, 0 round trip(s), 2 owed
+a delete makes no round trip: ok
+  rename docs -> papers: returned, 0 round trip(s), 3 owed
+a folder rename makes no round trip: ok
+  rmdir scratch: returned, 0 round trip(s), 4 owed
+a folder removal makes no round trip: ok
+each operation is owed: ok
+  local papers/a.txt
+  mkdir fresh: waited on the store, 1 round trip(s), 4 owed
+
+=== the link comes back
+everything owed was published: ok
+  local papers/a.txt
+  journal {"op":"mkdir","key":"docs","id":"<folder-1>"}
+  journal {"op":"mkdir","key":"scratch","id":"<folder-2>"}
+  journal {"op":"put","key":"docs/a.txt","size":5}
+  journal {"op":"put","key":"b.txt","size":5}
+  journal {"op":"rename","key":"c.txt","src":"b.txt","is_dir":false,"size":5}
+  journal {"op":"delete","key":"c.txt"}
+  journal {"op":"rename","key":"papers","src":"docs","is_dir":true,"id":"<folder-1>"}
+  journal {"op":"rmdir","key":"scratch","id":"<folder-2>"}
+  journal {"op":"mkdir","key":"fresh","id":"<folder-3>"}
+
+7 check(s), 0 failure(s)

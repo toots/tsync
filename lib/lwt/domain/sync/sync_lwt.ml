@@ -9,3 +9,6 @@ module Sync_poller =
 
 module Sync_queue =
   Sync_queue.Over (Io_lwt.Core) (File_store_lwt) (Wal_lwt.Q) (Wal_lwt)
+
+module Meta_queue =
+  Meta_queue.Over (Io_lwt.Core) (File_store_lwt) (Wal_lwt.Q) (Wal_lwt)

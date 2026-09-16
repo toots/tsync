@@ -424,6 +424,7 @@ let setup_client (module C : Conf_lwt.S) root staging_prefix =
   let module Lk = Logical_key.Make (C) in
   let module F = File_lwt.Make (C) in
   let module Sq = Sync_lwt.Sync_queue.Make (C) (F) in
+  let module Mq = Sync_lwt.Meta_queue.Make (C) (F) in
   let module Mfs = Staged_lwt.Manifest.Make (C) in
   let module Orphans = Maintenance_lwt.Staged_orphans.Make (C) in
   let module H = Ipc_handler.Make (C) (F) (Sq) in
@@ -453,6 +454,7 @@ let setup_client (module C : Conf_lwt.S) root staging_prefix =
   Sq.start ~on_upload_done:(fun ~key:_ ->
       (* Mirror the daemons: nudge cache-cap enforcement after each upload. *)
       Lwt.map (fun (_ : Maintenance_lwt.swept) -> ()) (F.enforce_chunk_cap ()));
+  Mq.start ();
   let staging_seq = ref 0 in
   let mark_time = ref 0. in
   (* The cache file backing stored chunk [index], for the steps that damage it
@@ -916,7 +918,7 @@ let setup_client (module C : Conf_lwt.S) root staging_prefix =
         wait 2000
     | Drain ->
         let rec wait () =
-          if Sq.pending () = 0 then Lwt.return_unit
+          if Sq.pending () = 0 && Mq.pending () = 0 then Lwt.return_unit
           else
             let* () = Lwt.pause () in
             wait ()
@@ -1196,6 +1198,9 @@ let setup_client (module C : Conf_lwt.S) root staging_prefix =
      the cursor is what a peer polls to decide whether to read the journal at
      all. *)
   let drain () =
+    (* The metadata queue first: a rename it publishes is what names the file an
+       upload behind it is for. *)
+    let* () = Mq.drain () in
     let* () = Sq.drain () in
     Fs.flush_cursor ()
   in
