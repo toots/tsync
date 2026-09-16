@@ -1124,6 +1124,20 @@
   (action
    (diff http_excerpt.expected http_excerpt.output))))
 
+(subdir unit/id
+ (alias
+  (name default)
+  (deps id_test.exe))
+ (rule
+  (alias runtest)
+  (target id_test.output)
+  (action
+   (with-stdout-to id_test.output (ignore-stderr (run ./id_test.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff id_test.expected id_test.output))))
+
 (subdir unit/import_batching
  (alias
   (name default)
