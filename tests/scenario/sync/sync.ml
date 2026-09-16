@@ -246,6 +246,7 @@ let delete_rename_race =
         A (Delete "foo.txt");
         A Drain;
         B (Rename { src = "foo.txt"; dst = "baz.txt" });
+        B Drain;
         B Sync;
         (* A picks up B's published baz; both clients converge. *)
         A Sync;
@@ -267,6 +268,7 @@ let rename_rename_race =
         A (Rename { src = "foo.txt"; dst = "bar.txt" });
         A Drain;
         B (Rename { src = "foo.txt"; dst = "baz.txt" });
+        B Drain;
         B Sync;
         (* A picks up B's published baz; both clients converge. *)
         A Sync;
