@@ -1,0 +1,11 @@
+
+=== an upload whose staged bytes went without it
+is owed: ok
+  journal entries: 0
+publishes no entry: ok
+and is no longer owed: ok
+
+=== an upload with its bytes in place
+still publishes its entry: ok
+
+4 check(s), 0 failure(s)

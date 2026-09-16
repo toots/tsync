@@ -789,6 +789,20 @@
   (action
    (diff upload.expected upload.output))))
 
+(subdir scenario/upload_gone
+ (alias
+  (name default)
+  (deps upload_gone.exe))
+ (rule
+  (alias runtest)
+  (target upload_gone.output)
+  (action
+   (with-stdout-to upload_gone.output (ignore-stderr (run ./upload_gone.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff upload_gone.expected upload_gone.output))))
+
 (subdir scenario/versioning
  (alias
   (name default)
