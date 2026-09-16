@@ -11,7 +11,9 @@
    operations in a straight line, so its legal end states are: the state after
    the last acked operation, plus the state after every interrupted one that
    follows. shared/ is written by both and carries only the weak expectation
-   that whatever is there is something somebody wrote.
+   that whatever is there is something somebody wrote. Both mounts create it,
+   so one of them files its own as a conflicted copy, and what it wrote there
+   first is judged as written to shared/.
 
    Everything random comes from one seed, printed on every run. A failure that
    cannot be replayed is a failure nobody can act on.
@@ -224,41 +226,66 @@ let stop_pressure () =
 
 (* {1 The oracle} *)
 
-(* Legal end states for a strict path: what stood after the last acked
-   operation, plus what every interrupted one after it would have left. A path
-   any rename touched is ambiguous by construction and is not judged. *)
+(* The folder both mounts create goes to whichever publishes first, the other
+   taking a conflicted name; a path under that copy is one written as shared/. *)
+let written_as path =
+  let shared = "shared" in
+  match String.index_opt path '/' with
+    | Some i
+      when String.starts_with ~prefix:(shared ^ " (conflicted copy ") path ->
+        shared ^ String.sub path i (String.length path - i)
+    | _ -> path
+
+(* Legal end states for a path. shared/ may hold anything written to it; a
+   strict path, what stood after the last acked operation plus what every
+   interrupted one after it would have left.
+
+   A strict path any rename touched is ambiguous by construction and is not
+   judged. *)
 let legal_states path =
-  let mine =
-    List.filter (fun r -> r.path = path) !journal
-    |> List.sort (fun a b -> compare a.at b.at)
-  in
-  if
-    List.exists
-      (fun r ->
-        match r.op with Rename_away | Rename_onto _ -> true | _ -> false)
-      mine
-  then None
-  else begin
-    let states = ref [] and cur = ref None in
-    List.iter
-      (fun r ->
-        (match r.op with
-          | Write "" -> () (* a read, which changes nothing *)
-          | Write h -> cur := Some h
-          | Delete -> cur := None
-          | _ -> ());
-        states := (!cur, r.outcome) :: !states)
-      (List.filter (fun r -> r.outcome <> Failed_op) mine);
-    let states = List.rev !states in
-    let rec from_last_ack acc seen = function
-      | [] -> acc
-      | (st, Acked) :: tl -> from_last_ack [st] true tl
-      | (st, _) :: tl -> from_last_ack (if seen then st :: acc else acc) seen tl
+  if String.starts_with ~prefix:"shared/" path then (
+    let written =
+      List.filter_map
+        (fun r ->
+          match r.op with
+            | Write h when r.path = path && h <> "" -> Some (Some h)
+            | _ -> None)
+        !journal
     in
-    match states with
-      | [] -> None
-      | _ -> Some (from_last_ack [None] false states)
-  end
+    Some (None :: written))
+  else (
+    let mine =
+      List.filter (fun r -> r.path = path) !journal
+      |> List.sort (fun a b -> compare a.at b.at)
+    in
+    if
+      List.exists
+        (fun r ->
+          match r.op with Rename_away | Rename_onto _ -> true | _ -> false)
+        mine
+    then None
+    else begin
+      let states = ref [] and cur = ref None in
+      List.iter
+        (fun r ->
+          (match r.op with
+            | Write "" -> () (* a read, which changes nothing *)
+            | Write h -> cur := Some h
+            | Delete -> cur := None
+            | _ -> ());
+          states := (!cur, r.outcome) :: !states)
+        (List.filter (fun r -> r.outcome <> Failed_op) mine);
+      let states = List.rev !states in
+      let rec from_last_ack acc seen = function
+        | [] -> acc
+        | (st, Acked) :: tl -> from_last_ack [st] true tl
+        | (st, _) :: tl ->
+            from_last_ack (if seen then st :: acc else acc) seen tl
+      in
+      match states with
+        | [] -> None
+        | _ -> Some (from_last_ack [None] false states)
+    end)
 
 (* {1 Checks over the settled domain} *)
 
@@ -599,7 +626,7 @@ let () =
           | [] -> ());
     List.iter
       (fun (path, actual) ->
-        match legal_states path with
+        match legal_states (written_as path) with
           | None -> ()
           | Some legal ->
               check (Printf.sprintf "%s holds something that was written" path)

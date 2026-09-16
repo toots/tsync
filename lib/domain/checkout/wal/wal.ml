@@ -9,6 +9,9 @@ type record = {
   last_error : (Retry.kind * string) option;
 }
 
+let is_metadata r =
+  r.ops <> [] && List.for_all (function `Put _ -> false | _ -> true) r.ops
+
 let string_of_state = function
   | Intent -> "intent"
   | Prepared -> "prepared"

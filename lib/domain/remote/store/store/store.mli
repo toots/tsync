@@ -59,6 +59,15 @@ module type S = sig
   *)
   val ensure_folder_id : Logical_key.t -> string io
 
+  (** Make sure the store files the folder under its name, and its ancestors
+      under theirs, answering [`Taken] with the id of another folder holding the
+      name. A taken ancestor is a transient failure: its own queued creation
+      moves it aside. [id] is the folder's own when the caller holds it; a
+      folder this client holds no id for takes the store's, unless it named one
+      at that path before, which is a folder moved or removed since. *)
+  val claim_folder :
+    ?id:string -> Logical_key.t -> [ `Held | `Taken of string ] io
+
   (** Record a directory under its parent's namespace, so a resync can rebuild
       the tree, its anchor written first so a marker left behind elsewhere is
       stale from this moment. A no-op for a layout with no folder tree. *)
@@ -70,6 +79,19 @@ module type S = sig
   (** [None] for a folder written before anchors were, which is taken at its
       marker's word. *)
   val get_anchor : folder_id:string -> Folder.anchor option io
+
+  (** Where the store files a folder by its anchor, against the place [at].
+      [`Unanchored] for a folder written before anchors were, or one never
+      published. *)
+  val placed :
+    folder_id:string ->
+    at:Folder.anchor ->
+    [ `Here | `Elsewhere of Folder.anchor | `Unanchored ] io
+
+  (** The folder a marker on the store names, [None] when there is none. A
+      store that cannot answer raises instead, so an outage is not read as a
+      free name. *)
+  val marker_id_at : bkey:Stored_key.t -> string option io
 
   (** Whether the marker at [bkey] is where its folder lives. A marker the
       folder's anchor places elsewhere is one a move left behind; a folder with

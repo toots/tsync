@@ -56,11 +56,7 @@ struct
     module Js = Js.Make (C)
     module W = W.Make (C)
 
-    (* A put's bytes and entry are the upload queue's; everything else is
-       ours. *)
-    let is_metadata (r : Wal.record) =
-      r.Wal.ops <> []
-      && List.for_all (function `Put _ -> false | _ -> true) r.Wal.ops
+    let is_metadata = Wal.is_metadata
 
     (* In memory, unlike the record's own count: what a ceiling is measuring is
        this run's attempts at a job the queue is holding, and a record carried
@@ -82,19 +78,25 @@ struct
         | Some entry_key ->
             Io.catch
               (fun () ->
-                let* () = F.backend_ops r.Wal.ops in
-                (* Executed, then published, then the record goes: a crash in
-                   either window leaves a record reconcile can finish from what
-                   the backend says. The cursor is recorded rather than
-                   published, so a drained backlog moves it once. *)
+                let* ops = F.backend_ops r.Wal.ops in
                 let+ () =
-                  W.discharge
-                    ~publish:(fun ek ops ->
-                      Js.write_journal_entry ~entry_key:ek ops)
-                    ~cursor:(fun ek ->
-                      Js.note_cursor ek;
-                      return_unit)
-                    entry_key r.Wal.ops
+                  match ops with
+                    (* The store was never told of what this names: nothing to
+                       publish, and nothing owed. *)
+                    | [] -> W.complete entry_key
+                    | ops ->
+                        (* Executed, then published, then the record goes: a
+                           crash in either window leaves a record reconcile can
+                           finish from what the backend says. The cursor is
+                           recorded rather than published, so a drained backlog
+                           moves it once. *)
+                        W.discharge
+                          ~publish:(fun ek ops ->
+                            Js.write_journal_entry ~entry_key:ek ops)
+                          ~cursor:(fun ek ->
+                            Js.note_cursor ek;
+                            return_unit)
+                          entry_key ops
                 in
                 Hashtbl.remove attempts id)
               (function

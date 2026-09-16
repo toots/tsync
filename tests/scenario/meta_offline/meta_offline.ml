@@ -72,6 +72,44 @@ let show_tree () =
            (Logical_key.path b.Checkout.key))
        listed)
 
+let until ready =
+  let rec go tries =
+    if ready () then Lwt.return_true
+    else if tries = 0 then Lwt.return_false
+    else
+      let* () = Lwt_unix.sleep 0.02 in
+      go (tries - 1)
+  in
+  go 250
+
+(* The names the store files under the root, read past the link. *)
+let root_markers () =
+  let prefix = C.domain_prefix ^ Stored_key.root_id ^ "/" in
+  let* entries = Real.list_prefix ~prefix () in
+  let+ names =
+    Lwt_list.filter_map_s
+      (fun (e : Backend.file_entry) ->
+        let+ body = Real.get_opt ~key:e.Backend.key () in
+        Option.bind body (fun b ->
+            Option.map
+              (fun (m : Folder.marker) -> m.Folder.name)
+              (Folder.marker_of_string (Bigstring.to_string b))))
+      entries
+  in
+  List.sort compare names
+
+let lookup rel =
+  Folder_ids_lwt.lookup_id ~cache_root:root ~domain_name:C.domain_name
+    (Lk.dir rel)
+
+let journal_keys () =
+  let* keys = Js.list_journal_keys () in
+  Lwt_list.fold_left_s
+    (fun acc key ->
+      let+ ops = Js.get_journal_entry key in
+      acc @ List.concat_map Journal.keys_of_op (Option.value ~default:[] ops))
+    [] keys
+
 (* Ids are minted at random; the snapshot names them by order of first sight. *)
 let ids : (string, string) Hashtbl.t = Hashtbl.create 8
 
@@ -160,15 +198,30 @@ let () =
      check "each operation is owed" (n = 4);
      let* () = show_tree () in
 
-     (* Last, because it holds the metadata lock until the link returns: a new
-        folder's id is still claimed from the store when it is created. *)
-     let* fresh, _ =
+     (* A new folder's id is this client's own, so creating one waits on
+        nothing, and neither does what happens to it before the store hears. *)
+     let* _, calls =
        offline "mkdir fresh" (fun () -> F.mkdir (Lk.dir "fresh"))
      in
+     let* fresh_id = lookup "fresh" in
+     check "a new folder makes no round trip and has its id"
+       (calls = 0 && fresh_id <> None);
+     let* _, calls =
+       offline "mkdir gone; rmdir gone" (fun () ->
+           let* () = F.mkdir (Lk.dir "gone") in
+           F.rmdir (Lk.dir "gone"))
+     in
+     check "a new folder removed makes no round trip" (calls = 0);
+     let* _, calls =
+       offline "mkdir moved; rename moved -> moved2" (fun () ->
+           let* () = F.mkdir (Lk.dir "moved") in
+           F.rename ~src:(Lk.dir "moved") ~dst:(Lk.dir "moved2"))
+     in
+     let* moved_id = lookup "moved2" in
+     check "a new folder renamed makes no round trip" (calls = 0);
 
      case "the link comes back";
      Link.set_up true;
-     let* () = fresh in
      Mq.set_paused false;
      Sq.set_paused false;
      let* () = settle () in
@@ -176,5 +229,59 @@ let () =
      check "everything owed was published" (n = 0);
      let* () = show_tree () in
      let* () = show_journal () in
-     report ~expected:7 ();
+     let* names = root_markers () in
+     step "store: %s" (String.concat ", " names);
+     check "a folder removed before the store heard of it is not filed there"
+       (not (List.mem "gone" names));
+     let* _, dirs = Ck.list_children ~prefix:Lk.root () in
+     check "nor brought back here" (not (List.mem "gone" dirs));
+     let* still = lookup "moved2" in
+     check
+       "a folder renamed before the store heard of it is filed where it is, \
+        under the id it was created with"
+       (List.mem "moved2" names
+       && (not (List.mem "moved" names))
+       && still = moved_id);
+
+     (* The claim is held on the wire, so the removal lands while the store is
+        being asked for the name. *)
+     case "a new folder removed while its creation is being published";
+     let* () = Js.flush_cursor () in
+     Link.set_up false;
+     Link.reset ();
+     let* () = F.mkdir (Lk.dir "race") in
+     let* out = until (fun () -> Link.calls () > 0) in
+     check "the claim is out" out;
+     let* () = F.rmdir (Lk.dir "race") in
+     step "rmdir race: returned while the claim was out";
+     Link.set_up true;
+     let* () = settle () in
+     let* _, dirs = Ck.list_children ~prefix:Lk.root () in
+     let* names = root_markers () in
+     step "local: %s; store: %s" (String.concat ", " dirs)
+       (String.concat ", " names);
+     check "the folder did not come back, here or on the store"
+       ((not (List.mem "race" dirs)) && not (List.mem "race" names));
+
+     (* An upload publishes into its folder whether or not the folder's own
+        creation has been, so it claims the name first: a peer applying the put
+        adopts the folder from its marker. *)
+     case "an upload claims a folder whose creation is still owed";
+     Mq.set_paused true;
+     let* () = F.mkdir (Lk.dir "early") in
+     let* () = write "early/f.txt" "echo" in
+     let* uploaded = until (fun () -> Sq.pending () = 0) in
+     let* names = root_markers () in
+     let* keys = journal_keys () in
+     check "the upload went ahead" uploaded;
+     check "and the folder is filed on the store before its mkdir is published"
+       (List.mem "early" names
+       && List.mem "early/f.txt" keys
+       && not (List.mem "early" keys));
+     Mq.set_paused false;
+     let* () = settle () in
+     let* keys = journal_keys () in
+     check "which follows" (List.mem "early" keys);
+
+     report ~expected:18 ();
      Lwt.return_unit)
