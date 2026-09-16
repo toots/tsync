@@ -63,9 +63,11 @@ module type S = sig
       item ([`Changed]), the same item ([`Same]), or for a folder another id
       ([`Replaced id]). A resync and a browse both go through this, so the tree
       they leave behind is the same one, and a resync reports from the answer.
-  *)
+      [on_other] is what a folder holding another id becomes: a resync restates
+      the store's, a browse keeps the one references already name. *)
   val record :
     parent:Logical_key.t ->
+    on_other:[ `Replace | `Keep ] ->
     Inode_tree.entry ->
     (Logical_key.t * [ `Same | `Changed | `Replaced of string ]) io
 

@@ -21,3 +21,5 @@ rebuild prunes entries for departed folders: ok
 a rebuilt index recovers an escaped name: ok
 a folder nested past any fixed cap resolves: ok
 a cycle in the index answers nothing rather than looping: ok
+a folder holding an id refuses another: ok
+a replace takes the new one, index and all: ok
