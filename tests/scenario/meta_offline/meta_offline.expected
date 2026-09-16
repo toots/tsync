@@ -51,4 +51,10 @@ the upload went ahead: ok
 and the folder is filed on the store before its mkdir is published: ok
 which follows: ok
 
-18 check(s), 0 failure(s)
+=== a file renamed into a folder that moves before it is published
+  objects under moved-on: 1
+  store: early, fresh, moved-on, moved2, papers
+both are published: ok
+the file is filed in the folder under its new name, and the old one is not brought back: ok
+
+20 check(s), 0 failure(s)
