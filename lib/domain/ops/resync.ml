@@ -69,7 +69,7 @@ struct
                   a.Folder.parent a.Folder.name)
       in
       let apply key (entry : Inode_tree.entry) =
-        let* filed, held = Ck.record ~parent:key entry in
+        let* filed, held = Ck.record ~parent:key ~on_other:`Replace entry in
         let rel = Logical_key.path filed in
         (* What the mirror now says that it did not before, as the op a reader
            of the applied entries takes for it. *)

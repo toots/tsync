@@ -796,9 +796,10 @@ struct
       if rel = "" then return_unit
       else (
         let write id =
-          Folders.write ~cache_root:C.cache_root ~domain_name:C.domain_name
-            (Lk.dir rel)
-            { Folder.name = Filename.basename rel; id }
+          Io.map ignore
+            (Folders.write ~cache_root:C.cache_root ~domain_name:C.domain_name
+               (Lk.dir rel)
+               { Folder.name = Filename.basename rel; id })
         in
         let from_op () =
           match id with Some id -> write id | None -> return_unit

@@ -80,6 +80,7 @@ module type S = sig
 
   val record :
     parent:Logical_key.t ->
+    on_other:[ `Replace | `Keep ] ->
     Inode_tree.entry ->
     (Logical_key.t * [ `Same | `Changed | `Replaced of string ]) io
 
@@ -282,7 +283,7 @@ struct
        and a browse leave the same tree behind. The name is in the body: the key
        a child was read by is hashed. What was there before is read first, so a
        resync can tell what it changed without a second copy of the tree. *)
-    let record ~parent (entry : Inode_tree.entry) =
+    let record ~parent ~on_other (entry : Inode_tree.entry) =
       match entry.Inode_tree.body with
         | Inode_tree.Dir marker ->
             let key = Logical_key.dir_in parent marker.Folder.name in
@@ -291,8 +292,14 @@ struct
                 ~domain_name:C.domain_name key
             in
             let+ () =
-              Folders.write ~cache_root:C.cache_root ~domain_name:C.domain_name
-                key marker
+              match on_other with
+                | `Replace ->
+                    Folders.replace ~cache_root:C.cache_root
+                      ~domain_name:C.domain_name key marker
+                | `Keep ->
+                    Io.map ignore
+                      (Folders.write ~cache_root:C.cache_root
+                         ~domain_name:C.domain_name key marker)
             in
             let state =
               match held with

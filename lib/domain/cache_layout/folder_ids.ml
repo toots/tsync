@@ -27,6 +27,13 @@ module type S = sig
     domain_name:string ->
     Logical_key.t ->
     Folder.marker ->
+    [ `Written | `Held of string ] io
+
+  val replace :
+    cache_root:string ->
+    domain_name:string ->
+    Logical_key.t ->
+    Folder.marker ->
     unit io
 
   val key_of_id :
@@ -113,7 +120,7 @@ module Over (Io : Io.S) (F : Fs.S with type 'a io := 'a Io.t) = struct
   (* The name comes from where the folder actually sits, not from the marker being
      written: a marker that travelled with a renamed directory still carries the old
      leaf, and the index has to spell the path back out. *)
-  let write ~cache_root ~domain_name key (m : Folder.marker) =
+  let replace ~cache_root ~domain_name key (m : Folder.marker) =
     let dir = dir_of ~cache_root ~domain_name key in
     let* () = F.mkdir_p dir in
     (* Rewritten rather than kept, so a sweep by mtime after a rebuild sees the
@@ -145,6 +152,15 @@ module Over (Io : Io.S) (F : Fs.S with type 'a io := 'a Io.t) = struct
               { parent; name = Logical_key.leaf key }
         | None -> return_unit
 
+  let write ~cache_root ~domain_name key (m : Folder.marker) =
+    let* existing = read ~cache_root ~domain_name key in
+    match existing with
+      | Some held when held.Folder.id <> m.Folder.id ->
+          Io.return (`Held held.Folder.id)
+      | _ ->
+          let+ () = replace ~cache_root ~domain_name key m in
+          `Written
+
   (* Mints and persists a marker, so this is for the write paths only. *)
   let ensure_id ~mint ~cache_root ~domain_name key =
     if Logical_key.is_root key then Io.return Stored_key.root_id
@@ -154,7 +170,7 @@ module Over (Io : Io.S) (F : Fs.S with type 'a io := 'a Io.t) = struct
         | Some m -> Io.return m.Folder.id
         | None ->
             let m = { Folder.name = Logical_key.leaf key; id = mint () } in
-            let+ () = write ~cache_root ~domain_name key m in
+            let+ () = replace ~cache_root ~domain_name key m in
             m.Folder.id
 
   (* Describing a removal is the one read that must answer for a folder the
@@ -300,6 +316,6 @@ module Over (Io : Io.S) (F : Fs.S with type 'a io := 'a Io.t) = struct
       match marker with
         | None -> return_unit
         | Some m ->
-            write ~cache_root ~domain_name key
+            replace ~cache_root ~domain_name key
               { m with Folder.name = Logical_key.leaf key }
 end

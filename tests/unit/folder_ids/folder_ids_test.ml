@@ -172,6 +172,26 @@ let main () =
   check "a cycle in the index answers nothing rather than looping"
     (looped = None);
 
+  (* An id is what a reference names, so a write carrying another one is
+     answered with the id the folder keeps; only a resync restates it. *)
+  let* held = ensure "keep" in
+  let marker id = { Folder.name = "keep"; id } in
+  let* written =
+    Folder_ids_lwt.write ~cache_root ~domain_name (Lk.dir "keep")
+      (marker "another")
+  in
+  let* kept = lookup "keep" in
+  check "a folder holding an id refuses another"
+    (written = `Held held && kept = Some held);
+  let* () =
+    Folder_ids_lwt.replace ~cache_root ~domain_name (Lk.dir "keep")
+      (marker "another")
+  in
+  let* replaced = lookup "keep" in
+  let* replaced_rel = rel_of "another" in
+  check "a replace takes the new one, index and all"
+    (replaced = Some "another" && replaced_rel = Some "keep");
+
   Lwt.return_unit
 
 let () =

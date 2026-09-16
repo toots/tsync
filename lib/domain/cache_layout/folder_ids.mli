@@ -52,9 +52,19 @@ module type S = sig
     Logical_key.t ->
     Item_ref.t option io
 
-  (** Write a folder's marker, and the reverse entry that makes {!rel_of_id}
-      answerable. *)
+  (** Write a folder's marker, and the reverse entry that makes {!key_of_id}
+      answerable. A folder that already holds another id keeps it, and the
+      answer names it: references to a folder never change under it. *)
   val write :
+    cache_root:string ->
+    domain_name:string ->
+    Logical_key.t ->
+    Folder.marker ->
+    [ `Written | `Held of string ] io
+
+  (** {!write}, whatever id the folder held: for a resync, which restates the
+      store's tree over the mirror's. *)
+  val replace :
     cache_root:string ->
     domain_name:string ->
     Logical_key.t ->

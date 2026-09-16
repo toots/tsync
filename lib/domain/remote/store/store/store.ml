@@ -179,19 +179,19 @@ struct
       let* known = L.folder_id key in
       match known with
         | Some id -> Io.return id
-        | None ->
+        | None -> (
             let* (_ : string) = ensure_folder_id (Logical_key.parent key) in
             let candidate = J.folder_id () in
             let* claimed = claim_name ~key ~id:candidate in
             let id =
               match claimed with `Held -> candidate | `Taken other -> other
             in
-            let+ () =
+            let+ written =
               Folder_ids.write ~cache_root:C.cache_root
                 ~domain_name:C.domain_name key
                 { Folder.name = Logical_key.leaf key; id }
             in
-            id
+            match written with `Written -> id | `Held held -> held)
 
     (* Only a caller entitled to bring a folder into existence: the marker a
        claim persists re-creates the local directory the key names. *)

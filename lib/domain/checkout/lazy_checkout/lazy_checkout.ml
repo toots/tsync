@@ -52,7 +52,7 @@ struct
         Fi.lookup_id ~cache_root:C.cache_root ~domain_name:C.domain_name prefix
 
     let file_child prefix entry =
-      let+ filed, _ = T.record ~parent:prefix entry in
+      let+ filed, _ = T.record ~parent:prefix ~on_other:`Keep entry in
       Logical_key.leaf filed
 
     (* Only the published half is dropped: a staged body is this client's own
