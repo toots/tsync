@@ -30,6 +30,8 @@
    -open
    Tsync_journal
    -open
+   Tsync_cache_layout_lwt
+   -open
    Tsync_test_harness))
  (name meta_offline)
  (libraries
@@ -48,6 +50,7 @@
   tsync_sync_lwt
   tsync_core_lwt
   tsync_journal
+  tsync_cache_layout_lwt
   yojson
   lwt
   lwt.unix))

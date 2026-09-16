@@ -268,11 +268,15 @@
   anchor <folder-1> in .tsync-trash as sub
 
 === concurrent_mkdir_then_write
+  B: metadata paused
+  B: uploads paused
   A: mkdir sub
   B: mkdir sub
   A: write sub/from-a.txt "a"
   B: write sub/from-b.txt "b"
   A: drain
+  B: metadata running
+  B: uploads running
   B: drain
   A: sync
   B: sync
@@ -281,27 +285,29 @@
 --- tree A
   d sub
   f sub/from-a.txt size=1 cached=0/1 uploaded=true etag=15da855801af627d
-  f sub/from-b.txt size=1 cached=0/1 uploaded=true etag=6c25cc3db3ce7928
+  d sub (conflicted copy from Client B)
+  f sub (conflicted copy from Client B)/from-b.txt size=1 cached=0/1 uploaded=true etag=6c25cc3db3ce7928
 --- content A
   sub/from-a.txt = "a"
-  sub/from-b.txt = "b"
+  sub (conflicted copy from Client B)/from-b.txt = "b"
 --- pending A
 --- tree B
   d sub
   f sub/from-a.txt size=1 cached=0/1 uploaded=true etag=15da855801af627d
-  f sub/from-b.txt size=1 cached=0/1 uploaded=true etag=6c25cc3db3ce7928
+  d sub (conflicted copy from Client B)
+  f sub (conflicted copy from Client B)/from-b.txt size=1 cached=0/1 uploaded=true etag=6c25cc3db3ce7928
 --- content B
   sub/from-a.txt = "a"
-  sub/from-b.txt = "b"
+  sub (conflicted copy from Client B)/from-b.txt = "b"
 --- pending B
 --- kept A
   {"op":"mkdir","key":"sub","id":"<folder-1>"}
   {"op":"put","key":"sub/from-a.txt","size":1}
-  {"op":"mkdir","key":"sub","id":"<folder-1>"}
-  {"op":"put","key":"sub/from-b.txt","size":1}
+  {"op":"mkdir","key":"sub (conflicted copy from Client B)","id":"<folder-2>"}
+  {"op":"put","key":"sub (conflicted copy from Client B)/from-b.txt","size":1}
 --- kept B
-  {"op":"mkdir","key":"sub","id":"<folder-1>"}
-  {"op":"put","key":"sub/from-b.txt","size":1}
+  {"op":"mkdir","key":"sub (conflicted copy from Client B)","id":"<folder-2>"}
+  {"op":"put","key":"sub (conflicted copy from Client B)/from-b.txt","size":1}
   {"op":"mkdir","key":"sub","id":"<folder-1>"}
   {"op":"put","key":"sub/from-a.txt","size":1}
 --- backend
@@ -309,14 +315,16 @@
   chunk e6c632b61e964e1f-d2f6d0996f37a720 size=1
   cursor = <entry-4>
   journal <entry-1> = mkdir sub
-  journal <entry-2> = mkdir sub
+  journal <entry-2> = mkdir sub (conflicted copy from Client B)
   journal <entry-3> = put sub/from-a.txt 1
-  journal <entry-4> = put sub/from-b.txt 1
+  journal <entry-4> = put sub (conflicted copy from Client B)/from-b.txt 1
+  folder sub (conflicted copy from Client B) [.tsync-root/3f7d0e58f871bc17-10b770c646fd834a] -> <folder-2>
   folder sub [.tsync-root/4f7b4244079f8bf6-67a7ed7af26470c3] -> <folder-1>
   anchor <folder-1> in .tsync-root as sub
   file from-a.txt [<folder-1>/3958c931de20fdc1-cf2927274a2ee417] = manifest size=1 chunks=1 h1=15da855801af627d h2=206c8135a9dd3b50
     chunk#0 e6c632b61e964e1f-d2f6d0996f37a720 size=1
-  file from-b.txt [<folder-1>/f87da0e66b299a40-05ed2ebb07efe2e0] = manifest size=1 chunks=1 h1=6c25cc3db3ce7928 h2=6816a4fbbf51c9a5
+  anchor <folder-2> in .tsync-root as sub (conflicted copy from Client B)
+  file from-b.txt [<folder-2>/f87da0e66b299a40-05ed2ebb07efe2e0] = manifest size=1 chunks=1 h1=6c25cc3db3ce7928 h2=6816a4fbbf51c9a5
     chunk#0 575a0b1c44d8843f-99009138a3452320 size=1
 
 === concurrent_mkdir_then_rmdir
@@ -330,26 +338,81 @@
   A: drain
   B: sync
 --- tree A
+  d sub (conflicted copy from Client B)
 --- content A
 --- pending A
 --- tree B
+  d sub (conflicted copy from Client B)
 --- content B
 --- pending B
 --- kept A
   {"op":"mkdir","key":"sub","id":"<folder-1>"}
-  {"op":"mkdir","key":"sub","id":"<folder-1>"}
+  {"op":"mkdir","key":"sub (conflicted copy from Client B)","id":"<folder-2>"}
   {"op":"rmdir","key":"sub","id":"<folder-1>"}
 --- kept B
-  {"op":"mkdir","key":"sub","id":"<folder-1>"}
+  {"op":"mkdir","key":"sub (conflicted copy from Client B)","id":"<folder-2>"}
   {"op":"mkdir","key":"sub","id":"<folder-1>"}
   {"op":"rmdir","key":"sub","id":"<folder-1>"}
 --- backend
   cursor = <entry-3>
   journal <entry-1> = mkdir sub
-  journal <entry-2> = mkdir sub
+  journal <entry-2> = mkdir sub (conflicted copy from Client B)
   journal <entry-3> = rmdir sub
+  folder sub (conflicted copy from Client B) [.tsync-root/3f7d0e58f871bc17-10b770c646fd834a] -> <folder-2>
   trash sub -> <folder-1>
   anchor <folder-1> in .tsync-trash as sub
+  anchor <folder-2> in .tsync-root as sub (conflicted copy from Client B)
+
+=== offline_mkdir_renamed_onto_a_taken_name
+  B: metadata paused
+  B: uploads paused
+  B: mkdir x
+  B: rename x -> z
+  A: mkdir z
+  A: write z/from-a.txt "a"
+  A: drain
+  B: metadata running
+  B: uploads running
+  B: drain
+  A: sync
+  B: sync
+--- tree A
+  d z
+  f z/from-a.txt size=1 cached=0/1 uploaded=true etag=15da855801af627d
+  d z (conflicted copy from Client B)
+--- content A
+  z/from-a.txt = "a"
+--- pending A
+--- tree B
+  d z
+  f z/from-a.txt size=1 cached=0/1 uploaded=true etag=15da855801af627d
+  d z (conflicted copy from Client B)
+--- content B
+  z/from-a.txt = "a"
+--- pending B
+--- kept A
+  {"op":"mkdir","key":"z","id":"<folder-1>"}
+  {"op":"put","key":"z/from-a.txt","size":1}
+  {"op":"mkdir","key":"z (conflicted copy from Client B)","id":"<folder-2>"}
+  {"op":"rename","key":"z","src":"x","is_dir":true,"id":"<folder-2>"}
+--- kept B
+  {"op":"mkdir","key":"z (conflicted copy from Client B)","id":"<folder-2>"}
+  {"op":"rename","key":"z","src":"x","is_dir":true,"id":"<folder-2>"}
+  {"op":"mkdir","key":"z","id":"<folder-1>"}
+  {"op":"put","key":"z/from-a.txt","size":1}
+--- backend
+  chunk e6c632b61e964e1f-d2f6d0996f37a720 size=1
+  cursor = <entry-2>
+  journal <entry-1> = mkdir z (conflicted copy from Client B)
+  journal <entry-2> = rename x -> z dir
+  journal <entry-3> = mkdir z
+  journal <entry-4> = put z/from-a.txt 1
+  folder z (conflicted copy from Client B) [.tsync-root/12fc838507e9e077-0bb3321e29afd652] -> <folder-2>
+  folder z [.tsync-root/54a7d9dde88eadb0-c106428b93eaf8e9] -> <folder-1>
+  anchor <folder-1> in .tsync-root as z
+  file from-a.txt [<folder-1>/3958c931de20fdc1-cf2927274a2ee417] = manifest size=1 chunks=1 h1=15da855801af627d h2=206c8135a9dd3b50
+    chunk#0 e6c632b61e964e1f-d2f6d0996f37a720 size=1
+  anchor <folder-2> in .tsync-root as z (conflicted copy from Client B)
 
 === concurrent_create
   A: write foo.txt "from A"

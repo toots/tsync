@@ -136,24 +136,24 @@ let foreign_rmdir_after_repeated_mkdir =
   }
 
 (* Both clients create one directory before either has seen the other, then each
-   writes into it. The directory's id is a claim, and only one client can hold
-   it: whoever loses has to adopt the winner's rather than keep its own, or its
-   file ends up in a namespace nothing points at -- present on the backend,
-   reachable from neither mount, reported by nothing.
-
-   The rmdir case below misses this: with no file written, both markers land on
-   the same key and the loser's namespace is empty, so nothing is stranded to
-   find. *)
+   writes into it, B while it cannot publish. A folder's id is final from its
+   mkdir, so the name goes to whoever the store files first and the other
+   folder takes a conflicted name of its own, keeping its id and its file --
+   rather than its file ending up in a namespace nothing points at. *)
 let concurrent_mkdir_then_write =
   {
     name = "concurrent_mkdir_then_write";
     steps =
       [
+        B (Metadata `Paused);
+        B (Uploads `Paused);
         A (Mkdir "sub");
         B (Mkdir "sub");
         A (Write { path = "sub/from-a.txt"; content = "a" });
         B (Write { path = "sub/from-b.txt"; content = "b" });
         A Drain;
+        B (Metadata `Running);
+        B (Uploads `Running);
         B Drain;
         A Sync;
         B Sync;
@@ -162,9 +162,9 @@ let concurrent_mkdir_then_write =
       ];
   }
 
-(* Both clients create the same directory before either deletes it. Each mints a
-   folder id locally when it has no marker, so this is where two markers for one
-   path could come from, and rmdir removes only one. *)
+(* Both clients create the same directory before either deletes it: two folders,
+   one name. The second to publish takes a conflicted name, so the rmdir removes
+   only the folder it was aimed at. *)
 let concurrent_mkdir_then_rmdir =
   {
     name = "concurrent_mkdir_then_rmdir";
@@ -178,6 +178,30 @@ let concurrent_mkdir_then_rmdir =
         B Sync;
         A (Rmdir "sub");
         A Drain;
+        B Sync;
+      ];
+  }
+
+(* B creates a folder and renames it while it cannot publish, onto a name A
+   takes first. B's folder is filed under a conflicted name when its creation is
+   published, which is where it already is by the time the rename is: the rename
+   has nothing left to move, and must not move A's folder in its stead. *)
+let offline_mkdir_renamed_onto_a_taken_name =
+  {
+    name = "offline_mkdir_renamed_onto_a_taken_name";
+    steps =
+      [
+        B (Metadata `Paused);
+        B (Uploads `Paused);
+        B (Mkdir "x");
+        B (Rename { src = "x"; dst = "z" });
+        A (Mkdir "z");
+        A (Write { path = "z/from-a.txt"; content = "a" });
+        A Drain;
+        B (Metadata `Running);
+        B (Uploads `Running);
+        B Drain;
+        A Sync;
         B Sync;
       ];
   }
@@ -461,6 +485,7 @@ let () =
       foreign_rmdir_after_repeated_mkdir;
       concurrent_mkdir_then_write;
       concurrent_mkdir_then_rmdir;
+      offline_mkdir_renamed_onto_a_taken_name;
       concurrent_create;
       open_file_guard;
       open_file_guard_closed;

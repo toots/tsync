@@ -111,6 +111,9 @@ type step =
 
           A paused queue still owes what is on it, so [Drain] only returns once
           the scenario has let it run. *)
+  | Metadata of [ `Paused | `Running ]
+      (** Hold or release the metadata queue, so what a client does meanwhile is
+          owed rather than published. *)
   | Sync
       (** Call [Sync_poller.sync_once]: read the journal, skip our own entries,
           apply any foreign entries — the same path the background poller takes.

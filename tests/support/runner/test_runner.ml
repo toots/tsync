@@ -83,6 +83,7 @@ type step =
   | Drain
   | SettleReadAhead
   | Uploads of [ `Paused | `Running ]
+  | Metadata of [ `Paused | `Running ]
   | Sync
   | HideNewestJournalEntry
       (** Take the newest journal object out of the store, as if its upload were
@@ -210,6 +211,8 @@ let rec render_step = function
   | SettleReadAhead -> "settle read-ahead"
   | Uploads `Paused -> "uploads paused"
   | Uploads `Running -> "uploads running"
+  | Metadata `Paused -> "metadata paused"
+  | Metadata `Running -> "metadata running"
   | Sync -> "sync"
   | HideNewestJournalEntry -> "hide newest journal entry"
   | UnhideJournalEntry -> "unhide journal entry"
@@ -964,6 +967,9 @@ let setup_client (module C : Conf_lwt.S) root staging_prefix =
         Lwt_unix.sleep 0.002
     | Uploads state ->
         Sq.set_paused (state = `Paused);
+        Lwt.return_unit
+    | Metadata state ->
+        Mq.set_paused (state = `Paused);
         Lwt.return_unit
     (* One pass of the poller's algorithm without its timer, cursor gate
        included. Nothing here is presenting a mount, so no changed key has

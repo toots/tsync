@@ -34,9 +34,20 @@ module type S = sig
   val delete_manifest : key:Logical_key.t -> unit io
   val copy_manifest : src_key:Logical_key.t -> dst_key:Logical_key.t -> unit io
   val ensure_folder_id : Logical_key.t -> string io
+
+  val claim_folder :
+    ?id:string -> Logical_key.t -> [ `Held | `Taken of string ] io
+
   val put_folder_marker : key:Logical_key.t -> unit io
   val put_anchor : folder_id:string -> parent:string -> name:string -> unit io
   val get_anchor : folder_id:string -> Folder.anchor option io
+
+  val placed :
+    folder_id:string ->
+    at:Folder.anchor ->
+    [ `Here | `Elsewhere of Folder.anchor | `Unanchored ] io
+
+  val marker_id_at : bkey:Stored_key.t -> string option io
 
   val filed :
     bkey:Stored_key.t ->
@@ -113,14 +124,34 @@ struct
       Option.bind body (fun b ->
           Folder.anchor_of_string (Bigstring.to_string b))
 
-    let filed ~bkey (m : Folder.marker) =
-      let+ anchor = get_anchor ~folder_id:m.Folder.id in
+    let placed ~folder_id ~(at : Folder.anchor) =
+      let+ anchor = get_anchor ~folder_id in
       match anchor with
-        | Some a
-          when a.Folder.parent <> Stored_key.parent_folder_id bkey
-               || a.Folder.name <> m.Folder.name ->
-            `Elsewhere a
-        | _ -> `Here
+        | Some a when a = at -> `Here
+        | Some a -> `Elsewhere a
+        | None -> `Unanchored
+
+    (* A folder with no anchor was written before anchors were, and is taken at
+       its marker's word. *)
+    let filed ~bkey (m : Folder.marker) =
+      let+ placement =
+        placed ~folder_id:m.Folder.id
+          ~at:
+            {
+              Folder.parent = Stored_key.parent_folder_id bkey;
+              name = m.Folder.name;
+            }
+      in
+      match placement with
+        | `Elsewhere a -> `Elsewhere a
+        | `Here | `Unanchored -> `Here
+
+    let marker_id_at ~bkey =
+      let+ body = B.get_opt ~key:bkey () in
+      Option.bind body (fun b ->
+          Option.map
+            (fun (m : Folder.marker) -> m.Folder.id)
+            (Folder.marker_of_string (Bigstring.to_string b)))
 
     let unresolved what key =
       Io.fail
@@ -193,18 +224,74 @@ struct
             in
             match written with `Written -> id | `Held held -> held)
 
+    (* A marker already naming the folder is the common case and costs a read;
+       only a name the store does not file yet is claimed, ancestors first, so
+       a peer adopting top-down finds every level. An id-less folder takes
+       whichever id the store holds, having none a reference could name.
+
+       ponytail: one read per publish into a folder, a per-process set of names
+       seen held if uploads into one folder ever dominate. *)
+    let rec claim_folder ?id key =
+      if Logical_key.is_root key then Io.return `Held
+      else
+        let* known =
+          match id with Some id -> return_some id | None -> L.folder_id key
+        in
+        match known with
+          | None -> (
+              let* gone =
+                Folder_ids.lookup_id_removed ~cache_root:C.cache_root
+                  ~domain_name:C.domain_name key
+              in
+              match gone with
+                (* Moved or removed here while this was owed: naming it again
+                   would bring back a folder that is gone, and the write aimed
+                   at it is settled by whatever moved it. *)
+                | Some _ ->
+                    Io.fail
+                      (Retry.failed ~kind:Retry.Transient ~op:"claim"
+                         (Logical_key.to_string key
+                        ^ ": moved or removed here since"))
+                | None ->
+                    let* () = claim_parent key in
+                    let+ (_ : string) = ensure_folder_id key in
+                    `Held)
+          | Some id -> (
+              let* bkey = L.folder_marker_key key in
+              match bkey with
+                (* No folder tree to file it in. *)
+                | None -> Io.return `Held
+                | Some bkey -> (
+                    let* there = marker_id_at ~bkey in
+                    match there with
+                      | Some held when held = id -> Io.return `Held
+                      | Some other -> Io.return (`Taken other)
+                      | None ->
+                          let* () = claim_parent key in
+                          claim_name ~key ~id))
+
+    (* A taken ancestor is settled by that folder's own queued creation, which
+       moves it aside, so what is filed beneath it waits rather than failing. *)
+    and claim_parent key =
+      let parent = Logical_key.parent key in
+      let* claimed = claim_folder parent in
+      match claimed with
+        | `Held -> Io.return ()
+        | `Taken other ->
+            Io.fail
+              (Retry.failed ~kind:Retry.Transient ~op:"claim"
+                 (Printf.sprintf "%s: the store files another folder (%s) there"
+                    (Logical_key.to_string parent)
+                    other))
+
     (* Only a caller entitled to bring a folder into existence: the marker a
        claim persists re-creates the local directory the key names. *)
     let ensure_manifest_key key =
-      let* known = L.manifest_key key in
-      match known with
+      let* () = claim_parent key in
+      let* bk = L.manifest_key key in
+      match bk with
         | Some bk -> Io.return bk
-        | None -> (
-            let* (_ : string) = ensure_folder_id (Logical_key.parent key) in
-            let* bk = L.manifest_key key in
-            match bk with
-              | Some bk -> Io.return bk
-              | None -> unresolved "manifest key" key)
+        | None -> unresolved "manifest key" key
 
     (* Publishing may bring the folder into existence; every other operation
        resolves what is already there and treats an unknown folder as absent. *)

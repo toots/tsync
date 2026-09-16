@@ -17,3 +17,4 @@ end
 include
   Lazy_checkout.Over (Io_lwt.Core) (Checkout_lwt) (Pull) (Folder_ids_lwt)
     (Manifests_lwt)
+    (Wal_lwt)

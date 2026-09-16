@@ -13,7 +13,12 @@ a folder rename makes no round trip: ok
 a folder removal makes no round trip: ok
 each operation is owed: ok
   local papers/a.txt
-  mkdir fresh: waited on the store, 1 round trip(s), 4 owed
+  mkdir fresh: returned, 0 round trip(s), 5 owed
+a new folder makes no round trip and has its id: ok
+  mkdir gone; rmdir gone: returned, 0 round trip(s), 7 owed
+a new folder removed makes no round trip: ok
+  mkdir moved; rename moved -> moved2: returned, 0 round trip(s), 9 owed
+a new folder renamed makes no round trip: ok
 
 === the link comes back
 everything owed was published: ok
@@ -27,5 +32,23 @@ everything owed was published: ok
   journal {"op":"rename","key":"papers","src":"docs","is_dir":true,"id":"<folder-1>"}
   journal {"op":"rmdir","key":"scratch","id":"<folder-2>"}
   journal {"op":"mkdir","key":"fresh","id":"<folder-3>"}
+  journal {"op":"rmdir","key":"gone","id":"<folder-4>"}
+  journal {"op":"mkdir","key":"moved2","id":"<folder-5>"}
+  journal {"op":"rename","key":"moved2","src":"moved","is_dir":true,"id":"<folder-5>"}
+  store: fresh, moved2, papers
+a folder removed before the store heard of it is not filed there: ok
+nor brought back here: ok
+a folder renamed before the store heard of it is filed where it is, under the id it was created with: ok
 
-7 check(s), 0 failure(s)
+=== a new folder removed while its creation is being published
+the claim is out: ok
+  rmdir race: returned while the claim was out
+  local: papers, fresh, moved2; store: fresh, moved2, papers
+the folder did not come back, here or on the store: ok
+
+=== an upload claims a folder whose creation is still owed
+the upload went ahead: ok
+and the folder is filed on the store before its mkdir is published: ok
+which follows: ok
+
+18 check(s), 0 failure(s)

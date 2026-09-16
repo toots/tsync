@@ -17,7 +17,8 @@ module Over
     (Ck : Checkout.OVER with type 'a io := 'a Io.t)
     (P : PULL with type 'a io := 'a Io.t)
     (Fi : Folder_ids.S with type 'a io := 'a Io.t)
-    (Mf : Manifests.OVER with type 'a io := 'a Io.t) =
+    (Mf : Manifests.OVER with type 'a io := 'a Io.t)
+    (Wal_log : Wal.OVER with type 'a io := 'a Io.t) =
 struct
   open Io_syntax.Make (Io)
 
@@ -32,6 +33,7 @@ struct
 
   module Make (C : Conf.S with type 'a io = 'a Io.t) = struct
     module T = Ck.Make (C)
+    module W = Wal_log.Make (C)
     module Pull = P.Make (C)
     module Manifests = Mf.Make (C)
     module Lk = Logical_key.Make (C)
@@ -76,9 +78,28 @@ struct
     (* [`Fail] inside the pull rather than skipping: a listing that lost a child
        is not evidence the child is gone, and pruning on one would delete what it
        could not read. *)
+    (* A folder something this client did under it is still owed for holds what
+       the store has not heard of yet, and a listing would undo it: a folder
+       made here pruned, one renamed away listed back. *)
+    let owed_under prefix =
+      let+ records = W.list () in
+      let here = Logical_key.path prefix in
+      let in_prefix rel =
+        (match Filename.dirname rel with "." -> "" | dir -> dir) = here
+      in
+      List.exists
+        (fun (_, (r : Wal.record)) ->
+          Wal.is_metadata r
+          && List.exists
+               (fun op -> List.exists in_prefix (Journal.keys_of_op op))
+               r.Wal.ops)
+        records
+
     let pull prefix =
       let* id = folder_id prefix in
+      let* owed = owed_under prefix in
       match id with
+        | _ when owed -> Io.return ()
         | None -> Io.return ()
         | Some folder_id ->
             let* entries = Pull.children ~folder_id () in

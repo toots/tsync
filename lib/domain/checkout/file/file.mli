@@ -33,11 +33,11 @@ end
 module type Publishing = sig
   type 'a io
 
-  (** The backend half of ops whose local half the caller has already applied.
-      Everything it needs comes from the ops: the mirror has moved on, so a
-      removed folder's id is read from the entry rather than from the marker it
-      went with. *)
-  val backend_ops : Journal.op list -> unit io
+  (** The backend half of ops whose local half the caller has already applied,
+      answering the ops to publish in their place. Everything it needs comes
+      from the ops, the mirror having moved on, except where a new folder now
+      is: it is published there, or not at all if it is gone. *)
+  val backend_ops : Journal.op list -> Journal.op list io
 end
 
 (** The file operations over one domain, as the Lwt binding builds them: what a

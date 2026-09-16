@@ -36,6 +36,10 @@ type record = {
           counted. *)
 }
 
+(** Whether a record is the metadata queue's: a put's bytes and entry are the
+    upload queue's, everything else is metadata. *)
+val is_metadata : record -> bool
+
 (** The job a durable queue drains, for a caller that builds one over these
     records. *)
 module Job : Durable_queue.JOB with type t = record
