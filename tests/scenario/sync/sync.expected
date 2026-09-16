@@ -450,6 +450,7 @@
   A: delete foo.txt
   A: drain
   B: rename foo.txt -> baz.txt
+  B: drain
   B: sync
   A: sync
 --- tree A
@@ -468,8 +469,8 @@
   {"op":"put","key":"baz (conflicted copy from Client B).txt","size":15}
 --- kept B
   {"op":"put","key":"foo.txt","size":15}
-  {"op":"delete","key":"foo.txt"}
   {"op":"put","key":"baz (conflicted copy from Client B).txt","size":15}
+  {"op":"delete","key":"foo.txt"}
 --- backend
   chunk 7927fec27038e81c-3a112440cfdf156a size=15
   cursor = <entry-3>
@@ -486,6 +487,7 @@
   A: rename foo.txt -> bar.txt
   A: drain
   B: rename foo.txt -> baz.txt
+  B: drain
   B: sync
   A: sync
 --- tree A
