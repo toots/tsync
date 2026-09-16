@@ -12,3 +12,4 @@ include
     (File_lwt)
     (Checkout_lwt)
     (Sync)
+    (Wal_lwt)

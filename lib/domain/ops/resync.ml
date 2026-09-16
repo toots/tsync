@@ -25,7 +25,8 @@ module Over
     (Cursor_of : Replay.JOURNAL with type 'a io := 'a Io.t)
     (Files : File.OVER with type 'a io := 'a Io.t)
     (Checkout : Checkout.OVER with type 'a io := 'a Io.t)
-    (Sync : SYNC with type 'a io := 'a Io.t) =
+    (Sync : SYNC with type 'a io := 'a Io.t)
+    (Wal_log : Wal.OVER with type 'a io := 'a Io.t) =
 struct
   open Io_syntax.Make (Io)
 
@@ -40,6 +41,7 @@ struct
     module Sq = Sync.Queue.Make (C) (F)
     module Rp = Sync.Replay.Make (C) (F)
     module Tree = Tree.Make (C)
+    module W = Wal_log.Make (C)
 
     (* Walks the inode tree through the module that owns the walk, so a resync and
        [tsync mirror] classify a child the same way. *)
@@ -187,6 +189,23 @@ struct
 
     let bookmark () = Cursor.read_last_sync_key ()
 
+    (* Read from disk, the one place every process serving the domain shares: a
+       daemon's owed operations are in no queue this one could drain, and a
+       rebuild restates the store's tree over the mirror they changed. *)
+    let refuse_if_metadata_owed () =
+      let* records = W.list () in
+      match
+        List.length (List.filter (fun (_, r) -> Wal.is_metadata r) records)
+      with
+        | 0 -> return_unit
+        | n ->
+            Io.fail
+              (Failure
+                 (Printf.sprintf
+                    "%d metadata operation(s) are not published yet, and a \
+                     rebuild would undo them; run this again once they are"
+                    n))
+
     let run ?(full = false) ?(progress = no_progress)
         ?(on_manifest = fun _ -> ()) ?(on_decision = fun _ _ _ -> ())
         ~parallelism () =
@@ -214,6 +233,7 @@ struct
       on_decision last_sync_key all_keys reason;
       match reason with
         | Some reason ->
+            let* () = refuse_if_metadata_owed () in
             full_resync ~parallelism ~progress ~on_manifest ~handled:all_keys
               reason
         | None -> incremental ~progress ()

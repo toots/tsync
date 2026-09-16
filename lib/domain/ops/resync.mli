@@ -43,13 +43,16 @@ module Over
     (_ : Replay.JOURNAL with type 'a io := 'a Io.t)
     (_ : File.OVER with type 'a io := 'a Io.t)
     (_ : Checkout.OVER with type 'a io := 'a Io.t)
-    (_ : SYNC with type 'a io := 'a Io.t) : sig
+    (_ : SYNC with type 'a io := 'a Io.t)
+    (_ : Wal.OVER with type 'a io := 'a Io.t) : sig
   module Make (C : Conf.S with type 'a io = 'a Io.t) : sig
     (** [on_decision] receives the local mark, the published journal and why a
         rebuild was chosen (or [None] for an incremental pass), once that is
         settled and before anything acts on it.
 
-        [full] forces a rebuild that the bookmark would not have required.
+        [full] forces a rebuild that the bookmark would not have required. A
+        rebuild is refused while metadata operations are owed, which it would
+        undo.
         [parallelism] bounds the concurrent backend reads of the walk. *)
     val run :
       ?full:bool ->
