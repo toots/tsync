@@ -114,7 +114,17 @@ struct
     let published = D.published
     let write_manifest key (state : Manifest.t) = Mf.write key state
     let delete_manifest key = Mf.delete key
-    let upload ?cancel key = D.sync key ?cancel ()
+
+    (* Nothing staged is ENOENT, which the sending pool takes to mean the upload
+       is no longer owed: [D.sync] answers it with nothing done, and the pool
+       would then publish an entry for a file that was never sent. *)
+    let upload ?cancel key =
+      let* staged = Mfs.read key in
+      match staged with
+        | None ->
+            Io.fail
+              (Unix.Unix_error (Unix.ENOENT, "upload", Logical_key.to_string key))
+        | Some _ -> D.sync key ?cancel ()
 
     (* Populates the chunk store only; produces no file. *)
     let ensure_cached = D.ensure_local
