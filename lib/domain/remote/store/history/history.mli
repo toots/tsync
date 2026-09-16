@@ -45,7 +45,7 @@ module type OVER = sig
       (L : Layout.S with type 'a io := 'a io) : S with type 'a io := 'a io
 end
 
-module Over (Io : Io.S) : sig
+module Over (Io : Io.S) (_ : Clock.S with type 'a io := 'a Io.t) : sig
   module Make
       (C : Conf.S with type 'a io = 'a Io.t)
       (L : Layout.S with type 'a io := 'a Io.t) : S with type 'a io := 'a Io.t
