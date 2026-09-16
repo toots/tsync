@@ -62,4 +62,12 @@ and names nothing under the copy's path, even for a removal: ok
   root after: p=<folder-2>, s=<folder-6>, w=<folder-5>, x=<folder-3>, y=<folder-5>, y (conflicted copy 2 from test)=<folder-3>, y (conflicted copy from test)=<folder-4>
 the store is not told: ok
 
-26 check(s), 0 failure(s)
+=== a marker a same-parent rename left behind lends no id
+  anchor of <folder-6>: in .tsync-root as s
+the folder is anchored under the root: ok
+  apply a peer's mkdir stale, carrying no id: succeeded
+  id at stale: none
+it applied: ok
+the folder takes no id from the stale marker: ok
+
+29 check(s), 0 failure(s)

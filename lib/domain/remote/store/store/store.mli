@@ -65,6 +65,13 @@ module type S = sig
       marker's word. *)
   val get_anchor : folder_id:string -> Folder.anchor option io
 
+  (** Whether the marker at [bkey] is where its folder lives. A marker the
+      folder's anchor places elsewhere is one a move left behind; a folder with
+      no anchor was written before anchors were, and is taken at its marker's
+      word. *)
+  val filed :
+    bkey:Stored_key.t -> Folder.marker -> [ `Here | `Elsewhere of Folder.anchor ] io
+
   (** {2 By backend key}
 
       Resync walks the inode tree by folder id and already holds backend keys,

@@ -351,6 +351,33 @@ let () =
      check "the store is not told"
        (not (List.mem_assoc "s (conflicted copy from test)" after));
 
-     report ~expected:26 ();
+     case "a marker a same-parent rename left behind lends no id";
+     (* The anchor agrees on the parent and not on the name, which is what a
+        rename within one folder whose old marker's delete was lost leaves. *)
+     let* anchor = show_anchor id in
+     check "the folder is anchored under the root"
+       (Option.map (fun a -> a.Folder.parent) anchor
+       = Some Stored_key.root_id);
+     let* () =
+       Store.put
+         ~key:
+           (Stored_key.child_key ~prefix:C.domain_prefix
+              ~folder_id:Stored_key.root_id "stale")
+         ~data:
+           (Bigstring.of_string
+              (Folder.marker_to_string { Folder.name = "stale"; id }))
+         ()
+     in
+     let* ok =
+       attempt "apply a peer's mkdir stale, carrying no id" (fun () ->
+           F.apply_foreign_ops [`Mkdir ("stale", None)])
+     in
+     let* at_stale = lookup "stale" in
+     step "id at stale: %s"
+       (match at_stale with Some i -> alias i | None -> "none");
+     check "it applied" ok;
+     check "the folder takes no id from the stale marker" (at_stale = None);
+
+     report ~expected:29 ();
      Lwt.return_unit);
   Scratch.cleanup root

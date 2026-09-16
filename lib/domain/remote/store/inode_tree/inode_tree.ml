@@ -226,33 +226,25 @@ struct
               outcomes;
             Io.return kept
 
-    (* A marker is believed only if the folder's own anchor agrees it lives
-       here under this name. A folder with no anchor is taken at its marker's
-       word: it was written before anchors were. One read per subfolder, the
-       anchor living in the child's namespace where no listing of the parent
-       reaches it; the reads are bounded by [slots] like the bodies were. *)
-    let owned ~on_unusable ~slots ~folder_id kept =
+    (* One anchor read per subfolder, the anchor living in the child's
+       namespace where no listing of the parent reaches it; the reads are
+       bounded by [slots] like the bodies were. *)
+    let owned ~on_unusable ~slots kept =
       let+ verdicts =
         Pools.map_with slots
           (fun entry ->
             match entry.body with
-              | File _ -> Io.return (entry, None)
-              | Dir m -> (
-                  let+ anchor = St.get_anchor ~folder_id:m.Folder.id in
-                  ( entry,
-                    match anchor with
-                      | Some a
-                        when a.Folder.parent <> folder_id
-                             || a.Folder.name <> m.Folder.name ->
-                          Some a
-                      | _ -> None )))
+              | File _ -> Io.return (entry, `Here)
+              | Dir m ->
+                  let+ filed = St.filed ~bkey:entry.bkey m in
+                  (entry, filed))
           kept
       in
       List.filter_map
-        (fun (entry, disowned) ->
-          match disowned with
-            | None -> Some entry
-            | Some a ->
+        (fun (entry, filed) ->
+          match filed with
+            | `Here -> Some entry
+            | `Elsewhere a ->
                 (match on_unusable with
                   | `Skip f -> f entry.bkey (`Disowned a)
                   | `Fail -> ());
@@ -274,7 +266,7 @@ struct
         classified ~on_unusable
           (read_of ~body_of (child_objects folder.Store.listed))
       in
-      owned ~on_unusable ~slots ~folder_id:folder.Store.folder_id kept
+      owned ~on_unusable ~slots kept
 
     let children ?(on_unusable = `Fail) ?(refresh_index = false)
         ?(on_index = fun _ -> ()) ?slots ~folder_id () =
@@ -328,7 +320,7 @@ struct
                   else Io.fail exn)
       in
       let* kept = classified ~on_unusable read in
-      owned ~on_unusable ~slots ~folder_id kept
+      owned ~on_unusable ~slots kept
 
     (* The frontier of a walk: folders known and not yet answered, in visit
        order, a folder's children taking its place when its answer arrives. *)
