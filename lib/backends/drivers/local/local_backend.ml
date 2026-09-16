@@ -32,6 +32,16 @@ struct
   let mkdir_p = Fs.mkdir_p
   let readdir_list = Fs.readdir_list
 
+  (* Flushed before its name is published: a rename or link commits to the
+     journal ahead of delayed allocation, so a crash can leave the final name on
+     an empty file.
+
+     Opened for writing because Windows refuses to flush a read-only handle. *)
+  let stage tmp data =
+    let* () = Bytes.write_to ~path:tmp data ~offset:0 in
+    let* fd = Sys.openfile tmp [Unix.O_WRONLY] 0 in
+    Io.finalize (fun () -> Sys.fsync fd) (fun () -> Sys.close fd)
+
   (* Each write stages to its own temp file and renames it into place, so
      overlapping writes of one key never expose a partial file.
 
@@ -42,7 +52,7 @@ struct
   let write_file path data =
     let* () = Fs.ensure_parent path in
     let tmp = Filename.temp_path path in
-    let* () = Bytes.write_to ~path:tmp data ~offset:0 in
+    let* () = stage tmp data in
     Sys.rename tmp path
 
   let write_string path data = write_file path (Bigstring.of_string data)
@@ -63,7 +73,7 @@ struct
   let create_exclusive path data =
     let* () = Fs.ensure_parent path in
     let tmp = Filename.temp_path path in
-    let* () = Bytes.write_to ~path:tmp data ~offset:0 in
+    let* () = stage tmp data in
     Io.finalize
       (fun () ->
         Io.catch

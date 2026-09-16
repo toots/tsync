@@ -71,6 +71,20 @@
   (action
    (diff deferred_shards.expected deferred_shards.output))))
 
+(subdir backends/durable_writes
+ (alias
+  (name default)
+  (deps durable_writes.exe))
+ (rule
+  (alias runtest)
+  (target durable_writes.output)
+  (action
+   (with-stdout-to durable_writes.output (ignore-stderr (run ./durable_writes.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff durable_writes.expected durable_writes.output))))
+
 (subdir backends/fallback
  (alias
   (name default)
