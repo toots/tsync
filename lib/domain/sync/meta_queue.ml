@@ -49,14 +49,9 @@ struct
     module Js = Js.Make (C)
     module W = W.Make (C)
 
-    (* Only the link failing clears by waiting. A failure of this client's own
-       -- its state, its code -- fails the same way on every try, and an ordered
-       queue retrying it at the head would publish nothing after it for good. *)
-    let classify = function
-      | Invalid_argument _ | Failure _ | Not_found | Assert_failure _
-      | Match_failure _ ->
-          Retry.Permanent
-      | exn -> Backend.classify exn
+    (* An ordered queue retrying at the head would publish nothing after a
+       failure that fails the same way on every try. *)
+    let classify = Retry.classify_in_order
 
     (* What is parked right now, where the queue's own flag latches for the life
        of the process and would go on reporting an operation {!rearm} landed. *)

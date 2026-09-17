@@ -14,6 +14,11 @@ let string_of_kind = function
    about its own failures answers first and defers here. *)
 let classify = function Failed { kind; _ } -> kind | _ -> Transient
 
+(* A request's failure leaves {!LOOP.with_retry} as [Failed], saying whether the
+   link caused it, so anything else was raised on this side of the link and
+   fails the same way on every try. *)
+let classify_in_order = function Failed { kind; _ } -> kind | _ -> Permanent
+
 let reason = function
   | Failed { detail; _ } -> detail
   | exn -> Printexc.to_string exn
@@ -72,7 +77,18 @@ module Make (Io : Io.S) (Clock : Clock.S with type 'a io := 'a Io.t) :
             Io.bind (Clock.sleep delay) (fun () -> go (attempt + 1))
         | exn ->
             Metrics.add_failure 1;
-            Io.fail exn)
+            (* Out of tries on what the link caused: said so in the exception,
+               which is whatever a socket, a resolver or a TLS stack raised and
+               tells a reader further up nothing. *)
+            if classify exn = Transient then begin
+              if Clock.is_timeout exn then Metrics.add_timeout 1;
+              Io.fail
+                (match exn with
+                  | Failed _ -> exn
+                  | exn ->
+                      failed ~kind:Transient ~op:(name ^ " " ^ op) (reason exn))
+            end
+            else Io.fail exn)
     in
     go 1
 end
