@@ -69,4 +69,13 @@ the peer's fetch is out: ok
   rename local.txt -> local2.txt: returned, 0 round trip(s), 1 owed
 the local rename made no round trip, and did not wait: ok
 
-25 check(s), 0 failure(s)
+=== a refused request lets no later operation overtake
+both are published: ok
+and the new folder did not meet the old one's name still taken: ok
+
+=== an operation the store refuses for good steps aside
+what follows it is published: ok
+it stays owed, and is reported: ok
+the retry sweep lands it, and the report clears: ok
+
+30 check(s), 0 failure(s)

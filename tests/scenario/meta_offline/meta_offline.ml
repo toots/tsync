@@ -10,7 +10,8 @@ open Check
 let root = Scratch.dir "meta_offline"
 
 module Real = (val Fixture.local_store (Filename.concat root "store"))
-module Link = Doubles.Outage (Real)
+module Shaky = Doubles.Flaky (Real)
+module Link = Doubles.Outage (Shaky)
 
 module C =
   (val Fixture.conf ~domain:"testdom"
@@ -81,6 +82,21 @@ let until ready =
       go (tries - 1)
   in
   go 250
+
+let until_io ready =
+  let rec go tries =
+    let* now = ready () in
+    if now then Lwt.return_true
+    else if tries = 0 then Lwt.return_false
+    else
+      let* () = Lwt_unix.sleep 0.02 in
+      go (tries - 1)
+  in
+  go 500
+
+let nothing_owed () =
+  let+ n = owed () in
+  n = 0
 
 (* The names the store files under the root, read past the link. *)
 let root_markers () =
@@ -392,5 +408,48 @@ let () =
      Sq.set_paused false;
      let* () = settle () in
 
-     report ~expected:25 ();
+     (* A request that comes back failed, where the outage above is one that
+        waits: the queue retries, and what it retries must not be overtaken. *)
+     case "a refused request lets no later operation overtake";
+     let* () = F.mkdir (Lk.dir "build") in
+     let* () = settle () in
+     Mq.set_paused true;
+     let* () = F.rmdir (Lk.dir "build") in
+     let* () = F.mkdir (Lk.dir "build") in
+     Shaky.refuse_next 1;
+     Mq.set_paused false;
+     let* published = until_io nothing_owed in
+     let* _, dirs = Ck.list_children ~prefix:Lk.root () in
+     let* names = root_markers () in
+     check "both are published" (published && Shaky.refusals () = 1);
+     check "and the new folder did not meet the old one's name still taken"
+       (List.mem "build" dirs && List.mem "build" names
+       && not
+            (List.exists
+               (fun d -> d <> "build" && String.starts_with ~prefix:"build" d)
+               (dirs @ names)));
+
+     case "an operation the store refuses for good steps aside";
+     Mq.set_paused true;
+     let* () = F.mkdir (Lk.dir "stuck") in
+     let* () = F.mkdir (Lk.dir "after") in
+     Shaky.refuse_next ~with_:Backend.Not_writable 1;
+     Mq.set_paused false;
+     let* passed =
+       until_io (fun () ->
+           let+ names = root_markers () in
+           List.mem "after" names)
+     in
+     let* n = owed () in
+     let* names = root_markers () in
+     check "what follows it is published" passed;
+     check "it stays owed, and is reported"
+       (n = 1 && Mq.degraded () && not (List.mem "stuck" names));
+     let* () = Mq.rearm () in
+     let* published = until_io nothing_owed in
+     let* names = root_markers () in
+     check "the retry sweep lands it, and the report clears"
+       (published && List.mem "stuck" names && not (Mq.degraded ()));
+
+     report ~expected:30 ();
      Lwt.return_unit)

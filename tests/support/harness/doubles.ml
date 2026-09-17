@@ -102,6 +102,51 @@ module Outage (Real : Backend_lwt.Store) = struct
   let list_many = None
 end
 
+module Flaky (Real : Backend_lwt.Store) = struct
+  include Real
+
+  let owed : (string option * exn) list ref = ref []
+  let refused = ref 0
+
+  let refuse_next ?on
+      ?(with_ = Retry.failed ~kind:Retry.Transient ~op:"link" "refused") n =
+    owed := List.init n (fun _ -> (on, with_))
+
+  let refusals () = !refused
+
+  let gate name f =
+    match !owed with
+      | (on, exn) :: rest when Option.fold ~none:true ~some:(( = ) name) on ->
+          owed := rest;
+          incr refused;
+          Lwt.fail exn
+      | _ -> f ()
+
+  let put ~key ~data () = gate "put" (fun () -> Real.put ~key ~data ())
+
+  let put_if_absent ~key ~data () =
+    gate "put_if_absent" (fun () -> Real.put_if_absent ~key ~data ())
+
+  let get ~key () = gate "get" (fun () -> Real.get ~key ())
+  let get_opt ~key () = gate "get_opt" (fun () -> Real.get_opt ~key ())
+
+  let get_range ~key ~offset ~length () =
+    gate "get_range" (fun () -> Real.get_range ~key ~offset ~length ())
+
+  let head_opt ~key () = gate "head_opt" (fun () -> Real.head_opt ~key ())
+  let delete ~key () = gate "delete" (fun () -> Real.delete ~key ())
+  let delete_multi keys = gate "delete_multi" (fun () -> Real.delete_multi keys)
+
+  let copy ~src_key ~dst_key () =
+    gate "copy" (fun () -> Real.copy ~src_key ~dst_key ())
+
+  let list_prefix ?max_keys ~prefix () =
+    gate "list_prefix" (fun () -> Real.list_prefix ?max_keys ~prefix ())
+
+  let get_many = None
+  let list_many = None
+end
+
 module Refuses : Backend_lwt.Store = struct
   let fail () = Lwt.fail Backend.Not_writable
   let put ~key:_ ~data:_ () = fail ()

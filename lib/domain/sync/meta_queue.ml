@@ -6,8 +6,8 @@ module type S = sig
   (** Metadata operations whose backend half is still owed. *)
   val pending : unit -> int
 
-  (** Something was parked or the log overflowed; patience alone will not clear
-      it. *)
+  (** An operation is parked: it fails in a way waiting will not clear, and
+      later ones publish past it until {!rearm} finds it fixed. *)
   val degraded : unit -> bool
 
   val set_paused : bool -> unit
@@ -43,12 +43,6 @@ struct
   (* Bound before [Make] shadows [W] with its per-domain result. *)
   module Owed = W.Owed
 
-  (* Past this a transient failure is taken for one that will not clear. An
-     ordered queue holds a failing job at its head, so without a ceiling a single
-     op that can never land stops every later one from reaching a peer for as
-     long as the daemon runs; {!S.rearm} is what brings the parked one back. *)
-  let max_attempts = 10
-
   module Make
       (C : Conf.S with type 'a io = 'a Io.t)
       (F : File.Publishing with type 'a io := 'a Io.t) :
@@ -56,18 +50,28 @@ struct
     module Js = Js.Make (C)
     module W = W.Make (C)
 
-    let is_metadata = Wal.is_metadata
+    (* What is parked right now, where the queue's own flag latches for the life
+       of the process and would go on reporting an operation {!rearm} landed. *)
+    let parked : (string, unit) Hashtbl.t = Hashtbl.create 4
 
-    (* In memory, unlike the record's own count: what a ceiling is measuring is
-       this run's attempts at a job the queue is holding, and a record carried
-       over from an earlier run starts again rather than arriving already
-       spent. *)
-    let attempts : (string, int) Hashtbl.t = Hashtbl.create 16
-
-    let count_failure id =
-      let n = 1 + Option.value ~default:0 (Hashtbl.find_opt attempts id) in
-      Hashtbl.replace attempts id n;
-      n
+    (* Read again rather than taken from the job: a conflict settled since this
+       was queued may have rewritten where the work lands. *)
+    let publish entry_key =
+      let* current = W.find entry_key in
+      let owed = Option.fold ~none:[] ~some:(fun c -> c.Wal.ops) current in
+      let* ops = F.backend_ops owed in
+      match ops with
+        (* The store was never told of what this names. *)
+        | [] -> W.complete entry_key
+        | ops ->
+            (* The cursor is recorded rather than published, so a drained
+               backlog moves it once. *)
+            W.discharge
+              ~publish:(fun ek ops -> Js.write_journal_entry ~entry_key:ek ops)
+              ~cursor:(fun ek ->
+                Js.note_cursor ek;
+                return_unit)
+              entry_key ops
 
     (* The record's id is the entry key: one unit of work keeps one name, from
        the local record through the published entry to the cursor a peer compares
@@ -78,54 +82,21 @@ struct
         | Some entry_key ->
             Io.catch
               (fun () ->
-                (* Read again: a conflict settled since this was queued may have
-                   rewritten where the work lands. *)
-                let* current = W.find entry_key in
-                let owed =
-                  Option.fold ~none:[] ~some:(fun c -> c.Wal.ops) current
-                in
-                let* ops = F.backend_ops owed in
-                let+ () =
-                  match ops with
-                    (* The store was never told of what this names: nothing to
-                       publish, and nothing owed. *)
-                    | [] -> W.complete entry_key
-                    | ops ->
-                        (* Executed, then published, then the record goes: a
-                           crash in either window leaves a record reconcile can
-                           finish from what the backend says. The cursor is
-                           recorded rather than published, so a drained backlog
-                           moves it once. *)
-                        W.discharge
-                          ~publish:(fun ek ops ->
-                            Js.write_journal_entry ~entry_key:ek ops)
-                          ~cursor:(fun ek ->
-                            Js.note_cursor ek;
-                            return_unit)
-                          entry_key ops
-                in
-                Hashtbl.remove attempts id)
+                let+ () = publish entry_key in
+                Hashtbl.remove parked id)
               (function
                 (* Settled some other way, so the record names nothing that is
                    still owed and goes rather than being retried. *)
                 | Retry.Cancelled ->
-                    Hashtbl.remove attempts id;
+                    Hashtbl.remove parked id;
                     W.complete entry_key
                 | exn ->
-                    let n = count_failure id in
+                    let kind = Backend.classify exn in
+                    if kind = Retry.Permanent then Hashtbl.replace parked id ();
                     let* () =
-                      W.note_failure entry_key (Backend.classify exn)
-                        (Retry.reason exn)
+                      W.note_failure entry_key kind (Retry.reason exn)
                     in
-                    if
-                      n < max_attempts
-                      || Backend.classify exn <> Retry.Transient
-                    then Io.fail exn
-                    else
-                      Io.fail
-                        (Backend.Backend_error
-                           (Printf.sprintf "%s after %d attempts: %s"
-                              (Ek.to_string entry_key) n (Retry.reason exn))))
+                    Io.fail exn)
 
     (* [Stop], not [Drop]: the record is what {!Replay} reconciles, what
        {!rearm} brings back and what stats reports as stuck, so parking must
@@ -141,7 +112,7 @@ struct
       let s = Q.stats queue in
       s.Durable_queue.queued + s.Durable_queue.in_flight
 
-    let degraded () = (Q.stats queue).Durable_queue.degraded
+    let degraded () = Hashtbl.length parked > 0
     let set_paused b = Q.set_paused queue b
     let paused () = Q.paused queue
     let adopt entry_key r = Q.adopt queue ~id:(Ek.to_string entry_key) r
@@ -150,7 +121,7 @@ struct
       let* records = W.list () in
       iter_s
         (fun (entry_key, r) ->
-          if is_metadata r then adopt entry_key r else return_unit)
+          if Wal.is_metadata r then adopt entry_key r else return_unit)
         records
 
     let start () =
