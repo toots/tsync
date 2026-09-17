@@ -41,7 +41,7 @@ let clones =
   let src = path "probe" in
   write_file src "x";
   let ok =
-    match try Device.clone ~src with _ -> None with
+    match try Device.clone ~src () with _ -> None with
       | Some fd ->
           Unix.close fd;
           true
@@ -67,13 +67,13 @@ let () =
   let p = path "empty" in
   write_file p "";
   check "map empty"
-    (Bigstring.length (Bigstring.map_file ~path:p ~offset:0 ~len:0) = 0);
+    (Bigstring.length (Bigstring.map_file ~path:p ~offset:0 ~len:0 ()) = 0);
 
   (* 1. A mapping outlives the name it was made from. This is what lets the cache
      cap delete a body under a reader. *)
   let p = path "unlinked" in
   write_file p body;
-  let c = Bigstring.map_file ~path:p ~offset:0 ~len:(String.length body) in
+  let c = Bigstring.map_file ~path:p ~offset:0 ~len:(String.length body) () in
   Sys.remove p;
   check "survives unlink" (Bigstring.to_string c = body);
 
@@ -82,7 +82,7 @@ let () =
      a cache body at all. *)
   let p = path "republished" in
   write_file p body;
-  let c = Bigstring.map_file ~path:p ~offset:0 ~len:(String.length body) in
+  let c = Bigstring.map_file ~path:p ~offset:0 ~len:(String.length body) () in
   publish p (String.make (String.length body) 'z');
   check "survives republish" (Bigstring.to_string c = body);
 
@@ -93,7 +93,7 @@ let () =
   let p = path "short" in
   write_file p "abc";
   let raised =
-    match Bigstring.map_file ~path:p ~offset:0 ~len:4096 with
+    match Bigstring.map_file ~path:p ~offset:0 ~len:4096 () with
       | _ -> false
       | exception _ -> true
   in
@@ -103,7 +103,7 @@ let () =
   (* 4. MAP_PRIVATE: writing through a view does not reach the file. *)
   let p = path "private" in
   write_file p body;
-  let c = Bigstring.map_file ~path:p ~offset:0 ~len:(String.length body) in
+  let c = Bigstring.map_file ~path:p ~offset:0 ~len:(String.length body) () in
   Bigstringaf.set c 0 'Z';
   check "write does not reach file" (read_file p = body);
 
@@ -111,7 +111,7 @@ let () =
      from never accumulates them and a kill mid-clone leaves nothing to reap. *)
   let p = path "no-litter" in
   write_file p body;
-  ignore (Bigstring.map_file ~path:p ~offset:0 ~len:(String.length body));
+  ignore (Bigstring.map_file ~path:p ~offset:0 ~len:(String.length body) ());
   check "clone left behind"
     (not (Array.exists Filename.is_temp_name (Sys.readdir root)));
 
@@ -131,7 +131,7 @@ let () =
      read, so the child surviving is the check. *)
   let p = path "truncated" in
   write_file p body;
-  let c = Bigstring.map_file ~path:p ~offset:0 ~len:(String.length body) in
+  let c = Bigstring.map_file ~path:p ~offset:0 ~len:(String.length body) () in
   let survived =
     match Unix.fork () with
       | 0 ->
@@ -149,13 +149,13 @@ let () =
      the stub has to align for us. *)
   let p = path "offset" in
   write_file p body;
-  let c = Bigstring.map_file ~path:p ~offset:100 ~len:50 in
+  let c = Bigstring.map_file ~path:p ~offset:100 ~len:50 () in
   check "unaligned offset" (Bigstring.to_string c = String.sub body 100 50);
 
   (* 9. Hashing reaches the bytes wherever they are. *)
   let p = path "hashed" in
   write_file p body;
-  let c = Bigstring.map_file ~path:p ~offset:0 ~len:(String.length body) in
+  let c = Bigstring.map_file ~path:p ~offset:0 ~len:(String.length body) () in
   check "hash matches string"
     (Xxhash.hash_bigstring_hex c 0 = Xxhash.hash_hex body 0
     && Xxhash.hash_bigstring_hex (Bigstring.of_string body) 1
@@ -176,7 +176,7 @@ let () =
   write_file p (String.make (4 * 1024 * 1024) 'a');
   let mapped =
     extra (fun () ->
-        Bigstring.map_file ~path:p ~offset:0 ~len:(4 * 1024 * 1024))
+        Bigstring.map_file ~path:p ~offset:0 ~len:(4 * 1024 * 1024) ())
   in
   check "mapping is a small heap object" (mapped < 1000.);
 

@@ -21,8 +21,12 @@ val max_concurrency : string -> int option
     [src] afterwards reaches it, and no name is left for a kill to leak or a
     directory walker to find.
 
+    [scratch] is the directory the clone is staged in, which must be on [src]'s
+    filesystem; without it the clone is staged beside [src], which is right
+    wherever nothing is watching that directory.
+
     [None] where the filesystem cannot clone — APFS and btrfs can, XFS can when
     made with [reflink=1], ext4 and tmpfs cannot — which is the caller's cue to
     read the file itself, whereas a directory that will not take the clone at
     all raises [Unix_error]. The caller closes it. *)
-val clone : src:string -> Unix.file_descr option
+val clone : ?scratch:string -> src:string -> unit -> Unix.file_descr option

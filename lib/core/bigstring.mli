@@ -25,7 +25,7 @@ val of_string : string -> t
     caller is back to needing a source nobody rewrites in place or truncates —
     the latter being [SIGBUS] under a mapping, a dead process rather than a
     short read. *)
-val open_snapshot : string -> Unix.file_descr
+val open_snapshot : ?scratch:string -> string -> Unix.file_descr
 
 (** A [MAP_PRIVATE] mapping of [len] bytes at [offset] of an {!open_snapshot} of
     [path].
@@ -33,7 +33,8 @@ val open_snapshot : string -> Unix.file_descr
     A short file is an error here rather than a silent grow: {!Unix.map_file}
     extends a file that cannot cover the mapping, and the descriptor being
     read-only is what turns that write into a failure. *)
-val map_file : path:string -> offset:int -> len:int -> t
+val map_file :
+  ?scratch:string -> path:string -> offset:int -> len:int -> unit -> t
 
 (** {!map_file} against a descriptor already open, which spares a clone and an
     open per range. Read-only, and a snapshot only if the descriptor is one:

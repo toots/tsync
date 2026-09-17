@@ -12,7 +12,12 @@ woken by the write rather than by the cap: ok
 the wait blocks rather than returning to a stale event: ok
 
 === a read of an object does not wake a watcher on its directory
-neither a read nor a scratch name of ours is reported: ok
+reading it leaves nothing for the watcher to report: ok
+
+=== what a read stages is not in the directory that is watched
+  at the store's root: .tsync-tmp-scratch.tmp
+the store holds one scratch directory of its own, at its root: ok
+and the object's own directory holds nothing of the kind: ok
 
 === and returns at the cap when nothing happens
 a directory nothing writes to still returns: ok
