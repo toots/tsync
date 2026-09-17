@@ -73,6 +73,18 @@ struct
     let local_id key =
       Folders.lookup_id ~cache_root:C.cache_root ~domain_name:C.domain_name key
 
+    let key_of_id id =
+      Folders.key_of_id ~cache_root:C.cache_root ~domain_name:C.domain_name
+        ~root:Lk.root id
+
+    let folder_of_id = function
+      | None -> Io.return None
+      | Some id -> key_of_id id
+
+    let whereabouts key =
+      Folders.whereabouts ~cache_root:C.cache_root ~domain_name:C.domain_name
+        ~root:Lk.root key
+
     (* [Mf] is the local mirror; [St] the store's own copy, which takes logical
        keys and maps them to backend keys through the layout scheme. *)
     module Mf = Mf.Make (C)
@@ -635,10 +647,7 @@ struct
        moved it meanwhile, and it goes by its id. *)
     let current_place rel id =
       with_meta (fun () ->
-          let* found =
-            Folders.key_of_id ~cache_root:C.cache_root
-              ~domain_name:C.domain_name ~root:Lk.root id
-          in
+          let* found = key_of_id id in
           match found with
             | Some key -> return_some key
             | None ->
@@ -932,21 +941,20 @@ struct
                   let* data = St.get_object ~bkey:marker_key in
                   match Folder.marker_of_string data with
                     | Some m -> (
-                        let* kept =
-                          Folders.lookup_id_removed ~cache_root:C.cache_root
-                            ~domain_name:C.domain_name (Lk.dir rel)
-                        in
-                        (* A folder this client moved or removed since is not
+                        let* place = whereabouts (Lk.dir rel) in
+                        let* here = kind (Lk.dir rel) in
+                        match place with
+                          (* A folder this client moved or removed since is not
                            brought back where it was; nor is one a move left
                            a marker behind for. *)
-                        let* here = kind (Lk.dir rel) in
-                        if kept = Some m.Folder.id && here <> `Dir then
-                          return_unit
-                        else
-                          let* filed = St.filed ~bkey:marker_key m in
-                          match filed with
-                            | `Elsewhere _ -> return_unit
-                            | `Here -> write m.Folder.id)
+                          | (`Moved (id, _) | `Removed id)
+                            when id = m.Folder.id && here <> `Dir ->
+                              return_unit
+                          | _ -> (
+                              let* filed = St.filed ~bkey:marker_key m in
+                              match filed with
+                                | `Elsewhere _ -> return_unit
+                                | `Here -> write m.Folder.id))
                     | None -> return_unit)
                 (fun _ -> return_unit))
 
@@ -1050,12 +1058,6 @@ struct
       (* [rename_local] pointed the shared id at the copy; this points it back. *)
       Folders.reparent ~cache_root:C.cache_root ~domain_name:C.domain_name dst
 
-    let folder_of_id = function
-      | None -> Io.return None
-      | Some id ->
-          Folders.key_of_id ~cache_root:C.cache_root ~domain_name:C.domain_name
-            ~root:Lk.root id
-
     (* A peer's folder op names its folder by id, and a local folder holding
        another id at that path is a different folder the op must leave alone. *)
     let another_folder_at key id =
@@ -1072,55 +1074,47 @@ struct
       match id with
         | None -> return_false
         | Some id ->
-            let+ found =
-              Folders.key_of_id ~cache_root:C.cache_root
-                ~domain_name:C.domain_name ~root:Lk.root id
-            in
+            let+ found = key_of_id id in
             Option.fold ~none:false
               ~some:(fun found -> not (Logical_key.equal found key))
               found
 
+    (* What applying a peer's entry asks of the store. Read before the metadata
+       lock is taken and only recalled under it, so a slow link holds up that
+       entry and not every local operation waiting behind it. *)
+    type store_reads = {
+      marker_at : Logical_key.t -> string option Io.t;
+          (** The id the store files under a folder's name. *)
+      manifest : Logical_key.t -> Manifest.t option Io.t;
+      adopt : [ `Ancestors of string | `Folder of string ] -> unit Io.t;
+    }
+
     (* Where a folder a peer names by path is here: one this client moved since
-       keeps its id and is found by it, and so is anything under it. *)
-    let rec local_folder key =
+       keeps its id and is found by it, and so is anything under it. The same
+       folder only if the store still files it under the name: a peer's own
+       folder there is another one. *)
+    let rec local_folder reads key =
       if Logical_key.is_root key then Io.return key
       else
-        let* live = local_id key in
+        let* place = whereabouts key in
         let* moved =
-          match live with
-            | Some _ -> Io.return None
-            | None -> (
-                let* kept =
-                  Folders.lookup_id_removed ~cache_root:C.cache_root
-                    ~domain_name:C.domain_name key
-                in
-                match kept with
-                  | None -> Io.return None
-                  | Some id ->
-                      (* The same folder only if the store still files it under
-                         the name: a peer's own folder there is another one. *)
-                      let* bkey = folder_marker_bkey key in
-                      let* filed =
-                        match bkey with
-                          | None -> Io.return None
-                          | Some bkey -> St.marker_id_at ~bkey
-                      in
-                      if filed <> Some id then Io.return None
-                      else
-                        Folders.key_of_id ~cache_root:C.cache_root
-                          ~domain_name:C.domain_name ~root:Lk.root id)
+          match place with
+            | `Moved (id, at) ->
+                let+ filed = reads.marker_at key in
+                if filed = Some id then Some at else None
+            | `Live _ | `Removed _ | `Unknown -> Io.return None
         in
-        match (live, moved) with
-          | Some _, _ -> Io.return key
-          | None, Some at -> Io.return at
-          | None, None ->
-              let+ parent = local_folder (Logical_key.parent key) in
+        match (place, moved) with
+          | `Live _, _ -> Io.return key
+          | _, Some at -> Io.return at
+          | _, None ->
+              let+ parent = local_folder reads (Logical_key.parent key) in
               Logical_key.dir_in parent (Logical_key.leaf key)
 
     (* A file, or a folder a peer creates or moves to: its parent is found the
        same way, and its own name is the peer's. *)
-    let local_child in_parent key =
-      let+ parent = local_folder (Logical_key.parent key) in
+    let local_child in_parent reads key =
+      let+ parent = local_folder reads (Logical_key.parent key) in
       in_parent parent (Logical_key.leaf key)
 
     let local_file = local_child Logical_key.file_in
@@ -1189,49 +1183,96 @@ struct
               r.Wal.ops)
         records
 
-    (* What applying the ops will read from the store, read before the metadata
-       lock is taken: a slow link then holds up this entry and not every local
-       operation waiting behind it. Ancestor ids first, since a manifest's key
-       is built from its folder's id, so a missing one does not fail loudly: it
-       resolves to no key and the put is skipped. *)
+    let marker_at_store key =
+      let* bkey = folder_marker_bkey key in
+      match bkey with
+        | None -> Io.return None
+        | Some bkey -> St.marker_id_at ~bkey
+
     (* A peer's object is in the namespace of the folder it names, which is the
        one found here: never a folder this client only remembers at the path,
        whose namespace holds this client's own files. *)
-    let fetch_peer key =
-      let* local = local_file key in
+    let fetch_peer reads key =
+      let* local = local_file reads key in
       let* parent = local_id (Logical_key.parent local) in
       match parent with
         | None -> Io.return None
         | Some _ -> R.fetch_manifest ~key:local ()
 
-    let prefetch ops =
-      let fetched = Hashtbl.create 8 in
-      let fetch key =
-        let+ m = fetch_peer key in
-        Hashtbl.replace fetched key m
+    let adopt = function
+      | `Ancestors rel -> adopt_ancestor_ids rel
+      | `Folder rel -> adopt_folder_id rel
+
+    (* Asks the store for everything {!apply_one} will, and answers the reads it
+       made. Ancestor ids first, since a manifest's key is built from its
+       folder's id, so a missing one does not fail loudly: it resolves to no key
+       and the put is skipped. *)
+    let read_ahead ~owed ops =
+      let markers = Hashtbl.create 8 and manifests = Hashtbl.create 8 in
+      let memo table read key =
+        match Hashtbl.find_opt table key with
+          | Some known -> Io.return known
+          | None ->
+              let+ answer = read key in
+              Hashtbl.replace table key answer;
+              answer
       in
+      let rec live =
+        {
+          marker_at = (fun key -> memo markers marker_at_store key);
+          manifest = (fun key -> memo manifests (fetch_peer live) key);
+          adopt;
+        }
+      in
+      let renames = owed_file_renames owed in
+      let resolved (_ : Logical_key.t) = () in
       let+ () =
         iter_s
           (function
             | `Put (rel, _) ->
-                let* () = adopt_ancestor_ids rel in
-                fetch (Lk.file rel)
-            | `Rename { Journal.src; dst; is_dir = false; _ } ->
-                let* () = adopt_ancestor_ids dst in
-                let* exists =
-                  Syscalls.file_exists (manifest_path (Lk.file src))
+                let* () = live.adopt (`Ancestors rel) in
+                let* key =
+                  local_file live (Lk.file (renamed_since renames rel))
                 in
-                if exists then return_unit else fetch (Lk.file dst)
-            | `Rename { Journal.dst = rel; is_dir = true; _ } | `Mkdir (rel, _)
-              ->
-                adopt_ancestor_ids rel
-            | `Delete _ | `Rmdir _ -> return_unit)
+                resolved key;
+                Io.map ignore (live.manifest (Lk.file rel))
+            | `Delete rel -> Io.map resolved (local_file live (Lk.file rel))
+            | `Mkdir (rel, id) ->
+                let* () = live.adopt (`Ancestors rel) in
+                let* key = local_child_folder live (Lk.dir rel) in
+                if id = None then live.adopt (`Folder (Logical_key.path key))
+                else return_unit
+            | `Rmdir _ -> return_unit
+            | `Rename { Journal.dst; is_dir = true; _ } ->
+                let* () = live.adopt (`Ancestors dst) in
+                Io.map resolved (local_child_folder live (Lk.dir dst))
+            | `Rename { Journal.src; dst; is_dir = false; _ } ->
+                let* () = live.adopt (`Ancestors dst) in
+                let* src_key = local_file live (Lk.file src) in
+                let* dst_key = local_file live (Lk.file dst) in
+                resolved dst_key;
+                let* exists = Syscalls.file_exists (manifest_path src_key) in
+                if exists then return_unit
+                else Io.map ignore (live.manifest (Lk.file dst)))
           ops
       in
-      fun key ->
-        match Hashtbl.find_opt fetched key with
-          | Some m -> Io.return m
-          | None -> fetch_peer key
+      (* A read nothing made ahead is one this client's own change since made
+         necessary, and the entry is read again rather than the store asked
+         with the lock held. *)
+      let recall table key =
+        match Hashtbl.find_opt table key with
+          | Some known -> Io.return known
+          | None ->
+              Io.fail
+                (Retry.failed ~kind:Retry.Transient ~op:"apply"
+                   (Logical_key.to_string key
+                  ^ ": changed here while the entry was being read"))
+      in
+      {
+        marker_at = recall markers;
+        manifest = recall manifests;
+        adopt = (fun _ -> return_unit);
+      }
 
     (* What this client wrote under a folder a peer removed and has not
        published yet survives beside the folder under conflicted names, its
@@ -1262,27 +1303,27 @@ struct
 
     (* Failures propagate: the sync poller must not advance its high-water mark
        past an entry it could not apply, or the op is lost until a full resync. *)
-    let apply_one ~fetched ~owed op =
+    let apply_one ~reads ~owed op =
       match op with
         | `Put (rel, _) ->
             let renames = owed_file_renames owed in
             let* () = settle_renamed_onto renames rel in
-            let* () = adopt_ancestor_ids rel in
-            let* key = local_file (Lk.file (renamed_since renames rel)) in
+            let* () = reads.adopt (`Ancestors rel) in
+            let* key = local_file reads (Lk.file (renamed_since renames rel)) in
             let* () = folder_aside (Lk.dir (Logical_key.path key)) in
             staged_aside key (fun () ->
                 ignore (cancel_upload key);
-                let* m = fetched (Lk.file rel) in
+                let* m = reads.manifest (Lk.file rel) in
                 match m with
                   | None -> return_unit
                   | Some state -> write_manifest key state)
         | `Delete rel ->
-            let* key = local_file (Lk.file rel) in
+            let* key = local_file reads (Lk.file rel) in
             staged_aside key (fun () ->
                 ignore (cancel_upload key);
                 clear_local key)
         | `Mkdir (rel, id) -> (
-            let* key = local_child_folder (Lk.dir rel) in
+            let* key = local_child_folder reads (Lk.dir rel) in
             let* elsewhere = lives_elsewhere key id in
             if elsewhere then return_unit
             else
@@ -1293,7 +1334,7 @@ struct
                   (Lk.file (Logical_key.path key))
                   (fun () -> return_unit)
               in
-              let* () = adopt_ancestor_ids rel in
+              let* () = reads.adopt (`Ancestors rel) in
               let* taken = another_folder_at key id in
               let* () =
                 match taken with
@@ -1306,7 +1347,7 @@ struct
                  until that one's rename lands. *)
                 match id with
                 | Some id -> write_folder_id key id
-                | None -> adopt_folder_id (Logical_key.path key))
+                | None -> reads.adopt (`Folder (Logical_key.path key)))
         | `Rmdir (rel, id) -> (
             (* A folder goes by its id, wherever it is here. *)
             let* found = folder_of_id id in
@@ -1323,7 +1364,7 @@ struct
                     Ck.delete_dir key)
         | `Rename { Journal.src; dst; is_dir = true; id; _ } -> (
             let owed = owed_folder_ids owed in
-            let* dst_key = local_child_folder (Lk.dir dst) in
+            let* dst_key = local_child_folder reads (Lk.dir dst) in
             let* src_key =
               let path = Lk.dir src in
               let* here = kind path in
@@ -1346,7 +1387,7 @@ struct
                   return_unit
               | Some src_key ->
                   unless_staged src_key (fun () ->
-                      let* () = adopt_ancestor_ids dst in
+                      let* () = reads.adopt (`Ancestors dst) in
                       let* found = at_destination ~dst:dst_key ~id in
                       match found with
                         | `Same_folder ->
@@ -1359,28 +1400,29 @@ struct
                             Io.map ignore
                               (rename_local ~src:src_key ~dst:dst_key)))
         | `Rename { Journal.src; dst; is_dir = false; _ } ->
-            let* src_key = local_file (Lk.file src) in
-            let* dst_key = local_file (Lk.file dst) in
+            let* src_key = local_file reads (Lk.file src) in
+            let* dst_key = local_file reads (Lk.file dst) in
             let* exists = Syscalls.file_exists (manifest_path src_key) in
             if exists then
               unless_staged src_key (fun () ->
-                  let* () = adopt_ancestor_ids dst in
+                  let* () = reads.adopt (`Ancestors dst) in
                   Io.map ignore (rename_local ~src:src_key ~dst:dst_key))
             else
               unless_staged dst_key (fun () ->
                   (* No local src (e.g. we renamed it ourselves and published the
                      result): adopt dst's remote state. *)
-                  let* m = fetched (Lk.file dst) in
+                  let* m = reads.manifest (Lk.file dst) in
                   match m with
                     | Some state -> write_manifest dst_key state
                     | _ -> return_unit)
 
+    (* The log is read for the reads ahead and again under the lock, where a
+       record written between the two shows up as a read nothing made. *)
     let apply_foreign_ops ops =
-      let* fetched = prefetch ops in
+      let* owed = W.list () in
+      let* reads = read_ahead ~owed ops in
       with_meta (fun () ->
-          (* Read once for the entry: the log holds every upload owed too, and
-             a large entry would otherwise read it once per op. *)
           let* owed = W.list () in
-          iter_s (apply_one ~fetched ~owed) ops)
+          iter_s (apply_one ~reads ~owed) ops)
   end
 end

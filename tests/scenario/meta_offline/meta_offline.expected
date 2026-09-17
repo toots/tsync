@@ -69,6 +69,16 @@ the peer's fetch is out: ok
   rename local.txt -> local2.txt: returned, 0 round trip(s), 1 owed
 the local rename made no round trip, and did not wait: ok
 
+=== a folder removed with everything under it
+each removal is published, none parked: ok
+the file is gone from the store, and the folder from the root: ok
+
+=== a peer's entry under a folder moved here holds up no local operation
+the peer's read is out: ok
+  mkdir meanwhile: returned, 0 round trip(s), 2 owed
+the local mkdir made no round trip, and did not wait: ok
+and the peer's delete reached the file where it is now: ok
+
 === a refused request lets no later operation overtake
 both are published: ok
 and the new folder did not meet the old one's name still taken: ok
@@ -81,4 +91,4 @@ what follows it is published: ok
 it stays owed, and is reported: ok
 the retry sweep lands it, and the report clears: ok
 
-31 check(s), 0 failure(s)
+36 check(s), 0 failure(s)

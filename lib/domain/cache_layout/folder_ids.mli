@@ -37,9 +37,10 @@ module type S = sig
   val lookup_id :
     cache_root:string -> domain_name:string -> Logical_key.t -> string option io
 
-  (** The id of a folder the mirror may already have dropped, for naming a
-      removal. Separate from {!lookup_id} because a caller resolving something
-      it means to reach must not be answered for a folder that is gone. *)
+  (** The id a path names or last named, the folder having moved or gone since:
+      for naming a removal, and for filing what an op recorded under that path.
+      Separate from {!lookup_id} because a caller resolving something it means
+      to reach must not be answered for a folder that is gone. *)
   val lookup_id_removed :
     cache_root:string -> domain_name:string -> Logical_key.t -> string option io
 
@@ -85,6 +86,21 @@ module type S = sig
     root:Logical_key.t ->
     string ->
     Logical_key.t option io
+
+  (** What this client knows of the folder a path names, or last named: there
+      now, moved to another path since, removed since, or never held. One answer
+      for every caller that meets a path an op recorded before the folder went.
+  *)
+  val whereabouts :
+    cache_root:string ->
+    domain_name:string ->
+    root:Logical_key.t ->
+    Logical_key.t ->
+    [ `Live of string
+    | `Moved of string * Logical_key.t
+    | `Removed of string
+    | `Unknown ]
+    io
 
   (** Stop [key] and every folder under it being folders the store knows: their
       markers go, and so does the path [key] was named by, so neither a lookup

@@ -43,6 +43,17 @@ module type S = sig
     string ->
     Logical_key.t option io
 
+  val whereabouts :
+    cache_root:string ->
+    domain_name:string ->
+    root:Logical_key.t ->
+    Logical_key.t ->
+    [ `Live of string
+    | `Moved of string * Logical_key.t
+    | `Removed of string
+    | `Unknown ]
+    io
+
   val forget :
     cache_root:string -> domain_name:string -> Logical_key.t -> unit io
 
@@ -291,8 +302,20 @@ module Over (Io : Io.S) (F : Fs.S with type 'a io := 'a Io.t) = struct
             let+ actual = lookup_id ~cache_root ~domain_name key in
             if actual = Some id then Some key else None
 
-  (* A marker travels with its directory and so still spells the old leaf after a
-     rename; {!rebuild} reads it, so the new name is written back. *)
+  let whereabouts ~cache_root ~domain_name ~root key =
+    let* live = lookup_id ~cache_root ~domain_name key in
+    match live with
+      | Some id -> Io.return (`Live id)
+      | None -> (
+          let* kept = lookup_id_removed ~cache_root ~domain_name key in
+          match kept with
+            | None -> Io.return `Unknown
+            | Some id ->
+                let+ at = key_of_id ~cache_root ~domain_name ~root id in
+                Option.fold ~none:(`Removed id)
+                  ~some:(fun at -> `Moved (id, at))
+                  at)
+
   let forget ~cache_root ~domain_name key =
     if Logical_key.is_root key then return_unit
     else (
@@ -309,6 +332,8 @@ module Over (Io : Io.S) (F : Fs.S with type 'a io := 'a Io.t) = struct
       let* () = strip (dir_of ~cache_root ~domain_name key) in
       F.unlink_quiet (by_path_path ~cache_root ~domain_name key))
 
+  (* A marker travels with its directory and so still spells the old leaf after a
+     rename; {!rebuild} reads it, so the new name is written back. *)
   let reparent ~cache_root ~domain_name key =
     if Logical_key.is_root key then return_unit
     else

@@ -43,28 +43,12 @@ struct
       let child_key ~folder_id leaf =
         Stored_key.child_key ~prefix:C.domain_prefix ~folder_id leaf
 
-      module Lk = Logical_key.Make (C)
-
-      (* A folder moved here since an op naming it by path was recorded keeps its
-         id, and with it its children's keys: the old path answers with the id it
-         last named, if that folder still lives somewhere. *)
+      (* An op recorded by path is published after the folder it names may have
+         moved or gone here, and its children's keys hang off the id either way:
+         a removal under a folder removed since must still reach the store. *)
       let parent_id key =
-        let* live = folder_id key in
-        match live with
-          | Some id -> return_some id
-          | None -> (
-              let* kept =
-                Folder_ids.lookup_id_removed ~cache_root:C.cache_root
-                  ~domain_name:C.domain_name key
-              in
-              match kept with
-                | None -> Io.return None
-                | Some id ->
-                    let+ at =
-                      Folder_ids.key_of_id ~cache_root:C.cache_root
-                        ~domain_name:C.domain_name ~root:Lk.root id
-                    in
-                    Option.map (fun _ -> id) at)
+        Folder_ids.lookup_id_removed ~cache_root:C.cache_root
+          ~domain_name:C.domain_name key
 
       (* A folder is not filed as a manifest — it is named by its marker under the
          parent's namespace — so this resolves a file either way. *)
