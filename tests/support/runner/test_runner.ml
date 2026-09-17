@@ -81,6 +81,8 @@ type step =
   | GcClose  (** Finish what [GcMark] left open. *)
   | GcAbort  (** Abandon an open collection, keeping everything. *)
   | Drain
+  | DrainMetadata
+      (** {!Drain} for the metadata queue alone, while uploads are held. *)
   | SettleReadAhead
   | Uploads of [ `Paused | `Running ]
   | Metadata of [ `Paused | `Running ]
@@ -208,6 +210,7 @@ let rec render_step = function
   | GcClose -> "gc (close)"
   | GcAbort -> "gc --abort"
   | Drain -> "drain"
+  | DrainMetadata -> "drain metadata"
   | SettleReadAhead -> "settle read-ahead"
   | Uploads `Paused -> "uploads paused"
   | Uploads `Running -> "uploads running"
@@ -938,33 +941,16 @@ let setup_client (module C : Conf_lwt.S) root staging_prefix =
            all: a step that left it behind would exercise [Sync] against a gate
            stuck shut. *)
         let* () = Fs.flush_cursor () in
-        (* Waited for, not assumed: whichever of this flush and the debounce
-           timer gets there first is what publishes, and a step returning before
-           the bump landed leaves [Sync] reading a gate that is still shut —
-           which reads as a peer that simply saw nothing. *)
-        let deadline = Unix.gettimeofday () +. 10. in
-        let rec published () =
-          let* keys = Fs.list_journal_keys () in
-          match List.rev keys with
-            | [] -> Lwt.return_unit
-            | newest :: _ ->
-                let* cursor = Fs.fetch_cursor () in
-                let covers =
-                  match cursor with
-                    | Some c -> Journal.Entry_key.compare c newest >= 0
-                    | None -> false
-                in
-                (* Bounded, so a bump that never lands fails the snapshot with
-                   what it was about rather than hanging the run. *)
-                if covers || Unix.gettimeofday () > deadline then
-                  Lwt.return_unit
-                else
-                  let* () = Lwt_unix.sleep 0.001 in
-                  published ()
-        in
-        let* () = published () in
         (* Move past the current ms so the next journal entry key is distinct. *)
         Lwt_unix.sleep 0.002
+    | DrainMetadata ->
+        let rec wait () =
+          if Mq.pending () = 0 then Lwt.return_unit
+          else
+            let* () = Lwt.pause () in
+            wait ()
+        in
+        wait ()
     | Uploads state ->
         Sq.set_paused (state = `Paused);
         Lwt.return_unit
