@@ -19,6 +19,7 @@ let conflict name ~setup ~ours ~theirs =
           A Drain;
           B Sync;
           B (Metadata `Running);
+          B DrainMetadata;
           B (Uploads `Running);
           B Drain;
           A Sync;

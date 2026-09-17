@@ -9,6 +9,7 @@
   A: drain
   B: sync
   B: metadata running
+  B: drain metadata
   B: uploads running
   B: drain
   A: sync
@@ -52,6 +53,7 @@
   A: drain
   B: sync
   B: metadata running
+  B: drain metadata
   B: uploads running
   B: drain
   A: sync
@@ -92,6 +94,7 @@
   A: drain
   B: sync
   B: metadata running
+  B: drain metadata
   B: uploads running
   B: drain
   A: sync
@@ -136,6 +139,7 @@
   A: drain
   B: sync
   B: metadata running
+  B: drain metadata
   B: uploads running
   B: drain
   A: sync
@@ -179,6 +183,7 @@
   A: drain
   B: sync
   B: metadata running
+  B: drain metadata
   B: uploads running
   B: drain
   A: sync
@@ -222,6 +227,7 @@
   A: drain
   B: sync
   B: metadata running
+  B: drain metadata
   B: uploads running
   B: drain
   A: sync
@@ -264,6 +270,7 @@
   A: drain
   B: sync
   B: metadata running
+  B: drain metadata
   B: uploads running
   B: drain
   A: sync
@@ -312,6 +319,7 @@
   A: drain
   B: sync
   B: metadata running
+  B: drain metadata
   B: uploads running
   B: drain
   A: sync
@@ -363,6 +371,7 @@
   A: drain
   B: sync
   B: metadata running
+  B: drain metadata
   B: uploads running
   B: drain
   A: sync
@@ -415,6 +424,7 @@
   A: drain
   B: sync
   B: metadata running
+  B: drain metadata
   B: uploads running
   B: drain
   A: sync
@@ -467,6 +477,7 @@
   A: drain
   B: sync
   B: metadata running
+  B: drain metadata
   B: uploads running
   B: drain
   A: sync
@@ -514,6 +525,7 @@
   A: drain
   B: sync
   B: metadata running
+  B: drain metadata
   B: uploads running
   B: drain
   A: sync
@@ -552,6 +564,7 @@
   A: drain
   B: sync
   B: metadata running
+  B: drain metadata
   B: uploads running
   B: drain
   A: sync
@@ -598,6 +611,7 @@
   A: drain
   B: sync
   B: metadata running
+  B: drain metadata
   B: uploads running
   B: drain
   A: sync
@@ -640,6 +654,7 @@
   A: drain
   B: sync
   B: metadata running
+  B: drain metadata
   B: uploads running
   B: drain
   A: sync
@@ -674,8 +689,8 @@
   {"op":"mkdir","key":"e","id":"<folder-2>"}
   {"op":"put","key":"e/theirs.txt","size":6}
   {"op":"rename","key":"e (conflicted copy from Client B)","src":"d","is_dir":true,"id":"<folder-1>"}
-  {"op":"put","key":"e (conflicted copy from Client B)/ours.txt","size":4}
   {"op":"rename","key":"e (conflicted copy from Client B)","src":"e","is_dir":true,"id":"<folder-1>"}
+  {"op":"put","key":"e (conflicted copy from Client B)/ours.txt","size":4}
 --- backend
   chunk 08b13b9a7f1dcae3-2fd3462d1ebeb40a size=4
   chunk 3a98c68f7f9f2fea-956195a803de999d size=6
@@ -707,6 +722,7 @@
   A: drain
   B: sync
   B: metadata running
+  B: drain metadata
   B: uploads running
   B: drain
   A: sync
@@ -739,8 +755,8 @@
   {"op":"mkdir","key":"d","id":"<folder-1>"}
   {"op":"put","key":"d/theirs.txt","size":6}
   {"op":"mkdir","key":"d (conflicted copy from Client B)","id":"<folder-2>"}
-  {"op":"put","key":"d (conflicted copy from Client B)/ours.txt","size":4}
   {"op":"rename","key":"d (conflicted copy from Client B)","src":"d","is_dir":true,"id":"<folder-2>"}
+  {"op":"put","key":"d (conflicted copy from Client B)/ours.txt","size":4}
 --- backend
   chunk 08b13b9a7f1dcae3-2fd3462d1ebeb40a size=4
   chunk 3a98c68f7f9f2fea-956195a803de999d size=6
@@ -770,6 +786,7 @@
   A: drain
   B: sync
   B: metadata running
+  B: drain metadata
   B: uploads running
   B: drain
   A: sync
@@ -806,6 +823,7 @@
   A: drain
   B: sync
   B: metadata running
+  B: drain metadata
   B: uploads running
   B: drain
   A: sync
@@ -860,6 +878,7 @@
   A: drain
   B: sync
   B: metadata running
+  B: drain metadata
   B: uploads running
   B: drain
   A: sync
@@ -913,6 +932,7 @@
   A: drain
   B: sync
   B: metadata running
+  B: drain metadata
   B: uploads running
   B: drain
   A: sync
@@ -941,8 +961,8 @@
 --- kept B
   {"op":"put","key":"x","size":6}
   {"op":"mkdir","key":"x (conflicted copy from Client B)","id":"<folder-1>"}
-  {"op":"put","key":"x (conflicted copy from Client B)/in.txt","size":6}
   {"op":"rename","key":"x (conflicted copy from Client B)","src":"x","is_dir":true,"id":"<folder-1>"}
+  {"op":"put","key":"x (conflicted copy from Client B)/in.txt","size":6}
 --- backend
   chunk d373a167a06d3bd4-390048f37337bbcd size=6
   chunk dfc8976fa829623b-80cd1fb296f91b05 size=6

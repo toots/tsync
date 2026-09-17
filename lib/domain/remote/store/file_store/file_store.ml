@@ -129,7 +129,9 @@ struct
       s.pending <- None;
       s.timer_armed <- false;
       match pending with
-        | None -> Io.return ()
+        (* Through the lock all the same, so a flush returns only once a publish
+           the timer started has landed. *)
+        | None -> Locks.with_lock s.publish_lock (fun () -> Io.return ())
         | Some entry_key ->
             Io.catch
               (fun () -> publish_cursor s entry_key)
