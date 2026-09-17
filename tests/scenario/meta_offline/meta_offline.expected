@@ -84,6 +84,9 @@ and the peer's delete reached the file where it is now: ok
 one that never started happens here and on the store, once: ok
 one whose local half was done is not done twice, and is published: ok
 
+=== a rename with nothing left to move, here or on the store
+it is owed nothing, and what follows it is published: ok
+
 === a refused request lets no later operation overtake
 both are published: ok
 and the new folder did not meet the old one's name still taken: ok
@@ -96,4 +99,4 @@ what follows it is published: ok
 it stays owed, and is reported: ok
 the retry sweep lands it, and the report clears: ok
 
-39 check(s), 0 failure(s)
+40 check(s), 0 failure(s)

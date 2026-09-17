@@ -524,6 +524,29 @@ let () =
      check "one whose local half was done is not done twice, and is published"
        ((not (List.mem "halfway" dirs)) && not (List.mem "halfway" names));
 
+     (* A peer removed the file on the store, this client renamed it and then
+        removed it: the rename has nothing to move and nothing to publish in
+        its place, and must not sit at the head of the queue for good. *)
+     case "a rename with nothing left to move, here or on the store";
+     let* () = write "moot.txt" "juliet" in
+     let* () = settle () in
+     Mq.set_paused true;
+     let* () = F.rename ~src:(Lk.file "moot.txt") ~dst:(Lk.file "moot2.txt") in
+     let* () = F.delete (Lk.file "moot2.txt") in
+     let* () = F.mkdir (Lk.dir "behind") in
+     let* (_ : bool) =
+       Real.delete
+         ~key:
+           (Stored_key.child_key ~prefix:C.domain_prefix
+              ~folder_id:Stored_key.root_id "moot.txt")
+         ()
+     in
+     Mq.set_paused false;
+     let* published = until_io nothing_owed in
+     let* names = root_markers () in
+     check "it is owed nothing, and what follows it is published"
+       (published && List.mem "behind" names && not (Mq.degraded ()));
+
      (* A request that comes back failed, where the outage above is one that
         waits: the queue retries, and what it retries must not be overtaken. *)
      case "a refused request lets no later operation overtake";
@@ -577,5 +600,5 @@ let () =
      check "the retry sweep lands it, and the report clears"
        (published && List.mem "stuck" names && not (Mq.degraded ()));
 
-     report ~expected:39 ();
+     report ~expected:40 ();
      Lwt.return_unit)

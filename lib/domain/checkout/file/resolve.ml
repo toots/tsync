@@ -239,7 +239,10 @@ module Publish = struct
         { actions = [Ours_aside_as_rename]; ending = Superseded }
     | Rename_folder `Free -> { actions = [Move_marker]; ending = Publish }
     | Rename_file (`Moved | `Landed) -> only Publish
-    | Rename_file (`Source_still_there | `Source_gone `Absent) -> only Retry
+    | Rename_file `Source_still_there -> only Retry
+    (* Gone from the store and gone here: there is nothing to move and nothing
+       to publish in its place, and retrying would hold the queue for good. *)
+    | Rename_file (`Source_gone `Absent) -> only Nothing_owed
     (* F5, F6: nothing on the store to move, and the name it was given clashes
        with nothing. *)
     | Rename_file (`Source_gone `Staged) ->

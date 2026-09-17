@@ -90,6 +90,6 @@ rename file: failed, source gone and destination there                          
 rename file: failed, source still on the store                                                     -> retry
 rename file: source gone from the store, ours staged                                               -> queue its upload; superseded
 rename file: source gone from the store, ours published                                            -> publish it where it is here; superseded
-rename file: source gone from the store, nothing here                                              -> retry
+rename file: source gone from the store, nothing here                                              -> nothing owed
 
 23 situation(s)
