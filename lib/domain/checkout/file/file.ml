@@ -1153,14 +1153,12 @@ struct
     let owed_file_renames records =
       List.concat_map
         (fun (entry_key, (r : Wal.record)) ->
-          if not (Wal.is_metadata r) then []
-          else
-            List.filter_map
-              (function
-                | `Rename { Journal.src; dst; is_dir = false; _ } ->
-                    Some (entry_key, (src, dst))
-                | _ -> None)
-              r.Wal.ops)
+          List.filter_map
+            (function
+              | `Rename { Journal.src; dst; is_dir = false; _ } ->
+                  Some (entry_key, (src, dst))
+              | _ -> None)
+            r.Wal.ops)
         records
 
     (* Where a file a peer names now is here, after this client's own renames
@@ -1199,16 +1197,14 @@ struct
     let owed_folder_ids records =
       List.concat_map
         (fun (_, (r : Wal.record)) ->
-          if not (Wal.is_metadata r) then []
-          else
-            List.filter_map
-              (function
-                | `Mkdir (_, id)
-                | `Rmdir (_, id)
-                | `Rename { Journal.is_dir = true; id; _ } ->
-                    id
-                | `Put _ | `Delete _ | `Rename _ -> None)
-              r.Wal.ops)
+          List.filter_map
+            (function
+              | `Mkdir (_, id)
+              | `Rmdir (_, id)
+              | `Rename { Journal.is_dir = true; id; _ } ->
+                  id
+              | `Put _ | `Delete _ | `Rename _ -> None)
+            r.Wal.ops)
         records
 
     let marker_at_store key =
@@ -1447,10 +1443,10 @@ struct
     (* The log is read for the reads ahead and again under the lock, where a
        record written between the two shows up as a read nothing made. *)
     let apply_foreign_ops ops =
-      let* owed = W.list () in
+      let* owed = W.owed_metadata () in
       let* reads = read_ahead ~owed ops in
       with_meta (fun () ->
-          let* owed = W.list () in
+          let* owed = W.owed_metadata () in
           iter_s (apply_one ~reads ~owed) ops)
   end
 end

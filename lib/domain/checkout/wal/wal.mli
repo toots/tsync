@@ -148,6 +148,10 @@ module type S = sig
       the ops must be replayed in. Other clients' records, if a shared data
       directory ever holds any, are left alone. *)
   val list : unit -> (Journal.Entry_key.t * record) list io
+
+  (** {!list}, the metadata operations alone: what this client has done here and
+      the store has not heard of yet. *)
+  val owed_metadata : unit -> (Journal.Entry_key.t * record) list io
 end
 
 (** The shape a consumer takes: the hand-off, and {!S} for whichever domain it

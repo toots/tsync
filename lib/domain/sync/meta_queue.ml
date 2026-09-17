@@ -118,10 +118,12 @@ struct
     let adopt entry_key r = Q.adopt queue ~id:(Ek.to_string entry_key) r
 
     let rearm () =
-      let* records = W.list () in
+      let* records = W.owed_metadata () in
+      (* An intent is an op still inside its local half, which hands the record
+         over itself when that is done. *)
       iter_s
-        (fun (entry_key, r) ->
-          if Wal.is_metadata r then adopt entry_key r else return_unit)
+        (fun (entry_key, (r : Wal.record)) ->
+          if r.Wal.state = Wal.Prepared then adopt entry_key r else return_unit)
         records
 
     let start () =
