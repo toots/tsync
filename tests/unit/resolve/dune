@@ -1,0 +1,5 @@
+(executable
+ (flags
+  (:standard -open Tsync_checkout))
+ (name resolve_test)
+ (libraries tsync_checkout))
