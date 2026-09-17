@@ -663,6 +663,20 @@
   (action
    (diff ipc.expected ipc.output))))
 
+(subdir scenario/lazy_owed
+ (alias
+  (name default)
+  (deps lazy_owed.exe))
+ (rule
+  (alias runtest)
+  (target lazy_owed.output)
+  (action
+   (with-stdout-to lazy_owed.output (ignore-stderr (run ./lazy_owed.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff lazy_owed.expected lazy_owed.output))))
+
 (subdir scenario/meta_offline
  (alias
   (name default)

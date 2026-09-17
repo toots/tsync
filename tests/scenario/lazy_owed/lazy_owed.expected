@@ -1,0 +1,10 @@
+
+=== a folder made here and not published yet
+  album lists: new
+survives a browse of its folder, and a removal is not listed back: ok
+
+=== once it is published
+  album lists: new
+the browse reads the store again and agrees: ok
+
+2 check(s), 0 failure(s)
