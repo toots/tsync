@@ -74,6 +74,10 @@ external clonefile : src:string -> dst:string -> bool = "tsync_clonefile"
 
 (* [clonefile] creates the destination itself, so unlike the Linux side there is
    nothing to open before it and nothing to unlink when it fails. *)
-let clone ~src =
-  let dst = Filename.temp_path src in
+let clone ?scratch ~src () =
+  let dst =
+    match scratch with
+      | Some dir -> Filename.temp_in dir
+      | None -> Filename.temp_path src
+  in
   if clonefile ~src ~dst then Some (Tsync_io.Fs.open_and_unlink dst) else None

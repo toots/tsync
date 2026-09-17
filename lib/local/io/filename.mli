@@ -13,6 +13,15 @@ include module type of Stdlib.Filename
 (** A staging name beside [path], for the same directory. *)
 val temp_path : string -> string
 
+(** A leaf for a directory of scratch: named as a temp itself, so a listing or a
+    sweep that skips temps skips this too. *)
+val scratch_leaf : string
+
+(** {!temp_path} where the directory is the caller's to choose: for a caller
+    whose scratch must not land beside what it is working on, because something
+    watches that directory or because it is somebody else's. *)
+val temp_in : string -> string
+
 (** Whether a name is one {!temp_path} produced. *)
 val is_temp_name : string -> bool
 

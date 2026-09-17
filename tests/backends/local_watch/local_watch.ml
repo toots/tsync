@@ -129,6 +129,9 @@ let () =
              check "the store's own directory can be watched" false;
              Lwt.return_unit
          | Some watcher ->
+             (* Before the drain below: the first read of a directory makes the
+                one the clones go in, which is a change and is reported. *)
+             let* (_ : Bigstring.t) = B.get ~key:cursor () in
              let* () = Lwt_unix.sleep 0.3 in
              let* () =
                Lwt.catch
@@ -138,14 +141,6 @@ let () =
              in
              let* (_ : Bigstring.t) = B.get ~key:cursor () in
              let* (_ : Bigstring.t) = B.get ~key:cursor () in
-             (* Planted, because whether a read leaves one at all is the
-                filesystem's answer and not this test's to arrange. *)
-             let scratch =
-               Stdlib.Filename.concat watched_dir ".tsync-tmp-99-1.tmp"
-             in
-             let planted = open_out scratch in
-             close_out planted;
-             Sys.remove scratch;
              let* quiet =
                Lwt.catch
                  (fun () ->
@@ -155,10 +150,27 @@ let () =
                    Lwt.return_false)
                  (fun _ -> Lwt.return_true)
              in
-             check "neither a read nor a scratch name of ours is reported" quiet;
+             check "reading it leaves nothing for the watcher to report" quiet;
              Watch_lwt.close watcher;
              Lwt.return_unit
      in
+
+     (* The watcher above says nothing where the filesystem cannot clone, there
+        being no clone to take: this is the same property asked of the store's
+        own layout, which every filesystem answers. *)
+     case "what a read stages is not in the directory that is watched";
+     let staged =
+       List.filter Tsync_io.Filename.is_temp_name
+         (Array.to_list (Sys.readdir store_dir))
+     in
+     step "at the store's root: %s" (String.concat ", " staged);
+     check "the store holds one scratch directory of its own, at its root"
+       (staged = [Tsync_io.Filename.scratch_leaf]
+       && Sys.is_directory
+            (Stdlib.Filename.concat store_dir Tsync_io.Filename.scratch_leaf));
+     check "and the object's own directory holds nothing of the kind"
+       (not
+          (Array.exists Tsync_io.Filename.is_temp_name (Sys.readdir watched_dir)));
 
      case "and returns at the cap when nothing happens";
      Unix.mkdir (Filename.concat store_dir "tsync/quiet") 0o755;

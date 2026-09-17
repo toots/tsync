@@ -47,7 +47,7 @@ struct
                (Printf.sprintf "spool %s vanished before it was read" t.path))
       | Some st ->
           Io.return
-            (Bigstring.map_file ~path:t.path ~offset:0 ~len:st.Unix.st_size)
+            (Bigstring.map_file ~path:t.path ~offset:0 ~len:st.Unix.st_size ())
 
   let drop t =
     let* () = close_quiet t in

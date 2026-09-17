@@ -19,11 +19,13 @@ let map_fd fd ~offset ~len =
 let clonable : (string, bool) Hashtbl.t = Hashtbl.create 8
 let warned_no_clone = ref false
 
-let snapshot path =
+let snapshot ?scratch path =
   let dir = Filename.dirname path in
   if Hashtbl.find_opt clonable dir = Some false then None
   else (
-    let fd = try Device.clone ~src:path with Unix.Unix_error _ -> None in
+    let fd =
+      try Device.clone ?scratch ~src:path () with Unix.Unix_error _ -> None
+    in
     Hashtbl.replace clonable dir (Option.is_some fd);
     if Option.is_none fd && not !warned_no_clone then (
       warned_no_clone := true;
@@ -33,15 +35,15 @@ let snapshot path =
         dir);
     fd)
 
-let open_snapshot path =
-  match snapshot path with
+let open_snapshot ?scratch path =
+  match snapshot ?scratch path with
     | Some fd -> fd
     | None -> Unix.openfile path [Unix.O_RDONLY] 0
 
-let map_file ~path ~offset ~len =
+let map_file ?scratch ~path ~offset ~len () =
   if len = 0 then empty
   else (
-    let fd = open_snapshot path in
+    let fd = open_snapshot ?scratch path in
     Fun.protect
       ~finally:(fun () -> Unix.close fd)
       (fun () -> map_fd fd ~offset ~len))

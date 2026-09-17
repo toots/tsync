@@ -8,11 +8,14 @@ let temp_seq = ref 0
 (* Unique per process and per call rather than [path ^ ".tmp"]: two writers of
    one path would otherwise share a temp file and the loser's rename would fail
    ENOENT. *)
-let temp_path path =
+let scratch_leaf = temp_prefix ^ "scratch.tmp"
+
+let temp_in dir =
   incr temp_seq;
-  Stdlib.Filename.concat
-    (Stdlib.Filename.dirname path)
+  Stdlib.Filename.concat dir
     (Printf.sprintf "%s%d-%d.tmp" temp_prefix (Unix.getpid ()) !temp_seq)
+
+let temp_path path = temp_in (Stdlib.Filename.dirname path)
 
 (* The prefix carries the test, not the ".tmp" suffix: as a suffix test in
    another module this matched user files too, and the walkers hid and deleted

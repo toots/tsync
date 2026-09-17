@@ -50,10 +50,11 @@ struct
   (* Mapped, not read: a name here is only ever replaced by {!write_file}'s
      rename, so a mapping keeps serving the bytes it was made from however the
      name is reused afterwards, and a chunk body never lands on the heap. *)
-  let read_file path =
+  let read_file ?scratch path =
     let+ st = Sys.LargeFile.stat path in
-    Bigstring.map_file ~path ~offset:0
+    Bigstring.map_file ?scratch ~path ~offset:0
       ~len:(Int64.to_int st.Unix.LargeFile.st_size)
+      ()
 
   (* [link] rather than [rename]: rename replaces silently, link fails with EEXIST
      when the destination is taken, which is the whole point.
@@ -133,6 +134,22 @@ struct
   let make ?(verify_writes = true) ~root () : (module Store) =
     let walk_slots = Bounded.create ~max:walk_fanout () in
     let resolve key = if key = "" then root else Filename.concat root key in
+    (* One directory per store for what a read stages: a clone taken beside the
+       object would wake whatever watches that directory, and what watches it is
+       this client. Made once, and on the store's own filesystem, which is what
+       the clone needs. [None] where it cannot be made, which leaves the clone
+       beside the object as it was. *)
+    let scratch_dir = Filename.concat root Filename.scratch_leaf in
+    let made = ref false in
+    let scratch () =
+      if !made then Some scratch_dir
+      else (
+        match Unix.mkdir scratch_dir 0o700 with
+          | () | (exception Unix.Unix_error (Unix.EEXIST, _, _)) ->
+              made := true;
+              Some scratch_dir
+          | exception Unix.Unix_error _ -> None)
+    in
     (* Keys with a trailing slash are directory markers: S3 stores them as
        zero-byte objects, here they map to actual directories. *)
     let is_dir_key key =
@@ -230,7 +247,7 @@ struct
       let get ~key () =
         let key = Stored_key.to_string key in
         Io.catch
-          (fun () -> read_file (resolve key))
+          (fun () -> read_file ?scratch:(scratch ()) (resolve key))
           (function
             | Unix.Unix_error (e, _, _) -> Io.fail (of_errno ~op:"get" key e)
             | exn -> Io.fail exn)
@@ -239,7 +256,7 @@ struct
         let key = Stored_key.to_string key in
         Io.catch
           (fun () ->
-            let+ data = read_file (resolve key) in
+            let+ data = read_file ?scratch:(scratch ()) (resolve key) in
             Some data)
           (function
             | Unix.Unix_error (Unix.ENOENT, _, _) -> Io.return None
@@ -259,7 +276,8 @@ struct
             let+ st = Sys.LargeFile.stat path in
             let size = Int64.to_int st.Unix.LargeFile.st_size in
             let len = max 0 (min length (size - offset)) in
-            Some (Bigstring.map_file ~path ~offset ~len))
+            Some
+              (Bigstring.map_file ?scratch:(scratch ()) ~path ~offset ~len ()))
           (function
             | Unix.Unix_error (Unix.ENOENT, _, _) -> Io.return None
             | Unix.Unix_error (e, _, _) ->
