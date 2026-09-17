@@ -356,8 +356,7 @@ let () =
         rename within one folder whose old marker's delete was lost leaves. *)
      let* anchor = show_anchor id in
      check "the folder is anchored under the root"
-       (Option.map (fun a -> a.Folder.parent) anchor
-       = Some Stored_key.root_id);
+       (Option.map (fun a -> a.Folder.parent) anchor = Some Stored_key.root_id);
      let* () =
        Store.put
          ~key:
@@ -422,8 +421,7 @@ let () =
      check "it applied" ok;
      check "the peer's folder has the name and its id"
        (List.mem "m" dirs && at_m = dir_op "mkdir");
-     check "ours keeps its id under a name of its own"
-       (at_copy = Some m_id);
+     check "ours keeps its id under a name of its own" (at_copy = Some m_id);
      check "and the store is told ours moved"
        (List.assoc_opt "m (conflicted copy from test)" after = Some m_id
        && not (List.mem_assoc "m" after));
