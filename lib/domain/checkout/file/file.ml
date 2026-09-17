@@ -1194,10 +1194,20 @@ struct
        operation waiting behind it. Ancestor ids first, since a manifest's key
        is built from its folder's id, so a missing one does not fail loudly: it
        resolves to no key and the put is skipped. *)
+    (* A peer's object is in the namespace of the folder it names, which is the
+       one found here: never a folder this client only remembers at the path,
+       whose namespace holds this client's own files. *)
+    let fetch_peer key =
+      let* local = local_file key in
+      let* parent = local_id (Logical_key.parent local) in
+      match parent with
+        | None -> Io.return None
+        | Some _ -> R.fetch_manifest ~key:local ()
+
     let prefetch ops =
       let fetched = Hashtbl.create 8 in
       let fetch key =
-        let+ m = R.fetch_manifest ~key () in
+        let+ m = fetch_peer key in
         Hashtbl.replace fetched key m
       in
       let+ () =
@@ -1221,7 +1231,7 @@ struct
       fun key ->
         match Hashtbl.find_opt fetched key with
           | Some m -> Io.return m
-          | None -> R.fetch_manifest ~key ()
+          | None -> fetch_peer key
 
     (* What this client wrote under a folder a peer removed and has not
        published yet survives beside the folder under conflicted names, its

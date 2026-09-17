@@ -51,5 +51,6 @@
   tsync_sync_lwt
   tsync_core_lwt
   tsync_journal
+  tsync_manifest
   lwt
   lwt.unix))
