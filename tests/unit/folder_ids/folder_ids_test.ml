@@ -16,8 +16,19 @@ module Lk = Logical_key.Make (struct
   let domain_prefix = "tsync/testdom/manifests/"
 end)
 
+(* The id a folder holds, giving it one first if it holds none. *)
 let ensure rel =
-  Folder_ids_lwt.ensure_id ~mint:Id.short ~cache_root ~domain_name (Lk.dir rel)
+  let key = Lk.dir rel in
+  let* held = Folder_ids_lwt.lookup_id ~cache_root ~domain_name key in
+  match held with
+    | Some id -> Lwt.return id
+    | None ->
+        let id = Id.short () in
+        let+ () =
+          Folder_ids_lwt.replace ~cache_root ~domain_name key
+            { Folder.name = Logical_key.leaf key; id }
+        in
+        id
 
 let lookup rel = Folder_ids_lwt.lookup_id ~cache_root ~domain_name (Lk.dir rel)
 
