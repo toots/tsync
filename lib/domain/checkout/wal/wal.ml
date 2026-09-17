@@ -248,8 +248,7 @@ module Make (Io : Io.S) (R : RECORDS with type 'a io := 'a Io.t) = struct
        no entry for peers to read, and nothing saying anything was owed.
 
        Where the entry goes and how the cursor moves are the store's, not this
-       log's: a caller that publishes on a timer passes a different [cursor] from
-       one discharging a single operation in its own path. *)
+       log's, which sits below it: the queue discharging passes both. *)
     let discharge ~publish ~cursor key ops =
       let* () = advance key Executed in
       let* (_ : Journal.Entry_key.t) = publish key ops in

@@ -20,15 +20,6 @@ module type S = sig
   (** The per-directory marker file naming that folder's id. *)
   val marker_name : string
 
-  (** The folder's id, persisting one [mint] makes when it has no marker yet.
-      For the write paths, which may bring a folder into existence. *)
-  val ensure_id :
-    mint:(unit -> string) ->
-    cache_root:string ->
-    domain_name:string ->
-    Logical_key.t ->
-    string io
-
   (** The folder's id if this client already records one, [None] otherwise.
 
       What a read must use: minting here would persist a marker that re-creates

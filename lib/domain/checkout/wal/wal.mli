@@ -118,10 +118,8 @@ module type S = sig
       record dropped. A crash in any of those windows leaves a record reconcile
       can finish from what the backend says.
 
-      [publish] and [cursor] are the store's, and the caller's to choose: one
-      discharging a single operation in its own path moves the cursor there and
-      then, while one draining a queue records it and lets a busy run collapse
-      them. *)
+      [publish] and [cursor] are the store's, which this log sits below, so
+      the queue discharging passes both. *)
   val discharge :
     publish:(Journal.Entry_key.t -> Journal.op list -> Journal.Entry_key.t io) ->
     cursor:(Journal.Entry_key.t -> unit io) ->

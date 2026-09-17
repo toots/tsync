@@ -3,13 +3,6 @@ module type S = sig
 
   val marker_name : string
 
-  val ensure_id :
-    mint:(unit -> string) ->
-    cache_root:string ->
-    domain_name:string ->
-    Logical_key.t ->
-    string io
-
   val lookup_id :
     cache_root:string -> domain_name:string -> Logical_key.t -> string option io
 
@@ -171,18 +164,6 @@ module Over (Io : Io.S) (F : Fs.S with type 'a io := 'a Io.t) = struct
       | _ ->
           let+ () = replace ~cache_root ~domain_name key m in
           `Written
-
-  (* Mints and persists a marker, so this is for the write paths only. *)
-  let ensure_id ~mint ~cache_root ~domain_name key =
-    if Logical_key.is_root key then Io.return Stored_key.root_id
-    else
-      let* existing = read ~cache_root ~domain_name key in
-      match existing with
-        | Some m -> Io.return m.Folder.id
-        | None ->
-            let m = { Folder.name = Logical_key.leaf key; id = mint () } in
-            let+ () = replace ~cache_root ~domain_name key m in
-            m.Folder.id
 
   (* Describing a removal is the one read that must answer for a folder the
      mirror has already dropped, and it names what is going away rather than

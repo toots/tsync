@@ -11,7 +11,6 @@ module type S = sig
   val degraded : unit -> bool
 
   val set_paused : bool -> unit
-  val paused : unit -> bool
   val start : unit -> unit
 
   (** Take up whatever the log still owes that this queue is not already
@@ -114,7 +113,6 @@ struct
 
     let degraded () = Hashtbl.length parked > 0
     let set_paused b = Q.set_paused queue b
-    let paused () = Q.paused queue
     let adopt entry_key r = Q.adopt queue ~id:(Ek.to_string entry_key) r
 
     let rearm () =
