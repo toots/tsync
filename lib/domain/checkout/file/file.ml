@@ -666,7 +666,7 @@ struct
       match bkey with
         | None -> return_false
         | Some bkey -> (
-            let+ there = St.marker_id_at ~bkey in
+            let+ there = St.holder_at ~bkey in
             match there with Some other -> other <> id | None -> false)
 
     (* Where a folder whose creation is owed is now: a local rename may have
@@ -986,32 +986,26 @@ struct
     let adopt_folder_id rel =
       if rel = "" then return_unit
       else (
-        let write id = write_folder_id (Lk.dir rel) id in
-        let* marker_key = folder_marker_bkey (Lk.dir rel) in
+        let key = Lk.dir rel in
+        let* marker_key = folder_marker_bkey key in
         match marker_key with
           | None -> return_unit
-          | Some marker_key ->
-              Io.catch
-                (fun () ->
-                  let* data = St.get_object ~bkey:marker_key in
-                  match Folder.marker_of_string data with
-                    | Some m -> (
-                        let* place = whereabouts (Lk.dir rel) in
-                        let* here = kind (Lk.dir rel) in
-                        match place with
-                          (* A folder this client moved or removed since is not
-                           brought back where it was; nor is one a move left
-                           a marker behind for. *)
-                          | (`Moved (id, _) | `Removed id)
-                            when id = m.Folder.id && here <> `Dir ->
-                              return_unit
-                          | _ -> (
-                              let* filed = St.filed ~bkey:marker_key m in
-                              match filed with
-                                | `Elsewhere _ -> return_unit
-                                | `Here -> write m.Folder.id))
-                    | None -> return_unit)
-                (fun _ -> return_unit))
+          | Some bkey -> (
+              (* A store that cannot answer fails the entry, which is read
+                 again, rather than passing for a name nobody holds. *)
+              let* holder = St.holder_at ~bkey in
+              match holder with
+                | None -> return_unit
+                | Some id -> (
+                    let* place = whereabouts key in
+                    let* here = kind key in
+                    match place with
+                      (* A folder this client moved or removed since is not
+                         brought back where it was. *)
+                      | (`Moved (held, _) | `Removed held)
+                        when held = id && here <> `Dir ->
+                          return_unit
+                      | _ -> write_folder_id key id)))
 
     (* A [Put] materialises the directories above it as a side effect of writing
        the manifest, and those carry no id: only a [Mkdir] op adopts one, and the
@@ -1219,9 +1213,7 @@ struct
 
     let marker_at_store key =
       let* bkey = folder_marker_bkey key in
-      match bkey with
-        | None -> Io.return None
-        | Some bkey -> St.marker_id_at ~bkey
+      match bkey with None -> Io.return None | Some bkey -> St.holder_at ~bkey
 
     (* A peer's object is in the namespace of the folder it names, which is the
        one found here: never a folder this client only remembers at the path,

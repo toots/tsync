@@ -23,19 +23,11 @@ module Store =
    like from a client whose idea of the marker's key is wrong. *)
 let silent = ref (Stored_key.listed "")
 
-(* A read that fails for one key, where reading it with [get_opt] still
-   answers: what a folder's adoption meets when that one read is lost. *)
-let unreadable = ref (Stored_key.listed "")
-
 module Flaky : Backend_lwt.Store = struct
   include Store
 
   let delete ~key () =
     if key = !silent then Lwt.return false else Store.delete ~key ()
-
-  let get ~key () =
-    if key = !unreadable then Lwt.fail (Failure "unreadable")
-    else Store.get ~key ()
 end
 
 module C =
@@ -113,11 +105,11 @@ let local_dirs () =
    it. *)
 let settle () = Durable_queue_lwt.settle_all ~timeout:10. ()
 
-let attempt what f =
+let attempt ?(settled = true) what f =
   Lwt.catch
     (fun () ->
       let* () = f () in
-      let+ () = settle () in
+      let+ () = if settled then settle () else Lwt.return_unit in
       step "%s: succeeded" what;
       true)
     (fun exn ->
@@ -395,6 +387,24 @@ let () =
      check "it applied" ok;
      check "the folder takes no id from the stale marker" (at_stale = None);
 
+     case "a marker a move left behind holds its name against nobody";
+     let* () =
+       Store.put
+         ~key:
+           (Stored_key.child_key ~prefix:C.domain_prefix
+              ~folder_id:Stored_key.root_id "vacant")
+         ~data:
+           (Bigstring.of_string
+              (Folder.marker_to_string { Folder.name = "vacant"; id }))
+         ()
+     in
+     let* () = F.mkdir (Lk.dir "vacant") in
+     let* () = settle () in
+     let* made = lookup "vacant" in
+     let* after = show_markers "root after" Stored_key.root_id in
+     check "a folder made under it keeps the name and its own id"
+       (made <> None && made <> Some id && List.assoc_opt "vacant" after = made);
+
      case "a peer's folder op leaves alone a folder holding another id";
      let* () = F.mkdir (Lk.dir "m") in
      let* () = settle () in
@@ -493,13 +503,12 @@ let () =
                  { Folder.name = "moved-from"; id = "peer-folder" }))
          ()
      in
-     unreadable := from_marker;
      let* ok =
-       attempt "apply a peer's put moved-from/x.txt" (fun () ->
+       attempt ~settled:false "apply a peer's put moved-from/x.txt" (fun () ->
            F.apply_foreign_ops [`Put ("moved-from/x.txt", 0L)])
      in
-     unreadable := Stored_key.listed "";
      Mq.set_paused false;
+     let* () = settle () in
      let* dirs = local_dirs () in
      let written =
        Sys.file_exists
@@ -511,6 +520,6 @@ let () =
      check "this client's own file is not taken for the peer's under the name"
        (not written);
 
-     report ~expected:39 ();
+     report ~expected:40 ();
      Lwt.return_unit);
   Scratch.cleanup root

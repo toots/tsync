@@ -49,6 +49,7 @@ module type S = sig
     [ `Here | `Elsewhere of Folder.anchor | `Unanchored ] io
 
   val marker_id_at : bkey:Stored_key.t -> string option io
+  val holder_at : bkey:Stored_key.t -> string option io
 
   val filed :
     bkey:Stored_key.t ->
@@ -57,7 +58,6 @@ module type S = sig
 
   val list_namespace : folder_id:string -> Backend.file_entry list io
   val get_object : bkey:Stored_key.t -> string io
-  val get_object_opt : bkey:Stored_key.t -> string option io
 
   val get_objects :
     ?slots:pool ->
@@ -155,6 +155,17 @@ struct
             (fun (m : Folder.marker) -> m.Folder.id)
             (Folder.marker_of_string (Bigstring.to_string b)))
 
+    let holder_at ~bkey =
+      let* body = B.get_opt ~key:bkey () in
+      match
+        Option.bind body (fun b ->
+            Folder.marker_of_string (Bigstring.to_string b))
+      with
+        | None -> Io.return None
+        | Some m -> (
+            let+ filed = filed ~bkey m in
+            match filed with `Here -> Some m.Folder.id | `Elsewhere _ -> None)
+
     let unresolved what key =
       Io.fail
         (Invalid_argument
@@ -170,12 +181,12 @@ struct
        other both put one under the same key, and only the first lands. The
        winner anchors the folder it brought into existence; a loser leaves that
        to it. *)
-    let claim_name ~key ~id =
+    let rec claim_name ~key ~id =
       let* bkey = L.folder_marker_key key in
       let* parent = L.folder_id (Logical_key.parent key) in
       match (bkey, parent) with
         | None, _ | _, None -> unresolved "folder marker key" key
-        | Some bkey, Some parent ->
+        | Some bkey, Some parent -> (
             let name = Logical_key.leaf key in
             let candidate =
               Bigstring.of_string (Folder.marker_to_string { Folder.name; id })
@@ -201,15 +212,20 @@ struct
                   let+ () = B.put ~key:bkey ~data:candidate () in
                   candidate)
             in
-            let winner =
-              Option.fold ~none:id
-                ~some:(fun (m : Folder.marker) -> m.Folder.id)
-                (Folder.marker_of_string (Bigstring.to_string held))
-            in
-            if winner = id then
-              let+ () = put_anchor ~folder_id:id ~parent ~name in
-              `Held
-            else Io.return (`Taken winner)
+            match Folder.marker_of_string (Bigstring.to_string held) with
+              | Some m when m.Folder.id <> id -> (
+                  let* filed = filed ~bkey m in
+                  match filed with
+                    | `Here -> Io.return (`Taken m.Folder.id)
+                    (* Left behind by a move: it holds the name for nobody and
+                       lends its id to nobody, and the claim is made again
+                       without it. *)
+                    | `Elsewhere _ ->
+                        let* (_ : bool) = B.delete ~key:bkey () in
+                        claim_name ~key ~id)
+              | Some _ | None ->
+                  let+ () = put_anchor ~folder_id:id ~parent ~name in
+                  `Held)
 
     (* A folder's id is claimed from the store rather than chosen here, so every
        client puts its children under the id the store accepted. Still
@@ -274,8 +290,9 @@ struct
                     let* there = marker_id_at ~bkey in
                     match there with
                       | Some held when held = id -> Io.return `Held
-                      | Some other -> Io.return (`Taken other)
-                      | None ->
+                      (* Whether another marker there is a live folder's is
+                         the claim's to find out. *)
+                      | Some _ | None ->
                           let* () = claim_parent key in
                           claim_name ~key ~id))
 
@@ -376,10 +393,6 @@ struct
     let get_object ~bkey =
       let+ body = B.get ~key:bkey () in
       Bigstring.to_string body
-
-    let get_object_opt ~bkey =
-      let+ body = B.get_opt ~key:bkey () in
-      Option.map Bigstring.to_string body
 
     let get_objects ?slots ~entries () =
       let+ answered = Bb.get_many ?slots ~entries () in
