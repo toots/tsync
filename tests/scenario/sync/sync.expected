@@ -926,6 +926,10 @@
   A: uploads running
   A: drain
   B: sync
+  A: names /
+  B: names /
+  names / = [e/]
+  names / = [e/]
 --- tree A
   d e
   f e/f.txt size=4 cached=0/1 uploaded=true etag=d483929c63df617d
@@ -944,14 +948,14 @@
   {"op":"put","key":"e/f.txt","size":4}
 --- kept B
   {"op":"mkdir","key":"d","id":"<folder-1>"}
-  {"op":"put","key":"e/f.txt","size":4}
   {"op":"rename","key":"e","src":"d","is_dir":true,"id":"<folder-1>"}
+  {"op":"put","key":"e/f.txt","size":4}
 --- backend
   chunk 5392d821e2ef6546-1d8e96417df95f17 size=4
   cursor = <entry-3>
   journal <entry-1> = mkdir d
-  journal <entry-2> = put e/f.txt 4
-  journal <entry-3> = rename d -> e dir
+  journal <entry-2> = rename d -> e dir
+  journal <entry-3> = put e/f.txt 4
   folder e [.tsync-root/e5e72e5e3bec4a78-6881790369f3a86a] -> <folder-1>
   anchor <folder-1> in .tsync-root as e
   file f.txt [<folder-1>/9b84998f74a137e7-901368d25b5bd524] = manifest size=4 chunks=1 h1=d483929c63df617d h2=2a546e64abb87ed8
