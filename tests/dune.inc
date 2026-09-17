@@ -1666,6 +1666,14 @@
   (alias runtest)
   (action (run ./queue_degraded.exe))))
 
+(subdir work/queue_order
+ (alias
+  (name default)
+  (deps queue_order.exe))
+ (rule
+  (alias runtest)
+  (action (run ./queue_order.exe))))
+
 (subdir work/queue_records
  (alias
   (name default)
