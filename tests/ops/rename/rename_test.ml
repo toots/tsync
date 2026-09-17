@@ -23,11 +23,19 @@ module Store =
    like from a client whose idea of the marker's key is wrong. *)
 let silent = ref (Stored_key.listed "")
 
+(* A read that fails for one key, where reading it with [get_opt] still
+   answers: what a folder's adoption meets when that one read is lost. *)
+let unreadable = ref (Stored_key.listed "")
+
 module Flaky : Backend_lwt.Store = struct
   include Store
 
   let delete ~key () =
     if key = !silent then Lwt.return false else Store.delete ~key ()
+
+  let get ~key () =
+    if key = !unreadable then Lwt.fail (Failure "unreadable")
+    else Store.get ~key ()
 end
 
 module C =
@@ -441,6 +449,58 @@ let () =
        ((not (List.mem "gone" dirs))
        && named = Some (Lk.dir "m (conflicted copy from test)"));
 
-     report ~expected:37 ();
+     (* The store files a peer's folder under the name this client's own folder
+        left, and this client could not adopt it: the peer's put must not be
+        answered from the namespace of the folder this client remembers there. *)
+     case "a peer's put under a name this client moved away from";
+     let* () = F.mkdir (Lk.dir "moved-from") in
+     let* () = settle () in
+     let* from_id = lookup "moved-from" in
+     let from_id = Option.get from_id in
+     let* () =
+       Store.put
+         ~key:
+           (Stored_key.child_key ~prefix:C.domain_prefix ~folder_id:from_id
+              "x.txt")
+         ~data:
+           (Bigstring.of_string
+              (Tsync_manifest.Manifest.encode ~name:"x.txt" ~size:0L
+                 ~chunk_size:4 ~mtime:0. ~h1:(String.make 16 'a')
+                 ~h2:(String.make 16 'b') ~symlink:None ~keys:[]))
+         ()
+     in
+     Mq.set_paused true;
+     let* () = F.rename ~src:(Lk.dir "moved-from") ~dst:(Lk.dir "moved-to") in
+     let from_marker =
+       Stored_key.child_key ~prefix:C.domain_prefix
+         ~folder_id:Stored_key.root_id "moved-from"
+     in
+     let* () =
+       Store.put ~key:from_marker
+         ~data:
+           (Bigstring.of_string
+              (Folder.marker_to_string
+                 { Folder.name = "moved-from"; id = "peer-folder" }))
+         ()
+     in
+     unreadable := from_marker;
+     let* ok =
+       attempt "apply a peer's put moved-from/x.txt" (fun () ->
+           F.apply_foreign_ops [`Put ("moved-from/x.txt", 0L)])
+     in
+     unreadable := Stored_key.listed "";
+     Mq.set_paused false;
+     let* dirs = local_dirs () in
+     let written =
+       Sys.file_exists
+         (Cache_layout.manifest_path ~cache_root:root ~domain_name:C.domain_name
+            (Lk.file "moved-from/x.txt"))
+     in
+     step "local: %s" (String.concat ", " dirs);
+     check "it applied" ok;
+     check "this client's own file is not taken for the peer's under the name"
+       (not written);
+
+     report ~expected:39 ();
      Lwt.return_unit);
   Scratch.cleanup root
