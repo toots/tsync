@@ -72,13 +72,19 @@ struct
     (* The record's id is the entry key: one unit of work keeps one name, from
        the local record through the published entry to the cursor a peer compares
        against. *)
-    let run ~id (r : Wal.record) =
+    let run ~id (_ : Wal.record) =
       match Ek.of_string id with
         | None -> return_unit
         | Some entry_key ->
             Io.catch
               (fun () ->
-                let* ops = F.backend_ops r.Wal.ops in
+                (* Read again: a conflict settled since this was queued may have
+                   rewritten where the work lands. *)
+                let* current = W.find entry_key in
+                let owed =
+                  Option.fold ~none:[] ~some:(fun c -> c.Wal.ops) current
+                in
+                let* ops = F.backend_ops owed in
                 let+ () =
                   match ops with
                     (* The store was never told of what this names: nothing to

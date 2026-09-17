@@ -593,6 +593,20 @@
   (action
    (diff base.expected base.output))))
 
+(subdir scenario/conflicts
+ (alias
+  (name default)
+  (deps conflicts.exe))
+ (rule
+  (alias runtest)
+  (target conflicts.output)
+  (action
+   (with-stdout-to conflicts.output (ignore-stderr (run ./conflicts.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff conflicts.expected conflicts.output))))
+
 (subdir scenario/corruption
  (alias
   (name default)

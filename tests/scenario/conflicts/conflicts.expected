@@ -1,0 +1,896 @@
+=== n1_rename_over_an_existing_file
+  A: write f.txt "first"
+  A: write g.txt "replaced"
+  A: drain
+  B: sync
+  B: metadata paused
+  B: uploads paused
+  B: rename f.txt -> g.txt
+  A: drain
+  B: sync
+  B: metadata running
+  B: uploads running
+  B: drain
+  A: sync
+  B: sync
+--- tree A
+  f g.txt size=5 cached=0/1 uploaded=true etag=23159de6084fe0eb
+--- content A
+  g.txt = "first"
+--- pending A
+--- tree B
+  f g.txt size=5 cached=0/1 uploaded=true etag=23159de6084fe0eb
+--- content B
+  g.txt = "first"
+--- pending B
+--- kept A
+  {"op":"put","key":"f.txt","size":5}
+  {"op":"put","key":"g.txt","size":8}
+  {"op":"rename","key":"g.txt","src":"f.txt","is_dir":false,"size":5}
+--- kept B
+  {"op":"put","key":"f.txt","size":5}
+  {"op":"put","key":"g.txt","size":8}
+  {"op":"rename","key":"g.txt","src":"f.txt","is_dir":false,"size":5}
+--- backend
+  chunk 370f0f1c16b0aa53-3e093848c49d9ba7 size=5
+  chunk bf2b24a0eda9bbc1-0ef7163b679d8a40 size=8
+  cursor = <entry-3>
+  journal <entry-1> = put f.txt 5
+  journal <entry-2> = put g.txt 8
+  journal <entry-3> = rename f.txt -> g.txt 5
+  file g.txt [.tsync-root/926c8b039839cfc6-7969407bf35f59e9] = manifest size=5 chunks=1 h1=23159de6084fe0eb h2=fef0cbc1c405b4a8
+    chunk#0 370f0f1c16b0aa53-3e093848c49d9ba7 size=5
+
+=== f1_delete_vs_edit
+  A: write f.txt "first"
+  A: drain
+  B: sync
+  B: metadata paused
+  B: uploads paused
+  B: delete f.txt
+  A: write f.txt "edited"
+  A: drain
+  B: sync
+  B: metadata running
+  B: uploads running
+  B: drain
+  A: sync
+  B: sync
+--- tree A
+  f f.txt size=6 cached=0/1 uploaded=true etag=587e781312c4a7fe
+--- content A
+  f.txt = "edited"
+--- pending A
+--- tree B
+  f f.txt size=6 cached=0/1 uploaded=true etag=587e781312c4a7fe
+--- content B
+  f.txt = "edited"
+--- pending B
+--- kept A
+  {"op":"put","key":"f.txt","size":5}
+  {"op":"put","key":"f.txt","size":6}
+--- kept B
+  {"op":"put","key":"f.txt","size":5}
+  {"op":"put","key":"f.txt","size":6}
+--- backend
+  chunk 370f0f1c16b0aa53-3e093848c49d9ba7 size=5
+  chunk 59bc625b5d0fb3e3-565e51b16841d8ee size=6
+  cursor = <entry-2>
+  journal <entry-1> = put f.txt 5
+  journal <entry-2> = put f.txt 6
+  file f.txt [.tsync-root/9b84998f74a137e7-901368d25b5bd524] = manifest size=6 chunks=1 h1=587e781312c4a7fe h2=3efe587390798b1d
+    chunk#0 59bc625b5d0fb3e3-565e51b16841d8ee size=6
+
+=== f2_delete_vs_rename
+  A: write f.txt "first"
+  A: drain
+  B: sync
+  B: metadata paused
+  B: uploads paused
+  B: delete f.txt
+  A: rename f.txt -> h.txt
+  A: drain
+  B: sync
+  B: metadata running
+  B: uploads running
+  B: drain
+  A: sync
+  B: sync
+--- tree A
+  f h.txt size=5 cached=0/1 uploaded=true etag=23159de6084fe0eb
+--- content A
+  h.txt = "first"
+--- pending A
+--- tree B
+  f h.txt size=5 cached=0/1 uploaded=true etag=23159de6084fe0eb
+--- content B
+  h.txt = "first"
+--- pending B
+--- kept A
+  {"op":"put","key":"f.txt","size":5}
+  {"op":"rename","key":"h.txt","src":"f.txt","is_dir":false,"size":5}
+  {"op":"delete","key":"f.txt"}
+--- kept B
+  {"op":"put","key":"f.txt","size":5}
+  {"op":"rename","key":"h.txt","src":"f.txt","is_dir":false,"size":5}
+  {"op":"delete","key":"f.txt"}
+--- backend
+  chunk 370f0f1c16b0aa53-3e093848c49d9ba7 size=5
+  cursor = <entry-2>
+  journal <entry-1> = put f.txt 5
+  journal <entry-2> = delete f.txt
+  journal <entry-3> = rename f.txt -> h.txt 5
+  file h.txt [.tsync-root/b8498c98aea80fb5-2ccd6b6d26c89eb0] = manifest size=5 chunks=1 h1=23159de6084fe0eb h2=fef0cbc1c405b4a8
+    chunk#0 370f0f1c16b0aa53-3e093848c49d9ba7 size=5
+
+=== f3_delete_vs_rename_onto
+  A: write f.txt "first"
+  A: drain
+  B: sync
+  B: metadata paused
+  B: uploads paused
+  B: delete f.txt
+  A: write x.txt "new"
+  A: drain
+  A: rename x.txt -> f.txt
+  A: drain
+  B: sync
+  B: metadata running
+  B: uploads running
+  B: drain
+  A: sync
+  B: sync
+--- tree A
+  f f.txt size=3 cached=0/1 uploaded=true etag=0b363f44a2245846
+--- content A
+  f.txt = "new"
+--- pending A
+--- tree B
+  f f.txt size=3 cached=0/1 uploaded=true etag=0b363f44a2245846
+--- content B
+  f.txt = "new"
+--- pending B
+--- kept A
+  {"op":"put","key":"f.txt","size":5}
+  {"op":"put","key":"x.txt","size":3}
+  {"op":"rename","key":"f.txt","src":"x.txt","is_dir":false,"size":3}
+--- kept B
+  {"op":"put","key":"f.txt","size":5}
+  {"op":"put","key":"x.txt","size":3}
+  {"op":"rename","key":"f.txt","src":"x.txt","is_dir":false,"size":3}
+--- backend
+  chunk 370f0f1c16b0aa53-3e093848c49d9ba7 size=5
+  chunk 4db73088ace631b8-f338599694ec3198 size=3
+  cursor = <entry-3>
+  journal <entry-1> = put f.txt 5
+  journal <entry-2> = put x.txt 3
+  journal <entry-3> = rename x.txt -> f.txt 3
+  file f.txt [.tsync-root/9b84998f74a137e7-901368d25b5bd524] = manifest size=3 chunks=1 h1=0b363f44a2245846 h2=82cf870d7d7df39d
+    chunk#0 4db73088ace631b8-f338599694ec3198 size=3
+
+=== f4_rename_vs_edit
+  A: write f.txt "first"
+  A: drain
+  B: sync
+  B: metadata paused
+  B: uploads paused
+  B: rename f.txt -> g.txt
+  A: write f.txt "edited"
+  A: drain
+  B: sync
+  B: metadata running
+  B: uploads running
+  B: drain
+  A: sync
+  B: sync
+--- tree A
+  f g.txt size=6 cached=0/1 uploaded=true etag=587e781312c4a7fe
+--- content A
+  g.txt = "edited"
+--- pending A
+--- tree B
+  f g.txt size=6 cached=0/1 uploaded=true etag=587e781312c4a7fe
+--- content B
+  g.txt = "edited"
+--- pending B
+--- kept A
+  {"op":"put","key":"f.txt","size":5}
+  {"op":"put","key":"f.txt","size":6}
+  {"op":"rename","key":"g.txt","src":"f.txt","is_dir":false,"size":5}
+--- kept B
+  {"op":"put","key":"f.txt","size":5}
+  {"op":"put","key":"f.txt","size":6}
+  {"op":"rename","key":"g.txt","src":"f.txt","is_dir":false,"size":5}
+--- backend
+  chunk 370f0f1c16b0aa53-3e093848c49d9ba7 size=5
+  chunk 59bc625b5d0fb3e3-565e51b16841d8ee size=6
+  cursor = <entry-2>
+  journal <entry-1> = put f.txt 5
+  journal <entry-2> = rename f.txt -> g.txt 5
+  journal <entry-3> = put f.txt 6
+  file g.txt [.tsync-root/926c8b039839cfc6-7969407bf35f59e9] = manifest size=6 chunks=1 h1=587e781312c4a7fe h2=3efe587390798b1d
+    chunk#0 59bc625b5d0fb3e3-565e51b16841d8ee size=6
+
+=== f5_rename_vs_delete
+  A: write f.txt "first"
+  A: drain
+  B: sync
+  B: metadata paused
+  B: uploads paused
+  B: rename f.txt -> g.txt
+  A: delete f.txt
+  A: drain
+  B: sync
+  B: metadata running
+  B: uploads running
+  B: drain
+  A: sync
+  B: sync
+--- tree A
+  f g (conflicted copy from Client B).txt size=5 cached=0/1 uploaded=true etag=23159de6084fe0eb
+--- content A
+  g (conflicted copy from Client B).txt = "first"
+--- pending A
+--- tree B
+  f g (conflicted copy from Client B).txt size=5 cached=0/1 uploaded=true etag=23159de6084fe0eb
+--- content B
+  g (conflicted copy from Client B).txt = "first"
+--- pending B
+--- kept A
+  {"op":"put","key":"f.txt","size":5}
+  {"op":"delete","key":"f.txt"}
+  {"op":"put","key":"g (conflicted copy from Client B).txt","size":5}
+--- kept B
+  {"op":"put","key":"f.txt","size":5}
+  {"op":"delete","key":"f.txt"}
+  {"op":"put","key":"g (conflicted copy from Client B).txt","size":5}
+--- backend
+  chunk 370f0f1c16b0aa53-3e093848c49d9ba7 size=5
+  cursor = <entry-3>
+  journal <entry-1> = put f.txt 5
+  journal <entry-2> = delete f.txt
+  journal <entry-3> = put g (conflicted copy from Client B).txt 5
+  file g (conflicted copy from Client B).txt [.tsync-root/8bc613231c021a03-69af243493c10e85] = manifest size=5 chunks=1 h1=23159de6084fe0eb h2=fef0cbc1c405b4a8
+    chunk#0 370f0f1c16b0aa53-3e093848c49d9ba7 size=5
+
+=== f6_rename_vs_rename
+  A: write f.txt "first"
+  A: drain
+  B: sync
+  B: metadata paused
+  B: uploads paused
+  B: rename f.txt -> g.txt
+  A: rename f.txt -> h.txt
+  A: drain
+  B: sync
+  B: metadata running
+  B: uploads running
+  B: drain
+  A: sync
+  B: sync
+--- tree A
+  f g (conflicted copy from Client B).txt size=5 cached=0/1 uploaded=true etag=23159de6084fe0eb
+  f h.txt size=5 cached=0/1 uploaded=true etag=23159de6084fe0eb
+--- content A
+  g (conflicted copy from Client B).txt = "first"
+  h.txt = "first"
+--- pending A
+--- tree B
+  f g (conflicted copy from Client B).txt size=5 cached=0/1 uploaded=true etag=23159de6084fe0eb
+  f h.txt size=5 cached=0/1 uploaded=true etag=23159de6084fe0eb
+--- content B
+  g (conflicted copy from Client B).txt = "first"
+  h.txt = "first"
+--- pending B
+--- kept A
+  {"op":"put","key":"f.txt","size":5}
+  {"op":"rename","key":"h.txt","src":"f.txt","is_dir":false,"size":5}
+  {"op":"put","key":"g (conflicted copy from Client B).txt","size":5}
+--- kept B
+  {"op":"put","key":"f.txt","size":5}
+  {"op":"rename","key":"h.txt","src":"f.txt","is_dir":false,"size":5}
+  {"op":"put","key":"g (conflicted copy from Client B).txt","size":5}
+--- backend
+  chunk 370f0f1c16b0aa53-3e093848c49d9ba7 size=5
+  cursor = <entry-3>
+  journal <entry-1> = put f.txt 5
+  journal <entry-2> = rename f.txt -> h.txt 5
+  journal <entry-3> = put g (conflicted copy from Client B).txt 5
+  file g (conflicted copy from Client B).txt [.tsync-root/8bc613231c021a03-69af243493c10e85] = manifest size=5 chunks=1 h1=23159de6084fe0eb h2=fef0cbc1c405b4a8
+    chunk#0 370f0f1c16b0aa53-3e093848c49d9ba7 size=5
+  file h.txt [.tsync-root/b8498c98aea80fb5-2ccd6b6d26c89eb0] = manifest size=5 chunks=1 h1=23159de6084fe0eb h2=fef0cbc1c405b4a8
+    chunk#0 370f0f1c16b0aa53-3e093848c49d9ba7 size=5
+
+=== f7_rename_vs_create_at_destination
+  A: write f.txt "first"
+  A: drain
+  B: sync
+  B: metadata paused
+  B: uploads paused
+  B: rename f.txt -> g.txt
+  A: write g.txt "theirs"
+  A: drain
+  B: sync
+  B: metadata running
+  B: uploads running
+  B: drain
+  A: sync
+  B: sync
+--- tree A
+  f g (conflicted copy from Client B).txt size=5 cached=0/1 uploaded=true etag=23159de6084fe0eb
+  f g.txt size=6 cached=0/1 uploaded=true etag=7e4ca1687d95decc
+--- content A
+  g (conflicted copy from Client B).txt = "first"
+  g.txt = "theirs"
+--- pending A
+--- tree B
+  f g (conflicted copy from Client B).txt size=5 cached=0/1 uploaded=true etag=23159de6084fe0eb
+  f g.txt size=6 cached=0/1 uploaded=true etag=7e4ca1687d95decc
+--- content B
+  g (conflicted copy from Client B).txt = "first"
+  g.txt = "theirs"
+--- pending B
+--- kept A
+  {"op":"put","key":"f.txt","size":5}
+  {"op":"put","key":"g.txt","size":6}
+  {"op":"rename","key":"g (conflicted copy from Client B).txt","src":"f.txt","is_dir":false,"size":5}
+--- kept B
+  {"op":"put","key":"f.txt","size":5}
+  {"op":"put","key":"g.txt","size":6}
+  {"op":"rename","key":"g (conflicted copy from Client B).txt","src":"f.txt","is_dir":false,"size":5}
+--- backend
+  chunk 370f0f1c16b0aa53-3e093848c49d9ba7 size=5
+  chunk 3a98c68f7f9f2fea-956195a803de999d size=6
+  cursor = <entry-2>
+  journal <entry-1> = put f.txt 5
+  journal <entry-2> = rename f.txt -> g (conflicted copy from Client B).txt 5
+  journal <entry-3> = put g.txt 6
+  file g (conflicted copy from Client B).txt [.tsync-root/8bc613231c021a03-69af243493c10e85] = manifest size=5 chunks=1 h1=23159de6084fe0eb h2=fef0cbc1c405b4a8
+    chunk#0 370f0f1c16b0aa53-3e093848c49d9ba7 size=5
+  file g.txt [.tsync-root/926c8b039839cfc6-7969407bf35f59e9] = manifest size=6 chunks=1 h1=7e4ca1687d95decc h2=e26f49d0046872c2
+    chunk#0 3a98c68f7f9f2fea-956195a803de999d size=6
+
+=== f8_rename_vs_their_file_moving_off_destination
+  A: write f.txt "first"
+  A: drain
+  B: sync
+  B: metadata paused
+  B: uploads paused
+  B: rename f.txt -> g.txt
+  A: write g.txt "theirs"
+  A: drain
+  A: rename g.txt -> h.txt
+  A: drain
+  B: sync
+  B: metadata running
+  B: uploads running
+  B: drain
+  A: sync
+  B: sync
+--- tree A
+  f g (conflicted copy from Client B).txt size=5 cached=0/1 uploaded=true etag=23159de6084fe0eb
+  f h.txt size=6 cached=0/1 uploaded=true etag=7e4ca1687d95decc
+--- content A
+  g (conflicted copy from Client B).txt = "first"
+  h.txt = "theirs"
+--- pending A
+--- tree B
+  f g (conflicted copy from Client B).txt size=5 cached=0/1 uploaded=true etag=23159de6084fe0eb
+  f h.txt size=6 cached=0/1 uploaded=true etag=7e4ca1687d95decc
+--- content B
+  g (conflicted copy from Client B).txt = "first"
+  h.txt = "theirs"
+--- pending B
+--- kept A
+  {"op":"put","key":"f.txt","size":5}
+  {"op":"put","key":"g.txt","size":6}
+  {"op":"rename","key":"h.txt","src":"g.txt","is_dir":false,"size":6}
+  {"op":"rename","key":"g (conflicted copy from Client B).txt","src":"f.txt","is_dir":false,"size":5}
+--- kept B
+  {"op":"put","key":"f.txt","size":5}
+  {"op":"put","key":"g.txt","size":6}
+  {"op":"rename","key":"h.txt","src":"g.txt","is_dir":false,"size":6}
+  {"op":"rename","key":"g (conflicted copy from Client B).txt","src":"f.txt","is_dir":false,"size":5}
+--- backend
+  chunk 370f0f1c16b0aa53-3e093848c49d9ba7 size=5
+  chunk 3a98c68f7f9f2fea-956195a803de999d size=6
+  cursor = <entry-2>
+  journal <entry-1> = put f.txt 5
+  journal <entry-2> = rename f.txt -> g (conflicted copy from Client B).txt 5
+  journal <entry-3> = put g.txt 6
+  journal <entry-4> = rename g.txt -> h.txt 6
+  file g (conflicted copy from Client B).txt [.tsync-root/8bc613231c021a03-69af243493c10e85] = manifest size=5 chunks=1 h1=23159de6084fe0eb h2=fef0cbc1c405b4a8
+    chunk#0 370f0f1c16b0aa53-3e093848c49d9ba7 size=5
+  file h.txt [.tsync-root/b8498c98aea80fb5-2ccd6b6d26c89eb0] = manifest size=6 chunks=1 h1=7e4ca1687d95decc h2=e26f49d0046872c2
+    chunk#0 3a98c68f7f9f2fea-956195a803de999d size=6
+
+=== f9_edit_vs_edit
+  A: write f.txt "first"
+  A: drain
+  B: sync
+  B: metadata paused
+  B: uploads paused
+  B: write f.txt "ours"
+  A: write f.txt "theirs"
+  A: drain
+  B: sync
+  B: metadata running
+  B: uploads running
+  B: drain
+  A: sync
+  B: sync
+--- tree A
+  f f (conflicted copy from Client B).txt size=4 cached=0/1 uploaded=true etag=231a778d8fde60eb
+  f f.txt size=6 cached=0/1 uploaded=true etag=7e4ca1687d95decc
+--- content A
+  f (conflicted copy from Client B).txt = "ours"
+  f.txt = "theirs"
+--- pending A
+--- tree B
+  f f (conflicted copy from Client B).txt size=4 cached=0/1 uploaded=true etag=231a778d8fde60eb
+  f f.txt size=6 cached=0/1 uploaded=true etag=7e4ca1687d95decc
+--- content B
+  f (conflicted copy from Client B).txt = "ours"
+  f.txt = "theirs"
+--- pending B
+--- kept A
+  {"op":"put","key":"f.txt","size":5}
+  {"op":"put","key":"f.txt","size":6}
+  {"op":"put","key":"f (conflicted copy from Client B).txt","size":4}
+--- kept B
+  {"op":"put","key":"f.txt","size":5}
+  {"op":"put","key":"f.txt","size":6}
+  {"op":"put","key":"f (conflicted copy from Client B).txt","size":4}
+--- backend
+  chunk 08b13b9a7f1dcae3-2fd3462d1ebeb40a size=4
+  chunk 370f0f1c16b0aa53-3e093848c49d9ba7 size=5
+  chunk 3a98c68f7f9f2fea-956195a803de999d size=6
+  cursor = <entry-3>
+  journal <entry-1> = put f.txt 5
+  journal <entry-2> = put f.txt 6
+  journal <entry-3> = put f (conflicted copy from Client B).txt 4
+  file f.txt [.tsync-root/9b84998f74a137e7-901368d25b5bd524] = manifest size=6 chunks=1 h1=7e4ca1687d95decc h2=e26f49d0046872c2
+    chunk#0 3a98c68f7f9f2fea-956195a803de999d size=6
+  file f (conflicted copy from Client B).txt [.tsync-root/fa590977d0c4e39e-e6e2ca6c47ee0981] = manifest size=4 chunks=1 h1=231a778d8fde60eb h2=4fa42d78bc0cb36d
+    chunk#0 08b13b9a7f1dcae3-2fd3462d1ebeb40a size=4
+
+=== d1_rmdir_vs_add_inside
+  A: mkdir d
+  A: write d/a.txt "a"
+  A: drain
+  B: sync
+  B: metadata paused
+  B: uploads paused
+  B: delete d/a.txt
+  B: rmdir d
+  A: write d/x.txt "added"
+  A: drain
+  B: sync
+  B: metadata running
+  B: uploads running
+  B: drain
+  A: sync
+  B: sync
+--- tree A
+--- content A
+--- pending A
+--- tree B
+--- content B
+--- pending B
+--- kept A
+  {"op":"mkdir","key":"d","id":"<folder-1>"}
+  {"op":"put","key":"d/a.txt","size":1}
+  {"op":"put","key":"d/x.txt","size":5}
+  {"op":"delete","key":"d/a.txt"}
+  {"op":"rmdir","key":"d","id":"<folder-1>"}
+--- kept B
+  {"op":"mkdir","key":"d","id":"<folder-1>"}
+  {"op":"put","key":"d/a.txt","size":1}
+  {"op":"put","key":"d/x.txt","size":5}
+  {"op":"delete","key":"d/a.txt"}
+  {"op":"rmdir","key":"d","id":"<folder-1>"}
+--- backend
+  chunk 2bee98317da6a5fc-560272ebc32903c8 size=5
+  chunk e6c632b61e964e1f-d2f6d0996f37a720 size=1
+  cursor = <entry-4>
+  journal <entry-1> = mkdir d
+  journal <entry-2> = put d/a.txt 1
+  journal <entry-3> = delete d/a.txt
+  journal <entry-4> = rmdir d
+  journal <entry-5> = put d/x.txt 5
+  trash d -> <folder-1>
+  anchor <folder-1> in .tsync-trash as d
+  file a.txt [<folder-1>/f01e5cbbc09d4fc4-9a0fcd66f030de75] = manifest size=1 chunks=1 h1=15da855801af627d h2=206c8135a9dd3b50
+    chunk#0 e6c632b61e964e1f-d2f6d0996f37a720 size=1
+  file x.txt [<folder-1>/fecd6e94d21b3dc7-d6d12967f4c00d3d] = manifest size=5 chunks=1 h1=387d298abfe69f5c h2=c312b6ee6ec6c260
+    chunk#0 2bee98317da6a5fc-560272ebc32903c8 size=5
+
+=== d2_rmdir_vs_rename
+  A: mkdir d
+  A: drain
+  B: sync
+  B: metadata paused
+  B: uploads paused
+  B: rmdir d
+  A: rename d -> e
+  A: drain
+  B: sync
+  B: metadata running
+  B: uploads running
+  B: drain
+  A: sync
+  B: sync
+--- tree A
+--- content A
+--- pending A
+--- tree B
+--- content B
+--- pending B
+--- kept A
+  {"op":"mkdir","key":"d","id":"<folder-1>"}
+  {"op":"rename","key":"e","src":"d","is_dir":true,"id":"<folder-1>"}
+  {"op":"rmdir","key":"d","id":"<folder-1>"}
+--- kept B
+  {"op":"mkdir","key":"d","id":"<folder-1>"}
+  {"op":"rename","key":"e","src":"d","is_dir":true,"id":"<folder-1>"}
+  {"op":"rmdir","key":"d","id":"<folder-1>"}
+--- backend
+  cursor = <entry-2>
+  journal <entry-1> = mkdir d
+  journal <entry-2> = rmdir d
+  journal <entry-3> = rename d -> e dir
+  folder e [.tsync-root/e5e72e5e3bec4a78-6881790369f3a86a] -> <folder-1>
+  trash d -> <folder-1>
+  anchor <folder-1> in .tsync-trash as d
+
+=== d3_rename_vs_add_inside
+  A: mkdir d
+  A: drain
+  B: sync
+  B: metadata paused
+  B: uploads paused
+  B: rename d -> e
+  A: write d/x.txt "added"
+  A: drain
+  B: sync
+  B: metadata running
+  B: uploads running
+  B: drain
+  A: sync
+  B: sync
+--- tree A
+  d e
+  f e/x.txt size=5 cached=0/1 uploaded=true etag=387d298abfe69f5c
+--- content A
+  e/x.txt = "added"
+--- pending A
+--- tree B
+  d e
+  f e/x.txt size=5 cached=0/1 uploaded=true etag=387d298abfe69f5c
+--- content B
+  e/x.txt = "added"
+--- pending B
+--- kept A
+  {"op":"mkdir","key":"d","id":"<folder-1>"}
+  {"op":"put","key":"d/x.txt","size":5}
+  {"op":"rename","key":"e","src":"d","is_dir":true,"id":"<folder-1>"}
+--- kept B
+  {"op":"mkdir","key":"d","id":"<folder-1>"}
+  {"op":"put","key":"d/x.txt","size":5}
+  {"op":"rename","key":"e","src":"d","is_dir":true,"id":"<folder-1>"}
+--- backend
+  chunk 2bee98317da6a5fc-560272ebc32903c8 size=5
+  cursor = <entry-2>
+  journal <entry-1> = mkdir d
+  journal <entry-2> = rename d -> e dir
+  journal <entry-3> = put d/x.txt 5
+  folder e [.tsync-root/e5e72e5e3bec4a78-6881790369f3a86a] -> <folder-1>
+  anchor <folder-1> in .tsync-root as e
+  file x.txt [<folder-1>/fecd6e94d21b3dc7-d6d12967f4c00d3d] = manifest size=5 chunks=1 h1=387d298abfe69f5c h2=c312b6ee6ec6c260
+    chunk#0 2bee98317da6a5fc-560272ebc32903c8 size=5
+
+=== d4_rename_vs_rename
+  A: mkdir d
+  A: drain
+  B: sync
+  B: metadata paused
+  B: uploads paused
+  B: rename d -> e
+  A: rename d -> f
+  A: drain
+  B: sync
+  B: metadata running
+  B: uploads running
+  B: drain
+  A: sync
+  B: sync
+--- tree A
+  d e
+--- content A
+--- pending A
+--- tree B
+  d e
+--- content B
+--- pending B
+--- kept A
+  {"op":"mkdir","key":"d","id":"<folder-1>"}
+  {"op":"rename","key":"f","src":"d","is_dir":true,"id":"<folder-1>"}
+  {"op":"rename","key":"e","src":"d","is_dir":true,"id":"<folder-1>"}
+--- kept B
+  {"op":"mkdir","key":"d","id":"<folder-1>"}
+  {"op":"rename","key":"f","src":"d","is_dir":true,"id":"<folder-1>"}
+  {"op":"rename","key":"e","src":"d","is_dir":true,"id":"<folder-1>"}
+--- backend
+  cursor = <entry-2>
+  journal <entry-1> = mkdir d
+  journal <entry-2> = rename d -> e dir
+  journal <entry-3> = rename d -> f dir
+  folder f [.tsync-root/33c155909ff3ba9a-d8317cc9d468d821] -> <folder-1>
+  folder e [.tsync-root/e5e72e5e3bec4a78-6881790369f3a86a] -> <folder-1>
+  anchor <folder-1> in .tsync-root as e
+
+=== d5_rename_vs_mkdir_at_destination
+  A: mkdir d
+  A: drain
+  B: sync
+  B: metadata paused
+  B: uploads paused
+  B: rename d -> e
+  A: mkdir e
+  A: drain
+  B: sync
+  B: metadata running
+  B: uploads running
+  B: drain
+  A: sync
+  B: sync
+--- tree A
+  d e
+  d e (conflicted copy from Client B)
+--- content A
+--- pending A
+--- tree B
+  d e
+  d e (conflicted copy from Client B)
+--- content B
+--- pending B
+--- kept A
+  {"op":"mkdir","key":"d","id":"<folder-1>"}
+  {"op":"mkdir","key":"e","id":"<folder-2>"}
+  {"op":"rename","key":"e (conflicted copy from Client B)","src":"d","is_dir":true,"id":"<folder-1>"}
+  {"op":"rename","key":"e (conflicted copy from Client B)","src":"e","is_dir":true,"id":"<folder-1>"}
+--- kept B
+  {"op":"mkdir","key":"d","id":"<folder-1>"}
+  {"op":"mkdir","key":"e","id":"<folder-2>"}
+  {"op":"rename","key":"e (conflicted copy from Client B)","src":"d","is_dir":true,"id":"<folder-1>"}
+  {"op":"rename","key":"e (conflicted copy from Client B)","src":"e","is_dir":true,"id":"<folder-1>"}
+--- backend
+  cursor = <entry-4>
+  journal <entry-1> = mkdir d
+  journal <entry-2> = rename d -> e (conflicted copy from Client B) dir
+  journal <entry-3> = mkdir e
+  journal <entry-4> = rename e -> e (conflicted copy from Client B) dir
+  folder e (conflicted copy from Client B) [.tsync-root/4ea0a028e4404db3-07337fd1939b827b] -> <folder-1>
+  folder e [.tsync-root/e5e72e5e3bec4a78-6881790369f3a86a] -> <folder-2>
+  anchor <folder-1> in .tsync-root as e (conflicted copy from Client B)
+  anchor <folder-2> in .tsync-root as e
+
+=== d6_mkdir_vs_mkdir
+  A: drain
+  B: sync
+  B: metadata paused
+  B: uploads paused
+  B: mkdir d
+  A: mkdir d
+  A: drain
+  B: sync
+  B: metadata running
+  B: uploads running
+  B: drain
+  A: sync
+  B: sync
+--- tree A
+  d d
+  d d (conflicted copy from Client B)
+--- content A
+--- pending A
+--- tree B
+  d d
+  d d (conflicted copy from Client B)
+--- content B
+--- pending B
+--- kept A
+  {"op":"mkdir","key":"d","id":"<folder-1>"}
+  {"op":"mkdir","key":"d (conflicted copy from Client B)","id":"<folder-2>"}
+  {"op":"rename","key":"d (conflicted copy from Client B)","src":"d","is_dir":true,"id":"<folder-2>"}
+--- kept B
+  {"op":"mkdir","key":"d","id":"<folder-1>"}
+  {"op":"mkdir","key":"d (conflicted copy from Client B)","id":"<folder-2>"}
+  {"op":"rename","key":"d (conflicted copy from Client B)","src":"d","is_dir":true,"id":"<folder-2>"}
+--- backend
+  cursor = <entry-3>
+  journal <entry-1> = mkdir d (conflicted copy from Client B)
+  journal <entry-2> = mkdir d
+  journal <entry-3> = rename d -> d (conflicted copy from Client B) dir
+  folder d [.tsync-root/45f80274c9c7a7ca-6e6bfc18706e03e7] -> <folder-1>
+  folder d (conflicted copy from Client B) [.tsync-root/86cccb358c24739d-d3cbefd28a81136e] -> <folder-2>
+  anchor <folder-1> in .tsync-root as d
+  anchor <folder-2> in .tsync-root as d (conflicted copy from Client B)
+
+=== d7_rmdir_vs_rmdir
+  A: mkdir d
+  A: drain
+  B: sync
+  B: metadata paused
+  B: uploads paused
+  B: rmdir d
+  A: rmdir d
+  A: drain
+  B: sync
+  B: metadata running
+  B: uploads running
+  B: drain
+  A: sync
+  B: sync
+--- tree A
+--- content A
+--- pending A
+--- tree B
+--- content B
+--- pending B
+--- kept A
+  {"op":"mkdir","key":"d","id":"<folder-1>"}
+  {"op":"rmdir","key":"d","id":"<folder-1>"}
+--- kept B
+  {"op":"mkdir","key":"d","id":"<folder-1>"}
+  {"op":"rmdir","key":"d","id":"<folder-1>"}
+--- backend
+  cursor = <entry-2>
+  journal <entry-1> = mkdir d
+  journal <entry-2> = rmdir d
+  trash d -> <folder-1>
+  anchor <folder-1> in .tsync-trash as d
+
+=== d8_add_inside_vs_rmdir
+  A: mkdir d
+  A: drain
+  B: sync
+  B: metadata paused
+  B: uploads paused
+  B: write d/new.txt "ours"
+  B: mkdir d/sub
+  A: rmdir d
+  A: drain
+  B: sync
+  B: metadata running
+  B: uploads running
+  B: drain
+  A: sync
+  B: sync
+--- tree A
+  f new (conflicted copy from Client B).txt size=4 cached=0/1 uploaded=true etag=231a778d8fde60eb
+--- content A
+  new (conflicted copy from Client B).txt = "ours"
+--- pending A
+--- tree B
+  f new (conflicted copy from Client B).txt size=4 cached=0/1 uploaded=true etag=231a778d8fde60eb
+--- content B
+  new (conflicted copy from Client B).txt = "ours"
+--- pending B
+--- kept A
+  {"op":"mkdir","key":"d","id":"<folder-1>"}
+  {"op":"rmdir","key":"d","id":"<folder-1>"}
+  {"op":"put","key":"new (conflicted copy from Client B).txt","size":4}
+--- kept B
+  {"op":"mkdir","key":"d","id":"<folder-1>"}
+  {"op":"rmdir","key":"d","id":"<folder-1>"}
+  {"op":"put","key":"new (conflicted copy from Client B).txt","size":4}
+--- backend
+  chunk 08b13b9a7f1dcae3-2fd3462d1ebeb40a size=4
+  cursor = <entry-3>
+  journal <entry-1> = mkdir d
+  journal <entry-2> = rmdir d
+  journal <entry-3> = put new (conflicted copy from Client B).txt 4
+  file new (conflicted copy from Client B).txt [.tsync-root/2d3abc94b32f348a-4d5738a220e7e3b2] = manifest size=4 chunks=1 h1=231a778d8fde60eb h2=4fa42d78bc0cb36d
+    chunk#0 08b13b9a7f1dcae3-2fd3462d1ebeb40a size=4
+  trash d -> <folder-1>
+  anchor <folder-1> in .tsync-trash as d
+
+=== k1_file_vs_folder
+  A: drain
+  B: sync
+  B: metadata paused
+  B: uploads paused
+  B: write x "a file"
+  A: mkdir x
+  A: write x/in.txt "inside"
+  A: drain
+  B: sync
+  B: metadata running
+  B: uploads running
+  B: drain
+  A: sync
+  B: sync
+--- tree A
+  f x (conflicted copy from Client B) size=6 cached=0/1 uploaded=true etag=5f2be1023032f366
+  d x
+  f x/in.txt size=6 cached=0/1 uploaded=true etag=b243e51ac31a4008
+--- content A
+  x (conflicted copy from Client B) = "a file"
+  x/in.txt = "inside"
+--- pending A
+--- tree B
+  f x (conflicted copy from Client B) size=6 cached=0/1 uploaded=true etag=5f2be1023032f366
+  d x
+  f x/in.txt size=6 cached=0/1 uploaded=true etag=b243e51ac31a4008
+--- content B
+  x (conflicted copy from Client B) = "a file"
+  x/in.txt = "inside"
+--- pending B
+--- kept A
+  {"op":"mkdir","key":"x","id":"<folder-1>"}
+  {"op":"put","key":"x/in.txt","size":6}
+  {"op":"put","key":"x (conflicted copy from Client B)","size":6}
+--- kept B
+  {"op":"mkdir","key":"x","id":"<folder-1>"}
+  {"op":"put","key":"x/in.txt","size":6}
+  {"op":"put","key":"x (conflicted copy from Client B)","size":6}
+--- backend
+  chunk d373a167a06d3bd4-390048f37337bbcd size=6
+  chunk dfc8976fa829623b-80cd1fb296f91b05 size=6
+  cursor = <entry-3>
+  journal <entry-1> = mkdir x
+  journal <entry-2> = put x/in.txt 6
+  journal <entry-3> = put x (conflicted copy from Client B) 6
+  file x (conflicted copy from Client B) [.tsync-root/7dc8bad42bb4ea24-2263e08e6a17b5d6] = manifest size=6 chunks=1 h1=5f2be1023032f366 h2=01497c58b2101670
+    chunk#0 d373a167a06d3bd4-390048f37337bbcd size=6
+  folder x [.tsync-root/eaf06c6480b2cd11-ab53714969b02f74] -> <folder-1>
+  anchor <folder-1> in .tsync-root as x
+  file in.txt [<folder-1>/04232ee1a8e3dfb8-eca6906915022e77] = manifest size=6 chunks=1 h1=b243e51ac31a4008 h2=d6a061bc8047d6b0
+    chunk#0 dfc8976fa829623b-80cd1fb296f91b05 size=6
+
+=== k1_folder_vs_file
+  A: drain
+  B: sync
+  B: metadata paused
+  B: uploads paused
+  B: mkdir x
+  A: write x "a file"
+  A: drain
+  B: sync
+  B: metadata running
+  B: uploads running
+  B: drain
+  A: sync
+  B: sync
+--- tree A
+  f x size=6 cached=0/1 uploaded=true etag=5f2be1023032f366
+  d x (conflicted copy from Client B)
+--- content A
+  x = "a file"
+--- pending A
+--- tree B
+  f x size=6 cached=0/1 uploaded=true etag=5f2be1023032f366
+  d x (conflicted copy from Client B)
+--- content B
+  x = "a file"
+--- pending B
+--- kept A
+  {"op":"put","key":"x","size":6}
+  {"op":"mkdir","key":"x (conflicted copy from Client B)","id":"<folder-1>"}
+  {"op":"rename","key":"x (conflicted copy from Client B)","src":"x","is_dir":true,"id":"<folder-1>"}
+--- kept B
+  {"op":"put","key":"x","size":6}
+  {"op":"mkdir","key":"x (conflicted copy from Client B)","id":"<folder-1>"}
+  {"op":"rename","key":"x (conflicted copy from Client B)","src":"x","is_dir":true,"id":"<folder-1>"}
+--- backend
+  chunk d373a167a06d3bd4-390048f37337bbcd size=6
+  cursor = <entry-3>
+  journal <entry-1> = mkdir x (conflicted copy from Client B)
+  journal <entry-2> = put x 6
+  journal <entry-3> = rename x -> x (conflicted copy from Client B) dir
+  folder x (conflicted copy from Client B) [.tsync-root/7dc8bad42bb4ea24-2263e08e6a17b5d6] -> <folder-1>
+  file x [.tsync-root/eaf06c6480b2cd11-ab53714969b02f74] = manifest size=6 chunks=1 h1=5f2be1023032f366 h2=01497c58b2101670
+    chunk#0 d373a167a06d3bd4-390048f37337bbcd size=6
+  anchor <folder-1> in .tsync-root as x (conflicted copy from Client B)
+

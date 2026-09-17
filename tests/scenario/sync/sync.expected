@@ -394,17 +394,17 @@
   {"op":"mkdir","key":"z","id":"<folder-1>"}
   {"op":"put","key":"z/from-a.txt","size":1}
   {"op":"mkdir","key":"z (conflicted copy from Client B)","id":"<folder-2>"}
-  {"op":"rename","key":"z","src":"x","is_dir":true,"id":"<folder-2>"}
+  {"op":"rename","key":"z (conflicted copy from Client B)","src":"x","is_dir":true,"id":"<folder-2>"}
 --- kept B
   {"op":"mkdir","key":"z (conflicted copy from Client B)","id":"<folder-2>"}
-  {"op":"rename","key":"z","src":"x","is_dir":true,"id":"<folder-2>"}
+  {"op":"rename","key":"z (conflicted copy from Client B)","src":"x","is_dir":true,"id":"<folder-2>"}
   {"op":"mkdir","key":"z","id":"<folder-1>"}
   {"op":"put","key":"z/from-a.txt","size":1}
 --- backend
   chunk e6c632b61e964e1f-d2f6d0996f37a720 size=1
   cursor = <entry-2>
   journal <entry-1> = mkdir z (conflicted copy from Client B)
-  journal <entry-2> = rename x -> z dir
+  journal <entry-2> = rename x -> z (conflicted copy from Client B) dir
   journal <entry-3> = mkdir z
   journal <entry-4> = put z/from-a.txt 1
   folder z (conflicted copy from Client B) [.tsync-root/12fc838507e9e077-0bb3321e29afd652] -> <folder-2>
@@ -807,8 +807,10 @@
   B: write f4.txt "moved"
   B: drain
   A: sync
+  A: metadata paused
   A: rename f4.txt -> sub/f4.txt
   A: rename sub -> sub-renamed
+  A: metadata running
   A: drain
   B: sync
 --- tree A

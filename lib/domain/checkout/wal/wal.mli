@@ -133,6 +133,14 @@ module type S = sig
   (** The work is done or abandoned; drop the record. *)
   val complete : Journal.Entry_key.t -> unit io
 
+  (** The record as it stands now, [None] once it is done. *)
+  val find : Journal.Entry_key.t -> record option io
+
+  (** Rewrite the ops a record owes, for a caller that learned since it was
+      written that the work has to land somewhere else. *)
+  val update_ops :
+    Journal.Entry_key.t -> (Journal.op list -> Journal.op list) -> unit io
+
   (** This client's records, in {!Journal.Entry_key.compare} order — the order
       the ops must be replayed in. Other clients' records, if a shared data
       directory ever holds any, are left alone. *)
