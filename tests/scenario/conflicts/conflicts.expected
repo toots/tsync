@@ -227,30 +227,30 @@
   A: sync
   B: sync
 --- tree A
-  f g (conflicted copy from Client B).txt size=5 cached=0/1 uploaded=true etag=23159de6084fe0eb
+  f g.txt size=5 cached=0/1 uploaded=true etag=23159de6084fe0eb
 --- content A
-  g (conflicted copy from Client B).txt = "first"
+  g.txt = "first"
 --- pending A
 --- tree B
-  f g (conflicted copy from Client B).txt size=5 cached=0/1 uploaded=true etag=23159de6084fe0eb
+  f g.txt size=5 cached=0/1 uploaded=true etag=23159de6084fe0eb
 --- content B
-  g (conflicted copy from Client B).txt = "first"
+  g.txt = "first"
 --- pending B
 --- kept A
   {"op":"put","key":"f.txt","size":5}
   {"op":"delete","key":"f.txt"}
-  {"op":"put","key":"g (conflicted copy from Client B).txt","size":5}
+  {"op":"put","key":"g.txt","size":5}
 --- kept B
   {"op":"put","key":"f.txt","size":5}
   {"op":"delete","key":"f.txt"}
-  {"op":"put","key":"g (conflicted copy from Client B).txt","size":5}
+  {"op":"put","key":"g.txt","size":5}
 --- backend
   chunk 370f0f1c16b0aa53-3e093848c49d9ba7 size=5
   cursor = <entry-3>
   journal <entry-1> = put f.txt 5
   journal <entry-2> = delete f.txt
-  journal <entry-3> = put g (conflicted copy from Client B).txt 5
-  file g (conflicted copy from Client B).txt [.tsync-root/8bc613231c021a03-69af243493c10e85] = manifest size=5 chunks=1 h1=23159de6084fe0eb h2=fef0cbc1c405b4a8
+  journal <entry-3> = put g.txt 5
+  file g.txt [.tsync-root/926c8b039839cfc6-7969407bf35f59e9] = manifest size=5 chunks=1 h1=23159de6084fe0eb h2=fef0cbc1c405b4a8
     chunk#0 370f0f1c16b0aa53-3e093848c49d9ba7 size=5
 
 === f6_rename_vs_rename
@@ -269,34 +269,34 @@
   A: sync
   B: sync
 --- tree A
-  f g (conflicted copy from Client B).txt size=5 cached=0/1 uploaded=true etag=23159de6084fe0eb
+  f g.txt size=5 cached=0/1 uploaded=true etag=23159de6084fe0eb
   f h.txt size=5 cached=0/1 uploaded=true etag=23159de6084fe0eb
 --- content A
-  g (conflicted copy from Client B).txt = "first"
+  g.txt = "first"
   h.txt = "first"
 --- pending A
 --- tree B
-  f g (conflicted copy from Client B).txt size=5 cached=0/1 uploaded=true etag=23159de6084fe0eb
+  f g.txt size=5 cached=0/1 uploaded=true etag=23159de6084fe0eb
   f h.txt size=5 cached=0/1 uploaded=true etag=23159de6084fe0eb
 --- content B
-  g (conflicted copy from Client B).txt = "first"
+  g.txt = "first"
   h.txt = "first"
 --- pending B
 --- kept A
   {"op":"put","key":"f.txt","size":5}
   {"op":"rename","key":"h.txt","src":"f.txt","is_dir":false,"size":5}
-  {"op":"put","key":"g (conflicted copy from Client B).txt","size":5}
+  {"op":"put","key":"g.txt","size":5}
 --- kept B
   {"op":"put","key":"f.txt","size":5}
   {"op":"rename","key":"h.txt","src":"f.txt","is_dir":false,"size":5}
-  {"op":"put","key":"g (conflicted copy from Client B).txt","size":5}
+  {"op":"put","key":"g.txt","size":5}
 --- backend
   chunk 370f0f1c16b0aa53-3e093848c49d9ba7 size=5
   cursor = <entry-3>
   journal <entry-1> = put f.txt 5
   journal <entry-2> = rename f.txt -> h.txt 5
-  journal <entry-3> = put g (conflicted copy from Client B).txt 5
-  file g (conflicted copy from Client B).txt [.tsync-root/8bc613231c021a03-69af243493c10e85] = manifest size=5 chunks=1 h1=23159de6084fe0eb h2=fef0cbc1c405b4a8
+  journal <entry-3> = put g.txt 5
+  file g.txt [.tsync-root/926c8b039839cfc6-7969407bf35f59e9] = manifest size=5 chunks=1 h1=23159de6084fe0eb h2=fef0cbc1c405b4a8
     chunk#0 370f0f1c16b0aa53-3e093848c49d9ba7 size=5
   file h.txt [.tsync-root/b8498c98aea80fb5-2ccd6b6d26c89eb0] = manifest size=5 chunks=1 h1=23159de6084fe0eb h2=fef0cbc1c405b4a8
     chunk#0 370f0f1c16b0aa53-3e093848c49d9ba7 size=5
