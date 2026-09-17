@@ -70,6 +70,10 @@ the folder is anchored under the root: ok
 it applied: ok
 the folder takes no id from the stale marker: ok
 
+=== a marker a move left behind holds its name against nobody
+  root after: p=<folder-2>, s=<folder-6>, stale=<folder-6>, vacant=<folder-7>, w=<folder-5>, x=<folder-3>, y=<folder-5>, y (conflicted copy 2 from test)=<folder-3>, y (conflicted copy from test)=<folder-4>
+a folder made under it keeps the name and its own id: ok
+
 === a peer's folder op leaves alone a folder holding another id
   apply a peer's rename m -> m2 and rmdir m, of another folder: succeeded
 it applied: ok
@@ -77,8 +81,8 @@ ours is where it was, with its id: ok
 
 === a peer's mkdir onto a folder of ours moves ours aside
   apply a peer's mkdir m: succeeded
-  local m: <folder-8>, copy: <folder-7>
-  root after: m (conflicted copy from test)=<folder-7>, p=<folder-2>, s=<folder-6>, stale=<folder-6>, w=<folder-5>, x=<folder-3>, y=<folder-5>, y (conflicted copy 2 from test)=<folder-3>, y (conflicted copy from test)=<folder-4>
+  local m: <folder-9>, copy: <folder-8>
+  root after: m (conflicted copy from test)=<folder-8>, p=<folder-2>, s=<folder-6>, stale=<folder-6>, vacant=<folder-7>, w=<folder-5>, x=<folder-3>, y=<folder-5>, y (conflicted copy 2 from test)=<folder-3>, y (conflicted copy from test)=<folder-4>
 it applied: ok
 the peer's folder has the name and its id: ok
 ours keeps its id under a name of its own: ok
@@ -91,8 +95,8 @@ nothing is created, and the id still names ours: ok
 
 === a peer's put under a name this client moved away from
   apply a peer's put moved-from/x.txt: succeeded
-  local: m, m (conflicted copy from test), moved-to, p, s (conflicted copy from test), stale, t, y, y (conflicted copy 2 from test), y (conflicted copy from test)
+  local: m, m (conflicted copy from test), moved-from, moved-to, p, s (conflicted copy from test), stale, t, vacant, y, y (conflicted copy 2 from test), y (conflicted copy from test)
 it applied: ok
 this client's own file is not taken for the peer's under the name: ok
 
-39 check(s), 0 failure(s)
+40 check(s), 0 failure(s)

@@ -97,6 +97,10 @@ module type S = sig
       name. *)
   val marker_id_at : bkey:Stored_key.t -> string option io
 
+  (** The folder living under a name, which is what holds it against another:
+      {!marker_id_at} less a marker its folder's anchor places elsewhere. *)
+  val holder_at : bkey:Stored_key.t -> string option io
+
   (** Whether the marker at [bkey] is where its folder lives. A marker the
       folder's anchor places elsewhere is one a move left behind; a folder with
       no anchor was written before anchors were, and is taken at its marker's
@@ -113,11 +117,6 @@ module type S = sig
 
   val list_namespace : folder_id:string -> Backend.file_entry list io
   val get_object : bkey:Stored_key.t -> string io
-
-  (** {!get_object} answering [None] for an object that is not there, where
-      reading and catching the failure could not tell that from a store that
-      cannot answer. *)
-  val get_object_opt : bkey:Stored_key.t -> string option io
 
   (** Bodies of several at once, in one request where the store has a way to
       make one and a bounded fan-out where it has not. [None] for a key the
