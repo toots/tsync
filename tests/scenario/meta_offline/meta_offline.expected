@@ -109,4 +109,12 @@ the entry after it is applied, and it is reported: ok
   applied 1, stepped aside 0
 and it lands on a later pass, once it can: ok
 
-44 check(s), 0 failure(s)
+=== while changes are held
+nothing of ours reaches the store: ok
+and what a peer did is not applied here: ok
+while a file read here is served: ok
+
+=== and once they flow again
+ours is published, and theirs applied: ok
+
+48 check(s), 0 failure(s)

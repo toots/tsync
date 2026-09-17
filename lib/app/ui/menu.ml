@@ -543,7 +543,7 @@ let render ?(quit_label = "Quit tsync tray") statuses =
   let pause =
     Item
       {
-        label = "Pause uploads";
+        label = "Hold changes";
         enabled = not (all_unreachable statuses);
         icon = None;
         checked = Some (all_paused statuses);

@@ -67,21 +67,30 @@ struct
        something that fails without taking any time would otherwise spin. *)
     let retry_floor = 2.
 
-    let start ~on_changed () =
+    (* Nothing is asked of the store while held, so this is a tick rather than
+       an interval: what it costs is a wakeup, and what it buys is a resume that
+       takes effect at once. *)
+    let held_tick = 0.2
+
+    (* Applying a peer's entry changes what this client holds, so it waits with
+       everything else that does; a read still serves whoever is waiting on it. *)
+    let start ?(paused = fun () -> false) ~on_changed () =
       Io.async (fun () ->
           let step () =
-            (* A ceiling on the wait, not what times the sweep: a store that
+            if paused () then Clock.sleep held_tick
+            else
+              (* A ceiling on the wait, not what times the sweep: a store that
                answers none at all must not park this loop for good. *)
-            let* () =
-              Io.catch
-                (fun () ->
-                  Clock.with_timeout !sweep_interval (fun () ->
-                      Js.wait_cursor_change !last_version))
-                (fun exn ->
-                  if Clock.is_timeout exn then Io.return () else Io.fail exn)
-            in
-            let+ (_ : int) = sync_once ~on_changed () in
-            ()
+              let* () =
+                Io.catch
+                  (fun () ->
+                    Clock.with_timeout !sweep_interval (fun () ->
+                        Js.wait_cursor_change !last_version))
+                  (fun exn ->
+                    if Clock.is_timeout exn then Io.return () else Io.fail exn)
+              in
+              let+ (_ : int) = sync_once ~on_changed () in
+              ()
           in
           let rec loop () =
             let* () =

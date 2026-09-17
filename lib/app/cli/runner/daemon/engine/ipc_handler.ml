@@ -52,7 +52,8 @@ end
 module Make
     (C : Conf_lwt.S)
     (F : File_ops.S with type 'a io := 'a Lwt.t)
-    (Sq : Sync_queue.S with type 'a io := 'a Lwt.t) : S = struct
+    (Sq : Sync_queue.S with type 'a io := 'a Lwt.t)
+    (Pause : Pause.S) : S = struct
   module Diag = Diagnostics.Make (C)
 
   (* One mutation at a time. A reference is resolved to a path before the
@@ -968,7 +969,7 @@ module Make
                                   file: the sandboxed extension may not open
                                   a file the daemon wrote. *)
                                :: ("readOnly", `Bool C.read_only)
-                               :: ("paused", `Bool (Sq.paused ()))
+                               :: ("paused", `Bool (Pause.held ()))
                                :: ("pendingUploads", `Int (Sq.pending ()))
                                :: ( "pendingDownloads",
                                     `Int (F.downloads_in_flight ()) )
@@ -1003,7 +1004,7 @@ module Make
                                :: Metrics.traffic_fields Metrics.process
                               @ hooks.status_fields ())
                         | "pause" ->
-                            Sq.set_paused (get_str obj "arg" <> "off");
+                            Pause.set (get_str obj "arg" <> "off");
                             Lwt.return (ok_json [])
                         | "stats" ->
                             (* This daemon reports itself twice: at the top as the

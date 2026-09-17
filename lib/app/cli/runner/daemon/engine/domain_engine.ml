@@ -56,7 +56,8 @@ module Make_over
   module F = File_lwt.Make_over (Ck) (C)
   module Sq = Sync_lwt.Sync_queue.Make (C) (F)
   module Mq = Sync_lwt.Meta_queue.Make (C) (F)
-  module Ih = Ipc_handler.Make (C) (F) (Sq)
+  module Pause = Sync_lwt.Pause.Make (Sq) (Mq)
+  module Ih = Ipc_handler.Make (C) (F) (Sq) (Pause)
   module Sp = Sync_lwt.Sync_poller.Make (C) (F)
   module Rp = Sync_lwt.Replay.Make (C) (F)
   module Mf = Checkout_lwt.Make (C)
@@ -164,7 +165,7 @@ module Make_over
 
   let converge ~on_changed () =
     let* () = start_queue () in
-    Sp.start ~on_changed ();
+    Sp.start ~paused:Pause.held ~on_changed ();
     run_maintenance ();
     Lwt.return_unit
 

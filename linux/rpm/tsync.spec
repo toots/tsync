@@ -33,7 +33,7 @@ Requires:       %{name} = %{version}-%{release}
 
 %description tray
 Shows what each tsync domain is doing in the desktop notification area, with a
-menu listing the files in flight and a switch that pauses uploads.
+menu listing the files in flight and a switch that holds every change.
 
 # Split off for the reason the tray is: this one links Qt and KDE Frameworks,
 # which a GNOME desktop installing the tray should not be made to carry.

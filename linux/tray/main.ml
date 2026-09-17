@@ -21,7 +21,7 @@ let cmd =
            `P
              "Puts an icon in the notification area showing what each \
               configured domain is doing, with a menu listing the files in \
-              flight and a switch that pauses uploads. It reads the same \
+              flight and a switch that holds every change. It reads the same \
               daemon each $(b,tsync) command talks to, and runs until quit.";
            `P
              "The icon is drawn by whatever the desktop uses to host \
