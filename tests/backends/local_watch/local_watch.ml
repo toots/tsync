@@ -118,6 +118,48 @@ let () =
              Lwt.return_unit
      in
 
+     (* The loop this is about: a read takes a reflink snapshot, a snapshot that
+        names its clone creates and removes a directory entry, and the watcher
+        the reader is about to wait on is woken by the read itself. It ends in a
+        box with no memory rather than in an error. *)
+     case "a read of an object does not wake a watcher on its directory";
+     let* () =
+       match Watch_lwt.open_dir watched_dir with
+         | None ->
+             check "the store's own directory can be watched" false;
+             Lwt.return_unit
+         | Some watcher ->
+             let* () = Lwt_unix.sleep 0.3 in
+             let* () =
+               Lwt.catch
+                 (fun () ->
+                   Lwt_unix.with_timeout 1. (fun () -> Watch_lwt.wait watcher))
+                 (fun _ -> Lwt.return_unit)
+             in
+             let* (_ : Bigstring.t) = B.get ~key:cursor () in
+             let* (_ : Bigstring.t) = B.get ~key:cursor () in
+             (* Planted, because whether a read leaves one at all is the
+                filesystem's answer and not this test's to arrange. *)
+             let scratch =
+               Stdlib.Filename.concat watched_dir ".tsync-tmp-99-1.tmp"
+             in
+             let planted = open_out scratch in
+             close_out planted;
+             Sys.remove scratch;
+             let* quiet =
+               Lwt.catch
+                 (fun () ->
+                   let* () =
+                     Lwt_unix.with_timeout 1. (fun () -> Watch_lwt.wait watcher)
+                   in
+                   Lwt.return_false)
+                 (fun _ -> Lwt.return_true)
+             in
+             check "neither a read nor a scratch name of ours is reported" quiet;
+             Watch_lwt.close watcher;
+             Lwt.return_unit
+     in
+
      case "and returns at the cap when nothing happens";
      Unix.mkdir (Filename.concat store_dir "tsync/quiet") 0o755;
      let* seconds = timed (fun () -> B.watch ~key:quiet ~last_seen:None ()) in

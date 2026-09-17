@@ -18,10 +18,11 @@ let open_dir dir =
     (Watch.open_dir dir)
 
 (* Drained after the wait, so what arrives between the two is what makes the
-   next wait return at once rather than something nobody hears about. *)
-let wait t =
+   next wait return at once rather than something nobody hears about; waited
+   again where all that arrived was this process's own scratch, which is not a
+   change and which a caller told of would read the store and make more of. *)
+let rec wait t =
   let* () = Lwt_unix.wait_read t.readable in
-  Watch.drain t.watcher;
-  Lwt.return_unit
+  if Watch.drain t.watcher then Lwt.return_unit else wait t
 
 let close t = Watch.close t.watcher

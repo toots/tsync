@@ -9,11 +9,13 @@
 type t = Unix.file_descr array
 
 external open_watch : string -> t = "tsync_watch_open_dir"
-external drain_events : Unix.file_descr -> unit = "tsync_watch_drain"
+external drain_events : Unix.file_descr -> bool = "tsync_watch_drain"
 
 let open_dir dir = try Some (open_watch dir) with Unix.Unix_error _ -> None
 let fd watcher = watcher.(0)
-let drain watcher = try drain_events watcher.(0) with Unix.Unix_error _ -> ()
+
+let drain watcher =
+  try drain_events watcher.(0) with Unix.Unix_error _ -> true
 
 let close watcher =
   Array.iter

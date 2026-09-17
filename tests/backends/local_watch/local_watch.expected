@@ -11,5 +11,8 @@ woken by the write rather than by the cap: ok
 === a watcher that has been drained goes quiet again
 the wait blocks rather than returning to a stale event: ok
 
+=== a read of an object does not wake a watcher on its directory
+neither a read nor a scratch name of ours is reported: ok
+
 === and returns at the cap when nothing happens
 a directory nothing writes to still returns: ok

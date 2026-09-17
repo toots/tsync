@@ -4,10 +4,13 @@
  * Both platforms in one file, as descriptors_stubs.c has both of its: what
  * differs is which syscalls name the idea, not the idea.
  *
- * ponytail: no errno beyond what caml_uerror carries and no event decoding.
- * Every failure means the same thing to the caller — go back to asking — and
- * what an event names answers no question it does not have to ask the store
- * regardless. */
+ * The one thing a name is read for: tsync's own scratch files. A read takes a
+ * reflink snapshot through a temp file in the object's own directory, so a
+ * store that reports those wakes the reader that made them, which reads again
+ * — a loop that ends in a box with no memory rather than in an error.
+ *
+ * ponytail: no errno beyond what caml_uerror carries, and no decoding past the
+ * name. Every failure means the same thing to the caller — go back to asking. */
 
 #include <caml/alloc.h>
 #include <caml/memory.h>
@@ -15,6 +18,7 @@
 #include <caml/unixsupport.h>
 
 #include <errno.h>
+#include <string.h>
 #include <unistd.h>
 
 #if defined(__linux__)
@@ -100,25 +104,54 @@ CAMLprim value tsync_watch_open_dir(value _directory_path) {
  * nothing above can time it out. */
 #define TSYNC_WATCH_DRAIN_PASSES 64
 
+/* Matches Filename.is_temp_name, which is where the spelling is decided; it is
+ * repeated here because a name is read in C and nowhere else. */
+static int tsync_watch_is_temp_name(const char *name, int length) {
+  static const char prefix[] = ".tsync-tmp-";
+  static const char suffix[] = ".tmp";
+  int prefix_length = (int)sizeof prefix - 1;
+  int suffix_length = (int)sizeof suffix - 1;
+  if (length < prefix_length + suffix_length)
+    return 0;
+  if (memcmp(name, prefix, prefix_length) != 0)
+    return 0;
+  return memcmp(name + length - suffix_length, suffix, suffix_length) == 0;
+}
+
+/* Whether anything the caller would call a change arrived. */
 CAMLprim value tsync_watch_drain(value _watch_fd) {
   CAMLparam1(_watch_fd);
+  int reportable = 0;
 
 #if defined(__linux__)
   /* Reads until the descriptor reports EAGAIN, having been opened non-blocking.
    * A short read cannot happen: the kernel refuses a partial event and answers
    * EINVAL for a buffer too small for the next one, which this is not. */
-  char events[4096];
+  /* Aligned, because each event is read back through a struct pointer. */
+  char events[4096] __attribute__((aligned(__alignof__(struct inotify_event))));
   for (int pass = 0; pass < TSYNC_WATCH_DRAIN_PASSES; pass++) {
     ssize_t bytes_read = read(Int_val(_watch_fd), events, sizeof events);
     if (bytes_read < 0 && errno == EINTR)
       continue;
     if (bytes_read <= 0)
       break;
+    for (char *at = events; at < events + bytes_read;) {
+      struct inotify_event *event = (struct inotify_event *)at;
+      /* No name at all is an event about the directory itself, which is a
+       * change to report: only a name this process knows for its own scratch
+       * is not. */
+      if (event->len == 0 ||
+          !tsync_watch_is_temp_name(event->name, (int)strnlen(event->name,
+                                                              event->len)))
+        reportable = 1;
+      at += sizeof(struct inotify_event) + event->len;
+    }
   }
 
 #elif defined(__APPLE__)
   /* A zero timeout, so this reports what is already queued rather than waiting
-   * for the next one. */
+   * for the next one. A vnode event carries no name, so every one of them is a
+   * change as far as this can tell. */
   struct kevent pending;
   struct timespec immediately = {0, 0};
   for (int pass = 0; pass < TSYNC_WATCH_DRAIN_PASSES; pass++) {
@@ -127,8 +160,9 @@ CAMLprim value tsync_watch_drain(value _watch_fd) {
       continue;
     if (taken <= 0)
       break;
+    reportable = 1;
   }
 #endif
 
-  CAMLreturn(Val_unit);
+  CAMLreturn(Val_bool(reportable));
 }
