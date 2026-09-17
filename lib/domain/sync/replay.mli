@@ -57,6 +57,12 @@ module type S = sig
   (** Remember these entries as handled without applying them: a rebuild has
       read the store they describe, so their effect is already in the mirror. *)
   val mark_handled : Journal.Entry_key.t list -> unit io
+
+  (** A peer's entries {!apply_foreign} stepped aside, each with why: they fail
+      here on this client's own account, not the link's, and would otherwise
+      keep every later entry from it. Left unhandled, so each pass tries them
+      again, and gone from here once one lands. *)
+  val unapplied : unit -> (Journal.Entry_key.t * string) list
 end
 
 (** The shape a consumer takes: {!S} for whichever domain it is applied to. *)

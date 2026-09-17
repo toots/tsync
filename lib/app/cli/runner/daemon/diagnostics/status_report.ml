@@ -525,6 +525,17 @@ let text json =
       if bool_of (mem f "metadataDegraded") then
         row 4 "METADATA PARKED"
           "an operation keeps failing; the metadata retry sweep tries it again";
+      (match mem f "unappliedEntries" with
+        | `Int n when n > 0 ->
+            row 4 "PEER ENTRIES UNAPPLIED"
+              (Printf.sprintf
+                 "%d could not be applied here (%s); later ones are, and \
+                  'tsync sync --full' restates the tree"
+                 n
+                 (match mem f "unappliedReason" with
+                   | `String why -> why
+                   | _ -> "?"))
+        | _ -> ());
       let queued =
         List.filter_map
           (fun (key, word) ->

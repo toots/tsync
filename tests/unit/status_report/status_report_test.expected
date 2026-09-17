@@ -24,6 +24,8 @@
           "stagedFiles": 3,
           "pendingMetadata": 2,
           "metadataDegraded": true,
+          "unappliedEntries": 1,
+          "unappliedReason": "ENOTDIR mkdir photos/2026",
           "openHandles": 2,
           "filesOpened": 41,
           "pid": 4242,
@@ -80,6 +82,8 @@
           "stagedFiles": 3,
           "pendingMetadata": 0,
           "metadataDegraded": false,
+          "unappliedEntries": 0,
+          "unappliedReason": "",
           "openHandles": 2,
           "filesOpened": 41,
           "pid": 4243,
@@ -187,6 +191,7 @@ Domain alpha
     traffic          up 2.0 KB (0 B/s), down 4.0 KB (0 B/s), 5 chunks hashed (0.0/s)
     handles          2 open, 41 since start
     METADATA PARKED  an operation keeps failing; the metadata retry sweep tries it again
+    PEER ENTRIES UNAPPLIED 1 could not be applied here (ENOTDIR mkdir photos/2026); later ones are, and 'tsync sync --full' restates the tree
     in flight        2 metadata, 3 staged
   Frontend http-proxy
     NOT ANSWERING    /run/tsync-alpha.sock: connection refused

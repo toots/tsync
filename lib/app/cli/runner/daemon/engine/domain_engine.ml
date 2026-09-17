@@ -191,6 +191,9 @@ module Make_over
       ("uploadsCompleted", `Int (Sq.completed_count ()));
       ("pendingMetadata", `Int (Mq.pending ()));
       ("metadataDegraded", `Bool (Mq.degraded ()));
+      ("unappliedEntries", `Int (List.length (Rp.unapplied ())));
+      ( "unappliedReason",
+        `String (match Rp.unapplied () with (_, why) :: _ -> why | [] -> "") );
       (* What runs unasked, answered by the running process rather than read out
          of the source: a frontend on an older build, or one driving a loop of
          its own, says so here. *)
