@@ -63,9 +63,13 @@ the failure is counted: ok
 and the bookmark did not move: ok
 nor was anything swept: ok
 
+=== a sync publishes the metadata this client owes
+  incremental(0)
+the folder's creation is published, and nothing is left owed: ok
+
 === a rebuild waits for metadata this client still owes
   refused: Failure("1 metadata operation(s) are not published yet, and a rebuild would undo them; run this again once they are")
 it is refused: ok
-and the folder is left as it was: ok
+and the mirror is left as it was: ok
 
-29 check(s), 0 failure(s)
+30 check(s), 0 failure(s)

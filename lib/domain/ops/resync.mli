@@ -31,6 +31,7 @@ module type SYNC = sig
   type 'a io
 
   module Queue : Sync_queue.OVER with type 'a io := 'a io
+  module Meta : Meta_queue.OVER with type 'a io := 'a io
   module Replay : Replay.OVER with type 'a io := 'a io
 end
 

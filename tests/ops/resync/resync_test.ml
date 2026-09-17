@@ -310,21 +310,47 @@ let () =
      (* A daemon's owed mkdir is on disk and nowhere else this process could
         drain it from; the store has never heard of the folder, so a rebuild
         would take it away. *)
-     case "a rebuild waits for metadata this client still owes";
+     (* A command run with no daemon about is the only thing publishing what
+        this client did offline, so it publishes it before reading the journal. *)
+     case "a sync publishes the metadata this client owes";
      broken := Stored_key.listed "";
      let module W = Tsync_checkout_lwt.Wal_lwt.Make (C) in
      let module J = Journal.Make (C) in
-     plant (dir_marker "owed") (marker "Z" "owed");
-     let entry_key = J.entry_key () in
-     let* () =
-       W.write entry_key
-         {
-           Tsync_checkout.Wal.ops = [`Mkdir ("owed", Some "Z")];
-           state = Tsync_checkout.Wal.Prepared;
-           attempts = 0;
-           last_error = None;
-         }
+     let owe op =
+       let entry_key = J.entry_key () in
+       let+ () =
+         W.write entry_key
+           {
+             Tsync_checkout.Wal.ops = [op];
+             state = Tsync_checkout.Wal.Prepared;
+             attempts = 0;
+             last_error = None;
+           }
+       in
+       entry_key
      in
+     plant (dir_marker "owed") (marker "Z" "owed");
+     let* (_ : Journal.Entry_key.t) = owe (`Mkdir ("owed", Some "Z")) in
+     let* outcome = run () in
+     step "%s" (describe outcome);
+     let* left = W.list () in
+     let* keys = Fs.list_journal_keys () in
+     let* published =
+       Lwt_list.exists_s
+         (fun key ->
+           let+ ops = Fs.get_journal_entry key in
+           List.mem (`Mkdir ("owed", Some "Z")) (Option.value ~default:[] ops))
+         keys
+     in
+     check "the folder's creation is published, and nothing is left owed"
+       (published && left = []);
+
+     (* A daemon's owed operation is on disk and nowhere else this process could
+        drain it from, and one parked here stays owed the same way; a rebuild
+        would undo what it names. *)
+     case "a rebuild waits for metadata this client still owes";
+     plant (dir_marker "kept") (marker "K" "kept");
+     let* entry_key = owe (`Rmdir ("ghost/x", Some "Q")) in
      let* refused =
        Lwt.catch
          (fun () ->
@@ -335,9 +361,9 @@ let () =
      in
      Option.iter (step "refused: %s") refused;
      check "it is refused" (refused <> None);
-     check "and the folder is left as it was"
-       (Sys.file_exists (dir_marker "owed"));
+     check "and the mirror is left as it was"
+       (Sys.file_exists (dir_marker "kept"));
      let* () = W.complete entry_key in
 
-     report ~expected:29 ();
+     report ~expected:30 ();
      Lwt.return_unit)
