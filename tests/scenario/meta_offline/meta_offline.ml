@@ -429,6 +429,16 @@ let () =
                (fun d -> d <> "build" && String.starts_with ~prefix:"build" d)
                (dirs @ names)));
 
+     case "a claim the link refused is made again";
+     Mq.set_paused true;
+     let* () = F.mkdir (Lk.dir "claimed") in
+     Shaky.refuse_next ~on:"put_if_absent" 1;
+     Mq.set_paused false;
+     let* published = until_io nothing_owed in
+     let* names = root_markers () in
+     check "the folder is filed on the store"
+       (published && List.mem "claimed" names);
+
      case "an operation the store refuses for good steps aside";
      Mq.set_paused true;
      let* () = F.mkdir (Lk.dir "stuck") in
@@ -451,5 +461,5 @@ let () =
      check "the retry sweep lands it, and the report clears"
        (published && List.mem "stuck" names && not (Mq.degraded ()));
 
-     report ~expected:30 ();
+     report ~expected:31 ();
      Lwt.return_unit)

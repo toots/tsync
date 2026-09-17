@@ -73,9 +73,12 @@ the local rename made no round trip, and did not wait: ok
 both are published: ok
 and the new folder did not meet the old one's name still taken: ok
 
+=== a claim the link refused is made again
+the folder is filed on the store: ok
+
 === an operation the store refuses for good steps aside
 what follows it is published: ok
 it stays owed, and is reported: ok
 the retry sweep lands it, and the report clears: ok
 
-30 check(s), 0 failure(s)
+31 check(s), 0 failure(s)

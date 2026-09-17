@@ -184,6 +184,12 @@ struct
               Io.catch
                 (fun () -> B.put_if_absent ~key:bkey ~data:candidate ())
                 (fun exn ->
+                  (* A link that failed is the caller's to retry; only a store
+                     that answered it cannot arbitrate is written to plainly. *)
+                  let* () =
+                    if Backend.classify exn = Retry.Transient then Io.fail exn
+                    else Io.return ()
+                  in
                   if not !warned_unarbitrated then begin
                     warned_unarbitrated := true;
                     Log.warn
@@ -192,7 +198,8 @@ struct
                        can strand files"
                       C.domain_name (Printexc.to_string exn)
                   end;
-                  Io.return candidate)
+                  let+ () = B.put ~key:bkey ~data:candidate () in
+                  candidate)
             in
             let winner =
               Option.fold ~none:id
