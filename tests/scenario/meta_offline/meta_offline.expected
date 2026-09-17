@@ -59,4 +59,9 @@ which follows: ok
 both are published: ok
 the file is filed in the folder under its new name, and the old one is not brought back: ok
 
-21 check(s), 0 failure(s)
+=== a peer's entry waiting on the store holds up no local operation
+the peer's fetch is out: ok
+  rename local.txt -> local2.txt: returned, 0 round trip(s), 1 owed
+the local rename made no round trip, and did not wait: ok
+
+23 check(s), 0 failure(s)

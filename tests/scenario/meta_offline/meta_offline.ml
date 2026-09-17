@@ -347,5 +347,30 @@ let () =
        && (not (List.mem "into" names))
        && back = None && inside <> []);
 
-     report ~expected:21 ();
+     (* The peer's manifest is held on the wire, so the local rename lands
+        while the entry that wants it is still being applied. *)
+     case "a peer's entry waiting on the store holds up no local operation";
+     let* () = write "local.txt" "golf" in
+     let* () = settle () in
+     let* () = Js.flush_cursor () in
+     Mq.set_paused true;
+     Sq.set_paused true;
+     Link.set_up false;
+     Link.reset ();
+     let applying = F.apply_foreign_ops [`Put ("theirs.txt", 5L)] in
+     let* out = until (fun () -> Link.calls () > 0) in
+     check "the peer's fetch is out" out;
+     let* renamed, calls =
+       offline "rename local.txt -> local2.txt" (fun () ->
+           F.rename ~src:(Lk.file "local.txt") ~dst:(Lk.file "local2.txt"))
+     in
+     check "the local rename made no round trip, and did not wait"
+       (calls = 0 && Lwt.state renamed = Lwt.Return ());
+     Link.set_up true;
+     let* () = applying in
+     Mq.set_paused false;
+     Sq.set_paused false;
+     let* () = settle () in
+
+     report ~expected:23 ();
      Lwt.return_unit)
