@@ -82,17 +82,16 @@ struct
        the store has not heard of yet, and a listing would undo it: a folder
        made here pruned, one renamed away listed back. *)
     let owed_under prefix =
-      let+ records = W.list () in
+      let+ records = W.owed_metadata () in
       let here = Logical_key.path prefix in
       let in_prefix rel =
         (match Filename.dirname rel with "." -> "" | dir -> dir) = here
       in
       List.exists
         (fun (_, (r : Wal.record)) ->
-          Wal.is_metadata r
-          && List.exists
-               (fun op -> List.exists in_prefix (Journal.keys_of_op op))
-               r.Wal.ops)
+          List.exists
+            (fun op -> List.exists in_prefix (Journal.keys_of_op op))
+            r.Wal.ops)
         records
 
     let pull prefix =

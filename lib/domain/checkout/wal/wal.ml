@@ -148,6 +148,7 @@ module type S = sig
     Journal.Entry_key.t -> (Journal.op list -> Journal.op list) -> unit io
 
   val list : unit -> (Journal.Entry_key.t * record) list io
+  val owed_metadata : unit -> (Journal.Entry_key.t * record) list io
 end
 
 module type OVER = sig
@@ -265,5 +266,9 @@ module Make (Io : Io.S) (R : RECORDS with type 'a io := 'a Io.t) = struct
           Option.map (fun key -> (key, r)) (Ek.of_string id))
       |> List.filter (fun (key, _) -> Ek.client_uuid key = uuid)
       |> List.sort (fun (a, _) (b, _) -> Ek.compare a b)
+
+    let owed_metadata () =
+      let+ records = list () in
+      List.filter (fun (_, r) -> is_metadata r) records
   end
 end

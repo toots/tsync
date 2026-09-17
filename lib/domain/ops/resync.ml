@@ -195,10 +195,8 @@ struct
        daemon's owed operations are in no queue this one could drain, and a
        rebuild restates the store's tree over the mirror they changed. *)
     let refuse_if_metadata_owed () =
-      let* records = W.list () in
-      match
-        List.length (List.filter (fun (_, r) -> Wal.is_metadata r) records)
-      with
+      let* records = W.owed_metadata () in
+      match List.length records with
         | 0 -> return_unit
         | n ->
             Io.fail
