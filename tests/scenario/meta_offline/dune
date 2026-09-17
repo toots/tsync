@@ -50,6 +50,7 @@
   tsync_sync_lwt
   tsync_core_lwt
   tsync_journal
+  tsync_manifest
   tsync_cache_layout_lwt
   yojson
   lwt

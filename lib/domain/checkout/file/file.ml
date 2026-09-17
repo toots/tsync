@@ -118,13 +118,26 @@ struct
     (* Nothing staged is ENOENT, which the sending pool takes to mean the upload
        is no longer owed: [D.sync] answers it with nothing done, and the pool
        would then publish an entry for a file that was never sent. *)
+    (* A symlink has no bytes to stage: what its upload owes is the manifest the
+       mirror already holds. *)
+    let symlink_manifest key =
+      let+ m = published key in
+      Option.bind m (fun m -> Option.map (fun _ -> m) (Manifest.symlink m))
+
     let upload ?cancel key =
       let* staged = Mfs.read key in
       match staged with
-        | None ->
-            Io.fail
-              (Unix.Unix_error (Unix.ENOENT, "upload", Logical_key.to_string key))
         | Some _ -> D.sync key ?cancel ()
+        | None -> (
+            let* link = symlink_manifest key in
+            match link with
+              | Some m ->
+                  let name = Logical_key.leaf key in
+                  St.put_manifest ~key ~data:(Manifest.body ~name m)
+              | None ->
+                  Io.fail
+                    (Unix.Unix_error
+                       (Unix.ENOENT, "upload", Logical_key.to_string key)))
 
     (* Populates the chunk store only; produces no file. *)
     let ensure_cached = D.ensure_local
@@ -311,6 +324,22 @@ struct
       let* () = delete_remote key in
       clear_local key
 
+    (* Recorded before this returns, which is what makes a crash here leave
+       something saying the upload is owed; handing it over only says who should
+       get to it first. *)
+    let owe_put key size =
+      let entry_key = J.entry_key () in
+      let record =
+        {
+          Wal.ops = [`Put (rel_key key, size)];
+          state = Wal.Prepared;
+          attempts = 0;
+          last_error = None;
+        }
+      in
+      let* () = W.write entry_key record in
+      Owed.signal W.owed (entry_key, record)
+
     let queue_put key =
       let* staged = Mfs.read_edits key in
       match staged with
@@ -318,21 +347,7 @@ struct
             Log.debug "queue_put %s: nothing staged, skipping"
               (Logical_key.to_string key);
             return_unit
-        | Some st ->
-            (* Recorded before this returns, which is what makes a crash here
-               leave something saying the upload is owed; handing it over only
-               says who should get to it first. *)
-            let entry_key = J.entry_key () in
-            let record =
-              {
-                Wal.ops = [`Put (rel_key key, st.Staged_manifest.s_size)];
-                state = Wal.Prepared;
-                attempts = 0;
-                last_error = None;
-              }
-            in
-            let* () = W.write entry_key record in
-            Owed.signal W.owed (entry_key, record)
+        | Some st -> owe_put key st.Staged_manifest.s_size
 
     (* A staged file that moves keeps the upload it was owed. The queued record
        names the old path, which the upload gives up on once the bytes have gone
@@ -371,7 +386,8 @@ struct
        its own key is what keeps one unit of work to one key across a restart. *)
     let resume_put key ~entry_key ~record =
       let* staged = Mfs.exists key in
-      if not staged then return_false
+      let* link = symlink_manifest key in
+      if (not staged) && link = None then return_false
       else
         let* () = W.write entry_key record in
         let+ () = Owed.signal W.owed (entry_key, record) in
@@ -912,12 +928,11 @@ struct
           let state =
             Manifest.make_symlink ~name ~target ~mtime:(Unix.gettimeofday ())
           in
-          let* () = St.put_manifest ~key ~data:(Manifest.body ~name state) in
+          (* Local first, like any other change: the upload queue publishes the
+             manifest the mirror holds once the store can be reached. *)
+          ignore (cancel_upload key);
           let* () = write_manifest key state in
-          let* ek =
-            Js.write_journal_entry [`Put (rel_key key, Manifest.size state)]
-          in
-          Js.bump_cursor ek)
+          owe_put key (Manifest.size state))
 
     let write_folder_id key id =
       Io.map ignore

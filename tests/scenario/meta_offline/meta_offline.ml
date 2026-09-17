@@ -225,6 +225,11 @@ let () =
            let* () = F.rename ~src:(Lk.dir "brief") ~dst:(Lk.dir "brief2") in
            F.rmdir (Lk.dir "brief2"))
      in
+     let* _, calls =
+       offline "symlink link -> papers/a.txt" (fun () ->
+           F.symlink ~target:"papers/a.txt" (Lk.file "link"))
+     in
+     check "a symlink makes no round trip" (calls = 0);
 
      case "the link comes back";
      Link.set_up true;
@@ -261,6 +266,21 @@ let () =
        ((not
            (List.exists (fun k -> List.mem k ["gone"; "brief"; "brief2"]) keys))
        && List.length trashed = 1);
+     let* link =
+       Real.get_opt
+         ~key:
+           (Stored_key.child_key ~prefix:C.domain_prefix
+              ~folder_id:Stored_key.root_id "link")
+         ()
+     in
+     check "the symlink is published, and its entry with it"
+       (List.mem "link" keys
+       && Option.fold ~none:false
+            ~some:(fun b ->
+              Tsync_manifest.Manifest.symlink
+                (Tsync_manifest.Manifest.of_string (Bigstring.to_string b))
+              = Some "papers/a.txt")
+            link);
      let* still = lookup "moved2" in
      check
        "a folder renamed before the store heard of it is filed where it is, \
@@ -372,5 +392,5 @@ let () =
      Sq.set_paused false;
      let* () = settle () in
 
-     report ~expected:23 ();
+     report ~expected:25 ();
      Lwt.return_unit)
