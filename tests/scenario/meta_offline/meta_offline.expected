@@ -79,6 +79,10 @@ the peer's read is out: ok
 the local mkdir made no round trip, and did not wait: ok
 and the peer's delete reached the file where it is now: ok
 
+=== an operation a crash interrupted is finished on the next start
+one that never started happens here and on the store, once: ok
+one whose local half was done is not done twice, and is published: ok
+
 === a refused request lets no later operation overtake
 both are published: ok
 and the new folder did not meet the old one's name still taken: ok
@@ -91,4 +95,4 @@ what follows it is published: ok
 it stays owed, and is reported: ok
 the retry sweep lands it, and the report clears: ok
 
-36 check(s), 0 failure(s)
+38 check(s), 0 failure(s)

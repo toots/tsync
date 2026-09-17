@@ -26,6 +26,8 @@ module W = Wal_lwt.Make (C)
 module Js = File_store_lwt.Make (C)
 module Lk = Logical_key.Make (C)
 module Ck = Checkout_lwt.Make (C)
+module Rp = Sync_lwt.Replay.Make (C) (F)
+module J = Journal.Make (C)
 
 let settle () = Durable_queue_lwt.settle_all ~timeout:10. ()
 
@@ -465,6 +467,28 @@ let () =
      Sq.set_paused false;
      let* () = settle () in
 
+     (* What a crash leaves is the intent, written before anything moved, and
+        no telling how far the local half got. *)
+     case "an operation a crash interrupted is finished on the next start";
+     let* () = F.mkdir (Lk.dir "halfway") in
+     let* () = settle () in
+     let* halfway = lookup "halfway" in
+     let* () = W.record (J.entry_key ()) [`Mkdir ("begun", Some "begun-id")] in
+     let* () = W.record (J.entry_key ()) [`Rmdir ("halfway", halfway)] in
+     let* () = Ck.delete_dir (Lk.dir "halfway") in
+     let* () = Rp.reconcile () in
+     let* published = until_io nothing_owed in
+     let* begun = lookup "begun" in
+     let* _, dirs = Ck.list_children ~prefix:Lk.root () in
+     let* names = root_markers () in
+     let* keys = journal_keys () in
+     let entries_for name = List.length (List.filter (( = ) name) keys) in
+     check "one that never started happens here and on the store, once"
+       (published && begun = Some "begun-id" && List.mem "begun" names
+       && entries_for "begun" = 1);
+     check "one whose local half was done is not done twice, and is published"
+       ((not (List.mem "halfway" dirs)) && not (List.mem "halfway" names));
+
      (* A request that comes back failed, where the outage above is one that
         waits: the queue retries, and what it retries must not be overtaken. *)
      case "a refused request lets no later operation overtake";
@@ -518,5 +542,5 @@ let () =
      check "the retry sweep lands it, and the report clears"
        (published && List.mem "stuck" names && not (Mq.degraded ()));
 
-     report ~expected:36 ();
+     report ~expected:38 ();
      Lwt.return_unit)
