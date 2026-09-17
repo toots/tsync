@@ -600,5 +600,31 @@ let () =
      check "the retry sweep lands it, and the report clears"
        (published && List.mem "stuck" names && not (Mq.degraded ()));
 
-     report ~expected:40 ();
+     (* Not the link and not the store: a failure of this client's own, which
+        waiting does not clear, and which at the head of a queue that keeps its
+        order would hold every later operation for as long as it kept failing. *)
+     case "an operation that fails on this client's own account steps aside";
+     let* () = write "after.txt" "kilo" in
+     let* () = settle () in
+     Mq.set_paused true;
+     let* () = F.mkdir (Lk.dir "faulty") in
+     let* () =
+       F.rename ~src:(Lk.file "after.txt") ~dst:(Lk.file "after2.txt")
+     in
+     Shaky.refuse_next ~on:"put_if_absent" ~with_:(Invalid_argument "a bug")
+       1000;
+     Mq.set_paused false;
+     let* passed =
+       until_io (fun () -> on_store ~folder_id:Stored_key.root_id "after2.txt")
+     in
+     check "what follows it is published, and it is reported"
+       (passed && Mq.degraded ());
+     Shaky.refuse_next 0;
+     let* () = Mq.rearm () in
+     let* published = until_io nothing_owed in
+     let* names = root_markers () in
+     check "and it lands once it can"
+       (published && List.mem "faulty" names && not (Mq.degraded ()));
+
+     report ~expected:42 ();
      Lwt.return_unit)
