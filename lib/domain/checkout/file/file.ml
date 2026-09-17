@@ -70,6 +70,9 @@ struct
     let meta_waiters () = Lock.has_waiters meta_mutex
     let rel_key = Logical_key.path
 
+    let local_id key =
+      Folders.lookup_id ~cache_root:C.cache_root ~domain_name:C.domain_name key
+
     (* [Mf] is the local mirror; [St] the store's own copy, which takes logical
        keys and maps them to backend keys through the layout scheme. *)
     module Mf = Mf.Make (C)
@@ -480,10 +483,7 @@ struct
           (* Read while the folder is still here: [Ck.delete_dir] takes the
              marker the id comes from, and the entry is the only place it goes
              on existing. *)
-          let* fid =
-            Folders.lookup_id ~cache_root:C.cache_root
-              ~domain_name:C.domain_name key
-          in
+          let* fid = local_id key in
           (* Refused before anything is removed rather than parked after. *)
           let* (_ : Stored_key.t) = old_marker_or_fail key in
           let* () = Ck.delete_dir key in
@@ -653,18 +653,12 @@ struct
             | Some key -> return_some key
             | None ->
                 let key = Lk.dir rel in
-                let+ held =
-                  Folders.lookup_id ~cache_root:C.cache_root
-                    ~domain_name:C.domain_name key
-                in
+                let+ held = local_id key in
                 if held = Some id then Some key else None)
 
     (* Where the store files a folder against where it is here. *)
     let placement key id =
-      let* parent =
-        Folders.lookup_id ~cache_root:C.cache_root ~domain_name:C.domain_name
-          (Logical_key.parent key)
-      in
+      let* parent = local_id (Logical_key.parent key) in
       match parent with
         | None -> Io.return `Unanchored
         | Some parent ->
@@ -763,10 +757,7 @@ struct
                     | `Taken _ ->
                         let* () =
                           with_meta (fun () ->
-                              let* still =
-                                Folders.lookup_id ~cache_root:C.cache_root
-                                  ~domain_name:C.domain_name key
-                              in
+                              let* still = local_id key in
                               if still = Some id then
                                 Io.map ignore (move_aside key)
                               else return_unit)
@@ -838,12 +829,7 @@ struct
       in
       let* requeued = rename_local ~src ~dst in
       (* Read after the move, where the folder now is. *)
-      let* dir_id =
-        if is_dir then
-          Folders.lookup_id ~cache_root:C.cache_root ~domain_name:C.domain_name
-            dst
-        else Io.return None
-      in
+      let* dir_id = if is_dir then local_id dst else Io.return None in
       let* dst_staged = Mfs.exists dst in
       (* Never published under its old name: its upload, now under the new one,
          is all it owes. *)
@@ -991,10 +977,7 @@ struct
       in
       iter_s
         (fun dir ->
-          let* known =
-            Folders.lookup_id ~cache_root:C.cache_root
-              ~domain_name:C.domain_name dir
-          in
+          let* known = local_id dir in
           match known with
             | Some _ -> return_unit
             | None -> adopt_folder_id (Logical_key.path dir))
@@ -1036,10 +1019,7 @@ struct
       let* present = Syscalls.file_exists (manifest_path dst) in
       if not present then Io.return `Free
       else
-        let+ held =
-          Folders.lookup_id ~cache_root:C.cache_root ~domain_name:C.domain_name
-            dst
-        in
+        let+ held = local_id dst in
         match (held, id) with
           | Some held, Some moving when held = moving -> `Same_folder
           | Some held, Some _ -> `Another_folder held
@@ -1092,10 +1072,7 @@ struct
       match id with
         | None -> Io.return None
         | Some id -> (
-            let+ held =
-              Folders.lookup_id ~cache_root:C.cache_root
-                ~domain_name:C.domain_name key
-            in
+            let+ held = local_id key in
             match held with Some held when held <> id -> Some held | _ -> None)
 
     (* The folder a peer created already lives here under another path: a
@@ -1118,10 +1095,7 @@ struct
     let rec local_folder key =
       if Logical_key.is_root key then Io.return key
       else
-        let* live =
-          Folders.lookup_id ~cache_root:C.cache_root ~domain_name:C.domain_name
-            key
-        in
+        let* live = local_id key in
         let* moved =
           match live with
             | Some _ -> Io.return None
@@ -1281,10 +1255,7 @@ struct
       let* k = kind key in
       if k <> `Dir then return_unit
       else
-        let* ours =
-          Folders.lookup_id ~cache_root:C.cache_root ~domain_name:C.domain_name
-            key
-        in
+        let* ours = local_id key in
         match ours with
           | Some ours -> rename_ours_aside ~dst:key ~ours
           | None -> Io.map ignore (move_aside key)
