@@ -68,6 +68,8 @@ let mount ~pid ~mount_point =
       ("reachable", `Bool true);
       ("mountPoint", `String mount_point);
       ("stagedFiles", `Int 3);
+      ("pendingMetadata", `Int 2);
+      ("metadataDegraded", `Bool true);
       ("openHandles", `Int 2);
       ("filesOpened", `Int 41);
       ("pid", `Int pid);

@@ -520,6 +520,11 @@ let text json =
         row 4 "metadata lock"
           (if bool_of (mem f "metaWaiting") then "HELD, callers waiting"
            else "held");
+      (* A parked operation stops nothing behind it, which is exactly why it goes
+         unnoticed: every later change reaches peers while this one never does. *)
+      if bool_of (mem f "metadataDegraded") then
+        row 4 "METADATA PARKED"
+          "an operation keeps failing; the metadata retry sweep tries it again";
       let queued =
         List.filter_map
           (fun (key, word) ->
@@ -528,6 +533,7 @@ let text json =
               | n -> Some (Printf.sprintf "%d %s" n word))
           [
             ("pendingUploads", "uploads");
+            ("pendingMetadata", "metadata");
             ("pendingDownloads", "downloads");
             ("stagedFiles", "staged");
           ]
