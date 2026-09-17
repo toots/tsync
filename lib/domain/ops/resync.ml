@@ -13,6 +13,7 @@ module type SYNC = sig
   type 'a io
 
   module Queue : Sync_queue.OVER with type 'a io := 'a io
+  module Meta : Meta_queue.OVER with type 'a io := 'a io
   module Replay : Replay.OVER with type 'a io := 'a io
 end
 
@@ -39,6 +40,7 @@ struct
     module F = Files.Make (C)
     module Ck = Checkout.Make (C)
     module Sq = Sync.Queue.Make (C) (F)
+    module Mq = Sync.Meta.Make (C) (F)
     module Rp = Sync.Replay.Make (C) (F)
     module Tree = Tree.Make (C)
     module W = Wal_log.Make (C)
@@ -213,8 +215,13 @@ struct
          has one to go through for the journal entry and cursor bump an upload
          owes — the same start {!Domain_engine} does for a daemon. *)
       Sq.start ~on_upload_done:(fun ~key:_ -> Io.return ());
+      Mq.start ();
       progress.on_phase "replaying local records";
       let* () = Rp.reconcile () in
+      (* Metadata first, as a daemon drains: a rename it publishes is what names
+         the file an upload behind it is for. *)
+      progress.on_phase "publishing metadata";
+      let* () = Mq.drain () in
       progress.on_phase "draining uploads";
       let* () = Sq.drain () in
       let* () = Cursor.flush_cursor () in

@@ -2,6 +2,7 @@
    replays through the queue the daemon would have used. *)
 module Sync = struct
   module Queue = Sync_lwt.Sync_queue
+  module Meta = Sync_lwt.Meta_queue
   module Replay = Sync_lwt.Replay
 end
 

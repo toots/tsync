@@ -673,7 +673,10 @@ struct
         watch_stalls t now
       end
 
+    (* A queue stopped by a drain takes work again once restarted, as a process
+       that drains more than once needs. *)
     let start ?(recover = false) t =
+      t.stopping := false;
       if recover then register_rescan (fun () -> rescan t)
       else claim t.log.Records.dir;
       t.running <-
