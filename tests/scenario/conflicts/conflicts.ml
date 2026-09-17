@@ -89,7 +89,12 @@ let () =
       conflict "d7_rmdir_vs_rmdir" ~setup:folder ~ours:[B (Rmdir "d")]
         ~theirs:[A (Rmdir "d")];
       conflict "d8_add_inside_vs_rmdir" ~setup:folder
-        ~ours:[B (write "d/new.txt" "ours"); B (Mkdir "d/sub")]
+        ~ours:
+          [
+            B (write "d/new.txt" "ours");
+            B (Mkdir "d/sub");
+            B (write "d/sub/new.txt" "ours too");
+          ]
         ~theirs:[A (Rmdir "d")];
       conflict "k1_file_vs_folder" ~setup:[]
         ~ours:[B (write "x" "a file")]

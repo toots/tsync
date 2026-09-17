@@ -529,17 +529,19 @@ struct
       if is_dir then Logical_key.dir_in parent base
       else Logical_key.file_in parent base
 
-    (* Gives the loser of a conflict a name of its own and moves it there. Free
-       locally, so a second conflict on one name does not move onto the first
-       one's copy. The caller holds the metadata lock and says what the move is
-       published as. *)
+    (* Free locally, staged files included, which the mirror does not show: a
+       second conflict on one name must not move onto the first one's copy. *)
     let aside_name key =
       let rec free n =
         let candidate = conflict_key ~n key in
         let* k = kind candidate in
-        if k = `Absent then Io.return candidate else free (n + 1)
+        let* staged = Mfs.exists candidate in
+        if k = `Absent && not staged then Io.return candidate else free (n + 1)
       in
       free 1
+
+    (* Gives the loser of a conflict a name of its own and moves it there. The
+       caller holds the metadata lock and says what the move is published as. *)
 
     let move_aside key =
       let* conflict = aside_name key in
