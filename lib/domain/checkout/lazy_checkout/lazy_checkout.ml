@@ -75,9 +75,6 @@ struct
           else delete_dir (Logical_key.dir_in prefix name))
         dirs
 
-    (* [`Fail] inside the pull rather than skipping: a listing that lost a child
-       is not evidence the child is gone, and pruning on one would delete what it
-       could not read. *)
     (* A folder something this client did under it is still owed for holds what
        the store has not heard of yet, and a listing would undo it: a folder
        made here pruned, one renamed away listed back. *)
@@ -94,6 +91,9 @@ struct
             r.Wal.ops)
         records
 
+    (* [`Fail] inside the pull rather than skipping: a listing that lost a child
+       is not evidence the child is gone, and pruning on one would delete what it
+       could not read. *)
     let pull prefix =
       let* id = folder_id prefix in
       let* owed = owed_under prefix in
