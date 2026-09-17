@@ -13,4 +13,5 @@ end
 
 include
   Data.Over (Io_lwt.Core) (Files) (Syscalls) (Io_lwt.Lock) (Io_lwt.Bounded)
+    (Io_lwt.Clock)
     (Manifests_lwt)

@@ -1,0 +1,14 @@
+
+=== a read of bytes not held here, with the link down
+  read: failed: timed out, 1 round trip(s)
+it fails within its deadline: ok
+
+=== the same read without a deadline to speak of
+  read: still waiting on the store
+is the one that holds its caller: ok
+
+=== the link comes back
+the read that waited is answered: ok
+and the next one from what it fetched, asking the store nothing: ok
+
+4 check(s), 0 failure(s)

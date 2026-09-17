@@ -59,6 +59,7 @@ type held = {
   mutable anchored : bool;
 }
 
+let read_deadline = ref 15.
 let default_pin_keep = 10. *. 86400.
 let counts : (string, held) Hashtbl.t = Hashtbl.create 4
 
@@ -83,6 +84,7 @@ module Make
     (Fs : Fs.S with type 'a io := 'a Io.t)
     (Retry : Syscalls.S with type 'a io := 'a Io.t)
     (Bounded : Bounded.S with type 'a io := 'a Io.t)
+    (Clock : Clock.S with type 'a io := 'a Io.t)
     (C : Conf.S with type 'a io = 'a Io.t)
     (F : Fetch with type 'a io := 'a Io.t) =
 struct
@@ -534,6 +536,22 @@ struct
         else Retry.utimes p now now)
       (fun _ -> return_unit)
 
+  (* Waited on apart from the work, which a timeout would otherwise cancel for
+     every reader joined to the same fetch: only this one stops waiting, and
+     the body still lands for the next read. *)
+  let within_deadline work =
+    let answer, resolve = Io.wait () in
+    Io.async (fun () ->
+        Io.catch
+          (fun () ->
+            let+ done_ = work () in
+            Io.wakeup_later resolve (Ok done_))
+          (fun exn ->
+            Io.wakeup_later resolve (Error exn);
+            return_unit));
+    let* outcome = Clock.with_timeout !read_deadline (fun () -> answer) in
+    match outcome with Ok done_ -> Io.return done_ | Error exn -> Io.fail exn
+
   (* The cap may delete a group between the fetch and the read, or mid-read, so a
      miss or short read is retried once against a freshly fetched body. A second
      failure is real and raised. *)
@@ -548,7 +566,9 @@ struct
     (* A refetch went to a backend by construction, whatever the first [ensure]
        answered. *)
     let refetch () =
-      let* f = ensure_fetched ~force:true ~group () in
+      let* f =
+        within_deadline (fun () -> ensure_fetched ~force:true ~group ())
+      in
       let+ n = attempt () in
       { bytes = n; fetched = f.pulled; from_backend = true }
     in
@@ -569,7 +589,7 @@ struct
          it costs, and leaves every read after this one with nothing to fetch at
          all. Asking for less would be paying the same round trip for a worse
          cache. *)
-      let* f = ensure_fetched ~group () in
+      let* f = within_deadline (fun () -> ensure_fetched ~group ()) in
       read_or_refetch ~from_backend:f.waited ~fetched:f.pulled
     else (
       (* Whatever else is on its way, this reader asks for its own bytes and
@@ -584,7 +604,9 @@ struct
          the record first, which is the same question the whole-group fetch
          would have been waited on to settle. *)
       let upto = min (chunk_off + want) (Manifest.Group.size group index) in
-      let* fetched = fill group ~index ~want:(chunk_off, upto) in
+      let* fetched =
+        within_deadline (fun () -> fill group ~index ~want:(chunk_off, upto))
+      in
       read_or_refetch ~fetched ~from_backend:(fetched > 0))
 
   (* Exact, so the count is set from it wherever it runs. *)

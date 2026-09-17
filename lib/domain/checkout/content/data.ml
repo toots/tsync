@@ -67,6 +67,7 @@ module Over
     (Retry : Syscalls.S with type 'a io := 'a Io.t and type fd = Fs.fd)
     (Lock : Lock.S with type 'a io := 'a Io.t)
     (Bounded : Bounded.S with type 'a io := 'a Io.t)
+    (Clock : Clock.S with type 'a io := 'a Io.t)
     (Mf : Manifests.OVER with type 'a io := 'a Io.t) =
 struct
   open Io_syntax.Make (Io)
@@ -78,7 +79,7 @@ struct
       (C : Conf.S with type 'a io = 'a Io.t)
       (R : Remote.S with type 'a io := 'a Io.t) =
   struct
-    module Cc = Chunk_cache.Make (Io) (Fs) (Retry) (Bounded) (C) (R)
+    module Cc = Chunk_cache.Make (Io) (Fs) (Retry) (Bounded) (Clock) (C) (R)
 
     (* Holding the store under its cap is a file-layer sweep, and lives beside
        the others. What stays here is the two hooks a caller of this module

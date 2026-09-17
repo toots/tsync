@@ -185,6 +185,7 @@ module Over
     (_ : Syscalls.S with type 'a io := 'a Io.t and type fd = Fs.fd)
     (_ : Lock.S with type 'a io := 'a Io.t)
     (_ : Bounded.S with type 'a io := 'a Io.t)
+    (_ : Clock.S with type 'a io := 'a Io.t)
     (_ : Manifests.OVER with type 'a io := 'a Io.t) : sig
   module Make
       (C : Conf.S with type 'a io = 'a Io.t)

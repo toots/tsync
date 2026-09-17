@@ -96,10 +96,12 @@ module Outage (Real : Backend_lwt.Store) = struct
 
   let watch ~key ~last_seen () = gate (fun () -> Real.watch ~key ~last_seen ())
 
-  (* Declared absent rather than inherited: a native batch passed through from
-     [Real] would answer while the link is down. *)
+  (* Declared absent rather than inherited: a native batch or a path on this
+     machine passed through from [Real] would answer while the link is down. *)
   let get_many = None
   let list_many = None
+  let fast_read = false
+  let local_path = None
 end
 
 module Flaky (Real : Backend_lwt.Store) = struct
@@ -145,6 +147,8 @@ module Flaky (Real : Backend_lwt.Store) = struct
 
   let get_many = None
   let list_many = None
+  let fast_read = false
+  let local_path = None
 end
 
 module Refuses : Backend_lwt.Store = struct
