@@ -61,15 +61,17 @@ let answer ~frontend ~domain ~pid ?(serves = []) ?(warnings = []) ?(jobs = [])
         ];
   }
 
-let mount ~pid ~mount_point =
+(* [parked] on one mount and not the other, so the report is seen both saying
+   so and keeping quiet. *)
+let mount ?(parked = false) ~pid ~mount_point () =
   `Assoc
     [
       ("type", `String "fuse");
       ("reachable", `Bool true);
       ("mountPoint", `String mount_point);
       ("stagedFiles", `Int 3);
-      ("pendingMetadata", `Int 2);
-      ("metadataDegraded", `Bool true);
+      ("pendingMetadata", `Int (if parked then 2 else 0));
+      ("metadataDegraded", `Bool parked);
       ("openHandles", `Int 2);
       ("filesOpened", `Int 41);
       ("pid", `Int pid);
@@ -169,8 +171,11 @@ let () =
                 [
                   ("name", `String "alpha");
                   ( "frontends",
-                    `List [mount ~pid:4242 ~mount_point:"/home/u/tsync/alpha"]
-                  );
+                    `List
+                      [
+                        mount ~parked:true ~pid:4242
+                          ~mount_point:"/home/u/tsync/alpha" ();
+                      ] );
                 ];
             ]
           ();
@@ -182,7 +187,8 @@ let () =
                 [
                   ("name", `String "beta");
                   ( "frontends",
-                    `List [mount ~pid:4243 ~mount_point:"/home/u/tsync/beta"] );
+                    `List [mount ~pid:4243 ~mount_point:"/home/u/tsync/beta" ()]
+                  );
                 ];
             ]
           ();
@@ -207,7 +213,8 @@ let () =
           ~domains:
             [
               domain_body ~name:"alpha"
-                ~frontends:[mount ~pid:4242 ~mount_point:"/home/u/tsync/alpha"]
+                ~frontends:
+                  [mount ~pid:4242 ~mount_point:"/home/u/tsync/alpha" ()]
                 ();
             ]
           ();
@@ -216,7 +223,8 @@ let () =
           ~domains:
             [
               domain_body ~name:"beta"
-                ~frontends:[mount ~pid:4242 ~mount_point:"/home/u/tsync/beta"]
+                ~frontends:
+                  [mount ~pid:4242 ~mount_point:"/home/u/tsync/beta" ()]
                 ();
             ]
           ();

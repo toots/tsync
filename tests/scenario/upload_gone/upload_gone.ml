@@ -46,12 +46,21 @@ let () =
      check "publishes no entry" (entries = []);
      let* owed = W.list () in
      check "and is no longer owed" (owed = []);
+     let module B = (val C.store : C.Store) in
+     let* manifest =
+       B.get_opt
+         ~key:
+           (Stored_key.child_key ~prefix:C.domain_prefix
+              ~folder_id:Stored_key.root_id "gone.txt")
+         ()
+     in
+     check "nor is a manifest for it on the store" (manifest = None);
 
      case "an upload with its bytes in place";
      let* () = write "kept.txt" "sent" in
      let* () = Durable_queue_lwt.settle_all ~timeout:10. () in
      let* entries = Js.list_journal_keys () in
      check "still publishes its entry" (List.length entries = 1);
-     report ~expected:4 ();
+     report ~expected:5 ();
      Lwt.return_unit);
   Scratch.cleanup root

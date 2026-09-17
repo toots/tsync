@@ -4,8 +4,9 @@ is owed: ok
   journal entries: 0
 publishes no entry: ok
 and is no longer owed: ok
+nor is a manifest for it on the store: ok
 
 === an upload with its bytes in place
 still publishes its entry: ok
 
-4 check(s), 0 failure(s)
+5 check(s), 0 failure(s)

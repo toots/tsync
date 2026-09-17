@@ -49,9 +49,10 @@ a folder renamed before the store heard of it is filed where it is, under the id
 
 === a new folder removed while its creation is being published
 the claim is out: ok
-  rmdir race: returned while the claim was out
+  rmdir race: returned, 0 round trip(s), 2 owed
   local: papers, fresh, moved2; store: fresh, moved2, papers
 the folder did not come back, here or on the store: ok
+and its removal leaves one entry pair and one trash entry at most: ok
 
 === an upload claims a folder whose creation is still owed
 the upload went ahead: ok
@@ -95,4 +96,4 @@ what follows it is published: ok
 it stays owed, and is reported: ok
 the retry sweep lands it, and the report clears: ok
 
-38 check(s), 0 failure(s)
+39 check(s), 0 failure(s)

@@ -78,8 +78,8 @@
           "reachable": true,
           "mountPoint": "/home/u/tsync/beta",
           "stagedFiles": 3,
-          "pendingMetadata": 2,
-          "metadataDegraded": true,
+          "pendingMetadata": 0,
+          "metadataDegraded": false,
           "openHandles": 2,
           "filesOpened": 41,
           "pid": 4243,
@@ -201,8 +201,7 @@ Domain beta
   Frontend fuse         pid 4243  /home/u/tsync/beta
     traffic          up 2.0 KB (0 B/s), down 4.0 KB (0 B/s), 5 chunks hashed (0.0/s)
     handles          2 open, 41 since start
-    METADATA PARKED  an operation keeps failing; the metadata retry sweep tries it again
-    in flight        2 metadata, 3 staged
+    in flight        3 staged
   Backend store (local, main)  path /srv/tsync
     reachable        yes (1 ms)
     journal          12 entries, 0 to apply
@@ -229,8 +228,7 @@ Domain alpha
   Frontend fuse         pid 4242  /home/u/tsync/alpha
     traffic          up 2.0 KB (0 B/s), down 4.0 KB (0 B/s), 5 chunks hashed (0.0/s)
     handles          2 open, 41 since start
-    METADATA PARKED  an operation keeps failing; the metadata retry sweep tries it again
-    in flight        2 metadata, 3 staged
+    in flight        3 staged
   Backend store (local, main)  path /srv/tsync
     reachable        yes (1 ms)
     journal          12 entries, 0 to apply
@@ -242,8 +240,7 @@ Domain beta
   Frontend fuse         pid 4242  /home/u/tsync/beta
     traffic          up 2.0 KB (0 B/s), down 4.0 KB (0 B/s), 5 chunks hashed (0.0/s)
     handles          2 open, 41 since start
-    METADATA PARKED  an operation keeps failing; the metadata retry sweep tries it again
-    in flight        2 metadata, 3 staged
+    in flight        3 staged
   Backend store (local, main)  path /srv/tsync
     reachable        yes (1 ms)
     journal          12 entries, 0 to apply

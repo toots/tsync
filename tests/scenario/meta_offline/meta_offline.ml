@@ -116,6 +116,28 @@ let root_markers () =
   in
   List.sort compare names
 
+let trash_count () =
+  let+ trash =
+    Real.list_prefix
+      ~prefix:
+        (Stored_key.to_string
+           (Stored_key.trash_namespace ~prefix:C.domain_prefix))
+      ()
+  in
+  List.length
+    (List.filter
+       (fun (e : Backend.file_entry) ->
+         Stored_key.is_child_object e.Backend.key)
+       trash)
+
+let on_store ~folder_id leaf =
+  let+ body =
+    Real.get_opt
+      ~key:(Stored_key.child_key ~prefix:C.domain_prefix ~folder_id leaf)
+      ()
+  in
+  body <> None
+
 let lookup rel =
   Folder_ids_lwt.lookup_id ~cache_root:root ~domain_name:C.domain_name
     (Lk.dir rel)
@@ -313,19 +335,26 @@ let () =
      let* () = Js.flush_cursor () in
      Link.set_up false;
      Link.reset ();
+     let* trashed_before = trash_count () in
      let* () = F.mkdir (Lk.dir "race") in
      let* out = until (fun () -> Link.calls () > 0) in
      check "the claim is out" out;
-     let* () = F.rmdir (Lk.dir "race") in
-     step "rmdir race: returned while the claim was out";
+     let* (_ : unit Lwt.t * int) =
+       offline "rmdir race" (fun () -> F.rmdir (Lk.dir "race"))
+     in
      Link.set_up true;
      let* () = settle () in
      let* _, dirs = Ck.list_children ~prefix:Lk.root () in
      let* names = root_markers () in
+     let* keys = journal_keys () in
+     let* trashed = trash_count () in
      step "local: %s; store: %s" (String.concat ", " dirs)
        (String.concat ", " names);
      check "the folder did not come back, here or on the store"
        ((not (List.mem "race" dirs)) && not (List.mem "race" names));
+     check "and its removal leaves one entry pair and one trash entry at most"
+       (List.length (List.filter (( = ) "race") keys) <= 2
+       && trashed - trashed_before <= 1);
 
      (* An upload publishes into its folder whether or not the folder's own
         creation has been, so it claims the name first: a peer applying the put
@@ -375,6 +404,10 @@ let () =
            Stored_key.is_child_object e.Backend.key)
          inside
      in
+     let* filed =
+       on_store ~folder_id:(Option.value moved_on ~default:"?") "loose.txt"
+     in
+     let* left = on_store ~folder_id:Stored_key.root_id "loose.txt" in
      step "objects under moved-on: %d" (List.length inside);
      step "store: %s" (String.concat ", " names);
      check "both are published" (n = 0);
@@ -383,7 +416,9 @@ let () =
         not brought back"
        (List.mem "moved-on" names
        && (not (List.mem "into" names))
-       && back = None && inside <> []);
+       && back = None
+       && List.length inside = 1
+       && filed && not left);
 
      (* The peer's manifest is held on the wire, so the local rename lands
         while the entry that wants it is still being applied. *)
@@ -542,5 +577,5 @@ let () =
      check "the retry sweep lands it, and the report clears"
        (published && List.mem "stuck" names && not (Mq.degraded ()));
 
-     report ~expected:38 ();
+     report ~expected:39 ();
      Lwt.return_unit)

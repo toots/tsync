@@ -95,7 +95,7 @@ let () =
   let highest = List.fold_left (fun acc id -> max acc (counter id)) (-1) all in
   let later = List.concat (at_once 1 (fun () -> [J.folder_id ()])) in
   check "counts on from above everything minted before"
-    (List.for_all (fun id -> counter id > highest) later);
+    (later <> [] && List.for_all (fun id -> counter id > highest) later);
 
   case "processes naming a new client at once";
   let module Fresh = Journal.Make (Fresh_conf) in
