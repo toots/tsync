@@ -28,6 +28,12 @@ val string_of_kind : kind -> string
     is waited out rather than abandoning the work. *)
 val classify : exn -> kind
 
+(** {!classify} for work done in order, where a failure that will not clear
+    holds up everything behind it. A request's failure leaves {!LOOP.with_retry}
+    as {!Failed}, saying whether the link caused it; anything else was raised on
+    this side of the link, and is [Permanent]. *)
+val classify_in_order : exn -> kind
+
 (** What to put in a log line. {!Printexc.to_string} would repeat the operation
     name the caller has already printed. *)
 val reason : exn -> string
