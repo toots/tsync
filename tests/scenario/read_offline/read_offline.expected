@@ -1,7 +1,7 @@
 
 === a read of bytes not held here, with the link down
-  read: failed: timed out, 1 round trip(s)
-it fails within its deadline: ok
+  read: failed: timed out
+it asked the store, and fails within its deadline: ok
 
 === the same read without a deadline to speak of
   read: still waiting on the store

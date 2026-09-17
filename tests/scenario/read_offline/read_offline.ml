@@ -68,8 +68,11 @@ let () =
      Link.reset ();
      let reading = read key in
      let* outcome = outcome_within 2. reading in
-     step "read: %s, %d round trip(s)" outcome (Link.calls ());
-     check "it fails within its deadline" (outcome = "failed: timed out");
+     step "read: %s" outcome;
+     (* How many requests are out is the read-ahead's to choose; that the store
+        was asked at all is what makes this a read of bytes not held. *)
+     check "it asked the store, and fails within its deadline"
+       (Link.calls () > 0 && outcome = "failed: timed out");
 
      case "the same read without a deadline to speak of";
      Tsync_checkout.Chunk_cache.read_deadline := 3600.;
