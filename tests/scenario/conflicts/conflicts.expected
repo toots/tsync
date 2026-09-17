@@ -634,7 +634,9 @@
   B: metadata paused
   B: uploads paused
   B: rename d -> e
+  B: write e/ours.txt "ours"
   A: mkdir e
+  A: write e/theirs.txt "theirs"
   A: drain
   B: sync
   B: metadata running
@@ -644,34 +646,54 @@
   B: sync
 --- tree A
   d e
+  f e/theirs.txt size=6 cached=0/1 uploaded=true etag=7e4ca1687d95decc
   d e (conflicted copy from Client B)
+  f e (conflicted copy from Client B)/ours.txt size=4 cached=0/1 uploaded=true etag=231a778d8fde60eb
 --- content A
+  e/theirs.txt = "theirs"
+  e (conflicted copy from Client B)/ours.txt = "ours"
 --- pending A
 --- tree B
   d e
+  f e/theirs.txt size=6 cached=0/1 uploaded=true etag=7e4ca1687d95decc
   d e (conflicted copy from Client B)
+  f e (conflicted copy from Client B)/ours.txt size=4 cached=0/1 uploaded=true etag=231a778d8fde60eb
 --- content B
+  e/theirs.txt = "theirs"
+  e (conflicted copy from Client B)/ours.txt = "ours"
 --- pending B
 --- kept A
   {"op":"mkdir","key":"d","id":"<folder-1>"}
   {"op":"mkdir","key":"e","id":"<folder-2>"}
+  {"op":"put","key":"e/theirs.txt","size":6}
   {"op":"rename","key":"e (conflicted copy from Client B)","src":"d","is_dir":true,"id":"<folder-1>"}
+  {"op":"put","key":"e (conflicted copy from Client B)/ours.txt","size":4}
   {"op":"rename","key":"e (conflicted copy from Client B)","src":"e","is_dir":true,"id":"<folder-1>"}
 --- kept B
   {"op":"mkdir","key":"d","id":"<folder-1>"}
   {"op":"mkdir","key":"e","id":"<folder-2>"}
+  {"op":"put","key":"e/theirs.txt","size":6}
   {"op":"rename","key":"e (conflicted copy from Client B)","src":"d","is_dir":true,"id":"<folder-1>"}
+  {"op":"put","key":"e (conflicted copy from Client B)/ours.txt","size":4}
   {"op":"rename","key":"e (conflicted copy from Client B)","src":"e","is_dir":true,"id":"<folder-1>"}
 --- backend
-  cursor = <entry-4>
+  chunk 08b13b9a7f1dcae3-2fd3462d1ebeb40a size=4
+  chunk 3a98c68f7f9f2fea-956195a803de999d size=6
+  cursor = <entry-6>
   journal <entry-1> = mkdir d
   journal <entry-2> = rename d -> e (conflicted copy from Client B) dir
   journal <entry-3> = mkdir e
-  journal <entry-4> = rename e -> e (conflicted copy from Client B) dir
+  journal <entry-4> = put e/theirs.txt 6
+  journal <entry-5> = put e (conflicted copy from Client B)/ours.txt 4
+  journal <entry-6> = rename e -> e (conflicted copy from Client B) dir
   folder e (conflicted copy from Client B) [.tsync-root/4ea0a028e4404db3-07337fd1939b827b] -> <folder-1>
   folder e [.tsync-root/e5e72e5e3bec4a78-6881790369f3a86a] -> <folder-2>
   anchor <folder-1> in .tsync-root as e (conflicted copy from Client B)
+  file ours.txt [<folder-1>/06c726b99fc97bce-6450016f2e333162] = manifest size=4 chunks=1 h1=231a778d8fde60eb h2=4fa42d78bc0cb36d
+    chunk#0 08b13b9a7f1dcae3-2fd3462d1ebeb40a size=4
   anchor <folder-2> in .tsync-root as e
+  file theirs.txt [<folder-2>/d9c786f161a1b542-6fa55e93f5aa365f] = manifest size=6 chunks=1 h1=7e4ca1687d95decc h2=e26f49d0046872c2
+    chunk#0 3a98c68f7f9f2fea-956195a803de999d size=6
 
 === d6_mkdir_vs_mkdir
   A: drain
@@ -679,7 +701,9 @@
   B: metadata paused
   B: uploads paused
   B: mkdir d
+  B: write d/ours.txt "ours"
   A: mkdir d
+  A: write d/theirs.txt "theirs"
   A: drain
   B: sync
   B: metadata running
@@ -689,31 +713,51 @@
   B: sync
 --- tree A
   d d
+  f d/theirs.txt size=6 cached=0/1 uploaded=true etag=7e4ca1687d95decc
   d d (conflicted copy from Client B)
+  f d (conflicted copy from Client B)/ours.txt size=4 cached=0/1 uploaded=true etag=231a778d8fde60eb
 --- content A
+  d/theirs.txt = "theirs"
+  d (conflicted copy from Client B)/ours.txt = "ours"
 --- pending A
 --- tree B
   d d
+  f d/theirs.txt size=6 cached=0/1 uploaded=true etag=7e4ca1687d95decc
   d d (conflicted copy from Client B)
+  f d (conflicted copy from Client B)/ours.txt size=4 cached=0/1 uploaded=true etag=231a778d8fde60eb
 --- content B
+  d/theirs.txt = "theirs"
+  d (conflicted copy from Client B)/ours.txt = "ours"
 --- pending B
 --- kept A
   {"op":"mkdir","key":"d","id":"<folder-1>"}
+  {"op":"put","key":"d/theirs.txt","size":6}
   {"op":"mkdir","key":"d (conflicted copy from Client B)","id":"<folder-2>"}
+  {"op":"put","key":"d (conflicted copy from Client B)/ours.txt","size":4}
   {"op":"rename","key":"d (conflicted copy from Client B)","src":"d","is_dir":true,"id":"<folder-2>"}
 --- kept B
   {"op":"mkdir","key":"d","id":"<folder-1>"}
+  {"op":"put","key":"d/theirs.txt","size":6}
   {"op":"mkdir","key":"d (conflicted copy from Client B)","id":"<folder-2>"}
+  {"op":"put","key":"d (conflicted copy from Client B)/ours.txt","size":4}
   {"op":"rename","key":"d (conflicted copy from Client B)","src":"d","is_dir":true,"id":"<folder-2>"}
 --- backend
-  cursor = <entry-3>
+  chunk 08b13b9a7f1dcae3-2fd3462d1ebeb40a size=4
+  chunk 3a98c68f7f9f2fea-956195a803de999d size=6
+  cursor = <entry-5>
   journal <entry-1> = mkdir d (conflicted copy from Client B)
   journal <entry-2> = mkdir d
-  journal <entry-3> = rename d -> d (conflicted copy from Client B) dir
+  journal <entry-3> = put d/theirs.txt 6
+  journal <entry-4> = put d (conflicted copy from Client B)/ours.txt 4
+  journal <entry-5> = rename d -> d (conflicted copy from Client B) dir
   folder d [.tsync-root/45f80274c9c7a7ca-6e6bfc18706e03e7] -> <folder-1>
   folder d (conflicted copy from Client B) [.tsync-root/86cccb358c24739d-d3cbefd28a81136e] -> <folder-2>
   anchor <folder-1> in .tsync-root as d
+  file theirs.txt [<folder-1>/d9c786f161a1b542-6fa55e93f5aa365f] = manifest size=6 chunks=1 h1=7e4ca1687d95decc h2=e26f49d0046872c2
+    chunk#0 3a98c68f7f9f2fea-956195a803de999d size=6
   anchor <folder-2> in .tsync-root as d (conflicted copy from Client B)
+  file ours.txt [<folder-2>/06c726b99fc97bce-6450016f2e333162] = manifest size=4 chunks=1 h1=231a778d8fde60eb h2=4fa42d78bc0cb36d
+    chunk#0 08b13b9a7f1dcae3-2fd3462d1ebeb40a size=4
 
 === d7_rmdir_vs_rmdir
   A: mkdir d
@@ -853,6 +897,7 @@
   B: metadata paused
   B: uploads paused
   B: mkdir x
+  B: write x/in.txt "inside"
   A: write x "a file"
   A: drain
   B: sync
@@ -864,31 +909,41 @@
 --- tree A
   f x size=6 cached=0/1 uploaded=true etag=5f2be1023032f366
   d x (conflicted copy from Client B)
+  f x (conflicted copy from Client B)/in.txt size=6 cached=0/1 uploaded=true etag=b243e51ac31a4008
 --- content A
   x = "a file"
+  x (conflicted copy from Client B)/in.txt = "inside"
 --- pending A
 --- tree B
   f x size=6 cached=0/1 uploaded=true etag=5f2be1023032f366
   d x (conflicted copy from Client B)
+  f x (conflicted copy from Client B)/in.txt size=6 cached=0/1 uploaded=true etag=b243e51ac31a4008
 --- content B
   x = "a file"
+  x (conflicted copy from Client B)/in.txt = "inside"
 --- pending B
 --- kept A
   {"op":"put","key":"x","size":6}
   {"op":"mkdir","key":"x (conflicted copy from Client B)","id":"<folder-1>"}
+  {"op":"put","key":"x (conflicted copy from Client B)/in.txt","size":6}
   {"op":"rename","key":"x (conflicted copy from Client B)","src":"x","is_dir":true,"id":"<folder-1>"}
 --- kept B
   {"op":"put","key":"x","size":6}
   {"op":"mkdir","key":"x (conflicted copy from Client B)","id":"<folder-1>"}
+  {"op":"put","key":"x (conflicted copy from Client B)/in.txt","size":6}
   {"op":"rename","key":"x (conflicted copy from Client B)","src":"x","is_dir":true,"id":"<folder-1>"}
 --- backend
   chunk d373a167a06d3bd4-390048f37337bbcd size=6
-  cursor = <entry-3>
+  chunk dfc8976fa829623b-80cd1fb296f91b05 size=6
+  cursor = <entry-4>
   journal <entry-1> = mkdir x (conflicted copy from Client B)
   journal <entry-2> = put x 6
-  journal <entry-3> = rename x -> x (conflicted copy from Client B) dir
+  journal <entry-3> = put x (conflicted copy from Client B)/in.txt 6
+  journal <entry-4> = rename x -> x (conflicted copy from Client B) dir
   folder x (conflicted copy from Client B) [.tsync-root/7dc8bad42bb4ea24-2263e08e6a17b5d6] -> <folder-1>
   file x [.tsync-root/eaf06c6480b2cd11-ab53714969b02f74] = manifest size=6 chunks=1 h1=5f2be1023032f366 h2=01497c58b2101670
     chunk#0 d373a167a06d3bd4-390048f37337bbcd size=6
   anchor <folder-1> in .tsync-root as x (conflicted copy from Client B)
+  file in.txt [<folder-1>/04232ee1a8e3dfb8-eca6906915022e77] = manifest size=6 chunks=1 h1=b243e51ac31a4008 h2=d6a061bc8047d6b0
+    chunk#0 dfc8976fa829623b-80cd1fb296f91b05 size=6
 

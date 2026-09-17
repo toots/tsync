@@ -81,10 +81,11 @@ let () =
         ~ours:[B (rename "d" "e")]
         ~theirs:[A (rename "d" "f")];
       conflict "d5_rename_vs_mkdir_at_destination" ~setup:folder
-        ~ours:[B (rename "d" "e")]
-        ~theirs:[A (Mkdir "e")];
-      conflict "d6_mkdir_vs_mkdir" ~setup:[] ~ours:[B (Mkdir "d")]
-        ~theirs:[A (Mkdir "d")];
+        ~ours:[B (rename "d" "e"); B (write "e/ours.txt" "ours")]
+        ~theirs:[A (Mkdir "e"); A (write "e/theirs.txt" "theirs")];
+      conflict "d6_mkdir_vs_mkdir" ~setup:[]
+        ~ours:[B (Mkdir "d"); B (write "d/ours.txt" "ours")]
+        ~theirs:[A (Mkdir "d"); A (write "d/theirs.txt" "theirs")];
       conflict "d7_rmdir_vs_rmdir" ~setup:folder ~ours:[B (Rmdir "d")]
         ~theirs:[A (Rmdir "d")];
       conflict "d8_add_inside_vs_rmdir" ~setup:folder
@@ -93,6 +94,7 @@ let () =
       conflict "k1_file_vs_folder" ~setup:[]
         ~ours:[B (write "x" "a file")]
         ~theirs:[A (Mkdir "x"); A (write "x/in.txt" "inside")];
-      conflict "k1_folder_vs_file" ~setup:[] ~ours:[B (Mkdir "x")]
+      conflict "k1_folder_vs_file" ~setup:[]
+        ~ours:[B (Mkdir "x"); B (write "x/in.txt" "inside")]
         ~theirs:[A (write "x" "a file")];
     ]
