@@ -30,7 +30,10 @@ module Over
 
     (** {!sync_once} whenever the store says the cursor is worth reading again,
         detached. What paces it is {!File_store.wait_cursor_change}, so the
-        cadence is the store's and not this module's. *)
-    val start : on_changed:(string -> unit) -> unit -> unit
+        cadence is the store's and not this module's. While [paused] answers
+        true nothing is read and nothing is applied: what a peer did is a change
+        to what this client holds, and the switch holds those. *)
+    val start :
+      ?paused:(unit -> bool) -> on_changed:(string -> unit) -> unit -> unit
   end
 end

@@ -49,4 +49,5 @@ end
 module Make
     (_ : Conf_lwt.S)
     (_ : File_ops.S with type 'a io := 'a Lwt.t)
-    (_ : Sync_queue.S with type 'a io := 'a Lwt.t) : S
+    (_ : Sync_queue.S with type 'a io := 'a Lwt.t)
+    (_ : Pause.S) : S

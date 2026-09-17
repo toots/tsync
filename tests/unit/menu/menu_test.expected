@@ -10,7 +10,7 @@ tooltip tsync — Uploading 3
         1.5 MB/s · 2h 13m left
         ---
         Stats >
-        [ ] Pause uploads -> pause true
+        [ ] Hold changes -> pause true
         ---
         Quit tsync tray -> quit
 
@@ -20,7 +20,7 @@ tooltip tsync — Daemon not running
         photos — not answering -> open photos
         ---
         Stats >
-        [ ] Pause uploads (disabled)
+        [ ] Hold changes (disabled)
         ---
         Quit tsync tray -> quit
 
@@ -38,7 +38,7 @@ tooltip tsync — Paused
         0 B sent · 500 B to go
         ---
         Stats >
-        [x] Pause uploads -> pause false
+        [x] Hold changes -> pause false
         ---
         Quit tsync tray -> quit
 
@@ -50,7 +50,7 @@ tooltip tsync — Downloading 2
         1020.4 MB sent
         ---
         Stats >
-        [ ] Pause uploads -> pause true
+        [ ] Hold changes -> pause true
         ---
         Quit tsync tray -> quit
 
@@ -67,7 +67,7 @@ tooltip tsync — Uploading 1 · Downloading 2
         1000 B sent
         ---
         Stats >
-        [ ] Pause uploads -> pause true
+        [ ] Hold changes -> pause true
         ---
         Quit tsync tray -> quit
 
@@ -83,7 +83,7 @@ tooltip tsync — Downloading 7
             … and 2 more
         ---
         Stats >
-        [ ] Pause uploads -> pause true
+        [ ] Hold changes -> pause true
         ---
         Quit tsync tray -> quit
 
@@ -93,7 +93,7 @@ tooltip tsync — No domains configured
         tsync — No domains configured
         ---
         Stats >
-        [ ] Pause uploads (disabled)
+        [ ] Hold changes (disabled)
         ---
         Quit tsync tray -> quit
 
@@ -140,7 +140,7 @@ tooltip tsync — No domains configured
       "submenu": true
     },
     {
-      "label": "Pause uploads",
+      "label": "Hold changes",
       "enabled": true,
       "indent": 0,
       "action": { "setPaused": true },

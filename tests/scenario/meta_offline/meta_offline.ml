@@ -27,6 +27,7 @@ module Js = File_store_lwt.Make (C)
 module Lk = Logical_key.Make (C)
 module Ck = Checkout_lwt.Make (C)
 module Rp = Sync_lwt.Replay.Make (C) (F)
+module Sp = Sync_lwt.Sync_poller.Make (C) (F)
 module J = Journal.Make (C)
 
 let settle () = Durable_queue_lwt.settle_all ~timeout:10. ()
@@ -34,6 +35,11 @@ let settle () = Durable_queue_lwt.settle_all ~timeout:10. ()
 let owed () =
   let+ records = W.list () in
   List.length records
+
+let read_whole key content =
+  let buf = Bigstring.create (String.length content) in
+  let+ n = F.read key buf ~offset:0L in
+  Bigstring.to_string (Bigarray.Array1.sub buf 0 n)
 
 let write rel content =
   let key = Lk.file rel in
@@ -650,11 +656,19 @@ let () =
          (* Past this client's own journal writer, which would count the
             entry as one it made and so has nothing to apply. *)
          | Some entry_key ->
-             Real.put
-               ~key:
-                 (Stored_key.in_space ~prefix:C.journal_prefix
-                    (Journal.Entry_key.relative_path entry_key))
-               ~data:(Bigstring.of_string (Journal.encode ops))
+             let* () =
+               Real.put
+                 ~key:
+                   (Stored_key.in_space ~prefix:C.journal_prefix
+                      (Journal.Entry_key.relative_path entry_key))
+                 ~data:(Bigstring.of_string (Journal.encode ops))
+                 ()
+             in
+             (* The cursor too, which is what a peer bumps and what the poller
+                waits on. *)
+             Real.put ~key:C.cursor_key
+               ~data:
+                 (Bigstring.of_string (Journal.Entry_key.to_string entry_key))
                ()
      in
      let* () = from_peer [`Mkdir ("inway/sub", Some "peer-sub")] in
@@ -673,5 +687,43 @@ let () =
        (sub = Some "peer-sub" && Rp.unapplied () = []);
      let* () = settle () in
 
-     report ~expected:44 ();
+     (* The switch a frontend flips: it holds what would change the domain, in
+        either direction, and nothing a reader is waiting on. The poller runs
+        throughout, as it does in a daemon, and is told. *)
+     case "while changes are held";
+     let* () = write "held.txt" "mike" in
+     let* () = settle () in
+     let* () = Js.flush_cursor () in
+     let held = ref true in
+     Sp.start ~paused:(fun () -> !held) ~on_changed:ignore ();
+     Mq.set_paused true;
+     Sq.set_paused true;
+     let* () = from_peer [`Mkdir ("theirs-held", Some "peer-held")] in
+     let* () = F.mkdir (Lk.dir "ours-held") in
+     let* () = F.rename ~src:(Lk.file "held.txt") ~dst:(Lk.file "held2.txt") in
+     let* () = Lwt_unix.sleep 0.3 in
+     let* names = root_markers () in
+     let* owed = owed () in
+     let* theirs = lookup "theirs-held" in
+     check "nothing of ours reaches the store"
+       (owed = 2 && not (List.mem "ours-held" names));
+     check "and what a peer did is not applied here" (theirs = None);
+     let* body = read_whole (Lk.file "held2.txt") "mike" in
+     check "while a file read here is served" (body = "mike");
+
+     case "and once they flow again";
+     held := false;
+     Mq.set_paused false;
+     Sq.set_paused false;
+     let* published = until_io nothing_owed in
+     let* applied =
+       until_io (fun () ->
+           let+ theirs = lookup "theirs-held" in
+           theirs = Some "peer-held")
+     in
+     let* names = root_markers () in
+     check "ours is published, and theirs applied"
+       (published && applied && List.mem "ours-held" names);
+
+     report ~expected:48 ();
      Lwt.return_unit)

@@ -114,7 +114,7 @@ tray_deps=$(shlibdeps tsync-tray "$tray/usr/bin/tsync-tray")
 test -n "$tray_deps"
 emit tsync-tray "$tray" "$tray_deps, tsync (= $version)" 'Sync status in the system tray
  Shows what each tsync domain is doing in the desktop notification area,
- with a menu listing the files in flight and a switch that pauses uploads.'
+ with a menu listing the files in flight and a switch that holds every change.'
 
 # The Dolphin plugin. Its own package for the reason the tray is one: it links
 # Qt and KDE Frameworks, and a GNOME desktop installing the tray should get

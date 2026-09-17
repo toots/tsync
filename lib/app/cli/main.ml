@@ -13,8 +13,6 @@ let run () =
          Cmd_start.cmd;
          Cmd_stop.cmd;
          Cmd_logs.cmd;
-         Cmd_pause.pause_uploads_cmd;
-         Cmd_pause.resume_uploads_cmd;
          Cmd_status.cmd;
          Cmd_sync.cmd;
          Cmd_data_integrity.cmd;
@@ -30,6 +28,7 @@ let run () =
          Cmd_expire.cmd;
          Cmd_gc.cmd;
        ]
+      @ Cmd_pause.pause_cmds
       @ Cmd_frontends.frontend_cmds ())
   in
   (* Every [failwith] under [Conf_parsing] is phrased for a user: print it, not

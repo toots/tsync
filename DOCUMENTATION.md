@@ -737,8 +737,8 @@ tsync config --edit            # interactive setup / editor
 tsync build-info               # compiled-in features, and the paths this binary uses
 tsync default-domain           # print the default currently in effect
 tsync default-domain <name>    # persist it for this machine (--clear to forget)
-tsync pause-uploads            # stop uploading; queued work is kept
-tsync resume-uploads           # start again
+tsync pause                    # hold every change; what is owed is kept
+tsync resume                   # let them flow again
 tsync restart                  # restart the service so it re-reads the config
 tsync start                    # mount in the foreground (the installed service runs this)
 tsync stop                     # unmount
@@ -910,8 +910,8 @@ wire.
 `tsync-tray` shows what each domain is doing in the notification area, next to
 bluetooth and wifi: an icon whose glyph says idle, transferring, paused or
 unreachable, and a menu listing the files currently in flight. Clicking a domain
-opens its folder, clicking a file selects it in the file manager, and *Pause
-uploads* is the same switch as `tsync pause-uploads` — it applies to every domain, and
+opens its folder, clicking a file selects it in the file manager, and *Pause*
+is the same switch as `tsync pause` — it applies to every domain, and
 the checkmark shows what the daemon actually did rather than what it was asked.
 
 Under each domain sit the files moving right now, uploads and downloads alike
