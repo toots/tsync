@@ -98,7 +98,8 @@ module Over (Io : Io.S) (Clock : Clock.S with type 'a io := 'a Io.t) = struct
       Io.catch
         (fun () -> Clock.with_timeout deadline snapshot)
         (fun exn ->
-          Log.warn "save_version %s: %s" (Logical_key.to_string key)
+          Log.warn "save_version %s: %s"
+            (Logical_key.to_string key)
             (Printexc.to_string exn);
           Io.return ())
 

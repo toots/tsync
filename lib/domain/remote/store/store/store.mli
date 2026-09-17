@@ -88,9 +88,9 @@ module type S = sig
     at:Folder.anchor ->
     [ `Here | `Elsewhere of Folder.anchor | `Unanchored ] io
 
-  (** The folder a marker on the store names, [None] when there is none. A
-      store that cannot answer raises instead, so an outage is not read as a
-      free name. *)
+  (** The folder a marker on the store names, [None] when there is none. A store
+      that cannot answer raises instead, so an outage is not read as a free
+      name. *)
   val marker_id_at : bkey:Stored_key.t -> string option io
 
   (** Whether the marker at [bkey] is where its folder lives. A marker the
@@ -98,7 +98,9 @@ module type S = sig
       no anchor was written before anchors were, and is taken at its marker's
       word. *)
   val filed :
-    bkey:Stored_key.t -> Folder.marker -> [ `Here | `Elsewhere of Folder.anchor ] io
+    bkey:Stored_key.t ->
+    Folder.marker ->
+    [ `Here | `Elsewhere of Folder.anchor ] io
 
   (** {2 By backend key}
 
@@ -132,6 +134,7 @@ module type S = sig
     (folder_ids:string list -> unit -> listed_folder list io) option
 
   val put_raw : bkey:Stored_key.t -> data:string -> unit io
+
   (** Delete one object by its backend key, answering whether it was there. *)
   val delete_raw : bkey:Stored_key.t -> bool io
 end

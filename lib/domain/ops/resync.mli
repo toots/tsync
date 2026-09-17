@@ -53,8 +53,7 @@ module Over
 
         [full] forces a rebuild that the bookmark would not have required. A
         rebuild is refused while metadata operations are owed, which it would
-        undo.
-        [parallelism] bounds the concurrent backend reads of the walk. *)
+        undo. [parallelism] bounds the concurrent backend reads of the walk. *)
     val run :
       ?full:bool ->
       ?progress:progress ->
