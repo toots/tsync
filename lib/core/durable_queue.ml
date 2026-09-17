@@ -402,6 +402,18 @@ struct
       Queue.push e t.jobs;
       Lock.signal t.wake
 
+    (* {!Ordered} retries at the head: pushed behind, a failing job is overtaken
+       by every job recorded after it. *)
+    let put_back t e =
+      match t.topo with
+        | Keyed _ -> enqueue t e
+        | Ordered ->
+            let behind = Queue.copy t.jobs in
+            Queue.clear t.jobs;
+            Queue.push e t.jobs;
+            Queue.transfer behind t.jobs;
+            Lock.signal t.wake
+
     let complete t id =
       Hashtbl.remove t.loaded id;
       Records.complete t.log id
@@ -535,9 +547,10 @@ struct
               (Retry.reason exn);
             complete t e.id
         | Stop ->
-            (* The record stays: it names work still owed, and something outside
-               the queue is expected to report or repair it. *)
+            (* The record stays, naming work still owed, and leaves [loaded] so
+               whoever repairs it can hand it back through {!adopt}. *)
             Log.err "%s: %s (not retrying)" t.name (Retry.reason exn);
+            Hashtbl.remove t.loaded e.id;
             Io.return ()
 
     (* An ordered queue keeps a failing job at the head, so what follows cannot
@@ -612,7 +625,7 @@ struct
               slot.cancel := false;
               slot.pending <- None;
               enqueue t next
-          | _, true -> enqueue t e
+          | _, true -> put_back t e
           | Some _, false -> (
               match t.topo with
                 | Keyed k -> Hashtbl.remove k.slots (k.key e.job)

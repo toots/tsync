@@ -1,0 +1,5 @@
+(executable
+ (flags
+  (:standard -open Tsync_core -open Tsync_core_lwt -open Tsync_test_harness))
+ (name queue_order)
+ (libraries tsync_core tsync_test_harness tsync_core_lwt lwt lwt.unix))
