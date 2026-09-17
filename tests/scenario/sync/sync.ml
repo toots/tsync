@@ -471,6 +471,10 @@ let rename_folder_with_owed_upload =
         A (Uploads `Running);
         A Drain;
         B Sync;
+        (* What a directory listing serves, which a folder holding no id is in
+           and the tree below is not. *)
+        A (ShowNames "");
+        B (ShowNames "");
       ];
   }
 

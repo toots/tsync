@@ -682,8 +682,8 @@
   {"op":"mkdir","key":"e","id":"<folder-2>"}
   {"op":"put","key":"e/theirs.txt","size":6}
   {"op":"rename","key":"e (conflicted copy from Client B)","src":"d","is_dir":true,"id":"<folder-1>"}
-  {"op":"put","key":"e (conflicted copy from Client B)/ours.txt","size":4}
   {"op":"rename","key":"e (conflicted copy from Client B)","src":"e","is_dir":true,"id":"<folder-1>"}
+  {"op":"put","key":"e (conflicted copy from Client B)/ours.txt","size":4}
 --- kept B
   {"op":"mkdir","key":"d","id":"<folder-1>"}
   {"op":"mkdir","key":"e","id":"<folder-2>"}
@@ -699,8 +699,8 @@
   journal <entry-2> = rename d -> e (conflicted copy from Client B) dir
   journal <entry-3> = mkdir e
   journal <entry-4> = put e/theirs.txt 6
-  journal <entry-5> = put e (conflicted copy from Client B)/ours.txt 4
-  journal <entry-6> = rename e -> e (conflicted copy from Client B) dir
+  journal <entry-5> = rename e -> e (conflicted copy from Client B) dir
+  journal <entry-6> = put e (conflicted copy from Client B)/ours.txt 4
   folder e (conflicted copy from Client B) [.tsync-root/4ea0a028e4404db3-07337fd1939b827b] -> <folder-1>
   folder e [.tsync-root/e5e72e5e3bec4a78-6881790369f3a86a] -> <folder-2>
   anchor <folder-1> in .tsync-root as e (conflicted copy from Client B)
@@ -749,8 +749,8 @@
   {"op":"mkdir","key":"d","id":"<folder-1>"}
   {"op":"put","key":"d/theirs.txt","size":6}
   {"op":"mkdir","key":"d (conflicted copy from Client B)","id":"<folder-2>"}
-  {"op":"put","key":"d (conflicted copy from Client B)/ours.txt","size":4}
   {"op":"rename","key":"d (conflicted copy from Client B)","src":"d","is_dir":true,"id":"<folder-2>"}
+  {"op":"put","key":"d (conflicted copy from Client B)/ours.txt","size":4}
 --- kept B
   {"op":"mkdir","key":"d","id":"<folder-1>"}
   {"op":"put","key":"d/theirs.txt","size":6}
@@ -764,8 +764,8 @@
   journal <entry-1> = mkdir d (conflicted copy from Client B)
   journal <entry-2> = mkdir d
   journal <entry-3> = put d/theirs.txt 6
-  journal <entry-4> = put d (conflicted copy from Client B)/ours.txt 4
-  journal <entry-5> = rename d -> d (conflicted copy from Client B) dir
+  journal <entry-4> = rename d -> d (conflicted copy from Client B) dir
+  journal <entry-5> = put d (conflicted copy from Client B)/ours.txt 4
   folder d [.tsync-root/45f80274c9c7a7ca-6e6bfc18706e03e7] -> <folder-1>
   folder d (conflicted copy from Client B) [.tsync-root/86cccb358c24739d-d3cbefd28a81136e] -> <folder-2>
   anchor <folder-1> in .tsync-root as d
@@ -956,8 +956,8 @@
 --- kept A
   {"op":"put","key":"x","size":6}
   {"op":"mkdir","key":"x (conflicted copy from Client B)","id":"<folder-1>"}
-  {"op":"put","key":"x (conflicted copy from Client B)/in.txt","size":6}
   {"op":"rename","key":"x (conflicted copy from Client B)","src":"x","is_dir":true,"id":"<folder-1>"}
+  {"op":"put","key":"x (conflicted copy from Client B)/in.txt","size":6}
 --- kept B
   {"op":"put","key":"x","size":6}
   {"op":"mkdir","key":"x (conflicted copy from Client B)","id":"<folder-1>"}
@@ -969,8 +969,8 @@
   cursor = <entry-4>
   journal <entry-1> = mkdir x (conflicted copy from Client B)
   journal <entry-2> = put x 6
-  journal <entry-3> = put x (conflicted copy from Client B)/in.txt 6
-  journal <entry-4> = rename x -> x (conflicted copy from Client B) dir
+  journal <entry-3> = rename x -> x (conflicted copy from Client B) dir
+  journal <entry-4> = put x (conflicted copy from Client B)/in.txt 6
   folder x (conflicted copy from Client B) [.tsync-root/7dc8bad42bb4ea24-2263e08e6a17b5d6] -> <folder-1>
   file x [.tsync-root/eaf06c6480b2cd11-ab53714969b02f74] = manifest size=6 chunks=1 h1=5f2be1023032f366 h2=01497c58b2101670
     chunk#0 d373a167a06d3bd4-390048f37337bbcd size=6

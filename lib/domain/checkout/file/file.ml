@@ -359,9 +359,10 @@ struct
        from there, so that one is cancelled and the new path queued.
 
        Only what was owed is queued again: a file still open is queued when it
-       is closed. Answers the keys queued, for a caller deciding what else the
-       move needs. *)
-    let rename_local ~src ~dst =
+       is closed. [record] is handed the keys about to be queued and writes what
+       the move itself owes first, so a peer replays the move before the puts
+       under the new path. *)
+    let rename_local ?(record = fun _ -> return_unit) ~src ~dst () =
       let from = Logical_key.path src and onto = Logical_key.path dst in
       let rebase key =
         let rel = Logical_key.path key in
@@ -384,8 +385,8 @@ struct
       in
       let* () = Mfs.rename ~src_key:src ~dst_key:dst in
       let* () = Ck.rename ~src_key:src ~dst_key:dst in
-      let+ () = iter_s queue_put owed in
-      owed
+      let* () = record owed in
+      iter_s queue_put owed
 
     (* The record already exists and already names this work; writing it under
        its own key is what keeps one unit of work to one key across a restart. *)
@@ -543,10 +544,33 @@ struct
     (* Gives the loser of a conflict a name of its own and moves it there. The
        caller holds the metadata lock and says what the move is published as. *)
 
-    let move_aside key =
+    let move_aside ?(record = fun _ -> return_unit) key =
       let* conflict = aside_name key in
-      let+ (_ : Logical_key.t list) = rename_local ~src:key ~dst:conflict in
+      let+ () =
+        rename_local
+          ~record:(fun _ -> record conflict)
+          ~src:key ~dst:conflict ()
+      in
       conflict
+
+    (* A folder sent aside, published as a rename from where the store files
+       it. *)
+    let publish_aside ~filed_at ~id key =
+      let record conflict =
+        with_journal
+          [
+            `Rename
+              Journal.
+                {
+                  src = rel_key filed_at;
+                  dst = rel_key conflict;
+                  size = None;
+                  is_dir = true;
+                  id = Some id;
+                };
+          ]
+      in
+      Io.map ignore (move_aside ~record key)
 
     (* Moving an object on the backend does not rewrite its body, so the copy at
        the new key still records the old leaf. Unconditional: the mirror is
@@ -622,24 +646,6 @@ struct
             let+ there = St.marker_id_at ~bkey in
             match there with Some other -> other <> id | None -> false)
 
-    (* Another folder took the name on the store while this rename was owed.
-       Ours takes a name of its own, locally and then as a rename of its own,
-       rather than having its marker written over the other's. *)
-    let rename_dir_aside ~src ~dst ~id =
-      let* conflict = with_meta (fun () -> move_aside dst) in
-      with_journal
-        [
-          `Rename
-            Journal.
-              {
-                src = rel_key src;
-                dst = rel_key conflict;
-                size = None;
-                is_dir = true;
-                id = Some id;
-              };
-        ]
-
     (* Where a folder whose creation is owed is now: a local rename may have
        moved it meanwhile, and it goes by its id. *)
     let current_place rel id =
@@ -696,7 +702,12 @@ struct
                   else
                     let* taken = taken_by_another ~dst ~id in
                     if taken then
-                      let* () = rename_dir_aside ~src ~dst ~id in
+                      (* Ours takes a name of its own rather than having its
+                         marker written over the other's. *)
+                      let* () =
+                        with_meta (fun () ->
+                            publish_aside ~filed_at:src ~id dst)
+                      in
                       (* Superseded by the rename to the conflicted name. *)
                       Io.fail Retry.Cancelled
                     else
@@ -823,26 +834,28 @@ struct
           ()
         else return_unit
       in
-      let* requeued = rename_local ~src ~dst in
-      (* Read after the move, where the folder now is. *)
-      let* dir_id = if is_dir then local_id dst else Io.return None in
-      let* dst_staged = Mfs.exists dst in
-      (* Never published under its old name: its upload, now under the new one,
-         is all it owes. *)
-      if List.mem dst requeued && dst_staged then return_unit
-      else
-        with_journal
-          [
-            `Rename
-              Journal.
-                {
-                  dst = rel_key dst;
-                  src = rel_key src;
-                  size;
-                  is_dir;
-                  id = dir_id;
-                };
-          ]
+      let record requeued =
+        (* Read after the move, where the folder now is. *)
+        let* dir_id = if is_dir then local_id dst else Io.return None in
+        let* dst_staged = Mfs.exists dst in
+        (* Never published under its old name: its upload, now under the new
+           one, is all it owes. *)
+        if List.mem dst requeued && dst_staged then return_unit
+        else
+          with_journal
+            [
+              `Rename
+                Journal.
+                  {
+                    dst = rel_key dst;
+                    src = rel_key src;
+                    size;
+                    is_dir;
+                    id = dir_id;
+                  };
+            ]
+      in
+      rename_local ~record ~src ~dst ()
 
     let rename ~src ~dst = with_meta (fun () -> rename_body ~src ~dst)
 
@@ -1019,27 +1032,6 @@ struct
           | Some held, Some moving when held = moving -> `Same_folder
           | Some held, Some _ -> `Another_folder held
           | _ -> `Free
-
-    (* A peer's folder is moving onto a name one of ours holds. Ours takes a name
-       of its own and publishes it, rather than the move failing on a directory
-       that is not empty and blocking every entry behind it.
-
-       Called under {!with_meta}, so the rename is recorded directly rather than
-       through {!rename}. *)
-    let rename_ours_aside ~dst ~ours =
-      let* conflict = move_aside dst in
-      with_journal
-        [
-          `Rename
-            Journal.
-              {
-                src = rel_key dst;
-                dst = rel_key conflict;
-                size = None;
-                is_dir = true;
-                id = Some ours;
-              };
-        ]
 
     (* The destination already holds the folder being moved: the rename was
        applied here once and its source came back. The source takes a conflicted
@@ -1284,7 +1276,7 @@ struct
                  (Logical_key.parent folder)
                  (Logical_key.leaf key))
           in
-          Io.map ignore (rename_local ~src:key ~dst:conflict))
+          rename_local ~src:key ~dst:conflict ())
         staged
 
     (* A folder of this client's under the name a peer's file takes: it takes a
@@ -1295,7 +1287,7 @@ struct
       else
         let* ours = local_id key in
         match ours with
-          | Some ours -> rename_ours_aside ~dst:key ~ours
+          | Some ours -> publish_aside ~filed_at:key ~id:ours key
           | None -> Io.map ignore (move_aside key)
 
     (* Failures propagate: the sync poller must not advance its high-water mark
@@ -1335,7 +1327,7 @@ struct
               let* taken = another_folder_at key id in
               let* () =
                 match taken with
-                  | Some ours -> rename_ours_aside ~dst:key ~ours
+                  | Some ours -> publish_aside ~filed_at:key ~id:ours key
                   | None -> return_unit
               in
               let* () = Ck.create_dir key in
@@ -1390,12 +1382,11 @@ struct
                         | `Same_folder ->
                             retire_stale_copy ~src:src_key ~dst:dst_key
                         | `Another_folder ours ->
-                            let* () = rename_ours_aside ~dst:dst_key ~ours in
-                            Io.map ignore
-                              (rename_local ~src:src_key ~dst:dst_key)
-                        | `Free ->
-                            Io.map ignore
-                              (rename_local ~src:src_key ~dst:dst_key)))
+                            let* () =
+                              publish_aside ~filed_at:dst_key ~id:ours dst_key
+                            in
+                            rename_local ~src:src_key ~dst:dst_key ()
+                        | `Free -> rename_local ~src:src_key ~dst:dst_key ()))
         | `Rename { Journal.src; dst; is_dir = false; _ } ->
             let* src_key = local_file reads (Lk.file src) in
             let* dst_key = local_file reads (Lk.file dst) in
@@ -1403,7 +1394,7 @@ struct
             if exists then
               unless_staged src_key (fun () ->
                   let* () = reads.adopt (`Ancestors dst) in
-                  Io.map ignore (rename_local ~src:src_key ~dst:dst_key))
+                  rename_local ~src:src_key ~dst:dst_key ())
             else
               unless_staged dst_key (fun () ->
                   (* No local src (e.g. we renamed it ourselves and published the
