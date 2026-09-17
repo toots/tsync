@@ -101,16 +101,8 @@ struct
     (* Answers the id the marker minted, which a peer resolves the folder by. *)
     let dir key =
       let* () = Ck.create_dir key in
-      let* claimed = St.claim_folder key in
-      match claimed with
-        | `Taken other ->
-            Io.fail
-              (Retry.failed ~kind:Retry.Transient ~op:"import"
-                 (Printf.sprintf "%s: the store files another folder (%s) there"
-                    (Logical_key.to_string key)
-                    other))
-        | `Held ->
-            Folder_ids.ensure_id ~mint:J.folder_id ~cache_root:C.cache_root
-              ~domain_name:C.domain_name key
+      let* () = St.ensure_claimed key in
+      Folder_ids.ensure_id ~mint:J.folder_id ~cache_root:C.cache_root
+        ~domain_name:C.domain_name key
   end
 end

@@ -38,6 +38,7 @@ module type S = sig
   val claim_folder :
     ?id:string -> Logical_key.t -> [ `Held | `Taken of string ] io
 
+  val ensure_claimed : Logical_key.t -> unit io
   val put_folder_marker : key:Logical_key.t -> unit io
   val put_anchor : folder_id:string -> parent:string -> name:string -> unit io
   val get_anchor : folder_id:string -> Folder.anchor option io
@@ -279,19 +280,20 @@ struct
                           let* () = claim_parent key in
                           claim_name ~key ~id))
 
-    (* A taken ancestor is settled by that folder's own queued creation, which
-       moves it aside, so what is filed beneath it waits rather than failing. *)
-    and claim_parent key =
-      let parent = Logical_key.parent key in
-      let* claimed = claim_folder parent in
+    (* A taken name is settled by that folder's own queued creation, which
+       moves it aside, so what waits on it is retried rather than failing. *)
+    and ensure_claimed key =
+      let* claimed = claim_folder key in
       match claimed with
         | `Held -> Io.return ()
         | `Taken other ->
             Io.fail
               (Retry.failed ~kind:Retry.Transient ~op:"claim"
                  (Printf.sprintf "%s: the store files another folder (%s) there"
-                    (Logical_key.to_string parent)
+                    (Logical_key.to_string key)
                     other))
+
+    and claim_parent key = ensure_claimed (Logical_key.parent key)
 
     (* Only a caller entitled to bring a folder into existence: the marker a
        claim persists re-creates the local directory the key names. *)
