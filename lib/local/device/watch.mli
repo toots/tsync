@@ -22,9 +22,16 @@ val open_dir : string -> t option
 val fd : t -> Unix.file_descr
 
 (** Consume whatever made {!fd} readable, so the next wait is about the next
-    change. What the events said is discarded: a name would not answer the
-    question the caller is about to ask the store anyway. *)
-val drain : t -> unit
+    change, answering whether any of it was a change at all.
+
+    What an event names answers no question the caller does not have to ask the
+    store regardless, with one exception it cannot do without: a name this
+    process writes for its own scratch. A read takes a reflink snapshot through
+    a temp file in the object's own directory, so reporting those wakes the
+    reader that made them, which reads again. [false] is that and nothing else.
+
+    A platform whose events carry no name answers [true] throughout. *)
+val drain : t -> bool
 
 (** Nobody in the daemon calls this: a store watches one directory for the life
     of the process, so there is nothing to reclaim. It is here because a watcher
