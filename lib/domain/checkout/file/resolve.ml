@@ -15,21 +15,15 @@ type facts =
       ours_owed : bool;
       source : [ `At_path | `By_id | `Gone ];
       already_there : bool;
-      staged_under : bool;
       destination : [ `Free | `Same_folder | `Another_folder ];
     }
-  | Rename_file of {
-      source_here : bool;
-      staged_source : bool;
-      staged_destination : bool;
-    }
+  | Rename_file of { source_here : bool; staged_destination : bool }
 
 type reason =
   | Already_applied
   | Ours_publishes_later
   | Held_by_another
   | Nothing_to_move
-  | Unpublished_work_here
 
 type action =
   | Retarget_our_rename
@@ -64,8 +58,10 @@ let decide = function
         (* F9. *)
         @ when_ (staged && not renamed_onto) Our_staged_file_aside
         @ [Write_theirs])
-  | Delete { staged } ->
-      Apply (when_ staged Our_staged_file_aside @ [Remove_file])
+  (* F12: an edit outlives a removal the way a rename does in F5, under its
+     own name, nothing else holding it. *)
+  | Delete { staged = true } -> Skip Ours_publishes_later
+  | Delete { staged = false } -> Apply [Remove_file]
   | Mkdir { lives_elsewhere = true; _ } -> Skip Already_applied
   | Mkdir { staged_file; another_folder; _ } ->
       Apply
@@ -82,25 +78,23 @@ let decide = function
   | Rename_folder { ours_owed = true; _ } -> Skip Ours_publishes_later
   | Rename_folder { source = `Gone; _ } -> Skip Nothing_to_move
   | Rename_folder { already_there = true; _ } -> Skip Already_applied
-  | Rename_folder { staged_under = true; _ } -> Skip Unpublished_work_here
   | Rename_folder { destination = `Same_folder; _ } ->
       Apply [Retire_stale_source]
   (* D5. *)
   | Rename_folder { destination = `Another_folder; _ } ->
       Apply [Our_folder_aside `Published_as_rename; Move_folder]
+  (* D9: what is staged under the folder moves with it, as D3 mirrored. *)
   | Rename_folder { destination = `Free; _ } -> Apply [Move_folder]
-  | Rename_file { source_here = true; staged_source = true; _ } ->
-      Skip Unpublished_work_here
-  | Rename_file { source_here = true; _ } -> Apply [Move_file]
-  | Rename_file { source_here = false; staged_destination = true; _ } ->
-      Skip Unpublished_work_here
-  | Rename_file { source_here = false; _ } ->
-      Apply [Adopt_theirs_at_destination]
+  (* F10: staged bytes move with their file, as F4 mirrored. F11: ours under
+     the destination is another file, as F7 mirrored. *)
+  | Rename_file { source_here; staged_destination } ->
+      Apply
+        (when_ staged_destination Our_staged_file_aside
+        @ [(if source_here then Move_file else Adopt_theirs_at_destination)])
 
 let clashed = function
   | Skip (Already_applied | Nothing_to_move) -> false
-  | Skip (Ours_publishes_later | Held_by_another | Unpublished_work_here) ->
-      true
+  | Skip (Ours_publishes_later | Held_by_another) -> true
   | Apply actions ->
       List.exists
         (function
@@ -143,8 +137,7 @@ let facts_to_string = function
         | `By_id -> "found by its id"
         | `At_path -> "looked for at its path"
         | `Held_by_another -> "its path held by another folder")
-  | Rename_folder
-      { ours_owed; source; already_there; staged_under; destination } ->
+  | Rename_folder { ours_owed; source; already_there; destination } ->
       "rename folder: "
       ^ String.concat ", "
           ((match source with
@@ -156,13 +149,11 @@ let facts_to_string = function
             | `Same_folder -> ["destination holds the same folder"]
             | `Another_folder -> ["destination holds another folder"])
           @ flag "our own op on it owed" ours_owed
-          @ flag "already there" already_there
-          @ flag "staged under it" staged_under)
-  | Rename_file { source_here; staged_source; staged_destination } ->
+          @ flag "already there" already_there)
+  | Rename_file { source_here; staged_destination } ->
       "rename file: "
       ^ String.concat ", "
           ([(if source_here then "source here" else "source not here")]
-          @ flag "source staged" staged_source
           @ flag "destination staged" staged_destination)
 
 let reason_to_string = function
@@ -170,7 +161,6 @@ let reason_to_string = function
   | Ours_publishes_later -> "ours publishes later"
   | Held_by_another -> "held by another folder"
   | Nothing_to_move -> "nothing to move"
-  | Unpublished_work_here -> "unpublished work here"
 
 let action_to_string = function
   | Retarget_our_rename -> "ours aside, its rename retargeted"

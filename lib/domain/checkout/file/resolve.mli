@@ -41,24 +41,18 @@ type facts =
           (** An op of this client's on the folder is not published yet. *)
       source : [ `At_path | `By_id | `Gone ];
       already_there : bool;
-      staged_under : bool;
       destination : [ `Free | `Same_folder | `Another_folder ];
     }
-  | Rename_file of {
-      source_here : bool;
-      staged_source : bool;
-      staged_destination : bool;
-    }
+  | Rename_file of { source_here : bool; staged_destination : bool }
 
 type reason =
   | Already_applied
   | Ours_publishes_later
-      (** This client's own op on the folder follows on the store, and whichever
-          lands last is where the folder ends up everywhere. *)
+      (** This client's own op on the same thing follows on the store, and
+          whichever lands last is what everyone ends with. *)
   | Held_by_another
       (** The name is another folder's, which the op is not on. *)
   | Nothing_to_move
-  | Unpublished_work_here
 
 type action =
   | Retarget_our_rename
