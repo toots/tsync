@@ -230,10 +230,15 @@ extension on macOS):
   "frontends": ["fuse"], "backends": [...] }
 ```
 
-Two machines editing the *same file* at once resolve last-writer-wins. Concurrent renames
-and delete/rename races leave a copy beside the original, named after the machine that
-lost — `report (conflicted copy from laptop).pdf`, extension kept so it still opens. That
-name is the `Client name` from step 2.
+tsync is built for one person at several machines, who mostly works in one place at a
+time. When work done in two places does meet, it is settled at once, the same way on every
+machine, and without losing anything: changes that do not clash are simply both applied —
+a file you renamed here keeps the edit made there. When two things end up wanting one
+name, the one published second keeps its content under a name of its own, named after its
+machine — `report (conflicted copy from laptop).pdf`, extension kept so it still opens,
+and likewise for a folder. That name is the `Client name` from step 2. Only two edits to
+the *same file*, both already uploaded, resolve last-writer-wins, the other kept in the
+file's version history.
 
 ## 7. Run tsync as a server for your network
 

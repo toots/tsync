@@ -112,7 +112,6 @@ struct
       val meta_locked : unit -> bool
       val meta_waiters : unit -> bool
       val local_id : t -> string option Io.t
-      val key_of_id : string -> t option Io.t
 
       val whereabouts :
         t ->
