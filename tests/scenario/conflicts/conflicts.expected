@@ -801,6 +801,7 @@
   B: uploads paused
   B: write d/new.txt "ours"
   B: mkdir d/sub
+  B: write d/sub/new.txt "ours too"
   A: rmdir d
   A: drain
   B: sync
@@ -810,31 +811,41 @@
   A: sync
   B: sync
 --- tree A
+  f new (conflicted copy 2 from Client B).txt size=8 cached=0/1 uploaded=true etag=e9f2b867f2c2924c
   f new (conflicted copy from Client B).txt size=4 cached=0/1 uploaded=true etag=231a778d8fde60eb
 --- content A
+  new (conflicted copy 2 from Client B).txt = "ours too"
   new (conflicted copy from Client B).txt = "ours"
 --- pending A
 --- tree B
+  f new (conflicted copy 2 from Client B).txt size=8 cached=0/1 uploaded=true etag=e9f2b867f2c2924c
   f new (conflicted copy from Client B).txt size=4 cached=0/1 uploaded=true etag=231a778d8fde60eb
 --- content B
+  new (conflicted copy 2 from Client B).txt = "ours too"
   new (conflicted copy from Client B).txt = "ours"
 --- pending B
 --- kept A
   {"op":"mkdir","key":"d","id":"<folder-1>"}
   {"op":"rmdir","key":"d","id":"<folder-1>"}
   {"op":"put","key":"new (conflicted copy from Client B).txt","size":4}
+  {"op":"put","key":"new (conflicted copy 2 from Client B).txt","size":8}
 --- kept B
   {"op":"mkdir","key":"d","id":"<folder-1>"}
   {"op":"rmdir","key":"d","id":"<folder-1>"}
   {"op":"put","key":"new (conflicted copy from Client B).txt","size":4}
+  {"op":"put","key":"new (conflicted copy 2 from Client B).txt","size":8}
 --- backend
   chunk 08b13b9a7f1dcae3-2fd3462d1ebeb40a size=4
-  cursor = <entry-3>
+  chunk 2b3186965d6826ed-98542a86b9d8a1e8 size=8
+  cursor = <entry-4>
   journal <entry-1> = mkdir d
   journal <entry-2> = rmdir d
   journal <entry-3> = put new (conflicted copy from Client B).txt 4
+  journal <entry-4> = put new (conflicted copy 2 from Client B).txt 8
   file new (conflicted copy from Client B).txt [.tsync-root/2d3abc94b32f348a-4d5738a220e7e3b2] = manifest size=4 chunks=1 h1=231a778d8fde60eb h2=4fa42d78bc0cb36d
     chunk#0 08b13b9a7f1dcae3-2fd3462d1ebeb40a size=4
+  file new (conflicted copy 2 from Client B).txt [.tsync-root/b3fd203a71a522e2-b1f9261aa62c3db1] = manifest size=8 chunks=1 h1=e9f2b867f2c2924c h2=912d4a74667fab49
+    chunk#0 2b3186965d6826ed-98542a86b9d8a1e8 size=8
   trash d -> <folder-1>
   anchor <folder-1> in .tsync-trash as d
 
