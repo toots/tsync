@@ -470,32 +470,6 @@ struct
               let+ () = write_folder_id key fid in
               `Backend_half))
 
-    (* The folder already lives at its new place by the time this runs, its
-       anchor and marker written, so a delete that found nothing costs no
-       correctness: whatever sits at the old key is disowned by the anchor and
-       skipped by every reader until a repair removes it. Said out loud all the
-       same, being a store that did not do what it was asked. *)
-    let remove_old_marker key bkey ~id =
-      let* there = St.marker_id_at ~bkey in
-      match there with
-        | Some other when other <> id ->
-            (* Another folder has taken the name since, and its marker is not
-               this one's to remove. *)
-            Log.info "%s: the marker at %s now names %s, not %s; left in place"
-              (Logical_key.to_string key)
-              (Stored_key.to_string bkey)
-              other id;
-            return_unit
-        | Some _ ->
-            let+ (_ : bool) = St.delete_raw ~bkey in
-            ()
-        | None ->
-            Log.err
-              "%s: the store held no marker at %s; nothing was left behind"
-              (Logical_key.to_string key)
-              (Stored_key.to_string bkey);
-            return_unit
-
     (* O(1) delete: move the parent marker into the trash namespace. The subtree
        stays on the backend for undo, dropped later by [expire] and its chunks
        reclaimed by [gc]. *)
@@ -589,238 +563,6 @@ struct
         (fun () ->
           let+ (_ : Logical_key.t list) = rename_local ~src:key ~dst:conflict in
           `Backend_half)
-
-    (* Moving an object on the backend does not rewrite its body, so the copy at
-       the new key still records the old leaf. Unconditional: the mirror is
-       already stamped by the time this runs, so its body cannot be used to detect
-       whether the backend's needs it. *)
-    let resync_manifest_name key =
-      let name = Logical_key.leaf key in
-      let* m = published key in
-      match m with
-        | Some man -> St.put_manifest ~key ~data:(Manifest.body ~name man)
-        | None -> return_unit
-
-    (* Whether the store was ever told of a folder: an anchor anywhere, or, for
-       one written before anchors were, its marker where the op found it. *)
-    let ever_published ~bkey id =
-      let* anchor = St.get_anchor ~folder_id:id in
-      match anchor with
-        | Some _ -> return_true
-        | None ->
-            let+ there = St.marker_id_at ~bkey in
-            there = Some id
-
-    (* Answers whether there was anything to retire: a folder removed before
-       the store heard of it leaves nothing there, and one already in the trash
-       was retired by a peer's removal. *)
-    let rmdir_remote rel fid =
-      let key = Lk.dir rel in
-      let name = Filename.basename rel in
-      let* old_marker = old_marker_or_fail key in
-      let* anchor = St.get_anchor ~folder_id:fid in
-      let* published =
-        match anchor with
-          | Some a when Folder.in_trash a -> return_false
-          | _ -> ever_published ~bkey:old_marker fid
-      in
-      if not published then return_false
-      else (
-        let trash_key =
-          Stored_key.under
-            (Stored_key.trash_namespace ~prefix:C.domain_prefix)
-            (Id.short ())
-        in
-        let marker = Folder.trash_marker_to_string ~name ~id:fid ~path:rel in
-        (* The entry before the anchor, so a folder anchored to the trash always
-           has one; the anchor before the live marker goes, so the marker is
-           stale from here whether or not its delete lands. *)
-        let* () = St.put_raw ~bkey:trash_key ~data:marker in
-        let* () =
-          St.put_anchor ~folder_id:fid ~parent:Stored_key.trash_id ~name
-        in
-        let+ () = remove_old_marker key old_marker ~id:fid in
-        true)
-
-    (* A peer removed or moved the source while the rename was owed, so there is
-       nothing on the store to move: the file is published where it is here,
-       under the name it was given, which clashes with nothing. *)
-    let settle_rename_conflict dst exn =
-      let* m = Mf.current dst in
-      match m with
-        (* Never reached the backend: its upload is all it owes. *)
-        | Some (`Staged _) -> queue_put dst
-        | Some (`Published m) -> publish_manifest dst m
-        | None -> Io.fail exn
-
-    (* Whether the store already files a different folder under [dst]'s name. *)
-    let taken_by_another ~dst ~id =
-      let* bkey = folder_marker_bkey dst in
-      match bkey with
-        | None -> return_false
-        | Some bkey -> (
-            let+ there = St.holder_at ~bkey in
-            match there with Some other -> other <> id | None -> false)
-
-    (* Where a folder whose creation is owed is now: a local rename may have
-       moved it meanwhile, and it goes by its id. *)
-    let current_place rel id =
-      with_meta (fun () ->
-          let* found = key_of_id id in
-          match found with
-            | Some key -> return_some key
-            | None ->
-                let key = Lk.dir rel in
-                let+ held = local_id key in
-                if held = Some id then Some key else None)
-
-    (* Where the store files a folder against where it is here. *)
-    let placement key id =
-      let* parent = local_id (Logical_key.parent key) in
-      match parent with
-        | None -> Io.return `Unanchored
-        | Some parent ->
-            St.placed ~folder_id:id
-              ~at:{ Folder.parent; name = Logical_key.leaf key }
-
-    (* Answers the rename to publish, if any. A folder goes by its id to where it
-       is here now, which a later local move or a conflict may have changed
-       since this was recorded; one that is gone here, or that the store never
-       heard of, has nothing to move. *)
-    let rename_remote (r : Journal.rename_op) =
-      let is_dir = r.Journal.is_dir in
-      let key rel = if is_dir then Lk.dir rel else Lk.file rel in
-      let src = key r.Journal.src in
-      let move () =
-        if is_dir then
-          (* A directory's backend keys hang off its folder id, which travelled
-             with the local [.tsync-dir] marker: only the parent's marker moves.
-             A file's key encodes its leaf, so the object itself moves. *)
-          let* id =
-            match r.Journal.id with
-              | Some id -> Io.return id
-              | None -> St.ensure_folder_id (key r.Journal.dst)
-          in
-          let* here = current_place r.Journal.dst id in
-          match here with
-            | None -> Io.return None
-            | Some dst ->
-                let* placed = placement dst id in
-                (* Already filed where it is: a creation published after this
-                   rename was recorded put it there, under a conflicted name if
-                   this one was taken, and there is nothing left to move. *)
-                if placed = `Here then
-                  return_some (`Rename { r with Journal.dst = rel_key dst })
-                else
-                  let* old_marker = old_marker_or_fail src in
-                  let* published = ever_published ~bkey:old_marker id in
-                  if not published then Io.return None
-                  else
-                    let* taken = taken_by_another ~dst ~id in
-                    if taken then
-                      (* Ours takes a name of its own rather than having its
-                         marker written over the other's. *)
-                      let* () =
-                        with_meta (fun () ->
-                            publish_aside ~filed_at:src ~id dst)
-                      in
-                      (* Superseded by the rename to the conflicted name. *)
-                      Io.fail Retry.Cancelled
-                    else
-                      (* The new place first, anchor and marker, then the old
-                         marker: a crash between the two leaves a stale marker
-                         readers skip, not a folder nobody lists. *)
-                      let* () = St.put_folder_marker ~key:dst in
-                      let+ () = remove_old_marker src old_marker ~id in
-                      Some (`Rename { r with Journal.dst = rel_key dst })
-        else (
-          let dst = key r.Journal.dst in
-          let* () = save_version src in
-          let* () = Js.rename_file ~src_key:src ~dst_key:dst in
-          let+ () = resync_manifest_name dst in
-          Some (`Rename r))
-      in
-      Io.catch move (fun exn ->
-          (* A directory's move cannot find its source gone: its marker is put
-             unconditionally, so a failure there is the store's. *)
-          if is_dir then Io.fail exn
-          else (
-            let dst = key r.Journal.dst in
-            let* src_head = Js.head_manifest_opt ~key:src in
-            if Option.is_some src_head then Io.fail exn
-            else
-              let* dst_head = Js.head_manifest_opt ~key:dst in
-              match dst_head with
-                (* The move itself landed, and what failed came after it. *)
-                | Some _ -> return_some (`Rename r)
-                | None ->
-                    let* () = settle_rename_conflict dst exn in
-                    (* The move the record names cannot happen, and what
-                       replaced it is queued or published under its own
-                       entry. *)
-                    Io.fail Retry.Cancelled))
-
-    (* Published where the folder now is, or not at all: a folder removed
-       before the store heard of it is not brought back, and one the store
-       already files elsewhere was moved by an op that says so. A name another
-       folder took sends ours aside under a conflicted name, same id, and it is
-       claimed there. *)
-    let rec mkdir_remote rel id =
-      let* place = current_place rel id in
-      match place with
-        | None -> Io.return []
-        | Some key -> (
-            let* placed = placement key id in
-            match placed with
-              | `Elsewhere _ -> Io.return []
-              | `Here | `Unanchored -> (
-                  let* claimed = St.claim_folder ~id key in
-                  match claimed with
-                    | `Held -> Io.return [`Mkdir (rel_key key, Some id)]
-                    | `Taken _ ->
-                        let* () =
-                          with_meta (fun () ->
-                              let* still = local_id key in
-                              if still = Some id then
-                                Io.map ignore (move_aside key)
-                              else return_unit)
-                        in
-                        mkdir_remote rel id))
-
-    (* The backend half of ops whose local half the caller has already applied,
-       which is all the metadata queue owes, answering the ops to publish in
-       their place. *)
-    let backend_op op =
-      match op with
-        (* A put's bytes and its entry are the upload queue's. *)
-        | `Put _ -> Io.return [op]
-        | `Delete rel -> (
-            let* now = kind (Lk.file rel) in
-            match now with
-              (* The name holds a file again: a peer's, which replaced the one
-                 removed and outlives the removal, or this client's own, which
-                 its upload publishes. *)
-              | `File -> Io.return []
-              | `Dir | `Absent ->
-                  let+ () = delete_remote (Lk.file rel) in
-                  [op])
-        | `Mkdir (rel, Some id) -> mkdir_remote rel id
-        | `Mkdir (rel, None) ->
-            let+ () = St.put_folder_marker ~key:(Lk.dir rel) in
-            [op]
-        | `Rmdir (rel, Some fid) ->
-            let+ published = rmdir_remote rel fid in
-            if published then [op] else []
-        | `Rmdir (rel, None) ->
-            Log.err "rmdir %s: the entry carries no folder id" rel;
-            Io.return [op]
-        | `Rename r ->
-            let+ published = rename_remote r in
-            Option.to_list published
-
-    let backend_ops ops =
-      let+ published = map_s backend_op ops in
-      List.concat published
 
     let rename_body ~src ~dst =
       let* k = kind src in
@@ -972,35 +714,301 @@ struct
           let* () = write_manifest key state in
           owe_put key (Manifest.size state))
 
-    (* Adopt the id from the backend marker, for a folder no op named: resolving
+    (* What the metadata queue owes the store for ops already applied here. *)
+    module Backend_half = struct
+      (* The folder already lives at its new place by the time this runs, its
+       anchor and marker written, so a delete that found nothing costs no
+       correctness: whatever sits at the old key is disowned by the anchor and
+       skipped by every reader until a repair removes it. Said out loud all the
+       same, being a store that did not do what it was asked. *)
+      let remove_old_marker key bkey ~id =
+        let* there = St.marker_id_at ~bkey in
+        match there with
+          | Some other when other <> id ->
+              (* Another folder has taken the name since, and its marker is not
+               this one's to remove. *)
+              Log.info
+                "%s: the marker at %s now names %s, not %s; left in place"
+                (Logical_key.to_string key)
+                (Stored_key.to_string bkey)
+                other id;
+              return_unit
+          | Some _ ->
+              let+ (_ : bool) = St.delete_raw ~bkey in
+              ()
+          | None ->
+              Log.err
+                "%s: the store held no marker at %s; nothing was left behind"
+                (Logical_key.to_string key)
+                (Stored_key.to_string bkey);
+              return_unit
+
+      (* Moving an object on the backend does not rewrite its body, so the copy at
+       the new key still records the old leaf. Unconditional: the mirror is
+       already stamped by the time this runs, so its body cannot be used to detect
+       whether the backend's needs it. *)
+      let resync_manifest_name key =
+        let name = Logical_key.leaf key in
+        let* m = published key in
+        match m with
+          | Some man -> St.put_manifest ~key ~data:(Manifest.body ~name man)
+          | None -> return_unit
+
+      (* Whether the store was ever told of a folder: an anchor anywhere, or, for
+       one written before anchors were, its marker where the op found it. *)
+      let ever_published ~bkey id =
+        let* anchor = St.get_anchor ~folder_id:id in
+        match anchor with
+          | Some _ -> return_true
+          | None ->
+              let+ there = St.marker_id_at ~bkey in
+              there = Some id
+
+      (* Answers whether there was anything to retire: a folder removed before
+       the store heard of it leaves nothing there, and one already in the trash
+       was retired by a peer's removal. *)
+      let rmdir_remote rel fid =
+        let key = Lk.dir rel in
+        let name = Filename.basename rel in
+        let* old_marker = old_marker_or_fail key in
+        let* anchor = St.get_anchor ~folder_id:fid in
+        let* published =
+          match anchor with
+            | Some a when Folder.in_trash a -> return_false
+            | _ -> ever_published ~bkey:old_marker fid
+        in
+        if not published then return_false
+        else (
+          let trash_key =
+            Stored_key.under
+              (Stored_key.trash_namespace ~prefix:C.domain_prefix)
+              (Id.short ())
+          in
+          let marker = Folder.trash_marker_to_string ~name ~id:fid ~path:rel in
+          (* The entry before the anchor, so a folder anchored to the trash always
+           has one; the anchor before the live marker goes, so the marker is
+           stale from here whether or not its delete lands. *)
+          let* () = St.put_raw ~bkey:trash_key ~data:marker in
+          let* () =
+            St.put_anchor ~folder_id:fid ~parent:Stored_key.trash_id ~name
+          in
+          let+ () = remove_old_marker key old_marker ~id:fid in
+          true)
+
+      (* A peer removed or moved the source while the rename was owed, so there is
+       nothing on the store to move: the file is published where it is here,
+       under the name it was given, which clashes with nothing. *)
+      let settle_rename_conflict dst exn =
+        let* m = Mf.current dst in
+        match m with
+          (* Never reached the backend: its upload is all it owes. *)
+          | Some (`Staged _) -> queue_put dst
+          | Some (`Published m) -> publish_manifest dst m
+          | None -> Io.fail exn
+
+      (* Whether the store already files a different folder under [dst]'s name. *)
+      let taken_by_another ~dst ~id =
+        let* bkey = folder_marker_bkey dst in
+        match bkey with
+          | None -> return_false
+          | Some bkey -> (
+              let+ there = St.holder_at ~bkey in
+              match there with Some other -> other <> id | None -> false)
+
+      (* Where a folder whose creation is owed is now: a local rename may have
+       moved it meanwhile, and it goes by its id. *)
+      let current_place rel id =
+        with_meta (fun () ->
+            let* found = key_of_id id in
+            match found with
+              | Some key -> return_some key
+              | None ->
+                  let key = Lk.dir rel in
+                  let+ held = local_id key in
+                  if held = Some id then Some key else None)
+
+      (* Where the store files a folder against where it is here. *)
+      let placement key id =
+        let* parent = local_id (Logical_key.parent key) in
+        match parent with
+          | None -> Io.return `Unanchored
+          | Some parent ->
+              St.placed ~folder_id:id
+                ~at:{ Folder.parent; name = Logical_key.leaf key }
+
+      (* Answers the rename to publish, if any. A folder goes by its id to where it
+       is here now, which a later local move or a conflict may have changed
+       since this was recorded; one that is gone here, or that the store never
+       heard of, has nothing to move. *)
+      let rename_remote (r : Journal.rename_op) =
+        let is_dir = r.Journal.is_dir in
+        let key rel = if is_dir then Lk.dir rel else Lk.file rel in
+        let src = key r.Journal.src in
+        let move () =
+          if is_dir then
+            (* A directory's backend keys hang off its folder id, which travelled
+             with the local [.tsync-dir] marker: only the parent's marker moves.
+             A file's key encodes its leaf, so the object itself moves. *)
+            let* id =
+              match r.Journal.id with
+                | Some id -> Io.return id
+                | None -> St.ensure_folder_id (key r.Journal.dst)
+            in
+            let* here = current_place r.Journal.dst id in
+            match here with
+              | None -> Io.return None
+              | Some dst ->
+                  let* placed = placement dst id in
+                  (* Already filed where it is: a creation published after this
+                   rename was recorded put it there, under a conflicted name if
+                   this one was taken, and there is nothing left to move. *)
+                  if placed = `Here then
+                    return_some (`Rename { r with Journal.dst = rel_key dst })
+                  else
+                    let* old_marker = old_marker_or_fail src in
+                    let* published = ever_published ~bkey:old_marker id in
+                    if not published then Io.return None
+                    else
+                      let* taken = taken_by_another ~dst ~id in
+                      if taken then
+                        (* Ours takes a name of its own rather than having its
+                         marker written over the other's. *)
+                        let* () =
+                          with_meta (fun () ->
+                              publish_aside ~filed_at:src ~id dst)
+                        in
+                        (* Superseded by the rename to the conflicted name. *)
+                        Io.fail Retry.Cancelled
+                      else
+                        (* The new place first, anchor and marker, then the old
+                         marker: a crash between the two leaves a stale marker
+                         readers skip, not a folder nobody lists. *)
+                        let* () = St.put_folder_marker ~key:dst in
+                        let+ () = remove_old_marker src old_marker ~id in
+                        Some (`Rename { r with Journal.dst = rel_key dst })
+          else (
+            let dst = key r.Journal.dst in
+            let* () = save_version src in
+            let* () = Js.rename_file ~src_key:src ~dst_key:dst in
+            let+ () = resync_manifest_name dst in
+            Some (`Rename r))
+        in
+        Io.catch move (fun exn ->
+            (* A directory's move cannot find its source gone: its marker is put
+             unconditionally, so a failure there is the store's. *)
+            if is_dir then Io.fail exn
+            else (
+              let dst = key r.Journal.dst in
+              let* src_head = Js.head_manifest_opt ~key:src in
+              if Option.is_some src_head then Io.fail exn
+              else
+                let* dst_head = Js.head_manifest_opt ~key:dst in
+                match dst_head with
+                  (* The move itself landed, and what failed came after it. *)
+                  | Some _ -> return_some (`Rename r)
+                  | None ->
+                      let* () = settle_rename_conflict dst exn in
+                      (* The move the record names cannot happen, and what
+                       replaced it is queued or published under its own
+                       entry. *)
+                      Io.fail Retry.Cancelled))
+
+      (* Published where the folder now is, or not at all: a folder removed
+       before the store heard of it is not brought back, and one the store
+       already files elsewhere was moved by an op that says so. A name another
+       folder took sends ours aside under a conflicted name, same id, and it is
+       claimed there. *)
+      let rec mkdir_remote rel id =
+        let* place = current_place rel id in
+        match place with
+          | None -> Io.return []
+          | Some key -> (
+              let* placed = placement key id in
+              match placed with
+                | `Elsewhere _ -> Io.return []
+                | `Here | `Unanchored -> (
+                    let* claimed = St.claim_folder ~id key in
+                    match claimed with
+                      | `Held -> Io.return [`Mkdir (rel_key key, Some id)]
+                      | `Taken _ ->
+                          let* () =
+                            with_meta (fun () ->
+                                let* still = local_id key in
+                                if still = Some id then
+                                  Io.map ignore (move_aside key)
+                                else return_unit)
+                          in
+                          mkdir_remote rel id))
+
+      (* The backend half of ops whose local half the caller has already applied,
+       which is all the metadata queue owes, answering the ops to publish in
+       their place. *)
+      let backend_op op =
+        match op with
+          (* A put's bytes and its entry are the upload queue's. *)
+          | `Put _ -> Io.return [op]
+          | `Delete rel -> (
+              let* now = kind (Lk.file rel) in
+              match now with
+                (* The name holds a file again: a peer's, which replaced the one
+                 removed and outlives the removal, or this client's own, which
+                 its upload publishes. *)
+                | `File -> Io.return []
+                | `Dir | `Absent ->
+                    let+ () = delete_remote (Lk.file rel) in
+                    [op])
+          | `Mkdir (rel, Some id) -> mkdir_remote rel id
+          | `Mkdir (rel, None) ->
+              let+ () = St.put_folder_marker ~key:(Lk.dir rel) in
+              [op]
+          | `Rmdir (rel, Some fid) ->
+              let+ published = rmdir_remote rel fid in
+              if published then [op] else []
+          | `Rmdir (rel, None) ->
+              Log.err "rmdir %s: the entry carries no folder id" rel;
+              Io.return [op]
+          | `Rename r ->
+              let+ published = rename_remote r in
+              Option.to_list published
+
+      let backend_ops ops =
+        let+ published = map_s backend_op ops in
+        List.concat published
+    end
+
+    let backend_ops = Backend_half.backend_ops
+
+    (* What a peer's entry does to this client's tree. *)
+    module Foreign = struct
+      (* Adopt the id from the backend marker, for a folder no op named: resolving
        it locally would mint a different one and split the namespace in two. A
        folder the store no longer files under this name stays id-less until a
        full sync, and nothing under it can be named. *)
-    let adopt_folder_id rel =
-      if rel = "" then return_unit
-      else (
-        let key = Lk.dir rel in
-        let* marker_key = folder_marker_bkey key in
-        match marker_key with
-          | None -> return_unit
-          | Some bkey -> (
-              (* A store that cannot answer fails the entry, which is read
+      let adopt_folder_id rel =
+        if rel = "" then return_unit
+        else (
+          let key = Lk.dir rel in
+          let* marker_key = folder_marker_bkey key in
+          match marker_key with
+            | None -> return_unit
+            | Some bkey -> (
+                (* A store that cannot answer fails the entry, which is read
                  again, rather than passing for a name nobody holds. *)
-              let* holder = St.holder_at ~bkey in
-              match holder with
-                | None -> return_unit
-                | Some id -> (
-                    let* place = whereabouts key in
-                    let* here = kind key in
-                    match place with
-                      (* A folder this client moved or removed since is not
+                let* holder = St.holder_at ~bkey in
+                match holder with
+                  | None -> return_unit
+                  | Some id -> (
+                      let* place = whereabouts key in
+                      let* here = kind key in
+                      match place with
+                        (* A folder this client moved or removed since is not
                          brought back where it was. *)
-                      | (`Moved (held, _) | `Removed held)
-                        when held = id && here <> `Dir ->
-                          return_unit
-                      | _ -> write_folder_id key id)))
+                        | (`Moved (held, _) | `Removed held)
+                          when held = id && here <> `Dir ->
+                            return_unit
+                        | _ -> write_folder_id key id)))
 
-    (* A [Put] materialises the directories above it as a side effect of writing
+      (* A [Put] materialises the directories above it as a side effect of writing
        the manifest, and those carry no id: only a [Mkdir] op adopts one, and the
        mkdir for a folder created before this client's cursor is not in the
        journal it replays. Left alone, the directory exists in the mirror and can
@@ -1009,437 +1017,449 @@ struct
        Top-down, because a marker's key is built from the id of the folder above
        it, and adoption only — the marker is the store's, and minting one here
        would fork the namespace the other clients already agree on. *)
-    let adopt_ancestor_ids rel =
-      let rec ancestors acc key =
-        let parent = Logical_key.parent key in
-        if Logical_key.is_root parent then acc
-        else ancestors (parent :: acc) parent
-      in
-      iter_s
-        (fun dir ->
-          let* known = local_id dir in
-          match known with
-            | Some _ -> return_unit
-            | None -> adopt_folder_id (Logical_key.path dir))
-        (ancestors [] (Lk.dir rel))
+      let adopt_ancestor_ids rel =
+        let rec ancestors acc key =
+          let parent = Logical_key.parent key in
+          if Logical_key.is_root parent then acc
+          else ancestors (parent :: acc) parent
+        in
+        iter_s
+          (fun dir ->
+            let* known = local_id dir in
+            match known with
+              | Some _ -> return_unit
+              | None -> adopt_folder_id (Logical_key.path dir))
+          (ancestors [] (Lk.dir rel))
 
-    (* A foreign op must never clobber unsynced local edits, and a staged
+      (* A foreign op must never clobber unsynced local edits, and a staged
        manifest is that flag.
 
        For a folder it means one somewhere under it: a file written there
        leaves its directory behind, empty, once it publishes. *)
-    let unless_staged key f =
-      let* staged =
-        match Logical_key.kind key with
-          | `File -> Mfs.exists key
-          | `Dir ->
-              let+ under =
-                Mfs.entries ~rel_dir:(Logical_key.path key) ~deep:true
-              in
-              under <> []
-      in
-      if staged then return_unit else f ()
+      let unless_staged key f =
+        let* staged =
+          match Logical_key.kind key with
+            | `File -> Mfs.exists key
+            | `Dir ->
+                let+ under =
+                  Mfs.entries ~rel_dir:(Logical_key.path key) ~deep:true
+                in
+                under <> []
+        in
+        if staged then return_unit else f ()
 
-    (* Without the local copy moved aside, both ends keep different bytes under
+      (* Without the local copy moved aside, both ends keep different bytes under
        one name, each with nothing left to apply. *)
-    let staged_aside key f =
-      let* staged = Mfs.exists key in
-      let* () =
-        if staged then
-          let* conflict = move_aside key in
-          queue_put conflict
-        else return_unit
-      in
-      f ()
+      let staged_aside key f =
+        let* staged = Mfs.exists key in
+        let* () =
+          if staged then
+            let* conflict = move_aside key in
+            queue_put conflict
+          else return_unit
+        in
+        f ()
 
-    (* What a peer's folder rename finds at its destination in this mirror. A
+      (* What a peer's folder rename finds at its destination in this mirror. A
        folder with no id, or an entry naming none, leaves nothing to compare and
        reads as free. *)
-    let at_destination ~dst ~id =
-      let* present = Syscalls.file_exists (manifest_path dst) in
-      if not present then Io.return `Free
-      else
-        let+ held = local_id dst in
-        match (held, id) with
-          | Some held, Some moving when held = moving -> `Same_folder
-          | Some held, Some _ -> `Another_folder held
-          | _ -> `Free
+      let at_destination ~dst ~id =
+        let* present = Syscalls.file_exists (manifest_path dst) in
+        if not present then Io.return `Free
+        else
+          let+ held = local_id dst in
+          match (held, id) with
+            | Some held, Some moving when held = moving -> `Same_folder
+            | Some held, Some _ -> `Another_folder held
+            | _ -> `Free
 
-    (* The destination already holds the folder being moved: the rename was
+      (* The destination already holds the folder being moved: the rename was
        applied here once and its source came back. The source takes a conflicted
        name and gives up the id it shares, keeping what it holds without two
        paths claiming one folder; the store is not told, already filing the
        folder where it now is. *)
-    let retire_stale_copy ~src ~dst =
-      let* conflict = move_aside src in
-      let* () =
-        Folders.forget ~cache_root:C.cache_root ~domain_name:C.domain_name
-          conflict
-      in
-      (* [rename_local] pointed the shared id at the copy; this points it back. *)
-      Folders.reparent ~cache_root:C.cache_root ~domain_name:C.domain_name dst
+      let retire_stale_copy ~src ~dst =
+        let* conflict = move_aside src in
+        let* () =
+          Folders.forget ~cache_root:C.cache_root ~domain_name:C.domain_name
+            conflict
+        in
+        (* [rename_local] pointed the shared id at the copy; this points it back. *)
+        Folders.reparent ~cache_root:C.cache_root ~domain_name:C.domain_name dst
 
-    (* A peer's folder op names its folder by id, and a local folder holding
+      (* A peer's folder op names its folder by id, and a local folder holding
        another id at that path is a different folder the op must leave alone. *)
-    let another_folder_at key id =
-      match id with
-        | None -> Io.return None
-        | Some id -> (
-            let+ held = local_id key in
-            match held with Some held when held <> id -> Some held | _ -> None)
+      let another_folder_at key id =
+        match id with
+          | None -> Io.return None
+          | Some id -> (
+              let+ held = local_id key in
+              match held with
+                | Some held when held <> id -> Some held
+                | _ -> None)
 
-    (* The folder a peer created already lives here under another path: a
+      (* The folder a peer created already lives here under another path: a
        rename moved it before this entry arrived, and creating it again would
        put its id at two places. *)
-    let lives_elsewhere key id =
-      match id with
-        | None -> return_false
-        | Some id ->
-            let+ found = key_of_id id in
-            Option.fold ~none:false
-              ~some:(fun found -> not (Logical_key.equal found key))
-              found
+      let lives_elsewhere key id =
+        match id with
+          | None -> return_false
+          | Some id ->
+              let+ found = key_of_id id in
+              Option.fold ~none:false
+                ~some:(fun found -> not (Logical_key.equal found key))
+                found
 
-    (* What applying a peer's entry asks of the store. Read before the metadata
+      (* What applying a peer's entry asks of the store. Read before the metadata
        lock is taken and only recalled under it, so a slow link holds up that
        entry and not every local operation waiting behind it. *)
-    type store_reads = {
-      marker_at : Logical_key.t -> string option Io.t;
-          (** The id the store files under a folder's name. *)
-      manifest : Logical_key.t -> Manifest.t option Io.t;
-      adopt : [ `Ancestors of string | `Folder of string ] -> unit Io.t;
-    }
+      type store_reads = {
+        marker_at : Logical_key.t -> string option Io.t;
+            (** The id the store files under a folder's name. *)
+        manifest : Logical_key.t -> Manifest.t option Io.t;
+        adopt : [ `Ancestors of string | `Folder of string ] -> unit Io.t;
+      }
 
-    (* Where a folder a peer names by path is here: one this client moved since
+      (* Where a folder a peer names by path is here: one this client moved since
        keeps its id and is found by it, and so is anything under it. The same
        folder only if the store still files it under the name: a peer's own
        folder there is another one. *)
-    let rec local_folder reads key =
-      if Logical_key.is_root key then Io.return key
-      else
-        let* place = whereabouts key in
-        let* moved =
-          match place with
-            | `Moved (id, at) ->
-                let+ filed = reads.marker_at key in
-                if filed = Some id then Some at else None
-            | `Live _ | `Removed _ | `Unknown -> Io.return None
-        in
-        match (place, moved) with
-          | `Live _, _ -> Io.return key
-          | _, Some at -> Io.return at
-          | _, None ->
-              let+ parent = local_folder reads (Logical_key.parent key) in
-              Logical_key.dir_in parent (Logical_key.leaf key)
+      let rec local_folder reads key =
+        if Logical_key.is_root key then Io.return key
+        else
+          let* place = whereabouts key in
+          let* moved =
+            match place with
+              | `Moved (id, at) ->
+                  let+ filed = reads.marker_at key in
+                  if filed = Some id then Some at else None
+              | `Live _ | `Removed _ | `Unknown -> Io.return None
+          in
+          match (place, moved) with
+            | `Live _, _ -> Io.return key
+            | _, Some at -> Io.return at
+            | _, None ->
+                let+ parent = local_folder reads (Logical_key.parent key) in
+                Logical_key.dir_in parent (Logical_key.leaf key)
 
-    (* A file, or a folder a peer creates or moves to: its parent is found the
+      (* A file, or a folder a peer creates or moves to: its parent is found the
        same way, and its own name is the peer's. *)
-    let local_child in_parent reads key =
-      let+ parent = local_folder reads (Logical_key.parent key) in
-      in_parent parent (Logical_key.leaf key)
+      let local_child in_parent reads key =
+        let+ parent = local_folder reads (Logical_key.parent key) in
+        in_parent parent (Logical_key.leaf key)
 
-    let local_file = local_child Logical_key.file_in
-    let local_child_folder = local_child Logical_key.dir_in
+      let local_file = local_child Logical_key.file_in
+      let local_child_folder = local_child Logical_key.dir_in
 
-    (* This client's file renames not published yet, oldest first, each with
+      (* This client's file renames not published yet, oldest first, each with
        the record that owes it. *)
-    let owed_file_renames records =
-      List.concat_map
-        (fun (entry_key, (r : Wal.record)) ->
-          List.filter_map
-            (function
-              | `Rename { Journal.src; dst; is_dir = false; _ } ->
-                  Some (entry_key, (src, dst))
-              | _ -> None)
-            r.Wal.ops)
-        records
+      let owed_file_renames records =
+        List.concat_map
+          (fun (entry_key, (r : Wal.record)) ->
+            List.filter_map
+              (function
+                | `Rename { Journal.src; dst; is_dir = false; _ } ->
+                    Some (entry_key, (src, dst))
+                | _ -> None)
+              r.Wal.ops)
+          records
 
-    (* Where a file a peer names now is here, after this client's own renames
+      (* Where a file a peer names now is here, after this client's own renames
        of it: a peer's edit follows the file it was made to. *)
-    let renamed_since renames rel =
-      let renames = List.map snd renames in
-      let rec follow rel hops =
-        match List.assoc_opt rel renames with
-          | Some dst when hops > 0 -> follow dst (hops - 1)
-          | _ -> rel
-      in
-      follow rel (List.length renames)
+      let renamed_since renames rel =
+        let renames = List.map snd renames in
+        let rec follow rel hops =
+          match List.assoc_opt rel renames with
+            | Some dst when hops > 0 -> follow dst (hops - 1)
+            | _ -> rel
+        in
+        follow rel (List.length renames)
 
-    (* A peer's file arrived under a name this client's unpublished rename
+      (* A peer's file arrived under a name this client's unpublished rename
        brought one of its own to. Ours takes a conflicted name there and then,
        and the rename owed for it is published to that name instead, which
        leaves the name to the peer's. *)
-    let settle_renamed_onto renames rel =
-      let onto =
-        List.filter (fun (_, (src, dst)) -> dst = rel && src <> rel) renames
-      in
-      if onto = [] || List.exists (fun (_, (src, _)) -> src = rel) renames then
-        return_unit
-      else
-        let* conflict = move_aside (Lk.file rel) in
-        let retarget = function
-          | `Rename ({ Journal.dst; is_dir = false; _ } as r) when dst = rel ->
-              `Rename { r with Journal.dst = rel_key conflict }
-          | op -> op
+      let settle_renamed_onto renames rel =
+        let onto =
+          List.filter (fun (_, (src, dst)) -> dst = rel && src <> rel) renames
         in
-        iter_s
-          (fun (entry_key, _) -> W.update_ops entry_key (List.map retarget))
-          onto
+        if onto = [] || List.exists (fun (_, (src, _)) -> src = rel) renames
+        then return_unit
+        else
+          let* conflict = move_aside (Lk.file rel) in
+          let retarget = function
+            | `Rename ({ Journal.dst; is_dir = false; _ } as r) when dst = rel
+              ->
+                `Rename { r with Journal.dst = rel_key conflict }
+            | op -> op
+          in
+          iter_s
+            (fun (entry_key, _) -> W.update_ops entry_key (List.map retarget))
+            onto
 
-    (* Folders this client has an operation on that is not published yet. *)
-    let owed_folder_ids records =
-      List.concat_map
-        (fun (_, (r : Wal.record)) ->
-          List.filter_map
-            (function
-              | `Mkdir (_, id)
-              | `Rmdir (_, id)
-              | `Rename { Journal.is_dir = true; id; _ } ->
-                  id
-              | `Put _ | `Delete _ | `Rename _ -> None)
-            r.Wal.ops)
-        records
+      (* Folders this client has an operation on that is not published yet. *)
+      let owed_folder_ids records =
+        List.concat_map
+          (fun (_, (r : Wal.record)) ->
+            List.filter_map
+              (function
+                | `Mkdir (_, id)
+                | `Rmdir (_, id)
+                | `Rename { Journal.is_dir = true; id; _ } ->
+                    id
+                | `Put _ | `Delete _ | `Rename _ -> None)
+              r.Wal.ops)
+          records
 
-    let marker_at_store key =
-      let* bkey = folder_marker_bkey key in
-      match bkey with None -> Io.return None | Some bkey -> St.holder_at ~bkey
+      let marker_at_store key =
+        let* bkey = folder_marker_bkey key in
+        match bkey with
+          | None -> Io.return None
+          | Some bkey -> St.holder_at ~bkey
 
-    (* A peer's object is in the namespace of the folder it names, which is the
+      (* A peer's object is in the namespace of the folder it names, which is the
        one found here: never a folder this client only remembers at the path,
        whose namespace holds this client's own files. *)
-    let fetch_peer reads key =
-      let* local = local_file reads key in
-      let* parent = local_id (Logical_key.parent local) in
-      match parent with
-        | None -> Io.return None
-        | Some _ -> R.fetch_manifest ~key:local ()
+      let fetch_peer reads key =
+        let* local = local_file reads key in
+        let* parent = local_id (Logical_key.parent local) in
+        match parent with
+          | None -> Io.return None
+          | Some _ -> R.fetch_manifest ~key:local ()
 
-    let adopt = function
-      | `Ancestors rel -> adopt_ancestor_ids rel
-      | `Folder rel -> adopt_folder_id rel
+      let adopt = function
+        | `Ancestors rel -> adopt_ancestor_ids rel
+        | `Folder rel -> adopt_folder_id rel
 
-    (* Asks the store for everything {!apply_one} will, and answers the reads it
+      (* Asks the store for everything {!apply_one} will, and answers the reads it
        made. Ancestor ids first, since a manifest's key is built from its
        folder's id, so a missing one does not fail loudly: it resolves to no key
        and the put is skipped. *)
-    let read_ahead ~owed ops =
-      let markers = Hashtbl.create 8 and manifests = Hashtbl.create 8 in
-      let memo table read key =
-        match Hashtbl.find_opt table key with
-          | Some known -> Io.return known
-          | None ->
-              let+ answer = read key in
-              Hashtbl.replace table key answer;
-              answer
-      in
-      let rec live =
-        {
-          marker_at = (fun key -> memo markers marker_at_store key);
-          manifest = (fun key -> memo manifests (fetch_peer live) key);
-          adopt;
-        }
-      in
-      let renames = owed_file_renames owed in
-      let resolved (_ : Logical_key.t) = () in
-      let+ () =
-        iter_s
-          (function
-            | `Put (rel, _) ->
-                let* () = live.adopt (`Ancestors rel) in
-                let* key =
-                  local_file live (Lk.file (renamed_since renames rel))
-                in
-                resolved key;
-                Io.map ignore (live.manifest (Lk.file rel))
-            | `Delete rel -> Io.map resolved (local_file live (Lk.file rel))
-            | `Mkdir (rel, id) ->
-                let* () = live.adopt (`Ancestors rel) in
-                let* key = local_child_folder live (Lk.dir rel) in
-                if id = None then live.adopt (`Folder (Logical_key.path key))
-                else return_unit
-            | `Rmdir _ -> return_unit
-            | `Rename { Journal.dst; is_dir = true; _ } ->
-                let* () = live.adopt (`Ancestors dst) in
-                Io.map resolved (local_child_folder live (Lk.dir dst))
-            | `Rename { Journal.src; dst; is_dir = false; _ } ->
-                let* () = live.adopt (`Ancestors dst) in
-                let* src_key = local_file live (Lk.file src) in
-                let* dst_key = local_file live (Lk.file dst) in
-                resolved dst_key;
-                let* exists = Syscalls.file_exists (manifest_path src_key) in
-                if exists then return_unit
-                else Io.map ignore (live.manifest (Lk.file dst)))
-          ops
-      in
-      (* A read nothing made ahead is one this client's own change since made
+      let read_ahead ~owed ops =
+        let markers = Hashtbl.create 8 and manifests = Hashtbl.create 8 in
+        let memo table read key =
+          match Hashtbl.find_opt table key with
+            | Some known -> Io.return known
+            | None ->
+                let+ answer = read key in
+                Hashtbl.replace table key answer;
+                answer
+        in
+        let rec live =
+          {
+            marker_at = (fun key -> memo markers marker_at_store key);
+            manifest = (fun key -> memo manifests (fetch_peer live) key);
+            adopt;
+          }
+        in
+        let renames = owed_file_renames owed in
+        let resolved (_ : Logical_key.t) = () in
+        let+ () =
+          iter_s
+            (function
+              | `Put (rel, _) ->
+                  let* () = live.adopt (`Ancestors rel) in
+                  let* key =
+                    local_file live (Lk.file (renamed_since renames rel))
+                  in
+                  resolved key;
+                  Io.map ignore (live.manifest (Lk.file rel))
+              | `Delete rel -> Io.map resolved (local_file live (Lk.file rel))
+              | `Mkdir (rel, id) ->
+                  let* () = live.adopt (`Ancestors rel) in
+                  let* key = local_child_folder live (Lk.dir rel) in
+                  if id = None then live.adopt (`Folder (Logical_key.path key))
+                  else return_unit
+              | `Rmdir _ -> return_unit
+              | `Rename { Journal.dst; is_dir = true; _ } ->
+                  let* () = live.adopt (`Ancestors dst) in
+                  Io.map resolved (local_child_folder live (Lk.dir dst))
+              | `Rename { Journal.src; dst; is_dir = false; _ } ->
+                  let* () = live.adopt (`Ancestors dst) in
+                  let* src_key = local_file live (Lk.file src) in
+                  let* dst_key = local_file live (Lk.file dst) in
+                  resolved dst_key;
+                  let* exists = Syscalls.file_exists (manifest_path src_key) in
+                  if exists then return_unit
+                  else Io.map ignore (live.manifest (Lk.file dst)))
+            ops
+        in
+        (* A read nothing made ahead is one this client's own change since made
          necessary, and the entry is read again rather than the store asked
          with the lock held. *)
-      let recall table key =
-        match Hashtbl.find_opt table key with
-          | Some known -> Io.return known
-          | None ->
-              Io.fail
-                (Retry.failed ~kind:Retry.Transient ~op:"apply"
-                   (Logical_key.to_string key
-                  ^ ": changed here while the entry was being read"))
-      in
-      {
-        marker_at = recall markers;
-        manifest = recall manifests;
-        adopt = (fun _ -> return_unit);
-      }
+        let recall table key =
+          match Hashtbl.find_opt table key with
+            | Some known -> Io.return known
+            | None ->
+                Io.fail
+                  (Retry.failed ~kind:Retry.Transient ~op:"apply"
+                     (Logical_key.to_string key
+                    ^ ": changed here while the entry was being read"))
+        in
+        {
+          marker_at = recall markers;
+          manifest = recall manifests;
+          adopt = (fun _ -> return_unit);
+        }
 
-    (* What this client wrote under a folder a peer removed and has not
+      (* What this client wrote under a folder a peer removed and has not
        published yet survives beside the folder under conflicted names, its
        uploads going with it; the folder itself goes. *)
-    let rescue_staged folder =
-      let* staged = Mfs.entries ~rel_dir:(Logical_key.path folder) ~deep:true in
-      iter_s
-        (fun (key, _) ->
-          let* conflict =
-            aside_name
-              (Logical_key.file_in
-                 (Logical_key.parent folder)
-                 (Logical_key.leaf key))
-          in
-          Io.map ignore (rename_local ~src:key ~dst:conflict))
-        staged
+      let rescue_staged folder =
+        let* staged =
+          Mfs.entries ~rel_dir:(Logical_key.path folder) ~deep:true
+        in
+        iter_s
+          (fun (key, _) ->
+            let* conflict =
+              aside_name
+                (Logical_key.file_in
+                   (Logical_key.parent folder)
+                   (Logical_key.leaf key))
+            in
+            Io.map ignore (rename_local ~src:key ~dst:conflict))
+          staged
 
-    (* A folder of this client's under the name a peer's file takes: it takes a
+      (* A folder of this client's under the name a peer's file takes: it takes a
        conflicted name of its own, published as a rename if it has an id. *)
-    let folder_aside key =
-      let* k = kind key in
-      if k <> `Dir then return_unit
-      else
-        let* ours = local_id key in
-        match ours with
-          | Some ours -> publish_aside ~filed_at:key ~id:ours key
-          | None -> Io.map ignore (move_aside key)
+      let folder_aside key =
+        let* k = kind key in
+        if k <> `Dir then return_unit
+        else
+          let* ours = local_id key in
+          match ours with
+            | Some ours -> publish_aside ~filed_at:key ~id:ours key
+            | None -> Io.map ignore (move_aside key)
 
-    (* Failures propagate: the sync poller must not advance its high-water mark
+      (* Failures propagate: the sync poller must not advance its high-water mark
        past an entry it could not apply, or the op is lost until a full resync. *)
-    let apply_one ~reads ~owed op =
-      match op with
-        | `Put (rel, _) ->
-            let renames = owed_file_renames owed in
-            let* () = settle_renamed_onto renames rel in
-            let* () = reads.adopt (`Ancestors rel) in
-            let* key = local_file reads (Lk.file (renamed_since renames rel)) in
-            let* () = folder_aside (Lk.dir (Logical_key.path key)) in
-            staged_aside key (fun () ->
-                ignore (cancel_upload key);
-                let* m = reads.manifest (Lk.file rel) in
-                match m with
-                  | None -> return_unit
-                  | Some state -> write_manifest key state)
-        | `Delete rel ->
-            let* key = local_file reads (Lk.file rel) in
-            staged_aside key (fun () ->
-                ignore (cancel_upload key);
-                clear_local key)
-        | `Mkdir (rel, id) -> (
-            let* key = local_child_folder reads (Lk.dir rel) in
-            let* elsewhere = lives_elsewhere key id in
-            if elsewhere then return_unit
-            else
-              (* A file of this client's under the name the peer's folder takes
-                 gives it up the way a staged file gives up to a peer's. *)
-              let* () =
-                staged_aside
-                  (Lk.file (Logical_key.path key))
-                  (fun () -> return_unit)
-              in
+      let apply_one ~reads ~owed op =
+        match op with
+          | `Put (rel, _) ->
+              let renames = owed_file_renames owed in
+              let* () = settle_renamed_onto renames rel in
               let* () = reads.adopt (`Ancestors rel) in
-              let* taken = another_folder_at key id in
-              let* () =
-                match taken with
-                  | Some ours -> publish_aside ~filed_at:key ~id:ours key
-                  | None -> return_unit
+              let* key =
+                local_file reads (Lk.file (renamed_since renames rel))
               in
-              let* () = Ck.create_dir key in
-              (* A folder's id is final from its mkdir, so the op's is taken as
+              let* () = folder_aside (Lk.dir (Logical_key.path key)) in
+              staged_aside key (fun () ->
+                  ignore (cancel_upload key);
+                  let* m = reads.manifest (Lk.file rel) in
+                  match m with
+                    | None -> return_unit
+                    | Some state -> write_manifest key state)
+          | `Delete rel ->
+              let* key = local_file reads (Lk.file rel) in
+              staged_aside key (fun () ->
+                  ignore (cancel_upload key);
+                  clear_local key)
+          | `Mkdir (rel, id) -> (
+              let* key = local_child_folder reads (Lk.dir rel) in
+              let* elsewhere = lives_elsewhere key id in
+              if elsewhere then return_unit
+              else
+                (* A file of this client's under the name the peer's folder takes
+                 gives it up the way a staged file gives up to a peer's. *)
+                let* () =
+                  staged_aside
+                    (Lk.file (Logical_key.path key))
+                    (fun () -> return_unit)
+                in
+                let* () = reads.adopt (`Ancestors rel) in
+                let* taken = another_folder_at key id in
+                let* () =
+                  match taken with
+                    | Some ours -> publish_aside ~filed_at:key ~id:ours key
+                    | None -> return_unit
+                in
+                let* () = Ck.create_dir key in
+                (* A folder's id is final from its mkdir, so the op's is taken as
                  is; the store may still file another folder under this name
                  until that one's rename lands. *)
-                match id with
-                | Some id -> write_folder_id key id
-                | None -> reads.adopt (`Folder (Logical_key.path key)))
-        | `Rmdir (rel, id) -> (
-            (* A folder goes by its id, wherever it is here. *)
-            let* found = folder_of_id id in
-            match found with
-              | Some at ->
-                  let* () = rescue_staged at in
-                  Ck.delete_dir at
-              | None ->
-                  let key = Lk.dir rel in
-                  let* taken = another_folder_at key id in
-                  if taken <> None then return_unit
-                  else
-                    let* () = rescue_staged key in
-                    Ck.delete_dir key)
-        | `Rename { Journal.src; dst; is_dir = true; id; _ } -> (
-            let owed = owed_folder_ids owed in
-            let* dst_key = local_child_folder reads (Lk.dir dst) in
-            let* src_key =
-              let path = Lk.dir src in
-              let* here = kind path in
-              let* taken = another_folder_at path id in
-              (* The path first: a copy under the new name may already hold the
+                  match id with
+                  | Some id -> write_folder_id key id
+                  | None -> reads.adopt (`Folder (Logical_key.path key)))
+          | `Rmdir (rel, id) -> (
+              (* A folder goes by its id, wherever it is here. *)
+              let* found = folder_of_id id in
+              match found with
+                | Some at ->
+                    let* () = rescue_staged at in
+                    Ck.delete_dir at
+                | None ->
+                    let key = Lk.dir rel in
+                    let* taken = another_folder_at key id in
+                    if taken <> None then return_unit
+                    else
+                      let* () = rescue_staged key in
+                      Ck.delete_dir key)
+          | `Rename { Journal.src; dst; is_dir = true; id; _ } -> (
+              let owed = owed_folder_ids owed in
+              let* dst_key = local_child_folder reads (Lk.dir dst) in
+              let* src_key =
+                let path = Lk.dir src in
+                let* here = kind path in
+                let* taken = another_folder_at path id in
+                (* The path first: a copy under the new name may already hold the
                  id, and the one to move is still where the peer's op says. *)
-              if here = `Dir && taken = None then return_some path
-              else folder_of_id id
-            in
-            match src_key with
-              (* This client's own operation on the folder publishes after this
+                if here = `Dir && taken = None then return_some path
+                else folder_of_id id
+              in
+              match src_key with
+                (* This client's own operation on the folder publishes after this
                  one, and whichever lands last is where the folder ends up. *)
-              | _
-                when Option.fold ~none:false
-                       ~some:(fun id -> List.mem id owed)
-                       id ->
-                  return_unit
-              | None -> return_unit
-              | Some src_key when Logical_key.equal src_key dst_key ->
-                  return_unit
-              | Some src_key ->
-                  unless_staged src_key (fun () ->
-                      let* () = reads.adopt (`Ancestors dst) in
-                      let* found = at_destination ~dst:dst_key ~id in
-                      match found with
-                        | `Same_folder ->
-                            retire_stale_copy ~src:src_key ~dst:dst_key
-                        | `Another_folder ours ->
-                            let* () =
-                              publish_aside ~filed_at:dst_key ~id:ours dst_key
-                            in
-                            Io.map ignore
-                              (rename_local ~src:src_key ~dst:dst_key)
-                        | `Free ->
-                            Io.map ignore
-                              (rename_local ~src:src_key ~dst:dst_key)))
-        | `Rename { Journal.src; dst; is_dir = false; _ } ->
-            let* src_key = local_file reads (Lk.file src) in
-            let* dst_key = local_file reads (Lk.file dst) in
-            let* exists = Syscalls.file_exists (manifest_path src_key) in
-            if exists then
-              unless_staged src_key (fun () ->
-                  let* () = reads.adopt (`Ancestors dst) in
-                  Io.map ignore (rename_local ~src:src_key ~dst:dst_key))
-            else
-              unless_staged dst_key (fun () ->
-                  (* No local src (e.g. we renamed it ourselves and published the
+                | _
+                  when Option.fold ~none:false
+                         ~some:(fun id -> List.mem id owed)
+                         id ->
+                    return_unit
+                | None -> return_unit
+                | Some src_key when Logical_key.equal src_key dst_key ->
+                    return_unit
+                | Some src_key ->
+                    unless_staged src_key (fun () ->
+                        let* () = reads.adopt (`Ancestors dst) in
+                        let* found = at_destination ~dst:dst_key ~id in
+                        match found with
+                          | `Same_folder ->
+                              retire_stale_copy ~src:src_key ~dst:dst_key
+                          | `Another_folder ours ->
+                              let* () =
+                                publish_aside ~filed_at:dst_key ~id:ours dst_key
+                              in
+                              Io.map ignore
+                                (rename_local ~src:src_key ~dst:dst_key)
+                          | `Free ->
+                              Io.map ignore
+                                (rename_local ~src:src_key ~dst:dst_key)))
+          | `Rename { Journal.src; dst; is_dir = false; _ } ->
+              let* src_key = local_file reads (Lk.file src) in
+              let* dst_key = local_file reads (Lk.file dst) in
+              let* exists = Syscalls.file_exists (manifest_path src_key) in
+              if exists then
+                unless_staged src_key (fun () ->
+                    let* () = reads.adopt (`Ancestors dst) in
+                    Io.map ignore (rename_local ~src:src_key ~dst:dst_key))
+              else
+                unless_staged dst_key (fun () ->
+                    (* No local src (e.g. we renamed it ourselves and published the
                      result): adopt dst's remote state. *)
-                  let* m = reads.manifest (Lk.file dst) in
-                  match m with
-                    | Some state -> write_manifest dst_key state
-                    | _ -> return_unit)
+                    let* m = reads.manifest (Lk.file dst) in
+                    match m with
+                      | Some state -> write_manifest dst_key state
+                      | _ -> return_unit)
 
-    (* The log is read for the reads ahead and again under the lock, where a
+      (* The log is read for the reads ahead and again under the lock, where a
        record written between the two shows up as a read nothing made. *)
-    let apply_foreign_ops ops =
-      let* owed = W.owed_metadata () in
-      let* reads = read_ahead ~owed ops in
-      with_meta (fun () ->
-          let* owed = W.owed_metadata () in
-          iter_s (apply_one ~reads ~owed) ops)
+      let apply_foreign_ops ops =
+        let* owed = W.owed_metadata () in
+        let* reads = read_ahead ~owed ops in
+        with_meta (fun () ->
+            let* owed = W.owed_metadata () in
+            iter_s (apply_one ~reads ~owed) ops)
+    end
+
+    let apply_foreign_ops = Foreign.apply_foreign_ops
   end
 end
