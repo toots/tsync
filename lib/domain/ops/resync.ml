@@ -191,9 +191,9 @@ struct
 
     let bookmark () = Cursor.read_last_sync_key ()
 
-    (* Read from disk, the one place every process serving the domain shares: a
-       daemon's owed operations are in no queue this one could drain, and a
-       rebuild restates the store's tree over the mirror they changed. *)
+    (* Read from disk, the one place every process serving the domain shares,
+       and after the drain above: what is left is what could not be published,
+       and a rebuild restates the store's tree over the mirror it changed. *)
     let refuse_if_metadata_owed () =
       let* records = W.owed_metadata () in
       match List.length records with

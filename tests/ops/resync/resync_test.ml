@@ -307,9 +307,6 @@ let () =
        ~why:(fun () -> "a partial walk advanced the mark");
      check "nor was anything swept" (Sys.file_exists (mirror_path "gone.txt"));
 
-     (* A daemon's owed mkdir is on disk and nowhere else this process could
-        drain it from; the store has never heard of the folder, so a rebuild
-        would take it away. *)
      (* A command run with no daemon about is the only thing publishing what
         this client did offline, so it publishes it before reading the journal. *)
      case "a sync publishes the metadata this client owes";

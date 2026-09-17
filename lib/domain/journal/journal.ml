@@ -90,26 +90,32 @@ let highest_lease dir =
     (-1)
     (try Sys.readdir dir with Sys_error _ -> [||])
 
-(* Keyed by the process holding the block as well as the data directory: a forked
-   child inherits the parent's and has to lease one of its own. *)
-let leases : (string, int * int * int ref) Hashtbl.t = Hashtbl.create 1
+(* Per data directory, and tagged with the process that leased it: a forked
+   child inherits the parent's block and has to lease one of its own. *)
+type lease = { owner : int; block : int; mutable next : int }
+
+let leases : (string, lease) Hashtbl.t = Hashtbl.create 1
 
 let folder_id ~share_dir () =
   let pid = Unix.getpid () in
-  let block, next =
+  let lease =
     match Hashtbl.find_opt leases share_dir with
-      | Some (owner, block, next) when owner = pid && !next < lease_size ->
-          (block, next)
+      | Some held when held.owner = pid && held.next < lease_size -> held
       | _ ->
           let dir = leases_dir share_dir in
           Io_lwt.Fs.mkdir_p_sync ~perm:0o700 dir;
-          let block = lease ~dir (highest_lease dir + 1) in
-          let next = ref 0 in
-          Hashtbl.replace leases share_dir (pid, block, next);
-          (block, next)
+          let fresh =
+            {
+              owner = pid;
+              block = lease ~dir (highest_lease dir + 1);
+              next = 0;
+            }
+          in
+          Hashtbl.replace leases share_dir fresh;
+          fresh
   in
-  let counter = (block * lease_size) + !next in
-  incr next;
+  let counter = (lease.block * lease_size) + lease.next in
+  lease.next <- lease.next + 1;
   Printf.sprintf "%s-%x" (String.sub (get_client_uuid ~share_dir) 0 12) counter
 
 (* An entry key names one unit of work for its whole life — in the local WAL, in

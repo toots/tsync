@@ -43,9 +43,6 @@ struct
   (* Bound before [Make_with_layout] shadows [W] with its per-domain result. *)
   module Owed = W.Owed
 
-  (* What the sending pool needs of the file operations, and what it tells them
-     in return. *)
-
   module Make_with_layout
       (C : Conf.S with type 'a io = 'a Io.t)
       (L : Layout.S with type 'a io := 'a Io.t)
@@ -130,15 +127,15 @@ struct
     let write_manifest key (state : Manifest.t) = Mf.write key state
     let delete_manifest key = Mf.delete key
 
-    (* Nothing staged is ENOENT, which the sending pool takes to mean the upload
-       is no longer owed: [D.sync] answers it with nothing done, and the pool
-       would then publish an entry for a file that was never sent. *)
     (* A symlink has no bytes to stage: what its upload owes is the manifest the
        mirror already holds. *)
     let symlink_manifest key =
       let+ m = published key in
       Option.bind m (fun m -> Option.map (fun _ -> m) (Manifest.symlink m))
 
+    (* Nothing staged is ENOENT, which the sending pool takes to mean the upload
+       is no longer owed: [D.sync] answers it with nothing done, and the pool
+       would then publish an entry for a file that was never sent. *)
     let upload ?cancel key =
       let* staged = Mfs.read key in
       match staged with
@@ -406,8 +403,8 @@ struct
       let+ () = iter_s queue_put owed in
       owed
 
-    (* The record already exists and already names this work; writing it under
-       its own key is what keeps one unit of work to one key across a restart. *)
+    (* Either resume finds a record that already names the work, and writes it
+       under its own key: one unit of work keeps one key across a restart. *)
     let resume_put key ~entry_key ~record =
       let* staged = Mfs.exists key in
       let* link = symlink_manifest key in
@@ -417,8 +414,6 @@ struct
         let+ () = Owed.signal W.owed (entry_key, record) in
         true
 
-    (* The record already names this work; writing it under its own key is what
-       keeps one unit of work to one key across a restart. *)
     let resume_meta ~entry_key ~record =
       let* () = W.write entry_key record in
       Owed.signal W.meta_owed (entry_key, record)
@@ -606,8 +601,6 @@ struct
         | Some man -> St.put_manifest ~key ~data:(Manifest.body ~name man)
         | None -> return_unit
 
-    (* The trash marker a removal leaves, built from the entry: the folder's own
-       id outlives its marker nowhere else. *)
     (* Whether the store was ever told of a folder: an anchor anywhere, or, for
        one written before anchors were, its marker where the op found it. *)
     let ever_published ~bkey id =
