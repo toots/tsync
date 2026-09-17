@@ -5,7 +5,7 @@
 let bools = [false; true]
 
 let universe =
-  let open Resolve in
+  let open Resolve.Arrival in
   List.concat
     [
       List.concat_map
@@ -54,11 +54,44 @@ let universe =
         bools;
     ]
 
+let at_publish =
+  let open Resolve.Publish in
+  [Put]
+  @ List.map (fun f -> Delete f) [`Gone_here; `A_file_here_again]
+  @ List.map
+      (fun f -> Mkdir f)
+      [`Claimed; `Name_taken; `Gone_here; `Filed_elsewhere; `No_id]
+  @ List.map
+      (fun f -> Rmdir f)
+      [`Published; `Never_published; `Already_trashed; `No_id]
+  @ List.map
+      (fun f -> Rename_folder f)
+      [`Free; `Name_taken; `Filed_here_already; `Never_published; `Gone_here]
+  @ List.map
+      (fun f -> Rename_file f)
+      [
+        `Moved;
+        `Landed;
+        `Source_still_there;
+        `Source_gone `Staged;
+        `Source_gone `Published;
+        `Source_gone `Absent;
+      ]
+
 let () =
+  print_endline "=== a peer's op arriving";
   List.iter
     (fun facts ->
       Printf.printf "%-98s -> %s\n"
-        (Resolve.facts_to_string facts)
-        (Resolve.decision_to_string (Resolve.decide facts)))
+        (Resolve.Arrival.facts_to_string facts)
+        (Resolve.Arrival.decision_to_string (Resolve.Arrival.decide facts)))
     universe;
-  Printf.printf "\n%d situation(s)\n" (List.length universe)
+  Printf.printf "\n%d situation(s)\n" (List.length universe);
+  print_endline "\n=== this client's own op being published";
+  List.iter
+    (fun facts ->
+      Printf.printf "%-98s -> %s\n"
+        (Resolve.Publish.facts_to_string facts)
+        (Resolve.Publish.decision_to_string (Resolve.Publish.decide facts)))
+    at_publish;
+  Printf.printf "\n%d situation(s)\n" (List.length at_publish)
