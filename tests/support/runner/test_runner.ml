@@ -1233,6 +1233,13 @@ let setup_client (module C : Conf_lwt.S) root staging_prefix =
       in
       must obj;
       let dirs, entries = split_items obj in
+      (* A listing leaves out what it cannot name, and a tree that left it out
+         too would show two clients agreeing on a folder only one of them has. *)
+      (match List.assoc_opt "unnamed" obj with
+        | Some (`Int n) when n > 0 ->
+            Printf.printf "  ! %s/: %d item(s) holding no id, not listed\n" rel
+              n
+        | _ -> ());
       let entries =
         List.map
           (fun (name, _) ->
