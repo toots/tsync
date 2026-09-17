@@ -300,19 +300,23 @@ struct
       ignore (cancel_upload key);
       D.truncate key size
 
-    (* The caller's local half has happened; the backend's is the metadata
-       queue's, which runs it whenever the store can be reached.
+    (* Recorded before this returns, which is what makes a crash here leave
+       something saying the work is owed; handing it over only says who should
+       get to it first.
 
-       [Prepared] for the same reason a staged upload says so: the record names
-       work already begun, so a reconcile owes its backend half and must not
-       repeat the local one. *)
-    let with_journal ops =
+       [Prepared]: the record names work already begun, so a reconcile owes its
+       backend half and must not repeat the local one. *)
+    let owe queue ops =
       let entry_key = J.entry_key () in
       let record =
         { Wal.ops; state = Wal.Prepared; attempts = 0; last_error = None }
       in
       let* () = W.write entry_key record in
-      Owed.signal W.meta_owed (entry_key, record)
+      Owed.signal queue (entry_key, record)
+
+    (* The caller's local half has happened; the backend's is the metadata
+       queue's, which runs it whenever the store can be reached. *)
+    let with_journal ops = owe W.meta_owed ops
 
     let save_version key =
       if C.versioning then Hs.save_version ~key else return_unit
@@ -327,21 +331,7 @@ struct
       let* () = delete_remote key in
       clear_local key
 
-    (* Recorded before this returns, which is what makes a crash here leave
-       something saying the upload is owed; handing it over only says who should
-       get to it first. *)
-    let owe_put key size =
-      let entry_key = J.entry_key () in
-      let record =
-        {
-          Wal.ops = [`Put (rel_key key, size)];
-          state = Wal.Prepared;
-          attempts = 0;
-          last_error = None;
-        }
-      in
-      let* () = W.write entry_key record in
-      Owed.signal W.owed (entry_key, record)
+    let owe_put key size = owe W.owed [`Put (rel_key key, size)]
 
     let queue_put key =
       let* staged = Mfs.read_edits key in
