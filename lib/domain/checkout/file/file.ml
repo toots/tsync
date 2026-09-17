@@ -1119,15 +1119,26 @@ struct
                 ~some:(fun found -> not (Logical_key.equal found key))
                 found
 
-      (* What applying a peer's entry asks of the store. Read before the metadata
-       lock is taken and only recalled under it, so a slow link holds up that
-       entry and not every local operation waiting behind it. *)
+      (* What applying a peer's entry asks of the store, as answers rather than
+         as a way to ask: nothing handed to the metadata lock can reach the
+         store from inside it, so a slow link holds up that entry and not every
+         local operation waiting behind it. *)
       type store_reads = {
-        marker_at : Logical_key.t -> string option Io.t;
+        markers : (Logical_key.t, string option) Hashtbl.t;
             (** The id the store files under a folder's name. *)
-        manifest : Logical_key.t -> Manifest.t option Io.t;
-        adopt : [ `Ancestors of string | `Folder of string ] -> unit Io.t;
+        manifests : (Logical_key.t, Manifest.t option) Hashtbl.t;
       }
+
+      exception
+        Unread of [ `Marker of Logical_key.t | `Manifest of Logical_key.t ]
+
+      let recall table missing key =
+        match Hashtbl.find_opt table key with
+          | Some known -> Io.return known
+          | None -> Io.fail (Unread (missing key))
+
+      let marker_at reads = recall reads.markers (fun key -> `Marker key)
+      let manifest_of reads = recall reads.manifests (fun key -> `Manifest key)
 
       (* Where a folder a peer names by path is here: one this client moved since
        keeps its id and is found by it, and so is anything under it. The same
@@ -1140,7 +1151,7 @@ struct
           let* moved =
             match place with
               | `Moved (id, at) ->
-                  let+ filed = reads.marker_at key in
+                  let+ filed = marker_at reads key in
                   if filed = Some id then Some at else None
               | `Live _ | `Removed _ | `Unknown -> Io.return None
           in
@@ -1263,7 +1274,6 @@ struct
         match op with
           | `Put (rel, _) ->
               let renames = owed_file_renames owed in
-              let* () = reads.adopt (`Ancestors rel) in
               let* at =
                 local_file reads (Lk.file (renamed_since renames rel))
               in
@@ -1290,7 +1300,6 @@ struct
               ( Resolve.Arrival.Delete { staged },
                 { at; from = None; ours = None } )
           | `Mkdir (rel, id) ->
-              let* () = reads.adopt (`Ancestors rel) in
               let* at = local_child_folder reads (Lk.dir rel) in
               let* lives_elsewhere = lives_elsewhere at id in
               let* staged_file = Mfs.exists (Lk.file (Logical_key.path at)) in
@@ -1319,7 +1328,6 @@ struct
                         },
                       { at; from = None; ours } ))
           | `Rename { Journal.src; dst; is_dir = true; id; _ } ->
-              let* () = reads.adopt (`Ancestors dst) in
               let* at = local_child_folder reads (Lk.dir dst) in
               let path = Lk.dir src in
               let* here = kind path in
@@ -1358,7 +1366,6 @@ struct
                       | `Free | `Same_folder -> None);
                 } )
           | `Rename { Journal.src; dst; is_dir = false; _ } ->
-              let* () = reads.adopt (`Ancestors dst) in
               let* from = local_file reads (Lk.file src) in
               let* at = local_file reads (Lk.file dst) in
               let* source_here = Syscalls.file_exists (manifest_path from) in
@@ -1374,7 +1381,7 @@ struct
 
       let write_theirs ~reads ~theirs at =
         ignore (cancel_upload at);
-        let* m = reads.manifest theirs in
+        let* m = manifest_of reads theirs in
         match m with
           | None -> return_unit
           | Some state -> write_manifest at state
@@ -1408,7 +1415,9 @@ struct
                  until that one's rename lands. *)
                 match id with
                 | Some id -> write_folder_id place.at id
-                | None -> reads.adopt (`Folder (Logical_key.path place.at)))
+                (* One recorded with no id was adopted from the store's marker
+                   ahead of the lock, or holds none. *)
+                | None -> return_unit)
           | Remove_folder, _ -> Ck.delete_dir place.at
           | (Move_folder | Move_file), _ ->
               Io.map ignore
@@ -1420,74 +1429,71 @@ struct
               _ ) ->
               invalid_arg "File.Foreign: an action its op cannot take"
 
-      let adopt = function
-        | `Ancestors rel -> adopt_ancestor_ids rel
-        | `Folder rel -> adopt_folder_id rel
+      let rec fill reads = function
+        | `Marker key ->
+            let+ id = marker_at_store key in
+            Hashtbl.replace reads.markers key id
+        | `Manifest key ->
+            Io.catch
+              (fun () ->
+                let+ m = fetch_peer reads key in
+                Hashtbl.replace reads.manifests key m)
+              (function
+                | Unread missing ->
+                    let* () = fill reads missing in
+                    fill reads (`Manifest key)
+                | exn -> Io.fail exn)
 
-      (* Makes the decision {!apply_one} will, ahead of the lock and against the
-         store itself, and answers the reads that took. Ancestor ids first,
-         since a manifest's key is built from its folder's id, so a missing one
-         does not fail loudly: it resolves to no key and the put is skipped. *)
+      (* Ancestor ids first, since a manifest's key is built from its folder's
+         id, so a missing one does not fail loudly: it resolves to no key and
+         the put is skipped. *)
+      let adopt_for = function
+        | `Put (rel, _) | `Mkdir (rel, _) | `Rename { Journal.dst = rel; _ } ->
+            adopt_ancestor_ids rel
+        | `Delete _ | `Rmdir _ -> return_unit
+
+      (* Makes the decision {!apply_one} will, ahead of the lock, and asks the
+         store for each answer that takes: a pass stops at the first one it
+         lacks, which is fetched before the next. *)
       let read_ahead ~owed ops =
-        let markers = Hashtbl.create 8 and manifests = Hashtbl.create 8 in
-        let memo table read key =
-          match Hashtbl.find_opt table key with
-            | Some known -> Io.return known
-            | None ->
-                let+ answer = read key in
-                Hashtbl.replace table key answer;
-                answer
-        in
-        let rec live =
-          {
-            marker_at = (fun key -> memo markers marker_at_store key);
-            manifest = (fun key -> memo manifests (fetch_peer live) key);
-            adopt;
-          }
+        let reads =
+          { markers = Hashtbl.create 8; manifests = Hashtbl.create 8 }
         in
         let theirs = function
           | `Put (rel, _) | `Rename { Journal.dst = rel; is_dir = false; _ } ->
-              Io.map ignore (live.manifest (Lk.file rel))
+              Io.map ignore (manifest_of reads (Lk.file rel))
           | `Delete _ | `Mkdir _ | `Rmdir _ | `Rename _ -> return_unit
         in
-        let+ () =
-          iter_s
-            (fun op ->
-              let* facts, place = gather ~reads:live ~owed op in
-              match (Resolve.Arrival.decide facts, op) with
-                | Resolve.Arrival.Skip _, _ -> return_unit
-                | Apply actions, `Mkdir (_, None)
-                  when List.mem Resolve.Arrival.Make_folder actions ->
-                    live.adopt (`Folder (Logical_key.path place.at))
-                | Apply actions, _
-                  when List.exists
-                         (function
-                           | Resolve.Arrival.Write_theirs
-                           | Adopt_theirs_at_destination ->
-                               true
-                           | _ -> false)
-                         actions ->
-                    theirs op
-                | Apply _, _ -> return_unit)
-            ops
+        let survey op =
+          let* facts, place = gather ~reads ~owed op in
+          match (Resolve.Arrival.decide facts, op) with
+            | Resolve.Arrival.Skip _, _ -> return_unit
+            | Apply actions, `Mkdir (_, None)
+              when List.mem Resolve.Arrival.Make_folder actions ->
+                adopt_folder_id (Logical_key.path place.at)
+            | Apply actions, _
+              when List.exists
+                     (function
+                       | Resolve.Arrival.Write_theirs
+                       | Adopt_theirs_at_destination ->
+                           true
+                       | _ -> false)
+                     actions ->
+                theirs op
+            | Apply _, _ -> return_unit
         in
-        (* A read nothing made ahead is one this client's own change since made
-           necessary, and the entry is read again rather than the store asked
-           with the lock held. *)
-        let recall table key =
-          match Hashtbl.find_opt table key with
-            | Some known -> Io.return known
-            | None ->
-                Io.fail
-                  (Retry.failed ~kind:Retry.Transient ~op:"apply"
-                     (Logical_key.to_string key
-                    ^ ": changed here while the entry was being read"))
+        let rec pass () =
+          Io.catch
+            (fun () -> iter_s survey ops)
+            (function
+              | Unread missing ->
+                  let* () = fill reads missing in
+                  pass ()
+              | exn -> Io.fail exn)
         in
-        {
-          marker_at = recall markers;
-          manifest = recall manifests;
-          adopt = (fun _ -> return_unit);
-        }
+        let* () = iter_s adopt_for ops in
+        let+ () = pass () in
+        reads
 
       (* Failures propagate: the sync poller must not advance its high-water mark
          past an entry it could not apply, or the op is lost until a full resync. *)
@@ -1503,14 +1509,25 @@ struct
           | Resolve.Arrival.Skip _ -> return_unit
           | Apply actions -> iter_s (enact ~reads ~owed op place) actions
 
-      (* The log is read for the reads ahead and again under the lock, where a
-       record written between the two shows up as a read nothing made. *)
+      (* The log is read for the reads ahead and again under the lock. A read
+         nothing made ahead is one this client's own change since made
+         necessary, and the entry is read again rather than the store asked
+         with the lock held. *)
       let apply_foreign_ops ops =
         let* owed = W.owed_metadata () in
         let* reads = read_ahead ~owed ops in
-        with_meta (fun () ->
-            let* owed = W.owed_metadata () in
-            iter_s (apply_one ~reads ~owed) ops)
+        Io.catch
+          (fun () ->
+            with_meta (fun () ->
+                let* owed = W.owed_metadata () in
+                iter_s (apply_one ~reads ~owed) ops))
+          (function
+            | Unread (`Marker key | `Manifest key) ->
+                Io.fail
+                  (Retry.failed ~kind:Retry.Transient ~op:"apply"
+                     (Logical_key.to_string key
+                    ^ ": changed here while the entry was being read"))
+            | exn -> Io.fail exn)
     end
 
     let apply_foreign_ops = Foreign.apply_foreign_ops
