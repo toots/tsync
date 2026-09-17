@@ -96,11 +96,11 @@ type step =
   | GcClose  (** Finish a collection [GcMark] left open. *)
   | GcAbort  (** Abandon an open collection, keeping every chunk it holds. *)
   | Drain
-  | DrainMetadata
-      (** {!Drain} for the metadata queue alone, while uploads are held. *)
       (** Wait for queued uploads to finish. Also puts the next journal entry in
           a later millisecond, keeping snapshots deterministic: entry keys are
           ms-timestamped and collide within one ms. *)
+  | DrainMetadata
+      (** {!Drain} for the metadata queue alone, while uploads are held. *)
   | SettleReadAhead
       (** Wait for the read-ahead a read fired to finish. A prefetch is fired
           and forgotten, so a count taken straight after a read is a race: it
