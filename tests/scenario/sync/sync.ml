@@ -422,8 +422,10 @@ let foreign_dir_rename_of_own_folder =
         B (Write { path = "f4.txt"; content = "moved" });
         B Drain;
         A Sync;
+        A (Metadata `Paused);
         A (Rename { src = "f4.txt"; dst = "sub/f4.txt" });
         A (Rename { src = "sub"; dst = "sub-renamed" });
+        A (Metadata `Running);
         A Drain;
         B Sync;
       ];

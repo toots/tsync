@@ -140,6 +140,11 @@ module type S = sig
 
   val note_failure : Journal.Entry_key.t -> Retry.kind -> string -> unit io
   val complete : Journal.Entry_key.t -> unit io
+  val find : Journal.Entry_key.t -> record option io
+
+  val update_ops :
+    Journal.Entry_key.t -> (Journal.op list -> Journal.op list) -> unit io
+
   val list : unit -> (Journal.Entry_key.t * record) list io
 end
 
@@ -226,6 +231,13 @@ module Make (Io : Io.S) (R : RECORDS with type 'a io := 'a Io.t) = struct
           { r with attempts = r.attempts + 1; last_error = Some (kind, detail) })
 
     let complete key = R.complete log (id key)
+
+    let find key =
+      let+ found = R.list ~wanted:(fun i -> i = id key) log in
+      match found with (_, r) :: _ -> Some r | [] -> None
+
+    let update_ops key f =
+      R.update log (id key) (fun r -> { r with ops = f r.ops })
 
     (* Executed, then published, then peers told to look, then the record goes: a
        crash in any of those windows leaves a record reconcile can finish from
