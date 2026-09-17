@@ -49,6 +49,15 @@ struct
     module Js = Js.Make (C)
     module W = W.Make (C)
 
+    (* Only the link failing clears by waiting. A failure of this client's own
+       -- its state, its code -- fails the same way on every try, and an ordered
+       queue retrying it at the head would publish nothing after it for good. *)
+    let classify = function
+      | Invalid_argument _ | Failure _ | Not_found | Assert_failure _
+      | Match_failure _ ->
+          Retry.Permanent
+      | exn -> Backend.classify exn
+
     (* What is parked right now, where the queue's own flag latches for the life
        of the process and would go on reporting an operation {!rearm} landed. *)
     let parked : (string, unit) Hashtbl.t = Hashtbl.create 4
@@ -90,7 +99,7 @@ struct
                     Hashtbl.remove parked id;
                     W.complete entry_key
                 | exn ->
-                    let kind = Backend.classify exn in
+                    let kind = classify exn in
                     if kind = Retry.Permanent then Hashtbl.replace parked id ();
                     let* () =
                       W.note_failure entry_key kind (Retry.reason exn)
@@ -101,8 +110,8 @@ struct
        {!rearm} brings back and what stats reports as stuck, so parking must
        leave it behind. *)
     let queue =
-      Q.ordered ~name:"metadata" ~log:W.log ~classify:Backend.classify
-        ~poison:Durable_queue.Stop ~run ()
+      Q.ordered ~name:"metadata" ~log:W.log ~classify ~poison:Durable_queue.Stop
+        ~run ()
 
     (* Queued plus running: an ordered queue's [owed] counts what is waiting,
        and a caller draining on it alone would go on while the job that is

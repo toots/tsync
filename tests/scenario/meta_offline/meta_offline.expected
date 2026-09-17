@@ -99,4 +99,8 @@ what follows it is published: ok
 it stays owed, and is reported: ok
 the retry sweep lands it, and the report clears: ok
 
-40 check(s), 0 failure(s)
+=== an operation that fails on this client's own account steps aside
+what follows it is published, and it is reported: ok
+and it lands once it can: ok
+
+42 check(s), 0 failure(s)
