@@ -1,0 +1,8 @@
+
+=== a put flushes its temp file before renaming it into place
+one object published: ok
+flushed before it was renamed: ok
+
+=== a put_if_absent flushes its temp file before linking it into place
+one object published: ok
+flushed before it was linked: ok
