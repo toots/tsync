@@ -173,6 +173,11 @@ module type S = sig
   val resume_meta :
     entry_key:Journal.Entry_key.t -> record:Wal.record -> unit io
 
+  (** The local half of a metadata op, for a replay that found its intent
+      recorded and cannot tell how far it got: taking it twice changes nothing.
+  *)
+  val redo_local : Journal.op -> unit io
+
   val delete : t -> unit io
   val mkdir : t -> unit io
   val rmdir : t -> unit io

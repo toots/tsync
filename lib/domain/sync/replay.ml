@@ -179,6 +179,10 @@ struct
           match r.Wal.state with
             | Wal.Executed -> finish_executed key r
             | Wal.Prepared -> resume_prepared key r
+            | Wal.Intent when Wal.is_metadata r ->
+                let* () = iter_s F.redo_local r.Wal.ops in
+                F.resume_meta ~entry_key:key
+                  ~record:{ r with Wal.state = Wal.Prepared }
             | Wal.Intent -> replay_unpublished key r)
         (fun exn ->
           (* Left in place: a record that could not be reconciled is tried again
