@@ -68,6 +68,10 @@ module type S = sig
   val claim_folder :
     ?id:string -> Logical_key.t -> [ `Held | `Taken of string ] io
 
+  (** {!claim_folder}, failing transiently when another folder holds the name:
+      its own queued creation moves it aside, and the caller is retried. *)
+  val ensure_claimed : Logical_key.t -> unit io
+
   (** Record a directory under its parent's namespace, so a resync can rebuild
       the tree, its anchor written first so a marker left behind elsewhere is
       stale from this moment. A no-op for a layout with no folder tree. *)
