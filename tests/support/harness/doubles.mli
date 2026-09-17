@@ -27,6 +27,18 @@ module Outage (_ : Backend_lwt.Store) : sig
   val reset : unit -> unit
 end
 
+(** [Real] behind a link that refuses: the next [n] requests fail, transiently
+    unless [with_] says otherwise, and the rest go through. [on] names the one
+    call refused, ["put_if_absent"] say, leaving every other through. Where
+    {!Outage} is a request that waits, this is one that comes back failed, which
+    is what a queue's retries and parking are for. *)
+module Flaky (_ : Backend_lwt.Store) : sig
+  include Backend_lwt.Store
+
+  val refuse_next : ?on:string -> ?with_:exn -> int -> unit
+  val refusals : unit -> int
+end
+
 (** Readable and never writable — a wrong credential, a bucket that refuses
     writes. Reads answer empty rather than failing; writes raise
     {!Backend.Not_writable}. *)
