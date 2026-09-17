@@ -217,7 +217,7 @@ struct
     let still_trashed (m : Folder.marker) =
       let+ anchor = St.get_anchor ~folder_id:m.Folder.id in
       match anchor with
-        | Some a when a.Folder.parent <> Stored_key.trash_id ->
+        | Some a when not (Folder.in_trash a) ->
             Log.err
               "trash entry for %s (%s) names a folder that lives under %s as \
                %s; not reclaimed. Run tsync data-integrity --repair."

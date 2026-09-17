@@ -31,6 +31,9 @@ val marker_of_string : string -> marker option
     move left behind is told from the folder's real place. *)
 type anchor = { parent : string; name : string }
 
+(** Whether the anchor files its folder in the trash, which retires it. *)
+val in_trash : anchor -> bool
+
 val anchor_to_string : anchor -> string
 
 (** [None] for anything that is not an anchor, a marker included. *)
