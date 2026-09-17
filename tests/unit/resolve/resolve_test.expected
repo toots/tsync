@@ -11,7 +11,7 @@ put: ours renamed onto the name, our folder there, staged                       
 put: ours renamed onto the name, our folder there, holding no id                                   -> ours aside, its rename retargeted; our folder aside, here only; write theirs
 put: ours renamed onto the name, our folder there, holding no id, staged                           -> ours aside, its rename retargeted; our folder aside, here only; write theirs
 delete: nothing in the way                                                                         -> remove the file
-delete: staged                                                                                     -> our staged file aside; remove the file
+delete: staged                                                                                     -> skip (ours publishes later)
 mkdir: nothing in the way                                                                          -> make the folder
 mkdir: another folder there                                                                        -> our folder aside, as a rename; make the folder
 mkdir: our staged file there                                                                       -> our staged file aside; make the folder
@@ -26,82 +26,42 @@ rmdir: its path held by another folder                                          
 rename folder: source at its path, destination free                                                -> move the folder
 rename folder: source at its path, destination holds the same folder                               -> retire the stale source
 rename folder: source at its path, destination holds another folder                                -> our folder aside, as a rename; move the folder
-rename folder: source at its path, destination free, staged under it                               -> skip (unpublished work here)
-rename folder: source at its path, destination holds the same folder, staged under it              -> skip (unpublished work here)
-rename folder: source at its path, destination holds another folder, staged under it               -> skip (unpublished work here)
 rename folder: source at its path, destination free, already there                                 -> skip (already applied)
 rename folder: source at its path, destination holds the same folder, already there                -> skip (already applied)
 rename folder: source at its path, destination holds another folder, already there                 -> skip (already applied)
-rename folder: source at its path, destination free, already there, staged under it                -> skip (already applied)
-rename folder: source at its path, destination holds the same folder, already there, staged under it -> skip (already applied)
-rename folder: source at its path, destination holds another folder, already there, staged under it -> skip (already applied)
 rename folder: source found by its id, destination free                                            -> move the folder
 rename folder: source found by its id, destination holds the same folder                           -> retire the stale source
 rename folder: source found by its id, destination holds another folder                            -> our folder aside, as a rename; move the folder
-rename folder: source found by its id, destination free, staged under it                           -> skip (unpublished work here)
-rename folder: source found by its id, destination holds the same folder, staged under it          -> skip (unpublished work here)
-rename folder: source found by its id, destination holds another folder, staged under it           -> skip (unpublished work here)
 rename folder: source found by its id, destination free, already there                             -> skip (already applied)
 rename folder: source found by its id, destination holds the same folder, already there            -> skip (already applied)
 rename folder: source found by its id, destination holds another folder, already there             -> skip (already applied)
-rename folder: source found by its id, destination free, already there, staged under it            -> skip (already applied)
-rename folder: source found by its id, destination holds the same folder, already there, staged under it -> skip (already applied)
-rename folder: source found by its id, destination holds another folder, already there, staged under it -> skip (already applied)
 rename folder: source gone, destination free                                                       -> skip (nothing to move)
 rename folder: source gone, destination holds the same folder                                      -> skip (nothing to move)
 rename folder: source gone, destination holds another folder                                       -> skip (nothing to move)
-rename folder: source gone, destination free, staged under it                                      -> skip (nothing to move)
-rename folder: source gone, destination holds the same folder, staged under it                     -> skip (nothing to move)
-rename folder: source gone, destination holds another folder, staged under it                      -> skip (nothing to move)
 rename folder: source gone, destination free, already there                                        -> skip (nothing to move)
 rename folder: source gone, destination holds the same folder, already there                       -> skip (nothing to move)
 rename folder: source gone, destination holds another folder, already there                        -> skip (nothing to move)
-rename folder: source gone, destination free, already there, staged under it                       -> skip (nothing to move)
-rename folder: source gone, destination holds the same folder, already there, staged under it      -> skip (nothing to move)
-rename folder: source gone, destination holds another folder, already there, staged under it       -> skip (nothing to move)
 rename folder: source at its path, destination free, our own op on it owed                         -> skip (ours publishes later)
 rename folder: source at its path, destination holds the same folder, our own op on it owed        -> skip (ours publishes later)
 rename folder: source at its path, destination holds another folder, our own op on it owed         -> skip (ours publishes later)
-rename folder: source at its path, destination free, our own op on it owed, staged under it        -> skip (ours publishes later)
-rename folder: source at its path, destination holds the same folder, our own op on it owed, staged under it -> skip (ours publishes later)
-rename folder: source at its path, destination holds another folder, our own op on it owed, staged under it -> skip (ours publishes later)
 rename folder: source at its path, destination free, our own op on it owed, already there          -> skip (ours publishes later)
 rename folder: source at its path, destination holds the same folder, our own op on it owed, already there -> skip (ours publishes later)
 rename folder: source at its path, destination holds another folder, our own op on it owed, already there -> skip (ours publishes later)
-rename folder: source at its path, destination free, our own op on it owed, already there, staged under it -> skip (ours publishes later)
-rename folder: source at its path, destination holds the same folder, our own op on it owed, already there, staged under it -> skip (ours publishes later)
-rename folder: source at its path, destination holds another folder, our own op on it owed, already there, staged under it -> skip (ours publishes later)
 rename folder: source found by its id, destination free, our own op on it owed                     -> skip (ours publishes later)
 rename folder: source found by its id, destination holds the same folder, our own op on it owed    -> skip (ours publishes later)
 rename folder: source found by its id, destination holds another folder, our own op on it owed     -> skip (ours publishes later)
-rename folder: source found by its id, destination free, our own op on it owed, staged under it    -> skip (ours publishes later)
-rename folder: source found by its id, destination holds the same folder, our own op on it owed, staged under it -> skip (ours publishes later)
-rename folder: source found by its id, destination holds another folder, our own op on it owed, staged under it -> skip (ours publishes later)
 rename folder: source found by its id, destination free, our own op on it owed, already there      -> skip (ours publishes later)
 rename folder: source found by its id, destination holds the same folder, our own op on it owed, already there -> skip (ours publishes later)
 rename folder: source found by its id, destination holds another folder, our own op on it owed, already there -> skip (ours publishes later)
-rename folder: source found by its id, destination free, our own op on it owed, already there, staged under it -> skip (ours publishes later)
-rename folder: source found by its id, destination holds the same folder, our own op on it owed, already there, staged under it -> skip (ours publishes later)
-rename folder: source found by its id, destination holds another folder, our own op on it owed, already there, staged under it -> skip (ours publishes later)
 rename folder: source gone, destination free, our own op on it owed                                -> skip (ours publishes later)
 rename folder: source gone, destination holds the same folder, our own op on it owed               -> skip (ours publishes later)
 rename folder: source gone, destination holds another folder, our own op on it owed                -> skip (ours publishes later)
-rename folder: source gone, destination free, our own op on it owed, staged under it               -> skip (ours publishes later)
-rename folder: source gone, destination holds the same folder, our own op on it owed, staged under it -> skip (ours publishes later)
-rename folder: source gone, destination holds another folder, our own op on it owed, staged under it -> skip (ours publishes later)
 rename folder: source gone, destination free, our own op on it owed, already there                 -> skip (ours publishes later)
 rename folder: source gone, destination holds the same folder, our own op on it owed, already there -> skip (ours publishes later)
 rename folder: source gone, destination holds another folder, our own op on it owed, already there -> skip (ours publishes later)
-rename folder: source gone, destination free, our own op on it owed, already there, staged under it -> skip (ours publishes later)
-rename folder: source gone, destination holds the same folder, our own op on it owed, already there, staged under it -> skip (ours publishes later)
-rename folder: source gone, destination holds another folder, our own op on it owed, already there, staged under it -> skip (ours publishes later)
 rename file: source not here                                                                       -> adopt theirs at the destination
-rename file: source not here, destination staged                                                   -> skip (unpublished work here)
-rename file: source not here, source staged                                                        -> adopt theirs at the destination
-rename file: source not here, source staged, destination staged                                    -> skip (unpublished work here)
+rename file: source not here, destination staged                                                   -> our staged file aside; adopt theirs at the destination
 rename file: source here                                                                           -> move the file
-rename file: source here, destination staged                                                       -> move the file
-rename file: source here, source staged                                                            -> skip (unpublished work here)
-rename file: source here, source staged, destination staged                                        -> skip (unpublished work here)
+rename file: source here, destination staged                                                       -> our staged file aside; move the file
 
-105 situation(s)
+65 situation(s)

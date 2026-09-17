@@ -69,6 +69,15 @@ let () =
         ~ours:[B (write "f.txt" "ours")]
         ~theirs:[A (write "f.txt" "theirs")];
       (* Removing a folder outlives what a peer adds to it. *)
+      conflict "f10_edit_vs_rename" ~setup:file
+        ~ours:[B (write "f.txt" "edited")]
+        ~theirs:[A (rename "f.txt" "g.txt")];
+      conflict "f11_create_vs_rename_onto" ~setup:file
+        ~ours:[B (write "g.txt" "ours")]
+        ~theirs:[A (rename "f.txt" "g.txt")];
+      conflict "f12_edit_vs_delete" ~setup:file
+        ~ours:[B (write "f.txt" "edited")]
+        ~theirs:[A (Delete "f.txt")];
       conflict "d1_rmdir_vs_add_inside"
         ~setup:(folder @ [A (write "d/a.txt" "a")])
         ~ours:[B (Delete "d/a.txt"); B (Rmdir "d")]
@@ -97,6 +106,9 @@ let () =
             B (write "d/sub/new.txt" "ours too");
           ]
         ~theirs:[A (Rmdir "d")];
+      conflict "d9_add_inside_vs_rename" ~setup:folder
+        ~ours:[B (write "d/x.txt" "added")]
+        ~theirs:[A (rename "d" "e")];
       conflict "k1_file_vs_folder" ~setup:[]
         ~ours:[B (write "x" "a file")]
         ~theirs:[A (Mkdir "x"); A (write "x/in.txt" "inside")];

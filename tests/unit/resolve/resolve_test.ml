@@ -37,31 +37,19 @@ let universe =
             (fun source ->
               List.concat_map
                 (fun already_there ->
-                  List.concat_map
-                    (fun staged_under ->
-                      List.map
-                        (fun destination ->
-                          Rename_folder
-                            {
-                              ours_owed;
-                              source;
-                              already_there;
-                              staged_under;
-                              destination;
-                            })
-                        [`Free; `Same_folder; `Another_folder])
-                    bools)
+                  List.map
+                    (fun destination ->
+                      Rename_folder
+                        { ours_owed; source; already_there; destination })
+                    [`Free; `Same_folder; `Another_folder])
                 bools)
             [`At_path; `By_id; `Gone])
         bools;
       List.concat_map
         (fun source_here ->
-          List.concat_map
-            (fun staged_source ->
-              List.map
-                (fun staged_destination ->
-                  Rename_file { source_here; staged_source; staged_destination })
-                bools)
+          List.map
+            (fun staged_destination ->
+              Rename_file { source_here; staged_destination })
             bools)
         bools;
     ]

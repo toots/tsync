@@ -1031,20 +1031,6 @@ struct
               | None -> adopt_folder_id (Logical_key.path dir))
           (ancestors [] (Lk.dir rel))
 
-      (* A foreign op must never clobber unsynced local edits, and a staged
-         manifest is that flag.
-
-         For a folder it means one somewhere under it: a file written there
-         leaves its directory behind, empty, once it publishes. *)
-      let staged_at key =
-        match Logical_key.kind key with
-          | `File -> Mfs.exists key
-          | `Dir ->
-              let+ under =
-                Mfs.entries ~rel_dir:(Logical_key.path key) ~deep:true
-              in
-              under <> []
-
       (* What a peer's folder rename finds at its destination in this mirror. A
        folder with no id, or an entry naming none, leaves nothing to compare and
        reads as free. *)
@@ -1308,11 +1294,6 @@ struct
                   let+ found = folder_of_id id in
                   ((if found = None then `Gone else `By_id), found)
               in
-              let* staged_under =
-                match from with
-                  | Some from -> staged_at from
-                  | None -> return_false
-              in
               let+ destination = at_destination ~dst:at ~id in
               ( Resolve.Rename_folder
                   {
@@ -1323,7 +1304,6 @@ struct
                     source;
                     already_there =
                       Option.fold ~none:false ~some:(Logical_key.equal at) from;
-                    staged_under;
                     destination =
                       (match destination with
                         | `Free -> `Free
@@ -1343,10 +1323,8 @@ struct
               let* from = local_file reads (Lk.file src) in
               let* at = local_file reads (Lk.file dst) in
               let* source_here = Syscalls.file_exists (manifest_path from) in
-              let* staged_source = Mfs.exists from in
               let+ staged_destination = Mfs.exists at in
-              ( Resolve.Rename_file
-                  { source_here; staged_source; staged_destination },
+              ( Resolve.Rename_file { source_here; staged_destination },
                 { at; from = Some from; ours = None } )
 
       (* A decision names a source or a folder in the way only when {!gather}
