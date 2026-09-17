@@ -892,27 +892,22 @@ struct
           in
           Js.bump_cursor ek)
 
-    (* Adopt the id from the backend marker: resolving the folder locally would
-       mint a different one and split the namespace in two. The store's marker
-       settles a concurrent create; the id the op carries stands in when the
-       store no longer has a marker under this name -- the folder was renamed
-       before this client caught up -- or the folder is id-less until a full
-       sync and nothing under it can be named. *)
-    let adopt_folder_id ?id rel =
+    let write_folder_id key id =
+      Io.map ignore
+        (Folders.write ~cache_root:C.cache_root ~domain_name:C.domain_name key
+           { Folder.name = Logical_key.leaf key; id })
+
+    (* Adopt the id from the backend marker, for a folder no op named: resolving
+       it locally would mint a different one and split the namespace in two. A
+       folder the store no longer files under this name stays id-less until a
+       full sync, and nothing under it can be named. *)
+    let adopt_folder_id rel =
       if rel = "" then return_unit
       else (
-        let write id =
-          Io.map ignore
-            (Folders.write ~cache_root:C.cache_root ~domain_name:C.domain_name
-               (Lk.dir rel)
-               { Folder.name = Filename.basename rel; id })
-        in
-        let from_op () =
-          match id with Some id -> write id | None -> return_unit
-        in
+        let write id = write_folder_id (Lk.dir rel) id in
         let* marker_key = folder_marker_bkey (Lk.dir rel) in
         match marker_key with
-          | None -> from_op ()
+          | None -> return_unit
           | Some marker_key ->
               Io.catch
                 (fun () ->
@@ -923,10 +918,10 @@ struct
                            path under a folder that lives elsewhere. *)
                         let* filed = St.filed ~bkey:marker_key m in
                         match filed with
-                          | `Elsewhere _ -> from_op ()
+                          | `Elsewhere _ -> return_unit
                           | `Here -> write m.Folder.id)
-                    | None -> from_op ())
-                (fun _ -> from_op ()))
+                    | None -> return_unit)
+                (fun _ -> return_unit))
 
     (* A [Put] materialises the directories above it as a side effect of writing
        the manifest, and those carry no id: only a [Mkdir] op adopts one, and the
@@ -1061,19 +1056,50 @@ struct
               ~some:(fun found -> not (Logical_key.equal found key))
               found
 
+    (* What applying the ops will read from the store, read before the metadata
+       lock is taken: a slow link then holds up this entry and not every local
+       operation waiting behind it. Ancestor ids first, since a manifest's key
+       is built from its folder's id, so a missing one does not fail loudly: it
+       resolves to no key and the put is skipped. *)
+    let prefetch ops =
+      let fetched = Hashtbl.create 8 in
+      let fetch key =
+        let+ m = R.fetch_manifest ~key () in
+        Hashtbl.replace fetched key m
+      in
+      let+ () =
+        iter_s
+          (function
+            | `Put (rel, _) ->
+                let* () = adopt_ancestor_ids rel in
+                fetch (Lk.file rel)
+            | `Rename { Journal.src; dst; is_dir = false; _ } ->
+                let* () = adopt_ancestor_ids dst in
+                let* exists =
+                  Syscalls.file_exists (manifest_path (Lk.file src))
+                in
+                if exists then return_unit else fetch (Lk.file dst)
+            | `Rename { Journal.dst = rel; is_dir = true; _ } | `Mkdir (rel, _)
+              ->
+                adopt_ancestor_ids rel
+            | `Delete _ | `Rmdir _ -> return_unit)
+          ops
+      in
+      fun key ->
+        match Hashtbl.find_opt fetched key with
+          | Some m -> Io.return m
+          | None -> R.fetch_manifest ~key ()
+
     (* Failures propagate: the sync poller must not advance its high-water mark
        past an entry it could not apply, or the op is lost until a full resync. *)
-    let apply_one op =
+    let apply_one ~fetched op =
       match op with
         | `Put (rel, _) ->
             let key = Lk.file rel in
             staged_aside key (fun () ->
                 ignore (cancel_upload key);
-                (* Before the fetch, not after: the manifest's own key is built
-                   from the parent folder's id, so a missing one does not fail
-                   loudly here — it resolves to no key and the put is skipped. *)
                 let* () = adopt_ancestor_ids rel in
-                let* m = R.fetch_manifest ~key () in
+                let* m = fetched key in
                 match m with
                   | None -> return_unit
                   | Some state -> write_manifest key state)
@@ -1089,19 +1115,18 @@ struct
             else
               let* () = adopt_ancestor_ids rel in
               let* taken = another_folder_at key id in
-              match (taken, id) with
-                | Some ours, Some id ->
-                    (* The store still files ours under this name until the
-                       queued rename lands, so the op's id is taken as is. *)
-                    let* () = rename_ours_aside ~dst:key ~ours in
-                    let* () = Ck.create_dir key in
-                    Io.map ignore
-                      (Folders.write ~cache_root:C.cache_root
-                         ~domain_name:C.domain_name key
-                         { Folder.name = Logical_key.leaf key; id })
-                | _ ->
-                    let* () = Ck.create_dir key in
-                    adopt_folder_id ?id rel)
+              let* () =
+                match taken with
+                  | Some ours -> rename_ours_aside ~dst:key ~ours
+                  | None -> return_unit
+              in
+              let* () = Ck.create_dir key in
+              (* A folder's id is final from its mkdir, so the op's is taken as
+                 is; the store may still file another folder under this name
+                 until that one's rename lands. *)
+                match id with
+                | Some id -> write_folder_id key id
+                | None -> adopt_folder_id rel)
         | `Rmdir (rel, id) ->
             let key = Lk.dir rel in
             let* taken = another_folder_at key id in
@@ -1136,11 +1161,13 @@ struct
               unless_staged dst_key (fun () ->
                   (* No local src (e.g. we renamed it ourselves and published the
                      result): adopt dst's remote state. *)
-                  let* m = R.fetch_manifest ~key:dst_key () in
+                  let* m = fetched dst_key in
                   match m with
                     | Some state -> write_manifest dst_key state
                     | _ -> return_unit)
 
-    let apply_foreign_ops ops = with_meta (fun () -> iter_s apply_one ops)
+    let apply_foreign_ops ops =
+      let* fetched = prefetch ops in
+      with_meta (fun () -> iter_s (apply_one ~fetched) ops)
   end
 end
