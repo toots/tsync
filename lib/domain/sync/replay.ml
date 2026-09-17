@@ -128,9 +128,7 @@ struct
       match ops with
         | [] -> W.complete key
         | ops ->
-            let puts, meta =
-              List.partition (function `Put _ -> true | _ -> false) ops
-            in
+            let puts, meta = Wal.partition_puts ops in
             (* Journal order matters: a rename must follow its create. *)
             let* () = iter_s apply_op meta in
             let* resumed =
@@ -164,9 +162,7 @@ struct
        holds, and publishing it is what brings the two back into agreement --
        skipping it would leave them apart with nothing left saying so. *)
     let resume_prepared key (r : Wal.record) =
-      let puts, meta =
-        List.partition (function `Put _ -> true | _ -> false) r.Wal.ops
-      in
+      let puts, meta = Wal.partition_puts r.Wal.ops in
       match (puts, meta) with
         | [(`Put (rel, _) as op)], [] ->
             let* resumed =

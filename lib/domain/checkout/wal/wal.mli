@@ -36,8 +36,11 @@ type record = {
           counted. *)
 }
 
-(** Whether a record is the metadata queue's: a put's bytes and entry are the
-    upload queue's, everything else is metadata. *)
+(** A record's puts, which are the upload queue's, and the rest, which are
+    metadata. *)
+val partition_puts : Journal.op list -> Journal.op list * Journal.op list
+
+(** Whether a record is the metadata queue's: it names no put. *)
 val is_metadata : record -> bool
 
 (** The job a durable queue drains, for a caller that builds one over these

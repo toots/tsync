@@ -9,8 +9,10 @@ type record = {
   last_error : (Retry.kind * string) option;
 }
 
-let is_metadata r =
-  r.ops <> [] && List.for_all (function `Put _ -> false | _ -> true) r.ops
+let partition_puts ops =
+  List.partition (function `Put _ -> true | _ -> false) ops
+
+let is_metadata r = r.ops <> [] && fst (partition_puts r.ops) = []
 
 let string_of_state = function
   | Intent -> "intent"
