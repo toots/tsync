@@ -602,20 +602,15 @@ struct
         let+ () = remove_old_marker key old_marker ~id:fid in
         true)
 
-    (* A peer removed the source while the rename was owed. The local side moved
-       long ago and may have been worked in since, so it keeps a name of its own
-       rather than being put back under whoever is using it. *)
+    (* A peer removed or moved the source while the rename was owed, so there is
+       nothing on the store to move: the file is published where it is here,
+       under the name it was given, which clashes with nothing. *)
     let settle_rename_conflict dst exn =
       let* m = Mf.current dst in
       match m with
-        | Some (`Staged _) ->
-            (* src never reached the backend: a rename before the first upload,
-               not a conflict. A conflict name here would break the writer's own
-               follow-up accesses (rclone stat'ing its renamed .partial). *)
-            queue_put dst
-        | Some (`Published m) ->
-            let* conflict = with_meta (fun () -> move_aside dst) in
-            publish_manifest conflict m
+        (* Never reached the backend: its upload is all it owes. *)
+        | Some (`Staged _) -> queue_put dst
+        | Some (`Published m) -> publish_manifest dst m
         | None -> Io.fail exn
 
     (* Whether the store already files a different folder under [dst]'s name. *)
