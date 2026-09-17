@@ -199,7 +199,12 @@ struct
       Cache_layout.staged_manifest_path ~cache_root:C.cache_root
         ~domain_name:C.domain_name key
 
-    let exists key = Retry.file_exists (path key)
+    (* The directory staging leaves above a staged file is not an edit to the
+       name it shares with a file. *)
+    let exists key =
+      let p = path key in
+      let* there = Retry.file_exists p in
+      if there then Io.map not (Fs.is_directory p) else return_false
 
     let read key =
       let p = path key in
