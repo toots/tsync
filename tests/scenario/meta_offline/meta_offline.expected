@@ -50,7 +50,7 @@ a folder renamed before the store heard of it is filed where it is, under the id
 === a new folder removed while its creation is being published
 the claim is out: ok
   rmdir race: returned, 0 round trip(s), 2 owed
-  local: papers, fresh, moved2; store: fresh, moved2, papers
+  local: fresh, moved2, papers; store: fresh, moved2, papers
 the folder did not come back, here or on the store: ok
 and its removal leaves one entry pair and one trash entry at most: ok
 

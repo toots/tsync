@@ -138,6 +138,12 @@ let on_store ~folder_id leaf =
   in
   body <> None
 
+(* Sorted: readdir order is the filesystem's, and a snapshot taking it is one
+   that passes on the machine that recorded it. *)
+let local_dirs () =
+  let+ _, dirs = Ck.list_children ~prefix:Lk.root () in
+  List.sort compare dirs
+
 let lookup rel =
   Folder_ids_lwt.lookup_id ~cache_root:root ~domain_name:C.domain_name
     (Lk.dir rel)
@@ -284,7 +290,7 @@ let () =
      step "store: %s" (String.concat ", " names);
      check "a folder removed before the store heard of it is not filed there"
        (not (List.mem "gone" names));
-     let* _, dirs = Ck.list_children ~prefix:Lk.root () in
+     let* dirs = local_dirs () in
      check "nor brought back here" (not (List.mem "gone" dirs));
      let* keys = journal_keys () in
      let* trash =
@@ -344,7 +350,7 @@ let () =
      in
      Link.set_up true;
      let* () = settle () in
-     let* _, dirs = Ck.list_children ~prefix:Lk.root () in
+     let* dirs = local_dirs () in
      let* names = root_markers () in
      let* keys = journal_keys () in
      let* trashed = trash_count () in
@@ -514,7 +520,7 @@ let () =
      let* () = Rp.reconcile () in
      let* published = until_io nothing_owed in
      let* begun = lookup "begun" in
-     let* _, dirs = Ck.list_children ~prefix:Lk.root () in
+     let* dirs = local_dirs () in
      let* names = root_markers () in
      let* keys = journal_keys () in
      let entries_for name = List.length (List.filter (( = ) name) keys) in
@@ -558,7 +564,7 @@ let () =
      Shaky.refuse_next 1;
      Mq.set_paused false;
      let* published = until_io nothing_owed in
-     let* _, dirs = Ck.list_children ~prefix:Lk.root () in
+     let* dirs = local_dirs () in
      let* names = root_markers () in
      check "both are published" (published && Shaky.refusals () = 1);
      check "and the new folder did not meet the old one's name still taken"
