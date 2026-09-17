@@ -124,6 +124,15 @@ let attempt what f =
       step "%s: refused (%s)" what (Printexc.to_string exn);
       Lwt.return false)
 
+(* Where the id a path last named is kept, which a folder no op ever named
+   here has none of. *)
+let remembered_path rel =
+  Filename.concat
+    (Filename.concat
+       (Cache_layout.folders_dir ~cache_root:root C.domain_name)
+       "by-path")
+    (Digest.to_hex (Digest.string (Logical_key.to_string (Lk.dir rel))))
+
 let marker_path rel =
   Filename.concat
     (Cache_layout.manifest_path ~cache_root:root ~domain_name:C.domain_name
@@ -197,6 +206,7 @@ let () =
      let* () = F.mkdir (Lk.dir "p/child") in
      let* () = settle () in
      let* () = Io_lwt.Fs.unlink_quiet (marker_path "p") in
+     let* () = Io_lwt.Fs.unlink_quiet (remembered_path "p") in
      let* ok =
        attempt "rename p/child -> orphan" (fun () ->
            F.rename ~src:(Lk.dir "p/child") ~dst:(Lk.dir "orphan"))

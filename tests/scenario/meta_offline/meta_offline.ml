@@ -408,6 +408,63 @@ let () =
      Sq.set_paused false;
      let* () = settle () in
 
+     (* Every other folder here sits at the root, whose id is fixed: these are
+        published once their parent is gone locally, which is what a recursive
+        removal leaves behind it. *)
+     case "a folder removed with everything under it";
+     let* () = F.mkdir (Lk.dir "tree") in
+     let* () = F.mkdir (Lk.dir "tree/sub") in
+     let* () = write "tree/sub/leaf.txt" "hotel" in
+     let* () = settle () in
+     let* sub_id = lookup "tree/sub" in
+     Mq.set_paused true;
+     let* () = F.delete (Lk.file "tree/sub/leaf.txt") in
+     let* () = F.rmdir (Lk.dir "tree/sub") in
+     let* () = F.rmdir (Lk.dir "tree") in
+     Mq.set_paused false;
+     let* published = until_io nothing_owed in
+     let* leaf =
+       Real.get_opt
+         ~key:
+           (Stored_key.child_key ~prefix:C.domain_prefix
+              ~folder_id:(Option.value sub_id ~default:"?")
+              "leaf.txt")
+         ()
+     in
+     let* names = root_markers () in
+     check "each removal is published, none parked"
+       (published && not (Mq.degraded ()));
+     check "the file is gone from the store, and the folder from the root"
+       (leaf = None && not (List.mem "tree" names));
+
+     (* The peer names the folder by the path this client moved it from, and
+        whether that is still the same folder is the store's to say. *)
+     case "a peer's entry under a folder moved here holds up no local operation";
+     let* () = F.mkdir (Lk.dir "there") in
+     let* () = write "there/x.txt" "india" in
+     let* () = settle () in
+     let* () = Js.flush_cursor () in
+     Mq.set_paused true;
+     Sq.set_paused true;
+     let* () = F.rename ~src:(Lk.dir "there") ~dst:(Lk.dir "here") in
+     Link.set_up false;
+     Link.reset ();
+     let applying = F.apply_foreign_ops [`Delete "there/x.txt"] in
+     let* out = until (fun () -> Link.calls () > 0) in
+     check "the peer's read is out" out;
+     let* made, calls =
+       offline "mkdir meanwhile" (fun () -> F.mkdir (Lk.dir "meanwhile"))
+     in
+     check "the local mkdir made no round trip, and did not wait"
+       (calls = 0 && Lwt.state made = Lwt.Return ());
+     Link.set_up true;
+     let* () = applying in
+     let* gone = F.stat (Lk.file "here/x.txt") in
+     check "and the peer's delete reached the file where it is now" (gone = None);
+     Mq.set_paused false;
+     Sq.set_paused false;
+     let* () = settle () in
+
      (* A request that comes back failed, where the outage above is one that
         waits: the queue retries, and what it retries must not be overtaken. *)
      case "a refused request lets no later operation overtake";
@@ -461,5 +518,5 @@ let () =
      check "the retry sweep lands it, and the report clears"
        (published && List.mem "stuck" names && not (Mq.degraded ()));
 
-     report ~expected:31 ();
+     report ~expected:36 ();
      Lwt.return_unit)

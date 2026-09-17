@@ -500,8 +500,6 @@
   journal <entry-5> = put d/x.txt 5
   trash d -> <folder-1>
   anchor <folder-1> in .tsync-trash as d
-  file a.txt [<folder-1>/f01e5cbbc09d4fc4-9a0fcd66f030de75] = manifest size=1 chunks=1 h1=15da855801af627d h2=206c8135a9dd3b50
-    chunk#0 e6c632b61e964e1f-d2f6d0996f37a720 size=1
   file x.txt [<folder-1>/fecd6e94d21b3dc7-d6d12967f4c00d3d] = manifest size=5 chunks=1 h1=387d298abfe69f5c h2=c312b6ee6ec6c260
     chunk#0 2bee98317da6a5fc-560272ebc32903c8 size=5
 

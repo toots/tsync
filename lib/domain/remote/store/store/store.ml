@@ -248,28 +248,20 @@ struct
         in
         match known with
           | None -> (
-              let* gone =
-                Folder_ids.lookup_id_removed ~cache_root:C.cache_root
-                  ~domain_name:C.domain_name key
+              let* place =
+                Folder_ids.whereabouts ~cache_root:C.cache_root
+                  ~domain_name:C.domain_name ~root:Lk.root key
               in
-              match gone with
-                (* Moved or removed here while this was owed: naming it again
-                   would bring back a folder that is gone. A folder that moved
-                   is published where it went by its own ops, and the layout
-                   files what is written under its old path by its id. *)
-                | Some id -> (
-                    let* moved =
-                      Folder_ids.key_of_id ~cache_root:C.cache_root
-                        ~domain_name:C.domain_name ~root:Lk.root id
-                    in
-                    match moved with
-                      | Some _ -> Io.return `Held
-                      | None ->
-                          Io.fail
-                            (Retry.failed ~kind:Retry.Transient ~op:"claim"
-                               (Logical_key.to_string key
-                              ^ ": removed here since")))
-                | None ->
+              match place with
+                (* Published where it went by its own ops, and the layout files
+                   what is written under its old path by its id. *)
+                | `Moved _ -> Io.return `Held
+                (* Naming it again would bring back a folder that is gone. *)
+                | `Removed _ ->
+                    Io.fail
+                      (Retry.failed ~kind:Retry.Transient ~op:"claim"
+                         (Logical_key.to_string key ^ ": removed here since"))
+                | `Live _ | `Unknown ->
                     let* () = claim_parent key in
                     let+ (_ : string) = ensure_folder_id key in
                     `Held)
