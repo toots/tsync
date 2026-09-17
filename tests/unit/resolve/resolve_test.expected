@@ -1,3 +1,4 @@
+=== a peer's op arriving
 put: nothing in the way                                                                            -> write theirs
 put: staged                                                                                        -> our staged file aside; write theirs
 put: our folder there                                                                              -> our folder aside, as a rename; write theirs
@@ -65,3 +66,30 @@ rename file: source here                                                        
 rename file: source here, destination staged                                                       -> our staged file aside; move the file
 
 65 situation(s)
+
+=== this client's own op being published
+put                                                                                                -> publish
+delete: gone here                                                                                  -> remove it from the store; publish
+delete: a file holds the name here again                                                           -> nothing owed
+mkdir: the store granted the name                                                                  -> publish
+mkdir: another folder holds the name                                                               -> ours aside; again
+mkdir: the folder is gone here                                                                     -> nothing owed
+mkdir: the store files the folder elsewhere                                                        -> nothing owed
+mkdir: recorded with no id                                                                         -> put its marker; publish
+rmdir: filed on the store                                                                          -> retire it to the trash; publish
+rmdir: the store never heard of the folder                                                         -> nothing owed
+rmdir: already in the trash                                                                        -> nothing owed
+rmdir: recorded with no id                                                                         -> publish
+rename folder: the name is free                                                                    -> move its marker; publish
+rename folder: another folder holds the name                                                       -> ours aside, as a rename of its own; superseded
+rename folder: the store files it where it is here                                                 -> publish
+rename folder: the store never heard of the folder                                                 -> nothing owed
+rename folder: gone here                                                                           -> nothing owed
+rename file: moved                                                                                 -> publish
+rename file: failed, source gone and destination there                                             -> publish
+rename file: failed, source still on the store                                                     -> retry
+rename file: source gone from the store, ours staged                                               -> queue its upload; superseded
+rename file: source gone from the store, ours published                                            -> publish it where it is here; superseded
+rename file: source gone from the store, nothing here                                              -> retry
+
+23 situation(s)
