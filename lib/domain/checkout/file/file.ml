@@ -567,7 +567,7 @@ struct
       let* anchor = St.get_anchor ~folder_id:fid in
       let* published =
         match anchor with
-          | Some a when a.Folder.parent = Stored_key.trash_id -> return_false
+          | Some a when Folder.in_trash a -> return_false
           | _ -> ever_published ~bkey:old_marker fid
       in
       if not published then return_false

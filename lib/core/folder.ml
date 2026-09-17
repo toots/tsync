@@ -26,6 +26,8 @@ let trash_path_of_string data =
 
 type anchor = { parent : string; name : string }
 
+let in_trash a = a.parent = Stored_key.trash_id
+
 let anchor_to_string { parent; name } =
   Yojson.Basic.to_string
     (`Assoc [("parent", `String parent); ("name", `String name)])
