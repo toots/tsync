@@ -1454,6 +1454,20 @@
   (action
    (diff queue_claim_test.expected queue_claim_test.output))))
 
+(subdir unit/resolve
+ (alias
+  (name default)
+  (deps resolve_test.exe))
+ (rule
+  (alias runtest)
+  (target resolve_test.output)
+  (action
+   (with-stdout-to resolve_test.output (ignore-stderr (run ./resolve_test.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff resolve_test.expected resolve_test.output))))
+
 (subdir unit/rsync_plan
  (alias
   (name default)
