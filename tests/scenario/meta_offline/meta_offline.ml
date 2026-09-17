@@ -626,5 +626,46 @@ let () =
      check "and it lands once it can"
        (published && List.mem "faulty" names && not (Mq.degraded ()));
 
-     report ~expected:42 ();
+     (* Entries are applied in order, so one that fails here on this client's
+        own account would keep every later one from it: a peer's folder under
+        a name a file of this client's holds cannot be made, however often it
+        is tried. *)
+     case "a peer's entry that cannot be applied here steps aside";
+     let* () = write "inway" "lima" in
+     let* () = settle () in
+     let from_peer ops =
+       let mine = Journal.Entry_key.to_string (J.entry_key ()) in
+       let theirs =
+         String.sub mine 0 (String.index mine '-' + 1) ^ String.make 32 'f'
+       in
+       let* () = Lwt_unix.sleep 0.003 in
+       match Journal.Entry_key.of_string theirs with
+         | None -> Lwt.fail_with ("not an entry key: " ^ theirs)
+         (* Past this client's own journal writer, which would count the
+            entry as one it made and so has nothing to apply. *)
+         | Some entry_key ->
+             Real.put
+               ~key:
+                 (Stored_key.in_space ~prefix:C.journal_prefix
+                    (Journal.Entry_key.relative_path entry_key))
+               ~data:(Bigstring.of_string (Journal.encode ops))
+               ()
+     in
+     let* () = from_peer [`Mkdir ("inway/sub", Some "peer-sub")] in
+     let* () = from_peer [`Mkdir ("fine", Some "peer-fine")] in
+     let* applied = Rp.apply_foreign ~on_changed:ignore () in
+     let* fine = lookup "fine" in
+     step "applied %d, stepped aside %d" applied (List.length (Rp.unapplied ()));
+     check "the entry after it is applied, and it is reported"
+       (fine = Some "peer-fine" && List.length (Rp.unapplied ()) = 1);
+     let* () = F.delete (Lk.file "inway") in
+     let* () = Ck.create_dir (Lk.dir "inway") in
+     let* applied = Rp.apply_foreign ~on_changed:ignore () in
+     let* sub = lookup "inway/sub" in
+     step "applied %d, stepped aside %d" applied (List.length (Rp.unapplied ()));
+     check "and it lands on a later pass, once it can"
+       (sub = Some "peer-sub" && Rp.unapplied () = []);
+     let* () = settle () in
+
+     report ~expected:44 ();
      Lwt.return_unit)

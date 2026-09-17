@@ -72,6 +72,9 @@ let mount ?(parked = false) ~pid ~mount_point () =
       ("stagedFiles", `Int 3);
       ("pendingMetadata", `Int (if parked then 2 else 0));
       ("metadataDegraded", `Bool parked);
+      ("unappliedEntries", `Int (if parked then 1 else 0));
+      ( "unappliedReason",
+        `String (if parked then "ENOTDIR mkdir photos/2026" else "") );
       ("openHandles", `Int 2);
       ("filesOpened", `Int 41);
       ("pid", `Int pid);

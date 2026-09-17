@@ -22,6 +22,7 @@ module type S = sig
   val reconcile : unit -> unit io
   val apply_foreign : on_changed:(string -> unit) -> unit -> int io
   val mark_handled : Journal.Entry_key.t list -> unit io
+  val unapplied : unit -> (Journal.Entry_key.t * string) list
 end
 
 module type OVER = sig
@@ -40,6 +41,19 @@ module Over
     (Sm : Staged_manifest.OVER with type 'a io := 'a Io.t) =
 struct
   open Io_syntax.Make (Io)
+
+  (* Per domain rather than per application of the functor below: the poller
+     that steps an entry aside and the engine that reports it each apply it. *)
+  let stepped_aside : (string, (string, string) Hashtbl.t) Hashtbl.t =
+    Hashtbl.create 4
+
+  let stepped_aside_for domain =
+    match Hashtbl.find_opt stepped_aside domain with
+      | Some entries -> entries
+      | None ->
+          let entries = Hashtbl.create 4 in
+          Hashtbl.replace stepped_aside domain entries;
+          entries
 
   module Make
       (C : Conf.S with type 'a io = 'a Io.t)
@@ -284,9 +298,25 @@ struct
           keys
       in
       let applied = ref 0 in
+      let aside = stepped_aside_for C.domain_name in
+      (* Entries are applied in order, so one failing the same way on every try
+         would keep every later one from this client for good. It is left
+         unhandled, which is what brings it back on the next pass, and said. *)
+      let stepping_aside ek apply =
+        Io.catch apply (fun exn ->
+            if Retry.classify_in_order exn = Retry.Transient then Io.fail exn
+            else begin
+              if not (Hashtbl.mem aside (Ek.to_string ek)) then
+                Log.err "%s: a peer's entry could not be applied here: %s"
+                  (Ek.to_string ek) (Retry.reason exn);
+              Hashtbl.replace aside (Ek.to_string ek) (Retry.reason exn);
+              return_unit
+            end)
+      in
       let+ () =
         iter_s
           (fun ek ->
+            stepping_aside ek @@ fun () ->
             let* () =
               if Ek.client_uuid ek = my_uuid then return_unit
               else
@@ -295,6 +325,7 @@ struct
                   | None -> return_unit
                   | Some ops ->
                       let* () = F.apply_foreign_ops ops in
+                      Hashtbl.remove aside (Ek.to_string ek);
                       (* After applying, so a reader of the kept entries never
                          meets one the mirror has not caught up with. *)
                       let* () = Js.note_applied ek ops in
@@ -317,5 +348,14 @@ struct
           keys
       in
       !applied
+
+    let unapplied () =
+      Hashtbl.fold
+        (fun key why acc ->
+          match Ek.of_string key with
+            | Some ek -> (ek, why) :: acc
+            | None -> acc)
+        (stepped_aside_for C.domain_name)
+        []
   end
 end

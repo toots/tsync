@@ -103,4 +103,10 @@ the retry sweep lands it, and the report clears: ok
 what follows it is published, and it is reported: ok
 and it lands once it can: ok
 
-42 check(s), 0 failure(s)
+=== a peer's entry that cannot be applied here steps aside
+  applied 1, stepped aside 1
+the entry after it is applied, and it is reported: ok
+  applied 1, stepped aside 0
+and it lands on a later pass, once it can: ok
+
+44 check(s), 0 failure(s)
