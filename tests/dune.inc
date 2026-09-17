@@ -705,6 +705,20 @@
   (action
    (diff queue_bytes_test.expected queue_bytes_test.output))))
 
+(subdir scenario/read_offline
+ (alias
+  (name default)
+  (deps read_offline.exe))
+ (rule
+  (alias runtest)
+  (target read_offline.output)
+  (action
+   (with-stdout-to read_offline.output (ignore-stderr (run ./read_offline.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff read_offline.expected read_offline.output))))
+
 (subdir scenario/rename_listing
  (alias
   (name default)

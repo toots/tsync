@@ -54,6 +54,11 @@ type held = {
   mutable anchored : bool;
 }
 
+(** How long {!Make.read_into} waits on the store: under the half minute a
+    suspend gives a reader stuck in the kernel before it gives up on sleeping,
+    and long enough for a slow link to deliver a cache chunk. *)
+val read_deadline : float ref
+
 (** How long a pin holds when the caller names no deadline: ten days. *)
 val default_pin_keep : float
 
@@ -62,6 +67,7 @@ module Make
     (_ : Fs.S with type 'a io := 'a Io.t)
     (_ : Syscalls.S with type 'a io := 'a Io.t)
     (_ : Bounded.S with type 'a io := 'a Io.t)
+    (_ : Clock.S with type 'a io := 'a Io.t)
     (C : Conf.S with type 'a io = 'a Io.t)
     (F : Fetch with type 'a io := 'a Io.t) : sig
   (** Whether this group's body is local. *)
@@ -93,7 +99,11 @@ module Make
       kept: a body may hold part of a stored chunk, and a later fetch of the
       whole group skips the members it already holds whole.
 
-      A body this serves is kept warm for {!enforce_cap}. *)
+      A body this serves is kept warm for {!enforce_cap}.
+
+      Somebody is waiting on this one, so what it asks of the store is given
+      {!read_deadline} and then fails with the scheduler's timeout; the fetch
+      itself goes on for the cache and for whoever else waits on it. *)
   val read_into :
     group:Manifest.Group.t ->
     index:int ->
