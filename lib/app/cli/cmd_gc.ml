@@ -188,23 +188,14 @@ let cmd : unit Cmd.t =
          read. *)
       let budget = Option.map parse_duration budget
       and pause = Option.map parse_duration pause in
-      (* Carriage-return progress belongs on a terminal, where one line rewrites
-         itself; down a pipe it is padding in front of the summary. The same
-         text goes to the log there instead, which is what [-v] reaches -- a
-         collection run under screen and teed to a file is the case that wants
-         it, and the one where stderr is not a terminal. *)
-      let watching = Unix.isatty Unix.stderr in
+      let live = live_output () in
       (* Spelled as {!Collection.string_of_phase} does, so a phase named here
          and one read off an open run are the same word. *)
       let phase = ref (Collection.string_of_phase Collection.Opening) in
       let at_ = ref "" in
       let marked = ref [] and closed = ref [] in
-      let emit ending line =
-        if watching then Printf.eprintf "%s%s%!" line ending
-        else vprintf "%s" line
-      in
-      let header fmt = Printf.ksprintf (emit "\n") fmt in
-      let progress fmt = Printf.ksprintf (emit "\r") fmt in
+      let header fmt = Printf.ksprintf live.note fmt in
+      let progress fmt = Printf.ksprintf (fun line -> live.block [line]) fmt in
       let on_open () =
         phase := Collection.string_of_phase Collection.Opening;
         header "%s %s..."
@@ -263,10 +254,7 @@ let cmd : unit Cmd.t =
                  G.run ?budget ?pause ?concurrency ?delete_batch ~verify
                    ~on_open ~on_mark ~on_close ())
           in
-          (* The progress lines above end in a carriage return, so the last one is
-             still sitting on the terminal's current line. Cleared before the
-             summary goes to stdout, or the two land on top of each other. *)
-          if watching then Printf.eprintf "\r%*s\r%!" 72 "";
+          live.clear ();
           report ~abort ~was_open ~domain:C.domain_name s))
   in
   Cmd.v
