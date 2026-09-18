@@ -28,6 +28,16 @@ let cmd : unit Cmd.t =
             "Backend to read from, by its configured name. Default: the \
              domain's own order, the primary first.")
   in
+  let parallelism_arg =
+    Arg.(
+      value
+      & opt (some int) None
+      & info ["parallelism"; "j"] ~docv:"N"
+          ~doc:
+            "Chunks fetched at once, each held in memory while it is. Default: \
+             the domain's $(b,maxDownloads). Lower it on a slow link, where \
+             more of them at once is each of them timing out.")
+  in
   (* Every path has to be the same domain's, one run reading one tree. *)
   let placed ?domain cfg paths =
     let places =
@@ -52,13 +62,16 @@ let cmd : unit Cmd.t =
             ("one domain at a time, and these name "
             ^ String.concat " and " names)
   in
-  let run domain source paths dst v =
+  let run domain source parallelism paths dst v =
     set_verbose v;
     let cfg = load_config () in
     let domain, paths = placed ?domain cfg paths in
     let (module C : Conf_lwt.S) =
       let conf = make_conf ?domain cfg in
-      match source with Some name -> reading_from name conf | None -> conf
+      let conf =
+        match source with Some name -> reading_from name conf | None -> conf
+      in
+      match parallelism with Some n -> reading_at_most n conf | None -> conf
     in
     let dst =
       if Filename.is_relative dst then Filename.concat (Sys.getcwd ()) dst
@@ -183,4 +196,5 @@ let cmd : unit Cmd.t =
           file is given its space up front, fetched in parallel, checked chunk \
           by chunk, and resumed where an earlier run stopped.")
     Term.(
-      const run $ domain_arg $ source_arg $ paths_arg $ dst_arg $ verbose_arg)
+      const run $ domain_arg $ source_arg $ parallelism_arg $ paths_arg
+      $ dst_arg $ verbose_arg)

@@ -328,6 +328,18 @@ let () =
        ~why:(fun () -> string_of_int !peak_open)
        (!peak_open <= width);
 
+     case "a run asked to read less at once than the domain allows";
+     let module Narrow =
+       Export_lwt.Make ((val Domain.reading_at_most 1 (module C : Conf_lwt.S))) in
+     chunk_reads := 0;
+     peak_in_flight := 0;
+     let* summary =
+       Narrow.run ~dst:(Filename.concat root "narrow") ~paths:["big.bin"] ()
+     in
+     check "fetches every chunk, one at a time"
+       ~why:(fun () -> string_of_int !peak_in_flight)
+       (summary.Export.exported = 1 && !chunk_reads = 10 && !peak_in_flight = 1);
+
      case "what is refused outright";
      let refused f =
        Lwt.catch
@@ -377,4 +389,4 @@ let () =
 
      Scratch.cleanup root;
      Lwt.return_unit);
-  report ~expected:29 ()
+  report ~expected:30 ()
