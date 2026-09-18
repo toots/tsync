@@ -1,0 +1,5 @@
+(executable
+ (flags
+  (:standard -open Tsync_cli))
+ (name export_display_test)
+ (libraries tsync_cli))

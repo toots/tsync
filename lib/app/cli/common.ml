@@ -96,6 +96,79 @@ let report_job ?target ?current ~kind (module C : Conf_lwt.S) ~counters () =
     ~counters ()
 
 let doing phase detail = phase ^ " · " ^ detail
+
+let terminal_width () =
+  let from_tput () =
+    match Unix.open_process_in "tput cols 2>/dev/null" with
+      | ic ->
+          let cols = try int_of_string_opt (input_line ic) with _ -> None in
+          ignore (Unix.close_process_in ic);
+          cols
+      | exception _ -> None
+  in
+  match Option.bind (Sys.getenv_opt "COLUMNS") int_of_string_opt with
+    | Some cols -> cols
+    | None -> Option.value (from_tput ()) ~default:80
+
+(* Cut on a character rather than a byte, a name being UTF-8 and half of one
+   being what a terminal prints as garbage.
+
+   ponytail: counts code points, so a line of wide characters still wraps;
+   measure display width if names in such scripts ever matter here. *)
+let fit ~width line =
+  let is_start c = Char.code c land 0xC0 <> 0x80 in
+  let rec cut i seen =
+    if i >= String.length line then None
+    else if is_start line.[i] && seen = width - 1 then Some i
+    else cut (i + 1) (if is_start line.[i] then seen + 1 else seen)
+  in
+  match cut 0 0 with
+    | Some i when width > 1 -> String.sub line 0 i ^ "…"
+    | _ -> line
+
+type live = {
+  watching : bool;  (** whether anybody is: stderr is a terminal *)
+  block : string list -> unit;  (** lines that rewrite themselves in place *)
+  note : string -> unit;  (** a line that stays, above whatever rewrites *)
+  clear : unit -> unit;  (** before anything that must stay *)
+}
+
+(* Progress that rewrites itself belongs on a terminal; down a pipe it is
+   padding in front of the summary, so the same text goes to the log there,
+   which is what [-v] reaches. *)
+let live_output () =
+  let watching = Unix.isatty Unix.stderr in
+  let width = if watching then terminal_width () else max_int in
+  let drawn = ref 0 in
+  let rewind () =
+    if !drawn > 1 then Printf.eprintf "\027[%dA" (!drawn - 1);
+    if !drawn > 0 then Printf.eprintf "\r\027[J"
+  in
+  let clear () =
+    if watching then begin
+      rewind ();
+      drawn := 0;
+      flush stderr
+    end
+  in
+  let block lines =
+    if not watching then List.iter (fun line -> vprintf "%s" line) lines
+    else begin
+      rewind ();
+      prerr_string (String.concat "\n" (List.map (fit ~width) lines));
+      drawn := List.length lines;
+      flush stderr
+    end
+  in
+  let note line =
+    if not watching then vprintf "%s" line
+    else begin
+      clear ();
+      prerr_endline line
+    end
+  in
+  { watching; block; note; clear }
+
 let human_bytes = Metrics.human_bytes
 
 let human_ts ts_ns =

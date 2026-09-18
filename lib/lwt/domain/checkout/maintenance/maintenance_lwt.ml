@@ -27,6 +27,8 @@ module Temp_files = Temp_files.Over (Io_lwt.Core) (Io_lwt.Fs) (Io_lwt.Bounded)
 module Staged_orphans =
   Staged_orphans.Over (Io_lwt.Core) (Files) (Staged_lwt.Manifest)
 
+module Export_records = Export_records.Over (Io_lwt.Core) (Io_lwt.Fs)
+
 (* Running one, the same way wherever it is run from -- the driver, a command,
    a test. A sweep that fails is logged and does not take its siblings with it,
    and one that collected something says so rather than answering into the
@@ -59,6 +61,9 @@ let default_staged_grace = 3600.
    can write a month of entries far larger than a quiet one writes in a year. *)
 let applied_keep_bytes = 64 * 1024 * 1024
 
+(* How long an export cut short can still be picked up where it stopped. *)
+let export_record_days = 30.
+
 (* Shards are monthly, so nothing is collectable more often than that; running
    it daily is only so a long-lived process never has to be restarted to shed
    them. *)
@@ -71,6 +76,7 @@ let applied_prune_interval = 86_400.
 module Domain (C : Conf_lwt.S) = struct
   module Temp = Temp_files.Make (C)
   module Orphans = Staged_orphans.Make (C)
+  module Exports = Export_records.Make (C)
 
   let tasks ?(staged_grace = default_staged_grace) () =
     [
@@ -81,6 +87,15 @@ module Domain (C : Conf_lwt.S) = struct
         run =
           (fun () ->
             Orphans.run ~cutoff:(Unix.gettimeofday () -. staged_grace) ());
+      };
+      {
+        name = "export records";
+        triggers = [`On_demand];
+        run =
+          (fun () ->
+            Exports.run
+              ~cutoff:(Unix.gettimeofday () -. (export_record_days *. 86_400.))
+              ());
       };
       {
         name = "applied journal entries";

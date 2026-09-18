@@ -131,7 +131,7 @@ struct
 
   let reserve ~size fd =
     Io.catch
-      (fun () -> P.reserve ~size fd)
+      (fun () -> if size = 0L then Io.return () else P.reserve ~size fd)
       (function
         | Unix.Unix_error ((Unix.EOPNOTSUPP | Unix.ENOSYS), _, _) ->
             Sys.LargeFile.ftruncate fd size

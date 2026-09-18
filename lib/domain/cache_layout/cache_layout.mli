@@ -17,6 +17,8 @@
     <cache_root>/<domain>/staged/whole/<uuid>     whole files from a frontend
     <cache_root>/<domain>/folders/<folder id>     {parent,name}: the folder tree
                                                   read the other way round
+    <cache_root>/<domain>/exports/<hash of dst>   what an export in flight has
+                                                  written of one file
     <cache_root>/<domain>/applied/<YYYY-MM>.log   journal entries this client
                                                   has published or applied
     v}
@@ -41,6 +43,14 @@ val chunks_dir : cache_root:string -> string -> string
     published or applied, so "what changed since" is answered without going back
     to the store for entries it once held. *)
 val applied_dir : cache_root:string -> string -> string
+
+(** Where [tsync export] keeps what it has written of each file still in flight,
+    so that the folder being exported to holds nothing but the export. *)
+val exports_dir : cache_root:string -> string -> string
+
+(** The record for the file being written at the absolute path [dst]. *)
+val export_record_path :
+  cache_root:string -> domain_name:string -> string -> string
 
 val staged_manifests_dir : cache_root:string -> string -> string
 val staged_chunks_dir : cache_root:string -> string -> string

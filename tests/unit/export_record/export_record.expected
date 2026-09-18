@@ -1,0 +1,28 @@
+header
+  tsync-export 1 aaaaaaaaaaaaaaaa bbbbbbbbbbbbbbbb 40 8 /mnt/big disk/Camera 1/P101.MOV
+a record beside a file of the right length
+  nothing claimed yet                            resume ..... (0 of 5)
+  chunks out of order                            resume ##.#. (3 of 5)
+  every chunk, the run having died at the end    resume ##### (5 of 5)
+  a claim cut short by a crash                   resume ##... (2 of 5)
+  a line that is no index ends the record        resume #.... (1 of 5)
+  as does one out of range                       resume #.... (1 of 5)
+  and one not spelled as it would be written     resume ..... (0 of 5)
+a record that is not to be believed
+  the file is gone                               start over
+  the file is another length                     start over
+  other content                                  start over
+  another destination                            start over
+  cut off inside its header                      start over
+no record
+  size and time are the manifest's               already there
+  the time a coarse filesystem kept              already there
+  right size, another time                       start over
+  nothing there                                  start over
+where a file lands under /out
+  asked ""           holds "a.txt"                -> /out/a.txt
+  asked ""           holds "docs/deep/b.txt"      -> /out/docs/deep/b.txt
+  asked "a.txt"      holds "a.txt"                -> /out/a.txt
+  asked "docs/deep/b.txt" holds "docs/deep/b.txt"      -> /out/b.txt
+  asked "docs"       holds "docs/deep/b.txt"      -> /out/docs/deep/b.txt
+  asked "docs/deep"  holds "docs/deep/b.txt"      -> /out/deep/b.txt

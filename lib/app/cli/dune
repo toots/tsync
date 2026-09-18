@@ -50,6 +50,8 @@
    -open
    Tsync_wizard
    -open
+   Tsync_menu
+   -open
    Tsync_io_lwt
    -open
    Tsync_tls
@@ -95,6 +97,7 @@
   tsync-libs.backend_api
   tsync-libs.backend_lwt
   tsync_wizard
+  tsync_menu
   tsync-libs.conf
   tsync_backend
   tsync_device

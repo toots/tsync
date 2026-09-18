@@ -44,5 +44,8 @@ let () =
   check "and owns its blocks where the filesystem could give them"
     ~why:(fun () -> Printf.sprintf "%d allocated" (allocated_bytes path))
     ((not can_reserve) || allocated_bytes path >= size);
+  let empty = with_new_file "empty" (fun fd -> Io_lwt.Fs.reserve ~size:0L fd) in
+  check "a file of no length is one there is nothing to reserve for"
+    ((Unix.stat empty).Unix.st_size = 0);
   Scratch.cleanup root;
-  report ~expected:2 ()
+  report ~expected:3 ()

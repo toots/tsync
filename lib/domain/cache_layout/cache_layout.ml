@@ -16,6 +16,14 @@ let chunks_dir ~cache_root domain_name = sub ~cache_root domain_name "chunks"
 (* The journal entries this client has already handled, month-sharded as the
    published journal is. *)
 let applied_dir ~cache_root domain_name = sub ~cache_root domain_name "applied"
+let exports_dir ~cache_root domain_name = sub ~cache_root domain_name "exports"
+
+(* Named by a hash of where the file is going, a destination being a path of any
+   length on any filesystem and this being one directory. *)
+let export_record_path ~cache_root ~domain_name dst =
+  Filename.concat
+    (exports_dir ~cache_root domain_name)
+    (Xxhash.hash_hex dst 0 ^ "-" ^ Xxhash.hash_hex dst 1)
 
 let staged_manifests_dir ~cache_root domain_name =
   sub ~cache_root domain_name "staged/manifests"
