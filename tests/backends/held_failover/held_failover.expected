@@ -1,0 +1,35 @@
+
+=== both up
+  read = "from the main"
+the main answers, and the replica is not asked: ok
+
+=== the main's link goes
+  read = "from the replica"
+the read comes back from the replica, the main having been asked once: ok
+and not waited for past the failure that showed it was down: ok
+  five more = "from the replica"
+none of which goes near the main: ok
+
+=== a batch, which is the main's to answer
+  batch = "from the replica"
+is answered key by key from the replica instead: ok
+
+=== the same main with nothing behind it
+  read = raised: HTTP 502
+is asked all the same, being all there is: ok
+
+=== the replica gone too
+  read = raised: HTTP 502
+is a read that failed, not a file that is not there: ok
+
+=== the hold runs out with the main back
+  three at once = "from the main", "from the replica", "from the replica"
+one of them was spent finding out: ok
+  the next read = "from the main"
+and the main answers again: ok
+
+=== a key the main does not have, the main being up
+  read = none
+is not there, which is an answer: ok
+
+10 check(s), 0 failure(s)

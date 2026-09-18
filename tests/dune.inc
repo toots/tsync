@@ -157,6 +157,20 @@
   (action
    (diff get_range.expected get_range.output))))
 
+(subdir backends/held_failover
+ (alias
+  (name default)
+  (deps held_failover.exe))
+ (rule
+  (alias runtest)
+  (target held_failover.output)
+  (action
+   (with-stdout-to held_failover.output (ignore-stderr (run ./held_failover.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff held_failover.expected held_failover.output))))
+
 (subdir backends/http_reuse
  (alias
   (name default)

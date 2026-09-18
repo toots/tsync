@@ -324,8 +324,15 @@ struct
             Io.return
               { Backend.share_url; chunk_size; max_concurrency; verified }
           in
+          (* Kept only once it has an answer: a peer that was down the first
+             time it was asked would otherwise be remembered as down for as long
+             as the process runs. *)
           t.caps_cache <- Some p;
-          p
+          Io.catch
+            (fun () -> p)
+            (fun exn ->
+              t.caps_cache <- None;
+              Io.fail exn)
 
   let make ~url ~secret : (module Store) =
     let health = Health.create () in
