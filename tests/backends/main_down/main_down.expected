@@ -1,0 +1,33 @@
+
+=== both there: a write reaches the replica, behind the main
+  replica holds tsync/d/chunks/000/0000000000000001-0000000000000002 = "chunk"
+  replica holds tsync/d/manifests/kept = "one"
+which is what the rest of this is measured against: ok
+
+=== the main goes: every verb, and the replica after all of them
+  put -> failed: link is down
+  put over what is there -> failed: link is down
+  put a chunk -> failed: link is down
+  put_if_absent -> failed: link is down
+  delete -> failed: link is down
+  delete_multi -> failed: link is down
+  copy -> failed: link is down
+  replica holds tsync/d/chunks/000/0000000000000001-0000000000000002 = "chunk"
+  replica holds tsync/d/manifests/kept = "one"
+the replica is byte for byte what it was: ok
+and is owed nothing, none of those having happened: ok
+
+=== a write the main took, still owed when the main goes
+  tried again with the main gone: true
+  replica holds tsync/d/chunks/000/0000000000000001-0000000000000002 = "chunk"
+  replica holds tsync/d/manifests/kept = "one"
+the replica is still what it was: ok
+and the write is still owed: ok
+
+=== the main comes back
+  replica holds tsync/d/chunks/000/0000000000000001-0000000000000002 = "chunk"
+  replica holds tsync/d/manifests/kept = "one"
+  replica holds tsync/d/manifests/late = "three"
+what was owed has landed: ok
+
+6 check(s), 0 failure(s)

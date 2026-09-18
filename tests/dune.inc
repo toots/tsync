@@ -193,6 +193,20 @@
   (action
    (diff local_watch.expected local_watch.output))))
 
+(subdir backends/main_down
+ (alias
+  (name default)
+  (deps main_down.exe))
+ (rule
+  (alias runtest)
+  (target main_down.output)
+  (action
+   (with-stdout-to main_down.output (ignore-stderr (run ./main_down.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff main_down.expected main_down.output))))
+
 (subdir backends/probe_deadline
  (alias
   (name default)
