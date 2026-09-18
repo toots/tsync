@@ -1,0 +1,10 @@
+
+=== a failure the store says will not clear
+  1 request(s): HTTP 409: local copy: tsync/dom/manifests/aaa/bbb-ccc: No such file or directory
+it is asked once, and the reason reaches the caller: ok
+
+=== one it says is its own
+  3 request(s): HTTP 409: local copy: tsync/dom/manifests/aaa/bbb-ccc: No such file or directory
+is waited out, and the ladder stops at the first that will not clear: ok
+
+2 check(s), 0 failure(s)

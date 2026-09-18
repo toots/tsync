@@ -199,6 +199,20 @@
   (action
    (diff probe_deadline_test.expected probe_deadline_test.output))))
 
+(subdir backends/proxy_permanent
+ (alias
+  (name default)
+  (deps proxy_permanent.exe))
+ (rule
+  (alias runtest)
+  (target proxy_permanent.output)
+  (action
+   (with-stdout-to proxy_permanent.output (ignore-stderr (run ./proxy_permanent.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff proxy_permanent.expected proxy_permanent.output))))
+
 (subdir backends/proxy_watch_client
  (alias
   (name default)
