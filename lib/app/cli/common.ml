@@ -57,6 +57,7 @@ let make_conf ?domain ?socket_path ?resume cfg =
 
 let load_conf ?domain () = make_conf ?domain (load_config ())
 let reading_from = Domain.reading_from
+let reading_at_most = Domain.reading_at_most
 let read_default_domain () = Domain.default_domain ~paths:runtime_paths
 let default_domain_file () = Domain.default_domain_file ~paths:runtime_paths
 

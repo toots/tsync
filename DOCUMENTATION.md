@@ -196,7 +196,8 @@ relative to the domain or as `Files:/path`. This is also how to get a file too l
 through a cache or a share link: it needs no mount and no local copy of the domain, only a
 config that names the backend. Each file is given its full size on disk before its first
 byte, so a disk too small says so at once; chunks are fetched in parallel up to
-`maxDownloads` and each is checked against its own name; and a run that stops is picked up
+`maxDownloads`, or `--parallelism N` for one run (lower it on a slow link, where several
+chunks at once each run past the request timeout), and each is checked against its own name; and a run that stops is picked up
 where it stopped by running the same command again. A file being written already has its
 final name and length, its modification time being set only once it is whole. What is left
 to fetch is recorded in the cache directory rather than beside the files, so the folder

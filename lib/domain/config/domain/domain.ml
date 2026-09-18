@@ -205,6 +205,14 @@ let target ?domain ~paths cfg =
 
 let socket ?domain ~paths cfg = snd (target ?domain ~paths cfg)
 
+let reading_at_most n (module C : Conf_lwt.S) : (module Conf_lwt.S) =
+  if n < 1 then failwith "at least one read at a time";
+  (module struct
+    include C
+
+    let max_downloads = n
+  end)
+
 (* [--source] says where to read from, so only reads move: a write still goes
    through the domain's own path and reaches the deferred targets behind it.
    Raises [Failure] when nothing has that name. *)

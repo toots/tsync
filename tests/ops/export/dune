@@ -26,6 +26,8 @@
    -open
    Tsync_ops
    -open
+   Tsync_domain
+   -open
    Tsync_ops_lwt
    -open
    Tsync_manifest
@@ -46,6 +48,7 @@
   tsync_remote
   tsync_remote_lwt
   tsync_ops
+  tsync_domain
   tsync_ops_lwt
   tsync_manifest
   str

@@ -30,6 +30,11 @@ val of_config :
     [Failure] when nothing has that name, or when several do. *)
 val reading_from : string -> (module Conf_lwt.S) -> (module Conf_lwt.S)
 
+(** The domain with another read budget, for one command on one link: what the
+    config says suits the machine, and a run somewhere slower has to be able to
+    ask for less. Raises [Failure] below one. *)
+val reading_at_most : int -> (module Conf_lwt.S) -> (module Conf_lwt.S)
+
 (** The domain a command means and the socket its daemon answers on. *)
 val target :
   ?domain:string -> paths:Runtime.paths -> Conf_parsing.t -> string * string
