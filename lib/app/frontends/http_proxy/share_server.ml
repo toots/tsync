@@ -198,35 +198,33 @@ module Make (C : Conf_lwt.S) = struct
   (* The shared folder's namespace, in this domain. *)
   let shared_folder folder_id = Tree.namespace_prefix folder_id
 
-  (* A subdirectory's [key] is its own namespace, so [resolve] descends by
-     handing it straight back. *)
+  let child_of (e : Inode_tree.entry) =
+    match e.Inode_tree.body with
+      | Inode_tree.Dir m ->
+          {
+            name = m.Folder.name;
+            key = Tree.namespace_prefix m.Folder.id;
+            is_dir = true;
+            size = 0L;
+            mtime = 0.;
+          }
+      | Inode_tree.File m ->
+          {
+            (* Fetched by backend key ([<folder-id>/<hash>]), so the
+               location cannot name it and the body must. *)
+            name = Manifest.recorded_name m;
+            key = e.Inode_tree.bkey;
+            is_dir = false;
+            size = Manifest.size m;
+            mtime = Manifest.mtime m;
+          }
+
   let children ns =
     let folder_id = Stored_key.folder_id_of ns in
     let+ entries =
       Tree.children ~on_unusable:(`Skip (fun _ _ -> ())) ~folder_id ()
     in
-    List.map
-      (fun (e : Inode_tree.entry) ->
-        match e.Inode_tree.body with
-          | Inode_tree.Dir m ->
-              {
-                name = m.Folder.name;
-                key = Tree.namespace_prefix m.Folder.id;
-                is_dir = true;
-                size = 0L;
-                mtime = 0.;
-              }
-          | Inode_tree.File m ->
-              {
-                (* Fetched by backend key ([<folder-id>/<hash>]), so the
-                   location cannot name it and the body must. *)
-                name = Manifest.recorded_name m;
-                key = e.Inode_tree.bkey;
-                is_dir = false;
-                size = Manifest.size m;
-                mtime = Manifest.mtime m;
-              })
-      entries
+    List.map child_of entries
 
   (* Rejects a browse-supplied path that could escape the shared folder. *)
   let safe_parts path =
@@ -240,18 +238,11 @@ module Make (C : Conf_lwt.S) = struct
     parts
 
   let resolve ns parts =
-    let rec go loc = function
-      | [] -> Lwt.return_some (`Dir loc)
-      | part :: rest -> (
-          let* cs = children loc in
-          match List.find_opt (fun c -> c.name = part) cs with
-            | None -> Lwt.return_none
-            | Some c when c.is_dir -> go c.key rest
-            | Some c ->
-                if rest = [] then Lwt.return_some (`File c) else Lwt.return_none
-          )
-    in
-    go ns parts
+    let+ found = Tree.find ~folder_id:(Stored_key.folder_id_of ns) parts in
+    match found with
+      | `Folder id -> Some (`Dir (Tree.namespace_prefix id))
+      | `File entry -> Some (`File (child_of entry))
+      | `Missing -> None
 
   (* Headers are already on the wire when a body stream runs, so a failure here
      only truncates the response and cohttp logs nothing of ours. *)
