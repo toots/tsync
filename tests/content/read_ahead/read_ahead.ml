@@ -85,6 +85,8 @@ module R = struct
     let* () = Lwt_unix.sleep 0.002 in
     Lwt.return (body ~chunk_key ~offset:0 ~length:csize)
 
+  let get_verified_chunk ~chunk_key:_ = unused "get_verified_chunk"
+
   let get_chunk_range ~chunk_key ~offset ~length =
     Hashtbl.replace asked (index_of_key chunk_key) ();
     let* () = Lwt_unix.sleep 0.002 in

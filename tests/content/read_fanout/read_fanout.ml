@@ -74,6 +74,8 @@ module R = struct
     let+ () = gate in
     body_of chunk_key
 
+  let get_verified_chunk ~chunk_key:_ = unused "get_verified_chunk"
+
   let get_chunk_range ~chunk_key ~offset ~length =
     incr started;
     let+ () = gate in

@@ -78,6 +78,30 @@ module Over (Io : Io.S) (Pools : Bounded.S with type 'a io := 'a Io.t) = struct
 
     let fetch key = Pools.use D.downloads (fun () -> D.fetch_body key)
 
+    (* One more read before giving up: what a link mangled comes back whole,
+       and what a store holds wrongly comes back the same.
+
+       ponytail: the second read takes the same route, so a good copy on
+       another member is not reached; [tsync data-integrity] is what finds it. *)
+    let fetch_verified key =
+      let fetch_checked () =
+        let+ body = fetch key in
+        if Chunks.key_of_body body = key then Some body else None
+      in
+      let* first = fetch_checked () in
+      match first with
+        | Some body -> Io.return body
+        | None -> (
+            let* second = fetch_checked () in
+            match second with
+              | Some body -> Io.return body
+              | None ->
+                  Io.fail
+                    (Backend.Backend_error
+                       (Printf.sprintf
+                          "chunk %s: what the store holds does not hash to it"
+                          key)))
+
     (* Its own budget, not [downloads]: every caller of this is a reader waiting
        on bytes, and a whole-chunk fetch is mostly the prefetch running ahead of
        one. Sharing the budget put the reader in a queue the prefetch refills as

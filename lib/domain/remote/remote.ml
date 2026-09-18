@@ -23,6 +23,7 @@ module type S = sig
     Manifest.t io
 
   val get_chunk : chunk_key:string -> Bigstring.t io
+  val get_verified_chunk : chunk_key:string -> Bigstring.t io
 
   val get_chunk_range :
     chunk_key:string -> offset:int -> length:int -> Bigstring.t io
@@ -325,6 +326,7 @@ struct
               | exception _ -> None)
 
     let get_chunk ~chunk_key = Chunks_store.fetch chunk_key
+    let get_verified_chunk ~chunk_key = Chunks_store.fetch_verified chunk_key
 
     let get_chunk_range ~chunk_key ~offset ~length =
       Chunks_store.fetch_range chunk_key ~offset ~length
