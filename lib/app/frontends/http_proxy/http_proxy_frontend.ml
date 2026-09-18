@@ -1146,10 +1146,22 @@ let callback ~port ~tls routes _conn req body =
                                       (fun () -> exec route op ~body))
                                   (fun exn ->
                                     bump "error";
-                                    Log.err "http-proxy: %s"
-                                      (Printexc.to_string exn);
-                                    respond ~status:`Internal_server_error
-                                      (Printexc.to_string exn)))
+                                    (* A failure waiting will not clear is
+                                       answered as the client's to settle: a 5xx
+                                       is what its ladder retries, and eight
+                                       round trips for a name the store will
+                                       never have is what a rename whose source
+                                       is gone used to cost. *)
+                                    let permanent =
+                                      Backend.classify exn = Retry.Permanent
+                                    in
+                                    (if permanent then Log.info else Log.err)
+                                      "http-proxy: %s" (Retry.reason exn);
+                                    respond
+                                      ~status:
+                                        (if permanent then `Conflict
+                                         else `Internal_server_error)
+                                      (Retry.reason exn)))
                               (fun () ->
                                 decr in_flight;
                                 Lwt.return_unit)

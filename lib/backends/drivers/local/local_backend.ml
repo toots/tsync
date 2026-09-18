@@ -378,6 +378,11 @@ struct
                 | Unix.Unix_error ((Unix.EXDEV | Unix.EMLINK | Unix.EPERM), _, _)
                 | Unix.Unix_error (Unix.EOPNOTSUPP, _, _) ->
                     body ()
+                (* Named for the source, which [link] does not: it answers for
+                   the destination, and a caller reading that goes looking for a
+                   name that is exactly where it should be. *)
+                | Unix.Unix_error (e, _, _) ->
+                    Io.fail (of_errno ~op:"copy" src_key e)
                 | exn -> Io.fail exn)
           in
           attempt ~parent_made:false)

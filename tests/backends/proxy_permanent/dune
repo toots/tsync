@@ -1,0 +1,31 @@
+(executable
+ (flags
+  (:standard
+   -open
+   Tsync_core
+   -open
+   Tsync_core_lwt
+   -open
+   Tsync_backend_api
+   -open
+   Tsync_backend_lwt
+   -open
+   Tsync_http_proxy_backend_lwt
+   -open
+   Tsync_test_harness))
+ (name proxy_permanent)
+ (libraries
+  tsync_core
+  tsync_core_lwt
+  tsync_backend_api
+  tsync_backend_lwt
+  tsync_http_proxy_backend
+  tsync_http_proxy_backend_lwt
+  tsync_test_harness
+  cohttp
+  cohttp-lwt
+  cohttp-lwt-unix
+  uri
+  lwt
+  lwt.unix
+  unix))
