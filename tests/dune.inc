@@ -1353,7 +1353,13 @@
  (rule
   (alias runtest)
   (deps %{exe:../../../bin/tsync.exe})
-  (action (run ./ls_listing.exe))))
+  (target ls_listing.output)
+  (action
+   (with-stdout-to ls_listing.output (ignore-stderr (run ./ls_listing.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff ls_listing.expected ls_listing.output))))
 
 (subdir unit/manifest_memo
  (alias
