@@ -84,9 +84,7 @@
 
 === no destination
   $ tsync export 
-  ! Usage: [01mtsync export[m [[01m--help[m] [[01m--domain[m=[04mNAME[m] [[01m--source[m=[04mNAME[m] [[01m--verbose[m]
-  !        [[04mOPTION[m]… [[04mPATH[m]… [04mDIR[m
-  ! tsync: required argument [04mDIR[m is [31mmissing[m
+  ! tsync: required argument DIR is missing
   exit 124
 every spelling that names something exports it: ok
 and every one that does not is refused: ok
