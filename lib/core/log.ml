@@ -9,6 +9,7 @@ let set_min_level l = min_level := l
 (* Receives the level and the fully formatted message. Defaults to stderr. *)
 let active : (level -> string -> unit) ref = ref Log_printf.log
 let set_sink sink = active := sink
+let sink () = !active
 
 (* Set per-process to a domain name, so per-domain daemon processes are
    distinguishable in a shared journal. *)

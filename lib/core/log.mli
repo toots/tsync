@@ -17,6 +17,9 @@ val recent : unit -> (float * level * string) list
     is logcat. *)
 val set_sink : (level -> string -> unit) -> unit
 
+(** The sink in place, for one that wraps it. *)
+val sink : unit -> level -> string -> unit
+
 val debug : ('a, unit, string, unit) format4 -> 'a
 val info : ('a, unit, string, unit) format4 -> 'a
 val warn : ('a, unit, string, unit) format4 -> 'a

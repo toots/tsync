@@ -104,9 +104,9 @@ let cmd : unit Cmd.t =
           moved := p.Export.present;
           Job_progress.plan ~basis:`Sent ~bytes:p.Export.bytes;
           Job_progress.settle ~bytes:p.Export.present ~sent:0L `Skipped
-      | `Started (rel, size) ->
+      | `Started { Export.rel; size; present } ->
           Hashtbl.replace active rel
-            { size; moved = 0L; rate = Metrics.counter () }
+            { size; moved = present; rate = Metrics.counter () }
       | `Landed (rel, bytes) ->
           let landed = Int64.of_int bytes in
           moved := Int64.add !moved landed;
