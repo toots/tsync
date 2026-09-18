@@ -1,5 +1,9 @@
 (* What `tsync ls' prints for one folder.
 
+   The frontend is http-proxy because every platform compiles that one in: a
+   command resolves a frontend before it lists anything, and a config naming one
+   this binary was built without fails before the listing is reached.
+
    A listing names what is in the folder asked for, so every row is a leaf:
    a row carrying the whole path reads as a file somewhere else, and the
    directories beside it never did. *)
@@ -22,9 +26,8 @@ let config =
     {|{"name":"test","domains":[
         {"name":"Files","versioning":false,"symlinks":"keep","readOnly":false,
          "backends":[{"name":"local","type":"local","path":%s,"role":"main"}],
-         "frontends":[{"type":"fuse","mountPoint":%s}]}]}|}
+         "frontends":[{"type":"http-proxy","port":8799,"secret":"s"}]}]}|}
     (Yojson.Basic.to_string (`String (Filename.concat root "store")))
-    (Yojson.Basic.to_string (`String (Filename.concat root "mnt")))
 
 let env =
   Printf.sprintf "%s TSYNC_CONFIG_JSON=%s" (Android_home.env ~home)
