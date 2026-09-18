@@ -32,7 +32,7 @@ let config =
     (domain "Other" 8798)
 
 let env =
-  Printf.sprintf "%s TSYNC_CONFIG_JSON=%s" (Android_home.env ~home)
+  Printf.sprintf "%s TERM=dumb TSYNC_CONFIG_JSON=%s" (Android_home.env ~home)
     (Filename.quote config)
 
 let read_file p =
@@ -77,8 +77,8 @@ let mask_root line =
   in
   go 0 ""
 
-(* Files finish in the order their chunks land; errors are said as the binary
-   says them, a log line's timestamp aside. *)
+(* Files finish in the order their chunks land, and of stderr only what tsync
+   itself says is kept: a usage text is cmdliner's, styled to the terminal. *)
 let case ?(dir = "out") label args =
   let dst = Filename.concat root dir in
   Check.case label;
@@ -92,7 +92,7 @@ let case ?(dir = "out") label args =
   List.iter
     (fun l -> Check.step "! %s" (mask_root l))
     (List.filter
-       (fun l -> String.length l < 5 || String.sub l 0 3 <> "202")
+       (fun l -> String.length l > 7 && String.sub l 0 7 = "tsync: ")
        err);
   Check.step "exit %d" status;
   List.iter (fun f -> Check.step "wrote %s" f) (walk dst);
