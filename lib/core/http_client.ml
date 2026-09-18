@@ -60,8 +60,10 @@ module type POOL = sig
 
   val create : keep:int64 -> parallel:int -> unit -> t
 
+  (** [alive] is called as the answer arrives, piece by piece. *)
   val call :
     t ->
+    alive:(unit -> unit) ->
     headers:Cohttp.Header.t ->
     body:Bigstring.t ->
     Cohttp.Code.meth ->
@@ -144,9 +146,10 @@ struct
   let call t ~headers ~meth ?(body = Bigstring.empty) uri =
     let attempt cache =
       Metrics.add_request 1;
-      Clock.with_timeout t.timeout (fun () ->
+      Clock.with_stall_timeout t.timeout (fun alive ->
           let* headers = headers () in
-          Pool.call cache ~headers ~body meth uri)
+          alive ();
+          Pool.call cache ~alive ~headers ~body meth uri)
     in
     let used = t.cache in
     Io.catch
