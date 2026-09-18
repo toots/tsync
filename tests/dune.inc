@@ -1289,6 +1289,20 @@
   (action
    (diff hashtbl_mmap_test.expected hashtbl_mmap_test.output))))
 
+(subdir unit/health
+ (alias
+  (name default)
+  (deps health_test.exe))
+ (rule
+  (alias runtest)
+  (target health_test.output)
+  (action
+   (with-stdout-to health_test.output (ignore-stderr (run ./health_test.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff health_test.expected health_test.output))))
+
 (subdir unit/http_excerpt
  (alias
   (name default)

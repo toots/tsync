@@ -1,0 +1,52 @@
+
+=== how many failures it takes
+a member nobody has asked has not been heard from: ok
+one failure is a blip: ok
+and says so to whoever asks next: ok
+a second in a row takes it out: ok
+for whoever asks: ok
+and whoever is choosing: ok
+which is something heard from it: ok
+  held down for s after  failures (HTTP )
+
+=== an answer between two failures
+starts the count again: ok
+
+=== a hold running out
+lets whoever is choosing through: ok
+  three ask at once: probe, held, held
+and one of them is the probe: ok
+
+=== a probe that fails
+leaves it out, and is news: ok
+for twice as long: ok
+up to a limit: ok
+
+=== a request that was already on its way when the member went out
+fails into the hold without being news: ok
+and without making it longer: ok
+
+=== failures that all came in the same instant
+are one bad moment, not a member that is down: ok
+which the next one, the moment having lasted, is: ok
+
+=== somebody waiting on a member with somewhere else to go
+hears nothing of a blip: ok
+is told when it goes out, the one who withdrew is not: ok
+and only once: ok
+
+=== a probe that is answered
+puts it back: ok
+and the next hold is a first one again: ok
+with nothing to say once it is back: ok
+
+=== a probe nobody reports back from
+is given out: ok
+and the member is held again meanwhile: ok
+until the next one: ok
+
+=== a store with no link to lose
+is never out: ok
+and counts as heard from: ok
+
+28 check(s), 0 failure(s)
