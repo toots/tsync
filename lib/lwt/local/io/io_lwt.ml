@@ -111,6 +111,14 @@ module Fs_primitives = struct
 
   let pwrite fd buf ~file_offset pos len =
     positioned unix_pwrite fd buf ~file_offset pos len
+
+  external unix_reserve : Unix.file_descr -> int64 -> unit
+    = "caml_tsync_reserve"
+
+  (* ponytail: blocks the loop for the call, which extent-based filesystems
+     answer at once; detach it if one that zeroes the range ever matters. *)
+  let reserve ~size fd =
+    Lwt.return (unix_reserve (Lwt_unix.unix_file_descr fd) size)
 end
 
 module Fs = struct

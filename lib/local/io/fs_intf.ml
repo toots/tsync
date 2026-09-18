@@ -29,6 +29,11 @@ module type S = sig
       that. *)
   val pwrite_all : fd -> buffer -> offset:int -> unit io
 
+  (** Size [fd] to [size] with the blocks behind it allocated, so a full disk
+      fails here rather than part-way through filling it. Where the filesystem
+      cannot reserve, the file is sized and nothing more. *)
+  val reserve : size:int64 -> fd -> unit io
+
   (** Create [path] and any missing parents (mode 0o755); tolerant of races. *)
   val mkdir_p : string -> unit io
 

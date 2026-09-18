@@ -1483,6 +1483,14 @@
   (action
    (diff queue_claim_test.expected queue_claim_test.output))))
 
+(subdir unit/reserve
+ (alias
+  (name default)
+  (deps reserve_test.exe))
+ (rule
+  (alias runtest)
+  (action (run ./reserve_test.exe))))
+
 (subdir unit/resolve
  (alias
   (name default)
