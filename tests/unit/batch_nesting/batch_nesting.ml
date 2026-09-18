@@ -59,6 +59,7 @@ module Member : Backend_lwt.Store = struct
   let list_many = None
   let fast_read = false
   let local_path = None
+  let health = Health.always_up
 end
 
 module Store =

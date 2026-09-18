@@ -29,6 +29,7 @@ struct
     base_uri : Uri.t;
     secret : string;
     client : Hc.t;
+    health : Health.t;
     mutable caps_cache : Backend.caps Io.t option;
     mutable no_list_many : bool;
   }
@@ -327,13 +328,15 @@ struct
           p
 
   let make ~url ~secret : (module Store) =
+    let health = Health.create () in
     let t =
       {
         base_uri = Uri.of_string url;
         secret;
         client =
           Hc.create ~name:"http-proxy" ~timeout:request_timeout
-            ~classify:Backend.classify ();
+            ~classify:Backend.classify ~health ();
+        health;
         caps_cache = None;
         no_list_many = false;
       }
@@ -415,6 +418,7 @@ struct
 
       (* The peer's files are the peer's, whatever it keeps them on. *)
       let local_path = None
+      let health = t.health
     end)
 
   let spec =

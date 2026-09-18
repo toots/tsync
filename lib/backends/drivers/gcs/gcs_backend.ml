@@ -123,6 +123,7 @@ struct
     auth : Auth.t option;
         (* [None] is anonymous, for emulators on a custom endpoint. *)
     share_url : string option;
+    health : Health.t;
   }
 
   let code = Http_client.code
@@ -373,6 +374,7 @@ struct
           put t ~key ~data:(Bigstring.of_string data) ()
 
         let share_url t = t.share_url
+        let health t = t.health
       end)
 
   let make ?endpoint ?service_account_key ?share_url ~bucket () : (module Store)
@@ -387,15 +389,17 @@ struct
       if n > 0 && base.[n - 1] = '/' then String.sub base 0 (n - 1) else base
     in
     let auth = Option.map Auth.of_service_account_json service_account_key in
+    let health = Health.create () in
     let t =
       {
         client =
           Hc.create ~name:"gcs" ~timeout:request_timeout
-            ~classify:Backend.classify ();
+            ~classify:Backend.classify ~health ();
         bucket;
         base;
         auth;
         share_url;
+        health;
       }
     in
     Shell.make t

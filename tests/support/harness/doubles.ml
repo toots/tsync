@@ -23,6 +23,7 @@ end) : Backend_lwt.Store = struct
 
   let capabilities ~prefix:_ () = Lwt.return Backend.no_caps
   let local_path = None
+  let health = Health.always_up
 end
 
 module Hung : Backend_lwt.Store = struct
@@ -48,6 +49,7 @@ module Hung : Backend_lwt.Store = struct
 
   let capabilities ~prefix:_ () = Lwt.return Backend.no_caps
   let local_path = None
+  let health = Health.always_up
 end
 
 module Outage (Real : Backend_lwt.Store) = struct
@@ -102,6 +104,7 @@ module Outage (Real : Backend_lwt.Store) = struct
   let list_many = None
   let fast_read = false
   let local_path = None
+  let health = Health.always_up
 end
 
 module Flaky (Real : Backend_lwt.Store) = struct
@@ -149,6 +152,7 @@ module Flaky (Real : Backend_lwt.Store) = struct
   let list_many = None
   let fast_read = false
   let local_path = None
+  let health = Health.always_up
 end
 
 module Refuses : Backend_lwt.Store = struct
@@ -174,6 +178,7 @@ module Refuses : Backend_lwt.Store = struct
 
   let capabilities ~prefix:_ () = Lwt.return Backend.no_caps
   let local_path = None
+  let health = Health.always_up
 end
 
 (* What a store answers a range read with, for a double holding whole bodies.

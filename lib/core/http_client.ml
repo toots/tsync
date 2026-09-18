@@ -76,7 +76,12 @@ module type S = sig
   type t
 
   val create :
-    name:string -> timeout:float -> classify:(exn -> Retry.kind) -> unit -> t
+    name:string ->
+    timeout:float ->
+    classify:(exn -> Retry.kind) ->
+    health:Health.t ->
+    unit ->
+    t
 
   val call :
     t ->
@@ -127,13 +132,14 @@ struct
     name : string;
     timeout : float;
     classify : exn -> Retry.kind;
+    health : Health.t;
     mutable cache : Pool.t;
   }
 
   let new_cache () = Pool.create ~keep:keep_idle_ns ~parallel:max_parallel ()
 
-  let create ~name ~timeout ~classify () =
-    { name; timeout; classify; cache = new_cache () }
+  let create ~name ~timeout ~classify ~health () =
+    { name; timeout; classify; health; cache = new_cache () }
 
   (* [headers] is a thunk because a caller may have to reach the network to
      build them — minting a bearer token — and that belongs inside the deadline
@@ -163,7 +169,8 @@ struct
   (* Raises on a transient status so the shared loop retries it; every other
      response comes back for the verb to interpret, 404 included. *)
   let call_retry t ~headers ~meth ?body op uri =
-    Loop.with_retry ~classify:t.classify ~name:t.name ~op (fun () ->
+    Loop.with_retry ~health:t.health ~classify:t.classify ~name:t.name ~op
+      (fun () ->
         let* resp, rbody = call t ~headers ~meth ?body uri in
         if is_transient_code (code resp) then
           Io.fail (failed op (code resp) (excerpt (Bigstring.to_string rbody)))

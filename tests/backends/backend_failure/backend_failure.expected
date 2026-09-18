@@ -11,3 +11,11 @@ transient                    3 attempt(s), raised HTTP 503
 permanent                    1 attempt(s), raised forbidden
 cancelled                    1 attempt(s), raised Retry.Cancelled
 unknown exception            3 attempt(s), raised Failure("something new")
+
+with_retry (max 3), told which member it is asking
+a link that is gone          3 attempt(s), raised HTTP 502, member held
+the next request of it       3 attempt(s), raised HTTP 502, member held
+one lost, then answered      2 attempt(s), answered, member up
+an answer that is a no       1 attempt(s), raised not found, member up
+answered while held          1 attempt(s), answered, member up
+a store with no link         3 attempt(s), answered, member up

@@ -97,6 +97,7 @@ module Memory () : Backend_lwt.Store = struct
   let capabilities ~prefix:_ () = Lwt.return Backend.no_caps
   let fast_read = false
   let local_path = None
+  let health = Health.always_up
 end
 
 let () =

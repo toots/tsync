@@ -571,6 +571,7 @@ struct
       (* Objects are files at [root/<key>] ({!resolve}), so a caller may work on
          the tree as one. *)
       let local_path = Some root
+      let health = Health.always_up
     end)
 
   let spec =

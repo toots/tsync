@@ -44,15 +44,24 @@ val reason : exn -> string
     only in how patient they are, not in shape. *)
 val backoff : base:float -> cap:float -> int -> float
 
+(** The failure of a request not made, its member being held down: transient,
+    and a {!Failed}, so a queue behind it keeps what it was asked to do. *)
+val held : name:string -> op:string -> Health.t -> exn
+
 (** The one retry loop for a single request, jittered so a fleet that failed
     together does not return together. A caller decides only what [classify]
     means for it; the curve, the cap and the log line are shared, so two of them
-    cannot drift into retrying differently. {!Cancelled} is never retried. *)
+    cannot drift into retrying differently. {!Cancelled} is never retried.
+
+    [health] is the member the request is made of, told of every failure that
+    may clear and of every answer. The climb goes on regardless: a caller with
+    another member to ask stops waiting on its own account. *)
 module type LOOP = sig
   type 'a io
 
   val with_retry :
     ?max_attempts:int ->
+    ?health:Health.t ->
     classify:(exn -> kind) ->
     name:string ->
     op:string ->
