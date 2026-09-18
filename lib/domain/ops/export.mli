@@ -13,11 +13,14 @@ type outcome =
 (** [present] is what of [bytes] is on the disk already, from an earlier run. *)
 type planned = { files : int; bytes : int64; present : int64 }
 
-(** [`Started] and [`Landed] carry the file's domain-relative path with its size
-    and the bytes just written; [`Finished] comes once a file. *)
+(** A file being picked up: [present] of its [size] landed in an earlier run. *)
+type started = { rel : string; size : int64; present : int64 }
+
+(** [`Landed] carries the file's domain-relative path and the bytes just
+    written; [`Finished] comes once a file. *)
 type event =
   [ `Plan of planned
-  | `Started of string * int64
+  | `Started of started
   | `Landed of string * int
   | `Finished of string * outcome ]
 

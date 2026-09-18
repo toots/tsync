@@ -2,10 +2,11 @@ type outcome =
   [ `Exported | `Exported_symlink | `Already_there | `Failed of string ]
 
 type planned = { files : int; bytes : int64; present : int64 }
+type started = { rel : string; size : int64; present : int64 }
 
 type event =
   [ `Plan of planned
-  | `Started of string * int64
+  | `Started of started
   | `Landed of string * int
   | `Finished of string * outcome ]
 
@@ -314,7 +315,13 @@ struct
     (* The record lands before the file does, so a run cut short leaves either
        nothing or a record that claims less than the disk holds. *)
     let open_job ~on_event job =
-      on_event (`Started (job.file.rel, Manifest.size job.file.manifest));
+      on_event
+        (`Started
+           {
+             rel = job.file.rel;
+             size = Manifest.size job.file.manifest;
+             present = claimed_bytes job;
+           });
       let* () = Files.ensure_parent job.file.dst_path in
       let* () = Files.ensure_parent job.record_path in
       let* fd =

@@ -128,16 +128,20 @@ let exports_dir =
 let records () =
   try Array.to_list (Sys.readdir exports_dir) with Sys_error _ -> []
 
+let started = ref []
+
 let export ?(paths = []) dst =
   chunk_reads := 0;
   peak_in_flight := 0;
   peak_open := 0;
   watch_dir := dst;
+  started := [];
   let outcomes = ref [] in
   let+ summary =
     E.run ~dst ~paths
       ~on_event:(function
         | `Finished (rel, outcome) -> outcomes := (rel, outcome) :: !outcomes
+        | `Started s -> started := s :: !started
         | _ -> ())
       ()
   in
@@ -214,6 +218,10 @@ let () =
        (summary.Export.exported = 1 && !chunk_reads = 7);
      check "and the file is whole"
        (read_file (Filename.concat dst "big.bin") = big);
+     check "picked up as a file that already has its three chunks"
+       (match !started with
+         | [{ Export.rel = "big.bin"; size = 80L; present = 24L }] -> true
+         | _ -> false);
      check "its record gone" (records () = []);
 
      case "a record claiming everything, the run having died before dropping it";
@@ -369,4 +377,4 @@ let () =
 
      Scratch.cleanup root;
      Lwt.return_unit);
-  report ~expected:28 ()
+  report ~expected:29 ()

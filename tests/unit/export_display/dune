@@ -2,4 +2,4 @@
  (flags
   (:standard -open Tsync_cli))
  (name export_display_test)
- (libraries tsync_cli))
+ (libraries tsync_cli tsync-libs.core str unix))

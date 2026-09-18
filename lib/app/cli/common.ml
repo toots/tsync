@@ -136,8 +136,7 @@ type live = {
 (* Progress that rewrites itself belongs on a terminal; down a pipe it is
    padding in front of the summary, so the same text goes to the log there,
    which is what [-v] reaches. *)
-let live_output () =
-  let watching = Unix.isatty Unix.stderr in
+let live_output ?(watching = Unix.isatty Unix.stderr) () =
   let width = if watching then terminal_width () else max_int in
   let drawn = ref 0 in
   let rewind () =
@@ -167,6 +166,14 @@ let live_output () =
       prerr_endline line
     end
   in
+  (* The log shares the terminal, and a line of it written into the middle of
+     the block leaves both unreadable. *)
+  if watching then begin
+    let log = Log.sink () in
+    Log.set_sink (fun level message ->
+        clear ();
+        log level message)
+  end;
   { watching; block; note; clear }
 
 let human_bytes = Metrics.human_bytes

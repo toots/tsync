@@ -39,5 +39,6 @@ let render s =
     List.sort (fun (a : active) b -> compare a.name b.name) s.active
   in
   match (s.files, active) with
+    | 0, _ -> []
     | 1, [a] -> [active_line a]
     | _ -> List.map active_line active @ [total_line s]
