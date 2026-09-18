@@ -28,9 +28,7 @@ let cmd : unit Cmd.t =
     with _ -> failwith ("invalid date (expected YYYY-MM-DD): " ^ s)
   in
   let run date domain =
-    (* Carriage-return progress belongs on a terminal, where one line rewrites
-       itself; down a pipe it is padding in front of the summary. *)
-    let watching = Unix.isatty Unix.stderr in
+    let live = live_output () in
     let s =
       run_lwt
         (let cutoff = parse_date date in
@@ -45,12 +43,11 @@ let cmd : unit Cmd.t =
            ~on_scan:(fun ~name ~objects ->
              Printf.eprintf "  %s: %d object(s)\n%!" name objects)
            ~on_delete:(fun ~name ~deleted ->
-             if watching then Printf.eprintf "  %s: %d deleted\r%!" name deleted)
+             if live.watching then
+               live.block [Printf.sprintf "  %s: %d deleted" name deleted])
            ~cutoff ())
     in
-    (* The last progress line is still sitting on the terminal's current line,
-       and the summary below would land on top of it. *)
-    if watching then Printf.eprintf "\r%*s\r%!" 72 "";
+    live.clear ();
     (* [Failure] is left to the top level, which prints it as a sentence and
        exits nonzero: a run that could not reach a backend must not tell a
        script it expired anything. *)
