@@ -559,6 +559,14 @@
   (action
    (diff share_server_test.expected share_server_test.output))))
 
+(subdir ops/export
+ (alias
+  (name default)
+  (deps export_test.exe))
+ (rule
+  (alias runtest)
+  (action (run ./export_test.exe))))
+
 (subdir ops/integrity_tree
  (alias
   (name default)
@@ -1101,6 +1109,49 @@
   (alias runtest)
   (action
    (diff eintr_test.expected eintr_test.output))))
+
+(subdir unit/export_cli
+ (alias
+  (name default)
+  (deps export_cli.exe))
+ (rule
+  (alias runtest)
+  (deps %{exe:../../../bin/tsync.exe})
+  (target export_cli.output)
+  (action
+   (with-stdout-to export_cli.output (ignore-stderr (run ./export_cli.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff export_cli.expected export_cli.output))))
+
+(subdir unit/export_display
+ (alias
+  (name default)
+  (deps export_display_test.exe))
+ (rule
+  (alias runtest)
+  (target export_display_test.output)
+  (action
+   (with-stdout-to export_display_test.output (ignore-stderr (run ./export_display_test.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff export_display_test.expected export_display_test.output))))
+
+(subdir unit/export_record
+ (alias
+  (name default)
+  (deps export_record.exe))
+ (rule
+  (alias runtest)
+  (target export_record.output)
+  (action
+   (with-stdout-to export_record.output (ignore-stderr (run ./export_record.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff export_record.expected export_record.output))))
 
 (subdir unit/field_spec
  (alias

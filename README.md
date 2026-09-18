@@ -58,6 +58,7 @@ tsync versions --revert notes/todo.txt   # undo — versions kept on every chang
 tsync cache --evict photos/2019       # free the space, keep the files listed
 tsync share photos/2024       # public link to a file, or a folder as a zip
 tsync import ~/Pictures       # seed a domain from files you already have
+tsync export Files:/video/take3.mov /mnt/disk   # a 50 GB file straight from the bucket, resumable
 ```
 
 Files are split into content-addressed chunks, so editing one frame of a video uploads one chunk, and two copies of the same file are stored once. A domain can also have more than one backend — a bucket *and* a NAS copy — each one's role saying whether it gets every write or fills in lazily in the background.

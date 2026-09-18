@@ -215,8 +215,9 @@ type step =
           for the next batch. Populate it first with [LocalWrite], [LocalMkdir],
           and [LocalSymlink]. *)
   | ExportDir
-      (** Run [Export.run] into a fresh temp folder, print per-file status
-          lines, then dump the exported tree's contents. *)
+      (** Run [Export.run] on the whole domain into a fresh temp folder, print
+          what became of each file and what was pending, then dump the exported
+          tree's contents. *)
 
 type scenario = { name : string; steps : step list }
 type two_client_step = A of step | B of step

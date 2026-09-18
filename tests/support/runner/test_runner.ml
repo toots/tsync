@@ -1068,20 +1068,32 @@ let setup_client (module C : Conf_lwt.S) root staging_prefix =
             (Printf.sprintf "export-%s%d" staging_prefix !staging_seq)
         in
         let module E = Export_lwt.Make (C) in
+        (* Files finish in whatever order their chunks land, which is not what a
+           snapshot should be recording. *)
+        let finished = ref [] in
         let* summary =
-          E.run ~dst
-            ~on_file:(fun ~rel status ->
-              let desc =
-                match status with
-                  | Export.Exported -> "assembled"
-                  | Export.Exported_symlink -> "symlink"
-                  | Export.Missing_data -> "MISSING"
-              in
-              Printf.printf "  export %s (%s)\n" rel desc)
+          E.run ~dst ~paths:[]
+            ~on_event:(function
+              | `Finished (rel, outcome) ->
+                  let desc =
+                    match outcome with
+                      | `Exported -> "exported"
+                      | `Exported_symlink -> "symlink"
+                      | `Already_there -> "already there"
+                      | `Failed why -> "FAILED: " ^ why
+                  in
+                  finished := (rel, desc) :: !finished
+              | `Plan _ | `Started _ | `Landed _ -> ())
             ()
         in
-        Printf.printf "  export: %d exported, %d missing\n"
-          summary.Export.exported summary.Export.missing;
+        List.iter
+          (fun (rel, desc) -> Printf.printf "  export %s (%s)\n" rel desc)
+          (List.sort compare !finished);
+        Printf.printf "  export: %d exported, %d failed\n"
+          summary.Export.exported summary.Export.failed;
+        List.iter
+          (Printf.printf "  export: pending, not exported: %s\n")
+          summary.Export.pending;
         (* Dump the exported tree so snapshots pin the actual bytes written. *)
         let rec dump rel =
           let dir = if rel = "" then dst else Filename.concat dst rel in

@@ -97,14 +97,14 @@
   export-dir
   local? cached.bin = online-only
   local? evicted.bin = online-only
-  export cached.bin (assembled)
-  export evicted.bin (assembled)
-  export: 2 exported, 0 missing
+  export cached.bin (exported)
+  export evicted.bin (exported)
+  export: 2 exported, 0 failed
   exported-file cached.bin = "kept locally"
   exported-file evicted.bin = "remote only"
 --- tree
-  f cached.bin size=12 cached=1/1 uploaded=true etag=a9c2c15f2ec95b51
-  f evicted.bin size=11 cached=1/1 uploaded=true etag=a1e40b6869044988
+  f cached.bin size=12 cached=0/1 uploaded=true etag=a9c2c15f2ec95b51
+  f evicted.bin size=11 cached=0/1 uploaded=true etag=a1e40b6869044988
 --- content
   cached.bin = "kept locally"
   evicted.bin = "remote only"
@@ -124,9 +124,10 @@
   drain
   stage-write file.bin "modified locally"
   export-dir
-  export file.bin (assembled)
-  export: 1 exported, 0 missing
-  exported-file file.bin = "modified locally"
+  export file.bin (exported)
+  export: 1 exported, 0 failed
+  export: pending, not exported: file.bin
+  exported-file file.bin = "uploaded"
 --- tree
   f file.bin size=16 cached=1/1 uploaded=false etag=
 --- content
@@ -151,16 +152,16 @@
   imported sub/b.txt (5 bytes)
   import: 2 imported, 0 skipped, 0 symlinks skipped
   local? a.txt = online-only
-  export a.txt (assembled)
-  export sub/b.txt (assembled)
-  export: 2 exported, 0 missing
+  export a.txt (exported)
+  export sub/b.txt (exported)
+  export: 2 exported, 0 failed
   exported-file a.txt = "alpha"
   exported-file sub/b.txt = "bravo"
-  local? a.txt = cached
+  local? a.txt = online-only
 --- tree
-  f a.txt size=5 cached=1/1 uploaded=true etag=b52128e828cdaed2
+  f a.txt size=5 cached=0/1 uploaded=true etag=b52128e828cdaed2
   d sub
-  f sub/b.txt size=5 cached=1/1 uploaded=true etag=e1480ef14771a79c
+  f sub/b.txt size=5 cached=0/1 uploaded=true etag=e1480ef14771a79c
 --- content
   a.txt = "alpha"
   sub/b.txt = "bravo"
@@ -310,18 +311,18 @@
   imported colon:file.txt (6 bytes)
   imported dir:with:colons/nested.txt (6 bytes)
   import: 3 imported, 0 skipped, 0 symlinks skipped
-  export .tsync-dir (assembled)
-  export colon:file.txt (assembled)
-  export dir:with:colons/nested.txt (assembled)
-  export: 3 exported, 0 missing
+  export .tsync-dir (exported)
+  export colon:file.txt (exported)
+  export dir:with:colons/nested.txt (exported)
+  export: 3 exported, 0 failed
   exported-file .tsync-dir = "mine"
   exported-file colon:file.txt = "colons"
   exported-file dir:with:colons/nested.txt = "nested"
 --- tree
-  f .tsync-dir size=4 cached=1/1 uploaded=true etag=85df471f7bba8615
-  f colon:file.txt size=6 cached=1/1 uploaded=true etag=4cf325a5de628a63
+  f .tsync-dir size=4 cached=0/1 uploaded=true etag=85df471f7bba8615
+  f colon:file.txt size=6 cached=0/1 uploaded=true etag=4cf325a5de628a63
   d dir:with:colons
-  f dir:with:colons/nested.txt size=6 cached=1/1 uploaded=true etag=7546f608548f4d0d
+  f dir:with:colons/nested.txt size=6 cached=0/1 uploaded=true etag=7546f608548f4d0d
 --- content
   .tsync-dir = "mine"
   colon:file.txt = "colons"
@@ -468,13 +469,13 @@
   imported link.txt (8 bytes)
   import: 2 imported, 0 skipped, 0 symlinks skipped
   export link.txt (symlink)
-  export real.txt (assembled)
-  export: 2 exported, 0 missing
+  export real.txt (exported)
+  export: 2 exported, 0 failed
   exported-symlink link.txt -> real.txt
   exported-file real.txt = "hello"
 --- tree
   f link.txt size=8 cached=0/0 uploaded=true etag=32be1ca2d26f5660
-  f real.txt size=5 cached=1/1 uploaded=true etag=650e58ac64da6e0a
+  f real.txt size=5 cached=0/1 uploaded=true etag=650e58ac64da6e0a
 --- content
   link.txt -> real.txt
   real.txt = "hello"
@@ -494,7 +495,7 @@
   imported dangling.txt (7 bytes)
   import: 1 imported, 0 skipped, 0 symlinks skipped
   export dangling.txt (symlink)
-  export: 1 exported, 0 missing
+  export: 1 exported, 0 failed
   exported-symlink dangling.txt -> nowhere
 --- tree
   f dangling.txt size=7 cached=0/0 uploaded=true etag=8e5038ff0d14070b

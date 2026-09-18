@@ -49,6 +49,18 @@ let plant_staged_body name ~age =
   Unix.utimes path when_ when_;
   path
 
+(* What an export leaves in the cache for a file it did not finish. *)
+let plant_export_record dst ~age =
+  let path =
+    Cache_layout.export_record_path ~cache_root:C.cache_root
+      ~domain_name:C.domain_name dst
+  in
+  Io_lwt.Fs.mkdir_p_sync (Filename.dirname path);
+  write path "tsync-export 1 ...";
+  let when_ = Unix.gettimeofday () -. age in
+  Unix.utimes path when_ when_;
+  path
+
 let mirror_root =
   Cache_layout.manifests_dir ~cache_root:C.cache_root C.domain_name
 
@@ -88,6 +100,25 @@ let () =
      step "collected %d body(s), %d byte(s)" swept.Sweep.files swept.Sweep.bytes;
      show "staged body, written just now" fresh;
      show "staged body, two hours old" stale;
+
+     case "the export records sweep, as the task list declares it";
+     let day = 86_400. in
+     let recent = plant_export_record "/mnt/disk/yesterday.mov" ~age:day in
+     let abandoned =
+       plant_export_record "/mnt/disk/spring.mov" ~age:(40. *. day)
+     in
+     let module Md = Maintenance_lwt.Domain (C) in
+     let task =
+       List.find
+         (fun (t : Maintenance_lwt.task) ->
+           t.Maintenance_lwt.name = "export records")
+         (Md.tasks ())
+     in
+     let* swept = Maintenance_lwt.run_task task in
+     step "collected %d record(s), %d byte(s)" swept.Sweep.files
+       swept.Sweep.bytes;
+     show "an export cut short yesterday" recent;
+     show "one nobody came back to in forty days" abandoned;
 
      Lwt.return_unit);
   report ()

@@ -187,7 +187,21 @@ path, so a bare `node_modules` matches at any depth.
 | anything else | Itself literally — `+`, `.`, `(`, `)`, spaces, … |
 
 The way out is `tsync export <dir>`: the whole domain as ordinary files and directories,
-symlinks included, nothing tsync-specific left behind.
+symlinks included, nothing tsync-specific left behind. It reads what the backends hold, so
+let uploads finish first: anything this machine has not published yet is named in a warning
+and is not in the export.
+
+`tsync export <path>… <dir>` does the same for the files and folders named, each spelled
+relative to the domain or as `Files:/path`. This is also how to get a file too large to pass
+through a cache or a share link: it needs no mount and no local copy of the domain, only a
+config that names the backend. Each file is given its full size on disk before its first
+byte, so a disk too small says so at once; chunks are fetched in parallel up to
+`maxDownloads` and each is checked against its own name; and a run that stops is picked up
+where it stopped by running the same command again. A file being written already has its
+final name and length, its modification time being set only once it is whole. What is left
+to fetch is recorded in the cache directory rather than beside the files, so the folder
+holds nothing but the export; `tsync cache --prune` collects records of exports nobody came
+back to after thirty days.
 
 ## 5. Using it
 
@@ -727,6 +741,7 @@ tsync data-integrity           # list chunks a store found were not what their n
 tsync mirror                   # copy missing/damaged objects from one backend to the others
 tsync import <dir>             # seed the domain from an existing folder
 tsync export <dir>             # write every file of the domain to a plain folder
+tsync export <path>... <dir>   # ...or the files and folders named; large files resume
 tsync share <path>             # print a public download URL for a file or folder (as a zip)
 tsync share --clear-cache      # drop what the share server has assembled and cached
 tsync status                   # full report: metrics, running commands, config, cache, backends
@@ -823,7 +838,7 @@ shows; and a rate over everything counted as done, since a restart spends its fi
 re-hashing chunks the stores already have — that runs at disk speed and would promise hours for
 work that has not begun. A run that has sent nothing yet shows no estimate rather than a
 made-up one, which is what a restart looks like until it reaches data the domain does not have.
-Only `import` reports bytes for now.
+`import`, `mirror` and `export` report bytes.
 
 Reporting is advisory. A command run with no daemon — the ordinary case — reports nothing and
 runs exactly the same; nothing here can fail a command. A row disappears once its process is

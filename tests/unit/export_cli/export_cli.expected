@@ -1,0 +1,94 @@
+
+=== the whole domain, as it was always spelled
+  $ tsync export '--domain' 'Files' 'out'
+  3 files exported
+  exported a.txt
+  exported sub/b.txt
+  exported sub/deep/c d.txt
+  exit 0
+  wrote a.txt
+  wrote sub/b.txt
+  wrote sub/deep/c d.txt
+
+=== the whole domain, named outright
+  $ tsync export 'Files:' 'out'
+  3 files exported
+  exported a.txt
+  exported sub/b.txt
+  exported sub/deep/c d.txt
+  exit 0
+  wrote a.txt
+  wrote sub/b.txt
+  wrote sub/deep/c d.txt
+
+=== a folder
+  $ tsync export 'Files:/sub' 'out'
+  2 files exported
+  exported sub/b.txt
+  exported sub/deep/c d.txt
+  exit 0
+  wrote sub/b.txt
+  wrote sub/deep/c d.txt
+
+=== a folder, without the slash
+  $ tsync export 'Files:sub/deep/' 'out'
+  1 file exported
+  exported sub/deep/c d.txt
+  exit 0
+  wrote deep/c d.txt
+
+=== a file with a space in it
+  $ tsync export 'Files:/sub/deep/c d.txt' 'out'
+  1 file exported
+  exported sub/deep/c d.txt
+  exit 0
+  wrote c d.txt
+
+=== several, relative to the domain named
+  $ tsync export '--domain' 'Files' 'sub/b.txt' 'a.txt' 'out'
+  2 files exported
+  exported a.txt
+  exported sub/b.txt
+  exit 0
+  wrote a.txt
+  wrote b.txt
+
+=== the other domain
+  $ tsync export 'Other:/' 'out'
+  1 file exported
+  exported o.txt
+  exit 0
+  wrote o.txt
+
+=== a destination relative to where it is run
+  $ tsync export 'Files:/a.txt' 'rel/out'
+  1 file exported
+  exported a.txt
+  exit 0
+  wrote a.txt
+
+=== a path the domain does not have
+  $ tsync export 'Files:/nope.txt' 'out'
+  ! tsync: nope.txt: no such file or folder in Files
+  exit 1
+
+=== two domains in one run
+  $ tsync export 'Files:/a.txt' 'Other:/o.txt' 'out'
+  ! tsync: one domain at a time, and these name Files and Other
+  exit 1
+
+=== a domain named twice, differently
+  $ tsync export '--domain' 'Other' 'Files:/a.txt' 'out'
+  ! tsync: one domain at a time, and these name Files and Other
+  exit 1
+
+=== no destination
+  $ tsync export 
+  ! Usage: [01mtsync export[m [[01m--help[m] [[01m--domain[m=[04mNAME[m] [[01m--source[m=[04mNAME[m] [[01m--verbose[m]
+  !        [[04mOPTION[m]… [[04mPATH[m]… [04mDIR[m
+  ! tsync: required argument [04mDIR[m is [31mmissing[m
+  exit 124
+every spelling that names something exports it: ok
+and every one that does not is refused: ok
+
+2 check(s), 0 failure(s)
