@@ -40,8 +40,10 @@ module type POOL = sig
 
   val create : keep:int64 -> parallel:int -> unit -> t
 
+  (** [alive] is called as the answer arrives, piece by piece. *)
   val call :
     t ->
+    alive:(unit -> unit) ->
     headers:Cohttp.Header.t ->
     body:Bigstring.t ->
     Cohttp.Code.meth ->
@@ -59,8 +61,11 @@ module type S = sig
 
       [timeout] is a stall detector rather than a latency budget: a pooled
       connection whose peer went away without a FIN leaves its request pending
-      forever, and a retry loop only ever sees failures, never stalls. Callers
-      choose it, since what counts as stalled differs by peer. *)
+      forever, and a retry loop only ever sees failures, never stalls. It is how
+      long an answer may go without a byte of it arriving, so a large body on a
+      slow link is not a stall; a request body being sent is not heard, and has
+      the whole of it to cross in. Callers choose it, since what counts as
+      stalled differs by peer. *)
   val create :
     name:string -> timeout:float -> classify:(exn -> Retry.kind) -> unit -> t
 

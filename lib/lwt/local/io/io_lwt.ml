@@ -48,6 +48,19 @@ end
 module Clock = struct
   let sleep = Lwt_unix.sleep
   let with_timeout = Lwt_unix.with_timeout
+
+  (* Woken at the moment the silence would be too long, not every so often: a
+     watcher that polls notices late by up to its own period. *)
+  let with_stall_timeout seconds f =
+    let heard = ref (Unix.gettimeofday ()) in
+    let alive () = heard := Unix.gettimeofday () in
+    let rec watch () =
+      let left = !heard +. seconds -. Unix.gettimeofday () in
+      if left <= 0. then Lwt.fail Lwt_unix.Timeout
+      else Lwt.bind (Lwt_unix.sleep left) watch
+    in
+    Lwt.pick [f alive; watch ()]
+
   let is_timeout exn = exn = Lwt_unix.Timeout
 end
 

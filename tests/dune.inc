@@ -171,6 +171,14 @@
   (action
    (diff http_reuse.expected http_reuse.output))))
 
+(subdir backends/http_stall
+ (alias
+  (name default)
+  (deps http_stall.exe))
+ (rule
+  (alias runtest)
+  (action (run ./http_stall.exe))))
+
 (subdir backends/local_watch
  (alias
   (name default)

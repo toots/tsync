@@ -10,7 +10,7 @@ module Pool = struct
   let create ~keep ~parallel () =
     Cohttp_lwt_unix.Connection_cache.create ~keep ~parallel ()
 
-  let call t ~headers ~body meth uri =
+  let call t ~alive ~headers ~body meth uri =
     let* resp, rbody =
       Cohttp_lwt_unix.Connection_cache.call t
         ~headers
@@ -20,7 +20,17 @@ module Pool = struct
         ~body:(Cohttp_lwt.Body.of_bigstring (`Passthrough body))
         meth uri
     in
-    let+ rbody = Cohttp_lwt.Body.to_bigstring rbody in
+    alive ();
+    let heard =
+      Lwt_stream.map
+        (fun piece ->
+          alive ();
+          piece)
+        (Cohttp_lwt.Body.to_stream rbody)
+    in
+    let+ rbody =
+      Cohttp_lwt.Body.to_bigstring (Cohttp_lwt.Body.of_stream heard)
+    in
     (resp, rbody)
 end
 

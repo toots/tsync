@@ -14,6 +14,11 @@ module type S = sig
       what {!Io.S} cannot express. *)
   val with_timeout : float -> (unit -> 'a io) -> 'a io
 
+  (** [with_stall_timeout seconds f] runs [f alive], failing as {!with_timeout}
+      does once [seconds] pass without [alive] being called: for work whose
+      length is its peer's to choose, where only silence says it is stuck. *)
+  val with_stall_timeout : float -> ((unit -> unit) -> 'a io) -> 'a io
+
   (** Whether [exn] is the scheduler's own timeout rather than a failure of the
       work. Only the scheduler that raises it can say. *)
   val is_timeout : exn -> bool
