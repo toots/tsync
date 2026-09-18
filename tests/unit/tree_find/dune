@@ -1,0 +1,32 @@
+(executable
+ (flags
+  (:standard
+   -open
+   Tsync_core
+   -open
+   Tsync_backend_api
+   -open
+   Tsync_remote_lwt
+   -open
+   Tsync_manifest
+   -open
+   Tsync_conf_lwt
+   -open
+   Tsync_remote
+   -open
+   Tsync_backend_lwt
+   -open
+   Tsync_test_harness))
+ (name tree_find_test)
+ (libraries
+  tsync_core
+  tsync_backend_api
+  tsync_remote_lwt
+  tsync_manifest
+  tsync_test_harness
+  tsync_conf_lwt
+  tsync_remote
+  tsync_backend_lwt
+  tsync_local_backend_lwt
+  lwt
+  lwt.unix))

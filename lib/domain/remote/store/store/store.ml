@@ -58,6 +58,7 @@ module type S = sig
 
   val list_namespace : folder_id:string -> Backend.file_entry list io
   val get_object : bkey:Stored_key.t -> string io
+  val get_object_opt : bkey:Stored_key.t -> string option io
 
   val get_objects :
     ?slots:pool ->
@@ -393,6 +394,10 @@ struct
     let get_object ~bkey =
       let+ body = B.get ~key:bkey () in
       Bigstring.to_string body
+
+    let get_object_opt ~bkey =
+      let+ body = B.get_opt ~key:bkey () in
+      Option.map Bigstring.to_string body
 
     let get_objects ?slots ~entries () =
       let+ answered = Bb.get_many ?slots ~entries () in

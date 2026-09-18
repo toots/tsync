@@ -118,6 +118,9 @@ module type S = sig
   val list_namespace : folder_id:string -> Backend.file_entry list io
   val get_object : bkey:Stored_key.t -> string io
 
+  (** [None] for a key the store does not hold. *)
+  val get_object_opt : bkey:Stored_key.t -> string option io
+
   (** Bodies of several at once, in one request where the store has a way to
       make one and a bounded fan-out where it has not. [None] for a key the
       store no longer holds, a listing and the reads that follow it not being

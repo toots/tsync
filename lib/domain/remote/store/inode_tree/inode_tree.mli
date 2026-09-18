@@ -64,6 +64,17 @@ module type S = sig
     unit ->
     entry list io
 
+  (** What [names] lead to from [folder_id] at one read a name and no listing: a
+      folder's id, [folder_id] itself for [[]], and [`Missing] for a marker
+      {!children} would not have listed.
+
+      Fails on a body caught mid-write rather than answering [`Missing] for an
+      object that is there. *)
+  val find :
+    folder_id:string ->
+    string list ->
+    [ `File of entry | `Folder of string | `Missing ] io
+
   (** Depth-first over the subtree under [folder_id]. [f acc rel entry] sees
       each entry with the real relative path of the folder holding it, [rel]
       naming that starting folder. A folder is visited before it is descended
