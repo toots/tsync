@@ -76,6 +76,10 @@ module type PRIMITIVES = sig
   val pread : fd -> Bigstringaf.t -> file_offset:int -> int -> int -> int io
 
   val pwrite : fd -> Bigstringaf.t -> file_offset:int -> int -> int -> int io
+
+  (** Size [fd] to [size] with its blocks allocated, failing with [EOPNOTSUPP]
+      or [ENOSYS] where the filesystem cannot. *)
+  val reserve : size:int64 -> fd -> unit io
 end
 
 module type S = Fs_intf.S
@@ -124,6 +128,14 @@ struct
 
   let atomic_write path data =
     with_temp_rename path (fun tmp -> P.write_file tmp data)
+
+  let reserve ~size fd =
+    Io.catch
+      (fun () -> P.reserve ~size fd)
+      (function
+        | Unix.Unix_error ((Unix.EOPNOTSUPP | Unix.ENOSYS), _, _) ->
+            Sys.LargeFile.ftruncate fd size
+        | exn -> Io.fail exn)
 
   let pwrite_all fd data ~offset =
     let total = Bigstringaf.length data in

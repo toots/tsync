@@ -60,6 +60,10 @@ module type PRIMITIVES = sig
   val pread : fd -> Bigstringaf.t -> file_offset:int -> int -> int -> int io
 
   val pwrite : fd -> Bigstringaf.t -> file_offset:int -> int -> int -> int io
+
+  (** Size [fd] to [size] with its blocks allocated, failing with [EOPNOTSUPP]
+      or [ENOSYS] where the filesystem cannot. *)
+  val reserve : size:int64 -> fd -> unit io
 end
 
 module type S = Fs_intf.S
