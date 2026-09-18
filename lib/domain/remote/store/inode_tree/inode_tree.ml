@@ -28,6 +28,11 @@ module type S = sig
     unit ->
     entry list io
 
+  val find :
+    folder_id:string ->
+    string list ->
+    [ `File of entry | `Folder of string | `Missing ] io
+
   val fold_tree :
     ?on_unusable:on_unusable ->
     ?refresh_index:bool ->
@@ -321,6 +326,31 @@ struct
       in
       let* kept = classified ~on_unusable read in
       owned ~on_unusable ~slots kept
+
+    (* A child's key follows from its name, so a path costs one read a segment
+       and no listing, however many siblings each folder has. *)
+    let child ~folder_id name =
+      let bkey = Stored_key.child_key ~prefix:C.domain_prefix ~folder_id name in
+      let* data = St.get_object_opt ~bkey in
+      match Option.map classify data with
+        | None -> Io.return None
+        | Some (Error exn) -> Io.fail exn
+        | Some (Ok (File _ as body)) -> return_some { bkey; body }
+        | Some (Ok (Dir m as body)) -> (
+            let+ filed = St.filed ~bkey m in
+            match filed with
+              | `Here -> Some { bkey; body }
+              | `Elsewhere _ -> None)
+
+    let rec find ~folder_id = function
+      | [] -> Io.return (`Folder folder_id)
+      | name :: rest -> (
+          let* found = child ~folder_id name in
+          match (found, rest) with
+            | None, _ | Some { body = File _; _ }, _ :: _ -> Io.return `Missing
+            | Some ({ body = File _; _ } as entry), [] ->
+                Io.return (`File entry)
+            | Some { body = Dir m; _ }, _ -> find ~folder_id:m.Folder.id rest)
 
     (* The frontier of a walk: folders known and not yet answered, in visit
        order, a folder's children taking its place when its answer arrives. *)

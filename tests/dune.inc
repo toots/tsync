@@ -1653,6 +1653,14 @@
   (action
    (diff tree_children_test.expected tree_children_test.output))))
 
+(subdir unit/tree_find
+ (alias
+  (name default)
+  (deps tree_find_test.exe))
+ (rule
+  (alias runtest)
+  (action (run ./tree_find_test.exe))))
+
 (subdir unit/upload_fanout
  (alias
   (name default)
