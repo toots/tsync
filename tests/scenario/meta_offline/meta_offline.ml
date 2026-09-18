@@ -732,5 +732,37 @@ let () =
      check "ours is published, and theirs applied"
        (published && applied && List.mem "ours-held" names);
 
-     report ~expected:48 ();
+     (* A rename touches two names here, and a frontend serving the mirror
+        invalidates what it holds from these: told of one, it goes on serving
+        the file at the other. *)
+     case "a peer's rename announces both the name it left and the one it took";
+     let* () = write "announced.txt" "november" in
+     let* () = settle () in
+     let* () = Js.flush_cursor () in
+     let announced = ref [] in
+     let* () =
+       from_peer
+         [
+           `Rename
+             Journal.
+               {
+                 src = "announced.txt";
+                 dst = "announced2.txt";
+                 size = Some 8L;
+                 is_dir = false;
+                 id = None;
+               };
+         ]
+     in
+     let* (_ : int) =
+       Rp.apply_foreign ~on_changed:(fun k -> announced := k :: !announced) ()
+     in
+     let named rel =
+       List.exists (fun k -> Filename.basename k = rel) !announced
+     in
+     step "announced: %s" (String.concat ", " !announced);
+     check "both the source and the destination are named"
+       (named "announced.txt" && named "announced2.txt");
+
+     report ~expected:49 ();
      Lwt.return_unit)
