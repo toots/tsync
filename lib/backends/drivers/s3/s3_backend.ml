@@ -20,6 +20,7 @@ struct
     endpoint : Aws_s3.Region.endpoint;
     unsigned_payload : bool;
     share_url : string option;
+    health : Health.t;
   }
 
   let make_t ?endpoint ?(unsigned_payload = false) ?share_url ~bucket ~region
@@ -34,7 +35,14 @@ struct
         | None -> Aws_s3.Region.of_string region
     in
     let endpoint = Aws_s3.Region.endpoint ~inet:`V4 ~scheme:`Https region in
-    { bucket; credentials; endpoint; unsigned_payload; share_url }
+    {
+      bucket;
+      credentials;
+      endpoint;
+      unsigned_payload;
+      share_url;
+      health = Health.create ();
+    }
 
   let string_of_error = function
     | S3.Redirect _ -> "redirect"
@@ -58,8 +66,9 @@ struct
 
   (* Raises on a transient error so the shared loop retries it; every other
      outcome, [Not_found] included, comes back for the verb to interpret. *)
-  let with_retry op f =
-    Loop.with_retry ~classify:Backend.classify ~name:"s3" ~op (fun () ->
+  let with_retry t op f =
+    Loop.with_retry ~health:t.health ~classify:Backend.classify ~name:"s3" ~op
+      (fun () ->
         let* res = f () in
         match res with
           | Error e when is_transient e -> Io.fail (failed op e)
@@ -85,7 +94,7 @@ struct
      until it answers -- a retry sends the same buffer again. *)
   let put t ~key ~data () =
     let+ res =
-      with_retry "put" (fun () ->
+      with_retry t "put" (fun () ->
           S3.put_bigstring ~credentials:t.credentials ~endpoint:t.endpoint
             ~bucket:t.bucket ~unsigned_payload:t.unsigned_payload ~key ~data ())
     in
@@ -94,7 +103,7 @@ struct
   (* The verifier's job bodies are JSON and small enough to stay on the heap. *)
   let put_text t ~key ~data () =
     let+ res =
-      with_retry "put" (fun () ->
+      with_retry t "put" (fun () ->
           S3.put ~credentials:t.credentials ~endpoint:t.endpoint
             ~bucket:t.bucket ~unsigned_payload:t.unsigned_payload ~key ~data ())
     in
@@ -102,7 +111,7 @@ struct
 
   let get t ~key () =
     let+ res =
-      with_retry "get" (fun () ->
+      with_retry t "get" (fun () ->
           S3.get_bigstring ~credentials:t.credentials ~endpoint:t.endpoint
             ~bucket:t.bucket ~key ())
     in
@@ -114,7 +123,7 @@ struct
      silently. *)
   let put_if_absent t ~key ~data () =
     let* res =
-      with_retry "put_if_absent" (fun () ->
+      with_retry t "put_if_absent" (fun () ->
           S3.put_bigstring ~credentials:t.credentials ~endpoint:t.endpoint
             ~bucket:t.bucket ~unsigned_payload:t.unsigned_payload
             ~precondition:`If_none_match ~key ~data ())
@@ -128,7 +137,7 @@ struct
 
   let get_opt t ~key () =
     let+ res =
-      with_retry "get" (fun () ->
+      with_retry t "get" (fun () ->
           S3.get_bigstring ~credentials:t.credentials ~endpoint:t.endpoint
             ~bucket:t.bucket ~key ())
     in
@@ -144,7 +153,7 @@ struct
   let get_range t ~key ~offset ~length () =
     let range = { S3.first = Some offset; last = Some (offset + length - 1) } in
     let+ res =
-      with_retry "get_range" (fun () ->
+      with_retry t "get_range" (fun () ->
           S3.get_bigstring ~range ~credentials:t.credentials
             ~endpoint:t.endpoint ~bucket:t.bucket ~key ())
     in
@@ -157,7 +166,7 @@ struct
 
   let head_opt t ~key () =
     let+ res =
-      with_retry "head" (fun () ->
+      with_retry t "head" (fun () ->
           S3.head ~credentials:t.credentials ~endpoint:t.endpoint
             ~bucket:t.bucket ~key ())
     in
@@ -173,7 +182,7 @@ struct
   let delete t ~key () =
     let* held = head_opt t ~key () in
     let+ res =
-      with_retry "delete" (fun () ->
+      with_retry t "delete" (fun () ->
           S3.delete ~credentials:t.credentials ~endpoint:t.endpoint
             ~bucket:t.bucket ~key ())
     in
@@ -191,7 +200,7 @@ struct
           let rest = List.filteri (fun i _ -> i >= n) batch in
           let objects = List.map (fun key -> { key; version_id = None }) here in
           let* res =
-            with_retry "delete_multi" (fun () ->
+            with_retry t "delete_multi" (fun () ->
                 S3.delete_multi ~credentials:t.credentials ~endpoint:t.endpoint
                   ~bucket:t.bucket ~objects ())
           in
@@ -247,14 +256,14 @@ struct
         match cont with
           | S3.Ls.Done -> Io.return (List.concat (List.rev acc))
           | S3.Ls.More f -> (
-              let* res = with_retry "ls-cont" (fun () -> f ?max_keys ()) in
+              let* res = with_retry t "ls-cont" (fun () -> f ?max_keys ()) in
               match res with
                 | Ok (items, next) ->
                     collect (List.map entry_of items :: acc) next
                 | Error e -> Io.fail (failed "ls-cont" e)))
     in
     let* res =
-      with_retry "ls" (fun () ->
+      with_retry t "ls" (fun () ->
           S3.ls ~credentials:t.credentials ~endpoint:t.endpoint ~bucket:t.bucket
             ?max_keys ~prefix ())
     in
@@ -281,6 +290,7 @@ struct
         let list_all = list_all
         let put_text = put_text
         let share_url t = t.share_url
+        let health t = t.health
       end)
 
   let make ?endpoint ?unsigned_payload ?share_url ~bucket ~region ~access_key_id

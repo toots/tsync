@@ -63,6 +63,7 @@ let main : (module Backend_lwt.Store) =
     let get_many = None
     let list_many = None
     let local_path = None
+    let health = Health.always_up
   end)
 
 let replica_up = ref true

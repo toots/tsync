@@ -46,3 +46,39 @@ let () =
     (Retry.failed ~kind:Retry.Permanent ~op:"put" "forbidden");
   attempts "cancelled" Retry.Cancelled;
   attempts "unknown exception" (Failure "something new")
+
+(* The same loop told whose link it is climbing against: it says how each
+   attempt went and climbs regardless, whether to wait for it being up to
+   whoever has another member to ask. *)
+let asked_of health ~fails exn =
+  let attempts = ref 0 in
+  let run () =
+    Retry_lwt.with_retry ~health ~max_attempts:3 ~classify:Backend.classify
+      ~name:"test" ~op:"get" (fun () ->
+        incr attempts;
+        if !attempts <= fails then Lwt.fail exn else Lwt.return_unit)
+  in
+  let outcome =
+    try Lwt_main.run (Lwt.bind (run ()) (fun () -> Lwt.return "answered"))
+    with e -> "raised " ^ Retry.reason e
+  in
+  Printf.sprintf "%d attempt(s), %s, member %s" !attempts outcome
+    (if Health.is_held health then "held" else "up")
+
+let () =
+  Health.trip_span := 0.;
+  let transient = Retry.failed ~kind:Retry.Transient ~op:"get" "HTTP 502"
+  and permanent = Retry.failed ~kind:Retry.Permanent ~op:"get" "not found" in
+  let row name said = Printf.printf "%-28s %s\n" name said in
+  print_newline ();
+  print_endline "with_retry (max 3), told which member it is asking";
+  let member = Health.create () in
+  row "a link that is gone" (asked_of member ~fails:max_int transient);
+  row "the next request of it" (asked_of member ~fails:max_int transient);
+  row "one lost, then answered" (asked_of (Health.create ()) ~fails:1 transient);
+  row "an answer that is a no"
+    (asked_of (Health.create ()) ~fails:max_int permanent);
+  let member = Health.create () in
+  ignore (asked_of member ~fails:max_int transient);
+  row "answered while held" (asked_of member ~fails:0 transient);
+  row "a store with no link" (asked_of Health.always_up ~fails:2 transient)

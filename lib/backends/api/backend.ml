@@ -173,6 +173,10 @@ module type S = sig
 
   val fast_read : bool
   val local_path : string option
+
+  (** Whether the store's link is there, as its own requests have found it: what
+      a caller with somewhere else to read from asks first. *)
+  val health : Health.t
 end
 
 (* Runs a request may ask for at once. Both bounds are needed: the count is what
@@ -411,6 +415,7 @@ struct
           Inner.list_many
 
       let local_path = Inner.local_path
+      let health = Inner.health
     end : Store)
 
   let make ?traffic ~backend_type ~get_field () =

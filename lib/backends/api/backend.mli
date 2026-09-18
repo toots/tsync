@@ -298,6 +298,11 @@ module type S = sig
       collection renames the chunk root aside and renames chunks back
       ({!Collection}), and a report only wants a path to measure. *)
   val local_path : string option
+
+  (** Whether the store's link is there, as its own requests have found it: what
+      a caller with somewhere else to read from asks first. A store with no link
+      to lose answers {!Health.always_up}. *)
+  val health : Health.t
 end
 
 (** One store's own share of what {!Metrics} counts for the whole process. A

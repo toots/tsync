@@ -349,5 +349,8 @@ struct
          member it means ({!Collection} takes the main's) rather than the fan-out
          over all of them. *)
       let local_path = None
+
+      (* A domain is not a member: which of its stores is held is asked of each. *)
+      let health = Health.always_up
     end)
 end

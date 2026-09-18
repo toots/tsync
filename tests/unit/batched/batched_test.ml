@@ -48,6 +48,7 @@ module Plain : Backend_lwt.Store = struct
   let list_many = None
   let fast_read = false
   let local_path = None
+  let health = Health.always_up
 end
 
 module Native : Backend_lwt.Store = struct
@@ -67,6 +68,7 @@ module Native : Backend_lwt.Store = struct
 
   let list_many = None
   let local_path = None
+  let health = Health.always_up
 end
 
 module Bp = Backend_lwt.Batched (Plain)
@@ -96,6 +98,7 @@ module Failing : Backend_lwt.Store = struct
 
   let list_many = None
   let local_path = None
+  let health = Health.always_up
 end
 
 module Composite =
@@ -125,6 +128,7 @@ module Counted : Backend_lwt.Store = struct
   let list_many = None
   let fast_read = false
   let local_path = None
+  let health = Health.always_up
 end
 
 module Bk = Backend_lwt.Batched (Counted)

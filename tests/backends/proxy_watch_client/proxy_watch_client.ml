@@ -19,7 +19,7 @@ let answer_status : Cohttp.Code.status_code ref = ref `OK
 module Fake_http = struct
   type t = unit
 
-  let create ~name:_ ~timeout:_ ~classify:_ () = ()
+  let create ~name:_ ~timeout:_ ~classify:_ ~health:_ () = ()
 
   let respond uri =
     asked := uri :: !asked;

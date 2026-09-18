@@ -79,7 +79,7 @@ let () =
      case "the pooled client";
      let client =
        Http_client_lwt.create ~name:"test" ~timeout:10. ~classify:Retry.classify
-         ()
+         ~health:Health.always_up ()
      in
      let answered = ref 0 in
      let rec go n =

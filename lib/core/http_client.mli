@@ -65,9 +65,17 @@ module type S = sig
       long an answer may go without a byte of it arriving, so a large body on a
       slow link is not a stall; a request body being sent is not heard, and has
       the whole of it to cross in. Callers choose it, since what counts as
-      stalled differs by peer. *)
+      stalled differs by peer.
+
+      [health] is the one peer this client talks to, told how each request went.
+  *)
   val create :
-    name:string -> timeout:float -> classify:(exn -> Retry.kind) -> unit -> t
+    name:string ->
+    timeout:float ->
+    classify:(exn -> Retry.kind) ->
+    health:Health.t ->
+    unit ->
+    t
 
   (** One request through the pool, redialling once if the pooled connection
       turned out to be unusable.

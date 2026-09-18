@@ -30,6 +30,7 @@ module type VERBS = sig
   (* The job bodies the verifier and the discard write are text. *)
   val put_text : t -> key:string -> data:string -> unit -> unit io
   val share_url : t -> string option
+  val health : t -> Health.t
 end
 
 module Over
@@ -102,5 +103,6 @@ struct
         Clock.sleep Backend.default_watch_interval
 
       let local_path = None
+      let health = V.health t
     end)
 end

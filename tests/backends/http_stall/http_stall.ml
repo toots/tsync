@@ -67,7 +67,7 @@ let ask uri p =
   let client =
     Http_client_lwt.create ~name:"test" ~timeout
       ~classify:(fun _ -> Retry.Permanent)
-      ()
+      ~health:Health.always_up ()
   in
   let started = Unix.gettimeofday () in
   let+ outcome =
