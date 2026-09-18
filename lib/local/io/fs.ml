@@ -125,6 +125,23 @@ struct
   let atomic_write path data =
     with_temp_rename path (fun tmp -> P.write_file tmp data)
 
+  let pwrite_all fd data ~offset =
+    let total = Bigstringaf.length data in
+    let rec go written =
+      if written >= total then Io.return ()
+      else
+        let* n =
+          P.pwrite fd data ~file_offset:(offset + written) written
+            (total - written)
+        in
+        if n = 0 then
+          Io.fail
+            (Failure
+               (Printf.sprintf "short write at offset %d" (offset + written)))
+        else go (written + n)
+    in
+    go 0
+
   let atomic_write_at path ~size write =
     with_temp_rename path (fun tmp ->
         let* fd =
@@ -135,25 +152,7 @@ struct
             (* Allocated before any piece is produced, so a full disk fails
                before the bytes are paid for. *)
             let* () = Sys.LargeFile.ftruncate fd (Int64.of_int size) in
-            let put ~offset data =
-              let total = Bigstringaf.length data in
-              let rec go written =
-                if written >= total then Io.return ()
-                else
-                  let* n =
-                    P.pwrite fd data ~file_offset:(offset + written) written
-                      (total - written)
-                  in
-                  if n = 0 then
-                    Io.fail
-                      (Failure
-                         (Printf.sprintf "short write to %s at offset %d" tmp
-                            (offset + written)))
-                  else go (written + n)
-              in
-              go 0
-            in
-            write put)
+            write (fun ~offset data -> pwrite_all fd data ~offset))
           (fun () -> Sys.close fd))
 
   let copy_file ~src ~dst =

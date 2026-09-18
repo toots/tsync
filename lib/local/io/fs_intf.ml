@@ -25,6 +25,10 @@ module type S = sig
 
   val pwrite : fd -> buffer -> file_offset:int -> int -> int -> int io
 
+  (** All of [buffer] at [offset], however many {!pwrite}s a short write makes
+      that. *)
+  val pwrite_all : fd -> buffer -> offset:int -> unit io
+
   (** Create [path] and any missing parents (mode 0o755); tolerant of races. *)
   val mkdir_p : string -> unit io
 
