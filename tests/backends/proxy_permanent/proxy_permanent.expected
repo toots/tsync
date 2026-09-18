@@ -7,4 +7,9 @@ it is asked once, and the reason reaches the caller: ok
   3 request(s): HTTP 409: local copy: tsync/dom/manifests/aaa/bbb-ccc: No such file or directory
 is waited out, and the ladder stops at the first that will not clear: ok
 
-2 check(s), 0 failure(s)
+=== a peer that could not say what it offers, asked again
+  refused: HTTP 403: no
+  4 request(s) the second time: it said
+is asked again, the first failure not being what it offers: ok
+
+3 check(s), 0 failure(s)

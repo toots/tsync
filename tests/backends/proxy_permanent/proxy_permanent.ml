@@ -158,5 +158,31 @@ let () =
      check
        "is waited out, and the ladder stops at the first that will not clear"
        (!asked = 3 && mentions gone why);
-     report ~expected:2 ();
+     case "a peer that could not say what it offers, asked again";
+     let (module Fresh : Backend_lwt.Store) =
+       Http_proxy_backend_lwt.make
+         ~url:(Printf.sprintf "http://127.0.0.1:%d" port)
+         ~secret:"s"
+     in
+     let offers plan =
+       asked := 0;
+       answers := plan;
+       Lwt.catch
+         (fun () ->
+           let+ (_ : Backend.caps) =
+             Fresh.capabilities ~prefix:"tsync/dom/" ()
+           in
+           "it said")
+         (fun exn -> Lwt.return (Retry.reason exn))
+     in
+     let four answer = [answer; answer; answer; answer] in
+     let* first =
+       within 30. (fun () -> offers (four ("403 Forbidden", "no")))
+     in
+     step "refused: %s" first;
+     let* second = within 30. (fun () -> offers (four ("404 Not Found", ""))) in
+     step "%d request(s) the second time: %s" !asked second;
+     check "is asked again, the first failure not being what it offers"
+       (!asked = 4 && second = "it said");
+     report ~expected:3 ();
      Lwt.return_unit)

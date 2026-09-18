@@ -14,6 +14,7 @@ module Over
     (Drain : DRAIN with type 'a io := 'a Io.t) =
 struct
   module Dt = Deferred.Over (Io) (Queues) (Lock)
+  module Wait = Health_wait.Make (Io)
 
   module type Store = Backend.S with type 'a io := 'a Io.t
 
@@ -69,6 +70,23 @@ struct
           if D.skip key then Io.return () else D.accept op)
         targets
     in
+    let health_of s =
+      let module B = (val s.backend : Store) in
+      B.health
+    in
+    (* A member with another behind it is asked only while it is thought to be
+       up, and waited on only until it is known not to be. The last one is asked
+       whatever is thought of it, being all there is. *)
+    let ask_member ~others label s f =
+      let module B = (val s.backend : Store) in
+      if not others then f (module B : Store)
+      else (
+        match Health.check B.health with
+          | `Held -> Io.fail (Retry.held ~name:s.name ~op:label B.health)
+          | `Up | `Probe ->
+              Wait.until_held B.health ~name:s.name ~op:label (fun () ->
+                  f (module B : Store)))
+    in
     (* [stop_on_miss] takes the first reachable store's [None] as the answer;
        otherwise a miss moves on. [`Unreachable exn] when every store raised. *)
     let walk ~stop_on_miss label chain f =
@@ -81,12 +99,14 @@ struct
             let* outcome =
               Io.catch
                 (fun () ->
-                  let module B = (val s.backend : Store) in
-                  let+ v = f (module B : Store) in
+                  let+ v = ask_member ~others:(rest <> []) label s f in
                   `Got v)
                 (fun exn ->
-                  Log.warn "domain store %s: %s unavailable (%s); trying next"
-                    label s.name (Printexc.to_string exn);
+                  (* Said once by whoever found it down, not by every read that
+                     passes it over afterwards. *)
+                  (if Health.is_held (health_of s) then Log.debug else Log.warn)
+                    "domain store %s: %s unavailable (%s); trying next" label
+                    s.name (Printexc.to_string exn);
                   Io.return (`Err exn))
             in
             match outcome with
@@ -208,6 +228,20 @@ struct
          A batch the store refused is asked key by key; a batch the link lost is
          not, since every key would be lost the same way, one retry loop at a
          time. *)
+      (* A batch is the first readable member's, and the one read that does not
+         fall through by itself: with that member held and another to ask, it
+         answers nothing, which sends the caller key by key through [read]. *)
+      let passed_over () =
+        match readable with
+          | head :: _ :: _ -> Health.is_held (health_of head)
+          | _ -> false
+
+      let batch label ask =
+        match readable with
+          | head :: _ :: _ ->
+              ask_member ~others:true label head (fun _ -> ask ())
+          | _ -> ask ()
+
       let get_many =
         let native =
           match readable with
@@ -223,9 +257,11 @@ struct
                 (fun ~entries () ->
                   let* first =
                     Io.catch
-                      (fun () -> native ~entries ())
+                      (fun () ->
+                        batch "get_many" (fun () -> native ~entries ()))
                       (fun exn ->
-                        if Backend.classify exn = Retry.Transient then
+                        if passed_over () then Io.return []
+                        else if Backend.classify exn = Retry.Transient then
                           Io.fail exn
                         else begin
                           Log.warn
@@ -264,9 +300,12 @@ struct
               Option.map
                 (fun native ~prefixes () ->
                   Io.catch
-                    (fun () -> native ~prefixes ())
+                    (fun () ->
+                      batch "list_many" (fun () -> native ~prefixes ()))
                     (fun exn ->
-                      if Backend.classify exn = Retry.Transient then Io.fail exn
+                      if passed_over () then Io.return []
+                      else if Backend.classify exn = Retry.Transient then
+                        Io.fail exn
                       else begin
                         Log.warn
                           "domain store list_many: %s refused (%s); asking \
@@ -329,8 +368,22 @@ struct
       (* These describe where the domain's own data lives, so the archives have no
          say — a readable target does, being a full copy. *)
       let capabilities ~prefix () =
+        (* ponytail: with the main held these are the replica's alone, its chunk
+           size included; ask a held member too if the two are ever configured
+           apart. *)
+        let asked =
+          match
+            List.filter (fun s -> not (Health.is_held (health_of s))) readable
+          with
+            | [] -> readable
+            | up -> up
+        in
         let+ answers =
-          map_s (fun (module B : Store) -> B.capabilities ~prefix ()) inners
+          map_s
+            (fun s ->
+              let module B = (val s.backend : Store) in
+              B.capabilities ~prefix ())
+            asked
         in
         Backend.merge_caps answers
 
