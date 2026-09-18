@@ -43,6 +43,10 @@ module type S = sig
       ([Manifest.chunk_key], without the domain's chunk prefix). *)
   val get_chunk : chunk_key:string -> Bigstring.t io
 
+  (** {!get_chunk} for a reader with nothing downstream to catch a bad body:
+      fails unless what came back hashes to [chunk_key]. *)
+  val get_verified_chunk : chunk_key:string -> Bigstring.t io
+
   (** [length] bytes of a stored chunk from [offset], for a reader that wants
       part of one. Bounded by the same reads-in-flight budget as {!get_chunk}, a
       range being a round trip like any other. *)

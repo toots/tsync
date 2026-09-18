@@ -79,6 +79,10 @@ module Over (Io : Io.S) (Pools : Bounded.S with type 'a io := 'a Io.t) : sig
 
     val fetch : string -> Bigstring.t Io.t
 
+    (** {!fetch}, failing unless the body hashes to the key it was asked for by:
+        the one check a length cannot stand in for. *)
+    val fetch_verified : string -> Bigstring.t Io.t
+
     (** Part of one, holding a read slot as a whole fetch does: what a range
         saves is bytes on the wire, not a round trip. *)
     val fetch_range : string -> offset:int -> length:int -> Bigstring.t Io.t

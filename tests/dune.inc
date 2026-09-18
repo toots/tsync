@@ -405,6 +405,14 @@
   (action
    (diff read_fanout.expected read_fanout.output))))
 
+(subdir content/verified_fetch
+ (alias
+  (name default)
+  (deps verified_fetch_test.exe))
+ (rule
+  (alias runtest)
+  (action (run ./verified_fetch_test.exe))))
+
 (subdir e2e/ipc_tap
  (alias
   (name default)
