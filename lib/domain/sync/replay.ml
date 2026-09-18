@@ -67,6 +67,9 @@ struct
 
     let full_key rel = Lk.file rel
     let op_keys = Journal.keys_of_op
+
+    (* What a record is filed under, which a rename shares between two paths:
+       for naming one unit of work, never for asking what it touched. *)
     let op_key op = List.hd (op_keys op)
 
     (* Bounded rather than [iter_p]: recovery can face a journal of any size, and
@@ -133,7 +136,9 @@ struct
       let short = Ek.to_string key in
       let* touched = overridden_since key in
       let ops =
-        List.filter (fun op -> not (Hashtbl.mem touched (op_key op))) r.Wal.ops
+        List.filter
+          (fun op -> not (List.exists (Hashtbl.mem touched) (op_keys op)))
+          r.Wal.ops
       in
       let skipped = List.length r.Wal.ops - List.length ops in
       if skipped > 0 then
@@ -332,8 +337,10 @@ struct
                       remember set ek;
                       List.iter
                         (fun op ->
-                          on_changed
-                            (Logical_key.to_string (full_key (op_key op))))
+                          List.iter
+                            (fun k ->
+                              on_changed (Logical_key.to_string (full_key k)))
+                            (op_keys op))
                         ops;
                       incr applied;
                       return_unit
