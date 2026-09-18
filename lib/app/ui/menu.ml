@@ -468,7 +468,7 @@ let stats_entries = function
    The estimate reads the whole file as what is left to fetch, so a file part of
    which was already cached finishes sooner than it says. Over-stating what
    remains beats a number that runs out while the transfer is still going. *)
-let progress_line (u : transfer) =
+let progress_text (u : transfer) =
   let parts =
     (match (u.moved, u.total) with
       | Some moved, Some total ->
@@ -490,9 +490,10 @@ let progress_line (u : transfer) =
             | None -> ["under a minute left"])
       | _ -> []
   in
-  match parts with
-    | [] -> []
-    | parts -> [info (String.concat " · " parts) ~indent:2]
+  match parts with [] -> None | parts -> Some (String.concat " · " parts)
+
+let progress_line u =
+  match progress_text u with None -> [] | Some text -> [info text ~indent:2]
 
 let file_rows s transfers =
   let shown =

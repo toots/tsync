@@ -179,3 +179,7 @@ val human_bytes : int64 -> string
     [8000.] is [Some "2h 13m"]. [None] under a minute, where there is nothing
     honest to say. *)
 val eta : float -> string option
+
+(** ["752 MB of 14.5 GB · 1.6 MB/s · 2h 23m left"], less whatever [transfer]
+    does not say, and [None] when it says none of it. *)
+val progress_text : transfer -> string option
