@@ -1,0 +1,9 @@
+
+=== a folder holding both
+  online-only  Activity.csv  <n> bytes
+  dir    audio/
+  dir    Horn charts/
+it is listed: ok
+every row names a leaf, the file's included: ok
+
+2 check(s), 0 failure(s)

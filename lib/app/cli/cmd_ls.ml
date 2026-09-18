@@ -54,7 +54,10 @@ let cmd : unit Cmd.t =
        let items =
          List.map (fun d -> (d, `Dir d)) subdirs
          @ List.map
-             (fun (e : Checkout.listed) -> (Logical_key.path e.key, `File e))
+             (* The leaf, as a directory row carries: a listing answers for one
+                folder, so a row spelling the whole path reads as a file
+                somewhere else. *)
+             (fun (e : Checkout.listed) -> (Logical_key.leaf e.key, `File e))
              files
        in
        let items =

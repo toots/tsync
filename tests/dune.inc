@@ -1346,6 +1346,15 @@
   (action
    (diff logical_key_test.expected logical_key_test.output))))
 
+(subdir unit/ls_listing
+ (alias
+  (name default)
+  (deps ls_listing.exe))
+ (rule
+  (alias runtest)
+  (deps %{exe:../../../bin/tsync.exe})
+  (action (run ./ls_listing.exe))))
+
 (subdir unit/manifest_memo
  (alias
   (name default)
