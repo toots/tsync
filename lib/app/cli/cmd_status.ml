@@ -69,8 +69,9 @@ let cmd : unit Cmd.t =
       let open Lwt.Syntax in
       Lwt_main.run
         (let* sync =
-           Status_report.ask ?arg ~frontend:"sync" ~domain:""
-             ~socket_path:sync_socket ()
+           Status_report.ask
+             ~timeout:(Status_report.cold_timeout ())
+             ?arg ~frontend:"sync" ~domain:"" ~socket_path:sync_socket ()
          in
          (* The finished report, recognised by carrying one: a daemon too old to
             assemble it answers for itself instead, and falls to the sweep
@@ -85,8 +86,9 @@ let cmd : unit Cmd.t =
                let+ answers =
                  Lwt_list.map_p
                    (fun (name, socket_path) ->
-                     Status_report.ask ?arg ~frontend:"" ~domain:name
-                       ~socket_path ())
+                     Status_report.ask
+                       ~timeout:(Status_report.cold_timeout ())
+                       ?arg ~frontend:"" ~domain:name ~socket_path ())
                    targets
                in
                Status_report.of_answers answers)

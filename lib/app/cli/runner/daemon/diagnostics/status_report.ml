@@ -28,13 +28,16 @@ type answer = {
   reply : Yojson.Safe.t;
 }
 
+(* How long to wait on a process that may be probing its stores, since giving
+   up sooner reads a daemon that is looking as one that is dead.
+
+   Not for a collector asking its own frontends, which probe nothing and would
+   otherwise be waited on for as long as the collector itself is. *)
+let cold_timeout () = !Health.probe_timeout +. 2.
+
 (* Never raises: a socket that does not answer is an answer saying so. A report
    whose job is to show what is wrong must not go missing when something is. *)
-(* A cold answer waits on a probe of each store, so whoever asks has to outwait
-   one: giving up sooner reads a daemon that is looking as one that is dead. *)
-let ask_timeout () = !Health.probe_timeout +. 2.
-
-let ask ?(timeout = ask_timeout ()) ?arg ~frontend ~domain ~socket_path () =
+let ask ?timeout ?arg ~frontend ~domain ~socket_path () =
   let request =
     Yojson.Safe.to_string
       (`Assoc
@@ -44,7 +47,7 @@ let ask ?(timeout = ask_timeout ()) ?arg ~frontend ~domain ~socket_path () =
   let+ reply =
     Lwt.catch
       (fun () ->
-        let+ resp = Ipc_lwt.send_lwt ~timeout ~socket_path request in
+        let+ resp = Ipc_lwt.send_lwt ?timeout ~socket_path request in
         match Yojson.Safe.from_string resp with
           | json -> json
           | exception _ -> `Assoc [("error", `String "unreadable answer")])
