@@ -67,6 +67,11 @@ val of_json : Yojson.Basic.t -> op option
 *)
 val keys_of_op : op -> string list
 
+(** {!keys_of_op} over an entry or a record, which is what asking what either
+    touched means: the one spelling, since reading the first key of an op where
+    all of them were meant is a mistake that type-checks. *)
+val keys_of_ops : op list -> string list
+
 (** A published journal entry: one op per line. Unreadable lines are skipped — a
     newer client may have written an op this one does not know. *)
 val encode : op list -> string

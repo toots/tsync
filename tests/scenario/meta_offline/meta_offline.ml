@@ -702,7 +702,11 @@ let () =
      let* () = settle () in
      let* () = Js.flush_cursor () in
      let held = ref true in
-     Sp.start ~paused:(fun () -> !held) ~on_changed:ignore ();
+     let announced = ref [] in
+     Sp.start
+       ~paused:(fun () -> !held)
+       ~on_changed:(fun k -> announced := k :: !announced)
+       ();
      Mq.set_paused true;
      Sq.set_paused true;
      let* () = from_peer [`Mkdir ("theirs-held", Some "peer-held")] in
@@ -739,7 +743,6 @@ let () =
      let* () = write "announced.txt" "november" in
      let* () = settle () in
      let* () = Js.flush_cursor () in
-     let announced = ref [] in
      let* () =
        from_peer
          [
@@ -754,15 +757,23 @@ let () =
                };
          ]
      in
-     let* (_ : int) =
-       Rp.apply_foreign ~on_changed:(fun k -> announced := k :: !announced) ()
-     in
+     (* Applied by the poller that has been running since the entries were held,
+        as a daemon's is: a second replay beside it would race it to the entry,
+        and whichever lost would find the source already gone. *)
      let named rel =
        List.exists (fun k -> Filename.basename k = rel) !announced
      in
-     step "announced: %s" (String.concat ", " !announced);
-     check "both the source and the destination are named"
-       (named "announced.txt" && named "announced2.txt");
+     let* both =
+       until (fun () -> named "announced.txt" && named "announced2.txt")
+     in
+     step "announced: %s"
+       (String.concat ", "
+          (List.sort_uniq compare
+             (List.filter
+                (fun k ->
+                  String.starts_with ~prefix:"announced" (Filename.basename k))
+                !announced)));
+     check "both the source and the destination are named" both;
 
      report ~expected:49 ();
      Lwt.return_unit)

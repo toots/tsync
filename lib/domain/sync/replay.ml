@@ -66,11 +66,6 @@ struct
     module Mfs = Sm.Make (C)
 
     let full_key rel = Lk.file rel
-    let op_keys = Journal.keys_of_op
-
-    (* What a record is filed under, which a rename shares between two paths:
-       for naming one unit of work, never for asking what it touched. *)
-    let op_key op = List.hd (op_keys op)
 
     (* Bounded rather than [iter_p]: recovery can face a journal of any size, and
        a promise per entry up front is both memory and a request storm. Module
@@ -94,11 +89,8 @@ struct
                 | None -> ()
                 | Some ops ->
                     List.iter
-                      (fun op ->
-                        List.iter
-                          (fun k -> Hashtbl.replace touched k ())
-                          (op_keys op))
-                      ops)
+                      (fun k -> Hashtbl.replace touched k ())
+                      (Journal.keys_of_ops ops))
           newer
       in
       touched
@@ -116,7 +108,9 @@ struct
             | `Rename { Journal.dst; src; _ } ->
                 F.rename ~src:(full_key src) ~dst:(full_key dst))
         (fun exn ->
-          Log.err "replay %s: %s" (op_key op) (Printexc.to_string exn);
+          Log.err "replay %s: %s"
+            (String.concat ", " (Journal.keys_of_op op))
+            (Printexc.to_string exn);
           return_unit)
 
     (* A record whose bytes are up owes only the entry. Asking the backend is what
@@ -137,7 +131,8 @@ struct
       let* touched = overridden_since key in
       let ops =
         List.filter
-          (fun op -> not (List.exists (Hashtbl.mem touched) (op_keys op)))
+          (fun op ->
+            not (List.exists (Hashtbl.mem touched) (Journal.keys_of_op op)))
           r.Wal.ops
       in
       let skipped = List.length r.Wal.ops - List.length ops in
@@ -237,7 +232,7 @@ struct
       let* () = iter_s reconcile_record records in
       let recorded =
         List.concat_map
-          (fun (_, (r : Wal.record)) -> List.map op_key r.Wal.ops)
+          (fun (_, (r : Wal.record)) -> Journal.keys_of_ops r.Wal.ops)
           records
       in
       adopt_unrecorded ~recorded
@@ -336,12 +331,9 @@ struct
                       let* () = Js.note_applied ek ops in
                       remember set ek;
                       List.iter
-                        (fun op ->
-                          List.iter
-                            (fun k ->
-                              on_changed (Logical_key.to_string (full_key k)))
-                            (op_keys op))
-                        ops;
+                        (fun k ->
+                          on_changed (Logical_key.to_string (full_key k)))
+                        (Journal.keys_of_ops ops);
                       incr applied;
                       return_unit
             in
