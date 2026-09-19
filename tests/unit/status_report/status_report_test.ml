@@ -236,3 +236,45 @@ let () =
   print_endline
     "########## no converging process: the same fold over a sweep ##########";
   print_string (Status_report.text swept)
+
+(* Everything asked timed out, which is what a daemon still probing a dead store
+   looked like to a caller that gave up first. A machine with nothing configured
+   is asked nothing, and is the other thing this must not be mistaken for. *)
+let () =
+  let silent ~frontend ~domain =
+    {
+      (answer ~frontend ~domain ~pid:0 ()) with
+      Status_report.reply = `Assoc [("error", `String "timed out")];
+    }
+  in
+  print_endline "########## nobody answered ##########";
+  print_string
+    (Status_report.text
+       (Status_report.of_answers
+          [
+            silent ~frontend:"fuse" ~domain:"alpha";
+            silent ~frontend:"fuse" ~domain:"beta";
+            silent ~frontend:"http-proxy" ~domain:"alpha";
+          ]));
+  print_endline "########## nobody was asked ##########";
+  print_string (Status_report.text (Status_report.of_answers []))
+
+(* The main held down: said on the domain, where whoever is wondering why
+   nothing uploads will look. *)
+let () =
+  let body =
+    match domain_body ~name:"alpha" ~frontends:[] () with
+      | `Assoc fields ->
+          `Assoc
+            (( "mainOffline",
+               `String
+                 "the main \"http-proxy\" is not online (held down for 27s \
+                  after 2 failures (HTTP 530))" )
+            :: fields)
+      | other -> other
+  in
+  print_endline "########## a domain whose main is held down ##########";
+  print_string
+    (Status_report.text
+       (Status_report.of_answers
+          [answer ~frontend:"fuse" ~domain:"alpha" ~pid:4242 ~domains:[body] ()]))

@@ -30,7 +30,11 @@ type answer = {
 
 (* Never raises: a socket that does not answer is an answer saying so. A report
    whose job is to show what is wrong must not go missing when something is. *)
-let ask ?timeout ?arg ~frontend ~domain ~socket_path () =
+(* A cold answer waits on a probe of each store, so whoever asks has to outwait
+   one: giving up sooner reads a daemon that is looking as one that is dead. *)
+let ask_timeout () = !Health.probe_timeout +. 2.
+
+let ask ?(timeout = ask_timeout ()) ?arg ~frontend ~domain ~socket_path () =
   let request =
     Yojson.Safe.to_string
       (`Assoc
@@ -40,7 +44,7 @@ let ask ?timeout ?arg ~frontend ~domain ~socket_path () =
   let+ reply =
     Lwt.catch
       (fun () ->
-        let+ resp = Ipc_lwt.send_lwt ?timeout ~socket_path request in
+        let+ resp = Ipc_lwt.send_lwt ~timeout ~socket_path request in
         match Yojson.Safe.from_string resp with
           | json -> json
           | exception _ -> `Assoc [("error", `String "unreadable answer")])
@@ -260,6 +264,19 @@ let of_answers ?(local = []) ?(domains = []) answers =
         (dedup
            (fun d -> str (mem d "name"))
            (List.concat_map (fun a -> list (mem a.reply "domains")) answered))
+  in
+  (* Asked about and answered for by nobody: still a domain of this machine,
+     which a report leaving it out would show as a machine with none. *)
+  let bodies =
+    bodies
+    @ List.map
+        (fun name ->
+          `Assoc [("name", `String name); ("unanswered", `Bool true)])
+        (List.filter
+           (fun name ->
+             name <> ""
+             && not (List.exists (fun b -> mem b "name" = `String name) bodies))
+           (dedup Fun.id (List.map (fun a -> a.domain) answers)))
   in
   let domains =
     List.map
@@ -598,13 +615,26 @@ let text json =
       (match identifying with
         | Some (k, v) -> Printf.sprintf "  %s %s" k (str v)
         | None -> "");
-    if bool_of (mem m "reachable") then
-      row 4 "reachable"
-        (Printf.sprintf "yes (%.0f ms)" (num (mem m "latencyMs")))
-    else row 4 "UNREACHABLE" (str ~default:"no answer" (mem m "error"));
+    (match mem m "health" with
+      | `Null ->
+          if bool_of (mem m "reachable") then
+            row 4 "reachable"
+              (Printf.sprintf "yes (%.0f ms)" (num (mem m "latencyMs")))
+          else row 4 "UNREACHABLE" (str ~default:"no answer" (mem m "error"))
+      | h ->
+          row 4 "HELD DOWN"
+            (Printf.sprintf "until %s, after %d failure%s — %s"
+               (str (mem h "heldUntilLocal"))
+               (int_of (mem h "failures"))
+               (if int_of (mem h "failures") = 1 then "" else "s")
+               (str (mem h "reason"))));
+    (* A store that could not be reached has no journal to describe, and a zero
+       would read as one that is empty. *)
     let j = mem m "journal" in
-    (match mem j "error" with
-      | `String e -> row 4 "journal" ("error: " ^ e)
+    (match (j, mem j "error", mem j "counting") with
+      | `Null, _, _ -> ()
+      | _, `String e, _ -> row 4 "journal" ("error: " ^ e)
+      | _, _, `Bool true -> row 4 "journal" "counting in the background"
       | _ ->
           row 4 "journal"
             (Printf.sprintf "%d entries, %d to apply"
@@ -615,6 +645,7 @@ let text json =
        something else. *)
     (let c = mem m "corrupted" in
      match (mem c "error", mem c "checked", int_of (mem c "chunks")) with
+       | _ when c = `Null || mem c "counting" = `Bool true -> ()
        | `String e, _, _ -> row 4 "corrupted" ("error: " ^ e)
        | _, `Bool false, _ ->
            row 4 "corrupted" "not checked — no verifier for this store"
@@ -676,66 +707,80 @@ let text json =
     (fun d ->
       line 0 "";
       line 0 "Domain %s" (str (mem d "name"));
-      row 2 "settings"
-        (String.concat ", "
-           [
-             Printf.sprintf "versioning %s"
-               (if bool_of (mem d "versioning") then "on" else "off");
-             Printf.sprintf "symlinks %s" (str (mem d "symlinks"));
-             Printf.sprintf "chunk %s" (bytes_or_default (mem d "chunkSize"));
-             Printf.sprintf "cache chunk %s"
-               (bytes_or_unlimited (mem d "cacheChunkSize"));
-           ]);
-      (* Chunk buffers belong here and not only in a frontend block: they are
+      (* Nothing answered for it, so there is a name and who was asked, and no
+         settings to print zeros for. *)
+      if bool_of (mem d "unanswered") then
+        List.iter frontend_block (list (mem d "frontends"))
+      else begin
+        (* Writes are not turned away: they wait on the main, and what this says
+           is why nothing is landing anywhere else meanwhile. *)
+        (match mem d "mainOffline" with
+          | `String why ->
+              row 2 "MAIN OFFLINE"
+                (why
+               ^ "; writes wait for it, and no replica is written meanwhile")
+          | _ -> ());
+        row 2 "settings"
+          (String.concat ", "
+             [
+               Printf.sprintf "versioning %s"
+                 (if bool_of (mem d "versioning") then "on" else "off");
+               Printf.sprintf "symlinks %s" (str (mem d "symlinks"));
+               Printf.sprintf "chunk %s" (bytes_or_default (mem d "chunkSize"));
+               Printf.sprintf "cache chunk %s"
+                 (bytes_or_unlimited (mem d "cacheChunkSize"));
+             ]);
+        (* Chunk buffers belong here and not only in a frontend block: they are
          what bounds the upload path's memory, so reading it against the chunk
          size above is how an operator sizes a small machine. *)
-      row 2 "concurrency"
-        (Printf.sprintf "%d uploads, %d chunk buffers, %d downloads"
-           (int_of (mem d "maxUploads"))
-           (int_of (mem d "maxChunkBuffers"))
-           (int_of (mem d "maxDownloads")));
-      (match mem d "cache" with
-        | `Null -> ()
-        | cache ->
-            row 2 "cache"
-              (Printf.sprintf "%d chunks, %s of %s%s%s"
-                 (int_of (mem cache "chunks"))
-                 (Metrics.human_bytes (int_of (mem cache "bytes")))
-                 (bytes_or_unlimited (mem cache "maxCache"))
-                 (match mem cache "pinnedBytes" with
-                   | `Null -> ""
-                   | p when int_of p > 0 ->
-                       Printf.sprintf ", %s pinned"
-                         (Metrics.human_bytes (int_of p))
-                   | _ -> "")
-                 (match mem cache "manifests" with
-                   | `Null -> ""
-                   | m -> Printf.sprintf ", %d manifests" (int_of m))));
-      if bool_of (mem d "domainReadOnly") then row 2 "read-only" "yes";
-      (* The name this client publishes under. Silent when it is the machine's,
+        row 2 "concurrency"
+          (Printf.sprintf "%d uploads, %d chunk buffers, %d downloads"
+             (int_of (mem d "maxUploads"))
+             (int_of (mem d "maxChunkBuffers"))
+             (int_of (mem d "maxDownloads")));
+        (match mem d "cache" with
+          | `Null -> ()
+          | cache ->
+              row 2 "cache"
+                (Printf.sprintf "%d chunks, %s of %s%s%s"
+                   (int_of (mem cache "chunks"))
+                   (Metrics.human_bytes (int_of (mem cache "bytes")))
+                   (bytes_or_unlimited (mem cache "maxCache"))
+                   (match mem cache "pinnedBytes" with
+                     | `Null -> ""
+                     | p when int_of p > 0 ->
+                         Printf.sprintf ", %s pinned"
+                           (Metrics.human_bytes (int_of p))
+                     | _ -> "")
+                   (match mem cache "manifests" with
+                     | `Null -> ""
+                     | m -> Printf.sprintf ", %d manifests" (int_of m))));
+        if bool_of (mem d "domainReadOnly") then row 2 "read-only" "yes";
+        (* The name this client publishes under. Silent when it is the machine's,
          which is the default and says nothing. *)
-        (match str (mem d "clientName") with
-        | "" -> ()
-        | n when n = host -> ()
-        | n -> row 2 "client name" n);
-      (* Silent when there is nothing owed, which is the normal state. *)
-      let wal = mem d "wal" in
-      if int_of (mem wal "pending") > 0 then (
-        let part name =
-          match int_of (mem wal name) with
-            | 0 -> None
-            | n -> Some (Printf.sprintf "%d %s" n name)
-        in
-        row 2 "unsynced"
-          (String.concat ", "
-             (List.filter_map part ["intent"; "prepared"; "executed"]));
-        match (int_of (mem wal "stuck"), mem wal "lastError") with
-          | 0, _ | _, `Null -> ()
-          | n, `String detail ->
-              row 2 "stuck" (Printf.sprintf "%d, last: %s" n detail)
-          | _ -> ());
-      List.iter frontend_block (list (mem d "frontends"));
-      List.iter backend_block (list (mem d "backends")))
+          (match str (mem d "clientName") with
+          | "" -> ()
+          | n when n = host -> ()
+          | n -> row 2 "client name" n);
+        (* Silent when there is nothing owed, which is the normal state. *)
+        let wal = mem d "wal" in
+        if int_of (mem wal "pending") > 0 then (
+          let part name =
+            match int_of (mem wal name) with
+              | 0 -> None
+              | n -> Some (Printf.sprintf "%d %s" n name)
+          in
+          row 2 "unsynced"
+            (String.concat ", "
+               (List.filter_map part ["intent"; "prepared"; "executed"]));
+          match (int_of (mem wal "stuck"), mem wal "lastError") with
+            | 0, _ | _, `Null -> ()
+            | n, `String detail ->
+                row 2 "stuck" (Printf.sprintf "%d, last: %s" n detail)
+            | _ -> ());
+        List.iter frontend_block (list (mem d "frontends"));
+        List.iter backend_block (list (mem d "backends"))
+      end)
     domains;
 
   (match processes with

@@ -108,3 +108,47 @@ let () =
            ~traffic:(traffic ~up:0 ~up_rate:0 ~down:0 ~down_rate:0)
            ();
        ])
+
+(* What this incident looked like, as it should have been shown: the main taken
+   out of the rotation and saying so once, the replica carrying the reads and
+   describing itself truthfully. *)
+let replace key value json =
+  match json with
+    | `Assoc fields -> `Assoc ((key, value) :: List.remove_assoc key fields)
+    | other -> other
+
+let () =
+  let held =
+    backend ~name:"http-proxy" ~typ:"http-proxy" ~role:"main" ()
+    |> replace "reachable" (`Bool false)
+    |> replace "latencyMs" `Null |> replace "journal" `Null
+    |> replace "corrupted" `Null
+    |> replace "health"
+         (`Assoc
+            [
+              ("heldUntil", `Float 1758205927.);
+              ("heldUntilLocal", `String "14:32:07");
+              ("heldSeconds", `Float 27.);
+              ("failures", `Int 2);
+              ("reason", `String "HTTP 530: error code: 1033");
+            ])
+  in
+  show "a main held down, with a replica that is not"
+    (domain [held; backend ~name:"gcs" ~typ:"gcs" ~role:"replica" ()]);
+  show "a store that did not answer, which is said once"
+    (domain
+       [
+         backend ~name:"gcs" ~typ:"gcs" ~role:"replica" ()
+         |> replace "reachable" (`Bool false)
+         |> replace "latencyMs" `Null
+         |> replace "error" (`String "no answer within 10s")
+         |> replace "journal" `Null |> replace "corrupted" `Null;
+       ]);
+  let counting = `Assoc [("counting", `Bool true)] in
+  show "a store that answered, its journal still being listed"
+    (domain
+       [
+         backend ~name:"gcs" ~typ:"gcs" ~role:"replica" ()
+         |> replace "journal" counting
+         |> replace "corrupted" counting;
+       ])

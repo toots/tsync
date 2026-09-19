@@ -1,7 +1,7 @@
 probe of a backend that never answers
   reachable false
   error     "no answer within 10s"
-  journal   "no answer within 10s"
+  journal   null
 asked again within the window
   answered at once true
   same finding    true
