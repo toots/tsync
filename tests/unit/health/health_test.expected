@@ -48,6 +48,7 @@ until the next one: ok
 === a hold that has run out, nobody having asked since
 is not a member that is back: ok
 and the next failure says so, with no probe having been asked for: ok
+counted with the ones that took it out, however long ago they were: ok
 
 === one failure long ago, and one now
 are not two in a row: ok
@@ -56,4 +57,4 @@ are not two in a row: ok
 is never out: ok
 and counts as heard from: ok
 
-31 check(s), 0 failure(s)
+32 check(s), 0 failure(s)

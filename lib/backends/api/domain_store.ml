@@ -106,11 +106,12 @@ struct
                   let+ v = ask_member ?probing ~others:(rest <> []) label s f in
                   `Got v)
                 (fun exn ->
-                  (* Said once by whoever found it down, not by every read that
-                     passes it over afterwards. *)
-                  (if Health.is_held (health_of s) then Log.debug else Log.warn)
-                    "domain store %s: %s unavailable (%s); trying next" label
-                    s.name (Printexc.to_string exn);
+                  (* A member going down is said once, by the request that found
+                     it so: the daemon logs at debug, and a line for every read
+                     that passes it over afterwards is one every two seconds. *)
+                  if not (Health.is_down (health_of s)) then
+                    Log.warn "domain store %s: %s unavailable (%s); trying next"
+                      label s.name (Printexc.to_string exn);
                   Io.return (`Err exn))
             in
             match outcome with

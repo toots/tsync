@@ -88,7 +88,8 @@ let lost t reason =
     let at = now () in
     t.sampled <- true;
     t.reason <- reason;
-    if t.consecutive = 0 || at -. t.last_lost > !hold_initial then begin
+    if t.consecutive = 0 || ((not (out t)) && at -. t.last_lost > !hold_initial)
+    then begin
       t.consecutive <- 0;
       t.failing_since <- at
     end;
