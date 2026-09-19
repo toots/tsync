@@ -596,15 +596,22 @@ let () =
      let* () = F.mkdir (Lk.dir "after") in
      Shaky.refuse_next ~with_:Backend.Not_writable 1;
      Mq.set_paused false;
+     (* A publish files its marker and then drops its record, so "after" on the
+        store and "after" no longer owed are two moments: both are waited for,
+        or the count taken between them still holds the one that just landed. *)
      let* passed =
        until_io (fun () ->
-           let+ names = root_markers () in
-           List.mem "after" names)
+           let* names = root_markers () in
+           let+ n = owed () in
+           List.mem "after" names && n = 1)
      in
      let* n = owed () in
      let* names = root_markers () in
      check "what follows it is published" passed;
      check "it stays owed, and is reported"
+       ~why:(fun () ->
+         Printf.sprintf "owed=%d degraded=%b stuck filed=%b" n (Mq.degraded ())
+           (List.mem "stuck" names))
        (n = 1 && Mq.degraded () && not (List.mem "stuck" names));
      let* () = Mq.rearm () in
      let* published = until_io nothing_owed in
