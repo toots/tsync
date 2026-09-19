@@ -38,6 +38,11 @@ let run () =
     | exception Failure msg ->
         prerr_endline ("tsync: " ^ msg);
         exit 1
+    (* What a store or the link to it said, in the drivers' own vocabulary, which
+       is already a sentence for whoever ran the command. *)
+    | exception (Retry.Failed _ as exn) ->
+        prerr_endline ("tsync: " ^ Retry.reason exn);
+        exit 1
     | exception exn ->
         (* Matches what cmdliner's own catch prints. *)
         Printf.eprintf "tsync: internal error, uncaught exception:\n%s\n"

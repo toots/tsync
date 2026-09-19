@@ -61,7 +61,10 @@ struct
 
   let iter_p f xs = Io.iter_p f xs
 
+  module Guard = Write_guard.Over (Io) (Clock)
+
   module Make (C : Conf.S with type 'a io = 'a Io.t) = struct
+    module Guard = Guard.For (C)
     module L = Chunk_layout.Make (C)
     module Space = Space.Make (C)
     module B = (val C.store : C.Store)
@@ -488,6 +491,11 @@ struct
       map_s
         (fun (m : (module C.Store) Backend.member) ->
           let (module T : C.Store) = m.Backend.backend in
+          let* () =
+            Guard.ensure
+              ~what:("hand deletes to " ^ m.Backend.name ^ " again")
+              m
+          in
           let* entries = T.list_prefix ~prefix:L.gc_jobs_prefix () in
           let jobs =
             List.filter
@@ -833,6 +841,9 @@ struct
           filter_map_s
             (fun (m : (module C.Store) Backend.member) ->
               let (module T : C.Store) = m.Backend.backend in
+              let* () =
+                Guard.ensure ~what:("delete chunks from " ^ m.Backend.name) m
+              in
               let* queued =
                 T.discard ~chunk_prefix:C.chunk_prefix
                   ~run:(Chunk_layout.gc_run_name s.started)

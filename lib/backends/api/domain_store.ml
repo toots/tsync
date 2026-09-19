@@ -14,6 +14,7 @@ module Over
     (Drain : DRAIN with type 'a io := 'a Io.t) =
 struct
   module Dt = Deferred.Over (Io) (Queues) (Lock)
+  module Guard = Write_guard.State (Io)
   module Wait = Health_wait.Make (Io)
 
   module type Store = Backend.S with type 'a io := 'a Io.t
@@ -346,8 +347,20 @@ struct
          [tsync data-integrity --verify] asks every configured member instead,
          which is what covers one that holds chunks nobody reads yet. *)
       let verify_all ~chunk_prefix () =
+        (* A pass is published as objects in the store it checks, which for a
+           copy is a write like any other. *)
+        let asked =
+          match
+            Guard.state
+              (List.map
+                 (fun s -> Backend.member ~role:`Main ~name:s.name s.backend)
+                 mains)
+          with
+            | `Ok -> inners
+            | `Offline _ -> writers
+        in
         let+ answers =
-          map_s (fun (module B : Store) -> B.verify_all ~chunk_prefix ()) inners
+          map_s (fun (module B : Store) -> B.verify_all ~chunk_prefix ()) asked
         in
         let queued =
           List.fold_left

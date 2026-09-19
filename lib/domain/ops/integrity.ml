@@ -76,8 +76,11 @@ struct
 
   let iter_p f xs = Io.iter_p f xs
 
+  module Guard = Write_guard.Over (Io) (Clock)
+
   module Make (C : Conf.S with type 'a io = 'a Io.t) = struct
     module Cor = Markers.Make (C)
+    module Guard = Guard.For (C)
     module L = Chunk_layout.Make (C)
     module Tree = Tree.Make (C)
     module St = Store.Make (C)
@@ -319,6 +322,9 @@ struct
         map_s
           (fun (m : (module C.Store) Backend.member) ->
             let (module B : C.Store) = m.Backend.backend in
+            let* () =
+              Guard.ensure ~what:("queue a verify pass on " ^ m.Backend.name) m
+            in
             let+ a = B.verify_all ~chunk_prefix:C.chunk_prefix () in
             match a with
               | `Queued n -> { store = m.Backend.name; queued = Some n }
@@ -383,7 +389,11 @@ struct
             let (module Dst : C.Store) = m.Backend.backend in
             let write body =
               if dry_run then Io.return ()
-              else Dst.put ~key:(L.key chunk_key) ~data:body ()
+              else
+                let* () =
+                  Guard.ensure ~what:("repair a chunk on " ^ m.Backend.name) m
+                in
+                Dst.put ~key:(L.key chunk_key) ~data:body ()
             in
             (* Its own copy first: see {!Cleared}. *)
             let* mine = good_body m.Backend.backend chunk_key in

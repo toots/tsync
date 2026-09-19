@@ -16,6 +16,7 @@ exception Share_not_found of string
 
 module Over
     (Io : Io.S)
+    (_ : Clock.S with type 'a io := 'a Io.t)
     (_ : Folder_ids.S with type 'a io := 'a Io.t)
     (_ : Layout.OVER with type 'a io := 'a Io.t) : sig
   module Make (C : Conf.S with type 'a io = 'a Io.t) : sig

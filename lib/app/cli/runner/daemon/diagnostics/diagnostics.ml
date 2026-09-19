@@ -129,43 +129,34 @@ module Make (C : Conf_lwt.S) = struct
 
   let int_opt = function Some n -> `Int n | None -> `Null
 
-  (* Deadline for the whole answer, retries included: a backend's own ladder
-     backs off to 20s, which is right for work that must land and wrong for a
-     health check the first round trip already answered. *)
-  let probe_timeout = 10.
+  (* A listing's own deadline, retries included: it is as long as what it lists,
+     which a probe of one small object is not. *)
+  let listing_timeout = 10.
 
   let unreachable exn =
-    let detail =
-      match exn with
-        | exn when Io_lwt.Clock.is_timeout exn ->
-            Printf.sprintf "no answer within %.0fs" probe_timeout
-        | exn -> Printexc.to_string exn
-    in
-    `String detail
+    `String
+      (if Io_lwt.Clock.is_timeout exn then
+         Printf.sprintf "no answer within %.0fs" listing_timeout
+       else Printexc.to_string exn)
 
-  (* Fetching the cursor — one small object at a known key — is the whole probe:
-     any answer, including a miss, means the store is reachable. Deliberately not
-     a listing: a [local] backend walks its whole tree before honouring
-     [max_keys]. The body comes back too, since the journal section wants it. *)
-  let probe (module B : Backend_lwt.Store) =
-    let t0 = Unix.gettimeofday () in
-    Lwt.catch
-      (fun () ->
-        let+ cursor =
-          Lwt_unix.with_timeout probe_timeout (fun () ->
-              B.get_opt ~key:C.cursor_key ())
-        in
-        let ms = 1000. *. (Unix.gettimeofday () -. t0) in
-        ( [("reachable", `Bool true); ("latencyMs", `Float ms); ("error", `Null)],
-          cursor ))
-      (fun exn ->
-        Lwt.return
+  (* The cursor body comes back too, since the journal section wants it. *)
+  let probe store =
+    let+ answered = Write_guard_lwt.probe store ~cursor_key:C.cursor_key in
+    match answered with
+      | Ok { Write_guard_lwt.seconds; cursor } ->
+          ( [
+              ("reachable", `Bool true);
+              ("latencyMs", `Float (1000. *. seconds));
+              ("error", `Null);
+            ],
+            cursor )
+      | Error why ->
           ( [
               ("reachable", `Bool false);
               ("latencyMs", `Null);
-              ("error", unreachable exn);
+              ("error", `String why);
             ],
-            None ))
+            None )
 
   (* [behind] is what a sync pass would still have to do, our own entries
      excluded.
@@ -179,7 +170,7 @@ module Make (C : Conf_lwt.S) = struct
     Lwt.catch
       (fun () ->
         let+ entries =
-          Lwt_unix.with_timeout probe_timeout (fun () ->
+          Lwt_unix.with_timeout listing_timeout (fun () ->
               B.list_prefix ~prefix:C.journal_prefix ())
         in
         let my_uuid = J.client_uuid () in
@@ -229,7 +220,7 @@ module Make (C : Conf_lwt.S) = struct
     Lwt.catch
       (fun () ->
         let+ found =
-          Lwt_unix.with_timeout probe_timeout (fun () ->
+          Lwt_unix.with_timeout listing_timeout (fun () ->
               Cor.member_entries ~max_keys:(corrupted_sample + 1) m)
         in
         match found with

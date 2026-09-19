@@ -3,6 +3,7 @@ exception Share_not_found of string
 
 module Over
     (Io : Io.S)
+    (Clock : Clock.S with type 'a io := 'a Io.t)
     (Folder_ids : Folder_ids.S with type 'a io := 'a Io.t)
     (Inode_layout : Layout.OVER with type 'a io := 'a Io.t) =
 struct
@@ -11,7 +12,10 @@ struct
   let return_ok x = Io.return (Ok x)
   let return_error e = Io.return (Error e)
 
+  module Guard = Write_guard.Over (Io) (Clock)
+
   module Make (C : Conf.S with type 'a io = 'a Io.t) = struct
+    module Guard = Guard.For (C)
     module Lk = Logical_key.Make (C)
     module L = Inode_layout.Make (C)
     module R = (val C.store : C.Store)
@@ -37,7 +41,12 @@ struct
             let (module Bk : C.Store) = m.Backend.backend in
             let* caps = Bk.capabilities ~prefix:C.domain_prefix () in
             match caps.Backend.share_url with
-              | Some url -> Io.return ((module Bk : C.Store), url)
+              | Some url ->
+                  (* Both callers write to what this answers. *)
+                  let+ () =
+                    Guard.ensure ~what:("keep shares on " ^ m.Backend.name) m
+                  in
+                  ((module Bk : C.Store), url)
               | None -> find rest)
       in
       let readable, rest =
