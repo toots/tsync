@@ -102,6 +102,9 @@ let purge (_ : (module Conf_lwt.S)) _args =
     Sys.remove marker;
     print_endline "TsyncApp is not running: skipping domain unregistration")
   else if not (wait 60) then (
+    (* Left behind, it would have the app unregister everything at each launch
+       long after this command gave up. *)
+    (try Sys.remove marker with Sys_error _ -> ());
     Printf.eprintf
       "purge failed: TsyncApp did not unregister its domains (see Console for \
        org.feverdreamtv.tsync)\n";

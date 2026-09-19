@@ -198,6 +198,10 @@ struct DaemonClient: Sendable {
         guard fd >= 0 else {
             throw DaemonError.transport("cannot create socket")
         }
+        // A daemon restarting mid-request is an error to report, and the
+        // default SIGPIPE would end this process instead.
+        var on: Int32 = 1
+        setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
         var addr = sockaddr_un()
         addr.sun_family = sa_family_t(AF_UNIX)
         let capacity = MemoryLayout.size(ofValue: addr.sun_path)
@@ -250,7 +254,10 @@ struct DaemonClient: Sendable {
                 if let nl = buffer.firstIndex(of: UInt8(ascii: "\n")) {
                     let line = buffer[buffer.startIndex..<nl]
                     buffer.removeSubrange(buffer.startIndex...nl)
-                    return String(data: line, encoding: .utf8) ?? ""
+                    // Lossy, never empty: the daemon passes a name's bytes
+                    // through as they are, and one that is not UTF-8 should
+                    // cost that item and not the whole reply.
+                    return String(decoding: line, as: UTF8.self)
                 }
                 var chunk = [UInt8](repeating: 0, count: 8192)
                 let n = recv(fd, &chunk, chunk.count, 0)
@@ -307,12 +314,14 @@ struct DaemonClient: Sendable {
 
     // MARK: Events
 
-    /// Subscribe to this domain's events, calling `onEvent` for each until the
-    /// connection drops. Blocking; run it on its own thread.
+    /// Subscribe to this domain's events, calling `onSubscribed` once the daemon
+    /// has accepted and `onEvent` for each event until the connection drops.
+    /// Blocking; run it on its own thread.
     ///
     /// The write half stays open: the daemon reads end-of-input as the subscriber
     /// going away, so half-closing would end the subscription immediately.
-    func subscribe(onEvent: (DaemonEvent) -> Void) throws {
+    func subscribe(onSubscribed: () -> Void = {},
+                   onEvent: (DaemonEvent) -> Void) throws {
         let fd = try Self.connect(to: socketPath)
         defer { close(fd) }
         let request = DaemonRequest(action: "subscribe", domain: domain)
@@ -328,6 +337,7 @@ struct DaemonClient: Sendable {
             throw DaemonError.remote(code: response.code ?? "internal",
                                      message: response.error ?? "subscribe refused")
         }
+        onSubscribed()
         while let line = try reader.next() {
             if line.isEmpty { continue }
             if let event = try? JSONDecoder().decode(DaemonEvent.self,

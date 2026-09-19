@@ -2,6 +2,7 @@ import AppKit
 import FileProvider
 import Foundation
 import OSLog
+import UniformTypeIdentifiers
 
 private let log = Logger(subsystem: "org.feverdreamtv.tsync", category: "Extension")
 
@@ -101,23 +102,18 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension,
             }
             defer { poller.cancel() }
             do {
-                // The system takes ownership of the file, but this process may
-                // not move one into that directory (EPERM, on locally signed and
-                // notarised builds alike), so the daemon assembles it in place.
-                guard let manager = NSFileProviderManager(for: domain),
-                      let temporary = try? manager.temporaryDirectoryURL() else {
-                    throw DaemonError.transport("no temporary directory for domain")
+                let (destination, item) = try await assembled { destination in
+                    try await client.ensureCached(ref: ref, destination: destination.path)
+                    try Task.checkCancellation()
+                    return try await resolve(itemIdentifier)
                 }
-                let destination = temporary.appendingPathComponent(UUID().uuidString)
-                try await client.ensureCached(ref: ref, destination: destination.path)
-                try Task.checkCancellation()
                 // The last poll lands short of the end, and a bar vanishing at
                 // 90% reads as an abandoned transfer.
                 poller.cancel()
                 if progress.totalUnitCount > 0 {
                     progress.completedUnitCount = progress.totalUnitCount
                 }
-                completionHandler(destination, try await resolve(itemIdentifier), nil)
+                completionHandler(destination, item, nil)
             } catch is CancellationError {
                 completionHandler(nil, nil, CocoaError(.userCancelled))
             } catch {
@@ -161,17 +157,14 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension,
                 let range = PartialRange.aligned(covering: requestedRange,
                                                  alignment: alignment,
                                                  documentSize: item.documentSize?.int64Value ?? 0)
-                // Same EPERM constraint as the whole-file path.
-                guard let manager = NSFileProviderManager(for: domain),
-                      let temporary = try? manager.temporaryDirectoryURL() else {
-                    throw DaemonError.transport("no temporary directory for domain")
+                let (destination, served) = try await assembled { destination in
+                    let served = try await client.fetchRange(ref: ref,
+                                                             destination: destination.path,
+                                                             offset: Int64(range.location),
+                                                             length: Int64(range.length))
+                    try Task.checkCancellation()
+                    return served
                 }
-                let destination = temporary.appendingPathComponent(UUID().uuidString)
-                let served = try await client.fetchRange(ref: ref,
-                                                         destination: destination.path,
-                                                         offset: Int64(range.location),
-                                                         length: Int64(range.length))
-                try Task.checkCancellation()
                 progress.completedUnitCount = progress.totalUnitCount
                 completionHandler(destination, item, served, [], nil)
             } catch is CancellationError {
@@ -212,7 +205,11 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension,
             let name = itemTemplate.filename
             let pending = unsupported(fields)
             do {
+                // A package (.rtfd, .logicx, .app) is a directory whose type only
+                // conforms to one, and a flat file named like one brings contents.
                 let isDirectory = itemTemplate.contentType == .folder
+                    || (url == nil
+                        && itemTemplate.contentType?.conforms(to: .directory) == true)
                 // A reimport replays everything on disk through this call, and
                 // re-writing a file that is already there would re-upload the
                 // whole domain. A directory needs no such guard: mkdir answers
@@ -422,6 +419,26 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension,
             return TsyncItem.make(item, readOnly: readOnly)
         } catch let error as DaemonError where error.isNotFound {
             return nil
+        }
+    }
+
+    /// A path for `fill` to have the daemon write, removed when `fill` fails:
+    /// the system takes over only a file it is handed.
+    ///
+    /// This process may not move a file into that directory (EPERM, on locally
+    /// signed and notarised builds alike), so the daemon assembles it in place.
+    private func assembled<Filled>(_ fill: (URL) async throws -> Filled)
+        async throws -> (URL, Filled) {
+        guard let manager = NSFileProviderManager(for: domain),
+              let temporary = try? manager.temporaryDirectoryURL() else {
+            throw DaemonError.transport("no temporary directory for domain")
+        }
+        let destination = temporary.appendingPathComponent(UUID().uuidString)
+        do {
+            return (destination, try await fill(destination))
+        } catch {
+            try? FileManager.default.removeItem(at: destination)
+            throw error
         }
     }
 

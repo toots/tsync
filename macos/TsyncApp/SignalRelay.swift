@@ -28,10 +28,12 @@ final class SignalRelay: @unchecked Sendable {
             var backoff = 1.0
             while !stopped {
                 do {
-                    try client.subscribe { [self] event in
+                    // Events are not replayed, so whatever happened while no
+                    // subscription was up is caught by asking once it is.
+                    try client.subscribe(onSubscribed: { [self] in
                         backoff = 1.0
-                        handle(event)
-                    }
+                        signalWorkingSet(because: "subscribed")
+                    }, onEvent: { [self] event in handle(event) })
                 } catch {
                     log.debug("subscribe: \(error, privacy: .public)")
                 }
@@ -44,19 +46,24 @@ final class SignalRelay: @unchecked Sendable {
 
     func stop() { stopped = true }
 
+    /// A replicated extension may signal only the working set; the system
+    /// propagates from there. Signalling a specific item is ignored.
+    private func signalWorkingSet(because reason: String) {
+        guard let manager = NSFileProviderManager(for: domain) else { return }
+        log.debug("signalling working set for \(reason, privacy: .public)")
+        manager.signalEnumerator(for: .workingSet) { error in
+            if let error { log.error("signalEnumerator: \(error, privacy: .public)") }
+        }
+        // `serverUnreachable` latches the domain off until cleared, so clear
+        // it on any news or a transient outage sticks.
+        manager.signalErrorResolved(NSFileProviderError(.serverUnreachable)) { _ in }
+    }
+
     private func handle(_ event: DaemonEvent) {
         guard let manager = NSFileProviderManager(for: domain) else { return }
         switch event.event {
         case "changed", "resync":
-            // A replicated extension may signal only the working set; the system
-            // propagates from there. Signalling a specific item is ignored.
-            log.debug("signalling working set for \(event.event, privacy: .public)")
-            manager.signalEnumerator(for: .workingSet) { error in
-                if let error { log.error("signalEnumerator: \(error, privacy: .public)") }
-            }
-            // `serverUnreachable` latches the domain off until cleared, so clear
-            // it on any news or a transient outage sticks.
-            manager.signalErrorResolved(NSFileProviderError(.serverUnreachable)) { _ in }
+            signalWorkingSet(because: event.event)
 
         case "evict":
             guard let ref = event.ref else { return }
