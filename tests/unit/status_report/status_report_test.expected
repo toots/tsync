@@ -253,3 +253,34 @@ Domain beta
 Processes
   fuse        pid 4242    up 1h 2m     0.3% cpu     1.0 MB rss   alpha, beta
     traffic          up 2.0 KB (0 B/s), down 4.0 KB (0 B/s), 5 chunks hashed (0.0/s)
+########## nobody answered ##########
+tsync — 2 domains, 0 processes
+
+Domain alpha
+  Frontend fuse
+    NOT ANSWERING    /run/tsync-alpha.sock: timed out
+  Frontend http-proxy
+    NOT ANSWERING    /run/tsync-alpha.sock: timed out
+
+Domain beta
+  Frontend fuse
+    NOT ANSWERING    /run/tsync-beta.sock: timed out
+########## nobody was asked ##########
+tsync — 0 domains, 0 processes
+########## a domain whose main is held down ##########
+tsync on testhost — 1 domain, 1 process, up 1h 2m
+
+Domain alpha
+  MAIN OFFLINE     the main "http-proxy" is not online (held down for 27s after 2 failures (HTTP 530)); writes wait for it, and no replica is written meanwhile
+  settings         versioning on, symlinks keep, chunk 8.0 MB (default), cache chunk 16.0 MB
+  concurrency      4 uploads, 4 chunk buffers, 8 downloads
+  cache            2 chunks, 8.0 KB of unlimited, 4.0 KB pinned
+  Frontend fuse
+    NOT ANSWERING    /run/tsync-alpha.sock: daemon reported no frontend
+  Backend store (local, main)  path /srv/tsync
+    reachable        yes (1 ms)
+    journal          12 entries, 0 to apply
+
+Processes
+  fuse        pid 4242    up 1h 2m     0.3% cpu     1.0 MB rss   alpha
+    traffic          up 2.0 KB (0 B/s), down 4.0 KB (0 B/s), 5 chunks hashed (0.0/s)

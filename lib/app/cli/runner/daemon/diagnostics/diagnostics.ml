@@ -131,7 +131,8 @@ module Make (C : Conf_lwt.S) = struct
 
   (* A listing's own deadline, retries included: it is as long as what it lists,
      which a probe of one small object is not. *)
-  let listing_timeout = 10.
+  let listing_timeout = 30.
+  let listing_grace = ref 2.
 
   let unreachable exn =
     `String
@@ -398,30 +399,82 @@ module Make (C : Conf_lwt.S) = struct
   let store_window = 5.
   let store_states = Hashtbl.create 4
 
+  let health_of (m : (module Backend_lwt.Store) Backend.member) =
+    let module B = (val m.Backend.backend : Backend_lwt.Store) in
+    B.health
+
+  (* What the listings of a store say, or that they are still being made: a
+     journal is listed whole and takes as long as it is, which whoever asked how
+     the store is doing should not have to sit through. *)
+  let listed p =
+    match Lwt.state p with
+      | Lwt.Return answers -> answers
+      | Lwt.Sleep ->
+          let counting = `Assoc [("counting", `Bool true)] in
+          (counting, counting)
+      | Lwt.Fail exn ->
+          let failed = `Assoc [("error", unreachable exn)] in
+          (failed, failed)
+
   let store_state (m : (module Backend_lwt.Store) Backend.member) =
     let name = m.Backend.name in
     let now = Unix.gettimeofday () in
     let refresh () =
-      let p =
-        let* probed, cursor = probe m.Backend.backend in
-        let cursor = Option.map Bigstring.to_string cursor in
-        let* jrnl = journal ~cursor m.Backend.backend in
-        let+ corrupt = corrupted m in
-        (probed, jrnl, corrupt)
+      let probing = probe m.Backend.backend in
+      let listing =
+        let* probed, cursor = probing in
+        if List.assoc "reachable" probed <> `Bool true then
+          Lwt.return (`Null, `Null)
+        else (
+          let cursor = Option.map Bigstring.to_string cursor in
+          let* jrnl = journal ~cursor m.Backend.backend in
+          let+ corrupt = corrupted m in
+          (jrnl, corrupt))
       in
-      Hashtbl.replace store_states name (now, p);
-      p
+      Hashtbl.replace store_states name (now, probing, listing);
+      (probing, listing)
     in
-    match Hashtbl.find_opt store_states name with
-      | None -> refresh ()
-      | Some (at, p) ->
-          if now -. at >= store_window && Lwt.state p <> Lwt.Sleep then
-            ignore (refresh ());
-          p
+    let probing, listing =
+      match Hashtbl.find_opt store_states name with
+        | None -> refresh ()
+        | Some (at, probing, listing) ->
+            if
+              now -. at >= store_window
+              && Lwt.state probing <> Lwt.Sleep
+              && Lwt.state listing <> Lwt.Sleep
+            then ignore (refresh ());
+            (probing, listing)
+    in
+    let* probed, _ = probing in
+    (* Waited for as long as a listing ordinarily takes and no longer, so the
+       usual answer is whole and a slow store costs the asker only this. *)
+    let+ () =
+      Lwt.choose
+        [
+          Lwt.catch (fun () -> Lwt.map ignore listing) (fun _ -> Lwt.return_unit);
+          Lwt_unix.sleep !listing_grace;
+        ]
+    in
+    let jrnl, corrupt = listed listing in
+    (probed, jrnl, corrupt)
+
+  (* A member held down is one whose state is known, and a probe of it would
+     spend the deadline finding that out again. *)
+  let held_state m =
+    ( [
+        ("reachable", `Bool false);
+        ("latencyMs", `Null);
+        ("error", `String (Health.describe (health_of m)));
+      ],
+      `Null,
+      `Null )
 
   let member_json ~totals ~exact ~reload
       (m : (module Backend_lwt.Store) Backend.member) =
-    let+ probed, jrnl, corrupt = store_state m in
+    let+ probed, jrnl, corrupt =
+      if Health.is_held (health_of m) then Lwt.return (held_state m)
+      else store_state m
+    in
     (* Synchronous: reads the last sample and leaves any walk it started running
        behind us. *)
     let tot =
@@ -440,7 +493,9 @@ module Make (C : Conf_lwt.S) = struct
             `Assoc (List.map (fun (k, v) -> (k, `String v)) m.Backend.config) )
        :: probed
       @ [("journal", jrnl); ("corrupted", corrupt)]
-      @ disk_json m @ Backend.link_json m @ tot)
+      @ disk_json m @ Backend.link_json m
+      @ Health.json (health_of m)
+      @ tot)
 
   let symlink_policy =
     match C.symlink_policy with
@@ -547,8 +602,14 @@ module Make (C : Conf_lwt.S) = struct
     let+ backends =
       Lwt_list.map_p (member_json ~totals ~exact ~reload) C.members
     in
+    (* After the probes, which are how this process comes to know. *)
+    let writes =
+      match Write_guard_lwt.state C.members with
+        | `Ok -> []
+        | `Offline why -> [("mainOffline", `String why)]
+    in
     `Assoc
-      (config_json @ extra
+      (config_json @ extra @ writes
       @ [
           ("cache", cache);
           ("wal", wal);

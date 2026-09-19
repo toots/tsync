@@ -1692,6 +1692,14 @@
   (alias runtest)
   (action (run ./status_cost.exe))))
 
+(subdir unit/status_held
+ (alias
+  (name default)
+  (deps status_held.exe))
+ (rule
+  (alias runtest)
+  (action (run ./status_held.exe))))
+
 (subdir unit/status_report
  (alias
   (name default)

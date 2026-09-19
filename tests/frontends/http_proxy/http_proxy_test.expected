@@ -79,10 +79,8 @@ stop: {"ok":true} closes=true asked=1
           "reachable": false,
           "latencyMs": null,
           "error": "Backend.Backend_error(\"connection refused\")",
-          "journal": {
-            "error": "Backend.Backend_error(\"connection refused\")"
-          },
-          "corrupted": { "checked": false },
+          "journal": null,
+          "corrupted": null,
           "deferred": { "queued": 7, "inFlight": 2, "degraded": true }
         }
       ]
@@ -166,8 +164,6 @@ Domain statusdom
     disk             100.0 GB free of 460.4 GB (78% used)
   Backend archive (http-proxy, backfill)  url https://nas.example:8443
     UNREACHABLE      Backend.Backend_error("connection refused")
-    journal          error: Backend.Backend_error("connection refused")
-    corrupted        not checked — no verifier for this store
     behind           7 queued, 2 in flight — DEGRADED, run tsync mirror
 
 Processes
@@ -198,8 +194,6 @@ Domain statusdom
     disk             100.0 GB free of 460.4 GB (78% used)
   Backend archive (http-proxy, backfill)  url https://nas.example:8443
     UNREACHABLE      Backend.Backend_error("connection refused")
-    journal          error: Backend.Backend_error("connection refused")
-    corrupted        not checked — no verifier for this store
     behind           7 queued, 2 in flight — DEGRADED, run tsync mirror
 
 Processes
@@ -226,8 +220,6 @@ Domain statusdom
     holds            0 manifests, ~4096 chunks, ~20.0 KB, as of 0m 0s ago
   Backend archive (http-proxy, backfill)  url https://nas.example:8443
     UNREACHABLE      Backend.Backend_error("connection refused")
-    journal          error: Backend.Backend_error("connection refused")
-    corrupted        not checked — no verifier for this store
     behind           7 queued, 2 in flight — DEGRADED, run tsync mirror
     holds            could not count: Backend.Backend_error("connection refused")
 
@@ -258,8 +250,6 @@ Domain statusdom
     holds            0 manifests, 4096 chunks, 20.0 KB, as of 0m 0s ago
   Backend archive (http-proxy, backfill)  url https://nas.example:8443
     UNREACHABLE      Backend.Backend_error("connection refused")
-    journal          error: Backend.Backend_error("connection refused")
-    corrupted        not checked — no verifier for this store
     behind           7 queued, 2 in flight — DEGRADED, run tsync mirror
     holds            could not count: Backend.Backend_error("connection refused")
 

@@ -76,8 +76,10 @@ let main () =
     (Yojson.Safe.to_string (member "reachable" wedged));
   Printf.printf "  error     %s\n"
     (Yojson.Safe.to_string (member "error" wedged));
+  (* Said once: a store that did not answer has no journal to describe, and is
+     not asked for one at another deadline's cost. *)
   Printf.printf "  journal   %s\n"
-    (Yojson.Safe.to_string (member "error" (member "journal" wedged)));
+    (Yojson.Safe.to_string (member "journal" wedged));
   (* A page redrawn within the window is served what the first report found,
      rather than waiting out the deadline again: the same wedged store, asked
      again straight away, answers at once. *)

@@ -25,3 +25,19 @@
     journal          135 entries, 0 to apply
     traffic          up 0 B (0 B/s), down 0 B (0 B/s)
 
+=== a main held down, with a replica that is not
+  Backend http-proxy (http-proxy, main)  bucket tsync-http-proxy
+    HELD DOWN        until 14:32:07, after 2 failures — HTTP 530: error code: 1033
+  Backend gcs (gcs, replica)  bucket tsync-gcs
+    reachable        yes (138 ms)
+    journal          135 entries, 0 to apply
+
+=== a store that did not answer, which is said once
+  Backend gcs (gcs, replica)  bucket tsync-gcs
+    UNREACHABLE      no answer within 10s
+
+=== a store that answered, its journal still being listed
+  Backend gcs (gcs, replica)  bucket tsync-gcs
+    reachable        yes (138 ms)
+    journal          counting in the background
+
