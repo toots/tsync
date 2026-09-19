@@ -23,6 +23,11 @@ type answer = {
 
     [frontend] is the name the caller expects to find there, used to say which
     frontend is silent when one is; [""] when the caller does not know. *)
+(** The deadline for asking a process that may be probing its stores: a probe's
+    own, and a little. {!ask} defaults to the IPC's, which suits a process that
+    probes nothing. *)
+val cold_timeout : unit -> float
+
 val ask :
   ?timeout:float ->
   ?arg:string ->
