@@ -118,7 +118,7 @@ while a file read here is served: ok
 ours is published, and theirs applied: ok
 
 === a peer's rename announces both the name it left and the one it took
-  announced: tsync/testdom/manifests/announced.txt, tsync/testdom/manifests/announced2.txt, tsync/testdom/manifests/theirs-held
+  announced: tsync/testdom/manifests/announced.txt, tsync/testdom/manifests/announced2.txt
 both the source and the destination are named: ok
 
 49 check(s), 0 failure(s)

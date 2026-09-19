@@ -34,13 +34,10 @@ module Make (C : Conf_lwt.S) = struct
      code path rather than two. *)
   let announce ops =
     List.iter
-      (fun op ->
-        List.iter
-          (fun rel ->
-            Change_notice.send ~domain:C.domain_name ~sockets:[C.socket_path]
-              (Logical_key.to_string (Lk.file rel)))
-          (Journal.keys_of_op op))
-      ops
+      (fun rel ->
+        Change_notice.send ~domain:C.domain_name ~sockets:[C.socket_path]
+          (Logical_key.to_string (Lk.file rel)))
+      (Journal.keys_of_ops ops)
 
   let note_applied entry_key ops =
     Applied_entries.note ~cache_root:C.cache_root ~domain_name:C.domain_name
