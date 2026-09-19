@@ -263,6 +263,20 @@
   (action
    (diff proxy_watch_client.expected proxy_watch_client.output))))
 
+(subdir backends/write_guard
+ (alias
+  (name default)
+  (deps write_guard_test.exe))
+ (rule
+  (alias runtest)
+  (target write_guard_test.output)
+  (action
+   (with-stdout-to write_guard_test.output (ignore-stderr (run ./write_guard_test.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff write_guard_test.expected write_guard_test.output))))
+
 (subdir backends/writes_in_flight
  (alias
   (name default)

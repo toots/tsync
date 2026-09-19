@@ -7,6 +7,7 @@ type dest_stats = {
 
 module Over
     (Io : Io.S)
+    (Clock : Clock.S with type 'a io := 'a Io.t)
     (Spool : Listing.SPOOL with type 'a io := 'a Io.t)
     (Pools : Bounded.S with type 'a io := 'a Io.t)
     (Tree : Inode_tree.OVER with type 'a io := 'a Io.t and type pool := Pools.t)
@@ -21,7 +22,10 @@ struct
 
   let iter_p f xs = Io.iter_p f xs
 
+  module Guard = Write_guard.Over (Io) (Clock)
+
   module Make (C : Conf.S with type 'a io = 'a Io.t) = struct
+    module Guard = Guard.For (C)
     module Lk = Logical_key.Make (C)
     module Space = Space.Make (C)
     module L = Chunk_layout.Make (C)
@@ -410,6 +414,7 @@ struct
           |> List.filter (fun (m : (module C.Store) Backend.member) ->
               m.Backend.name <> src.name)
           |> map_s (fun (m : (module C.Store) Backend.member) ->
+              let* () = Guard.ensure ~what:("copy to " ^ m.Backend.name) m in
               let* held =
                 match listed_scope with
                   | None -> Io.return None
