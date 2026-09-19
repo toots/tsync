@@ -30,13 +30,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func registerDomains() async {
-        let domainNames: [String]
-        if let config = try? Config.load() {
-            domainNames = config.domains.map(\.name)
-        } else {
-            log.error("config not found or invalid, no domains will be registered")
-            domainNames = []
-        }
+        let config = try? Config.load()
+        let domainNames = config?.domains.map(\.name) ?? []
 
         // Ahead of anything that can fail or return early, so a failure shows
         // up in the menu bar instead of leaving no interface at all.
@@ -44,29 +39,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         if await purgeIfRequested() { return }
 
+        // Reconciling against no names would remove every domain and the local
+        // copies with it, and a config that cannot be read names nothing.
+        guard config != nil else {
+            log.error("config not found or invalid, domains left as they are")
+            await startRelays()
+            return
+        }
+
         let existing: [NSFileProviderDomain]
+        var listed = true
         do {
             existing = try await retryingWhileInvalidating { try await NSFileProviderManager.domains() }
         } catch {
             log.error("domains() failed: \(error, privacy: .public)")
             existing = []
+            listed = false
         }
 
         let configured = Set(domainNames.map(domainIdentifier))
         let reset = consumeResetMarker().union(await staleIdentityScheme(existing))
 
-        for domain in existing
-        where !configured.contains(domain.identifier.rawValue)
-            || reset.contains(domain.identifier.rawValue) {
-            do {
-                try await NSFileProviderManager.remove(domain, mode: .removeAll)
-                log.info("removed domain '\(domain.identifier.rawValue, privacy: .public)'")
-            } catch {
-                log.error("remove '\(domain.identifier.rawValue, privacy: .public)' failed: \(error, privacy: .public)")
-            }
+        let unwanted = existing.filter {
+            !configured.contains($0.identifier.rawValue)
+                || reset.contains($0.identifier.rawValue)
         }
+        let removed = await remove(unwanted)
 
-        let surviving = Set(existing.map(\.identifier.rawValue)).subtracting(reset)
+        let surviving = Set(existing.map(\.identifier.rawValue)).subtracting(removed)
 
         for name in domainNames {
             let identifier = domainIdentifier(name)
@@ -85,8 +85,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        recordIdentityScheme()
+        // A domain still spelling the old identifiers is rebuilt at the next
+        // launch, which recording the scheme now would call off.
+        if listed, removed.count == unwanted.count { recordIdentityScheme() }
         await startRelays()
+    }
+
+    /// The identifiers of the domains that did go.
+    private func remove(_ domains: [NSFileProviderDomain]) async -> Set<String> {
+        var removed: Set<String> = []
+        for domain in domains {
+            let identifier = domain.identifier.rawValue
+            do {
+                try await retryingWhileInvalidating {
+                    try await NSFileProviderManager.remove(domain, mode: .removeAll)
+                }
+                log.info("removed domain '\(identifier, privacy: .public)'")
+                removed.insert(identifier)
+            } catch {
+                log.error("remove '\(identifier, privacy: .public)' failed: \(error, privacy: .public)")
+            }
+        }
+        return removed
     }
 
     /// The system rejects domain calls with `providerNotFound` ("is in the
@@ -150,19 +170,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Markers
 
     /// Written by `tsync fileprovider purge`: unregister every domain, register
-    /// none. The marker is deleted last, which is how the CLI knows the domains
-    /// are gone and the rest can be torn down.
+    /// none. The marker is deleted last and only once every domain is gone,
+    /// which is how the CLI knows the rest can be torn down.
     private func purgeIfRequested() async -> Bool {
         let marker = Config.dataDirURL.appendingPathComponent("fileprovider-purge")
         guard FileManager.default.fileExists(atPath: marker.path) else { return false }
 
-        for domain in (try? await NSFileProviderManager.domains()) ?? [] {
-            do {
-                try await NSFileProviderManager.remove(domain, mode: .removeAll)
-                log.info("purged domain '\(domain.identifier.rawValue, privacy: .public)'")
-            } catch {
-                log.error("purge '\(domain.identifier.rawValue, privacy: .public)' failed: \(error, privacy: .public)")
+        do {
+            let domains = try await retryingWhileInvalidating {
+                try await NSFileProviderManager.domains()
             }
+            guard await remove(domains).count == domains.count else { return true }
+        } catch {
+            log.error("purge: domains() failed: \(error, privacy: .public)")
+            return true
         }
         await LoginItem.unregister()
         try? FileManager.default.removeItem(at: marker)
