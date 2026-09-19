@@ -3,7 +3,7 @@
 
 open Lwt.Syntax
 
-let root = "/tmp/tsync-pause-test"
+let root = Scratch.dir "pause"
 let store_dir = root ^ "/store"
 
 module C =
@@ -29,24 +29,6 @@ module Sent = struct
 end
 
 module Sq = Sync_lwt.Sync_queue.Make (C) (Sent)
-
-(* Waits for the queue to stop moving rather than for a length of time: on a
-   loaded CI runner 0.2s elapsed before the worker had dequeued, and the report
-   read one item still pending. Pausing is part of what is under test, so this
-   cannot wait for the queue to empty -- while paused it never does. *)
-let settle () =
-  let rec go ~stable ~last ~polls =
-    if polls > 200 then Lwt.return_unit
-      (* ~10s: a queue this stuck is the finding *)
-    else (
-      let now = (Sq.pending (), Sq.paused ()) in
-      let stable = if now = last then stable + 1 else 0 in
-      if stable >= 4 then Lwt.return_unit
-      else
-        let* () = Lwt_unix.sleep 0.05 in
-        go ~stable ~last:now ~polls:(polls + 1))
-  in
-  go ~stable:0 ~last:(-1, false) ~polls:0
 
 (* What a file operation does: the record is written, and then handed to
    whoever sends it. *)
@@ -77,17 +59,17 @@ let () =
 
      Sq.set_paused true;
      let* () = post 1 in
-     let* () = settle () in
+     let* () = Until.held (fun () -> Sq.pending () = 1 && !uploaded = 0) in
      report "posted while paused";
 
      Sq.set_paused false;
-     let* () = settle () in
+     let* () = Until.reached (fun () -> Sq.pending () = 0) in
      report "resumed";
 
      (* [drain] must win over [paused], or shutdown never finishes. *)
      Sq.set_paused true;
      let* () = post 2 in
-     let* () = settle () in
+     let* () = Until.held (fun () -> Sq.pending () = 1 && !uploaded = 1) in
      report "posted while paused again";
      let* () = Sq.drain () in
      report "after drain";

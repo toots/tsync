@@ -35,4 +35,5 @@
   tsync_io_lwt
   tsync_core
   lwt
+  lwt.unix
   unix))

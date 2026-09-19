@@ -4,7 +4,7 @@
 
 open Lwt.Syntax
 
-let root = "/tmp/tsync-queue-bytes-test"
+let root = Scratch.dir "queue-bytes"
 let store_dir = root ^ "/store"
 
 module C =
@@ -30,24 +30,6 @@ module Sent = struct
 end
 
 module Sq = Sync_lwt.Sync_queue.Make (C) (Sent)
-
-(* Waits for the queue to stop moving rather than for a length of time: on a
-   loaded CI runner 0.2s elapsed before the worker had dequeued, and the report
-   read one item still pending. Pausing is part of what is under test, so this
-   cannot wait for the queue to empty -- while paused it never does. *)
-let settle () =
-  let rec go ~stable ~last ~polls =
-    if polls > 200 then Lwt.return_unit
-      (* ~10s: a queue this stuck is the finding *)
-    else (
-      let now = (Sq.pending (), Sq.paused ()) in
-      let stable = if now = last then stable + 1 else 0 in
-      if stable >= 4 then Lwt.return_unit
-      else
-        let* () = Lwt_unix.sleep 0.05 in
-        go ~stable ~last:now ~polls:(polls + 1))
-  in
-  go ~stable:0 ~last:(-1, false) ~polls:0
 
 (* Every upload parks here, so the two a worker holds stay in flight for as long
    as the test needs them to. *)
@@ -120,16 +102,22 @@ let () =
      let* () = post 2 200 in
      let* () = post 3 300 in
      let* () = post 4 400 in
-     let* () = settle () in
+     let* () =
+       Until.held (fun () ->
+           Sq.pending () = 4 && List.length (Sq.uploading ()) = 2)
+     in
      report "4 posted";
 
      Lwt.wakeup_later open_gate ();
-     let* () = settle () in
+     let* () = Until.reached (fun () -> Sq.pending () = 0) in
      report "gate open";
 
      renaming := true;
      let* () = post_dir_rename () in
-     let* () = settle () in
+     let* () =
+       Until.held (fun () ->
+           Sq.pending () = 1 && List.length (Sq.uploading ()) = 1)
+     in
      report "folder in flight";
      Lwt.wakeup_later open_dir_gate ();
 
