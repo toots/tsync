@@ -132,6 +132,9 @@ let () =
     (Health.lost t "HTTP 502" = `Tripped
     && Health.is_held t
     && Health.hold_length t = 2. *. before);
+  check "counted with the ones that took it out, however long ago they were"
+    (Yojson.Safe.Util.member "failures" (List.assoc "health" (Health.json t))
+    = `Int 3);
 
   case "one failure long ago, and one now";
   Health.hold_initial := 0.001;
@@ -147,4 +150,4 @@ let () =
   done;
   check "is never out" (Health.check Health.always_up = `Up);
   check "and counts as heard from" (Health.sampled Health.always_up);
-  report ~expected:31 ()
+  report ~expected:32 ()
