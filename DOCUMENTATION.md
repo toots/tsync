@@ -483,6 +483,25 @@ is missing data that patience will not supply: `tsync mirror --source <main>`.
 Between a write and its target catching up, that write exists only on the mains. With a single
 local `main`, that means only on that machine — which is the trade being made.
 
+### When the main is not there
+
+Reads carry on from a `replica`. A backend that has failed everything asked of it for a second
+or so is taken out of the rotation: a read that was waiting on it goes to the next backend at
+once, and reads after it do not go near it. After thirty seconds one read is spent finding out
+whether it is back, everything else still using the replica; each time it is not, the wait
+doubles, up to five minutes. An answer of any kind, a refusal or a miss included, puts it
+straight back. A backend with nothing behind it is asked whatever is thought of it, being all
+there is. `tsync status` shows a backend in this state as `HELD DOWN`, with until when and why,
+and the domain as `MAIN OFFLINE`.
+
+Writes do not move. A replica is a copy of what the main holds, and written on its own it would
+hold something nobody can check against the source of truth, so a write waits for the main: it
+stays queued on this machine, as it does through any outage, and lands when the main returns.
+The commands that write to a backend by name hold to the same rule — `tsync data-integrity
+--verify` and `--repair`, `tsync gc`, `tsync mirror` and `tsync share` refuse to write to
+anything but a `main` while the main is offline, and say so. Writing *to* the main is always
+allowed, which is how one is refilled: `tsync mirror --source <replica>`.
+
 ### Choosing between `replica` and `backfill`
 
 `replica` is a guarantee, and costs a full copy of every write.
@@ -982,6 +1001,8 @@ what stops syncing.
 | Local cache and remote disagree | `tsync sync --full`. |
 | Daemon state unclear | `tsync status`, `tsync status`, and `tsync logs -f` — [reading the log](#reading-the-log). |
 | One backend of several is misbehaving | `tsync status` — each backend reports its own reachability, journal backlog and how far behind it is. |
+| Reads were failing while one backend was down | With a `replica` they fall over to it within a second or two; `tsync status` shows the dead one as `HELD DOWN`. A file the replica had not caught up on yet is not there to be read until the main returns. |
+| A command says "refusing to … the main … is not online" | Deliberate: nothing but a `main` is written while the main is offline. Once it is back, `tsync mirror --source <replica>` refills it. |
 | A `replica` or `backfill` target is behind | Normal: it catches up on its own, and what it owes survives a restart. `tsync status` says by how much. |
 | A target says `DEGRADED` | Writes were dropped — refused, or queued past all reason: `tsync mirror --source <main>`. |
 | No tray icon on GNOME | Install `gnome-shell-extension-appindicator` and log back in — GNOME has no built-in host. |
