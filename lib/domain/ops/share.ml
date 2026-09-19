@@ -49,6 +49,18 @@ struct
                   ((module Bk : C.Store), url)
               | None -> find rest)
       in
+      (* Asked before any member is asked what it offers: a main that is gone
+         would otherwise be climbed for a minute on the way to being refused. *)
+      let* () =
+        match
+          List.find_opt
+            (fun (m : (module C.Store) Backend.member) ->
+              m.Backend.role <> `Main)
+            C.members
+        with
+          | Some copy -> Guard.ensure ~what:"keep shares on a copy" copy
+          | None -> Io.return ()
+      in
       let readable, rest =
         List.partition
           (fun (m : (module C.Store) Backend.member) -> m.Backend.readable)

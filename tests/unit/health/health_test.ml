@@ -120,10 +120,31 @@ let () =
   Health.expire t;
   check "until the next one" (Health.check t = `Probe);
 
+  case "a hold that has run out, nobody having asked since";
+  let t = Health.create () in
+  blip t;
+  blip t;
+  let before = Health.hold_length t in
+  Health.expire t;
+  check "is not a member that is back"
+    (Health.is_down t && not (Health.is_held t));
+  check "and the next failure says so, with no probe having been asked for"
+    (Health.lost t "HTTP 502" = `Tripped
+    && Health.is_held t
+    && Health.hold_length t = 2. *. before);
+
+  case "one failure long ago, and one now";
+  Health.hold_initial := 0.001;
+  let t = Health.create () in
+  blip t;
+  Unix.sleepf 0.01;
+  check "are not two in a row" (Health.lost t "HTTP 502" = `Up);
+  Health.hold_initial := 30.;
+
   case "a store with no link to lose";
   for _ = 1 to 10 do
     blip Health.always_up
   done;
   check "is never out" (Health.check Health.always_up = `Up);
   check "and counts as heard from" (Health.sampled Health.always_up);
-  report ~expected:28 ()
+  report ~expected:31 ()

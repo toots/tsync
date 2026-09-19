@@ -31,6 +31,7 @@ module Over
     (Io : Io.S)
     (Queues : Durable_queue.S with type 'a io := 'a Io.t)
     (Lock : Lock.S with type 'a io := 'a Io.t)
+    (_ : Clock.S with type 'a io := 'a Io.t)
     (_ : DRAIN with type 'a io := 'a Io.t) : sig
   module Dt : module type of Deferred.Over (Io) (Queues) (Lock)
 

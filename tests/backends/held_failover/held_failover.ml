@@ -45,6 +45,9 @@ let behind link (module Real : Backend_lwt.Store) : (module Backend_lwt.Store) =
     let get_opt ~key () = climbing "get_opt" (Real.get_opt ~key)
     let get ~key () = climbing "get" (Real.get ~key)
 
+    let watch ~key ~last_seen () =
+      climbing "watch" (fun () -> Real.watch ~key ~last_seen ())
+
     let get_many =
       Some
         (fun ~entries () ->
@@ -122,6 +125,12 @@ let () =
      check "and not waited for past the failure that showed it was down"
        ~why:(fun () -> string_of_int !(main_link.attempts))
        (!(main_link.attempts) = !Health.trip_after);
+     (* Long enough for the third attempt to have been made, had the request
+        been left climbing behind the read that gave up on it. *)
+     let* () = Lwt_unix.sleep 1.2 in
+     check "and called back, not left to climb for nobody"
+       ~why:(fun () -> string_of_int !(main_link.attempts))
+       (!(main_link.attempts) = !Health.trip_after);
      main_link.asked := 0;
      let* said =
        Lwt_list.map_s (fun () -> read domain "file") [(); (); (); (); ()]
@@ -145,6 +154,19 @@ let () =
              bodies));
      check "is answered key by key from the replica instead"
        (!(main_link.asked) = 0);
+
+     case "a long poll, once the hold has run out";
+     Health.expire main_link.health;
+     main_link.asked := 0;
+     let (module D : Backend_lwt.Store) = domain in
+     let* () =
+       Lwt.pick
+         [D.watch ~key:(key "file") ~last_seen:None (); Lwt_unix.sleep 0.2]
+     in
+     check "is not what finds out whether the main is back"
+       (!(main_link.asked) = 0);
+     let* (_ : string) = read domain "file" in
+     check "which the next read is" (!(main_link.asked) = 1);
 
      case "the same main with nothing behind it";
      main_link.asked := 0;
@@ -177,4 +199,4 @@ let () =
      check "is not there, which is an answer" (said = "none");
      Scratch.cleanup root;
      Lwt.return_unit);
-  report ~expected:10 ()
+  report ~expected:13 ()

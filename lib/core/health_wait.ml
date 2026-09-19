@@ -1,24 +1,15 @@
-module Make (Io : Io.S) = struct
+module Make (Io : Io.S) (Clock : Clock.S with type 'a io := 'a Io.t) = struct
   let until_held health ~name ~op ask =
-    let answer, resolve = Io.wait () in
-    let settled = ref false in
-    let settle outcome =
-      if not !settled then begin
-        settled := true;
-        Io.wakeup_later resolve outcome
-      end
-    in
-    let watch =
-      Health.on_held health (fun () ->
-          settle (Error (Retry.held ~name ~op health)))
-    in
-    Io.async (fun () ->
-        Io.catch
-          (fun () -> Io.map (fun v -> settle (Ok v)) (ask ()))
-          (fun exn ->
-            settle (Error exn);
-            Io.return ()));
-    Io.bind answer (fun outcome ->
+    let stopped, stop = Io.wait () in
+    let watch = Health.on_held health (fun () -> Io.wakeup_later stop ()) in
+    Io.finalize
+      (fun () ->
+        Clock.pick
+          [
+            ask ();
+            Io.bind stopped (fun () -> Io.fail (Retry.held ~name ~op health));
+          ])
+      (fun () ->
         Health.off health watch;
-        match outcome with Ok v -> Io.return v | Error exn -> Io.fail exn)
+        Io.return ())
 end

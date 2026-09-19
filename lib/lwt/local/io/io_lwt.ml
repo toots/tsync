@@ -62,6 +62,8 @@ module Clock = struct
     Lwt.pick [f alive; watch ()]
 
   let is_timeout exn = exn = Lwt_unix.Timeout
+  let pick = Lwt.pick
+  let is_cancelled exn = exn = Lwt.Canceled
 end
 
 module Lock = struct

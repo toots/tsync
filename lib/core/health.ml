@@ -6,6 +6,7 @@ type t = {
   mutable reason : string;
   mutable sampled : bool;
   mutable failing_since : float;
+  mutable last_lost : float;
   mutable probing : bool;
   mutable next_watch : int;
   watchers : (int, unit -> unit) Hashtbl.t;
@@ -26,6 +27,7 @@ let make ~tracked =
     reason = "";
     sampled = not tracked;
     failing_since = 0.;
+    last_lost = 0.;
     probing = false;
     next_watch = 0;
     watchers = Hashtbl.create 4;
@@ -36,6 +38,7 @@ let create () = make ~tracked:true
 let now = Unix.gettimeofday
 let out t = t.held_until > 0.
 let is_held t = out t && now () < t.held_until
+let is_down = out
 let sampled t = t.sampled
 
 let check t =
@@ -74,24 +77,32 @@ let hold_for t seconds =
   t.held_until <- now () +. seconds
 
 (* A request already on its way when the member went out fails into a hold
-   that is none of its doing: only the probe's failure is news. *)
+   that is none of its doing, and only the probe's failure is news; past the
+   hold every failure is one, nobody having to have asked for a probe.
+
+   Failures a hold's length apart are not a run: the first says nothing about
+   the link by the time the second comes. *)
 let lost t reason =
   if not t.tracked then `Up
   else begin
+    let at = now () in
     t.sampled <- true;
     t.reason <- reason;
-    if t.consecutive = 0 then t.failing_since <- now ();
+    if t.consecutive = 0 || at -. t.last_lost > !hold_initial then begin
+      t.consecutive <- 0;
+      t.failing_since <- at
+    end;
+    t.last_lost <- at;
     t.consecutive <- t.consecutive + 1;
     if out t then
-      if t.probing then begin
+      if t.probing || at >= t.held_until then begin
         t.probing <- false;
         hold_for t (Float.min !hold_max (t.hold *. 2.));
         tell t;
         `Tripped
       end
       else `Held
-    else if
-      t.consecutive >= !trip_after && now () -. t.failing_since >= !trip_span
+    else if t.consecutive >= !trip_after && at -. t.failing_since >= !trip_span
     then begin
       hold_for t !hold_initial;
       tell t;

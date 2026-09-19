@@ -103,6 +103,10 @@ module Make (Io : Io.S) (Clock : Clock.S with type 'a io := 'a Io.t) :
             (f ()))
         (function
           | Cancelled as exn -> Io.fail exn
+          (* Called back by whoever was waiting, a deadline or a member found
+             down: trying again is doing what they stopped asking for, and it
+             says nothing about the link. *)
+          | exn when Clock.is_cancelled exn -> Io.fail exn
           | exn when classify exn = Transient ->
               (match Health.lost health (reason exn) with
                 | `Tripped ->

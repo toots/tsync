@@ -2,6 +2,7 @@
    drain hooks. *)
 include
   Domain_store.Over (Io_lwt.Core) (Durable_queue_lwt) (Io_lwt.Lock)
+    (Io_lwt.Clock)
     (Backend_lwt)
 
 module Deferred = Dt

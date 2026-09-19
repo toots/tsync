@@ -14,7 +14,7 @@ module State (Io : Io.S) = struct
 
   let state members =
     match
-      List.find_opt (fun m -> Health.is_held (health m)) (mains members)
+      List.find_opt (fun m -> Health.is_down (health m)) (mains members)
     with
       | Some m -> offline m (Health.describe (health m))
       | None -> `Ok
@@ -22,7 +22,7 @@ end
 
 module Over (Io : Io.S) (Clock : Clock.S with type 'a io := 'a Io.t) = struct
   include State (Io)
-  module Wait = Health_wait.Make (Io)
+  module Wait = Health_wait.Make (Io) (Clock)
   open Io_syntax.Make (Io)
 
   type answer = { seconds : float; cursor : Bigstring.t option }
@@ -46,11 +46,17 @@ module Over (Io : Io.S) (Clock : Clock.S with type 'a io := 'a Io.t) = struct
         Ok { seconds = Unix.gettimeofday () -. started; cursor })
       (fun exn -> Io.return (Error (why_not exn)))
 
-  (* A main heard from and not held is taken at its word, so a run of guarded
-     writes costs one look and not one each. *)
+  (* A main heard from and up is taken at its word, so a run of guarded writes
+     costs one look and not one each; one that went down is looked at again
+     once its hold has run out, an expired hold being no answer. *)
   let look ~cursor_key members =
     let unheard =
-      List.filter (fun m -> not (Health.sampled (health m))) (mains members)
+      List.filter
+        (fun m ->
+          let h = health m in
+          (not (Health.sampled h))
+          || (Health.is_down h && not (Health.is_held h)))
+        (mains members)
     in
     fold_left_s
       (fun found m ->

@@ -19,6 +19,14 @@ module type S = sig
       length is its peer's to choose, where only silence says it is stuck. *)
   val with_stall_timeout : float -> ((unit -> unit) -> 'a io) -> 'a io
 
+  (** The first of these to finish, the rest being cancelled: a request given up
+      on is called back rather than left to run. *)
+  val pick : 'a io list -> 'a io
+
+  (** Whether [exn] is the scheduler calling work back, which is not something
+      that happened to the work. *)
+  val is_cancelled : exn -> bool
+
   (** Whether [exn] is the scheduler's own timeout rather than a failure of the
       work. Only the scheduler that raises it can say. *)
   val is_timeout : exn -> bool

@@ -11,11 +11,12 @@ module Over
     (Io : Io.S)
     (Queues : Durable_queue.S with type 'a io := 'a Io.t)
     (Lock : Lock.S with type 'a io := 'a Io.t)
+    (Clock : Clock.S with type 'a io := 'a Io.t)
     (Drain : DRAIN with type 'a io := 'a Io.t) =
 struct
   module Dt = Deferred.Over (Io) (Queues) (Lock)
   module Guard = Write_guard.State (Io)
-  module Wait = Health_wait.Make (Io)
+  module Wait = Health_wait.Make (Io) (Clock)
 
   module type Store = Backend.S with type 'a io := 'a Io.t
 
@@ -78,19 +79,21 @@ struct
     (* A member with another behind it is asked only while it is thought to be
        up, and waited on only until it is known not to be. The last one is asked
        whatever is thought of it, being all there is. *)
-    let ask_member ~others label s f =
+    let ask_member ?(probing = true) ~others label s f =
       let module B = (val s.backend : Store) in
+      let held () = Io.fail (Retry.held ~name:s.name ~op:label B.health) in
+      let ask () =
+        Wait.until_held B.health ~name:s.name ~op:label (fun () ->
+            f (module B : Store))
+      in
       if not others then f (module B : Store)
-      else (
-        match Health.check B.health with
-          | `Held -> Io.fail (Retry.held ~name:s.name ~op:label B.health)
-          | `Up | `Probe ->
-              Wait.until_held B.health ~name:s.name ~op:label (fun () ->
-                  f (module B : Store)))
+      else if not probing then
+        if Health.is_down B.health then held () else ask ()
+      else (match Health.check B.health with `Held -> held () | _ -> ask ())
     in
     (* [stop_on_miss] takes the first reachable store's [None] as the answer;
        otherwise a miss moves on. [`Unreachable exn] when every store raised. *)
-    let walk ~stop_on_miss label chain f =
+    let walk ?probing ~stop_on_miss label chain f =
       let rec go last = function
         | [] -> (
             match last with
@@ -100,7 +103,7 @@ struct
             let* outcome =
               Io.catch
                 (fun () ->
-                  let+ v = ask_member ~others:(rest <> []) label s f in
+                  let+ v = ask_member ?probing ~others:(rest <> []) label s f in
                   `Got v)
                 (fun exn ->
                   (* Said once by whoever found it down, not by every read that
@@ -121,8 +124,8 @@ struct
     (* A miss is reported only when every store that could hold the key was
        actually asked: an unreachable one surfaces its error, since "could not
        look" must not read as "not there". *)
-    let read label f =
-      let* first = walk ~stop_on_miss:true label readable f in
+    let read ?probing label f =
+      let* first = walk ?probing ~stop_on_miss:true label readable f in
       match first with
         | `Answer v -> Io.return (Some v)
         | _ -> (
@@ -204,11 +207,27 @@ struct
          not read the cursor from says nothing about the one it does. *)
       let watch ~key ~last_seen () =
         let+ (_ : unit option) =
-          read "watch" (fun (module B : Store) ->
+          (* Never the one read spent finding out whether a member is back: a
+             long poll is built not to answer for half a minute. *)
+          read ~probing:false "watch" (fun (module B : Store) ->
               let+ () = B.watch ~key ~last_seen () in
               Some ())
         in
         ()
+
+      (* A batch is the first readable member's, and the one read that does not
+         fall through by itself: with that member held and another to ask, it
+         answers nothing, which sends the caller key by key through [read]. *)
+      let passed_over () =
+        match readable with
+          | head :: _ :: _ -> Health.is_down (health_of head)
+          | _ -> false
+
+      let batch label ask =
+        match readable with
+          | head :: _ :: _ ->
+              ask_member ~others:true label head (fun _ -> ask ())
+          | _ -> ask ()
 
       (* Declared only where the first readable store has a batch of its own, and
          forwarding to it directly rather than through {!Backend.Make.Batched}: the
@@ -229,20 +248,6 @@ struct
          A batch the store refused is asked key by key; a batch the link lost is
          not, since every key would be lost the same way, one retry loop at a
          time. *)
-      (* A batch is the first readable member's, and the one read that does not
-         fall through by itself: with that member held and another to ask, it
-         answers nothing, which sends the caller key by key through [read]. *)
-      let passed_over () =
-        match readable with
-          | head :: _ :: _ -> Health.is_held (health_of head)
-          | _ -> false
-
-      let batch label ask =
-        match readable with
-          | head :: _ :: _ ->
-              ask_member ~others:true label head (fun _ -> ask ())
-          | _ -> ask ()
-
       let get_many =
         let native =
           match readable with
@@ -392,10 +397,21 @@ struct
             | up -> up
         in
         let+ answers =
-          map_s
+          filter_map_s
             (fun s ->
-              let module B = (val s.backend : Store) in
-              B.capabilities ~prefix ())
+              Io.catch
+                (fun () ->
+                  let+ caps =
+                    ask_member ~probing:false
+                      ~others:(List.length asked > 1)
+                      "capabilities" s
+                      (fun (module B : Store) -> B.capabilities ~prefix ())
+                  in
+                  Some caps)
+                (fun exn ->
+                  if List.length asked > 1 && Health.is_down (health_of s) then
+                    Io.return None
+                  else Io.fail exn))
             asked
         in
         Backend.merge_caps answers

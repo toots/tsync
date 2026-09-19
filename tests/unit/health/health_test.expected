@@ -45,8 +45,15 @@ is given out: ok
 and the member is held again meanwhile: ok
 until the next one: ok
 
+=== a hold that has run out, nobody having asked since
+is not a member that is back: ok
+and the next failure says so, with no probe having been asked for: ok
+
+=== one failure long ago, and one now
+are not two in a row: ok
+
 === a store with no link to lose
 is never out: ok
 and counts as heard from: ok
 
-28 check(s), 0 failure(s)
+31 check(s), 0 failure(s)
