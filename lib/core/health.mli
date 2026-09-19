@@ -43,6 +43,11 @@ val check : t -> [ `Up | `Probe | `Held ]
     probe is due, so the one that would make it is let through. *)
 val is_held : t -> bool
 
+(** Out since it tripped and not heard from since, whether or not the hold has
+    run out: for whoever must not act as though it were there, and has to go and
+    look instead of taking an expired hold for an answer. *)
+val is_down : t -> bool
+
 (** Whether this process has heard from the member at all, either way. A command
     that has just started has not, and has to look before it concludes. *)
 val sampled : t -> bool

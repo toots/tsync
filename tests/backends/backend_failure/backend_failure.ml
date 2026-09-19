@@ -82,3 +82,27 @@ let () =
   ignore (asked_of member ~fails:max_int transient);
   row "answered while held" (asked_of member ~fails:0 transient);
   row "a store with no link" (asked_of Health.always_up ~fails:2 transient)
+
+(* Called back by a deadline while its first attempt is still out. The wait is
+   for a second attempt to have been made had there been one, and what is
+   asserted is that there was not. *)
+let () =
+  let attempts = ref 0 and member = Health.create () in
+  let outcome =
+    Lwt_main.run
+      (Lwt.bind
+         (Lwt.catch
+            (fun () ->
+              Lwt_unix.with_timeout 0.05 (fun () ->
+                  Retry_lwt.with_retry ~health:member ~classify:Backend.classify
+                    ~name:"test" ~op:"get" (fun () ->
+                      incr attempts;
+                      fst (Lwt.task ()))))
+            (fun exn -> Lwt.return (Printexc.to_string exn)))
+         (fun said -> Lwt.map (fun () -> said) (Lwt_unix.sleep 1.2)))
+  in
+  print_newline ();
+  print_endline "with_retry, called back by whoever was waiting";
+  Printf.printf "%-28s %d attempt(s), raised %s, member %s\n" "a deadline"
+    !attempts outcome
+    (if Health.is_down member then "down" else "not held against")

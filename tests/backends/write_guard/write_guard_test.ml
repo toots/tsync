@@ -112,6 +112,14 @@ let () =
        "the main is still the main's to be written, which is how it is refilled"
        (answer = "allowed");
 
+     case "the same, its hold having run out";
+     Health.expire health;
+     link.asked := 0;
+     let* answer = asked_of (ensure members replica) in
+     step "write the replica: %s" answer;
+     check "is looked at again, and still refused"
+       (!(link.asked) = 1 && answer <> "allowed");
+
      case "one that never answers";
      let link = { answers = `Never; asked = ref 0 } in
      let members, _, replica = domain link (Health.create ()) in
@@ -173,4 +181,4 @@ let () =
      check "which is the same command allowed" (answer = "allowed");
      Scratch.cleanup root;
      Lwt.return_unit);
-  report ~expected:9 ()
+  report ~expected:10 ()

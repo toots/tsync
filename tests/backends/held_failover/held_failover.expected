@@ -7,12 +7,17 @@ the main answers, and the replica is not asked: ok
   read = "from the replica"
 the read comes back from the replica, the main having been asked once: ok
 and not waited for past the failure that showed it was down: ok
+and called back, not left to climb for nobody: ok
   five more = "from the replica"
 none of which goes near the main: ok
 
 === a batch, which is the main's to answer
   batch = "from the replica"
 is answered key by key from the replica instead: ok
+
+=== a long poll, once the hold has run out
+is not what finds out whether the main is back: ok
+which the next read is: ok
 
 === the same main with nothing behind it
   read = raised: HTTP 502
@@ -32,4 +37,4 @@ and the main answers again: ok
   read = none
 is not there, which is an answer: ok
 
-10 check(s), 0 failure(s)
+13 check(s), 0 failure(s)

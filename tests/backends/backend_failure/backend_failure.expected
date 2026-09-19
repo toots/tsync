@@ -19,3 +19,6 @@ one lost, then answered      2 attempt(s), answered, member up
 an answer that is a no       1 attempt(s), raised not found, member up
 answered while held          1 attempt(s), answered, member up
 a store with no link         3 attempt(s), answered, member up
+
+with_retry, called back by whoever was waiting
+a deadline                   1 attempt(s), raised Lwt_unix.Timeout, member not held against

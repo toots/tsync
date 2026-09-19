@@ -2,4 +2,4 @@
  (flags
   (:standard -open Tsync_core -open Tsync_test_harness))
  (name health_test)
- (libraries tsync-libs.core tsync_test_harness yojson))
+ (libraries tsync-libs.core tsync_test_harness yojson unix))

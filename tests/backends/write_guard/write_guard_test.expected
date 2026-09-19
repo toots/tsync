@@ -8,11 +8,15 @@ which is not what is being guarded, and costs nothing: ok
 
 === one that is not there
   before anybody looks: ok
-  write the replica: refusing to copy to replica: the main "main" is not online (held down for s after  failures (HTTP )). A replica is never written while the main is offline, or it holds what nobody can check [transient]
+  write the replica: refusing to copy to replica: the main "main" is not online (HTTP ). A replica is never written while the main is offline, or it holds what nobody can check [transient]
 is looked at, and found out: ok
   once known: the main "main" is not online (held down for s after  failures (HTTP ))
   write the main: allowed
 the main is still the main's to be written, which is how it is refilled: ok
+
+=== the same, its hold having run out
+  write the replica: refusing to copy to replica: the main "main" is not online (held down for s after  failures (HTTP )). A replica is never written while the main is offline, or it holds what nobody can check [transient]
+is looked at again, and still refused: ok
 
 === one that never answers
   write the replica: refusing to copy to replica: the main "main" is not online (no answer within s). A replica is never written while the main is offline, or it holds what nobody can check [transient]
@@ -24,9 +28,9 @@ is not waited on for ever: ok
 has no source of truth to be behind: ok
 
 === a command that writes to every member, the main being gone
-  data-integrity --verify: refusing to queue a verify pass on replica: the main "main" is not online (held down for s after  failures (HTTP )). A replica is never written while the main is offline, or it holds what nobody can check [transient]
+  data-integrity --verify: refusing to queue a verify pass on replica: the main "main" is not online (HTTP ). A replica is never written while the main is offline, or it holds what nobody can check [transient]
 leaves the replica holding exactly what it held: ok
   and with the main there: allowed
 which is the same command allowed: ok
 
-9 check(s), 0 failure(s)
+10 check(s), 0 failure(s)
