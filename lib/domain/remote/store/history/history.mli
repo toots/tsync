@@ -19,31 +19,10 @@ val manifest_of : domain_prefix:string -> grouping:string -> Stored_key.t
 (** Every version of every file in one folder, which share its id. *)
 val folder_versions : versions_prefix:string -> folder_id:string -> Stored_key.t
 
-module type S = sig
-  type 'a io
-
-  (** [<versions_prefix>/<manifest key tail>/], so a file's versions share the
-      identity its manifest has. [None] for a key whose folder this client
-      cannot resolve. *)
-  val version_dir : key:Logical_key.t -> Stored_key.t option io
-
-  (** Snapshot the current manifest object under a fresh timestamped version
-      key, when the backend has one. Best-effort: a lost snapshot must not wedge
-      the write it precedes. *)
-  val save_version : key:Logical_key.t -> unit io
-
-  val list_versions : key:Logical_key.t -> Backend.file_entry list io
-  val get_version : vkey:Stored_key.t -> string io
-end
+module type S = History_intf.S
 
 (** The shape a consumer takes: {!S} for whichever domain it is applied to. *)
-module type OVER = sig
-  type 'a io
-
-  module Make
-      (C : Conf.S with type 'a io = 'a io)
-      (L : Layout.S with type 'a io := 'a io) : S with type 'a io := 'a io
-end
+module type OVER = History_intf.OVER
 
 module Over (Io : Io.S) (_ : Clock.S with type 'a io := 'a Io.t) : sig
   module Make

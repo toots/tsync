@@ -61,7 +61,6 @@ val close : connection -> unit
 (** {1 Messages} *)
 
 val method_call : int
-val method_return : int
 val error : int
 val signal : int
 
@@ -77,7 +76,6 @@ val message_type : message -> int
 val message_path : message -> string
 val message_interface : message -> string
 val message_member : message -> string
-val message_sender : message -> string
 val message_error_name : message -> string
 val message_no_reply : message -> bool
 

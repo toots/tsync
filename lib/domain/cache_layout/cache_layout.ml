@@ -73,23 +73,9 @@ let chunk_pin_path ~cache_root ~domain_name chunk_key =
 
 (** {!Fs.S} plus the two marker questions {!Make} answers, which is what a
     module of the checkout takes as its filesystem. *)
-module type FS = sig
-  include Fs.S
+module type FS = Cache_layout_intf.FS
 
-  val record_dir_name : string -> string -> unit io
-  val real_dir_name : string -> string -> string io
-end
-
-module type S = sig
-  type 'a io
-
-  val record_dir_name : string -> string -> unit io
-  val real_dir_name : string -> string -> string io
-  val clear_projection : cache_root:string -> domain_name:string -> unit io
-
-  val sweep_stale :
-    cutoff:float -> cache_root:string -> domain_name:string -> unit io
-end
+module type S = Cache_layout_intf.S
 
 module Make
     (Io : Io.S)

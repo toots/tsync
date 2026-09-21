@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_test_harness
+   -open
    Tsync_core
    -open
    Tsync_remote_lwt
@@ -17,6 +19,7 @@
    Tsync_local_backend_lwt))
  (name promote_race)
  (libraries
+  tsync_test_harness
   unix
   tsync_core
   tsync_remote_lwt

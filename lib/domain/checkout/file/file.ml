@@ -1,30 +1,4 @@
-module type Owing = sig
-  type 'a io
-
-  val record_key : Wal.record -> Logical_key.t option
-  val record_size : Wal.record -> int64
-  val upload : ?cancel:bool ref -> Logical_key.t -> unit io
-  val set_in_flight : (unit -> Logical_key.t list) -> unit
-  val set_canceller : (Logical_key.t -> bool) -> unit
-end
-
-(* What the metadata queue needs of the file operations: the backend half of an
-   op whose local half the caller has already applied. *)
-module type Publishing = sig
-  type 'a io
-
-  val backend_ops : Journal.op list -> Journal.op list io
-end
-
-module type OVER = sig
-  type 'a io
-
-  module Make (_ : Conf.S with type 'a io = 'a io) : sig
-    include File_ops.S with type 'a io := 'a io
-    include Owing with type 'a io := 'a io
-    include Publishing with type 'a io := 'a io
-  end
-end
+include File_intf
 
 module Over
     (Io : Io.S)

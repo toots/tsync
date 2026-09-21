@@ -63,16 +63,9 @@ let wait_until ?timeout ~what f =
   until ?timeout ~what (fun () -> if f () then Some () else None)
 
 let write_file path contents =
-  let oc = open_out path in
-  output_string oc contents;
-  close_out oc
+  Out_channel.with_open_text path (fun oc -> output_string oc contents)
 
-let read_file path =
-  let ic = open_in_bin path in
-  let n = in_channel_length ic in
-  let s = really_input_string ic n in
-  close_in ic;
-  s
+let read_file path = In_channel.with_open_bin path In_channel.input_all
 
 let entries dir =
   match Sys.readdir dir with

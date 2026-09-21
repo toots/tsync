@@ -19,9 +19,6 @@ struct
   end
 
   open Io_syntax.Make (Io)
-
-  let iter_p f xs = Io.iter_p f xs
-
   module Guard = Write_guard.Over (Io) (Clock)
 
   module Make (C : Conf.S with type 'a io = 'a Io.t) = struct
@@ -343,30 +340,9 @@ struct
     let resync ?source ?(scope = `All)
         ?(on_scan = fun ~objects:_ ~bytes:_ -> ())
         ?(on_list = fun ~name:_ -> ()) ?on_start ?on_entry () =
-      let named name =
-        match
-          List.filter
-            (fun (m : (module C.Store) Backend.member) -> m.Backend.name = name)
-            C.members
-        with
-          | [m] -> m
-          | [] ->
-              failwith
-                (Printf.sprintf "no backend named %s (available: %s)" name
-                   (String.concat ", "
-                      (List.map
-                         (fun (m : (module C.Store) Backend.member) -> m.name)
-                         C.members)))
-          | _ ->
-              failwith
-                (Printf.sprintf
-                   "backend name %s is ambiguous; set distinct \"name\" fields \
-                    in the config"
-                   name)
-      in
       let src =
         match (source, C.members) with
-          | Some name, _ -> named name
+          | Some name, _ -> Backend.named_exn name C.members
           | None, m :: _ -> m
           | None, [] -> failwith "no backends configured"
       in

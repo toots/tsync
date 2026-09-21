@@ -20,3 +20,9 @@ val adopt : home:string -> unit
 (** [paths ~tsync ~home ~scratch] asks [tsync] where it would keep its config
     and its cache under [home], using [scratch] for the answer. *)
 val paths : tsync:string -> home:string -> scratch:string -> paths
+
+(** The built [tsync], found by walking up from where dune runs the test. *)
+val binary : string option
+
+(** Run a shell command, ignoring how it ends. *)
+val sh : ('a, unit, string, unit) format4 -> 'a

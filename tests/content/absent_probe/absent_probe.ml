@@ -15,10 +15,7 @@ open Check
 let root = Scratch.dir "absent-probe"
 let reads = ref 0
 
-module Disk =
-  (val Backend_lwt.make ~backend_type:"local"
-         ~get_field:(fun _ -> Some (Filename.concat root "store"))
-         ())
+module Disk = (val Fixture.local_store (Filename.concat root "store"))
 
 module Store : Backend_lwt.Store = struct
   include Disk

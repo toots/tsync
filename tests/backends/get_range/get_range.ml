@@ -23,7 +23,7 @@ let body =
 let size = Bigstring.length body
 
 let () =
-  let module B = (val Fixture.local_store root : Backend_lwt.Store) in
+  let module B = (val Fixture.local_store root) in
   Lwt_main.run
     (let* () = B.put ~key:(k "obj") ~data:body () in
      print_endline "=== a store answers exactly the range asked for";

@@ -12,34 +12,7 @@ open Manifest
    A staged manifest on disk means an upload is owed; once [s_published] is set
    it is instead the commit record of a promotion to replay. *)
 
-(** Where a chunk's bytes are within [staged/chunks/<uuid>]. One body holds
-    every staged member of a cache group, so the offset is what separates them
-    and is carried rather than derived: it is fixed when the bytes are written,
-    while the group size it would be derived from is configuration and can
-    change between runs. *)
-type body = { uuid : string; offset : int }
-
-type slot =
-  | Staged of body
-  | Inherit  (** the published manifest's entry at this index *)
-  | Zero  (** never written; reads as zeros *)
-
-type staged = {
-  s_name : string;
-  s_size : int64;
-  s_mtime : float;
-  s_chunk_size : int;
-  s_slots : slot array;
-  s_whole : string option;
-      (** A whole file handed over by a frontend: its bytes are one file rather
-          than per-chunk bodies, [s_slots] is empty, and the upload needs no
-          chunking pass. *)
-}
-
-(* Which half of the lifecycle the sidecar is in. A mutation can only produce
-   [Owed]: the manifest an upload published is not a field of the record it
-   would have to clear, so no write can carry a stale one past itself. *)
-type state = Owed of staged | Committed of staged * t
+include Staged_manifest_intf
 
 let edits = function Owed st | Committed (st, _) -> st
 let new_uuid = Id.short
@@ -148,37 +121,6 @@ let staged_of_string body =
   match published with None -> Owed st | Some m -> Committed (st, m)
 
 let sidecar_path = Cache_layout.staged_manifest_path
-
-module type S = sig
-  type 'a io
-
-  val root : unit -> string
-  val path : Logical_key.t -> string
-  val exists : Logical_key.t -> bool io
-  val read : Logical_key.t -> state option io
-  val read_edits : Logical_key.t -> staged option io
-  val write : Logical_key.t -> staged -> unit io
-  val commit : Logical_key.t -> staged -> Manifest.t -> unit io
-  val delete : Logical_key.t -> unit io
-  val rename : src_key:Logical_key.t -> dst_key:Logical_key.t -> unit io
-
-  val fold :
-    rel_dir:string ->
-    deep:bool ->
-    ('a -> Logical_key.t -> staged -> 'a) ->
-    'a ->
-    'a io
-
-  val list : unit -> Logical_key.t list io
-  val uuids : unit -> string list io
-  val entries : rel_dir:string -> deep:bool -> (Logical_key.t * staged) list io
-end
-
-module type OVER = sig
-  type 'a io
-
-  module Make (C : Conf.S with type 'a io = 'a io) : S with type 'a io := 'a io
-end
 
 module Over
     (Io : Io.S)

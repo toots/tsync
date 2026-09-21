@@ -1,13 +1,5 @@
 module Ek = Journal.Entry_key
-
-type state = Intent | Prepared | Executed
-
-type record = {
-  ops : Journal.op list;
-  state : state;
-  attempts : int;
-  last_error : (Retry.kind * string) option;
-}
+include Wal_intf
 
 let partition_puts ops =
   List.partition (function `Put _ -> true | _ -> false) ops
@@ -100,69 +92,6 @@ end
 
 (* What this needs of a durable log, which is the record half of a queue and
    none of the draining. *)
-module type RECORDS = sig
-  type 'a io
-  type t
-
-  val create : dir:string -> t
-  val write : t -> id:string -> record -> unit io
-  val update : t -> string -> (record -> record) -> unit io
-  val complete : t -> string -> unit io
-  val list : ?wanted:(string -> bool) -> t -> (string * record) list io
-end
-
-module type OWED = sig
-  type 'a io
-  type 'a t
-
-  val create : unit -> 'a t
-  val signal : 'a t -> 'a -> unit io
-  val consume : 'a t -> ('a -> unit io) -> unit
-  val idle : 'a t -> unit
-end
-
-module type S = sig
-  type 'a io
-  type records
-  type 'a owed
-
-  val log : records
-  val owed : (Journal.Entry_key.t * record) owed
-  val meta_owed : (Journal.Entry_key.t * record) owed
-  val record : Journal.Entry_key.t -> Journal.op list -> unit io
-  val write : Journal.Entry_key.t -> record -> unit io
-  val advance : Journal.Entry_key.t -> state -> unit io
-
-  val discharge :
-    publish:(Journal.Entry_key.t -> Journal.op list -> Journal.Entry_key.t io) ->
-    cursor:(Journal.Entry_key.t -> unit io) ->
-    Journal.Entry_key.t ->
-    Journal.op list ->
-    unit io
-
-  val note_failure : Journal.Entry_key.t -> Retry.kind -> string -> unit io
-  val complete : Journal.Entry_key.t -> unit io
-  val find : Journal.Entry_key.t -> record option io
-
-  val update_ops :
-    Journal.Entry_key.t -> (Journal.op list -> Journal.op list) -> unit io
-
-  val list : unit -> (Journal.Entry_key.t * record) list io
-  val owed_metadata : unit -> (Journal.Entry_key.t * record) list io
-end
-
-module type OVER = sig
-  type 'a io
-  type records
-
-  module Owed : OWED with type 'a io := 'a io
-
-  module Make (_ : Conf.S with type 'a io = 'a io) :
-    S
-      with type 'a io := 'a io
-       and type records := records
-       and type 'a owed := 'a Owed.t
-end
 
 module Make (Io : Io.S) (R : RECORDS with type 'a io := 'a Io.t) = struct
   type records = R.t

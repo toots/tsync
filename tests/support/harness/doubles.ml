@@ -187,3 +187,88 @@ end
 let range_of ~offset ~length body =
   Bigstring.sub body ~off:offset
     ~len:(max 0 (min length (Bigstring.length body - offset)))
+
+module Memory () : Backend_lwt.Store = struct
+  let objects : (Stored_key.t, Bigstring.t) Hashtbl.t = Hashtbl.create 8
+
+  let put ~key ~data () =
+    Hashtbl.replace objects key data;
+    Lwt.return_unit
+
+  (* The winner is handed back the very value it passed, which is what a real
+     store does and what tells a win from a loss without comparing bodies. *)
+  let put_if_absent ~key ~data () =
+    match Hashtbl.find_opt objects key with
+      | Some held -> Lwt.return held
+      | None ->
+          Hashtbl.replace objects key data;
+          Lwt.return data
+
+  let get_opt ~key () = Lwt.return (Hashtbl.find_opt objects key)
+
+  let get_range ~key ~offset ~length () =
+    Lwt.return
+      (Option.map (range_of ~offset ~length) (Hashtbl.find_opt objects key))
+
+  let get ~key () =
+    match Hashtbl.find_opt objects key with
+      | Some d -> Lwt.return d
+      | None ->
+          Lwt.fail
+            (Backend.Backend_error ("no such key: " ^ Stored_key.to_string key))
+
+  let head_opt ~key () =
+    Lwt.return
+      (Option.map
+         (fun d ->
+           {
+             Backend.key;
+             size = Bigstring.length d;
+             last_modified = 0.;
+             etag = None;
+           })
+         (Hashtbl.find_opt objects key))
+
+  let delete ~key () =
+    let held = Hashtbl.mem objects key in
+    Hashtbl.remove objects key;
+    Lwt.return held
+
+  let delete_multi keys =
+    List.iter (Hashtbl.remove objects) keys;
+    Lwt.return_unit
+
+  let copy ~src_key ~dst_key () =
+    (match Hashtbl.find_opt objects src_key with
+      | Some d -> Hashtbl.replace objects dst_key d
+      | None -> ());
+    Lwt.return_unit
+
+  let list_prefix ?max_keys:_ ~prefix () =
+    Lwt.return
+      (Hashtbl.fold
+         (fun key d acc ->
+           if Stored_key.is_in ~prefix key then
+             {
+               Backend.key;
+               size = Bigstring.length d;
+               last_modified = 0.;
+               etag = None;
+             }
+             :: acc
+           else acc)
+         objects [])
+
+  let watch ~key:_ ~last_seen:_ () = Lwt.return_unit
+  let verify_all ~chunk_prefix:_ () = Lwt.return `Unsupported
+
+  let discard ~chunk_prefix:_ ~run:_ ~name:_ ~keys:_ () =
+    Lwt.return `Unsupported
+
+  let get_many = None
+  let list_many = None
+  let capabilities ~prefix:_ () = Lwt.return Backend.no_caps
+  let fast_read = false
+  let local_path = None
+  let health = Health.always_up
+end

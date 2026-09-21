@@ -14,10 +14,7 @@ open Check
 
 let root = Scratch.dir "rename"
 
-module Store =
-  (val Backend_lwt.make ~backend_type:"local"
-         ~get_field:(fun _ -> Some (Filename.concat root "store"))
-         ())
+module Store = (val Fixture.local_store (Filename.concat root "store"))
 
 (* A delete that answers "nothing was there" for one key: what a store looks
    like from a client whose idea of the marker's key is wrong. *)

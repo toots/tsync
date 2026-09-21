@@ -9,19 +9,11 @@ module type WATCHER = sig
   val wait : t -> unit io
 end
 
-(* Writing a buffer straight to a path, which the bigstring layer owns. *)
-module type BYTES = sig
-  type 'a io
-
-  val write_to : path:string -> Bigstring.t -> offset:int -> unit io
-end
-
 module Over
     (Io : Io.S)
     (Fs : Fs.S with type 'a io := 'a Io.t)
     (Sys : Syscalls.S with type 'a io := 'a Io.t)
     (Bounded : Bounded.S with type 'a io := 'a Io.t)
-    (Bytes : BYTES with type 'a io := 'a Io.t)
     (Clock : Clock.S with type 'a io := 'a Io.t)
     (Watcher : WATCHER with type 'a io := 'a Io.t) =
 struct
@@ -36,11 +28,15 @@ struct
      journal ahead of delayed allocation, so a crash can leave the final name on
      an empty file.
 
-     Opened for writing because Windows refuses to flush a read-only handle. *)
+     Opened for writing because Windows refuses to flush a read-only handle, and
+     created here because a write that moves no bytes creates nothing. *)
   let stage tmp data =
-    let* () = Bytes.write_to ~path:tmp data ~offset:0 in
-    let* fd = Sys.openfile tmp [Unix.O_WRONLY] 0 in
-    Io.finalize (fun () -> Sys.fsync fd) (fun () -> Sys.close fd)
+    let* fd = Sys.openfile tmp [Unix.O_WRONLY; Unix.O_CREAT] 0o644 in
+    Io.finalize
+      (fun () ->
+        let* (_ : int) = Fs.write tmp data ~offset:0L in
+        Sys.fsync fd)
+      (fun () -> Sys.close fd)
 
   (* Each write stages to its own temp file and renames it into place, so
      overlapping writes of one key never expose a partial file.
@@ -492,10 +488,7 @@ struct
             (fun a b -> Stored_key.compare a.Backend.key b.Backend.key)
             !entries
         in
-        match max_keys with
-          | Some n when List.length entries > n ->
-              List.filteri (fun i _ -> i < n) entries
-          | _ -> entries
+        match max_keys with Some n -> List.take n entries | None -> entries
 
       (* Probed once: the device under a configured root does not change, and this
          is asked with a request waiting on the answer. *)

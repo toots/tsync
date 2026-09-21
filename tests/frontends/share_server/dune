@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_test_harness
+   -open
    Tsync_core
    -open
    Tsync_remote_lwt
@@ -25,6 +27,7 @@
    Tsync_io_lwt))
  (name share_server_test)
  (libraries
+  tsync_test_harness
   cohttp-lwt
   cohttp
   tsync_core

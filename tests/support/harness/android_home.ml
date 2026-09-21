@@ -51,3 +51,17 @@ let paths ~tsync ~home ~scratch =
       one "config" (fun h -> Filename.concat h ".config/tsync/config.json");
     cache = one "cache" (fun h -> Filename.concat h ".cache/tsync");
   }
+
+(* The generated rule depends on the binary (deps_for in tests/gen-dune.sh), so
+   it is built; dune runs a test from its own directory, hence the walk up. *)
+let binary =
+  let rec find dir depth =
+    if depth = 0 then None
+    else (
+      let candidate = Filename.concat dir "bin/tsync.exe" in
+      if Sys.file_exists candidate then Some candidate
+      else find (Filename.dirname dir) (depth - 1))
+  in
+  find (Sys.getcwd ()) 6
+
+let sh fmt = Printf.ksprintf (fun cmd -> ignore (Sys.command cmd)) fmt

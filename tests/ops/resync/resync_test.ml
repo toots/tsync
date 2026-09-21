@@ -11,10 +11,7 @@ open Check
 
 let root = Scratch.dir "resync"
 
-module Store =
-  (val Backend_lwt.make ~backend_type:"local"
-         ~get_field:(fun _ -> Some (Filename.concat root "store"))
-         ())
+module Store = (val Fixture.local_store (Filename.concat root "store"))
 
 (* One key that will not read, so a walk has something to fail on and the
    bookmark rule has something to decide about. A wrapper rather than a chmod:

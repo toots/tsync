@@ -304,12 +304,7 @@ struct
             in
             match keys with Some keys -> Hashed keys | None -> Unhashed)
 
-    let rec iter_s_acc acc xs f =
-      match xs with
-        | [] -> return acc
-        | x :: rest ->
-            let* acc = f acc x in
-            iter_s_acc acc rest f
+    let iter_s_acc acc xs f = fold_left_s f acc xs
 
     let rec walk_local ~root rel acc =
       let path = at root rel in
@@ -388,29 +383,18 @@ struct
             P.Batch.add batch [`Delete (rel_of key)]
 
     let act ~batch ~src ~dst rel decision =
+      let key_on ~kind = function
+        | Domain prefix -> kind (join_rel prefix rel)
+        | Local _ -> Lk.root
+      in
+      let path_on = function Local root -> at root rel | Domain _ -> "" in
+      let src_key = key_on ~kind:Lk.file src in
+      let dst_key = key_on ~kind:Lk.file dst in
       match decision with
         | Skip s -> return (Skipped s)
         | Make_dir side ->
-            let path =
-              match dst with Local root -> at root rel | Domain _ -> ""
-            in
-            let key =
-              match dst with
-                | Domain prefix -> Lk.dir (join_rel prefix rel)
-                | Local _ -> Lk.root
-            in
-            make_dir ~batch side key path
+            make_dir ~batch side (key_on ~kind:Lk.dir dst) (path_on dst)
         | Rename_in_domain ->
-            let src_key =
-              match src with
-                | Domain prefix -> Lk.file (join_rel prefix rel)
-                | Local _ -> Lk.root
-            in
-            let dst_key =
-              match dst with
-                | Domain prefix -> Lk.file (join_rel prefix rel)
-                | Local _ -> Lk.root
-            in
             let* m = Mf.published src_key in
             let size = Option.map Manifest.size m in
             let* () =
@@ -437,43 +421,11 @@ struct
                 ]
             in
             Copied 0L
-        | Copy_manifest m ->
-            let dst_key =
-              match dst with
-                | Domain prefix -> Lk.file (join_rel prefix rel)
-                | Local _ -> Lk.root
-            in
-            copy_manifest ~batch ~src:m dst_key
-        | Upload _ ->
-            let src_path =
-              match src with Local root -> at root rel | Domain _ -> ""
-            in
-            let dst_key =
-              match dst with
-                | Domain prefix -> Lk.file (join_rel prefix rel)
-                | Local _ -> Lk.root
-            in
-            upload_local ~batch ~src_path dst_key
-        | Assemble _ ->
-            let src_key =
-              match src with
-                | Domain prefix -> Lk.file (join_rel prefix rel)
-                | Local _ -> Lk.root
-            in
-            let dst_path =
-              match dst with Local root -> at root rel | Domain _ -> ""
-            in
-            assemble ~src_key dst_path
+        | Copy_manifest m -> copy_manifest ~batch ~src:m dst_key
+        | Upload _ -> upload_local ~batch ~src_path:(path_on src) dst_key
+        | Assemble _ -> assemble ~src_key (path_on dst)
         | Patch_local { src = m; chunks } ->
-            let src_key =
-              match src with
-                | Domain prefix -> Lk.file (join_rel prefix rel)
-                | Local _ -> Lk.root
-            in
-            let dst_path =
-              match dst with Local root -> at root rel | Domain _ -> ""
-            in
-            patch_local ~src:m ~src_key dst_path chunks
+            patch_local ~src:m ~src_key (path_on dst) chunks
 
     let tally summary = function
       | Copied n ->

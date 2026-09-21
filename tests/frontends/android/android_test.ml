@@ -30,23 +30,10 @@ let domain_root = "tsync/media/manifests/"
 
 (* Spelled only to be refused: the daemon names items by reference. *)
 let photos_key = domain_root ^ "photos/"
-
-let binary =
-  (* The generated rule depends on it (deps_for in tests/gen-dune.sh), so it is
-     built; dune runs this from its own directory, hence the walk up. *)
-  let rec find dir depth =
-    if depth = 0 then None
-    else (
-      let candidate = Filename.concat dir "bin/tsync.exe" in
-      if Sys.file_exists candidate then Some candidate
-      else find (Filename.dirname dir) (depth - 1))
-  in
-  find (Sys.getcwd ()) 6
+let binary = Android_home.binary
 
 let write_file path contents =
-  let oc = open_out_bin path in
-  output_string oc contents;
-  close_out oc
+  Out_channel.with_open_bin path (fun oc -> output_string oc contents)
 
 let read_file path =
   match open_in_bin path with
@@ -57,7 +44,7 @@ let read_file path =
         close_in ic;
         s
 
-let sh fmt = Printf.ksprintf (fun cmd -> ignore (Sys.command cmd)) fmt
+let sh = Android_home.sh
 let case name = Printf.printf "\n=== %s\n" name
 let line fmt = Printf.printf ("  " ^^ fmt ^^ "\n%!")
 

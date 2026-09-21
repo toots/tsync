@@ -12,27 +12,8 @@
      8     key bytes, then value bytes
    v} *)
 
-module type Storable = sig
-  type t
-
-  val to_string : t -> string
-  val of_string : string -> t
-end
-
-module type S = sig
-  type key
-  type value
-  type t
-
-  val create : int -> t
-  val replace : t -> key -> value -> unit
-  val find : t -> key -> value
-  val find_opt : t -> key -> value option
-  val mem : t -> key -> bool
-  val length : t -> int
-  val iter : (key -> value -> unit) -> t -> unit
-  val fold : (key -> value -> 'a -> 'a) -> t -> 'a -> 'a
-end
+module type Storable = Hashtbl_mmap_intf.Storable
+module type S = Hashtbl_mmap_intf.S
 
 type blob =
   (char, Bigarray.int8_unsigned_elt, Bigarray.c_layout) Bigarray.Array1.t

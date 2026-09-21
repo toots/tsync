@@ -8,6 +8,8 @@
  (flags
   (:standard
    -open
+   Tsync_test_harness
+   -open
    Tsync_conf_parsing
    -open
    Tsync_core
@@ -21,6 +23,7 @@
    Tsync_io_lwt))
  (name conf_test)
  (libraries
+  tsync_test_harness
   unix
   tsync_conf_parsing
   tsync_core

@@ -273,8 +273,8 @@ struct
     let rec go = function
       | [] -> Io.return ()
       | batch ->
-          let here = List.filteri (fun i _ -> i < bulk_delete_limit) batch in
-          let rest = List.filteri (fun i _ -> i >= bulk_delete_limit) batch in
+          let here = List.take bulk_delete_limit batch in
+          let rest = List.drop bulk_delete_limit batch in
           let request = delete_body here in
           (* Required, and answered with a 400 naming it when absent: this is the
              one request whose body the store checks before acting on it, a
@@ -369,10 +369,6 @@ struct
         let delete_multi = delete_multi
         let copy = copy
         let list_all = list_all
-
-        let put_text t ~key ~data () =
-          put t ~key ~data:(Bigstring.of_string data) ()
-
         let share_url t = t.share_url
         let health t = t.health
       end)

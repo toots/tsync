@@ -1,17 +1,9 @@
-type poison = Stop | Drop
-type stats = { queued : int; in_flight : int; degraded : bool; bytes : int64 }
-
-module type JOB = sig
-  type t
-
-  val to_string : t -> string
-  val of_string : string -> t option
-end
+include Durable_queue_intf
 
 (* Past this the queue is declared degraded and jobs are dropped. A job is a
    short line on disk, so this is a runaway backstop rather than a memory bound:
    reaching it means the target has not kept up for a very long time. *)
-let default_max_queued = 100_000
+let max_queued = 100_000
 
 (* Settable so a test need not wait the default minute to see a warning. *)
 let stall_warning_interval = ref 60.
@@ -62,84 +54,6 @@ let release dir =
 
 (** The calls this makes of a filesystem, spelled as {!Fs} spells them so that
     one can be handed over as it stands. *)
-module type FILES = sig
-  type 'a io
-
-  val mkdir_p : string -> unit io
-  val atomic_write : string -> string -> unit io
-  val readdir_list : string -> string list io
-  val readdir_list_quiet : string -> string list io
-  val unlink_quiet : string -> unit io
-  val is_directory : string -> bool io
-  val read_file : string -> [ `Body of string | `Gone | `Failed of exn ] io
-end
-
-module type RECORDS = sig
-  type 'a io
-  type job
-  type t
-
-  val create : dir:string -> t
-  val write : t -> id:string -> job -> unit io
-  val update : t -> string -> (job -> job) -> unit io
-  val complete : t -> string -> unit io
-  val list : ?wanted:(string -> bool) -> t -> (string * job) list io
-  val dropped : t -> int
-end
-
-module type QUEUE = sig
-  type 'a io
-  type job
-
-  module Records : RECORDS with type 'a io := 'a io and type job := job
-
-  type t
-
-  val ordered :
-    ?max_queued:int ->
-    name:string ->
-    log:Records.t ->
-    classify:(exn -> Retry.kind) ->
-    poison:poison ->
-    run:(id:string -> job -> unit io) ->
-    unit ->
-    t
-
-  val keyed :
-    ?max_queued:int ->
-    ?workers:int ->
-    ?weight:(job -> int64) ->
-    name:string ->
-    log:Records.t ->
-    key:(job -> string) ->
-    classify:(exn -> Retry.kind) ->
-    poison:poison ->
-    run:(id:string -> job -> cancel:bool ref -> unit io) ->
-    unit ->
-    t
-
-  val post : ?id:string -> t -> job -> unit io
-  val adopt : t -> id:string -> job -> unit io
-  val start : ?recover:bool -> t -> unit
-  val cancel : t -> string -> bool
-  val set_paused : t -> bool -> unit
-  val paused : t -> bool
-  val stop : t -> unit io
-  val stats : t -> stats
-  val in_flight : t -> job list
-  val owed : t -> int
-  val settle_key : t -> string -> unit io
-end
-
-module type S = sig
-  type 'a io
-
-  val settle_all : ?timeout:float -> unit -> unit io
-  val register_settle : (unit -> unit io) -> unit
-  val rescan_all : unit -> unit io
-
-  module Make (J : JOB) : QUEUE with type 'a io := 'a io and type job := J.t
-end
 
 module Make
     (Io : Io.S)
@@ -309,7 +223,6 @@ struct
       name : string;
       log : Records.t;
       poison : poison;
-      max_queued : int;
       topo : topology;
       workers : int;
       run : id:string -> J.t -> cancel:bool ref -> unit Io.t;
@@ -334,30 +247,6 @@ struct
       stopping : bool ref;
       mutable running : unit Io.t list;
     }
-
-    let base t =
-      {
-        name = t;
-        log = Records.create ~dir:"";
-        poison = Drop;
-        max_queued = default_max_queued;
-        topo = Ordered;
-        workers = 1;
-        run = (fun ~id:_ _ ~cancel:_ -> Io.return ());
-        classify = Retry.classify;
-        jobs = Queue.create ();
-        loaded = Hashtbl.create 64;
-        wake = Lock.condition ();
-        settled = Lock.condition ();
-        recording = Lock.mutex ();
-        parked = 0;
-        outcomes = 0;
-        failures = 0;
-        degraded = false;
-        paused = ref false;
-        stopping = ref false;
-        running = [];
-      }
 
     let active_count t =
       match t.topo with
@@ -446,12 +335,12 @@ struct
                   slot.pending <- Some e)
 
     let full t =
-      if Queue.length t.jobs >= t.max_queued then begin
+      if Queue.length t.jobs >= max_queued then begin
         if not t.degraded then begin
           t.degraded <- true;
           Log.err
             "%s: %d jobs queued, dropping writes — it will need tsync mirror"
-            t.name t.max_queued
+            t.name max_queued
         end;
         true
       end
@@ -460,13 +349,11 @@ struct
     (* The job is on disk before the caller is told the write is done. Recorded in
        the caller's path rather than in the background, since a job only queued in
        memory is one a crash loses without anything left saying it was owed. *)
-    let post ?id t job =
+    let post t job =
       if full t then Io.return ()
       else
         Lock.with_lock t.recording (fun () ->
-            let id =
-              match id with Some id -> id | None -> Records.mint_id t.log
-            in
+            let id = Records.mint_id t.log in
             let+ () = Records.write t.log ~id job in
             take t ~id job)
 
@@ -721,32 +608,40 @@ struct
 
     let paused t = !(t.paused)
 
-    let make ~name ~log ~poison ~max_queued ~topo ~workers ~classify ~run =
+    let make ~name ~log ~poison ~topo ~workers ~classify ~run =
       let t =
         {
-          (base name) with
+          name;
           log;
           poison;
-          max_queued;
           topo;
           workers;
-          classify;
           run;
+          classify;
+          jobs = Queue.create ();
+          loaded = Hashtbl.create 64;
+          wake = Lock.condition ();
+          settled = Lock.condition ();
+          recording = Lock.mutex ();
+          parked = 0;
+          outcomes = 0;
+          failures = 0;
+          degraded = false;
           paused = ref false;
           stopping = ref false;
+          running = [];
         }
       in
       register_settle (fun () -> settle t);
       t
 
-    let ordered ?(max_queued = default_max_queued) ~name ~log ~classify ~poison
-        ~run () =
-      make ~name ~log ~poison ~max_queued ~topo:Ordered ~workers:1 ~classify
+    let ordered ~name ~log ~classify ~poison ~run () =
+      make ~name ~log ~poison ~topo:Ordered ~workers:1 ~classify
         ~run:(fun ~id job ~cancel:_ -> run ~id job)
 
-    let keyed ?(max_queued = default_max_queued) ?(workers = 1)
-        ?(weight = fun _ -> 0L) ~name ~log ~key ~classify ~poison ~run () =
-      make ~name ~log ~poison ~max_queued ~classify
+    let keyed ?(workers = 1) ?(weight = fun _ -> 0L) ~name ~log ~key ~classify
+        ~poison ~run () =
+      make ~name ~log ~poison ~classify
         ~topo:
           (Keyed
              {

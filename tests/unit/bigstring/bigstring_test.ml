@@ -180,12 +180,6 @@ let () =
   in
   check "mapping is a small heap object" (mapped < 1000.);
 
-  (* 12. Written back and read again. *)
-  let p = path "written" in
-  Lwt_main.run
-    (Bigstring_lwt.write_to ~path:p (Bigstring.of_string body) ~offset:0);
-  check "write_to" (read_file p = body);
-
   (* Counted, so a case that stopped running takes the report with it, and
      reported, so a failure is an exit code rather than a line in a log. *)
-  report ~expected:16 ()
+  report ~expected:15 ()

@@ -26,28 +26,7 @@ let mutates line =
           | _ -> false)
     | _ | (exception _) -> false
 
-module type S = sig
-  type hooks = {
-    evict : Logical_key.t -> unit Lwt.t;
-    restore : ?keep:float -> Logical_key.t -> unit Lwt.t;
-    changed : Logical_key.t -> unit;
-    full_resync : unit -> unit Lwt.t;
-    status_fields : unit -> (string * Yojson.Safe.t) list;
-    stats_fields : unit -> (string * Yojson.Safe.t) list;
-    on_stop : unit -> unit;
-  }
-
-  (** How a subscriber names [key], for a frontend telling one to act on an
-      item. [None] for a key whose folder this client cannot resolve. *)
-  val key_of_ref : string -> Logical_key.t option Lwt.t
-
-  val item_ref : Logical_key.t -> string option Lwt.t
-
-  val handler :
-    hooks ->
-    string ->
-    (string * [ `Continue | `Stop | `Subscribe of string ]) Lwt.t
-end
+module type S = Ipc_handler_intf.S
 
 module Make
     (C : Conf_lwt.S)
@@ -145,12 +124,7 @@ module Make
   module R = Item_row.Make (C) (F)
 
   let ref_str r = `String (Item_ref.to_string r)
-
-  (* The id of a folder key, under two names because the call sites mean
-     different things by it: one holds the directory, the other is climbing to
-     a parent. *)
   let own_folder_id = R.own_folder_id
-  let lookup_folder = R.own_folder_id
   let item_ref = R.item_ref
 
   (* Every reference says which kind it names, and {!handle_stat} holds it to

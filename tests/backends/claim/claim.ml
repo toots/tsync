@@ -15,9 +15,7 @@ open Check
 let root = Scratch.dir "claim"
 
 let () =
-  let (module B : Backend_lwt.Store) =
-    Backend_lwt.make ~backend_type:"local" ~get_field:(fun _ -> Some root) ()
-  in
+  let (module B : Backend_lwt.Store) = Fixture.local_store root in
   Lwt_main.run
     (case "several clients reach for one name at once";
      (* Started together and resolved together: whichever lands first, the rest

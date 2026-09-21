@@ -24,10 +24,7 @@ let chunk_key =
   Stored_key.in_space ~prefix:chunk_prefix
     (Chunk_layout.relative_path (Printf.sprintf "%016x-%016x" 1 2))
 
-let local root =
-  Backend_lwt.make ~backend_type:"local"
-    ~get_field:(function "verifyWrites" -> Some "false" | _ -> Some root)
-    ()
+let local root = Fixture.local_store ~verify_writes:false root
 
 (* Every verb goes while [up] and fails as a link does while not, reads
    included: what a target still owes it re-reads from here. *)

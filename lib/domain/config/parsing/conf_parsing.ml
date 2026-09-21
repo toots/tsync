@@ -230,15 +230,7 @@ let parse_domain json =
       || not (List.exists (fun b -> b.role <> `ReadOnly) backends);
     chunk_size = parse_size_field json "chunkSize";
     cache_chunk_size = parse_size_field json "cacheChunkSize";
-    max_cache =
-      (match json |> member "maxCache" with
-        | `Int n when n > 0 -> Some n
-        | `String s -> (
-            match parse_size s with
-              | Some n -> Some n
-              | None -> failwith ("invalid maxCache: " ^ s))
-        | `Null -> None
-        | _ -> failwith "domain \"maxCache\" must be a size string or integer");
+    max_cache = parse_size_field json "maxCache";
   }
 
 let of_json json =

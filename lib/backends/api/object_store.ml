@@ -27,8 +27,6 @@ module type VERBS = sig
   val list_all :
     t -> ?max_keys:int -> prefix:string -> unit -> Backend.file_entry list io
 
-  (* The job bodies the verifier and the discard write are text. *)
-  val put_text : t -> key:string -> data:string -> unit -> unit io
   val share_url : t -> string option
   val health : t -> Health.t
 end
@@ -47,7 +45,10 @@ struct
 
   let make (t : V.t) : (module Store) =
     let str = Stored_key.to_string in
-    let put_text ~key ~data () = V.put_text t ~key:(str key) ~data () in
+    (* The job bodies the verifier and the discard write are text. *)
+    let put_text ~key ~data () =
+      V.put t ~key:(str key) ~data:(Bigstring.of_string data) ()
+    in
     (module struct
       let put ~key ~data () = V.put t ~key:(str key) ~data ()
 

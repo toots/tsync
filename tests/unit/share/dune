@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_test_harness
+   -open
    Tsync_core
    -open
    Tsync_remote_lwt
@@ -17,6 +19,7 @@
    Tsync_local_backend_lwt))
  (name share_test)
  (libraries
+  tsync_test_harness
   tsync_core
   tsync_remote_lwt
   tsync_ops_lwt

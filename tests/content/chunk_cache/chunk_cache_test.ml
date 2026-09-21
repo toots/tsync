@@ -137,32 +137,11 @@ let unused_store : (module Backend_lwt.Store) =
     let why = "no backend in this test"
   end))
 
-module C : Conf_lwt.S = struct
-  let versioning = false
-  let client_name = "test"
-  let domain_name = "testdom"
-  let domain_prefix = "tsync/testdom/manifests/"
-  let chunk_prefix = "tsync/testdom/chunks/"
-  let versions_prefix = "tsync/testdom/versions/"
-  let journal_prefix = "tsync/testdom/journal/"
-  let cursor_key = Stored_key.in_space ~prefix:"tsync/testdom/" "cursor"
-  let shares_prefix = "tsync/shares/"
-  let store = unused_store
-  let members = []
-  let cache_root = root
-  let data_dir = root
-  let socket_path = ""
-  let max_uploads = 1
-  let max_chunk_buffers = 1
-  let max_downloads = 4
-  let chunk_size = Some 16
-  let cache_chunk_size = Some 48
-  let max_cache = None
-  let symlink_policy = `Keep
-  let read_only = false
-
-  include Conf_lwt.Monad
-end
+module C =
+  (val Fixture.conf ~max_downloads:4 ~chunk_size:16 ~cache_chunk_size:48
+         ~cache_root:root ~data_dir:root ~store:unused_store ~members:[] ~root
+         ()
+      : Conf_lwt.S)
 
 module Cc = Chunk_cache_lwt.Make (C) (Fetch)
 module Cap = Cc

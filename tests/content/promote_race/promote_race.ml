@@ -12,37 +12,8 @@ let store_dir = root ^ "/store"
 let cache_dir = root ^ "/cache"
 let data_dir = root ^ "/data"
 
-module C : Conf_lwt.S = struct
-  let versioning = false
-  let client_name = "test"
-  let domain_name = "racedom"
-  let domain_prefix = "tsync/racedom/manifests/"
-  let chunk_prefix = "tsync/racedom/chunks/"
-  let versions_prefix = "tsync/racedom/versions/"
-  let journal_prefix = "tsync/racedom/journal/"
-  let cursor_key = Stored_key.in_space ~prefix:"tsync/racedom/" "cursor"
-  let shares_prefix = "tsync/shares/"
-
-  let store =
-    Backend_lwt.make ~backend_type:"local"
-      ~get_field:(fun _ -> Some store_dir)
-      ()
-
-  let members = [Backend.member ~name:"local" store]
-  let cache_root = cache_dir
-  let data_dir = data_dir
-  let socket_path = ""
-  let max_uploads = 1
-  let max_chunk_buffers = 1
-  let max_downloads = 2
-  let chunk_size = Some 8
-  let cache_chunk_size = Some 8
-  let max_cache = None
-  let symlink_policy = `Keep
-  let read_only = false
-
-  include Conf_lwt.Monad
-end
+module C =
+  (val Fixture.conf ~domain:"racedom" ~max_downloads:2 ~root () : Conf_lwt.S)
 
 module Lk = Logical_key.Make (C)
 module R = Remote_lwt.Make (C)

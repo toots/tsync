@@ -31,12 +31,7 @@ module C = struct
   let journal_prefix = "tsync/test/journal/"
   let cursor_key = Stored_key.in_space ~prefix:"tsync/test/" "cursor"
   let shares_prefix = "tsync/shares/"
-
-  let store =
-    Backend_lwt.make ~backend_type:"local"
-      ~get_field:(fun _ -> Some backend_root)
-      ()
-
+  let store = Fixture.local_store backend_root
   let members = [Backend.member ~name:"local" store]
   let cache_root = Filename.concat root "cache"
   let data_dir = Filename.concat root "data"
@@ -60,9 +55,7 @@ module Lk = Logical_key.Make (C)
 module P : Domain_engine.Domain = Domain_engine.Make (C)
 
 let write_local path content =
-  let oc = open_out_bin path in
-  output_string oc content;
-  close_out oc
+  Out_channel.with_open_bin path (fun oc -> output_string oc content)
 
 (* No drain: a queue with nothing running it would settle only by never
    returning, and a test that hangs reports nothing. Pauses let whatever workers

@@ -93,9 +93,7 @@ module E = Export_lwt.Make (C)
 module Mfs = Staged_lwt.Manifest.Make (C)
 
 let write_file path contents =
-  let oc = open_out_bin path in
-  output_string oc contents;
-  close_out oc
+  Out_channel.with_open_bin path (fun oc -> output_string oc contents)
 
 let read_file path =
   let ic = open_in_bin path in

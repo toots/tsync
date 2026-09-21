@@ -13,10 +13,6 @@ module type APPEND = sig
 
   val open_out : string -> t io
   val write : t -> string -> unit io
-
-  (** Append the whole of [src], which must already be flushed. *)
-  val write_file : t -> src:string -> unit io
-
   val close : t -> unit io
 end
 

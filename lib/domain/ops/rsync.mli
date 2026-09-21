@@ -55,13 +55,6 @@ val describe : t -> string
 (** Whether the source survives the action. *)
 val source_disposal : move:bool -> t -> [ `Keep | `Drop ]
 
-(** Captured before the functor parameter of the same name shadows it. *)
-type listed = Checkout.listed = {
-  key : Logical_key.t;
-  size : int;
-  mtime : float;
-}
-
 (** One end of the copy, named the way the command's caller named it. *)
 type endpoint = Local of string | Domain of string
 

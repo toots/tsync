@@ -24,11 +24,7 @@ let marker_key = Chunk_layout.gc_marker_key ~chunk_prefix
 (* An object store's stand-in: a local backend that says it cannot collect, which
    is what every non-filesystem driver answers. *)
 module Uncollectable : Backend_lwt.Store = struct
-  include
-    (val Backend_lwt.make ~backend_type:"local"
-           ~get_field:(fun _ -> Some store_dir)
-           ()
-        : Backend_lwt.Store)
+  include (val Fixture.local_store store_dir)
 
   let get_many = None
   let list_many = None
@@ -68,13 +64,7 @@ module Conf_of (B : Backend_lwt.Store) : Conf_lwt.S = struct
   include Conf_lwt.Monad
 end
 
-module Collectable =
-  Conf_of
-    ((val Backend_lwt.make ~backend_type:"local"
-            ~get_field:(fun _ -> Some store_dir)
-            ()
-         : Backend_lwt.Store))
-
+module Collectable = Conf_of ((val Fixture.local_store store_dir))
 module Space = Collection_lwt.Make (Collectable)
 module Frozen = Conf_of (Uncollectable)
 module Frozen_space = Collection_lwt.Make (Frozen)
@@ -85,11 +75,7 @@ module Frozen_space = Collection_lwt.Make (Frozen)
    reading. *)
 let ck n = Printf.sprintf "%016x-%016x" n n
 
-module Store =
-  (val Backend_lwt.make ~backend_type:"local"
-         ~get_field:(fun _ -> Some store_dir)
-         ()
-      : Backend_lwt.Store)
+module Store = (val Fixture.local_store store_dir)
 
 let () =
   ignore

@@ -22,12 +22,7 @@ module C = struct
   let journal_prefix = "tsync/test/journal/"
   let cursor_key = Stored_key.in_space ~prefix:"tsync/test/" "cursor"
   let shares_prefix = "tsync/shares/"
-
-  let store =
-    Backend_lwt.make ~backend_type:"local"
-      ~get_field:(fun _ -> Some backend_root)
-      ()
-
+  let store = Fixture.local_store backend_root
   let members = [Backend.member ~name:"local" store]
   let cache_root = Filename.concat root "cache"
   let data_dir = Filename.concat root "data"
@@ -57,11 +52,7 @@ module D = Data_lwt.Make (C) (R)
 let moving = ref ""
 
 module Mutating = struct
-  include
-    (val Backend_lwt.make ~backend_type:"local"
-           ~get_field:(fun _ -> Some backend_root)
-           ()
-        : Backend_lwt.Store)
+  include (val Fixture.local_store backend_root)
 
   let put ~key ~data () =
     if !moving <> "" then begin
@@ -85,11 +76,7 @@ module Rm = Remote_lwt.Make (Cm)
 
 let opinionated n : (module Backend_lwt.Store) =
   (module struct
-    include
-      (val Backend_lwt.make ~backend_type:"local"
-             ~get_field:(fun _ -> Some backend_root)
-             ()
-          : Backend_lwt.Store)
+    include (val Fixture.local_store backend_root)
 
     let get_many = None
     let list_many = None
@@ -122,22 +109,12 @@ let distinct size =
   String.init size (fun i -> Char.chr ((i + (i / chunk_size)) land 0xff))
 
 let write_file path s =
-  let oc = open_out_bin path in
-  output_string oc s;
-  close_out oc
+  Out_channel.with_open_bin path (fun oc -> output_string oc s)
 
-let read_file path =
-  let ic = open_in_bin path in
-  let s = really_input_string ic (in_channel_length ic) in
-  close_in ic;
-  s
+let read_file path = In_channel.with_open_bin path In_channel.input_all
 
 let count_chunks () =
-  let (module B : Backend_lwt.Store) =
-    Backend_lwt.make ~backend_type:"local"
-      ~get_field:(fun _ -> Some backend_root)
-      ()
-  in
+  let (module B : Backend_lwt.Store) = Fixture.local_store backend_root in
   let+ entries = B.list_prefix ~prefix:C.chunk_prefix () in
   List.length
     (List.filter

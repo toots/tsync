@@ -85,69 +85,46 @@ end
 
 module Main =
   Count
-    ((val Backend_lwt.make ~backend_type:"local"
-            ~get_field:(fun _ -> Some main_dir)
-            ()
-         : Backend_lwt.Store))
+    ((val Fixture.local_store main_dir))
     (struct
       let t = main_ops
     end)
 
 module Replica =
   Count
-    ((val Backend_lwt.make ~backend_type:"local"
-            ~get_field:(fun _ -> Some replica_dir)
-            ()
-         : Backend_lwt.Store))
+    ((val Fixture.local_store replica_dir))
     (struct
       let t = replica_ops
     end)
 
-module C : Conf_lwt.S = struct
-  let versioning = false
-  let client_name = "test"
-  let domain_name = "testdom"
-  let domain_prefix = domain_prefix
-  let chunk_prefix = chunk_prefix
-  let versions_prefix = "tsync/testdom/versions/"
-  let journal_prefix = "tsync/testdom/journal/"
-  let cursor_key = Stored_key.in_space ~prefix:"tsync/testdom/" "cursor"
-  let shares_prefix = "tsync/shares/"
-
-  let members =
-    [
-      Backend.member ~role:`Main ~backend_type:"local" ~local_path:main_dir
-        ~name:"main"
-        (module Main : Backend_lwt.Store);
-      Backend.member ~role:`Replica ~backend_type:"local"
-        ~local_path:replica_dir ~name:"replica"
-        (module Replica : Backend_lwt.Store);
-    ]
-
-  (* The real composite, deliberately. A test that hands {!Gc} the main alone
+module C =
+  (val Fixture.conf
+         ~store:
+           (Domain_store_lwt.make
+              ~mains:
+                [{ Domain_store_lwt.name = "main"; backend = (module Main) }]
+              ~targets:[]
+              ~archives:
+                [
+                  {
+                    Domain_store_lwt.name = "replica";
+                    backend = (module Replica);
+                  };
+                ])
+         ~members:
+           [
+             Backend.member ~role:`Main ~backend_type:"local"
+               ~local_path:main_dir ~name:"main"
+               (module Main : Backend_lwt.Store);
+             Backend.member ~role:`Replica ~backend_type:"local"
+               ~local_path:replica_dir ~name:"replica"
+               (module Replica : Backend_lwt.Store);
+             (* The real composite, deliberately. A test that hands {!Gc} the main alone
      cannot see anything being fanned out to a copy — which is exactly how the
      marker reaching every replica went unnoticed. *)
-  let store =
-    Domain_store_lwt.make
-      ~mains:[{ Domain_store_lwt.name = "main"; backend = (module Main) }]
-      ~targets:[]
-      ~archives:
-        [{ Domain_store_lwt.name = "replica"; backend = (module Replica) }]
-
-  let cache_root = root ^ "/cache"
-  let data_dir = root ^ "/data"
-  let socket_path = ""
-  let max_uploads = 1
-  let max_chunk_buffers = 1
-  let max_downloads = 1
-  let chunk_size = Some 8
-  let cache_chunk_size = Some 8
-  let max_cache = None
-  let symlink_policy = `Keep
-  let read_only = false
-
-  include Conf_lwt.Monad
-end
+           ]
+         ~root ()
+      : Conf_lwt.S)
 
 module G = Gc_lwt.Make (C)
 module Collection = Collection_lwt.Make (C)

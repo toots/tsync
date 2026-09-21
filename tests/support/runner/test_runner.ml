@@ -147,16 +147,9 @@ let rec rm_rf path =
     | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ()
 
 let write_file path content =
-  let oc = open_out_bin path in
-  output_string oc content;
-  close_out oc
+  Out_channel.with_open_bin path (fun oc -> output_string oc content)
 
-let read_file path =
-  let ic = open_in_bin path in
-  let n = in_channel_length ic in
-  let s = really_input_string ic n in
-  close_in ic;
-  s
+let read_file path = In_channel.with_open_bin path In_channel.input_all
 
 let render_op = function
   | `Put (k, size) -> Printf.sprintf "put %s %Ld" k size
@@ -1456,11 +1449,7 @@ let setup_client (module C : Conf_lwt.S) root staging_prefix =
 
 let dump_backend_at ~backend_root ~domain_prefix ~chunk_prefix ~journal_prefix
     ~versions_prefix ~cursor_key =
-  let (module B : Backend_lwt.Store) =
-    Backend_lwt.make ~backend_type:"local"
-      ~get_field:(fun _ -> Some backend_root)
-      ()
-  in
+  let (module B : Backend_lwt.Store) = Fixture.local_store backend_root in
   let rel_key k =
     let pfx = String.length domain_prefix in
     if String.length k > pfx then String.sub k pfx (String.length k - pfx)
@@ -1746,15 +1735,11 @@ let run_scenario ?(versioning = false) ?(symlink_policy = `Keep)
         Backend.member ~name:"backend" ~backend_type:"local"
           ~config:[("path", backend_root)]
           ~local_path:backend_root
-          (Backend_lwt.make ~backend_type:"local"
-             ~get_field:(fun _ -> Some backend_root)
-             ());
+          (Fixture.local_store backend_root);
         Backend.member ~name:"backend2" ~backend_type:"local"
           ~config:[("path", backend2_root)]
           ~local_path:backend2_root
-          (Backend_lwt.make ~backend_type:"local"
-             ~get_field:(fun _ -> Some backend2_root)
-             ());
+          (Fixture.local_store backend2_root);
       ]
 
     let store =
@@ -1874,9 +1859,7 @@ let run_two_client_scenario ?(versioning = false)
       Backend.member ~name:"backend" ~backend_type:"local"
         ~config:[("path", backend_root)]
         ~local_path:backend_root
-        (Backend_lwt.make ~backend_type:"local"
-           ~get_field:(fun _ -> Some backend_root)
-           ());
+        (Fixture.local_store backend_root);
     ]
   in
   let module Ca = struct
@@ -2005,11 +1988,7 @@ let make_conf ?(versioning = false) ~client_name ~backend_root ~cache_root
     let journal_prefix = "tsync/test/journal/"
     let cursor_key = Stored_key.in_space ~prefix:"tsync/test/" "cursor"
     let shares_prefix = "tsync/shares/"
-
-    let store =
-      Backend_lwt.make ~backend_type:"local"
-        ~get_field:(fun _ -> Some backend_root)
-        ()
+    let store = Fixture.local_store backend_root
 
     (* What the daemon declares for diagnosis ([bin/cli.ml build_backends]), so
        [stats] has a store to report on here too. *)

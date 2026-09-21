@@ -4,14 +4,12 @@ open Manifest
    filesystem cannot hold verbatim becomes an escaped handle plus a marker file
    carrying the real one. *)
 
-type listed = { key : Logical_key.t; size : int; mtime : float }
+include Checkout_intf
 
 let dir ~cache_root domain_name =
   Cache_layout.manifests_dir ~cache_root domain_name
 
 let sidecar_path = Cache_layout.manifest_path
-
-type availability = [ `Online_only | `Cached | `Pinned of float ]
 
 let availability_name = function
   | `Online_only -> "online-only"
@@ -63,35 +61,6 @@ let availability
               `Pinned (List.fold_left min infinity untils)
             else `Cached)
       | exception _ -> `Online_only)
-
-module type S = sig
-  type 'a io
-
-  val rename : src_key:Logical_key.t -> dst_key:Logical_key.t -> unit io
-  val create_dir : Logical_key.t -> unit io
-  val delete_dir : Logical_key.t -> unit io
-
-  val list_children :
-    prefix:Logical_key.t -> unit -> (listed list * string list) io
-
-  val list_tree : prefix:Logical_key.t -> unit -> listed list io
-  val walk : unit -> string list io
-  val ensure_root : unit -> unit io
-
-  val record :
-    parent:Logical_key.t ->
-    on_other:[ `Replace | `Keep ] ->
-    Inode_tree.entry ->
-    (Logical_key.t * [ `Same | `Changed | `Replaced of string ]) io
-
-  val sweep_stale : cutoff:float -> unit -> Journal.op list io
-end
-
-module type OVER = sig
-  type 'a io
-
-  module Make (C : Conf.S with type 'a io = 'a io) : S with type 'a io := 'a io
-end
 
 module Over
     (Io : Io.S)
@@ -261,21 +230,6 @@ struct
       in
       let+ staged = staged_listed ~rel_dir:rel ~deep:true in
       merge_entries published staged
-
-    (* Published or only staged, unsorted. *)
-    let walk () =
-      let* published =
-        fold_files ~start:(Mf.root ()) ~key:Lk.root
-          (fun acc key (_ : t) -> Logical_key.path key :: acc)
-          []
-      in
-      let+ staged =
-        Sm.fold ~rel_dir:"" ~deep:true
-          (fun acc key (_ : Staged_manifest.staged) ->
-            Logical_key.path key :: acc)
-          []
-      in
-      List.sort_uniq compare (published @ staged)
 
     let ensure_root () = Fs.mkdir_p (Mf.root ())
 

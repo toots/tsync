@@ -19,10 +19,7 @@ module C : Conf_lwt.S = struct
     (* [verifyWrites] off: the chunks planted here are named to land one per
        shard, which a real content key cannot be made to do, so the store would
        rightly file every one of them as corrupt. *)
-    Backend_lwt.make ~backend_type:"local"
-      ~get_field:(function
-        | "verifyWrites" -> Some "false" | _ -> Some (status_root ^ "/store"))
-      ()
+    Fixture.local_store ~verify_writes:false (status_root ^ "/store")
 
   (* Two stores, one of them down, so the report has to name which. *)
   let members =
@@ -238,10 +235,7 @@ let () =
       (* A fresh root per run: a write through a route really reaches its store
          now, so a leftover object would answer the read this asserts is a
          miss. *)
-      store =
-        Backend_lwt.make ~backend_type:"local"
-          ~get_field:(fun _ -> Some (Scratch.dir "route-test"))
-          ();
+      store = Fixture.local_store (Scratch.dir "route-test");
       serve_share = None;
       peers = [];
       domain_name = "one";

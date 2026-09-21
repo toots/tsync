@@ -51,64 +51,9 @@ let excerpt body =
     Bodies cross as bigstrings rather than in whatever an implementation moves
     them in, so the whole of that vocabulary — and the copy a conversion would
     make — stays on this side. *)
-module type POOL = sig
-  type 'a io
-  type t
+module type POOL = Http_client_intf.POOL
 
-  (** The pooled connection was unusable and the request never left. *)
-  exception Redial
-
-  val create : keep:int64 -> parallel:int -> unit -> t
-
-  (** [alive] is called as the answer arrives, piece by piece. *)
-  val call :
-    t ->
-    alive:(unit -> unit) ->
-    headers:Cohttp.Header.t ->
-    body:Bigstring.t ->
-    Cohttp.Code.meth ->
-    Uri.t ->
-    (Cohttp.Response.t * Bigstring.t) io
-end
-
-module type S = sig
-  type 'a io
-  type t
-
-  val create :
-    name:string ->
-    timeout:float ->
-    classify:(exn -> Retry.kind) ->
-    health:Health.t ->
-    unit ->
-    t
-
-  val call :
-    t ->
-    headers:(unit -> Cohttp.Header.t io) ->
-    meth:Cohttp.Code.meth ->
-    ?body:Bigstring.t ->
-    Uri.t ->
-    (Cohttp.Response.t * Bigstring.t) io
-
-  val call_retry :
-    t ->
-    headers:(unit -> Cohttp.Header.t io) ->
-    meth:Cohttp.Code.meth ->
-    ?body:Bigstring.t ->
-    string ->
-    Uri.t ->
-    (Cohttp.Response.t * Bigstring.t) io
-
-  val call_text :
-    t ->
-    headers:(unit -> Cohttp.Header.t io) ->
-    meth:Cohttp.Code.meth ->
-    ?body:Bigstring.t ->
-    string ->
-    Uri.t ->
-    (Cohttp.Response.t * string) io
-end
+module type S = Http_client_intf.S
 
 module Make
     (Io : Io.S)

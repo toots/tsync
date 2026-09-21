@@ -9,10 +9,7 @@ open Check
 
 let root = Scratch.dir "tree-children"
 
-module Store =
-  (val Backend_lwt.make ~backend_type:"local"
-         ~get_field:(fun _ -> Some (Filename.concat root "store"))
-         ())
+module Store = (val Fixture.local_store (Filename.concat root "store"))
 
 module C =
   (val Fixture.conf ~domain:"testdom"

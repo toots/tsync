@@ -21,19 +21,8 @@ let log_dir = root ^ "/log"
 let chunk_prefix = "tsync/testdom/chunks/"
 let manifest_prefix = "tsync/testdom/manifests/"
 
-module Src =
-  (val Backend_lwt.make ~backend_type:"local"
-         ~get_field:(function
-           | "verifyWrites" -> Some "false" | _ -> Some src_dir)
-         ()
-      : Backend_lwt.Store)
-
-module Real =
-  (val Backend_lwt.make ~backend_type:"local"
-         ~get_field:(function
-           | "verifyWrites" -> Some "false" | _ -> Some dst_dir)
-         ()
-      : Backend_lwt.Store)
+module Src = (val Fixture.local_store ~verify_writes:false src_dir)
+module Real = (val Fixture.local_store ~verify_writes:false dst_dir)
 
 let heads = ref 0
 let listings = ref 0

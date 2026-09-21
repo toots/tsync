@@ -33,20 +33,7 @@ let action ~socket_path ?item ?arg ?(fields = []) ?domain action =
     @ fields)
 
 (* The same socket for a caller that has a loop to keep turning. *)
-module type TRANSPORT = sig
-  type 'a io
-  type input
-  type output
-  type server
-
-  val connect : string -> (input * output) io
-  val read_line : input -> string io
-  val write_line : output -> string -> unit io
-  val flush : output -> unit io
-  val close : input -> unit io
-  val serve : path:string -> (input * output -> unit io) -> server io
-  val shutdown : server -> unit io
-end
+module type TRANSPORT = Ipc_intf.TRANSPORT
 
 module Make
     (Io : Io.S)

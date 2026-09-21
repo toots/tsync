@@ -31,8 +31,6 @@ module Over
 struct
   open Io_syntax.Make (Io)
 
-  let iter_p f xs = Io.iter_p f xs
-
   module Make (C : Conf.S with type 'a io = 'a Io.t) = struct
     module Lk = Logical_key.Make (C)
     module J = Journal.Make (C)

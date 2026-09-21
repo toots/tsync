@@ -383,6 +383,13 @@ let parse_op meth uri body =
   in
   let q name = Uri.get_query_param uri name in
   let is_obj p = String.starts_with ~prefix:"/o/" p in
+  (* A body naming what a bulk op is about: a JSON list of at most [max]. *)
+  let names ~max op =
+    match Yojson.Safe.from_string (Bigstring.to_string body) with
+      | `List l when List.length l <= max ->
+          op (List.filter_map (function `String x -> Some x | _ -> None) l)
+      | _ | (exception _) -> Bad
+  in
   match (meth, path) with
     | `GET, p when is_obj p -> (
         let range =
@@ -434,39 +441,14 @@ let parse_op meth uri body =
           | None -> Bad)
     | `DELETE, p when is_obj p -> (
         match obj_key () with Some k -> Delete k | None -> Bad)
-    | `POST, "/get-multi" -> (
-        match
-          try Some (Yojson.Safe.from_string (Bigstring.to_string body))
-          with _ -> None
-        with
-          | Some (`List l) when List.length l <= max_keys_per_request ->
-              Get_multi
-                (List.filter_map
-                   (function
-                     | `String x -> Some (Stored_key.listed x) | _ -> None)
-                   l)
-          | _ -> Bad)
-    | `POST, "/children-multi" -> (
-        match
-          try Some (Yojson.Safe.from_string (Bigstring.to_string body))
-          with _ -> None
-        with
-          | Some (`List l) when List.length l <= Backend.max_batch_folders ->
-              Children_multi
-                (List.filter_map (function `String p -> Some p | _ -> None) l)
-          | _ -> Bad)
-    | `POST, "/delete-multi" -> (
-        match
-          try Some (Yojson.Safe.from_string (Bigstring.to_string body))
-          with _ -> None
-        with
-          | Some (`List l) when List.length l <= max_keys_per_request ->
-              Delete_multi
-                (List.filter_map
-                   (function
-                     | `String x -> Some (Stored_key.listed x) | _ -> None)
-                   l)
-          | _ -> Bad)
+    | `POST, "/get-multi" ->
+        names ~max:max_keys_per_request (fun l ->
+            Get_multi (List.map Stored_key.listed l))
+    | `POST, "/children-multi" ->
+        names ~max:Backend.max_batch_folders (fun l -> Children_multi l)
+    | `POST, "/delete-multi" ->
+        names ~max:max_keys_per_request (fun l ->
+            Delete_multi (List.map Stored_key.listed l))
     | `POST, "/copy" -> (
         match (q "src", q "dst") with
           | Some src, Some dst ->
@@ -544,22 +526,8 @@ let within route name =
   List.exists (fun r -> String.starts_with ~prefix:r name) route.roots
   || String.starts_with ~prefix:route.shares_prefix name
 
-(* A request targets the route one of whose [roots] prefixes its key. *)
-let route_key = function
-  | Get k | Head k | Put k | Put_if_absent k | Delete k ->
-      Some (Stored_key.to_string k)
-  | Watch { key; _ } | Get_range { key; _ } -> Some (Stored_key.to_string key)
-  | Delete_multi (k :: _) | Get_multi (k :: _) -> Some (Stored_key.to_string k)
-  | Children_multi (p :: _) -> Some p
-  | Delete_multi [] | Get_multi [] | Children_multi [] -> None
-  | Copy (src, _) -> Some (Stored_key.to_string src)
-  | List_all (p, _)
-  | Share_url p
-  | Chunk_size p
-  | Max_concurrency p
-  | Verified p ->
-      Some p
-  | Bad | Unknown -> None
+(* A request targets the route one of whose [roots] prefixes its first key. *)
+let route_key op = List.nth_opt (op_keys op) 0
 
 (* An older peer answers a [?wait=] request at once, as the plain GET it reads
    it as. This is how a client tells that apart from an answer it really did
@@ -614,9 +582,9 @@ let exec route op ~body =
   let writable key =
     (not route.read_only) || Stored_key.is_in ~prefix:route.shares_prefix key
   in
+  let module B = (val route.store : Backend_lwt.Store) in
   match op with
     | Get key -> (
-        let module B = (val route.store : Backend_lwt.Store) in
         let* data = B.get_opt ~key () in
         match data with
           | Some data ->
@@ -624,7 +592,6 @@ let exec route op ~body =
               respond_chunk data
           | None -> respond ~status:`Not_found "")
     | Get_range { key; offset; length } -> (
-        let module B = (val route.store : Backend_lwt.Store) in
         let* data = B.get_range ~key ~offset ~length () in
         match data with
           | Some data ->
@@ -657,7 +624,6 @@ let exec route op ~body =
             gate.waiters <- gate.waiters - 1;
             Lwt.return_unit)
     | Head key -> (
-        let module B = (val route.store : Backend_lwt.Store) in
         let* e = B.head_opt ~key () in
         match e with
           | Some e ->
@@ -673,7 +639,6 @@ let exec route op ~body =
     | Put_if_absent key ->
         if not (writable key) then reject_ro ()
         else
-          let module B = (val route.store : Backend_lwt.Store) in
           let* held = B.put_if_absent ~key ~data:body () in
           received route (Bigstring.length body);
           sent route (Bigstring.length held);
@@ -683,24 +648,17 @@ let exec route op ~body =
     | Put key ->
         if not (writable key) then reject_ro ()
         else
-          let* () =
-            let module B = (val route.store : Backend_lwt.Store) in
-            B.put ~key ~data:body ()
-          in
+          let* () = B.put ~key ~data:body () in
           received route (Bigstring.length body);
           respond ""
     | Delete key ->
         if not (writable key) then reject_ro ()
         else
-          let* removed =
-            let module B = (val route.store : Backend_lwt.Store) in
-            B.delete ~key ()
-          in
+          let* removed = B.delete ~key () in
           (* 204 says nothing was there, which a client moving a marker acts
              on; an object removed is a plain 200. *)
           respond ~status:(if removed then `OK else `No_content) ""
     | Get_multi keys ->
-        let module B = (val route.store : Backend_lwt.Store) in
         let module Bb = Backend_lwt.Batched (B) in
         (* Sizes the caller has and this end does not, so the answer is bounded
            by the key count alone; the client packed the request to its own byte
@@ -714,7 +672,6 @@ let exec route op ~body =
         let* answered = Bb.get_many ?slots:!batch_reads ~entries () in
         respond_parts ~route ~parts:Http_proxy.Wire.body_parts answered
     | Children_multi prefixes ->
-        let module B = (val route.store : Backend_lwt.Store) in
         let module Bb = Backend_lwt.Batched (B) in
         (* Folders in the order asked, each whole or not at all, and only while
            what is listed fits the byte budget a get-multi is packed to; decided
@@ -751,21 +708,14 @@ let exec route op ~body =
     | Delete_multi keys ->
         if route.read_only then reject_ro ()
         else
-          let* () =
-            let module B = (val route.store : Backend_lwt.Store) in
-            B.delete_multi keys
-          in
+          let* () = B.delete_multi keys in
           respond ""
     | Copy (src_key, dst_key) ->
         if route.read_only then reject_ro ()
         else
-          let* () =
-            let module B = (val route.store : Backend_lwt.Store) in
-            B.copy ~src_key ~dst_key ()
-          in
+          let* () = B.copy ~src_key ~dst_key () in
           respond ""
     | List_all (prefix, max_keys) ->
-        let module B = (val route.store : Backend_lwt.Store) in
         let* entries = B.list_prefix ?max_keys ~prefix () in
         respond (Http_proxy.Wire.entries_to_json entries)
     | Share_url prefix -> (
@@ -812,7 +762,6 @@ let exec route op ~body =
            us reads markers out of that store, so what it may claim about them is
            exactly what the store claims. Answering for ourselves would let a
            proxy in front of an unchecked bucket report a clean domain. *)
-        let module B = (val route.store : Backend_lwt.Store) in
         let* caps = B.capabilities ~prefix () in
         respond
           (Yojson.Safe.to_string

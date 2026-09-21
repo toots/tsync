@@ -9,10 +9,7 @@ open Check
 
 let root = Scratch.dir "status-cost"
 
-module Local =
-  (val Backend_lwt.make ~backend_type:"local"
-         ~get_field:(fun _ -> Some (Filename.concat root "store"))
-         ())
+module Local = (val Fixture.local_store (Filename.concat root "store"))
 
 (* Every listing is counted: what a report costs a store is how often it is
    asked, and a remote store asked once a second is the whole complaint. *)

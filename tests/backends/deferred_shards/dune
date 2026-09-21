@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_test_harness
+   -open
    Tsync_core
    -open
    Tsync_backend_lwt
@@ -11,6 +13,7 @@
    Tsync_local_backend_lwt))
  (name deferred_shards)
  (libraries
+  tsync_test_harness
   tsync-libs.core
   tsync_core
   tsync_backend_lwt

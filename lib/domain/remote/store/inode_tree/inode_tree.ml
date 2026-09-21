@@ -5,53 +5,7 @@
    manifest, told apart only by their body. Callers keep their own folds — they
    want different things — and share only that classification step. *)
 
-type body = Dir of Folder.marker | File of Manifest.t
-type entry = { bkey : Stored_key.t; body : body }
-
-type unusable =
-  [ `Unreadable of exn | `Unclassifiable of exn | `Disowned of Folder.anchor ]
-
-type on_unusable = [ `Fail | `Skip of Stored_key.t -> unusable -> unit ]
-
-module type S = sig
-  type 'a io
-  type pool
-
-  val namespace_prefix : string -> Stored_key.t
-
-  val children :
-    ?on_unusable:on_unusable ->
-    ?refresh_index:bool ->
-    ?on_index:(Stored_key.t -> unit) ->
-    ?slots:pool ->
-    folder_id:string ->
-    unit ->
-    entry list io
-
-  val find :
-    folder_id:string ->
-    string list ->
-    [ `File of entry | `Folder of string | `Missing ] io
-
-  val fold_tree :
-    ?on_unusable:on_unusable ->
-    ?refresh_index:bool ->
-    ?on_index:(Stored_key.t -> unit) ->
-    ?slots:pool ->
-    folder_id:string ->
-    key:Logical_key.t ->
-    ('a -> Logical_key.t -> entry -> 'a io) ->
-    'a ->
-    'a io
-end
-
-module type OVER = sig
-  type 'a io
-  type pool
-
-  module Make (C : Conf.S with type 'a io = 'a io) :
-    S with type 'a io := 'a io and type pool = pool
-end
+include Inode_tree_intf
 
 module Over
     (Io : Io.S)

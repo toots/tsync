@@ -20,11 +20,7 @@ let dirs = 16
 let per_dir = 500
 let entries = dirs * per_dir
 
-module B =
-  (val Backend_lwt.make ~backend_type:"local"
-         ~get_field:(fun _ -> Some store)
-         ()
-      : Backend_lwt.Store)
+module B = (val Fixture.local_store store)
 
 let plant () =
   for d = 0 to dirs - 1 do

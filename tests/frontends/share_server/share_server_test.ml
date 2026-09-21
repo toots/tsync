@@ -27,12 +27,7 @@ module C : Conf_lwt.S = struct
   let journal_prefix = "tsync/testdom/journal/"
   let cursor_key = Stored_key.in_space ~prefix:"tsync/testdom/" "cursor"
   let shares_prefix = "tsync/shares/"
-
-  let store =
-    Backend_lwt.make ~backend_type:"local"
-      ~get_field:(fun _ -> Some store_dir)
-      ()
-
+  let store = Fixture.local_store store_dir
   let members = [Backend.member ~name:"local" store]
   let cache_root = cache_dir
   let data_dir = data_dir
@@ -61,9 +56,7 @@ module Sh = Share_server.Make (C)
 let backend () = C.store
 
 let write_local path content =
-  let oc = open_out_bin path in
-  output_string oc content;
-  close_out oc
+  Out_channel.with_open_bin path (fun oc -> output_string oc content)
 
 (* Upload [content] as the domain-relative path [rel]; returns its backend key. *)
 let upload rel content =
