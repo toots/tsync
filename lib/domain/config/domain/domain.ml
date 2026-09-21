@@ -261,5 +261,10 @@ let reading_from name (module C : Conf_lwt.S) : (module Conf_lwt.S) =
            fan-out asks the [get_opt] above. *)
         let get_many = Src.get_many
         let list_many = Src.list_many
+
+        (* With them too: every read served here goes to [Src], so the
+           composite's "a domain is not a member, never held" would be a report
+           about a store this one does not ask. *)
+        let health = Src.health
       end : Backend_lwt.Store)
   end : Conf_lwt.S)
