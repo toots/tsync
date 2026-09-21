@@ -52,9 +52,6 @@ let release dir =
         (try Unix.close fd with _ -> ());
         Hashtbl.remove owned dir
 
-(** The calls this makes of a filesystem, spelled as {!Fs} spells them so that
-    one can be handed over as it stands. *)
-
 module Make
     (Io : Io.S)
     (Clock : Clock.S with type 'a io := 'a Io.t)

@@ -12,7 +12,7 @@ end
 module Over
     (Io : Io.S)
     (Fs : Fs.S with type 'a io := 'a Io.t)
-    (Sys : Syscalls.S with type 'a io := 'a Io.t)
+    (Sys : Syscalls.S with type 'a io := 'a Io.t and type fd = Fs.fd)
     (Bounded : Bounded.S with type 'a io := 'a Io.t)
     (Clock : Clock.S with type 'a io := 'a Io.t)
     (Watcher : WATCHER with type 'a io := 'a Io.t) =
@@ -34,7 +34,7 @@ struct
     let* fd = Sys.openfile tmp [Unix.O_WRONLY; Unix.O_CREAT] 0o644 in
     Io.finalize
       (fun () ->
-        let* (_ : int) = Fs.write tmp data ~offset:0L in
+        let* () = Fs.pwrite_all fd data ~offset:0 in
         Sys.fsync fd)
       (fun () -> Sys.close fd)
 
@@ -488,7 +488,9 @@ struct
             (fun a b -> Stored_key.compare a.Backend.key b.Backend.key)
             !entries
         in
-        match max_keys with Some n -> List.take n entries | None -> entries
+        match max_keys with
+          | Some n -> List.filteri (fun i _ -> i < n) entries
+          | None -> entries
 
       (* Probed once: the device under a configured root does not change, and this
          is asked with a request waiting on the answer. *)

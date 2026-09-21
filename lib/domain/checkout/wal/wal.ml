@@ -90,9 +90,6 @@ module Job = struct
   let of_string body = Some (of_body body)
 end
 
-(* What this needs of a durable log, which is the record half of a queue and
-   none of the draining. *)
-
 module Make (Io : Io.S) (R : RECORDS with type 'a io := 'a Io.t) = struct
   type records = R.t
 

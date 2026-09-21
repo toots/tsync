@@ -273,8 +273,8 @@ struct
     let rec go = function
       | [] -> Io.return ()
       | batch ->
-          let here = List.take bulk_delete_limit batch in
-          let rest = List.drop bulk_delete_limit batch in
+          let here = List.filteri (fun i _ -> i < bulk_delete_limit) batch in
+          let rest = List.filteri (fun i _ -> i >= bulk_delete_limit) batch in
           let request = delete_body here in
           (* Required, and answered with a 400 naming it when absent: this is the
              one request whose body the store checks before acting on it, a

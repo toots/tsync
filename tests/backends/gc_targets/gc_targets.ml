@@ -27,6 +27,9 @@ module Backfill = (val Fixture.local_store backfill_dir)
 
 module C =
   (val Fixture.conf
+       (* Reads and writes go to the main alone: this test is about what {!Gc}
+            does to the copies, not about fan-out, and a composite would put
+            every chunk on every store before the collection even started. *)
          ~store:(module Main : Backend_lwt.Store)
          ~members:
            [

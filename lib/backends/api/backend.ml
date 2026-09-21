@@ -66,9 +66,6 @@ let merge_caps cs =
      is nobody's claim, so it is not one either. *)
   { merged with verified = cs <> [] && List.for_all (fun c -> c.verified) cs }
 
-(** What {!S.list_many} answers for one folder: its listing whole, and a body
-    for each child object in it. *)
-
 (* Runs a request may ask for at once. Both bounds are needed: the count is what
    a request line carries, and the byte budget is what the answer costs in
    memory, which a folder of large manifests reaches first. *)

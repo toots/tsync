@@ -99,6 +99,9 @@ module Replica =
 
 module C =
   (val Fixture.conf
+       (* The real composite, deliberately. A test that hands {!Gc} the main
+            alone cannot see anything being fanned out to a copy — which is
+            exactly how the marker reaching every replica went unnoticed. *)
          ~store:
            (Domain_store_lwt.make
               ~mains:
@@ -119,9 +122,6 @@ module C =
              Backend.member ~role:`Replica ~backend_type:"local"
                ~local_path:replica_dir ~name:"replica"
                (module Replica : Backend_lwt.Store);
-             (* The real composite, deliberately. A test that hands {!Gc} the main alone
-     cannot see anything being fanned out to a copy — which is exactly how the
-     marker reaching every replica went unnoticed. *)
            ]
          ~root ()
       : Conf_lwt.S)

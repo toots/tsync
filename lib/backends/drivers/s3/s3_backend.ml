@@ -186,8 +186,8 @@ struct
     let rec go = function
       | [] -> Io.return ()
       | batch ->
-          let here = List.take 1000 batch in
-          let rest = List.drop 1000 batch in
+          let here = List.filteri (fun i _ -> i < 1000) batch in
+          let rest = List.filteri (fun i _ -> i >= 1000) batch in
           let objects = List.map (fun key -> { key; version_id = None }) here in
           let* res =
             with_retry t "delete_multi" (fun () ->

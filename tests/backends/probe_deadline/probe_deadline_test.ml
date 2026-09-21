@@ -21,12 +21,10 @@ module C =
   (val Fixture.conf ~domain:"wedgedom" ~client_name:"test-client" ~max_uploads:2
          ~max_downloads:3 ~socket_path:(root ^ "/absent.sock") ~chunk_size:65536
          ~cache_chunk_size:65536
-         ~store:
-           (Fixture.local_store
-              (root ^ "/store")
-              (* The store that never answers, declared as the daemon would. *))
+         ~store:(Fixture.local_store (root ^ "/store"))
          ~members:
            [
+             (* The store that never answers, declared as the daemon would. *)
              Backend.member ~name:"wedged" ~backend_type:"http-proxy"
                ~config:[("url", "http://wedged.example:8000")]
                (module Hung : Backend_lwt.Store);

@@ -18,8 +18,8 @@ end
 
 module Over
     (Io : Io.S)
-    (_ : Fs.S with type 'a io := 'a Io.t)
-    (_ : Syscalls.S with type 'a io := 'a Io.t)
+    (Fs : Fs.S with type 'a io := 'a Io.t)
+    (_ : Syscalls.S with type 'a io := 'a Io.t and type fd = Fs.fd)
     (_ : Bounded.S with type 'a io := 'a Io.t)
     (_ : Clock.S with type 'a io := 'a Io.t)
     (_ : WATCHER with type 'a io := 'a Io.t) : sig

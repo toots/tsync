@@ -31,8 +31,9 @@ module C =
   (val Fixture.conf ~domain:"test" ~client_name:"Test" ~max_uploads:2
          ~max_downloads:downloads
          ~socket_path:(Filename.concat root "s.sock")
-         ~chunk_size:csize ~cache_chunk_size:csize ~store:unused_store
-         ~members:[] ~root ()
+         ~chunk_size:csize
+           (* One group per stored chunk, which is the shape that fans out most. *)
+         ~cache_chunk_size:csize ~store:unused_store ~members:[] ~root ()
       : Conf_lwt.S)
 
 let gate, release = Lwt.wait ()

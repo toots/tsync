@@ -25,6 +25,11 @@ module Counting : Backend_lwt.Store = struct
   let put ~key ~data () =
     incr puts;
     put ~key ~data ()
+
+  let put_if_absent ~key ~data () =
+    let* held = put_if_absent ~key ~data () in
+    if held == data then incr puts;
+    Lwt.return held
 end
 
 module C =

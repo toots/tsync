@@ -35,11 +35,6 @@ let default_attempts = 8
 let held ~name ~op health =
   failed ~kind:Transient ~op:(name ^ " " ^ op) (Health.describe health)
 
-(** The one retry loop for a single request, jittered so a fleet that failed
-    together does not return together. A caller decides only what [classify]
-    means for it; the curve, the cap and the log line are shared, so two of them
-    cannot drift into retrying differently. {!Cancelled} is never retried. *)
-
 module Make (Io : Io.S) (Clock : Clock.S with type 'a io := 'a Io.t) :
   LOOP with type 'a io := 'a Io.t = struct
   (* [classify] comes from whoever built the loop, so a caller that knows more
