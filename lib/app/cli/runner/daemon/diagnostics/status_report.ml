@@ -33,7 +33,7 @@ type answer = {
 
    Not for a collector asking its own frontends, which probe nothing and would
    otherwise be waited on for as long as the collector itself is. *)
-let cold_timeout () = !Health.probe_timeout +. 2.
+let cold_timeout () = !Health.probe_timeout +. !Diagnostics.listing_grace +. 5.
 
 (* Never raises: a socket that does not answer is an answer saying so. A report
    whose job is to show what is wrong must not go missing when something is. *)

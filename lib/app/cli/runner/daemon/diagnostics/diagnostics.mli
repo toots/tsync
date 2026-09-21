@@ -11,6 +11,11 @@
     the launcher forks reports the launcher's uptime. *)
 val restart : unit -> unit
 
+(** How long {!Make.domain_json} waits on a listing already running, once the
+    probe before it has come back. Read by {!Status_report}, which must not give
+    up on this daemon before it has had both. *)
+val listing_grace : float ref
+
 (** This process: uptime, CPU, GC and Lwt counters. [extra] is merged in for a
     caller with something to add — the http proxy reports its listener. *)
 val self_json :
