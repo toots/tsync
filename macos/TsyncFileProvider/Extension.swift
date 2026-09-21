@@ -206,9 +206,12 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension,
             let pending = unsupported(fields)
             do {
                 // A package (.rtfd, .logicx, .app) is a directory whose type only
-                // conforms to one, and a flat file named like one brings contents.
+                // conforms to one, and a flat file named like one brings
+                // contents. The system offers contents for everything that is
+                // not a directory, so an offer settles it even where the URL is
+                // absent -- a nil URL alone would make such a file a folder.
                 let isDirectory = itemTemplate.contentType == .folder
-                    || (url == nil
+                    || (url == nil && !fields.contains(.contents)
                         && itemTemplate.contentType?.conforms(to: .directory) == true)
                 // A reimport replays everything on disk through this call, and
                 // re-writing a file that is already there would re-upload the
