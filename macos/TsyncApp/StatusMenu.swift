@@ -69,13 +69,19 @@ final class StatusMenu: NSObject, NSMenuDelegate {
 
     // MARK: - Polling
 
+    /// A daemon slower to answer than the interval would otherwise collect a
+    /// request every three seconds on top of the ones already waiting.
+    private var polling = false
+
     /// One call, not one per domain: this daemon serves them all over the one
     /// socket, and the summary and the icon are decided across the set.
     private func poll() {
-        guard let client = clients.first else { return }
+        guard let client = clients.first, !polling else { return }
+        polling = true
         Task {
             let fresh = try? await client.menu()
             await MainActor.run {
+                self.polling = false
                 if let fresh { self.menu = fresh }
                 self.render()
             }
