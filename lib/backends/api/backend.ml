@@ -1,28 +1,5 @@
-type file_entry = {
-  key : Stored_key.t;
-  size : int;
-  last_modified : float;
-  etag : string option;
-      (** What the store calls this object's version, when it has a name for
-          one: an S3 or GCS listing carries it, a filesystem has none.
-
-          The only validator worth caching an object's body against. Size and
-          [last_modified] are not: S3 reports whole seconds, and a manifest
-          rewritten inside one to a body of the same length — same name, same
-          chunk count — is invisible in both. *)
-}
-
-(* Trimmed on the way in, in the one place it happens: a store comparing a body
-   against a token that reached it over a wire must not conclude "changed" from
-   whitespace. *)
-module Watch_token = struct
-  type t = string
-
-  let of_body body = String.trim (Bigstring.to_string body)
-  let to_wire token = token
-  let of_wire s = String.trim s
-  let equal = String.equal
-end
+include Backend_intf
+module Watch_token = Watch_token
 
 let default_watch_interval = 2.
 
@@ -58,13 +35,6 @@ let () =
     | Backend_error msg -> Some (Printf.sprintf "Backend.Backend_error(%S)" msg)
     | _ -> None)
 
-type caps = {
-  share_url : string option;
-  chunk_size : int option;
-  max_concurrency : int option;
-  verified : bool;
-}
-
 let no_caps =
   {
     share_url = None;
@@ -95,89 +65,6 @@ let merge_caps cs =
      store is enough to make "no corruption found" mean "nothing looked". Empty
      is nobody's claim, so it is not one either. *)
   { merged with verified = cs <> [] && List.for_all (fun c -> c.verified) cs }
-
-(** What {!S.list_many} answers for one folder: its listing whole, and a body
-    for each child object in it. *)
-type children = {
-  listed : file_entry list;
-  bodies : (Stored_key.t * Bigstring.t option) list;
-}
-
-module type S = sig
-  type 'a io
-
-  val put : key:Stored_key.t -> data:Bigstring.t -> unit -> unit io
-  val get : key:Stored_key.t -> unit -> Bigstring.t io
-
-  (** [None] when the key does not exist; other failures raise. Saves the HEAD
-      round trip of [head_opt] + [get] when the body is wanted. *)
-  val get_opt : key:Stored_key.t -> unit -> Bigstring.t option io
-
-  val get_range :
-    key:Stored_key.t ->
-    offset:int ->
-    length:int ->
-    unit ->
-    Bigstring.t option io
-
-  val put_if_absent :
-    key:Stored_key.t -> data:Bigstring.t -> unit -> Bigstring.t io
-
-  val head_opt : key:Stored_key.t -> unit -> file_entry option io
-  val delete : key:Stored_key.t -> unit -> bool io
-  val delete_multi : Stored_key.t list -> unit io
-  val copy : src_key:Stored_key.t -> dst_key:Stored_key.t -> unit -> unit io
-  val list_prefix : ?max_keys:int -> prefix:string -> unit -> file_entry list io
-
-  (** Return when the object at [key] may have changed, or after however long
-      this store thinks is sensible to wait before saying so. A hint: waking
-      early is allowed and waking late is not, the caller re-reading and
-      comparing either way, and a store may watch something coarser than [key].
-      Bounded always, so a watch that cannot fire slows a caller rather than
-      stopping it. *)
-  val watch :
-    key:Stored_key.t -> last_seen:Watch_token.t option -> unit -> unit io
-
-  (** A native multi-object read, or [None] from a store with none — which is
-      every store but http-proxy, S3 having no multi-object GET and the GCS
-      batch API carrying metadata only. Declared rather than implemented, so a
-      store without one says so and {!Batched} supplies the fan-out. *)
-  val get_many :
-    (entries:file_entry list ->
-    unit ->
-    (Stored_key.t * Bigstring.t option) list io)
-    option
-
-  (** A folder's listing with the bodies of its child objects, for many folders
-      in one request, or [None] from a store with none. Answered in request
-      order; a folder the store left out, for a byte budget it alone knows, is
-      the caller's to ask for singly. *)
-  val list_many :
-    (prefixes:string list -> unit -> (string * children) list io) option
-
-  val verify_all :
-    chunk_prefix:string -> unit -> [ `Queued of int | `Unsupported ] io
-
-  val discard :
-    chunk_prefix:string ->
-    run:string ->
-    name:string ->
-    keys:Stored_key.t list ->
-    unit ->
-    [ `Queued | `Unsupported ] io
-
-  (** What this store can tell a client about [prefix]'s domain beyond holding
-      its bytes. See {!caps}; [no_caps] is the honest answer for every store
-      that only holds bytes. *)
-  val capabilities : prefix:string -> unit -> caps io
-
-  val fast_read : bool
-  val local_path : string option
-
-  (** Whether the store's link is there, as its own requests have found it: what
-      a caller with somewhere else to read from asks first. *)
-  val health : Health.t
-end
 
 (* Runs a request may ask for at once. Both bounds are needed: the count is what
    a request line carries, and the byte budget is what the answer costs in
@@ -277,6 +164,20 @@ let deferred members =
   List.filter (fun m -> m.role = `Replica || m.role = `Backfill) members
 
 let named name members = List.find_opt (fun m -> m.name = name) members
+
+let named_exn name members =
+  match List.filter (fun m -> m.name = name) members with
+    | [m] -> m
+    | [] ->
+        failwith
+          (Printf.sprintf "no backend named %s (available: %s)" name
+             (String.concat ", " (List.map (fun m -> m.name) members)))
+    | _ ->
+        failwith
+          (Printf.sprintf
+             "backend name %s is ambiguous; set distinct \"name\" fields in \
+              the config"
+             name)
 
 (* What the batched reads need of a pool. *)
 
@@ -413,9 +314,6 @@ struct
               answered;
             answered)
           Inner.list_many
-
-      let local_path = Inner.local_path
-      let health = Inner.health
     end : Store)
 
   let make ?traffic ~backend_type ~get_field () =

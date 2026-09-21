@@ -1,39 +1,8 @@
 module Ek = Journal.Entry_key
 
 (* What this needs below it. *)
-module type S = sig
-  type 'a io
-
-  (** Files with an active or queued upload. *)
-  val pending : unit -> int
-
-  val uploading : unit -> Logical_key.t list
-
-  (** Bytes still owed: everything queued plus everything in flight. Counted
-      whole per file, so a file half sent still counts for its full size. *)
-  val pending_bytes : unit -> int64
-
-  (** Uploads completed since the daemon started. *)
-  val completed_count : unit -> int
-
-  (** Park the workers between uploads. Queued work is kept, so {!pending} keeps
-      reporting it, and {!drain} still runs to completion. Not persisted: a
-      restart resumes. *)
-  val set_paused : bool -> unit
-
-  val paused : unit -> bool
-  val start : on_upload_done:(key:Logical_key.t -> unit io) -> unit
-  val drain : unit -> unit io
-  val wait_uploaded : Logical_key.t -> unit io
-end
-
-module type OVER = sig
-  type 'a io
-
-  module Make
-      (_ : Conf.S with type 'a io = 'a io)
-      (_ : File.Owing with type 'a io := 'a io) : S with type 'a io := 'a io
-end
+module type S = Sync_queue_intf.S
+module type OVER = Sync_queue_intf.OVER
 
 module Over
     (Io : Io.S)
@@ -52,7 +21,6 @@ struct
       (F : File.Owing with type 'a io := 'a Io.t) :
     S with type 'a io := 'a Io.t = struct
     module Js = Js.Make (C)
-    module Lk = Logical_key.Make (C)
     module W = W.Make (C)
 
     (* The queue's own slot identity, not a name: one string per file so a second
@@ -128,12 +96,6 @@ struct
       Q.keyed ~workers:(max 1 C.max_uploads) ~weight:F.record_size
         ~name:"upload" ~log:W.log ~key:slot_of ~classify:Backend.classify
         ~poison:Durable_queue.Stop ~run ()
-
-    (* [Prepared]: whatever staged data the caller read is what this names, so the
-       upload is owed from here on. *)
-    let post ~entry_key (r : Wal.record) =
-      Q.post ~id:(Ek.to_string entry_key) queue
-        { r with Wal.state = Wal.Prepared }
 
     let cancel_put key = Q.cancel queue key
     let pending () = Q.owed queue

@@ -12,10 +12,6 @@ type state
 
 external create : int -> state = "caml_xxh3_state_create"
 external update : state -> string -> unit = "caml_xxh3_state_update"
-
-external update_bigstring : state -> Bigstringaf.t -> unit
-  = "caml_xxh3_state_update_bigstring"
-
 external digest : state -> int64 = "caml_xxh3_state_digest"
 
 let digest_hex s = Printf.sprintf "%016Lx" (digest s)

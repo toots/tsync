@@ -48,3 +48,9 @@ module Refuses : Backend_lwt.Store
     clamped at the end of the object as every driver's is, so a double cannot
     answer a range a real store would have cut short. *)
 val range_of : offset:int -> length:int -> Bigstring.t -> Bigstring.t
+
+(** A store that is a table in memory and nothing else, a fresh one per
+    application: for a test about what reaches a store rather than about the
+    store. A test counting or gating a verb includes it and overrides that verb.
+*)
+module Memory () : Backend_lwt.Store

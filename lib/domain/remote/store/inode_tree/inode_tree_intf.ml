@@ -1,0 +1,101 @@
+type body = Dir of Folder.marker | File of Manifest.t
+type entry = { bkey : Stored_key.t; body : body }
+
+(** Why a child yielded no {!entry}: it could not be fetched, or its body is
+    neither a marker nor a clean manifest, which is what a write in flight looks
+    like. [`Unclassifiable] carries the parse failure, since that is the only
+    account of what the body was. [`Disowned] is a folder marker the folder's
+    own anchor contradicts: the folder lives elsewhere and this marker is what a
+    move left behind; it carries the anchor, which says where. *)
+type unusable =
+  [ `Unreadable of exn | `Unclassifiable of exn | `Disowned of Folder.anchor ]
+
+(** What a child that yields no entry costs the walk. [`Fail] propagates the
+    fetch error, so a caller deciding what to delete cannot mistake it for an
+    absent subtree; [`Skip f] carries on, telling [f] what was passed over.
+
+    Reported rather than merely skipped because callers disagree about what a
+    skip means: a resync that parsed nothing has to say so rather than claiming
+    success, while a listing that only renders what it found does not care. An
+    unclassifiable body is skipped under both, being mid-write, and so is a
+    disowned marker, being no folder at all. *)
+type on_unusable = [ `Fail | `Skip of Stored_key.t -> unusable -> unit ]
+
+module type S = sig
+  type 'a io
+  type pool
+
+  (** The backend prefix a folder's children live under. *)
+  val namespace_prefix : string -> Stored_key.t
+
+  (** Direct children of [folder_id], [`Fail] by default.
+
+      One listing, then whatever {!Folder_index} does not already hold, read in
+      one request where the store has a way to make one. [slots] bounds those
+      reads — the domain's download budget unless a caller passes a bound of its
+      own, which is how [tsync sync --full] honours [--parallelism]. A pool
+      passed here must outlive the call and must not be one the fold body asks
+      again.
+
+      [refresh_index] writes the folder's index back when enough of it was not
+      covered to pay for the round trip, and is for a caller that walks the tree
+      and may write: a read-only domain and a share being served must leave it
+      alone. Best effort either way — a read does not fail because its cache
+      could not be refreshed.
+
+      [on_index] is told the folder's index key where the listing offered one.
+      It is not a child and no fold sees it, but it is an object in the
+      namespace holding a copy of every manifest body in it, so a caller
+      deleting the folder needs it named or nothing ever reclaims it. *)
+  val children :
+    ?on_unusable:on_unusable ->
+    ?refresh_index:bool ->
+    ?on_index:(Stored_key.t -> unit) ->
+    ?slots:pool ->
+    folder_id:string ->
+    unit ->
+    entry list io
+
+  (** What [names] lead to from [folder_id] at one read a name and no listing: a
+      folder's id, [folder_id] itself for [[]], and [`Missing] for a marker
+      {!children} would not have listed.
+
+      Fails on a body caught mid-write rather than answering [`Missing] for an
+      object that is there. *)
+  val find :
+    folder_id:string ->
+    string list ->
+    [ `File of entry | `Folder of string | `Missing ] io
+
+  (** Depth-first over the subtree under [folder_id]. [f acc rel entry] sees
+      each entry with the real relative path of the folder holding it, [rel]
+      naming that starting folder. A folder is visited before it is descended
+      into.
+
+      Folders are fetched ahead of the visit, up to the width of [slots] at
+      once, so a deep tree does not pay a round trip per folder in series; the
+      visits themselves stay in order.
+
+      Under [`Skip], a folder whose fetch failed transiently is walked again
+      after the rest, and only a second failure is reported, under the folder's
+      namespace key. *)
+  val fold_tree :
+    ?on_unusable:on_unusable ->
+    ?refresh_index:bool ->
+    ?on_index:(Stored_key.t -> unit) ->
+    ?slots:pool ->
+    folder_id:string ->
+    key:Logical_key.t ->
+    ('a -> Logical_key.t -> entry -> 'a io) ->
+    'a ->
+    'a io
+end
+
+(** The shape a consumer takes: {!S} for whichever domain it is applied to. *)
+module type OVER = sig
+  type 'a io
+  type pool
+
+  module Make (C : Conf.S with type 'a io = 'a io) :
+    S with type 'a io := 'a io and type pool = pool
+end

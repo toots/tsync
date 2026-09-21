@@ -1,0 +1,69 @@
+(** What the mirror knows is in a folder: the domain's name for an item, and the
+    size and mtime held for it.
+
+    Not a {!Backend.file_entry}: a store's listing answers with the key an
+    object is filed under and its identity for the bytes, neither of which a
+    mirror of names has — its keys are hashed, and it is asked what a folder
+    contains, not what a bucket does. *)
+type listed = { key : Logical_key.t; size : int; mtime : float }
+
+(** Where a file's bytes are. [`Online_only] when any cache chunk its sidecar's
+    chunks group into is not held whole; [`Cached] when every one is, or the
+    file has unsynced edits; [`Pinned until] when every one also carries a live
+    pin, [until] being the earliest deadline among them. Synchronous, for the
+    CLI listing. *)
+type availability = [ `Online_only | `Cached | `Pinned of float ]
+
+module type S = sig
+  type 'a io
+
+  val rename : src_key:Logical_key.t -> dst_key:Logical_key.t -> unit io
+  val create_dir : Logical_key.t -> unit io
+  val delete_dir : Logical_key.t -> unit io
+
+  (** Immediate children of [prefix]: file entries (logical keys, size, mtime)
+      and real subdirectory names, serving both readdir and frontend
+      enumeration.
+
+      Internal markers are filtered, names are real rather than escaped, and a
+      staged file's own size and mtime win — it is listed even when nothing of
+      it has been published. *)
+  val list_children :
+    prefix:Logical_key.t -> unit -> (listed list * string list) io
+
+  (** Every file entry under [prefix], recursively. *)
+  val list_tree : prefix:Logical_key.t -> unit -> listed list io
+
+  (** Create the checkout root. Every process serving the domain needs this and
+      nothing more. *)
+  val ensure_root : unit -> unit io
+
+  (** File one child of [parent] as the store lists it, answering the key it was
+      filed under and what the mirror held there before: nothing or a different
+      item ([`Changed]), the same item ([`Same]), or for a folder another id
+      ([`Replaced id]). A resync and a browse both go through this, so the tree
+      they leave behind is the same one, and a resync reports from the answer.
+      [on_other] is what a folder holding another id becomes: a resync restates
+      the store's, a browse keeps the one references already name. *)
+  val record :
+    parent:Logical_key.t ->
+    on_other:[ `Replace | `Keep ] ->
+    Inode_tree.entry ->
+    (Logical_key.t * [ `Same | `Changed | `Replaced of string ]) io
+
+  (** Drop every published entry last written before [cutoff]: what a walk that
+      rewrote everything the store still has did not touch. Answers the ops a
+      reader of the applied entries takes for it, named as the walk names what
+      arrives. A folder whose id the index now places elsewhere is reported as
+      the move from here to there; nothing beneath a dropped folder is reported.
+      Only after a walk that reached everything, a folder it could not read
+      being not one that is gone. *)
+  val sweep_stale : cutoff:float -> unit -> Journal.op list io
+end
+
+(** The shape a consumer takes: {!S} for whichever domain it is applied to. *)
+module type OVER = sig
+  type 'a io
+
+  module Make (C : Conf.S with type 'a io = 'a io) : S with type 'a io := 'a io
+end

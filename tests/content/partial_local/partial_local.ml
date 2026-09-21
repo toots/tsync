@@ -15,10 +15,7 @@ open Check
 
 let root = Scratch.dir "partial-local"
 
-module Disk =
-  (val Backend_lwt.make ~backend_type:"local"
-         ~get_field:(fun _ -> Some (Filename.concat root "store"))
-         ())
+module Disk = (val Fixture.local_store (Filename.concat root "store"))
 
 (* Everything a disk does, and none of its cheapness: reads take the range they
    were asked for, as they would over a link. *)

@@ -369,10 +369,6 @@ struct
         let delete_multi = delete_multi
         let copy = copy
         let list_all = list_all
-
-        let put_text t ~key ~data () =
-          put t ~key ~data:(Bigstring.of_string data) ()
-
         let share_url t = t.share_url
         let health t = t.health
       end)

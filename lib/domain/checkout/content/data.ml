@@ -4,62 +4,8 @@
    backing it and fetches what is absent, the store answering "is it local?" by
    the body existing. Read-ahead applies to sequential reads only. *)
 
-module type S = sig
-  type 'a io
-
-  val pread :
-    id:string ->
-    ?stream:string ->
-    manifest:Manifest.t ->
-    Bigstring.t ->
-    offset:int64 ->
-    int io
-
-  val published : Logical_key.t -> Manifest.t option io
-
-  val pread_key :
-    ?stream:string -> Logical_key.t -> Bigstring.t -> offset:int64 -> int io
-
-  val write : Logical_key.t -> Bigstring.t -> offset:int64 -> int io
-  val truncate : Logical_key.t -> int64 -> unit io
-  val create : Logical_key.t -> unit io
-  val sync : Logical_key.t -> ?cancel:bool ref -> unit -> unit io
-  val enforce_chunk_cap : unit -> Sweep.swept io
-  val chunk_stats : unit -> (int * int * int) io
-  val downloads_in_flight : unit -> int
-  val read_ahead_in_flight : unit -> int
-  val downloads_completed_count : unit -> int
-  val stage_whole : Logical_key.t -> src_path:string -> unit io
-  val chunk_residency : Logical_key.t -> (int * int) io
-  val ensure_local : ?keep:float -> Logical_key.t -> unit io
-  val assemble_to : Logical_key.t -> dst_path:string -> unit io
-
-  val fetch_range :
-    Logical_key.t -> dst_path:string -> offset:int -> length:int -> int io
-
-  val download_progress : Logical_key.t -> (int * int) option
-
-  type pulling = {
-    key : string;
-    bytes : int;
-    size : int;
-    seconds : float;
-    rate : float;
-  }
-
-  val pulling_now : ?now:float -> unit -> pulling list
-  val forget_chunks : Logical_key.t -> unit io
-  val discard_staged : Logical_key.t -> unit io
-  val staged_body_path : Logical_key.t -> string option io
-end
-
-module type OVER = sig
-  type 'a io
-
-  module Make
-      (C : Conf.S with type 'a io = 'a io)
-      (R : Remote.S with type 'a io := 'a io) : S with type 'a io := 'a io
-end
+module type S = Data_intf.S
+module type OVER = Data_intf.OVER
 
 module Over
     (Io : Io.S)

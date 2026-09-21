@@ -3,11 +3,8 @@ open Common
 
 let cmd : unit Cmd.t =
   let path_arg =
-    Arg.(
-      value
-      & pos 0 (some (Location.conv `In_domain)) None
-      & info [] ~docv:"PATH"
-          ~doc:"Folder to list, domain-relative or as $(b,DOMAIN:/path).")
+    Location.path_arg
+      ~doc:"Folder to list, domain-relative or as $(b,DOMAIN:/path)."
   in
   let deleted_arg =
     Arg.(

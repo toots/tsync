@@ -125,6 +125,10 @@ let conv reading =
     ~pp:(fun ppf a -> Format.pp_print_string ppf a.token)
     ()
 
+let path_arg ~doc =
+  let in_domain = conv `In_domain in
+  Cmdliner.Arg.(value & pos 0 (some in_domain) None & info [] ~docv:"PATH" ~doc)
+
 (* [tsync start --mount] moves the mount without touching the config, and only
    ever for a lone domain ({!Cmd_start}), so a path under one belongs to that
    domain and the running daemon is the only thing that knows where it put it. *)

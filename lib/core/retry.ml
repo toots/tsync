@@ -1,7 +1,4 @@
-type kind = Transient | Permanent
-
-exception Failed of { kind : kind; op : string; detail : string }
-exception Cancelled
+include Retry_intf
 
 let failed ~kind ~op detail = Failed { kind; op; detail }
 
@@ -37,23 +34,6 @@ let default_attempts = 8
 
 let held ~name ~op health =
   failed ~kind:Transient ~op:(name ^ " " ^ op) (Health.describe health)
-
-(** The one retry loop for a single request, jittered so a fleet that failed
-    together does not return together. A caller decides only what [classify]
-    means for it; the curve, the cap and the log line are shared, so two of them
-    cannot drift into retrying differently. {!Cancelled} is never retried. *)
-module type LOOP = sig
-  type 'a io
-
-  val with_retry :
-    ?max_attempts:int ->
-    ?health:Health.t ->
-    classify:(exn -> kind) ->
-    name:string ->
-    op:string ->
-    (unit -> 'a io) ->
-    'a io
-end
 
 module Make (Io : Io.S) (Clock : Clock.S with type 'a io := 'a Io.t) :
   LOOP with type 'a io := 'a Io.t = struct

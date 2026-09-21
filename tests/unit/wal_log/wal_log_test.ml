@@ -13,10 +13,7 @@ open Check
 let root = Scratch.dir "wal-log"
 let domain = "testdom"
 
-module Store =
-  (val Backend_lwt.make ~backend_type:"local"
-         ~get_field:(fun _ -> Some (Filename.concat root "store"))
-         ())
+module Store = (val Fixture.local_store (Filename.concat root "store"))
 
 let conf ~domain =
   Fixture.conf ~domain

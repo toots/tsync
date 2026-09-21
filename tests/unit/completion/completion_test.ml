@@ -7,17 +7,7 @@
 
 let root = Scratch.dir "completion"
 let home = Filename.concat root "home"
-
-let binary =
-  let rec upwards dir n =
-    if n = 0 then None
-    else (
-      let candidate = Filename.concat dir "bin/tsync.exe" in
-      if Sys.file_exists candidate then Some candidate
-      else upwards (Filename.dirname dir) (n - 1))
-  in
-  upwards (Sys.getcwd ()) 6
-
+let binary = Android_home.binary
 let with_home = Android_home.env ~home
 
 let config =
@@ -37,12 +27,7 @@ let config =
 let env =
   Printf.sprintf "%s TSYNC_CONFIG_JSON=%s" with_home (Filename.quote config)
 
-let read_file p =
-  let ic = open_in_bin p in
-  let n = in_channel_length ic in
-  let s = really_input_string ic n in
-  close_in ic;
-  s
+let read_file p = In_channel.with_open_bin p In_channel.input_all
 
 (* Doc strings arrive styled, which is deterministic but unreadable in a diff. *)
 let strip_ansi s =

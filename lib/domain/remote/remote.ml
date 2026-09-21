@@ -9,44 +9,7 @@ let () =
     | Source_changed p -> Some (p ^ ": changed while it was being read")
     | _ -> None)
 
-module type S = sig
-  type 'a io
-
-  val upload :
-    key:Logical_key.t ->
-    src_path:string ->
-    mtime:float ->
-    chunk_size:int ->
-    ?cancel:bool ref ->
-    ?on_progress:(bytes:int -> sent:bool -> unit) ->
-    unit ->
-    Manifest.t io
-
-  val get_chunk : chunk_key:string -> Bigstring.t io
-  val get_verified_chunk : chunk_key:string -> Bigstring.t io
-
-  val get_chunk_range :
-    chunk_key:string -> offset:int -> length:int -> Bigstring.t io
-
-  val fast_read : bool
-
-  (** Chunk size for files this client creates; see the .mli. *)
-  val chunk_size : unit -> int io
-
-  val known_chunk_count : unit -> int
-
-  val upload_chunks :
-    key:Logical_key.t ->
-    size:int64 ->
-    chunk_size:int ->
-    mtime:float ->
-    source:(int -> unit io Chunk_source.t io) ->
-    ?cancel:bool ref ->
-    unit ->
-    Manifest.t io
-
-  val fetch_manifest : key:Logical_key.t -> unit -> Manifest.t option io
-end
+module type S = Remote_intf.S
 
 (* Settable so a test can reach the cap without uploading a terabyte. *)
 let max_known = ref 100_000

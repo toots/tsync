@@ -22,15 +22,6 @@ module Over
 struct
   open Io_syntax.Make (Io)
 
-  (* Sequential: the width would otherwise be the folder's child count, which is
-     the store's to choose and not ours. *)
-  let map_s f xs =
-    let rec go acc = function
-      | [] -> Io.return (List.rev acc)
-      | x :: rest -> Io.bind (f x) (fun y -> go (y :: acc) rest)
-    in
-    go [] xs
-
   module Make (C : Conf.S with type 'a io = 'a Io.t) = struct
     module T = Ck.Make (C)
     module W = Wal_log.Make (C)
@@ -42,7 +33,6 @@ struct
     let create_dir = T.create_dir
     let delete_dir = T.delete_dir
     let list_tree = T.list_tree
-    let walk = T.walk
     let ensure_root = T.ensure_root
     let record = T.record
     let sweep_stale = T.sweep_stale

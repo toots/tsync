@@ -13,92 +13,7 @@ open Check
 
 let body n = Bigstring.of_string (String.make n 'x')
 
-module Memory () : Backend_lwt.Store = struct
-  let objects : (Stored_key.t, Bigstring.t) Hashtbl.t = Hashtbl.create 8
-
-  let put ~key ~data () =
-    Hashtbl.replace objects key data;
-    Lwt.return_unit
-
-  (* The winner is handed back the very value it passed, which is what a real
-     store does and what tells a win from a loss without comparing bodies. *)
-  let put_if_absent ~key ~data () =
-    match Hashtbl.find_opt objects key with
-      | Some held -> Lwt.return held
-      | None ->
-          Hashtbl.replace objects key data;
-          Lwt.return data
-
-  let get_opt ~key () = Lwt.return (Hashtbl.find_opt objects key)
-
-  let get_range ~key ~offset ~length () =
-    Lwt.return
-      (Option.map
-         (Doubles.range_of ~offset ~length)
-         (Hashtbl.find_opt objects key))
-
-  let get ~key () =
-    match Hashtbl.find_opt objects key with
-      | Some d -> Lwt.return d
-      | None ->
-          Lwt.fail
-            (Backend.Backend_error ("no such key: " ^ Stored_key.to_string key))
-
-  let head_opt ~key () =
-    Lwt.return
-      (Option.map
-         (fun d ->
-           {
-             Backend.key;
-             size = Bigstring.length d;
-             last_modified = 0.;
-             etag = None;
-           })
-         (Hashtbl.find_opt objects key))
-
-  let delete ~key () =
-    let held = Hashtbl.mem objects key in
-    Hashtbl.remove objects key;
-    Lwt.return held
-
-  let delete_multi keys =
-    List.iter (Hashtbl.remove objects) keys;
-    Lwt.return_unit
-
-  let copy ~src_key ~dst_key () =
-    (match Hashtbl.find_opt objects src_key with
-      | Some d -> Hashtbl.replace objects dst_key d
-      | None -> ());
-    Lwt.return_unit
-
-  let list_prefix ?max_keys:_ ~prefix () =
-    Lwt.return
-      (Hashtbl.fold
-         (fun key d acc ->
-           if Stored_key.is_in ~prefix key then
-             {
-               Backend.key;
-               size = Bigstring.length d;
-               last_modified = 0.;
-               etag = None;
-             }
-             :: acc
-           else acc)
-         objects [])
-
-  let watch ~key:_ ~last_seen:_ () = Lwt.return_unit
-  let verify_all ~chunk_prefix:_ () = Lwt.return `Unsupported
-
-  let discard ~chunk_prefix:_ ~run:_ ~name:_ ~keys:_ () =
-    Lwt.return `Unsupported
-
-  let get_many = None
-  let list_many = None
-  let capabilities ~prefix:_ () = Lwt.return Backend.no_caps
-  let fast_read = false
-  let local_path = None
-  let health = Health.always_up
-end
+module Memory = Doubles.Memory
 
 let () =
   Backend_lwt.register ~spec:[] "memory" (fun _ ->
@@ -146,11 +61,7 @@ let () =
     (Sys.command (Printf.sprintf "rm -rf %s && mkdir -p %s" scratch scratch));
   Lwt_main.run
     (let (module R : Backend_lwt.Store) = remote () in
-     let (module L : Backend_lwt.Store) =
-       Backend_lwt.make ~backend_type:"local"
-         ~get_field:(fun _ -> Some scratch)
-         ()
-     in
+     let (module L : Backend_lwt.Store) = Fixture.local_store scratch in
 
      case "a body crossing a link is counted, once, for its own length";
      let* r =

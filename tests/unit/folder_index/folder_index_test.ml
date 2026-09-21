@@ -17,10 +17,7 @@ let index_reads = ref 0
 let child_reads = ref 0
 let index_writes = ref 0
 
-module Disk =
-  (val Backend_lwt.make ~backend_type:"local"
-         ~get_field:(fun _ -> Some (Filename.concat root "store"))
-         ())
+module Disk = (val Fixture.local_store (Filename.concat root "store"))
 
 (* A version per key, bumped on every write, which is what S3 and GCS report and
    a filesystem does not. *)

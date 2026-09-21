@@ -16,13 +16,7 @@ let config =
            domain side of an operation.";
         exit 2
 
-let read_file p =
-  let ic = open_in_bin p in
-  let n = in_channel_length ic in
-  let s = really_input_string ic n in
-  close_in ic;
-  s
-
+let read_file p = In_channel.with_open_bin p In_channel.input_all
 let json = read_file config
 
 let field ?(from = 0) name =

@@ -15,21 +15,11 @@ open Check
 let root = Scratch.dir "writes-in-flight"
 let src_dir = Scratch.sub root "src"
 let dst_dir = Scratch.sub root "dst"
-let domain_prefix = "tsync/d/manifests/"
 let chunk_prefix = "tsync/d/chunks/"
 let shard = "2e2/"
 
-module Local =
-  (val Backend_lwt.make ~backend_type:"local"
-         ~get_field:(fun _ -> Some src_dir)
-         ()
-      : Backend_lwt.Store)
-
-module Dst =
-  (val Backend_lwt.make ~backend_type:"local"
-         ~get_field:(fun _ -> Some dst_dir)
-         ()
-      : Backend_lwt.Store)
+module Local = (val Fixture.local_store src_dir)
+module Dst = (val Fixture.local_store dst_dir)
 
 (* The staged file is planted on disk rather than caught mid-write: what is
    under test is the listing, and a real race would not reproduce. *)
@@ -52,47 +42,26 @@ module Stale = struct
     else Lwt.return entries
 end
 
-module C : Conf_lwt.S = struct
-  let versioning = false
-  let client_name = "test"
-  let domain_name = "d"
-  let domain_prefix = domain_prefix
-  let chunk_prefix = chunk_prefix
-  let versions_prefix = "tsync/d/versions/"
-  let journal_prefix = "tsync/d/journal/"
-  let cursor_key = Stored_key.in_space ~prefix:"tsync/d/" "cursor"
-  let shares_prefix = "tsync/shares/"
-
-  let members =
-    [
-      Backend.member ~role:`Main ~backend_type:"local" ~local_path:src_dir
-        ~name:"source"
-        (module Stale : Backend_lwt.Store);
-      Backend.member ~role:`Replica ~backend_type:"local" ~local_path:dst_dir
-        ~name:"copy"
-        (module Dst : Backend_lwt.Store);
-    ]
-
-  let store =
-    Domain_store_lwt.make
-      ~mains:[{ Domain_store_lwt.name = "source"; backend = (module Stale) }]
-      ~targets:[]
-      ~archives:[{ Domain_store_lwt.name = "copy"; backend = (module Dst) }]
-
-  let cache_root = Scratch.sub root "cache"
-  let data_dir = Scratch.sub root "data"
-  let socket_path = ""
-  let max_uploads = 1
-  let max_chunk_buffers = 2
-  let max_downloads = 1
-  let chunk_size = Some 8
-  let cache_chunk_size = Some 8
-  let max_cache = None
-  let symlink_policy = `Keep
-  let read_only = false
-
-  include Conf_lwt.Monad
-end
+module C =
+  (val Fixture.conf ~domain:"d" ~max_chunk_buffers:2
+         ~store:
+           (Domain_store_lwt.make
+              ~mains:
+                [{ Domain_store_lwt.name = "source"; backend = (module Stale) }]
+              ~targets:[]
+              ~archives:
+                [{ Domain_store_lwt.name = "copy"; backend = (module Dst) }])
+         ~members:
+           [
+             Backend.member ~role:`Main ~backend_type:"local"
+               ~local_path:src_dir ~name:"source"
+               (module Stale : Backend_lwt.Store);
+             Backend.member ~role:`Replica ~backend_type:"local"
+               ~local_path:dst_dir ~name:"copy"
+               (module Dst : Backend_lwt.Store);
+           ]
+         ~root ()
+      : Conf_lwt.S)
 
 module M = Mirror_lwt.Make (C)
 

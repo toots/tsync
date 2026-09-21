@@ -4,7 +4,6 @@
 include
   Local_backend.Over (Io_lwt.Core) (Io_lwt.Fs) (Io_lwt.Syscalls)
     (Io_lwt.Bounded)
-    (Bigstring_lwt)
     (Io_lwt.Clock)
     (Watch_lwt)
 

@@ -1,37 +1,8 @@
 module Ek = Journal.Entry_key
 
-module type JOURNAL = sig
-  type 'a io
-
-  module Make (_ : Conf.S with type 'a io = 'a io) : sig
-    include File_store.S with type 'a io := 'a io
-
-    val note_applied : Journal.Entry_key.t -> Journal.op list -> unit io
-
-    (** Every entry this client has applied or published, as far back as it
-        keeps them. *)
-    val applied_keys : unit -> Journal.Entry_key.t list io
-
-    val note_local : Journal.op list -> unit io
-  end
-end
-
-module type S = sig
-  type 'a io
-
-  val reconcile : unit -> unit io
-  val apply_foreign : on_changed:(string -> unit) -> unit -> int io
-  val mark_handled : Journal.Entry_key.t list -> unit io
-  val unapplied : unit -> (Journal.Entry_key.t * string) list
-end
-
-module type OVER = sig
-  type 'a io
-
-  module Make
-      (C : Conf.S with type 'a io = 'a io)
-      (F : File_ops.S with type 'a io := 'a io) : S with type 'a io := 'a io
-end
+module type JOURNAL = Replay_intf.JOURNAL
+module type S = Replay_intf.S
+module type OVER = Replay_intf.OVER
 
 module Over
     (Io : Io.S)

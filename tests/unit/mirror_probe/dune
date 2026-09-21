@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_test_harness
+   -open
    Tsync_core
    -open
    Tsync_conf_lwt
@@ -17,6 +19,7 @@
    Tsync_ops_lwt))
  (name mirror_probe)
  (libraries
+  tsync_test_harness
   tsync-libs.core
   tsync_core
   tsync_conf_lwt

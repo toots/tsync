@@ -95,9 +95,7 @@ let flaky ~fails ~root : (module Backend_lwt.Store) * (unit -> int) =
   let left = ref fails in
   let refused = ref 0 in
   let (module Real : Backend_lwt.Store) =
-    Backend_lwt.make ~backend_type:"local"
-      ~get_field:(function "verifyWrites" -> Some "false" | _ -> Some root)
-      ()
+    Fixture.local_store ~verify_writes:false root
   in
   ( (module struct
       include Real
@@ -119,9 +117,7 @@ module Refuses = Doubles.Refuses
 (* Reachable only while [up]. *)
 let switchable ~up ~root : (module Backend_lwt.Store) =
   let (module Real : Backend_lwt.Store) =
-    Backend_lwt.make ~backend_type:"local"
-      ~get_field:(function "verifyWrites" -> Some "false" | _ -> Some root)
-      ()
+    Fixture.local_store ~verify_writes:false root
   in
   (module struct
     include Real
@@ -193,12 +189,7 @@ let settled ~name stats =
   go ()
 
 let () =
-  let main =
-    Backend_lwt.make ~backend_type:"local"
-      ~get_field:(function
-        | "verifyWrites" -> Some "false" | _ -> Some main_root)
-      ()
-  in
+  let main = Fixture.local_store ~verify_writes:false main_root in
   let (module M : Backend_lwt.Store) = main in
   Lwt_main.run
     (let c0 = chunk 0 and c2 = chunk 2 in
@@ -296,11 +287,7 @@ let () =
      let t5_root = Filename.concat root "t5" in
      let l5, (module T5 : Domain_store_lwt.Deferred.S) =
        target_for ~inners:[main]
-         ~target:
-           (Backend_lwt.make ~backend_type:"local"
-              ~get_field:(function
-                | "verifyWrites" -> Some "false" | _ -> Some t5_root)
-              ())
+         ~target:(Fixture.local_store ~verify_writes:false t5_root)
          ~name:"replica" ()
      in
      let (module B5 : Backend_lwt.Store) = l5 in

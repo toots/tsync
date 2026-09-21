@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_local_backend_lwt
+   -open
    Tsync_core
    -open
    Tsync_manifest
@@ -15,6 +17,7 @@
    Tsync_test_harness))
  (name fetch_fanout_test)
  (libraries
+  tsync_local_backend_lwt
   tsync-libs.core
   tsync_manifest
   tsync_checkout_lwt

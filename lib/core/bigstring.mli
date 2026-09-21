@@ -40,20 +40,3 @@ val map_file :
     open per range. Read-only, and a snapshot only if the descriptor is one:
     pass {!open_snapshot}'s, not a plain {!Unix.openfile}'s. *)
 val map_fd : Unix.file_descr -> offset:int -> len:int -> t
-
-(** Putting bytes where a name can find them again, which is the one thing here
-    that has to wait. *)
-module type WRITER = sig
-  type 'a io
-
-  (** Make [path] exist, moving no bytes. *)
-  val touch : string -> unit io
-
-  val write : string -> t -> offset:int64 -> unit io
-end
-
-module Make (Io : Io.S) (Writer : WRITER with type 'a io := 'a Io.t) : sig
-  (** [write_to ~path t ~offset] puts [t] into [path] at [offset]. An empty [t]
-      still makes [path] appear. *)
-  val write_to : path:string -> t -> offset:int -> unit Io.t
-end

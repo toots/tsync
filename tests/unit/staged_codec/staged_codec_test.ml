@@ -10,37 +10,9 @@ open Lwt.Syntax
 
 let root = "/tmp/tsync-staged-codec-test"
 
-module C : Conf_lwt.S = struct
-  let versioning = false
-  let client_name = "test"
-  let domain_name = "codecdom"
-  let domain_prefix = "tsync/codecdom/manifests/"
-  let chunk_prefix = "tsync/codecdom/chunks/"
-  let versions_prefix = "tsync/codecdom/versions/"
-  let journal_prefix = "tsync/codecdom/journal/"
-  let cursor_key = Stored_key.in_space ~prefix:"tsync/codecdom/" "cursor"
-  let shares_prefix = "tsync/shares/"
-
-  let store =
-    Backend_lwt.make ~backend_type:"local"
-      ~get_field:(fun _ -> Some (root ^ "/store"))
-      ()
-
-  let members = [Backend.member ~name:"local" store]
-  let cache_root = root ^ "/cache"
-  let data_dir = root ^ "/data"
-  let socket_path = ""
-  let max_uploads = 1
-  let max_chunk_buffers = 1
-  let max_downloads = 1
-  let chunk_size = Some 8
-  let cache_chunk_size = Some 24
-  let max_cache = None
-  let symlink_policy = `Keep
-  let read_only = false
-
-  include Conf_lwt.Monad
-end
+module C =
+  (val Fixture.conf ~domain:"codecdom" ~cache_chunk_size:24 ~root ()
+      : Conf_lwt.S)
 
 module Lk = Logical_key.Make (C)
 module Mfs = Staged_lwt.Manifest.Make (C)

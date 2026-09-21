@@ -41,7 +41,6 @@ end
 module Local =
   Local_backend.Over (Io_lwt.Core) (Io_lwt.Fs) (Recording_syscalls)
     (Io_lwt.Bounded)
-    (Bigstring_lwt)
     (Io_lwt.Clock)
     (Watch_lwt)
 

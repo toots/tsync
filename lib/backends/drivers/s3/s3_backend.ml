@@ -100,15 +100,6 @@ struct
     in
     ignore (unwrap "put" res)
 
-  (* The verifier's job bodies are JSON and small enough to stay on the heap. *)
-  let put_text t ~key ~data () =
-    let+ res =
-      with_retry t "put" (fun () ->
-          S3.put ~credentials:t.credentials ~endpoint:t.endpoint
-            ~bucket:t.bucket ~unsigned_payload:t.unsigned_payload ~key ~data ())
-    in
-    ignore (unwrap "put" res)
-
   let get t ~key () =
     let+ res =
       with_retry t "get" (fun () ->
@@ -195,9 +186,8 @@ struct
     let rec go = function
       | [] -> Io.return ()
       | batch ->
-          let n = min 1000 (List.length batch) in
-          let here = List.filteri (fun i _ -> i < n) batch in
-          let rest = List.filteri (fun i _ -> i >= n) batch in
+          let here = List.filteri (fun i _ -> i < 1000) batch in
+          let rest = List.filteri (fun i _ -> i >= 1000) batch in
           let objects = List.map (fun key -> { key; version_id = None }) here in
           let* res =
             with_retry t "delete_multi" (fun () ->
@@ -288,7 +278,6 @@ struct
         let delete_multi = delete_multi
         let copy = copy
         let list_all = list_all
-        let put_text = put_text
         let share_url t = t.share_url
         let health t = t.health
       end)

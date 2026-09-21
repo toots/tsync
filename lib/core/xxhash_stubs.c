@@ -67,15 +67,6 @@ CAMLprim value caml_xxh3_state_update(value _state, value _data)
     CAMLreturn(Val_unit);
 }
 
-CAMLprim value caml_xxh3_state_update_bigstring(value _state, value _data)
-{
-    CAMLparam2(_state, _data);
-    XXH3_64bits_update(
-        *((XXH3_state_t **)Data_custom_val(_state)),
-        Caml_ba_data_val(_data), Caml_ba_array_val(_data)->dim[0]);
-    CAMLreturn(Val_unit);
-}
-
 CAMLprim value caml_xxh3_state_digest(value _state)
 {
     CAMLparam1(_state);

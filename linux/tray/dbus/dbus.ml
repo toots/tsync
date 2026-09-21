@@ -97,7 +97,6 @@ external message_type : message -> int = "tsync_dbus_message_type"
 external message_path : message -> string = "tsync_dbus_message_path"
 external message_interface : message -> string = "tsync_dbus_message_interface"
 external message_member : message -> string = "tsync_dbus_message_member"
-external message_sender : message -> string = "tsync_dbus_message_sender"
 
 external message_error_name : message -> string
   = "tsync_dbus_message_error_name"
@@ -129,7 +128,6 @@ external iter_get_double : iter -> float = "tsync_dbus_iter_get_double"
 external iter_get_string : iter -> string = "tsync_dbus_iter_get_string"
 
 let method_call = 1
-let method_return = 2
 let error = 3
 let signal = 4
 

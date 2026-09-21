@@ -24,97 +24,22 @@ let listing_fails = ref false
 exception Listing_failed
 
 module Store : Backend_lwt.Store = struct
-  let objects : (Stored_key.t, Bigstring.t) Hashtbl.t = Hashtbl.create 8
-
-  let put ~key ~data () =
-    Hashtbl.replace objects key data;
-    Lwt.return_unit
+  include Doubles.Memory ()
 
   let get_opt ~key () =
     if Stored_key.to_string key = "tsync/testdom/cursor" then incr cursor_reads;
-    Lwt.return (Hashtbl.find_opt objects key)
+    get_opt ~key ()
 
-  let get_range ~key ~offset ~length () =
-    Lwt.return
-      (Option.map
-         (Doubles.range_of ~offset ~length)
-         (Hashtbl.find_opt objects key))
-
-  let get ~key () =
-    match Hashtbl.find_opt objects key with
-      | Some d -> Lwt.return d
-      | None ->
-          Lwt.fail
-            (Backend.Backend_error ("no such key: " ^ Stored_key.to_string key))
-
-  let put_if_absent ~key ~data () =
-    match Hashtbl.find_opt objects key with
-      | Some held -> Lwt.return held
-      | None ->
-          let* () = put ~key ~data () in
-          Lwt.return data
-
-  let head_opt ~key () =
-    Lwt.return
-      (Option.map
-         (fun d ->
-           {
-             Backend.key;
-             size = Bigstring.length d;
-             last_modified = 0.;
-             etag = None;
-           })
-         (Hashtbl.find_opt objects key))
-
-  let delete ~key () =
-    let held = Hashtbl.mem objects key in
-    Hashtbl.remove objects key;
-    Lwt.return held
-
-  let delete_multi keys =
-    List.iter (Hashtbl.remove objects) keys;
-    Lwt.return_unit
-
-  let copy ~src_key ~dst_key () =
-    (match Hashtbl.find_opt objects src_key with
-      | Some d -> Hashtbl.replace objects dst_key d
-      | None -> ());
-    Lwt.return_unit
-
-  let list_prefix ?max_keys:_ ~prefix () =
+  let list_prefix ?max_keys ~prefix () =
     if String.starts_with ~prefix:"tsync/testdom/journal/" prefix then begin
       incr listings;
       if !listing_fails then raise Listing_failed
     end;
-    Lwt.return
-      (Hashtbl.fold
-         (fun key d acc ->
-           if Stored_key.is_in ~prefix key then
-             {
-               Backend.key;
-               size = Bigstring.length d;
-               last_modified = 0.;
-               etag = None;
-             }
-             :: acc
-           else acc)
-         objects [])
+    list_prefix ?max_keys ~prefix ()
 
   let watch ~key:_ ~last_seen () =
     let* () = Lwt_mvar.put calls last_seen in
     Lwt_mvar.take gate
-
-  let verify_all ~chunk_prefix:_ () = Lwt.return `Unsupported
-
-  let discard ~chunk_prefix:_ ~run:_ ~name:_ ~keys:_ () =
-    Lwt.return `Unsupported
-
-  let get_many = None
-  let list_many = None
-  let capabilities ~prefix:_ () = Lwt.return Backend.no_caps
-  let fast_read = false
-  let local_path = None
-  let health = Health.always_up
 end
 
 module C =

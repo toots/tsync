@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_local_backend_lwt
+   -open
    Tsync_core
    -open
    Tsync_manifest
@@ -21,6 +23,7 @@
    Tsync_test_harness))
  (name chunk_cache_test)
  (libraries
+  tsync_local_backend_lwt
   unix
   tsync-libs.core
   tsync_manifest

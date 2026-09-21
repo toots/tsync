@@ -19,28 +19,13 @@ let browsing = Filename.concat root "browsing"
 let other = Filename.concat root "other"
 let case name = Printf.printf "\n=== %s\n" name
 let line fmt = Printf.printf ("  " ^^ fmt ^^ "\n%!")
-let sh fmt = Printf.ksprintf (fun cmd -> ignore (Sys.command cmd)) fmt
-
-let binary =
-  let rec find dir depth =
-    if depth = 0 then None
-    else (
-      let candidate = Filename.concat dir "bin/tsync.exe" in
-      if Sys.file_exists candidate then Some candidate
-      else find (Filename.dirname dir) (depth - 1))
-  in
-  find (Sys.getcwd ()) 6
+let sh = Android_home.sh
+let binary = Android_home.binary
 
 let write_file path contents =
-  let oc = open_out_bin path in
-  output_string oc contents;
-  close_out oc
+  Out_channel.with_open_bin path (fun oc -> output_string oc contents)
 
-let read_file path =
-  let ic = open_in_bin path in
-  let s = really_input_string ic (in_channel_length ic) in
-  close_in ic;
-  s
+let read_file path = In_channel.with_open_bin path In_channel.input_all
 
 (* Folder ids are minted rather than derived, so each run spells them
    differently; the one this test names is replaced wherever it appears. *)

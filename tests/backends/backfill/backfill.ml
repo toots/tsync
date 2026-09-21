@@ -115,20 +115,11 @@ let wrap ~inners ~target ~name =
   (composite, Option.get !built)
 
 let () =
-  let main =
-    Backend_lwt.make ~backend_type:"local"
-      ~get_field:(function
-        | "verifyWrites" -> Some "false" | _ -> Some main_root)
-      ()
-  in
+  let main = Fixture.local_store ~verify_writes:false main_root in
   let (module M : Backend_lwt.Store) = main in
   let composite, (module T : Domain_store_lwt.Deferred.S) =
     wrap ~inners:[main]
-      ~target:
-        (Backend_lwt.make ~backend_type:"local"
-           ~get_field:(function
-             | "verifyWrites" -> Some "false" | _ -> Some target_root)
-           ())
+      ~target:(Fixture.local_store ~verify_writes:false target_root)
       ~name:"target"
   in
   let (module B : Backend_lwt.Store) = composite in

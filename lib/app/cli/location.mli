@@ -18,6 +18,9 @@ type arg
     alone, and a term is built before a command knows it will need either. *)
 val conv : reading -> arg Cmdliner.Arg.conv
 
+(** The optional domain-relative [PATH] positional several commands take. *)
+val path_arg : doc:string -> arg option Cmdliner.Term.t
+
 (** What was typed, for a report that echoes it back. *)
 val typed : arg -> string
 

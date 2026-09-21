@@ -217,25 +217,7 @@ let reading_at_most n (module C : Conf_lwt.S) : (module Conf_lwt.S) =
    through the domain's own path and reaches the deferred targets behind it.
    Raises [Failure] when nothing has that name. *)
 let reading_from name (module C : Conf_lwt.S) : (module Conf_lwt.S) =
-  let m =
-    match
-      List.filter
-        (fun (m : _ Backend.member) -> m.Backend.name = name)
-        C.members
-    with
-      | [m] -> m
-      | [] ->
-          failwith
-            (Printf.sprintf "no backend named %s (available: %s)" name
-               (String.concat ", "
-                  (List.map (fun (m : _ Backend.member) -> m.name) C.members)))
-      | _ ->
-          failwith
-            (Printf.sprintf
-               "backend name %s is ambiguous; set distinct \"name\" fields in \
-                the config"
-               name)
-  in
+  let m = Backend.named_exn name C.members in
   (module struct
     include C
 

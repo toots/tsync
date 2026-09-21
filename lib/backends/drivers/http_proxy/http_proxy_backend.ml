@@ -215,93 +215,62 @@ struct
     if is_ok resp then Http_proxy.Wire.entries_of_json body
     else raise (failed "list_all" (code resp) body)
 
+  (* One capability endpoint: [parse] reads the JSON answer, and [default] is
+     what a 404 or an unreadable body means. *)
+  let ask t ~route ~op ~prefix ~default parse =
+    let uri =
+      Uri.with_query' (Uri.with_path t.base_uri route) [("prefix", prefix)]
+    in
+    let+ resp, body = call_text t ~meth:`GET op uri in
+    if is_ok resp then (
+      match Yojson.Safe.from_string body with
+        | exception _ -> default
+        | j -> parse j)
+    else if code resp = 404 then default
+    else raise (failed op (code resp) body)
+
+  let positive name j =
+    match Yojson.Safe.Util.member name j with
+      | `Int n when n > 0 -> Some n
+      | _ -> None
+
   (* The proxy answers yes/no only: behind TLS termination it does not reliably
      know its own public URL, while [base_uri] is exactly the URL this client
      reaches it on. *)
-  let query_share_url t ~prefix =
-    let uri =
-      Uri.with_query'
-        (Uri.with_path t.base_uri "/share-url")
-        [("prefix", prefix)]
-    in
-    let+ resp, body = call_text t ~meth:`GET "share_url" uri in
-    if is_ok resp then (
-      match Yojson.Safe.from_string body with
-        | exception _ -> None
-        | j -> (
-            match
-              (Yojson.Safe.Util.member "url" j, Yojson.Safe.Util.member "self" j)
-            with
-              (* A backing store serves them: absolute URL, used as given. *)
-              | `String url, _ -> Some url
-              (* The proxy serves them itself, off the address we reach it on. *)
-              | _, `Bool true ->
-                  Some (Uri.to_string (Uri.with_path t.base_uri "/s"))
-              | _ -> None))
-    else if code resp = 404 then None
-    else raise (failed "share_url" (code resp) body)
+  let query_share_url t =
+    ask t ~route:"/share-url" ~op:"share_url" ~default:None (fun j ->
+        match
+          (Yojson.Safe.Util.member "url" j, Yojson.Safe.Util.member "self" j)
+        with
+          (* A backing store serves them: absolute URL, used as given. *)
+          | `String url, _ -> Some url
+          (* The proxy serves them itself, off the address we reach it on. *)
+          | _, `Bool true ->
+              Some (Uri.to_string (Uri.with_path t.base_uri "/s"))
+          | _ -> None)
 
   (* The serving domain's own [chunkSize], so a client behind the proxy writes new
      files at the size the domain uses instead of the two configs having to agree.
      404 means no opinion. *)
-  let query_chunk_size t ~prefix =
-    let uri =
-      Uri.with_query'
-        (Uri.with_path t.base_uri "/chunk-size")
-        [("prefix", prefix)]
-    in
-    let+ resp, body = call_text t ~meth:`GET "chunk_size" uri in
-    if is_ok resp then (
-      match Yojson.Safe.from_string body with
-        | exception _ -> None
-        | j -> (
-            match Yojson.Safe.Util.member "chunkSize" j with
-              | `Int n when n > 0 -> Some n
-              | _ -> None))
-    else if code resp = 404 then None
-    else raise (failed "chunk_size" (code resp) body)
+  let query_chunk_size t =
+    ask t ~route:"/chunk-size" ~op:"chunk_size" ~default:None
+      (positive "chunkSize")
 
   (* What the serving proxy will run at once, so a client holds its own excess
      rather than parking it in the server's accept queue. Asked rather than
      configured twice, the limit belonging to hardware this process cannot see;
      404 means no bound. *)
-  let query_max_concurrency t ~prefix =
-    let uri =
-      Uri.with_query'
-        (Uri.with_path t.base_uri "/max-concurrency")
-        [("prefix", prefix)]
-    in
-    let+ resp, body = call_text t ~meth:`GET "max_concurrency" uri in
-    if is_ok resp then (
-      match Yojson.Safe.from_string body with
-        | exception _ -> None
-        | j -> (
-            match Yojson.Safe.Util.member "maxConcurrency" j with
-              | `Int n when n > 0 -> Some n
-              | _ -> None))
-    else if code resp = 404 then None
-    else raise (failed "max_concurrency" (code resp) body)
+  let query_max_concurrency t =
+    ask t ~route:"/max-concurrency" ~op:"max_concurrency" ~default:None
+      (positive "maxConcurrency")
 
   (* 404 reads as [false], which is the honest answer twice over: a proxy too old
      to have this endpoint is one whose store nothing was checking when it was
      built, and a peer that cannot say whether its bytes are held against their
      names has not said they are. *)
-  let query_verified t ~prefix =
-    let uri =
-      Uri.with_query'
-        (Uri.with_path t.base_uri "/verified")
-        [("prefix", prefix)]
-    in
-    let+ resp, body = call_text t ~meth:`GET "verified" uri in
-    if is_ok resp then (
-      match Yojson.Safe.from_string body with
-        | exception _ -> false
-        | j -> (
-            match Yojson.Safe.Util.member "verified" j with
-              | `Bool b -> b
-              | _ -> false))
-    else if code resp = 404 then false
-    else raise (failed "verified" (code resp) body)
+  let query_verified t =
+    ask t ~route:"/verified" ~op:"verified" ~default:false (fun j ->
+        Yojson.Safe.Util.member "verified" j = `Bool true)
 
   (* Fixed for the life of the process — a peer changing any of these restarts to
      do it, dropping these connections anyway — so the promise is memoized and

@@ -13,10 +13,7 @@ let root = Scratch.dir "held-failover"
 let key name = Stored_key.in_space ~prefix:"tsync/d/manifests/" name
 
 let local name =
-  Backend_lwt.make ~backend_type:"local"
-    ~get_field:(function
-      | "verifyWrites" -> Some "false" | _ -> Some (Filename.concat root name))
-    ()
+  Fixture.local_store ~verify_writes:false (Filename.concat root name)
 
 type link = {
   up : bool ref;

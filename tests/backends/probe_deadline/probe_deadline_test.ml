@@ -17,44 +17,20 @@ let root = "/tmp/tsync-probe-deadline-test"
    comes. *)
 module Hung = Doubles.Hung
 
-module C : Conf_lwt.S = struct
-  let versioning = false
-  let client_name = "test-client"
-  let domain_name = "wedgedom"
-  let domain_prefix = "tsync/wedgedom/manifests/"
-  let chunk_prefix = "tsync/wedgedom/chunks/"
-  let versions_prefix = "tsync/wedgedom/versions/"
-  let journal_prefix = "tsync/wedgedom/journal/"
-  let cursor_key = Stored_key.in_space ~prefix:"tsync/wedgedom/" "cursor"
-  let shares_prefix = "tsync/shares/"
-
-  let store =
-    Backend_lwt.make ~backend_type:"local"
-      ~get_field:(fun _ -> Some (root ^ "/store"))
-      ()
-
-  (* The store that never answers, declared as the daemon would. *)
-  let members =
-    [
-      Backend.member ~name:"wedged" ~backend_type:"http-proxy"
-        ~config:[("url", "http://wedged.example:8000")]
-        (module Hung : Backend_lwt.Store);
-    ]
-
-  let cache_root = root ^ "/cache"
-  let data_dir = root ^ "/data"
-  let socket_path = root ^ "/absent.sock"
-  let max_uploads = 2
-  let max_chunk_buffers = 2
-  let max_downloads = 3
-  let chunk_size = Some 65536
-  let cache_chunk_size = Some 65536
-  let max_cache = None
-  let symlink_policy = `Keep
-  let read_only = false
-
-  include Conf_lwt.Monad
-end
+module C =
+  (val Fixture.conf ~domain:"wedgedom" ~client_name:"test-client" ~max_uploads:2
+         ~max_downloads:3 ~socket_path:(root ^ "/absent.sock") ~chunk_size:65536
+         ~cache_chunk_size:65536
+         ~store:(Fixture.local_store (root ^ "/store"))
+         ~members:
+           [
+             (* The store that never answers, declared as the daemon would. *)
+             Backend.member ~name:"wedged" ~backend_type:"http-proxy"
+               ~config:[("url", "http://wedged.example:8000")]
+               (module Hung : Backend_lwt.Store);
+           ]
+         ~root ()
+      : Conf_lwt.S)
 
 module Diag = Diagnostics.Make (C)
 

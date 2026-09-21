@@ -214,7 +214,6 @@ CAMLprim value tsync_dbus_message_type(value _msg) {
 HEADER_ACCESSOR(tsync_dbus_message_path, dbus_message_get_path)
 HEADER_ACCESSOR(tsync_dbus_message_interface, dbus_message_get_interface)
 HEADER_ACCESSOR(tsync_dbus_message_member, dbus_message_get_member)
-HEADER_ACCESSOR(tsync_dbus_message_sender, dbus_message_get_sender)
 HEADER_ACCESSOR(tsync_dbus_message_error_name, dbus_message_get_error_name)
 
 CAMLprim value tsync_dbus_message_no_reply(value _msg) {

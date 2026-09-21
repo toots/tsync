@@ -1,39 +1,9 @@
-type entry = { chunk_key : string; store : string }
-
-type report = {
-  entries : entry list;
-  unverified : string list;
-  unreachable : (string * string) list;
-}
+include Corruption_intf
 
 (* Long enough that a file's worth of chunks costs one listing, short enough that
    a daemon left running picks up what another client — or a bucket's own
    verifier — filed while it was working. *)
 let ttl = 5.
-
-module type S = sig
-  type 'a io
-  type store
-
-  val list : unit -> report io
-
-  val member_entries :
-    ?max_keys:int ->
-    store Backend.member ->
-    [ `Unverified | `Entries of entry list ] io
-
-  val detail : entry -> Corruption_marker.t option io
-  val is_marked : string -> bool io
-  val forget : string -> unit
-  val invalidate : unit -> unit
-end
-
-module type OVER = sig
-  type 'a io
-
-  module Make (C : Conf.S with type 'a io = 'a io) :
-    S with type 'a io := 'a io and type store := (module C.Store)
-end
 
 module Over (Io : Io.S) = struct
   open Io_syntax.Make (Io)

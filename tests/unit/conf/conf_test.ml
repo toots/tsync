@@ -208,9 +208,7 @@ let () =
      for itself what to report then. *)
   let store ?local_path ?(role = `Main) name =
     Backend.member ~name ~role ?local_path
-      (Backend_lwt.make ~backend_type:"local"
-         ~get_field:(fun _ -> Some (Filename.get_temp_dir_name ()))
-         ())
+      (Fixture.local_store (Filename.get_temp_dir_name ()))
   in
   assert (Conf.capacity [] = None);
   assert (Conf.capacity [store "remote"] = None);

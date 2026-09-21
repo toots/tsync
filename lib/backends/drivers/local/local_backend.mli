@@ -16,19 +16,11 @@ module type WATCHER = sig
   val wait : t -> unit io
 end
 
-(** Writing a buffer straight to a path, which the bigstring layer owns. *)
-module type BYTES = sig
-  type 'a io
-
-  val write_to : path:string -> Bigstring.t -> offset:int -> unit io
-end
-
 module Over
     (Io : Io.S)
-    (_ : Fs.S with type 'a io := 'a Io.t)
-    (_ : Syscalls.S with type 'a io := 'a Io.t)
+    (Fs : Fs.S with type 'a io := 'a Io.t)
+    (_ : Syscalls.S with type 'a io := 'a Io.t and type fd = Fs.fd)
     (_ : Bounded.S with type 'a io := 'a Io.t)
-    (_ : BYTES with type 'a io := 'a Io.t)
     (_ : Clock.S with type 'a io := 'a Io.t)
     (_ : WATCHER with type 'a io := 'a Io.t) : sig
   module type Store = Backend.S with type 'a io := 'a Io.t

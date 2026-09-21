@@ -51,36 +51,7 @@ let disk_space path =
 (** What a platform owes beyond {!Syscalls.S}: whole files, a directory's names,
     and bigstrings on a descriptor. Everything else below is built from these.
 *)
-module type PRIMITIVES = sig
-  type 'a io
-  type fd
-
-  (** [None] for any failure, a missing path included. *)
-  val read_file_opt : string -> string option io
-
-  val write_file : string -> string -> unit io
-
-  (** Without [.] and [..]. *)
-  val readdir_list : string -> string list io
-
-  (** At the descriptor's own position, which they advance. *)
-  val bread : fd -> Bigstringaf.t -> int -> int -> int io
-
-  val bwrite : fd -> Bigstringaf.t -> int -> int -> int io
-
-  (** The offset travels with the call and the descriptor's own position is
-      untouched, so ranges of one file may be moved concurrently through one
-      descriptor.
-
-      These need not yield, and under Lwt they do not. *)
-  val pread : fd -> Bigstringaf.t -> file_offset:int -> int -> int -> int io
-
-  val pwrite : fd -> Bigstringaf.t -> file_offset:int -> int -> int -> int io
-
-  (** Size [fd] to [size] with its blocks allocated, failing with [EOPNOTSUPP]
-      or [ENOSYS] where the filesystem cannot. *)
-  val reserve : size:int64 -> fd -> unit io
-end
+module type PRIMITIVES = Fs_intf.PRIMITIVES
 
 module type S = Fs_intf.S
 

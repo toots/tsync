@@ -52,11 +52,8 @@ let trash_restore arg domain =
 
 let cmd : unit Cmd.t =
   let path_arg =
-    Arg.(
-      value
-      & pos 0 (some (Location.conv `In_domain)) None
-      & info [] ~docv:"PATH"
-          ~doc:"A deleted file, domain-relative or as $(b,DOMAIN:/path).")
+    Location.path_arg
+      ~doc:"A deleted file, domain-relative or as $(b,DOMAIN:/path)."
   in
   let restore_arg =
     Arg.(

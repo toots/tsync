@@ -10,16 +10,7 @@
 
 let root = Scratch.dir "ls-listing"
 let home = Filename.concat root "home"
-
-let binary =
-  let rec upwards dir n =
-    if n = 0 then None
-    else (
-      let candidate = Filename.concat dir "bin/tsync.exe" in
-      if Sys.file_exists candidate then Some candidate
-      else upwards (Filename.dirname dir) (n - 1))
-  in
-  upwards (Sys.getcwd ()) 6
+let binary = Android_home.binary
 
 let config =
   Printf.sprintf
@@ -39,7 +30,7 @@ let read_file p =
     ~finally:(fun () -> close_in ic)
     (fun () -> really_input_string ic (in_channel_length ic))
 
-let sh fmt = Printf.ksprintf (fun cmd -> ignore (Sys.command cmd)) fmt
+let sh = Android_home.sh
 
 let run args =
   let out = Filename.concat root "out.txt" in

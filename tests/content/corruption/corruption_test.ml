@@ -56,9 +56,7 @@ module Corrupt = Corruption_lwt.Make (C)
 module B = (val C.store : C.Store)
 
 let write_file path contents =
-  let oc = open_out_bin path in
-  output_string oc contents;
-  close_out oc
+  Out_channel.with_open_bin path (fun oc -> output_string oc contents)
 
 (* One chunk exactly, so the manifest names a single key to talk about. *)
 let body = String.init chunk_size (fun i -> Char.chr (i * 7 mod 251))

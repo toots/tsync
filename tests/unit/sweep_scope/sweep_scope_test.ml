@@ -24,9 +24,7 @@ module Temp = Maintenance_lwt.Temp_files.Make (C)
 module Orphans = Maintenance_lwt.Staged_orphans.Make (C)
 
 let write path contents =
-  let oc = open_out path in
-  output_string oc contents;
-  close_out oc
+  Out_channel.with_open_text path (fun oc -> output_string oc contents)
 
 (* Named by [Filename.temp_path], so the recogniser and this agree by
    construction rather than by a spelling copied here. *)

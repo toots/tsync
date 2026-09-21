@@ -20,89 +20,16 @@ let root = Scratch.dir "cursor-debounce"
 let puts = ref 0
 
 module Counting : Backend_lwt.Store = struct
-  let objects : (Stored_key.t, Bigstring.t) Hashtbl.t = Hashtbl.create 8
+  include Doubles.Memory ()
 
   let put ~key ~data () =
     incr puts;
-    Hashtbl.replace objects key data;
-    Lwt.return_unit
+    put ~key ~data ()
 
   let put_if_absent ~key ~data () =
-    match Hashtbl.find_opt objects key with
-      | Some held -> Lwt.return held
-      | None ->
-          let* () = put ~key ~data () in
-          Lwt.return data
-
-  let get_opt ~key () = Lwt.return (Hashtbl.find_opt objects key)
-
-  let get_range ~key ~offset ~length () =
-    Lwt.return
-      (Option.map
-         (Doubles.range_of ~offset ~length)
-         (Hashtbl.find_opt objects key))
-
-  let get ~key () =
-    match Hashtbl.find_opt objects key with
-      | Some d -> Lwt.return d
-      | None ->
-          Lwt.fail
-            (Backend.Backend_error ("no such key: " ^ Stored_key.to_string key))
-
-  let head_opt ~key () =
-    Lwt.return
-      (Option.map
-         (fun d ->
-           {
-             Backend.key;
-             size = Bigstring.length d;
-             last_modified = 0.;
-             etag = None;
-           })
-         (Hashtbl.find_opt objects key))
-
-  let delete ~key () =
-    let held = Hashtbl.mem objects key in
-    Hashtbl.remove objects key;
+    let* held = put_if_absent ~key ~data () in
+    if held == data then incr puts;
     Lwt.return held
-
-  let delete_multi keys =
-    List.iter (Hashtbl.remove objects) keys;
-    Lwt.return_unit
-
-  let copy ~src_key ~dst_key () =
-    (match Hashtbl.find_opt objects src_key with
-      | Some d -> Hashtbl.replace objects dst_key d
-      | None -> ());
-    Lwt.return_unit
-
-  let list_prefix ?max_keys:_ ~prefix () =
-    Lwt.return
-      (Hashtbl.fold
-         (fun key d acc ->
-           if Stored_key.is_in ~prefix key then
-             {
-               Backend.key;
-               size = Bigstring.length d;
-               last_modified = 0.;
-               etag = None;
-             }
-             :: acc
-           else acc)
-         objects [])
-
-  let watch ~key:_ ~last_seen:_ () = Lwt.return_unit
-  let verify_all ~chunk_prefix:_ () = Lwt.return `Unsupported
-
-  let discard ~chunk_prefix:_ ~run:_ ~name:_ ~keys:_ () =
-    Lwt.return `Unsupported
-
-  let get_many = None
-  let list_many = None
-  let capabilities ~prefix:_ () = Lwt.return Backend.no_caps
-  let fast_read = false
-  let local_path = None
-  let health = Health.always_up
 end
 
 module C =

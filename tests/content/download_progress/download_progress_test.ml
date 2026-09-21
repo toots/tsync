@@ -36,12 +36,7 @@ module C = struct
   let journal_prefix = "tsync/test/journal/"
   let cursor_key = Stored_key.in_space ~prefix:"tsync/test/" "cursor"
   let shares_prefix = "tsync/shares/"
-
-  let store =
-    Backend_lwt.make ~backend_type:"local"
-      ~get_field:(fun _ -> Some backend_root)
-      ()
-
+  let store = Fixture.local_store backend_root
   let members = [Backend.member ~name:"local" store]
   let cache_root = Filename.concat root "cache"
   let data_dir = Filename.concat root "data"
@@ -66,16 +61,9 @@ module R = Remote_lwt.Make (C)
 module D = Data_lwt.Make (C) (R)
 
 let write_file path contents =
-  let oc = open_out_bin path in
-  output_string oc contents;
-  close_out oc
+  Out_channel.with_open_bin path (fun oc -> output_string oc contents)
 
-let read_file path =
-  let ic = open_in_bin path in
-  let n = in_channel_length ic in
-  let s = really_input_string ic n in
-  close_in ic;
-  s
+let read_file path = In_channel.with_open_bin path In_channel.input_all
 
 (* Distinct bytes throughout, so a misplaced range shows as wrong content rather
    than bytes that happen to match. *)

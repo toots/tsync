@@ -82,21 +82,9 @@ let holds root key =
   Sys.file_exists (Filename.concat root (Stored_key.to_string key))
 
 let () =
-  let main =
-    Backend_lwt.make ~backend_type:"local"
-      ~get_field:(fun _ -> Some main_root)
-      ()
-  in
-  let replica =
-    Backend_lwt.make ~backend_type:"local"
-      ~get_field:(fun _ -> Some replica_root)
-      ()
-  in
-  let archive =
-    Backend_lwt.make ~backend_type:"local"
-      ~get_field:(fun _ -> Some archive_root)
-      ()
-  in
+  let main = Fixture.local_store main_root in
+  let replica = Fixture.local_store replica_root in
+  let archive = Fixture.local_store archive_root in
   let (module Rep : Backend_lwt.Store) = replica in
   let (module Arc : Backend_lwt.Store) = archive in
   Lwt_main.run
