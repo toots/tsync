@@ -4,6 +4,8 @@ import OSLog
 
 private let log = Logger(subsystem: "org.feverdreamtv.tsync", category: "SignalRelay")
 
+private let maxBackoff = 30.0
+
 /// Carries the daemon's events to the system.
 ///
 /// Only a process holding an `NSFileProviderManager` can signal the system, and
@@ -27,19 +29,24 @@ final class SignalRelay: @unchecked Sendable {
             // without anyone reconnecting it.
             var backoff = 1.0
             while !stopped {
+                let connected = Date()
                 do {
                     // Events are not replayed, so whatever happened while no
                     // subscription was up is caught by asking once it is.
                     try client.subscribe(onSubscribed: { [self] in
-                        backoff = 1.0
                         signalWorkingSet(because: "subscribed")
                     }, onEvent: { [self] event in handle(event) })
                 } catch {
                     log.debug("subscribe: \(error, privacy: .public)")
                 }
                 if stopped { break }
+                // The ack costs the daemon nothing, so it is no evidence the
+                // connection was any good: a crashlooping daemon that acks and
+                // dies would hold the backoff at a second and turn every retry
+                // into a working-set enumeration. Time up is the evidence.
+                if Date().timeIntervalSince(connected) >= maxBackoff { backoff = 1.0 }
                 Thread.sleep(forTimeInterval: backoff)
-                backoff = min(backoff * 2, 30)
+                backoff = min(backoff * 2, maxBackoff)
             }
         }
     }
