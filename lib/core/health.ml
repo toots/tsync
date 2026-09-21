@@ -112,6 +112,22 @@ let lost t reason =
     else `Up
   end
 
+(* The hold [lost] would have chosen, taken on one report rather than a run. *)
+let probe_lost t reason =
+  if t.tracked then begin
+    let at = now () in
+    let held = out t in
+    t.sampled <- true;
+    t.reason <- reason;
+    if t.consecutive = 0 then t.failing_since <- at;
+    t.consecutive <- t.consecutive + 1;
+    t.last_lost <- at;
+    t.probing <- false;
+    hold_for t
+      (if held then Float.min !hold_max (t.hold *. 2.) else !hold_initial);
+    tell t
+  end
+
 let describe t =
   if not (out t) then ""
   else

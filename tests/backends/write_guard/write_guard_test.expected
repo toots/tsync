@@ -21,6 +21,9 @@ is looked at again, and still refused: ok
 === one that never answers
   write the replica: refusing to copy to replica: the main "main" is not online (no answer within s). A replica is never written while the main is offline, or it holds what nobody can check [transient]
 is not waited on for ever: ok
+  once given up on: the main "main" is not online (held down for s after  failure (no answer within s))
+  writing it again: refusing to copy to replica: the main "main" is not online (held down for s after  failure (no answer within s)). A replica is never written while the main is offline, or it holds what nobody can check [transient]
+a main given up on is one this process has heard from: ok
 
 === a domain with no main at all
   ok
@@ -33,4 +36,4 @@ leaves the replica holding exactly what it held: ok
   and with the main there: allowed
 which is the same command allowed: ok
 
-10 check(s), 0 failure(s)
+11 check(s), 0 failure(s)

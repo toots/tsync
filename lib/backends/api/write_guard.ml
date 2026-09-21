@@ -44,7 +44,14 @@ module Over (Io : Io.S) (Clock : Clock.S with type 'a io := 'a Io.t) = struct
                   B.get_opt ~key:cursor_key ()))
         in
         Ok { seconds = Unix.gettimeofday () -. started; cursor })
-      (fun exn -> Io.return (Error (why_not exn)))
+      (fun exn ->
+        let why = why_not exn in
+        (* The deadline cancels the request under it, and a cancelled request
+           tells the cell nothing: this main is down on the probe's own answer,
+           or the next look would find it unheard from and pay the wait
+           again. *)
+        if Clock.is_timeout exn then Health.probe_lost B.health why;
+        Io.return (Error why))
 
   (* A main heard from and up is taken at its word, so a run of guarded writes
      costs one look and not one each; one that went down is looked at again

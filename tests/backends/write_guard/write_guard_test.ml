@@ -122,10 +122,20 @@ let () =
 
      case "one that never answers";
      let link = { answers = `Never; asked = ref 0 } in
-     let members, _, replica = domain link (Health.create ()) in
+     let health = Health.create () in
+     let members, _, replica = domain link health in
      let* answer = asked_of (ensure members replica) in
      step "write the replica: %s" answer;
      check "is not waited on for ever" (!(link.asked) = 1);
+     (* The deadline cancels the request under it, so nothing on the retry
+        ladder reports the failure: a probe that comes back with nothing to say
+        leaves the main unheard from, and every write after it pays the wait
+        again. *)
+     step "once given up on: %s" (said (Write_guard_lwt.state members));
+     let* answer = asked_of (ensure members replica) in
+     step "writing it again: %s" answer;
+     check "a main given up on is one this process has heard from"
+       (Health.is_down health && !(link.asked) = 1 && answer <> "allowed");
 
      case "a domain with no main at all";
      let members =
@@ -181,4 +191,4 @@ let () =
      check "which is the same command allowed" (answer = "allowed");
      Scratch.cleanup root;
      Lwt.return_unit);
-  report ~expected:10 ()
+  report ~expected:11 ()
