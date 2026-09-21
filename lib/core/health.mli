@@ -61,6 +61,12 @@ val answered : t -> unit
     line in a log; [`Held] is a request that was already on its way. *)
 val lost : t -> string -> [ `Up | `Tripped | `Held ]
 
+(** A probe made on purpose and lost: the member is out on this answer alone. A
+    run of failures is what a request that was going there anyway has to add up
+    to, and a deadline cancelling the request under it leaves {!lost} nothing to
+    be told at all. *)
+val probe_lost : t -> string -> unit
+
 (** Called once, the next time the member goes or stays out: for whoever is
     waiting on it with somewhere else to go. {!off} withdraws it. *)
 val on_held : t -> (unit -> unit) -> int
