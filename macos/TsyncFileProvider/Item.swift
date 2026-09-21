@@ -92,12 +92,17 @@ final class TsyncItem: NSObject, NSFileProviderItem {
         guard let id = ItemID.parse(item.ref),
               let parent = ItemID.parse(item.parentRef)
         else { return nil }
+        // A name whose bytes are not UTF-8 reaches us with replacements in it,
+        // and a file's reference spells its name: handed back, it names nothing
+        // the daemon has. Writing such an item would create a second file under
+        // the replacements and then fail to delete the first.
+        let mangled = item.ref.contains("\u{FFFD}") || item.name.contains("\u{FFFD}")
         return TsyncItem(
             identifier: id.identifier,
             parent: parent.identifier,
             filename: item.name,
             isDirectory: item.isDirectory,
-            readOnly: readOnly,
+            readOnly: readOnly || mangled,
             size: item.size,
             // A directory reports mtime 0 for "no useful date", not the epoch.
             modificationDate: item.mtime > 0
