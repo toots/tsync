@@ -404,7 +404,12 @@ struct
             | [] -> readable
             | up -> up
         in
-        let+ answers =
+        (* Passing over a member that is down leaves the answer to the others;
+           when none of them answered either, nobody was asked, and the empty
+           merge would hand the caller "no share URL, no chunk size" as fact —
+           which {!Remote} then memoises for the life of the process. *)
+        let passed_over = ref None in
+        let* answers =
           filter_map_s
             (fun s ->
               Io.catch
@@ -417,12 +422,16 @@ struct
                   in
                   Some caps)
                 (fun exn ->
-                  if List.length asked > 1 && Health.is_down (health_of s) then
+                  if List.length asked > 1 && Health.is_down (health_of s) then begin
+                    passed_over := Some exn;
                     Io.return None
+                  end
                   else Io.fail exn))
             asked
         in
-        Backend.merge_caps answers
+        match (answers, !passed_over) with
+          | [], Some exn -> Io.fail exn
+          | _ -> Io.return (Backend.merge_caps answers)
 
       (* The main's alone: it is the store a read lands on, and a replica behind
          a link would make every read of this domain pay for a whole cache chunk
