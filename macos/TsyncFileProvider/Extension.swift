@@ -157,6 +157,15 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension,
                 let range = PartialRange.aligned(covering: requestedRange,
                                                  alignment: alignment,
                                                  documentSize: item.documentSize?.int64Value ?? 0)
+                // Nothing to read means the file is shorter than the size the
+                // request was built from. The daemon rejects a length of 0 as
+                // invalid, which maps to an unknown error the system retries
+                // forever; saying the version is gone has it ask for the item
+                // afresh and come back with a range that exists.
+                guard range.length > 0 else {
+                    throw NSError(domain: NSFileProviderErrorDomain,
+                                  code: NSFileProviderError.versionNoLongerAvailable.rawValue)
+                }
                 let (destination, served) = try await assembled { destination in
                     let served = try await client.fetchRange(ref: ref,
                                                              destination: destination.path,
