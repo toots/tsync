@@ -104,6 +104,7 @@ CAMLprim value tsync_watch_open_dir(value _directory_path) {
  * nothing above can time it out. */
 #define TSYNC_WATCH_DRAIN_PASSES 64
 
+#if defined(__linux__)
 /* Matches Filename.is_temp_name, which is where the spelling is decided; it is
  * repeated here because a name is read in C and nowhere else. */
 static int tsync_watch_is_temp_name(const char *name, int length) {
@@ -117,6 +118,7 @@ static int tsync_watch_is_temp_name(const char *name, int length) {
     return 0;
   return memcmp(name + length - suffix_length, suffix, suffix_length) == 0;
 }
+#endif
 
 /* Whether anything the caller would call a change arrived. */
 CAMLprim value tsync_watch_drain(value _watch_fd) {
