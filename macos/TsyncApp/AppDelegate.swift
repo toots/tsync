@@ -66,7 +66,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let configured = Set(domainNames.map(domainIdentifier))
         let stale = await staleIdentityScheme(existing)
-        let reset = consumeResetMarker().union(stale)
+        let requested = readResetMarker()
+        let reset = requested.union(stale)
 
         let unwanted = existing.filter {
             !configured.contains($0.identifier.rawValue)
@@ -101,6 +102,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // not let go of would otherwise pin every launch to a rebuild of all
         // the others, whose content goes dataless and comes back down each time.
         if listed, stale.isSubset(of: removed) { recordIdentityScheme() }
+
+        // Same for the reset request: it is answered once the domains it named
+        // are gone, or were not there to remove. A removal that failed keeps
+        // the marker, so the next launch tries again rather than dropping the
+        // request on the floor.
+        let awaited = requested.intersection(Set(existing.map(\.identifier.rawValue)))
+        if listed, awaited.isSubset(of: removed) { clearResetMarker() }
+
         await startRelays()
     }
 
@@ -213,15 +222,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return true
     }
 
-    /// Domain names written by `tsync fileprovider reset`, one per line. Removed
-    /// before reconciling, so the loop above registers them afresh.
-    private func consumeResetMarker() -> Set<String> {
-        let marker = Config.dataDirURL.appendingPathComponent("fileprovider-reset")
-        guard let text = try? String(contentsOf: marker, encoding: .utf8) else { return [] }
-        try? FileManager.default.removeItem(at: marker)
+    /// Domain names written by `tsync fileprovider reset`, one per line. They
+    /// are removed while reconciling and the loop above registers them afresh.
+    private static var resetMarker: URL {
+        Config.dataDirURL.appendingPathComponent("fileprovider-reset")
+    }
+
+    private func readResetMarker() -> Set<String> {
+        guard let text = try? String(contentsOf: Self.resetMarker, encoding: .utf8)
+        else { return [] }
         return Set(
             text.split(separator: "\n")
                 .map { domainIdentifier($0.trimmingCharacters(in: .whitespaces)) }
                 .filter { !$0.isEmpty })
+    }
+
+    private func clearResetMarker() {
+        try? FileManager.default.removeItem(at: Self.resetMarker)
     }
 }
