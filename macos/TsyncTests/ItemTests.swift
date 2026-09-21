@@ -1,4 +1,5 @@
 import FileProvider
+import UniformTypeIdentifiers
 import XCTest
 
 /// What an item built out of a name the daemon could not spell in UTF-8 is
@@ -35,5 +36,34 @@ final class ItemTests: XCTestCase {
     func testAnOrdinaryNameStaysWritable() throws {
         let item = try XCTUnwrap(try item(named: Data("Café.txt".utf8)))
         XCTAssertTrue(item.capabilities.contains(.allowsWriting))
+    }
+
+    // MARK: - What a directory is typed as
+
+    private func directory(named name: String) -> TsyncItem {
+        TsyncItem(identifier: NSFileProviderItemIdentifier("d:9f3a"),
+                  parent: .rootContainer, filename: name,
+                  isDirectory: true, readOnly: false)
+    }
+
+    /// A package arriving from a peer is a directory, and typing it as a plain
+    /// folder is what has the Finder show a `.rtfd` as something to open rather
+    /// than as the document it is.
+    func testAPackageIsTypedAsItsOwnDocument() {
+        let item = directory(named: "notes.rtfd")
+        XCTAssertEqual(item.contentType.identifier, "com.apple.rtfd")
+        XCTAssertTrue(item.contentType.conforms(to: .directory))
+    }
+
+    func testAnOrdinaryFolderIsAFolder() {
+        XCTAssertEqual(directory(named: "Documents").contentType, .folder)
+        XCTAssertEqual(directory(named: "archive.2026").contentType, .folder)
+    }
+
+    /// A folder is not opened by whatever owns the extension it happens to end
+    /// in: only a type that is itself a directory may stand in for one.
+    func testAFolderNamedLikeAFlatFileStaysAFolder() {
+        XCTAssertEqual(directory(named: "read.me.txt").contentType, .folder)
+        XCTAssertEqual(directory(named: "cover.jpg").contentType, .folder)
     }
 }
