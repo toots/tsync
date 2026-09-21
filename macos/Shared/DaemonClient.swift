@@ -270,6 +270,53 @@ struct DaemonClient: Sendable {
 
     // MARK: Requests
 
+    /// The descriptor a request is blocked on, so cancelling the task can shut
+    /// it down. `Task.cancel()` on its own does not reach a thread sitting in
+    /// `recv`, and that thread is one of a small global pool: enough cancelled
+    /// fetches left waiting on a daemon with no deadline of its own and every
+    /// later request waits behind them.
+    ///
+    /// Locked throughout, because a descriptor that has been closed is a number
+    /// the system hands out again — a shutdown arriving late would land on
+    /// somebody else's connection.
+    private final class CancellableSocket: @unchecked Sendable {
+        private let lock = NSLock()
+        private var fd: Int32 = -1
+        private var cancelled = false
+
+        /// False once cancelled, so a request that loses the race never opens a
+        /// connection no one is left to shut down.
+        func adopt(_ fd: Int32) -> Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            guard !cancelled else { return false }
+            self.fd = fd
+            return true
+        }
+
+        func close() {
+            lock.lock()
+            defer { lock.unlock() }
+            if fd >= 0 {
+                Darwin.close(fd)
+                fd = -1
+            }
+        }
+
+        func cancel() {
+            lock.lock()
+            defer { lock.unlock() }
+            cancelled = true
+            if fd >= 0 { shutdown(fd, SHUT_RDWR) }
+        }
+
+        var wasCancelled: Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            return cancelled
+        }
+    }
+
     /// ponytail: a connection per request. The daemon serves many on one now, but
     /// replies carry no request id, so reusing one means serialising against it —
     /// worth a pool only if the connect ever shows up in a profile.
@@ -281,20 +328,44 @@ struct DaemonClient: Sendable {
     /// shape. The daemon's verdict is checked first whatever the shape.
     func send<Reply: Decodable>(_ request: DaemonRequest,
                                 as reply: Reply.Type) async throws -> Reply {
-        try await withCheckedThrowingContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                do { continuation.resume(returning: try sendSync(request, as: reply)) }
-                catch { continuation.resume(throwing: error) }
+        let socket = CancellableSocket()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                DispatchQueue.global(qos: .userInitiated).async {
+                    do {
+                        continuation.resume(
+                            returning: try sendSync(request, as: reply, on: socket))
+                    } catch {
+                        // A shutdown mid-`recv` reads as the peer closing, which
+                        // is a transport error and not what happened.
+                        continuation.resume(
+                            throwing: socket.wasCancelled ? CancellationError() : error)
+                    }
+                }
             }
+        } onCancel: {
+            socket.cancel()
         }
     }
 
+    /// Blocking, and uninterruptible unless a socket is passed in for a
+    /// canceller to shut down.
     func sendSync<Reply: Decodable>(_ request: DaemonRequest,
                                     as reply: Reply.Type) throws -> Reply {
+        try sendSync(request, as: reply, on: CancellableSocket())
+    }
+
+    private func sendSync<Reply: Decodable>(_ request: DaemonRequest,
+                                            as reply: Reply.Type,
+                                            on socket: CancellableSocket) throws -> Reply {
         var request = request
         if request.domain == nil { request.domain = domain }
         let fd = try Self.connect(to: socketPath)
-        defer { close(fd) }
+        guard socket.adopt(fd) else {
+            Darwin.close(fd)
+            throw CancellationError()
+        }
+        defer { socket.close() }
         try Self.writeLine(fd, try JSONEncoder().encode(request))
         // Half-close tells the daemon no more requests are coming, so it
         // finishes and lets go.
