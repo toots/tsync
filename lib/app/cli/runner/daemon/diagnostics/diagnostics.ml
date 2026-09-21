@@ -117,6 +117,12 @@ let self_json ?(extra = []) () =
            (Log.recent ())) );
   ]
 
+(* How long a domain's answer waits on a listing that is still running, after
+   the probe before it. Out here because whoever asks this daemon over a socket
+   has to outlast it, and a deadline of its own guessed at the far end is one
+   that drifts. *)
+let listing_grace = ref 2.
+
 module Make (C : Conf_lwt.S) = struct
   module R = Remote_lwt.Make_with_layout (C) (Layout_lwt.Identity)
   module L = Chunk_layout.Make (C)
@@ -132,7 +138,6 @@ module Make (C : Conf_lwt.S) = struct
   (* A listing's own deadline, retries included: it is as long as what it lists,
      which a probe of one small object is not. *)
   let listing_timeout = 30.
-  let listing_grace = ref 2.
 
   let unreachable exn =
     `String
