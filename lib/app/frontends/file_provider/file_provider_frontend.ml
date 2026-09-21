@@ -88,6 +88,9 @@ let reset (module C : Conf_lwt.S) _args =
 let purge (_ : (module Conf_lwt.S)) _args =
   let paths = Runtime.default_paths () in
   let marker = write_marker "fileprovider-purge" in
+  (* A minute: the app bounds its own retrying to a few seconds however many
+     domains it has, and what is left is the removals themselves. Giving up
+     early would take the marker away from an app still working on it. *)
   let rec wait attempts =
     if not (Sys.file_exists marker) then true
     else if attempts = 0 then false
@@ -101,7 +104,7 @@ let purge (_ : (module Conf_lwt.S)) _args =
   if not (restart_app ()) then (
     Sys.remove marker;
     print_endline "TsyncApp is not running: skipping domain unregistration")
-  else if not (wait 60) then (
+  else if not (wait 120) then (
     (* Left behind, it would have the app unregister everything at each launch
        long after this command gave up. *)
     (try Sys.remove marker with Sys_error _ -> ());

@@ -37,7 +37,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // up in the menu bar instead of leaving no interface at all.
         statusMenu = await StatusMenu(domains: domainNames)
 
-        if await purgeIfRequested() { return }
+        // One window for the whole launch, not one per call: multiplied by the
+        // number of domains, a per-call budget outruns the CLI waiting on a
+        // purge and has it call the purge failed while it is still going.
+        let deadline = Date().addingTimeInterval(Self.invalidationWindow)
+
+        if await purgeIfRequested(until: deadline) { return }
 
         // Reconciling against no names would remove every domain and the local
         // copies with it, and a config that cannot be read names nothing.
@@ -50,7 +55,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let existing: [NSFileProviderDomain]
         var listed = true
         do {
-            existing = try await retryingWhileInvalidating { try await NSFileProviderManager.domains() }
+            existing = try await retryingWhileInvalidating(until: deadline) {
+                try await NSFileProviderManager.domains()
+            }
         } catch {
             log.error("domains() failed: \(error, privacy: .public)")
             existing = []
@@ -58,13 +65,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let configured = Set(domainNames.map(domainIdentifier))
-        let reset = consumeResetMarker().union(await staleIdentityScheme(existing))
+        let stale = await staleIdentityScheme(existing)
+        let reset = consumeResetMarker().union(stale)
 
         let unwanted = existing.filter {
             !configured.contains($0.identifier.rawValue)
                 || reset.contains($0.identifier.rawValue)
         }
-        let removed = await remove(unwanted)
+        let removed = await remove(unwanted, until: deadline)
 
         let surviving = Set(existing.map(\.identifier.rawValue)).subtracting(removed)
 
@@ -78,7 +86,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // operation nothing implements.
             domain.supportsSyncingTrash = false
             do {
-                try await retryingWhileInvalidating { try await NSFileProviderManager.add(domain) }
+                try await retryingWhileInvalidating(until: deadline) {
+                    try await NSFileProviderManager.add(domain)
+                }
                 log.info("registered domain '\(identifier, privacy: .public)'")
             } catch {
                 log.error("add '\(identifier, privacy: .public)' failed: \(error, privacy: .public)")
@@ -86,18 +96,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         // A domain still spelling the old identifiers is rebuilt at the next
-        // launch, which recording the scheme now would call off.
-        if listed, removed.count == unwanted.count { recordIdentityScheme() }
+        // launch, which recording the scheme now would call off. Only those
+        // count: a domain merely dropped from the config that the system will
+        // not let go of would otherwise pin every launch to a rebuild of all
+        // the others, whose content goes dataless and comes back down each time.
+        if listed, stale.isSubset(of: removed) { recordIdentityScheme() }
         await startRelays()
     }
 
     /// The identifiers of the domains that did go.
-    private func remove(_ domains: [NSFileProviderDomain]) async -> Set<String> {
+    private func remove(_ domains: [NSFileProviderDomain],
+                        until deadline: Date) async -> Set<String> {
         var removed: Set<String> = []
         for domain in domains {
             let identifier = domain.identifier.rawValue
             do {
-                try await retryingWhileInvalidating {
+                try await retryingWhileInvalidating(until: deadline) {
                     try await NSFileProviderManager.remove(domain, mode: .removeAll)
                 }
                 log.info("removed domain '\(identifier, privacy: .public)'")
@@ -109,21 +123,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return removed
     }
 
+    /// How long one launch may spend waiting on a provider that is still
+    /// invalidating, across every call it makes.
+    private static let invalidationWindow: TimeInterval = 10
+
     /// The system rejects domain calls with `providerNotFound` ("is in the
     /// process of being invalidated. Retry later.") while it swaps the
     /// extension registration — which is what the installer opening the app
     /// races against on every fresh install.
-    private func retryingWhileInvalidating<T>(_ body: () async throws -> T) async throws -> T {
-        for attempt in 1...10 {
+    ///
+    /// The deadline is shared by every call of one launch, so the wait stays
+    /// what it says however many domains there are to reconcile.
+    private func retryingWhileInvalidating<T>(until deadline: Date,
+                                              _ body: () async throws -> T) async throws -> T {
+        while true {
             do {
                 return try await body()
             } catch let error as NSError where error.domain == NSFileProviderErrorDomain
                 && error.code == NSFileProviderError.Code.providerNotFound.rawValue {
-                log.info("provider still invalidating, retry \(attempt)")
+                guard Date() < deadline else { throw error }
+                log.info("provider still invalidating, retrying")
                 try? await Task.sleep(for: .seconds(1))
             }
         }
-        return try await body()
     }
 
     /// One relay per domain, for as long as the app runs.
@@ -172,15 +194,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Written by `tsync fileprovider purge`: unregister every domain, register
     /// none. The marker is deleted last and only once every domain is gone,
     /// which is how the CLI knows the rest can be torn down.
-    private func purgeIfRequested() async -> Bool {
+    private func purgeIfRequested(until deadline: Date) async -> Bool {
         let marker = Config.dataDirURL.appendingPathComponent("fileprovider-purge")
         guard FileManager.default.fileExists(atPath: marker.path) else { return false }
 
         do {
-            let domains = try await retryingWhileInvalidating {
+            let domains = try await retryingWhileInvalidating(until: deadline) {
                 try await NSFileProviderManager.domains()
             }
-            guard await remove(domains).count == domains.count else { return true }
+            guard await remove(domains, until: deadline).count == domains.count
+            else { return true }
         } catch {
             log.error("purge: domains() failed: \(error, privacy: .public)")
             return true
