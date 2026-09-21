@@ -34,11 +34,19 @@ final class TsyncItem: NSObject, NSFileProviderItem {
         self.parentItemIdentifier = parent
         self.filename = filename
         self.symlinkTargetPath = symlinkTarget
+        let ext = (filename as NSString).pathExtension
+        // A package (.rtfd, .logicx, .band) is a directory the system should
+        // show and open as the one document it is. The plain lookup answers
+        // with the flat type an extension usually means, so the directory
+        // reading has to be asked for -- and taken only when it is a type
+        // something actually declared, since the lookup invents a dynamic one
+        // for every extension that has none, .txt included.
+        let asDirectory = UTType(filenameExtension: ext, conformingTo: .directory)
         self.contentType = isDirectory
-            ? .folder
+            ? (asDirectory?.isDeclared == true ? asDirectory! : .folder)
             : symlinkTarget != nil
             ? .symbolicLink
-            : UTType(filenameExtension: (filename as NSString).pathExtension) ?? .data
+            : UTType(filenameExtension: ext) ?? .data
         self.documentSize = size.map { NSNumber(value: $0) }
         self.contentModificationDate = modificationDate
 
