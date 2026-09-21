@@ -93,7 +93,7 @@ struct
     in
     (* [stop_on_miss] takes the first reachable store's [None] as the answer;
        otherwise a miss moves on. [`Unreachable exn] when every store raised. *)
-    let walk ?probing ~stop_on_miss label chain f =
+    let walk ?probing ?(others_after = false) ~stop_on_miss label chain f =
       let rec go last = function
         | [] -> (
             match last with
@@ -103,7 +103,11 @@ struct
             let* outcome =
               Io.catch
                 (fun () ->
-                  let+ v = ask_member ?probing ~others:(rest <> []) label s f in
+                  let+ v =
+                    ask_member ?probing
+                      ~others:(rest <> [] || others_after)
+                      label s f
+                  in
                   `Got v)
                 (fun exn ->
                   (* A member going down is said once, by the request that found
@@ -126,7 +130,10 @@ struct
        actually asked: an unreachable one surfaces its error, since "could not
        look" must not read as "not there". *)
     let read ?probing label f =
-      let* first = walk ?probing ~stop_on_miss:true label readable f in
+      let* first =
+        walk ?probing ~others_after:(archives <> []) ~stop_on_miss:true label
+          readable f
+      in
       match first with
         | `Answer v -> Io.return (Some v)
         | _ -> (
