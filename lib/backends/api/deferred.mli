@@ -108,11 +108,19 @@ module Over
       and released its chunk buffer, so this is the memory that path costs, and
       the caller passes the budget it holds those buffers under. A push offered
       past it is dropped for the manifest job to fetch later, never queued.
-      Values below [1] are read as [1]. *)
+      Values below [1] are read as [1].
+
+      [room_for] is the link's answer to the same question: whether a body of
+      that many bytes may go now. A [false] drops the forward as the count
+      does, for the same reason, that a body is not held in memory waiting
+      for a link; the store's own gate then takes the room on the write with
+      nothing between, which is what the answer is good for. Omitted, there
+      is always room. *)
   val make :
     ?resume:bool ->
     ?chunk_from_prefix:string ->
     ?max_chunk_forwards:int ->
+    ?room_for:(bytes:int -> bool) ->
     name:string ->
     backend:(module Store) ->
     source:(module Store) ->

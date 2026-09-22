@@ -4,6 +4,7 @@ type 'io admission = {
   abandoned : bytes:int -> unit;
   now : unit -> float;
   waiting : unit -> int;
+  try_admit : bytes:int -> bool;
 }
 
 let small_body = ref 65536
@@ -18,6 +19,7 @@ module Make (Io : Io.S) (Clock : Clock.S with type 'a io := 'a Io.t) = struct
       abandoned = (fun ~bytes:_ -> ());
       now = Clock.now;
       waiting = (fun () -> 0);
+      try_admit = (fun ~bytes:_ -> true);
     }
 
   (* What a line asks of what is beneath it: a store's own budget, or the
@@ -99,6 +101,7 @@ module Make (Io : Io.S) (Clock : Clock.S with type 'a io := 'a Io.t) = struct
       abandoned = (fun ~bytes -> left g ~bytes ~answered:false ~elapsed:0.);
       now = Clock.now;
       waiting = (fun () -> Queue.length g.waiters);
+      try_admit = (fun ~bytes -> room g ~bytes);
     }
 
   (* One after the other: the first asked first, so a store's own ceiling is
@@ -120,6 +123,7 @@ module Make (Io : Io.S) (Clock : Clock.S with type 'a io := 'a Io.t) = struct
           second.abandoned ~bytes);
       now = first.now;
       waiting = (fun () -> first.waiting () + second.waiting ());
+      try_admit = (fun ~bytes -> first.try_admit ~bytes && second.try_admit ~bytes);
     }
 
   let capped ~rate =
@@ -273,6 +277,11 @@ module Make (Io : Io.S) (Clock : Clock.S with type 'a io := 'a Io.t) = struct
     {
       (admission_of t.line) with
       acquire = (fun ~bytes -> acquire t ~class_ ~bytes);
+      try_admit =
+        (fun ~bytes ->
+          match class_ with
+            | Foreground -> true
+            | Background -> try_admit t ~bytes);
     }
 
   let attach t ~name ~held ~probe =

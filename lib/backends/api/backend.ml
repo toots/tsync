@@ -253,6 +253,7 @@ struct
       abandoned = (fun ~bytes:_ -> ());
       now = (fun () -> 0.);
       waiting = (fun () -> 0);
+      try_admit = (fun ~bytes:_ -> true);
     }
 
   let counted ~traffic ~(admission : unit Io.t Uplink.admission) m =

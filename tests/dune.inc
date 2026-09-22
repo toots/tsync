@@ -57,6 +57,14 @@
   (action
    (diff deferred.expected deferred.output))))
 
+(subdir backends/deferred_governed
+ (alias
+  (name default)
+  (deps deferred_governed.exe))
+ (rule
+  (alias runtest)
+  (action (run ./deferred_governed.exe))))
+
 (subdir backends/deferred_shards
  (alias
   (name default)

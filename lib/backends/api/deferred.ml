@@ -125,7 +125,8 @@ struct
   let release ~root ~name = Durable_queue.release (log_dir ~root ~name)
 
   let make ?(resume = false) ?chunk_from_prefix
-      ?(max_chunk_forwards = default_max_chunk_forwards) ~name ~backend ~source
+      ?(max_chunk_forwards = default_max_chunk_forwards)
+      ?(room_for = fun ~bytes:_ -> true) ~name ~backend ~source
       ~chunk_prefix ~(chunk_keys : string -> string list) ~journal_prefix
       ~cursor_key ~(excluded : Stored_key.t -> bool) ~reads_reach ~root () :
       (module S) =
@@ -257,8 +258,11 @@ struct
        all, which is why the durable log holds one record per user-visible
        operation rather than one per chunk. *)
     let forward_chunk key data =
-      if Hashtbl.mem ensured key || !chunks_in_flight >= max_chunk_forwards then
-        ()
+      if
+        Hashtbl.mem ensured key
+        || !chunks_in_flight >= max_chunk_forwards
+        || not (room_for ~bytes:(Bigstring.length data))
+      then ()
       else begin
         incr chunks_in_flight;
         Io.async (fun () ->

@@ -22,6 +22,10 @@ type 'io admission = {
   now : unit -> float;
       (** The clock [elapsed] is read off, so a store need not hold one. *)
   waiting : unit -> int;  (** Bodies queued behind the gate right now. *)
+  try_admit : bytes:int -> bool;
+      (** Room for [bytes] now, with nothing ahead: the drop path's question.
+          Pure, and good only until this turn yields; the [acquire] that
+          follows takes the room with no bind between. *)
 }
 
 (** A body of at most this many bytes may pass ahead of what is queued, when
@@ -77,7 +81,7 @@ module Make (Io : Io.S) (Clock : Clock.S with type 'a io := 'a Io.t) : sig
       and charges nothing. A [true] holds only until this turn yields: the
       caller's {!acquire} that follows takes the room synchronously, with no
       bind between, which is what {!Deferred} relies on. Always [true] when
-      disabled. *)
+      disabled. What {!admission} answers as its [try_admit]. *)
   val try_admit : t -> bytes:int -> bool
 
   (** What a store hands {!Backend.Make.make}: this governor, asked as

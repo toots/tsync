@@ -1,16 +1,16 @@
 (* Every store's writes join the process governor's line; a ceiling in the
    config is this store's own gate in front of it, one per store built. *)
-let make_backend ~traffic (bc : Conf_parsing.backend_config) =
-  let module U = Tsync_core_lwt.Uplink_lwt in
-  let governed = U.admission (U.process ()) U.Background in
-  let admission =
-    match bc.Conf_parsing.max_upload_rate with
-      | Some rate -> U.compose (U.capped ~rate:(float_of_int rate)) governed
-      | None -> governed
-  in
+let make_backend ~traffic ~admission (bc : Conf_parsing.backend_config) =
   Backend_lwt.make ~admission ~traffic ~backend_type:bc.backend_type
     ~get_field:(fun k -> List.assoc_opt k bc.fields)
     ()
+
+let admission_for (bc : Conf_parsing.backend_config) =
+  let module U = Tsync_core_lwt.Uplink_lwt in
+  let governed = U.admission (U.process ()) U.Background in
+  match bc.Conf_parsing.max_upload_rate with
+    | Some rate -> U.compose (U.capped ~rate:(float_of_int rate)) governed
+    | None -> governed
 
 (* Empty for a body that is not a manifest: a folder marker, a trash marker, a
    share. *)
@@ -37,6 +37,9 @@ let build_backends ~paths ~resume ~max_chunk_forwards
   (* One counter pair per configured store, kept by name so the member built
      below reports the very counters that store's wrapper adds to. *)
   let traffic : (string, Backend.traffic) Hashtbl.t = Hashtbl.create 4 in
+  (* Kept by name beside the counters: a deferred target asks its own store's
+     gate whether a forward may go, the same gate the write then takes. *)
+  let admissions = Hashtbl.create 4 in
   (* Shared by every layer below: a second [make_backend] for the same config is
      a second client against the same store. Order comes from
      {!Conf_parsing.order_backends}, so a main answers first. *)
@@ -45,7 +48,9 @@ let build_backends ~paths ~resume ~max_chunk_forwards
       (fun (bc : Conf_parsing.backend_config) ->
         let t = Backend.new_traffic () in
         Hashtbl.replace traffic bc.Conf_parsing.name t;
-        (bc, make_backend ~traffic:t bc))
+        let admission = admission_for bc in
+        Hashtbl.replace admissions bc.Conf_parsing.name admission;
+        (bc, make_backend ~traffic:t ~admission bc))
       (Conf_parsing.order_backends d.Conf_parsing.backends)
   in
   let of_roles rs =
@@ -64,8 +69,9 @@ let build_backends ~paths ~resume ~max_chunk_forwards
   in
   let target ((bc : Conf_parsing.backend_config), backend) ~source =
     let built_target =
-      Domain_store_lwt.Deferred.make ~resume ~max_chunk_forwards ~name:bc.name
-        ~backend ~source
+      Domain_store_lwt.Deferred.make ~resume ~max_chunk_forwards
+        ~room_for:(Hashtbl.find admissions bc.name).Uplink.try_admit
+        ~name:bc.name ~backend ~source
         ~chunk_prefix:(Conf_parsing.chunk_prefix d)
         ~chunk_from_prefix:
           (let module L = Chunk_layout.Make (struct
