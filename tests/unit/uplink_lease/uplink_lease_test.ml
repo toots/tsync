@@ -90,19 +90,34 @@ let () =
   check "the sum" (Uplink_lease.drain t = (150, 1));
   check "then nothing" (Uplink_lease.drain t = (0, 0));
 
+  case "having waited is said once, and spent by the split that hears it";
+  let t = Uplink_lease.create () in
+  Uplink_lease.record t ~now:0. ~pid:1 { Uplink_lease.idle with held_back = true };
+  check "heard" (List.exists (fun (_, r) -> Uplink_lease.wants r) (Uplink_lease.live t ~now:0.));
+  Uplink_lease.split t ~now:0. ~total ~min_rate ~self:Uplink_lease.idle;
+  check "and spent"
+    (not (List.exists (fun (_, r) -> Uplink_lease.wants r) (Uplink_lease.live t ~now:0.)));
+
+  case "a lessee that never says is held back while it has a body in flight";
+  let old_build = Uplink_lease.report_of_json [("inFlight", `Int 5)] in
+  check "read as wanting more" (Uplink_lease.wants old_build);
+  check "and one that says no is not"
+    (not (Uplink_lease.wants (Uplink_lease.report_of_json [("inFlight", `Int 5); ("heldBack", `Bool false)])));
+
   case "a report read off a request";
   let r =
     Uplink_lease.report_of_json
       [("inFlight", `Int 5); ("completed", `Float 7.); ("waiting", `Int 2)]
   in
-  check "fields present are read, absent ones are nothing"
+  check "fields present are read, absent ones are nothing, but for held back,
+          which a body in flight stands in for"
     (r
     = {
         Uplink_lease.in_flight = 5;
         completed = 7;
         timeouts = 0;
         waiting = 2;
-        held_back = false;
+        held_back = true;
       });
 
-  report ~expected:12 ()
+  report ~expected:16 ()

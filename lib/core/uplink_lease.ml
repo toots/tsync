@@ -23,10 +23,12 @@ let report_of_json fields =
     completed = int "completed";
     timeouts = int "timeouts";
     waiting = int "waiting";
+    (* A lessee built before the field existed never sends it; for one, a
+       body in flight is the best sign it would use more. *)
     held_back =
       (match List.assoc_opt "heldBack" fields with
         | Some (`Bool b) -> b
-        | _ -> false);
+        | _ -> int "inFlight" > 0);
   }
 
 type lessee = {
@@ -131,7 +133,12 @@ let split t ~now ~total ~min_rate ~self =
         | `Own -> t.own <- Some rate
         | `Lessee pid -> (
             match Hashtbl.find_opt t.lessees pid with
-              | Some l -> l.grant <- Some rate
+              | Some l ->
+                  l.grant <- Some rate;
+                  (* Said once, counted once: what a lessee reported having
+                     waited is spent by this split, not by every step until
+                     it renews. *)
+                  l.last <- { l.last with held_back = false }
               | None -> ()))
     (water_fill ~total ~min_rate wants)
 
@@ -155,5 +162,6 @@ let json t ~now =
           ("rateBytesPerSec", `Int (int_of_float (rate_for t ~now ~pid)));
           ("inFlightBytes", `Int r.in_flight);
           ("waiting", `Int r.waiting);
+          ("heldBack", `Bool r.held_back);
         ])
     (live t ~now)

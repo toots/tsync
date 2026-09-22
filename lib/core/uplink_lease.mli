@@ -27,7 +27,9 @@ type report = {
   waiting : int;
   held_back : bool;
       (** A body waited or was refused since the last renewal, whether or
-          not one is waiting now: the rate held this lessee back. *)
+          not one is waiting now: the rate held this lessee back. Spent by
+          the next {!split}. A lessee that never says (an older build) is
+          read as held back while it has a body in flight. *)
 }
 
 val idle : report
@@ -74,5 +76,5 @@ val own_rate : t -> float
 val rate_for : t -> now:float -> pid:int -> float
 
 (** Every live lessee as a report shows it: [pid], [rateBytesPerSec],
-    [inFlightBytes], [waiting]. *)
+    [inFlightBytes], [waiting], [heldBack]. *)
 val json : t -> now:float -> Yojson.Safe.t list
