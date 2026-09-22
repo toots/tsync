@@ -67,6 +67,19 @@ let answer ~frontend ~domain ~pid ?(serves = []) ?(warnings = []) ?(jobs = [])
                 ("targetDelayMs", `Float 50.0);
                 ("waiting", `Int 3);
                     ] );
+                (* A second link this process holds a lease on: no law of its
+                   own to show, only the grant and the load. *)
+                ( "lan",
+                  `Assoc
+                    [
+                      ("enabled", `Bool governed);
+                      ("state", `String "leased");
+                      ("rateBytesPerSec", `Int 3145728);
+                      ("capacityBytesPerSec", `Null);
+                      ("inFlightBytes", `Int 8388608);
+                      ("waiting", `Int 0);
+                      ("drops", `Int 0);
+                    ] );
               ] );
           ("jobs", `List jobs);
           ( "recentErrors",
@@ -149,6 +162,22 @@ let job ~pid =
       ("state", `String "running");
       ("uptimeSeconds", `Float 300.);
       ("target", `String "/media/stage");
+      (* A job beside the daemon, leasing the link its store is on. *)
+      ( "uplinks",
+        `Assoc
+          [
+            ( "wan",
+              `Assoc
+                [
+                  ("enabled", `Bool true);
+                  ("state", `String "leased");
+                  ("rateBytesPerSec", `Int 1048576);
+                  ("capacityBytesPerSec", `Null);
+                  ("inFlightBytes", `Int 8388608);
+                  ("waiting", `Int 2);
+                  ("drops", `Int 5);
+                ] );
+          ] );
     ]
 
 let () =
