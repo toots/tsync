@@ -56,6 +56,11 @@ let cmd : unit Cmd.t =
           (fun (b : Conf_parsing.backend_config) ->
             Printf.printf "  backend: %s (%s) [%s]\n" b.name b.backend_type
               (Conf_parsing.role_name b.role);
+            (match b.max_upload_rate with
+              | Some n ->
+                  Printf.printf "    %-22s %s/s\n" "maxUploadRate:"
+                    (Metrics.human_bytes n)
+              | None -> ());
             List.iter
               (fun (k, v) ->
                 Printf.printf "    %-22s %s\n" (k ^ ":") (mask b k v))

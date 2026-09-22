@@ -471,6 +471,14 @@ module Make (E : ENV) = struct
         | _ -> ""
     in
     let btype = get "type" in
+    (* Held as a number in the file; an older hand-edited config may spell it
+       as a size, which is read the same way. *)
+    let rate_of () =
+      match List.assoc_opt "maxUploadRate" !l with
+        | Some (`Int n) -> Some n
+        | Some (`String v) -> Conf_parsing.parse_size v
+        | _ -> None
+    in
     let which =
       match btype with "s3" -> Some `S3 | "gcs" -> Some `Gcs | _ -> None
     in
@@ -490,6 +498,15 @@ module Make (E : ENV) = struct
         spec;
       let role_n = List.length spec + 2 in
       Printf.printf "  %d. %-16s %s\n" role_n "role:" (role_of !l);
+      (* A local store has no link to bound, so it is not offered one. *)
+      let rate_n = if btype = "local" then None else Some (role_n + 1) in
+      Option.iter
+        (fun n ->
+          Printf.printf "  %d. %-16s %s\n" n "maxUploadRate:"
+            (match rate_of () with
+              | Some r -> Metrics.human_bytes r ^ "/s"
+              | None -> "none"))
+        rate_n;
       if can_sync then
         Printf.printf "  [t] sync bucket/keys/share URL from Terraform\n";
       if !status <> "" then Printf.printf "\n%s\n" !status;
@@ -511,6 +528,14 @@ module Make (E : ENV) = struct
             match int_of_string_opt input with
               | Some n when n = role_n ->
                   l := assoc_set !l "role" (`String (prompt_role (role_of !l)))
+              | Some n when rate_n = Some n -> (
+                  match
+                    prompt_size_opt ~unset:"none"
+                      "  Upload rate ceiling, per second (\"none\" = unlimited)"
+                      (rate_of ())
+                  with
+                    | Some r -> l := assoc_set !l "maxUploadRate" (`Int r)
+                    | None -> l := List.remove_assoc "maxUploadRate" !l)
               | Some n when n >= 2 && n <= List.length spec + 1 -> (
                   let s = List.nth spec (n - 2) in
                   match prompt_field s ~current:(get s.name) with

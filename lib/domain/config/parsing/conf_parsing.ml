@@ -5,6 +5,7 @@ type backend_config = {
   name : string;
   fields : (string * string) list;
   role : role;
+  max_upload_rate : int option;
 }
 
 type frontend_config = {
@@ -106,10 +107,35 @@ let parse_backend json =
                "backend %s: missing required \"role\" field (one of %s)" name
                expected)
   in
+  (* Strict where the size fields above are lenient: a ceiling typed wrong and
+     read as none would let a store run unbounded on the one link it was set
+     to spare. *)
+  let max_upload_rate =
+    let bad v =
+      failwith
+        (Printf.sprintf
+           "backend %s: \"maxUploadRate\" must be a positive size per second \
+            such as \"500 KB\", not %s"
+           name (Yojson.Basic.to_string v))
+    in
+    match json |> member "maxUploadRate" with
+      | `Null -> None
+      | `Int n when n > 0 -> Some n
+      | `String str as v -> (
+          match parse_size str with Some n -> Some n | None -> bad v)
+      | v -> bad v
+  in
+  if max_upload_rate <> None && backend_type = "local" then
+    failwith
+      (Printf.sprintf
+         "backend %s: \"maxUploadRate\" bounds a link, and a local store has \
+          none"
+         name);
   let fields =
     to_assoc json
     |> List.filter_map (fun (k, v) ->
-        if k = "type" || k = "name" || k = "role" then None
+        if k = "type" || k = "name" || k = "role" || k = "maxUploadRate" then
+          None
         else (
           match v with
             | `String s -> Some (k, s)
@@ -120,7 +146,7 @@ let parse_backend json =
             | `List _ -> Some (k, Yojson.Basic.to_string v)
             | _ -> None))
   in
-  { backend_type; name; fields; role }
+  { backend_type; name; fields; role; max_upload_rate }
 
 (* Reads use the head, so config order picks the read primary. *)
 let order_backends backends =

@@ -1,7 +1,15 @@
 (* Checks read ordering by role (main, replica, readOnly, backfill — each group
-   keeping config order) and that "role" is required. *)
+   keeping config order), that "role" is required, and how "maxUploadRate"
+   reads. *)
 let bc ?(role = `Main) backend_type id =
-  Conf_parsing.{ backend_type; name = id; fields = [("id", id)]; role }
+  Conf_parsing.
+    {
+      backend_type;
+      name = id;
+      fields = [("id", id)];
+      role;
+      max_upload_rate = None;
+    }
 
 let ids bs =
   List.map
@@ -38,6 +46,40 @@ let () =
   in
   assert (fails (one_backend {|{"type": "s3", "name": "s"}|}));
   assert (fails (one_backend {|{"type": "s3", "name": "s", "role": "primary"}|}));
+
+  (* "maxUploadRate" is a size per second, and strict: a ceiling typed wrong
+     must not be read as no ceiling. It bounds a link, so a local store may not
+     have one, and it is the target's own setting rather than a field the
+     backend driver sees. *)
+  let with_rate extra =
+    one_backend
+      (Printf.sprintf {|{"type": "s3", "name": "s", "role": "main"%s}|} extra)
+  in
+  let rate_of extra =
+    let d = List.hd (load (with_rate extra)).Conf_parsing.domains in
+    (List.hd d.Conf_parsing.backends).Conf_parsing.max_upload_rate
+  in
+  assert (rate_of "" = None);
+  assert (rate_of {|, "maxUploadRate": "500 KB"|} = Some (500 * 1024));
+  assert (rate_of {|, "maxUploadRate": 65536|} = Some 65536);
+  assert (fails (with_rate {|, "maxUploadRate": 0|}));
+  assert (fails (with_rate {|, "maxUploadRate": -4|}));
+  assert (fails (with_rate {|, "maxUploadRate": "fast"|}));
+  assert (fails (with_rate {|, "maxUploadRate": true|}));
+  assert (
+    not
+      (List.mem_assoc "maxUploadRate"
+         (List.hd
+            (List.hd
+               (load (with_rate {|, "maxUploadRate": "1 MB"|}))
+                 .Conf_parsing.domains)
+              .Conf_parsing.backends)
+           .Conf_parsing.fields));
+  assert (
+    fails
+      (one_backend
+         {|{"type": "local", "name": "l", "role": "main", "path": "/x",
+            "maxUploadRate": "1 MB"}|}));
 
   (* A domain is writable (has a main) or purely read-only. A replica or backfill
      target with no main is a copy of nothing. *)

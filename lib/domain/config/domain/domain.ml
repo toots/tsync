@@ -108,7 +108,14 @@ let build_backends ~paths ~resume ~max_chunk_forwards
                      (Option.value ~default:[]
                         (Backend_lwt.spec_for bc.backend_type))
                      k v ))
-               bc.fields)
+               bc.fields
+            (* Appended rather than prepended: a report names a store by the
+               first config entry that says anything, which should stay the
+               bucket or the path. *)
+            @
+            match bc.Conf_parsing.max_upload_rate with
+              | Some n -> [("maxUploadRate", Metrics.human_bytes n ^ "/s")]
+              | None -> [])
           ?pending:(stat (fun s -> s.Deferred.queued))
           ?in_flight:(stat (fun s -> s.Deferred.in_flight))
           ?degraded:(stat (fun s -> s.Deferred.degraded))

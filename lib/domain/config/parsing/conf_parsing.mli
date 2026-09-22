@@ -32,6 +32,12 @@ type backend_config = {
   fields : (string * string) list;
   role : role;
       (** Required: ["main"], ["replica"], ["backfill"] or ["readOnly"]. *)
+  max_upload_rate : int option;
+      (** [maxUploadRate]: a ceiling, in bytes per second, on what this
+          process writes to this store, as a size (["500 KB"]) or a byte
+          count; [None] when the config does not say. Refused on a [local]
+          store, which has no link. Each process holds its own, so a daemon
+          and a job writing to one store are two of it. *)
 }
 
 type frontend_config = {

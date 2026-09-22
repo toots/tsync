@@ -34,6 +34,7 @@ let conf ?(domain = "testdom") ?(client_name = "test") ?(versioning = false)
                   Conf_parsing.backend_type = "local";
                   name = "local";
                   role = `Main;
+                  max_upload_rate = None;
                   fields =
                     [
                       ("path", Filename.concat root "store");
