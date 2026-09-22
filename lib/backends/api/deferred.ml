@@ -97,8 +97,10 @@ struct
   end
 
   (* Past this, a chunk PUT is dropped rather than held in memory: the manifest job
-     fetches it later. *)
-  let max_chunks_in_flight = 32
+     fetches it later. The caller passes the budget it holds chunk buffers under,
+     a forward keeping a body alive past its buffer; a caller with no such budget
+     gets this. *)
+  let default_max_chunk_forwards = 32
 
   (* ponytail: crude memo — reset the whole table past the cap rather than keeping
      an LRU, overflowing costing only a HEAD per chunk again. Per-key eviction if
@@ -122,10 +124,12 @@ struct
   let log_dir ~root ~name = Filename.concat root (escape name)
   let release ~root ~name = Durable_queue.release (log_dir ~root ~name)
 
-  let make ?(resume = false) ?chunk_from_prefix ~name ~backend ~source
+  let make ?(resume = false) ?chunk_from_prefix
+      ?(max_chunk_forwards = default_max_chunk_forwards) ~name ~backend ~source
       ~chunk_prefix ~(chunk_keys : string -> string list) ~journal_prefix
       ~cursor_key ~(excluded : Stored_key.t -> bool) ~reads_reach ~root () :
       (module S) =
+    let max_chunk_forwards = max 1 max_chunk_forwards in
     let (module Target : Store) = backend in
     let (module Source : Store) = source in
     let module L = Chunk_layout.Make (struct
@@ -253,8 +257,8 @@ struct
        all, which is why the durable log holds one record per user-visible
        operation rather than one per chunk. *)
     let forward_chunk key data =
-      if Hashtbl.mem ensured key || !chunks_in_flight >= max_chunks_in_flight
-      then ()
+      if Hashtbl.mem ensured key || !chunks_in_flight >= max_chunk_forwards then
+        ()
       else begin
         incr chunks_in_flight;
         Io.async (fun () ->

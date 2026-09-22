@@ -21,7 +21,8 @@ let deferred_root ~paths (d : Conf_parsing.domain) =
 (* The one place a configured role becomes behavior: [replica] and [backfill]
    are the same target with one bit between them — whether reads may reach it —
    so a resynced backfill is promoted by editing one word. *)
-let build_backends ~paths ~resume (d : Conf_parsing.domain) :
+let build_backends ~paths ~resume ~max_chunk_forwards
+    (d : Conf_parsing.domain) :
     (module Backend_lwt.Store) * (module Backend_lwt.Store) Backend.member list
     =
   (* One counter pair per configured store, kept by name so the member built
@@ -54,7 +55,8 @@ let build_backends ~paths ~resume (d : Conf_parsing.domain) :
   in
   let target ((bc : Conf_parsing.backend_config), backend) ~source =
     let built_target =
-      Domain_store_lwt.Deferred.make ~resume ~name:bc.name ~backend ~source
+      Domain_store_lwt.Deferred.make ~resume ~max_chunk_forwards ~name:bc.name
+        ~backend ~source
         ~chunk_prefix:(Conf_parsing.chunk_prefix d)
         ~chunk_from_prefix:
           (let module L = Chunk_layout.Make (struct
@@ -171,7 +173,11 @@ let of_config ?domain ?socket_path ?(resume = false) ~paths cfg :
     let journal_prefix = Conf_parsing.journal_prefix d
     let cursor_key = Conf_parsing.cursor_key d
     let shares_prefix = Conf_parsing.shares_prefix d
-    let store, members = build_backends ~paths ~resume d
+    (* A forward holds a chunk body past the buffer that carried it, so the
+       buffers' budget is the ceiling on forwards too. *)
+    let store, members =
+      build_backends ~paths ~resume
+        ~max_chunk_forwards:cfg.Conf_parsing.max_chunk_buffers d
     let cache_root = paths.Runtime.cache_root
     let data_dir = paths.Runtime.data_dir
     let socket_path = socket_path

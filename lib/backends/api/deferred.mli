@@ -101,10 +101,18 @@ module Over
 
       [reads_reach] is whether reads may fall through to this target. One they
       reach carries the journal and cursor too, a peer reading it needing both;
-      one they never reach has no use for either. *)
+      one they never reach has no use for either.
+
+      [max_chunk_forwards] bounds the chunk pushes this target runs at once. A
+      forward keeps its body alive after the write that carried it has returned
+      and released its chunk buffer, so this is the memory that path costs, and
+      the caller passes the budget it holds those buffers under. A push offered
+      past it is dropped for the manifest job to fetch later, never queued.
+      Values below [1] are read as [1]. *)
   val make :
     ?resume:bool ->
     ?chunk_from_prefix:string ->
+    ?max_chunk_forwards:int ->
     name:string ->
     backend:(module Store) ->
     source:(module Store) ->
