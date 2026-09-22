@@ -13,6 +13,15 @@ open Lwt.Syntax
 open Check
 module U = Uplink.Make (Io_lwt.Core) (Fake_clock)
 
+(* Flushed, so a run cut short still says which case it was in. *)
+let case name =
+  case name;
+  flush stdout
+
+let check ?why name ok =
+  check ?why name ok;
+  flush stdout
+
 let mb = 1024 * 1024
 let on = { Uplink_control.default_settings with enabled = true }
 
@@ -93,8 +102,11 @@ let () =
      check "two silences: still leased" (U.mode g = U.Leased);
      let* () = tick () in
      check "a third: local" (U.mode g = U.Local && state g <> "leased");
-     (* A body made to wait, or the law would rightly grant no more. *)
-     let* () = U.acquire g ~class_:U.Background ~bytes:(8 * mb) in
+     (* A body made to wait while another completes, or the law would
+        rightly grant no more. *)
+     let adm = U.admission g U.Background in
+     let* () = adm.Uplink.acquire ~bytes:(8 * mb) in
+     adm.Uplink.completed ~bytes:(8 * mb) ~elapsed:1.;
      let held = U.acquire g ~class_:U.Background ~bytes:mb in
      let* () = settle 3 in
      let* () = tick () in
@@ -162,10 +174,26 @@ let () =
      let* () = tick () in
      check "the owner idle, the lessee not: a probe went" (!probed = 1);
 
+     case "a lessee held back is what lets the owner's law grow";
+     let before = Uplink_control.rate (U.control o) in
+     ignore
+       (U.lease_renewal o ~pid:7
+          { Uplink_lease.idle with completed = 4 * mb; held_back = true });
+     let* () = tick () in
+     check "it grew, for the lessee's sake"
+       (Uplink_control.rate (U.control o) > before);
+     ignore (U.lease_renewal o ~pid:7 { Uplink_lease.idle with completed = 4 * mb });
+     let before = Uplink_control.rate (U.control o) in
+     let* () = tick () in
+     check "and holds once the lessee says it is no longer"
+       (Uplink_control.rate (U.control o) = before);
+
      case "the owner's own writes hold a share like any other";
-     (* A line behind the owner too: it wants all it can get, as the lessee
-        does, so the two halve the rate. *)
-     let* () = U.acquire o ~class_:U.Background ~bytes:(2 * mb) in
+     (* A line behind the owner too, and the lessee asking for all it can get:
+        the two halve the rate. Neither body fits the bucket at once, so
+        both are stepped through rather than awaited. *)
+     ignore (U.lease_renewal o ~pid:7 wants);
+     let first = U.acquire o ~class_:U.Background ~bytes:(2 * mb) in
      let waiting = U.acquire o ~class_:U.Background ~bytes:mb in
      let* () = settle 3 in
      let* () = tick () in
@@ -175,8 +203,15 @@ let () =
          Printf.sprintf "own %d of %.0f" (int_field o "ownRateBytesPerSec") total)
        (Float.abs (float_of_int (int_field o "ownRateBytesPerSec") -. (total /. 2.))
        <= 1.);
-     Fake_clock.advance 10.;
+     let rec until_through n =
+       if n = 0 || not (Lwt.is_sleeping waiting) then Lwt.return_unit
+       else
+         let* () = tick () in
+         until_through (n - 1)
+     in
+     let* () = until_through 60 in
+     let* () = first in
      let* () = waiting in
 
-     report ~expected:17 ();
+     report ~expected:19 ();
      Lwt.return_unit)

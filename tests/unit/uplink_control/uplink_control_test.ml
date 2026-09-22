@@ -48,7 +48,7 @@ let second link t ~now =
   link.queue <- link.queue -. drained;
   if drained > 0. then begin
     Uplink_budget.release link.budget ~bytes:(int_of_float drained);
-    Uplink_control.completed t ~now ~bytes:(int_of_float drained)
+    Uplink_control.completed t ~now ~bytes:(int_of_float drained) ~elapsed:1.
   end;
   (* A foreign load keeps a little standing queue of its own in the buffer. *)
   let standing = link.foreign *. 0.02 in
@@ -185,7 +185,47 @@ let () =
     (Uplink_control.rate t = before);
   Uplink_control.observe_delay t ~now:42. 0.02;
   Uplink_control.tick t ~now:42. ~limited:true;
-  check "held back once, it grows" (Uplink_control.rate t = 2. *. before);
+  check "held back with nothing completing, still not"
+    (Uplink_control.rate t = before);
+  Uplink_control.completed t ~now:43. ~bytes:65536 ~elapsed:1.;
+  Uplink_control.observe_delay t ~now:44. 0.02;
+  Uplink_control.tick t ~now:44. ~limited:true;
+  check "held back while sending, it grows" (Uplink_control.rate t = 2. *. before);
+
+  case "a body is credited over the seconds it took";
+  Uplink_control.rate_window := 10.;
+  let t = Uplink_control.create ~settings ~now:0. () in
+  (* Eight megabytes that took sixteen seconds: half a megabyte a second,
+     of which the window holds ten seconds' worth. *)
+  Uplink_control.completed t ~now:16. ~bytes:(8 * 1024 * 1024) ~elapsed:16.;
+  Uplink_control.observe_delay t ~now:16. 0.02;
+  Uplink_control.tick t ~now:16. ~limited:true;
+  Uplink_control.observe_delay t ~now:18. 0.5;
+  Uplink_control.tick t ~now:18. ~limited:true;
+  Uplink_control.observe_delay t ~now:20. 0.5;
+  Uplink_control.tick t ~now:20. ~limited:true;
+  check "the edge it then meets reads the link at what got through, not a burst"
+    ~why:(fun () ->
+      match Uplink_control.capacity t with
+        | Some c -> Printf.sprintf "%.0f KB/s" (c /. 1024.)
+        | None -> "none")
+    (match Uplink_control.capacity t with
+      | Some c -> within (0.25 *. mb) (0.6 *. mb) c
+      | None -> false);
+
+  case "steady, and not held back: the rate holds rather than grows";
+  let link = fresh_link ~capacity:cap ~base:0.02 in
+  let t = Uplink_control.create ~settings ~now:0. () in
+  let _, _, now = run link t ~from:0. ~seconds:46 in
+  check "steady" (Uplink_control.state t = Steady);
+  let before = Uplink_control.rate t in
+  Uplink_control.observe_delay t ~now:(now +. 2.) 0.02;
+  Uplink_control.tick t ~now:(now +. 2.) ~limited:false;
+  check "flat delay, nobody waiting: unchanged"
+    (Uplink_control.rate t = before);
+  Uplink_control.observe_delay t ~now:(now +. 4.) 0.2;
+  Uplink_control.tick t ~now:(now +. 4.) ~limited:false;
+  check "a queue still shrinks it" (Uplink_control.rate t < before);
 
   case "the base re-learns a route that got shorter";
   let t = Uplink_control.create ~settings ~now:0. () in
@@ -208,4 +248,4 @@ let () =
   check "until the old base has fallen out of the window"
     (Uplink_control.base_delay t ~now:later = Some 0.140);
 
-  report ~expected:24 ()
+  report ~expected:29 ()

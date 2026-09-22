@@ -85,9 +85,10 @@ val settings : t -> settings
 (** A body refused on a path that drops rather than waits. *)
 val dropped : t -> unit
 
-(** [bytes] were answered: they count toward the rate the link was seen to
-    carry. A body given up on counts toward nothing, and is not reported. *)
-val completed : t -> now:float -> bytes:int -> unit
+(** [bytes] were answered, [elapsed] seconds after they were admitted: they
+    count toward the rate the link was seen to carry, spread over the seconds
+    they took. A body given up on counts toward nothing, and is not reported. *)
+val completed : t -> now:float -> bytes:int -> elapsed:float -> unit
 
 (** One probe's round trip, seconds. Several in a tick are read as their
     least, server-side delay being one-sided. *)
@@ -99,7 +100,9 @@ val timed_out : t -> now:float -> unit
 (** One step of the law. The caller runs it every {!tick_interval}.
 
     [limited] is whether the rate held the sender back since the last step:
-    its bucket drawn down, or a body waiting. The rate grows only then. A
+    a body waited or was refused. The rate grows only then, and only while
+    bytes are completing, since a body waiting out a debt on an idle link is
+    no reason to grant more. A
     sender with little to send would otherwise see delay stay flat and be
     granted more forever, and meet its first real load with a rate that never
     met any edge, and a capacity read off it. *)

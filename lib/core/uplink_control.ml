@@ -71,6 +71,16 @@ module Window = struct
     let i = t.at mod Array.length t.cells in
     t.cells.(i) <- t.combine t.cells.(i) v
 
+  (* Into the period [ago] periods back, if the ring still holds it. *)
+  let note_back t ~now ~ago v =
+    advance t now;
+    let n = Array.length t.cells in
+    if ago < n then begin
+      let i = (t.at - ago) mod n in
+      let i = if i < 0 then i + n else i in
+      t.cells.(i) <- t.combine t.cells.(i) v
+    end
+
   let fold t ~now =
     advance t now;
     Array.fold_left t.combine t.empty t.cells
@@ -126,8 +136,15 @@ let create ?(settings = default_settings) ~now () =
 
 let dropped t = t.drops <- t.drops + 1
 
-let completed t ~now ~bytes =
-  Window.note t.completed_bytes ~now (float_of_int bytes)
+(* Credited over the seconds the body took, not the one it landed in: a body
+   longer than the window would otherwise read as a burst of its whole size
+   and then as nothing, and the link as far larger than it is. *)
+let completed t ~now ~bytes ~elapsed =
+  let seconds = Int.max 1 (int_of_float (Float.ceil elapsed)) in
+  let each = float_of_int bytes /. float_of_int seconds in
+  for ago = 0 to seconds - 1 do
+    Window.note_back t.completed_bytes ~now ~ago each
+  done
 
 let observe_delay t ~now:_ delay = t.samples <- delay :: t.samples
 let achieved t ~now = Window.fold t.completed_bytes ~now /. !rate_window
@@ -206,6 +223,9 @@ let tick t ~now ~limited =
   let q = t.queueing in
   t.over_target <- (if q > target then t.over_target + 1 else 0);
   let off = Float.max (-1.) (Float.min 1. ((target -. q) /. target)) in
+  (* Held back, and using the link: a body waiting out a debt on an idle
+     link is no reason to grant more. *)
+  let limited = limited && achieved t ~now > 0. in
   let rate = t.rate in
   let next =
     match t.state with

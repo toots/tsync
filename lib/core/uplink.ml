@@ -203,11 +203,11 @@ module Make (Io : Io.S) (Clock : Clock.S with type 'a io := 'a Io.t) = struct
           take = Uplink_budget.take share;
           wait_for = Uplink_budget.wait_for share;
           left =
-            (fun ~now ~bytes ~answered ~elapsed:_ ->
+            (fun ~now ~bytes ~answered ~elapsed ->
               Uplink_budget.release share ~bytes;
               if answered then begin
                 completed_since := !completed_since + bytes;
-                Uplink_control.completed control ~now ~bytes
+                Uplink_control.completed control ~now ~bytes ~elapsed
               end);
         }
     in
@@ -262,12 +262,8 @@ module Make (Io : Io.S) (Clock : Clock.S with type 'a io := 'a Io.t) = struct
      out is read as the timeout's length: an enormous delay, which the next
      step cuts hard on. It does not touch the store's health, which its own
      retry loop keeps. *)
-  let probe_round t =
-    let now = Clock.now () in
-    let in_flight =
-      Uplink_budget.in_flight_bytes t.share
-      + match t.lessees with Some l -> Uplink_lease.in_flight l ~now | None -> 0
-    in
+  let probe_round t ~lessees_in_flight =
+    let in_flight = Uplink_budget.in_flight_bytes t.share + lessees_in_flight in
     if in_flight = 0 then Io.return ()
     else
       Io.iter_p
@@ -321,20 +317,29 @@ module Make (Io : Io.S) (Clock : Clock.S with type 'a io := 'a Io.t) = struct
     in
     if own_timeouts + lessee_timeouts > 0 then
       Uplink_control.timed_out t.control ~now;
+    (* What lessees moved is spread over the interval they reported it for. *)
     if lessee_completed > 0 then
-      Uplink_control.completed t.control ~now ~bytes:lessee_completed;
-    let* () = probe_round t in
+      Uplink_control.completed t.control ~now ~bytes:lessee_completed
+        ~elapsed:!Uplink_control.tick_interval;
+    (* One listing a step: what is probed for, what is held back, and what
+       is split are the same lessees. *)
+    let lessees =
+      match t.lessees with Some l -> Uplink_lease.live l ~now | None -> []
+    in
+    let* () =
+      probe_round t
+        ~lessees_in_flight:
+          (List.fold_left
+             (fun acc (_, (r : Uplink_lease.report)) -> acc + r.in_flight)
+             0 lessees)
+    in
     let now = Clock.now () in
-    (* Held back: a body waited or was refused here since the last step, or
-       behind any lessee's line. *)
+    (* One report a step, read once: what this process is to the split, and
+       what it says of itself should it ask the daemon back in this step. *)
     let mine = own_report t ~timeouts:own_timeouts in
     let limited =
       Uplink_lease.wants mine
-      ||
-      match t.lessees with
-        | Some l ->
-            List.exists (fun (_, r) -> Uplink_lease.wants r) (Uplink_lease.live l ~now)
-        | None -> false
+      || List.exists (fun (_, r) -> Uplink_lease.wants r) lessees
     in
     Uplink_control.tick t.control ~now ~limited;
     let total = Uplink_control.rate t.control in
@@ -349,12 +354,11 @@ module Make (Io : Io.S) (Clock : Clock.S with type 'a io := 'a Io.t) = struct
     announce t;
     pump t.line;
     arm t.line;
-    Io.return ()
+    Io.return mine
 
   (* {2 A lessee's renewal} *)
 
-  let request t ~timeouts =
-    let r = own_report t ~timeouts in
+  let request (r : Uplink_lease.report) =
     Yojson.Safe.to_string
       (`Assoc
         [
@@ -395,11 +399,14 @@ module Make (Io : Io.S) (Clock : Clock.S with type 'a io := 'a Io.t) = struct
   (* One renewal: what came back sets the grant, and what did not counts.
      [Refused] is a daemon that does not know the action, which no retry will
      change soon; [Unreached] is one that may be back. *)
-  let renew t ~send =
+  (* [report] is what this process says of itself: a step that has just read
+     it hands it on, so a busy process asking the daemon back does not report
+     itself idle. *)
+  let renew t ~send ~report =
     let* answer =
       Io.catch
         (fun () ->
-          let+ line = send (request t ~timeouts:(timeouts_since t)) in
+          let+ line = send (request report) in
           read_answer line)
         (fun _ -> Io.return Unreached)
     in
@@ -425,11 +432,11 @@ module Make (Io : Io.S) (Clock : Clock.S with type 'a io := 'a Io.t) = struct
     Io.return ()
 
   (* A local process with a daemon to ask asks it again now and then. *)
-  let maybe_retry t =
+  let maybe_retry t ~report =
     match (t.mode, t.daemon) with
       | Local, Some send when Clock.now () >= t.retry_at ->
           t.retry_at <- Clock.now () +. retry_every;
-          renew t ~send
+          renew t ~send ~report
       | _ -> Io.return ()
 
   (* One loop whatever the mode: a lessee renews at the owner's interval,
@@ -443,11 +450,12 @@ module Make (Io : Io.S) (Clock : Clock.S with type 'a io := 'a Io.t) = struct
     in
     let* () =
       match (t.mode, t.daemon) with
-        | Leased, Some send -> renew t ~send
+        | Leased, Some send ->
+            renew t ~send ~report:(own_report t ~timeouts:(timeouts_since t))
         | Leased, None -> fall_to_local t "no daemon to renew from"; Io.return ()
         | (Owner | Local), _ ->
-            let* () = step t in
-            maybe_retry t
+            let* report = step t in
+            maybe_retry t ~report
     in
     ticker t
 
