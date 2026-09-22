@@ -31,4 +31,5 @@
   tsync_backend_api
   tsync_backend_lwt
   tsync_core_lwt
-  tsync_runtime))
+  tsync_runtime
+  lwt))

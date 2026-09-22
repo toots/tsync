@@ -5,6 +5,18 @@ let make_backend ~traffic ~admission (bc : Conf_parsing.backend_config) =
     ~get_field:(fun k -> List.assoc_opt k bc.fields)
     ()
 
+(* One small round trip the governor may time: a head of the domain cursor,
+   which every written store holds and which costs nothing to ask about. A
+   store that is a tree here has no link to measure; one held down is left to
+   its own retry loop. *)
+let attach_probe ~cursor_key (bc : Conf_parsing.backend_config) store =
+  let module St = (val store : Backend_lwt.Store) in
+  if St.local_path = None then
+    let module U = Tsync_core_lwt.Uplink_lwt in
+    U.attach (U.process ()) ~name:bc.Conf_parsing.name
+      ~held:(fun () -> Health.is_held St.health)
+      ~probe:(fun () -> Lwt.map ignore (St.head_opt ~key:cursor_key ()))
+
 let admission_for (bc : Conf_parsing.backend_config) =
   let module U = Tsync_core_lwt.Uplink_lwt in
   let governed = U.admission (U.process ()) U.Background in
@@ -50,7 +62,9 @@ let build_backends ~paths ~resume ~max_chunk_forwards
         Hashtbl.replace traffic bc.Conf_parsing.name t;
         let admission = admission_for bc in
         Hashtbl.replace admissions bc.Conf_parsing.name admission;
-        (bc, make_backend ~traffic:t ~admission bc))
+        let store = make_backend ~traffic:t ~admission bc in
+        attach_probe ~cursor_key:(Conf_parsing.cursor_key d) bc store;
+        (bc, store))
       (Conf_parsing.order_backends d.Conf_parsing.backends)
   in
   let of_roles rs =
