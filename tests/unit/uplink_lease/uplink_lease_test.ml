@@ -118,6 +118,17 @@ let () =
         timeouts = 0;
         waiting = 2;
         held_back = true;
+        probe = None;
       });
 
-  report ~expected:16 ()
+  case "what a lessee timed travels as milliseconds, and only when it did";
+  let r = Uplink_lease.report_of_json [("probeMs", `Float 42.)] in
+  check "read" (r.Uplink_lease.probe = Some 0.042);
+  check "absent is none" ((Uplink_lease.report_of_json []).Uplink_lease.probe = None);
+  let timed = { Uplink_lease.idle with in_flight = 7; probe = Some 0.0123 } in
+  check "written and read back"
+    (Uplink_lease.report_of_json (Uplink_lease.report_to_json timed) = timed);
+  check "and not written when none"
+    (not (List.mem_assoc "probeMs" (Uplink_lease.report_to_json Uplink_lease.idle)));
+
+  report ~expected:20 ()

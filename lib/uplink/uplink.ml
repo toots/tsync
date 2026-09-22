@@ -333,7 +333,7 @@ struct
   (* What this process says of itself on a link when it renews, or files as
      the owner's own row: what is in flight and waiting now, what completed
      and timed out since it last said. *)
-  let own_report l ~timeouts =
+  let own_report l ~timeouts ~probe =
     let r =
       {
         Uplink_lease.in_flight = Uplink_budget.in_flight_bytes l.share;
@@ -341,6 +341,7 @@ struct
         timeouts;
         waiting = waiting l;
         held_back = held_back l.line;
+        probe;
       }
     in
     l.completed_since := 0;
@@ -361,30 +362,38 @@ struct
      its own retry loop keeps. *)
   let probe_round l ~lessees_in_flight =
     let in_flight = Uplink_budget.in_flight_bytes l.share + lessees_in_flight in
-    if in_flight = 0 then Io.return ()
+    if in_flight = 0 then Io.return None
     else
-      Io.iter_p
-        (fun p ->
-          let started = Clock.now () in
-          Io.catch
-            (fun () ->
-              let+ () = Clock.with_timeout !probe_timeout p.probe in
-              Uplink_control.observe_delay l.control ~now:(Clock.now ())
-                (Clock.now () -. started))
-            (fun exn ->
-              if Clock.is_timeout exn then begin
-                if not l.probe_warned then begin
-                  l.probe_warned <- true;
-                  Log.warn
-                    (Printf.sprintf
-                       "uplink %s: a probe of %s went unanswered for %.0fs"
-                       l.name p.name !probe_timeout)
-                end;
-                Uplink_control.observe_delay l.control ~now:(Clock.now ())
-                  !probe_timeout
-              end;
-              Io.return ()))
-        (List.filter (fun p -> not (p.held ())) l.probes)
+      let+ delays =
+        Io.map_p
+          (fun p ->
+            let started = Clock.now () in
+            Io.catch
+              (fun () ->
+                let+ () = Clock.with_timeout !probe_timeout p.probe in
+                Some (Clock.now () -. started))
+              (fun exn ->
+                if Clock.is_timeout exn then begin
+                  if not l.probe_warned then begin
+                    l.probe_warned <- true;
+                    Log.warn
+                      (Printf.sprintf
+                         "uplink %s: a probe of %s went unanswered for %.0fs"
+                         l.name p.name !probe_timeout)
+                  end;
+                  Io.return (Some !probe_timeout)
+                end
+                else Io.return None))
+          (List.filter (fun p -> not (p.held ())) l.probes)
+      in
+      (* The least of the round: server-side delay is one-sided. *)
+      List.fold_left
+        (fun least d ->
+          match (least, d) with
+            | None, d -> d
+            | Some a, Some b -> Some (Float.min a b)
+            | least, None -> least)
+        None delays
 
   let announce l =
     let state = Uplink_control.state l.control in
@@ -432,7 +441,7 @@ struct
     let lessees =
       match l.lessees with Some t -> Uplink_lease.live t ~now | None -> []
     in
-    let* () =
+    let* probe =
       probe_round l
         ~lessees_in_flight:
           (List.fold_left
@@ -440,9 +449,10 @@ struct
              0 lessees)
     in
     let now = Clock.now () in
+    Option.iter (Uplink_control.observe_delay l.control ~now) probe;
     (* One report a step, read once: what this process is to the split, and
        what it says of itself should it ask the daemon back in this step. *)
-    let mine = own_report l ~timeouts:own_timeouts in
+    let mine = own_report l ~timeouts:own_timeouts ~probe in
     let limited =
       Uplink_lease.wants mine
       || List.exists (fun (_, r) -> Uplink_lease.wants r) lessees
@@ -464,35 +474,45 @@ struct
 
   (* {2 A lessee's renewal} *)
 
-  let request (r : Uplink_lease.report) =
+  (* Every link this process uses, its report beside it: one line a tick
+     whatever the number of links. *)
+  let request (reports : (string * Uplink_lease.report) list) =
     Yojson.Safe.to_string
       (`Assoc
         [
           ("action", `String "uplink");
           ("pid", `Int (Unix.getpid ()));
-          ("inFlight", `Int r.Uplink_lease.in_flight);
-          ("completed", `Int r.completed);
-          ("timeouts", `Int r.timeouts);
-          ("waiting", `Int r.waiting);
-          ("heldBack", `Bool r.held_back);
+          ( "links",
+            `Assoc
+              (List.map
+                 (fun (name, r) -> (name, `Assoc (Uplink_lease.report_to_json r)))
+                 reports) );
         ])
 
-  type answer = Granted of float * float | Refused | Unreached
+  type answer = Granted of (string * float) list * float | Refused | Unreached
 
+  let num fields key =
+    match List.assoc_opt key fields with
+      | Some (`Int n) -> Some (float_of_int n)
+      | Some (`Float f) -> Some f
+      | _ -> None
+
+  (* A grant per link named, and the interval. An answer with no links, which
+     a daemon of the one-link build gives, is a refusal: one grant cannot be
+     read as several. *)
   let read_answer line =
     match Yojson.Safe.from_string line with
       | `Assoc fields -> (
-          let num key =
-            match List.assoc_opt key fields with
-              | Some (`Int n) -> Some (float_of_int n)
-              | Some (`Float f) -> Some f
-              | _ -> None
-          in
-          match (List.assoc_opt "ok" fields, num "rate") with
-            | Some (`Bool true), Some rate ->
+          match (List.assoc_opt "ok" fields, List.assoc_opt "links" fields) with
+            | Some (`Bool true), Some (`Assoc links) ->
                 Granted
-                  ( rate,
-                    Option.value (num "interval")
+                  ( List.filter_map
+                      (fun (name, g) ->
+                        match g with
+                          | `Assoc gf -> Option.map (fun r -> (name, r)) (num gf "rate")
+                          | _ -> None)
+                      links,
+                    Option.value (num fields "interval")
                       ~default:!Uplink_control.tick_interval )
             | _ -> Refused)
       | _ | (exception _) -> Refused
@@ -503,39 +523,38 @@ struct
     Log.warn
       (Printf.sprintf "uplink: %s; governing this process's links alone" why)
 
-  (* One renewal, for the one link the wire carries: what came back sets that
-     link's grant, and what did not counts against the daemon. [Refused] is a
-     daemon that does not know the action, which no retry will change soon;
-     [Unreached] is one that may be back. [report] is what this process said
-     of itself on that link: a step that has just read it hands it on, so a
-     busy process asking the daemon back does not report itself idle. *)
+  (* One renewal for every link: what came back sets each link's grant, and
+     what did not counts against the daemon. [Refused] is a daemon that does
+     not know the action, which no retry will change soon; [Unreached] is one
+     that may be back. [reports] is what this process said of itself on each
+     link: a step that has just read them hands them on, so a busy process
+     asking the daemon back does not report itself idle. *)
   let renew p ~send ~(reports : (string * Uplink_lease.report) list) =
-    let name, report =
-      match List.assoc_opt default_link reports with
-        | Some r -> (default_link, r)
-        | None -> (
-            match reports with
-              | (n, r) :: _ -> (n, r)
-              | [] -> (default_link, Uplink_lease.idle))
-    in
     let* answer =
       Io.catch
         (fun () ->
-          let+ line = send (request report) in
+          let+ line = send (request reports) in
           read_answer line)
         (fun _ -> Io.return Unreached)
     in
     (match answer with
-      | Granted (rate, interval) ->
+      | Granted (grants, interval) ->
           p.missed <- 0;
           p.interval <- interval;
-          let l = link p name in
-          Uplink_budget.set_rate l.share ~now:(Clock.now ()) rate;
+          let now = Clock.now () in
+          (* A link the answer does not name keeps its last grant. *)
+          List.iter
+            (fun (name, rate) ->
+              Uplink_budget.set_rate (link p name).share ~now rate)
+            grants;
           if p.mode <> Leased then begin
             p.mode <- Leased;
             Log.info
-              (Printf.sprintf "uplink %s: leasing %s from the daemon" name
-                 (per_sec rate))
+              (Printf.sprintf "uplink: leasing from the daemon: %s"
+                 (String.concat ", "
+                    (List.map
+                       (fun (name, rate) -> name ^ " " ^ per_sec rate)
+                       grants)))
           end
       | Refused ->
           if p.mode = Leased then
@@ -582,9 +601,12 @@ struct
     let* () =
       match (p.mode, p.daemon) with
         | Leased, Some send ->
+            (* A lessee times its own links, and says what it saw: the owner
+               may have no store on one of them to time for itself. *)
             let* reports =
               reports_of p (fun l ->
-                  Io.return (own_report l ~timeouts:(timeouts_since l)))
+                  let+ probe = probe_round l ~lessees_in_flight:0 in
+                  own_report l ~timeouts:(timeouts_since l) ~probe)
             in
             renew p ~send ~reports
         | Leased, None ->
@@ -639,6 +661,11 @@ struct
                         t
                 in
                 Uplink_lease.record table ~now ~pid report;
+                (* What the lessee timed is a sample beside this process's
+                   own, and the only one for a link it has no store on. *)
+                Option.iter
+                  (Uplink_control.observe_delay l.control ~now)
+                  report.Uplink_lease.probe;
                 (name, Uplink_lease.rate_for table ~now ~pid))
               reports
           in

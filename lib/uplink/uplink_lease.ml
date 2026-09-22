@@ -4,10 +4,18 @@ type report = {
   timeouts : int;
   waiting : int;
   held_back : bool;
+  probe : float option;
 }
 
 let idle =
-  { in_flight = 0; completed = 0; timeouts = 0; waiting = 0; held_back = false }
+  {
+    in_flight = 0;
+    completed = 0;
+    timeouts = 0;
+    waiting = 0;
+    held_back = false;
+    probe = None;
+  }
 
 let wants r = r.waiting > 0 || r.held_back
 
@@ -29,7 +37,25 @@ let report_of_json fields =
       (match List.assoc_opt "heldBack" fields with
         | Some (`Bool b) -> b
         | _ -> int "inFlight" > 0);
+    probe =
+      (match List.assoc_opt "probeMs" fields with
+        | Some (`Int n) -> Some (float_of_int n /. 1000.)
+        | Some (`Float f) -> Some (f /. 1000.)
+        | _ -> None);
   }
+
+let report_to_json r =
+  [
+    ("inFlight", `Int r.in_flight);
+    ("completed", `Int r.completed);
+    ("timeouts", `Int r.timeouts);
+    ("waiting", `Int r.waiting);
+    ("heldBack", `Bool r.held_back);
+  ]
+  @
+  match r.probe with
+    | Some seconds -> [("probeMs", `Float (Float.round (seconds *. 10_000.) /. 10.))]
+    | None -> []
 
 type lessee = {
   mutable last : report;
@@ -157,11 +183,16 @@ let json t ~now =
   List.map
     (fun (pid, (r : report)) ->
       `Assoc
-        [
-          ("pid", `Int pid);
-          ("rateBytesPerSec", `Int (int_of_float (rate_for t ~now ~pid)));
-          ("inFlightBytes", `Int r.in_flight);
-          ("waiting", `Int r.waiting);
-          ("heldBack", `Bool r.held_back);
-        ])
+        ([
+           ("pid", `Int pid);
+           ("rateBytesPerSec", `Int (int_of_float (rate_for t ~now ~pid)));
+           ("inFlightBytes", `Int r.in_flight);
+           ("waiting", `Int r.waiting);
+           ("heldBack", `Bool r.held_back);
+         ]
+        @
+        match r.probe with
+          | Some seconds ->
+              [("probeMs", `Float (Float.round (seconds *. 10_000.) /. 10.))]
+          | None -> []))
     (live t ~now)

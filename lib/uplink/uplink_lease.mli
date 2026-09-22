@@ -30,6 +30,11 @@ type report = {
           not one is waiting now: the rate held this lessee back. Spent by
           the next {!split}. A lessee that never says (an older build) is
           read as held back while it has a body in flight. *)
+  probe : float option;
+      (** The least round trip the lessee timed on the link since it last
+          renewed, seconds; [None] when it had nothing in flight to time
+          one beside. What lets an owner run the law of a link it has no
+          store on. *)
 }
 
 val idle : report
@@ -38,8 +43,12 @@ val idle : report
     one there since it last said. *)
 val wants : report -> bool
 
-(** Read off a request's fields; a field absent is nothing. *)
+(** Read off a request's fields; a field absent is nothing. The probe is
+    carried as [probeMs]. *)
 val report_of_json : (string * Yojson.Safe.t) list -> report
+
+(** What {!report_of_json} reads back as the same report. *)
+val report_to_json : report -> (string * Yojson.Safe.t) list
 
 type t
 
@@ -76,5 +85,5 @@ val own_rate : t -> float
 val rate_for : t -> now:float -> pid:int -> float
 
 (** Every live lessee as a report shows it: [pid], [rateBytesPerSec],
-    [inFlightBytes], [waiting], [heldBack]. *)
+    [inFlightBytes], [waiting], [heldBack], and [probeMs] when it timed one. *)
 val json : t -> now:float -> Yojson.Safe.t list

@@ -31,16 +31,41 @@ let rec settle n =
     let* () = Lwt.pause () in
     settle (n - 1)
 
-(* The scripted daemon. *)
-type script = Grant of float | Refuse | Silent
+(* The scripted daemon: grants every link the request names at the rate
+   the script says for it, refuses, says nothing, or answers as the one-link
+   build did. *)
+type script = Grant of (string -> float) | Refuse | Silent | Flat of float
 
-let script = ref (Grant (4. *. float_of_int mb))
+let script = ref (Grant (fun _ -> 4. *. float_of_int mb))
 let asked : Yojson.Safe.t list ref = ref []
 
+let links_of line =
+  match line with
+    | `Assoc fields -> (
+        match List.assoc_opt "links" fields with
+          | Some (`Assoc l) -> l
+          | _ -> [])
+    | _ -> []
+
 let send line =
-  asked := Yojson.Safe.from_string line :: !asked;
+  let req = Yojson.Safe.from_string line in
+  asked := req :: !asked;
   match !script with
-    | Grant rate ->
+    | Grant rate_of ->
+        Lwt.return
+          (Yojson.Safe.to_string
+             (`Assoc
+               [
+                 ("ok", `Bool true);
+                 ("interval", `Float 2.);
+                 ( "links",
+                   `Assoc
+                     (List.map
+                        (fun (name, _) ->
+                          (name, `Assoc [("rate", `Float (rate_of name))]))
+                        (links_of req)) );
+               ]))
+    | Flat rate ->
         Lwt.return
           (Yojson.Safe.to_string
              (`Assoc
@@ -49,11 +74,17 @@ let send line =
         Lwt.return {|{"ok":false,"error":"unknown action: uplink","code":"invalid"}|}
     | Silent -> Lwt.fail Lwt_unix.Timeout
 
-let last_asked key =
+let last_asked ?(link = "wan") key =
   match !asked with
-    | `Assoc fields :: _ -> (
-        match List.assoc_opt key fields with Some (`Int n) -> n | _ -> -1)
+    | req :: _ -> (
+        match List.assoc_opt link (links_of req) with
+          | Some (`Assoc fields) -> (
+              match List.assoc_opt key fields with Some (`Int n) -> n | _ -> -1)
+          | _ -> -1)
     | _ -> -1
+
+let last_asked_links () =
+  match !asked with req :: _ -> List.map fst (links_of req) | _ -> []
 
 let field u key = List.assoc_opt key (U.json u)
 let mode g = U.mode (U.process_of g)
@@ -125,7 +156,7 @@ let () =
        (Uplink_control.rate (U.control g) > float_of_int mb);
 
      case "a daemon that comes back is asked again, and leased from";
-     script := Grant (3. *. float_of_int mb);
+     script := Grant (fun _ -> 3. *. float_of_int mb);
      let rec wait n = if n = 0 then Lwt.return_unit else let* () = tick () in wait (n - 1) in
      let* () = wait 16 in
      let* () = held in
@@ -223,5 +254,53 @@ let () =
      let* () = first in
      let* () = waiting in
 
-     report ~expected:19 ();
+     case "a queue on one link shrinks that link's law alone";
+     (* Nobody wanting more on wan, so its law has no reason to move. *)
+     ignore (renewal o ~pid:7 Uplink_lease.idle);
+     let* () = tick () in
+     let lan = U.link (U.process_of o) "lan" in
+     let wan_before = Uplink_control.rate (U.control o) in
+     let lan_before = Uplink_control.rate (U.control lan) in
+     (* A lessee on lan times the link empty once, then a queue twice over:
+        lan's law reads a delay it has no store of its own to see, above the
+        least it was told. *)
+     let timed probe = { Uplink_lease.idle with in_flight = mb; probe = Some probe } in
+     ignore (U.lease_renewal (U.process_of o) ~pid:8 [("lan", timed 0.02)]);
+     let* () = tick () in
+     ignore (U.lease_renewal (U.process_of o) ~pid:8 [("lan", timed 0.4)]);
+     let* () = tick () in
+     ignore (U.lease_renewal (U.process_of o) ~pid:8 [("lan", timed 0.4)]);
+     let* () = tick () in
+     check "lan cut, on what its lessee timed"
+       ~why:(fun () ->
+         Printf.sprintf "lan %.0f -> %.0f" lan_before (Uplink_control.rate (U.control lan)))
+       (Uplink_control.rate (U.control lan) < lan_before);
+     check "wan untouched"
+       ~why:(fun () ->
+         Printf.sprintf "wan %.0f -> %.0f" wan_before (Uplink_control.rate (U.control o)))
+       (Uplink_control.rate (U.control o) = wan_before);
+     check "and both are listed"
+       (List.map fst (U.links (U.process_of o)) = ["lan"; "wan"]);
+
+     case "one renewal carries every link a lessee uses";
+     Fake_clock.reset ();
+     script := Grant (fun name -> if name = "wan" then 4. *. float_of_int mb else float_of_int mb);
+     let g = U.create ~settings:on () in
+     lease g ~send;
+     let g_lan = U.link (U.process_of g) "lan" in
+     let* () = U.acquire g ~class_:U.Background ~bytes:1024 in
+     let* () = U.acquire g_lan ~class_:U.Background ~bytes:1024 in
+     let* () = tick () in
+     check "both links in the one request" (List.sort compare (last_asked_links ()) = ["lan"; "wan"]);
+     check "each granted its own rate"
+       ~why:(fun () ->
+         Printf.sprintf "wan %d lan %d" (int_field g "rateBytesPerSec") (int_field g_lan "rateBytesPerSec"))
+       (int_field g "rateBytesPerSec" = 4 * mb && int_field g_lan "rateBytesPerSec" = mb);
+
+     case "an answer of the one-link build is a refusal";
+     script := Flat (2. *. float_of_int mb);
+     let* () = tick () in
+     check "local, every link" (mode g = U.Local);
+
+     report ~expected:25 ();
      Lwt.return_unit)

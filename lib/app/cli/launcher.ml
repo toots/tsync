@@ -198,21 +198,46 @@ let handler ~request_stop engines line =
               let pid =
                 match List.assoc_opt "pid" obj with Some (`Int p) -> p | _ -> 0
               in
+              (* A report per link under "links"; a request with the fields
+                 at the top is a process of the one-link build, on the
+                 default link, and is answered with its grant at the top
+                 too. *)
+              let reports =
+                match List.assoc_opt "links" obj with
+                  | Some (`Assoc links) ->
+                      List.filter_map
+                        (fun (name, r) ->
+                          match r with
+                            | `Assoc fields ->
+                                Some (name, Uplink_lease.report_of_json fields)
+                            | _ -> None)
+                        links
+                  | _ -> [(Uplink.default_link, Uplink_lease.report_of_json obj)]
+              in
+              let flat = List.assoc_opt "links" obj = None in
               match
-                Uplink_lwt.lease_renewal (Uplink_lwt.process ()) ~pid
-                  [(Uplink.default_link, Uplink_lease.report_of_json obj)]
+                Uplink_lwt.lease_renewal (Uplink_lwt.process ()) ~pid reports
               with
-                | Some ((_, rate) :: _, interval) ->
+                | Some (grants, interval) ->
                     Lwt.return
                       ( Yojson.Safe.to_string
                           (`Assoc
-                            [
-                              ("ok", `Bool true);
-                              ("rate", `Float rate);
-                              ("interval", `Float interval);
-                            ]),
+                            ([
+                               ("ok", `Bool true);
+                               ("interval", `Float interval);
+                               ( "links",
+                                 `Assoc
+                                   (List.map
+                                      (fun (name, rate) ->
+                                        (name, `Assoc [("rate", `Float rate)]))
+                                      grants) );
+                             ]
+                            @
+                            match (flat, grants) with
+                              | true, (_, rate) :: _ -> [("rate", `Float rate)]
+                              | _ -> [])),
                         `Continue )
-                | _ -> fail `Invalid "not the link's owner")
+                | None -> fail `Invalid "not the links' owner")
           | Some (`String "stop") ->
               (* Answered before winding down, so the caller hears that it was
                  asked rather than losing the connection. *)
