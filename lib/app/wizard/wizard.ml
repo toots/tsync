@@ -918,10 +918,34 @@ module Make (E : ENV) = struct
               with Failure _ -> Uplink_control.default_settings)
           | None -> Uplink_control.default_settings)
     in
-    let links = Option.bind existing_root (fun r -> jfield r "links") in
+    (* Per-link overrides: kept as the file had them, and edited here for
+       the one thing a link is usually given of its own, a ceiling. *)
+    let links =
+      ref
+        (match Option.bind existing_root (fun r -> jfield r "links") with
+          | Some (`Assoc l) -> l
+          | _ -> [])
+    in
     let tls = ref (Option.bind existing_root (fun r -> jstr r "tls")) in
     let domains =
       ref (match existing_root with Some r -> jlist r "domains" | None -> [])
+    in
+    (* Every link the backends name, in any domain: a local store is on
+       none. *)
+    let link_names () =
+      List.sort_uniq compare
+        (List.concat_map
+           (fun d ->
+             List.filter_map
+               (fun b ->
+                 if jstr b "type" = Some "local" then None
+                 else
+                   Some
+                     (match jstr b "link" with
+                       | Some l when String.trim l <> "" -> String.trim l
+                       | _ -> Conf_parsing.default_link))
+               (jlist d "backends"))
+           !domains)
     in
     let edit_globals () =
       client_name := prompt "Client name" (Some !client_name);
@@ -959,10 +983,37 @@ module Make (E : ENV) = struct
            target_delay = float_of_int (Int.max 5 target) /. 1000.;
            max_rate;
          };
-       if links <> None then
-         print_endline
-           "  (per-link overrides under \"links\" are kept as written; edit \
-            them in the file)");
+       (* A ceiling per link: what caps one store alone on its link, and
+          holds across every process on the machine. Anything else a link
+          differs in stays as the file has it. *)
+       List.iter
+         (fun name ->
+           let entry =
+             match List.assoc_opt name !links with
+               | Some (`Assoc o) -> o
+               | _ -> []
+           in
+           let current =
+             match List.assoc_opt "maxRate" entry with
+               | Some (`Int n) -> Some n
+               | Some (`String v) -> Conf_parsing.parse_size v
+               | _ -> None
+           in
+           let ceiling =
+             prompt_size_opt ~unset:"none"
+               (Printf.sprintf
+                  "Link %s: upload rate ceiling, per second (\"none\" = as uplink)"
+                  name)
+               current
+           in
+           let entry =
+             List.remove_assoc "maxRate" entry
+             @ match ceiling with Some n -> [("maxRate", `Int n)] | None -> []
+           in
+           links :=
+             List.remove_assoc name !links
+             @ if entry = [] then [] else [(name, `Assoc entry)])
+         (link_names ()));
       (* Only worth asking when the build has more than one backend. "auto"
            leaves it unset, taking the preferred one at startup, which survives a
            build dropping a backend. *)
@@ -1076,7 +1127,7 @@ module Make (E : ENV) = struct
     if not !saved then Printf.printf "Aborted; config left untouched.\n"
     else begin
       write_config ~path:config_path ~client_name:!client_name ~uplink:!uplink
-        ~links
+        ~links:(match !links with [] -> None | l -> Some (`Assoc l))
         ~max_uploads:!max_uploads ~max_chunk_buffers:!max_chunk_buffers
         ~max_downloads:!max_downloads ~tls:!tls ~domains:!domains;
       Printf.printf "\nConfig written to %s\n" config_path;
