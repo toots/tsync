@@ -147,6 +147,9 @@ module Make (Io : Io.S) (Clock : Clock.S with type 'a io := 'a Io.t) = struct
 
   type t = {
     control : Uplink_control.t;
+    share : Uplink_budget.t;
+        (** What this process admits against: the law's rate here, a granted
+            share of it under a lease. *)
     line : gate;
     mutable probes : probe list;
     mutable ticking : bool;
@@ -156,20 +159,24 @@ module Make (Io : Io.S) (Clock : Clock.S with type 'a io := 'a Io.t) = struct
   }
 
   let create ?settings () =
-    let control = Uplink_control.create ?settings ~now:(Clock.now ()) () in
+    let now = Clock.now () in
+    let control = Uplink_control.create ?settings ~now () in
+    let share =
+      Uplink_budget.create ~now ~rate:(Uplink_control.rate control)
+    in
     {
       control;
+      share;
       line =
         gate
           {
-            admits = Uplink_control.admits control;
-            take = Uplink_control.take control;
-            wait_for = Uplink_control.wait_for control;
+            admits = Uplink_budget.admits share;
+            take = Uplink_budget.take share;
+            wait_for = Uplink_budget.wait_for share;
             left =
-              (fun ~now ~bytes ~answered ~elapsed ->
-                if answered then
-                  Uplink_control.completed control ~now ~bytes ~elapsed
-                else Uplink_control.abandoned control ~now ~bytes);
+              (fun ~now ~bytes ~answered ~elapsed:_ ->
+                Uplink_budget.release share ~bytes;
+                if answered then Uplink_control.completed control ~now ~bytes);
           };
       probes = [];
       ticking = false;
@@ -187,7 +194,7 @@ module Make (Io : Io.S) (Clock : Clock.S with type 'a io := 'a Io.t) = struct
      delay, which the next step cuts hard on. It does not touch the store's
      health, which its own retry loop keeps. *)
   let probe_round t =
-    if Uplink_control.in_flight_bytes t.control = 0 then Io.return ()
+    if Uplink_budget.in_flight_bytes t.share = 0 then Io.return ()
     else
       Io.iter_p
         (fun p ->
@@ -237,6 +244,8 @@ module Make (Io : Io.S) (Clock : Clock.S with type 'a io := 'a Io.t) = struct
     t.last_timeouts <- timeouts;
     let* () = probe_round t in
     Uplink_control.tick t.control ~now:(Clock.now ());
+    Uplink_budget.set_rate t.share ~now:(Clock.now ())
+      (Uplink_control.rate t.control);
     announce t;
     pump t.line;
     arm t.line;
@@ -290,7 +299,11 @@ module Make (Io : Io.S) (Clock : Clock.S with type 'a io := 'a Io.t) = struct
 
   let json t =
     Uplink_control.json t.control ~now:(Clock.now ())
-    @ [("waiting", `Int (waiting t))]
+    @ [
+        ("inFlightBytes", `Int (Uplink_budget.in_flight_bytes t.share));
+        ("windowBytes", `Int (Uplink_budget.window_bytes t.share));
+        ("waiting", `Int (waiting t));
+      ]
 
   let the_process : t option ref = ref None
 

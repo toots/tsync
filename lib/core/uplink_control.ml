@@ -78,7 +78,7 @@ end
 
 type t = {
   settings : settings;
-  budget : Uplink_budget.t;
+  mutable rate : float;
   base : Window.t;
   completed_bytes : Window.t;
   mutable capacity : float option;
@@ -104,9 +104,7 @@ let create ?(settings = default_settings) ~now () =
   let cells_of span width = Int.max 1 (int_of_float (span /. width)) in
   {
     settings;
-    budget =
-      Uplink_budget.create ~now
-        ~rate:(clamp_to_settings settings !initial_rate);
+    rate = clamp_to_settings settings !initial_rate;
     base =
       Window.create
         ~cells:(cells_of !base_window 60.)
@@ -126,19 +124,14 @@ let create ?(settings = default_settings) ~now () =
     drops = 0;
   }
 
-let admits t ~now ~bytes = Uplink_budget.admits t.budget ~now ~bytes
-let take t ~now ~bytes = Uplink_budget.take t.budget ~now ~bytes
-let wait_for t ~now ~bytes = Uplink_budget.wait_for t.budget ~now ~bytes
 let dropped t = t.drops <- t.drops + 1
 
-let completed t ~now ~bytes ~elapsed:_ =
-  Uplink_budget.release t.budget ~bytes;
+let completed t ~now ~bytes =
   Window.note t.completed_bytes ~now (float_of_int bytes)
 
-let abandoned t ~now:_ ~bytes = Uplink_budget.release t.budget ~bytes
 let observe_delay t ~now:_ delay = t.samples <- delay :: t.samples
 let achieved t ~now = Window.fold t.completed_bytes ~now /. !rate_window
-let rate t = Uplink_budget.rate t.budget
+let rate t = t.rate
 let state t = t.state
 let capacity t = t.capacity
 
@@ -147,9 +140,6 @@ let base_delay t ~now =
   if b < infinity then Some b else None
 
 let queueing_delay t = t.queueing
-let in_flight_bytes t = Uplink_budget.in_flight_bytes t.budget
-let window_bytes t = Uplink_budget.window_bytes t.budget
-let tokens t ~now = Uplink_budget.tokens t.budget ~now
 let drops t = t.drops
 
 let enter t ~now state =
@@ -179,15 +169,14 @@ let ceiling t =
     | Ramping, _ | _, None -> infinity
     | (Steady | Backing_off), Some c -> t.settings.headroom *. c
 
-let set_rate t ~now rate =
-  Uplink_budget.set_rate t.budget ~now
-    (clamp_to_settings t.settings (Float.min rate (ceiling t)))
+let set_rate t rate =
+  t.rate <- clamp_to_settings t.settings (Float.min rate (ceiling t))
 
 let timed_out t ~now =
   lower_capacity t ~now;
   t.never_saturated <- false;
   enter t ~now Backing_off;
-  set_rate t ~now (rate t *. !decrease_floor)
+  set_rate t (t.rate *. !decrease_floor)
 
 (* The least of a tick's probes, above the least seen lately, smoothed over
    two ticks. A tick with no probe decays toward nothing rather than holding a
@@ -209,7 +198,7 @@ let tick t ~now =
   let q = t.queueing in
   t.over_target <- (if q > target then t.over_target + 1 else 0);
   let off = Float.max (-1.) (Float.min 1. ((target -. q) /. target)) in
-  let rate = rate t in
+  let rate = t.rate in
   let next =
     match t.state with
       | Ramping ->
@@ -241,7 +230,7 @@ let tick t ~now =
           if now -. t.since >= !backoff_hold then enter t ~now Ramping;
           rate
   in
-  set_rate t ~now next
+  set_rate t next
 
 let json t ~now =
   let ms s = `Float (Float.round (s *. 10_000.) /. 10.) in
@@ -253,8 +242,6 @@ let json t ~now =
       match t.capacity with Some c -> `Int (int_of_float c) | None -> `Null );
     ("baseDelayMs", match base_delay t ~now with Some b -> ms b | None -> `Null);
     ("queueingDelayMs", ms t.queueing);
-    ("inFlightBytes", `Int (in_flight_bytes t));
-    ("windowBytes", `Int (window_bytes t));
     ("drops", `Int t.drops);
     ("headroom", `Float t.settings.headroom);
     ("targetDelayMs", ms t.settings.target_delay);

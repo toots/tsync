@@ -19,8 +19,11 @@
     and in a steady state a queue that stays up brings it down to what is
     completing, since that is what another user has left.
 
-    Pure: every entry point is handed the time. What it decided at an instant
-    is read off it, not waited for. *)
+    The law alone: delays and completions in, a rate out. What is admitted
+    against that rate is an {!Uplink_budget} the caller keeps, since under a
+    lease the one law serves several budgets. Pure: every entry point is
+    handed the time, and what it decided at an instant is read off it, not
+    waited for. *)
 
 (** What the config can set. *)
 type settings = {
@@ -77,25 +80,14 @@ type t
 val create : ?settings:settings -> now:float -> unit -> t
 val settings : t -> settings
 
-(** {1 Admission}
-
-    The budget beneath: see {!Uplink_budget}. *)
-
-val admits : t -> now:float -> bytes:int -> bool
-val take : t -> now:float -> bytes:int -> unit
-val wait_for : t -> now:float -> bytes:int -> float
+(** {1 What happened} *)
 
 (** A body refused on a path that drops rather than waits. *)
 val dropped : t -> unit
 
-(** {1 What happened} *)
-
-(** [bytes] were answered: they left the link, and count toward the rate the
-    link was seen to carry. *)
-val completed : t -> now:float -> bytes:int -> elapsed:float -> unit
-
-(** [bytes] were given up on: they left the link and count toward nothing. *)
-val abandoned : t -> now:float -> bytes:int -> unit
+(** [bytes] were answered: they count toward the rate the link was seen to
+    carry. A body given up on counts toward nothing, and is not reported. *)
+val completed : t -> now:float -> bytes:int -> unit
 
 (** One probe's round trip, seconds. Several in a tick are read as their
     least, server-side delay being one-sided. *)
@@ -123,9 +115,6 @@ val base_delay : t -> now:float -> float option
 (** The smoothed delay above base, seconds. *)
 val queueing_delay : t -> float
 
-val in_flight_bytes : t -> int
-val window_bytes : t -> int
-val tokens : t -> now:float -> float
 val drops : t -> int
 
 (** Under the names every report uses. *)

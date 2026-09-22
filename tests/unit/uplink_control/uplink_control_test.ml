@@ -20,14 +20,24 @@ type link = {
   base : float;
   mutable foreign : float;  (** Bytes per second another user is taking. *)
   mutable queue : float;  (** Our bytes waiting on the link. *)
+  budget : Uplink_budget.t;  (** What the law's rate is admitted against. *)
 }
+
+let fresh_link ~capacity ~base =
+  {
+    capacity;
+    base;
+    foreign = 0.;
+    queue = 0.;
+    budget = Uplink_budget.create ~now:0. ~rate:!Uplink_control.initial_rate;
+  }
 
 (* Offer greedily, drain at what the foreign load leaves, and read the probe
    off the queue: one simulated second. *)
 let second link t ~now =
   let rec offer () =
-    if Uplink_control.admits t ~now ~bytes:body then begin
-      Uplink_control.take t ~now ~bytes:body;
+    if Uplink_budget.admits link.budget ~now ~bytes:body then begin
+      Uplink_budget.take link.budget ~now ~bytes:body;
       link.queue <- link.queue +. float_of_int body;
       offer ()
     end
@@ -36,8 +46,10 @@ let second link t ~now =
   let share = Float.max 0. (link.capacity -. link.foreign) in
   let drained = Float.min link.queue share in
   link.queue <- link.queue -. drained;
-  if drained > 0. then
-    Uplink_control.completed t ~now ~bytes:(int_of_float drained) ~elapsed:1.;
+  if drained > 0. then begin
+    Uplink_budget.release link.budget ~bytes:(int_of_float drained);
+    Uplink_control.completed t ~now ~bytes:(int_of_float drained)
+  end;
   (* A foreign load keeps a little standing queue of its own in the buffer. *)
   let standing = link.foreign *. 0.02 in
   link.base +. ((link.queue +. standing) /. link.capacity)
@@ -52,6 +64,7 @@ let run link t ~from ~seconds =
     if Float.rem now !Uplink_control.tick_interval = 0. then begin
       Uplink_control.observe_delay t ~now delay;
       Uplink_control.tick t ~now;
+      Uplink_budget.set_rate link.budget ~now (Uplink_control.rate t);
       rates := Uplink_control.rate t :: !rates;
       delays := delay :: !delays
     end
@@ -74,7 +87,7 @@ let () =
   let cap = 1.6 *. mb in
 
   case "a cold start doubles while delay stays flat";
-  let link = { capacity = cap; base = 0.02; foreign = 0.; queue = 0. } in
+  let link = fresh_link ~capacity:cap ~base:0.02 in
   let t = Uplink_control.create ~settings ~now:0. () in
   check "begins at the initial rate"
     (Uplink_control.rate t = !Uplink_control.initial_rate);
@@ -145,7 +158,7 @@ let () =
   let narrow =
     { settings with min_rate = floor_rate; max_rate = Some ceiling_rate }
   in
-  let link = { capacity = cap; base = 0.02; foreign = 0.; queue = 0. } in
+  let link = fresh_link ~capacity:cap ~base:0.02 in
   let t = Uplink_control.create ~settings:narrow ~now:0. () in
   let rates, _, now = run link t ~from:0. ~seconds:60 in
   check "under a ceiling, it stops there"

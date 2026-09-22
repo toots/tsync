@@ -59,11 +59,10 @@ let () =
      case "the drop path: room, or a drop that charges nothing";
      Fake_clock.reset ();
      let g = U.create ~settings:on () in
-     let before = Uplink_control.tokens (U.control g) ~now:0. in
      check "room on a fresh budget" (U.try_admit g ~bytes:mb);
-     check "asking took nothing"
-       (Uplink_control.tokens (U.control g) ~now:0. = before);
+     (* The whole burst still passes at once: asking took none of it. *)
      let* () = U.acquire g ~class_:Background ~bytes:(2 * mb) in
+     check "asking took nothing" (U.waiting g = 0);
      let waiting = ask g "w" mb in
      let* () = settle 3 in
      check "with a line ahead, no room" (not (U.try_admit g ~bytes:1024));
