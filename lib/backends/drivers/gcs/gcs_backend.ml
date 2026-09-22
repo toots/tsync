@@ -148,10 +148,12 @@ struct
 
      Measured against the connections that go this way: every one of them is
      answered on the first retry, so waiting longer buys a caller nothing — the
-     connection is already gone by the second the request is made. Sixty seconds
-     against a link that answers in 150ms and would take about eight for a chunk
-     at its worst observed rate. *)
-  let request_timeout = 60.
+     connection is already gone by the second the request is made.
+
+     The length is {!Uplink_budget.stall_timeout}'s, read when the client is
+     made: the budget sizes what may be in flight against it, so the deadline
+     and the window that keeps bodies inside it are one setting. *)
+  let request_timeout () = !Uplink_budget.stall_timeout
 
   (* Minting a token reaches the network, which is why the pool takes these as a
      thunk: it belongs inside the request's deadline rather than before it. *)
@@ -389,7 +391,7 @@ struct
     let t =
       {
         client =
-          Hc.create ~name:"gcs" ~timeout:request_timeout
+          Hc.create ~name:"gcs" ~timeout:(request_timeout ())
             ~classify:Backend.classify ~health ();
         bucket;
         base;
