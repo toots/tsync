@@ -1808,6 +1808,14 @@
   (alias runtest)
   (action (run ./tree_find_test.exe))))
 
+(subdir unit/uplink
+ (alias
+  (name default)
+  (deps uplink_test.exe))
+ (rule
+  (alias runtest)
+  (action (run ./uplink_test.exe))))
+
 (subdir unit/uplink_budget
  (alias
   (name default)
