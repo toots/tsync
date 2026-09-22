@@ -1,6 +1,6 @@
 (* Checks read ordering by role (main, replica, readOnly, backfill — each group
-   keeping config order), that "role" is required, and how "maxUploadRate"
-   reads. *)
+   keeping config order), that "role" is required, and how "link", "uplink"
+   and "links" read. *)
 let bc ?(role = `Main) backend_type id =
   Conf_parsing.
     {
