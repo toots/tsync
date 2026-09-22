@@ -25,6 +25,15 @@ let cmd : unit Cmd.t =
     (match cfg.Conf_parsing.tls with
       | Some t -> Printf.printf "tls:             %s\n" t
       | None -> ());
+    (let u = cfg.Conf_parsing.uplink in
+     Printf.printf
+       "uplink:          %s, headroom %.0f%%, target %.0f ms, min %s/s, max %s\n"
+       (if u.Uplink_control.enabled then "on" else "off")
+       (100. *. u.headroom) (1000. *. u.target_delay)
+       (Metrics.human_bytes u.min_rate)
+       (match u.max_rate with
+         | Some m -> Metrics.human_bytes m ^ "/s"
+         | None -> "none"));
     List.iter
       (fun (d : Conf_parsing.domain) ->
         Printf.printf "\ndomain: %s%s\n" d.name

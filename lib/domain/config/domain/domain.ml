@@ -1,11 +1,14 @@
-(* A ceiling in the config is this store's own gate, one per store built. *)
+(* Every store's writes join the process governor's line; a ceiling in the
+   config is this store's own gate in front of it, one per store built. *)
 let make_backend ~traffic (bc : Conf_parsing.backend_config) =
+  let module U = Tsync_core_lwt.Uplink_lwt in
+  let governed = U.admission (U.process ()) U.Background in
   let admission =
-    Option.map
-      (fun rate -> Tsync_core_lwt.Uplink_lwt.capped ~rate:(float_of_int rate))
-      bc.Conf_parsing.max_upload_rate
+    match bc.Conf_parsing.max_upload_rate with
+      | Some rate -> U.compose (U.capped ~rate:(float_of_int rate)) governed
+      | None -> governed
   in
-  Backend_lwt.make ?admission ~traffic ~backend_type:bc.backend_type
+  Backend_lwt.make ~admission ~traffic ~backend_type:bc.backend_type
     ~get_field:(fun k -> List.assoc_opt k bc.fields)
     ()
 
@@ -186,6 +189,11 @@ let of_config ?domain ?socket_path ?(resume = false) ~paths cfg :
     let journal_prefix = Conf_parsing.journal_prefix d
     let cursor_key = Conf_parsing.cursor_key d
     let shares_prefix = Conf_parsing.shares_prefix d
+
+    (* Before the first store is built, which joins the governor's line; a
+       second domain in the same process finds it configured and leaves it. *)
+    let () = Tsync_core_lwt.Uplink_lwt.configure cfg.Conf_parsing.uplink
+
     (* A forward holds a chunk body past the buffer that carried it, so the
        buffers' budget is the ceiling on forwards too. *)
     let store, members =

@@ -81,6 +81,40 @@ let () =
          {|{"type": "local", "name": "l", "role": "main", "path": "/x",
             "maxUploadRate": "1 MB"}|}));
 
+  (* The "uplink" object: absent is the defaults, each setting is read
+     strictly, and what is written reads back as itself. *)
+  let with_uplink extra =
+    Printf.sprintf
+      {|{"domains": [{"name": "d", "symlinks": "keep", "versioning": false,
+                      "frontends": ["fuse"],
+                      "backends": [{"type": "s3", "name": "s", "role": "main"}]}]%s}|}
+      extra
+  in
+  let uplink_of extra = (load (with_uplink extra)).Conf_parsing.uplink in
+  assert (uplink_of "" = Uplink_control.default_settings);
+  let u =
+    uplink_of
+      {|, "uplink": {"enabled": true, "headroom": 0.5, "targetDelayMs": 80,
+                     "minRate": "128 KB", "maxRate": "2 MB"}|}
+  in
+  assert u.Uplink_control.enabled;
+  assert (u.headroom = 0.5);
+  assert (u.target_delay = 0.08);
+  assert (u.min_rate = 128 * 1024);
+  assert (u.max_rate = Some (2 * 1024 * 1024));
+  assert (fails (with_uplink {|, "uplink": {"headroom": 1.5}|}));
+  assert (fails (with_uplink {|, "uplink": {"headroom": 0}|}));
+  assert (fails (with_uplink {|, "uplink": {"targetDelayMs": 2}|}));
+  assert (fails (with_uplink {|, "uplink": {"maxRate": "fast"}|}));
+  assert (
+    fails (with_uplink {|, "uplink": {"minRate": "2 MB", "maxRate": "1 MB"}|}));
+  assert (fails (with_uplink {|, "uplink": 3|}));
+  assert (Conf_parsing.uplink_of_json (Conf_parsing.uplink_to_json u) = u);
+  assert (
+    Conf_parsing.uplink_of_json
+      (Conf_parsing.uplink_to_json Uplink_control.default_settings)
+    = Uplink_control.default_settings);
+
   (* A domain is writable (has a main) or purely read-only. A replica or backfill
      target with no main is a copy of nothing. *)
   let role r = Printf.sprintf {|{"type": "s3", "name": %S, "role": %S}|} r r in

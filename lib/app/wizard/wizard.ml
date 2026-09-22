@@ -841,7 +841,7 @@ module Make (E : ENV) = struct
 
   (* Serialize globals + domains to [path] with 0600 perms. *)
   let write_config ~path ~client_name ~max_uploads ~max_chunk_buffers
-      ~max_downloads ~tls ~domains =
+      ~max_downloads ~uplink ~tls ~domains =
     Io_lwt.Fs.mkdir_p_sync (Filename.dirname path);
     let json =
       `Assoc
@@ -850,6 +850,7 @@ module Make (E : ENV) = struct
            ("maxUploads", `Int max_uploads);
            ("maxChunkBuffers", `Int max_chunk_buffers);
            ("maxDownloads", `Int max_downloads);
+           ("uplink", Conf_parsing.uplink_to_json uplink);
          ]
         @ (match tls with Some t -> [("tls", `String t)] | None -> [])
         @ [("domains", `List domains)])
@@ -905,6 +906,16 @@ module Make (E : ENV) = struct
            (Option.bind existing_root (fun r -> jint r "maxDownloads"))
            ~default:Conf_parsing.default_max_downloads)
     in
+    (* Read with the parser's own rules, a hand-edited value that would be
+       refused on the way in being shown as the default here. *)
+    let uplink =
+      ref
+        (match Option.bind existing_root (fun r -> jfield r "uplink") with
+          | Some u -> (
+              try Conf_parsing.uplink_of_json u
+              with Failure _ -> Uplink_control.default_settings)
+          | None -> Uplink_control.default_settings)
+    in
     let tls = ref (Option.bind existing_root (fun r -> jstr r "tls")) in
     let domains =
       ref (match existing_root with Some r -> jlist r "domains" | None -> [])
@@ -916,6 +927,35 @@ module Make (E : ENV) = struct
       max_chunk_buffers :=
         prompt_int "Max chunk buffers held in memory" !max_chunk_buffers;
       max_downloads := prompt_int "Max concurrent downloads" !max_downloads;
+      (* The link is written at a rate chosen from its delay: how far under
+         what it can carry, and how much delay is aimed at. minRate is a
+         file-only setting; the default is right for any link worth using. *)
+      (let u = !uplink in
+       let enabled =
+         prompt_bool ~default:u.Uplink_control.enabled
+           "Govern uploads by link delay"
+       in
+       let headroom =
+         prompt_int "Headroom, % of measured capacity"
+           (int_of_float (Float.round (u.headroom *. 100.)))
+       in
+       let target =
+         prompt_int "Target queueing delay (ms)"
+           (int_of_float (Float.round (u.target_delay *. 1000.)))
+       in
+       let max_rate =
+         prompt_size_opt ~unset:"none"
+           "Upload rate ceiling, per second (\"none\" = what the link allows)"
+           u.max_rate
+       in
+       uplink :=
+         {
+           u with
+           enabled;
+           headroom = float_of_int (Int.min 100 headroom) /. 100.;
+           target_delay = float_of_int (Int.max 5 target) /. 1000.;
+           max_rate;
+         });
       (* Only worth asking when the build has more than one backend. "auto"
            leaves it unset, taking the preferred one at startup, which survives a
            build dropping a backend. *)
@@ -1028,7 +1068,7 @@ module Make (E : ENV) = struct
     done;
     if not !saved then Printf.printf "Aborted; config left untouched.\n"
     else begin
-      write_config ~path:config_path ~client_name:!client_name
+      write_config ~path:config_path ~client_name:!client_name ~uplink:!uplink
         ~max_uploads:!max_uploads ~max_chunk_buffers:!max_chunk_buffers
         ~max_downloads:!max_downloads ~tls:!tls ~domains:!domains;
       Printf.printf "\nConfig written to %s\n" config_path;

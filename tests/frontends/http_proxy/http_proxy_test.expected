@@ -21,6 +21,13 @@ stop: {"ok":true} closes=true asked=1
       "maxUploads": 2,
       "maxChunkBuffers": 2,
       "maxDownloads": 3,
+      "uplink": {
+        "enabled": false,
+        "headroom": 0.8,
+        "targetDelayMs": 50.0,
+        "minRate": 65536,
+        "maxRate": null
+      },
       "cacheRoot": "/tmp/tsync-http-proxy-status-test/cache",
       "dataDir": "/tmp/tsync-http-proxy-status-test/data",
       "socketPath": "/tmp/tsync-http-proxy-status-test/absent.sock",

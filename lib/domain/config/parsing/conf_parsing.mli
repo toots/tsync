@@ -85,6 +85,10 @@ type t = {
           holding its own copy of each body it sends, and per upload path rather
           than per process. *)
   max_downloads : int;  (** max concurrent file downloads (default 8) *)
+  uplink : Uplink_control.settings;
+      (** The top-level [uplink] object: whether the process's one link is
+          written at a rate chosen from its delay, and the headroom, target
+          delay and rate bounds of that choice. Absent, the defaults. *)
   domains : domain list;
 }
 
@@ -100,6 +104,13 @@ val default_max_downloads : int
     {!Metrics.human_bytes}, and a size stored in the config or on the wire is a
     plain integer of bytes. *)
 val parse_size : string -> int option
+
+(** The [uplink] object alone, [`Null] being the defaults; raises [Failure]
+    on a setting that cannot be what it says. *)
+val uplink_of_json : Yojson.Basic.t -> Uplink_control.settings
+
+(** What {!uplink_of_json} reads back as the same settings. *)
+val uplink_to_json : Uplink_control.settings -> Yojson.Basic.t
 
 (** Load configuration from [path], or from the JSON string in
     [$TSYNC_CONFIG_JSON] if set (overrides [path]). *)

@@ -40,6 +40,11 @@ module Make (Io : Io.S) (Clock : Clock.S with type 'a io := 'a Io.t) : sig
       next, as the budget says. *)
   val capped : rate:float -> unit Io.t admission
 
+  (** [compose first second] asks [first] and then [second], and tells both:
+      a store's own ceiling in front of the process governor. *)
+  val compose :
+    unit Io.t admission -> unit Io.t admission -> unit Io.t admission
+
   (** {1 The process governor} *)
 
   (** Who is asking. [Background] takes from the budget; [Foreground] is a

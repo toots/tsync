@@ -31,6 +31,7 @@ type t = {
   max_uploads : int;
   max_chunk_buffers : int;
   max_downloads : int;
+  uplink : Uplink_control.settings;
   domains : domain list;
 }
 
@@ -259,6 +260,65 @@ let parse_domain json =
     max_cache = parse_size_field json "maxCache";
   }
 
+(* Strict, as a backend's ceiling is: a setting typed wrong here would leave
+   the link governed by something other than what was meant. *)
+let uplink_of_json json =
+  let open Yojson.Basic.Util in
+  let d = Uplink_control.default_settings in
+  let bad field v =
+    failwith
+      (Printf.sprintf "uplink: \"%s\" cannot be %s" field
+         (Yojson.Basic.to_string v))
+  in
+  let size field default =
+    match json |> member field with
+      | `Null -> default
+      | `Int n when n > 0 -> Some n
+      | `String str as v -> (
+          match parse_size str with Some n -> Some n | None -> bad field v)
+      | v -> bad field v
+  in
+  match json with
+    | `Null -> d
+    | `Assoc _ ->
+        let enabled =
+          match json |> member "enabled" with
+            | `Bool b -> b
+            | `Null -> d.enabled
+            | v -> bad "enabled" v
+        in
+        let headroom =
+          match json |> member "headroom" with
+            | `Float h when h > 0. && h <= 1. -> h
+            | `Int 1 -> 1.
+            | `Null -> d.headroom
+            | v -> bad "headroom" v
+        in
+        let target_delay =
+          match json |> member "targetDelayMs" with
+            | `Int n when n >= 5 -> float_of_int n /. 1000.
+            | `Null -> d.target_delay
+            | v -> bad "targetDelayMs" v
+        in
+        let min_rate = Option.get (size "minRate" (Some d.min_rate)) in
+        let max_rate = size "maxRate" d.max_rate in
+        (match max_rate with
+          | Some m when m < min_rate ->
+              failwith "uplink: \"maxRate\" is below \"minRate\""
+          | _ -> ());
+        { Uplink_control.enabled; headroom; target_delay; min_rate; max_rate }
+    | v -> bad "uplink" v
+
+let uplink_to_json (u : Uplink_control.settings) : Yojson.Basic.t =
+  `Assoc
+    ([
+       ("enabled", `Bool u.enabled);
+       ("headroom", `Float u.headroom);
+       ("targetDelayMs", `Int (int_of_float (Float.round (u.target_delay *. 1000.))));
+       ("minRate", `Int u.min_rate);
+     ]
+    @ match u.max_rate with Some m -> [("maxRate", `Int m)] | None -> [])
+
 let of_json json =
   let open Yojson.Basic.Util in
   let max_uploads =
@@ -283,6 +343,7 @@ let of_json json =
       (match json |> member "maxDownloads" with
         | `Int n when n > 0 -> n
         | _ -> default_max_downloads);
+    uplink = uplink_of_json (json |> member "uplink");
     domains = json |> member "domains" |> to_list |> List.map parse_domain;
   }
 

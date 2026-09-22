@@ -101,6 +101,27 @@ module Make (Io : Io.S) (Clock : Clock.S with type 'a io := 'a Io.t) = struct
       waiting = (fun () -> Queue.length g.waiters);
     }
 
+  (* One after the other: the first asked first, so a store's own ceiling is
+     paid before the governor's line is joined, and what the governor counts
+     in flight is what is on the link and nothing waiting on a cap. *)
+  let compose first second =
+    {
+      acquire =
+        (fun ~bytes ->
+          let* () = first.acquire ~bytes in
+          second.acquire ~bytes);
+      completed =
+        (fun ~bytes ~elapsed ->
+          first.completed ~bytes ~elapsed;
+          second.completed ~bytes ~elapsed);
+      abandoned =
+        (fun ~bytes ->
+          first.abandoned ~bytes;
+          second.abandoned ~bytes);
+      now = first.now;
+      waiting = (fun () -> first.waiting () + second.waiting ());
+    }
+
   let capped ~rate =
     let b = Uplink_budget.create ~now:(Clock.now ()) ~rate in
     admission_of

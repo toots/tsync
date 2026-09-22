@@ -523,6 +523,19 @@ module Make (C : Conf_lwt.S) = struct
       ("maxUploads", `Int C.max_uploads);
       ("maxChunkBuffers", `Int C.max_chunk_buffers);
       ("maxDownloads", `Int C.max_downloads);
+      (* From the governor rather than the conf: what this process is running
+         under, which is what the rest of this block reports. *)
+      ( "uplink",
+        let module U = Tsync_core_lwt.Uplink_lwt in
+        let u = Uplink_control.settings (U.control (U.process ())) in
+        `Assoc
+          [
+            ("enabled", `Bool u.Uplink_control.enabled);
+            ("headroom", `Float u.headroom);
+            ("targetDelayMs", `Float (1000. *. u.target_delay));
+            ("minRate", `Int u.min_rate);
+            ("maxRate", match u.max_rate with Some m -> `Int m | None -> `Null);
+          ] );
       ("cacheRoot", `String C.cache_root);
       ("dataDir", `String C.data_dir);
       ("socketPath", `String C.socket_path);

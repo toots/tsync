@@ -8,7 +8,8 @@ let conf ?(domain = "testdom") ?(client_name = "test") ?(versioning = false)
     ?store:store_override ?members:members_override ?(verify_writes = true)
     ?(max_uploads = 1) ?max_chunk_buffers ?(max_downloads = 1) ?(chunk_size = 8)
     ?(cache_chunk_size = 8) ?max_cache ?(symlink_policy = `Keep)
-    ?(read_only = false) ?(socket_path = "") ?cache_root ?data_dir ~root () =
+    ?(read_only = false) ?(socket_path = "") ?cache_root ?data_dir
+    ?(uplink = Uplink_control.default_settings) ~root () =
   let paths =
     {
       Runtime.cache_root =
@@ -24,6 +25,7 @@ let conf ?(domain = "testdom") ?(client_name = "test") ?(versioning = false)
       max_uploads;
       max_chunk_buffers = Option.value max_chunk_buffers ~default:max_uploads;
       max_downloads;
+      uplink;
       domains =
         [
           {
