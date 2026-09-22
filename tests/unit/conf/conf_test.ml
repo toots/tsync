@@ -8,7 +8,7 @@ let bc ?(role = `Main) backend_type id =
       name = id;
       fields = [("id", id)];
       role;
-      max_upload_rate = None;
+      link = "wan";
     }
 
 let ids bs =
@@ -47,39 +47,61 @@ let () =
   assert (fails (one_backend {|{"type": "s3", "name": "s"}|}));
   assert (fails (one_backend {|{"type": "s3", "name": "s", "role": "primary"}|}));
 
-  (* "maxUploadRate" is a size per second, and strict: a ceiling typed wrong
-     must not be read as no ceiling. It bounds a link, so a local store may not
-     have one, and it is the target's own setting rather than a field the
-     backend driver sees. *)
-  let with_rate extra =
+  (* "link" names what a store is written over: "wan" unless said, any name
+     when said, and the target's own setting rather than a field the driver
+     sees. A local store is on none. *)
+  let with_link extra =
     one_backend
       (Printf.sprintf {|{"type": "s3", "name": "s", "role": "main"%s}|} extra)
   in
-  let rate_of extra =
-    let d = List.hd (load (with_rate extra)).Conf_parsing.domains in
-    (List.hd d.Conf_parsing.backends).Conf_parsing.max_upload_rate
+  let first_backend extra =
+    List.hd (List.hd (load (with_link extra)).Conf_parsing.domains).Conf_parsing.backends
   in
-  assert (rate_of "" = None);
-  assert (rate_of {|, "maxUploadRate": "500 KB"|} = Some (500 * 1024));
-  assert (rate_of {|, "maxUploadRate": 65536|} = Some 65536);
-  assert (fails (with_rate {|, "maxUploadRate": 0|}));
-  assert (fails (with_rate {|, "maxUploadRate": -4|}));
-  assert (fails (with_rate {|, "maxUploadRate": "fast"|}));
-  assert (fails (with_rate {|, "maxUploadRate": true|}));
-  assert (
-    not
-      (List.mem_assoc "maxUploadRate"
-         (List.hd
-            (List.hd
-               (load (with_rate {|, "maxUploadRate": "1 MB"|}))
-                 .Conf_parsing.domains)
-              .Conf_parsing.backends)
-           .Conf_parsing.fields));
+  assert ((first_backend "").Conf_parsing.link = "wan");
+  assert ((first_backend {|, "link": "lan"|}).Conf_parsing.link = "lan");
+  assert ((first_backend {|, "link": " wlan-slow "|}).Conf_parsing.link = "wlan-slow");
+  assert (not (List.mem_assoc "link" (first_backend {|, "link": "lan"|}).Conf_parsing.fields));
+  assert (fails (with_link {|, "link": ""|}));
+  assert (fails (with_link {|, "link": 3|}));
   assert (
     fails
       (one_backend
          {|{"type": "local", "name": "l", "role": "main", "path": "/x",
-            "maxUploadRate": "1 MB"}|}));
+            "link": "lan"}|}));
+
+  (* "links": per-link overrides read over "uplink", for links some backend
+     is on, in any domain. *)
+  let two_domains ~links =
+    Printf.sprintf
+      {|{"uplink": {"headroom": 0.5},
+         "links": %s,
+         "domains": [
+           {"name": "a", "symlinks": "keep", "versioning": false, "frontends": ["fuse"],
+            "backends": [{"type": "s3", "name": "s", "role": "main"}]},
+           {"name": "b", "symlinks": "keep", "versioning": false, "frontends": ["fuse"],
+            "backends": [{"type": "s3", "name": "t", "role": "main", "link": "lan"}]}]}|}
+      links
+  in
+  let cfg = load (two_domains ~links:{|{"lan": {"maxRate": "1 MB", "enabled": false}}|}) in
+  let lan = Conf_parsing.link_settings cfg "lan" in
+  assert (lan.Uplink_control.max_rate = Some (1024 * 1024));
+  assert (not lan.enabled);
+  assert (lan.headroom = 0.5);
+  assert (Conf_parsing.link_settings cfg "wan" = cfg.Conf_parsing.uplink);
+  assert (cfg.Conf_parsing.uplink.headroom = 0.5);
+  assert (fails (two_domains ~links:{|{"dsl": {}}|}));
+  assert (fails (two_domains ~links:{|3|}));
+  assert (fails (two_domains ~links:{|{"lan": {"headroom": 5}}|}));
+  let round =
+    load
+      (Printf.sprintf
+         {|{"uplink": {"headroom": 0.5}, "links": %s,
+            "domains": [{"name": "b", "symlinks": "keep", "versioning": false,
+                         "frontends": ["fuse"],
+                         "backends": [{"type": "s3", "name": "t", "role": "main", "link": "lan"}]}]}|}
+         (Yojson.Basic.to_string (Conf_parsing.links_to_json cfg)))
+  in
+  assert (round.Conf_parsing.links = cfg.Conf_parsing.links);
 
   (* The "uplink" object: absent is the defaults, each setting is read
      strictly, and what is written reads back as itself. *)

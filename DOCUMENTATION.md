@@ -727,9 +727,16 @@ delay, and what is in flight, waiting or was dropped, for the daemon and for eac
 
 `enabled: false` sends as fast as the counts allow, which is what tsync did before. `maxRate`
 is a ceiling whatever the link allows; `minRate` (default 64 KB) a floor however it is doing.
-A single store can be held under its own ceiling with `maxUploadRate` on the backend, on top
-of all this: `"maxUploadRate": "500 KB"`. That one is per process — a daemon and a job writing
-to the same store each hold it.
+Every remote backend names the link it is written over with `link` (default `wan`); stores
+naming the same link are governed as one, and `links` overrides these settings for one link:
+
+```json
+"links": { "wan": { "maxRate": "500 KB" } }
+```
+
+A ceiling set there holds across the daemon and every job on the machine together. To hold
+one store under its own ceiling, give it a link of its own — `"link": "wlan-slow"` — and cap
+that link.
 
 Sizes accept a byte count or a suffixed string — `512K`, `8M`, `1G`, binary multiples — so
 both `8388608` and `"8M"` work.
@@ -899,8 +906,8 @@ the top of `tsync status`.
 ## Backend type reference
 
 Every backend needs a `type`, a `name` (used by `mirror --source`) and a
-[`role`](#backend-role-reference). Any remote one may also carry `maxUploadRate`, a ceiling on
-what this process writes to it per second (`"500 KB"`), over and above the link's own governor.
+[`role`](#backend-role-reference). Any remote one may also name the `link` it is written over
+(default `wan`) — see [Uplink](#uplink).
 
 | `type` | Required fields | Optional | Notes |
 |---|---|---|---|

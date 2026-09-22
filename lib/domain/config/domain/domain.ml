@@ -17,12 +17,9 @@ let attach_probe ~cursor_key (bc : Conf_parsing.backend_config) store =
       ~held:(fun () -> Health.is_held St.health)
       ~probe:(fun () -> Lwt.map ignore (St.head_opt ~key:cursor_key ()))
 
-let admission_for (bc : Conf_parsing.backend_config) =
+let admission_for (_ : Conf_parsing.backend_config) =
   let module U = Tsync_core_lwt.Uplink_lwt in
-  let governed = U.admission (U.process ()) U.Background in
-  match bc.Conf_parsing.max_upload_rate with
-    | Some rate -> U.compose (U.capped ~rate:(float_of_int rate)) governed
-    | None -> governed
+  U.admission (U.process ()) U.Background
 
 (* Empty for a body that is not a manifest: a folder marker, a trash marker, a
    share. *)
@@ -142,9 +139,8 @@ let build_backends ~paths ~resume ~max_chunk_forwards
                first config entry that says anything, which should stay the
                bucket or the path. *)
             @
-            match bc.Conf_parsing.max_upload_rate with
-              | Some n -> [("maxUploadRate", Metrics.human_bytes n ^ "/s")]
-              | None -> [])
+            if bc.Conf_parsing.link = Conf_parsing.default_link then []
+            else [("link", bc.Conf_parsing.link)])
           ?pending:(stat (fun s -> s.Deferred.queued))
           ?in_flight:(stat (fun s -> s.Deferred.in_flight))
           ?degraded:(stat (fun s -> s.Deferred.degraded))

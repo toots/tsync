@@ -13,7 +13,7 @@ let conf ?(domain = "testdom") ?(client_name = "test") ?(versioning = false)
     ?(cache_chunk_size = 8) ?max_cache ?(symlink_policy = `Keep)
     ?(read_only = false) ?(socket_path = "") ?cache_root ?data_dir
     ?(uplink = { Uplink_control.default_settings with enabled = false })
-    ~root () =
+    ?(links = []) ~root () =
   let paths =
     {
       Runtime.cache_root =
@@ -30,6 +30,7 @@ let conf ?(domain = "testdom") ?(client_name = "test") ?(versioning = false)
       max_chunk_buffers = Option.value max_chunk_buffers ~default:max_uploads;
       max_downloads;
       uplink;
+      links;
       domains =
         [
           {
@@ -40,7 +41,7 @@ let conf ?(domain = "testdom") ?(client_name = "test") ?(versioning = false)
                   Conf_parsing.backend_type = "local";
                   name = "local";
                   role = `Main;
-                  max_upload_rate = None;
+                  link = Conf_parsing.default_link;
                   fields =
                     [
                       ("path", Filename.concat root "store");

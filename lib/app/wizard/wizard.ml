@@ -471,13 +471,10 @@ module Make (E : ENV) = struct
         | _ -> ""
     in
     let btype = get "type" in
-    (* Held as a number in the file; an older hand-edited config may spell it
-       as a size, which is read the same way. *)
-    let rate_of () =
-      match List.assoc_opt "maxUploadRate" !l with
-        | Some (`Int n) -> Some n
-        | Some (`String v) -> Conf_parsing.parse_size v
-        | _ -> None
+    let link_of () =
+      match List.assoc_opt "link" !l with
+        | Some (`String v) when String.trim v <> "" -> String.trim v
+        | _ -> Conf_parsing.default_link
     in
     let which =
       match btype with "s3" -> Some `S3 | "gcs" -> Some `Gcs | _ -> None
@@ -498,15 +495,11 @@ module Make (E : ENV) = struct
         spec;
       let role_n = List.length spec + 2 in
       Printf.printf "  %d. %-16s %s\n" role_n "role:" (role_of !l);
-      (* A local store has no link to bound, so it is not offered one. *)
-      let rate_n = if btype = "local" then None else Some (role_n + 1) in
+      (* A local store is on no link, so it is not asked which. *)
+      let link_n = if btype = "local" then None else Some (role_n + 1) in
       Option.iter
-        (fun n ->
-          Printf.printf "  %d. %-16s %s\n" n "maxUploadRate:"
-            (match rate_of () with
-              | Some r -> Metrics.human_bytes r ^ "/s"
-              | None -> "none"))
-        rate_n;
+        (fun n -> Printf.printf "  %d. %-16s %s\n" n "link:" (link_of ()))
+        link_n;
       if can_sync then
         Printf.printf "  [t] sync bucket/keys/share URL from Terraform\n";
       if !status <> "" then Printf.printf "\n%s\n" !status;
@@ -528,14 +521,21 @@ module Make (E : ENV) = struct
             match int_of_string_opt input with
               | Some n when n = role_n ->
                   l := assoc_set !l "role" (`String (prompt_role (role_of !l)))
-              | Some n when rate_n = Some n -> (
+              | Some n when link_n = Some n -> (
+                  (* Any name; stores naming the same one are governed as
+                     one. Blank is the default, and is not written. *)
                   match
-                    prompt_size_opt ~unset:"none"
-                      "  Upload rate ceiling, per second (\"none\" = unlimited)"
-                      (rate_of ())
+                    String.trim
+                      (prompt
+                         (Printf.sprintf
+                            "  Link this store is written over (blank = %s)"
+                            Conf_parsing.default_link)
+                         (Some (link_of ())))
                   with
-                    | Some r -> l := assoc_set !l "maxUploadRate" (`Int r)
-                    | None -> l := List.remove_assoc "maxUploadRate" !l)
+                    | "" -> l := List.remove_assoc "link" !l
+                    | v when v = Conf_parsing.default_link ->
+                        l := List.remove_assoc "link" !l
+                    | v -> l := assoc_set !l "link" (`String v))
               | Some n when n >= 2 && n <= List.length spec + 1 -> (
                   let s = List.nth spec (n - 2) in
                   match prompt_field s ~current:(get s.name) with
@@ -841,7 +841,7 @@ module Make (E : ENV) = struct
 
   (* Serialize globals + domains to [path] with 0600 perms. *)
   let write_config ~path ~client_name ~max_uploads ~max_chunk_buffers
-      ~max_downloads ~uplink ~tls ~domains =
+      ~max_downloads ~uplink ~links ~tls ~domains =
     Io_lwt.Fs.mkdir_p_sync (Filename.dirname path);
     let json =
       `Assoc
@@ -852,6 +852,8 @@ module Make (E : ENV) = struct
            ("maxDownloads", `Int max_downloads);
            ("uplink", Conf_parsing.uplink_to_json uplink);
          ]
+        (* Kept as the file had it: per-link overrides are edited there. *)
+        @ (match links with Some l -> [("links", l)] | None -> [])
         @ (match tls with Some t -> [("tls", `String t)] | None -> [])
         @ [("domains", `List domains)])
     in
@@ -916,6 +918,7 @@ module Make (E : ENV) = struct
               with Failure _ -> Uplink_control.default_settings)
           | None -> Uplink_control.default_settings)
     in
+    let links = Option.bind existing_root (fun r -> jfield r "links") in
     let tls = ref (Option.bind existing_root (fun r -> jstr r "tls")) in
     let domains =
       ref (match existing_root with Some r -> jlist r "domains" | None -> [])
@@ -955,7 +958,11 @@ module Make (E : ENV) = struct
            headroom = float_of_int (Int.min 100 headroom) /. 100.;
            target_delay = float_of_int (Int.max 5 target) /. 1000.;
            max_rate;
-         });
+         };
+       if links <> None then
+         print_endline
+           "  (per-link overrides under \"links\" are kept as written; edit \
+            them in the file)");
       (* Only worth asking when the build has more than one backend. "auto"
            leaves it unset, taking the preferred one at startup, which survives a
            build dropping a backend. *)
@@ -1069,6 +1076,7 @@ module Make (E : ENV) = struct
     if not !saved then Printf.printf "Aborted; config left untouched.\n"
     else begin
       write_config ~path:config_path ~client_name:!client_name ~uplink:!uplink
+        ~links
         ~max_uploads:!max_uploads ~max_chunk_buffers:!max_chunk_buffers
         ~max_downloads:!max_downloads ~tls:!tls ~domains:!domains;
       Printf.printf "\nConfig written to %s\n" config_path;
