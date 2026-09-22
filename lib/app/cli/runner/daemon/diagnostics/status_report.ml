@@ -135,7 +135,7 @@ let process_of reply =
     @ assoc (mem reply "process")
     @ List.filter_map
         (fun k -> match mem reply k with `Null -> None | v -> Some (k, v))
-        ["traffic"; "pools"; "lwt"; "backend"])
+        ["traffic"; "pools"; "lwt"; "backend"; "uplink"])
 
 (* A domain runs at most one frontend of each kind -- the launcher groups its
    bindings by frontend name -- so within a domain the kind is the identity. One
@@ -383,6 +383,28 @@ let elide path =
 (* The one spelling of a traffic row. The process, a frontend, a store and a job
    each report the same four figures, and four copies of the format is how two of
    them come to disagree about what "up" means. *)
+(* The governor's figures: the rate it allows against what the link was seen
+   to carry, and the state it is in. Only when it is on, since off it is
+   nothing to read. *)
+let uplink_row u =
+  let per_sec j = Metrics.human_bytes (int_of j) ^ "/s" in
+  Printf.sprintf "%s of %s (%s, +%.0f ms queueing, %s in flight%s%s)"
+    (per_sec (mem u "rateBytesPerSec"))
+    (match mem u "capacityBytesPerSec" with
+      | `Null -> "unknown"
+      | c -> per_sec c)
+    (str (mem u "state"))
+    (num (mem u "queueingDelayMs"))
+    (Metrics.human_bytes (int_of (mem u "inFlightBytes")))
+    (match int_of (mem u "waiting") with
+      | 0 -> ""
+      | n -> Printf.sprintf ", %d waiting" n)
+    (match int_of (mem u "drops") with
+      | 0 -> ""
+      | n -> Printf.sprintf ", %d dropped" n)
+
+let governed u = bool_of (mem u "enabled")
+
 let traffic_row t =
   Printf.sprintf "up %s, down %s%s"
     (Metrics.with_rate
@@ -861,6 +883,9 @@ let text json =
             (match mem p "traffic" with
               | t when moved t -> row 4 "traffic" (traffic_row t)
               | _ -> ());
+            (match mem p "uplink" with
+              | u when governed u -> row 4 "uplink" (uplink_row u)
+              | _ -> ());
             (* Only the pools something is waiting on: a report of empty queues
                is a report of nothing. *)
             (match
@@ -1030,6 +1055,9 @@ let text json =
                           match mem bk k with `Null -> None | v -> Some (f v))
                         [("traffic", traffic_row); ("deferred", behind_row)])))
               (list (mem j "backends"));
+            (match mem j "uplink" with
+              | u when governed u -> row 4 "uplink" (uplink_row u)
+              | _ -> ());
             (match list (mem j "pools") with
               | [] -> ()
               | pools -> row 4 "slots" (slots_row pools));

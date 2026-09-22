@@ -148,6 +148,20 @@ stop: {"ok":true} closes=true asked=1
         "retries": 0,
         "timeouts": 0,
         "failures": 0
+      },
+      "uplink": {
+        "enabled": false,
+        "state": "ramping",
+        "rateBytesPerSec": 262144,
+        "capacityBytesPerSec": null,
+        "baseDelayMs": null,
+        "queueingDelayMs": 0.0,
+        "inFlightBytes": 0,
+        "windowBytes": 7864320,
+        "drops": 0,
+        "headroom": 0.8,
+        "targetDelayMs": 50.0,
+        "waiting": 0
       }
     }
   ],

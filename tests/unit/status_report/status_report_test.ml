@@ -6,6 +6,7 @@
    logged by every process. What the fold has to do is say each of those once. *)
 
 let answer ~frontend ~domain ~pid ?(serves = []) ?(warnings = []) ?(jobs = [])
+    ?(governed = false)
     ?(domains = []) () =
   {
     Status_report.domain;
@@ -44,6 +45,24 @@ let answer ~frontend ~domain ~pid ?(serves = []) ?(warnings = []) ?(jobs = [])
                 ("uploadBytesPerSec", `Int 0);
                 ("downloadBytesPerSec", `Int 0);
                 ("chunksHashed", `Int 5);
+              ] );
+          (* A governor that has found the link, holding under it with a line
+             behind it and a few forwards dropped along the way. *)
+          ( "uplink",
+            `Assoc
+              [
+                ("enabled", `Bool governed);
+                ("state", `String "steady");
+                ("rateBytesPerSec", `Int 1258291);
+                ("capacityBytesPerSec", `Int 1677721);
+                ("baseDelayMs", `Float 21.0);
+                ("queueingDelayMs", `Float 12.0);
+                ("inFlightBytes", `Int 16777216);
+                ("windowBytes", `Int 37748736);
+                ("drops", `Int 41);
+                ("headroom", `Float 0.8);
+                ("targetDelayMs", `Float 50.0);
+                ("waiting", `Int 3);
               ] );
           ("jobs", `List jobs);
           ( "recentErrors",
@@ -161,7 +180,7 @@ let () =
         ]
       ~domains:[domain_body ~name:"alpha" (); domain_body ~name:"beta" ()]
       [
-        answer ~frontend:"fuse" ~domain:"alpha" ~pid:4242
+        answer ~frontend:"fuse" ~domain:"alpha" ~pid:4242 ~governed:true
           ~jobs:[job ~pid:9001]
           ~warnings:
             [

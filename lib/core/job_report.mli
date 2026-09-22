@@ -25,11 +25,19 @@ module type SEND = sig
   val send : socket_path:string -> string -> string io
 end
 
+(** The process's link governor, as a report shows it: what {!Uplink} says
+    under the names every report uses. Handed in because the governor is the
+    scheduler's, and this is not. *)
+module type LINK = sig
+  val json : unit -> (string * Yojson.Safe.t) list
+end
+
 module Make
     (Io : Io.S)
     (Clock : Clock.S with type 'a io := 'a Io.t)
     (Pools : Bounded.S with type 'a io := 'a Io.t)
-    (Send : SEND with type 'a io := 'a Io.t) : sig
+    (Send : SEND with type 'a io := 'a Io.t)
+    (Link : LINK) : sig
   val start :
     socket_path:string ->
     domain:string ->

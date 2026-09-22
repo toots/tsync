@@ -95,6 +95,7 @@ let self_json ?(extra = []) () =
         ] );
     ("backend", `Assoc (ints (Metrics.backend_fields ())));
     ("pools", Job_report_lwt.pools_json ());
+    ("uplink", `Assoc (Uplink_lwt.json (Uplink_lwt.process ())));
     ( "lwt",
       `Assoc
         [
