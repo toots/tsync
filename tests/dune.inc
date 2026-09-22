@@ -1840,6 +1840,14 @@
   (alias runtest)
   (action (run ./uplink_control_test.exe))))
 
+(subdir unit/uplink_lease
+ (alias
+  (name default)
+  (deps uplink_lease_test.exe))
+ (rule
+  (alias runtest)
+  (action (run ./uplink_lease_test.exe))))
+
 (subdir unit/upload_fanout
  (alias
   (name default)
