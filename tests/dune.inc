@@ -1816,6 +1816,14 @@
   (alias runtest)
   (action (run ./uplink_budget_test.exe))))
 
+(subdir unit/uplink_control
+ (alias
+  (name default)
+  (deps uplink_control_test.exe))
+ (rule
+  (alias runtest)
+  (action (run ./uplink_control_test.exe))))
+
 (subdir unit/upload_fanout
  (alias
   (name default)

@@ -1,0 +1,132 @@
+(** The rate a link is written at, chosen from how long a small request takes
+    to be answered.
+
+    A queue building in the modem is the one thing that says the other users
+    of a link are being hurt, and no throughput figure can: two megabytes a
+    second is all of a small pipe or half of a large one. So the signal is
+    queueing delay, a probe's round trip above the least seen lately, and the
+    law is LEDBAT's (RFC 6817) in shape: aim for a small delay over the base,
+    grow below it, shrink above it, and cut hard on a timeout. On a rate
+    rather than a window, and stepped every few seconds rather than every
+    round trip, since a probe is noisy and only a trend is worth acting on.
+
+    Two things the plain law would get wrong are handled apart. A polite
+    sender never learns the link got faster, so every so often the ceiling is
+    lifted and the rate climbs until delay says stop. And what the link can
+    carry is not read off a trailing average, which on a ramp still holds the
+    early seconds and reads the link far too small: on the way up it is
+    placed between the last step that built no queue and the one that did,
+    and in a steady state a queue that stays up brings it down to what is
+    completing, since that is what another user has left.
+
+    Pure: every entry point is handed the time. What it decided at an instant
+    is read off it, not waited for. *)
+
+(** What the config can set. *)
+type settings = {
+  enabled : bool;
+  headroom : float;  (** Fraction of the measured capacity written at. *)
+  target_delay : float;  (** Queueing delay aimed for, seconds. *)
+  min_rate : int;  (** Bytes per second the rate never drops below. *)
+  max_rate : int option;  (** A ceiling whatever the link allows. *)
+}
+
+val default_settings : settings
+
+(** {1 The law's constants}
+
+    Settable, the way {!Health.trip_after} is, so a test need not wait a
+    minute for a probe. *)
+
+(** Bytes per second a cold start begins at, doubling each tick until delay
+    says otherwise. *)
+val initial_rate : float ref
+
+(** One control step, and one probe round, seconds. *)
+val tick_interval : float ref
+
+(** The largest fraction the rate moves in one step while steady. *)
+val gain : float ref
+
+(** The smallest multiplier one step applies, and the cut a timeout makes. *)
+val decrease_floor : float ref
+
+(** How far back the least delay is remembered, seconds: a route that got
+    shorter is believed after this. *)
+val base_window : float ref
+
+(** Bytes completed over this many seconds are the achieved rate. *)
+val rate_window : float ref
+
+(** Steady this long, and the ceiling is lifted to see whether the link has
+    room again. *)
+val probe_up_every : float ref
+
+(** After a timeout, no growth for this long. *)
+val backoff_hold : float ref
+
+type state =
+  | Ramping  (** Growing while delay stays flat; no ceiling but [max_rate]. *)
+  | Steady  (** Held at [headroom] of capacity, shrinking as delay rises. *)
+  | Backing_off  (** Cut by a timeout, and not growing until the hold ends. *)
+
+val string_of_state : state -> string
+
+type t
+
+val create : ?settings:settings -> now:float -> unit -> t
+val settings : t -> settings
+
+(** {1 Admission}
+
+    The budget beneath: see {!Uplink_budget}. *)
+
+val admits : t -> now:float -> bytes:int -> bool
+val take : t -> now:float -> bytes:int -> unit
+val wait_for : t -> now:float -> bytes:int -> float
+
+(** A body refused on a path that drops rather than waits. *)
+val dropped : t -> unit
+
+(** {1 What happened} *)
+
+(** [bytes] were answered: they left the link, and count toward the rate the
+    link was seen to carry. *)
+val completed : t -> now:float -> bytes:int -> elapsed:float -> unit
+
+(** [bytes] were given up on: they left the link and count toward nothing. *)
+val abandoned : t -> now:float -> bytes:int -> unit
+
+(** One probe's round trip, seconds. Several in a tick are read as their
+    least, server-side delay being one-sided. *)
+val observe_delay : t -> now:float -> float -> unit
+
+(** A request timed out: the rate is cut by {!decrease_floor} and held. *)
+val timed_out : t -> now:float -> unit
+
+(** One step of the law. The caller runs it every {!tick_interval}. *)
+val tick : t -> now:float -> unit
+
+(** {1 Readers} *)
+
+val rate : t -> float
+val state : t -> state
+
+(** Bytes per second the link has for us, as last measured: raised by a ramp
+    that met the edge, lowered by a queue that stayed up; [None] until the
+    edge has been met once. *)
+val capacity : t -> float option
+
+(** The least probe delay in {!base_window}; [None] before any probe. *)
+val base_delay : t -> now:float -> float option
+
+(** The smoothed delay above base, seconds. *)
+val queueing_delay : t -> float
+
+val in_flight_bytes : t -> int
+val window_bytes : t -> int
+val tokens : t -> now:float -> float
+val drops : t -> int
+
+(** Under the names every report uses. *)
+val json : t -> now:float -> (string * Yojson.Safe.t) list
