@@ -148,9 +148,17 @@ let enter t ~now state =
   t.settled <- false
 
 (* A ramp that met the edge is a fresh measurement of it, and replaces what
-   an older one said; the link can carry at least what completed meanwhile. *)
+   an older one said. The link can carry at least what completed meanwhile,
+   and not much more than twice it: a step that built no queue only says the
+   link kept up with what was offered, and a sender with one body in flight
+   at a time offers far less than its rate, so between two steps the edge is
+   bounded by what got through as much as by the steps. *)
 let measured_capacity t ~now estimate =
-  t.capacity <- Some (Float.max (achieved t ~now) estimate)
+  let achieved = achieved t ~now in
+  let bounded =
+    if achieved > 0. then Float.min estimate (2. *. achieved) else estimate
+  in
+  t.capacity <- Some (Float.max achieved bounded)
 
 (* What is completing under a queue is what the link has left for us. *)
 let lower_capacity t ~now =
