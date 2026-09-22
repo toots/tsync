@@ -1,5 +1,11 @@
+(* A ceiling in the config is this store's own gate, one per store built. *)
 let make_backend ~traffic (bc : Conf_parsing.backend_config) =
-  Backend_lwt.make ~traffic ~backend_type:bc.backend_type
+  let admission =
+    Option.map
+      (fun rate -> Tsync_core_lwt.Uplink_lwt.capped ~rate:(float_of_int rate))
+      bc.Conf_parsing.max_upload_rate
+  in
+  Backend_lwt.make ?admission ~traffic ~backend_type:bc.backend_type
     ~get_field:(fun k -> List.assoc_opt k bc.fields)
     ()
 

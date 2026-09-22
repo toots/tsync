@@ -967,6 +967,14 @@
   (action
    (diff applied_entries_test.expected applied_entries_test.output))))
 
+(subdir unit/backend_capped
+ (alias
+  (name default)
+  (deps backend_capped.exe))
+ (rule
+  (alias runtest)
+  (action (run ./backend_capped.exe))))
+
 (subdir unit/backend_render
  (alias
   (name default)

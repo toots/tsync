@@ -245,7 +245,17 @@ struct
      Only the verbs that carry a body, and only where a body crosses a link: a
      local store is a filesystem, and counting its reads as traffic would bury the
      remote ones it exists to be read instead of. *)
-  let counted ~traffic m =
+  (* A store with no gate sends a body as it did before there were gates. *)
+  let ungated : unit Io.t Uplink.admission =
+    {
+      Uplink.acquire = (fun ~bytes:_ -> Io.return ());
+      completed = (fun ~bytes:_ ~elapsed:_ -> ());
+      abandoned = (fun ~bytes:_ -> ());
+      now = (fun () -> 0.);
+      waiting = (fun () -> 0);
+    }
+
+  let counted ~traffic ~(admission : unit Io.t Uplink.admission) m =
     let module Inner = (val m : Store) in
     (* Every body is counted twice over: once for the process, once for the store
        it went to. The per-store figure is what says which link a stalled transfer
@@ -257,19 +267,38 @@ struct
       Metrics.add_downloaded n;
       Metrics.count traffic.downloaded n
     in
+    (* Ask before a body goes and say after how it went: only the two verbs
+       that send one. What is counted is unchanged by the asking. *)
+    let governed ~bytes f =
+      let* () = admission.Uplink.acquire ~bytes in
+      let started = admission.Uplink.now () in
+      Io.catch
+        (fun () ->
+          let+ answer = f () in
+          admission.Uplink.completed ~bytes
+            ~elapsed:(admission.Uplink.now () -. started);
+          answer)
+        (fun exn ->
+          admission.Uplink.abandoned ~bytes;
+          Io.fail exn)
+    in
     (module struct
       include Inner
 
       let put ~key ~data () =
-        let+ () = Inner.put ~key ~data () in
-        up (Bigstring.length data)
+        let bytes = Bigstring.length data in
+        let+ () = governed ~bytes (fun () -> Inner.put ~key ~data ()) in
+        up bytes
 
       (* A loser gets the winning body back, which came down the link; the winner
          is handed its own [data] again, so physical identity tells them apart
          without comparing bodies that are equal by construction. *)
       let put_if_absent ~key ~data () =
-        let+ held = Inner.put_if_absent ~key ~data () in
-        up (Bigstring.length data);
+        let bytes = Bigstring.length data in
+        let+ held =
+          governed ~bytes (fun () -> Inner.put_if_absent ~key ~data ())
+        in
+        up bytes;
         if held != data then down (Bigstring.length held);
         held
 
@@ -316,20 +345,20 @@ struct
           Inner.list_many
     end : Store)
 
-  let make ?traffic ~backend_type ~get_field () =
+  let make ?traffic ?(admission = ungated) ~backend_type ~get_field () =
     match Hashtbl.find_opt registry backend_type with
       | Some { factory; _ } ->
           let store = factory get_field in
           let module St = (val store : Store) in
           (* A store that is a tree here read nothing over a link, so there is no
-             traffic to count. Derived from the store rather than asked of its
-             type, so the wrapper that counts and the report that prints cannot
-             disagree about which stores have a figure. *)
+             traffic to count and no link to gate. Derived from the store rather
+             than asked of its type, so the wrapper that counts and the report
+             that prints cannot disagree about which stores have a figure. *)
           if St.local_path <> None then store
           else
             counted
               ~traffic:
                 (match traffic with Some t -> t | None -> new_traffic ())
-              store
+              ~admission store
       | None -> failwith ("unknown backend type: " ^ backend_type)
 end
