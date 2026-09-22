@@ -210,7 +210,10 @@ let tick t ~now ~limited =
   let next =
     match t.state with
       | Ramping ->
-          if q > target then begin
+          (* Two ticks over target, as the ratchet asks: one probe behind one
+             body reads a queue that is gone by the next, and a ramp ended on
+             it learns a link a fraction of the size. *)
+          if q > target && t.over_target >= 2 then begin
             (* The edge lies between the last step that built no queue and
                this one that did: their geometric mean, or what completed if
                that says more. A trailing average alone would still hold the
