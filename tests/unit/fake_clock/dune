@@ -1,0 +1,5 @@
+(executable
+ (flags
+  (:standard -open Tsync_test_harness))
+ (name fake_clock_test)
+ (libraries tsync_test_harness lwt lwt.unix))

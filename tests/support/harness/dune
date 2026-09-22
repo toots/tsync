@@ -22,6 +22,8 @@
    -open
    Tsync_io_lwt
    -open
+   Tsync_io
+   -open
    Tsync_core))
  (name tsync_test_harness)
  (libraries
@@ -33,6 +35,7 @@
   tsync_domain
   tsync_runtime
   tsync_io_lwt
+  tsync_io
   tsync_core
   lwt
   lwt.unix

@@ -46,6 +46,7 @@ module Unix_syscalls = struct
 end
 
 module Clock = struct
+  let now = Clock.monotonic_now
   let sleep = Lwt_unix.sleep
   let with_timeout = Lwt_unix.with_timeout
 

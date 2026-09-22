@@ -1203,6 +1203,14 @@
   (action
    (diff export_record.expected export_record.output))))
 
+(subdir unit/fake_clock
+ (alias
+  (name default)
+  (deps fake_clock_test.exe))
+ (rule
+  (alias runtest)
+  (action (run ./fake_clock_test.exe))))
+
 (subdir unit/field_spec
  (alias
   (name default)
