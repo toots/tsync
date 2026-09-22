@@ -200,9 +200,9 @@ let handler ~request_stop engines line =
               in
               match
                 Uplink_lwt.lease_renewal (Uplink_lwt.process ()) ~pid
-                  (Uplink_lease.report_of_json obj)
+                  [(Uplink.default_link, Uplink_lease.report_of_json obj)]
               with
-                | Some (rate, interval) ->
+                | Some ((_, rate) :: _, interval) ->
                     Lwt.return
                       ( Yojson.Safe.to_string
                           (`Assoc
@@ -212,7 +212,7 @@ let handler ~request_stop engines line =
                               ("interval", `Float interval);
                             ]),
                         `Continue )
-                | None -> fail `Invalid "not the link's owner")
+                | _ -> fail `Invalid "not the link's owner")
           | Some (`String "stop") ->
               (* Answered before winding down, so the caller hears that it was
                  asked rather than losing the connection. *)
@@ -265,7 +265,7 @@ let converge domains =
         [Sys.sigterm; Sys.sigint];
       (* Before the engines, which may have deferred work to send at once: the
          link's owner is this process, and its lessees find it answering. *)
-      Uplink_lwt.own_link ();
+      Uplink_lwt.own_links ();
       let* () =
         Lwt_list.iter_s
           (fun e ->

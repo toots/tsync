@@ -36,7 +36,7 @@ type t = {
   domains : domain list;
 }
 
-let default_link = "wan"
+let default_link = Uplink.default_link
 
 let roles : role list = [`Main; `Replica; `Backfill; `ReadOnly]
 

@@ -48,10 +48,13 @@ let answer ~frontend ~domain ~pid ?(serves = []) ?(warnings = []) ?(jobs = [])
               ] );
           (* A governor that has found the link, holding under it with a line
              behind it and a few forwards dropped along the way. *)
-          ( "uplink",
+          ( "uplinks",
             `Assoc
               [
-                ("enabled", `Bool governed);
+                ( "wan",
+                  `Assoc
+                    [
+                      ("enabled", `Bool governed);
                 ("state", `String "steady");
                 ("rateBytesPerSec", `Int 1258291);
                 ("capacityBytesPerSec", `Int 1677721);
@@ -63,6 +66,7 @@ let answer ~frontend ~domain ~pid ?(serves = []) ?(warnings = []) ?(jobs = [])
                 ("headroom", `Float 0.8);
                 ("targetDelayMs", `Float 50.0);
                 ("waiting", `Int 3);
+                    ] );
               ] );
           ("jobs", `List jobs);
           ( "recentErrors",

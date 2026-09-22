@@ -5,7 +5,7 @@ module Send = struct
 end
 
 module Link = struct
-  let json () = Uplink_lwt.json (Uplink_lwt.process ())
+  let json () = Uplink_lwt.json_links (Uplink_lwt.process ())
 end
 
 include

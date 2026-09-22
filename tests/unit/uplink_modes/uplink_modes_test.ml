@@ -56,6 +56,15 @@ let last_asked key =
     | _ -> -1
 
 let field u key = List.assoc_opt key (U.json u)
+let mode g = U.mode (U.process_of g)
+let lease g ~send = U.lease_through (U.process_of g) ~send
+let own g = U.own (U.process_of g)
+
+(* One link's renewal, as the flat wire carries it. *)
+let renewal o ~pid r =
+  match U.lease_renewal (U.process_of o) ~pid [(Uplink.default_link, r)] with
+    | Some ((_, rate) :: _, interval) -> Some (rate, interval)
+    | _ -> None
 let state u = match field u "state" with Some (`String s) -> s | _ -> "?"
 
 let int_field u key =
@@ -74,12 +83,12 @@ let () =
     (case "a lessee admits at what it is granted, and runs no law";
      Fake_clock.reset ();
      let g = U.create ~settings:on () in
-     U.lease_through g ~send;
+     lease g ~send;
      let adm = U.admission g U.Background in
      (* In flight across the first renewal, answered before the second. *)
      let* () = adm.Uplink.acquire ~bytes:mb in
      let* () = tick () in
-     check "leased, and says so" (U.mode g = U.Leased && state g = "leased");
+     check "leased, and says so" (mode g = U.Leased && state g = "leased");
      check "the first renewal said what was in flight"
        ~why:(fun () -> string_of_int (last_asked "inFlight"))
        (last_asked "inFlight" = mb && last_asked "completed" = 0);
@@ -99,9 +108,9 @@ let () =
      script := Silent;
      let* () = tick () in
      let* () = tick () in
-     check "two silences: still leased" (U.mode g = U.Leased);
+     check "two silences: still leased" (mode g = U.Leased);
      let* () = tick () in
-     check "a third: local" (U.mode g = U.Local && state g <> "leased");
+     check "a third: local" (mode g = U.Local && state g <> "leased");
      (* A body made to wait while another completes, or the law would
         rightly grant no more. *)
      let adm = U.admission g U.Background in
@@ -120,7 +129,7 @@ let () =
      let rec wait n = if n = 0 then Lwt.return_unit else let* () = tick () in wait (n - 1) in
      let* () = wait 16 in
      let* () = held in
-     check "leased again within the retry wait" (U.mode g = U.Leased);
+     check "leased again within the retry wait" (mode g = U.Leased);
      check "at the new grant"
        ~why:(fun () -> string_of_int (int_field g "rateBytesPerSec"))
        (int_field g "rateBytesPerSec" = 3 * mb);
@@ -129,24 +138,24 @@ let () =
      Fake_clock.reset ();
      script := Refuse;
      let g = U.create ~settings:on () in
-     U.lease_through g ~send;
+     lease g ~send;
      let* () = U.acquire g ~class_:U.Background ~bytes:1024 in
      let* () = tick () in
-     check "one refusal is enough" (U.mode g = U.Local);
+     check "one refusal is enough" (mode g = U.Local);
 
      case "an owner answers renewals and splits what the law chose";
      Fake_clock.reset ();
      let o = U.create ~settings:on () in
-     U.own o;
-     U.lease_through o ~send;
-     check "and ignores an offer to lease" (U.mode o = U.Owner);
+     own o;
+     lease o ~send;
+     check "and ignores an offer to lease" (mode o = U.Owner);
      let wants = { Uplink_lease.idle with in_flight = 65536; waiting = 2 } in
      check "a newcomer is granted an even share of the starting rate at once"
        ~why:(fun () ->
-         match U.lease_renewal o ~pid:7 wants with
+         match renewal o ~pid:7 wants with
            | Some (r, _) -> string_of_float r
            | None -> "none")
-       (match U.lease_renewal o ~pid:7 wants with
+       (match renewal o ~pid:7 wants with
          | Some (r, 2.) -> Float.abs (r -. (float_of_int mb /. 2.)) < 1.
          | _ -> false);
      let* () = tick () in
@@ -157,7 +166,7 @@ let () =
        ~why:(fun () ->
          Printf.sprintf "own %d of %.0f" (int_field o "ownRateBytesPerSec") total)
        (int_field o "ownRateBytesPerSec" = on.min_rate
-       && (match U.lease_renewal o ~pid:7 wants with
+       && (match renewal o ~pid:7 wants with
             | Some (r, _) ->
                 Float.abs (r -. (total -. float_of_int on.min_rate)) < 1.
             | None -> false));
@@ -178,12 +187,12 @@ let () =
      case "a lessee held back is what lets the owner's law grow";
      let before = Uplink_control.rate (U.control o) in
      ignore
-       (U.lease_renewal o ~pid:7
+       (renewal o ~pid:7
           { Uplink_lease.idle with completed = 4 * mb; held_back = true });
      let* () = tick () in
      check "it grew, for the lessee's sake"
        (Uplink_control.rate (U.control o) > before);
-     ignore (U.lease_renewal o ~pid:7 { Uplink_lease.idle with completed = 4 * mb });
+     ignore (renewal o ~pid:7 { Uplink_lease.idle with completed = 4 * mb });
      let before = Uplink_control.rate (U.control o) in
      let* () = tick () in
      check "and holds once the lessee says it is no longer"
@@ -193,7 +202,7 @@ let () =
      (* A line behind the owner too, and the lessee asking for all it can get:
         the two halve the rate. Neither body fits the bucket at once, so
         both are stepped through rather than awaited. *)
-     ignore (U.lease_renewal o ~pid:7 wants);
+     ignore (renewal o ~pid:7 wants);
      let first = U.acquire o ~class_:U.Background ~bytes:(2 * mb) in
      let waiting = U.acquire o ~class_:U.Background ~bytes:mb in
      let* () = settle 3 in

@@ -135,7 +135,7 @@ let process_of reply =
     @ assoc (mem reply "process")
     @ List.filter_map
         (fun k -> match mem reply k with `Null -> None | v -> Some (k, v))
-        ["traffic"; "pools"; "lwt"; "backend"; "uplink"])
+        ["traffic"; "pools"; "lwt"; "backend"; "uplinks"])
 
 (* A domain runs at most one frontend of each kind -- the launcher groups its
    bindings by frontend name -- so within a domain the kind is the identity. One
@@ -419,6 +419,12 @@ let uplink_row u =
               (List.length l))
 
 let governed u = bool_of (mem u "enabled")
+
+(* One row per link something is written over, the link named on the row. *)
+let uplink_rows ~row uplinks =
+  List.iter
+    (fun (name, u) -> if governed u then row 4 ("uplink " ^ name) (uplink_row u))
+    (assoc uplinks)
 
 let traffic_row t =
   Printf.sprintf "up %s, down %s%s"
@@ -898,9 +904,7 @@ let text json =
             (match mem p "traffic" with
               | t when moved t -> row 4 "traffic" (traffic_row t)
               | _ -> ());
-            (match mem p "uplink" with
-              | u when governed u -> row 4 "uplink" (uplink_row u)
-              | _ -> ());
+            uplink_rows ~row (mem p "uplinks");
             (* Only the pools something is waiting on: a report of empty queues
                is a report of nothing. *)
             (match
@@ -1070,9 +1074,7 @@ let text json =
                           match mem bk k with `Null -> None | v -> Some (f v))
                         [("traffic", traffic_row); ("deferred", behind_row)])))
               (list (mem j "backends"));
-            (match mem j "uplink" with
-              | u when governed u -> row 4 "uplink" (uplink_row u)
-              | _ -> ());
+            uplink_rows ~row (mem j "uplinks");
             (match list (mem j "pools") with
               | [] -> ()
               | pools -> row 4 "slots" (slots_row pools));

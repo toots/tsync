@@ -138,19 +138,21 @@
         "downloadBytesPerSec": 0,
         "chunksHashed": 5
       },
-      "uplink": {
-        "enabled": true,
-        "state": "steady",
-        "rateBytesPerSec": 1258291,
-        "capacityBytesPerSec": 1677721,
-        "baseDelayMs": 21.0,
-        "queueingDelayMs": 12.0,
-        "inFlightBytes": 16777216,
-        "windowBytes": 37748736,
-        "drops": 41,
-        "headroom": 0.8,
-        "targetDelayMs": 50.0,
-        "waiting": 3
+      "uplinks": {
+        "wan": {
+          "enabled": true,
+          "state": "steady",
+          "rateBytesPerSec": 1258291,
+          "capacityBytesPerSec": 1677721,
+          "baseDelayMs": 21.0,
+          "queueingDelayMs": 12.0,
+          "inFlightBytes": 16777216,
+          "windowBytes": 37748736,
+          "drops": 41,
+          "headroom": 0.8,
+          "targetDelayMs": 50.0,
+          "waiting": 3
+        }
       }
     },
     {
@@ -169,19 +171,21 @@
         "downloadBytesPerSec": 0,
         "chunksHashed": 5
       },
-      "uplink": {
-        "enabled": false,
-        "state": "steady",
-        "rateBytesPerSec": 1258291,
-        "capacityBytesPerSec": 1677721,
-        "baseDelayMs": 21.0,
-        "queueingDelayMs": 12.0,
-        "inFlightBytes": 16777216,
-        "windowBytes": 37748736,
-        "drops": 41,
-        "headroom": 0.8,
-        "targetDelayMs": 50.0,
-        "waiting": 3
+      "uplinks": {
+        "wan": {
+          "enabled": false,
+          "state": "steady",
+          "rateBytesPerSec": 1258291,
+          "capacityBytesPerSec": 1677721,
+          "baseDelayMs": 21.0,
+          "queueingDelayMs": 12.0,
+          "inFlightBytes": 16777216,
+          "windowBytes": 37748736,
+          "drops": 41,
+          "headroom": 0.8,
+          "targetDelayMs": 50.0,
+          "waiting": 3
+        }
       }
     }
   ],
@@ -243,7 +247,7 @@ Processes
   sync        pid 4200    up 1h 2m     2.1% cpu     2.0 MB rss   alpha, beta
   fuse        pid 4242    up 1h 2m     0.3% cpu     1.0 MB rss   alpha
     traffic          up 2.0 KB (0 B/s), down 4.0 KB (0 B/s), 5 chunks hashed (0.0/s)
-    uplink           1.2 MB/s of 1.6 MB/s (steady, +12 ms queueing, 16.0 MB in flight, 3 waiting, 41 dropped)
+    uplink wan       1.2 MB/s of 1.6 MB/s (steady, +12 ms queueing, 16.0 MB in flight, 3 waiting, 41 dropped)
   fuse        pid 4243    up 1h 2m     0.3% cpu     1.0 MB rss   beta
     traffic          up 2.0 KB (0 B/s), down 4.0 KB (0 B/s), 5 chunks hashed (0.0/s)
 

@@ -9,7 +9,7 @@ end
 include Uplink.Make (Io_lwt.Core) (Io_lwt.Clock) (Reporter)
 
 (* The daemon, once it serves the sync socket. *)
-let own_link () = own (process ())
+let own_links () = own (process ())
 
 (* Everyone else, asking that socket. A renewal is one line and a second is
    plenty for it; one that takes longer is one unanswered. *)

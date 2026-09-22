@@ -18,6 +18,7 @@ let rec settle n =
     settle (n - 1)
 
 let on = { Uplink_control.default_settings with enabled = true }
+let mode g = U.mode (U.process_of g)
 let landed = ref []
 
 (* A background acquire that notes its tag when it gets through. *)

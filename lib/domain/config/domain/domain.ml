@@ -1,5 +1,3 @@
-(* Every store's writes join the process governor's line; a ceiling in the
-   config is this store's own gate in front of it, one per store built. *)
 let make_backend ~traffic ~admission (bc : Conf_parsing.backend_config) =
   Backend_lwt.make ~admission ~traffic ~backend_type:bc.backend_type
     ~get_field:(fun k -> List.assoc_opt k bc.fields)
@@ -13,14 +11,17 @@ let attach_probe ~cursor_key (bc : Conf_parsing.backend_config) store =
   let module St = (val store : Backend_lwt.Store) in
   if St.local_path = None then
     let module U = Tsync_core_lwt.Uplink_lwt in
-    U.attach (U.process ()) ~name:bc.Conf_parsing.name
+    U.attach
+      (U.link (U.process ()) bc.Conf_parsing.link)
+      ~name:bc.Conf_parsing.name
       ~held:(fun () -> Health.is_held St.health)
       ~timeouts:(fun () -> Health.timeouts St.health)
       ~probe:(fun () -> Lwt.map ignore (St.head_opt ~key:cursor_key ()))
 
-let admission_for (_ : Conf_parsing.backend_config) =
+(* Every store's writes join the line of the link it is on. *)
+let admission_for (bc : Conf_parsing.backend_config) =
   let module U = Tsync_core_lwt.Uplink_lwt in
-  U.admission (U.process ()) U.Background
+  U.admission (U.link (U.process ()) bc.Conf_parsing.link) U.Background
 
 (* Empty for a body that is not a manifest: a folder marker, a trash marker, a
    share. *)
@@ -207,9 +208,11 @@ let of_config ?domain ?socket_path ?(resume = false) ~paths cfg :
     let cursor_key = Conf_parsing.cursor_key d
     let shares_prefix = Conf_parsing.shares_prefix d
 
-    (* Before the first store is built, which joins the governor's line; a
+    (* Before the first store is built, which joins its link's line; a
        second domain in the same process finds it configured and leaves it. *)
-    let () = Tsync_core_lwt.Uplink_lwt.configure cfg.Conf_parsing.uplink
+    let () =
+      Tsync_core_lwt.Uplink_lwt.configure ~defaults:cfg.Conf_parsing.uplink
+        ~overrides:cfg.Conf_parsing.links
 
     (* A forward holds a chunk body past the buffer that carried it, so the
        buffers' budget is the ceiling on forwards too. *)

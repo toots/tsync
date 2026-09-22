@@ -96,7 +96,7 @@ struct
         `Assoc
           (List.map (fun (k, v) -> (k, `Int v)) (Metrics.backend_fields ())) );
       ("pools", pools_json ());
-      ("uplink", `Assoc (Link.json ()));
+      ("uplinks", `Assoc (Link.json ()));
       ("counters", ints (t.counters ()));
     ]
     @ extra
