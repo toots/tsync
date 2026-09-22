@@ -150,4 +150,15 @@ let () =
   done;
   check "is never out" (Health.check Health.always_up = `Up);
   check "and counts as heard from" (Health.sampled Health.always_up);
-  report ~expected:32 ()
+
+  case "the timeouts a member took";
+  let t = Health.create () in
+  Health.timed_out t;
+  Health.timed_out t;
+  check "tallied" (Health.timeouts t = 2);
+  Health.answered t;
+  check "and kept when it answers again: a tally, not a state"
+    (Health.timeouts t = 2);
+  Health.timed_out Health.always_up;
+  check "a store with no link counts none" (Health.timeouts Health.always_up = 0);
+  report ~expected:35 ()
