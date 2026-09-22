@@ -4,12 +4,16 @@ let local_store ?(verify_writes = true) path =
       | "verifyWrites" -> Some (string_of_bool verify_writes) | _ -> Some path)
     ()
 
+(* The link governor is off unless a test asks for it: on, every store built
+   here would join a line paced by the real clock, and a test that wanted that
+   would say so. *)
 let conf ?(domain = "testdom") ?(client_name = "test") ?(versioning = false)
     ?store:store_override ?members:members_override ?(verify_writes = true)
     ?(max_uploads = 1) ?max_chunk_buffers ?(max_downloads = 1) ?(chunk_size = 8)
     ?(cache_chunk_size = 8) ?max_cache ?(symlink_policy = `Keep)
     ?(read_only = false) ?(socket_path = "") ?cache_root ?data_dir
-    ?(uplink = Uplink_control.default_settings) ~root () =
+    ?(uplink = { Uplink_control.default_settings with enabled = false })
+    ~root () =
   let paths =
     {
       Runtime.cache_root =

@@ -71,7 +71,7 @@ let () =
      let* () = waiting in
 
      case "disabled, everything passes at once";
-     let g = U.create () in
+     let g = U.create ~settings:{ on with enabled = false } () in
      let* () =
        Lwt.join (List.init 10 (fun _ -> U.acquire g ~class_:Background ~bytes:mb))
      in

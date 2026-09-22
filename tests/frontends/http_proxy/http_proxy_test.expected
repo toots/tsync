@@ -22,7 +22,7 @@ stop: {"ok":true} closes=true asked=1
       "maxChunkBuffers": 2,
       "maxDownloads": 3,
       "uplink": {
-        "enabled": false,
+        "enabled": true,
         "headroom": 0.8,
         "targetDelayMs": 50.0,
         "minRate": 65536,
@@ -150,7 +150,7 @@ stop: {"ok":true} closes=true asked=1
         "failures": 0
       },
       "uplink": {
-        "enabled": false,
+        "enabled": true,
         "state": "ramping",
         "rateBytesPerSec": 262144,
         "capacityBytesPerSec": null,
@@ -194,6 +194,7 @@ Processes
     clients          up 2 B (0 B/s), down 0 B (0 B/s)
     requests         none served
     traffic          up 4.0 KB (0 B/s), down 2.0 KB (0 B/s)
+    uplink           256.0 KB/s of unknown (ramping, +0 ms queueing, 0 B in flight)
 ########## /stats with a mount daemon ##########
 tsync on testhost — 1 domain, 1 process, up 1h 0m, load 0.5
 
@@ -224,6 +225,7 @@ Processes
     clients          up 2 B (0 B/s), down 0 B (0 B/s)
     requests         none served
     traffic          up 4.0 KB (0 B/s), down 2.0 KB (0 B/s)
+    uplink           256.0 KB/s of unknown (ramping, +0 ms queueing, 0 B in flight)
 ########## /stats?totals=1 ##########
 tsync on testhost — 1 domain, 1 process, up 1h 0m, load 0.5
 
@@ -251,6 +253,7 @@ Processes
     clients          up 2 B (0 B/s), down 0 B (0 B/s)
     requests         2 stats, 2 unauthorized
     traffic          up 4.0 KB (0 B/s), down 2.0 KB (0 B/s)
+    uplink           256.0 KB/s of unknown (ramping, +0 ms queueing, 0 B in flight)
 
 Warnings (newest first)
    ×3  22:13:20  warn  diagnostics: counting archive: Backend.Backend_error("connection refused")
@@ -281,6 +284,7 @@ Processes
     clients          up 2 B (0 B/s), down 0 B (0 B/s)
     requests         2 stats, 2 unauthorized
     traffic          up 4.0 KB (0 B/s), down 2.0 KB (0 B/s)
+    uplink           256.0 KB/s of unknown (ramping, +0 ms queueing, 0 B in flight)
 
 Warnings (newest first)
    ×3  22:13:20  warn  diagnostics: counting archive: Backend.Backend_error("connection refused")

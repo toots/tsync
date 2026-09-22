@@ -8,7 +8,7 @@ type settings = {
 
 let default_settings =
   {
-    enabled = false;
+    enabled = true;
     headroom = 0.8;
     target_delay = 0.05;
     min_rate = 65536;

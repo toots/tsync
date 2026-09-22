@@ -704,6 +704,33 @@ chunk bodies are held in memory at once across all of them, so the upload path c
 carry no chunk — dedup checks, manifest writes, TLS setup. `maxDownloads` (default 8) bounds
 concurrent file downloads.
 
+Those three bound memory and file descriptors. What bounds the link is different: the counts
+say nothing about how fast it is, and a count that is fine at home is a stall on a slow
+connection, where every body queued behind the others expires before it lands.
+
+**Uplink.** Uploads are written at a rate chosen from the link itself: a small request is
+timed against every remote store while bytes are in flight, and a round trip taking longer
+than the least seen lately means a queue is building in the modem — the one thing that says
+the other users of the connection are being slowed, which no throughput figure can. The rate
+grows while that delay stays flat, shrinks when it rises, is cut in half by a timeout, and is
+held under a `headroom` fraction (default 80%) of what the link was seen to carry, probing
+above it every minute in case the link has room again. The daemon owns this for the machine:
+every command run beside it (`import`, `mirror`, `export`, …) leases a share of the rate over
+the daemon's socket, renewed every two seconds, so a job starts at the going rate rather than
+cold; with no daemon running, or one too old to answer, a command governs its own link the
+same way. `tsync status` shows the rate, the capacity it was measured against, the queueing
+delay, and what is in flight, waiting or was dropped, for the daemon and for each job.
+
+```json
+"uplink": { "enabled": true, "headroom": 0.8, "targetDelayMs": 50, "maxRate": "2 MB" }
+```
+
+`enabled: false` sends as fast as the counts allow, which is what tsync did before. `maxRate`
+is a ceiling whatever the link allows; `minRate` (default 64 KB) a floor however it is doing.
+A single store can be held under its own ceiling with `maxUploadRate` on the backend, on top
+of all this: `"maxUploadRate": "500 KB"`. That one is per process — a daemon and a job writing
+to the same store each hold it.
+
 Sizes accept a byte count or a suffixed string — `512K`, `8M`, `1G`, binary multiples — so
 both `8388608` and `"8M"` work.
 
@@ -724,6 +751,7 @@ Top level:
 | `maxUploads` | no | Concurrent upload operations, default `4`. |
 | `maxChunkBuffers` | no | Chunk bodies held in memory at once, default `maxUploads`. |
 | `maxDownloads` | no | Concurrent file downloads, default `8`. |
+| `uplink` | no | How the link is written: `enabled` (default on), `headroom` (default `0.8`), `targetDelayMs` (default `50`), `minRate`, `maxRate` — see [Uplink](#uplink). |
 | `tls` | no | `"openssl"` or `"native"` — see [TLS](#tls). |
 
 Per domain:
@@ -871,7 +899,8 @@ the top of `tsync status`.
 ## Backend type reference
 
 Every backend needs a `type`, a `name` (used by `mirror --source`) and a
-[`role`](#backend-role-reference).
+[`role`](#backend-role-reference). Any remote one may also carry `maxUploadRate`, a ceiling on
+what this process writes to it per second (`"500 KB"`), over and above the link's own governor.
 
 | `type` | Required fields | Optional | Notes |
 |---|---|---|---|
