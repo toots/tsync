@@ -297,13 +297,20 @@ module Make (Io : Io.S) (Clock : Clock.S with type 'a io := 'a Io.t) = struct
     t.probes <- { name; held; probe } :: t.probes;
     ensure_ticking t
 
+  (* The budget's figures sit where a reader expects them, beside the drops,
+     whichever module happens to hold them. *)
   let json t =
-    Uplink_control.json t.control ~now:(Clock.now ())
-    @ [
-        ("inFlightBytes", `Int (Uplink_budget.in_flight_bytes t.share));
-        ("windowBytes", `Int (Uplink_budget.window_bytes t.share));
-        ("waiting", `Int (waiting t));
-      ]
+    List.concat_map
+      (fun (k, v) ->
+        if k = "drops" then
+          [
+            ("inFlightBytes", `Int (Uplink_budget.in_flight_bytes t.share));
+            ("windowBytes", `Int (Uplink_budget.window_bytes t.share));
+            (k, v);
+          ]
+        else [(k, v)])
+      (Uplink_control.json t.control ~now:(Clock.now ()))
+    @ [("waiting", `Int (waiting t))]
 
   let the_process : t option ref = ref None
 
