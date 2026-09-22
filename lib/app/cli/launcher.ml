@@ -190,6 +190,29 @@ let handler ~request_stop engines line =
                 (`Assoc (List.remove_assoc "action" obj));
               Lwt.return
                 (Yojson.Safe.to_string (`Assoc [("ok", `Bool true)]), `Continue)
+          (* A process beside the daemon asking for its share of the link:
+             what it reports goes into the split, and the grant comes back.
+             A daemon built without this answers unknown action, which the
+             asker reads as a refusal and governs its own link. *)
+          | Some (`String "uplink") -> (
+              let pid =
+                match List.assoc_opt "pid" obj with Some (`Int p) -> p | _ -> 0
+              in
+              match
+                Uplink_lwt.lease_renewal (Uplink_lwt.process ()) ~pid
+                  (Uplink_lease.report_of_json obj)
+              with
+                | Some (rate, interval) ->
+                    Lwt.return
+                      ( Yojson.Safe.to_string
+                          (`Assoc
+                            [
+                              ("ok", `Bool true);
+                              ("rate", `Float rate);
+                              ("interval", `Float interval);
+                            ]),
+                        `Continue )
+                | None -> fail `Invalid "not the link's owner")
           | Some (`String "stop") ->
               (* Answered before winding down, so the caller hears that it was
                  asked rather than losing the connection. *)
@@ -240,6 +263,9 @@ let converge domains =
       List.iter
         (fun s -> ignore (Lwt_unix.on_signal s (fun _ -> request_stop ())))
         [Sys.sigterm; Sys.sigint];
+      (* Before the engines, which may have deferred work to send at once: the
+         link's owner is this process, and its lessees find it answering. *)
+      Uplink_lwt.own_link ();
       let* () =
         Lwt_list.iter_s
           (fun e ->
@@ -277,6 +303,9 @@ let run ?(on_leaf = fun ~name:_ -> ()) domains =
     in
     (* After the fork, so each process is named for what it runs. *)
     on_leaf ~name;
+    (* And asks the parent, which owns the link, for its share of it. *)
+    Uplink_lwt.lease_from
+      ~socket_path:(Runtime.sync_socket_path (Runtime.default_paths ()));
     (* Sized here because only this side knows what else shares the leaf, and
        after the fork because it is the first thing to touch Lwt. *)
     let serve items =

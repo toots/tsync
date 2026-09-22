@@ -142,15 +142,29 @@ module Make (Io : Io.S) (Clock : Clock.S with type 'a io := 'a Io.t) = struct
   (* {1 The process governor} *)
 
   type class_ = Background | Foreground
+  type mode = Owner | Leased | Local
+
+  let string_of_mode = function
+    | Owner -> "owner"
+    | Leased -> "leased"
+    | Local -> "local"
 
   type probe = { name : string; held : unit -> bool; probe : unit -> unit Io.t }
 
   type t = {
     control : Uplink_control.t;
     share : Uplink_budget.t;
-        (** What this process admits against: the law's rate here, a granted
-            share of it under a lease. *)
+        (** What this process admits against: the law's rate, its own share
+            of it as an owner, or the grant it holds as a lessee. *)
     line : gate;
+    mutable mode : mode;
+    mutable lessees : Uplink_lease.t option;  (** An owner's table. *)
+    mutable daemon : (string -> string Io.t) option;
+        (** A line to the owner's socket, for a lessee or one that could be. *)
+    mutable missed : int;  (** Renewals unanswered in a row. *)
+    mutable retry_at : float;  (** When a local process next asks the daemon. *)
+    mutable interval : float;  (** What the owner said to renew at. *)
+    completed_since : int ref;  (** Own bytes answered since last told. *)
     mutable probes : probe list;
     mutable ticking : bool;
     mutable last_timeouts : int;
@@ -158,26 +172,46 @@ module Make (Io : Io.S) (Clock : Clock.S with type 'a io := 'a Io.t) = struct
     mutable probe_warned : bool;
   }
 
+  (* A local process asks the daemon again this often; the daemon may have
+     been restarted on a build that answers. *)
+  let retry_every = 30.
+
+  (* Unanswered renewals in a row before a lessee runs its own law. *)
+  let missed_before_local = 3
+
   let create ?settings () =
     let now = Clock.now () in
     let control = Uplink_control.create ?settings ~now () in
     let share =
       Uplink_budget.create ~now ~rate:(Uplink_control.rate control)
     in
+    let completed_since = ref 0 in
+    let line =
+      gate
+        {
+          admits = Uplink_budget.admits share;
+          take = Uplink_budget.take share;
+          wait_for = Uplink_budget.wait_for share;
+          left =
+            (fun ~now ~bytes ~answered ~elapsed:_ ->
+              Uplink_budget.release share ~bytes;
+              if answered then begin
+                completed_since := !completed_since + bytes;
+                Uplink_control.completed control ~now ~bytes
+              end);
+        }
+    in
     {
       control;
       share;
-      line =
-        gate
-          {
-            admits = Uplink_budget.admits share;
-            take = Uplink_budget.take share;
-            wait_for = Uplink_budget.wait_for share;
-            left =
-              (fun ~now ~bytes ~answered ~elapsed:_ ->
-                Uplink_budget.release share ~bytes;
-                if answered then Uplink_control.completed control ~now ~bytes);
-          };
+      line;
+      mode = Local;
+      lessees = None;
+      daemon = None;
+      missed = 0;
+      retry_at = 0.;
+      interval = !Uplink_control.tick_interval;
+      completed_since;
       probes = [];
       ticking = false;
       last_timeouts = Metrics.timeouts ();
@@ -187,14 +221,43 @@ module Make (Io : Io.S) (Clock : Clock.S with type 'a io := 'a Io.t) = struct
 
   let enabled t = (Uplink_control.settings t.control).Uplink_control.enabled
   let control t = t.control
+  let mode t = t.mode
   let waiting t = Queue.length t.line.waiters
+  let per_sec rate = Metrics.human_bytes (int_of_float rate) ^ "/s"
 
-  (* One small round trip to every store not held down, timed on this clock.
-     A probe that times out is read as the timeout's length: an enormous
-     delay, which the next step cuts hard on. It does not touch the store's
-     health, which its own retry loop keeps. *)
+  (* What this process says of itself when it renews, or files as the owner's
+     own row: what is in flight and waiting now, what completed and timed out
+     since it last said. *)
+  let own_report t ~timeouts =
+    let r =
+      {
+        Uplink_lease.in_flight = Uplink_budget.in_flight_bytes t.share;
+        completed = !(t.completed_since);
+        timeouts;
+        waiting = waiting t;
+      }
+    in
+    t.completed_since := 0;
+    r
+
+  let timeouts_since t =
+    let n = Metrics.timeouts () in
+    let delta = n - t.last_timeouts in
+    t.last_timeouts <- n;
+    delta
+
+  (* One small round trip to every store not held down, timed on this clock,
+     while anyone the law answers for has bytes in flight. A probe that times
+     out is read as the timeout's length: an enormous delay, which the next
+     step cuts hard on. It does not touch the store's health, which its own
+     retry loop keeps. *)
   let probe_round t =
-    if Uplink_budget.in_flight_bytes t.share = 0 then Io.return ()
+    let now = Clock.now () in
+    let in_flight =
+      Uplink_budget.in_flight_bytes t.share
+      + match t.lessees with Some l -> Uplink_lease.in_flight l ~now | None -> 0
+    in
+    if in_flight = 0 then Io.return ()
     else
       Io.iter_p
         (fun p ->
@@ -217,8 +280,6 @@ module Make (Io : Io.S) (Clock : Clock.S with type 'a io := 'a Io.t) = struct
               Io.return ()))
         (List.filter (fun p -> not (p.held ())) t.probes)
 
-  let per_sec rate = Metrics.human_bytes (int_of_float rate) ^ "/s"
-
   let announce t =
     let state = Uplink_control.state t.control in
     if state <> t.last_state then begin
@@ -235,25 +296,137 @@ module Make (Io : Io.S) (Clock : Clock.S with type 'a io := 'a Io.t) = struct
         | Ramping -> Log.info "uplink: probing above %s" rate
     end
 
-  (* Timeouts are read off the process counter the retry loops keep, one cut a
-     step however many there were: no hook into the drivers. *)
+  (* {2 The owner's step, and a local process's}
+
+     Timeouts are read off the process counter the retry loops keep and off
+     what lessees reported, one cut a step however many there were: no hook
+     into the drivers. The law's rate is then split, the owner's own share
+     being what its line admits against. *)
   let step t =
-    let timeouts = Metrics.timeouts () in
-    if timeouts > t.last_timeouts then
-      Uplink_control.timed_out t.control ~now:(Clock.now ());
-    t.last_timeouts <- timeouts;
+    let now = Clock.now () in
+    let own_timeouts = timeouts_since t in
+    let lessee_completed, lessee_timeouts =
+      match t.lessees with Some l -> Uplink_lease.drain l | None -> (0, 0)
+    in
+    if own_timeouts + lessee_timeouts > 0 then
+      Uplink_control.timed_out t.control ~now;
+    if lessee_completed > 0 then
+      Uplink_control.completed t.control ~now ~bytes:lessee_completed;
     let* () = probe_round t in
-    Uplink_control.tick t.control ~now:(Clock.now ());
-    Uplink_budget.set_rate t.share ~now:(Clock.now ())
-      (Uplink_control.rate t.control);
+    let now = Clock.now () in
+    Uplink_control.tick t.control ~now;
+    let total = Uplink_control.rate t.control in
+    (match t.lessees with
+      | Some l ->
+          let min_rate =
+            float_of_int (Uplink_control.settings t.control).min_rate
+          in
+          Uplink_lease.split l ~now ~total ~min_rate
+            ~self:(own_report t ~timeouts:own_timeouts);
+          Uplink_budget.set_rate t.share ~now (Uplink_lease.own_rate l)
+      | None -> Uplink_budget.set_rate t.share ~now total);
     announce t;
     pump t.line;
     arm t.line;
     Io.return ()
 
+  (* {2 A lessee's renewal} *)
+
+  let request t ~timeouts =
+    let r = own_report t ~timeouts in
+    Yojson.Safe.to_string
+      (`Assoc
+        [
+          ("action", `String "uplink");
+          ("pid", `Int (Unix.getpid ()));
+          ("inFlight", `Int r.Uplink_lease.in_flight);
+          ("completed", `Int r.completed);
+          ("timeouts", `Int r.timeouts);
+          ("waiting", `Int r.waiting);
+        ])
+
+  type answer = Granted of float * float | Refused | Unreached
+
+  let read_answer line =
+    match Yojson.Safe.from_string line with
+      | `Assoc fields -> (
+          let num key =
+            match List.assoc_opt key fields with
+              | Some (`Int n) -> Some (float_of_int n)
+              | Some (`Float f) -> Some f
+              | _ -> None
+          in
+          match (List.assoc_opt "ok" fields, num "rate") with
+            | Some (`Bool true), Some rate ->
+                Granted
+                  ( rate,
+                    Option.value (num "interval")
+                      ~default:!Uplink_control.tick_interval )
+            | _ -> Refused)
+      | _ | (exception _) -> Refused
+
+  let fall_to_local t why =
+    t.mode <- Local;
+    t.retry_at <- Clock.now () +. retry_every;
+    Log.warn "uplink: %s; governing this process's link alone" why
+
+  (* One renewal: what came back sets the grant, and what did not counts.
+     [Refused] is a daemon that does not know the action, which no retry will
+     change soon; [Unreached] is one that may be back. *)
+  let renew t ~send =
+    let* answer =
+      Io.catch
+        (fun () ->
+          let+ line = send (request t ~timeouts:(timeouts_since t)) in
+          read_answer line)
+        (fun _ -> Io.return Unreached)
+    in
+    (match answer with
+      | Granted (rate, interval) ->
+          t.missed <- 0;
+          t.interval <- interval;
+          Uplink_budget.set_rate t.share ~now:(Clock.now ()) rate;
+          if t.mode <> Leased then begin
+            t.mode <- Leased;
+            Log.info "uplink: leasing %s from the daemon" (per_sec rate)
+          end
+      | Refused ->
+          if t.mode = Leased then
+            fall_to_local t "the daemon does not answer for the link"
+      | Unreached ->
+          t.missed <- t.missed + 1;
+          if t.mode = Leased && t.missed >= missed_before_local then
+            fall_to_local t
+              (Printf.sprintf "%d renewals unanswered" missed_before_local));
+    pump t.line;
+    arm t.line;
+    Io.return ()
+
+  (* A local process with a daemon to ask asks it again now and then. *)
+  let maybe_retry t =
+    match (t.mode, t.daemon) with
+      | Local, Some send when Clock.now () >= t.retry_at ->
+          t.retry_at <- Clock.now () +. retry_every;
+          renew t ~send
+      | _ -> Io.return ()
+
+  (* One loop whatever the mode: a lessee renews at the owner's interval,
+     everyone else steps the law at its own. *)
   let rec ticker t =
-    let* () = Clock.sleep !Uplink_control.tick_interval in
-    let* () = step t in
+    let* () =
+      Clock.sleep
+        (match t.mode with
+          | Leased -> t.interval
+          | Owner | Local -> !Uplink_control.tick_interval)
+    in
+    let* () =
+      match (t.mode, t.daemon) with
+        | Leased, Some send -> renew t ~send
+        | Leased, None -> fall_to_local t "no daemon to renew from"; Io.return ()
+        | (Owner | Local), _ ->
+            let* () = step t in
+            maybe_retry t
+    in
     ticker t
 
   let ensure_ticking t =
@@ -261,6 +434,40 @@ module Make (Io : Io.S) (Clock : Clock.S with type 'a io := 'a Io.t) = struct
       t.ticking <- true;
       Io.async (fun () -> ticker t)
     end
+
+  (* {2 Deciding what this process is} *)
+
+  (* Split at once, so a lessee renewing before the first step is granted an
+     even share of the law's starting rate rather than nothing. *)
+  let own t =
+    t.mode <- Owner;
+    t.daemon <- None;
+    (match t.lessees with
+      | Some _ -> ()
+      | None ->
+          let l = Uplink_lease.create () in
+          Uplink_lease.split l ~now:(Clock.now ())
+            ~total:(Uplink_control.rate t.control)
+            ~min_rate:
+              (float_of_int (Uplink_control.settings t.control).min_rate)
+            ~self:Uplink_lease.idle;
+          t.lessees <- Some l);
+    ensure_ticking t
+
+  let lease_through t ~send =
+    if t.mode <> Owner then begin
+      t.daemon <- Some send;
+      t.mode <- Leased;
+      t.missed <- 0
+    end
+
+  let lease_renewal t ~pid report =
+    match (t.mode, t.lessees) with
+      | Owner, Some l ->
+          let now = Clock.now () in
+          Uplink_lease.record l ~now ~pid report;
+          Some (Uplink_lease.rate_for l ~now ~pid, t.interval)
+      | _ -> None
 
   let acquire t ~class_ ~bytes =
     if not (enabled t) then Io.return ()
@@ -298,19 +505,34 @@ module Make (Io : Io.S) (Clock : Clock.S with type 'a io := 'a Io.t) = struct
     ensure_ticking t
 
   (* The budget's figures sit where a reader expects them, beside the drops,
-     whichever module happens to hold them. *)
+     whichever module happens to hold them. A lessee runs no law, so it
+     says so in place of a state and a capacity it does not have. *)
   let json t =
+    let now = Clock.now () in
     List.concat_map
       (fun (k, v) ->
-        if k = "drops" then
+        match (k, t.mode) with
+          | "state", Leased -> [(k, `String "leased")]
+          | "capacityBytesPerSec", Leased -> [(k, `Null)]
+          | "rateBytesPerSec", Leased ->
+              [(k, `Int (int_of_float (Uplink_budget.rate t.share)))]
+          | "drops", _ ->
+              [
+                ("inFlightBytes", `Int (Uplink_budget.in_flight_bytes t.share));
+                ("windowBytes", `Int (Uplink_budget.window_bytes t.share));
+                (k, v);
+              ]
+          | _ -> [(k, v)])
+      (Uplink_control.json t.control ~now)
+    @ [("waiting", `Int (waiting t)); ("mode", `String (string_of_mode t.mode))]
+    @
+    match t.lessees with
+      | Some l when t.mode = Owner ->
           [
-            ("inFlightBytes", `Int (Uplink_budget.in_flight_bytes t.share));
-            ("windowBytes", `Int (Uplink_budget.window_bytes t.share));
-            (k, v);
+            ("ownRateBytesPerSec", `Int (int_of_float (Uplink_budget.rate t.share)));
+            ("lessees", `List (Uplink_lease.json l ~now));
           ]
-        else [(k, v)])
-      (Uplink_control.json t.control ~now:(Clock.now ()))
-    @ [("waiting", `Int (waiting t))]
+      | _ -> []
 
   let the_process : t option ref = ref None
 

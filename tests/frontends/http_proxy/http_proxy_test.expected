@@ -161,7 +161,8 @@ stop: {"ok":true} closes=true asked=1
         "drops": 0,
         "headroom": 0.8,
         "targetDelayMs": 50.0,
-        "waiting": 0
+        "waiting": 0,
+        "mode": "local"
       }
     }
   ],

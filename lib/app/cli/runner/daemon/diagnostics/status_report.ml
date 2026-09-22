@@ -388,20 +388,35 @@ let elide path =
    nothing to read. *)
 let uplink_row u =
   let per_sec j = Metrics.human_bytes (int_of j) ^ "/s" in
-  Printf.sprintf "%s of %s (%s, +%.0f ms queueing, %s in flight%s%s)"
-    (per_sec (mem u "rateBytesPerSec"))
-    (match mem u "capacityBytesPerSec" with
-      | `Null -> "unknown"
-      | c -> per_sec c)
-    (str (mem u "state"))
-    (num (mem u "queueingDelayMs"))
-    (Metrics.human_bytes (int_of (mem u "inFlightBytes")))
-    (match int_of (mem u "waiting") with
-      | 0 -> ""
-      | n -> Printf.sprintf ", %d waiting" n)
-    (match int_of (mem u "drops") with
-      | 0 -> ""
-      | n -> Printf.sprintf ", %d dropped" n)
+  let load =
+    Printf.sprintf "%s in flight%s%s"
+      (Metrics.human_bytes (int_of (mem u "inFlightBytes")))
+      (match int_of (mem u "waiting") with
+        | 0 -> ""
+        | n -> Printf.sprintf ", %d waiting" n)
+      (match int_of (mem u "drops") with
+        | 0 -> ""
+        | n -> Printf.sprintf ", %d dropped" n)
+  in
+  if str (mem u "state") = "leased" then
+    Printf.sprintf "%s leased from the daemon (%s)"
+      (per_sec (mem u "rateBytesPerSec"))
+      load
+  else
+    Printf.sprintf "%s of %s (%s, +%.0f ms queueing, %s%s)"
+      (per_sec (mem u "rateBytesPerSec"))
+      (match mem u "capacityBytesPerSec" with
+        | `Null -> "unknown"
+        | c -> per_sec c)
+      (str (mem u "state"))
+      (num (mem u "queueingDelayMs"))
+      load
+      (match list (mem u "lessees") with
+        | [] -> ""
+        | l ->
+            Printf.sprintf ", %s kept, %d leased out"
+              (per_sec (mem u "ownRateBytesPerSec"))
+              (List.length l))
 
 let governed u = bool_of (mem u "enabled")
 

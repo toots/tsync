@@ -57,6 +57,16 @@ module Make (Io : Io.S) (Clock : Clock.S with type 'a io := 'a Io.t) : sig
       without the interface changing. *)
   type class_ = Background | Foreground
 
+  (** What a process is to the link. The [Owner] serves the daemon's socket:
+      it runs the law, splits its rate among those holding a share, and
+      answers their renewals; its own writes hold a share like any other. A
+      [Leased] process asks the owner for its share every interval and runs
+      no law of its own. A [Local] one runs the law alone: no daemon
+      answered, or the one that did does not know the question. *)
+  type mode = Owner | Leased | Local
+
+  val string_of_mode : mode -> string
+
   type t
 
   val create : ?settings:Uplink_control.settings -> unit -> t
@@ -71,6 +81,25 @@ module Make (Io : Io.S) (Clock : Clock.S with type 'a io := 'a Io.t) : sig
 
   val enabled : t -> bool
   val control : t -> Uplink_control.t
+  val mode : t -> mode
+
+  (** This process serves the link's owner socket. Said before its engines
+      start, so a lessee never finds the socket up and the owner not yet
+      answering, and it stays said. Starts the ticker: the split is wanted
+      whether or not the owner itself has anything to send. *)
+  val own : t -> unit
+
+  (** This process asks the owner over [send] for its share, one line each
+      way, renewing every interval the owner names. Refused, which an older
+      daemon does, or unanswered three times, it runs the law alone and asks
+      again now and then. A process that has said {!own} ignores this. *)
+  val lease_through : t -> send:(string -> string Io.t) -> unit
+
+  (** A lessee's renewal, answered by the owner: its grant in bytes per
+      second and the interval to renew at. [None] from a process that is not
+      the owner, which the caller turns into a refusal. *)
+  val lease_renewal :
+    t -> pid:int -> Uplink_lease.report -> (float * float) option
 
   (** Waits for room, in order; a body of at most {!small_body} bytes passes
       ahead when the budget covers it. Returns at once when disabled or
