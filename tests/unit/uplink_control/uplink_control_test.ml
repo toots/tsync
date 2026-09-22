@@ -63,7 +63,8 @@ let run link t ~from ~seconds =
     let delay = second link t ~now in
     if Float.rem now !Uplink_control.tick_interval = 0. then begin
       Uplink_control.observe_delay t ~now delay;
-      Uplink_control.tick t ~now;
+      (* The offer is greedy: the rate always held it back. *)
+      Uplink_control.tick t ~now ~limited:true;
       Uplink_budget.set_rate link.budget ~now (Uplink_control.rate t);
       rates := Uplink_control.rate t :: !rates;
       delays := delay :: !delays
@@ -171,25 +172,40 @@ let () =
   check "and however many timeouts, not below the floor"
     (Uplink_control.rate t = float_of_int floor_rate);
 
+  case "a sender with little to send is granted no more";
+  let t = Uplink_control.create ~settings ~now:0. () in
+  let before = Uplink_control.rate t in
+  for i = 1 to 20 do
+    let now = 2. *. float_of_int i in
+    Uplink_control.observe_delay t ~now 0.02;
+    Uplink_control.tick t ~now ~limited:false
+  done;
+  check "forty seconds of flat delay, and the rate has not moved"
+    ~why:(fun () -> string_of_float (Uplink_control.rate t))
+    (Uplink_control.rate t = before);
+  Uplink_control.observe_delay t ~now:42. 0.02;
+  Uplink_control.tick t ~now:42. ~limited:true;
+  check "held back once, it grows" (Uplink_control.rate t = 2. *. before);
+
   case "the base re-learns a route that got shorter";
   let t = Uplink_control.create ~settings ~now:0. () in
   Uplink_control.observe_delay t ~now:0. 0.100;
-  Uplink_control.tick t ~now:0.;
+  Uplink_control.tick t ~now:0. ~limited:false;
   check "the first probe is the base"
     (Uplink_control.base_delay t ~now:0. = Some 0.100);
   Uplink_control.observe_delay t ~now:2. 0.060;
-  Uplink_control.tick t ~now:2.;
+  Uplink_control.tick t ~now:2. ~limited:false;
   check "a shorter one at once"
     (Uplink_control.base_delay t ~now:2. = Some 0.060);
   Uplink_control.observe_delay t ~now:4. 0.140;
-  Uplink_control.tick t ~now:4.;
+  Uplink_control.tick t ~now:4. ~limited:false;
   check "a longer one is queueing, not a new base"
     (Uplink_control.base_delay t ~now:4. = Some 0.060
     && Uplink_control.queueing_delay t > 0.);
   let later = 4. +. !Uplink_control.base_window +. 60. in
   Uplink_control.observe_delay t ~now:later 0.140;
-  Uplink_control.tick t ~now:later;
+  Uplink_control.tick t ~now:later ~limited:false;
   check "until the old base has fallen out of the window"
     (Uplink_control.base_delay t ~now:later = Some 0.140);
 
-  report ~expected:22 ()
+  report ~expected:24 ()

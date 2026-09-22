@@ -96,8 +96,14 @@ val observe_delay : t -> now:float -> float -> unit
 (** A request timed out: the rate is cut by {!decrease_floor} and held. *)
 val timed_out : t -> now:float -> unit
 
-(** One step of the law. The caller runs it every {!tick_interval}. *)
-val tick : t -> now:float -> unit
+(** One step of the law. The caller runs it every {!tick_interval}.
+
+    [limited] is whether the rate held the sender back since the last step:
+    its bucket drawn down, or a body waiting. The rate grows only then. A
+    sender with little to send would otherwise see delay stay flat and be
+    granted more forever, and meet its first real load with a rate that never
+    met any edge, and a capacity read off it. *)
+val tick : t -> now:float -> limited:bool -> unit
 
 (** {1 Readers} *)
 

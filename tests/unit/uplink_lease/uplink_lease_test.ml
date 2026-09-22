@@ -96,6 +96,13 @@ let () =
       [("inFlight", `Int 5); ("completed", `Float 7.); ("waiting", `Int 2)]
   in
   check "fields present are read, absent ones are nothing"
-    (r = { Uplink_lease.in_flight = 5; completed = 7; timeouts = 0; waiting = 2 });
+    (r
+    = {
+        Uplink_lease.in_flight = 5;
+        completed = 7;
+        timeouts = 0;
+        waiting = 2;
+        held_back = false;
+      });
 
   report ~expected:12 ()

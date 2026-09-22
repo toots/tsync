@@ -20,9 +20,21 @@
 
 (** What a lessee says when it renews. Deltas since its last renewal, except
     [in_flight] and [waiting], which are what is true now. *)
-type report = { in_flight : int; completed : int; timeouts : int; waiting : int }
+type report = {
+  in_flight : int;
+  completed : int;
+  timeouts : int;
+  waiting : int;
+  held_back : bool;
+      (** A body waited or was refused since the last renewal, whether or
+          not one is waiting now: the rate held this lessee back. *)
+}
 
 val idle : report
+
+(** Whether a lessee would use more than it has: a line behind it now, or
+    one there since it last said. *)
+val wants : report -> bool
 
 (** Read off a request's fields; a field absent is nothing. *)
 val report_of_json : (string * Yojson.Safe.t) list -> report

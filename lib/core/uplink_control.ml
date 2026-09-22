@@ -192,7 +192,7 @@ let read_delay t ~now =
         t.queueing <- (0.5 *. t.queueing) +. (0.5 *. above));
   t.samples <- []
 
-let tick t ~now =
+let tick t ~now ~limited =
   read_delay t ~now;
   let target = t.settings.target_delay in
   let q = t.queueing in
@@ -213,7 +213,7 @@ let tick t ~now =
             enter t ~now Steady;
             Float.max (rate *. !decrease_floor) (ceiling t)
           end
-          else if q <= target /. 2. then
+          else if q <= target /. 2. && limited then
             if t.never_saturated then rate *. 2. else rate *. (1. +. !gain)
           else rate
       | Steady ->
@@ -225,7 +225,8 @@ let tick t ~now =
           if q <= target then t.settled <- true
           else if t.settled && t.over_target >= 2 then lower_capacity t ~now;
           if now -. t.since >= !probe_up_every then enter t ~now Ramping;
-          rate *. (1. +. (!gain *. off))
+          (* Growth only for a sender the rate held back; a shrink always. *)
+          if off > 0. && not limited then rate else rate *. (1. +. (!gain *. off))
       | Backing_off ->
           if now -. t.since >= !backoff_hold then enter t ~now Ramping;
           rate

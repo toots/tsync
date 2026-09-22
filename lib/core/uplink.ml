@@ -38,9 +38,18 @@ module Make (Io : Io.S) (Clock : Clock.S with type 'a io := 'a Io.t) = struct
     beneath : beneath;
     waiters : (int * unit Io.u) Queue.t;
     mutable armed : bool;
+    mutable held_back : bool;
+        (** A body waited or was refused since this was last read: the rate
+            held the sender back, which is what lets it grow. *)
   }
 
-  let gate beneath = { beneath; waiters = Queue.create (); armed = false }
+  let gate beneath =
+    { beneath; waiters = Queue.create (); armed = false; held_back = false }
+
+  let held_back g =
+    let was = g.held_back in
+    g.held_back <- false;
+    was
 
   (* Wake, in order, every waiter from the head the budget now admits. *)
   let rec pump g =
@@ -83,6 +92,7 @@ module Make (Io : Io.S) (Clock : Clock.S with type 'a io := 'a Io.t) = struct
       Io.return ()
     end
     else begin
+      g.held_back <- true;
       let waited, wake = Io.wait () in
       Queue.add (bytes, wake) g.waiters;
       arm g;
@@ -235,6 +245,7 @@ module Make (Io : Io.S) (Clock : Clock.S with type 'a io := 'a Io.t) = struct
         completed = !(t.completed_since);
         timeouts;
         waiting = waiting t;
+        held_back = held_back t.line;
       }
     in
     t.completed_since := 0;
@@ -314,15 +325,25 @@ module Make (Io : Io.S) (Clock : Clock.S with type 'a io := 'a Io.t) = struct
       Uplink_control.completed t.control ~now ~bytes:lessee_completed;
     let* () = probe_round t in
     let now = Clock.now () in
-    Uplink_control.tick t.control ~now;
+    (* Held back: a body waited or was refused here since the last step, or
+       behind any lessee's line. *)
+    let mine = own_report t ~timeouts:own_timeouts in
+    let limited =
+      Uplink_lease.wants mine
+      ||
+      match t.lessees with
+        | Some l ->
+            List.exists (fun (_, r) -> Uplink_lease.wants r) (Uplink_lease.live l ~now)
+        | None -> false
+    in
+    Uplink_control.tick t.control ~now ~limited;
     let total = Uplink_control.rate t.control in
     (match t.lessees with
       | Some l ->
           let min_rate =
             float_of_int (Uplink_control.settings t.control).min_rate
           in
-          Uplink_lease.split l ~now ~total ~min_rate
-            ~self:(own_report t ~timeouts:own_timeouts);
+          Uplink_lease.split l ~now ~total ~min_rate ~self:mine;
           Uplink_budget.set_rate t.share ~now (Uplink_lease.own_rate l)
       | None -> Uplink_budget.set_rate t.share ~now total);
     announce t;
@@ -343,6 +364,7 @@ module Make (Io : Io.S) (Clock : Clock.S with type 'a io := 'a Io.t) = struct
           ("completed", `Int r.completed);
           ("timeouts", `Int r.timeouts);
           ("waiting", `Int r.waiting);
+          ("heldBack", `Bool r.held_back);
         ])
 
   type answer = Granted of float * float | Refused | Unreached
@@ -484,6 +506,7 @@ module Make (Io : Io.S) (Clock : Clock.S with type 'a io := 'a Io.t) = struct
       ensure_ticking t;
       if room t.line ~bytes then true
       else begin
+        t.line.held_back <- true;
         Uplink_control.dropped t.control;
         false
       end

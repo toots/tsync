@@ -1,6 +1,15 @@
-type report = { in_flight : int; completed : int; timeouts : int; waiting : int }
+type report = {
+  in_flight : int;
+  completed : int;
+  timeouts : int;
+  waiting : int;
+  held_back : bool;
+}
 
-let idle = { in_flight = 0; completed = 0; timeouts = 0; waiting = 0 }
+let idle =
+  { in_flight = 0; completed = 0; timeouts = 0; waiting = 0; held_back = false }
+
+let wants r = r.waiting > 0 || r.held_back
 
 let report_of_json fields =
   let int key =
@@ -14,6 +23,10 @@ let report_of_json fields =
     completed = int "completed";
     timeouts = int "timeouts";
     waiting = int "waiting";
+    held_back =
+      (match List.assoc_opt "heldBack" fields with
+        | Some (`Bool b) -> b
+        | _ -> false);
   }
 
 type lessee = {
@@ -77,7 +90,7 @@ let drain t =
    get. Moving bytes with nothing waiting: a little over what it moved, since
    more would sit idle. Moving nothing: the floor, so a first body goes. *)
 let can_use ~min_rate (r : report) =
-  if r.waiting > 0 then infinity
+  if wants r then infinity
   else if r.in_flight > 0 then
     Float.max min_rate (1.25 *. float_of_int r.completed /. interval ())
   else min_rate

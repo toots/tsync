@@ -93,6 +93,10 @@ let () =
      check "two silences: still leased" (U.mode g = U.Leased);
      let* () = tick () in
      check "a third: local" (U.mode g = U.Local && state g <> "leased");
+     (* A body made to wait, or the law would rightly grant no more. *)
+     let* () = U.acquire g ~class_:U.Background ~bytes:(8 * mb) in
+     let held = U.acquire g ~class_:U.Background ~bytes:mb in
+     let* () = settle 3 in
      let* () = tick () in
      let* () = tick () in
      check "and the law runs, doubling while nothing says otherwise"
@@ -103,6 +107,7 @@ let () =
      script := Grant (3. *. float_of_int mb);
      let rec wait n = if n = 0 then Lwt.return_unit else let* () = tick () in wait (n - 1) in
      let* () = wait 16 in
+     let* () = held in
      check "leased again within the retry wait" (U.mode g = U.Leased);
      check "at the new grant"
        ~why:(fun () -> string_of_int (int_field g "rateBytesPerSec"))
