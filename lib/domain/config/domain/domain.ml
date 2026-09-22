@@ -15,6 +15,7 @@ let attach_probe ~cursor_key (bc : Conf_parsing.backend_config) store =
     let module U = Tsync_core_lwt.Uplink_lwt in
     U.attach (U.process ()) ~name:bc.Conf_parsing.name
       ~held:(fun () -> Health.is_held St.health)
+      ~timeouts:(fun () -> Health.timeouts St.health)
       ~probe:(fun () -> Lwt.map ignore (St.head_opt ~key:cursor_key ()))
 
 let admission_for (_ : Conf_parsing.backend_config) =

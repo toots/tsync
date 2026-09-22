@@ -8,7 +8,7 @@
 
 open Lwt.Syntax
 open Check
-module Gate = Uplink.Make (Io_lwt.Core) (Fake_clock)
+module Gate = Uplink.Make (Io_lwt.Core) (Fake_clock) (Uplink.Silent)
 module Memory = Doubles.Memory
 module One = Doubles.Memory ()
 module Held = Doubles.Outage (One)

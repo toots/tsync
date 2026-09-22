@@ -8,6 +8,8 @@
    -open
    Tsync_core
    -open
+   Tsync_uplink
+   -open
    Tsync_remote_lwt
    -open
    Tsync_journal
@@ -32,6 +34,7 @@
  (name tsync_diagnostics)
  (public_name tsync-libs.diagnostics)
  (libraries
+  tsync_uplink
   tsync_checkout
   tsync_checkout_lwt
   tsync-libs.conf_parsing

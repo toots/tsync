@@ -11,7 +11,7 @@
 
 open Lwt.Syntax
 open Check
-module U = Uplink.Make (Io_lwt.Core) (Fake_clock)
+module U = Uplink.Make (Io_lwt.Core) (Fake_clock) (Uplink.Silent)
 
 (* Flushed, so a run cut short still says which case it was in. *)
 let case name =
@@ -168,6 +168,7 @@ let () =
      let probed = ref 0 in
      U.attach o ~name:"store"
        ~held:(fun () -> false)
+       ~timeouts:(fun () -> 0)
        ~probe:(fun () ->
          incr probed;
          Lwt.return_unit);

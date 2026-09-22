@@ -7,7 +7,7 @@
 
 open Lwt.Syntax
 open Check
-module U = Uplink.Make (Io_lwt.Core) (Fake_clock)
+module U = Uplink.Make (Io_lwt.Core) (Fake_clock) (Uplink.Silent)
 
 let mb = 1024 * 1024
 
@@ -99,12 +99,17 @@ let () =
      check "and passes once the first is gone" (adm.Uplink.waiting () = 0);
      Uplink_budget.stall_timeout := 60.;
 
-     case "a timeout the drivers counted reaches the law on the next step";
+     case "a timeout a store on the link took reaches the law on the next step";
      Fake_clock.reset ();
      let g = U.create ~settings:on () in
+     let timed_out = ref 0 in
+     U.attach g ~name:"store"
+       ~held:(fun () -> false)
+       ~timeouts:(fun () -> !timed_out)
+       ~probe:(fun () -> Lwt.return_unit);
      let* () = U.acquire g ~class_:Background ~bytes:1024 in
      let before = Uplink_control.rate (U.control g) in
-     Metrics.add_timeout 1;
+     incr timed_out;
      Fake_clock.advance 2.;
      let* () = settle 5 in
      check "halved" (Uplink_control.rate (U.control g) = before *. 0.5);
@@ -116,6 +121,7 @@ let () =
      let probed = ref 0 in
      U.attach g ~name:"store"
        ~held:(fun () -> false)
+       ~timeouts:(fun () -> 0)
        ~probe:(fun () ->
          incr probed;
          Lwt.return_unit);
@@ -132,7 +138,8 @@ let () =
      let* () = settle 5 in
      check "answered: none again" (!probed = 1);
      let held = ref true in
-     U.attach g ~name:"down" ~held:(fun () -> !held) ~probe:(fun () -> incr probed; Lwt.return_unit);
+     U.attach g ~name:"down" ~held:(fun () -> !held) ~timeouts:(fun () -> 0)
+       ~probe:(fun () -> incr probed; Lwt.return_unit);
      let* () = adm.Uplink.acquire ~bytes:mb in
      Fake_clock.advance 2.;
      let* () = settle 5 in

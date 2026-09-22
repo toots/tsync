@@ -38,8 +38,7 @@ val default_settings : settings
 
 (** {1 The law's constants}
 
-    Settable, the way {!Health.trip_after} is, so a test need not wait a
-    minute for a probe. *)
+    Settable, so a test need not wait a minute for a probe. *)
 
 (** Bytes per second a cold start begins at, doubling each tick until delay
     says otherwise. *)

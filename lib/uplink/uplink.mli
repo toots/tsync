@@ -33,7 +33,26 @@ type 'io admission = {
     chunk. Bounded, so a run of them cannot keep a chunk waiting for long. *)
 val small_body : int ref
 
-module Make (Io : Io.S) (Clock : Clock.S with type 'a io := 'a Io.t) : sig
+(** How long a probe is given before it is read as the length of the
+    timeout itself: an enormous delay, which the next step cuts hard on. *)
+val probe_timeout : float ref
+
+(** Where the governor says what it decided. Handed in rather than named,
+    so this library names no logger: [rate] spells bytes per second the way
+    the embedding program does. *)
+module type LOG = sig
+  val info : string -> unit
+  val warn : string -> unit
+  val rate : float -> string
+end
+
+(** Says nothing; for a test, or an embedding with nowhere to say it. *)
+module Silent : LOG
+
+module Make
+    (Io : Io.S)
+    (Clock : Clock.S with type 'a io := 'a Io.t)
+    (Log : LOG) : sig
   (** Admits everything at once: a store with no ceiling. *)
   val unbounded : unit Io.t admission
 
@@ -117,12 +136,20 @@ module Make (Io : Io.S) (Clock : Clock.S with type 'a io := 'a Io.t) : sig
       [class_]. *)
   val admission : t -> class_ -> unit Io.t admission
 
-  (** A store with governed bytes crossing the link, and how to time one small
-      round trip to it. Probed every tick while the governor has bytes in
-      flight and the store is not [held]; never when idle, since a probe is a
-      billed request. *)
+  (** A store with governed bytes crossing the link: whether to leave it
+      alone just now ([held], a store its own retry loop has taken out), how
+      many of its requests have timed out so far ([timeouts], read each step
+      and the growth since cut on), and one small round trip to time
+      ([probe]). Probed every tick while the governor has bytes in flight and
+      the store is not held; never when idle, since a probe is a billed
+      request. *)
   val attach :
-    t -> name:string -> held:(unit -> bool) -> probe:(unit -> unit Io.t) -> unit
+    t ->
+    name:string ->
+    held:(unit -> bool) ->
+    timeouts:(unit -> int) ->
+    probe:(unit -> unit Io.t) ->
+    unit
 
   val waiting : t -> int
   val json : t -> (string * Yojson.Safe.t) list

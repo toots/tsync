@@ -24,9 +24,12 @@
    -open
    Tsync_io
    -open
-   Tsync_core))
+   Tsync_core
+   -open
+   Tsync_uplink))
  (name tsync_test_harness)
  (libraries
+  tsync_uplink
   tsync_manifest
   tsync_conf_lwt
   tsync_backend_api

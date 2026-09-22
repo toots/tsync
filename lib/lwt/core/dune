@@ -2,10 +2,11 @@
 
 (library
  (flags
-  (:standard -open Tsync_core -open Tsync_io_lwt))
+  (:standard -open Tsync_core -open Tsync_uplink -open Tsync_io_lwt))
  (name tsync_core_lwt)
  (public_name tsync-libs.core_lwt)
  (libraries
+  tsync_uplink
   tsync_core
   tsync_io_lwt
   lwt

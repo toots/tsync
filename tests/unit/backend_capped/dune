@@ -4,6 +4,8 @@
    -open
    Tsync_core
    -open
+   Tsync_uplink
+   -open
    Tsync_backend_api
    -open
    Tsync_backend_lwt
@@ -13,6 +15,7 @@
    Tsync_test_harness))
  (name backend_capped)
  (libraries
+  tsync_uplink
   tsync-libs.core
   tsync_core
   tsync_backend_api

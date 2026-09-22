@@ -8,8 +8,25 @@ type 'io admission = {
 }
 
 let small_body = ref 65536
+let probe_timeout = ref 10.
 
-module Make (Io : Io.S) (Clock : Clock.S with type 'a io := 'a Io.t) = struct
+module type LOG = sig
+  val info : string -> unit
+  val warn : string -> unit
+  val rate : float -> string
+end
+
+module Silent = struct
+  let info _ = ()
+  let warn _ = ()
+  let rate r = Printf.sprintf "%.0f B/s" r
+end
+
+module Make
+    (Io : Io.S)
+    (Clock : Clock.S with type 'a io := 'a Io.t)
+    (Log : LOG) =
+struct
   open Io_syntax.Make (Io)
 
   let unbounded =
@@ -159,7 +176,14 @@ module Make (Io : Io.S) (Clock : Clock.S with type 'a io := 'a Io.t) = struct
     | Leased -> "leased"
     | Local -> "local"
 
-  type probe = { name : string; held : unit -> bool; probe : unit -> unit Io.t }
+  (* A store on the link: whether to leave it alone, how many of its
+     requests have timed out, and one small round trip to time. *)
+  type probe = {
+    name : string;
+    held : unit -> bool;
+    timeouts : unit -> int;
+    probe : unit -> unit Io.t;
+  }
 
   type t = {
     control : Uplink_control.t;
@@ -224,7 +248,7 @@ module Make (Io : Io.S) (Clock : Clock.S with type 'a io := 'a Io.t) = struct
       completed_since;
       probes = [];
       ticking = false;
-      last_timeouts = Metrics.timeouts ();
+      last_timeouts = 0;
       last_state = Uplink_control.state control;
       probe_warned = false;
     }
@@ -233,7 +257,7 @@ module Make (Io : Io.S) (Clock : Clock.S with type 'a io := 'a Io.t) = struct
   let control t = t.control
   let mode t = t.mode
   let waiting t = Queue.length t.line.waiters
-  let per_sec rate = Metrics.human_bytes (int_of_float rate) ^ "/s"
+  let per_sec = Log.rate
 
   (* What this process says of itself when it renews, or files as the owner's
      own row: what is in flight and waiting now, what completed and timed out
@@ -251,8 +275,10 @@ module Make (Io : Io.S) (Clock : Clock.S with type 'a io := 'a Io.t) = struct
     t.completed_since := 0;
     r
 
+  (* Summed over the stores on this link, so a timeout on another link is
+     not read as this one's. *)
   let timeouts_since t =
-    let n = Metrics.timeouts () in
+    let n = List.fold_left (fun acc p -> acc + p.timeouts ()) 0 t.probes in
     let delta = n - t.last_timeouts in
     t.last_timeouts <- n;
     delta
@@ -271,18 +297,20 @@ module Make (Io : Io.S) (Clock : Clock.S with type 'a io := 'a Io.t) = struct
           let started = Clock.now () in
           Io.catch
             (fun () ->
-              let+ () = Clock.with_timeout !Health.probe_timeout p.probe in
+              let+ () = Clock.with_timeout !probe_timeout p.probe in
               Uplink_control.observe_delay t.control ~now:(Clock.now ())
                 (Clock.now () -. started))
             (fun exn ->
               if Clock.is_timeout exn then begin
                 if not t.probe_warned then begin
                   t.probe_warned <- true;
-                  Log.warn "uplink: a probe of %s went unanswered for %.0fs"
-                    p.name !Health.probe_timeout
+                  Log.warn
+                    (Printf.sprintf
+                       "uplink: a probe of %s went unanswered for %.0fs" p.name
+                       !probe_timeout)
                 end;
                 Uplink_control.observe_delay t.control ~now:(Clock.now ())
-                  !Health.probe_timeout
+                  !probe_timeout
               end;
               Io.return ()))
         (List.filter (fun p -> not (p.held ())) t.probes)
@@ -294,13 +322,17 @@ module Make (Io : Io.S) (Clock : Clock.S with type 'a io := 'a Io.t) = struct
       let rate = per_sec (Uplink_control.rate t.control) in
       match state with
         | Uplink_control.Steady ->
-            Log.info "uplink: steady at %s (capacity %s, delay +%.0f ms)" rate
-              (match Uplink_control.capacity t.control with
-                | Some c -> per_sec c
-                | None -> "unknown")
-              (1000. *. Uplink_control.queueing_delay t.control)
-        | Backing_off -> Log.info "uplink: backing off to %s after a timeout" rate
-        | Ramping -> Log.info "uplink: probing above %s" rate
+            Log.info
+              (Printf.sprintf "uplink: steady at %s (capacity %s, delay +%.0f ms)"
+                 rate
+                 (match Uplink_control.capacity t.control with
+                   | Some c -> per_sec c
+                   | None -> "unknown")
+                 (1000. *. Uplink_control.queueing_delay t.control))
+        | Backing_off ->
+            Log.info
+              (Printf.sprintf "uplink: backing off to %s after a timeout" rate)
+        | Ramping -> Log.info (Printf.sprintf "uplink: probing above %s" rate)
     end
 
   (* {2 The owner's step, and a local process's}
@@ -394,7 +426,8 @@ module Make (Io : Io.S) (Clock : Clock.S with type 'a io := 'a Io.t) = struct
   let fall_to_local t why =
     t.mode <- Local;
     t.retry_at <- Clock.now () +. retry_every;
-    Log.warn "uplink: %s; governing this process's link alone" why
+    Log.warn
+      (Printf.sprintf "uplink: %s; governing this process's link alone" why)
 
   (* One renewal: what came back sets the grant, and what did not counts.
      [Refused] is a daemon that does not know the action, which no retry will
@@ -417,7 +450,8 @@ module Make (Io : Io.S) (Clock : Clock.S with type 'a io := 'a Io.t) = struct
           Uplink_budget.set_rate t.share ~now:(Clock.now ()) rate;
           if t.mode <> Leased then begin
             t.mode <- Leased;
-            Log.info "uplink: leasing %s from the daemon" (per_sec rate)
+            Log.info
+              (Printf.sprintf "uplink: leasing %s from the daemon" (per_sec rate))
           end
       | Refused ->
           if t.mode = Leased then
@@ -531,8 +565,10 @@ module Make (Io : Io.S) (Clock : Clock.S with type 'a io := 'a Io.t) = struct
             | Background -> try_admit t ~bytes);
     }
 
-  let attach t ~name ~held ~probe =
-    t.probes <- { name; held; probe } :: t.probes;
+  (* What the store has timed out so far is not this link's to cut on. *)
+  let attach t ~name ~held ~timeouts ~probe =
+    t.last_timeouts <- t.last_timeouts + timeouts ();
+    t.probes <- { name; held; timeouts; probe } :: t.probes;
     ensure_ticking t
 
   (* The budget's figures sit where a reader expects them, beside the drops,

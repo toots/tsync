@@ -1,8 +1,9 @@
 (executable
  (flags
-  (:standard -open Tsync_core -open Tsync_io_lwt -open Tsync_test_harness))
+  (:standard -open Tsync_core -open Tsync_uplink -open Tsync_io_lwt -open Tsync_test_harness))
  (name uplink_modes_test)
  (libraries
+  tsync_uplink
   tsync-libs.core
   tsync_core
   tsync_io_lwt

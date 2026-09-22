@@ -1,0 +1,12 @@
+; A link written at a rate chosen from its own delay: the budget, the law,
+; the lessee table and the governor that ties them. Functors over the
+; signatures in tsync_io alone, and a reporter handed in, so nothing here
+; names a scheduler, a logger or a store: it is what an opam package of its
+; own would be.
+
+(library
+ (name tsync_uplink)
+ (public_name tsync-libs.uplink)
+ (flags
+  (:standard -open Tsync_io))
+ (libraries tsync_io yojson unix))

@@ -1,4 +1,12 @@
-include Uplink.Make (Io_lwt.Core) (Io_lwt.Clock)
+(* What the governor says goes to the daemon's log, sizes spelled as every
+   report spells them. *)
+module Reporter = struct
+  let info s = Log.info "%s" s
+  let warn s = Log.warn "%s" s
+  let rate r = Metrics.human_bytes (int_of_float r) ^ "/s"
+end
+
+include Uplink.Make (Io_lwt.Core) (Io_lwt.Clock) (Reporter)
 
 (* The daemon, once it serves the sync socket. *)
 let own_link () = own (process ())

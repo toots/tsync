@@ -31,9 +31,8 @@ let string_of_state = function
   | Steady -> "steady"
   | Backing_off -> "backingOff"
 
-(* A rolling aggregate over fixed periods, keyed on the time handed in: the
-   ring {!Metrics.counter} keeps, but driven by the caller's clock rather than
-   the wall's, so a test can turn it. *)
+(* A rolling aggregate over fixed periods, keyed on the time handed in rather
+   than the wall's, so a test can turn it. *)
 module Window = struct
   type t = {
     cells : float array;
