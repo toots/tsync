@@ -169,3 +169,8 @@ val cloud_storage_dir : domain_name:string -> string option
     What turns a path a user typed into a domain and a path within it, so a
     caller can name the item before it asks anything of the daemon. *)
 val roots_of : data_dir:string -> domain -> string list
+
+(** The keys a backend type's driver reads, for refusing a backend key nothing
+    reads. [None], the default, leaves that type's keys unchecked; the domain
+    layer, which knows the drivers, sets it. *)
+val driver_fields : (string -> string list option) ref

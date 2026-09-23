@@ -61,6 +61,41 @@ let () =
     not
       (List.mem_assoc "link"
          (first_backend {|, "link": "lan"|}).Conf_parsing.fields));
+  (* A key nothing reads is refused, at every level: a setting renamed or
+     removed would otherwise be run as if absent, silently. Backend keys are
+     checked against what the type's driver reads, once that is known. *)
+  (Conf_parsing.driver_fields :=
+     function "s3" -> Some ["bucket"; "region"] | _ -> None);
+  assert (not (fails (with_link {|, "bucket": "b", "region": "r"|})));
+  assert (fails (with_link {|, "maxUploadRate": 512000|}));
+  (* A type whose driver is not known here is not checked. *)
+  assert (
+    not
+      (fails
+         (one_backend
+            {|{"type": "gcs", "name": "g", "role": "main", "anything": 1}|})));
+  (Conf_parsing.driver_fields := fun _ -> None);
+  let domain_with extra =
+    Printf.sprintf
+      {|{"domains": [{"name": "d", "symlinks": "keep", "versioning": false,
+                      "frontends": ["fuse"], %s
+                      "backends": [{"type": "s3", "name": "s",
+                                    "role": "main"}]}]}|}
+      extra
+  in
+  assert (not (fails (domain_with {|"maxCache": "1G",|})));
+  assert (fails (domain_with {|"maxChunkForwards": 2,|}));
+  let top_with extra =
+    Printf.sprintf
+      {|{%s "domains": [{"name": "d", "symlinks": "keep", "versioning": false,
+                         "frontends": ["fuse"],
+                         "backends": [{"type": "s3", "name": "s",
+                                       "role": "main"}]}]}|}
+      extra
+  in
+  assert (not (fails (top_with {|"uplink": {"maxRate": 1000000},|})));
+  assert (fails (top_with {|"uplink": {"maxrate": 1000000},|}));
+  assert (fails (top_with {|"maxChunkForwards": 2,|}));
   assert (fails (with_link {|, "link": ""|}));
   assert (fails (with_link {|, "link": 3|}));
   assert (

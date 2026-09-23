@@ -41,6 +41,14 @@ let deferred_root ~paths (d : Conf_parsing.domain) =
 (* The one place a configured role becomes behavior: [replica] and [backfill]
    are the same target with one bit between them — whether reads may reach it —
    so a resynced backfill is promoted by editing one word. *)
+(* The drivers are known here and not below, where the config is read. *)
+let () =
+  Conf_parsing.driver_fields :=
+    fun backend_type ->
+      Option.map
+        (List.map (fun (f : Field_spec.t) -> f.Field_spec.name))
+        (Backend_lwt.spec_for backend_type)
+
 let build_backends ~paths ~resume ~max_chunk_forwards (d : Conf_parsing.domain)
     :
     (module Backend_lwt.Store) * (module Backend_lwt.Store) Backend.member list

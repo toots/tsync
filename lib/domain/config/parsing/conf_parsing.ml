@@ -79,6 +79,31 @@ let parse_size s =
             if n > 0 then Some n else None
         | _ -> None))
 
+(* A key nothing reads is refused rather than ignored: a setting renamed or
+   removed, or one typed wrong, would otherwise leave the store run as if it
+   were not there, and nothing would say so. *)
+let refuse_unknown ~where ~known json =
+  match json with
+    | `Assoc fields -> (
+        match
+          List.filter_map
+            (fun (k, _) -> if List.mem k known then None else Some k)
+            fields
+        with
+          | [] -> ()
+          | unknown ->
+              failwith
+                (Printf.sprintf "%s: unknown key%s %s" where
+                   (if List.length unknown = 1 then "" else "s")
+                   (String.concat ", " (List.map (Printf.sprintf "%S") unknown)))
+        )
+    | _ -> ()
+
+(* The keys a backend type's driver reads, beside the ones read here. Set by
+   whoever knows the drivers; [None] for a type it does not, whose keys are
+   then not checked. *)
+let driver_fields : (string -> string list option) ref = ref (fun _ -> None)
+
 let parse_backend json =
   let open Yojson.Basic.Util in
   let backend_type = json |> member "type" |> to_string in
@@ -126,6 +151,13 @@ let parse_backend json =
     failwith
       (Printf.sprintf
          "backend %s: \"link\" names a link, and a local store has none" name);
+  Option.iter
+    (fun driver ->
+      refuse_unknown
+        ~where:(Printf.sprintf "backend %s" name)
+        ~known:(["type"; "name"; "role"; "link"] @ driver)
+        json)
+    (!driver_fields backend_type);
   let fields =
     to_assoc json
     |> List.filter_map (fun (k, v) ->
@@ -227,6 +259,21 @@ let validate_roles name backends =
 let parse_domain json =
   let open Yojson.Basic.Util in
   let name = json |> member "name" |> to_string in
+  refuse_unknown
+    ~where:(Printf.sprintf "domain %s" name)
+    ~known:
+      [
+        "name";
+        "backends";
+        "frontends";
+        "symlinks";
+        "versioning";
+        "readOnly";
+        "chunkSize";
+        "cacheChunkSize";
+        "maxCache";
+      ]
+    json;
   let backends =
     json |> member "backends" |> to_list |> List.map parse_backend
   in
@@ -275,6 +322,9 @@ let uplink_of_json ?(base = Uplink_control.default_settings) ?(where = "uplink")
   match json with
     | `Null -> d
     | `Assoc _ ->
+        refuse_unknown ~where
+          ~known:["enabled"; "headroom"; "targetDelayMs"; "minRate"; "maxRate"]
+          json;
         let enabled =
           match json |> member "enabled" with
             | `Bool b -> b
@@ -346,6 +396,19 @@ let links_to_json t : Yojson.Basic.t =
 
 let of_json json =
   let open Yojson.Basic.Util in
+  refuse_unknown ~where:"config"
+    ~known:
+      [
+        "name";
+        "tls";
+        "maxUploads";
+        "maxChunkBuffers";
+        "maxDownloads";
+        "uplink";
+        "links";
+        "domains";
+      ]
+    json;
   let domains = json |> member "domains" |> to_list |> List.map parse_domain in
   let uplink = uplink_of_json (json |> member "uplink") in
   let links = links_of_json ~uplink ~domains (json |> member "links") in
