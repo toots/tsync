@@ -54,7 +54,8 @@ let cmd : unit Cmd.t =
           let socket_path = Runtime.domain_socket_path runtime_paths d.name in
           (* The only [resume]: the daemon is the process that outlives a
              deferred target's work, so it is the one that picks up what a
-             previous run left owed. *)
+             previous run left owed. Its converging parent starts those queues
+             once the frontends are forked ({!Domain.start_resumed}). *)
           let conf = make_conf ~domain:d.name ~socket_path ~resume:true cfg in
           (d, conf, mount_fn d))
         domains

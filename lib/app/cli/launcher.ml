@@ -194,6 +194,11 @@ let handler ~request_stop engines line =
              what it reports goes into the split, and the grant comes back.
              A daemon built without this answers unknown action, which the
              asker reads as a refusal and governs its own link. *)
+          (* A frontend recorded a replica job it leaves to this process. *)
+          | Some (`String "rescan") ->
+              Lwt.async Durable_queue_lwt.rescan_all;
+              Lwt.return
+                (Yojson.Safe.to_string (`Assoc [("ok", `Bool true)]), `Continue)
           | Some (`String "uplink") -> (
               let pid =
                 match List.assoc_opt "pid" obj with
@@ -294,6 +299,9 @@ let converge domains =
       (* Before the engines, which may have deferred work to send at once: the
          link's owner is this process, and its lessees find it answering. *)
       Uplink_lwt.own_links ();
+      (* Here and nowhere else: the frontends forked with these queues built,
+         and only record into them. *)
+      Domain.start_resumed ();
       let* () =
         Lwt_list.iter_s
           (fun e ->
@@ -320,6 +328,29 @@ let converge domains =
           Cv.drain ())
         engines)
 
+(* One notice for a burst of records: a copy of a tree records a job per file,
+   and the parent's one scan finds them all. *)
+let ask_rescan ~socket_path =
+  let pending = ref false in
+  fun () ->
+    if not !pending then begin
+      pending := true;
+      Lwt.async (fun () ->
+          let open Lwt.Syntax in
+          let* () = Lwt_unix.sleep 0.5 in
+          pending := false;
+          Lwt.catch
+            (fun () ->
+              let+ (_ : string) =
+                Ipc_lwt.send_lwt ~timeout:1. ~socket_path
+                  (Yojson.Safe.to_string
+                     (`Assoc [("action", `String "rescan")]))
+              in
+              ())
+            (* Its sweep, or its next start, finds the record anyway. *)
+            (fun _ -> Lwt.return_unit))
+    end
+
 let run ?(on_leaf = fun ~name:_ -> ()) domains =
   let run_group (name, bindings) =
     let (module F : Frontend.S) = resolve name in
@@ -332,8 +363,11 @@ let run ?(on_leaf = fun ~name:_ -> ()) domains =
     (* After the fork, so each process is named for what it runs. *)
     on_leaf ~name;
     (* And asks the parent, which owns the link, for its share of it. *)
-    Uplink_lwt.lease_from
-      ~socket_path:(Runtime.sync_socket_path (Runtime.default_paths ()));
+    let sync_socket = Runtime.sync_socket_path (Runtime.default_paths ()) in
+    Uplink_lwt.lease_from ~socket_path:sync_socket;
+    (* And leaves the replica jobs its writes record to the parent, which runs
+       them: told at once rather than at its next sweep. *)
+    Domain.set_on_recorded (ask_rescan ~socket_path:sync_socket);
     (* Sized here because only this side knows what else shares the leaf, and
        after the fork because it is the first thing to touch Lwt. *)
     let serve items =

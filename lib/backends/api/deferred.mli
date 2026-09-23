@@ -90,6 +90,12 @@ module Over
       at once and reorder a rename's copy and delete. A one-shot command still
       records and drains its own.
 
+      A resuming target is built stopped, and runs nothing until
+      {!start_resumed}: the daemon builds its stores before it forks its
+      frontends, and a queue started there would be run by every child too. A
+      process that never calls it records what its writes owe, forwards no
+      chunks, and leaves the records to the process that does.
+
       [chunk_from_prefix] is where the source keeps chunks it has not finished
       collecting — see {!Collection} — and a read falls through to it, though
       what is written to the target is always the ordinary chunk key. Omit it
@@ -137,4 +143,12 @@ module Over
   (** Give up this process's claim on a target's log, so another may take what
       it left owed without waiting for this one to exit. *)
   val release : root:string -> name:string -> unit
+
+  (** Start every resuming target built so far, picking up what their logs hold.
+      Once per process, in the one that is to run them. *)
+  val start_resumed : unit -> unit
+
+  (** Called after a target not running in this process records a job, so a
+      caller can tell the process that runs it to look. *)
+  val set_on_recorded : (unit -> unit) -> unit
 end

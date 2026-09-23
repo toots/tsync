@@ -22,6 +22,20 @@ struct
 
   open Io_syntax.Make (Io)
 
+  (* Resuming targets built but not yet running, started together by the
+     process that is to run them. *)
+  let resumed_starts : (unit -> unit) list ref = ref []
+
+  (* Told when a target not running here has recorded a job, so the process
+     that does run it can be asked to look. *)
+  let on_recorded = ref (fun () -> ())
+  let set_on_recorded f = on_recorded := f
+
+  let start_resumed () =
+    let starts = List.rev !resumed_starts in
+    resumed_starts := [];
+    List.iter (fun start -> start ()) starts
+
   module Q = Queues.Make (struct
     type t = job
 
@@ -239,7 +253,12 @@ struct
         ~run:(fun ~id:_ job -> run job)
         ()
     in
-    Q.start ~recover:resume queue;
+    let running = ref false in
+    let start () =
+      running := true;
+      Q.start ~recover:resume queue
+    in
+    if resume then resumed_starts := start :: !resumed_starts else start ();
     (* Chunk pushes are not owed — a manifest job fetches whatever is missing — but
        one still in flight when a command exits would land after everything else
        has gone quiet. *)
@@ -258,7 +277,7 @@ struct
        operation rather than one per chunk. *)
     let forward_chunk key data =
       if
-        Hashtbl.mem ensured key
+        (not !running) || Hashtbl.mem ensured key
         || !chunks_in_flight >= max_chunk_forwards
         || not (room_for ~bytes:(Bigstring.length data))
       then ()
@@ -302,14 +321,17 @@ struct
           degraded = s.Durable_queue.degraded;
         }
 
+      let post job =
+        let+ () = Q.post queue job in
+        if not !running then !on_recorded ()
+
       let accept = function
         | Put { key; data } when Stored_key.is_in ~prefix:chunk_prefix key ->
             forward_chunk key data;
             Io.return ()
-        | Put { key; _ } -> Q.post queue (Job_put key)
-        | Copy { src_key; dst_key } ->
-            Q.post queue (Job_copy (src_key, dst_key))
-        | Delete key -> Q.post queue (Job_delete key)
-        | Delete_multi keys -> Q.post queue (Job_delete_multi keys)
+        | Put { key; _ } -> post (Job_put key)
+        | Copy { src_key; dst_key } -> post (Job_copy (src_key, dst_key))
+        | Delete key -> post (Job_delete key)
+        | Delete_multi keys -> post (Job_delete_multi keys)
     end)
 end

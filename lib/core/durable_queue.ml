@@ -380,7 +380,9 @@ struct
        and outlives the process, so holding a command open for a store that is
        down buys nothing. *)
     let rec settle t =
-      if idle t then Io.return ()
+      (* Not running: nothing here will move what is queued, which is on disk
+         for whoever does run it. *)
+      if idle t || t.running = [] then Io.return ()
       else if t.failures > 0 then begin
         Log.warn "%s: target is down, leaving %d job(s) queued on disk" t.name
           (Queue.length t.jobs);

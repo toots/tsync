@@ -298,3 +298,6 @@ let reading_from name (module C : Conf_lwt.S) : (module Conf_lwt.S) =
         let health = Src.health
       end : Backend_lwt.Store)
   end : Conf_lwt.S)
+
+let start_resumed = Domain_store_lwt.Deferred.start_resumed
+let set_on_recorded = Domain_store_lwt.Deferred.set_on_recorded

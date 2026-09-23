@@ -275,6 +275,31 @@ let () =
          ~target:(switchable ~up ~root:t3_root)
          ~name:"offline" ()
      in
+     (* Built stopped, as the daemon builds it before forking: nothing is
+        picked up until the process that runs it starts it. *)
+     step "owed before the start: %d" (owed "offline");
+     (* A write while it is stopped, as a frontend's is: recorded and left for
+        whoever runs the queue, the recording said to the hook, the chunk not
+        forwarded ahead of it. *)
+     let told = ref 0 in
+     Domain_store_lwt.Deferred.set_on_recorded (fun () -> incr told);
+     let (module B4 : Backend_lwt.Store) = l4 in
+     let* () = B4.put ~key:c2 ~data:(Bigstring.of_string "bbbb") () in
+     let* () =
+       B4.put ~key:(manifest_key "five")
+         ~data:
+           (Bigstring.of_string
+              (manifest ~name:"five" [Stored_key.to_string c2]))
+         ()
+     in
+     let* () = Lwt_unix.sleep 0.1 in
+     step
+       "put chunk c2 and manifest five while stopped: owed %d, told %d, on the \
+        target %d key(s)"
+       (owed "offline") !told
+       (List.length (keys_under t3_root));
+     Domain_store_lwt.Deferred.set_on_recorded (fun () -> ());
+     Domain_store_lwt.Deferred.start_resumed ();
      let stats4 = T4.stats in
      let* () = settled ~name:"offline" stats4 in
      step "owed once caught up: %d" (owed "offline");
