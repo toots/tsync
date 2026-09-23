@@ -201,6 +201,8 @@ struct
     mutable last_state : Uplink_control.state;
     mutable probe_warned : bool;
     mutable used : bool;  (** Something here has asked for room. *)
+    mutable granted_limit : Uplink_control.limit option;
+        (** A lessee's: what holds the owner's rate, as it last said. *)
   }
 
   and process = {
@@ -288,6 +290,7 @@ struct
         last_state = Uplink_control.state control;
         probe_warned = false;
         used = false;
+        granted_limit = None;
       }
     in
     if p.mode = Owner then l.lessees <- Some (lessee_table l);
@@ -487,7 +490,37 @@ struct
                   reports) );
          ])
 
-  type answer = Granted of (string * float) list * float | Refused | Unreached
+  type grant = { rate : float; limit : Uplink_control.limit option }
+  type answer = Granted of (string * grant) list * float | Refused | Unreached
+
+  (* The owner's side of the same line: a grant per link, and at the top the
+     first one's rate for a lessee that asked in the one-link shape. *)
+  let answer_json ~flat ~interval grants =
+    `Assoc
+      ([
+         ("ok", `Bool true);
+         ("interval", `Float interval);
+         ( "links",
+           `Assoc
+             (List.map
+                (fun (name, g) ->
+                  ( name,
+                    `Assoc
+                      (("rate", `Float g.rate)
+                      ::
+                        (match g.limit with
+                        | Some l ->
+                            [
+                              ( "limit",
+                                `String (Uplink_control.string_of_limit l) );
+                            ]
+                        | None -> [])) ))
+                grants) );
+       ]
+      @
+        match (flat, grants) with
+        | true, (_, g) :: _ -> [("rate", `Float g.rate)]
+        | _ -> [])
 
   let num fields key =
     match List.assoc_opt key fields with
@@ -508,7 +541,18 @@ struct
                       (fun (name, g) ->
                         match g with
                           | `Assoc gf ->
-                              Option.map (fun r -> (name, r)) (num gf "rate")
+                              Option.map
+                                (fun rate ->
+                                  ( name,
+                                    {
+                                      rate;
+                                      limit =
+                                        (match List.assoc_opt "limit" gf with
+                                          | Some (`String l) ->
+                                              Uplink_control.limit_of_string l
+                                          | _ -> None);
+                                    } ))
+                                (num gf "rate")
                           | _ -> None)
                       links,
                     Option.value (num fields "interval")
@@ -543,8 +587,10 @@ struct
           let now = Clock.now () in
           (* A link the answer does not name keeps its last grant. *)
           List.iter
-            (fun (name, rate) ->
-              Uplink_budget.set_rate (link p name).share ~now rate)
+            (fun (name, g) ->
+              let l = link p name in
+              Uplink_budget.set_rate l.share ~now g.rate;
+              l.granted_limit <- g.limit)
             grants;
           if p.mode <> Leased then begin
             p.mode <- Leased;
@@ -552,7 +598,7 @@ struct
               (Printf.sprintf "uplink: leasing from the daemon: %s"
                  (String.concat ", "
                     (List.map
-                       (fun (name, rate) -> name ^ " " ^ per_sec rate)
+                       (fun (name, g) -> name ^ " " ^ per_sec g.rate)
                        grants)))
           end
       | Refused ->
@@ -665,7 +711,11 @@ struct
                 Option.iter
                   (Uplink_control.observe_delay l.control ~now)
                   report.Uplink_lease.probe;
-                (name, Uplink_lease.rate_for table ~now ~pid))
+                ( name,
+                  {
+                    rate = Uplink_lease.rate_for table ~now ~pid;
+                    limit = Some (Uplink_control.limit l.control);
+                  } ))
               reports
           in
           Some (grants, p.interval)
@@ -722,6 +772,13 @@ struct
         match (k, mode) with
           | "state", Leased -> [(k, `String "leased")]
           | "capacityBytesPerSec", Leased -> [(k, `Null)]
+          | "limit", Leased ->
+              [
+                ( k,
+                  match l.granted_limit with
+                    | Some g -> `String (Uplink_control.string_of_limit g)
+                    | None -> `Null );
+              ]
           | "rateBytesPerSec", Leased ->
               [(k, `Int (int_of_float (Uplink_budget.rate l.share)))]
           | "drops", _ ->

@@ -111,6 +111,15 @@ val tick : t -> now:float -> limited:bool -> unit
 val rate : t -> float
 val state : t -> state
 
+(** What holds the rate: the configured [max_rate], once the rate has reached
+    it; a capacity the law has measured; or nothing yet, while it is still
+    finding the link's edge. *)
+type limit = Configured | Measured | Estimating
+
+val limit : t -> limit
+val string_of_limit : limit -> string
+val limit_of_string : string -> limit option
+
 (** Bytes per second the link has for us, as last measured: raised by a ramp
     that met the edge, lowered by a queue that stayed up; [None] until the edge
     has been met once. *)

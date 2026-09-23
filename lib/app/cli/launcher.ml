@@ -229,21 +229,7 @@ let handler ~request_stop engines line =
                 | Some (grants, interval) ->
                     Lwt.return
                       ( Yojson.Safe.to_string
-                          (`Assoc
-                             ([
-                                ("ok", `Bool true);
-                                ("interval", `Float interval);
-                                ( "links",
-                                  `Assoc
-                                    (List.map
-                                       (fun (name, rate) ->
-                                         (name, `Assoc [("rate", `Float rate)]))
-                                       grants) );
-                              ]
-                             @
-                               match (flat, grants) with
-                               | true, (_, rate) :: _ -> [("rate", `Float rate)]
-                               | _ -> [])),
+                          (Uplink_lwt.answer_json ~flat ~interval grants),
                         `Continue )
                 | None -> fail `Invalid "not the links' owner")
           | Some (`String "stop") ->

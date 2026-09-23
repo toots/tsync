@@ -101,7 +101,7 @@ let own g = U.own (U.process_of g)
 (* One link's renewal, as the flat wire carries it. *)
 let renewal o ~pid r =
   match U.lease_renewal (U.process_of o) ~pid [(Uplink.default_link, r)] with
-    | Some ((_, rate) :: _, interval) -> Some (rate, interval)
+    | Some ((_, g) :: _, interval) -> Some (g.U.rate, interval)
     | _ -> None
 
 let state u = match field u "state" with Some (`String s) -> s | _ -> "?"
@@ -331,5 +331,38 @@ let () =
      let* () = tick () in
      check "local, every link" (mode g = U.Local);
 
-     report ~expected:25 ();
+     case "a lessee says what holds the owner's rate";
+     Fake_clock.reset ();
+     (* A real owner behind the line, held from the start by a ceiling below
+        where every law begins. *)
+     let o = U.create ~settings:{ on with max_rate = Some 100_000 } () in
+     own o;
+     let through_owner line =
+       let reports =
+         List.filter_map
+           (fun (name, r) ->
+             match r with
+               | `Assoc fields -> Some (name, Uplink_lease.report_of_json fields)
+               | _ -> None)
+           (links_of (Yojson.Safe.from_string line))
+       in
+       match U.lease_renewal (U.process_of o) ~pid:9 reports with
+         | Some (grants, interval) ->
+             Lwt.return
+               (Yojson.Safe.to_string
+                  (U.answer_json ~flat:false ~interval grants))
+         | None -> Lwt.return {|{"ok":false}|}
+     in
+     let g = U.create ~settings:on () in
+     lease g ~send:through_owner;
+     let* () = U.acquire g ~class_:U.Background ~bytes:1024 in
+     let* () = tick () in
+     check "the owner's ceiling, as the owner said"
+       ~why:(fun () ->
+         match field g "limit" with
+           | Some j -> Yojson.Safe.to_string j
+           | None -> "absent")
+       (field g "limit" = Some (`String "configured"));
+
+     report ~expected:26 ();
      Lwt.return_unit)

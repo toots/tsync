@@ -151,11 +151,19 @@ module Make
       store on is made for the lessee, on the owner's settings for the name.
       [None] from a process that is not the owner, which the caller turns into a
       refusal. *)
+  (** A lessee's share of one link, and what holds the owner's rate there. *)
+  type grant = { rate : float; limit : Uplink_control.limit option }
+
   val lease_renewal :
     process ->
     pid:int ->
     (string * Uplink_lease.report) list ->
-    ((string * float) list * float) option
+    ((string * grant) list * float) option
+
+  (** The owner's answer on the wire: [flat] for a lessee that asked in the
+      one-link shape, which reads its grant at the top. *)
+  val answer_json :
+    flat:bool -> interval:float -> (string * grant) list -> Yojson.Safe.t
 
   (** Waits for room on the link, in order; a body of at most {!small_body}
       bytes passes ahead when the budget covers it. Returns at once when the

@@ -92,6 +92,7 @@ let () =
   let t = Uplink_control.create ~settings ~now:0. () in
   check "begins at the initial rate"
     (Uplink_control.rate t = !Uplink_control.initial_rate);
+  check "and says it is still estimating" (Uplink_control.limit t = Estimating);
   let rates, _, now = run link t ~from:0. ~seconds:6 in
   check "and is ramping" (Uplink_control.state t = Ramping);
   check "twice as much each tick, until the link is found"
@@ -113,6 +114,7 @@ let () =
   check "the rate holds at the headroom, not at the edge"
     ~why:(fun () -> pct (last rates) cap)
     (within (0.6 *. cap) (0.85 *. cap) (last rates));
+  check "held by what it measured" (Uplink_control.limit t = Measured);
   check "and the queue it built on the way up has drained"
     ~why:(fun () -> Printf.sprintf "%.0f ms" (1000. *. last delays))
     (last delays < link.base +. settings.target_delay);
@@ -167,11 +169,15 @@ let () =
     ~why:(fun () -> pct (last rates) cap)
     (List.for_all (fun r -> r <= float_of_int ceiling_rate) rates
     && last rates = float_of_int ceiling_rate);
+  check "and says the ceiling is the config's"
+    (Uplink_control.limit t = Configured);
   Uplink_control.timed_out t ~now;
   Uplink_control.timed_out t ~now;
   Uplink_control.timed_out t ~now;
   check "and however many timeouts, not below the floor"
     (Uplink_control.rate t = float_of_int floor_rate);
+  check "where the ceiling no longer holds it"
+    (Uplink_control.limit t <> Configured);
 
   case "a sender with little to send is granted no more";
   let t = Uplink_control.create ~settings ~now:0. () in
@@ -249,4 +255,4 @@ let () =
   check "until the old base has fallen out of the window"
     (Uplink_control.base_delay t ~now:later = Some 0.140);
 
-  report ~expected:29 ()
+  report ~expected:33 ()

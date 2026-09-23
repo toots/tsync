@@ -31,6 +31,19 @@ let string_of_state = function
   | Steady -> "steady"
   | Backing_off -> "backingOff"
 
+type limit = Configured | Measured | Estimating
+
+let string_of_limit = function
+  | Configured -> "configured"
+  | Measured -> "measured"
+  | Estimating -> "estimating"
+
+let limit_of_string = function
+  | "configured" -> Some Configured
+  | "measured" -> Some Measured
+  | "estimating" -> Some Estimating
+  | _ -> None
+
 (* A rolling aggregate over fixed periods, keyed on the time handed in rather
    than the wall's, so a test can turn it. *)
 module Window = struct
@@ -263,11 +276,22 @@ let tick t ~now ~limited =
   in
   set_rate t next
 
+(* What holds the rate where it is. A configured ceiling says so once the rate
+   has reached it, whatever the law knows of the link: raising it is the
+   owner's call, not something the link will answer. *)
+let limit t =
+  match t.settings.max_rate with
+    | Some m when t.rate >= float_of_int m *. 0.999 -> Configured
+    | _ -> ( match t.capacity with Some _ -> Measured | None -> Estimating)
+
 let json t ~now =
   let ms s = `Float (Float.round (s *. 10_000.) /. 10.) in
   [
     ("enabled", `Bool t.settings.enabled);
     ("state", `String (string_of_state t.state));
+    ("limit", `String (string_of_limit (limit t)));
+    ( "maxRateBytesPerSec",
+      match t.settings.max_rate with Some m -> `Int m | None -> `Null );
     ("rateBytesPerSec", `Int (int_of_float (rate t)));
     ( "capacityBytesPerSec",
       match t.capacity with Some c -> `Int (int_of_float c) | None -> `Null );
