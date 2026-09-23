@@ -47,6 +47,10 @@ val initial_rate : float ref
 (** One control step, and one probe round, seconds. *)
 val tick_interval : float ref
 
+(** How long a probe is given before it is read as the length of the timeout
+    itself, seconds. *)
+val probe_timeout : float ref
+
 (** The largest fraction the rate moves in one step while steady. *)
 val gain : float ref
 
@@ -89,9 +93,10 @@ val dropped : t -> unit
     they took. A body given up on counts toward nothing, and is not reported. *)
 val completed : t -> now:float -> bytes:int -> elapsed:float -> unit
 
-(** One probe's round trip, seconds. Several in a tick are read as their least,
-    server-side delay being one-sided. *)
-val observe_delay : t -> now:float -> float -> unit
+(** One probe's round trip, seconds, over [path] (a store; one path when
+    omitted). Each path is read above its own base, and several in a tick as the
+    least of those, server-side delay being one-sided. *)
+val observe_delay : ?path:string -> t -> now:float -> float -> unit
 
 (** A request timed out: the rate is cut by {!decrease_floor} and held. *)
 val timed_out : t -> now:float -> unit
@@ -125,7 +130,8 @@ val limit_of_string : string -> limit option
     has been met once. *)
 val capacity : t -> float option
 
-(** The least probe delay in {!base_window}; [None] before any probe. *)
+(** The least probe delay in {!base_window} over every path; [None] before any
+    probe. *)
 val base_delay : t -> now:float -> float option
 
 (** The smoothed delay above base, seconds. *)

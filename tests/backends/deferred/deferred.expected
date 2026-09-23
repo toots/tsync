@@ -34,3 +34,6 @@
 === the mains are what a write waits for
   manifest one on main: true
   manifest two on main, though its target dropped it: true
+
+=== a copy a stop cuts short is left owed, not rebuilt
+  copy six -> seven attempted true: puts after it 0, owed 1

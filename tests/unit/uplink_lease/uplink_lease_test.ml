@@ -65,15 +65,17 @@ let () =
     (near (Uplink_lease.own_rate t) (total /. 2.)
     && near (Uplink_lease.rate_for t ~now:0. ~pid:1) (total /. 2.));
 
-  case "silence for three intervals drops a lessee";
+  case "silence for three intervals and a probe's timeout drops a lessee";
   let t = Uplink_lease.create () in
   Uplink_lease.record t ~now:0. ~pid:1 wants;
   Uplink_lease.record t ~now:0. ~pid:2 wants;
-  Uplink_lease.record t ~now:5. ~pid:2 wants;
-  check "at seven seconds, only the one heard at five"
-    (List.map fst (Uplink_lease.live t ~now:7.) = [2]);
+  check "a renewal a slow probe held back finds its row still there"
+    (List.map fst (Uplink_lease.live t ~now:8.) = [1; 2]);
+  Uplink_lease.record t ~now:10. ~pid:2 wants;
+  check "at seventeen seconds, only the one heard at ten"
+    (List.map fst (Uplink_lease.live t ~now:17.) = [2]);
   check "and its bytes are the only ones in flight"
-    (Uplink_lease.in_flight t ~now:7. = 65536);
+    (Uplink_lease.in_flight t ~now:17. = 65536);
 
   case "a newcomer since the last split is granted an even share at once";
   let t = Uplink_lease.create () in
@@ -131,15 +133,22 @@ let () =
         timeouts = 0;
         waiting = 2;
         held_back = true;
-        probe = None;
+        probes = [];
       });
 
   case "what a lessee timed travels as milliseconds, and only when it did";
   let r = Uplink_lease.report_of_json [("probeMs", `Float 42.)] in
-  check "read" (r.Uplink_lease.probe = Some 0.042);
+  check "an older lessee's least is read over no store"
+    (r.Uplink_lease.probes = [("", 0.042)]);
   check "absent is none"
-    ((Uplink_lease.report_of_json []).Uplink_lease.probe = None);
-  let timed = { Uplink_lease.idle with in_flight = 7; probe = Some 0.0123 } in
+    ((Uplink_lease.report_of_json []).Uplink_lease.probes = []);
+  let timed =
+    {
+      Uplink_lease.idle with
+      in_flight = 7;
+      probes = [("near", 0.0123); ("far", 0.2)];
+    }
+  in
   check "written and read back"
     (Uplink_lease.report_of_json (Uplink_lease.report_to_json timed) = timed);
   check "and not written when none"
@@ -147,4 +156,4 @@ let () =
        (List.mem_assoc "probeMs"
           (Uplink_lease.report_to_json Uplink_lease.idle)));
 
-  report ~expected:20 ()
+  report ~expected:21 ()

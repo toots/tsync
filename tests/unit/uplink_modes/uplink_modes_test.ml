@@ -283,7 +283,7 @@ let () =
         lan's law reads a delay it has no store of its own to see, above the
         least it was told. *)
      let timed probe =
-       { Uplink_lease.idle with in_flight = mb; probe = Some probe }
+       { Uplink_lease.idle with in_flight = mb; probes = [("lan", probe)] }
      in
      ignore (U.lease_renewal (U.process_of o) ~pid:8 [("lan", timed 0.02)]);
      let* () = tick () in

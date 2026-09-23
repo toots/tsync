@@ -230,11 +230,13 @@ struct
         | Job_copy (src, dst) ->
             Io.catch
               (fun () -> Target.copy ~src_key:src ~dst_key:dst ())
-              (fun _ ->
-                (* The target has no [src]: added after it was written, or its job
-                   was dropped. The authoritative [dst] exists by now, so rebuild
-                   from that, chunk check included. *)
-                run (Job_put dst))
+              (function
+                | Shutdown.Stopping -> Io.fail Shutdown.Stopping
+                | _ ->
+                    (* The target has no [src]: added after it was written, or
+                       its job was dropped. The authoritative [dst] exists by
+                       now, so rebuild from that, chunk check included. *)
+                    run (Job_put dst))
         | Job_delete key ->
             Hashtbl.remove ensured key;
             let+ (_ : bool) = Target.delete ~key () in

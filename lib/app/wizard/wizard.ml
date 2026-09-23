@@ -192,6 +192,16 @@ module Make (E : ENV) = struct
                   unset;
                 prompt_size_opt ~unset msg default)
 
+  (* The parser refuses a ceiling below the floor, and the floor is not asked
+     for here, so a ceiling under it is asked again rather than written. *)
+  let rec prompt_ceiling ~min_rate msg default =
+    match prompt_size_opt ~unset:"none" msg default with
+      | Some n when n < min_rate ->
+          Printf.printf "  (at least %s, the link's minRate)\n%!"
+            (Metrics.human_bytes min_rate);
+          prompt_ceiling ~min_rate msg default
+      | ceiling -> ceiling
+
   (* Suggested cache cap for a new domain; the prompt still takes "none". Editing
      an existing domain shows what it already has. *)
   let default_max_cache = 1024 * 1024 * 1024
@@ -971,7 +981,7 @@ module Make (E : ENV) = struct
            (int_of_float (Float.round (u.target_delay *. 1000.)))
        in
        let max_rate =
-         prompt_size_opt ~unset:"none"
+         prompt_ceiling ~min_rate:u.min_rate
            "Upload rate ceiling, per second (\"none\" = what the link allows)"
            u.max_rate
        in
@@ -993,19 +1003,22 @@ module Make (E : ENV) = struct
                | Some (`Assoc o) -> o
                | _ -> []
            in
-           let current =
-             match List.assoc_opt "maxRate" entry with
+           let size key =
+             match List.assoc_opt key entry with
                | Some (`Int n) -> Some n
                | Some (`String v) -> Conf_parsing.parse_size v
                | _ -> None
            in
            let ceiling =
-             prompt_size_opt ~unset:"none"
+             prompt_ceiling
+               ~min_rate:
+                 (Option.value (size "minRate")
+                    ~default:!uplink.Uplink_control.min_rate)
                (Printf.sprintf
                   "Link %s: upload rate ceiling, per second (\"none\" = as \
                    uplink)"
                   name)
-               current
+               (size "maxRate")
            in
            let entry =
              List.remove_assoc "maxRate" entry
@@ -1127,6 +1140,15 @@ module Make (E : ENV) = struct
     done;
     if not !saved then Printf.printf "Aborted; config left untouched.\n"
     else begin
+      (* The parser refuses an override no backend is on any more. *)
+      let used = link_names () in
+      List.iter
+        (fun (name, _) ->
+          if not (List.mem name used) then
+            Printf.printf
+              "Dropping the settings of link %s: no backend is on it\n" name)
+        !links;
+      links := List.filter (fun (name, _) -> List.mem name used) !links;
       write_config ~path:config_path ~client_name:!client_name ~uplink:!uplink
         ~links:(match !links with [] -> None | l -> Some (`Assoc l))
         ~max_uploads:!max_uploads ~max_chunk_buffers:!max_chunk_buffers
