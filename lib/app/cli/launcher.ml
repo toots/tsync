@@ -237,7 +237,7 @@ let handler ~request_stop engines line =
                  asked rather than losing the connection. *)
               request_stop ();
               Lwt.return
-                (Yojson.Safe.to_string (`Assoc [("ok", `Bool true)]), `Stop)
+                (Yojson.Safe.to_string (`Assoc [("ok", `Bool true)]), `Continue)
           | Some (`String a) -> fail `Invalid ("unknown action: " ^ a)
           | _ -> fail `Invalid "unknown action: ")
     | _ -> fail `Internal "expected JSON object"
@@ -275,6 +275,7 @@ let converge domains =
       let open Lwt.Syntax in
       let stop, wake = Lwt.wait () in
       let request_stop () =
+        Shutdown.request ();
         match Lwt.state stop with
           | Lwt.Sleep -> Lwt.wakeup_later wake ()
           | _ -> ()
@@ -282,6 +283,10 @@ let converge domains =
       List.iter
         (fun s -> ignore (Lwt_unix.on_signal s (fun _ -> request_stop ())))
         [Sys.sigterm; Sys.sigint];
+      (* As the frontends do: Lwt's default ends the process on any exception
+         a background loop lets escape, the drain included. *)
+      (Lwt.async_exception_hook :=
+         fun exn -> Log.err "async exception: %s" (Printexc.to_string exn));
       (* Before the engines, which may have deferred work to send at once: the
          link's owner is this process, and its lessees find it answering. *)
       Uplink_lwt.own_links ();
@@ -302,17 +307,25 @@ let converge domains =
       let socket_path = Runtime.sync_socket_path (Runtime.default_paths ()) in
       Log.debug "converging %d domain(s), answering at %s" (List.length engines)
         socket_path;
+      (* Closed once the domains have caught up, however the stop was asked,
+         so status can still be asked while they do. *)
+      let drained, drained_wake = Lwt.wait () in
       Lwt.async (fun () ->
-          Ipc_lwt.serve ~path:socket_path (handler ~request_stop engines));
+          Ipc_lwt.serve ~until:drained ~path:socket_path
+            (handler ~request_stop engines));
       ready ();
       let* () = stop in
       Log.info "stopping, letting the domains catch up";
-      (try Unix.unlink socket_path with _ -> ());
-      Lwt_list.iter_s
-        (fun e ->
-          let module Cv = (val e.converging : Domain_engine.Converging) in
-          Cv.drain ())
-        engines)
+      let* () =
+        Domain_engine.drain_for_stop
+          (List.map
+             (fun e ->
+               let module Cv = (val e.converging : Domain_engine.Converging) in
+               Cv.drain)
+             engines)
+      in
+      Lwt.wakeup_later drained_wake ();
+      Lwt.return_unit)
 
 (* One notice for a burst of records: a copy of a tree records a job per file,
    and the parent's one scan finds them all. *)

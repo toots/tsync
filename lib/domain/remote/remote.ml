@@ -165,6 +165,9 @@ struct
       in
       let one index =
         if !cancel then raise Cancelled;
+        (* A chunk not begun is not begun for a stop: the upload is owed on
+           disk, and what was sent is found again by content. *)
+        if Shutdown.requested () then raise Shutdown.Stopping;
         let* src = source index in
         let+ ck_rel, sent = Chunks_store.store src in
         Manifest.set table index ck_rel;
@@ -180,6 +183,7 @@ struct
        references them. *)
     let publish ~key ~size ~chunk_size ~mtime ~cancel table =
       if !cancel then raise Cancelled;
+      if Shutdown.requested () then raise Shutdown.Stopping;
       let count = Manifest.builder_count table in
       let chunk_key = Manifest.get table in
       let h1, h2 =

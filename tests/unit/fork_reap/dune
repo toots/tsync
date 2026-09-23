@@ -1,0 +1,11 @@
+(executable
+ (flags
+  (:standard
+   -open
+   Tsync_core
+   -open
+   Tsync_frontend_register
+   -open
+   Tsync_test_harness))
+ (name fork_reap_test)
+ (libraries tsync_core tsync_frontend_register tsync_test_harness unix))

@@ -37,6 +37,8 @@ let held ~name ~op health =
 
 module Make (Io : Io.S) (Clock : Clock.S with type 'a io := 'a Io.t) :
   LOOP with type 'a io := 'a Io.t = struct
+  module Nap = Shutdown.Sleep (Io) (Clock)
+
   (* [classify] comes from whoever built the loop, so a caller that knows more
      about its own failures says so once rather than at each request. *)
   let with_retry ?(max_attempts = default_attempts) ?(health = Health.always_up)
@@ -75,7 +77,11 @@ module Make (Io : Io.S) (Clock : Clock.S with type 'a io := 'a Io.t) :
       (if attempt < 3 then Log.info else Log.warn)
         "%s %s: %s; retrying (%d/%d) in %.1fs" name op (reason exn) attempt
         max_attempts delay;
-      Clock.sleep delay
+      (* A stop does not wait out a backoff: what this was doing is owed on
+         disk, and the next start tries again. *)
+      Io.bind (Nap.sleep delay) (function
+        | `Slept -> Io.return ()
+        | `Stopping -> Io.fail Shutdown.Stopping)
     in
     (* Told how it went and never refused: whether there is anywhere else to
        go is known to whoever chose this member, not down here. *)
@@ -88,7 +94,7 @@ module Make (Io : Io.S) (Clock : Clock.S with type 'a io := 'a Io.t) :
               answer)
             (f ()))
         (function
-          | Cancelled as exn -> Io.fail exn
+          | (Cancelled | Shutdown.Stopping) as exn -> Io.fail exn
           (* Called back by whoever was waiting, a deadline or a member found
              down: trying again is doing what they stopped asking for, and it
              says nothing about the link. *)

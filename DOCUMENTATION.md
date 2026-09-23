@@ -162,6 +162,8 @@ From there on you interact with your files as if they were local files on your h
 open, save, copy, move, delete, from any application or command-line tool.
 
 `tsync stop` unmounts; running `tsync start` by hand runs the daemon in the foreground instead.
+A stop or a restart takes seconds, however much is still uploading: what is in flight gives way,
+and everything owed is already on disk, so the next start picks it up where it stopped.
 
 ## 4. Put your files in
 
@@ -472,7 +474,8 @@ and a cloud copy behind it costs nothing but time it spends on its own.
 What each target still owes is kept on disk, under `<data dir>/deferred-pending/<domain>/`, and is
 recorded before the write is reported done. Losing the network, or the machine, does not lose
 it: a failure that can clear (a dropped link, a throttling store) is waited out and retried,
-and anything still queued when the daemon stops is picked up when it next starts. `tsync status`
+and anything still queued when the daemon stops is picked up when it next starts: a stop does not
+wait for it. `tsync status`
 shows how far behind each target is.
 
 Two things are not waited out. A failure that cannot clear — a wrong credential, a bucket that

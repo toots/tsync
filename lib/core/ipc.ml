@@ -142,13 +142,20 @@ struct
           Io.return ())
   end
 
-  let serve ?subs ~path handler =
+  let serve ?subs ?until ~path handler =
     let dir = Filename.dirname path in
     Fs.mkdir_p_sync ~perm:0o700 dir;
     (try Unix.unlink path with Unix.Unix_error (Unix.ENOENT, _, _) -> ());
     let stopped, wake_stop = Io.wait () in
     (* Waking twice raises, and two clients can each ask the daemon to stop. *)
     let woken = ref false in
+    let wake () =
+      if not !woken then begin
+        woken := true;
+        Io.wakeup_later wake_stop ()
+      end
+    in
+    Option.iter (fun until -> Io.async (fun () -> Io.map wake until)) until;
     (* One task per connection, so a slow request (a large restore) never blocks
        another client. A connection carries requests until the client closes it:
        fileproviderd asks constantly, and a connect and accept per question buys
@@ -161,10 +168,7 @@ struct
         let* () = T.flush oc in
         match action with
           | `Stop ->
-              if not !woken then begin
-                woken := true;
-                Io.wakeup_later wake_stop ()
-              end;
+              wake ();
               Io.return ()
           | `Subscribe topic -> (
               (* The connection becomes the event stream, so events and replies

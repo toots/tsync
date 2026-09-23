@@ -67,9 +67,14 @@ module Make
       connection carries requests until the client closes it. Stops serving when
       the handler returns [`Stop]; hands the connection to [subs] as an event
       stream when it returns [`Subscribe topic]. Without [subs] a subscribe
-      request simply closes the connection. *)
+      request simply closes the connection.
+
+      [until] stops it too, for a server whose stop is asked some other way — a
+      signal — or has work to finish first: either way the listener is closed
+      and its socket removed here, once. *)
   val serve :
     ?subs:Subs.t ->
+    ?until:unit Io.t ->
     path:string ->
     (string -> (string * [ `Continue | `Stop | `Subscribe of string ]) Io.t) ->
     unit Io.t

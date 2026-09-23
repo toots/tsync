@@ -1,0 +1,5 @@
+(executable
+ (flags
+  (:standard -open Tsync_core_lwt -open Tsync_test_harness))
+ (name ipc_serve_test)
+ (libraries tsync_core_lwt tsync_test_harness yojson lwt lwt.unix unix))

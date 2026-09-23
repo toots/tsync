@@ -163,7 +163,10 @@ module type QUEUE = sig
 
   val paused : t -> bool
 
-  (** Stop the workers and wait for them, leaving anything unstarted on disk. *)
+  (** Stop the workers and wait for them. What is queued is run first, as a
+      command finishing needs; once the process is stopping ({!Shutdown}) only
+      the jobs already running finish or give way, and the rest stays on disk
+      for the next start. *)
   val stop : t -> unit io
 
   val stats : t -> stats

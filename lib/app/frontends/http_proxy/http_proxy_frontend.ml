@@ -957,7 +957,7 @@ let ipc_handler ~port ~tls ~request_stop routes line =
                  that it was asked rather than losing the connection. *)
               request_stop ();
               Lwt.return
-                (Yojson.Safe.to_string (`Assoc [("ok", `Bool true)]), `Stop)
+                (Yojson.Safe.to_string (`Assoc [("ok", `Bool true)]), `Continue)
           | Some (`String a) -> fail `Invalid ("unknown action: " ^ a)
           | _ -> fail `Invalid "unknown action: ")
     | _ -> fail `Internal "expected JSON object"
@@ -1168,6 +1168,7 @@ let start served =
         would drop what those still owe a backfill target. *)
       let stop, wake = Lwt.wait () in
       let request_stop () =
+        Shutdown.request ();
         match Lwt.state stop with
           | Lwt.Sleep -> Lwt.wakeup_later wake ()
           | _ -> ()
@@ -1216,8 +1217,9 @@ let start served =
       in
       let socket_path = Runtime.proxy_socket_path (Runtime.default_paths ()) in
       Log.debug "starting IPC server at %s" socket_path;
+      let drained, drained_wake = Lwt.wait () in
       Lwt.async (fun () ->
-          Ipc_lwt.serve ~path:socket_path
+          Ipc_lwt.serve ~until:drained ~path:socket_path
             (ipc_handler ~port ~tls ~request_stop routes));
       ready ();
       let* () =
@@ -1227,12 +1229,17 @@ let start served =
              ())
       in
       Log.info "http-proxy stopping, letting backends catch up";
-      (try Unix.unlink socket_path with _ -> ());
-      Lwt_list.iter_s
-        (fun (sv : Frontend.served) ->
-          let module D = (val sv.Frontend.domain : Domain_engine.Domain) in
-          D.drain ())
-        served)
+      let* () =
+        Domain_engine.drain_for_stop
+          (List.map
+             (fun (sv : Frontend.served) ->
+               let module D = (val sv.Frontend.domain : Domain_engine.Domain) in
+               D.drain)
+             served)
+      in
+      (* The listener closes and removes its socket, once. *)
+      Lwt.wakeup_later drained_wake ();
+      Lwt.return_unit)
 
 let spec =
   Field_spec.

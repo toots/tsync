@@ -1162,6 +1162,14 @@
   (action
    (diff demand_ranges.expected demand_ranges.output))))
 
+(subdir unit/drain_for_stop
+ (alias
+  (name default)
+  (deps drain_for_stop_test.exe))
+ (rule
+  (alias runtest)
+  (action (run ./drain_for_stop_test.exe))))
+
 (subdir unit/eintr
  (alias
   (name default)
@@ -1282,6 +1290,14 @@
   (alias runtest)
   (action
    (diff folder_index_test.expected folder_index_test.output))))
+
+(subdir unit/fork_reap
+ (alias
+  (name default)
+  (deps fork_reap_test.exe))
+ (rule
+  (alias runtest)
+  (action (run ./fork_reap_test.exe))))
 
 (subdir unit/gc_job
  (alias
@@ -1412,6 +1428,14 @@
  (rule
   (alias runtest)
   (action (run ./import_progress.exe))))
+
+(subdir unit/ipc_serve
+ (alias
+  (name default)
+  (deps ipc_serve_test.exe))
+ (rule
+  (alias runtest)
+  (action (run ./ipc_serve_test.exe))))
 
 (subdir unit/item_ref
  (alias
@@ -1630,6 +1654,14 @@
   (action
    (diff queue_claim_test.expected queue_claim_test.output))))
 
+(subdir unit/queue_stop
+ (alias
+  (name default)
+  (deps queue_stop_test.exe))
+ (rule
+  (alias runtest)
+  (action (run ./queue_stop_test.exe))))
+
 (subdir unit/reserve
  (alias
   (name default)
@@ -1665,6 +1697,14 @@
   (alias runtest)
   (action
    (diff rsync_plan.expected rsync_plan.output))))
+
+(subdir unit/shutdown
+ (alias
+  (name default)
+  (deps shutdown_test.exe))
+ (rule
+  (alias runtest)
+  (action (run ./shutdown_test.exe))))
 
 (subdir unit/spool_reap
  (alias

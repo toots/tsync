@@ -92,14 +92,13 @@ module Make (C : Conf_lwt.S) (D : Domain_engine.Domain) = struct
     end
     else report_recorded_failures last_seen
 
-  (* Deliberately unbounded: a wedged stop should hang so the supervisor's own
-     timeout kills us and reports the unit failed, where a timer of our own would
-     abandon the same pending work with an exit status saying all was well.
-     Steps waiting on something remote carry their own bounds
-     ({!Domain_store_lwt.drain}). *)
+  (* The drain it releases is bounded by {!Shutdown.grace}: what it leaves is
+     owed on disk, so exiting on time abandons nothing, where the supervisor's
+     timeout would end the mount with SIGKILL. *)
   let stop_t, stop_wake = Lwt.wait ()
 
   let do_stop () =
+    Shutdown.request ();
     match Lwt.state stop_t with
       | Lwt.Sleep -> Lwt.wakeup_later stop_wake ()
       | _ -> ()
@@ -514,7 +513,7 @@ module Make (C : Conf_lwt.S) (D : Domain_engine.Domain) = struct
            [Fuse.main], so it must not wait behind the drain. *)
         let unmount_t = unmount mount_point in
         Log.debug "draining upload queue and backends";
-        let* () = D.drain () in
+        let* () = Domain_engine.drain_for_stop [D.drain] in
         unmount_t);
     try Unix.unlink C.socket_path with _ -> ()
 end

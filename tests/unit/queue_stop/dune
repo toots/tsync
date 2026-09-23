@@ -1,0 +1,20 @@
+(executable
+ (flags
+  (:standard
+   -open
+   Tsync_core
+   -open
+   Tsync_core_lwt
+   -open
+   Tsync_io_lwt
+   -open
+   Tsync_test_harness))
+ (name queue_stop_test)
+ (libraries
+  tsync_core
+  tsync_core_lwt
+  tsync_io_lwt
+  tsync_test_harness
+  lwt
+  lwt.unix
+  unix))

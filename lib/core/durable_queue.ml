@@ -59,6 +59,7 @@ module Make
     (Files : FILES with type 'a io := 'a Io.t) =
 struct
   open Io_syntax.Make (Io)
+  module Nap = Shutdown.Sleep (Io) (Clock)
 
   (* [f] runs only if no process claims [dir]. *)
   let with_claim dir f =
@@ -90,6 +91,10 @@ struct
   let rescan_all () = iter_s (fun f -> f ()) !rescans
 
   let settle_all ?(timeout = default_settle_timeout) () =
+    let timeout =
+      if Shutdown.requested () then Float.min timeout !Shutdown.grace
+      else timeout
+    in
     if !registry = [] then Io.return ()
     else
       Io.catch
@@ -384,9 +389,9 @@ struct
        and outlives the process, so holding a command open for a store that is
        down buys nothing. *)
     let rec settle t =
-      (* Not running: nothing here will move what is queued, which is on disk
-         for whoever does run it. *)
-      if idle t || t.running = [] then Io.return ()
+      (* Not running, or not taking more: nothing here will move what is
+         queued, which is on disk for whoever runs it next. *)
+      if idle t || t.running = [] || Shutdown.requested () then Io.return ()
       else if t.failures > 0 then begin
         Log.warn "%s: target is down, leaving %d job(s) queued on disk" t.name
           (Queue.length t.jobs);
@@ -406,6 +411,7 @@ struct
         | Keyed k -> (
             match Hashtbl.find_opt k.slots key with
               | None -> Io.return ()
+              | Some _ when Shutdown.requested () -> Io.return ()
               | Some slot when slot.failures > 0 -> Io.return ()
               | Some _ ->
                   let* () = Lock.wait t.settled in
@@ -447,7 +453,11 @@ struct
        overtake it. A keyed one puts it at the back: the keys are independent, and
        holding the head would stall every other key behind one that is failing. *)
     let rec loop t =
-      if (Queue.is_empty t.jobs || !(t.paused)) && not !(t.stopping) then begin
+      (* A process stopping takes no more work: what is queued is on disk for
+         its next start. A queue stopped for any other reason — a command
+         finishing — still runs what it holds. *)
+      if Shutdown.requested () then Io.return ()
+      else if (Queue.is_empty t.jobs || !(t.paused)) && not !(t.stopping) then begin
         t.parked <- t.parked + 1;
         announce t;
         let* () = Lock.wait t.wake in
@@ -485,6 +495,9 @@ struct
                    is then a no-op. *)
                 let+ () = complete t e.id in
                 false
+            (* Given up for a stop: still owed, on disk, and no failure of the
+               target's. *)
+            | `Failed Shutdown.Stopping -> Io.return false
             | `Failed exn when t.classify exn = Retry.Transient ->
                 (* Counted the same as a backend's own ladder: retries a queue
                    absorbs are still the link struggling, and a report that showed
@@ -500,7 +513,7 @@ struct
                 (* Before the sleep, so a drain waiting on this queue learns the
                    target is down now rather than a backoff later. *)
                 announce t;
-                let+ () = Clock.sleep delay in
+                let+ (_ : [ `Slept | `Stopping ]) = Nap.sleep delay in
                 true
             | `Failed exn ->
                 Metrics.add_failure 1;
@@ -636,6 +649,12 @@ struct
         }
       in
       register_settle (fun () -> settle t);
+      (* Parked workers look again, and find the stop. *)
+      let (_ : unit -> unit) =
+        Shutdown.on_request (fun () ->
+            Lock.broadcast t.wake;
+            announce t)
+      in
       t
 
     let ordered ~name ~log ~classify ~poison ~run () =

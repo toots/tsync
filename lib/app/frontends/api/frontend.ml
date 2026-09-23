@@ -99,6 +99,37 @@ let cap_blocking_pool ~concurrency =
   Lwt_unix.set_pool_size n;
   Log.debug "blocking thread pool: at most %d" n
 
+(* All told at once, then waited for together, for as long as a stop may take
+   and a little more: a child still there after that is killed, since what it
+   owed is on disk and a supervisor would end the whole group the same way,
+   only later. *)
+let reap child_pids =
+  List.iter (fun pid -> try Unix.kill pid Sys.sigterm with _ -> ()) child_pids;
+  let deadline = Unix.gettimeofday () +. !Shutdown.grace +. 2. in
+  let running pid =
+    match Unix.waitpid [Unix.WNOHANG] pid with
+      | 0, _ -> true
+      | _ -> false
+      | exception Unix.Unix_error (Unix.EINTR, _, _) -> true
+      | exception Unix.Unix_error _ -> false
+  in
+  let rec wait left =
+    match List.filter running left with
+      | [] -> ()
+      | left when Unix.gettimeofday () > deadline ->
+          List.iter
+            (fun pid ->
+              Log.warn "frontend %d still running after the stop; killing it"
+                pid;
+              (try Unix.kill pid Sys.sigkill with _ -> ());
+              try ignore (Unix.waitpid [] pid) with _ -> ())
+            left
+      | left ->
+          Unix.sleepf 0.05;
+          wait left
+  in
+  wait child_pids
+
 (* Explicitly in order: [List.map]'s is unspecified, and these are forks. A
    child runs [f] and exits without ever reaching the reaper below, so its
    siblings stay the parent's to signal. *)
@@ -117,12 +148,21 @@ let fork_each f items =
       [] items
     |> List.rev
   in
+  (* Told the moment this process is, not after its own drain: a child that
+     forks in turn then stops alongside its children, within one grace, where
+     waiting for it to reap them first would take two and outlast the deadline
+     its own parent gives it. *)
+  let tell_children =
+    Shutdown.on_request (fun () ->
+        List.iter
+          (fun pid -> try Unix.kill pid Sys.sigterm with _ -> ())
+          child_pids)
+  in
+  (* Taken back once they are reaped, so a later stop signals no pid the
+     system has since given to something else. *)
   fun () ->
-    List.iter
-      (fun pid ->
-        (try Unix.kill pid Sys.sigterm with _ -> ());
-        try ignore (Unix.waitpid [] pid) with _ -> ())
-      child_pids
+    reap child_pids;
+    tell_children ()
 
 let run_forked f items =
   match List.rev items with

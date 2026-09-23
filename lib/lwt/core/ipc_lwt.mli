@@ -21,6 +21,7 @@ end
 
 val serve :
   ?subs:Subs.t ->
+  ?until:unit Lwt.t ->
   path:string ->
   (string -> (string * [ `Continue | `Stop | `Subscribe of string ]) Lwt.t) ->
   unit Lwt.t

@@ -18,6 +18,9 @@ ExecStart=/usr/bin/tsync start
 ExecStop=/usr/bin/tsync stop
 Restart=on-failure
 RestartSec=5
+# A stop takes at most about ten seconds: what is still in flight then is
+# owed on disk and resumes at the next start.
+TimeoutStopSec=30
 LimitNOFILE=65536
 
 [Install]

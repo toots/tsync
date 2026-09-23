@@ -1,0 +1,11 @@
+(executable
+ (flags
+  (:standard -open Tsync_core -open Tsync_engine -open Tsync_test_harness))
+ (name drain_for_stop_test)
+ (libraries
+  tsync_core
+  tsync-libs.engine
+  tsync_test_harness
+  lwt
+  lwt.unix
+  unix))
