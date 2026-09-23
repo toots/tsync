@@ -93,6 +93,7 @@ struct
                 | Retry.Cancelled ->
                     Hashtbl.remove parked id;
                     W.complete entry_key
+                | Shutdown.Stopping as exn -> Io.fail exn
                 | exn ->
                     let kind = classify exn in
                     if kind = Retry.Permanent then Hashtbl.replace parked id ();

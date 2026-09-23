@@ -80,6 +80,8 @@ struct
                    more, so the record goes rather than being retried. *)
                       | Retry.Cancelled | Unix.Unix_error (Unix.ENOENT, _, _) ->
                           abandon ()
+                      (* Still owed: left as it is for the next start. *)
+                      | Shutdown.Stopping as exn -> Io.fail exn
                       | exn ->
                           (* The record is never dropped on a real failure, or the file
                        sits dirty in the cache forever: nothing else remembers the

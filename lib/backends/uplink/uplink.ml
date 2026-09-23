@@ -51,7 +51,7 @@ struct
      pumps then. *)
   type gate = {
     beneath : beneath;
-    waiters : (int * unit Io.u) Queue.t;
+    waiters : (int * (unit, exn) result Io.u) Queue.t;
     mutable armed : bool;
     mutable held_back : bool;
         (** A body waited or was refused since this was last read: the rate held
@@ -72,7 +72,7 @@ struct
       | Some (bytes, wake) when g.beneath.admits ~now:(Clock.now ()) ~bytes ->
           ignore (Queue.pop g.waiters);
           g.beneath.take ~now:(Clock.now ()) ~bytes;
-          Io.wakeup_later wake ();
+          Io.wakeup_later wake (Ok ());
           pump g
       | _ -> ()
 
@@ -110,8 +110,14 @@ struct
       let waited, wake = Io.wait () in
       Queue.add (bytes, wake) g.waiters;
       arm g;
-      waited
+      Io.bind waited (function Ok () -> Io.return () | Error e -> Io.fail e)
     end
+
+  (* Every body waiting fails with [exn], having taken nothing. *)
+  let fail_waiting g exn =
+    let waiting = Queue.fold (fun acc (_, wake) -> wake :: acc) [] g.waiters in
+    Queue.clear g.waiters;
+    List.iter (fun wake -> Io.wakeup_later wake (Error exn)) (List.rev waiting)
 
   let left g ~bytes ~answered ~elapsed =
     g.beneath.left ~now:(Clock.now ()) ~bytes ~answered ~elapsed;
@@ -799,6 +805,9 @@ struct
             ("lessees", `List (Uplink_lease.json t ~now));
           ]
       | _ -> []
+
+  let cancel_waiting p exn =
+    Hashtbl.iter (fun _ l -> fail_waiting l.line exn) p.links
 
   let json_links p = List.map (fun (n, l) -> (n, `Assoc (json l))) (links p)
   let the_process : process option ref = ref None

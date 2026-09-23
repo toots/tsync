@@ -151,5 +151,37 @@ let () =
      let* () = settle 5 in
      check "a store held down is left alone" (!probed = 2);
 
-     report ~expected:21 ();
+     case "a stop fails every body waiting, and takes nothing";
+     Fake_clock.reset ();
+     let g = U.create ~settings:on () in
+     let lan = U.link (U.process_of g) "lan" in
+     let first = ask g "first" (2 * mb) in
+     let* () = settle 3 in
+     let outcome p =
+       Lwt.catch
+         (fun () -> Lwt.map (fun () -> "passed") p)
+         (fun exn -> Lwt.return (Printexc.to_string exn))
+     in
+     let w = outcome (U.acquire g ~class_:Background ~bytes:mb)
+     and l =
+       outcome
+         (let* () = U.acquire lan ~class_:Background ~bytes:(2 * mb) in
+          U.acquire lan ~class_:Background ~bytes:mb)
+     in
+     let* () = settle 3 in
+     let in_flight u =
+       match List.assoc_opt "inFlightBytes" (U.json u) with
+         | Some (`Int n) -> n
+         | _ -> -1
+     in
+     let before = in_flight g in
+     U.cancel_waiting (U.process_of g) Exit;
+     let* w = w and* l = l and* () = first in
+     check "each waiter, on every link, fails with what it was given"
+       ~why:(fun () -> w ^ " / " ^ l)
+       (w = "Stdlib.Exit" && l = "Stdlib.Exit");
+     check "and nothing more is in flight for it" (in_flight g = before);
+     check "the line is empty" (U.waiting g = 0 && U.waiting lan = 0);
+
+     report ~expected:24 ();
      Lwt.return_unit)

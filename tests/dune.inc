@@ -1674,6 +1674,14 @@
   (action
    (diff rsync_plan.expected rsync_plan.output))))
 
+(subdir unit/shutdown
+ (alias
+  (name default)
+  (deps shutdown_test.exe))
+ (rule
+  (alias runtest)
+  (action (run ./shutdown_test.exe))))
+
 (subdir unit/spool_reap
  (alias
   (name default)

@@ -100,6 +100,7 @@ module Make (C : Conf_lwt.S) (D : Domain_engine.Domain) = struct
   let stop_t, stop_wake = Lwt.wait ()
 
   let do_stop () =
+    Shutdown.request ();
     match Lwt.state stop_t with
       | Lwt.Sleep -> Lwt.wakeup_later stop_wake ()
       | _ -> ()

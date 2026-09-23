@@ -59,6 +59,7 @@ module Make
     (Files : FILES with type 'a io := 'a Io.t) =
 struct
   open Io_syntax.Make (Io)
+  module Nap = Shutdown.Sleep (Io) (Clock)
 
   (* [f] runs only if no process claims [dir]. *)
   let with_claim dir f =
@@ -485,6 +486,9 @@ struct
                    is then a no-op. *)
                 let+ () = complete t e.id in
                 false
+            (* Given up for a stop: still owed, on disk, and no failure of the
+               target's. *)
+            | `Failed Shutdown.Stopping -> Io.return false
             | `Failed exn when t.classify exn = Retry.Transient ->
                 (* Counted the same as a backend's own ladder: retries a queue
                    absorbs are still the link struggling, and a report that showed
@@ -500,7 +504,7 @@ struct
                 (* Before the sleep, so a drain waiting on this queue learns the
                    target is down now rather than a backoff later. *)
                 announce t;
-                let+ () = Clock.sleep delay in
+                let+ (_ : [ `Slept | `Stopping ]) = Nap.sleep delay in
                 true
             | `Failed exn ->
                 Metrics.add_failure 1;

@@ -1168,6 +1168,7 @@ let start served =
         would drop what those still owe a backfill target. *)
       let stop, wake = Lwt.wait () in
       let request_stop () =
+        Shutdown.request ();
         match Lwt.state stop with
           | Lwt.Sleep -> Lwt.wakeup_later wake ()
           | _ -> ()

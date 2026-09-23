@@ -154,6 +154,11 @@ module Make
   (** A lessee's share of one link, and what holds the owner's rate there. *)
   type grant = { rate : float; limit : Uplink_control.limit option }
 
+  (** Every body waiting on any of the process's links fails with [exn],
+      having taken nothing: for a process stopping, whose writes are owed on
+      disk and not worth a wait for the link. *)
+  val cancel_waiting : process -> exn -> unit
+
   val lease_renewal :
     process ->
     pid:int ->

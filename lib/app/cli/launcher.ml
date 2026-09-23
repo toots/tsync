@@ -275,6 +275,7 @@ let converge domains =
       let open Lwt.Syntax in
       let stop, wake = Lwt.wait () in
       let request_stop () =
+        Shutdown.request ();
         match Lwt.state stop with
           | Lwt.Sleep -> Lwt.wakeup_later wake ()
           | _ -> ()
