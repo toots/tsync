@@ -354,6 +354,10 @@ struct
             let+ () = Records.write t.log ~id job in
             take t ~id job)
 
+    let record t job =
+      Lock.with_lock t.recording (fun () ->
+          Records.write t.log ~id:(Records.mint_id t.log) job)
+
     (* A job already on disk, for a caller that wrote it: the record is theirs
        and this only takes it up. Under the same lock as {!post}, and idempotent
        on [id], so a record signalled twice is queued once. *)

@@ -294,9 +294,9 @@ let () =
      in
      let* () = Lwt_unix.sleep 0.1 in
      step
-       "put chunk c2 and manifest five while stopped: owed %d, told %d, on the \
-        target %d key(s)"
-       (owed "offline") !told
+       "put chunk c2 and manifest five while stopped: owed %d, held in memory \
+        %d, told %d, on the target %d key(s)"
+       (owed "offline") (T4.stats ()).Deferred.queued !told
        (List.length (keys_under t3_root));
      Domain_store_lwt.Deferred.set_on_recorded (fun () -> ());
      Domain_store_lwt.Deferred.start_resumed ();

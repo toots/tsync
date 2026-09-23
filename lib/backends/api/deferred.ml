@@ -321,9 +321,13 @@ struct
           degraded = s.Durable_queue.degraded;
         }
 
+      (* Not running here: written for the process that runs it, and not
+         held, since nothing here would ever take it off. *)
       let post job =
-        let+ () = Q.post queue job in
-        if not !running then !on_recorded ()
+        if !running then Q.post queue job
+        else
+          let+ () = Q.record queue job in
+          !on_recorded ()
 
       let accept = function
         | Put { key; data } when Stored_key.is_in ~prefix:chunk_prefix key ->
