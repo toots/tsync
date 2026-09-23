@@ -1162,6 +1162,14 @@
   (action
    (diff demand_ranges.expected demand_ranges.output))))
 
+(subdir unit/drain_for_stop
+ (alias
+  (name default)
+  (deps drain_for_stop_test.exe))
+ (rule
+  (alias runtest)
+  (action (run ./drain_for_stop_test.exe))))
+
 (subdir unit/eintr
  (alias
   (name default)
