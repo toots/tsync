@@ -8,7 +8,7 @@ type 'io admission = {
 }
 
 let small_body = ref 65536
-let probe_timeout = ref 10.
+let probe_timeout = Uplink_control.probe_timeout
 let default_link = "wan"
 
 module type LOG = sig
@@ -53,13 +53,22 @@ struct
     beneath : beneath;
     waiters : (int * (unit, exn) result Io.u) Queue.t;
     mutable armed : bool;
+    mutable overtaken : int;
+        (** Bytes passed ahead of the head since it got there: at most its own
+            size, so a run of small bodies delays it at most twice over. *)
     mutable held_back : bool;
         (** A body waited or was refused since this was last read: the rate held
             the sender back, which is what lets it grow. *)
   }
 
   let gate beneath =
-    { beneath; waiters = Queue.create (); armed = false; held_back = false }
+    {
+      beneath;
+      waiters = Queue.create ();
+      armed = false;
+      overtaken = 0;
+      held_back = false;
+    }
 
   let held_back g =
     let was = g.held_back in
@@ -71,6 +80,7 @@ struct
     match Queue.peek_opt g.waiters with
       | Some (bytes, wake) when g.beneath.admits ~now:(Clock.now ()) ~bytes ->
           ignore (Queue.pop g.waiters);
+          g.overtaken <- 0;
           g.beneath.take ~now:(Clock.now ()) ~bytes;
           Io.wakeup_later wake (Ok ());
           pump g
@@ -95,13 +105,16 @@ struct
 
   (* Room now, with nothing ahead that should go first. *)
   let room g ~bytes =
-    (Queue.is_empty g.waiters || bytes <= !small_body)
+    (match Queue.peek_opt g.waiters with
+      | None -> true
+      | Some (head, _) -> bytes <= !small_body && g.overtaken + bytes <= head)
     && g.beneath.admits ~now:(Clock.now ()) ~bytes
 
   (* Synchronous when there is room: no bind before the check, so a caller that
      asks and sends in one turn cannot have the room taken between. *)
   let acquire g ~bytes =
     if room g ~bytes then begin
+      if not (Queue.is_empty g.waiters) then g.overtaken <- g.overtaken + bytes;
       g.beneath.take ~now:(Clock.now ()) ~bytes;
       Io.return ()
     end
@@ -117,6 +130,7 @@ struct
   let fail_waiting g exn =
     let waiting = Queue.fold (fun acc (_, wake) -> wake :: acc) [] g.waiters in
     Queue.clear g.waiters;
+    g.overtaken <- 0;
     List.iter (fun wake -> Io.wakeup_later wake (Error exn)) (List.rev waiting)
 
   let left g ~bytes ~answered ~elapsed =
@@ -339,7 +353,7 @@ struct
   (* What this process says of itself on a link when it renews, or files as
      the owner's own row: what is in flight and waiting now, what completed
      and timed out since it last said. *)
-  let own_report l ~timeouts ~probe =
+  let own_report l ~timeouts ~probes =
     let r =
       {
         Uplink_lease.in_flight = Uplink_budget.in_flight_bytes l.share;
@@ -347,7 +361,7 @@ struct
         timeouts;
         waiting = waiting l;
         held_back = held_back l.line;
-        probe;
+        probes;
       }
     in
     l.completed_since := 0;
@@ -368,7 +382,7 @@ struct
      its own retry loop keeps. *)
   let probe_round l ~lessees_in_flight =
     let in_flight = Uplink_budget.in_flight_bytes l.share + lessees_in_flight in
-    if in_flight = 0 then Io.return None
+    if in_flight = 0 then Io.return []
     else
       let+ delays =
         Io.map_p
@@ -377,7 +391,7 @@ struct
             Io.catch
               (fun () ->
                 let+ () = Clock.with_timeout !probe_timeout p.probe in
-                Some (Clock.now () -. started))
+                Some (p.name, Clock.now () -. started))
               (fun exn ->
                 if Clock.is_timeout exn then begin
                   if not l.probe_warned then begin
@@ -387,19 +401,12 @@ struct
                          "uplink %s: a probe of %s went unanswered for %.0fs"
                          l.name p.name !probe_timeout)
                   end;
-                  Io.return (Some !probe_timeout)
+                  Io.return (Some (p.name, !probe_timeout))
                 end
                 else Io.return None))
           (List.filter (fun p -> not (p.held ())) l.probes)
       in
-      (* The least of the round: server-side delay is one-sided. *)
-      List.fold_left
-        (fun least d ->
-          match (least, d) with
-            | None, d -> d
-            | Some a, Some b -> Some (Float.min a b)
-            | least, None -> least)
-        None delays
+      List.filter_map Fun.id delays
 
   let announce l =
     let state = Uplink_control.state l.control in
@@ -447,7 +454,7 @@ struct
     let lessees =
       match l.lessees with Some t -> Uplink_lease.live t ~now | None -> []
     in
-    let* probe =
+    let* probes =
       probe_round l
         ~lessees_in_flight:
           (List.fold_left
@@ -455,10 +462,12 @@ struct
              0 lessees)
     in
     let now = Clock.now () in
-    Option.iter (Uplink_control.observe_delay l.control ~now) probe;
+    List.iter
+      (fun (path, d) -> Uplink_control.observe_delay ~path l.control ~now d)
+      probes;
     (* One report a step, read once: what this process is to the split, and
        what it says of itself should it ask the daemon back in this step. *)
-    let mine = own_report l ~timeouts:own_timeouts ~probe in
+    let mine = own_report l ~timeouts:own_timeouts ~probes in
     let limited =
       Uplink_lease.wants mine
       || List.exists (fun (_, r) -> Uplink_lease.wants r) lessees
@@ -656,8 +665,8 @@ struct
                may have no store on one of them to time for itself. *)
             let* reports =
               reports_of p (fun l ->
-                  let+ probe = probe_round l ~lessees_in_flight:0 in
-                  own_report l ~timeouts:(timeouts_since l) ~probe)
+                  let+ probes = probe_round l ~lessees_in_flight:0 in
+                  own_report l ~timeouts:(timeouts_since l) ~probes)
             in
             renew p ~send ~reports
         | Leased, None ->
@@ -714,9 +723,10 @@ struct
                 Uplink_lease.record table ~now ~pid report;
                 (* What the lessee timed is a sample beside this process's
                    own, and the only one for a link it has no store on. *)
-                Option.iter
-                  (Uplink_control.observe_delay l.control ~now)
-                  report.Uplink_lease.probe;
+                List.iter
+                  (fun (path, d) ->
+                    Uplink_control.observe_delay ~path l.control ~now d)
+                  report.Uplink_lease.probes;
                 ( name,
                   {
                     rate = Uplink_lease.rate_for table ~now ~pid;

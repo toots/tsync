@@ -4,7 +4,7 @@ type report = {
   timeouts : int;
   waiting : int;
   held_back : bool;
-  probe : float option;
+  probes : (string * float) list;
 }
 
 let idle =
@@ -14,10 +14,22 @@ let idle =
     timeouts = 0;
     waiting = 0;
     held_back = false;
-    probe = None;
+    probes = [];
   }
 
 let wants r = r.waiting > 0 || r.held_back
+
+let least_probe r =
+  List.fold_left
+    (fun acc (_, d) -> Some (Option.fold ~none:d ~some:(Float.min d) acc))
+    None r.probes
+
+let ms seconds = `Float (Float.round (seconds *. 10_000.) /. 10.)
+
+let seconds_of = function
+  | `Int n -> Some (float_of_int n /. 1000.)
+  | `Float f -> Some (f /. 1000.)
+  | _ -> None
 
 let report_of_json fields =
   let int key =
@@ -37,11 +49,19 @@ let report_of_json fields =
       (match List.assoc_opt "heldBack" fields with
         | Some (`Bool b) -> b
         | _ -> int "inFlight" > 0);
-    probe =
-      (match List.assoc_opt "probeMs" fields with
-        | Some (`Int n) -> Some (float_of_int n /. 1000.)
-        | Some (`Float f) -> Some (f /. 1000.)
-        | _ -> None);
+    (* An older lessee sends only its least, over no store in particular. *)
+    probes =
+      (match
+         (List.assoc_opt "probesMs" fields, List.assoc_opt "probeMs" fields)
+       with
+        | Some (`Assoc by_store), _ ->
+            List.filter_map
+              (fun (store, v) ->
+                Option.map (fun d -> (store, d)) (seconds_of v))
+              by_store
+        | _, Some v ->
+            Option.fold ~none:[] ~some:(fun d -> [("", d)]) (seconds_of v)
+        | _ -> []);
   }
 
 let report_to_json r =
@@ -53,9 +73,14 @@ let report_to_json r =
     ("heldBack", `Bool r.held_back);
   ]
   @
-    match r.probe with
-    | Some seconds ->
-        [("probeMs", `Float (Float.round (seconds *. 10_000.) /. 10.))]
+    match least_probe r with
+    | Some least ->
+        (* The least as well, for an owner built before the split by store. *)
+        [
+          ("probeMs", ms least);
+          ( "probesMs",
+            `Assoc (List.map (fun (store, d) -> (store, ms d)) r.probes) );
+        ]
     | None -> []
 
 type lessee = {
@@ -97,9 +122,10 @@ let record t ~now ~pid (report : report) =
           { last = report; seen = now; grant = None }
 
 (* Three intervals of silence, and the row is dropped here rather than left
-   for a reader to age out. *)
+   for a reader to age out. A lessee probes before it renews, so a congested
+   link spaces its renewals by up to a probe's timeout more. *)
 let live t ~now =
-  let stale = 3. *. interval () in
+  let stale = (3. *. interval ()) +. !Uplink_control.probe_timeout in
   Hashtbl.filter_map_inplace
     (fun _ l -> if now -. l.seen > stale then None else Some l)
     t.lessees;
@@ -190,8 +216,7 @@ let json t ~now =
            ("heldBack", `Bool r.held_back);
          ]
         @
-          match r.probe with
-          | Some seconds ->
-              [("probeMs", `Float (Float.round (seconds *. 10_000.) /. 10.))]
+          match least_probe r with
+          | Some least -> [("probeMs", ms least)]
           | None -> []))
     (live t ~now)

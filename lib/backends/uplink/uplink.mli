@@ -171,7 +171,8 @@ module Make
     flat:bool -> interval:float -> (string * grant) list -> Yojson.Safe.t
 
   (** Waits for room on the link, in order; a body of at most {!small_body}
-      bytes passes ahead when the budget covers it. Returns at once when the
+      bytes passes ahead when the budget covers it, and no more than the head's
+      own size passes it in all. Returns at once when the
       link is disabled or the asker is [Foreground]. Starts the process's ticker
       on first use. *)
   val acquire : t -> class_:class_ -> bytes:int -> unit Io.t

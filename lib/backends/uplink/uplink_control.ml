@@ -17,6 +17,7 @@ let default_settings =
 
 let initial_rate = ref 262144.
 let tick_interval = ref 2.
+let probe_timeout = ref 10.
 let gain = ref 0.25
 let decrease_floor = ref 0.5
 let base_window = ref 600.
@@ -101,10 +102,10 @@ end
 type t = {
   settings : settings;
   mutable rate : float;
-  base : Window.t;
+  bases : (string, Window.t) Hashtbl.t;
   completed_bytes : Window.t;
   mutable capacity : float option;
-  mutable samples : float list;
+  mutable samples : (string * float) list;
   mutable queueing : float;
   mutable over_target : int;
   mutable settled : bool;
@@ -122,15 +123,13 @@ let clamp_to_settings s rate =
     | Some m -> Float.min (float_of_int m) rate
     | None -> rate
 
+let cells_of span width = Int.max 1 (int_of_float (span /. width))
+
 let create ?(settings = default_settings) ~now () =
-  let cells_of span width = Int.max 1 (int_of_float (span /. width)) in
   {
     settings;
     rate = clamp_to_settings settings !initial_rate;
-    base =
-      Window.create
-        ~cells:(cells_of !base_window 60.)
-        ~width:60. ~empty:infinity ~combine:Float.min ~now;
+    bases = Hashtbl.create 2;
     completed_bytes =
       Window.create ~cells:(cells_of !rate_window 1.) ~width:1. ~empty:0.
         ~combine:( +. ) ~now;
@@ -157,14 +156,20 @@ let completed t ~now ~bytes ~elapsed =
     Window.note_back t.completed_bytes ~now ~ago each
   done
 
-let observe_delay t ~now:_ delay = t.samples <- delay :: t.samples
+let observe_delay ?(path = "") t ~now:_ delay =
+  t.samples <- (path, delay) :: t.samples
+
 let achieved t ~now = Window.fold t.completed_bytes ~now /. !rate_window
 let rate t = t.rate
 let state t = t.state
 let capacity t = t.capacity
 
 let base_delay t ~now =
-  let b = Window.fold t.base ~now in
+  let b =
+    Hashtbl.fold
+      (fun _ w acc -> Float.min acc (Window.fold w ~now))
+      t.bases infinity
+  in
   if b < infinity then Some b else None
 
 let queueing_delay t = t.queueing
@@ -214,18 +219,36 @@ let timed_out t ~now =
   enter t ~now Backing_off;
   set_rate t (t.rate *. !decrease_floor)
 
-(* The least of a tick's probes, above the least seen lately, smoothed over
-   two ticks. A tick with no probe decays toward nothing rather than holding a
-   reading that is no longer being taken. *)
+let base_of t ~now path =
+  match Hashtbl.find_opt t.bases path with
+    | Some w -> w
+    | None ->
+        let w =
+          Window.create
+            ~cells:(cells_of !base_window 60.)
+            ~width:60. ~empty:infinity ~combine:Float.min ~now
+        in
+        Hashtbl.replace t.bases path w;
+        w
+
+(* Each path above its own base, since stores sharing a link sit at different
+   distances and the far one alone would read its distance as a queue.
+
+   The least of those, smoothed over two ticks, decays toward nothing on a tick
+   with no probe rather than holding a reading no longer being taken. *)
 let read_delay t ~now =
   (match t.samples with
     | [] -> t.queueing <- 0.5 *. t.queueing
     | samples ->
-        let current = List.fold_left Float.min infinity samples in
-        Window.note t.base ~now current;
-        let base = Window.fold t.base ~now in
-        let above = Float.max 0. (current -. base) in
-        t.queueing <- (0.5 *. t.queueing) +. (0.5 *. above));
+        let above (path, delay) =
+          let w = base_of t ~now path in
+          Window.note w ~now delay;
+          Float.max 0. (delay -. Window.fold w ~now)
+        in
+        let current =
+          List.fold_left (fun acc s -> Float.min acc (above s)) infinity samples
+        in
+        t.queueing <- (0.5 *. t.queueing) +. (0.5 *. current));
   t.samples <- []
 
 let tick t ~now ~limited =

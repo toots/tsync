@@ -255,4 +255,37 @@ let () =
   check "until the old base has fallen out of the window"
     (Uplink_control.base_delay t ~now:later = Some 0.140);
 
-  report ~expected:33 ()
+  case "a far store left alone on the link is not read as a queue";
+  let t = Uplink_control.create ~settings ~now:0. () in
+  for i = 0 to 2 do
+    let now = 2. *. float_of_int i in
+    Uplink_control.observe_delay ~path:"near" t ~now 0.020;
+    Uplink_control.observe_delay ~path:"far" t ~now 0.200;
+    Uplink_control.tick t ~now ~limited:false
+  done;
+  let before = Uplink_control.rate t in
+  for i = 3 to 10 do
+    let now = 2. *. float_of_int i in
+    Uplink_control.observe_delay ~path:"far" t ~now 0.200;
+    Uplink_control.tick t ~now ~limited:false
+  done;
+  check "the near one held down, and the rate is not cut"
+    ~why:(fun () ->
+      Printf.sprintf "%.0f -> %.0f, queueing %.3fs" before
+        (Uplink_control.rate t)
+        (Uplink_control.queueing_delay t))
+    (Uplink_control.rate t >= before);
+  let before = Uplink_control.rate t in
+  List.iter
+    (fun now ->
+      Uplink_control.observe_delay ~path:"far" t ~now 0.500;
+      Uplink_control.tick t ~now ~limited:false)
+    [22.; 24.];
+  check "a queue on it still is"
+    ~why:(fun () ->
+      Printf.sprintf "%.0f -> %.0f, queueing %.3fs" before
+        (Uplink_control.rate t)
+        (Uplink_control.queueing_delay t))
+    (Uplink_control.rate t < before);
+
+  report ~expected:35 ()

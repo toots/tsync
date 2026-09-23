@@ -57,6 +57,38 @@ let () =
      let* () = chunk in
      check "then the chunk goes" (List.rev !landed = ["small"; "chunk"]);
 
+     case "small bodies pass a queued chunk by no more than its size";
+     Fake_clock.reset ();
+     landed := [];
+     let g = U.create ~settings:on () in
+     let* () = U.acquire g ~class_:Background ~bytes:(2 * mb) in
+     let chunk = ask g "chunk" mb in
+     let small = 65536 in
+     (* One small body for each one the refill earns: taken first each time,
+        the chunk would never see its megabyte. *)
+     let rec feed n acc =
+       if n = 0 then Lwt.return acc
+       else begin
+         Fake_clock.advance (float_of_int small /. float_of_int mb);
+         let s = ask g "small" small in
+         let* () = settle 3 in
+         feed (n - 1) (s :: acc)
+       end
+     in
+     let* smalls = feed 40 [] in
+     Fake_clock.advance 3.;
+     let* () = Lwt.join (chunk :: smalls) in
+     let ahead =
+       let rec before = function
+         | "chunk" :: _ | [] -> 0
+         | _ :: rest -> 1 + before rest
+       in
+       before (List.rev !landed)
+     in
+     check "sixteen of 64 KiB, a megabyte, then the chunk"
+       ~why:(fun () -> string_of_int ahead)
+       (ahead = mb / small);
+
      case "the drop path: room, or a drop that charges nothing";
      Fake_clock.reset ();
      let g = U.create ~settings:on () in
@@ -183,5 +215,5 @@ let () =
      check "and nothing more is in flight for it" (in_flight g = before);
      check "the line is empty" (U.waiting g = 0 && U.waiting lan = 0);
 
-     report ~expected:24 ();
+     report ~expected:25 ();
      Lwt.return_unit)
