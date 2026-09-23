@@ -36,4 +36,20 @@ let () =
     ~why:(fun () -> Printf.sprintf "%.1fs" took)
     (took >= 2. && took < 5.);
 
-  report ~expected:2 ()
+  case "a stop reaches the children at once, before any reaping";
+  Shutdown.reset ();
+  (* Every child holds the write end, so the read end sees its end of file
+     only once all of them are gone. *)
+  let gone, alive = Unix.pipe () in
+  let reap = Frontend.fork_each (fun _ -> Unix.sleepf 30.) [1; 2] in
+  Unix.close alive;
+  Shutdown.request ();
+  let ended =
+    match Unix.select [gone] [] [] 2. with
+      | [], _, _ -> false
+      | _ -> Unix.read gone (Bytes.create 1) 0 1 = 0
+  in
+  check "both ended without being reaped" ended;
+  reap ();
+
+  report ~expected:3 ()

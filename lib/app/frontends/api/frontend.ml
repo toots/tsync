@@ -148,7 +148,21 @@ let fork_each f items =
       [] items
     |> List.rev
   in
-  fun () -> reap child_pids
+  (* Told the moment this process is, not after its own drain: a child that
+     forks in turn then stops alongside its children, within one grace, where
+     waiting for it to reap them first would take two and outlast the deadline
+     its own parent gives it. *)
+  let tell_children =
+    Shutdown.on_request (fun () ->
+        List.iter
+          (fun pid -> try Unix.kill pid Sys.sigterm with _ -> ())
+          child_pids)
+  in
+  (* Taken back once they are reaped, so a later stop signals no pid the
+     system has since given to something else. *)
+  fun () ->
+    reap child_pids;
+    tell_children ()
 
 let run_forked f items =
   match List.rev items with
