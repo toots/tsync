@@ -121,11 +121,12 @@ type 'store member = {
   local_path : string option;
       (** Where a [local] store keeps its files, so a report can say how much
           room is left. Absent for stores whose capacity is not ours to know. *)
+  link : string option;
 }
 
 let member ?(role = `Main) ?(readable = true) ?(backend_type = "local")
-    ?(config = []) ?local_path ?pending ?in_flight ?degraded ?traffic ~name
-    backend =
+    ?(config = []) ?local_path ?pending ?in_flight ?degraded ?traffic ?link
+    ~name backend =
   {
     name;
     role;
@@ -138,6 +139,7 @@ let member ?(role = `Main) ?(readable = true) ?(backend_type = "local")
     degraded;
     traffic;
     local_path;
+    link;
   }
 
 let main members = List.find_opt (fun m -> m.role = `Main) members

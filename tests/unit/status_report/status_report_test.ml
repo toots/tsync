@@ -150,6 +150,17 @@ let domain_body ~name ?(frontends = []) () =
                 ( "corrupted",
                   `Assoc [("checked", `Bool true); ("chunks", `Int 0)] );
               ];
+            (* A remote store says which link its writes are governed on. *)
+            `Assoc
+              [
+                ("name", `String "bucket");
+                ("type", `String "gcs");
+                ("role", `String "replica");
+                ("link", `String "wlan-slow");
+                ("config", `Assoc [("bucket", `String "tsync-alpha")]);
+                ("reachable", `Bool true);
+                ("latencyMs", `Float 40.);
+              ];
           ] );
     ]
 

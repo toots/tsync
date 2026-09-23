@@ -491,13 +491,21 @@ module Make (C : Conf_lwt.S) = struct
         | `Null -> []
         | counts -> [("totals", counts)]
     in
+    let link =
+      match m.Backend.link with
+        | Some link -> [("link", `String link)]
+        | None -> []
+    in
     `Assoc
-      (("name", `String m.Backend.name)
-       :: ("type", `String m.backend_type)
-       :: ("role", `String (Conf_parsing.role_name m.role))
-       :: ( "config",
-            `Assoc (List.map (fun (k, v) -> (k, `String v)) m.Backend.config) )
-       :: probed
+      ([
+         ("name", `String m.Backend.name);
+         ("type", `String m.backend_type);
+         ("role", `String (Conf_parsing.role_name m.role));
+       ]
+      @ link
+      @ ( "config",
+          `Assoc (List.map (fun (k, v) -> (k, `String v)) m.Backend.config) )
+        :: probed
       @ [("journal", jrnl); ("corrupted", corrupt)]
       @ disk_json m @ Backend.link_json m
       @ Health.json (health_of m)

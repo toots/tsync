@@ -136,13 +136,10 @@ let build_backends ~paths ~resume ~max_chunk_forwards (d : Conf_parsing.domain)
                      (Option.value ~default:[]
                         (Backend_lwt.spec_for bc.backend_type))
                      k v ))
-               bc.fields
-            (* Appended rather than prepended: a report names a store by the
-               first config entry that says anything, which should stay the
-               bucket or the path. *)
-            @
-            if bc.Conf_parsing.link = Conf_parsing.default_link then []
-            else [("link", bc.Conf_parsing.link)])
+               bc.fields)
+          ?link:
+            (if bc.backend_type = "local" then None
+             else Some bc.Conf_parsing.link)
           ?pending:(stat (fun s -> s.Deferred.queued))
           ?in_flight:(stat (fun s -> s.Deferred.in_flight))
           ?degraded:(stat (fun s -> s.Deferred.degraded))

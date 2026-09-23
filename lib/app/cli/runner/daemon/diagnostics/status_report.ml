@@ -662,6 +662,10 @@ let text json =
       (match identifying with
         | Some (k, v) -> Printf.sprintf "  %s %s" k (str v)
         | None -> "");
+    (* Which [uplink] row governs this store's writes. *)
+      (match mem m "link" with
+      | `String link -> row 4 "link" link
+      | _ -> ());
     (match mem m "health" with
       | `Null ->
           if bool_of (mem m "reachable") then

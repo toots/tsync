@@ -57,6 +57,15 @@
           "latencyMs": 1.0,
           "journal": { "entries": 12, "behind": 0 },
           "corrupted": { "checked": true, "chunks": 0 }
+        },
+        {
+          "name": "bucket",
+          "type": "gcs",
+          "role": "replica",
+          "link": "wlan-slow",
+          "config": { "bucket": "tsync-alpha" },
+          "reachable": true,
+          "latencyMs": 40.0
         }
       ]
     },
@@ -109,6 +118,15 @@
           "latencyMs": 1.0,
           "journal": { "entries": 12, "behind": 0 },
           "corrupted": { "checked": true, "chunks": 0 }
+        },
+        {
+          "name": "bucket",
+          "type": "gcs",
+          "role": "replica",
+          "link": "wlan-slow",
+          "config": { "bucket": "tsync-alpha" },
+          "reachable": true,
+          "latencyMs": 40.0
         }
       ]
     }
@@ -259,6 +277,9 @@ Domain alpha
   Backend store (local, main)  path /srv/tsync
     reachable        yes (1 ms)
     journal          12 entries, 0 to apply
+  Backend bucket (gcs, replica)  bucket tsync-alpha
+    link             wlan-slow
+    reachable        yes (40 ms)
 
 Domain beta
   settings         versioning on, symlinks keep, chunk 8.0 MB (default), cache chunk 16.0 MB
@@ -271,6 +292,9 @@ Domain beta
   Backend store (local, main)  path /srv/tsync
     reachable        yes (1 ms)
     journal          12 entries, 0 to apply
+  Backend bucket (gcs, replica)  bucket tsync-alpha
+    link             wlan-slow
+    reachable        yes (40 ms)
 
 Processes
   sync        pid 4200    up 1h 2m     2.1% cpu     2.0 MB rss   alpha, beta
@@ -301,6 +325,9 @@ Domain alpha
   Backend store (local, main)  path /srv/tsync
     reachable        yes (1 ms)
     journal          12 entries, 0 to apply
+  Backend bucket (gcs, replica)  bucket tsync-alpha
+    link             wlan-slow
+    reachable        yes (40 ms)
 
 Domain beta
   settings         versioning on, symlinks keep, chunk 8.0 MB (default), cache chunk 16.0 MB
@@ -313,6 +340,9 @@ Domain beta
   Backend store (local, main)  path /srv/tsync
     reachable        yes (1 ms)
     journal          12 entries, 0 to apply
+  Backend bucket (gcs, replica)  bucket tsync-alpha
+    link             wlan-slow
+    reachable        yes (40 ms)
 
 Processes
   fuse        pid 4242    up 1h 2m     0.3% cpu     1.0 MB rss   alpha, beta
@@ -344,6 +374,9 @@ Domain alpha
   Backend store (local, main)  path /srv/tsync
     reachable        yes (1 ms)
     journal          12 entries, 0 to apply
+  Backend bucket (gcs, replica)  bucket tsync-alpha
+    link             wlan-slow
+    reachable        yes (40 ms)
 
 Processes
   fuse        pid 4242    up 1h 2m     0.3% cpu     1.0 MB rss   alpha

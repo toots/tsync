@@ -74,6 +74,9 @@ type 'store member = {
   local_path : string option;
       (** Where a [local] store keeps its files, so a report can say how much
           room is left. Absent for stores whose capacity is not ours to know. *)
+  link : string option;
+      (** The uplink this store is written over, as configured. Absent for a
+          [local] store, which is written over none. *)
 }
 
 (** The defaults describe a store with nothing special about it: a writable
@@ -89,6 +92,7 @@ val member :
   ?in_flight:(unit -> int) ->
   ?degraded:(unit -> bool) ->
   ?traffic:traffic ->
+  ?link:string ->
   name:string ->
   'store ->
   'store member
