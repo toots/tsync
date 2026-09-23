@@ -1413,6 +1413,14 @@
   (alias runtest)
   (action (run ./import_progress.exe))))
 
+(subdir unit/ipc_serve
+ (alias
+  (name default)
+  (deps ipc_serve_test.exe))
+ (rule
+  (alias runtest)
+  (action (run ./ipc_serve_test.exe))))
+
 (subdir unit/item_ref
  (alias
   (name default)

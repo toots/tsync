@@ -841,11 +841,11 @@ let () =
   List.iter
     (fun line -> print_endline (Yojson.Safe.to_string (ipc line)))
     ["not json"; {|{"action":"nope"}|}; "{}"];
-  (* Answered, then the connection closes: a caller must hear that the listener
-     was asked before it winds down. *)
+  (* Answered, and the listener left open: it closes itself once the domains
+     it serves have caught up, however the stop was asked. *)
   let stop_reply, stop_ctl = ipc_full {|{"action":"stop"}|} in
-  Printf.printf "stop: %s closes=%b asked=%d\n" stop_reply (stop_ctl = `Stop)
-    !stop_asked;
+  Printf.printf "stop: %s stays open=%b asked=%d\n" stop_reply
+    (stop_ctl = `Continue) !stop_asked;
   print_endline "########## /api/v1/stats ##########";
   print_endline (Yojson.Safe.pretty_to_string stable);
   print_endline "########## /stats ##########";
