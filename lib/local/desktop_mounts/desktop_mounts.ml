@@ -20,16 +20,16 @@ let unescape s =
   scan 0;
   Buffer.contents buf
 
-(* A mount table line is optional fields then " - ", so the filesystem type is
-   found by the separator rather than by counting. [fuse.tsync] is the subtype
-   libfuse takes from argv[0], which Fuse_fs passes as a constant: a fact about
-   the running filesystem rather than anything the config could disagree with. *)
+(* A mount table line is optional fields then " - ", so the source is found by
+   the separator rather than by counting. The source is the [fsname] Fuse_fs
+   passes as a constant; the type may be [fuse.sshfs] (Fuse_frontend's
+   [mountSubtype]), so it only tells a FUSE mount from a non-FUSE one. *)
 let mounted_paths mountinfo =
   match open_in mountinfo with
     | exception _ -> []
     | ic ->
         let rec after_separator = function
-          | "-" :: fstype :: _ -> Some fstype
+          | "-" :: fstype :: source :: _ -> Some (fstype, source)
           | _ :: rest -> after_separator rest
           | [] -> None
         in
@@ -38,9 +38,12 @@ let mounted_paths mountinfo =
             | exception End_of_file -> acc
             | line -> (
                 match String.split_on_char ' ' line with
-                  | _ :: _ :: _ :: _ :: mount :: rest
-                    when after_separator rest = Some "fuse.tsync" ->
-                      collect (unescape mount :: acc)
+                  | _ :: _ :: _ :: _ :: mount :: rest -> (
+                      match after_separator rest with
+                        | Some (fstype, "tsync")
+                          when String.starts_with ~prefix:"fuse." fstype ->
+                            collect (unescape mount :: acc)
+                        | _ -> collect acc)
                   | _ -> collect acc)
         in
         let paths = collect [] in

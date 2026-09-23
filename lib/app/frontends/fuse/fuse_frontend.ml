@@ -9,6 +9,19 @@ let prepare_mount_point mount_point =
           (Filename.quote mount_point)));
   Io_lwt.Fs.mkdir_p_sync mount_point
 
+(* The value lands in FUSE's comma-separated [-o] list, so a typo with a comma
+   or an [=] fails here, naming the field, rather than as a mount error. *)
+let mount_subtype = function
+  | None | Some "" -> "sshfs"
+  | Some subtype ->
+      String.iter
+        (function
+          | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '.' | '_' | '-' -> ()
+          | _ ->
+              failwith (Printf.sprintf "fuse: invalid mountSubtype %S" subtype))
+        subtype;
+      subtype
+
 let mount_binding (sv : Frontend.served) =
   let b = sv.Frontend.binding in
   let module C = (val b.Frontend.conf : Conf_lwt.S) in
@@ -20,10 +33,13 @@ let mount_binding (sv : Frontend.served) =
     Field_spec.bool ~default:false
       (List.assoc_opt "allowOther" b.Frontend.options)
   in
+  let subtype =
+    mount_subtype (List.assoc_opt "mountSubtype" b.Frontend.options)
+  in
   prepare_mount_point b.Frontend.mount_point;
   let module D = (val sv.Frontend.domain : Domain_engine.Domain) in
   let module R = Fuse_fs.Make (C) (D) in
-  R.mount ~allow_other b.Frontend.mount_point
+  R.mount ~allow_other ~subtype b.Frontend.mount_point
 
 (* FUSE's mount blocks, so the launcher gives each domain its own process, and
    hands this exactly one. Serving a second would mount it only once the first
@@ -52,6 +68,16 @@ let spec =
         label = "Allow other users to access the mount (media servers, etc.)";
         typ = `Bool;
         default = Some "false";
+        secret = false;
+      };
+      {
+        name = "mountSubtype";
+        label =
+          "Filesystem type the mount reports, as fuse.TYPE (sshfs: file \
+           managers treat it as remote and do not download files to thumbnail \
+           them; tsync: its own name)";
+        typ = `String;
+        default = Some "sshfs";
         secret = false;
       };
     ]

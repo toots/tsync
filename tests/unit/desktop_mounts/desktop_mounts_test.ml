@@ -20,8 +20,8 @@ let write name contents =
   close_out oc;
   path
 
-(* Two domains: one with an explicit mountPoint, one relying on the default of
-   ~/tsync/<name>. *)
+(* Two mounted domains, one with an explicit mountPoint and one relying on the
+   default of ~/tsync/<name>, and three that must not be reported. *)
 let config home =
   (* The shape [Conf_parsing.load] insists on; only the frontend options vary. *)
   let domain name frontend =
@@ -31,23 +31,30 @@ let config home =
          "frontends":[%s]}|}
       name frontend
   in
-  Printf.sprintf {|{"name":"test","domains":[%s,%s,%s]}|}
+  Printf.sprintf {|{"name":"test","domains":[%s,%s,%s,%s,%s]}|}
     (domain "Explicit"
        (Printf.sprintf {|{"type":"fuse","mountPoint":"%s/elsewhere"}|} home))
     (domain "Jellyfin Media" {|{"type":"fuse"}|})
     (domain "Unmounted"
        (Printf.sprintf {|{"type":"fuse","mountPoint":"%s/gone"}|} home))
+    (domain "Impostor"
+       (Printf.sprintf {|{"type":"fuse","mountPoint":"%s/impostor"}|} home))
+    (domain "Absent"
+       (Printf.sprintf {|{"type":"fuse","mountPoint":"%s/absent"}|} home))
 
 (* A real one has more fields and other filesystems; both matter, so both are
-   here. The space in the second is escaped, as the kernel writes it. *)
+   here. The space in the second is escaped, as the kernel writes it; the two
+   tsync types are [mountSubtype] sshfs and tsync. *)
 let mountinfo home =
   Printf.sprintf
     "24 30 0:22 / /proc rw,relatime shared:5 - proc proc rw\n\
      31 63 0:86 / %s/elsewhere rw,nosuid shared:9 - fuse.tsync tsync rw\n\
-     35 63 0:89 / %s/tsync/Jellyfin\\040Media ro,nosuid shared:1 - fuse.tsync \
+     35 63 0:89 / %s/tsync/Jellyfin\\040Media ro,nosuid shared:1 - fuse.sshfs \
      tsync ro\n\
-     41 63 0:91 / %s/other rw shared:2 - ext4 /dev/sda1 rw\n"
-    home home home
+     41 63 0:91 / %s/other rw shared:2 - ext4 /dev/sda1 rw\n\
+     42 63 0:93 / %s/gone rw shared:3 - fuse.sshfs user@host: rw\n\
+     43 63 0:95 / %s/impostor rw shared:4 - tmpfs tsync rw\n"
+    home home home home home
 
 let () =
   (try Unix.mkdir scratch 0o700 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
@@ -72,8 +79,12 @@ let () =
   check "a domain mounting where the config does not say is still found"
     (List.assoc_opt (home ^ "/tsync/Jellyfin Media") found
     = Some (Runtime.domain_socket_path paths "Jellyfin Media"));
-  check "a configured domain that is not mounted is left out"
+  check "a configured path mounted by real sshfs is left out"
     (not (List.mem_assoc (home ^ "/gone") found));
+  check "a non-FUSE mount whose source is tsync is left out"
+    (not (List.mem_assoc (home ^ "/impostor") found));
+  check "a configured path with nothing mounted is left out"
+    (not (List.mem_assoc (home ^ "/absent") found));
   check "another filesystem's mount is not ours" (List.length found = 2);
   (* Totality is the wrapper's contract, not [mount_points_in]'s, and it is what
      the C caller depends on: an exception there takes the host with it. *)

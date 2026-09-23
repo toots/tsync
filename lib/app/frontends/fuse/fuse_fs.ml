@@ -430,7 +430,7 @@ module Make (C : Conf_lwt.S) (D : Domain_engine.Domain) = struct
     flush stderr;
     Unix._exit 0
 
-  let mount ?(allow_other = false) mount_point =
+  let mount ?(allow_other = false) ?(subtype = "sshfs") mount_point =
     (* Worth the allocation it costs on the failing thread: an
        [Invalid_argument] from some [String.sub] names neither the file it came
        from nor the caller that reached it, and the count that says a handler
@@ -469,8 +469,13 @@ module Make (C : Conf_lwt.S) (D : Domain_engine.Domain) = struct
             "auto_cache";
           ]
         in
+        (* KIO thumbnails every file on a mount whose type is not on its
+           hardcoded network list, downloading whole folders; [fuse.sshfs] is on
+           that list. [fsname] carries tsync's name whatever the type, and is
+           what Desktop_mounts matches. *)
         let opts =
-          (if C.read_only then ["ro"] else [])
+          ["fsname=tsync"; "subtype=" ^ subtype]
+          @ (if C.read_only then ["ro"] else [])
           @ (if allow_other then ["allow_other"] else [])
           @ cache_opts
         in
