@@ -176,8 +176,17 @@ module Make_over
   let drain () =
     (* The metadata queue first: a rename it publishes is what names the file an
        upload behind it is for. *)
-    let* () = Mq.drain () in
-    let* () = Sq.drain () in
+    let queues =
+      let* () = Mq.drain () in
+      Sq.drain ()
+    in
+    (* Raced short of {!drain_for_stop}'s grace, so the bumps of the uploads
+       that did finish are published before the exit abandons the rest. *)
+    let* () =
+      if Shutdown.requested () then
+        Lwt.choose [queues; Lwt_unix.sleep (!Shutdown.grace *. 0.8)]
+      else queues
+    in
     let* () = Fs.flush_cursor () in
     (* Notices are batched on a timer, which a command that returns first would
        take with it. Here rather than at each command for the same reason the

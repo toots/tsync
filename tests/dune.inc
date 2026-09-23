@@ -617,6 +617,20 @@
   (action
    (diff share_server_test.expected share_server_test.output))))
 
+(subdir frontends/stop_publishes_cursor
+ (alias
+  (name default)
+  (deps stop_publishes_cursor.exe))
+ (rule
+  (alias runtest)
+  (target stop_publishes_cursor.output)
+  (action
+   (with-stdout-to stop_publishes_cursor.output (ignore-stderr (run ./stop_publishes_cursor.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff stop_publishes_cursor.expected stop_publishes_cursor.output))))
+
 (subdir ops/export
  (alias
   (name default)

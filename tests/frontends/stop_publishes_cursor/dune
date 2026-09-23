@@ -1,0 +1,34 @@
+(executable
+ (flags
+  (:standard
+   -open
+   Tsync_core
+   -open
+   Tsync_remote_lwt
+   -open
+   Tsync_test_harness
+   -open
+   Tsync_engine
+   -open
+   Tsync_backend_api
+   -open
+   Tsync_backend_lwt
+   -open
+   Tsync_conf_lwt
+   -open
+   Tsync_local_backend_lwt))
+ (name stop_publishes_cursor)
+ (libraries
+  tsync_core
+  tsync_remote_lwt
+  tsync_test_harness
+  tsync-libs.engine
+  tsync_backend_api
+  tsync_backend_lwt
+  tsync_conf_lwt
+  tsync_local_backend_lwt
+  str
+  unix
+  yojson
+  lwt
+  lwt.unix))

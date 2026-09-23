@@ -332,4 +332,52 @@ let () =
      step "manifest one on main: %b" (h <> None);
      let* h = M.head_opt ~key:(manifest_key "two") () in
      step "manifest two on main, though its target dropped it: %b" (h <> None);
+
+     case "a copy a stop cuts short is left owed, not rebuilt";
+     (* The stop lands during the copy's backoff, which is where the retry
+        ladder raises it. *)
+     let t6_root = Filename.concat root "t6" in
+     let copied = ref false and puts_after = ref 0 in
+     let (module Real6 : Backend_lwt.Store) =
+       Fixture.local_store ~verify_writes:false t6_root
+     in
+     let target6 : (module Backend_lwt.Store) =
+       (module struct
+         include Real6
+
+         let put ~key ~data () =
+           if !copied then incr puts_after;
+           Real6.put ~key ~data ()
+
+         let copy ~src_key:_ ~dst_key:_ () =
+           copied := true;
+           Shutdown.request ();
+           Lwt.fail Shutdown.Stopping
+       end)
+     in
+     let l6, (module T6 : Domain_store_lwt.Deferred.S) =
+       target_for ~inners:[main] ~target:target6 ~name:"stopping" ()
+     in
+     let (module B6 : Backend_lwt.Store) = l6 in
+     let* () =
+       B6.put ~key:(manifest_key "six")
+         ~data:
+           (Bigstring.of_string
+              (manifest ~name:"six" [Stored_key.to_string c0]))
+         ()
+     in
+     let* () = settled ~name:"stopping" T6.stats in
+     let* () =
+       B6.copy ~src_key:(manifest_key "six") ~dst_key:(manifest_key "seven") ()
+     in
+     let rec attempted tries =
+       if !copied || tries = 0 then Lwt_unix.sleep 0.2
+       else
+         let* () = Lwt_unix.sleep 0.02 in
+         attempted (tries - 1)
+     in
+     let* () = attempted 500 in
+     step "copy six -> seven attempted %b: puts after it %d, owed %d" !copied
+       !puts_after (owed "stopping");
+     Shutdown.reset ();
      Lwt.return_unit)

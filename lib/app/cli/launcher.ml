@@ -310,9 +310,16 @@ let converge domains =
       (* Closed once the domains have caught up, however the stop was asked,
          so status can still be asked while they do. *)
       let drained, drained_wake = Lwt.wait () in
+      (* Fatal: without the socket no lease is granted and no stop is heard,
+         and a restart is what brings it back. *)
       Lwt.async (fun () ->
-          Ipc_lwt.serve ~until:drained ~path:socket_path
-            (handler ~request_stop engines));
+          Lwt.catch
+            (fun () ->
+              Ipc_lwt.serve ~until:drained ~path:socket_path
+                (handler ~request_stop engines))
+            (fun exn ->
+              Log.err "sync socket %s: %s" socket_path (Printexc.to_string exn);
+              exit 2));
       ready ();
       let* () = stop in
       Log.info "stopping, letting the domains catch up";
