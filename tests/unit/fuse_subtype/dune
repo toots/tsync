@@ -1,0 +1,7 @@
+(test
+ (flags
+  (:standard -open Tsync_fuse_frontend))
+ (name fuse_subtype_test)
+ (enabled_if
+  (= %{system} linux))
+ (libraries tsync_fuse_frontend))

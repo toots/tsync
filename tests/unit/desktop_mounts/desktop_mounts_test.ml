@@ -39,15 +39,17 @@ let config home =
        (Printf.sprintf {|{"type":"fuse","mountPoint":"%s/gone"}|} home))
 
 (* A real one has more fields and other filesystems; both matter, so both are
-   here. The space in the second is escaped, as the kernel writes it. *)
+   here. The space in the second is escaped, as the kernel writes it; the two
+   tsync types are [mountSubtype] sshfs and tsync. *)
 let mountinfo home =
   Printf.sprintf
     "24 30 0:22 / /proc rw,relatime shared:5 - proc proc rw\n\
      31 63 0:86 / %s/elsewhere rw,nosuid shared:9 - fuse.tsync tsync rw\n\
-     35 63 0:89 / %s/tsync/Jellyfin\\040Media ro,nosuid shared:1 - fuse.tsync \
+     35 63 0:89 / %s/tsync/Jellyfin\\040Media ro,nosuid shared:1 - fuse.sshfs \
      tsync ro\n\
-     41 63 0:91 / %s/other rw shared:2 - ext4 /dev/sda1 rw\n"
-    home home home
+     41 63 0:91 / %s/other rw shared:2 - ext4 /dev/sda1 rw\n\
+     42 63 0:93 / %s/gone rw shared:3 - fuse.sshfs user@host: rw\n"
+    home home home home
 
 let () =
   (try Unix.mkdir scratch 0o700 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
@@ -72,7 +74,7 @@ let () =
   check "a domain mounting where the config does not say is still found"
     (List.assoc_opt (home ^ "/tsync/Jellyfin Media") found
     = Some (Runtime.domain_socket_path paths "Jellyfin Media"));
-  check "a configured domain that is not mounted is left out"
+  check "a configured path mounted by real sshfs is left out"
     (not (List.mem_assoc (home ^ "/gone") found));
   check "another filesystem's mount is not ours" (List.length found = 2);
   (* Totality is the wrapper's contract, not [mount_points_in]'s, and it is what
