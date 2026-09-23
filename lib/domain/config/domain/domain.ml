@@ -41,8 +41,8 @@ let deferred_root ~paths (d : Conf_parsing.domain) =
 (* The one place a configured role becomes behavior: [replica] and [backfill]
    are the same target with one bit between them — whether reads may reach it —
    so a resynced backfill is promoted by editing one word. *)
-let build_backends ~paths ~resume ~max_chunk_forwards
-    (d : Conf_parsing.domain) :
+let build_backends ~paths ~resume ~max_chunk_forwards (d : Conf_parsing.domain)
+    :
     (module Backend_lwt.Store) * (module Backend_lwt.Store) Backend.member list
     =
   (* One counter pair per configured store, kept by name so the member built
@@ -219,6 +219,7 @@ let of_config ?domain ?socket_path ?(resume = false) ~paths cfg :
     let store, members =
       build_backends ~paths ~resume
         ~max_chunk_forwards:cfg.Conf_parsing.max_chunk_buffers d
+
     let cache_root = paths.Runtime.cache_root
     let data_dir = paths.Runtime.data_dir
     let socket_path = socket_path

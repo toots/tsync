@@ -34,4 +34,5 @@
   tsync-libs.backend_api
   tsync-libs.backend_lwt
   tsync_local_backend_lwt
-  tsync_io_lwt yojson))
+  tsync_io_lwt
+  yojson))

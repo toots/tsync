@@ -126,10 +126,9 @@ struct
 
   let make ?(resume = false) ?chunk_from_prefix
       ?(max_chunk_forwards = default_max_chunk_forwards)
-      ?(room_for = fun ~bytes:_ -> true) ~name ~backend ~source
-      ~chunk_prefix ~(chunk_keys : string -> string list) ~journal_prefix
-      ~cursor_key ~(excluded : Stored_key.t -> bool) ~reads_reach ~root () :
-      (module S) =
+      ?(room_for = fun ~bytes:_ -> true) ~name ~backend ~source ~chunk_prefix
+      ~(chunk_keys : string -> string list) ~journal_prefix ~cursor_key
+      ~(excluded : Stored_key.t -> bool) ~reads_reach ~root () : (module S) =
     let max_chunk_forwards = max 1 max_chunk_forwards in
     let (module Target : Store) = backend in
     let (module Source : Store) = source in

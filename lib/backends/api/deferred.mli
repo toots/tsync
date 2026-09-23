@@ -111,11 +111,11 @@ module Over
       Values below [1] are read as [1].
 
       [room_for] is the link's answer to the same question: whether a body of
-      that many bytes may go now. A [false] drops the forward as the count
-      does, for the same reason, that a body is not held in memory waiting
-      for a link; the store's own gate then takes the room on the write with
-      nothing between, which is what the answer is good for. Omitted, there
-      is always room. *)
+      that many bytes may go now. A [false] drops the forward as the count does,
+      for the same reason, that a body is not held in memory waiting for a link;
+      the store's own gate then takes the room on the write with nothing
+      between, which is what the answer is good for. Omitted, there is always
+      room. *)
   val make :
     ?resume:bool ->
     ?chunk_from_prefix:string ->

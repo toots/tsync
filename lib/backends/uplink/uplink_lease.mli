@@ -1,20 +1,19 @@
-(** The lessees of a link's owner: who holds a share of it, what each last
-    said, and how the rate the law chose is split among them.
+(** The lessees of a link's owner: who holds a share of it, what each last said,
+    and how the rate the law chose is split among them.
 
-    A lessee renews every {!Uplink_control.tick_interval}, reporting what it
-    has in flight, what completed and what timed out since it last renewed,
-    and how many bodies wait behind its line; it is granted a rate in reply.
-    The owner's own writes are a lessee too, in the same table under the same
-    rule, so one implementation admits everyone. One silent for three
-    intervals is gone: the {!Job_registry} rule, and the same reason.
+    A lessee renews every {!Uplink_control.tick_interval}, reporting what it has
+    in flight, what completed and what timed out since it last renewed, and how
+    many bodies wait behind its line; it is granted a rate in reply. The owner's
+    own writes are a lessee too, in the same table under the same rule, so one
+    implementation admits everyone. One silent for three intervals is gone: the
+    {!Job_registry} rule, and the same reason.
 
     The split is max-min fair over what each lessee can use. A lessee with a
     line behind it wants all it can get; one moving bytes but with nothing
-    waiting is using what it has, and is given a little over that and no
-    more, since more would sit idle; one moving nothing holds the floor, so
-    its first body is admitted at once. What is left over is handed out
-    evenly regardless: it costs nothing to grant, and a lessee that wakes
-    bursts into it.
+    waiting is using what it has, and is given a little over that and no more,
+    since more would sit idle; one moving nothing holds the floor, so its first
+    body is admitted at once. What is left over is handed out evenly regardless:
+    it costs nothing to grant, and a lessee that wakes bursts into it.
 
     Pure: every entry point is handed the time. *)
 
@@ -26,25 +25,25 @@ type report = {
   timeouts : int;
   waiting : int;
   held_back : bool;
-      (** A body waited or was refused since the last renewal, whether or
-          not one is waiting now: the rate held this lessee back. Spent by
-          the next {!split}. A lessee that never says (an older build) is
-          read as held back while it has a body in flight. *)
+      (** A body waited or was refused since the last renewal, whether or not
+          one is waiting now: the rate held this lessee back. Spent by the next
+          {!split}. A lessee that never says (an older build) is read as held
+          back while it has a body in flight. *)
   probe : float option;
       (** The least round trip the lessee timed on the link since it last
-          renewed, seconds; [None] when it had nothing in flight to time
-          one beside. What lets an owner run the law of a link it has no
-          store on. *)
+          renewed, seconds; [None] when it had nothing in flight to time one
+          beside. What lets an owner run the law of a link it has no store on.
+      *)
 }
 
 val idle : report
 
-(** Whether a lessee would use more than it has: a line behind it now, or
-    one there since it last said. *)
+(** Whether a lessee would use more than it has: a line behind it now, or one
+    there since it last said. *)
 val wants : report -> bool
 
-(** Read off a request's fields; a field absent is nothing. The probe is
-    carried as [probeMs]. *)
+(** Read off a request's fields; a field absent is nothing. The probe is carried
+    as [probeMs]. *)
 val report_of_json : (string * Yojson.Safe.t) list -> report
 
 (** What {!report_of_json} reads back as the same report. *)
@@ -71,17 +70,18 @@ val in_flight : t -> now:float -> int
     lessee, and zeroed: what the law is fed once a tick. *)
 val drain : t -> int * int
 
-(** Split [total] bytes per second between the owner's own writes, described
-    by [self], and the live lessees; each is granted at least [min_rate].
+(** Split [total] bytes per second between the owner's own writes, described by
+    [self], and the live lessees; each is granted at least [min_rate].
     Remembered, so {!rate_for} answers with it until the next split. *)
-val split : t -> now:float -> total:float -> min_rate:float -> self:report -> unit
+val split :
+  t -> now:float -> total:float -> min_rate:float -> self:report -> unit
 
 (** The owner's own grant from the last {!split}, or [total] before any. *)
 val own_rate : t -> float
 
 (** [pid]'s grant from the last {!split}. A lessee not in that split, having
-    renewed for the first time since, is granted an even share of the last
-    total at once: a job started beside a daemon does not start cold. *)
+    renewed for the first time since, is granted an even share of the last total
+    at once: a job started beside a daemon does not start cold. *)
 val rate_for : t -> now:float -> pid:int -> float
 
 (** Every live lessee as a report shows it: [pid], [rateBytesPerSec],

@@ -3,13 +3,7 @@
    and "links" read. *)
 let bc ?(role = `Main) backend_type id =
   Conf_parsing.
-    {
-      backend_type;
-      name = id;
-      fields = [("id", id)];
-      role;
-      link = "wan";
-    }
+    { backend_type; name = id; fields = [("id", id)]; role; link = "wan" }
 
 let ids bs =
   List.map
@@ -55,12 +49,18 @@ let () =
       (Printf.sprintf {|{"type": "s3", "name": "s", "role": "main"%s}|} extra)
   in
   let first_backend extra =
-    List.hd (List.hd (load (with_link extra)).Conf_parsing.domains).Conf_parsing.backends
+    List.hd
+      (List.hd (load (with_link extra)).Conf_parsing.domains)
+        .Conf_parsing.backends
   in
   assert ((first_backend "").Conf_parsing.link = "wan");
   assert ((first_backend {|, "link": "lan"|}).Conf_parsing.link = "lan");
-  assert ((first_backend {|, "link": " wlan-slow "|}).Conf_parsing.link = "wlan-slow");
-  assert (not (List.mem_assoc "link" (first_backend {|, "link": "lan"|}).Conf_parsing.fields));
+  assert (
+    (first_backend {|, "link": " wlan-slow "|}).Conf_parsing.link = "wlan-slow");
+  assert (
+    not
+      (List.mem_assoc "link"
+         (first_backend {|, "link": "lan"|}).Conf_parsing.fields));
   assert (fails (with_link {|, "link": ""|}));
   assert (fails (with_link {|, "link": 3|}));
   assert (
@@ -82,7 +82,9 @@ let () =
             "backends": [{"type": "s3", "name": "t", "role": "main", "link": "lan"}]}]}|}
       links
   in
-  let cfg = load (two_domains ~links:{|{"lan": {"maxRate": "1 MB", "enabled": false}}|}) in
+  let cfg =
+    load (two_domains ~links:{|{"lan": {"maxRate": "1 MB", "enabled": false}}|})
+  in
   let lan = Conf_parsing.link_settings cfg "lan" in
   assert (lan.Uplink_control.max_rate = Some (1024 * 1024));
   assert (not lan.enabled);

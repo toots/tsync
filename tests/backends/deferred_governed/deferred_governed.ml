@@ -26,7 +26,9 @@ let chunk n =
 let manifest_key name = Stored_key.in_space ~prefix:manifest_prefix name
 
 let manifest ~name chunks =
-  let keys = List.map (fun k -> Filename.basename (Stored_key.to_string k)) chunks in
+  let keys =
+    List.map (fun k -> Filename.basename (Stored_key.to_string k)) chunks
+  in
   Manifest.encode ~name
     ~size:(Int64.of_int (List.length keys * 4))
     ~chunk_size:4 ~mtime:0. ~h1:(hex 0) ~h2:(hex 1) ~symlink:None ~keys
@@ -97,8 +99,8 @@ let () =
      let* () = Lwt_list.iter_s (fun key -> B.put ~key ~data:body ()) chunks in
      check "nothing in flight and nothing on the target"
        ~why:(fun () ->
-         Printf.sprintf "in flight %d, chunks %d" (T.stats ()).Deferred.in_flight
-           (chunks_on t1))
+         Printf.sprintf "in flight %d, chunks %d"
+           (T.stats ()).Deferred.in_flight (chunks_on t1))
        ((T.stats ()).Deferred.in_flight = 0 && chunks_on t1 = 0);
      let* () =
        B.put ~key:(manifest_key "one")
@@ -126,7 +128,8 @@ let () =
      let* () = Until.reached (fun () -> (T.stats ()).Deferred.in_flight = 0) in
      check "both chunks on the target, no manifest yet"
        ~why:(fun () ->
-         Printf.sprintf "chunks %d manifests %d" (chunks_on t2) (manifests_on t2))
+         Printf.sprintf "chunks %d manifests %d" (chunks_on t2)
+           (manifests_on t2))
        (chunks_on t2 = 2 && manifests_on t2 = 0);
 
      case "the question carries the body's size, and is asked per forward";
@@ -149,8 +152,7 @@ let () =
        ~why:(fun () ->
          String.concat "," (List.map string_of_int (List.rev !asked)))
        (List.rev !asked = [4; 4; 4]);
-     check "the two granted are there, the refused one is not"
-       (chunks_on t3 = 2);
+     check "the two granted are there, the refused one is not" (chunks_on t3 = 2);
      let* () =
        B.put ~key:(manifest_key "three")
          ~data:(Bigstring.of_string (manifest ~name:"three" chunks))

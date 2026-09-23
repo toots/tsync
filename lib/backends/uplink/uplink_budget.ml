@@ -61,6 +61,6 @@ let release t ~bytes = t.in_flight <- Int.max 0 (t.in_flight - bytes)
 let wait_for t ~now ~bytes =
   refill t ~now;
   if not (window_has_room t bytes) then infinity
-  else
+  else (
     let short = asks t bytes -. t.tokens in
-    if short <= 0. then 0. else short /. t.rate
+    if short <= 0. then 0. else short /. t.rate)

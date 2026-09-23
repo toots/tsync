@@ -77,9 +77,8 @@ val off : t -> int -> unit
 val describe : t -> string
 
 (** A request of this member timed out. Tallied apart from whether it tripped
-    the member: whoever governs the link the member is on reads the tally,
-    and a timeout is evidence for the link either way. {!always_up} counts
-    nothing. *)
+    the member: whoever governs the link the member is on reads the tally, and a
+    timeout is evidence for the link either way. {!always_up} counts nothing. *)
 val timed_out : t -> unit
 
 (** Timeouts this member's requests took, ever. *)

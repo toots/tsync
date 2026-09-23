@@ -423,7 +423,8 @@ let governed u = bool_of (mem u "enabled")
 (* One row per link something is written over, the link named on the row. *)
 let uplink_rows ~row uplinks =
   List.iter
-    (fun (name, u) -> if governed u then row 4 ("uplink " ^ name) (uplink_row u))
+    (fun (name, u) ->
+      if governed u then row 4 ("uplink " ^ name) (uplink_row u))
     (assoc uplinks)
 
 let traffic_row t =
@@ -907,11 +908,11 @@ let text json =
             uplink_rows ~row (mem p "uplinks");
             (* Only the pools something is waiting on: a report of empty queues
                is a report of nothing. *)
-            (match
-               List.filter
-                 (fun p -> int_of (mem p "waiting") > 0)
-                 (list (mem p "pools"))
-             with
+              (match
+                 List.filter
+                   (fun p -> int_of (mem p "waiting") > 0)
+                   (list (mem p "pools"))
+               with
               | [] -> ()
               | busy -> row 4 "slots" (slots_row busy));
             (match int_of (mem p "swappedBytes") with

@@ -2,5 +2,4 @@
  (flags
   (:standard -open Tsync_core -open Tsync_uplink -open Tsync_test_harness))
  (name uplink_control_test)
- (libraries
-  tsync_uplink tsync-libs.core tsync_test_harness))
+ (libraries tsync_uplink tsync-libs.core tsync_test_harness))

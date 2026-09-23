@@ -26,8 +26,8 @@ module type SEND = sig
 end
 
 (** The process's link governors, as a report shows them: by link name, what
-    each says under the names every report uses. Handed in because the
-    governors are the scheduler's, and this is not. *)
+    each says under the names every report uses. Handed in because the governors
+    are the scheduler's, and this is not. *)
 module type LINK = sig
   val json : unit -> (string * Yojson.Safe.t) list
 end

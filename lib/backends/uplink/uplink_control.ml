@@ -119,9 +119,8 @@ let create ?(settings = default_settings) ~now () =
         ~cells:(cells_of !base_window 60.)
         ~width:60. ~empty:infinity ~combine:Float.min ~now;
     completed_bytes =
-      Window.create
-        ~cells:(cells_of !rate_window 1.)
-        ~width:1. ~empty:0. ~combine:( +. ) ~now;
+      Window.create ~cells:(cells_of !rate_window 1.) ~width:1. ~empty:0.
+        ~combine:( +. ) ~now;
     capacity = None;
     samples = [];
     queueing = 0.;
@@ -256,7 +255,8 @@ let tick t ~now ~limited =
           else if t.settled && t.over_target >= 2 then lower_capacity t ~now;
           if now -. t.since >= !probe_up_every then enter t ~now Ramping;
           (* Growth only for a sender the rate held back; a shrink always. *)
-          if off > 0. && not limited then rate else rate *. (1. +. (!gain *. off))
+          if off > 0. && not limited then rate
+          else rate *. (1. +. (!gain *. off))
       | Backing_off ->
           if now -. t.since >= !backoff_hold then enter t ~now Ramping;
           rate
@@ -271,7 +271,8 @@ let json t ~now =
     ("rateBytesPerSec", `Int (int_of_float (rate t)));
     ( "capacityBytesPerSec",
       match t.capacity with Some c -> `Int (int_of_float c) | None -> `Null );
-    ("baseDelayMs", match base_delay t ~now with Some b -> ms b | None -> `Null);
+    ( "baseDelayMs",
+      match base_delay t ~now with Some b -> ms b | None -> `Null );
     ("queueingDelayMs", ms t.queueing);
     ("drops", `Int t.drops);
     ("headroom", `Float t.settings.headroom);

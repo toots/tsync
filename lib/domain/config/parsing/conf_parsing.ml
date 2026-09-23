@@ -37,7 +37,6 @@ type t = {
 }
 
 let default_link = Uplink.default_link
-
 let roles : role list = [`Main; `Replica; `Backfill; `ReadOnly]
 
 let role_name : role -> string = function
@@ -256,8 +255,8 @@ let parse_domain json =
 
 (* Strict, as a backend's ceiling is: a setting typed wrong here would leave
    the link governed by something other than what was meant. *)
-let uplink_of_json ?(base = Uplink_control.default_settings)
-    ?(where = "uplink") json =
+let uplink_of_json ?(base = Uplink_control.default_settings) ?(where = "uplink")
+    json =
   let open Yojson.Basic.Util in
   let d = base in
   let bad field v =
@@ -320,8 +319,7 @@ let links_of_json ~uplink ~(domains : domain list) json =
         List.map
           (fun (name, j) ->
             if not (on_some_backend name) then
-              failwith
-                (Printf.sprintf "links: no backend names link %S" name);
+              failwith (Printf.sprintf "links: no backend names link %S" name);
             (name, uplink_of_json ~base:uplink ~where:("links." ^ name) j))
           l
     | v ->
@@ -337,7 +335,8 @@ let uplink_to_json (u : Uplink_control.settings) : Yojson.Basic.t =
     ([
        ("enabled", `Bool u.enabled);
        ("headroom", `Float u.headroom);
-       ("targetDelayMs", `Int (int_of_float (Float.round (u.target_delay *. 1000.))));
+       ( "targetDelayMs",
+         `Int (int_of_float (Float.round (u.target_delay *. 1000.))) );
        ("minRate", `Int u.min_rate);
      ]
     @ match u.max_rate with Some m -> [("maxRate", `Int m)] | None -> [])

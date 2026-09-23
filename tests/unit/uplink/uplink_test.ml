@@ -74,7 +74,8 @@ let () =
      case "disabled, everything passes at once";
      let g = U.create ~settings:{ on with enabled = false } () in
      let* () =
-       Lwt.join (List.init 10 (fun _ -> U.acquire g ~class_:Background ~bytes:mb))
+       Lwt.join
+         (List.init 10 (fun _ -> U.acquire g ~class_:Background ~bytes:mb))
      in
      check "ten megabytes, no line" (U.waiting g = 0);
      check "and the drop path always has room" (U.try_admit g ~bytes:mb);
@@ -139,8 +140,12 @@ let () =
      let* () = settle 5 in
      check "answered: none again" (!probed = 1);
      let held = ref true in
-     U.attach g ~name:"down" ~held:(fun () -> !held) ~timeouts:(fun () -> 0)
-       ~probe:(fun () -> incr probed; Lwt.return_unit);
+     U.attach g ~name:"down"
+       ~held:(fun () -> !held)
+       ~timeouts:(fun () -> 0)
+       ~probe:(fun () ->
+         incr probed;
+         Lwt.return_unit);
      let* () = adm.Uplink.acquire ~bytes:mb in
      Fake_clock.advance 2.;
      let* () = settle 5 in

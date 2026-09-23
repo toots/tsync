@@ -3,7 +3,6 @@ let clock = ref 0.
 (* Each sleep with its promise as well as its waker: a sleep [pick] cancelled
    is no longer sleeping, and waking it would be an error rather than a no-op. *)
 let sleepers : (float * unit Lwt.t * unit Lwt.u) list ref = ref []
-
 let now () = !clock
 
 let sleep seconds =
@@ -26,7 +25,8 @@ let advance seconds =
     (List.sort (fun (a, _, _) (b, _, _) -> compare a b) due)
 
 let pending () =
-  List.length (List.filter (fun (_, waited, _) -> Lwt.is_sleeping waited) !sleepers)
+  List.length
+    (List.filter (fun (_, waited, _) -> Lwt.is_sleeping waited) !sleepers)
 
 let reset () =
   clock := 0.;

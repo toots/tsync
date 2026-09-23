@@ -71,7 +71,8 @@ let () =
      let* () = second 1 in
      let* () = all in
      check "one more each second"
-       ~why:(fun () -> String.concat "," (List.map string_of_int (List.rev !seen)))
+       ~why:(fun () ->
+         String.concat "," (List.map string_of_int (List.rev !seen)))
        (List.rev !seen = [3; 4; 5; 6; 7; 8; 9; 10]);
      check "the line is empty" (gate.Uplink.waiting () = 0);
      check "every byte counted, exactly as without a gate"

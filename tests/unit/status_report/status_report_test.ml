@@ -6,8 +6,7 @@
    logged by every process. What the fold has to do is say each of those once. *)
 
 let answer ~frontend ~domain ~pid ?(serves = []) ?(warnings = []) ?(jobs = [])
-    ?(governed = false)
-    ?(domains = []) () =
+    ?(governed = false) ?(domains = []) () =
   {
     Status_report.domain;
     frontend;
@@ -55,17 +54,17 @@ let answer ~frontend ~domain ~pid ?(serves = []) ?(warnings = []) ?(jobs = [])
                   `Assoc
                     [
                       ("enabled", `Bool governed);
-                ("state", `String "steady");
-                ("rateBytesPerSec", `Int 1258291);
-                ("capacityBytesPerSec", `Int 1677721);
-                ("baseDelayMs", `Float 21.0);
-                ("queueingDelayMs", `Float 12.0);
-                ("inFlightBytes", `Int 16777216);
-                ("windowBytes", `Int 37748736);
-                ("drops", `Int 41);
-                ("headroom", `Float 0.8);
-                ("targetDelayMs", `Float 50.0);
-                ("waiting", `Int 3);
+                      ("state", `String "steady");
+                      ("rateBytesPerSec", `Int 1258291);
+                      ("capacityBytesPerSec", `Int 1677721);
+                      ("baseDelayMs", `Float 21.0);
+                      ("queueingDelayMs", `Float 12.0);
+                      ("inFlightBytes", `Int 16777216);
+                      ("windowBytes", `Int 37748736);
+                      ("drops", `Int 41);
+                      ("headroom", `Float 0.8);
+                      ("targetDelayMs", `Float 50.0);
+                      ("waiting", `Int 3);
                     ] );
                 (* A second link this process holds a lease on: no law of its
                    own to show, only the grant and the load. *)

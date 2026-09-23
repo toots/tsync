@@ -211,9 +211,9 @@ module Make (Io : Io.S) (Bounded : Bounded.S with type 'a io := 'a Io.t) : sig
       — into a pair nobody holds — so a caller wanting the figure passes one and
       keeps it on the store's {!member}.
 
-      [admission] is the gate each body sent goes through, asked before and
-      told after; omitted, a body is sent as it was before there were gates. A
-      local store is neither counted nor gated: it has no link. *)
+      [admission] is the gate each body sent goes through, asked before and told
+      after; omitted, a body is sent as it was before there were gates. A local
+      store is neither counted nor gated: it has no link. *)
   val make :
     ?traffic:traffic ->
     ?admission:unit Io.t Uplink.admission ->

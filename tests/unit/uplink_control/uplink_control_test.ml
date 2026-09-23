@@ -117,7 +117,8 @@ let () =
     ~why:(fun () -> Printf.sprintf "%.0f ms" (1000. *. last delays))
     (last delays < link.base +. settings.target_delay);
   let rates, _, now = run link t ~from:now ~seconds:16 in
-  check "where it stays" ~why:(fun () -> pct (mean rates) cap)
+  check "where it stays"
+    ~why:(fun () -> pct (mean rates) cap)
     (within (0.6 *. cap) (0.85 *. cap) (mean rates));
 
   case "another user arrives: it yields";
@@ -190,7 +191,8 @@ let () =
   Uplink_control.completed t ~now:43. ~bytes:65536 ~elapsed:1.;
   Uplink_control.observe_delay t ~now:44. 0.02;
   Uplink_control.tick t ~now:44. ~limited:true;
-  check "held back while sending, it grows" (Uplink_control.rate t = 2. *. before);
+  check "held back while sending, it grows"
+    (Uplink_control.rate t = 2. *. before);
 
   case "a body is credited over the seconds it took";
   Uplink_control.rate_window := 10.;
@@ -221,8 +223,7 @@ let () =
   let before = Uplink_control.rate t in
   Uplink_control.observe_delay t ~now:(now +. 2.) 0.02;
   Uplink_control.tick t ~now:(now +. 2.) ~limited:false;
-  check "flat delay, nobody waiting: unchanged"
-    (Uplink_control.rate t = before);
+  check "flat delay, nobody waiting: unchanged" (Uplink_control.rate t = before);
   Uplink_control.observe_delay t ~now:(now +. 4.) 0.2;
   Uplink_control.tick t ~now:(now +. 4.) ~limited:false;
   check "a queue still shrinks it" (Uplink_control.rate t < before);

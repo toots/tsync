@@ -55,23 +55,28 @@ let send line =
         Lwt.return
           (Yojson.Safe.to_string
              (`Assoc
-               [
-                 ("ok", `Bool true);
-                 ("interval", `Float 2.);
-                 ( "links",
-                   `Assoc
-                     (List.map
-                        (fun (name, _) ->
-                          (name, `Assoc [("rate", `Float (rate_of name))]))
-                        (links_of req)) );
-               ]))
+                [
+                  ("ok", `Bool true);
+                  ("interval", `Float 2.);
+                  ( "links",
+                    `Assoc
+                      (List.map
+                         (fun (name, _) ->
+                           (name, `Assoc [("rate", `Float (rate_of name))]))
+                         (links_of req)) );
+                ]))
     | Flat rate ->
         Lwt.return
           (Yojson.Safe.to_string
              (`Assoc
-               [("ok", `Bool true); ("rate", `Float rate); ("interval", `Float 2.)]))
+                [
+                  ("ok", `Bool true);
+                  ("rate", `Float rate);
+                  ("interval", `Float 2.);
+                ]))
     | Refuse ->
-        Lwt.return {|{"ok":false,"error":"unknown action: uplink","code":"invalid"}|}
+        Lwt.return
+          {|{"ok":false,"error":"unknown action: uplink","code":"invalid"}|}
     | Silent -> Lwt.fail Lwt_unix.Timeout
 
 let last_asked ?(link = "wan") key =
@@ -79,7 +84,9 @@ let last_asked ?(link = "wan") key =
     | req :: _ -> (
         match List.assoc_opt link (links_of req) with
           | Some (`Assoc fields) -> (
-              match List.assoc_opt key fields with Some (`Int n) -> n | _ -> -1)
+              match List.assoc_opt key fields with
+                | Some (`Int n) -> n
+                | _ -> -1)
           | _ -> -1)
     | _ -> -1
 
@@ -96,10 +103,9 @@ let renewal o ~pid r =
   match U.lease_renewal (U.process_of o) ~pid [(Uplink.default_link, r)] with
     | Some ((_, rate) :: _, interval) -> Some (rate, interval)
     | _ -> None
-let state u = match field u "state" with Some (`String s) -> s | _ -> "?"
 
-let int_field u key =
-  match field u key with Some (`Int n) -> n | _ -> -1
+let state u = match field u "state" with Some (`String s) -> s | _ -> "?"
+let int_field u key = match field u key with Some (`Int n) -> n | _ -> -1
 
 let tick () =
   Fake_clock.advance 2.;
@@ -157,7 +163,12 @@ let () =
 
      case "a daemon that comes back is asked again, and leased from";
      script := Grant (fun _ -> 3. *. float_of_int mb);
-     let rec wait n = if n = 0 then Lwt.return_unit else let* () = tick () in wait (n - 1) in
+     let rec wait n =
+       if n = 0 then Lwt.return_unit
+       else
+         let* () = tick () in
+         wait (n - 1)
+     in
      let* () = wait 16 in
      let* () = held in
      check "leased again within the retry wait" (mode g = U.Leased);
@@ -193,14 +204,18 @@ let () =
      (* The step ran the law too, which grew the rate: the split is of what
         the law now says. *)
      let total = Uplink_control.rate (U.control o) in
-     check "after a step, the idle owner keeps the floor and the lessee the rest"
+     check
+       "after a step, the idle owner keeps the floor and the lessee the rest"
        ~why:(fun () ->
-         Printf.sprintf "own %d of %.0f" (int_field o "ownRateBytesPerSec") total)
+         Printf.sprintf "own %d of %.0f"
+           (int_field o "ownRateBytesPerSec")
+           total)
        (int_field o "ownRateBytesPerSec" = on.min_rate
-       && (match renewal o ~pid:7 wants with
-            | Some (r, _) ->
-                Float.abs (r -. (total -. float_of_int on.min_rate)) < 1.
-            | None -> false));
+       &&
+         match renewal o ~pid:7 wants with
+         | Some (r, _) ->
+             Float.abs (r -. (total -. float_of_int on.min_rate)) < 1.
+         | None -> false);
      check "and the report lists the lessee"
        (match field o "lessees" with Some (`List [_]) -> true | _ -> false);
 
@@ -241,8 +256,11 @@ let () =
      let total = Uplink_control.rate (U.control o) in
      check "half each"
        ~why:(fun () ->
-         Printf.sprintf "own %d of %.0f" (int_field o "ownRateBytesPerSec") total)
-       (Float.abs (float_of_int (int_field o "ownRateBytesPerSec") -. (total /. 2.))
+         Printf.sprintf "own %d of %.0f"
+           (int_field o "ownRateBytesPerSec")
+           total)
+       (Float.abs
+          (float_of_int (int_field o "ownRateBytesPerSec") -. (total /. 2.))
        <= 1.);
      let rec until_through n =
        if n = 0 || not (Lwt.is_sleeping waiting) then Lwt.return_unit
@@ -264,7 +282,9 @@ let () =
      (* A lessee on lan times the link empty once, then a queue twice over:
         lan's law reads a delay it has no store of its own to see, above the
         least it was told. *)
-     let timed probe = { Uplink_lease.idle with in_flight = mb; probe = Some probe } in
+     let timed probe =
+       { Uplink_lease.idle with in_flight = mb; probe = Some probe }
+     in
      ignore (U.lease_renewal (U.process_of o) ~pid:8 [("lan", timed 0.02)]);
      let* () = tick () in
      ignore (U.lease_renewal (U.process_of o) ~pid:8 [("lan", timed 0.4)]);
@@ -273,29 +293,38 @@ let () =
      let* () = tick () in
      check "lan cut, on what its lessee timed"
        ~why:(fun () ->
-         Printf.sprintf "lan %.0f -> %.0f" lan_before (Uplink_control.rate (U.control lan)))
+         Printf.sprintf "lan %.0f -> %.0f" lan_before
+           (Uplink_control.rate (U.control lan)))
        (Uplink_control.rate (U.control lan) < lan_before);
      check "wan untouched"
        ~why:(fun () ->
-         Printf.sprintf "wan %.0f -> %.0f" wan_before (Uplink_control.rate (U.control o)))
+         Printf.sprintf "wan %.0f -> %.0f" wan_before
+           (Uplink_control.rate (U.control o)))
        (Uplink_control.rate (U.control o) = wan_before);
      check "and both are listed"
        (List.map fst (U.links (U.process_of o)) = ["lan"; "wan"]);
 
      case "one renewal carries every link a lessee uses";
      Fake_clock.reset ();
-     script := Grant (fun name -> if name = "wan" then 4. *. float_of_int mb else float_of_int mb);
+     script :=
+       Grant
+         (fun name ->
+           if name = "wan" then 4. *. float_of_int mb else float_of_int mb);
      let g = U.create ~settings:on () in
      lease g ~send;
      let g_lan = U.link (U.process_of g) "lan" in
      let* () = U.acquire g ~class_:U.Background ~bytes:1024 in
      let* () = U.acquire g_lan ~class_:U.Background ~bytes:1024 in
      let* () = tick () in
-     check "both links in the one request" (List.sort compare (last_asked_links ()) = ["lan"; "wan"]);
+     check "both links in the one request"
+       (List.sort compare (last_asked_links ()) = ["lan"; "wan"]);
      check "each granted its own rate"
        ~why:(fun () ->
-         Printf.sprintf "wan %d lan %d" (int_field g "rateBytesPerSec") (int_field g_lan "rateBytesPerSec"))
-       (int_field g "rateBytesPerSec" = 4 * mb && int_field g_lan "rateBytesPerSec" = mb);
+         Printf.sprintf "wan %d lan %d"
+           (int_field g "rateBytesPerSec")
+           (int_field g_lan "rateBytesPerSec"))
+       (int_field g "rateBytesPerSec" = 4 * mb
+       && int_field g_lan "rateBytesPerSec" = mb);
 
      case "an answer of the one-link build is a refusal";
      script := Flat (2. *. float_of_int mb);

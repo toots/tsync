@@ -53,8 +53,9 @@ let report_to_json r =
     ("heldBack", `Bool r.held_back);
   ]
   @
-  match r.probe with
-    | Some seconds -> [("probeMs", `Float (Float.round (seconds *. 10_000.) /. 10.))]
+    match r.probe with
+    | Some seconds ->
+        [("probeMs", `Float (Float.round (seconds *. 10_000.) /. 10.))]
     | None -> []
 
 type lessee = {
@@ -128,9 +129,7 @@ let can_use ~min_rate (r : report) =
    handed out evenly regardless. *)
 let water_fill ~total ~min_rate wants =
   let n = List.length wants in
-  let sorted =
-    List.sort (fun (_, a) (_, b) -> compare a b) wants
-  in
+  let sorted = List.sort (fun (_, a) (_, b) -> compare a b) wants in
   let remaining = ref total and left = ref n in
   let grants =
     List.map
@@ -191,7 +190,7 @@ let json t ~now =
            ("heldBack", `Bool r.held_back);
          ]
         @
-        match r.probe with
+          match r.probe with
           | Some seconds ->
               [("probeMs", `Float (Float.round (seconds *. 10_000.) /. 10.))]
           | None -> []))

@@ -1,11 +1,11 @@
 (** Admission to a link: the gate a store's writes go through.
 
-    A store asks before each body it sends and says how it went after. What
-    it asks is a record of closures rather than a module, so a store built once
-    can be handed whichever gate its config names, and a gate answering for
-    one store can later be swapped for one answering to a daemon without the
-    store changing. Upload only: a read is the caller waiting, and is not made
-    to wait longer here.
+    A store asks before each body it sends and says how it went after. What it
+    asks is a record of closures rather than a module, so a store built once can
+    be handed whichever gate its config names, and a gate answering for one
+    store can later be swapped for one answering to a daemon without the store
+    changing. Upload only: a read is the caller waiting, and is not made to wait
+    longer here.
 
     Two gates. {!Make.capped} is a ceiling on one store, a budget of its own.
     The process governor, {!Make.process}, is one {!Uplink_control} for every
@@ -24,22 +24,22 @@ type 'io admission = {
   waiting : unit -> int;  (** Bodies queued behind the gate right now. *)
   try_admit : bytes:int -> bool;
       (** Room for [bytes] now, with nothing ahead: the drop path's question.
-          Pure, and good only until this turn yields; the [acquire] that
-          follows takes the room with no bind between. *)
+          Pure, and good only until this turn yields; the [acquire] that follows
+          takes the room with no bind between. *)
 }
 
-(** A body of at most this many bytes may pass ahead of what is queued, when
-    the budget covers it: a cursor or a journal entry should not sit behind a
-    chunk. Bounded, so a run of them cannot keep a chunk waiting for long. *)
+(** A body of at most this many bytes may pass ahead of what is queued, when the
+    budget covers it: a cursor or a journal entry should not sit behind a chunk.
+    Bounded, so a run of them cannot keep a chunk waiting for long. *)
 val small_body : int ref
 
-(** How long a probe is given before it is read as the length of the
-    timeout itself: an enormous delay, which the next step cuts hard on. *)
+(** How long a probe is given before it is read as the length of the timeout
+    itself: an enormous delay, which the next step cuts hard on. *)
 val probe_timeout : float ref
 
-(** Where the governor says what it decided. Handed in rather than named,
-    so this library names no logger: [rate] spells bytes per second the way
-    the embedding program does. *)
+(** Where the governor says what it decided. Handed in rather than named, so
+    this library names no logger: [rate] spells bytes per second the way the
+    embedding program does. *)
 module type LOG = sig
   val info : string -> unit
   val warn : string -> unit
@@ -61,37 +61,37 @@ module Make
 
   (** A ceiling of [rate] bytes per second on one store, over its own
       {!Uplink_budget}. Waiters are served in order, each woken the moment the
-      budget next allows it, whether by refill or by a body leaving the link;
-      a body larger than the bucket goes alone and is paid off before the
-      next, as the budget says. *)
+      budget next allows it, whether by refill or by a body leaving the link; a
+      body larger than the bucket goes alone and is paid off before the next, as
+      the budget says. *)
   val capped : rate:float -> unit Io.t admission
 
-  (** [compose first second] asks [first] and then [second], and tells both:
-      a store's own ceiling in front of the process governor. *)
+  (** [compose first second] asks [first] and then [second], and tells both: a
+      store's own ceiling in front of the process governor. *)
   val compose :
     unit Io.t admission -> unit Io.t admission -> unit Io.t admission
 
   (** {1 The process governor: one link at a time, all of them together} *)
 
-  (** Who is asking. [Background] takes from the budget; [Foreground] is a
-      user waiting, and passes. Upload only today, so every store is
-      [Background]; the class is here so a download path can say otherwise
-      without the interface changing. *)
+  (** Who is asking. [Background] takes from the budget; [Foreground] is a user
+      waiting, and passes. Upload only today, so every store is [Background];
+      the class is here so a download path can say otherwise without the
+      interface changing. *)
   type class_ = Background | Foreground
 
-  (** What a process is to its links. The [Owner] serves the daemon's socket:
-      it runs each link's law, splits its rate among those holding a share of
-      that link, and answers their renewals; its own writes hold a share like
-      any other. A [Leased] process asks the owner for its shares every
-      interval and runs no law of its own. A [Local] one runs the laws alone:
-      no daemon answered, or the one that did does not know the question. A
-      process is one of these for every link it has at once. *)
+  (** What a process is to its links. The [Owner] serves the daemon's socket: it
+      runs each link's law, splits its rate among those holding a share of that
+      link, and answers their renewals; its own writes hold a share like any
+      other. A [Leased] process asks the owner for its shares every interval and
+      runs no law of its own. A [Local] one runs the laws alone: no daemon
+      answered, or the one that did does not know the question. A process is one
+      of these for every link it has at once. *)
   type mode = Owner | Leased | Local
 
   val string_of_mode : mode -> string
 
-  (** One link's governor: its law, its budget, the line behind it, and, for
-      an owner, the lessees holding shares of it. *)
+  (** One link's governor: its law, its budget, the line behind it, and, for an
+      owner, the lessees holding shares of it. *)
   type t
 
   (** The process's links, and what the process is to them. *)
@@ -106,8 +106,8 @@ module Make
   (** A lone {!default_link} in a fresh local process: what a test builds. *)
   val create : ?settings:Uplink_control.settings -> unit -> t
 
-  (** Applied once per process, before the first store is built. A later
-      call is a no-op: a process opening a second domain has the same links. *)
+  (** Applied once per process, before the first store is built. A later call is
+      a no-op: a process opening a second domain has the same links. *)
   val configure :
     defaults:Uplink_control.settings ->
     overrides:(string * Uplink_control.settings) list ->
@@ -117,8 +117,8 @@ module Make
       nothing configured it. *)
   val process : unit -> process
 
-  (** The link of that name, made on first mention: its override if the
-      process has one for the name, else the defaults. *)
+  (** The link of that name, made on first mention: its override if the process
+      has one for the name, else the defaults. *)
   val link : process -> string -> t
 
   (** Every link something uses, by name, sorted. A link nothing writes to,
@@ -140,17 +140,17 @@ module Make
       whether or not the owner itself has anything to send. *)
   val own : process -> unit
 
-  (** This process asks the owner over [send] for its shares, one line each
-      way, renewing every interval the owner names. Refused, which an older
-      daemon does, or unanswered three times, it runs the laws alone and asks
-      again now and then. A process that has said {!own} ignores this. *)
+  (** This process asks the owner over [send] for its shares, one line each way,
+      renewing every interval the owner names. Refused, which an older daemon
+      does, or unanswered three times, it runs the laws alone and asks again now
+      and then. A process that has said {!own} ignores this. *)
   val lease_through : process -> send:(string -> string Io.t) -> unit
 
-  (** A lessee's renewal, answered by the owner: a grant in bytes per second
-      for each link reported, and the interval to renew at. A link the owner
-      has no store on is made for the lessee, on the owner's settings for the
-      name. [None] from a process that is not the owner, which the caller
-      turns into a refusal. *)
+  (** A lessee's renewal, answered by the owner: a grant in bytes per second for
+      each link reported, and the interval to renew at. A link the owner has no
+      store on is made for the lessee, on the owner's settings for the name.
+      [None] from a process that is not the owner, which the caller turns into a
+      refusal. *)
   val lease_renewal :
     process ->
     pid:int ->
@@ -159,27 +159,26 @@ module Make
 
   (** Waits for room on the link, in order; a body of at most {!small_body}
       bytes passes ahead when the budget covers it. Returns at once when the
-      link is disabled or the asker is [Foreground]. Starts the process's
-      ticker on first use. *)
+      link is disabled or the asker is [Foreground]. Starts the process's ticker
+      on first use. *)
   val acquire : t -> class_:class_ -> bytes:int -> unit Io.t
 
-  (** The drop path's question: room now, or not at all; a [false] is a drop
-      and charges nothing. A [true] holds only until this turn yields: the
-      caller's {!acquire} that follows takes the room synchronously, with no
-      bind between, which is what a chunk forward relies on. Always [true]
-      when the link is disabled. What {!admission} answers as its
-      [try_admit]. *)
+  (** The drop path's question: room now, or not at all; a [false] is a drop and
+      charges nothing. A [true] holds only until this turn yields: the caller's
+      {!acquire} that follows takes the room synchronously, with no bind
+      between, which is what a chunk forward relies on. Always [true] when the
+      link is disabled. What {!admission} answers as its [try_admit]. *)
   val try_admit : t -> bytes:int -> bool
 
   (** What a store hands its constructor: this link, asked as [class_]. *)
   val admission : t -> class_ -> unit Io.t admission
 
-  (** A store on the link with governed bytes crossing it: whether to leave
-      it alone just now ([held], a store its own retry loop has taken out),
-      how many of its requests have timed out so far ([timeouts], read each
-      step and the growth since cut on), and one small round trip to time
-      ([probe]). Probed every tick while the link has bytes in flight and the
-      store is not held; never when idle, since a probe is a billed request. *)
+  (** A store on the link with governed bytes crossing it: whether to leave it
+      alone just now ([held], a store its own retry loop has taken out), how
+      many of its requests have timed out so far ([timeouts], read each step and
+      the growth since cut on), and one small round trip to time ([probe]).
+      Probed every tick while the link has bytes in flight and the store is not
+      held; never when idle, since a probe is a billed request. *)
   val attach :
     t ->
     name:string ->

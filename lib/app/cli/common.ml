@@ -53,7 +53,9 @@ let domain_arg =
    than inside a per-domain constructor. *)
 let make_conf ?domain ?socket_path ?resume cfg =
   Tls_conf.apply cfg.Conf_parsing.tls;
-  let conf = Domain.of_config ?domain ?socket_path ?resume ~paths:runtime_paths cfg in
+  let conf =
+    Domain.of_config ?domain ?socket_path ?resume ~paths:runtime_paths cfg
+  in
   (* A command beside the daemon asks it for a share of the link. The daemon
      itself passes through here too, and says otherwise once it is up. *)
   Uplink_lwt.lease_from ~socket_path:(Runtime.sync_socket_path runtime_paths);

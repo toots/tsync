@@ -25,7 +25,8 @@ let () =
   Uplink_lease.split t ~now:0. ~total ~min_rate ~self:Uplink_lease.idle;
   let a = Uplink_lease.rate_for t ~now:0. ~pid:1
   and b = Uplink_lease.rate_for t ~now:0. ~pid:2 in
-  check "an even share each" ~why:(fun () -> pct a ^ " " ^ pct b)
+  check "an even share each"
+    ~why:(fun () -> pct a ^ " " ^ pct b)
     (near a b && near a ((total -. min_rate) /. 2.));
   check "the idle owner holds the floor"
     ~why:(fun () -> pct (Uplink_lease.own_rate t))
@@ -58,7 +59,8 @@ let () =
   Uplink_lease.split t ~now:0. ~total ~min_rate ~self:Uplink_lease.idle;
   check "half each, to burst into"
     ~why:(fun () ->
-      pct (Uplink_lease.own_rate t) ^ " "
+      pct (Uplink_lease.own_rate t)
+      ^ " "
       ^ pct (Uplink_lease.rate_for t ~now:0. ~pid:1))
     (near (Uplink_lease.own_rate t) (total /. 2.)
     && near (Uplink_lease.rate_for t ~now:0. ~pid:1) (total /. 2.));
@@ -92,25 +94,36 @@ let () =
 
   case "having waited is said once, and spent by the split that hears it";
   let t = Uplink_lease.create () in
-  Uplink_lease.record t ~now:0. ~pid:1 { Uplink_lease.idle with held_back = true };
-  check "heard" (List.exists (fun (_, r) -> Uplink_lease.wants r) (Uplink_lease.live t ~now:0.));
+  Uplink_lease.record t ~now:0. ~pid:1
+    { Uplink_lease.idle with held_back = true };
+  check "heard"
+    (List.exists
+       (fun (_, r) -> Uplink_lease.wants r)
+       (Uplink_lease.live t ~now:0.));
   Uplink_lease.split t ~now:0. ~total ~min_rate ~self:Uplink_lease.idle;
   check "and spent"
-    (not (List.exists (fun (_, r) -> Uplink_lease.wants r) (Uplink_lease.live t ~now:0.)));
+    (not
+       (List.exists
+          (fun (_, r) -> Uplink_lease.wants r)
+          (Uplink_lease.live t ~now:0.)));
 
   case "a lessee that never says is held back while it has a body in flight";
   let old_build = Uplink_lease.report_of_json [("inFlight", `Int 5)] in
   check "read as wanting more" (Uplink_lease.wants old_build);
   check "and one that says no is not"
-    (not (Uplink_lease.wants (Uplink_lease.report_of_json [("inFlight", `Int 5); ("heldBack", `Bool false)])));
+    (not
+       (Uplink_lease.wants
+          (Uplink_lease.report_of_json
+             [("inFlight", `Int 5); ("heldBack", `Bool false)])));
 
   case "a report read off a request";
   let r =
     Uplink_lease.report_of_json
       [("inFlight", `Int 5); ("completed", `Float 7.); ("waiting", `Int 2)]
   in
-  check "fields present are read, absent ones are nothing, but for held back,
-          which a body in flight stands in for"
+  check
+    "fields present are read, absent ones are nothing, but for held back,\n\
+    \          which a body in flight stands in for"
     (r
     = {
         Uplink_lease.in_flight = 5;
@@ -124,11 +137,14 @@ let () =
   case "what a lessee timed travels as milliseconds, and only when it did";
   let r = Uplink_lease.report_of_json [("probeMs", `Float 42.)] in
   check "read" (r.Uplink_lease.probe = Some 0.042);
-  check "absent is none" ((Uplink_lease.report_of_json []).Uplink_lease.probe = None);
+  check "absent is none"
+    ((Uplink_lease.report_of_json []).Uplink_lease.probe = None);
   let timed = { Uplink_lease.idle with in_flight = 7; probe = Some 0.0123 } in
   check "written and read back"
     (Uplink_lease.report_of_json (Uplink_lease.report_to_json timed) = timed);
   check "and not written when none"
-    (not (List.mem_assoc "probeMs" (Uplink_lease.report_to_json Uplink_lease.idle)));
+    (not
+       (List.mem_assoc "probeMs"
+          (Uplink_lease.report_to_json Uplink_lease.idle)));
 
   report ~expected:20 ()

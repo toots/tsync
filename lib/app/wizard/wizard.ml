@@ -524,14 +524,14 @@ module Make (E : ENV) = struct
               | Some n when link_n = Some n -> (
                   (* Any name; stores naming the same one are governed as
                      one. Blank is the default, and is not written. *)
-                  match
-                    String.trim
-                      (prompt
-                         (Printf.sprintf
-                            "  Link this store is written over (blank = %s)"
-                            Conf_parsing.default_link)
-                         (Some (link_of ())))
-                  with
+                    match
+                      String.trim
+                        (prompt
+                           (Printf.sprintf
+                              "  Link this store is written over (blank = %s)"
+                              Conf_parsing.default_link)
+                           (Some (link_of ())))
+                    with
                     | "" -> l := List.remove_assoc "link" !l
                     | v when v = Conf_parsing.default_link ->
                         l := List.remove_assoc "link" !l
@@ -1002,7 +1002,8 @@ module Make (E : ENV) = struct
            let ceiling =
              prompt_size_opt ~unset:"none"
                (Printf.sprintf
-                  "Link %s: upload rate ceiling, per second (\"none\" = as uplink)"
+                  "Link %s: upload rate ceiling, per second (\"none\" = as \
+                   uplink)"
                   name)
                current
            in

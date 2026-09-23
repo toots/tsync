@@ -23,10 +23,7 @@ module Silent = struct
   let rate r = Printf.sprintf "%.0f B/s" r
 end
 
-module Make
-    (Io : Io.S)
-    (Clock : Clock.S with type 'a io := 'a Io.t)
-    (Log : LOG) =
+module Make (Io : Io.S) (Clock : Clock.S with type 'a io := 'a Io.t) (Log : LOG) =
 struct
   open Io_syntax.Make (Io)
 
@@ -57,8 +54,8 @@ struct
     waiters : (int * unit Io.u) Queue.t;
     mutable armed : bool;
     mutable held_back : bool;
-        (** A body waited or was refused since this was last read: the rate
-            held the sender back, which is what lets it grow. *)
+        (** A body waited or was refused since this was last read: the rate held
+            the sender back, which is what lets it grow. *)
   }
 
   let gate beneath =
@@ -72,8 +69,7 @@ struct
   (* Wake, in order, every waiter from the head the budget now admits. *)
   let rec pump g =
     match Queue.peek_opt g.waiters with
-      | Some (bytes, wake)
-        when g.beneath.admits ~now:(Clock.now ()) ~bytes ->
+      | Some (bytes, wake) when g.beneath.admits ~now:(Clock.now ()) ~bytes ->
           ignore (Queue.pop g.waiters);
           g.beneath.take ~now:(Clock.now ()) ~bytes;
           Io.wakeup_later wake ();
@@ -83,7 +79,7 @@ struct
   (* Set for the moment the head could next pass on refill alone. A head only a
      completion can free sets nothing: that completion will pump. *)
   let rec arm g =
-    if not g.armed then
+    if not g.armed then (
       match Queue.peek_opt g.waiters with
         | None -> ()
         | Some (bytes, _) ->
@@ -95,7 +91,7 @@ struct
                   g.armed <- false;
                   pump g;
                   arm g)
-            end
+            end)
 
   (* Room now, with nothing ahead that should go first. *)
   let room g ~bytes =
@@ -151,7 +147,8 @@ struct
           second.abandoned ~bytes);
       now = first.now;
       waiting = (fun () -> first.waiting () + second.waiting ());
-      try_admit = (fun ~bytes -> first.try_admit ~bytes && second.try_admit ~bytes);
+      try_admit =
+        (fun ~bytes -> first.try_admit ~bytes && second.try_admit ~bytes);
     }
 
   let capped ~rate =
@@ -194,9 +191,8 @@ struct
     proc : process;
     control : Uplink_control.t;
     share : Uplink_budget.t;
-        (** What this process admits against on this link: the law's rate,
-            its own share of it as an owner, or the grant it holds as a
-            lessee. *)
+        (** What this process admits against on this link: the law's rate, its
+            own share of it as an owner, or the grant it holds as a lessee. *)
     line : gate;
     mutable lessees : Uplink_lease.t option;  (** An owner's table. *)
     completed_since : int ref;  (** Own bytes answered since last told. *)
@@ -303,7 +299,9 @@ struct
       | Some l -> l
       | None -> create_link p name
 
-  let create ?settings () = link (create_process ?defaults:settings ()) default_link
+  let create ?settings () =
+    link (create_process ?defaults:settings ()) default_link
+
   let process_of l = l.proc
   let name l = l.name
   let enabled l = (Uplink_control.settings l.control).Uplink_control.enabled
@@ -316,10 +314,9 @@ struct
      only once something does, and kept meanwhile so a job that comes back
      finds the law where it left it. *)
   let dormant l ~now =
-    l.probes = []
-    && (not l.used)
+    l.probes = [] && (not l.used)
     &&
-    match l.lessees with
+      match l.lessees with
       | Some t -> Uplink_lease.live t ~now = []
       | None -> true
 
@@ -479,15 +476,16 @@ struct
   let request (reports : (string * Uplink_lease.report) list) =
     Yojson.Safe.to_string
       (`Assoc
-        [
-          ("action", `String "uplink");
-          ("pid", `Int (Unix.getpid ()));
-          ( "links",
-            `Assoc
-              (List.map
-                 (fun (name, r) -> (name, `Assoc (Uplink_lease.report_to_json r)))
-                 reports) );
-        ])
+         [
+           ("action", `String "uplink");
+           ("pid", `Int (Unix.getpid ()));
+           ( "links",
+             `Assoc
+               (List.map
+                  (fun (name, r) ->
+                    (name, `Assoc (Uplink_lease.report_to_json r)))
+                  reports) );
+         ])
 
   type answer = Granted of (string * float) list * float | Refused | Unreached
 
@@ -509,7 +507,8 @@ struct
                   ( List.filter_map
                       (fun (name, g) ->
                         match g with
-                          | `Assoc gf -> Option.map (fun r -> (name, r)) (num gf "rate")
+                          | `Assoc gf ->
+                              Option.map (fun r -> (name, r)) (num gf "rate")
                           | _ -> None)
                       links,
                     Option.value (num fields "interval")
@@ -675,12 +674,12 @@ struct
   let acquire l ~class_ ~bytes =
     l.used <- true;
     if not (enabled l) then Io.return ()
-    else
+    else (
       match class_ with
         | Foreground -> Io.return ()
         | Background ->
             ensure_ticking l.proc;
-            acquire l.line ~bytes
+            acquire l.line ~bytes)
 
   let try_admit l ~bytes =
     l.used <- true;
@@ -735,16 +734,16 @@ struct
       (Uplink_control.json l.control ~now)
     @ [("waiting", `Int (waiting l)); ("mode", `String (string_of_mode mode))]
     @
-    match l.lessees with
+      match l.lessees with
       | Some t when mode = Owner ->
           [
-            ("ownRateBytesPerSec", `Int (int_of_float (Uplink_budget.rate l.share)));
+            ( "ownRateBytesPerSec",
+              `Int (int_of_float (Uplink_budget.rate l.share)) );
             ("lessees", `List (Uplink_lease.json t ~now));
           ]
       | _ -> []
 
   let json_links p = List.map (fun (n, l) -> (n, `Assoc (json l))) (links p)
-
   let the_process : process option ref = ref None
 
   let configure ~defaults ~overrides =
