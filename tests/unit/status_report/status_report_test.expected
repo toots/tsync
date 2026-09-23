@@ -160,6 +160,7 @@
         "wan": {
           "enabled": true,
           "state": "steady",
+          "limit": "measured",
           "rateBytesPerSec": 1258291,
           "capacityBytesPerSec": 1677721,
           "baseDelayMs": 21.0,
@@ -174,10 +175,23 @@
         "lan": {
           "enabled": true,
           "state": "leased",
+          "limit": "configured",
           "rateBytesPerSec": 3145728,
           "capacityBytesPerSec": null,
           "inFlightBytes": 8388608,
           "waiting": 0,
+          "drops": 0
+        },
+        "wlan-slow": {
+          "enabled": true,
+          "state": "ramping",
+          "limit": "configured",
+          "maxRateBytesPerSec": 512000,
+          "rateBytesPerSec": 512000,
+          "capacityBytesPerSec": null,
+          "queueingDelayMs": 3.0,
+          "inFlightBytes": 0,
+          "waiting": 1,
           "drops": 0
         }
       }
@@ -202,6 +216,7 @@
         "wan": {
           "enabled": false,
           "state": "steady",
+          "limit": "measured",
           "rateBytesPerSec": 1258291,
           "capacityBytesPerSec": 1677721,
           "baseDelayMs": 21.0,
@@ -216,10 +231,23 @@
         "lan": {
           "enabled": false,
           "state": "leased",
+          "limit": "configured",
           "rateBytesPerSec": 3145728,
           "capacityBytesPerSec": null,
           "inFlightBytes": 8388608,
           "waiting": 0,
+          "drops": 0
+        },
+        "wlan-slow": {
+          "enabled": false,
+          "state": "ramping",
+          "limit": "configured",
+          "maxRateBytesPerSec": 512000,
+          "rateBytesPerSec": 512000,
+          "capacityBytesPerSec": null,
+          "queueingDelayMs": 3.0,
+          "inFlightBytes": 0,
+          "waiting": 1,
           "drops": 0
         }
       }
@@ -236,6 +264,7 @@
         "wan": {
           "enabled": true,
           "state": "leased",
+          "limit": "estimating",
           "rateBytesPerSec": 1048576,
           "capacityBytesPerSec": null,
           "inFlightBytes": 8388608,
@@ -300,14 +329,15 @@ Processes
   sync        pid 4200    up 1h 2m     2.1% cpu     2.0 MB rss   alpha, beta
   fuse        pid 4242    up 1h 2m     0.3% cpu     1.0 MB rss   alpha
     traffic          up 2.0 KB (0 B/s), down 4.0 KB (0 B/s), 5 chunks hashed (0.0/s)
-    uplink wan       1.2 MB/s of 1.6 MB/s (steady, +12 ms queueing, 16.0 MB in flight, 3 waiting, 41 dropped)
-    uplink lan       3.0 MB/s leased from the daemon (8.0 MB in flight)
+    uplink wan       1.2 MB/s of 1.6 MB/s measured (steady, +12 ms queueing, 16.0 MB in flight, 3 waiting, 41 dropped)
+    uplink lan       3.0 MB/s leased from the daemon, at its configured ceiling (8.0 MB in flight)
+    uplink wlan-slow 500.0 KB/s at its configured ceiling (ramping, +3 ms queueing, 0 B in flight, 1 waiting)
   fuse        pid 4243    up 1h 2m     0.3% cpu     1.0 MB rss   beta
     traffic          up 2.0 KB (0 B/s), down 4.0 KB (0 B/s), 5 chunks hashed (0.0/s)
 
 Jobs
   import  pid 9001  running 5m 0s  /media/stage
-    uplink wan       1.0 MB/s leased from the daemon (8.0 MB in flight, 2 waiting, 5 dropped)
+    uplink wan       1.0 MB/s leased from the daemon, capacity still being estimated (8.0 MB in flight, 2 waiting, 5 dropped)
 
 Warnings (newest first)
    ×3  22:13:50  warn  store put: HTTP 429; retrying

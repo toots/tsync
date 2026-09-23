@@ -55,6 +55,7 @@ let answer ~frontend ~domain ~pid ?(serves = []) ?(warnings = []) ?(jobs = [])
                     [
                       ("enabled", `Bool governed);
                       ("state", `String "steady");
+                      ("limit", `String "measured");
                       ("rateBytesPerSec", `Int 1258291);
                       ("capacityBytesPerSec", `Int 1677721);
                       ("baseDelayMs", `Float 21.0);
@@ -73,10 +74,27 @@ let answer ~frontend ~domain ~pid ?(serves = []) ?(warnings = []) ?(jobs = [])
                     [
                       ("enabled", `Bool governed);
                       ("state", `String "leased");
+                      ("limit", `String "configured");
                       ("rateBytesPerSec", `Int 3145728);
                       ("capacityBytesPerSec", `Null);
                       ("inFlightBytes", `Int 8388608);
                       ("waiting", `Int 0);
+                      ("drops", `Int 0);
+                    ] );
+                (* Held by a ceiling set in the config, the link's own edge not
+                   met yet. *)
+                ( "wlan-slow",
+                  `Assoc
+                    [
+                      ("enabled", `Bool governed);
+                      ("state", `String "ramping");
+                      ("limit", `String "configured");
+                      ("maxRateBytesPerSec", `Int 512000);
+                      ("rateBytesPerSec", `Int 512000);
+                      ("capacityBytesPerSec", `Null);
+                      ("queueingDelayMs", `Float 3.0);
+                      ("inFlightBytes", `Int 0);
+                      ("waiting", `Int 1);
                       ("drops", `Int 0);
                     ] );
               ] );
@@ -181,6 +199,7 @@ let job ~pid =
                 [
                   ("enabled", `Bool true);
                   ("state", `String "leased");
+                  ("limit", `String "estimating");
                   ("rateBytesPerSec", `Int 1048576);
                   ("capacityBytesPerSec", `Null);
                   ("inFlightBytes", `Int 8388608);

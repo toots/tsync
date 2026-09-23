@@ -398,16 +398,33 @@ let uplink_row u =
         | 0 -> ""
         | n -> Printf.sprintf ", %d dropped" n)
   in
+  let measured =
+    match mem u "capacityBytesPerSec" with
+      | `Null -> None
+      | c -> Some (per_sec c ^ " measured")
+  in
+  (* What holds the rate, so a ceiling someone set is not read as the most the
+     link could carry, nor a guess as a measurement. *)
+  let held =
+    match (str (mem u "limit"), measured) with
+      | "configured", None -> " at its configured ceiling"
+      | "configured", Some m -> " at its configured ceiling, of " ^ m
+      | "estimating", _ -> ", capacity still being estimated"
+      | _, Some m -> " of " ^ m
+      | _, None -> " of unknown"
+  in
   if str (mem u "state") = "leased" then
-    Printf.sprintf "%s leased from the daemon (%s)"
+    Printf.sprintf "%s leased from the daemon%s (%s)"
       (per_sec (mem u "rateBytesPerSec"))
+      (match str (mem u "limit") with
+        | "configured" -> ", at its configured ceiling"
+        | "estimating" -> ", capacity still being estimated"
+        | _ -> "")
       load
   else
-    Printf.sprintf "%s of %s (%s, +%.0f ms queueing, %s%s)"
+    Printf.sprintf "%s%s (%s, +%.0f ms queueing, %s%s)"
       (per_sec (mem u "rateBytesPerSec"))
-      (match mem u "capacityBytesPerSec" with
-        | `Null -> "unknown"
-        | c -> per_sec c)
+      held
       (str (mem u "state"))
       (num (mem u "queueingDelayMs"))
       load
