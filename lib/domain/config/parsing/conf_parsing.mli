@@ -32,7 +32,14 @@ type backend_config = {
   fields : (string * string) list;
   role : role;
       (** Required: ["main"], ["replica"], ["backfill"] or ["readOnly"]. *)
+  link : string;
+      (** [link]: the name of the link this store is written over, shared by
+          every store on the same one and governed as one; {!default_link} when
+          the config does not say. Any name; the set of links is what the
+          backends name. Refused on a [local] store, which is on none. *)
 }
+
+val default_link : string
 
 type frontend_config = {
   frontend_type : string;
@@ -79,6 +86,14 @@ type t = {
           holding its own copy of each body it sends, and per upload path rather
           than per process. *)
   max_downloads : int;  (** max concurrent file downloads (default 8) *)
+  uplink : Uplink_control.settings;
+      (** The top-level [uplink] object: whether a link is written at a rate
+          chosen from its delay, and the headroom, target delay and rate bounds
+          of that choice. Absent, the defaults. What every link runs under
+          unless [links] says otherwise for it. *)
+  links : (string * Uplink_control.settings) list;
+      (** The top-level [links] object: per link, what differs from [uplink],
+          already merged over it. A name no backend is on is refused. *)
   domains : domain list;
 }
 
@@ -94,6 +109,25 @@ val default_max_downloads : int
     {!Metrics.human_bytes}, and a size stored in the config or on the wire is a
     plain integer of bytes. *)
 val parse_size : string -> int option
+
+(** The [uplink] object alone, [`Null] being [base] (the defaults) and any field
+    absent being [base]'s; raises [Failure], naming [where], on a setting that
+    cannot be what it says. *)
+val uplink_of_json :
+  ?base:Uplink_control.settings ->
+  ?where:string ->
+  Yojson.Basic.t ->
+  Uplink_control.settings
+
+(** What {!uplink_of_json} reads back as the same settings. *)
+val uplink_to_json : Uplink_control.settings -> Yojson.Basic.t
+
+(** What a link runs under: its override, else [uplink]. *)
+val link_settings : t -> string -> Uplink_control.settings
+
+(** The [links] object as the config would carry it: every override in full,
+    which reads back to the same effective settings over [uplink]. *)
+val links_to_json : t -> Yojson.Basic.t
 
 (** Load configuration from [path], or from the JSON string in
     [$TSYNC_CONFIG_JSON] if set (overrides [path]). *)
@@ -135,3 +169,8 @@ val cloud_storage_dir : domain_name:string -> string option
     What turns a path a user typed into a domain and a path within it, so a
     caller can name the item before it asks anything of the daemon. *)
 val roots_of : data_dir:string -> domain -> string list
+
+(** The keys a backend type's driver reads, for refusing a backend key nothing
+    reads. [None], the default, leaves that type's keys unchecked; the domain
+    layer, which knows the drivers, sets it. *)
+val driver_fields : (string -> string list option) ref

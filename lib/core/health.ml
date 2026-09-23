@@ -10,6 +10,7 @@ type t = {
   mutable probing : bool;
   mutable next_watch : int;
   watchers : (int, unit -> unit) Hashtbl.t;
+  mutable timeouts : int;
 }
 
 let trip_after = ref 2
@@ -31,10 +32,17 @@ let make ~tracked =
     probing = false;
     next_watch = 0;
     watchers = Hashtbl.create 4;
+    timeouts = 0;
   }
 
 let always_up = make ~tracked:false
 let create () = make ~tracked:true
+
+(* A tally apart from the trip: whoever governs the link this member is on
+   reads it, and a timeout is evidence for the link whether or not it took
+   the member out. The untracked cell is shared, so it counts nothing. *)
+let timed_out t = if t.tracked then t.timeouts <- t.timeouts + 1
+let timeouts t = t.timeouts
 let now = Unix.gettimeofday
 let out t = t.held_until > 0.
 let is_held t = out t && now () < t.held_until

@@ -4,11 +4,16 @@ let local_store ?(verify_writes = true) path =
       | "verifyWrites" -> Some (string_of_bool verify_writes) | _ -> Some path)
     ()
 
+(* The link governor is off unless a test asks for it: on, every store built
+   here would join a line paced by the real clock, and a test that wanted that
+   would say so. *)
 let conf ?(domain = "testdom") ?(client_name = "test") ?(versioning = false)
     ?store:store_override ?members:members_override ?(verify_writes = true)
     ?(max_uploads = 1) ?max_chunk_buffers ?(max_downloads = 1) ?(chunk_size = 8)
     ?(cache_chunk_size = 8) ?max_cache ?(symlink_policy = `Keep)
-    ?(read_only = false) ?(socket_path = "") ?cache_root ?data_dir ~root () =
+    ?(read_only = false) ?(socket_path = "") ?cache_root ?data_dir
+    ?(uplink = { Uplink_control.default_settings with enabled = false })
+    ?(links = []) ~root () =
   let paths =
     {
       Runtime.cache_root =
@@ -24,6 +29,8 @@ let conf ?(domain = "testdom") ?(client_name = "test") ?(versioning = false)
       max_uploads;
       max_chunk_buffers = Option.value max_chunk_buffers ~default:max_uploads;
       max_downloads;
+      uplink;
+      links;
       domains =
         [
           {
@@ -34,6 +41,7 @@ let conf ?(domain = "testdom") ?(client_name = "test") ?(versioning = false)
                   Conf_parsing.backend_type = "local";
                   name = "local";
                   role = `Main;
+                  link = Conf_parsing.default_link;
                   fields =
                     [
                       ("path", Filename.concat root "store");

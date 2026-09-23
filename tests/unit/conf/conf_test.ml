@@ -1,7 +1,9 @@
 (* Checks read ordering by role (main, replica, readOnly, backfill — each group
-   keeping config order) and that "role" is required. *)
+   keeping config order), that "role" is required, and how "link", "uplink"
+   and "links" read. *)
 let bc ?(role = `Main) backend_type id =
-  Conf_parsing.{ backend_type; name = id; fields = [("id", id)]; role }
+  Conf_parsing.
+    { backend_type; name = id; fields = [("id", id)]; role; link = "wan" }
 
 let ids bs =
   List.map
@@ -38,6 +40,139 @@ let () =
   in
   assert (fails (one_backend {|{"type": "s3", "name": "s"}|}));
   assert (fails (one_backend {|{"type": "s3", "name": "s", "role": "primary"}|}));
+
+  (* "link" names what a store is written over: "wan" unless said, any name
+     when said, and the target's own setting rather than a field the driver
+     sees. A local store is on none. *)
+  let with_link extra =
+    one_backend
+      (Printf.sprintf {|{"type": "s3", "name": "s", "role": "main"%s}|} extra)
+  in
+  let first_backend extra =
+    List.hd
+      (List.hd (load (with_link extra)).Conf_parsing.domains)
+        .Conf_parsing.backends
+  in
+  assert ((first_backend "").Conf_parsing.link = "wan");
+  assert ((first_backend {|, "link": "lan"|}).Conf_parsing.link = "lan");
+  assert (
+    (first_backend {|, "link": " wlan-slow "|}).Conf_parsing.link = "wlan-slow");
+  assert (
+    not
+      (List.mem_assoc "link"
+         (first_backend {|, "link": "lan"|}).Conf_parsing.fields));
+  (* A key nothing reads is refused, at every level: a setting renamed or
+     removed would otherwise be run as if absent, silently. Backend keys are
+     checked against what the type's driver reads, once that is known. *)
+  (Conf_parsing.driver_fields :=
+     function "s3" -> Some ["bucket"; "region"] | _ -> None);
+  assert (not (fails (with_link {|, "bucket": "b", "region": "r"|})));
+  assert (fails (with_link {|, "maxUploadRate": 512000|}));
+  (* A type whose driver is not known here is not checked. *)
+  assert (
+    not
+      (fails
+         (one_backend
+            {|{"type": "gcs", "name": "g", "role": "main", "anything": 1}|})));
+  (Conf_parsing.driver_fields := fun _ -> None);
+  let domain_with extra =
+    Printf.sprintf
+      {|{"domains": [{"name": "d", "symlinks": "keep", "versioning": false,
+                      "frontends": ["fuse"], %s
+                      "backends": [{"type": "s3", "name": "s",
+                                    "role": "main"}]}]}|}
+      extra
+  in
+  assert (not (fails (domain_with {|"maxCache": "1G",|})));
+  assert (fails (domain_with {|"maxChunkForwards": 2,|}));
+  let top_with extra =
+    Printf.sprintf
+      {|{%s "domains": [{"name": "d", "symlinks": "keep", "versioning": false,
+                         "frontends": ["fuse"],
+                         "backends": [{"type": "s3", "name": "s",
+                                       "role": "main"}]}]}|}
+      extra
+  in
+  assert (not (fails (top_with {|"uplink": {"maxRate": 1000000},|})));
+  assert (fails (top_with {|"uplink": {"maxrate": 1000000},|}));
+  assert (fails (top_with {|"maxChunkForwards": 2,|}));
+  assert (fails (with_link {|, "link": ""|}));
+  assert (fails (with_link {|, "link": 3|}));
+  assert (
+    fails
+      (one_backend
+         {|{"type": "local", "name": "l", "role": "main", "path": "/x",
+            "link": "lan"}|}));
+
+  (* "links": per-link overrides read over "uplink", for links some backend
+     is on, in any domain. *)
+  let two_domains ~links =
+    Printf.sprintf
+      {|{"uplink": {"headroom": 0.5},
+         "links": %s,
+         "domains": [
+           {"name": "a", "symlinks": "keep", "versioning": false, "frontends": ["fuse"],
+            "backends": [{"type": "s3", "name": "s", "role": "main"}]},
+           {"name": "b", "symlinks": "keep", "versioning": false, "frontends": ["fuse"],
+            "backends": [{"type": "s3", "name": "t", "role": "main", "link": "lan"}]}]}|}
+      links
+  in
+  let cfg =
+    load (two_domains ~links:{|{"lan": {"maxRate": "1 MB", "enabled": false}}|})
+  in
+  let lan = Conf_parsing.link_settings cfg "lan" in
+  assert (lan.Uplink_control.max_rate = Some (1024 * 1024));
+  assert (not lan.enabled);
+  assert (lan.headroom = 0.5);
+  assert (Conf_parsing.link_settings cfg "wan" = cfg.Conf_parsing.uplink);
+  assert (cfg.Conf_parsing.uplink.headroom = 0.5);
+  assert (fails (two_domains ~links:{|{"dsl": {}}|}));
+  assert (fails (two_domains ~links:{|3|}));
+  assert (fails (two_domains ~links:{|{"lan": {"headroom": 5}}|}));
+  let round =
+    load
+      (Printf.sprintf
+         {|{"uplink": {"headroom": 0.5}, "links": %s,
+            "domains": [{"name": "b", "symlinks": "keep", "versioning": false,
+                         "frontends": ["fuse"],
+                         "backends": [{"type": "s3", "name": "t", "role": "main", "link": "lan"}]}]}|}
+         (Yojson.Basic.to_string (Conf_parsing.links_to_json cfg)))
+  in
+  assert (round.Conf_parsing.links = cfg.Conf_parsing.links);
+
+  (* The "uplink" object: absent is the defaults, each setting is read
+     strictly, and what is written reads back as itself. *)
+  let with_uplink extra =
+    Printf.sprintf
+      {|{"domains": [{"name": "d", "symlinks": "keep", "versioning": false,
+                      "frontends": ["fuse"],
+                      "backends": [{"type": "s3", "name": "s", "role": "main"}]}]%s}|}
+      extra
+  in
+  let uplink_of extra = (load (with_uplink extra)).Conf_parsing.uplink in
+  assert (uplink_of "" = Uplink_control.default_settings);
+  let u =
+    uplink_of
+      {|, "uplink": {"enabled": true, "headroom": 0.5, "targetDelayMs": 80,
+                     "minRate": "128 KB", "maxRate": "2 MB"}|}
+  in
+  assert u.Uplink_control.enabled;
+  assert (u.headroom = 0.5);
+  assert (u.target_delay = 0.08);
+  assert (u.min_rate = 128 * 1024);
+  assert (u.max_rate = Some (2 * 1024 * 1024));
+  assert (fails (with_uplink {|, "uplink": {"headroom": 1.5}|}));
+  assert (fails (with_uplink {|, "uplink": {"headroom": 0}|}));
+  assert (fails (with_uplink {|, "uplink": {"targetDelayMs": 2}|}));
+  assert (fails (with_uplink {|, "uplink": {"maxRate": "fast"}|}));
+  assert (
+    fails (with_uplink {|, "uplink": {"minRate": "2 MB", "maxRate": "1 MB"}|}));
+  assert (fails (with_uplink {|, "uplink": 3|}));
+  assert (Conf_parsing.uplink_of_json (Conf_parsing.uplink_to_json u) = u);
+  assert (
+    Conf_parsing.uplink_of_json
+      (Conf_parsing.uplink_to_json Uplink_control.default_settings)
+    = Uplink_control.default_settings);
 
   (* A domain is writable (has a main) or purely read-only. A replica or backfill
      target with no main is a copy of nothing. *)

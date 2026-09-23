@@ -14,6 +14,8 @@
    -open
    Tsync_core
    -open
+   Tsync_uplink
+   -open
    Tsync_conf
    -open
    Tsync_backend_api
@@ -23,6 +25,7 @@
    Tsync_io_lwt))
  (name conf_test)
  (libraries
+  tsync_uplink
   tsync_test_harness
   unix
   tsync_conf_parsing
@@ -31,4 +34,5 @@
   tsync-libs.backend_api
   tsync-libs.backend_lwt
   tsync_local_backend_lwt
-  tsync_io_lwt))
+  tsync_io_lwt
+  yojson))

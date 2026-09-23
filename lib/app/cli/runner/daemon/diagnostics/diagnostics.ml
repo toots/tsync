@@ -95,6 +95,7 @@ let self_json ?(extra = []) () =
         ] );
     ("backend", `Assoc (ints (Metrics.backend_fields ())));
     ("pools", Job_report_lwt.pools_json ());
+    ("uplinks", `Assoc (Uplink_lwt.json_links (Uplink_lwt.process ())));
     ( "lwt",
       `Assoc
         [
@@ -490,13 +491,21 @@ module Make (C : Conf_lwt.S) = struct
         | `Null -> []
         | counts -> [("totals", counts)]
     in
+    let link =
+      match m.Backend.link with
+        | Some link -> [("link", `String link)]
+        | None -> []
+    in
     `Assoc
-      (("name", `String m.Backend.name)
-       :: ("type", `String m.backend_type)
-       :: ("role", `String (Conf_parsing.role_name m.role))
-       :: ( "config",
-            `Assoc (List.map (fun (k, v) -> (k, `String v)) m.Backend.config) )
-       :: probed
+      ([
+         ("name", `String m.Backend.name);
+         ("type", `String m.backend_type);
+         ("role", `String (Conf_parsing.role_name m.role));
+       ]
+      @ link
+      @ ( "config",
+          `Assoc (List.map (fun (k, v) -> (k, `String v)) m.Backend.config) )
+        :: probed
       @ [("journal", jrnl); ("corrupted", corrupt)]
       @ disk_json m @ Backend.link_json m
       @ Health.json (health_of m)
@@ -523,6 +532,26 @@ module Make (C : Conf_lwt.S) = struct
       ("maxUploads", `Int C.max_uploads);
       ("maxChunkBuffers", `Int C.max_chunk_buffers);
       ("maxDownloads", `Int C.max_downloads);
+      (* From the governors rather than the conf: what this process is
+         running each link under, which is what the rest of this block
+         reports. Every link the backends name, used or not. *)
+      ( "uplinks",
+        let module U = Tsync_core_lwt.Uplink_lwt in
+        `Assoc
+          (List.map
+             (fun (name, l) ->
+               let u = Uplink_control.settings (U.control l) in
+               ( name,
+                 `Assoc
+                   [
+                     ("enabled", `Bool u.Uplink_control.enabled);
+                     ("headroom", `Float u.headroom);
+                     ("targetDelayMs", `Float (1000. *. u.target_delay));
+                     ("minRate", `Int u.min_rate);
+                     ( "maxRate",
+                       match u.max_rate with Some m -> `Int m | None -> `Null );
+                   ] ))
+             (U.all_links (U.process ()))) );
       ("cacheRoot", `String C.cache_root);
       ("dataDir", `String C.data_dir);
       ("socketPath", `String C.socket_path);

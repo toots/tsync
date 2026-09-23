@@ -10,11 +10,16 @@ module type SEND = sig
   val send : socket_path:string -> string -> string io
 end
 
+module type LINK = sig
+  val json : unit -> (string * Yojson.Safe.t) list
+end
+
 module Make
     (Io : Io.S)
     (Clock : Clock.S with type 'a io := 'a Io.t)
     (Pools : Bounded.S with type 'a io := 'a Io.t)
-    (Send : SEND with type 'a io := 'a Io.t) =
+    (Send : SEND with type 'a io := 'a Io.t)
+    (Link : LINK) =
 struct
   open Io_syntax.Make (Io)
 
@@ -91,6 +96,7 @@ struct
         `Assoc
           (List.map (fun (k, v) -> (k, `Int v)) (Metrics.backend_fields ())) );
       ("pools", pools_json ());
+      ("uplinks", `Assoc (Link.json ()));
       ("counters", ints (t.counters ()));
     ]
     @ extra

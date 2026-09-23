@@ -10,6 +10,8 @@
    -open
    Tsync_core
    -open
+   Tsync_uplink
+   -open
    Tsync_manifest
    -open
    Tsync_conf_lwt
@@ -23,6 +25,7 @@
    Tsync_runtime))
  (name tsync_domain)
  (libraries
+  tsync_uplink
   tsync_stdlib
   tsync_core
   tsync_manifest
@@ -30,4 +33,6 @@
   tsync_conf_parsing
   tsync_backend_api
   tsync_backend_lwt
-  tsync_runtime))
+  tsync_core_lwt
+  tsync_runtime
+  lwt))

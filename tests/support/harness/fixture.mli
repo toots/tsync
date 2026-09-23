@@ -29,6 +29,8 @@ val conf :
   ?socket_path:string ->
   ?cache_root:string ->
   ?data_dir:string ->
+  ?uplink:Uplink_control.settings ->
+  ?links:(string * Uplink_control.settings) list ->
   root:string ->
   unit ->
   (module Conf_lwt.S)

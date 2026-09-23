@@ -76,6 +76,14 @@ val off : t -> int -> unit
 (** ["held down for 27s after 2 failures (HTTP 530: …)"], or [""] when not. *)
 val describe : t -> string
 
+(** A request of this member timed out. Tallied apart from whether it tripped
+    the member: whoever governs the link the member is on reads the tally, and a
+    timeout is evidence for the link either way. {!always_up} counts nothing. *)
+val timed_out : t -> unit
+
+(** Timeouts this member's requests took, ever. *)
+val timeouts : t -> int
+
 (** For a report, empty unless held. The wall-clock string is made here, so what
     renders it does not have to know the zone. *)
 val json : t -> (string * Yojson.Safe.t) list

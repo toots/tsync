@@ -47,7 +47,10 @@ module Make (Io : Io.S) (Clock : Clock.S with type 'a io := 'a Io.t) :
          is whatever a socket, a resolver or a TLS stack raised and tells a
          reader further up nothing. *)
       if classify exn = Transient then begin
-        if Clock.is_timeout exn then Metrics.add_timeout 1;
+        if Clock.is_timeout exn then begin
+          Metrics.add_timeout 1;
+          Health.timed_out health
+        end;
         Io.fail
           (match exn with
             | Failed _ -> exn
@@ -63,7 +66,10 @@ module Make (Io : Io.S) (Clock : Clock.S with type 'a io := 'a Io.t) :
          that answers slowly and one that stops answering are the same number
          of retries and very different problems. *)
       Metrics.add_retry 1;
-      if Clock.is_timeout exn then Metrics.add_timeout 1;
+      if Clock.is_timeout exn then begin
+        Metrics.add_timeout 1;
+        Health.timed_out health
+      end;
       (* A first or second attempt lost is the link's ordinary weather and is
          counted; from the third on it is worth a line at default verbosity. *)
       (if attempt < 3 then Log.info else Log.warn)

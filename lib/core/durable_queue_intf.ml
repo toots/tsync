@@ -133,6 +133,11 @@ module type QUEUE = sig
       run — that is the point. *)
   val post : t -> job -> unit io
 
+  (** Record [job] and nothing more, for a queue this process does not run: the
+      process that does finds it on its next scan. Holding it in memory here
+      would only grow a queue nothing here drains. *)
+  val record : t -> job -> unit io
+
   (** Take up a job already written to the log, for a caller that owns the
       durable half itself: {!post} is this plus the write. Idempotent on [id],
       so a record offered twice is queued once. *)

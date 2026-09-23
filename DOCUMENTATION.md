@@ -704,6 +704,46 @@ chunk bodies are held in memory at once across all of them, so the upload path c
 carry no chunk — dedup checks, manifest writes, TLS setup. `maxDownloads` (default 8) bounds
 concurrent file downloads.
 
+Those three bound memory and file descriptors. What bounds the link is different: the counts
+say nothing about how fast it is, and a count that is fine at home is a stall on a slow
+connection, where every body queued behind the others expires before it lands.
+
+**Uplink.** Uploads are written at a rate chosen from the link itself: a small request is
+timed against every remote store while bytes are in flight, and a round trip taking longer
+than the least seen lately means a queue is building in the modem — the one thing that says
+the other users of the connection are being slowed, which no throughput figure can. The rate
+grows while that delay stays flat, shrinks when it rises, is cut in half by a timeout, and is
+held under a `headroom` fraction (default 80%) of what the link was seen to carry, probing
+above it every minute in case the link has room again. This is done per link: every remote
+backend names the link it is written over (`link`, default `wan`), stores naming the same
+link are governed as one, and a machine with a bucket over the WAN and a NAS over the LAN
+runs one governor for each, so a queue on one never slows the other. The daemon owns the
+links for the machine: every command run beside it (`import`, `mirror`, `export`, …) leases
+a share of each link it uses over the daemon's socket, renewed every two seconds in one
+request, so a job starts at the going rate rather than cold; a job on a link the daemon has
+no store of its own on times that link itself and reports what it saw, which is what the
+daemon runs that link's law on. With no daemon running, or one too old to answer, a command
+governs its own links the same way. `tsync status` shows one row per link — the rate, the
+capacity it was measured against, the queueing delay, and what is in flight, waiting or was
+dropped — for the daemon and for each job.
+
+```json
+"uplink": { "enabled": true, "headroom": 0.8, "targetDelayMs": 50, "maxRate": "2 MB" }
+```
+
+`enabled: false` sends as fast as the counts allow, which is what tsync did before. `maxRate`
+is a ceiling whatever the link allows; `minRate` (default 64 KB) a floor however it is doing.
+These are what every link runs under; `links` overrides them for one link, naming only what
+differs:
+
+```json
+"links": { "wan": { "maxRate": "500 KB" } }
+```
+
+A ceiling set there holds across the daemon and every job on the machine together. To hold
+one store under its own ceiling, give it a link of its own — `"link": "wlan-slow"` — and cap
+that link.
+
 Sizes accept a byte count or a suffixed string — `512K`, `8M`, `1G`, binary multiples — so
 both `8388608` and `"8M"` work.
 
@@ -724,6 +764,8 @@ Top level:
 | `maxUploads` | no | Concurrent upload operations, default `4`. |
 | `maxChunkBuffers` | no | Chunk bodies held in memory at once, default `maxUploads`. |
 | `maxDownloads` | no | Concurrent file downloads, default `8`. |
+| `uplink` | no | How every link is written: `enabled` (default on), `headroom` (default `0.8`), `targetDelayMs` (default `50`), `minRate`, `maxRate` — see [Uplink](#uplink). |
+| `links` | no | The same settings for one link, by the name its backends give it, overriding `uplink` field by field. A name no backend uses is refused. |
 | `tls` | no | `"openssl"` or `"native"` — see [TLS](#tls). |
 
 Per domain:
@@ -871,7 +913,8 @@ the top of `tsync status`.
 ## Backend type reference
 
 Every backend needs a `type`, a `name` (used by `mirror --source`) and a
-[`role`](#backend-role-reference).
+[`role`](#backend-role-reference). Any remote one may also name the `link` it is written over
+(default `wan`) — see [Uplink](#uplink).
 
 | `type` | Required fields | Optional | Notes |
 |---|---|---|---|

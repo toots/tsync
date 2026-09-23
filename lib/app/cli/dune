@@ -20,6 +20,8 @@
    -open
    Tsync_core
    -open
+   Tsync_uplink
+   -open
    Tsync_core_lwt
    -open
    Tsync_runtime
@@ -65,6 +67,7 @@
    Tsync_device))
  (name tsync_cli)
  (libraries
+  tsync_uplink
   unix
   lwt.unix
   tsync_frontend_register

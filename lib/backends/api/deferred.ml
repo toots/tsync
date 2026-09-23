@@ -22,6 +22,20 @@ struct
 
   open Io_syntax.Make (Io)
 
+  (* Resuming targets built but not yet running, started together by the
+     process that is to run them. *)
+  let resumed_starts : (unit -> unit) list ref = ref []
+
+  (* Told when a target not running here has recorded a job, so the process
+     that does run it can be asked to look. *)
+  let on_recorded = ref (fun () -> ())
+  let set_on_recorded f = on_recorded := f
+
+  let start_resumed () =
+    let starts = List.rev !resumed_starts in
+    resumed_starts := [];
+    List.iter (fun start -> start ()) starts
+
   module Q = Queues.Make (struct
     type t = job
 
@@ -97,8 +111,10 @@ struct
   end
 
   (* Past this, a chunk PUT is dropped rather than held in memory: the manifest job
-     fetches it later. *)
-  let max_chunks_in_flight = 32
+     fetches it later. The caller passes the budget it holds chunk buffers under,
+     a forward keeping a body alive past its buffer; a caller with no such budget
+     gets this. *)
+  let default_max_chunk_forwards = 32
 
   (* ponytail: crude memo — reset the whole table past the cap rather than keeping
      an LRU, overflowing costing only a HEAD per chunk again. Per-key eviction if
@@ -122,10 +138,12 @@ struct
   let log_dir ~root ~name = Filename.concat root (escape name)
   let release ~root ~name = Durable_queue.release (log_dir ~root ~name)
 
-  let make ?(resume = false) ?chunk_from_prefix ~name ~backend ~source
-      ~chunk_prefix ~(chunk_keys : string -> string list) ~journal_prefix
-      ~cursor_key ~(excluded : Stored_key.t -> bool) ~reads_reach ~root () :
-      (module S) =
+  let make ?(resume = false) ?chunk_from_prefix
+      ?(max_chunk_forwards = default_max_chunk_forwards)
+      ?(room_for = fun ~bytes:_ -> true) ~name ~backend ~source ~chunk_prefix
+      ~(chunk_keys : string -> string list) ~journal_prefix ~cursor_key
+      ~(excluded : Stored_key.t -> bool) ~reads_reach ~root () : (module S) =
+    let max_chunk_forwards = max 1 max_chunk_forwards in
     let (module Target : Store) = backend in
     let (module Source : Store) = source in
     let module L = Chunk_layout.Make (struct
@@ -235,7 +253,12 @@ struct
         ~run:(fun ~id:_ job -> run job)
         ()
     in
-    Q.start ~recover:resume queue;
+    let running = ref false in
+    let start () =
+      running := true;
+      Q.start ~recover:resume queue
+    in
+    if resume then resumed_starts := start :: !resumed_starts else start ();
     (* Chunk pushes are not owed — a manifest job fetches whatever is missing — but
        one still in flight when a command exits would land after everything else
        has gone quiet. *)
@@ -253,7 +276,10 @@ struct
        all, which is why the durable log holds one record per user-visible
        operation rather than one per chunk. *)
     let forward_chunk key data =
-      if Hashtbl.mem ensured key || !chunks_in_flight >= max_chunks_in_flight
+      if
+        (not !running) || Hashtbl.mem ensured key
+        || !chunks_in_flight >= max_chunk_forwards
+        || not (room_for ~bytes:(Bigstring.length data))
       then ()
       else begin
         incr chunks_in_flight;
@@ -295,14 +321,21 @@ struct
           degraded = s.Durable_queue.degraded;
         }
 
+      (* Not running here: written for the process that runs it, and not
+         held, since nothing here would ever take it off. *)
+      let post job =
+        if !running then Q.post queue job
+        else
+          let+ () = Q.record queue job in
+          !on_recorded ()
+
       let accept = function
         | Put { key; data } when Stored_key.is_in ~prefix:chunk_prefix key ->
             forward_chunk key data;
             Io.return ()
-        | Put { key; _ } -> Q.post queue (Job_put key)
-        | Copy { src_key; dst_key } ->
-            Q.post queue (Job_copy (src_key, dst_key))
-        | Delete key -> Q.post queue (Job_delete key)
-        | Delete_multi keys -> Q.post queue (Job_delete_multi keys)
+        | Put { key; _ } -> post (Job_put key)
+        | Copy { src_key; dst_key } -> post (Job_copy (src_key, dst_key))
+        | Delete key -> post (Job_delete key)
+        | Delete_multi keys -> post (Job_delete_multi keys)
     end)
 end

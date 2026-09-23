@@ -9,5 +9,5 @@
   (:standard -open Tsync_stdlib))
  (foreign_stubs
   (language c)
-  (names statvfs_stubs))
+  (names statvfs_stubs clock_stubs))
  (libraries tsync_stdlib unix bigstringaf))

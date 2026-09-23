@@ -57,6 +57,15 @@
           "latencyMs": 1.0,
           "journal": { "entries": 12, "behind": 0 },
           "corrupted": { "checked": true, "chunks": 0 }
+        },
+        {
+          "name": "bucket",
+          "type": "gcs",
+          "role": "replica",
+          "link": "wlan-slow",
+          "config": { "bucket": "tsync-alpha" },
+          "reachable": true,
+          "latencyMs": 40.0
         }
       ]
     },
@@ -109,6 +118,15 @@
           "latencyMs": 1.0,
           "journal": { "entries": 12, "behind": 0 },
           "corrupted": { "checked": true, "chunks": 0 }
+        },
+        {
+          "name": "bucket",
+          "type": "gcs",
+          "role": "replica",
+          "link": "wlan-slow",
+          "config": { "bucket": "tsync-alpha" },
+          "reachable": true,
+          "latencyMs": 40.0
         }
       ]
     }
@@ -137,6 +155,45 @@
         "uploadBytesPerSec": 0,
         "downloadBytesPerSec": 0,
         "chunksHashed": 5
+      },
+      "uplinks": {
+        "wan": {
+          "enabled": true,
+          "state": "steady",
+          "limit": "measured",
+          "rateBytesPerSec": 1258291,
+          "capacityBytesPerSec": 1677721,
+          "baseDelayMs": 21.0,
+          "queueingDelayMs": 12.0,
+          "inFlightBytes": 16777216,
+          "windowBytes": 37748736,
+          "drops": 41,
+          "headroom": 0.8,
+          "targetDelayMs": 50.0,
+          "waiting": 3
+        },
+        "lan": {
+          "enabled": true,
+          "state": "leased",
+          "limit": "configured",
+          "rateBytesPerSec": 3145728,
+          "capacityBytesPerSec": null,
+          "inFlightBytes": 8388608,
+          "waiting": 0,
+          "drops": 0
+        },
+        "wlan-slow": {
+          "enabled": true,
+          "state": "ramping",
+          "limit": "configured",
+          "maxRateBytesPerSec": 512000,
+          "rateBytesPerSec": 512000,
+          "capacityBytesPerSec": null,
+          "queueingDelayMs": 3.0,
+          "inFlightBytes": 0,
+          "waiting": 1,
+          "drops": 0
+        }
       }
     },
     {
@@ -154,6 +211,45 @@
         "uploadBytesPerSec": 0,
         "downloadBytesPerSec": 0,
         "chunksHashed": 5
+      },
+      "uplinks": {
+        "wan": {
+          "enabled": false,
+          "state": "steady",
+          "limit": "measured",
+          "rateBytesPerSec": 1258291,
+          "capacityBytesPerSec": 1677721,
+          "baseDelayMs": 21.0,
+          "queueingDelayMs": 12.0,
+          "inFlightBytes": 16777216,
+          "windowBytes": 37748736,
+          "drops": 41,
+          "headroom": 0.8,
+          "targetDelayMs": 50.0,
+          "waiting": 3
+        },
+        "lan": {
+          "enabled": false,
+          "state": "leased",
+          "limit": "configured",
+          "rateBytesPerSec": 3145728,
+          "capacityBytesPerSec": null,
+          "inFlightBytes": 8388608,
+          "waiting": 0,
+          "drops": 0
+        },
+        "wlan-slow": {
+          "enabled": false,
+          "state": "ramping",
+          "limit": "configured",
+          "maxRateBytesPerSec": 512000,
+          "rateBytesPerSec": 512000,
+          "capacityBytesPerSec": null,
+          "queueingDelayMs": 3.0,
+          "inFlightBytes": 0,
+          "waiting": 1,
+          "drops": 0
+        }
       }
     }
   ],
@@ -163,7 +259,19 @@
       "pid": 9001,
       "state": "running",
       "uptimeSeconds": 300.0,
-      "target": "/media/stage"
+      "target": "/media/stage",
+      "uplinks": {
+        "wan": {
+          "enabled": true,
+          "state": "leased",
+          "limit": "estimating",
+          "rateBytesPerSec": 1048576,
+          "capacityBytesPerSec": null,
+          "inFlightBytes": 8388608,
+          "waiting": 2,
+          "drops": 5
+        }
+      }
     }
   ],
   "warnings": [
@@ -198,6 +306,9 @@ Domain alpha
   Backend store (local, main)  path /srv/tsync
     reachable        yes (1 ms)
     journal          12 entries, 0 to apply
+  Backend bucket (gcs, replica)  bucket tsync-alpha
+    link             wlan-slow
+    reachable        yes (40 ms)
 
 Domain beta
   settings         versioning on, symlinks keep, chunk 8.0 MB (default), cache chunk 16.0 MB
@@ -210,16 +321,23 @@ Domain beta
   Backend store (local, main)  path /srv/tsync
     reachable        yes (1 ms)
     journal          12 entries, 0 to apply
+  Backend bucket (gcs, replica)  bucket tsync-alpha
+    link             wlan-slow
+    reachable        yes (40 ms)
 
 Processes
   sync        pid 4200    up 1h 2m     2.1% cpu     2.0 MB rss   alpha, beta
   fuse        pid 4242    up 1h 2m     0.3% cpu     1.0 MB rss   alpha
     traffic          up 2.0 KB (0 B/s), down 4.0 KB (0 B/s), 5 chunks hashed (0.0/s)
+    uplink wan       1.2 MB/s of 1.6 MB/s measured (steady, +12 ms queueing, 16.0 MB in flight, 3 waiting, 41 dropped)
+    uplink lan       3.0 MB/s leased from the daemon, at its configured ceiling (8.0 MB in flight)
+    uplink wlan-slow 500.0 KB/s at its configured ceiling (ramping, +3 ms queueing, 0 B in flight, 1 waiting)
   fuse        pid 4243    up 1h 2m     0.3% cpu     1.0 MB rss   beta
     traffic          up 2.0 KB (0 B/s), down 4.0 KB (0 B/s), 5 chunks hashed (0.0/s)
 
 Jobs
   import  pid 9001  running 5m 0s  /media/stage
+    uplink wan       1.0 MB/s leased from the daemon, capacity still being estimated (8.0 MB in flight, 2 waiting, 5 dropped)
 
 Warnings (newest first)
    ×3  22:13:50  warn  store put: HTTP 429; retrying
@@ -237,6 +355,9 @@ Domain alpha
   Backend store (local, main)  path /srv/tsync
     reachable        yes (1 ms)
     journal          12 entries, 0 to apply
+  Backend bucket (gcs, replica)  bucket tsync-alpha
+    link             wlan-slow
+    reachable        yes (40 ms)
 
 Domain beta
   settings         versioning on, symlinks keep, chunk 8.0 MB (default), cache chunk 16.0 MB
@@ -249,6 +370,9 @@ Domain beta
   Backend store (local, main)  path /srv/tsync
     reachable        yes (1 ms)
     journal          12 entries, 0 to apply
+  Backend bucket (gcs, replica)  bucket tsync-alpha
+    link             wlan-slow
+    reachable        yes (40 ms)
 
 Processes
   fuse        pid 4242    up 1h 2m     0.3% cpu     1.0 MB rss   alpha, beta
@@ -280,6 +404,9 @@ Domain alpha
   Backend store (local, main)  path /srv/tsync
     reachable        yes (1 ms)
     journal          12 entries, 0 to apply
+  Backend bucket (gcs, replica)  bucket tsync-alpha
+    link             wlan-slow
+    reachable        yes (40 ms)
 
 Processes
   fuse        pid 4242    up 1h 2m     0.3% cpu     1.0 MB rss   alpha

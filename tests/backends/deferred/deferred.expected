@@ -17,9 +17,12 @@
   on the target so far: 0 key(s)
 
 === the next daemon start picks up what it left owed
+  owed before the start: 3
+  put chunk c2 and manifest five while stopped: owed 4, held in memory 0, told 1, on the target 0 key(s)
   owed once caught up: 0
 --- target
   chunk c2
+  manifest five
   manifest four
 
 === a replica carries the sync bookkeeping too

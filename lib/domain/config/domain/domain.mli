@@ -49,3 +49,12 @@ val default_domain : paths:Runtime.paths -> string option
 
 (** Where that name is kept, for the command that writes it. *)
 val default_domain_file : paths:Runtime.paths -> string
+
+(** Start the replica and backfill queues every [~resume:true] config built, in
+    the process that runs them: the daemon's converging parent, after its
+    frontends are forked, which only record. *)
+val start_resumed : unit -> unit
+
+(** Called after this process records a replica or backfill job it does not run
+    itself. *)
+val set_on_recorded : (unit -> unit) -> unit

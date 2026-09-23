@@ -135,7 +135,7 @@ let process_of reply =
     @ assoc (mem reply "process")
     @ List.filter_map
         (fun k -> match mem reply k with `Null -> None | v -> Some (k, v))
-        ["traffic"; "pools"; "lwt"; "backend"])
+        ["traffic"; "pools"; "lwt"; "backend"; "uplinks"])
 
 (* A domain runs at most one frontend of each kind -- the launcher groups its
    bindings by frontend name -- so within a domain the kind is the identity. One
@@ -383,6 +383,67 @@ let elide path =
 (* The one spelling of a traffic row. The process, a frontend, a store and a job
    each report the same four figures, and four copies of the format is how two of
    them come to disagree about what "up" means. *)
+(* The governor's figures: the rate it allows against what the link was seen
+   to carry, and the state it is in. Only when it is on, since off it is
+   nothing to read. *)
+let uplink_row u =
+  let per_sec j = Metrics.human_bytes (int_of j) ^ "/s" in
+  let load =
+    Printf.sprintf "%s in flight%s%s"
+      (Metrics.human_bytes (int_of (mem u "inFlightBytes")))
+      (match int_of (mem u "waiting") with
+        | 0 -> ""
+        | n -> Printf.sprintf ", %d waiting" n)
+      (match int_of (mem u "drops") with
+        | 0 -> ""
+        | n -> Printf.sprintf ", %d dropped" n)
+  in
+  let measured =
+    match mem u "capacityBytesPerSec" with
+      | `Null -> None
+      | c -> Some (per_sec c ^ " measured")
+  in
+  (* What holds the rate, so a ceiling someone set is not read as the most the
+     link could carry, nor a guess as a measurement. *)
+  let held =
+    match (str (mem u "limit"), measured) with
+      | "configured", None -> " at its configured ceiling"
+      | "configured", Some m -> " at its configured ceiling, of " ^ m
+      | "estimating", _ -> ", capacity still being estimated"
+      | _, Some m -> " of " ^ m
+      | _, None -> " of unknown"
+  in
+  if str (mem u "state") = "leased" then
+    Printf.sprintf "%s leased from the daemon%s (%s)"
+      (per_sec (mem u "rateBytesPerSec"))
+      (match str (mem u "limit") with
+        | "configured" -> ", at its configured ceiling"
+        | "estimating" -> ", capacity still being estimated"
+        | _ -> "")
+      load
+  else
+    Printf.sprintf "%s%s (%s, +%.0f ms queueing, %s%s)"
+      (per_sec (mem u "rateBytesPerSec"))
+      held
+      (str (mem u "state"))
+      (num (mem u "queueingDelayMs"))
+      load
+      (match list (mem u "lessees") with
+        | [] -> ""
+        | l ->
+            Printf.sprintf ", %s kept, %d leased out"
+              (per_sec (mem u "ownRateBytesPerSec"))
+              (List.length l))
+
+let governed u = bool_of (mem u "enabled")
+
+(* One row per link something is written over, the link named on the row. *)
+let uplink_rows ~row uplinks =
+  List.iter
+    (fun (name, u) ->
+      if governed u then row 4 ("uplink " ^ name) (uplink_row u))
+    (assoc uplinks)
+
 let traffic_row t =
   Printf.sprintf "up %s, down %s%s"
     (Metrics.with_rate
@@ -618,6 +679,10 @@ let text json =
       (match identifying with
         | Some (k, v) -> Printf.sprintf "  %s %s" k (str v)
         | None -> "");
+    (* Which [uplink] row governs this store's writes. *)
+      (match mem m "link" with
+      | `String link -> row 4 "link" link
+      | _ -> ());
     (match mem m "health" with
       | `Null ->
           if bool_of (mem m "reachable") then
@@ -861,13 +926,14 @@ let text json =
             (match mem p "traffic" with
               | t when moved t -> row 4 "traffic" (traffic_row t)
               | _ -> ());
+            uplink_rows ~row (mem p "uplinks");
             (* Only the pools something is waiting on: a report of empty queues
                is a report of nothing. *)
-            (match
-               List.filter
-                 (fun p -> int_of (mem p "waiting") > 0)
-                 (list (mem p "pools"))
-             with
+              (match
+                 List.filter
+                   (fun p -> int_of (mem p "waiting") > 0)
+                   (list (mem p "pools"))
+               with
               | [] -> ()
               | busy -> row 4 "slots" (slots_row busy));
             (match int_of (mem p "swappedBytes") with
@@ -1030,6 +1096,7 @@ let text json =
                           match mem bk k with `Null -> None | v -> Some (f v))
                         [("traffic", traffic_row); ("deferred", behind_row)])))
               (list (mem j "backends"));
+            uplink_rows ~row (mem j "uplinks");
             (match list (mem j "pools") with
               | [] -> ()
               | pools -> row 4 "slots" (slots_row pools));

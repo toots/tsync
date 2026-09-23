@@ -90,6 +90,12 @@ module Over
       at once and reorder a rename's copy and delete. A one-shot command still
       records and drains its own.
 
+      A resuming target is built stopped, and runs nothing until
+      {!start_resumed}: the daemon builds its stores before it forks its
+      frontends, and a queue started there would be run by every child too. A
+      process that never calls it records what its writes owe, forwards no
+      chunks, and leaves the records to the process that does.
+
       [chunk_from_prefix] is where the source keeps chunks it has not finished
       collecting — see {!Collection} — and a read falls through to it, though
       what is written to the target is always the ordinary chunk key. Omit it
@@ -101,10 +107,26 @@ module Over
 
       [reads_reach] is whether reads may fall through to this target. One they
       reach carries the journal and cursor too, a peer reading it needing both;
-      one they never reach has no use for either. *)
+      one they never reach has no use for either.
+
+      [max_chunk_forwards] bounds the chunk pushes this target runs at once. A
+      forward keeps its body alive after the write that carried it has returned
+      and released its chunk buffer, so this is the memory that path costs, and
+      the caller passes the budget it holds those buffers under. A push offered
+      past it is dropped for the manifest job to fetch later, never queued.
+      Values below [1] are read as [1].
+
+      [room_for] is the link's answer to the same question: whether a body of
+      that many bytes may go now. A [false] drops the forward as the count does,
+      for the same reason, that a body is not held in memory waiting for a link;
+      the store's own gate then takes the room on the write with nothing
+      between, which is what the answer is good for. Omitted, there is always
+      room. *)
   val make :
     ?resume:bool ->
     ?chunk_from_prefix:string ->
+    ?max_chunk_forwards:int ->
+    ?room_for:(bytes:int -> bool) ->
     name:string ->
     backend:(module Store) ->
     source:(module Store) ->
@@ -121,4 +143,12 @@ module Over
   (** Give up this process's claim on a target's log, so another may take what
       it left owed without waiting for this one to exit. *)
   val release : root:string -> name:string -> unit
+
+  (** Start every resuming target built so far, picking up what their logs hold.
+      Once per process, in the one that is to run them. *)
+  val start_resumed : unit -> unit
+
+  (** Called after a target not running in this process records a job, so a
+      caller can tell the process that runs it to look. *)
+  val set_on_recorded : (unit -> unit) -> unit
 end

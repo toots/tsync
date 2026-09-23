@@ -5,6 +5,7 @@ type backend_config = {
   name : string;
   fields : (string * string) list;
   role : role;
+  link : string;
 }
 
 type frontend_config = {
@@ -30,9 +31,12 @@ type t = {
   max_uploads : int;
   max_chunk_buffers : int;
   max_downloads : int;
+  uplink : Uplink_control.settings;
+  links : (string * Uplink_control.settings) list;
   domains : domain list;
 }
 
+let default_link = Uplink.default_link
 let roles : role list = [`Main; `Replica; `Backfill; `ReadOnly]
 
 let role_name : role -> string = function
@@ -75,6 +79,31 @@ let parse_size s =
             if n > 0 then Some n else None
         | _ -> None))
 
+(* A key nothing reads is refused rather than ignored: a setting renamed or
+   removed, or one typed wrong, would otherwise leave the store run as if it
+   were not there, and nothing would say so. *)
+let refuse_unknown ~where ~known json =
+  match json with
+    | `Assoc fields -> (
+        match
+          List.filter_map
+            (fun (k, _) -> if List.mem k known then None else Some k)
+            fields
+        with
+          | [] -> ()
+          | unknown ->
+              failwith
+                (Printf.sprintf "%s: unknown key%s %s" where
+                   (if List.length unknown = 1 then "" else "s")
+                   (String.concat ", " (List.map (Printf.sprintf "%S") unknown)))
+        )
+    | _ -> ()
+
+(* The keys a backend type's driver reads, beside the ones read here. Set by
+   whoever knows the drivers; [None] for a type it does not, whose keys are
+   then not checked. *)
+let driver_fields : (string -> string list option) ref = ref (fun _ -> None)
+
 let parse_backend json =
   let open Yojson.Basic.Util in
   let backend_type = json |> member "type" |> to_string in
@@ -106,10 +135,33 @@ let parse_backend json =
                "backend %s: missing required \"role\" field (one of %s)" name
                expected)
   in
+  (* The link this store is written over, a name shared by every store on the
+     same one; a local store is a tree here and is on none. *)
+  let link =
+    match json |> member "link" with
+      | `Null -> default_link
+      | `String l when String.trim l <> "" -> String.trim l
+      | v ->
+          failwith
+            (Printf.sprintf
+               "backend %s: \"link\" must be a name such as \"wan\", not %s"
+               name (Yojson.Basic.to_string v))
+  in
+  if json |> member "link" <> `Null && backend_type = "local" then
+    failwith
+      (Printf.sprintf
+         "backend %s: \"link\" names a link, and a local store has none" name);
+  Option.iter
+    (fun driver ->
+      refuse_unknown
+        ~where:(Printf.sprintf "backend %s" name)
+        ~known:(["type"; "name"; "role"; "link"] @ driver)
+        json)
+    (!driver_fields backend_type);
   let fields =
     to_assoc json
     |> List.filter_map (fun (k, v) ->
-        if k = "type" || k = "name" || k = "role" then None
+        if k = "type" || k = "name" || k = "role" || k = "link" then None
         else (
           match v with
             | `String s -> Some (k, s)
@@ -120,7 +172,7 @@ let parse_backend json =
             | `List _ -> Some (k, Yojson.Basic.to_string v)
             | _ -> None))
   in
-  { backend_type; name; fields; role }
+  { backend_type; name; fields; role; link }
 
 (* Reads use the head, so config order picks the read primary. *)
 let order_backends backends =
@@ -207,6 +259,21 @@ let validate_roles name backends =
 let parse_domain json =
   let open Yojson.Basic.Util in
   let name = json |> member "name" |> to_string in
+  refuse_unknown
+    ~where:(Printf.sprintf "domain %s" name)
+    ~known:
+      [
+        "name";
+        "backends";
+        "frontends";
+        "symlinks";
+        "versioning";
+        "readOnly";
+        "chunkSize";
+        "cacheChunkSize";
+        "maxCache";
+      ]
+    json;
   let backends =
     json |> member "backends" |> to_list |> List.map parse_backend
   in
@@ -233,8 +300,118 @@ let parse_domain json =
     max_cache = parse_size_field json "maxCache";
   }
 
+(* Strict, as a backend's ceiling is: a setting typed wrong here would leave
+   the link governed by something other than what was meant. *)
+let uplink_of_json ?(base = Uplink_control.default_settings) ?(where = "uplink")
+    json =
+  let open Yojson.Basic.Util in
+  let d = base in
+  let bad field v =
+    failwith
+      (Printf.sprintf "%s: \"%s\" cannot be %s" where field
+         (Yojson.Basic.to_string v))
+  in
+  let size field default =
+    match json |> member field with
+      | `Null -> default
+      | `Int n when n > 0 -> Some n
+      | `String str as v -> (
+          match parse_size str with Some n -> Some n | None -> bad field v)
+      | v -> bad field v
+  in
+  match json with
+    | `Null -> d
+    | `Assoc _ ->
+        refuse_unknown ~where
+          ~known:["enabled"; "headroom"; "targetDelayMs"; "minRate"; "maxRate"]
+          json;
+        let enabled =
+          match json |> member "enabled" with
+            | `Bool b -> b
+            | `Null -> d.enabled
+            | v -> bad "enabled" v
+        in
+        let headroom =
+          match json |> member "headroom" with
+            | `Float h when h > 0. && h <= 1. -> h
+            | `Int 1 -> 1.
+            | `Null -> d.headroom
+            | v -> bad "headroom" v
+        in
+        let target_delay =
+          match json |> member "targetDelayMs" with
+            | `Int n when n >= 5 -> float_of_int n /. 1000.
+            | `Null -> d.target_delay
+            | v -> bad "targetDelayMs" v
+        in
+        let min_rate = Option.get (size "minRate" (Some d.min_rate)) in
+        let max_rate = size "maxRate" d.max_rate in
+        (match max_rate with
+          | Some m when m < min_rate ->
+              failwith (where ^ ": \"maxRate\" is below \"minRate\"")
+          | _ -> ());
+        { Uplink_control.enabled; headroom; target_delay; min_rate; max_rate }
+    | v -> bad where v
+
+(* Overrides for the links the backends name, each read over the defaults so
+   a partial object says only what differs. A name no backend is on is
+   refused: an override that governs nothing is a typo. *)
+let links_of_json ~uplink ~(domains : domain list) json =
+  let open Yojson.Basic.Util in
+  let on_some_backend name =
+    List.exists
+      (fun d -> List.exists (fun b -> b.link = name) d.backends)
+      domains
+  in
+  match json with
+    | `Null -> []
+    | `Assoc l ->
+        List.map
+          (fun (name, j) ->
+            if not (on_some_backend name) then
+              failwith (Printf.sprintf "links: no backend names link %S" name);
+            (name, uplink_of_json ~base:uplink ~where:("links." ^ name) j))
+          l
+    | v ->
+        failwith
+          (Printf.sprintf "links: must be an object of links, not %s"
+             (Yojson.Basic.to_string v))
+
+let link_settings t name =
+  match List.assoc_opt name t.links with Some s -> s | None -> t.uplink
+
+let uplink_to_json (u : Uplink_control.settings) : Yojson.Basic.t =
+  `Assoc
+    ([
+       ("enabled", `Bool u.enabled);
+       ("headroom", `Float u.headroom);
+       ( "targetDelayMs",
+         `Int (int_of_float (Float.round (u.target_delay *. 1000.))) );
+       ("minRate", `Int u.min_rate);
+     ]
+    @ match u.max_rate with Some m -> [("maxRate", `Int m)] | None -> [])
+
+let links_to_json t : Yojson.Basic.t =
+  `Assoc (List.map (fun (n, s) -> (n, uplink_to_json s)) t.links)
+
 let of_json json =
   let open Yojson.Basic.Util in
+  refuse_unknown ~where:"config"
+    ~known:
+      [
+        "name";
+        "tls";
+        "maxUploads";
+        "maxChunkBuffers";
+        "maxDownloads";
+        "uplink";
+        "links";
+        "domains";
+      ]
+    json;
+  let domains = json |> member "domains" |> to_list |> List.map parse_domain in
+  let uplink = uplink_of_json (json |> member "uplink") in
+  let links = links_of_json ~uplink ~domains (json |> member "links") in
   let max_uploads =
     match json |> member "maxUploads" with
       | `Int n when n > 0 -> n
@@ -257,7 +434,9 @@ let of_json json =
       (match json |> member "maxDownloads" with
         | `Int n when n > 0 -> n
         | _ -> default_max_downloads);
-    domains = json |> member "domains" |> to_list |> List.map parse_domain;
+    uplink;
+    links;
+    domains;
   }
 
 let load path =

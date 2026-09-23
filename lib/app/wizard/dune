@@ -10,6 +10,8 @@
    -open
    Tsync_core
    -open
+   Tsync_uplink
+   -open
    Tsync_conf_parsing
    -open
    Tsync_backend_api
@@ -23,6 +25,7 @@
    Tsync_tls))
  (name tsync_wizard)
  (libraries
+  tsync_uplink
   tsync_stdlib
   tsync_core
   tsync_conf_parsing

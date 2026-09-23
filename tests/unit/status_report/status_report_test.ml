@@ -6,7 +6,7 @@
    logged by every process. What the fold has to do is say each of those once. *)
 
 let answer ~frontend ~domain ~pid ?(serves = []) ?(warnings = []) ?(jobs = [])
-    ?(domains = []) () =
+    ?(governed = false) ?(domains = []) () =
   {
     Status_report.domain;
     frontend;
@@ -44,6 +44,59 @@ let answer ~frontend ~domain ~pid ?(serves = []) ?(warnings = []) ?(jobs = [])
                 ("uploadBytesPerSec", `Int 0);
                 ("downloadBytesPerSec", `Int 0);
                 ("chunksHashed", `Int 5);
+              ] );
+          (* A governor that has found the link, holding under it with a line
+             behind it and a few forwards dropped along the way. *)
+          ( "uplinks",
+            `Assoc
+              [
+                ( "wan",
+                  `Assoc
+                    [
+                      ("enabled", `Bool governed);
+                      ("state", `String "steady");
+                      ("limit", `String "measured");
+                      ("rateBytesPerSec", `Int 1258291);
+                      ("capacityBytesPerSec", `Int 1677721);
+                      ("baseDelayMs", `Float 21.0);
+                      ("queueingDelayMs", `Float 12.0);
+                      ("inFlightBytes", `Int 16777216);
+                      ("windowBytes", `Int 37748736);
+                      ("drops", `Int 41);
+                      ("headroom", `Float 0.8);
+                      ("targetDelayMs", `Float 50.0);
+                      ("waiting", `Int 3);
+                    ] );
+                (* A second link this process holds a lease on: no law of its
+                   own to show, only the grant and the load. *)
+                ( "lan",
+                  `Assoc
+                    [
+                      ("enabled", `Bool governed);
+                      ("state", `String "leased");
+                      ("limit", `String "configured");
+                      ("rateBytesPerSec", `Int 3145728);
+                      ("capacityBytesPerSec", `Null);
+                      ("inFlightBytes", `Int 8388608);
+                      ("waiting", `Int 0);
+                      ("drops", `Int 0);
+                    ] );
+                (* Held by a ceiling set in the config, the link's own edge not
+                   met yet. *)
+                ( "wlan-slow",
+                  `Assoc
+                    [
+                      ("enabled", `Bool governed);
+                      ("state", `String "ramping");
+                      ("limit", `String "configured");
+                      ("maxRateBytesPerSec", `Int 512000);
+                      ("rateBytesPerSec", `Int 512000);
+                      ("capacityBytesPerSec", `Null);
+                      ("queueingDelayMs", `Float 3.0);
+                      ("inFlightBytes", `Int 0);
+                      ("waiting", `Int 1);
+                      ("drops", `Int 0);
+                    ] );
               ] );
           ("jobs", `List jobs);
           ( "recentErrors",
@@ -115,6 +168,17 @@ let domain_body ~name ?(frontends = []) () =
                 ( "corrupted",
                   `Assoc [("checked", `Bool true); ("chunks", `Int 0)] );
               ];
+            (* A remote store says which link its writes are governed on. *)
+            `Assoc
+              [
+                ("name", `String "bucket");
+                ("type", `String "gcs");
+                ("role", `String "replica");
+                ("link", `String "wlan-slow");
+                ("config", `Assoc [("bucket", `String "tsync-alpha")]);
+                ("reachable", `Bool true);
+                ("latencyMs", `Float 40.);
+              ];
           ] );
     ]
 
@@ -126,6 +190,23 @@ let job ~pid =
       ("state", `String "running");
       ("uptimeSeconds", `Float 300.);
       ("target", `String "/media/stage");
+      (* A job beside the daemon, leasing the link its store is on. *)
+      ( "uplinks",
+        `Assoc
+          [
+            ( "wan",
+              `Assoc
+                [
+                  ("enabled", `Bool true);
+                  ("state", `String "leased");
+                  ("limit", `String "estimating");
+                  ("rateBytesPerSec", `Int 1048576);
+                  ("capacityBytesPerSec", `Null);
+                  ("inFlightBytes", `Int 8388608);
+                  ("waiting", `Int 2);
+                  ("drops", `Int 5);
+                ] );
+          ] );
     ]
 
 let () =
@@ -161,7 +242,7 @@ let () =
         ]
       ~domains:[domain_body ~name:"alpha" (); domain_body ~name:"beta" ()]
       [
-        answer ~frontend:"fuse" ~domain:"alpha" ~pid:4242
+        answer ~frontend:"fuse" ~domain:"alpha" ~pid:4242 ~governed:true
           ~jobs:[job ~pid:9001]
           ~warnings:
             [

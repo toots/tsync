@@ -57,6 +57,14 @@
   (action
    (diff deferred.expected deferred.output))))
 
+(subdir backends/deferred_governed
+ (alias
+  (name default)
+  (deps deferred_governed.exe))
+ (rule
+  (alias runtest)
+  (action (run ./deferred_governed.exe))))
+
 (subdir backends/deferred_shards
  (alias
   (name default)
@@ -967,6 +975,14 @@
   (action
    (diff applied_entries_test.expected applied_entries_test.output))))
 
+(subdir unit/backend_capped
+ (alias
+  (name default)
+  (deps backend_capped.exe))
+ (rule
+  (alias runtest)
+  (action (run ./backend_capped.exe))))
+
 (subdir unit/backend_render
  (alias
   (name default)
@@ -1202,6 +1218,14 @@
   (alias runtest)
   (action
    (diff export_record.expected export_record.output))))
+
+(subdir unit/fake_clock
+ (alias
+  (name default)
+  (deps fake_clock_test.exe))
+ (rule
+  (alias runtest)
+  (action (run ./fake_clock_test.exe))))
 
 (subdir unit/field_spec
  (alias
@@ -1791,6 +1815,46 @@
  (rule
   (alias runtest)
   (action (run ./tree_find_test.exe))))
+
+(subdir unit/uplink
+ (alias
+  (name default)
+  (deps uplink_test.exe))
+ (rule
+  (alias runtest)
+  (action (run ./uplink_test.exe))))
+
+(subdir unit/uplink_budget
+ (alias
+  (name default)
+  (deps uplink_budget_test.exe))
+ (rule
+  (alias runtest)
+  (action (run ./uplink_budget_test.exe))))
+
+(subdir unit/uplink_control
+ (alias
+  (name default)
+  (deps uplink_control_test.exe))
+ (rule
+  (alias runtest)
+  (action (run ./uplink_control_test.exe))))
+
+(subdir unit/uplink_lease
+ (alias
+  (name default)
+  (deps uplink_lease_test.exe))
+ (rule
+  (alias runtest)
+  (action (run ./uplink_lease_test.exe))))
+
+(subdir unit/uplink_modes
+ (alias
+  (name default)
+  (deps uplink_modes_test.exe))
+ (rule
+  (alias runtest)
+  (action (run ./uplink_modes_test.exe))))
 
 (subdir unit/upload_fanout
  (alias

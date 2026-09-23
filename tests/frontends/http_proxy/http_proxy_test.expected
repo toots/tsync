@@ -21,6 +21,7 @@ stop: {"ok":true} closes=true asked=1
       "maxUploads": 2,
       "maxChunkBuffers": 2,
       "maxDownloads": 3,
+      "uplinks": {},
       "cacheRoot": "/tmp/tsync-http-proxy-status-test/cache",
       "dataDir": "/tmp/tsync-http-proxy-status-test/data",
       "socketPath": "/tmp/tsync-http-proxy-status-test/absent.sock",
@@ -141,7 +142,8 @@ stop: {"ok":true} closes=true asked=1
         "retries": 0,
         "timeouts": 0,
         "failures": 0
-      }
+      },
+      "uplinks": {}
     }
   ],
   "jobs": [],

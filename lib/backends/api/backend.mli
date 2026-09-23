@@ -74,6 +74,9 @@ type 'store member = {
   local_path : string option;
       (** Where a [local] store keeps its files, so a report can say how much
           room is left. Absent for stores whose capacity is not ours to know. *)
+  link : string option;
+      (** The uplink this store is written over, as configured. Absent for a
+          [local] store, which is written over none. *)
 }
 
 (** The defaults describe a store with nothing special about it: a writable
@@ -89,6 +92,7 @@ val member :
   ?in_flight:(unit -> int) ->
   ?degraded:(unit -> bool) ->
   ?traffic:traffic ->
+  ?link:string ->
   name:string ->
   'store ->
   'store member
@@ -209,9 +213,14 @@ module Make (Io : Io.S) (Bounded : Bounded.S with type 'a io := 'a Io.t) : sig
       [traffic] is the store's own counter pair, which the returned module adds
       to alongside the process-wide ones. Omitted, a counted store still counts
       — into a pair nobody holds — so a caller wanting the figure passes one and
-      keeps it on the store's {!member}. *)
+      keeps it on the store's {!member}.
+
+      [admission] is the gate each body sent goes through, asked before and told
+      after; omitted, a body is sent as it was before there were gates. A local
+      store is neither counted nor gated: it has no link. *)
   val make :
     ?traffic:traffic ->
+    ?admission:unit Io.t Uplink.admission ->
     backend_type:string ->
     get_field:(string -> string option) ->
     unit ->

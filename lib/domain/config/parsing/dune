@@ -1,6 +1,6 @@
 (library
  (flags
-  (:standard -open Tsync_stdlib -open Tsync_core))
+  (:standard -open Tsync_uplink -open Tsync_stdlib -open Tsync_core))
  (name tsync_conf_parsing)
  (public_name tsync-libs.conf_parsing)
- (libraries tsync_stdlib tsync-libs.core unix yojson))
+ (libraries tsync_uplink tsync_stdlib tsync-libs.core unix yojson))

@@ -1,7 +1,27 @@
-let make_backend ~traffic (bc : Conf_parsing.backend_config) =
-  Backend_lwt.make ~traffic ~backend_type:bc.backend_type
+let make_backend ~traffic ~admission (bc : Conf_parsing.backend_config) =
+  Backend_lwt.make ~admission ~traffic ~backend_type:bc.backend_type
     ~get_field:(fun k -> List.assoc_opt k bc.fields)
     ()
+
+(* One small round trip the governor may time: a head of the domain cursor,
+   which every written store holds and which costs nothing to ask about. A
+   store that is a tree here has no link to measure; one held down is left to
+   its own retry loop. *)
+let attach_probe ~cursor_key (bc : Conf_parsing.backend_config) store =
+  let module St = (val store : Backend_lwt.Store) in
+  if St.local_path = None then
+    let module U = Tsync_core_lwt.Uplink_lwt in
+    U.attach
+      (U.link (U.process ()) bc.Conf_parsing.link)
+      ~name:bc.Conf_parsing.name
+      ~held:(fun () -> Health.is_held St.health)
+      ~timeouts:(fun () -> Health.timeouts St.health)
+      ~probe:(fun () -> Lwt.map ignore (St.head_opt ~key:cursor_key ()))
+
+(* Every store's writes join the line of the link it is on. *)
+let admission_for (bc : Conf_parsing.backend_config) =
+  let module U = Tsync_core_lwt.Uplink_lwt in
+  U.admission (U.link (U.process ()) bc.Conf_parsing.link) U.Background
 
 (* Empty for a body that is not a manifest: a folder marker, a trash marker, a
    share. *)
@@ -21,12 +41,24 @@ let deferred_root ~paths (d : Conf_parsing.domain) =
 (* The one place a configured role becomes behavior: [replica] and [backfill]
    are the same target with one bit between them — whether reads may reach it —
    so a resynced backfill is promoted by editing one word. *)
-let build_backends ~paths ~resume (d : Conf_parsing.domain) :
+(* The drivers are known here and not below, where the config is read. *)
+let () =
+  Conf_parsing.driver_fields :=
+    fun backend_type ->
+      Option.map
+        (List.map (fun (f : Field_spec.t) -> f.Field_spec.name))
+        (Backend_lwt.spec_for backend_type)
+
+let build_backends ~paths ~resume ~max_chunk_forwards (d : Conf_parsing.domain)
+    :
     (module Backend_lwt.Store) * (module Backend_lwt.Store) Backend.member list
     =
   (* One counter pair per configured store, kept by name so the member built
      below reports the very counters that store's wrapper adds to. *)
   let traffic : (string, Backend.traffic) Hashtbl.t = Hashtbl.create 4 in
+  (* Kept by name beside the counters: a deferred target asks its own store's
+     gate whether a forward may go, the same gate the write then takes. *)
+  let admissions = Hashtbl.create 4 in
   (* Shared by every layer below: a second [make_backend] for the same config is
      a second client against the same store. Order comes from
      {!Conf_parsing.order_backends}, so a main answers first. *)
@@ -35,7 +67,11 @@ let build_backends ~paths ~resume (d : Conf_parsing.domain) :
       (fun (bc : Conf_parsing.backend_config) ->
         let t = Backend.new_traffic () in
         Hashtbl.replace traffic bc.Conf_parsing.name t;
-        (bc, make_backend ~traffic:t bc))
+        let admission = admission_for bc in
+        Hashtbl.replace admissions bc.Conf_parsing.name admission;
+        let store = make_backend ~traffic:t ~admission bc in
+        attach_probe ~cursor_key:(Conf_parsing.cursor_key d) bc store;
+        (bc, store))
       (Conf_parsing.order_backends d.Conf_parsing.backends)
   in
   let of_roles rs =
@@ -54,7 +90,9 @@ let build_backends ~paths ~resume (d : Conf_parsing.domain) :
   in
   let target ((bc : Conf_parsing.backend_config), backend) ~source =
     let built_target =
-      Domain_store_lwt.Deferred.make ~resume ~name:bc.name ~backend ~source
+      Domain_store_lwt.Deferred.make ~resume ~max_chunk_forwards
+        ~room_for:(Hashtbl.find admissions bc.name).Uplink.try_admit
+        ~name:bc.name ~backend ~source
         ~chunk_prefix:(Conf_parsing.chunk_prefix d)
         ~chunk_from_prefix:
           (let module L = Chunk_layout.Make (struct
@@ -107,6 +145,9 @@ let build_backends ~paths ~resume (d : Conf_parsing.domain) :
                         (Backend_lwt.spec_for bc.backend_type))
                      k v ))
                bc.fields)
+          ?link:
+            (if bc.backend_type = "local" then None
+             else Some bc.Conf_parsing.link)
           ?pending:(stat (fun s -> s.Deferred.queued))
           ?in_flight:(stat (fun s -> s.Deferred.in_flight))
           ?degraded:(stat (fun s -> s.Deferred.degraded))
@@ -171,7 +212,19 @@ let of_config ?domain ?socket_path ?(resume = false) ~paths cfg :
     let journal_prefix = Conf_parsing.journal_prefix d
     let cursor_key = Conf_parsing.cursor_key d
     let shares_prefix = Conf_parsing.shares_prefix d
-    let store, members = build_backends ~paths ~resume d
+
+    (* Before the first store is built, which joins its link's line; a
+       second domain in the same process finds it configured and leaves it. *)
+    let () =
+      Tsync_core_lwt.Uplink_lwt.configure ~defaults:cfg.Conf_parsing.uplink
+        ~overrides:cfg.Conf_parsing.links
+
+    (* A forward holds a chunk body past the buffer that carried it, so the
+       buffers' budget is the ceiling on forwards too. *)
+    let store, members =
+      build_backends ~paths ~resume
+        ~max_chunk_forwards:cfg.Conf_parsing.max_chunk_buffers d
+
     let cache_root = paths.Runtime.cache_root
     let data_dir = paths.Runtime.data_dir
     let socket_path = socket_path
@@ -250,3 +303,6 @@ let reading_from name (module C : Conf_lwt.S) : (module Conf_lwt.S) =
         let health = Src.health
       end : Backend_lwt.Store)
   end : Conf_lwt.S)
+
+let start_resumed = Domain_store_lwt.Deferred.start_resumed
+let set_on_recorded = Domain_store_lwt.Deferred.set_on_recorded

@@ -57,4 +57,9 @@ are not two in a row: ok
 is never out: ok
 and counts as heard from: ok
 
-32 check(s), 0 failure(s)
+=== the timeouts a member took
+tallied: ok
+and kept when it answers again: a tally, not a state: ok
+a store with no link counts none: ok
+
+35 check(s), 0 failure(s)

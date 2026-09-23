@@ -471,6 +471,11 @@ module Make (E : ENV) = struct
         | _ -> ""
     in
     let btype = get "type" in
+    let link_of () =
+      match List.assoc_opt "link" !l with
+        | Some (`String v) when String.trim v <> "" -> String.trim v
+        | _ -> Conf_parsing.default_link
+    in
     let which =
       match btype with "s3" -> Some `S3 | "gcs" -> Some `Gcs | _ -> None
     in
@@ -490,6 +495,11 @@ module Make (E : ENV) = struct
         spec;
       let role_n = List.length spec + 2 in
       Printf.printf "  %d. %-16s %s\n" role_n "role:" (role_of !l);
+      (* A local store is on no link, so it is not asked which. *)
+      let link_n = if btype = "local" then None else Some (role_n + 1) in
+      Option.iter
+        (fun n -> Printf.printf "  %d. %-16s %s\n" n "link:" (link_of ()))
+        link_n;
       if can_sync then
         Printf.printf "  [t] sync bucket/keys/share URL from Terraform\n";
       if !status <> "" then Printf.printf "\n%s\n" !status;
@@ -511,6 +521,21 @@ module Make (E : ENV) = struct
             match int_of_string_opt input with
               | Some n when n = role_n ->
                   l := assoc_set !l "role" (`String (prompt_role (role_of !l)))
+              | Some n when link_n = Some n -> (
+                  (* Any name; stores naming the same one are governed as
+                     one. Blank is the default, and is not written. *)
+                    match
+                      String.trim
+                        (prompt
+                           (Printf.sprintf
+                              "  Link this store is written over (blank = %s)"
+                              Conf_parsing.default_link)
+                           (Some (link_of ())))
+                    with
+                    | "" -> l := List.remove_assoc "link" !l
+                    | v when v = Conf_parsing.default_link ->
+                        l := List.remove_assoc "link" !l
+                    | v -> l := assoc_set !l "link" (`String v))
               | Some n when n >= 2 && n <= List.length spec + 1 -> (
                   let s = List.nth spec (n - 2) in
                   match prompt_field s ~current:(get s.name) with
@@ -816,7 +841,7 @@ module Make (E : ENV) = struct
 
   (* Serialize globals + domains to [path] with 0600 perms. *)
   let write_config ~path ~client_name ~max_uploads ~max_chunk_buffers
-      ~max_downloads ~tls ~domains =
+      ~max_downloads ~uplink ~links ~tls ~domains =
     Io_lwt.Fs.mkdir_p_sync (Filename.dirname path);
     let json =
       `Assoc
@@ -825,7 +850,10 @@ module Make (E : ENV) = struct
            ("maxUploads", `Int max_uploads);
            ("maxChunkBuffers", `Int max_chunk_buffers);
            ("maxDownloads", `Int max_downloads);
+           ("uplink", Conf_parsing.uplink_to_json uplink);
          ]
+        (* Kept as the file had it: per-link overrides are edited there. *)
+        @ (match links with Some l -> [("links", l)] | None -> [])
         @ (match tls with Some t -> [("tls", `String t)] | None -> [])
         @ [("domains", `List domains)])
     in
@@ -880,9 +908,44 @@ module Make (E : ENV) = struct
            (Option.bind existing_root (fun r -> jint r "maxDownloads"))
            ~default:Conf_parsing.default_max_downloads)
     in
+    (* Read with the parser's own rules, a hand-edited value that would be
+       refused on the way in being shown as the default here. *)
+    let uplink =
+      ref
+        (match Option.bind existing_root (fun r -> jfield r "uplink") with
+          | Some u -> (
+              try Conf_parsing.uplink_of_json u
+              with Failure _ -> Uplink_control.default_settings)
+          | None -> Uplink_control.default_settings)
+    in
+    (* Per-link overrides: kept as the file had them, and edited here for
+       the one thing a link is usually given of its own, a ceiling. *)
+    let links =
+      ref
+        (match Option.bind existing_root (fun r -> jfield r "links") with
+          | Some (`Assoc l) -> l
+          | _ -> [])
+    in
     let tls = ref (Option.bind existing_root (fun r -> jstr r "tls")) in
     let domains =
       ref (match existing_root with Some r -> jlist r "domains" | None -> [])
+    in
+    (* Every link the backends name, in any domain: a local store is on
+       none. *)
+    let link_names () =
+      List.sort_uniq compare
+        (List.concat_map
+           (fun d ->
+             List.filter_map
+               (fun b ->
+                 if jstr b "type" = Some "local" then None
+                 else
+                   Some
+                     (match jstr b "link" with
+                       | Some l when String.trim l <> "" -> String.trim l
+                       | _ -> Conf_parsing.default_link))
+               (jlist d "backends"))
+           !domains)
     in
     let edit_globals () =
       client_name := prompt "Client name" (Some !client_name);
@@ -891,6 +954,67 @@ module Make (E : ENV) = struct
       max_chunk_buffers :=
         prompt_int "Max chunk buffers held in memory" !max_chunk_buffers;
       max_downloads := prompt_int "Max concurrent downloads" !max_downloads;
+      (* The link is written at a rate chosen from its delay: how far under
+         what it can carry, and how much delay is aimed at. minRate is a
+         file-only setting; the default is right for any link worth using. *)
+      (let u = !uplink in
+       let enabled =
+         prompt_bool ~default:u.Uplink_control.enabled
+           "Govern uploads by link delay"
+       in
+       let headroom =
+         prompt_int "Headroom, % of measured capacity"
+           (int_of_float (Float.round (u.headroom *. 100.)))
+       in
+       let target =
+         prompt_int "Target queueing delay (ms)"
+           (int_of_float (Float.round (u.target_delay *. 1000.)))
+       in
+       let max_rate =
+         prompt_size_opt ~unset:"none"
+           "Upload rate ceiling, per second (\"none\" = what the link allows)"
+           u.max_rate
+       in
+       uplink :=
+         {
+           u with
+           enabled;
+           headroom = float_of_int (Int.min 100 headroom) /. 100.;
+           target_delay = float_of_int (Int.max 5 target) /. 1000.;
+           max_rate;
+         };
+       (* A ceiling per link: what caps one store alone on its link, and
+          holds across every process on the machine. Anything else a link
+          differs in stays as the file has it. *)
+       List.iter
+         (fun name ->
+           let entry =
+             match List.assoc_opt name !links with
+               | Some (`Assoc o) -> o
+               | _ -> []
+           in
+           let current =
+             match List.assoc_opt "maxRate" entry with
+               | Some (`Int n) -> Some n
+               | Some (`String v) -> Conf_parsing.parse_size v
+               | _ -> None
+           in
+           let ceiling =
+             prompt_size_opt ~unset:"none"
+               (Printf.sprintf
+                  "Link %s: upload rate ceiling, per second (\"none\" = as \
+                   uplink)"
+                  name)
+               current
+           in
+           let entry =
+             List.remove_assoc "maxRate" entry
+             @ match ceiling with Some n -> [("maxRate", `Int n)] | None -> []
+           in
+           links :=
+             List.remove_assoc name !links
+             @ if entry = [] then [] else [(name, `Assoc entry)])
+         (link_names ()));
       (* Only worth asking when the build has more than one backend. "auto"
            leaves it unset, taking the preferred one at startup, which survives a
            build dropping a backend. *)
@@ -1003,7 +1127,8 @@ module Make (E : ENV) = struct
     done;
     if not !saved then Printf.printf "Aborted; config left untouched.\n"
     else begin
-      write_config ~path:config_path ~client_name:!client_name
+      write_config ~path:config_path ~client_name:!client_name ~uplink:!uplink
+        ~links:(match !links with [] -> None | l -> Some (`Assoc l))
         ~max_uploads:!max_uploads ~max_chunk_buffers:!max_chunk_buffers
         ~max_downloads:!max_downloads ~tls:!tls ~domains:!domains;
       Printf.printf "\nConfig written to %s\n" config_path;

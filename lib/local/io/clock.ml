@@ -4,8 +4,18 @@
     has to elapse and what a scheduler's own timeout is are questions only
     something that waits on a clock asks. *)
 
+(* Bound here beside the signature, as {!Fs.statvfs} is, so an implementation
+   has something to name rather than a stub of its own. *)
+external monotonic_now : unit -> float = "tsync_monotonic_now"
+
 module type S = sig
   type 'a io
+
+  (** Seconds on a clock that only moves forward, from an origin that means
+      nothing: for how long something took, never for when it happened. Wall
+      time steps under NTP, by about the intervals a rate is read over, and a
+      length read off it would step too. *)
+  val now : unit -> float
 
   val sleep : float -> unit io
 
