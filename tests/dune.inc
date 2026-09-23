@@ -1283,6 +1283,14 @@
   (action
    (diff folder_index_test.expected folder_index_test.output))))
 
+(subdir unit/fork_reap
+ (alias
+  (name default)
+  (deps fork_reap_test.exe))
+ (rule
+  (alias runtest)
+  (action (run ./fork_reap_test.exe))))
+
 (subdir unit/gc_job
  (alias
   (name default)

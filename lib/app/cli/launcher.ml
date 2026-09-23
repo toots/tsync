@@ -317,11 +317,12 @@ let converge domains =
       let* () = stop in
       Log.info "stopping, letting the domains catch up";
       let* () =
-        Lwt_list.iter_s
-          (fun e ->
-            let module Cv = (val e.converging : Domain_engine.Converging) in
-            Cv.drain ())
-          engines
+        Domain_engine.drain_for_stop
+          (List.map
+             (fun e ->
+               let module Cv = (val e.converging : Domain_engine.Converging) in
+               Cv.drain)
+             engines)
       in
       Lwt.wakeup_later drained_wake ();
       Lwt.return_unit)

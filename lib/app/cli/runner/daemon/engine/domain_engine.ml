@@ -215,6 +215,24 @@ module Make (C : Conf_lwt.S) : S = Make_over (Checkout_lwt) (C)
 
 (* The convergence half of an engine, for a caller holding several domains and
    presenting none of them. *)
+(* What a process stopping owes before it exits, all at once and for at most
+   the grace: each drain gives way to the stop, and what one still has running
+   when the grace is up is owed on disk and picked up by the next start. A
+   stop that waited on it would be the one systemd ends with SIGKILL. *)
+let drain_for_stop drains =
+  Lwt.catch
+    (fun () ->
+      Lwt_unix.with_timeout !Shutdown.grace (fun () ->
+          Lwt_list.iter_p (fun drain -> drain ()) drains))
+    (function
+      | Lwt_unix.Timeout ->
+          Log.warn
+            "stopping: still busy after %.0fs; what is left is owed on disk \
+             and resumes at the next start"
+            !Shutdown.grace;
+          Lwt.return_unit
+      | exn -> Lwt.fail exn)
+
 module Converge (E : S) : Converging = struct
   let start = E.converge
   let drain = E.drain

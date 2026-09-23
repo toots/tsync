@@ -1230,11 +1230,12 @@ let start served =
       in
       Log.info "http-proxy stopping, letting backends catch up";
       let* () =
-        Lwt_list.iter_s
-          (fun (sv : Frontend.served) ->
-            let module D = (val sv.Frontend.domain : Domain_engine.Domain) in
-            D.drain ())
-          served
+        Domain_engine.drain_for_stop
+          (List.map
+             (fun (sv : Frontend.served) ->
+               let module D = (val sv.Frontend.domain : Domain_engine.Domain) in
+               D.drain)
+             served)
       in
       (* The listener closes and removes its socket, once. *)
       Lwt.wakeup_later drained_wake ();
