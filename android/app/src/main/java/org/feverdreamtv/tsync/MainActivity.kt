@@ -6,8 +6,10 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Intent
 import android.graphics.Typeface
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.OpenableColumns
 import android.text.InputType
 import android.view.View
 import android.view.WindowInsets
@@ -54,12 +56,30 @@ class MainActivity : Activity() {
     /** What back does on the screen showing; false hands it to the platform. */
     private var onBack: () -> Boolean = { false }
 
+    /** What another app shared, when this is a share target rather than the
+     *  launcher: the browser then picks where it is saved. */
+    private var incoming: List<Uri> = emptyList()
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        if (Config.exists(this)) {
-            TsyncProvider.notifyRootsChanged(this)
-            showBrowser()
-        } else showSetup()
+        incoming = sharedStreams(intent)
+        val sharing = intent.action == Intent.ACTION_SEND ||
+            intent.action == Intent.ACTION_SEND_MULTIPLE
+        when {
+            sharing && incoming.isEmpty() -> {
+                toast("Nothing to save: only files can be saved to tsync")
+                finish()
+            }
+            sharing && !Config.exists(this) -> {
+                toast("Set up tsync before saving to it")
+                finish()
+            }
+            Config.exists(this) -> {
+                TsyncProvider.notifyRootsChanged(this)
+                showBrowser()
+            }
+            else -> showSetup()
+        }
     }
 
     @Suppress("DEPRECATION")
@@ -132,10 +152,10 @@ class MainActivity : Activity() {
             if (entry.getString("kind") == "dir") {
                 trail.addLast(entry.getString("ref") to entry.getString("name"))
                 showBrowser()
-            } else offerActions(entry)
+            } else if (incoming.isEmpty()) offerActions(entry)
         }
         list.setOnItemLongClickListener { _, _, position, _ ->
-            offerActions(rows[position])
+            if (incoming.isEmpty()) offerActions(rows[position])
             true
         }
 
@@ -147,16 +167,29 @@ class MainActivity : Activity() {
                 true
             }
         }
+        val path = trail.joinToString("/") { it.second }
         setContentViewInsetAware(column {
             addView(row {
-                addView(Button(this@MainActivity).apply {
-                    text = "Settings"; setOnClickListener { showSetup() }
-                })
-                addView(Button(this@MainActivity).apply {
-                    text = "Status"; setOnClickListener { showStatus() }
-                })
+                if (incoming.isEmpty()) {
+                    addView(Button(this@MainActivity).apply {
+                        text = "Settings"; setOnClickListener { showSetup() }
+                    })
+                    addView(Button(this@MainActivity).apply {
+                        text = "Status"; setOnClickListener { showStatus() }
+                    })
+                } else {
+                    addView(Button(this@MainActivity).apply {
+                        text = "Save here"; setOnClickListener { saveHere(here) }
+                    })
+                    addView(Button(this@MainActivity).apply {
+                        text = "Cancel"; setOnClickListener { finish() }
+                    })
+                }
             })
-            addView(heading(trail.joinToString("/") { it.second }.ifEmpty { "tsync" }))
+            addView(heading(
+                if (incoming.isEmpty()) path.ifEmpty { "tsync" }
+                else "Save ${plural(incoming.size, "file")} to /$path"
+            ))
             addView(notice)
             addView(list, LinearLayout.LayoutParams(MATCH_PARENT, 0, 1f))
         })
@@ -279,6 +312,82 @@ class MainActivity : Activity() {
             }
         }
     }
+
+    // ── Share target ─────────────────────────────────────────────────────────
+
+    @Suppress("DEPRECATION")
+    private fun sharedStreams(intent: Intent): List<Uri> = when (intent.action) {
+        Intent.ACTION_SEND ->
+            listOfNotNull(intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM))
+        Intent.ACTION_SEND_MULTIPLE ->
+            intent.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM).orEmpty()
+        else -> emptyList()
+    }
+
+    private fun displayName(uri: Uri): String =
+        runCatching {
+            contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+                ?.use { if (it.moveToFirst()) it.getString(0) else null }
+        }.getOrNull() ?: uri.lastPathSegment ?: "shared file"
+
+    /** One file is named here before it is saved; several keep their own. */
+    private fun saveHere(folder: String) {
+        val named = incoming.map { it to displayName(it) }
+        if (named.size > 1) return save(folder, named)
+        val name = field("Name", named[0].second)
+        AlertDialog.Builder(this)
+            .setTitle("Save as")
+            .setView(name)
+            .setPositiveButton("Save") { _, _ ->
+                save(folder, listOf(named[0].first to name.text.toString()))
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    /**
+     * Copies each stream while this activity still holds its read grant, then
+     * leaves and commits them, the service keeping the process up until the
+     * uploads have been sent.
+     *
+     * A name already in [folder] is kept and the new file numbered beside it.
+     */
+    private fun save(folder: String, files: List<Pair<Uri, String>>) {
+        val context = applicationContext
+        OpenDocumentsService.retain(context)
+        toast("Saving ${plural(files.size, "file")}…")
+        thread {
+            try {
+                val staged = files.mapNotNull { (uri, name) ->
+                    val staging = Ingest.newStaging(context)
+                    runCatching {
+                        contentResolver.openInputStream(uri).use { input ->
+                            requireNotNull(input) { "no stream for $uri" }
+                            staging.outputStream().use { input.copyTo(it) }
+                        }
+                        staging to name
+                    }.onFailure {
+                        staging.delete()
+                        Notifications.problem(context, "Could not read $name: ${it.message}")
+                    }.getOrNull()
+                }
+                runOnUiThread { finish() }
+                for ((staging, name) in staged) {
+                    runCatching {
+                        val leaf = Ingest.freeName(context, folder, Keys.sanitizeLeaf(name))
+                        Ingest.commit(context, folder, leaf, staging)
+                    }.onFailure {
+                        Notifications.problem(context, "Could not save $name: ${it.message}")
+                    }
+                }
+            } finally {
+                OpenDocumentsService.release(context)
+            }
+        }
+    }
+
+    private fun plural(count: Int, noun: String) =
+        if (count == 1) "1 $noun" else "$count ${noun}s"
 
     // ── Setup ────────────────────────────────────────────────────────────────
 
