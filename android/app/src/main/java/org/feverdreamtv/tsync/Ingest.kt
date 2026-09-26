@@ -1,6 +1,7 @@
 package org.feverdreamtv.tsync
 
 import android.content.Context
+import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
 import java.util.UUID
@@ -94,14 +95,30 @@ object Ingest {
 
     /** The reference a folder's child answers to, or null if it has none. */
     private fun childRef(context: Context, parent: String, name: String): String? =
+        children(context, parent)
+            .firstOrNull { it.getString("name") == name }
+            ?.getString("ref")
+
+    /**
+     * [name], or `name (n).ext` for the first n not taken in [parent]:
+     * [commit] replaces a file of the same name.
+     */
+    fun freeName(context: Context, parent: String, name: String): String {
+        val taken = children(context, parent).map { it.getString("name") }.toSet()
+        if (name !in taken) return name
+        val stem = name.substringBeforeLast('.').ifEmpty { name }
+        val extension = name.removePrefix(stem)
+        return generateSequence(1) { it + 1 }
+            .map { "$stem ($it)$extension" }
+            .first { it !in taken }
+    }
+
+    private fun children(context: Context, parent: String): List<JSONObject> =
         try {
             val items = Tsync.json(context, Cli.list(parent)).getJSONArray("items")
-            (0 until items.length())
-                .map { items.getJSONObject(it) }
-                .firstOrNull { it.getString("name") == name }
-                ?.getString("ref")
+            (0 until items.length()).map { items.getJSONObject(it) }
         } catch (absent: Cli.Error) {
-            null
+            emptyList()
         }
 
     /**
