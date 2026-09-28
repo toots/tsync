@@ -478,6 +478,12 @@ and anything still queued when the daemon stops is picked up when it next starts
 wait for it. `tsync status`
 shows how far behind each target is.
 
+A job is one user-visible operation, not one chunk: a file's manifest reaches the target only
+once every chunk it names has, so the job for a large file uploads all of its missing chunks
+before it finishes, and on a slow link can hold the queue for hours. While it does, `tsync
+status` names the file and how far through its chunks the job is, and the log stays quiet: a
+queue is only reported stalled when nothing has moved at all.
+
 Two things are not waited out. A failure that cannot clear — a wrong credential, a bucket that
 refuses writes — drops the job rather than blocking everything queued behind it, and the target
 is reported `DEGRADED` from then on. So is a queue that has grown absurd. Both mean the target

@@ -99,6 +99,14 @@ let new_traffic = Metrics.traffic
 
 type role = [ `Main | `Replica | `Backfill | `ReadOnly ]
 
+type filling = {
+  file : string;
+  checked : int;
+  total : int;
+  sent : int;
+  sent_bytes : int;
+}
+
 type 'store member = {
   name : string;
   role : role;
@@ -112,6 +120,8 @@ type 'store member = {
       (** Replica and backfill: jobs this target still owes, kept on disk. *)
   in_flight : (unit -> int) option;
       (** Replica and backfill: chunk forwards in flight. *)
+  filling : (unit -> filling option) option;
+      (** Replica and backfill: the manifest job being worked on, if any. *)
   traffic : traffic option;
       (** What crossed the link to this store, for the stores that have a link:
           absent for a store that is a tree here, having no link. *)
@@ -125,8 +135,8 @@ type 'store member = {
 }
 
 let member ?(role = `Main) ?(readable = true) ?(backend_type = "local")
-    ?(config = []) ?local_path ?pending ?in_flight ?degraded ?traffic ?link
-    ~name backend =
+    ?(config = []) ?local_path ?pending ?in_flight ?filling ?degraded ?traffic
+    ?link ~name backend =
   {
     name;
     role;
@@ -136,6 +146,7 @@ let member ?(role = `Main) ?(readable = true) ?(backend_type = "local")
     backend;
     pending;
     in_flight;
+    filling;
     degraded;
     traffic;
     local_path;
@@ -143,6 +154,22 @@ let member ?(role = `Main) ?(readable = true) ?(backend_type = "local")
   }
 
 let main members = List.find_opt (fun m -> m.role = `Main) members
+
+let filling_json m =
+  match Option.bind m.filling (fun f -> f ()) with
+    | None -> []
+    | Some f ->
+        [
+          ( "filling",
+            `Assoc
+              [
+                ("file", `String f.file);
+                ("checked", `Int f.checked);
+                ("total", `Int f.total);
+                ("sent", `Int f.sent);
+                ("sentBytes", `Int f.sent_bytes);
+              ] );
+        ]
 
 let link_json m =
   (match m.traffic with
@@ -154,11 +181,12 @@ let link_json m =
         [
           ( "deferred",
             `Assoc
-              [
-                ("queued", `Int (queued ()));
-                ("inFlight", `Int (in_flight ()));
-                ("degraded", `Bool (degraded ()));
-              ] );
+              ([
+                 ("queued", `Int (queued ()));
+                 ("inFlight", `Int (in_flight ()));
+                 ("degraded", `Bool (degraded ()));
+               ]
+              @ filling_json m) );
         ]
     | _ -> []
 

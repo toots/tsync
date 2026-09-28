@@ -48,6 +48,17 @@ val new_traffic : unit -> traffic
     reaches a member without being taken apart and put back together. *)
 type role = [ `Main | `Replica | `Backfill | `ReadOnly ]
 
+(** A deferred target's manifest job part way through: a manifest reaches the
+    target only once every chunk it names does, so one naming a large file is a
+    single job that can take hours, and the queue's count says nothing of it. *)
+type filling = {
+  file : string;  (** The name the manifest records. *)
+  checked : int;  (** Chunks confirmed on the target or sent, so far. *)
+  total : int;  (** Chunks the manifest names. *)
+  sent : int;  (** Of [checked], those this job had to upload. *)
+  sent_bytes : int;
+}
+
 type 'store member = {
   name : string;
   role : role;
@@ -64,6 +75,8 @@ type 'store member = {
       (** Deferred targets: jobs this one still owes, kept on disk. *)
   in_flight : (unit -> int) option;
       (** Deferred targets: chunk forwards in flight. *)
+  filling : (unit -> filling option) option;
+      (** Deferred targets: the manifest job being worked on, if any. *)
   traffic : traffic option;
       (** What crossed the link to this store. [None] where there is no link to
           cross — a [local] store — rather than a pair of zeros, which would
@@ -90,6 +103,7 @@ val member :
   ?local_path:string ->
   ?pending:(unit -> int) ->
   ?in_flight:(unit -> int) ->
+  ?filling:(unit -> filling option) ->
   ?degraded:(unit -> bool) ->
   ?traffic:traffic ->
   ?link:string ->

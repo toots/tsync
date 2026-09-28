@@ -38,7 +38,9 @@ let readable name backend ~source:_ : (module Domain_store_lwt.Deferred.S) =
     let readable = Some backend
     let accept _ = Lwt.return_unit
     let skip _ = false
-    let stats () = { Deferred.queued = 0; in_flight = 0; degraded = false }
+
+    let stats () =
+      { Deferred.queued = 0; in_flight = 0; degraded = false; filling = None }
   end)
 
 (* One reporting shape for every read: which of the three outcomes a caller gets

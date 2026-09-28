@@ -458,10 +458,23 @@ let traffic_row t =
           Printf.sprintf ", %d chunks hashed (%.1f/s)" n
             (num (mem t "hashesPerSec")))
 
+(* One manifest job can hold the queue for hours while its chunks go up, and
+   the count alone reads the same as a queue that is stuck. *)
+let filling_row f =
+  Printf.sprintf "%s: %d/%d chunks checked, %d sent (%s)"
+    (str (mem f "file"))
+    (int_of (mem f "checked"))
+    (int_of (mem f "total"))
+    (int_of (mem f "sent"))
+    (Metrics.human_bytes (int_of (mem f "sentBytes")))
+
 let behind_row bf =
-  Printf.sprintf "%d queued, %d in flight%s"
+  Printf.sprintf "%d queued, %d in flight%s%s"
     (int_of (mem bf "queued"))
     (int_of (mem bf "inFlight"))
+    (match mem bf "filling" with
+      | `Null -> ""
+      | f -> ", filling " ^ filling_row f)
     (if bool_of (mem bf "degraded") then " — DEGRADED, run tsync mirror" else "")
 
 (* What crossed between clients and a listener, in the client's words so a

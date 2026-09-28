@@ -59,6 +59,11 @@ let chunk_keys data =
     | t -> List.init (Manifest.count t) (Manifest.key t)
     | exception _ -> []
 
+let file_name data =
+  match Manifest.of_string data with
+    | t -> Some (Manifest.recorded_name t)
+    | exception _ -> None
+
 let keys_under dir =
   let rec walk d =
     Sys.readdir d |> Array.to_list
@@ -110,6 +115,20 @@ let flaky ~fails ~root : (module Backend_lwt.Store) * (unit -> int) =
     end),
     fun () -> !refused )
 
+(* Holds a put of [key] until [release] is woken, as a large chunk on a slow
+   link holds the job that sends it. *)
+let held_on ~key ~release ~root : (module Backend_lwt.Store) =
+  let (module Real : Backend_lwt.Store) =
+    Fixture.local_store ~verify_writes:false root
+  in
+  (module struct
+    include Real
+
+    let put ~key:k ~data () =
+      let* () = if k = key then release else Lwt.return_unit in
+      Real.put ~key:k ~data ()
+  end)
+
 (* A store nobody can write to, ever: the credential is wrong, the bucket is
    read-only. *)
 module Refuses = Doubles.Refuses
@@ -151,7 +170,7 @@ let target_for ?resume ~inners ~target ~name () =
   let spec ~source =
     let t =
       Domain_store_lwt.Deferred.make ?resume ~name ~backend:target ~source
-        ~chunk_prefix ~chunk_keys ~journal_prefix ~cursor_key
+        ~chunk_prefix ~chunk_keys ~file_name ~journal_prefix ~cursor_key
         ~excluded:(fun _ -> false)
         ~reads_reach:true ~root:log_dir ()
     in
@@ -326,6 +345,45 @@ let () =
      step "put journal entry, put cursor";
      let* () = settled ~name:"replica" stats5 in
      dump_target t5_root;
+
+     case "a manifest job part way through its chunks says how far it has got";
+     (* Straight to the main, so it is the manifest job that sends them. *)
+     let c4 = chunk 4 and c6 = chunk 6 and c8 = chunk 8 in
+     let* () =
+       Lwt_list.iter_s
+         (fun key -> M.put ~key ~data:(Bigstring.of_string "cccc") ())
+         [c4; c6; c8]
+     in
+     let t6_root = Filename.concat root "t6" in
+     let release, wake = Lwt.wait () in
+     let l6, (module T6 : Domain_store_lwt.Deferred.S) =
+       target_for ~inners:[main]
+         ~target:(held_on ~key:c6 ~release ~root:t6_root)
+         ~name:"filling" ()
+     in
+     let (module B6 : Backend_lwt.Store) = l6 in
+     let* () =
+       B6.put ~key:(manifest_key "six")
+         ~data:
+           (Bigstring.of_string
+              (manifest ~name:"big.mov"
+                 (List.map Stored_key.to_string [c4; c6; c8])))
+         ()
+     in
+     step "put manifest six [c4, c6, c8], the target holding c6";
+     let* () = Lwt_unix.sleep 0.2 in
+     let show () =
+       match (T6.stats ()).Deferred.filling with
+         | None -> "nothing"
+         | Some f ->
+             Printf.sprintf "%s, %d/%d checked, %d sent (%d bytes)"
+               f.Backend.file f.checked f.total f.sent f.sent_bytes
+     in
+     step "filling while held: %s" (show ());
+     Lwt.wakeup wake ();
+     let* () = settled ~name:"filling" T6.stats in
+     step "filling once caught up: %s" (show ());
+     dump_target t6_root;
 
      case "the mains are what a write waits for";
      let* h = M.head_opt ~key:(manifest_key "one") () in

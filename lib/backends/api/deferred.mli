@@ -37,9 +37,15 @@ type op =
   | Delete of Stored_key.t
   | Delete_multi of Stored_key.t list
 
-(** How far behind: jobs waiting, chunk pushes in flight, and whether work was
-    dropped or the log overflowed. *)
-type stats = { queued : int; in_flight : int; degraded : bool }
+(** How far behind: jobs waiting, chunk pushes in flight, whether work was
+    dropped or the log overflowed, and how far the manifest job being run has
+    got through its chunks. *)
+type stats = {
+  queued : int;
+  in_flight : int;
+  degraded : bool;
+  filling : Backend.filling option;
+}
 
 module Over
     (Io : Io.S)
@@ -116,6 +122,9 @@ module Over
       past it is dropped for the manifest job to fetch later, never queued.
       Values below [1] are read as [1].
 
+      [file_name] names the file a manifest body describes, for {!stats} to say
+      which one a long job is filling. Omitted, the manifest's key stands in.
+
       [room_for] is the link's answer to the same question: whether a body of
       that many bytes may go now. A [false] drops the forward as the count does,
       for the same reason, that a body is not held in memory waiting for a link;
@@ -126,6 +135,7 @@ module Over
     ?resume:bool ->
     ?chunk_from_prefix:string ->
     ?max_chunk_forwards:int ->
+    ?file_name:(string -> string option) ->
     ?room_for:(bytes:int -> bool) ->
     name:string ->
     backend:(module Store) ->

@@ -31,6 +31,16 @@
   cursor
   journal
 
+=== a manifest job part way through its chunks says how far it has got
+  put manifest six [c4, c6, c8], the target holding c6
+  filling while held: big.mov, 1/3 checked, 1 sent (4 bytes)
+  filling once caught up: nothing
+--- target
+  chunk c4
+  chunk c6
+  chunk c8
+  manifest six
+
 === the mains are what a write waits for
   manifest one on main: true
   manifest two on main, though its target dropped it: true

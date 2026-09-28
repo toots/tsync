@@ -30,6 +30,11 @@ let chunk_keys data =
     | t -> List.init (Manifest.count t) (Manifest.key t)
     | exception _ -> []
 
+let file_name data =
+  match Manifest.of_string data with
+    | t -> Some (Manifest.recorded_name t)
+    | exception _ -> None
+
 (* Where the deferred targets keep what they still owe. Per domain, since the
    jobs name domain keys and a shared root would replay one domain's against
    another's backends — the same reason {!Wal} shards by domain. *)
@@ -99,7 +104,7 @@ let build_backends ~paths ~resume ~max_chunk_forwards (d : Conf_parsing.domain)
              let chunk_prefix = Conf_parsing.chunk_prefix d
            end) in
           L.from_prefix)
-        ~chunk_keys
+        ~chunk_keys ~file_name
         ~journal_prefix:(Conf_parsing.journal_prefix d)
         ~cursor_key:(Conf_parsing.cursor_key d)
         ~excluded:Stored_key.is_index_key ~reads_reach:(bc.role = `Replica)
@@ -150,6 +155,7 @@ let build_backends ~paths ~resume ~max_chunk_forwards (d : Conf_parsing.domain)
              else Some bc.Conf_parsing.link)
           ?pending:(stat (fun s -> s.Deferred.queued))
           ?in_flight:(stat (fun s -> s.Deferred.in_flight))
+          ?filling:(stat (fun s -> s.Deferred.filling))
           ?degraded:(stat (fun s -> s.Deferred.degraded))
           ?traffic:
             (let module B = (val backend : Backend_lwt.Store) in

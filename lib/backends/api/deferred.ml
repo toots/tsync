@@ -4,7 +4,12 @@ type op =
   | Delete of Stored_key.t
   | Delete_multi of Stored_key.t list
 
-type stats = { queued : int; in_flight : int; degraded : bool }
+type stats = {
+  queued : int;
+  in_flight : int;
+  degraded : bool;
+  filling : Backend.filling option;
+}
 
 (* What a target still owes. Bodyless on purpose: see the .mli. *)
 type job =
@@ -140,9 +145,10 @@ struct
 
   let make ?(resume = false) ?chunk_from_prefix
       ?(max_chunk_forwards = default_max_chunk_forwards)
-      ?(room_for = fun ~bytes:_ -> true) ~name ~backend ~source ~chunk_prefix
-      ~(chunk_keys : string -> string list) ~journal_prefix ~cursor_key
-      ~(excluded : Stored_key.t -> bool) ~reads_reach ~root () : (module S) =
+      ?(file_name = fun _ -> None) ?(room_for = fun ~bytes:_ -> true) ~name
+      ~backend ~source ~chunk_prefix ~(chunk_keys : string -> string list)
+      ~journal_prefix ~cursor_key ~(excluded : Stored_key.t -> bool)
+      ~reads_reach ~root () : (module S) =
     let max_chunk_forwards = max 1 max_chunk_forwards in
     let (module Target : Store) = backend in
     let (module Source : Store) = source in
@@ -203,16 +209,59 @@ struct
           entries;
         Hashtbl.replace known_shards shard ()
     in
+    (* Chunks checked across every job, for the queue's stall watch: one
+       manifest can take hours, and that is not a stall while this climbs. *)
+    let chunks_checked = ref 0 in
+    let filling : Backend.filling option ref = ref None in
     let ensure_chunk chunk_key =
       let key = L.key chunk_key in
-      if Hashtbl.mem ensured key then Io.return ()
+      if Hashtbl.mem ensured key then Io.return None
       else
         let* () = learn_shard (Chunk_layout.shard_of chunk_key) in
-        if Hashtbl.mem ensured key then Io.return ()
+        if Hashtbl.mem ensured key then Io.return None
         else
           let* data = source_body key chunk_key in
           let+ () = Target.put ~key ~data () in
-          remember key
+          remember key;
+          Some (Bigstring.length data)
+    in
+    let check_chunk chunk_key =
+      let+ sent = ensure_chunk chunk_key in
+      incr chunks_checked;
+      filling :=
+        Option.map
+          (fun (f : Backend.filling) ->
+            match sent with
+              | None -> { f with checked = f.checked + 1 }
+              | Some bytes ->
+                  {
+                    f with
+                    checked = f.checked + 1;
+                    sent = f.sent + 1;
+                    sent_bytes = f.sent_bytes + bytes;
+                  })
+          !filling
+    in
+    let fill ~key body =
+      match chunk_keys body with
+        | [] -> Io.return ()
+        | chunks ->
+            filling :=
+              Some
+                {
+                  Backend.file =
+                    Option.value (file_name body)
+                      ~default:(Stored_key.to_string key);
+                  checked = 0;
+                  total = List.length chunks;
+                  sent = 0;
+                  sent_bytes = 0;
+                };
+            Io.finalize
+              (fun () -> iter_s check_chunk chunks)
+              (fun () ->
+                filling := None;
+                Io.return ())
     in
     let rec run job =
       match job with
@@ -223,9 +272,7 @@ struct
                  says so. *)
               | None -> Io.return ()
               | Some data ->
-                  let* () =
-                    iter_s ensure_chunk (chunk_keys (Bigstring.to_string data))
-                  in
+                  let* () = fill ~key (Bigstring.to_string data) in
                   Target.put ~key ~data ())
         | Job_copy (src, dst) ->
             Io.catch
@@ -250,6 +297,7 @@ struct
              again, and every later rename would queue behind it forever. The
              target is degraded from then on and needs tsync mirror. *)
         ~classify:Backend.classify ~poison:Durable_queue.Drop
+        ~progress:(fun () -> !chunks_checked)
         ~run:(fun ~id:_ job -> run job)
         ()
     in
@@ -319,6 +367,7 @@ struct
           queued = s.Durable_queue.queued;
           in_flight = !chunks_in_flight;
           degraded = s.Durable_queue.degraded;
+          filling = !filling;
         }
 
       (* Not running here: written for the process that runs it, and not
