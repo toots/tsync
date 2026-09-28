@@ -770,6 +770,14 @@ struct
           let* staged =
             Mfs.entries ~rel_dir:(Logical_key.path folder) ~deep:true
           in
+          (* Sorted, as the listing is in readdir order and the numbering of
+             copies that share a leaf follows it. *)
+          let staged =
+            List.sort
+              (fun (a, _) (b, _) ->
+                String.compare (Logical_key.path a) (Logical_key.path b))
+              staged
+          in
           iter_s
             (fun (key, _) ->
               let* conflict =
