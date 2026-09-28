@@ -4,7 +4,7 @@
    worker stuck inside [run] waiting on a reply that never comes, one parked
    while work waits, one whose promise is gone. None of them raise, none return,
    none log, and [stats] keeps reporting the jobs as merely queued. What can be
-   observed is the absence — work owed and nothing finishing it — so that is
+   observed is the absence — work owed and nothing moving it — so that is
    what is asserted here, in both directions: a queue that is working must stay
    quiet, or the warning would mean nothing. *)
 
@@ -25,7 +25,7 @@ let stalls () =
     (fun (_, _, msg) ->
       String.length msg > 0
       &&
-      let needle = "none finished in" in
+      let needle = "nothing moved in" in
       let n = String.length msg and m = String.length needle in
       let rec go i =
         i + m <= n && (String.sub msg i m = needle || go (i + 1))
@@ -33,8 +33,8 @@ let stalls () =
       go 0)
     (Log.recent ())
 
-let queue ~name ~dir ~run =
-  Q.ordered ~name ~classify:Retry.classify
+let queue ?progress ~name ~dir ~run () =
+  Q.ordered ?progress ~name ~classify:Retry.classify
     ~log:(Q.Records.create ~dir:(Filename.concat root dir))
     ~poison:Durable_queue_lwt.Drop ~run ()
 
@@ -44,8 +44,9 @@ let () =
     (let before = List.length (stalls ()) in
 
      let done_q =
-       queue ~name:"working" ~dir:"working" ~run:(fun ~id:_ _ ->
-           Lwt.return_unit)
+       queue ~name:"working" ~dir:"working"
+         ~run:(fun ~id:_ _ -> Lwt.return_unit)
+         ()
      in
      Q.start done_q;
      let* () = Q.post done_q "a" in
@@ -59,7 +60,7 @@ let () =
         timeout looks like from here. *)
      let forever, _ = Lwt.wait () in
      let stuck_q =
-       queue ~name:"stuck" ~dir:"stuck" ~run:(fun ~id:_ _ -> forever)
+       queue ~name:"stuck" ~dir:"stuck" ~run:(fun ~id:_ _ -> forever) ()
      in
      Q.start stuck_q;
      let* () = Q.post stuck_q "one" in
@@ -70,6 +71,37 @@ let () =
        (List.length (stalls ()) > before);
      check "and still reports them as merely queued"
        ((Q.stats stuck_q).Durable_queue_lwt.queued > 0);
+
+     (* One job far longer than the warning waits, moving all along: a large
+        file's chunks going up one at a time over a slow link. *)
+     let steps = ref 0 in
+     let slow_stalls () =
+       List.filter
+         (fun (_, _, msg) -> String.starts_with ~prefix:"slow:" msg)
+         (stalls ())
+     in
+     let slow_q =
+       queue ~name:"slow" ~dir:"slow"
+         ~progress:(fun () -> !steps)
+         ~run:(fun ~id:_ _ ->
+           let rec step n =
+             if n = 0 then Lwt.return_unit
+             else
+               let* () = Lwt_unix.sleep 0.05 in
+               incr steps;
+               step (n - 1)
+           in
+           step 20)
+         ()
+     in
+     Q.start slow_q;
+     let* () = Q.post slow_q "big" in
+     let* () = Q.post slow_q "behind it" in
+     let* () = Lwt_unix.sleep 0.7 in
+     check "a job that is moving, however long it takes, says nothing"
+       (slow_stalls () = []);
+     check "while what is behind it is still queued"
+       ((Q.stats slow_q).Durable_queue_lwt.queued > 0);
 
      report ();
      Lwt.return_unit)

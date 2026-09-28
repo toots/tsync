@@ -228,6 +228,9 @@ struct
       topo : topology;
       workers : int;
       run : id:string -> J.t -> cancel:bool ref -> unit Io.t;
+      (* Movement inside a job that has not finished, counted by whoever runs
+         it: a job that takes hours is not a stall while this climbs. *)
+      progress : unit -> int;
       (* Beside [run] because it is the same knowledge: whoever supplies the work
          is the only one who can say which of its failures will clear. *)
       classify : exn -> Retry.kind;
@@ -574,18 +577,19 @@ struct
        A process still recording into this directory is running its own records
        from memory, and they are not this one's to take. *)
     let rescan t = with_claim t.log.Records.dir (fun () -> resume t)
+    let moved t = t.outcomes + t.progress ()
 
     (* None of the ways a queue goes quiet raise, return or log, so what is
-       reported is the absence: work owed and nothing finishing it. *)
+       reported is the absence: work owed and nothing moving it. *)
     let rec watch_stalls t last =
       let* () = Clock.sleep !stall_warning_interval in
       if !(t.stopping) then Io.return ()
       else begin
-        let now = t.outcomes in
+        let now = moved t in
         if Queue.length t.jobs > 0 && now = last then
-          Log.warn "%s: %d job(s) queued, none finished in %gs (%d/%d parked)"
-            t.name (Queue.length t.jobs) !stall_warning_interval t.parked
-            t.workers;
+          Log.warn "%s: %d job(s) queued, nothing moved in %gs (%d/%d busy)"
+            t.name (Queue.length t.jobs) !stall_warning_interval
+            (active_count t) t.workers;
         watch_stalls t now
       end
 
@@ -609,7 +613,7 @@ struct
                 Log.err "%s: worker stopped on %s; %d job(s) left queued" t.name
                   (Printexc.to_string exn) (Queue.length t.jobs);
                 Io.fail exn));
-      Io.async (fun () -> watch_stalls t t.outcomes)
+      Io.async (fun () -> watch_stalls t (moved t))
 
     let stop t =
       t.stopping := true;
@@ -624,7 +628,8 @@ struct
 
     let paused t = !(t.paused)
 
-    let make ~name ~log ~poison ~topo ~workers ~classify ~run =
+    let make ?(progress = fun () -> 0) ~name ~log ~poison ~topo ~workers
+        ~classify ~run () =
       let t =
         {
           name;
@@ -633,6 +638,7 @@ struct
           topo;
           workers;
           run;
+          progress;
           classify;
           jobs = Queue.create ();
           loaded = Hashtbl.create 64;
@@ -657,9 +663,10 @@ struct
       in
       t
 
-    let ordered ~name ~log ~classify ~poison ~run () =
-      make ~name ~log ~poison ~topo:Ordered ~workers:1 ~classify
+    let ordered ?progress ~name ~log ~classify ~poison ~run () =
+      make ?progress ~name ~log ~poison ~topo:Ordered ~workers:1 ~classify
         ~run:(fun ~id job ~cancel:_ -> run ~id job)
+        ()
 
     let keyed ?(workers = 1) ?(weight = fun _ -> 0L) ~name ~log ~key ~classify
         ~poison ~run () =
@@ -672,6 +679,6 @@ struct
                slots = Hashtbl.create 64;
                active = Hashtbl.create 8;
              })
-        ~workers:(max 1 workers) ~run
+        ~workers:(max 1 workers) ~run ()
   end
 end

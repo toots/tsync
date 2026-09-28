@@ -99,8 +99,13 @@ module type QUEUE = sig
       write and letting what follows overtake it.
 
       [run] is handed the record's id, which is the only name a job has: what it
-      means is the log's, not this queue's. *)
+      means is the log's, not this queue's.
+
+      [progress] counts what a running job has moved short of finishing, for a
+      job that can take longer than the stall warning waits: while it climbs,
+      the queue is not reported stalled. *)
   val ordered :
+    ?progress:(unit -> int) ->
     name:string ->
     log:Records.t ->
     classify:(exn -> Retry.kind) ->
