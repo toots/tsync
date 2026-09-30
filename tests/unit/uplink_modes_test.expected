@@ -1,0 +1,12 @@
+== lessee
+granted: true
+one request renews every link: lan, wan
+wan granted 1000000.0; lan, not named, keeps 262144.0
+two missed renewals: "leased"
+the third makes it local: true
+a refusal makes it local at once: true
+== owner
+a newcomer is answered from an immediate split: 196608 of 262144
+two lessees recorded: 2
+the row of a gone pid is dropped at the next step: true
+a flat report of an older build is answered with a top-level rate: true

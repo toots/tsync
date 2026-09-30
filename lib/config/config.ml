@@ -591,3 +591,15 @@ let masked_fields ~specs fields =
             | F f -> `Float f
             | L l -> `List (List.map (fun s -> `String s) l)) ))
     fields
+
+let uplink_settings (l : link) =
+  {
+    Tsync_store.Uplink.enabled = l.enabled;
+    law =
+      {
+        headroom = l.headroom;
+        target_delay = l.target_delay_ms /. 1000.;
+        min_rate = float_of_int l.min_rate;
+        max_rate = Option.map float_of_int l.max_rate;
+      };
+  }

@@ -13,6 +13,7 @@ type child = {
     domains listing [http-proxy] one store server. *)
 val assign : ?mount:string -> ?tls:string -> Tsync_config.Config.t -> child list
 
-(** Serve until stopped, then stop the children and answer the exit status: 0, 1
-    when another supervisor answers, 2 when the socket cannot be bound. *)
-val run : exe:string -> child list -> int
+(** Serve until stopped, as the uplink governor owner, then stop the children
+    and answer the exit status: 0, 1 when another supervisor answers, 2 when the
+    socket cannot be bound. *)
+val run : exe:string -> Tsync_config.Config.t -> child list -> int

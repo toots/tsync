@@ -1,17 +1,41 @@
-(** Upload admission per network link (spec algorithms/uplink-governor.md §4.1–
-    §4.3, 06 §6): a token bucket with an in-flight window, and a FIFO line that
-    small bodies may pass by a bounded amount. The rate is the link's [maxRate];
-    a link without one admits at once until the delay-driven law and the lease
-    protocol (§4.4–§4.5) exist. *)
+(** Upload admission per network link (spec algorithms/uplink-governor.md): a
+    token bucket with an in-flight window, a FIFO line that small bodies may
+    pass by a bounded amount, and the delay-driven law setting the rate.
+
+    The supervisor is the governor owner: it runs each link's law and splits its
+    rate among the processes that lease from it. Every other process leases, and
+    runs the law itself (Local) while no owner answers. A Local process never
+    takes ownership: tsync is expected to run under its supervisor, so there is
+    no machine-wide governor lock. *)
 
 type t
+type settings = { enabled : bool; law : Uplink_law.settings }
 
 (** Admits everything at once and counts nothing: a store without a link. *)
 val none : t
 
-(** The admission of a named link, one per process, shared by every store on it.
-*)
-val link : string -> enabled:bool -> max_rate:int option -> t
+(** The admission of a named link, one per process, shared by every store on it;
+    the first settings named win. *)
+val link : string -> settings -> t
+
+(** Probe a store on the link while bytes are in flight, and cut on its
+    timeouts. *)
+val attach :
+  t ->
+  store:string ->
+  probe:(unit -> unit) ->
+  health:Tsync_core.Health.t ->
+  unit
+
+(** Become the governor owner, restoring laws from [state_file] and saving them
+    there; a link first named by a lessee takes [settings_for] its name. *)
+val own : ?state_file:string -> (string -> settings) -> unit
+
+(** Lease from the owner through [call], one renewal per tick. *)
+val lease : (Yojson.Safe.t -> Yojson.Safe.t) -> unit
+
+(** The owner's answer to a renewal; [None] refuses it. *)
+val renewal : Yojson.Safe.t -> Yojson.Safe.t option
 
 type ticket
 
@@ -32,6 +56,9 @@ val waiting : t -> int
     running. *)
 val admitted : t -> Store.mode -> int -> (unit -> 'a) -> 'a
 
+(** §4.9, per link in use. *)
+val status : unit -> Yojson.Safe.t
+
 module Budget : sig
   type t
 
@@ -40,4 +67,5 @@ module Budget : sig
   val take : t -> now:float -> int -> unit
   val release : t -> int -> unit
   val wait_for : t -> now:float -> int -> float
+  val set_rate : t -> now:float -> float -> unit
 end

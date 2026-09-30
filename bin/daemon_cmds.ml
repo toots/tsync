@@ -45,6 +45,7 @@ let start mount tls verbose =
                     Owner.stop_on_signals ();
                     run (fun () ->
                         Tsync_supervisor.Supervisor.run ~exe:Sys.executable_name
+                          config
                           (Tsync_supervisor.Supervisor.assign ?mount ?tls config))
               ))
 

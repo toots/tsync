@@ -66,6 +66,7 @@ val parse_size : string -> int option
 
 val bool_of_string_opt : string -> bool option
 val link_settings : t -> string -> link
+val uplink_settings : link -> Tsync_store.Uplink.settings
 val frontend : domain -> string -> frontend option
 val find_domain : t -> string -> domain option
 

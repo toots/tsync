@@ -1,3 +1,10 @@
 (library
  (name tsync_supervisor)
- (libraries tsync_core tsync_config tsync_ipc tsync_owner unix yojson))
+ (libraries
+  tsync_core
+  tsync_store
+  tsync_config
+  tsync_ipc
+  tsync_owner
+  unix
+  yojson))

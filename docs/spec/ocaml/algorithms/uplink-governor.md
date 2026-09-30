@@ -46,3 +46,5 @@ Companion to the language-neutral spec [../../algorithms/uplink-governor.md](../
 - Small-body overtaking bounded by the head's size, and the lessee aging period including the probe timeout (c3c4a983).
 - Links separate (a8c127c7) and one renewal for every link (1ea95d84); timeouts counted per member (4f0bc2ca).
 - Gates wake waiters with `Io.wakeup_later`, so a woken waiter does not run inside `pump` while the line is iterated.
+- Ownership belongs to the supervisor alone: tsync is expected to run under it, so there is no machine-wide governor lock, and a process that reaches no owner stays Local and retries the lease every LOCAL_RETRY.
+- A simulated link needs a bounded buffer (a few hundred ms of capacity) past which the sender is held to its share: with an unbounded queue the first ×2 ramp step builds seconds of delay that no real bottleneck holds, and Steady spends a minute draining it.

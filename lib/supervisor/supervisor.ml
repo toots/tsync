@@ -290,6 +290,7 @@ let machine_report arg children =
       ("host", `String (Unix.gethostname ()));
       ("domains", `List domains);
       ("processes", `List processes);
+      ("uplinks", Tsync_store.Uplink.status ());
       ("jobs", `List (List.map (fun j -> j.report) (live_jobs ())));
       ( "warnings",
         `List
@@ -320,13 +321,17 @@ let handle children req =
     | Some "report" ->
         record_job req;
         Ipc.Reply (Ipc.ok [])
-    | Some "uplink" -> Ipc.Reply (Ipc.ok [])
+    | Some "uplink" -> (
+        match Tsync_store.Uplink.renewal req with
+          | Some answer -> Ipc.Reply answer
+          | None ->
+              Ipc.Reply (Ipc.failure (Fail.make Fail.Invalid "not a renewal")))
     | Some a ->
         Ipc.Reply
           (Ipc.failure (Fail.make Fail.Invalid ("unknown action: " ^ a)))
     | None -> Ipc.Reply (Ipc.failure (Fail.make Fail.Invalid "no action"))
 
-let run ~exe children =
+let run ~exe (config : Config.t) children =
   let path = Paths.supervisor_socket () in
   match
     Ipc.call ~timeout:Ipc.advisory_deadline path
@@ -353,6 +358,10 @@ let run ~exe children =
               Log.err "cannot serve %s: %s" path (Printexc.to_string e);
               2
           | server ->
+              Tsync_store.Uplink.own
+                ~state_file:(Filename.concat (Paths.data_dir ()) "uplink.json")
+                (fun link ->
+                  Config.uplink_settings (Config.link_settings config link));
               supervise exe children;
               stop_children children;
               Ipc.close server;

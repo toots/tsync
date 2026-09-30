@@ -37,8 +37,12 @@ let domain ?name config =
 
 (* failure-model §7.5: a classified failure prints its sentence, never a
    trace. *)
+(* Every process leases its uplinks from the supervisor; the supervisor itself
+   takes ownership in place of this. *)
 let run body =
   Printexc.record_backtrace true;
+  Tsync_store.Uplink.lease (fun request ->
+      Ipc.call ~timeout:1. (Paths.supervisor_socket ()) request);
   match Rt.run_sync body with
     | code -> code
     | exception Exit_with code -> code

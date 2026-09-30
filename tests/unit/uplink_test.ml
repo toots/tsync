@@ -24,7 +24,18 @@ let () =
   p "== gate at 1 MiB/s";
   Rt.run_sync (fun () ->
       let link =
-        Uplink.link "test" ~enabled:true ~max_rate:(Some (1024 * 1024))
+        let mib = 1024. *. 1024. in
+        Uplink.link "test"
+          {
+            enabled = true;
+            law =
+              {
+                headroom = 0.8;
+                target_delay = 0.05;
+                min_rate = mib;
+                max_rate = Some mib;
+              };
+          }
       in
       let t0 = Rt.now () in
       List.iter
@@ -40,6 +51,87 @@ let () =
         (match Uplink.try_acquire link (8 * 1024 * 1024) with
           | Some _ -> "admitted"
           | None -> "refused");
-      p "an unlimited link admits at once: %b"
-        (let u = Uplink.link "open" ~enabled:true ~max_rate:None in
-         Uplink.try_acquire u max_int <> None))
+      p "a disabled link admits at once: %b"
+        (let u =
+           Uplink.link "open"
+             {
+               enabled = false;
+               law =
+                 {
+                   headroom = 0.8;
+                   target_delay = 0.05;
+                   min_rate = 1.;
+                   max_rate = None;
+                 };
+             }
+         in
+         Uplink.try_acquire u (1 lsl 40) <> None))
+
+module Lease = Uplink_lease
+
+let grants rows =
+  let g = Lease.split ~total:1000. ~min_rate:100. ~interval:2. rows in
+  String.concat " " (List.map (Printf.sprintf "%.0f") g)
+  ^ Printf.sprintf " (sum %.0f)" (List.fold_left ( +. ) 0. g)
+
+let () =
+  let waiting = { Lease.idle with waiting = 2 } in
+  let mover = { Lease.idle with in_flight = 10; completed = 200. } in
+  p "== lease split (§4.5), 1000 B/s, min_rate 100, interval 2 s";
+  p "three waiting: %s" (grants [waiting; waiting; waiting]);
+  p "waiting, idle: %s" (grants [waiting; Lease.idle]);
+  p "waiting, mover at 100 B/s: %s" (grants [waiting; mover]);
+  p "idle, idle: %s" (grants [Lease.idle; Lease.idle]);
+  p "held back counts as waiting: %s"
+    (grants [{ Lease.idle with held_back = true }; Lease.idle]);
+  p "floors fit a small link: %s"
+    (let g =
+       Lease.split ~total:150. ~min_rate:100. ~interval:2.
+         [Lease.idle; Lease.idle; waiting]
+     in
+     String.concat " " (List.map (Printf.sprintf "%.0f") g));
+  p "== renewal shapes";
+  let show j = p "  %s" (Yojson.Safe.to_string j) in
+  let report =
+    {
+      mover with
+      timeouts = 1;
+      waiting = 3;
+      held_back = true;
+      probes = [("gcs", 0.0412)];
+    }
+  in
+  show (Lease.request_to_json ~pid:1234 [("wan", report)]);
+  let read j =
+    match Lease.request_of_json (Yojson.Safe.from_string j) with
+      | None -> p "  refused"
+      | Some r ->
+          List.iter
+            (fun (l, (x : Lease.report)) ->
+              p "  pid %d flat %b %s: inFlight %d heldBack %b probes [%s]" r.pid
+                r.flat l x.in_flight x.held_back
+                (String.concat ", "
+                   (List.map
+                      (fun (s, d) -> Printf.sprintf "%S %.4f" s d)
+                      x.probes)))
+            r.links
+  in
+  read
+    (Yojson.Safe.to_string (Lease.request_to_json ~pid:1234 [("wan", report)]));
+  p "an old flat report, without heldBack or probesMs:";
+  read {|{"action":"uplink","pid":7,"inFlight":5,"completed":0,"probeMs":12.5}|};
+  show
+    (Lease.answer_to_json ~interval:2. ~flat:true
+       [("wan", { Lease.rate = 1250000.; limit = "measured" })]);
+  let answer j =
+    match Lease.answer_of_json (Yojson.Safe.from_string j) with
+      | None -> "refused"
+      | Some (i, l) ->
+          Printf.sprintf "interval %.0f, %s" i
+            (String.concat ", "
+               (List.map (fun (k, r) -> Printf.sprintf "%s %.0f" k r) l))
+  in
+  p "answer with links: %s"
+    (answer
+       {|{"ok":true,"interval":2.0,"links":{"wan":{"rate":1250000.0,"limit":"measured"}}}|});
+  p "answer without links: %s" (answer {|{"ok":true}|})

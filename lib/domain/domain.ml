@@ -22,11 +22,17 @@ let create_store config d (b : Config.backend) =
     match b.link with
       | None -> Uplink.none
       | Some link ->
-          let s = Config.link_settings config link in
-          Uplink.link link ~enabled:s.enabled ~max_rate:s.max_rate
+          Uplink.link link
+            (Config.uplink_settings (Config.link_settings config link))
   in
-  (Option.get (Driver.find b.btype)).create ~domain:d ~admission ~name:b.bname
-    b.fields
+  let store =
+    (Option.get (Driver.find b.btype)).create ~domain:d ~admission ~name:b.bname
+      b.fields
+  in
+  Uplink.attach admission ~store:b.bname
+    ~probe:(fun () -> ignore (store.head_opt (Key.cursor d)))
+    ~health:store.health;
+  store
 
 let knowledge d main =
   {

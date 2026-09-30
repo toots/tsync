@@ -6,10 +6,30 @@
  (modules rt_test core_test dqueue_test)
  (libraries tsync_core unix))
 
-(executable
- (name uplink_test)
- (modules uplink_test)
- (libraries tsync_core tsync_store))
+(executables
+ (names uplink_test uplink_law_test uplink_modes_test)
+ (modules uplink_test uplink_law_test uplink_modes_test)
+ (libraries tsync_core tsync_store yojson unix))
+
+(rule
+ (with-stdout-to
+  uplink_modes_test.output
+  (run ./uplink_modes_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff uplink_modes_test.expected uplink_modes_test.output)))
+
+(rule
+ (with-stdout-to
+  uplink_law_test.output
+  (run ./uplink_law_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff uplink_law_test.expected uplink_law_test.output)))
 
 (rule
  (with-stdout-to
