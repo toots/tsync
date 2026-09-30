@@ -127,6 +127,12 @@ type server = {
 (* sun_path, NUL included. *)
 let max_path = if Fs.is_macos then 103 else 107
 
+let check_length path =
+  if String.length path > max_path then
+    Fail.raise_ Fail.Invalid
+      "socket path %s is longer than the %d bytes a Unix socket address holds"
+      path max_path
+
 let check_dir dir =
   (try Unix.mkdir dir 0o700 with Unix.Unix_error (EEXIST, _, _) -> ());
   let st = Unix.lstat dir in
@@ -305,10 +311,7 @@ let rec accept_loop t handler =
 let serve ~path handler =
   ignore_sigpipe ();
   check_dir (Filename.dirname path);
-  if String.length path > max_path then
-    Fail.raise_ Fail.Invalid
-      "socket path %s is longer than the %d bytes a Unix socket address holds"
-      path max_path;
+  check_length path;
   (try Unix.unlink path with Unix.Unix_error (ENOENT, _, _) -> ());
   let lfd = Unix.socket ~cloexec:true PF_UNIX SOCK_STREAM 0 in
   let umask = Unix.umask 0o177 in
@@ -349,6 +352,7 @@ module Client = struct
 
   let connect path =
     ignore_sigpipe ();
+    check_length path;
     let fd = Unix.socket ~cloexec:true PF_UNIX SOCK_STREAM 0 in
     match Unix.connect fd (ADDR_UNIX path) with
       | () -> Line.make fd
