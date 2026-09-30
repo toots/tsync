@@ -19,7 +19,10 @@ type t = private {
     inconsistent length, a negative size. *)
 val decode : string -> t option
 
-val is_manifest : string -> bool
+(** A store body, decoded when it carries the manifest magic. *)
+val of_body : Bigstring.t -> t option
+
+val is_manifest : Bigstring.t -> bool
 
 (** Chunk key [i], parsed when used; a malformed key is CORRUPT. *)
 val key : t -> int -> Chunk_key.t
@@ -27,7 +30,7 @@ val key : t -> int -> Chunk_key.t
 val keys : t -> Chunk_key.t list
 
 (** The chunks a body names if it is a manifest, else none. *)
-val chunk_names : string -> Chunk_key.t list
+val chunk_names : Bigstring.t -> Chunk_key.t list
 
 val is_link : t -> bool
 

@@ -109,8 +109,9 @@ let () =
           R.upload_chunks ~name ~size:(String.length content) ~chunk_size:8
             ~mtime:1. (fun i ->
               Bytes
-                (String.sub content (i * 8)
-                   (min 8 (String.length content - (i * 8)))))
+                (Bigstring.of_string
+                   (String.sub content (i * 8)
+                      (min 8 (String.length content - (i * 8))))))
         in
         R.publish ~parent:w ~leaf:name m;
         m

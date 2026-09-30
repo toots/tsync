@@ -21,9 +21,13 @@ val connect : ?tls:tls -> host:string -> port:int -> unit -> t
 val of_fd : Unix.file_descr -> t
 
 (** Up to [len] bytes; 0 at end of stream. [timeout] bounds the wait. *)
-val read : ?timeout:float -> t -> Bytes.t -> int -> int -> int
+val read : ?timeout:float -> t -> Tsync_core.Bigstring.t -> int -> int -> int
 
-val write : ?timeout:float -> t -> string -> unit
+val write : ?timeout:float -> t -> Tsync_core.Bigstring.t -> unit
+
+(** Small metadata: status lines, headers. *)
+val write_string : ?timeout:float -> t -> string -> unit
+
 val close : t -> unit
 
 (** Wakes whoever reads or writes it, without closing the descriptor. *)

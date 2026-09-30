@@ -59,7 +59,7 @@ let tree (module E : Engine.S) =
           let content =
             Fun.protect
               ~finally:(fun () -> E.close_read h)
-              (fun () -> E.read h ~off:0 ~len:1000)
+              (fun () -> Bigstring.to_string (E.read h ~off:0 ~len:1000))
           in
           [
             Printf.sprintf "%s = %S%s" p content
@@ -77,7 +77,7 @@ let show label clients =
 
 let write (module E : Engine.S) path content =
   E.create path ~exclusive:false;
-  E.write path ~off:0 content;
+  E.write path ~off:0 (Bigstring.of_string content);
   E.close path
 
 let drain (module E : Engine.S) = E.drain ~grace:10. ()
@@ -117,7 +117,7 @@ let () =
       pass b;
       show "after B's pass" both;
       p "\n== B edits inside one chunk; A applies\n";
-      B.write "papers/one.txt" ~off:6 "WORLD";
+      B.write "papers/one.txt" ~off:6 (Bigstring.of_string "WORLD");
       B.close "papers/one.txt";
       drain b;
       pass a;

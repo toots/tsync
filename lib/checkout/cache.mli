@@ -33,8 +33,8 @@ val create :
   domain:Domain_name.t ->
   cc:int ->
   fast:(unit -> bool) ->
-  get_whole:(Chunk_key.t -> string) ->
-  get_range:(Chunk_key.t -> int -> int -> string) ->
+  get_whole:(Chunk_key.t -> Bigstring.t) ->
+  get_range:(Chunk_key.t -> int -> int -> Bigstring.t) ->
   cap:int option ->
   t
 
@@ -49,11 +49,11 @@ val ensure_whole : ?force:bool -> t -> group -> unit
 (** Bytes [\[coff, coff + len)] of a member, fetching a range on a slow store
     and the whole group on a fast one; DEADLINE after {!read_deadline}, the
     fetch continuing. *)
-val read_piece : t -> group -> member -> coff:int -> len:int -> string
+val read_piece : t -> group -> member -> coff:int -> len:int -> Bigstring.t
 
 (** A member from a whole, verified body, fetched if needed: the only source of
     inherited bytes in a new publication. *)
-val verified_member : t -> group -> member -> string
+val verified_member : t -> group -> member -> Bigstring.t
 
 val evict : t -> Manifest.t -> unit
 val unpin : t -> Manifest.t -> unit

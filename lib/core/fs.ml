@@ -142,17 +142,20 @@ let release p =
 
 let temp_in dir = Filename.concat dir (Names.temp_name ())
 
-let write_temp ?(perm = 0o600) dir data =
+let write_temp_with ?(perm = 0o600) dir write =
   let tmp = temp_in dir in
   let fd = openfile ~perm tmp [O_WRONLY; O_CREAT; O_EXCL] in
   (try
      with_fd fd (fun fd ->
-         write_all fd data;
+         write fd;
          fsync fd)
    with e ->
      unlink_quiet tmp;
      raise e);
   tmp
+
+let write_temp ?perm dir data =
+  write_temp_with ?perm dir (fun fd -> write_all fd data)
 
 let rename ?(op = "") a b = sys ~op (fun () -> Unix.rename a b)
 
@@ -242,6 +245,10 @@ let pwrite_all fd buf ~boff ~len ~off =
   in
   go 0
 
+let write_temp_bigstring ?perm dir b =
+  write_temp_with ?perm dir (fun fd ->
+      pwrite_all fd b ~boff:0 ~len:(Bigstring.length b) ~off:0)
+
 let reserve fd size =
   if size > 0 then (
     match eintr (fun () -> reserve_ fd (Int64.of_int size)) with
@@ -269,16 +276,24 @@ let open_nofollow p = opt (fun () -> open_nofollow_ p)
 
 (* A private read-only mapping: a file shorter than the mapping is an error,
    never extended. *)
-let map_file p =
-  let fd = openfile p [O_RDONLY] in
-  with_fd fd (fun fd ->
-      let size =
-        (sys (fun () -> Unix.LargeFile.fstat fd)).st_size |> Int64.to_int
-      in
-      if size = 0 then Bigstring.empty
-      else
-        Bigarray.array1_of_genarray
-          (Unix.map_file fd Bigarray.char Bigarray.c_layout false [| size |]))
+let fd_size fd =
+  (sys (fun () -> Unix.LargeFile.fstat fd)).st_size |> Int64.to_int
+
+let map_fd fd =
+  let size = fd_size fd in
+  if size = 0 then Bigstring.empty
+  else
+    Bigarray.array1_of_genarray
+      (sys (fun () ->
+           Unix.map_file fd Bigarray.char Bigarray.c_layout false [| size |]))
+
+let map_file p = with_fd (openfile p [O_RDONLY]) map_fd
+
+let read_fd_bigstring fd =
+  let size = fd_size fd in
+  let b = Bigstring.create size in
+  let n = pread_full fd b ~boff:0 ~len:size ~off:0 in
+  if n = size then b else Bigstring.sub b ~off:0 ~len:n
 
 let sweep_temps ?(older_than = 0.) dir =
   List.iter

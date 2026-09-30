@@ -100,12 +100,14 @@ let mint ((t : state), path) =
     ^ "&assertion=" ^ jwt t
   in
   let r =
-    Client.request t.endpoint ~meth:"POST" ~body
+    Client.request t.endpoint ~meth:"POST" ~body:(Bigstring.of_string body)
       ~headers:(fun () ->
         [("content-type", "application/x-www-form-urlencoded")])
       path
   in
-  let json = try Yojson.Safe.from_string r.body with _ -> `Null in
+  let json =
+    try Yojson.Safe.from_string (Bigstring.to_string r.body) with _ -> `Null
+  in
   let field k = match json with `Assoc l -> List.assoc_opt k l | _ -> None in
   match r.status with
     | s when s >= 200 && s < 300 -> (

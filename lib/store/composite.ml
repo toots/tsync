@@ -143,7 +143,7 @@ let escape_name n =
 type member = { name : string; role : role; store : Store.t }
 
 type knowledge = {
-  chunk_names : string -> Chunk_key.t list;
+  chunk_names : Bigstring.t -> Chunk_key.t list;
   generation : unit -> int option;
   is_index : Key.t -> bool;
   is_journal : Key.t -> bool;
@@ -377,8 +377,12 @@ let rec sync t src c key restarts =
         match missing with
           | None -> c.member.store.put key b
           | Some ck ->
-              if restarts < 3 && src.get_opt key <> Some b then
-                sync t src c key (restarts + 1)
+              if
+                restarts < 3
+                && not
+                     (Option.fold ~none:false ~some:(Bigstring.equal b)
+                        (src.get_opt key))
+              then sync t src c key (restarts + 1)
               else
                 Fail.corrupt "source names a chunk no main holds: %s names %s"
                   (Key.to_string key) (Chunk_key.to_string ck))

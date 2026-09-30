@@ -42,7 +42,7 @@ let read_entry t key =
   match t.store.get_opt key with
     | None -> None
     | Some body -> (
-        match Op.decode_entry body with
+        match Op.decode_entry (Bigstring.to_string body) with
           | Ok ops -> Some ops
           | Error what ->
               Fail.corrupt "journal entry %s: expected %s" (Key.to_string key)
@@ -52,12 +52,15 @@ let entry_exists t k =
   t.store.head_opt (Entry_key.journal_key t.domain k) <> None
 
 let write_entry t k ops =
-  t.store.put (Entry_key.journal_key t.domain k) (Op.encode_entry ops)
+  t.store.put
+    (Entry_key.journal_key t.domain k)
+    (Bigstring.of_string (Op.encode_entry ops))
 
 let cursor_read t =
   match t.store.get_opt (Key.cursor t.domain) with
     | None -> `None
     | Some b -> (
+        let b = Bigstring.to_string b in
         match Entry_key.parse b with Some k -> `Key k | None -> `Unparsed b)
 
 let cursor_token t = Store.token (t.store.get_opt (Key.cursor t.domain))
@@ -65,7 +68,8 @@ let cursor_wait t token = t.store.watch (Key.cursor t.domain) token
 
 let publish_now t k =
   Rt.Fmutex.with_lock t.publish_m (fun () ->
-      t.store.put (Key.cursor t.domain) (Entry_key.to_string k);
+      t.store.put (Key.cursor t.domain)
+        (Bigstring.of_string (Entry_key.to_string k));
       Mutex.protect t.m (fun () -> t.last_publish <- Rt.now ()))
 
 let take t =

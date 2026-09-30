@@ -14,8 +14,8 @@ type tls = { host : string; ca_file : string option }
 
 type t = {
   fd : Unix.file_descr;
-  read : ?timeout:float -> Bytes.t -> int -> int -> int;
-  write : ?timeout:float -> string -> unit;
+  read : ?timeout:float -> Bigstring.t -> int -> int -> int;
+  write : ?timeout:float -> Bigstring.t -> unit;
   close : unit -> unit;
 }
 
@@ -25,16 +25,18 @@ let retry_io = function
 
 let plain fd =
   let rec read ?timeout buf off len =
-    match Unix.read fd buf off len with
+    match Unix.read_bigarray fd buf off len with
       | n -> n
       | exception e when retry_io e ->
           Rt.wait_readable ?timeout fd;
           read ?timeout buf off len
   in
-  let write ?timeout s =
+  let write ?timeout b =
     let rec go off =
-      if off < String.length s then (
-        match Unix.write_substring fd s off (String.length s - off) with
+      if off < Bigstring.length b then (
+        match
+          Unix.single_write_bigarray fd b off (Bigstring.length b - off)
+        with
           | n -> go (off + n)
           | exception e when retry_io e ->
               Rt.wait_writable ?timeout fd;
@@ -110,16 +112,16 @@ let openssl fd { host; ca_file } =
      if v <> 0 then untrusted host (Ssl.get_verify_error_string v)
      else tls_failure host "handshake failed");
   let read ?timeout buf off len =
-    try ssl_retry ?timeout fd (fun () -> Ssl.read s buf off len)
+    try ssl_retry ?timeout fd (fun () -> Ssl.read_into_bigarray s buf off len)
     with Ssl.Read_error (Error_zero_return | Error_syscall) -> 0
   in
-  let write ?timeout str =
+  let write ?timeout b =
     let rec go off =
-      if off < String.length str then
+      if off < Bigstring.length b then
         go
           (off
           + ssl_retry ?timeout fd (fun () ->
-              Ssl.write_substring s str off (String.length str - off)))
+              Ssl.write_bigarray s b off (Bigstring.length b - off)))
     in
     go 0
   in
@@ -172,22 +174,32 @@ let native fd { host; ca_file } =
   let raw = plain fd in
   let state, hello = Tls.Engine.client config in
   let state = ref state in
-  let pending = Buffer.create 4096 in
+  (* The engine speaks strings: what it hands back is copied once into the
+     caller's buffer. *)
+  let pending = ref "" and pending_pos = ref 0 in
   let eof = ref false in
-  let chunk = Bytes.create 16384 in
-  raw.write hello;
+  let chunk = Bigstring.create 16384 in
+  let send ?timeout s = raw.write ?timeout (Bigstring.of_string s) in
+  send hello;
   let pump ?timeout () =
-    let n = raw.read ?timeout chunk 0 (Bytes.length chunk) in
+    let n = raw.read ?timeout chunk 0 (Bigstring.length chunk) in
     if n = 0 then eof := true
     else (
-      match Tls.Engine.handle_tls !state (Bytes.sub_string chunk 0 n) with
+      match Tls.Engine.handle_tls !state (Bigstring.to_string ~len:n chunk) with
         | Ok (s, e, `Response resp, `Data data) ->
             state := s;
-            Option.iter raw.write resp;
-            Option.iter (Buffer.add_string pending) data;
+            Option.iter send resp;
+            Option.iter
+              (fun d ->
+                pending :=
+                  String.sub !pending !pending_pos
+                    (String.length !pending - !pending_pos)
+                  ^ d;
+                pending_pos := 0)
+              data;
             if e <> None then eof := true
         | Error (failure, `Response resp) -> (
-            (try raw.write resp with _ -> ());
+            (try send resp with _ -> ());
             match failure with
               | `Error (`AuthenticationFailure e) ->
                   untrusted host
@@ -200,22 +212,23 @@ let native fd { host; ca_file } =
     pump ()
   done;
   if !eof then tls_failure host "the connection closed during the handshake";
+  let available () = String.length !pending - !pending_pos in
   let read ?timeout buf off len =
-    while Buffer.length pending = 0 && not !eof do
+    while available () = 0 && not !eof do
       pump ?timeout ()
     done;
-    let n = min len (Buffer.length pending) in
-    Buffer.blit pending 0 buf off n;
-    let rest = Buffer.sub pending n (Buffer.length pending - n) in
-    Buffer.clear pending;
-    Buffer.add_string pending rest;
+    let n = min len (available ()) in
+    Bigstring.blit_from_bytes
+      (Bytes.unsafe_of_string !pending)
+      !pending_pos buf off n;
+    pending_pos := !pending_pos + n;
     n
   in
-  let write ?timeout s =
-    match Tls.Engine.send_application_data !state [s] with
+  let write ?timeout b =
+    match Tls.Engine.send_application_data !state [Bigstring.to_string b] with
       | Some (st, out) ->
           state := st;
-          raw.write ?timeout out
+          send ?timeout out
       | None -> tls_failure host "the session is not ready"
   in
   {
@@ -227,7 +240,7 @@ let native fd { host; ca_file } =
         (try
            let st, out = Tls.Engine.send_close_notify !state in
            state := st;
-           raw.write ~timeout:1. out
+           send ~timeout:1. out
          with _ -> ());
         raw.close ());
   }
@@ -287,7 +300,8 @@ let connect ?tls ~host ~port () =
           raise e)
 
 let read ?timeout t buf off len = t.read ?timeout buf off len
-let write ?timeout t s = t.write ?timeout s
+let write ?timeout t b = t.write ?timeout b
+let write_string ?timeout t s = t.write ?timeout (Bigstring.of_string s)
 let close t = t.close ()
 
 (* A connection leaves its server's list before its descriptor is closed, so

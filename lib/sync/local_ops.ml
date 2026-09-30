@@ -343,9 +343,11 @@ module Make (C : Engine_ctx.S) = struct
 
   let base_of path = Mirror.manifest mirror path
 
+  (* A live staged body can change size under a reader, so it is read by
+     position, never mapped (01 §12). *)
   let read_staged path (e : Staged.edit) ~off ~len =
     let len = max 0 (min len (e.size - off)) in
-    if len = 0 then ""
+    if len = 0 then Bigstring.empty
     else (
       match e.content with
         | Whole b ->
@@ -354,43 +356,46 @@ module Make (C : Engine_ctx.S) = struct
                 let buf = Bigstring.create len in
                 let n = Fs.pread_full fd buf ~boff:0 ~len ~off in
                 if n < len then Fail.corrupt "%s: its staged body is short" path;
-                Bigstring.to_string buf)
+                buf)
         | Slots slots ->
             let cs = e.chunk_size in
             let count = Array.length slots in
             let pieces = Chunking.pieces ~cs ~count ~off ~len in
-            let b = Buffer.create len in
+            let out = Bigstring.create len in
             List.iter
               (fun (pc : Chunking.piece) ->
-                let data =
-                  match slots.(pc.index) with
-                    | Staged.Zero -> String.make pc.len '\000'
-                    | Staged { body; off = boff } ->
-                        Staged.read_body staged body ~off:(boff + pc.off)
-                          ~len:pc.len
-                    | Inherit -> (
-                        match base_of path with
-                          | Some base when pc.index < base.count ->
-                              let avail =
-                                Chunking.length ~size:base.size
-                                  ~cs:base.chunk_size pc.index
-                              in
-                              let from = min pc.len (max 0 (avail - pc.off)) in
-                              let s =
-                                if from > 0 then
-                                  base_chunk base pc.index ~off:pc.off ~len:from
-                                else ""
-                              in
-                              s ^ String.make (pc.len - from) '\000'
-                          | _ ->
-                              Fail.corrupt
-                                "%s: chunk %d inherits from a base that lacks \
-                                 it"
-                                path pc.index)
+                let dst = Bigstring.sub out ~off:pc.buf_off ~len:pc.len in
+                let copy b =
+                  Bigstring.blit ~src:b ~src_off:0 ~dst ~dst_off:0
+                    ~len:(Bigstring.length b)
                 in
-                Buffer.add_string b data)
+                match slots.(pc.index) with
+                  | Staged.Zero -> Bigarray.Array1.fill dst '\000'
+                  | Staged { body; off = boff } ->
+                      copy
+                        (Staged.read_body staged body ~off:(boff + pc.off)
+                           ~len:pc.len)
+                  | Inherit -> (
+                      match base_of path with
+                        | Some base when pc.index < base.count ->
+                            let avail =
+                              Chunking.length ~size:base.size
+                                ~cs:base.chunk_size pc.index
+                            in
+                            let from = min pc.len (max 0 (avail - pc.off)) in
+                            if from > 0 then
+                              copy
+                                (base_chunk base pc.index ~off:pc.off ~len:from);
+                            if from < pc.len then
+                              Bigarray.Array1.fill
+                                (Bigstring.sub dst ~off:from ~len:(pc.len - from))
+                                '\000'
+                        | _ ->
+                            Fail.corrupt
+                              "%s: chunk %d inherits from a base that lacks it"
+                              path pc.index))
               pieces;
-            Buffer.contents b)
+            out)
 
   let prefetch (m : Manifest.t) off =
     let cc = Cache.cc cache in
@@ -409,11 +414,11 @@ module Make (C : Engine_ctx.S) = struct
   let read_published (m : Manifest.t) ~off ~len =
     Manifest.check_readable m;
     let len = max 0 (min len (m.size - off)) in
-    if len = 0 then ""
+    if len = 0 then Bigstring.empty
     else (
       let pieces = Chunking.pieces ~cs:m.chunk_size ~count:m.count ~off ~len in
       let cc = Cache.cc cache in
-      String.concat ""
+      Bigstring.concat
         (List.map
            (fun (pc : Chunking.piece) ->
              let g = Cache.group_of ~cc m (Cache.group_index ~cc m pc.index) in
@@ -454,9 +459,9 @@ module Make (C : Engine_ctx.S) = struct
     in
     let s = read_content h.path c ~off ~len in
     (match c with
-      | Published m when h.pos = off -> prefetch m (off + String.length s)
+      | Published m when h.pos = off -> prefetch m (off + Bigstring.length s)
       | _ -> ());
-    h.pos <- off + String.length s;
+    h.pos <- off + Bigstring.length s;
     s
 
   let close_read h =
@@ -569,10 +574,10 @@ module Make (C : Engine_ctx.S) = struct
      slow path's copy; inherited bytes come from a whole, verified body. *)
   let member_bytes path (e : Staged.edit) slots i =
     let len = member_len ~size:e.size ~cs:e.chunk_size i in
-    if len <= 0 then ""
+    if len <= 0 then Bigstring.empty
     else (
       match slots.(i) with
-        | Staged.Zero -> ""
+        | Staged.Zero -> Bigstring.empty
         | Staged { body; off } -> Staged.read_body staged body ~off ~len
         | Inherit -> (
             match base_of path with
@@ -585,7 +590,8 @@ module Make (C : Engine_ctx.S) = struct
                     List.find (fun (x : Cache.member) -> x.index = i) g.members
                   in
                   let s = Cache.verified_member cache g x in
-                  if String.length s >= len then String.sub s 0 len else s
+                  if Bigstring.length s >= len then Bigstring.sub s ~off:0 ~len
+                  else s
               | _ ->
                   Fail.corrupt "%s: chunk %d inherits from a base that lacks it"
                     path i))
@@ -633,7 +639,8 @@ module Make (C : Engine_ctx.S) = struct
           List.iter
             (fun j ->
               let data = member_bytes path e slots j in
-              if data <> "" then Staged.write_body_at fd ~off:(layout j) data)
+              if Bigstring.length data > 0 then
+                Staged.write_body_at fd ~off:(layout j) data)
             members);
       let old =
         List.filter_map
@@ -668,7 +675,7 @@ module Make (C : Engine_ctx.S) = struct
         let e0 = staged_for path in
         let e = e0 in
         let cs = e.chunk_size in
-        let len = String.length data in
+        let len = Bigstring.length data in
         let new_size = max e.size (off + len) in
         let n = Chunking.count ~size:new_size ~cs in
         let old_slots = Staged.slots e in
@@ -697,7 +704,7 @@ module Make (C : Engine_ctx.S) = struct
                               fd
                       in
                       Staged.write_body_at fd ~off:(boff + pc.off)
-                        (String.sub data pc.buf_off pc.len)
+                        (Bigstring.sub data ~off:pc.buf_off ~len:pc.len)
                   | _ -> assert false)
               pieces);
         let e = { e with mtime = Unix.gettimeofday (); state = Owed } in
@@ -1147,7 +1154,7 @@ module Make (C : Engine_ctx.S) = struct
                                   (Staged.body_path staged body)
                             | _ ->
                                 let data =
-                                  String.concat ""
+                                  Bigstring.concat
                                     (List.map
                                        (fun (x : Cache.member) ->
                                          read_staged path e
@@ -1156,7 +1163,7 @@ module Make (C : Engine_ctx.S) = struct
                                        g.members)
                                 in
                                 let tmp =
-                                  Fs.write_temp
+                                  Fs.write_temp_bigstring
                                     (Filename.dirname
                                        (Staged.body_path staged "x"))
                                     data
@@ -1222,9 +1229,10 @@ module Make (C : Engine_ctx.S) = struct
             let rec go off =
               if off < size then (
                 let s = read h ~off ~len:(min step (size - off)) in
-                if s = "" then Fail.corrupt "%s: short read at %d" path off;
-                Fs.write_all fd s;
-                go (off + String.length s))
+                let n = Bigstring.length s in
+                if n = 0 then Fail.corrupt "%s: short read at %d" path off;
+                Fs.pwrite_all fd s ~boff:0 ~len:n ~off;
+                go (off + n))
             in
             go 0;
             Fs.fsync fd);
@@ -1239,9 +1247,8 @@ module Make (C : Engine_ctx.S) = struct
         let s = read h ~off ~len in
         let fd = create_dest dst in
         Fs.with_fd fd (fun fd ->
-            if s <> "" then
-              Fs.pwrite_all fd (Bigstring.of_string s) ~boff:0
-                ~len:(String.length s) ~off;
+            if Bigstring.length s > 0 then
+              Fs.pwrite_all fd s ~boff:0 ~len:(Bigstring.length s) ~off;
             Fs.fsync fd);
-        String.length s)
+        Bigstring.length s)
 end

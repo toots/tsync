@@ -20,7 +20,7 @@ type member = { name : string; role : role; store : Store.t }
 
 (** Domain knowledge a copy job needs, injected (06 §1). *)
 type knowledge = {
-  chunk_names : string -> Chunk_key.t list;
+  chunk_names : Bigstring.t -> Chunk_key.t list;
       (** the chunks a body names, if it is a manifest *)
   generation : unit -> int option;
       (** the collection generation G; [None] when unreadable *)

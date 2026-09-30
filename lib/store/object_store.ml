@@ -8,10 +8,10 @@ type raw_entry = {
 }
 
 type verbs = {
-  put : Key.t -> string -> unit;
-  put_if_absent : Key.t -> string -> Store.claim;
-  get_opt : Key.t -> string option;
-  get_range : Key.t -> int -> int -> string option;
+  put : Key.t -> Bigstring.t -> unit;
+  put_if_absent : Key.t -> Bigstring.t -> Store.claim;
+  get_opt : Key.t -> Bigstring.t option;
+  get_range : Key.t -> int -> int -> Bigstring.t option;
   head_opt : Key.t -> Store.entry option;
   delete : Key.t -> bool;
   delete_page : Key.t list -> unit;
@@ -96,7 +96,7 @@ let make ~name ?share_url v =
   let up n = ignore (Atomic.fetch_and_add traffic.uploaded n) in
   let down = function
     | Some s ->
-        ignore (Atomic.fetch_and_add traffic.downloaded (String.length s))
+        ignore (Atomic.fetch_and_add traffic.downloaded (Bigstring.length s))
     | None -> ()
   in
   Store.checked
@@ -105,12 +105,12 @@ let make ~name ?share_url v =
       put =
         (fun ?mode:_ k body ->
           ladder "put" (fun () ->
-              up (String.length body);
+              up (Bigstring.length body);
               v.put k body));
       put_if_absent =
         (fun k body ->
           ladder "put_if_absent" (fun () ->
-              up (String.length body);
+              up (Bigstring.length body);
               let r = v.put_if_absent k body in
               (match r with Held b -> down (Some b) | Won -> ());
               r));
@@ -125,9 +125,9 @@ let make ~name ?share_url v =
           ladder "get_range" (fun () ->
               let r = v.get_range k off len in
               (match r with
-                | Some s when String.length s > len ->
+                | Some s when Bigstring.length s > len ->
                     Fail.corrupt "%s: asked %d bytes of %s, got %d" name len
-                      (Key.to_string k) (String.length s)
+                      (Key.to_string k) (Bigstring.length s)
                 | _ -> ());
               down r;
               r));

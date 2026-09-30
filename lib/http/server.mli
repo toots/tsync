@@ -24,8 +24,9 @@ type request = {
 
 type body =
   | Empty
-  | String of string
-  | Stream of ((string -> unit) -> unit)
+  | String of string  (** short texts *)
+  | Bigstring of Tsync_core.Bigstring.t
+  | Stream of ((Tsync_core.Bigstring.t -> unit) -> unit)
       (** written as chunks; a failure after the headers truncates it *)
 
 type response = { status : int; headers : Codec.headers; body : body }
@@ -42,7 +43,7 @@ type t
 val serve :
   ?limits:limits ->
   Unix.sockaddr list ->
-  (request -> (limit:int -> string) -> response) ->
+  (request -> (limit:int -> Tsync_core.Bigstring.t) -> response) ->
   t
 
 (** Stops accepting, lets in-flight requests finish within [grace], then closes

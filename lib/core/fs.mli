@@ -80,6 +80,8 @@ val temp_in : string -> string
 (** Write [data] to a new temporary in [dir] and fsync it. *)
 val write_temp : ?perm:int -> string -> string -> string
 
+val write_temp_bigstring : ?perm:int -> string -> bigstring -> string
+
 val pread :
   Unix.file_descr -> bigstring -> boff:int -> len:int -> off:int -> int
 
@@ -124,6 +126,13 @@ val open_nofollow : string -> Unix.file_descr option
 
 (** A private read-only mapping of a file never modified in place. *)
 val map_file : string -> bigstring
+
+(** The same, of an open descriptor. *)
+val map_fd : Unix.file_descr -> bigstring
+
+(** The whole file by positioned reads: for data that may change or vanish under
+    a mapping (network mounts, files tsync does not own). *)
+val read_fd_bigstring : Unix.file_descr -> bigstring
 
 (** Remove temporaries in [dir] whose owner is dead, or older than [older_than]
     seconds when they name no owner. *)

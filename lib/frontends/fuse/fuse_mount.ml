@@ -193,36 +193,34 @@ let fopen t path (fi : Fuse.file_info) =
   }
 
 let blit_into (buf : Fuse.buffer) s =
-  String.iteri (fun i c -> Bigarray.Array1.unsafe_set buf i c) s
+  let n = Bigstring.length s in
+  Bigstring.blit ~src:s ~src_off:0 ~dst:buf ~dst_off:0 ~len:n;
+  n
 
-let scratch_read r ~off ~len =
-  let path = Option.get r.scratch in
+(* Straight into the kernel's buffer. *)
+let scratch_read r (buf : Fuse.buffer) ~off =
   Fs.with_fd
-    (Unix.openfile path [O_RDONLY; O_CLOEXEC] 0)
-    (fun fd ->
-      let b = Bigstring.create len in
-      let n = Fs.pread_full fd b ~boff:0 ~len ~off in
-      Bigstring.to_string ~len:n b)
+    (Unix.openfile (Option.get r.scratch) [O_RDONLY; O_CLOEXEC] 0)
+    (fun fd -> Fs.pread_full fd buf ~boff:0 ~len:(Bigstring.length buf) ~off)
 
 let read t path (buf : Fuse.buffer) off (fi : Fuse.file_info) =
   let len = Bigarray.Array1.dim buf and off = Int64.to_int off in
   let rel = rel path in
-  let s =
+  let n =
     match locked t (fun () -> Hashtbl.find_opt t.handles fi.fi_fh) with
       | Some { read = Some h; _ } ->
           let (module E : Tsync_sync.Engine.S) = t.engine in
-          call (fun () -> E.read h ~off ~len)
+          blit_into buf (call (fun () -> E.read h ~off ~len))
       | _ -> (
           match locked t (fun () -> Hashtbl.find_opt t.hidden rel) with
-            | Some ({ scratch = Some _; _ } as r) -> scratch_read r ~off ~len
+            | Some ({ scratch = Some _; _ } as r) -> scratch_read r buf ~off
             | Some r ->
                 let (module E : Tsync_sync.Engine.S) = t.engine in
-                call (fun () -> E.read r.content ~off ~len)
+                blit_into buf (call (fun () -> E.read r.content ~off ~len))
             | None -> errno EBADF)
   in
-  blit_into buf s;
-  ignore (Atomic.fetch_and_add t.bytes_read (String.length s));
-  String.length s
+  ignore (Atomic.fetch_and_add t.bytes_read n);
+  n
 
 (* fuse §4.10: the first write to a hidden name copies the retention aside. *)
 let ensure_scratch t rel r =
@@ -242,9 +240,10 @@ let ensure_scratch t rel r =
                   call (fun () ->
                       E.read r.content ~off ~len:(min step (r.size - off)))
                 in
-                if data = "" then errno EIO;
-                Fs.write_all fd data;
-                go (off + String.length data))
+                let n = Bigstring.length data in
+                if n = 0 then errno EIO;
+                Fs.pwrite_all fd data ~boff:0 ~len:n ~off;
+                go (off + n))
             in
             go 0);
         r.scratch <- Some s;
@@ -265,7 +264,8 @@ let write t path (buf : Fuse.buffer) off (fi : Fuse.file_info) =
               Fs.pwrite_all fd buf ~boff:0 ~len ~off:(Int64.to_int off)))
   else (
     let (module E : Tsync_sync.Engine.S) = t.engine in
-    let data = Bigstring.to_string ~len buf in
+    (* The kernel's buffer outlives the call, which waits for the engine. *)
+    let data = Bigstring.sub buf ~off:0 ~len in
     let synchronous =
       match locked t (fun () -> Hashtbl.find_opt t.handles fi.fi_fh) with
         | Some h ->

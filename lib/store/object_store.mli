@@ -18,10 +18,10 @@ type raw_entry = {
 (** Each verb is one attempt: a transient failure raises for the ladder, a clean
     absence is [None] or [false]. *)
 type verbs = {
-  put : Key.t -> string -> unit;
-  put_if_absent : Key.t -> string -> Store.claim;
-  get_opt : Key.t -> string option;
-  get_range : Key.t -> int -> int -> string option;
+  put : Key.t -> Bigstring.t -> unit;
+  put_if_absent : Key.t -> Bigstring.t -> Store.claim;
+  get_opt : Key.t -> Bigstring.t option;
+  get_range : Key.t -> int -> int -> Bigstring.t option;
   head_opt : Key.t -> Store.entry option;
   delete : Key.t -> bool;
   delete_page : Key.t list -> unit;  (** at most {!page} keys *)

@@ -30,7 +30,7 @@ val read_body :
   limit:int ->
   reader ->
   [ `Length of int | `Chunked | `Eof ] ->
-  string
+  Tsync_core.Bigstring.t
 
 (** How a message with these headers delimits its body. *)
 val framing : headers -> [ `Length of int | `Chunked | `Eof ]

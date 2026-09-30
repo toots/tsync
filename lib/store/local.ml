@@ -9,7 +9,7 @@ let fields =
 
 type gate =
   key:Key.t ->
-  source:[ `Body of string | `Copy_of of Key.t ] ->
+  source:[ `Body of Bigstring.t | `Copy_of of Key.t ] ->
   (unit -> unit) ->
   unit
 
@@ -42,10 +42,18 @@ let path root key =
   check_no_links root key;
   Filename.concat root key
 
-let read_opt root key =
+(* Store files are replaced by rename, never modified in place, so a mapping
+   stays valid (P6); a network mount could fault one, so it is read instead. *)
+let read_opt ~mappable root key =
   match Fs.open_nofollow (path root key) with
     | None -> None
-    | Some fd -> Some (Fs.with_fd fd Fs.read_fd_all)
+    | Some fd ->
+        Some
+          (Fs.with_fd fd
+             (if mappable () then Fs.map_fd else Fs.read_fd_bigstring))
+
+let write_body fd body =
+  Fs.pwrite_all fd body ~boff:0 ~len:(Bigstring.length body) ~off:0
 
 let mkdirs root key =
   let dir = Filename.dirname (Filename.concat root (Key.to_string key)) in
@@ -62,7 +70,7 @@ let durable_write root key body =
     match
       let fd = Fs.openfile ~perm:0o644 tmp [O_WRONLY; O_CREAT; O_EXCL] in
       Fs.with_fd fd (fun fd ->
-          Fs.write_all fd body;
+          write_body fd body;
           Fs.fsync fd);
       Fs.rename tmp p;
       Fs.fsync_dir dir
@@ -77,14 +85,14 @@ let durable_write root key body =
   in
   attempt 0
 
-let rec claim root key body retries =
+let rec claim ~mappable root key body retries =
   let p = path root key in
   mkdirs root key;
   let dir = Filename.dirname p in
   let tmp = Filename.concat dir (temp_name ()) in
   let fd = Fs.openfile ~perm:0o644 tmp [O_WRONLY; O_CREAT; O_EXCL] in
   Fs.with_fd fd (fun fd ->
-      Fs.write_all fd body;
+      write_body fd body;
       Fs.fsync fd);
   let outcome =
     Fun.protect
@@ -109,14 +117,14 @@ let rec claim root key body retries =
   match outcome with
     | `Won -> Store.Won
     | `Taken -> (
-        match read_opt root key with
-          | Some holder when holder = body -> Store.Won
+        match read_opt ~mappable root key with
+          | Some holder when Bigstring.equal holder body -> Store.Won
           | Some holder -> Store.Held holder
           | None ->
               if retries <= 0 then
                 Fail.raise_ Fail.Load "%s: the holder vanished during the claim"
                   (Key.to_string key)
-              else claim root key body (retries - 1))
+              else claim ~mappable root key body (retries - 1))
 
 let is_reference_key key =
   match String.split_on_char '/' (Key.to_string key) with
@@ -177,24 +185,26 @@ let marker_body ?computed ?reason size =
 
 (* 06 §9: read back what was just written, never the argument, and file or
    clear the chunk's marker. A mismatch never fails the put. *)
-let verify_written root key =
+let verify_written ~mappable root key =
   match Key.marker_of key with
     | None -> ()
     | Some marker -> (
         let leaf = Key.leaf key in
-        match read_opt root key with
+        let marker_write body =
+          durable_write root marker (Bigstring.of_string body)
+        in
+        match read_opt ~mappable root key with
           | exception Fail.E f ->
-              durable_write root marker (marker_body ~reason:f.reason None)
+              marker_write (marker_body ~reason:f.reason None)
           | None ->
-              durable_write root marker
-                (marker_body ~reason:"vanished after write" None)
+              marker_write (marker_body ~reason:"vanished after write" None)
           | Some b ->
-              let computed = Xxh.dual b in
+              let computed = Xxh.dual_bigstring b in
               if computed = leaf then (
                 match Fs.release (path root marker) with _ -> ())
               else
-                durable_write root marker
-                  (marker_body ~computed (Some (String.length b))))
+                marker_write (marker_body ~computed (Some (Bigstring.length b)))
+        )
 
 let expand_home p =
   if String.starts_with ~prefix:"~/" p then
@@ -206,6 +216,15 @@ let create ?(verify_writes = true)
     root =
   let root = expand_home root in
   let health = Health.create name in
+  let network = Atomic.make None in
+  let mappable () =
+    match Atomic.get network with
+      | Some n -> not n
+      | None ->
+          let n = try Fs.is_network_fs root with _ -> true in
+          Atomic.set network (Some n);
+          not n
+  in
   (* Only link-kind failures (a network filesystem away) count against it. *)
   let fed f =
     match f () with
@@ -221,7 +240,7 @@ let create ?(verify_writes = true)
   let put ?mode:_ key body =
     fed (fun () ->
         gated key (`Body body) (fun () -> durable_write root key body);
-        if verify_writes then verify_written root key)
+        if verify_writes then verify_written ~mappable root key)
   in
   let get_range key off len =
     fed (fun () ->
@@ -229,16 +248,22 @@ let create ?(verify_writes = true)
           | None -> None
           | Some fd ->
               Fs.with_fd fd (fun fd ->
-                  let size =
-                    Int64.to_int
-                      (Fs.sys (fun () -> Unix.LargeFile.fstat fd)).st_size
-                  in
-                  if off >= size then Some ""
+                  if mappable () then (
+                    let b = Fs.map_fd fd in
+                    let size = Bigstring.length b in
+                    if off >= size then Some Bigstring.empty
+                    else Some (Bigstring.sub b ~off ~len:(min len (size - off))))
                   else (
-                    let n = min len (size - off) in
-                    let buf = Bigstring.create n in
-                    let got = Fs.pread_full fd buf ~boff:0 ~len:n ~off in
-                    Some (Bigstring.to_string ~len:got buf))))
+                    let size =
+                      Int64.to_int
+                        (Fs.sys (fun () -> Unix.LargeFile.fstat fd)).st_size
+                    in
+                    if off >= size then Some Bigstring.empty
+                    else (
+                      let n = min len (size - off) in
+                      let buf = Bigstring.create n in
+                      let got = Fs.pread_full fd buf ~boff:0 ~len:n ~off in
+                      Some (Bigstring.sub buf ~off:0 ~len:got)))))
   in
   let head_opt key =
     fed (fun () ->
@@ -293,7 +318,7 @@ let create ?(verify_writes = true)
                             | Unix.EOPNOTSUPP ),
                             _,
                             _ ) ->
-                        durable_write root dst (Fs.read_file s)
+                        durable_write root dst (Fs.map_file s)
                     | exception Unix.Unix_error (e, fn, a) ->
                         raise (Fail.E (Fail.of_unix e fn a)))
               | _ ->
@@ -302,7 +327,9 @@ let create ?(verify_writes = true)
   in
   (* ponytail: polls at the interval; a directory watch would wake sooner. *)
   let watch key last =
-    let current = try Store.token (read_opt root key) with _ -> last in
+    let current =
+      try Store.token (read_opt ~mappable root key) with _ -> last
+    in
     if current = last then Rt.sleep Store.watch_interval
   in
   Store.checked
@@ -313,9 +340,10 @@ let create ?(verify_writes = true)
         (fun key body ->
           fed (fun () ->
               let r = ref Store.Won in
-              gated key (`Body body) (fun () -> r := claim root key body 3);
+              gated key (`Body body) (fun () ->
+                  r := claim ~mappable root key body 3);
               !r));
-      get_opt = (fun key -> fed (fun () -> read_opt root key));
+      get_opt = (fun key -> fed (fun () -> read_opt ~mappable root key));
       get_range;
       head_opt;
       delete;

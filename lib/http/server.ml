@@ -27,7 +27,12 @@ type request = {
   body_length : [ `Length of int | `Chunked | `Eof ];
 }
 
-type body = Empty | String of string | Stream of ((string -> unit) -> unit)
+type body =
+  | Empty
+  | String of string
+  | Bigstring of Bigstring.t
+  | Stream of ((Bigstring.t -> unit) -> unit)
+
 type response = { status : int; headers : Codec.headers; body : body }
 
 let text ?(headers = []) status msg =
@@ -95,6 +100,7 @@ let write_response lim conn ~head_only ~close r =
     match r.body with
       | Empty -> [("content-length", "0")]
       | String s -> [("content-length", string_of_int (String.length s))]
+      | Bigstring b -> [("content-length", string_of_int (Bigstring.length b))]
       | Stream _ -> [("transfer-encoding", "chunked")]
   in
   Codec.write_head b
@@ -102,16 +108,22 @@ let write_response lim conn ~head_only ~close r =
     ((("date", http_date ()) :: r.headers)
     @ framing
     @ if close then [("connection", "close")] else []);
-  let write s = Transport.write ~timeout:lim.idle_timeout conn s in
+  let write s = Transport.write_string ~timeout:lim.idle_timeout conn s in
+  let write_body b = Transport.write ~timeout:lim.idle_timeout conn b in
   match r.body with
     | String s when not head_only ->
         Buffer.add_string b s;
         write (Buffer.contents b)
+    | Bigstring body when not head_only ->
+        write (Buffer.contents b);
+        write_body body
     | Stream f when not head_only ->
         write (Buffer.contents b);
-        f (fun s ->
-            if s <> "" then
-              write (Printf.sprintf "%x\r\n%s\r\n" (String.length s) s));
+        f (fun piece ->
+            if Bigstring.length piece > 0 then (
+              write (Printf.sprintf "%x\r\n" (Bigstring.length piece));
+              write_body piece;
+              write "\r\n"));
         write "0\r\n\r\n"
     | _ -> write (Buffer.contents b)
 
@@ -149,7 +161,7 @@ let serve_conn lim handle conn requests =
                 in
                 let consumed = ref (body_length = `Length 0) in
                 let read_body ~limit =
-                  if !consumed then ""
+                  if !consumed then Bigstring.empty
                   else (
                     consumed := true;
                     (match body_length with
@@ -158,7 +170,7 @@ let serve_conn lim handle conn requests =
                           raise (Codec.Malformed "bad length")
                       | _ -> ());
                     if Codec.header headers "expect" = Some "100-continue" then
-                      Transport.write ~timeout:lim.idle_timeout conn
+                      Transport.write_string ~timeout:lim.idle_timeout conn
                         "HTTP/1.1 100 Continue\r\n\r\n";
                     try
                       Codec.read_body ~timeout:lim.idle_timeout ~limit reader

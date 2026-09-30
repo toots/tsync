@@ -313,9 +313,11 @@ let read_body t id ~off ~len =
         Fs.with_fd fd (fun fd ->
             let buf = Bigstring.create len in
             let n = Fs.pread_full fd buf ~boff:0 ~len ~off in
-            let s = Bigstring.to_string ~len:n buf in
-            if n < len then s ^ String.make (len - n) '\000' else s)
+            if n < len then
+              Bigarray.Array1.fill
+                (Bigstring.sub buf ~off:n ~len:(len - n))
+                '\000';
+            buf)
 
 let write_body_at fd ~off data =
-  Fs.pwrite_all fd (Bigstring.of_string data) ~boff:0 ~len:(String.length data)
-    ~off
+  Fs.pwrite_all fd data ~boff:0 ~len:(Bigstring.length data) ~off

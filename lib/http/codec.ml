@@ -1,3 +1,5 @@
+open Tsync_core
+
 type headers = (string * string) list
 
 let header h k = List.assoc_opt k h
@@ -7,14 +9,14 @@ exception Too_large
 
 type reader = {
   t : Transport.t;
-  buf : Bytes.t;
+  buf : Bigstring.t;
   mutable pos : int;
   mutable len : int;
   progress : unit -> unit;
 }
 
 let reader ?(progress = ignore) t =
-  { t; buf = Bytes.create 65536; pos = 0; len = 0; progress }
+  { t; buf = Bigstring.create 65536; pos = 0; len = 0; progress }
 
 let buffered r = r.pos < r.len
 
@@ -22,30 +24,41 @@ let buffered r = r.pos < r.len
 let fill ?timeout r =
   if r.pos = r.len then (
     r.pos <- 0;
-    r.len <- Transport.read ?timeout r.t r.buf 0 (Bytes.length r.buf);
+    r.len <- Transport.read ?timeout r.t r.buf 0 (Bigstring.length r.buf);
     if r.len > 0 then r.progress ();
     r.len > 0)
   else true
 
+let index_newline r =
+  let rec go i =
+    if i >= r.len then None
+    else if Bigarray.Array1.unsafe_get r.buf i = '\n' then Some i
+    else go (i + 1)
+  in
+  go r.pos
+
 let line ?timeout ~limit r =
   let b = Buffer.create 128 in
+  let take n =
+    Buffer.add_string b (Bigstring.to_string ~off:r.pos ~len:n r.buf);
+    r.pos <- r.pos + n
+  in
   let rec go () =
     if Buffer.length b > limit then raise Too_large;
     if not (fill ?timeout r) then
       if Buffer.length b = 0 then None
       else raise (Malformed "end of stream inside a line")
     else (
-      match Bytes.index_from_opt r.buf r.pos '\n' with
-        | Some i when i < r.len ->
-            Buffer.add_subbytes b r.buf r.pos (i - r.pos);
-            r.pos <- i + 1;
+      match index_newline r with
+        | Some i ->
+            take (i - r.pos);
+            r.pos <- r.pos + 1;
             let s = Buffer.contents b in
             let n = String.length s in
             Some
               (if n > 0 && s.[n - 1] = '\r' then String.sub s 0 (n - 1) else s)
-        | _ ->
-            Buffer.add_subbytes b r.buf r.pos (r.len - r.pos);
-            r.pos <- r.len;
+        | None ->
+            take (r.len - r.pos);
             go ())
   in
   go ()
@@ -82,32 +95,41 @@ let read_head ?timeout ~limit r =
         in
         Some (first, headers [])
 
-let exactly ?timeout r b n =
-  let rec go n =
+(* Buffered bytes first, then straight from the transport into [dst]. *)
+let exactly ?timeout r dst off n =
+  let from_buffer = min n (r.len - r.pos) in
+  Bigstring.blit ~src:r.buf ~src_off:r.pos ~dst ~dst_off:off ~len:from_buffer;
+  r.pos <- r.pos + from_buffer;
+  let rec go off n =
     if n > 0 then (
-      if not (fill ?timeout r) then
-        raise (Malformed "end of stream inside a body");
-      let k = min n (r.len - r.pos) in
-      Buffer.add_subbytes b r.buf r.pos k;
-      r.pos <- r.pos + k;
-      go (n - k))
+      let got = Transport.read ?timeout r.t dst off n in
+      if got = 0 then raise (Malformed "end of stream inside a body");
+      r.progress ();
+      go (off + got) (n - got))
   in
-  go n
+  go (off + from_buffer) (n - from_buffer)
+
+let piece ?timeout r n =
+  let b = Bigstring.create n in
+  exactly ?timeout r b 0 n;
+  b
 
 let read_body ?timeout ~limit r framing =
-  let b = Buffer.create 4096 in
-  (match framing with
+  match framing with
     | `Length n ->
         if n > limit then raise Too_large;
-        exactly ?timeout r b n
+        piece ?timeout r n
     | `Eof ->
-        while fill ?timeout r do
-          Buffer.add_subbytes b r.buf r.pos (r.len - r.pos);
-          r.pos <- r.len;
-          if Buffer.length b > limit then raise Too_large
-        done
+        let rec go acc total =
+          if not (fill ?timeout r) then Bigstring.concat (List.rev acc)
+          else (
+            let n = r.len - r.pos in
+            if total + n > limit then raise Too_large;
+            go (piece ?timeout r n :: acc) (total + n))
+        in
+        go [] 0
     | `Chunked ->
-        let rec chunks () =
+        let rec chunks acc total =
           match line ?timeout ~limit:1024 r with
             | None -> raise (Malformed "end of stream inside a chunked body")
             | Some l -> (
@@ -119,16 +141,16 @@ let read_body ?timeout ~limit r framing =
                           | Some "" | None -> ()
                           | Some _ -> trailers ()
                       in
-                      trailers ()
+                      trailers ();
+                      Bigstring.concat (List.rev acc)
                   | Some n when n > 0 ->
-                      if Buffer.length b + n > limit then raise Too_large;
-                      exactly ?timeout r b n;
+                      if total + n > limit then raise Too_large;
+                      let b = piece ?timeout r n in
                       ignore (line ?timeout ~limit:2 r);
-                      chunks ()
+                      chunks (b :: acc) (total + n)
                   | _ -> raise (Malformed "a bad chunk size"))
         in
-        chunks ());
-  Buffer.contents b
+        chunks [] 0
 
 let framing h =
   match header h "transfer-encoding" with

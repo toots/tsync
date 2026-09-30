@@ -45,7 +45,15 @@ let decode body =
           h2 = String.sub body 56 16;
         })
 
-let is_manifest body = decode body <> None
+let has_magic body =
+  let m = String.length magic in
+  Bigstring.length body >= m && Bigstring.to_string ~len:m body = magic
+
+(* Only a body carrying the magic is copied off the bigstring and decoded. *)
+let of_body body =
+  if has_magic body then decode (Bigstring.to_string body) else None
+
+let is_manifest body = of_body body <> None
 
 let keys_offset m =
   header + String.length m.name
@@ -64,7 +72,7 @@ let key m i =
 let keys m = List.init m.count (key m)
 
 let chunk_names body =
-  match decode body with Some m -> ( try keys m with _ -> []) | None -> []
+  match of_body body with Some m -> ( try keys m with _ -> []) | None -> []
 
 let is_link m = m.link <> None
 

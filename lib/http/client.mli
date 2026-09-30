@@ -14,18 +14,22 @@ val base_path : endpoint -> string
 val host : endpoint -> string
 val url : endpoint -> string
 
-type response = { status : int; headers : Codec.headers; body : string }
+type response = {
+  status : int;
+  headers : Codec.headers;
+  body : Tsync_core.Bigstring.t;
+}
 
 (** [headers] is computed inside the stall timeout, per attempt. [progress] is
     called for every piece sent or received. *)
 val request :
   ?stall:float ->
   ?headers:(unit -> Codec.headers) ->
-  ?body:string ->
+  ?body:Tsync_core.Bigstring.t ->
   endpoint ->
   meth:string ->
   string ->
   response
 
 (** Collapsed whitespace, at most [HTTP_EXCERPT] characters. *)
-val excerpt : string -> string
+val excerpt : Tsync_core.Bigstring.t -> string

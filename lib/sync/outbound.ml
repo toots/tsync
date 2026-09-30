@@ -709,7 +709,7 @@ module Make (C : Engine_ctx.S) = struct
                               Fs.pread_full fd buf ~boff:0 ~len
                                 ~off:(i * e.chunk_size)
                             in
-                            Bigstring.to_string ~len:n buf))
+                            Bigstring.sub buf ~off:0 ~len:n))
                 | Slots slots -> (
                     let len =
                       if e.size = 0 then 0
@@ -731,7 +731,10 @@ module Make (C : Engine_ctx.S) = struct
                                   (fun () ->
                                     read_staged path e ~off:(i * e.chunk_size)
                                       ~len))
-                      | Zero -> Remote.Bytes (String.make len '\000')
+                      | Zero ->
+                          let b = Bigstring.create len in
+                          Bigarray.Array1.fill b '\000';
+                          Remote.Bytes b
                       | Staged { body; off } ->
                           Remote.Lazy
                             (fun () -> Staged.read_body staged body ~off ~len))

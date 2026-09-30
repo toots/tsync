@@ -157,7 +157,7 @@ let fail ~op (r : Tsync_http.Client.response) =
           r.status))
 
 let json ~op (r : Tsync_http.Client.response) =
-  try Yojson.Safe.from_string r.body
+  try Yojson.Safe.from_string (Bigstring.to_string r.body)
   with _ -> Fail.corrupt "gcs %s: an answer that is not JSON" op
 
 let obj t k =
@@ -186,7 +186,7 @@ let put_if_absent t k body =
       | r when success r.status -> Tsync_store.Store.Won
       | { status = 412; _ } -> (
           match get_opt t k with
-            | Some held when held = body -> Won
+            | Some held when Bigstring.equal held body -> Won
             | Some held -> Held held
             | None when n > 1 -> go (n - 1)
             | None ->
@@ -217,9 +217,10 @@ let get_range t k off len =
     | 200 when off = 0 -> Some r.body
     | 200 ->
         Some
-          (if off >= String.length r.body then ""
-           else String.sub r.body off (min len (String.length r.body - off)))
-    | 416 -> Some ""
+          (let n = Bigstring.length r.body in
+           if off >= n then Bigstring.empty
+           else Bigstring.sub r.body ~off ~len:(min len (n - off)))
+    | 416 -> Some Bigstring.empty
     | 404 -> None
     | _ -> fail ~op:"get_range" r
 
@@ -253,7 +254,7 @@ let delete_page t keys =
   if safe <> [] then (
     let body = delete_body (List.map Key.to_string safe) in
     let r =
-      call t ~meth:"POST" ~body
+      call t ~meth:"POST" ~body:(Bigstring.of_string body)
         ~headers:
           [
             ("content-type", "application/xml");
@@ -265,7 +266,7 @@ let delete_page t keys =
     match
       List.filter
         (fun (code, _) -> code <> "NoSuchKey" && code <> "NotFound")
-        (delete_errors r.body)
+        (delete_errors (Bigstring.to_string r.body))
     with
       | [] -> ()
       | (code, key) :: _ as refused ->
@@ -294,7 +295,7 @@ let copy t src dst =
           | Some tok -> "?rewriteToken=" ^ segment tok
           | None -> "")
     in
-    match call t ~meth:"POST" ~body:"" target with
+    match call t ~meth:"POST" ~body:Bigstring.empty target with
       | r when success r.status -> (
           match Yojson.Safe.Util.member "rewriteToken" (json ~op:"copy" r) with
             | `String tok -> go (Some tok)

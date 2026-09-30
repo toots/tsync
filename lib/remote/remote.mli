@@ -9,8 +9,8 @@ open Tsync_store
     is, or bytes produced when needed. *)
 type source =
   | Stored of Chunk_key.t
-  | Bytes of string
-  | Lazy of (unit -> string)
+  | Bytes of Bigstring.t
+  | Lazy of (unit -> Bigstring.t)
 
 (** The bytes offered for a chunk no longer match what the upload started from.
 *)
@@ -39,15 +39,15 @@ module Make (_ : Context.S) : sig
       refusal). *)
   val drop_memo : Chunk_key.t list -> unit
 
-  val put_chunk : Chunk_key.t -> string -> unit
+  val put_chunk : Chunk_key.t -> Bigstring.t -> unit
 
   (** From either space during a collection; CORRUPT when no store holds it. *)
-  val get_chunk : Chunk_key.t -> string
+  val get_chunk : Chunk_key.t -> Bigstring.t
 
   (** Fails unless the body hashes to its key within two reads. *)
-  val get_verified_chunk : Chunk_key.t -> string
+  val get_verified_chunk : Chunk_key.t -> Bigstring.t
 
-  val get_chunk_range : Chunk_key.t -> int -> int -> string
+  val get_chunk_range : Chunk_key.t -> int -> int -> Bigstring.t
 
   (** Put every chunk the store does not know and build the manifest; nothing is
       published. A marked chunk is re-sent rather than deduplicated. *)
@@ -70,7 +70,7 @@ module Make (_ : Context.S) : sig
   (** Put a manifest, saving a version first; on a "missing chunks" refusal the
       named chunks are re-sent from [resend] and the put retried. *)
   val put_manifest :
-    ?resend:(Chunk_key.t -> string option) ->
+    ?resend:(Chunk_key.t -> Bigstring.t option) ->
     ?save:bool ->
     Key.t ->
     Manifest.t ->
@@ -78,7 +78,7 @@ module Make (_ : Context.S) : sig
 
   (** Publish at [(parent, leaf)], recording [leaf] as the manifest's name. *)
   val publish :
-    ?resend:(Chunk_key.t -> string option) ->
+    ?resend:(Chunk_key.t -> Bigstring.t option) ->
     parent:Folder_id.t ->
     leaf:string ->
     Manifest.t ->

@@ -61,8 +61,8 @@ type t = {
   dir : string;
   cc : int;
   fast : unit -> bool;
-  get_whole : Chunk_key.t -> string;
-  get_range : Chunk_key.t -> int -> int -> string;
+  get_whole : Chunk_key.t -> Bigstring.t;
+  get_range : Chunk_key.t -> int -> int -> Bigstring.t;
   m : Mutex.t;
   states : (string, gstate) Hashtbl.t;
   in_flight : (string, unit Rt.Promise.t) Hashtbl.t;
@@ -130,14 +130,15 @@ let within_deadline f =
 let fetch_verified t (x : member) =
   let b = t.get_whole x.ck in
   if
-    String.length b <> x.len || not (Chunk_key.equal (Chunk_key.of_body b) x.ck)
+    Bigstring.length b <> x.len
+    || not (Chunk_key.equal (Chunk_key.of_bigstring b) x.ck)
   then
     Fail.corrupt "chunk %s: %d bytes that do not hash to its key"
-      (Chunk_key.to_string x.ck) (String.length b);
+      (Chunk_key.to_string x.ck) (Bigstring.length b);
   b
 
-let write_at fd ~off s =
-  Fs.pwrite_all fd (Bigstring.of_string s) ~boff:0 ~len:(String.length s) ~off
+let write_at fd ~off b =
+  Fs.pwrite_all fd b ~boff:0 ~len:(Bigstring.length b) ~off
 
 let rec ensure_whole ?(force = false) t g =
   let p = Mutex.protect t.m (fun () -> Hashtbl.find_opt t.in_flight g.gkey) in
@@ -237,7 +238,7 @@ let pread_path p ~off ~len =
         Fs.with_fd fd (fun fd ->
             let buf = Bigstring.create len in
             let n = Fs.pread_full fd buf ~boff:0 ~len ~off in
-            Some (Bigstring.to_string ~len:n buf))
+            Some (Bigstring.sub buf ~off:0 ~len:n))
 
 let all_held g s =
   List.for_all
@@ -253,7 +254,7 @@ let rec fill t g (x : member) (c, dd) =
           match missing (Hashtbl.find_opt s.held x.index) (c, dd) with
             | None ->
                 `Bytes
-                  (Option.value ~default:""
+                  (Option.value ~default:Bigstring.empty
                      (pread_path (partial_path t g.gkey) ~off:(x.off + c)
                         ~len:(dd - c)))
             | Some gap ->
@@ -282,7 +283,7 @@ let rec fill t g (x : member) (c, dd) =
                 Hashtbl.replace s.held x.index
                   (widen
                      (Hashtbl.find_opt s.held x.index)
-                     (lo, lo + String.length data));
+                     (lo, lo + Bigstring.length data));
                 if not (List.mem x.index s.from_ranges) then
                   s.from_ranges <- x.index :: s.from_ranges;
                 if all_held g s then (
@@ -295,7 +296,7 @@ let rec fill t g (x : member) (c, dd) =
                       a <= c && dd <= b)
                 then
                   `Bytes
-                    (Option.value ~default:""
+                    (Option.value ~default:Bigstring.empty
                        (pread_path (partial_path t g.gkey) ~off:(x.off + c)
                           ~len:(dd - c)))
                 else `Again))
@@ -319,7 +320,7 @@ let touch t gkey =
 let read_piece t (g : group) (x : member) ~coff ~len =
   let from_body () =
     match pread_path (whole_path t g.gkey) ~off:(x.off + coff) ~len with
-      | Some s when String.length s = len ->
+      | Some s when Bigstring.length s = len ->
           touch t g.gkey;
           Some s
       | _ -> None
@@ -335,10 +336,11 @@ let read_piece t (g : group) (x : member) ~coff ~len =
     in
     match r with
       | `Bytes b -> b
-      | `Whole -> ( match from_body () with Some s -> s | None -> "")
+      | `Whole -> (
+          match from_body () with Some s -> s | None -> Bigstring.empty)
   in
   let s = attempt () in
-  if String.length s = len then s
+  if Bigstring.length s = len then s
   else (
     within_deadline (fun () -> ensure_whole ~force:true t g);
     match from_body () with
@@ -350,7 +352,7 @@ let read_piece t (g : group) (x : member) ~coff ~len =
 let verified_member t g (x : member) =
   ensure_whole t g;
   match pread_path (whole_path t g.gkey) ~off:x.off ~len:x.len with
-    | Some s when String.length s = x.len -> s
+    | Some s when Bigstring.length s = x.len -> s
     | _ -> Fail.corrupt "cache body %s is short" g.gkey
 
 let evict_group t gkey =
@@ -412,6 +414,8 @@ let adopt_body t gkey source =
   Rt.Fmutex.with_lock s.lock (fun () ->
       Fs.unlink_quiet (partial_path t gkey);
       forget s;
+      (* ponytail: a root that cannot link copies through the heap; rare, and
+         bounded by one group. *)
       let copy () =
         let data = Fs.read_file source in
         let tmp = Fs.write_temp (shard_dir t gkey) data in

@@ -25,7 +25,7 @@ type caps = {
 
 (** The answer to a conditional create: [Won] when the name holds exactly the
     body asked for, [Held b] when another writer's [b] holds it. *)
-type claim = Won | Held of string
+type claim = Won | Held of Bigstring.t
 
 (** Upload admission (06 §6): [Wait] acquires, [Best_effort] fails CANCELLED
     rather than wait. *)
@@ -36,17 +36,17 @@ type mode = Wait | Best_effort
 type folder = {
   prefix : Key.prefix;
   listing : entry list;
-  bodies : (Key.t * string option) list;
+  bodies : (Key.t * Bigstring.t option) list;
 }
 
 type traffic = { uploaded : int Atomic.t; downloaded : int Atomic.t }
 
 type t = {
   name : string;  (** for messages: the member's name *)
-  put : ?mode:mode -> Key.t -> string -> unit;
-  put_if_absent : Key.t -> string -> claim;
-  get_opt : Key.t -> string option;
-  get_range : Key.t -> int -> int -> string option;
+  put : ?mode:mode -> Key.t -> Bigstring.t -> unit;
+  put_if_absent : Key.t -> Bigstring.t -> claim;
+  get_opt : Key.t -> Bigstring.t option;
+  get_range : Key.t -> int -> int -> Bigstring.t option;
       (** [offset], [length]: the bytes up to the end, empty past it, [None]
           when absent. *)
   head_opt : Key.t -> entry option;
@@ -59,7 +59,7 @@ type t = {
   watch : Key.t -> string option -> unit;
       (** return when the key may have changed, or after at most
           {!watch_interval}; the argument is the token last seen *)
-  get_many : (Key.t list -> string option list) option;
+  get_many : (Key.t list -> Bigstring.t option list) option;
   list_many : (Key.prefix list -> folder list) option;
   verify_all : Key.prefix -> [ `Queued of int | `Unsupported ];
   discard :
@@ -79,12 +79,12 @@ val no_caps : caps
 val new_traffic : unit -> traffic
 
 (** [get_opt], turning a clean absence into ABSENT. *)
-val get : t -> Key.t -> string
+val get : t -> Key.t -> Bigstring.t
 
 val watch_interval : float
 
 (** The watch token of a body: surrounding whitespace removed. *)
-val token : string option -> string option
+val token : Bigstring.t option -> string option
 
 (** Refuse a malformed range before any request, and send nothing for an empty
     bulk list. Every driver is wrapped in it. *)
@@ -101,7 +101,7 @@ val max_batch_folders : int
 (** Read many listed entries: native batches within the key and byte caps where
     declared, else one read each. A batch failing permanently is re-asked key by
     key. *)
-val read_many : t -> entry list -> (Key.t * string option) list
+val read_many : t -> entry list -> (Key.t * Bigstring.t option) list
 
 val count_up : t -> int -> unit
 val count_down : t -> int -> unit

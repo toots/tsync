@@ -13,7 +13,7 @@ val fields : Tsync_core.Field_spec.field list
     being put, or the key being copied, and the write to perform. *)
 type gate =
   key:Tsync_core.Key.t ->
-  source:[ `Body of string | `Copy_of of Tsync_core.Key.t ] ->
+  source:[ `Body of Tsync_core.Bigstring.t | `Copy_of of Tsync_core.Key.t ] ->
   (unit -> unit) ->
   unit
 

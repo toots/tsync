@@ -14,30 +14,30 @@ type caps = {
   verified : bool;
 }
 
-type claim = Won | Held of string
+type claim = Won | Held of Bigstring.t
 type mode = Wait | Best_effort
 
 type folder = {
   prefix : Key.prefix;
   listing : entry list;
-  bodies : (Key.t * string option) list;
+  bodies : (Key.t * Bigstring.t option) list;
 }
 
 type traffic = { uploaded : int Atomic.t; downloaded : int Atomic.t }
 
 type t = {
   name : string;
-  put : ?mode:mode -> Key.t -> string -> unit;
-  put_if_absent : Key.t -> string -> claim;
-  get_opt : Key.t -> string option;
-  get_range : Key.t -> int -> int -> string option;
+  put : ?mode:mode -> Key.t -> Bigstring.t -> unit;
+  put_if_absent : Key.t -> Bigstring.t -> claim;
+  get_opt : Key.t -> Bigstring.t option;
+  get_range : Key.t -> int -> int -> Bigstring.t option;
   head_opt : Key.t -> entry option;
   delete : Key.t -> bool;
   delete_multi : Key.t list -> unit;
   copy : Key.t -> Key.t -> unit;
   list_prefix : ?max_keys:int -> Key.prefix -> entry list;
   watch : Key.t -> string option -> unit;
-  get_many : (Key.t list -> string option list) option;
+  get_many : (Key.t list -> Bigstring.t option list) option;
   list_many : (Key.prefix list -> folder list) option;
   verify_all : Key.prefix -> [ `Queued of int | `Unsupported ];
   discard :
@@ -74,7 +74,7 @@ let get s k =
 let watch_interval = 2.
 
 (* 06 §2.4: the watched value is the body with surrounding whitespace removed. *)
-let token body = Option.map String.trim body
+let token body = Option.map (fun b -> String.trim (Bigstring.to_string b)) body
 
 (* Keys are valid by construction; what is left to refuse before any request
    is a malformed range, and empty bulk lists issue no request. *)

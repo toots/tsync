@@ -84,9 +84,10 @@ let base_path e = e.base
 let host e = e.host
 let url e = e.url
 
-type response = { status : int; headers : Codec.headers; body : string }
+type response = { status : int; headers : Codec.headers; body : Bigstring.t }
 
-let excerpt s =
+let excerpt body =
+  let s = Bigstring.to_string ~len:(min (Bigstring.length body) 4096) body in
   let b = Buffer.create 64 in
   let space = ref false in
   String.iter
@@ -135,7 +136,7 @@ let exchange e c ~meth ~target ~headers ~body ~reused =
     @ headers
     @
       match body with
-      | Some s -> [("content-length", string_of_int (String.length s))]
+      | Some s -> [("content-length", string_of_int (Bigstring.length s))]
       | None ->
           if meth = "POST" || meth = "PUT" then [("content-length", "0")]
           else []
@@ -143,8 +144,9 @@ let exchange e c ~meth ~target ~headers ~body ~reused =
   Codec.write_head b
     (Printf.sprintf "%s %s HTTP/1.1" meth (e.base ^ target))
     head;
-  Option.iter (Buffer.add_string b) body;
-  (try Transport.write c.t (Buffer.contents b)
+  (try
+     Transport.write_string c.t (Buffer.contents b);
+     Option.iter (Transport.write c.t) body
    with e when reused && not (Rt.is_cancelled e) -> raise Dead_before_answer);
   let head =
     match Codec.read_head ~limit:65536 c.reader with

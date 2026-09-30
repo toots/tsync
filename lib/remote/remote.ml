@@ -3,8 +3,8 @@ open Tsync_store
 
 type source =
   | Stored of Chunk_key.t
-  | Bytes of string
-  | Lazy of (unit -> string)
+  | Bytes of Bigstring.t
+  | Lazy of (unit -> Bigstring.t)
 
 exception Source_changed of string
 
@@ -16,7 +16,7 @@ let read_generation (store : Store.t) d =
   match store.get_opt (Key.gc_generation d) with
     | None -> Some 0
     | Some b -> (
-        match Yojson.Safe.from_string b with
+        match Yojson.Safe.from_string (Bigstring.to_string b) with
           | `Assoc f -> (
               match List.assoc_opt "generation" f with
                 | Some (`Int g) when g >= 0 -> Some g
@@ -166,7 +166,7 @@ module Make (C : Context.S) = struct
                       (Chunk_key.to_string ck)))
 
   let get_verified_chunk ck =
-    let check b = Chunk_key.equal (Chunk_key.of_body b) ck in
+    let check b = Chunk_key.equal (Chunk_key.of_bigstring b) ck in
     let b = get_chunk ck in
     if check b then b
     else (
@@ -212,17 +212,21 @@ module Make (C : Context.S) = struct
                 let expected =
                   if size = 0 then 0 else Chunking.length ~size ~cs:chunk_size i
                 in
-                if String.length b <> expected then raise (Source_changed name);
-                let ck = Chunk_key.of_body b in
+                if Bigstring.length b <> expected then
+                  raise (Source_changed name);
+                let ck = Chunk_key.of_bigstring b in
                 if not (known ck) then put_chunk ck b;
-                progress (String.length b);
+                progress (Bigstring.length b);
                 ck)
     in
     let keys = Rt.map_bounded ~width:2 one (List.init count Fun.id) in
     Manifest.make ~name ~size ~mtime ~chunk_size keys
 
   let slot parent leaf = Key.child d parent leaf
-  let get_slot parent leaf = store.get_opt (slot parent leaf)
+
+  let get_slot parent leaf =
+    Option.map Bigstring.to_string (store.get_opt (slot parent leaf))
+
   let head_slot parent leaf = store.head_opt (slot parent leaf)
 
   let group_of key =
@@ -273,7 +277,7 @@ module Make (C : Context.S) = struct
       =
     if save then save_version key;
     let rec attempt n =
-      match store.put key m.body with
+      match store.put key (Bigstring.of_string m.body) with
         | () -> ()
         | exception e -> (
             match missing_of e with
@@ -308,7 +312,7 @@ module Make (C : Context.S) = struct
     ignore (store.delete skey);
     match store.get_opt dkey with
       | Some b -> (
-          match Manifest.decode b with
+          match Manifest.of_body b with
             | Some m when m.name <> dl ->
                 put_manifest ~save:false dkey (Manifest.rename m dl)
             | _ -> ())
@@ -324,7 +328,8 @@ module Make (C : Context.S) = struct
          (Key.as_prefix (Key.v (Key.prefix_to_string (Key.versions d) ^ group))))
     |> List.sort (fun (a, _) (b, _) -> compare b a)
 
-  let get_version (e : Store.entry) = Store.get store e.key
+  let get_version (e : Store.entry) =
+    Bigstring.to_string (Store.get store e.key)
 
   let revert ~parent ~leaf (version : Store.entry) =
     let body = get_version version in

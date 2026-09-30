@@ -26,6 +26,7 @@ let knowledge =
   {
     Composite.chunk_names =
       (fun b ->
+        let b = Bigstring.to_string b in
         if String.starts_with ~prefix:"manifest:" b then
           List.filter_map Chunk_key.of_string
             (String.split_on_char ',' (String.sub b 9 (String.length b - 9)))
@@ -66,33 +67,33 @@ let () =
       in
       let s = Composite.store c in
       p "== reads\n";
-      replica.put (k "tsync/d/only-on-replica") "stale";
-      archive.put (k "tsync/d/old") "archived";
+      Contract.put replica (k "tsync/d/only-on-replica") "stale";
+      Contract.put archive (k "tsync/d/old") "archived";
       p "main misses, replica not asked: %s\n"
-        (show (s.get_opt (k "tsync/d/only-on-replica")));
+        (show (Contract.get s (k "tsync/d/only-on-replica")));
       p "archive answers a source miss: %s\n"
-        (show (s.get_opt (k "tsync/d/old")));
+        (show (Contract.get s (k "tsync/d/old")));
       main_up := false;
       p "main down, replica answers: %s\n"
-        (show (s.get_opt (k "tsync/d/only-on-replica")));
+        (show (Contract.get s (k "tsync/d/only-on-replica")));
       p "main down, absent on replica and archive: %s\n"
-        (kind (fun () -> s.get_opt (k "tsync/d/nowhere")));
+        (kind (fun () -> Contract.get s (k "tsync/d/nowhere")));
       p "\n== writes with the main down\n";
-      p "put: %s\n" (kind (fun () -> s.put (k "tsync/d/x") "x"));
+      p "put: %s\n" (kind (fun () -> Contract.put s (k "tsync/d/x") "x"));
       p "replica owes nothing: %d records\n"
         (List.fold_left (fun a (_, n, _) -> a + n) 0 (Composite.copy_stats c));
       main_up := true;
       p "\n== deferred copies\n";
       let ck1 = Chunk_key.of_body "one" and ck2 = Chunk_key.of_body "two" in
-      s.put (Key.chunk d ck1) "one";
-      s.put (Key.chunk d ck2) "two";
+      Contract.put s (Key.chunk d ck1) "one";
+      Contract.put s (Key.chunk d ck2) "two";
       let manifest = k "tsync/d/manifests/.tsync-root/aaaa" in
-      s.put manifest
+      Contract.put s manifest
         (Printf.sprintf "manifest:%s,%s" (Chunk_key.to_string ck1)
            (Chunk_key.to_string ck2));
-      s.put (k "tsync/d/journal/2026-09/1790000000000-abc") "entry";
-      s.put (Key.cursor d) "1790000000000-abc";
-      s.put (k "tsync/d/manifests/.tsync-root/.tsync-index") "index";
+      Contract.put s (k "tsync/d/journal/2026-09/1790000000000-abc") "entry";
+      Contract.put s (Key.cursor d) "1790000000000-abc";
+      Contract.put s (k "tsync/d/manifests/.tsync-root/.tsync-index") "index";
       p "owed before start: %s\n"
         (String.concat ", "
            (List.map
@@ -100,7 +101,7 @@ let () =
               (Composite.copy_stats c)));
       Composite.start c;
       Composite.settle ~timeout:10. c;
-      let has (st : Store.t) key = st.get_opt key <> None in
+      let has (st : Store.t) key = Contract.get st key <> None in
       List.iter
         (fun (n, (st : Store.t)) ->
           p "%s: chunks %b %b, manifest %b, journal %b, cursor %b, index %b\n" n
@@ -116,7 +117,7 @@ let () =
       p "after delete, replica manifest %b\n" (has replica manifest);
       p "\n== a manifest naming a chunk no main holds parks, degraded\n";
       let ghost = Chunk_key.of_body "ghost" in
-      s.put
+      Contract.put s
         (k "tsync/d/manifests/.tsync-root/bbbb")
         ("manifest:" ^ Chunk_key.to_string ghost);
       Composite.settle ~timeout:10. c;

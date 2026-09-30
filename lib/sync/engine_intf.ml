@@ -37,7 +37,7 @@ module type S = sig
   val open_read : string -> handle
 
   (** Short only at the end of the content; DEADLINE past the read deadline. *)
-  val read : handle -> off:int -> len:int -> string
+  val read : handle -> off:int -> len:int -> Bigstring.t
 
   val close_read : handle -> unit
 
@@ -45,7 +45,7 @@ module type S = sig
   val retain : string -> handle
 
   val release : handle -> unit
-  val write : string -> off:int -> string -> unit
+  val write : string -> off:int -> Bigstring.t -> unit
   val truncate : string -> int -> unit
   val create : string -> exclusive:bool -> unit
 

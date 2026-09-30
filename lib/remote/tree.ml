@@ -24,8 +24,16 @@ module Make (C : Context.S) = struct
   let d = C.domain
   let store = C.store
 
-  let anchor id =
-    Option.bind (store.get_opt (Key.anchor d id)) Folder.decode_anchor
+  (* Markers, anchors and manifests are small; they cross as strings. *)
+  let get k = Option.map Bigstring.to_string (store.get_opt k)
+  let put k body = store.put k (Bigstring.of_string body)
+
+  let claim_text k body =
+    match store.put_if_absent k (Bigstring.of_string body) with
+      | Store.Won -> body
+      | Held b -> Bigstring.to_string b
+
+  let anchor id = Option.bind (get (Key.anchor d id)) Folder.decode_anchor
 
   let placed id ~parent ~name =
     match anchor id with
@@ -48,10 +56,10 @@ module Make (C : Context.S) = struct
           if filed ~parent ~name m.id then `Filed m.id else `Disowned m.id
       | `Unclassifiable -> `Unclassifiable
       | `Not_marker ->
-          if Manifest.is_manifest body then `File else `Unclassifiable
+          if Manifest.decode body <> None then `File else `Unclassifiable
 
   let holder_at parent name =
-    match store.get_opt (slot parent name) with
+    match get (slot parent name) with
       | None -> None
       | Some b -> (
           match classify_slot parent name b with
@@ -60,7 +68,7 @@ module Make (C : Context.S) = struct
 
   let remove_marker_if ~parent ~name id =
     let k = slot parent name in
-    match store.get_opt k with
+    match get k with
       | Some b -> (
           match Folder.classify_marker b with
             | `Marker (m, _) when Folder_id.equal m.id id ->
@@ -69,7 +77,7 @@ module Make (C : Context.S) = struct
       | None -> ()
 
   let write_anchor id ~parent ~name =
-    store.put (Key.anchor d id) (Folder.anchor_body { parent; aname = name })
+    put (Key.anchor d id) (Folder.anchor_body { parent; aname = name })
 
   (* data-model §6.2 step 1: create-if-absent, then read what holds the slot;
      an answer that names nobody is read back, never taken as won. *)
@@ -79,13 +87,11 @@ module Make (C : Context.S) = struct
     else (
       let k = slot parent name in
       let body = Folder.marker_body { name; id } in
-      let holder =
-        match store.put_if_absent k body with Store.Won -> body | Held b -> b
-      in
+      let holder = claim_text k body in
       let holder =
         match Folder.classify_marker holder with
           | `Marker _ -> Some holder
-          | _ -> store.get_opt k
+          | _ -> get k
       in
       match holder with
         | None -> claim ~rounds:(rounds - 1) ~parent ~name id
@@ -112,7 +118,7 @@ module Make (C : Context.S) = struct
 
   (* data-model §6.2 step 3. *)
   let confirm ~parent ~name id =
-    match store.get_opt (slot parent name) with
+    match get (slot parent name) with
       | None -> (
           match claim ~parent ~name id with
             | `Won -> `Reclaimed
@@ -135,15 +141,11 @@ module Make (C : Context.S) = struct
     write_anchor id ~parent ~name;
     let k = slot parent name in
     let body = Folder.marker_body { name; id } in
-    let holder =
-      match store.put_if_absent k body with
-        | Store.Won -> Some body
-        | Held b -> Some b
-    in
+    let holder = Some (claim_text k body) in
     let holder =
       match Option.map Folder.classify_marker holder with
         | Some (`Marker _) -> holder
-        | _ -> store.get_opt k
+        | _ -> get k
     in
     match Option.map (classify_slot parent name) holder with
       | None ->
@@ -167,14 +169,14 @@ module Make (C : Context.S) = struct
 
   let trash id ~old:(op, on) ~path =
     let entry = Key.trash_entry d (Ids.short ()) in
-    store.put entry (Folder.trash_body { name = on; id } ~path);
+    put entry (Folder.trash_body { name = on; id } ~path);
     write_anchor id ~parent:Folder_id.trash ~name:on;
     remove_marker_if ~parent:op ~name:on id
 
   let trash_entries () =
     List.filter_map
       (fun (e : Store.entry) ->
-        match store.get_opt e.key with
+        match get e.key with
           | Some b -> (
               match Folder.classify_marker b with
                 | `Marker (m, path) -> Some (e, m, path)
@@ -270,14 +272,18 @@ module Make (C : Context.S) = struct
         (fun (e : Store.entry) -> Key.is_child_of ~namespace:ns e.key)
         (store.list_prefix ns)
     in
-    let bodies = List.map snd (Store.read_many store listing) in
+    let bodies =
+      List.map
+        (fun (_, b) -> Option.map Bigstring.to_string b)
+        (Store.read_many store listing)
+    in
     entries_of ~id ~on_unusable listing bodies
 
   let find id names =
     let rec go id = function
       | [] -> `Folder id
       | [leaf] -> (
-          match store.get_opt (slot id leaf) with
+          match get (slot id leaf) with
             | None -> `Missing
             | Some b -> (
                 match classify_child b with
@@ -288,7 +294,7 @@ module Make (C : Context.S) = struct
                   | `Unclassifiable ->
                       Fail.corrupt "%s: unclassifiable body" leaf))
       | leaf :: rest -> (
-          match store.get_opt (slot id leaf) with
+          match get (slot id leaf) with
             | None -> `Missing
             | Some b -> (
                 match classify_child b with

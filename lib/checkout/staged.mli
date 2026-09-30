@@ -79,6 +79,6 @@ val body_size : t -> string -> int
 val body_links : t -> string -> int
 
 (** Bytes of a body, zeros past its end; CORRUPT when the body is missing. *)
-val read_body : t -> string -> off:int -> len:int -> string
+val read_body : t -> string -> off:int -> len:int -> Bigstring.t
 
-val write_body_at : Unix.file_descr -> off:int -> string -> unit
+val write_body_at : Unix.file_descr -> off:int -> Bigstring.t -> unit
