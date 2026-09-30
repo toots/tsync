@@ -479,6 +479,7 @@ type counts = { bytes : int; pinned : int; bodies : int }
 let enforce_cap t =
   let now = Unix.gettimeofday () in
   let bodies = ref [] and pinned = ref 0 and total = ref 0 in
+  let count = ref 0 in
   List.iter
     (fun shard ->
       let dir = Filename.concat t.dir shard in
@@ -504,6 +505,7 @@ let enforce_cap t =
                       | None -> false
                   in
                   total := !total + bytes;
+                  incr count;
                   if live_pin then pinned := !pinned + bytes
                   else bodies := (st.st_mtime, gkey, bytes) :: !bodies
               | _ -> ()))
@@ -516,7 +518,8 @@ let enforce_cap t =
           (fun (_, gkey, bytes) ->
             if !over > 0 && evict_group t gkey then (
               over := !over - bytes;
+              decr count;
               total := !total - bytes))
           (List.sort compare !bodies)
     | None -> ());
-  { bytes = !total; pinned = !pinned; bodies = List.length !bodies }
+  { bytes = !total; pinned = !pinned; bodies = !count }
