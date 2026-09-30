@@ -15,6 +15,7 @@ external rename_noreplace_ : string -> string -> unit = "tsync_rename_noreplace"
 external clone_ : string -> string -> unit = "tsync_clone"
 external is_network_fs_ : string -> bool = "tsync_is_network_fs"
 external pid_alive_ : int -> bool = "tsync_pid_alive"
+external open_nofollow_ : string -> Unix.file_descr = "tsync_open_nofollow"
 
 let rec eintr f = try f () with Unix.Unix_error (Unix.EINTR, _, _) -> eintr f
 
@@ -247,6 +248,9 @@ let clone a b = sys (fun () -> clone_ a b)
 let is_network_fs p = try is_network_fs_ p with _ -> false
 let pid_alive pid = pid_alive_ pid
 
+(* ELOOP means the last component is a symbolic link. *)
+let open_nofollow p = opt (fun () -> open_nofollow_ p)
+
 let bigstring_create n =
   Bigarray.Array1.create Bigarray.char Bigarray.c_layout n
 
@@ -289,3 +293,8 @@ let sweep_temps ?(older_than = 0.) dir =
         in
         if dead then rm_rf p))
     (try readdir dir with _ -> [])
+
+let write_file_for_test p data =
+  mkdir_p (Filename.dirname p);
+  let fd = openfile ~perm:0o644 p [O_WRONLY; O_CREAT; O_TRUNC] in
+  with_fd fd (fun fd -> write_all fd data)

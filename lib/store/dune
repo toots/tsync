@@ -1,0 +1,3 @@
+(library
+ (name tsync_store)
+ (libraries tsync_core unix yojson))

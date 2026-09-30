@@ -106,6 +106,10 @@ val clone : string -> string -> unit
 
 val is_network_fs : string -> bool
 val pid_alive : int -> bool
+
+(** Open for reading without following a final symbolic link (ELOOP);
+    [None] when absent. *)
+val open_nofollow : string -> Unix.file_descr option
 val bigstring_create : int -> bigstring
 val bigstring_of_string : string -> bigstring
 val string_of_bigstring : ?off:int -> ?len:int -> bigstring -> string
@@ -116,3 +120,6 @@ val map_file : string -> bigstring
 (** Remove temporaries in [dir] whose owner is dead, or older than [older_than]
     seconds when they name no owner. *)
 val sweep_temps : ?older_than:float -> string -> unit
+
+(** A plain, non-durable write for tests and fixtures. *)
+val write_file_for_test : string -> string -> unit

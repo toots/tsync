@@ -89,6 +89,19 @@ CAMLprim value tsync_funlock(value fd) {
   return Val_unit;
 }
 
+CAMLprim value tsync_open_nofollow(value path) {
+  CAMLparam1(path);
+  char *p = caml_stat_strdup(String_val(path));
+  int fd;
+  caml_release_runtime_system();
+  do { fd = open(p, O_RDONLY | O_CLOEXEC | O_NOFOLLOW); } while (fd < 0 && errno == EINTR);
+  int e = errno;
+  caml_acquire_runtime_system();
+  caml_stat_free(p);
+  if (fd < 0) { errno = e; uerror("open", path); }
+  CAMLreturn(Val_int(fd));
+}
+
 CAMLprim value tsync_pid_alive(value pid) {
   if (kill(Int_val(pid), 0) == 0) return Val_true;
   return Val_bool(errno == EPERM);

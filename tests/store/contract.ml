@@ -1,0 +1,66 @@
+open Tsync_core
+open Tsync_store
+
+let p fmt = Printf.printf fmt
+let k = Key.v
+let d = Domain_name.v "d"
+let show = function Some s -> Printf.sprintf "%S" s | None -> "none"
+
+let kind_of f = match f () with _ -> "ok" | exception Fail.E fl -> Fail.kind_name fl.kind | exception e -> Printexc.to_string e
+
+(* The generic store conformance of spec 06 §10, printed for a snapshot. *)
+let run (s : Store.t) =
+  p "== round trips\n";
+  s.put (k "tsync/d/a") "hello";
+  p "get_opt a: %s; absent: %s; get absent: %s\n" (show (s.get_opt (k "tsync/d/a"))) (show (s.get_opt (k "tsync/d/zz")))
+    (kind_of (fun () -> Store.get s (k "tsync/d/zz")));
+  p "head a size: %s\n" (match s.head_opt (k "tsync/d/a") with Some e -> string_of_int e.size | None -> "none");
+  let big = String.init (8 * 1024 * 1024) (fun i -> Char.chr ((i * 7) land 255)) in
+  s.put (k "tsync/d/big") big;
+  p "chunk-sized body identical: %b\n" (s.get_opt (k "tsync/d/big") = Some big);
+  s.copy (k "tsync/d/a") (k "tsync/d/a-copy");
+  p "copy: %s; copy of absent: %s\n" (show (s.get_opt (k "tsync/d/a-copy"))) (kind_of (fun () -> s.copy (k "tsync/d/zz") (k "tsync/d/zz2")));
+  p "\n== ranges\n";
+  s.put (k "tsync/d/r") "0123456789";
+  List.iter
+    (fun (o, l) -> p "[%d,+%d) %s\n" o l (show (s.get_range (k "tsync/d/r") o l)))
+    [(0, 3); (4, 2); (7, 3); (0, 10); (7, 100); (10, 5); (20, 1)];
+  p "absent: %s; length 0: %s\n" (show (s.get_range (k "tsync/d/zz") 0 1)) (kind_of (fun () -> s.get_range (k "tsync/d/r") 0 0));
+  p "\n== claims\n";
+  let results = Rt.map_concurrently (fun i -> s.put_if_absent (k "tsync/d/claim") (Printf.sprintf "body-%d" i)) [1; 2; 3; 4; 5] in
+  let won = List.length (List.filter (( = ) Store.Won) results) in
+  let stored = Option.get (s.get_opt (k "tsync/d/claim")) in
+  let told_holder = List.for_all (function Store.Won -> true | Held b -> b = stored) results in
+  p "five racing claims: %d won, losers told the holder: %b\n" won told_holder;
+  p "later claim: %s\n" (match s.put_if_absent (k "tsync/d/claim") "late" with Won -> "won" | Held b -> "held " ^ string_of_bool (b = stored));
+  p "same body again: %s\n" (match s.put_if_absent (k "tsync/d/claim") stored with Won -> "won" | Held _ -> "held");
+  p "free name: %s\n" (match s.put_if_absent (k "tsync/d/free") "x" with Won -> "won" | Held _ -> "held");
+  p "\n== delete\n";
+  let first = s.delete (k "tsync/d/free") in
+  let second = s.delete (k "tsync/d/free") in
+  p "delete: %b then %b\n" first second;
+  let keys = List.init 2100 (fun i -> k (Printf.sprintf "tsync/d/m/%05d" i)) in
+  let survivors = [0; 999; 1000; 1001; 2099] in
+  List.iter (fun i -> s.put (List.nth keys i) "x") survivors;
+  s.delete_multi keys;
+  p "delete_multi over 2100 keys, survivors left: %d\n"
+    (List.length (List.filter (fun i -> s.get_opt (List.nth keys i) <> None) survivors));
+  p "\n== awkward keys\n";
+  let awkward = ["tsync/d/x/& < > \" ' + % # ? space"; "tsync/d/x/élan ✓"] in
+  List.iter (fun key -> s.put (k key) key) awkward;
+  List.iter (fun key -> p "%S round-trips: %b\n" key (s.get_opt (k key) = Some key)) awkward;
+  p "listed: %b\n"
+    (List.map (fun (e : Store.entry) -> Key.to_string e.key) (s.list_prefix (Key.prefix "tsync/d/x/")) = List.sort compare awkward);
+  s.delete_multi (List.map k awkward);
+  p "after delete_multi: %d listed\n" (List.length (s.list_prefix (Key.prefix "tsync/d/x/")));
+  p "invalid keys refused before anything: %s\n"
+    (String.concat " " (List.map (fun key -> kind_of (fun () -> k key)) ["tsync/../x"; "tsync/./x"; "tsync//x"; "/tsync/x"; "tsync/x/"]));
+  p "\n== listing\n";
+  List.iter (fun i -> s.put (k (Printf.sprintf "tsync/d/l/%c" i)) "") ['c'; 'a'; 'b'; 'e'; 'd'];
+  let names l = String.concat "," (List.map (fun (e : Store.entry) -> Key.leaf e.key) l) in
+  p "all: %s\n" (names (s.list_prefix (Key.prefix "tsync/d/l/")));
+  p "max_keys 2: %s\n" (names (s.list_prefix ~max_keys:2 (Key.prefix "tsync/d/l/")));
+  p "empty prefix: %d\n" (List.length (s.list_prefix (Key.prefix "tsync/d/nothing/")));
+  p "\n== capabilities\n";
+  let c = s.capabilities (Key.domain_prefix d) in
+  p "verified %b, share_url %s\n" c.verified (show c.share_url)
