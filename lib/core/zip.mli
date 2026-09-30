@@ -4,7 +4,7 @@
 type t
 
 (** Every byte of the archive goes to [out], in order. *)
-val create : (string -> unit) -> t
+val create : (Bigstring.t -> unit) -> t
 
 val add_dir : ?mode:int -> t -> name:string -> mtime:float -> unit
 
@@ -14,11 +14,11 @@ val add_file :
   t ->
   name:string ->
   mtime:float ->
-  ((string -> unit) -> unit) ->
+  ((Bigstring.t -> unit) -> unit) ->
   unit
 
 (** Write the central directory and the end records. *)
 val finish : t -> unit
 
-(** CRC-32 (polynomial 0xEDB88320) of a substring, continuing from [crc]. *)
-val crc_update : int32 -> string -> int -> int -> int32
+(** CRC-32 (polynomial 0xEDB88320) of a slice, continuing from [crc]. *)
+val crc_update : int32 -> Bigstring.t -> int -> int -> int32

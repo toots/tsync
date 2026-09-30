@@ -9,13 +9,14 @@ let crc_table =
       done;
       !c)
 
-let crc_update crc s off len =
+let crc_update crc (s : Bigstring.t) off len =
   let c = ref (Int32.lognot crc) in
   for i = off to off + len - 1 do
     let idx =
       Int32.to_int
         (Int32.logand
-           (Int32.logxor !c (Int32.of_int (Char.code (String.unsafe_get s i))))
+           (Int32.logxor !c
+              (Int32.of_int (Char.code (Bigarray.Array1.unsafe_get s i))))
            0xffl)
     in
     c := Int32.logxor crc_table.(idx) (Int32.shift_right_logical !c 8)
@@ -33,17 +34,18 @@ type entry = {
 }
 
 type t = {
-  out : string -> unit;
+  out : Bigstring.t -> unit;
   mutable pos : int;
   mutable entries : entry list;
 }
 
 let create out = { out; pos = 0; entries = [] }
 
-let emit t s =
-  t.out s;
-  t.pos <- t.pos + String.length s
+let emit_body t b =
+  t.out b;
+  t.pos <- t.pos + Bigstring.length b
 
+let emit t s = emit_body t (Bigstring.of_string s)
 let le16 b v = Buffer.add_uint16_le b (v land 0xffff)
 let le32 b v = Buffer.add_int32_le b v
 let le32i b v = Buffer.add_int32_le b (Int32.of_int v)
@@ -100,10 +102,10 @@ let add_file ?(mode = 0o644) t ~name ~mtime body =
   let offset = t.pos in
   header t ~name ~mtime;
   let crc = ref 0l and size = ref 0 in
-  body (fun s ->
-      crc := crc_update !crc s 0 (String.length s);
-      size := !size + String.length s;
-      emit t s);
+  body (fun b ->
+      crc := crc_update !crc b 0 (Bigstring.length b);
+      size := !size + Bigstring.length b;
+      emit_body t b);
   descriptor t !crc !size;
   t.entries <-
     { name; crc = !crc; size = !size; offset; mtime; dir = false; mode }

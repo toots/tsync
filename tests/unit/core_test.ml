@@ -159,7 +159,7 @@ let () =
   Fs.mkdir_p dir;
   let path = Filename.concat dir "a.zip" in
   let oc = open_out_bin path in
-  let z = Zip.create (output_string oc) in
+  let z = Zip.create (fun b -> output_string oc (Bigstring.to_string b)) in
   let binary = String.init 300 (fun i -> Char.chr (i land 255)) in
   let members =
     [
@@ -171,7 +171,9 @@ let () =
   in
   Zip.add_dir z ~name:"d" ~mtime:0.;
   List.iter
-    (fun (name, body) -> Zip.add_file z ~name ~mtime:0. (fun feed -> feed body))
+    (fun (name, body) ->
+      Zip.add_file z ~name ~mtime:0. (fun feed ->
+          feed (Bigstring.of_string body)))
     members;
   Zip.finish z;
   close_out oc;
