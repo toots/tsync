@@ -29,8 +29,9 @@ val field : json -> string -> string option
 
 type answer =
   | Reply of json
-  | Subscribe of string * json
-      (** the reply, after which the connection carries the topic's events *)
+  | Subscribe of string * json * json list
+      (** the topic, the reply, and the first events queued once the connection
+          carries the topic's events *)
 
 type server
 

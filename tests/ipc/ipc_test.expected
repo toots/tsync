@@ -1,0 +1,47 @@
+== framing
+  > {"action":"echo","arg":1}
+  < {"ok":true,"arg":1}
+  > not json
+  < {"ok":false,"code":"invalid","error":"invalid JSON"}
+  > [1,2]
+  < {"ok":false,"code":"invalid","error":"expected a JSON object"}
+  > {"action":"nope"}
+  < {"ok":false,"code":"invalid","error":"unknown action: nope"}
+  > {"action":"fail"}
+  < {"ok":false,"code":"unreachable","error":"the store is down"}
+  > {"action":"echo","arg":"still here"}
+  < {"ok":true,"arg":"still here"}
+== over-long line
+  > xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…
+  < {"ok":false,"code":"invalid","error":"request line too long"}
+  connection closed by the server
+== client
+  {"ok":true,"arg":"hi"}
+== subscriptions
+  subscribe A: {"ok":true}
+  subscribe A: {"ok":true}
+  subscribe B: {"ok":true}
+  a1 got {"event":"recovered"}
+  a2 got {"event":"recovered"}
+  b got {"event":"recovered"}
+  publish A 1: {"ok":true,"delivered":2}
+  publish A 2: {"ok":true,"delivered":2}
+  publish C 3: {"ok":true,"delivered":0}
+  a1 got {"event":"changed","arg":1}
+  a1 got {"event":"changed","arg":2}
+  a2 got {"event":"changed","arg":1}
+  a2 got {"event":"changed","arg":2}
+  publish B 4: {"ok":true,"delivered":1}
+  b got {"event":"changed","arg":4}
+  publish A 5: {"ok":true,"delivered":1}
+  publish B 6: {"ok":true,"delivered":0}
+  a1 got {"event":"changed","arg":5}
+== no server
+  Not_serving
+  advisory to nobody returned
+== close
+  closed within 1s: true, socket file gone: true
+  a1: end of stream
+== directory checks
+  0755: denied
+  long path: invalid

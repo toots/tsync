@@ -53,6 +53,7 @@ module Line = struct
     let s = Buffer.contents t.buf in
     match String.index_opt s '\n' with
       | None -> None
+      | Some i when i > max_line -> raise Too_long
       | Some i ->
           Buffer.clear t.buf;
           Buffer.add_substring t.buf s (i + 1) (String.length s - i - 1);
@@ -104,7 +105,7 @@ module Line = struct
     go 0
 end
 
-type answer = Reply of json | Subscribe of string * json
+type answer = Reply of json | Subscribe of string * json * json list
 
 type conn = {
   line : Line.t;
@@ -160,8 +161,10 @@ let set_topic t topic f =
       let subs = Option.value ~default:[] (Hashtbl.find_opt t.topics topic) in
       Hashtbl.replace t.topics topic (f subs))
 
-let stream_events t c topic =
-  let s = { queue = Queue.create (); wake = Rt.Signal.create () } in
+let stream_events t c topic first =
+  let s =
+    { queue = Queue.of_seq (List.to_seq first); wake = Rt.Signal.create () }
+  in
   set_topic t topic (fun subs -> s :: subs);
   Fun.protect
     ~finally:(fun () -> set_topic t topic (List.filter (( != ) s)))
@@ -221,9 +224,9 @@ let serve_conn t c handler =
                   | Reply r ->
                       reply r;
                       loop ()
-                  | Subscribe (topic, r) ->
+                  | Subscribe (topic, r, first) ->
                       reply r;
-                      stream_events t c topic
+                      stream_events t c topic first
                   | exception e ->
                       reply (failure (Fail.classify e));
                       loop ()))

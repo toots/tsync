@@ -39,7 +39,8 @@ let handler server req =
     | Some "fail" -> Fail.raise_ Fail.Unreachable "the store is down"
     | Some "subscribe" ->
         let topic = Option.value ~default:"" (Ipc.field req "domain") in
-        Ipc.Subscribe (topic, Ipc.ok [])
+        Ipc.Subscribe
+          (topic, Ipc.ok [], [`Assoc [("event", `String "recovered")]])
     | Some "publish" ->
         let topic = Option.value ~default:"" (Ipc.field req "domain") in
         let n =
@@ -99,15 +100,18 @@ let () =
         in
         p "  publish %s %d: %s" topic arg (str r)
       in
-      let a1 = sub "A" and a2 = sub "A" and b = sub "B" in
-      publish "A" 1;
-      publish "A" 2;
-      publish "C" 3;
       let next name c =
         match Ipc.Client.next ~timeout:2. c with
           | Some ev -> p "  %s got %s" name (str ev)
           | None -> p "  %s: end of stream" name
       in
+      let a1 = sub "A" and a2 = sub "A" and b = sub "B" in
+      next "a1" a1;
+      next "a2" a2;
+      next "b" b;
+      publish "A" 1;
+      publish "A" 2;
+      publish "C" 3;
       next "a1" a1;
       next "a1" a1;
       next "a2" a2;
