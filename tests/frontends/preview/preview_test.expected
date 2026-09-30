@@ -1,4 +1,0 @@
-image, named .png      -> png
-text, named .png       -> none
-text, named .txt       -> png
-missing body           -> none

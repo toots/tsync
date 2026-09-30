@@ -1,9 +1,0 @@
-; Where a checkout keeps things on disk, and the index of which directory
-; carries which folder id: the leaf the journal and the store reach as well.
-
-(library
- (flags
-  (:standard -open Tsync_io -open Tsync_core))
- (name tsync_cache_layout)
- (public_name tsync-libs.cache_layout)
- (libraries tsync_io tsync_core unix yojson))

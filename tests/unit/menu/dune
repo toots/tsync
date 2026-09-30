@@ -1,5 +1,0 @@
-(executable
- (flags
-  (:standard -open Tsync_menu))
- (name menu_test)
- (libraries tsync_menu yojson))

@@ -1,5 +1,0 @@
-(executable
- (flags
-  (:standard -open Tsync_io -open Tsync_core))
- (name stored_key_test)
- (libraries tsync_io tsync_core))

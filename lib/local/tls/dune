@@ -1,6 +1,0 @@
-(library
- (flags
-  (:standard -open Tsync_core))
- (name tsync_tls)
- (public_name tsync-libs.tls)
- (libraries conduit-lwt-unix tsync_core))

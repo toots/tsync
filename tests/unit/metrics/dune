@@ -1,5 +1,0 @@
-(test
- (flags
-  (:standard -open Tsync_core))
- (name metrics_test)
- (libraries tsync_core))

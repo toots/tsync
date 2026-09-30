@@ -1,5 +1,0 @@
-(executable
- (flags
-  (:standard -open Tsync_diagnostics))
- (name status_report_test)
- (libraries tsync_diagnostics yojson))

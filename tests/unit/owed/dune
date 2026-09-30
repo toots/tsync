@@ -1,5 +1,0 @@
-(executable
- (flags
-  (:standard -open Tsync_checkout_lwt -open Tsync_test_harness))
- (name owed_test)
- (libraries tsync_checkout_lwt tsync_test_harness lwt lwt.unix unix))

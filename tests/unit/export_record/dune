@@ -1,5 +1,0 @@
-(executable
- (flags
-  (:standard -open Tsync_ops))
- (name export_record)
- (libraries tsync-libs.ops))

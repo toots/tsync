@@ -1,5 +1,0 @@
-(executable
- (flags
-  (:standard -open Tsync_core))
- (name hash)
- (libraries tsync_core))

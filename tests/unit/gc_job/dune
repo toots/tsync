@@ -1,5 +1,0 @@
-(executable
- (flags
-  (:standard -open Tsync_core))
- (name gc_job)
- (libraries tsync-libs.core tsync_core unix))

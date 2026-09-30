@@ -1,7 +1,0 @@
-; The binary is a name and an entry point; everything it does is tsync_cli.
-
-(executable
- (name tsync)
- (public_name tsync)
- (package tsync)
- (libraries tsync_cli))
