@@ -36,12 +36,14 @@ let fold_owners config : R.machine =
   {
     host = Unix.gethostname ();
     domains =
-      List.concat_map
-        (fun (name, a) ->
-          match a with
-            | Ok (x : R.answer) -> x.domains
-            | Error _ -> [R.Unanswered name])
-        owners;
+      R.with_presented
+        (List.concat_map
+           (fun (name, a) ->
+             match a with
+               | Ok (x : R.answer) -> x.domains
+               | Error _ -> [R.Unanswered name])
+           owners)
+        (match server with Ok x -> x.presented | Error _ -> []);
     processes =
       (List.map (fun (name, a) -> process ~role:"owner" ~serves:[name] a) owners
       @

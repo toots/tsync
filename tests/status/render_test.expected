@@ -7,6 +7,8 @@ Domain Media
   read-only        yes
   cache            7494 chunks, 9.9 GiB of 10.0 GiB
   Frontend fuse       pid 101  /home/u/tsync/Media
+  Frontend http-proxy pid 102  port 5446  shared  share links
+    io               read 3.0 MiB, written 1.0 KiB
   Backend gcs (gcs, main)  bucket media-bucket
     link             wan
     reachable        yes (51 ms)

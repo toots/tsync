@@ -635,6 +635,9 @@ let host ~mount domains ~run =
                 open_handles = Some (Atomic.get t.open_handles);
                 bytes_read = Some (Atomic.get t.bytes_read);
                 bytes_written = Some (Atomic.get t.bytes_written);
+                shared = false;
+                read_only = None;
+                shares = None;
                 unanswered = false;
               });
       }

@@ -132,6 +132,9 @@ let frontend b (f : frontend) =
             Option.map (Printf.sprintf "pid %d") f.pid;
             f.mount;
             Option.map (Printf.sprintf "port %d") f.port;
+            (if f.shared then Some "shared" else None);
+            (if f.read_only = Some true then Some "read-only" else None);
+            (if f.shares = Some true then Some "share links" else None);
           ]))
     (if f.unanswered then "  NOT ANSWERING" else "");
   (match f.open_handles with

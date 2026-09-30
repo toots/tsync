@@ -75,7 +75,30 @@ let fuse : frontend =
     open_handles = Some 0;
     bytes_read = Some 0;
     bytes_written = Some 0;
+    shared = false;
+    read_only = None;
+    shares = None;
     unanswered = false;
+  }
+
+(* Presented by the store server, merged into the owner's section. *)
+let proxy : presented =
+  {
+    domain = "Media";
+    frontend =
+      {
+        fuse with
+        kind = "http-proxy";
+        pid = Some 102;
+        mount = None;
+        port = Some 5446;
+        open_handles = None;
+        bytes_read = Some 3145728;
+        bytes_written = Some 1024;
+        shared = true;
+        read_only = Some false;
+        shares = Some true;
+      };
   }
 
 let gcs : backend =
@@ -131,27 +154,29 @@ let healthy : machine =
   {
     host = "example";
     domains =
-      [
-        Answered
-          {
-            name = "Media";
-            paused = false;
-            main_offline = false;
-            settings;
-            sync = idle_sync;
-            cache =
-              {
-                chunks = 7494;
-                bytes = 10630044876;
-                pinned_bytes = 0;
-                max_cache = Some 10737418240;
-              };
-            wal = clean_wal;
-            queues = no_queues;
-            frontends = [fuse];
-            backends = [gcs];
-          };
-      ];
+      with_presented
+        [
+          Answered
+            {
+              name = "Media";
+              paused = false;
+              main_offline = false;
+              settings;
+              sync = idle_sync;
+              cache =
+                {
+                  chunks = 7494;
+                  bytes = 10630044876;
+                  pinned_bytes = 0;
+                  max_cache = Some 10737418240;
+                };
+              wal = clean_wal;
+              queues = no_queues;
+              frontends = [fuse];
+              backends = [gcs];
+            };
+        ]
+        [proxy; { proxy with domain = "Elsewhere" }];
     processes =
       [
         {

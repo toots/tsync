@@ -145,6 +145,9 @@ type frontend = {
   open_handles : int option; [@key "openHandles"] [@default None]
   bytes_read : int option; [@key "bytesRead"] [@default None]
   bytes_written : int option; [@key "bytesWritten"] [@default None]
+  shared : bool; [@default false]
+  read_only : bool option; [@key "readOnly"] [@default None]
+  shares : bool option; [@default None]
   unanswered : bool; [@default false]
 }
 [@@deriving yojson { strict = false }]
@@ -351,8 +354,32 @@ type warning = {
 }
 [@@deriving yojson { strict = false }]
 
-type answer = { domains : domain list; [@default []] self : self }
+type presented = { domain : string; frontend : frontend }
 [@@deriving yojson { strict = false }]
+
+type answer = {
+  domains : domain list; [@default []]
+  presented : presented list; [@default []]
+  self : self;
+}
+[@@deriving yojson { strict = false }]
+
+let with_presented domains presented =
+  List.map
+    (function
+      | Answered body ->
+          Answered
+            {
+              body with
+              frontends =
+                body.frontends
+                @ List.filter_map
+                    (fun p ->
+                      if p.domain = body.name then Some p.frontend else None)
+                    presented;
+            }
+      | Unanswered _ as d -> d)
+    domains
 
 type machine = {
   host : string;

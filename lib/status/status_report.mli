@@ -111,6 +111,9 @@ type frontend = {
   open_handles : int option;
   bytes_read : int option;
   bytes_written : int option;
+  shared : bool;  (** one listener serving several domains *)
+  read_only : bool option;
+  shares : bool option;  (** serves share links *)
   unanswered : bool;
 }
 [@@deriving yojson]
@@ -230,8 +233,18 @@ type warning = {
 }
 [@@deriving yojson]
 
-(** A process's answer to [stats]. *)
-type answer = { domains : domain list; self : self } [@@deriving yojson]
+(** A frontend another process presents for a domain: a shared listener
+    (frontends/http-proxy §A10). *)
+type presented = { domain : string; frontend : frontend } [@@deriving yojson]
+
+(** A process's answer to [stats]: the domains it owns, and the frontends it
+    presents for domains others own. *)
+type answer = { domains : domain list; presented : presented list; self : self }
+[@@deriving yojson]
+
+(** Each presented frontend appended to its domain's section; one for an
+    unanswered domain is dropped. *)
+val with_presented : domain list -> presented list -> domain list
 
 type machine = {
   host : string;

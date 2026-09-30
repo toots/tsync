@@ -26,7 +26,10 @@ type t = {
   gates : Watch_gates.t;
   share_slots : Rt.Semaphore.t;
   tallies : (string, int Atomic.t) Hashtbl.t;
+  traffic : (string, traffic) Hashtbl.t;  (** per route name *)
 }
+
+and traffic = { read : int Atomic.t; written : int Atomic.t }
 
 let tally_names =
   [
@@ -93,6 +96,14 @@ let create ?max_concurrent ?listener routes =
     tallies =
       (let h = Hashtbl.create 32 in
        List.iter (fun n -> Hashtbl.replace h n (Atomic.make 0)) tally_names;
+       h);
+    traffic =
+      (let h = Hashtbl.create 4 in
+       List.iter
+         (fun route ->
+           Hashtbl.replace h route.name
+             { read = Atomic.make 0; written = Atomic.make 0 })
+         routes;
        h);
   }
 
@@ -724,6 +735,32 @@ let serve_share t (r : Server.request) params rest =
         Rt.Semaphore.release t.share_slots;
         raise e
 
+(* §A12: bytes clients wrote in request bodies and read in answers, per route. *)
+let counted t route body (response : Server.response) =
+  match Hashtbl.find_opt t.traffic route.name with
+    | None -> response
+    | Some c -> (
+        ignore (Atomic.fetch_and_add c.written (Bigstring.length body));
+        let add n = ignore (Atomic.fetch_and_add c.read n) in
+        match response.body with
+          | Empty -> response
+          | String s ->
+              add (String.length s);
+              response
+          | Bigstring b ->
+              add (Bigstring.length b);
+              response
+          | Stream f ->
+              {
+                response with
+                body =
+                  Stream
+                    (fun write ->
+                      f (fun chunk ->
+                          add (Bigstring.length chunk);
+                          write chunk));
+              })
+
 (* The wire's processing order (backends/http-proxy §6.1). *)
 let handle t (r : Server.request) read_body =
   try
@@ -763,7 +800,7 @@ let handle t (r : Server.request) read_body =
               with
                 | None -> unauthorized t
                 | Some route -> (
-                    try execute t route op body
+                    try counted t route body (execute t route op body)
                     with Fail.E f -> store_failure t f)
             in
             let go () =
@@ -790,28 +827,63 @@ let owner_poke (d : Domain_name.t) () =
          ("domain", `String (Domain_name.to_string d));
        ])
 
+let presented t route : Tsync_status.Status_report.presented =
+  let traffic = Hashtbl.find_opt t.traffic route.name in
+  {
+    domain = route.name;
+    frontend =
+      {
+        kind = "http-proxy";
+        pid = Some (Unix.getpid ());
+        mount = None;
+        port =
+          Option.map (fun (l : Proxy_options.listener) -> l.port) t.listener;
+        open_handles = None;
+        bytes_read = Option.map (fun c -> Atomic.get c.read) traffic;
+        bytes_written = Option.map (fun c -> Atomic.get c.written) traffic;
+        shared = true;
+        read_only = Some route.read_only;
+        shares = Some (route.share <> None);
+        unanswered = false;
+      };
+  }
+
+(* §A11: answers for itself only; a route named by [domain] alone, else every
+   route. [status] is the same report as [stats]. *)
 let control t stop req =
+  let module P = Tsync_owner.Protocol in
+  let routes =
+    match Tsync_ipc.Ipc.field req "domain" with
+      | Some d when List.exists (fun r -> r.name = d) t.routes ->
+          List.filter (fun r -> r.name = d) t.routes
+      | _ -> t.routes
+  in
+  let stats () : Tsync_status.Status_report.answer =
+    {
+      domains = [];
+      presented = List.map (presented t) routes;
+      self =
+        Tsync_status.Self_report.self ~role:"store-server"
+          ~serves:(List.map (fun r -> r.name) t.routes)
+          ();
+    }
+  in
+  let answer : type a. a P.request -> a = function
+    | Ping -> ()
+    | Stop -> (stop () : unit)
+    | Stats _ -> stats ()
+    | r -> Fail.invalid "unknown action: %s" (P.action r)
+  in
   let reply =
-    let module P = Tsync_owner.Protocol in
-    let answer : type a. a P.request -> a = function
-      | Ping -> ()
-      | Stop -> (stop () : unit)
-      | Stats _ ->
-          {
-            domains = [];
-            self =
-              Tsync_status.Self_report.self ~role:"store-server"
-                ~serves:(List.map (fun r -> r.name) t.routes)
-                ();
-          }
-      | r -> Fail.invalid "%s is answered by a domain's owner" (P.action r)
-    in
-    match P.decode req with
-      | Request r -> (
-          match answer r with
-            | reply -> P.encode_reply r reply
+    match Tsync_ipc.Ipc.field req "action" with
+      | Some "status" -> P.encode_reply (Stats []) (stats ())
+      | _ -> (
+          match P.decode req with
+            | Request r -> (
+                match answer r with
+                  | reply -> P.encode_reply r reply
+                  | exception e -> Tsync_ipc.Ipc.failure (Fail.classify e))
             | exception e -> Tsync_ipc.Ipc.failure (Fail.classify e))
-      | exception e -> Tsync_ipc.Ipc.failure (Fail.classify e)
   in
   Tsync_ipc.Ipc.Reply reply
 
@@ -832,12 +904,12 @@ let run config =
         Log.info "http-proxy: no domain lists the frontend";
         0
     | Some (listener, bindings) -> (
-        if listener.tls <> None then
-          raise
-            (Fail.E
-               (Fail.make Fail.Refused
-                  "http-proxy: in-process TLS is not built yet; terminate TLS \
-                   in a reverse proxy"));
+        let tls =
+          Option.map
+            (fun (certificate, key) ->
+              Tsync_http.Transport.server_tls ~certificate ~key)
+            listener.tls
+        in
         let routes =
           List.map
             (fun (b : Proxy_options.binding) ->
@@ -870,7 +942,8 @@ let run config =
             (control t Stop.request)
         in
         match
-          Server.serve ~limits:listener.limits (addresses listener) (handle t)
+          Server.serve ~limits:listener.limits ?tls (addresses listener)
+            (handle t)
         with
           | exception e ->
               Log.err "http-proxy: cannot listen on port %d: %s" listener.port
@@ -878,9 +951,10 @@ let run config =
               Tsync_ipc.Ipc.close ctl;
               1
           | server ->
-              Log.info "http-proxy: serving %s on port %d"
+              Log.info "http-proxy: serving %s on port %d%s"
                 (String.concat ", " (List.map (fun r -> r.name) routes))
-                listener.port;
+                listener.port
+                (if tls = None then "" else " (TLS)");
               Stop.wait ();
               Server.close server;
               Tsync_ipc.Ipc.close ctl;

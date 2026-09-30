@@ -130,6 +130,7 @@ let route ~draining served req =
 let stats_reply reports report : Tsync_status.Status_report.answer =
   {
     domains = [Answered (Report.domain_body report)];
+    presented = [];
     self =
       Tsync_status.Self_report.self
         ~traffic:(Report.traffic (List.map snd reports))

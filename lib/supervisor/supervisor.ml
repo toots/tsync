@@ -297,6 +297,13 @@ let machine_report arg children : R.machine =
             ans)
       (List.combine children answers)
   in
+  let domains =
+    R.with_presented domains
+      (List.concat_map
+         (List.concat_map (fun (_, a) ->
+              match a with Ok (x : R.answer) -> x.presented | Error _ -> []))
+         answers)
+  in
   {
     host = Unix.gethostname ();
     domains;
