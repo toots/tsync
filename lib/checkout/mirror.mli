@@ -6,7 +6,6 @@
     ever replaced by rename. *)
 
 open Tsync_core
-open Tsync_remote
 
 type t
 

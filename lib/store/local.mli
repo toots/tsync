@@ -8,20 +8,11 @@
 (** The driver's config fields (backends/local §2). *)
 val fields : Tsync_core.Field_spec.field list
 
-(** The collection's reference gate (gc §5.4), run around every put or copy
-    whose destination is in a manifest or version area. It receives the body
-    being put, or the key being copied, and the write to perform. *)
-type gate =
-  key:Tsync_core.Key.t ->
-  source:[ `Body of Tsync_core.Bigstring.t | `Copy_of of Tsync_core.Key.t ] ->
-  (unit -> unit) ->
-  unit
-
 (** [root] is absolute or starts with [~/]; it need not exist. With
     [verify_writes] (the default) every chunk written is read back and its
-    corruption marker filed or cleared. [gate] can be installed later. *)
-val create :
-  ?verify_writes:bool -> ?gate:gate Atomic.t -> name:string -> string -> Store.t
+    corruption marker filed or cleared. On a root local to this host, chunk
+    accesses and reference writes go through {!Chunk_spaces}. *)
+val create : ?verify_writes:bool -> name:string -> string -> Store.t
 
 (** A fresh random-form temporary name, [.tsync-tmp-<hex>.tmp]. *)
 val temp_name : unit -> string

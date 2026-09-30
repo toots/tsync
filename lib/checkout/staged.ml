@@ -1,5 +1,4 @@
 open Tsync_core
-open Tsync_remote
 
 type slot = Inherit | Zero | Staged of { body : string; off : int }
 type content = Slots of slot array | Whole of string

@@ -10,38 +10,12 @@ exception Source_changed of string
 
 let snapshot_deadline = 10.
 let corruption_ttl = 5.
-let run_ttl = 5.
-
-let read_generation (store : Store.t) d =
-  match store.get_opt (Key.gc_generation d) with
-    | None -> Some 0
-    | Some b -> (
-        match Yojson.Safe.from_string (Bigstring.to_string b) with
-          | `Assoc f -> (
-              match List.assoc_opt "generation" f with
-                | Some (`Int g) when g >= 0 -> Some g
-                | _ -> None)
-          | _ -> None
-          | exception _ -> None)
 
 module Make (C : Context.S) = struct
   let d = C.domain
   let store = C.store
   let buffers = Rt.Semaphore.create ~name:"chunk-buffers" C.max_chunk_buffers
   let downloads = Rt.Semaphore.create ~name:"downloads" C.max_downloads
-
-  (* A cached "is a run open" bit only orders lookups; a miss re-reads it. *)
-  let run_cache = Atomic.make (false, neg_infinity)
-
-  let run_present ?(fresh = false) () =
-    let v, at = Atomic.get run_cache in
-    if (not fresh) && Rt.now () -. at < run_ttl then v
-    else (
-      let v = store.head_opt (Key.gc_run d) <> None in
-      Atomic.set run_cache (v, Rt.now ());
-      v)
-
-  let generation () = read_generation store d
   let resolved_chunk_size = Atomic.make None
 
   (* 01 §3.5: configured, else the main's recommendation within range, else
@@ -137,9 +111,7 @@ module Make (C : Context.S) = struct
     Mutex.protect memo_m (fun () ->
         List.iter (fun ck -> Hashtbl.remove memo (Chunk_key.to_string ck)) cks)
 
-  let present ck =
-    store.head_opt (Key.chunk d ck) <> None
-    || (run_present () && store.head_opt (Key.chunk_from d ck) <> None)
+  let present ck = store.head_opt (Key.chunk d ck) <> None
 
   (* 02 §4.1: a marked chunk is never deduplicated against; the memo only
      spares a presence check. *)
@@ -154,16 +126,8 @@ module Make (C : Context.S) = struct
     Rt.Semaphore.with_slot downloads (fun () ->
         match store.get_opt (Key.chunk d ck) with
           | Some b -> b
-          | None -> (
-              match
-                if run_present ~fresh:true () then
-                  store.get_opt (Key.chunk_from d ck)
-                else None
-              with
-                | Some b -> b
-                | None ->
-                    Fail.corrupt "chunk %s is on no store"
-                      (Chunk_key.to_string ck)))
+          | None ->
+              Fail.corrupt "chunk %s is on no store" (Chunk_key.to_string ck))
 
   let get_verified_chunk ck =
     let check b = Chunk_key.equal (Chunk_key.of_bigstring b) ck in
@@ -178,15 +142,7 @@ module Make (C : Context.S) = struct
 
   let get_chunk_range ck off len =
     Rt.Semaphore.with_slot downloads (fun () ->
-        let r =
-          match store.get_range (Key.chunk d ck) off len with
-            | Some b -> Some b
-            | None ->
-                if run_present ~fresh:true () then
-                  store.get_range (Key.chunk_from d ck) off len
-                else None
-        in
-        match r with
+        match store.get_range (Key.chunk d ck) off len with
           | Some b -> b
           | None ->
               Fail.corrupt "chunk %s is on no store" (Chunk_key.to_string ck))

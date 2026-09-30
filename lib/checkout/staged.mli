@@ -3,7 +3,6 @@
 *)
 
 open Tsync_core
-open Tsync_remote
 
 (** Where chunk [i] of an edit comes from: the base's chunk, a hole, or bytes of
     a staged body at an offset. *)

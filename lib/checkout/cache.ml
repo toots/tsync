@@ -1,5 +1,4 @@
 open Tsync_core
-open Tsync_remote
 
 let read_deadline = 15.
 let touch_interval = 60.

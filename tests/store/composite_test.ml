@@ -21,18 +21,17 @@ let switchable (s : Store.t) =
         (fun ?max_keys pr -> g (fun () -> s.list_prefix ?max_keys pr));
     } )
 
-(* Manifests here are "manifest:<chunk>,<chunk>". *)
+let manifest_body cks =
+  let cs = Chunking.chunk_size_min in
+  (Manifest.make ~name:"f"
+     ~size:(List.length cks * cs)
+     ~mtime:0. ~chunk_size:cs cks)
+    .body
+
 let knowledge =
   {
     Composite.describe = (fun _ -> None);
-    chunk_names =
-      (fun b ->
-        let b = Bigstring.to_string b in
-        if String.starts_with ~prefix:"manifest:" b then
-          List.filter_map Chunk_key.of_string
-            (String.split_on_char ',' (String.sub b 9 (String.length b - 9)))
-        else []);
-    generation = (fun () -> None);
+    chunk_names = Manifest.chunk_names;
     is_index =
       (fun key -> String.ends_with ~suffix:".tsync-index" (Key.to_string key));
     is_journal =
@@ -91,9 +90,7 @@ let () =
       Contract.put s (Key.chunk d ck1) "one";
       Contract.put s (Key.chunk d ck2) "two";
       let manifest = k "tsync/d/manifests/.tsync-root/aaaa" in
-      Contract.put s manifest
-        (Printf.sprintf "manifest:%s,%s" (Chunk_key.to_string ck1)
-           (Chunk_key.to_string ck2));
+      Contract.put s manifest (manifest_body [ck1; ck2]);
       Contract.put s (k "tsync/d/journal/2026-09/1790000000000-abc") "entry";
       Contract.put s (Key.cursor d) "1790000000000-abc";
       Contract.put s (k "tsync/d/manifests/.tsync-root/.tsync-index") "index";
@@ -125,9 +122,18 @@ let () =
       p "after delete, replica manifest %b\n" (has replica manifest);
       p "\n== a manifest naming a chunk no main holds parks, degraded\n";
       let ghost = Chunk_key.of_body "ghost" in
+      p "the gate refuses it: %s\n"
+        (kind (fun () ->
+             Contract.put s
+               (k "tsync/d/manifests/.tsync-root/bbbb")
+               (manifest_body [ghost])));
+      Composite.pause c;
+      Contract.put main (Key.chunk d ghost) "ghost";
       Contract.put s
         (k "tsync/d/manifests/.tsync-root/bbbb")
-        ("manifest:" ^ Chunk_key.to_string ghost);
+        (manifest_body [ghost]);
+      ignore (main.delete (Key.chunk d ghost));
+      Composite.resume c;
       Composite.settle ~timeout:10. c;
       List.iter
         (fun (n, _, (note : Dqueue.failure_note)) ->

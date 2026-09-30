@@ -16,6 +16,7 @@ backfill: chunks true true, manifest true, journal false, cursor false, index fa
 after delete, replica manifest false
 
 == a manifest naming a chunk no main holds parks, degraded
+the gate refuses it: corrupt/missing_chunks
 replica parked: corrupt/other
 backfill parked: corrupt/other
 replica holds it: false

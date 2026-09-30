@@ -98,6 +98,21 @@ val chunk_of : t -> Chunk_key.t option
 (** The marker key of a surviving-space chunk key, of any domain. *)
 val marker_of : t -> t option
 
+(** A surviving-space chunk key of any domain, split. *)
+val chunk_parts : t -> (Domain_name.t * Chunk_key.t) option
+
+(** An outgoing-space chunk key of any domain, split. *)
+val outgoing_chunk : t -> (Domain_name.t * Chunk_key.t) option
+
+(** Any key inside an outgoing space, chunk or not. *)
+val is_outgoing : t -> bool
+
+(** The outgoing-space prefix matching a prefix inside a surviving space. *)
+val outgoing_prefix : prefix -> prefix option
+
+(** The domain of a key in a manifest or version area. *)
+val domain_of_reference : t -> Domain_name.t option
+
 val chunk_of_marker : t -> (Domain_name.t * Chunk_key.t) option
 val parse_verify_job : t -> (Domain_name.t * string) option
 

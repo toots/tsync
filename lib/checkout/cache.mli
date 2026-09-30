@@ -4,7 +4,6 @@
     whole and verified before they are installed. *)
 
 open Tsync_core
-open Tsync_remote
 
 val read_deadline : float
 val default_cache_chunk_size : int

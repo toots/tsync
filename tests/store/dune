@@ -116,3 +116,35 @@
  (alias runtest)
  (action
   (diff share_test.expected share_test.output)))
+
+(executable
+ (name spaces_test)
+ (modules spaces_test)
+ (libraries contract tsync_core tsync_store unix))
+
+(rule
+ (with-stdout-to
+  spaces_test.output
+  (run ./spaces_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff spaces_test.expected spaces_test.output)))
+
+; Which library sources know the collection exists (gc.md §5.8, §10 "Scoped
+; access"): a new name in this list is a caller that learned about GC.
+
+(rule
+ (deps
+  (source_tree %{workspace_root}/lib))
+ (action
+  (with-stdout-to
+   gc_scoping.output
+   (system
+    "cd %{workspace_root}/lib && grep -rlE 'Key\\.(chunks_from|chunk_from|gc_run|gc_lock|gc_generation|outgoing_chunk|outgoing_prefix|is_outgoing)|Gc_generation\\.|Chunk_spaces\\.' --include='*.ml' --exclude-dir=.formatted . | sort"))))
+
+(rule
+ (alias runtest)
+ (action
+  (diff gc_scoping.expected gc_scoping.output)))

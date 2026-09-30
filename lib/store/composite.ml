@@ -145,7 +145,6 @@ type member = { name : string; role : role; store : Store.t }
 type knowledge = {
   chunk_names : Bigstring.t -> Chunk_key.t list;
   describe : Bigstring.t -> (string * int) option;
-  generation : unit -> int option;
   is_index : Key.t -> bool;
   is_journal : Key.t -> bool;
 }
@@ -166,8 +165,7 @@ type copy = {
   records : Dqueue.Records.t;
   queue : record Dqueue.t;
   memo_m : Mutex.t;
-  ensured : (string, int) Hashtbl.t;
-  known_shards : (string, int) Hashtbl.t;
+  memo : Copy_memo.t;
   forwards : Rt.Semaphore.t;
   mutable running : running option;  (** under [memo_m] *)
 }
@@ -269,39 +267,21 @@ let fill t job =
               t.poke ()))
     t.copies
 
-let generation_even t =
-  match t.knowledge.generation () with
-    | Some g when g mod 2 = 0 -> Some g
-    | _ -> None
-
-let relies c g k =
-  match g with
-    | None -> false
-    | Some g ->
-        Mutex.protect c.memo_m (fun () ->
-            Hashtbl.find_opt c.ensured (Chunk_key.to_string k) = Some g)
-
-let note c g k =
-  match g with
-    | Some g ->
-        Mutex.protect c.memo_m (fun () ->
-            Hashtbl.replace c.ensured (Chunk_key.to_string k) g)
-    | None -> ()
-
 (* A best-effort forward of a chunk to a copy: never blocks the writer, and a
    forward that does not happen is fetched by the manifest's job. *)
-let forward_chunk t c key body =
+let forward_chunk c key body =
   match Key.chunk_of key with
     | None -> ()
     | Some ck ->
-        let g = generation_even t in
-        if (not (relies c g ck)) && Rt.Semaphore.try_acquire c.forwards then
+        let v = Copy_memo.look c.memo in
+        if (not (Copy_memo.holds v ck)) && Rt.Semaphore.try_acquire c.forwards
+        then
           Rt.spawn ~name:"forward" (fun () ->
               Fun.protect
                 ~finally:(fun () -> Rt.Semaphore.release c.forwards)
                 (fun () ->
                   match c.member.store.put ~mode:Store.Best_effort key body with
-                    | () -> note c g ck
+                    | () -> Copy_memo.note v ck
                     | exception Rt.Cancelled -> ()
                     | exception e ->
                         Log.debug "forward %s to %s: %s" (Key.to_string key)
@@ -317,7 +297,7 @@ let put t ?mode key body =
   m0.store.put ?mode key body;
   if t.owner && Key.chunk_of key <> None then
     List.iter
-      (fun c -> if not (skip t c key) then forward_chunk t c key body)
+      (fun c -> if not (skip t c key) then forward_chunk c key body)
       t.copies;
   fill t (Put key);
   List.iter (fun m -> m.store.put ?mode key body) (List.tl t.mains)
@@ -375,14 +355,10 @@ let progress c f = Mutex.protect c.memo_m (fun () -> Option.iter f c.running)
 let rec sync t src c key restarts =
   match src.Store.get_opt key with
     | None ->
-        (match Key.chunk_of key with
-          | Some ck ->
-              Mutex.protect c.memo_m (fun () ->
-                  Hashtbl.remove c.ensured (Chunk_key.to_string ck))
-          | None -> ());
+        Option.iter (fun ck -> Copy_memo.forget c.memo [ck]) (Key.chunk_of key);
         ignore (c.member.store.delete key)
     | Some b -> (
-        let g = generation_even t in
+        let v = Copy_memo.look c.memo in
         let names = t.knowledge.chunk_names b in
         progress c (fun r ->
             r.chunks <- List.length names;
@@ -391,7 +367,7 @@ let rec sync t src c key restarts =
         let missing =
           List.find_opt
             (fun ck ->
-              let held = ensure_chunk t src c g ck in
+              let held = ensure_chunk t src c v ck in
               progress c (fun r -> r.checked <- r.checked + 1);
               not held)
             names
@@ -409,51 +385,29 @@ let rec sync t src c key restarts =
                 Fail.corrupt "source names a chunk no main holds: %s names %s"
                   (Key.to_string key) (Chunk_key.to_string ck))
 
-and ensure_chunk t (src : Store.t) c g ck =
+and ensure_chunk t (src : Store.t) c v ck =
   let d = t.domain in
-  if relies c g ck then true
-  else (
-    let known =
-      match g with
-        | Some g ->
-            let sss = Chunk_key.shard ck in
-            if
-              Mutex.protect c.memo_m (fun () ->
-                  Hashtbl.find_opt c.known_shards sss <> Some g)
-            then (
-              let listing =
-                c.member.store.list_prefix (Key.shard_prefix d sss)
-              in
-              Mutex.protect c.memo_m (fun () ->
-                  List.iter
-                    (fun (e : Store.entry) ->
-                      Hashtbl.replace c.ensured (Key.leaf e.key) g)
-                    listing;
-                  Hashtbl.replace c.known_shards sss g));
-            relies c (Some g) ck
-        | None -> c.member.store.head_opt (Key.chunk d ck) <> None
-    in
-    known
-    ||
-    let body =
-      match src.get_opt (Key.chunk d ck) with
-        | Some b -> Some b
-        | None -> src.get_opt (Key.chunk_from d ck)
-    in
-    match body with
-      | None -> false
-      | Some b ->
-          c.member.store.put (Key.chunk d ck) b;
-          progress c (fun r -> r.sent <- r.sent + Bigstring.length b);
-          note c g ck;
-          true)
+  let known () =
+    if Copy_memo.trusted v then (
+      let sss = Chunk_key.shard ck in
+      Copy_memo.learn_shard v sss (fun () ->
+          List.filter_map
+            (fun (e : Store.entry) -> Key.chunk_of e.key)
+            (c.member.store.list_prefix (Key.shard_prefix d sss)));
+      Copy_memo.holds v ck)
+    else c.member.store.head_opt (Key.chunk d ck) <> None
+  in
+  Copy_memo.holds v ck || known ()
+  ||
+    match src.get_opt (Key.chunk d ck) with
+    | None -> false
+    | Some b ->
+        c.member.store.put (Key.chunk d ck) b;
+        progress c (fun r -> r.sent <- r.sent + Bigstring.length b);
+        Copy_memo.note v ck;
+        true
 
-let main_holds t (src : Store.t) key =
-  match Key.chunk_of key with
-    | Some ck ->
-        src.head_opt (Key.chunk t.domain ck) <> None
-        || src.head_opt (Key.chunk_from t.domain ck) <> None
-    | None -> src.head_opt key <> None
+let main_holds (src : Store.t) key = src.head_opt key <> None
 
 let job_key = function
   | Put k | Delete k | Copy (_, k) -> Key.to_string k
@@ -467,13 +421,11 @@ let run_job_body t src c r =
     | Copy (_, d) -> sync t src c d 0
     | Delete_many ks -> List.iter (fun k -> sync t src c k 0) ks
     | Collection_delete cd ->
-        let ks = List.filter (fun k -> not (main_holds t src k)) cd.keys in
-        Mutex.protect c.memo_m (fun () ->
-            List.iter (fun k -> Hashtbl.remove c.ensured (Key.leaf k)) ks;
-            Hashtbl.clear c.known_shards);
+        let ks = List.filter (fun k -> not (main_holds src k)) cd.keys in
+        Copy_memo.forget c.memo (List.filter_map Key.chunk_of ks);
         let markers = List.filter_map Key.marker_of ks in
         c.member.store.delete_multi (ks @ markers);
-        List.iter (fun k -> if main_holds t src k then sync t src c k 0) cd.keys
+        List.iter (fun k -> if main_holds src k then sync t src c k 0) cd.keys
 
 let run_job t src c _id r ~cancel:_ =
   Mutex.protect c.memo_m (fun () ->
@@ -629,6 +581,21 @@ let make_store t ~source_only =
       traffic = None;
     }
 
+(* G lives on the collecting main only; the others read as 0, and any main
+   that cannot answer makes it unknown. *)
+let main_generation domain mains =
+  List.fold_left
+    (fun acc m ->
+      match acc with
+        | None -> None
+        | Some g -> (
+            match Gc_generation.read m.store domain with
+              | Some g' -> Some (max g g')
+              | None -> None
+              | exception ((Stop.Stopping | Rt.Cancelled) as e) -> raise e
+              | exception _ -> None))
+    (Some 0) mains
+
 let create ~domain ~data_dir ~owner ~poke ~knowledge members =
   let mains = List.filter (fun m -> m.role = Main) members in
   let archives = List.filter (fun m -> m.role = Read_only) members in
@@ -636,6 +603,7 @@ let create ~domain ~data_dir ~owner ~poke ~knowledge members =
     List.filter (fun m -> m.role = Replica) members
     @ List.filter (fun m -> m.role = Backfill) members
   in
+  let generation () = main_generation domain mains in
   let copies =
     List.map
       (fun m ->
@@ -657,8 +625,7 @@ let create ~domain ~data_dir ~owner ~poke ~knowledge members =
               ~name:(Printf.sprintf "copy %s" m.name)
               ~ordered:true record_kind records;
           memo_m = Mutex.create ();
-          ensured = Hashtbl.create 1024;
-          known_shards = Hashtbl.create 64;
+          memo = Copy_memo.create ~generation ();
           forwards = Rt.Semaphore.create ~name:"forwards" 4;
           running = None;
         })

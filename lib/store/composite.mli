@@ -24,8 +24,6 @@ type knowledge = {
       (** the chunks a body names, if it is a manifest *)
   describe : Bigstring.t -> (string * int) option;
       (** a manifest's recorded name and size, for the status report *)
-  generation : unit -> int option;
-      (** the collection generation G; [None] when unreadable *)
   is_index : Key.t -> bool;  (** per-store caches no copy carries *)
   is_journal : Key.t -> bool;
       (** journal entries and the cursor, which a backfill skips *)

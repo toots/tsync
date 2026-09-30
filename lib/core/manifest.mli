@@ -1,8 +1,6 @@
 (** The file manifest, binary [tsyncm03] (spec 02 §2.6): a frozen format read
     and written exactly as specified. *)
 
-open Tsync_core
-
 type t = private {
   body : string;  (** the exact bytes *)
   size : int;

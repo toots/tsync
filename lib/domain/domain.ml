@@ -1,6 +1,5 @@
 open Tsync_core
 open Tsync_store
-open Tsync_remote
 open Tsync_sync
 open Tsync_config
 
@@ -38,7 +37,7 @@ let create_store config d (b : Config.backend) =
     ~health:store.health;
   store
 
-let knowledge d main =
+let knowledge d =
   {
     Composite.chunk_names = Manifest.chunk_names;
     describe =
@@ -46,7 +45,6 @@ let knowledge d main =
         Option.map
           (fun (m : Manifest.t) -> (m.name, m.size))
           (Manifest.decode (Bigstring.to_string b)));
-    generation = (fun () -> Remote.read_generation main d);
     is_index = (fun k -> Key.leaf k = ".tsync-index");
     is_journal =
       (fun k -> Key.under (Key.journal d) k || Key.equal k (Key.cursor d));
@@ -74,16 +72,9 @@ let build ?(owner = true) ?(poke = ignore) ?(lazy_tree = false) ?cache_root
           } ))
       dom.backends
   in
-  let main =
-    match
-      List.find_opt (fun (_, (m : Composite.member)) -> m.role = Main) members
-    with
-      | Some (_, m) -> m.store
-      | None -> (snd (List.hd members)).store
-  in
   let composite =
-    Composite.create ~domain:d ~data_dir ~owner ~poke
-      ~knowledge:(knowledge d main) (List.map snd members)
+    Composite.create ~domain:d ~data_dir ~owner ~poke ~knowledge:(knowledge d)
+      (List.map snd members)
   in
   {
     config;

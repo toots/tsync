@@ -1,6 +1,5 @@
 open Tsync_core
 open Tsync_store
-open Tsync_remote
 open Tsync_sync
 
 let p fmt = Printf.printf fmt
@@ -16,7 +15,6 @@ let knowledge =
   {
     Composite.chunk_names = Manifest.chunk_names;
     describe = (fun _ -> None);
-    generation = (fun () -> Some 0);
     is_index = (fun _ -> false);
     is_journal = (fun _ -> false);
   }

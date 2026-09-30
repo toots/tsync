@@ -1,5 +1,3 @@
-open Tsync_core
-
 let magic = "tsyncm03"
 let header = 72
 

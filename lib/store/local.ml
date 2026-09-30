@@ -7,12 +7,6 @@ let fields =
       f ~default:"true" "verifyWrites" "Verify chunk writes" Bool;
     ]
 
-type gate =
-  key:Key.t ->
-  source:[ `Body of Bigstring.t | `Copy_of of Key.t ] ->
-  (unit -> unit) ->
-  unit
-
 let temp_name () = ".tsync-tmp-" ^ Ids.short () ^ ".tmp"
 
 let is_gc_lock rel =
@@ -20,27 +14,8 @@ let is_gc_lock rel =
     | ["tsync"; _; "gc-run.lock"] -> true
     | _ -> false
 
-(* Every directory between the root and the key is refused if it is a
-   symbolic link, so a link planted in the store cannot redirect an access. *)
-let check_no_links root key =
-  let parts = String.split_on_char '/' key in
-  let rec go dir = function
-    | [] | [_] -> ()
-    | seg :: rest -> (
-        let d = Filename.concat dir seg in
-        match Fs.lstat_opt d with
-          | Some { st_kind = S_LNK; _ } ->
-              Fail.invalid "%s: a symbolic link inside the store" d
-          | Some { st_kind = S_DIR; _ } -> go d rest
-          | Some _ -> Fail.raise_ Fail.Refused "%s: not a directory" d
-          | None -> ())
-  in
-  go root parts
-
-let path root key =
-  let key = Key.to_string key in
-  check_no_links root key;
-  Filename.concat root key
+let path = Local_path.path
+let check_no_links = Local_path.check_no_links
 
 (* Store files are replaced by rename, never modified in place, so a mapping
    stays valid (P6); a network mount could fault one, so it is read instead. *)
@@ -126,11 +101,6 @@ let rec claim ~mappable root key body retries =
                   (Key.to_string key)
               else claim ~mappable root key body (retries - 1))
 
-let is_reference_key key =
-  match String.split_on_char '/' (Key.to_string key) with
-    | "tsync" :: _ :: ("manifests" | "versions") :: _ -> true
-    | _ -> false
-
 let entry_of rel (st : Unix.LargeFile.stats) =
   {
     Store.key = rel;
@@ -139,7 +109,7 @@ let entry_of rel (st : Unix.LargeFile.stats) =
     etag = None;
   }
 
-let list name root prefix max_keys =
+let list name root prefix =
   let prefix = Key.prefix_to_string prefix in
   let base =
     if prefix = "" then root
@@ -169,8 +139,7 @@ let list name root prefix max_keys =
   (match Fs.lstat_opt base with
     | Some { st_kind = S_DIR; _ } -> walk base ""
     | _ -> ());
-  let l = List.sort (fun (a : Store.entry) b -> Key.compare a.key b.key) !acc in
-  match max_keys with Some n -> List.filteri (fun i _ -> i < n) l | None -> l
+  !acc
 
 let marker_body ?computed ?reason size =
   Yojson.Safe.to_string
@@ -185,7 +154,7 @@ let marker_body ?computed ?reason size =
 
 (* 06 §9: read back what was just written, never the argument, and file or
    clear the chunk's marker. A mismatch never fails the put. *)
-let verify_written ~mappable root key =
+let verify_written ~read root key =
   match Key.marker_of key with
     | None -> ()
     | Some marker -> (
@@ -193,7 +162,7 @@ let verify_written ~mappable root key =
         let marker_write body =
           durable_write root marker (Bigstring.of_string body)
         in
-        match read_opt ~mappable root key with
+        match read key with
           | exception Fail.E f ->
               marker_write (marker_body ~reason:f.reason None)
           | None ->
@@ -211,9 +180,7 @@ let expand_home p =
     Filename.concat (Sys.getenv "HOME") (String.sub p 2 (String.length p - 2))
   else p
 
-let create ?(verify_writes = true)
-    ?(gate : gate Atomic.t = Atomic.make (fun ~key:_ ~source:_ f -> f ())) ~name
-    root =
+let create ?(verify_writes = true) ~name root =
   let root = expand_home root in
   let health = Health.create name in
   let network = Atomic.make None in
@@ -233,17 +200,20 @@ let create ?(verify_writes = true)
           ignore (Health.lost ~reason health);
           raise e
   in
-  let gated key source write =
-    if is_reference_key key then (Atomic.get gate) ~key ~source write
-    else write ()
+  let spaces = Chunk_spaces.create ~collectable:mappable root in
+  let read_opt key =
+    Chunk_spaces.read spaces key (fun key -> read_opt ~mappable root key)
   in
   let put ?mode:_ key body =
     fed (fun () ->
-        gated key (`Body body) (fun () -> durable_write root key body);
-        if verify_writes then verify_written ~mappable root key)
+        Chunk_spaces.gate spaces ~key
+          ~body:(fun () -> body)
+          (fun () -> durable_write root key body);
+        if verify_writes then verify_written ~read:read_opt root key)
   in
   let get_range key off len =
     fed (fun () ->
+        Chunk_spaces.read spaces key @@ fun key ->
         match Fs.open_nofollow (path root key) with
           | None -> None
           | Some fd ->
@@ -267,19 +237,26 @@ let create ?(verify_writes = true)
   in
   let head_opt key =
     fed (fun () ->
+        Chunk_spaces.read spaces key @@ fun key ->
         match Fs.lstat_opt (path root key) with
           | Some ({ st_kind = S_REG; _ } as st) -> Some (entry_of key st)
           | _ -> None)
   in
+  let delete_one key =
+    let p = path root key in
+    match Fs.lstat_opt p with
+      | Some { st_kind = S_REG; _ } ->
+          let removed = Fs.release p in
+          Fs.fsync_dir (Filename.dirname p);
+          removed
+      | _ -> false
+  in
   let delete key =
     fed (fun () ->
-        let p = path root key in
-        match Fs.lstat_opt p with
-          | Some { st_kind = S_REG; _ } ->
-              let removed = Fs.release p in
-              Fs.fsync_dir (Filename.dirname p);
-              removed
-          | _ -> false)
+        List.fold_left
+          (fun removed k -> delete_one k || removed)
+          false
+          (Chunk_spaces.twins spaces key))
   in
   let delete_multi keys =
     fed (fun () ->
@@ -292,12 +269,18 @@ let create ?(verify_writes = true)
                   ignore (Fs.release p);
                   Hashtbl.replace dirs (Filename.dirname p) ()
               | _ -> ())
-          keys;
+          (List.concat_map (Chunk_spaces.twins spaces) keys);
         Hashtbl.iter (fun d () -> Fs.fsync_dir d) dirs)
   in
   let copy src dst =
     fed (fun () ->
-        gated dst (`Copy_of src) (fun () ->
+        let body () =
+          match read_opt src with
+            | Some b -> b
+            | None ->
+                Fail.absent ~op:"copy" "%s: no such object" (Key.to_string src)
+        in
+        Chunk_spaces.gate spaces ~key:dst ~body (fun () ->
             let s = path root src and d = path root dst in
             match Fs.lstat_opt s with
               | Some { st_kind = S_REG; _ } -> (
@@ -327,9 +310,7 @@ let create ?(verify_writes = true)
   in
   (* ponytail: polls at the interval; a directory watch would wake sooner. *)
   let watch key last =
-    let current =
-      try Store.token (read_opt ~mappable root key) with _ -> last
-    in
+    let current = try Store.token (read_opt key) with _ -> last in
     if current = last then Rt.sleep Store.watch_interval
   in
   Store.checked
@@ -339,18 +320,26 @@ let create ?(verify_writes = true)
       put_if_absent =
         (fun key body ->
           fed (fun () ->
-              let r = ref Store.Won in
-              gated key (`Body body) (fun () ->
-                  r := claim ~mappable root key body 3);
-              !r));
-      get_opt = (fun key -> fed (fun () -> read_opt ~mappable root key));
+              Chunk_spaces.gate spaces ~key
+                ~body:(fun () -> body)
+                (fun () -> claim ~mappable root key body 3)));
+      get_opt = (fun key -> fed (fun () -> read_opt key));
       get_range;
       head_opt;
       delete;
       delete_multi;
       copy;
       list_prefix =
-        (fun ?max_keys p -> fed (fun () -> list name root p max_keys));
+        (fun ?max_keys p ->
+          fed (fun () ->
+              let l =
+                List.sort
+                  (fun (a : Store.entry) b -> Key.compare a.key b.key)
+                  (Chunk_spaces.list spaces p (list name root))
+              in
+              match max_keys with
+                | Some n -> List.filteri (fun i _ -> i < n) l
+                | None -> l));
       watch;
       get_many = None;
       list_many = None;

@@ -102,6 +102,54 @@ let marker_of k =
                   | _ -> None)
             | _ -> None))
 
+(* The domain sits between [tsync/] and the last [seg] segment. *)
+let split_space seg k =
+  if not (String.starts_with ~prefix:root k) then None
+  else (
+    match rfind seg k with
+      | None -> None
+      | Some i -> (
+          let d = String.sub k 6 (i - 6)
+          and rest =
+            String.sub k
+              (i + String.length seg)
+              (String.length k - i - String.length seg)
+          in
+          match Domain_name.of_string d with
+            | Ok d -> Some (d, rest)
+            | Error _ -> None))
+
+let chunk_in seg k =
+  match split_space seg k with
+    | Some (d, rest) -> (
+        match String.split_on_char '/' rest with
+          | [sss; leaf] -> (
+              match Chunk_key.of_string leaf with
+                | Some c when Chunk_key.shard c = sss -> Some (d, c)
+                | _ -> None)
+          | _ -> None)
+    | None -> None
+
+let chunk_parts k = chunk_in "/chunks/" k
+let outgoing_chunk k = chunk_in "/chunks.from/" k
+let is_outgoing k = split_space "/chunks.from/" k <> None
+
+(* The sentinel makes the prefix end inside the space, even at its root. *)
+let outgoing_prefix p =
+  match split_space "/chunks/" (p ^ "x") with
+    | Some (d, rest) ->
+        Some (chunks_from d ^ String.sub rest 0 (String.length rest - 1))
+    | None -> None
+
+let domain_of_reference k =
+  match String.split_on_char '/' k with
+    | "tsync" :: _ -> (
+        let area seg = split_space seg k in
+        match area "/manifests/" with
+          | Some (d, _) -> Some d
+          | None -> Option.map fst (area "/versions/"))
+    | _ -> None
+
 let chunk_of_marker k =
   match String.split_on_char '/' k with
     | ["tsync"; "corrupted"; d; sss; leaf] -> (
