@@ -15,14 +15,6 @@ let settings =
       };
   }
 
-let field path j =
-  List.fold_left
-    (fun j k ->
-      match j with
-        | `Assoc l -> List.assoc_opt k l |> Option.value ~default:`Null
-        | _ -> `Null)
-    j path
-
 let link_status name =
   List.find_opt
     (fun (l : Uplink.link_status) -> l.name = name)
@@ -50,33 +42,34 @@ let until ?(limit = 15.) cond =
 let use link = Uplink.completed link (Uplink.acquire link 1000)
 
 let grant rate =
-  `Assoc
-    [
-      ("ok", `Bool true);
-      ("interval", `Float 2.);
-      ("links", `Assoc [("wan", `Assoc [("rate", `Float rate)])]);
-    ]
+  Some
+    {
+      Uplink_lease.interval = 2.;
+      grants = [("wan", { rate; limit = Measured })];
+      flat = false;
+    }
 
 let () =
   Rt.run_sync (fun () ->
       let wan = Uplink.link "wan" settings
       and lan = Uplink.link "lan" settings in
-      let answer = ref (`Grant 1e6) and calls = ref 0 and last = ref `Null in
+      let answer = ref (`Grant 1e6) and calls = ref 0 and last = ref None in
       Uplink.lease (fun req ->
           incr calls;
-          last := req;
+          last := Some req;
           match !answer with
             | `Grant r -> grant r
-            | `Refuse -> `Assoc [("ok", `Bool true)]
+            | `Refuse -> None
             | `Fail -> failwith "unreached");
       use wan;
       use lan;
       p "== lessee";
       p "granted: %b" (until (fun () -> mode "wan" = "leased" && !calls > 0));
       p "one request renews every link: %s"
-        (match field ["links"] !last with
-          | `Assoc l -> String.concat ", " (List.sort compare (List.map fst l))
-          | _ -> "none");
+        (match !last with
+          | Some (r : Uplink_lease.request) ->
+              String.concat ", " (List.sort compare (List.map fst r.links))
+          | None -> "none");
       let rate l =
         Option.fold ~none:"?"
           ~some:(fun (s : Uplink.link_status) -> Printf.sprintf "%.1f" s.rate)
@@ -91,10 +84,10 @@ let () =
       answer := `Grant 1e6;
       Uplink.lease (fun req ->
           incr calls;
-          last := req;
+          last := Some req;
           match !answer with
             | `Grant r -> grant r
-            | `Refuse -> `Assoc [("ok", `Bool true)]
+            | `Refuse -> None
             | `Fail -> failwith "unreached");
       ignore (until (fun () -> mode "wan" = "leased"));
       answer := `Refuse;
@@ -105,32 +98,28 @@ let () =
       Uplink.own (fun _ -> settings);
       let me = Unix.getpid () in
       let report pid =
-        `Assoc
-          [
-            ("action", `String "uplink");
-            ("pid", `Int pid);
-            ( "links",
-              `Assoc
-                [
-                  ( "wan",
-                    `Assoc
-                      [
-                        ("inFlight", `Int 1000);
-                        ("completed", `Int 0);
-                        ("waiting", `Int 2);
-                        ("heldBack", `Bool true);
-                        ("probesMs", `Assoc [("gcs", `Float 40.)]);
-                      ] );
-                ] );
-          ]
+        {
+          Uplink_lease.pid;
+          links =
+            [
+              ( "wan",
+                {
+                  Uplink_lease.idle with
+                  in_flight = 1000;
+                  waiting = 2;
+                  held_back = true;
+                  probes = [("gcs", 0.04)];
+                } );
+            ];
+          flat = false;
+        }
       in
-      let rate j = field ["links"; "wan"; "rate"] j in
       (match Uplink.renewal (report me) with
         | Some a ->
             p "a newcomer is answered from an immediate split: %s"
-              (match rate a with
-                | `Float r -> Printf.sprintf "%.0f of %.0f" r (256. *. 1024.)
-                | _ -> "no grant")
+              (match List.assoc_opt "wan" a.grants with
+                | Some g -> Printf.sprintf "%.0f of %.0f" g.rate (256. *. 1024.)
+                | None -> "no grant")
         | None -> p "refused");
       let dead =
         let pid =
@@ -151,15 +140,20 @@ let () =
         (until (fun () -> lessees () = 1));
       p "a flat report of an older build is answered with a top-level rate: %b"
         (match
-           Uplink.renewal
-             (`Assoc
-                [
-                  ("action", `String "uplink");
-                  ("pid", `Int me);
-                  ("inFlight", `Int 0);
-                ])
+           Option.bind
+             (Uplink_lease.request_of_json
+                (`Assoc
+                   [
+                     ("action", `String "uplink");
+                     ("pid", `Int me);
+                     ("inFlight", `Int 0);
+                   ]))
+             Uplink.renewal
          with
-          | Some (`Assoc l) ->
-              List.mem_assoc "rate" l && List.mem_assoc "links" l
-          | _ -> false);
+          | Some a -> (
+              match Uplink_lease.answer_to_json a with
+                | `Assoc l ->
+                    List.mem_assoc "rate" l && List.mem_assoc "links" l
+                | _ -> false)
+          | None -> false);
       Stop.request ())

@@ -106,7 +106,7 @@ type proc = {
   mutable missed : int;
   mutable retry_at : float;
   mutable interval : float;
-  mutable renew : (Yojson.Safe.t -> Yojson.Safe.t) option;
+  mutable renew : (Lease.request -> Lease.answer option) option;
   mutable state_file : string option;
   mutable saved : (string * (float * float)) list;
   mutable saved_at : float;
@@ -217,12 +217,6 @@ let room g b =
 let take_now g b =
   if not (Queue.is_empty g.line) then g.overtaken <- g.overtaken + b;
   Budget.take g.budget ~now:(Rt.now ()) b
-
-let limit_name g =
-  match Law.limit g.law with
-    | Law.Configured -> "configured"
-    | Measured -> "measured"
-    | Estimating -> "estimating"
 
 let own_report g ~timeouts ~probes =
   let r =
@@ -355,24 +349,24 @@ let renew gates reports =
   match proc.renew with
     | None -> set_mode Local
     | Some call ->
-        let request = Lease.request_to_json ~pid:(Unix.getpid ()) reports in
+        let request =
+          { Lease.pid = Unix.getpid (); links = reports; flat = false }
+        in
         (match Rt.with_timeout renewal_timeout (fun () -> call request) with
-          | answer -> (
-              match Lease.answer_of_json answer with
-                | Some (interval, grants) ->
-                    Mutex.protect proc_m (fun () ->
-                        proc.missed <- 0;
-                        proc.interval <- interval);
-                    set_mode Leased;
-                    List.iter
-                      (fun g ->
-                        match List.assoc_opt g.name grants with
-                          | Some r ->
-                              Mutex.protect g.m (fun () ->
-                                  Budget.set_rate g.budget ~now:(Rt.now ()) r)
-                          | None -> ())
-                      gates
-                | None -> set_mode Local)
+          | Some (answer : Lease.answer) ->
+              Mutex.protect proc_m (fun () ->
+                  proc.missed <- 0;
+                  proc.interval <- answer.interval);
+              set_mode Leased;
+              List.iter
+                (fun g ->
+                  match List.assoc_opt g.name answer.grants with
+                    | Some (grant : Lease.grant) ->
+                        Mutex.protect g.m (fun () ->
+                            Budget.set_rate g.budget ~now:(Rt.now ()) grant.rate)
+                    | None -> ())
+                gates
+          | None -> set_mode Local
           | exception e when not (Rt.is_cancelled e) ->
               let missed =
                 Mutex.protect proc_m (fun () ->
@@ -497,12 +491,9 @@ let lease call =
       proc.renew <- Some call;
       proc.mode <- Leased)
 
-let renewal json =
-  match
-    ( Mutex.protect proc_m (fun () -> (proc.mode, proc.settings_for)),
-      Lease.request_of_json json )
-  with
-    | (Owner, Some settings_for), Some req ->
+let renewal (req : Lease.request) =
+  match Mutex.protect proc_m (fun () -> (proc.mode, proc.settings_for)) with
+    | Owner, Some settings_for ->
         let now = Rt.now () in
         let grants =
           List.filter_map
@@ -536,13 +527,12 @@ let renewal json =
                               arm g);
                         let l = Hashtbl.find g.lessees req.pid in
                         Some
-                          (name, { Lease.rate = l.grant; limit = limit_name g })))
+                          ( name,
+                            { Lease.rate = l.grant; limit = Law.limit g.law } )))
             req.links
         in
         ensure_ticking ();
-        Some
-          (Lease.answer_to_json ~interval:Law.tick_interval ~flat:req.flat
-             grants)
+        Some { Lease.interval = Law.tick_interval; grants; flat = req.flat }
     | _ -> None
 
 let attach t ~store ~probe ~health =
@@ -685,13 +675,7 @@ let link_state_to_yojson, link_state_of_yojson =
       (`Leased, "leased");
     ]
 
-let limit_to_yojson, limit_of_yojson =
-  enum_codec "limit"
-    [
-      (Configured, "configured");
-      (Measured, "measured");
-      (Estimating, "estimating");
-    ]
+let limit_to_yojson, limit_of_yojson = enum_codec "limit" Lease.limits
 
 let process_mode_to_yojson, process_mode_of_yojson =
   enum_codec "mode" [(`Owner, "owner"); (`Leased, "leased"); (`Local, "local")]

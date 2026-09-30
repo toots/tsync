@@ -42,7 +42,11 @@ let domain ?name config =
 let run body =
   Printexc.record_backtrace true;
   Tsync_store.Uplink.lease (fun request ->
-      Ipc.call ~timeout:1. (Paths.supervisor_socket ()) request);
+      Tsync_store.Uplink_lease.(
+        answer_of_json
+          (Ipc.call ~timeout:1.
+             (Paths.supervisor_socket ())
+             (request_to_json request))));
   match Rt.run_sync body with
     | code -> code
     | exception Exit_with code -> code

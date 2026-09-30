@@ -346,8 +346,13 @@ let handle children req =
               Ipc.Reply
                 (Ipc.failure (Fail.make Fail.Invalid ("bad report: " ^ e))))
     | Some "uplink" -> (
-        match Tsync_store.Uplink.renewal req with
-          | Some answer -> Ipc.Reply answer
+        match
+          Option.bind
+            (Tsync_store.Uplink_lease.request_of_json req)
+            Tsync_store.Uplink.renewal
+        with
+          | Some answer ->
+              Ipc.Reply (Tsync_store.Uplink_lease.answer_to_json answer)
           | None ->
               Ipc.Reply (Ipc.failure (Fail.make Fail.Invalid "not a renewal")))
     | Some a ->

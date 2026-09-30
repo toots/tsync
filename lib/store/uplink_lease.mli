@@ -29,13 +29,18 @@ type request = {
   flat : bool;  (** the older single-link shape, answered with [rate] too *)
 }
 
-val request_to_json : pid:int -> (string * report) list -> Yojson.Safe.t
+val request_to_json : request -> Yojson.Safe.t
 val request_of_json : Yojson.Safe.t -> request option
 
-type grant = { rate : float; limit : string }
+(** The wire names of a limit. *)
+val limits : (Uplink_law.limit * string) list
 
-val answer_to_json :
-  interval:float -> flat:bool -> (string * grant) list -> Yojson.Safe.t
+type grant = { rate : float; limit : Uplink_law.limit }
+
+(** [flat] answers an older single-link report with a top-level [rate] too. *)
+type answer = { interval : float; grants : (string * grant) list; flat : bool }
+
+val answer_to_json : answer -> Yojson.Safe.t
 
 (** [None] is a refusal: an answer without per-link grants. *)
-val answer_of_json : Yojson.Safe.t -> (float * (string * float) list) option
+val answer_of_json : Yojson.Safe.t -> answer option

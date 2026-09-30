@@ -101,7 +101,9 @@ let () =
       probes = [("gcs", 0.0412)];
     }
   in
-  show (Lease.request_to_json ~pid:1234 [("wan", report)]);
+  show
+    (Lease.request_to_json
+       { pid = 1234; links = [("wan", report)]; flat = false });
   let read j =
     match Lease.request_of_json (Yojson.Safe.from_string j) with
       | None -> p "  refused"
@@ -117,19 +119,28 @@ let () =
             r.links
   in
   read
-    (Yojson.Safe.to_string (Lease.request_to_json ~pid:1234 [("wan", report)]));
+    (Yojson.Safe.to_string
+       (Lease.request_to_json
+          { pid = 1234; links = [("wan", report)]; flat = false }));
   p "an old flat report, without heldBack or probesMs:";
   read {|{"action":"uplink","pid":7,"inFlight":5,"completed":0,"probeMs":12.5}|};
   show
-    (Lease.answer_to_json ~interval:2. ~flat:true
-       [("wan", { Lease.rate = 1250000.; limit = "measured" })]);
+    (Lease.answer_to_json
+       {
+         interval = 2.;
+         flat = true;
+         grants = [("wan", { rate = 1250000.; limit = Measured })];
+       });
   let answer j =
     match Lease.answer_of_json (Yojson.Safe.from_string j) with
       | None -> "refused"
-      | Some (i, l) ->
-          Printf.sprintf "interval %.0f, %s" i
+      | Some (a : Lease.answer) ->
+          Printf.sprintf "interval %.0f, %s" a.interval
             (String.concat ", "
-               (List.map (fun (k, r) -> Printf.sprintf "%s %.0f" k r) l))
+               (List.map
+                  (fun (k, (g : Lease.grant)) ->
+                    Printf.sprintf "%s %.0f" k g.rate)
+                  a.grants))
   in
   p "answer with links: %s"
     (answer

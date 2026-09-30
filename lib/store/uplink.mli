@@ -32,10 +32,10 @@ val attach :
 val own : ?state_file:string -> (string -> settings) -> unit
 
 (** Lease from the owner through [call], one renewal per tick. *)
-val lease : (Yojson.Safe.t -> Yojson.Safe.t) -> unit
+val lease : (Uplink_lease.request -> Uplink_lease.answer option) -> unit
 
 (** The owner's answer to a renewal; [None] refuses it. *)
-val renewal : Yojson.Safe.t -> Yojson.Safe.t option
+val renewal : Uplink_lease.request -> Uplink_lease.answer option
 
 type ticket
 

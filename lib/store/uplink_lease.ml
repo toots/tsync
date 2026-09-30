@@ -74,12 +74,12 @@ let report_to_json r : Yojson.Safe.t =
           `Assoc (List.map (fun (s, d) -> (s, `Float (d *. 1000.))) r.probes) );
       ])
 
-let request_to_json ~pid links : Yojson.Safe.t =
+let request_to_json r : Yojson.Safe.t =
   `Assoc
     [
       ("action", `String "uplink");
-      ("pid", `Int pid);
-      ("links", `Assoc (List.map (fun (l, r) -> (l, report_to_json r)) links));
+      ("pid", `Int r.pid);
+      ("links", `Assoc (List.map (fun (l, r) -> (l, report_to_json r)) r.links));
     ]
 
 let number = function
@@ -130,32 +130,62 @@ let request_of_json j =
                 { pid; links = [(default_link, report_of_json j)]; flat = true }
         )
 
-type grant = { rate : float; limit : string }
+type grant = { rate : float; limit : Uplink_law.limit }
+type answer = { interval : float; grants : (string * grant) list; flat : bool }
 
-let answer_to_json ~interval ~flat grants : Yojson.Safe.t =
+let limits =
+  [
+    (Uplink_law.Configured, "configured");
+    (Measured, "measured");
+    (Estimating, "estimating");
+  ]
+
+let answer_to_json a : Yojson.Safe.t =
   let links =
     List.map
       (fun (l, g) ->
-        (l, `Assoc [("rate", `Float g.rate); ("limit", `String g.limit)]))
-      grants
+        ( l,
+          `Assoc
+            [
+              ("rate", `Float g.rate);
+              ("limit", `String (List.assoc g.limit limits));
+            ] ))
+      a.grants
   in
   let top =
-    match (flat, List.assoc_opt default_link grants) with
+    match (a.flat, List.assoc_opt default_link a.grants) with
       | true, Some g -> [("rate", `Float g.rate)]
       | _ -> []
   in
   `Assoc
-    ([("ok", `Bool true); ("interval", `Float interval)]
+    ([("ok", `Bool true); ("interval", `Float a.interval)]
     @ top
     @ [("links", `Assoc links)])
 
 let answer_of_json j =
   match field "links" j with
     | Some (`Assoc l) ->
-        let interval = Option.value ~default:2. (num "interval" j) in
         Some
-          ( interval,
-            List.filter_map
-              (fun (k, g) -> Option.map (fun r -> (k, r)) (num "rate" g))
-              l )
+          {
+            interval = Option.value ~default:2. (num "interval" j);
+            flat = false;
+            grants =
+              List.filter_map
+                (fun (k, g) ->
+                  Option.map
+                    (fun rate ->
+                      let limit =
+                        match field "limit" g with
+                          | Some (`String s) -> (
+                              match
+                                List.find_opt (fun (_, n) -> n = s) limits
+                              with
+                                | Some (l, _) -> l
+                                | None -> Uplink_law.Estimating)
+                          | _ -> Uplink_law.Estimating
+                      in
+                      (k, { rate; limit }))
+                    (num "rate" g))
+                l;
+          }
     | _ -> None
