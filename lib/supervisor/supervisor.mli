@@ -9,9 +9,9 @@ type child = {
 }
 
 (** 07 §2.4: a per-domain presenting frontend or none gets a process of its own,
-    shared presenting frontends one process for all their domains. [extra] is
-    appended to every owner's arguments. *)
-val assign : extra:string list -> Tsync_config.Config.t -> child list
+    shared presenting frontends one process for all their domains, and the
+    domains listing [http-proxy] one store server. *)
+val assign : ?mount:string -> ?tls:string -> Tsync_config.Config.t -> child list
 
 (** Serve until stopped, then stop the children and answer the exit status: 0, 1
     when another supervisor answers, 2 when the socket cannot be bound. *)

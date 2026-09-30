@@ -23,6 +23,9 @@ val run : (unit -> int) -> int
 (** The reply, or its failure raised with its code's kind. *)
 val checked : Tsync_ipc.Ipc.json -> Tsync_ipc.Ipc.json
 
+(** The TLS implementation of [--tls], else of the config. *)
+val use_tls : Config.t -> string option -> unit
+
 val int_field : Tsync_ipc.Ipc.json -> string -> int
 val verbose : bool Cmdliner.Term.t
 val set_verbose : bool -> unit

@@ -11,5 +11,7 @@
   tsync_ipc
   tsync_owner
   tsync_supervisor
+  tsync_http
+  tsync_http_proxy
   unix
   yojson))

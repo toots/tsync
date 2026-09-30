@@ -43,13 +43,10 @@ let start mount tls verbose =
                 | None, _, _ ->
                     ignore (Fs.raise_nofile 65536);
                     Owner.stop_on_signals ();
-                    let extra =
-                      Option.fold ~none:[] ~some:(fun m -> ["--mount"; m]) mount
-                      @ Option.fold ~none:[] ~some:(fun t -> ["--tls"; t]) tls
-                    in
                     run (fun () ->
                         Tsync_supervisor.Supervisor.run ~exe:Sys.executable_name
-                          (Tsync_supervisor.Supervisor.assign ~extra config))))
+                          (Tsync_supervisor.Supervisor.assign ?mount ?tls config))
+              ))
 
 let start_cmd =
   let mount =
@@ -66,12 +63,13 @@ let start_cmd =
   cmd "start" ~doc:"Start the owners and serve until stopped."
     Term.(const start $ mount $ tls $ verbose)
 
-let owner names mount _tls =
+let owner names mount tls =
   Atomic.set Log.min_level Log.Debug;
   let config = config_opt () in
   match config with
     | None -> 0
     | Some config -> (
+        use_tls config tls;
         let domains = List.map (fun n -> domain ~name:n config) names in
         (match domains with
           | [d] ->
@@ -158,4 +156,24 @@ let stop verbose =
                   0))
 
 let stop_cmd = cmd "stop" ~doc:"Stop tsync." Term.(const stop $ verbose)
-let cmds = [start_cmd; owner_cmd; stop_cmd]
+
+let store_server tls =
+  Atomic.set Log.min_level Log.Debug;
+  match config_opt () with
+    | None -> 0
+    | Some config ->
+        use_tls config tls;
+        Atomic.set Log.prefix "[http-proxy] ";
+        ignore (Fs.raise_nofile 65536);
+        Owner.stop_on_signals ();
+        run (fun () -> Tsync_http_proxy.Store_server.run config)
+
+let store_server_cmd =
+  let tls = Arg.(value & opt (some string) None & info ["tls"]) in
+  Cmd.v
+    (Cmd.info "store-server"
+       ~doc:"Serve the domains' stores over HTTP (started by tsync start)."
+       ~docs:"INTERNAL COMMANDS")
+    Term.(const store_server $ tls)
+
+let cmds = [start_cmd; owner_cmd; store_server_cmd; stop_cmd]

@@ -62,6 +62,16 @@ let checked reply =
              (Fail.make (Fail.kind_of_code code)
                 (Option.value ~default:"failed" (Ipc.field reply "error"))))
 
+(* security §9: [--tls] wins over the config's [tls]; OpenSSL otherwise. *)
+let use_tls (config : Config.t) tls =
+  match Option.fold ~none:config.tls ~some:Option.some tls with
+    | None -> ()
+    | Some name -> (
+        match Tsync_http.Transport.tls_impl_of_string name with
+          | Some impl -> Atomic.set Tsync_http.Transport.tls_impl impl
+          | None ->
+              fail "unknown TLS implementation %S (native or openssl)" name)
+
 let int_field j k =
   match j with
     | `Assoc l -> ( match List.assoc_opt k l with Some (`Int i) -> i | _ -> 0)

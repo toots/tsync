@@ -19,7 +19,11 @@ let presenting (d : Config.domain) =
       Option.bind (Frontend.find f.ftype) (fun (r : Frontend.t) -> r.presenting))
     d.frontends
 
-let assign ~extra (config : Config.t) =
+let assign ?mount ?tls (config : Config.t) =
+  let tls_args = Option.fold ~none:[] ~some:(fun t -> ["--tls"; t]) tls in
+  let extra =
+    Option.fold ~none:[] ~some:(fun m -> ["--mount"; m]) mount @ tls_args
+  in
   let owner names =
     {
       args =
@@ -34,8 +38,21 @@ let assign ~extra (config : Config.t) =
   let shared, own =
     List.partition (fun d -> presenting d = Some `Shared) config.domains
   in
+  let served =
+    List.filter (fun d -> Config.frontend d "http-proxy" <> None) config.domains
+  in
   List.map (fun d -> owner [name d]) own
-  @ if shared = [] then [] else [owner (List.map name shared)]
+  @ (if shared = [] then [] else [owner (List.map name shared)])
+  @
+  if served = [] then []
+  else
+    [
+      {
+        args = "store-server" :: tls_args;
+        domains = List.map name served;
+        socket = Paths.store_server_socket ();
+      };
+    ]
 
 type running = {
   child : child;
