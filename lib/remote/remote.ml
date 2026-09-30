@@ -12,6 +12,18 @@ let snapshot_deadline = 10.
 let corruption_ttl = 5.
 let run_ttl = 5.
 
+let read_generation (store : Store.t) d =
+  match store.get_opt (Key.gc_generation d) with
+    | None -> Some 0
+    | Some b -> (
+        match Yojson.Safe.from_string b with
+          | `Assoc f -> (
+              match List.assoc_opt "generation" f with
+                | Some (`Int g) when g >= 0 -> Some g
+                | _ -> None)
+          | _ -> None
+          | exception _ -> None)
+
 module Make (C : Context.S) = struct
   let d = C.domain
   let store = C.store
@@ -29,18 +41,7 @@ module Make (C : Context.S) = struct
       Atomic.set run_cache (v, Rt.now ());
       v)
 
-  let generation () =
-    match store.get_opt (Key.gc_generation d) with
-      | None -> Some 0
-      | Some b -> (
-          match Yojson.Safe.from_string b with
-            | `Assoc f -> (
-                match List.assoc_opt "generation" f with
-                  | Some (`Int g) when g >= 0 -> Some g
-                  | _ -> None)
-            | _ -> None
-            | exception _ -> None)
-
+  let generation () = read_generation store d
   let resolved_chunk_size = Atomic.make None
 
   (* 01 §3.5: configured, else the main's recommendation within range, else

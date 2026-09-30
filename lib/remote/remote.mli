@@ -16,6 +16,10 @@ type source =
 *)
 exception Source_changed of string
 
+(** The collection generation G (02 §2.12); absent reads as 0, unreadable as
+    [None]. *)
+val read_generation : Store.t -> Domain_name.t -> int option
+
 module Make (_ : Context.S) : sig
   (** Whether a collection run is open on the main (cached briefly unless
       [fresh]). *)
