@@ -33,6 +33,12 @@ val run_sync : (unit -> 'a) -> 'a
     by a cancellation for example. *)
 val suspend : ((('a, exn) result -> bool) -> unit) -> 'a
 
+(** The calling fiber's identity; code outside any fiber shares one. *)
+type fiber
+
+val self : unit -> fiber
+val same : fiber -> fiber -> bool
+
 (** Cancellable sleep. *)
 val sleep : float -> unit
 

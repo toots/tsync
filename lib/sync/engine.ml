@@ -1240,6 +1240,7 @@ module Make (C : Engine_ctx.S) = struct
   type handle = Local_ops.handle
 
   let bridge () = Atomic.get bridge_state
+  let atomically = with_meta
   let folder_id path = Mirror.folder_id mirror path
   let path_of_id id = Mirror.key_of_id mirror id
   let parked () = Dqueue.parked uploads @ Dqueue.parked metadata

@@ -103,7 +103,18 @@ module Make (C : Engine_ctx.S) = struct
 
   let generation path = !(snd (klock path))
   let bump path = incr (snd (klock path))
-  let with_meta f = Rt.Fmutex.with_lock meta f
+  let meta_holder = Atomic.make None
+
+  (* Reentrant for its holder, so the request handler resolves a reference and
+     acts on it in one hold (08 §3.5). *)
+  let with_meta f =
+    match Atomic.get meta_holder with
+      | Some h when Rt.same h (Rt.self ()) -> f ()
+      | _ ->
+          Rt.Fmutex.with_lock meta (fun () ->
+              Atomic.set meta_holder (Some (Rt.self ()));
+              Fun.protect ~finally:(fun () -> Atomic.set meta_holder None) f)
+
   let changed_hook : (string list -> unit) ref = ref (fun _ -> ())
   let changed paths = try !changed_hook paths with _ -> ()
   let handles_m = Mutex.create ()

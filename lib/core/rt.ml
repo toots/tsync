@@ -43,6 +43,11 @@ type _ Effect.t += Current : ctx Effect.t
 let root = new_ctx ()
 let current () = try Effect.perform Current with Effect.Unhandled _ -> root
 
+type fiber = ctx
+
+let self = current
+let same = ( == )
+
 let cancelled () =
   let c = current () in
   Mutex.protect c.cm (fun () -> c.cancel)

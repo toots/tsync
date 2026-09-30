@@ -4,6 +4,10 @@ open Tsync_core
 open Tsync_checkout
 
 module type S = sig
+  (** Holds the metadata lock across [f]; every operation called inside joins
+      the same hold. *)
+  val atomically : (unit -> 'a) -> 'a
+
   val kind : string -> [ `Dir | `File | `Absent ]
 
   (** Answered from the mirror; a staged edit's size and mtime win. *)
