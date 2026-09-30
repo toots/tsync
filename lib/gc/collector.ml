@@ -431,6 +431,31 @@ let each composite f =
         in
         go [] ms
 
+type status = {
+  collected : string;
+  record : Gc_record.read;
+  generation : int option;
+  owed : int;
+}
+
+(* Reads only: no lock, so it answers while a session runs. *)
+let status composite =
+  let d = Composite.domain composite in
+  List.map
+    (fun m ->
+      let generation = Gc_generation.read m.member.store d in
+      {
+        collected = m.member.name;
+        record = Gc_record.read m.member.store d;
+        generation;
+        owed =
+          (match generation with
+            | Some g when g mod 2 = 1 ->
+                Composite.collection_owed composite ~generation:g
+            | _ -> 0);
+      })
+    (targets composite)
+
 let run ?budget ?pause ?(verify = false) ?(keep = false) composite =
   let d = Composite.domain composite in
   each composite (session ?budget ?pause ~verify ~keep composite d)

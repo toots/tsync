@@ -17,7 +17,8 @@ let () =
   in
   Fs.rm_rf root;
   let store_root = Filename.concat root "store" in
-  let main = Local.create ~name:"main" store_root in
+  let main = Local.create ~name:"main" store_root
+  and replica = Local.create ~name:"replica" (Filename.concat root "replica") in
   let now = Unix.gettimeofday () in
   let cutoff = now -. (10. *. day) in
   let ids =
@@ -85,15 +86,19 @@ let () =
       trash ~age:1. "live" "live" "e5";
       trash "orphan" "orphan" "e6";
       List.iter
-        (fun days ->
+        (fun (group, days) ->
           let key =
-            Key.version d ~group:"0000000000a1-1/h"
+            Key.version d ~group
               ~ns:(Int64.of_float ((now -. (days *. day)) *. 1e9))
           in
           Hashtbl.replace labels (Key.to_string key)
-            (Printf.sprintf "version of %.0f days ago" days);
+            (Printf.sprintf "version of %.0f days ago in %s" days group);
           put key (empty "v"))
-        [40.; 5.];
+        [
+          ("0000000000a1-1/h", 40.);
+          ("0000000000a1-1/h", 5.);
+          ("0000000000a7-1/gone", 50.);
+        ];
       let entry days =
         Tsync_sync.Entry_key.make
           ~ms:(Int64.of_float ((now -. (days *. day)) *. 1000.))
@@ -119,6 +124,11 @@ let () =
         (Printf.sprintf {|{"v":1,"expires":%.0f,"domain":"e","type":"file"}|}
            (now -. day));
       share "aa04" "garbage";
+      replica.put
+        (Option.get (Key.share "aa05"))
+        (Bigstring.of_string
+           (Printf.sprintf {|{"v":1,"expires":%.0f,"domain":"d","type":"file"}|}
+              (now -. day)));
       put ~age:30. (Key.v "tsync/shares/cache/0123-4567.data") "old";
       let composite =
         Composite.create ~domain:d
@@ -129,7 +139,10 @@ let () =
               Composite.is_index = (fun _ -> false);
               is_journal = (fun _ -> false);
             }
-          [{ name = "main"; role = Main; store = main }]
+          [
+            { name = "main"; role = Main; store = main };
+            { name = "replica"; role = Replica; store = replica };
+          ]
       in
       let module C = struct
         let domain = d
@@ -179,6 +192,15 @@ let () =
       p "dry run changed nothing: %b\n" (listing () = before);
       p "\n== expire, applied\n";
       show (R.expire ~apply:true ~now ~cutoff ());
+      let dir rel =
+        Fs.is_dir (Filename.concat store_root ("tsync/d/versions/" ^ rel))
+      in
+      p "group directories: kept %b, emptied %b, its folder %b\n"
+        (dir "0000000000a1-1/h")
+        (dir "0000000000a7-1/gone")
+        (dir "0000000000a7-1");
+      p "share held only by the replica, expired there: %b\n"
+        (replica.head_opt (Option.get (Key.share "aa05")) = None);
       p "left on the store:\n";
       List.iter (fun k -> p "  %s\n" (alias k)) (listing ()));
   Fs.rm_rf root

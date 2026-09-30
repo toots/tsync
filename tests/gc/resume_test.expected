@@ -1,0 +1,9 @@
+uninterrupted                                completed; live main true replica true; junk main false replica false; F false, R false, G 2
+Opening written, S not yet renamed           completed; live main true replica true; junk main false replica false; F false, R false, G 2
+renamed, Marking not yet written             completed; live main true replica true; junk main false replica false; F false, R false, G 2
+mid namespace, cursor before it              completed; live main true replica true; junk main false replica false; F false, R false, G 2
+mid doom: deletions recorded, F not unlinked completed; live main true replica true; junk main false replica false; F false, R false, G 2
+F removed, R not yet deleted                 completed; live main true replica true; junk main false replica false; F false, R false, G 2
+closing record without a generation          completed; live main true replica true; junk main false replica false; F false, R false, G 6
+unreadable run record: abandoned             completed; live main true replica true; junk main true replica true; F false, R false, G 0
+mid keep_one: a shard half moved back        completed; live main true replica true; junk main true replica true; F false, R false, G 0

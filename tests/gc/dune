@@ -18,10 +18,17 @@
  (modules collector_test)
  (libraries contract tsync_core tsync_store tsync_gc unix))
 
+(executable
+ (name lock_holder)
+ (modules lock_holder)
+ (libraries tsync_core tsync_store))
+
 (rule
- (with-stdout-to
-  collector_test.output
-  (run ./collector_test.exe)))
+ (deps lock_holder.exe)
+ (action
+  (with-stdout-to
+   collector_test.output
+   (run ./collector_test.exe))))
 
 (rule
  (alias runtest)
@@ -42,3 +49,18 @@
  (alias runtest)
  (action
   (diff retention_test.expected retention_test.output)))
+
+(executable
+ (name resume_test)
+ (modules resume_test)
+ (libraries tsync_core tsync_store tsync_gc unix))
+
+(rule
+ (with-stdout-to
+  resume_test.output
+  (run ./resume_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff resume_test.expected resume_test.output)))

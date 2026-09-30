@@ -13,6 +13,7 @@ generation settled: true
   trashed  main S true F false, replica true
   ver      main S true F false, replica true
   run open false, outgoing space false, G 2
+  status: no run, generation 2, 0 owed
 
 == a second run right after deletes nothing
 run: completed; promoted 5, reclaimed 0 (0 bytes)
@@ -22,6 +23,7 @@ run: suspended in marking at "m/.tsync-root"; promoted 3, reclaimed 0 (0 bytes)
 run: suspended in marking at "m/0123456789ab-1"; promoted 2, reclaimed 0 (0 bytes)
   publishing a manifest naming late, now outgoing
   reading junk3 during the run: true
+  status: marking after "m/0123456789ab-1", generation 4, 0 owed
 run: suspended in closing at "2b6"; promoted 1, reclaimed 0 (0 bytes)
 run: suspended in closing at "307"; promoted 0, reclaimed 0 (0 bytes)
 run: suspended in closing at "7ff"; promoted 0, reclaimed 0 (0 bytes)
@@ -84,4 +86,7 @@ generation settled: true
   run open false, outgoing space false, G 10
 
 == exclusion
+another process: held
+run: busy
+after it exits: run: completed; promoted 7, reclaimed 0 (0 bytes)
 run: busy

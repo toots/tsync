@@ -63,6 +63,71 @@ module Make (C : Context.S) = struct
     in
     go 0 (Gc_plan.purge_order (subtree id 0))
 
+  (* §4.3: a filesystem store keeps the directories of a group whose versions
+     all expired; a snapshot racing the removal retries its write once. *)
+  let remove_empty_groups keys =
+    let rmdir p = try Unix.rmdir p with Unix.Unix_error _ -> () in
+    List.iter
+      (fun (m : Composite.member) ->
+        Option.iter
+          (fun root ->
+            List.sort_uniq String.compare
+              (List.map
+                 (fun k -> Filename.dirname (Local_path.path root k))
+                 keys)
+            |> List.iter (fun group ->
+                rmdir group;
+                rmdir (Filename.dirname group)))
+          m.store.local_path)
+      (Composite.members C.composite)
+
+  (* §4.5: each member holding shares, since a share may sit on a copy alone;
+     copies behind the write guard, archives never. *)
+  let shares_on ~apply ~now ~cutoff (m : Composite.member) =
+    match
+      if m.role <> Main then Composite.guard C.composite m "expire shares"
+    with
+      | exception ((Stop.Stopping | Rt.Cancelled) as e) -> raise e
+      | exception e -> Error (Printexc.to_string e)
+      | () ->
+          let st = m.store in
+          let listing = st.list_prefix Key.shares in
+          let artifact (e : Store.entry) =
+            String.ends_with ~suffix:".data" (Key.leaf e.key)
+          in
+          let bad = ref [] in
+          let doomed =
+            List.concat_map
+              (fun (e : Store.entry) ->
+                if artifact e then
+                  if e.last_modified < cutoff then [e.key] else []
+                else (
+                  match st.get_opt e.key with
+                    | None -> []
+                    | Some b -> (
+                        match
+                          Gc_plan.share ~domain:d ~now (Bigstring.to_string b)
+                        with
+                          | Expired ->
+                              let token = Key.leaf e.key in
+                              e.key
+                              :: List.filter_map
+                                   (fun (a : Store.entry) ->
+                                     if
+                                       Key.leaf a.key = token ^ ".data"
+                                       && a.last_modified >= cutoff
+                                     then Some a.key
+                                     else None)
+                                   listing
+                          | Unparseable ->
+                              bad := e.key :: !bad;
+                              []
+                          | Kept | Other_domain -> [])))
+              listing
+          in
+          if apply && doomed <> [] then st.delete_multi doomed;
+          Ok (doomed, !bad)
+
   let by_folder () =
     let groups = Hashtbl.create 16 in
     List.iter
@@ -114,11 +179,14 @@ module Make (C : Context.S) = struct
     in
     let versions_deleted =
       count (fun () ->
-          delete
-            (Gc_plan.versions ~cutoff
-               (List.map
-                  (fun (e : Store.entry) -> e.key)
-                  (store.list_prefix (Key.versions d)))))
+          let expired =
+            Gc_plan.versions ~cutoff
+              (List.map
+                 (fun (e : Store.entry) -> e.key)
+                 (store.list_prefix (Key.versions d)))
+          in
+          delete expired;
+          if apply then remove_empty_groups expired)
     in
     let journal_deleted =
       count (fun () ->
@@ -138,36 +206,27 @@ module Make (C : Context.S) = struct
     in
     let shares_deleted =
       count (fun () ->
-          let listing = store.list_prefix Key.shares in
-          let artifact (e : Store.entry) =
-            String.ends_with ~suffix:".data" (Key.leaf e.key)
-          in
+          let seen = Hashtbl.create 16 in
           List.iter
-            (fun (e : Store.entry) ->
-              if artifact e then (
-                if e.last_modified < cutoff then delete [e.key])
-              else (
-                match store.get_opt e.key with
-                  | None -> ()
-                  | Some b -> (
-                      match
-                        Gc_plan.share ~domain:d ~now (Bigstring.to_string b)
-                      with
-                        | Expired ->
-                            let token = Key.leaf e.key in
-                            delete
-                              (e.key
-                              :: List.filter_map
-                                   (fun (a : Store.entry) ->
-                                     if
-                                       Key.leaf a.key = token ^ ".data"
-                                       && a.last_modified >= cutoff
-                                     then Some a.key
-                                     else None)
-                                   listing)
-                        | Unparseable -> unparseable := e.key :: !unparseable
-                        | Kept | Other_domain -> ())))
-            listing)
+            (fun (m : Composite.member) ->
+              match shares_on ~apply ~now ~cutoff m with
+                | Error reason ->
+                    Log.warn "shares on %s not expired: %s" m.name reason
+                | Ok (keys, bad) ->
+                    List.iter
+                      (fun k ->
+                        if not (Hashtbl.mem seen k) then (
+                          Hashtbl.replace seen k ();
+                          deleted := k :: !deleted))
+                      keys;
+                    List.iter
+                      (fun k ->
+                        if not (List.exists (Key.equal k) !unparseable) then
+                          unparseable := k :: !unparseable)
+                      bad)
+            (List.filter
+               (fun (m : Composite.member) -> m.role <> Read_only)
+               (Composite.members C.composite)))
     in
     {
       counts =

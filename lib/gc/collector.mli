@@ -59,6 +59,18 @@ val run :
   Composite.t ->
   (stats list, failure) result
 
+(** One collectable main as it stands: its run record, the generation, and the
+    copy deletions owed under an odd generation. *)
+type status = {
+  collected : string;
+  record : Gc_record.read;
+  generation : int option;  (** [None]: unreadable, treated as odd *)
+  owed : int;
+}
+
+(** Reads only, without the run lock, so it answers beside a running session. *)
+val status : Composite.t -> status list
+
 (** Report what a collection would reclaim, per main; [Error reason] inside the
     list when a body stops the survey as it would stop marking. *)
 val dry_run :

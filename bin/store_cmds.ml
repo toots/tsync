@@ -55,35 +55,67 @@ let failure = function
   | Collector.Busy -> fail "another collection holds this domain's run lock"
   | Unsupported reason -> fail "cannot collect: %s" reason
 
-let gc apply verify abort budget name verbose =
+let print_status (s : Collector.status) =
+  say "%s: %s; generation %s%s" s.collected
+    (match s.record with
+      | Absent -> "no run open"
+      | Unreadable -> "a run record is present but unreadable"
+      | Record r ->
+          Printf.sprintf "run %s open in %s after %S" (Gc_record.run_name r)
+            (Gc_record.phase_name r.phase)
+            r.cursor)
+    (match s.generation with
+      | Some g ->
+          string_of_int g
+          ^ if g mod 2 = 1 then " (deletions on copies in flight)" else ""
+      | None -> "unreadable")
+    (if s.owed > 0 then
+       Printf.sprintf ", %d deletion batches owed to copies" s.owed
+     else "")
+
+let gc apply verify abort budget show_status name verbose =
   set_verbose verbose;
   run (fun () ->
-      store_command
-        ~what:(if abort then "tsync gc --abort" else "tsync gc")
-        name
-        (fun dom ->
-          let c = dom.composite in
-          if apply || abort then (
-            match Collector.run ?budget ~verify ~keep:abort c with
-              | Error f -> failure f
-              | Ok stats ->
-                  List.iter print_stats stats;
-                  if
-                    List.for_all
-                      (fun (s : Collector.stats) -> s.outcome = Completed)
-                      stats
-                  then 0
-                  else 1)
-          else (
-            match Collector.dry_run ~verify c with
-              | Error f -> failure f
-              | Ok surveys ->
-                  List.iter
-                    (function
-                      | Ok s -> print_survey s
-                      | Error reason -> say "survey stopped: %s" reason)
-                    surveys;
-                  if List.for_all Result.is_ok surveys then 0 else 1)))
+      if show_status then (
+        let config = config () in
+        let dom =
+          Tsync_domain.Domain.build ~owner:false config (domain ?name config)
+        in
+        match Collector.status dom.composite with
+          | [] ->
+              fail
+                "no main of this domain is a filesystem store local to this \
+                 host"
+          | l ->
+              List.iter print_status l;
+              0)
+      else
+        store_command
+          ~what:(if abort then "tsync gc --abort" else "tsync gc")
+          name
+          (fun dom ->
+            let c = dom.composite in
+            if apply || abort then (
+              match Collector.run ?budget ~verify ~keep:abort c with
+                | Error f -> failure f
+                | Ok stats ->
+                    List.iter print_stats stats;
+                    if
+                      List.for_all
+                        (fun (s : Collector.stats) -> s.outcome = Completed)
+                        stats
+                    then 0
+                    else 1)
+            else (
+              match Collector.dry_run ~verify c with
+                | Error f -> failure f
+                | Ok surveys ->
+                    List.iter
+                      (function
+                        | Ok s -> print_survey s
+                        | Error reason -> say "survey stopped: %s" reason)
+                      surveys;
+                    if List.for_all Result.is_ok surveys then 0 else 1)))
 
 let apply_arg =
   Arg.(value & flag & info ["apply"] ~doc:"Act; without it, only report.")
@@ -101,10 +133,16 @@ let gc_cmd =
       & opt (some float) None
       & info ["budget"] ~docv:"SECONDS"
           ~doc:"Leave the run open after this long.")
+  and show_status =
+    Arg.(
+      value & flag
+      & info ["status"] ~doc:"Show the collection state; change nothing.")
   in
   cmd "gc"
     ~doc:"Collect chunks no file or version names (a dry run by default)."
-    Term.(const gc $ apply_arg $ verify $ abort $ budget $ domain_arg $ verbose)
+    Term.(
+      const gc $ apply_arg $ verify $ abort $ budget $ show_status $ domain_arg
+      $ verbose)
 
 (* 07 §5.3: a date at local midnight. *)
 let cutoff_of date =

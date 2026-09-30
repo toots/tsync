@@ -145,6 +145,21 @@ let () =
               p "run: unsupported: %s\n" r;
               Halted r
       in
+      let show_status () =
+        List.iter
+          (fun (s : Collector.status) ->
+            p "  status: %s, generation %s, %d owed\n"
+              (match s.record with
+                | Absent -> "no run"
+                | Unreadable -> "unreadable run"
+                | Record r ->
+                    Printf.sprintf "%s after %S"
+                      (Gc_record.phase_name r.phase)
+                      r.cursor)
+              (Option.fold ~none:"unreadable" ~some:string_of_int s.generation)
+              s.owed)
+          (Collector.status c)
+      in
       p "== dry run (§5.9)\n";
       let before = files main_root in
       (match Collector.dry_run ~verify:true c with
@@ -166,6 +181,7 @@ let () =
       Composite.settle ~timeout:10. c;
       p "generation settled: %b\n" (settled 100);
       state ();
+      show_status ();
       p "\n== a second run right after deletes nothing\n";
       ignore (run ());
       p "\n== one unit per session, a publication landing mid-run\n";
@@ -177,7 +193,8 @@ let () =
           p "  publishing a manifest naming late, now outgoing\n";
           publish (slot Folder_id.root "late") ["late"];
           p "  reading junk3 during the run: %b\n"
-            (Contract.get s (Key.chunk d (chunk "junk3")) <> None));
+            (Contract.get s (Key.chunk d (chunk "junk3")) <> None);
+          show_status ());
         match o with
           | Collector.Suspended _ when i < 20 -> steps (i + 1)
           | _ -> ()
@@ -224,6 +241,22 @@ let () =
       p "generation settled: %b\n" (settled 100);
       state ();
       p "\n== exclusion\n";
+      let to_holder, holder_in = Unix.pipe ~cloexec:true ()
+      and holder_out, from_holder = Unix.pipe ~cloexec:true () in
+      let pid =
+        Unix.create_process "./lock_holder.exe"
+          [| "./lock_holder.exe"; main_root; "d" |]
+          to_holder from_holder Unix.stderr
+      in
+      Unix.close to_holder;
+      Unix.close from_holder;
+      p "another process: %s\n"
+        (input_line (Unix.in_channel_of_descr holder_out));
+      ignore (run ());
+      Unix.close holder_in;
+      ignore (Unix.waitpid [] pid);
+      p "after it exits: ";
+      ignore (run ());
       match
         Chunk_spaces.with_run_lock (Chunk_spaces.create main_root) d (fun () ->
             run ())

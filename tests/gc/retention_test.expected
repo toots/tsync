@@ -4,7 +4,7 @@ anchored live: live elsewhere
 trashed: would purge 4 objects
 
 == expire, dry run (cutoff 10 days ago)
-trash 7, versions 1, journal 1, shares 3
+trash 7, versions 2, journal 1, shares 4
   delete manifests/<sub>/926c8b039839cfc6-7969407bf35f59e9
   delete manifests/<trashed>/4f7b4244079f8bf6-67a7ed7af26470c3
   delete manifests/<trashed>/91e75a14034af1d0-d3be400c101eec7c
@@ -12,17 +12,19 @@ trash 7, versions 1, journal 1, shares 3
   delete manifests/.tsync-trash/e1
   delete manifests/.tsync-trash/e4
   delete manifests/.tsync-trash/e6
-  delete version of 40 days ago
+  delete version of 40 days ago in 0000000000a1-1/h
+  delete version of 50 days ago in 0000000000a7-1/gone
   delete journal entry of 45 days ago
   delete tsync/shares/aa01
   delete tsync/shares/cache/aa01.data
   delete tsync/shares/cache/0123-4567.data
+  delete tsync/shares/aa05
   skipped, trashed recently: <recent>
   unparseable share left: tsync/shares/aa04
 dry run changed nothing: true
 
 == expire, applied
-trash 7, versions 1, journal 1, shares 3
+trash 7, versions 2, journal 1, shares 4
   delete manifests/<sub>/926c8b039839cfc6-7969407bf35f59e9
   delete manifests/<trashed>/4f7b4244079f8bf6-67a7ed7af26470c3
   delete manifests/<trashed>/91e75a14034af1d0-d3be400c101eec7c
@@ -30,13 +32,17 @@ trash 7, versions 1, journal 1, shares 3
   delete manifests/.tsync-trash/e1
   delete manifests/.tsync-trash/e4
   delete manifests/.tsync-trash/e6
-  delete version of 40 days ago
+  delete version of 40 days ago in 0000000000a1-1/h
+  delete version of 50 days ago in 0000000000a7-1/gone
   delete journal entry of 45 days ago
   delete tsync/shares/aa01
   delete tsync/shares/cache/aa01.data
   delete tsync/shares/cache/0123-4567.data
+  delete tsync/shares/aa05
   skipped, trashed recently: <recent>
   unparseable share left: tsync/shares/aa04
+group directories: kept true, emptied false, its folder false
+share held only by the replica, expired there: true
 left on the store:
   chunks/2d0/2d06800538d394c2-4dc5b0cc826f6703
   cursor
@@ -54,7 +60,7 @@ left on the store:
   manifests/<moved>/.tsync-parent
   manifests/<moved>/b8498c98aea80fb5-2ccd6b6d26c89eb0
   manifests/<recent>/.tsync-parent
-  version of 5 days ago
+  version of 5 days ago in 0000000000a1-1/h
   tsync/shares/aa02
   tsync/shares/aa03
   tsync/shares/aa04
