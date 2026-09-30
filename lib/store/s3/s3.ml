@@ -23,7 +23,7 @@ let () =
       fields;
       linkless = false;
       create =
-        (fun ~domain:_ ~name _ ->
+        (fun ~domain:_ ~admission:_ ~name _ ->
           Fail.raise_ Fail.Refused
             "backend %s: the s3 driver is not written yet" name);
     }

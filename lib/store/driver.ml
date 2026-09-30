@@ -5,6 +5,7 @@ type t = {
   linkless : bool;
   create :
     domain:Domain_name.t ->
+    admission:Uplink.t ->
     name:string ->
     (string * Field_spec.value) list ->
     Store.t;

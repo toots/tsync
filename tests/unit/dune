@@ -3,7 +3,23 @@
 
 (executables
  (names rt_test core_test dqueue_test)
+ (modules rt_test core_test dqueue_test)
  (libraries tsync_core unix))
+
+(executable
+ (name uplink_test)
+ (modules uplink_test)
+ (libraries tsync_core tsync_store))
+
+(rule
+ (with-stdout-to
+  uplink_test.output
+  (run ./uplink_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff uplink_test.expected uplink_test.output)))
 
 (rule
  (with-stdout-to

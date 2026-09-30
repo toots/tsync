@@ -9,6 +9,7 @@ type t = {
   linkless : bool;  (** a local store: no network link to govern *)
   create :
     domain:Domain_name.t ->
+    admission:Uplink.t ->
     name:string ->
     (string * Field_spec.value) list ->
     Store.t;

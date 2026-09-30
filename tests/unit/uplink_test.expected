@@ -1,0 +1,11 @@
+== budget (uplink-governor §4.2), 1000 B/s: burst 2000, window 30000
+admits 1500 at 0: true
+admits 1000 at 0: false, waits 0.50s
+admits 1000 at 0.5: true
+a body over the bucket alone: true
+then the window blocks: waits until a completion
+after its completion, debt paid by 100s: true
+== gate at 1 MiB/s
+4 MiB in 512 KiB bodies: about 2 s (the burst is 2 s of rate)
+a best-effort body beyond the budget: refused
+an unlimited link admits at once: true

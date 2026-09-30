@@ -332,7 +332,7 @@ let list_page t ~prefix ~token ~max =
             | _ -> None ))
     | r -> fail ~op:"list" r
 
-let create ~domain:_ ~name fields =
+let create ~domain:_ ~admission ~name fields =
   let str k =
     match List.assoc_opt k fields with
       | Some (Field_spec.S s) when String.trim s <> "" -> Some (String.trim s)
@@ -357,7 +357,7 @@ let create ~domain:_ ~name fields =
     Fail.invalid
       "backend %s: a service account key is required outside an emulator" name;
   let t = { api; bucket; auth } in
-  Tsync_store.Object_store.make ~name ?share_url:(str "shareUrl")
+  Tsync_store.Object_store.make ~name ~admission ?share_url:(str "shareUrl")
     {
       put =
         (fun k body ->

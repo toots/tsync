@@ -89,7 +89,7 @@ let rec chunks n = function
       let a, rest = take n [] l in
       a :: chunks n rest
 
-let make ~name ?share_url v =
+let make ~name ~admission ?share_url v =
   let health = Health.create name in
   let traffic = Store.new_traffic () in
   let ladder op f = Retry.ladder ~health ~op f in
@@ -103,15 +103,20 @@ let make ~name ?share_url v =
     {
       Store.name;
       put =
-        (fun ?mode:_ k body ->
+        (fun ?(mode = Store.Wait) k body ->
           ladder "put" (fun () ->
-              up (Bigstring.length body);
-              v.put k body));
+              Uplink.admitted admission mode (Bigstring.length body) (fun () ->
+                  up (Bigstring.length body);
+                  v.put k body)));
       put_if_absent =
         (fun k body ->
           ladder "put_if_absent" (fun () ->
-              up (Bigstring.length body);
-              let r = v.put_if_absent k body in
+              let r =
+                Uplink.admitted admission Wait (Bigstring.length body)
+                  (fun () ->
+                    up (Bigstring.length body);
+                    v.put_if_absent k body)
+              in
               (match r with Held b -> down (Some b) | Won -> ());
               r));
       get_opt =

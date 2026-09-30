@@ -43,4 +43,5 @@ val status_failure :
 (** failure-model §4.2: a per-key refusal inside an answered bulk request. *)
 val per_key_failure : op:string -> code:string -> key:string -> Fail.t
 
-val make : name:string -> ?share_url:string -> verbs -> Store.t
+val make :
+  name:string -> admission:Uplink.t -> ?share_url:string -> verbs -> Store.t

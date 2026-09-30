@@ -46,7 +46,7 @@ let () =
           | _ -> assert false
       in
       let client ?(secret = secret) domain =
-        (Option.get (Driver.find "http-proxy")).create
+        (Option.get (Driver.find "http-proxy")).create ~admission:Uplink.none
           ~domain:(Domain_name.v domain) ~name:("proxy-" ^ domain)
           [("url", Field_spec.S url); ("secret", Field_spec.S secret)]
       in

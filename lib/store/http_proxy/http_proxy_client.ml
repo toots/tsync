@@ -24,6 +24,7 @@ type t = {
   endpoint : Tsync_http.Client.endpoint;
   health : Health.t;
   traffic : Store.traffic;
+  admission : Uplink.t;
   served : bool option Atomic.t;
   claims : bool option Atomic.t;
   caps : (string * Store.caps) list Atomic.t;
@@ -106,16 +107,21 @@ let failure t ~op (r : answer) =
   in
   raise (Fail.E (Fail.make ~op kind reason))
 
-let request t ~meth ?(query = []) ?(body = Bigstring.empty) path =
+let request ?(mode = Store.Wait) t ~meth ?(query = []) ?(body = Bigstring.empty)
+    path =
   let target =
     if query = [] then path else path ^ "?" ^ W.canonical_query query
   in
-  ignore (Atomic.fetch_and_add t.traffic.uploaded (Bigstring.length body));
-  let r =
+  let send () =
+    ignore (Atomic.fetch_and_add t.traffic.uploaded (Bigstring.length body));
     Tsync_http.Client.request ~stall:stall_timeout t.endpoint ~meth
       ?body:(if meth = "PUT" || meth = "POST" then Some body else None)
       ~headers:(fun () -> W.sign ~secret:t.secret ~meth ~target body)
       target
+  in
+  let r =
+    if Bigstring.length body = 0 then send ()
+    else Uplink.admitted t.admission mode (Bigstring.length body) send
   in
   ignore (Atomic.fetch_and_add t.traffic.downloaded (Bigstring.length r.body));
   r
@@ -155,10 +161,10 @@ let ensure_served t =
                 (Tsync_http.Client.url t.endpoint)
           | _ -> failure t ~op:"bind" r)
 
-let call t op ~meth ?query ?body path =
+let call ?mode t op ~meth ?query ?body path =
   ensure_served t;
   ladder t op (fun () ->
-      let r = request t ~meth ?query ?body path in
+      let r = request ?mode t ~meth ?query ?body path in
       match r.status with
         | 429 | 503 -> failure t ~op r
         | s when s >= 500 -> failure t ~op r
@@ -388,7 +394,7 @@ let watch t k last =
           | _ -> ());
         Stop.sleep watch_floor
 
-let create ~domain ~name fields =
+let create ~domain ~admission ~name fields =
   let str k =
     match List.assoc_opt k fields with
       | Some (Field_spec.S s) when String.trim s <> "" -> Some (String.trim s)
@@ -415,6 +421,7 @@ let create ~domain ~name fields =
       endpoint = Tsync_http.Client.endpoint ?ca_file:(str "ca_certificate") url;
       health = Health.create name;
       traffic = Store.new_traffic ();
+      admission;
       served = Atomic.make None;
       claims = Atomic.make None;
       caps = Atomic.make [];
@@ -426,8 +433,8 @@ let create ~domain ~name fields =
     {
       Store.name;
       put =
-        (fun ?mode:_ k body ->
-          expect t "put" (call t "put" ~meth:"PUT" ~body (obj k)));
+        (fun ?mode k body ->
+          expect t "put" (call ?mode t "put" ~meth:"PUT" ~body (obj k)));
       put_if_absent = put_if_absent t;
       get_opt = get_opt t;
       get_range = get_range t;

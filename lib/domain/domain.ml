@@ -17,8 +17,16 @@ type t = {
 }
 
 (* 05 §3.2: parsing registered the type, so the driver is linked. *)
-let create_store d (b : Config.backend) =
-  (Option.get (Driver.find b.btype)).create ~domain:d ~name:b.bname b.fields
+let create_store config d (b : Config.backend) =
+  let admission =
+    match b.link with
+      | None -> Uplink.none
+      | Some link ->
+          let s = Config.link_settings config link in
+          Uplink.link link ~enabled:s.enabled ~max_rate:s.max_rate
+  in
+  (Option.get (Driver.find b.btype)).create ~domain:d ~admission ~name:b.bname
+    b.fields
 
 let knowledge d main =
   {
@@ -44,8 +52,11 @@ let build ?(owner = true) ?(poke = ignore) ?(lazy_tree = false) ?cache_root
     List.map
       (fun (b : Config.backend) ->
         ( b,
-          { Composite.name = b.bname; role = b.role; store = create_store d b }
-        ))
+          {
+            Composite.name = b.bname;
+            role = b.role;
+            store = create_store config d b;
+          } ))
       dom.backends
   in
   let main =
