@@ -369,7 +369,7 @@ let () =
       fields;
       linkless = true;
       create =
-        (fun ~name fields ->
+        (fun ~domain:_ ~name fields ->
           let verify_writes =
             match List.assoc_opt "verifyWrites" fields with
               | Some (Field_spec.B b) -> b

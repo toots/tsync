@@ -7,7 +7,11 @@ open Tsync_core
 type t = {
   fields : Field_spec.field list;
   linkless : bool;  (** a local store: no network link to govern *)
-  create : name:string -> (string * Field_spec.value) list -> Store.t;
+  create :
+    domain:Domain_name.t ->
+    name:string ->
+    (string * Field_spec.value) list ->
+    Store.t;
       (** reaches no network and touches no file *)
 }
 

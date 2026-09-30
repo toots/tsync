@@ -202,7 +202,11 @@ let () =
               exit 2
           | _ -> (fake, "d")
       in
-      let s = (Option.get (Driver.find "gcs")).create ~name:"gcs" fields in
+      let s =
+        (Option.get (Driver.find "gcs")).create
+          ~domain:(Domain_name.v domain_name)
+          ~name:"gcs" fields
+      in
       Fun.protect
         ~finally:(fun () -> Contract.cleanup s)
         (fun () -> Contract.run ~domain_name s);

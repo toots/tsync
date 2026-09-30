@@ -3,7 +3,11 @@ open Tsync_core
 type t = {
   fields : Field_spec.field list;
   linkless : bool;
-  create : name:string -> (string * Field_spec.value) list -> Store.t;
+  create :
+    domain:Domain_name.t ->
+    name:string ->
+    (string * Field_spec.value) list ->
+    Store.t;
 }
 
 let registry = Registry.create ()

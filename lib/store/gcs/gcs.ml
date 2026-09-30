@@ -332,7 +332,7 @@ let list_page t ~prefix ~token ~max =
             | _ -> None ))
     | r -> fail ~op:"list" r
 
-let create ~name fields =
+let create ~domain:_ ~name fields =
   let str k =
     match List.assoc_opt k fields with
       | Some (Field_spec.S s) when String.trim s <> "" -> Some (String.trim s)

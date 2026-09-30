@@ -17,8 +17,8 @@ type t = {
 }
 
 (* 05 §3.2: parsing registered the type, so the driver is linked. *)
-let create_store (b : Config.backend) =
-  (Option.get (Driver.find b.btype)).create ~name:b.bname b.fields
+let create_store d (b : Config.backend) =
+  (Option.get (Driver.find b.btype)).create ~domain:d ~name:b.bname b.fields
 
 let knowledge d main =
   {
@@ -43,7 +43,9 @@ let build ?(owner = true) ?(poke = ignore) ?(lazy_tree = false) ?cache_root
   let members =
     List.map
       (fun (b : Config.backend) ->
-        (b, { Composite.name = b.bname; role = b.role; store = create_store b }))
+        ( b,
+          { Composite.name = b.bname; role = b.role; store = create_store d b }
+        ))
       dom.backends
   in
   let main =
