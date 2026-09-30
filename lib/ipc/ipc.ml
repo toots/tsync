@@ -134,6 +134,7 @@ let check_length path =
       path max_path
 
 let check_dir dir =
+  Fs.mkdir_p (Filename.dirname dir);
   (try Unix.mkdir dir 0o700 with Unix.Unix_error (EEXIST, _, _) -> ());
   let st = Unix.lstat dir in
   if
@@ -346,6 +347,11 @@ let close t =
   Mutex.protect t.m (fun () -> List.iter hang_up t.conns)
 
 exception Not_serving of string
+
+let () =
+  Printexc.register_printer (function
+    | Not_serving path -> Some ("nothing serves " ^ path)
+    | _ -> None)
 
 module Client = struct
   type t = Line.t
