@@ -1,0 +1,5 @@
+(library
+ (name tsync_status)
+ (libraries tsync_core tsync_store unix yojson)
+ (preprocess
+  (pps ppx_deriving_yojson)))

@@ -80,8 +80,10 @@ val num : (string * value) list -> string -> int option
 val fstr : (string * value) list -> string -> string option
 val ffloat : (string * value) list -> string -> float option
 
-(** Fields rendered for a report, secrets and fields without a spec masked. *)
+type shown = Secret | Shown of value
+
+(** Fields for a report: secrets and fields without a spec are masked. *)
 val masked_fields :
-  specs:Field_spec.field list ->
-  (string * value) list ->
-  (string * Yojson.Safe.t) list
+  specs:Field_spec.field list -> (string * value) list -> (string * shown) list
+
+val value_to_string : value -> string

@@ -1,0 +1,16 @@
+; Renders typed reports; the output is compared with render_test.expected.
+
+(executable
+ (name render_test)
+ (libraries tsync_status tsync_store yojson))
+
+(rule
+ (action
+  (with-stdout-to
+   render_test.output
+   (run ./render_test.exe))))
+
+(rule
+ (alias runtest)
+ (action
+  (diff render_test.expected render_test.output)))

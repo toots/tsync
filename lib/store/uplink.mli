@@ -56,8 +56,46 @@ val waiting : t -> int
     running. *)
 val admitted : t -> Store.mode -> int -> (unit -> 'a) -> 'a
 
-(** §4.9, per link in use. *)
-val status : unit -> Yojson.Safe.t
+type link_state = [ `Ramping | `Steady | `Backing_off | `Leased ]
+type limit = Uplink_law.limit = Configured | Measured | Estimating
+type process_mode = [ `Owner | `Leased | `Local ]
+
+type lessee_status = {
+  pid : int;
+  rate : float;
+  in_flight : int;
+  waiting : int;
+  held_back : bool;
+  probe_ms : float option;
+}
+[@@deriving yojson]
+
+(** §4.9: [rate] is the law's in an Owner or Local process, the grant in a
+    Leased one. *)
+type link_status = {
+  name : string;
+  state : link_state;
+  limit : limit;
+  max_rate : float option;
+  rate : float;
+  capacity : float option;
+  achieved : float;
+  base_delay_ms : float option;
+  queueing_delay_ms : float;
+  in_flight : int;
+  window : float;
+  drops : int;
+  headroom : float;
+  target_delay_ms : float;
+  waiting : int;
+  mode : process_mode;
+  own_rate : float option;  (** an owner's own grant *)
+  lessees : lessee_status list;
+}
+[@@deriving yojson]
+
+(** Links in use, by name. *)
+val status : unit -> link_status list
 
 module Budget : sig
   type t

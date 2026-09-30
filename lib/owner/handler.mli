@@ -9,8 +9,7 @@ type hooks = {
   surface_evicted : string -> unit;
   surface_restored : string -> unit;
   reannounce : unit -> unit;
-  status_fields : unit -> (string * Ipc.json) list;
-  stats_fields : unit -> (string * Ipc.json) list;
+  frontend : unit -> Tsync_status.Status_report.frontend option;
 }
 
 val no_hooks : hooks

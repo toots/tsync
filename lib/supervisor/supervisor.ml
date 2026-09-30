@@ -160,40 +160,26 @@ let stop_children children =
         r.pid <- None)
       children)
 
-type job = {
-  report : Ipc.json;
-  key : string;
-  running : bool;
-  at : float;
-  pid : int;
-}
+module R = Tsync_status.Status_report
+
+type job = { report : R.job; at : float }
 
 let jobs = Atomic.make []
 
-let record_job req =
-  let get k = Option.value ~default:"" (Ipc.field req k) in
-  let pid =
-    match req with
-      | `Assoc l -> (
-          match List.assoc_opt "pid" l with Some (`Int p) -> p | _ -> 0)
-      | _ -> 0
+(* 07 §4.6: keyed by (pid, kind, domain); a new report replaces the row. *)
+let record_job (report : R.job) =
+  let same (o : job) =
+    o.report.pid = report.pid
+    && o.report.kind = report.kind
+    && o.report.domain = report.domain
   in
-  let key = Printf.sprintf "%d %s %s" pid (get "kind") (get "domain") in
-  let j =
-    {
-      report = req;
-      key;
-      running = get "state" = "running";
-      at = Rt.now ();
-      pid;
-    }
-  in
+  let j = { report; at = Rt.now () } in
   let rec swap () =
     let old = Atomic.get jobs in
     if
       not
         (Atomic.compare_and_set jobs old
-           (j :: List.filter (fun o -> o.key <> key) old))
+           (j :: List.filter (fun o -> not (same o)) old))
     then swap ()
   in
   swap ()
@@ -204,106 +190,136 @@ let live_jobs () =
   let now = Rt.now () in
   List.filter
     (fun j ->
-      if j.running then
+      if j.report.state = `Running then
         now -. j.at < Float.max job_stale_min (4. *. job_report_interval)
-        || Fs.pid_alive j.pid
+        || Fs.pid_alive j.report.pid
       else now -. j.at < job_keep)
     (Atomic.get jobs)
 
+(* 07 §5.5: only a collector fans out; a failed answer never raises. *)
 let ask_stats arg r =
   List.map
     (fun d ->
-      match
-        Ipc.call ~timeout:Ipc.request_deadline r.child.socket
-          (`Assoc
-             [
-               ("action", `String "stats");
-               ("domain", `String d);
-               ("arg", `String (String.concat "," ("frontend" :: arg)));
-             ])
-      with
-        | `Assoc l when List.assoc_opt "ok" l = Some (`Bool true) ->
-            let bodies =
-              match List.assoc_opt "domains" l with
-                | Some (`List ds) -> ds
-                | _ -> []
-            in
-            Ok (bodies, List.assoc_opt "process" l)
-        | reply ->
-            Error (Option.value ~default:"no answer" (Ipc.field reply "error"))
-        | exception e -> Error (Printexc.to_string e))
-    r.child.domains
-  |> List.map2 (fun d res -> (d, res)) r.child.domains
+      ( d,
+        match
+          Ipc.call ~timeout:Ipc.request_deadline r.child.socket
+            (`Assoc
+               [
+                 ("action", `String "stats");
+                 ("domain", `String d);
+                 ("arg", `String (String.concat "," ("frontend" :: arg)));
+               ])
+        with
+          | `Assoc l as reply when List.assoc_opt "ok" l = Some (`Bool true) ->
+              R.answer_of_yojson reply
+          | reply ->
+              Error
+                (Option.value ~default:"no answer" (Ipc.field reply "error"))
+          | exception e -> Error (Fail.classify e).reason ))
+    (match r.child.domains with [] -> [""] | ds -> ds)
 
-let machine_report arg children =
+(* 07 §5.5: grouped by (level, message), newest first. *)
+let warnings (selves : (int * R.self) list) =
+  let groups = Hashtbl.create 16 in
+  List.iter
+    (fun (pid, (s : R.self)) ->
+      List.iter
+        (fun (l : R.log_line) ->
+          let key = (l.level, l.message) in
+          let w : R.warning =
+            match Hashtbl.find_opt groups key with
+              | Some (w : R.warning) ->
+                  {
+                    w with
+                    count = w.count + 1;
+                    first = Float.min w.first l.t;
+                    last = Float.max w.last l.t;
+                    pids =
+                      (if List.mem pid w.pids then w.pids else pid :: w.pids);
+                  }
+              | None ->
+                  {
+                    level = l.level;
+                    message = l.message;
+                    count = 1;
+                    first = l.t;
+                    last = l.t;
+                    pids = [pid];
+                  }
+          in
+          Hashtbl.replace groups key w)
+        s.recent_errors)
+    selves;
+  List.sort
+    (fun (a : R.warning) b -> Float.compare b.last a.last)
+    (Hashtbl.fold (fun _ w acc -> w :: acc) groups [])
+
+let machine_report arg children : R.machine =
   let answers = Rt.map_concurrently (ask_stats arg) children in
-  let domains =
-    List.concat_map
-      (List.concat_map (fun (d, res) ->
-           match res with
-             | Ok (bodies, _) -> bodies
-             | Error _ ->
-                 [`Assoc [("name", `String d); ("unanswered", `Bool true)]]))
-      answers
-  in
+  let own = Tsync_status.Self_report.self ~role:"supervisor" ~serves:[] () in
   let processes =
-    `Assoc
-      [
-        ("pid", `Int (Unix.getpid ()));
-        ("role", `String "supervisor");
-        ("serves", `List []);
-        ("process", Usage.to_json (Usage.sample ()));
-      ]
+    {
+      R.role = "supervisor";
+      pid = Some (Unix.getpid ());
+      serves = [];
+      error = None;
+      self = Some own;
+    }
     :: List.map2
          (fun r ans ->
-           let base =
-             [
-               ( "role",
-                 `String
-                   (match r.child.args with
-                     | "store-server" :: _ -> "store-server"
-                     | _ -> "owner") );
-               ("serves", `List (List.map (fun d -> `String d) r.child.domains));
-               ("socketPath", `String r.child.socket);
-             ]
-             @ Option.fold ~none:[] ~some:(fun p -> [("pid", `Int p)]) r.pid
-             @ Option.to_list
-                 (List.find_map
-                    (function
-                      | _, Ok (_, Some p) -> Some ("process", p) | _ -> None)
-                    ans)
-           in
-           match
+           let error =
              List.find_map
-               (fun (_, res) ->
-                 Result.fold ~ok:(fun _ -> None) ~error:Option.some res)
+               (fun (_, a) ->
+                 Result.fold ~ok:(fun _ -> None) ~error:Option.some a)
                ans
-           with
-             | None -> `Assoc (("reachable", `Bool true) :: base)
-             | Some e ->
-                 `Assoc
-                   (("reachable", `Bool false) :: ("error", `String e) :: base))
+           in
+           {
+             R.role =
+               (match r.child.args with
+                 | "store-server" :: _ -> "store-server"
+                 | _ -> "owner");
+             pid = r.pid;
+             serves = r.child.domains;
+             error;
+             self =
+               List.find_map
+                 (fun (_, a) ->
+                   Result.fold
+                     ~ok:(fun (x : R.answer) -> Some x.self)
+                     ~error:(fun _ -> None)
+                     a)
+                 ans;
+           })
          children answers
   in
-  Ipc.ok
-    [
-      ("host", `String (Unix.gethostname ()));
-      ("domains", `List domains);
-      ("processes", `List processes);
-      ("uplinks", Tsync_store.Uplink.status ());
-      ("jobs", `List (List.map (fun j -> j.report) (live_jobs ())));
-      ( "warnings",
-        `List
-          (List.map
-             (fun (t, lvl, msg) ->
-               `Assoc
-                 [
-                   ("t", `Float t);
-                   ("level", `String (Log.name lvl));
-                   ("message", `String msg);
-                 ])
-             (Log.recent ())) );
-    ]
+  let domains =
+    List.concat_map
+      (fun (r, ans) ->
+        if r.child.args <> [] && List.hd r.child.args = "store-server" then []
+        else
+          List.concat_map
+            (fun (d, a) ->
+              match a with
+                | Ok (x : R.answer) -> x.domains
+                | Error _ -> [R.Unanswered d])
+            ans)
+      (List.combine children answers)
+  in
+  {
+    host = Unix.gethostname ();
+    domains;
+    processes;
+    uplinks = Tsync_store.Uplink.status ();
+    jobs = List.map (fun j -> j.report) (live_jobs ());
+    warnings =
+      warnings
+        (List.filter_map
+           (fun (p : R.process) ->
+             match (p.pid, p.self) with
+               | Some pid, Some s -> Some (pid, s)
+               | _ -> None)
+           processes);
+  }
 
 let handle children req =
   match Ipc.field req "action" with
@@ -317,10 +333,18 @@ let handle children req =
             (String.split_on_char ','
                (Option.value ~default:"" (Ipc.field req "arg")))
         in
-        Ipc.Reply (machine_report arg children)
-    | Some "report" ->
-        record_job req;
-        Ipc.Reply (Ipc.ok [])
+        Ipc.Reply
+          (match R.machine_to_yojson (machine_report arg children) with
+            | `Assoc l -> Ipc.ok l
+            | j -> j)
+    | Some "report" -> (
+        match R.job_of_yojson req with
+          | Ok job ->
+              record_job job;
+              Ipc.Reply (Ipc.ok [])
+          | Error e ->
+              Ipc.Reply
+                (Ipc.failure (Fail.make Fail.Invalid ("bad report: " ^ e))))
     | Some "uplink" -> (
         match Tsync_store.Uplink.renewal req with
           | Some answer -> Ipc.Reply answer

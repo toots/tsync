@@ -10,4 +10,5 @@
   tsync_ipc
   unix
   threads.posix
+  tsync_status
   yojson))

@@ -7,8 +7,7 @@ type hooks = {
   surface_evicted : string -> unit;
   surface_restored : string -> unit;
   reannounce : unit -> unit;
-  status_fields : unit -> (string * Ipc.json) list;
-  stats_fields : unit -> (string * Ipc.json) list;
+  frontend : unit -> Tsync_status.Status_report.frontend option;
 }
 
 let no_hooks =
@@ -17,8 +16,7 @@ let no_hooks =
     surface_evicted = ignore;
     surface_restored = ignore;
     reannounce = ignore;
-    status_fields = (fun () -> []);
-    stats_fields = (fun () -> []);
+    frontend = (fun () -> None);
   }
 
 type t = {
@@ -308,7 +306,10 @@ let status t =
        ("uploading", `List []);
        ("downloading", `List []);
      ]
-    @ t.hooks.status_fields ())
+    @
+      match t.hooks.frontend () with
+      | Some { mount = Some m; _ } -> [("mount", `String m)]
+      | _ -> [])
 
 let item t path = [("item", row_or_unnamed t path)]
 

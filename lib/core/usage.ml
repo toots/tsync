@@ -34,21 +34,3 @@ let sample () =
     major_collections = g.major_collections;
     cpu_seconds = t.tms_utime +. t.tms_stime;
   }
-
-let to_json t =
-  let opt k = function Some v -> [(k, `Int v)] | None -> [] in
-  `Assoc
-    ([
-       ("cpuSeconds", `Float t.cpu_seconds);
-       ("rssBytes", `Int t.resident);
-       ("privateBytes", `Int t.private_);
-       ("swappedBytes", `Int t.swapped);
-     ]
-    @ opt "anonymousBytes" t.anonymous
-    @ opt "fileBackedBytes" t.file_backed
-    @ [
-        ("heapBytes", `Int t.heap);
-        ("topHeapBytes", `Int t.top_heap);
-        ("minorCollections", `Int t.minor_collections);
-        ("majorCollections", `Int t.major_collections);
-      ])

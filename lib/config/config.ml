@@ -578,19 +578,19 @@ let is_secret ~specs name =
     | None -> true
 
 (* security §10.3: masking fails closed, a field without a spec is masked. *)
+type shown = Secret | Shown of value
+
 let masked_fields ~specs fields =
   List.map
-    (fun (k, v) ->
-      ( k,
-        if is_secret ~specs k then `String "***"
-        else (
-          match v with
-            | S s -> `String s
-            | B b -> `Bool b
-            | I i -> `Int i
-            | F f -> `Float f
-            | L l -> `List (List.map (fun s -> `String s) l)) ))
+    (fun (k, v) -> (k, if is_secret ~specs k then Secret else Shown v))
     fields
+
+let value_to_string = function
+  | S s -> s
+  | B b -> string_of_bool b
+  | I i -> string_of_int i
+  | F f -> Printf.sprintf "%g" f
+  | L l -> String.concat ", " l
 
 let uplink_settings (l : link) =
   {

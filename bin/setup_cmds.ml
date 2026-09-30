@@ -3,6 +3,20 @@ open Tsync_core
 open Tsync_config
 open Cli
 
+(* The printed config's JSON form; secrets read ***. *)
+let shown fields =
+  List.map
+    (fun (k, (v : Config.shown)) ->
+      ( k,
+        match v with
+          | Secret -> `String "***"
+          | Shown (S s) -> `String s
+          | Shown (B b) -> `Bool b
+          | Shown (I i) -> `Int i
+          | Shown (F f) -> `Float f
+          | Shown (L l) -> `List (List.map (fun s -> `String s) l) ))
+    fields
+
 let show_config () =
   run (fun () ->
       let config = config () in
@@ -19,7 +33,7 @@ let show_config () =
              ("role", `String (Tsync_store.Composite.role_to_string b.role));
            ]
           @ Option.fold ~none:[] ~some:(fun l -> [("link", `String l)]) b.link
-          @ Config.masked_fields ~specs b.fields)
+          @ shown (Config.masked_fields ~specs b.fields))
       in
       let frontend (f : Config.frontend) =
         let specs =
@@ -28,7 +42,8 @@ let show_config () =
             (Frontend.find f.ftype)
         in
         `Assoc
-          (("type", `String f.ftype) :: Config.masked_fields ~specs f.options)
+          (("type", `String f.ftype)
+          :: shown (Config.masked_fields ~specs f.options))
       in
       print_endline
         (Yojson.Safe.pretty_to_string

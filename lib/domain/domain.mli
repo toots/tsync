@@ -34,6 +34,9 @@ val build :
     owner, which keeps it. *)
 val engine : t -> (module Engine.S)
 
+(** A store's liveness probe: one cheap read of the domain cursor. *)
+val probe : Tsync_core.Domain_name.t -> Store.t -> unit
+
 (** The remote layer's view of the domain, for readers that are not its owner.
 *)
 val context : t -> (module Tsync_remote.Context.S)

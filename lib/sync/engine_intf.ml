@@ -3,6 +3,20 @@
 open Tsync_core
 open Tsync_checkout
 
+(** What the status report reads of an engine (07 §5.5). *)
+type activity = {
+  intent : int;
+  prepared : int;
+  executed : int;
+  stuck : int;  (** parked records: retried only on {!S.rearm} *)
+  last_error : string option;
+  in_flight : string list;  (** paths of the uploads running now *)
+  bytes_owed : int;  (** whole-file bytes of every unpublished put *)
+  mark_age : float option;  (** seconds since the last-sync mark's entry *)
+  cache : Cache.counts;
+  max_cache : int option;
+}
+
 module type S = sig
   (** Holds the metadata lock across [f]; every operation called inside joins
       the same hold. *)
@@ -115,6 +129,10 @@ module type S = sig
   val unapplied : unit -> (string * string) list
 
   val pending_uploads : unit -> int
+
+  (** Reads every WAL record: meant for a report, not a hot path. *)
+  val activity : unit -> activity
+
   val pending_metadata : unit -> int
   val parked : unit -> (string * Dqueue.failure_note) list
 

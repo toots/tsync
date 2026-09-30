@@ -17,6 +17,10 @@ type t = {
 }
 
 (* 05 §3.2: parsing registered the type, so the driver is linked. *)
+(* uplink-governor §8: a metadata read of the domain cursor exists on every
+   written store and costs almost nothing. *)
+let probe d (store : Store.t) = ignore (store.head_opt (Key.cursor d))
+
 let create_store config d (b : Config.backend) =
   let admission =
     match b.link with
@@ -30,7 +34,7 @@ let create_store config d (b : Config.backend) =
       b.fields
   in
   Uplink.attach admission ~store:b.bname
-    ~probe:(fun () -> ignore (store.head_opt (Key.cursor d)))
+    ~probe:(fun () -> probe d store)
     ~health:store.health;
   store
 

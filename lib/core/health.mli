@@ -47,4 +47,13 @@ val timeouts : t -> int
 (** "held down for Ns after K failures (reason)", while out. *)
 val describe : t -> string option
 
-val json : t -> Yojson.Safe.t
+type state =
+  | Up
+  | Down of { held_for : float; failures : int; reason : string }
+
+val state : t -> state
+
+(** The report's wire form. *)
+val state_to_yojson : state -> Yojson.Safe.t
+
+val state_of_yojson : Yojson.Safe.t -> (state, string) result

@@ -3,4 +3,6 @@
 (library
  (name tsync_store)
  (library_flags (-linkall))
- (libraries tsync_core unix yojson))
+ (libraries tsync_core unix yojson)
+ (preprocess
+  (pps ppx_deriving_yojson)))

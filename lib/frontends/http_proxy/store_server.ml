@@ -797,14 +797,18 @@ let control t stop req =
       | Some "stop" ->
           stop ();
           Tsync_ipc.Ipc.ok []
-      | Some ("stats" | "status") ->
-          Tsync_ipc.Ipc.ok
-            [
-              ("frontend", `String "http-proxy");
-              ("serves", `List (List.map (fun r -> `String r.name) t.routes));
-              ("dataInFlight", `Int (Atomic.get t.pending));
-              ("process", Usage.to_json (Usage.sample ()));
-            ]
+      | Some ("stats" | "status") -> (
+          Tsync_status.Status_report.answer_to_yojson
+            {
+              domains = [];
+              self =
+                Tsync_status.Self_report.self ~role:"store-server"
+                  ~serves:(List.map (fun r -> r.name) t.routes)
+                  ();
+            }
+          |> function
+          | `Assoc l -> Tsync_ipc.Ipc.ok l
+          | j -> j)
       | Some a ->
           Tsync_ipc.Ipc.failure
             (Fail.make Fail.Invalid ("unknown action: " ^ a))

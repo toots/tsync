@@ -125,32 +125,20 @@ let route ~draining served req =
                   (Ipc.failure
                      (Fail.make Fail.Unreachable (d ^ " is not served here")))))
 
-(* ponytail: a minimal domain body; the full report of 07 §5.5 lives with the
-   status collector. *)
-let domain_body (domain : Domain.t) (module E : Tsync_sync.Engine.S) =
-  let sync =
-    match E.bridge () with
-      | Incremental -> [("state", `String "incremental")]
-      | Hold reason -> [("state", `String "hold"); ("reason", `String reason)]
-  in
-  `Assoc
-    [
-      ("name", `String (Domain_name.to_string domain.name));
-      ("paused", `Bool (E.is_paused ()));
-      ( "sync",
-        `Assoc
-          (sync
-          @ [
-              ("unappliedEntries", `Int (List.length (E.unapplied ())));
-              ("parkedMetadata", `Int (List.length (E.parked ())));
-            ]) );
-      ( "queues",
-        `Assoc
-          [
-            ("pendingFiles", `Int (E.pending_uploads ()));
-            ("pendingMetadata", `Int (E.pending_metadata ()));
-          ] );
-    ]
+(* 07 §5.5: a domain's body, and this process's description of itself with
+   the traffic of every domain it serves. *)
+let stats_reply reports report =
+  Tsync_status.Status_report.answer_to_yojson
+    {
+      domains = [Answered (Report.domain_body report)];
+      self =
+        Tsync_status.Self_report.self
+          ~traffic:(Report.traffic (List.map snd reports))
+          ~role:"owner" ~serves:(List.map fst reports) ();
+    }
+  |> function
+  | `Assoc l -> Ipc.ok l
+  | j -> j
 
 let housekeeping (module E : Tsync_sync.Engine.S) =
   try
@@ -169,6 +157,7 @@ let serve ?present ~socket config domains =
     match !server with Some srv -> Ipc.publish srv d ev | None -> 0
   in
   let home = Paths.home () in
+  let reports = ref [] in
   served :=
     List.map
       (fun (dom : Config.domain) ->
@@ -183,6 +172,8 @@ let serve ?present ~socket config domains =
             | None -> (Handler.no_hooks, ignore)
         in
         E.set_changed_hook hooks.changed;
+        let report = Report.create domain engine ~frontend:hooks.frontend in
+        reports := (Domain_name.to_string dom.name, report) :: !reports;
         {
           domain;
           engine;
@@ -190,12 +181,7 @@ let serve ?present ~socket config domains =
           handler =
             Handler.create ~domain ~engine ~hooks
               ~publish:(publish (Domain_name.to_string dom.name))
-              ~stats:(fun _ ->
-                Ipc.ok
-                  [
-                    ("domains", `List [domain_body domain engine]);
-                    ("process", Usage.to_json (Usage.sample ()));
-                  ])
+              ~stats:(fun _ -> stats_reply !reports report)
               ~stop:Stop.request ~dest_roots:[home] ~staging_roots:[home];
         })
       domains;
@@ -262,15 +248,16 @@ let one_shot ~what config (dom : Config.domain) f =
             let (module E : Tsync_sync.Engine.S) = engine in
             E.start ~poll_journal:false ();
             let home = Paths.home () in
+            let report =
+              Report.create domain engine ~frontend:(fun () -> None)
+            in
             let handler =
               Handler.create ~domain ~engine ~hooks:Handler.no_hooks
                 ~publish:(fun _ -> 0)
                 ~stats:(fun _ ->
-                  Ipc.ok
-                    [
-                      ("domains", `List [domain_body domain engine]);
-                      ("process", Usage.to_json (Usage.sample ()));
-                    ])
+                  stats_reply
+                    [(Domain_name.to_string domain.name, report)]
+                    report)
                 ~stop:ignore ~dest_roots:[home] ~staging_roots:[home]
             in
             Fun.protect ~finally:(fun () -> E.drain ()) (fun () -> f handler))

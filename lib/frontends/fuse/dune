@@ -11,6 +11,7 @@
   tsync_domain
   tsync_sync
   tsync_owner
+  tsync_status
   threads.posix
   unix
   fuse3))

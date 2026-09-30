@@ -239,3 +239,4 @@ the File Provider stop bound, detached jobs, peer-credential refusal.
 - A first normative draft specified *detached jobs* (`"detach":true`, `job` polling) for long IPC
   requests; it was replaced by bulk actions bounded by progress plus the `ping` liveness probe
   (failure-model §8.2), which needs no job table.
+- **The status report is typed end to end** (`Status_report`, with `[@@deriving yojson]`): owners, the store server and the supervisor build records, `tsync status` renders records, and JSON exists only on the socket and in `--json`. The wire shape follows §5.5 with three groupings the types impose: a backend's `reachable`/`latencyMs`/`error` sit under `reach`, a process's `server`/`process`/`uplinks`/`traffic`/`recentErrors` under `self`, and `sync.state`/`reason` read as one optional `hold`.

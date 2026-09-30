@@ -23,7 +23,17 @@ let field path j =
         | _ -> `Null)
     j path
 
-let mode link = field [link; "mode"] (Uplink.status ())
+let link_status name =
+  List.find_opt
+    (fun (l : Uplink.link_status) -> l.name = name)
+    (Uplink.status ())
+
+let mode name =
+  match link_status name with
+    | Some { mode = `Owner; _ } -> "owner"
+    | Some { mode = `Leased; _ } -> "leased"
+    | Some { mode = `Local; _ } -> "local"
+    | None -> "dormant"
 
 (* The ticker runs on the real clock: wait for a condition, bounded. *)
 let until ?(limit = 15.) cond =
@@ -62,22 +72,22 @@ let () =
       use wan;
       use lan;
       p "== lessee";
-      p "granted: %b"
-        (until (fun () -> mode "wan" = `String "leased" && !calls > 0));
+      p "granted: %b" (until (fun () -> mode "wan" = "leased" && !calls > 0));
       p "one request renews every link: %s"
         (match field ["links"] !last with
           | `Assoc l -> String.concat ", " (List.sort compare (List.map fst l))
           | _ -> "none");
       let rate l =
-        Yojson.Safe.to_string (field [l; "rateBytesPerSec"] (Uplink.status ()))
+        Option.fold ~none:"?"
+          ~some:(fun (s : Uplink.link_status) -> Printf.sprintf "%.1f" s.rate)
+          (link_status l)
       in
       p "wan granted %s; lan, not named, keeps %s" (rate "wan") (rate "lan");
       answer := `Fail;
       let c = !calls in
       ignore (until (fun () -> !calls >= c + 2));
-      p "two missed renewals: %s" (Yojson.Safe.to_string (mode "wan"));
-      p "the third makes it local: %b"
-        (until (fun () -> mode "wan" = `String "local"));
+      p "two missed renewals: %S" (mode "wan");
+      p "the third makes it local: %b" (until (fun () -> mode "wan" = "local"));
       answer := `Grant 1e6;
       Uplink.lease (fun req ->
           incr calls;
@@ -86,11 +96,11 @@ let () =
             | `Grant r -> grant r
             | `Refuse -> `Assoc [("ok", `Bool true)]
             | `Fail -> failwith "unreached");
-      ignore (until (fun () -> mode "wan" = `String "leased"));
+      ignore (until (fun () -> mode "wan" = "leased"));
       answer := `Refuse;
       p "a refusal makes it local at once: %b"
         (let c = !calls in
-         until (fun () -> !calls > c) && mode "wan" = `String "local");
+         until (fun () -> !calls > c) && mode "wan" = "local");
       p "== owner";
       Uplink.own (fun _ -> settings);
       let me = Unix.getpid () in
@@ -132,9 +142,9 @@ let () =
       in
       ignore (Uplink.renewal (report dead));
       let lessees () =
-        match field ["wan"; "lessees"] (Uplink.status ()) with
-          | `List l -> List.length l
-          | _ -> -1
+        Option.fold ~none:(-1)
+          ~some:(fun (s : Uplink.link_status) -> List.length s.lessees)
+          (link_status "wan")
       in
       p "two lessees recorded: %d" (lessees ());
       p "the row of a gone pid is dropped at the next step: %b"

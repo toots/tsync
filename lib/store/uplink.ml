@@ -663,81 +663,134 @@ let admitted t (mode : Store.mode) bytes f =
         abandoned t ticket;
         raise e
 
-let ms s = `Float (Float.round (s *. 10000.) /. 10.)
+type link_state = [ `Ramping | `Steady | `Backing_off | `Leased ]
+type limit = Law.limit = Configured | Measured | Estimating
+type process_mode = [ `Owner | `Leased | `Local ]
 
-(* §4.9 *)
+let enum_codec name cases =
+  ( (fun v -> `String (List.assoc v cases)),
+    function
+    | `String s -> (
+        match List.find_opt (fun (_, n) -> n = s) cases with
+          | Some (v, _) -> Ok v
+          | None -> Error (name ^ ": " ^ s))
+    | _ -> Error (name ^ ": not a string") )
+
+let link_state_to_yojson, link_state_of_yojson =
+  enum_codec "state"
+    [
+      (`Ramping, "ramping");
+      (`Steady, "steady");
+      (`Backing_off, "backingOff");
+      (`Leased, "leased");
+    ]
+
+let limit_to_yojson, limit_of_yojson =
+  enum_codec "limit"
+    [
+      (Configured, "configured");
+      (Measured, "measured");
+      (Estimating, "estimating");
+    ]
+
+let process_mode_to_yojson, process_mode_of_yojson =
+  enum_codec "mode" [(`Owner, "owner"); (`Leased, "leased"); (`Local, "local")]
+
+type lessee_status = {
+  pid : int;
+  rate : float; [@key "rateBytesPerSec"]
+  in_flight : int; [@key "inFlightBytes"]
+  waiting : int;
+  held_back : bool; [@key "heldBack"]
+  probe_ms : float option; [@key "probeMs"] [@default None]
+}
+[@@deriving yojson { strict = false }]
+
+type link_status = {
+  name : string;
+  state : link_state;
+  limit : limit;
+  max_rate : float option; [@key "maxRateBytesPerSec"] [@default None]
+  rate : float; [@key "rateBytesPerSec"]
+  capacity : float option; [@key "capacityBytesPerSec"] [@default None]
+  achieved : float; [@key "achievedBytesPerSec"]
+  base_delay_ms : float option; [@key "baseDelayMs"] [@default None]
+  queueing_delay_ms : float; [@key "queueingDelayMs"]
+  in_flight : int; [@key "inFlightBytes"]
+  window : float; [@key "windowBytes"]
+  drops : int;
+  headroom : float;
+  target_delay_ms : float; [@key "targetDelayMs"]
+  waiting : int;
+  mode : process_mode;
+  own_rate : float option; [@key "ownRateBytesPerSec"] [@default None]
+  lessees : lessee_status list; [@default []]
+}
+[@@deriving yojson { strict = false }]
+
+let ms s = Float.round (s *. 10000.) /. 10.
+
+(* §4.9: links in use, by name. *)
 let status () =
   let mode = Mutex.protect proc_m (fun () -> proc.mode) in
-  let mode_name =
-    match mode with Owner -> "owner" | Leased -> "leased" | Local -> "local"
-  in
   let one g =
     Mutex.protect g.m (fun () ->
         let now = Rt.now () in
-        let state =
-          match (mode, Law.phase g.law) with
-            | Leased, _ -> "leased"
-            | _, Law.Ramping -> "ramping"
-            | _, Steady -> "steady"
-            | _, Backing_off -> "backingOff"
-        in
-        let opt f = function Some x -> f x | None -> `Null in
-        let base =
-          [
-            ("enabled", `Bool true);
-            ("state", `String state);
-            ("limit", `String (limit_name g));
-            ("maxRateBytesPerSec", opt (fun r -> `Float r) g.settings.max_rate);
-            ( "rateBytesPerSec",
-              `Float
-                (if mode = Leased then Budget.rate g.budget else Law.rate g.law)
-            );
-            ("capacityBytesPerSec", opt (fun c -> `Float c) (Law.capacity g.law));
-            ("achievedBytesPerSec", `Float (Law.achieved g.law ~now));
-            ("baseDelayMs", opt ms (Law.base_delay g.law));
-            ("queueingDelayMs", ms (Law.queueing g.law));
-            ("inFlightBytes", `Int (Budget.in_flight g.budget));
-            ("windowBytes", `Float (Budget.window_bytes g.budget));
-            ("drops", `Int g.drops);
-            ("headroom", `Float g.settings.headroom);
-            ("targetDelayMs", ms g.settings.target_delay);
-            ("waiting", `Int (Queue.length g.line));
-            ("mode", `String mode_name);
-          ]
-        in
-        let owner =
-          if mode <> Owner then []
-          else
-            [
-              ("ownRateBytesPerSec", `Float g.own_grant);
-              ( "lessees",
-                `List
-                  (Hashtbl.fold
-                     (fun pid l acc ->
-                       `Assoc
-                         [
-                           ("pid", `Int pid);
-                           ("rateBytesPerSec", `Float l.grant);
-                           ("inFlightBytes", `Int l.report.in_flight);
-                           ("waiting", `Int l.report.waiting);
-                           ("heldBack", `Bool l.report.held_back);
-                           ( "probeMs",
-                             match l.report.probes with
-                               | [] -> `Null
-                               | ps ->
-                                   ms
+        {
+          name = g.name;
+          state =
+            (match (mode, Law.phase g.law) with
+              | Leased, _ -> `Leased
+              | _, Law.Ramping -> `Ramping
+              | _, Steady -> `Steady
+              | _, Backing_off -> `Backing_off);
+          limit = Law.limit g.law;
+          max_rate = g.settings.max_rate;
+          rate =
+            (if mode = Leased then Budget.rate g.budget else Law.rate g.law);
+          capacity = Law.capacity g.law;
+          achieved = Law.achieved g.law ~now;
+          base_delay_ms = Option.map ms (Law.base_delay g.law);
+          queueing_delay_ms = ms (Law.queueing g.law);
+          in_flight = Budget.in_flight g.budget;
+          window = Budget.window_bytes g.budget;
+          drops = g.drops;
+          headroom = g.settings.headroom;
+          target_delay_ms = ms g.settings.target_delay;
+          waiting = Queue.length g.line;
+          mode =
+            (match mode with
+              | Owner -> `Owner
+              | Leased -> `Leased
+              | Local -> `Local);
+          own_rate = (if mode = Owner then Some g.own_grant else None);
+          lessees =
+            (if mode <> Owner then []
+             else
+               List.sort compare
+                 (Hashtbl.fold
+                    (fun pid (l : lessee) acc ->
+                      {
+                        pid;
+                        rate = l.grant;
+                        in_flight = l.report.in_flight;
+                        waiting = l.report.waiting;
+                        held_back = l.report.held_back;
+                        probe_ms =
+                          (match l.report.probes with
+                            | [] -> None
+                            | ps ->
+                                Some
+                                  (ms
                                      (List.fold_left
                                         (fun a (_, d) -> Float.min a d)
-                                        infinity ps) );
-                         ]
-                       :: acc)
-                     g.lessees []) );
-            ]
-        in
-        (g.name, `Assoc (base @ owner)))
+                                        infinity ps)));
+                      }
+                      :: acc)
+                    g.lessees []));
+        })
   in
-  `Assoc
-    (List.filter_map
-       (fun g ->
-         if Mutex.protect g.m (fun () -> dormant g) then None else Some (one g))
-       (List.sort (fun a b -> compare a.name b.name) (governed ())))
+  List.filter_map
+    (fun g ->
+      if Mutex.protect g.m (fun () -> dormant g) then None else Some (one g))
+    (List.sort (fun (a : gate) b -> compare a.name b.name) (governed ()))

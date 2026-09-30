@@ -1251,6 +1251,58 @@ module Make (C : Engine_ctx.S) = struct
     if left > 0. then Tsync_store.Composite.settle ~timeout:left C.composite
 
   let pending_uploads () = Dqueue.pending uploads
+
+  let activity () : Engine_intf.activity =
+    let records =
+      List.filter_map
+        (fun id -> Option.map (fun r -> (id, r)) (read_record id))
+        (Dqueue.Records.list wal)
+    in
+    let count s =
+      List.length
+        (List.filter (fun (_, (r : Wal.record)) -> r.state = s) records)
+    in
+    let owed =
+      List.fold_left
+        (fun acc (_, (r : Wal.record)) ->
+          if r.state = Executed then acc
+          else
+            List.fold_left
+              (fun acc -> function
+                | Op.Put { size; _ } -> acc + size | _ -> acc)
+              acc r.ops)
+        0 records
+    in
+    let parked = Dqueue.parked uploads @ Dqueue.parked metadata in
+    {
+      intent = count Intent;
+      prepared = count Prepared;
+      executed = count Executed;
+      stuck = List.length parked;
+      last_error =
+        (match parked with
+          | (_, n) :: _ -> Some (Fail.to_string n.last)
+          | [] -> None);
+      in_flight =
+        List.concat_map
+          (fun id ->
+            match List.assoc_opt id records with
+              | Some r -> List.concat_map Op.paths r.ops
+              | None -> [])
+          (Dqueue.running uploads);
+      bytes_owed = owed;
+      mark_age =
+        Option.map
+          (fun k ->
+            Unix.gettimeofday () -. (Int64.to_float (Entry_key.ms k) /. 1000.))
+          (mark ());
+      cache =
+        (match Cache.last_counts cache with
+          | Some c -> c
+          | None -> Cache.enforce_cap cache);
+      max_cache = Cache.cap cache;
+    }
+
   let pending_metadata () = Dqueue.pending metadata
 
   type handle = Local_ops.handle

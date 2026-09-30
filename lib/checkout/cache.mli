@@ -79,3 +79,8 @@ type counts = { bytes : int; pinned : int; bodies : int }
 
 (** Remove lapsed pins, then the coldest unpinned bodies over the cap. *)
 val enforce_cap : t -> counts
+
+(** What the last {!enforce_cap} left. *)
+val last_counts : t -> counts option
+
+val cap : t -> int option

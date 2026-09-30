@@ -19,9 +19,6 @@ type t = {
 
 val sample : unit -> t
 
-(** The 07 §5.5 process fields, plus [anonymousBytes] and [fileBackedBytes]. *)
-val to_json : t -> Yojson.Safe.t
-
 (** Returns the allocator's free memory to the kernel, after a large operation.
 *)
 val trim : unit -> unit

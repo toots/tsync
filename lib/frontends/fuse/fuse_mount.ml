@@ -624,18 +624,19 @@ let host ~mount domains ~run =
       {
         Handler.no_hooks with
         changed = invalidator ();
-        status_fields = (fun () -> [("mount", `String mount_point)]);
-        stats_fields =
+        frontend =
           (fun () ->
-            [
-              ("frontend", `String "fuse");
-              ("mountPoint", `String mount_point);
-              ("openHandles", `Int (Atomic.get t.open_handles));
-              ("filesOpened", `Int (Atomic.get t.opened));
-              ("bytesRead", `Int (Atomic.get t.bytes_read));
-              ("bytesWritten", `Int (Atomic.get t.bytes_written));
-              ("handlerFailures", `Int (Fuse.error_count ()));
-            ]);
+            Some
+              {
+                Tsync_status.Status_report.kind = "fuse";
+                pid = Some (Unix.getpid ());
+                mount = Some mount_point;
+                port = None;
+                open_handles = Some (Atomic.get t.open_handles);
+                bytes_read = Some (Atomic.get t.bytes_read);
+                bytes_written = Some (Atomic.get t.bytes_written);
+                unanswered = false;
+              });
       }
     in
     let go () =

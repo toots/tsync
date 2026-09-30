@@ -57,6 +57,8 @@ type gstate = {
   mutable from_ranges : int list;
 }
 
+type counts = { bytes : int; pinned : int; bodies : int }
+
 type t = {
   dir : string;
   cc : int;
@@ -68,6 +70,7 @@ type t = {
   in_flight : (string, unit Rt.Promise.t) Hashtbl.t;
   mutable links : [ `Unknown | `Yes | `No ];
   cap : int option;
+  last : counts option Atomic.t;
 }
 
 let create ~cache_root ~domain ~cc ~fast ~get_whole ~get_range ~cap =
@@ -85,6 +88,7 @@ let create ~cache_root ~domain ~cc ~fast ~get_whole ~get_range ~cap =
     in_flight = Hashtbl.create 16;
     links = `Unknown;
     cap;
+    last = Atomic.make None;
   }
 
 let cc t = t.cc
@@ -472,8 +476,6 @@ let sweep_at_start t =
         (Fs.readdir dir))
     (Fs.readdir t.dir)
 
-type counts = { bytes : int; pinned : int; bodies : int }
-
 (* read-path §4.9: lapsed pins go, then the coldest unpinned bodies until the
    unpinned bytes fit the cap. *)
 let enforce_cap t =
@@ -522,4 +524,9 @@ let enforce_cap t =
               total := !total - bytes))
           (List.sort compare !bodies)
     | None -> ());
-  { bytes = !total; pinned = !pinned; bodies = !count }
+  let counts = { bytes = !total; pinned = !pinned; bodies = !count } in
+  Atomic.set t.last (Some counts);
+  counts
+
+let last_counts t = Atomic.get t.last
+let cap t = t.cap

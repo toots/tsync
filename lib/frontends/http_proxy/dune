@@ -12,6 +12,7 @@
   tsync_domain
   tsync_remote
   tsync_ipc
+  tsync_status
   unix
   yojson))
 

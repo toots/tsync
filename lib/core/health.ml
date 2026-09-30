@@ -141,15 +141,52 @@ let describe t =
                  t.consecutive
                  (if t.reason = "" then "" else " (" ^ t.reason ^ ")")))
 
-let json t =
+type state =
+  | Up
+  | Down of { held_for : float; failures : int; reason : string }
+
+let state t =
   Mutex.protect t.m (fun () ->
       match t.held_until with
-        | None -> `Assoc [("state", `String "up")]
+        | None -> Up
         | Some until ->
-            `Assoc
-              [
-                ("state", `String "down");
-                ("heldForSeconds", `Float (max 0. (until -. t.now ())));
-                ("failures", `Int t.consecutive);
-                ("reason", `String t.reason);
-              ])
+            Down
+              {
+                held_for = max 0. (until -. t.now ());
+                failures = t.consecutive;
+                reason = t.reason;
+              })
+
+let state_to_yojson = function
+  | Up -> `Assoc [("state", `String "up")]
+  | Down d ->
+      `Assoc
+        [
+          ("state", `String "down");
+          ("heldForSeconds", `Float d.held_for);
+          ("failures", `Int d.failures);
+          ("reason", `String d.reason);
+        ]
+
+let state_of_yojson = function
+  | `Assoc l -> (
+      let num k =
+        match List.assoc_opt k l with
+          | Some (`Float f) -> f
+          | Some (`Int i) -> float_of_int i
+          | _ -> 0.
+      in
+      match List.assoc_opt "state" l with
+        | Some (`String "down") ->
+            Ok
+              (Down
+                 {
+                   held_for = num "heldForSeconds";
+                   failures = truncate (num "failures");
+                   reason =
+                     (match List.assoc_opt "reason" l with
+                       | Some (`String r) -> r
+                       | _ -> "");
+                 })
+        | _ -> Ok Up)
+  | _ -> Error "health: not an object"

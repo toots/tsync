@@ -19,6 +19,7 @@
   mem_usage
   mirage-crypto-pk
   mirage-crypto-rng
+  ppx_deriving_yojson
   ptime
   re
   ssl
