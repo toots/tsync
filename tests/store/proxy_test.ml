@@ -99,4 +99,13 @@ let () =
       Contract.put s cursor "two";
       let took = Rt.Promise.await waiter in
       p "a change wakes the watch: %b\n" (took < 5.);
-      Server.close server)
+      let held =
+        Rt.async (fun () -> try s.watch cursor (Some "two") with _ -> ())
+      in
+      Rt.sleep 0.5;
+      let t0 = Rt.now () in
+      Stop.request ();
+      Server.close server;
+      p "a stop answers a held watch, closing in under 2s: %b\n"
+        (Rt.now () -. t0 < 2.);
+      ignore (Rt.Promise.peek held))

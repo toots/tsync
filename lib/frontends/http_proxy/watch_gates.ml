@@ -76,9 +76,15 @@ let wait t ~route ~store k ~last_seen ~wait =
         Rt.spawn ~name:"watch gate" (fun () ->
             try loop t id g store k with Stop.Stopping -> ());
       let deadline = Rt.now () +. wait in
+      (* A stop answers every held watch at once, so the server's close does
+         not wait out their deadlines. *)
+      let unregister =
+        Stop.on_request (fun () -> Rt.Signal.broadcast g.woken)
+      in
       let rec hold () =
         let v = Rt.Signal.version g.woken in
         if differs (Atomic.get g.token) last_seen then `Changed
+        else if Stop.requested () then `Unchanged
         else (
           let left = deadline -. Rt.now () in
           if left <= 0. then `Unchanged
@@ -88,4 +94,4 @@ let wait t ~route ~store k ~last_seen ~wait =
              with Rt.Timeout -> ());
             hold ()))
       in
-      hold ())
+      Fun.protect ~finally:unregister hold)

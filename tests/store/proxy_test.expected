@@ -52,3 +52,4 @@ list_many: 1 folders
 == watch
 behind: returned at once true
 a change wakes the watch: true
+a stop answers a held watch, closing in under 2s: true
