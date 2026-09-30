@@ -6,19 +6,11 @@
  (name tsync_catalog)
  (libraries
   tsync_store
+  tsync_gcs
+  tsync_s3
   tsync_http_proxy_client
   tsync_http_proxy
   tsync_android
-  (select
-   catalog_gcs.ml
-   from
-   (tsync_gcs -> catalog_gcs.enabled.ml)
-   (-> catalog_gcs.disabled.ml))
-  (select
-   catalog_s3.ml
-   from
-   (tsync_s3 -> catalog_s3.enabled.ml)
-   (-> catalog_s3.disabled.ml))
   (select
    catalog_fuse.ml
    from
