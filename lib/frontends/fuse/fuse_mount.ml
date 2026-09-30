@@ -461,11 +461,12 @@ let invalidator () =
     Mutex.protect m (fun () ->
         List.iter
           (fun k ->
-            Queue.push ("/" ^ k) q;
-            if k <> "" then
-              Queue.push
-                (match Filename.dirname k with "." -> "/" | d -> "/" ^ d)
-                q)
+            (* The root has no entry to drop: the kernel answers ENOSYS. *)
+            if k <> "" then (
+              Queue.push ("/" ^ k) q;
+              match Filename.dirname k with
+                | "." -> ()
+                | d -> Queue.push ("/" ^ d) q))
           keys;
         Condition.signal c)
 
