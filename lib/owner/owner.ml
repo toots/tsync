@@ -190,7 +190,11 @@ let serve ?present ~socket config domains =
             Handler.create ~domain ~engine ~hooks
               ~publish:(publish (Domain_name.to_string dom.name))
               ~stats:(fun _ ->
-                Ipc.ok [("domains", `List [domain_body domain engine])])
+                Ipc.ok
+                  [
+                    ("domains", `List [domain_body domain engine]);
+                    ("process", Usage.to_json (Usage.sample ()));
+                  ])
               ~stop:Stop.request ~dest_roots:[home] ~staging_roots:[home];
         })
       domains;
@@ -261,7 +265,11 @@ let one_shot ~what config (dom : Config.domain) f =
               Handler.create ~domain ~engine ~hooks:Handler.no_hooks
                 ~publish:(fun _ -> 0)
                 ~stats:(fun _ ->
-                  Ipc.ok [("domains", `List [domain_body domain engine])])
+                  Ipc.ok
+                    [
+                      ("domains", `List [domain_body domain engine]);
+                      ("process", Usage.to_json (Usage.sample ()));
+                    ])
                 ~stop:ignore ~dest_roots:[home] ~staging_roots:[home]
             in
             Fun.protect ~finally:(fun () -> E.drain ()) (fun () -> f handler))

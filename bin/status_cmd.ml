@@ -81,6 +81,40 @@ let status json verbose =
                let n = int_field queues "pendingMetadata" in
                if n > 0 then say "    %d metadata changes pending" n))
            (report |> member "domains" |> to_list));
+      (let open Yojson.Safe.Util in
+       match report |> member "processes" with
+         | `List (_ :: _ as processes) ->
+             say "Processes";
+             List.iter
+               (fun p ->
+                 let role =
+                   p |> member "role" |> to_string_option
+                   |> Option.value ~default:"?"
+                 in
+                 let pid =
+                   match p |> member "pid" with
+                     | `Int n -> string_of_int n
+                     | _ -> "-"
+                 in
+                 let serves =
+                   match p |> member "serves" with
+                     | `List l ->
+                         String.concat ", " (List.filter_map to_string_option l)
+                     | _ -> ""
+                 in
+                 let bytes k =
+                   match p |> member "process" |> member k with
+                     | `Int n ->
+                         Printf.sprintf "%.0f MiB" (float_of_int n /. 1048576.)
+                     | _ -> "?"
+                 in
+                 say "  %-12s %7s  %s" role pid serves;
+                 if p |> member "process" <> `Null then
+                   say "    private %s (heap %s, anonymous %s), mapped files %s"
+                     (bytes "privateBytes") (bytes "heapBytes")
+                     (bytes "anonymousBytes") (bytes "fileBackedBytes"))
+               processes
+         | _ -> ());
       0)
 
 let status_cmd =

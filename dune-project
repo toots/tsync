@@ -16,6 +16,7 @@
   digestif
   domain-name
   eqaf
+  mem_usage
   mirage-crypto-pk
   mirage-crypto-rng
   ptime

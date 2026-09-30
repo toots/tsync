@@ -1,6 +1,6 @@
 (library
  (name tsync_core)
- (libraries unix threads.posix duppy yojson digestif)
+ (libraries mem_usage unix threads.posix duppy yojson digestif)
  (foreign_stubs
   (language c)
   (include_dirs ../../vendor/xxhash)

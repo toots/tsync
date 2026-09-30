@@ -803,6 +803,7 @@ let control t stop req =
               ("frontend", `String "http-proxy");
               ("serves", `List (List.map (fun r -> `String r.name) t.routes));
               ("dataInFlight", `Int (Atomic.get t.pending));
+              ("process", Usage.to_json (Usage.sample ()));
             ]
       | Some a ->
           Tsync_ipc.Ipc.failure

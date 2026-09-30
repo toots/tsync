@@ -222,10 +222,13 @@ let ask_stats arg r =
                ("arg", `String (String.concat "," ("frontend" :: arg)));
              ])
       with
-        | `Assoc l when List.assoc_opt "ok" l = Some (`Bool true) -> (
-            match List.assoc_opt "domains" l with
-              | Some (`List ds) -> Ok ds
-              | _ -> Ok [])
+        | `Assoc l when List.assoc_opt "ok" l = Some (`Bool true) ->
+            let bodies =
+              match List.assoc_opt "domains" l with
+                | Some (`List ds) -> ds
+                | _ -> []
+            in
+            Ok (bodies, List.assoc_opt "process" l)
         | reply ->
             Error (Option.value ~default:"no answer" (Ipc.field reply "error"))
         | exception e -> Error (Printexc.to_string e))
@@ -238,7 +241,7 @@ let machine_report arg children =
     List.concat_map
       (List.concat_map (fun (d, res) ->
            match res with
-             | Ok bodies -> bodies
+             | Ok (bodies, _) -> bodies
              | Error _ ->
                  [`Assoc [("name", `String d); ("unanswered", `Bool true)]]))
       answers
@@ -249,6 +252,7 @@ let machine_report arg children =
         ("pid", `Int (Unix.getpid ()));
         ("role", `String "supervisor");
         ("serves", `List []);
+        ("process", Usage.to_json (Usage.sample ()));
       ]
     :: List.map2
          (fun r ans ->
@@ -263,6 +267,11 @@ let machine_report arg children =
                ("socketPath", `String r.child.socket);
              ]
              @ Option.fold ~none:[] ~some:(fun p -> [("pid", `Int p)]) r.pid
+             @ Option.to_list
+                 (List.find_map
+                    (function
+                      | _, Ok (_, Some p) -> Some ("process", p) | _ -> None)
+                    ans)
            in
            match
              List.find_map

@@ -9,6 +9,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
+#include <stdio.h>
 #include <string.h>
 #include <sys/file.h>
 #include <sys/resource.h>
@@ -244,8 +245,29 @@ CAMLprim value tsync_is_network_fs(value path) {
 
 CAMLprim value tsync_is_macos(value unit) { return Val_false; }
 
+/* Resident anonymous and file-backed bytes, from /proc/self/status. */
+CAMLprim value tsync_memory_split(value unit) {
+  CAMLparam1(unit);
+  CAMLlocal1(res);
+  long anon = -1, file = -1;
+  char line[256];
+  FILE *f = fopen("/proc/self/status", "r");
+  if (f) {
+    while (fgets(line, sizeof line, f)) {
+      sscanf(line, "RssAnon: %ld kB", &anon);
+      sscanf(line, "RssFile: %ld kB", &file);
+    }
+    fclose(f);
+  }
+  res = caml_alloc_tuple(2);
+  Store_field(res, 0, Val_long(anon < 0 ? -1 : anon * 1024));
+  Store_field(res, 1, Val_long(file < 0 ? -1 : file * 1024));
+  CAMLreturn(res);
+}
+
 #elif defined(__APPLE__)
 
+#include <mach/mach.h>
 #include <sys/clonefile.h>
 #include <sys/mount.h>
 #include <sys/ucred.h>
@@ -309,5 +331,22 @@ CAMLprim value tsync_is_network_fs(value path) {
 }
 
 CAMLprim value tsync_is_macos(value unit) { return Val_true; }
+
+/* Resident anonymous (internal) and file-backed (external) bytes. */
+CAMLprim value tsync_memory_split(value unit) {
+  CAMLparam1(unit);
+  CAMLlocal1(res);
+  task_vm_info_data_t info;
+  mach_msg_type_number_t count = TASK_VM_INFO_COUNT;
+  long anon = -1, file = -1;
+  if (task_info(mach_task_self(), TASK_VM_INFO, (task_info_t)&info, &count) == KERN_SUCCESS) {
+    anon = (long)info.internal;
+    file = (long)info.external;
+  }
+  res = caml_alloc_tuple(2);
+  Store_field(res, 0, Val_long(anon));
+  Store_field(res, 1, Val_long(file));
+  CAMLreturn(res);
+}
 
 #endif
