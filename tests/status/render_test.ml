@@ -90,6 +90,7 @@ let gcs : backend =
     corrupted = Not_checked "no verification has run";
     health = Up;
     disk = None;
+    copies = Some { owed = 0; parked = 0; rate = 0.; eta = None };
     traffic =
       Some { up_bytes = 0; up_rate = 0.; down_bytes = 92; down_rate = 4. };
   }
@@ -268,6 +269,9 @@ let degraded : machine =
                   reach = Unreachable "DNS lookup failed";
                   journal = Counting;
                   corrupted = Checked { chunks = 3; truncated = true };
+                  copies =
+                    Some
+                      { owed = 1204; parked = 2; rate = 1.5; eta = Some 802. };
                   health =
                     Down
                       {

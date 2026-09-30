@@ -669,12 +669,17 @@ let resume t = List.iter (fun c -> Dqueue.resume c.queue) t.core.copies
 let settle ?timeout t =
   Rt.iter_concurrently (fun c -> Dqueue.settle ?timeout c.queue) t.core.copies
 
+type copy_stats = { copy : string; owed : int; parked : int; done_ : int }
+
 let copy_stats t =
   List.map
     (fun c ->
-      ( c.member.name,
-        Dqueue.pending c.queue,
-        List.length (Dqueue.parked c.queue) ))
+      {
+        copy = c.member.name;
+        owed = Dqueue.pending c.queue;
+        parked = List.length (Dqueue.parked c.queue);
+        done_ = Dqueue.completed c.queue;
+      })
     t.core.copies
 
 let parked t =

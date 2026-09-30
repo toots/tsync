@@ -164,6 +164,18 @@ let backend b (be : backend) =
         (Printf.sprintf "%s free of %s" (isize d.free_bytes)
            (isize d.total_bytes)))
     be.disk;
+  (match be.copies with
+    | Some c when c.owed > 0 ->
+        row b "    " "copies"
+          (Printf.sprintf "%s owed%s, %.1f/s%s"
+             (plural c.owed "object" "objects")
+             (if c.parked > 0 then Printf.sprintf " (%d parked)" c.parked
+              else "")
+             c.rate
+             (Option.fold ~none:""
+                ~some:(fun e -> ", done in " ^ duration e)
+                c.eta))
+    | _ -> ());
   Option.iter (traffic b "    ") be.traffic
 
 let domain b = function

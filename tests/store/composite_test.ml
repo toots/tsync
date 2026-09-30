@@ -81,7 +81,9 @@ let () =
       p "\n== writes with the main down\n";
       p "put: %s\n" (kind (fun () -> Contract.put s (k "tsync/d/x") "x"));
       p "replica owes nothing: %d records\n"
-        (List.fold_left (fun a (_, n, _) -> a + n) 0 (Composite.copy_stats c));
+        (List.fold_left
+           (fun a (s : Composite.copy_stats) -> a + s.owed)
+           0 (Composite.copy_stats c));
       main_up := true;
       p "\n== deferred copies\n";
       let ck1 = Chunk_key.of_body "one" and ck2 = Chunk_key.of_body "two" in
@@ -97,7 +99,8 @@ let () =
       p "owed before start: %s\n"
         (String.concat ", "
            (List.map
-              (fun (n, owed, _) -> Printf.sprintf "%s %d" n owed)
+              (fun (s : Composite.copy_stats) ->
+                Printf.sprintf "%s %d" s.copy s.owed)
               (Composite.copy_stats c)));
       Composite.start c;
       Composite.settle ~timeout:10. c;

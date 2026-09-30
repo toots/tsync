@@ -225,6 +225,14 @@ type disk = {
 }
 [@@deriving yojson { strict = false }]
 
+type copies = {
+  owed : int;
+  parked : int;
+  rate : float; [@key "jobsPerSec"]
+  eta : float option; [@key "etaSeconds"] [@default None]
+}
+[@@deriving yojson { strict = false }]
+
 type config = (string * string) list
 
 let config_to_yojson, config_of_yojson =
@@ -251,6 +259,7 @@ type backend = {
   corrupted : corrupted;
   health : Health.state;
   disk : disk option; [@default None]
+  copies : copies option; [@default None]
   traffic : traffic option; [@default None]
 }
 [@@deriving yojson { strict = false }]

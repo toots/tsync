@@ -90,9 +90,11 @@ val pause : t -> unit
 val resume : t -> unit
 val settle : ?timeout:float -> t -> unit
 
-(** Per copy: name, owed jobs, parked jobs. *)
-val copy_stats : t -> (string * int * int) list
+(** A copy log: jobs owed, the parked among them, and jobs completed since the
+    process started. *)
+type copy_stats = { copy : string; owed : int; parked : int; done_ : int }
 
+val copy_stats : t -> copy_stats list
 val parked : t -> (string * string * Dqueue.failure_note) list
 
 (** The write guard (replication §4.9): refuse to write a non-main member while

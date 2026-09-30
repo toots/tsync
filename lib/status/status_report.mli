@@ -131,6 +131,11 @@ type reach = Reachable of { latency_ms : float } | Unreachable of string
 
 type disk = { free_bytes : int; total_bytes : int } [@@deriving yojson]
 
+(** A copy member's deferred copies: jobs owed and parked, and the rate jobs
+    complete at, which gives the ETA. *)
+type copies = { owed : int; parked : int; rate : float; eta : float option }
+[@@deriving yojson]
+
 type backend = {
   name : string;
   kind : string;
@@ -142,6 +147,7 @@ type backend = {
   corrupted : corrupted;
   health : Health.state;
   disk : disk option;
+  copies : copies option;
   traffic : traffic option;
 }
 [@@deriving yojson]

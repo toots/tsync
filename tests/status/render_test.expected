@@ -50,6 +50,7 @@ Domain Files
     HELD DOWN        for 0m 42s after 5 failures (connection refused)
     journal          counting…
     CORRUPTED        3 chunks or more
+    copies           1204 objects owed (2 parked), 1.5/s, done in 13m 22s
   Backend disk (local, replica)  path /srv/tsync
     reachable        yes (0 ms)
     journal          unreadable: permission denied

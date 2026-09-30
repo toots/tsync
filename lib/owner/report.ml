@@ -21,6 +21,7 @@ type slot = {
   mutable listing : R.journal option;
   mutable refreshing : bool;
   rates : rates;
+  copied : Tsync_status.Self_report.rate;
 }
 
 type t = {
@@ -52,6 +53,7 @@ let create (domain : Domain.t) engine ~frontend =
                 up = Tsync_status.Self_report.rate ~now:(Rt.now ());
                 down = Tsync_status.Self_report.rate ~now:(Rt.now ());
               };
+            copied = Tsync_status.Self_report.rate ~now:(Rt.now ());
           })
         domain.members;
   }
@@ -161,6 +163,26 @@ let disk (store : Store.t) =
           })
         (Fs.disk_space path))
 
+let copies t s =
+  List.find_map
+    (fun (c : Composite.copy_stats) ->
+      if c.copy <> s.member.name then None
+      else (
+        let rate =
+          Tsync_status.Self_report.per_second s.copied ~now:(Rt.now ())
+            (float_of_int c.done_)
+        in
+        Some
+          {
+            R.owed = c.owed;
+            parked = c.parked;
+            rate;
+            eta =
+              (if c.owed > 0 && rate > 0. then Some (float_of_int c.owed /. rate)
+               else None);
+          }))
+    (Composite.copy_stats t.domain.composite)
+
 let backend t s : R.backend =
   let b = s.backend and store = s.member.store in
   let specs =
@@ -184,6 +206,7 @@ let backend t s : R.backend =
     corrupted = Not_checked "no verification has run";
     health = Health.state store.health;
     disk = disk store;
+    copies = copies t s;
     traffic = slot_traffic s;
   }
 
