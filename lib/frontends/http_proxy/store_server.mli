@@ -9,9 +9,9 @@ type route = {
   domain : Tsync_core.Domain_name.t;
   secret : string;
   read_only : bool;
-  shares : bool;
   chunk_size : int option;
   store : Tsync_store.Store.t;
+  share : Share_server.t option;  (** [Some] when the route serves share links *)
 }
 
 type t

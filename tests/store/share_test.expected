@@ -1,0 +1,20 @@
+== ranges of a 39-byte file (§A9.5)
+(none)           whole
+bytes=6-10       bytes 6-10/39
+bytes=6-         bytes 6-38/39
+bytes=-5         bytes 34-38/39
+bytes=-100       bytes 0-38/39
+bytes=30-100     bytes 30-38/39
+bytes=39-        416
+bytes=10-6       whole
+bytes=1-2,4-5    whole
+bytes=+1-2       whole
+items=1-2        whole
+bytes=-0         whole
+== content-disposition (security §13)
+attachment; filename="report.pdf"; filename*=UTF-8''report.pdf
+inline; filename="a_b_c ____.txt"; filename*=UTF-8''a%22b%5Cc%20%E2%9C%93%0A.txt
+== single-pass templating
+<h1>__B__</h1> b
+== JSON inside a script
+{"title":"\u003c/script\u003e\u003cb\u003e\u0026\u2028"}

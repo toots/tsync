@@ -71,6 +71,17 @@ let build ?(owner = true) ?(poke = ignore) ?(lazy_tree = false) ?cache_root
     poke;
   }
 
+let context t : (module Tsync_remote.Context.S) =
+  (module struct
+    let domain = t.name
+    let store = Composite.store t.composite
+    let composite = t.composite
+    let versioning = t.domain.versioning
+    let chunk_size_config = t.domain.chunk_size
+    let max_downloads = t.config.max_downloads
+    let max_chunk_buffers = t.config.max_chunk_buffers
+  end)
+
 let engine t =
   let module C = struct
     let domain = t.name

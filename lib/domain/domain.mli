@@ -34,6 +34,10 @@ val build :
     owner, which keeps it. *)
 val engine : t -> (module Engine.S)
 
+(** The remote layer's view of the domain, for readers that are not its owner.
+*)
+val context : t -> (module Tsync_remote.Context.S)
+
 (** The composite store. *)
 val store : t -> Store.t
 

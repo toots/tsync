@@ -23,9 +23,9 @@ let () =
           domain = Domain_name.v domain;
           secret;
           read_only;
-          shares = false;
           chunk_size = Some 4096;
           store;
+          share = None;
         }
       in
       let proxy =

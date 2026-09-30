@@ -10,6 +10,25 @@
   tsync_http
   tsync_http_proxy_client
   tsync_domain
+  tsync_remote
   tsync_ipc
   unix
   yojson))
+
+(rule
+ (targets share_assets.ml)
+ (deps
+  (:browse %{project_root}/lambda/browse.html)
+  (:player %{project_root}/lambda/player.js)
+  (:mime %{project_root}/lambda/mime.json))
+ (action
+  (with-stdout-to
+   share_assets.ml
+   (progn
+    (echo "let browse = {tsync_asset|")
+    (cat %{browse})
+    (echo "|tsync_asset}\nlet player = {tsync_asset|")
+    (cat %{player})
+    (echo "|tsync_asset}\nlet mime = {tsync_asset|")
+    (cat %{mime})
+    (echo "|tsync_asset}\n")))))

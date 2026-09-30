@@ -8,9 +8,9 @@ type route = {
   domain : Domain_name.t;
   secret : string;
   read_only : bool;
-  shares : bool;
   chunk_size : int option;
   store : Store.t;
+  share : Share_server.t option;  (** [Some] when the route serves share links *)
 }
 
 let default_max_concurrent = 16
@@ -24,6 +24,7 @@ type t = {
   pending : int Atomic.t;
   body_memory : int Atomic.t;
   gates : Watch_gates.t;
+  share_slots : Rt.Semaphore.t;
   tallies : (string, int Atomic.t) Hashtbl.t;
 }
 
@@ -86,6 +87,9 @@ let create ?max_concurrent ?listener routes =
     pending = Atomic.make 0;
     body_memory = Atomic.make 0;
     gates = Watch_gates.create ();
+    share_slots =
+      Rt.Semaphore.create ~name:"share responses"
+        (match listener with Some l -> l.max_share_responses | None -> 64);
     tallies =
       (let h = Hashtbl.create 32 in
        List.iter (fun n -> Hashtbl.replace h n (Atomic.make 0)) tally_names;
@@ -305,6 +309,62 @@ let route_for t names =
         match List.find_opt (fun r -> within r first) t.routes with
           | Some r when List.for_all (within r) names -> Some r
           | _ -> None)
+
+let share_space = Key.prefix_to_string Key.shares
+let in_share_space name = String.starts_with ~prefix:share_space name
+
+(* security §6.4: [tsync/shares/<token>] is a manifest, anything deeper a cache
+   artifact. *)
+let is_manifest_name name =
+  in_share_space name
+  && not
+       (String.contains
+          (String.sub name
+             (String.length share_space)
+             (String.length name - String.length share_space))
+          '/')
+
+let stored_domain route name =
+  match Option.bind (Key.of_string name) route.store.get_opt with
+    | Some b -> Share_server.manifest_domain (Bigstring.to_string b)
+    | None -> None
+
+(* The routes that may serve a share-space operation, before any signature. *)
+let share_candidates t op body names =
+  if not (List.for_all in_share_space names) then []
+  else (
+    match (op, names) with
+      | (Get_multi | Children_multi | Delete_multi), _
+        when List.exists is_manifest_name names ->
+          []
+      | (Put _ | Claim _), [name] when is_manifest_name name -> (
+          match Share_server.manifest_domain (Bigstring.to_string body) with
+            | None -> []
+            | Some d ->
+                List.filter
+                  (fun r ->
+                    Domain_name.equal r.domain d
+                    &&
+                      match stored_domain r name with
+                      | None -> true
+                      | Some held -> Domain_name.equal held d)
+                  t.routes)
+      | _, [name] when is_manifest_name name ->
+          let owning =
+            List.filter (fun r -> stored_domain r name = Some r.domain) t.routes
+          in
+          let held_anywhere =
+            List.exists
+              (fun r ->
+                match Key.of_string name with
+                  | Some k -> r.store.head_opt k <> None
+                  | None -> false)
+              t.routes
+          in
+          if owning <> [] then owning
+          else if held_anywhere then []
+          else t.routes
+      | _ -> t.routes)
 
 let bulk_names t body =
   match Yojson.Safe.from_string (Bigstring.to_string body) with
@@ -528,7 +588,9 @@ let execute t route op body =
         empty 200
     | List (p, max_keys) ->
         let entries =
-          if max_keys = Some 0 then [] else s.list_prefix ?max_keys p
+          (if max_keys = Some 0 then [] else s.list_prefix ?max_keys p)
+          |> List.filter (fun (e : Store.entry) ->
+              not (is_manifest_name (Key.to_string e.key)))
         in
         {
           Server.status = 200;
@@ -543,7 +605,7 @@ let execute t route op body =
             Bigstring (bs (W.listing_to_json (Option.to_list (s.head_opt k))));
         }
     | Share_url p ->
-        if route.shares then json (`Assoc [("self", `Bool true)])
+        if route.share <> None then json (`Assoc [("self", `Bool true)])
         else (
           match (s.capabilities p).share_url with
             | Some u -> json (`Assoc [("url", `String u)])
@@ -610,48 +672,113 @@ let listener_endpoint t (r : Server.request) params =
               else json report)
     | _ -> raise Not_found
 
+(* §A9.1: with several share-serving routes, the one whose domain the token's
+   manifest names answers, else the first, so its refusal is the answer. *)
+let serve_share t (r : Server.request) params rest =
+  let sharing = List.filter_map (fun route -> route.share) t.routes in
+  if sharing = [] then (
+    count t "notFound";
+    answer (text 404 "not found"));
+  if r.meth <> "GET" && r.meth <> "HEAD" then
+    answer (text 405 "method not allowed");
+  let token, sub =
+    match String.index_opt rest '/' with
+      | Some i ->
+          ( String.sub rest 0 i,
+            String.sub rest (i + 1) (String.length rest - i - 1) )
+      | None -> (rest, "")
+  in
+  let share =
+    match sharing with
+      | [s] -> s
+      | first :: _ -> (
+          match
+            List.find_opt (fun s -> Share_server.claims s token) sharing
+          with
+            | Some s -> s
+            | None -> first)
+      | [] -> assert false
+  in
+  count t "share";
+  if not (Rt.Semaphore.try_acquire t.share_slots) then (
+    count t "busy";
+    answer (text 503 "busy"));
+  let max_zip_members =
+    match t.listener with Some l -> l.max_zip_members | None -> 100_000
+  in
+  match Share_server.handle share ~max_zip_members r ~token ~sub params with
+    | { body = Stream f; _ } as response ->
+        {
+          response with
+          body =
+            Stream
+              (fun write ->
+                Fun.protect
+                  ~finally:(fun () -> Rt.Semaphore.release t.share_slots)
+                  (fun () -> f write));
+        }
+    | response ->
+        Rt.Semaphore.release t.share_slots;
+        response
+    | exception e ->
+        Rt.Semaphore.release t.share_slots;
+        raise e
+
 (* The wire's processing order (backends/http-proxy §6.1). *)
 let handle t (r : Server.request) read_body =
   try
-    let params =
-      match W.parse_query r.query with Some p -> p | None -> bad_request t
-    in
-    match listener_endpoint t r params with
-      | response -> response
-      | exception Not_found ->
-          let op = parse_op t r params in
-          count t (tally op);
-          let limit = body_limit t op in
-          (match r.body_length with
-            | `Length n when n > limit && limit > 0 ->
-                count t "tooLarge";
-                answer (text 413 "too large")
-            | `Length n when n > 0 && limit = 0 -> bad_request t
-            | _ -> ());
-          if not (fresh r) then unauthorized t;
-          let names = key_names op in
-          let run body names =
-            match route_for t names with
-              | None -> unauthorized t
-              | Some route -> (
-                  if not (verifies r params body route.secret) then
-                    unauthorized t;
-                  try execute t route op body
-                  with Fail.E f -> store_failure t f)
-          in
-          let go () =
-            match op with
-              | Get_multi | Children_multi | Delete_multi ->
-                  let body = read_within t r read_body limit in
-                  run body (bulk_names t body)
-              | _ ->
-                  (match route_for t names with
-                    | None -> unauthorized t
-                    | Some _ -> ());
-                  let body = read_within t r read_body limit in
-                  run body names
-          in
-          if is_data op then admitted t go else go ()
+    if String.starts_with ~prefix:"/s/" r.path then
+      serve_share t r
+        (Option.value ~default:[] (W.parse_query r.query))
+        (String.sub r.path 3 (String.length r.path - 3))
+    else (
+      let params =
+        match W.parse_query r.query with Some p -> p | None -> bad_request t
+      in
+      match listener_endpoint t r params with
+        | response -> response
+        | exception Not_found ->
+            let op = parse_op t r params in
+            count t (tally op);
+            let limit = body_limit t op in
+            (match r.body_length with
+              | `Length n when n > limit && limit > 0 ->
+                  count t "tooLarge";
+                  answer (text 413 "too large")
+              | `Length n when n > 0 && limit = 0 -> bad_request t
+              | _ -> ());
+            if not (fresh r) then unauthorized t;
+            let names = key_names op in
+            let candidates body names =
+              match names with
+                | first :: _ when in_share_space first ->
+                    share_candidates t op body names
+                | _ -> Option.to_list (route_for t names)
+            in
+            let run body names =
+              match
+                List.find_opt
+                  (fun route -> verifies r params body route.secret)
+                  (candidates body names)
+              with
+                | None -> unauthorized t
+                | Some route -> (
+                    try execute t route op body
+                    with Fail.E f -> store_failure t f)
+            in
+            let go () =
+              match op with
+                | Get_multi | Children_multi | Delete_multi ->
+                    let body = read_within t r read_body limit in
+                    run body (bulk_names t body)
+                | _ ->
+                    (match names with
+                      | first :: _ when in_share_space first -> ()
+                      | _ -> if route_for t names = None then unauthorized t);
+                    let body = read_within t r read_body limit in
+                    run body names
+            in
+            if is_data op then admitted t go else go ())
   with Answer response -> response
 
 let owner_poke (d : Domain_name.t) () =
@@ -720,9 +847,14 @@ let run config =
                 domain = b.domain.name;
                 secret = b.secret;
                 read_only = b.read_only;
-                shares = b.shares;
                 chunk_size = b.domain.chunk_size;
                 store = Tsync_domain.Domain.store domain;
+                share =
+                  (if b.shares then
+                     Some
+                       (Share_server.of_context
+                          (Tsync_domain.Domain.context domain))
+                   else None);
               })
             bindings
         in
