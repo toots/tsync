@@ -109,6 +109,9 @@ val is_network_fs : string -> bool
 (** Built for macOS. *)
 val is_macos : bool
 
+(** The uid of a connected Unix socket's peer, from the kernel. *)
+val peer_uid : Unix.file_descr -> int
+
 val pid_alive : int -> bool
 
 (** Open for reading without following a final symbolic link (ELOOP); [None]
