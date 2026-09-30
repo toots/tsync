@@ -223,7 +223,7 @@ let run ?present ?socket config (domains : Config.domain list) =
 
 (* 07 §2.5, §3.5: an owner for the command's duration, with every duty but
    journal polling, drained before the lock is released. *)
-let one_shot ~what config (dom : Config.domain) f =
+let with_ownership ~what config (dom : Config.domain) f =
   match acquire ~role:"command" ~what dom.name with
     | Error h ->
         Fail.raise_ Fail.Load "%s is owned by %s, which is not serving"
@@ -239,20 +239,48 @@ let one_shot ~what config (dom : Config.domain) f =
             let engine = Domain.engine domain in
             let (module E : Tsync_sync.Engine.S) = engine in
             E.start ~poll_journal:false ();
-            let home = Paths.home () in
-            let report =
-              Report.create domain engine ~frontend:(fun () -> None)
-            in
-            let handler =
-              Handler.create ~domain ~engine ~hooks:Handler.no_hooks
-                ~publish:(fun _ -> 0)
-                ~stats:(fun _ ->
-                  stats_reply
-                    [(Domain_name.to_string domain.name, report)]
-                    report)
-                ~stop:ignore ~dest_roots:[home] ~staging_roots:[home]
-            in
-            Fun.protect ~finally:(fun () -> E.drain ()) (fun () -> f handler))
+            Fun.protect
+              ~finally:(fun () -> E.drain ())
+              (fun () -> f domain engine))
+
+let one_shot ~what config dom f =
+  with_ownership ~what config dom (fun domain engine ->
+      let home = Paths.home () in
+      let report = Report.create domain engine ~frontend:(fun () -> None) in
+      let handler =
+        Handler.create ~domain ~engine ~hooks:Handler.no_hooks
+          ~publish:(fun _ -> 0)
+          ~stats:(fun _ ->
+            stats_reply [(Domain_name.to_string domain.name, report)] report)
+          ~stop:ignore ~dest_roots:[home] ~staging_roots:[home]
+      in
+      f handler)
+
+let refuse_paused (dom : Config.domain) paused =
+  if paused then
+    Fail.raise_ Fail.Paused "%s is paused" (Domain_name.to_string dom.name)
+
+(* 07 §2.5 store class: beside a serving owner, a non-owner build whose copy
+   jobs go to the owner's inbox, then a poke; else ownership for the run. *)
+let store_command ~what config (dom : Config.domain) f =
+  let socket = Paths.owner_socket dom.name
+  and name = Domain_name.to_string dom.name in
+  match Protocol.call ~domain:name socket Protocol.Status with
+    | status ->
+        refuse_paused dom status.paused;
+        let poke () =
+          try Protocol.call ~domain:name socket Protocol.Poll
+          with e ->
+            Log.warn "cannot poke the owner of %s: %s" name
+              (Printexc.to_string e)
+        in
+        let domain = Domain.build ~owner:false ~poke config dom in
+        Fun.protect ~finally:poke (fun () -> f domain)
+    | exception Ipc.Not_serving _ ->
+        with_ownership ~what config dom (fun domain engine ->
+            let (module E : Tsync_sync.Engine.S) = engine in
+            refuse_paused dom (E.is_paused ());
+            f domain)
 
 let request ?(bulk = false) ~what config (dom : Config.domain) req =
   match
