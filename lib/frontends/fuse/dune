@@ -5,4 +5,12 @@
  (name tsync_fuse)
  (optional)
  (library_flags (-linkall))
- (libraries tsync_core tsync_config fuse3))
+ (libraries
+  tsync_core
+  tsync_config
+  tsync_domain
+  tsync_sync
+  tsync_owner
+  threads.posix
+  unix
+  fuse3))

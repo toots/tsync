@@ -142,12 +142,12 @@ let start_cmd =
   cmd "start" ~doc:"Start the owners and serve until stopped."
     Term.(const start $ mount $ tls $ verbose)
 
-let owner names _mount _tls =
+let owner names mount _tls =
   Atomic.set Log.min_level Log.Debug;
   let config = config_opt () in
   match config with
     | None -> 0
-    | Some config ->
+    | Some config -> (
         let domains = List.map (fun n -> domain ~name:n config) names in
         (match domains with
           | [d] ->
@@ -155,7 +155,11 @@ let owner names _mount _tls =
           | _ -> ());
         ignore (Fs.raise_nofile 65536);
         Owner.stop_on_signals ();
-        run (fun () -> Owner.run config domains)
+        match Owner.host_for domains with
+          | Some host ->
+              host ~mount domains ~run:(fun present ->
+                  run (fun () -> Owner.run ~present config domains))
+          | None -> run (fun () -> Owner.run config domains))
 
 let owner_cmd =
   let names = Arg.(non_empty & opt_all string [] & info ["domain"] ~docv:"NAME")
