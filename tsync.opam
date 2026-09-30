@@ -21,6 +21,9 @@ depends: [
   "odoc" {with-doc}
 ]
 depopts: ["fuse3"]
+conflicts: [
+  "fuse3" {< "3.10.0.1"}
+]
 build: [
   ["dune" "subst"] {dev}
   [

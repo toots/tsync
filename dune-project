@@ -23,4 +23,6 @@
   tls
   x509
   yojson)
- (depopts fuse3))
+ (depopts fuse3)
+ (conflicts
+  (fuse3 (< 3.10.0.1))))
