@@ -59,7 +59,7 @@ Request objects are written through the driver's `put`, and so are admitted and 
 
 ## 3. Confirming the bucket-side function
 
-A store claims `verified`, and answers `verify_all` and `discard` with `Queued`, only after it has evidence that the verify function is deployed on its bucket. A bucket without it (a manual setup, an S3-compatible provider, a notification the operator never wired) otherwise claims checks nobody runs and accepts deletes nobody executes.
+A store claims `verified`, and answers `verify_all` and `discard` with `Queued`, only after it has evidence that the verify function is deployed on its bucket. Every object-store driver SHOULD support the function wherever its provider can run one: without it, a collection deletes each chunk with its own request ([06 §3.8](../06-backends.md#38-optional-operations)), and once it is confirmed a collection's deletions MUST use it. A bucket without it (a manual setup, an S3-compatible provider, a notification the operator never wired) otherwise claims checks nobody runs and accepts deletes nobody executes.
 
 **The probe.** An empty collection delete request, at the reserved run name `0000000000000` and shard `000`:
 

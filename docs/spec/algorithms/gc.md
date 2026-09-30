@@ -439,8 +439,11 @@ owner executes them as specified in
 
 - **Re-check before** (an optimisation): immediately before issuing a deletion, the owner MAY drop every
   key the collected main holds (§5.8).
-- **Direct delete** (a copy without queued deletion): delete the keys and their corruption markers.
-  Absent keys count as deleted.
+- **Direct delete** (a copy without queued deletion: a filesystem copy, or a remote store whose driver
+  has no confirmed deleter): delete the keys and their corruption markers. Absent keys count as
+  deleted. This costs one request per chunk on an object store, which is impractical for a large
+  domain: every remote driver SHOULD provide queued deletion ([06 §3.8](../06-backends.md#38-optional-operations)).
+- A copy whose store confirms queued deletion MUST be told through it, never by direct deletes.
 - **Queued deletion** (a copy with a bucket function): write the discard request, named by run and shard,
   and keep it among the copy's pending discards (locally, durably) until the request object is gone. A
   request already present under that name is superseded by the new one covering the same or later

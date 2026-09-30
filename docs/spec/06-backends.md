@@ -166,6 +166,8 @@ The value of a watched key, as a watch compares it: the object's body with leadi
 - A store MUST NOT answer `Queued` unless both conditions hold.
 - A `Queued` request is consumed later, at-least-once, by a party this client does not see. Until it is consumed, the named chunks are still on the store.
 - A collection never calls `discard` or `delete_multi` on a copy directly: its deletions on copies are jobs in the copies' durable job logs ([gc §5.7](algorithms/gc.md#57-deletion-on-copies), [replication §4.8](algorithms/replication.md#48-deletions-on-copies-outside-the-worker)).
+- **When a store answers `Queued`, its collection deletions MUST go through `discard`.** Deleting from the client costs one request per chunk: a collection's garbage on a media library is hundreds of thousands of chunks, days of requests against a copy's rate limits and quota. `delete_multi` on a copy is the fallback for stores that cannot run a deleter (a filesystem copy, or a provider without bucket-side functions).
+- **Every driver of a remote store SHOULD provide a server-side deleter wherever its provider can run one** (a bucket function triggered on object creation, [backends/object-store-common.md §5](backends/object-store-common.md#5-the-verify-function)), and answer `Queued` once it is confirmed. A driver that cannot MUST say so in its own spec file, with the cost of the fallback.
 
 ### 3.9 Capabilities, `fast_read`, `local_path`, `health`
 
