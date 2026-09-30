@@ -84,6 +84,8 @@ val rescan : t -> unit
 val rearm : t -> int
 val pause : t -> unit
 val resume : t -> unit
+(** Run the copies' queues to completion within [timeout]; the owner then
+    settles the collection generation once. *)
 val settle : ?timeout:float -> t -> unit
 
 (** A copy log: jobs owed, the parked among them, and jobs completed since the

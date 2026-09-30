@@ -737,7 +737,12 @@ let pause t = List.iter (fun c -> Dqueue.pause c.queue) t.core.copies
 let resume t = List.iter (fun c -> Dqueue.resume c.queue) t.core.copies
 
 let settle ?timeout t =
-  Rt.iter_concurrently (fun c -> Dqueue.settle ?timeout c.queue) t.core.copies
+  Rt.iter_concurrently (fun c -> Dqueue.settle ?timeout c.queue) t.core.copies;
+  if t.core.owner then (
+    try ignore (settle_generation t.core)
+    with e ->
+      Log.warn "cannot settle the collection generation: %s"
+        (Printexc.to_string e))
 
 type job_progress = {
   job : string;
