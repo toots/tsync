@@ -271,6 +271,7 @@ let flock ?(exclusive = true) ?(block = false) fd =
   sys (fun () -> flock_ fd exclusive block)
 
 let funlock fd = funlock_ fd
+let ignore_sigpipe () = Sys.set_signal Sys.sigpipe Sys.Signal_ignore
 let rename_noreplace a b = sys (fun () -> rename_noreplace_ a b)
 let clone a b = sys (fun () -> clone_ a b)
 let is_network_fs p = try is_network_fs_ p with _ -> false

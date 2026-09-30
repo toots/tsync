@@ -106,6 +106,10 @@ val flock : ?exclusive:bool -> ?block:bool -> Unix.file_descr -> bool
 
 val funlock : Unix.file_descr -> unit
 
+(** A write to a closed socket fails with EPIPE instead of killing the process;
+    every process that writes to peers calls it. *)
+val ignore_sigpipe : unit -> unit
+
 (** Copy-on-write clone into a new file. *)
 val clone : string -> string -> unit
 

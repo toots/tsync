@@ -3,9 +3,11 @@
  (libraries tsync_core tsync_http unix))
 
 (rule
- (with-stdout-to
-  http_test.output
-  (run ./http_test.exe)))
+ (deps tls_cert.pem tls_key.pem)
+ (action
+  (with-stdout-to
+   http_test.output
+   (run ./http_test.exe))))
 
 (rule
  (alias runtest)

@@ -39,9 +39,12 @@ exception Body_too_large
 
 type t
 
-(** [handle] reads the body with the function it is given, at most once. *)
+(** [handle] reads the body with the function it is given, at most once. With
+    [tls], each connection's handshake runs in its own fiber within the header
+    timeout. *)
 val serve :
   ?limits:limits ->
+  ?tls:Transport.server_tls ->
   Unix.sockaddr list ->
   (request -> (limit:int -> Tsync_core.Bigstring.t) -> response) ->
   t

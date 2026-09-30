@@ -92,25 +92,19 @@ let rec ssl_retry ?timeout fd f =
     | exception
         ( Ssl.Read_error Error_want_read
         | Ssl.Write_error Error_want_read
-        | Ssl.Connection_error Error_want_read ) ->
+        | Ssl.Connection_error Error_want_read
+        | Ssl.Accept_error Error_want_read ) ->
         Rt.wait_readable ?timeout fd;
         ssl_retry ?timeout fd f
     | exception
         ( Ssl.Read_error Error_want_write
         | Ssl.Write_error Error_want_write
-        | Ssl.Connection_error Error_want_write ) ->
+        | Ssl.Connection_error Error_want_write
+        | Ssl.Accept_error Error_want_write ) ->
         Rt.wait_writable ?timeout fd;
         ssl_retry ?timeout fd f
 
-let openssl fd { host; ca_file } =
-  let s = Ssl.embed_socket fd (ssl_context ca_file) in
-  Ssl.set_client_SNI_hostname s host;
-  Ssl.set_host s host;
-  (try ssl_retry fd (fun () -> Ssl.connect s)
-   with Ssl.Connection_error _ ->
-     let v = Ssl.get_verify_result s in
-     if v <> 0 then untrusted host (Ssl.get_verify_error_string v)
-     else tls_failure host "handshake failed");
+let of_ssl fd s =
   let read ?timeout buf off len =
     try ssl_retry ?timeout fd (fun () -> Ssl.read_into_bigarray s buf off len)
     with Ssl.Read_error (Error_zero_return | Error_syscall) -> 0
@@ -135,7 +129,22 @@ let openssl fd { host; ca_file } =
         try Unix.close fd with _ -> ());
   }
 
+let openssl fd { host; ca_file } =
+  let s = Ssl.embed_socket fd (ssl_context ca_file) in
+  Ssl.set_client_SNI_hostname s host;
+  Ssl.set_host s host;
+  (try ssl_retry fd (fun () -> Ssl.connect s)
+   with Ssl.Connection_error _ ->
+     let v = Ssl.get_verify_result s in
+     if v <> 0 then untrusted host (Ssl.get_verify_error_string v)
+     else tls_failure host "handshake failed");
+  of_ssl fd s
+
 let rng_initialised = Atomic.make false
+
+let init_rng () =
+  if not (Atomic.exchange rng_initialised true) then
+    Mirage_crypto_rng_unix.use_default ()
 
 let authenticator ca_file =
   match ca_file with
@@ -155,9 +164,8 @@ let authenticator ca_file =
 
 (* The OCaml TLS engine is a state machine over records: bytes read from the
    socket go in, application data and records to send come out. *)
-let native fd { host; ca_file } =
-  if not (Atomic.exchange rng_initialised true) then
-    Mirage_crypto_rng_unix.use_default ();
+let native_client { host; ca_file } =
+  init_rng ();
   let peer_name =
     match Host_name.of_string host with
       | Ok d -> (
@@ -171,8 +179,14 @@ let native fd { host; ca_file } =
       | Ok c -> c
       | Error (`Msg m) -> tls_failure host m
   in
-  let raw = plain fd in
   let state, hello = Tls.Engine.client config in
+  (state, Some hello)
+
+(* [first] is what this side sends before reading: a client's hello, nothing
+   for a server. *)
+let native_session ?timeout fd ~host
+    ((state, first) : Tls.Engine.state * string option) =
+  let raw = plain fd in
   let state = ref state in
   (* The engine speaks strings: what it hands back is copied once into the
      caller's buffer. *)
@@ -180,7 +194,7 @@ let native fd { host; ca_file } =
   let eof = ref false in
   let chunk = Bigstring.create 16384 in
   let send ?timeout s = raw.write ?timeout (Bigstring.of_string s) in
-  send hello;
+  Option.iter send first;
   let pump ?timeout () =
     let n = raw.read ?timeout chunk 0 (Bigstring.length chunk) in
     if n = 0 then eof := true
@@ -209,7 +223,7 @@ let native fd { host; ca_file } =
               | f -> tls_failure host (Tls.Engine.string_of_failure f)))
   in
   while Tls.Engine.handshake_in_progress !state && not !eof do
-    pump ()
+    pump ?timeout ()
   done;
   if !eof then tls_failure host "the connection closed during the handshake";
   let available () = String.length !pending - !pending_pos in
@@ -286,18 +300,73 @@ let connect_fd ~host ~port =
   (try Unix.setsockopt fd TCP_NODELAY true with Unix.Unix_error _ -> ());
   fd
 
-let connect ?tls ~host ~port () =
+(* A peer that takes the connection and never speaks TLS would otherwise hold
+   the caller forever; the whole handshake is bounded, not each wait. *)
+let bounded_handshake ~host timeout f =
+  try Rt.with_timeout timeout f
+  with Rt.Timeout ->
+    tls_failure host (Printf.sprintf "no handshake within %gs" timeout)
+
+let connect ?(handshake_timeout = connect_timeout) ?tls ~host ~port () =
   let fd = connect_fd ~host ~port in
   match tls with
     | None -> plain fd
     | Some tls -> (
         try
-          match Atomic.get tls_impl with
-            | Openssl -> openssl fd tls
-            | Native -> native fd tls
+          bounded_handshake ~host:tls.host handshake_timeout (fun () ->
+              match Atomic.get tls_impl with
+                | Openssl -> openssl fd tls
+                | Native -> native_session fd ~host:tls.host (native_client tls))
         with e ->
           (try Unix.close fd with _ -> ());
           raise e)
+
+type server_tls =
+  | Openssl_server of Ssl.context
+  | Native_server of Tls.Config.server
+
+let server_tls ~certificate ~key =
+  let fail what = Fail.raise_ Fail.Invalid "TLS %s" what in
+  match Atomic.get tls_impl with
+    | Openssl -> (
+        if not (Atomic.exchange ssl_initialised true) then Ssl.init ();
+        let ctx = Ssl.create_context Ssl.TLSv1_2 Ssl.Server_context in
+        Ssl.set_min_protocol_version ctx Ssl.TLSv1_2;
+        match Ssl.use_certificate ctx certificate key with
+          | () -> Openssl_server ctx
+          | exception e ->
+              fail
+                (Printf.sprintf "certificate %s or key %s: %s" certificate key
+                   (Printexc.to_string e)))
+    | Native -> (
+        init_rng ();
+        let certs =
+          match
+            X509.Certificate.decode_pem_multiple (Fs.read_file certificate)
+          with
+            | Ok (_ :: _ as l) -> l
+            | Ok [] -> fail (certificate ^ ": no certificate")
+            | Error (`Msg m) -> fail (certificate ^ ": " ^ m)
+        and pk =
+          match X509.Private_key.decode_pem (Fs.read_file key) with
+            | Ok k -> k
+            | Error (`Msg m) -> fail (key ^ ": " ^ m)
+        in
+        match Tls.Config.server ~certificates:(`Single (certs, pk)) () with
+          | Ok c -> Native_server c
+          | Error (`Msg m) -> fail m)
+
+let accept_tls ~timeout server t =
+  bounded_handshake ~host:"client" timeout (fun () ->
+      match server with
+        | Openssl_server ctx ->
+            let s = Ssl.embed_socket t.fd ctx in
+            (try ssl_retry t.fd (fun () -> Ssl.accept s)
+             with Ssl.Accept_error _ ->
+               tls_failure "client" "handshake failed");
+            of_ssl t.fd s
+        | Native_server config ->
+            native_session t.fd ~host:"client" (Tls.Engine.server config, None))
 
 let read ?timeout t buf off len = t.read ?timeout buf off len
 let write ?timeout t b = t.write ?timeout b

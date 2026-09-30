@@ -83,3 +83,134 @@ let () =
       match Client.request e ~meth:"GET" "/echo" with
         | r -> show r
         | exception Fail.E f -> p "  %s" (Fail.kind_name f.kind))
+
+(* backends/http-proxy §2: a listener terminates TLS itself; every pairing of
+   the two implementations interoperates, and an unknown CA is refused. *)
+let () =
+  Rt.run_sync (fun () ->
+      p "== TLS listener";
+      let listen impl =
+        Atomic.set Transport.tls_impl impl;
+        let tls =
+          Transport.server_tls ~certificate:"tls_cert.pem" ~key:"tls_key.pem"
+        in
+        let server =
+          Server.serve ~tls
+            [Unix.ADDR_INET (Unix.inet_addr_loopback, 0)]
+            handler
+        in
+        match Server.addresses server with
+          | [ADDR_INET (_, port)] -> (server, port)
+          | _ -> assert false
+      in
+      let name = function
+        | Transport.Openssl -> "openssl"
+        | Native -> "ocaml-tls"
+      in
+      let servers =
+        List.map (fun impl -> (impl, listen impl)) [Transport.Openssl; Native]
+      in
+      List.iter
+        (fun (server_impl, (_, port)) ->
+          List.iter
+            (fun client_impl ->
+              Atomic.set Transport.tls_impl client_impl;
+              let url = Printf.sprintf "https://localhost:%d" port in
+              let e = Client.endpoint ~ca_file:"tls_cert.pem" url in
+              let r = Client.request e ~meth:"GET" "/echo?tls=1" in
+              p "  %s server, %s client: %d" (name server_impl)
+                (name client_impl) r.status;
+              match
+                Client.request (Client.endpoint url) ~meth:"GET" "/echo"
+              with
+                | r -> p "    without the CA: %d" r.status
+                | exception Fail.E f ->
+                    p "    without the CA: %s" (Fail.kind_name f.kind))
+            [Transport.Openssl; Native])
+        servers;
+      List.iter (fun (_, (s, _)) -> Server.close ~grace:0.1 s) servers)
+
+(* The failure modes of a TLS socket layer: plaintext buffered inside the TLS
+   engine while the descriptor stays quiet, and handshakes nobody completes. *)
+let () =
+  Rt.run_sync (fun () ->
+      p "== TLS edge cases";
+      let listen () =
+        let l = Unix.socket PF_INET SOCK_STREAM 0 in
+        Unix.setsockopt l SO_REUSEADDR true;
+        Unix.bind l (ADDR_INET (Unix.inet_addr_loopback, 0));
+        Unix.listen l 4;
+        match Unix.getsockname l with
+          | ADDR_INET (_, port) -> (l, port)
+          | _ -> assert false
+      in
+      let accept l =
+        Rt.wait_readable l;
+        Transport.of_fd (fst (Unix.accept l))
+      in
+      let tls =
+        { Transport.host = "localhost"; ca_file = Some "tls_cert.pem" }
+      in
+      List.iter
+        (fun (name, impl) ->
+          Atomic.set Transport.tls_impl impl;
+          let server =
+            Transport.server_tls ~certificate:"tls_cert.pem" ~key:"tls_key.pem"
+          in
+          let l, port = listen () in
+          let got =
+            Rt.async (fun () ->
+                let conn = Transport.accept_tls ~timeout:5. server (accept l) in
+                let buf = Bigstring.create 100 in
+                let rec go n =
+                  if n >= 3000 then n
+                  else go (n + Transport.read ~timeout:2. conn buf 0 100)
+                in
+                let n = go 0 in
+                Transport.close conn;
+                n)
+          in
+          let c = Transport.connect ~tls ~host:"localhost" ~port () in
+          Transport.write c (Bigstring.of_string (String.make 3000 'x'));
+          p "  %s: one 3000-byte record read 100 bytes at a time: %s" name
+            (match Rt.Promise.await got with
+              | n -> Printf.sprintf "%d bytes" n
+              | exception e -> Printexc.to_string e);
+          Transport.close c;
+          Unix.close l)
+        [("openssl", Transport.Openssl); ("ocaml-tls", Native)];
+      Atomic.set Transport.tls_impl Openssl;
+      let tls_server =
+        Transport.server_tls ~certificate:"tls_cert.pem" ~key:"tls_key.pem"
+      in
+      let server =
+        Server.serve
+          ~limits:{ Server.default_limits with header_timeout = 0.3 }
+          ~tls:tls_server
+          [Unix.ADDR_INET (Unix.inet_addr_loopback, 0)]
+          handler
+      in
+      let port =
+        match Server.addresses server with
+          | [ADDR_INET (_, p)] -> p
+          | _ -> assert false
+      in
+      let silent = Transport.connect ~host:"127.0.0.1" ~port () in
+      p "  a client that never speaks TLS is dropped: %s"
+        (match Transport.read ~timeout:3. silent (Bigstring.create 16) 0 16 with
+          | 0 -> "end of stream"
+          | n -> Printf.sprintf "%d bytes" n
+          | exception e -> Printexc.to_string e);
+      Transport.close silent;
+      Server.close ~grace:0.1 server;
+      let l, port = listen () in
+      let held = Rt.async (fun () -> accept l) in
+      p "  a server that never speaks TLS fails the client: %s"
+        (match
+           Transport.connect ~handshake_timeout:0.3 ~tls ~host:"localhost" ~port
+             ()
+         with
+          | _ -> "connected"
+          | exception Fail.E f -> Fail.kind_name f.kind ^ ": " ^ f.reason);
+      Transport.close (Rt.Promise.await held);
+      Unix.close l)

@@ -204,7 +204,7 @@ let serve_conn lim handle conn requests =
   in
   loop true
 
-let rec accept_loop t lim handle lfd =
+let rec accept_loop ?tls t lim handle lfd =
   let ready =
     Rt.first
       [
@@ -243,7 +243,15 @@ let rec accept_loop t lim handle lfd =
                     Transport.close conn;
                     Atomic.decr t.connections)
                   (fun () ->
-                    try serve_conn lim handle conn t.requests
+                    try
+                      let conn =
+                        match tls with
+                          | None -> conn
+                          | Some tls ->
+                              Transport.accept_tls ~timeout:lim.header_timeout
+                                tls conn
+                      in
+                      serve_conn lim handle conn t.requests
                     with e when not (Rt.is_cancelled e) ->
                       Log.debug "http %s: %s" (Transport.peer conn)
                         (Printexc.to_string e)))
@@ -255,7 +263,7 @@ let rec accept_loop t lim handle lfd =
             Log.once "http accept" Log.Warn "http accept: %s"
               (Printexc.to_string e);
             Rt.sleep 0.1);
-    accept_loop t lim handle lfd)
+    accept_loop ?tls t lim handle lfd)
 
 let bind addr =
   let fd =
@@ -272,7 +280,8 @@ let bind addr =
   Unix.set_nonblock fd;
   fd
 
-let serve ?(limits = default_limits) addrs handle =
+let serve ?(limits = default_limits) ?tls addrs handle =
+  Fs.ignore_sigpipe ();
   let listeners = List.map bind addrs in
   let t =
     {
@@ -293,7 +302,7 @@ let serve ?(limits = default_limits) addrs handle =
               Unix.close lfd;
               if Atomic.fetch_and_add running (-1) = 1 then
                 Rt.Promise.resolve t.finished ())
-            (fun () -> accept_loop t limits handle lfd)))
+            (fun () -> accept_loop ?tls t limits handle lfd)))
     listeners;
   t
 

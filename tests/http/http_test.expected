@@ -15,3 +15,17 @@
   200 "GET after=restart \"\"\n"
 == nothing listening
   transient/link
+== TLS listener
+  openssl server, openssl client: 200
+    without the CA: refused/other
+  openssl server, ocaml-tls client: 200
+    without the CA: refused/other
+  ocaml-tls server, openssl client: 200
+    without the CA: refused/other
+  ocaml-tls server, ocaml-tls client: 200
+    without the CA: refused/other
+== TLS edge cases
+  openssl: one 3000-byte record read 100 bytes at a time: 3000 bytes
+  ocaml-tls: one 3000-byte record read 100 bytes at a time: 3000 bytes
+  a client that never speaks TLS is dropped: end of stream
+  a server that never speaks TLS fails the client: transient/link: TLS with localhost: no handshake within 0.3s

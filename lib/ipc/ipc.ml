@@ -34,7 +34,6 @@ let field j k =
     | _ -> None
 
 (* A write to a peer that left raises EPIPE instead of killing the process. *)
-let ignore_sigpipe () = Sys.set_signal Sys.sigpipe Sys.Signal_ignore
 
 let retry_io = function
   | Unix.Unix_error ((EAGAIN | EWOULDBLOCK | EINTR), _, _) -> true
@@ -310,7 +309,7 @@ let rec accept_loop t handler =
     accept_loop t handler)
 
 let serve ~path handler =
-  ignore_sigpipe ();
+  Tsync_core.Fs.ignore_sigpipe ();
   check_dir (Filename.dirname path);
   check_length path;
   (try Unix.unlink path with Unix.Unix_error (ENOENT, _, _) -> ());
@@ -357,7 +356,7 @@ module Client = struct
   type t = Line.t
 
   let connect path =
-    ignore_sigpipe ();
+    Tsync_core.Fs.ignore_sigpipe ();
     check_length path;
     let fd = Unix.socket ~cloexec:true PF_UNIX SOCK_STREAM 0 in
     match Unix.connect fd (ADDR_UNIX path) with

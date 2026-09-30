@@ -14,8 +14,21 @@ val tls_impl_of_string : string -> tls_impl option
     certificate checked against [host]. *)
 type tls = { host : string; ca_file : string option }
 
-(** Connects to the first address of [host] that answers, IPv4 or IPv6. *)
-val connect : ?tls:tls -> host:string -> port:int -> unit -> t
+(** Connects to the first address of [host] that answers, IPv4 or IPv6. The
+    whole TLS handshake is bounded by [handshake_timeout] (10 s); a failed
+    handshake closes the socket, so the peer sees the end of the stream. *)
+val connect :
+  ?handshake_timeout:float -> ?tls:tls -> host:string -> port:int -> unit -> t
+
+(** A listener's certificate chain and key, loaded once with the implementation
+    of {!tls_impl}; INVALID when they do not load. *)
+type server_tls
+
+val server_tls : certificate:string -> key:string -> server_tls
+
+(** The server side of the handshake on an accepted connection, all of it within
+    [timeout]; the caller closes the connection when it fails. *)
+val accept_tls : timeout:float -> server_tls -> t -> t
 
 (** A connection already accepted by a plain listener. *)
 val of_fd : Unix.file_descr -> t
