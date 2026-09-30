@@ -1,0 +1,56 @@
+(** An HTTP/1.1 listener (security-model §11): header size and time bounds, an
+    idle bound on every read and write, keep-alive, a connection bound, and a
+    body read only when the handler asks for it within its own limit. *)
+
+type limits = {
+  header_bytes : int;
+  header_timeout : float;
+  idle_timeout : float;
+  keepalive_timeout : float;
+  max_connections : int;
+}
+
+val default_limits : limits
+
+type request = {
+  meth : string;
+  target : string;  (** as received: path and raw query *)
+  path : string;
+  query : string;  (** raw, after [?]; [""] when absent *)
+  headers : Codec.headers;
+  peer : string;
+  body_length : [ `Length of int | `Chunked | `Eof ];
+}
+
+type body =
+  | Empty
+  | String of string
+  | Stream of ((string -> unit) -> unit)
+      (** written as chunks; a failure after the headers truncates it *)
+
+type response = { status : int; headers : Codec.headers; body : body }
+
+(** A [text/plain] answer of one line. *)
+val text : ?headers:Codec.headers -> int -> string -> response
+
+(** Raised by the body reader past the handler's limit. *)
+exception Body_too_large
+
+type t
+
+(** [handle] reads the body with the function it is given, at most once. *)
+val serve :
+  ?limits:limits ->
+  Unix.sockaddr list ->
+  (request -> (limit:int -> string) -> response) ->
+  t
+
+(** Stops accepting, lets in-flight requests finish within [grace], then closes
+    what remains. *)
+val close : ?grace:float -> t -> unit
+
+(** Requests in flight. *)
+val in_flight : t -> int
+
+(** The bound addresses, ports resolved. *)
+val addresses : t -> Unix.sockaddr list

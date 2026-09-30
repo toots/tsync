@@ -1,0 +1,12 @@
+(library
+ (name tsync_http)
+ (libraries
+  tsync_core
+  unix
+  ssl
+  tls
+  ca-certs
+  x509
+  ptime.clock.os
+  domain-name
+  mirage-crypto-rng.unix))

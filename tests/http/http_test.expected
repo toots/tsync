@@ -1,0 +1,17 @@
+== requests
+  200 "GET a=1 \"\"\n"
+  200 "PUT  \"hello\"\n"
+  413 "too large\n"
+  200 ""
+  200 "one two three" (chunked)
+  404 "not found\n"
+== keep-alive
+  same connection: true
+  new connection after close: true
+== stall
+  transient/link:  no progress for 0.5s
+  200 "late\n"
+== redial after the server dropped an idle connection
+  200 "GET after=restart \"\"\n"
+== nothing listening
+  transient/link

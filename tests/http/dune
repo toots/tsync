@@ -1,0 +1,13 @@
+(executable
+ (name http_test)
+ (libraries tsync_core tsync_http unix))
+
+(rule
+ (with-stdout-to
+  http_test.output
+  (run ./http_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff http_test.expected http_test.output)))
