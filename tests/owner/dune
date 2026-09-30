@@ -1,0 +1,20 @@
+(executable
+ (name owner_test)
+ (libraries
+  tsync_core
+  tsync_config
+  tsync_catalog
+  tsync_ipc
+  tsync_owner
+  unix
+  yojson))
+
+(rule
+ (with-stdout-to
+  owner_test.output
+  (run ./owner_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff owner_test.expected owner_test.output)))

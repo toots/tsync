@@ -1,0 +1,13 @@
+(library
+ (name tsync_owner)
+ (libraries
+  tsync_core
+  tsync_store
+  tsync_checkout
+  tsync_sync
+  tsync_config
+  tsync_domain
+  tsync_ipc
+  unix
+  threads.posix
+  yojson))
