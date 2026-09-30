@@ -90,6 +90,7 @@ module type S = sig
       grace; what is left stays owed on disk. *)
   val drain : ?grace:float -> unit -> unit
 
+  (** Adopt records other processes submitted, then run a journal pass soon. *)
   val poll : unit -> unit
 
   (** One discovery-and-application pass; the number of entries applied. *)

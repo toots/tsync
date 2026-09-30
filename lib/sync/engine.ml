@@ -965,7 +965,21 @@ module Make (C : Engine_ctx.S) = struct
       | Some s -> String.trim s
       | None -> ""
 
-  let poll () = Rt.Signal.broadcast poll_signal
+  (* durable-queue §4.2: records other processes submitted, a WAL record
+     without an entry key getting one. *)
+  let rescan_logs () =
+    Dqueue.rescan
+      ~rekey:(fun id ->
+        if Entry_key.parse id = None then Some (mint ()) else None)
+      metadata;
+    Dqueue.rescan uploads
+
+  let wake_poller () = Rt.Signal.broadcast poll_signal
+
+  let poll () =
+    rescan_logs ();
+    Tsync_store.Composite.rescan C.composite;
+    wake_poller ()
 
   (* wal-and-journal §4.3: the sweep is timed from the last listing, never from
      a wait's expiry. *)
@@ -1196,7 +1210,7 @@ module Make (C : Engine_ctx.S) = struct
     f metadata;
     (if on then Tsync_store.Composite.pause else Tsync_store.Composite.resume)
       C.composite;
-    if not on then poll ()
+    if not on then wake_poller ()
 
   let is_paused () = Atomic.get paused
 
@@ -1208,11 +1222,7 @@ module Make (C : Engine_ctx.S) = struct
     Dqueue.start ~paused:is_paused uploads run_upload;
     Dqueue.start ~paused:is_paused metadata run_metadata;
     reconcile ();
-    Dqueue.rescan
-      ~rekey:(fun id ->
-        if Entry_key.parse id = None then Some (mint ()) else None)
-      metadata;
-    Dqueue.rescan uploads;
+    rescan_logs ();
     adopt_unrecorded ();
     Dqueue.start claim_queue run_claim;
     Tsync_store.Composite.start ~paused:is_paused C.composite;
