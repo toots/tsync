@@ -22,6 +22,25 @@ let duration s =
   else if s < 86400 then Printf.sprintf "%dh %dm" (s / 3600) (s mod 3600 / 60)
   else Printf.sprintf "%dd %dh" (s / 86400) (s mod 86400 / 3600)
 
+(* The first folder and as many trailing parts as fit in [width]. *)
+let shorten ?(width = 60) path =
+  if String.length path <= width then path
+  else (
+    match String.split_on_char '/' path with
+      | first :: (_ :: _ as rest) ->
+          let rec keep acc len = function
+            | part :: more when len + String.length part + 1 <= width ->
+                keep (part :: acc) (len + String.length part + 1) more
+            | _ -> acc
+          in
+          let tail =
+            match keep [] (String.length first + 2) (List.rev rest) with
+              | [] -> [List.nth rest (List.length rest - 1)]
+              | tail -> tail
+          in
+          String.concat "/" (first :: "…" :: tail)
+      | _ -> path)
+
 let plural n one many = Printf.sprintf "%d %s" n (if n = 1 then one else many)
 
 let row b indent label value =
@@ -176,17 +195,18 @@ let backend b (be : backend) =
         Option.iter
           (fun (j : copy_job) ->
             row b "    " "sending"
-              (Printf.sprintf "%s%s%s, %s sent%s"
-                 (Option.value ~default:j.job j.path)
+              (Printf.sprintf "%s%s%s, %s%s"
+                 (shorten (Option.value ~default:j.job j.path))
                  (Option.fold ~none:""
                     ~some:(fun s -> " (" ^ isize s ^ ")")
                     j.size)
                  (if j.chunks > 0 then
                     Printf.sprintf ": chunk %d of %d" j.checked j.chunks
                   else "")
-                 (isize j.sent)
+                 (if j.sent = 0 then "checking what the copy holds"
+                  else isize j.sent ^ " sent")
                  (Option.fold ~none:""
-                    ~some:(fun e -> ", done in " ^ duration e)
+                    ~some:(fun e -> ", done in at most " ^ duration e)
                     j.eta)))
           c.current))
     be.copies;

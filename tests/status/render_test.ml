@@ -280,7 +280,12 @@ let degraded : machine =
                             {
                               job =
                                 "tsync/Files/manifests/d62e6a4d741d649c/8efbae2a";
-                              path = Some "Videos/2019/trip.mov";
+                              path =
+                                Some
+                                  "Music Production/Sabertooth \
+                                   Swing/Assets/Sunday Swing June 14 \
+                                   2026/2026-06-14 \
+                                   Sabertooth/media/SABR_260614_B01/XDROOT/Clip/ALLWAYS0010.MXF";
                               size = Some 5153960755;
                               chunks = 615;
                               checked = 205;

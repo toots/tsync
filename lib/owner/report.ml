@@ -181,12 +181,17 @@ let copy_job t (j : Composite.job_progress) : R.copy_job =
     sent = j.sent;
     elapsed = j.elapsed;
     eta =
-      (if j.checked > 0 && j.chunks > j.checked then
-         Some
-           (j.elapsed
-           *. float_of_int (j.chunks - j.checked)
-           /. float_of_int j.checked)
-       else None);
+      (* Chunks already on the copy check fast, so only bytes sent give a pace;
+         the rest is taken as missing, an upper bound. *)
+        (match j.file with
+        | Some (_, size) when j.sent > 0 && j.chunks > 0 ->
+            let left =
+              float_of_int size
+              *. float_of_int (j.chunks - j.checked)
+              /. float_of_int j.chunks
+            in
+            Some (left /. (float_of_int j.sent /. j.elapsed))
+        | _ -> None);
   }
 
 let copies t s =
