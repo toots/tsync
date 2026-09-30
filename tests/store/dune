@@ -47,10 +47,18 @@
   ptime
   base64))
 
+; The CI variables select a real bucket; they are dependencies, so a cached
+; run against the fake is never replayed as a real one.
+
 (rule
- (with-stdout-to
-  gcs_test.output
-  (run ./gcs_test.exe)))
+ (deps
+  (env_var TSYNC_CI_GCS_BUCKET)
+  (env_var TSYNC_CI_GCS_SERVICE_ACCOUNT_KEY)
+  (env_var TSYNC_CI_REQUIRE_REAL))
+ (action
+  (with-stdout-to
+   gcs_test.output
+   (run ./gcs_test.exe))))
 
 (rule
  (alias runtest)

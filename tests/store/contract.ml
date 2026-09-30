@@ -2,8 +2,9 @@ open Tsync_core
 open Tsync_store
 
 let p fmt = Printf.printf fmt
-let k = Key.v
-let d = Domain_name.v "d"
+let domain = ref "d"
+let k rel = Key.v (Text.replace_all ~sub:"tsync/d/" ~by:("tsync/" ^ !domain ^ "/") rel)
+let prefix rel = Key.prefix (Text.replace_all ~sub:"tsync/d/" ~by:("tsync/" ^ !domain ^ "/") rel)
 let show = function Some s -> Printf.sprintf "%S" s | None -> "none"
 
 let kind_of f =
@@ -12,8 +13,10 @@ let kind_of f =
     | exception Fail.E fl -> Fail.kind_name fl.kind
     | exception e -> Printexc.to_string e
 
-(* The generic store conformance of spec 06 §10, printed for a snapshot. *)
-let run (s : Store.t) =
+(* The generic store conformance of spec 06 §10, printed for a snapshot. Keys
+   live under [tsync/<domain>/], which the output never shows. *)
+let run ?(domain_name = "d") (s : Store.t) =
+  domain := domain_name;
   p "== round trips\n";
   s.put (k "tsync/d/a") "hello";
   p "get_opt a: %s; absent: %s; get absent: %s\n"
@@ -80,18 +83,19 @@ let run (s : Store.t) =
        (List.filter (fun i -> s.get_opt (List.nth keys i) <> None) survivors));
   p "\n== awkward keys\n";
   let awkward = ["tsync/d/x/& < > \" ' + % # ? space"; "tsync/d/x/élan ✓"] in
-  List.iter (fun key -> s.put (k key) key) awkward;
+  List.iter (fun key -> s.put (k key) (Key.to_string (k key))) awkward;
   List.iter
-    (fun key -> p "%S round-trips: %b\n" key (s.get_opt (k key) = Some key))
+    (fun key ->
+      p "%S round-trips: %b\n" key (s.get_opt (k key) = Some (Key.to_string (k key))))
     awkward;
   p "listed: %b\n"
     (List.map
        (fun (e : Store.entry) -> Key.to_string e.key)
-       (s.list_prefix (Key.prefix "tsync/d/x/"))
-    = List.sort compare awkward);
+       (s.list_prefix (prefix "tsync/d/x/"))
+    = List.sort compare (List.map (fun key -> Key.to_string (k key)) awkward));
   s.delete_multi (List.map k awkward);
   p "after delete_multi: %d listed\n"
-    (List.length (s.list_prefix (Key.prefix "tsync/d/x/")));
+    (List.length (s.list_prefix (prefix "tsync/d/x/")));
   p "invalid keys refused before anything: %s\n"
     (String.concat " "
        (List.map
@@ -104,11 +108,16 @@ let run (s : Store.t) =
   let names l =
     String.concat "," (List.map (fun (e : Store.entry) -> Key.leaf e.key) l)
   in
-  p "all: %s\n" (names (s.list_prefix (Key.prefix "tsync/d/l/")));
+  p "all: %s\n" (names (s.list_prefix (prefix "tsync/d/l/")));
   p "max_keys 2: %s\n"
-    (names (s.list_prefix ~max_keys:2 (Key.prefix "tsync/d/l/")));
+    (names (s.list_prefix ~max_keys:2 (prefix "tsync/d/l/")));
   p "empty prefix: %d\n"
-    (List.length (s.list_prefix (Key.prefix "tsync/d/nothing/")));
+    (List.length (s.list_prefix (prefix "tsync/d/nothing/")));
   p "\n== capabilities\n";
-  let c = s.capabilities (Key.domain_prefix d) in
+  let c = s.capabilities (Key.domain_prefix (Domain_name.v !domain)) in
   p "verified %b, share_url %s\n" c.verified (show c.share_url)
+
+(* Everything a run left under its domain. *)
+let cleanup (s : Store.t) =
+  s.delete_multi
+    (List.map (fun (e : Store.entry) -> e.key) (s.list_prefix (prefix "tsync/d/")))

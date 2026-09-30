@@ -167,15 +167,28 @@ let () =
           | [ADDR_INET (_, p)] -> p
           | _ -> assert false
       in
-      let s =
-        (Option.get (Driver.find "gcs")).create ~name:"gcs"
-          [
-            ("bucket", Field_spec.S "b");
-            ( "endpoint",
-              Field_spec.S (Printf.sprintf "http://127.0.0.1:%d" port) );
-          ]
+      let fake =
+        [
+          ("bucket", Field_spec.S "b");
+          ("endpoint", Field_spec.S (Printf.sprintf "http://127.0.0.1:%d" port));
+        ]
       in
-      Contract.run s;
+      let fields, domain_name =
+        match (Sys.getenv_opt "TSYNC_CI_GCS_BUCKET", Sys.getenv_opt "TSYNC_CI_GCS_SERVICE_ACCOUNT_KEY") with
+          | Some b, Some key when b <> "" && key <> "" ->
+              let run =
+                Option.value ~default:(string_of_int (Unix.getpid ())) (Sys.getenv_opt "GITHUB_RUN_ID")
+                ^ "-" ^ Option.value ~default:"0" (Sys.getenv_opt "GITHUB_RUN_ATTEMPT")
+              in
+              prerr_endline ("gcs_test: against bucket " ^ b ^ ", domain ci-" ^ run);
+              ([("bucket", Field_spec.S b); ("serviceAccountKey", Field_spec.S key)], "ci-" ^ run)
+          | _ when Sys.getenv_opt "TSYNC_CI_REQUIRE_REAL" = Some "1" ->
+              prerr_endline "gcs_test: TSYNC_CI_REQUIRE_REAL is set but the bucket or key is missing";
+              exit 2
+          | _ -> (fake, "d")
+      in
+      let s = (Option.get (Driver.find "gcs")).create ~name:"gcs" fields in
+      Fun.protect ~finally:(fun () -> Contract.cleanup s) (fun () -> Contract.run ~domain_name s);
       p "\n== gcs wire (backends/gcs §6)\n";
       p "segment: %s | %s\n"
         (Tsync_gcs.Gcs.segment "tsync/d/.chunks/aabb-ccdd")

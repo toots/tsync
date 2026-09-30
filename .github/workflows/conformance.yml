@@ -1,0 +1,38 @@
+# Runs every snapshot test, the store contract against the CI GCS bucket
+# included; missing secrets fail the job rather than test the fake.
+
+name: conformance
+
+on:
+  push:
+    branches: [rewrite]
+  workflow_dispatch:
+
+jobs:
+  tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: System libraries
+        run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config
+
+      - uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: "5.5"
+
+      - name: OCaml libraries
+        run: >-
+          opam install -y dune yojson cmdliner ssl tls ca-certs x509
+          mirage-crypto-pk mirage-crypto-rng ptime domain-name base64
+
+      - name: Build
+        run: opam exec -- dune build
+
+      - name: Tests
+        env:
+          TSYNC_CI_REQUIRE_REAL: "1"
+          TSYNC_CI_GCS_BUCKET: ${{ secrets.TSYNC_CI_GCS_BUCKET }}
+          TSYNC_CI_GCS_SERVICE_ACCOUNT_KEY: ${{ secrets.TSYNC_CI_GCS_SERVICE_ACCOUNT_KEY }}
+        run: opam exec -- dune build @runtest --force
