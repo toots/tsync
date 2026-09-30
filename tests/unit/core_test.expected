@@ -106,3 +106,10 @@ d/text.txt       byte-exact
 d/bin            byte-exact
 d/empty          byte-exact
 d/héllo ✓.txt byte-exact
+
+== key areas: a domain may be named like an area
+d           chunk d true; outgoing d true; marker true; reference d; version d; manifest marker true
+chunks      chunk chunks true; outgoing chunks true; marker true; reference chunks; version chunks; manifest marker true
+manifests   chunk manifests true; outgoing manifests true; marker true; reference manifests; version manifests; manifest marker true
+versions    chunk versions true; outgoing versions true; marker true; reference versions; version versions; manifest marker true
+chunks.from chunk chunks.from true; outgoing chunks.from true; marker true; reference chunks.from; version chunks.from; manifest marker true

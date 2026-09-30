@@ -198,3 +198,33 @@ let () =
       p "%-16s %s\n" name (if got = body then "byte-exact" else "DIFFERENT"))
     members;
   Fs.rm_rf dir
+
+let () =
+  p "\n== key areas: a domain may be named like an area\n";
+  let ck = Chunk_key.of_body "x" in
+  let show_parts = function
+    | Some (d, c) ->
+        Printf.sprintf "%s %b" (Domain_name.to_string d) (Chunk_key.equal c ck)
+    | None -> "none"
+  in
+  List.iter
+    (fun name ->
+      let d = Domain_name.v name in
+      let outcome f = try f () with e -> "raises " ^ Printexc.to_string e in
+      p
+        "%-11s chunk %s; outgoing %s; marker %b; reference %s; version %s; \
+         manifest marker %b\n"
+        name
+        (outcome (fun () -> show_parts (Key.chunk_parts (Key.chunk d ck))))
+        (outcome (fun () ->
+             show_parts (Key.outgoing_chunk (Key.chunk_from d ck))))
+        (Key.marker_of (Key.chunk d ck) = Some (Key.marker d ck))
+        (outcome (fun () ->
+             Option.fold ~none:"none" ~some:Domain_name.to_string
+               (Key.domain_of_reference (Key.child d Folder_id.root "f"))))
+        (outcome (fun () ->
+             Option.fold ~none:"none" ~some:Domain_name.to_string
+               (Key.domain_of_reference (Key.version d ~group:"g/h" ~ns:1L))))
+        (try Key.marker_of (Key.child d Folder_id.root "f") = None
+         with _ -> false))
+    ["d"; "chunks"; "manifests"; "versions"; "chunks.from"]

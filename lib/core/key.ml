@@ -70,85 +70,44 @@ let split_last s =
 let leaf k = snd (split_last k)
 let parent_segment k = leaf (fst (split_last k))
 
-let rfind sub s =
-  let n = String.length sub in
-  let rec go i =
-    if i < 0 then None else if String.sub s i n = sub then Some i else go (i - 1)
-  in
-  go (String.length s - n)
-
-let chunk_of k =
+(* Domain names hold no '/', so the second segment is always the domain. *)
+let area k =
   match String.split_on_char '/' k with
-    | ["tsync"; _; "chunks"; sss; leaf] -> (
+    | "tsync" :: d :: area :: rest -> (
+        match Domain_name.of_string d with
+          | Ok d -> Some (d, area, rest)
+          | Error _ -> None)
+    | _ -> None
+
+let chunk_in space k =
+  match area k with
+    | Some (d, a, [sss; leaf]) when a = space -> (
         match Chunk_key.of_string leaf with
-          | Some c when Chunk_key.shard c = sss -> Some c
+          | Some c when Chunk_key.shard c = sss -> Some (d, c)
           | _ -> None)
     | _ -> None
 
-(* 02 §2.3: only a surviving-space chunk has a marker, found from the last
-   [/chunks/] segment. *)
-let marker_of k =
-  if not (String.starts_with ~prefix:root k) then None
-  else (
-    match rfind "/chunks/" k with
-      | None -> None
-      | Some i -> (
-          let d = String.sub k 6 (i - 6) in
-          let rest = String.sub k (i + 8) (String.length k - i - 8) in
-          match (String.split_on_char '/' rest, Domain_name.of_string d) with
-            | [sss; leaf], Ok d -> (
-                match Chunk_key.of_string leaf with
-                  | Some c when Chunk_key.shard c = sss -> Some (marker d c)
-                  | _ -> None)
-            | _ -> None))
+let chunk_parts k = chunk_in "chunks" k
+let chunk_of k = Option.map snd (chunk_parts k)
+let outgoing_chunk k = chunk_in "chunks.from" k
 
-(* The domain sits between [tsync/] and the last [seg] segment. *)
-let split_space seg k =
-  if not (String.starts_with ~prefix:root k) then None
-  else (
-    match rfind seg k with
-      | None -> None
-      | Some i -> (
-          let d = String.sub k 6 (i - 6)
-          and rest =
-            String.sub k
-              (i + String.length seg)
-              (String.length k - i - String.length seg)
-          in
-          match Domain_name.of_string d with
-            | Ok d -> Some (d, rest)
-            | Error _ -> None))
-
-let chunk_in seg k =
-  match split_space seg k with
-    | Some (d, rest) -> (
-        match String.split_on_char '/' rest with
-          | [sss; leaf] -> (
-              match Chunk_key.of_string leaf with
-                | Some c when Chunk_key.shard c = sss -> Some (d, c)
-                | _ -> None)
-          | _ -> None)
-    | None -> None
-
-let chunk_parts k = chunk_in "/chunks/" k
-let outgoing_chunk k = chunk_in "/chunks.from/" k
-let is_outgoing k = split_space "/chunks.from/" k <> None
+let is_outgoing k =
+  match area k with Some (_, "chunks.from", _) -> true | _ -> false
 
 (* The sentinel makes the prefix end inside the space, even at its root. *)
 let outgoing_prefix p =
-  match split_space "/chunks/" (p ^ "x") with
-    | Some (d, rest) ->
+  match area (p ^ "x") with
+    | Some (d, "chunks", rest) ->
+        let rest = String.concat "/" rest in
         Some (chunks_from d ^ String.sub rest 0 (String.length rest - 1))
-    | None -> None
+    | _ -> None
 
 let domain_of_reference k =
-  match String.split_on_char '/' k with
-    | "tsync" :: _ -> (
-        let area seg = split_space seg k in
-        match area "/manifests/" with
-          | Some (d, _) -> Some d
-          | None -> Option.map fst (area "/versions/"))
+  match area k with
+    | Some (d, ("manifests" | "versions"), _) -> Some d
     | _ -> None
+
+let marker_of k = Option.map (fun (d, c) -> marker d c) (chunk_parts k)
 
 let chunk_of_marker k =
   match String.split_on_char '/' k with
