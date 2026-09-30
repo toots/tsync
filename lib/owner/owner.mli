@@ -34,10 +34,12 @@ val owner_held : int
     any domain, so every thread inherits the mask. *)
 val stop_on_signals : unit -> unit
 
-(** What a presenting frontend does for its domain: present it, then return the
-    hooks the handler calls. *)
+(** What a presenting frontend does for its domain once its engine has started:
+    the hooks the handler calls, and what presents it once the socket serves. *)
 type present =
-  Tsync_domain.Domain.t -> (module Tsync_sync.Engine.S) -> Handler.hooks
+  Tsync_domain.Domain.t ->
+  (module Tsync_sync.Engine.S) ->
+  Handler.hooks * (unit -> unit)
 
 (** Owner start, serve until the process stop, then drain within the grace.
     Answers the exit status: 0, or {!owner_held}. *)
@@ -67,3 +69,19 @@ val request :
   Tsync_config.Config.domain ->
   Tsync_ipc.Ipc.json ->
   Tsync_ipc.Ipc.json
+
+(** How a presenting frontend hosts its owner (07 §3.7): given [run], which runs
+    the owner with a presentation and answers its exit status, it answers the
+    process's exit status. A frontend that must own the main thread (FUSE) runs
+    the owner on another. *)
+type host =
+  mount:string option ->
+  Tsync_config.Config.domain list ->
+  run:(present -> int) ->
+  int
+
+(** At module initialisation, by the frontend's library. *)
+val register_host : string -> host -> unit
+
+(** The host of the first frontend of these domains that registered one. *)
+val host_for : Tsync_config.Config.domain list -> host option

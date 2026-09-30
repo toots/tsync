@@ -86,12 +86,15 @@ let stop_on_signals () =
        ())
 
 type present =
-  Tsync_domain.Domain.t -> (module Tsync_sync.Engine.S) -> Handler.hooks
+  Tsync_domain.Domain.t ->
+  (module Tsync_sync.Engine.S) ->
+  Handler.hooks * (unit -> unit)
 
 type served = {
   domain : Domain.t;
   engine : (module Tsync_sync.Engine.S);
   handler : Handler.t;
+  go : unit -> unit;
 }
 
 let answered_while_draining = ["stats"; "status"; "stop"; "ping"]
@@ -173,11 +176,18 @@ let serve ?present ~socket config domains =
         let (module E : Tsync_sync.Engine.S) = engine in
         E.start ();
         Rt.spawn ~name:"housekeeping" (fun () -> housekeeping engine);
+        let hooks, go =
+          match present with
+            | Some p -> p domain engine
+            | None -> (Handler.no_hooks, ignore)
+        in
+        E.set_changed_hook hooks.changed;
         {
           domain;
           engine;
+          go;
           handler =
-            Handler.create ~domain ~engine ~hooks:Handler.no_hooks
+            Handler.create ~domain ~engine ~hooks
               ~publish:(publish (Domain_name.to_string dom.name))
               ~stats:(fun _ ->
                 Ipc.ok [("domains", `List [domain_body domain engine])])
@@ -192,10 +202,7 @@ let serve ?present ~socket config domains =
            (Domain_name.to_string s.domain.name)
            (Handler.event s.handler "recovered" [])))
     !served;
-  Option.iter
-    (fun present ->
-      List.iter (fun s -> ignore (present s.domain s.engine)) !served)
-    present;
+  List.iter (fun s -> s.go ()) !served;
   Stop.wait ();
   Atomic.set draining true;
   Rt.iter_concurrently
@@ -274,3 +281,20 @@ let request ?(bulk = false) ~what config (dom : Config.domain) req =
             match Handler.answer h req with
               | Ipc.Reply r -> r
               | Ipc.Subscribe _ -> Fail.invalid "a subscription needs an owner")
+
+type host =
+  mount:string option ->
+  Tsync_config.Config.domain list ->
+  run:(present -> int) ->
+  int
+
+let hosts : host Registry.t = Registry.create ()
+let register_host = Registry.register hosts
+
+let host_for (domains : Config.domain list) =
+  List.find_map
+    (fun (d : Config.domain) ->
+      List.find_map
+        (fun (f : Config.frontend) -> Registry.find hosts f.ftype)
+        d.frontends)
+    domains
