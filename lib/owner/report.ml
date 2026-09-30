@@ -56,13 +56,16 @@ let create (domain : Domain.t) engine ~frontend =
         domain.members;
   }
 
-(* 07 §5.5: entries newer than the mark and authored by another client. *)
+(* 07 §5.5: entries newer than the mark and authored by another client; one
+   already in the applied log is not behind, whatever the mark says. *)
 let behind t entries =
+  let (module E : Tsync_sync.Engine.S) = t.engine in
   let mark = Tsync_sync.Mark.read ~data_dir:t.domain.data_dir t.domain.name in
   List.length
     (List.filter
        (fun (k, _) ->
          Tsync_sync.Entry_key.client k <> t.client
+         && (not (Tsync_sync.Applied.contains E.applied k))
          &&
            match mark with
            | Some m -> Tsync_sync.Entry_key.compare k m > 0
