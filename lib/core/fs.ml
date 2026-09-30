@@ -79,9 +79,21 @@ let read_file p =
     | None -> Fail.absent "%s: no such file" p
 
 let readdir_opt p =
-  match opt (fun () -> Sys.readdir p) with
-    | exception Sys_error msg -> raise (Fail.E (Fail.make Fail.Local msg))
-    | r -> Option.map (fun a -> List.sort compare (Array.to_list a)) r
+  match opt (fun () -> Unix.opendir p) with
+    | None -> None
+    | Some dh ->
+        Fun.protect
+          ~finally:(fun () -> try Unix.closedir dh with _ -> ())
+          (fun () ->
+            let rec go acc =
+              match eintr (fun () -> Unix.readdir dh) with
+                | "." | ".." -> go acc
+                | n -> go (n :: acc)
+                | exception End_of_file -> acc
+                | exception Unix.Unix_error (e, fn, a) ->
+                    raise (Fail.E (Fail.of_unix e fn a))
+            in
+            Some (List.sort compare (go [])))
 
 let readdir p = Option.value ~default:[] (readdir_opt p)
 

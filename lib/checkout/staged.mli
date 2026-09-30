@@ -58,8 +58,9 @@ val fold :
 val edits : t -> (string * edit) list
 val edits_under : t -> string -> (string * edit) list
 
-(** Move a staged manifest, stamping the new leaf. *)
-val move : t -> src:string -> dst:string -> unit
+(** Move a staged manifest, stamping the new leaf; a [new_file] (a conflicted
+    copy) starts from no record. *)
+val move : ?new_file:bool -> t -> src:string -> dst:string -> unit
 
 val bodies_named : edit -> string list
 

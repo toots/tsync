@@ -259,11 +259,16 @@ let edits t =
 let edits_under t dir =
   List.filter (fun (rel, _) -> Names.is_under ~dir rel) (edits t)
 
-let move t ~src ~dst =
+let move ?(new_file = false) t ~src ~dst =
   match edit t src with
     | None -> ()
     | Some e ->
-        write t dst { e with name = Names.leaf_of dst };
+        write t dst
+          {
+            e with
+            name = Names.leaf_of dst;
+            base = (if new_file then Base_none else e.base);
+          };
         remove t src
 
 let bodies_named e =

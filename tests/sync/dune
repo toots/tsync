@@ -12,3 +12,24 @@
  (alias runtest)
  (action
   (diff formats_test.expected formats_test.output)))
+
+(executable
+ (name two_clients_test)
+ (modules two_clients_test)
+ (libraries
+  tsync_core
+  tsync_store
+  tsync_remote
+  tsync_checkout
+  tsync_sync
+  unix))
+
+(rule
+ (with-stdout-to
+  two_clients_test.output
+  (run ./two_clients_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff two_clients_test.expected two_clients_test.output)))
