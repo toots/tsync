@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: System libraries
         run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config
@@ -23,9 +23,7 @@ jobs:
           ocaml-compiler: "5.5"
 
       - name: OCaml libraries
-        run: >-
-          opam install -y dune yojson cmdliner ssl tls ca-certs x509
-          mirage-crypto-pk mirage-crypto-rng ptime domain-name base64
+        run: opam install -y . --deps-only
 
       - name: Build
         run: opam exec -- dune build

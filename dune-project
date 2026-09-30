@@ -2,3 +2,25 @@
 (name tsync)
 (license MIT)
 (implicit_transitive_deps false)
+(generate_opam_files true)
+
+(package
+ (name tsync)
+ (synopsis "Synchronise folders through object stores")
+ (depends
+  (ocaml (>= 5.5))
+  dune
+  base64
+  ca-certs
+  cmdliner
+  digestif
+  domain-name
+  mirage-crypto-pk
+  mirage-crypto-rng
+  ptime
+  re
+  ssl
+  tls
+  x509
+  yojson)
+ (depopts fuse3))
