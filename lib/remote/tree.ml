@@ -309,34 +309,48 @@ module Make (C : Context.S) = struct
      path of the containing folder; subfolders are fetched ahead, which leaves
      the visit order unchanged. A folder failing transiently under [Skip] is
      retried once after the walk. *)
+  (* Depth first over an explicit stack; only the next [width] folders in visit
+     order are fetched ahead, so at most that many listings wait in memory
+     whatever the tree's width. *)
   let fold_tree ?(on_unusable = Fail_on_unusable) ?(width = C.max_downloads) id
       ~root_path f acc =
-    let slots = Rt.Semaphore.create (max 1 width) in
-    let fetch id =
-      Rt.async (fun () ->
-          Rt.Semaphore.with_slot slots (fun () -> children ~on_unusable id))
-    in
+    let width = max 1 width in
+    let fetch id = Rt.async (fun () -> children ~on_unusable id) in
     let acc = ref acc and later = ref [] in
-    let rec visit id path pending =
-      match Rt.Promise.await pending with
-        | entries ->
-            List.iter (fun e -> acc := f !acc path e) entries;
-            let dirs =
-              List.filter_map
-                (fun e ->
-                  match e.body with
-                    | Dir mk -> Some (mk.Folder.id, Names.join path mk.name)
-                    | File _ -> None)
-                entries
-            in
-            let fetched = List.map (fun (id, p) -> (id, p, fetch id)) dirs in
-            List.iter (fun (id, p, pr) -> visit id p pr) fetched
-        | exception (Fail.E fl as e) when Fail.retryable fl.kind -> (
-            match on_unusable with
-              | Skip _ -> later := (id, path) :: !later
-              | Fail_on_unusable -> raise e)
+    let rec prefetch n = function
+      | [] -> ()
+      | _ when n = 0 -> ()
+      | (id, _, (p : _ option ref)) :: rest ->
+          if !p = None then p := Some (fetch id);
+          prefetch (n - 1) rest
     in
-    visit id root_path (fetch id);
+    let rec loop = function
+      | [] -> ()
+      | (id, path, p) :: rest as stack -> (
+          prefetch width stack;
+          let pending = Option.get !p in
+          match Rt.Promise.await pending with
+            | entries ->
+                List.iter (fun e -> acc := f !acc path e) entries;
+                let dirs =
+                  List.filter_map
+                    (fun e ->
+                      match e.body with
+                        | Dir mk ->
+                            Some
+                              (mk.Folder.id, Names.join path mk.name, ref None)
+                        | File _ -> None)
+                    entries
+                in
+                loop (dirs @ rest)
+            | exception (Fail.E fl as e) when Fail.retryable fl.kind -> (
+                match on_unusable with
+                  | Skip _ ->
+                      later := (id, path) :: !later;
+                      loop rest
+                  | Fail_on_unusable -> raise e))
+    in
+    loop [(id, root_path, ref None)];
     List.iter
       (fun (id, path) ->
         match children ~on_unusable id with
