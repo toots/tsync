@@ -64,3 +64,18 @@
  (alias runtest)
  (action
   (diff gcs_test.expected gcs_test.output)))
+
+(executable
+ (name proxy_wire_test)
+ (modules proxy_wire_test)
+ (libraries tsync_core tsync_store tsync_http_proxy_client))
+
+(rule
+ (with-stdout-to
+  proxy_wire_test.output
+  (run ./proxy_wire_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff proxy_wire_test.expected proxy_wire_test.output)))

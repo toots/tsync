@@ -1,0 +1,44 @@
+== signature vectors (§3.4)
+key dHN5bmMvZG9jcy9jdXJzb3I
+676f55e451e2c18804ebfe64f0e40e7779bac0027b6f206be68cdf67a88e9799
+aaad0b84828445ef41805f42d64c59c051d88f21456c8308b72e691dfbc40ad5
+4dda143e2738745c9629ec63e6e4904e5073531994ffa52d1a4cfed35e080f87
+88bfa097567658cbf464de58b53601df613701a09f172016c78f22a9148b3e2d
+== verification (§12)
+fresh signature          true
+wrong secret             false
+tampered target          false
+tampered body            false
+upper-case hex           false
+timestamp now            true
+timestamp +300           true
+timestamp +301           false
+non-decimal timestamp    false
+16 digits                false
+== canonical query (§3.2)
+prefix=a%20b%2C%2B%26%C3%A9&k%3D=v=
+parses back: true
+"a=1&a=2"    400
+"a"          400
+"a=%zz"      400
+"a=%4"       400
+"a=+"        ok
+""           ok
+== keys
+round trip: true
+undecodable: true
+== listing JSON
+[{"key":"tsync/d/a","size":3,"lastModified":1727600000.25,"etag":"\"9b2c\""},{"key":"tsync/d/b","size":0,"lastModified":1.0}]
+round trip: true
+not an array: corrupt/other
+== get-multi frames (§4.3)
+decoded: 3,absent,0,200000
+fewer keys than frames: corrupt/other
+more keys than frames: corrupt/other
+truncated body: corrupt/other
+length cut in half: corrupt/other
+== children-multi frames (§4.3)
+round trip: true
+empty answer: 0 folders
+folder not asked for: corrupt/other
+child outside its folder: corrupt/other

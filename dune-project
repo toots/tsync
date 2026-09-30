@@ -15,6 +15,7 @@
   cmdliner
   digestif
   domain-name
+  eqaf
   mirage-crypto-pk
   mirage-crypto-rng
   ptime
