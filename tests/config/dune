@@ -1,6 +1,11 @@
 (executable
  (name config_test)
- (libraries tsync_core tsync_config tsync_catalog tsync_store))
+ (libraries
+  tsync_core
+  tsync_config
+  tsync_catalog
+  tsync_store
+  tsync_http_proxy))
 
 (rule
  (with-stdout-to

@@ -40,8 +40,8 @@ let listener_value bindings name =
         invalid "http-proxy: %s differs between domains; the listener is shared"
           name
 
-(* A per-domain option set nowhere else inherits the value every binding that
-   sets it agrees on. *)
+(* An unset secret inherits the value every binding that sets one agrees on;
+   exposure (shares, readOnly) never crosses domains. *)
 let inherited bindings opts name =
   match present (List.assoc_opt name opts) with
     | Some v -> Some v
@@ -138,8 +138,9 @@ let resolve (config : Config.t) =
           {
             domain = dom;
             secret;
-            shares = bool (inherited all opts "shares");
-            read_only = dom.read_only || bool (inherited all opts "readOnly");
+            shares = bool (present (List.assoc_opt "shares" opts));
+            read_only =
+              dom.read_only || bool (present (List.assoc_opt "readOnly" opts));
           })
         bound
     in

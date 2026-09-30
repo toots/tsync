@@ -156,3 +156,32 @@ let () =
           | Some v -> string_of_int v
           | None -> "refused"))
     ["512K"; "8M"; "1G"; "1048576"; "8.0 MB"; "1.5 GiB"; "0"; "-1"; "x"]
+
+(* frontends/http-proxy §A3: only the secret inherits across the shared
+   listener; share links and read-only are each domain's own. *)
+let () =
+  p "\n== http-proxy bindings\n";
+  let proxy opts =
+    Printf.sprintf {|[{"type":"http-proxy","port":8443%s}]|} opts
+  in
+  let c =
+    Config.of_string
+      (config
+         [
+           domain
+             ~frontends:
+               (proxy (Printf.sprintf {|,"secret":"%s","shares":true|} secret))
+             "F";
+           domain ~frontends:(proxy {|,"readOnly":true|}) "G";
+           domain ~frontends:(proxy "") "H";
+         ])
+  in
+  match Tsync_http_proxy.Proxy_options.resolve c with
+    | None -> p "no binding\n"
+    | Some (_, bindings) ->
+        List.iter
+          (fun (b : Tsync_http_proxy.Proxy_options.binding) ->
+            p "%s: secret inherited %b, shares %b, read-only %b\n"
+              (Tsync_core.Domain_name.to_string b.domain.name)
+              (b.secret = secret) b.shares b.read_only)
+          bindings

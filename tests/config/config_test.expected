@@ -37,3 +37,8 @@ chunk size out of range                  refused: domains[0].chunkSize: must lie
 "0"        refused
 "-1"       refused
 "x"        refused
+
+== http-proxy bindings
+F: secret inherited true, shares true, read-only false
+G: secret inherited true, shares false, read-only true
+H: secret inherited true, shares false, read-only false

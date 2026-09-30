@@ -49,10 +49,11 @@ Options live per domain in the domain's `frontends` array, e.g. `{"type":"http-p
 | `ssl_certificate`, `ssl_certificate_key` | paths | blank = plaintext | listener | same uniqueness; both or neither |
 | limit options of [security §11](../algorithms/security-model.md#11-request-size-and-time-limits-listener) | sizes, durations, counts | as listed there | listener | same uniqueness; positive |
 | `secret` | string, secret | — | per domain | required, at least `min_secret_length` characters. A binding without one inherits the value iff every binding that sets one agrees on it. |
-| `shares` | bool | false | per domain | same inheritance rule; serve `/s/` for this domain |
-| `readOnly` | bool | false | per domain | same inheritance rule |
+| `shares` | bool | false | per domain | never inherited; serve `/s/` for this domain |
+| `readOnly` | bool | false | per domain | never inherited |
 
 - An empty string equals unset.
+- Only `secret` inherits: a domain that sets none is either covered by the one value every other binding agrees on or refused. `shares` and `readOnly` change what the listener exposes or accepts for a domain, so they are taken from that domain's own binding alone; enabling share links for one domain never enables them for another.
 - Every listener option is validated before the listener starts; a violation fails startup with a message naming the option.
 - TLS is terminated in-process from PEM files, or by a reverse proxy meeting [the wire's transport rules](../backends/http-proxy.md#2-transport).
 - Secrets are masked wherever options are reported ([security §10.3](../algorithms/security-model.md#103-masking)).
