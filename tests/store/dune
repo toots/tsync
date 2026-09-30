@@ -79,3 +79,25 @@
  (alias runtest)
  (action
   (diff proxy_wire_test.expected proxy_wire_test.output)))
+
+(executable
+ (name proxy_test)
+ (modules proxy_test)
+ (libraries
+  contract
+  tsync_core
+  tsync_store
+  tsync_http
+  tsync_http_proxy_client
+  tsync_http_proxy
+  unix))
+
+(rule
+ (with-stdout-to
+  proxy_test.output
+  (run ./proxy_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff proxy_test.expected proxy_test.output)))

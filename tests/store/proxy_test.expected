@@ -1,0 +1,54 @@
+== round trips
+get_opt a: "hello"; absent: none; get absent: absent
+head a size: 5
+chunk-sized body identical: true
+copy: "hello"; copy of absent: absent
+
+== ranges
+[0,+3) "012"
+[4,+2) "45"
+[7,+3) "789"
+[0,+10) "0123456789"
+[7,+100) "789"
+[10,+5) ""
+[20,+1) ""
+absent: none; length 0: invalid
+
+== claims
+five racing claims: 1 won, losers told the holder: true
+later claim: held true
+same body again: won
+free name: won
+
+== delete
+delete: true then false
+delete_multi over 2100 keys, survivors left: 0
+
+== awkward keys
+"tsync/d/x/& < > \" ' + % # ? space" round-trips: true
+"tsync/d/x/\195\169lan \226\156\147" round-trips: true
+listed: true
+after delete_multi: 0 listed
+invalid keys refused before anything: invalid invalid invalid invalid invalid
+
+== listing
+all: a,b,c,d,e
+max_keys 2: a,b
+empty prefix: 0
+
+== capabilities
+verified true, share_url none
+
+== http-proxy (backends/http-proxy §12)
+read-only put: refused/read_only
+read-only get of an absent key: none
+wrong secret: refused/denied
+unserved domain get_opt: refused/denied
+unserved domain head: refused/denied
+a key of another route: refused/denied
+capabilities: chunk 4096, concurrency 4, verified true
+get_many across pages: 2500 answers
+list_many: 1 folders
+== watch
+behind: returned at once true
+a change wakes the watch: true

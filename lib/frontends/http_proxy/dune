@@ -3,4 +3,13 @@
 (library
  (name tsync_http_proxy)
  (library_flags (-linkall))
- (libraries tsync_core tsync_config))
+ (libraries
+  tsync_core
+  tsync_config
+  tsync_store
+  tsync_http
+  tsync_http_proxy_client
+  tsync_domain
+  tsync_ipc
+  unix
+  yojson))
