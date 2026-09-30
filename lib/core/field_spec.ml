@@ -14,12 +14,12 @@ let f ?(secret = false) ?(required = false) ?default ?(check = fun _ -> None)
     name label kind =
   { name; label; kind; default; secret; required; check }
 
-type catalog = {
-  backends : (string * field list) list;
-  frontends : (string * field list) list;
-  presenting : string list;
-  linkless : string list;
-}
+type value =
+  | S of string
+  | B of bool
+  | I of int
+  | F of float
+  | L of string list
 
 let is_loopback host =
   host = "localhost" || host = "::1" || host = "[::1]"

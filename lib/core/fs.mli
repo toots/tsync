@@ -105,6 +105,10 @@ val funlock : Unix.file_descr -> unit
 val clone : string -> string -> unit
 
 val is_network_fs : string -> bool
+
+(** Built for macOS. *)
+val is_macos : bool
+
 val pid_alive : int -> bool
 
 (** Open for reading without following a final symbolic link (ELOOP); [None]

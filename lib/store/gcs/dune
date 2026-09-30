@@ -1,0 +1,8 @@
+; linkall: the driver registers itself when linked.
+; Optional: a build without its dependencies refuses a config naming it.
+
+(library
+ (name tsync_gcs)
+ (optional)
+ (library_flags (-linkall))
+ (libraries tsync_core tsync_store))

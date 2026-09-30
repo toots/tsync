@@ -15,3 +15,15 @@ let fields =
       f ~default:"false" "unsignedPayload" "Unsigned payload" Bool;
       f "shareUrl" "Share URL" String;
     ]
+
+(* ponytail: registers its fields only; the client comes with the HTTP stack. *)
+let () =
+  Tsync_store.Driver.register "s3"
+    {
+      fields;
+      linkless = false;
+      create =
+        (fun ~name _ ->
+          Fail.raise_ Fail.Refused
+            "backend %s: the s3 driver is not written yet" name);
+    }

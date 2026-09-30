@@ -20,3 +20,5 @@ let fields =
       f ~default:"sshfs" ~check:subtype_chars "mountSubtype" "Mount subtype"
         String;
     ]
+
+let () = Tsync_config.Frontend.register "fuse" { fields; presenting = true }

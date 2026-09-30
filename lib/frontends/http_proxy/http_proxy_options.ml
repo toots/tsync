@@ -26,3 +26,6 @@ let fields =
       f "max_share_responses" "Concurrent share responses" Int;
       f "max_zip_members" "ZIP members" Int;
     ]
+
+let () =
+  Tsync_config.Frontend.register "http-proxy" { fields; presenting = false }

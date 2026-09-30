@@ -16,7 +16,7 @@ let config ?(top = "") domains =
     (String.concat "," domains)
 
 let try_ what s =
-  match Config.of_string ~catalog:Tsync_catalog.Catalog.v s with
+  match Config.of_string s with
     | c ->
         p "%-40s ok: %s\n" what
           (String.concat "; "
@@ -132,6 +132,14 @@ let () =
        ]);
   try_ "two presenting frontends"
     (config [domain ~frontends:{|["fuse","android"]|} "F"]);
+  try_ "backend type not built"
+    (config
+       [
+         domain
+           ~backends:{|[{"type":"ftp","name":"f","role":"main","link":"x"}]|}
+           "F";
+       ]);
+  try_ "frontend type not built" (config [domain ~frontends:{|["webdav"]|} "F"]);
   try_ "a frontend twice" (config [domain ~frontends:{|["fuse","fuse"]|} "F"]);
   try_ "unused link"
     (config ~top:{|,"links":{"slow":{"maxRate":"1M"}}|} [domain "F"]);

@@ -61,13 +61,12 @@ module Make (C : Engine_ctx.S) = struct
       ~get_whole:R.get_chunk ~get_range:R.get_chunk_range ~cap:C.max_cache
 
   let keys =
-    lazy
-      (Entry_key.minter ~client:C.client_uuid
-         ~seen:
-           (List.filter_map Entry_key.parse (Dqueue.Records.list wal)
-           @ Applied.keys applied))
+    Entry_key.minter ~client:C.client_uuid
+      ~seen:
+        (List.filter_map Entry_key.parse (Dqueue.Records.list wal)
+        @ Applied.keys applied)
 
-  let mint () = Entry_key.to_string (Entry_key.mint (Lazy.force keys))
+  let mint () = Entry_key.to_string (Entry_key.mint keys)
 
   let uploads =
     Dqueue.create ~workers:(max 1 C.max_uploads) ~name:"uploads" ~ordered:false

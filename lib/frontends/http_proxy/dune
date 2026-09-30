@@ -1,3 +1,6 @@
+; linkall: the frontend registers itself when linked.
+
 (library
  (name tsync_http_proxy)
- (libraries tsync_core))
+ (library_flags (-linkall))
+ (libraries tsync_core tsync_config))

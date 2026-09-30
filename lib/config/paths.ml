@@ -10,30 +10,27 @@ let env_dir var default =
     | Some d when d <> "" && String.starts_with ~prefix:"/" d -> d
     | _ -> Filename.concat (home ()) default
 
-let macos =
-  lazy (try Sys.command "test \"$(uname -s)\" = Darwin" = 0 with _ -> false)
-
 let group () =
   Filename.concat (home ())
     "Library/Group Containers/group.org.feverdreamtv.tsync"
 
 let config_file () =
-  if Lazy.force macos then Filename.concat (group ()) "config.json"
+  if Fs.is_macos then Filename.concat (group ()) "config.json"
   else
     Filename.concat
       (Filename.concat (env_dir "XDG_CONFIG_HOME" ".config") "tsync")
       "config.json"
 
 let data_dir () =
-  if Lazy.force macos then Filename.concat (group ()) "tsync"
+  if Fs.is_macos then Filename.concat (group ()) "tsync"
   else Filename.concat (env_dir "XDG_DATA_HOME" ".local/share") "tsync"
 
 let cache_root () =
-  if Lazy.force macos then Filename.concat (data_dir ()) "cache"
+  if Fs.is_macos then Filename.concat (data_dir ()) "cache"
   else Filename.concat (env_dir "XDG_CACHE_HOME" ".cache") "tsync"
 
 let owner_socket domain =
-  if Lazy.force macos then Filename.concat (data_dir ()) "tsync.sock"
+  if Fs.is_macos then Filename.concat (data_dir ()) "tsync.sock"
   else
     Filename.concat (data_dir ())
       (Printf.sprintf "tsync-%s.sock" (Domain_name.to_string domain))

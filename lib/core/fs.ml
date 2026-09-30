@@ -16,7 +16,9 @@ external clone_ : string -> string -> unit = "tsync_clone"
 external is_network_fs_ : string -> bool = "tsync_is_network_fs"
 external pid_alive_ : int -> bool = "tsync_pid_alive"
 external open_nofollow_ : string -> Unix.file_descr = "tsync_open_nofollow"
+external is_macos_ : unit -> bool = "tsync_is_macos"
 
+let is_macos = is_macos_ ()
 let rec eintr f = try f () with Unix.Unix_error (Unix.EINTR, _, _) -> eintr f
 
 (* Every call is retried on EINTR and raises a classified failure. *)

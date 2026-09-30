@@ -7,7 +7,7 @@ let fail path fmt =
     (fun m -> raise (Invalid (if path = "" then m else path ^ ": " ^ m)))
     fmt
 
-type value =
+type value = Field_spec.value =
   | S of string
   | B of bool
   | I of int
@@ -218,16 +218,22 @@ let ffloat fields k =
     | Some (I i) -> Some (float_of_int i)
     | _ -> None
 
-let parse_backend (catalog : Field_spec.catalog) path j =
+let parse_backend path j =
   let l = assoc path j in
   let btype =
     required (sub path "type") "string" (string_field path l "type")
   in
-  let specs =
-    match List.assoc_opt btype catalog.backends with
-      | Some s -> s
-      | None -> fail (sub path "type") "unknown backend type %S" btype
+  let driver =
+    match Tsync_store.Driver.find btype with
+      | Some d -> d
+      | None ->
+          fail (sub path "type")
+            "backend type %S is unknown or not compiled into this build \
+             (built: %s)"
+            btype
+            (String.concat ", " (Tsync_store.Driver.names ()))
   in
+  let specs = driver.fields in
   check_keys path
     (["type"; "name"; "role"; "link"]
     @ List.map (fun (f : Field_spec.field) -> f.name) specs)
@@ -247,7 +253,7 @@ let parse_backend (catalog : Field_spec.catalog) path j =
                   "expected main, replica, backfill or readOnly")
   in
   let link = Option.map String.trim (string_field path l "link") in
-  let linkless = List.mem btype catalog.linkless in
+  let linkless = driver.linkless in
   (match link with
     | Some _ when linkless ->
         fail path "\"link\" names a link, and a %s store has none" btype
@@ -266,7 +272,7 @@ let parse_backend (catalog : Field_spec.catalog) path j =
   in
   b
 
-let parse_frontend (catalog : Field_spec.catalog) path j =
+let parse_frontend path j =
   let ftype, l =
     match j with
       | `String t -> (t, [])
@@ -275,9 +281,14 @@ let parse_frontend (catalog : Field_spec.catalog) path j =
       | _ -> fail path "expected a frontend type or object"
   in
   let specs =
-    match List.assoc_opt ftype catalog.frontends with
-      | Some s -> s
-      | None -> fail path "unknown frontend type %S" ftype
+    match Frontend.find ftype with
+      | Some f -> f.fields
+      | None ->
+          fail path
+            "frontend type %S is unknown or not compiled into this build \
+             (built: %s)"
+            ftype
+            (String.concat ", " (Frontend.names ()))
   in
   check_keys path
     ("type" :: List.map (fun (f : Field_spec.field) -> f.name) specs)
@@ -326,7 +337,7 @@ let link_of
     | _ -> ());
   v
 
-let parse_domain catalog path j =
+let parse_domain path j =
   let l = assoc path j in
   check_keys path
     [
@@ -349,7 +360,7 @@ let parse_domain catalog path j =
       | Some (`List bs) ->
           List.mapi
             (fun i b ->
-              parse_backend catalog (Printf.sprintf "%s.backends[%d]" path i) b)
+              parse_backend (Printf.sprintf "%s.backends[%d]" path i) b)
             bs
       | Some _ -> fail (sub path "backends") "expected an array"
       | None -> fail (sub path "backends") "required array is missing"
@@ -365,9 +376,7 @@ let parse_domain catalog path j =
       | Some (`List (_ :: _ as fs)) ->
           List.mapi
             (fun i f ->
-              parse_frontend catalog
-                (Printf.sprintf "%s.frontends[%d]" path i)
-                f)
+              parse_frontend (Printf.sprintf "%s.frontends[%d]" path i) f)
             fs
       | Some _ -> fail (sub path "frontends") "expected a non-empty array"
       | None -> fail (sub path "frontends") "required array is missing"
@@ -380,7 +389,10 @@ let parse_domain catalog path j =
     types;
   if
     List.length
-      (List.filter (fun t -> List.mem t catalog.Field_spec.presenting) types)
+      (List.filter
+         (fun t ->
+           match Frontend.find t with Some f -> f.presenting | None -> false)
+         types)
     > 1
   then
     fail (sub path "frontends")
@@ -445,7 +457,7 @@ let parse_domain catalog path j =
 
 let hostname () = try Unix.gethostname () with _ -> "tsync"
 
-let of_json ~catalog j =
+let of_json j =
   let l = assoc "" j in
   check_keys ""
     [
@@ -470,7 +482,7 @@ let of_json ~catalog j =
     match get l "domains" with
       | Some (`List ds) ->
           List.mapi
-            (fun i d -> parse_domain catalog (Printf.sprintf "domains[%d]" i) d)
+            (fun i d -> parse_domain (Printf.sprintf "domains[%d]" i) d)
             ds
       | Some _ -> fail "domains" "expected an array"
       | None -> fail "domains" "required array is missing"
@@ -525,9 +537,9 @@ let of_json ~catalog j =
     domains;
   }
 
-let of_string ~catalog s =
+let of_string s =
   match Yojson.Safe.from_string s with
-    | j -> of_json ~catalog j
+    | j -> of_json j
     | exception Yojson.Json_error e -> raise (Invalid ("not valid JSON: " ^ e))
 
 let link_settings t name =

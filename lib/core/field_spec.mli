@@ -25,15 +25,13 @@ val f :
   kind ->
   field
 
-(** Every type this build compiles, so a config naming another is refused when
-    parsed: backend fields, frontend options, the frontends that present a
-    domain to a user, and the backend types with no network link. *)
-type catalog = {
-  backends : (string * field list) list;
-  frontends : (string * field list) list;
-  presenting : string list;
-  linkless : string list;
-}
+(** A parsed field value. *)
+type value =
+  | S of string
+  | B of bool
+  | I of int
+  | F of float
+  | L of string list
 
 val is_loopback : string -> bool
 

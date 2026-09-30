@@ -19,6 +19,8 @@ short http-proxy secret                  refused: domains[0].frontends[0].secret
 plain http to a remote host              refused: domains[0].backends[0].url: plain http is refused for a host that is not a loopback address
 plain http to loopback                   ok: F ro=false backends=nas:main
 two presenting frontends                 refused: domains[0].frontends: at most one presenting frontend (fuse, file_provider, android) per domain
+backend type not built                   refused: domains[0].backends[0].type: backend type "ftp" is unknown or not compiled into this build (built: gcs, http-proxy, local, s3)
+frontend type not built                  refused: domains[0].frontends[0]: frontend type "webdav" is unknown or not compiled into this build (built: android, fuse, http-proxy)
 a frontend twice                         refused: domains[0].frontends: fuse is listed twice
 unused link                              refused: links.slow: no backend uses this link
 maxRate below minRate                    refused: uplink.maxRate: is below minRate

@@ -1,0 +1,6 @@
+; linkall: the driver registers itself when linked.
+
+(library
+ (name tsync_http_proxy_client)
+ (library_flags (-linkall))
+ (libraries tsync_core tsync_store))

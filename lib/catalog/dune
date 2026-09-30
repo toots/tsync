@@ -1,13 +1,24 @@
-; The catalog lists only what this build compiles: a config naming a frontend
-; that is not built is refused when it is parsed.
+; Links every driver and frontend this build has; each registers itself. The
+; select stubs are empty: they only make the optional libraries dependencies
+; when they are built.
 
 (library
  (name tsync_catalog)
  (libraries
-  tsync_core
   tsync_store
+  tsync_http_proxy_client
   tsync_http_proxy
   tsync_android
+  (select
+   catalog_gcs.ml
+   from
+   (tsync_gcs -> catalog_gcs.enabled.ml)
+   (-> catalog_gcs.disabled.ml))
+  (select
+   catalog_s3.ml
+   from
+   (tsync_s3 -> catalog_s3.enabled.ml)
+   (-> catalog_s3.disabled.ml))
   (select
    catalog_fuse.ml
    from

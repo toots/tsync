@@ -1,7 +1,8 @@
 ; Built only where the FUSE binding is installed; the Linux release build
-; requires it.
+; requires it. linkall: the frontend registers itself when linked.
 
 (library
  (name tsync_fuse)
  (optional)
- (libraries tsync_core fuse3))
+ (library_flags (-linkall))
+ (libraries tsync_core tsync_config fuse3))

@@ -334,3 +334,20 @@ let create ?(verify_writes = true)
       health;
       traffic = None;
     }
+
+let () =
+  Driver.register "local"
+    {
+      fields;
+      linkless = true;
+      create =
+        (fun ~name fields ->
+          let verify_writes =
+            match List.assoc_opt "verifyWrites" fields with
+              | Some (Field_spec.B b) -> b
+              | _ -> true
+          in
+          match List.assoc_opt "path" fields with
+            | Some (Field_spec.S root) -> create ~verify_writes ~name root
+            | _ -> Fail.raise_ Fail.Invalid "backend %s: no path" name);
+    }

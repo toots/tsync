@@ -211,6 +211,8 @@ CAMLprim value tsync_is_network_fs(value path) {
   }
 }
 
+CAMLprim value tsync_is_macos(value unit) { return Val_false; }
+
 #elif defined(__APPLE__)
 
 #include <sys/clonefile.h>
@@ -274,5 +276,7 @@ CAMLprim value tsync_is_network_fs(value path) {
   if (statfs(String_val(path), &s) < 0) uerror("statfs", path);
   CAMLreturn(Val_bool(!(s.f_flags & MNT_LOCAL)));
 }
+
+CAMLprim value tsync_is_macos(value unit) { return Val_true; }
 
 #endif

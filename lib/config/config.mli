@@ -6,7 +6,7 @@ open Tsync_core
 
 exception Invalid of string
 
-type value =
+type value = Field_spec.value =
   | S of string
   | B of bool
   | I of int
@@ -55,11 +55,11 @@ type t = {
   domains : domain list;
 }
 
-(** Raises {!Invalid}. [catalog] lists every backend and frontend type with its
-    fields. *)
-val of_string : catalog:Field_spec.catalog -> string -> t
+(** Raises {!Invalid}, also for a backend or frontend type no linked library
+    registered ({!Tsync_store.Driver}, {!Frontend}). *)
+val of_string : string -> t
 
-val of_json : catalog:Field_spec.catalog -> Yojson.Safe.t -> t
+val of_json : Yojson.Safe.t -> t
 
 (** [512K], [8M], [1.5 GiB], [1048576]. *)
 val parse_size : string -> int option
