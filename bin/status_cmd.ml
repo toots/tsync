@@ -6,17 +6,8 @@ open Cli
 module R = Tsync_status.Status_report
 
 let answer socket domain =
-  match
-    Ipc.call socket
-      (`Assoc
-         ([("action", `String "stats"); ("arg", `String "frontend")]
-         @ Option.fold ~none:[] ~some:(fun d -> [("domain", `String d)]) domain
-         ))
-  with
-    | `Assoc l as reply when List.assoc_opt "ok" l = Some (`Bool true) ->
-        R.answer_of_yojson reply
-    | reply ->
-        Error (Option.value ~default:"no answer" (Ipc.field reply "error"))
+  match Tsync_owner.Protocol.call ?domain socket (Stats ["frontend"]) with
+    | a -> Ok a
     | exception e -> Error (Fail.classify e).reason
 
 let process ~role ~serves = function

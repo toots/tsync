@@ -792,28 +792,26 @@ let owner_poke (d : Domain_name.t) () =
 
 let control t stop req =
   let reply =
-    match Tsync_ipc.Ipc.field req "action" with
-      | Some "ping" -> Tsync_ipc.Ipc.ok []
-      | Some "stop" ->
-          stop ();
-          Tsync_ipc.Ipc.ok []
-      | Some ("stats" | "status") -> (
-          Tsync_status.Status_report.answer_to_yojson
-            {
-              domains = [];
-              self =
-                Tsync_status.Self_report.self ~role:"store-server"
-                  ~serves:(List.map (fun r -> r.name) t.routes)
-                  ();
-            }
-          |> function
-          | `Assoc l -> Tsync_ipc.Ipc.ok l
-          | j -> j)
-      | Some a ->
-          Tsync_ipc.Ipc.failure
-            (Fail.make Fail.Invalid ("unknown action: " ^ a))
-      | None ->
-          Tsync_ipc.Ipc.failure (Fail.make Fail.Invalid "unknown action: ")
+    let module P = Tsync_owner.Protocol in
+    let answer : type a. a P.request -> a = function
+      | Ping -> ()
+      | Stop -> (stop () : unit)
+      | Stats _ ->
+          {
+            domains = [];
+            self =
+              Tsync_status.Self_report.self ~role:"store-server"
+                ~serves:(List.map (fun r -> r.name) t.routes)
+                ();
+          }
+      | r -> Fail.invalid "%s is answered by a domain's owner" (P.action r)
+    in
+    match P.decode req with
+      | Request r -> (
+          match answer r with
+            | reply -> P.encode_reply r reply
+            | exception e -> Tsync_ipc.Ipc.failure (Fail.classify e))
+      | exception e -> Tsync_ipc.Ipc.failure (Fail.classify e)
   in
   Tsync_ipc.Ipc.Reply reply
 

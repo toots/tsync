@@ -1,5 +1,6 @@
 (executable
  (name owner_test)
+ (modules owner_test)
  (libraries
   tsync_core
   tsync_config
@@ -18,3 +19,18 @@
  (alias runtest)
  (action
   (diff owner_test.expected owner_test.output)))
+
+(executable
+ (name protocol_test)
+ (modules protocol_test)
+ (libraries tsync_core tsync_owner yojson))
+
+(rule
+ (with-stdout-to
+  protocol_test.output
+  (run ./protocol_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff protocol_test.expected protocol_test.output)))

@@ -1,0 +1,515 @@
+open Tsync_core
+module R = Tsync_status.Status_report
+
+type target = Ref of string | Rel of string
+type availability = Online_only | Cached | Pinned of float
+
+type row = {
+  ref_ : string;
+  parent_ref : string;
+  name : string;
+  kind : [ `Dir | `File | `Symlink ];
+  size : int;
+  mtime : float;
+  etag : string;
+  is_uploaded : bool;
+  content_id : string option;
+  symlink_target : string option;
+  availability : availability option;
+}
+
+type page = { items : row list; next : string option; unnamed : int }
+type destination = { parent_ref : string; name : string }
+type written = { size : int; mtime : float; item : row }
+type fetched = { local_path : string; offset : int; length : int }
+type counted = { succeeded : int; failed : int }
+type progress = Inactive | Active of { downloaded : int; total : int }
+type resynced = Incremental of int | Full of { manifests : int; failed : int }
+
+type status = {
+  domain : string;
+  read_only : bool;
+  paused : bool;
+  pending_uploads : int;
+  mount : string option;
+}
+
+type _ request =
+  | Ping : unit request
+  | Stat : target -> row request
+  | List_dir : {
+      dir : target;
+      after : string option;
+      limit : int option;
+    }
+      -> page request
+  | Cursor : string request
+  | Ensure_cached : { item : target; dest : string } -> string request
+  | Fetch_range : {
+      item : target;
+      dest : string;
+      offset : int;
+      length : int;
+    }
+      -> fetched request
+  | Download_progress : target -> progress request
+  | Create : { at : destination; exclusive : bool } -> row request
+  | Write : {
+      at : destination;
+      staging : string;
+      base : string option;
+      exclusive : bool;
+    }
+      -> written request
+  | Mkdir : { at : destination; exclusive : bool } -> row request
+  | Symlink : {
+      at : destination;
+      link_target : string;
+      exclusive : bool;
+    }
+      -> row request
+  | Rename : { src : string; at : destination; noreplace : bool } -> row request
+  | Delete : target -> unit request
+  | Rmdir : target -> unit request
+  | Evict : target -> counted request
+  | Restore : { item : target; keep : float option } -> counted request
+  | Full_resync : unit request
+  | Sync : { full : bool } -> resynced request
+  | Retry : int request
+  | Poll : unit request
+  | Notify_reset : int request
+  | Status : status request
+  | Pause : bool -> bool request
+  | Stats : string list -> R.answer request
+  | Stop : unit request
+
+type packed = Request : 'a request -> packed
+
+let action : type a. a request -> string = function
+  | Ping -> "ping"
+  | Stat _ -> "stat"
+  | List_dir _ -> "list_dir"
+  | Cursor -> "cursor"
+  | Ensure_cached _ -> "ensure_cached"
+  | Fetch_range _ -> "fetch_range"
+  | Download_progress _ -> "download_progress"
+  | Create _ -> "create"
+  | Write _ -> "write"
+  | Mkdir _ -> "mkdir"
+  | Symlink _ -> "symlink"
+  | Rename _ -> "rename"
+  | Delete _ -> "delete"
+  | Rmdir _ -> "rmdir"
+  | Evict _ -> "evict"
+  | Restore _ -> "restore"
+  | Full_resync -> "full_resync"
+  | Sync _ -> "sync"
+  | Retry -> "retry"
+  | Poll -> "poll"
+  | Notify_reset -> "notify_reset"
+  | Status -> "status"
+  | Pause _ -> "pause"
+  | Stats _ -> "stats"
+  | Stop -> "stop"
+
+let mutates : type a. a request -> bool = function
+  | Create _ | Write _ | Mkdir _ | Symlink _ | Rename _ | Delete _ | Rmdir _ ->
+      true
+  | _ -> false
+
+let bulk : type a. a request -> bool = function
+  | Ensure_cached _ | Fetch_range _ | Evict _ | Restore _ | Sync _ -> true
+  | _ -> false
+
+let refused_while_paused : type a. a request -> bool = function
+  | Sync _ -> true
+  | _ -> false
+
+type event = Recovered | Reset
+
+let event_name = function Recovered -> "recovered" | Reset -> "reset"
+
+(* Field access on the owner side: a wrong type is INVALID, never a crash. *)
+let member j k = match j with `Assoc l -> List.assoc_opt k l | _ -> None
+
+let str j k =
+  match member j k with
+    | Some (`String s) -> Some s
+    | None | Some `Null -> None
+    | Some _ -> Fail.invalid "%s must be a string" k
+
+let required j k =
+  match str j k with Some s -> s | None -> Fail.invalid "%s is required" k
+
+let flag j k =
+  match member j k with
+    | Some (`Bool b) -> b
+    | None | Some `Null -> false
+    | Some _ -> Fail.invalid "%s must be a boolean" k
+
+let int j k =
+  match member j k with
+    | Some (`Int i) -> Some i
+    | None | Some `Null -> None
+    | Some _ -> Fail.invalid "%s must be an integer" k
+
+let number j k =
+  match member j k with
+    | Some (`Int i) -> Some (float_of_int i)
+    | Some (`Float f) -> Some f
+    | None | Some `Null -> None
+    | Some _ -> Fail.invalid "%s must be a number" k
+
+let opt k f = function Some v -> [(k, f v)] | None -> []
+
+let target_fields = function
+  | Ref r -> [("ref", `String r)]
+  | Rel p -> [("rel", `String p)]
+
+let target_of j =
+  match (str j "ref", str j "rel") with
+    | Some r, _ -> Ref r
+    | None, Some p -> Rel p
+    | None, None -> Fail.invalid "ref or rel is required"
+
+let destination_fields (d : destination) =
+  [("parentRef", `String d.parent_ref); ("name", `String d.name)]
+
+let destination_of j =
+  { parent_ref = required j "parentRef"; name = required j "name" }
+
+let request_fields : type a. a request -> (string * Yojson.Safe.t) list =
+  function
+  | Ping | Cursor | Full_resync | Retry | Poll | Notify_reset | Status | Stop ->
+      []
+  | Stat t | Download_progress t | Delete t | Rmdir t | Evict t ->
+      target_fields t
+  | List_dir r ->
+      target_fields r.dir
+      @ opt "after" (fun a -> `String a) r.after
+      @ opt "limit" (fun l -> `Int l) r.limit
+  | Ensure_cached r -> target_fields r.item @ [("dest", `String r.dest)]
+  | Fetch_range r ->
+      target_fields r.item
+      @ [
+          ("dest", `String r.dest);
+          ("offset", `Int r.offset);
+          ("length", `Int r.length);
+        ]
+  | Create r -> destination_fields r.at @ [("exclusive", `Bool r.exclusive)]
+  | Write r ->
+      destination_fields r.at
+      @ [("staging", `String r.staging); ("exclusive", `Bool r.exclusive)]
+      @ opt "base" (fun b -> `String b) r.base
+  | Mkdir r -> destination_fields r.at @ [("exclusive", `Bool r.exclusive)]
+  | Symlink r ->
+      destination_fields r.at
+      @ [("target", `String r.link_target); ("exclusive", `Bool r.exclusive)]
+  | Rename r ->
+      (("ref", `String r.src) :: destination_fields r.at)
+      @ [("noreplace", `Bool r.noreplace)]
+  | Restore r -> target_fields r.item @ opt "keep" (fun k -> `Float k) r.keep
+  | Sync r -> [("arg", `String (if r.full then "full" else ""))]
+  | Pause on -> [("arg", `String (if on then "on" else "off"))]
+  | Stats args -> [("arg", `String (String.concat "," args))]
+
+let encode ?domain r =
+  `Assoc
+    ((("action", `String (action r)) :: opt "domain" (fun d -> `String d) domain)
+    @ request_fields r)
+
+let decode j =
+  match required j "action" with
+    | "ping" -> Request Ping
+    | "stat" -> Request (Stat (target_of j))
+    | "list_dir" ->
+        Request
+          (List_dir
+             { dir = target_of j; after = str j "after"; limit = int j "limit" })
+    | "cursor" -> Request Cursor
+    | "ensure_cached" ->
+        Request (Ensure_cached { item = target_of j; dest = required j "dest" })
+    | "fetch_range" ->
+        Request
+          (Fetch_range
+             {
+               item = target_of j;
+               dest = required j "dest";
+               offset = Option.value ~default:(-1) (int j "offset");
+               length = Option.value ~default:0 (int j "length");
+             })
+    | "download_progress" -> Request (Download_progress (target_of j))
+    | "create" ->
+        Request
+          (Create { at = destination_of j; exclusive = flag j "exclusive" })
+    | "write" ->
+        Request
+          (Write
+             {
+               at = destination_of j;
+               staging = required j "staging";
+               base = str j "base";
+               exclusive = flag j "exclusive";
+             })
+    | "mkdir" ->
+        Request
+          (Mkdir { at = destination_of j; exclusive = flag j "exclusive" })
+    | "symlink" ->
+        Request
+          (Symlink
+             {
+               at = destination_of j;
+               link_target = required j "target";
+               exclusive = flag j "exclusive";
+             })
+    | "rename" ->
+        Request
+          (Rename
+             {
+               src = required j "ref";
+               at = destination_of j;
+               noreplace = flag j "noreplace" || flag j "exclusive";
+             })
+    | "delete" -> Request (Delete (target_of j))
+    | "rmdir" -> Request (Rmdir (target_of j))
+    | "evict" -> Request (Evict (target_of j))
+    | "restore" ->
+        Request (Restore { item = target_of j; keep = number j "keep" })
+    | "full_resync" -> Request Full_resync
+    | "sync" -> Request (Sync { full = str j "arg" = Some "full" })
+    | "retry" -> Request Retry
+    | "poll" -> Request Poll
+    | "notify_reset" -> Request Notify_reset
+    | "status" -> Request Status
+    | "pause" -> Request (Pause (str j "arg" <> Some "off"))
+    | "stats" ->
+        Request
+          (Stats
+             (List.filter (( <> ) "")
+                (String.split_on_char ','
+                   (Option.value ~default:"" (str j "arg")))))
+    | "stop" -> Request Stop
+    | a -> Fail.invalid "unknown action: %s" a
+
+let kind_name = function
+  | `Dir -> "dir"
+  | `File -> "file"
+  | `Symlink -> "symlink"
+
+let row_fields r =
+  [
+    ("ref", `String r.ref_);
+    ("parentRef", `String r.parent_ref);
+    ("name", `String r.name);
+    ("kind", `String (kind_name r.kind));
+    ("size", `Int r.size);
+    ("mtime", `Float r.mtime);
+    ("etag", `String r.etag);
+    ("isUploaded", `Bool r.is_uploaded);
+  ]
+  @ opt "contentId" (fun c -> `String c) r.content_id
+  @ opt "symlinkTarget" (fun t -> `String t) r.symlink_target
+  @
+    match r.availability with
+    | None -> []
+    | Some Online_only -> [("availability", `String "online-only")]
+    | Some Cached -> [("availability", `String "cached")]
+    | Some (Pinned until) ->
+        [("availability", `String "pinned"); ("pinnedUntil", `Float until)]
+
+let row_of_fields j =
+  {
+    ref_ = required j "ref";
+    parent_ref = required j "parentRef";
+    name = required j "name";
+    kind =
+      (match str j "kind" with
+        | Some "dir" -> `Dir
+        | Some "symlink" -> `Symlink
+        | _ -> `File);
+    size = Option.value ~default:0 (int j "size");
+    mtime = Option.value ~default:0. (number j "mtime");
+    etag = Option.value ~default:"" (str j "etag");
+    is_uploaded = flag j "isUploaded";
+    content_id = str j "contentId";
+    symlink_target = str j "symlinkTarget";
+    availability =
+      (match str j "availability" with
+        | Some "online-only" -> Some Online_only
+        | Some "cached" -> Some Cached
+        | Some "pinned" ->
+            Some (Pinned (Option.value ~default:0. (number j "pinnedUntil")))
+        | _ -> None);
+  }
+
+let ok fields = `Assoc (("ok", `Bool true) :: fields)
+let item r = [("item", `Assoc (row_fields r))]
+
+let encode_reply : type a. a request -> a -> Yojson.Safe.t =
+ fun req reply ->
+  match req with
+    | Ping | Full_resync | Poll | Stop | Delete _ | Rmdir _ -> ok []
+    | Stat _ -> ok (row_fields reply)
+    | Create _ -> ok (item reply)
+    | Mkdir _ -> ok (item reply)
+    | Symlink _ -> ok (item reply)
+    | Rename _ -> ok (item reply)
+    | List_dir _ ->
+        ok
+          ([
+             ( "items",
+               `List (List.map (fun r -> `Assoc (row_fields r)) reply.items) );
+           ]
+          @ opt "next" (fun n -> `String n) reply.next
+          @ if reply.unnamed > 0 then [("unnamed", `Int reply.unnamed)] else []
+          )
+    | Cursor -> ok [("cursor", `String reply)]
+    | Ensure_cached _ -> ok [("localPath", `String reply)]
+    | Fetch_range _ ->
+        ok
+          [
+            ("localPath", `String reply.local_path);
+            ("offset", `Int reply.offset);
+            ("length", `Int reply.length);
+          ]
+    | Download_progress _ -> (
+        match reply with
+          | Inactive -> ok [("active", `Bool false)]
+          | Active a ->
+              ok
+                [
+                  ("active", `Bool true);
+                  ("bytesDownloaded", `Int a.downloaded);
+                  ("totalBytes", `Int a.total);
+                ])
+    | Write _ ->
+        ok
+          ([("size", `Int reply.size); ("mtime", `Float reply.mtime)]
+          @ item reply.item)
+    | Evict _ ->
+        ok [("evicted", `Int reply.succeeded); ("failed", `Int reply.failed)]
+    | Restore _ ->
+        ok [("restored", `Int reply.succeeded); ("failed", `Int reply.failed)]
+    | Sync _ -> (
+        match reply with
+          | Incremental n ->
+              ok [("mode", `String "incremental"); ("applied", `Int n)]
+          | Full f ->
+              ok
+                [
+                  ("mode", `String "full");
+                  ("manifests", `Int f.manifests);
+                  ("failed", `Int f.failed);
+                ])
+    | Retry -> ok [("readopted", `Int reply)]
+    | Notify_reset -> ok [("delivered", `Int reply)]
+    | Status ->
+        ok
+          ([
+             ("domain", `String reply.domain);
+             ("running", `Bool true);
+             ("readOnly", `Bool reply.read_only);
+             ("paused", `Bool reply.paused);
+             ("pendingUploads", `Int reply.pending_uploads);
+             ("pendingDownloads", `Int 0);
+             ("uploading", `List []);
+             ("downloading", `List []);
+           ]
+          @ opt "mount" (fun m -> `String m) reply.mount)
+    | Pause _ -> ok [("paused", `Bool reply)]
+    | Stats _ -> (
+        match R.answer_to_yojson reply with `Assoc l -> ok l | j -> j)
+
+let failure_of_reply j =
+  match member j "ok" with
+    | Some (`Bool true) -> None
+    | _ ->
+        let text k =
+          match member j k with Some (`String s) -> Some s | _ -> None
+        in
+        Some
+          (Fail.make
+             (Fail.kind_of_code
+                (Option.value ~default:"internal" (text "code")))
+             (Option.value ~default:"failed" (text "error")))
+
+let count k j = Option.value ~default:0 (int j k)
+
+let decode_reply : type a. a request -> Yojson.Safe.t -> a =
+ fun req j ->
+  Option.iter (fun f -> raise (Fail.E f)) (failure_of_reply j);
+  let item () =
+    match member j "item" with
+      | Some i -> row_of_fields i
+      | None -> Fail.invalid "the reply has no item"
+  in
+  match req with
+    | Ping -> ()
+    | Full_resync -> ()
+    | Poll -> ()
+    | Stop -> ()
+    | Delete _ -> ()
+    | Rmdir _ -> ()
+    | Stat _ -> row_of_fields j
+    | Create _ -> item ()
+    | Mkdir _ -> item ()
+    | Symlink _ -> item ()
+    | Rename _ -> item ()
+    | List_dir _ ->
+        {
+          items =
+            (match member j "items" with
+              | Some (`List l) -> List.map row_of_fields l
+              | _ -> []);
+          next = str j "next";
+          unnamed = count "unnamed" j;
+        }
+    | Cursor -> required j "cursor"
+    | Ensure_cached _ -> required j "localPath"
+    | Fetch_range _ ->
+        {
+          local_path = required j "localPath";
+          offset = count "offset" j;
+          length = count "length" j;
+        }
+    | Download_progress _ ->
+        if flag j "active" then
+          Active
+            {
+              downloaded = count "bytesDownloaded" j;
+              total = count "totalBytes" j;
+            }
+        else Inactive
+    | Write _ ->
+        {
+          size = count "size" j;
+          mtime = Option.value ~default:0. (number j "mtime");
+          item = item ();
+        }
+    | Evict _ -> { succeeded = count "evicted" j; failed = count "failed" j }
+    | Restore _ -> { succeeded = count "restored" j; failed = count "failed" j }
+    | Sync _ ->
+        if str j "mode" = Some "full" then
+          Full { manifests = count "manifests" j; failed = count "failed" j }
+        else Incremental (count "applied" j)
+    | Retry -> count "readopted" j
+    | Notify_reset -> count "delivered" j
+    | Status ->
+        {
+          domain = Option.value ~default:"" (str j "domain");
+          read_only = flag j "readOnly";
+          paused = flag j "paused";
+          pending_uploads = count "pendingUploads" j;
+          mount = str j "mount";
+        }
+    | Pause _ -> flag j "paused"
+    | Stats _ -> (
+        match R.answer_of_yojson j with
+          | Ok a -> a
+          | Error e -> Fail.invalid "unreadable stats: %s" e)
+
+let call ?(bulk = false) ?timeout ?domain socket req =
+  let json = encode ?domain req in
+  decode_reply req
+    (if bulk then Tsync_ipc.Ipc.call_bulk socket json
+     else Tsync_ipc.Ipc.call ?timeout socket json)

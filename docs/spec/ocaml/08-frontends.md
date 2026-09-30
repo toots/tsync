@@ -126,3 +126,4 @@ end
 and evict availability), `tests/unit/item_ref`, `tests/unit/menu`, `tests/frontends/presenting_domain`,
 `tests/frontends/stop_publishes_cursor`. Not covered: transfer-path refusal, `noreplace`, subtree
 evict/restore on every frontend, codes on router errors.
+- **The request protocol is a GADT** (`Protocol`, `'a request` whose parameter is the reply's type): `Handler.call : t -> 'a request -> 'a` serves in-process callers and the one-shot fallback with no JSON at all, `Protocol.call` serves socket clients typed both ways, and `Handler.answer` is the only place a request is decoded. The codec is hand-written to keep §3.3's wire exactly; a round-trip test covers every constructor, and the socket-level owner test covers the wire itself.

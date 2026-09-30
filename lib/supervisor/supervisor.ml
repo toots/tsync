@@ -202,19 +202,11 @@ let ask_stats arg r =
     (fun d ->
       ( d,
         match
-          Ipc.call ~timeout:Ipc.request_deadline r.child.socket
-            (`Assoc
-               [
-                 ("action", `String "stats");
-                 ("domain", `String d);
-                 ("arg", `String (String.concat "," ("frontend" :: arg)));
-               ])
+          Tsync_owner.Protocol.call ~timeout:Ipc.request_deadline ~domain:d
+            r.child.socket
+            (Stats ("frontend" :: arg))
         with
-          | `Assoc l as reply when List.assoc_opt "ok" l = Some (`Bool true) ->
-              R.answer_of_yojson reply
-          | reply ->
-              Error
-                (Option.value ~default:"no answer" (Ipc.field reply "error"))
+          | answer -> Ok answer
           | exception e -> Error (Fail.classify e).reason ))
     (match r.child.domains with [] -> [""] | ds -> ds)
 

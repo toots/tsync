@@ -60,16 +60,6 @@ let run body =
           ^ Option.fold ~none:"" ~some:(fun r -> " (" ^ r ^ ")") f.repair);
         if f.kind = Fail.Unexplained then 125 else 1
 
-let checked reply =
-  match reply with
-    | `Assoc l when List.assoc_opt "ok" l = Some (`Bool true) -> reply
-    | _ ->
-        let code = Option.value ~default:"internal" (Ipc.field reply "code") in
-        raise
-          (Fail.E
-             (Fail.make (Fail.kind_of_code code)
-                (Option.value ~default:"failed" (Ipc.field reply "error"))))
-
 (* security §9: [--tls] wins over the config's [tls]; OpenSSL otherwise. *)
 let use_tls (config : Config.t) tls =
   match Option.fold ~none:config.tls ~some:Option.some tls with
@@ -79,11 +69,6 @@ let use_tls (config : Config.t) tls =
           | Some impl -> Atomic.set Tsync_http.Transport.tls_impl impl
           | None ->
               fail "unknown TLS implementation %S (native or openssl)" name)
-
-let int_field j k =
-  match j with
-    | `Assoc l -> ( match List.assoc_opt k l with Some (`Int i) -> i | _ -> 0)
-    | _ -> 0
 
 let verbose =
   Arg.(value & flag & info ["v"; "verbose"] ~doc:"Log at info level.")

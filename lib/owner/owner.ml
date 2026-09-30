@@ -127,18 +127,14 @@ let route ~draining served req =
 
 (* 07 §5.5: a domain's body, and this process's description of itself with
    the traffic of every domain it serves. *)
-let stats_reply reports report =
-  Tsync_status.Status_report.answer_to_yojson
-    {
-      domains = [Answered (Report.domain_body report)];
-      self =
-        Tsync_status.Self_report.self
-          ~traffic:(Report.traffic (List.map snd reports))
-          ~role:"owner" ~serves:(List.map fst reports) ();
-    }
-  |> function
-  | `Assoc l -> Ipc.ok l
-  | j -> j
+let stats_reply reports report : Tsync_status.Status_report.answer =
+  {
+    domains = [Answered (Report.domain_body report)];
+    self =
+      Tsync_status.Self_report.self
+        ~traffic:(Report.traffic (List.map snd reports))
+        ~role:"owner" ~serves:(List.map fst reports) ();
+  }
 
 let housekeeping (module E : Tsync_sync.Engine.S) =
   try
@@ -187,11 +183,7 @@ let serve ?present ~socket config domains =
       domains;
   server := Some (Ipc.serve ~path:socket (route ~draining !served));
   List.iter
-    (fun s ->
-      ignore
-        (publish
-           (Domain_name.to_string s.domain.name)
-           (Handler.event s.handler "recovered" [])))
+    (fun s -> ignore (Handler.publish_event s.handler Recovered))
     !served;
   List.iter (fun s -> s.go ()) !served;
   Stop.wait ();
@@ -263,20 +255,15 @@ let one_shot ~what config (dom : Config.domain) f =
             Fun.protect ~finally:(fun () -> E.drain ()) (fun () -> f handler))
 
 let request ?(bulk = false) ~what config (dom : Config.domain) req =
-  let req =
-    match req with
-      | `Assoc l ->
-          `Assoc (("domain", `String (Domain_name.to_string dom.name)) :: l)
-      | j -> j
-  in
-  let socket = Paths.owner_socket dom.name in
-  match if bulk then Ipc.call_bulk socket req else Ipc.call socket req with
+  match
+    Protocol.call ~bulk
+      ~domain:(Domain_name.to_string dom.name)
+      (Paths.owner_socket dom.name)
+      req
+  with
     | reply -> reply
     | exception Ipc.Not_serving _ ->
-        one_shot ~what config dom (fun h ->
-            match Handler.answer h req with
-              | Ipc.Reply r -> r
-              | Ipc.Subscribe _ -> Fail.invalid "a subscription needs an owner")
+        one_shot ~what config dom (fun h -> Handler.call h req)
 
 type host =
   mount:string option ->

@@ -67,8 +67,8 @@ val request :
   what:string ->
   Tsync_config.Config.t ->
   Tsync_config.Config.domain ->
-  Tsync_ipc.Ipc.json ->
-  Tsync_ipc.Ipc.json
+  'a Protocol.request ->
+  'a
 
 (** How a presenting frontend hosts its owner (07 §3.7): given [run], which runs
     the owner with a presentation and answers its exit status, it answers the

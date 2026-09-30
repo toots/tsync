@@ -118,7 +118,7 @@ let stop verbose =
   set_verbose verbose;
   run (fun () ->
       let ask socket =
-        match Ipc.call socket (`Assoc [("action", `String "stop")]) with
+        match Protocol.call socket Stop with
           | _ -> `Asked socket
           | exception Ipc.Not_serving _ -> `Absent
           | exception Fail.E { kind = Deadline; _ } ->

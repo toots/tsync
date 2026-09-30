@@ -1,13 +1,13 @@
 open Cmdliner
 open Tsync_core
-open Tsync_ipc
 open Tsync_owner
+open Protocol
 open Cli
 
 let owner_request ?bulk ~what name req =
   let config = config () in
   let d = domain ?name config in
-  (d, checked (Owner.request ?bulk ~what config d req))
+  (d, Owner.request ?bulk ~what config d req)
 
 let pause on name verbose =
   set_verbose verbose;
@@ -15,12 +15,7 @@ let pause on name verbose =
       let d, _ =
         owner_request
           ~what:(if on then "tsync pause" else "tsync resume")
-          name
-          (`Assoc
-             [
-               ("action", `String "pause");
-               ("arg", `String (if on then "on" else "off"));
-             ])
+          name (Pause on)
       in
       say "%s %s."
         (if on then "Paused" else "Resumed")
@@ -40,20 +35,15 @@ let sync full name verbose =
         owner_request ~bulk:true
           ~what:(if full then "tsync sync --full" else "tsync sync")
           name
-          (`Assoc
-             [
-               ("action", `String "sync");
-               ("arg", `String (if full then "full" else ""));
-             ])
+          (Sync { full })
       in
-      match Ipc.field r "mode" with
-        | Some "full" ->
-            let failed = int_field r "failed" in
-            say "full resync: %d manifests%s" (int_field r "manifests")
+      match r with
+        | Full { manifests; failed } ->
+            say "full resync: %d manifests%s" manifests
               (if failed > 0 then Printf.sprintf " (%d failed)" failed else "");
             if failed > 0 then 1 else 0
-        | _ ->
-            say "%d journal entries from other clients" (int_field r "applied");
+        | Incremental applied ->
+            say "%d journal entries from other clients" applied;
             0)
 
 let sync_cmd =
@@ -66,11 +56,8 @@ let sync_cmd =
 let retry name verbose =
   set_verbose verbose;
   run (fun () ->
-      let _, r =
-        owner_request ~what:"tsync retry" name
-          (`Assoc [("action", `String "retry")])
-      in
-      say "%d parked records re-adopted" (int_field r "readopted");
+      let _, r = owner_request ~what:"tsync retry" name Retry in
+      say "%d parked records re-adopted" r;
       0)
 
 let retry_cmd =

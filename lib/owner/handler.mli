@@ -25,14 +25,19 @@ val create :
   engine:(module Tsync_sync.Engine.S) ->
   hooks:hooks ->
   publish:(Ipc.json -> int) ->
-  stats:(string list -> Ipc.json) ->
+  stats:(string list -> Tsync_status.Status_report.answer) ->
   stop:(unit -> unit) ->
   dest_roots:string list ->
   staging_roots:string list ->
   t
 
-(** An event line, [id] increasing within the process (08 §3.8). *)
-val event : t -> string -> (string * Ipc.json) list -> Ipc.json
+(** Publishes an event to the domain's subscribers, [id] increasing within the
+    process (08 §3.8); how many received it. *)
+val publish_event : t -> Protocol.event -> int
 
-(** Answers a request; a failure is a coded reply, never an exception. *)
+(** In-process: the rules of 08 §3.5, then the request; a failure raises. *)
+val call : t -> 'a Protocol.request -> 'a
+
+(** The socket edge: decodes a request, answers it, and encodes the reply or the
+    failure's code; also turns [subscribe] into an event stream. *)
 val answer : t -> Ipc.json -> Ipc.answer
