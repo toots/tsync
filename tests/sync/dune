@@ -1,0 +1,14 @@
+(executable
+ (name formats_test)
+ (modules formats_test)
+ (libraries tsync_core tsync_remote tsync_checkout tsync_sync yojson unix))
+
+(rule
+ (with-stdout-to
+  formats_test.output
+  (run ./formats_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff formats_test.expected formats_test.output)))

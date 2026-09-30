@@ -1,0 +1,3 @@
+(library
+ (name tsync_checkout)
+ (libraries tsync_core tsync_store tsync_remote unix yojson base64))

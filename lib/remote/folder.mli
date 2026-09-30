@@ -18,7 +18,8 @@ val anchor_body : anchor -> string
 
 (** A marker (with the trash entry's path, if any), a marker whose id is not a
     folder id, or not a marker at all. *)
-val classify_marker : string -> [`Marker of marker * string option | `Unclassifiable | `Not_marker]
+val classify_marker :
+  string -> [ `Marker of marker * string option | `Unclassifiable | `Not_marker ]
 
 (** [None] unless both fields are strings and the parent is a folder id. *)
 val decode_anchor : string -> anchor option

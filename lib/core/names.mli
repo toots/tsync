@@ -1,5 +1,7 @@
 (** The grammar of every name and key (spec 01 §2), and item references. *)
 
+val is_hexlower : char -> bool
+
 (** {1 Store keys and prefixes (§2.1)} *)
 
 val valid_key : string -> bool
@@ -78,6 +80,9 @@ val storable : string -> bool
 val escape : string -> string
 
 val escape_path : string -> string
+
+(** [.tsync-esc-]. *)
+val escape_prefix : string
 
 (** A leaf a mirror listing skips: [.tsync-] and not an escape handle. *)
 val is_internal_local : string -> bool

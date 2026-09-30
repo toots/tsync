@@ -34,9 +34,15 @@ val is_link : t -> bool
 (** The whole-file digest of a chunk list: [(h1, h2)]. *)
 val digest_of : size:int -> cs:int -> Chunk_key.t list -> string * string
 
-(** A regular file's manifest; [keys] has [max 1 ⌈size / chunk_size⌉]
-    entries. *)
-val make : name:string -> size:int -> mtime:float -> chunk_size:int -> Chunk_key.t list -> t
+(** A regular file's manifest; [keys] has [max 1 ⌈size / chunk_size⌉] entries.
+*)
+val make :
+  name:string ->
+  size:int ->
+  mtime:float ->
+  chunk_size:int ->
+  Chunk_key.t list ->
+  t
 
 val symlink : name:string -> mtime:float -> string -> t
 

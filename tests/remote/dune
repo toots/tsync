@@ -4,11 +4,14 @@
  (libraries tsync_core tsync_remote))
 
 (rule
- (with-stdout-to codec_test.output (run ./codec_test.exe)))
+ (with-stdout-to
+  codec_test.output
+  (run ./codec_test.exe)))
 
 (rule
  (alias runtest)
- (action (diff codec_test.expected codec_test.output)))
+ (action
+  (diff codec_test.expected codec_test.output)))
 
 (executable
  (name remote_test)
@@ -16,8 +19,11 @@
  (libraries tsync_core tsync_store tsync_remote unix))
 
 (rule
- (with-stdout-to remote_test.output (run ./remote_test.exe)))
+ (with-stdout-to
+  remote_test.output
+  (run ./remote_test.exe)))
 
 (rule
  (alias runtest)
- (action (diff remote_test.expected remote_test.output)))
+ (action
+  (diff remote_test.expected remote_test.output)))
