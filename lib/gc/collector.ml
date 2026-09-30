@@ -479,8 +479,11 @@ let run ?budget ?pause ?(verify = false) ?(keep = false) composite =
                    (List.map (fun (c : Composite.member) -> c.name) copies))))
     | _ -> each composite (session ?budget ?pause ~verify ~keep composite d)
 
+(* §5.9 on a main of millions of chunks: one table of referenced chunks, each
+   flagged once a shard listing shows it, and the chunk area read one shard at
+   a time. *)
 let survey_one ~verify d m =
-  let referenced = Hashtbl.create 4096 in
+  let referenced : (Chunk_key.t, bool) Hashtbl.t = Hashtbl.create 65536 in
   let corrupt = ref 0 in
   let run, run_unreadable =
     match Gc_record.read m.member.store d with
@@ -488,63 +491,59 @@ let survey_one ~verify d m =
       | Unreadable -> (None, true)
       | Absent -> (None, false)
   in
-  let halted =
-    match
-      List.iter
-        (fun ns ->
-          List.iter
-            (fun c -> Hashtbl.replace referenced (Chunk_key.to_string c) c)
-            (namespace_references m d ns))
-        (enumerate m d ~after:"")
-    with
-      | () -> None
-      | exception Halt reason -> Some reason
-  in
-  match halted with
-    | Some reason -> Error reason
-    | None ->
-        let listing = m.member.store.list_prefix (Key.chunks d) in
-        let s =
-          Gc_plan.unreferenced
-            ~referenced:(fun c ->
-              Hashtbl.mem referenced (Chunk_key.to_string c))
-            listing
-        in
-        let listed = Hashtbl.create (List.length listing) in
+  match
+    List.iter
+      (fun ns ->
         List.iter
-          (fun (e : Store.entry) ->
-            Option.iter
-              (fun c -> Hashtbl.replace listed (Chunk_key.to_string c) ())
-              (Key.chunk_of e.key))
-          listing;
+          (fun c -> Hashtbl.replace referenced c false)
+          (namespace_references m d ns))
+      (enumerate m d ~after:"")
+  with
+    | exception Halt reason -> Error reason
+    | () ->
+        let reclaimable = ref 0 and bytes = ref 0 in
+        List.iter
+          (fun shard ->
+            let listing =
+              m.member.store.list_prefix (Key.shard_prefix d shard)
+            in
+            let s =
+              Gc_plan.unreferenced ~referenced:(Hashtbl.mem referenced) listing
+            in
+            reclaimable := !reclaimable + s.reclaimable;
+            bytes := !bytes + s.bytes;
+            List.iter
+              (fun (e : Store.entry) ->
+                match Key.chunk_of e.key with
+                  | Some c when Hashtbl.mem referenced c ->
+                      Hashtbl.replace referenced c true;
+                      if verify then (
+                        match m.member.store.get_opt e.key with
+                          | Some b
+                            when Chunk_key.equal (Chunk_key.of_bigstring b) c ->
+                              ()
+                          | _ -> incr corrupt)
+                  | _ -> ())
+              listing)
+          (List.init 4096 (Printf.sprintf "%03x"));
         let missing =
           Hashtbl.fold
-            (fun name c acc ->
-              if Hashtbl.mem listed name then acc else c :: acc)
+            (fun c seen acc -> if seen then acc else c :: acc)
             referenced []
           |> List.sort Chunk_key.compare
         in
-        if verify then
-          Hashtbl.iter
-            (fun name c ->
-              if Hashtbl.mem listed name then (
-                match m.member.store.get_opt (Key.chunk d c) with
-                  | Some b when Chunk_key.equal (Chunk_key.of_bigstring b) c ->
-                      ()
-                  | _ -> incr corrupt))
-            referenced;
         Ok
           {
             surveyed = m.member.name;
             run;
             run_unreadable;
             chunks_referenced = Hashtbl.length referenced;
-            chunks_reclaimable = s.reclaimable;
-            bytes_reclaimable = s.bytes;
+            chunks_reclaimable = !reclaimable;
+            bytes_reclaimable = !bytes;
             chunks_missing = missing;
             per_copy =
               List.map
-                (fun (c : Composite.member) -> (c.name, s.reclaimable))
+                (fun (c : Composite.member) -> (c.name, !reclaimable))
                 m.tells;
             chunks_corrupt = !corrupt;
           }
