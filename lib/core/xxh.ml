@@ -1,5 +1,4 @@
-type bigstring =
-  (char, Bigarray.int8_unsigned_elt, Bigarray.c_layout) Bigarray.Array1.t
+type bigstring = Bigstring.t
 
 external h_string : string -> int -> int -> int64 -> int64 = "tsync_xxh3_string"
 

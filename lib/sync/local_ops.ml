@@ -228,7 +228,7 @@ module Make (C : Engine_ctx.S) = struct
             Fs.with_fd fd (fun fd ->
                 let cs = e.chunk_size in
                 let n = Chunking.manifest_count ~size:e.size ~cs in
-                let buf = Fs.bigstring_create cs in
+                let buf = Bigstring.create cs in
                 let keys =
                   List.init n (fun i ->
                       let len =
@@ -351,10 +351,10 @@ module Make (C : Engine_ctx.S) = struct
         | Whole b ->
             let fd = Fs.openfile (Staged.whole_path staged b) [O_RDONLY] in
             Fs.with_fd fd (fun fd ->
-                let buf = Fs.bigstring_create len in
+                let buf = Bigstring.create len in
                 let n = Fs.pread_full fd buf ~boff:0 ~len ~off in
                 if n < len then Fail.corrupt "%s: its staged body is short" path;
-                Fs.string_of_bigstring buf)
+                Bigstring.to_string buf)
         | Slots slots ->
             let cs = e.chunk_size in
             let count = Array.length slots in
@@ -514,7 +514,7 @@ module Make (C : Engine_ctx.S) = struct
                       let i = (!g * per) + j in
                       if i < count then (
                         let len = Chunking.length ~size:e.size ~cs i in
-                        let buf = Fs.bigstring_create len in
+                        let buf = Bigstring.create len in
                         let n =
                           Fs.pread_full src buf ~boff:0 ~len ~off:(i * cs)
                         in
@@ -1240,7 +1240,7 @@ module Make (C : Engine_ctx.S) = struct
         let fd = create_dest dst in
         Fs.with_fd fd (fun fd ->
             if s <> "" then
-              Fs.pwrite_all fd (Fs.bigstring_of_string s) ~boff:0
+              Fs.pwrite_all fd (Bigstring.of_string s) ~boff:0
                 ~len:(String.length s) ~off;
             Fs.fsync fd);
         String.length s)

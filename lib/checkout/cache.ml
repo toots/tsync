@@ -137,8 +137,7 @@ let fetch_verified t (x : member) =
   b
 
 let write_at fd ~off s =
-  Fs.pwrite_all fd (Fs.bigstring_of_string s) ~boff:0 ~len:(String.length s)
-    ~off
+  Fs.pwrite_all fd (Bigstring.of_string s) ~boff:0 ~len:(String.length s) ~off
 
 let rec ensure_whole ?(force = false) t g =
   let p = Mutex.protect t.m (fun () -> Hashtbl.find_opt t.in_flight g.gkey) in
@@ -216,7 +215,7 @@ let install_from_partial t g s =
           | None -> false
           | Some fd ->
               Fs.with_fd fd (fun fd ->
-                  let buf = Fs.bigstring_create x.len in
+                  let buf = Bigstring.create x.len in
                   let n = Fs.pread_full fd buf ~boff:0 ~len:x.len ~off:x.off in
                   n = x.len && Chunk_key.equal (Chunk_key.of_bigstring buf) x.ck))
       g.members
@@ -236,9 +235,9 @@ let pread_path p ~off ~len =
     | None -> None
     | Some fd ->
         Fs.with_fd fd (fun fd ->
-            let buf = Fs.bigstring_create len in
+            let buf = Bigstring.create len in
             let n = Fs.pread_full fd buf ~boff:0 ~len ~off in
-            Some (Fs.string_of_bigstring ~len:n buf))
+            Some (Bigstring.to_string ~len:n buf))
 
 let all_held g s =
   List.for_all

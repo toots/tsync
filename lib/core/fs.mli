@@ -4,7 +4,7 @@
     Every call retries EINTR. A helper answers "absent" only for ENOENT or
     ENOTDIR, and raises every other error as a classified {!Fail.E}. *)
 
-type bigstring = Xxh.bigstring
+type bigstring = Bigstring.t
 
 (** Retry on EINTR. *)
 val eintr : (unit -> 'a) -> 'a
@@ -121,10 +121,6 @@ val pid_alive : int -> bool
 (** Open for reading without following a final symbolic link (ELOOP); [None]
     when absent. *)
 val open_nofollow : string -> Unix.file_descr option
-
-val bigstring_create : int -> bigstring
-val bigstring_of_string : string -> bigstring
-val string_of_bigstring : ?off:int -> ?len:int -> bigstring -> string
 
 (** A private read-only mapping of a file never modified in place. *)
 val map_file : string -> bigstring

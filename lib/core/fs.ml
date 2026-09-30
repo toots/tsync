@@ -1,4 +1,4 @@
-type bigstring = Xxh.bigstring
+type bigstring = Bigstring.t
 
 external pread_ : Unix.file_descr -> bigstring -> int -> int -> int64 -> int
   = "tsync_pread"
@@ -267,20 +267,6 @@ let pid_alive pid = pid_alive_ pid
 (* ELOOP means the last component is a symbolic link. *)
 let open_nofollow p = opt (fun () -> open_nofollow_ p)
 
-let bigstring_create n =
-  Bigarray.Array1.create Bigarray.char Bigarray.c_layout n
-
-let bigstring_of_string s =
-  let b = bigstring_create (String.length s) in
-  String.iteri (fun i c -> Bigarray.Array1.unsafe_set b i c) s;
-  b
-
-let string_of_bigstring ?(off = 0) ?len b =
-  let len =
-    match len with Some l -> l | None -> Bigarray.Array1.dim b - off
-  in
-  String.init len (fun i -> Bigarray.Array1.unsafe_get b (off + i))
-
 (* A private read-only mapping: a file shorter than the mapping is an error,
    never extended. *)
 let map_file p =
@@ -289,7 +275,7 @@ let map_file p =
       let size =
         (sys (fun () -> Unix.LargeFile.fstat fd)).st_size |> Int64.to_int
       in
-      if size = 0 then bigstring_create 0
+      if size = 0 then Bigstring.empty
       else
         Bigarray.array1_of_genarray
           (Unix.map_file fd Bigarray.char Bigarray.c_layout false [| size |]))

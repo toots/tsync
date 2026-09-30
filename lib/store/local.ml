@@ -236,9 +236,9 @@ let create ?(verify_writes = true)
                   if off >= size then Some ""
                   else (
                     let n = min len (size - off) in
-                    let buf = Fs.bigstring_create n in
+                    let buf = Bigstring.create n in
                     let got = Fs.pread_full fd buf ~boff:0 ~len:n ~off in
-                    Some (Fs.string_of_bigstring ~len:got buf))))
+                    Some (Bigstring.to_string ~len:got buf))))
   in
   let head_opt key =
     fed (fun () ->

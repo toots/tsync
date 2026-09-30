@@ -704,12 +704,12 @@ module Make (C : Engine_ctx.S) = struct
                           Fs.openfile (Staged.whole_path staged b) [O_RDONLY]
                         in
                         Fs.with_fd fd (fun fd ->
-                            let buf = Fs.bigstring_create len in
+                            let buf = Bigstring.create len in
                             let n =
                               Fs.pread_full fd buf ~boff:0 ~len
                                 ~off:(i * e.chunk_size)
                             in
-                            Fs.string_of_bigstring ~len:n buf))
+                            Bigstring.to_string ~len:n buf))
                 | Slots slots -> (
                     let len =
                       if e.size = 0 then 0

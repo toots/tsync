@@ -130,6 +130,22 @@ CAMLprim value tsync_errno_numbers(value unit) {
   CAMLreturn(res);
 }
 
+/* Bigstring helpers: no allocation, so the runtime lock stays held. */
+CAMLprim value tsync_bigstring_memcmp(value a, value aoff, value b, value boff, value len) {
+  return Val_int(memcmp((char *)Caml_ba_data_val(a) + Long_val(aoff),
+                        (char *)Caml_ba_data_val(b) + Long_val(boff), Long_val(len)));
+}
+
+CAMLprim value tsync_bigstring_blit_from_bytes(value src, value soff, value dst, value doff, value len) {
+  memcpy((char *)Caml_ba_data_val(dst) + Long_val(doff), Bytes_val(src) + Long_val(soff), Long_val(len));
+  return Val_unit;
+}
+
+CAMLprim value tsync_bigstring_blit_to_bytes(value src, value soff, value dst, value doff, value len) {
+  memcpy(Bytes_val(dst) + Long_val(doff), (char *)Caml_ba_data_val(src) + Long_val(soff), Long_val(len));
+  return Val_unit;
+}
+
 /* Raise the soft descriptor limit toward the hard one, capped at target, never
    lowering it; answers the soft limit in force. */
 CAMLprim value tsync_raise_nofile(value target) {

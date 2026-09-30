@@ -200,9 +200,9 @@ let scratch_read r ~off ~len =
   Fs.with_fd
     (Unix.openfile path [O_RDONLY; O_CLOEXEC] 0)
     (fun fd ->
-      let b = Fs.bigstring_create len in
+      let b = Bigstring.create len in
       let n = Fs.pread_full fd b ~boff:0 ~len ~off in
-      Fs.string_of_bigstring ~len:n b)
+      Bigstring.to_string ~len:n b)
 
 let read t path (buf : Fuse.buffer) off (fi : Fuse.file_info) =
   let len = Bigarray.Array1.dim buf and off = Int64.to_int off in
@@ -265,7 +265,7 @@ let write t path (buf : Fuse.buffer) off (fi : Fuse.file_info) =
               Fs.pwrite_all fd buf ~boff:0 ~len ~off:(Int64.to_int off)))
   else (
     let (module E : Tsync_sync.Engine.S) = t.engine in
-    let data = Fs.string_of_bigstring ~len buf in
+    let data = Bigstring.to_string ~len buf in
     let synchronous =
       match locked t (fun () -> Hashtbl.find_opt t.handles fi.fi_fh) with
         | Some h ->

@@ -311,12 +311,11 @@ let read_body t id ~off ~len =
     | None -> Fail.corrupt "staged body %s is missing" id
     | Some fd ->
         Fs.with_fd fd (fun fd ->
-            let buf = Fs.bigstring_create len in
+            let buf = Bigstring.create len in
             let n = Fs.pread_full fd buf ~boff:0 ~len ~off in
-            let s = Fs.string_of_bigstring ~len:n buf in
+            let s = Bigstring.to_string ~len:n buf in
             if n < len then s ^ String.make (len - n) '\000' else s)
 
 let write_body_at fd ~off data =
-  Fs.pwrite_all fd
-    (Fs.bigstring_of_string data)
-    ~boff:0 ~len:(String.length data) ~off
+  Fs.pwrite_all fd (Bigstring.of_string data) ~boff:0 ~len:(String.length data)
+    ~off

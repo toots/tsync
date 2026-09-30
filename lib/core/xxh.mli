@@ -1,7 +1,6 @@
 (** XXH3-64 (xxHash 0.8) and the dual digest of spec 01 §3. *)
 
-type bigstring =
-  (char, Bigarray.int8_unsigned_elt, Bigarray.c_layout) Bigarray.Array1.t
+type bigstring = Bigstring.t
 
 val string : ?seed:int64 -> string -> int64
 val bigstring : ?seed:int64 -> ?off:int -> ?len:int -> bigstring -> int64
