@@ -29,7 +29,7 @@ let load_avg () =
         | one :: _ -> float_of_string_opt one
         | [] -> None)
 
-let self ?traffic ~role ~serves () : Status_report.self =
+let self ?traffic ?listener ~role ~serves () : Status_report.self =
   let now = Unix.gettimeofday () in
   let u = Usage.sample () in
   {
@@ -65,4 +65,5 @@ let self ?traffic ~role ~serves () : Status_report.self =
       List.map
         (fun (t, level, message) -> { Status_report.t; level; message })
         (Log.recent ());
+    listener;
   }

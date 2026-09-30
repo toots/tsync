@@ -34,3 +34,15 @@
     (echo "|tsync_asset}\nlet mime = {tsync_asset|")
     (cat %{mime})
     (echo "|tsync_asset}\n")))))
+
+(rule
+ (targets status_page.ml)
+ (deps
+  (:page status_page.html))
+ (action
+  (with-stdout-to
+   status_page.ml
+   (progn
+    (echo "let html = {tsync_page|")
+    (cat %{page})
+    (echo "|tsync_page}\n")))))

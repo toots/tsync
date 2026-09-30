@@ -288,13 +288,7 @@ let machine_report arg children : R.machine =
     List.concat_map
       (fun (r, ans) ->
         if r.child.args <> [] && List.hd r.child.args = "store-server" then []
-        else
-          List.concat_map
-            (fun (d, a) ->
-              match a with
-                | Ok (x : R.answer) -> x.domains
-                | Error _ -> [R.Unanswered d])
-            ans)
+        else R.answered ans)
       (List.combine children answers)
   in
   let domains =

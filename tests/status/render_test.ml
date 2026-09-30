@@ -19,8 +19,8 @@ let usage ~cpu ~private_ ~heap : usage =
     major_collections = 1;
   }
 
-let self ?traffic ?(recent = []) ?(uplinks = []) ~role ~pid ~uptime ~serves () :
-    self =
+let self ?traffic ?listener ?(recent = []) ?(uplinks = []) ~role ~pid ~uptime
+    ~serves () : self =
   {
     server =
       {
@@ -36,6 +36,7 @@ let self ?traffic ?(recent = []) ?(uplinks = []) ~role ~pid ~uptime ~serves () :
     uplinks;
     traffic;
     recent_errors = recent;
+    listener;
   }
 
 let settings : settings =
@@ -186,6 +187,26 @@ let healthy : machine =
           error = None;
           self =
             Some (self ~role:"supervisor" ~pid:100 ~uptime:671. ~serves:[] ());
+        };
+        {
+          role = "store-server";
+          pid = Some 102;
+          serves = ["Media"];
+          error = None;
+          self =
+            Some
+              (self ~role:"store-server" ~pid:102 ~uptime:669. ~serves:["Media"]
+                 ~listener:
+                   {
+                     port = Some 5446;
+                     tls = true;
+                     in_flight = 3;
+                     data_in_flight = 1;
+                     bytes_read = 3145728;
+                     bytes_written = 1024;
+                     requests = [("get", 12); ("head", 0); ("put", 2)];
+                   }
+                 ());
         };
         {
           role = "owner";

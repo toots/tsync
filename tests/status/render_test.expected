@@ -1,5 +1,5 @@
 == healthy
-tsync on example — 1 domain, 2 processes, up 11m 11s, load 0.4
+tsync on example — 1 domain, 3 processes, up 11m 11s, load 0.4
 
 Domain Media
   settings         versioning on, symlinks keep, chunk 8.0 MiB (default), cache chunk 16.0 MiB
@@ -19,6 +19,10 @@ Domain Media
 Processes
   supervisor   pid 100  up 11m 11s  1.2% cpu
     memory           private 61.0 MiB (heap 18.0 MiB, anonymous 61.0 MiB), mapped files 9.0 MiB
+  store-server pid 102  up 11m 9s  1.2% cpu  Media
+    memory           private 61.0 MiB (heap 18.0 MiB, anonymous 61.0 MiB), mapped files 9.0 MiB
+    listener         port 5446, TLS, 3 in flight (1 data), read 3.0 MiB, written 1.0 KiB
+    requests         get 12, put 2
   owner        pid 101  up 11m 10s  1.2% cpu  Media
     memory           private 61.0 MiB (heap 18.0 MiB, anonymous 61.0 MiB), mapped files 9.0 MiB
     traffic          up 0 B (0 B/s), down 1.9 KiB (9 B/s)

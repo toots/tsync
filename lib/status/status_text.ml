@@ -247,6 +247,27 @@ let own_uplink b (l : Uplink.link_status) =
              (if l.waiting > 0 then Printf.sprintf ", %d waiting" l.waiting
               else ""))
 
+let listener b (l : listener) =
+  row b "    " "listener"
+    (String.concat ", "
+       (some_list
+          [
+            Option.map (Printf.sprintf "port %d") l.port;
+            (if l.tls then Some "TLS" else None);
+            Some
+              (Printf.sprintf "%d in flight (%d data)" l.in_flight
+                 l.data_in_flight);
+            Some
+              (Printf.sprintf "read %s, written %s" (isize l.bytes_read)
+                 (isize l.bytes_written));
+          ]));
+  match List.filter (fun (_, n) -> n > 0) l.requests with
+    | [] -> ()
+    | counted ->
+        row b "    " "requests"
+          (String.concat ", "
+             (List.map (fun (k, n) -> Printf.sprintf "%s %d" k n) counted))
+
 let process b (p : process) =
   Printf.bprintf b "  %-12s %s\n" p.role
     (String.concat "  "
@@ -268,6 +289,7 @@ let process b (p : process) =
     | Some s, None ->
         row b "    " "memory" (memory s.usage);
         Option.iter (traffic b "    ") s.traffic;
+        Option.iter (listener b) s.listener;
         List.iter (own_uplink b) s.uplinks
     | None, None -> ()
 

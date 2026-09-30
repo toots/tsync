@@ -68,6 +68,17 @@ let level_to_yojson, level_of_yojson =
           List.find_opt (fun l -> Log.name l = s) [Debug; Info; Warn; Err]
       | _ -> None)
 
+type listener = {
+  port : int option;
+  tls : bool;
+  in_flight : int; [@key "inFlight"]
+  data_in_flight : int; [@key "dataInFlight"]
+  bytes_read : int; [@key "bytesRead"]
+  bytes_written : int; [@key "bytesWritten"]
+  requests : (string * int) list;
+}
+[@@deriving yojson { strict = false }]
+
 type log_line = { t : float; level : level; message : string }
 [@@deriving yojson { strict = false }]
 
@@ -77,6 +88,7 @@ type self = {
   uplinks : Uplink.link_status list; [@default []]
   traffic : traffic option; [@default None]
   recent_errors : log_line list; [@key "recentErrors"] [@default []]
+  listener : listener option; [@default None]
 }
 [@@deriving yojson { strict = false }]
 
@@ -363,6 +375,12 @@ type answer = {
   self : self;
 }
 [@@deriving yojson { strict = false }]
+
+let answered answers =
+  List.concat_map
+    (fun (name, a) ->
+      match a with Ok a -> a.domains | Error _ -> [Unanswered name])
+    answers
 
 let with_presented domains presented =
   List.map

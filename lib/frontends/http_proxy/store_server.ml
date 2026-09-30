@@ -27,6 +27,8 @@ type t = {
   share_slots : Rt.Semaphore.t;
   tallies : (string, int Atomic.t) Hashtbl.t;
   traffic : (string, traffic) Hashtbl.t;  (** per route name *)
+  total : traffic;  (** every answer, shares included *)
+  in_flight : int Atomic.t;
 }
 
 and traffic = { read : int Atomic.t; written : int Atomic.t }
@@ -97,6 +99,8 @@ let create ?max_concurrent ?listener routes =
       (let h = Hashtbl.create 32 in
        List.iter (fun n -> Hashtbl.replace h n (Atomic.make 0)) tally_names;
        h);
+    total = { read = Atomic.make 0; written = Atomic.make 0 };
+    in_flight = Atomic.make 0;
     traffic =
       (let h = Hashtbl.create 4 in
        List.iter
@@ -629,6 +633,37 @@ let execute t route op body =
     | Verified p ->
         json (`Assoc [("verified", `Bool (s.capabilities p).verified)])
 
+(* §A12: bytes clients wrote in request bodies and read in answers, per route
+   and for the whole listener. *)
+let count_bytes counters ~written (response : Server.response) =
+  let add get n =
+    List.iter (fun c -> ignore (Atomic.fetch_and_add (get c) n)) counters
+  in
+  add (fun c -> c.written) written;
+  match response.body with
+    | Empty -> response
+    | String s ->
+        add (fun c -> c.read) (String.length s);
+        response
+    | Bigstring b ->
+        add (fun c -> c.read) (Bigstring.length b);
+        response
+    | Stream f ->
+        {
+          response with
+          body =
+            Stream
+              (fun write ->
+                f (fun chunk ->
+                    add (fun c -> c.read) (Bigstring.length chunk);
+                    write chunk));
+        }
+
+let counted t route body response =
+  count_bytes
+    (t.total :: Option.to_list (Hashtbl.find_opt t.traffic route.name))
+    ~written:(Bigstring.length body) response
+
 let verified_routes t (r : Server.request) params =
   if not (fresh r) then []
   else
@@ -636,8 +671,124 @@ let verified_routes t (r : Server.request) params =
       (fun route -> verifies r params Bigstring.empty route.secret)
       t.routes
 
+let presented t route : Tsync_status.Status_report.presented =
+  let traffic = Hashtbl.find_opt t.traffic route.name in
+  {
+    domain = route.name;
+    frontend =
+      {
+        kind = "http-proxy";
+        pid = Some (Unix.getpid ());
+        mount = None;
+        port =
+          Option.map (fun (l : Proxy_options.listener) -> l.port) t.listener;
+        open_handles = None;
+        bytes_read = Option.map (fun c -> Atomic.get c.read) traffic;
+        bytes_written = Option.map (fun c -> Atomic.get c.written) traffic;
+        shared = true;
+        read_only = Some route.read_only;
+        shares = Some (route.share <> None);
+        unanswered = false;
+      };
+  }
+
+module R = Tsync_status.Status_report
+
+let listener_report t : R.listener =
+  {
+    port = Option.map (fun (l : Proxy_options.listener) -> l.port) t.listener;
+    tls = (match t.listener with Some l -> l.tls <> None | None -> false);
+    in_flight = Atomic.get t.in_flight;
+    data_in_flight = Atomic.get t.pending;
+    bytes_read = Atomic.get t.total.read;
+    bytes_written = Atomic.get t.total.written;
+    requests =
+      List.map
+        (fun n -> (n, Atomic.get (Hashtbl.find t.tallies n)))
+        (List.sort compare tally_names);
+  }
+
+let self_report t routes =
+  Tsync_status.Self_report.self ~listener:(listener_report t)
+    ~role:"store-server"
+    ~serves:(List.map (fun r -> r.name) routes)
+    ()
+
+(* §A10: each route's owner answers for its domain within the collector's
+   deadline, and this listener's entry joins each section; a silent owner is
+   reported unanswered. *)
+let collect t ~arg routes =
+  let asked =
+    Rt.map_concurrently
+      (fun route ->
+        ( route,
+          match
+            Tsync_owner.Protocol.call ~timeout:Tsync_ipc.Ipc.request_deadline
+              ~domain:route.name
+              (Tsync_config.Paths.owner_socket route.domain)
+              (Stats ("frontend" :: arg))
+          with
+            | (a : R.answer) -> Ok a
+            | exception e -> Error (Fail.classify e).reason ))
+      routes
+  in
+  let domains =
+    R.with_presented
+      (R.answered (List.map (fun (route, a) -> (route.name, a)) asked))
+      (List.map (presented t) routes)
+  in
+  let owners =
+    List.map
+      (fun (route, a) ->
+        match a with
+          | Ok (a : R.answer) ->
+              {
+                R.role = "owner";
+                pid = Some a.self.server.pid;
+                serves = [route.name];
+                error = None;
+                self = Some a.self;
+              }
+          | Error e ->
+              {
+                R.role = "owner";
+                pid = None;
+                serves = [route.name];
+                error = Some e;
+                self = None;
+              })
+      asked
+  in
+  (domains, owners)
+
+(* [totals=1|exact] and [reload=1], as the status report's arguments. *)
+let totals_arg params =
+  match List.assoc_opt "totals" params with
+    | Some "exact" ->
+        "totals" :: "exact"
+        ::
+        (if List.assoc_opt "reload" params = Some "1" then ["reload"] else [])
+    | Some "1" ->
+        "totals"
+        ::
+        (if List.assoc_opt "reload" params = Some "1" then ["reload"] else [])
+    | _ -> []
+
 let listener_endpoint t (r : Server.request) params =
   match (r.meth, r.path) with
+    | "GET", ("/" | "/index.html") ->
+        {
+          Server.status = 200;
+          headers =
+            [
+              ("content-type", "text/html; charset=utf-8");
+              ("x-content-type-options", "nosniff");
+              ("referrer-policy", "no-referrer");
+              ("content-security-policy", "frame-ancestors 'none'");
+              ("cache-control", "no-store");
+            ];
+          body = String Status_page.html;
+        }
     | "GET", "/domains" -> (
         count t "domains";
         match verified_routes t r params with
@@ -662,25 +813,31 @@ let listener_endpoint t (r : Server.request) params =
         match verified_routes t r params with
           | [] -> unauthorized t
           | routes ->
-              let report =
-                `Assoc
-                  [
-                    ("frontend", `String "http-proxy");
-                    ( "serves",
-                      `List (List.map (fun route -> `String route.name) routes)
-                    );
-                    ( "requests",
-                      `Assoc
-                        (("dataInFlight", `Int (Atomic.get t.pending))
-                        :: List.map
-                             (fun n ->
-                               (n, `Int (Atomic.get (Hashtbl.find t.tallies n))))
-                             (List.sort compare tally_names)) );
-                  ]
+              let domains, owners = collect t ~arg:(totals_arg params) routes in
+              let self = self_report t routes in
+              let machine : R.machine =
+                {
+                  host = Unix.gethostname ();
+                  domains;
+                  processes =
+                    {
+                      role = "store-server";
+                      pid = Some self.server.pid;
+                      serves = self.server.serves;
+                      error = None;
+                      self = Some self;
+                    }
+                    :: owners;
+                  uplinks = [];
+                  jobs = [];
+                  warnings = [];
+                }
               in
               if r.path = "/stats" then
-                text 200 (Yojson.Safe.pretty_to_string report)
-              else json report)
+                text 200
+                  (Tsync_status.Status_text.render ~now:(Unix.gettimeofday ())
+                     machine)
+              else json (R.machine_to_yojson machine))
     | _ -> raise Not_found
 
 (* §A9.1: with several share-serving routes, the one whose domain the token's
@@ -717,7 +874,10 @@ let serve_share t (r : Server.request) params rest =
   let max_zip_members =
     match t.listener with Some l -> l.max_zip_members | None -> 100_000
   in
-  match Share_server.handle share ~max_zip_members r ~token ~sub params with
+  match
+    Share_server.handle share ~max_zip_members r ~token ~sub params
+    |> count_bytes [t.total] ~written:0
+  with
     | { body = Stream f; _ } as response ->
         {
           response with
@@ -735,34 +895,10 @@ let serve_share t (r : Server.request) params rest =
         Rt.Semaphore.release t.share_slots;
         raise e
 
-(* §A12: bytes clients wrote in request bodies and read in answers, per route. *)
-let counted t route body (response : Server.response) =
-  match Hashtbl.find_opt t.traffic route.name with
-    | None -> response
-    | Some c -> (
-        ignore (Atomic.fetch_and_add c.written (Bigstring.length body));
-        let add n = ignore (Atomic.fetch_and_add c.read n) in
-        match response.body with
-          | Empty -> response
-          | String s ->
-              add (String.length s);
-              response
-          | Bigstring b ->
-              add (Bigstring.length b);
-              response
-          | Stream f ->
-              {
-                response with
-                body =
-                  Stream
-                    (fun write ->
-                      f (fun chunk ->
-                          add (Bigstring.length chunk);
-                          write chunk));
-              })
-
 (* The wire's processing order (backends/http-proxy §6.1). *)
 let handle t (r : Server.request) read_body =
+  Atomic.incr t.in_flight;
+  Fun.protect ~finally:(fun () -> Atomic.decr t.in_flight) @@ fun () ->
   try
     if String.starts_with ~prefix:"/s/" r.path then
       serve_share t r
@@ -827,29 +963,8 @@ let owner_poke (d : Domain_name.t) () =
          ("domain", `String (Domain_name.to_string d));
        ])
 
-let presented t route : Tsync_status.Status_report.presented =
-  let traffic = Hashtbl.find_opt t.traffic route.name in
-  {
-    domain = route.name;
-    frontend =
-      {
-        kind = "http-proxy";
-        pid = Some (Unix.getpid ());
-        mount = None;
-        port =
-          Option.map (fun (l : Proxy_options.listener) -> l.port) t.listener;
-        open_handles = None;
-        bytes_read = Option.map (fun c -> Atomic.get c.read) traffic;
-        bytes_written = Option.map (fun c -> Atomic.get c.written) traffic;
-        shared = true;
-        read_only = Some route.read_only;
-        shares = Some (route.share <> None);
-        unanswered = false;
-      };
-  }
-
-(* §A11: answers for itself only; a route named by [domain] alone, else every
-   route. [status] is the same report as [stats]. *)
+(* §A11: with [frontend], its own entries for the route named by [domain], or
+   every route; otherwise, and for [status], the full report over every route. *)
 let control t stop req =
   let module P = Tsync_owner.Protocol in
   let routes =
@@ -858,25 +973,29 @@ let control t stop req =
           List.filter (fun r -> r.name = d) t.routes
       | _ -> t.routes
   in
-  let stats () : Tsync_status.Status_report.answer =
+  let own () : R.answer =
     {
       domains = [];
       presented = List.map (presented t) routes;
-      self =
-        Tsync_status.Self_report.self ~role:"store-server"
-          ~serves:(List.map (fun r -> r.name) t.routes)
-          ();
+      self = self_report t t.routes;
+    }
+  and full arg : R.answer =
+    {
+      domains = fst (collect t ~arg t.routes);
+      presented = [];
+      self = self_report t t.routes;
     }
   in
   let answer : type a. a P.request -> a = function
     | Ping -> ()
     | Stop -> (stop () : unit)
-    | Stats _ -> stats ()
+    | Stats arg when List.mem "frontend" arg -> own ()
+    | Stats arg -> full arg
     | r -> Fail.invalid "unknown action: %s" (P.action r)
   in
   let reply =
     match Tsync_ipc.Ipc.field req "action" with
-      | Some "status" -> P.encode_reply (Stats []) (stats ())
+      | Some "status" -> P.encode_reply (Stats []) (full ["totals"])
       | _ -> (
           match P.decode req with
             | Request r -> (

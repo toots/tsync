@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tsync status</title>
+<style>
+  :root { color-scheme: light dark; --fg: #1d1d1f; --bg: #fafafa; --muted: #6e6e73; --line: #d2d2d7; --bad: #b3261e; }
+  @media (prefers-color-scheme: dark) { :root { --fg: #f5f5f7; --bg: #161617; --muted: #a1a1a6; --line: #3a3a3c; --bad: #f2b8b5; } }
+  body { margin: 0; padding: 16px; background: var(--bg); color: var(--fg); font: 15px/1.4 system-ui, sans-serif; }
+  main { max-width: 72rem; margin: 0 auto; }
+  h1 { font-size: 1.25rem; margin: 0 0 12px; }
+  form { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: end; margin-bottom: 12px; }
+  label { display: flex; flex-direction: column; gap: 4px; color: var(--muted); font-size: 0.85rem; }
+  input, select, button { font: inherit; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--fg); }
+  button { cursor: pointer; }
+  #message { min-height: 1.4em; color: var(--muted); margin: 0 0 8px; }
+  #message.bad { color: var(--bad); }
+  pre { margin: 0; padding: 12px; border: 1px solid var(--line); border-radius: 6px; overflow-x: auto; font: 13px/1.35 ui-monospace, monospace; }
+</style>
+</head>
+<body>
+<main>
+  <h1>tsync status</h1>
+  <form id="login" autocomplete="off">
+    <label>Secret <input id="secret" type="password" required></label>
+    <label>Store counts
+      <select id="totals">
+        <option value="">off</option>
+        <option value="1">estimate</option>
+        <option value="exact">exact</option>
+      </select>
+    </label>
+    <button id="show">Show</button>
+    <button id="forget" type="button" hidden>Forget secret</button>
+  </form>
+  <p id="message" role="status"></p>
+  <pre id="report" hidden></pre>
+</main>
+<script>
+"use strict";
+// security-model §10.4: the secret lives in this variable only, never in storage.
+let secret = null;
+let timer = null;
+const $ = (id) => document.getElementById(id);
+const EMPTY_SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+const hex = (buf) => Array.from(new Uint8Array(buf), (b) => b.toString(16).padStart(2, "0")).join("");
+
+function say(text, bad) {
+  $("message").textContent = text;
+  $("message").className = bad ? "bad" : "";
+}
+
+function forget(reason) {
+  secret = null;
+  clearTimeout(timer);
+  $("secret").value = "";
+  $("forget").hidden = true;
+  $("report").hidden = true;
+  say(reason || "", Boolean(reason));
+}
+
+// backends/http-proxy §3.1: HMAC-SHA256 over method, target, timestamp and the body's digest.
+async function sign(target, timestamp) {
+  const enc = new TextEncoder();
+  const key = await crypto.subtle.importKey("raw", enc.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const msg = "GET\n" + target + "\n" + timestamp + "\n" + EMPTY_SHA256;
+  return hex(await crypto.subtle.sign("HMAC", key, enc.encode(msg)));
+}
+
+async function poll() {
+  if (secret === null) return;
+  const totals = $("totals").value;
+  const target = "/stats" + (totals ? "?totals=" + totals : "");
+  const timestamp = String(Math.floor(Date.now() / 1000));
+  try {
+    const answer = await fetch("." + target, {
+      cache: "no-store",
+      headers: { "x-tsync-timestamp": timestamp, "x-tsync-signature": await sign(target, timestamp) },
+    });
+    if (answer.status === 401) {
+      forget("Wrong secret, or this device's clock is off by more than 5 minutes.");
+      return;
+    }
+    if (!answer.ok) {
+      say("The server answered " + answer.status + "; retrying.", true);
+    } else {
+      $("report").textContent = await answer.text();
+      $("report").hidden = false;
+      say("Updated " + new Date().toLocaleTimeString() + ".");
+    }
+  } catch (e) {
+    say("Cannot reach the server; retrying.", true);
+  }
+  timer = setTimeout(poll, 5000);
+}
+
+$("login").addEventListener("submit", (event) => {
+  event.preventDefault();
+  if (!window.isSecureContext) {
+    forget("This page is not served over HTTPS; the secret would cross the network in the clear. Open it over HTTPS or from this machine.");
+    return;
+  }
+  secret = $("secret").value;
+  $("secret").value = "";
+  $("forget").hidden = false;
+  clearTimeout(timer);
+  poll();
+});
+$("forget").addEventListener("click", () => forget(""));
+$("totals").addEventListener("change", () => { clearTimeout(timer); poll(); });
+</script>
+</body>
+</html>

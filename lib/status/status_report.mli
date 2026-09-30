@@ -47,12 +47,26 @@ type log_line = { t : float; level : level; message : string }
 [@@deriving yojson]
 
 (** A process's description of itself. *)
+(** An http-proxy listener's counters (frontends/http-proxy §A12): bytes are
+    the server's own, once per request; [requests] is one tally per kind. *)
+type listener = {
+  port : int option;
+  tls : bool;
+  in_flight : int;
+  data_in_flight : int;
+  bytes_read : int;
+  bytes_written : int;
+  requests : (string * int) list;
+}
+[@@deriving yojson]
+
 type self = {
   server : server;
   usage : usage;
   uplinks : Uplink.link_status list;
   traffic : traffic option;
   recent_errors : log_line list;
+  listener : listener option;  (** an http-proxy store server's own figures *)
 }
 [@@deriving yojson]
 
@@ -241,6 +255,10 @@ type presented = { domain : string; frontend : frontend } [@@deriving yojson]
     presents for domains others own. *)
 type answer = { domains : domain list; presented : presented list; self : self }
 [@@deriving yojson]
+
+(** The sections owners answered with, and [Unanswered] for each domain whose
+    owner did not answer. *)
+val answered : (string * (answer, string) result) list -> domain list
 
 (** Each presented frontend appended to its domain's section; one for an
     unanswered domain is dropped. *)

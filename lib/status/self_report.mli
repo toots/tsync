@@ -10,6 +10,7 @@ val per_second : rate -> now:float -> float -> float
 
 val self :
   ?traffic:Status_report.traffic ->
+  ?listener:Status_report.listener ->
   role:string ->
   serves:string list ->
   unit ->
