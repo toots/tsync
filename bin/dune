@@ -1,0 +1,15 @@
+; tsync_catalog links every driver and frontend this build has.
+
+(executable
+ (name tsync)
+ (libraries
+  cmdliner
+  tsync_core
+  tsync_store
+  tsync_config
+  tsync_catalog
+  tsync_ipc
+  tsync_owner
+  tsync_supervisor
+  unix
+  yojson))

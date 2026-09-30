@@ -47,3 +47,23 @@ val run :
   Tsync_config.Config.t ->
   Tsync_config.Config.domain list ->
   int
+
+(** Takes the domain's ownership for [f]'s duration, with an in-process request
+    handler, and drains before releasing it; BUSY when another process holds it.
+*)
+val one_shot :
+  what:string ->
+  Tsync_config.Config.t ->
+  Tsync_config.Config.domain ->
+  (Handler.t -> 'a) ->
+  'a
+
+(** An owner-class request (07 §2.5): sent to the domain's owner, else answered
+    by {!one_shot}. *)
+val request :
+  ?bulk:bool ->
+  what:string ->
+  Tsync_config.Config.t ->
+  Tsync_config.Config.domain ->
+  Tsync_ipc.Ipc.json ->
+  Tsync_ipc.Ipc.json

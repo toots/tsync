@@ -230,3 +230,47 @@ let run ?present ?socket config (domains : Config.domain list) =
     | Ok () ->
         serve ?present ~socket config domains;
         0
+
+(* 07 §2.5, §3.5: an owner for the command's duration, with every duty but
+   journal polling, drained before the lock is released. *)
+let one_shot ~what config (dom : Config.domain) f =
+  match acquire ~role:"command" ~what dom.name with
+    | Error h ->
+        Fail.raise_ Fail.Load "%s is owned by %s, which is not serving"
+          (Domain_name.to_string dom.name)
+          (match h with
+            | Some h -> Printf.sprintf "%s (pid %d)" h.what h.pid
+            | None -> "another process")
+    | Ok lock ->
+        Fun.protect
+          ~finally:(fun () -> release lock)
+          (fun () ->
+            let domain = Domain.build ~owner:true config dom in
+            let engine = Domain.engine domain in
+            let (module E : Tsync_sync.Engine.S) = engine in
+            E.start ~poll_journal:false ();
+            let home = Paths.home () in
+            let handler =
+              Handler.create ~domain ~engine ~hooks:Handler.no_hooks
+                ~publish:(fun _ -> 0)
+                ~stats:(fun _ ->
+                  Ipc.ok [("domains", `List [domain_body domain engine])])
+                ~stop:ignore ~dest_roots:[home] ~staging_roots:[home]
+            in
+            Fun.protect ~finally:(fun () -> E.drain ()) (fun () -> f handler))
+
+let request ?(bulk = false) ~what config (dom : Config.domain) req =
+  let req =
+    match req with
+      | `Assoc l ->
+          `Assoc (("domain", `String (Domain_name.to_string dom.name)) :: l)
+      | j -> j
+  in
+  let socket = Paths.owner_socket dom.name in
+  match if bulk then Ipc.call_bulk socket req else Ipc.call socket req with
+    | reply -> reply
+    | exception Ipc.Not_serving _ ->
+        one_shot ~what config dom (fun h ->
+            match Handler.answer h req with
+              | Ipc.Reply r -> r
+              | Ipc.Subscribe _ -> Fail.invalid "a subscription needs an owner")

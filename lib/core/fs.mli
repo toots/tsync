@@ -112,6 +112,10 @@ val is_macos : bool
 (** The uid of a connected Unix socket's peer, from the kernel. *)
 val peer_uid : Unix.file_descr -> int
 
+(** Raises the soft descriptor limit toward the hard one, capped at the target
+    and never lowered; the soft limit in force. *)
+val raise_nofile : int -> int
+
 val pid_alive : int -> bool
 
 (** Open for reading without following a final symbolic link (ELOOP); [None]

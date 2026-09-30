@@ -6,6 +6,9 @@ type bridge = Outbound.bridge = Incremental | Hold of string
 
 module type S = Engine_intf.S
 
+let pause_flag ~data_dir d =
+  List.fold_left Filename.concat data_dir ["paused"; Domain_name.to_string d]
+
 module Make (C : Engine_ctx.S) = struct
   include Outbound.Make (C)
 
@@ -1196,9 +1199,7 @@ module Make (C : Engine_ctx.S) = struct
           post_put p e.size (base_hex e))
       (Staged.edits staged)
 
-  let paused_path =
-    List.fold_left Filename.concat C.data_dir
-      ["paused"; Domain_name.to_string d]
+  let paused_path = pause_flag ~data_dir:C.data_dir d
 
   let set_paused on =
     if on then Fs.durable_replace paused_path ""

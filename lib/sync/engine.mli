@@ -11,4 +11,7 @@ type bridge = Outbound.bridge = Incremental | Hold of string
 
 module type S = Engine_intf.S
 
+(** The pause flag of 07 §2.6: present means paused. *)
+val pause_flag : data_dir:string -> Tsync_core.Domain_name.t -> string
+
 module Make (_ : Engine_ctx.S) : S

@@ -11,6 +11,7 @@
 #include <signal.h>
 #include <string.h>
 #include <sys/file.h>
+#include <sys/resource.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/statvfs.h>
@@ -127,6 +128,20 @@ CAMLprim value tsync_errno_numbers(value unit) {
   Store_field(res, 4, Val_int(-1));
 #endif
   CAMLreturn(res);
+}
+
+/* Raise the soft descriptor limit toward the hard one, capped at target, never
+   lowering it; answers the soft limit in force. */
+CAMLprim value tsync_raise_nofile(value target) {
+  struct rlimit r;
+  if (getrlimit(RLIMIT_NOFILE, &r) < 0) uerror("getrlimit", Nothing);
+  rlim_t want = (rlim_t)Long_val(target);
+  if (r.rlim_max != RLIM_INFINITY && want > r.rlim_max) want = r.rlim_max;
+  if (want > r.rlim_cur) {
+    r.rlim_cur = want;
+    if (setrlimit(RLIMIT_NOFILE, &r) < 0) uerror("setrlimit", Nothing);
+  }
+  return Val_long(r.rlim_cur);
 }
 
 #if defined(__linux__)

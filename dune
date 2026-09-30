@@ -3,6 +3,7 @@
 (rule
  (alias default)
  (deps
+  (alias_rec bin/all)
   (alias_rec lib/all)
   (alias_rec vendor/all))
  (action (progn)))
