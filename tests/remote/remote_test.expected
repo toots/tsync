@@ -1,0 +1,42 @@
+== five clients claim one name
+won: 1; every loser adopts the winner: true
+confirm: final
+
+== files and deduplication
+a: 3 chunks, b: 2 chunks, chunk objects: 3
+empty file names the empty chunk once: true
+versions of a.txt: 1
+renamed manifest records its new leaf: c.txt
+
+== the tree
+Photos/ Photos/Trip/ Photos/empty Photos/c.txt Photos/a.txt
+find Photos/Trip: the folder
+
+== a move whose old-marker delete was lost
+listed at: Photos Moved
+old path: missing
+
+== trash and restore
+trash entries: 1; anchor in trash: true; live: gone
+after restore: entries 0, found true
+
+== a placement onto a taken name
+taken by Photos
+
+== store
+  tsync/photos/chunks/09f/09f3609df6eb52af-ae660e173ff2060b (7)
+  tsync/photos/chunks/180/1808e40d6723f646-e7bf74a2eb7a5a23 (8)
+  tsync/photos/chunks/2d0/2d06800538d394c2-4dc5b0cc826f6703 (0)
+  tsync/photos/chunks/3c3/3c379c9c184eaa13-2e14c3378109b02f (8)
+  tsync/photos/chunks/933/933c068887eb6b65-91f47b9be8ec24b9 (3)
+  tsync/photos/manifests/.tsync-root/48e1a90f5af8ebab-1f4a03b4e3db4fd0 (52)
+  tsync/photos/manifests/.tsync-root/857fcda0047eeab4-a677d171b8d38674 (50)
+  tsync/photos/manifests/<photos-id>/.tsync-parent (40)
+  tsync/photos/manifests/<photos-id>/249fdb46916455c7-93a78be56770e1c0 (48)
+  tsync/photos/manifests/<photos-id>/8f8952eab4c14116-c70a51267db6e78e (110)
+  tsync/photos/manifests/<photos-id>/d6d50f267ed1aabb-7fe71c7d92c1e0c0 (143)
+  tsync/photos/manifests/<photos-id>/f01e5cbbc09d4fc4-9a0fcd66f030de75 (110)
+  tsync/photos/manifests/aaaaaaaaaaaa-7/.tsync-parent (42)
+  tsync/photos/manifests/bbbbbbbbbbbb-1/.tsync-parent (40)
+  tsync/photos/versions/<photos-id>/3c697ec236bbf61f-698ad1290042cc94/<ns> (143)
+  tsync/photos/versions/<photos-id>/f01e5cbbc09d4fc4-9a0fcd66f030de75/<ns> (176)
