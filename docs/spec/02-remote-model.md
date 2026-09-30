@@ -489,7 +489,8 @@ this layer's: an empty or unparseable answer to create-if-absent is read back, n
    - marked corrupt on a member read by the domain (§4.7): **not** known;
    - otherwise in the dedup memo, if the memo may be relied on
      ([algorithms/gc.md §5.6](algorithms/gc.md#56-the-generation-and-presence-memos)): known;
-   - otherwise a presence check (either space on the collected main during a run): known if present.
+   - otherwise a presence check: known if present (on a collectable main the driver answers from
+     both collection spaces, [algorithms/gc.md §5.8](algorithms/gc.md#58-chunk-access-is-scoped-by-the-driver)).
 
    Unknown chunks are put; a successful put clears the chunk's corruption memo entry. Record the key in
    the manifest and report progress (a progress callback MUST NOT block).
@@ -515,8 +516,8 @@ optimisation only, since the gate on a collectable main checks presence
 ### 4.2 Download
 
 - A waiting reader's range read MUST NOT queue behind whole-chunk prefetches.
-- On the collected main during a run, reads look in both spaces ([algorithms/gc.md](algorithms/gc.md)
-  §5.8), then fall back to the composite.
+- Readers never handle collection spaces: a collectable main's driver answers chunk reads from both
+  ([algorithms/gc.md §5.8](algorithms/gc.md#58-chunk-access-is-scoped-by-the-driver)).
 - `get_verified_chunk` fetches, checks `dual(body) = key`, fetches once more on mismatch, and fails the
   second mismatch naming the key.
 - `fetch_manifest` answers `None` for an unresolved key, an absent object, or a body that is not a

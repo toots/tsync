@@ -27,7 +27,7 @@ Goals:
   collecting client lists.
 - **Goal 3, oblivious writers.** Clients do not have to know a collection is running. Their one duty is to
   publish references through the interlock (§5.4), which the store driver of the collected main
-  performs on their behalf.
+  performs on their behalf. Every chunk access on that main is scoped by the same driver (§5.8).
 - **Goal 4, resumable and abandonable.** A collection can take hours and be interrupted at any point by a
   crash, a time budget or an operator. It resumes where it got to, and can be called off with everything
   put back.
@@ -113,6 +113,9 @@ Retention removes references. It runs through the domain's composite (reaching e
 deletes to copies), deletes no chunks, and proceeds in this order, so that nothing it is about to purge
 still counts as a reference to what follows: trash, versions, journal, shares. Each step is idempotent;
 an interrupted expiry is simply run again.
+
+Expiry and purge have a **dry run** that performs every read and decision below and reports each
+deletion it would make, by kind, deleting and writing nothing. Operator entry points default to it.
 
 ### 4.1 Trash
 
@@ -432,7 +435,7 @@ owner executes them as specified in
 [algorithms/replication.md §4.8](replication.md#48-deletions-on-copies-outside-the-worker):
 
 - **Re-check before** (an optimisation): immediately before issuing a deletion, the owner MAY drop every
-  key the collected main holds in either space.
+  key the collected main holds (§5.8).
 - **Direct delete** (a copy without queued deletion): delete the keys and their corruption markers.
   Absent keys count as deleted.
 - **Queued deletion** (a copy with a bucket function): write the discard request, named by run and shard,
@@ -440,7 +443,7 @@ owner executes them as specified in
   request already present under that name is superseded by the new one covering the same or later
   shards.
 - **Restore after.** Once a deletion has taken effect (the direct delete returned, or the request object
-  is gone), list the collected main's shard for those keys, in both spaces, and put back onto the copy,
+  is gone), list the collected main's shard for those keys (§5.8), and put back onto the copy,
   from the main, every deleted key the main still holds. Only then is the deletion settled.
 - **Settle.** When every deletion owed for generation *g* is settled, write G := *g* + 1 (even).
 - The write guard applies: no deletion or restore runs while a main is unreachable.
@@ -449,7 +452,7 @@ The **bucket function** deletes only chunk keys of the request's own domain, del
 corruption marker with it, and deletes the request last, only if it refused nothing.
 
 **Re-delivery.** Outstanding requests are reported at every start of a collection. Re-delivering one
-rewrites it with only the keys still absent from the collected main (both spaces), which raises a fresh
+rewrites it with only the keys still absent from the collected main (§5.8), which raises a fresh
 notification; a request with no key left is deleted instead. Nothing re-delivers automatically. A
 request never consumed keeps G odd: copy memos stay unused for that domain (a cost, not a risk) until it
 is re-delivered and consumed.
@@ -458,15 +461,59 @@ is re-delivered and consumed.
 (meaning G is odd for as long as it is present); collectors MUST NOT write one, and MUST maintain G for
 every run they close.
 
-### 5.8 Readers and copy fills during a run
+### 5.8 Chunk access is scoped by the driver
 
-- A reader of the collected main looks in S, then F. A miss re-reads R's presence before it is believed,
-  so a stale "no run" cache can reorder lookups but never turn "in F" into "absent". Reads never promote.
-- An http-proxy server exporting the collected main MUST answer chunk reads (get, range, head) from
-  either space in the same way, so remote clients read, and deduplicate against, chunks still in F; the
-  gate on their publications promotes them.
-- A copy's fill job fetching a chunk from the collected main falls back to F, and writes it to the copy
-  under its plain key (a copy has one space).
+The two spaces, R and the publish lock are private to the collectable main's store driver and to the
+collector. Every access to a chunk of a collectable main goes through that driver, which scopes it with
+the collection, so no caller names F, reads R, or orders lookups:
+
+| Operation on a chunk key | The driver does |
+|---|---|
+| get, range, head | S, then F. A miss in S re-reads R's presence before it is believed, so a cached "no run" bit can reorder lookups but never turn "in F" into "absent". Reads never promote |
+| put | writes into S |
+| delete | deletes from both spaces, and the chunk's corruption marker is the caller's as usual |
+| listing of the chunk area | the union of both spaces under plain keys, each name once; keys of F are never listed as such |
+| put or copy into the manifest or version area | the gate (§5.4) |
+
+The collector's promotion and the gate's are one implementation. Consequences, with no collection
+code at the caller: readers and writers of the main, an http-proxy server exporting it (remote clients
+read, and deduplicate against, chunks still in F), a copy's fill job reading a chunk from it (and writing
+it to the copy under its plain key, a copy having one space) and an integrity check all see one space.
+
+Presence memos about copies are scoped the same way: the component holding a copy's memo reads G
+itself and answers "unknown" whenever §5.6 forbids relying on an entry, and records nothing while G is
+odd. Its callers ask whether a copy holds a chunk; they never read G.
+
+### 5.9 Dry run
+
+A **dry run** reports what a collection would reclaim and changes nothing: it writes no store object,
+no local record and no generation, opens no run, renames nothing and never takes the publish lock. It
+takes the run lock (a dry run beside a live collection would read spaces mid-rename) and answers `Busy`
+like a collection.
+
+```
+dry_run():
+  require a collectable main, the run lock, as start()
+  report R's phase and cursor if a run is open, and outstanding discard requests on each copy
+  referenced := {}
+  for ns in every namespace (§5.3), sorted:
+     for each child object k of ns:  body := read k      -- the same read rules as mark()
+        referenced += chunks named by body
+  for each chunk c listed in the chunk area (both spaces, §5.8), with its size:
+     if c not in referenced: count c and its bytes as reclaimable
+  report referenced, reclaimable count and bytes, and per-copy the number of those keys the run would
+  tell that copy to delete
+```
+
+A body that stops marking stops the dry run with the same report, having deleted nothing. The
+reclaimable set is exact for a main nobody writes between the survey and the collection; writers
+move it either way (a publication references a counted chunk, a delete or expiry frees one), and
+nothing depends on it: the collection decides by its own marking. Its memory is proportional to
+the live set, which §9 rejects for a collection but not for a report: an interrupted dry run is simply
+run again. With `verify`, it also hashes each referenced chunk and reports mismatches without filing
+markers.
+
+Operator entry points default to the dry run; a collection that deletes needs an explicit request.
 
 ---
 
@@ -543,6 +590,7 @@ spaces and gates promoting.
 | `pause` | none | wait between steps |
 | `verify` | off | re-hash each chunk promoted by this run |
 | `keep` / abort | off | abandon instead of collect |
+| `apply` | off at operator entry points | off: a dry run (§5.9, §4); on: collect or expire |
 | shard fan-out | 3 hex digits (4096) | frozen by the key layout ([02-remote-model.md](../02-remote-model.md)) |
 | publish lock wait | the request deadline | a gate that cannot take the shared lock fails transiently |
 | `orphan_grace` | the journal retention horizon plus 7 days | MUST be at least the journal retention horizon, so a client allowed to resume a placement has had the chance |
@@ -595,6 +643,13 @@ An implementation MUST exhibit these observable properties:
   continued with a fresh odd generation.
 - **Readers.** During a run, chunks in either space are readable, directly and through an http-proxy;
   an idle-cache miss re-checks the run before answering "absent".
+- **Scoped access.** No component other than the collectable main's driver and the collector names the
+  outgoing space, reads the run record or takes the publish lock; no component other than a copy's
+  presence memo reads the generation to decide whether a memo entry holds. A listing of the chunk area
+  during a run names each chunk once, under its plain key.
+- **Dry run.** A dry run changes no byte on any store and no local record, whatever the phase it finds;
+  on a main nobody writes, its reclaimable count and bytes equal what the following collection reclaims,
+  and after a completed collection it reports zero.
 - **Retention.** Expiry never deletes a folder whose anchor is live; purges deepest namespace first and
   trash entries last; keeps anchors; deletes stale entries alone; skips a folder with any entry younger
   than the cutoff; deletes expired shares of its domain and their cached artifacts; never deletes a

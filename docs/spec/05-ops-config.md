@@ -494,8 +494,10 @@ paused.
 - `deleted_in_folder(key)` and `deleted_in_domain()`: from the versions namespace; a grouping whose
   live manifest is absent is a deleted file, named from a version body. They look up folder ids, never
   mint them.
-- `expire(cutoff)` → `{trash_deleted, versions_deleted, journal_deleted, shares_deleted}`, in that
+- `expire(cutoff, ?apply)` → `{trash_deleted, versions_deleted, journal_deleted, shares_deleted}`, in that
   order (trash, versions, journal, shares); its rules are [gc.md §4](algorithms/gc.md#4-retention).
+  Without `apply` it is a dry run: the same counts, and each key it would delete, with nothing deleted.
+  `purge(path, ?apply)` likewise.
   A client offline for longer than the retention window cannot bridge and rebuilds
   ([wal-and-journal.md §4.8](algorithms/wal-and-journal.md#48-retention-horizon-bridging-and-rebuild)).
 - Reverting a file (a file operation, [04 §3.4](04-checkout-cache.md#34-operations)) saves a version
@@ -503,11 +505,16 @@ paused.
 
 ### 4.9 Garbage collection
 
-`gc` → `start`, `step`, `run ?budget ?pause`, `abort`, `status`, `outstanding`, `retry_outstanding`,
-with `stats{outcome: Completed | Suspended{phase, cursor}; roots_marked; chunks_promoted;
+`gc` → `dry_run ?verify`, `start`, `step`, `run ?budget ?pause`, `abort`, `status`, `outstanding`,
+`retry_outstanding`, with `stats{outcome: Completed | Suspended{phase, cursor}; roots_marked; chunks_promoted;
 chunks_verified; chunks_corrupt; chunks_unreadable; chunks_cleared; chunks_reclaimed;
 bytes_reclaimed}` and failures `Unsupported(reason)`, `Busy(holder)`. The collector, its phases,
 precondition and writer interlock are [gc.md](algorithms/gc.md).
+
+`dry_run` → `survey{run: (phase, cursor) option; chunks_referenced; chunks_reclaimable;
+bytes_reclaimable; per_copy: (member, count) list; chunks_corrupt}` and the same failures; it changes
+nothing ([gc.md §5.9](algorithms/gc.md#59-dry-run)). The operator command runs it unless a collection is
+explicitly requested; `abort` and `retry_outstanding` are explicit by nature.
 
 **Exclusion.** At most one collection session per domain runs at a time on a machine, whatever the
 processes and sessions: a session takes the domain's collection lock before reading the run marker,

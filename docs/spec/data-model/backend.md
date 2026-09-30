@@ -435,9 +435,10 @@ leaves the old state, the new state, or a state readers classify safely.
 - A child listed but gone on read is a *permanent* miss for that child. A deleter MUST NOT take it as the
   absence of the whole folder.
 - Journal entries appear out of key order; a reader lists the whole window and dedupes.
-- During a run, a chunk may be in either space. Readers of the collected main look in the surviving space,
-  then the outgoing one, and re-check the run's presence before answering "absent". This includes a
-  server re-exporting that main (an http-proxy), which MUST answer chunk reads from either space.
+- During a run, a chunk may be in either space. The collected main's driver scopes every chunk access:
+  it looks in the surviving space, then the outgoing one, and re-checks the run's presence before answering
+  "absent"; a server re-exporting that main (an http-proxy) inherits this through the driver
+  ([algorithms/gc.md §5.8](../algorithms/gc.md#58-chunk-access-is-scoped-by-the-driver)).
 - A manifest may name chunks a copy does not yet hold. A reader fails over to a copy only when no main is
   reachable, never because of a miss on a reachable main.
 

@@ -306,7 +306,7 @@ doom step for shard s of run r, generation g odd (collecting owner):     -- gc �
 
 run(CollectionDelete(ks, r, s, g)) at copy C:
   guard(C, "delete collected chunks")                       -- §4.9
-  ks := ks − [k | the collected main holds k in either space]   -- MAY: a re-check just before
+  ks := ks − [k | the collected main holds k]               -- MAY: a re-check just before
   C.ensured -= ks                                            -- before the deletion is issued
   if C has a confirmed bucket function (06 §3.8):
       add {r, s, g, ks} to C's pending discards, durably
@@ -320,7 +320,7 @@ every DISCARD_POLL, for each pending discard P of copy C:
       restore(C, P.shard, P.keys); remove P                  -- settled
 
 restore(C, s, keys):                                         -- mandatory; the write guard applies
-  list the collected main's shard s in both spaces
+  list the collected main's shard s                    -- both spaces, gc §5.8
   for k in keys that the main holds: sync(k)                 -- §4.3: the chunk is put back on C
 
 when no collection-delete record and no pending discard of generation g remains for any copy:

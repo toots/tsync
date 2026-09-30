@@ -119,7 +119,7 @@ Given the operation's first key or prefix `k`:
 | share-url | none | route serves shares → `{"self":true}`; else `B.capabilities(prefix).share_url` → `{"url":u}`; else 404 |
 | verified | none | `{"verified": B.capabilities(prefix).verified}` |
 
-**Garbage collection.** Every manifest or version write (put, claim, copy into those areas) passes the store driver's reference gate ([gc.md §5.4](../algorithms/gc.md#54-the-collection-interlock)): during a run it promotes the named chunks, and it refuses a write naming a chunk the main lacks with 409 `missing_chunks` listing them ([wire §6.2](../backends/http-proxy.md#62-failure-kind-header)). During a run, chunk reads (get, range, head, get-multi) are answered from either space ([gc.md §5.8](../algorithms/gc.md#58-readers-and-copy-fills-during-a-run)).
+**Garbage collection.** Every manifest or version write (put, claim, copy into those areas) passes the store driver's reference gate ([gc.md §5.4](../algorithms/gc.md#54-the-collection-interlock)): during a run it promotes the named chunks, and it refuses a write naming a chunk the main lacks with 409 `missing_chunks` listing them ([wire §6.2](../backends/http-proxy.md#62-failure-kind-header)). During a run, chunk reads (get, range, head, get-multi) are answered from either space ([gc.md §5.8](../algorithms/gc.md#58-chunk-access-is-scoped-by-the-driver)).
 
 ### A4.5 Read-only
 

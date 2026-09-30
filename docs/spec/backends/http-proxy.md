@@ -352,7 +352,7 @@ A server MUST answer every client that uses only the core correctly: new endpoin
 
 - **Concurrency**: the inherited `max_concurrency` makes the domain hold excess client-side; a 503 is backed off by the ladder.
 - **Consistency relied on**: whatever the far composite store guarantees. Reads are read-after-write for that server's own writes; `put_if_absent` is the far store's conditional create arbitrated by its first main; `watch` is as prompt as the far store's own watch, coalesced across clients.
-- **Garbage collection**: every manifest or version write through a listener passes the server's reference gate ([gc.md §5.4](../algorithms/gc.md#54-the-collection-interlock)), and during a run chunk reads are answered from either space ([gc.md §5.8](../algorithms/gc.md#58-readers-and-copy-fills-during-a-run)). A client therefore deduplicates safely against what the server reports present, and re-uploads what a `missing_chunks` refusal names.
+- **Garbage collection**: every manifest or version write through a listener passes the server's reference gate ([gc.md §5.4](../algorithms/gc.md#54-the-collection-interlock)), and during a run chunk reads are answered from either space ([gc.md §5.8](../algorithms/gc.md#58-chunk-access-is-scoped-by-the-driver)). A client therefore deduplicates safely against what the server reports present, and re-uploads what a `missing_chunks` refusal names.
 
 ---
 
