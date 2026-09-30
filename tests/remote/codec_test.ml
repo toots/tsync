@@ -1,5 +1,4 @@
 open Tsync_core
-open Tsync_remote
 
 let p fmt = Printf.printf fmt
 

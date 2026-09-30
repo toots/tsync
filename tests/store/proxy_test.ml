@@ -79,7 +79,9 @@ let () =
            (Option.get s.get_many
               (List.init 2500 (fun i ->
                    Key.v (Printf.sprintf "tsync/d/many/%d" i)))));
-      Contract.put s (Key.v "tsync/d/manifests/x/f") {|{"name":"f"}|};
+      Contract.put s
+        (Key.v "tsync/d/manifests/x/f")
+        {|{"dir":true,"name":"f","id":"0123456789ab-1"}|};
       p "list_many: %d folders\n"
         (List.length
            (Option.get s.list_many [Key.prefix "tsync/d/manifests/x/"]));

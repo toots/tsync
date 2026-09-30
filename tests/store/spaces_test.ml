@@ -49,8 +49,12 @@ let () =
       p "manifest naming an absent chunk: %s\n"
         (kind (fun () -> Contract.put s (slot "x") (manifest_body [c3])));
       p "refused manifest not written: %b\n" (not (on_disk (slot "x")));
-      p "folder record: %s\n"
-        (kind (fun () -> Contract.put s (slot "m") {|{"id":"x"}|}));
+      p "folder marker: %s\n"
+        (kind (fun () ->
+             Contract.put s (slot "m")
+               {|{"dir":true,"name":"m","id":"0123456789ab-1"}|}));
+      p "JSON that is not a folder marker: %s\n"
+        (kind (fun () -> Contract.put s (slot "j") {|{"id":"x"}|}));
       p "folder index (internal leaf): %s\n"
         (kind (fun () -> Contract.put s (slot ".tsync-index") "tsyncidx1..."));
       p "body that is neither: %s\n"
@@ -92,7 +96,7 @@ let () =
         (on_disk (Key.chunk d c4))
         (on_disk (Key.chunk_from d c4));
       p "\n== the publish lock orders publications with the collector\n";
-      let spaces = Chunk_spaces.create ~collectable:(fun () -> true) root in
+      let spaces = Chunk_spaces.create root in
       let held = Rt.Promise.create () and release = Rt.Promise.create () in
       let collector =
         Rt.async (fun () ->
@@ -111,7 +115,9 @@ let () =
       p "publication waits while the lock is held: %b\n"
         (not (Atomic.get done_));
       p "a record naming no chunk does not wait: %s\n"
-        (kind (fun () -> Contract.put s (slot "n") {|{"id":"n"}|}));
+        (kind (fun () ->
+             Contract.put s (slot "n")
+               {|{"dir":true,"name":"n","id":"0123456789ab-1"}|}));
       Rt.Promise.resolve release ();
       Rt.Promise.await collector;
       Rt.Promise.await writer;

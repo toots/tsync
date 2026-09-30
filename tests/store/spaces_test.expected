@@ -2,7 +2,8 @@
 manifest naming present chunks: ok
 manifest naming an absent chunk: corrupt/missing_chunks
 refused manifest not written: true
-folder record: ok
+folder marker: ok
+JSON that is not a folder marker: invalid
 folder index (internal leaf): ok
 body that is neither: invalid
 claim naming an absent chunk: corrupt/missing_chunks

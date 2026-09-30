@@ -1,0 +1,87 @@
+== dry run (§5.9)
+referenced 5, reclaimable 2 (10 bytes), missing 0, corrupt 0, per copy replica 2
+dry run changed nothing on the main: true
+
+== a collection (§5.5)
+run: completed; promoted 5, reclaimed 2 (10 bytes)
+generation settled: true
+  junk1    main S false F false, replica false
+  junk2    main S false F false, replica false
+  live1    main S true F false, replica true
+  live2    main S true F false, replica true
+  live3    main S true F false, replica true
+  trashed  main S true F false, replica true
+  ver      main S true F false, replica true
+  run open false, outgoing space false, G 2
+
+== a second run right after deletes nothing
+run: completed; promoted 5, reclaimed 0 (0 bytes)
+
+== one unit per session, a publication landing mid-run
+run: suspended in marking at "m/.tsync-root"; promoted 3, reclaimed 0 (0 bytes)
+run: suspended in marking at "m/0123456789ab-1"; promoted 2, reclaimed 0 (0 bytes)
+  publishing a manifest naming late, now outgoing
+  reading junk3 during the run: true
+run: suspended in closing at "2b6"; promoted 1, reclaimed 0 (0 bytes)
+run: suspended in closing at "307"; promoted 0, reclaimed 0 (0 bytes)
+run: suspended in closing at "7ff"; promoted 0, reclaimed 0 (0 bytes)
+run: suspended in closing at "88a"; promoted 0, reclaimed 0 (0 bytes)
+run: suspended in closing at "8a5"; promoted 0, reclaimed 0 (0 bytes)
+run: suspended in closing at "975"; promoted 0, reclaimed 0 (0 bytes)
+run: suspended in closing at "a5c"; promoted 0, reclaimed 1 (5 bytes)
+run: completed; promoted 0, reclaimed 0 (0 bytes)
+generation settled: true
+  junk1    main S false F false, replica false
+  junk2    main S false F false, replica false
+  junk3    main S false F false, replica false
+  late     main S true F false, replica true
+  live1    main S true F false, replica true
+  live2    main S true F false, replica true
+  live3    main S true F false, replica true
+  live4    main S true F false, replica true
+  trashed  main S true F false, replica true
+  ver      main S true F false, replica true
+  run open false, outgoing space false, G 6
+
+== abort puts back everything still outgoing
+run: suspended in marking at "m/.tsync-root"; promoted 4, reclaimed 0 (0 bytes)
+junk5 outgoing: true
+run: completed; promoted 0, reclaimed 0 (0 bytes)
+junk5 back in S: true
+  junk1    main S false F false, replica false
+  junk2    main S false F false, replica false
+  junk3    main S false F false, replica false
+  junk5    main S true F false, replica true
+  late     main S true F false, replica true
+  live1    main S true F false, replica true
+  live2    main S true F false, replica true
+  live3    main S true F false, replica true
+  live4    main S true F false, replica true
+  trashed  main S true F false, replica true
+  ver      main S true F false, replica true
+  run open false, outgoing space false, G 6
+
+== verify keeps and marks a chunk that does not hash to its key
+run: completed; promoted 7, reclaimed 1 (5 bytes), verified 7, corrupt 1
+live2 kept: true, marked: true
+
+== a body that is not a manifest halts, leaving the run open
+run: halted: tsync/d/manifests/.tsync-root/fa2ef02b5771334f-adbc8e9d6edde589: neither a manifest nor a folder marker; promoted 0, reclaimed 0 (0 bytes)
+run open: true, live1 outgoing and readable: true true
+run: completed; promoted 7, reclaimed 0 (0 bytes)
+generation settled: true
+  junk1    main S false F false, replica false
+  junk2    main S false F false, replica false
+  junk3    main S false F false, replica false
+  junk5    main S false F false, replica false
+  late     main S true F false, replica true
+  live1    main S true F false, replica true
+  live2    main S true F false, replica true
+  live3    main S true F false, replica true
+  live4    main S true F false, replica true
+  trashed  main S true F false, replica true
+  ver      main S true F false, replica true
+  run open false, outgoing space false, G 10
+
+== exclusion
+run: busy

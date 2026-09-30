@@ -141,16 +141,7 @@ let list name root prefix =
     | _ -> ());
   !acc
 
-let marker_body ?computed ?reason size =
-  Yojson.Safe.to_string
-    (`Assoc
-       (List.filter_map Fun.id
-          [
-            Option.map (fun c -> ("computed", `String c)) computed;
-            Option.map (fun s -> ("size", `Int s)) size;
-            Some ("at", `Float (Unix.gettimeofday ()));
-            Option.map (fun r -> ("reason", `String r)) reason;
-          ]))
+let marker_body = Corruption_marker.body
 
 (* 06 §9: read back what was just written, never the argument, and file or
    clear the chunk's marker. A mismatch never fails the put. *)
@@ -200,7 +191,7 @@ let create ?(verify_writes = true) ~name root =
           ignore (Health.lost ~reason health);
           raise e
   in
-  let spaces = Chunk_spaces.create ~collectable:mappable root in
+  let spaces = Chunk_spaces.create root in
   let read_opt key =
     Chunk_spaces.read spaces key (fun key -> read_opt ~mappable root key)
   in

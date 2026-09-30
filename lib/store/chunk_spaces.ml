@@ -1,10 +1,29 @@
 open Tsync_core
 
-type t = { root : string; collectable : unit -> bool }
+type t = { root : string; network : bool option Atomic.t }
 
-let create ~collectable root = { root; collectable }
-let collectable t = t.collectable ()
+let create root = { root; network = Atomic.make None }
+
+(* gc.md A1: a network filesystem may be written by another host. *)
+let root t = t.root
+
+let collectable t =
+  match Atomic.get t.network with
+    | Some n -> not n
+    | None ->
+        let n = try Fs.is_network_fs t.root with _ -> true in
+        Atomic.set t.network (Some n);
+        not n
+
 let publish_wait = 30.
+
+let of_store (store : Store.t) =
+  match store.local_path with
+    | Some root ->
+        let t = create root in
+        if collectable t then Some t else None
+    | None -> None
+
 let file t key = Local_path.path t.root key
 
 let run_open t d =
@@ -36,6 +55,37 @@ let with_publish_lock ?(wait = publish_wait) t d ~exclusive f =
       take 0.005;
       Fun.protect ~finally:(fun () -> Fs.funlock fd) f)
 
+let sessions_m = Mutex.create ()
+let sessions : (string, unit) Hashtbl.t = Hashtbl.create 4
+
+(* Record locks of one process merge, so a second session in this process is
+   excluded by a check-and-set with no suspension point, taken first. *)
+let with_run_lock t d f =
+  let p = file t (Key.gc_lock d) in
+  let claimed =
+    Mutex.protect sessions_m (fun () ->
+        if Hashtbl.mem sessions p then false
+        else (
+          Hashtbl.replace sessions p ();
+          true))
+  in
+  if not claimed then Error `Busy
+  else
+    Fun.protect
+      ~finally:(fun () ->
+        Mutex.protect sessions_m (fun () -> Hashtbl.remove sessions p))
+      (fun () ->
+        Fs.mkdir_p ~perm:0o755 (Filename.dirname p);
+        Fs.with_fd
+          (Fs.openfile ~perm:0o644 p [O_RDWR; O_CREAT])
+          (fun fd ->
+            match Fs.eintr (fun () -> Unix.lockf fd Unix.F_TLOCK 0) with
+              | () -> Ok (f ())
+              | exception Unix.Unix_error ((Unix.EAGAIN | Unix.EACCES), _, _) ->
+                  Error `Busy
+              | exception Unix.Unix_error (e, fn, a) ->
+                  raise (Fail.E (Fail.of_unix e fn a))))
+
 let promote t d c =
   let src = file t (Key.chunk_from d c) and dst = file t (Key.chunk d c) in
   let attempt () =
@@ -56,27 +106,25 @@ let sync_shards t d cs =
     (List.map (fun c -> Filename.dirname (file t (Key.chunk d c))) cs)
   |> List.iter Fs.fsync_dir
 
-let is_record body =
-  match Yojson.Safe.from_string (Bigstring.to_string body) with
-    | `Assoc _ -> true
-    | _ -> false
-    | exception _ -> false
-
-let names_of key body =
-  if Key.is_internal_leaf (Key.leaf key) then []
+let references key body =
+  if Key.is_internal_leaf (Key.leaf key) then Ok []
   else if Manifest.is_manifest body then
-    List.sort_uniq Chunk_key.compare (Manifest.chunk_names body)
-  else if is_record body then []
-  else
-    Fail.invalid ~op:"publish" "%s: neither a manifest nor a folder record"
-      (Key.to_string key)
+    Ok (List.sort_uniq Chunk_key.compare (Manifest.chunk_names body))
+  else (
+    match Folder.classify_marker (Bigstring.to_string body) with
+      | `Marker _ -> Ok []
+      | `Unclassifiable | `Not_marker ->
+          Error
+            (Printf.sprintf "%s: neither a manifest nor a folder marker"
+               (Key.to_string key)))
 
 let gate t ~key ~body write =
   match Key.domain_of_reference key with
     | Some d when collectable t -> (
-        match names_of key (body ()) with
-          | [] -> write ()
-          | names ->
+        match references key (body ()) with
+          | Error reason -> Fail.raise_ Fail.Invalid ~op:"publish" "%s" reason
+          | Ok [] -> write ()
+          | Ok names ->
               with_publish_lock t d ~exclusive:false (fun () ->
                   if run_open t d then
                     sync_shards t d (List.filter (promote t d) names);
@@ -95,17 +143,19 @@ let gate t ~key ~body write =
         )
     | _ -> write ()
 
-(* A miss in both spaces re-reads the surviving one: a promotion between the
-   two reads moved the chunk behind the reader. *)
+(* The outgoing space is read under the shared publish lock, so no reader sees a
+   shard its doom step is emptying; a miss there re-reads the surviving space,
+   where a promotion may have moved the chunk behind the reader. *)
 let read t key f =
   match f key with
     | Some v -> Some v
     | None -> (
         match Key.chunk_parts key with
-          | Some (d, c) when collectable t && run_open t d -> (
-              match f (Key.chunk_from d c) with
-                | Some v -> Some v
-                | None -> f key)
+          | Some (d, c) when collectable t && run_open t d ->
+              with_publish_lock t d ~exclusive:false (fun () ->
+                  match f (Key.chunk_from d c) with
+                    | Some v -> Some v
+                    | None -> f key)
           | _ -> None)
 
 let twins t key =

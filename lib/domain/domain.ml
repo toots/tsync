@@ -39,13 +39,7 @@ let create_store config d (b : Config.backend) =
 
 let knowledge d =
   {
-    Composite.chunk_names = Manifest.chunk_names;
-    describe =
-      (fun b ->
-        Option.map
-          (fun (m : Manifest.t) -> (m.name, m.size))
-          (Manifest.decode (Bigstring.to_string b)));
-    is_index = (fun k -> Key.leaf k = ".tsync-index");
+    Composite.is_index = (fun k -> Key.leaf k = ".tsync-index");
     is_journal =
       (fun k -> Key.under (Key.journal d) k || Key.equal k (Key.cursor d));
   }

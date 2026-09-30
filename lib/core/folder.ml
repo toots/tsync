@@ -1,5 +1,3 @@
-open Tsync_core
-
 type marker = { name : string; id : Folder_id.t }
 type anchor = { parent : Folder_id.t; aname : string }
 

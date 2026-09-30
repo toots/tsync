@@ -30,9 +30,7 @@ let manifest_body cks =
 
 let knowledge =
   {
-    Composite.describe = (fun _ -> None);
-    chunk_names = Manifest.chunk_names;
-    is_index =
+    Composite.is_index =
       (fun key -> String.ends_with ~suffix:".tsync-index" (Key.to_string key));
     is_journal =
       (fun key -> Key.under (Key.journal d) key || Key.equal key (Key.cursor d));

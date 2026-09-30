@@ -32,12 +32,7 @@ let () =
       let d = Domain_name.v "photos" in
       let main = Local.create ~name:"main" (Filename.concat root "store") in
       let knowledge =
-        {
-          Composite.chunk_names = Manifest.chunk_names;
-          describe = (fun _ -> None);
-          is_index = (fun _ -> false);
-          is_journal = (fun _ -> false);
-        }
+        { Composite.is_index = (fun _ -> false); is_journal = (fun _ -> false) }
       in
       let composite =
         Composite.create ~domain:d

@@ -511,8 +511,10 @@ chunks_verified; chunks_corrupt; chunks_unreadable; chunks_cleared; chunks_recla
 bytes_reclaimed}` and failures `Unsupported(reason)`, `Busy(holder)`. The collector, its phases,
 precondition and writer interlock are [gc.md](algorithms/gc.md).
 
-`dry_run` → `survey{run: (phase, cursor) option; chunks_referenced; chunks_reclaimable;
-bytes_reclaimable; per_copy: (member, count) list; chunks_corrupt}` and the same failures; it changes
+`dry_run` → per collectable main, `survey{run: (phase, cursor) option; chunks_referenced;
+chunks_reclaimable; bytes_reclaimable; chunks_missing; per_copy: (member, count) list;
+chunks_corrupt}` and the same failures, where `chunks_missing` lists referenced chunks the main lacks
+(files a reader cannot open, and publications the gate would refuse); it changes
 nothing ([gc.md §5.9](algorithms/gc.md#59-dry-run)). The operator command runs it unless a collection is
 explicitly requested; `abort` and `retry_outstanding` are explicit by nature.
 

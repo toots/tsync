@@ -11,11 +11,17 @@ open Tsync_core
 
 type t
 
-(** [collectable] says whether the root is on a filesystem local to this host
-    (gc.md A1). *)
-val create : collectable:(unit -> bool) -> string -> t
+val create : string -> t
 
+(** Whether the root is on a filesystem local to this host (gc.md A1), decided
+    once. *)
 val collectable : t -> bool
+
+val root : t -> string
+
+(** The spaces of a store that can be collected: a filesystem store local to
+    this host. *)
+val of_store : Store.t -> t option
 
 (** Whether a run record is present, whatever its body. *)
 val run_open : t -> Domain_name.t -> bool
@@ -28,6 +34,11 @@ val in_surviving : t -> Domain_name.t -> Chunk_key.t -> bool
 val with_publish_lock :
   ?wait:float -> t -> Domain_name.t -> exclusive:bool -> (unit -> 'a) -> 'a
 
+(** Run [f] holding the run lock (§5.4): at most one holder per main on this
+    host, across processes and within this one. [Error `Busy] when held. The
+    kernel releases it if the process dies. *)
+val with_run_lock : t -> Domain_name.t -> (unit -> 'a) -> ('a, [ `Busy ]) result
+
 (** Move a chunk from the outgoing space to the surviving one; whether this call
     moved it. Not durable until {!sync_shards}. *)
 val promote : t -> Domain_name.t -> Chunk_key.t -> bool
@@ -35,15 +46,22 @@ val promote : t -> Domain_name.t -> Chunk_key.t -> bool
 (** Make earlier promotions of these chunks durable. *)
 val sync_shards : t -> Domain_name.t -> Chunk_key.t list -> unit
 
+(** The chunks a body in a manifest or version area names (§5.3): a manifest's
+    chunks; nothing for a folder marker, a trash entry or an internal leaf
+    (anchor, index); [Error] for anything else. The gate refuses what marking
+    would halt on. *)
+val references : Key.t -> Bigstring.t -> (Chunk_key.t list, string) result
+
 (** The reference gate around [write], which puts [body ()] at [key] (§5.4):
     promotes the chunks the body names while a run is open, then refuses with
     MISSING_CHUNKS any the surviving space lacks. A body naming no chunk passes
-    without the lock; one that is neither a manifest nor a JSON record is
-    INVALID. Keys outside a manifest or version area pass. *)
+    without the lock; one {!references} refuses is INVALID. Keys outside a
+    manifest or version area pass. *)
 val gate : t -> key:Key.t -> body:(unit -> Bigstring.t) -> (unit -> 'a) -> 'a
 
 (** A read of a surviving-space chunk key through [f]: the surviving space,
-    then, while a run is open, the outgoing one. Other keys are read once. *)
+    then, while a run is open, the outgoing one under the shared publish lock.
+    Other keys are read once. *)
 val read : t -> Key.t -> (Key.t -> 'a option) -> 'a option
 
 (** The files a delete of [key] removes: a chunk in both spaces. *)

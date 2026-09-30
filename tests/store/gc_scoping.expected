@@ -1,3 +1,5 @@
+./gc/collector.ml
+./gc/gc_record.ml
 ./store/chunk_spaces.ml
 ./store/composite.ml
 ./store/gc_generation.ml

@@ -1,0 +1,65 @@
+(** The chunk collector (spec algorithms/gc.md §5.5, §5.9): one session per
+    collectable main of a domain, each under that main's run lock. The first
+    collectable main in role order also owes its deletions to the domain's
+    replicas and backfills, through their durable job logs. *)
+
+open Tsync_core
+open Tsync_store
+
+type failure =
+  | Unsupported of string  (** no main is a local filesystem store *)
+  | Busy  (** another session holds a main's run lock *)
+
+type outcome =
+  | Completed
+  | Suspended of { phase : Gc_record.phase; cursor : string }
+      (** the budget ran out at a unit boundary; the run stays open *)
+  | Halted of string
+      (** a body or area that must not be read as "no references": the run stays
+          open, nothing discarded *)
+
+type stats = {
+  main : string;
+  outcome : outcome;
+  roots_marked : int;
+  chunks_promoted : int;
+  chunks_verified : int;
+  chunks_corrupt : int;
+  chunks_unreadable : int;
+  chunks_cleared : int;
+  chunks_reclaimed : int;
+  bytes_reclaimed : int;
+}
+
+(** What a dry run found on one main; nothing was written. *)
+type survey = {
+  surveyed : string;
+  run : (Gc_record.phase * string) option;  (** an open run, with its cursor *)
+  run_unreadable : bool;
+  chunks_referenced : int;
+  chunks_reclaimable : int;
+  bytes_reclaimable : int;
+  chunks_missing : Chunk_key.t list;
+      (** referenced but absent from the main: damaged files *)
+  per_copy : (string * int) list;
+      (** deletions a collection would owe each copy *)
+  chunks_corrupt : int;  (** with [verify]: referenced chunks that misread *)
+}
+
+(** Collect each collectable main: resume or open a run and take it as far as
+    [budget] seconds allow, waiting [pause] between units; at least one unit
+    runs. [keep] abandons instead, putting back every chunk still outgoing. With
+    [verify], each chunk this run promotes is re-hashed and its marker filed or
+    cleared. *)
+val run :
+  ?budget:float ->
+  ?pause:float ->
+  ?verify:bool ->
+  ?keep:bool ->
+  Composite.t ->
+  (stats list, failure) result
+
+(** Report what a collection would reclaim, per main; [Error reason] inside the
+    list when a body stops the survey as it would stop marking. *)
+val dry_run :
+  ?verify:bool -> Composite.t -> ((survey, string) result list, failure) result

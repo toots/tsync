@@ -20,10 +20,6 @@ type member = { name : string; role : role; store : Store.t }
 
 (** Domain knowledge a copy job needs, injected (06 §1). *)
 type knowledge = {
-  chunk_names : Bigstring.t -> Chunk_key.t list;
-      (** the chunks a body names, if it is a manifest *)
-  describe : Bigstring.t -> (string * int) option;
-      (** a manifest's recorded name and size, for the status report *)
   is_index : Key.t -> bool;  (** per-store caches no copy carries *)
   is_journal : Key.t -> bool;
       (** journal entries and the cursor, which a backfill skips *)
@@ -127,3 +123,7 @@ val submit_collection_delete :
   shard:string ->
   generation:int ->
   unit
+
+(** Collection deletions of this generation not yet settled on any copy, in
+    this process's queues or submitted to the owner. *)
+val collection_owed : t -> generation:int -> int

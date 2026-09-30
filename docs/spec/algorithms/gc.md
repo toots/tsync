@@ -469,7 +469,7 @@ the collection, so no caller names F, reads R, or orders lookups:
 
 | Operation on a chunk key | The driver does |
 |---|---|
-| get, range, head | S, then F. A miss in S re-reads R's presence before it is believed, so a cached "no run" bit can reorder lookups but never turn "in F" into "absent". Reads never promote |
+| get, range, head | S, then F. A miss in S re-reads R's presence before it is believed, so a cached "no run" bit can reorder lookups but never turn "in F" into "absent". F is read holding the publish lock shared, then S once more: a reader never observes a shard its doom step is emptying (a copy's restore check would otherwise find a doomed chunk and put it back), and a chunk promoted between the reads is found. Reads never promote |
 | put | writes into S |
 | delete | deletes from both spaces, and the chunk's corruption marker is the caller's as usual |
 | listing of the chunk area | the union of both spaces under plain keys, each name once; keys of F are never listed as such |
@@ -501,8 +501,8 @@ dry_run():
         referenced += chunks named by body
   for each chunk c listed in the chunk area (both spaces, §5.8), with its size:
      if c not in referenced: count c and its bytes as reclaimable
-  report referenced, reclaimable count and bytes, and per-copy the number of those keys the run would
-  tell that copy to delete
+  report referenced, reclaimable count and bytes, the referenced chunks absent from the chunk area
+  (damage), and per-copy the number of reclaimable keys the run would tell that copy to delete
 ```
 
 A body that stops marking stops the dry run with the same report, having deleted nothing. The

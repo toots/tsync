@@ -1,0 +1,29 @@
+(executable
+ (name plan_test)
+ (modules plan_test)
+ (libraries tsync_core tsync_store tsync_sync tsync_gc))
+
+(rule
+ (with-stdout-to
+  plan_test.output
+  (run ./plan_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff plan_test.expected plan_test.output)))
+
+(executable
+ (name collector_test)
+ (modules collector_test)
+ (libraries contract tsync_core tsync_store tsync_gc unix))
+
+(rule
+ (with-stdout-to
+  collector_test.output
+  (run ./collector_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff collector_test.expected collector_test.output)))

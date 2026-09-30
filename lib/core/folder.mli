@@ -1,7 +1,5 @@
 (** Folder markers, anchors and trash entries (spec 02 §2.7–2.9). *)
 
-open Tsync_core
-
 (** "the folder [id] appears here under [name]" *)
 type marker = { name : string; id : Folder_id.t }
 

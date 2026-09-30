@@ -12,12 +12,7 @@ let root =
 let d = Domain_name.v "docs"
 
 let knowledge =
-  {
-    Composite.chunk_names = Manifest.chunk_names;
-    describe = (fun _ -> None);
-    is_index = (fun _ -> false);
-    is_journal = (fun _ -> false);
-  }
+  { Composite.is_index = (fun _ -> false); is_journal = (fun _ -> false) }
 
 let client name : (module Engine.S) =
   let data_dir = Filename.concat root (name ^ "/data") in

@@ -141,13 +141,7 @@ let escape_name n =
        (List.of_seq (String.to_seq n)))
 
 type member = { name : string; role : role; store : Store.t }
-
-type knowledge = {
-  chunk_names : Bigstring.t -> Chunk_key.t list;
-  describe : Bigstring.t -> (string * int) option;
-  is_index : Key.t -> bool;
-  is_journal : Key.t -> bool;
-}
+type knowledge = { is_index : Key.t -> bool; is_journal : Key.t -> bool }
 
 (* The job a copy log is running, for the status report. *)
 type running = {
@@ -181,6 +175,7 @@ type core = {
   knowledge : knowledge;
   heard : (string, unit) Hashtbl.t;
   heard_m : Mutex.t;
+  settle_pending : bool Atomic.t;
 }
 
 type t = { core : core; source_store : Store.t; whole : Store.t }
@@ -241,6 +236,16 @@ let read ?(probing = true) t f =
           | Unreach e, _ -> raise (unreachable_of e)
           | _ -> None)
 
+let settle_retry = 2.
+let max_forwards = 4
+
+let submit t c job =
+  let r = { job; attempts = 0; last_error = None } in
+  if t.owner then ignore (Dqueue.post c.queue r)
+  else (
+    ignore (Dqueue.Records.create c.records (encode_record r));
+    t.poke ())
+
 let fill t job =
   List.iter
     (fun c ->
@@ -259,12 +264,7 @@ let fill t job =
       match job with
         | None -> ()
         | Some (Put k) when Key.chunk_of k <> None && t.owner -> ()
-        | Some job ->
-            let r = { job; attempts = 0; last_error = None } in
-            if t.owner then ignore (Dqueue.post c.queue r)
-            else (
-              ignore (Dqueue.Records.create c.records (encode_record r));
-              t.poke ()))
+        | Some job -> submit t c job)
     t.copies
 
 (* A best-effort forward of a chunk to a copy: never blocks the writer, and a
@@ -359,11 +359,14 @@ let rec sync t src c key restarts =
         ignore (c.member.store.delete key)
     | Some b -> (
         let v = Copy_memo.look c.memo in
-        let names = t.knowledge.chunk_names b in
+        let m = Manifest.of_body b in
+        let names = Option.fold ~none:[] ~some:Manifest.keys m in
         progress c (fun r ->
             r.chunks <- List.length names;
             r.checked <- 0;
-            if names <> [] then r.file <- t.knowledge.describe b);
+            Option.iter
+              (fun (m : Manifest.t) -> r.file <- Some (m.name, m.size))
+              m);
         let missing =
           List.find_opt
             (fun ck ->
@@ -414,6 +417,19 @@ let job_key = function
   | Delete_many ks -> Printf.sprintf "%d deletions" (List.length ks)
   | Collection_delete cd -> Printf.sprintf "collection %s" cd.shard
 
+(* A forward in flight when the deletion lands would put a doomed chunk back
+   on the copy; later forwards are skipped while every slot is held. *)
+let without_forwards c f =
+  for _ = 1 to max_forwards do
+    Rt.Semaphore.acquire c.forwards
+  done;
+  Fun.protect
+    ~finally:(fun () ->
+      for _ = 1 to max_forwards do
+        Rt.Semaphore.release c.forwards
+      done)
+    f
+
 let run_job_body t src c r =
   guard t c.member.role ("copy to " ^ c.member.name);
   match r.job with
@@ -424,8 +440,59 @@ let run_job_body t src c r =
         let ks = List.filter (fun k -> not (main_holds src k)) cd.keys in
         Copy_memo.forget c.memo (List.filter_map Key.chunk_of ks);
         let markers = List.filter_map Key.marker_of ks in
-        c.member.store.delete_multi (ks @ markers);
+        without_forwards c (fun () ->
+            c.member.store.delete_multi (ks @ markers));
         List.iter (fun k -> if main_holds src k then sync t src c k 0) cd.keys
+
+let collection_owed t ~generation () =
+  List.fold_left
+    (fun n c ->
+      List.fold_left
+        (fun n id ->
+          match Dqueue.Records.read c.records id with
+            | `Body b -> (
+                match decode_record b with
+                  | Some { job = Collection_delete cd; _ }
+                    when cd.generation = generation ->
+                      n + 1
+                  | _ -> n)
+            | `Gone -> n)
+        n
+        (Dqueue.Records.list c.records))
+    0 t.copies
+
+(* Whether some main's run lock was busy, so G may still await settling. *)
+let settle_generation t =
+  List.exists
+    (fun m ->
+      match Chunk_spaces.of_store m.store with
+        | None -> false
+        | Some spaces -> (
+            match
+              Chunk_spaces.with_run_lock spaces t.domain (fun () ->
+                  Gc_generation.settle m.store t.domain ~owed:(fun g ->
+                      collection_owed t ~generation:g ()))
+            with
+              | Ok () -> false
+              | Error `Busy -> true))
+    t.mains
+
+(* After the job's record completes, and again while a collector holds the run
+   lock; one pending attempt per domain. *)
+let settle_later t =
+  if Atomic.compare_and_set t.settle_pending false true then
+    Rt.spawn ~name:"settle generation" (fun () ->
+        let rec attempt () =
+          Rt.sleep settle_retry;
+          match settle_generation t with
+            | true -> attempt ()
+            | false -> Atomic.set t.settle_pending false
+            | exception e ->
+                Atomic.set t.settle_pending false;
+                Log.warn "cannot settle the collection generation: %s"
+                  (Printexc.to_string e)
+        in
+        attempt ())
 
 let run_job t src c _id r ~cancel:_ =
   Mutex.protect c.memo_m (fun () ->
@@ -441,7 +508,9 @@ let run_job t src c _id r ~cancel:_ =
           });
   Fun.protect
     ~finally:(fun () -> Mutex.protect c.memo_m (fun () -> c.running <- None))
-    (fun () -> run_job_body t src c r)
+    (fun () ->
+      run_job_body t src c r;
+      match r.job with Collection_delete _ -> settle_later t | _ -> ())
 
 let record_kind =
   {
@@ -581,21 +650,6 @@ let make_store t ~source_only =
       traffic = None;
     }
 
-(* G lives on the collecting main only; the others read as 0, and any main
-   that cannot answer makes it unknown. *)
-let main_generation domain mains =
-  List.fold_left
-    (fun acc m ->
-      match acc with
-        | None -> None
-        | Some g -> (
-            match Gc_generation.read m.store domain with
-              | Some g' -> Some (max g g')
-              | None -> None
-              | exception ((Stop.Stopping | Rt.Cancelled) as e) -> raise e
-              | exception _ -> None))
-    (Some 0) mains
-
 let create ~domain ~data_dir ~owner ~poke ~knowledge members =
   let mains = List.filter (fun m -> m.role = Main) members in
   let archives = List.filter (fun m -> m.role = Read_only) members in
@@ -603,7 +657,9 @@ let create ~domain ~data_dir ~owner ~poke ~knowledge members =
     List.filter (fun m -> m.role = Replica) members
     @ List.filter (fun m -> m.role = Backfill) members
   in
-  let generation () = main_generation domain mains in
+  let generation () =
+    Gc_generation.read_mains (List.map (fun m -> m.store) mains) domain
+  in
   let copies =
     List.map
       (fun m ->
@@ -626,7 +682,7 @@ let create ~domain ~data_dir ~owner ~poke ~knowledge members =
               ~ordered:true record_kind records;
           memo_m = Mutex.create ();
           memo = Copy_memo.create ~generation ();
-          forwards = Rt.Semaphore.create ~name:"forwards" 4;
+          forwards = Rt.Semaphore.create ~name:"forwards" max_forwards;
           running = None;
         })
       copy_members
@@ -649,6 +705,7 @@ let create ~domain ~data_dir ~owner ~poke ~knowledge members =
       knowledge;
       heard = Hashtbl.create 4;
       heard_m = Mutex.create ();
+      settle_pending = Atomic.make false;
     }
   in
   {
@@ -665,10 +722,11 @@ let members t =
   t.core.mains @ List.map (fun c -> c.member) t.core.copies @ t.core.archives
 
 let start ?(paused = false) (t : t) =
-  if t.core.owner then
+  if t.core.owner then (
+    settle_later t.core;
     List.iter
       (fun c -> Dqueue.start ~paused c.queue (run_job t.core t.source_store c))
-      t.core.copies
+      t.core.copies)
 
 let rescan t = List.iter (fun c -> Dqueue.rescan c.queue) t.core.copies
 
@@ -731,13 +789,10 @@ let parked t =
 let guard t (m : member) what = guard t.core m.role what
 
 let submit_collection_delete t (m : member) ~keys ~run ~shard ~generation =
-  match List.find_opt (fun c -> c.member.name = m.name) t.core.copies with
-    | None -> ()
-    | Some c ->
-        ignore
-          (Dqueue.post c.queue
-             {
-               job = Collection_delete { keys; run; shard; generation };
-               attempts = 0;
-               last_error = None;
-             })
+  List.iter
+    (fun c ->
+      if c.member.name = m.name then
+        submit t.core c (Collection_delete { keys; run; shard; generation }))
+    t.core.copies
+
+let collection_owed t ~generation = collection_owed t.core ~generation ()

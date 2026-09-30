@@ -24,12 +24,7 @@ let () =
   let composite =
     Composite.create ~domain:d ~data_dir ~owner:true ~poke:ignore
       ~knowledge:
-        {
-          Composite.chunk_names = Manifest.chunk_names;
-          describe = (fun _ -> None);
-          is_index = (fun _ -> false);
-          is_journal = (fun _ -> false);
-        }
+        { Composite.is_index = (fun _ -> false); is_journal = (fun _ -> false) }
       [{ name = "main"; role = Main; store }]
   in
   let module C = struct
