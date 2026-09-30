@@ -1,0 +1,118 @@
+(** Local filesystem helpers (spec 01 §6.3–6.4) and the durable write primitives
+    (durable-queue §3.2).
+
+    Every call retries EINTR. A helper answers "absent" only for ENOENT or
+    ENOTDIR, and raises every other error as a classified {!Fail.E}. *)
+
+type bigstring = Xxh.bigstring
+
+(** Retry on EINTR. *)
+val eintr : (unit -> 'a) -> 'a
+
+(** Retry on EINTR and turn Unix errors into classified failures. *)
+val sys : ?op:string -> (unit -> 'a) -> 'a
+
+(** [None] only for ENOENT/ENOTDIR. *)
+val opt : (unit -> 'a) -> 'a option
+
+val stat_opt : string -> Unix.LargeFile.stats option
+val lstat_opt : string -> Unix.LargeFile.stats option
+val exists : string -> bool
+val is_dir : string -> bool
+
+(** The kind of what is at a path, without following a link. *)
+val kind : string -> [ `Absent | `Dir | `File | `Link | `Other ]
+
+val openfile : ?perm:int -> string -> Unix.open_flag list -> Unix.file_descr
+val close : Unix.file_descr -> unit
+val with_fd : Unix.file_descr -> (Unix.file_descr -> 'a) -> 'a
+val read_fd_all : Unix.file_descr -> string
+val read_file_opt : string -> string option
+
+(** Raises ABSENT for a missing file. *)
+val read_file : string -> string
+
+(** Sorted entries, without [.] and [..]; [None] for a missing directory. *)
+val readdir_opt : string -> string list option
+
+(** As {!readdir_opt}, a missing directory listing as empty. *)
+val readdir : string -> string list
+
+val write_all : Unix.file_descr -> string -> unit
+val fsync : Unix.file_descr -> unit
+val fsync_dir : string -> unit
+
+(** Create a directory chain, fsyncing the parent of every directory created
+    unless [durable] is false. *)
+val mkdir_p : ?perm:int -> ?durable:bool -> string -> unit
+
+(** Durable replace: temporary, fsync, rename, directory fsync. *)
+val durable_replace : ?perm:int -> string -> string -> unit
+
+(** Replace without the directory fsync: never torn, not yet durable. *)
+val replace : ?perm:int -> string -> string -> unit
+
+(** Durable create-if-absent by hard link (or no-replace rename). *)
+val create_if_absent : ?perm:int -> string -> string -> [ `Created | `Exists ]
+
+(** One write of a whole line, then fsync. *)
+val append_durable : ?perm:int -> string -> string -> unit
+
+(** Unlink; answers whether something was there. *)
+val release : string -> bool
+
+(** Best-effort cleanup whose outcome nobody reads. *)
+val unlink_quiet : string -> unit
+
+(** Remove a tree without following symbolic links. *)
+val rm_rf : string -> unit
+
+val rename : ?op:string -> string -> string -> unit
+
+(** EEXIST when the target exists. *)
+val rename_noreplace : string -> string -> unit
+
+val link : string -> string -> unit
+
+(** A fresh temporary name in [dir]. *)
+val temp_in : string -> string
+
+(** Write [data] to a new temporary in [dir] and fsync it. *)
+val write_temp : ?perm:int -> string -> string -> string
+
+val pread :
+  Unix.file_descr -> bigstring -> boff:int -> len:int -> off:int -> int
+
+(** Reads until [len] or end of file. *)
+val pread_full :
+  Unix.file_descr -> bigstring -> boff:int -> len:int -> off:int -> int
+
+val pwrite_all :
+  Unix.file_descr -> bigstring -> boff:int -> len:int -> off:int -> unit
+
+(** Reserve blocks, falling back to setting the size; size 0 is a no-op. *)
+val reserve : Unix.file_descr -> int -> unit
+
+(** Available, free and total bytes; [None] when unknown. *)
+val disk_space : string -> (int64 * int64 * int64) option
+
+(** A BSD lock; [false] when [block] is false and the lock is held. *)
+val flock : ?exclusive:bool -> ?block:bool -> Unix.file_descr -> bool
+
+val funlock : Unix.file_descr -> unit
+
+(** Copy-on-write clone into a new file. *)
+val clone : string -> string -> unit
+
+val is_network_fs : string -> bool
+val pid_alive : int -> bool
+val bigstring_create : int -> bigstring
+val bigstring_of_string : string -> bigstring
+val string_of_bigstring : ?off:int -> ?len:int -> bigstring -> string
+
+(** A private read-only mapping of a file never modified in place. *)
+val map_file : string -> bigstring
+
+(** Remove temporaries in [dir] whose owner is dead, or older than [older_than]
+    seconds when they name no owner. *)
+val sweep_temps : ?older_than:float -> string -> unit

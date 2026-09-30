@@ -1,0 +1,26 @@
+; Each test prints what it checked; the output is compared with a committed
+; <name>.expected snapshot, so a change reads as a diff.
+
+(executables
+ (names rt_test core_test)
+ (libraries tsync_core unix))
+
+(rule
+ (with-stdout-to
+  rt_test.output
+  (run ./rt_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff rt_test.expected rt_test.output)))
+
+(rule
+ (with-stdout-to
+  core_test.output
+  (run ./core_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff core_test.expected core_test.output)))

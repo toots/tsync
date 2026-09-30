@@ -1,0 +1,9 @@
+ok   sleep
+ok   timeout
+ok   first
+ok   all order
+ok   mutex exclusion
+ok   semaphore bound
+ok   promise
+ok   cancel runs finally
+8 checks
