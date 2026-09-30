@@ -1,0 +1,13 @@
+(executable
+ (name config_test)
+ (libraries tsync_core tsync_config tsync_catalog tsync_store))
+
+(rule
+ (with-stdout-to
+  config_test.output
+  (run ./config_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff config_test.expected config_test.output)))

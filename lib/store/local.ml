@@ -1,5 +1,12 @@
 open Tsync_core
 
+let fields =
+  Field_spec.
+    [
+      f ~required:true ~check:absolute_or_home "path" "Store root" Path;
+      f ~default:"true" "verifyWrites" "Verify chunk writes" Bool;
+    ]
+
 type gate =
   key:Key.t ->
   source:[ `Body of string | `Copy_of of Key.t ] ->

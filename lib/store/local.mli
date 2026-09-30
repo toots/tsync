@@ -5,6 +5,9 @@
     no-replace rename), and no symbolic link at or below the root is followed.
 *)
 
+(** The driver's config fields (backends/local §2). *)
+val fields : Tsync_core.Field_spec.field list
+
 (** The collection's reference gate (gc §5.4), run around every put or copy
     whose destination is in a manifest or version area. It receives the body
     being put, or the key being copied, and the write to perform. *)

@@ -1,0 +1,3 @@
+(library
+ (name tsync_android)
+ (libraries tsync_core))

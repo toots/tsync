@@ -1,0 +1,3 @@
+(library
+ (name tsync_http_proxy)
+ (libraries tsync_core))

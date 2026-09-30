@@ -1,0 +1,37 @@
+== accepted
+minimal                                  ok: Files ro=false backends=disk:main
+read order main < replica < archive < backfill ok: Files ro=false backends=m:main,r:replica,a:readOnly,b:backfill
+a lone readOnly store forces read-only   ok: Archive ro=true backends=a:readOnly
+sizes and string booleans                ok: Files ro=false backends=disk:main
+
+== refused, each naming its path
+unknown top-level key                    refused: unknown key(s) "maxUpload"
+unknown backend key                      refused: domains[0].backends[0]: unknown key(s) "bukcet"
+missing versioning                       refused: domains[0].versioning: required boolean is missing
+reserved domain name                     refused: domains[0].name: "gc-jobs" is a reserved name
+SHARES beside a local store              refused: domains[0].name: "SHARES" is a reserved name on a local-filesystem store
+duplicate domain ignoring case           refused: domains: domain name "files" is used twice (ignoring case)
+replica without main                     refused: domains[0].backends: a replica is a copy of a source of truth: this domain has no main
+link on a local store                    refused: domains[0].backends[0]: "link" names a link, and a local store has none
+relative local path                      refused: domains[0].backends[0].path: must be absolute or start with ~/
+member named ..                          refused: domains[0].backends[0].name: invalid backend name ".."
+short http-proxy secret                  refused: domains[0].frontends[0].secret: must have at least 32 characters
+plain http to a remote host              refused: domains[0].backends[0].url: plain http is refused for a host that is not a loopback address
+plain http to loopback                   ok: F ro=false backends=nas:main
+two presenting frontends                 refused: domains[0].frontends: at most one presenting frontend (fuse, file_provider, android) per domain
+a frontend twice                         refused: domains[0].frontends: fuse is listed twice
+unused link                              refused: links.slow: no backend uses this link
+maxRate below minRate                    refused: uplink.maxRate: is below minRate
+wrong JSON type                          refused: domains[0].readOnly: expected a boolean
+chunk size out of range                  refused: domains[0].chunkSize: must lie between 256 KiB and 256 MiB
+
+== sizes
+"512K"     524288
+"8M"       8388608
+"1G"       1073741824
+"1048576"  1048576
+"8.0 MB"   8388608
+"1.5 GiB"  1610612736
+"0"        refused
+"-1"       refused
+"x"        refused

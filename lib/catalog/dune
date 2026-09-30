@@ -1,0 +1,20 @@
+; The catalog lists only what this build compiles: a config naming a frontend
+; that is not built is refused when it is parsed.
+
+(library
+ (name tsync_catalog)
+ (libraries
+  tsync_core
+  tsync_store
+  tsync_http_proxy
+  tsync_android
+  (select
+   catalog_fuse.ml
+   from
+   (tsync_fuse -> catalog_fuse.enabled.ml)
+   (-> catalog_fuse.disabled.ml))
+  (select
+   catalog_file_provider.ml
+   from
+   (tsync_file_provider -> catalog_file_provider.enabled.ml)
+   (-> catalog_file_provider.disabled.ml))))
