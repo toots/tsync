@@ -254,7 +254,11 @@ let machine_report arg children =
          (fun r ans ->
            let base =
              [
-               ("role", `String "owner");
+               ( "role",
+                 `String
+                   (match r.child.args with
+                     | "store-server" :: _ -> "store-server"
+                     | _ -> "owner") );
                ("serves", `List (List.map (fun d -> `String d) r.child.domains));
                ("socketPath", `String r.child.socket);
              ]
