@@ -391,7 +391,9 @@ let parse_domain path j =
     List.length
       (List.filter
          (fun t ->
-           match Frontend.find t with Some f -> f.presenting | None -> false)
+           match Frontend.find t with
+             | Some f -> f.presenting <> None
+             | None -> false)
          types)
     > 1
   then

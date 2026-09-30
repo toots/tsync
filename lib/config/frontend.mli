@@ -6,7 +6,11 @@ open Tsync_core
 
 type t = {
   fields : Field_spec.field list;
-  presenting : bool;  (** presents the domain to a user; one per domain *)
+  presenting : [ `Per_domain | `Shared ] option;
+      (** presents the domain to a user (one per domain), from a process per
+          domain or from one process for all its domains *)
+  commands_only : string option;
+      (** never run by [tsync start], which refuses it with this text *)
 }
 
 (** At module initialisation, before any fiber runs. *)

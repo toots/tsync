@@ -28,4 +28,5 @@ let fields =
     ]
 
 let () =
-  Tsync_config.Frontend.register "http-proxy" { fields; presenting = false }
+  Tsync_config.Frontend.register "http-proxy"
+    { fields; presenting = None; commands_only = None }

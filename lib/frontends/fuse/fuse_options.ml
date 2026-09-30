@@ -21,4 +21,6 @@ let fields =
         String;
     ]
 
-let () = Tsync_config.Frontend.register "fuse" { fields; presenting = true }
+let () =
+  Tsync_config.Frontend.register "fuse"
+    { fields; presenting = Some `Per_domain; commands_only = None }
