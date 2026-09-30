@@ -32,3 +32,27 @@
  (alias runtest)
  (action
   (diff composite_test.expected composite_test.output)))
+
+(executable
+ (name gcs_test)
+ (modules gcs_test)
+ (libraries
+  contract
+  tsync_core
+  tsync_store
+  tsync_gcs
+  tsync_http
+  unix
+  yojson
+  ptime
+  base64))
+
+(rule
+ (with-stdout-to
+  gcs_test.output
+  (run ./gcs_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff gcs_test.expected gcs_test.output)))

@@ -11,6 +11,7 @@ type endpoint
 val endpoint : ?ca_file:string -> ?max_connections:int -> string -> endpoint
 
 val base_path : endpoint -> string
+val host : endpoint -> string
 val url : endpoint -> string
 
 type response = { status : int; headers : Codec.headers; body : string }

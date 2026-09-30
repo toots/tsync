@@ -81,6 +81,7 @@ let endpoint ?ca_file ?(max_connections = 32) url =
   }
 
 let base_path e = e.base
+let host e = e.host
 let url e = e.url
 
 type response = { status : int; headers : Codec.headers; body : string }

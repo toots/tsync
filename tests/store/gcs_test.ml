@@ -1,0 +1,201 @@
+open Tsync_core
+open Tsync_store
+open Tsync_http
+
+let p = Contract.p
+
+(* An in-memory bucket speaking the JSON API and the XML bulk delete. *)
+let objects : (string, string * float) Hashtbl.t = Hashtbl.create 64
+let requests = ref []
+
+let pct_decode s =
+  let b = Buffer.create (String.length s) in
+  let rec go i =
+    if i < String.length s then
+      if s.[i] = '%' && i + 2 < String.length s then (
+        Buffer.add_char b
+          (Char.chr (int_of_string ("0x" ^ String.sub s (i + 1) 2)));
+        go (i + 3))
+      else (
+        Buffer.add_char b s.[i];
+        go (i + 1))
+  in
+  go 0;
+  Buffer.contents b
+
+let query q =
+  List.filter_map
+    (fun kv ->
+      match String.index_opt kv '=' with
+        | Some i ->
+            Some
+              ( String.sub kv 0 i,
+                pct_decode (String.sub kv (i + 1) (String.length kv - i - 1)) )
+        | None -> None)
+    (String.split_on_char '&' q)
+
+let meta name (body, t) =
+  `Assoc
+    [
+      ("name", `String name);
+      ("size", `String (string_of_int (String.length body)));
+      ( "updated",
+        `String (Ptime.to_rfc3339 ~frac_s:3 (Option.get (Ptime.of_float_s t)))
+      );
+      ("etag", `String (Digest.to_hex (Digest.string body)));
+    ]
+
+let json j =
+  { Server.status = 200; headers = []; body = String (Yojson.Safe.to_string j) }
+
+let empty status = { Server.status; headers = []; body = Empty }
+let page_size = 3
+
+let handler (r : Server.request) read_body =
+  requests := (r.meth ^ " " ^ r.path) :: !requests;
+  let q = query r.query in
+  match (r.meth, String.split_on_char '/' r.path) with
+    | "POST", [""; "upload"; "storage"; "v1"; "b"; _; "o"] ->
+        let name = List.assoc "name" q and body = read_body ~limit:max_int in
+        if
+          List.assoc_opt "ifGenerationMatch" q = Some "0"
+          && Hashtbl.mem objects name
+        then empty 412
+        else (
+          Hashtbl.replace objects name (body, Unix.gettimeofday ());
+          json (meta name (body, 0.)))
+    | "GET", [""; "storage"; "v1"; "b"; _; "o"] ->
+        let prefix = Option.value ~default:"" (List.assoc_opt "prefix" q) in
+        let names =
+          Hashtbl.fold
+            (fun k _ acc ->
+              if String.starts_with ~prefix k then k :: acc else acc)
+            objects []
+          |> List.sort compare
+        in
+        let start =
+          Option.value ~default:0
+            (Option.map int_of_string (List.assoc_opt "pageToken" q))
+        in
+        let page =
+          List.filteri (fun i _ -> i >= start && i < start + page_size) names
+        in
+        json
+          (`Assoc
+             (( "items",
+                `List (List.map (fun n -> meta n (Hashtbl.find objects n)) page)
+              )
+             ::
+             (if start + page_size < List.length names then
+                [("nextPageToken", `String (string_of_int (start + page_size)))]
+              else [])))
+    | ( "POST",
+        [""; "storage"; "v1"; "b"; _; "o"; src; "rewriteTo"; "b"; _; "o"; dst] )
+      -> (
+        match Hashtbl.find_opt objects (pct_decode src) with
+          | Some (body, _) ->
+              Hashtbl.replace objects (pct_decode dst)
+                (body, Unix.gettimeofday ());
+              json (`Assoc [("done", `Bool true)])
+          | None -> empty 404)
+    | meth, [""; "storage"; "v1"; "b"; _; "o"; k] -> (
+        let name = pct_decode k in
+        match (meth, Hashtbl.find_opt objects name) with
+          | _, None -> empty 404
+          | "DELETE", Some _ ->
+              Hashtbl.remove objects name;
+              empty 204
+          | "GET", Some ((body, _) as o) ->
+              if List.assoc_opt "alt" q <> Some "media" then json (meta name o)
+              else (
+                match Codec.header r.headers "range" with
+                  | None -> { status = 200; headers = []; body = String body }
+                  | Some range ->
+                      Scanf.sscanf range "bytes=%d-%d" (fun a b ->
+                          let size = String.length body in
+                          if a >= size then empty 416
+                          else (
+                            let b = min b (size - 1) in
+                            {
+                              status = 206;
+                              headers =
+                                [
+                                  ( "content-range",
+                                    Printf.sprintf "bytes %d-%d/%d" a b size );
+                                ];
+                              body = String (String.sub body a (b - a + 1));
+                            })))
+          | _ -> empty 405)
+    | "POST", [""; _] when r.query = "delete" ->
+        let body = read_body ~limit:max_int in
+        if
+          Codec.header r.headers "content-md5"
+          <> Some (Base64.encode_string (Digest.string body))
+        then empty 400
+        else (
+          let rec keys from acc =
+            match Text.find_from body "<Key>" from with
+              | None -> acc
+              | Some i ->
+                  let j = Option.get (Text.find_from body "</Key>" i) in
+                  keys j (String.sub body (i + 5) (j - i - 5) :: acc)
+          in
+          List.iter
+            (fun k ->
+              Hashtbl.remove objects
+                (List.fold_left
+                   (fun k (sub, by) -> Text.replace_all ~sub ~by k)
+                   k
+                   [
+                     ("&lt;", "<");
+                     ("&gt;", ">");
+                     ("&quot;", "\"");
+                     ("&apos;", "'");
+                     ("&amp;", "&");
+                   ]))
+            (keys 0 []);
+          { status = 200; headers = []; body = String "<DeleteResult/>" })
+    | _ -> empty 400
+
+let () =
+  Rt.run_sync (fun () ->
+      let server =
+        Server.serve [Unix.ADDR_INET (Unix.inet_addr_loopback, 0)] handler
+      in
+      let port =
+        match Server.addresses server with
+          | [ADDR_INET (_, p)] -> p
+          | _ -> assert false
+      in
+      let s =
+        (Option.get (Driver.find "gcs")).create ~name:"gcs"
+          [
+            ("bucket", Field_spec.S "b");
+            ( "endpoint",
+              Field_spec.S (Printf.sprintf "http://127.0.0.1:%d" port) );
+          ]
+      in
+      Contract.run s;
+      p "\n== gcs wire (backends/gcs §6)\n";
+      p "segment: %s | %s\n"
+        (Tsync_gcs.Gcs.segment "tsync/d/.chunks/aabb-ccdd")
+        (Tsync_gcs.Gcs.segment "a-b_c.d~e");
+      List.iter
+        (fun t ->
+          p "rfc3339 %s: %s\n" t
+            (try Printf.sprintf "%.3f" (Tsync_gcs.Gcs.rfc3339 t)
+             with Fail.E f -> Fail.kind_name f.kind))
+        [
+          "1970-01-01T00:00:00.000Z";
+          "2001-09-09T01:46:40Z";
+          "2001-09-09T03:46:40+02:00";
+          "garbage";
+        ];
+      p "delete body: %s\n" (Tsync_gcs.Gcs.delete_body ["a/x"; "a/y"; "<&>\"'"]);
+      p "no refusals: %d\n"
+        (List.length (Tsync_gcs.Gcs.delete_errors "<DeleteResult/>"));
+      List.iter
+        (fun (c, k) -> p "refusal %s %s\n" c k)
+        (Tsync_gcs.Gcs.delete_errors
+           "<DeleteResult><Error><Key>a&amp;b</Key><Code>AccessDenied</Code></Error><Error><Key>c</Key><Code>NoSuchKey</Code></Error></DeleteResult>");
+      Server.close server)

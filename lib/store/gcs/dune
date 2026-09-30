@@ -1,8 +1,16 @@
 ; linkall: the driver registers itself when linked.
-; Optional: a build without its dependencies refuses a config naming it.
 
 (library
  (name tsync_gcs)
- (optional)
  (library_flags (-linkall))
- (libraries tsync_core tsync_store))
+ (private_modules gcs_auth)
+ (libraries
+  tsync_core
+  tsync_store
+  tsync_http
+  unix
+  yojson
+  base64
+  ptime
+  x509
+  mirage-crypto-pk))
