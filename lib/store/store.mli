@@ -10,7 +10,8 @@ open Tsync_core
 type entry = {
   key : Key.t;
   size : int;
-  last_modified : float;  (** wall-clock epoch seconds, finest resolution kept *)
+  last_modified : float;
+      (** wall-clock epoch seconds, finest resolution kept *)
   etag : string option;  (** the store's version name, when it has one *)
 }
 
@@ -18,7 +19,8 @@ type caps = {
   share_url : string option;
   chunk_size : int option;  (** recommended for new files *)
   max_concurrency : int option;
-  verified : bool;  (** every chunk this store takes is checked, by someone known to run *)
+  verified : bool;
+      (** every chunk this store takes is checked, by someone known to run *)
 }
 
 (** The answer to a conditional create: [Won] when the name holds exactly the
@@ -31,7 +33,11 @@ type mode = Wait | Best_effort
 
 (** One folder of a [list_many] answer: its whole listing and a body (or
     absence) for each child object. *)
-type folder = { prefix : Key.prefix; listing : entry list; bodies : (Key.t * string option) list }
+type folder = {
+  prefix : Key.prefix;
+  listing : entry list;
+  bodies : (Key.t * string option) list;
+}
 
 type traffic = { uploaded : int Atomic.t; downloaded : int Atomic.t }
 
@@ -55,8 +61,13 @@ type t = {
           {!watch_interval}; the argument is the token last seen *)
   get_many : (Key.t list -> string option list) option;
   list_many : (Key.prefix list -> folder list) option;
-  verify_all : Key.prefix -> [`Queued of int | `Unsupported];
-  discard : chunk_prefix:Key.prefix -> run:string -> name:string -> Key.t list -> [`Queued | `Unsupported];
+  verify_all : Key.prefix -> [ `Queued of int | `Unsupported ];
+  discard :
+    chunk_prefix:Key.prefix ->
+    run:string ->
+    name:string ->
+    Key.t list ->
+    [ `Queued | `Unsupported ];
   capabilities : Key.prefix -> caps;
   fast_read : bool;
   local_path : string option;

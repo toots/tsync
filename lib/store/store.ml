@@ -1,11 +1,27 @@
 open Tsync_core
 
-type entry = { key : Key.t; size : int; last_modified : float; etag : string option }
-type caps = { share_url : string option; chunk_size : int option; max_concurrency : int option; verified : bool }
+type entry = {
+  key : Key.t;
+  size : int;
+  last_modified : float;
+  etag : string option;
+}
+
+type caps = {
+  share_url : string option;
+  chunk_size : int option;
+  max_concurrency : int option;
+  verified : bool;
+}
+
 type claim = Won | Held of string
 type mode = Wait | Best_effort
 
-type folder = { prefix : Key.prefix; listing : entry list; bodies : (Key.t * string option) list }
+type folder = {
+  prefix : Key.prefix;
+  listing : entry list;
+  bodies : (Key.t * string option) list;
+}
 
 type traffic = { uploaded : int Atomic.t; downloaded : int Atomic.t }
 
@@ -23,8 +39,13 @@ type t = {
   watch : Key.t -> string option -> unit;
   get_many : (Key.t list -> string option list) option;
   list_many : (Key.prefix list -> folder list) option;
-  verify_all : Key.prefix -> [`Queued of int | `Unsupported];
-  discard : chunk_prefix:Key.prefix -> run:string -> name:string -> Key.t list -> [`Queued | `Unsupported];
+  verify_all : Key.prefix -> [ `Queued of int | `Unsupported ];
+  discard :
+    chunk_prefix:Key.prefix ->
+    run:string ->
+    name:string ->
+    Key.t list ->
+    [ `Queued | `Unsupported ];
   capabilities : Key.prefix -> caps;
   fast_read : bool;
   local_path : string option;
@@ -32,11 +53,23 @@ type t = {
   traffic : traffic option;
 }
 
-let no_caps = { share_url = None; chunk_size = None; max_concurrency = None; verified = false }
+let no_caps =
+  {
+    share_url = None;
+    chunk_size = None;
+    max_concurrency = None;
+    verified = false;
+  }
+
 let new_traffic () = { uploaded = Atomic.make 0; downloaded = Atomic.make 0 }
 
 let get s k =
-  match s.get_opt k with Some b -> b | None -> Fail.absent ~op:("get " ^ Key.to_string k) "%s: no such object on %s" (Key.to_string k) s.name
+  match s.get_opt k with
+    | Some b -> b
+    | None ->
+        Fail.absent
+          ~op:("get " ^ Key.to_string k)
+          "%s: no such object on %s" (Key.to_string k) s.name
 
 let watch_interval = 2.
 
@@ -50,11 +83,14 @@ let checked s =
     s with
     get_range =
       (fun key off len ->
-        if len <= 0 || off < 0 then Fail.invalid ~op:"get_range" "bad range %d+%d" off len;
+        if len <= 0 || off < 0 then
+          Fail.invalid ~op:"get_range" "bad range %d+%d" off len;
         s.get_range key off len);
     delete_multi = (fun keys -> if keys <> [] then s.delete_multi keys);
-    get_many = Option.map (fun f keys -> if keys = [] then [] else f keys) s.get_many;
-    list_many = Option.map (fun f ps -> if ps = [] then [] else f ps) s.list_many;
+    get_many =
+      Option.map (fun f keys -> if keys = [] then [] else f keys) s.get_many;
+    list_many =
+      Option.map (fun f ps -> if ps = [] then [] else f ps) s.list_many;
   }
 
 (* A listed name that is not a valid key is skipped with a warning, never
@@ -63,7 +99,8 @@ let listed store_name name =
   match Key.of_string name with
     | Some k -> Some k
     | None ->
-        Log.once ("invalid-listed:" ^ name) Warn "%s: skipping listed name %S, not a valid key" store_name name;
+        Log.once ("invalid-listed:" ^ name) Warn
+          "%s: skipping listed name %S, not a valid key" store_name name;
         None
 
 let max_batch_keys = 256
@@ -79,8 +116,10 @@ let read_many s (entries : entry list) =
         let rec batches acc cur n bytes = function
           | [] -> List.rev (if cur = [] then acc else List.rev cur :: acc)
           | e :: rest ->
-              if cur <> [] && (n >= max_batch_keys || bytes + e.size > max_batch_bytes) then
-                batches (List.rev cur :: acc) [e] 1 e.size rest
+              if
+                cur <> []
+                && (n >= max_batch_keys || bytes + e.size > max_batch_bytes)
+              then batches (List.rev cur :: acc) [e] 1 e.size rest
               else batches acc (e :: cur) (n + 1) (bytes + e.size) rest
         in
         List.concat_map
@@ -93,5 +132,8 @@ let read_many s (entries : entry list) =
                   List.map (fun k -> (k, s.get_opt k)) keys)
           (batches [] [] 0 0 entries)
 
-let count_up s n = Option.iter (fun t -> ignore (Atomic.fetch_and_add t.uploaded n)) s.traffic
-let count_down s n = Option.iter (fun t -> ignore (Atomic.fetch_and_add t.downloaded n)) s.traffic
+let count_up s n =
+  Option.iter (fun t -> ignore (Atomic.fetch_and_add t.uploaded n)) s.traffic
+
+let count_down s n =
+  Option.iter (fun t -> ignore (Atomic.fetch_and_add t.downloaded n)) s.traffic

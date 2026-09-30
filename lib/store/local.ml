@@ -1,10 +1,17 @@
 open Tsync_core
 
-type gate = key:Key.t -> source:[`Body of string | `Copy_of of Key.t] -> (unit -> unit) -> unit
+type gate =
+  key:Key.t ->
+  source:[ `Body of string | `Copy_of of Key.t ] ->
+  (unit -> unit) ->
+  unit
 
 let temp_name () = ".tsync-tmp-" ^ Ids.short () ^ ".tmp"
+
 let is_gc_lock rel =
-  match String.split_on_char '/' rel with ["tsync"; _; "gc-run.lock"] -> true | _ -> false
+  match String.split_on_char '/' rel with
+    | ["tsync"; _; "gc-run.lock"] -> true
+    | _ -> false
 
 (* Every directory between the root and the key is refused if it is a
    symbolic link, so a link planted in the store cannot redirect an access. *)
@@ -15,7 +22,8 @@ let check_no_links root key =
     | seg :: rest -> (
         let d = Filename.concat dir seg in
         match Fs.lstat_opt d with
-          | Some { st_kind = S_LNK; _ } -> Fail.invalid "%s: a symbolic link inside the store" d
+          | Some { st_kind = S_LNK; _ } ->
+              Fail.invalid "%s: a symbolic link inside the store" d
           | Some { st_kind = S_DIR; _ } -> go d rest
           | Some _ -> Fail.raise_ Fail.Refused "%s: not a directory" d
           | None -> ())
@@ -27,9 +35,10 @@ let path root key =
   check_no_links root key;
   Filename.concat root key
 
-
 let read_opt root key =
-  match Fs.open_nofollow (path root key) with None -> None | Some fd -> Some (Fs.with_fd fd Fs.read_fd_all)
+  match Fs.open_nofollow (path root key) with
+    | None -> None
+    | Some fd -> Some (Fs.with_fd fd Fs.read_fd_all)
 
 let mkdirs root key =
   let dir = Filename.dirname (Filename.concat root (Key.to_string key)) in
@@ -71,17 +80,23 @@ let rec claim root key body retries =
       Fs.write_all fd body;
       Fs.fsync fd);
   let outcome =
-    Fun.protect ~finally:(fun () -> Fs.unlink_quiet tmp) (fun () ->
+    Fun.protect
+      ~finally:(fun () -> Fs.unlink_quiet tmp)
+      (fun () ->
         match Fs.eintr (fun () -> Unix.link tmp p) with
           | () -> `Won
           | exception Unix.Unix_error (Unix.EEXIST, _, _) -> `Taken
-          | exception Unix.Unix_error ((Unix.EPERM | Unix.EOPNOTSUPP | Unix.EMLINK), _, _) -> (
+          | exception
+              Unix.Unix_error
+                ((Unix.EPERM | Unix.EOPNOTSUPP | Unix.EMLINK), _, _) -> (
               match Fs.rename_noreplace tmp p with
                 | () -> `Won
                 | exception Fail.E { kind = Exists; _ } -> `Taken
                 | exception Fail.E { kind = Refused; _ } ->
-                    Fail.raise_ Fail.Refused "%s: this filesystem cannot claim a name" p)
-          | exception Unix.Unix_error (e, fn, a) -> raise (Fail.E (Fail.of_unix e fn a)))
+                    Fail.raise_ Fail.Refused
+                      "%s: this filesystem cannot claim a name" p)
+          | exception Unix.Unix_error (e, fn, a) ->
+              raise (Fail.E (Fail.of_unix e fn a)))
   in
   Fs.fsync_dir dir;
   match outcome with
@@ -91,7 +106,9 @@ let rec claim root key body retries =
           | Some holder when holder = body -> Store.Won
           | Some holder -> Store.Held holder
           | None ->
-              if retries <= 0 then Fail.raise_ Fail.Load "%s: the holder vanished during the claim" (Key.to_string key)
+              if retries <= 0 then
+                Fail.raise_ Fail.Load "%s: the holder vanished during the claim"
+                  (Key.to_string key)
               else claim root key body (retries - 1))
 
 let is_reference_key key =
@@ -100,11 +117,19 @@ let is_reference_key key =
     | _ -> false
 
 let entry_of rel (st : Unix.LargeFile.stats) =
-  { Store.key = rel; size = Int64.to_int st.st_size; last_modified = st.st_mtime; etag = None }
+  {
+    Store.key = rel;
+    size = Int64.to_int st.st_size;
+    last_modified = st.st_mtime;
+    etag = None;
+  }
 
 let list name root prefix max_keys =
   let prefix = Key.prefix_to_string prefix in
-  let base = if prefix = "" then root else Filename.concat root (String.sub prefix 0 (String.length prefix - 1)) in
+  let base =
+    if prefix = "" then root
+    else Filename.concat root (String.sub prefix 0 (String.length prefix - 1))
+  in
   if prefix <> "" then check_no_links root (prefix ^ "x");
   let acc = ref [] in
   let rec walk dir rel =
@@ -113,17 +138,22 @@ let list name root prefix max_keys =
       | Some names ->
           List.iter
             (fun n ->
-              if not (Names.is_temp_name n) then
-                let p = Filename.concat dir n and r = if rel = "" then n else rel ^ "/" ^ n in
+              if not (Names.is_temp_name n) then (
+                let p = Filename.concat dir n
+                and r = if rel = "" then n else rel ^ "/" ^ n in
                 match Fs.lstat_opt p with
                   | Some ({ st_kind = S_REG; _ } as st) ->
                       if not (is_gc_lock (prefix ^ r)) then
-                        Option.iter (fun key -> acc := entry_of key st :: !acc) (Store.listed name (prefix ^ r))
+                        Option.iter
+                          (fun key -> acc := entry_of key st :: !acc)
+                          (Store.listed name (prefix ^ r))
                   | Some { st_kind = S_DIR; _ } -> walk p r
-                  | _ -> ())
+                  | _ -> ()))
             names
   in
-  (match Fs.lstat_opt base with Some { st_kind = S_DIR; _ } -> walk base "" | _ -> ());
+  (match Fs.lstat_opt base with
+    | Some { st_kind = S_DIR; _ } -> walk base ""
+    | _ -> ());
   let l = List.sort (fun (a : Store.entry) b -> Key.compare a.key b.key) !acc in
   match max_keys with Some n -> List.filteri (fun i _ -> i < n) l | None -> l
 
@@ -146,17 +176,27 @@ let verify_written root key =
     | Some marker -> (
         let leaf = Key.leaf key in
         match read_opt root key with
-          | exception Fail.E f -> durable_write root marker (marker_body ~reason:f.reason None)
-          | None -> durable_write root marker (marker_body ~reason:"vanished after write" None)
+          | exception Fail.E f ->
+              durable_write root marker (marker_body ~reason:f.reason None)
+          | None ->
+              durable_write root marker
+                (marker_body ~reason:"vanished after write" None)
           | Some b ->
               let computed = Xxh.dual b in
-              if computed = leaf then (match Fs.release (path root marker) with _ -> ())
-              else durable_write root marker (marker_body ~computed (Some (String.length b))))
+              if computed = leaf then (
+                match Fs.release (path root marker) with _ -> ())
+              else
+                durable_write root marker
+                  (marker_body ~computed (Some (String.length b))))
 
 let expand_home p =
-  if String.starts_with ~prefix:"~/" p then Filename.concat (Sys.getenv "HOME") (String.sub p 2 (String.length p - 2)) else p
+  if String.starts_with ~prefix:"~/" p then
+    Filename.concat (Sys.getenv "HOME") (String.sub p 2 (String.length p - 2))
+  else p
 
-let create ?(verify_writes = true) ?(gate : gate Atomic.t = Atomic.make (fun ~key:_ ~source:_ f -> f ())) ~name root =
+let create ?(verify_writes = true)
+    ?(gate : gate Atomic.t = Atomic.make (fun ~key:_ ~source:_ f -> f ())) ~name
+    root =
   let root = expand_home root in
   let health = Health.create name in
   (* Only link-kind failures (a network filesystem away) count against it. *)
@@ -168,7 +208,8 @@ let create ?(verify_writes = true) ?(gate : gate Atomic.t = Atomic.make (fun ~ke
           raise e
   in
   let gated key source write =
-    if is_reference_key key then (Atomic.get gate) ~key ~source write else write ()
+    if is_reference_key key then (Atomic.get gate) ~key ~source write
+    else write ()
   in
   let put ?mode:_ key body =
     fed (fun () ->
@@ -181,13 +222,16 @@ let create ?(verify_writes = true) ?(gate : gate Atomic.t = Atomic.make (fun ~ke
           | None -> None
           | Some fd ->
               Fs.with_fd fd (fun fd ->
-                  let size = Int64.to_int (Fs.sys (fun () -> Unix.LargeFile.fstat fd)).st_size in
+                  let size =
+                    Int64.to_int
+                      (Fs.sys (fun () -> Unix.LargeFile.fstat fd)).st_size
+                  in
                   if off >= size then Some ""
-                  else
+                  else (
                     let n = min len (size - off) in
                     let buf = Fs.bigstring_create n in
                     let got = Fs.pread_full fd buf ~boff:0 ~len:n ~off in
-                    Some (Fs.string_of_bigstring ~len:got buf)))
+                    Some (Fs.string_of_bigstring ~len:got buf))))
   in
   let head_opt key =
     fed (fun () ->
@@ -226,7 +270,9 @@ let create ?(verify_writes = true) ?(gate : gate Atomic.t = Atomic.make (fun ~ke
             match Fs.lstat_opt s with
               | Some { st_kind = S_REG; _ } -> (
                   mkdirs root dst;
-                  let tmp = Filename.concat (Filename.dirname d) (temp_name ()) in
+                  let tmp =
+                    Filename.concat (Filename.dirname d) (temp_name ())
+                  in
                   match Fs.eintr (fun () -> Unix.link s tmp) with
                     | () ->
                         (try Fs.rename tmp d
@@ -234,10 +280,18 @@ let create ?(verify_writes = true) ?(gate : gate Atomic.t = Atomic.make (fun ~ke
                            Fs.unlink_quiet tmp;
                            raise e);
                         Fs.fsync_dir (Filename.dirname d)
-                    | exception Unix.Unix_error ((Unix.EXDEV | Unix.EMLINK | Unix.EPERM | Unix.EOPNOTSUPP), _, _) ->
+                    | exception
+                        Unix.Unix_error
+                          ( ( Unix.EXDEV | Unix.EMLINK | Unix.EPERM
+                            | Unix.EOPNOTSUPP ),
+                            _,
+                            _ ) ->
                         durable_write root dst (Fs.read_file s)
-                    | exception Unix.Unix_error (e, fn, a) -> raise (Fail.E (Fail.of_unix e fn a)))
-              | _ -> Fail.absent ~op:"copy" "%s: no such object" (Key.to_string src)))
+                    | exception Unix.Unix_error (e, fn, a) ->
+                        raise (Fail.E (Fail.of_unix e fn a)))
+              | _ ->
+                  Fail.absent ~op:"copy" "%s: no such object"
+                    (Key.to_string src)))
   in
   (* ponytail: polls at the interval; a directory watch would wake sooner. *)
   let watch key last =
@@ -260,7 +314,8 @@ let create ?(verify_writes = true) ?(gate : gate Atomic.t = Atomic.make (fun ~ke
       delete;
       delete_multi;
       copy;
-      list_prefix = (fun ?max_keys p -> fed (fun () -> list name root p max_keys));
+      list_prefix =
+        (fun ?max_keys p -> fed (fun () -> list name root p max_keys));
       watch;
       get_many = None;
       list_many = None;

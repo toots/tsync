@@ -1,0 +1,23 @@
+== reads
+main misses, replica not asked: none
+archive answers a source miss: "archived"
+main down, replica answers: "stale"
+main down, absent on replica and archive: unreachable
+
+== writes with the main down
+put: transient/link
+replica owes nothing: 0 records
+
+== deferred copies
+owed before start: replica 3, backfill 1
+replica: chunks true true, manifest true, journal true, cursor true, index false
+backfill: chunks true true, manifest true, journal false, cursor false, index false
+after delete, replica manifest false
+
+== a manifest naming a chunk no main holds parks, degraded
+replica parked: corrupt/other
+backfill parked: corrupt/other
+replica holds it: false
+
+== write guard
+guarded write to the replica: transient/link
