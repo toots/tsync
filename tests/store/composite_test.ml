@@ -24,7 +24,8 @@ let switchable (s : Store.t) =
 (* Manifests here are "manifest:<chunk>,<chunk>". *)
 let knowledge =
   {
-    Composite.chunk_names =
+    Composite.describe = (fun _ -> None);
+    chunk_names =
       (fun b ->
         let b = Bigstring.to_string b in
         if String.starts_with ~prefix:"manifest:" b then
@@ -104,6 +105,10 @@ let () =
               (Composite.copy_stats c)));
       Composite.start c;
       Composite.settle ~timeout:10. c;
+      p "no copy job left running: %b\n"
+        (List.for_all
+           (fun (s : Composite.copy_stats) -> s.current = None && s.done_ > 0)
+           (Composite.copy_stats c));
       let has (st : Store.t) key = Contract.get st key <> None in
       List.iter
         (fun (n, (st : Store.t)) ->

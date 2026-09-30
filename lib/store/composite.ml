@@ -144,9 +144,20 @@ type member = { name : string; role : role; store : Store.t }
 
 type knowledge = {
   chunk_names : Bigstring.t -> Chunk_key.t list;
+  describe : Bigstring.t -> (string * int) option;
   generation : unit -> int option;
   is_index : Key.t -> bool;
   is_journal : Key.t -> bool;
+}
+
+(* The job a copy log is running, for the status report. *)
+type running = {
+  key : string;
+  mutable file : (string * int) option;
+  started : float;
+  mutable chunks : int;
+  mutable checked : int;
+  mutable sent : int;
 }
 
 type copy = {
@@ -158,6 +169,7 @@ type copy = {
   ensured : (string, int) Hashtbl.t;
   known_shards : (string, int) Hashtbl.t;
   forwards : Rt.Semaphore.t;
+  mutable running : running option;  (** under [memo_m] *)
 }
 
 type core = {
@@ -358,6 +370,8 @@ let guard t role what =
             m.name
       | None -> ())
 
+let progress c f = Mutex.protect c.memo_m (fun () -> Option.iter f c.running)
+
 let rec sync t src c key restarts =
   match src.Store.get_opt key with
     | None ->
@@ -369,10 +383,18 @@ let rec sync t src c key restarts =
         ignore (c.member.store.delete key)
     | Some b -> (
         let g = generation_even t in
+        let names = t.knowledge.chunk_names b in
+        progress c (fun r ->
+            r.chunks <- List.length names;
+            r.checked <- 0;
+            if names <> [] then r.file <- t.knowledge.describe b);
         let missing =
           List.find_opt
-            (fun ck -> not (ensure_chunk t src c g ck))
-            (t.knowledge.chunk_names b)
+            (fun ck ->
+              let held = ensure_chunk t src c g ck in
+              progress c (fun r -> r.checked <- r.checked + 1);
+              not held)
+            names
         in
         match missing with
           | None -> c.member.store.put key b
@@ -422,6 +444,7 @@ and ensure_chunk t (src : Store.t) c g ck =
       | None -> false
       | Some b ->
           c.member.store.put (Key.chunk d ck) b;
+          progress c (fun r -> r.sent <- r.sent + Bigstring.length b);
           note c g ck;
           true)
 
@@ -432,7 +455,12 @@ let main_holds t (src : Store.t) key =
         || src.head_opt (Key.chunk_from t.domain ck) <> None
     | None -> src.head_opt key <> None
 
-let run_job t src c _id r ~cancel:_ =
+let job_key = function
+  | Put k | Delete k | Copy (_, k) -> Key.to_string k
+  | Delete_many ks -> Printf.sprintf "%d deletions" (List.length ks)
+  | Collection_delete cd -> Printf.sprintf "collection %s" cd.shard
+
+let run_job_body t src c r =
   guard t c.member.role ("copy to " ^ c.member.name);
   match r.job with
     | Put k | Delete k -> sync t src c k 0
@@ -446,6 +474,22 @@ let run_job t src c _id r ~cancel:_ =
         let markers = List.filter_map Key.marker_of ks in
         c.member.store.delete_multi (ks @ markers);
         List.iter (fun k -> if main_holds t src k then sync t src c k 0) cd.keys
+
+let run_job t src c _id r ~cancel:_ =
+  Mutex.protect c.memo_m (fun () ->
+      c.running <-
+        Some
+          {
+            key = job_key r.job;
+            file = None;
+            started = Rt.now ();
+            chunks = 0;
+            checked = 0;
+            sent = 0;
+          });
+  Fun.protect
+    ~finally:(fun () -> Mutex.protect c.memo_m (fun () -> c.running <- None))
+    (fun () -> run_job_body t src c r)
 
 let record_kind =
   {
@@ -616,6 +660,7 @@ let create ~domain ~data_dir ~owner ~poke ~knowledge members =
           ensured = Hashtbl.create 1024;
           known_shards = Hashtbl.create 64;
           forwards = Rt.Semaphore.create ~name:"forwards" 4;
+          running = None;
         })
       copy_members
   in
@@ -669,7 +714,22 @@ let resume t = List.iter (fun c -> Dqueue.resume c.queue) t.core.copies
 let settle ?timeout t =
   Rt.iter_concurrently (fun c -> Dqueue.settle ?timeout c.queue) t.core.copies
 
-type copy_stats = { copy : string; owed : int; parked : int; done_ : int }
+type job_progress = {
+  job : string;
+  file : (string * int) option;
+  elapsed : float;
+  chunks : int;
+  checked : int;
+  sent : int;
+}
+
+type copy_stats = {
+  copy : string;
+  owed : int;
+  parked : int;
+  done_ : int;
+  current : job_progress option;
+}
 
 let copy_stats t =
   List.map
@@ -679,6 +739,19 @@ let copy_stats t =
         owed = Dqueue.pending c.queue;
         parked = List.length (Dqueue.parked c.queue);
         done_ = Dqueue.completed c.queue;
+        current =
+          Mutex.protect c.memo_m (fun () ->
+              Option.map
+                (fun (r : running) ->
+                  {
+                    job = r.key;
+                    file = r.file;
+                    elapsed = Rt.now () -. r.started;
+                    chunks = r.chunks;
+                    checked = r.checked;
+                    sent = r.sent;
+                  })
+                c.running);
       })
     t.core.copies
 

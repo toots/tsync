@@ -131,9 +131,29 @@ type reach = Reachable of { latency_ms : float } | Unreachable of string
 
 type disk = { free_bytes : int; total_bytes : int } [@@deriving yojson]
 
-(** A copy member's deferred copies: jobs owed and parked, and the rate jobs
-    complete at, which gives the ETA. *)
-type copies = { owed : int; parked : int; rate : float; eta : float option }
+(** The job a copy log is running: a file's manifest names [chunks], of which
+    [checked] are known to be on the copy or sent; [eta] is from its own pace.
+*)
+type copy_job = {
+  job : string;
+  path : string option;
+  size : int option;
+  chunks : int;
+  checked : int;
+  sent : int;
+  elapsed : float;
+  eta : float option;
+}
+[@@deriving yojson]
+
+(** A copy member's deferred copies: jobs owed and parked, the rate jobs
+    complete at, and the job running now. *)
+type copies = {
+  owed : int;
+  parked : int;
+  rate : float;
+  current : copy_job option;
+}
 [@@deriving yojson]
 
 type backend = {

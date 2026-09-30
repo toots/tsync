@@ -163,24 +163,46 @@ let disk (store : Store.t) =
           })
         (Fs.disk_space path))
 
+(* A manifest key names its folder by id; the engine knows the folder's path. *)
+let job_path t (j : Composite.job_progress) =
+  let (module E : Tsync_sync.Engine.S) = t.engine in
+  Option.bind j.file (fun (name, _) ->
+      Option.bind (Key.of_string j.job) (fun k ->
+          Option.bind (Key.folder_of_namespace_key t.domain.name k) (fun id ->
+              Option.map (fun dir -> Names.join dir name) (E.path_of_id id))))
+
+let copy_job t (j : Composite.job_progress) : R.copy_job =
+  {
+    job = j.job;
+    path = job_path t j;
+    size = Option.map snd j.file;
+    chunks = j.chunks;
+    checked = j.checked;
+    sent = j.sent;
+    elapsed = j.elapsed;
+    eta =
+      (if j.checked > 0 && j.chunks > j.checked then
+         Some
+           (j.elapsed
+           *. float_of_int (j.chunks - j.checked)
+           /. float_of_int j.checked)
+       else None);
+  }
+
 let copies t s =
   List.find_map
     (fun (c : Composite.copy_stats) ->
       if c.copy <> s.member.name then None
-      else (
-        let rate =
-          Tsync_status.Self_report.per_second s.copied ~now:(Rt.now ())
-            (float_of_int c.done_)
-        in
+      else
         Some
           {
             R.owed = c.owed;
             parked = c.parked;
-            rate;
-            eta =
-              (if c.owed > 0 && rate > 0. then Some (float_of_int c.owed /. rate)
-               else None);
-          }))
+            rate =
+              Tsync_status.Self_report.per_second s.copied ~now:(Rt.now ())
+                (float_of_int c.done_);
+            current = Option.map (copy_job t) c.current;
+          })
     (Composite.copy_stats t.domain.composite)
 
 let backend t s : R.backend =

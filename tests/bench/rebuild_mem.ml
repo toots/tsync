@@ -26,6 +26,7 @@ let () =
       ~knowledge:
         {
           Composite.chunk_names = Manifest.chunk_names;
+          describe = (fun _ -> None);
           generation = (fun () -> Remote.read_generation store d);
           is_index = (fun _ -> false);
           is_journal = (fun _ -> false);

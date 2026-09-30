@@ -41,6 +41,11 @@ let create_store config d (b : Config.backend) =
 let knowledge d main =
   {
     Composite.chunk_names = Manifest.chunk_names;
+    describe =
+      (fun b ->
+        Option.map
+          (fun (m : Manifest.t) -> (m.name, m.size))
+          (Manifest.decode (Bigstring.to_string b)));
     generation = (fun () -> Remote.read_generation main d);
     is_index = (fun k -> Key.leaf k = ".tsync-index");
     is_journal =

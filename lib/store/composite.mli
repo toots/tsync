@@ -22,6 +22,8 @@ type member = { name : string; role : role; store : Store.t }
 type knowledge = {
   chunk_names : Bigstring.t -> Chunk_key.t list;
       (** the chunks a body names, if it is a manifest *)
+  describe : Bigstring.t -> (string * int) option;
+      (** a manifest's recorded name and size, for the status report *)
   generation : unit -> int option;
       (** the collection generation G; [None] when unreadable *)
   is_index : Key.t -> bool;  (** per-store caches no copy carries *)
@@ -92,7 +94,24 @@ val settle : ?timeout:float -> t -> unit
 
 (** A copy log: jobs owed, the parked among them, and jobs completed since the
     process started. *)
-type copy_stats = { copy : string; owed : int; parked : int; done_ : int }
+(** The job a copy log is running: its key, how long it has run, the chunks
+    its manifest names and how many are checked, and the bytes sent. *)
+type job_progress = {
+  job : string;
+  file : (string * int) option;  (** a manifest's name and size *)
+  elapsed : float;
+  chunks : int;
+  checked : int;
+  sent : int;
+}
+
+type copy_stats = {
+  copy : string;
+  owed : int;
+  parked : int;
+  done_ : int;
+  current : job_progress option;
+}
 
 val copy_stats : t -> copy_stats list
 val parked : t -> (string * string * Dqueue.failure_note) list

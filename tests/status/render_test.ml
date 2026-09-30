@@ -90,7 +90,7 @@ let gcs : backend =
     corrupted = Not_checked "no verification has run";
     health = Up;
     disk = None;
-    copies = Some { owed = 0; parked = 0; rate = 0.; eta = None };
+    copies = Some { owed = 0; parked = 0; rate = 0.; current = None };
     traffic =
       Some { up_bytes = 0; up_rate = 0.; down_bytes = 92; down_rate = 4. };
   }
@@ -271,7 +271,24 @@ let degraded : machine =
                   corrupted = Checked { chunks = 3; truncated = true };
                   copies =
                     Some
-                      { owed = 1204; parked = 2; rate = 1.5; eta = Some 802. };
+                      {
+                        owed = 1204;
+                        parked = 2;
+                        rate = 0.;
+                        current =
+                          Some
+                            {
+                              job =
+                                "tsync/Files/manifests/d62e6a4d741d649c/8efbae2a";
+                              path = Some "Videos/2019/trip.mov";
+                              size = Some 5153960755;
+                              chunks = 615;
+                              checked = 205;
+                              sent = 1719664640;
+                              elapsed = 3600.;
+                              eta = Some 7200.;
+                            };
+                      };
                   health =
                     Down
                       {

@@ -15,6 +15,7 @@ let d = Domain_name.v "docs"
 let knowledge =
   {
     Composite.chunk_names = Manifest.chunk_names;
+    describe = (fun _ -> None);
     generation = (fun () -> Some 0);
     is_index = (fun _ -> false);
     is_journal = (fun _ -> false);

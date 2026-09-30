@@ -10,6 +10,7 @@ replica owes nothing: 0 records
 
 == deferred copies
 owed before start: replica 3, backfill 1
+no copy job left running: true
 replica: chunks true true, manifest true, journal true, cursor true, index false
 backfill: chunks true true, manifest true, journal false, cursor false, index false
 after delete, replica manifest false

@@ -225,11 +225,23 @@ type disk = {
 }
 [@@deriving yojson { strict = false }]
 
+type copy_job = {
+  job : string;
+  path : string option; [@default None]
+  size : int option; [@default None]
+  chunks : int;
+  checked : int;
+  sent : int; [@key "sentBytes"]
+  elapsed : float; [@key "elapsedSeconds"]
+  eta : float option; [@key "etaSeconds"] [@default None]
+}
+[@@deriving yojson { strict = false }]
+
 type copies = {
   owed : int;
   parked : int;
   rate : float; [@key "jobsPerSec"]
-  eta : float option; [@key "etaSeconds"] [@default None]
+  current : copy_job option; [@default None]
 }
 [@@deriving yojson { strict = false }]
 
