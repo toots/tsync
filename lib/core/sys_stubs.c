@@ -164,6 +164,7 @@ CAMLprim value tsync_raise_nofile(value target) {
 #if defined(__linux__)
 
 #include <linux/fs.h>
+#include <malloc.h>
 #include <sys/ioctl.h>
 #include <sys/statfs.h>
 #include <sys/syscall.h>
@@ -265,9 +266,16 @@ CAMLprim value tsync_memory_split(value unit) {
   CAMLreturn(res);
 }
 
+/* Hands the allocator's free memory back to the kernel. */
+CAMLprim value tsync_malloc_trim(value unit) {
+  malloc_trim(0);
+  return Val_unit;
+}
+
 #elif defined(__APPLE__)
 
 #include <mach/mach.h>
+#include <malloc/malloc.h>
 #include <sys/clonefile.h>
 #include <sys/mount.h>
 #include <sys/ucred.h>
@@ -347,6 +355,11 @@ CAMLprim value tsync_memory_split(value unit) {
   Store_field(res, 0, Val_long(anon));
   Store_field(res, 1, Val_long(file));
   CAMLreturn(res);
+}
+
+CAMLprim value tsync_malloc_trim(value unit) {
+  malloc_zone_pressure_relief(NULL, 0);
+  return Val_unit;
 }
 
 #endif

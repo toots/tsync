@@ -12,6 +12,7 @@ type t = {
 }
 
 external memory_split : unit -> int * int = "tsync_memory_split"
+external trim : unit -> unit = "tsync_malloc_trim"
 
 let known n = if n < 0 then None else Some n
 

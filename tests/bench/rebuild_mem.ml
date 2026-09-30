@@ -81,5 +81,7 @@ let () =
       show "after" (Usage.sample ());
       Gc.full_major ();
       Gc.compact ();
-      show "after compaction" (Usage.sample ()));
+      show "after compaction" (Usage.sample ());
+      Usage.trim ();
+      show "after malloc trim" (Usage.sample ()));
   Fs.rm_rf scratch
