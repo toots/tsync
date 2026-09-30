@@ -27,6 +27,7 @@ therefore separates two kinds of note:
 | Daemon & CLI | [07-daemon-cli.md](07-daemon-cli.md) |
 | Frontends (FUSE binding, KIO plugin via shared object) | [08-frontends.md](08-frontends.md) |
 | Test harness mechanics and dune traps | [09-tests.md](09-tests.md) |
+| Bodies, mapping and memory (measured in the OCaml 5 rewrite) | [memory.md](memory.md) |
 | Backend drivers | [local](backends/local.md), [s3 and object-store common](backends/s3.md), [gcs](backends/gcs.md), [http-proxy](backends/http-proxy.md) |
 | FUSE (libfuse binding, KIO plugin via shared object) | [frontends/fuse.md](frontends/fuse.md) |
 | http-proxy server | [frontends/http-proxy.md](frontends/http-proxy.md) |
@@ -54,6 +55,10 @@ therefore separates two kinds of note:
 6. **dune can report success having done nothing.** Cached test actions replay with `--force`, and
    `dune build` does not compile the scenario runner. A failing scenario step can still exit 0.
    ([09](09-tests.md))
+7. **Bound a prefetch by position, not only by concurrency.** A semaphore on fetches in flight let
+   every finished listing wait in memory; a large domain's rebuild peaked near 1.8 GB. Measure with
+   private memory split into anonymous, file-backed and OCaml heap before guessing.
+   ([memory.md](memory.md))
 
 ## Migration order, if moving off Lwt
 
