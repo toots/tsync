@@ -1,147 +1,138 @@
 # 05 — Domain config and whole-domain operations
 
-Scope: `lib/domain/config/{conf,parsing,domain}` + `lib/lwt/domain/config` (the config model, and turning a
-parsed config into a live domain), and `lib/domain/ops` + `lib/lwt/domain/ops` (the one-shot jobs over a whole
-domain: import, export, rsync/copy, mirror, resync/sync, retention = expire/trash/deleted-listing, gc,
-integrity, share).
+This file owns:
 
-**Scope correction.** The per-item operations a frontend calls — read, write, rename, delete, list, cache
-evict/fetch, versions/revert — are *not* in `lib/domain/ops`. They live in `lib/domain/checkout`
-(`ops/file_ops.ml`, `file/`, `content/data.ml`, `manifests/`) and reach users through the daemon's IPC
-(`tsync versions --revert` is `Ipc.action "revert"`, not an ops module). This file names them only where an
-op here reuses them. Likewise "mirror" is overloaded in the codebase:
+- the **config schema and its validation**;
+- the **Domain Context**: the live domain every subsystem above config is given, and how it is
+  built from config;
+- the **whole-domain operations** (import, export, rsync, mirror, resync, trash and deleted-file
+  listing, expire, gc, integrity, share): their interfaces and semantics.
 
-| Term | Meaning | Where |
-|---|---|---|
-| **local manifest mirror** (`Manifests`, "the mirror", "projection") | this client's on-disk copy of every published manifest, filed under real paths; the full source of truth for "does this key exist" | checkout |
-| **`Mirror` op / `tsync mirror`** | backend-to-backend copy of a domain's objects ("remote resync") | `ops/mirror.ml` |
-| **`Resync` op / `tsync sync`** | bring the *local manifest mirror* up to date with the store (incremental journal replay or full rebuild) | `ops/resync.ml` |
+It does not own: the meaning of roles and the composite's read and write paths
+([algorithms/replication.md](algorithms/replication.md)); backend key layout and byte formats
+([02](02-remote-model.md)); the collector and expiry rules ([algorithms/gc.md](algorithms/gc.md));
+uplink and link settings ([06](06-backends.md)); each driver's fields ([backends/](backends/));
+where an operation runs and which process owns the domain ([07 §2](07-daemon-cli.md)). Per-item
+operations a frontend calls (read, write, rename, evict, revert) are the file operations
+([04 §3.5](04-checkout-cache.md)) and the request handler ([08](08-frontends.md)).
 
-File layout: this file (§1–§9) is the language-neutral specification. The [OCaml notes](ocaml/05-ops-config.md) hold OCaml-specific
-implementation notes, each tied to a Part A section.
+Three things are called "mirror":
+
+| Term | Meaning |
+|---|---|
+| **the mirror** | this client's local projection of the domain's names ([local-cache.md](data-model/local-cache.md)) |
+| **`tsync mirror`** | backend-to-backend copy of a domain's objects (§4.6) |
+| **`tsync sync`** | resync: bring the mirror up to date with the store (§4.7) |
+
+Implementation notes: [ocaml/05-ops-config.md](ocaml/05-ops-config.md).
 
 ---
-
 
 ## 1. Problem
 
-tsync mounts storage the user controls as a folder. A **domain** is one such folder: a name, a set of
-backends (stores) with roles, a set of frontends that present it, and a handful of per-domain policies. Two
-things are needed around the per-file engine:
+A **domain** is a name, a set of stores with roles, the frontends that present it, and a few
+per-domain policies. Around the per-file engine two things are needed:
 
-1. **A config model** that says, per machine, which domains exist, which stores back each and in what role,
-   how they are reached and throttled, and where local state lives — validated strictly so a typo cannot
-   silently leave a store unconfigured. And one place (`Domain.of_config`) where a configured *role* becomes
-   *behaviour* (which store is source of truth, which is filled behind the write, which is only read).
-2. **Whole-domain jobs** that must run without a daemon (and often while one runs), over trees and keyspaces
-   too large to hold in memory: seeding a domain from a folder (import), writing it out (export), copying
-   within/into/out of a domain without moving bytes that are already stored (rsync), repairing one backend
-   from another (mirror), rebuilding this client's view (resync), trimming history (expire), reclaiming
-   unreferenced chunks (gc), checking/repairing chunk integrity and tree shape (integrity), publishing links
-   (share).
+1. **A config model**, validated strictly: a typo must never silently leave a store or an option
+   unconfigured. And one place where a parsed domain becomes a live one with real stores.
+2. **Whole-domain jobs** over whole trees and keyspaces: seeding a domain from a
+   folder, writing it out, copying without moving bytes already stored, repairing one store from
+   another, rebuilding this client's view, trimming history, reclaiming chunks, checking integrity,
+   publishing links. They run as commands, beside a running owner or without one.
 
-Why separate: the ops are "applications of the layers below rather than an abstraction of their own —
-nothing depends on this library, which is what lets each of these run without a daemon"
-(`lib/domain/ops/dune`). The config is three layers: (a) a pure parser/validator usable by any tool with no
-I/O runtime; (b) the **Domain Context** interface (§2.4) that every subsystem above is parameterised by; (c)
-the one builder that turns a parsed domain into a live Domain Context with real stores — kept separate "so a
-test can build a real domain without linking a daemon" (`lib/domain/config/domain/dune`).
+The operations are applications of the layers below; nothing depends on them but the CLI and the
+request handler.
 
 ---
 
-## 2. Concepts & data model
+## 2. Config
 
-### 2.1 Config file
+### 2.1 Schema and validation
 
-Location (`Runtime.default_paths`, `lib/local/runtime/*_runtime.ml`):
+The config is one JSON object (location: [07 §2.7](07-daemon-cli.md)). Validation rules, applied by
+every tool that reads or writes a config (the daemon, every command, the Android app, the wizard):
 
-| Platform | config_path | data_dir | cache_root |
+- **Unknown keys are refused at every level**: top level, each domain, `uplink`, each `links`
+  entry, each backend object, and each frontend object. The known set of a backend object is the
+  common keys plus its driver's declared fields; of a frontend object, `type` plus its frontend's
+  option spec ([08 §2.1](08-frontends.md)).
+- **Known types are part of the schema**, whatever this build compiles: every backend type and every
+  frontend type of this release, with their fields and options, is known to the parser. An unknown
+  type is refused at parse. A known type this build does not include is refused when something tries
+  to use it ("configured but not compiled into this binary").
+- **Every value has a declared type**, and a value of another JSON type is refused. `null` stands for
+  an absent optional value and is refused for a required one.
+- **Every error names the JSON path** of the offending value and what was expected:
+  `domains[1].versioning: required boolean is missing`,
+  `domains[0].backends[2]: unknown key(s) "bukcet"`.
+- A tool that parses a config never falls back to defaults for a value it could not read.
+
+**Top level**
+
+| key | type | default | rule |
 |---|---|---|---|
-| Linux | `${XDG_CONFIG_HOME:-~/.config}/tsync/config.json` | `${XDG_DATA_HOME:-~/.local/share}/tsync` | `${XDG_CACHE_HOME:-~/.cache}/tsync` |
-| macOS | `~/Library/Group Containers/group.org.feverdreamtv.tsync/config.json` | `<group>/tsync` | `<group>/tsync/cache` |
-
-`$TSYNC_CONFIG_JSON`, if set, is the config JSON text itself and overrides the file
-(`Conf_parsing.load`). Android builds its config through the same `Conf_parsing.load` / `Domain.of_config`
-from JNI (`android_jni.ml`), with paths supplied by the app.
-
-Per-machine sidecar files under `data_dir`:
-- `default-domain` — one line, the domain name used when a command names none (`Domain.default_domain_file`).
-- `deferred-pending/<domain>/` — the durable queue of replica/backfill jobs (§4.1).
-- sockets: Linux `tsync-<domain>.sock` per domain (each FUSE domain is its own child process); macOS a single
-  `tsync.sock` shared by every domain. Plus `tsync-http-proxy.sock`, `tsync-sync.sock`.
-
-#### Schema (JSON, strict)
-
-Unknown keys are **refused** at every level where the known set is declared (top, domain, uplink/links, and
-backend when its driver's field list is known) with `"<where>: unknown key(s) \"k1\", \"k2\""`
-(`refuse_unknown`, commit 5e532514 "config: a key nothing reads is refused").
-
-Top level:
-
-| Key | Type | Default | Validation / meaning |
-|---|---|---|---|
-| `name` | string | `gethostname()` | client name; labels conflict copies |
-| `tls` | string | none | `"native"` \| `"openssl"` (not validated here) |
-| `maxUploads` | int > 0 | 4 | concurrent upload *files*; non-positive/absent → default |
-| `maxChunkBuffers` | int > 0 | = `maxUploads` | chunk bodies in memory across all uploads; also caps deferred forwards and mirror copy slots |
-| `maxDownloads` | int > 0 | 8 | concurrent file downloads; export's worker width |
-| `uplink` | object | defaults | see below |
-| `links` | object name→uplink-partial | `{}` | per-link overrides merged over `uplink`; a name no backend in any domain uses is refused (`links: no backend names link "x"`) |
+| `name` | string | the host name | client name, labels conflicted copies; non-empty |
+| `tls` | `"native"` \| `"openssl"` | unset (the build's default) | |
+| `maxUploads` | int ≥ 0 | 4 | concurrent upload files; 0 means the default |
+| `maxChunkBuffers` | int ≥ 0 | `maxUploads` | chunk bodies in memory across all uploads; also bounds deferred forwards and `tsync mirror` copies; 0 means the default |
+| `maxDownloads` | int ≥ 0 | 8 | concurrent file downloads; 0 means the default |
+| `uplink`, `links` | objects | | [06](06-backends.md); a `links` entry naming a link no backend uses is refused |
 | `domains` | array | required | |
 
-`uplink` object (`uplink_of_json`; defaults `Uplink_control.default_settings`):
+**Domain**
 
-| Key | Type | Default | Rule |
+| key | type | required | rule |
 |---|---|---|---|
-| `enabled` | bool | true | |
-| `headroom` | float in (0,1] (or int `1`) | 0.8 | |
-| `targetDelayMs` | int ≥ 5 | 50 | stored as seconds (0.05) |
-| `minRate` | size | 65536 B/s | int > 0 or size string |
-| `maxRate` | size | none | must be ≥ `minRate` |
+| `name` | string | yes | the domain-name grammar of [01 §2.2](01-core.md#22-domain-names), which refuses the reserved root names and `/`; unique among domains **ignoring case** (it names directories, sockets and macOS identifiers on case-insensitive filesystems); on macOS, two `file_provider` domains whose identifiers or replica-folder projections collide are refused ([file-provider.md §3.3](frontends/file-provider.md#33-domain-identifier)) |
+| `backends` | array | yes | each per the backend object below; then role validation |
+| `frontends` | non-empty array | yes | each `"<type>"` or `{"type":"<type>", …options}` |
+| `symlinks` | `"keep"` \| `"follow"` \| `"skip"` | yes | |
+| `versioning` | bool | yes | |
+| `readOnly` | bool | no | false; forced true when no backend has a writable role |
+| `chunkSize` | size | no | unset: the main's recommendation, else 8 MiB; within the range of [01 §3.5](01-core.md#35-chunk-size) |
+| `cacheChunkSize` | size | no | unset: 16 MiB |
+| `maxCache` | size | no | unset: unbounded |
 
-Anything else in a field → `Failure "<where>: \"field\" cannot be <json>"`. `uplink_to_json` round-trips
-(`targetDelayMs` rounded to int ms; `maxRate` omitted when none).
+**Backend object**
 
-Domain object:
-
-| Key | Type | Required | Default / rule |
-|---|---|---|---|
-| `name` | string | yes | also mount dir leaf and key-space root |
-| `backends` | array | yes | each parsed per below; then role validation |
-| `frontends` | non-empty array | yes | each `"fuse"` or `{"type":"fuse", ...opts}`; non-string option values stringified (bool→`true`/`false`, int→decimal, list→JSON text, others dropped) |
-| `symlinks` | `"keep"`\|`"follow"`\|`"skip"` | **yes** | missing → error; other string → `unknown symlinks policy` |
-| `versioning` | bool | **yes** | `to_bool` raises if absent |
-| `readOnly` | bool | no | false; **forced true** when no backend has a role other than `readOnly` |
-| `chunkSize` | size | no | `None` = unset (resolved later: backend recommendation else 8 MiB) |
-| `cacheChunkSize` | size | no | `None` → 16 MiB |
-| `maxCache` | size | no | `None` = unbounded |
-
-Size fields: `Int n` with n>0, or a string parsed by `parse_size`; `Null` → None; else error.
-
-Backend object (`parse_backend`):
-
-| Key | Rule |
+| key | rule |
 |---|---|
-| `type` | string, required (`s3`, `gcs`, `local`, `http-proxy`, `exec`…) |
-| `name` | string, required (`backend config missing required "name" field (type: s3)`) |
-| `role` | required, one of `"main"`, `"replica"`, `"backfill"`, `"readOnly"` (exact spelling) |
-| `link` | optional non-blank string, trimmed; default `"wan"` (`Uplink.default_link`). **Refused on `type: local`** ("a local store has none") |
-| everything else | passed to the driver as `(string*string)` fields: string as-is, bool → `"true"/"false"`, int → decimal, list → JSON text (e.g. exec's `command`), others dropped. Checked against the driver's declared field names when the parser has been told them (the builder layer registers the driver field lists; a bare parser with no registry skips the check) |
+| `type` | required; a known backend type |
+| `name` | required, non-empty, not `.` or `..`, no `/`; unique within the domain **ignoring case** (it names the target's deferred log directory and its counters) |
+| `role` | required: `"main"`, `"replica"`, `"backfill"` or `"readOnly"` ([replication.md](algorithms/replication.md)) |
+| `link` | optional non-blank string, trimmed; default `"wan"`; refused on `type: local` (a local store has no link) |
+| other keys | the driver's declared fields ([backends/](backends/)), each with its declared type. A field declared as a list (for example an `exec` command) takes a JSON array. A local store's `path` is absolute or starts with `~/`. |
 
-Role validation (`validate_roles`), when there is no `main`:
-- any `replica` → error ("a replica is a copy of a source of truth");
-- any `backfill` → error ("nothing to fill it from");
-- no `readOnly` either → error ("nothing here can answer a read").
+**Role validation.** With no `main`: a `replica` is refused ("a replica is a copy of a source of
+truth"); a `backfill` is refused ("nothing to fill it from"); no `readOnly` either is refused
+("nothing here can answer a read").
 
-Not validated: duplicate backend names within a domain (surfaces later as a `named_exn` failure), duplicate
-domain names, duplicate frontends.
+**Frontends.**
 
-`parse_size` grammar: trim, lowercase; strip trailing `ib` or `b`; trim; optional trailing `k|m|g|t`
-(binary: 1024^n); remaining must parse as a finite float > 0; result rounded; must be > 0. Accepts
-`512K`, `8M`, `1G`, `1048576`, `8.0 MB`, `1.5 GiB`. There is deliberately no `format_size`: display uses
-`Metrics.human_bytes`, storage uses plain integers.
+- Each type at most once per domain.
+- At most one **presenting** frontend per domain ([08 §2.1](08-frontends.md)): one owner process
+  hosts it ([07 §2.4](07-daemon-cli.md)).
+- Options are checked against the frontend's option spec, by type, and against the rules its spec
+  states (for the http-proxy: a secret of at least 32 characters, TLS unless the listener binds
+  loopback, [frontends/http-proxy.md](frontends/http-proxy.md)).
+- **Booleans**, in frontend options and driver fields alike, take a JSON bool or one of the strings
+  `true, 1, yes, on, false, 0, no, off` (any case); any other value is refused. Ints take a JSON int
+  or a decimal string.
+
+**Sizes**: a JSON int > 0, or a string: trimmed, lower-cased, a trailing `ib` or `b` removed, an
+optional trailing `k|m|g|t` (powers of 1024), the rest a finite number > 0; the result is rounded and
+must be > 0. Accepts `512K`, `8M`, `1G`, `1048576`, `8.0 MB`, `1.5 GiB`.
+
+**Serialisation**: a tool that writes a config writes it with mode `0600` from creation, durably
+(temp file, fsync, rename, fsync of the directory)
+([security-model.md §10.2](algorithms/security-model.md#102-at-rest)). User documentation describes
+these rules; it MUST NOT say that unrecognised keys pass through.
+
+**Masking** fails closed: every report masks a field as `***` unless its spec declares it
+non-secret ([security-model.md §10.3](algorithms/security-model.md#103-masking)).
 
 Example:
+
 ```json
 {
   "name": "laptop",
@@ -161,828 +152,534 @@ Example:
 }
 ```
 
-### 2.2 Roles
+### 2.2 Domain resolution
 
-`type role = Main | Replica | Backfill | ReadOnly` (JSON `main|replica|backfill|readOnly`).
-
-| Role | Written | Read | Journal/cursor | Built as |
-|---|---|---|---|---|
-| main | every write, synchronously; write returns once **all mains** have it | first main in config order is read primary | yes | composite `mains` |
-| replica | every write, deferred (behind the write, durable queue) | when no main reachable | yes | `Deferred` with `reads_reach=true` |
-| backfill | every write from now on, deferred; starts empty | never | **no** (content only) | `Deferred` with `reads_reach=false` |
-| readOnly | never | when the source of truth misses or is unreachable | — | composite `archives` |
-
-Replica and backfill are the *same* thing differing by one bit ("a resynced backfill is promoted by editing
-one word", `domain.ml:41`).
-
-Read order (`order_backends`, stable sort): main(0), replica(1), readOnly(2), backfill(3); config order kept
-within a role. "Reads use the head, so config order selects the read primary."
-
-### 2.3 Key space (object naming on a backend)
-
-`root_prefix = "tsync/"`; per domain `D`:
-
-| Function | Key | Holds |
-|---|---|---|
-| `domain_root` | `tsync/D/` | everything of the domain (drop domain = one prefix delete) |
-| `domain_prefix` | `tsync/D/manifests/` | folder namespaces `…/manifests/<folder-id>/<hash(name)>` (manifests, folder markers), `.tsync-index`, anchors |
-| `chunk_prefix` | `tsync/D/chunks/` | `…/chunks/<shard3hex>/<chunkkey>`; **per domain: no cross-domain dedup** |
-| `versions_prefix` | `tsync/D/versions/` | `…/versions/<folder-id>/<leafhash>/<ts_ns>` |
-| `journal_prefix` | `tsync/D/journal/` | journal entries (month-sharded, `<13-digit-ms>-<uuid>`) |
-| `cursor_key` | `tsync/D/cursor` | latest published entry key |
-| `shares_prefix` | `tsync/shares/` (**not per domain**, fixed for IAM/lifecycle) | `tsync/shares/<token>` share manifests; `tsync/shares/cache/…` assembled artifacts |
-| gc marker | `tsync/D/gc-run` | open collection record |
-| gc from-space | `tsync/D/chunks.from/<shard>/<key>` | chunks on their way out during gc |
-| corruption markers | `tsync/corrupted/D/<shard>/<key>` | sibling of domain roots |
-| verify jobs | `tsync/verify-jobs/D/<shard>` | |
-| gc jobs | `tsync/gc-jobs/D/<run13ms>/<last-shard>` | delete requests handed to a copy |
-| folder ids | `.tsync-root`, `.tsync-trash` | reserved sentinel ids (`Stored_key.root_id/trash_id`) |
-
-Chunk key example: `3ab8997bc73098ac-74d584d55f333769` (dual-seed xxHash hex of the body, owned by the chunk
-subsystem). Shards: `fanout=3` hex chars → 4096 shards (`000`…`fff`).
-Collision note (in code): a domain named `corrupted`, `verify-jobs` or `gc-jobs` would collide; not checked.
-
-### 2.4 Domain Context — the live domain as seen by everything above
-
-An immutable record handed to every subsystem that works on one domain (the seam; one instance per domain
-per process):
-
-| Field | Type | Meaning |
-|---|---|---|
-| `versioning` | bool | keep previous versions on modify/rename/delete |
-| `client_name` | string | top-level `name` |
-| `domain_name` | string | |
-| `domain_prefix`, `chunk_prefix`, `versions_prefix`, `journal_prefix`, `shares_prefix` | string | §2.3 |
-| `cursor_key` | key | §2.3 |
-| `cache_root` | path | machine cache root (**not** per domain; per-domain dirs are `cache_root/<domain>/…`) |
-| `data_dir` | path | |
-| `socket_path` | path | where this domain's daemon answers |
-| `max_uploads`, `max_chunk_buffers`, `max_downloads` | int | concurrency budgets |
-| `chunk_size`, `cache_chunk_size`, `max_cache` | optional int | unresolved config values |
-| `symlink_policy` | Keep \| Follow \| Skip | |
-| `read_only` | bool | |
-| `store` | Store | the **composite**: reads walk members in role order; writes land on all mains, deferred targets catch up behind |
-| `members` | list of Member | the individual stores in role order, each with the same Store interface |
-
-`Store` is the backend abstraction (get / get_opt / get_range / head_opt / list_prefix / put / copy / delete /
-delete_multi / capabilities / verify_all / discard / watch / health / local_path; specified in the backends
-file). The Domain Context is asynchronous-runtime-agnostic: every Store operation is asynchronous in whatever
-concurrency model the host uses.
-
-Rule: *everything that reads or writes a domain key goes through `store`*. `members` is for callers that
-need one store rather than the domain: a report, a mirror copying between two, share placement, gc's main,
-integrity repair of one bad copy.
-
-`Backend.member` fields used here: `name`, `role`, `readable` (false for backfill), `backend_type`,
-`config` (fields with secrets masked by `Field_spec.mask_named`), `link` (None for local), `pending`,
-`in_flight`, `degraded` (deferred stats thunks), `traffic` (remote only), `local_path` (store's own
-directory if it is a filesystem store), `backend`.
-
-Derived helpers in `Conf`:
-- `default_chunk_size = 8 MiB`, `default_cache_chunk_size = 16 MiB`.
-- `chunks_per_group ~chunk_size ~cache_chunk_size = if chunk_size<=0 then 1 else max 1 ((cache + chunk/2)/chunk)` (rounded).
-- `locality = {cache_root; domain_name; cache_chunk_size}` — for callers outside a Domain Context asking "is every byte local".
-- `capacity members`: among non-readOnly members with a `local_path`, the `Fs.disk_space` record with the
-  least `avail` (whole record from one disk, not a per-field min); `None` if none is local.
-
-### 2.5 Ops data types (persistent formats)
-
-**Publish batch** (`publish.ml`): journal ops spooled to a file under `<spool dir>/journal*`; published as one
-journal entry when `count >= entry_ops (2000)` or `now - published_at >= entry_age (10 s)`, and at end of run.
-
-**Listing spool** (`Listing`, used by import/mirror): records appended to a temp file named
-`<dir>/<name><temp-suffix owned by pid>`; each field is `int32_le length ++ bytes` for strings, `int64_le`
-for ints; sealed then `mmap`ed and read once or several times. `reap ~dir` unlinks spools whose owner pid is
-dead. Spool dirs: `<cache_root>/import`, `<cache_root>/mirror`, `<cache_root>/rsync` (machine-wide, not per
-domain).
-
-**Export record** (`<cache_root>/<domain>/exports/<xxh(dst,0)>-<xxh(dst,1)>`):
-```
-tsync-export 1 <h1> <h2> <size> <chunk_size> <OCaml-escaped dst>\n
-3\n
-0\n
-4\n
-```
-Header compared byte-for-byte to the expected one (no field parsing). Then one decimal chunk index per line,
-appended after the chunk's bytes are `pwrite`+`fsync`ed. The text after the last `\n` is ignored (torn
-claim). Parsing stops at the first line that is not an in-range index spelled canonically
-(`string_of_int i = line`).
-
-**Share manifest** (`tsync/shares/<token>`, token = 16 random bytes from `/dev/urandom` → 32 hex chars, or
-caller-supplied):
-```json
-{"v":1,"expires":1767225600,"domain":"Files","type":"file","key":"tsync/Files/manifests/<fid>/<hash>","filename":"report.pdf"}
-{"v":1,"expires":1767225600,"domain":"Files","type":"dir","folderId":"<fid or .tsync-root>","filename":"2024.zip"}
-```
-Root share: `folderId = .tsync-root`, `filename = "<domain>.zip"`. URL returned: `<shareUrl>/<token>`.
-
-**GC run marker** (`tsync/D/gc-run`, via `Collection`): `{phase: Opening|Marking|Abandoning|Closing;
-started: float; cursor: string}`; cursor = last finished item *by name* (namespace tag or shard), "" = none.
-Namespace names in the cursor: `m/<folder-id>` (manifests) or `v/<folder-id>` (versions); sorted, so all
-`m/` precede `v/`. Lock file: `<main local_path>/tsync/D/gc-run.lock` (lockf F_TLOCK).
-
-**GC job key**: `tsync/gc-jobs/D/<run>/<last shard of batch>`, `run = sprintf "%013.0f" (started*1000)`.
-`shard_of_job key` = basename if it is a 3-hex shard name, else None (e.g. `tsync/gc-jobs/dom/abb` is *not* a
-job; `…/1755300000000/abb` is). Body format is the copy's driver's (`Backend.discard`).
+Everywhere a domain is picked: an explicit name → the recorded default domain if it is configured
+→ the sole configured domain. Errors: "no domains configured", "multiple domains configured — use
+--domain to select", "domain not found: X".
 
 ---
 
-## 3. Interface
+## 3. The Domain Context
 
-Each op is a component constructed from a Domain Context plus the lower-layer services it names in §5; all
-operations are asynchronous. Callers are CLI commands (`lib/app/cli/cmd_<op>.ml`) and, for share, also the
-daemon's IPC handler. Signatures below are pseudo-signatures (`?x` = optional, `~x` = named argument).
+### 3.1 Interface
 
-### 3.1 Config
+An immutable value handed to every subsystem working on one domain, one per domain per process:
 
-```
-Conf_parsing.load        : path -> t                  (* env TSYNC_CONFIG_JSON overrides; raises Failure *)
-Conf_parsing.of_json     : json -> t                  (* same validation; used by `config --edit` before writing *)
-Conf_parsing.pick_domain : ?domain -> t -> domain     (* named; else sole; "no domains configured" / "multiple domains configured — use --domain to select" / "domain not found: X" *)
-Conf_parsing.order_backends, role_name, role_of_string, parse_size, uplink_of_json, uplink_to_json,
-  link_settings (override else uplink), links_to_json
-Conf_parsing.mount_point_of d   (* fuse frontend option "mountPoint" if non-empty, else ~/tsync/<domain> *)
-Conf_parsing.cloud_storage_dir ~domain_name   (* macOS: entry of ~/Library/CloudStorage whose [a-z0-9] lowercase equals that of "TsyncApp"^domain *)
-Conf_parsing.roots_of ~data_dir d  (* [mount point; cloud-storage dir if found; data_dir] — order a user path is resolved to a domain *)
+| field | meaning |
+|---|---|
+| `domain_name`, `client_name`, `versioning`, `read_only`, `symlink_policy` | from config |
+| `domain_prefix`, `chunk_prefix`, `versions_prefix`, `journal_prefix`, `shares_prefix`, `cursor_key` | key names ([02](02-remote-model.md)) |
+| `cache_root`, `data_dir`, `socket_path` | local paths ([07 §2.7](07-daemon-cli.md)) |
+| `max_uploads`, `max_chunk_buffers`, `max_downloads` | concurrency budgets |
+| `chunk_size`, `cache_chunk_size`, `max_cache` | unresolved config values |
+| `store` | the **composite** store ([06](06-backends.md)) |
+| `members` | the individual stores in role order, each with the store interface and `{name, role, readable, type, masked config, link, deferred stats, traffic, local_path}` |
 
-Domain.of_config : ?domain -> ?socket_path -> ?resume:bool -> paths -> config -> DomainContext
-Domain.reading_from : name -> conf -> conf       (* reads (get, get_opt, get_range, fast_read, head_opt, list_prefix, watch, get_many, list_many, health) from member [name]; writes unchanged *)
-Domain.reading_at_most : n -> conf -> conf       (* max_downloads := n; n<1 fails *)
-Domain.target/socket ?domain ~paths cfg          (* (name, socket path) for IPC *)
-Domain.default_domain ~paths : string option     (* from data_dir/default-domain; ignored if empty or not configured; if config unreadable, trusted *)
-Domain.start_resumed : unit -> unit              (* start deferred queues built with ~resume:true, in the daemon's converging parent *)
-Domain.set_on_recorded : (unit -> unit) -> unit  (* hook: this process recorded a deferred job it will not run *)
-```
-Domain resolution order everywhere: explicit `--domain` → persisted default → sole configured domain.
+- Everything that reads or writes a domain key goes through `store`. `members` is for a caller that
+  needs one store, not the domain: a report, `tsync mirror`, share placement, the collector,
+  integrity repair.
+- `capacity(members)`: among non-`readOnly` members with a local path, the disk-space record of the
+  one with the least available space (the whole record from one disk); none if no member is local.
+- `chunks_per_group(chunk_size, cache_chunk_size)` = 1 if `chunk_size` ≤ 0, else
+  `max(1, round(cache_chunk_size / chunk_size))`.
 
-### 3.1a How hosts repurpose these pieces
+Derived contexts:
 
-| Host | Config use | Builds Domain Context? | Ops used |
-|---|---|---|---|
-| Linux daemon (one child process per FUSE domain) | full parse | yes, `resume=true`; starts deferred queues in the converging parent after frontends fork | share (IPC); revert etc. are checkout's |
-| macOS daemon (one process, all domains, one socket) | full parse from the App Group container | yes per domain, `resume=true` | share (IPC) |
-| CLI one-shot command | full parse; domain resolution; `--source` → `reading_from`, `--parallelism` → `reading_at_most` | yes, `resume=false` (records and drains its own deferred jobs; does not run the daemon's) | import, export, rsync, mirror, sync, expire/trash/versions listing, gc, data-integrity, share |
-| Android app | config JSON supplied by the app, same parser | yes, paths supplied by the app | none of the ops layer |
-| Desktop mounts / tray | parse only (`mount_point_of`, `roots_of`, `cloud_storage_dir`) | no | none |
-| `config --edit` | `of_json` to validate before writing | no | none |
+- `reading_from(name)`: every read entry point (single and batched reads, ranged reads, heads,
+  listings, `watch`, health) goes to the named member; writes still go through the composite, so
+  deferred targets still fill. An unknown name fails; so would an ambiguous one, which validation
+  rules out.
+- `reading_at_most(n)`: `max_downloads := n`; n < 1 fails.
 
-A one-shot command and a daemon may run against the same domain at once; the ops are written for that
-(journal batching, gc lock + two-space reads, resync draining this process's own queues).
+### 3.2 Building a domain
 
-### 3.2 Ops (per `Make(C)`)
+1. Resolve the domain (§2.2) and its socket path.
+2. Configure the process's uplink governor from `uplink` and `links`, once per process
+   ([06](06-backends.md)).
+3. For each backend, in role order ([replication.md](algorithms/replication.md)): fresh traffic
+   counters; its link's admission; **one** store client (every layer above shares it: two clients
+   against one store would be two sets of health and limits); an uplink probe for remote stores.
+4. Build the composite: mains; `readOnly` archives; each `replica` and `backfill` as a deferred
+   target whose job log lives at `<data_dir>/deferred-pending/<domain>/<escaped backend name>/`,
+   which forwards a manifest only after its chunks and never forwards folder indexes.
+5. Build the members.
+6. **Deferred logs are resumed only by the domain's owner** ([07 §2.2](07-daemon-cli.md)). Any other
+   process submits the jobs its writes cause to the logs and pokes the owner; it never runs them
+   ([durable-queue.md §4.2](algorithms/durable-queue.md#42-ownership)). A command that takes ownership resumes the logs like
+   any owner.
 
-| Op | Signature (abridged) | Result / errors |
+Building has no side effect on the stores.
+
+### 3.3 Who builds a Domain Context
+
+| process | builds | notes |
 |---|---|---|
-| **Import** | `run ?only ?exclude ?force_rehash ?entry_ops ?entry_age ?on_dir ?on_plan ?on_start ?on_progress ~src ~on_file ()` | `summary {imported; skipped; skipped_symlinks; failed}`; per entry `status = Imported size \| Skipped_exists \| Skipped_symlink \| Failed msg` |
-| **Export** | `run ?on_event ~dst ~paths ()` (dst absolute, else `Invalid_argument`) | `summary {exported; already_there; failed; pending : rel list}`; events `Plan{files;bytes;present} / Started{rel;size;present} / Landed(rel,bytes) / Finished(rel, Exported\|Exported_symlink\|Already_there\|Failed msg)`; fails whole run on unknown path, collision, or `..`/`.` segment |
-| **Rsync** | `run ?move ?dry_run ?on_entry ~src:(Local p\|Domain rel) ~dst ()`; pure `decide ~move ~src target`, `describe`, `source_disposal` | `summary {copied; skipped; dirs; failed; bytes_moved}` |
-| **Mirror** | `resync ?source ?scope:(All\|Manifests\|Path rel) ?on_scan ?on_list ?on_start ?on_entry ()` | `dest_stats list` (`{name; checked; copied; copied_bytes}`) per destination in config order; `Failure` if source name unknown, gc run open (non-Manifests scope), `Path` object missing on source, or write guard refuses |
-| **Resync** | `run ?full ?progress ?on_manifest ?on_decision ~parallelism ()`; `bookmark ()`; `client_uuid ()` | `Full{manifests; failed; reason} \| Incremental{applied}`; `Failure` when a rebuild is needed but metadata ops are owed |
-| **Retention** | `trashed ()`; `restore path`; `purge_trashed ?on_delete ~path ()`; `deleted_in_folder key`; `deleted_in_domain ()`; `expire ?on_list ?on_scan ?on_delete ~cutoff ()` | `restored = Restored\|Not_in_trash\|Parent_unknown`; purge `Purged n\|Not_in_trash\|Live_elsewhere`; `deleted {path; latest; versions}`; `stats {versions_deleted; journal_deleted}` |
-| **Gc** | `start ?concurrency ?delete_batch ?keep ?verify ()`, `step ?units s`, `release`, `phase/done_/total/stats`, `run ?budget ?units ?pause …`, `abort …`, `status ()`, `outstanding ()`, `retry_outstanding ()`, `show_age` | `stats {outcome: Completed\|Suspended{phase;cursor}; roots_marked; chunks_promoted; chunks_verified; chunks_corrupt; chunks_unreadable; chunks_cleared; chunks_reclaimed; bytes_reclaimed}`; exceptions `Unsupported msg`, `Busy msg` |
-| **Integrity** | `tree_report ()`, `repair_tree ?dry_run ()`, `verify ~on_answers ~on_progress ~on_done ~on_stalled ()`, `follow …`, `repair ?source ?dry_run ?on_start ?on_chunk ()` | tree findings `Twice\|Disowned\|Unanchored\|Orphan\|Trashed_live`; verify `Watched\|Nothing_queued`; repair `Repaired{from_store}\|Cleared\|Unrepairable` and `repair_stats`; `Failure` on read-only domain (non-dry) |
-| **Share** | `create ?token ~expires ~rel ()`; `clear_cache ()` | `(url, msg) result`; `(count, bytes) result`; `Share_unavailable`/`Share_not_found` mapped to `Error` |
-| **Publish** (internal to import/rsync) | `Batch.create/add/publish/drop`, `file`, `symlink`, `dir` | manifest / folder id |
-| **Batch** | `take n l`, `per_delete = 1000` | |
-
-Progress-callback contracts (acceptance-relevant): `on_plan`/`on_scan` fire once with totals before work;
-`on_start` fires when an item is *picked up* (inside the bounding slot), `on_file`/`on_entry` when done; a
-caller wanting "what it is on now" uses `on_start`. Byte totals planned equal bytes later reported.
+| owner (FUSE, File Provider, headless, Android app, a command holding ownership) | yes | resumes deferred logs |
+| store server | yes | submits deferred jobs; uses `store` only |
+| other one-shot commands | yes | submits |
+| tray, discovery library, wizard | no | parse only (mount points, roots, validation) |
 
 ---
 
-## 4. Behaviour / algorithms
+## 4. Whole-domain operations
 
-### 4.1 `Domain.of_config` — building the live domain
+### 4.1 Rules common to every operation
 
-1. Resolve domain (explicit → `default-domain` file → sole), socket path (`Runtime.domain_socket_path`).
-2. Configure the process-wide uplink governor with `uplink` defaults and `links` overrides — once per process (a second domain in the
-   same process finds it configured and leaves it).
-3. `build_backends`, over `order_backends d.backends`, for each backend config `bc`:
-   - fresh traffic counters, kept by name;
-   - `admission = Uplink.admission (link bc.link) Background` (every store's writes join its link's line);
-   - `store = backend factory(type, field lookup, admission, traffic)` (one client per config entry,
-     shared by every layer above — building twice would be two clients against one store);
-   - if the store has no `local_path`, attach an uplink probe: `head_opt cursor_key` as the small round trip
-     the governor times; `held` and `timeouts` from the store's `Health`.
-4. Composite store(mains, targets, archives):
-   - mains = role Main; archives = role ReadOnly;
-   - targets = Replica/Backfill each wrapped in `Deferred.make ~resume ~max_chunk_forwards:cfg.max_chunk_buffers
-     ~room_for:(its admission).try_admit ~name ~backend ~source:<composite> ~chunk_prefix ~chunk_from_prefix
-     ~chunk_keys ~journal_prefix ~cursor_key ~excluded:is_index_key ~reads_reach:(role=Replica)
-     ~root:<data_dir>/deferred-pending/<domain>`.
-   - `chunk_keys body` = chunk keys of the body if it parses as a manifest, else `[]` (markers, shares) — lets a
-     deferred target forward a manifest only after its chunks.
-   - Folder indexes (`.tsync-index`) are excluded from forwarding.
-5. Members, one per leaf with name, role, `readable` (deferred: `readable <> None`; others true), type, masked
-   config, link (None for local), deferred stats thunks, traffic (remote only), `local_path`.
-6. `resume=true` only for the daemon: picks up owed deferred work; a one-shot command records and drains its
-   own jobs but must not run jobs the daemon is running. `start_resumed` runs them in the daemon's parent after
-   frontends fork.
+- **Where it runs.** Each operation's CLI command has an access class
+  ([07 §2.5](07-daemon-cli.md#25-one-shot-commands)), which says whether it runs beside the owner,
+  asks it, or takes ownership. An operation that is not the owner never writes the owner's local
+  state and never publishes a journal entry: it writes stores, submits records to the domain's logs
+  (§4.2), and pokes the owner.
+- **Pause.** Operations that write a domain's stores refuse while the domain is paused
+  ([07 §2.6](07-daemon-cli.md#26-pause)).
+- **GC interlock.** Every operation that publishes a reference to a chunk (a manifest from an
+  upload, an import, an rsync copy or rename, a revert) does so through the writer interlock of
+  [gc.md](algorithms/gc.md). No operation keeps a process-lifetime memo of "this chunk exists" across a
+  collection.
+- **Per-entry isolation.** A per-entry failure is recorded and the run continues, unless this file
+  says the whole run fails.
+- **Failures** carry the kinds of [failure-model.md](algorithms/failure-model.md); "could not read"
+  is never "absent".
+- **Whole-store listings** use the `tsync/` prefix or a narrower one, never the empty prefix
+  ([01 §2.1](01-core.md#21-store-keys-and-prefixes)).
+- **Private temporaries.** An operation's own spill and listing files are temporaries of the local
+  temp-name grammar ([01 §2.9](01-core.md#29-temporary-and-reserved-local-names)), removed when their
+  owning process is dead; their contents are not a contract.
+- **Progress callbacks.** Totals (`on_plan`, `on_scan`) fire once before work; `on_start` fires when
+  an item is picked up; `on_file` / `on_entry` when it is done. Byte totals planned equal the bytes
+  later reported, and a file's progress sums to its size.
 
-`reading_from name`: `Backend.named_exn` (fails on none or several). Replaces *all* read entry points, `watch`,
-batch reads and `health` with the named store's so reads, wakes and health reports refer to the same store;
-writes still go through the composite so deferred targets still fill.
+### 4.2 Announcing what an operation published (import, rsync, trash restore)
 
-### 4.2 Publish (shared by import and rsync)
+Only the domain's owner mints journal entry keys and publishes entries
+([wal-and-journal.md §4.9](algorithms/wal-and-journal.md#49-one-owner-per-domain)). An operation
+announces its changes by the rule of
+[durable-queue.md §7.3](algorithms/durable-queue.md#73-kill-point-walkthrough-publishing-without-a-local-staged-edit):
 
-- `file ~src_path key`: stat; `chunk_size ← R.chunk_size ()`; `R.upload ~key ~src_path ~mtime ~chunk_size
-  ~on_progress` (chunked, deduplicated, promotes chunks for an open gc run, writes manifest to the store);
-  then write it into the local manifest mirror (`Mf.write`). No cache entry: imported files read as not cached.
-- `symlink ~target ~mtime key`: `Manifest.make_symlink` (chunkless); `put_manifest`; mirror write.
-- `dir key`: `Ck.create_dir key`; `St.ensure_claimed key`; returns `St.ensure_folder_id key` (the id the marker
-  minted — a peer resolves the folder by it).
-- `Batch.add ops` appends **one op at a time, sequentially** (a parallel append could land in a sealed spool);
-  after each, publish if `count >= ops || now - published_at >= age`. `publish` swaps in a fresh spool first,
-  then seals the full one, writes it as one journal entry body (`Js.write_journal_entry_body`) and
-  `bump_cursor entry_key`; the full spool is dropped in a `finally`.
+- Ops are grouped into batches of at most `ENTRY_OPS` ops, a batch closing early once `ENTRY_AGE`
+  has passed since the previous one. Each batch becomes one WAL record listing its ops, made durable
+  (by the owner, or submitted by a non-owner and held locked) **before** the first object it announces
+  is put on the store; it is released to the owner once those objects are on the store.
+- The owner publishes one journal entry per record, updates its mirror and applied log, and bumps
+  the cursor. A non-owner pokes it (`poll`) after each release and at the end of the run.
+- **No peer sees a `put` before the `mkdir` naming its folder**: an operation's folder records are
+  released before any record holding a file beneath those folders, and the owner publishes an
+  operation's records in the order they were released.
+- A crash at any point leaves every manifest already on the store named by a durable record, which
+  the owner publishes (or drops, for an op whose manifest never landed) at its next rescan.
 
-Rationale (comment on `entry_ops/entry_age`): a deferred replica queues an entry behind the objects it names,
-so one entry for a whole run hides the whole run from that replica's readers until its backlog drains; a count
-alone bounds nothing a reader feels, hence age too.
+Why count and age: a deferred replica queues an entry behind the objects it names, so one entry for a
+whole run hides the run from the replica's readers until its backlog drains.
 
 ### 4.3 Import
 
-1. `src` → absolute, `realpath`. `Listing.reap <cache_root>/import`.
-2. **Plan** (`walk_source`): recursive readdir from `src`; per name compute `r` (domain-relative path via
-   `Logical_key`), skip if any `exclude` glob matches full `r` or basename. `lstat_kind`; entries sorted by key
-   where a directory's key carries a trailing `/` — so output order equals a sort of all full paths.
-   - Dir: `realpath` into `seen` (cycle guard, one entry per directory); push onto `pending`; with no `only`
-     flush immediately (emit into `dirs` listing); recurse; `selected` inherits.
-   - File when kept (`only=[] || selected || only-glob matches r`): flush pending dirs, add `(r, size)` to
-     `files`.
-   - Symlink when kept: flush, add `(r, target, bytes)` where bytes = 0 (`Skip`), `len target` (`Keep`), or
-     target's `stat` size or 0 if broken (`Follow`).
-   - Under `only`, a directory marker is emitted only once something beneath it is kept (ancestors held in
-     `pending`). Dir-symlinks are never descended. Unreadable dirs log a warning and count as empty.
-3. `on_plan ~files:(files+symlinks) ~bytes`.
-4. Batch created with `entry_ops`/`entry_age`.
-5. **Dirs first**: for each planned dir, `P.dir`, `on_dir`, add `Mkdir (rel, Some id)`. Then `publish ()` —
-   **every mkdir is published before any put**, since a peer resolves a file's folder by the id its marker
-   carries.
-6. Files: `exists key` = local mirror has it (`Mf.published`) **or** store `head_manifest_opt`; if exists and
-   not `force_rehash` → `Skipped_exists` (import never overwrites). Else `P.file` → `Imported size`, add
-   `Put (rel, size)`.
-7. Symlinks per policy: `Keep` → `P.symlink` (same exists check); `Follow` → broken target → `Skipped_symlink`,
-   else import as file (content of target under the link's name); `Skip` → `Skipped_symlink`.
-8. Each entry wrapped: `on_start` then any exception → `Failed msg` (logged); run continues.
-9. Final `publish ()`, then `Cursor.flush_cursor ()` (no queue settles behind an import and `Backend.drain`
-   doesn't reach the cursor, so a held-back debounced bump would otherwise never be seen). `finally`: drop
-   the three listings and the batch.
+`import ~src ?only ?exclude ?force_rehash` → `{imported, skipped, skipped_symlinks, failed}`; per
+entry `Imported size | Skipped_exists | Skipped_symlink | Failed reason`.
 
-Memory: tree is spilled to disk (a million paths ≈ 100 MB otherwise); only `seen` grows (per directory).
+1. `src` is made absolute and resolved (a dangling resolution keeps the unresolved path).
+2. **Plan**: a recursive walk of `src`, entries in the sort order of their full paths (a directory's
+   path sorts with a trailing `/`), each once. Per name, its domain-relative path `r`:
+   - skipped if an `exclude` glob matches `r` or its basename, at any depth;
+   - a directory is recorded once by its resolved path (a cycle guard); with no `only`, its marker is
+     planned at once (empty folders are imported); under `only`, only once something beneath it is
+     kept; symlinked directories are never descended; an unreadable directory logs a warning and
+     counts as empty;
+   - a file is kept when `only` is empty, an ancestor was selected, or an `only` glob matches `r`;
+   - a symlink is kept likewise, planned with 0 bytes (`skip`), its target's length (`keep`) or its
+     target's size (`follow`, 0 when dangling).
+   Glob syntax and matching: [01 §17](01-core.md#17-glob-patterns).
+3. `on_plan(files, bytes)`.
+4. **Folders first**: create each planned folder's marker on the store (claiming its folder id) and
+   announce `Mkdir(r, id)` (§4.2).
+5. **Files**: a key exists if the store has its manifest, or the mirror holds it published or staged
+   (a permitted read, [07 §2.2](07-daemon-cli.md#22-the-domain-owner)). An existing key is
+   `Skipped_exists`, **even when its content differs**, unless `force_rehash`, which uploads the file
+   again (re-sending chunks missing from the store) and announces it. Otherwise upload (chunked,
+   deduplicated, through the interlock) and announce `Put(r, size)`. An imported file is not cached
+   locally.
+6. **Symlinks** per policy: `keep` → publish a symlink manifest, dangling ones included (same
+   existence rule); `follow` → import the target's content under the link's name, a dangling target
+   is `Skipped_symlink`; `skip` → `Skipped_symlink`.
+7. Close the last batch; poke the owner.
+
+A rerun after a crash skips what exists; nothing it uploaded before the crash stays unannounced
+(§4.2).
 
 ### 4.4 Export
 
-Reads straight off the stores (no daemon, no local mirror, no cache except the record).
+`export ~dst ~paths` → `{exported, already_there, failed, pending}`; events `Plan{files, bytes,
+present}`, `Started{rel, size, present}`, `Landed(rel, bytes)`, `Finished(rel, outcome)`.
 
-1. Normalize paths (`segments` joined by `/`; `[]` → `[""]` = whole domain).
-2. For each path: `Tree.find root_id segments` over the **store's inode tree** →
-   `Missing` → fail `"<p>: no such file or folder in <domain>"`; `Folder id` → `Tree.fold_tree ~on_unusable:`Fail`
-   collecting every file manifest; `File` → one.
-3. `landing ~dst ~asked ~rel`: strips `dirname asked` from `rel`: a file lands by its own name, a folder keeps
-   its name, the root's contents land as-is. Examples: asked `docs/deep/b.txt` → `/out/b.txt`; asked
-   `docs/deep` holds `docs/deep/b.txt` → `/out/deep/b.txt`; asked `""` → `/out/docs/deep/b.txt`.
-4. Dedup by (rel, dst_path); refuse any rel with `.`/`..` segment (names come off a store; dst is somebody's
-   disk); refuse two rels landing on one dst path.
-5. `pending` = staged (unuploaded) entries on this machine under the paths (`Staged.entries ~deep`), reported not
-   exported.
-6. Per file decide (`decide`):
-   - record present: parse against identity `{h1,h2,size,chunk_size,dst}`; `Claimed` **and** dst exists with
-     manifest size → `Resume claimed`; otherwise `Fresh`.
-   - no record: dst is a regular file with manifest size and `|mtime - manifest.mtime| <= 2s` → `Already_there`;
-     else `Fresh`. (Marked `ponytail:` — hash if ever insufficient.)
-   - symlink manifests always `Fresh`.
-7. `Plan` event with `present = size(already_there) + claimed bytes`. `Finished Already_there` for those.
-8. `mkdir_p dst`; `Pools.each ~width:C.max_downloads cursor`: the cursor walks jobs **in order, chunk by
-   chunk**, skipping claimed chunks, so the open files are the few the workers are spread over.
-   - Opening (lazily, once per job, memoized promise): `Started` event; ensure parents; if fresh: atomically
-     write record header **first**, then `unlink` dst (never write through a symlink), `open O_CREAT|O_EXCL`,
-     `Files.reserve ~size` (preallocate; ENOSPC → `not enough space in <dir>: needs X, Y available`, cleanup of
-     file and record); if resuming, `open O_WRONLY`. Record opened `O_APPEND`.
-   - Chunk: `R.get_verified_chunk` (checked against key), length must equal expected (else fail file),
-     `pwrite_all` at offset, **`fsync`**, append claim line (short write fails), `left--`, `Landed`.
-   - Zero-left fresh job (e.g. empty file): just open (creates/reserves).
-   - `guarded`: exceptions settle the job `Failed` (message from `Failure`/`Backend_error` else printed); never
-     propagate (Pools.each would stop all workers). When `left=0`, no outcome yet and no chunk in flight →
-     `finish`: close fds, `utimes` to manifest mtime, unlink record, `Exported`. Close fds once failed and
-     idle.
-   - Symlink: ensure parent, unlink, `symlink target`, `Exported_symlink`.
-9. Tally: jobs with no outcome count as failed.
+Export reads the stores, never the mirror or the chunk cache: files may be too large to pass through
+a cache, and the domain's cache is left untouched. A file with staged edits exports its **published**
+version and is listed as pending. `dst` must be absolute.
 
-Invariant: record lands before file bytes; a crash leaves nothing or a record claiming ≤ what the disk holds.
-A failed file is left at full length under its name with its record in the cache for resume.
+1. Each path is resolved in the store's folder tree: missing → the whole run fails
+   (`<p>: no such file or folder in <domain>`); a folder → every file manifest beneath it (an
+   unusable child fails the run); a file → itself.
+2. **Landing**: a file lands by its own name, a folder keeps its name, the root's contents land as
+   they are (`docs/deep/b.txt` → `<dst>/b.txt`; `docs/deep` → `<dst>/deep/b.txt`; `""` →
+   `<dst>/docs/deep/b.txt`).
+3. The run fails on any relative path with a `.` or `..` segment (names come from a store; `dst` is
+   someone's disk) and on two paths landing on one destination.
+4. `pending`: this machine's staged, unpublished entries under the paths (a permitted read); they
+   are reported, not exported, and make the command exit 1.
+5. Per file:
+   - with a **record** (below) whose identity matches and a destination file of the manifest's size →
+     resume, skipping claimed chunks;
+   - with no record, a destination regular file of the manifest's size and an mtime within
+     `EXPORT_MTIME_SLACK` of the manifest's → `Already_there`;
+   - otherwise fresh (a record whose identity no longer matches, because the file changed upstream,
+     starts the file over); symlink manifests are always fresh.
+6. Opening a fresh file: write the record header durably **first**, then unlink the
+   destination (never write through a symlink), create it exclusively, and preallocate its full size
+   (no space → fail that file with `not enough space in <dir>: needs X, Y available`, removing file
+   and record). Per chunk: read it verified against its key, check its length, write it at its
+   offset, fsync, then append its index to the record. When a file has no chunk left: close, set its
+   mtime to the manifest's, remove the record. A symlink manifest: unlink, create the link.
+7. A failure settles its file `Failed` and never stops the other files. Files with no outcome at the
+   end count as failed. A failed file is left at full length with its record, for resume.
 
-### 4.5 Rsync (copy/move)
+Invariant: a record exists before any byte of its file; it never claims a chunk the file does not
+durably hold.
 
-Pure decision table (`decide ~move ~src target`), where `source = Missing | Dir | File of local | Key of
-Manifest` and `target = Absent side | Dir side | File local | Key Manifest`, `local = Link target | Hashed
-chunkkeys | Unhashed`:
+**Export record** at `<cache_root>/<domain>/exports/<xxh(dst,0)>-<xxh(dst,1)>` (hex, the path hashed
+with the two seeds of [01](01-core.md)):
 
-| src \ target | result |
+```
+tsync-export 1 <h1> <h2> <size> <chunk_size> <escaped dst>\n
+<chunk index>\n
+…
+```
+
+The header is compared whole, byte for byte, with the expected one. Then one decimal chunk index
+per line, each appended after its chunk is durable. Reading stops at the first line that is not an
+in-range index spelled canonically; the text after the last newline is ignored (a torn append).
+The export holds an exclusive lock on each record it uses for its whole run; a second export to the
+same destination fails that file with `busy`, and the owner's sweep of export records removes only
+unlocked records older than the sweep's grace.
+
+### 4.5 Rsync (copy and move)
+
+`rsync ~src ~dst ?move ?dry_run` with `src`, `dst` each `Local path | Domain rel` →
+`{copied, skipped, dirs, failed, bytes_moved}`. Local to local is refused; both domain endpoints are
+the same domain.
+
+**Facts.** Every domain-side fact comes from the **store** (its folder tree and manifests), never
+from the mirror; a local fact from the local filesystem. `source = Missing | Dir | File(local) |
+Key(manifest)`; `target = Absent(side) | Dir(side) | File(local) | Key(manifest)`;
+`local = Link(target) | Hashed(chunk keys) | Unhashed`.
+
+**Decision** (pure):
+
+| source \ target | decision |
 |---|---|
-| Missing, _ | Skip Source_missing |
+| Missing, _ | Skip `Source_missing` |
 | Dir, Absent s / Dir s | Make_dir s |
-| Dir, File/Key | Skip Target_not_a_dir |
-| File/Key, Dir | Skip Target_is_dir |
-| Key, Absent Domain, move | Rename_in_domain |
+| Dir, File / Key | Skip `Target_not_a_dir` |
+| File / Key, Dir | Skip `Target_is_dir` |
+| Key m, Absent Domain, move | Rename_in_domain m |
 | Key m, Absent Domain | Copy_manifest m |
-| Key a, Key b | Identical if `h1,h2` equal else Copy_manifest a |
+| Key a, Key b | Identical if the content hashes are equal, else Copy_manifest a |
 | File, Absent Domain | Upload Fresh |
-| File l, Key d | Identical if `unchanged l d` else Upload Replacing |
+| File l, Key d | Identical if `unchanged(l, d)`, else Upload Replacing |
 | Key m, Absent Local | Assemble m |
-| Key m, File l | `differing`: None → (Identical if unchanged else Assemble); Some [] → Identical; Some idx → Patch_local{m, idx} |
-| File, Absent Local / File | Skip Not_in_domain |
+| Key m, File l | `differing`: unknown → Identical if unchanged else Assemble; none → Identical; some indices → Patch_local(m, indices) |
+| File, Absent Local / File | Skip `Not_in_domain` |
 
-- `unchanged`: Link a vs symlink b → a=b; Hashed keys vs non-symlink → same count and all keys equal; Unhashed →
-  false; kind mismatch → false. **Identity is only ever bytes**, never mtime (a manifest's double mtime cannot
-  faithfully hold ns).
-- A local file is hashed only when there is a manifest to compare against, and cut at *that manifest's*
-  chunk size so index i names the same span (`local_keys`).
-- `source_disposal ~move`: Skip/Rename/Make_dir keep the source (rename already consumed it; a dir outlives
-  files still moving out); others drop iff move.
+- `unchanged`: link vs symlink manifest → same target; hashed keys vs a file manifest → same count
+  and every key equal; unhashed → false; a kind mismatch → false. **Identity is bytes**, never mtime.
+- A local file is hashed only against a manifest, cut at that manifest's chunk size.
+- `source_disposal(move)`: Skip, Rename_in_domain and Make_dir keep the source; everything else
+  drops it iff `move`.
 
-Execution (`run`):
-- Entries: Local root → a single file/symlink is `[("", File)]`; a dir is a sorted recursive walk; Domain prefix
-  → if a manifest exists at prefix it's one file; else recursive `Ck.list_children` (local mirror). Sorted so
-  a directory precedes its content. Held as an in-memory list.
-- Per entry: fetch src/dst manifests (`manifest_at` = local mirror, falling back to `R.fetch_manifest`), build
-  source/target facts, decide, `on_entry`; `dry_run` tallies (non-skip non-dir as `Copied 0`).
-- Actions:
-  - Copy_manifest: symlink → put body + mirror + `Put` op; file → `R.upload_chunks` with each chunk
-    `Chunk_source.Stored key` (inherited, zero bytes moved, and the one path that **promotes chunks before the
-    manifest appears**, so an open gc cannot sweep them — commit 96c30ced) → mirror → `Put`.
-  - Upload: policy for symlinks (`Skip` → Skipped Source_missing; `Keep` → P.symlink); vanished → Failed; else
-    P.file (store dedups, so only differing chunks are sent).
-  - Assemble: symlink manifest → local symlink; else `D.assemble_to`.
-  - Patch_local: consecutive indices merged into runs, each one `D.fetch_range`; then `utimes` to manifest
-    mtime. `bytes = |chunks| * chunk_size`.
-  - Rename_in_domain: put manifest at dst, mirror write, delete src manifest + mirror, one `Rename{dst; src;
-    size; is_dir=false; id=None}` op.
-  - Make_dir: local `mkdir_p`, or `P.dir` + `Mkdir(rel, Some id)`.
-  - Drop source (move): local unlink, or delete manifest + mirror + `Delete rel`.
-- End: publish batch, drop, `flush_cursor`.
-- Both endpoints `Domain` refer to the same domain `C`.
+**Execution.**
 
-### 4.6 Mirror (backend → backend)
+- Entries are handled in sorted order, a directory before its content.
+- Each action uses the facts its decision was made on; it never re-reads a fact and assumes it is
+  still there.
+- Copy_manifest: a symlink → publish its manifest; a file → publish a manifest over the **inherited
+  chunk keys** through the writer interlock (zero bytes moved; the chunks are promoted before the
+  manifest appears, so an open collection cannot sweep them). Announce `Put` (§4.2).
+- Upload: symlinks per policy (`skip` → Skip `Symlink_policy`; `keep` → publish the link; `follow`
+  → the target's content, a dangling target → Skip `Dangling_symlink`); a vanished source → Failed;
+  else upload (the store deduplicates, so only differing chunks are sent). Announce `Put`.
+- Assemble: a symlink manifest → a local symlink; else write the file from its chunks.
+- Patch_local: consecutive indices merged into runs, each fetched into place; then set the mtime.
+- Rename_in_domain: publish the manifest at the destination, delete the source manifest, announce one
+  `Rename(dst, src, size, is_dir=false)`.
+- Make_dir: local `mkdir -p`, or a domain folder and `Mkdir(rel, id)`.
+- Drop source (move): local unlink, or delete the manifest and announce `Delete`.
+- The end closes the last batch and pokes the owner (§4.2).
+- Unpublished local edits under a domain source are not part of the copy; they are listed on stderr.
 
-1. Source = named member (`named_exn`) or the first member (a main by role order).
-2. Refuse `All`/`Path` while a gc run is open (chunk prefix only partly under its usual name): message names
-   phase and age, suggests `tsync gc` or `tsync gc --abort`. `Manifests` scope is allowed.
-3. `Listing.reap <cache_root>/mirror`. Build the **source listing** spooled to disk:
-   - `All`: list `domain_prefix`; list chunks **a batch of shards at a time** (batch width = `probe_pool`
-     width; each shard `list_prefix chunk_prefix/<shard>/`), spilled before the next batch; list journal,
-     versions; `head_opt cursor`. `Manifests`: domain_prefix only.
-   - Entries whose leaf is internal (e.g. `.tsync-index`) are skipped — an index records store-reported versions
-     and duplicates every manifest body.
-   - `Path rel`: walk the inode tree (`Tree.children`) descending only into folders on the way to `rel` or
-     under it; collect folder marker keys and file manifest keys under `rel`, plus all chunk keys those
-     manifests name; `head_opt` each on the source (probe pool) — missing → `Failure "<key> is missing from source
-     <name>"`; journal/versions/cursor excluded (would state a history that never happened).
-4. `on_scan ~objects ~bytes`.
-5. For each other member **sequentially** (`map_s`), in config order:
-   - `Write_guard.ensure ~what:"copy to <name>"` (a non-main may be written only while the main is online; a
-     main may always be written — that is how one is refilled).
-   - For listed scopes, build a **destination view** by listing the destination the same way, into an
-     mmap-backed hashtable (`Hashtbl_mmap`) key→size. (A listing answers ~1000 keys/request vs a HEAD each.)
-     `Path` scope uses per-object HEAD instead.
-   - `Pools.each ~width:min(entries_in_flight, count)` workers pull the next listing record:
-     - size there: from view (announce `on_start`), or `head_opt` inside `probe_pool` (announce inside the slot);
-     - reason: missing → `Missing`; dir key present → none; size differs → `Wrong_size`; else present;
-     - if a reason: inside `copy_pool`: dir key → put empty; else `Src.get` → `Dst.put`.
-     - `on_entry` with `Present` or `Copied(reason, bytes)`; counts only (keys are never retained).
-6. `finally` drop listing.
+### 4.6 `tsync mirror` (store to store)
 
-Bounds: `copy_pool = max_chunk_buffers` (bodies in memory); `probe_pool = max(8, 4*max_chunk_buffers)` (round
-trips, no body); `entries_in_flight = 4*probe_max` (constant, not the listing length). Probe slot and copy slot
-are taken **one after the other, never nested** (nesting deadlocks). Additive only: nothing deleted on
-destinations. Correct bytes of wrong content are not detected (that's integrity's job; the store checks bodies
-against keys). Chunk prefix copied whole even when shared (content-addressed extras only help).
+`mirror ?source ?scope:(All | Manifests | Path rel)` → per destination `{name, checked, copied,
+copied_bytes}`.
+
+1. Source: the named member, else the first member in role order.
+2. `All` and `Path` are refused while a collection is open ([gc.md](algorithms/gc.md): the chunk
+   space is partly under another name); the message names the phase and age and suggests `tsync gc`
+   or `tsync gc --abort`. `Manifests` is allowed.
+3. **Source listing**:
+   - `All`: chunks, then the domain's manifests, markers and versions, then journal entries, then
+     the cursor.
+   - `Manifests`: the domain's manifests and markers.
+   - `Path rel`: walk the folder tree down to and under `rel`, collecting markers and manifests and
+     every chunk key those manifests name; each is checked on the source (missing → the run fails
+     `<key> is missing from source <name>`); no journal, versions or cursor (they would state a
+     history that never happened).
+   - Internal leaves (folder indexes) are skipped: an index records store-reported versions and
+     duplicates every manifest body.
+4. `on_scan(objects, bytes)`.
+5. For each other member, in config order: the write guard
+   ([replication.md](algorithms/replication.md)) must allow writing it. Compare each source object
+   with the destination's (from a listing of the destination for listed scopes, a head per object for
+   `Path`):
+   - a **chunk** (content-addressed, immutable) is copied when absent or of another size;
+   - **every other key** (manifests, markers, anchors, versions, journal entries, the cursor) is
+     mutable, and is copied when absent or when its body differs from the source's.
+   A copy is a get from the source and a put to the destination.
+6. Every chunk is copied before any manifest that names it, and the cursor last: a reader of the
+   destination never sees a manifest whose chunks are not there yet, or a cursor ahead of its
+   entries.
+
+Additive: nothing is deleted on a destination. A chunk's content (same size, wrong bytes) is
+integrity's (§4.10). Stateless: a restart re-lists.
 
 ### 4.7 Resync (`tsync sync`)
 
-1. Start this process's upload queue (`Sq.start`) and metadata queue (`Mq.start`).
-2. `Rp.reconcile ()` (replay local records) → `Mq.drain ()` (metadata first: a rename names the file an upload
-   is for) → `Sq.drain ()` → `Cursor.flush_cursor ()`.
-3. Read `last_sync_key` (local bookmark) and all journal keys. Reason for a **full** rebuild:
-   `--full` → "--full flag"; no bookmark → "no bookmark (first run)"; `cannot_bridge last keys` (journal empty,
-   or oldest entry's ms > bookmark's ms) → "bookmark older than oldest journal entry". Else incremental.
-4. `on_decision last keys reason`.
-5. Incremental: `Rp.apply_foreign ~on_changed:ignore` (same engine as the daemon poller) → `Incremental{applied}`.
-6. Full:
-   - Refuse if `W.owed_metadata ()` non-empty ("N metadata operation(s) are not published yet, and a rebuild
-     would undo them").
-   - `Cache.clear_projection` (applied entries and scratch; **not** the mirror contents or cached chunks).
-   - Walk the store's folder tree (`Tree.fold_tree ~on_unusable:(Skip note) ~refresh_index:(not read_only)
-     ~slots:(pool of max 1 parallelism)`); for each entry `Ck.record ~parent ~on_other:`Replace` rewrites the
-     mirror in place and says `Same | Changed | Replaced old`; report the difference as journal ops: file
-     changed → `Put(rel,size)`; dir changed → `Mkdir(rel, Some id)`; dir replaced → `Rmdir(rel, Some old)` then
-     `Mkdir`. Unusable children (unreadable, unparseable manifest, disowned marker) are counted with a sample of
-     10 logged. Ops flushed as locally-minted journal entries every 64 ops (`Cursor.note_local`) so a reader of
-     applied entries sees a delta, not a reset (commit dbbbe079).
-   - **Only if failed = 0**: sweep mirror entries not rewritten since walk start (`Ck.sweep_stale ~cutoff`) and
-     cache (`Cache.sweep_stale`), report removals, write bookmark = `J.entry_key ()` (now), `Rp.mark_handled
-     all_keys`. A partial walk leaves bookmark and mirror sweep alone (otherwise folders never fetched would be
-     skipped forever).
-   - The mount keeps serving the mirror throughout; unsynced edits are kept.
+`resync ?full ~parallelism` → `Full{manifests, failed, reason} | Incremental{applied}`. It runs in the
+domain's owner (the `sync` bulk action when requested over IPC,
+[07 §4.3](07-daemon-cli.md#43-deadlines-bulk-actions-and-the-liveness-probe)), and is refused while
+paused.
 
-### 4.8 Retention (expire, trash, deleted files)
+1. Let the metadata queue publish what it owes, bounded by the settle timeout.
+2. Decide: **full** when `full` was asked, or when the domain cannot bridge (the conditions B1–B4 of
+   [wal-and-journal.md §4.8](algorithms/wal-and-journal.md#48-retention-horizon-bridging-and-rebuild),
+   reported with their reason). Otherwise incremental.
+3. **Incremental**: one journal pass ([wal-and-journal.md §4.4](algorithms/wal-and-journal.md#44-inbound-applying-entries))
+   → `Incremental{applied}`.
+4. **Full**: a rebuild, meeting every rebuild obligation of
+   [wal-and-journal.md §4.8](algorithms/wal-and-journal.md#48-retention-horizon-bridging-and-rebuild)
+   (refused while metadata is owed: "N metadata operation(s) are not published yet, and a rebuild
+   would undo them"; listing before walking; mark and sweep only after a walk with no failure). The
+   walk itself:
+   - walks the store's folder tree (`parallelism` = the command's `-j`), rewriting the mirror **in
+     place** entry by entry; staged edits and cached chunks are kept;
+   - reports each difference as ops noted in the applied log as found (at most `RESYNC_NOTE_OPS` per
+     noted entry): a changed file → `Put`; a changed folder → `Mkdir(rel, id)`; a replaced folder →
+     `Rmdir(rel, old id)` then `Mkdir`; after a complete walk, removed entries (and their cached
+     bodies) are reported as removals;
+   - counts unusable children, logging a sample;
+   - ends by stamping a new resync generation and calling the frontend's `reannounce`
+     ([08 §3.2](08-frontends.md#32-hooks)).
+   The mount serves the mirror throughout.
 
-- Trash: a removed folder's marker is moved under the trash namespace `domain_prefix/.tsync-trash/`; subtree
-  untouched (unreachable from root).
-- `trashed ()`: list trash namespace, skip dir keys, GET each body; `Folder.trash_path_of_string` gives path;
-  unparsable bodies passed over (a write in flight).
-- `restore path`: find entry whose path matches; target key `L.folder_marker_key (Lk.dir path)` (needs parent's
-  id locally → else `Parent_unknown`); `put_anchor folder_id parent name`, put marker `{name,id}` at new key,
-  delete trash entry (already gone → logged, still `Restored`). O(1). No journal entry: peers learn by resync.
-- `still_trashed m`: folder's anchor exists and is not in trash → log error and refuse (would delete a live
-  folder); no anchor → trust the entry.
-- `purge_trashed`: `collect_namespace id` = every child bkey of the subtree via `Tree.fold_tree` **plus every
-  folder index** seen (`on_index`), errors propagate; delete subtree then marker **last**, in batches of 1000
-  (`delete_multi`).
-- `deleted_in_folder key`: look up (never mint) folder id; list `versions/<fid>/`; per distinct grouping, if the
-  live manifest (`domain_prefix ^ grouping`) is absent, read name from a version body (fallback grouping).
-- `deleted_in_domain`: one list of `versions_prefix`; per grouping latest ts, count, sample key; then HEAD live
-  manifest per grouping.
-- `expire ~cutoff` (seconds): through the composite (reaches every store):
-  1. Trash markers with `last_modified < cutoff` (cheap `keep` filter before GET) → for each still-trashed marker,
-     marker + subtree keys; delete all.
-  2. Versions: list; partition by ts (ns) `< cutoff*1e9`; delete expired; then delete version *directories*
-     (`versions/<grouping>/`) of groupings with no survivor (no-op on S3).
-  3. Journal: entries with `timestamp_ms < cutoff*1000` **except the one the cursor names** (else a quiet domain
-     is left with a cursor pointing at nothing). Age is the only safe criterion: cursor says what was published,
-     not what every client applied.
-  Returns counts of versions and journal entries (trash not counted in stats).
-  Consequence: a client offline longer than the window must full-resync.
+### 4.8 Trash, deleted files and retention
 
-### 4.9 GC (copying-collector over a local main)
+- **Trash**: a removed folder's marker moves into the trash namespace; its subtree is untouched
+  (unreachable from the root) until expiry.
+- `trashed()`: list the trash namespace; read each entry for its path; an unparsable body is passed
+  over (a write in flight).
+- `restore(path)`: find the entry for `path`; the target is the folder marker at `path`, which needs
+  the parent's folder id on this client (else `Parent_unknown`). Refuse when a live folder already
+  has the name. Write the anchor (parent, name), then the marker, then delete the trash entry (already
+  gone is logged and still `Restored`); announce `Mkdir(path, id)` (§4.2) so peers learn it.
+- `purge(path)` → `Purged n | Not_in_trash | Live_elsewhere`: the rules (anchors kept as tombstones,
+  trash entry last, refusal of a folder live elsewhere) are
+  [gc.md §4.2](algorithms/gc.md#42-purge).
+- `deleted_in_folder(key)` and `deleted_in_domain()`: from the versions namespace; a grouping whose
+  live manifest is absent is a deleted file, named from a version body. They look up folder ids, never
+  mint them.
+- `expire(cutoff)` → `{trash_deleted, versions_deleted, journal_deleted, shares_deleted}`, in that
+  order (trash, versions, journal, shares); its rules are [gc.md §4](algorithms/gc.md#4-retention).
+  A client offline for longer than the retention window cannot bridge and rebuilds
+  ([wal-and-journal.md §4.8](algorithms/wal-and-journal.md#48-retention-horizon-bridging-and-rebuild)).
+- Reverting a file (a file operation, [04 §3.4](04-checkout-cache.md#34-operations)) saves a version
+  of the content it replaces when the domain keeps versions.
 
-Precondition: `Backend.main members` (first main) has a `local_path`; else `Unsupported` ("Collecting chunks
-needs a local main store; X is s3. Versions and the journal can still be trimmed with tsync expire.").
+### 4.9 Garbage collection
 
-Idea: rename `chunks/` → `chunks.from/`; writers keep writing `chunks/` (unaware); marking **moves** each chunk a
-live root names back into `chunks/` (`Space.promote`); what remains in `chunks.from/` is the garbage by name.
-Readers look in both spaces (`Collection.head/get/get_range`, surviving space first). The one writer duty:
-`Collection.promote_all` before publishing a manifest (done by `Remote.publish`/`upload_chunks`).
+`gc` → `start`, `step`, `run ?budget ?pause`, `abort`, `status`, `outstanding`, `retry_outstanding`,
+with `stats{outcome: Completed | Suspended{phase, cursor}; roots_marked; chunks_promoted;
+chunks_verified; chunks_corrupt; chunks_unreadable; chunks_cleared; chunks_reclaimed;
+bytes_reclaimed}` and failures `Unsupported(reason)`, `Busy(holder)`. The collector, its phases,
+precondition and writer interlock are [gc.md](algorithms/gc.md).
 
-State machine (phase recorded **before** the step it names):
+**Exclusion.** At most one collection session per domain runs at a time on a machine, whatever the
+processes and sessions: a session takes the domain's collection lock before reading the run marker,
+and the in-process part of that lock is taken without any suspension point between checking and
+setting it (a kernel lock alone merges locks of one process). A second session gets `Busy` naming the
+holder. `gc` refuses while the domain is paused.
 
-```
-(none) --start--> Opening: save; rename chunks->chunks.from (skip if from exists; ENOENT ok)
-Opening/Marking --> enumerate namespaces = readdir(manifests/) as m/<id> ++ readdir(versions/) as v/<id>, sorted,
-                    filter > cursor; save Marking(cursor)
-Marking: per namespace ns (sequential): prefix (dir → trailing "/", a single-object namespace → none);
-         list; keep is_child_object keys; per root (unit_slots): GET, marker → [], manifest → its chunk keys,
-         unparseable → FAIL the collection (nothing discarded); per chunk (item_slots): promote; if verify &&
-         moved: verify_promoted. After ns: save Marking(ns).
-Mark [] --> begin_closing: shards = union(readdir chunks/, readdir chunks.from/) sorted; save Closing("")
-Closing: per shard (sequential scan): candidates = chunk-named entries in chunks.from/<shard>/;
-         keep those NOT present by name in chunks/<shard>/ (HEAD, item_slots) → doomed (key, size);
-         pool until ready = (no targets) || count >= delete_batch || 5 s since last flush;
-         flush: for each deferred member (Write_guard first): discard(keys) → Queued (bucket function will
-         delete) | Unsupported → delete_multi; then delete corruption markers of doomed keys on main + direct
-         copies; then discard shards locally (unlink entries, rmdir); save Closing(last shard of batch).
-Close [] --> rm -rf chunks.from; clear run marker; Done.
-keep=true / Abandoning: shards = readdir chunks.from; per shard: carry_over (rename whole shard dir if
-         chunks/<shard> absent/empty) else if k+1 < m-k push_down (unlink/move-down the few in chunks/) then
-         carry_over, else move_across missing chunks; discard_shard; save Abandoning(shard).
-Keep [] --> re-list chunks.from; leftovers → another Keep round; none → rm -rf, clear, Done.
-```
-
-- Resume: `Abandoning` always continues abandoning (once called off, stays off); `keep` overrides any phase
-  (cursor not reused); `Closing` resumes after cursor; `Opening|Marking` redo the (idempotent) rename and
-  resume marking after cursor. Cursors are names, not indices (resume re-lists).
-- Namespaces go one at a time so "last finished" is the furthest; cursor saved after each namespace (a
-  namespace can be hours of promoting).
-- Copies before main: crash between leaves keys to delete again (idempotent), never keys leaked.
-- Doomed-key recheck by name in the surviving space: a chunk re-uploaded mid-run under the same name by a writer
-  that never saw the outgoing copy must not be deleted off replicas.
-- Only names that are chunk keys are counted/deleted (an in-flight temp is discarded with the space but never
-  named in a delete).
-- Pools: `unit_slots` for things run several at once (roots), `item_slots` for per-object work inside one;
-  width = `concurrency` or main's `caps.max_concurrency` (default 8), clamped ≥1. Chosen by nesting depth; one
-  shared pool deadlocks.
-- `verify_promoted` (only for chunks actually moved, i.e. once per chunk): GET from **the main only**
-  (never the composite: a read would fall through to a replica; a write would fan out); hash = key → count
-  verified, delete any stale corruption marker (`cleared`); mismatch → write marker `{computed; size; at;
-  reason=None}`; unreadable (EIO, vanished) → marker with `reason`. Never discarded (a manifest names it).
-- Throttled progress: ≤1 call/s per phase key, last call forced. `budget` checked between units.
-- `run`: `start`, set deadline/callbacks, loop `step ~units` (default 256) with optional `pause`; on budget
-  exhaustion return `Suspended` leaving the run open; lock released in `finally`.
-- `abort`: no-op if no run; else `run ~keep:true`.
-- `outstanding ()`: per deferred member list `gc_jobs_prefix`, keep true job keys; `(name, count, max age)`.
-  Warned at every `start`. `retry_outstanding ()`: re-PUT each job body onto itself to re-fire the bucket's
-  object-created notification (write guard first). Safe to repeat.
-- Exclusion: `take_lock` = in-process flag `held` (lockf merges same-process locks) + `lockf F_TLOCK` on
-  `<root>/tsync/D/gc-run.lock` (EAGAIN/EACCES/EDEADLK → `Busy`). Kernel drops it on death → a crashed run is
-  resumable. Taken before reading the marker so one process decides open-vs-resume.
+`outstanding()` lists, per deferred member, delete jobs a copy has not consumed yet, with count and
+age, and is warned at every start; `retry_outstanding()` rewrites each job over itself (write guard
+first) to re-fire the copy's notification. Both are safe to repeat.
 
 ### 4.10 Integrity
 
-- `tree_report` (read-only walk from root, `refresh_index:false`): per folder, record id→paths; anchor missing →
-  `Unanchored{path;id;parent}`; unusable `Disowned anchor` → `Disowned{marker; anchor}`; ids at ≥2 paths →
-  `Twice`. Trash entries whose folder id was reached from root → `Trashed_live`. Orphans only if some **main**
-  has a `local_path`: readdir `<root>/tsync/D/manifests/`, minus internal leaves; mark everything reachable
-  from root and from each trashed id (plus root and trash ids); each unseen namespace → `Orphan{id; objects;
-  sample of ≤3 names}`. Findings order: Twice (sorted), Disowned, Trashed_live, Unanchored, Orphan.
-- `repair_tree`: refuses on read-only (unless dry run); Disowned/Trashed_live → `delete_raw` (removed or `left`
-  if nothing was deleted); Unanchored → `put_anchor id parent basename(path)`; Twice/Orphan untouched → `left`.
-- `verify`: per member (write guard), `B.verify_all ~chunk_prefix` → `Queued n` / `Unsupported`; `on_answers`
-  once; none queued → `Nothing_queued`; else `follow` each queued member concurrently.
-- `follow`: poll every 3 s: count `verify_jobs_prefix` (left) and `corrupted_prefix` (found); left=0 → done;
-  unchanged `left` for 5 polls → `on_stalled` (undeployed/misfiltered notification) and stop. List errors count 0.
-- `repair`: refuses on read-only (unless dry); `Cor.list ()` markers; per marker (sequential): bad store's own
-  copy hashes right → rewrite it over itself (`Cleared`; the store must re-verify to clear the marker —
-  nothing here deletes a marker); else first *readable* member ≠ bad store (optionally only `source`) whose body
-  hashes to the key → write to the bad store only (`Repaired{from}`); else `Unrepairable` (key in `lost`). Local
-  cache is never a source. Writes go directly to the bad member (not the composite). `Cor.invalidate ()` after.
+- `tree_report()`: a read-only walk from the root. Per folder: its id and paths; a missing anchor →
+  `Unanchored{path, id, parent}`; a marker disowned by its anchor → `Disowned{marker, anchor}`; an id
+  at two or more paths → `Twice`; a trash entry whose id was reached from the root → `Trashed_live`.
+  **Orphans**: list the manifest namespaces on the first main (any store type), mark every
+  namespace reachable from the root and from each trashed id; each unmarked namespace holding a child
+  object → `Orphan{id, objects, sample ≤ 3}` ([gc.md §4.6](algorithms/gc.md#46-orphan-namespaces)). Order: Twice (sorted), Disowned, Trashed_live, Unanchored, Orphan.
+- `repair_tree(dry_run)`: refused on a read-only domain unless dry; Disowned and Trashed_live →
+  delete the stale object; Unanchored → write the anchor; a top-level Orphan older than
+  `orphan_grace` → adopted into the trash, and a tombstone MAY be deleted, as
+  [gc.md §4.6](algorithms/gc.md#46-orphan-namespaces) specifies; Twice is left and reported.
+- `verify()`: per member (write guard first), ask the store's own verifier to queue its chunks;
+  `Queued n | Unsupported`; none queued → `Nothing_queued`; else follow each queued member: poll
+  every `VERIFY_POLL` the remaining jobs and corruption markers; done at 0; unchanged for
+  `VERIFY_STALL_POLLS` polls → `on_stalled` (a verifier not deployed or not notified). A failed
+  listing is not "0 left".
+- `repair(source?, dry_run)`: refused on a read-only domain unless dry; per corruption marker: the bad
+  store's own copy hashes right → rewrite it over itself (`Cleared`; the store's verifier clears the
+  marker); else the first readable other member (only `source` if given) whose copy hashes to the key
+  → write it to the bad store only (`Repaired{from}`); else `Unrepairable`. The local cache is never a
+  source; nothing here deletes a marker.
 
 ### 4.11 Share
 
-- `share_backend`: first, if any non-main member exists, `Write_guard.ensure` against it (fail fast rather than
-  climbing a dead main's retry ladder). Then members ordered readable-first, backfill last; the first whose
-  `capabilities.share_url` is `Some url` is chosen (write guard on it). None → `Share_unavailable "Sharing is
+Token, expiry, overwrite and revocation rules are
+[security-model.md §6.1–6.2](algorithms/security-model.md#61-token); the share entity is
+[data-model/backend.md §2.18](data-model/backend.md#218-share); the manifest bytes are
+[02](02-remote-model.md).
+
+- **Store choice**: when a non-main member exists, the write guard first (fail fast rather than
+  climbing a dead main's retry ladder). Then members readable-first, backfill last; the first whose
+  capabilities give a share URL is chosen (write guard on it). None → `Share_unavailable "Sharing is
   not available for <domain>."`.
-- `create`: `L.manifest_key (Lk.file rel)`; GET via the composite; body is a folder marker → treat as dir.
-  File (object exists, not a marker) → type file manifest. Else dir: id from marker, else
-  `Folder_ids.lookup_id` (never minted); none → `Share_not_found "not found: rel"`; `list_prefix
-  namespace ~max_keys:2`, filter child objects (one may be the index); empty → not found. Put JSON at
-  `shares/<token>` on the chosen member directly (not the composite: shares are outside every domain root, so a
-  read-only domain can share). Returns `<url>/<token>`.
-- `clear_cache`: list `tsync/shares/`, delete non-dir keys under `shares/cache/` and legacy loose `*.data`
-  siblings; returns count and bytes. Links keep working.
-
-### 4.12 Batching helpers
-
-`Batch.take n l` one-pass split; `per_delete = 1000` (S3 and GCS bulk delete cap) used by expire/purge and as
-gc's default `delete_batch`.
-
----
-
-## 5. Interactions
-
-Depends on (services each op is constructed with):
-
-| Dependency | Used for |
-|---|---|
-| Backend API (backends subsystem) | `Store` signature (get/put/head_opt/list_prefix/delete_multi/copy/capabilities/verify_all/discard/local_path/health), `member`, `main`, `deferred`, `named_exn`, `make`, `spec_for` |
-| Composite domain store + Deferred target | composite store and replica/backfill queues |
-| Uplink governor | link admission, probe attach, settings |
-| `Write_guard` | refusing writes to non-mains while the main is offline (mirror, share, integrity, gc) |
-| `Remote` (`Remote.OVER`) | upload/upload_chunks/fetch_manifest/get_verified_chunk/chunk_size |
-| `Store.INODE`, `Layout`, `Inode_tree`, `Folder`, `Folder_ids` | folder markers, anchors, ids, tree walks |
-| `Manifests` (local mirror), `Checkout`, `Staged_manifest`, `Data` | mirror writes, list_children, create_dir, record/sweep, staged entries, assemble/fetch_range |
-| `File_store` / `Replay.JOURNAL`, `Journal`, `Spool` | journal entries, cursor bump/flush, bookmark, local notes |
-| `Sync_queue`, `Meta_queue`, `Replay`, `Wal` | resync drains and replays; owed metadata |
-| `Collection` | gc run record, promote, two-space lookups |
-| `Corruption`, `Chunk_layout`, `Chunks` | markers, shard layout, chunk hashing/offsets |
-| `History` | version key parsing |
-| `Listing`, `Hashtbl_mmap`, `Bounded` pools, `Fs`, `Syscalls`, `Clock` | spills, bounds, filesystem |
-| `Runtime` | paths, sockets |
-
-Depended on by: every CLI command (`lib/app/cli/common.ml make_conf` → `Domain.of_config`), the daemon
-(`resume:true`, `start_resumed`), the Android JNI, desktop mounts (`Conf_parsing.load` for mount points), the
-tray (`mount_point_of`), `tsync config --edit` (`of_json`), IPC handler (share). Nothing depends on the ops
-library besides CLI and IPC.
-
-Data flows:
-- *import*: disk tree → plan spool → `Remote.upload` (chunks dedup'd, manifest) → composite (mains now,
-  deferred later) → local mirror → journal entries (mkdirs first) → cursor.
-- *rsync domain→domain*: mirror/store manifest → `upload_chunks` with inherited chunk keys → manifest only.
-- *mirror*: member A listing → member B listing view → copy missing/wrong-size objects A→B directly.
-- *sync*: local WAL → drain queues → journal → mirror (incremental) or tree walk → mirror (full).
-- *expire → gc*: expire drops references (versions, trash, journal); gc reclaims chunks nothing references.
+- **`create(rel, expires, token?)`**: resolve `rel` through the composite: a file manifest → a file
+  share (filename = its leaf); a folder (marker, else the local folder-id index, never minted) with at
+  least one child → a folder share (the root's filename is `<domain>.zip`); else `Share_not_found`.
+  The object MUST be present **on the chosen member** (a head there, or for a folder its namespace
+  listing); otherwise `Share_unavailable "<rel> is not on <member> yet"`. The manifest is written to
+  the chosen member directly, not through the composite (shares sit outside every domain root, so a
+  read-only domain can share), never overwriting an existing one. Every share has a finite expiry,
+  `SHARE_DEFAULT_EXPIRY` unless the caller chooses another. Returns `<share URL>/<token>`.
+- **`revoke(token | url)`**: delete the manifest, then its token-keyed artifacts.
+- **`clear_cache()`**: delete every object under the share cache, and every object of the share
+  space whose name is not a share token; returns count and bytes. A reader of the share space SHOULD
+  accept objects there that are neither share manifests nor under the share cache (meaning: cached
+  artifacts, safe to delete); writers MUST NOT produce them. Links keep working.
+- Expired shares are removed by `expire` ([gc.md §4.5](algorithms/gc.md#45-shares)). When a domain is
+  removed from a store, its share manifests on that store go with it.
 
 ---
 
-## 6. Concurrency, durability & failure semantics
+## 5. Concurrency and failure
 
-- **Config** is read-only after load; uplink configuration is first-writer-wins per process; the driver-field registry is
-  set once when the builder layer loads.
-- **Deferred targets**: jobs recorded durably under `data_dir/deferred-pending/<domain>/` *before* a write is
-  reported done; resumed only by the daemon (`resume`), one-shot commands record/drain their own.
-- **Import/rsync**: journal batches spooled on disk; published entries are durable progress; mkdirs before puts;
-  cursor flushed at end. A crash mid-run: already-published entries stand; unpublished spool reaped next run
-  (dead pid); rerun skips existing keys (import) or finds identical bytes (rsync). Per-entry failures do not
-  abort the run.
-- **Export**: per-chunk `fsync` + claim line; record header written atomically before the file is created;
-  resume from claims; a torn last line ignored. `ponytail:` fsync per chunk (batch if it shows in profiles).
-- **Mirror**: stateless; restart re-lists; additive and idempotent. Bounded memory: listings mmapped from disk,
-  destination view in `Hashtbl_mmap`, counts not keys (guarded by `tests/unit/mirror_pools`, ~16 live words per
-  object vs 140 before).
-- **Resync**: queues drained first; full rebuild refused with owed metadata; bookmark/sweep only after a
-  complete walk; ops reported in 64-op local entries as found (a walk that dies part-way has still written
-  true facts).
-- **Retention**: marker deleted last in purge; expire order trash → versions → version dirs → journal; cursor's
-  entry never expired. No journal entry for restore.
-- **GC**: every phase transition saved before acting; cursor per namespace/shard-batch; copies before main;
-  exclusion by kernel lock (crash ⇒ resumable). Unsafe across hosts sharing one main over a network filesystem
-  (`ponytail:` noted). Reads during a run consult both spaces; writes unaffected. Mirror refuses while a run is
-  open.
-- **Integrity repair**: writes only to the bad store; never deletes markers (stores clear by re-verify).
-- **Write guard**: every op that writes a named member (mirror dest, share store, verify/repair, gc copies,
-  retry_outstanding) calls `Write_guard.ensure`; mains always allowed.
-- **Offline**: ops needing the store fail with backend errors; ops are CLI-only, nothing queues them.
+- **Config** is read-only after load; the uplink configuration is set once per process.
+- **Deferred work** is durable before a write is reported done; only the owner runs it (§3.2).
+- **Import and rsync**: every manifest put is named by a durable record first (§4.2); mkdirs before
+  puts; a crash leaves nothing unannounced and a rerun converges.
+- **Export**: record header before the file, per-chunk fsync then claim; resume from claims.
+- **Mirror**: stateless, additive, idempotent.
+- **Resync**: runs in the owner under its serialisation; mark and sweep only after a complete walk.
+- **Restore**: anchor before marker, announcement after.
+- **GC**: every phase saved before acting ([gc.md](algorithms/gc.md)); exclusive per domain (§4.9).
+- **Write guard**: every operation that writes a named member calls it; mains are always allowed.
+- **Concurrent work inside one operation** hands each item (a chunk, a listing record) to exactly one
+  worker, opens and finishes each exported file once, and settles each file's outcome once.
 
-### 6.1 Correctness that relies on cooperative single-threaded scheduling
+---
 
-The implementation runs every op on one thread with cooperative tasks: shared mutable state is touched with no
-lock, and is safe only because nothing preempts between two yields. A rewrite with preemptive threads or
-parallel workers must add synchronisation at each of these points:
+## 6. Design rationale
 
-| Where | Shared state | What would break under preemption |
+- **Strict keys everywhere, types from the schema**: a renamed, mistyped or misplaced key otherwise
+  leaves a store or an option silently at its default (a mistyped `mountPoint` mounted elsewhere).
+- **Unique names ignoring case**: names become directory names and platform identifiers; two targets
+  sharing one deferred log each ran the other's jobs against the wrong store.
+- **Role required, replica and backfill one mechanism**; **read-only forced** when nothing is
+  writable (EROFS at the mount beats a store error per attempt).
+- **Operations never write the owner's state or publish entries**: they submit records, so one
+  process decides every local change and mints every entry key.
+- **Batches by count and age; mkdirs before puts.**
+- **Import never overwrites** unless asked.
+- **Rsync decides from the store, before acting, by bytes**; in-domain copies inherit chunks through
+  the interlock.
+- **Export off the stores**, with preallocation and claims; a record is believed only beside a file
+  of the right length.
+- **Mirror** orders chunks before manifests and compares mutable keys by body: a same-size stale
+  manifest or cursor would otherwise stay stale forever.
+- **Resync rewrites in place and reports ops** rather than clearing: clearing served an empty tree
+  for minutes and forced every reader to re-list.
+- **Shares** at a fixed root (IAM and lifecycle target one prefix), created exclusively, verified on
+  the member that serves them, never minting folder ids.
+
+---
+
+## 7. Conformance
+
+- **Config**: unknown keys refused at every level including frontend and backend objects; roles
+  limited to the four spellings and the read order following role then config order; a domain with
+  no main valid only when all its stores are `readOnly`, and then read-only; `uplink` fields validated
+  per [06](06-backends.md); the mount point defaulting to `$HOME/tsync/<name>`; the size parser
+  accepting whatever the size printer emits; http-proxy secrets shorter than 32 characters and a
+  plaintext listener off loopback refused; two `file_provider` domains colliding on identifier or
+  replica folder refused; a member named `.` or `..` refused; a local `path` that is neither absolute
+  nor `~/`-relative refused; secret fields masked in every report, fields not declared non-secret
+  included; a known but
+  not compiled type refused at use, an unknown type at parse; wrong JSON types refused with the JSON
+  path in the message; duplicate domain names and backend names (ignoring case) refused; a domain
+  name outside the grammar refused; two presenting frontends or a duplicate frontend refused; role
+  validation as §2.1; `link` default and refusal on `local`; `links` merged over `uplink` and an
+  unused link refused; sizes parsed as §2.1; `maxChunkBuffers` follows `maxUploads`; zero means the
+  default; a lone `readOnly` backend forces read-only; the wizard cannot write a config the parser
+  refuses.
+- **Read order and capacity** as [replication.md](algorithms/replication.md) and §3.1.
+- **Import**: no put published before the mkdir naming its folder; entries in full-path order,
+  each once; names with newlines and tabs survive; `only` imports only selected entries with markers
+  only for folders holding them; filters apply at any depth; empty folders are imported; `**/.git`
+  excludes `.git` directories only; each symlink policy as §4.3 (kept dangling links included; broken
+  followed links skipped and counted); planned bytes equal reported bytes and a file's progress sums
+  to its size; a restart transfers nothing new; an existing key is skipped even when its content
+  differs, and `--force-rehash` republishes it with its new content and re-sends missing chunks;
+  identical content is deduplicated; killing an import at any point leaves no manifest unannounced
+  after the owner's next start.
+- **Export**: every file under its own path with the right bytes and mtime, no record left; a rerun
+  finds everything already there with zero chunk reads; a refused chunk fails only its file, left at
+  full length with a record claiming the landed chunks, and the next run fetches only the missing
+  ones; a file changed upstream restarts from scratch; a file with staged edits exports its published
+  version and is listed pending; the domain's cache is untouched; collisions, unknown paths, `..`
+  names and relative destinations refused.
+- **Rsync**: the full decision table including patch indices; a copy within a domain moves no bytes;
+  a move of a file the mirror does not hold yet succeeds.
+- **Mirror**: heals a missing chunk, a wrong-size chunk and a missing manifest on a secondary; an
+  in-sync run copies nothing; a same-size stale manifest or cursor is replaced; no destination ever
+  holds a manifest without its chunks.
+- **Resync**: no mark → rebuild with a reason; a clean rebuild sets the mark; a caught-up client
+  applies the journal and reports nothing; `--full` reports nothing for unchanged files; the mirror is
+  rewritten in place (chunks survive); moves, recreations and removals of folders are reported by id;
+  a failed walk leaves mark and sweep alone; owed metadata is published first and a rebuild is
+  refused while it is owed.
+- **Trash**: a restore is seen by a peer's next journal pass; purge per
+  [gc.md](algorithms/gc.md#10-conformance) (anchors kept); a purge of a live folder is refused.
+- **GC**: two sessions for one domain, in one process or two, never run at once; the rest per
+  [gc.md](algorithms/gc.md).
+- **Integrity**: an unanchored tree reports TWICE, TRASHED-LIVE, UNANCHORED and ORPHAN with a sample;
+  repair removes disowned and stale trash entries, anchors the rest, and adopts an orphan older than
+  `orphan_grace` into the trash (a younger one is left); orphans are found on a remote main too.
+- **Share**: manifest fields for a file and a folder; root share named `<domain>.zip`; refused when no
+  member advertises a share URL; a missing path or an empty folder → not found; a read-only domain can share; a backfill-only share store is used
+  when it is the only one with a URL, and refused while it lacks the object; a given token that
+  exists is refused; revoke removes the link; `clear_cache` removes only cached artifacts, counts
+  correctly, and is idempotent.
+
+---
+
+## 8. Parameters
+
+| name | value | rule |
 |---|---|---|
-| Publish batch (`publish.ml`) | spool handle, op count, last-publish time | `add` is sequential by contract; `publish` reads the full spool, *yields* creating a fresh one, then swaps. A concurrent `add` in that window appends to the spool about to be sealed. Callers must serialise `add`/`publish`. |
-| Export (`export.ml`) | shared job cursor (`j`, `i`), per-job `left`, `in_flight`, `outcome`, `opening`, `closed` | `next()` must hand each chunk to exactly one worker (atomic pull); `opened` checks-then-sets a memoised "opening" future (two workers must share one open); `left=0 && in_flight=0 && outcome=None → finish` must run once; `settle` first-writer-wins on `outcome`. |
-| Mirror (`mirror.ml`) | listing cursor pulled by all workers; `checked`/`copied`/`copied_bytes` counters | atomic pull and atomic counters. The destination view is read-only once built. |
-| Resync full rebuild | `pending` op list, `held` count, `count`, `failed`, `sample`, `at` | walk callbacks run concurrently (up to `parallelism`); `report` appends and `flush` swaps the list *before* yielding — must be atomic. |
-| GC session | `chunks_promoted`, `roots_marked`, `chunks_verified/…`, `done_`, `at`, progress throttle table | incremented from concurrently running roots/chunks. |
-| GC in-process lock flag `held` | boolean | `take_lock` checks `held`, **yields** (ensure parent dir, lockf), then sets it: two sessions started concurrently in one process can both pass the flag and rely on the kernel lock, which merges same-process locks — i.e. this is racy even today. Use a mutex or set the flag before yielding. |
-| Import walk | `seen`, `pending`, `bytes` | sequential walk; safe as long as it stays sequential. |
-
-Pools and bounds summary:
-
-| Op | Bound | Value |
-|---|---|---|
-| export | worker width | `max_downloads` (overridable by `--parallelism` via `reading_at_most`) |
-| mirror | copy / probe / in-flight | `max_chunk_buffers` / `max(8, 4*mcb)` / `4*probe` |
-| resync | tree walk slots | `parallelism` (CLI) |
-| gc | unit_slots, item_slots | `concurrency` or store max_concurrency (8) |
-| import | sequential per file (upload internals bounded by `max_uploads`/`max_chunk_buffers` in Remote) | |
-| expire/purge | delete batch | 1000 |
-| integrity follow | poll | 3 s, stall after 5 unchanged polls |
-
----
-
-## 7. Design choices & rationale
-
-- **Strict config keys** (5e532514): a renamed/removed/mistyped key would otherwise leave a store run as if it
-  weren't there. Backend keys checked only when the driver's field list is known.
-- **Role is required, no default**; replica/backfill are one mechanism with a `reads_reach` bit.
-- **Read-only forced** when nothing is writable: EROFS at the mount beats a backend error per attempt.
-- **Shares at a fixed root** (not per domain) so IAM/lifecycle target a constant prefix; the manifest names its
-  domain (ca6ed151) so the proxy serves it from that one. Shares written to a member directly so a read-only
-  domain can share.
-- **Chunks per domain** (no cross-domain dedup) so a domain is dropped by one prefix delete.
-- **Share never mints a folder id** (would create a namespace nothing wrote to, and persisting it re-creates the
-  local dir on a read).
-- **Publish in batches by count and age** (deferred replicas hide a single terminal entry until their backlog
-  drains); **mkdirs published before puts** (peers resolve folders by marker id).
-- **Import never overwrites** an existing key unless `force_rehash`.
-- **Rsync decides before acting**; identity by bytes only; in-domain copies publish manifests with inherited
-  chunks via `upload_chunks` (the path that promotes chunks for gc — hand-rolling would let a collection sweep
-  them).
-- **Export off the stores, not the cache**: for files too large to pass through a cache; preallocation;
-  resume by claims; a record is believed only beside a file of the right length.
-- **Mirror**: listing destinations (not HEAD per object); fixed worker set pulling from a cursor rather than a
-  fan-out over the listing; never retain keys; never nest pools; don't resize a pool to fix memory (memory note
-  mirror-per-object-retention). Chunks listed a shard batch at a time (whole = bucket's object count in one list).
-  Folder indexes skipped.
-- **Resync rewrites the mirror in place** (1e85630b) rather than clearing it (clearing took minutes and served
-  an empty tree, and dropped still-valid cached chunks), and **reports a rebuild as ops** (dbbbe079) rather than
-  wiping applied entries (which forced every reader to re-list). Rebuild waits for owed metadata (d68f0ce4,
-  f44d8f9f).
-- **The local manifest mirror is the source of truth for existence** (memory fuse-enoent-backend-roundtrip):
-  nothing below it on a metadata path asks the backend. Note import's `exists` and rsync's `manifest_at` *do*
-  fall back to the store — acceptable because they are one-shot writes, not metadata paths, and import must not
-  overwrite keys published since the last sync.
-- **GC as a copying collector by rename**: garbage is named, not inferred; writers need no cooperation beyond
-  `promote_all`; needs a filesystem rename, hence local main only; copies are *told* keys rather than walked
-  (cost proportional to garbage, not layout). A parse failure aborts (skipping a root = deleting a file's
-  chunks — "a first attempt at this discarded an entire store"). Namespace prefixes need their trailing `/`
-  (without it every lookup is empty and gc deletes everything). Job keys carry the run name so a later run
-  cannot overwrite an unconsumed request.
-- **Expire and gc are separate** because only some stores can gc; expire works everywhere.
-- **Journal expiry by age only**, keeping the cursor's entry.
-- **Integrity**: verification is the store's own machinery (bucket notification → function); client only
-  queues and watches, and reports "nothing checked" distinctly from "nothing found". Repair hashes candidates
-  before trusting them; writes only the bad copy.
-- **IPC mutation serialisation** (memory ipc-mutation-resolution-race): not in this subsystem, but share/revert
-  via IPC run under the daemon's serialized mutating actions; path→ref resolution must happen inside the lock.
-
-Alternatives rejected (from comments): per-field-min capacity (mixes disks); fan-out over mirror entries;
-mark-and-sweep with an in-memory live set (gc: "the surviving root is the record of what has been marked");
-walking every shard on every copy to find orphans (that's mirror's job).
-
----
-
-## 8. Invariants the tests pin down
-
-Config (`tests/unit/conf`):
-- read order by role main→replica→readOnly→backfill, config order within role; single backend unchanged.
-- `role` required; only the four spellings; `role` never passed as a backend field.
-- `link` defaults `"wan"`, any name accepted, refused on `local`.
-- unknown keys refused at every level; unknown driver type's keys not checked.
-- `links` override merged over `uplink`; a link no backend names refused.
-- `uplink` absent = defaults; each field validated.
-- replica/backfill without main refused; lone readOnly is valid and forced read-only.
-- fields pass through whatever their JSON type (arrays as JSON text).
-- both frontend forms parse; object extra keys become options.
-- sizes: int and suffixed strings; absent stays absent; human_bytes spellings accepted; junk rejected.
-- `maxChunkBuffers` follows `maxUploads`; zero falls back to default.
-- `roots_of` head is the mount point (`~/tsync/<d>` default).
-- `capacity`: only local stores bound it; readOnly never; tightest one's full record.
-
-Import (`import_batching`, `import_listing`, `import_progress`, `scenario/import_export`):
-- no put published before the mkdir naming its folder; the last mkdir entry precedes the first put; the cursor
-  names the last published entry; an unreachable op cap with `entry_age=0` still splits a run into >1 entries.
-- entries in full-path sort order, each once; folders announced before their subfolders; names with `\n`/`\t`
-  survive; live words at first entry < files in tree; `only` imports only selected, markers only for holding
-  folders.
-- planned bytes = reported bytes; `sent=false` for deduplicated chunks (restart transfers nothing new).
-- import into empty domain; skip existing key; dedup identical content.
-
-Export (`ops/export`, `unit/export_record`, `unit/export_cli`):
-- every file exported under its own path, nothing else in the destination folder, right bytes and mtime, no record
-  left; chunk fetches within budget; open files ≤ workers.
-- rerun: all `already_there`, zero chunk reads.
-- refused chunk mid-file: file failed, left at full length, one record claiming landed chunks; next run fetches
-  only the missing ones; record gone after.
-- mangled chunk fails only its file; after repair only that chunk is fetched.
-- collisions, unknown paths, relative destinations refused.
-- record parse table (resume/start over/already there, 2 s mtime slack) and landing table (see §4.4).
-
-Rsync (`unit/rsync_plan`, `live/rsync`): the full decision table of §4.5 including patch-local indices and
-"every decision reachable"; live: a copy within a domain moves no bytes.
-
-Mirror (`unit/mirror_pools`, `unit/mirror_probe`, `scenario/resync`):
-- pools named (visible in reports); `on_start` announced inside the bound; announced set = finished set;
-  bounded live words per object; second pass announces nothing as picked-up-and-copied but reports `Present`.
-- heals missing chunk, corrupt (wrong-size) chunk, missing manifest on a secondary; in-sync is a no-op.
-
-Resync (`ops/resync`): no bookmark → rebuild with reason and file reported as applied op; clean rebuild sets
-bookmark; caught-up client applies journal and reports nothing; `--full` rebuild reports nothing for unchanged
-files; mirror rewritten in place (chunks survive, dropped manifests reported); anchors bridged across a rebuild;
-moved folder reported as a move; recreated folder = old id leaves then new arrives; gone folder reported under
-its id; a lost batch is retried; a failed walk leaves bookmark and sweep alone; sync publishes owed metadata;
-rebuild refused while metadata owed and mirror untouched.
-
-Retention / GC (`scenario/expire`, `scenario/gc`, `backends/gc_cost`, `gc_targets`, `gc_queued`,
-`unit/gc_job`, `unit/gc_report`, `content/promote_race`):
-- expire drops old versions/deleted-file versions/trashed folders (trash emptied first), leaving chunks;
-  cutoff keeps newer versions; cursor entry survives.
-- gc reclaims old-version chunk, keeps live; deleted file/trashed folder fully reclaimed; nothing expired →
-  everything kept; second gc is a no-op; a write deduplicating onto a doomed chunk mid-run survives; a write
-  mid-collection survives.
-- stepping: resume does not re-find work; closing asks copies nothing but the deletes; interrupted abandonment
-  stays abandonment; many roots with fewer slots than roots does not deadlock; shards the cursor skipped are
-  swept; collection uses only rename on the filesystem; a chunk re-uploaded mid-run is not deleted off copies.
-- queued copies: main done, copy still holds garbage with a job outstanding; `retry_outstanding` re-sends;
-  consumed job deletes the chunk and its marker, live chunk untouched.
-- job key shapes (see §2.5 examples), including domains named `chunks`/`gc-jobs`, and non-job keys.
-- progress callbacks' final figures equal returned stats; `at` set when picked up.
-- reads and writes during a promotion succeed.
-
-Integrity (`ops/integrity_tree`): unanchored tree → TWICE, TRASHED-LIVE, UNANCHORED×n, ORPHAN (with sample),
-orphans checked; with anchors → DISOWNED marker under the wrong parent; repair removes disowned + stale trash
-entry, anchors the rest, leaves the orphan.
-
-Share (`unit/share`): file manifest fields (`v=1`, domain, type file, key, filename, expires); root share type
-dir, `<domain>.zip`, `folderId=.tsync-root`; nonexistent → Error; read-only-only domain can share (composite
-refuses writes); share served from a backfill member when it is the only one with a URL; `not found` for an
-empty folder; `clear_cache` removes only cache/ and loose `.data` artifacts, count and bytes correct,
-idempotent.
-
-Write guard (`backends/write_guard`): a main not yet heard from is probed once then trusted; an absent main
-refuses non-main writes while mains stay writable; hold expiry re-probes; a never-answering main is bounded;
-no main = OK; an all-members command leaves the replica untouched while the main is gone.
-
----
-
-## 9. Open questions / inconsistencies
-
-1. **Docs vs code on unknown keys**: DOCUMENTATION.md Troubleshooting says "unrecognised fields pass through,
-   so a typo can look set"; code refuses them (5e532514). Docs stale.
-2. **Duplicate backend names** are not rejected at parse; `named_exn` fails later, and `Domain.build_backends`
-   keys traffic/admission/built tables by name, so duplicates would silently share/overwrite counters.
-3. **Duplicate domain names** not rejected; `pick_domain` takes the first.
-4. `versioning` absent raises a raw `Yojson.Util.Type_error` rather than a friendly message like `symlinks`.
-5. `default_domain` treats an unreadable config as "configured" (returns the recorded name).
-6. **Spool dirs are machine-wide** (`<cache_root>/import|mirror|rsync`), not per domain; safe only because
-   `reap` removes files of dead pids alone.
-7. **Rsync holds its entry list in memory** (unlike import/mirror, which spill); a very large tree costs RAM.
-   `Rename_in_domain` does `Option.get` on the mirror's manifest, which fails if the manifest came from the store
-   fallback only.
-8. **Rsync `Upload` under `Skip` policy** reports `Skipped Source_missing` for a skipped symlink (misleading
-   label); under `Follow`, `upload_local` falls through to `P.file` which uploads the target (a dangling one
-   fails in `stat`).
-9. **GC picks the first main only**: a domain whose first main is remote but a later main is local is refused.
-10. **Expire's version-directory filter** is `List.mem` over survivors — O(expired × surviving).
-11. **Expire stats omit trash deletions**.
-12. `cannot_bridge` returns true on an empty journal, so a bookmark with no journal at all forces a rebuild.
-13. `Integrity.tree_report` finds orphans only when a *main* is local; a local replica is ignored.
-14. `Share.create` reads through the composite but writes to one member: the link's store may lack what the
-    domain read returned (acknowledged for backfill in comments).
-15. `mirror.mli` doc refers to `Checkout.resync` in `gc.mli` (stale name for `tsync mirror`).
-16. Mirror's `Wrong_size` repair trusts size alone; a same-size wrong body is left for integrity.
-17. Brief's per-item operations (read/write/rename/delete/list/versions/revert/cache evict) are not in this
-    subsystem — see checkout spec.
-18. GC's in-process `held` flag is checked, then set after an await (§6.1): two sessions started concurrently in
-    one process are not excluded (the kernel lock merges same-process locks).
-
----
-
-
----
-
-OCaml implementation notes for this subsystem: [ocaml/05-ops-config.md](ocaml/05-ops-config.md).
+| `ENTRY_OPS` / `ENTRY_AGE` | 2000 ops / 10 s | ops per announced batch |
+| `RESYNC_NOTE_OPS` | 64 | ops per locally noted resync entry |
+| `EXPORT_MTIME_SLACK` | 2 s | |
+| resync walk parallelism | CLI `-j`, default 32 | |
+| `VERIFY_POLL` / `VERIFY_STALL_POLLS` | 3 s / 5 | |
+| `SHARE_DEFAULT_EXPIRY` | 7 days | [security-model.md §6.2](algorithms/security-model.md#62-lifetime) |
+| default chunk / cache chunk size | 8 MiB / 16 MiB | range: [01 §3.5](01-core.md#35-chunk-size) |

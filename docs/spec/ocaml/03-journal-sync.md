@@ -1,6 +1,11 @@
 # 03 — Multi-machine synchronisation (journal, sync, conflict resolution) — OCaml implementation notes
 
 Companion to the language-neutral spec [../03-journal-sync.md](../03-journal-sync.md). See [README.md](README.md) for how these notes are organised.
+The mapping of the protocol and of the conflict tables to the code, the implementation choices
+(widths, batch sizes, read bounds) and the code's deviations from the spec are in
+[algorithms/wal-and-journal.md](algorithms/wal-and-journal.md) and
+[algorithms/conflict-resolution.md](algorithms/conflict-resolution.md). Section numbers in
+parentheses below name the concept, not a section of the current spec.
 
 
 Each note names the spec concept it implements. B-I holds what stays true under any
@@ -40,7 +45,7 @@ kind and `Permanent` for any other exception (`Unix_error ENOTEMPTY`, `Invalid_a
 record stays for the next start; `Unix_error (ENOENT, _, _)` from an upload = staged bytes
 gone, nothing owed. A catch-all handler anywhere on these paths silently changes policy —
 review every `with _ ->` against this list (e.g. `get_journal_entry` swallowing all
-errors, §9.6).
+errors; see [algorithms/wal-and-journal.md](algorithms/wal-and-journal.md) §3).
 
 **B-I.5 State hoisted to module-global tables because functors are applied many times
 (§2.10, §4.2).** `Make (C)` is applied in every module that touches the journal (queues,
@@ -51,10 +56,10 @@ meant a flush in one never published another's pending bump); `Replay.stepped_as
 domain (the poller steps aside, the engine reports); `Wal.logs` by directory (a second log
 over one dir kept its own id counter), with the two hand-offs stored alongside;
 `Journal.uuid_cache`/`leases` by data dir (lease tagged by pid because a forked child
-inherits the heap). The `handled` set is still per application (§9.4). This is about
+inherits the heap). The `handled` set is still per application ([algorithms/wal-and-journal.md](algorithms/wal-and-journal.md) §3). This is about
 generative functor application, not Lwt: it applies to any design that instantiates
 per-domain modules repeatedly. Under domains these tables additionally need
-synchronisation (§6.1).
+synchronisation (B-II.2).
 
 **B-I.6 Blocking local I/O where it is cheap and hot (§2.1, §2.6).** Client uuid, folder
 id leases and the last-sync mark use synchronous `Unix`/`Stdlib` I/O (called on every
@@ -92,9 +97,13 @@ and the mirror tree disappear; keep the inner per-domain parameterisation (or re
 with a first-class record of the domain's config) and keep the dependency seams that tests
 substitute.
 
-**B-II.2 The monad marks every yield — and §6.1 depends on it.** Under Lwt a
-check-then-act with no `let*` in between is atomic. Under effects any function call may
-suspend the fiber, and under domains other code runs in parallel. Every row of §6.1 needs
+**B-II.2 The monad marks every yield, and unlocked state depends on it.** Under Lwt a
+check-then-act with no `let*` in between is atomic. These pieces of shared state rely on that, with
+no lock: entry-key minting (`last_ms`), the folder-id lease counter, the cursor debouncer
+(`pending`, `timer_armed`, `last_published`; the publish itself is under a mutex), the dedupe set
+and `stepped_aside`, the poller's `last_version`/`last_swept`, the metadata queue's `parked` set,
+the WAL hand-off slot and log registry, and in-process applied-log appends. Under effects any function call may
+suspend the fiber, and under domains other code runs in parallel. Each of these needs
 an explicit mechanism: `Atomic` for `last_ms`/lease `next`/counters, `Mutex` (or a single
 owning fiber with a message queue) for the debouncer, dedupe set, parked set and log
 registry, and one `write` per applied-log record under a per-file mutex.
@@ -126,7 +135,7 @@ fibers; an unbounded `Lwt_list.iter_p` becomes unbounded fibers — the same haz
 plus a short-write loop (`write_all`) that fails on a 0-byte write. Because the loop can
 yield between partial writes, two in-process writers could interleave; the record format
 (newline-led) makes cross-process tears cost one record, and in-process safety relies on
-records being small enough that one `write` completes (§6.1).
+records being small enough that one `write` completes (B-II.2).
 
 **B-II.7 Blocking calls inside the event loop (§2.1, §2.6).** B-I.6's synchronous I/O
 stalls the whole Lwt loop (every domain) for its duration; acceptable because each is a

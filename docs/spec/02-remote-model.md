@@ -1,232 +1,207 @@
 # 02 — The remote data model
 
-Scope: `lib/domain/manifest`, `lib/domain/remote` (`remote.ml`, `chunks/chunk_store`,
-`store/{layout,store,inode_tree,file_store,history,gc,corruption}`), their Lwt
-instantiations in `lib/lwt/domain/remote`, and the pure vocabulary they stand on in
-`lib/core` (`stored_key`, `logical_key`, `chunks`, `chunk_layout`, `chunk_source`,
-`folder`, `xxhash`, `id`). The collector driver `lib/domain/ops/gc.ml` and the trash /
-versions expiry in `lib/domain/ops/retention.ml` are covered here as far as they define
-what lives on the store; their CLI and scheduling belong to the ops spec.
+This file owns every **byte-level format and key spelling** of what a domain stores on a backend, the
+readers each format requires,
+and the **remote interface** above the store: the content store, the manifest store, the tree reader
+and history.
 
-This file is the language-neutral specification; the [OCaml notes](ocaml/02-remote-model.md) collect OCaml-specific
-implementation notes.
+**Core** formats are frozen and MUST be read and written exactly as specified here, with no migration:
+chunks and chunk keys, manifests, folder markers, anchors, trash entries, versions, and the journal and
+cursor ([03-journal-sync.md](03-journal-sync.md)). **Ephemeral** formats (collection state and the lock
+file, verify and discard jobs, corruption markers, share manifests and the share cache, the folder index)
+MAY change when there is a real need.
+
+Related: the entities, invariants and folder-identity protocol are in
+[data-model/backend.md](data-model/backend.md); retention and garbage collection, including the
+collection interlock, in [algorithms/gc.md](algorithms/gc.md); the hash function, chunking, chunk keys
+and key grammar in [01-core.md](01-core.md); journal and cursor formats in
+[03-journal-sync.md](03-journal-sync.md); the store contract in [06-backends.md](06-backends.md).
+Implementation notes: [ocaml/02-remote-model.md](ocaml/02-remote-model.md).
 
 ---
-
 
 ## 1. Problem
 
-tsync stores a user's tree on a dumb key/value object store (S3, GCS, a local directory,
-or another tsync over HTTP). The store offers only `put/get/get_range/head/delete/copy/
-list_prefix` and one conditional write (`put_if_absent`). On top of that the remote model
-has to provide:
+tsync stores a user's tree on a key/value object store (S3, GCS, a local directory, or another tsync
+over HTTP) that offers put, get, ranged get, head, delete, server-side copy, prefix listing and one
+conditional write (create-if-absent). On top of it this layer provides:
 
-- **Content-addressed, deduplicated file bodies.** A file is cut into fixed-size chunks
-  named by the hash of their bytes. Identical content is stored once per domain; an
-  unchanged chunk is never re-sent; any client can verify any chunk against its name.
-- **A cheap, rename-stable directory tree.** Directories are identified by a stable
-  random id, not by their path, so renaming/moving a folder rewrites *one* object
-  (the marker under the parent), never its descendants.
-- **Lazy access.** A reader resolves a path to one small manifest object with one GET
-  per path segment, then fetches only the chunks (or byte ranges of chunks) it needs.
-- **History.** Previous manifests (versions), deleted folders (trash) and a shared
-  journal of operations (the journal format itself is spec'd elsewhere).
-- **Reclaiming space.** Unreferenced chunks are collected by a resumable mark-by-move
-  collection that is safe against concurrent writers who have never heard of it.
-- **Integrity.** Stores that verify chunks file corruption markers; the upload path
-  must not dedup against a chunk known to be bad.
+- **Content-addressed, deduplicated file bodies.** A file is cut into fixed-size chunks named by the
+  digest of their bytes; identical content is stored once per domain; an unchanged chunk is never
+  re-sent.
+- **A rename-stable directory tree.** Folders are identified by stable ids, not paths, so moving a
+  folder rewrites a constant number of objects, never its descendants.
+- **Lazy access.** A reader resolves a path with one read per segment, then fetches only the chunks, or
+  byte ranges of chunks, it needs.
+- **History** (versions, trash) and **integrity** (corruption markers).
 
-It is a separate abstraction because every layer above (mirror, frontends, sync,
-shares, CLI) speaks **logical keys** (domain-relative paths); only this layer knows the
-**stored keys** (hashed, id-based) and the binary manifest format.
+Every layer above speaks **logical keys** (domain-relative paths); only this layer knows **stored keys**
+(hashed, id-based) and the binary formats.
 
 ---
 
-## 2. Concepts & data model
+## 2. Formats and key spellings
 
-### 2.1 Hashes
+### 2.1 Digests
 
-All naming uses **XXH3-64** (xxHash v3, 64-bit variant, `XXH3_64bits_withSeed`),
-rendered as 16 lowercase hex chars (`%016Lx`). A "dual digest" is the same input hashed
-with seed 0 and seed 1, joined by `-`: `"<h(seed0)>-<h(seed1)>"`, 33 bytes. Not
-cryptographic; the pair gives 128 bits against accidental collision.
+The **dual digest** of a byte string is the chunk-key construction of [01-core.md](01-core.md) (XXH3-64
+with seeds 0 and 1, each rendered as 16 lowercase hex characters, joined by `-`; 33 characters). It is a
+non-cryptographic checksum. It names:
 
 | Name | Input | Shape |
 |---|---|---|
-| chunk key | chunk bytes | `hex16(xxh3(b,0)) "-" hex16(xxh3(b,1))` |
-| leaf-name hash (child key) | UTF-8/raw bytes of the leaf name | same shape |
-| manifest whole-file digest `h1`,`h2` | streaming over `"<chunkkey>-<len>;"` for each chunk in order | `h1`=seed0, `h2`=seed1, each 16 hex (stored separately, no dash) |
-| cache group key | streaming over `"<memberkey>;"` for each member | dual digest shape |
-| symlink digest | target string | `h1 = xxh3(target,0)`, `h2 = xxh3(target,1)` |
-| mirror escape handle | leaf | `.tsync-esc-` + hex16(xxh3(leaf,0)) |
+| chunk key | the chunk's bytes | dual digest |
+| leaf hash (child key) | the leaf name's bytes | dual digest |
+| manifest whole-file digest `h1`, `h2` | the concatenation, in chunk order, of `"<chunk key>-<length in decimal>;"` | `h1` = seed 0, `h2` = seed 1, each 16 hex, stored separately |
+| symlink digest | the target's bytes | `h1` = seed 0, `h2` = seed 1 |
 
-Verified values (computed with the vendored `xxhash.h`):
+Test vectors:
 
 ```
-xxh3 dual("hello world") = d447b1ea40e6988b-b7aeb52a10fdaf2d
-xxh3 dual("")            = 2d06800538d394c2-4dc5b0cc826f6703   (key of an empty chunk)
-xxh3 dual("img.jpg")     = 066843ea47b80079-e0e3d2bb9b72c14d   (pinned in tests/unit/stored_key)
-xxh3 dual("hello.txt")   = 285b8db6c3eef5e0-7b23aee4b1561b8f
-xxh3 dual("Photos")      = 857fcda0047eeab4-a677d171b8d38674
+dual("hello world") = d447b1ea40e6988b-b7aeb52a10fdaf2d
+dual("")            = 2d06800538d394c2-4dc5b0cc826f6703   (the empty chunk)
+dual("img.jpg")     = 066843ea47b80079-e0e3d2bb9b72c14d
+dual("hello.txt")   = 285b8db6c3eef5e0-7b23aee4b1561b8f
+dual("Photos")      = 857fcda0047eeab4-a677d171b8d38674
 ```
 
-`Chunks.is_chunk_key name` ⇔ exactly one `-` at index 16 and both halves are 16 chars of
-`[0-9a-f]`. Used whenever walking a store decides copy/delete: it says what a name *is*,
-never what it is not.
+A name **is a chunk key** iff it is exactly 33 characters, `-` at index 16, and both halves are 16
+characters of `[0-9a-f]`. Whenever a walk of a store decides to copy or delete, this test says what a
+name is; membership in a space is decided by key prefix, never by the shape of the leaf alone.
 
-### 2.2 Chunking
+### 2.2 Chunking facts the formats depend on
 
-- `chunk_size` default **8 MiB** (`Conf.default_chunk_size = 8*1024*1024`). Resolution
-  for *new* files, once per process: config `chunkSize` → `Backend.caps.chunk_size` of
-  the domain's store (an http-proxy answers the serving domain's own) → default.
-  Existing files always use the `chunk_size` recorded in their manifest.
-- `count(size) = 0 if size<=0 else ceil(size/chunk_size)`; chunk `i` covers
-  `[i*chunk_size, min((i+1)*chunk_size, size))`; `length_of i = max 0 (min chunk_size (size - i*chunk_size))`.
-- **An empty regular file has exactly one chunk key: the key of the empty body**
-  (`2d06…-4dc5…`), because the uploader uses `max 1 count`. A symlink has zero.
-- `pieces ~chunk_size ~count ~offset ~length` → ordered list of
-  `{index; chunk_off; len; dest}` covering the range once, truncated at `count`.
-- Chunks are **per domain**: no cross-domain dedup (a domain is deleted with one prefix
-  delete).
+Chunking is specified in [01-core.md](01-core.md). The formats rely on: a regular file of size *s* cut
+with chunk size *c* has `max(1, ceil(s / c))` chunks, so **an empty regular file names exactly one
+chunk, the empty chunk**; a symlink names none. Existing files keep the chunk size recorded in their
+manifest.
 
-### 2.3 Backend key layout (everything a domain puts on a store)
+### 2.3 Backend key layout
 
-`root_prefix = "tsync/"`, per domain `D`:
+Store root `tsync/`; per domain `D` (a valid domain name, [01-core.md](01-core.md)):
 
 ```
-tsync/<D>/manifests/                      domain_prefix   (the inode tree)
-tsync/<D>/manifests/<folder_id>/          a folder's namespace
-tsync/<D>/manifests/<folder_id>/<h1>-<h2> child: file manifest OR folder marker (h = dual(leaf name))
-tsync/<D>/manifests/<folder_id>/.tsync-parent   the folder's anchor (JSON)
-tsync/<D>/manifests/<folder_id>/.tsync-index    folder index cache (binary, optional)
-tsync/<D>/manifests/.tsync-root/…         root folder's namespace (root id = ".tsync-root")
-tsync/<D>/manifests/.tsync-trash/<16hex>  trashed folder markers (JSON, with "path")
-tsync/<D>/chunks/<sss>/<chunkkey>         chunk bodies; sss = first 3 hex chars of key
-tsync/<D>/chunks.from/<sss>/<chunkkey>    only during a GC run on a local main: the space being collected
-tsync/<D>/gc-run                          GC run marker (JSON), main store only
-tsync/<D>/gc-run.lock                     lockf file beside it (filesystem only; not a store object)
-tsync/<D>/versions/<folder_id>/<h1>-<h2>/<unix_ns>   manifest version snapshots
-tsync/<D>/journal/<YYYY-MM>/<13-digit-ms>-<client_uuid>  journal entries (NDJSON; format in journal spec)
-tsync/<D>/cursor                          newest published entry key (text)
-tsync/corrupted/<D>/<sss>/<chunkkey>      corruption marker for that chunk (JSON)
-tsync/verify-jobs/<D>/<sss>               request: verify shard (empty body)
-tsync/gc-jobs/<D>/<run>/<name>            request: delete these chunk keys (newline-separated keys)
-tsync/shares/<token>                      share manifests (fixed root; spec'd with shares)
+tsync/D/manifests/                              the manifest area
+tsync/D/manifests/<folder id>/                  a folder's namespace
+tsync/D/manifests/<folder id>/<leaf hash>       child: file manifest or folder marker
+tsync/D/manifests/<folder id>/.tsync-parent     the folder's anchor
+tsync/D/manifests/<folder id>/.tsync-index      folder index (optional)
+tsync/D/manifests/.tsync-root/…                 the root folder's namespace
+tsync/D/manifests/.tsync-trash/<16 hex>         trash entries
+tsync/D/chunks/<sss>/<chunk key>                chunks, surviving space; sss = first 3 hex of the key
+tsync/D/chunks.from/<sss>/<chunk key>           outgoing space, only during a collection run
+tsync/D/gc-run                                  collection run record, collectable main only
+tsync/D/gc-generation                           collection generation, first collectable main only
+tsync/D/gc-run.lock                             lock file (filesystem stores only; not a store object;
+                                                MAY exist before any collection ran)
+tsync/D/versions/<folder id>/<leaf hash>/<ns>   version snapshots
+tsync/D/journal/<YYYY-MM>/<entry key>           journal entries (format: 03-journal-sync.md)
+tsync/D/cursor                                  cursor (format: 03-journal-sync.md)
+tsync/corrupted/D/<sss>/<chunk key>             corruption marker
+tsync/verify-jobs/D/<sss>                       verify job
+tsync/gc-jobs/D/<run>/<shard>                   discard job
+tsync/shares/<token>                            share manifest (store-wide, not per domain)
+tsync/shares/cache/<token>.data                 assembled share artifact, by token
+tsync/shares/cache/<h1>-<h2>.data               assembled file, by whole-file digest
 ```
 
-Notes:
+Rules:
 
-- The corruption / job roots are **siblings of `tsync/<D>/`**, not children
-  (`Chunk_layout.domain_roots` lists all four prefixes a domain owns). Derived from
-  `chunk_prefix` by taking everything up to the first `/` as store root. A domain named
-  `corrupted`, `verify-jobs` or `gc-jobs` would collide; not checked.
-- Shard fan-out: 3 hex chars → **4096 shards** (`shard_name n = %03x`). A key shorter
-  than 3 chars would go under `_` (never happens for real keys).
-- `gc_run_name started = sprintf "%013.0f" (started*1000.)` (milliseconds).
-- `Chunk_layout.marker_key` maps `…/<D>/chunks/<sss>/<key>` → `<root>corrupted/<D>/<sss>/<key>`,
-  matching the **last** `/chunks/` segment (a domain called `chunks` must not cut short),
-  and returns `None` for anything under `chunks.from/`, for markers themselves, for an
-  empty domain, and for manifests (which are spelled like chunk keys but are not under
-  `/chunks/`). Membership is by prefix, never by the shape of the leaf.
-- **Reserved sentinel** `.tsync-`: every internal leaf starts with it (`.tsync-root`,
-  `.tsync-trash`, `.tsync-index`, `.tsync-parent`, `.tsync-dir`, `.tsync-name`,
-  `.tsync-tmp-<pid>-<seq>.tmp` temp files, `.tsync-esc-<hex16>` escape handles).
-  `internal_leaf l = starts_with ".tsync-" && not escaped`. `is_child_object k = not
-  dir-key && not internal` — what a namespace listing offers as a real child.
-- A "directory key" is one ending in `/` (filesystem stores list the namespace itself).
+- **Shards.** `sss` is the first three characters of the chunk key: 4096 shards `000`…`fff`. A shard name
+  is exactly three lowercase hex characters.
+- **Sibling trees.** `corrupted`, `verify-jobs`, `gc-jobs` and `shares` are siblings of the domain trees,
+  so one literal prefix covers every domain for notification filters, IAM conditions and lifecycle
+  rules. Their names are reserved ([01-core.md §2.2 Domain names](01-core.md#22-domain-names)).
+- **Corruption marker key from a chunk key.** `…/D/chunks/<sss>/<key>` maps to
+  `tsync/corrupted/D/<sss>/<key>`, matching the **last** `/chunks/` segment. There is no marker key for
+  anything under `chunks.from/`, for a marker, for a manifest, or when the domain is empty.
+- **Internal leaves.** Every internal leaf starts with the sentinel `.tsync-` (`.tsync-root`,
+  `.tsync-trash`, `.tsync-parent`, `.tsync-index`). A namespace listing's **child objects** are the
+  listed keys whose leaf is not internal. Store listings never contain directory keys or a store's own
+  temporary files ([06-backends.md §3.6](06-backends.md#36-list_prefix)).
+- **Prefixes.** A key never ends in `/`; the prefix of a namespace or shard is its key followed by `/`
+  ([01-core.md §2.1](01-core.md#21-store-keys-and-prefixes)). Listing a namespace without the `/`
+  matches a different set of keys.
 
-### 2.4 Two key types
-
-- **`Logical_key.t`** = `{prefix = domain_prefix; path; kind = File|Dir}`. `to_string =
-  prefix ^ path` (e.g. `tsync/photos/manifests/2024/img.jpg`), root has `path=""`,
-  `leaf` is the basename, `parent` of root is root. Leading/trailing `/` trimmed on
-  construction. This is what every upper layer and the journal speak.
-- **`Stored_key.t`** = opaque string naming an object in one space; no `of_string`
-  (built by a namer or taken from a listing via `listed`). Constructors:
-  `in_space ~prefix path`, `namespace ~prefix ~folder_id = prefix^id^"/"`,
-  `child_key ~prefix ~folder_id name = prefix^id^"/"^dual(name)`,
-  `index_key`, `anchor_key`, `trash_namespace`, `share_key`, `under k name = k^name`.
-  Inspectors: `parent_folder_id k` (basename of dirname), `folder_id_of ns`,
-  `path_in ~prefix k`, `is_dir_key`, `is_index_key`, `is_internal`, `is_child_object`.
-
-Mapping (`Layout.Inode`):
+Example: domain `photos`, folder `Photos` at the root with id `3f2a9c1b7d4e-1a`, file
+`Photos/hello.txt` containing `hello world`:
 
 ```
-manifest_key(K)       = child_key(prefix=domain_prefix, folder_id = id(parent(K)), leaf(K))
-folder_marker_key(K)  = manifest_key(K)            (None for root)
-folder_id(K)          = local lookup (Folder_ids, from the mirror's .tsync-dir markers)
+tsync/photos/manifests/.tsync-root/857fcda0047eeab4-a677d171b8d38674     marker for "Photos"
+tsync/photos/manifests/3f2a9c1b7d4e-1a/.tsync-parent                     anchor of Photos
+tsync/photos/manifests/3f2a9c1b7d4e-1a/285b8db6c3eef5e0-7b23aee4b1561b8f manifest of hello.txt
+tsync/photos/chunks/d44/d447b1ea40e6988b-b7aeb52a10fdaf2d                its only chunk
 ```
 
-A file and a folder of the same name in the same parent would collide at one key; the
-object at that key is one or the other (classified by body).
+### 2.4 Logical keys and stored keys
 
-`Layout.Identity` is the degenerate layout used by share serving: the logical string
-*is* the backend key (`in_space ~prefix:""`), `folder_id K = leaf K`, no markers.
-
-Example: domain `photos`, folder `Photos` at root with id `3f2a9c1b7d4e-1a`, file
-`Photos/hello.txt`:
+The logical key grammar and the logical-to-stored mapping are owned by [01-core.md](01-core.md). The
+spellings this layer produces:
 
 ```
-tsync/photos/manifests/.tsync-root/857fcda0047eeab4-a677d171b8d38674   ← marker for "Photos"
-tsync/photos/manifests/3f2a9c1b7d4e-1a/.tsync-parent                   ← anchor of Photos
-tsync/photos/manifests/3f2a9c1b7d4e-1a/285b8db6c3eef5e0-7b23aee4b1561b8f ← manifest of hello.txt
-tsync/photos/chunks/d44/d447b1ea40e6988b-b7aeb52a10fdaf2d               ← its only chunk ("hello world")
+namespace(id)          = tsync/D/manifests/<id>/
+child_key(id, name)    = namespace(id) ^ dual(name)
+manifest_key(K)        = child_key(folder id of parent(K), leaf(K))
+folder_marker_key(K)   = manifest_key(K)            (none for the root)
+anchor_key(id)         = namespace(id) ^ ".tsync-parent"
+index_key(id)          = namespace(id) ^ ".tsync-index"
+trash_key(r)           = tsync/D/manifests/.tsync-trash/<r>
 ```
+
+The folder id of a logical key comes from local state (the owner's record of settled ids), never from
+the path. A client that holds no id for a folder cannot name its children on the store (**unresolved**),
+which says nothing about what the store holds.
+
+Share serving uses the **identity layout**: the share names stored keys directly (§2.14), and folders
+are named by id; no local ids are involved.
 
 ### 2.5 Folder ids
 
-`<first 12 hex chars of client_uuid>-<counter in lowercase hex>`, e.g. `3f2a9c1b7d4e-1a`.
+The folder-id grammar is owned by
+[01-core.md §2.5](01-core.md#25-folder-ids); client identity, leases and minting by
+[03-journal-sync.md §2.1](03-journal-sync.md#21-client-identity-and-folder-id-leases-local); arbitration
+by [data-model/backend.md §6](data-model/backend.md#6-folder-identity-arbitration). Reserved ids used in
+this layout: `.tsync-root` (the root's namespace) and `.tsync-trash` (the trash namespace). Example
+minted id: `3f2a9c1b7d4e-1a`.
 
-- `client_uuid` = 32 hex chars from 16 bytes of `/dev/urandom`, stored in
-  `<data_dir>/client-uuid`, created by write-tmp + `link` so concurrent processes agree.
-- Counter blocks of 1024 are leased per process by `O_CREAT|O_EXCL` of
-  `<data_dir>/id-leases/<block hex>`; next block = highest existing + 1; a forked child
-  leases its own. Counter = `block*1024 + next`.
-- Reserved ids: `.tsync-root` (domain root namespace), `.tsync-trash`.
-- An id minted locally is only a **candidate**; the id actually used is the one the
-  store accepts via the claim (§4.3).
+### 2.6 File manifest: binary `tsyncm03`
 
-### 2.6 Manifest (file) body — binary, `tsyncm03`
-
-Little-endian, fixed header then variable fields; no escaping anywhere.
+Little-endian, a fixed header then variable fields, no escaping. A body with another magic is not a
+manifest.
 
 ```
 off  len  field
 0    8    magic "tsyncm03"
-8    8    size        int64   logical file size in bytes
-16   8    mtime       IEEE-754 double bits (seconds since epoch, fractional)
-24   4    chunk_size  int32
-28   4    count       int32   number of chunk keys
-32   4    name_len    int32
-36   4    link_len    int32   0 for a regular file
-40   16   h1          ASCII hex (whole-file digest, seed 0)
-56   16   h2          ASCII hex (seed 1)
-72   name_len         leaf name bytes (arbitrary bytes)
+8    8    size        signed 64-bit: logical file size in bytes
+16   8    mtime       IEEE-754 double (seconds since the epoch)
+24   4    chunk_size  unsigned 32-bit
+28   4    count       unsigned 32-bit: number of chunk keys
+32   4    name_len    unsigned 32-bit
+36   4    link_len    unsigned 32-bit; 0 for a regular file
+40   16   h1          ASCII hex, whole-file digest, seed 0
+56   16   h2          ASCII hex, seed 1
+72   name_len         leaf name bytes, recorded at write time
 ..   link_len         symlink target bytes
-..   count*33         chunk keys "<16hex>-<16hex>", in index order, no separators
+..   count × 33       chunk keys, in index order, no separators
 ```
 
-Total length **must equal** `72 + name_len + link_len + 33*count`; otherwise
-`Malformed`. Other decode failures: shorter than 72, bad magic, negative lengths.
-Decoders never parse keys eagerly: key `i` is the substring at `keys_at + 33*i`, so a
-32 GB file's 31,230 keys cost no heap when the manifest is `mmap`ed (`of_file`).
+**Reader.** A body MUST be rejected as malformed if it is shorter than 72 bytes, has another magic, has
+`size < 0`, or its length differs from `72 + name_len + link_len + 33 × count` (computed without
+overflow). A chunk key that is not a well-formed chunk key (§2.1) makes the manifest malformed when that
+key is used; a reader MUST NOT fetch or trust it. A reader MUST NOT serve bytes of a range that no key
+covers (a count too small for the size): that range reads as damaged, never as zeros. A reader need not
+parse keys eagerly: key *i* is the 33 bytes at `72 + name_len + link_len + 33·i`. A manifest read from
+local disk MAY, and SHOULD, be read through an immutable memory mapping: a manifest file is only ever
+replaced by rename, never modified in place.
 
-Semantics:
+**Writer.** A writer MUST write `count = max(1, ceil(size / chunk_size))` with `chunk_size > 0` for a
+regular file, and for a symlink `count = 0`, `link_len > 0`, `size` = the target's length, `chunk_size =
+8388608`, `h1`/`h2` = the symlink digest. It MUST compute `h1`/`h2` from the keys and lengths (§2.1), so
+a partial rewrite needs no reread of unchanged bytes. The recorded name is the leaf of the key the body
+is written to; a body copied to a new location keeps its old name until re-put.
 
-- `name` is the leaf name **as recorded at write time**. It is *not* authoritative when
-  the location yields a name (a key built from the path). It exists because some
-  locations are one-way (`<folder-id>/<hash>`, `.tsync-esc-<hash>` cache leaves,
-  version keys, trash).
-- `h1/h2` = whole-file digest over the ordered `"<key>-<len>;"` strings (§2.1), so a
-  changed file's digest is recomputed from chunk keys without re-reading untouched bytes.
-- Symlink: `count = 0`, `link_len > 0`, `size = len(target)`,
-  `chunk_size = 8388608` (default, only to keep the field well-formed),
-  `h1/h2 = xxh3(target, 0/1)`.
-- Regular empty file: `size 0`, `count 1`, key = empty-body key.
-
-Byte-exact example: `hello.txt`, content `hello world` (11 bytes), mtime
-`1759140000.5`, chunk_size 8 MiB. `h = dual("d447b1ea40e6988b-b7aeb52a10fdaf2d-11;")
-= d94b4e9626fdc9c1-f3f6d793ca1ea424`. 114 bytes:
+Byte-exact example: `hello.txt`, content `hello world`, mtime `1759140000.5`, chunk size 8 MiB;
+`h = dual("d447b1ea40e6988b-b7aeb52a10fdaf2d-11;") = d94b4e9626fdc9c1-f3f6d793ca1ea424`; 114 bytes:
 
 ```
 0000  74 73 79 6e 63 6d 30 33 0b 00 00 00 00 00 00 00  tsyncm03........
@@ -239,126 +214,174 @@ Byte-exact example: `hello.txt`, content `hello world` (11 bytes), mtime
 0070  32 64                                            2d
 ```
 
-Writer API: `builder ~name ~size ~chunk_size ~mtime ~symlink ~count` allocates the whole
-body zeroed (a never-set key is 33 NULs, which no store can hold), `set b i key`
-(rejects width ≠ 33), `seal b ~h1 ~h2` (rejects width ≠ 16) returns the buffer itself.
-`encode` = builder+set+seal. `to_string ~name m` re-encodes with a different name (used
-for version snapshots/trash); `body ~name m` returns the original bytes when the recorded
-name already equals `name`.
-
-`Manifest.Group` (local-cache concern, defined here because it is derived only from a
-manifest): stored chunks are grouped `per = chunks_per_group ~chunk_size
-~cache_chunk_size = max 1 round(cache_chunk_size/chunk_size)` (cache default 16 MiB → 2
-stored chunks per group). Group `g` covers indices `[g*per, min(n,(g+1)*per))`, its cache
-filename is the dual digest over `"<member>;"` of member keys (not first-last — runs of
-identical chunks would alias), `offset` is a prefix sum of member lengths.
-
 ### 2.7 Folder marker (JSON)
 
-At `manifests/<parent_id>/<dual(name)>`:
+At `child_key(parent id, name)`:
 
 ```json
 {"dir":true,"name":"Photos","id":"3f2a9c1b7d4e-1a"}
 ```
 
-Classified as a marker iff it parses as a JSON object with `"dir": true`. Missing
-`name`/`id` read as `""`. Serialized by `Yojson.Basic.to_string` in the field order
-above, no whitespace.
+- **Writer**: exactly these three fields in this order, no whitespace.
+- **Reader**: a body is a folder marker iff it parses as a JSON object with `"dir": true`. Field order
+  and unknown fields are ignored. Readers SHOULD accept a marker with a missing or non-string `name` or `id`
+  (meaning an empty one); writers MUST NOT produce it. A marker whose
+  `id` is not a folder id ([01-core.md §2.5](01-core.md#25-folder-ids)), including an empty one, is
+  **unclassifiable**: skipped like
+  a write in flight, never adopted, and it references no chunk.
 
 ### 2.8 Anchor (JSON)
 
-At `manifests/<folder_id>/.tsync-parent` — where the folder says it lives:
+At `anchor_key(id)`:
 
 ```json
 {"parent":".tsync-root","name":"Photos"}
 ```
 
-No `"dir"` field, so it never classifies as a marker. `in_trash a ⇔ a.parent = ".tsync-trash"`.
-A marker at `manifests/P/<dual(N)>` naming id `I` is **filed here** iff
-anchor(I) = `{parent=P; name=N}`, or I has no anchor (pre-anchor data: marker taken at
-its word). Otherwise the marker is **disowned** (left behind by a move) and is ignored by
-every reader.
+- It has no `"dir"` field, so it never classifies as a marker.
+- **Reader**: both `parent` and `name` MUST be strings, else the body is not an anchor and the folder
+  reads as unanchored. Unknown fields are ignored. "In trash" ⇔ `parent = ".tsync-trash"`.
+- A marker at `child_key(P, N)` naming *I* is filed iff anchor(*I*) = `{parent: P, name: N}` or *I* has
+  no anchor ([data-model/backend.md](data-model/backend.md) §6.3).
 
-### 2.9 Trash marker (JSON)
+### 2.9 Trash entry (JSON)
 
-At `manifests/.tsync-trash/<Id.short()>` (16 hex from a per-process PRNG):
+At `trash_key(<16 lowercase hex, random>)`:
 
 ```json
 {"dir":true,"name":"Photos","id":"3f2a9c1b7d4e-1a","path":"Archive/Photos"}
 ```
 
-`path` is the domain-relative path at deletion time (for listing/restore). The folder's
-anchor is rewritten to `{"parent":".tsync-trash","name":"Photos"}`. The subtree
-(`manifests/<id>/…`) is untouched and unreachable from the root.
+- A folder-marker body plus `path`, the domain-relative path at deletion time.
+- **Reader**: read as a folder marker (§2.7); readers SHOULD accept an entry without a string `path` (meaning
+  a trash entry for expiry and repair that cannot be found by path for restore); writers MUST NOT
+  produce it.
+- The trashed folder's anchor is `{"parent":".tsync-trash","name":<its name>}`.
 
-### 2.10 Folder index (binary, `tsyncidx1`)
+### 2.10 Folder index (binary `tsyncidx1`)
 
-At `manifests/<folder_id>/.tsync-index`. A cache of children's bodies so a folder read
-is list + 1 GET instead of list + N GETs on stores with no multi-object read.
+At `index_key(id)`. A cache of the namespace's child bodies, so a folder read costs one listing and one
+read instead of one read per child.
 
 ```
 "tsyncidx1"
-repeat:  be32 len | key bytes (full Stored_key string)
-         be32 len | etag bytes
-         be32 len | body bytes
+repeat:  be32 length | key bytes (the full stored key)
+         be32 length | entity tag bytes
+         be32 length | body bytes
 ```
 
-Big-endian lengths (unlike the manifest). An entry is used only if the *current* listing
-reports the same `etag` for that key. Only entries whose listing carried an etag are
-written. Any parse error ⇒ treated as no index.
-Constants: `max_children = 10_000` (not written above), `max_bytes = 64 MiB` (not read
-above, judged from listing size). `worth_writing ~covered ~total = total > 1 && total <=
-10000 && covered*4 < total*3` (rewrite when < 75 % covered).
+- Lengths are big-endian (unlike the manifest). Only children whose listing carried an entity tag are
+  written.
+- **Reader**: any parse error means "no index". An entry is used only if the current listing reports the
+  same entity tag for that key. An index whose listed size exceeds `index_max_bytes` (64 MiB) is not
+  read.
+- **Writer**: only a walker allowed to write, only for a domain with exactly one readable member, only
+  when `1 < children ≤ index_max_children` (10 000) and fewer than 75 % of the children were served from
+  the existing index.
 
 ### 2.11 Versions
 
-`save_version K` (only when `Conf.versioning`): if the current manifest object exists,
-server-side `copy` it to
-
 ```
-tsync/<D>/versions/<folder_id>/<dual(leaf)>/<unix time in ns, decimal>
+tsync/D/versions/<folder id>/<leaf hash>/<timestamp>
 e.g. tsync/photos/versions/3f2a9c1b7d4e-1a/285b8db6c3eef5e0-7b23aee4b1561b8f/1759140000500000000
 ```
 
-The "grouping key" is the manifest key with `domain_prefix` stripped
-(`<folder_id>/<dual(leaf)>`), so versions follow a *folder* rename (id stable) but not a
-*file* rename (leaf hash changes). A deleted file = a grouping key with versions and no
-live manifest at `domain_prefix ^ grouping`. The body is the old manifest verbatim, so
-its recorded name is how a deleted file's name is recovered. `History.parse` splits a
-version key at its last `/` into `(grouping, timestamp)`.
+- The body is the replaced manifest body, verbatim.
+- The **history group** is `<folder id>/<leaf hash>`: the manifest key minus `tsync/D/manifests/`.
+- `timestamp` is a decimal count of nanoseconds since the epoch. Writers MUST make timestamps strictly
+  increasing per group (a later snapshot in the same nanosecond takes the previous timestamp plus one).
+- **Reader**: split a version key at its last `/` into (group, timestamp); a timestamp that is not a
+  decimal integer makes the key not a version.
 
-### 2.12 GC run marker (JSON)
+### 2.12 Collection run record and generation (JSON)
 
-At `tsync/<D>/gc-run` on the **main store only**:
+**Run record** at `tsync/D/gc-run` on the collectable main only:
 
 ```json
 {"phase":"marking","started":1759140000.123,"cursor":"m/3f2a9c1b7d4e-1a"}
+{"phase":"closing","started":1759140000.123,"cursor":"a3f","generation":7}
 ```
 
-`phase ∈ opening|marking|abandoning|closing` (legacy `reconciling` reads as `closing`);
-cursor meaning depends on phase: marking → last finished namespace name (`m/<id>` or
-`v/<id>`), abandoning/closing → last finished shard (`abc`). Unparseable ⇒ read as idle
-by `read_run` (with a warning), but *presence* alone makes lookups use two spaces.
+- `phase` ∈ `opening`, `marking`, `abandoning`, `closing`. Readers SHOULD accept
+  `reconciling` (meaning `closing`); writers MUST NOT produce it.
+- `started`: seconds since the epoch; a reader accepts an integer or a float. The **run name** is
+  `started × 1000` rounded, zero-padded to 13 decimal digits.
+- `cursor`: marking → the last finished namespace, `m/<folder id>` (manifest area) or `v/<folder id>`
+  (version area), which sort all `m/` before `v/`; closing and abandoning → the last finished shard; `""`
+  = none. A missing `cursor` reads as `""`.
+- **Presence** of the object means a run is open, whatever its body. A body that does not parse, or
+  names an unknown phase, is an **unreadable run**: readers and the gate treat the run as open; the
+  collector treats it as abandoning ([algorithms/gc.md](algorithms/gc.md)).
+- `generation` (written from the closing phase on): the odd collection generation of this run, an
+  integer ≥ 1. Writers MUST include it in every closing record. Readers SHOULD accept a closing record
+  without it (meaning G is odd for as long as the record is present); a collector resuming one assigns it
+  a fresh odd generation before its next doom step
+  ([algorithms/gc.md §5.5](algorithms/gc.md#55-the-collector-phase-by-phase)). Readers MUST ignore
+  unknown fields.
 
-### 2.13 Corruption marker (JSON) and job bodies
+**Generation** at `tsync/D/gc-generation`, on the first collectable main of the domain:
 
-`tsync/corrupted/<D>/<sss>/<key>`; the key is the finding, the body optional detail,
-all fields optional and unknown ones ignored (written by this client for local stores,
-by a bucket function for S3/GCS):
+```json
+{"generation":8}
+```
+
+- An integer ≥ 0 that only increases. Even: no collection has deletions on copies in flight. Odd: one
+  has ([algorithms/gc.md §5.6](algorithms/gc.md#56-the-generation-and-presence-memos)).
+- Written with a plain put, only by the collecting owner holding the run lock.
+- **Reader**: absent reads as 0. A body that does not parse, or a value that is not a non-negative
+  integer, reads as odd (memos untrusted) and is reported. Unknown fields are ignored.
+
+### 2.13 Corruption marker, verify job, discard job
+
+**Corruption marker** at `tsync/corrupted/D/<sss>/<chunk key>`. The key is the finding; the body is
+optional detail:
 
 ```json
 {"computed":"0123456789abcdef-fedcba9876543210","size":8388608,"at":1759140000.5,"reason":"EIO"}
 ```
 
-An unparseable body is still a marker. Discard request body
-(`tsync/gc-jobs/<D>/<run>/<name>`): backend keys joined by `\n`. Verify request
-(`tsync/verify-jobs/<D>/<sss>`): empty.
+- `computed` and `size` describe wrong bytes; `reason` (without `computed`) an unreadable chunk; `at` is
+  seconds since the epoch, integer or float.
+- **Reader**: every field is optional; unknown fields are ignored; an empty or unparseable body is still
+  a marker. Only a key whose leaf is a well-formed chunk key counts (filesystem stores also list shard
+  directories).
 
-### 2.14 Journal / cursor objects (key shapes only)
+**Verify job** at `tsync/verify-jobs/D/<sss>`, empty body: "check every chunk under
+`tsync/D/chunks/<sss>/`". A key counts as a verify job iff, after `tsync/verify-jobs/`, it splits from the
+right into `<domain>/<shard>` with a valid shard.
 
-Entry key `"%013Ld-%s" ms client_uuid`, stored at `journal/<YYYY-MM (UTC)>/<entrykey>`.
-Cursor object body = the entry key string. Local `data_dir/last-sync-<D>` holds the last
-applied entry key (written by tmp+rename). Details in the journal spec.
+**Discard job** at `tsync/gc-jobs/D/<run>/<shard>`:
+
+- `<run>` is the collection's run name (§2.12); `<shard>` is the last shard of the batch.
+- Body: full chunk keys (`tsync/D/chunks/<sss>/<chunk key>`) joined by `\n`; no trailing newline
+  required; empty lines ignored.
+- **Probe**: the reserved run name `0000000000000` with shard `000` and an empty body is the
+  bucket-function probe; its procedure is [backends/object-store-common.md](backends/object-store-common.md)
+  ("The probe"). An empty request deletes nothing.
+- **Reader**: a key counts as a discard job iff, after `tsync/gc-jobs/`, it splits from the right into
+  `<domain>/<run>/<shard>` with a valid shard and a non-empty domain and run. A listed key under the
+  prefix that does not parse this way is not a job. The executor deletes only lines that are chunk keys
+  of that same domain's surviving space; it refuses and logs any other line.
+
+### 2.14 Share manifest (JSON) and share artifacts
+
+At `tsync/shares/<token>`. `token` is 32 lowercase hex characters from 16 random bytes; readers accept
+any non-empty lowercase hex token of at most 64 characters (caller-supplied tokens exist).
+
+```json
+{"v":1,"expires":1767225600,"domain":"Files","type":"file","key":"tsync/Files/manifests/<folder id>/<leaf hash>","filename":"report.pdf"}
+{"v":1,"expires":1767225600,"domain":"Files","type":"dir","folderId":"<folder id>","filename":"2024.zip"}
+```
+
+- `expires`: seconds since the epoch. A share of the whole domain has `folderId = ".tsync-root"` and
+  `filename = "<domain>.zip"`.
+- **Reader**: `v` MUST be `1`; `domain` MUST be a valid domain name; for `file`, `key` MUST lie under
+  `tsync/<domain>/manifests/` and be a child key; for `dir`, `folderId` MUST be a folder id ([01-core.md §2.5](01-core.md#25-folder-ids)).
+  Otherwise the share is refused. Unknown fields are ignored.
+- **Artifacts**: `tsync/shares/cache/<token>.data` (a download of that share) and
+  `tsync/shares/cache/<h1>-<h2>.data` (a file by whole-file digest). Readers SHOULD
+  accept a `tsync/shares/<name>.data` object directly under the share tree (meaning a share artifact,
+  never a share manifest; clear-cache and expiry delete it); writers MUST NOT produce it.
 
 ---
 
@@ -366,577 +389,307 @@ applied entry key (written by tmp+rename). Details in the journal spec.
 
 ### 3.1 The seams
 
-Each component below is an abstract interface instantiated **per domain** from a domain
-configuration record, which supplies: the prefixes of §2.3, the domain's composite store
-(reads walk members in order, writes land on every main, deferred targets catch up
-later), the individual `members` with roles (main / replica / deferred / read-only),
-limits (`max_chunk_buffers`, `max_downloads`), `versioning`, optional `chunk_size`,
-`cache_root`, `data_dir`. All operations are asynchronous (futures/tasks). Process-wide
-state (pools, memos, debouncers, GC-open cache) is keyed by the domain's prefix, never by
-instance: a process creates several instances per domain (uploader, import, share
-server, diagnostics) and they must share one budget and one view.
+Each component is instantiated per domain from the domain context ([05-ops-config.md](05-ops-config.md)):
+prefixes, the composite store, the individual members with roles, versioning, chunk size and local
+roots. Process-wide state (memos, cursor debouncing, the run-open cache) is keyed by the domain, never by
+instance: several instances of one domain in one process share one view.
 
-**ContentStore** (upload/download of file bodies):
+**ContentStore** (file bodies):
 
 ```
-upload(key: LogicalKey, src_path, mtime, chunk_size, cancel?: flag,
-       on_progress?: (bytes:int, sent:bool) -> ()) -> Manifest
-    errors: Cancelled, Source_changed(path), Stopping (shutdown), backend errors
-upload_chunks(key, size, chunk_size, mtime,
-       source: index -> ChunkSource, cancel?) -> Manifest
-get_chunk(chunk_key) -> bytes                    // downloads pool
-get_verified_chunk(chunk_key) -> bytes           // fails unless hash(body)==key after ≤2 reads
-get_chunk_range(chunk_key, offset, length) -> bytes   // ranges pool
-fast_read: bool                                   // from the store
-chunk_size() -> int                               // config → store caps → 8 MiB, cached per process
-known_chunk_count() -> int
-fetch_manifest(key) -> Manifest?                  // None for unresolved/absent/undecodable
+upload(key, source_path, mtime, chunk_size, cancel?, on_progress?) -> Manifest
+    errors: Cancelled, SourceChanged(path), Stopping, MissingChunks(keys), store failures
+upload_chunks(key, size, chunk_size, mtime, source: index -> ChunkSource, cancel?) -> Manifest
+get_chunk(chunk key) -> bytes
+get_verified_chunk(chunk key) -> bytes          // fails unless dual(body) = key within two reads
+get_chunk_range(chunk key, offset, length) -> bytes
+chunk_size() -> int                              // config, else the store's advertised size, else 8 MiB
+fetch_manifest(key) -> Manifest | None           // None: unresolved, absent or undecodable
 ```
 
-`ChunkSource` (decided with no I/O): `Stored(key)` — reuse, neither read nor sent |
-`Mapped(() -> bytes)` — bytes produced in place (mmap), inside a buffer slot |
-`Filled(len, fill(buffer))` — caller writes exactly `len` bytes into a pooled buffer.
+`ChunkSource`, decided without I/O: `Stored(key)` (reuse a key; neither read nor sent), `Mapped(bytes)`
+(bytes produced in place, for example by mapping the source), `Filled(length, fill)` (the caller writes
+exactly `length` bytes into a buffer).
 
-**ManifestStore** (manifest objects by logical key + raw objects by stored key):
+**ManifestStore** (manifests by logical key, raw objects by stored key):
 
 ```
-put_manifest(key, body)                       // may claim the parent folder chain
+put_manifest(key, body)                // resolves or claims the parent chain; gated on a collectable main
 get_manifest_state(key) -> Body(bytes) | Absent | Unresolved
-head_manifest(key) -> Entry?     delete_manifest(key)
-copy_manifest(src, dst)                       // server copy then delete src; dst folders may be claimed
-ensure_folder_id(dir_key) -> id               // claim self+ancestors if unknown locally
-claim_folder(dir_key, id?) -> Held | Taken(other_id)
-ensure_claimed(dir_key)                       // Taken ⇒ transient failure
-put_folder_marker(dir_key)                    // anchor first, then marker
-put_anchor(folder_id, parent, name); get_anchor(folder_id) -> Anchor?
-placed(folder_id, at) -> Here | Elsewhere(anchor) | Unanchored
-filed(bkey, marker) -> Here | Elsewhere(anchor)
-marker_id_at(bkey) -> id?   holder_at(bkey) -> id?     // holder = marker minus disowned
-list_namespace(folder_id) -> [Entry]
-get_object(bkey) / get_object_opt(bkey) / get_objects(entries, pool?) -> [(bkey, bytes?)]
-list_many?(folder_ids) -> [ListedFolder]      // only if the store has a native one
-put_raw(bkey, bytes); delete_raw(bkey) -> existed
+head_manifest(key) -> Entry?           delete_manifest(key)
+copy_manifest(src, dst)                // server-side copy then delete of src; gated
+ensure_folder_id(dir key) -> id        // local first; otherwise claims self and ancestors
+claim_folder(dir key, id?) -> Held | Taken(id)
+place_folder(dir key)                  // the placement procedure for a settled id
+trash_folder(dir key, id)              // entry, anchor, then marker removal
+restore_folder(path) -> Restored | NotInTrash | ParentUnknown
+remove_stale_marker(slot, expected id?)
+confirm_pending_claims()               // runs the confirmations owed
+get_anchor(id) -> Anchor?   placed(id, at) -> Here | Elsewhere(anchor) | Unanchored
+holder_at(slot) -> id?                 // the filed marker's id, disowned ones read as none
+list_namespace(id) -> [Entry]   get_object(key)   get_objects(keys)   list_many?(ids)
 ```
 
-`Unresolved` = this client does not know the key's folder id (says nothing about the
-store); `Absent` = the store has nothing. A caller that memoizes answers must not
-memoize `Unresolved`.
+`Unresolved` means this client holds no id for the key's folder; `Absent` means the store holds nothing
+there. A caller that memoizes answers MUST NOT memoize `Unresolved`. There is no operation that writes a
+folder marker with a plain put.
 
 **TreeReader** (the folder tree by id):
 
 ```
-Entry = { bkey, body: Dir(marker) | File(manifest) }
-Unusable = Unreadable(err) | Unclassifiable(err) | Disowned(anchor)
-OnUnusable = Fail | Skip(report(bkey, Unusable))
-children(folder_id, on_unusable=Fail, refresh_index=false, on_index?, pool?) -> [Entry]
-find(folder_id, names[]) -> File(entry) | Folder(id) | Missing
-fold_tree(folder_id, root_key, f(acc, containing_dir_key, entry) -> acc, acc0, ...) -> acc
+Entry     = { key, body: Dir(marker) | File(manifest) }
+Unusable  = Unreadable(error) | Unclassifiable(error) | Disowned(anchor)
+OnUnusable = Fail | Skip(report)
+children(id, on_unusable = Fail, refresh_index = false) -> [Entry]
+find(id, names) -> File(entry) | Folder(id) | Missing
+fold_tree(id, root key, f(acc, containing dir key, entry) -> acc, acc0, on_unusable?) -> acc
 ```
 
-**JournalStore**: `write_journal_entry(ops, entry_key?) -> entry_key`,
-`write_journal_entry_body(bytes, entry_key?)`, `bump_cursor`, `note_cursor` (never
-publishes inline), `flush_cursor`, `fetch_cursor`, `wait_cursor_change(last_seen?)`,
-`read/write_last_sync_key` (local), `list_journal_keys(start_after?)` (sorted),
-`get_journal_entry`, `journal_entry_published`, `rename_file(src, dst)` (= copy_manifest),
-`head_manifest_opt`. The host binding also records every published entry in the local
-applied-entries log *before* publishing it and sends a change notice.
+**History**: `save_version(key)` (best effort, bounded by `snapshot_deadline`, recommended 10 s including
+retries; failures logged), `list_versions(key)`, `get_version(version key)`, `revert(key, version key)`
+(a gated copy onto the live location), and the pure helpers `parse(version key) -> (group, timestamp)?`,
+`versions_of(group)`, `manifest_of(group)`, `folder_versions(id)`.
 
-**History**: `version_dir(key) -> bkey?`, `save_version(key)` (best effort, 10 s deadline
-including retries, errors logged), `list_versions(key)`, `get_version(vkey)`; pure helpers
-`parse(vkey) -> (grouping, ts)?`, `versions_of(grouping)`, `manifest_of(grouping)`,
-`folder_versions(folder_id)`.
+**ChunkSpace** (reads of the collected main during a run): `head`, `get`, `get_range` across both
+spaces ([algorithms/gc.md](algorithms/gc.md) §5.8), `run_present()`, and `generation()` (G, §2.12). Promotion is performed only by
+the gate of the collectable main's driver ([algorithms/gc.md](algorithms/gc.md) §5.4); no other
+component promotes.
 
-**ChunkSpace** (GC-aware chunk lookup): `read_run/write_run/clear_run`,
-`head/get/get_range(chunk_key)` across both spaces, `promote(chunk_key) -> moved`,
-`promote_all(count, key_at)`.
+**Corruption**: `list() -> {entries, unverified, unreachable}`, `is_marked(key)` (memo, §4.7),
+`forget(key)`, `detail(entry)`.
 
-**Corruption**: `list() -> {entries, unverified, unreachable}`, `member_entries(member,
-max_keys?) -> Unverified | Entries`, `detail(entry) -> MarkerBody?`, `is_marked(key)`
-(TTL memo), `forget(key)`, `invalidate()`.
+**KeyLayout** (logical to stored): `manifest_key`, `folder_marker_key`, `folder_id`; two realisations,
+the *inode* layout (ids from local state) and the *identity* layout (share serving).
 
-**ChunkStore** (internal to ContentStore): `store(ChunkSource) -> (key, sent)`,
-`fetch`, `fetch_verified`, `fetch_range`, `known_count`; parametrised by put /
-backend_key / present / fetch / corrupt / cleared / three pools / max_known.
+### 3.2 How hosts use these
 
-**KeyLayout** (logical → stored): `manifest_key(key) -> bkey?`,
-`folder_marker_key(key) -> bkey?`, `folder_id(key) -> id?`. Two implementations: *Inode*
-(ids from local folder markers) and *Identity* (logical string is the backend key; used
-by share serving).
-
-### 3.1b How hosts use these
-
-| Host | Instantiates | Role / differences |
+| Host | Uses | Differences |
 |---|---|---|
-| Daemon (Linux FUSE, CLI `tsync mount`) | all components, Inode layout | full read/write; uploader drives ContentStore + ManifestStore + JournalStore |
-| macOS File Provider extension | ContentStore (`upload` for re-import), ManifestStore, TreeReader | same model; whole-file uploads from the extension's snapshot |
-| Android app | same as daemon (embedded core) | same keys and formats; only the frontend differs |
-| http-proxy server | TreeReader/ManifestStore for `list_many`, share serving with **Identity** layout | answers `list_many`/`get_many` natively for its clients; never refreshes indexes for shares |
-| CLI one-shots (import, export, gc, expire, data-integrity, diagnostics) | ContentStore, ChunkSpace, Corruption, History, Retention | GC only where the main has a local path |
+| Domain owner (desktop, embedded mobile core) | every component, inode layout | full read and write |
+| File-provider extension | ContentStore, ManifestStore, TreeReader, through its owner | whole-file uploads from snapshots |
+| http-proxy server | TreeReader and ManifestStore for batched folder reads; share serving with the identity layout; its local store driver's gate and two-space reads for remote writers and readers | never writes folder indexes for shares |
+| One-shot commands (import, export, gc, expire, integrity, diagnostics) | as needed, through or as the owner | collection only where a collectable main is local |
 
-Host rows other than the daemon are as seen from this subsystem; the frontends spec owns
-the details. All hosts read and write the same on-store formats; nothing here is host-specific except
-whether a local path exists (GC, promotion) and whether the caller may write the folder
-index.
+### 3.3 What this layer requires of the store
 
-### 3.2 Required backend contract
-
-- `put` last-writer-wins, **atomic visibility** (object absent or whole — local stores
-  stage `.tsync-tmp-<pid>-<seq>.tmp` then rename).
-- `put_if_absent ~key ~data` → the body that holds the key afterwards (ours if we won).
-  Object stores use a generation/`If-None-Match` precondition; filesystems use
-  `link` (fails with EEXIST). A store that cannot arbitrate raises non-transiently.
-- `get_opt` → `None` iff absent; `get_range` returns exactly `length` bytes (short only at
-  EOF) or `None` if absent; `delete` returns whether it existed; `delete_multi` treats
-  absent as success and pages; `copy` server-side; `list_prefix` returns `file_entry =
-  {key; size; last_modified; etag option}`; filesystem listings include directory keys
-  (ending `/`) and arbitrary order.
-- Optional: `get_many` (native batch), `list_many` (http-proxy: listing + bodies for up
-  to `max_batch_folders = 64` folders), `discard` (queue deletes to a bucket function),
-  `verify_all`, `local_path` (grants rename/rm within the tree), `fast_read`, `watch`,
-  `capabilities` (`chunk_size`, `max_concurrency`, `verified`, `share_url`).
-  Batch packing: ≤ 256 keys, ≤ 8 MiB per request.
+The store contract is [06-backends.md §3](06-backends.md#3-the-store-contract). One reading rule is
+this layer's: an empty or unparseable answer to create-if-absent is read back, never taken as "won"
+([data-model/backend.md §6.2](data-model/backend.md#62-claiming-a-name-for-a-new-folder)).
 
 ---
 
-## 4. Behaviour / algorithms
+## 4. Behaviour
 
-### 4.1 Upload (`Remote.fill` + `publish`)
+### 4.1 Upload
 
-1. `count = max 1 (Chunks.count size chunk_size)`; allocate `Manifest.builder` with
-   `name = leaf key`.
-2. Run `each_chunk`: `W = width(chunk_slots)` workers each pulling the next index (never
-   one promise per chunk — a terabyte file would allocate millions). Per index:
-   - if `!cancel` → `Cancelled`; if shutdown requested → `Shutdown.Stopping`.
-   - `source i` (no I/O) gives a `Chunk_source`.
-   - `Chunk_store.store`: `Stored k` → `(k, false)` without a slot. `Mapped`/`Filled` →
-     take a **chunk buffer slot**, obtain bytes, `key = dual(bytes)`, then
-     `known?` = *corruption marker?* (if marked → not known) → *session memo?* →
-     `Collection.head` (presence, either GC space). Known → remember, `sent=false`. Else
-     `put chunks/<sss>/<key>`, clear any corruption memo entry for it, remember,
-     `sent=true`.
-   - `Manifest.set table i key`; `on_progress ~bytes:len ~sent` (inside the slot; must
-     not block).
-3. `publish`: re-check cancel/shutdown; compute `h1,h2` from keys; seal; if versioning,
-   `save_version key` (best effort); **`Collection.promote_all`** over all keys (no-op
-   unless a GC run marker exists on the main); `St.put_manifest` (claims the parent
-   folder chain first, §4.3); if `cancel` was set while the put was in flight, delete the
-   manifest again and raise `Cancelled` (chunks are left: content-addressed, reused by
-   the successor).
+1. `count = max(1, ceil(size / chunk_size))`; build a manifest with the key's leaf as recorded name.
+2. For each chunk index: stop with `Cancelled` or `Stopping` if asked; obtain a `ChunkSource`; for
+   `Stored(k)` keep `k`; otherwise obtain the bytes, compute the key, and decide whether the chunk is
+   known:
+   - marked corrupt on a member read by the domain (§4.7): **not** known;
+   - otherwise in the dedup memo, if the memo may be relied on
+     ([algorithms/gc.md §5.6](algorithms/gc.md#56-the-generation-and-presence-memos)): known;
+   - otherwise a presence check (either space on the collected main during a run): known if present.
 
-`upload ~src_path` specifics: `fstat` the source fd, open a **snapshot** of the file
-(`Bigstring.open_snapshot`, a reflink/copy so later user writes do not reach the pages),
-size from the snapshot, chunks `mmap`ed from it (map failure ⇒ `Cancelled`). After all
-chunks, `fstat` the original again; if `st_size` or `st_mtime` changed ⇒
-`Source_changed` and nothing is published.
+   Unknown chunks are put; a successful put clears the chunk's corruption memo entry. Record the key in
+   the manifest and report progress (a progress callback MUST NOT block).
+3. **Publish**: re-check cancel and shutdown; compute `h1`/`h2`; seal; if versioning, `save_version`;
+   `put_manifest`. On a collectable main the put goes through the gate; a `MissingChunks` refusal makes
+   the uploader drop those keys from its memo, re-send them from the source it holds, and publish again
+   (a `Stored` chunk has no source here: the refusal propagates to the caller, which re-reads the bytes
+   from its local copy or reports the file damaged). If `cancel` was set while the put was in flight,
+   delete the manifest again and fail `Cancelled` (chunks stay: a successor reuses them).
 
-`upload_chunks` is the partial-rewrite path: unchanged chunks are `` `Stored key``
-(taken on trust — a corrupt inherited chunk stays corrupt; repair is `tsync
-data-integrity --repair`).
+**Whole-file upload** reads from a snapshot of the source taken when it starts (a copy or reflink), so
+later writes do not reach the bytes being hashed, and compares the source's size and modification time
+after the last chunk: a change fails `SourceChanged` and publishes nothing.
 
-Memo: `Dedup` hashtable, cap `max_known = 100_000` (settable); at cap it is **cleared**
-(not LRU). Not pre-populated by listing (cost would scale with the archive).
+**Partial rewrite** (`upload_chunks`) passes unchanged chunks as `Stored` keys, taken on trust from the
+manifest being rewritten; the gate on the main is what verifies them.
+
+**Dedup memo**: never pre-populated by listing (that cost would scale with the archive); it is an
+optimisation only, since the gate on a collectable main checks presence
+([algorithms/gc.md §5.4](algorithms/gc.md#54-the-collection-interlock)), and it is subject to
+[algorithms/gc.md §5.6](algorithms/gc.md#56-the-generation-and-presence-memos).
 
 ### 4.2 Download
 
-- `get_chunk k` = under `downloads` pool slot (`max_downloads`), `Collection.get k`.
-- `get_chunk_range` = under the separate `ranges` pool (`max_downloads` wide) — a
-  waiting reader must not queue behind prefetch whole-chunk fetches.
-- `get_verified_chunk` = fetch, check `dual(body) = k`; on mismatch fetch once more (same
-  route); second mismatch ⇒ `Backend_error "chunk K: what the store holds does not hash to it"`.
-- Pools are keyed by `chunk_prefix` in a global table, so every `Remote.Make`
-  application for one domain (uploader, import, share server…) shares one budget.
-- `Collection.get/head/get_range` during a GC run (only when main has `local_path`):
-  try main at `chunks/…` then `chunks.from/…`, then fall back to the composite. Whether a
-  run is open is cached for `order_ttl = 5 s`; on a total miss with the cache saying
-  idle, the marker is re-read for real before answering "absent" (so a stale cache can
-  cost latency but never a false miss).
-- `fetch_manifest key` = `get_manifest_state`; `Unresolved`, `Absent` or undecodable body
-  ⇒ `None` (a write caught mid-flight reads as no metadata).
+- A waiting reader's range read MUST NOT queue behind whole-chunk prefetches.
+- On the collected main during a run, reads look in both spaces ([algorithms/gc.md](algorithms/gc.md)
+  §5.8), then fall back to the composite.
+- `get_verified_chunk` fetches, checks `dual(body) = key`, fetches once more on mismatch, and fails the
+  second mismatch naming the key.
+- `fetch_manifest` answers `None` for an unresolved key, an absent object, or a body that is not a
+  manifest (a write in flight). A store failure MUST propagate as a failure, never as `None`
+  ([algorithms/failure-model.md](algorithms/failure-model.md)).
 
-### 4.3 Folder identity: claim protocol
+### 4.3 Folders
 
-`claim_name ~key ~id` (the marker *is* the claim):
+The protocol (claim, confirmation, placement, trash, restore, stale-marker removal) is
+[data-model/backend.md](data-model/backend.md) §6. This layer adds:
 
-1. `bkey = folder_marker_key key`, `parent = folder_id (parent key)`; unresolved ⇒ fail.
-2. `held = put_if_absent bkey {"dir":true,"name":leaf,"id":id}`. If the store raises a
-   *transient* error ⇒ propagate (caller retries). A non-transient error (store cannot
-   arbitrate) ⇒ warn once per process and do a plain `put` (last writer wins; the old
-   race returns).
-3. If `held` is a marker for another id `m`:
-   - if `m` is filed here (anchor agrees or absent) ⇒ `` `Taken m``;
-   - if `m`'s anchor places it elsewhere ⇒ the marker is stale: delete it and retry
-     the claim.
-4. Else (we won, or it already named our id) ⇒ `put_anchor id {parent; name}` ⇒ `` `Held``.
+- `ensure_folder_id(K)` is local first: an id the owner already holds costs no round trip. Otherwise it
+  ensures the parent, mints a candidate, claims, records the resulting id (its own on a win, the
+  holder's on `Taken`) in local state, and queues the claim's confirmation durably. If local state
+  already recorded another id for `K` meanwhile, that id wins.
+- `claim_folder(K)` on publish: the root is always held. For a folder with no local id, local state is
+  consulted first: a folder this client moved away is held (content is filed by its id); a folder this
+  client removed fails transiently (a publish must not resurrect it); otherwise the parent chain and the
+  folder are claimed. For a folder with a local id whose claim is final, no store read is needed.
+- `ensure_claimed(K)` turns `Taken` into a transient failure: the conflict tables set one folder aside,
+  and the waiting operation is retried.
+- `restore_folder(path)` needs the destination parent's id locally (else `ParentUnknown`) and writes no
+  journal entry; peers learn of it by resync.
 
-`ensure_folder_id key` (idempotent, local-first): if the local mirror records an id,
-return it (no round trip). Else `ensure_folder_id (parent key)` recursively, mint a
-candidate id, `claim_name`; the id is ours on `Held` or the winner's on `Taken`; record
-it locally via `Folder_ids.write` (which may answer `` `Held other`` if a local marker
-appeared meanwhile — then `other` wins).
+### 4.4 Files (store side)
 
-`claim_folder ?id key` (called on every publish into a folder via `ensure_manifest_key →
-claim_parent`):
+- **Rename**: snapshot the source's version (if versioning), server-side copy to the destination (gated),
+  delete the source, then re-put the body with the new leaf as recorded name.
+- **Delete**: snapshot (if versioning), delete the manifest; history remains in the version area.
+- **Revert**: a gated copy of a version body onto the live location, preceded by a snapshot of the live
+  body.
 
-- root ⇒ `Held`.
-- No id known locally: consult `Folder_ids.whereabouts`: `Moved` ⇒ `Held` (layout files
-  by the old id); `Removed` ⇒ transient failure (don't resurrect); `Live`/`Unknown` ⇒
-  claim parent, then `ensure_folder_id`.
-- Id known: read the marker at its key; same id ⇒ `Held` (one GET per publish —
-  `ponytail:` noted); otherwise claim parent then `claim_name`.
+### 4.5 Reading the tree
 
-`ensure_claimed` turns `Taken` into a **transient** failure: the other folder's own
-queued creation moves it aside, and the waiting op is retried.
+`children(id)`:
 
-`put_folder_marker key` (explicit mkdir publish): ensure parent id, ensure own id, write
-**anchor first**, then plain `put` of the marker.
+1. List the namespace; keep child objects; note the index key if listed.
+2. If the domain has exactly one readable member and an index is listed within `index_max_bytes`, read
+   it and use entries whose entity tag matches the listing.
+3. Fetch the rest (native batched reads where the store has them).
+4. If `refresh_index` and the write rule of §2.10 holds, rewrite the index (best effort; errors logged).
+5. Classify each body: folder marker, else manifest, else **unclassifiable** (a write in flight). A key
+   listed but gone on read is **unreadable** (a permanent "not found" for that child).
+6. Policy: `Fail` fails the folder on any unreadable child (a deleter must not take it for an empty
+   folder) and skips unclassifiable ones; `Skip` reports each unusable child and continues, and if a
+   whole batch failed permanently, retries child by child so one bad object does not cost its siblings.
+7. For each folder marker, read the subfolder's anchor and drop disowned markers (reported as
+   `Disowned` under `Skip`).
 
-### 4.4 Folder move / rename / delete (store side)
+`find(id, names)`: one read of `child_key(id, name)` per segment, no listing; a file in a non-final
+position, an absent child or a disowned marker answer `Missing`; an unparseable body fails.
 
-Performed by the checkout/ops layer through these primitives (ordering matters):
-
-- **Rename/move folder**: write anchor `{new_parent,new_name}` → write new marker under
-  new parent → delete old marker. From the moment the anchor lands the old marker is
-  disowned even if its delete is lost. Descendants untouched.
-- **Rename file**: `copy_manifest` = server-side copy to the new key + delete old; then
-  the body is re-put with the new leaf name (`Manifest.body ~name`), because a copy does
-  not rewrite the recorded name.
-- **Delete folder (to trash)**: put trash marker `manifests/.tsync-trash/<short>` (with
-  `path`) → anchor to `.tsync-trash` → delete the live marker.
-- **Restore** (`Retention.restore path`): find trash marker by `path`; need the parent's
-  id locally (else `Parent_unknown`); anchor to new parent → put live marker → delete
-  trash entry (already gone ⇒ logged). O(1): subtree untouched; no journal entry is
-  written (peers learn by resync).
-- **Delete file**: `delete_manifest`; history remains in `versions/`.
-
-### 4.5 Reading the tree (`Inode_tree`)
-
-`children ~folder_id`:
-
-1. `list_namespace` (`list_prefix manifests/<id>/`); report the `.tsync-index` key to
-   `on_index`; keep `is_child_object` entries.
-2. If the domain has exactly one readable member and an index is listed (≤ 64 MiB):
-   read it; use cached bodies whose recorded etag equals the listing's etag.
-3. Fetch the rest via `get_objects` (native `get_many` or bounded fan-out on `slots`,
-   default a shared pool "tree reads" of `max_downloads` keyed by domain prefix).
-4. If `refresh_index` and `worth_writing`, write a new index (best effort, errors logged).
-   Only `tsync sync --full`-style walkers that may write pass this; read-only domains
-   and share serving never do.
-5. Classify each body: marker JSON ⇒ `Dir`; else `Manifest.of_string` ⇒ `File`; else
-   `Unclassifiable` (a write in flight). A key listed but gone on read ⇒ `Unreadable`
-   (permanent "not found").
-6. Policy: `` `Fail`` ⇒ any `Unreadable` fails the folder (a deleter must not mistake it
-   for absence); unclassifiable is silently skipped. `` `Skip f`` ⇒ report each and
-   continue; if the whole batch failed with a *permanent* error, redo key-by-key so one
-   bad object does not cost its siblings.
-7. For each `Dir`, read the subfolder's anchor (bounded by `slots`) and drop disowned
-   markers (reported as `` `Disowned anchor`` under `Skip`).
-
-`find ~folder_id names`: per segment one `get_opt` of `child_key(id, name)`, no
-listing; a file in a non-final position ⇒ `Missing`; disowned marker ⇒ `Missing`;
-unparseable body ⇒ fail (not `Missing`).
-
-`fold_tree`: depth-first, folder visited before its descent, `f acc key entry` gets the
-real logical key of the containing folder (built from marker names). Prefetching: a
-doubly-linked frontier list in visit order; up to `width(slots)` requests in flight,
-each asking the first unrequested folders (1 per request, or up to 64 with
-`list_many`); an answered folder is replaced in the frontier by its subfolders; a folder
-omitted from a `list_many` answer is fetched singly; request slot freed when all folders
-of that request have been consumed. Under `Skip`, a folder failing *transiently* is
-retried once after the whole walk; a second failure is reported under its namespace key.
+`fold_tree`: depth first, each folder visited before its descent, `f` receiving the real logical key of
+the containing folder (built from marker names). Prefetching is allowed provided the visit order is
+unchanged; a folder omitted from a batched answer is fetched singly. Under `Skip`, a folder failing
+transiently is retried once after the walk, then reported.
 
 ### 4.6 Folder index lifecycle
 
-Nothing on the write path maintains it; the listing is the truth; any mismatch costs a
-read per stale child. Disabled (neither read nor written) when the domain has more than
-one readable member — a body from store B must not be recorded against store A's etag.
-Deleters (`purge`, `expire`) must name it via `on_index`, since no fold yields it.
+Nothing on the write path maintains an index: the listing is the truth, and a stale entry costs one read.
+Deleters (purge) MUST delete indexes explicitly, since no tree walk yields them as children.
 
-### 4.7 Cursor debouncing (`File_store`)
+### 4.7 Corruption memo
 
-A store rate-limits writes to one name (~1/s). `bump_cursor ek`: if ≥
-`cursor_flush_interval` (2 s) since last publish ⇒ publish now; else record as pending
-(forward-only max) and arm a timer to publish the newest after the interval.
-`flush_cursor` publishes pending (serialized by a mutex, errors swallowed). State is
-global per cursor key. Every bump must be followed by a flush before exit.
-`list_journal_keys` sorts by `(ms, uuid)` (filesystem listings are unordered) and drops
-names that are not entry keys (e.g. month directories).
-
-### 4.8 Versions & retention (`Retention.expire ~cutoff`)
-
-Order: (1) trash markers older than cutoff (by listing `last_modified`) whose folder
-anchor is still in trash (or absent): delete whole subtree from `fold_tree` (incl.
-indexes) then the trash marker last; a trash entry whose folder is anchored elsewhere is
-skipped loudly. (2) Versions with timestamp < cutoff (ns); then version directory keys
-with no survivors. (3) Journal entries with ms < cutoff except the one the cursor names.
-Deletes in `Batch.per_delete` batches through the composite (all stores). Expire leaves
-unreferenced chunks; reclaiming them is GC.
-
-### 4.9 Garbage collection (mark by move)
-
-Only possible when the domain's **main** store has `local_path` (a filesystem);
-otherwise `Unsupported`. Object-store replicas/backfill targets (`deferred` members) are
-told which keys to delete. One run per machine enforced by `lockf` on
-`<root>/tsync/<D>/gc-run.lock` (plus an in-process flag).
-
-Phases (each recorded in `gc-run` *before* the step it names):
-
-1. **Opening**: `rename chunks/ → chunks.from/` (skip if `chunks.from` exists; ENOENT
-   ok). `chunks/` is not recreated; writers `ensure_parent` on put.
-2. Enumerate namespaces: directory names under `manifests/` (encoded `m/<id>`) and
-   `versions/` (`v/<id>`), sorted; skip those `≤ cursor`. Record **Marking**.
-3. **Marking**, one namespace at a time (cursor saved after each): list it (with the
-   trailing `/` — omitting it would list nothing and discard the whole store), take
-   `is_child_object` keys; per key (concurrently on `unit_slots`) read body: marker ⇒
-   nothing; manifest ⇒ its chunk keys; **unparseable ⇒ abort the run with nothing
-   discarded**. For each chunk (on `item_slots`, a separate pool to avoid nested-pool
-   deadlock) `promote` = `rename chunks.from/sss/k → chunks/sss/k` (ENOENT ⇒ mkdir parent
-   and retry once; second ENOENT ⇒ already moved). Optional `--verify`: re-hash each
-   chunk promoted *by this call*; mismatch or unreadable ⇒ put a corruption marker on
-   the main; match ⇒ delete any stale marker.
-4. **Closing** (recorded before the first shard): for each shard present in either
-   space, sorted, after cursor: list `chunks.from/sss/`, keep only chunk-key names, and
-   for each ask `head chunks/sss/k` on the main — present ⇒ re-uploaded during the run,
-   not garbage; absent ⇒ doomed. Pool doomed keys across shards; flush when ≥
-   `delete_batch` keys (default `Batch.per_delete`), or 5 s since last flush, or there
-   are no copies. Flush = for every deferred member: `discard` (`Queued` ⇒ durable
-   request under `gc-jobs/<D>/<run>/<last shard>`; `Unsupported` ⇒ `delete_multi`); then
-   delete corruption markers for the doomed keys on the main and on directly-deleting
-   copies; then unlink the shard directories in `chunks.from/`; then save cursor = last
-   shard. Copies are deleted **before** the main discards (crash ⇒ idempotent repeat,
-   never a leak).
-5. Finish: `rm -rf chunks.from/`, delete `gc-run`.
-
-**Abandoning** (`gc --abort` or `keep`): every shard in `chunks.from/` is carried back:
-if the surviving shard dir doesn't exist, rename the whole directory; else choose the
-cheaper of pushing the few surviving chunks down then renaming (cost `k+1`) vs moving
-the missing ones across (`m-k`); then remove the old shard dir; cursor per shard. Once
-abandoning, a resumed run stays abandoning. Loops until `chunks.from/` has no shards.
-
-Runs are resumable at any point (budget `--budget`, `units` per step, `pause`),
-concurrency from `caps.max_concurrency` (default 8, clamped ≥1). Outstanding
-`gc-jobs` on copies are reported at start; `retry_outstanding` re-puts them to re-fire
-the bucket notification.
-
-**Writer obligation during a run**: `promote_all` over all chunk keys immediately before
-publishing a manifest. This (not the presence check) is what makes chunks skipped by the
-session memo, chunks written before the rename, and uploads in flight across the open
-survive. Promotion is idempotent and a no-op outside a run.
-
-### 4.10 Corruption memo
-
-`is_marked` lists every member's `corrupted/<D>/` (members whose `caps.verified` is false
-are skipped as `Unverified`) at most once per `ttl = 5 s`, shared per chunk prefix; a
-failed listing = nothing marked (an unreachable store must not stop uploads). `forget k`
-after a successful re-upload. Only keys of full marker shape count (a filesystem lists
-the shard directory it created).
+`is_marked` lists every member's corruption markers for the domain at most once per `corruption_ttl`
+(recommended 5 s), shared per domain. Members that do not verify chunks are skipped. A listing that
+fails counts as "nothing marked" for that member (an unreachable store must not stop uploads), and is
+reported. `forget(key)` follows a successful re-upload.
 
 ---
 
 ## 5. Interactions
 
-Depends on:
-
-- **Backend** (`Backend.S`, composite `Conf.store`, `members`, `Batched`, `Retry.classify`
-  transient/permanent, `Write_guard`, `Discard_job`, `Corruption_marker`).
-- **Cache layout / Folder_ids** (local `.tsync-dir` markers and reverse index):
-  `lookup_id`, `lookup_id_removed` (used for parent resolution so a removal under a
-  since-moved folder still reaches the store), `whereabouts`, `write`.
-- **Journal** for `folder_id()` minting, `Entry_key`, `encode/decode`.
-- **Conf** (prefixes, limits), **Io/Bounded/Syscalls/Fs/Lock/Clock** signatures,
-  `Shutdown`, `Metrics`, `Change_notice`, `Applied_entries` (Lwt File_store wrapper).
-
-Used by:
-
-- **Uploader / staged writes / import / FileProvider re-import** → `Remote.upload`,
-  `upload_chunks`, `Store.put_manifest/claim_folder/put_folder_marker`, `File_store`
-  journal writes and cursor.
-- **Checkout (mirror, pulls, reads, cache groups)** → `fetch_manifest`, `get_chunk*`,
-  `Inode_tree.find/children`, `Manifest.Group`.
-- **Sync / resync / mirror** → `Inode_tree.fold_tree` (with `refresh_index`), journal
-  listing, cursor watch.
-- **Ops**: `Gc` (Collection), `Retention` (trash, versions, journal expiry),
-  `Integrity` / `data-integrity` (anchors, disowned markers, corruption), rename.
-- **Share server** → `Layout.Identity`, `Inode_tree` read-only.
-- **Local cache** → `Manifest.of_file` on mmapped sidecars (replaced only by rename).
+- **Below**: the composite store and its members, the retry classification, the write guard, deferred
+  jobs ([06-backends.md](06-backends.md), [algorithms/replication.md](algorithms/replication.md)).
+- **Beside**: local state for folder ids and whereabouts ([data-model/local-cache.md](data-model/local-cache.md));
+  the journal for client identity and entry keys ([03-journal-sync.md](03-journal-sync.md)).
+- **Above**: the uploader and staged writes (upload, manifest store, journal writes); the read path
+  (manifests, chunks, tree find); sync and resync (tree fold, journal); whole-domain operations
+  (retention, collection, integrity, mirror, rsync, share).
 
 Main flows:
 
-- *Write a file*: FS write → staged → uploader `upload_chunks` → chunks put/deduped →
-  versions snapshot → promote_all → claim folder chain → put manifest → journal entry
-  (local log then store) → cursor bump.
-- *Open a file lazily*: path → `Folder_ids` ids (or `Inode_tree.find` one GET per
-  segment) → manifest → `pieces` → cache group → `get_chunk_range`/`get_chunk`.
-- *Resync*: `fold_tree` from `.tsync-root`, rebuild mirror markers from `Dir` entries,
-  manifests from `File` entries, index written where worth it.
+- *Write a file*: staged → `upload_chunks` → chunks put or deduplicated → version snapshot → claim the
+  folder chain → gated manifest put → journal entry → cursor bump.
+- *Open a file lazily*: path → local ids (or `find`, one read per segment) → manifest → byte ranges →
+  chunks.
+- *Resync*: `fold_tree` from the root; markers become local folders with their ids, manifests become
+  local manifests; indexes rewritten where worth it.
 
 ---
 
-## 6. Concurrency, durability & failure semantics
+## 6. Concurrency, durability and failure
 
-- **Atomicity unit = one object.** No multi-object transactions. Correctness rests on
-  orderings: chunks before manifest; `promote_all` before manifest; anchor before
-  marker; trash marker before anchor before marker delete; subtree delete before trash
-  marker delete; copies' deletes before main discard; GC phase recorded before its step.
-- **Crash during upload**: orphaned chunks (reclaimed by GC); no manifest ⇒ file not
-  visible. Crash after manifest before journal ⇒ the mirror still owes the entry
-  (uploader's job).
-- **Cancel** while manifest put is in flight ⇒ manifest deleted again (cleanup failure
-  logged, not raised).
-- **Concurrent writers to the same file**: last-writer-wins on the manifest key
-  (conflict detection lives above, in the sync layer).
-- **Concurrent folder creation**: arbitrated by `put_if_absent`; loser adopts winner's id.
-  Stores that cannot arbitrate degrade to last-writer-wins with one warning.
-- **Pools**: `chunk_slots` (max `max_chunk_buffers`, ≥1) bounds bytes in memory for all
-  uploads of a domain; `downloads` and `ranges` (each `max_downloads`); `tree reads`
-  (`max_downloads`, shared per domain prefix). Slots are taken inside the per-chunk
-  function (never hold a slot while asking for one). GC uses two pools by nesting depth.
-- **Idempotence**: chunk put (same name ⇒ same bytes), promote, discard requests (keyed
-  by run+cursor), `delete_multi` (absent ok), GC resume, claim (same id ⇒ Held).
-- **Offline**: reads fail; `Unresolved` vs `Absent` distinction avoids caching a
-  non-answer; corruption listing failure ⇒ "nothing marked"; version snapshot failures
-  swallowed (10 s deadline).
-- **Durable local state** touched here: `client-uuid`, `id-leases/`, `last-sync-<D>`
-  (tmp+rename). Session memos (dedup, corruption, GC TTL, resolved chunk size) are RAM.
+- **Atomicity unit is one object.** Correctness rests on the ordering rules of
+  [data-model/backend.md](data-model/backend.md) §4.3.
+- **Crash during upload**: orphan chunks (reclaimed by a collection); no manifest, so the file is not
+  visible. A crash after the manifest and before the journal entry is recovered by the writer's WAL.
+- **Concurrent writers to one file**: last writer wins on the manifest key; conflicts are detected in
+  the sync layer.
+- **Idempotence**: chunk put, promotion, discard requests (named by run and shard), batched deletes
+  (absent is success), collection resume, a claim of a slot already naming the claimant's id.
+- **Offline**: reads fail; `Unresolved` is never cached; a corruption listing failure reads as "nothing
+  marked"; version snapshot failures are logged and swallowed within `snapshot_deadline`.
+- **Shared in-process state** MUST be updated atomically with respect to concurrent tasks: upload index
+  allocation, the dedup and corruption memos, the per-domain registries, the run-open
+  cache, the tree-walk frontier, and the counters for entry keys, version timestamps and folder ids.
+- **Durable local state** used here: the client id, folder-id leases, pending claim confirmations
+  ([data-model/local-cache.md](data-model/local-cache.md)). Memos are memory only.
 
 ---
 
-### 6.1 Correctness that silently relies on cooperative scheduling
+## 7. Design choices and rationale
 
-The implementation runs on a single-threaded cooperative scheduler: code between two
-suspension points is never interleaved with other tasks. The following shared state is
-read-modify-written without locks and would race under preemptive threads or parallel
-workers; a rewrite with real parallelism must add atomics/locks (or confine the state to
-one thread):
-
-| State | Pattern relied on | Consequence if preempted |
+| Choice | Why | Rejected alternative |
 |---|---|---|
-| Upload worker index counter (`next` in `each_chunk`) | `i = next; next += 1` | two workers upload the same chunk index / one index skipped (manifest keeps a NUL key ⇒ publish of an invalid body) |
-| Dedup memo (hash map + clear-at-cap) | unsynchronised insert/clear/lookup | map corruption |
-| Corruption memo `marked()` | check TTL, then store the in-flight listing future and timestamp *before* awaiting, so concurrent askers share one request | duplicate listings; torn `keys`/`loaded` fields |
-| Process-wide tables keyed by prefix (pools, corruption memos, cursor states, tree-read pool) | find-or-create | two pools/memos for one domain ⇒ budget exceeded twice over |
-| Resolved chunk size cache | store the future on first call | benign duplicate capability request |
-| Cursor debouncer (`pending`, `timer_armed`, `last_published`) | forward-only max; arm-once flag | lost bump (peers never see last entry) or double timers; the publish itself is mutex-serialised |
-| GC-open cache (`order_checked`, `running`) and GC session counters/`work`/`at` | plain field updates from concurrent promote tasks | wrong counts; cursor fields torn |
-| `fold_tree` frontier (doubly linked list, `parked` table, `requests` counter) | mutated by completions of concurrent fetches | corrupted frontier ⇒ folders skipped or visited twice |
-| Journal entry-key `last_ms`, folder-id lease counter | `ms = max(now, last+1)`; `next += 1` | duplicate entry keys / duplicate folder ids (the id-lease file protects only across processes) |
-| GC in-process `held` flag | check-then-set before taking the lockf | two collections in one process step one run (loses chunks) |
-
-Not affected: `Manifest` builder `set` (disjoint byte ranges per index), and everything
-arbitrated by the store (`put_if_absent`, renames).
-
-## 7. Design choices & rationale
-
-| Choice | Why (source) | Tempting alternative rejected |
-|---|---|---|
-| Folders keyed by stable id; children by hash of leaf | rename touches one object; hashed leaf is fixed-length and filesystem-safe (`stored_key.mli`, `layout.ml`) | path-keyed objects: a folder rename would rewrite the whole subtree |
-| Folder id **claimed** via `put_if_absent`, not minted | two clients creating one dir both wrote the marker; loser's subtree silently unreachable (commit 284521fd) | local mint + plain put |
-| Anchor `.tsync-parent` inside the folder's namespace | a lost delete after a move left two markers → folder at two paths; the anchor decides (c3ae1e7c); also protects trash expiry from deleting restored folders (47 real cases) | trusting markers alone |
-| Binary manifest with fixed 33-byte keys | O(1) key access, mmap without heap for huge files; no escaping of names (`manifest.ml` header) | JSON (earlier formats); per-chunk lengths (derived instead) |
-| Name recorded in manifest body | some locations are one-way hashes (version keys, trash, escaped cache leaves) (`manifest.mli`) | — |
-| Group cache key hashes all members | first/last would alias runs of identical chunks → wrong bytes served | `"<first>-<last>"` |
-| Dedup memo bounded, cleared at cap, never pre-listed | listing scales with whole archive (`chunk_store.ml`) | listing the chunk prefix at start; LRU |
-| Corruption checked before memo | a marked chunk must be re-uploaded or bad bytes propagate to every file sharing it | presence == healthy |
-| GC marks by **rename** not hardlink | link fallback rewrote the live set on exFAT/Android/network FS; leftover space *is* the garbage, deleted by name (18e77119) | hardlink mark; reconcile by asking every copy about 4096 shards |
-| Writers never learn about GC except `promote_all` at publish | clients unaware of a run write to `chunks/` which survives | redirecting writes |
-| GC marker on main only, not through the composite | replicas would carry a marker about a run that is not theirs | composite write |
-| Copies deleted before main discard; discard requests durable before main proceeds | crash ⇒ idempotent repeat instead of permanent leak (nothing walks copies later) | reverse order |
-| Folder index validated by etag only | S3 mtimes are whole seconds; same-size rewrite invisible (f1766969) | size+mtime validation |
-| Pools keyed globally by prefix | `Remote.Make` applied per role; per-application pools admitted N× the budget | pool per functor application |
-| Separate `ranges` pool | a 128 KiB read queued behind 8×1 MiB prefetches = 6 s on a phone | one download pool |
-| Cursor debounced ≥ 2 s | stores 429 more than ~1 write/s to one name | publish every bump |
-| Snapshot + fstat check on whole-file upload | chunks must describe bytes the file held together | reading the live file |
+| Folders keyed by stable id; children by leaf hash | a move rewrites a constant number of objects; the hashed leaf is fixed-length and filesystem-safe | path-keyed objects (a folder move rewrites its subtree) |
+| Folder ids claimed with create-if-absent, then confirmed | two clients creating one folder must agree; a stale delete or an unarbitrating server must not strand a subtree | local mint and plain put |
+| Anchor inside the folder's namespace | a lost delete after a move would otherwise show a folder at two paths; also keeps expiry from deleting a restored folder | trusting markers alone |
+| Binary manifest with fixed 33-byte keys | O(1) key access, mappable without heap for huge files, no escaping | JSON; per-chunk lengths |
+| Recorded name in the manifest body | version keys and shares are one-way hashes | — |
+| Dedup memo never pre-listed | listing scales with the archive | pre-listing |
+| Corruption checked before the memo | a marked chunk must be re-sent, or bad bytes spread to every file sharing it | presence means healthy |
+| Folder index validated by entity tag only | object stores report whole seconds; a same-size rewrite within a second is invisible to size and time | size and time validation |
+| Range reads never wait behind prefetches | a small read queued behind whole-chunk prefetches stalls on slow links | one queue for all downloads |
+| Snapshot and change check on whole-file upload | the chunks must describe bytes the file held together | reading the live file |
 
 ---
 
-## 8. Invariants the tests pin down
+## 8. Conformance
 
-- `tests/unit/stored_key` (snapshot): root/trash ids; `img.jpg` under
-  `9f3a1c0428b6d5e7` ⇒ `9f3a1c0428b6d5e7/066843ea47b80079-e0e3d2bb9b72c14d`; same name ⇒
-  same key; index key `…/.tsync-index`; listing classification (child vs index vs
-  namespace vs temp file).
-- `tests/unit/layout`: chunk shard path `abc/<key>`, key recoverable by basename, short
-  key under `_`; journal month shard incl. year boundary, ordering preserved; entry-key
-  parsing rejects month dirs/short/non-numeric/missing uuid; corruption `marker_key` —
-  a marker earns none, `chunks.from` none, a manifest none, empty domain none, shard dir
-  is not a marker; discard request body round trips (pinned against the bucket's Python).
-- `tests/unit/folder_index` (snapshot): no index ⇒ 3 child reads + 1 index write;
-  indexed ⇒ 1 index read, 0 child reads; one child rewritten ⇒ 1+1 reads and rewrite;
-  a reader that may not write never writes; two readable stores ⇒ index neither read
-  nor written.
-- `tests/unit/tree_children`: empty namespace listed as dir key yields no children;
-  classification by body; unusable reported once not raised, `Fail` skips
-  unclassifiable too; one unreadable object doesn't cost siblings under `Skip`, `Fail`
-  refuses the folder; `fold_tree` lists each folder once, overlapped but ≤ pool width,
-  DFS order independent of width; `list_many` batching (root alone, rest in batches),
-  omitted folders fetched singly; disowned marker skipped and reported with anchor;
-  unanchored folder listed at both places.
-- `tests/unit/tree_find`: file at root, non-ASCII two deep, folder answers its id, `[]`
-  answers itself, unknown ⇒ Missing, file has nothing under it.
-- `tests/backends/claim` (+ conformance against real stores): many clients claiming one
-  name ⇒ exactly one wins and all adopt it; later claim on taken name; free name;
-  released then reclaimed; nothing left over.
-- `tests/unit/dedup`: corrupt key ⇒ absent without consulting store; remembered key ⇒
-  present with no round trip; unknown ⇒ store asked; memo bounded and cleared at cap.
-- `tests/content/known_chunks`, `upload_fanout`, `mirror_pools`, `batch_nesting`,
-  `walk_fanout`: bounded concurrency, memo non-empty after upload.
-- `tests/content/verified_fetch`: good body 1 read; unverified path accepts mangled;
-  mangled once ⇒ reread; wrong twice ⇒ refused after exactly 2 reads.
-- `tests/content/corruption`: good upload unmarked; store reports verified; scrambled
-  body filed under its key with `computed`; marked chunk re-uploaded not deduped; good
-  write clears marker; no empty marker shard remains.
-- `tests/unit/chunk_space`: idle ⇒ one space, other never consulted; non-collectable
-  store never grows a second lookup; mid-run found in either space; promoting; reads work
-  after the discarded space is gone.
-- `tests/backends/gc_cost`: one namespace per unit; resume doesn't re-find work; closing
-  asks copies nothing but deletes; interrupted abandonment stays abandonment; many roots
-  with fewer slots than roots (no deadlock); shards skipped by cursor still swept;
-  collecting uses only `rename` on the filesystem; copies told nothing about the run.
-- `tests/backends/gc_targets`: chunk re-uploaded mid-run is not deleted off copies.
-- `tests/backends/gc_queued`: `Queued` discard returns without touching the copy; request
-  reported as outstanding; can be re-sent; once consumed, reclaimed chunk and its marker
-  gone, live chunk untouched; requests never mistaken for chunks.
-- `tests/unit/gc_job`: two runs 0.5 s apart get distinct names; request not a chunk.
-- `tests/scenario/upload`, `upload_gone`: round trip through read path; upload whose
-  staged bytes vanished publishes no entry and no manifest.
-- `tests/unit/manifest_naming`: recorded name vs key leaf across rename, escaping,
-  staged-then-renamed.
+An implementation MUST exhibit these observable properties:
 
----
-
-## 9. Open questions / inconsistencies
-
-1. **GC TOCTOU window for local writers.** `promote_all` reads the run marker *before*
-   `put_manifest`. If a run opens between that read (None) and the put, and the target
-   namespace was already marked (or is new and missed by enumeration), deduplicated
-   chunks sitting in `chunks.from/` are never promoted and are reclaimed. Small window,
-   but no lock/recheck closes it.
-2. **GC and http-proxy clients.** `promote` needs `local_path`; a client reaching the
-   main through an http-proxy has none, so `promote_all` reads the run marker through
-   the proxy and then promotes nothing. Its deduped chunks (memo or `head` via the proxy,
-   which also finds `chunks.from`) are not rescued unless the proxy server does it on
-   its side — no code for that was found under `lib/app/frontends/http_proxy`.
-3. `Manifest.int32_at` reads unsigned 32-bit into a 63-bit int, so the "negative
-   length" checks never fire on 64-bit; a count ≥ 2³¹ is accepted if the length matches.
-4. `manifest.mli` declares `recorded_name` twice (cosmetic).
-5. Versions follow folder renames but **not file renames** (grouping key includes the
-   leaf hash); after a rename the old versions appear as a "deleted file".
-6. Version snapshot is a composite `copy` that fans out to every main; version
-   timestamps are `gettimeofday*1e9` as float → ~µs resolution.
-7. `claim_folder` costs one GET per publish into a folder (acknowledged `ponytail:`).
-8. `Chunk_layout` root collisions for domains named `corrupted`/`verify-jobs`/`gc-jobs`
-   are unchecked (acknowledged).
-9. `upload_chunks` `` `Stored`` chunks bypass corruption checks (documented, deliberate).
-10. The GC lockfile is on the main's filesystem; two hosts sharing a main over a network
-    FS could both step a run (acknowledged).
-11. The folder index is written only by `refresh_index` callers and disabled for
-    multi-store domains; on those, S3/GCS resyncs stay at list + N GETs.
-12. Manifest body `name` is written with the key's leaf, but `copy_manifest` leaves the
-    old name in the body until the caller re-puts it; a reader using `recorded_name`
-    in that window sees the old name (callers are told to prefer the key's leaf).
-
----
-
-
----
-
-OCaml implementation notes for this subsystem: [ocaml/02-remote-model.md](ocaml/02-remote-model.md).
+- **Key spellings.** The digests of §2.1 match the test vectors; `img.jpg` under folder
+  `9f3a1c0428b6d5e7` is `…/9f3a1c0428b6d5e7/066843ea47b80079-e0e3d2bb9b72c14d`; equal names give equal
+  keys under any folder; listing classification separates children, indexes and anchors.
+- **Layout.** A chunk key maps to shard `sss` and back by basename; a corruption marker key exists only for a surviving-space chunk; discard and verify job keys
+  parse as §2.13 and are never mistaken for chunks; a discard body round-trips between client and
+  bucket function.
+- **Manifest.** The example of §2.6 is produced byte for byte; every malformation of §2.6 is rejected;
+  an empty regular file names the empty chunk once; a symlink names none.
+- **Run record and generation readers.** A closing run record without `generation` makes G read as odd
+  while it is present; an absent generation object reads as 0 and an unparseable one as odd; phase
+  `reconciling` reads as closing; a share with unknown fields is served; a `.data` object directly under
+  the share tree is never read as a share.
+- **Folder index.** Without an index: one read per child and one index write; with a valid index: one
+  index read and no child reads; one child rewritten: one extra read and a rewrite; a reader not allowed
+  to write never writes; a domain with two readable members neither reads nor writes one.
+- **Tree reads.** An empty namespace yields no children; classification is by body; one unreadable child
+  does not cost its siblings under `Skip` and fails the folder under `Fail`; a fold lists each folder
+  once, in a visit order independent of prefetching; batched listings are used
+  and omitted folders fetched singly; a disowned marker is skipped and reported; an unanchored folder is
+  listed where its marker says.
+- **Uploads.** A marked chunk is re-sent rather than deduplicated; a remembered chunk is not re-checked
+  while the memo may be relied on; an upload whose source changed or vanished publishes
+  nothing; a `MissingChunks` refusal leads to a re-send and a successful publish.
+- **Deduplication.** Identical bytes are one chunk object whatever the file or name; re-uploading
+  identical content adds no chunk object; zero-filled chunks share one key; a 0-byte file names the
+  empty chunk once. Identical content yields identical `h1`/`h2`; the `h1` of an empty regular file is
+  `06b4b04bae2346bf`.
+- **Recorded name.** A written manifest records the leaf of the key it is written to, whatever name the
+  caller supplied.
+- **Folder moves.** Moving a folder changes no key of any object under it; the folder is listed exactly
+  once afterwards.
+- **Versions.** With versioning on, each overwrite and each delete leaves the prior manifest body as a
+  version, and a rename leaves a version under the old name.
+- **Side trees.** A run started at `1755300000.5` names its discard jobs under `1755300000500`; two runs
+  0.5 s apart get different names; domain names containing spaces work; a job key with a missing run, a
+  bad shard, a trailing `/` or an empty domain is refused.
+- **Chunk size and source changes.** New files use the configured chunk size, else the store's
+  advertised one, else 8 MiB; a source modified during a whole-file upload publishes nothing.
+- **Corruption markers.** A verifying store files a marker recording the computed digest when a body
+  does not hash to its key; a good rewrite clears it; a corruption listing distinguishes a store that
+  found nothing from a store nothing checks.
+- **Verified fetch.** A good body costs one read; a body mangled once is re-read; a body wrong twice is
+  refused after exactly two reads.

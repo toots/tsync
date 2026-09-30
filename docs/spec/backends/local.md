@@ -1,205 +1,161 @@
-# Backend driver: `local` (a directory on this machine, or a mounted NAS)
+# Backend driver: `local` (a directory on this machine, or a mounted network filesystem)
 
-Implements [the store contract](../06-backends.md) (§3.1) over a POSIX filesystem. This file says how each contract operation is realised and where the driver is weaker or stronger than the contract; it does not restate the contract.
+How the `local` driver realises [the store contract](../06-backends.md) over a POSIX filesystem, and what it relies on from the filesystem.
 
-Code: `lib/backends/drivers/local/local_backend.ml` (driver, a functor over the I/O seams), `lib/lwt/backends/drivers/local/local_backend_lwt.ml` (instance + registration), `lib/local/io/{filename,fs}.ml` (temp names, `mkdir -p`, `rm -rf`), `lib/local/device/` (queue depth, reflink clone, directory watch), `lib/core/bigstring.ml` (`map_file`).
+Implementation notes: [../ocaml/backends/local.md](../ocaml/backends/local.md).
 
 ---
 
 ## 1. Role
 
-- The only driver with `local_path = Some root`: the store *is* a tree, and callers may treat it as one (rename, rmdir, statvfs). That grant is what makes it the only store a chunk collection can run on (§9).
-- The only driver with `fast_read = true`: reading a whole cache chunk costs about what a range does, so the chunk cache fetches whole groups from it.
-- Linkless: no `link` (network link name), `health = always_up`, not wrapped in the counting/admission wrapper (§3.2 of the contract: stores with `local_path` are neither counted nor gated), no uplink probe.
-- No retry ladder of its own. Every call is one attempt; the kind attached to a failure (§6) is for the caller (composite fallthrough, deferred target, uploader).
+- The only driver with a `local_path`: the store is a tree, and in-process code may treat it as one (collection by rename, disk-space reports). That grant is what makes it the only store a collection can run on ([algorithms/gc.md](../algorithms/gc.md)).
+- It hosts the collection's **reference gate** and the lock file's host-level locks for the main it serves (§6).
+- The only driver with `fast_read = true`: reading a whole cache chunk costs about what a range does.
+- Linkless: no `link` field, no admission, not counted, not probed by the uplink governor.
+- It has a [breaker cell (01 §8)](../01-core.md#8-health-breaker), fed only by link-kind failures (§10). A local disk never trips it. A network mount that stops answering does, so reads fail over to a replica.
+- No retry ladder of its own. Every call is one attempt, and the kind it fails with is for the caller.
 
 ## 2. Configuration
 
-Backend object in a domain's `backends` list:
+The backend object's generic fields are in [05 §2.1](../05-ops-config.md#21-schema-and-validation). Driver fields:
 
-| JSON field | Type | Default | Meaning |
+| Field | Type | Default | Meaning |
 |---|---|---|---|
-| `type` | `"local"` | — | selects this driver |
-| `name`, `role` | string | — | generic (see contract §2.5) |
-| `path` | string | **required** | store root directory. Missing → `Failure "local backend: missing field: path"`. Used verbatim: not expanded (`~`), not made absolute, not required to exist (directories are created on first write). |
-| `verifyWrites` | bool | `true` | read back every chunk after writing it and file/clear its corruption marker (§7). Accepts JSON bool, or strings `true/1/yes/on`, `false/0/no/off` (case-insensitive); anything else → default. |
-| `link` | — | — | **refused**: `backend <name>: "link" names a link, and a local store has none`. |
+| `path` | string | required | The store root. It MUST be absolute, or start with `~/` (expanded to the user's home). A relative path is refused, because processes with different working directories would otherwise open different stores. The root need not exist: directories are created on the first write. |
+| `verifyWrites` | bool | `true` | Read back every chunk after writing it, and file or clear its corruption marker (§9). JSON booleans and the strings `true/1/yes/on`, `false/0/no/off` (any case) are accepted; any other value MUST be refused. |
+| `link` | — | — | Refused: `backend <name>: "link" names a link, and a local store has none`. |
 
-Unknown fields are refused by the generic config parser (driver spec lists `path`, `verifyWrites`). Registry field spec: `path` (String, label "Local path", no default), `verifyWrites` (Bool, default `"true"`). Nothing is secret.
+Nothing is secret. Building a store touches no file.
 
-Instance construction (`make ~verify_writes ~root`) allocates, per instance: a walk pool of 64 slots (§8), a lazily-created scratch directory, a lazily-probed device concurrency, and a watcher table (§6). Nothing touches the disk at construction.
+## 3. Layout
 
-## 3. On-disk layout
-
-- Key `k` ↔ file `<root>/<k>` (`resolve "" = root`, else `root ^ "/" ^ k`). Keys are used as relative paths byte-for-byte; `/` is the separator. No escaping.
-- Dir-marker keys (ending `/`) ↔ real directories. There is no zero-byte object for them.
-- Staging names: `<dir of target>/.tsync-tmp-<pid>-<seq>.tmp`, `seq` a per-process counter (unique per call, so two concurrent writers of one key never share a temp file). A name is a temp name iff it starts with `.tsync-tmp-` **and** ends with `.tmp` (prefix is the discriminator; a pure `.tmp` suffix test once hid users' `.syncthing.*.tmp`). `pid` lets a sweeper tell a crashed writer's leftover from a live one.
-- Read scratch directory: `<root>/.tsync-tmp-scratch.tmp`, mode 0700, created on first read (`EEXIST` fine; any other failure → no scratch, clones stage beside the object). It is itself a temp name, so listings hide it.
-- GC artefacts that live beside the layout because the store is a tree (owned by GC, see §9): `<root>/tsync/<domain>/chunks.from/` (from-space of an open collection) and a lock file `<root>/<gc-run marker key>.lock`.
-
-Consequence of mapping keys to paths (deviation from an object store): the key space must be prefix-free between objects and directories. Key `a` and key `a/b` cannot coexist (`ENOTDIR`/`EISDIR` on write → Permanent). tsync's layout never needs both.
+- The object under key `k` is the regular file `<root>/<k>`, with `/` as the separator and no escaping. Directories exist only to hold files; they are created as needed and hold no object. No key names a directory ([06 §2.1](../06-backends.md#21-keys-and-prefixes)).
+- **Confinement** is [security §5.3](../algorithms/security-model.md#53-filesystem-mapped-stores): keys are checked lexically before any system call, and resolution never follows a symbolic link at or below the root. The root itself may be reached through a symbolic link. This holds whoever supplied the key: a peer through the http-proxy, a listing of another store, a job record.
+- **Temporary names** follow the one grammar of [01 §2.9](../01-core.md#29-temporary-and-reserved-local-names): every name that starts with `.tsync-tmp-` and ends with `.tmp`, file or directory, is temporary. Such names are never listed, read or reported, and are swept by age (§7). Readers SHOULD accept the pid form `.tsync-tmp-<pid>-<seq>.tmp` and a scratch directory `.tsync-tmp-scratch.tmp` at the root (meaning temporaries like any other); writers MUST NOT produce them in a store. A new temporary file uses the random form, in the directory of the target, created with exclusive create, so two writers, on one host or on two hosts sharing a mount, never share one.
+- **Files that are not store objects** live beside the layout: the collection's lock file `tsync/<d>/gc-run.lock` ([gc §5.4](../algorithms/gc.md#54-the-collection-interlock)), which may exist before any collection ran (the gate creates it). Listings omit it.
+- **Filesystem limit.** The key space must be prefix-free between objects and directories: keys `a` and `a/b` cannot both hold objects. A write that meets this fails REFUSED. tsync's layout never needs both.
 
 ## 4. Primitives
 
-**stage(tmp, body)**: `open(tmp, O_WRONLY|O_CREAT, 0644)`; `pwrite` the whole body from offset 0 in a loop (a 0-byte write mid-body → failure "short write at offset N"); **`fsync(fd)`**; `close`. Opened for writing even when the body is empty (Windows refuses to flush a read-only handle; and a zero-length write would otherwise create nothing).
+**Durable write** `write(path, body)`:
 
-**write(path, body)**: `mkdir -p dirname(path)` (0755, `EEXIST` tolerated, walks up with `stat`); `tmp = temp_path(path)`; `stage(tmp, body)`; `rename(tmp, path)`. On failure the temp file is **not** removed (§12).
+1. Create missing parent directories. Each directory created is made durable by fsyncing its parent.
+2. Create a temporary name exclusively, write the whole body, and fsync the file.
+3. Rename the temporary name onto `path`, and fsync `path`'s directory.
 
-Why fsync before rename: rename/link commit to the filesystem journal ahead of delayed allocation; without the flush a crash can leave the final name on an empty file. The containing directory is **not** fsynced, so a crash after `put` returns can lose the rename (the key reads as its previous version or absent) but never exposes a truncated body.
+If any step fails, the temporary file is unlinked (best effort) and the failure is raised. If a concurrent removal of an empty parent makes step 2 or 3 fail with ENOENT, the write is retried once from step 1.
 
-**map(path, offset=0, len=size)**: `len = 0` → empty buffer without opening. Otherwise take a read descriptor on a *snapshot* and `mmap(PROT_READ, MAP_SHARED)` `[offset, offset+len)`:
-- Snapshot = copy-on-write clone: Linux `FICLONE` ioctl from `src` onto a fresh `O_EXCL 0600` temp file in the scratch directory (or beside `src` when no scratch is given), which is then opened read-only and unlinked at once; macOS `clonefile()`. The clone shares extents, costs no space or time proportional to the file, and is immune to later writes to `src`.
-- Where the filesystem cannot clone (ext4, tmpfs, NFS, SMB, ZFS-without-reflink…) the file itself is opened read-only and mapped. The per-directory answer is memoised for the process (one failed attempt per directory); a single warning is logged per process.
-- The descriptor is closed right after mapping; the mapping keeps the inode alive.
-- Correctness does **not** depend on the clone: a published name is only ever replaced by rename (a new inode) and never written through or truncated, so a mapping of the old inode keeps serving the bytes it was made from.
-- Bodies never land on the process heap; bytes are read when pages are touched.
+Why each fsync: the file's fsync keeps a crash from leaving the final name on an empty or torn file (rename can reach the journal before delayed allocation writes the data). The directory's fsync makes the name itself survive, so an acknowledged put, claim, copy or delete is still there after power loss (P2).
 
-**claim(path, body)**: `mkdir -p dirname`; `stage(tmp, body)`; `link(tmp, path)`; always `unlink(tmp)` afterwards (errors ignored). `link` succeeds → this caller won; `EEXIST` → map the existing file and return it. `link`, not `rename`, because rename replaces silently. The winner's body is complete the instant its name appears.
+**Claim** `claim(path, body)`:
 
-**prune_marker_dirs(marker_path)**: `rmdir` the marker's parent, grandparent and great-grandparent (`<shard>/`, `<domain>/`, `corrupted/`), each failure ignored (non-empty or concurrently recreated). Keeps an emptied shard from listing as a stray entry.
+1. Stage a temporary file as in the durable write.
+2. `link(temp, path)`: success → won. EEXIST → read the holder.
+3. Where `link` is refused (`EPERM`, `EOPNOTSUPP`, `EMLINK`), rename without replacement (`RENAME_NOREPLACE`, `RENAME_EXCL`) where the platform offers it, with EEXIST meaning the same.
+4. Where neither exists, the claim fails REFUSED. There is no fallback.
+5. Unlink the temporary name, then fsync the directory.
+
+`link` and rename-without-replacement are used, never rename, because rename replaces silently. The winner's body is complete the instant its name appears.
+
+**Read.** A published name is only ever replaced by rename (a new inode), never written through or truncated, so the bytes of an opened file never change under a reader. A read SHOULD therefore hand out an immutable mapping of the file (P6); no snapshot is needed, since nothing truncates a store file ([01 §12](../01-core.md#12-reading-data-that-may-change-under-the-reader)). A read MAY use positioned reads into a buffer instead. Either way a read that raced a replacement returns the old body or the new, whole.
 
 ## 5. Operations
 
 | Contract op | Realisation |
 |---|---|
-| `put k body` | dir key → `mkdir -p <root>/<k>` (body ignored). Else `write(path, body)`, then if `verifyWrites` → `verify_written k` (§7). |
-| `put_if_absent k body` | `claim(path, body)`. Returns the argument buffer itself on a win, the mapped existing body on `EEXIST`. The existing body is mapped **without** the scratch directory (a clone, if any, is staged beside the claim key). |
-| `get k` | `map(<root>/<k>)` via scratch. `ENOENT` → Permanent failure (contract: missing = failure). |
-| `get_opt k` | as `get`; `ENOENT` → `None`. |
-| `get_range k off len` | `stat` → `size`; `n = max 0 (min len (size − off))`; `map(path, off, n)` via scratch. Never more than `len`; short only at EOF; `off ≥ size` → empty buffer (not `None`). `ENOENT` → `None`. Clamping is mandatory: mapping past EOF is a SIGBUS on first touch, not a short read. |
-| `head_opt k` | `stat` (follows symlinks). Directory → `{size=0; last_modified=st_mtime; etag=None}`; else `{size=st_size; last_modified=st_mtime; etag=None}`. `ENOENT` → `None`. No etag: size+mtime is all a filesystem offers (mtime has sub-second precision on most local filesystems). |
-| `delete k` | `head_opt` then `rm -rf <root>/<k>` (lstat-based, does not follow symlinks; `ENOENT` and per-entry unlink/rmdir errors swallowed); if `k` is a corruption-marker key → `prune_marker_dirs`. Returns `head_opt ≠ None`. |
-| `delete_multi ks` | `delete` each, sequentially, in order. Absent keys succeed. |
-| `copy src dst` | src dir key → `mkdir -p <root>/<dst>` (children are not copied). Else `link(src, dst)` first (no parent check: the stat is a third to half the cost on bulk paths). `EEXIST` → success (destination kept as is). `ENOENT` (first time) → `mkdir -p dirname(dst)`, retry once; second `ENOENT` is the source's. `EXDEV`, `EMLINK`, `EPERM`, `EOPNOTSUPP` → body copy: `map(src)` (no scratch) then `write(dst)`. Other errno → failure named for the **source** key (link's errno speaks for the destination, which misleads). Hard links are safe because names are never written through. |
-| `list_prefix ?max_keys p` | Level-order walk from `<root>/<p>` (§8). Emits regular files as `{key=<p-relative path>; size; mtime; etag=None}`; recurses into directories; ignores other file types (symlinks are `stat`ed, so a symlink to a file is listed as a file). Temp names are skipped (never listed, never deleted). A directory with no (non-temp) children whose key ends in `/` is emitted as its dir-marker key `{size=0; last_modified=0}` — matching S3's zero-byte marker (the root of a prefix without trailing `/` is not). `ENOENT` anywhere → skipped. `ENOTDIR` on the prefix itself → the prefix is a file: emit it as one entry. Result sorted by key, then truncated to `max_keys` (no early stop). |
-| `watch k last_seen` | §6. |
-| `get_many`, `list_many` | `None` (filesystem reads are not round trips; the generic batcher fans `get_opt` out). |
-| `verify_all` | `Unsupported` — every write is already checked; `tsync gc --verify` is the sweep. |
-| `discard` | `Unsupported` — GC on a local main already deletes on the machine it runs on (§9). |
-| `capabilities _` | `{share_url=None; chunk_size=None; max_concurrency=Device.max_concurrency(root); verified=verifyWrites}`; the prefix is ignored. |
-| `fast_read` | `true`. |
-| `local_path` | `Some root`. |
-| `health` | `always_up`. |
+| `put(k, b)` | The gate (§6) for a manifest or version key; then `write(<root>/<k>, b)`; then, with `verifyWrites`, the check of §9. |
+| `put_if_absent(k, b)` | `claim`. A win answers `Won`. EEXIST reads the holder: `Won` if it is byte-identical to `b` (a retransmitted link on a network filesystem can answer EEXIST to the winner), `Held(holder)` otherwise. If the holder vanished before it was read, the claim is repeated ([06 §3.3](../06-backends.md#33-put_if_absent)). |
+| `get(k)` / `get_opt(k)` | Read the whole file. ENOENT → ABSENT / `none`. |
+| `get_range(k, off, len)` | Read `[off, min(off + len, size))`; `off ≥ size` → empty body; ENOENT → `none`. |
+| `head_opt(k)` | Status without following a symbolic link. A regular file → `{size; last_modified = mtime at full resolution; etag = none}`. ENOENT → `none`. |
+| `delete(k)` | Unlink the regular file, fsync its directory, answer `true`. ENOENT → `false`. A directory is never removed through `delete`. |
+| `delete_multi(ks)` | Unlink each regular file in order, then fsync each distinct parent directory once, then return. Absent keys succeed. The first failure stops the call and is raised with its kind ([06 §3.4](../06-backends.md#34-delete-and-delete_multi)). |
+| `copy(src, dst)` | The gate (§6) when `dst` is a manifest or version key. `src` absent → ABSENT. Otherwise `link(src, temp)` in `dst`'s directory, `rename(temp, dst)`, fsync the directory, replacing any previous `dst`. Where a hard link is refused (`EXDEV`, `EMLINK`, `EPERM`, `EOPNOTSUPP`), read `src` and `write(dst)`. Hard links are safe because names are never written through. |
+| `list_prefix(p, max)` | A walk of `<root>/<p>` that reports every regular file whose relative name is a valid key, with `{size; mtime; etag = none}`. It omits temporary names, the files of §3 that are not store objects, directories, symbolic links and other file types. It descends into directories and never follows symbolic links. ENOENT on the prefix → an empty list. Sorted by key, truncated to `max`. |
+| `watch(k, last_seen)` | §8. |
+| `get_many`, `list_many` | Not declared: filesystem reads are not round trips. |
+| `verify_all` | `Unsupported`. Every write is already checked; whole-store checking is the client-side sweep ([05-ops-config.md](../05-ops-config.md)). |
+| `discard` | `Unsupported`. A collection on a local main deletes on the machine it runs on. |
+| `capabilities(_)` | `{share_url = none; chunk_size = none; max_concurrency = an implementation's estimate of the device's useful concurrency, or none; verified = verifyWrites}`. |
+| `fast_read` / `local_path` | `true` / the root. |
 
-Prefix/key semantics note: `list_prefix p` resolves `p` as a path, so it matches only whole path components (`tsync/d/chunks/ab` lists the directory `ab`, not keys starting `ab…`). tsync only lists directory-shaped prefixes (ending `/`) or single files, where this equals object-store semantics.
+## 6. The collection's gate and locks
 
-## 6. Watch (cursor wait)
+The driver of a collectable main hosts the interlock of [gc §5.4](../algorithms/gc.md#54-the-collection-interlock), so no writer can bypass it:
 
-- Watches `dirname(<root>/<k>)`, never the object: writes rename a new inode into place, so a watch on the name would follow an inode unlinked a moment later.
-- One watcher per directory per store instance, opened on first `watch` and kept for the process (never closed; the set is bounded by the domains served). A failed open (directory missing, platform without support) is not cached, so a later call retries.
-- Linux: `inotify_init1(IN_NONBLOCK|IN_CLOEXEC)` + `inotify_add_watch(dir, IN_CREATE|IN_MOVED_TO|IN_CLOSE_WRITE)` (close-write rather than modify: one wake per written file, not per `write()`). macOS: `open(dir, O_EVTONLY|O_CLOEXEC)` + `kqueue` `EVFILT_VNODE` with `EV_ADD|EV_CLEAR` and `NOTE_WRITE|NOTE_LINK|NOTE_DELETE|NOTE_RENAME` (`EV_CLEAR` or the queue stays readable forever). Other platforms: no watcher.
-- `wait` = wait for the descriptor to become readable, then drain (≤ 64 non-blocking read/`kevent` passes, `EINTR` retried). The drain reports "changed" if any event is nameless or names a non-temp entry; if every event named a temp name (Linux only; kqueue events carry no names) the wait resumes. This filter exists because a read's own reflink staging used to wake the reader, which read again — an unbounded loop that ended in OOM. The scratch directory (§3) removes the cause on every platform; the filter is the belt.
-- `watch` = race the wait against `default_watch_interval` (2 s). Timeout → return. Any other failure of the wait → sleep 2 s, return. No watcher → sleep 2 s, return. `last_seen` is ignored: the caller always re-reads and compares.
-- Non-recursive: only direct children of the cursor's directory (`tsync/<domain>/`) wake it — the cursor itself, the GC run marker, the lock file, a new subdirectory. Spurious wakes are allowed by the contract.
-- If the watched directory is deleted and recreated, the cached watcher goes silent (inotify `IN_IGNORED` / kqueue `NOTE_DELETE`): the store degrades to 2 s polling for the rest of the process. Never late beyond the cap, so the contract holds.
+- Every `put` or `copy` whose destination is in the manifest area or the version area passes the **reference gate** before it writes: shared publish lock, promotion of the named chunks when the run record is present, a presence check of every named chunk, and a refusal naming the missing chunks ([gc §5.4](../algorithms/gc.md#54-the-collection-interlock)).
+- The lock file carries the **run lock** and the **publish lock** as host-level locks. The driver offers no exclusion across hosts beyond what the filesystem's lock manager provides (§12).
 
-## 7. Verified writes and corruption markers
+## 7. Orphaned temporary files
 
-Enabled by `verifyWrites` (default on). Performed inside `put`, after the rename, only for keys that have a corruption-marker key (chunk keys under `tsync/<domain>/chunks/<shard>/<h1>-<h2>`; not `chunks.from/`, not manifests, not markers). Covers every way a chunk lands on this store (uploader, http-proxy frontend PUTs, mirror, repair, deferred forwards) because it sits in the driver.
+A crash between creating a temporary file and its rename or unlink leaves it behind. Temporary names are never listed, so they cost only space.
 
-1. Map the just-written file (**read back**; never hash the argument, which may alias a buffer its owner has reused — hashing it would agree with itself).
-2. Read fails (exception of any kind, e.g. `EIO`) → write marker `{"reason": "<exception text>", "at": <now>}`.
-3. `key_of_body(read) = leaf` → `unlink(marker)`; if that removed something → `prune_marker_dirs`.
-4. Otherwise → write marker `{"computed": "<h1>-<h2>", "size": <read length>, "at": <now>}`.
-5. Verification never fails the `put` (the bytes are already published; a raised error would lose the finding). A failure *writing the marker* does propagate.
+- Any walk of a directory by this driver MAY remove the temporary names it meets whose modification time is older than TEMP_GRACE (recommended 24 h), a temporary directory with its content.
+- The domain owner's maintenance SHOULD walk each local store's domain prefix for them at least every TEMP_SWEEP_INTERVAL (recommended 7 days).
+- TEMP_GRACE is measured on file times and is far longer than any write takes, so a live writer's file is never taken, whichever host it runs on.
 
-Marker writes use `write` (temp + fsync + rename) and are not themselves verified. Order is verify-then-act (cloud side is act-then-verify because its events are at-least-once and unordered; here the writer is local and the rename already happened).
+## 8. Watch
 
-Strength: the read-back usually comes from the page cache, so it proves the bytes survived tsync's own pipeline and the filesystem write path, not that the medium holds them. Media rot is found by `tsync gc --verify` (reads on keep) or a later read. `capabilities.verified = verifyWrites`, so an operator who turns it off makes "no markers" read as "nobody looked", not "clean".
+- The watch is a directory watch ([01 §14](../01-core.md#14-directory-watch)) on the key's parent directory, never on the object: writes rename a new inode into place, so a watch on the name would follow an inode unlinked a moment later.
+- A watcher whose directory was removed is dropped and reopened on the next call. A directory that cannot be watched is retried on the next call.
+- **Order.** Arm the watcher first, then read the key. If its token differs from `last_seen`, return at once. Otherwise wait for an event or WATCH_INTERVAL, whichever comes first.
+- On a network filesystem, notifications report only this host's changes. The watch then sleeps WATCH_INTERVAL after the read, without a notification.
+- Spurious wakes are allowed.
 
-`delete` of a marker key prunes its directories; GC deletes a chunk's marker with the chunk.
+## 9. Verified writes and corruption markers
 
-## 8. Concurrency and memory
+With `verifyWrites` (the default), `put` of a key that has a corruption-marker key (a chunk under `tsync/<d>/chunks/<shard>/`; not the collection's second space, not manifests, not markers) checks what it wrote. The check sits in the driver, so it covers every way a chunk lands on this store (uploader, http-proxy peers, mirror, repair, copy forwards).
 
-- `list_prefix`: breadth-first by level. Per level, 8 directory workers pull directories from a shared list; within a directory, 8 entry workers (`64 / 8`) pull names from a shared list; each `stat` holds one slot of the per-store 64-slot walk pool, **only around the stat** (a pool held across recursion deadlocks: outer levels hold every slot while inner ones wait). Workers pulling from a list, not a task per entry: a task per entry once kept ~100 MB of pending tasks alive for 500k manifests. Peak concurrent stats per store: 64 across all concurrent walks.
-- `max_concurrency` (reported in caps, read by GC for its per-step pools with default 8 when `None`, and by the http-proxy frontend to size its listener): probed once per store, lazily, on first `capabilities`.
-  - Linux: find the mount covering `root` in `/proc/self/mountinfo` (longest mount-point prefix; field 3 = `major:minor`); `/sys/dev/block/<maj:min>` (if it has a `partition` file, use its parent disk); read `device/queue_depth`, else `queue/nr_requests`; `d > 0` → `max(2, min(64, 4·d))`, else `None`. USB Bulk-Only enclosures report 1 → 4.
-  - macOS: `df -P <root>` → device node; `diskutil info <dev>` → `Solid State` / `Protocol` / `Device Location`: HDD on USB/FireWire → 4; other HDD → 8; SSD on USB → 16; other SSD → 64; unknown but external → 8; else `None`. Any subprocess failure → `None`.
-- No per-store limit on concurrent `put`/`get`: callers' pools bound them. Local stores are exempt from the uplink gate.
-- Memory: bodies are mmapped (off-heap, paged on demand); `put` writes the caller's buffer directly. `list_prefix` materialises the full listing (sorted) before returning.
+1. Read the just-written file back. Never hash the argument, which may alias a buffer its owner has reused, and would agree with itself.
+2. The read fails → write the marker with `reason` and `at` ([02 §2.13](../02-remote-model.md#213-corruption-marker-verify-job-discard-job)).
+3. The bytes hash to the key's leaf → if a marker exists, delete it.
+4. Otherwise → write the marker with `computed`, `size` and `at`.
 
-## 9. GC and discard through `local_path`
+- A mismatch never fails the `put`: the bytes are already published, and a raised error would lose the finding. A failure to write or delete the marker fails the `put` with its kind, and the caller's repeat redoes the write and the check.
+- Markers are written with the durable write and are not themselves checked.
+- The order is check-then-act. The cloud side acts first because its events are at-least-once and unordered; here the writer is local and the rename already happened.
+- **Strength.** The read-back usually comes from the page cache: it proves the bytes survived tsync's pipeline and the filesystem's write path, not that the medium holds them. Media decay is found by the whole-store sweep or a later read. `verified = verifyWrites`, so with checking off, "no markers" reads as "nobody looked", not "clean".
 
-`discard` is `Unsupported`; instead GC requires the **main** to have `local_path` and operates on the tree directly (full algorithm: [05-ops-config §4.9](../05-ops-config.md)). What it relies on from this driver/filesystem:
+## 10. Failure kinds
 
-- Opening a run: `rename(<root>/tsync/<d>/chunks, <root>/tsync/<d>/chunks.from)` — atomic, same parent. `chunks/` is not recreated; every writer's `mkdir -p` makes it reappear.
-- Marking (promotion): per live chunk, `rename(chunks.from/<shard>/<k>, chunks/<shard>/<k>)` (parent made on `ENOENT`, tried once). Moves, never copies: a filesystem without hard links would otherwise rewrite the whole live set (test-pinned: 0 `copy` calls).
-- Abandoning: whole-shard `rename(chunks.from/<shard>, chunks/<shard>)` when the destination is absent/empty; `ENOTEMPTY|EEXIST|ENOTDIR|EISDIR` → per-chunk moves.
-- Closing: per shard, `unlink` each remaining name in `chunks.from/<shard>/` then `rmdir`. Copies (replicas/backfills) get `delete_multi` first.
-- Mutual exclusion: `lockf(F_TLOCK)` on `<root>/<gc-run key>.lock`, released by the kernel on death.
-- Reads during a run look in `chunks/` then `chunks.from/` (the collection layer asks for both keys).
-- Other `local_path` users: disk-space reports (`statvfs(root)`), integrity's namespace listing (`readdir` of the domain prefix), the FUSE frontend's hidden files.
+Every errno is classified by [failure-model §4.1](../algorithms/failure-model.md#41-local-filesystem-errors), the same on every operation. Network-filesystem errnos (a server away) are TRANSIENT/LINK and feed the breaker cell. A failure names the operation, the key, and the system's error text.
 
-## 10. Error mapping
+**Bounded calls.** A blocking filesystem call that has not returned within LOCAL_STALL_TIMEOUT (recommended 60 s) fails TRANSIENT/LINK, and never holds up unrelated work while it hangs. A hung network mount thus costs the caller a bounded wait and trips the store's breaker cell.
 
-Wrapped as `Retry.Failed {kind; op = "local <op>"; detail = "<key>: <strerror>"}` in `put_if_absent`, `get`, `get_opt`, `get_range`, `copy` (link path):
+## 11. What the driver relies on from the filesystem
 
-| errno | kind |
-|---|---|
-| `EIO ENOSPC EMFILE ENFILE EAGAIN EINTR EBUSY` | Transient (clears when the condition does) |
-| anything else (`EACCES EPERM EROFS ENOTDIR EISDIR ENAMETOOLONG ELOOP ESTALE …`) | Permanent (someone has to act) |
+- `rename` atomically replaces its target within one directory, and `link` (or rename-without-replacement) fails with EEXIST atomically. These make `put` last-writer-wins without partial reads, and `put_if_absent` a real precondition.
+- An open or mapped file stays readable after its name is unlinked or replaced.
+- A name renamed into place is visible to the next status or directory read on the same host.
+- fsync of a file and of a directory makes data and names durable.
 
-Not wrapped (raw `Unix_error` or `Failure` escapes): `put` (including `mkdir -p`, stage, rename, marker write), `head_opt` (non-`ENOENT`), `delete`, `delete_multi`, `list_prefix` (non-`ENOENT`/`ENOTDIR`), `copy`'s body-copy fallback, "short write". The generic classifier treats unrecognised exceptions as **Transient**, so e.g. `EACCES` on `put` is Transient while `EACCES` on `get` is Permanent.
+## 12. Network filesystems (NFS, SMB, sshfs and other FUSE mounts)
 
-Absence: `get` → Permanent via `ENOENT`; `get_opt`/`get_range`/`head_opt` → `None`.
-
-## 11. Consistency the driver relies on from the filesystem
-
-- `rename(2)` atomically replaces the target within one directory; `link(2)` fails `EEXIST` atomically. Both are what make `put` last-writer-wins without partial reads and `put_if_absent` a real precondition.
-- Unlinked-but-open/mapped inodes stay readable (POSIX). This is what makes mmapped reads safe across GC and replacement.
-- Directory reads are consistent enough that a just-renamed name is visible to the next `stat`/`readdir` on the same host (read-your-writes on one machine).
-- Writes are durable in order (body before name), not durable on return (no directory fsync).
-
-## 12. Deviations from the contract (weaker or stronger)
-
-Stronger:
-- Reads are consistent immediately after writes (no eventual consistency); listings see a write as soon as it is renamed.
-- `put_if_absent` returns the winner's complete body with no window.
-- `copy` is O(1) where links work.
-
-Weaker / different:
-- `delete` of a **dir-marker key** removes the whole subtree, not a zero-byte object. `delete` swallows per-entry unlink/rmdir errors and still reports `true` if the key existed — so `delete_multi` can "succeed" having removed nothing (e.g. `EACCES`), contrary to "delete all or raise".
-- `copy` of a dir key creates an empty directory; `copy` onto an existing destination keeps the destination (`EEXIST` → success) rather than overwriting it. Safe for content-addressed chunks; would be wrong for a mutable key.
-- `list_prefix` matches whole path components only; `max_keys` does not stop the walk early.
-- `head_opt` never has an etag; `last_modified` of a dir marker from listing is 0 but from `head_opt` is the directory's mtime.
-- Error kinds are inconsistent across ops (§10).
-- Orphaned temp files: a failed `stage`/`rename` in `put`, or a crash, leaves `.tsync-tmp-*.tmp` in the store; they are hidden from listings but nothing sweeps the store root for them (the pid-based temp sweeper walks the client's manifest mirror, not stores).
-- `watch` ignores `last_seen`.
-
-## 13. Network filesystems (NAS: NFS, SMB/CIFS, sshfs/FUSE)
-
-The driver has no NAS mode; each mechanism degrades as follows.
+A mount is a network filesystem when the system reports it so: the filesystem type on Linux, the absence of the local-mount flag on macOS. There, the driver behaves as follows:
 
 | Mechanism | On a network mount |
 |---|---|
-| Watch | inotify/kqueue deliver only this host's own changes; a writer on another machine never raises an event, so the cursor wait is plain 2 s polling. Local writers still wake at once. |
-| `max_concurrency` | Linux: network/FUSE mounts have anonymous `0:N` device numbers with no `/sys/dev/block` entry → `None` (GC falls back to 8). macOS: `diskutil` does not describe an SMB/NFS source → `None` unless flagged external. |
-| Reflink clone | Unsupported → the file itself is mapped (one warning per process). |
-| `copy` | Hard links: NFS supports them; SMB often answers `EPERM`/`EOPNOTSUPP` → body copy (read + write over the wire). |
-| `put` | `fsync` is a server round trip per object (NFS COMMIT). Rename is atomic on NFS/SMB servers for a single client. |
-| `put_if_absent` | NFS `LINK` is atomic on the server, but a retransmitted `LINK` whose first attempt succeeded can answer `EEXIST` (if the server's duplicate-request cache misses it): the winner then reads back its own body as "the other writer's", which is still the correct answer. SMB hard-link support varies; where `link` is refused the claim fails Permanent (there is no fallback for claims). |
-| mmap reads | Pages fault in over the network on touch. If another host deletes a file this host has mapped and not yet paged in (e.g. GC on another machine), NFS may return `ESTALE`, delivered as SIGBUS on page fault rather than as an error. |
-| GC lock | `lockf` over NFS depends on the lock manager (NLM/NFSv4); over SMB it is advisory at best. Two hosts collecting one NAS main are not reliably excluded. |
-| Error kinds | `ESTALE`, `ETIMEDOUT`, `EHOSTDOWN` map to Permanent (§10), though they are often transient on a NAS. |
+| Watch | Polling at WATCH_INTERVAL: other hosts' writes raise no event here. |
+| Reads | Positioned reads MAY be preferred over mappings, so a vanished file or an unreachable server surfaces as the read's failure. |
+| Durability | Every fsync is a server round trip. Nothing is skipped. |
+| Claims | `link` where supported, then rename-without-replacement, else REFUSED. NFS: a retransmitted `link` whose first attempt succeeded can answer EEXIST, which reads back as `Won` (§5). |
+| Copies | Hard links where supported, else a body copy over the wire. |
+| Errors | Link-kind errnos and stalls are TRANSIENT/LINK and feed the breaker cell. |
+| `max_concurrency` | None. |
+| Cross-host exclusion | The collection's locks (§6) hold only as far as the filesystem's lock manager does. |
 
-Recommended topology (not enforced): at most one host runs GC against a NAS main; other hosts should reach it through an http-proxy frontend on the host that mounts it, rather than mounting it themselves.
+Recommended topology: one host mounts a network store and serves it to other hosts through its http-proxy frontend, rather than several hosts mounting it.
 
-## 14. Test-pinned invariants
+## 13. Conformance
 
-- **durable_writes**: `put` and `put_if_absent` each publish exactly one temp file, and it was `fsync`ed before its `rename`/`link` (syscall order recorded; the count guards against a vacuous pass).
-- **claim**: concurrent `put_if_absent` on one name → exactly one winner, all others receive the winner's body; a later claim on a taken name gets the existing body; a free name returns the caller's own body and stores it; `delete` returns `true` then `false`; after release the next claimant wins; no temp files or extra objects remain.
-- **get_range**: exact slices at start/middle/end/whole; `[size−3, size+97)` → 3 bytes; offset past end → 0 bytes; absent key → `None`; bytes compared against the local slice, not just counted.
-- **writes_in_flight**: a staged temp file is neither listed nor deleted; a user file named `.syncthing.*.tmp` is listed.
-- **local_watch**: missing directory → no watcher; a rename into the directory wakes a watcher promptly; `watch` on the cursor returns promptly (< 1 s) after a write; a drained watcher blocks again; reads of the object do not wake a watcher on its directory; after reads, the only temp-named entry at the root is the scratch directory and the object's directory holds none; `watch` on a quiet directory returns at the cap (≥ 1 s).
-- **corruption**: a good upload files no marker and caps report `verified`; a scrambled body is filed under its chunk's marker key with the hash it computed; a marked chunk is re-uploaded rather than deduped; the good rewrite clears the marker; no empty marker shard directories remain.
-- **gc_cost / gc_targets / gc_queued**: a collection on a local main uses rename only (0 `copy` calls), never lists or marks replicas, deletes reclaimed chunks from copies first.
-
-## 15. Open questions
-
-1. `delete` swallowing unlink errors (§12) makes a failed GC delete on a local *copy* look successful. Should `rm -rf` failures other than `ENOENT` raise?
-2. Error-kind inconsistency (§10): `put`'s raw errors classify as Transient, so a read-only or permission-denied store retries/queues forever instead of reporting a Permanent fault.
-3. No sweeper for orphaned `.tsync-tmp-*.tmp` in store roots.
-4. Linux device lookup: mount-point matching is a plain string prefix (`/mnt/tsync` also "covers" `/mnt/tsync2/...` if the latter is on a shorter mount); mountinfo's `\040` escapes are not decoded; a relative or symlinked `path` is not canonicalised before matching; btrfs and dm/LUKS volumes report `0:N`/`nr_requests` rather than hardware depth.
-5. mmap turns media errors (`EIO`) and NFS `ESTALE` into SIGBUS at page-touch time, including inside `verify_written`'s hash; the "unreadable" marker path only catches errors raised by open/stat/mmap themselves.
-6. No directory fsync after rename: acceptable for chunks (re-uploadable) — is it acceptable for the cursor and journal on a local main?
-7. `watch` could honour `last_seen` by reading the cursor before waiting (cheap locally).
+- **Durable writes.** `put`, `put_if_absent`, `copy` and `delete` each fsync the file (where one is written) before publishing it, and the directory after. The system-call order is recorded, and the count of published files is checked so the test cannot pass vacuously.
+- **Claims.** Concurrent claims on one name: exactly one `Won`, the others `Held` with the winner's body. A later claim gets the holder. A free name answers `Won` and stores the body. `delete` answers `true`, then `false`. After a delete the next claimant wins. The losers leave no temporary files.
+- **Ranges.** Exact slices at the start, middle, end and whole; `[size−3, size+97)` → 3 bytes; an offset past the end → empty; an absent key → `none`. Bytes are compared, not just counted.
+- **Confinement.** Keys holding `..`, `.`, empty segments or a leading `/` are refused before any file is touched. A symbolic link inside the root that points outside is never followed, for reads, writes, deletes or listings.
+- **Listings.** A staged temporary file is neither listed nor deleted; a user file named `.syncthing.x.tmp` is listed; directories, symbolic links and the collection lock file are not listed; order is by key; `max_keys` is exact.
+- **Delete.** A key naming a directory removes nothing. An unlink refused with `EACCES` fails `delete_multi` REFUSED.
+- **Errors.** The same errno has the same kind in every operation. A simulated stalled call fails TRANSIENT/LINK within the local stall bound.
+- **Gate.** A manifest put naming a chunk absent from the surviving space is refused naming it; during a run the gate promotes the named chunks.
+- **Sweeping.** A temporary file older than the grace is removed by a walk; a younger one is kept.
+- **Watch.** A write of the key wakes a watch within a second; a watch whose key already differs from `last_seen` returns at once; a quiet key returns at the interval; reads of the object do not wake a watch on its directory.
+- **Corruption.** A good chunk files no marker and capabilities say `verified`. A scrambled body is filed under its marker key with the hash computed. A good rewrite clears the marker.

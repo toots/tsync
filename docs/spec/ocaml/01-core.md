@@ -5,7 +5,7 @@ Companion to the language-neutral spec [../01-core.md](../01-core.md). See [READ
 
 ## B.1 Runtime-independent OCaml learnings (valid under Lwt or OCaml 5 direct style)
 
-**EINTR and the stdlib (spec §4.2).** OCaml's `Sys.set_signal` installs handlers without
+**EINTR and the stdlib (spec §6.3).** OCaml's `Sys.set_signal` installs handlers without
 SA_RESTART (sa_flags = SA_ONSTACK), and `runtime/sys.c` never retries: an interrupted call surfaces as
 `Sys_error "<path>: Interrupted system call"` — a *string*, invisible to any `Unix_error (EINTR,_,_)`
 handler. `Sys.file_exists` answers `false` on any failure including EINTR. `tsync_stdlib`
@@ -94,7 +94,7 @@ relocated rule and confirm a suite reddens (e.g. `reap_older_than` and the up-fr
 
 ## B.2 Lwt / functor-specific learnings, and their effects/domains translation
 
-### B.2.1 The signatures (implements spec §3.1)
+### B.2.1 The signatures (implements spec §6.1)
 
 `lib/local/io/io.ml`:
 
@@ -171,8 +171,8 @@ module type PRIMITIVES = sig
 end
 ```
 
-`Fs.Make (Io) (Syscalls) (PRIMITIVES) : Fs.S` adds the logic (see §3.3). `Bounded.Make (Io) : Bounded.S`
-(§3.4). There is **no** `Fs` inside `Io`; a module that needs files takes an `Fs.S` or a narrower
+`Fs.Make (Io) (Syscalls) (PRIMITIVES) : Fs.S` adds the logic (spec §6.4). `Bounded.Make (Io) : Bounded.S`
+(spec §5.1). There is **no** `Fs` inside `Io`; a module that needs files takes an `Fs.S` or a narrower
 signature it declares itself (e.g. `Durable_queue.FILES`, `Listing.SPOOL`, `Spool.APPEND`).
 
 ### B.2.2 Functor inventory in this layer
@@ -197,7 +197,7 @@ Pure (no functor): `Chunks`, `Chunk_source`, `Stored_key`, `Folder`, `Id`, `Xxha
 `Zip_stream`, `Metrics`, `Health`, `Job_progress`, `Hashtbl_mmap`, `Bigstring`, `Field_spec`, `Log`,
 `Shutdown` (core), `Retry` vocabulary.
 
-### B.2.3 The layering as built (implements spec §4.1)
+### B.2.3 The layering as built (implements spec §6.2)
 
 1. **Logic modules are functors** over the smallest set of signatures they use
    (`Io.S` always; `Clock.S`, `Lock.S`, `Syscalls.S`, `Fs.S`/narrower file signatures, `Bounded.S`,
@@ -271,7 +271,7 @@ Pure (no functor): `Chunks`, `Chunk_source`, `Stored_key`, `Folder`, `Id`, `Xxha
 | Lwt learning | problem the functor/monad solved or caused | under effects (Eio/Picos, direct style) | under domains (parallel) |
 |---|---|---|---|
 | Functor over `Io.S` applied once in `lib/lwt` | kept Lwt out of logic; cost: every module is a functor, `'a io` everywhere, `with type … :=` gymnastics, a mirror tree of ~1000 lines of applications, tests use Lwt directly (1019 refs) | functors unnecessary: logic calls `Eio`/effects directly or through a plain module; keep the *narrow capability records* only where tests need doubles (Clock, Files, Transport, Send, Pool) | same, plus capability records must be thread-safe |
-| The monad marks suspension points | G1 atomicity was visible: no `let*` ⇒ no yield | lost: any call may perform an effect and yield. Audit the §3.2 critical sections; keep them free of effectful calls or wrap in `Eio.Mutex` | lost entirely between domains: every table in §3.2's list needs `Mutex`/`Atomic` or confinement to one domain |
+| The monad marks suspension points | G1 atomicity was visible: no `let*` ⇒ no yield | lost: any call may perform an effect and yield. Audit the critical sections of B.3.3; keep them free of effectful calls or wrap in `Eio.Mutex` | lost entirely between domains: every table in B.3.3 needs `Mutex`/`Atomic` or confinement to one domain |
 | `Lwt.wait` + `wakeup_later` (`'a u`) needed for pools | not derivable from bind; pools built on it | `Eio.Promise.create`/`resolve`, or `Eio.Semaphore` for `Bounded` | `Eio.Semaphore`/`Mutex` are domain-safe; hand-rolled queues are not |
 | `Lwt_list.map_p` unbounded fan-out; `Bounded.map_with` bounds in-flight, not offered | a fan-out whose width the data chooses allocates a promise+closure per element up front (mirror: 140 words/object) | unbounded `Fiber.List.map` spawns a fiber per element — same trap; use `Fiber.List.map ~max_fibers` or a semaphore, and pull workers (`Bounded.each`) for data-sized sources | a global scheduler bounds width, **not** working set: keep explicit pools (memory note duppy-scheduler-exploration) |
 | Nesting a pool inside itself deadlocks (mirror probe→copy) | slots taken in sequence on the same pool | identical with semaphores | identical |
@@ -292,4 +292,185 @@ the concurrency interface direct-style while still on Lwt (needs OCaml 5; `tsync
 `>= 4.14`; `Lwt_direct` availability unverified), (2) move HTTP off cohttp-lwt (the expensive part:
 cohttp/conduit/S3 client, `lib/app` with ~378 direct Lwt refs), (3) swap the scheduler outright — never
 run two permanently. Keep `Bounded` regardless; assume one main worker plus blocking threads unless every
-§3.2 item has been made domain-safe.
+B.3.3 item has been made domain-safe.
+
+## B.3 Where each spec concept lives, and where the code departs from it
+
+### B.3.1 Module map
+
+| Spec concept | OCaml |
+|---|---|
+| XXH3 dual seed, chunk key (§3.1–3.2) | `Xxhash` (vendored header, `lib/core/xxhash_stubs.c`), `Chunks.key_of_body`, `Chunks.is_chunk_key` |
+| chunking, range to pieces (§3.4) | `Chunks.count/index_of/offset_of/length_of/pieces` |
+| upload chunk source | `Chunk_source.t = Stored of key \| Mapped of (unit -> bigstring) \| Filled of {len; fill}`, decided before any I/O |
+| chunk size choice (§3.5) | `Conf.chunk_size`, else backend `capabilities.chunk_size`, else `Conf.default_chunk_size`; memoised once per process in `Remote` (`resolved_chunk_size`) |
+| shard function (§3.6) | `Chunk_layout` (`fanout`, `shard_name`, `shard_of`, `relative_path`, `marker_key`, `is_marker_key`, `shard_of_job`) |
+| logical keys (§2.4) | `Logical_key.Make` (`to_string`, `leaf`, `parent`, `file_in`/`dir_in` raising `Invalid_argument`, `rel_of_string`) |
+| stored keys (§2.6) | `Stored_key` (abstract; `listed`, `namespace`, `child_key`, `index_key`, `anchor_key`, `trash_namespace`, `share_key`, `parent_folder_id`, `folder_id_of`, `path_in`, `is_dir_key`, `is_internal`, `is_child_object`) |
+| folder marker / anchor bodies | `Folder` (Yojson.Basic, compact) |
+| item references (§2.7) | `Item_ref` (polymorphic variant with `` `Bad ``) |
+| mirror escaping (§2.8) | `Stored_key.escape`, `escape_path`, `name_max = 250`, `dir_name_leaf`, `folder_marker_leaf` |
+| temporary names (§2.9) | `Filename.temp_in`, `temp_path`, `scratch_leaf`, `is_temp_name`, `temp_owner` (and a duplicate test in the inotify C stub) |
+| random ids (§2.10) | `Id.short` (two `Random.State.int64 < 2^32`, `%08Lx%08Lx`, private state tagged with the pid and reseeded after fork, seeded from `/dev/urandom` with a pid+time fallback), `Id.token n` (raises without `/dev/urandom`) |
+| pools (§5.1) | `Bounded.Make` (`create ?max_waiting ?name ~max`, `shared ~key`, `use`, `use_or ~busy`, `map_with`, `iter_with`, `filter_map_with`, `each ~width next`, `totals`) |
+| local filesystem helpers (§6.4) | `Fs.Make`: `mkdir_p`, `atomic_write`, `atomic_write_at ~size`, `reserve`, `pwrite_all`, `copy_file`, `read_file_opt`, `readdir_list_quiet`, `stat_opt`, `lstat_kind`, `rm_rf`, `unlink_quiet`, `reap_older_than`, `zero`; synchronous `mkdir_p_sync`, `open_and_unlink`, `pid_alive`, `disk_space`, `load_average` |
+| retry ladder (§7) | `Retry` (`Failed {kind = Transient \| Permanent; op; detail}`, `Cancelled`, `classify`, `classify_in_order`, `backoff`, `held`, `Make.with_retry`, `default_attempts = 8`) |
+| `until-held` | `Health_wait.until_held` |
+| breaker (§8) | `Health` (`check`, `lost`, `answered`, `probe_lost`, `on_held`/`off`, `describe`, `timed_out`/`timeouts`, `json`; tunables `trip_after`, `trip_span`, `hold_initial`, `hold_max`, `probe_timeout`; test hooks `expire`, `hold_length`) |
+| stop (§9) | `Shutdown` (`Stopping`, `request`, `requested`, `on_request`, `grace`, `reset`, `Sleep`) |
+| HTTP discipline (§10) | `Http_client.Make` over a cohttp `Connection_cache` pool (`Redial` = `Connection.Retry`), `call`, `call_retry`, `call_text`, `failed`, `excerpt` |
+| IPC framing (§11) | `Ipc.Make` (`serve ?subs ?until ~path handler`, `send ?timeout`, `Subs` with `max_queued = 256`), blocking `Ipc.send`/`Ipc.request` for the CLI |
+| spilling (§12) | `Spool`, `Listing` (records of int32-LE-length strings and 8-byte LE int64s), `Hashtbl_mmap` |
+| snapshots (§12) | `Bigstring.open_snapshot`, `map_file` (`MAP_PRIVATE`, read-only fd), `Device.clone` (Linux `FICLONE` from a fresh `O_EXCL` 0600 file; macOS `clonefile`) |
+| ZIP64 (§13) | `Zip_stream` (golden dump `tests/unit/zip/zip_test.expected`) |
+| platform facts (§14) | `Device.max_concurrency`, `Descriptors.raise_to`, `Watch.open_dir/fd/drain/close`, `Watch_lwt.wait` |
+| glob (§17) | `Glob.of_pattern`, `Glob.matches` |
+
+Modules with no spec counterpart in 01 (owned elsewhere or pure plumbing): `Metrics`
+(10 one-second buckets, `human_bytes` base 1024), `Job_progress` / `Job_report` (the report
+line is specified in 07), `Change_notice` (the `changed` line is specified in 07; 0.2 s flush,
+512 keys per batch), `Log` (levels debug < info < warn < err, default `info`, `recent ()` keeps
+the last 50 warn/err newest first, `Daemon.init` logs to syslog facility DAEMON ident `tsync`
+with LOG_PID and LOG_PERROR only on a tty, else stderr as `YYYY-MM-DD HH:MM:SS LEVEL msg`),
+`Field_spec` (config field specs: `bool` accepts true/1/yes/on and false/0/no/off
+case-insensitively, else the default; `mask` renders a set secret as `***`), `Tls_conf`
+(`available`, `current`, `apply`), `Desktop_mounts.mount_points` (Linux mountinfo parsing with
+octal escapes and `fuse.*` types sourced `tsync`; total, for a C caller), `Runtime`
+(`default_paths`, socket paths, `restart_service`, `log_command`).
+
+### B.3.2 In-memory formats (implementation choices, not contracts)
+
+- **`Hashtbl_mmap`**: a blob region (file-backed shared mapping of an unlinked temp file,
+  initially `max 4096 (64·n)` bytes, doubled with `ftruncate` + remap) of appended records
+  `[u32le klen][u32le vlen][key][value]`, and a slot array (anonymous int64 Bigarray, power of
+  two ≥ `max 16 (2·n)`) holding `offset + 1` (0 = empty). Linear probing from
+  `Hashtbl.hash key land mask`; slots double when `4·count > 3·slots`, rehashed from slots.
+  `replace` always appends; superseded records are never reclaimed, so heavy rebinding grows
+  the blob. No removal.
+- **Durable-queue record ids and claims**: `%020Ld-%08d-%d` (µs since epoch, a per-`Records.t`
+  sequence, pid); claim lock `<dir>.owner` held with `lockf F_TLOCK` on an fd kept open. The
+  queue's rules are in [../algorithms/durable-queue.md](../algorithms/durable-queue.md).
+
+### B.3.3 Shared mutable state that relies on cooperative scheduling
+
+Every item below is mutated without a lock because Lwt never switches tasks between two
+statements without a bind. A runtime with preemption or parallelism must lock or confine each.
+
+| State | Module | Reliance |
+|---|---|---|
+| `held`, `waiting`, waiter queue; `named` registry; `shared_pools` | Bounded | check-then-act |
+| the job source cursor in `each` | Bounded | pop and advance |
+| `jobs`, `loaded`, `slots` (`cancel`/`pending`/`failures`), `active`, `parked`, `outcomes`, `failures`, `degraded`, `running`; `owned`, registry and rescan lists; `Records` `seq`, `dropped` | Durable_queue | lock-free mutation; the `recording` mutex only orders writes |
+| every field of a `Health.t`; watcher table | Health | read-modify-write; single probe hand-out |
+| `hooks`, `requested_`, `next_hook` | Shutdown | idempotent flip and hook drain |
+| buckets, totals | Metrics, Job_progress | increments |
+| `job`, `ticks`, `live`, `stop`, `warned` | Job_report | flags |
+| subscriber list and queues; `woken` in `serve` | Ipc | empty-check-then-wait; double-resolve guard |
+| `cache` (pool generation) | Http_client | compare-and-replace |
+| `table`, `pending`, `scheduled`, `warned` | Change_notice | set plus scheduled flag |
+| `recent_q`, `min_level`, `prefix`, sink | Log | push/pop |
+| `clonable` memo, `warned_no_clone` | Bigstring | memo |
+| PRNG state | Id | not thread-safe |
+| `temp_seq` | Filename | increment |
+| blob, slots, count | Hashtbl_mmap | not thread-safe by design |
+| TLS backend | Tls_conf | set once |
+| `resolved_chunk_size` | Remote | set once |
+
+`lockf` claims are per process, so the in-process `owned` table is the only thing that stops two
+threads of one process double-claiming.
+
+### B.3.4 Where the code departs from the spec
+
+Each item is a place where the OCaml code at the time of writing does something the spec
+forbids or does not require; the spec section says what is correct.
+
+- **Glob (§17).** `Glob.match_from` tries the rest of a pattern after `**/` at every character
+  offset, not only at segment starts, so `**/.git` matches `foo.git` and `a/repo.git`. `**`
+  inside a segment crosses `/`. Only `tsync import --only/--exclude` uses it
+  (`lib/domain/ops/import.ml`), matching each pattern against the path and its basename.
+- **Clocks (§4).** `Io_lwt.Clock.now` is monotonic (`CLOCK_MONOTONIC` stub), but
+  `Io_lwt.Clock.with_stall_timeout` (behind `Http_client`), `Health.now` and `Metrics.now_sec`
+  use `Unix.gettimeofday`.
+- **Stall timer (§10).** The timer is reset after headers are built and on each response body
+  piece; bytes of the request body going out are not heard.
+- **Breaker evidence (§8, failure model §6).** `Retry.with_retry` calls `Health.lost` on every
+  `Transient` failure, which includes 429, 503 and unclassified exceptions inside a request;
+  `Retry-After` is not read.
+- **Absent versus failed (§6.4).** `Fs.read_file_opt` answers `None`, `stat_opt`/`is_directory`
+  answer `None`/`false`, `lstat_kind` answers `` `Missing ``, and `readdir_list_quiet` answers
+  `[]` on any failure.
+- **Validation (§2.1–2.2, §2.7).** `Stored_key.listed` is the identity; no layer checks key
+  segments; domain names are not validated in `Conf_parsing`; `Item_ref.parse` accepts any
+  non-empty id and a leaf containing `/` (everything after the first `/`), and a `` `Bad ``
+  reference is answered `not_found`.
+- **Mirror escape collisions (§2.8).** Two unstorable leaves with the same seed-0 hash share a
+  handle; nothing checks.
+- **Chunk size bounds (§3.5).** No clamp on a configured or store-recommended chunk size, and
+  none on a manifest's chunk size when reading.
+- **Random ids (§2.10).** `Id.short` falls back to pid and time when `/dev/urandom` is
+  unreadable.
+- **Snapshots (§12).** When cloning fails in a directory, `Bigstring.open_snapshot` maps the
+  live file (warning once per process), so a concurrent truncate is a SIGBUS.
+- **Directory watch (§14.3).** On macOS kqueue cannot report names, so `Watch.drain` cannot
+  discard the reader's own scratch files and the self-wake loop remains there.
+- **IPC (§11).** `serve` runs one task per connection with no bound, reads lines with no length
+  limit and no partial-line deadline, and swallows per-connection exceptions. `Ipc.send` (the
+  CLI's blocking call) has no timeout and leaks its fd on an exception.
+- **Spool.** `Spool.create ~dir ~name` names the file `dir/.tsync-tmp-<pid>-<n>.tmp`; `name`
+  does not appear in it. `Spool.seal` uses a non-LargeFile `stat` (fine on 64-bit only).
+
+### B.3.5 Hosts
+
+How each host instantiates this layer (process roles are specified in 07):
+
+| Host | Uses / swaps |
+|---|---|
+| Linux daemon | syslog via `Log.Daemon.init`, log prefix `"[<domain>] "`; raises the fd limit to 8192 before forking frontends; `Shutdown.request` on unmount or signal; recovering durable queues; `rescan_all` when a one-shot command leaves work behind |
+| macOS daemon | one process for all domains on `tsync.sock` in the app-group container; syslog with LOG_PERROR into `~/Library/Logs/tsync-daemon.log`; fd limit raised from launchd's 256 |
+| Android | runtime embedded in the app; `Log.set_sink` to logcat first; Lwt blocking-call pool capped at 16 threads; everything reachable from JNI total |
+| http-proxy frontend | one listener for all its domains; reports `Log.recent ()` over HTTP; `Zip_stream` for share downloads |
+| one-shot commands | blocking `Ipc.send`/`request`; queues started without recover (claiming their dirs); `Job_report` every 10 s; `settle_all` (≤ 60 s) and `Change_notice.settle` before exit |
+| Linux file-manager extensions | `Desktop_mounts.mount_points` across a C boundary |
+| tests | Clock/Files/Send/Pool/Transport doubles; `Shutdown.reset`, `set_stall_warning_interval`, `Health.expire` |
+
+### B.3.6 Resource strategies (implementation choices, not spec)
+
+Spec P6 leaves these to the implementation. What the OCaml code does, and why:
+
+- **Pools (`Bounded`).** A pool stands for a resource (memory for bodies, round trips in
+  flight, a device's command queue), not a kind of work; its width belongs to whoever knows what
+  shares that resource. `acquire` takes a slot if fewer than `width` are held, else answers
+  `Busy` if a `max_waiting` cap is reached, else waits; `release` hands the slot straight to the
+  oldest waiter (FIFO, no barging). Widths below 1 become 1. `each ~width next` runs `width`
+  workers pulling `next ()`; the first failure stops them and is re-raised. Named pools report
+  `(name, in flight, waiting, width)` to status, summed by name. Habits worth keeping: take the
+  slot before the resource it guards; never wait for a slot of a pool you already hold one of
+  (the mirror's probe-then-copy deadlocked that way); pull workers for data-sized sources rather
+  than a promise per element (mirror memory went from 140 to 16 words per object). A
+  scheduler-wide bound is not a substitute: it bounds concurrency, not working set.
+- **HTTP sockets.** At most 32 sockets per endpoint, idle ones closed after 60 s
+  (`keep_idle_ns`, `max_parallel`); the work bound is the caller's pool.
+- **Spills.** `Spool` appends to a temp file, closes it, then maps it (mapping a file still open
+  for append is unsound); `Listing` records are fields of int32-LE-length strings and 8-byte LE
+  int64s, re-walkable, refusing appends after sealing; `Hashtbl_mmap` (B.3.2) keeps data-sized
+  key sets off the heap. Spools of dead processes are reaped by pid.
+- **Device concurrency.** `Device.max_concurrency`: on Linux the queue depth of the block device
+  under the mount (`device/queue_depth`, else `queue/nr_requests`, of the whole disk for a
+  partition), as `max 2 (min 64 (4·depth))`; on macOS by `df -P` + `diskutil info`: rotational
+  over USB/FireWire 4, rotational 8, SSD over USB 16, SSD 64, unknown external 8. Asked once per
+  store. USB mass storage takes one command at a time; NVMe hundreds.
+- **Descriptor limit.** `Descriptors.raise_to ~target` clamps to the hard limit and halves the
+  request until `setrlimit` accepts it (launchd starts processes with 256; the Linux daemon asks
+  for 8192 before forking frontends).
+- **Watch drain.** `TSYNC_WATCH_DRAIN_PASSES = 64` reads per wake.
+- **Metrics.** Rates over 10 one-second buckets.
+- **Advisory IPC sends.** `Ipc.Make.send ?timeout = 2.`.
+
+### B.3.7 Further departures from the round-2 spec
+
+- A local-filesystem store uses the shared `Health.always_up` cell, so a stale NFS mount never
+  trips and network-filesystem errnos are not classified as link failures.
+- The local store writes pid-form temporaries (`.tsync-tmp-<pid>-<seq>.tmp`) and can list
+  directory keys; the spec's store uses random-form temporaries and lists no directory markers.
+- `Bigstring.open_snapshot` is used for every mapped read; the spec only requires snapshots for
+  files that can change in place.

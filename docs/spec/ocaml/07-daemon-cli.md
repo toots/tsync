@@ -5,7 +5,7 @@ Companion to the language-neutral spec [../07-daemon-cli.md](../07-daemon-cli.md
 
 ## B.1 Runtime-independent OCaml learnings (still valid under OCaml 5 direct style)
 
-- **Binary = registry filled at link time** (spec §3.1). Each frontend/driver has a one-line
+- **Binary = registry filled at link time** (spec [08 §2.1](../08-frontends.md)). Each frontend/driver has a one-line
   `register ()` module; dune `(select ...)` picks `frontend_x.enabled.ml` or `.disabled.ml`
   depending on whether the optional library builds (`lib/app/frontends/dune`), and the runtime
   paths module is selected the same way per OS (`runtime.linux.ml` / `runtime.macos.ml`).
@@ -23,7 +23,7 @@ Companion to the language-neutral spec [../07-daemon-cli.md](../07-daemon-cli.md
   returns its code from the loop and exits after (`cmd_sync.ml`, `cmd_trash.ml`, ...). Under
   effects the same rule holds: `exit` from inside a fiber skips whatever the runner does after.
 - **Loop death uses `Unix._exit 1`**, not `exit`: `at_exit` handlers would drain through the dead
-  loop and hang (spec §3.2).
+  loop and hang (spec §3.7).
 - **Backtraces across threads**: `on_loop` re-raises on the calling thread, which replaces the
   backtrace; the original is carried as `With_backtrace (exn, Printexc.raw_backtrace)` captured
   *before* re-raise, except for `Unix.Unix_error` (an answer, hot path, no capture).
@@ -66,7 +66,7 @@ What the functor pattern bought here, and what each learning becomes under effec
   `Diagnostics.Make (C)`, `Ipc_handler.Make (C) (F) (Sq) (Pause)`): each functor application
   creates fresh module-level state — e.g. the mutation `Lwt_mutex` is per application, i.e. per
   domain per process, and `Pause`'s switch is per application too, which is exactly why the
-  parent's poller and the frontend's queues hold **different** pause flags (spec §9.1).
+  parent's poller and the frontend's queues hold **different** pause flags (B.4).
   In a rewrite make such state an explicit value owned by the per-domain engine instance.
 - **The Lwt pitfalls that shaped this code**:
   - *Forking*: `Lwt_engine`/notification eventfd is created at module init; a plain `Unix.fork`
@@ -100,13 +100,13 @@ What the functor pattern bought here, and what each learning becomes under effec
   - *`Lwt_preemptive.run_in_main`* is the bridge for libfuse and JNI threads (`on_loop`).
   - *Signals*: `Lwt_unix.on_signal` for SIGTERM/SIGINT; libfuse may install its own handlers and
     override them.
-- **Cooperative scheduling is load-bearing** (spec §6.1): the monad marks every point where
+- **Cooperative scheduling is load-bearing** (spec §7): the monad marks every point where
   another task may run (`let*`), and code like `Subs.write_pending`, `Change_notice.flush`,
   `Shutdown.request`, `Launcher.ask_rescan`, `Diagnostics.refresh` relies on "no bind, no
   interleaving". Under effects, a direct-style call may suspend without any syntactic marker, so
   these invariants become invisible; with multiple domains they become data races. Keep all of
   this state on one domain (one main scheduler worker plus blocking threads) or protect each item
-  listed in §6.1.
+  listed in spec §7.
 - **Unbounded concurrency discipline**: every `Lwt_list.map_p` here is config-wide with a deadline
   per leaf (status fan-outs, 16 sampled shards); data-wide fan-outs elsewhere use `Bounded`
   pools. Under effects an unbounded `map_p` becomes unbounded fibers and a pool becomes a
@@ -124,3 +124,118 @@ What the functor pattern bought here, and what each learning becomes under effec
   permanent second one. `Bounded` pools stay regardless; one main worker plus blocking threads,
   no domain parallelism. Unchecked: Android/macOS compiler versions, GPL-2+ duppy vs tsync's
   licence.
+
+## B.3 Mapping to the current code
+
+| Spec concept | Current code |
+|---|---|
+| supervisor (`tsync start`) | `lib/app/cli/launcher.ml` (`Launcher`), the "sync" parent process |
+| owner / presenting engine / converging engine | `lib/app/cli/runner/daemon/engine/domain_engine.ml` (`Domain.start`, `converge`, `start_queue`) |
+| request handler | `ipc_handler.ml`, `item_row.ml`, `ipc_error.ml` |
+| stop signal | `lib/core/shutdown.ml`; `Domain_engine.drain_for_stop`; `Frontend.fork_each`/`run_forked`/reap |
+| IPC transport | `lib/core/ipc.ml`, `lib/lwt/core/ipc_lwt.ml` (with `Subs`) |
+| one-shot lifecycle | `lib/app/cli/oneshot.ml` (`Oneshot.run`) |
+| path arguments | `lib/app/cli/location.ml` |
+| status collection | `Diagnostics`, `Status_report`, `Job_registry` under `runner/daemon/diagnostics` |
+| job report | `lib/core/job_report.ml` |
+| menu model | `lib/app/ui/menu.ml` (`Tsync_menu`) |
+| wizard | `lib/app/wizard/wizard.ml` |
+| maintenance list | `Maintenance_lwt` (`task = {name; triggers; run}`), `Domain_engine.run_maintenance` |
+| runtime paths, service manager | `lib/local/runtime/*_runtime.ml` |
+| descriptor limit | `Descriptors.raise_to ~target:8192` |
+
+## B.4 Where the current code differs from the spec
+
+The code at the spec's extraction commit implements an older process model. A rewrite, or a port of
+the code towards the spec, has to change at least the following.
+
+**Process model.**
+- The `tsync start` parent converges every domain (reconcile, poller, maintenance, deferred
+  resume) and presents none; each frontend group is a forked child that presents and runs its own
+  upload and metadata queues over the same on-disk state. Nothing takes an ownership lock: the
+  mirror, staged tree and WAL are written by the parent, every frontend child and `tsync sync`
+  with in-process Lwt mutexes only (finding F7, including the confirmed loss of a staged edit to a
+  concurrent peer delete).
+- The parent tells frontends about applied peer changes with batched `changed` notices
+  (`lib/lwt/core/change_notice.ml`, 0.2 s, ≤ 512 keys) sent to every frontend socket. Under the spec
+  the hook is called in-process by the owner and the `changed` action disappears.
+  `Change_notice.for_domain` caches the socket list on first use and ignores later lists.
+- Replica/backfill logs are resumed only by the parent (`Domain.start_resumed`); frontends record
+  and send `rescan` to the sync socket; one-shot commands build with `resume:false` and run their
+  own posts under the durable-queue claim (RUNNER role). Android builds with `resume:false` and has
+  no resumer at all (finding G7).
+- The http-proxy child builds a presenting engine (`D.start`, `D.drain`) and its share server reads
+  through the domain's chunk cache (`Data`).
+- One-shot `import`/`rsync` write the mirror directly (`Mf.write`) and `tsync sync` reconciles,
+  drains and rebuilds in the CLI process beside a running daemon (no guard).
+- Children are forked with `Lwt_unix.fork` in config order; the parent does not restart a child
+  that dies, so a crashed FUSE process leaves its domain unmounted until `tsync restart`.
+
+**Pause.** `tsync pause` reaches only the frontend process behind the domain socket
+(`Pause.set`, a plain `ref`); the parent's poller runs with the parent's own `Pause` instance, which
+nothing sets, and the sync socket has no `pause` action (finding G8). The flag is in memory only.
+
+**Stop.**
+- The File Provider router serves without `until`, has no signal handler, never requests
+  `Shutdown`, and drains its domains sequentially after the listener closes, so a stop with a store
+  down can hang indefinitely (finding G10).
+- `tsync stop` prints "No IPC-backed frontend running; relying on signal." and sends no signal; it
+  prints `Stopped N domain(s).` without waiting for anything to exit.
+- The domain handler returns control `Stop` for `stop` even when its reply is an error.
+
+**IPC.**
+- `Ipc.send` (the blocking CLI client) has no timeout and leaks its descriptor on an exception
+  (finding G9); the in-loop client defaults to 2 s.
+- The File Provider router's own errors (`cannot tell which domain…`, bad JSON) omit `code`
+  (finding H2).
+- Socket files are created with default modes (0755 seen); the directory is 0700 only when the IPC
+  server creates it (the durable queue creates 0755 directories under the data dir); no peer
+  credentials are checked.
+- There are no detached jobs; long requests (`restore`, `ensure_cached`) are synchronous.
+- Status falls back to asking every frontend socket, each of which probes every backend.
+
+**Other.**
+- A missing or invalid config: both exit 0 (`tsync start`); the units have no
+  `RestartPreventExitStatus`.
+- `Job_registry` keys on pid only.
+- The wizard writes `config.json` and then `chmod 0600`s it (a window with default permissions).
+- Memtrace leaf names are per frontend group, so per-binding children share a name.
+- The fd soft limit target is 8192 while the unit grants 65536.
+- Docs: DOCUMENTATION.md says `sync --full` "clears the local cache" (it rewrites the mirror in
+  place) and that jobs report to "its domain's daemon" (they report to the sync socket).
+
+## B.5 Conformance checks in the current test suite
+
+| Spec §9 item | Test |
+|---|---|
+| drain raced, not cancelled | `tests/unit/drain_for_stop` |
+| reaping, SIGKILL after grace, stop reaches children first | `tests/unit/fork_reap` |
+| server stops by socket / `until`; socket removed | `tests/unit/ipc_serve` |
+| subscription semantics | `tests/unit/subs` |
+| stop signal, sleeps, hooks, retry ladder | `tests/unit/shutdown` |
+| process stop leaves jobs on disk | `tests/unit/queue_stop` |
+| stop publishes the cursor bump | `tests/frontends/stop_publishes_cursor` |
+| presenting process uploads and publishes; maintenance list | `tests/frontends/presenting_domain` |
+| pause holds queues, drain completes | `tests/scenario/pause` (single process only) |
+| job registry | `tests/unit/job_registry`, `tests/unit/job_render` |
+| status request shape, folding, cost, held members | `tests/unit/status_ask`, `status_report`, `status_cost`, `status_held` |
+| menu rendering | `tests/unit/menu` |
+| completion and path refusal | `tests/unit/completion` |
+| export path spellings | `tests/unit/export_cli`, `export_display` |
+| socket survives rename (e2e relay) | `tests/e2e/ipc_tap` |
+| real daemon start/stop | `tests/e2e/linux`, `tests/e2e/macos` |
+
+Not covered today: ownership, pause across processes, a wedged daemon against every CLI command,
+the File Provider stop bound, detached jobs, peer-credential refusal.
+
+## B.6 Resource strategy and superseded designs
+
+- **Blocking pool**: `min(256, max(32, 8 × Σ(maxUploads + maxDownloads)))` over the domains a
+  process serves, set after all forking (`cap_blocking_pool`). The pool never shrinks, so its ceiling
+  is a memory floor (a mount at 256 settled at ≈114 MB).
+- **Status sampling**: the chunk count estimate lists 16 evenly spaced shards and scales.
+- **IPC bounds** used today: line 1 MiB, 256 connections, subscriber backlog 256 (the spec's values
+  are 01's).
+- A first normative draft specified *detached jobs* (`"detach":true`, `job` polling) for long IPC
+  requests; it was replaced by bulk actions bounded by progress plus the `ping` liveness probe
+  (failure-model §8.2), which needs no job table.

@@ -1,8 +1,8 @@
 # OCaml implementation notes
 
-These notes are for someone re-implementing tsync **in OCaml**. They record what the current
-code learned. The language-neutral spec is in the parent directory; each note names the spec
-concept it implements.
+These notes describe the OCaml implementation of tsync: how it maps onto the spec, where it
+departs from it, and what it learned. They are descriptive, not normative; the spec is in the
+parent directory, and each note names the spec concept it implements.
 
 The current code runs on Lwt, with the logic written as functors over a small concurrency
 signature and applied once per process under `lib/lwt/`. A rewrite may use OCaml 5 effects and
@@ -32,6 +32,8 @@ therefore separates two kinds of note:
 | http-proxy server | [frontends/http-proxy.md](frontends/http-proxy.md) |
 | macOS (platform and QuickLook stubs, the accept-loop failure) | [frontends/file-provider.md](frontends/file-provider.md) |
 | Android (cross-compilation, JNI, embedding the runtime) | [frontends/android.md](frontends/android.md) |
+| Backend and local data models | [data-model/backend.md](data-model/backend.md), [data-model/local-cache.md](data-model/local-cache.md) |
+| Algorithms: how the code maps onto each, and where it departs | [wal-and-journal](algorithms/wal-and-journal.md), [conflict-resolution](algorithms/conflict-resolution.md), [durable-queue](algorithms/durable-queue.md), [failure-model](algorithms/failure-model.md), [replication](algorithms/replication.md), [read-path-and-cache](algorithms/read-path-and-cache.md), [gc](algorithms/gc.md), [uplink-governor](algorithms/uplink-governor.md), [security-model](algorithms/security-model.md) |
 
 ## The lessons that matter most
 

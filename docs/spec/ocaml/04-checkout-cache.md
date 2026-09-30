@@ -1,6 +1,71 @@
 # 04 — Checkout & local cache (the local side) — OCaml implementation notes
 
 Companion to the language-neutral spec [../04-checkout-cache.md](../04-checkout-cache.md). See [README.md](README.md) for how these notes are organised.
+Related notes: [data-model/local-cache.md](data-model/local-cache.md),
+[algorithms/read-path-and-cache.md](algorithms/read-path-and-cache.md),
+[algorithms/durable-queue.md](algorithms/durable-queue.md).
+
+## B.0 Where the spec lives in the code (tree at `4c32fa96`)
+
+| Spec concept | Code |
+|---|---|
+| layout paths, `per`, shards | `lib/domain/cache_layout`, `Conf.chunks_per_group`, `Chunk_layout.shard_of` |
+| group, group key | `Manifest.Group` (`key_of`, `of_table`, `all`) |
+| mirror entries, memo | `Manifests` (`published` memoised by `(ino,size,mtime)`, FIFO 1024, an implementation choice the spec leaves open; `write` is the sole writer and stamps names; `current` is the single resolution point) |
+| staged manifest codec | `Staged_manifest` (`staged_of_string`, `staged_to_string`, version check, `.bad` set-aside in `read`) |
+| staged bodies | `Staged_body` (`ensure`, `resize`, `copy_chunk`, `link_group`, `adopt_whole`) |
+| staged write path | `Data.write_locked`, `ensure_group_body`, `truncate_locked`, `stage_whole`, `split_whole` (`lib/domain/checkout/content/data.ml`) |
+| upload and promotion | `Data.sync`, `upload_staged`, `promote_pending`, `promote`; `File.upload` |
+| WAL codec and log | `Wal` (`of_body`, `Job`, `Owed`, `log_for`, `discharge`, `owed_metadata`) |
+| file-operation interface | `File_ops.S` (`lib/domain/checkout/ops/file_ops.ml`), implemented by `File.Make_with_layout` |
+| tree interface | `Checkout_intf.S`: `Checkout` (full), `Lazy_checkout` (lazy, `PULL.children`) |
+| folder-id index | `Folder_ids` (`lookup_id`, `write`/`replace`, `key_of_id`, `whereabouts`, `rebuild`) |
+| resync primitives | `Checkout.record`, `Checkout.sweep_stale`, `Cache_layout.clear_projection`, `Cache_layout.sweep_stale` |
+| availability | `Checkout.availability` (synchronous, no event loop) |
+| maintenance | `Temp_files`, `Staged_orphans` (grace 3600 s, on demand), `Export_records`, `Maintenance_lwt` |
+| peer application, publish decisions | `File.apply_foreign_ops`, `File.backend_ops`, `Resolve.Arrival`, `Resolve.Publish` |
+
+## B.0.1 Where the current code differs from the spec
+
+- **Several writer processes.** FUSE children, the converging parent and one-shot `tsync sync`
+  all write one cache root; `meta_mutex` (`file.ml`) and `with_key` (`data.ml`) are per-process
+  Lwt mutexes, and `File.write` does not take `meta_mutex`. A peer `Delete` applied in the
+  parent can discard a staged edit a FUSE child just wrote. The spec makes one owner per domain
+  and re-checks staged facts under the key lock (spec §3.2).
+- **No fsync.** `Fs.atomic_write` / `with_temp_rename` / `atomic_write_at` rename unsynced temps.
+  The spec's primitives fsync the temp before every replace.
+- **Release before switch.** `ensure_group_body`'s slow path and `truncate_locked` call
+  `Sb.forget` on old bodies before `Mfs.write` writes the new sidecar; a crash between leaves a
+  sidecar naming a deleted body, and `Sync_queue` then treats the ENOENT as "nothing owed" and
+  abandons the edit.
+- **Set-aside sidecars lose their bodies.** `Staged_manifest.fold` skips `.bad` files, so
+  `uuids ()` omits their bodies and `Staged_orphans` reaps them on `tsync cache --prune`. The
+  set-aside name `<leaf>.bad` also collides with a user file named so.
+- **Persisted partial records.** Partial bodies are named `<group key>` with a strict-parsed
+  `<group key>.manifest` interval record; the spec keeps held intervals in memory only and names
+  partial bodies `.partial`.
+- **Undecodable WAL records.** `Wal.Job.of_string` never fails; garbage decodes as an empty
+  `Intent` that reconcile deletes, and unknown ops are dropped by `filter_map`.
+- **Promotion before `Executed`.** `Data.sync` promotes (deleting the staged sidecar) before
+  `Sync_queue.run` calls `W.discharge`; a crash between completes a `Prepared` record without
+  publishing its entry.
+- **Upload cancellation is cooperative only.** `File.write` calls `cancel_upload`, but nothing
+  stops a manifest put already past the cancel check; the spec's edit generation closes this.
+- **No read handles in FUSE.** `internal_ops.ml` `read` resolves the key on every call, so a
+  peer update between two reads of one descriptor mixes versions; `assemble_to` loops over
+  reads the same way.
+- **`rmdir` removes non-empty folders**; rename flags (NOREPLACE, EXCHANGE) are ignored; FUSE
+  `fsync`/`flush` are no-ops.
+- **Directory `stat` mtime is `now`** on every call.
+- **Removed-id records (`folders/by-path/`) are never pruned**; `rebuild` calls `unlink_quiet`
+  on the `by-path` directory, which fails quietly.
+- **Orphan sweep uses a 1 h grace** and runs only on demand; the spec runs it exactly at owner
+  start.
+- **Revert** puts the manifest and writes the journal entry directly, with no WAL record.
+- **No own marker, no staged `base`, no WAL `priors`/`localFrom`, no re-keying, no `exclusive`
+  or `base` on writes, no `retain`/`release`**: all are spec additions.
+- **The view** is updated only by promotion; an abandoned promotion leaves the old manifest in
+  the mirror.
 
 
 ## B.1 Runtime-independent learnings (valid under Lwt or OCaml 5 direct style)

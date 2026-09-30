@@ -1,491 +1,421 @@
-# Lazy read path and cache replacement
+# Read path and chunk cache
 
-How the bytes of a file are materialised on demand from content-addressed chunks, and how the
-local copy of those chunks is kept within a bound. Implementation-independent: concrete names
-appear only in §10.
+How a file's bytes are served on demand from content-addressed chunks, how fetched bytes are
+verified, how sequential readers are kept ahead of, and how the local copy of chunks is bounded.
 
-Sources: [04 §2.1, §4.3–4.5, §4.10–4.12, §6](../04-checkout-cache.md),
-[02 §4.2, §6](../02-remote-model.md), [08 availability](../08-frontends.md),
-[file-provider A5.3](../frontends/file-provider.md), [android](../frontends/android.md),
-[09 §A6](../09-tests.md), [findings](../findings.md).
+The cache files' spellings are in [04](../04-checkout-cache.md) §2.7; version resolution, read
+handles and staged content are in [04](../04-checkout-cache.md) §3.3, §4.2 and §4.3; the durable
+write primitives are in [durable-queue](durable-queue.md) §3.2.
 
 ---
 
-## 1. Problem and goals
+## 1. Goals
 
-A file is a *version*: an immutable ordered list of **stored chunks**, each named by a hash of
-its bytes, plus a size. The store holds the chunks; nothing local is required to exist. A reader
-asks for `[offset, offset+len)` of a named file and must get those bytes, fetching only what it
-touches.
+- **G1. Correct bytes.** A read returns exactly bytes of the content its handle is bound to:
+  never zeros standing for missing data, never another version's bytes, never a mix of versions
+  within one handle's lineage ([04](../04-checkout-cache.md) §3.3).
+- **G2. Pay for what is touched.** A small read of a cold file costs about one small request,
+  never a whole chunk or file.
+- **G3. Streaming speed.** A sequential reader finds its next bytes already local.
+- **G4. Latency isolation.** A reader waiting for its own bytes never queues behind prefetch or
+  behind another reader's larger fetch.
+- **G5. Bounded disk.** Cache disk is held under a cap, except for pinned data.
+- **G6. No unpublished loss.** Nothing the cache does can destroy the only copy of user data.
+- **G7. Bounded waiting.** A read never waits longer than `READ_DEADLINE`, even offline;
+  abandoning a wait does not abandon the fetch.
+- **G8. Nothing unverified is republished.** Bytes that leave this machine inside a new
+  publication come only from verified or locally written sources.
 
-Goals:
+**Non-goals.** Caching directory metadata (the mirror is separate); reference counting of
+shared bodies; exact LRU; persisting access statistics.
 
-- **G1 Correct bytes.** A read returns exactly the bytes of one version of the file, the one it
-  resolved; never zeros standing for missing data, never bytes of another version, never a mix
-  within one read.
-- **G2 Pay for what is touched.** A small read of a cold file costs roughly one small request,
-  not a whole chunk, and never a whole file.
-- **G3 Streaming speed.** A sequential reader finds the next bytes already local.
-- **G4 Latency isolation.** A reader waiting for its own bytes never queues behind prefetch or
-  another reader's larger fetch.
-- **G5 Bounded resources.** Local disk is held under a cap (except for explicitly pinned data);
-  open descriptors, concurrent requests and memory are bounded by constants, not by file size,
-  read size or reader count.
-- **G6 No unpublished loss.** Nothing the cache does (eviction, crash recovery, refetch) can
-  destroy the only copy of user data.
-- **G7 Bounded waiting.** A read never blocks longer than a fixed deadline, even when the
-  network is gone; abandoning a wait does not abandon the fetch.
+## 2. Model and assumptions
 
-Non-goals: integrity verification on the read path (§5.4, §8); caching directory metadata (the
-mirror is a separate algorithm); refcounting shared bodies; persistence of access statistics;
-exact LRU; cross-process coordination beyond what the filesystem gives.
-
-## 2. System model and assumptions
-
-- **A1 Content addressing.** A chunk name determines its bytes. Any copy of a chunk, anywhere,
-  at any time, is interchangeable with any other. Two writers of the same chunk region write the
-  same bytes. (Everything that lets the cache be lock-light follows from this.)
-- **A2 Store operations.** `get(chunk) → bytes` and `get_range(chunk, off, len) → bytes`
-  (exactly `len` bytes, short only at the chunk's end). Both may be slow, fail transiently, or
-  hang indefinitely. The store is *not* assumed honest about bytes: it may return bytes that do
-  not hash to the name (bit rot, a mangling link). A "fast" store (local disk) makes a whole
-  chunk cost about as much as a range.
-- **A3 Local filesystem.** Supports sparse files (an unwritten region reads as zeros), positional
-  write, atomic rename, hard links (optional; some mobile storage refuses them), and mtime set
-  by the caller. Durability is to a *process* crash (no fsync assumed, see §6).
-- **A4 Other actors.** Several processes may share one cache directory (frontends, the converge
-  process, CLI commands). Within a process, reads, fills, prefetch, eviction and promotion run
-  concurrently. The implementation relies on a cooperative single-threaded scheduler for
-  atomicity of in-memory updates between suspension points (§5.5).
-- **A5 Version resolution is external.** A resolver answers, for a file, either a *published
-  version* (chunk list) or a *staged edit* (a slot per chunk: inherited from a base version,
-  a local staged body, or a hole) with its base version. Staged bodies live in a separate store
-  the cache never touches.
-- **A6 Clocks.** Wall clock for mtimes and pin deadlines; a monotonic timer for the read deadline.
-  Clock steps can make pins lapse early or late; nothing correctness-critical depends on them.
+- **A1. Content addressing.** A chunk key determines its bytes. Any correct copy of a chunk is
+  interchangeable with any other, and two writers of the same region of a body write the same
+  bytes.
+- **A2. Store operations.** `get(chunk)` and `get_range(chunk, offset, length)`, the latter
+  answering exactly `length` bytes or fewer only at the chunk's end
+  ([06](../06-backends.md)). Both may be slow, fail, or hang. The store is **not** trusted to
+  return correct bytes: it may return bytes that do not hash to the key (bit rot, a mangling
+  path). A *fast* store (local disk) makes a whole chunk cost about as much as a range.
+- **A3. One writer.** Only the domain's owner reads into or writes the cache (P1). Inside the
+  owner, reads, fills, prefetch, eviction and promotion run concurrently; the per-body lock of
+  §3.2 serialises what must be.
+- **A4. Clocks.** Pin deadlines and body mtimes are wall time (they are stored); the read
+  deadline and every duration are monotonic (P5). A wall-clock step can make a pin lapse early
+  or late; nothing correctness-critical depends on it.
 
 ## 3. State
 
-Durable, on local disk (shared by every process on the machine):
-
-| State | Meaning | Must live |
-|---|---|---|
-| **Group body** `B(g)` | one local file per *group* `g` (run of `per` consecutive stored chunks of a version), member `i` at `offset(i) = Σ size(j<i)`; sparse while partial | in the cache store, named by the group key |
-| **Group key** | hash of the ordered member chunk names (not first/last: runs sharing ends differ inside) | name of `B(g)`; two files with the same run share one body |
-| **Partial record** `R(g)` | beside `B(g)`; one interval `[a,b)` per member that holds anything | presence ⇔ body incomplete; absence ⇔ body whole |
-| **Pin** `P(g)` | beside `B(g)`; its mtime is a deadline | follows the content, not the file |
-| **Body mtime** | last read/publish time, coarsened to 60 s | the LRU order |
-| Staged bodies | sole copy of unpublished bytes | a *different store*, unreachable by the cap |
-
-Volatile, per process (must be one instance per process per cache root, §8 G-dup):
+### 3.1 On disk
 
 | State | Meaning |
 |---|---|
+| **Whole body** `B(g)` | the group's bytes in group layout ([04](../04-checkout-cache.md) §2.2). Exists ⇒ whole and verified |
+| **Partial body** `P(g)` | a sparse file in group layout, filled by range fetches; meaningful only with the owner's memory of what it holds |
+| **Pin** `N(g)` | its mtime is a deadline; may exist without a body |
+| **Body mtime** | the last read or install time, refreshed at most every `TOUCH_INTERVAL`: the LRU order |
+
+Staged bodies live in a different tree that nothing here addresses.
+
+### 3.2 In the owner's memory (one instance per domain per owner)
+
+Every consumer inside the owner (the file operations, the request handler, materialisation)
+shares these; none of them is per consumer, so one group is never fetched twice at once.
+
+| State | Meaning |
+|---|---|
+| **Body lock** per group key | serialises every change of what a group's files are: creating or removing `P(g)`, recording held intervals, installing or removing `B(g)`, eviction |
+| **Generation** per group key | incremented under the body lock whenever `P(g)` or `B(g)` is removed or replaced |
+| **Held intervals** per group key | for each member of `P(g)`, one interval `[a, b)` of chunk-local bytes known to be on disk in `P(g)`'s current inode |
 | **In-flight table** | group key → the one running whole-group fetch, for joiners |
-| **Held intervals (memory)** | group key → member intervals; the authority while the process runs, the record being its persisted shadow |
-| **Publish chain** | group key → the last pending record write, serialising record writes per body |
-| **Stream positions** | stream id → end of its last read (sequential detection) |
-| **Held counts** | per cache root: files, bytes, pinned bytes, earliest pin deadline, anchored flag |
-| **Link capability** | unknown / yes / no, probed once |
-| Pools | see §7 |
+| **Stream positions** | read handle → end of its last read |
+| **Counts** | bytes held, pinned bytes, earliest pin deadline |
+| **Link capability** | unknown, yes or no, for the cache root ([04](../04-checkout-cache.md) §4.8) |
 
-Per-body state machine (the body, its record, its pin are the observable state):
+### 3.3 Per group
 
 ```
-ABSENT ──fill(range)──▶ PARTIAL{intervals} ──fill…──▶ PARTIAL ──last member whole──▶ WHOLE
-ABSENT ──whole fetch (temp+rename)───────────────────────────────────────────────▶ WHOLE
-PARTIAL ──complete (fetch missing members in place, then drop record)───────────▶ WHOLE
-WHOLE ──forced refetch (temp+rename, replaces inode)─────────────────────────────▶ WHOLE
-WHOLE ──promote(link of a staged body)───────────────────────────────────────────▶ WHOLE
-PARTIAL ──promote: unlink body+record, then link────────────────────────────────▶ WHOLE
-any ──evict/forget: unlink body, then record────────────────────────────────────▶ ABSENT
-record without body ≡ ABSENT (reset on next fill)
+ABSENT ──range fill──▶ PARTIAL ──fills…──▶ PARTIAL ──every member held, verified──▶ WHOLE
+ABSENT ──whole fetch, verified (temp, fsync, rename)──────────────────────────────▶ WHOLE
+PARTIAL ──whole fetch of the missing members, verified, install───────────────────▶ WHOLE
+WHOLE ──forced refetch (new inode)────────────────────────────────────────────────▶ WHOLE
+ABSENT or PARTIAL ──promotion hard link of a staged body──────────────────────────▶ WHOLE
+PARTIAL or WHOLE ──evict, forget, cap──────────────────────────────────────────────▶ ABSENT
+owner start: every PARTIAL ──────────────────────────────────────────────────────▶ ABSENT
 ```
 
-There is no "verified" state: nothing on the read path rehashes (§5.4). "Whole" means *every
-byte the manifest describes is on disk and sized right*, not *checked against its name*.
+At owner start every cache file that is not a whole body or a pin is removed
+([04](../04-checkout-cache.md) §2.7, §4.10). The owner MAY re-verify any whole body and removes
+one that fails.
+
+---
 
 ## 4. The algorithm
 
-### 4.1 Units and why
+### 4.1 Units
 
-- **Stored chunk** (default 8 MiB): the network and dedup unit; the unit of a whole fetch.
-- **Group** (`per = round(cache_chunk / chunk)`, default 2 → 16 MiB): the **disk** unit, one
-  file. Coarser than a chunk to keep file counts, directory fan-out and cap walks small; `per` is
-  derived from the *version's own* chunk size so old versions group by their body.
-- **Range** (a sub-interval of one member): the unit a *demand* read fetches, so a 4 KiB read
-  costs a 4 KiB request (G2).
-- **Piece**: the intersection of a read with one stored chunk; a read is served piece by piece.
+- **Chunk** (default 8 MiB): the network and dedup unit, and the unit of verification.
+- **Group** (`per` chunks, default 2): the disk unit, one file. Coarser than a chunk to keep file
+  counts and cap walks small.
+- **Range**: a sub-interval of one member, the unit a demand read fetches (G2).
+- **Piece**: the intersection of a read with one chunk; a read is served piece by piece.
 
-Fetch granularity is thus split by intent: **demand reads fetch ranges; prefetch and explicit
-materialisation fetch whole groups** (fewer, larger, cacheable requests; one round trip per
-group since members are fetched concurrently).
+Demand reads fetch ranges; prefetch, materialisation and staging copies fetch whole groups,
+which are verifiable and cacheable.
 
-### 4.2 Resolving a read
+### 4.2 Reading through a handle
 
 ```
-read(file, stream, buf, off):
-  loop at most twice:                               // second pass only after "body vanished"
-    v = resolve(file)                               // once per attempt: one version per read (G1)
-    if v = none: return 0
-    if v is staged: return read_staged(v, buf, off)
-    return read_published(v.version, stream, buf, off)
-  on ENOENT in attempt 1: retry (a promotion may have moved the bytes, §4.8)
-
-read_published(ver, stream, buf, off):
-  total = clamp(len(buf), 0, ver.size - off);  if total = 0: return 0
-  pieces = split [off, off+total) at stored-chunk boundaries → (index, chunk_off, len, dest)
-  concurrently, bounded by PIECE_SLOTS:
-     for each piece p: served[p] = cache_read(group_of(p.index), p.index, buf[p.dest..], p.chunk_off)
-  got = length of the leading run of complete pieces        // a short middle piece ends the count
-  if position[stream] = off: start_prefetch(ver, last chunk read)
-  position[stream] = off + got
+read(handle, off, buf):
+  c := handle's current content                        # 04 §3.3
+  if c is a staged edit: return read_staged(c, off, buf)   # 04 §4.3
+  total := clamp(len(buf), 0, c.size − off); if total = 0: return 0
+  pieces := split [off, off+total) at chunk boundaries
+  serve every piece (concurrently or not): cache_read(group of piece, piece)
+  got := length of the leading run of complete pieces      # a short middle piece ends the count
+  if position[handle] = off: start_prefetch(c, last chunk read)
+  position[handle] := off + got
   return got
 ```
 
-Missing group for an index (a malformed chunk list) is an error, never zeros.
+A read is short only at the end of the content. A missing group for a chunk index is CORRUPT.
 
-### 4.3 Serving one piece from the cache
+### 4.3 Serving one piece
 
 ```
 cache_read(g, i, dst, coff):
-  want = len(dst); at = offset_g(i) + coff
-  if WHOLE(g):                         fetched = 0
-  elif store.fast:                     within_deadline(ensure_whole(g))       // take the group
-  else:                                fetched = within_deadline(fill(g, i, [coff, min(coff+want, size(i)))))
-  n = pread(B(g), at, dst); touch(B(g))
-  if n ≠ want or ENOENT:               // evicted under us, or the body was replaced
-     within_deadline(ensure_whole(g, force=true)); n = pread(...)   // once; a second failure is real
+  within_deadline:
+    if B(g) exists:            fd := open B(g)
+    elif store is fast:        ensure_whole(g); fd := open B(g)
+    else:                      fd := fill(g, i, [coff, min(coff + len(dst), size(i))))
+  n := pread(fd, offset_g(i) + coff, dst); touch(g)
+  if n ≠ len(dst):             # the body was replaced or damaged under us
+    within_deadline: ensure_whole(g, force = true); fd := open B(g); n := pread(...)
+    if n ≠ len(dst): CORRUPT
   return n
 
 within_deadline(work):
-  start work detached; wait for its outcome at most READ_DEADLINE
-  timeout ⇒ fail this reader (EIO); the work continues and still lands for the next read
+  run work detached; wait for its outcome at most READ_DEADLINE (monotonic)
+  on expiry: this reader fails with DEADLINE; the work continues and lands for later readers
 ```
 
-**Rule R1 (never wait for another's whole fetch on a range read).** A demand read on a slow
-store asks for its own range even when a whole-group fetch of the same group is in flight
-(typically the prefetch). Duplicated bytes are bounded by the read and identical (A1).
+- **R1. A range read never waits for another's whole fetch.** A demand read on a slow store
+  fetches its own range even while a whole-group fetch of the same group is in flight
+  (typically prefetch). The duplicated bytes are bounded by the read and identical (A1).
+- A reader reads through a descriptor opened at a moment its range was held, so an eviction or
+  replacement after that moment cannot take its bytes away: an unlinked inode stays readable.
+- `touch(g)` sets the body's mtime to now if it is older than `TOUCH_INTERVAL`.
 
-### 4.4 Range fill (the partial body protocol)
-
-```
-fill(g, i, want=[c,d)):   under SLOTS (one open destination)
-  here = exists(B(g))
-  held = here ? load(g)               // memory first, else parse R(g); unparsable ⇒ nothing
-              : (reset memory(g); nothing)   // a record whose body is gone is about nothing
-  gap = missing(held[i], want); if none: return 0
-  if not here: write R(g) := empty    // BEFORE the first byte (crash ⇒ claims less than disk)
-  data = store.get_range(chunk(g,i), gap)             // ranges pool
-  if data empty: return 0
-  pwrite(B(g), offset_g(i) + gap.lo, data)            // creates/extends a sparse file
-  memory(g)[i] := widen(memory(g)[i], [gap.lo, gap.lo+|data|))   // no suspension between read & write of memory
-  publish(g): chained after the previous publish of g; when its turn comes, read memory(g):
-     all members whole ⇒ delete R(g) (and drop memory)      // this is what makes the body WHOLE
-     else ⇒ atomic-write R(g) := render(memory(g))
-  return |data|
-
-missing(have=[a,b), want=[c,d)):          // one interval per member, never a set
-  none held → [c,d);  want ⊆ have → none
-  d ≤ a → [c,a)   (fetch the hole between too);   c ≥ b → [b,d)
-  c<a ∧ d>b → [c,d) (refetch the middle rather than split)
-  c<a → [c,a);  else → [b,d)
-widen(have, got) = [min, max]            // valid only if got touches or overlaps have (see §8 N1)
-```
-
-Worst case one read costs one gap inside one chunk; no interval algebra.
-
-### 4.5 Whole-group fetch with in-flight dedupe
+### 4.4 Range fill
 
 ```
-ensure_whole(g, force=false):
-  if inflight[g.key] exists: await it; return {waited = entry.went_to_network, pulled = 0}
-  entry = new; inflight[g.key] = entry          // inserted before any work can run
+fill(g, i, want):
+  loop:
+    with body_lock(g):
+      if B(g) exists: return open B(g)
+      gen := generation(g)
+      gap := missing(held(g, i), want)
+      if gap = none: return open P(g)
+      if P(g) absent: create P(g) empty and sparse; held(g, ·) := none
+    data := store.get_range(chunk(g, i), gap)        # no lock held
+    with body_lock(g):
+      if generation(g) ≠ gen or P(g) absent: continue loop     # evicted or replaced meanwhile
+      pwrite(P(g), offset_g(i) + gap.lo, data)
+      held(g, i) := widen(held(g, i), [gap.lo, gap.lo + |data|))
+      if every member of g is held whole: install_from_partial(g)     # §4.5
+      return open (B(g) if it exists, else P(g))
+```
+
+`missing(have, want)` answers one interval per member, never a set:
+
+```
+have = none                       → want
+want ⊆ have                       → none
+want = [c,d), have = [a,b):
+  d ≤ a                           → [c, a)       (fetch the hole between too)
+  c ≥ b                           → [b, d)
+  c < a and d > b                 → [c, d)       (refetch the middle rather than split)
+  c < a                           → [c, a)
+  otherwise                       → [b, d)
+```
+
+`widen(have, got)` is the union when the two intervals touch or overlap; when they are disjoint
+it keeps whichever is longer (the current one on a tie). It never claims the gap between them.
+
+**Invariant I1.** Every interval held in memory for `P(g)` is on disk in `P(g)`'s current
+inode. It holds because an interval is widened only after its bytes were written, under the
+body lock, after checking that the generation (hence the inode) is the one the fill started
+against, and because nothing about a partial body survives the owner: partial bodies are
+removed at owner start ([04](../04-checkout-cache.md) §4.10).
+
+### 4.5 Whole-group fetch, verification and install
+
+```
+ensure_whole(g, force = false):
+  if in_flight[g] exists: await it; return (the joiner is credited with nothing)
+  in_flight[g] := this fetch            # inserted before any work can start
   try:
-    if not force and WHOLE(g): return
-    entry.went_to_network = true                // slot wait counts as network cost
-    under SLOTS:
-      if R(g) exists: for every member not held whole, concurrently: get, check size, pwrite at offset
-                      then drop R(g)            // publishes as WHOLE; members a reader paid for are kept
-      else:           temp := sized to group bytes (disk-full fails before paying for bytes)
-                      concurrently: get each member, check size = manifest size, pwrite at offset
-                      rename temp → B(g); drop any stale R(g)
-  finally: remove inflight[g.key]
+    if not force and B(g) exists: return
+    do:
+      if not force and P(g) exists:     # complete in place
+        for each member not held whole: fetch_verified(member);
+          with body_lock(g): if generation changed: restart ensure_whole; pwrite; held := whole
+        install_from_partial(g)
+      else:                             # fresh body
+        temp := a temporary file for the group
+        for each member: pwrite(temp, offset, fetch_verified(member))
+        fsync(temp)
+        with body_lock(g): rename temp → B(g); remove P(g) if any; forget held(g); generation(g)++
+  finally: remove in_flight[g]
+
+fetch_verified(member):
+  bytes := store.get(chunk)
+  require |bytes| = member size and hash(bytes) = chunk key, else CORRUPT
+  return bytes
+
+install_from_partial(g):                # under body_lock(g)
+  for each member whose bytes came, in whole or in part, from range fills:
+    read it back from P(g); require hash = chunk key
+  on a mismatch: remove P(g); forget held(g); generation(g)++; answer "mismatch"
+  else: fsync(P(g)); rename P(g) → B(g); forget held(g); generation(g)++
+
+A caller told "mismatch" releases the body lock and runs ensure_whole(g, force = true) once;
+that fetch verifies every member itself, so its failure (CORRUPT if the store's bytes are
+wrong) is the answer.
 ```
 
-A size mismatch fails the whole write: nothing lands. Joiners get the owner's outcome; only the
-owner is credited with bytes pulled (so progress is not counted N times).
+A size or hash mismatch lands nothing. CORRUPT is propagated per
+[failure-model](failure-model.md) (the chunk's corruption marker and repair are
+[02](../02-remote-model.md) and [replication](replication.md)); it is never retried as
+TRANSIENT and never served. Promotion installs a group by hard link instead
+([04](../04-checkout-cache.md) §4.8); its bytes are the bytes the upload hashed.
 
-### 4.6 Sequential detection and read-ahead
+### 4.6 Verification
 
-- A *stream* is a reader's identity (a descriptor/handle if the frontend has one, else the file).
-  A read is sequential iff it starts exactly where that stream's previous read ended. The first
-  read of a stream never prefetches.
-- On a sequential read: from the group containing the last chunk read, walk `window + 1` groups
-  in order (`window = clamp(READAHEAD_BYTES / group_bytes, 1, MAX_GROUPS)`; 1 at defaults, i.e.
-  current group + next), calling `ensure_whole` on each, detached, errors swallowed. Skip if
-  `MAX_LOOPS` prefetch loops are already running (spawn rate is the reader's; the count is ours).
-- Prefetch is *sequential within a loop* and whole-group, using the whole-chunk pool, so it can
-  never occupy the range pool a demand reader needs (G4).
+- **V1.** Every whole chunk fetched from a store is hashed and compared with its key before any
+  of its bytes is written (§4.5).
+- **V2.** A member assembled from range fills is verified when its body becomes whole, before
+  the body is installed (§4.5). A whole body is therefore always verified.
+- **V3.** Bytes served from a partial body are **unverified**: a range cannot be checked against
+  a key that covers the whole chunk. They reach only readers on this machine.
+- **V4.** Any operation that turns cached bytes into bytes of a new publication (staging an
+  inherited member, [04](../04-checkout-cache.md) §4.3; export verification in
+  [05](../05-ops-config.md)) reads them only from a whole body, fetching it whole if needed.
+  Hence G8.
+- **V5.** Whole bodies are not re-hashed on every read: verification happened at install, and
+  the install's fsync before rename keeps a power loss from leaving an unwritten body under the
+  final name.
+- The chunk key is a non-cryptographic hash. Verification detects accidental corruption, not a
+  store that deliberately crafts colliding bytes; the threat model is
+  [security-model](security-model.md).
 
-Staged reads do not prefetch; their inherited pieces still go through §4.3.
+### 4.7 Sequential detection and read-ahead
 
-### 4.7 Staged edits combined with published chunks
+- A read is sequential iff it starts exactly where its handle's previous read ended; a
+  handle's first read never prefetches.
+- On a sequential read the owner SHOULD fetch whole, detached, the group holding the last chunk
+  read and at least the next one. How far ahead, and how many prefetches run at once, is the
+  implementation's choice. Prefetch errors are logged, never raised to a reader.
+- Prefetch MUST NOT delay a demand read (G4): a range read is served while prefetches of the
+  same file are in flight, whatever capacity they hold.
+- Reads of staged content do not prefetch; their inherited pieces still go through §4.3.
+
+### 4.8 Materialisation and pinning
+
+- **Plan**: a published version needs all its groups; a staged edit needs the base groups that
+  hold an Inherit member; a staged edit without base needs none. On a lazy tree, a file absent
+  from the mirror has its manifest fetched and recorded first.
+- **`pin(key, keep)`**:
+  1. For every planned group, durably create or update `N(g)` with deadline `now + keep`
+     **before** fetching, so the cap cannot evict a group between its fetch and its pin. A pin
+     is attached to content: it follows the content across renames and is shared by every file
+     using that body.
+  2. `ensure_whole` every planned group.
+  3. Acknowledge once every group is whole. A failure leaves the pins in place (a later retry
+     or the cap's lapse removes them).
+- **`unpin(key)`** removes the pins of the key's groups (reference-blind, like `evict`).
+- **`assemble_to`** fetches the plan whole, then reads the content through one read handle into
+  the destination. Its progress covers both the fetch and the
+  assembly; concurrent materialisations of one key report as one.
+- **`fetch_range`** reads only the covering pieces through one handle into the destination.
+- A whole body is never modified in place (it is only created by rename or link and removed), so
+  a reader SHOULD read it through a read-only mapping. A partial body is written in place while
+  it fills; a reader MAY map it, and reads only intervals that I1 guarantees.
+
+### 4.9 Replacement (the cap)
 
 ```
-read_staged(edit, base, buf, off):
-  whole-file staged body ⇒ read it directly (short = EOF)
-  else per piece i:
-    Staged(body, boff) ⇒ read body at boff+chunk_off; past its end ⇒ zeros (a body is only as
-                          long as the writes that reached it; the edit's size is authoritative)
-    Zero               ⇒ zeros
-    Inherit            ⇒ cache_read(group of i in base, …)   // no base ⇒ error, never zeros
+counts: maintained by every create, write, install, link, removal, pin and unpin of cache files;
+        anchored by one walk of the cache tree per owner (lazily after owner start)
+
+enforce_cap():            # after every upload, and every HOUSEKEEPING_INTERVAL
+  if now < earliest_pin_deadline and not (CAP set and bytes − pinned > CAP): return
+  walk: bodies (whole and partial), pins
+  remove lapsed pins (deadline < now); recount exactly from the walk
+  if CAP set and bytes − pinned > CAP:
+    candidates := bodies without a live pin, by mtime ascending (coldest first)
+    for each, while bytes − pinned > CAP:
+      if body_lock(g) is free: take it; remove the body; forget held(g); generation(g)++
 ```
 
-A write that must stage a group with inherited members copies them *through* `cache_read`, so
-the cache's bytes become the staged edit's bytes and then a newly published chunk (§8 N1 impact).
+- Bytes are counted by allocated size where the filesystem reports it, else by apparent size.
+  Pins and staged bodies count nothing.
+- Pinned bodies are neither evicted nor counted against the cap; pinned bytes are unbounded by
+  design (the user asked).
+- A body under a running fill or install is skipped, not waited for.
+- The cap cannot reach staged bytes: they are in another tree. A cache body that shares an inode
+  with a staged body loses only its cache name.
+- With no cap configured nothing is evicted; lapsed pins are still removed.
 
-### 4.8 Cooperation required from other actors
+---
 
-- **Promotion (writer side).** Publishing a staged group into the cache is a *hard link* of the
-  staged body under the group key (fallback: write the group whole). If a partial body occupies
-  the name it is unlinked with its record first; the link is dated now (else the cap sees it as
-  old as the write). Order: groups into the cache → published version visible → staged edit
-  removed → staged bodies forgotten. A reader that resolved either representation finds its
-  bytes, and one ENOENT retry of the whole read covers the flip.
-- **Resync / namespace changes** never touch the cache (content-addressed, still valid).
-- **Evict(file)** forgets every group of its published version, reference-blind: a body shared
-  with another file goes too and is re-fetched on demand.
-- **Explicit materialisation** (pin, assemble to a path): plan the groups still owed (published:
-  all; staged: groups with an inherited member), `ensure_whole` each under GROUP_SLOTS, then for
-  pinning set `P(g)` deadline = now + keep on each (a pin needs a body to stand beside).
-  Assembly then reads through §4.2.
-- **Partial-range frontends** (macOS dataless files) round the requested range outward to the
-  system's alignment (start down, end up, clamp at EOF), then call a range read into the
-  destination at the same offset; bytes outside stay sparse. An empty range is answered as
-  "version gone", not sent.
+## 5. Properties
 
-### 4.9 Replacement
+- **Safety of bytes (G1).** A body is named by the digest of its member keys, so it can only
+  ever hold bytes of those chunks; whole fetches check each member's size and hash; every range
+  lands at the member's chunk-local offset. A reader reads either a whole body (verified, V1–V2),
+  or a partial body's range that I1 guarantees is on disk, or bytes its own fill wrote. A short
+  piece ends the count, so a hole is never reported as read. One handle reads one lineage
+  ([04](../04-checkout-cache.md) §3.3).
+- **No unpublished loss (G6).** Staged bytes are in a tree the cap, evict and forced refetch
+  cannot address; promotion links rather than renames, so at no instant are unpublished bytes
+  only in the cache.
+- **Liveness (G3, G7).** Every foreground wait is bounded by `READ_DEADLINE`; the detached fetch
+  completes the body for the next read. In-flight entries are removed in a `finally`, so a
+  failed fetch never wedges its joiners. A fill that finds its body replaced starts over, within
+  the reader's deadline.
+- **Concurrency.** The in-flight insertion, the held-interval widen, the generation check and
+  every cache file change are each one critical section (the body lock, or the in-flight table's
+  own atomic insert). Concurrent fills of disjoint ranges of one member are correct because
+  `widen` never claims a gap.
 
-```
-held counts: maintained on every write into a body name (size before/after delta; new file +1),
-             link, forget, pin/unpin; anchored by one full walk per process (or reset if the root is gone)
-
-enforce_cap():            // triggers: after each upload, and every HOUSEKEEPING_INTERVAL
-  anchor()
-  if now < earliest_pin_deadline and not (cap set and bytes − pinned_bytes > cap): return
-  walk all bodies (skip records; pins give deadlines)
-  unlink lapsed pins; recount exactly from the walk
-  if over cap:
-     candidates = unpinned bodies, sorted by mtime ascending
-     while bytes − pinned_bytes > cap: unlink body, THEN its record
-```
-
-- Counts: bodies (whole or partial, by file size), not records, not pins, not staged bodies.
-- Pinned bytes neither count nor are evicted; a pin lapses at its deadline and is removed by the
-  next sweep, after which the body is an ordinary candidate.
-- LRU approximation: mtime, refreshed by a read only when older than TOUCH_INTERVAL.
-- **Staged bytes cannot be evicted because they are in a different store** — not because a filter
-  spares them. After promotion a published body may share an inode with a staged body; unlinking
-  the cache name leaves the staged name intact, and after the staged name is gone the bytes are
-  published and re-fetchable.
-
-### 4.10 Availability (derived)
-
-`held(g)` ⇔ WHOLE(g). A file is *pinned* if every group is held with a live pin, *cached* if
-every group is held, else *online-only* (a partly cached file reads online-only). Staged files
-are cached.
-
-## 5. Properties and why they hold
-
-### 5.1 Safety: bytes match the version resolved (G1)
-
-Claim: a published read returns bytes whose hash-named source is the resolved version's chunk
-list, given an honest store.
-
-- *Naming.* A body is named by the hash of its members' names, so a body can only ever be filled
-  with bytes of those chunks (A1). Two versions never alias a body unless they share the exact
-  run, in which case the bytes are equal.
-- *Placement.* Every write lands member `i`'s bytes at `offset(i)+x` for chunk-local `x`; whole
-  fetches check each member's size; ranges are read at chunk-local offsets.
-- *No zeros for missing data.* The invariant **I1: every interval a record (or the memory table)
-  claims is on disk** plus **I2: a body without a record is whole** make every served byte real:
-  a reader reads only after `missing` returned none (claimed) or after its own fill wrote the
-  range, or after a whole fetch/rename. I1 is kept by: empty record before first byte; widen
-  after bytes land; eviction removes body before record (a record without body reads as empty);
-  promotion removes a partial body before linking. **I1 is violated by two interleavings (§8 N1,
-  N2).**
-- *One version per read.* Resolution happens once per attempt; the retry re-resolves and re-reads
-  the whole buffer. Across reads of one open descriptor, versions may change (§8 N3).
-- *Short reads.* A missing/short piece ends the count at the leading run of complete pieces, so
-  a hole is never reported as read.
-
-### 5.2 Safety: eviction never loses unpublished data (G6)
-
-Staged bytes live in a separate store the cap, evict and forced refetch cannot address. Cache
-bodies are projections of published chunks (A1: re-fetchable). Promotion links rather than
-renames, so at no instant is the only name of unpublished bytes in the cache. Holds structurally.
-(Staged-store losses exist but belong to the write path: findings F7, F9, F10.)
-
-### 5.3 Liveness and bounded waiting (G7, G3)
-
-- Every foreground wait is `within_deadline`: after READ_DEADLINE the reader gets EIO; the fetch
-  continues detached and completes the body for the next read (offline read fails fast, then
-  succeeds once online).
-- A body stuck PARTIAL completes on the next `ensure_whole` (prefetch, materialisation).
-- In-flight entries are removed in a `finally`, so a failed or cancelled owner does not wedge
-  joiners forever; joiners observe the failure.
-- A cold sequential stream: the second read prefetches current + next group; afterwards each
-  crossing into a new group fetches one further ahead (G3). Bounded concurrency means a slow store
-  degrades throughput, not correctness.
-
-### 5.4 Integrity (what is *not* guaranteed)
-
-Plain reads never rehash. Whole fetches check only size; range fills cannot check anything (a
-chunk name covers the whole chunk). A store returning wrong bytes of the right length is served
-to readers, cached, and — via §4.7 staging copies — republished under new honest names. Only
-verified fetch (export), `gc --verify` and repair rehash (09 §A6). A correct version must either
-accept this explicitly or verify: whole fetches can rehash for free (bytes are in memory);
-ranges would need a per-chunk sub-hash tree in the manifest.
-
-### 5.5 Concurrency argument
-
-Relies on the cooperative scheduler: (a) the in-flight lookup-then-insert, (b) `widen` of the
-memory table, (c) publish-chain append, (d) held-count deltas have no suspension point inside.
-Under preemptive threads each becomes a critical section; `widen` + `publish` for one body must
-be one. Concurrent *writers* of the same region are harmless by A1; concurrent fills of different
-regions are correct only if widen is (§8 N1).
-
-### 5.6 Bounds (G5)
-
-Disk: `bytes − pinned ≤ cap` after each sweep; overshoot between sweeps ≤ what is read in one
-HOUSEKEEPING_INTERVAL plus drift from other processes; pinned bytes unbounded by design (user
-asked). Descriptors: ≤ SLOTS open destinations for fills and group fetches. Wire: ≤ DOWNLOADS
-whole-chunk requests + ≤ RANGES range requests per domain per process (the pools are per
-domain prefix, shared by every consumer). Memory: a whole fetch holds up to one group of chunk
-buffers per slot (SLOTS × group bytes = 128 MiB at defaults); a read holds its caller's buffer.
-Exception: the caller-sized range copy (§8 N4).
-
-## 6. Failure, crash and resume
+## 6. Crash and power loss
 
 | Interrupted at | Left on disk | Next behaviour |
 |---|---|---|
-| fill: before empty record | nothing | fill starts over |
-| fill: after empty record, before/after pwrite | record `{}` (claims nothing) + maybe bytes | bytes re-fetched on demand; harmless waste |
-| fill: after pwrite, before record update | record claims less than disk | refetch of that range; I1 holds |
-| record write torn | unparsable record | strict parser ⇒ "holds nothing"; I1 holds |
-| whole fetch before rename | temp file | temp sweep (dead pid) |
-| complete-in-place before record drop | partial body, record claims less | next ensure completes it |
-| eviction between body unlink and record unlink | record without body | read as ABSENT, reset on next fill |
-| promotion mid-way | see write path (04 §4.7); cache side is idempotent (EEXIST ⇒ done) | |
-| pin after fetch, cap in between | body gone, pin skipped | file reads online-only, re-pin needed (not detected) |
-| read deadline expires | fetch still running | next read finds the bytes |
-| power loss | renames may persist before data (no fsync): zero-length record ⇒ "holds nothing" (safe); a whole body renamed before its data ⇒ **zeros read as whole** (F8) | |
+| any point of a range fill | a partial body | removed at owner start |
+| a fresh whole fetch before its rename | a temporary file | removed at owner start ([04](../04-checkout-cache.md) §4.10) |
+| an install from a partial body | the partial body, or the whole body (after the rename) | removed, or whole and verified |
+| an eviction | the body gone or still there; a pin, if any, untouched | consistent either way |
+| a pin before its fetch | a pin without a body | the next pin or the cap's lapse handles it |
+| a promotion | [04](../04-checkout-cache.md) §4.7 replays it; linking an existing name succeeds | |
+| power loss | whole bodies were fsynced before their rename; partial bodies are discarded anyway | no body under a whole name holds unwritten bytes |
 
-Every cache step is idempotent: re-running a fill re-asks `missing`; a whole fetch of a whole body
-is a no-op; linking an existing name succeeds; forget of an absent body is a no-op.
+Every cache step is idempotent: a fill re-asks `missing`, a whole fetch of a whole body does
+nothing, linking an existing name succeeds, forgetting an absent body succeeds.
 
-## 7. Parameters
+## 7. Bounds and parameters
 
-| Name | Value | Effect / trade-off |
+**Disk**: `bytes − pinned ≤ CAP` after each sweep; overshoot between sweeps ≤ what is read in one
+`HOUSEKEEPING_INTERVAL`. How many requests, descriptors and buffers a fill or fetch uses at once
+is the implementation's choice ([01](../01-core.md), P6).
+
+| Name | Recommended | Constraint / effect |
 |---|---|---|
-| CHUNK_SIZE | 8 MiB (per version) | network/dedup unit; larger = fewer requests, costlier whole fetches, worse dedup |
-| CACHE_CHUNK (group) | 16 MiB → `per = 2` | files on disk vs prefetch granularity and eviction granularity |
-| DOWNLOADS | `max_downloads` = 8 | concurrent whole-chunk requests per domain |
-| RANGES | `max_downloads` = 8 | concurrent demand ranges; separate so prefetch cannot starve readers |
-| SLOTS | `max_downloads` = 8 | open destinations (fills + group fetches) per consumer; without it 247 fds in 200 ms |
-| PIECE_SLOTS | 4 × max_downloads | pieces of one read in flight; bounds caller-sized fan-out |
-| GROUP_SLOTS | 4 × max_downloads | groups of a materialisation queued at once |
-| READ_DEADLINE | 15 s | EIO latency when offline vs spurious failures on a slow link |
-| READAHEAD_BYTES / MAX_GROUPS / MAX_LOOPS | 4 MiB / 8 / 4 | lookahead depth (1 group at defaults) vs wasted bandwidth on seeks |
-| TOUCH_INTERVAL | 60 s | LRU resolution vs one inode write per read |
-| CAP | unset (unlimited) by config; wizard proposes 1 GiB | disk vs refetch cost |
-| HOUSEKEEPING_INTERVAL | 60 s | cap overshoot window vs walk cost (walk only when over or a pin lapsed) |
-| PIN_KEEP | 10 days | offline guarantee duration |
-| stat pools (walk) | 64 entries / 16 directories | cap walk speed vs fd use; two pools because nesting one deadlocks |
+| `READ_DEADLINE` | 15 s | EIO latency offline vs spurious failures on a slow link |
+| `TOUCH_INTERVAL` | 60 s | LRU resolution vs one inode write per read |
+| `CAP` | unset (unlimited); the config wizard proposes 1 GiB | disk vs refetch cost |
+| `HOUSEKEEPING_INTERVAL` | 60 s | cap overshoot window |
+| `PIN_KEEP` | 10 days | default offline duration of a pin |
 
-## 8. Known gaps
+## 8. Conformance
 
-- **N1 (new, from code reading; not reproduced) — concurrent disjoint fills over-claim.** A fill
-  computes its gap against the `held` it loaded, then suspends on the network; `widen` applies
-  its fetched span to the *current* memory interval. Two fills of one member with disjoint wants
-  (`[0,4)` and `[10,12)` on a cold member) end with a claimed `[0,12)` whose middle was never
-  written: sparse zeros served as content, persisted in the record, copied into staged edits and
-  republished. Fix: widen only when the new span touches or overlaps the current interval,
-  otherwise keep the current interval (claim less); or hold one fill per (body, member).
-- **N2 (new, from code reading) — eviction during a fill resurrects stale claims.** The cap
-  unlinks the body and record but not the in-memory intervals; a fill that loaded before the
-  eviction pwrites into a freshly created sparse body, widens the stale memory, and publishes a
-  record claiming the evicted intervals. Fix: eviction must reset memory for that group, and a
-  fill must re-check that the body it loaded against is the one it writes (e.g. inode or a
-  generation counter) before widening.
-- **N3 — "the version it opened" is per read call, not per open.** FUSE resolves the file on
-  every read with no stream id; a peer update applied between two reads of one descriptor mixes
-  versions in what the application sees, and `assemble_to` loops over reads the same way (a
-  materialised copy can be torn across versions). The share server holds one manifest per
-  response and is consistent. Fix: resolve at open and read that version for the handle's life
-  (bodies are content-addressed, so the old version stays readable while re-fetchable).
-- **N4 — caller-sized buffer.** A range copy allocates the requested length up front; the IPC
-  verb bounds it only by `length > 0`. Fix: copy in group-sized blocks.
-- **N5 — no read-path verification** (09 §A6): corruption flows to readers and into republished
-  chunks (§5.4).
-- **N6 — per-consumer dedupe and slots** (04 §9.5): each data-layer instance in a process has its
-  own in-flight table and SLOTS, so two consumers can fetch one group twice and hold 2×SLOTS
-  descriptors; wire pools are shared, so the wire bound holds.
-- **N7 — cross-process counts drift** (by design, `ponytail` note): another process's writes and
-  evictions are not seen until a walk; overshoot costs disk only.
-- **N8 — fan-out below SLOTS.** A group fetch fans out over all its members unbounded at the
-  cache layer; the wire pools are the bound. A test stubbing the store above those pools sees an
-  apparently unbounded fan-out (memory note *read-path pools*): test bounds against the real
-  store layer with a fake backend below it.
-- **N9 — pin after fetch is not atomic with the cap**; a pin can silently not happen. Pin before
-  fetch with a marker the cap honours even for an absent body, or re-check after pinning.
-- **N10 — power loss** (F8): no fsync; a renamed-before-data whole body reads as whole zeros.
-- **N11 — availability is binary** (04 §9.6): a partly cached file is online-only.
-- Publish-chain entries for bodies that stay partial are never freed (04 §9.7): bounded by distinct
-  partial bodies seen per process.
+An implementation MUST exhibit the following.
 
-## 9. Alternatives and why this design
+- Two concurrent whole fetches of a cold group issue one request per member; the first caller is
+  credited with the bytes, the joiner with none.
+- Reading 4 bytes of member 0 of a group of members sized 4, 4 and 2 asks the store for exactly
+  `[0,4)` of member 0; the body is 10 bytes with members at 0, 4 and 8; reading all three makes it
+  whole.
+- On a fast store, a member read fetches the whole group and no range.
+- A range read proceeds while a whole fetch of its group is held in flight, and the group still
+  arrives.
+- Two fills of disjoint ranges of one cold member, completing in either order, never make a
+  later read return bytes that were not fetched; the cap evicting a body during a fill never
+  makes a later read return bytes that are not on disk.
+- A fetched chunk whose bytes do not hash to its key is never written, served or installed, and
+  the failure is CORRUPT; a store answering a missing chunk yields ABSENT or CORRUPT per
+  [failure-model](failure-model.md), names the chunk, caches nothing, and the in-flight table is
+  empty afterwards.
+- A body assembled from ranges whose bytes are wrong is not installed as whole.
+- Reads fetch only the groups they touch; `fetch_range` serves a range without materialising
+  the file, and the destination's size is the end of the range.
+- Two handles on one file keep separate read-ahead positions; one read does not prefetch; a
+  second sequential read fetches the current and the next group; a probe elsewhere in the file
+  through another handle does not reset a sequential reader.
+- A range read is served while prefetches hold every whole-fetch request in flight.
+- A handle opened before a peer's version is applied keeps reading the version it opened; a
+  local write is visible to every handle.
+- A read offline fails within `READ_DEADLINE`; the fetch lands; the next read is local with no
+  store call. A body removed underneath a reader is refetched on the next read.
+- Read touches mtime; with no cap nothing is evicted; a cap of 20 bytes drops the coldest
+  bodies; a cap of 0 drops every unpinned body, whole or partial.
+- A pin spares a body at cap 0; re-pinning moves the deadline; a lapsed pin is removed, then its
+  body is an ordinary candidate; a pin made before its fetch survives a cap sweep that runs
+  during the fetch.
+- Promotion by link: one body, two names; publishing twice succeeds; a length mismatch is
+  refused; the body stays readable after the staged name goes, with no refetch; a cap of 0
+  never touches staged bodies.
+- A file with every group present but one partly filled is `online-only`; once filled it is
+  `cached`.
+- Progress of a materialisation is monotone, covers fetch and assembly, and overlapping
+  materialisations of one key share one report.
 
-| Choice | Alternative | Reason |
-|---|---|---|
-| Ranges for demand, whole groups for prefetch | all-or-nothing bodies | a few-byte read cost 16 MiB (b0ea0213, 00585588) |
-| One interval per member | interval sets | worst case one gap per read; no algebra (b0ea0213) — at the price of N1 |
-| Record absent ⇔ whole | flag inside the body | keeps "name exists ⇒ whole" for every existing caller (9f41023b) |
-| Never join a whole fetch on a range read | join in-flight | 100 KB turned into seconds; phones lost FUSE descriptors (6bd091b6) |
-| Separate range pool | one download pool | 128 KiB read behind 8 × 1 MiB prefetches = 6 s on a phone (ff9b1855) |
-| Detached fetch + deadline | retry ladder / cancel on timeout | suspend froze 44 s with the link down; cancellation would fail joiners (0f9a529e) |
-| Descriptor slots at the cache | rely on wire pools | destinations opened before the wire slot: 247 fds in 200 ms (eb40957d) |
-| Prefetch ahead of, not alongside, the reader | prefetch from current chunk | (96e990ea) |
-| Fast stores take the whole group | ranges everywhere | same cost, better cache (f18f85db) |
-| LRU by coarse mtime | atime, access log | no inode write per read (6c654bc9) |
-| In-process counts + one walk | walk every time; persisted counts | status polls walked 4096 shards (82e0adea) |
-| Pin = marker whose mtime is the deadline | per-file pin list | follows content, shared across files (9b794f0c) |
-| Staged in a separate store | spare staged in the cap | eviction *cannot* reach sole copies (2d0f0fc9, 75c90fdd) |
-| Promote by hard link | rename / copy | both names readable across the flip; half the local writes (99ec3cb6) |
-| Reference-blind evict | refcounts | re-fetch is cheap; refcounts are state to corrupt |
-| Plausible: verify on whole fetch | — | costs one hash of bytes already in memory; would close N5 for prefetched data |
+## 9. Rationale
 
-## 10. Mapping to the current implementation
-
-| Abstract | Concrete | Spec |
-|---|---|---|
-| group, group key, `per`, offsets | `Manifest.Group`, `Conf.chunks_per_group` | [04 §2.1](../04-checkout-cache.md) |
-| body / record / pin paths | `chunks/<xxx>/<group key>`, `.manifest`, `.pin` via `Cache_layout` | 04 §2.2–2.3 |
-| read (§4.2), retry on ENOENT | `Data.pread_key`, `Data.pread`, `serve_pieces`, `Chunks.pieces` (`lib/domain/checkout/content/data.ml`) | 04 §4.11 |
-| cache_read (§4.3), within_deadline, touch | `Chunk_cache.read_into`, `within_deadline`, `touch` (`lib/domain/checkout/chunks/chunk_cache.ml`) | 04 §4.3 |
-| fill, missing, widen, publish chain | `Chunk_cache.fill`; `Partial.missing/widen/take/publish/start/load/reset` (`chunks/partial.ml`) | 04 §4.4 |
-| ensure_whole, in-flight table | `Chunk_cache.ensure_fetched`, `fetching`, `fetch`, `complete_body`, `write_group` | 04 §4.4 |
-| read-ahead | `Data.read_ahead`, `last_read_end`, `readahead_in_flight` | 04 §4.11 |
-| staged combination | `Data.pread_staged`/`pread_chunked`; resolver `Manifests.current` | 04 §4.5 |
-| promotion hand-over | `Chunk_cache.link_in`, `put_group`, `links_supported`; `Data.promote` | 04 §4.7 |
-| materialisation, pin | `Data.fetch_plan`, `fetch_groups`, `ensure_local`, `assemble_to`, `fetch_range`; `Chunk_cache.pin/unpin/forget` | 04 §4.10 |
-| cap | `Chunk_cache.enforce_cap`, `anchor`, `counted_write`, `held_for`; triggers in the domain engine (`housekeeping_interval = 60`) | 04 §4.12 |
-| availability | `Checkout.availability` | [08](../08-frontends.md) |
-| DOWNLOADS / RANGES pools, verified fetch | `Remote.pools_for` (`downloads`, `ranges`, keyed by chunk prefix); `Chunk_store.fetch/fetch_range/fetch_verified` | [02 §4.2, §6](../02-remote-model.md) |
-| SLOTS, PIECE_SLOTS, GROUP_SLOTS | `Chunk_cache.slots`, `Data.piece_slots`, `Data.group_slots` | 04 §2.5, §6 |
-| FUSE read (no stream) | `lib/app/frontends/fuse/internal_ops.ml` `read` | 08 |
-| Android per-handle stream | `android_jni.ml` `read ~stream:handle` | [android](../frontends/android.md) |
-| macOS aligned partial fetch | `PartialRange.aligned`, `fetchPartialContents` → IPC `fetch_range` | [file-provider A5.3](../frontends/file-provider.md) |
-| share server consistent reads | `share_server.ml` `D.pread ~manifest` (one manifest per response) | 08 |
-| tests | `tests/content/{chunk_cache,demand_paging,fetch_range,read_ahead,read_fanout,fetch_fanout,cache_cap,partial_local,promote_race,read_offline,verified_fetch,corruption}`, `tests/unit/{partial_intervals,demand_ranges,chunk_pools}` | 04 §8, [09](../09-tests.md) |
+| Choice | Reason |
+|---|---|
+| Ranges for demand reads, whole groups for prefetch | A few-byte read once cost a whole group. |
+| One held interval per member | The worst case per read is one gap in one chunk; no interval algebra. |
+| Held intervals only in memory | A persisted record needs crash-ordering rules that power loss breaks; a lost partial body costs a refetch. |
+| A name that exists is a whole body | Every caller can answer "cached?" from a name. |
+| Never join a whole fetch on a range read | Joining turned 100 KB into seconds and lost file descriptors on phones. |
+| Prefetch never delays a demand read | A 128 KiB read waited 6 s behind prefetches on a phone. |
+| Detached fetch plus deadline | A suspend froze 44 s on a reader with the link down; cancelling would fail joiners. |
+| Verify whole chunks, read-back verify range-built bodies | Corruption must not be cached as whole or republished under new, honest keys. |
+| Pin before fetch | A pin placed after its fetch could silently not happen. |
+| LRU by coarse mtime | No inode write per read. |
+| Pin as a marker whose mtime is the deadline | Follows content across renames and is shared by every file using the body. |
+| Reference-blind evict | Refetching is cheap; reference counts are state to corrupt. |

@@ -1,345 +1,430 @@
 # Multi-store replication
 
-One domain is backed by several stores, each with a role, and is presented to every layer above as a single store with the ordinary object contract. This document specifies the policy and the algorithm independently of the current code; §10 maps it onto the implementation.
+One domain is backed by several stores, each with a role, and is presented to every layer above as a single store with the contract of [06-backends.md](../06-backends.md). This file owns the roles, the composite's read and write paths, the copies filled behind the write, the write guard, and repair between members.
+
+Terms: a **member** is one configured backend of a domain. A **copy** is a replica or backfill member. The **source** is the composite of the mains alone. The **owner** is the process that owns the domain on this machine ([07 §2.2](../07-daemon-cli.md#22-the-domain-owner), principle P1 of the spec README).
 
 ---
 
 ## 1. Problem and goals
 
-A user's domain is a set of objects: content-addressed **chunks** (the name is a hash of the body), and **referrers** that name chunks (file manifests) or name other objects (journal entries name manifests, the cursor names the newest journal entry). The user wants more than one store to hold it: a source of truth, a full second copy that can answer reads when the first is unreachable, a copy being filled for later promotion, an old archive that still answers for what it holds.
+A domain is a set of objects: content-addressed **chunks** (the name is a hash of the body), and **referrers** that name chunks (file manifests) or other objects (journal entries name manifests, the cursor names the newest journal entry). The user wants more than one store to hold it: a source of truth, a full second copy that answers reads when the first is unreachable, a copy being filled for later promotion, an old archive that still answers for what it holds.
 
 Goals:
 
-- **G1 One store.** Callers see one store with the ordinary contract (put, get, conditional put, delete, copy, list, watch). They never learn how many members there are or which answered.
-- **G2 Roles as policy.** Each member's role fixes what it promises to hold, when, and whether reads may reach it.
-- **G3 Writes are not slowed by copies.** A write returns once the sources of truth have it and every copy has *durably recorded* that it owes it. Copies catch up in the background, across crashes and restarts.
-- **G4 Partial coverage, never partial files.** A copy may lag, but a referrer reaches it only after everything the referrer names is there. A reader of a copy may see an old tree; it never sees a file whose chunks are missing.
+- **G1 One store.** Callers see one store with the ordinary contract. They never learn how many members there are or which one answered.
+- **G2 Roles as policy.** A member's role fixes what it promises to hold, when, and whether reads may reach it.
+- **G3 Writes are not slowed by copies.** A write returns once the mains have it and every copy has durably recorded that it owes it. Copies catch up in the background, across crashes and restarts.
+- **G4 Partial coverage, never partial files.** A copy may lag, but a referrer reaches it only after everything the referrer names is there.
 - **G5 Honest reads.** A read fails over past an unreachable member, and never reports "not found" because a member could not be asked.
-- **G6 Copies are never ahead of the truth.** No copy is written while a source of truth is offline.
-- **G7 Repairable.** Divergence (dropped work, corruption, a new empty member) is detectable and repairable by an explicit whole-store operation.
-- **G8 Bounded resources.** Background forwarding holds a bounded number of bodies in memory, and a bounded amount of upload bandwidth.
+- **G6 Copies are never ahead of the truth.** No copy is written while a main is offline.
+- **G7 Nothing is dropped, and divergence is visible.** A job that cannot run is kept and retried, the copy is reported degraded meanwhile, and whole-store divergence (corruption, a new empty member) is repaired by an explicit operation.
+- **G8 Forwarding never competes with the user.** Best-effort chunk forwards use upload bandwidth only when the link has room.
 
 Non-goals:
 
-- Consensus between sources of truth. With several mains, the first one arbitrates conditional writes; the others are written in sequence with no rollback.
-- Writes while the main is offline. Failover is for reads only (disconnected writes are the local write-ahead log's job, one layer up).
+- Consensus between mains. The first main arbitrates claims. The others follow in sequence, with no rollback.
+- Writes while a main is offline. Failover is for reads only. Disconnected writes are the write-ahead log's job, one layer up ([algorithms/wal-and-journal.md](wal-and-journal.md)).
 - Merged listings. A listing is one member's view.
-- Automatic repair. Integrity findings and dropped jobs are reported; an operator runs the repair.
-- Byte-level verification by the replication path. Stores verify bodies against names on their own (§4.7).
+- Automatic whole-store repair. Findings are reported, and an operator runs the repair.
+- Byte-level checking by the replication path. Stores check bodies against names themselves ([06 §2.3](../06-backends.md#23-capabilities)).
 
 ---
 
 ## 2. System model and assumptions
 
-- **A1 Store operations.** Each member offers: atomic whole-object put (no partial object is ever visible); get / get-optional (absent is distinguished from failure); head; delete (reports whether something was there); bulk delete (absent keys are success; per-key failures are raised); copy; recursive prefix listing; a true server-side put-if-absent; a bounded watch on one key. Consistency: read-after-write on one key. Listings may be eventually consistent, but a missing key only costs extra work (§5).
-- **A2 Failure classification.** Every failure is *transient* (retry may help: network, 5xx, throttling, timeouts) or *permanent* (the store's considered answer: absent, forbidden, malformed). Unknown failures are transient.
-- **A3 Health per member.** Each remote member has a health cell fed by every request: consecutive transient failures spanning a minimum time *trip* it; a tripped member is *held* for a window that doubles on each failed probe; a considered answer, permanent failures included, proves the link and resets it. Exactly one caller per expired hold is granted the *probe*.
-- **A4 Content addressing.** A chunk's name is a hash of its body. Chunks are immutable: two bodies under one name are the same bytes unless a store corrupted them. Referrers are mutable, last-writer-wins.
-- **A5 Durable local disk.** Each process has a local directory whose atomic record writes survive a crash. Records are listable in creation order.
-- **A6 Processes.** Several processes may build the same domain on one machine at once: one long-lived daemon, its forked frontends (which inherit its stores), and short one-shot commands. A per-directory advisory lock is available, and the kernel drops it when its holder dies. Other machines may write the same mains, but never the local job records.
-- **A7 Cooperative scheduling** inside a process. Check-then-act on in-memory tables is atomic between suspension points (§8 notes what a preemptive runtime needs).
-- **A8 Clocks.** Only durations are used (backoff, health windows, timeouts). No ordering decision depends on a clock.
-- **A9 Garbage collection** runs over the main and deletes unreferenced chunks from every other member *directly*, not through the replication path (§4.8).
+- **A1 Stores** implement the contract of [06 §3](../06-backends.md#3-the-store-contract): atomic put, honest absence, a real claim precondition, honest delete results, read-after-write and list-after-write on each key.
+- **A2 Failures** carry the kinds of [algorithms/failure-model.md](failure-model.md). Each member has a [breaker cell (01 §8)](../01-core.md#8-health-breaker), fed as [failure-model §6](failure-model.md#6-link-health-evidence) says.
+- **A3 Content addressing.** Chunks are immutable: two bodies under one chunk name are the same bytes unless a store damaged them. Referrers are mutable, last writer wins.
+- **A4 Durable logs** as in [algorithms/durable-queue.md](durable-queue.md): records survive a crash, are run in id order, and a record that fails with a non-retryable kind is parked and retried, never dropped.
+- **A5 One owner per domain per machine** (P1). Other machines write the same mains, each through its own owner, and keep their own job logs for the copies they configure.
+- **A6 Clocks.** Only durations are used, on the monotonic clock. No ordering decision depends on a clock.
+- **A7 Collection** runs over a main and deletes unreferenced chunks from copies through the copies' job logs ([gc §5.7](gc.md#57-deletion-on-copies)); this file specifies how those deletions are recorded and run (§4.8).
 
 ---
 
 ## 3. State
 
-### 3.1 Roles (configuration, durable, per domain)
+### 3.1 Roles
 
 | Role | Promises to hold | When | Reads reach it | Written by |
 |---|---|---|---|---|
-| **main** | everything | synchronously: a write returns only after every main has it | first, in config order (the first main is the *read primary*) | the composite, directly |
-| **replica** | everything, including journal and cursor | eventually: behind the write, through a durable per-member job log | only when no main answered (unreachable) | its deferred target |
-| **backfill** | content only (manifests, chunks, folder markers). No journal or cursor | eventually, from the moment it was added. It starts empty and past content arrives only through repair | never. It is also never a share location | its deferred target |
-| **read-only (archive)** | different content (an older or foreign store) | never written | after the sources of truth miss, or are unreachable | nobody |
+| **main** | everything | synchronously: a write returns only after every main has it | first, in configuration order; the first main is the **read primary** and the arbiter of claims | the composite |
+| **replica** | everything, including the journal and the cursor | eventually, behind the write, through its job log | only when no main answered | its job-log worker |
+| **backfill** | content only: every key except journal entries and the cursor | eventually, from the moment it was added; earlier content arrives only through repair | never, and share links never point into it | its job-log worker |
+| **read-only (archive)** | different content (an older or foreign store) | never written | after the source of truth misses, or is unreachable | nobody |
 
 A replica and a backfill are one mechanism that differs by one bit, *reads reach it*. Promoting a fully repaired backfill is a one-word configuration change.
 
-Configuration rules: roles are required. Replica or backfill without a main is refused ("nothing to fill it from"). A domain with no main needs at least one archive and is then forced read-only. Member names must be unique (not enforced today, see G2 in §8). Read order is main < replica < archive < backfill, stable on config order.
+Every copy skips per-store caches (folder index objects, which describe the store that wrote them). A backfill also skips journal entries and the cursor.
 
-### 3.2 Durable state
+### 3.2 Configuration rules
 
-- **Job log**, one per (domain, deferred member), in local storage keyed by an escaped member name: an ordered sequence of *bodyless* jobs:
-  - `Put(key)`
-  - `Copy(src, dst)`
-  - `Delete(key)`
-  - `DeleteMany(keys)`
+- Every member has a role.
+- Member names MUST be unique within a domain, MUST be non-empty, and MUST NOT be `.` or `..` (uniqueness ignoring case is enforced by [05 §2.1](../05-ops-config.md#21-schema-and-validation)). A name identifies durable local state (the job log), so a duplicate would make two members share one log.
+- A replica or backfill without a main MUST be refused ("nothing to fill it from").
+- A domain with no main MUST have at least one archive, and is then read-only.
+- Read order is main < replica < archive < backfill, stable on configuration order within a role.
+- A copy is complete only with respect to writes made by owners that configure it. Every machine that writes a domain SHOULD configure the same copies. A write made by an owner that does not configure a copy reaches it only through repair.
 
-  A record exists from before the write returns until the job completes or is dropped. An unparseable record is dropped and counted.
-- **Claim lock** beside each log: held by a process that keeps jobs of this log in memory (§4.6).
-- **Corruption markers** in each store, under a separate prefix: "the object named N here is not what N says" (computed hash and size, or an unreadability reason).
-- **Verify requests** and **server-side delete requests** as objects in the store they concern (the bucket is the queue).
-- The **GC run marker** in the main (read by repair to refuse a whole-store copy mid-collection).
+### 3.3 Durable local state (per domain and copy)
 
-### 3.3 Volatile state (per process, per deferred member)
+**Job log.** One durable log per copy, at `<data dir>/deferred-pending/<domain>/<escaped member name>/`. Record ids, creation, parking and adoption are those of [durable-queue §4](durable-queue.md#4-the-durable-queue). The escape keeps `[A-Za-z0-9._-]` and writes every other byte as `%XX`. Each record is a JSON object, and none carries a body:
 
-- `ensured`: a set of chunk keys known to be on the member, filled by forwards, by chunk puts inside jobs and by shard listings. Capped, and reset whole when full.
-- `known_shards`: the shards whose listing has been folded into `ensured`. Reset together with `ensured`, because a key forgotten while its shard stayed "known" would never be relearned.
-- `forwards_in_flight`: the count of best-effort chunk forwards.
-- `running`: whether this process runs this log, or only records into it.
-- `degraded`: a job was dropped. Only a repair restores the promise.
-- The in-memory queue of jobs this process will run, in record order.
+```json
+{"op":"put","key":"tsync/d/…"}
+{"op":"copy","src":"tsync/d/…","dst":"tsync/d/…"}
+{"op":"delete","key":"tsync/d/…"}
+{"op":"delete_multi","keys":["tsync/d/…","tsync/d/…"]}
+{"op":"delete_multi","keys":["tsync/d/chunks/…"],"run":"<run name>","shard":"<sss>","generation":<n>}
+```
+
+- The last shape is a **collection delete**, appended by a collecting owner ([gc §5.5](gc.md#55-the-collector-phase-by-phase)); `generation` is the odd collection generation of that run ([02 §2.12](../02-remote-model.md#212-collection-run-record-and-generation-json)). `run`, `shard` and `generation` are present together or not at all.
+- Readers MUST accept exactly these shapes. A record that does not decode, or names an invalid key, is handled as [durable-queue](durable-queue.md#46-outcomes) handles an undecodable record.
+
+Records are named with the id grammar of [durable-queue §4.1](durable-queue.md#41-structure) and run in id order; files in a log directory that do not match the record grammar are ignored. The decoder reads fields by name and ignores any it does not know. A record without `run`, `shard` and `generation` is an ordinary job, and a record without a failure note has never failed.
+
+**Per-log lock files.** Readers SHOULD accept a file `<log dir>.owner` beside a log directory (meaning a per-log advisory lock, which is not part of the log): while one exists, the owner SHOULD hold its lock while it runs that log, and MAY delete it when no process holds it. Writers MUST NOT create one; the domain ownership lock is the claim.
+
+**Pending discards.** For a copy with a bucket function, the discard requests this owner wrote and has not yet seen consumed, each with its run, shard and keys: a durable log beside the job log, `<log dir>.discards/`, one record `{"run": "<run name>", "shard": "<sss>", "generation": <n>, "keys": [...]}` per request (§4.8).
+
+**Degraded.** A copy is **degraded** while any record of its log is parked ([durable-queue §4.7](durable-queue.md#47-parking-and-retry-of-parked-records)). The parked records are the durable evidence: a restart reports the same state. Status names each parked record with its last failure.
+
+### 3.4 Volatile state (the owner, per copy)
+
+- `ensured`: a **presence memo** ([gc §5.6](gc.md#56-the-generation-and-presence-memos)) of chunk keys known to be on the copy, learnt from successful chunk writes and from the copy's own shard listings, each tagged with the collection generation G read when its presence was confirmed.
+- `known_shards`: shards whose listing has been folded into `ensured`, with the same tag.
 
 ---
 
 ## 4. The algorithm
 
-### 4.1 Composite construction
+### 4.1 Construction
 
 ```
 build(domain):
-  mains    := members with role main, config order
-  archives := members with role read-only
-  source   := composite(mains, targets = [], archives = [])        -- mains only
-  targets  := [deferred_target(m, source, reads_reach = (m.role = replica))
-               for m in replica ∪ backfill]
-  readable := mains ++ [t.store for t in targets if t.reads_reach]
-  return composite(mains, targets, archives, readable)
+  mains    := members with role main, configuration order
+  archives := members with role read-only, configuration order
+  source   := composite(mains, copies = [], archives = [])        -- mains only
+  copies   := [copy_target(m, source, reads_reach = (m.role = replica))
+               for m in replicas ++ backfills]
+  readable := mains ++ [c for c in copies if c.reads_reach]
+  return composite(mains, copies, archives, readable)
 ```
 
-A target catches up by reading **the mains only**, never the composite: a job is consumed once it succeeds, so a body read from a copy that is itself behind would land on the target and never be corrected.
+A copy catches up by reading **the source**, never the composite. A job is consumed once it succeeds, so a body read from a copy that is itself behind would land and never be corrected.
 
 ### 4.2 Write path
 
 ```
-put(key, body):
-  if mains = []: fail NotWritable
-  for m in mains (sequentially): m.put(key, body)        -- any failure fails the write; nothing is filled
-  fill(Put(key, body))
+put(k, b):
+  if mains = []: fail REFUSED(read_only)
+  mains[0].put(k, b)                                  -- failure: raise; no copy is told
+  fill(Put(k))                                        -- the read primary holds it: copies owe it
+  for m in mains[1..]: m.put(k, b)                    -- first failure: raise it (after the fill)
 
-put_if_absent(key, body):
-  held := mains[0].put_if_absent(key, body)                -- the first main alone arbitrates
-  for m in mains[1..]: m.put(key, held)
-  fill(Put(key, held)); return held
+put_if_absent(k, b):
+  r := mains[0].put_if_absent(k, b)                   -- the first main alone arbitrates
+  held := (r = Won) ? b : r.holder
+  fill(Put(k))
+  for m in mains[1..]: m.put(k, held)                 -- followers copy the arbitrated result
+  return r
 
-delete(key):     removed := any(m.delete(key) for m in mains); fill(Delete(key)); return removed
-delete_many(ks): for m in mains: m.delete_many(ks); for t in targets: t.accept(DeleteMany([k in ks | not t.skip(k)]))
-copy(src, dst):  for m in mains: m.copy(src, dst); fill(Copy(src, dst))       -- skip decided on dst
+delete(k):        removed := mains[0].delete(k); fill(Delete(k)); for m in mains[1..]: m.delete(k); return removed
+delete_multi(ks): mains[0].delete_multi(ks); fill(DeleteMany(ks)); for m in mains[1..]: m.delete_multi(ks)
+copy(s, d):       mains[0].copy(s, d); fill(Copy(s, d)); for m in mains[1..]: m.copy(s, d)
 
-fill(op): for t in targets (config order): if not t.skip(op.key): t.accept(op)
+fill(job): for c in copies (configuration order):
+             keys := [k in job's keys | not c.skip(k)]
+             if keys ≠ []: c.accept(job restricted to keys)
 ```
 
-`skip(key)` is true for per-store caches (folder index objects, which describe the store that wrote them), and, for a target that reads never reach, for the journal and the cursor.
+- The first main is the authority. Its answer is the operation's answer, and its failure aborts before any other member is written or told.
+- Once the first main took a write, the copies are told, even if a later main then fails. The copies read the source, whose read primary holds the write, so they converge on what readers see.
+- A failure on a later main is raised after the fill. The caller treats the whole write as still owed and repeats it: every writer above the composite holds its work durably until success ([durable-queue](durable-queue.md)), and every write is idempotent.
+- The followers' plain `put` of the arbitrated body is not a fallback from a claim: the arbitration already happened, on the first main.
+- A write returns once every main has it and every copy has durably recorded the job, or has decided on a chunk forward.
+
+**Accepting at a copy:**
 
 ```
-accept(op) at target T:
-  case op of
-    Put(key, body) with key a chunk:  forward_chunk(key, body); return       -- not recorded
-    Put(key, _)       -> post(Put(key))
-    Copy(s, d)        -> post(Copy(s, d))
-    Delete(k)         -> post(Delete(k))
-    DeleteMany(ks)    -> post(DeleteMany(ks))
+accept(job) at copy C:
+  if job = Put(k) and k is a chunk key: forward_chunk(C, k); return      -- not recorded
+  if this process is C's owner: post job to C's log                        -- the durability point
+  else: submit job to C's log and poke the owner                          -- durable-queue §4.2
 
-post(job):
-  if T.running_here:
-     if in_memory_queue_length ≥ MAX_QUEUED: T.degraded := true; return   -- dropped, see §8
-     under record_lock: write record durably; enqueue in memory
-  else:
-     write record durably; notify(the runner)                               -- §4.6
-
-forward_chunk(key, body):                                  -- best effort, never blocks, never queues
-  if not running_here or key ∈ ensured or forwards_in_flight ≥ MAX_FORWARDS
-     or not uplink.try_admit(len body): return
-  forwards_in_flight += 1
-  spawn: try T.store.put(key, body); ensured += key   except: warn
-         finally forwards_in_flight -= 1; wake settlers
+forward_chunk(C, k):                         -- owner only; best effort, never blocks, never queues
+  if C.relies(k): return                                -- §4.4
+  if the implementation's forward bound is reached: return
+  in the background:
+     g := read G                                        -- before the put
+     try C.store.put(k, body, mode = best_effort)       -- refused admission: CANCELLED, nothing sent
+         C.note(k, g)                                   -- §4.4: recorded only if g is even
+     except any: log (CANCELLED at debug, other kinds as warnings)
 ```
 
-The write returns when every main has the object and every target has either durably recorded the job or (for a chunk) decided on the forward. That is the *durability point* for copies. A crash after it loses no copy work. The only exception is a chunk forward, which nothing needs (see below).
+- A process that is not the owner but writes the mains (the http-proxy store server, [07 §2.2](../07-daemon-cli.md#22-the-domain-owner)) records copy jobs by **submission** and pokes the owner. Copy jobs are order-insensitive (§4.3), which is what submission requires. A non-owner never forwards chunks: the manifest's job fetches them.
+- Nothing depends on a forward: the manifest's job fetches any chunk that did not arrive.
 
-The **referrer-after-referenced rule** is enforced by the consumer, not by the order of arrival:
+### 4.3 Running jobs: every job converges a key on the source
 
-```
-run(job) at target T (one worker, record order):
-  Put(key):
-     body := source.get_optional(key)
-     if body = none: return                         -- deleted since; a later Delete job says so
-     for c in chunk_names(body) (sequentially): ensure_chunk(c)
-     T.store.put(key, body)                         -- only after every chunk is confirmed
-  Copy(s, d):
-     try T.store.copy(s, d)
-     except Stopping: re-raise                       -- still owed
-     except _: run(Put(d))                           -- T lacks s; rebuild d, chunk check included
-  Delete(k):       ensured -= k; T.store.delete(k)
-  DeleteMany(ks):  ensured -= ks; T.store.delete_many(ks)
-
-ensure_chunk(c):
-  if c ∈ ensured: return
-  learn_shard(shard(c))                               -- list T's shard once; add every key to ensured
-  if c ∈ ensured: return
-  body := source.get_optional(c)
-          or, if a collection is open, source.get(from_space(c))    -- else fail: not found
-  T.store.put(plain_name(c), body); ensured += c      -- a target has one space
-```
-
-`chunk_names(body)` is the chunks the body names if it parses as a manifest, and nothing otherwise (markers, journal entries, shares). Journal entries and the cursor need no dependency check: one ordered worker runs the jobs of one process's log, and the writer puts the manifest before the entry that names it, and the entry before the cursor that names that. So a replica never publishes a cursor ahead of the entries and manifests it describes (within one writer process, see gap R2).
-
-Why bodyless jobs: repeated puts of one key converge on the latest body, a put whose key was since deleted reads nothing, and the log stays small. Why one record per user-visible operation rather than per chunk: deduplication means a copy or an incremental re-upload issues no chunk puts at all, so correctness must rest on the manifest job's chunk check, and chunk puts are pure prefetch.
-
-**Queue discipline.** One worker per target, in record order. A job that fails transiently stays at the head and is retried with exponential backoff (cap 5 min). Nothing overtakes it, so a rename's copy never lands after its delete. A permanent failure drops the job (its record is deleted) and marks the target degraded: the same request would be refused again, and every later job would wait behind it forever. "Stopping" during shutdown is neither: the job stays owed.
-
-### 4.3 Read path
+The owner runs each copy's log with one ordered worker ([durable-queue §4.5](durable-queue.md#45-ordered-and-keyed-queues)). Every ordinary job brings some keys of the copy to the source's state **at the time the job runs**:
 
 ```
-ask(member, f, others_remaining, probing):
-  if not others_remaining: return f(member)            -- the last candidate is asked whatever its health
+run(Put(k))          = sync(k)
+run(Delete(k))       = sync(k)
+run(Copy(s, d))      = sync(d)
+run(DeleteMany(ks))  = for k in ks: sync(k)
+
+sync(k) at copy C:
+  restarts := 0
+  loop:
+    b := source.get_opt(k)                                 -- could not look: the failure is the job's
+    if b = none:
+        C.ensured -= k; C.store.delete(k); return
+    C.g := read G                                          -- after the source read (§4.4)
+    for c in chunk_names(b), sequentially:
+        case ensure_chunk(C, c) of
+          Present -> continue
+          Missing_at_source ->
+             if restarts < JOB_RESTARTS and source.get_opt(k) ≠ b:
+                 restarts += 1; continue loop                -- the referrer changed: redo with its new body
+             fail CORRUPT("source names a chunk no main holds: " k, c)
+    C.store.put(k, b); return                                -- only after every named chunk is confirmed
+
+ensure_chunk(C, c):
+  if C.relies(c): return Present                             -- §4.4
+  if C.g is even and shard(c) not known under tag C.g:
+     list C.store's shard of c; note every key and the shard under tag C.g
+     if C.relies(c): return Present
+  elif C.g is odd and C.store.head_opt(plain chunk key of c) ≠ none:
+     return Present                                          -- confirmed afresh, nothing recorded
+  body := source.get_opt(plain chunk key of c)
+          else source.get_opt(collection-space chunk key of c)     -- gc §5.8
+  if body = none: return Missing_at_source
+  C.store.put(plain chunk key of c, body); C.note(c, C.g)    -- a copy has one chunk space
+  return Present
+```
+
+- `chunk_names(b)` is the list of chunks `b` names if it parses as a manifest, and empty otherwise (markers, anchors, journal entries, the cursor, shares, versions of anything but manifests).
+- A `DeleteMany` job MAY establish which of its keys the source still holds with one listing per distinct parent prefix instead of one read per key.
+- Journal entries and the cursor need no dependency check. The writer puts a manifest before the entry that names it, and the entry before the cursor, and one worker runs one owner's records in order. A cursor may name an entry whose job has not run yet: the cursor is a hint, and a reader lists the journal ([algorithms/wal-and-journal.md](wal-and-journal.md)).
+- Because every job reads the source when it runs, order between logs, and a parked job run after later ones, converge on the source's state. That is why jobs carry no bodies, and why a copy job is not a copy on the target: a target-side copy would carry forward whatever the target's `src` happened to hold.
+
+**Collection deletes** (`delete_multi` with `run` and `shard`) are not converged on the source: they run as §4.8 specifies.
+
+**Queue discipline.** Retryable kinds block the head and are retried with backoff; non-retryable kinds (REFUSED, INVALID, CORRUPT, UNEXPLAINED, …) **park** the record and it is retried at ownership start, periodically and on request ([durable-queue §4.6–4.7](durable-queue.md#46-outcomes)). Parking lets later jobs run past a parked one, which is safe because every job converges on the source when it runs. While any record is parked the copy is degraded (§3.3).
+
+### 4.4 The chunk memo
+
+`ensured` is a presence memo, governed by the collection generation G of the collected main ([gc §5.6](gc.md#56-the-generation-and-presence-memos), format [02 §2.12](../02-remote-model.md#212-collection-run-record-and-generation-json)):
+
+- **Tags.** Every entry is tagged with the value of G read when the chunk's presence on the copy was confirmed (a successful put, or the copy's own shard listing).
+- **Reading G.** A job reads G **after** the source read that makes its chunks relevant, once per job (or once per batch of jobs whose source reads all precede it).
+- **Reliance.** `C.relies(c)` holds only if G, as last read, is even and equals `c`'s tag. When G differs from the tags held, every entry and every known shard is invalidated.
+- **Odd G.** While G is odd, presence on the copy is confirmed afresh every time (a metadata read or a listing of the copy) and `C.note` records nothing. A G that cannot be read counts as odd. A run record in its closing phase that carries no generation means odd while it is present ([02 §2.12](../02-remote-model.md#212-collection-run-record-and-generation-json)).
+- **Own deletions.** Keys a copy deletion names are removed from that copy's `ensured` before the deletion is issued (§4.8).
+- **Gate refusals.** A writer whose publication a main's gate refuses with "missing chunks" ([gc §5.4](gc.md#54-the-collection-interlock)) drops those keys from every presence memo it holds for the domain, for every member.
+- An implementation MAY invalidate the memo at any other time.
+
+### 4.5 The single runner
+
+The owner is the only process that runs, completes or parks a domain's job records (P1, [durable-queue §4.2](durable-queue.md#42-ownership)). Consequently:
+
+- At start, the owner loads every copy's log in id order and runs it, whoever recorded the records.
+- A process that is not the owner adds records only by submission (§4.2).
+- A one-shot command that took ownership because no owner was running runs every log, its own records and those left by earlier owners alike.
+- **Settling** before an owner exits is [durable-queue §4.8](durable-queue.md#48-settle-stop-and-pause): bounded, raced rather than cancelled, and records still owed stay on disk for the next owner.
+
+### 4.6 Read path
+
+```
+ask(m, f, last_candidate, probing):
+  if last_candidate: return f(m)                     -- the last candidate is asked whatever its health
   if probing:
-     case health.check(member): Held -> fail fast "held"
-                                Up | Probe -> f(member), cancelled as soon as the member is found down elsewhere
-  else:                                                -- long polls, capability queries
-     if health.is_down(member): fail fast else f(member) with the same cancellation
+     case breaker(m).check of held -> fail UNREACHABLE at once
+                              up | probe -> until-held(m, f(m))      -- 01 §7
+  else:                                              -- watches and capability queries
+     if breaker(m).is-down: fail UNREACHABLE at once else until-held(m, f(m))
 
 walk(chain, stop_on_miss):
-  last_err := none
+  first_err := none
   for m in chain:
-     r := try ask(m, ...) except e: last_err := e; continue
+     r := try ask(m, ...) except e: first_err := first_err or e; continue
      if r = some v: return Answer v
-     if stop_on_miss: return Miss                       -- the first reachable member's miss is authoritative
-  return last_err ? Unreachable last_err : Miss
+     if stop_on_miss: return Miss                     -- the first reachable member's miss is authoritative
+  return first_err ? Unreachable first_err : Miss
 
 read(f):
-  a := walk(readable, stop_on_miss = true)             -- mains, then readable replicas
+  a := walk(readable, stop_on_miss = true)            -- mains, then readable replicas
   if a = Answer v: return v
-  b := walk(archives, stop_on_miss = false)            -- archives hold different content; ask each
+  b := walk(archives, stop_on_miss = false)           -- archives hold different content: ask each
   if b = Answer v: return v
-  if a = Unreachable e: raise e                        -- "could not look" never becomes "not there"
+  if a = Unreachable e: raise e                       -- "could not look" never becomes "not there"
   if b = Unreachable e: raise e
   return none
 ```
 
-Consequences:
-
-- Main reachable and missing means *not found*: a replica holds the same content (or less) and is not asked.
-- Main unreachable means the replica answers.
+- A main that answers "absent" means *not found*. A replica holds the same content or less, and is not asked.
+- A main that is unreachable means the replica answers.
 - Archives are asked both when the source of truth misses and when it is unreachable.
-- Everything unreachable raises the first unreachable error, never "absent".
+- When everything is unreachable, the first unreachable error is raised, never "absent" ([failure-model §5.2](failure-model.md#52-absent-versus-could-not-look)).
+- `get` is `read(get_opt)`, with a clean `none` turned into ABSENT.
+- `list_prefix` returns the first reachable member's listing, never merged. An empty list is an answer.
+- `watch` is a non-probing read: a long poll must never be the request that finds out whether a member is back.
+- The single probe per lapsed hold is the breaker's ([01 §8](../01-core.md#8-health-breaker)); concurrent reads that do not get it pass to the next member.
 
-`get` = `read(get_optional)`, with a clean `none` turned into a permanent "not found" in the drivers' own vocabulary. `list_prefix` returns the first reachable member's listing, never merged, and an empty list is an answer. `watch` is a non-probing read: a 30 s long poll must never be the request spent discovering whether a member is back.
+**Batches.** A batch read (many keys, or many folders' listings with bodies) is declared only if the first readable member declares it, and it goes to that member alone.
 
-**One probe per hold.** A held member is skipped without a request until its hold expires. Then exactly one caller gets `Probe` and asks it. Taking the probe pushes the hold out, so a probe that never reports back is retried at the next expiry rather than never. Concurrent reads in that instant are all passed over to the next member. A request already in flight to a member that another request finds down is cancelled with a transient "held" failure, so it stops climbing its retry ladder.
+- If the member is passed over, or refuses the batch, the batch answers empty.
+- A transient failure while the member is still considered up is raised: every key would be lost the same way.
+- Every key the batch did not answer with a body goes back through `read`, one at a time, which keeps archive fallback and the unreachable-versus-absent distinction.
 
-**Batches.** A batch read (many keys, or many folders' listings plus bodies) belongs to the first readable member alone and is sent to it directly, without taking a second slot from the caller's pool. If that member is passed over or refuses the batch, the batch answers empty. A transient failure while the member is still considered up is re-raised, since every key would be lost the same way. Every key the batch did not return a body for goes back through `read` one at a time, which keeps archive fallback and the unreachable-versus-absent distinction.
+### 4.7 Capabilities, verification requests and discards at the composite
 
-**Capabilities** are merged over the readable members that are not held. Archives have no say. If every candidate was passed over, the merge raises rather than returning an empty merge that callers would memoise as fact.
+**`capabilities(prefix)`** asks every non-archive member that is not held, without probing:
 
-### 4.4 Write guard
+- `share_url` and `chunk_size` come from the first main that answered. A replica never decides the chunk size of new files.
+- `max_concurrency` is the minimum over the readable members that answered.
+- `verified` is true only if every main, replica and backfill answered `verified = true`.
+- If no main answered and the domain has a main, the call fails UNREACHABLE. An empty merge would be memoised as fact.
+- Archives have no say.
+
+**`verify_all`** asks every readable member when every main is up, and only the mains otherwise: a verification request is an object written into the store, and the write guard applies. The results are summed. `Unsupported` is returned only if every member asked answered it. Backfills are reached only by the per-member verification command ([05-ops-config.md](../05-ops-config.md)).
+
+**`discard`** is always `Unsupported` at the composite. Collection deletes on copies are jobs (§4.8).
+
+### 4.8 Deletions on copies outside the worker
+
+A collection's deletions on copies are owed durably and executed by the owner ([gc §5.7](gc.md#57-deletion-on-copies)):
+
+```
+doom step for shard s of run r, generation g odd (collecting owner):     -- gc §5.5
+  for each copy C told by this run:
+     append CollectionDelete(doomed, r, s, g) to C's job log, durably
+  -- only then does the main unlink its outgoing entries
+
+run(CollectionDelete(ks, r, s, g)) at copy C:
+  guard(C, "delete collected chunks")                       -- §4.9
+  ks := ks − [k | the collected main holds k in either space]   -- MAY: a re-check just before
+  C.ensured -= ks                                            -- before the deletion is issued
+  if C has a confirmed bucket function (06 §3.8):
+      add {r, s, g, ks} to C's pending discards, durably
+      write the discard request for (r, s) naming ks         -- supersedes an older one of that name
+  else:
+      delete ks and their corruption markers                  -- absent keys count as deleted
+      restore(C, s, ks)                                      -- settled
+
+every DISCARD_POLL, for each pending discard P of copy C:
+  if the request object for (P.run, P.shard) is gone:
+      restore(C, P.shard, P.keys); remove P                  -- settled
+
+restore(C, s, keys):                                         -- mandatory; the write guard applies
+  list the collected main's shard s in both spaces
+  for k in keys that the main holds: sync(k)                 -- §4.3: the chunk is put back on C
+
+when no collection-delete record and no pending discard of generation g remains for any copy:
+  write G := g + 1 to the collected main                     -- even: settled
+```
+
+- **Recorded before the main discards.** Deletions for direct and queued copies alike are durable before the main unlinks its outgoing chunks, so a crash repeats them instead of leaking them.
+- **Restore after (mandatory).** Once a deletion has taken effect (a direct delete returned, or the request object is gone), every deleted key the main still holds is put back. Only then is the deletion settled. A chunk referenced again during or after the collection is thereby restored on the copy, whenever the deletion landed.
+- **Settling G.** G turns even only when every deletion of its generation is settled, so a memo is never relied on while a deletion could still invalidate it ([gc §5.6](gc.md#56-the-generation-and-presence-memos)).
+- **At start** the owner resumes every unsettled collection-delete record and pending discard, settles them, and then makes G even.
+- **A request never consumed** leaves G odd: copy memos go unused for the domain, which costs listings and puts, never safety. Re-delivery ([gc §5.7](gc.md#57-deletion-on-copies)) rewrites it with only the keys still absent from the main.
+- A collection-delete record completes only after its direct deletion and restore, or once its discard is recorded pending; a pending discard is removed only after its restore.
+- Failures follow the queue discipline of §4.3.
+
+### 4.9 Write guard
 
 ```
 guard(dst, what):
-  if dst.role = main: allow                       -- that is how a main is refilled from a replica
-  for m in mains where (never heard from) or (down and hold expired):
-     probe(m): get_optional(cursor), bounded by PROBE_TIMEOUT including retries;
-               a timeout is recorded as a failed probe (a cancelled request tells the cell nothing)
-  if any main is down: fail TRANSIENT "refusing to <what>: the main <m> is not online"
+  if dst.role = main: allow                          -- that is how a main is refilled from a replica
+  for m in mains where (never heard from) or (down and hold lapsed):
+     probe(m): m.get_opt(cursor key), bounded by PROBE_TIMEOUT including retries;
+               a timeout is recorded as a lost probe
+  if any main is down: fail TRANSIENT/LINK "refusing to <what>: the main <m> is not online"
   allow
 ```
 
-A main heard from and up is taken at its word, so a run of guarded writes costs one look, not one each. A domain with no main passes.
+- A main heard from and up is taken at its word, so a run of guarded writes costs one look, not one each. A domain with no main passes.
+- Every operation that writes a named non-main member directly MUST call the guard first: mirror copies, integrity rewrites, verification requests, collection delete jobs and re-delivered requests, and share publication. Ordinary copy jobs are guarded too: the worker does not run while a main is down.
+- The composite's own writes cannot violate the guard: copies receive only what the first main already took.
+- The guard fails TRANSIENT so that callers retry once the main is back, rather than record a permanent refusal.
 
-Every operation that writes a **named non-main member directly** must call the guard first: repair copies, integrity rewrites, verify requests (they are objects written into the store), GC deletions from copies, re-sent delete requests, and share publication. The composite's own writes cannot violate it: targets only ever receive what a main already took, and a main write failure aborts before `fill`.
+Why it exists: a copy written while the main is offline would hold state the source of truth never had. Reads prefer the main, so those writes would vanish when it returns, and nothing could check them against it. In the other direction, a copy that runs ahead is what a failing-over reader would trust.
 
-Why the guard exists: a copy written while the main is offline would hold state the source of truth never had. Reads prefer the main, so those writes would disappear when it returns, and nothing could check them against it. In the other direction, a copy that runs ahead is what a reader failing over would trust. The guard fails *transient*, so callers retry once the main is back rather than record a permanent refusal.
+Residual window: a main that goes down between the look and the write is not seen. That is harmless for repair (it copies what a main held) and for collection (it deletes what the main already doomed and re-checked).
 
-### 4.5 Repair and verification between members
+### 4.10 Repair: mirror
 
-**Mirror (repair by copy).** An explicit, stateless, additive whole-store operation:
-
-```
-mirror(source := named member or the first in read order, scope ∈ {All, ReferrersOnly, Subtree(p)}):
-  refuse All/Subtree while a collection is open on the main (chunks are split across two names)
-  L := listing of source for the scope, spooled to disk (chunks one batch of shards at a time;
-       Subtree walks the tree and adds only the chunks its manifests name, and excludes history)
-  for dst in other members (sequentially, config order):
-     guard(dst, "copy to dst")
-     V := listing of dst for the scope (disk-backed map key → size); Subtree uses HEAD per key
-     for e in L, by a fixed pool of workers:
-        if e ∉ V or size differs: copy source→dst (body in memory under a bounded copy pool)
-```
-
-It never deletes. It does not detect same-size wrong bytes: that is verification's job. Per-store caches are not copied. It is the only remedy for a degraded target, a new backfill's past content, and dropped or never-replayed records.
-
-**Verification.** Each store checks "chunks are what their names say" itself: a local store re-reads every chunk after writing it, and a cloud store checks each new chunk on its object-created event. A mismatch or an unreadable chunk becomes a **corruption marker**. Whole-store verification queues one request per shard in each store. The composite asks every readable member when the mains are up, and only the mains otherwise (a request is a write). Backfills are reached only by a per-member verify command. A store's capability `verified` says whether anyone is checking. A composite claims it only if every member does.
-
-**Integrity repair.**
+Mirror is an explicit, stateless, additive whole-store copy from a source member to the others. It is the remedy for a new backfill's past content, for writes made by owners that do not configure a copy, and for parked jobs whose cause a repair of the copy clears.
 
 ```
-for marker (store S, chunk c):                                 -- sequential
-  guard(S, ...)
-  if S's own body hashes to c: rewrite S's body over itself    -- S re-verifies, which clears the marker
-  elif some readable member R ≠ S (optionally a named source) has a body hashing to c:
+mirror(source := a named member, or the first in read order; scope ∈ {All, ReferrersOnly, Subtree(p)}):
+  refuse All and Subtree while a collection run is open on the main       -- chunks are split across two spaces
+  for dst in the other members, sequentially, in configuration order:
+     guard(dst, "copy to " dst)
+     phase 1  chunks:   for the scope's chunks (All: every shard; Subtree: the chunks the in-scope
+                        manifests name), copy each chunk the dst listing lacks or holds at a different size
+     phase 2  content referrers: manifests, folder markers, anchors, trash markers, versions, shares.
+                        Skip a manifest any of whose chunks phase 1 failed to place.
+                        For immutable keys, copy when missing or of a different size;
+                        for mutable keys, copy when missing or when the bodies differ
+     phase 3  journal entries (not into a backfill)
+     phase 4  the cursor (not into a backfill), last
+  then retry every parked record of dst's log
+```
+
+- The phases give the dependency order of G4: a chunk before any manifest naming it, a manifest before the entry naming it, the cursor last. A mirror interrupted at any point leaves no referrer without its referents.
+- Mirror never deletes. It does not detect same-size wrong chunk bytes: that is verification's job. Per-store caches are not copied.
+- Mirror writes onto a main pass the main's reference gate ([gc §5.4](gc.md#54-the-collection-interlock)).
+
+### 4.11 Verification and integrity repair
+
+**Verification.** Each store checks "chunks are what their names say" itself ([06 §2.3](../06-backends.md#23-capabilities)). Whole-store verification queues one request per shard in each store. A composite claims `verified` only if every member does (§4.7).
+
+**Integrity repair:**
+
+```
+for each corruption marker (store S, chunk c), sequentially:
+  guard(S, "repair " c)
+  if S's own body hashes to c: rewrite S's body over itself    -- S re-checks, which clears the marker
+  elif some readable member R ≠ S (or a named source) has a body hashing to c:
        write it to S only                                       -- directly, never through the composite
-  else: report unrepairable
+  else: report c as unrepairable
 ```
 
-Repair never deletes a marker. Only the store's own re-verification clears one, so a marker can never be cleared by a party that did not check the bytes. The cloud checker deletes the marker *before* hashing: events are at-least-once and unordered, and a stale "clean" state on bad bytes is unrecoverable, while a spurious marker only costs a rewrite.
-
-### 4.6 Resumption: the single-runner rule
-
-A log must be run by at most one process at a time. Otherwise two workers would reorder a rename's copy and delete.
-
-- **Resumer (daemon).** Builds every target *stopped* in resume mode. After forking its frontends, it starts them: each reads its log (records not already loaded, in record order) and runs them. It re-reads every log on a periodic housekeeping sweep and whenever notified, but only a log that no live process has claimed.
-- **Forked frontends.** They inherit targets that are not running. `accept` only records the job and notifies the resumer, which rescans.
-- **One-shot commands.** They claim the log with the advisory lock, run the jobs they record themselves, and on exit settle (wait for their queue and their in-flight forwards) up to a timeout. Records still owed stay on disk. The kernel drops the claim when the command exits, killed or not, and the resumer's next sweep takes them.
-- **Rescan dedup.** The resumer never enqueues an id it already holds. A rescan runs under the same lock as recording, so a write arriving meanwhile queues behind what the rescan found.
-
-### 4.7 Deletion and GC propagation
-
-Ordinary deletes and bulk deletes are replicated like any write (a `Delete` job for every target that does not skip the key). A target takes a delete whether or not it holds the object.
-
-Garbage collection (§A9) deletes unreferenced chunks from copies **before** the main, and **directly**:
-
-```
-per flush of doomed chunks (keys not present by name in the main's surviving space, re-checked after listing):
-  for each deferred member M:
-     guard(M)
-     M.discard(keys) → Queued (a durable server-side delete request) | Unsupported → M.delete_many(keys)
-  delete the doomed chunks' corruption markers on the main and on direct-deleting copies
-  discard the shards on the main; advance the durable cursor
-```
-
-- Copies before main: a crash in between leaves keys that a resumed run deletes again (idempotent). The other order would leak them forever, since nothing walks a copy's shards.
-- The recheck of each doomed key in the main's surviving space protects a chunk that was orphaned and then re-uploaded during the run: deleting it off a copy would take out a live chunk.
-- Server-side delete requests are left in place when any per-key delete was refused, and can be re-sent by hand. Nothing retries them automatically.
-
-### 4.8 Settling
-
-A process about to exit calls the drain hook once. It waits, bounded by the settle timeout (shortened to the shutdown grace when stopping), for every queue to empty and every chunk forward to finish. A queue that has started failing ends the wait at once: its work is on disk and outlives the process.
+- Repair never deletes a marker. Only the store's own re-check clears one, so a marker is never cleared by a party that did not check the bytes.
+- A reader that cannot read a marker or a candidate body reports it as "not checked", never as "no good copy" ([failure-model](failure-model.md)).
 
 ---
 
 ## 5. Properties and why they hold
 
-**S1 (referrer after referenced).** When a manifest is present on a target, every chunk it names is present on that target. Its job runs `ensure_chunk` for each name, sequentially, before the put. `ensure_chunk` returns only after a confirmed put or a positive memo entry. The memo is filled only by successful puts or by the target's own listing, and a listing that misses a key only costs a redundant put, which is harmless for immutable content. *Holds unless the memo is stale (R1) or the chunk is deleted from the target later by an actor other than the job worker (R1, R6).*
+**S1 (referrer after referenced).** When a manifest is present on a copy, every chunk it names is present there. Its job ensures each named chunk before the put, and `ensure_chunk` returns only after a confirmed put, a fresh confirmation, or a memo entry whose tag equals an even G read after the manifest was read from the source. A chunk doomed in generation *g* can reappear in a manifest only after G became *g*, so such a job never relies on an entry confirmed before the doom ([gc §5.6](gc.md#56-the-generation-and-presence-memos)). A fresh confirmation made while G is odd can be overtaken by a deletion; the mandatory restore of §4.8 puts back every deleted chunk the main holds before G turns even.
 
-**S2 (no job lost at the durability point).** A job is on local disk before the write returns. Its record is deleted only on success, or on a permanent failure, which sets `degraded`. A crash between the main write and the record loses the fill, but then the write never returned success, and the caller's retry repeats it.
+**S2 (no job lost).** A job is recorded durably before the write returns. Its record is removed only on success; a non-retryable failure parks it.
 
-**S3 (per-key convergence).** Jobs are bodyless: a `Put(k)` run at time t writes the main's value of `k` at t. The last job for `k` therefore writes a value at least as new as the write that recorded it, or deletes, matching the main's state at the time it ran. After quiescence (no writes, all logs empty, no drops, one runner) every non-skipped key on the target equals the main's.
+**S3 (per-key convergence).** Every job sets its keys on the copy to the source's state at the time it runs. The last job for a key runs after the last main write of that key by this owner, so after quiescence (no writes, logs empty, nothing parked) every non-skipped key the owner wrote equals the source's value, whatever the order between logs, across owners and machines.
 
-**S4 (order within a log).** One worker, head-of-line blocking on transient failures: effects apply in record order, so copy-then-delete (rename) and entry-then-cursor are preserved on the target.
+**S4 (order within a log).** One worker, head-of-line blocking for retryable failures: effects apply in id order, so an entry never reaches a copy before the manifest it named. Parking may reorder, which S3 makes harmless.
 
-**S5 (no false absence).** `read` returns `none` only if some member in the first chain answered `none` and was reachable (stop on miss), and every archive answered `none`. An unreachable member always surfaces as an error when nothing answered.
+**S5 (no false absence).** `read` returns `none` only if a member in the first chain was reachable and answered `none`, and every archive answered `none`.
 
-**S6 (copies never ahead).** Composite writes to targets happen only after all mains succeeded. Direct writes to non-mains pass the guard. A main that failed the probe blocks them. Residual window: the guard trusts a main heard from and up, so a main that goes down between the look and the write is not seen. The write then fails on its own ladder or, for a copy-only write, lands. That is harmless for repair (it copies what a main held) and for GC (it deletes what the main already doomed).
+**S6 (copies never ahead).** Composite writes reach copies only after the first main took them. Direct writes and job runs pass the guard.
 
-**S7 (one runner).** A resumer reads a log only under a lock that any process holding its records in memory also holds. Forked frontends never run. **But** a one-shot command and the resumer each run their *own* records concurrently against the same member (R2).
+**S7 (one runner).** Only the owner runs a log (P1), and ownership is exclusive on a machine.
+
+**S8 (visible degradation).** A copy is reported degraded exactly while a record of its log is parked, and parked records survive restarts.
 
 **Liveness.**
 
-- **L1.** While the main and a target are reachable, every recorded job eventually completes or is dropped. The worker retries transient failures forever with capped backoff, and a stall watchdog logs a queue that has not moved in a minute.
-- **L2.** Owed records left by a dead process are taken by the resumer within one housekeeping interval, if a resumer exists (R3, G7).
-- **L3.** A held member is re-probed at most once per hold window, which doubles to 5 min, so a returning member is noticed within that bound.
+- **L1.** While the source and a copy are reachable, every recorded job eventually completes or is parked; parked records are retried periodically, so one whose cause cleared completes.
+- **L2.** Records left by an owner that died, and records submitted by non-owners, are run by the next owner.
+- **L3.** A held member is re-probed once per hold window ([01 §8](../01-core.md#8-health-breaker)), so a returning member is noticed within that bound.
 
-**Worst-case interleavings, and why they are harmless:**
-
-- A put and a delete of `k` recorded in one log, the put run after the source deleted `k`: the put reads none and does nothing, and the delete then runs.
-- A copy whose source key is gone from the target (its put was dropped, or the target was added later): it falls back to rebuilding the destination from the main, chunk check included.
-- A manifest overwritten while its job runs: the job may put the newer body, which is fine by S3. Its chunks are ensured from the body actually put, because the same fetch supplies both.
-- A chunk read from the from-space during a collection: it is written to the target under its plain name, since a target has one space.
-
-**Replica consistency at any instant.** For each key, the replica holds the main's value at some past instant, or an older value while a job for that key is owed. Across keys it is not a snapshot: a manifest may be newer than the cursor the replica publishes, never older than the entries that cursor reaches (S4). A reader of a replica that follows its cursor sees a tree where every entry it reaches has its manifest (possibly newer) and every manifest has its chunks (S1). A backfill offers the same per-key guarantee over content keys only, from the moment it was added.
-
-**After quiescence** (no writes, logs drained, no drops since the last full mirror, single runner, no out-of-band deletes): replica ≡ main over non-skipped keys, and backfill ≡ main over content written since it was added. A completed `mirror` from the main makes a backfill ≡ main over content as well. Mirror is additive, so it never removes a key the main no longer has.
+**Replica consistency at any instant.** For each key, the replica holds the source's value at some past instant, or an older value while a job for that key is owed. Across keys it is not a snapshot. A reader that follows the replica's journal sees entries whose manifests are present (possibly newer) and manifests whose chunks are present. A backfill offers the same per-key guarantee over content keys, from the moment it was added.
 
 ---
 
@@ -347,109 +432,72 @@ A process about to exit calls the drain hook once. It waits, bounded by the sett
 
 | Interruption point | Effect | Recovery |
 |---|---|---|
-| Main k fails after mains 1..k−1 took the write | Write fails; earlier mains hold it; no target owes it | Caller retries (idempotent). If it never does, R4. |
-| Crash after mains, before a record | Write never returned; targets owe nothing | Caller's write-ahead replay repeats the write |
-| Crash after the record, before the job ran | Record on disk | Resumer rescans at start or on its sweep |
-| Crash mid-job (chunks partly put) | Chunks are immutable; the manifest is not yet put | Job re-run: memo misses cost a listing, puts are idempotent |
-| Crash mid-copy | Target copy is an atomic put | Re-run, or fall back to rebuild |
-| Stop during a job | Job neither done nor failed; record kept | Next runner |
-| Chunk forward lost (crash, drop, refusal) | Nothing owed | The manifest job fetches it from the main |
-| Target down for hours | Records accumulate on disk; head retries with backoff ≤ 5 min | Automatic when the link returns |
-| Target refuses permanently | Job dropped, target degraded | Operator: mirror from the main |
-| In-memory queue over its cap | New jobs not recorded; degraded | Mirror |
-| Unparseable record | Dropped, counted, degraded | Mirror |
-| Main down | Reads fail over; composite writes fail transient; guarded writes refused; jobs whose source read fails wait at the head | Automatic on return |
-| GC crash between copies and main | Doomed keys still on the main, maybe gone from copies | Resumed run redoes both (idempotent) |
-| Server-side delete request not consumed | Chunk stays on that copy; request stays | Status lists it; re-send by hand |
+| First main fails | No other member written, no copy owes it | The caller repeats the write |
+| A later main fails | First main and copies' logs have it; that main does not | The caller repeats the write (idempotent); a mirror otherwise |
+| Crash after the first main, before the job records | The write never returned | The caller's durable work repeats it |
+| Crash after a record, before its job ran | Record on disk | Next owner runs it at start |
+| Crash mid-job (chunks partly put) | Chunks are immutable; the referrer is not yet put | The job re-runs; memo misses cost a listing |
+| Stop during a job | Neither done nor failed; the record stays | Next owner |
+| Chunk forward lost or refused admission | Nothing owed | The manifest's job fetches the chunk |
+| Copy down for hours | Records accumulate on disk; the head retries with backoff | Automatic when the link returns |
+| Copy refuses a job, or a record does not decode | Record parked; copy degraded | Automatic retry once the cause clears; operator repair otherwise |
+| Source names a chunk no main holds | Job parked as CORRUPT, naming the key | Integrity repair on the main; the parked retry then completes |
+| Main down | Reads fail over; composite writes fail; guarded writes and job runs wait | Automatic on return |
+| Collection delete re-check finds a key live | Key dropped from the delete | None needed |
+| A deletion removed a chunk the main still holds | The copy lacks it until the restore | Restore after the deletion (§4.8) |
+| Discard request not consumed | Chunks stay on that copy; request outstanding | Status lists it; re-delivery ([gc §5.7](gc.md#57-deletion-on-copies)) |
 
-Every job is idempotent: bodyless put, copy onto an atomic put, deletes that treat absent as success. Re-running any prefix of a log is safe.
-
-Abandonment: nothing is abandoned automatically except by drop (permanent failure, overflow, unreadable record). Every drop sets `degraded`, the only signal that a repair is needed.
+Every job is idempotent: ordinary jobs converge keys on the source, collection deletes re-check before deleting, and deletes treat absence as success.
 
 ---
 
 ## 7. Parameters
 
-| Parameter | Value | Effect | Trade-off |
-|---|---|---|---|
-| MAX_FORWARDS | = chunk buffer budget (default = upload concurrency, 4). 32 when no budget is given | Chunk bodies kept alive by best-effort forwards | Higher prefills targets faster but holds more memory. Lower costs the manifest job a fetch per dropped chunk |
-| forward admission | the target's uplink `try_admit` | Forward only when the link has room now | Forwards never delay user writes on a shared uplink |
-| MEMO_CAP | 100 000 keys | `ensured` size before a full reset | Larger saves repeat listings, smaller saves memory. A reset costs one shard listing per shard met |
-| MAX_QUEUED | 100 000 jobs in memory per log | Runaway backstop: past it, new jobs are dropped and the target is degraded | Too low degrades a merely slow target; too high only delays noticing |
-| queue backoff | base 0.5 s, doubling, cap 300 s | Retry pace of a failing head | Faster retries waste requests against a dead target |
-| settle timeout | 60 s (capped by shutdown grace) | How long a command waits for its own queue before exiting | Longer keeps commands open; shorter leaves more to the resumer |
-| housekeeping interval | 60 s | Resumer rescan period for orphaned records | Latency before a dead command's work resumes |
-| health trip | ≥ 2 consecutive transient failures over ≥ 1 s | When a member is declared down | Lower fails over faster but flaps more |
-| hold | 30 s, doubling to 300 s per failed probe | How long a down member is skipped | Longer spends fewer probes but notices a return later |
-| PROBE_TIMEOUT | 10 s (including retries) | Write-guard probe bound | Shorter refuses sooner on a slow-but-alive main |
-| driver retry ladder | 8 attempts, 0.5 s·2ⁿ capped at 20 s, jittered | Per-request persistence | Cut short by health "held" |
-| mirror pools | copy = chunk buffer budget; probe = max(8, 4×copy); in flight = 4×probe | Bodies in memory, round trips in flight, listing records in flight | Memory against throughput |
-
----
-
-## 8. Known gaps
-
-Cited from `findings.md`:
-
-- **G2 — duplicate member names.** Two deferred members with the same name share one job log and one set of per-name tables. The resumer runs one member's records against the other's store, and stats and admission come from the wrong member. Correct version: reject duplicate names at configuration time (names are the identity of durable state).
-- **G7 — Android never resumes.** The app builds its domain in non-resume mode, which claims the log and never rescans. Records left by a killed app process are never replayed on the device, and the member stays behind until a mirror (which the phone cannot run). Correct version: the app is its own resumer (resume mode, start after construction, periodic rescan), or it hands its logs to a resumer.
-
-Observed while writing this specification, not in `findings.md`:
-
-- **R1 — stale `ensured` memo after out-of-band deletes.** GC deletes chunks from copies directly (or through a server-side request), bypassing the job worker, so a long-lived process's memo still lists them. If the same content is uploaded again later, both the forward and the manifest job's `ensure_chunk` see the memo and skip, and the manifest reaches the target without its chunk, which breaks S1. Correct version: any deletion on a target must invalidate that target's memo in every process that runs it. The simplest sound rule is to drop the memo whenever a collection closes: the resumer can observe the run marker, or tag the memo with the collection epoch and discard it on change.
-- **R2 — two runners per log across processes.** A one-shot command runs its own records while the resumer runs its own, against the same member. Order across the two is not preserved. Example: a command's `Delete(k)` runs after the daemon's later `Put(k)` has landed, so the target lacks a key the main holds until the next write to `k` or a mirror. The claim lock only prevents one process from running another's records. Correct version: a single runner per member (commands record and hand off, as forked frontends do), or per-key ordering across logs.
-- **R3 — `degraded` is volatile.** A dropped job deletes its record, and the flag lives in memory. After a restart the member reports healthy although it owes a mirror. Correct version: persist a degraded marker beside the log, cleared only by a completed mirror to that member.
-- **R4 — partial main fan-out.** With several mains, a failure on main k leaves mains 1..k−1 holding a write that nothing owes the others or the targets unless the caller retries. Correct version: record owed writes for later mains as for targets, or guarantee caller retry.
-- **R5 — spurious drops under collection.** A `Put(manifest)` job that read a body naming a chunk the collection then discarded (the manifest was overwritten after marking) gets a permanent "not found" and is dropped, which degrades the target although a later job carries the newer manifest. The harm is a false degraded signal. Correct version: treat "chunk missing at source" as "the referrer changed". Re-read the referrer and retry, and drop only if it still names the missing chunk.
-- **R6 — re-upload between GC's recheck and a copy's delete.** A chunk re-uploaded to the main after the doomed-key recheck but before the delete on a copy is removed from the copy while the main keeps it. The window is small. Correct version: recheck after the copies' deletes too, and re-forward survivors, or order the copy deletes behind a barrier on writers.
-- The composite's capability merge with the main held answers from the replica alone (acknowledged), and health windows use the wall clock (G12).
-
-Preemptive runtimes: `ensured`/`known_shards`, the forward counter's check-and-increment, and `try_admit`-then-take each need to become one atomic step.
-
----
-
-## 9. Alternatives and why this design
-
-- **Synchronous writes to every member.** Rejected: a slow or remote copy would slow every write ("Fill replicas behind the write, not in it", 9b0f6af2).
-- **Jobs carrying bodies.** Rejected: the log would grow with data, repeated puts would not converge on the latest body, and deleted keys would be resurrected. Bodyless jobs read the main at run time.
-- **One record per chunk.** Rejected: deduplication makes most operations chunk-free, so correctness rests on the manifest job's check and chunk forwards are pure prefetch.
-- **Targets reading through the composite.** Rejected: a stale copy could feed a job whose result is never corrected (targets read mains only).
-- **Separate replica and backfill mechanisms.** Collapsed into one with one bit (b92f69b2, fcf7b854), so promotion is a configuration edit.
-- **Writing a replica while the main is down.** Rejected (the write guard): it creates state nobody can check and that disappears on the main's return.
-- **HEAD per chunk on the target.** Replaced by shard listings folded into a memo: across tens of thousands of manifests, shards repeat, and a listing answers about 1000 keys per request (deferred_shards: 40 manifests × 4 chunks → 0 HEADs, 4 listings).
-- **Several mains each arbitrating conditional writes.** Rejected: two clients could each win somewhere.
-- **Merged listings.** Rejected: one member's view is consistent with itself, and a merge would mix different points in time.
-- **A queue service for verify and delete requests.** Rejected: the bucket's own notification delivers request objects to the function that already checks every chunk. No second credential, one code path.
-- **Automatic repair.** Not done: drops are rare and signalled, and mirror is additive, idempotent, and cheap to rerun.
-
----
-
-## 10. Mapping to the current implementation
-
-| Abstract | Concrete | Spec |
+| Parameter | Recommended | Effect / bound |
 |---|---|---|
-| Roles, read order, config validation | `role = Main\|Replica\|Backfill\|ReadOnly`, `order_backends`, `validate_roles` (`conf_parsing.ml`) | [05 §2.2](../05-ops-config.md), [06 §2.5](../06-backends.md) |
-| Composite construction | `Domain.of_config` → `build_backends` → `Domain_store.make ~mains ~targets ~archives` (`lib/domain/config/domain/domain.ml`, `lib/backends/api/domain_store.ml`) | 05 §4.1, 06 §4.3 |
-| Source = mains only | `make ~mains ~targets:[] ~archives:[]` inside `Domain_store.make` | 06 §4.3 |
-| Write fan-out, `fill`, `skip` | `write`, `fill`, `D.skip` (`excluded = Stored_key.is_index_key`; journal prefix / cursor key when `reads_reach = false`) | 06 §4.3–4.4 |
-| Deferred target, reads-reach bit | `Deferred.make ~reads_reach:(role=Replica)` (`lib/backends/api/deferred.ml`) | 06 §4.4 |
-| Job log, bodyless jobs | `Durable_queue.ordered` with `Records` at `<data_dir>/deferred-pending/<domain>/<escape name>/`, JSON `{"op":"put"\|"copy"\|"delete"\|"delete_multi",…}` | 06 §2.6 |
-| Claim lock | `lockf` on `<dir>.owner`, `claim`/`with_claim`/`release` (`lib/core/durable_queue.ml`) | 06 §4.4 |
-| MAX_QUEUED, backoff, settle timeout | `max_queued = 100_000`, `Retry.backoff ~base:0.5 ~cap:300.`, `default_settle_timeout = 60.` | — |
-| chunk forward, MAX_FORWARDS, admission | `forward_chunk`, `max_chunk_forwards` = `maxChunkBuffers` (default 32 in `Deferred`), `room_for` = link admission `try_admit` | 06 §4.4, §4.9 |
-| `ensured`, `known_shards`, MEMO_CAP | same names, `max_ensured = 100_000`, `learn_shard` over `Chunk_layout.shard_prefix` | 06 §4.4 |
-| from-space fallback | `chunk_from_prefix` = `tsync/<d>/chunks.from/` | 05 §4.9 |
-| chunk_names | `chunk_keys` (manifest parse, `[]` otherwise) | 05 §4.1 |
-| drop → degraded | `poison = Drop`, `Q.stats.degraded` | 06 §4.4 |
-| read / walk / ask | `read`, `walk`, `ask_member ?probing ~others`, `Health_wait.until_held` | 06 §4.3 |
-| health, hold, probe | `Health` (`trip_after 2`, `trip_span 1.`, `hold_initial 30.`, `hold_max 300.`, `probe_timeout 10.`), `check → Up\|Held\|Probe` | 06 §4.1 |
-| batches | `get_many`/`list_many` on the first readable member, `passed_over`, per-key `read` fallback | 06 §4.3 |
-| write guard | `Write_guard.ensure`/`look`/`probe` on the cursor key (`lib/backends/api/write_guard.ml`) | 06 §4.5 |
-| mirror | `tsync mirror`, `lib/domain/ops/mirror.ml` (`resync ?source ?scope`) | 05 §4.6 |
-| verification, markers | local `verifyWrites`, `lambda/verify.py`, `verify_all` → `tsync/verify-jobs/<d>/<shard>`, markers at `tsync/corrupted/<d>/<shard>/<key>` | 06 §4.6–4.7 |
-| integrity repair | `Integrity.repair` / `verify` / `follow` (`lib/domain/ops/integrity.ml`), `tsync data-integrity` | 05 §4.10 |
-| GC propagation | `Gc.flush_close` (`discard` → `tsync/gc-jobs/<d>/<run>/<shard>` or `delete_multi`), `orphans_in_shard` recheck (`lib/domain/ops/gc.ml`) | 05 §4.9, 06 §4.6 |
-| resumer | daemon `resume = true`, `Domain.start_resumed` after fork (`launcher.ml`), `rescan_all` on the 60 s housekeeping sweep (`domain_engine.ml`) and IPC `rescan` from `set_on_recorded` | 06 §5.1, 05 §4.1 |
-| settle / drain | `Queues.register_settle chunks_quiet`, `Domain_store` drain hook → `settle_all` | 06 §4.4 |
-| Android host | `android_jni.ml` `load_domain` without `~resume` (G7) | findings G7 |
-| Tests | `tests/backends/{fallback,held_failover,main_down,deferred,deferred_shards,deferred_governed,backfill,write_guard,gc_targets,gc_queued}`, `tests/unit/queue_claim` | 06 §8 |
+| JOB_RESTARTS | 3 | Re-reads of a referrer that changed while its chunks were ensured |
+| DISCARD_POLL | 60 s | Period of the owner's checks that a pending discard request was consumed |
+| Queue backoff, rearm, settle | [durable-queue §9](durable-queue.md#9-parameters) | Retry pace, parked-record retry period, exit wait |
+| PROBE_TIMEOUT | [01 §15](../01-core.md#15-parameters) | Write-guard probe bound, retries included |
+
+---
+
+## 8. Alternatives and rationale
+
+- **Synchronous writes to every member.** Rejected: a slow or remote copy would slow every write.
+- **Jobs carrying bodies.** Rejected: the log would grow with data, repeated puts would not converge on the latest body, and deleted keys would be resurrected.
+- **Jobs replaying the operation on the target** (a copy on the target, a delete regardless of the source). Rejected: they converge only if every log runs in one global order, which two machines, submissions, parking, or a restarted owner cannot give. Reading the source when the job runs converges in any order.
+- **Dropping a job that fails permanently.** Rejected: it lost work silently until a whole-store mirror; parking keeps the work and the evidence.
+- **Deleting on copies directly from the collector.** Rejected: it bypassed the worker's memo; as jobs, deletes are re-checked and ordered with the copy's other work.
+- **One record per chunk.** Rejected: deduplication makes most operations chunk-free, so correctness rests on the manifest job's check, and chunk forwards are pure prefetch.
+- **Targets reading through the composite.** Rejected: a stale copy could feed a job whose result is never corrected.
+- **Separate replica and backfill mechanisms.** Collapsed into one bit, so promotion is a configuration edit.
+- **Writing a copy while the main is down.** Rejected: see the write guard.
+- **A metadata read per chunk on the copy.** Replaced by shard listings folded into a memo: across many manifests shards repeat, and one listing answers about a thousand keys.
+- **Several mains each arbitrating claims.** Rejected: two clients could each win somewhere.
+- **Merged listings.** Rejected: one member's view is consistent with itself, and a merge would mix different points in time.
+
+---
+
+## 9. Conformance
+
+An implementation MUST exhibit:
+
+- **Read semantics.** With main and replica: a reachable main that misses answers "absent" without asking the replica; an unreachable main is passed over and the replica answers; archives answer on a source miss and when the source is unreachable; everything unreachable raises, never "absent", and with everything down the main's error is the one reported; a read-only domain reads and lists, and its writes fail REFUSED(read_only); an empty listing is an answer; an unreachable main's listing falls to an archive.
+- **Held failover.** A replica is not asked while the main is up. A main found down is passed over without waiting out its retry ladder, and a request already in flight to it is cancelled. A batch whose member is passed over is answered key by key from the next member. A long poll is never the probe. A single-member domain always asks its member, held or not. At hold expiry exactly one of several concurrent reads probes.
+- **Main down.** Every write verb fails; the replica is unchanged and owed nothing; verification requests to the replica are refused. A write taken earlier stays owed and lands when the main returns.
+- **Multi-main.** A failure on the first main writes no other member and records no job. A failure on a later main leaves the copies owing the write, and the write raises.
+- **Durability.** A job is on disk before the write returns, and survives a failure of the copy. After a restart the copy's jobs are intact and run in id order, with writes made meanwhile recorded behind them. A stop mid-job leaves it owed. A permanent failure parks the job and reports the copy degraded, across restarts; the parked job completes on retry once the cause clears. A record submitted by a non-owner is run by the owner after its poke.
+- **Convergence.** A delete job whose key the source holds again restores the key on the copy. A put job whose key the source no longer holds deletes it on the copy. A rename is converged as a put of the destination and a delete of the source. Two logs replayed in either order converge on the source.
+- **Referrer after referenced.** A manifest reaches a copy only after every chunk it names; a chunk missing at the source because its referrer changed restarts the job with the new body; a chunk no main holds parks the job as CORRUPT with the key named.
+- **Memo.** 40 manifests × 4 chunks over 4 shards cost no per-chunk metadata reads, 4 shard listings and 160 chunk puts, and the same content under new names costs nothing more. While a run record is present the memo is not relied on. After a collection deletes a chunk from the copy and the chunk is referenced again, the manifest's job puts the chunk before the manifest.
+- **Collection deletes.** Owed deletions carry their generation and are durable before the main unlinks its outgoing chunks; a crash in between repeats them. A deletion deletes chunks and their markers on a copy without a function, or writes one discard request per run and shard on a copy with one, kept pending until consumed; removes its keys from the memo first; does not run while a main is down. After a deletion takes effect, every deleted chunk the main holds is restored on the copy, and only when every deletion of a generation is settled does G turn even. At start, unsettled deletions are resumed and settled before G is made even. A never-consumed request leaves G odd, and the memo unused.
+- **Generation.** While G is odd, or unreadable, or a run record in closing has no generation, no memo entry is relied on or recorded. After G changes, no entry tagged with the old value is relied on. A writer refused "missing chunks" by the gate no longer believes those chunks present anywhere.
+- **Forwards.** Forwards are asked once per chunk with its exact size, and only admitted forwards are sent; a refused forward is fetched by the manifest's job.
+- **Backfill.** Chunks before manifests; a deduplicated hole is filled; symlink manifests name no chunks; the journal and cursor are not carried; reads never reach it.
+- **Write guard.** Probes once then trusts; a down main refuses non-main writes as TRANSIENT naming the main; an expired hold is re-probed; a main that never answers is bounded by the probe timeout; a domain with no main is allowed.
+- **Mirror.** On any interruption, the destination holds no manifest without its chunks and no entry without its manifest; a mutable key of equal size but different body is recopied; mirror never deletes.
+
+---
+
+OCaml implementation notes: [ocaml/algorithms/replication.md](../ocaml/algorithms/replication.md).

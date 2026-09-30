@@ -1,605 +1,553 @@
-# The macOS application (File Provider frontend)
+# The macOS host (File Provider frontend)
 
-Scope: everything under `macos/` (TsyncApp, TsyncFileProvider extension, Shared,
-TsyncTests, build/sign/notarize/install scripts, RELEASING.md) and its daemon-side
-counterpart `lib/app/frontends/file_provider/` (plus the parts of the generic IPC
-handler `lib/app/cli/runner/daemon/engine/ipc_handler.ml` that exist for this client).
+Scope: how tsync presents domains on macOS through Apple's File Provider framework: the processes
+involved and which of them owns what, the macOS realisation of the request interface, the mapping
+between tsync items and File Provider items, change signalling, domain registration, and the
+installation.
 
-The generic frontend seam (`Frontend.S`, topology, `served`, how a launcher forks
-frontends) is specified in **[the frontend contract](../08-frontends.md)** and is only referenced here. Journal,
-applied-entries, folder ids, chunk store, uploads and conflicts have their own files;
-this one specifies how the macOS host uses them.
+Rules shared by every frontend are owned elsewhere and only referenced here:
+- the frontend contract, item references, the item row, error codes, anchors, paging and the shared
+  request handler: [the frontend contract](../08-frontends.md);
+- the process model, domain ownership, the owner's lifecycle and stop protocol, and the CLI:
+  [daemon and CLI](../07-daemon-cli.md);
+- what the owner's local state is: [local state](../data-model/local-cache.md);
+- failure kinds and deadlines: [failure model](../algorithms/failure-model.md);
+- trust boundaries and path confinement: [security model](../algorithms/security-model.md);
+- conflicts: [conflict resolution](../algorithms/conflict-resolution.md).
 
 ---
 
+## 1. Problem
 
-## A1. Problem
+On macOS a folder lazily backed by remote storage is provided through the File Provider framework
+(a *replicated* extension), not a kernel filesystem. The framework imposes this shape:
 
-On macOS a user folder that is lazily backed by remote storage must be provided through
-Apple's **File Provider** framework (`NSFileProviderReplicatedExtension`), not FUSE.
-The framework imposes a very specific shape:
+- The operating system keeps a **replica** of each domain on disk under
+  `~/Library/CloudStorage/`. Files are dataless placeholders until materialised. The provider never
+  writes the replica; it answers callbacks.
+- Callbacks are served by an **extension** the system launches, suspends and kills at will. It is
+  sandboxed and may not read files other processes wrote into the shared App Group container.
+- Only a process holding a File Provider manager (the app or the extension) may register domains,
+  signal changes, evict items or request downloads.
+- Items are named by opaque identifiers the system persists. Changes are pulled by the system from
+  a **working set** enumerator, using opaque **sync anchors**. Pages and anchors are at most 500 bytes.
 
-- The OS (`fileproviderd`) owns a **replica** on disk under
-  `~/Library/CloudStorage/<App>-<Domain>/`; files are "dataless" placeholders until
-  materialized. The provider never writes the replica directly: it answers callbacks.
-- Callbacks are served by an **app extension** (`.appex`) that the OS launches, suspends
-  and kills at will, which is **sandboxed**, and which may not read files other
-  processes wrote into the shared App Group container.
-- Only a process holding an `NSFileProviderManager` may register domains, signal
-  changes, evict or request downloads. The daemon (a plain unsandboxed binary) is not
-  such a process.
-- Items are identified by opaque identifiers the system persists; changes are pulled by
-  the system from a **working set** enumerator using opaque **sync anchors**; pages and
-  anchors are opaque blobs ≤ 500 bytes.
+tsync's engine lives in a long-running, unsandboxed process. This subsystem is the adapter: it
+divides the File Provider duties between processes, realises the request interface for sandboxed
+clients, and maps tsync's names and change feed onto the framework's identifiers, versions,
+enumerations and anchors.
 
-tsync's engine (mirror, journal, chunk store, upload queue) lives in a long-running
-daemon. This subsystem is the adapter: it splits the File Provider duties across three
-processes, defines a JSON-lines IPC contract between them and the daemon, and maps
-tsync's naming (logical keys, folder ids) and change feed (applied journal entries)
-onto the framework's identifiers, enumerations, versions and anchors.
-
-It is a separate abstraction because none of this is shared with FUSE/Android: the
-daemon core stays frontend-agnostic and the frontend contributes only (a) hooks (evict,
-restore, changed, full_resync, status/stats fields), (b) an event channel, (c) one extra
-verb (`preview`), (d) three CLI commands (`fileprovider reimport|reset|purge`), and (e)
-an `availability` answer that reads the replica's dataless flag.
-
-## A2. Process model
+## 2. Processes and ownership
 
 ```
-                   launchd (per user, gui/<uid>)
-        ┌──────────────────────┴───────────────────────┐
-  LaunchAgent org.feverdreamtv.tsync.daemon      Login item (SMAppService.mainApp)
-  $APP/Contents/MacOS/tsync start                $APP/Contents/MacOS/TsyncApp  (sandboxed, LSUIElement)
-        │                                          │  - registers/reconciles domains
-        ├─ parent: "converging" process            │  - one SignalRelay thread per domain
-        │   (sync, uplink owner, journal apply)    │    (subscribes to events)
-        │   listens tsync-sync.sock                │  - menu bar status item (polls "menu")
-        │   posts {"action":"changed",keys}  ──┐   │
-        └─ child: file_provider frontend       │   │
-            ONE process for ALL domains  ◄─────┘   │
-            listens tsync.sock  ◄───────────────────┘ subscribe (long-lived), menu, pause
+                    launchd (per user session)
+         ┌───────────────────┴─────────────────────────┐
+   LaunchAgent: tsync service                     Login item: TsyncApp (sandboxed)
+         │                                          - registers and reconciles domains
+         └─ owner of every File Provider domain     - one event relay per domain
+            (converges each domain it owns;         - menu bar status item
+             serves the request socket)  ◄──────────┘ subscribe, menu, pause, reset notices
                   ▲
-                  │ request/reply (one connection per request)
-     TsyncFileProvider.appex (sandboxed; one instance per domain; launched by fileproviderd)
+                  │ one request per connection
+     TsyncFileProvider extension (sandboxed; one instance per domain; started by the system)
 
-     tsync CLI (same binary via /usr/local/bin/tsync symlink): one-shot requests to
-     tsync.sock; fileprovider commands write marker files and bounce TsyncApp.
+     tsync CLI: requests to the owner's socket; takes ownership itself only when no owner runs
 ```
 
-| Process | Lifetime | Sandbox | Holds FP manager? | Role |
+| Process | Lifetime | Sandboxed | Holds a File Provider manager | Role |
 |---|---|---|---|---|
-| daemon parent (`tsync start`) | launchd `KeepAlive{SuccessfulExit=false}`, `RunAtLoad` | no | no | Converges every domain with the store (poller, journal apply, uplink). Sends change notices to the frontend socket. See 08. |
-| daemon child (file_provider frontend) | forked by the parent | no | no | Serves **all** domains on one socket `tsync.sock`; answers extension/app/CLI requests; publishes events. Topology `One_process`, `listens = Domain_socket`, `tree = Replicated`. |
-| TsyncApp | login item, always up | yes (App Group) | yes | Domain registration/reset/purge; event relay (daemon → `signalEnumerator`/`evictItem`/`requestDownload`); menu bar. |
-| TsyncFileProvider.appex | started/stopped by the OS | yes (App Group, network.client, hardened runtime) | via `NSFileProviderManager(for:)` only for temp dir | Implements every File Provider callback by asking the daemon. Holds **no state** across calls except a cached "readOnly" flag. |
-| CLI | one-shot | no | no | Generic daemon verbs + `fileprovider reimport/reset/purge`. |
+| Owner | started by the service manager, restarted on any unclean exit | no | no | Owns and converges every domain configured with the `file_provider` frontend (P1, [07](../07-daemon-cli.md)). Serves the request socket. Publishes events. |
+| App | login item, always running | yes (App Group) | yes | Domain registration, reset and purge; relays owner events to the framework; menu bar. |
+| Extension | started and stopped by the system | yes (App Group, network client) | only to obtain its temporary directory | Implements every File Provider callback by asking the owner. Holds no state across callbacks except the cached read-only flag (§6.9). |
+| CLI | one-shot | no | no | Sends requests to the owner. `fileprovider reimport|reset|purge` (§9). |
 
-Direction rule (load-bearing): **the daemon never connects out.** Sandboxed processes
-can always connect to the daemon's unix socket, but the daemon cannot reach into them
-and the OS owns their lifetime. So the app subscribes and receives events on its own
-connection; the extension only makes request/reply calls.
+**Ownership (P1).** One process owns all File Provider domains of the user. It holds each domain's
+ownership lock for its lifetime and is the only process that mutates their local state. It also
+converges them: reconcile, journal polling and application, maintenance, and resumption of deferred
+work. Any other frontend configured for one of these domains runs inside the same owner. The app,
+the extension and the CLI act on a domain only through the owner's request interface. A one-shot
+command that finds no owner running MAY take ownership for its own duration, as
+[07](../07-daemon-cli.md) specifies. Because the owner applies peer changes itself, it learns which
+keys changed in-process; no notice crosses a process boundary for that.
 
-Why the app, not the extension, relays events: the extension is stopped exactly when the
-domain is idle — which is when remote changes need reporting. The app is a login item
-and stays up (`SignalRelay.swift` header comment).
+**Direction rule.** The owner never connects to the sandboxed processes. Sandboxed processes can
+always connect to the owner's socket, but the owner cannot reach into them and the system owns their
+lifetime. The app therefore subscribes and receives events on its own connection, and the extension
+makes only request/reply calls.
 
-## A3. Filesystem layout and identifiers
+**Why the app relays events, not the extension.** The system stops the extension exactly when the
+domain is idle, which is when remote changes need reporting. The app is a login item and stays up.
+
+## 3. Host layout and identifiers
+
+### 3.1 Fixed identifiers
+
+These identifiers are part of the installed base. Changing the App Group orphans every existing
+installation's configuration and local state.
 
 | Thing | Value |
 |---|---|
 | App bundle id | `org.feverdreamtv.tsync` |
 | Extension bundle id | `org.feverdreamtv.tsync.fileprovider` |
 | App Group | `group.org.feverdreamtv.tsync` |
-| Daemon launchd label | `org.feverdreamtv.tsync.daemon` |
-| Team ID | `PSE2VP6582` |
-| Group container | `~/Library/Group Containers/group.org.feverdreamtv.tsync/` |
+| Service label | `org.feverdreamtv.tsync.daemon` |
+
+### 3.2 Paths
+
+| Thing | Path |
+|---|---|
+| Group container | `~/Library/Group Containers/<App Group>/` |
 | Config | `<group>/config.json` (survives purge) |
-| data_dir | `<group>/tsync/` |
-| cache_root | `<group>/tsync/cache/` |
-| Frontend socket (all domains) | `<group>/tsync/tsync.sock` |
-| Converger socket | `<group>/tsync/tsync-sync.sock` |
-| http-proxy socket | `<group>/tsync/tsync-http-proxy.sock` |
-| Generation stamp | `<data_dir>/resync-<domain>` (decimal ms since epoch) |
-| Kept list_all walk | `<scratch_dir(domain)>/.tsync-list-all` |
-| Preview scratch | `<cache_root>/previews/` |
-| Markers (app ↔ CLI) | `<data_dir>/fileprovider-reset`, `<data_dir>/fileprovider-purge`, `<data_dir>/fileprovider-identity-scheme` |
-| Daemon log | `~/Library/Logs/tsync-daemon.log` (stdout+stderr of the agent; syslog opened with LOG_PERROR so it has every line) |
-| LaunchAgent plist | `~/Library/LaunchAgents/org.feverdreamtv.tsync.daemon.plist` |
-| CLI symlink | `/usr/local/bin/tsync → /Applications/TsyncApp.app/Contents/MacOS/tsync` |
-| Replica folder | `~/Library/CloudStorage/TsyncApp-<displayName with disallowed chars removed>` |
-| Extension staging | `<extension container>/tmp/staging/<UUID>` (the extension's own sandbox tmp) |
-| Fetch destinations | `NSFileProviderManager.temporaryDirectoryURL()/<UUID>` |
+| Data directory | `<group>/tsync/` |
+| Cache root | `<group>/tsync/cache/` |
+| Request socket (all domains) | `<group>/tsync/tsync.sock` |
+| Reset marker | `<data dir>/fileprovider-reset` (one display name per line) |
+| Purge marker | `<data dir>/fileprovider-purge` |
+| Identity-scheme record | `<data dir>/fileprovider-identity-scheme` (decimal integer) |
+| Service log | `~/Library/Logs/tsync-daemon.log` |
+| CLI link | `/usr/local/bin/tsync` → the binary inside the app bundle |
+| Extension staging directory | `~/Library/Containers/<extension bundle id>/Data/tmp/staging/` |
 
-All five identifiers must agree across the Xcode project, both entitlements, the Swift
-`Config`, `install-agent.sh` and the daemon runtime paths. Changing the App Group
-orphans cache and config. Unix socket paths are capped at 104 bytes.
+The generation stamp and the kept whole-domain walk are the owner's local state and live where
+[local state](../data-model/local-cache.md) puts them. Unix socket paths are limited to 104 bytes;
+the request socket path MUST fit.
 
-**Domain identity.** Config domain `name` is the *display name*; the
-`NSFileProviderDomainIdentifier` is `name.lowercased()` with spaces → `-`. Every client
-(`DaemonClient(domain: domain.displayName)`) sends the display name as `"domain"`, and the
-daemon routes on it, so display name must equal the config name byte-for-byte.
+Every marker and record above is written by the rule of
+[durable-queue.md](../algorithms/durable-queue.md) (temporary file, fsync, rename, directory fsync).
 
-**Locating the replica folder** (`Conf_parsing.cloud_storage_dir`): the OS names it
-`<AppName>-<displayName>` after dropping characters it will not put in a path, by an
-undocumented rule. It is found by listing `~/Library/CloudStorage` and comparing
-lowercase-alphanumeric-only projections: `alnum(dir) == alnum("TsyncApp" ^ domain)`.
-`None` until the domain is registered and fileproviderd has created it.
+### 3.3 Domain identifier
 
-## A4. Wire protocol (extension/app/CLI ↔ frontend daemon)
+The config's domain `name` is the File Provider **display name**. The File Provider **domain
+identifier** is derived from it:
 
-### A4.1 Framing
-
-- `AF_UNIX`, `SOCK_STREAM`, path `tsync.sock`. One JSON object per line, `\n`
-  terminated, UTF-8 (names passed through as bytes; the Swift reader decodes lossily so
-  one bad name costs one item).
-- The server serves a connection **sequentially**: read line → handle → write reply
-  line → loop, until EOF. Replies carry **no request id**; concurrency comes from
-  multiple connections (one server task per connection).
-- The Swift client uses **one connection per request**: connect, write line,
-  `shutdown(SHUT_WR)` (tells the server no more requests), read one line, close.
-  `SO_NOSIGPIPE` set. No client-side timeout; cancellation `shutdown(SHUT_RDWR)`s the
-  socket under a lock (see A7).
-- A reply of `"subscribe"` turns the connection into an event stream (A4.5); the
-  client must **not** half-close it (EOF on the read side ends the subscription).
-- `"stop"` replies then stops the server.
-
-### A4.2 Envelope
-
-Request: `{"action": <verb>, "domain": <display name>, ...fields}`. Absent `domain` is
-accepted only when the daemon serves exactly one domain; otherwise
-`{"ok":false,"error":"cannot tell which domain '<action>' is for: name it with \"domain\""}`.
-Routing to the domain happens in the frontend router, except `menu` and `menu_stats`,
-which span domains and are answered by the router itself.
-
-Success: `{"ok":true, ...}`. Failure:
-`{"ok":false,"code":<code>,"error":<prose>}` where code ∈
-
-| code | from | Extension maps to | Semantics for FP |
-|---|---|---|---|
-| `not_found` | ENOENT, share not found, "no versions for" | `NSFileProviderError.noSuchItem` (or `fileProviderErrorForNonExistentItem(id)` when the item is known) | item gone; delete treats as success |
-| `exists` | EEXIST | `.filenameCollision` | |
-| `not_empty` | ENOTEMPTY | `.directoryNotEmpty` | |
-| `read_only` | EROFS, backend not writable, domain read-only | Cocoa `NSFileWriteNoPermissionError` | |
-| `denied` | EPERM/EACCES | Cocoa `NSFileWriteNoPermissionError` | |
-| `unreachable` | backend error, timeout, share unavailable | `.serverUnreachable` | **latches** the domain until `signalErrorResolved` |
-| `invalid` | bad request, `Invalid_argument` | Cocoa `NSFileWriteUnknownError` | retried |
-| `internal` | anything else | Cocoa `NSFileWriteUnknownError` | retried |
-| (transport) | socket connect/read/write failure | Cocoa `NSFileWriteUnknownError` | retried |
-
-Rules: only errors in `NSCocoaErrorDomain` or `NSFileProviderErrorDomain` may be
-returned to the framework (any other domain surfaces as an unexplained I/O error).
-Only `unreachable` may map to `serverUnreachable`: a daemon restarting (transport error)
-must cost one retried operation, never latch the domain off. Unplaceable daemon
-exceptions are `internal`, never `unreachable`.
-
-### A4.3 Item references
-
-The wire name of an item (and, verbatim, the `NSFileProviderItemIdentifier` raw value):
-
-| Form | Meaning |
-|---|---|
-| `root` | domain root (daemon side). The extension maps it to/from `.rootContainer`. |
-| `d:<folderId>` | a directory, by its daemon-minted stable folder id. `d:.tsync-root` parses as root. |
-| `f:<parentFolderId>/<leaf>` | a file (or symlink): parent folder id + leaf name. Split at the **first** `/` (neither ids nor leaves contain `/`); both halves non-empty. |
-| anything else | `Bad` → request answered `not_found` or `invalid`; a storage key is deliberately not accepted as a reference. |
-
-`.tsync-root` is the reserved folder id of the root, i.e. the parent id of every
-top-level file (`f:.tsync-root/a.txt`). A top-level item's `parentRef` is `root`.
-
-Why: the framework reads an identifier returned from `modifyItem` that differs from the
-one passed in as an instruction to **merge**. Path identifiers would make every folder
-rename a silent re-identification of its whole subtree. Folder ids survive renames; a
-file's identifier still changes on rename, but that "merge" covers exactly one item,
-which the system reconciles. A stable per-file id would require a storage-layout change.
-Identifiers reach system logs, so they never spell storage keys (and user paths only
-where a leaf is a name).
-
-Only the daemon mints folder ids; a file reference is **composable** by the client from
-a container identifier + name (`ItemID.file(in:named:)`), a directory's is not — which
-is why every mutation replies with the item it produced.
-
-Resolution on the daemon: `root`→root key; `d:id`→path via folder-id index (mints
-nothing; `None` → `not_found`); `f:id/name`→ that folder's path + leaf. A reference's
-kind is enforced on `stat` (`f:` must not answer for a folder).
-
-Alternative addressing for path-only callers (desktop menus, CLI): `"rel": "<path>"` in
-place of `"ref"`; `rel:""` is root; kind is read from the mirror; absent → `not_found`.
-
-### A4.4 Item row (the one shape for stat, listings, change ops, mutation replies)
-
-```json
-{"ref":"f:.tsync-root/a.txt","parentRef":"root","name":"a.txt","kind":"file",
- "size":5,"mtime":1727630000.25,"etag":"650e58ac64da6e0a","isUploaded":true,
- "availability":"pinned","pinnedUntil":1727633600.0}
+```
+identifier(name) = replace every U+0020 SPACE with "-" in lowercase(name)
 ```
 
-| Field | Meaning |
-|---|---|
-| `ref`, `parentRef`, `name` | A4.3; the root's `name` is the domain name; root's `parentRef` is `root`. |
-| `kind` | `dir` \| `file` \| `symlink` |
-| `size` | logical bytes (dir: 0) |
-| `mtime` | float seconds (dir: **0**, meaning "no date", constant) |
-| `etag` | published manifest's content hash `h1` (16 hex); **`""`** for a file with unsynced edits (staged); for a dir its **own folder id** (constant for its lifetime) |
-| `isUploaded` | false while a staged version is unpublished |
-| `symlinkTarget` | present only for symlinks |
-| `trashed` | present only when true (unused by the extension today) |
-| `availability` | files only: `online-only` \| `cached` \| `pinned` (chunk store state, see checkout spec) |
-| `pinnedUntil` | with `pinned`: deadline, float seconds |
+where `lowercase` is the Unicode default lowercase mapping. The derivation is part of the installed
+base: registered domains are found again by it.
 
-Staged files: size/mtime come from the staged manifest (authoritative until publish),
-`etag:""`, `isUploaded:false`. Listed files with no readable manifest fall back to the
-listing's size/mtime, `etag:""`, `isUploaded:true`.
+- Every client names the domain to the owner by its display name, byte for byte equal to the
+  config name. The identifier is used only between the app and the framework.
+- On a macOS host, config validation MUST refuse two domains configured with `file_provider` whose
+  identifiers are equal, or whose replica-folder projections (§3.4) are equal, naming both domains.
+  The domain name grammar itself is [01-core.md](../01-core.md)'s.
+- The app MUST NOT register a domain whose identifier equals one it registers for another name in
+  the same pass. If it meets such a collision (a configuration that bypassed validation), it
+  registers neither and reports the collision in the menu.
 
-### A4.5 Verbs
+### 3.4 Locating the replica folder
 
-Mutating verbs (`create write delete rename mkdir rmdir symlink revert`) are refused
-with `read_only` on a read-only domain **by the daemon** (not trusting the client's
-capabilities) and are **serialized** under one per-domain mutex (A7).
+The system names a domain's replica folder `<app name>-<display name>` after dropping characters it
+does not put in a path, by an undocumented rule. The owner finds it by listing `~/Library/CloudStorage`
+and comparing projections that keep only lowercase ASCII letters and digits:
 
-| Verb | Request fields | Reply (besides `ok`) | Used by |
-|---|---|---|---|
-| `stat` | `ref` \| `rel` | item row fields at **top level** | ext `item(for:)`, `existingFile` |
-| `list_dir` | `ref`, `after?`, `limit?` (default 1000) | `items:[row]`, `next?`, `unnamed?` | ext directory enumerator; non-recursive delete check (`limit:1`) |
-| `list_all` | `after?`, `limit?` | `items`, `next?` (`"<walk>:<line>"`), `unnamed?` | ext working-set `enumerateItems` |
-| `changes_since` | `arg`=anchor, `limit?` (default 512) | `stale:true` **or** `stale:false,cursor,more,ops:[op],unnamed?` | ext working-set `enumerateChanges` |
-| `cursor` | – | `cursor` | ext `currentSyncAnchor` |
-| `ensure_cached` | `ref`, `dest` (absolute path) | `localPath` | ext `fetchContents` |
-| `fetch_range` | `ref`, `dest`, `offset≥0`, `length>0` | `localPath`, `offset`, `length` (served; short at EOF) | ext `fetchPartialContents` |
-| `download_progress` | `ref` | `active:false` \| `active:true,bytesDownloaded,totalBytes` | ext progress poller |
-| `create` | `parentRef`, `name` | `item` | ext createItem (file w/o contents) |
-| `write` | `parentRef`, `name`, `staging` (abs path), `await?` | `size`, `mtime`, `item` | ext create/modify with contents |
-| `mkdir` | `parentRef`, `name` | `item` (existing folder if already there) | ext createItem dir |
-| `symlink` | `parentRef`, `name`, `target` | `item` | ext createItem symlink |
-| `rename` | `ref`, `parentRef`, `name` | `item` (destination) | ext modifyItem move |
-| `delete` / `rmdir` | `ref` | – | ext deleteItem; rmdir detaches the whole subtree |
-| `revert` | `ref`\|`rel`, `arg`=version | – | CLI |
-| `share` | `ref`\|`rel` | `url` (expires in 7 days) | ext custom action Copy Share URL |
-| `restore` | `ref`\|`rel`, `keep?` (s) | – | ext "Make Available Offline", CLI pin |
-| `evict` | `ref`\|`rel` | – | ext "Make Online Only", CLI |
-| `full_resync` | – | – | CLI `fileprovider reimport` |
-| `status` | – | `domain,running,readOnly,paused,pendingUploads,pendingDownloads,uploading[],downloading[],pendingBytes,<traffic>,subscribers` | ext readOnly probe, CLI, menu (internally) |
-| `pause` | `arg`=`"on"`\|`"off"` | – | app menu (all domains), CLI |
-| `stats` | `arg`= comma set of `totals,exact,reload,frontend` | diagnostics | CLI/menu_stats |
-| `menu` | – (spans domains) | `menu:{icon,tooltip,submenuPlaceholder?,rows}` | app status item poll |
-| `menu_stats` | – | `rows:[row]` | app stats submenu on open |
-| `changed` | `keys:[logical key]` | – | converger → frontend (not a client verb) |
-| `preview` | `body` (abs path) | `data` (base64 PNG) or nothing | none today (A10) |
-| `subscribe` | `domain` (required) | ack, then event lines | app SignalRelay |
-| `stop` | – | – | CLI |
-
-`uploading[]` = `{name, rel, body?, size?}` (body = staged body path); `downloading[]` =
-`{name, rel, bytes, size, seconds, rate}`.
-
-**Mutation replies carry the resulting item** (`item`); the extension fails the
-operation (`internal`, "reply names no item") if absent, because completing without an
-item tells the system nothing about what changed.
-
-**Change op** (entry in `changes_since.ops`), each naming its item like a listing:
-
-```json
-{"op":"put","ref":"f:.tsync-root/a.txt","parentRef":"root","name":"a.txt","item":{...row...}}
-{"op":"delete","ref":"f:.tsync-root/a.txt","parentRef":"root","name":"a.txt"}
-{"op":"mkdir","ref":"d:<id>","parentRef":"root","name":"sub","item":{...}}
-{"op":"rmdir","id":"<id>","ref":"d:<id>","parentRef":"root","name":"gone"}
-{"op":"rename","is_dir":false,"srcRef":"f:.tsync-root/a.txt","srcParentRef":"root",
- "ref":"f:.tsync-root/b.txt","parentRef":"root","name":"b.txt","item":{...}}
-{"op":"rename","is_dir":true,"id":"<id>","srcRef":"d:<id>","srcParentRef":"root",
- "ref":"d:<id>","parentRef":"root","name":"sub2","item":{...}}
+```
+projection(s) = the lowercase ASCII letters and digits of lowercase(s), in order
+replica(domain) = the entry e with projection(e) = projection("TsyncApp" + name)
 ```
 
-- Non-removal ops carry `item` = the item **as it is now**, found by resolving the
-  reference (the path the op spelled may have moved with its folder). If it no longer
-  exists (e.g. put then deleted later in the feed), `item` is omitted.
-- Directory ops name the folder by the id stored **in the journal op** (a removed or
-  renamed folder's marker is gone); the dir row is synthesized from the id
-  (`dir_with_id`), no mirror read.
-- End-point naming uses a folder-id lookup that survives removal (`removed_folder_id`).
-- An op whose ends cannot be named (folder unknown to this client) is **dropped and
-  counted** in `unnamed`, never made stale; a rename is reported only if *both* ends are
-  nameable.
-- **Nothing is filtered by author**: this client's own ops appear (the CLI's changes must
-  reach the mount; client uuid is per machine).
+It is absent until the domain is registered and the system has created the folder. The owner uses it
+only to answer availability (a dataless file is `online-only`); it never writes there.
 
-**Events** (subscriber stream lines):
+## 4. The request interface on macOS
+
+### 4.1 Framing
+
+- A Unix stream socket at the request socket path, carrying newline-delimited JSON as
+  [08](../08-frontends.md) specifies.
+- The owner serves each connection sequentially and every connection concurrently. A failure on one
+  connection (including a socket-option or accept error) MUST NOT stop the listener. The owner MUST
+  NOT set TCP options on Unix sockets.
+- `subscribe` turns the connection into an event stream (§8.1).
+
+### 4.2 Routing and refusals
+
+Requests are `{"action": <verb>, "domain": <display name>, …}`, routed as
+[07 §4.2](../07-daemon-cli.md#42-envelopes) specifies.
+
+- An absent `domain` is accepted only when the owner serves exactly one File Provider domain.
+- **Every refusal carries a code**, the router's own included; the kind-to-code mapping is
+  [failure-model.md §7.2](../algorithms/failure-model.md#72-client-error-codes). A request naming a
+  domain the running owner does not serve (the config changed and the owner was not restarted) is
+  answered `unreachable`, with prose naming the domain; the latch this sets in the framework is
+  cleared by the relay when the owner restarts with the domain (§8.2).
+
+`menu` and `menu_stats` span domains and are answered by the router itself (§10).
+
+### 4.3 Mapping codes to the framework
+
+The meaning of each code, and what every client must do with it, is
+[failure-model.md §7.2](../algorithms/failure-model.md#72-client-error-codes). The extension realises
+it with this table, and MUST return to the framework only errors in the Cocoa or File Provider error
+domains (any other domain surfaces as an unexplained I/O error).
+
+| code | Framework error |
+|---|---|
+| `not_found` | `noSuchItem`, built for the item's identifier when the call names one |
+| `exists` | `filenameCollision` |
+| `not_empty` | `directoryNotEmpty` |
+| `read_only`, `denied` | Cocoa write-no-permission, carrying the owner's sentence |
+| `unreachable` | `serverUnreachable` (latches until `signalErrorResolved`) |
+| `paused`, `busy` | Cocoa write-unknown, carrying the owner's sentence |
+| `invalid`, `internal`, an unknown code, a transport failure, a client deadline | Cocoa write-unknown |
+| cancellation | Cocoa user-cancelled |
+
+Only `unreachable` maps to `serverUnreachable`: the framework retries everything else, so an owner
+restarting costs one retried operation, never a latched domain. `paused` reaches the File Provider
+only from the Copy Share URL action (writes are accepted and held while paused,
+[07 §2.6](../07-daemon-cli.md#26-pause)), and is shown to the user there.
+
+### 4.4 Client obligations (Swift client)
+
+- **One connection per request**: connect, write the line, half-close the write side, read one line,
+  close. SIGPIPE is suppressed on the socket. A subscription does not half-close.
+- **Deadlines.** Every request, including the read-only probe (§6.9) and the menu poll (§10), obeys
+  the client deadlines of [failure-model.md §8.2](../algorithms/failure-model.md#82-requests-between-processes).
+  The extension treats `ensure_cached`, `fetch_range` and `write` as bulk requests (their duration
+  grows with a file's size) and bounds them with the liveness probe (`ping`) that section specifies. A
+  deadline expiry closes the socket and is reported like a transport failure.
+- **Cancellation**: cancelling a request shuts the socket down in both directions under a lock and
+  returns at once with a cancellation error. A request cancelled before its connection opened never
+  opens one. The descriptor is closed under the same lock, so a cancel never shuts a reused
+  descriptor number.
+- **No blocking call on a framework callback thread** waits without a deadline, and blocking socket
+  I/O never occupies a shared thread pool that other requests need.
+- **Thread-safe state.** Every piece of client state read or written by more than one task (the
+  cancellable socket, the read-only cell of §6.9, the menu's poll latch of §10) MUST be synchronised.
+  A latch that marks a request outstanding MUST be released when the request's deadline expires.
+
+### 4.5 Transfer paths (confused-deputy protection)
+
+`write` names a `staging` file the owner adopts, and `ensure_cached`/`fetch_range` name a `dest` the
+owner creates. The rule is [security-model.md §7.3](../algorithms/security-model.md#73-paths-passed-over-ipc-confused-deputy),
+enforced by the handler ([08 §3.5](../08-frontends.md#35-rules-the-handler-enforces)). On macOS the
+File Provider host declares these transfer roots:
+
+- **staging root**: the extension staging directory (§3.2), derived by the owner from the extension's
+  bundle id, never taken from a request;
+- **destination root**, per domain: the provider temporary directory the app declared for that domain
+  in its subscription (§8.2). The app holds a File Provider manager and obtains the directory from the
+  framework; the extension, the less trusted party, never declares it.
+
+Until the app has declared a domain's destination root, requests naming a `dest` for it are refused
+with `unreachable`; the declaration arrives with the app's subscription, whose acknowledgement also
+makes the relay clear the latch.
+
+## 5. Anchors and pages
+
+The anchor and page cursors are the core's ([08](../08-frontends.md)). On macOS:
+
+- The extension carries an anchor as the UTF-8 bytes of the owner's string, verbatim. Bytes that do
+  not decode as UTF-8 are treated as no anchor (never synced).
+- A page is the UTF-8 bytes of the owner's resume cursor, verbatim. The two framework initial-page
+  sentinels are themselves valid UTF-8, so the extension MUST recognise them explicitly and treat them
+  as "from the start" rather than as a name.
+- Every anchor and cursor the owner issues fits in 500 bytes by construction (names are at most 255
+  bytes; walk cursors and anchors are short). The extension MUST refuse, not truncate, any anchor or
+  page longer than 500 bytes: an oversized page ends the enumeration there, and an oversized anchor is
+  reported as no anchor.
+- Page and batch sizes are the framework's suggested size, or 100 when it suggests none, and at least 1.
+
+A cursor must mean the same thing to a freshly started extension: the extension is killed and
+restarted at will, and pages and anchors outlive the object that issued them. No cursor may encode an
+in-memory offset.
+
+## 6. File Provider mapping (extension)
+
+### 6.1 Identifiers
+
+- An item's identifier is its item reference ([08](../08-frontends.md)), verbatim. `root` maps to the
+  framework's root container identifier and back; the root item's parent is itself.
+- Rows whose `ref` or `parentRef` do not parse are dropped.
+- A name or reference containing U+FFFD (bytes that were not UTF-8, decoded lossily) is presented
+  read-only: its reference no longer names what the owner holds, and writing it would create a second
+  item and fail to delete the first.
+
+### 6.2 Item model
+
+- `contentType`: a directory whose extension is a declared package type conforming to directory
+  (for example `.rtfd`, `.logicx`, `.band`) takes that type, any other directory is a folder; a
+  symlink is a symbolic link; a file takes the type of its filename extension, else generic data.
+- `documentSize` = size; `contentModificationDate` = mtime, absent when mtime ≤ 0.
+- `contentPolicy` = download lazily: download on read, keep materialised items up to date, evictable
+  under pressure.
+
+### 6.3 Versions
+
+Both versions MUST be non-empty (the framework drops empty version data).
+
+- **contentVersion** changes if and only if the bytes of the item change. In particular it MUST NOT
+  change when this client's own upload of content the system already holds completes: a changed
+  contentVersion makes the system fetch a materialised file again and replace the file the user just
+  saved.
+  - File: the row's content identity (`contentId`, see below) when present, else
+    `"<size>:<mtime>"`. A symlink appends `":<target>"`.
+  - Directory: its folder id, constant for its lifetime. Children changes arrive through the working
+    set, never through the parent's version.
+- **metadataVersion** = contentVersion + `":1"` when uploaded, `":0"` when not, so an upload finishing
+  refreshes the item's metadata without touching its content.
+
+**Content identity.** The item row carries, for a file, `contentId`: the whole-file digest `h1` of the
+content the key resolves to ([02](../02-remote-model.md)). For a published file it equals the etag. For
+a file whose staged content is a whole adopted body, the owner computes the digest while adopting the
+body, with the chunk size the upload will use, and reports it immediately; the later publish yields
+the same `h1`. A file with staged partial edits (not produced on macOS) has no `contentId` until
+published. The `etag` keeps its meaning ([08](../08-frontends.md)).
+
+### 6.4 Capabilities and domain
+
+- Read-only domain or read-only item (§6.1): directory {reading, enumerating}; file {reading}.
+- Writable: directory {reading, enumerating, adding sub-items, renaming, reparenting, deleting};
+  symlink {reading, renaming, reparenting, deleting}; file {reading, writing, renaming, reparenting,
+  deleting}. No trashing capability.
+- The domain is registered with `supportsSyncingTrash = false`, since trash is not implemented, and
+  the trash container's enumerator fails as unsupported.
+- The extension declares user-controlled eviction, enumeration support, the three custom actions
+  (§6.7). How many fetches the system may issue concurrently is left at its default (see the
+  implementation notes).
+
+### 6.5 Callbacks
+
+| Callback | Behaviour |
+|---|---|
+| item for identifier | Root → the synthesised root item. Otherwise `stat`. Directories are asked too: answering from the identifier would keep a deleted folder on disk forever. Errors map with the identifier, so the system reconciles that exact item away. |
+| enumerator for container | Working set → the working-set enumerator; any other container → a directory enumerator. |
+| directory: enumerate items | `list_dir(ref, after: page, limit)`. A directory enumerator has no change enumeration: a replicated extension can signal only the working set, so it would never be asked. |
+| working set: enumerate items | `list_all` pages over the whole domain; items carry their real parent. A fresh anchor is paired with a full enumeration. |
+| working set: enumerate changes from anchor | `changes_since(anchor, limit)`. `stale` → finish with sync-anchor-expired (the system re-enumerates). Else resolve the ops (§7), report deletions and updates, and finish up to the returned cursor with `more` as more-coming. **On any error, finish with the error, never at the starting anchor**: finishing there claims "up to date" and the system stops asking for the life of the domain. |
+| current sync anchor | `cursor`; on failure, no anchor (an invented anchor would come back unparseable and cost a rescan). |
+| fetch contents | `dest` = a new UUID name in the provider temporary directory; `ensure_cached(ref, dest)`: the owner writes the file there, because the extension may not move files into that directory. Then `stat` for the returned item. Progress is driven by polling `download_progress` every `progress_poll_interval`; the total is set when known and completed at the end. On failure the destination is deleted. |
+| fetch partial contents | `stat` first. With strict versioning and a different contentVersion → version-no-longer-available. Range = `aligned` (§6.8). An empty range → version-no-longer-available (the owner rejects length 0 as `invalid`, which the system would retry forever). `fetch_range(ref, dest, offset, length)`; complete with the **served** range. |
+| create item | Read-only → volume-read-only. It is a directory iff the type is folder, or the type conforms to directory and no contents are offered (a flat file named like a package is offered contents). With may-already-exist (a reimport replay) on a non-directory: compose `f:<parent id>/<name>` and `stat` it; if present return it without writing (else a reimport re-uploads the domain). **Only `not_found` means absent**; any other error propagates. Then: directory → `mkdir`; symlink → `symlink` (target required); contents → stage and `write`; else `create`. Every creation that is not a may-already-exist replay is sent with `exclusive:true`: an existing name is refused with `exists`, which the system presents as a name collision. |
+| modify item | Read-only → error. Contents changed: stage and `write` at the new parent and name, carrying `base` = the content identity in the base version the system gave (omitted when that version is a `size:mtime` fallback); if the item also moved, the write is `exclusive:true` at the new name and is followed by `delete(old ref)`, because a file's reference changes with its name. Moved only: `rename(ref, parentRef, name)` with `noreplace:true`. Otherwise (only unsupported fields): answer with a fresh `stat`. |
+| delete item | Read-only → error. A directory without the recursive flag: `list_dir(limit: 1)`; non-empty → `not_empty`. Then `delete`/`rmdir`; `not_found` → success. |
+| custom actions | Copy Share URL → `share(first item)` → pasteboard; Make Available Offline → `restore` each item; Make Online Only → `evict` each item. |
+
+**Pending fields.** Create and modify MUST return every changed field other than contents, filename
+and parent as still pending. Otherwise the system writes its own idea of them to disk (Finder tags were
+silently reverted) and offers them again.
+
+**Mutation replies carry the item.** The extension fails the operation as `internal` when a mutation
+reply names no item: completing without one tells the system nothing about what changed.
+
+**Concurrent edit on write.** A `write` carrying `base` whose base differs from the key's current
+content identity is a local edit of a version this client no longer has. The owner keeps both sides
+as [conflict resolution](../algorithms/conflict-resolution.md) specifies for a stale `base`; the
+reply's `item` is the key as it now resolves, so the system fetches the winning content and learns of
+the copy through the change feed. The base travels with the published `put`
+([03 §2.3](../03-journal-sync.md#23-journal-ops)), so a peer's concurrent edit is settled the same way
+at publish time.
+
+**Progress and cancellation.** Every callback returns a progress object whose cancellation cancels the
+request; the system cancels slow fetches and expects the completion handler promptly.
+
+### 6.6 Staging uploads
+
+The system unlinks the contents URL it handed over once the callback returns, and the upload outlives
+that. The extension hard-links the URL (or copies it, when linking fails) to a new UUID name in its
+staging directory, sends that path as `staging`, and removes its link afterwards whatever the outcome.
+The owner validates the path (§4.5) and adopts the file where it is, as [08](../08-frontends.md)
+specifies for `write`. The whole file is re-sent on edit; chunk deduplication keeps unchanged chunks
+off the wire.
+
+### 6.7 Evict and restore
+
+The custom actions and the CLI send `evict` and `restore`, whose chunk-store semantics (subtree of a
+folder, root included; per-file counts; staged content never dropped) are
+[08 §3.4](../08-frontends.md#34-evict-and-restore). The File Provider host's hooks then move the
+replica: `surface_evicted` and `surface_restored` publish an `evict` or `restore` event naming the
+request's reference, and the app evicts the item from the replica or requests its download (§8.2).
+
+- With no subscriber, the hook fails and the request is refused with a sentence telling the user to
+  start TsyncApp and retry; it never reports success for a replica nobody changed.
+- Finder's own Download Now and Remove Download act on the replica only and leave pins alone.
+
+### 6.8 Partial ranges
+
+```
+aligned(requested, alignment, documentSize):
+  size = max(0, documentSize); unit = max(1, alignment)
+  wantStart = max(0, requested.location); start = wantStart - wantStart % unit
+  wantEnd = min(size, wantStart + max(0, requested.length))
+  if start >= size or wantEnd <= start: return (min(start, size), 0)
+  end = min(round_up(wantEnd, unit), size)
+  return (start, end - start)
+```
+
+The range only grows outwards (a missing byte is read as content). Its length is a multiple of the
+alignment except at end of file. The alignment is a runtime value and MUST NOT be assumed constant.
+
+### 6.9 The read-only flag
+
+The sandboxed extension cannot read the config, so it asks the owner (`status.readOnly`).
+
+- The probe runs asynchronously when the extension starts, under the client deadline (§4.4), never
+  inside a framework callback.
+- The answer is kept in a synchronised cell for the extension's lifetime. A `read_only` refusal also
+  sets it. A failed probe is retried at most once per `readonly_probe_retry`.
+- Until an answer arrives the domain is presented writable; the owner refuses writes to a read-only
+  domain itself.
+
+## 7. Change batch resolution
+
+A pure function turns an ordered page of ops into an unordered set of updated items and deleted
+identifiers:
+
+```
+lastMention[r] = index of the last op in which r appears as ref or srcRef
+for (i, op) in ops:
+  if op.srcRef ≠ none and op.srcRef ≠ op.ref and lastMention[op.srcRef] = i:
+    deleted += op.srcRef                     # a file rename retires its old reference
+  if op.ref ≠ none and lastMention[op.ref] = i:
+    if op is delete or rmdir: deleted += op.ref
+    elif op.item parses:      updated += op.item
+    # otherwise nothing: no field is invented and nothing asks the owner again
+```
+
+Every change is reported wherever it sits. The extension MUST NOT filter by what the system has
+materialised: the system tracks that itself, and a filter drops removals under unbrowsed folders and
+leaves folders on disk.
+
+## 8. Change signalling
+
+### 8.1 Events
+
+A subscription (`subscribe` with the domain) receives one JSON line per event:
 
 ```json
 {"event":"changed","domain":"Files","id":42}
 {"event":"resync","domain":"Files","id":43}
 {"event":"evict","domain":"Files","id":44,"ref":"f:<id>/movie.mkv"}
-{"event":"restore","domain":"Files","id":45,"ref":"f:<id>/movie.mkv"}
+{"event":"restore","domain":"Files","id":45,"ref":"root"}
+{"event":"reset","domain":"Files","id":46}
+{"event":"recovered","domain":"Files","id":47}
 ```
 
-`id` is a process-wide monotonically increasing sequence (reserved for future acks). The
-Swift decoder also accepts an optional `key` that the daemon no longer sends.
+- `id` increases monotonically within one owner process. No acknowledgement exists; a client uses
+  `id` only for ordering.
+- `changed` names nothing: the answer is always "enumerate the working set's changes". The owner emits
+  it debounced: the first changed key after a quiet period schedules one event `changed_debounce`
+  later, and further keys in that window join it. It is raised when the owner applies a peer change,
+  on `revert`, and when an upload completes (upload state is part of the item's version).
+- Events are hints on top of the change feed. They are not durable and not replayed; a lost event
+  costs promptness, not correctness. Nobody subscribed is not a failure for `changed` or `resync`.
+- Each subscriber's queue is bounded. When full, the oldest event is dropped and the drop is logged;
+  the next event still makes the app enumerate. `status.subscribers` reports the count.
+- `recovered` is the domain's recovery notice
+  ([failure-model.md §7.2](../algorithms/failure-model.md#72-client-error-codes),
+  [08 §3.8](../08-frontends.md#38-events)): a store request succeeded after the owner had answered
+  `unreachable`.
 
-### A4.6 Anchors and pages
+### 8.2 The app's relay
 
-**Sync anchor** = daemon string `"<generation>|<entryKey>"`, carried by the extension
-**verbatim** as UTF-8 bytes (`NSFileProviderSyncAnchor(Data(s.utf8))`).
-
-- `generation` = contents of `<data_dir>/resync-<domain>` (decimal ms timestamp), `""`
-  when never stamped. Stamped only by `full_resync`.
-- `entryKey` = the last applied journal entry, `%013d-<client uuid>` (ms, zero-padded
-  13 digits), `""` if none. Example: `1727630000123|1727629999000-0a1b2c3d4e5f`.
-- Undecodable bytes → `""` → treated as never synced.
-
-`changes_since(anchor)`:
-1. Split at first `|` (no `|` → generation `""`). If generation ≠ current → `stale:true`.
-2. If anchor entry == applied head (or both absent) → `stale:false, cursor=anchor, more:false, ops:[]`.
-3. Else page `Applied_entries.since(anchor, limit)`; `None` (anchor pruned) → `stale:true`.
-4. `cursor` = last entry of the page, or the input anchor if the page is empty ("holding
-   at the anchor"); `more` from the page.
-
-Answered from **applied** entries (entries kept only once this client applied them), so
-an op never names an item the mirror has yet to catch up with.
-
-**Pages** (`NSFileProviderPage`): the daemon's resume cursor as UTF-8 bytes.
-- `list_dir`: cursor = last **name** served; resumes with `name > after` over a
-  name-sorted list (files and folders interleaved in one byte-order). A deleted cursor
-  name still resumes after it.
-- `list_all`: the first page walks the whole mirror (depth-first via folder ids,
-  collecting `(path, container id, entry)`), sorts by path, writes the kept walk file
-  (header `{"walk":"<ms>","skipped":n}` then one JSON line per entry
-  `{"path","container","kind","size"?,"mtime"?}`), and uses cursor `"<walk>:<line>"`.
-  Later pages read lines `n+1…` of the kept file. If the file is missing (a resync
-  empties scratch), it re-walks and resumes at the same line number; a walk-id mismatch
-  only logs. Cursors not matching `digits:digits` restart from the beginning.
-- The two framework sentinels `initialPageSortedByName`/`ByDate` are **valid UTF-8**
-  (`"FPPageSortedByName "`…) so they are matched explicitly and mean "from start".
-- Any page or anchor > 500 bytes is **refused rather than truncated**: an oversized page
-  becomes `nil` (finishes the enumeration there). Names ≤ 255, ids and entry keys short.
-- `next` is present iff more entries follow (the page fetches `limit+1`).
-- Page size = `observer.suggestedPageSize ?? 100` (≥1); batch size likewise for changes.
-
-Why no in-memory offsets: the extension is killed and restarted at will and pages/anchors
-outlive the object that issued them; a cursor must mean the same to a fresh process.
-Why line numbers for list_all rather than `<container>/<name>`: a folder id can sit at
-several mirror paths, so a name cursor could jump between copies and loop.
-
-## A5. File Provider mapping (extension)
-
-### A5.1 Item model (`TsyncItem`)
-
-- `itemIdentifier` = ref (root ↔ `.rootContainer`); `parentItemIdentifier` = parentRef.
-  The root item's parent is itself.
-- `contentType`: dir → `UTType(ext, conformingTo: .directory)` **if it is a declared
-  type** (packages: `.rtfd`, `.logicx`, `.band`), else `.folder`; symlink →
-  `.symbolicLink`; file → `UTType(filenameExtension:) ?? .data`.
-- `documentSize`, `contentModificationDate` (nil when mtime ≤ 0).
-- `contentPolicy = .downloadLazily` (download on read, pull updates eagerly once
-  materialized, evictable under pressure — so a changed `contentVersion` re-fetches on
-  its own).
-- **Versions** (both must be non-empty; the framework drops empty version data):
-  - `content = etag` if non-empty else `"<size>:<mtime as Double>"`; symlinks append
-    `":<target>"` (all symlink manifests hash an empty chunk list).
-  - `contentVersion = content`, `metadataVersion = content + ":" + (isUploaded ? "1" : "0")`
-    (so an upload finishing refreshes metadata).
-  - Directory: content = folder id (constant) → children changes arrive via the feed,
-    never through the parent's version.
-- **Capabilities**: read-only domain or mangled name → dir `{reading, contentEnumerating}`,
-  file `{reading}`. Writable: dir `{reading, contentEnumerating, addingSubItems,
-  renaming, reparenting, deleting}`; symlink `{reading, renaming, reparenting, deleting}`;
-  file `{reading, writing, renaming, reparenting, deleting}`. No trashing capability.
-- A name or ref containing U+FFFD (non-UTF-8 bytes decoded lossily) is made read-only:
-  its reference no longer names what the daemon has, and writing it would create a
-  second file and fail to delete the first.
-- Rows whose `ref`/`parentRef` do not parse are dropped.
-
-### A5.2 Domain
-
-`NSFileProviderDomain(identifier: lowercase-dashed name, displayName: name)`,
-`supportsSyncingTrash = false` (else Finder offers Move to Trash for something nothing
-implements). `enumerator(for: .trashContainer)` throws `featureUnsupported`.
-
-Info.plist: `NSExtensionFileProviderDocumentGroup = group.org.feverdreamtv.tsync`,
-`SupportsEnumeration = true`, `AllowsUserControlledEviction = true`, **no**
-`DownloadPipelineDepth` (deliberately default; raising it multiplies concurrent range
-fetches, each costing the daemon a group read + read-ahead, which buries slow backends),
-three custom actions with `TRUEPREDICATE` activation.
-
-### A5.3 Callbacks
-
-| Callback | Behaviour |
-|---|---|
-| `item(for:)` | root → synthesized root item; else `stat(ref)`. Must really ask the daemon for directories too: answering from the identifier keeps a deleted folder on disk forever. Error mapped with the identifier (so the system reconciles that exact item away). |
-| `enumerator(for:)` | `.workingSet` → WorkingSetEnumerator; any other container → DirectoryEnumerator. |
-| Directory `enumerateItems` | `list_dir(ref, after: page, limit)`. **No** `enumerateChanges`/`currentSyncAnchor`: a replicated extension can signal only the working set, so a directory's change enumeration is never triggered. |
-| Working set `enumerateItems` | `list_all` pages (whole domain; items carry their real parent). A fresh anchor is paired with a full enumeration. |
-| Working set `enumerateChanges(from:)` | `changes_since(anchor, limit)`. `stale` → finish with `.syncAnchorExpired` (system re-enumerates). Else resolve ops (A5.4), `didDeleteItems`, `didUpdate`, `finishEnumeratingChanges(upTo: cursor ?? anchor, moreComing: more)`. On error: finish **with the error**, never at the starting anchor (that would claim "up to date" and the system stops asking for the life of the domain). |
-| `currentSyncAnchor` | `cursor`; on failure `nil` (an invented anchor would come back unparseable and cost a rescan). |
-| `fetchContents` | `dest = temporaryDirectoryURL/UUID`; `ensure_cached(ref, dest)` — the **daemon writes the file** there (the extension gets EPERM moving files into that dir). Then re-`stat` for the item returned. A 0.5 s poller on `download_progress` drives the `Progress` (total set when known; set to 100 % at the end; not reset on inactive). On failure the destination is deleted. Cancellation → `CocoaError(.userCancelled)`. |
-| `fetchPartialContents` | `stat` first; with `.strictVersioning` and a different contentVersion → `versionNoLongerAvailable`. Range = `PartialRange.aligned` (below). Empty range → `versionNoLongerAvailable` (daemon would reject length 0 as `invalid`, which the system retries forever). `fetch_range(ref, dest, offset, length)`; complete with the **served** range and no flags. |
-| `createItem` | Read-only → `NSFileWriteVolumeReadOnlyError`. isDirectory = `contentType == .folder` OR (`url == nil` AND `.contents` not in fields AND type conforms to `.directory`) — a flat file named like a package is offered contents. `mayAlreadyExist` (reimport replay) on a non-directory: compose `f:<parentId>/<name>`, `stat`; if present return it without writing (else the reimport re-uploads the domain). Only `not_found` means absent; any other error propagates. Then: dir → `mkdir`; symlink → `symlink` (target required); with contents → stage + `write`; else `create`. Complete with `described(reply)` and pending fields. |
-| `modifyItem` | Read-only → error. `baseVersion` is **ignored** (conflict detection by base version needs macOS 26; conflicts are settled in the daemon, which publishes the losing side as a conflicted copy — see conflicts spec). If `.contents` changed with a URL: stage + `write(parentRef: new parent, name: new name)`; if also moved (`.filename` or `.parentItemIdentifier`), then `delete(old ref)` because the file reference changed. Else if moved: `rename(ref, parentRef, name)`. Else (only unsupported fields) → answer with a fresh `stat`. |
-| `deleteItem` | Read-only → error. Directory (ref parses to a folder) without `.recursive`: `list_dir(limit:1)`; non-empty → `not_empty` (daemon's rmdir always detaches the subtree). `delete`/`rmdir`; `not_found` → success (already gone). |
-| Pending fields | `unsupported(fields) = fields − {contents, filename, parentItemIdentifier}` returned as still-pending on create/modify, so the system neither propagates its own idea of them to disk (that silently reverted Finder tags) nor re-offers them. |
-| Custom actions | `copyShareURL` → `share(first item)` → `NSPasteboard`; `makeAvailableOffline` → `restore` each selected item; `makeOnlineOnly` → `evict` each. |
-
-**Staging (uploads).** The system unlinks the URL it handed over once the call returns,
-and the daemon's upload outlives that. The extension hard-links (fallback copy) the URL
-into `<own sandbox tmp>/staging/<UUID>` (it may read but not write the group container),
-sends that path as `staging`; the daemon (unsandboxed) **adopts the file where it is**
-(rename into its store on the same volume, no copy/chunking pass), cancels any upload in
-flight for that key, stages it, queues the put and replies with staged size/mtime and the
-item. The extension removes its staging link afterwards (`defer`). The whole file is
-re-uploaded on edit (the framework hands whole files), chunk dedup keeps unchanged
-chunks off the wire.
-
-**PartialRange.aligned(requested, alignment, documentSize)**:
-```
-size = max(0, documentSize); unit = max(1, alignment)
-wantStart = max(0, req.location); start = wantStart - wantStart % unit
-wantEnd = min(size, wantStart + max(0, req.length))
-if start >= size or wantEnd <= start: return (min(start,size), 0)
-end = wantEnd rounded UP to a multiple of unit, then min(end, size)
-return (start, end - start)
-```
-Rounds outwards only (a missing byte is read as a hole of content); length is a multiple
-of the alignment except at EOF; alignment is a runtime value, never baked in.
-
-**readOnly flag**: asked once via a *blocking* `status` on first use and cached for the
-extension's lifetime; unanswered (daemon down) → treated writable, and the daemon refuses
-writes itself. The config file cannot be read from the sandbox.
-
-### A5.4 Change batch resolution (`ChangeBatch.resolve`, pure)
-
-Input: ordered ops. Output: unordered `updated` items and `deleted` identifiers.
+One relay per registered domain, on its own thread:
 
 ```
-lastMention[r] = index of the last op where r appears as ref or srcRef
-for (i, op):
-  if op.srcRef ≠ nil and op.srcRef ≠ op.ref and lastMention[srcRef] == i:
-      deleted += srcRef                # a file rename retires its old reference
-  if op.ref ≠ nil and lastMention[ref] == i:
-      if op is delete/rmdir: deleted += ref
-      elif op.item parses:  updated += item
-      # else: dropped (no invented fields; nothing here re-asks the daemon)
+loop:
+  connect; subscribe(domain, tempDir = the provider temporary directory for the domain)
+  on acknowledgement:
+    signal the working set; signal error resolved (serverUnreachable)
+    if this is a reconnection: reconcile domain registrations (§9.1)
+  read events until the connection ends
+  back off, then retry
 ```
 
-Pinned cases: create+delete in one batch → only deleted; file rename → old ref deleted,
-new updated; folder rename (same ref) → nothing deleted; rename then delete → both names
-deleted; rename chain a→b→c → only c updated, a and b deleted; removal needs no item.
+- The subscription declares the domain's provider temporary directory (§4.5). The app obtains it from
+  the framework; the owner keeps the latest declaration per domain in memory.
+- Signalling on every (re)subscription catches up on whatever was missed, since events are not
+  replayed.
+- Backoff starts at `relay_backoff_min`, doubles to `relay_backoff_max`, and resets only when a
+  connection lived at least `relay_backoff_reset` (an acknowledgement is free, and a crash-looping
+  owner would otherwise cause a working-set enumeration per second). The relay never gives up.
+- Handling:
+  - `changed`, `resync`, `recovered` → signal the working set, and signal error resolved;
+  - `evict` → evict the item from the replica; `restore` → request its download (whole range);
+    the event's `ref` is translated to the framework identifier exactly like an item identifier
+    (§6.1), so `root` names the root container;
+  - `reset` → run the registration pass of §9.1 now, which reads the purge and reset markers;
+  - unknown events are ignored.
+- Signalling a specific item is ignored by the framework for replicated extensions, so only the
+  working set is signalled.
 
-Every change is reported **wherever it sits** — the extension does not filter by what the
-system has materialized (the system tracks that itself and asks for the rest). An earlier
-"materialized set" filter dropped removals under unbrowsed folders and left folders on
-disk (f779eb51, d1bea01b).
+## 9. Domain lifecycle
 
-## A6. Event relay (app) and change signalling
+### 9.1 Registration (app)
 
-End-to-end flow of a remote change:
+At launch the app registers itself as a login item, then reconciles domains. The same reconciliation
+runs whenever a relay reconnects after the owner restarted, which is how a changed configuration takes
+effect without restarting the app.
 
-1. Converger applies foreign journal ops to the mirror, then `Change_notice` batches keys
-   (0.2 s flush, ≤ 512 keys/line, set semantics) and sends
-   `{"action":"changed","domain":D,"keys":[...]}` to the domain's frontend sockets
-   (warn once on failure).
-2. Frontend `changed` handler calls hook `changed(key)` per key; the hook **debounces**:
-   first key schedules one `{"event":"changed"}` publish 0.2 s later, carrying no key
-   (the answer is always "re-read the working set"). Also fired by `revert` and by upload
-   completion (`on_upload_done`), since upload state is part of the item version.
-3. App `SignalRelay` receives it → `signalEnumerator(for: .workingSet)` **and**
-   `signalErrorResolved(.serverUnreachable)` (clears a latched outage on any news).
-   Signalling a specific item is ignored for replicated extensions, so only the working set.
-4. fileproviderd calls working-set `enumerateChanges(anchor)` → `changes_since`.
+1. Load the config's domain names. Create the menu first, so a failure still shows UI.
+2. Take one deadline, `registration_deadline`, for every framework call of this pass. A call failing
+   with provider-not-found (the extension registration is being swapped by an installer) is retried
+   every `registration_retry` until that deadline.
+3. If the purge marker exists: remove every domain; only if all were removed, unregister the login
+   item and delete the marker. Register nothing and stop.
+4. If the config cannot be read, leave every domain untouched (reconciling against no names would
+   remove every domain and its local copies), start relays for the domains that exist, and stop.
+5. List existing domains. A failure to list counts as an empty list, and marks the pass *unlisted*.
+6. `stale` = every existing domain unless the identity-scheme record says 1, this spec's scheme (item
+   identifiers as §6.1 defines them). Writers MUST NOT record another scheme. Readers SHOULD accept an
+   absent record or another value, meaning the registered domains use identifiers that cannot be
+   translated: they are rebuilt once. Their content goes dataless; the stores are untouched.
+7. `requested` = the identifiers of the names in the reset marker.
+8. Remove every existing domain that is not configured, or is in `requested ∪ stale`.
+9. Add every configured domain that did not survive step 8, subject to §3.3's collision rule, and
+   signal the working set of each added domain so its enumeration starts without waiting for a user.
+10. Record the current identity scheme only if the pass was listed and every stale domain was removed
+    (a domain the system refuses to release must not force a rebuild of all domains at every launch).
+11. Clear the reset marker only if the pass was listed and every requested domain that existed was
+    removed; a failed removal keeps the marker for the next pass.
+12. Start one relay per registered domain that has none, and stop relays of removed domains.
 
-Events are **hints on top of the journal**: nobody subscribed is not a failure for
-`changed`/`resync`, and a dropped event costs promptness, not correctness.
+### 9.2 Reimport
 
-`SignalRelay` per domain (dedicated thread): loop { subscribe; on ack → signal working set
-("subscribed", catches up on anything missed, since events are not replayed); read events
-until EOF }. Backoff 1 s doubling to 30 s; reset to 1 s only if the connection lived ≥ 30 s
-(an ack is free and proves nothing — a crash-looping daemon would otherwise cause a
-working-set enumeration every second). Never gives up (survives `make install`).
+`tsync fileprovider reimport` sends `full_resync` to the owner. The owner stamps a new generation
+([08 §2.5](../08-frontends.md#25-cursors-and-anchors)), and the host's `reannounce` hook rebuilds the
+folder-id index from the mirror and publishes `resync`. Every
+outstanding anchor becomes stale, the system re-enumerates the working set and replays creations with
+may-already-exist, which the stat guard of §6.5 turns into no-ops. The command fails (exit 1) unless
+the owner answered `ok`.
 
-Event handling in the app: `changed`, `resync` → signal working set; `evict` →
-`manager.evictItem(identifier: ref)`; `restore` → `manager.requestDownloadForItem(ref,
-range: NSNotFound)`; others ignored.
+### 9.3 Reset
 
-Subscriber registry (daemon): topic = domain name (`""` hears all); per-subscriber queue
-bounded at 256, **dropping the oldest** with an error log; `publish` returns the number
-of subscribers reached. `status.subscribers` exposes the count.
+Only the app may remove a domain. `tsync fileprovider reset`:
 
-**Evict / restore** (hooks, used by custom actions and CLI):
-- `evict(key)`: drop the chunk store's copy (and pin) first, then publish `evict` naming
-  the item's reference; zero subscribers → fails `No_subscriber` ("nothing is listening
-  for '<domain>': make sure TsyncApp is running, then retry").
-- `restore(key, keep?)`: `ensure_cached` into the chunk store with pin deadline (a repeat
-  moves the deadline), then publish `restore`. Same `No_subscriber` failure.
-- Chunk store first because a pin is the daemon's promise and holds whether or not
-  anything listens. Finder's own "Download Now"/"Remove Download" act on the replica only
-  and leave the pin alone.
+1. appends the display name to the reset marker (durably);
+2. sends `notify_reset` for the domain; the owner publishes a `reset` event and replies
+   `{delivered}`, the number of subscribers reached; the app runs the registration pass of §9.1 at
+   once;
+3. if `delivered` is 0 or the owner cannot be reached, launches the app (never terminating it), which processes the marker
+   at launch.
 
-**Reimport** (`full_resync` action, CLI `tsync fileprovider reimport`): stamp a new
-generation (atomic write), rebuild the folder-id index from the mirror (it may have been
-replaced wholesale by another process), publish `resync`. Every outstanding anchor is now
-stale → system gets `syncAnchorExpired` → full working-set enumeration → `createItem`
-calls with `.mayAlreadyExist` for everything on disk, deduplicated by the stat guard.
+The command MUST NOT terminate any process: in particular the owner keeps running, so the domain is
+served again as soon as the app re-adds it. It reports success when the marker is written and the app
+was reached or launched; if neither worked it removes its line from the marker and fails.
 
-## A7. Concurrency, durability, failure semantics
+### 9.4 Purge (uninstall)
 
-- **Mutation serialization**: all mutating verbs of one domain run under one mutex,
-  covering reference **resolution** as well as the mutation. fileproviderd sends
-  modifyItem calls concurrently; resolving `parentRef` before the mirror lock let
-  `mv f4 sub/` racing `mv sub sub2` put f4 into a re-created `sub` beside `sub2`, which
-  was then journaled and replicated everywhere (b7fd7943). Reads are not serialized.
-- **One task per connection** on the server; a slow request (large restore) never blocks
-  another client. Per connection, requests are sequential.
-- **Cancellation (Swift)**: each request runs on a GCD global thread doing blocking
-  `recv`; `Task.cancel()` does not reach it, and that pool is small, so cancelled fetches
-  waiting on a daemon with no deadline starved every later request. A `CancellableSocket`
-  (NSLock-guarded) records the fd; cancel = `shutdown(SHUT_RDWR)`; `adopt` fails after
-  cancel (never opens a connection nobody will shut down); closing under the lock avoids
-  shutting a reused fd number. A cancelled request reports `CancellationError`, mapped to
-  `CocoaError(.userCancelled)`.
-- **Progress objects**: every callback returns a `Progress` whose cancellation handler
-  cancels the task; the system cancels a slow fetch and expects the completion handler
-  promptly.
-- **Daemon down**: extension calls fail with transport errors → retried by the system;
-  relay reconnects with backoff; menu shows last known state; `readOnly` treated false.
-- **Store unreachable**: `unreachable` → `serverUnreachable` latches; cleared by the
-  relay's `signalErrorResolved` on the next event or reconnection.
-- **Durability**: the daemon's state (mirror, staged tree, applied entries, generation
-  stamp) is covered by other specs. Things specific here: the generation file is written
-  atomically; the kept list_all walk is best-effort (failure logs, page still served);
-  staged upload bodies are adopted before `write` returns, so the system may delete its
-  URL. No state lives in the extension.
-- **Events** are not durable and not replayed; correctness rests on anchors + journal.
-- **Async exceptions** in the frontend process are logged, not fatal (a background error
-  must not end the daemon).
+`tsync fileprovider purge`:
 
-## A8. Domain registration, reset, purge (app)
+1. writes the purge marker, then reaches the app as in §9.3 (`notify_reset`, else launch);
+2. waits up to `purge_wait` for the marker to disappear. On timeout it deletes the marker (else the app
+   would purge at every later launch) and fails. When the app is not installed or cannot be launched,
+   unregistration is skipped;
+3. stops the owner through the service manager and removes the service definition;
+4. removes the app bundle and the data directory, keeping `config.json`;
+5. removes the CLI link when it may; when the link is owned by root it prints the command that removes
+   it. The link is tested without following it, since it dangles by then.
 
-`applicationDidFinishLaunching`: `SMAppService.mainApp.register()` (login item), then
-`registerDomains()`:
+The owner is stopped deliberately and only at step 3, after the app released the domains.
 
-1. Load `config.json` (display names). Create the status menu first (so a failure still
-   shows UI).
-2. `deadline = now + 10 s` shared by **every** framework call of this launch.
-   `retryingWhileInvalidating` retries a call failing with `providerNotFound` ("in the
-   process of being invalidated", raced by the installer opening the app during a fresh
-   install) every 1 s until the deadline.
-3. If `<data_dir>/fileprovider-purge` exists: list domains, remove all
-   (`.removeAll`); only if **all** were removed: unregister the login item and delete the
-   marker. Register nothing. Return.
-4. Config unreadable → **leave domains untouched** (reconciling against no names would
-   remove every domain and its local copies), start relays, return.
-5. `existing = NSFileProviderManager.domains()` (failure → treat as empty, `listed=false`).
-6. `stale` = all existing domains if the recorded identity scheme
-   (`fileprovider-identity-scheme`, int, default 0) < current scheme **1** (identifiers
-   recorded before opaque references spelled paths and cannot be translated → rebuild once;
-   content goes dataless, store untouched).
-7. `requested` = identifiers from `fileprovider-reset` (one display name per line,
-   converted to identifiers).
-8. Remove every existing domain that is not configured or is in `requested ∪ stale`.
-9. Add every configured domain not surviving (with `supportsSyncingTrash=false`).
-10. Record the identity scheme only if `listed` and `stale ⊆ removed` (a domain dropped
-    from config that the system refuses to release must not pin every launch to a rebuild
-    of all domains).
-11. Clear the reset marker only if `listed` and every requested domain that existed was
-    removed (a failed removal keeps the marker for the next launch).
-12. Start one relay per domain returned by `domains()`.
+`tsync restart` restarts the owner through the service manager (the service manager's own restart,
+not a signal matched by process name) and relaunches the app.
 
-New domains in config take effect on app restart (`Runtime.restart_service`: pkill app,
-`launchctl kickstart -k` the daemon agent, `open -a` app).
+## 10. Menu bar
 
-**CLI side** (`tsync fileprovider …`):
-- `reimport`: send `full_resync` for the domain; exit 1 if no `ok`.
-- `reset`: append domain name to the reset marker, restart the app (`pkill -f
-  /Applications/TsyncApp.app` + `open -a`); if the app cannot be restarted remove the
-  marker and fail. (Only the app owning the extension may remove a domain.)
-- `purge`: write purge marker, restart app, wait up to 60 s (120 × 0.5 s) for the marker
-  to disappear. App not running → skip unregistration. Timeout → remove marker (else the
-  app would purge at every future launch) and fail. Then `launchctl bootout` the daemon
-  agent, delete its plist, `rm -rf` the app bundle and `data_dir`; keep `config.json`;
-  remove `/usr/local/bin/tsync` if possible (root-owned: print the `sudo rm` hint; checked
-  with `lstat` since the link dangles).
-
-## A9. Menu bar (settings UI)
-
-There is **no settings window**; configuration is `config.json` (edited by hand/CLI).
-The app's only UI is an `NSStatusItem` whose content the **daemon renders** (`menu`
-verb) from the same model the Linux tray uses, so platforms cannot drift:
+There is no settings window; configuration is `config.json`. The app's only UI is a status item whose
+content the owner renders (`menu`) from the same model as the Linux tray
+([fuse.md](fuse.md)), so the platforms cannot drift.
 
 ```json
 {"ok":true,"menu":{"icon":"tsync-sync-symbolic","tooltip":"…",
@@ -612,257 +560,149 @@ verb) from the same model the Linux tray uses, so platforms cannot drift:
           {"label":"Quit tsync menu bar","action":{"quit":true}}]}}
 ```
 
-- Poll every 3 s (timer tolerance 1 s), skipped while a poll is outstanding; menu not
-  rebuilt while open (would dismiss it); rebuilt on close.
-- Icons are asset-catalog image sets named exactly as the Linux panel names them
-  (`tsync-idle|sync|paused|error-symbolic`), template images 18×18; unknown → idle.
-- `openFolder` → root URL from `manager.getUserVisibleURL(for: .rootContainer)` (resolved
-  once at launch); open via `startAccessingSecurityScopedResource` +
-  `NSWorkspace.selectFile(nil, inFileViewerRootedAtPath:)`, fallback
-  `activateFileViewerSelecting`. `reveal` → select the file in Finder (never open it);
-  icon from `NSWorkspace.icon(forFile:)` using the rel's last component.
-- Pause toggles **all** domains (`pause on|off`), state read back by the next poll
-  (uploads only; not persisted across daemon restarts).
-- Stats submenu: rows fetched with `menu_stats` on `menuNeedsUpdate`, at most once per
-  1 s; failure leaves the placeholder.
-- Items: `autoenablesItems=false`; indented rows drawn in secondary colour.
+- Poll every `menu_poll_interval`, skipping a poll while one is outstanding; a poll that exceeds its
+  deadline counts as a failure and releases the latch. The menu is not rebuilt while open (that would
+  dismiss it) and is rebuilt on close.
+- An owner that cannot be reached, or a poll that timed out, shows the error icon and an "unreachable"
+  tooltip rather than the last known state.
+- Icons are named as on the Linux panel (`tsync-idle|sync|paused|error-symbolic`); unknown → idle.
+- `openFolder` opens the domain's root in Finder; `reveal` selects the file in Finder and never opens
+  it.
+- Pause toggles all domains through the owner (`pause`), with the semantics of
+  [07 §2.6](../07-daemon-cli.md#26-pause). The state shown is read back by the next poll.
+- The stats submenu is fetched with `menu_stats` when it opens, at most once per
+  `menu_stats_interval`; a failure leaves the placeholder.
 
-## A10. QuickLook previews
+## 11. Installation
 
-Daemon-side `preview` verb: `{"action":"preview","body":<abs path>}`. Accepted only if
-`body` equals the staged body of an upload currently in flight (so callers cannot name
-arbitrary paths). The body is named by uuid (no extension), so the daemon hard-links it
-into `<cache_root>/previews/<pid>-<n><ext of the item's name>` (same filesystem; a
-symlink would be resolved back to the uuid by generators), asks QuickLook Thumbnailing for
-a **thumbnail representation** (not the generic icon) at 64×64 points, scale 1, with a
-10 s timeout, encodes PNG, unlinks the link, replies `data: base64(png)`; no picture →
-`{"ok":true}` with no `data`; not in flight → `not_found`. Runs off the event loop.
+- Distributed as a notarised installer package installing the app bundle into `/Applications`. A disk
+  image cannot install the CLI link and exposes the app to translocation.
+- The package's post-install step creates the CLI link, installs the owner's service definition for the
+  console user, and launches the app.
+- The service definition runs `tsync start` at login and restarts it on any unclean exit. The service
+  exits cleanly when no domain is configured, which is every fresh install, and is not restarted then.
+  Installing removes a leftover request socket first: a stale socket makes callers believe the owner is
+  running.
+- The owner is a plain per-user service, not a helper registered through the app: the latter is
+  refused by the system for a sealed, team-signed bundled executable. The app itself is the login item.
+- The user approves the extension once in System Settings. The owner's first start after an install
+  prompts once for access to data from other apps, since it runs from inside the app bundle.
+- Apple silicon only; minimum macOS 13.
 
-Rationale for placing it in the daemon: the menu bar app is sandboxed and a file in the
-shared container is "data from other apps" to it.
+## 12. The framework's contract (what any reimplementation must honour)
 
-**Current status**: no client sends `preview` since the tray rework (269bd342 moved the
-menu rendering into the daemon and the Swift menu now uses `NSWorkspace` file-type icons).
-The verb and its test remain.
+1. Identifiers are persisted by the system; an identifier returned from a modification that differs
+   from the one given is a **merge** instruction. Directory identity must survive renames.
+2. Replicated extensions may signal only the working set; changes for any container are reported
+   through it, with items carrying their real parent.
+3. A new anchor pairs with a full enumeration; anchor-expired makes the system re-enumerate; finishing
+   a change enumeration at its starting anchor on error means "up to date" forever.
+4. Pages and anchors are at most 500 bytes; the initial-page sentinels are valid UTF-8; both must mean
+   the same to a fresh process.
+5. Only Cocoa and File Provider error domains are accepted. `serverUnreachable` and
+   `notAuthenticated` latch until error-resolved is signalled; everything else is retried.
+6. Version data must be non-empty; directory versions must be stable, or the system sees a
+   modification on every look.
+7. The root's parent is itself.
+8. "Item for identifier" is the system's authority on existence: `noSuchItem` is how items leave disk.
+9. A partial fetch's served range covers the request and is aligned in start and length (short only at
+   end of file, checked against the document size); the alignment varies per boot.
+10. The extension may not move files into the provider temporary directory, write into the group
+    container, or read files other processes wrote there; a fetched file is created at a path the system
+    gave; the system unlinks a contents URL once the callback returns.
+11. Domain calls may fail with provider-not-found while an installer swaps the extension.
+12. Only a process holding a manager can register, signal, evict or request downloads.
+13. Trash syncing defaults to on and must be turned off unless trash is implemented.
+14. Fields the provider cannot store must be returned as pending.
+15. Every callback completes promptly after cancellation.
 
-## A11. Install, packaging, uninstall
+## 13. Parameters
 
-Bundle:
-```
-TsyncApp.app/Contents
-├── MacOS/TsyncApp                  app (LSUIElement: no Dock icon)
-├── MacOS/tsync                     daemon + CLI (same binary)
-├── libs/*.dylib                    non-system libs, install names @executable_path/../libs
-├── Resources/install-agent.sh
-└── PlugIns/TsyncFileProvider.appex
-```
+| Parameter | Recommended | Constraint |
+|---|---|---|
+| `progress_poll_interval` | 0.5 s | |
+| `readonly_probe_retry` | 10 s | |
+| `changed_debounce` | 0.2 s | ≤ 1 s |
+| `relay_backoff_min` / `relay_backoff_max` / `relay_backoff_reset` | 1 s / 30 s / 30 s | reset ≥ max |
+| `registration_deadline` / `registration_retry` | 10 s / 1 s | |
+| `purge_wait` | 60 s | |
+| `menu_poll_interval` / `menu_stats_interval` | 3 s / 1 s | |
 
-- Distributed as a notarized, stapled **component pkg** (not a dmg: a sandboxed app cannot
-  install the CLI symlink; pkg also avoids Gatekeeper app translocation). Install location
-  `/Applications`.
-- `postinstall` (root): `ln -sf …/MacOS/tsync /usr/local/bin/tsync` (creating the dir);
-  then as the console user: run `install-agent.sh` and `open -a` the app.
-- `install-agent.sh` (user, never root): bootout old agent, delete a stale socket (a
-  leftover makes callers think the daemon is up), write the plist
-  (`ProgramArguments=[…/tsync, start]`, `RunAtLoad`, `KeepAlive={SuccessfulExit:false}`
-  — the daemon exits 0 with no config, which happens on every fresh install —,
-  stdout/stderr → `~/Library/Logs/tsync-daemon.log`), `enable`, `bootstrap gui/<uid>`.
-- The daemon is a **plain LaunchAgent**, not `SMAppService.agent`: a correctly placed,
-  sealed, Team-ID-signed bundled agent reports `.notFound` / "Operation not permitted".
-  `SMAppService.mainApp` works, so the app itself is the login item.
-- Signing inside-out after all injection: dylibs → daemon → appex (its effective
-  entitlements) → app. Re-sign preserving the entitlements Xcode derived from the profile
-  (`com.apple.application-identifier`), else the App Group breaks. Sandbox + App Group
-  under Developer ID requires embedded provisioning profiles for both bundle ids.
-  Hardened runtime and secure timestamp only with a real identity (ad-hoc signatures have
-  no Team ID and library validation rejects the bundled dylibs).
-- User must approve the extension once in System Settings → Login Items & Extensions →
-  File Provider Extensions. After a deploy, the daemon's first start blocks on a TCC
-  prompt "TsyncApp would like to access data from other apps" (the daemon runs from inside
-  the app bundle).
-- Apple silicon only; deployment target macOS 13.0.
-- Uninstall = `tsync fileprovider purge` (A8).
+## 14. Conformance
 
-## A12. What a reimplementation must honour from Apple's contract
+An implementation MUST exhibit these properties; [09-tests.md](../09-tests.md) says how they are
+checked.
 
-1. Identifiers are persisted by the system; a returned identifier differing from the one
-   given means **merge**. Keep directory identity stable across renames.
-2. Replicated extensions may only signal `.workingSet`; changes for any container must be
-   reported through the working set, with items carrying their real parent.
-3. A new anchor pairs with a full enumeration; `syncAnchorExpired` makes the system
-   re-enumerate; finishing a change enumeration at the starting anchor on error means "up
-   to date forever". Never do it.
-4. Pages and anchors ≤ 500 bytes; initial-page sentinels are valid UTF-8 and must be
-   recognized explicitly; both must be meaningful to a freshly started process.
-5. Only `NSCocoaErrorDomain`/`NSFileProviderErrorDomain` errors are accepted.
-   `serverUnreachable`/`notAuthenticated` latch until `signalErrorResolved`; everything
-   else is retried.
-6. `itemVersion` data must be non-empty; directory versions must be stable or the system
-   sees modifications on every look.
-7. The root's parent is itself; any other parent makes the system invent a container.
-8. `item(for:)` is the system's authority on existence: `noSuchItem` (preferably with the
-   identifier) is how items leave disk.
-9. Partial fetch: served range must cover the request, be aligned in start and length
-   (length may be short only at EOF, checked against `documentSize`); alignment varies
-   per boot.
-10. The extension may not move files into the provider temp dir nor write into the group
-    container, and may not read files other processes wrote there; the fetched file must
-    be created at a path the system gave and handed back; the system unlinks a contents URL
-    after the callback returns.
-11. Domain calls can fail with `providerNotFound` while the extension registration is
-    being swapped (install) — retry with a bounded deadline.
-12. Only a process holding an `NSFileProviderManager` (app or extension) can register,
-    signal, evict or request downloads.
-13. `supportsSyncingTrash` defaults to true; set false unless trash is implemented.
-14. Fields the provider cannot store must be returned as still-pending, or the system
-    writes its own values to disk (Finder tags reverted) and re-offers them.
-15. Every callback must complete promptly after cancellation.
+**Identifiers and references**
+- A directory is named by its id and a file by its parent's id and leaf; `root` and `d:.tsync-root`
+  are one identity, mapped to the root container; only the first `/` splits; malformed references are
+  rejected without an exception; a reference composed by the client equals the owner's.
+- A renamed folder keeps its identifier; a directory's version is stable across looks and renames.
+- Two configured names with the same identifier or replica projection are refused.
 
-## A13. Interactions
+**Items and versions**
+- A non-UTF-8 name is read-only; a declared package directory takes its package type; a plain folder
+  is a folder; a folder named like a flat file stays a folder.
+- A file's contentVersion is identical before and after its own upload completes; its metadataVersion
+  changes. A peer's edit changes the contentVersion.
+- A created file is fully described by the mutation reply; every mutation reply carries an item.
 
-| Depends on | Through |
-|---|---|
-| Frontend seam (08) | `Frontend.S`: `availability`, `tree=Replicated`, `serving=Daemon{One_process, Domain_socket, start}`; CLI group `fileprovider` with verbs `reimport/reset/purge`; `served` list with per-domain engine. |
-| Domain engine / IPC handler (generic) | `handler(hooks)`, `item_ref`, `key_of_ref`; `start ~on_upload_done`, `drain`, `stats_fields`. |
-| File ops / checkout | `evict`, `ensure_cached ?keep`, `uploads_in_flight`, `kind`, `resolve`, `published`, `list_children`, `assemble_to`, `fetch_range`, `write_whole`, `create/mkdir/rename/delete/rmdir/symlink/revert`, download progress, `Checkout.availability`. |
-| Folder ids | `lookup_id`, `lookup_id_removed`, `key_of_id`, `rebuild` (on reimport). |
-| Applied entries / journal | `head`, `since(anchor, limit)`, `Entry_key` string form. |
-| Upload queue | `queue_put`, `wait_uploaded`, `pending`, `pending_bytes`, `on_upload_done`. |
-| Converger (launcher parent) | `changed` notices on `tsync.sock`; the frontend child asks it to rescan after recording jobs and leases uplink from it (`tsync-sync.sock`). |
-| Menu model (shared with Linux tray) | `Menu.of_status_json`, `render`, `to_json`, `of_stats_json`, `stats_entries`. |
-| Share | `Share.create ~expires:+7d ~rel`. |
-| Runtime paths | `default_paths`, `domain_socket_path` (same path for all domains), `restart_service`. |
+**Request interface**
+- Every refusal, including the router's, carries a code; only `unreachable` latches; an unknown or
+  missing code is retried; `not_found` carries the item's identifier.
+- A request to a wedged owner fails within its deadline; cancelling a request returns without waiting
+  for the owner; concurrent tasks share no unsynchronised client state.
+- A `staging` or `dest` outside its permitted directory, or a symbolic link at the leaf, is refused
+  with `denied` and touches nothing.
+- Many requests in sequence on one connection are answered in order.
 
-Main flows: **open a dataless file** (fetchPartialContents → stat → fetch_range → daemon
-reads chunks → writes range into dest), **save** (modifyItem → stage → write → staged,
-queued → upload → on_upload_done → changed event → working set → put op with
-isUploaded=true), **remote edit** (converger applies → changed notice → debounced event
-→ app signals → changes_since → didUpdate → system re-fetches if materialized),
-**Make Available Offline** (custom action → restore → chunk store pin → restore event →
-app requestDownload).
+**Enumeration**
+- Folder pages and whole-domain pages lie end to end with no gap or repeat, including when the named
+  cursor entry was deleted between pages; child `parentRef` equals the container's reference.
+- A change enumeration that fails finishes with an error, never at its starting anchor; a stale
+  answer finishes with anchor-expired.
+- Change batches: create then delete → only deleted; file rename → old deleted, new updated; folder
+  rename → nothing deleted; rename then delete → both deleted; a→b→c → only c updated, a and b deleted;
+  a removal needs no item; an update without an item is not invented.
+- Oversized pages or anchors are refused; sentinels are not names; an anchor is carried verbatim;
+  non-UTF-8 anchor bytes are no anchor.
 
-## A14. Invariants the tests pin down
+**Content**
+- Partial ranges cover the request, start aligned, have aligned length except at end of file, grow
+  only outwards, clamp at end of file, are empty past it, and handle an empty file and alignments of
+  0 and 1.
+- Reading 4 KiB at the middle of a large dataless file is served by range fetches totalling less than
+  the file, with no whole-file materialisation.
+- A concurrent-edit write (stale `base`) keeps both contents.
 
-Swift `TsyncTests` (pure + against a real daemon started from `_build`, `HOME`
-redirected, local store, short `/tmp/ts-xxxx` root because of the 104-byte socket cap):
-- ItemID: dir named by id; file by parent+leaf; one root identity (`root`, `d:.tsync-root`
-  ↔ `.rootContainer`); only first slash splits; malformed refs rejected (not thrown);
-  round trip; composing a child ref.
-- Item: non-UTF-8 name → read-only; declared package type is its document type; plain
-  folder is `.folder`; folder named like a flat file stays a folder.
-- Protocol (real daemon): `status.readOnly`; empty domain lists nothing; created file is
-  fully described; `fetch_range` served at its offset and short past EOF; composed file ref
-  equals daemon's; child `parentRef` equals container ref; folder and whole-domain pages
-  lie end to end; resuming after a deleted name; renamed folder keeps identity; directory
-  version stable; deleted file/folder report `not_found`; failures carry a code; many
-  requests in sequence on one connection.
-- Cancellation: cancelling a request returns without waiting on the daemon.
-- ChangeBatch: the six cases in A5.4 plus "update without item is not invented".
-- DaemonError: not_found/exists/not_empty distinct; only `unreachable` latches; unexplained
-  failures retried; refusals surface to the user; every mapping in an accepted domain;
-  not_found carries the item.
-- PartialRange: covers request; start aligned; length aligned except at EOF; rounds out;
-  clamps at EOF; past-EOF empty; empty file; degenerate alignments 0/1.
-- Cursor: name round trip incl. awkward names; sentinels are not names; oversized name
-  refused; anchor verbatim; non-text bytes → no cursor.
+**Lifecycle**
+- Evicting or restoring the root, a folder or a file changes the replica and the chunk store for the
+  whole subtree; with no subscriber it fails and says so.
+- `reset` leaves the owner running and the domain re-registered and enumerated; `purge` removes
+  domains before stopping the owner; an unreadable config removes nothing.
+- A domain added to the config is registered after the owner restarts, without restarting the app.
+- The replica passes the system's consistency check after the platform-neutral end-to-end scenario.
 
-OCaml snapshot `tests/scenario/ipc` (`ipc.expected`): exact JSON of stat by path, restore
-with keep → `pinned`+`pinnedUntil`, evict → `online-only`; list_dir whole/paged
-(`next` = name), list_all paged (`next` = `<walk>:<n>`); files and folders share one name
-order; nested keys; an unnameable folder is counted (`unnamed`), not dropped; identical
-content shares an etag; changes_since working/up-to-date/pruned-stale/after-reimport-stale
-for put, mkdir+put, delete, rename, rmdir (carries `id`), move into a folder renamed since
-(named by kept id), dir rename (same ref, `id`); create under a parent spelled as a storage
-key is refused; a name containing `\n` does not end the kept walk. `tests/unit/item_ref`
-mirrors the Swift ItemID cases. `tests/unit/ipc_serve`, `tests/unit/subs` cover the server
-loop and subscriber registry. `tests/frontends/preview` (macOS only): image named .png →
-png; text named .png → none; text named .txt → png; missing body → none.
+## 15. Rationale (do not undo)
 
-End-to-end `tests/e2e/macos` (needs installed app; `make -C macos e2e`): stages a store
-daemon over http-proxy, a domain in the real config (restored afterwards), a second client;
-runs the platform-neutral E2e checks (user create reaches store, edit → new version, copy,
-folder+file, delete leaves no manifest, remote create/edit/delete/folder appear, remote
-folder rename keeps identity, share URLs serve, mount and store agree, cleanup) plus:
-reading 4 KiB at 20 MiB of a 40 MiB dataless file issues ≥1 `fetch_range`, **zero**
-`ensure_cached`, and fetched bytes < file size (observed with an IPC tap); and
-`fileproviderctl check -a <mount>` reports no broken invariants.
-
-## A15. Design choices & rationale (do not undo)
-
-- **Daemon owns the anchor and compares it** (807e1454): the extension once read the
-  resync token from a daemon-written file, which the sandbox denies; every anchor carried
-  an empty token and reimport expired nothing.
-- **Working set = one daemon-paged listing** (3c1c513a): the extension used to walk the
-  domain itself, carrying the frontier in the page; ~26 folders overflowed 500 bytes and
-  the enumeration silently ended early. Names containing `|` also broke that encoding.
-- **Two enumerators** (a06abe2f): the single one reported the whole journal into every
-  folder's changes.
-- **Report every change** (f779eb51, d1bea01b): see A5.4.
-- **An unnameable op is dropped and counted, not stale** (807e1454): stale re-lists the
-  whole domain to repair one folder.
-- **Mutation replies carry the item** (9cb2f9c4): no post-create listing; directories'
-  refs cannot be composed.
-- **Move-with-contents deletes the old ref** (2939226c): a guard comparing a value to
-  itself left the old file behind and the system took it as a merge.
-- **Only not_found means absent in the reimport guard** (274cc0ab).
-- **Only unreachable latches** (DaemonError header): a one-second daemon restart used to
-  latch the domain off.
-- **Daemon assembles fetched files into the system's temp dir** (eff2c3ac): EPERM moving
-  there from the extension, on local and notarized builds alike.
-- **Relay backoff reset by uptime, not ack** (ee2dfe5b).
-- **Launch-wide invalidation deadline; rebuild marker recorded only by stale domains**
-  (9b4c3156). **Unreadable config touches nothing; purge marker deleted only on full
-  success; relay signals on (re)subscribe** (f81bb083). **Reset marker survives a failed
-  removal** (2cc2fd00).
-- **Empty partial range → versionNoLongerAvailable** (51c9b0f6).
-- **Cancelled request releases its thread** (d0e0c1d4).
-- **Restore/evict act on the chunk store first** (8fe543be).
-- **readOnly asked of the daemon** (061b7ab7).
-- **Mutation mutex** (b7fd7943) — see A7.
-- **No DownloadPipelineDepth** — Info.plist comment.
-- **Connection-per-request client**: replies have no id; pooling would mean serialising;
-  revisit only if connect shows in a profile.
-- Rejected: `SMAppService.agent` for the daemon (doesn't work); a dmg (cannot install the
-  CLI); in-memory page offsets; path identifiers; a materialized-set filter.
-
-## A16. Open questions / inconsistencies
-
-1. **`preview` verb has no client** since 269bd342; the Swift `DaemonClient` no longer
-   calls it. Dead surface on the daemon (with a test) or planned reuse?
-2. **contentVersion changes on publish**: a freshly written file reports
-   `contentVersion = "size:mtime"` (etag `""`), and after upload `= h1`. The system may
-   treat the materialized file as having new content and re-fetch it (from the local chunk
-   cache) even though the comment says only metadataVersion should move. Unverified.
-3. **`reset` leaves the daemon down**: `restart_app` does `pkill -f
-   /Applications/TsyncApp.app`, which also matches the daemon binary inside the bundle;
-   the daemon exits cleanly (0) and `KeepAlive{SuccessfulExit:false}` does not restart it.
-   `restart_service` kickstarts the agent; `reset` does not (memory note
-   fileprovider-reset-gotchas). Also a CLI invoked by its in-bundle path would kill itself.
-4. After reset the domain stays empty until a GUI-session client touches it (ssh `ls` reads
-   the replica without waking fileproviderd).
-5. **Relay does not translate `root`** into `.rootContainer` for `evict`/`restore` events
-   (the extension's `ItemID.wire` does translate the other way). Evicting/restoring the
-   root by event would name an identifier the system does not know.
-6. **Relays and menu clients are created only at app launch**: a domain added to config
-   needs an app restart (the CLI's `restart_service` does this).
-7. **No client-side timeout** on extension requests: a wedged daemon holds a callback until
-   the system cancels it (cancellation is handled; see A7).
-8. `DaemonRequest` still declares `path`, `src` fields and `DaemonEvent` a `key` the daemon
-   never uses/sends; the OCaml comment points to `macos/TsyncFileProvider/IPC.swift`, which
-   no longer exists (it is `Shared/DaemonClient.swift`).
-9. `modifyItem` ignores `baseVersion`; concurrent local/remote edits rely entirely on the
-   daemon's conflicted-copy logic (see conflicts spec / conflict-gaps memory note).
-10. The `readOnly` probe in the extension is a **blocking** socket call on whatever thread
-    first asks (possibly inside a framework callback), and a failed first probe is retried
-    on every subsequent call until the daemon answers.
-11. Events have an `id` "so an acknowledgement can be threaded back"; no ack exists.
-12. `status` in the file_provider frontend reports `running:true` always (it answers only
-    when running) — fine, but the menu's "unreachable" state must come from transport
-    failure.
+- **The owner holds the anchor and compares it.** The sandbox denies the extension the generation
+  file; an extension-side token was always empty and reimport expired nothing.
+- **The working set is one owner-paged listing.** Walking the domain in the extension carried a
+  frontier in the page, which overflowed 500 bytes at about 26 folders and silently ended enumeration.
+- **Two enumerators.** A single one reported the whole journal into every folder's changes.
+- **Report every change; an unnameable op is dropped and counted, not stale.** Stale re-lists the whole
+  domain to repair one folder.
+- **Only `not_found` means absent in the reimport guard.**
+- **Only `unreachable` latches.** Latching on any other code would take a domain offline for a one-second owner restart.
+- **The owner writes fetched files into the system's temporary directory.** The extension cannot move
+  files there.
+- **Relay backoff resets on uptime, not on acknowledgement.**
+- **Content identity survives the upload.** A version that moved on publish re-fetched every saved file.
+- **Reset never kills processes.** Matching processes by path killed the owner, which then stayed down.
+- **Connection per request.** Replies carry no request id; pooling would serialise requests.
+- Rejected: a helper registered through the app for the owner (refused by the system); a disk image;
+  in-memory page offsets; path identifiers; a materialised-set filter.
 
 ---
 
-
----
-
-OCaml implementation notes for this subsystem: [../ocaml/frontends/file-provider.md](../ocaml/frontends/file-provider.md).
+Implementation notes for this subsystem: [../ocaml/frontends/file-provider.md](../ocaml/frontends/file-provider.md).

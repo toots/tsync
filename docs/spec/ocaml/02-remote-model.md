@@ -70,3 +70,86 @@ Companion to the language-neutral spec [../02-remote-model.md](../02-remote-mode
   mutex.
 - **`Io.async`** (cursor timer) is unsupervised: exceptions are swallowed inside
   `flush_cursor` by design. With effects, spawn under a supervising switch.
+
+## B.3 Code map
+
+| Spec concept | OCaml |
+|---|---|
+| Dual digest, chunk-key test | `Xxhash`, `Chunks.is_chunk_key` (`lib/core`) |
+| Key layout, marker key, shards, run name | `Chunk_layout` (`marker_key`, `shard_name`, `gc_marker_key`, `gc_run_name`), `Stored_key` (`namespace`, `child_key`, `anchor_key`, `index_key`, `trash_namespace`, `share_key`, `is_child_object`, `is_internal`) |
+| Logical keys | `Logical_key` (`to_string = prefix ^ path`, root has `path = ""`) |
+| Inode / identity layouts | `Layout.Inode`, `Layout.Identity` (`lib/domain/remote/store/layout/layout.ml`) |
+| Manifest format | `Manifest` (`builder`, `set`, `seal`, `encode`, `of_string`, `of_file`, `body ~name`, `recorded_name`); the local cache grouping `Manifest.Group` lives here too although it is a local-cache concern |
+| Folder marker, anchor, trash entry JSON | `Folder` (`marker_to_string`, `marker_of_string`, `anchor_of_string`, `trash_marker_to_string`, `trash_path_of_string`) |
+| Folder index | `Folder_index` (`max_children = 10_000`, `max_bytes = 64 MiB`, `worth_writing`) |
+| Versions | `History` (`parse`, `versions_of`, `manifest_of`, `folder_versions`); `save_version` in `File` |
+| Run record | `Collection.of_string` / `to_string` (legacy `reconciling`) |
+| Corruption marker body | `Corruption_marker` (`lib/backends/api`) |
+| Discard job keys and body | `Discard_job` (`lib/backends/api`), `lambda/verify.py` |
+| Share manifest | `Share.create` (`lib/domain/ops/share.ml`), `lambda/handler.py` |
+| ContentStore | `Remote` (`upload`, `upload_chunks`, `fill`, `publish`, `each_chunk`), `Chunk_store` (`store`, `Dedup`) |
+| ManifestStore | `Store` (`put_manifest`, `claim_name`, `claim_folder`, `ensure_folder_id`, `ensure_claimed`, `put_folder_marker`, `put_anchor`, `get_anchor`, `placed`, `filed`, `holder_at`, `marker_id_at`, `put_raw`, `delete_raw`, `copy_manifest`) |
+| TreeReader | `Inode_tree` (`children`, `find`, `fold_tree`) |
+| ChunkSpace | `Collection` (`head`, `get`, `get_range`, `read_run`, `promote`, `promote_all`, `order_ttl = 5.`) |
+| Corruption memo | `Corruption` (`is_marked`, `forget`, `ttl = 5.`) |
+| Cursor debouncing | `File_store` (spec: 03) |
+
+## B.4 Where the current code differs from the spec
+
+- **Promotion is a writer duty, not a gate.** `Remote.publish` calls `Collection.promote_all` before
+  `St.put_manifest`; it reads the run marker once (`read_run`, parse-based, so an unreadable marker reads
+  as idle), promotes only when `local_path` is set, and ignores the result. No other publishing path
+  (`copy_manifest`, revert, republish, rsync rename, version snapshot) promotes, and the http-proxy
+  server's `Put` is a plain put. See [algorithms/gc.md](algorithms/gc.md).
+- **Claims.** `claim_name` reads an empty `put_if_absent` answer as a win (an old http-proxy server
+  answers `""`), falls back to a plain `put` on a non-transient error, deletes a disowned marker
+  unconditionally, and has no confirmation step. `put_folder_marker` (mkdir, move destination) writes the
+  marker with a plain `put` after the anchor; `Retention.restore` does the same with `put_raw`. A claim of a
+  slot naming the claimant's id rewrites the anchor without checking whether the folder moved.
+- **Markers with an empty id** are classified as markers (`marker_of_string` fills `""`), not as
+  unclassifiable.
+- **`claim_folder`** reads the marker on every publish into a folder (a `ponytail:` comment).
+- **Manifest reader.** `Manifest.int32_at` reads unsigned values into a 63-bit `int`, so its
+  negative-length checks never fire; negative `size` and malformed chunk keys are not rejected;
+  `manifest.mli` declares `recorded_name` twice.
+- **Version timestamps** are `gettimeofday () *. 1e9` as a float (about microsecond resolution), not
+  strictly increasing per group.
+- **Share reader** (`lambda/handler.py`) lists subfolders from markers without consulting anchors, and
+  does not check that `key` lies inside the share's domain.
+
+## B.5 State that relies on cooperative scheduling
+
+The current code runs on a single-threaded cooperative scheduler; the following state is
+read-modify-written without locks and needs atomics or locks under preemption or parallelism (spec §6):
+
+| State | Pattern relied on | Consequence if preempted |
+|---|---|---|
+| Upload worker index (`next` in `each_chunk`) | `i = next; next += 1` | two workers on one index, or one skipped (a NUL key published) |
+| Dedup memo (hash table, clear at cap) | unsynchronised insert, clear, lookup | table corruption |
+| Corruption memo `marked()` | check the TTL, store the in-flight listing and time before awaiting | duplicate listings; torn fields |
+| Per-prefix tables (pools, memos, cursor states, tree-read pool) | find-or-create | two pools for one domain: budget exceeded |
+| Resolved chunk size cache | store the future on first call | a benign duplicate request |
+| Cursor debouncer (`pending`, `timer_armed`, `last_published`) | forward-only max; arm-once flag | lost bump, or two timers |
+| Run-open cache (`order_checked`, `running`) and GC session counters | plain field updates from concurrent promotions | wrong counts; torn cursor fields |
+| `fold_tree` frontier (linked list, `parked`, `requests`) | mutated by completions of concurrent fetches | folders skipped or visited twice |
+| Entry-key `last_ms`, folder-id lease counter | `ms = max(now, last + 1)`; `next += 1` | duplicate entry keys or folder ids |
+| GC in-process `held` flag | check, then await, then set | two collections in one process (G3) |
+
+## B.6 Resource strategy (not normative)
+
+What the current code does to bound resources; the spec leaves these choices to the implementation.
+
+- **Upload**: `each_chunk` runs `width(chunk_slots)` workers pulling the next index (never a promise per
+  chunk); `chunk_slots` = `max_chunk_buffers` (≥ 1) bounds chunk bodies in memory for all uploads of a
+  domain. Slots are taken inside the per-chunk function, never while holding one. The manifest builder
+  keeps its body in a `Bigstring`, off the OCaml heap.
+- **Dedup memo**: `Chunk_store.Dedup`, `max_known = 100_000`, cleared (not LRU) at the cap.
+- **Downloads**: `downloads` and `ranges` pools, `max_downloads` each, keyed by chunk prefix in a
+  global table so every `Remote.Make` application for one domain shares one budget (a per-application
+  pool once admitted twice the budget).
+- **Tree reads**: a shared "tree reads" pool of `max_downloads` per domain prefix; `fold_tree` keeps up
+  to `width(slots)` requests in flight over a doubly linked frontier, one folder per request, or up to
+  64 (`max_batch_folders`) with `list_many`.
+- **Manifests** from local sidecars are `mmap`ed (`Manifest.of_file`), which the spec now recommends.
+- **Run-open cache**: `Collection.order_ttl = 5.` s.
+- **Corruption memo**: `ttl = 5.` s.

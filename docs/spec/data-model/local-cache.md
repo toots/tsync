@@ -1,666 +1,446 @@
-# Data model — local checkout state (one client, one domain)
+# Data model — local state of one client for one domain
 
-This file is the abstract model of what one client machine keeps for one domain: everything under the
-domain's directory in the cache root, the domain's entries in the data dir, and the client-wide identity
-the domain borrows. Sections 1–7 and 9 name no file, path, hash or encoding. Section 8 maps each entity to
-its current representation, and the byte-level formats are specified in
-[04-checkout-cache.md](../04-checkout-cache.md) §2, [03-journal-sync.md](../03-journal-sync.md) §2,
-[05-ops-config.md](../05-ops-config.md) §2 and [07-daemon-cli.md](../07-daemon-cli.md) §2.
+The abstract model of what one machine keeps for one domain: every entity, whether it is
+authoritative or rebuildable, the invariants between entities, and **what the domain owner
+owns** (P1, with [07](../07-daemon-cli.md), which owns the process model and the ownership
+lock). Sections 1–8 name no file or encoding; the byte formats are in
+[04](../04-checkout-cache.md) §2, and §9 maps each entity to its format.
 
-An encoding that keeps the entities, identities, invariants and write roles below is correct, whatever it
-stores them in: a filesystem tree, an embedded database, or a key-value store.
+An encoding that keeps these entities, identities, invariants and write rules is correct,
+whether it stores them in a filesystem tree, an embedded database or a key-value store.
 
-## 1. Purpose and the constraints of the medium
+## 1. Purpose and medium
 
-The backend holds content-addressed chunks and manifests filed under folder ids and name hashes. It cannot
-cheaply answer "what is in this folder", "what is this file called" or "what bytes are at offset N", and it
-may be unreachable. The local state exists to:
+The backend holds content-addressed chunks and manifests filed under folder ids and name
+hashes, and may be unreachable. The local state exists to:
 
 1. answer every namespace question (list, stat, lookup) without the network;
-2. serve file bytes lazily, fetching only what a reader touches, within a bounded disk budget;
-3. hold the user's unpublished edits, which are the only copy of that data until uploaded;
-4. record every unit of owed work before doing it, so a crash never leaves a change that nothing owes;
-5. apply peers' changes and feed them, together with this client's own, to frontends as an ordered feed.
+2. serve file bytes lazily within a bounded disk budget;
+3. hold the user's unpublished edits, the only copy of that data until uploaded;
+4. record every unit of owed work before doing it, so no crash leaves a change nothing owes;
+5. apply peers' changes, and feed them with this client's own to frontends as an ordered feed.
 
-**What the medium offers.** A local filesystem, or anything equivalent, that gives:
-- atomic whole-object replacement (write aside, then swap in);
-- create-if-absent, used for client identity and id leases;
-- hard links, not always available (some Android storage lacks them);
-- sparse files with positional writes;
-- per-object modification times that can be set explicitly;
-- advisory whole-file locks that the kernel drops when the holder dies.
+The medium's required properties (atomic rename, fsync of files and directories, create-if-
+absent, advisory locks that die with their holder, sparse files, settable mtimes, optional hard
+links) are listed in [durable-queue](../algorithms/durable-queue.md) §2. Every multi-object
+change is an ordered sequence of single-object steps; there are no transactions and no
+reference counts.
 
-**What it lacks.**
-- **Durability ordering.** Nothing is fsynced today (F8), so every crash-consistency claim below holds for
-  a process crash, not for power loss.
-- **Transactions across objects.** Every multi-object change is an ordered sequence of single-object steps.
-- **Cross-process locks on most entities** (F7).
-- **Reference counting.**
+## 2. The owner
 
-**Who shares it.** On one machine, several processes read and write the same domain state at the same
-time: the converging daemon parent, one or more frontend processes, one-shot CLI commands, and the
-http-proxy/share server. §5 lists which of them may write which entity.
+On one machine, exactly one process at a time owns a domain's local state: it holds the domain's
+ownership lock ([07](../07-daemon-cli.md) §2.3) for as long as it touches that state.
 
-## 2. Entities
+**The owner owns, for its domain**, every entity of §3 except the machine-wide identity (§3.12):
+the namespace mirror, the folder-id index, the chunk cache (bodies and pins), the staged tree,
+the WAL, the deferred job logs, the applied log, the last-sync mark and resync generation, the
+pause flag, the export records, the kept walk and the scratch area, and all the in-memory
+state of §3.13.
 
-Each entity below is given as:
-- **Id**: its identity, meaning what makes two instances the same.
-- **Attr**: its attributes.
-- **Mut**: its mutability (immutable, replaced whole, or appended).
-- **Card**: its cardinality.
-- **Life**: its lifecycle (created by, changed by, deleted by, and when).
-- **Auth**: whether it is authoritative or a projection (§6).
+- Only the owner creates, changes or removes any of it.
+- Within the owner, every check-then-act is serialised per domain for metadata and per key for
+  content ([04](../04-checkout-cache.md) §3.2).
+- The owner runs everything that consumes owned state: reconcile, peer application (on a full
+  tree), the queues, the deferred job logs, maintenance and every local recovery step
+  ([04](../04-checkout-cache.md) §4.10).
 
-### 2.1 Namespace mirror — the published tree
+**What other processes may do**:
+- read owned objects that the owner replaces atomically (mirror entries, markers, pins), for
+  advisory answers only, tolerating any object changing or vanishing between two reads, and
+  never writing anything based on what they read;
+- submit a new record to one of the domain's logs
+  ([durable-queue](../algorithms/durable-queue.md) §4.2);
+- as an export command, create and lock its own export records (§3.10);
+- nothing else. A process that needs more asks the owner, or takes ownership when there is none.
+
+**Machine-wide identity** (§3.12) is shared by every owner on the machine and arbitrated by
+create-if-absent, never by the ownership lock.
+
+**The ownership lock** is a file per domain with an advisory holder record naming the owner, and
+the **pause flag** a file per domain whose presence means paused; both are specified by
+[07](../07-daemon-cli.md) §2.3, §2.6 and §2.7.
+
+**Host-owned state** lives outside the owner's domain state and outside this model: a host MAY
+keep state of its own that feeds the owner through its request interface, and it is responsible
+for that state's durability. On Android these are the ingest intents with their staging copies,
+and the camera-backup records ([android](../frontends/android.md) §9 and §13). Once the owner has
+acknowledged a handover, the content is in the staged tree and the host's copy is disposable.
+
+## 3. Entities
+
+Each entity gives: **Id** (what makes two instances the same), **Attr**, **Mut** (immutable,
+replaced whole, appended, or written in place), **Life** and **Class** (§6).
+
+### 3.1 Namespace mirror
 
 This client's projection of the domain's namespace as of the journal entries it has applied.
 
-- **Folder entry**
-  - Id: the logical path.
-  - Attr: real leaf name, and folder id (absent only for a folder created by a legacy path or not yet
-    recorded).
-  - A folder may exist in the mirror before it has an id. Operations under a folder with no id are refused
-    ("run sync first").
-- **File entry**
-  - Id: the logical path.
-  - Attr: the published manifest, byte-identical to the one on the store, with its recorded name set to
-    the entry's leaf.
-  - An unreadable manifest counts as absent.
-- **Name record**
-  - Id: the folder entry it belongs to.
-  - Attr: the real leaf of a folder whose storable handle had to be escaped.
-  - Only escaped folders have one. A file's real name travels in its manifest.
-- Mut: each entry is replaced whole. The tree shape changes by create, move and remove.
-- Card: one folder entry per folder the client knows, and one file entry per published file.
-- Life:
-  - created and replaced by peer application, resync walks, lazy pulls, local mkdir and rename, promotion
-    and revert;
-  - removed by local delete and rmdir, peer application, the resync sweep and the lazy prune.
-- **Full checkout**: a name the mirror lacks is a name the domain does not have. This is the "whole answer"
-  invariant, and listings never touch the network.
-- **Lazy checkout (Android)**: a name the mirror lacks has not been fetched yet. Listing a folder first pulls
-  that folder's children from the store, records them (keeping any id the client already holds), and prunes
-  published entries the store no longer names. Three guards apply:
-  - a folder with no local id is not pulled;
-  - a folder that an owed metadata record touches directly is not pulled, because the pull would undo the
-    unpublished change;
-  - a pull that cannot read every child fails without pruning.
-- Auth: projection (§6), with one exception. A folder's id is final from the moment the client mints it at
-  mkdir, and it becomes authoritative once published.
+- **Folder entry.** Id: the logical path. Attr: the real leaf; the folder id (absent only for a
+  folder whose marker is unreadable, until a resync). Operations under a folder with no id are
+  UNPREPARED.
+- **File entry.** Id: the logical path. Attr: the published manifest, byte-identical to the
+  store's, with its recorded name set to the entry's leaf; and whether this client stored it
+  (*own*). The entry is the path's **view**
+  ([conflict-resolution](../algorithms/conflict-resolution.md) §3.3): it becomes a manifest this
+  client stored even when that upload's promotion was abandoned, moves with a local rename and
+  goes with a local delete. An undecodable entry is CORRUPT for its path and skipped by
+  listings.
+- **Name record.** Id: the folder entry. Attr: the real leaf of a folder whose local name had to
+  be escaped.
+- Mut: entries are replaced whole; the tree changes by create, move and remove.
+- Life: written by peer application, resync, lazy pulls, local namespace operations, promotion,
+  revert and the Put-without-staged-edit recovery; removed by local delete and rmdir, peer
+  application, the resync sweep and the lazy prune.
+- Class: projection, except that a folder id minted here is final from the mint, and is
+  recorded in the WAL until published.
 
-### 2.2 Folder-id index
+### 3.2 Folder-id index
 
-This entity holds the bidirectional map between stable folder ids and paths. The backend files everything
-by folder id, and ops carry ids.
+- **Forward** (path → id): the folder entry's id. It is never minted by a read.
+- **Reverse entry.** Id: the folder id. Attr: parent folder id, leaf. A resolution climbs to the
+  root, stops on a cycle, and is accepted only if the path it produced maps forward to the same
+  id.
+- **Removed-id record.** Id: a logical path. Attr: the last folder id at that path. It outlives
+  the folder so ops recorded under a removed or moved folder stay nameable; it answers
+  *whereabouts*.
+- Mut: replaced whole.
+- Class: the reverse index is a projection (rebuilt by walking the mirror); removed-id records
+  are history, kept for `REMOVED_ID_RETENTION` ([04](../04-checkout-cache.md) §4.9).
 
-- **Forward** (path → id): the folder entry's own id attribute (§2.1). It is never minted on a read.
-- **Reverse entry**
-  - Id: the folder id.
-  - Attr: parent folder id and leaf name.
-  - Resolving an id climbs reverse entries to the root, stops on a cycle, and is accepted only if the path
-    it produced maps forward to the same id. A stale entry therefore costs an answer, never a wrong folder.
-- **Removed-id record**
-  - Id: the logical path.
-  - Attr: the last folder id that path named.
-  - It outlives the folder, so ops recorded under a removed or moved folder stay nameable, including by a
-    process other than the one that removed it.
-  - It answers *whereabouts* (Live, Moved, Removed or Unknown).
-- Mut: entries are replaced whole.
-- Card: one reverse entry per indexed folder. Removed-id records accumulate, one per path that ever held a
-  folder.
-- Life:
-  - written with every folder write, move and reparent;
-  - reverse entries are removed by `forget`, `rebuild` and the resync index sweep;
-  - removed-id records are never pruned (§7).
-- Auth: the reverse index is a projection of the mirror's folder ids and can be rebuilt by walking the
-  mirror. Removed-id records cannot be rebuilt, because they are history.
+### 3.3 Chunk cache
 
-### 2.3 Chunk cache
+- **Group**: a run of `per` consecutive chunks of one manifest, `per` derived from that
+  manifest's chunk size. Id: a digest of the ordered member chunk keys (two files with the same
+  run share a body).
+- **Whole body.** Id: the group key. Attr: the group's bytes, verified. Its existence means
+  whole.
+- **Partial body.** Id: the group key. Attr: sparse bytes; which intervals it holds is known
+  only to the owner's memory. It does not survive the owner.
+- **Residency** (derived): online-only, cached or pinned
+  ([04](../04-checkout-cache.md) §3.6).
+- Mut: a whole body appears atomically and is replaced only by a forced refetch; a partial body
+  is written in place.
+- Life: created by reads, prefetch, materialisation and promotion; removed by the cap, evict,
+  forget, and (partial bodies) owner start. Removal is reference-blind.
+- Class: projection of backend chunks. Any of it may be removed at any time by the owner.
 
-The chunk cache holds file bytes served locally, organised by the local grouping of stored chunks.
+### 3.4 Pins
 
-- **Group**
-  - A run of `per` consecutive stored chunks of one manifest. `per` is derived from that manifest's own
-    chunk size and the configured cache granularity.
-  - Id: a digest of its ordered member chunk keys. Two files with identical groups therefore share one body
-    and one download. The group key is not (first, last), because two groups can share both ends.
-  - Member *i* sits at the sum of the earlier members' sizes.
-- **Group body**
-  - Id: the group key.
-  - Attr: bytes in group layout, possibly sparse.
-  - Whole ⇔ the body exists and no partial record accompanies it.
-- **Partial record**
-  - Id: the group key. At most one per body.
-  - Attr: for each member, a single held interval [a,b) of chunk-local bytes, never an interval set.
-  - Present ⇔ the body is incomplete.
-  - A record that does not parse means "nothing held".
-- **Residency** (derived, not stored): a file is online-only, cached or pinned, computed from its manifest's
-  groups, their bodies, their partial records and their pins.
-- Mut:
-  - a whole body appears atomically and is not rewritten thereafter, except by a forced refetch, which
-    replaces it whole;
-  - a partial body is filled in place by positional writes;
-  - partial records are replaced whole.
-- Card: bounded by the cap (§7).
-- Life:
-  - created by reads (range fill or whole-group fetch), read-ahead, materialize, and promotion (hard link
-    from a staged body, or a copy when links are unsupported);
-  - deleted by the cap, `evict` and `forget`. Deletion is reference-blind: a body another file shares goes
-    too, and it is refetched on demand.
-- Auth: projection of backend chunks. Any of it can be deleted at any time.
+- Id: the group key: a pin is attached to content, follows it across renames and is shared by
+  every file using the body. Attr: a deadline. A pin may exist before its body does.
+- Mut: replaced (a re-pin moves the deadline).
+- Life: created by pin requests before their fetch; removed by unpin, evict, forget, and by the
+  cap once lapsed.
+- Class: user intent, acknowledged durably; losing one costs a refetch and a silent loss of the
+  offline guarantee, so it is written durably.
 
-### 2.4 Pins
+### 3.5 Staged edits
 
-A pin keeps a body out of cap eviction until a deadline.
+Unpublished local writes, in a tree neither the cap nor a resync can address.
 
-- Id: the group key. A pin is attached to content, not to a file, so it follows the content across renames
-  and is shared by every file using that body.
-- Attr: the deadline.
-- Mut: replaced. A re-pin moves the deadline.
-- Card: at most one per body.
-- Life:
-  - created by "make available offline" and materialize-with-keep, after the body exists (a pin needs a
-    body to stand beside);
-  - removed by unpin, by `forget`, and by the cap once the deadline has lapsed.
-- Auth: user intent, but losing it costs only a refetch.
+- **Staged manifest.** Id: the logical path (same tree shape as the mirror). It wins over the
+  published entry of the same path in listings and reads, and is listed even if never published.
+  Attr: real name, authoritative size, mtime, chunk size; either a whole-body reference or one
+  slot per chunk (Inherit, Zero, Staged(body, offset)); the edit's **base** (the content
+  identity of the view it started from, none, or unknown); state **Owed**, or **Committed** with
+  the manifest the upload produced. Every local mutation produces Owed.
+- **Staged body.** Id: an opaque random id. Attr: bytes in one group's layout (sparse), or a
+  whole file. A group body may be written in place only while it is not also a cache body; a
+  whole body is never written in place.
+- **Set-aside manifest.** A staged manifest that could not be decoded. Kept under a name no
+  reader lists, never decoded, never deleted automatically, reported; it keeps every body it
+  may name alive.
+- Mut: manifests replaced whole; group bodies written in place, grown and resized.
+- Life: a manifest is created by the first write, truncate, create or handover; moved by
+  renames and asides; removed by promotion, delete, create, revert, a replacing rename, or a
+  recursive rmdir. A body is released when no manifest, set-aside manifest or open read handle
+  names it, after the switch away from it is durable.
+- Class: **authoritative, the sole copy of user data.**
 
-### 2.5 Staged edits
-
-This entity holds unpublished local writes, in a store that neither the cap nor a resync can reach.
-
-- **Staged manifest**
-  - Id: the logical path. It uses the same tree shape as the mirror, and wins over the published entry for
-    the same path in listings and reads. It is listed even if the file was never published.
-  - Attr:
-    - real name, authoritative size, mtime and chunk size;
-    - either a *whole-body reference* (a file a frontend handed over complete), or one *slot* per chunk:
-      **Inherit** (the published manifest's chunk *i*), **Zero** (a hole) or **Staged**(body id, offset);
-    - optionally a *commit record*: the manifest the upload produced.
-  - Its two states are a type, not a flag. **Owed** means no commit record. **Committed** means the upload
-    is done and promotion is pending.
-  - Every local mutation produces Owed, which is what retires a pending promotion: the promotion re-reads
-    the manifest, finds it Owed, and abandons.
-- **Staged body**
-  - Id: an opaque random id.
-  - Attr: bytes, either in one group's layout (sparse; one body per staged group) or as a whole file.
-  - Referenced by (body id, offset) from slots, or by the whole-body reference.
-  - A body is only as long as the writes that reached it, and a short tail reads as zeros.
-- **Set-aside manifest**: a staged manifest that could not be decoded (a newer version, or torn). It is
-  kept under a distinct name, never decoded into something it does not mean, never deleted, and skipped by
-  listings and folds.
-- Mut: manifests are replaced whole. Bodies are written in place, grown, and resized exactly on truncate
-  and before promotion.
-- Card: one manifest per locally edited path, and one body per staged group (or one whole body).
-- Life:
-  - a manifest is created on the first write, truncate, create or whole-file handover, and moved by local
-    renames and conflict asides;
-  - a manifest is deleted by promotion, discard (local delete, O_TRUNC re-create, peer application's
-    remove) or an explicit revert;
-  - a body is released when no slot names it any more, after promotion, or by the orphan sweep (unreferenced
-    and older than the grace).
-- Auth: **authoritative. It is the sole copy of user data.**
-
-### 2.6 Write-ahead log of owed work
+### 3.6 Write-ahead log
 
 One record per unit of work this client owes the store.
 
-- Id: an **entry key**: the start time in milliseconds plus the client uuid. It is totally ordered, and its
-  order is replay order. The same key names the work for its whole life:
-  WAL record → published journal entry → cursor value → applied-log line → change-feed anchor.
-- Attr:
-  - ops: the journal vocabulary (put, delete, mkdir, rmdir, rename; directory ops carry folder ids);
-  - state;
-  - attempt count;
-  - last error (kind and detail).
-- **Record states**
+- Id: an **entry key** (start time, client uuid), totally ordered. The same key names the work
+  for its whole life: WAL record, journal entry, cursor value, applied-log line, change-feed
+  anchor ([wal-and-journal](../algorithms/wal-and-journal.md) §3.1).
+- Attr: ops (journal vocabulary), state (Intent, Prepared, Executed:
+  [wal-and-journal](../algorithms/wal-and-journal.md) §4.1), attempt count, last failure; for
+  each delete and file rename, the expected prior record; while a retargeted record is in
+  Intent, the file's current local location. A record submitted by a non-owner carries a
+  submission id until the owner re-keys it.
+- **Set-aside record**: an undecodable record, kept and reported like a set-aside manifest.
+- Mut: replaced whole on every change.
+- Life: metadata records are created before their local half; put records at close, at a
+  handover, by a bulk publisher (possibly as a submission), by revert, and by the adoption of an
+  unrecorded staged edit; records are removed by discharge, or when nothing is owed.
+- Class: **authoritative, the sole record of owed work.** A staged edit with no record is legal
+  between a write and its close; owner start adopts it.
 
-  | State | Meaning | Set by |
-  |---|---|---|
-  | Intent | recorded, nothing done yet (metadata: the local half has not run) | `record`, before the local half |
-  | Prepared | local half done or data staged; backend half owed | the hand-off to a queue (a put's first state) |
-  | Executed | bytes or marker on the store; entry not yet published | discharge, just before publishing the entry |
-  | *(no record)* | entry published, cursor noted | discharge deletes the record; there is no Committed state |
+### 3.7 Deferred job logs
 
-  - An unknown state reads as Intent, so a record never claims a state it did not earn.
-  - A record with ops and no put is a *metadata record*.
-- Mut: replaced whole on each state change, and updated by retargeting (conflict asides rewrite owed renames).
-- Card: one per unit of owed work.
-- Life:
-  - puts are created at close;
-  - metadata records are created before the local half;
-  - records are deleted by discharge, by reconcile once nothing is left owed, and when the local half
-    reports that nothing is owed (for example a rename of a never-published file).
-- **Claim**: a per-directory advisory lock. The first process that starts a queue over the log holds it. A
-  process rescans the log for others' records only while nobody holds the claim. It gates *recovery reads*,
-  not writes.
-- Auth: **authoritative. It is the sole record of owed work.**
-- Relation to staged edits: a staged manifest with no WAL record is legal. The window runs from the first
-  write to close, and startup reconcile *adopts* such manifests with a fresh put record.
+- Id: one log per (domain, replica or backfill target); one record per job.
+- Attr: a bodyless job (put, copy, delete of backend keys) that brings the target's key to the
+  source's current state ([replication](../algorithms/replication.md)).
+- Life: created by the owner or submitted by a non-owner writer before the main write is
+  acknowledged; run and removed by the owner; parked on a non-retryable failure and retried.
+- Class: **authoritative, the sole record of owed replication.**
 
-### 2.7 Applied-entries log (the change feed)
+### 3.8 Applied log
 
-The journal entries this client has published or applied, in the order it handled them.
+The journal entries this client has published or applied, in the order handled; the change
+feed. Format: [03](../03-journal-sync.md). Retention: by age only, never by size
+([wal-and-journal](../algorithms/wal-and-journal.md) §4.8).
 
-- Id of a line: its entry key. **Position, not key order, is the feed order.** An anchor is a position.
-- Attr: entry key and ops. It covers four kinds of entry:
-  - this client's own published entries, noted before the backend put;
-  - peers' entries, noted after all their ops applied;
-  - rebuild findings, under freshly minted keys, whose ops are the diff a full resync made;
-  - "handled" markers with no ops.
-- Mut: append-only, sharded by the month in which the entry was handled. A torn append loses only that line.
-- Card: one line per entry handled. Bounded by retention (§7).
-- Life:
-  - appended by the uploader and metadata queue (own entries), by the poller and `tsync sync` (peer
-    entries), and by full resync (findings);
-  - pruned by age and total size.
-- Readers:
-  - the dedupe set, which is loaded once per process (F5);
-  - the frontend change feed (`changes_since`), which is never filtered by author;
-  - the full-resync decision.
-- Auth: authoritative *history* for dedupe (it cannot be rebuilt from the store after the journal is pruned).
-  As a feed it is the only source. A lost feed is recovered by the reader re-listing, not by rebuilding the
-  feed.
+- Id of a line: its entry key; position, not key order, is the feed order.
+- Mut: append-only.
+- Class: authoritative history for dedupe and the feed; not rebuildable from the store once the
+  journal is pruned.
 
-### 2.8 Last-sync mark and resync generation
+### 3.9 Last-sync mark, resync generation, pause flag
 
-- **Last-sync mark**
-  - Id: one per (client, domain).
-  - Attr: an entry key.
-  - Moved forward only, during peer application.
-  - It has two uses: absent means "never synced" (which disables the dedupe horizon), and it drives the
-    `cannot_bridge` test that decides a full rebuild. It is **not** a "list since" cursor.
-- **Resync generation**
-  - Id: one per (client, domain).
-  - Attr: an opaque token (a timestamp).
-  - Every change-feed anchor carries it. An anchor from another generation answers "stale", and the reader
-    re-lists.
-  - Stamped when a frontend asks for a full resync through IPC.
-- Both are replaced whole, atomically.
-- Auth: both are authoritative bookkeeping. If either is lost, the cost is a full rebuild or a re-list, and no
-  data is lost.
+- **Last-sync mark**: one entry key, forward-only, meaning "every due entry older than this has
+  been seen and handled"; it also drives the bridging test
+  ([wal-and-journal](../algorithms/wal-and-journal.md) §4.8).
+- **Resync generation**: an opaque token carried by change-feed anchors; an anchor of another
+  generation reads as stale ([07](../07-daemon-cli.md)).
+- **Pause flag** ([07](../07-daemon-cli.md) §2.6).
+- Mut: replaced whole, durably. Class: authoritative bookkeeping; loss costs a rebuild, a
+  re-list or a lost pause, never data.
 
-### 2.9 Export resume records
+### 3.10 Export records
 
-- Id: the destination path, one record per destination file.
-- Attr:
-  - a header that identifies the source content (manifest identity, size, chunk size) and the destination;
-  - the set of chunk indices whose bytes are durably written at the destination.
-- Mut: append-only indices. A header mismatch makes the record void.
-- Life:
-  - created and extended by an export (a CLI one-shot);
-  - deleted when the export completes, or by the on-demand sweep after a retention period.
-- Auth: authoritative only about the destination's progress. Losing it means a full re-export.
-- Unlike the rest of the local state, the export path fsyncs each chunk before recording its index.
+Resume records of in-progress exports ([05](../05-ops-config.md) §4.4). Authoritative only about
+the destination's progress; loss costs a re-export. The export command, which need not be the
+owner, holds an exclusive lock on each record it uses for its whole run; the owner's sweep removes
+only unlocked records older than its grace. This is the one domain-local object a non-owner
+writes besides submissions.
 
-### 2.10 Kept whole-domain walk (paging)
+### 3.10a Pending folder-claim confirmations
 
-- Id: a walk id (a timestamp), carried in every `list_all` page cursor as (walk id, line number).
-- Attr: a header (walk id, skipped count), then one row per item in path order, each holding path,
-  container folder id, kind, size and mtime.
-- Mut: replaced whole when a new walk starts. It is never invalidated by later changes, because the change
-  feed carries what moved after the anchor.
-- Life:
-  - written best-effort by the IPC handler of the serving process;
-  - lost on resync, because it lives in the scratch area;
-  - a missing walk is redone and paging continues at the same line number.
-- Auth: disposable projection.
+- Id: a record per folder claim not yet confirmed
+  ([data-model/backend](backend.md) §6.2).
+- Attr: tentative folder id, parent id, name, the time the claim landed
+  ([04](../04-checkout-cache.md) §2.9); the protocol is [data-model/backend](backend.md) §6.2.
+- Life: recorded durably by the owner when it claims a folder name on the store; run after the
+  settle delay; removed once confirmed; resumed by every owner start.
+- Class: **authoritative**: a lost confirmation could leave a lost claim undetected.
 
-### 2.11 Scratch and temporary objects
+### 3.11 Kept walk, scratch, temporaries
 
-- **Frontend scratch**: files a frontend must hold beside the namespace but never publish (FUSE's
-  `.fuse_hidden*`), filed by real path, plus the kept walk (§2.10). The whole scratch area is wiped by resync.
-- **Temporary objects**: the write-aside half of every atomic replacement. Each carries the owning process
-  id, so a sweep can tell a live writer's temp from a dead one's.
-- **Listing spools**: machine-wide, not per domain, used by import, mirror and rsync. Their owner is
-  identified by pid.
-- All of these are disposable and never authoritative.
+- **Kept walk**: the paging snapshot of a whole-domain listing ([07](../07-daemon-cli.md)).
+- **Frontend scratch**: files a frontend holds beside the namespace and never publishes.
+- **Temporary objects**: the write-aside half of every replacement ([01](../01-core.md) §2.9).
+- All disposable; scratch and the kept walk are wiped by resync.
 
-### 2.12 Deferred-job logs (replica and backfill)
+### 3.12 Machine-wide identity
 
-- Id: one log per (domain, target backend name), with one record per job.
-- Attr: a *bodyless* job (put key, copy src→dst, delete key or keys). The body is re-read from a main when
-  the job runs, so repeated puts converge on the latest body.
-- Mut: records are created, then deleted when done. A permanent failure drops the record and marks the
-  target degraded.
-- Card: bounded at 100 000 per target. Past that the target is degraded.
-- Life:
-  - recorded by every process that writes to the domain's store;
-  - run by the process that holds the log's claim: the daemon parent (resuming) or the one-shot that
-    recorded them (its own only).
-- Auth: **authoritative: the sole record of replication owed to a target.**
+- **Client uuid**: one per data directory, shared by all domains; created once by durable
+  create-if-absent (the loser adopts the winner's); immutable. Losing it would make this machine
+  a new client whose own WAL records are foreign.
+- **Folder-id lease**: a block of counter values one process may mint folder ids from; created
+  by durable create-if-absent before its first id is used ([03](../03-journal-sync.md) §2.1).
+  Leases MUST never let a block be leased twice.
+- Class: authoritative.
 
-### 2.13 Client identity
+### 3.13 In the owner's memory
 
-- **Client uuid**
-  - Id: one per data dir, shared by *all* domains.
-  - Created once by a create-if-absent race: the loser adopts the winner's value.
-  - Immutable.
-- **Folder-id counter lease**
-  - Id: the block number.
-  - Created by create-exclusive. Owning a block entitles one process to mint the 1024 ids in it (id = uuid
-    prefix plus counter).
-  - A forked child leases its own block. Leases never block and never contact the store.
-- Auth: authoritative.
-  - Losing the uuid makes this machine a new client: its WAL records stop being "own" and its folder ids
-    change prefix.
-  - Losing leases risks duplicate folder ids, which is silent namespace corruption.
+One instance per domain per owner, shared by every consumer in the owner: the metadata and key
+locks and edit generations ([04](../04-checkout-cache.md) §3.2); read handles
+([04](../04-checkout-cache.md) §3.3); the cache's body locks,
+generations, held intervals, in-flight table and counts
+([read-path-and-cache](../algorithms/read-path-and-cache.md) §3.2); the queues' loaded records
+and slots ([durable-queue](../algorithms/durable-queue.md) §3.1); the dedupe set and the cursor
+debouncer ([wal-and-journal](../algorithms/wal-and-journal.md) §3.3). All are rebuilt from
+durable state at owner start. Retentions of open-and-unlinked content
+([04](../04-checkout-cache.md) §3.3) are among the read handles.
 
-### 2.14 In-process state (not persisted, listed for completeness)
-
-These tables live in memory, one per process:
-- the manifest memo (bounded FIFO);
-- the cache byte and file counts, anchored by one walk;
-- the in-flight fetch table;
-- the partial-record intervals;
-- the per-key and metadata mutexes;
-- the dedupe set;
-- the WAL hand-offs;
-- the cursor debouncer;
-- the pull table.
-
-None of them is shared across processes. §5 depends on that fact.
-
-## 3. Relations
+## 4. Relations
 
 ```mermaid
 erDiagram
     FOLDER_ENTRY ||--o{ FOLDER_ENTRY : "contains (by path)"
     FOLDER_ENTRY ||--o{ FILE_ENTRY : "contains (by path)"
-    FOLDER_ENTRY |o--o| REVERSE_ENTRY : "id (stable id)"
+    FOLDER_ENTRY |o--o| REVERSE_ENTRY : "folder id"
     REVERSE_ENTRY }o--o| REVERSE_ENTRY : "parent id"
     REMOVED_ID_RECORD }o--|| FOLDER_ID : "last id at path"
-    FILE_ENTRY ||--|{ GROUP : "manifest chunk keys -> group key (content)"
-    GROUP ||--o| GROUP_BODY : "cached as"
-    GROUP_BODY ||--o| PARTIAL_RECORD : "incomplete iff"
-    GROUP_BODY ||--o| PIN : "kept until"
-    STAGED_MANIFEST |o--o| FILE_ENTRY : "same path; Inherit slots reference base"
-    STAGED_MANIFEST ||--o{ STAGED_BODY : "slots (opaque id, offset)"
-    STAGED_BODY |o--o| GROUP_BODY : "hard-linked at promotion"
+    FILE_ENTRY ||--|{ GROUP : "manifest chunk keys -> group key"
+    GROUP ||--o| CACHE_BODY : "cached as (whole or partial)"
+    GROUP ||--o| PIN : "kept until"
+    STAGED_MANIFEST |o--o| FILE_ENTRY : "same path; Inherit slots use it as base"
+    STAGED_MANIFEST ||--o{ STAGED_BODY : "slots (body id, offset)"
+    SET_ASIDE_MANIFEST ||--o{ STAGED_BODY : "may name"
+    READ_HANDLE }o--o{ STAGED_BODY : "reads"
+    STAGED_BODY |o--o| CACHE_BODY : "hard-linked at promotion"
     WAL_RECORD }o--o| STAGED_MANIFEST : "put op names path"
     WAL_RECORD ||--o| APPLIED_LINE : "same entry key"
-    APPLIED_LINE }o--|| RESYNC_GENERATION : "anchor = generation + position"
-    LAST_SYNC_MARK }o--|| APPLIED_LINE : "entry key"
     CLIENT_UUID ||--o{ WAL_RECORD : "key suffix"
     CLIENT_UUID ||--o{ FOLDER_ID : "id prefix"
     ID_LEASE ||--o{ FOLDER_ID : "counter block"
 ```
 
-The table below gives each reference, how it names its target, and what a dangling reference means.
-
-| From → to | By | Dangling means |
+| Reference | By | A dangling reference means |
 |---|---|---|
-| mirror file entry → group | content (member chunk keys → group key) | not cached; fetch on demand. Normal. |
-| partial record → body | content (same group key) | the body was taken by the cap; the record means "nothing held" and is reset on the next fill |
-| pin → body | content | a pin with no body is inert; the cap drops it when its deadline lapses |
-| staged slot → staged body | opaque id + offset | **data loss** for those members: the read and the upload hit ENOENT, and the uploader abandons the record (F9) |
-| staged Inherit slot → published manifest | path (the mirror entry at the same path) | a hard error ("inherits nothing"). Zeros are never served as content. |
-| staged manifest → WAL record | path, through the record's put op | transient (the file is open, or a crash before close); reconcile adopts it |
-| WAL record → staged manifest | path | nothing left to upload: the record completes and publishes no entry |
+| file entry → group | content | not cached: fetch on demand |
+| pin → body | content | a pin placed before its fetch, or whose body was evicted after it lapsed; inert |
+| staged slot → staged body | body id | cannot happen by §5.2; if found, CORRUPT: the edit is kept, reported, and its record parked, never abandoned |
+| staged Inherit slot → base entry | path | CORRUPT; zeros are never served as content |
+| staged manifest → WAL record | path via a put op | the file is open, or a crash fell before close: owner start adopts it |
+| WAL put record → staged manifest | path | nothing staged: the record publishes only if the store holds a manifest at the path ([durable-queue](../algorithms/durable-queue.md) §7.3) |
 | WAL rename → path | path | retargeted when a conflict aside moves the destination |
-| folder id → path (reverse chain) | stable id | unresolvable until `rebuild`; operations refuse rather than guess |
-| removed-id record → folder id | path → id | expected: the id lives on after the folder |
-| change-feed anchor → applied line | generation + entry key (position) | the line was pruned or the generation changed: the reader re-lists ("stale") |
-| last-sync mark → journal | entry key | the journal was pruned past it: `cannot_bridge` forces a full rebuild (the daemon never checks, F3) |
-| kept-walk cursor → walk | walk id + line | the walk is gone: re-walk and continue at the same line |
-| deferred job → store object | backend key | the object is gone: the put job is done ("deleted since") |
+| folder id → path | reverse chain | unresolvable until rebuild; operations refuse rather than guess |
+| removed-id record → folder id | path | expected: the id lives on after the folder |
+| change-feed anchor → applied line | generation and entry key | pruned or another generation: the reader re-lists |
+| deferred job → backend key | key | the job re-derives from the source's current state |
 
-## 4. Invariants
+## 5. Invariants
 
-### 4.1 At rest
+### 5.1 At rest
 
-1. **Whole body.** A group body is whole ⇔ it exists and has no partial record.
-2. **A partial record never claims more than the body holds.**
-3. **Staged is unreachable by projection maintenance.** The cap, `evict`, the resync walk and the resync
-   sweep never delete staged manifests or bodies. This holds by separation of stores, not by a filter.
-4. **Every body a staged manifest names exists** (at least up to the bytes it holds). This is violated today
-   in a crash window (F9, §4.2).
-5. **Committed means published.** A Committed staged manifest's commit record names a manifest already on
-   the store. A local mutation can only produce Owed.
-6. **Nothing owed is unrecorded.**
-   - Every published-worthy change is covered by either a WAL record or an unrecorded staged manifest that
-     reconcile will adopt.
-   - A metadata change's record precedes its local effect.
-7. **One unit of work, one key.** A WAL record, its journal entry, its applied line and any anchor to it all
-   share one entry key.
-8. **Folder ids are final and unique.**
-   - A folder holds at most one id, and an existing id is never replaced by a browse.
-   - Ids are unique across clients (uuid prefix) and across processes (lease).
-9. **The reverse index is never trusted without verification.** A path resolved from an id must map back to
-   that id.
-10. **Mirror completeness** (full checkout only). Absence in the mirror = absence in the domain, as of the
-    entries applied.
+1. **A whole-body name means whole and verified.** Partial bodies never survive their owner.
+2. **Held intervals never exceed the disk**
+   ([read-path-and-cache](../algorithms/read-path-and-cache.md) I1).
+3. **Staged is unreachable by projection maintenance**: the cap, evict, resync and the lazy
+   prune never address the staged tree, by separation of stores.
+4. **Every body a staged manifest names exists**, up to the bytes it holds.
+5. **Committed means published**: a Committed manifest's commit record names a manifest the
+   store holds.
+6. **Nothing owed is unrecorded**: every change owed to the store is covered by a WAL record or
+   by an unrecorded Owed staged edit that owner start adopts. A metadata change's record
+   precedes its local effect.
+7. **One unit of work, one key** across WAL record, entry, applied line and anchor.
+8. **Folder ids are final and unique**: a folder holds at most one id, a browse never replaces
+   it, ids are unique across clients (uuid prefix) and processes (leases).
+9. **The reverse index is verified before use.**
+10. **Mirror completeness** (full tree): absence in the mirror is absence in the domain, as of
+    the entries applied.
 11. **The last-sync mark is monotone.**
-12. **An applied line means done.** An applied-log line for a peer entry exists only after all its ops were
-    applied, and a line for an own entry exists only for a record that still exists or whose entry is on the
+12. **An applied line means done**: a peer entry's line exists only after its effects are
+    durable; an own entry's line only for a record that still exists or whose entry is on the
     store.
-13. **Content-addressed names never change content.** This covers group bodies and pins. Bodies with
-    opaque ids are rewritten in place only by the process holding that path's per-key lock.
+13. **Nothing authoritative is ever discarded because it could not be decoded**: it is set
+    aside, with everything it may reference.
 
-### 4.2 Crash-consistency ordering (abstract)
+### 5.2 Durability order
 
-- **Referent before referrer.**
-  - Staged bytes before the staged manifest that names them.
-  - Group bodies before the mirror entry that promotion writes.
-  - A folder's new marker before removal of the old one.
-- **Release a referent only after its last referrer has switched.**
-  - Old staged bodies are released only after the new staged manifest is written.
-  - Staged bodies are released only after the published entry is written and the staged manifest is removed.
-  - Violated in `ensure_group_body`'s slow path and in truncate (F9).
-- **Commit before any local move.** The commit record is written into the staged manifest before
-  promotion. A crash before it re-uploads identical bytes (dedup makes that free), and a crash after it
-  replays only the local moves.
-- **Promotion order**: publish groups into the cache (hard link, else copy) → write the mirror entry → delete
-  the staged manifest → release the bodies. A concurrent reader finds whichever representation it lands on
-  still present, with one retry on ENOENT.
-- **Metadata**: record Intent → local half → Prepared (hand-off) → backend half → Executed → publish entry
-  → note cursor → delete record.
-- **Partial bodies**: write the empty record before the first byte; widen the record only after bytes land;
-  on eviction remove the body before the record.
-- **Own applied line before the backend put**, and a peer's applied line after its ops. A crash in the
-  first case leaves a line for an entry that is published later under the same key.
+Every authoritative write obeys [durable-queue](../algorithms/durable-queue.md) §3 (R1–R6). The
+local referent → referrer pairs it governs:
 
-### 4.3 Temporarily violated (who repairs)
+| Referent (durable first) | Referrer |
+|---|---|
+| staged bodies | the staged manifest naming them |
+| the staged manifest (at sync and close) | the WAL put record |
+| the manifest on the store | the Committed staged manifest |
+| the WAL record's `Executed` state | the promotion's removal of the staged manifest |
+| cache groups and the mirror entry of a promotion | the release of the staged manifest, then of its bodies |
+| a metadata op's local effects | its WAL record's `Prepared` state |
+| a peer entry's local effects | its applied line |
+| a lease | the first folder id minted from it |
 
-| Invariant / state | Violated during | Repaired by |
+Releases go the other way: the staged bodies an edit replaced are released after the new
+manifest is durable, and after every read handle on them has closed.
+
+### 5.3 Temporarily violated
+
+| Invariant or state | During | Repaired by |
 |---|---|---|
-| mirror completeness | a full-resync walk (stale entries remain until the sweep); lazy checkout always | the sweep, run only after a complete walk; lazy: the next pull of that folder |
-| folder index consistency | reparent in progress; crash mid-reparent | verification on read; `rebuild`; the resync index sweep |
-| referent-before-referrer for staged bodies | F9 window (not designed) | nothing: data loss |
-| unrecorded staged manifest | first write → close; crash before close | startup reconcile (`adopt_unrecorded`) |
-| WAL state behind reality | any crash | startup reconcile (§4.6 of 04): HEAD the entry, redo idempotent local halves, resume queues |
-| orphan staged body | crash between body creation and manifest write | orphan sweep after the grace |
-| orphan temp object | crash mid-replace | temp sweep (dead owner pid; mirror tree only, on demand) |
-| cache counts | other processes writing the same cache | re-anchored by the next full cap walk |
-| partial record torn | crash mid-rewrite | parses as "nothing held"; refilled |
-| applied line torn | concurrent or crashed append | the next append closes it; only that line is lost |
+| mirror completeness | a resync walk (stale entries until the sweep); always on a lazy tree | the sweep, after a complete walk only; the next pull of that folder |
+| folder-index consistency | a reparent; a crash in one | verification on read; rebuild; the resync sweep |
+| unrecorded staged edit | first write → close; a crash before close | owner start adoption |
+| WAL state behind reality | any crash | reconcile ([wal-and-journal](../algorithms/wal-and-journal.md) §4.7) and the upload job's state check ([04](../04-checkout-cache.md) §4.6) |
+| unnamed staged body | a crash between a body's creation and the manifest naming it; a deferred release | the owner-start sweep ([04](../04-checkout-cache.md) §4.10) |
+| Committed staged edit not promoted | a crash during an upload's tail | owner start promotes it |
+| temporary object | a crash mid-replace | the temporary sweep |
+| partial body | always, while its owner runs | removed at owner start |
 
-## 5. Ownership and concurrency
-
-### 5.1 Processes that share one domain's local state
-
-| Role | Instances | Runs |
-|---|---|---|
-| **Converge** (daemon parent) | one per machine | WAL reconcile over *all* own records + staged adoption; the peer poller; maintenance (applied prune, cap, metadata retry, deferred rescan); its own upload and metadata queues; the deferred job runner (resuming) |
-| **Frontend** (FUSE child per binding; File Provider or http-proxy group) | one or more | local mutations under its own locks; its own upload and metadata queues; promotion of what it uploaded; cache reads and fills; the IPC handler (feed, paging walk, resync generation stamp) |
-| **One-shot CLI** | any number, alongside the daemon | `sync`: reconcile, drain, peer apply or full rebuild; `import`; `export`; `cache --prune`; read-only `ls`/availability |
-| **Share server** | inside the http-proxy frontend | cache reads and fills only |
-| **Android app** | one process per boot (plus shell `tsync android` one-shots) | everything a frontend does + reconcile + maintenance, over the *lazy* checkout; no poller |
-
-### 5.2 Write roles per entity (as designed)
-
-| Entity | Writers | Arbitration |
-|---|---|---|
-| mirror entries (local ops) | the frontend that accepted the op | in-process metadata mutex |
-| mirror entries (peer ops) | converge; `tsync sync` | in-process metadata mutex |
-| mirror entries (resync / lazy pull) | `tsync sync --full`; the lazy checkout's lister | none (idempotent rewrite + mtime sweep) |
-| mirror entries (promotion, revert) | the process whose queue uploaded the file | in-process per-key lock |
-| folder-id index | whoever writes the folder entry; resync sweep; `rebuild` | none cross-process; verify-on-read |
-| chunk cache bodies, partial records | any process that reads (fill), promotes (link/copy) or caps | content addressing: two writers write identical bytes; atomic swap for whole bodies |
-| pins | frontend (make available offline, materialize) | idempotent; last deadline wins |
-| staged manifests and bodies | the frontend that accepted the write; converge / `sync` (discard or aside on peer ops, adopt at reconcile) | in-process per-key lock only |
-| WAL records | the process that recorded them; *any* process running reconcile | the queue claim gates rescans only |
-| applied log | uploaders and metadata queues of every process; converge / `sync` | none (append; torn-line tolerant) |
-| last-sync mark | converge; `sync` | atomic replace; forward-only |
-| resync generation | the IPC handler of the serving process | atomic replace |
-| export records | the `export` one-shot; `cache --prune` sweeps | one exporter per destination assumed |
-| kept walk | the IPC handler | best effort |
-| deferred logs | any process records; the claim holder runs | per-log advisory claim (kernel lock) |
-| client uuid | first process ever | create-if-absent (link) |
-| id leases | each process, once per block | create-exclusive |
-
-The only arbitration points that span processes:
-- create-if-absent on the uuid and on the leases;
-- the per-log claims on the WAL and the deferred logs;
-- the GC lockfile, which is outside this layout;
-- atomic whole-object replacement, which gives readers either the old object or the new one and never a
-  torn one.
-
-Everything else assumes that the split of duties keeps two processes off the same object. Readers may
-observe the following mid-change:
-- a staged manifest and a mirror entry both present during promotion (the staged one wins);
-- a partial body;
-- a folder whose reverse entry is stale;
-- a mirror mid-resync, which serves throughout: the walk rewrites in place, then the sweep runs.
-
-### 5.3 Where the model is violated (findings)
-
-- **F7 — several writers, per-process locks.**
-  - The metadata mutex and per-key locks are in-process. The mirror, the staged tree and the WAL are
-    written by converge, by every frontend and by `tsync sync` with no cross-process exclusion.
-  - Confirmed loss: converge applies a peer `Delete A` after checking that no staged edit exists; a FUSE
-    child then stages an edit to A; converge's discard removes the child's staged bytes. The designed
-    outcome is "ours publishes later".
-  - `cancel_upload` reaches only the caller's queue.
-  - A `tsync sync` reconcile can redo or resume a frontend's in-flight Intent or Prepared record, and can
-    adopt a staged manifest whose record the frontend has not yet written.
-  - Even within one process, a write does not take the metadata mutex.
-  - The model needs one of two things: a per-domain (or per-path) cross-process lock around peer
-    application, discard and reconcile, or a single writer process per domain.
-- **F8 — no fsync** on staged manifests, WAL records, partial records or deferred logs. The authoritative
-  entities (§6) survive a process crash but not power loss: after a power loss a zero-length staged manifest
-  is set aside, and a torn WAL record decodes as an empty Intent that reconcile deletes. Export and the local
-  backend do fsync.
-- **F9 — release before switch.** The staged-body replacement releases the old bodies before the new staged
-  manifest is written. A crash in that window leaves a manifest naming a missing body, and the uploader then
-  abandons the whole edit as "nothing staged".
-- **F10 — set-aside manifests do not protect their bodies.** The orphan sweep's reference set is built only
-  from decodable manifests, so `cache --prune` reaps bodies that a set-aside manifest names once they are
-  older than the grace. "Set aside, never deleted" therefore does not cover the data.
-- Related:
-  - **F5**: the dedupe set is loaded once per process, so the daemon and `tsync sync` can re-apply each
-    other's entries.
-  - **F4**: the size-capped applied-log prune can drop the newest shard.
-  - **G7**: Android never resumes deferred logs a killed process left.
-
-## 6. Derived vs authoritative
+## 6. Authoritative or derived
 
 | Entity | Class | Rebuilt from |
 |---|---|---|
-| staged manifests + bodies (incl. set-aside) | **authoritative: sole copy of user data** | never |
-| WAL records | **authoritative: sole record of owed work** | never. Only an unrecorded staged manifest is re-derived (adoption). |
-| deferred job logs | **authoritative: sole record of owed replication** | never. A dropped job needs `tsync mirror`. |
-| client uuid, id leases | **authoritative identity** | never |
-| folder ids held in the mirror | authoritative once minted (final) and published; otherwise a projection of store markers | resync walk (store's id wins) |
-| applied-entries log | authoritative history (dedupe, feed) | not rebuildable; loss ⇒ re-apply (idempotent) and "stale" feed |
-| last-sync mark, resync generation | authoritative bookkeeping | loss ⇒ full rebuild / re-list |
-| export records | authoritative about destination progress only | loss ⇒ re-export |
-| namespace mirror | projection of the store's namespace + applied journal | full resync walk (full); pulls (lazy) |
-| reverse folder index | projection of mirror folder ids | `rebuild` (walk mirror) |
-| removed-id records | history; not rebuildable | loss ⇒ some peer ops under old ids become unnameable |
-| chunk cache, partial records | projection of backend chunks | any read |
-| pins | user intent, cheap to lose | re-pin |
-| kept walk, scratch, temp objects, spools | disposable | re-walk / nothing |
+| staged manifests, staged bodies, set-aside manifests | **authoritative: sole copy of user data** | never |
+| WAL records, set-aside records | **authoritative: sole record of owed work** | never; only an unrecorded staged edit is re-derived (adoption) |
+| deferred job logs | **authoritative: sole record of owed replication** | never |
+| client uuid, leases | **authoritative identity** | never |
+| pins | authoritative user intent | re-pin |
+| applied log | authoritative history | not rebuildable; loss causes re-application (idempotent) and a stale feed |
+| last-sync mark, resync generation, pause flag | authoritative bookkeeping | loss causes a rebuild, a re-list, a lost pause |
+| export records | authoritative about the destination only | re-export |
+| folder ids in the mirror | authoritative once minted here, until published; otherwise projection of store markers | resync (the store's id wins) |
+| removed-id records | history | not rebuildable; loss makes some old ops unnameable |
+| namespace mirror | projection of the store and the applied journal | resync (full); pulls (lazy) |
+| reverse folder index | projection of the mirror | rebuild |
+| chunk cache | projection of backend chunks | any read |
+| kept walk, scratch, temporaries, spools | disposable | nothing |
 
-**Lazy vs full.** The two checkouts differ in what the mirror promises, not in its entities:
+## 7. Full and lazy trees
 
-- **Full checkout** (Linux and macOS daemon):
-  - The mirror is complete: absence is an answer.
-  - It is kept current by the converge poller.
-  - It is rebuilt by a full resync.
-  - The applied log carries own and peer entries, and the last-sync mark is maintained.
-- **Lazy checkout** (Android):
-  - The mirror is a cache of folders the user has opened: absence means "not fetched".
-  - It is refreshed only by listing a folder, and pruning is guarded by owed metadata and by complete reads.
-  - There is no poller, no peer application and no resync (it is refused).
-  - The applied log holds *own* entries only, and the last-sync mark is never written.
-  - Staged edits, the WAL, identity and deferred logs are exactly as on the full checkout.
-  - Hard links may be unsupported, so promotion copies groups instead of linking them.
-  - The app keeps its own handover area and camera-backup records outside this layout (the app's orphan
-    sweep uses a 24 h grace).
+The two trees differ in what the mirror promises, not in their entities.
 
-## 7. Growth and reclamation
+- **Full** (desktop hosts): the mirror is complete; the owner's journal poller keeps it current;
+  a resync rebuilds it; the applied log carries own and peer entries; the last-sync mark is
+  maintained.
+- **Lazy** (Android): the mirror caches the folders the user has opened; absence means "not
+  fetched"; it is refreshed by pulls ([android](../frontends/android.md) §3.2), each overlaid
+  with the owed work touching the folder and never skipped because of it, and a pull that cannot
+  read every child changes nothing ([04](../04-checkout-cache.md) §3.5); there is no poller, no peer application
+  and no resync; the applied log holds own entries only and the last-sync mark is never
+  written. Staged edits, the WAL, identity and deferred logs are exactly as on the full tree,
+  and the app is their owner, resuming them at every start. Hard links may be unsupported, so
+  promotion may copy.
 
-| Grows with | Bound / reclaimer |
+## 8. Growth and reclamation
+
+| Grows with | Bound, reclaimer |
 |---|---|
-| chunk cache: every read, read-ahead, promotion | cap by coldest mtime (reads touch at most once per minute), excluding pinned bytes; run after uploads and periodically, since reads alone grow it. No cap configured ⇒ unbounded. |
-| pins | lapsed pins dropped by the cap walk |
-| staged edits: user writes while not yet uploaded | uploads + promotion; orphan bodies by the on-demand sweep (grace). **Set-aside manifests are never reclaimed.** |
-| WAL: owed work | discharge; offline, it grows with the user's ops (by design) |
-| applied log: every entry handled | prune by age (30 days) and total size (64 MiB); F4: the size rule can drop the newest shard |
-| removed-id records: every path that held a folder | **unbounded**: `rebuild` does not prune them (04 §9.4) |
-| id leases: one per process start that mints | **unbounded**: never removed |
-| export records | deleted on completion; on-demand sweep past 30 days |
-| temp objects (crash leftovers) | dead-owner sweep, on demand, mirror tree only; temps in other areas are not swept |
-| deferred logs: writes while a target lags | drained by the runner; degraded past 100 000 |
-| scratch / kept walk | wiped by resync; the walk is one object per domain |
+| chunk cache: reads, prefetch, promotion | the cap by coldest mtime, excluding pinned bytes; after uploads and periodically. No cap configured: unbounded by the user's choice |
+| partial bodies | removed at owner start; counted by the cap meanwhile |
+| pins | lapsed pins removed by the cap walk |
+| staged edits | upload and promotion; unnamed bodies by the owner-start sweep |
+| set-aside manifests and records | reported; removed only by an explicit user request |
+| WAL, deferred logs | discharge; they grow with owed work while offline, by design |
+| parked records | retried; reported until they succeed |
+| applied log | age only ([wal-and-journal](../algorithms/wal-and-journal.md) §4.8) |
+| removed-id records | retention of [04](../04-checkout-cache.md) §4.9 |
+| id leases | [03](../03-journal-sync.md) §2.1 (never reusing a block) |
+| export records | deleted on completion; age sweep ([05](../05-ops-config.md)) |
+| temporaries | the temporary sweep |
+| scratch, kept walk | wiped by resync; one walk per domain |
 | conflicted copies | user-visible files; never reclaimed automatically |
-| in-process tables (memo, partial chains, per-key locks) | memo FIFO 1024; partial-publish chains live for the process (04 §9.7) |
+| pending claim confirmations | removed once confirmed |
+| in-memory state | rebuilt at owner start; handles and retentions bounded by the frontends' open files |
 
-## 8. Mapping to the current encoding
+## 9. Encoding
 
-This is the only section with concrete names. `<C>` = `<cache_root>/<domain>`, and `<D>` = `<data_dir>`.
+Every optional field and optional file has a stated meaning when absent
+([04](../04-checkout-cache.md) §2); no operation requires rewriting a valid existing file.
 
-| Abstract entity | Current representation | Spec |
-|---|---|---|
-| folder entry | a directory under `<C>/manifests/` (escaped leaf) + `.tsync-dir` JSON marker `{dir,name,id}` | [04 §2.2–2.3](../04-checkout-cache.md) |
-| name record | `.tsync-name` inside an escaped directory | 04 §2.3, §4.1 |
-| file entry | binary manifest file at `<C>/manifests/<escaped path>` | 04 §2.3; [02 §2](../02-remote-model.md) |
-| reverse folder entry | `<C>/folders/<id>` JSON `{parent,name}` | 04 §2.3, §4.13 |
-| removed-id record | `<C>/folders/by-path/<md5(key)>` = id | 04 §4.13 |
-| group key / body | `<C>/chunks/<3-char shard>/<xxh3 pair of member keys>` (sparse file) | 04 §2.1–2.2; [01 §2](../01-core.md) |
-| partial record | `<body>.manifest` text `i a b` lines | 04 §2.3, §4.4 |
-| pin | `<body>.pin` empty file; mtime = deadline | 04 §2.3 |
-| staged manifest | `<C>/staged/manifests/<escaped path>` JSON v2 (`slots`/`whole`, `published` = commit record) | 04 §2.3 |
-| set-aside manifest | `<same>.bad` | 04 §2.2 |
-| staged body | `<C>/staged/chunks/<16-hex uuid>`, `<C>/staged/whole/<uuid>` | 04 §2.2 |
-| WAL record | `<D>/journal-pending/<domain>/<entry key>` JSON `{state,attempts,ops,lastError}` | 04 §2.3; [03 §2.8](../03-journal-sync.md) |
-| WAL claim | `<D>/journal-pending/<domain>.owner` (lockf) | 04 §2.2 |
-| entry key | `%013d-<uuid>` | 03 §2.2 |
-| applied log | `<C>/applied/<YYYY-MM>.log`, newline-led `key\tops-json` | 03 §2.7 |
-| last-sync mark | `<D>/last-sync-<domain>` | 03 §2.6 |
-| resync generation | `<D>/resync-<domain>` (ms timestamp) | [07 §2.2, §2.7](../07-daemon-cli.md) |
-| export record | `<C>/exports/<xxh3(dst) pair>` text header + index lines | [05 §2.5](../05-ops-config.md) |
-| kept walk | `<C>/scratch/.tsync-list-all` (header line + JSON lines) | 07 §2.6 |
-| frontend scratch | `<C>/scratch/<escaped path>` | 04 §2.2 |
-| temp objects | `.tsync-tmp-<pid>-<seq>.tmp` beside the target | 04 §2.1 |
-| listing spools | `<cache_root>/{import,mirror,rsync}/…` (pid-owned temp suffix) | 05 §2.5 |
-| deferred job log | `<D>/deferred-pending/<domain>/<escaped target>/` + `.owner` claim | [06 §2.6, §4.4](../06-backends.md) |
-| client uuid | `<D>/client-uuid` (32 hex) | 03 §2.1 |
-| id lease | `<D>/id-leases/<hex block>` (empty file) | 03 §2.1 |
-| folder id | `<12 hex of uuid>-<hex counter>`; root `.tsync-root`, trash `.tsync-trash` | 03 §2.1 |
+| Entity | Specified in |
+|---|---|
+| mirror entries, folder, name and own markers | [04](../04-checkout-cache.md) §2.3 |
+| reverse entries, removed-id records | [04](../04-checkout-cache.md) §2.4 |
+| staged manifests, set-aside names | [04](../04-checkout-cache.md) §2.5 |
+| staged bodies | [04](../04-checkout-cache.md) §2.6 |
+| cache bodies, partial bodies, pins | [04](../04-checkout-cache.md) §2.7 |
+| WAL records, set-aside records | [04](../04-checkout-cache.md) §2.8 |
+| queue log layout, record names, submissions, re-keying | [durable-queue](../algorithms/durable-queue.md) §4.1–§4.2, [04](../04-checkout-cache.md) §2.8 |
+| pending claim confirmations | [04](../04-checkout-cache.md) §2.9 |
+| applied log, last-sync mark, entry keys, client uuid, leases | [03](../03-journal-sync.md) |
+| deferred job bodies | [06](../06-backends.md) |
+| export records, spools | [05](../05-ops-config.md) |
+| ownership lock, pause flag, resync generation, kept walk | [07](../07-daemon-cli.md) |
+| temporary names, leaf escaping | [01](../01-core.md) |
 
-## 9. Open questions
+## 10. Conformance
 
-1. **Cross-process exclusion (F7).** Is the intended model "one writer process per domain", or "many
-   writers plus a per-domain lock"? The current code is neither. The WAL claim protects only recovery rescans,
-   and `tsync sync` reconcile ignores it.
-2. **Durability (F8).** Which entities must survive power loss? At least staged manifests, WAL records and
-   deferred logs are authoritative and would need data-then-rename ordering with fsync.
-3. **Staged body release order (F9).** Should old bodies be released only after the new manifest lands,
-   leaving an orphan for the sweep on a crash, as §4.2 states?
-4. **Set-aside manifests (F10).** Should they count as referrers in the orphan sweep? Should they ever be
-   surfaced to the user or reclaimed?
-5. **Undecodable WAL records.** They decode as an empty Intent and are deleted by reconcile (04 §9.9). This
-   quietly discards authoritative data, unlike the staged tree's set-aside rule.
-6. **Removed-id records and id leases grow without bound.** What retention keeps ops nameable without
-   growing forever?
-7. **Resync generation writer.** It is stamped only by the IPC `full_resync` action. A CLI
-   `tsync sync --full` records rebuild findings in the applied log instead and leaves the generation alone.
-   Is the generation meant to change on every rebuild? 05 §4.7 also says the rebuild clears "applied entries
-   and scratch", but the code clears only scratch.
-8. **Staged manifest identity is a path.** A cross-process rename of a staged file races a write to the
-   same path (04 §9.13). Would a stable file id make ownership clearer?
-9. **Dedupe and the feed share one log (F4/F5).** Pruning for feed size removes dedupe history. Should dedupe
-   have its own bound, tied to the journal's retention instead?
-10. **Android deferred logs (G7).** Jobs a killed process leaves are recorded but never resumed on that
-    device.
+An implementation MUST exhibit the following model-level properties; the operation-level ones
+are in [04](../04-checkout-cache.md) §6 and
+[read-path-and-cache](../algorithms/read-path-and-cache.md) §8.
+
+- Removing the whole chunk cache, running the cap at 0, a resync and a lazy prune leave every
+  staged edit and set-aside manifest, with its bodies, intact.
+- A second process never writes the domain's local state while an owner holds the lock, other
+  than submissions and export records; its reads never observe a torn object.
+- After any crash, owner start leaves no partial body, no unnamed staged body, no Committed staged
+  edit and no staged edit without a WAL record.
+- The last-sync mark never moves backwards, and an applied line exists only for work whose
+  effects are durable.

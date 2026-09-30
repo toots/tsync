@@ -1,677 +1,613 @@
-# Garbage collection of unreferenced chunks
+# Retention and garbage collection
 
-A resumable copying collector that marks by *moving*, run against a domain's main store while
-unaware writers keep writing. It is preceded by retention (expiry), which removes the references
-that make chunks garbage. This file describes the algorithm independently of the current code;
-section 10 maps it onto the implementation. Source references are at commit `4c32fa96`.
+This file owns retention (expiry and purge: removing the references that make storage garbage) and
+garbage collection of unreferenced chunks, including the **collection interlock** that every writer
+publishing a chunk reference goes through. Entities and invariants are in
+[data-model/backend.md](../data-model/backend.md); byte formats and key spellings in
+[02-remote-model.md](../02-remote-model.md); the operator-facing operations (`expire`, `purge`, `gc`,
+their options and output) in [05-ops-config.md](../05-ops-config.md). Implementation notes:
+[ocaml/algorithms/gc.md](../ocaml/algorithms/gc.md).
 
 ---
 
 ## 1. Problem and goals
 
-File content is stored as immutable, content-addressed chunks. A chunk's name is a digest of
-its bytes, and chunks are deduplicated across every file of a domain. Files are *manifests*,
-small objects that list chunk names. Overwriting, deleting or expiring a manifest never deletes
-chunks, because another manifest may name the same chunk. Garbage accumulates, and something has
-to find and delete the chunks no manifest names.
+File content is stored as immutable, content-addressed chunks, deduplicated across every file of a
+domain. Files are manifests that list chunk keys. Overwriting, deleting or expiring a manifest never
+deletes chunks, because another manifest may name the same chunk. Garbage accumulates; something must
+find and delete the chunks nothing references, while writers that know nothing about it keep writing.
 
 Goals:
 
-- **G1, no loss.** A chunk named by any manifest that exists when the collection ends, or is
-  published later from knowledge acquired before it, must not be deleted.
-- **G2, reclaim.** A chunk that no manifest names when the collection opens, and that nobody
-  writes again, is deleted from the main and from every store that mirrors it.
-- **G3, oblivious writers.** Clients that write the domain must not have to know that a
-  collection is running, and must not coordinate with it beyond one cheap duty at publish time.
-  Some clients are other machines, some are old binaries, and some reach the store through a
-  proxy.
-- **G4, resumable and abandonable.** A collection can take hours and be interrupted at any point
-  by a crash, a time budget or an operator. It must resume from where it got to without redoing
-  finished work, and it can be called off with everything put back.
-- **G5, cost proportional to data, not layout.** Work is proportional to the number of live
-  manifests plus live chunks on the main, and to the garbage (not the layout) on every other
-  store. Copies are never walked or listed.
+- **Goal 1, no loss.** A chunk named by any manifest or version that is visible on a main, at any time, is
+  never deleted from that main. A chunk a collection deletes from a copy while a manifest there names it
+  is put back on that copy before the collection's generation settles (§5.7).
+- **Goal 2, reclaim.** A chunk that no manifest or version names when a collection opens, and that nobody
+  references again before it is examined, is deleted from the collected main and from every copy the
+  collecting client lists.
+- **Goal 3, oblivious writers.** Clients do not have to know a collection is running. Their one duty is to
+  publish references through the interlock (§5.4), which the store driver of the collected main
+  performs on their behalf.
+- **Goal 4, resumable and abandonable.** A collection can take hours and be interrupted at any point by a
+  crash, a time budget or an operator. It resumes where it got to, and can be called off with everything
+  put back.
+- **Goal 5, cost proportional to data.** Work is proportional to the live manifests plus live chunks on the
+  collected main, and to the garbage on every other store. Copies are never walked or listed.
 
 Non-goals:
 
-- Reclaiming garbage created *during* a run. It lands in the surviving space and waits for the
-  next run.
-- Collecting a store that is not a local filesystem. Object stores only receive deletes. A domain
-  whose main is an object store can be expired but not collected.
-- Cross-domain deduplication. Chunk spaces are per domain, so a domain can be dropped with one
-  prefix delete.
-- Deciding what to keep. That is retention's job (section 4.7), and GC only follows references.
+- Reclaiming garbage created during a run: it lands in the surviving space and waits for the next run.
+- Collecting a store that is not a filesystem local to the collecting host. Object stores only receive
+  deletes; a domain whose mains are all object stores is expired but not collected.
+- Cross-domain deduplication (a domain is dropped with one prefix delete).
+- Deciding what to keep. That is retention (§4); a collection only follows references.
+
+---
 
 ## 2. System model and assumptions
 
-- **A1, main.** The collected store (the *main*) is a directory tree on one filesystem. It offers
-  atomic rename of a file or directory within that filesystem. Renaming a missing source fails
-  with *not-found*, and renaming a directory onto a non-empty directory fails. Its object `put` is
-  atomic: a temp file is renamed into place, and the writer creates missing parent directories
-  first.
-- **A2, content addressing.** Two chunks with the same name hold the same bytes. A re-upload of a
-  name is always harmless to the bytes. It does refresh the object's modification time.
-- **A3, no transactions.** Every store operation is atomic for one object at most. There is no
-  multi-object transaction and no lock shared between writers and the collector, except the
-  optional one proposed in section 8.
-- **A4, writers.** Any number of writers, on this machine, other machines, or behind an HTTP
-  proxy, upload chunks and publish manifests concurrently with the collection. A writer may:
-  - skip uploading a chunk it believes is present (a session memo, a presence check, or a chunk
-    inherited from the manifest it is rewriting);
-  - hold chunk names for an unbounded time between uploading and publishing (large uploads,
-    retries);
-  - be a peer that renames or copies manifests without touching chunks.
-- **A5, copies.** Other members of the domain hold copies. *Replica* and *backfill* members are
-  filled asynchronously from the main by an ordered, durable job queue. That queue is owned by
-  the daemon, not by the collector's process. *Archive* (read-only) members hold different
-  content and are never written. Additional mains, if any, are written synchronously alongside
-  the first.
-- **A6, cloud deleters.** Some object-store copies have a server-side function triggered by that
-  bucket's object-created notification. Delivery is at-least-once and unordered, and nothing
-  redelivers a missed event.
-- **A7, failures.** Crash-stop. The collector's durable state is only what lies on the main, so a
-  crash loses no more than in-memory progress. A crashed collector's lock is released by the
-  kernel.
-- **A8, one collector per main.** Exclusion is an advisory kernel lock on a file in the main's
-  own tree. This holds only for processes on the host that owns the filesystem (see gap N7).
-- **A9, clocks.** Safety of the current design uses no clock. Clocks pace checkpoints and
-  progress output and name the run. The proposed fixes in section 8 use store-assigned
-  modification times, compared only against another store-assigned time on the same store.
-- **A10, reads.** Reading a chunk does not keep it alive. A reader must find a chunk wherever it
-  currently is.
+- **A1, collectable main.** A main is **collectable** iff it is a filesystem store whose root is on a
+  filesystem local to the collecting host (not a network filesystem). It offers atomic rename of a file
+  or directory within the filesystem (renaming a missing source fails with *not-found*), atomic object
+  put (temporary file renamed into place, missing parent directories created first), and host-level
+  advisory locks released by the kernel when their holder dies. A collection MUST refuse a main that is
+  not collectable.
+- **A2, content addressing.** Two chunks with the same key hold the same bytes; a re-upload is harmless
+  to the bytes and refreshes the object's modification time.
+- **A3, no transactions.** Store operations are atomic for one object at most. The only cross-process
+  exclusion is the host-level locking of §5.4, which exists only on the collected main's host.
+- **A4, writers.** Any number of writers, on this host or elsewhere (directly, or through an http-proxy
+  served from this host), upload chunks and publish references concurrently with a collection. A
+  writer may skip uploading a chunk it believes present (a memo, a presence check, a chunk inherited
+  from the manifest it rewrites), may hold chunk keys for an unbounded time before publishing, and may
+  publish references without touching chunks (rename, copy, revert, version snapshot).
+- **A5, reach.** Every write onto a collectable main passes through that store's driver on the main's
+  host: by a process on that host, or by an http-proxy server on that host acting for a remote client.
+  A filesystem main MUST NOT be written by several hosts through a shared network mount.
+- **A6, copies.** Replicas and backfills are filled from the mains by ordered, durable job logs, one per
+  client per copy, owned by that client's domain owner ([algorithms/replication.md](replication.md)).
+  Archives are never written. Other mains are written synchronously.
+- **A7, cloud deleters.** Some object-store copies have a bucket function triggered by object-created
+  notifications. Delivery is at-least-once and unordered; nothing redelivers a missed event.
+- **A8, failures.** Crash-stop. The collector's durable state is what lies on the collected main plus the
+  owner's durable records of deletions owed to copies, so a crash loses only in-memory progress.
+- **A9, clocks.** Safety never compares clocks of two machines. Durations are measured with a clock
+  that counts time spent suspended. The only time comparisons are between two store-assigned
+  modification times on one store (trash and share ages, §4) and between the run's recorded start and the collecting host's
+  own clock (§5.5).
+- **A10, reads.** Reading a chunk does not keep it alive; a reader must find a chunk wherever it is.
+
+---
 
 ## 3. State
 
-Durable, on the main only (never replicated, because a copy cannot act on it):
+Durable, on the collected main only (never replicated):
 
 | State | Content | Notes |
 |---|---|---|
-| Surviving space **S** | the live chunk directory, by name | Where every writer writes, whatever it knows. |
-| Outgoing space **F** | exists only while a run is open | The whole chunk space as it was at open, minus what has been promoted since. At the end of marking, F *is* the garbage. |
-| Run record **R** | `phase ∈ {Opening, Marking, Closing, Abandoning}`, `started` (open time), `cursor` | Present iff a run is open. The cursor is the last finished item **by name** (a namespace or a shard), never a position, because resuming re-lists and a changed store shifts positions. |
-| Lock file | beside R | Kernel advisory lock. Its content is irrelevant. |
+| Surviving space **S** | the live chunk directory | where every writer writes |
+| Outgoing space **F** | exists only while a run is open | the chunk space as it was at open, minus what has been promoted since; after marking, F is the garbage |
+| Run record **R** | phase ∈ {Opening, Marking, Closing, Abandoning}, start time, cursor, and from Closing on the run's **generation** | present iff a run is open. The cursor is the last finished unit **by name** (a namespace or a shard), never a position |
+| Collection generation **G** | a counter; even = settled, odd = deletions on copies in flight | persists across runs; absent reads as 0. Written only by the collecting owner (§5.6) |
+| Lock file | beside R | carries the two host-level locks of §5.4; its content is irrelevant |
 
-Durable, on copies:
+Durable, elsewhere:
 
-| State | Content |
-|---|---|
-| Delete request Q(run, name) | A list of chunk names for a cloud deleter. Keyed by run *and* batch, so a later run cannot overwrite an unconsumed one. Deleted by the function only after every key went. |
+| State | Where | Content |
+|---|---|---|
+| Owed copy deletions | the collecting owner's local state ([algorithms/replication.md §4.8](replication.md#48-deletions-on-copies-outside-the-worker)) | chunk keys to delete on that copy, with the run and shard they came from, and pending discards until consumed |
+| Discard requests | on a copy with queued deletion | chunk keys for the bucket function, named by run and shard |
 
-Volatile, in the collector:
+Volatile, in every process that holds them (what the collection must be robust against):
 
-- The work list of the current phase: namespaces, or shards.
-- Two concurrency pools, separated by nesting depth: an outer one for roots and an inner one for
-  chunks. Sharing one pool deadlocks.
-- A pending batch of doomed keys and their shards, plus the time of the last flush.
-- Counters.
+- Cached "is a run open" bits (readers use them only to order lookups).
+- **Presence memos**: beliefs that a chunk is present on a member (a writer's dedup memo, a deferred
+  worker's memo of chunks it confirmed on a copy). Each entry is tagged with the generation it was
+  confirmed under (§5.6).
 
-Volatile, in writers and readers (these are what the collector must be robust against):
+---
 
-- A cached "is a run open" bit with a TTL. Readers use it only to order lookups.
-- Session memos of chunk names believed present. This includes the writer's dedup memo and each
-  copy's memo of chunks it has confirmed.
+## 4. Retention
 
-## 4. The algorithm
+Retention removes references. It runs through the domain's composite (reaching every main and queueing
+deletes to copies), deletes no chunks, and proceeds in this order, so that nothing it is about to purge
+still counts as a reference to what follows: trash, versions, journal, shares. Each step is idempotent;
+an interrupted expiry is simply run again.
 
-### 4.1 Idea
+### 4.1 Trash
 
-Opening renames S to F in one atomic step. From then on, S starts empty and grows two ways:
+Expiry takes a cutoff time. For each folder id named by at least one trash entry:
 
-- writers, who know nothing, write into S;
-- marking *moves* every chunk a manifest names from F back to S.
+1. Read the folder's anchor.
+2. **Stale entries.** If the anchor says the folder is live (not in trash), every entry naming it is
+   stale: delete those older than the cutoff, alone, never the subtree. Log each.
+3. **Not yet expired.** If any entry naming the folder is younger than the cutoff, skip the folder: it was
+   trashed again recently.
+4. **Purge.** Otherwise (anchor "in trash", or no anchor), purge the folder (§4.2), then delete every
+   entry naming it.
 
-When marking ends, whatever is still in F is named by no manifest that marking saw and was not
-rewritten by any writer. It is the garbage, listed by name rather than inferred from a set
-difference. Deleting it is a directory walk of F plus a per-name check.
+An entry's age is its store-assigned modification time. Purging one named trashed folder on demand
+(any age) is the same procedure from step 1, with step 3 skipped.
 
-Why a move and not a link or copy: a move needs nothing beyond rename. An earlier link-based mark
-fell back to rewriting every live chunk on filesystems without hard links. A move also leaves the
-garbage behind as the residue, and it makes promotion idempotent and exclusive: exactly one
-rename of a given source succeeds.
+### 4.2 Purge
 
-Why the whole space at once: one rename puts every pre-existing chunk "at risk" atomically, with
-no per-chunk bookkeeping and no in-memory live set. S becomes the record of what has been marked,
-so a resumed run needs no mark table.
+A purge deletes a trashed folder's subtree so that a crash at any point leaves the remainder reachable
+from the trash entry:
 
-### 4.2 Referenced
+1. Walk the subtree from the folder, following **filed** markers only (a subfolder moved out of the
+   trashed tree is not part of it).
+2. Visit namespaces **deepest first**. Immediately before deleting a namespace, re-read the trashed
+   folder's anchor; if it no longer says "in trash" (a concurrent restore), stop and report. Then delete
+   the namespace's manifests, folder markers and folder index. **Never delete the anchor**: it stays as a
+   tombstone ([data-model/backend.md](../data-model/backend.md) §2.7).
+3. Delete the trash entries naming the folder, last.
 
-A chunk is *referenced* for this run iff it is named by a manifest object that is present in some
-**namespace** of the main when marking lists that namespace. Namespaces are:
+Restore and purge of the same folder are not atomic with respect to each other: a restore landing
+between the re-read of step 2 and that namespace's deletes loses that namespace. Operators SHOULD NOT
+restore a folder while its expiry runs; the window is one namespace's deletes.
 
-- every folder namespace in the manifest area. This is by directory enumeration, not tree
-  reachability, so trashed subtrees, disowned or orphaned folders and unanchored namespaces all
-  keep their chunks;
-- every version group in the version area.
+A deleted file with versioning on is still referenced by its versions until they expire. With
+versioning off, nothing references it once its manifest is deleted.
 
-Folder markers, anchors and indexes name no chunks. Journal entries and share records name paths
-or manifest keys, never chunks. A manifest body that will not parse aborts the run, because
-skipping it would delete a file.
+### 4.3 Versions
 
-References the collector *cannot* see, which must be covered by the writer duty (section 4.4):
+Delete every version whose timestamp is older than the cutoff, then any group directories left empty
+on filesystem stores.
 
-1. A manifest published after its namespace was listed, or into a namespace created after
-   enumeration.
-2. Chunks uploaded, or believed present, by a writer that has not published yet. This covers
-   in-flight uploads and staged edits that inherit chunk names from an older manifest, on this
-   or any other client.
-3. Manifests moved or copied between namespaces during marking: a rename is copy-then-delete,
-   from a namespace not yet listed to one already listed.
+### 4.4 Journal
 
-Copies are never consulted for references. The main's manifest set is authoritative for the
-domain.
+Journal entries hold no chunk references. Expiry MUST NOT delete an entry younger than the retention
+horizon H, nor the entry the cursor names, whatever cutoff it was given
+([algorithms/wal-and-journal.md §4.8](wal-and-journal.md#48-retention-horizon-bridging-and-rebuild)).
 
-### 4.3 Collector, phase by phase
+### 4.5 Shares
 
-The phase is always recorded in R **before** the step it names. Resuming from any recorded phase
-redoes, idempotently, whatever that step had started.
+On each member holding shares for the domain (behind the write guard):
+
+- delete every share whose body names this domain and whose expiry has passed, then the token-keyed
+  artifacts of each deleted share;
+- delete share artifacts (either kind) whose modification time is older than the cutoff: they are
+  rebuildable, whichever domain built them.
+
+A share body that does not parse is left in place and reported.
+
+### 4.6 Orphan namespaces
+
+An **orphan namespace** is one holding at least one child object that no walk from the root or from a
+trash entry reaches through filed markers. Orphans arise from a move or restore cut short and never
+resumed. They are GC roots (§5.3), so they keep their chunks alive until adopted.
+
+Integrity repair ([05-ops-config.md](../05-ops-config.md)), which enumerates every namespace and walks
+the tree, MUST adopt each **top-level** orphan (one whose anchor's parent is not itself an orphan) once
+its anchor and every object in it are older than `orphan_grace`: write a trash entry for it (name from
+its anchor, or its id; path equal to that name, at the root), then anchor it "in trash". It is then an
+ordinary trashed folder: restorable, and purged by expiry. A client that later completes the interrupted
+placement re-anchors the folder live; the adoption's entry then becomes stale and expiry deletes it.
+
+A namespace holding only its anchor is a tombstone, not an orphan. Repair MAY delete a tombstone once
+its full enumeration found no marker naming that id.
+
+---
+
+## 5. Collection
+
+### 5.1 Idea
+
+Opening renames S to F in one atomic step. From then on S starts empty and grows two ways: writers write
+into S as always, and marking **moves** every chunk a reference names from F back to S. When marking
+ends, whatever is still in F is named by no reference and was not rewritten: it is the garbage, listed by
+name. Deleting it is a walk of F plus a lookup per candidate.
+
+A move rather than a link or copy: it needs only rename, promotion is idempotent and exclusive (exactly
+one rename of a source succeeds), the garbage is the residue, and S itself is the record of what was
+marked, so a resumed run needs no mark table. One rename of the whole space puts every existing chunk
+at risk atomically, with no per-chunk bookkeeping.
+
+### 5.2 Which mains are collected, and who is told
+
+- **Every collectable main is collected by its own run**, on the host that owns its filesystem, by the
+  owner of the domain on that host ([07-daemon-cli.md](../07-daemon-cli.md)). Runs on two collectable
+  mains are independent.
+- The run on the **first collectable main in role order** also deletes on copies: every replica and
+  backfill in the collecting client's configuration. Copies other clients configure are theirs to
+  collect.
+- A main that is not collectable is never told deletes: it takes writes synchronously, and a delete
+  decided elsewhere cannot be ordered with them. Its garbage is not reclaimed.
+- Archives are never written.
+
+### 5.3 What is referenced
+
+A chunk is **referenced** for a run iff it is named by a manifest body that is present in a
+**namespace** of the collected main when marking lists that namespace, or that is published through the
+interlock (§5.4) while the run is open. Namespaces are every directory of the manifest area (live,
+trashed, orphaned or tombstone folders alike) and every version group of the version area.
+
+Marking is by **presence**, not reachability from the root. Reachability is not stable while folders
+move (a folder mid-move is unreachable), the store offers no snapshot to compute it on, and removing
+references is retention's job, not the collector's. Orphans are handled by adoption (§4.6).
+
+Folder markers, anchors, trash entries and folder indexes name no chunks; journal entries and shares
+name paths or locations, never chunks.
+
+### 5.4 The collection interlock
+
+Every write that makes a chunk reference visible on a collectable main MUST go through the **reference
+gate** of that main's store driver. A reference-publishing write is any put or server-side copy whose
+destination lies in the manifest area or the version area. This covers, among others: publishing an
+upload, a file rename (copy then delete), an in-domain copy or move, re-publishing a cached manifest,
+reverting to a version, restoring a deleted file, a version snapshot, import, mirror or repair writing
+onto the main, a copy refilling a main, and every such write an http-proxy listener performs for a remote
+client. A chunk put received by a listener is a writer path too: it goes through the same driver and
+lands in S like any other writer's. Because the gate sits in the driver of the store that has the spaces, no caller can bypass it.
+
+The main's lock file carries two independent host-level locks:
+
+- the **run lock**, exclusive, held by the collector for the whole of its session: at most one collector
+  per collectable main. It is a POSIX record lock on the lock file.
+- the **publish lock**, a reader/writer lock that does not conflict with the run lock: shared by the
+  gate, exclusive by the collector during opening (§5.5) and during each shard's doom step. A gate MUST
+  bound its wait for the shared side ([algorithms/failure-model.md](failure-model.md)); a timeout is a
+  transient failure of the write.
+
+Within one process, collector exclusion MUST be a check-and-set with no suspension between the check and
+the set, taken before the run lock (a process's own record locks merge and would not exclude a second
+session in the same process).
+
+**The gate.** For a write naming chunks *C* (read from the body being put, or from the source body of a
+copy):
+
+```
+gate(write, C):
+  take the publish lock, shared
+  if R is present on this main (presence, whatever its body):
+     for c in C: promote(c)
+  for c in C: require c present in S           -- a stat, not a belief
+  if any c is missing:
+     release; fail the write permanently with "missing chunks" naming them
+  perform the write
+  release
+
+promote(c):
+  rename F/shard(c)/c -> S/shard(c)/c
+  on not-found: ensure S/shard(c) exists; retry once; a second not-found is not an error
+```
+
+A body in the manifest or version area that is not a manifest (a folder marker, an anchor, a trash entry,
+an index) names nothing and passes. A body there that does not parse as any of these is refused.
+
+On a "missing chunks" refusal, the writer MUST re-upload the named chunks from bytes it holds (its staged
+body, its source file, its local cache) and retry. A writer that holds no bytes for a missing chunk MUST
+NOT publish the reference: it reports the file as damaged and keeps its local content
+([algorithms/failure-model.md](failure-model.md)). A version snapshot refused this way is logged and
+skipped, like any failed snapshot.
+
+Why this is exact: a gate either completes before the collector takes the publish lock exclusively to
+open (so its manifest is present when marking lists its namespace, which happens after the open), or it
+observes R and promotes. A promotion either happens before a shard's doom step (so the chunk is in S and
+not doomed) or after it (so the chunk is gone from F and the gate reports it missing). The presence check
+makes the result independent of what the writer believed, so presence memos never reach the main.
+
+### 5.5 The collector, phase by phase
+
+The phase is recorded in R **before** the step it names; resuming from any phase redoes, idempotently,
+whatever that step had started.
 
 ```
 start(keep, verify):
-  require main has a filesystem root, else Unsupported
-  take kernel lock (fail Busy if held); set in-process held flag      -- see G3
+  require a collectable main (A1) on this host, else Unsupported
+  in-process exclusion (check-and-set), then the run lock (non-blocking), else Busy
   R0 := read R
-  report outstanding delete requests on each copy (listing only)
+  report outstanding discard requests on each copy
+  if R0 is present but unparseable: treat it as Abandoning         -- the safe direction
   match:
-    R0.phase = Abandoning         -> work := Keep(shards of F after R0.cursor)
-    keep                          -> write R{Abandoning, cursor=""}; work := Keep(all shards of F)
-    R0.phase = Closing            -> work := Close(shards of S ∪ F after R0.cursor)
-    R0 absent | Opening | Marking ->
-        write R{Opening, started = R0.started or now, cursor = R0.cursor or ""}
-        if F does not exist: rename S -> F   (S missing = nothing to do; S is not recreated,
-                                              writers create it on demand)
-        N := sorted(manifest namespaces tagged m/…  ++  version groups tagged v/…)
-        N := [n in N | n > R0.cursor]
+    R0.phase = Abandoning          -> work := Keep(shards of F after R0.cursor)
+    keep                           -> write R{Abandoning, cursor=""}; work := Keep(all shards of F)
+    R0.phase = Closing             -> work := Close(shards of S ∪ F after R0.cursor)
+    R0 absent | Opening | Marking  ->
+        with the publish lock exclusive:
+            write R{Opening, started = R0.started or now, cursor = R0.cursor or ""}
+            if F does not exist: rename S -> F      (S missing: nothing to rename; S is not recreated)
+        if the manifest area is absent or cannot be enumerated while F holds chunks:
+            stop, leaving the run open                -- a missing mount must not read as "no references"
+        N := sorted(manifest namespaces tagged m/…  ++  version groups tagged v/…), keep n > R0.cursor
         write R{Marking, cursor = R0.cursor}
         work := Mark(N)
 ```
 
-**Marking.** Namespaces are handled one at a time. Only one at a time makes "last finished" the
-same as "furthest reached", so the cursor is exact.
+**Marking**, one namespace at a time, so "last finished" equals "furthest reached":
 
 ```
 mark(ns):
-  keys := list(ns as a *directory prefix*)        -- the trailing separator is load-bearing:
-                                                     without it the listing is empty, nothing is
-                                                     promoted, and closing deletes every chunk
-  roots := [k in keys | k is a child object (not internal, not a temp file, not a dir entry)]
-  parallel over roots (outer pool):
-     body := read(k)            -- a read failure or unparseable body fails the run, nothing discarded
-     if body is a folder marker: continue
-     for each chunk c named by body (inner pool):
+  keys := list ns as a directory prefix (with its trailing separator: without it the listing is empty,
+          nothing is promoted, and closing would delete every chunk)
+  for each child object k (a listed key whose leaf is not internal):
+     body := read k from the collected main
+       not found (deleted or renamed since the listing): references nothing
+       any other read failure, or a body that is not a manifest or folder marker: stop the run,
+         leaving it open, nothing discarded
+     for each chunk c named by body:
         moved := promote(c)
         if verify and moved: verify_promoted(c)
   write R{Marking, cursor = ns}
-
-promote(c):                         -- also what writers call
-  try rename F/shard(c)/c -> S/shard(c)/c ; return true
-  on not-found: ensure S/shard(c) exists; retry once
-     second not-found: return false   -- already in S, or in neither (see N2)
 ```
 
-`verify_promoted` runs only when this call moved the chunk, which is once per chunk per run. It
-reads the chunk from the main alone, never through the composite: a composite read could be
-answered by a replica, and a write would fan out. If the chunk hashes to its name, it deletes any
-stale corruption marker. If it does not, or is unreadable, it files a marker. It never discards
-the chunk, because a manifest names it.
+A not-found on a listed child is safe to read as "references nothing": if it was renamed, the rename's
+copy went through the gate.
 
-**Transition.** When Mark is empty:
+`verify_promoted(c)` runs only when this call moved c (once per chunk per run). It reads c from the
+collected main alone, never through the composite. If c hashes to its key, it deletes any corruption
+marker for c on that main; otherwise, or if unreadable, it files one. It never discards c.
 
-```
-begin_closing:
-  shards := sorted(shard dirs in S ∪ shard dirs in F)
-  write R{Closing, cursor = ""}
-```
-
-**Closing.** Shards are handled one at a time, and doomed keys are pooled across shards.
+**Transition to closing.** When Mark is empty:
 
 ```
-for shard in shards (sequential):
-  cand := [names in F/shard that are chunk names]     -- temp files etc. are never named in a delete
-  doomed_here := [c in cand | c not present in S/shard (point lookup, inner pool)]
-                                                     -- checked after listing F: a promotion that
-                                                        landed before the lookup is seen
-  pending += shard; doomed += doomed_here
-  if no copies  or  |doomed| >= delete_batch  or  now - last_flush >= checkpoint_interval:
-     flush()
-
-flush():
-  for each copy m (replica, backfill), sequentially:
-     ensure main is online (write guard)
-     r := m.discard(run, name = max(pending shards), doomed)
-     if r = Queued:      nothing more     -- a durable request now exists on m
-     if r = Unsupported: m.delete_many(doomed)  (absent = success; per-key failures raise)
-  delete corruption markers of doomed keys on the main and on copies that deleted directly
-  for shard in pending: unlink every entry of F/shard; rmdir F/shard
-  write R{Closing, cursor = max(pending shards)}
+wait until this owner holds no unsettled copy deletion (§5.7)
+if G is odd: g := G                           -- left odd by a crash, or by a run whose records are gone
+else: g := G + 1; write G := g                -- odd: from here on no presence memo about a copy is relied on
+shards := sorted(shard directories of S ∪ shard directories of F)
+write R{Closing, cursor = "", generation = g}
+work := Close(shards)
 ```
 
-**Finish.** When Close is empty: remove F recursively, delete R.
+A resumed run in Closing whose R carries a generation continues with it (G is already that odd value).
+A collector resuming an R in Closing that carries no generation MUST set G to the next odd value and
+record it in R before its next doom step, then continue under these rules.
 
-**Order inside a flush.** Copies are handled first, then corruption markers, then the main's F
-entries, then the cursor. If a crash comes after the copies were told and before the main
-discarded, a resume re-lists F, re-dooms the same keys, and re-sends idempotent deletes. The
-reverse order would leak those keys on the copies forever, because nothing ever walks a copy.
+**Closing**, one shard at a time; the **doom step** of each shard runs under the publish lock,
+exclusive:
 
-**Abandoning** (the operator's abort, or `keep`). This is the same machine with "every chunk is
-live". Per shard of F, sorted, after the cursor:
+```
+close(shard):
+  with the publish lock exclusive:
+     cand   := [names in F/shard that are chunk keys]      -- temporary files are never named in a delete
+     doomed := [c in cand | c not present in S/shard]      -- a point lookup each
+     for each copy m told by this run (§5.2):
+        record delete(doomed, run, shard) for m durably             -- before the next line (§5.7)
+     delete corruption markers of doomed keys on this main
+     unlink every entry of F/shard; remove F/shard
+  write R{Closing, cursor = shard}
+```
+
+The doom step touches only the main's disk and the owner's local records, so the exclusive hold is
+short. The surviving shard is never listed: it is hundreds of times larger than the outgoing one.
+
+**Finish.** When Close is empty: remove F recursively, then delete R. The run's generation stays odd
+until its copy deletions settle (§5.7), which may outlive the collector's session: the domain owner
+settles them. A collector MAY end its session before that and let a later session finish: R stays
+present meanwhile, which is safe.
+
+**Abandoning** (the operator's abort, or `keep`): the same machine with "every chunk is live". Per shard
+of F, sorted, after the cursor:
 
 ```
 keep_one(shard):
-  if S/shard absent or empty: rename F/shard -> S/shard          (one rename for the whole shard)
+  if S/shard is absent or empty: rename F/shard -> S/shard                (one rename)
   else k := |S/shard|, m := |F/shard|
-       if k + 1 < m - k: push_down (move/unlink S's few into F), then try the directory rename again
-                         (if a writer landed something meanwhile, fall back to move_across)
-       else move_across: rename each c in F/shard not in S/shard into S/shard
-       -- names in both are identical bytes (A2), so either copy may be dropped
-  unlink leftovers of F/shard; rmdir
+       if k + 1 < m - k: move S's few entries into F/shard, then retry the directory rename
+                         (if a writer landed something meanwhile, fall back to moving across)
+       else: rename each c in F/shard not in S/shard into S/shard
+       -- names in both are identical bytes (A2): either copy may be dropped
+  unlink leftovers of F/shard; remove it
   write R{Abandoning, cursor = shard}
-when Keep is empty: re-list F; any shards left -> another Keep round; none -> rm F, delete R
+when Keep is empty: re-list F; shards left -> another round; none -> remove F, delete R
 ```
 
-Once a run is abandoning it stays abandoning on resume. `keep` overrides any phase and ignores
-the old cursor, because a cursor means something different in each phase. Shards already closed
-cannot be restored, so abort after closing started keeps only what is left.
+Once abandoning, a run stays abandoning on resume. `keep` overrides any phase and ignores the cursor
+(a cursor means something different in each phase). Shards already closed cannot be restored; they
+were garbage by construction.
 
-### 4.4 Writers (the one duty)
+### 5.6 The generation, and presence memos
 
-Every writer, before making a manifest visible on the main:
+A collection deletes chunks some process may believe present: a writer's dedup memo, or a copy
+worker's memo of chunks it confirmed on a copy. No such belief survives a collection (P8):
 
-```
-publish(M):
-  (upload or dedup every chunk of M into S, as usual)
-  if R is present on the main: for each chunk c of M: promote(c)
-  put M
-```
+- **On the collected main**, beliefs are harmless: the gate checks presence at every publication
+  (§5.4). A writer receiving a "missing chunks" refusal MUST drop those keys from every presence memo it
+  holds for the domain, for every member.
+- **On copies**, beliefs are governed by the **generation G**, an object on the first collectable main
+  ([02-remote-model.md §2.12](../02-remote-model.md#212-collection-run-record-and-generation-json)):
+  - The collecting owner sets G to the next **odd** value durably before the first doom step of a run
+    (§5.5), and to the next **even** value only when every deletion that run owed a copy has taken
+    effect and been followed by its restore check (§5.7).
+  - A presence memo entry about a copy is tagged with the value of G read when the presence was
+    confirmed. It MAY be relied on only if G, read **after** the source body that makes the entry
+    relevant was read, is even and equal to the tag. While G is odd, presence on a copy is confirmed
+    afresh (a probe or a listing of the copy) and no memo entry is recorded.
+  - A G that cannot be read (absent reads as 0; an unparseable body does not) is treated as odd.
 
-Tying survival to publish rather than to how a chunk was found covers the three cases a presence
-check alone cannot:
+Why this is exact, with no timing assumption. A chunk doomed in generation *g* is absent from the main
+from its doom step on, so any manifest naming it that a copy later receives was published on the main
+after the chunk was uploaded again, which is after G became *g*. A worker reads that manifest from the
+main before it reads G, so it sees G ≥ *g* and never relies on an entry confirmed before the doom.
+Presence confirmed afresh while deletions are in flight can be wrong by the time the manifest lands on
+the copy; the restore check runs after every deletion has taken effect and puts back every deleted
+chunk the main holds, which includes every chunk such a manifest names. Only after the restore checks
+does G turn even, and fresh confirmations are then true until the next run turns it odd.
 
-- a chunk skipped by the writer's own memo;
-- a chunk uploaded before the open and moved to F by the rename;
-- an upload in flight across the open.
+### 5.7 Deletion on copies
 
-Promotion is idempotent and costs nothing when no run is open, apart from one read of R.
+The deletions a doom step owes each copy are recorded **durably** in the collecting owner before the
+main's outgoing entries are unlinked (§5.5), so a crash repeats deletions instead of leaking them. The
+owner executes them as specified in
+[algorithms/replication.md §4.8](replication.md#48-deletions-on-copies-outside-the-worker):
 
-Presence checks during a run look in S, then in F. A *miss* re-reads R for real before it is
-believed, so a stale "no run" cache can reorder lookups but cannot turn "in F" into "absent".
-Readers do the same, S first. Reads never promote.
+- **Re-check before** (an optimisation): immediately before issuing a deletion, the owner MAY drop every
+  key the collected main holds in either space.
+- **Direct delete** (a copy without queued deletion): delete the keys and their corruption markers.
+  Absent keys count as deleted.
+- **Queued deletion** (a copy with a bucket function): write the discard request, named by run and shard,
+  and keep it among the copy's pending discards (locally, durably) until the request object is gone. A
+  request already present under that name is superseded by the new one covering the same or later
+  shards.
+- **Restore after.** Once a deletion has taken effect (the direct delete returned, or the request object
+  is gone), list the collected main's shard for those keys, in both spaces, and put back onto the copy,
+  from the main, every deleted key the main still holds. Only then is the deletion settled.
+- **Settle.** When every deletion owed for generation *g* is settled, write G := *g* + 1 (even).
+- The write guard applies: no deletion or restore runs while a main is unreachable.
 
-### 4.5 Deletion on other members
+The **bucket function** deletes only chunk keys of the request's own domain, deletes each chunk's
+corruption marker with it, and deletes the request last, only if it refused nothing.
 
-- **Replica, backfill.** These members are told keys, never walked. How a key is removed depends
-  on what the member can do:
-  - a store with a server-side deleter gets one request object per flush. Its object-created
-    notification runs a function that accepts only chunk keys of that domain, deletes them and
-    their corruption markers, and deletes the request last, and only if nothing was refused;
-  - any other store gets a direct bulk delete.
+**Re-delivery.** Outstanding requests are reported at every start of a collection. Re-delivering one
+rewrites it with only the keys still absent from the collected main (both spaces), which raises a fresh
+notification; a request with no key left is deleted instead. Nothing re-delivers automatically. A
+request never consumed keeps G odd: copy memos stay unused for that domain (a cost, not a risk) until it
+is re-delivered and consumed.
 
-  Outstanding requests are reported at every start. They can be re-fired by re-writing each
-  request onto itself, which raises a fresh notification. Nothing retries automatically.
-- **Archives.** Never written. They hold different content, so their garbage is theirs.
-- **Additional mains.** Never collected and never told (gap N8).
-- **Write guard.** No copy is written while the main is unreachable.
+**Records without a generation.** Readers SHOULD accept a run record in Closing without a generation
+(meaning G is odd for as long as it is present); collectors MUST NOT write one, and MUST maintain G for
+every run they close.
 
-### 4.6 Readers and copies' fill during a run
+### 5.8 Readers and copy fills during a run
 
-A copy's fill job (ordered, durable, in the daemon) fetches a chunk from the main when the copy
-lacks it. During a run the chunk may still be in F, so the fetch falls back to F. It is written
-to the copy under its plain name, because a copy has one space.
+- A reader of the collected main looks in S, then F. A miss re-reads R's presence before it is believed,
+  so a stale "no run" cache can reorder lookups but never turn "in F" into "absent". Reads never promote.
+- An http-proxy server exporting the collected main MUST answer chunk reads (get, range, head) from
+  either space in the same way, so remote clients read, and deduplicate against, chunks still in F; the
+  gate on their publications promotes them.
+- A copy's fill job fetching a chunk from the collected main falls back to F, and writes it to the copy
+  under its plain key (a copy has one space).
 
-### 4.7 Retention (what makes chunks garbage)
+---
 
-Expiry runs through the composite, so it reaches every main and queues deletes to copies. It
-removes references and no chunks, in this order:
+## 6. Properties and why they hold
 
-1. **Trash.** A trashed folder whose trash entry is older than the cutoff, and whose anchor still
-   says it is trashed (or is gone), is deleted with its whole subtree: every manifest, marker and
-   index under it. The trash entry goes last. An entry whose folder is anchored elsewhere (it was
-   restored) is skipped loudly. This goes first so that nothing in the purged subtree counts as a
-   reference any more.
-2. **Versions.** Version snapshots older than the cutoff are deleted, then version groups that
-   have no survivor.
-3. **Journal.** Entries older than the cutoff are deleted, except the one the cursor names. The
-   journal holds no chunk references, so this step does not matter to GC.
+**P1, the main keeps what marking saw.** A chunk named by a manifest present when its namespace was
+listed is in S at the end of marking: marking promoted it or found it already there. Closing deletes
+only names in F absent from S. Listing, reads and promotion are idempotent, and a crash re-marks the
+current namespace in full.
 
-Until expiry removes them, trashed subtrees and versions are namespaces, and they keep every chunk
-they name alive (section 4.2). A deleted file with versioning on is still referenced by its
-versions. With versioning off, nothing references it once its manifest is deleted.
+**P2, the interlock covers what marking did not see.** A reference published after its namespace was
+listed, or into a namespace created after enumeration, went through the gate while R was present (the
+open took the publish lock exclusively, so no gate straddles it), and was either promoted before its
+shard's doom step or refused as missing. A reference whose chunks the writer held only as a belief is
+checked by presence. Nothing the gate lets through names a chunk absent from S.
 
-## 5. Properties and why they hold
+**P3, copies end with every referenced chunk.** A key is sent to copies only if it was in F and absent
+from S under the exclusive doom step. A chunk referenced again after its doom is on the main by the time
+of the restore check that follows each deletion, and is put back. Memos cannot hide a deletion (§5.6).
 
-**P1, the main keeps what marking saw.** A chunk named by a manifest that was present when its
-namespace was listed is in S at the end of marking. Marking promotes it, or finds it already in S.
-Closing only deletes names that are in F and absent from S. The listing, reads and promotion are
-all idempotent, and a crash re-marks the current namespace in full.
+**P4, no non-chunk object is deleted.** Only names that parse as chunk keys are doomed. Anything else in
+F is removed with F as a leftover temporary file. The bucket function re-validates each key's shape and
+domain.
 
-**P2, the writer duty covers what marking did not see**, provided four conditions hold. Suppose
-manifest M, naming c, lands after its namespace was listed, or in a namespace enumeration missed.
-The four conditions:
+**P5, abandoning loses nothing still in F.** Every surviving entry of F is moved or carried into S, or
+dropped when a same-named copy is already in S. F is removed only once it holds no shard.
 
-- (a) the writer's read of R happened after R was written (so it promoted);
-- (b) the promotion happened before closing reached c's shard;
-- (c) c existed in F or S at promotion time;
-- (d) the writer took the promoting path at all.
+**P6, one collector per main.** The run lock excludes other processes on the host, the in-process
+check-and-set excludes a second session in one process, and A1/A5 exclude other hosts.
 
-Under these, c is in S when closing checks it, and it survives. Each condition fails somewhere
-(section 8): (a) is F1, (b) and (c) are N1 and N2, (d) is F2 and N3.
+**Liveness.** Marking terminates (the enumerated list is finite; later namespaces are not added).
+Closing terminates (finite shards). Abandoning converges (each round removes directories). A failing
+step (an unparseable body, an unreachable copy's queue) leaves R and the cursor where they were: the
+run stays open and resumable, and readers and writers keep working because lookups consult both
+spaces and the gate promotes. Reclaim on a queued-deletion copy depends on its notification firing; a
+missed one stays outstanding until re-delivered.
 
-**P3, copies only lose unreferenced keys**, modulo N4. A key is sent to copies only if it was in
-F after marking and absent from S at the lookup made after F was listed. A chunk re-uploaded during
-the run lands in S, so it is not doomed. A promotion that lands before the lookup is seen.
+**Cost.** One rename to open. One listing plus one read per manifest and one rename per live chunk to
+mark. Two directory listings plus one lookup per garbage candidate to close. On copies, deletes only.
+Per publication on the collected main: one lock, one read of R, one stat per named chunk.
 
-**P4, no non-chunk object is deleted.** Only names that parse as chunk names are doomed. Anything
-else in F is removed with F, as a temp file of an interrupted write. The cloud deleter
-re-validates every key's shape and domain before deleting.
+---
 
-**P5, abandoning loses nothing still in F.** Every surviving F entry is moved or carried into S,
-or dropped when a same-named copy is already in S (A2). F is deleted only once it is empty of
-shards.
-
-**P6, no double collector on one host.** The kernel lock excludes other processes. The
-in-process flag excludes a second session in the same process, where record locks merge; this
-part is racy, see G3.
-
-**Liveness.**
-
-- Marking terminates: the enumerated namespace list is finite, and namespaces created later are
-  not added.
-- Closing terminates: the shard list is finite.
-- Abandoning converges, because each round removes directories.
-- A step that fails, for example on an unreadable manifest or an unreachable copy, leaves R and
-  the cursor where they were. The run stays open and resumable, and readers and writers keep
-  working, because lookups consult both spaces.
-- Reclaim on copies with a deleter depends on their notification firing. A missed event stays
-  outstanding until someone re-fires it.
-
-**Cost.**
-
-- One rename to open.
-- One listing plus one read per manifest and one rename per live chunk to mark.
-- Two directory listings plus one point lookup per *garbage candidate* to close. The surviving
-  shard is never listed, because it is hundreds of times larger.
-- On copies, deletes only.
-- Delete batches are sized by keys, not shards.
-
-## 6. Failure, crash and resume
+## 7. Failure, crash and resume
 
 | Interrupted at | State on the main | Resume does |
 |---|---|---|
-| after writing Opening, before the rename | R=Opening, S intact | renames (skipped if F exists; S absent is fine) |
-| after the rename, before Marking was recorded | R=Opening, F exists | enumerates again, marks from the start |
-| mid-namespace | R=Marking(cursor=previous ns) | re-lists and re-marks that namespace (promotion idempotent) |
-| between begin_closing and first flush | R=Closing("") | lists shards again, recomputes doomed keys |
-| mid-flush: copies told, main not discarded | R=Closing(previous batch) | re-dooms the same keys and re-sends them all (batches may split differently; a request re-put under the same run+name is superseded by one covering the same or later shards); deletes are absent-tolerant |
-| after main discard, before cursor saved | shards already gone | those shards are empty, so nothing is doomed there |
-| after rm F, before R deleted | R=Closing, no F | no shards to close; deletes R |
-| mid-abandon | R=Abandoning(shard) | continues abandoning; never resumes collecting |
-| budget exhausted or operator stop | any phase, cursor at a unit boundary | same as a crash, without redoing the current unit |
+| after writing Opening, before the rename | R = Opening, S intact | renames (skipped if F exists; S absent is fine) |
+| after the rename, before Marking | R = Opening, F exists | enumerates again, marks from the start |
+| mid-namespace | R = Marking(previous namespace) | re-lists and re-marks that namespace |
+| after Closing was recorded, before the first shard | R = Closing("") | lists shards again |
+| mid doom step, jobs appended, F/shard not yet unlinked | R = Closing(previous shard) | re-dooms the same keys and appends them again (duplicate deletes are harmless) |
+| after the unlink, before the cursor | shard gone from F | nothing left to doom there |
+| after F removed, before R deleted | R = Closing, no F | waits out §5.5's finish condition, deletes R |
+| mid-abandon | R = Abandoning(shard) | continues abandoning; never collects |
+| budget exhausted or operator stop | any phase, at a unit boundary | as a crash, without redoing the unit |
+| collector crashed while holding the publish lock | kernel released it | gates proceed |
+| after G was made odd, before R records Closing | G odd, R = Marking | the transition finds G odd and no unsettled deletion, reuses G, records Closing |
+| copy deletions recorded, owner stopped before settling | G odd, R possibly gone | the owner resumes its durable records at start, settles them, then makes G even |
 
-Other properties:
+Every step is a rename that tolerates not-found, a delete that treats absent as success, a durable job
+append that tolerates duplicates, or a record overwrite. G only ever increases. The kernel releases both locks on process death,
+so a run left open with no process is simply resumable; R's presence alone keeps readers looking in both
+spaces and gates promoting.
 
-- **Idempotence.** Every step is either a rename that tolerates not-found, a delete that treats
-  absent as success, or a record overwrite.
-- **Abandonment.** Possible at any point. It restores everything still in F. What closing has
-  already deleted stays deleted, but it was garbage by construction.
-- **Lock loss.** The kernel releases the lock on process death. A run left open with no process
-  is simply resumable. R's presence alone keeps readers looking in both spaces.
-- **Unreadable R.** Lookups treat R's presence as "open", which is safe. Promotion treats an
-  unreadable R as "idle", which is unsafe (N5).
+---
 
-## 7. Parameters
+## 8. Parameters
 
-| Parameter | Current value | Effect | Trade-off |
-|---|---|---|---|
-| `concurrency` | store's advertised max concurrency (default 8), clamped ≥ 1, overridable | width of the outer (roots) and inner (chunks) pools, each | Throughput against device load. 1 is least obtrusive. Both pools share the value, so the peak is width² in-flight chunk operations. |
-| `delete_batch` | 1000 keys, clamped ≥ 1 | keys per copy delete or request | Fewer round trips against the store's body or request limits. It also bounds how much a crash repeats. |
-| `checkpoint_interval` | 5 s | the longest closing goes without flushing and saving the cursor | Shorter means more deletes and record writes. Longer means more rescanning after a crash. It also moves the cursor on stores with little garbage. |
-| `units` per step | 256 | namespaces or shards per step call | Granularity of pause and budget checks. The budget is also checked between units. |
-| `budget` | none | wall time after which the run is left open | Enables nightly incremental collection. |
-| `pause` | none | sleep between steps | Background friendliness. |
-| `verify` | off | re-hash each chunk promoted by this run | Turns marking into a full integrity scan of the live set, at one read per live chunk. |
-| `keep` / abort | off | abandon instead of collect | — |
-| shard fan-out | 3 hex digits (4096 shards) | granularity of closing, abandoning and delete batches | More shards make smaller directories and finer cursors, at the cost of more empty-directory overhead. |
-| run-open cache TTL (readers) | 5 s | how long a lookup trusts "no run" | Performance only. A miss always re-checks. |
-| writer memo size | 100 000 names, cleared at cap | dedup without store round trips | Bigger saves more lookups but widens N2. |
-| copy "ensured" memo | 100 000 names, cleared at cap | copy fill avoids listings | Same exposure as N4b. |
-| expiry cutoff | operator-chosen date | what retention dereferences | Longer keeps more history and more chunks. A client offline longer than the cutoff must fully resync. |
-| expiry delete batch | 1000 | — | — |
-| progress report interval | 1 s | — | Output only. |
+| Parameter | Recommended | Effect / constraint |
+|---|---|---|
+| `delete_batch` | 1000 keys, ≥ 1 | keys per copy delete request; the executor may merge consecutive jobs of one copy up to it |
+| `budget` | none | elapsed time after which the run is left open |
+| `pause` | none | wait between steps |
+| `verify` | off | re-hash each chunk promoted by this run |
+| `keep` / abort | off | abandon instead of collect |
+| shard fan-out | 3 hex digits (4096) | frozen by the key layout ([02-remote-model.md](../02-remote-model.md)) |
+| publish lock wait | the request deadline | a gate that cannot take the shared lock fails transiently |
+| `orphan_grace` | the journal retention horizon plus 7 days | MUST be at least the journal retention horizon, so a client allowed to resume a placement has had the chance |
+| expiry cutoff | operator-chosen | longer keeps more history and chunks |
+| expiry delete batch | 1000 | — |
 
-## 8. Known gaps
-
-Findings F1, F2 and G3 are adversarially confirmed in [findings.md](../findings.md). The N items
-were identified while writing this description from the code. They are **not** adversarially
-verified, but each cites the code path it rests on (section 10).
-
-**F1, the writer checks R once, before publishing.** Interleaving:
-
-1. The writer dedups c.
-2. The writer reads R, which is absent.
-3. The collector writes R and renames S to F, so c is now in F.
-4. The collector enumerates namespaces, or marks M's namespace.
-5. The writer puts M.
-6. Closing finds c in F and not in S, and deletes it.
-
-The window is from the writer's read to the manifest landing, which is milliseconds unless the
-put retries.
-
-**F2, proxy writers promote nothing.** Promotion is a rename on the main's filesystem, so a writer
-reaching the main over the HTTP proxy cannot perform it, and the proxy server does not perform it
-either. Presence checks through the proxy are safe: a chunk only in F reads as absent and is
-re-uploaded into S. The unsafe path is the session memo:
-
-1. The writer uploaded c before the run.
-2. The run opens and moves c to F.
-3. The writer publishes another manifest naming c from its memo.
-4. Its promotion is a no-op.
-5. The manifest lands in an already-marked or new namespace.
-6. Closing deletes c.
-
-The window is the whole marking phase, hours.
-
-**N1, promotion races closing.** Closing decides "doomed" by looking c up in S, then deletes it
-from copies and unlinks it from F. A writer promotion that lands *after* that lookup can hit two
-cases:
-
-- (i) before the unlink: the promotion succeeds, the main keeps c, but every copy is told to
-  delete it (violates P3);
-- (ii) after the unlink: the promotion finds c in neither space and returns "false", which the
-  writer ignores, and M is published naming a chunk that no longer exists (violates G1).
-
-The code comment claims a promotion landing between the two listings is seen. It is seen only
-before the lookup.
-
-**N2, beliefs outlive a completed run.** The writer's memo is process-lifetime, and inherited
-chunk names (a partial rewrite reusing the old manifest's chunks) are taken on trust. Nothing
-ties either to a collection. Example:
-
-1. A file is deleted with versioning off, or deleted and expired.
-2. A full run deletes c.
-3. The same process later publishes a file with c's content, from its memo.
-4. No run is open, so no promotion happens.
-5. The manifest names a chunk that exists nowhere.
-
-This needs no concurrency with the run, only a long-lived daemon. Inside a run, promotion's "false" result
-(c in neither space) is the signal that is currently discarded; outside one, nothing is checked at all.
-
-**N3, manifest writes that bypass the duty.** Only the upload path promotes. Several other
-operations make a manifest visible without promoting its chunks:
-
-- a file rename, which is a server-side copy to the destination then a delete of the source;
-- the in-domain rename in the copy/move operation;
-- re-publishing a cached manifest when a rename's source vanished;
-- reverting to a version.
-
-Cross-folder file rename during marking, with versioning off, loses data:
-
-1. The destination namespace was already listed.
-2. The source namespace is not yet listed.
-3. The rename moves the only reference into a listed namespace and removes it from an unlisted
-   one.
-4. Closing deletes the chunks.
-
-With versioning on, the pre-rename version snapshot keeps the chunks referenced (version groups
-sort after all manifest namespaces). Taking that snapshot is best-effort, though, and it can be
-expired. A revert is safe only while the version it copied survives until its group is marked.
-The code comment that says a namespace created after enumeration "needs no catching, whatever
-writes it promoting its own chunks" is true only of the upload path.
-
-**N4, copy-side races.**
-
-- (a) A queued delete request is applied whenever the bucket function runs. That can be hours
-  later, or days later after a re-fire. It is applied without re-checking. A chunk re-uploaded
-  after the run (it lands in the main's S and is forwarded to the copy) is then deleted from the
-  copy by the stale request.
-- (b) The copy's fill queue keeps an "ensured" memo in the daemon. Direct deletes by the collector
-  process do not invalidate it. A later manifest job naming c skips sending c, and the copy holds
-  a manifest without its chunk. Mirror repair heals this. Nothing else does.
-
-**N5, an unreadable R reads as "idle" for promotion** but as "open" for lookups. A writer then
-skips promotion during a run. Promotion must be keyed on R's presence, as lookups already are.
-
-**N6, a concurrent delete aborts marking.** A manifest listed and then deleted or renamed before
-its read makes the read fail, and the run stops, leaving it open. The resume re-lists, so this is
-liveness, not safety. A namespace under steady churn could fail repeatedly. A not-found on a
-listed root can safely be treated as "references nothing", because the object is gone.
-
-**N7, exclusion is per host.** Two hosts sharing a main over a network filesystem could both step
-one run. Both would resume from the same cursor and partition the work, and one would close while
-the other still marks. This is acknowledged in the code.
-
-**N8, only the first main is collected.** Other mains are never told deletes, so they leak
-garbage. A domain whose first main is remote is refused even if a later main is local.
-
-**G3, the in-process guard** checks its flag, suspends to open and lock the file, and only then
-sets the flag. Two sessions in one process could both pass, and record locks merge within a
-process. Nothing drives two sessions today. Set the flag before the first suspension, or use a
-mutex.
-
-**Also:**
-
-- Expiry's trash purge checks "still trashed", then deletes the subtree. A restore landing in
-  between is deleted with it. This is a check-then-act with no fence; the same fix shape applies,
-  re-checking the anchor after deleting the marker.
-- Nothing re-fires stuck delete requests automatically.
-
-### What a correct version requires
-
-A minimal protocol that closes F1, F2, N1–N5 and N8 without making writers aware of runs beyond
-what they already do:
-
-1. **Promotion is owned by the store that has the spaces, at the manifest-write seam.** Every
-   write or copy of a manifest onto the main performs the duty. That means the local driver's
-   manifest put and copy, and the proxy server when it receives one. Doing it in one upload path
-   is what left F2 and N3 open. It is the single place every writer, including peers, proxies,
-   renames and reverts, crosses. A copy of a manifest must read the source body to know its
-   chunks. On the main that is a local read.
-2. **Publish and doom are mutually exclusive.** On the main's host, take a shared/exclusive
-   advisory lock on the main's filesystem:
-   - a publisher holds it *shared* across "read R → promote → put manifest";
-   - the collector holds it *exclusive* across "write R → rename S→F" and across each shard's
-     doom step (below).
-
-   This closes F1 exactly: a publisher either completes before the open, so its manifest is
-   enumerated, or observes R. It is cheap: one lock per publish, uncontended except for
-   milliseconds. It is sound only where every publisher runs on the main's host, which (1)
-   guarantees. Remote writers publish through the proxy or the host's own daemon.
-
-   *Lock-free alternative:* check R *after* the put. If R is present, promote and verify. If R is
-   absent, any later open enumerates after the manifest landed, so marking lists it. This needs
-   (3) and (4) as well, because the post-check can meet a closing that already doomed c.
-3. **Doom atomically, and let promotion observe it.** Closing first renames `F/shard` to a doomed
-   area, all at once, under the exclusive lock. It then looks up survivors in S and tells copies.
-   Promotion reports one of three outcomes: *moved*, *already in S* (verified, not assumed), or
-   *missing*. On *missing*, the publisher must restore c before the manifest becomes visible, or
-   refuse to publish. It can restore by renaming c back from the doomed area if it is still
-   there, re-uploading it from bytes in hand, or re-reading it from the source file. The doomed
-   area is deleted after copies are told. This closes N1(ii) and N2 for writers inside a run.
-4. **Beliefs carry a collection generation.** The main keeps a monotonically increasing
-   generation, bumped durably at begin-closing. It can live in a permanent record rather than in
-   R, so one read yields both. Writers tag memo entries and inherited chunk names with the
-   generation at which each was last verified. At publish, a chunk verified in an older
-   generation is re-verified by presence in S and handled as *missing* if absent. Copy fill
-   queues scope their "ensured" memo the same way. This closes N2 across completed runs and
-   N4(b).
-5. **Copy deletes are conditional.** Each copy deletes c only if its copy of c is older than the
-   run's doom time. Both times are the copy store's own clock: the request carries a doom time
-   read from the copy, for example the request object's own creation time. A re-upload or forward
-   after doom refreshes c's modification time and survives. Where the store offers a
-   generation/precondition on delete, use it to close the head-then-delete window. Where it does
-   not, a residual window of one round trip remains, and the generation-scoped copy memo (4)
-   repairs it on the next manifest that names c. Alternatively, route direct deletes through the
-   copy's own ordered fill queue, where each delete job re-checks "c absent from the main's S" at
-   execution time. FIFO order with the manifest jobs makes this exact. This closes N1(i) and
-   N4(a), including re-fired stale requests.
-6. **Smaller fixes.**
-   - Key promotion on R's presence (N5).
-   - Treat a vanished root as referencing nothing (N6).
-   - Set the in-process flag before suspending (G3).
-   - Either collect every local main and tell every other main its deletes, or refuse
-     multi-main domains explicitly (N8).
-   - Keep the lock on the host that owns the disk, and refuse to collect over a network mount
-     (N7).
-
-Items 1–3 together subsume the current pre-publish check. Item 4 is needed even with a perfect
-lock, because N2 involves no concurrency.
+---
 
 ## 9. Alternatives considered
 
 | Alternative | Why not |
 |---|---|
-| Mark by hard link, then close by link count (earlier design) | Filesystems without links (exFAT, Android shared storage, some network mounts) fell back to rewriting every live chunk while reporting success. Move needs only rename, and it leaves the garbage as the named residue. (commit `18e77119`) |
-| In-memory live set: walk manifests, then diff against a listing | Memory proportional to the live set. Not resumable without persisting the set. The code rejects it with the note "the surviving root is the record of what has been marked". |
-| Reconcile copies by listing all 4096 shards on each | Cost proportional to layout. A 12-chunk domain paid 4096 round trips per copy. Copies are now told keys (`18e77119`), and filling a lagging copy is the mirror's job. |
-| Redirect writers into a different space during a run | Every writer would have to know about runs, including old binaries, peers and proxies (violates G3). Writing to S unchanged is what makes an unaware writer safe for new chunks. |
-| Promote on read or on presence check | Two mechanisms to be sure of instead of one. A read says nothing about references. The code deliberately keeps a single duty at publish. |
-| Put R through the composite | Copies would carry a record of a run that is not theirs. R goes to the main only. |
-| Delete on the main first, then copies | A crash between the two leaks those keys on copies forever, because nothing walks them. |
-| Run request naming by cursor alone | A later run could overwrite an unconsumed request (`27685a67`). Requests are keyed by run and batch. |
-| Collect object-store mains with conditional deletes | Needs a server-side rename or a listing of the whole live set per run. Out of scope; expiry still works there. |
-| Skip unparseable manifests | A first attempt at "skip what you don't recognise" discarded a whole store. Unparseable input stops the run with nothing discarded. |
-| A key-based lock instead of a kernel lock | A crashed holder would leave a run nobody may touch. The kernel lock is dropped on death, so a crash leaves a resumable run. |
-| Proposed: a lease or grace period between writing R and renaming | Bounds F1 by time, but a manifest put has no bounded latency (retries), so a writer cannot know it met the deadline. Section 8 (2) or its lock-free post-check variant is exact. |
+| Mark by hard link, close by link count | Filesystems without links (exFAT, Android shared storage, some network mounts) fell back to rewriting every live chunk while reporting success. |
+| In-memory live set, diffed against a listing | Memory proportional to the live set; not resumable without persisting the set. |
+| Reconcile copies by listing all shards on each | Cost proportional to layout on every copy; copies are told keys instead. |
+| Redirect writers to another space during a run | Every writer would have to know about runs, including peers and proxies. |
+| Promote on read or on presence check | A read says nothing about references; one duty at the publication seam is easier to be sure of. |
+| A writer-side duty (each writer promotes before its put) | Missed every publication that is not an upload (renames, reverts, snapshots), could not be performed by remote writers, and checked the run once before a put that could straddle the open. The gate in the driver of the main is the one seam every writer crosses. |
+| Timing rules for memos (keep the run record present for a poll interval) | Correct only if every owner polls on schedule; the generation is exact. |
+| A per-chunk modification-time rule in the bucket function | Needed only without the restore check, which covers every kind of copy the same way. |
+| Doom a shard by renaming it to a separate "doomed" area | The exclusive doom step already makes dooming atomic with respect to publications. |
+| Reachability-based marking | Unstable while folders move; conflates retention with collection (§5.3). |
+| Put R through the composite | Copies would carry a record of a run that is not theirs. |
+| Delete on the main first, then tell copies | A crash between the two would leak those keys on copies forever. Deletes owed to copies are made durable first. |
+| A lease or grace period between writing R and renaming | A publication has no bounded latency, so a writer cannot know it met the deadline; the publish lock is exact. |
+| Skip unparseable manifests during marking | Would discard the chunks of a file that exists. |
+| A key-based lock instead of a kernel lock | A crashed holder would leave a run nobody may touch. |
 
-## 10. Mapping to the current implementation
+---
 
-Spec sections:
+## 10. Conformance
 
-- [02 §2.3](../02-remote-model.md#23-backend-key-layout-everything-a-domain-puts-on-a-store)
-- [02 §4.9](../02-remote-model.md#49-garbage-collection-mark-by-move)
-- [02 §4.8](../02-remote-model.md#48-versions--retention-retentionexpire-cutoff)
-- [05 §4.8](../05-ops-config.md#48-retention-expire-trash-deleted-files)
-- [05 §4.9](../05-ops-config.md#49-gc-copying-collector-over-a-local-main)
-- [06 §4.4](../06-backends.md#44-deferred-targets-replica-and-backfill)
-- [06 §4.6](../06-backends.md#46-server-side-work-through-the-bucket-verify-and-discard)
-- [OCaml notes](../ocaml/05-ops-config.md)
+An implementation MUST exhibit these observable properties:
 
-| Abstract | Concrete |
-|---|---|
-| Surviving space S | `tsync/<D>/chunks/<sss>/<key>` on the first `Main` member with `local_path` (`Chunk_layout` `key`) |
-| Outgoing space F | `tsync/<D>/chunks.from/<sss>/<key>` (`L.from_prefix`, `L.from_key`) |
-| Run record R | `tsync/<D>/gc-run` JSON `{phase, started, cursor}`, legacy `reconciling`→`Closing`; `Collection.read_run`/`write_run`/`clear_run`, written to the main directly (`marker_store`) — `lib/domain/remote/store/gc/collection.ml:222-245` |
-| Lock | `lockf F_TLOCK` on `tsync/<D>/gc-run.lock` plus in-process `held` — `lib/domain/ops/gc.ml:156-201` |
-| Namespace tags | `m/<folder-id>`, `v/<folder-id>` from `readdir` of `manifests/` and `versions/` — `gc.ml:223-261` |
-| Directory prefix with trailing separator | `prefix_of_namespace` — `gc.ml:252-261` |
-| Root → chunks, abort on parse failure | `referenced_chunks` (reads via composite `B.get`) — `gc.ml:266-283` |
-| promote | `Collection.promote` (rename, `ensure_parent`, retry once; result ignored by writers) — `collection.ml:264-285` |
-| Writer duty | `Collection.promote_all` (reads R via `read_run`, parse-based) — `collection.ml:294-305`; called in `Remote.publish` before `St.put_manifest` — `lib/domain/remote/remote.ml:202-203`, and via `upload_chunks` |
-| Two-space lookups | `Collection.head/get/get_range`, `candidates`, `missed`, `order_ttl = 5.` — `collection.ml:99-220` |
-| Writer memo | `Chunk_store.Dedup` (process-lifetime, `max_known` 100 000, reset at cap) — `lib/domain/remote/chunks/chunk_store.ml:3-26,50-68` |
-| Collector start / phase dispatch | `Gc.start` — `gc.ml:527-653` |
-| Marking step, cursor per namespace | `mark_one`, `mark_root`, `step` (`Mark`) — `gc.ml:752-798,1196-1214` |
-| verify_promoted | `gc.ml:691-750` (main only; `Corruption_marker`) |
-| begin_closing | `gc.ml:1103-1124` |
-| Doomed lookup | `orphans_in_shard` (list F shard, `head_opt` in S per candidate, `Chunks.is_chunk_key` filter) — `gc.ml:330-358` |
-| Batch, checkpoint | `close_batch` (`delete_batch` default `Batch.per_delete` = 1000, `checkpoint_interval` = 5 s) — `gc.ml:905-956` |
-| flush order | `flush_close` (`Guard.ensure`, `discard` → `Queued`/`Unsupported`→`delete_multi`, markers, `discard_shard`, `save Closing`) — `gc.ml:835-890` |
-| Finish | `discard_from_space` (`rm_rf`), `finish` (`clear_run`) — `gc.ml:1129-1139,1184-1187` |
-| Abandoning | `carry_over`, `push_down`, `move_across`, `keep_one`, `Keep []` re-list — `gc.ml:966-1099,1169-1183`; `abort` — `gc.ml:1273-1281` |
-| Parameters | `run ?budget ?(units=256) ?pause ?concurrency ?delete_batch ?keep ?verify` — `gc.ml:1225-1267`; concurrency from `caps.max_concurrency` default 8 — `gc.ml:542-550`; `report_interval = 1.` |
-| Delete requests | `Backend.discard` → `tsync/gc-jobs/<D>/<run13ms>/<last shard>`, body `\n`-joined keys; `outstanding`, `retry_outstanding` — `gc.ml:459-522`; function `run_gc_job` / `may_delete` — `lambda/verify.py:204-240` |
-| Copies | `Backend.deferred` = `Replica` ∪ `Backfill` (`lib/backends/api/backend.ml:165-166`); archives = `ReadOnly`; `Backend.main` = first `Main` only (`backend.ml:145`) |
-| Copy fill from F | `Deferred` `source_body` with `chunk_from_prefix` — `lib/backends/api/deferred.ml:180-192`; `ensured` memo (100 000) — `deferred.ml:122,154-172,208-245` |
-| Write guard | `Write_guard.ensure` ([06 §4.5](../06-backends.md#45-write-guard-never-write-a-copy-while-the-main-is-offline)) |
-| Retention | `Retention.expire ~cutoff` (trash → versions → version dirs → journal, cursor entry kept; `still_trashed`, `collect_namespace`) — `lib/domain/ops/retention.ml:248-331` |
-| N3 bypasses | `Store.copy_manifest` (copy then delete) — `lib/domain/remote/store/store/store.ml:260-268`, used by file rename `gather_rename_file` — `lib/domain/checkout/file/file.ml:1382-1389`; `publish_manifest` (`Republish_here`) — `file.ml:1168-1175,1455-1461`; `revert` — `file.ml:1191-1216`; rsync `Rename_in_domain` — `lib/domain/ops/rsync.ml:395-410`; `save_version` gated on `C.versioning` — `file.ml:1153-1154` |
-| F1 / F2 / G3 | [findings.md](../findings.md) F1 (`remote.ml:202-203`, `collection.ml:294-305`, `gc.ml:636-653`), F2 (`http_proxy_backend.ml:396`, `http_proxy_frontend.ml:645-650`), G3 (`gc.ml:181-196`) |
-| Tests | `tests/scenario/gc`, `tests/scenario/expire`, `tests/backends/gc_cost`, `gc_targets`, `gc_queued`, `tests/unit/gc_job`, `tests/unit/chunk_space`, `tests/content/promote_race`. None covers F1, F2 or N1–N6. |
+- **No loss on the main.** For every interleaving of a collection with writers publishing through each
+  reference-publishing path of §5.4 (upload with memo hits, upload in flight across the open, file
+  rename across namespaces already and not yet marked, in-domain copy, re-publish, revert, version
+  snapshot, import, a remote client through an http-proxy), every chunk named by a manifest or version
+  visible on the main after the run is present on the main.
+- **Gate outcomes.** A publication naming a chunk absent from the main is refused as "missing chunks"
+  whether or not a run is open, including after a completed run deleted a chunk the writer remembers;
+  the writer re-uploads and succeeds.
+- **Crash at every step** of opening, marking, closing and abandoning, then resume, reaches the same end
+  state as an uninterrupted run; abandoning after any interruption restores every chunk still in F.
+- **Copies.** For every interleaving of a run's copy deletions with other owners forwarding manifests
+  that name re-uploaded chunks, including forwards whose presence check ran just before a deletion
+  landed and forwards relying on memos confirmed before the run, every manifest on the copy has its
+  chunks once the generation is even again. A worker never relies on a memo entry while G is odd or
+  after G changed. A run record in Closing without a generation is
+  continued with a fresh odd generation.
+- **Readers.** During a run, chunks in either space are readable, directly and through an http-proxy;
+  an idle-cache miss re-checks the run before answering "absent".
+- **Retention.** Expiry never deletes a folder whose anchor is live; purges deepest namespace first and
+  trash entries last; keeps anchors; deletes stale entries alone; skips a folder with any entry younger
+  than the cutoff; deletes expired shares of its domain and their cached artifacts; never deletes a
+  journal entry younger than the horizon or the one the cursor names; leaves chunks to the collection.
+- **Exclusion.** A second collection of the same main, from another process or the same process, is
+  refused as busy.
+- **GC behaviour.** A chunk referenced by any live manifest, version or trashed manifest is kept; a
+  second run right after a completed one deletes nothing; `abort` restores every chunk still in F;
+  with `verify`, a referenced chunk that does not hash to its key is kept and marked, never deleted;
+  deleting a chunk deletes its corruption marker; a chunk only a copy holds survives on that copy; a
+  collection never copies chunks to, or fills, a copy.
+- **Purge.** Purging a named path never trashed answers "not in trash"; purging a trashed folder that
+  is anchored elsewhere is refused.
+- **Cost.** Starting a run lists nothing; marking lists each namespace once and needs no presence
+  check per chunk; resuming does not redo finished units; closing lists only the shards the main holds,
+  never lists a copy, and asks copies nothing but deletions.

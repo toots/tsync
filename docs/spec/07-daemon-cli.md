@@ -1,1128 +1,850 @@
-# 07 — Daemon, process model, IPC and CLI
+# 07 — Process model, lifecycle, IPC contract and CLI
 
-Scope: `bin/`, `lib/app/cli` (commands, `Launcher`, `Oneshot`, `Location`, `Daemons`, `Common`),
-`lib/app/cli/runner/daemon/engine` (`Domain_engine`, `Ipc_handler`, `Item_row`, `Ipc_error`),
-`lib/app/cli/runner/daemon/diagnostics` (`Diagnostics`, `Status_report`, `Job_registry`),
-`lib/app/ui` (`Menu`), `lib/app/wizard` (`Wizard`). Also the process-level pieces those sit on
-and nobody else owns: `lib/core/ipc.ml` + `lib/lwt/core/ipc_lwt.ml` (wire transport),
-`lib/core/shutdown.ml` (stop), `lib/lwt/core/change_notice.ml`, `lib/core/job_report.ml`,
-`lib/core/log.ml`, `lib/local/runtime/*` (paths, service manager), `lib/app/frontends/api/frontend.ml`
-(the frontend registry and the fork/reap primitives). Frontend internals (FUSE, File Provider,
-http-proxy, Android) are another spec; only their contract with the launcher/engine is here.
+This file owns:
 
-This file is the language-neutral specification. The [OCaml notes](ocaml/07-daemon-cli.md) hold OCaml implementation
-notes, split into runtime-independent learnings and Lwt/functor-specific ones.
+- the **process model** (principle P1): which process owns which domain on each host, the
+  ownership lock, the machine-level supervisor, the store server, one-shot commands;
+- the **lifecycle**: start order, supervision, stop and its grace, pause;
+- the **IPC contract**: sockets, envelopes, bulk actions and the liveness probe, the supervisor
+  socket, advisory side channels;
+- the **CLI**: every command, its access to a domain, its output and exit status;
+- status collection, logging, the shared menu model and the config wizard.
+
+It does not own: the line-JSON framing and subscription streams ([01 §IPC framing](01-core.md)),
+the request handler and its actions ([08](08-frontends.md)), what an owner owns
+([data-model/local-cache.md](data-model/local-cache.md)), failure kinds and their mapping to codes
+and exit statuses ([algorithms/failure-model.md](algorithms/failure-model.md), including IPC codes §7.2, CLI exit
+status §7.5 and deadlines §8), the uplink lease
+protocol ([algorithms/uplink-governor.md](algorithms/uplink-governor.md)), the durable queue
+([algorithms/durable-queue.md](algorithms/durable-queue.md)), the security model
+([algorithms/security-model.md](algorithms/security-model.md)), and config validation
+([05](05-ops-config.md)).
+
+Implementation notes: [ocaml/07-daemon-cli.md](ocaml/07-daemon-cli.md).
 
 ---
-
 
 ## 1. Problem
 
-tsync is one binary (`tsync`) that is both a long-running service and a toolbox of one-shot
-commands. This subsystem decides:
+tsync is one binary that is both a long-running service and a toolbox of commands. Several
+processes on one machine act on the same domain: a mount, a File Provider extension's daemon side,
+an HTTP server for other machines, a tray, a file-manager plugin, and commands the user types while
+all of these run. A domain's local state (mirror, staged edits, write-ahead log, applied log,
+deferred-job logs, marks) holds the only copy of unpublished user data and the only record of owed
+work. Two processes writing it with process-local locks lose data: one applies a peer's delete
+after checking that no staged edit exists, the other stages an edit, the first discards it.
 
-- **what runs where**: which OS processes exist when the service is up, which of them owns
-  shared per-domain state (mirror, applied-through bookmark, staged tree, deferred-copy queues,
-  link governor), and which merely present a domain to a user (a FUSE mount, a File Provider
-  extension's daemon, an HTTP listener);
-- **how they talk**: a line-delimited JSON request/reply protocol over Unix-domain sockets,
-  shared by the CLI, the macOS File Provider extension (Swift), the tray/menu-bar, the
-  converging parent and the frontends among themselves;
-- **how the service starts and stops**: config-less start, fd limit, forks, supervision of
-  children, a stop bounded by a *grace* (10 s) after which unfinished work is left owed on disk;
-- **how one-shot commands behave beside a running daemon**: they run their own event loop,
-  drain what they owe before exit, report progress to the daemon advisorily, and lease upload
-  bandwidth from it;
-- **how the machine reports on itself** (`tsync status`): one process assembles a report from
-  every other process's self-description, with every fan-out bounded by config width and every
-  leaf by a deadline.
-
-It is separate because the domain library (sync, checkout, backends) is parameterised by a
-domain configuration and knows nothing of processes, sockets or the CLI. Everything
-process-shaped is pushed here, into one place that sees the whole (domain × frontend) matrix.
+This subsystem removes the problem by construction: **each domain has exactly one local owner
+process**, and everything else asks it. It also decides how processes start, stop, talk and report.
 
 ---
 
-## 2. Concepts & data model
+## 2. Process model
 
-### 2.1 Process model (service running)
+### 2.1 Roles
 
-```
-tsync start                         ("sync" process: parent, converges every domain)
- ├─ owns: sync socket  <data_dir>/tsync-sync.sock
- ├─ owns: link governors (uplink "owner"), deferred replica/backfill queues (resume=true)
- ├─ runs per domain: reconcile, sync poller, maintenance sweeps, upload+metadata queues
- │
- ├─ fork: frontend group "fuse"   (topology `Process_per_binding)
- │     ├─ serves last fuse binding itself (FUSE main loop holds main thread)
- │     └─ fork: one child per other fuse binding
- │          each: domain socket <data_dir>/tsync-<domain>.sock (Linux)
- ├─ fork: frontend group "http-proxy" (`One_process, all its domains)
- │          proxy socket <data_dir>/tsync-http-proxy.sock + TCP listener
- └─ fork: frontend group "file-provider" (macOS, `One_process, all domains)
-            one socket <data_dir>/tsync.sock for every domain, routes on "domain"
-```
+| Role | Instances | Owns | Does |
+|---|---|---|---|
+| **Domain owner** | exactly one process per domain per machine at a time | the domain's local state ([local-cache.md](data-model/local-cache.md)) and its ownership lock | converges the domain, resumes its deferred work, runs its queues and maintenance, serves its request interface, hosts the domain's presenting frontend |
+| **Supervisor** | at most one per machine (`tsync start` on Linux) | no domain state; the uplink governor, the supervisor socket, the job registry | starts, restarts and stops owners and the store server; collects status |
+| **Store server** | at most one per machine (the `http-proxy` frontend) | no domain local state | serves domains' stores to other machines; submits the deferred work it causes to owners' logs |
+| **One-shot command** | any number | nothing, unless it takes ownership (§2.5) | acts on stores directly, or asks the owner, or becomes the owner for its duration |
+| **Client tool** | any number (tray, Dolphin plugin, File Provider extension, Android UI) | nothing | asks the owner over its request interface |
 
-- One process per **frontend name** (group), forked from the parent in config order of first
-  appearance (`Launcher.bindings_by_frontend`). Within a group, `topology` decides: one process
-  for all its bindings, or one per binding (`Frontend.run_forked`: the *last* binding runs in
-  the group process, the others in forked children).
-- Frontends whose `serving = Commands hint` (Android) are never run by the launcher; if any
-  configured frontend is such, `tsync start` fails **before the first fork** with `hint`.
-- The parent ("sync") presents no domain. It is the only process that runs convergence work
-  for a domain (commit cb2be7ac): reconcile, poller, sweeps write state shared by all processes
-  of the domain and are arbitrated by none, so exactly one process may run them.
-- Every presenting process runs its **own** upload queue and metadata queue for what it accepted
-  (in-memory workers; each posts only what it was handed). Presenting (`Domain.start`) never
-  runs reconcile/poller.
-- Frontend processes are **lessees** of the upload link and **recorders** of replica jobs; the
-  parent is the link **owner** and **runner** of replica jobs (`Domain.start_resumed` only in
-  the parent).
-- One-shot CLI commands are separate processes, also lessees, which run and drain their own
-  deferred work (`resume=false`).
+A process MAY own several domains. It then holds one ownership lock per domain and keeps each
+domain's state and serialisation separate.
 
-### 2.2 Runtime paths (`lib/local/runtime`, selected at build time per OS)
+### 2.2 The domain owner
 
-| | Linux | macOS |
+The owner is the only process that mutates the domain's local state. It:
+
+1. holds the domain's **ownership lock** (§2.3) for as long as it touches that state;
+2. **converges** the domain: reconciles owed work at start
+   ([wal-and-journal.md](algorithms/wal-and-journal.md)), applies peers' journal entries (unless
+   the host's tree is pulled, [08 §2.1](08-frontends.md)), runs maintenance (§6);
+3. **resumes** every deferred-job log of the domain: it is the log's only resumer
+   ([durable-queue.md](algorithms/durable-queue.md));
+4. runs the domain's upload and metadata queues; every local change, whichever client asked for it,
+   is posted to these queues;
+5. serves the domain's **request interface** ([08 §3](08-frontends.md)) on its socket, or by direct
+   call in an embedded host;
+6. hosts the domain's presenting frontend, if the domain has one (§2.4).
+
+Within the owner, every check-then-act on local state MUST be serialised per domain for metadata
+(names, folders, the WAL, the applied log, marks) and per key for content (staged bodies, cache
+bodies, pins), whichever client, queue, poller or sweep performs it. A change applied from a peer,
+a local edit arriving from any frontend, reconcile and every sweep take the same locks. No lock
+spans processes, because no other process writes.
+
+Other processes MAY **read** owner files that are replaced atomically (mirror entries, markers,
+pins, the default-domain file) for advisory answers (`tsync ls`, path resolution, availability,
+shell completion). Such a reader MUST tolerate the file changing or vanishing between two reads and
+MUST NOT write anything based on what it read.
+
+Other processes MAY **submit** work by creating a new, durable record in one of the domain's logs
+(its deferred-job logs, its WAL), as
+[durable-queue.md §4.2](algorithms/durable-queue.md#42-ownership) specifies: that is the only write a
+non-owner makes under the domain's local state. The submitter then pokes the owner (`poll`, §4.6).
+Only the owner reads, runs and removes records, and **only the owner mints journal entry keys and
+publishes journal entries** ([wal-and-journal.md §4.9](algorithms/wal-and-journal.md#49-one-owner-per-domain)):
+a command that publishes files puts their chunks and manifests on the store and submits the WAL
+record that announces them ([durable-queue.md §7.3](algorithms/durable-queue.md#73-kill-point-walkthrough-publishing-without-a-local-staged-edit)).
+
+### 2.3 The ownership lock
+
+- One lock per domain, a file in the data directory (§2.7), taken **non-blocking** and exclusively.
+- The lock MUST be released by the kernel when the holder dies, MUST NOT be released by an
+  unrelated close of the same file inside the holder, and MUST NOT be inherited by processes the
+  holder spawns. (Open-file-description locks or `flock` on a close-on-exec descriptor satisfy
+  this; POSIX `lockf` does not, because any close in the process drops it.)
+- After acquiring, the holder writes an advisory **holder record** into the lock file:
+  `{"pid":<int>,"role":"daemon"|"command"|"app","what":"<e.g. tsync import>","socket":"<path>"|null}`.
+  The kernel lock is authoritative; a record read while the lock is free means no owner.
+- A process that fails to acquire the lock MUST NOT touch the domain's local state (except the
+  permitted reads and inbox submissions of §2.2). It reads the holder record to find the owner's
+  socket or to name the holder in a refusal.
+- The lock is released only at process exit, or by a one-shot command after its drain (§3.5).
+- A process started as an owner that finds the lock held exits with status `OWNER_HELD` (§3.3).
+
+### 2.4 Which process owns which domain
+
+On a host with a supervisor, it assigns each configured domain to exactly one owner process:
+
+1. A domain presented by a frontend whose descriptor declares **per-domain topology** (`fuse`) is
+   owned by its own process, which also hosts the mount.
+2. A domain presented by a frontend whose descriptor declares **shared topology**
+   (`file_provider`) is owned by that frontend's single process, which owns every such domain.
+3. A domain with no presenting frontend (only `http-proxy`, or none) is owned by a **headless
+   owner** process of its own.
+
+Config validation guarantees at most one presenting frontend per domain ([05 §2.1](05-ops-config.md)).
+The supervisor role is optional (P1): a host MAY have none. On macOS there is none: the service
+process the launch agent starts owns every configured domain itself (the File Provider framework
+talks to one process), holds the governor, and starts the store server as its child ([file-provider.md §2](frontends/file-provider.md#2-processes-and-ownership)).
+
+| Host | Owner of each domain | Supervisor | Converges | Uplink governor |
+|---|---|---|---|---|
+| Linux service | one process per domain: the FUSE mount process, or a headless owner | `tsync start` | yes, the owner | the supervisor |
+| macOS service | the service process started by the launch agent: it owns every domain (the `file_provider` ones and any other) and is restarted by the launch agent on any unclean exit | none: the service process starts the store server itself | yes, the owner | the service process |
+| Android | the app process, for each domain it opens | none | reconcile, maintenance, deferred resume; no journal poller (pulled tree, [android.md §3.2](frontends/android.md#32-freshness-without-a-journal-poller)) | the holder of the machine-wide governor lock |
+| One-shot command | itself, only when it takes ownership (§2.5) | — | recovery and deferred resume at acquisition; no polling | leased, else the governor lock's holder |
+
+The uplink governor's owner is the supervisor where there is one, otherwise the holder of the
+machine-wide governor lock ([uplink-governor.md §4.5](algorithms/uplink-governor.md#45-governor-ownership-and-the-lease-protocol)).
+
+The store server is never an owner. What it needs of a domain is its configuration and its
+composite store. Writes it accepts reach the mains synchronously; the deferred copies they cause are
+submitted to the domain's deferred-job logs (§2.2) with a poke to the owner, never run by the store
+server. Share content is streamed
+from the stores and never passes through the owner's chunk cache. It keeps no other domain state.
+
+### 2.5 One-shot commands
+
+Each command has an **access class**. It decides what the command may do beside a running owner.
+
+| Class | Commands | Beside a serving owner | No owner | Owner held but not serving |
+|---|---|---|---|---|
+| **none** | `config`, `default-domain`, `build-info`, `logs`, `status`, `start`, `stop`, `restart` | n/a | n/a | n/a |
+| **read** | `ls`, `versions` (listing), `trash` (listing), `export` | reads stores and permitted local files | same | same |
+| **store** | `expire`, `gc`, `mirror`, `data-integrity`, `share`, `trash --purge` | writes stores directly; submits deferred work to the inbox and pokes the owner | as beside an owner; then takes ownership to settle what it submitted (§3.5) | submits to the inbox; the holder runs it |
+| **publish** | `import`, `rsync` with a domain side, `trash --restore` | puts chunks, manifests and markers on the store and submits the WAL records announcing them; the owner publishes the journal entries and updates its mirror | takes ownership for its whole run and publishes itself | submits; the holder publishes at its next rescan |
+| **owner** | `pause`, `resume`, `retry`, `set-aside`, `cache --evict/--fetch/--prune`, `versions --revert`, `sync`, every `<group> <verb>` whose frontend declares it owner-class (the whole desktop `tsync android` group) | sends the request to the owner | takes ownership for its run and performs the request itself | refuses with `busy`, naming the holder |
+
+"Serving" means the holder record names a socket and the socket answers. A command that takes
+ownership is an owner for its duration with every duty of §2.2 except continuous journal polling,
+and it runs the owner's drain before releasing the lock.
+
+Commands in the **store** and **publish** classes refuse while the domain is paused (§2.6).
+
+### 2.6 Pause
+
+`pause` stops **everything that changes the domain** on this machine, persistently:
+
+- publishing local changes (the upload and metadata queues);
+- applying peers' journal entries (the poller holds; it MAY still list the journal to report how far
+  behind it is);
+- forwarding deferred work to replicas and backfills;
+- one-shot commands of the **store** and **publish** classes, owner requests that write stores
+  directly (`revert`, `share`) and owner jobs that apply or rebuild (`sync`): these refuse with
+  `paused` ([08 §3.3](08-frontends.md) marks them).
+
+It does not stop: reads and the fetches they cause, local edits (accepted, staged, recorded and
+held in the queues), local cache maintenance, requests from the store server's remote clients (their
+own changes, paused only on their own machines), `stop`.
+
+Rules:
+
+- The pause state is per domain and is **persisted** by the owner as a flag file (§2.7), written
+  durably ([durable-queue.md](algorithms/durable-queue.md) P2) before `pause` is acknowledged, and
+  removed durably before `resume` is acknowledged. An owner reads it at start before starting any
+  queue or the poller.
+- A command that finds no owner reads the flag file itself.
+- A drain completes while paused: a paused queue does not delay a stop; what it holds stays owed on
+  disk.
+- `status` reports `paused` from the owner's state.
+
+### 2.7 Runtime paths
+
+| Item | Linux | macOS |
 |---|---|---|
-| config | `$XDG_CONFIG_HOME/tsync/config.json` (default `~/.config/...`) | `~/Library/Group Containers/group.org.feverdreamtv.tsync/config.json` |
-| data_dir | `$XDG_DATA_HOME/tsync` (`~/.local/share/tsync`) | `<group container>/tsync` |
-| cache_root | `$XDG_CACHE_HOME/tsync` (`~/.cache/tsync`) | `<data_dir>/cache` |
-| domain socket | `<data_dir>/tsync-<domain>.sock` (per domain: each FUSE domain is its own process) | `<data_dir>/tsync.sock` (same for every domain; routed by `domain`) |
-| proxy socket | `<data_dir>/tsync-http-proxy.sock` | same |
-| sync socket | `<data_dir>/tsync-sync.sock` | same |
-| default domain | `<data_dir>/default-domain` (one line, the name) | same |
-| resync generation | `<data_dir>/resync-<domain>` (decimal ms timestamp) | same |
-| restart | `systemctl --user restart tsync` | `pkill -f <app>`; `launchctl kickstart -k gui/$UID/org.feverdreamtv.tsync.daemon`; `open -a /Applications/TsyncApp.app` |
+| config | `$XDG_CONFIG_HOME/tsync/config.json` (default `~/.config/…`) | `~/Library/Group Containers/group.org.feverdreamtv.tsync/config.json` |
+| data dir | `$XDG_DATA_HOME/tsync` (default `~/.local/share/tsync`) | `<group container>/tsync` |
+| cache root | `$XDG_CACHE_HOME/tsync` (default `~/.cache/tsync`) | `<data dir>/cache` |
+| owner socket | `<data dir>/tsync-<domain>.sock` (one per owner) | `<data dir>/tsync.sock`, the service process's one socket for every domain (routes by `domain`) |
+| store-server socket | `<data dir>/tsync-http-proxy.sock` | same |
+| supervisor socket | `<data dir>/tsync-sync.sock` | same |
+| ownership lock | `<data dir>/owners/<domain>.lock` | same |
+| governor lock | [uplink-governor.md §4.5](algorithms/uplink-governor.md#45-governor-ownership-and-the-lease-protocol) | same |
+| pause flag | `<data dir>/paused/<domain>` (present = paused) | same |
+| resync generation | `<data dir>/resync-<domain>` ([08 §2.5](08-frontends.md)) | same |
+| default domain | `<data dir>/default-domain` (one line, the name) | same |
+| restart (through the service manager, never by signalling processes found by name) | `systemctl --user restart tsync` | `launchctl kickstart -k gui/$UID/org.feverdreamtv.tsync.daemon`, then open the app |
 | log reader | `journalctl -t tsync -n N [-f]` | `tail -n N [-f] ~/Library/Logs/tsync-daemon.log` |
 
-Socket directories are created `0700` by the server before binding.
+`$TSYNC_CONFIG_JSON`, when set, is the config text itself and overrides the file. Modes and
+ownership of the data dir and of every directory holding a socket, lock or flag:
+[security-model.md §7.1](algorithms/security-model.md#71-socket-directory-and-files).
 
-Service units (`linux/tsync.service` user unit, `linux/tsync@.service` system instance for
-packages): `ExecStart=tsync start`, `ExecStop=tsync stop`, `Restart=on-failure`, `RestartSec=5`,
-`TimeoutStopSec=30`, `LimitNOFILE=65536`. The system instance must **not** use
-`ProtectHome`/`PrivateTmp`/`PrivateMounts` (private mount namespace hides the FUSE mount).
-macOS: LaunchAgent plist `org.feverdreamtv.tsync.daemon`, `RunAtLoad`, `KeepAlive
-{SuccessfulExit=false}` (restart on crash, respect clean exit 0), stdout/stderr to
-`~/Library/Logs/tsync-daemon.log`; installer removes a stale `tsync.sock` first.
+A socket path longer than the platform's limit for a Unix socket address cannot be bound. The
+supervisor and every owner MUST check the length before binding and fail with a sentence naming the
+domain and the limit.
 
-### 2.3 Wire protocol (all sockets)
+### 2.8 Service units
 
-- Transport: `AF_UNIX`, `SOCK_STREAM`. Framing: **one JSON object per line** (`\n`-terminated),
-  request then reply, strictly alternating on a connection. A connection carries any number of
-  requests until the client closes it (the File Provider asks constantly; one connect per
-  question buys nothing). A connection may be converted into an **event stream** by `subscribe`.
-- TCP_NODELAY is never set on these sockets (`~set_tcp_nodelay:false` on both server and
-  client): macOS answers `EINVAL` on setsockopt for a peer that already hung up, which killed the
-  accept loop (d8f854af; memory note lwt-unix-server-nodelay-einval).
-- Request envelope: `{"action": "<verb>", "domain"?: "<name>", "ref"?: "<item ref>", "arg"?: "<string>", ...action fields}`.
-  `domain` omitted addresses a daemon serving exactly one domain.
-- Reply envelope, success: `{"ok": true, ...fields}`. Failure:
-  `{"ok": false, "code": "<code>", "error": "<prose>"}`. Clients act on `code`, never on prose.
-  (The File Provider router's own routing errors omit `code` — see §9.)
-
-Error codes (`Ipc_error`), and exception → code mapping (`Ipc_error.of_exn`):
-
-| code | from |
-|---|---|
-| `not_found` | `ENOENT`; `Share_not_found`; `Failure "no versions for..."`; unresolvable ref |
-| `exists` | `EEXIST` |
-| `not_empty` | `ENOTEMPTY` |
-| `read_only` | `EROFS`; `Backend.Not_writable`; mutating action on a `readOnly` domain |
-| `unreachable` | `Backend.Backend_error`; any timeout; `Share_unavailable` |
-| `denied` | `EPERM`, `EACCES` |
-| `invalid` | `Invalid_argument`; bad JSON; missing/invalid fields; unknown action |
-| `internal` | everything else (retried by callers: one unexplained failure costs one op, not the domain) |
-
-`unreachable` tells the caller "the store is the problem, stop trying"; the macOS side maps
-codes to File Provider errors, some of which make the system back off until signalled, so the
-mapping must be conservative.
-
-### 2.4 Item references (wire names for items)
-
-`Item_ref` (defined in core, used heavily here). Wire forms:
-
-- `root`
-- `d:<folder id>` — a directory, by its stable folder id (survives renames).
-- `f:<parent folder id>/<leaf>` — a file, by its parent's id and its own name. The root's folder
-  id is `.tsync-root`, e.g. `f:.tsync-root/a.txt`.
-- anything else parses to `Bad` (a storage key included — a key carries no kind).
-
-Resolution to a logical key happens **only** in `Ipc_handler` (and `Location.item` on the CLI
-side); it mints nothing (a read that minted would persist a marker and resurrect a deleted
-folder). Unresolvable → `not_found`. A `f:` ref must not answer for a folder (`expect` kind).
-
-### 2.5 Item row (the one shape of listing/stat/change rows)
-
-`Item_row.fields`, in this order:
-
-```json
-{"ref":"f:.tsync-root/a.txt","parentRef":"root","name":"a.txt","kind":"file",
- "size":5,"mtime":1727600000.0,"etag":"650e58ac64da6e0a","isUploaded":true,
- "symlinkTarget"?: "...", "trashed"?: true,
- "availability"?: "online-only"|"cached"|"pinned", "pinnedUntil"?: <epoch float>}
-```
-
-- `kind`: `dir | file | symlink`.
-- `etag`: content hash (`h1`) of the published manifest; `""` for a file with unsynced edits;
-  for a directory, its own folder id (constant for the folder's lifetime; `mtime` 0, `size` 0),
-  so watchers are not told a directory changed on every look.
-- `trashed` only when set; `availability` only for files; `pinnedUntil` only when pinned.
-- Root row: `ref:"root"`, `parentRef:"root"`, `name:<domain name>`, `etag:".tsync-root"`.
-
-### 2.6 Paging cursors
-
-- `list_dir`: entries of one folder sorted by name (`compare` on bytes, files and folders
-  interleaved), `limit` default **1000**. Cursor = the **last served name** (`"next":"mid"`);
-  resume filters `name > after`. Stateless: a fresh process answers the same page; insertions
-  before the cursor shift nothing.
-- `list_all`: whole-domain walk sorted by path, `limit` default 1000. Cursor
-  `"<walk>:<n>"` where `<walk>` = decimal ms timestamp of the walk, `<n>` = 0-based line index of
-  the last entry served. The walk is persisted between pages at
-  `<cache_root>/<scratch dir for domain>/.tsync-list-all`: line 1 header
-  `{"walk":"<ms>","skipped":<n>}`, then one JSON line per entry
-  `{"path":"a/b.txt","container":"<folder id>","kind":"file","size":5,"mtime":1.0}` or
-  `{"path":"a","container":"<id>","kind":"dir"}`. Written atomically, best-effort; never
-  invalidated by changes (the change feed carries what moved after the anchor). Missing file
-  (a resync empties scratch) → re-walk and continue at the same line number (logs a warning if
-  walk ids differ). A cursor whose prefix before `:` is not all digits (old `<container>/<name>`
-  form) restarts the listing. Line numbers are used instead of `container/name` because one
-  folder id can sit at several mirror paths and a name cursor could loop forever.
-- Both: fetch `limit+1` to decide whether to emit `next`. Items the client cannot name (under a
-  folder with no known id) are omitted and **counted** in `"unnamed": N` (plus a warning
-  suggesting `tsync sync --full`); for `list_all` an unnameable folder's subtree counts once more.
-
-### 2.7 Change feed anchors
-
-`changes_since` / `cursor` anchors: `"<generation>|<journal entry key>"`, entry key `""` for a
-caller that has never synced. `<generation>` is the content of `<data_dir>/resync-<domain>`
-(trimmed; `""` if absent), stamped with the current ms time by `full_resync`. An anchor issued
-under another generation → `{"ok":true,"stale":true}` (the reader re-lists). Answers come from
-the locally kept **applied** entries (`Applied_entries`), never from the store, and are not
-filtered by author (a CLI change must reach the mount; the client uuid is per machine).
-
-### 2.8 Status report JSON (what `tsync status --json` prints)
-
-Per-process self description (`Diagnostics.self_json`):
-
-```
-server:  {hostname, pid, startedAt, uptimeSeconds, loadAvg?, frontend, serves:[domains], ...extra}
-process: {cpuSeconds, cpuPercent, cpuPercentAvg, rssBytes, privateBytes, swappedBytes,
-          heapBytes, topHeapBytes, minorCollections, majorCollections}
-backend: {<counter>: int ...}      pools: [{name,inFlight,waiting,max}]
-uplinks: {<link>: governor figures} lwt: {readableFds, writableFds, timers, poolSize}
-traffic: {...}                      recentErrors: [{t, level, message}]  (last 50 warn/err)
-```
-
-`cpuPercent` is over the interval since the previous report (reports <1 s apart reuse the last
-figure; first report = lifetime average).
-
-Per-domain body (`Diagnostics.Make.domain_json`): resolved config (`name, clientName,
-versioning, symlinks, domainReadOnly, chunkSize, cacheChunkSize, maxCache, maxUploads,
-maxChunkBuffers, maxDownloads, uplinks, cacheRoot, dataDir, socketPath, domainPrefix,
-chunkPrefix`), `mainOffline?`, `cache {chunks, bytes, pinnedBytes, maxCache, manifests?}`,
-`wal {pending, intent, prepared, executed, stuck, lastError}`, `frontends [...]`,
-`backends [{name, type, role, link?, config, reachable, latencyMs, error, journal{entries,
-behind, cursor, lastSync}|{counting}|{error}, corrupted{checked, chunks?, truncated?},
-disk?{availableBytes,totalBytes}, <link json>, <health json>, totals?}]`.
-
-Machine report (`Status_report.of_answers`): `{host, domains:[...], processes:[...], jobs:[...],
-warnings:[{level, message, count, firstAt, lastAt, sources:[{frontend,pid,count}]}]}`. With
-`--json` the CLI prepends `"t": <now>`.
-
-### 2.9 Job report (one-shot → daemon, every 10 s)
-
-```json
-{"action":"report","kind":"import","domain":"Files","pid":979109,"startedAt":...,
- "uptimeSeconds":...,"intervalSeconds":10.0,"state":"running"|"done"|"failed","error"?:"...",
- "memory":{rssBytes,privateBytes,swappedBytes,virtBytes,systemUsedBytes,systemTotalBytes},
- "gc":{heapBytes,topHeapBytes,minorCollections,majorCollections,liveBytes?},
- "traffic":{...},"backend":{...},"pools":[...],"uplinks":{...},
- "counters":{"files":2499,"planned":6000,...},"target"?:"/media/stage","current"?:"...",
- "backends"?:[{name, ...link json}], ...Job_progress fields}
-```
-
-`liveBytes` is sampled every 6th tick (it costs a GC walk). `kind` values used:
-`sync`, `sync --full`, `mirror`, `mirror --manifests`, `mirror --path`, `import`, `export`,
-`rsync`, `gc`, `gc --abort`, `data-integrity`, `data-integrity --verify`,
-`data-integrity --repair`.
-
-### 2.10 Change notice (parent → frontends)
-
-`{"action":"changed","domain":"<name>","keys":["<logical key string>", ...]}` sent to every
-socket a domain's frontends answer on. Batched: a per-domain set of pending keys, flushed
-**0.2 s** after the first pending key, in chunks of at most **512** keys; flush loops until the
-set is empty. Failure is logged once per domain (warn) and otherwise ignored.
-
-### 2.11 Other constants
-
-| constant | value | where |
-|---|---|---|
-| `Shutdown.grace` | 10 s | stop budget |
-| drain inner race | 0.8 × grace | queues give way before cursor flush |
-| reaper deadline | grace + 2 s, poll 50 ms, then SIGKILL | `Frontend.reap` |
-| `Ipc.Make.send` default timeout | 2 s | async client |
-| rescan / uplink lease send timeout | 1 s | |
-| rescan debounce | 0.5 s | `Launcher.ask_rescan` |
-| `Status_report.cold_timeout` | `Health.probe_timeout` (10) + `listing_grace` (2) + 5 = 17 s | |
-| `Diagnostics.listing_grace` | 2 s | wait on in-flight listing after probe |
-| store state window | 5 s | cached probe/journal/corruption |
-| listing timeout | 30 s | journal / corruption listings |
-| corrupted sample | 1000 (+1 to detect truncation) | |
-| sampled shards | 16 of `Chunk_layout.shards` | chunk count estimate |
-| `Job_registry` stale | max(45 s, 4 × interval); finished kept 300 s | |
-| `Subs.max_queued` | 256 per subscriber, drop oldest | |
-| blocking pool | `min 256 (max 32 (8 × Σ(maxUploads+maxDownloads)))` | per process |
-| fd soft limit target | 8192 (never lowered) | `tsync start` |
-| housekeeping interval | 60 s | maintenance |
-| default page / changes limit | 1000 / 512 | |
-| share link lifetime (IPC `share`) | 7 days | |
-| `Log.recent` | 50 warn/err | |
-| status `--watch` | redraw every N s, clear screen with `ESC[2J ESC[H` (not in `--json`) | |
+- Linux user unit `tsync.service` and system template `tsync@.service` (`User=%i`): `ExecStart=tsync
+  start`, `ExecStop=tsync stop`, `Restart=on-failure`, `RestartSec=5`,
+  `RestartPreventExitStatus=78`, `TimeoutStopSec` greater than `STOP_WAIT` (§3.4),
+  `LimitNOFILE=65536`. The system unit MUST NOT use `ProtectHome=`, `PrivateTmp=` or
+  `PrivateMounts=`: a private mount namespace hides the FUSE mount from everyone else.
+- macOS launch agent `org.feverdreamtv.tsync.daemon`: `RunAtLoad`, `KeepAlive {SuccessfulExit=false}`
+  (the service process, which owns every domain, is restarted on any unclean exit), output to
+  `~/Library/Logs/tsync-daemon.log`.
 
 ---
 
-## 3. Interface
+## 3. Lifecycle
 
-### 3.1 The frontend seam (a plugin interface with several implementations)
+### 3.1 `tsync start` (the supervisor)
 
-A **frontend** is one way of presenting a domain to a user. It is registered by name at build
-time (the binary's set of frontends is decided by what is linked in) and describes itself with:
+1. Initialise daemon logging (§5.7).
+2. No config file, or a config with no domains: say so on stderr and **exit 0**. An installer starts
+   the service before configuration; a non-zero status would make the service manager respawn it.
+3. Load and validate the config ([05 §2](05-ops-config.md)). Invalid: print the error and exit with
+   status **78** (`EX_CONFIG`), which the Linux units exclude from restarts.
+4. Refuse, before starting any process, a configured frontend whose descriptor is `Commands`
+   ([08 §2.1](08-frontends.md)), with that frontend's own refusal text, and a frontend that is not
+   compiled into this binary ("configured but not compiled into this binary").
+5. `--mount P` replaces the FUSE mount point only when exactly one domain is configured; otherwise
+   it is refused. `--tls` overrides the TLS implementation for every process it starts.
+6. Raise the descriptor soft limit to the hard limit, capped at `FD_SOFT_TARGET`, never lowering it.
+7. Take the supervisor role: refuse to start if another supervisor answers on the supervisor socket
+   ("tsync is already running", exit 1).
+8. Start one owner process per owner assignment (§2.4) and the store server if any domain lists
+   `http-proxy`. Each child MUST start with no runtime state inherited from the supervisor other
+   than its arguments and environment: it is either a fresh execution of the binary or a fork made
+   before the supervisor created any event-loop, thread-pool or socket resource.
+9. Become the uplink governor's owner ([uplink-governor.md §4.5](algorithms/uplink-governor.md#45-governor-ownership-and-the-lease-protocol))
+   and serve the supervisor socket. Failure to bind is fatal (exit 2): without the socket no stop and no lease is
+   heard, and a restart by the service manager is better than running deaf.
+10. Supervise (§3.3) until a stop is requested (§3.4).
 
-| property | values | meaning |
+On macOS, steps 7–9 are replaced by: take the governor lock, start the store server if configured,
+and run the owner start (§3.2) for every configured domain in this process.
+
+The order between the supervisor's socket and its children's start is not load-bearing: a lessee
+that cannot reach the supervisor governs its own link and keeps renewing.
+
+### 3.2 Owner start
+
+In order:
+
+1. Acquire each owned domain's ownership lock (§2.3); on failure exit `OWNER_HELD`. Write the
+   holder record.
+2. Build the domain from config ([05 §3](05-ops-config.md)).
+3. Read the pause flag.
+4. Local recovery of the checkout, including the exact staged-orphan sweep and the temporary-file
+   sweep ([04 §4.10](04-checkout-cache.md#410-owner-start-local-recovery)).
+5. Start the upload and metadata queues (paused if flagged), then **reconcile**
+   ([wal-and-journal.md §4.7](algorithms/wal-and-journal.md#47-crash-recovery-reconcile)): recovery
+   posts through the queues, so they run first.
+6. Start every log of the domain with recovery, adopting submitted records
+   ([durable-queue.md §4.2](algorithms/durable-queue.md#42-ownership)).
+7. Start the journal poller (held if paused; not at all for a pulled tree) and periodic maintenance.
+8. Serve the owner socket, then publish the recovery notice for each owned domain
+   ([08 §3.8](08-frontends.md#38-events)), so a client latched on a router's "not served" answer clears.
+9. Present: mount FUSE, or signal the File Provider system, as the frontend specifies.
+10. Serve until stopped.
+
+Nothing is presented before reconcile has finished its local part: a client never sees a mirror
+that recovery is about to change underneath it.
+
+**Starting on existing state.** An owner starts on whatever local state it finds, with no
+conversion step: every local file is read under the definitions of its owning file
+([04](04-checkout-cache.md), [local-cache.md](data-model/local-cache.md),
+[durable-queue.md](algorithms/durable-queue.md), [03](03-journal-sync.md),
+[05 §4.4](05-ops-config.md#44-export)), and the owed work it holds continues. For the files this file
+owns:
+
+- an absent ownership lock file means the domain is unowned; the owner creates it;
+- an absent pause flag means not paused;
+- a file that exists at a socket path is removed and the path bound afresh by the process that
+  serves it;
+- a file in a log directory that does not match the record grammar is ignored and never blocks
+  adoption of a record ([durable-queue.md §4.2](algorithms/durable-queue.md#42-ownership)): the
+  ownership lock is the only claim.
+
+### 3.3 Supervision
+
+- The supervisor waits on its children. A child that exits while no stop is requested is restarted
+  after a backoff that starts at `RESTART_BACKOFF_MIN` and doubles up to `RESTART_BACKOFF_MAX`; the
+  backoff resets after the child has run for `RESTART_STABLE`. Each restart is logged with the exit
+  status.
+- Exit statuses of an owner: 0 clean stop; 1 failure (including a dead event loop, §3.7);
+  `OWNER_HELD` (75) the domain is owned by another process (for example a `tsync sync` running as
+  owner) — retried with the same backoff, logged at info.
+- A FUSE mount unmounted from outside ends its owner with status 0; the supervisor restarts it like
+  any other exit, since no stop was requested.
+- No restart happens once a stop is requested.
+- On macOS the launch agent restarts the service process on any unclean exit; the service process
+  restarts its store-server child as above.
+
+### 3.4 Stop
+
+Triggers: `tsync stop` (IPC `stop`), SIGTERM or SIGINT, the service manager's stop.
+
+**Stop signal.** Each process has one process-wide stop flag with hooks
+([01](01-core.md) shutdown). Requesting it is idempotent. Backoffs, retry ladders, queue workers and
+uplink waits give way with STOPPING ([failure-model.md](algorithms/failure-model.md)): owed work is
+left untouched on disk, never counted as a failure, never cancelled into a completed record.
+
+**Owner stop.**
+
+1. Stop accepting new requests on its socket except `stats`, `status` and `stop`, which stay
+   answerable during the drain.
+2. Begin un-presenting concurrently with the drain (unmount FUSE: [frontends/fuse.md §6.2](frontends/fuse.md)).
+3. Drain every owned domain concurrently, raced against `GRACE`. The race MUST NOT cancel the
+   drains: a cancelled job would be recorded as a failure of work that was merely unfinished.
+4. Per-domain drain, in order: metadata queue, then upload queue (a published rename names the file
+   an upload behind it is for), this pair raced against `QUEUE_GRACE_FRACTION × GRACE`; then flush the
+   coalesced cursor bump so peers hear of uploads that finished; then settle the deferred-job logs
+   ([durable-queue.md §4.8](algorithms/durable-queue.md#48-settle-stop-and-pause)), all within the
+   grace.
+5. On timeout, log "still busy after GRACE; what is left is owed on disk and resumes at the next
+   start".
+6. Close and remove its socket (exactly once, by the server that bound it), release the ownership
+   locks by exiting.
+
+The File Provider process follows the same protocol for all its domains; its stop is bounded by the
+same grace.
+
+**Store server stop.** Stop accepting HTTP requests, settle in-flight ones and the inbox submissions
+they owe, raced against `GRACE`; then close its socket and exit.
+
+On macOS the service process is the owner and has no supervisor: it stops as an owner, and stops its
+store-server child as the supervisor would.
+
+**Supervisor stop.**
+
+1. Tell every child at once (SIGTERM), not after anything else: a child that has children of its own
+   then stops alongside them within one grace.
+2. Reap: poll children every `REAP_POLL` until `GRACE + REAP_MARGIN`; then SIGKILL the rest and reap
+   them. Unregister the children afterwards so a later signal never reaches a recycled pid.
+3. Keep the supervisor socket answering `stats` and `stop` until the children are reaped, then close
+   it and exit 0.
+
+`STOP_WAIT = GRACE + REAP_MARGIN + REQUEST_DEADLINE` ([failure-model.md §8.3](algorithms/failure-model.md#83-parameters)) bounds a whole-machine stop. Service
+managers' stop timeouts MUST exceed it.
+
+### 3.5 One-shot lifecycle
+
+1. Load and validate config; fail before any terminal output.
+2. If the command's class needs it (§2.5), find the owner or take ownership.
+3. Lease the uplink from the governor's owner, or become it (§2.4).
+4. Start a job report (§4.6) if the command reports.
+5. Run the body.
+6. Drain: if it is the owner, run the owner's drain; otherwise its submissions are already durable,
+   and it pokes the owner.
+7. Finish the job report (`done` or `failed`).
+8. Release ownership by exiting, **then** decide the exit status: exiting from inside the body skips
+   the drain.
+
+A one-shot owner's drain uses the durable queue's command settle
+([durable-queue.md](algorithms/durable-queue.md) `settle_all`): it runs what it holds to completion,
+bounded by the settle timeout; what remains is owed on disk for the next owner.
+
+### 3.6 Embedded host (Android)
+
+The app process is the owner of the domains it opens. The platform kills it without warning, so it
+MUST be correct with no drain: every operation's state is durable before it is acknowledged, and
+the next owner start reconciles and resumes whatever was owed. It runs no supervisor, no socket and
+no journal poller; requests arrive by direct call through the same request handler (same JSON, same
+error codes). CLI verbs driving the Android frontend on a desktop (`tsync android <verb>`) are
+**owner**-class commands.
+
+### 3.7 Event-loop hosting
+
+- All domain state is touched only by the owner's scheduler. Platform threads (FUSE workers, JNI
+  threads) submit a closure to the scheduler and block only themselves until it completes. An OS
+  error raised by the core passes back to the platform thread unchanged (it is an answer); any
+  other failure is carried back with its original trace.
+- A host whose platform must own the main thread (libfuse) runs the scheduler on another thread;
+  the main thread waits until the scheduler says it is ready before entering the platform loop.
+  The ready signal is also released if the scheduler's body ends without calling it.
+- **Loop death.** If the scheduler itself fails (not a task within it), the process logs the failure
+  with its trace, flushes, and exits with status 1 **without** running exit handlers: they would
+  drain through the dead scheduler and hang. The supervisor restarts it (§3.3).
+- A failure in a background task is logged and never ends the process.
+- The readiness mechanism MUST have no ceiling on descriptor numbers (never `select(2)`): above
+  `FD_SETSIZE` one high descriptor takes the loop down.
+
+---
+
+## 4. IPC contract
+
+### 4.1 Sockets
+
+| Socket | Served by | Answers |
 |---|---|---|
-| `availability(locality, key)` | `online-only` \| `cached` \| `pinned(until)` | where a file's bytes are, for `tsync ls` and item rows |
-| `serving` | `Daemon{topology, listens, start}` \| `Commands(refusal text)` | whether the launcher runs it; `Commands` frontends are driven by `tsync <group> <verb>` or by an app that embeds the core, and the text is what a refusal says |
-| `topology` | `one-process` \| `process-per-binding` | how many processes the launcher forks for it (per binding = its serving call blocks per domain, as a FUSE mount does) — *declared*, the launcher enacts it |
-| `listens` | none \| `domain-socket` \| `proxy-socket` | which socket it answers requests on |
-| `start(served list)` | blocks until shutdown | serve the given bindings |
-| `tree` | `replicated` \| `pulled(refusal text)` | whether it keeps the manifest tree complete locally; a pulled tree has nothing for a full resync to rebuild, so `tsync sync` refuses |
-| `spec` | field specs | what the config wizard asks for |
-| `cli_group`, `commands[{verb, doc, run(domain conf, raw args)}]` | | CLI verbs the frontend contributes; the binary resolves `--domain`, checks the frontend is configured for it, and passes positional args uninterpreted |
+| owner socket | each owner | the request handler ([08 §3](08-frontends.md)) |
+| store-server socket | the store server | `stats` (its own figures with `frontend`, else its full report), `status` (the full report, as `stats` with totals), `ping` (the liveness answer of §4.3), `stop` ([frontends/http-proxy.md](frontends/http-proxy.md)) |
+| supervisor socket | the supervisor | §4.4 |
 
-A **binding** = (domain configuration, the frontend's option map from config, mount point
-(fuse only)). A **served** item = binding + the per-domain engine the launcher built for it
-(§3.2 *presenting* engine) + `peers`: sockets of the domain's *other* frontends (only the
-http-proxy uses it, so its own status page is complete).
+- Framing, line and connection bounds, subscription streams and server robustness:
+  [01 §11](01-core.md#11-ipc-framing). Socket modes, directory checks and the same-uid peer check:
+  [security-model.md §7](algorithms/security-model.md#7-local-ipc-access-control).
+- No process sends change notices to any socket: an owner's frontends learn of changes in-process
+  ([08 §3.2](08-frontends.md#32-hooks)), and the store server keeps no view to refresh.
+- A server binds its path after removing a stale socket file, and is the only process that removes
+  its socket, once, when it stops.
 
-| frontend | serving | topology | listens | tree |
-|---|---|---|---|---|
-| fuse | Daemon | process-per-binding | domain-socket | replicated |
-| http-proxy | Daemon | one-process | proxy-socket | replicated |
-| file-provider (macOS) | Daemon | one-process | domain-socket (one path for all domains) | replicated |
-| android | Commands | — | — | pulled |
+### 4.2 Envelopes
 
-Process primitives the launcher offers frontends:
+- Request: `{"action":"<verb>", "domain"?:"<name>", "ref"?:"<item ref>", "arg"?:"<string>", …}`.
+  `domain` may be omitted only on a socket serving exactly one domain.
+- Success: `{"ok":true, …fields}`. Failure: `{"ok":false,"code":"<code>","error":"<sentence>"}`.
+  **Every failure carries a code**, including a router's own refusals and a malformed item reference
+  (INVALID). The codes and the kinds they stand for are
+  [failure-model.md §7.2](algorithms/failure-model.md#72-client-error-codes); a client treats a missing
+  or unknown code as `internal`. A line that is not JSON is answered exactly
+  `{"ok":false,"code":"invalid","error":"invalid JSON"}`; an unknown action is refused `invalid`,
+  naming it.
+- A reply to `stop` returns control `Stop` to the server only when the stop was accepted.
 
-- `use_event_loop_backend()` — select a readiness backend that has no descriptor-number ceiling
-  (never `select(2)`: above FD_SETSIZE=1024 one high descriptor takes the loop down).
-- `cap_blocking_pool(concurrency)` — size the per-process blocking-I/O worker pool to
-  `min(256, max(32, 8 × concurrency))`, `concurrency = Σ over served bindings of (maxUploads +
-  maxDownloads)` (summed: the pool is per process, the budgets per domain). Must be called in the
-  leaf, after all forking.
-- `fork_each(f, items) -> reaper`: fork one child per item, in list order; the child resets its
-  diagnostics start time, runs `f(item)`, exits 0. Registers a stop hook that SIGTERMs all
-  children the moment this process is asked to stop. `reaper()` = §4.2 reap, then unregister the
-  hook.
-- `run_forked(f, items)`: `fork_each` all but the last item, run the last in this process, reap
-  when it returns (so a failure of the in-process one does not orphan the forked siblings).
+### 4.3 Deadlines, bulk actions and the liveness probe
 
-### 3.2 Domain engine — what a process gets per domain
+Deadlines on both sides of every request are
+[failure-model.md §8.2](algorithms/failure-model.md#82-requests-between-processes). This contract
+designates:
 
-Two roles over the same per-domain machinery:
+- **Bulk actions**, bounded by progress rather than by a total deadline: `ensure_cached`,
+  `fetch_range`, `write` with `await`, `evict` and `restore` of a folder, `sync`, `prune`
+  ([08 §3.3](08-frontends.md) marks them **B**).
+- **The liveness probe** that [failure-model.md §8.2](algorithms/failure-model.md#82-requests-between-processes)
+  requires: `ping`, answered `{"ok":true}` from memory by every server (owner, store
+  server, supervisor), never waiting on a store, a lock held across I/O, or a pool. A client waiting
+  on a bulk action probes on a separate connection.
 
-**Presenting engine** (every process that serves a domain to a user):
+A client that abandons a request closes its connection; the server's work continues and lands for
+the next caller.
 
-| operation | contract |
-|---|---|
-| `file_ops` | the file operations over the domain (checkout, content, staging) |
-| `handler(hooks, line) -> (reply line, control)` | the request handler of §3.6 over `file_ops` |
-| `start(on_upload_done?)` | ensure manifest root; start **this process's** upload queue (each completion runs `on_upload_done` then the after-upload maintenance tasks) and metadata queue |
-| `drain()` | §4.2 domain drain |
-| `stats_fields()` | `pendingUploads, uploadsCompleted, pendingMetadata, metadataDegraded, unappliedEntries, unappliedReason, maintenance[]` |
+### 4.4 Supervisor socket
 
-**Converging engine** (exactly one per domain per machine):
+| action | request | reply | behaviour |
+|---|---|---|---|
+| `stats` | `arg`: comma set of `totals`, `exact`, `reload` | the machine report (§5.5), `ok:true` | `exact` implies totals; `reload` only with totals |
+| `report` | a job report (§4.6) | `ok:true` | recorded in the job registry |
+| `uplink` | lease renewal ([uplink-governor.md §4.5](algorithms/uplink-governor.md#45-governor-ownership-and-the-lease-protocol)) | lease answer | a process that does not own the governor answers without grants |
+| `ping` | — | `ok:true` | liveness probe |
+| `stop` | — | `ok:true` | starts the supervisor stop (§3.4); the socket stays up until children are reaped |
+| other | | `invalid "unknown action: <a>"` | |
 
-| operation | contract |
-|---|---|
-| `start(on_changed: key -> ())` | `start_queue` + start the sync poller (held while paused) whose applied keys are reported to `on_changed` + start periodic maintenance |
-| `drain()`, `stats_fields()` | as above |
+### 4.5 Owner socket
 
-Building blocks, layered:
+The request handler of [08 §3](08-frontends.md), for every domain the owner owns. The owner-level
+actions it includes (`pause`, `stop`, `stats`, `status`, `poll`, `ping`, `subscribe`) are listed
+there with the others.
 
-- `init` — ensure the manifest root exists (all a read-only command needs).
-- `start` — init + upload queue + metadata queue.
-- `start_queue` — start + **reconcile** (recovery replays through the queue, so the queue must be
-  running first). What a lone one-shot command or an embedded host owes.
-- `converge` — start_queue + poller + periodic maintenance.
-- `run_maintenance` — one driver for the declared task list (§4.5).
+### 4.6 Advisory side channels
 
-The checkout implementation is a parameter: the replicated checkout (daemon, CLI) or the lazy
-one that reads a folder when asked (Android).
-
-Process-level helpers:
-
-- `drain_for_stop(drains)` — run all drains concurrently; return when all finish or after
-  `grace`, whichever first; never cancel the unfinished ones.
-- `host_loop(serve, main_thread?, after?)` — run the event loop; `serve` receives `ready()`. With
-  `main_thread`, the loop runs on a second thread and the caller's thread waits for `ready`, then
-  runs `main_thread()` (a platform loop that must own the main thread, e.g. libfuse), then joins.
-  `after` runs on the loop thread after a clean finish. `serve` finishing without calling `ready`
-  still releases the waiter.
-- `host_loop_detached(serve)` — the loop on its own thread for a host whose main thread belongs
-  to a platform (Android); returns once `ready` is called; never joined.
-- `on_loop(f)` — from a platform thread, run `f` on the loop and block only the calling thread
-  until its result; errors are re-raised on the calling thread carrying the original trace.
-- Loop death: if the event loop itself fails (not a task — the dispatcher), log with trace, flush,
-  and terminate the process immediately **without** running exit handlers (they would try to
-  drain through the dead loop and hang). Seen in production: 47 minutes of silence after a TLS
-  read raised inside the dispatcher, outside any task.
-
-### 3.3 IPC transport
-
-Blocking client (one-shot commands): `send(socket, line) -> line` (no timeout);
-`request(socket, fields) -> fields` (raises the daemon's `error` text on `ok:false`);
-`action(socket, verb, ref?, arg?, fields?, domain?)` — optional fields omitted rather than sent
-empty.
-
-Non-blocking client (inside a daemon): `send_async(socket, line, timeout = 2 s) -> line`; timeout
-is distinguishable from other failures.
-
-Server `serve(path, handler, until?, subs?)`:
-
-- `mkdir -p` the parent with mode `0700`; unlink a stale socket; listen.
-- One concurrent task per connection; a connection carries many requests until the client
-  closes it.
-- Per line: `handler(line) -> (reply, control)`; write reply + newline, flush; then
-  `continue` → next line; `stop` → trigger the server stop (idempotent across clients) and end the
-  connection; `subscribe(topic)` → the connection becomes an event stream (§ below), or is closed
-  if the server has no subscriber registry.
-- `until` completing also triggers the stop. On stop: close the listener, **then** unlink the
-  socket path — exactly once, here. Nobody else removes the socket.
-- Handler failure or client EOF ends only that connection.
-
-Subscriber registry: `publish(topic, msg) -> delivered count` (a subscriber registered under
-`""` hears every topic; 0 = nobody listening, not an error); per subscriber a FIFO of at most 256
-messages, overflow drops the oldest (events are hints on top of the journal: loss costs
-promptness, not correctness). A subscription ends when the client goes away (read side hits EOF
-and wakes the writer) or a write fails; either side ends by itself, not by cancelling the other;
-unregistered on exit. Event lines are only ever written on a subscribed connection, so events and
-replies never interleave.
-
-Transport requirement: never set TCP_NODELAY on these sockets (see the [OCaml notes](ocaml/07-daemon-cli.md)).
-
-### 3.4 Process stop signal
-
-A process-wide, one-way flag with hooks:
-
-- `request()` — idempotent; the first call sets the flag and runs every registered hook once, in
-  registration order.
-- `requested() -> bool`.
-- `on_request(f) -> unregister` — runs `f` immediately if already requested.
-- `grace` — seconds a stop may take (10; settable for tests).
-- `interruptible_sleep(s) -> slept | stopping` — returns `stopping` at once if already requested
-  or as soon as it is.
-- Error `Stopping` ("left for the next start"): what backoffs, retry ladders, queue workers and
-  uplink waits fail with. Consumers must treat it as *owed, untouched on disk*: never retried in
-  this process, never counted as a failure, never taken to mean "no longer owed" (distinct from a
-  cancellation that completes a record).
-
-### 3.5 Advisory side channels
-
-All four never fail their caller, log each kind of failure at most once, and are pure hints on top
+All of these never fail their caller, are bounded by the advisory send deadline
+([01 §11](01-core.md#11-ipc-framing)), log each kind of failure at most once, and carry hints on top
 of durable state.
 
-- **Change notice** `send(domain, sockets, key)`: add key to the domain's pending set; if no
-  flush is scheduled, schedule one 0.2 s later; flush takes the whole set, sends it in chunks of
-  ≤512 keys (`changed` action, §2.10) to every socket concurrently, and repeats while keys keep
-  arriving. `settle()`: flush every domain's pending set now (for a process about to exit).
-  Domain with no sockets: ignored.
-- **Job report** `start(socket, domain, kind, target?, interval = 10 s, current?, backends?,
-  counters)`: every interval (sequential — a slow send delays the next), send `report` state
-  `running`; `finish(error?)`: stop the loop and send a last report `done`/`failed`; second call
-  no-op.
-- **Rescan request** (frontend processes): after recording a replica/backfill job it does not run,
-  send at most one `rescan` to the sync socket per 0.5 s window (1 s timeout).
-- **Uplink lease** (every non-owner process): periodic `uplink` renewal to the sync socket
-  (1 s timeout); an unanswered/refused renewal means the process governs its own link. Protocol
-  owned by the uplink spec; the sync socket answers it (§3.6).
+- **Poke.** A process that submitted records to a domain's logs sends `poll` to the domain's owner.
+  No owner answering is not an error: the next owner adopts submitted records at start, and every
+  owner rescans its logs periodically ([durable-queue.md §4.2](algorithms/durable-queue.md#42-ownership)).
+- **Uplink lease.** Every process that writes to stores and does not own the governor renews a lease
+  ([uplink-governor.md §4.5](algorithms/uplink-governor.md#45-governor-ownership-and-the-lease-protocol)).
+- **Job report.** A one-shot command that reports sends `report` to the supervisor every
+  `JOB_REPORT_INTERVAL`, sequentially (a slow send delays the next), with state `running`, then one
+  final report `done` or `failed` (with `error`). Finishing twice is a no-op. `kind` names the command
+  as typed (`import`, `sync --full`, `gc --abort`, …); `progress` carries total, skipped, done,
+  handled and remaining, and an ETA from the run's own rate, absent before anything settled and after
+  completion. A missing supervisor is the ordinary case: reporting never decides whether a command
+  runs.
 
-### 3.6 Actions per socket
+The job registry keys a report by (pid, kind, domain). A running entry not refreshed for
+`max(JOB_STALE_MIN, 4 × interval)` whose pid is gone is dropped; `done` and `failed` entries are kept
+for `JOB_KEEP` after their last report; a new report for a key replaces the old row.
 
-**Domain socket** (fuse per domain; file-provider shared; served by `Ipc_handler.Make(C)(F)(Sq)(Pause)` with frontend `hooks`):
+---
 
-| action | request fields | reply fields | notes |
-|---|---|---|---|
-| `stat` | `ref` or `rel` | item row fields | `rel` (path, `""`=root) for callers holding only a path (desktop menus); kind from mirror |
-| `list_dir` | `ref`/`rel`, `limit?`, `after?` | `items`, `next?`, `unnamed?` | §2.6 |
-| `list_all` | `limit?`, `after?` | same | §2.6 |
-| `changes_since` | `arg`=anchor, `limit?` (512) | `stale`, `cursor`, `more`, `ops`, `unnamed?` | §2.7, §4.4 |
-| `cursor` | — | `cursor` | current anchor |
-| `ensure_cached` | target, `dest` | `localPath` | assemble whole file to `dest` |
-| `fetch_range` | target, `dest`, `offset`≥0, `length`>0 | `localPath, offset, length` (served, short at EOF) | |
-| `create` | `parentRef`, `name` | `item?` | mutating |
-| `write` | `parentRef`, `name`, `staging` (path), `await?` | `size?, mtime?, item?` | adopts staging file in place; cancels an in-flight upload of the key first; `await:true` waits for upload |
-| `delete` | target | — | mutating |
-| `rename` | `ref` (src), `parentRef`, `name` | `item?` (dest) | keeps kind; folder id travels |
-| `mkdir` | `parentRef`, `name` | `item?` | |
-| `symlink` | `parentRef`, `name`, `target` | `item?` | |
-| `rmdir` | target | — | |
-| `revert` | target, `arg`=version ts (`""`=latest) | — | then `hooks.changed key` |
-| `share` | target | `url` | 7-day link |
-| `evict` | target | — | `hooks.evict` (fuse: whole subtree) |
-| `restore` | target, `keep?` seconds | — | `hooks.restore` (fetch + pin) |
-| `full_resync` | — | — | stamps new generation, then `hooks.full_resync` |
-| `status` | — | `domain, running:true, readOnly, paused, pendingUploads, pendingDownloads, uploading:[{name,rel,body?,size?}], downloading:[{name,rel,bytes,size,seconds,rate}], pendingBytes, <process traffic fields>, <hooks.status_fields>` | cheap: no store access (menu poll) |
-| `pause` | `arg`: `"off"` → resume, anything else → hold | — | |
-| `stats` | `arg` = comma set of `totals`,`exact`,`reload`,`frontend` | self_json + `domains:[domain body with frontends:[queues]]` | `frontend` → only this frontend's figures, no cache walk / WAL / probes |
-| `download_progress` | target | `active`, `bytesDownloaded?`, `totalBytes?` | |
-| `changed` | `keys:[logical key strings]` | — | from the parent; `hooks.changed` per key; unknown keys warned |
-| `stop` | — | — | `hooks.on_stop`; control `Stop` |
-| `subscribe` | `domain` (required) | — | control `Subscribe <routed domain>` |
+## 5. CLI
 
-"target" = `ref` or `rel`. Mutating set: `create, write, delete, rename, mkdir, rmdir, symlink,
-revert` (share excluded: share manifests live outside domain roots). Action strings are a wire
-contract with `macos/TsyncFileProvider/IPC.swift`.
+### 5.1 Conventions
 
-Frontend `hooks` record: `evict`, `restore ?keep`, `changed`, `full_resync`, `status_fields`,
-`stats_fields` (must include `"frontend": <type>`; normalised to `"type"`), `on_stop`.
+- **Domain resolution**, everywhere: `--domain NAME`, else the name in the default-domain file if it
+  is configured (a recorded name that is not configured is ignored with a warning), else the sole
+  configured domain, else the error "multiple domains configured — use --domain to select" (or "no
+  domains configured").
+- **Output.** Results on stdout; progress and logs on stderr. `-v/--verbose` sets the log level to
+  `info` (default `warn`).
+- **Exit status**: [failure-model.md §7.5](algorithms/failure-model.md#75-cli-exit-status); a classified
+  failure prints `tsync: <sentence>`. Status 2 (a refusal about the invocation's environment) is used
+  by `sync` on a pulled tree ([08 §2.1](08-frontends.md#21-frontend-descriptor)).
+- **Durations**: `<N>d|h|m|s` with N > 0; anything else is an invalid argument.
+- **Progress on a TTY**: a redrawn block on stderr (cursor-up, clear to end), lines truncated to the
+  terminal width by code points with `…`; a persistent note is printed above the block; log lines
+  clear the block first. Not a TTY: progress lines go to the `info` log.
 
-**File-provider router extras** (same socket, macOS): `menu` → `{"ok":true,"menu":<Menu.to_json>}`
-(built by calling every domain handler's `status`); `menu_stats` → `{"ok":true,"rows":[...]}`
-(every domain's `stats`). Other actions route by `domain`; missing `domain` with exactly one
-domain served → that one; otherwise error "cannot tell which domain '<action>' is for".
+### 5.2 Path arguments
 
-**Sync socket** (parent, `Launcher.handler`):
+- `DOMAIN:/path` or `DOMAIN:path` names a domain outright iff `DOMAIN` is a configured domain name;
+  otherwise the token is a local path containing a colon.
+- A command reads a relative token either as domain-relative (in the resolved domain, wherever it
+  runs from) or as a local path, and says which in its help.
+- A local absolute path resolves to a domain by lying under one of the domain's roots, tried in
+  order: its mount point, its File Provider folder (macOS), then the data directory. A path under no
+  root is refused with exit 1.
+- Resolving a path to an item reference reads the domain's folder markers (a permitted read,
+  §2.2). A folder this client holds no id for is refused with "this client has not resolved its
+  folder; run 'tsync sync'".
 
-| action | behaviour |
-|---|---|
-| `stats` | `arg` flags `totals`/`exact`/`reload` (`exact` implies totals; `reload` only with totals). Returns the finished machine report (`processes` present) with `ok:true` |
-| `report` | job report → `Job_registry.record`; always `ok:true` |
-| `rescan` | start a background rescan of every durable deferred queue's on-disk records; `ok:true` at once |
-| `uplink` | lessee lease renewal (`pid`, `links:{name: report}` or flat legacy shape) → `{ok, interval, links:{name:{rate, limit?}}, rate?}`; `invalid "not the links' owner"` if this process isn't |
-| `stop` | `request_stop()` then `ok:true`, control `Continue` (listener closes after the drain, via `until`) |
-| other | `invalid "unknown action: ..."` |
+### 5.3 Commands
 
-**Proxy socket**: http-proxy's own handler (other spec); speaks the same envelope, answers
-`stats` and `stop`.
-
-### 3.7 CLI surface (`tsync <cmd>`)
-
-Global conventions: `--domain NAME` (with shell completion from config) else the default-domain
-file else the sole domain; `-v/--verbose` sets log level `info` (default `warn`) — progress goes
-through `Log`, command results to stdout via printf; exit codes: 0 success; 1 for user-facing
-`Failure`/`Retry.Failed` (printed `tsync: <msg>`) and command-specific failures; 2 for
-`sync` on a `Pulled` frontend; 125 (internal error) for anything unexpected, with a stack trace. Commands that compute an exit code call `exit` **after** `Oneshot.run` returns (exiting
-inside the promise skips the drain).
-
-Path arguments (`Location`): `DOMAIN:/path` or `DOMAIN:path` names a domain outright iff
-`DOMAIN` is a configured domain name (else it's a local path with a colon). Readings:
-`` `In_domain `` (relative token = domain-relative in the target domain, wherever run from) vs
-`` `Either `` (relative token = local path). Absolute/`Either` paths resolve by lying under a
-domain root (`Conf_parsing.roots_of`), else — for `Location.item` — by asking the running
-daemon's `stats` for its `mountPoint` (covers `tsync start --mount`). `Location.item` resolves a
-path to `(domain, Item_ref)` locally via folder markers (`Folder_ids_lwt.ref_of_key`); error
-"this client has not resolved its folder" if none.
-
-| command | talks to | semantics |
+| command | class | semantics |
 |---|---|---|
-| `start [--mount P] [--tls native\|openssl]` | — | Run the service (§4.1). `--mount` only when exactly one domain. |
-| `stop` | every socket from `Daemons.all` (+sync) | send `stop`; ECONNREFUSED/ENOENT = not running; prints `Stopped N domain(s).` or "No IPC-backed frontend running; relying on signal." |
-| `restart` | service manager | `Runtime.restart_service`; exit 1 if not installed |
-| `status [--json] [--totals [--exact] [--reload]] [-w S]` | sync socket, fallback every frontend socket | §4.6 |
-| `logs [-f] [-n N=200]` | exec log reader | `execvp`; ENOENT → explain need for journald |
-| `pause` / `resume` (aliases `pause-uploads` / `resume-uploads`) | domain socket | `pause` with `arg` on/off |
-| `ls [PATH] [--deleted] [--frontend F]` | local mirror | children sorted case-insensitively; `dir    name/` or `<availability>  name  N bytes` (`pinned until <ts>`); `--deleted` appends `deleted  name` |
-| `cache --evict\|--fetch [--keep DUR] PATH...` | domain socket (`evict` / `restore`) | per-path error lines, exit 1 if any failed; `--keep` default 10d (daemon side) |
-| `cache --prune [--grace DUR=1h]` | local | runs every declared on-demand maintenance task; prints per task files/bytes |
-| `versions [PATH]` / `--revert [--version TS]` | local+store / domain socket `revert` | list versions `ts  human  size` newest first, or all deleted files |
-| `trash` / `--restore PATH` / `--purge PATH` | local+store | restore exit 1 on `Parent_unknown`; purge exit 1 on `Live_elsewhere`/`Not_in_trash` |
-| `expire DATE` | store | cutoff `YYYY-MM-DD` local midnight; prints removed versions/journal entries |
-| `gc [--budget] [--pause] [--concurrency] [--delete-batch] [--abort] [--status] [--retry-jobs] [--verify]` | store | resumable collection (gc spec) |
-| `sync [--full] [--source NAME] [-j N=32]` | store | refuses (exit 2) if any configured frontend is `Pulled`; prints `N journal entries from other clients` or `full resync: N manifests downloaded (K failed …)`, exit 1 if failed>0 |
-| `data-integrity [--verify\|--repair] [--detail] [--source] [--dry-run]` | store | exit 1 if unhealthy |
-| `mirror [--source] [--manifests\|--path P]` | stores | needs ≥2 members |
-| `import DIR [--only G] [--exclude G] [--force-rehash]` | store | exit 1 if any failed |
-| `export [PATH...] DIR [--source] [-j N]` | store | one domain per run; exit 1 on failures or pending local changes (listed on stderr) |
-| `rsync SRC DST [--move] [-n]` | store | refuses local→local and cross-domain |
-| `share [PATH] [--expires 7d] [--token HEX] \| --clear-cache` | store | URL on stdout, expiry on stderr |
-| `config [--edit]` | file | print parsed config with secrets masked, or run wizard |
-| `default-domain [NAME] [--clear]` | file | set (must be configured) / clear / print (exit 1 if unset) |
-| `build-info` | — | frontends, s3 enabled, log impl, paths, sockets |
-| `<cli_group> <verb> [ARGS...]` | frontend | frontend-contributed (`fileprovider reimport\|reset\|purge`; `android stat\|list\|read\|open\|residency\|fetch\|write-whole\|create\|mkdir\|delete\|rmdir\|rename\|share\|request\|status`); binary checks the frontend is configured for the domain, passes raw positional args |
+| `start [--mount P] [--tls native\|openssl]` | none | §3.1 |
+| `stop` | none | §5.4 |
+| `restart` | none | the platform restart through the service manager (§2.7); exit 1 if the service is not installed |
+| `status [--json] [--totals [--exact] [--reload]] [-w S]` | none | §5.5 |
+| `logs [-f] [-n N]` | none | executes the platform log reader (default N = 200); explains what is missing if it cannot |
+| `pause` / `resume` | owner | §2.6; also spelled `pause-uploads` / `resume-uploads` |
+| `ls [PATH] [--deleted] [--frontend F]` | read | children sorted case-insensitively: `dir    name/`, or `<availability>  name  N bytes` (`pinned until <time>`); `--deleted` appends `deleted  name` rows |
+| `cache --evict\|--fetch [--keep DUR] PATH...` | owner | `evict` / `restore` per path ([08 §3.4](08-frontends.md)), as bulk actions; one line per path, exit 1 if any failed; `--keep` default 10 days |
+| `cache --prune [--grace DUR]` | owner | runs every on-demand maintenance task (§6) in the owner (`prune`, a bulk action); prints per task files and bytes; `--grace` default 1 h |
+| `retry` | owner | re-adopt every parked record of the domain's logs now ([durable-queue.md §4.7](algorithms/durable-queue.md#47-parking-and-retry-of-parked-records)); owner action `retry`; prints the count re-adopted |
+| `set-aside [--remove NAME... \| --remove-all]` | owner | lists the domain's set-aside objects (staged manifests, WAL and log records that could not be decoded) with their size and time, or removes the named ones after the user inspected them ([durable-queue.md §3.3](algorithms/durable-queue.md#33-ordering-rules), [04 §4.10](04-checkout-cache.md#410-owner-start-local-recovery)); owner action `set_aside` |
+| `versions [PATH]` | read | versions of a file, newest first (`time  human  size`), or every deleted file of the domain |
+| `versions --revert PATH [--version TS]` | owner | `revert` (latest when no version) |
+| `trash` | read | trashed folders |
+| `trash --restore PATH` | publish | [05 §4.8](05-ops-config.md); exit 1 on `Parent_unknown` |
+| `trash --purge PATH` | store | exit 1 on `Live_elsewhere` or `Not_in_trash` |
+| `expire DATE` | store | cutoff `YYYY-MM-DD` at local midnight; prints removed trash entries, versions and journal entries |
+| `gc [...]` | store | [05 §4.9](05-ops-config.md) |
+| `sync [--full] [--source NAME] [-j N]` | owner | the resync operation ([05 §4.7](05-ops-config.md)) in the owner (`sync`, a bulk action); refuses with exit 2 for a pulled tree; prints `N journal entries from other clients` or `full resync: N manifests (K failed …)`, exit 1 if any failed |
+| `data-integrity [--verify\|--repair] [--detail] [--source] [--dry-run]` | store | [05 §4.10](05-ops-config.md); exit 1 if unhealthy |
+| `mirror [--source] [--manifests\|--path P]` | store | [05 §4.6](05-ops-config.md); needs at least two members |
+| `import DIR [--only G] [--exclude G] [--force-rehash]` | publish | [05 §4.3](05-ops-config.md); exit 1 if any entry failed |
+| `export [PATH...] DIR [--source] [-j N]` | read | [05 §4.4](05-ops-config.md); one domain per run; exit 1 on failures or on pending local changes (listed on stderr) |
+| `rsync SRC DST [--move] [-n]` | publish | [05 §4.5](05-ops-config.md) |
+| `share [PATH] [--expires DUR] [--token HEX] \| --clear-cache` | store | [05 §4.11](05-ops-config.md); URL on stdout, expiry on stderr |
+| `config [--edit]` | none | print the parsed config with secrets masked, or run the wizard (§5.9) |
+| `default-domain [NAME] [--clear]` | none | set (must be configured), clear, or print (exit 1 when unset) |
+| `build-info` | none | compiled frontends and drivers, log sink, paths, sockets |
+| `<group> <verb> [ARGS...]` | per verb | frontend-contributed ([08 §2.1](08-frontends.md)); the binary resolves `--domain`, checks the frontend is configured for it, and passes the remaining arguments uninterpreted. `fileprovider reset` terminates no process and `fileprovider purge` stops the owner only after the app released its domains ([file-provider.md §9.3–9.4](frontends/file-provider.md#93-reset)); the desktop `tsync android` group is owner-class |
 
-Durations (`parse_duration`): `<N>d|h|m|s`, N > 0, else a user-facing error.
+`--source NAME` reads from one member ([05 §3.1](05-ops-config.md) `reading_from`); `-j N` sets read
+parallelism (`reading_at_most`).
 
-### 3.8 Composition per host
+### 5.4 `tsync stop`
 
-The same core (config → domain conf, checkout, content, queues, poller, request handler,
-diagnostics) is instantiated by seven hosts. What differs is which engine role each builds, which
-domain config flags it passes, who owns the shared per-machine roles, and its lifecycle.
+1. Send `stop` to the supervisor socket. If it acknowledges, wait until the socket stops accepting
+   connections, polling every 100 ms, for at most `STOP_WAIT`.
+   - Gone: print `Stopped tsync.` and exit 0.
+   - Still there: print `tsync: still stopping after <N>s; unfinished work is owed on disk and
+     resumes at the next start` and exit 1.
+2. If no supervisor answers (no socket, or connection refused), send `stop` to every owner socket
+   and the store-server socket of this configuration, concurrently, and wait for each the same way.
+   - At least one stopped: print `Stopped <N> process(es).` and exit 0.
+   - None was running: print `tsync is not running.` and exit 0.
+3. A socket that accepts but does not reply within the client deadline: print
+   `tsync: <socket> did not answer within <N>s` and exit 1.
 
-Per-machine roles that must have exactly one holder at a time:
+The command MUST NOT claim an action it did not take. One-shot owners have no socket and are not
+stopped by `tsync stop`.
 
-- **converger** of a domain (reconcile, poller, periodic sweeps: they write the mirror, the
-  applied-through bookmark and the staged tree, which no one arbitrates);
-- **resumer** of deferred replica/backfill work (built with `resume = true`; starts queues left
-  owed by previous runs);
-- **link owner** (uplink governor that grants shares to lessees).
+### 5.5 `tsync status`
 
-| host | engine role per domain | resume | link | checkout | loop hosting | stop |
-|---|---|---|---|---|---|---|
-| **daemon parent** (`tsync start`, "sync") | converging, all domains | **true** (the only one) | **owner** | replicated | `host_loop`, main thread | signals / sync-socket `stop`; drain all; reap children |
-| **fuse child** (one per fuse domain) | presenting | false | lessee | replicated | `host_loop` with FUSE on the main thread | SIGTERM (from parent) / domain-socket `stop`; unmount ∥ drain |
-| **http-proxy child** (server for other tsync clients; all its domains) | presenting | false | lessee | replicated | `host_loop` | SIGTERM / proxy-socket `stop`; drain |
-| **file-provider child** (macOS; all domains, one socket) | presenting | false | lessee | replicated | `host_loop` | domain-socket `stop`; drain (see §9) |
-| **one-shot command** (`tsync import` etc.) | `init` or `start_queue` as the command needs; never the poller | false (records *and drains its own* deferred work) | lessee | replicated | one loop per command, then drain | returns |
-| **embedded app** (Android, core linked into the app process) | `start_queue` + periodic maintenance, **no poller** (pulled tree: folders read on demand) | false | none (no daemon) | lazy | `host_loop_detached`; requests via `on_loop` | process death; state is on disk, next start reconciles |
-| **android CLI** (`tsync android <verb>`, for shells/tests) | per command: `start_queue` if the request mutates, else `init`; then drain | false | lessee | lazy | one loop per command | returns |
+1. Resolve targets once (a `--watch` redraw does not re-read the config): the supervisor socket,
+   every owner socket and the store-server socket of this configuration.
+2. Ask the supervisor `stats`. Its reply is the finished machine report; the supervisor answers
+   within the request deadline, marking what it could not collect in time.
+3. With no supervisor, ask every owner socket and the store-server socket and fold their answers
+   the same way.
+4. Print JSON (`--json`, with `"t": <now>` prepended) or text. `-w S` redraws every S seconds,
+   clearing the screen (not in `--json`).
 
-Per-host wiring differences:
+**Collection (supervisor).** The supervisor asks each owner and the store server for `stats` with
+`arg` containing `frontend` plus the caller's flags, and folds them
+with its own process description and the job registry. **Only a collector fans out**: a process
+asked for its own figures asks nobody. A failed answer becomes a process entry
+`{reachable:false, socketPath, error}`; `ask` never raises.
 
-- Frontend processes install: uplink lessee → sync socket; "on recorded" → rescan request to the
-  sync socket; their own `hooks` into the request handler (§3.6): fuse evicts/restores whole
-  subtrees and invalidates its view on `changed`; the embedded app's hooks are no-ops except
-  evict/restore of a single key; file-provider signals the system extension via subscribers.
-- The daemon parent wires `on_changed` of each converging engine to a change notice towards that
-  domain's frontend sockets; it is the only process that sends `changed`.
-- The embedded app and one-shot commands have no socket of their own; the embedded app answers
-  requests through a direct function call carrying the same JSON request/reply lines (same
-  handler, same error vocabulary as the File Provider).
-- A host whose OS forbids long-lived background processes (Android: a foreground service is
-  stopped after ~6 h/day) must be correct with no drain at all: every operation's state is on
-  disk and reconcile at the next start publishes what it finds.
+**Report shape.** Machine report `{host, domains:[…], processes:[…], jobs:[…], warnings:[…]}`:
 
-Start order inside the daemon parent (order matters):
+- a process self-description: `server {hostname, pid, startedAt, uptimeSeconds, loadAvg?, role,
+  serves:[domains]}`, `process {cpuSeconds, cpuPercent, cpuPercentAvg, rssBytes, privateBytes,
+  swappedBytes, heapBytes, topHeapBytes, minorCollections, majorCollections}`, `backend`, `pools
+  [{name, inFlight, waiting, max}]`, `uplinks`, `traffic`, `recentErrors [{t, level, message}]`
+  (the last 50 warnings and errors). `cpuPercent` covers the interval since the previous report
+  (reports under 1 s apart reuse it; the first is the lifetime average);
+- a domain body from its owner: resolved settings, `mainOffline?`, `paused`, `sync {state:
+  "incremental" | "hold", reason?, markAgeSeconds, unappliedEntries, unappliedReason?, parkedMetadata}`
+  ([wal-and-journal.md §4.8](algorithms/wal-and-journal.md#48-retention-horizon-bridging-and-rebuild)),
+  `cache {chunks, bytes, pinnedBytes, maxCache, manifests?}`, `wal {pending, intent, prepared,
+  executed, stuck, lastError}`, `queues {pendingFiles, inFlight: [FIFO], bytesOwed}` (pending counted
+  in files; bytes owed are whole-file bytes, in-flight included; a folder rename owes 0 bytes),
+  `frontends [...]`, `backends [{name, type, role, link?, config (secrets masked `***`), reachable, latencyMs, error,
+  journal {entries, behind, cursor, lastSync} | {counting} | {error}, corrupted {checked, chunks?,
+  truncated?}, disk?, health, totals?}]`;
+- the fold: domain bodies deduplicated by name, a stub `{name, unanswered:true}` for a domain no
+  process answered for; processes one per pid with `serves` widened; jobs deduplicated by
+  (pid, kind, domain); warnings grouped by (level, message) with per-process counts and first/last
+  times, newest first.
 
-1. load config; raise the fd soft limit (before forking, so children inherit it);
-2. refuse any `Commands` frontend (before the first fork, while there are no siblings to orphan);
-3. fork one process per frontend group (config order of first appearance); in each child:
-   diagnostics clock reset, lessee + rescan wiring, event-loop backend + pool sizing, then
-   `start(served)` (which may fork per binding);
-4. in the parent: install stop handling and a background-error logger → become link owner →
-   start resumed deferred queues → start each domain's converging engine **sequentially** →
-   serve the sync socket (fatal if it fails) → `ready`.
+**Cost rules.**
 
-Frontend children never run convergence; the parent never presents.
+- A member's probe, journal listing and corruption listing are cached per owner for
+  `STORE_STATE_WINDOW`, shared by every asker, and refreshed behind the answer. An answer waits for
+  a listing at most `LISTING_GRACE` after the probe, else reports `{"counting":true}`.
+- A member held down by its breaker is not probed (`reachable:false`, error = the hold).
+- `journal.behind` counts listed entries newer than the last-sync mark and not authored by this
+  client (this client's own entries are never behind; keys compare without their month directory);
+  the listing is not truncated (a cut would drop exactly the newest entries).
+- `totals` (store contents) are never computed while a request waits: an answer serves the last
+  sample with `sampledSecondsAgo` (+ `refreshing`); a walk starts only when none exists or on
+  `reload`; one walk per (store, precision). A chunk count MAY be an estimate from a sample of
+  shards, and says so; manifests are always a full listing.
+- `corrupted.checked:false` distinguishes "nobody looked" from "clean".
 
-## 4. Behaviour / algorithms
+**Text rendering.** Header `tsync on <host> — N domains, M processes, up X, load L`; per domain its
+settings, cache, `PAUSED`, unsynced or stuck WAL, `MAIN OFFLINE`; each frontend (`NOT ANSWERING`,
+traffic, open handles, parked metadata, unapplied peer entries, transfers, maintenance); each backend
+(`UNREACHABLE`/`HELD DOWN`, journal, corruption or "not checked", disk); then `Processes`, `Jobs`,
+`Warnings (newest first)` (10 shown). A row appearing is the signal: clean states print nothing.
 
-### 4.1 `tsync start`
+### 5.6 Pause and resume
 
-1. Initialise daemon logging (syslog at debug, §4.9).
-2. No config file → message to stderr, **exit 0** (the installer starts the service before
-   configuration; 0 keeps launchd/systemd from respawning). No domains → same, exit 0.
-3. `--tls` overrides the config's TLS backend choice (picked once per process).
-4. For each domain: socket = domain socket path; conf built with `resume = true`; mount point =
-   `--mount` if exactly one domain, else the configured one (default `~/tsync/<DOMAIN>`).
-5. Raise fd soft limit toward 8192 before forking.
-6. **Create no event-loop resources before the forks** (a child inheriting the loop's
-   wake-up descriptor gets its worker completions delivered to the parent); fork with a primitive
-   that re-initialises them in the child.
-7. Launch groups as in §3.8; each child also opens a per-process memory trace when `MEMTRACE`
-   names a directory.
-8. Parent: converge (below) with the reaper guaranteed to run on the way out.
+`tsync pause|resume` sends `pause` (`arg` `"on"` or `"off"`) to the domain's owner, or, with no
+owner, takes ownership and writes or removes the pause flag durably itself (§2.5, §2.6). It prints `Paused <domain>.` or
+`Resumed <domain>.`
 
-Parent converge sequence:
-1. Per domain: converging engine + diagnostics; frontend sockets = (frontend name, socket)
-   deduplicated by socket.
-2. SIGTERM/SIGINT → `request_stop` = stop signal `request()` + resolve the local `stop` event
-   (once).
-3. Background-task errors are logged, never fatal.
-4. Become link owner (before engines, which may send at once).
-5. Start resumed replica/backfill queues.
-6. Start each converging engine sequentially with `on_changed = change notice to its frontends`.
-7. Serve the sync socket with `until = drained`; if serving fails → log and **exit 2** (without
-   the socket no lease and no stop are heard; a supervisor restart is better than running
-   unreachable — c3c4a983).
-8. `ready`; wait for `stop`; `drain_for_stop(every domain's drain)`; resolve `drained` (the
-   listener closes and unlinks only now, so status stays answerable during the drain).
-9. Reap children.
+### 5.7 Logging
 
-### 4.2 Stop
+- Levels `debug`, `info`, `warn`, `err`; CLI default `warn` (`-v` → `info`), daemons `debug`. An
+  owner of one domain prefixes its lines with `[<domain>] `. The sink is replaceable (Android logs to
+  logcat). The last 50 warnings and errors are kept with timestamps for `recentErrors`.
+- Daemons log to syslog (ident `tsync`, facility daemon, with pid), echoing to stderr only when
+  stderr is a terminal; without syslog, to stderr. tsync writes no log files of its own.
 
-Triggers: `tsync stop` (IPC `stop` to each socket), SIGTERM/SIGINT (systemd `ExecStop`/kill), a
-FUSE mount unmounted externally.
+### 5.8 Menu model (tray and macOS menu bar)
 
-Parent on stop:
-- `request()` runs hooks, including the fork hook: SIGTERM every direct child **immediately**,
-  not after the parent's own drain (a child that forked in turn then stops alongside its children
-  within one grace; waiting would take two graces and outlast the parent's deadline).
-- Backoffs, queue workers and uplink waits give way with `Stopping`.
-- `drain_for_stop`: all drains concurrently, raced against `grace` — **raced, not cancelled**
-  (cancelling made the metadata queue record the cancellation as a permanent failure and mark
-  itself degraded). On timeout: warn "still busy after 10s; what is left is owed on disk and
-  resumes at the next start".
-- Per-domain drain: metadata queue drain **then** upload queue drain (a published rename is what
-  names the file an upload behind it is for); while stopping, that pair is raced against
-  `0.8 × grace`; then flush the coalesced cursor bump (so peers hear about uploads that did
-  finish), settle change notices, drain backend deferred copies.
-- Reaper: SIGTERM all children, poll non-blocking wait every 50 ms until `grace + 2 s`, then
-  SIGKILL and wait for stragglers; then unregister the fork hook (a later stop must not signal
-  recycled pids).
+A pure function from per-domain `status` replies to a menu, shared by the Linux tray and the macOS
+menu (served as JSON by the File Provider process's `menu` action):
 
-Frontend processes: fuse maps SIGTERM/SIGINT and IPC `stop` (via `hooks.on_stop`) to its
-`request_stop`; its listener closes at once on `stop`; it then unmounts **concurrently** with
-`drain_for_stop([its drain])` (the unmount is what releases the FUSE main loop). http-proxy
-mirrors the parent (listener closes after the drain). Overall bound: ~10 s drain + 2 s reaper
-margin, inside systemd's `TimeoutStopSec=30`.
+- **Summary**: no domains → "No domains configured"; every domain unreachable → "Daemon not
+  running"; nothing moving → "Paused" if all are paused, else "Idle"; otherwise
+  "Uploading N · Downloading M" plus " · paused" when any domain is paused.
+- **Icon**: all unreachable or no domains → error; all paused → paused; any transferring → sync;
+  else idle.
+- **Rows**: per domain a row opening its folder; up to 5 upload rows then "… and N more"; download
+  rows revealing the file; a traffic line "X sent · Y to go" when non-zero; a rate line
+  "R/s · 2h 13m left" (two largest non-zero units; none under a minute); a Stats submenu filled on
+  open (placeholder "Reading…", never empty); "Hold changes", checked when all domains are paused,
+  disabled when all are unreachable, whose action pauses or resumes every domain; quit, labelled for
+  the icon ("Quit tsync tray"), which leaves the daemon running.
+- **JSON**: `{icon?, tooltip, entries:[{separator} | {label, enabled, indent, checked?, submenu?,
+  action: openFolder | reveal{domain, rel} | setPaused | stats | quit}]}`.
 
-### 4.3 Event-loop hosting
+### 5.9 Config wizard (`tsync config --edit`)
 
-See `host_loop`, `host_loop_detached`, `on_loop` and loop death in §3.2. Invariant: **all domain
-state is touched only on the loop thread**; platform threads (libfuse workers, JVM binder threads)
-never touch it directly, they marshal through `on_loop` and block only themselves. `on_loop`
-passes an OS error (errno) through untouched (it is an answer, e.g. `getattr` → ENOENT on the
-hot path) and wraps anything else with its original trace.
-
-### 4.4 IPC handler internals
-
-- Parse; non-object → `internal "expected JSON object"`; bad JSON → `invalid`.
-- Read-only domain and mutating action → `read_only "'<domain>' is read-only"` (enforced here,
-  not trusted to the frontend's advertised capabilities).
-- **Mutations are serialised** under one mutual-exclusion lock per domain handler, *including* reference
-  resolution (b7fd7943): the File Provider sends concurrent requests; resolving `parentRef`
-  before the mirror lock let `mv f4 sub/` racing `mv sub sub2` recreate `sub` beside `sub2`, and
-  every replica journaled the wrong tree. Reads are not serialised.
-- Every handler failure → failure envelope with `code` from the §2.3 mapping and the error's text as `error`.
-- Control: `stop` → `Stop`; `subscribe` with non-empty `domain` → `Subscribe C.domain_name`
-  (the routed domain is the topic); else `Continue`.
-
-`changes_since` algorithm:
-1. Split anchor at first `|` → (issued generation, entry key). Generation mismatch → `stale:true`.
-2. Head = latest applied entry key. Anchor == head, or both absent → up to date:
-   `{stale:false, cursor:anchor(gen,head), more:false, ops:[]}`.
-3. `Applied_entries.since ?since:anchor ~limit` → `None` (anchor pruned) → `stale:true`.
-4. Ops of the page's entries, in order; cursor = last entry key of the page (or the anchor if
-   none — never told to start over); `more` from the page.
-5. Each op described (`op_to_json`) using `removed_folder_id` lookup (answers even after the
-   mirror dropped a folder):
-   - `put` → `{op:"put", ref, parentRef, name, item}` with `item` read from the mirror via the
-     ref's *current* resolution (the folder may have moved since).
-   - `mkdir` → `{op:"mkdir", ref:"d:<id>", parentRef, name, item}` (row built from the id).
-   - `delete` / `rmdir` → naming only (`rmdir` adds `id`).
-   - `rename` → `{op:"rename", is_dir, id?, srcRef, srcParentRef, ref, parentRef, name, item}`;
-     dropped unless **both** ends are nameable (a half-reported move loses an item).
-   - An op whose self/parent cannot be named is dropped and counted in `unnamed` (re-listing the
-     domain for one folder would cost every other).
-
-`list_all` walk: DFS from root, each folder's children via its folder id; folder with no id →
-`unnamed+1` and subtree skipped.
-
-### 4.5 Domain maintenance (declared, one driver)
-
-Tasks are data (`Maintenance_lwt.task = {name; triggers; run}`), so "what runs unasked" is a list
-and `stats_fields.maintenance` reports it. Per domain (test-pinned list):
-
-```
-mirror temp files (on demand); staged orphans (on demand); export records (on demand);
-applied journal entries (on demand, every 86400s); chunk cap (after each upload, every 60s);
-deferred rescan (every 60s); metadata retry (every 60s)
-```
-
-`run_maintenance`: for each task with a `Periodic s` trigger, an async loop `sleep s; run`.
-`After_upload` tasks run sequentially after each upload completion. `tsync cache --prune` runs
-the `Md.tasks ~staged_grace` list (the on-demand half) directly. Periodic maintenance runs only
-in the converging parent (`converge`); presenting processes run `After_upload` tasks.
-
-### 4.6 `tsync status`
-
-1. Resolve targets once (`--watch` must not re-read config): every configured frontend with a
-   socket (`Daemons.all`: `Domain_socket` → per-domain path, `Proxy_socket` → proxy path, one
-   entry per domain even when shared), plus `("sync", sync socket)`, sort-uniq.
-2. Ask the sync socket `stats` (timeout `cold_timeout` 17 s). If the reply has `processes`, it is
-   the finished report (drop `ok`).
-3. Otherwise (no parent, or an old daemon) fall back: ask every frontend socket in parallel
-   (width = config) and fold with `Status_report.of_answers` without local/domains.
-4. Print JSON (with `t`) or `Status_report.text`.
-
-Parent `stats` assembly (`Launcher.report`): per engine `Diag.domain_json` in parallel; ask every
-frontend `stats` with `arg:"frontend"` (their own figures only, no probes; default 2 s timeout);
-fold with `local = self_json + {frontend:"sync", serves:[...]} + jobs`. **Only a collector fans
-out**: a frontend asked for its figures asks nobody (else frontends × frontends round trips).
-
-`Status_report.ask` never raises: failures become `{"error": "timed out" | exn}`, rendered as a
-frontend entry `{type?, reachable:false, socketPath, error}`.
-
-`frontend_entry`: take the answering daemon's `domains[name == asked].frontends[0]` (fallback to
-the first domain) and add `pid`, `uptimeSeconds` (from `server`), `cpuSeconds`, `rssBytes`
-(from `process`), `traffic` — unless the frontend already reported that key itself.
-
-`of_answers` fold:
-- host = first reply with `server.hostname`.
-- domain bodies: collector's own win; then answered bodies deduped by name; then a stub
-  `{name, unanswered:true}` for each asked domain nobody answered.
-- each domain's `frontends` = body's frontends + gathered entries, merged by identity
-  (`type:<t>` or `socket:<path>`), first description wins per field.
-- `processes`: one per distinct `server.pid` (flattened server+process+traffic/pools/lwt/backend/
-  uplinks, hostname removed), `serves` widened across all replies of that pid.
-- `jobs`: concatenated, deduped by pid (jobs without pid are all kept).
-- `warnings`: grouped by (level, message), counting per (frontend, pid), first/last times,
-  sorted newest `lastAt` first.
-
-Diagnostics cost controls:
-- Store probe + journal listing + corruption listing per member are cached for a 5 s window,
-  shared by every asker, refreshed **behind** the answer (a redraw never waits on the store). The
-  answer waits for the listing at most `listing_grace` (2 s) after the probe; otherwise reports
-  `{"counting":true}`.
-- A member whose health is *held down* is not probed at all (`reachable:false`, error =
-  health description).
-- `journal.behind` = listed journal keys newer than the last-sync bookmark and not authored by
-  this client uuid; listed whole (a `max_keys` cut would drop exactly the newest entries).
-- `totals` (store contents) are never computed while a request waits: a request serves the last
-  sample with `sampledSecondsAgo` (+`refreshing` if a walk is running); `compute` starts a walk
-  only if none exists or `reload`; one walk per (store, precision) at a time; `exact` and sampled
-  are separate slots (the other precision is served as fallback). Sampled chunk count = 16 evenly
-  spaced shards × (shards/16); manifests always a full listing; mid-GC adds `chunksPartial`.
-- `cache.manifests` (a mirror walk) only with totals.
-
-Text rendering: header `tsync on <host> — N domains, M processes, up X, load L`; then per domain
-(settings, concurrency, cache, read-only, unsynced/stuck WAL, `MAIN OFFLINE`), each frontend
-(`NOT ANSWERING`, traffic, clients, handles, `metadata lock HELD`, `METADATA PARKED`,
-`PEER ENTRIES UNAPPLIED`, in flight/completed/downloading/maintenance), each backend
-(`UNREACHABLE`/`HELD DOWN`, journal, corrupted — "not checked" when no verifier, traffic, behind,
-disk, holds); then `Processes`, `Jobs`, `Warnings (newest first)` (10 shown). Silent-when-clean:
-a row appearing is the signal.
-
-### 4.7 One-shot commands (`Oneshot.run`)
-
-```
-open memory trace "<argv[1]>-<pid>" if MEMTRACE names a directory
-run event loop until:
-  start job report (if the command reports)
-  r = command body;  on failure: job report finish(error), re-raise
-  drain backend deferred copies the command posted
-  settle change notices
-  job report finish
-  return r
-exit code decided by the caller only after the loop returned
-```
-
-A one-shot's conf is built with `resume:false` (it records and drains its own deferred work but
-must not run jobs the daemon runs) and every `make_conf` registers the process as an uplink
-lessee of the sync socket (if nothing answers, it governs its own link). Every command also
-fails fast on config errors before any terminal redraw.
-
-`live_output` (progress rewrite on a TTY stderr): `block lines` rewinds with `ESC[<n>A` +
-`\r ESC[J` and redraws lines truncated to terminal width (`$COLUMNS`, else `tput cols`, else 80;
-cut by code points with `…`); `note` prints a persistent line above; log sink wrapped to clear
-the block first. Not a TTY → lines go to `Log.info` (visible with `-v`).
-
-### 4.8 Pause
-
-`tsync pause|resume` → domain socket `pause` → `Pause.set held` on that process's upload and
-metadata queues; `Sync_poller` is started with `~paused:Pause.held` (holds applying peers' work).
-Reads are never held. `drain` still completes while paused (a paused queue cannot wedge a
-shutdown — test `pause`). The flag is in-memory only (lost on restart). See §9 on which process
-actually holds the poller.
-
-### 4.9 Logging
-
-- `Log.{debug,info,warn,err}` printf-style; `min_level` default `info` (CLI sets `warn`, `-v`
-  `info`, daemon `debug`); optional per-process `prefix` (fuse sets `"[<domain>] "`); sink
-  replaceable (Android → logcat); last 50 `warn`/`err` kept with timestamps for `recentErrors`.
-- Daemon: `syslog(3)` ident `tsync`, facility `LOG_DAEMON`, `LOG_PID`, plus `LOG_PERROR` only if
-  stderr is a TTY (under a service manager stderr is the journal too; echo would duplicate).
-  Levels → `LOG_DEBUG/INFO/WARNING/ERR`. Falls back to stderr when the syslog library is absent
-  (`build-info` reports which). No log files of its own; `tsync logs` execs the platform reader.
-
-### 4.10 Tray / menu model (`lib/app/ui/menu.ml`)
-
-Pure function from per-domain `status` replies to a menu; the Linux tray links it; macOS gets it
-as JSON via the `menu` action. Rules:
-- summary: no domains → "No domains configured"; all unreachable → "Daemon not running";
-  nothing moving → "Paused" if all paused else "Idle"; otherwise
-  "Uploading N · Downloading M · paused".
-- per domain detail: "not answering" if counts missing; download count = number of downloading
-  rows if any, else the chunk-fetch count.
-- icon priority: all unreachable → `tsync-error-symbolic`; all paused → `tsync-paused-symbolic`;
-  any transferring → `tsync-sync-symbolic`; else `tsync-idle-symbolic`.
-- rows: header only when no domains; per domain a row (action open folder) then up to 5 upload
-  rows + "… and N more", download rows (action reveal `{domain, rel}`, file icon by extension,
-  generic freedesktop names only); traffic line "X sent · Y to go" (only when non-zero); rate
-  line "R/s · 2h 13m left" (`eta`: two largest non-zero of d/h/m, `None` under a minute);
-  separator; `Stats` submenu (filled on open via `stats`/`menu_stats`, placeholder "Reading…",
-  never empty); "Hold changes" checkbox (checked = all paused; disabled when all unreachable;
-  action sets the negation; the checkmark shows the daemon's answer on the next poll); separator;
-  quit row (label names the *icon*, e.g. "Quit tsync tray" / "Quit tsync menu bar": the daemon
-  keeps running).
-- `to_json`: `{icon?, tooltip, entries:[{separator}|{label,enabled,indent,checked?,submenu?,
-  action:{openFolder|reveal{domain,rel}|setPaused|stats|quit}}]}`; icon omitted for non-OCaml
-  clients.
-
-### 4.11 Config wizard (`tsync config --edit`)
-
-Interactive editor over the raw JSON (preserves unknown per-link fields). Existing file that is
-not valid JSON → refuse, exit 1. New file: prompt globals (client name default hostname,
-`maxUploads`, `maxChunkBuffers` default = maxUploads, `maxDownloads`, uplink governor enabled /
-headroom % (≤100) / target delay ms (≥5) / ceiling (must be ≥ minRate, asked again otherwise),
-per-link ceilings for each link some backend uses, TLS backend if ≥2 available, "auto" = unset)
-then domain 1. Main loop: select by number, `[a]dd [e]dit [r]emove [g]lobals [w]rite [q]uit`.
-Domain: name, versioning (default **true**), symlinks, readOnly, chunkSize, cacheChunkSize,
-maxCache (default 1 GiB), backends (type default `local`; s3/gcs offer filling
-bucket/keys/shareUrl from `terraform|tofu -chdir=DIR output -json`, outputs `stores`/`gcs_stores`,
-secrets from `secret_access_keys`/`gcs_service_account_keys`; remaining fields from the driver's
-`Field_spec`; role default `replica` for a cloud store once a `main` exists, else `main`),
-frontends (from the registry). Field prompts: blank keeps current; required fields re-asked;
-optional with default `""` omitted; secrets read without echo. On write: drop per-link settings
-whose link no backend uses (parser would reject), validate with `Conf_parsing.of_json` (refuse and
-exit 1 if invalid), write pretty JSON + newline, `chmod 0600`, tell the user to `tsync restart`.
+- Edits the raw JSON so that nothing it does not ask about is lost. An existing file that is not
+  valid JSON is refused (exit 1).
+- New file: prompts for globals (client name, default the hostname; `maxUploads`; `maxChunkBuffers`,
+  default `maxUploads`; `maxDownloads`; uplink settings; per-link ceilings for links some backend
+  uses; TLS implementation when more than one is available), then a domain.
+- Main loop: select by number; `[a]dd [e]dit [r]emove [g]lobals [w]rite [q]uit`. A domain prompts for
+  its name, `versioning` (default true), `symlinks`, `readOnly`, sizes, `maxCache` (default 1 GiB),
+  backends (type default `local`; field prompts from the driver's option spec; role default
+  `replica` for a cloud store once a `main` exists, else `main`; optional filling of s3/gcs fields
+  from `terraform|tofu -chdir=DIR output -json`), and frontends (from the frontend registry).
+- Prompts: blank keeps the current value; required fields are asked again; secrets are read without
+  echo.
+- On write: drop per-link settings no backend uses; validate with the parser's own rules
+  ([05 §2](05-ops-config.md)) and refuse to write an invalid config (exit 1); write to a temporary
+  file **created with mode 0600**, fsync, rename over the config, fsync the directory; tell the user
+  to `tsync restart`.
 
 ---
 
-## 5. Interactions
+## 6. Maintenance
 
-Depends on:
-- **Config** (`Conf_parsing`, `Domain.of_config`, `Conf_lwt.S`): domain list, frontends,
-  backends, roles, defaults; `Domain.target`, `default_domain`, `start_resumed`,
-  `set_on_recorded`, `reading_from`, `reading_at_most`.
-- **Sync** (`Sync_queue`, `Meta_queue`, `Pause`, `Sync_poller`, `Replay`, `Resync`): queue
-  start/drain/pending counts, poller, reconcile, unapplied entries.
-- **Checkout / file ops** (`File_ops.S`, `Checkout_lwt`, `Folder_ids_lwt`, `Applied_entries`,
-  `File_store_lwt.flush_cursor`, `Staged`): everything the IPC handler answers.
-- **Backends** (`Backend_lwt.drain`, `Write_guard_lwt.probe/state`, `Health`, `Corruption`,
-  `Collection`, `Wal`, `Journal`): diagnostics and drains; deferred replica/backfill queues
-  (`Durable_queue_lwt.rescan_all`).
-- **Uplink** (`Uplink_lwt.own_links`, `lease_from`, `lease_renewal`, `answer_json`): link owner in
-  the parent, lessees everywhere else, over the sync socket.
-- **Maintenance** (`Maintenance_lwt`): the declared sweep list.
-- **Commands' libraries** (`Import_lwt`, `Export_lwt`, `Mirror_lwt`, `Gc_lwt`, `Retention_lwt`,
-  `Integrity_lwt`, `Rsync_lwt`, `Share_lwt`, `Resync_lwt`): each CLI command is a thin driver.
+What an owner runs unasked is a declared list, so it can be reported (`stats` lists it) and cannot
+drift between hosts. Every host that owns a domain runs the same list, the Android app included.
 
-Depended on by:
-- **Frontends** (fuse, file-provider, http-proxy, android): `Frontend` registry,
-  `Domain_engine.Domain`, `Ipc_handler`, `Ipc_lwt.serve`, `Domain_engine.run/drain_for_stop`,
-  `Shutdown`, `Diagnostics`, `Status_report`, `Menu`.
-- **macOS Swift** (`DaemonClient.swift`, `IPC.swift`): the domain-socket wire contract, `menu`,
-  `menu_stats`, `subscribe`.
-- **Linux tray** and **Dolphin plugin**: domain socket (`status`, `pause`, `stat`/`restore`/
-  `evict` by `rel`), `Menu`.
+| task | when | rule |
+|---|---|---|
+| local recovery, including the exact staged-orphan sweep and temporary files | at owner start | [04 §4.10](04-checkout-cache.md#410-owner-start-local-recovery) |
+| temporary files | at start and daily | [04 §4.11](04-checkout-cache.md#411-periodic-maintenance) |
+| chunk cache cap | after every upload and every `HOUSEKEEPING_INTERVAL` | [04 §4.11](04-checkout-cache.md#411-periodic-maintenance) |
+| applied-log prune | daily | [wal-and-journal.md §4.8](algorithms/wal-and-journal.md#48-retention-horizon-bridging-and-rebuild) |
+| removed-id records, export-record sweep | daily | [04 §4.11](04-checkout-cache.md#411-periodic-maintenance), [05 §4.4](05-ops-config.md) |
+| log rescan and re-arming of parked records | every `HOUSEKEEPING_INTERVAL` | [durable-queue.md](algorithms/durable-queue.md#47-parking-and-retry-of-parked-records) |
 
-Main flows:
-- *Write through a mount*: kernel → fuse op (`on_loop`) → `F` → staged + upload queue (in the fuse
-  process) → upload → journal entry + cursor bump (coalesced, flushed on drain); replica copy
-  recorded → `rescan` to parent → parent's deferred queue sends it.
-- *Peer change*: parent's poller applies journal entries to the mirror → `on_changed key` →
-  `Change_notice` batch → `changed` to each frontend socket → `hooks.changed` (fuse invalidation /
-  File Provider signal); File Provider then pulls `changes_since`.
-- *CLI edit*: `tsync cache --evict P` → `Location.item` resolves `(domain, ref)` from local folder
-  markers → `Ipc.action evict` on the domain socket.
-- *CLI heavy job*: `tsync import` → own loop, conf `resume:false`, lessee of the link, job reports
-  to sync socket every 10 s → `tsync status` shows `Jobs` → on exit drain + settle + final report.
+- Each periodic task runs to completion before its next period starts; a failing task does not stop
+  the others. `tsync cache --prune` runs the sweeps on demand (`prune`).
+- While paused, what changes the domain's stores or applies peer work is held; local tasks run.
 
 ---
 
-## 6. Concurrency, durability & failure semantics
+## 7. Concurrency and failure
 
-- **Single event loop per process**; no parallelism over domain state. Blocking I/O runs on a
-  bounded per-process worker pool. Platform threads enter via `on_loop`. See §6.1 for what this
-  model is silently relied on for.
-- **What survives a crash/stop**: everything owed is on disk (upload records/WAL, replica jobs,
-  staged bodies, durable queue logs). A stop leaves unfinished work for the next start; the
-  parent's `resume:true` conf and `start_resumed` pick it up; frontends only record. In-memory
-  only: pause flag, job registry, change-notice batches (settled on drain), cursor-bump coalescing
-  (flushed on drain — test `stop_publishes_cursor`), diagnostics caches, `recentErrors`.
-- **Stop is bounded**: ~10 s drain, +2 s reaper, SIGKILL after; never cancels in-flight jobs
-  (races them). Retries/backoffs end with `Stopping` and are not counted as failures.
-- **Background-task failures** never kill a daemon: they are logged. A dead event loop kills
-  the process at once (exit status 1, no exit handlers) so the supervisor restarts it. The sync socket failing to serve
-  exits 2 (restart rather than run unreachable).
-- **IPC**: per-connection tasks; a slow request never blocks another client. Mutations per domain
-  handler serialised; reads concurrent. The blocking CLI client has **no timeout**; the in-loop
-  client defaults to 2 s.
-- **Advisory channels** (job reports, change notices, rescan, uplink lease) never fail the
-  caller; each failure is logged at most once.
-- **Fan-out widths**: every concurrent fan-out here is as wide as the config (domains ×
-  frontends × members, 16 shards), not the data, and each leaf has a deadline — so no bounding
-  pool is used. A fan-out whose width the data chooses must be bounded.
-- **Idempotence**: stop `request()`, IPC stop wake, `Job_report.finish`, `tsync stop` repeated,
-  `full_resync` (new generation each time), `pause` set.
-- **Descriptor safety**: event-loop backend without a descriptor-number ceiling; fd limit raised pre-fork.
-- **Offline**: status reports stores unreachable/held without blocking (cached window, deadlines);
-  commands fail with the driver's sentence (`tsync: <reason>`, exit 1).
-
-### 6.1 Correctness that silently relies on cooperative, single-threaded scheduling
-
-The implementation runs every task of a process on one thread and switches tasks only at explicit
-suspension points (I/O, sleep, lock wait). Several pieces are correct **only** because nothing
-runs between two statements that do not suspend. A rewrite with preemptive threads, or with
-parallel workers touching this state, must add locking (or confine the state to one thread) at
-each of these:
-
-| where | what would break under preemption |
-|---|---|
-| subscriber registry `write_pending` | "queue empty → wait on condition" has no lock; a publish between the check and the wait would be a lost wake-up and a stalled stream |
-| subscriber `publish` / register / unregister | mutate a shared list and per-subscriber queues without a lock |
-| IPC server stop `woken` flag | check-then-wake; two concurrent `stop`s could double-resolve the stop event |
-| stop signal `request()` / `on_request` | flag + hook table read and written without a lock; a hook registered concurrently with `request()` could be run twice or never |
-| parent/fuse/http-proxy `request_stop` | "if stop not yet resolved then resolve" is check-then-act |
-| change notice pending set + `scheduled` flag, `flush`, `settle` | a key added between "read all pending" and "reset set" would be lost; `scheduled` could leave keys with no flush |
-| rescan debounce `pending` flag | check-then-set |
-| diagnostics `refresh` (`counting` slot) and the 5 s store-state cache | "not counting → mark counting → start walk" relies on atomic check-and-set; the cache entry is replaced without a lock |
-| job registry table, `Log.recent` ring, CPU-percent sample, metrics counters | plain shared mutable state |
-| pause switch | sets the flag then each queue's flag; a reader between them sees a mixed state (harmless today because nothing yields there) |
-| request handler | **reads** are deliberately not serialised; each mirror operation is assumed atomic between suspension points, and only mutations take the per-domain lock (because they *do* suspend between resolving a reference and acting on it) |
-| `list_all` kept listing, generation file | written atomically (temp + rename), read without locks — safe under preemption as long as writes stay atomic renames |
-
-The mutation lock (§4.4) is the one place the design already acknowledges interleaving; it exists
-because resolution and mutation are separated by suspension points, not because of parallelism.
-Platform threads are safe only because they never touch this state directly (§4.3).
+- **Serialisation.** One owner per domain (§2.2); inside it, per-domain metadata and per-key content
+  serialisation. Reads MAY run concurrently with each other and with mutations only where each
+  read observes one consistent snapshot of what it reads (atomically replaced files, or a read under
+  the same lock). A rewrite with preemptive threads MUST additionally make atomic every piece of
+  shared in-process state that the owner's tasks update: the subscriber registry and its queues,
+  the stop flag and hook table, debounce flags, the job registry, the recent-errors ring, counters
+  and the status caches.
+- **Durability.** Everything owed is on disk (WAL, staged tree, deferred logs, pause flag). Volatile:
+  the job registry, status caches, event streams, the coalesced cursor bump (flushed by every
+  drain).
+- **Bounded stop.** `GRACE` drain, `REAP_MARGIN`, then SIGKILL; nothing is cancelled.
+- **Failures in background tasks** are logged and never end a process. A dead event loop ends it with
+  status 1 at once.
+- **Every wait is bounded** ([failure-model.md §8](algorithms/failure-model.md#8-deadlines-and-bounded-waits-p7)).
+- **Idempotence**: stop, `tsync stop` repeated, `pause` and `resume`, job-report finish, `full_resync` (a
+  new generation each time).
+- **Offline**: status reports stores unreachable or held without blocking; commands that need a
+  store fail with the driver's sentence and exit 1.
 
 ---
 
-## 7. Design choices & rationale
+## 8. Design rationale
 
-- **Convergence in the parent, not a frontend** (cb2be7ac): reconcile/poller/sweeps write shared
-  state; running them in "the first frontend" made one frontend secretly different and picked it
-  by config order, and a passive frontend never heard peers. The parent presents nothing, so no
-  one is picked. Frontends learn about applied changes only through the `changed` notice.
-- **Every presenting process runs its own upload queue** (test `presenting_domain`): otherwise a
-  process accepts writes it never sends while metadata ops land on the store.
-- **No event-loop resources before forking** (the [OCaml notes](ocaml/07-daemon-cli.md) §B.2): an inherited wake-up descriptor sends
-  a child's worker completions to the wrong process.
-- **Poll backend without FD_SETSIZE ceiling; worker-pool size asked, not defaulted**: the pool
-  never shrinks once grown, so its ceiling is a memory floor (~0.5 MB/thread; a mount left at 256
-  settled at ~114 MB, a small host's whole budget). Summed across bindings: pool per process,
-  budgets per domain.
-- **Stop raced, not cancelled** (9ea6d6c3): cancellation looked like a failure and degraded the
-  metadata queue. **Queues give way at 0.8 × grace** (c3c4a983) so finished uploads' cursor bumps
-  are still published.
-- **Children told at once on stop** (9ea6d6c3): nested forks would otherwise need two graces.
-- **Listener closes once, after the drain** (9ea6d6c3): status answerable during the drain; two
-  removers raised ENOENT out of the accept loop.
-- **No TCP_NODELAY on unix sockets** (d8f854af): macOS EINVAL killed the accept loop — presented
-  as a File Provider deadlock.
-- **Serialise mutations incl. ref resolution** (b7fd7943) rather than a finer lock: correctness of
-  concurrent FP requests over throughput.
-- **References, not paths, on the wire**: a directory path changes for a whole subtree on rename;
-  folder ids do not. A file is (parent id, leaf): blast radius of a rename is one item. Storage
-  keys are rejected (no kind; would require guessing). Paths only where the caller holds only a
-  path (`rel`).
-- **Page cursors are names/line numbers, not offsets** (stateless across processes; no loops when
-  one folder id sits at several paths).
-- **Change feed from applied local entries, not the store**: never names an item the mirror hasn't
-  caught up with; not filtered by author (the CLI's own changes must reach the mount).
-- **`status` asks the parent**, which owns the domains, instead of every frontend (each would
-  re-probe every backend for the same figures); only collectors fan out; `frontend` flag keeps
-  frontends from redoing domain work.
-- **Diagnostics never block on stores**: windowed cache, refresh behind the answer, totals only on
-  request and served stale with age; `checked:false` distinguishes "nobody looked" from "clean".
-- **Advisory reporting** (jobs, notices): reporting must never decide whether a command runs; a
-  missing daemon is the ordinary case.
-- **Job reports go to the sync socket**, not a domain socket: a domain served only by the
-  http-proxy has no socket of its own, while every frontend is a child of the parent.
-- **One-shot drain in `Oneshot.run`**, not per command: short-lived commands otherwise strand
-  deferred copies and batched notices (a file imported by CLI stayed invisible in a listening
-  mount). Exit codes set outside the promise for the same reason.
-- **Exit 0 on missing config** so service managers do not respawn-loop on fresh installs.
-- **Declared maintenance list**: "what runs unasked" is data; Android once ran half of what the
-  daemon ran because loops were ad hoc.
-- **`Menu` shared** between Linux tray and macOS (via `menu` action) so the rules exist once.
-- **Wizard validates with the parser's own rules** before writing, so it cannot write a config
-  the daemon refuses.
-- **Syslog without a log file**; `tsync logs` execs the platform reader (journald by identity, so
-  renaming units does not lose logs).
-- **Scheduler choice is open** (see the [OCaml notes](ocaml/07-daemon-cli.md) §B.2 on the duppy exploration): whatever replaces the
-  event loop must keep one worker for domain state plus blocking threads (§6.1), and keep bounded
-  pools — a global scheduler bounds width, not working set.
+- **One owner per domain**, not cross-process locks around each check-then-act: every local
+  decision already has a lock inside one process; making the process unique is what makes those
+  locks sufficient. A frontend that presents a domain runs inside its owner, so a local edit and a
+  peer's change meet under one metadata lock.
+- **The supervisor owns no domain state**: a crash or restart of one owner leaves the other domains
+  untouched, and the supervisor never has to arbitrate between presenter and converger.
+- **Submission instead of IPC for owed work**: a record created exclusively is already a durable
+  request; the owner is poked but need not be up.
+- **Only the owner publishes journal entries**: entry keys are minted by one process, the applied log
+  has one writer, and a command beside a running owner never touches the mirror.
+- **Pause is persisted** because a user who holds changes before a flight expects them held after a
+  reboot.
+- **Bulk actions bounded by progress, with a liveness probe**, give every request a bound without
+  cutting off legitimately long work.
+- **Stop races, never cancels**: a cancelled job reads as a failure and degrades a queue. **Queues
+  give way at a fraction of the grace** so the cursor bump of finished uploads still goes out.
+  **Children are told at once** so nested processes stop within one grace. **A listener closes once,
+  after the drain**, so status stays answerable.
+- **References, not paths, on the wire** ([08 §2.2](08-frontends.md)).
+- **Exit 0 on a missing config, 78 on an invalid one**: service managers must not respawn-loop a fresh
+  install, and must not hide a broken config.
+- **The wizard validates with the parser** so it cannot write a config the daemon refuses.
 
 ---
 
-## 8. Invariants the tests pin down
+## 9. Conformance
 
-- `tests/unit/drain_for_stop`: a drain that finishes is waited for; one that does not is left at
-  the grace and **not cancelled**.
-- `tests/unit/fork_reap`: children that stop on SIGTERM are reaped at once (<1 s); one ignoring
-  SIGTERM is killed after grace + margin (not its own 30 s); a stop reaches all children
-  immediately, before any reaping.
-- `tests/unit/ipc_serve`: a server stops when asked over its socket, when told by its `until`
-  promise, or both; it returns, its socket file is gone, no exception escapes.
-- `tests/unit/subs`: connection serves several requests; subscribe acknowledged; subscriber
-  counted; topics isolated; publish reports delivery count; events in order; departed subscriber
-  dropped; publishing to nobody returns 0.
-- `tests/unit/shutdown`: `Sleep.sleep` runs its length without a stop, ends at once on stop, and
-  a sleep begun after a stop returns `Stopping` immediately; hooks run once and not after
-  unregistering; late hooks run at once; a retry ladder is not climbed past a stop and counts no
-  failure.
-- `tests/unit/queue_stop`: a command-finishing stop still runs everything queued; a process stop
-  takes no more work, returns at once having begun only the running job, leaves all jobs on disk;
-  the next start runs them all.
-- `tests/frontends/stop_publishes_cursor`: a stop publishes the cursor bump of finished uploads
-  even while another upload holds the drain past the grace; stop completes within the grace.
-- `tests/frontends/presenting_domain`: a presenting-only process still uploads and publishes the
-  cursor; the maintenance list is exactly the 7 tasks in §4.5 with those triggers.
-- `tests/scenario/ipc`: exact JSON of `stat` (by `rel` too), `list_dir` (paged by name, `next`),
-  `list_all` (`<walk>:<n>` cursors), `unnamed` counting, identical content → identical etag,
-  `create` under a key-shaped parent refused `not_found`, `changes_since` up-to-date / pruned
-  anchor stale / after reimport stale, op shapes for put/mkdir/rename/delete, `restore` with
-  `keep` → `pinned` + `pinnedUntil`, `evict` → `online-only`.
-- `tests/scenario/pause`: posted while paused is held (pending=1); resume uploads; drain completes
-  while paused.
-- `tests/unit/job_registry`: live job listed, killed (and reaped) job dropped; `done`/`failed`
-  kept after exit; second report from a pid replaces the first.
-- `tests/unit/status_ask`: request shape `{"action":"stats","domain":"beta","arg":"frontend"}`;
-  frontend entry carries pid/uptime/cpu/rss/traffic from the process; unbound socket →
-  `{type, reachable:false, socketPath, error}`.
-- `tests/unit/status_report`: snapshot of the folded report and its text rendering (merge by
-  frontend type, unreachable entries, warnings dedup).
-- `tests/unit/status_cost`: over a 3000-entry journal, the first report lists the store, ten more
-  within the window do not.
-- `tests/unit/status_held`: a main that is up is probed; held down it is not probed at all,
-  reported once as held, domain says `mainOffline`, replica described as is.
-- `tests/unit/menu`: snapshots of the rendered menu for busy/unreachable/paused/below-threshold
-  cases (icons, tooltips, rows, "… and N more", checkbox state/enabled).
-- `tests/unit/job_render`: text of Jobs blocks (progress bytes vs counts, failed job shows
-  `failed, ran … : <error>`).
-- `tests/unit/completion`: shell completion offers configured domains, `DOMAIN:/` items, only
-  things that exist, every offer is accepted by the command; a path under no domain is refused
-  with exit 1 by `ls`, `cache --evict`, `versions`.
-- `tests/unit/export_cli`, `export_display`: path spellings accepted/refused by `tsync export`
-  (8 ok, 4 refused: missing path, two domains, domain named twice differently, no destination).
-- `tests/e2e/ipc_tap`: a bound unix socket survives rename, which lets e2e tests interpose a
-  recording relay without test code in the daemon. `tests/e2e/linux|macos`: real daemon
-  start/stop and mount behaviour.
+An implementation MUST exhibit:
 
----
-
-## 9. Open questions / inconsistencies
-
-1. **Pause does not reach the converging poller (likely bug).** `tsync pause` goes to the domain
-   socket (the fuse/file-provider process), whose `Pause` holds only that process's queues. The
-   poller runs in the parent with the parent's own `Pause.held`, and the sync socket handler has no
-   `pause` action. Since bde81092 (after the cb2be7ac split) the documented "what peers did is not
-   applied" appears not to hold on Linux. The parent's own upload/metadata queues (reconcile) are
-   also not held. The pause flag is not persisted across restarts either.
-2. **File-provider stop is not grace-bounded**: its router serves without `until`; `stop` →
-   `Stop` closes the listener at once, then drains every domain **sequentially** with no
-   `Shutdown.request` and no `drain_for_stop` race. `hooks.on_stop` is a no-op there.
-3. The domain handler returns control `Stop` for `stop` even when its reply is an error.
-4. `Ipc.send` (blocking, used by `stop`, `pause`, `cache`, `versions --revert`, `Location`) has no
-   timeout: a wedged daemon hangs the CLI (the exact symptom of the EINVAL bug).
-5. `tsync stop` prints "relying on signal" when no socket answered, but sends no signal.
-6. File-provider router errors (`cannot tell which domain…`, invalid JSON) use
-   `{"ok":false,"error":…}` without `code`, unlike `Ipc_handler.error_reply`.
-7. `Change_notice.for_domain` caches the socket list on first use; later calls with a different
-   list are ignored.
-8. Docs vs code: DOCUMENTATION says `sync --full` "clear local cache", the command says "rewriting
-   the local mirror in place"; docs say jobs report to "its domain's daemon" and that an
-   unanswering domain is named on stderr — code reports to the sync socket and renders
-   `unanswered`/`NOT ANSWERING` in the report.
-9. `on_leaf` trace naming is per frontend group, so `Process_per_binding` children of one group
-   share a memtrace name — contrary to the "one file per process" intent of `trace_process`
-   (pids are not in the leaf name).
-10. `Descriptors.raise_to ~target:8192` while systemd grants 65536; harmless but two ceilings.
-11. `Status` fallback path (no parent) makes every frontend probe every backend — acknowledged as
-    the degraded mode, but still the mode on a machine whose parent is down.
-12. `Job_registry` keys on pid only; a pid running two reporting jobs sequentially is fine, but
-    concurrent reporters in one process (not currently possible) would overwrite each other.
-13. **Android embedded host builds its domain with `resume = false`** (`android_jni.ml:load_domain`)
-    and there is no daemon parent on the phone, so nothing is the *resumer* of replica/backfill work
-    recorded there (§3.8). Whether the "deferred rescan" sweep alone picks such records up in that
-    host was not verified here — worth checking against the deferred-queue spec.
+- **Ownership.** For any domain, at most one process holds its ownership lock; a second owner start
+  exits `OWNER_HELD` without touching local state; killing the holder with SIGKILL frees the lock
+  for the next process. A local edit made through the mount and a peer's delete of the same file
+  applied concurrently end as the conflict table says (the local edit publishes later), never with
+  the edit discarded.
+- **Start on existing state.** An owner starting on existing local state (owed WAL records, staged
+  edits, a backlog of deferred jobs, files in log directories that are not records, a leftover socket
+  file, no lock or pause file) converts nothing: the domain comes up owned and not paused, every owed
+  record and deferred job is adopted and runs, and nothing is lost or rewritten except by the owner's
+  ordinary work.
+- **Commands beside an owner.** `tsync sync` with a running owner runs the resync in the owner and
+  prints its count; with no owner it takes ownership and releases it at exit; with a non-serving
+  holder it refuses with `busy`. An import beside a running owner appears in the mount once the owner
+  has adopted its submitted records, with no process but the owner writing the mirror or publishing
+  journal entries; killing the import at any point leaves no manifest on the store unannounced after
+  the owner's next start.
+- **Pause.** While paused: nothing is published, no peer entry is applied, no deferred copy runs,
+  and store/publish commands refuse; local edits are accepted and held. The pause survives a
+  restart. A drain overrides pause: it completes while paused.
+- **Queue accounting.** Pending uploads count files; in-flight entries are listed first in, first
+  out; bytes owed are whole-file bytes, in-flight included; a folder rename owes 0 bytes.
+- **Stop.** A stop without a process stop drains everything; after a process stop, a queue returns
+  within a bound, leaving its records on disk for the next start. A drain that finishes is waited
+  for; one that does not is left at the grace and not cancelled. A server removes its socket and
+  returns within one second of being told to stop. Children that stop on SIGTERM are reaped at once; one ignoring it is killed after
+  `GRACE + REAP_MARGIN`; a stop reaches all children before any reaping. A stop publishes the cursor
+  bump of finished uploads even while another upload holds the drain past the grace. The File
+  Provider process's stop completes within the grace with a store unreachable.
+- **`tsync stop`** prints `Stopped tsync.` only after the supervisor socket is gone; `tsync is not
+  running.` when nothing answered; a wedged socket is reported and exits 1 within the reply deadline.
+- **Deadlines.** Every CLI command that talks to a daemon returns within its deadlines when the
+  daemon accepts connections but never replies. `ping` answers while a bulk action is in progress
+  and while every store is unreachable.
+- **IPC answers.** Invalid JSON is answered exactly `{"ok":false,"code":"invalid","error":"invalid
+  JSON"}`; an unknown action is refused naming it; `stop` is acknowledged and requests the stop
+  exactly once.
+- **Servers.** A server stops when asked over its socket, when its owner's stop resolves, or both;
+  its socket file is gone afterwards; no failure escapes. A connection serves several requests.
+  Subscription: subscribed, counted, topics isolated, events in order, a departed subscriber
+  dropped, publishing to nobody returns 0. A connection from another user is refused.
+- **Stop signal.** A stop-aware sleep runs its length without a stop, ends at once on stop, and one
+  begun after a stop returns at once; hooks run once, not after unregistering; late hooks run at
+  once; a retry ladder is not climbed past a stop and counts no failure. A process stop takes no more
+  queue work and leaves all jobs on disk; the next start runs them.
+- **Job reports.** A long command reports itself as a job, including when no supervisor listens; its
+  progress carries total, skipped, done, handled and remaining, and an ETA only between the first
+  settled item and completion. A dead pid's running job disappears; a finished or failed one stays;
+  a re-report replaces the row.
+- **Status.** The report carries the fields of §5.5 with their values (the text rendering's layout
+  and wording are not part of the contract, except that a zero-valued qualifier is omitted); secrets
+  are masked `***`; this client's own journal entries are never counted behind; processes and jobs
+  are deduplicated; warnings are folded by (level, message). The collector's request shape to a
+  process is `{"action":"stats","domain":…,"arg":"frontend,…"}`; an unbound socket becomes
+  `{reachable:false, socketPath, error}` promptly; over a large journal, repeated reports within the
+  window list the store once; a held-down member is not probed and is reported as held; totals never
+  delay a reply; a domain in `hold` reports its reason and mark age.
+- **Menu.** Rendering is a pure function of the status replies (icons, tooltip, rows, "… and N
+  more", checkbox state and enablement).
+- **CLI parsing.** Shell completion offers configured domains and `DOMAIN:/` items that exist,
+  folders ending in `/`, and every offer is accepted by the command; `ls` shows availability, name
+  and size per file and folders with a trailing `/`; a path command finds its domain's owner socket; a path under no domain is refused with exit 1 by `ls`,
+  `cache --evict` and `versions`. `tsync export` accepts and refuses the path spellings of
+  [05 §4.4](05-ops-config.md).
 
 ---
 
+## 10. Parameters
 
----
+| name | value | rule |
+|---|---|---|
+| `GRACE` | 10 s | a stop's drain budget |
+| `QUEUE_GRACE_FRACTION` | 0.8 | < 1, so the cursor flush runs inside the grace |
+| `REAP_MARGIN` | 2 s | |
+| `REAP_POLL` | 50 ms | |
+| `STOP_WAIT` | `GRACE + REAP_MARGIN + REQUEST_DEADLINE` | < the service manager's stop timeout |
+| `RESTART_BACKOFF_MIN` / `MAX` / `RESTART_STABLE` | 1 s / 60 s / 60 s | |
+| `OWNER_HELD` exit status | 75 | |
+| `JOB_REPORT_INTERVAL` / `JOB_STALE_MIN` / `JOB_KEEP` | 10 s / 45 s / 300 s | |
+| `STORE_STATE_WINDOW` / `LISTING_GRACE` | 5 s / 2 s | |
+| status listing timeout | 30 s | journal and corruption listings |
+| corrupted sample | 1000 (+1 to detect truncation) | |
+| `HOUSEKEEPING_INTERVAL` | 60 s | |
+| `FD_SOFT_TARGET` | 65536 | |
 
-OCaml implementation notes for this subsystem: [ocaml/07-daemon-cli.md](ocaml/07-daemon-cli.md).
+Request deadlines: [failure-model.md §8.3](algorithms/failure-model.md#83-parameters). IPC line,
+connection and subscriber bounds: [01 §15](01-core.md#15-parameters).

@@ -1,6 +1,6 @@
 # The http-proxy frontend — OCaml implementation notes
 
-Companion to the language-neutral spec [../../frontends/http-proxy.md](../../frontends/http-proxy.md). See [README.md](../README.md) for how these notes are organised.
+Companion to the language-neutral spec [../../frontends/http-proxy.md](../../frontends/http-proxy.md). See [README.md](../README.md) for how these notes are organised. Security gaps of this code against the spec: [../algorithms/security-model.md](../algorithms/security-model.md).
 
 Each note names the spec section it implements.
 
@@ -55,3 +55,31 @@ The waiter itself uses `Lwt.pick [Lwt_condition.wait gate.woken; Lwt_unix.sleep 
 **B17. Lifecycle (A13).** `start` runs `Domain_engine.run (fun ~ready -> …)`: stop is an `Lwt.wait` pair resolved by `request_stop` (guarded by `Lwt.state stop = Sleep`, a check-then-act that is safe only without preemption) after `Shutdown.request ()`; signals via `Lwt_unix.on_signal`. The control socket is `Lwt.async (Ipc_lwt.serve ~until:drained …)`, and `drained` is woken after `Domain_engine.drain_for_stop`, which is what closes and unlinks the socket once. `Lwt.async_exception_hook` is set to a logger so the watch loops and share streams never take the process down; an exception escaping `Lwt_main.run` itself is fatal by the engine's design.
 
 **B18. Capability derivation (A5).** `Lwt_list.map_s` over routes with `Lwt.catch … (fun _ -> Backend.no_caps)`, then `Backend.merge_caps`; sequential on purpose (few routes, startup only). Swapping to a parallel map is harmless but gains nothing.
+
+## B-III. History and gaps at the spec snapshot
+
+**B19. Commits behind the rationale (A16).** 409 for permanent failures: 48e797b4. One watch per key, read on arrival: cf3684d8. Gate data not metadata, 16× queue, batch pool: 4060b0b1 (a gate of 4 was serving 128 reads through the batch layer's default width). Bulk answers from listed sizes, streamed: 34183bb1 (a 90 MB folder answered whole through a growing buffer plus a final copy killed a 400 MB host). One "who serves shares" predicate: ca6ed151.
+
+**B20. Process shape.** The launcher forks one child for the whole `http-proxy` group; it inherits the stores built before the fork (stopped, `resume = true`), leases uplink bandwidth from the parent and routes "replica job recorded" to the parent as a `rescan`. The spec requires the listener to run in the domains' owner.
+
+**B21. Where the code falls short of the frontend spec.**
+- The gate table is keyed by key string, not (route, key), and any key may be watched; the whole body is the token, so a watch on a chunk key reads and holds the chunk.
+- `wait` is parsed with `float_of_string`: `nan` passes the clamp (min with NaN is NaN) and leaves the deadline undefined; a negative `wait` answers 204 at once.
+- An unparseable `max_keys` lists everything; `if_absent` with an unknown value is a plain PUT.
+- Claims, deletes, copies and delete-multi bypass the gate; there is no connection cap, so nothing bounds them.
+- Stop ends the accept loop and drains without awaiting in-flight requests.
+- The control socket answers a JSON non-object with `internal`.
+- The default port without TLS is 80 on all interfaces; there is no `bind` option.
+- `/s/` accepts any method.
+- Share bytes are read through the domain's chunk-cache data path (`Data_lwt.pread`, fetch-on-miss into the cache); the spec (R-2) has the store server own no domain state and stream shares from the stores.
+- Deferred replica jobs recorded by the child are signalled to the parent as a `rescan`, not submitted to an owner inbox.
+- No server-side GC gate: a proxied `Put` of a manifest is a plain `B.put`, no promotion, no missing-chunk check; chunk reads do not fall back to `chunks.from/`.
+- No `Date`, `x-tsync-kind` or `x-tsync-etag` headers.
+
+## B-IV. Resource strategy (not normative)
+
+The spec leaves these to the implementation (P6). Values at the snapshot:
+- Admission gate `max:n`, waiter queue `16 × n`; batch-reads pool of `n`, no waiter limit (separate from the gate so a request holding a gate slot never waits on the same pool: deadlock).
+- Share reads in 256 KiB blocks, each taking one of 16 process-wide read slots **before** allocating its buffer (this order is what bounds memory); no waiter limit, because headers are already sent. File manifests memoised per key, cleared at 256 entries.
+- Single-object answers handed to cohttp without a copy; bulk answers streamed as frame pieces, bodies held once in the store's buffers; byte counters bumped per piece.
+- ZIP: one block in memory at a time; the member list is computed before the response starts.

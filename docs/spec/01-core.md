@@ -1,1005 +1,864 @@
-# 01 — Foundation layer: lib/core, lib/local, lib/lwt
+# 01 — Foundation: names, content keys, time, resources, runtime, shared mechanisms
 
-Scope: `lib/core` (library `tsync_core`), `lib/local/{stdlib,io,device,runtime,tls,desktop_mounts}`,
-and the scheduler-binding layer `lib/lwt/{local/io,core}` plus the pattern the rest of `lib/lwt/**` follows.
+This file is normative. It owns:
 
-Structure: this file (§1–§9) is the language-neutral specification: formats, contracts, algorithms,
-and the abstract runtime interface (§3.1–§3.2) that a Rust async runtime, a C event loop + thread pool,
-or an OCaml 5 effects/domains runtime must each provide. The [OCaml notes](ocaml/01-core.md) hold OCaml
-implementation notes: the functor-over-`Io.S` pattern, the Lwt binding, the `lib/lwt` mirror tree, dune
-tricks, C stubs, and each Lwt-specific learning translated to effects/domains.
+- the grammar of every name and key, and their validation (principle P4, grammar half);
+- content hashing, fixed-size chunking and chunk keys;
+- the mapping from logical keys to stored keys, and item references;
+- the time rules (P5) and the resource rule (P6);
+- the requirements on the runtime every concurrent part is written against;
+- the retry ladder, the health breaker, the HTTP request discipline and IPC framing.
 
+It does not own, and only links to: the failure kinds and their propagation
+([failure-model](algorithms/failure-model.md)), the durable queue and every persistence rule
+([durable-queue](algorithms/durable-queue.md)), the backend key layout and object bodies
+([02](02-remote-model.md)), the IPC contract — envelope, error codes, actions
+([07](07-daemon-cli.md)), socket locations, change notices and advisory sends
+([07](07-daemon-cli.md)), and where each trust boundary enforces validation
+([security-model](algorithms/security-model.md)). Notes on the OCaml implementation are in
+[ocaml/01-core.md](ocaml/01-core.md).
 
----
-
-## 1. Problem
-
-tsync is a set of cooperating processes (per-domain daemons/frontends, a sync process, one-shot CLI
-commands, an Android app) that all speak the same vocabulary about the same store. This layer is that
-vocabulary and toolbox, with no configuration and (mostly) no scheduler:
-
-* **Names** — how an item is called by a user (`Logical_key`), how a store files it (`Stored_key`),
-  how a frontend refers to it over IPC (`Item_ref`), how content is named (`Chunks.key_of_body`,
-  XXH3 dual-seed), where a chunk lives (`Chunk_layout`). Every writer and reader must compute these
-  identically across clients, languages (a Python bucket verifier re-implements the chunk key) and
-  releases: they are persistent formats.
-* **Tools every layer shares** — a durable on-disk work queue, a retry ladder with shared backoff,
-  a per-peer health breaker, a bounded concurrency pool, a pooled HTTP client, a line-JSON IPC,
-  spill-to-disk listings and an off-heap hash table, metrics, job progress/report, cooperative
-  shutdown, a streaming ZIP64 writer, glob matching, logging.
-* **Platform facts** (`lib/local`) — EINTR-safe stdlib, filesystem primitives, copy-on-write clone,
-  device queue depth, fd limit, directory watch, per-OS paths, TLS backend selection.
-* **A narrow runtime interface** — all concurrent logic is written against a small set of runtime
-  capabilities (tasks, a resolvable promise, catch/finally, concurrent join, timers with cancellable
-  races, mutex/condition, positioned file I/O). §3.1 lists them neutrally; §3.2 lists the ordering and
-  atomicity guarantees the logic silently relies on. (How OCaml achieves this — functors over `Io.S`
-  applied once to Lwt — is in the [OCaml notes](ocaml/01-core.md).)
-
-It is separate because (a) the naming rules are a cross-client contract that must live in exactly one
-place ("one spelling, or two things that can disagree" is the recurring rationale), and (b) keeping the
-runtime behind a narrow interface lets logic be tested and reasoned about without naming a scheduler,
-and keeps the choice of scheduler in one place (a Duppy/effects migration was explored against exactly
-this seam — see the [OCaml notes](ocaml/01-core.md)).
+Terms follow the [glossary](README.md#3-glossary). Parameters are written `NAME` and collected
+in §15 with recommended values; where safety depends on a range, the range is a MUST.
 
 ---
 
-## 2. Concepts & data model
+## 1. Why a foundation layer
 
-### 2.1 Content hashing (XXH3-64, dual seed) — EXACT
+Several independent programs — daemons, frontends, one-shot commands, an embedded app, a
+bucket verifier in another language — read and write the same stores. They agree only if they
+compute every name identically, across languages and releases. Names are therefore persistent
+formats, and each is defined once, here. The same programs share a small set of mechanisms
+(retry, breaker, framing) whose semantics must not drift between callers; those
+are defined here too, against an abstract runtime (§6) so no rule depends on a scheduler.
 
-* Algorithm: **XXH3-64** (xxHash v0.8 `XXH3_64bits_withSeed`), vendored single header, compiled inline
-  (`lib/core/xxhash_stubs.c`). Seeds are small integers **0 and 1**.
-* `hash_hex data seed` = `printf "%016Lx"` of the 64-bit result: **16 lowercase hex chars**, zero padded.
-* **Chunk key** (`Chunks.key_of_body`, `lib/core/chunks.ml:1`):
-  `hex(XXH3_64(body, seed=0)) ^ "-" ^ hex(XXH3_64(body, seed=1))` → 33 chars.
-  `is_chunk_key name` ⇔ exactly one `-` at index 16 and both halves are 16 chars of `[0-9a-f]`
-  (uppercase rejected). Decides copy/delete during store walks, so it tests what a key *is*.
-* Streaming state (`Xxhash.create seed / update / digest`) is the same function as one-shot (the golden
-  test checks at XXH3 branch boundaries 0,1,16,17,128,129,240,241,2600, 1 MiB, 1 MiB+1, 8 MiB).
-* Known answers (`tests/unit/hash/hash.expected`, also read by a Python implementation):
+---
 
-  | input | seed 0 | seed 1 |
-  |---|---|---|
-  | `""` | `2d06800538d394c2` | `4dc5b0cc826f6703` |
-  | `"hello world"` | `d447b1ea40e6988b` | `b7aeb52a10fdaf2d` |
-  | `pattern-8388608` (byte i = (i*31+7) & 0xff) | `29a6314906cb27cd` | `314dbe6e90136337` |
+## 2. Names and keys (P4)
 
-  So the chunk key of `"hello world"` is `d447b1ea40e6988b-b7aeb52a10fdaf2d`.
+All names are byte strings. Comparison is byte-wise and case-sensitive unless a rule says
+otherwise.
 
-Other uses of the same dual-seed construction (all `h0 ^ "-" ^ h1`):
+### 2.1 Store keys and prefixes
 
-| where | input | purpose |
+A **key** names one object in a store. A **prefix** names a set of keys (a listing argument).
+
+```
+key      = segment *( "/" segment )
+prefix   = key "/"
+segment  = 1*byte  except  "/" and NUL,  and not exactly "." or ".."
+```
+
+- A key MUST NOT be empty, MUST NOT start with `/`, MUST NOT end with `/`, MUST NOT contain an
+  empty segment (`//`), a `.` or `..` segment, or a NUL byte.
+- A prefix is a key followed by exactly one `/`. No object key ends with `/`, and no store
+  writes or lists a directory-marker key.
+- Every component that accepts a key or prefix from outside the process (a peer request, a
+  listing returned by a store, a job object read from a store, a config value, an IPC request)
+  MUST validate it against this grammar before using it, and refuse it as INVALID
+  ([failure-model §3](algorithms/failure-model.md#3-the-classification)) otherwise. A listing entry
+  is validated as a key, or as a prefix where a listing by delimiter returns one; an entry that
+  fails validation is skipped with a warning and never mapped to a path.
+- A store that maps keys to a filesystem MUST follow no symbolic link at or below its root: every
+  component of a key's path is opened without following links, and a link found there is
+  refused (enforcement: [security-model](algorithms/security-model.md)).
+- Every key existing writers have produced satisfies this grammar, so validation rejects no
+  existing object.
+
+### 2.2 Domain names
+
+```
+domain-name = 1*255 byte  except  "/", NUL, bytes 0x01–0x1F and 0x7F
+              and not "." or "..", not beginning with ".tsync-"
+              and not a reserved root name
+reserved    = "shares" | "corrupted" | "verify-jobs" | "gc-jobs"
+```
+
+- A domain name is a key segment: it appears as `tsync/<domain>/…` and as a sibling of the
+  reserved roots `tsync/shares/`, `tsync/corrupted/`, `tsync/verify-jobs/`, `tsync/gc-jobs/`
+  ([02](02-remote-model.md)). A domain carrying a reserved name would read and write another
+  subsystem's objects; one containing `/` or `..` would escape its prefix.
+- A reserved name is refused byte for byte everywhere. If any of the domain's stores is a
+  local-filesystem store, a name equal to a reserved name ignoring ASCII case is refused too,
+  because such a store may sit on a case-insensitive filesystem that files `Shares` and
+  `shares` in one directory. (Object stores are case-sensitive, so a domain named `Shares` on
+  one remains valid.)
+- The config validator ([05](05-ops-config.md)) MUST refuse a domain whose name violates this
+  grammar. Uniqueness of domain names (ignoring case) is a configuration rule owned by
+  [05](05-ops-config.md). Every component that receives a domain name from outside (a peer
+  request, an IPC request, a job object, a GC job key) MUST validate it against the grammar.
+- Inner spaces and any other byte are allowed (`Family Photos` is a valid name). A domain
+  literally named `chunks` or `tsync` is valid.
+
+### 2.3 Leaf names and logical paths
+
+```
+leaf  = 1*byte  except  "/" and NUL,  and not exactly "." or ".."
+path  = "" | leaf *( "/" leaf )          ; "" is the domain root
+```
+
+- A leaf is the user's name for one file or folder. Any byte string satisfying `leaf` is valid,
+  including names beginning with `.tsync-`, names longer than a local filesystem allows, and
+  names with characters some filesystems refuse: the store files children by a hash of the
+  leaf (§2.6), and a local mirror escapes what it cannot hold (§2.8).
+- Readers MUST accept any leaf that existing writers stored; all of them satisfy this grammar.
+- A path accepted from a user (CLI argument, import source walk) MAY carry one leading and one
+  trailing `/`, which are removed; after that it MUST satisfy `path` or be refused as INVALID.
+
+### 2.4 Logical keys
+
+A **logical key** is `(domain, path, kind)` with `kind ∈ {file, folder}`.
+
+- Its string spelling is `<domain prefix><path>` where the domain prefix is
+  `tsync/<domain>/manifests/`. The root is `(domain, "", folder)`, spelled
+  `tsync/<domain>/manifests/`. The spelling carries no kind.
+- Equality includes the kind: a file and a folder with the same path are different keys.
+- `leaf(k)` is the last segment of the path, `""` for the root. `parent(k)` is the key of the
+  path minus its last segment, always of kind folder; the parent of the root is the root.
+- Descending from a file key is an error.
+- Parsing a string back into a logical key succeeds only if it starts with this domain's
+  prefix and the remainder satisfies `path` (readers SHOULD accept one trailing `/` after it,
+  meaning the same key; writers MUST NOT produce it); the
+  kind MUST come from the caller or from local state, never be guessed from the string.
+
+Example: file `photos/trip/img.jpg` in domain `home` is spelled
+`tsync/home/manifests/photos/trip/img.jpg`, leaf `img.jpg`, parent folder `photos/trip`.
+
+### 2.5 Folder ids
+
+A **folder id** names one folder for its whole life, across renames and moves.
+
+```
+folder-id  = root-id | trash-id | hex-id
+root-id    = ".tsync-root"
+trash-id   = ".tsync-trash"
+hex-id     = 1*hexlower [ "-" 1*hexlower ]
+hexlower   = "0"–"9" | "a"–"f"
+```
+
+- Writers MUST mint ids of the form `<12 hex> "-" <counter>`: the first 12 hex characters of
+  this client's uuid, `-`, and a counter in lowercase hex that is unique for that client. Client identity, counter
+  leases and minting are owned by [03 §2.1](03-journal-sync.md#21-client-identity-and-folder-id-leases-local); arbitration between clients
+  that claim ids is owned by [data-model/backend.md §6](data-model/backend.md#6-folder-identity-arbitration).
+- Readers SHOULD accept any other `hex-id` (for example 16 or 32 hex digits with no counter)
+  as a folder id with the same meaning; writers MUST NOT mint one.
+- Anything else read where a folder id is expected is INVALID (from a request) or CORRUPT (from
+  a store object).
+
+### 2.6 Stored keys: the logical-to-stored mapping
+
+A **stored key** is where the store files an item. Stored keys are built only by the mapping
+functions below, or taken from a store's own listing after validation (§2.1). There is no other
+way to obtain one: a free string is never a stored key.
+
+The **inode model**: a folder's children are filed under the folder's id, each at a hash of its
+leaf, so renaming or moving a folder rewrites one object and nothing under it.
+
+```
+name-hash(leaf)                 = hex16(XXH3(leaf, 0)) "-" hex16(XXH3(leaf, 1))     (§3.1)
+namespace(prefix, id)           = prefix id "/"
+child-key(prefix, id, leaf)     = prefix id "/" name-hash(leaf)
+reserved-key(prefix, id, name)  = prefix id "/" name     for name ∈ reserved leaves
+```
+
+- `manifest-key(k) = child-key(domain prefix, folder-id(parent(k)), leaf(k))`. A folder's
+  marker lives at the same key as a file of the same name would; the two cannot coexist in one
+  parent.
+- **Reserved leaves.** Every name a store keeps for itself begins with the sentinel `.tsync-`.
+  No user leaf reaches a store key unhashed, so no user name can collide with one. The reserved
+  leaves under a folder namespace (`.tsync-parent`, `.tsync-index`), the trash namespace
+  (`.tsync-trash/`), the full key layout and the bodies filed at each key are specified in
+  [02](02-remote-model.md).
+- A stored key's parent folder id is its second-to-last segment; a namespace's folder id is its
+  last non-empty segment.
+
+Example: `img.jpg` in a folder with id `3f2a9c1b7d4e-1a` is filed at
+`<prefix>3f2a9c1b7d4e-1a/066843ea47b80079-e0e3d2bb9b72c14d`.
+
+### 2.7 Item references
+
+An **item reference** is how a non-kernel client names an item to the domain owner. It is
+never a path for a folder, so it survives renames of any ancestor.
+
+```
+item-ref = "root"
+         | "d:" folder-id                       ; a folder
+         | "f:" folder-id "/" leaf              ; a file: its parent's id and its leaf
+```
+
+- Parsing is total: every string yields either a reference or "malformed".
+- `d:.tsync-root` denotes the root and MUST be normalised to `root`.
+- For `f:`, the first `/` separates the id from the leaf. The id MUST satisfy `folder-id`, and
+  the leaf MUST satisfy `leaf` (so it contains no `/`); a leaf MAY contain `:`.
+- Anything else — an empty id or leaf, a bare `d:` or `f:`, an id or leaf violating its
+  grammar, a store key — is **malformed**. A malformed reference is INVALID; it is never
+  answered as ABSENT. A well-formed reference that resolves to nothing is ABSENT.
+- A reference names a kind: an `f:` reference MUST NOT resolve to a folder, and a `d:`
+  reference MUST NOT resolve to a file.
+- Formatting a parsed reference MUST reproduce the canonical string (`root`, `d:<id>`,
+  `f:<id>/<leaf>`).
+- Resolving a reference MUST NOT mint a folder id or write anything: a resolution that minted
+  would publish a marker and could resurrect a deleted folder.
+
+Rationale: a directory rename changes every descendant's path, and references reach system
+logs, so no user path appears in one unless the caller named it.
+
+### 2.8 Mirror escaping (local names for real paths)
+
+A local mirror files each item by its real path. A component is **storable** as itself iff it
+is at most `NAME_MAX_LOCAL` bytes, does not begin with `.tsync-`, and contains none of
+`" * : < > ? \ |` and no byte below 0x20. Otherwise it is filed as
+`.tsync-esc-` followed by `hex16(XXH3(leaf, 0))`.
+
+- Characters illegal on FAT, exFAT or NTFS are escaped even where the local filesystem would
+  accept them, so a mirror can be copied to such a volume.
+- The real name is recovered from the file's manifest (files) or from a `.tsync-name` record
+  beside the escaped directory (folders); the layout of those records is owned by
+  [04](04-checkout-cache.md).
+- The escape handle is a 64-bit hash, so two distinct unstorable leaves in one folder can map
+  to one handle. A writer that finds the handle already taken by a different real name MUST
+  refuse the second item locally as EXISTS rather than overwrite the first; the conflict policy
+  ([conflict-resolution](algorithms/conflict-resolution.md)) then files it under a conflicted
+  name.
+
+### 2.9 Temporary and reserved local names
+
+- A **temporary file** lives in the directory of its target. A name is a temporary iff it has
+  **both** the prefix `.tsync-tmp-` and the suffix `.tmp`; whatever lies between is the
+  writer's choice. A suffix test alone MUST NOT be used: it once deleted a user's
+  `.syncthing.*.tmp` files, forever.
+- Writers MUST name temporaries `.tsync-tmp-<pid>-<seq>.tmp` (`pid` in decimal, `seq` unique
+  within the process), except a local-filesystem store, which MUST use
+  `.tsync-tmp-<random>.tmp` with lowercase random hex from §2.10
+  ([backends/local](backends/local.md)). Readers, listings, sweepers and watchers SHOULD
+  recognise any other middle (such as `scratch`) as a temporary too; writers MUST NOT produce
+  one.
+- A sweeper MAY remove a temporary whose middle is `<pid>-<seq>` only if `pid` names no live
+  process, and any other temporary only once it is older than its owner's age rule. Readers and
+  listings MUST hide temporary files, and a directory watcher MUST ignore them (§14).
+
+### 2.10 Random identifiers
+
+- Tokens that grant access or identify a client (share tokens, the client uuid) MUST be drawn
+  from the operating system's cryptographically secure generator. If it is unavailable the
+  operation MUST fail; there is no fallback.
+- Short random ids (staged-body names, trash entries) MUST be drawn from a generator seeded
+  from the operating system's secure generator, and MUST NOT repeat across processes: a
+  process created by `fork` MUST reseed before drawing (forked frontends once drew identical
+  ids).
+- The client uuid is 16 random bytes in lowercase hex (32 characters).
+
+---
+
+## 3. Content: hashing, chunking and chunk keys
+
+### 3.1 The hash
+
+- Algorithm: **XXH3-64** (xxHash 0.8, `XXH3_64bits_withSeed`) with seeds **0** and **1**.
+- `hex16(h)` is the 64-bit result in lowercase hexadecimal, zero-padded to 16 characters.
+- Streaming and one-shot hashing MUST give the same result for every input length.
+
+Known answers, which every implementation MUST reproduce:
+
+| input | seed 0 | seed 1 |
 |---|---|---|
-| `Stored_key.hash_name` | a child's leaf name | manifest/marker key within a folder namespace |
-| `Manifest` h1/h2 (domain layer) | concatenation over chunks of `"<chunkkey>-<len>;"` | whole-file digest, rebuildable from chunk keys without rereading bytes; streamed separately per seed |
-| `Manifest` symlink | the target string | h1/h2 of a symlink |
-| `Cache_layout.Group.key_of` | concatenation of member chunk keys each followed by `";"` | cache-file name for a group of chunks |
-| `Cache_layout.export_record_path` | destination path | fixed-length file name |
+| `""` | `2d06800538d394c2` | `4dc5b0cc826f6703` |
+| `"hello world"` | `d447b1ea40e6988b` | `b7aeb52a10fdaf2d` |
+| 8 388 608 bytes, byte i = (31·i + 7) mod 256 | `29a6314906cb27cd` | `314dbe6e90136337` |
 
-`Stored_key.escape` uses **one** seed only: `".tsync-esc-" ^ hex(XXH3(leaf,0))`.
+Conformance vectors additionally cover lengths 0, 1, 16, 17, 128, 129, 240, 241, 2600,
+1 MiB, 1 MiB + 1 and 8 MiB, which straddle the algorithm's internal branch boundaries.
 
-### 2.2 Chunking — EXACT
-
-**Fixed-size, not content-defined.** A file of `size` bytes with per-file `chunk_size` is cut at
-multiples of `chunk_size`; every chunk is `chunk_size` bytes except the last (`lib/core/chunks.ml`):
+### 3.2 Chunk keys
 
 ```
-count(size, cs)      = size <= 0 ? 0 : ceil(size / cs)
-index_of(cs, pos)    = pos / cs
-offset_of(cs, i)     = i * cs
-length_of(size,cs,i) = max 0 (min cs (size - i*cs))     # 0 past the end; cs=0 → 0
+chunk-key(body) = hex16(XXH3(body, 0)) "-" hex16(XXH3(body, 1))      ; 33 characters
 ```
 
-* `chunk_size` is recorded **per file in its manifest** and never changes for that file. New files use
-  `Conf.chunk_size` if configured, else the primary backend's recommended `capabilities.chunk_size`
-  (an http-proxy answers with the serving domain's), else `Conf.default_chunk_size = 8 MiB`
-  (`8*1024*1024`), resolved once per process (`lib/domain/remote/remote.ml:95`). Symlink manifests
-  carry `chunk_size = default` and no chunks.
-* Empty file → 0 chunks.
-* Dedup is purely by chunk key equality: two clients cutting the same bytes at the same chunk size
-  produce the same keys. Different chunk sizes do not dedup.
-* The local cache groups consecutive stored chunks into cache files of ~`cache_chunk_size`
-  (default 16 MiB): `chunks_per_group = max 1 ((cache_cs + cs/2) / cs)` (domain layer, noted here
-  because it is a function of chunk size).
+- A string is a chunk key iff it is exactly 33 bytes, byte 16 is `-`, and the other 32 bytes are
+  lowercase hex. Uppercase is not a chunk key. This test decides whether a listed object is a
+  chunk, so it tests what a key *is*, not what it resembles. A manifest's stored key has the
+  same shape; membership in the chunk space is therefore decided by prefix
+  ([02](02-remote-model.md)), never by leaf shape.
+- Example: the chunk key of `"hello world"` is `d447b1ea40e6988b-b7aeb52a10fdaf2d`.
+- **Threat model.** The chunk key is 128 bits of a non-cryptographic hash. It detects accidental
+  damage (bit rot, truncation, a store answering for the wrong key) and gives deduplication
+  among cooperating clients. It does not resist an adversary who can write to the store: such
+  an adversary can craft colliding bodies. Stores are assumed to be written only by the user's
+  own clients ([security-model](algorithms/security-model.md)). The algorithm is frozen: every
+  existing chunk is filed under it.
+- A reader that verifies a chunk (every reader that obtained the bytes from a store or a peer,
+  per [read-path-and-cache](algorithms/read-path-and-cache.md)) recomputes the key and treats a
+  mismatch as CORRUPT.
 
-**Range → pieces** (`Chunks.pieces ~chunk_size ~count ~offset ~length`): returns
-`{index; chunk_off; len; dest}` in order, covering `[offset, offset+length)` exactly once, where `dest`
-is the offset inside the caller's buffer. Empty if `chunk_size<=0 || length<=0 || offset<0`; stops at
-chunk `count` (a range past the end is short, not an error). Examples (`chunk=8`):
-`[6,10)` count 3 → `#0[6,8)@0, #1[0,2)@2`; `[12,28)` count 2 → `#1[4,8)@0`; `[16,24)` count 2 → none.
+### 3.3 Other digests with the same construction
 
-`Chunk_source.t` (how an uploader obtains a chunk's bytes, decided before any I/O):
-`Stored of key` (inherited from a previous manifest, nothing to hash/send) | `Mapped of (unit -> bigstring)`
-(mmap in place) | `Filled of {len; fill : bigstring -> 'a}` (written into a pooled buffer).
+Each is `hex16(XXH3(x, 0)) "-" hex16(XXH3(x, 1))` over the stated input:
 
-### 2.3 Chunk store layout — EXACT (`lib/core/chunk_layout.ml`)
-
-* `fanout = 3` hex chars → `shards = 4096`; `shard_name n = "%03x"`; `shard_of key` = first 3 chars,
-  or `"_"` for a key shorter than 3. `relative_path key = "<shard>/<key>"`. Same layout for the backend
-  chunk store and the local chunk cache. Rationale: few hundred files/shard for 10 TB at 8 MiB.
-* Given `chunk_prefix = "tsync/<domain>/chunks/"` (from `Conf_parsing`: root `tsync/`, domain root
-  `tsync/<d>/`, `manifests/`, `chunks/`, `versions/`, `journal/`, shares at `tsync/shares/`):
-
-| thing | key |
+| digest | input |
 |---|---|
-| chunk | `tsync/<d>/chunks/<shard>/<key>` e.g. `tsync/home/chunks/d44/d447b1ea40e6988b-b7aeb52a10fdaf2d` |
-| GC "from" space (root renamed away during a collection) | `tsync/<d>/chunks.from/<shard>/<key>` |
-| GC run marker | `tsync/<d>/gc-run` (sibling of chunks root) |
-| GC run name | `%013.0f` of start time in **milliseconds**, e.g. `1755300000000` |
-| GC job request | `tsync/gc-jobs/<d>/<run>/<shard>` |
-| verify job request | `tsync/verify-jobs/<d>/<shard>` |
-| corruption marker | `tsync/corrupted/<d>/<shard>/<key>` |
-| `domain_roots` (all prefixes a domain owns) | `[tsync/<d>/; tsync/corrupted/<d>/; tsync/verify-jobs/<d>/; tsync/gc-jobs/<d>/]` |
+| leaf name hash (§2.6) | the leaf |
+| whole-file digest in a manifest | concatenation over chunks of `"<chunk-key>-<length>;"` |
+| symlink digest | the target string |
 
-* `marker_key k`: rewrite `…/<d>/chunks/<shard>/<chunkkey>` → `tsync/corrupted/<d>/<shard>/<chunkkey>`;
-  finds the **last** `/chunks/` segment (a domain named `chunks` must not cut short); `None` for
-  anything under `chunks.from/`, for markers, for an empty domain, for a non-shard or non-chunk-key leaf.
-  Membership is by prefix, never by leaf shape (a manifest key is shaped like a chunk key).
-* `is_marker_key` checks the whole shape (`<root>/corrupted/.../<shard>/<chunkkey>`) so a filesystem
-  store's listed-back directories are not markers. `shard_of_job` answers `Some leaf` only if the leaf
-  is a shard name.
-* A domain literally named `corrupted`, `verify-jobs` or `gc-jobs` would collide — acknowledged, not checked.
+The mirror escape handle (§2.8) uses seed 0 only. Local cache names derived from digests are
+owned by [04](04-checkout-cache.md).
 
-### 2.4 Keys
+### 3.4 Fixed-size chunking
 
-**`Logical_key.t`** = `{prefix; path; kind : File|Dir}` (`lib/core/logical_key.ml`). The user-facing name.
+A file of `size` bytes with chunk size `cs > 0` is cut at multiples of `cs`. Every chunk is `cs`
+bytes except the last:
 
-* `to_string = prefix ^ path` (the wire/store spelling; carries no kind). Prefix is the domain's
-  `domain_prefix` = `tsync/<d>/manifests/`. Root: path `""`, kind Dir → `tsync/home/manifests/`.
-* `path` has no leading/trailing `/` (`Make.file/dir` trim exactly one of each); `leaf` = basename or `""`;
-  `parent` of root is root, parent is always Dir; `file_in/dir_in` raise `Invalid_argument` on a File.
-* Equality/compare include prefix and kind — a file and a folder with the same path are different keys.
-* `rel_of_string s` = `Some (trim (s minus prefix))` iff `s` starts with the domain prefix.
-
-Examples: file `photos/trip/img.jpg` → `"tsync/home/manifests/photos/trip/img.jpg"`, leaf `img.jpg`,
-parent `"tsync/home/manifests/photos/trip"`.
-
-**`Stored_key.t`** (`lib/core/stored_key.ml`) — opaque string, constructed only via namers or `listed`
-(taking a store's listing at its word). The **inode model**: folders have stable random ids; children
-are filed under the parent's id by hash of leaf name, so renaming a folder touches only its own marker.
-
-* Sentinel `".tsync-"`: every store-internal leaf starts with it. `root_id = ".tsync-root"`,
-  `trash_id = ".tsync-trash"`. Folder ids are `<12 hex>-<counter>` (minted in the domain layer).
-* `namespace ~prefix ~folder_id = prefix ^ folder_id ^ "/"` (ends in `/` ⇒ `is_dir_key`).
-* `child_key ~prefix ~folder_id name = prefix ^ folder_id ^ "/" ^ h0(name) ^ "-" ^ h1(name)`.
-  E.g. `img.jpg` under `9f3a1c0428b6d5e7` → `9f3a1c0428b6d5e7/066843ea47b80079-e0e3d2bb9b72c14d`.
-* `index_key` = `<prefix><id>/.tsync-index` (folder's cache of its children's bodies);
-  `anchor_key` = `<prefix><id>/.tsync-parent`; `trash_namespace` = `<prefix>.tsync-trash/`;
-  `share_key ~prefix token = prefix ^ token`.
-* `parent_folder_id k` = basename of dirname; `folder_id_of ns` = last component of a namespace key.
-* `internal_leaf l` ⇔ starts with `.tsync-` and is not an escape handle; `is_internal`,
-  `is_child_object k` ⇔ not a dir key and not internal. `path_in ~prefix` strips a prefix (versions
-  re-root a manifest key under another prefix sharing the folder id).
-* **Mirror escaping** (for a local mirror filing items by real path): a component is kept iff
-  `length <= 250` (NAME_MAX 255 minus margin), does not start with `.tsync-`, and has no char in
-  `" * : < > ? \ |` or `< 0x20`. Otherwise it becomes `.tsync-esc-<16hex seed0>`. Reserved leaves
-  beside mirror entries: `.tsync-name` (real name of an escaped directory), `.tsync-dir` (folder id
-  marker). The real name is recovered from the manifest body (files) or `.tsync-name` (dirs).
-
-**`Folder` bodies** (`lib/core/folder.ml`), JSON (Yojson.Basic, compact), filed at a `child_key`:
-
-```json
-{"dir":true,"name":"trip","id":"a1b2c3d4e5f6-7"}                       // marker
-{"dir":true,"name":"trip","id":"a1b2c3d4e5f6-7","path":"photos/trip"}  // trashed marker
-{"parent":"9f3a1c0428b6d5e7","name":"trip"}                            // anchor, at <id>/.tsync-parent
+```
+count(size, cs)       = 0                     if size ≤ 0
+                      = ⌈size / cs⌉            otherwise
+offset(cs, i)         = i · cs
+length(size, cs, i)   = max(0, min(cs, size − i·cs))
+index(cs, pos)        = ⌊pos / cs⌋
 ```
 
-A body is a marker iff it parses as an object with `"dir": true` (missing name/id → `""`); anything
-else (a file manifest) → `None`. An anchor has no `dir` field. `in_trash a ⇔ a.parent = ".tsync-trash"`.
-When a marker and the anchor disagree, the anchor wins (marker is a stale leftover of a move).
+- An empty file has no chunks.
+- Deduplication is by chunk key equality only. Two clients cutting the same bytes at the same
+  chunk size produce the same keys; different chunk sizes do not deduplicate.
+- **Range to pieces.** A byte range `[offset, offset + len)` of a file with `count` chunks maps
+  to the ordered list of `(index, offset inside chunk, length, offset inside the caller's
+  buffer)` that covers the range exactly once, clipped at the end of chunk `count − 1`. The list
+  is empty if `cs ≤ 0`, `len ≤ 0` or `offset < 0`. A range past the end is short, not an error.
+  Examples with `cs = 8`: `[6,10)`, count 3 → `#0[6,8)@0, #1[0,2)@2`; `[12,28)`, count 2 →
+  `#1[4,8)@0`; `[16,24)`, count 2 → empty.
 
-**`Item_ref.t`** — how a frontend names an item to the daemon (never a path for directories):
-wire forms `"root"`, `"d:<folder id>"`, `"f:<parent folder id>/<leaf>"`. Parsing is total: `d:.tsync-root`
-normalises to `Root`; for `f:` the **first** `/` separates (leaf may contain `/`? no — neither id nor
-leaf contain `/`; a leaf may contain `:`); empty id or leaf, bare prefix (`"d:"`), or anything else
-(including a storage key) → `` `Bad s ``. `to_string` round-trips (Bad returns the original).
+### 3.5 Chunk size
 
-### 2.5 Random ids (`lib/core/id.ml`)
+- The chunk size is recorded per file in its manifest and never changes for that file version.
+- A writer choosing the chunk size of a new file MUST use, in order: the domain's configured
+  chunk size ([05](05-ops-config.md)); else the main store's recommended chunk size (an
+  http-proxy peer answers with the serving domain's); else `DEFAULT_CHUNK_SIZE`. The chosen
+  value MUST lie in `[CHUNK_SIZE_MIN, CHUNK_SIZE_MAX]`; a store recommendation outside it is
+  ignored with a warning, and a configured value outside it is refused by the validator. Every
+  other client must be able to read what a writer chooses, so the range is part of the format.
+- A reader MUST accept any chunk size in `[1, CHUNK_SIZE_READ_MAX]` found in an existing
+  manifest, and treat a larger or non-positive one as CORRUPT.
+- A symlink manifest records `DEFAULT_CHUNK_SIZE` and no chunks.
 
-* `short ()` — 16 hex chars = two `Random.State.int64 < 2^32` printed `%08Lx%08Lx`, from a private PRNG
-  seeded from 8 bytes of `/dev/urandom` (fallback: pid + time µs). The state is tagged with the
-  seeding pid and **reseeded in a forked child** (commit a42c99e5: forked frontends drew identical ids).
-  For staged-body names, trash entries.
-* `token n` — `n` bytes of `/dev/urandom`, hex; raises rather than falling back. For share tokens, client uuid.
+### 3.6 Chunk shards
 
-### 2.6 Temp names (`lib/local/io/filename.ml`) — cross-module convention
+- A chunk is filed under the shard named by the first 3 characters of its key
+  (`SHARD_FANOUT` = 3 hex characters, 4096 shards, named `000`–`fff`); a key shorter than 3
+  characters is filed under shard `_`. The relative path of a chunk is `<shard>/<key>`.
+- The same function names chunks in the local chunk cache.
+- The full set of keys built on it (chunk space, collection space, corruption markers, job
+  requests) is owned by [02](02-remote-model.md).
 
-`temp_in dir = dir/".tsync-tmp-<pid>-<seq>.tmp"` (seq per process, from 1); `temp_path p` = temp in
-`dirname p`; `scratch_leaf = ".tsync-tmp-scratch.tmp"`. `is_temp_name n` ⇔ prefix `.tsync-tmp-` AND
-suffix `.tmp`. `temp_owner` parses the pid (`None` if not ours). Readers/sweepers (and the inotify C
-stub, which duplicates the test) use it to hide/skip/reap. A suffix-only test once deleted a user's
-`.syncthing.*.tmp` files forever — the prefix is load-bearing.
+---
 
-### 2.7 Durable queue on-disk format (`lib/core/durable_queue.ml`)
+## 4. Time (P5)
 
-* One directory per target and domain (`Records.create ~dir`). Each record is a file named by its id
-  containing `J.to_string job` (format owned by the job type; e.g. `Wal.Job`). Written by
-  `atomic_write` (temp + rename).
-* **Record id**: `sprintf "%020Ld-%08d-%d" (µs since epoch) seq pid`, e.g.
-  `00001758000000123456-00000001-4242`. Lexicographic order = chronological; `seq` disambiguates
-  within a µs (per `Records.t`); pid separates processes. `list` only considers names whose first char
-  is `0-9` (others are temp files, possibly live in another process) and sorts them.
-* **Claim lock**: `<dir>.owner` (sibling, not inside), `lockf F_TLOCK` on an fd kept open for the life of
-  the claim. Kernel drops it on death.
+Two clocks exist. The **monotonic clock** never steps and has an arbitrary origin. The **wall
+clock** can step by any amount in either direction (NTP corrections; a fake hardware clock on
+boards without a real-time clock sets it far off at boot), and peers' wall clocks disagree.
 
-### 2.8 Other byte formats
+- Every **duration measured inside a process** MUST use the monotonic clock: timeouts, stall
+  detection, deadlines, retry and queue backoff, breaker trip spans and holds, probe cadence,
+  lease expiry on the holder's side, watchdogs, rate windows, throughput and ETA estimates, and
+  debounce intervals.
+- The **wall clock** is used only for a time that is **persisted** or **compared with another
+  host**: journal entry timestamps and retention horizons, request-signature windows, GC run
+  names, version and trash timestamps, pin expiry, temp-file and orphan ages derived from file
+  times, credential expiry claims, and human-readable timestamps in logs and status.
+- Every wall-clock comparison MUST tolerate a step: the result of a step is at most an early or
+  late expiry, never a loss of data. Rules that compare wall times across hosts state their
+  tolerance where they are owned.
+- A monotonic reading MUST NOT be persisted and MUST NOT be sent to another host. It MAY be
+  exchanged between processes on one host only if the clock is system-wide.
+- A timer MUST fire at its deadline without polling; a watchdog re-arms to the exact next
+  deadline.
+- A clock that includes time spent suspended MAY be used as the monotonic clock, provided it
+  never steps.
 
-* **Listing record** (`lib/core/listing.ml`): concatenated records; `str` = int32-LE length + bytes;
-  `int64` = 8 bytes LE. Record layout is the caller's sequence of field writers; decoder reads the same.
-* **Hashtbl_mmap** (`lib/core/hashtbl_mmap.ml`): two regions. Blob (file-backed shared mmap of an
-  unlinked temp file, initial `max 4096 (64n)` bytes, doubled via `ftruncate`+remap) of appended
-  records `[u32le klen][u32le vlen][key][value]`; slot array (Bigarray int64, anonymous, power of two
-  `>= max 16 (2n)`) holding `offset+1` (0 = empty). Linear probing from `Hashtbl.hash key land mask`;
-  grow slots ×2 when `4*count > 3*slots`, rehash from slots (not blob, which holds superseded
-  records). `replace` always appends (old records never reclaimed). No remove. `Int` storable = 8 bytes LE.
-* **ZIP64 stream** (`lib/core/zip_stream.ml`): STORED only; every archive ZIP64; version 45; flags
-  `0x0808` (bit 3 data descriptor + bit 11 UTF-8). Local header: sig `0x04034b50`, crc/sizes 0,
-  extra 20 bytes = ZIP64 tag `0x0001`, len 16, two zero u64. Data descriptor: `0x08074b50`, crc32,
-  u64 size ×2. Central entry: made-by `(3<<8)|45`; if size or offset ≥ `0xFFFFFFFF` all three move to
-  a 28-byte ZIP64 extra (uncompressed, compressed, offset) with 32-bit fields = `0xFFFFFFFF`; external
-  attrs = `(S_IFREG|mode or S_IFDIR|mode) << 16 | (0x10 if dir)`; default mode 0644, dirs 0755 with
-  trailing `/`. Finish: ZIP64 EOCD (`0x06064b50`, size 44), locator (`0x07064b50`), EOCD
-  (`0x06054b50`, counts min 0xFFFF, sentinels if ≥ 2^32). DOS time from **local** time; pre-1980 →
-  date `0x21`, time 0. CRC-32 poly `0xEDB88320`. Caller writes payload bytes; `feed` only advances CRC
-  and offset. Golden byte dump: `tests/unit/zip/zip_test.expected`.
-* **IPC**: newline-delimited JSON over a Unix stream socket (see §3.8).
+Rationale: a wall-clock breaker trips at boot when fake-hwclock jumps forward, and a backward
+NTP step extends a hold and delays stall detection by the size of the step.
 
-### 2.9 Constants table
+---
 
-| constant | value | where |
+## 5. Resources and immutable data (P6)
+
+- **Resource strategy is not specified.** Internal concurrency widths, pool sizes, fan-out
+  bounds, and memory strategies (streaming or materialising, spilling to disk, off-heap
+  structures) are implementation choices. This specification states only limits another party
+  can observe: wire limits, request size and time limits at trust boundaries, retention
+  horizons and deadlines. Each is a named parameter in the file that owns it.
+- **Immutable data may be shared.** Data that is never modified in place — objects only ever
+  replaced by rename (store objects on a filesystem store, whole cache bodies, mirror entries)
+  and content-addressed data — MAY be passed around as an immutable memory mapping, and SHOULD
+  be; no rule in this specification forbids it. A local-filesystem store SHOULD read objects by
+  mapping them; positioned reads are equally allowed.
+- **Data written in place** (staged bodies, partial cache bodies) MAY be mapped only under the
+  rules of [04](04-checkout-cache.md) and
+  [read-path-and-cache](algorithms/read-path-and-cache.md). Files outside tsync's control that
+  others change in place (a user's source files during an import) follow §12.
+
+---
+
+## 6. Runtime requirements
+
+Every concurrent part of tsync is written against the capabilities below and relies only on
+the guarantees in §6.2. Any runtime — a multi-threaded async runtime, an event loop with a
+blocking-I/O thread pool, effects-based fibers — satisfies the spec if it provides them.
+
+### 6.1 Capabilities
+
+| Group | Capability | Contract |
 |---|---|---|
-| default chunk size | 8 MiB | `Conf.default_chunk_size` |
-| default cache chunk (group) size | 16 MiB | `Conf.default_cache_chunk_size` |
-| shard fanout | 3 hex (4096) | `Chunk_layout.fanout` |
-| mirror name max | 250 bytes | `Stored_key.name_max` |
-| retry attempts (request) | 8 | `Retry.default_attempts` |
-| request backoff | `min 20 (0.5·2^min(10,n-1))` × uniform[0.5,1.5) | `Retry.Make` |
-| queue backoff | `min 300 (0.5·2^min(10,n-1))`, no jitter | `Durable_queue` |
-| queue runaway cap | 100 000 queued → degraded, drop posts | `max_queued` |
-| queue settle timeout | 60 s (min with grace when stopping) | `default_settle_timeout` |
-| stall warning | 60 s | `stall_warning_interval` |
-| shutdown grace | 10 s | `Shutdown.grace` |
-| health trip | 2 consecutive failures spanning ≥ 1 s | `trip_after`, `trip_span` |
-| health hold | 30 s initial, ×2 per failed probe, cap 300 s | `hold_initial`, `hold_max` |
-| health probe timeout | 10 s | `probe_timeout` |
-| HTTP keep-alive idle | 60 s | `keep_idle_ns` |
-| HTTP sockets per endpoint | 32 | `max_parallel` |
-| HTTP excerpt | 200 chars, whitespace runs collapsed, `" ..."` | `Http_client.excerpt` |
-| IPC async send timeout | 2 s default | `Ipc.Make.send` |
-| subscriber backlog | 256 events (oldest dropped) | `Ipc.Subs.max_queued` |
-| change-notice flush / batch | 0.2 s / 512 keys | `Change_notice` |
-| metrics window | 10 × 1 s buckets | `Metrics.window` |
-| log ring | 50 warn/err | `Log.max_recent` |
-| job report interval | 10 s; heap walk every 6th tick | `Job_report` |
-| watch drain passes | 64 | `watch_stubs.c` |
+| R1 tasks | spawn detached | MUST NOT fail; a detached body catches everything, and an escaping failure is a fatal bug |
+| | join all / map concurrently | results keep input order |
+| | catch, finally | `finally` runs on success, failure and cancellation, then re-raises |
+| | one-shot promise and resolver | resolving never runs the waiter re-entrantly inside the resolver; resolving twice is a bug and callers guard against it |
+| R2 time | monotonic now | §4 |
+| | sleep | cancellable |
+| | with timeout | fails with a recognisable timeout and cancels the work |
+| | with stall timeout | fails like a timeout once the window passes with no progress signal; fires at the exact deadline |
+| | race | the first to finish wins; the others are cancelled |
+| | is cancelled | distinguishes "the caller withdrew" from a failure of the work |
+| R3 coordination | mutex | FIFO; released however the holder ends |
+| | condition | carries no value; a woken waiter re-reads its state; a signal with no waiter is lost, so waiters re-check before waiting |
+| R4 bounded concurrency | counting semaphore | FIFO hand-off; a slot is released however its holder ends |
+| R5 file I/O | POSIX calls; positioned read/write into off-heap buffers; block reservation | EINTR retried inside (§6.3); positioned calls carry their offset so many ranges of one file move through one descriptor; "reservation unsupported" is distinct, and the caller falls back to setting the size |
+| R6 sockets | Unix stream sockets (§11); pooled HTTP/1.1 connections (§10) | |
+| R7 readiness | wait until an OS descriptor is readable | used by directory watch (§14) |
+| R8 stop | process-wide stop flag, hooks, stop-aware sleep (§9) | every runtime binding wires stop into in-flight waits |
+
+### 6.2 Guarantees the logic requires
+
+- **Atomic check-then-act.** Every check-then-act on shared in-memory state (pool counters,
+  waiter queues, queue slot tables, breaker cells, memo tables, counters, subscriber queues,
+  "replace only if still the one that failed" swaps) MUST be atomic with respect to every
+  other task. An implementation achieves this either by **confinement** — the state is touched
+  by one executor that cannot switch tasks between the check and the act — or by a lock or an
+  atomic operation. A runtime that can switch tasks at any call, or run tasks in parallel,
+  MUST use locks or atomics for every such section.
+- **Suspension points.** Code relying on confinement MUST keep its critical sections free of any
+  call that can suspend.
+- **Ordering.** Mutexes and pool hand-offs are FIFO. Concurrent maps keep input order.
+  Broadcast wakes every waiter.
+- **Cancellation.** A cancelled task receives a distinguishable cancellation at its current
+  wait; `finally` handlers run (slots released, descriptors closed, watchers removed). Retry
+  loops never retry a cancellation.
+- **Stop is not cancellation.** A stop is an explicit STOPPING failure raised by stop-aware
+  waits and checks; running work may finish or give way at its next stop-aware wait (§9).
+- **Blocking I/O.** A call that can block on disk or on another process MUST NOT stall
+  unrelated tasks longer than the call itself; if the runtime has one executor, such calls are
+  offloaded. Code around an offloaded call keeps the atomicity it relied on.
+- **Locks across external waits.** A lock guarding local state MUST NOT be held across a store
+  request, a peer request or an IPC wait. Work that needs remote data reads it first, then
+  takes the lock to decide and write locally.
+- **Process-wide registries** (named pools, queue registries, driver registries, stop hooks)
+  exist once per process.
+
+### 6.3 Interrupted system calls
+
+Signal handlers may be installed without automatic restart, so any blocking system call can
+fail with EINTR. Every file and directory call, in every helper, MUST retry on EINTR, and an
+EINTR MUST never be interpreted as an answer. In particular, "does this path exist" is: the
+stat succeeds → yes; it fails with ENOENT or ENOTDIR → no; EINTR → retry; any other error →
+a failure classified per [failure-model §4.1](algorithms/failure-model.md#41-local-filesystem-errors),
+never "no". (An existence check that answered "no" on EINTR once re-minted a client uuid over
+the live one.)
+
+### 6.4 Local filesystem helpers
+
+- **Absent versus failed.** A helper that reads, stats, lists or opens a local path MUST report
+  ABSENT only for ENOENT or ENOTDIR, and MUST surface every other error as a classified failure
+  ([failure-model §4.1](algorithms/failure-model.md#41-local-filesystem-errors)). A helper that
+  answers "absent", "empty", "no entries" or "missing" on an arbitrary error MUST NOT exist,
+  except for best-effort cleanup (unlinking a temporary, pruning an empty directory) whose
+  result no caller uses as an answer.
+- **Atomic replacement.** Replacing a file writes a temporary in the same directory (§2.9),
+  then renames it over the target; on failure the temporary is removed and the failure
+  re-raised. Readers never see a partial body. When the file is state the system relies on for
+  recovery, the persistence rules of [durable-queue](algorithms/durable-queue.md) apply.
+- **Positioned writes of a known size.** The temporary is first sized to the final length (a
+  full disk fails before any byte is written); ranges are then written in any order, each byte
+  exactly once, and the rename follows the last write.
+- **Short writes.** A write that makes no progress is a failure, never a silent truncation.
+- **Tree removal** never follows symbolic links.
+- **Reservation**: size 0 is a no-op; otherwise reserve blocks (Linux `fallocate`, macOS
+  preallocation) and fall back to setting the size when the filesystem cannot reserve.
+- **Disk space** reports available, free and total bytes; a failure to query is reported as
+  unknown, never as zero or full.
 
 ---
 
-## 3. Interface
+## 7. Retry ladder
 
-### 3.1 Runtime capability interface (language-neutral)
+The ladder retries one request against one member. Which failures are retryable is decided by
+the failure's kind ([failure-model §3](algorithms/failure-model.md#3-the-classification)); the
+ladder never inspects message text.
 
-Everything concurrent in tsync (this layer and every domain subsystem above it) uses only the
-capabilities below. Any runtime — Rust async (tokio), a C event loop plus a blocking-I/O thread pool,
-OCaml 5 effects (Eio/Picos) with or without domains, or today's Lwt — must provide them. Each module
-takes only the groups it needs, so a module that only queues work is not handed a disk.
+```
+attempt n = 1, 2, …, LADDER_ATTEMPTS:
+  run the request
+  success                          → report "answered" to the breaker; return the value
+  STOPPING, CANCELLED, cancellation→ re-raise at once; nothing is reported or counted
+  a considered answer              → report "answered"; return the failure (1 attempt)
+     (ABSENT, EXISTS, REFUSED, CORRUPT are returned as failures or values per the driver)
+  TRANSIENT/LINK                   → report "lost" to the breaker; retry
+  TRANSIENT/LOAD                   → report "answered" (the link is up); retry
+  TRANSIENT/LOCAL, UNEXPLAINED     → report nothing; retry
+  retry:
+    delay = min(LADDER_CAP, LADDER_BASE · 2^min(10, n−1)) · U[0.5, 1.5)
+    if the answer carried a retry-after hint: delay = max(delay, min(hint, LADDER_CAP))
+    if n = LADDER_ATTEMPTS, or delay exceeds the caller's remaining deadline → give up
+    sleep(delay) stop-aware; a stop during the sleep raises STOPPING
+give up → raise the last failure, keeping its kind, with the member and the operation attached
+```
 
-**R1. Tasks and results**
-| capability | contract |
-|---|---|
-| `spawn_detached(task)` | start a task not awaited by anyone. It **must not fail**: an escaping error is fatal to the process (the task is responsible for catching). |
-| `join_all(tasks)` / `map_concurrent(f, xs)` / `for_each_concurrent` | start all at once, wait for all; results keep input order. Width is chosen by the list — callers bound it with a pool (R4). |
-| `try/catch`, `finally` | `finally` runs on success, failure and cancellation, then re-raises. |
-| one-shot promise + resolver (`wait() -> (future, resolver)`, `resolve_later(resolver, v)`) | resolving never runs the waiter's continuation re-entrantly inside the resolver's caller; resolving twice is an error, so callers guard. Pools and stop-aware sleeps are built from this. |
+- The delay before attempt `n + 1` uses the jitter factor so a fleet failing together does not
+  return together.
+- A timeout of a single attempt (stall) is TRANSIENT/LINK and is also tallied as a timeout on
+  the member (the uplink governor reads the tally).
+- The ladder never refuses to ask because the member is held: whoever has an alternative
+  consults the breaker before asking (§8), and a request to a member that goes out while it
+  climbs is ended by `until-held`.
+- **`until-held(member, ask)`** races `ask` against the member's breaker tripping, cancelling
+  `ask` and raising UNREACHABLE for that member when it trips.
+- Attempts and failures are counted in metrics where they happen.
 
-**R2. Time**
-| capability | contract |
-|---|---|
-| `now_monotonic()` | seconds, arbitrary origin, never steps; for durations and rates only. |
-| `sleep(s)` | cancellable. |
-| `with_timeout(s, f)` | fails with a *recognisable timeout error* (`is_timeout(e)`) if `f` hasn't finished; `f` is cancelled. |
-| `with_stall_timeout(s, f(alive))` | fails like a timeout once `s` seconds pass without `alive()` being called; the watchdog wakes exactly at the deadline (no polling period). |
-| `race(fs)` | first to finish wins; **the others are cancelled** (not left running). |
-| `is_cancelled(e)` | distinguishes "the caller withdrew" from a failure of the work. |
+---
 
-**R3. Coordination**
-| capability | contract |
-|---|---|
-| `mutex`, `with_lock(m, f)` | released however `f` ends; FIFO. `is_locked`, `has_waiters` for reporting only. |
-| `condition`, `wait(c)`, `signal(c)`, `broadcast(c)` | carries no value; a woken waiter re-reads the state it waits on. Signal with no waiter is lost (callers re-check before waiting). |
+## 8. Health breaker
 
-**R4. Bounded concurrency (pool/semaphore)** — see §3.4 for the full contract. FIFO hand-off,
-optional refusal when a waiting-queue cap is reached, named pools reported in status. This is the only
-mechanism bounding width; a global scheduler bound is not a substitute (pools bound *working set*:
-memory for bodies, round trips in flight, device queue depth).
+One breaker cell per member, local-filesystem stores included: a store on a network
+filesystem or a removable disk fails the way a link does (its network-filesystem errnos are
+TRANSIENT/link). A store that is not a member (a scratch store inside one process) uses a
+shared cell that is always up. Every duration below uses the monotonic clock (§4). Which
+outcomes count for or against a member is owned by
+[failure-model §6](algorithms/failure-model.md#6-link-health-evidence); the cell only receives
+"lost", "answered" and "probe lost".
 
-**R5. File I/O** (EINTR transparently retried everywhere; see §4.2)
-| capability | contract |
-|---|---|
-| POSIX-named calls | `exists, stat, lstat (64-bit sizes), readlink, symlink, rename, unlink, link (EEXIST = a claim), mkdir, rmdir, open, close, read, write, utimes, fsync, fstat, ftruncate, lseek` |
-| positioned `pread/pwrite(fd, buf, file_offset, pos, len)` into **off-heap buffers** | offset travels with the call, so many ranges of one file move concurrently through one descriptor. May block the calling worker (today they do). |
-| `reserve(fd, size)` | allocate blocks up front (Linux `fallocate`, macOS `F_PREALLOCATE`); "unsupported" is a distinct error the caller maps to `ftruncate`. |
-| `read_file_opt`, `write_file`, `readdir_list` | whole-file helpers; readdir excludes `.`/`..`. |
-| derived `Fs` operations | §3.3 — written once on top of the above. |
+State: `consecutive` failures, `failing_since`, `last_lost`, `held_until` (none when not out),
+`hold`, `probing`, `timeouts` tally, one-shot watchers.
 
-**R6. Sockets** (only for IPC and HTTP): line-oriented Unix-socket client/server (§3.8) and a pooled
-HTTP/1.1 connection cache per endpoint with keep-alive, streaming response body and a "connection was
-dead, request never left, redial" signal (§3.7).
+- **lost** (a failure counting against the member):
+  - If `consecutive = 0`, or the cell is not out and `now − last_lost > HOLD_INITIAL`, start a
+    new run: `consecutive = 0`, `failing_since = now`. Then `consecutive += 1`,
+    `last_lost = now`.
+  - If the cell is out: if a probe was handed out or the hold has lapsed, the failure is the
+    probe's (or a lapsed hold's) evidence → `hold = min(HOLD_MAX, 2·hold)`,
+    `held_until = now + hold`, notify watchers, answer *tripped*. Otherwise the request was
+    already in flight when the member went out: answer *held*, no extension.
+  - If not out: if `consecutive ≥ TRIP_AFTER` and `now − failing_since ≥ TRIP_SPAN` →
+    `hold = HOLD_INITIAL`, `held_until = now + hold`, notify watchers, answer *tripped*. Else
+    answer *up*: a burst within one instant is one bad moment.
+- **check**: not out → *up*. `now < held_until` → *held*. Otherwise hand out the probe:
+  `held_until = now + hold`, `probing = true`, answer *probe*. Exactly one caller per lapsed
+  hold gets the probe; a probe that never reports back is re-offered at the next lapse.
+- **is-held**: out and `now < held_until`. **is-down**: out, even if the hold lapsed (a lapsed
+  hold is not an answer).
+- **answered**: reset: `consecutive = 0`, not out, `hold = HOLD_INITIAL`, `probing = false`,
+  sampled.
+- **probe lost** (a deliberate probe failed or exceeded `PROBE_TIMEOUT`, retries included):
+  the member goes out on that evidence alone: `hold = 2·hold` if already out (capped at
+  `HOLD_MAX`), else `HOLD_INITIAL`.
+- Watchers are one-shot: called once and cleared at each trip.
+- A cell describes itself for status as "held down for Ns after K failures (reason)" and
+  reports hold end, failure count and reason while out.
 
-**R7. Watch/readiness**: wait until an OS descriptor (inotify/kqueue fd) is readable (§4.14).
+Rationale: without a breaker, eight retries against a dead host cost about a minute per read;
+with it, failover to another member takes one to two seconds and only one request per hold
+pays for finding out.
 
-**R8. Process-wide stop** (§3.5 `Shutdown`): a flag + hooks, and a stop-aware sleep. Not a runtime
-feature but every runtime binding must wire it so that cancellation of in-flight waits happens on stop.
+---
 
-### 3.2 Guarantees the domain logic relies on (and which of them come free from Lwt today)
+## 9. Stop
 
-The current runtime is **cooperative and single-threaded**: one OS thread runs all tasks; a task is only
-suspended at an explicit await (a `bind` in the monad); blocking system calls either run in a helper
-thread pool (Lwt_unix jobs) or block the one thread outright (positioned pread/pwrite, `reserve`,
-`statvfs`, `clone`, sync `Ipc.send`, `Unix.lockf`, `mmap`). Consequences the code depends on:
+- A process has one stop flag. Requesting a stop is idempotent: it sets the flag and runs the
+  registered hooks once, in registration order. A hook registered after the request runs at
+  once.
+- A **stop-aware sleep** ends early with STOPPING when a stop is requested. Every backoff and
+  every wait for a link, a queue or a settle MUST be stop-aware.
+- On stop: ladders end with STOPPING; queues stop taking work; waits for settle are capped at
+  `STOP_GRACE`. STOPPING is never retried, never counted as a failure, and leaves the work owed
+  on disk (the propagation rules are in
+  [failure-model §5](algorithms/failure-model.md#5-propagation)).
+- The lifecycle that requests a stop, and how processes drain within the grace, is owned by
+  [07](07-daemon-cli.md).
 
-**G1. Atomicity between awaits (free under Lwt).** Any sequence of statements with no await between
-them is atomic with respect to every other task. The code relies on this to mutate shared tables
-without locks. Examples:
-* `Bounded.acquire/release`: check `held < limit` then increment; take waiter from queue then resolve.
-* `Bounded.each`: `next ()` pops a job and advances the source between awaits so no two workers see the same job.
-* `Ipc.Subs`: "nothing yields between the empty check and the wait" — a publish cannot slip between
-  checking the queue empty and waiting on the condition (lost-wakeup freedom).
-* `Durable_queue`: `take`, slot replacement (`cancel := true; pending := e`), `active`, `loaded`,
-  `jobs` queue, `parked` counters, `put_back` (copy/clear/push/transfer).
-* `Health`: read-modify-write of all fields (`check` hands the single probe to exactly one caller).
-* `Http_client.call`: "replace the pool only if it is still the one that failed" (compare-and-swap by
-  atomicity).
-* `Change_notice`: `scheduled` flag + pending set; `Job_report`: `job` ref, `stop` flag.
+---
 
-**G2. Where a task may be suspended.** Only at awaits. The monadic type (`'a t`) marks every
-suspension point in the source. Direct-style runtimes lose that visual marker: any call may yield.
-Logic whose correctness depends on G1 must keep those critical sections free of calls that can yield
-(or take a lock).
+## 10. HTTP request discipline
 
-**G3. Ordering.** `mutex` is FIFO; pool slots are handed to waiters FIFO (no barging); a durable
-queue's `recording` mutex makes record-id order equal queue order; `map_concurrent` preserves input
-order in results; condition `broadcast` wakes all waiters.
+- **Pooled connections.** Each endpoint has a keep-alive connection cache.
+- **Redial.** If a pooled connection proves dead before the request left, the cache that failed
+  is replaced (only if it is still the current one) and the request is tried once more. A
+  request that may have left is never silently resent by this layer; it is a TRANSIENT/LINK
+  failure for the ladder.
+- **Stall timeout, not a latency budget.** Each request runs under a stall timeout: it fails
+  as TRANSIENT/LINK once `stall window` passes with no progress. Progress is any of: a request
+  body chunk accepted by the transport, response headers, a response body chunk. (Large
+  bodies over slow links are legitimate; a connection that died without FIN is silent forever
+  unless a timer ends it.) The window is the driver's parameter
+  ([06](06-backends.md)). The stall timer uses the monotonic clock.
+- **Headers** may be computed per attempt (credentials that need minting); computing them
+  counts as the request's first step and is inside the stall timeout.
+- **Statuses** are classified by the driver per
+  [failure-model §4.2](algorithms/failure-model.md#42-http-object-stores); only statuses the
+  ladder retries raise; every other status is returned to the verb to interpret.
+- **Bodies** move as off-heap buffers end to end; a body is never copied to be hashed or sent.
+- Failure text quotes at most `HTTP_EXCERPT` characters of a response body, with whitespace
+  runs collapsed.
 
-**G4. Cancellation.** `race`/`with_timeout`/`with_stall_timeout` cancel the losing branch; the
-cancellation is delivered as a distinguishable error at the branch's current await (so `finally`
-handlers run — pool slots are released, file descriptors closed, watchers unregistered). Retry loops
-never retry a cancellation. `Shutdown` is *not* cancellation: it is an explicit `Stopping` error raised
-by stop-aware sleeps and checked flags; work already running is allowed to finish or give way at its
-next stop-aware wait.
+---
 
-**G5. Blocking-I/O offload.** Directory/stat/open/rename/unlink/read/write through the runtime's
-async file layer do not stall other tasks (Lwt: detached thread pool; the pool never shrinks once
-grown — Android caps it at 16). Positioned off-heap pread/pwrite do stall the loop today (regular files
-are "always ready"); a rewrite may offload them but then must keep G1 for the code around them.
+## 11. IPC framing
 
-**G6. Timers** fire on the loop; sleeps are cancellable and stop-aware sleeps resolve immediately on
-stop.
+The framing of every local socket between tsync processes and their clients. The envelope and
+actions are owned by [07](07-daemon-cli.md), the error codes by
+[failure-model §7.2](algorithms/failure-model.md#72-client-error-codes); where sockets live, their
+modes and who may connect, by [07](07-daemon-cli.md) and
+[security-model](algorithms/security-model.md).
 
-**G7. Detached tasks** (`spawn_detached`) never propagate errors; each detached body in the code
-catches everything (job report loop, change-notice flush, stall watchdog, `forget_pending`).
+- **Transport**: Unix-domain stream socket.
+- **Framing**: one request is one JSON object on one line terminated by `\n`; one reply is one
+  line. Requests and replies strictly alternate on a connection, which carries any number of
+  requests until the client closes it.
+- **Line bound**: a line longer than `IPC_MAX_LINE` is refused: the server answers `invalid`
+  if it can and closes the connection. A line that is not a JSON object is answered `invalid`
+  and the connection continues.
+- **Partial lines**: once the first byte of a request line has arrived, the rest MUST arrive
+  within `IPC_LINE_DEADLINE`, or the server closes the connection. An idle connection between
+  requests MAY stay open.
+- **Connection bound**: a listener serves at most `IPC_MAX_CONNECTIONS` connections at once.
+  At the bound it closes the connection idle the longest; if none is idle it refuses the new
+  one. Subscribed connections count toward the bound.
+- **Subscription**: a request the contract defines as a subscription is answered with one
+  reply line, after which the connection carries only event lines, one JSON object each, until
+  either side closes it. Each subscriber has a backlog of at most `IPC_SUBSCRIBER_BACKLOG`
+  events; on overflow the oldest events are dropped and the drop is logged. Events are hints
+  for promptness, never needed for correctness. A subscription ends when the client closes or
+  a write fails. Publishing reports how many subscribers received the event; zero is not an
+  error.
+- **Direction**: servers never connect to clients. A sandboxed client can always reach a
+  server; a server pushing to clients cannot.
+- **Socket options**: implementations MUST NOT set TCP-only options (such as `TCP_NODELAY`) on
+  Unix sockets; some platforms answer `EINVAL` once the peer has left, and an accept loop that
+  treats that as fatal stops serving everyone.
+- **Server robustness**: a failure while serving one connection closes that connection only;
+  it never ends the listener.
+- **Advisory sends** (one process notifying another's socket: change notices, job reports,
+  lease renewals) never fail their caller and log a failure once; their messages and send
+  deadlines are owned by [07](07-daemon-cli.md).
+- **Deadlines**: every request a client sends has a deadline, and the server answers every
+  request within its own; both are specified in
+  [failure-model §8](algorithms/failure-model.md#8-deadlines-and-bounded-waits-p7).
 
-#### Shared mutable state that would need synchronisation under real parallelism
+---
 
-If a rewrite runs tasks on several threads/domains (OCaml 5 domains, a multi-threaded tokio runtime,
-a C thread pool without a single event thread), every item below loses G1 and needs a lock, an atomic,
-or confinement to one executor:
+## 12. Reading data that may change under the reader
 
-| state | module | today's reliance |
+- A reader of a file outside tsync's control that another writer may truncate or rewrite in
+  place (a user's file being imported) MUST obtain a failure, never a process crash,
+  when that happens. It either reads a snapshot (a copy-on-write clone, unlinked after opening)
+  or uses positioned reads; it MUST NOT map the live file, because a truncate under a mapping
+  kills the process.
+- A mapping is private and read-only, so a file shorter than the mapping is an error, never
+  extended.
+- Data that is never modified in place needs no snapshot; data tsync writes in place is read
+  under the rules §5 points to.
+
+---
+
+## 13. Streaming ZIP64 archives
+
+Folder downloads (share server, export) stream an archive whose total size is not known in
+advance. The format is exact:
+
+- Method STORED only. Every archive is ZIP64. Version needed 45. General-purpose flags `0x0808`
+  (bit 3: data descriptor follows; bit 11: UTF-8 names).
+- **Local header**: signature `0x04034b50`, CRC and sizes 0, extra field of 20 bytes: tag
+  `0x0001`, length 16, two zero 64-bit sizes.
+- **Data descriptor** after each member: signature `0x08074b50`, CRC-32, 64-bit compressed size,
+  64-bit uncompressed size.
+- **Central directory entry**: version made by `(3 << 8) | 45`. If the size or the local header
+  offset is ≥ `0xFFFFFFFF`, all three (uncompressed size, compressed size, offset) move to a
+  28-byte ZIP64 extra field and their 32-bit fields are `0xFFFFFFFF`. External attributes are
+  `(S_IFREG | mode) << 16` for files and `((S_IFDIR | mode) << 16) | 0x10` for directories;
+  default modes 0644 and 0755; directory names end in `/`.
+- **End**: ZIP64 end of central directory (signature `0x06064b50`, record size 44), ZIP64
+  locator (`0x07064b50`), end of central directory (`0x06054b50`) with counts capped at
+  `0xFFFF` and sentinel values where a field overflows 32 bits.
+- Times are DOS times in local time; a time before 1980 is written as date `0x21`, time 0.
+- CRC-32 polynomial `0xEDB88320`.
+
+---
+
+## 14. Directory watch
+
+- A watch reports that a directory's entries changed (created, moved in, closed after writing,
+  and on macOS written, linked, deleted or renamed). It is not recursive. Where no watch is
+  available, the consumer polls.
+- A watcher MUST NOT wake its consumer for the consumer's own temporary files (§2.9): a read
+  that makes a snapshot beside the watched file would otherwise wake itself forever. Where the
+  platform reports names (inotify), events for temporary names are discarded. Where it does not
+  (kqueue), the consumer MUST place its temporaries and snapshots outside the watched directory.
+- Draining events after a wake is bounded, so a registration that never clears cannot spin
+  forever.
+
+---
+
+## 15. Parameters
+
+| Parameter | Recommended | MUST range / note |
 |---|---|---|
-| pool `held`, `waiting`, waiter queue; `named` registry; `shared_pools` table | Bounded | check-then-act |
-| job source cursor inside `each` | Bounded | pop+advance |
-| queue `jobs`, `loaded`, `slots` (with `cancel`/`pending`/`failures`), `active`, `parked`, `outcomes`, `failures`, `degraded`, `running` | Durable_queue | lock-free mutation; `recording` mutex only orders writes |
-| `owned` claims table; `registry`/`rescans` lists | Durable_queue (process-wide) | append without lock |
-| Records `seq`, `dropped` | Durable_queue.Records | increments |
-| every field of a `Health.t`; watcher table | Health | read-modify-write; single-probe handout |
-| `hooks`, `requested_`, `next_hook` | Shutdown | idempotent flip + hook drain |
-| counters' buckets/total/last_sec | Metrics (explicitly "unlocked: one thread") | increments |
-| `Job_progress.state` (global) | Job_progress | increments |
-| `job` ref, `ticks`, `live`, `stop`, `warned` | Job_report | flags |
-| subscriber list, per-sub queues | Ipc.Subs | empty-check-then-wait |
-| `woken` flag in `serve` | Ipc | guard against double resolve |
-| `cache` field (pool generation) | Http_client | compare-and-replace |
-| `table`, `pending`, `scheduled`, `warned` | Change_notice | set + scheduled flag |
-| `recent_q`, `min_level`, `prefix`, `active` sink | Log | queue push/pop |
-| `clonable` memo, `warned_no_clone` | Bigstring | memo |
-| `seeded` PRNG state (pid-tagged) | Id | PRNG state is not thread-safe |
-| `temp_seq` | Filename | increment (duplicate temp names under a race ⇒ two writers share a temp file) |
-| blob/slots/count | Hashtbl_mmap | not thread-safe by design |
-| TLS backend ref | Tls_conf (conduit global) | set once |
-| `resolved_chunk_size` memo | Remote (domain layer) | set once |
+| `DEFAULT_CHUNK_SIZE` | 8 MiB | |
+| `CHUNK_SIZE_MIN` / `CHUNK_SIZE_MAX` (writers) | 256 KiB / 256 MiB | every client must read what a writer chooses |
+| `CHUNK_SIZE_READ_MAX` (readers) | 2³¹ − 1 bytes | MUST accept every size existing manifests carry |
+| `SHARD_FANOUT` | 3 hex characters | frozen |
+| `NAME_MAX_LOCAL` | 250 bytes | ≤ 255 − the longest suffix appended to a stored leaf |
+| `LADDER_ATTEMPTS` | 8 | ≥ 1 |
+| `LADDER_BASE` / `LADDER_CAP` | 0.5 s / 20 s | jitter factor U[0.5, 1.5) |
+| `TRIP_AFTER` / `TRIP_SPAN` | 2 failures / 1 s | |
+| `HOLD_INITIAL` / `HOLD_MAX` | 30 s / 300 s | |
+| `PROBE_TIMEOUT` | 10 s | includes retries |
+| `STOP_GRACE` | 10 s | owned by [07](07-daemon-cli.md) |
+| `HTTP_EXCERPT` | 200 characters | |
+| `IPC_MAX_LINE` | 1 MiB | |
+| `IPC_LINE_DEADLINE` | 10 s | |
+| `IPC_MAX_CONNECTIONS` | 256 per listener | |
+| `IPC_SUBSCRIBER_BACKLOG` | 256 events | drop oldest |
 
-Also: the `lockf` claim is per-process (POSIX record locks are owned by the process, not the thread),
-so the in-process `owned` table is the only thing that stops two threads of one process double-claiming.
-
-### 3.3 Fs.S (derived operations)
-
-| op | contract |
-|---|---|
-| `mkdir_p` / `ensure_parent` | create missing parents 0755, EEXIST tolerated (races) |
-| `atomic_write path data` | write to `temp_path path`, rename over; on failure unlink temp and re-raise |
-| `atomic_write_at path ~size f` | temp file, `ftruncate` to `size` first (full disk fails early), `f put` writes positioned pieces (concurrent, out of order ok), rename after `f` returns; every byte must be covered exactly once |
-| `reserve ~size fd` | `size=0` noop; platform reserve (Linux `fallocate(fd,0,0,size)`, macOS `F_PREALLOCATE` contig then any + `ftruncate`), fallback `ftruncate` on EOPNOTSUPP/ENOSYS |
-| `pwrite_all fd buf ~offset` | loop; `n=0` → `Failure "short write at offset N"` |
-| `copy_file ~src ~dst` | 1 MiB buffer loop, dst created/truncated 0644 |
-| `read path buf ~offset` / `write` | open per call, lseek, loop until full or EOF; returns bytes moved; write opens `O_RDWR|O_CREAT` |
-| `read_file_opt` | `None` on any failure |
-| `readdir_list_quiet` | `[]` on `Unix_error` only |
-| `is_directory`, `stat_opt`, `stat_opt_large` | any failure → false/None |
-| `lstat_kind` | `` `Dir | `File size | `Symlink target | `Missing `` (any error → Missing) |
-| `rm_rf` | lstat-based, never follows symlinks, ignores errors/ENOENT |
-| `unlink_quiet` | ignores any `Unix_error` |
-| `reap_older_than ~cutoff dir` | delete files with mtime < cutoff, prune empty dirs, true if empty after; missing dir = true |
-| `zero buf ~pos ~len` | fill with `\0` |
-
-Synchronous helpers (usable before any runtime is running): `mkdir_p_sync`, `open_and_unlink` (fd with no name), `pid_alive`
-(`kill pid 0`; EPERM = alive; reused pid reads alive), `disk_space` (statvfs: `avail = f_bavail·f_frsize`,
-`free = f_bfree·f_frsize`, `total = f_blocks·f_frsize`; `None` on failure), `load_average` (1-min, `None`
-where unavailable, e.g. Android).
-
-### 3.4 Bounded (pools)
-
-```
-create ?max_waiting ?name ~max ()      max<1 clamped to 1; name registers for totals (never pruned)
-shared ~key ~name ~max ()              process-wide pool memoized by key
-use t f                                 slot for duration of f; Busy if queue >= max_waiting
-use_or t ~busy f
-map_with / iter_with / filter_map_with  whole list, each element through the pool; order kept
-each ~width next                        width workers pulling next() until None; first failure stops all, re-raised
-in_flight / waiting / width / totals () -> (name, in_flight, waiting, width) list, same-name summed, creation order
-```
-
-A pool stands for a **resource** (memory for bodies, round trips in flight, device queue), not a piece
-of work; the width belongs to whoever knows what shares the process.
-
-### 3.5 Retry, Health, Shutdown
-
-```
-enum Kind { Transient, Permanent }
-error Failed { kind, op, detail }        // rendered "op: detail (transient|permanent)"
-error Cancelled                          // work no longer wanted: never retried
-classify(e)          = Failed{k} -> k ; anything else -> Transient     // requests
-classify_in_order(e) = Failed{k} -> k ; anything else -> Permanent     // ordered work
-reason(e)            = Failed.detail, else the error's text
-backoff(base, cap, n) = min(cap, base * 2^min(10, n-1))                // n is 1-based
-held(name, op, health) = Failed{Transient, op = name+" "+op, detail = health.describe()}
-with_retry(max_attempts = 8, health = ALWAYS_UP, classify, name, op, f) -> result   // §4.4
-```
-
-`Health` (one per peer/member; `ALWAYS_UP` is a shared untracked instance for local stores):
-`check() -> Up|Probe|Held`, `is_held()`, `is_down()`, `sampled()`, `answered()`,
-`lost(reason) -> Up|Tripped|Held`, `probe_lost(reason)`, `on_held(cb) -> id` / `off(id)` (one-shot
-watcher), `describe()` (`"held down for 27s after 2 failures (HTTP 530: …)"` or `""`),
-`timed_out()` / `timeouts()`, `json()` (`{"health":{heldUntil, heldUntilLocal "HH:MM:SS", heldSeconds,
-failures, reason}}` only when out). Tunables: trip_after, trip_span, hold_initial, hold_max,
-probe_timeout (§2.9). Test hooks: `expire()`, `hold_length()`.
-
-`until_held(health, name, op, ask)` = `race[ask(), fail(held(...)) as soon as health trips]`
-(cancelling `ask`).
-
-`Shutdown` (process-global): error `Stopping`; `request()` idempotent, runs hooks once in registration
-order; `requested()`; `on_request(f) -> unregister` (runs `f` immediately if already requested);
-`grace` (10 s, settable); `reset()` (tests); `stop_aware_sleep(s) -> Slept|Stopping` resolves early on stop.
-
-`Stopping` semantics everywhere: never retried, not counted as failure, **work is still owed** (on disk),
-unlike `Retry.Cancelled` (work no longer wanted).
-
-### 3.6 Durable_queue (seam used by 3 subsystems)
-
-```
-enum Poison { Stop /* leave record on disk */, Drop /* unlink record, mark degraded */ }
-struct Stats { queued, in_flight, degraded: bool, bytes: i64 /* keyed weight still owed */ }
-trait Job      { to_string(job) -> bytes ; of_string(bytes) -> Option<job> }   // None = unreadable
-trait Files    { mkdir_p, atomic_write, readdir_list, readdir_list_quiet, unlink_quiet, is_directory,
-                 read_file(path) -> Body(bytes) | Gone | Failed(err) }        // Gone vs Failed matters
-Records(dir):  write(id, job) ; update(id, f) /* gone = no-op */ ; complete(id) /* unlink */ ;
-               list(wanted: id -> bool) -> [(id, job)] in id order ; dropped() -> count
-Queue:
-  ordered(name, log, classify, poison, run(id, job))                      // 1 worker, strict order
-  keyed(workers=1, weight=0, name, log, key(job), classify, poison,
-        run(id, job, cancel_flag))                                        // ≤1 job per key
-  post(job)            // write record, then enqueue; returns once durable
-  record(job)          // write only (a queue another process runs)
-  adopt(id, job)       // enqueue an existing record; idempotent on id
-  start(recover=false) ; stop() ; cancel(key) -> bool ; set_paused(b) ; paused()
-  stats() ; in_flight() -> [job] ; owed() -> distinct keys ; settle_key(key)
-Process-wide: settle_all(timeout=60) ; register_settle(f) ; rescan_all() ; release(dir) ;
-              set_stall_warning_interval(s)
-```
-
-Consumers: `Deferred` backend replication (`ordered`, poison `Drop`, dir per target+domain),
-`Meta_queue` (`ordered`, `Stop`, metadata ops), `Sync_queue` (`keyed`, workers = `max_uploads`,
-weight = record size, `Stop`, uploads).
-
-### 3.7 HTTP client
-
-```
-trait SocketPool {                 // per-endpoint keep-alive connection cache
-  create(keep_idle_ns, parallel) ; error Redial   // pooled connection unusable, request never left
-  call(alive_cb, headers, body: off-heap bytes, method, uri) -> (response, body: off-heap bytes)
-                                   // alive_cb invoked on headers and each body piece received
-}
-HttpClient:
-  create(name, stall_timeout, classify, health)
-  call(headers_thunk, method, body?, uri)           // one attempt (+ one redial)
-  call_retry(headers_thunk, method, body?, op, uri) // 5xx/429 -> Failed Transient, retried; others returned
-  call_text(...) -> (response, string)
-helpers: code(resp), is_ok = 2xx, failed(op, code, body) Transient iff code>=500 || code=429, excerpt(body)
-```
-
-### 3.8 IPC wire protocol
-
-* Transport: Unix stream socket; one request = one JSON object on one line (`\n`); one reply line.
-  A connection carries many requests until the client closes it.
-* Request fields: `action` (string, required), optional `ref` (Item_ref wire form), `domain`
-  (absent ⇒ the daemon's only domain), `arg`, plus action-specific fields.
-  Example: `{"action":"pin","ref":"f:9f3a1c0428b6d5e7/report.pdf","domain":"home"}`.
-* Reply envelope: `{"ok":true, …}` or `{"ok":false,"error":"<message>"}`. `Ipc.request` raises
-  `Failure msg` on `ok:false` or non-object.
-* Subscription: a handler returning `` `Subscribe topic `` sends its reply, then the connection becomes
-  an event stream (no more replies interleave). Topic = domain name; `""` subscribes to all.
-  `publish` returns the number of subscribers (0 = nobody listening). Per-subscriber backlog 256;
-  overflow drops the oldest with an error log. Stream ends on client EOF or failed write.
-* `serve ?subs ?until ~path handler`: mkdir parent 0700, unlink stale socket, one task per connection;
-  handler `` `Stop `` or `until` resolving → shutdown listener, unlink socket, return (idempotent wake).
-  Per-connection exceptions are swallowed (connection closed).
-* `send` (sync, blocking, no timeout) for CLI; `Make.send ?timeout=2.` for in-loop callers.
-* Socket paths (`Runtime`): Linux `$XDG_DATA_HOME/tsync/tsync-<domain>.sock` (one daemon process per
-  domain), proxy `tsync-http-proxy.sock`, sync `tsync-sync.sock`; macOS one daemon for all domains at
-  `~/Library/Group Containers/group.org.feverdreamtv.tsync/tsync/tsync.sock`.
-* Change notice (`lib/lwt/core/change_notice.ml`): line `{"action":"changed","domain":d,"keys":[…]}`
-  sent via async send to each configured frontend socket; keys deduplicated, flushed every 0.2 s in
-  batches ≤ 512; `settle ()` flushes now (before a command exits); failures warned once, never raised.
-* Job report line: `{"action":"report","kind","domain","pid","startedAt","uptimeSeconds","intervalSeconds",
-  "state":"running|done|failed","memory":{rssBytes,privateBytes,swappedBytes,virtBytes,systemUsedBytes,
-  systemTotalBytes},"gc":{heapBytes,topHeapBytes,minorCollections,majorCollections[,liveBytes]},
-  "traffic":{bytesUploaded,bytesDownloaded,uploadBytesPerSec,downloadBytesPerSec,chunksHashed,hashesPerSec},
-  "backend":{requests,retries,timeouts,failures},"pools":[{name,inFlight,waiting,max}],"uplinks":{…},
-  "counters":[[k,v],…][,"error"][,"target"][,"current"][,"progress":{…}][,"backends":[…]]}`.
-  `progress` = `{bytesTotal,bytesDone,bytesSkipped,bytesFailed,bytesHandled,bytesRemaining,bytesSent
-  [,bytesPerSecAvg][,etaSeconds][,current:{bytesDone,bytesTotal}]}`.
-
-### 3.9 Smaller interfaces
-
-* **Spool**: `create ~dir ~name` (temp file `dir/.tsync-tmp-<pid>-<n>.tmp` — note `name` only shapes the
-  temp path's directory, see §9), `append`, `seal` (close THEN mmap whole file; fails "spool … vanished"
-  if gone), `close`, `drop` (close quietly + unlink), `reap ~dir` (unlink temp names whose pid is dead, one level).
-* **Listing**: `create ~dir ~name ~decode`, `add t fields` (raises `Invalid_argument` once sealed),
-  `count`, `iter` (seals on first call, re-walkable), `read`/`next` (pull cursor), `drop`, `reap`.
-* **Bigstring**: Bigstringaf + `of_string`, `open_snapshot ?scratch path` (reflink clone, unlinked,
-  read-only; falls back to the file itself with one warning per process, memo per directory),
-  `map_file ?scratch ~path ~offset ~len ()` (MAP_PRIVATE of a snapshot; read-only fd so a short file
-  errors instead of growing), `map_fd`.
-* **Hashtbl_mmap** (parameterised by key and value byte encodings): `create n, replace, find, find_opt, mem, length, iter, fold`.
-* **Glob**: `of_pattern`, `matches` (`*` no `/`, `?` one non-`/`, `**/` zero or more segments, `**` anything, rest literal).
-* **Metrics**: counters (`counter/count/total/rate`), process traffic, hashed, request/retry/timeout/failure
-  tallies, `cpu_seconds`, `mem_stats`, `gc_stats`, `live_bytes` (heap walk), `human_bytes`
-  (`"%d B"` or `"%.1f KB|MB|GB|TB"`, base 1024), `with_rate`.
-* **Job_progress** (process-global): `plan ~basis ~bytes`, `start_entry ~size`, `advance ~bytes ~sent`,
-  `settle ~bytes ~sent outcome`, `finish_entry`, `json`.
-* **Log**: levels debug<info<warn<err, default min `info`; `set_prefix`; `set_sink`; `recent ()` (last 50
-  warn/err, newest first); `Daemon.init` (min level debug; syslog facility DAEMON ident `tsync` with
-  LOG_PID, and LOG_PERROR only when stderr is a tty; else stderr sink
-  `YYYY-MM-DD HH:MM:SS LEVEL msg`, colored on a tty).
-* **Field_spec**: `{name; label; typ : String|Bool|Int; default : string option (None=required,
-  Some ""=optional omitted); secret}`; `bool ~default` accepts true/1/yes/on, false/0/no/off
-  (case-insensitive), else default; `mask` → `"***"` for set secrets.
-* **Device**: `max_concurrency path : int option`, `clone ?scratch ~src () : fd option`.
-  `Descriptors.current`, `raise_to ~target`. `Watch.open_dir/fd/drain/close`.
-* **Runtime**: `default_paths () = {cache_root; data_dir; config_path}`, socket paths,
-  `restart_service`, `log_command`.
-* **Tls_conf**: `available ()` (preferred first: openssl, native), `current ()`, `apply (string option)`.
-* **Desktop_mounts** (Linux): `mount_points () : (mount, socket) list` — total (C caller).
 
 ---
 
-## 4. Behaviour / algorithms
+## 16. Conformance
 
-### 4.1 Layering rule (neutral)
+An implementation MUST exhibit these observable properties.
 
-1. Every piece of concurrent logic is written against the capability groups of §3.1 it actually uses,
-   plus narrow, module-specific capability interfaces for anything the *process* owns (e.g. a queue's
-   file operations, a listing's spool, the HTTP socket pool, the IPC transport, a report sender, a link
-   governor's JSON). Classification rule: a loop, recursion or sequence of calls is logic; a single call
-   the platform or the process makes is a capability.
-2. Pure vocabulary (names, formats, classification, backoff formula, disk-space query) never depends
-   on the runtime, so consumers needing only names don't link one.
-3. One **composition root** per process binds each capability once. Anything that is a registry
-   (named pools, queue settle/rescan lists, backend drivers, change-notice table, shutdown hooks) is
-   therefore a process-wide singleton; binding twice would split it.
-4. Raw OS descriptors cross into logic only through the file-I/O capability; C/FFI conversions stay
-   inside the binding.
-
-A rewrite may use generics over small traits (Rust), a vtable struct (C), or plain direct-style calls
-into one runtime (OCaml 5 effects) — what matters is the narrow surface, the single composition root,
-and preserving (or explicitly replacing with locks) the guarantees G1–G7 of §3.2.
-
-### 4.2 EINTR discipline
-
-The daemon receives SIGCHLD (it shells out to `df`/`diskutil`, forks frontends) and SIGWINCH, and signal
-handlers are installed without SA_RESTART, so **every** blocking syscall may fail with EINTR. Rule:
-every file/dir syscall — synchronous or async, in any helper — retries on EINTR, and an EINTR must
-never be interpreted as an answer. In particular "does this path exist" must be `stat` succeeds →
-true, stat fails with a real errno → false, EINTR → retry. (A naive exists-check that said "no" on
-EINTR nearly re-minted the client uuid over the live one, abandoning every unfinished WAL record —
-commit 37c0d67d.) OCaml-specific mechanics of this are in the [OCaml notes](ocaml/01-core.md).
-
-### 4.3 Bounded pool algorithm
-
-`acquire`: if `held < limit` take a slot; else if `max_waiting` reached answer false (→ `Busy`);
-else enqueue a resolver and wait. `release`: if a waiter exists, **hand the slot directly** to it
-(`held` unchanged, FIFO, no barging); else `held--`. `use` = acquire; `finalize f release`.
-`map_with` = `map_p` of `use` per element (queue unbounded because elements are already in memory).
-`each ~width next`: `max 1 width` workers; each loops `next ()`; on a job exception records the first
-exception into `stop`, all workers stop taking jobs; after join re-raise it.
-
-### 4.4 Retry ladder (`Retry.Make.with_retry`)
-
-```
-go attempt:
-  try r = f(); Health.answered h; return r
-  with Cancelled | Shutdown.Stopping -> reraise
-     | e when Clock.is_cancelled e -> reraise
-     | e when classify e = Transient ->
-         if Health.lost h (reason e) = `Tripped then warn (describe h)
-         if attempt < max_attempts:
-            delay = min(20, 0.5 * 2^min(10, attempt-1)) * (0.5 + U[0,1))
-            Metrics.retries++; if timeout: Metrics.timeouts++, Health.timed_out h
-            log (info if attempt<3 else warn) "name op: reason; retrying (a/max) in Ds"
-            Shutdown.Sleep delay -> `Stopping => fail Stopping
-            go (attempt+1)
-         else out_of_tries
-     | e (permanent) -> Health.answered h (an answer about an object proves the link); out_of_tries
-out_of_tries e: Metrics.failures++; if Transient: (timeout→count+Health.timed_out);
-   fail (e if Failed else Failed{Transient; op = name^" "^op; detail = reason e}); else fail e
-```
-
-The loop never refuses because a member is held; whoever has an alternative uses `Health.check`/
-`Health_wait` to stop waiting.
-
-### 4.5 Health breaker state machine (`lib/core/health.ml`)
-
-State: `consecutive`, `failing_since`, `last_lost`, `held_until` (0 = not out), `hold`, `probing`.
-Time is wall clock (`gettimeofday`).
-
-* `lost` (tracked only): if `consecutive=0` or (not out and `now - last_lost > hold_initial`), start a
-  new run (`consecutive=0; failing_since=now`). `consecutive++`, `last_lost=now`.
-  * If out: if `probing` or `now >= held_until` (the probe failed, or the hold had lapsed with nobody
-    probing) → `hold = min(hold_max, 2·hold)`, `held_until = now+hold`, notify watchers, `` `Tripped ``;
-    else `` `Held `` (request already in flight when it went out; not news, no extension).
-  * If not out: if `consecutive >= 2` and `now - failing_since >= 1 s` → hold 30 s, notify, `` `Tripped ``;
-    else `` `Up `` (a burst in one instant is one bad moment).
-* `check`: not out → `` `Up ``; `now < held_until` → `` `Held ``; else extend `held_until = now+hold`,
-  `probing=true`, `` `Probe `` (exactly one caller per expiry gets the probe; an unreported probe is
-  re-offered at the next expiry).
-* `is_held` = out and `now < held_until` (false once a probe is due). `is_down` = out, even if expired
-  (a lapsed hold is not an answer).
-* `answered`: reset everything (consecutive 0, not out, hold 30 s, sampled).
-* `probe_lost`: a deliberate probe that failed puts it out on that alone (`2·hold` if already out, else 30 s).
-* Watchers (`on_held`) are one-shot: called and cleared on each trip.
-
-### 4.6 Durable queue algorithms
-
-**Posting.** `post`: if `full` (queue length ≥ 100 000) → set degraded, log once, silently drop.
-Else under the `recording` mutex: mint id, `atomic_write` the record, then `take`. The mutex keeps
-id order = queue order (a rename replayed backwards loses a file). Returns when durable.
-`record` writes only (another process's queue). `adopt` takes an existing record under the same mutex,
-ignoring ids already `loaded`.
-
-**take (keyed).** If the key has no slot: create one and enqueue. If a slot exists (running or queued):
-set its `cancel := true`, drop any previous `pending` (its record is completed asynchronously — its data
-is no longer staged), set `pending := this`. So at most one job per key runs, the newest wins, and
-the run function polls `cancel` to stop early.
-
-**Worker loop.**
-```
-loop:
-  if Shutdown.requested: return
-  if (queue empty or paused) and not stopping: parked++; announce; wait wake; parked--; loop
-  if queue empty: return                      (stopping and drained)
-  e = pop; (keyed) active[key] = e
-  outcome = run e (catch all)
-  (keyed) remove active[key]; outcomes++
-  Done           -> clear failures (slot and queue); Records.complete id; requeue=false
-  Failed Stopping-> requeue=false (record stays on disk; owed)
-  Failed e, classify e = Transient ->
-                    Metrics.retries++ (timeouts too); n = ++failures (slot or queue);
-                    delay = min(300, 0.5·2^min(10,n-1)); warn; announce; Shutdown.Sleep delay; requeue=true
-  Failed e (permanent) -> Metrics.failures++; degraded=true;
-                    Drop: log err "(dropped; run tsync mirror)", complete record
-                    Stop: log err "(not retrying)", leave record, remove from loaded (so adopt can re-offer)
-  if slot.pending exists: clear cancel, enqueue pending        (replacement takes the key)
-  elif requeue and not stopping: put_back                      (ordered: at HEAD; keyed: at tail)
-  elif keyed: remove slot
-  announce; loop
-```
-Ordered queues retry at the head so later records can't overtake (commit 5dcca235: an rmdir overtaken
-by a later mkdir conflicted). Keyed queues retry at the tail so one failing key doesn't stall others.
-
-**Start / recovery / claims.** `start ?recover`: without `recover`, the process **claims** the log dir
-(`lockf` on `<dir>.owner`, kept open; if another holds it, proceed anyway without claim — both keep
-their own records in memory). With `recover`, register a rescan and have each worker first `rescan`:
-`with_claim dir` (only if no process holds the lock and this process doesn't own it) → `resume`: under
-the recording mutex, `Records.list ~wanted:(not loaded)`, set degraded if any unreadable record was
-dropped, create slots and enqueue in recorded order. `rescan_all` re-reads every recovering queue's log
-(daemon calls it when a one-shot command leaves work behind). A watchdog logs a warning every
-`stall_warning_interval` if jobs are queued and `outcomes` didn't move.
-
-**Records.list** reads each wanted id: `` `Gone `` (completed meanwhile) → skip silently;
-unparseable body → `dropped++`, err log, unlink; `` `Failed exn `` (EMFILE, EIO…) → warn and **leave**.
-
-**Stop / settle.** `stop`: set stopping, broadcast, join workers — a command's queue drains what it
-holds; if `Shutdown.requested`, workers return immediately leaving the rest on disk. `settle t` waits on
-the `settled` condition until idle, not running, shutdown, or `failures > 0` (target down: warn and
-return — queued work is on disk). `settle_key` likewise per key. `settle_all ?timeout` joins all settles
-under `with_timeout` (60 s, or `min(timeout, grace)` when stopping), warning on timeout. On
-`Shutdown.request` every queue broadcasts its conditions. `stats.degraded = degraded || dropped > 0`;
-`stats.bytes` = sum of `weight` over queued+active (keyed).
-
-### 4.7 Shutdown
-
-`request()` flips the flag and runs hooks (sorted by registration id) once. Stop-aware sleeps resolve
-`` `Stopping `` immediately; retry ladders fail with `Stopping`; queues stop taking jobs; settle waits are
-capped to `grace` (10 s). Everything a stop leaves is on disk (upload records, queued jobs, staged
-bodies) and resumes at the next start.
-
-### 4.8 HTTP client call
-
-`call`: `Metrics.requests++`; under `with_stall_timeout timeout` (timer reset by `alive()` after headers
-are built and on each response body piece; the request body upload is not "heard"), build headers (may
-hit the network, e.g. token mint) then `Pool.call`. If `Pool.Redial` (connection unusable, request never
-left), replace the pool **once per generation** (only if `t.cache` is still the one that failed) and try
-once more. `call_retry` wraps in `with_retry ~health ~classify`, converting 5xx/429 into
-`Failed Transient "HTTP <code>: <excerpt>"`; all other statuses (404 included) return to the caller.
-Bodies are bigstrings end to end (`Passthrough`, no copy).
-
-### 4.9 Glob
-
-Recursive backtracking: `**` followed by `/` skips the `**/` and tries the rest at every position from
-the current index (so `**/x` matches `x`, `a/x`, `a/b/x`); `**` otherwise tries every position; `*`
-tries positions not crossing `/`; `?` one non-`/`; others literal. Used by import excludes (applied to
-basenames and paths).
-
-### 4.10 Metrics counter
-
-Ring of 10 one-second buckets indexed `sec mod 10`; on each add/read, zero buckets for elapsed seconds
-(at most 10); `rate = sum/10`. Unlocked (single thread). Retries/timeouts/failures counted where they
-happen (both the request ladder and the queue).
-
-### 4.11 Job progress estimate
-
-`handled = done + current.done + skipped + failed`; `remaining = max 0 (total - handled)`.
-Basis `` `Sent ``: rate = `sent / (now - first_sent_time)` (bytes that reached a store, timed from the
-first), published as `bytesPerSecAvg`. Basis `` `Handled ``: rate = `handled / (now - planned_at)`, not
-published. `etaSeconds = remaining/rate` only if rate > 0 and remaining > 0. Absent figures are absent
-keys. `finish_entry `Skipped/`Failed` charges the entry's planned size.
-
-### 4.12 Snapshots and clones
-
-`Bigstring.open_snapshot`: `Device.clone` stages a clone at `temp_in scratch` or `temp_path src`, opens it
-read-only and unlinks it (Linux: `FICLONE` ioctl from a fresh `O_EXCL` 0600 file, unlink on failure;
-macOS: `clonefile`). A directory that failed once is remembered (`clonable[dir]=false`) and the file
-itself is used thereafter (warn once per process: a truncating writer then means SIGBUS under a
-mapping). Mapping is `MAP_PRIVATE` read-only so a short file errors instead of being extended.
-
-### 4.13 Device queue depth
-
-Linux: longest mount point in `/proc/self/mountinfo` covering the path → `major:minor` →
-`/sys/dev/block/<mm>` (go to `..` if `partition` exists) → `device/queue_depth` else `queue/nr_requests`
-→ `max 2 (min 64 (depth*4))`. macOS: `df -P` → device → `diskutil info`: rotational+USB/FireWire 4,
-rotational 8, SSD over USB 16, SSD 64, unknown external 8, else None. Ask once per store.
-
-### 4.14 Directory watch
-
-Linux inotify `IN_CREATE|IN_MOVED_TO|IN_CLOSE_WRITE` non-blocking; macOS kqueue EVFILT_VNODE
-`NOTE_WRITE|NOTE_LINK|NOTE_DELETE|NOTE_RENAME` with EV_CLEAR on an O_EVTONLY dir fd. `drain` reads up to
-64 passes; returns true if any event is not one of our temp names (Linux) / any event at all (macOS).
-`Watch_lwt.wait` waits readable then drains, re-waiting if only own scratch arrived (prevents a
-read→snapshot→wake→read OOM loop). Non-recursive; `None` means fall back to polling.
-
-### 4.15 Descriptor limit
-
-`raise_to ~target`: clamp to `rlim_max` if finite; if current ≥ want return current; else try `setrlimit`
-halving `want` until accepted or ≤ current. (launchd gives 256.)
+- **Hashing.** The known answers of §3.1 for both seeds at every listed length (the empty body's
+  chunk key is `2d06800538d394c2-4dc5b0cc826f6703`, that of `"hello world"`
+  `d447b1ea40e6988b-b7aeb52a10fdaf2d`). Streaming with updates split at 1, 16, 240 or 1 MiB
+  bytes equals one-shot hashing, and hashing a mapped buffer equals hashing the same bytes held
+  any other way. The chunk-key test accepts exactly 33-byte lowercase dual-hex strings. The
+  same vectors are checked by every other implementation of the chunk key (the bucket
+  verifier): if two implementations disagree, every chunk in every store reads as corrupt.
+- **Chunking.** Range-to-pieces lists equal the examples in §3.4, always cover the range exactly
+  once, and are empty for length 0 or chunk size 0.
+- **Keys.** The leaf `img.jpg` hashes to `066843ea47b80079-e0e3d2bb9b72c14d` under any folder;
+  the root and trash ids are `.tsync-root` and `.tsync-trash`; a folder index lives at
+  `<folder-id>/.tsync-index`; classification tells a child key, the index key, a namespace
+  prefix and a temporary name apart. A file and a folder of one path are different logical
+  keys; the root is the bare domain prefix and its parent is itself; parsing a string of
+  another domain's prefix fails; a trailing `/` is accepted when parsing; descending from a
+  file fails; a leading `/` in a user path is ignored. A chunk with a key shorter than 3
+  characters is filed under shard `_`.
+- **Validation.** Keys with an empty, `.` or `..` segment, a leading `/` or a NUL are refused;
+  domain names `shares`, `gc-jobs`, `a/b`, `..`, `.tsync-x` are refused, `SHARES` is refused
+  for a domain with a local-filesystem store and accepted otherwise, and `Family Photos` and
+  `chunks` are accepted; folder ids of 12, 16 and 32 hex digits, with or without a `-<counter>`, are accepted.
+- **Item references.** `d:.tsync-root` is the root; a leaf may contain `:`
+  (`f:3f2a9c1b7d4e-1a/a:b`); `f:3f2a9c1b7d4e-1a/a/b`, `d:`, `f:3f2a9c1b7d4e-1a/`, `f:/x`,
+  `d:..`, `d:Photos` and a storage key are malformed and answered INVALID; formatting
+  round-trips.
+- **Temporary names.** `.tsync-tmp-1-2.tmp` (owner pid 1 recoverable),
+  `.tsync-tmp-9f3a0c.tmp` and `.tsync-tmp-scratch.tmp` are ours; `.syncthing.X.mkv.tmp`, `x.tmp`, `.tsync-tmp-1-2.txt` and
+  `my.tsync-tmp-1-2.tmp` are the user's. Listings and mirroring hide only ours; a sweep removes
+  a pid-form temporary only when its owner is dead.
+- **Escaped names.** A leaf containing `:` is always escaped to `.tsync-esc-<hex16>` locally; a
+  file's real name is recovered from its manifest; an escaped folder's `.tsync-name` record
+  follows the folder through renames.
+- **Random ids.** A forked child draws ids distinct from its parent's.
+- **EINTR.** Both spellings of an interrupted call are retried; other errors propagate; an
+  existence check agrees with the platform on missing files, files, directories and dangling
+  links.
+- **Local absent vs failed.** A read, stat or listing that fails with an error other than
+  ENOENT/ENOTDIR raises a classified failure, never "absent" or "empty".
+- **Breaker.** A blip does not trip; the second failure spanning ≥ `TRIP_SPAN` trips; an answer
+  resets; one probe among concurrent checkers; a lost probe doubles the hold up to the cap; a
+  failure in flight when the member went out does not extend the hold; a same-instant burst
+  does not trip; watchers fire once; a lapsed hold is still down; an isolated old failure does
+  not start a run with a new one; the always-up cell never goes out; the timeout tally
+  persists across trips. None of this changes when the wall clock steps. A local-filesystem
+  member whose network filesystem answers `ESTALE` or `ETIMEDOUT` trips like a remote one.
+- **Stop.** A stop-aware sleep ends with STOPPING without the clock moving; an unregistered hook
+  never runs; a late hook runs at once; a ladder under stop gives up after one try and counts no
+  failure.
+- **Glob.** Every row of the table in §17.
+- **ZIP.** A fixed member set (a directory, a text file, a 300-byte binary, an empty file, a
+  UTF-8 name) produces a fixed 1144-byte archive that a standard unzipper extracts.
+- **Mappings and snapshots.** A mapping survives unlink and republish of its source; a short
+  file errors instead of growing; writes to the mapping do not reach the file; a truncate of a
+  file being imported fails the read rather than the process; no clone is left behind.
+- **Reservation.** The file is sized; blocks are owned where the filesystem supports it; size
+  0 is a no-op.
+- **IPC.** Many requests per connection; a subscription acknowledges, then delivers only its
+  topic's events in order; a departed subscriber is removed; publishing to nobody returns 0; an
+  over-long line is refused; a stalled partial line is closed after `IPC_LINE_DEADLINE`; the
+  listener survives any single connection's failure and stops cleanly.
 
 ---
 
-## 5. Interactions
+## 17. Glob patterns
 
-* **Depends on**: OS only (POSIX, inotify/kqueue, FICLONE/clonefile, statvfs, getrlimit), yojson,
-  bigstringaf, cohttp types (only in `Http_client_intf`), mem_usage, syslog (optional), Lwt/cohttp-lwt/
-  conduit in the binding layer; `Desktop_mounts` depends on `Conf_parsing` (config) and `Runtime`.
-* **Depended on by** (everything):
-  * Config (`Conf.S`) satisfies `Logical_key.Domain` and `Chunk_layout.Store`.
-  * Backends: `Stored_key`, `Chunk_layout`, `Chunks.key_of_body` (verify on read in local driver, GC,
-    integrity), `Http_client` (S3/GCS/http-proxy drivers), `Retry`, `Health`/`Health_wait` (domain store
-    failover), `Durable_queue` (deferred replication), `Device.max_concurrency` (local driver pool width),
-    `Watch` (local driver change detection), `Bounded`.
-  * Remote/chunk store: chunk sizing, `Chunk_source`, `Bounded` pools for chunk buffers, `Metrics.add_*`.
-  * Manifest / checkout / cache layout: XXH3 digests, `Chunks.pieces`, `Bigstring`, `Fs.atomic_write_at`,
-    `Filename` temps, `Spool`.
-  * Sync: `Durable_queue` (`Sync_queue` keyed uploads, `Meta_queue` ordered metadata), `Change_notice`.
-  * Ops: `Listing`, `Spool`, `Hashtbl_mmap` (mirror's held set), `Job_progress`/`Job_report`,
-    `Zip_stream` (export/share server), `Glob` (import excludes).
-  * App/frontends: `Ipc` (every daemon/CLI conversation), `Item_ref` (frontend ↔ daemon), `Runtime`
-    paths, `Log`, `Shutdown`, `Tls_conf`, `Descriptors`, `Desktop_mounts` (Linux file-manager
-    extensions via C), `Metrics_lwt`, `Uplink_lwt` (governor; separate `tsync_uplink` library).
+Glob patterns select paths (import `--only` and `--exclude`,
+[05](05-ops-config.md)). A pattern is matched against a path (§2.3) as a whole: both ends are
+anchored. Matching is byte-wise and case-sensitive.
 
-### 5.1 Hosts: how this layer is repurposed
+- A **globstar** is `**` forming a whole segment of the pattern: at the start of the pattern or
+  after `/`, and at the end of the pattern or before `/`.
+  - `**/` matches zero or more whole leading segments of the remaining path: the rest of the
+    pattern is tried at the current position and at every position immediately after a `/`.
+  - `**` at the end of the pattern matches the rest of the path, whatever it is, including
+    nothing.
+- `*` matches any run of bytes, possibly empty, not containing `/`. Two or more consecutive `*`
+  that do not form a globstar behave as one `*`.
+- `?` matches exactly one byte other than `/`.
+- Every other byte matches itself. There is no escaping, no character class and no brace
+  expansion.
 
-The same foundation is linked into several hosts; each instantiates the runtime once and picks roles:
-
-| host | what it uses / swaps |
-|---|---|
-| Linux daemon (`tsync start`) | one process per domain (FUSE frontend) + a sync process; log → syslog (`Log.Daemon.init`, ident `tsync`, facility DAEMON, level debug), log prefix `"[<domain>] "`; raises fd limit to 8192 before forking frontends; per-domain IPC socket `tsync-<domain>.sock`; `Shutdown.request` on unmount/signal; recovering durable queues; `rescan_all` when a one-shot command leaves work behind. |
-| macOS daemon + File Provider app | one daemon serving all domains on one socket `tsync.sock` in the app-group container; logs to syslog with LOG_PERROR into `~/Library/Logs/tsync-daemon.log`; fd limit raised (launchd gives 256); File Provider extension talks via IPC and subscribes to change events (daemon never connects out). |
-| Android app | runtime embedded in the app process; log sink replaced by logcat (`Log.set_sink`) before anything else; blocking-I/O pool capped at 16 threads; everything reachable from the host must be total (no escaping errors); no daemon socket—requests are answered in-process. |
-| http-proxy frontend | one listener for all its domains (`tsync-http-proxy.sock` for control); no IPC socket for status, so it reports `Log.recent()` (last 50 warn/err) over HTTP; uses `Zip_stream` for folder downloads in the share server. |
-| One-shot CLI commands (import, export, mirror, gc, rsync…) | synchronous `Ipc.send`/`request` to talk to daemons; durable queues started **without** recover (they claim their log dirs for their lifetime); `Job_report` every 10 s to the daemon so `tsync status` sees them; `settle_all` (≤60 s) before exit; `Change_notice.settle` before exit; log sink wrapped to coexist with a live progress block. |
-| Linux desktop file-manager extensions | call `Desktop_mounts.mount_points` across a C boundary (must be total) to learn which mounts are tsync's and their sockets. |
-| Tests | replace Clock/Files/Send/Pool/Transport capabilities with doubles; `Shutdown.reset`, `set_stall_warning_interval`, `Health.expire`. |
-
-### 5.2 Main data flows through this layer
-
-1. *Upload*: file bytes → fixed-size cut (`Chunks`) → `Chunk_source` → hashed in place (`key_of_body`)
-   → `Chunk_layout.Make.key` → HTTP client/driver under `Bounded` chunk-buffer pool and `Retry` ladder.
-   A write is first recorded (`Durable_queue.post`) so a crash leaves it owed.
-2. *Read*: range → `Chunks.pieces` → chunk keys → cache (`relative_path`) or backend; verified by
-   recomputing `key_of_body`; mismatches filed as `marker_key`.
-3. *Frontend request*: `Item_ref` over `Ipc` → daemon resolves via folder ids (`Stored_key`, `Folder`).
-
----
-
-## 6. Concurrency, durability & failure semantics
-
-* **Atomic file replacement** everywhere via temp name in the same directory + rename; failures unlink
-  the temp. Readers never see partial bodies. Temp names carry the pid, so sweepers (`Spool.reap`,
-  cache sweeps) remove only dead processes' leftovers.
-* **Durable queue**: record is on disk (atomic write; no fsync) before `post` returns; completion =
-  unlink. Crash ⇒ records replayed next start (or by `rescan_all`). Replays are idempotent at the
-  queue level (`loaded` set; `adopt` idempotent on id) — jobs themselves must tolerate re-run
-  (at-least-once). Unreadable records are dropped and the queue flagged degraded (needs `tsync mirror`).
-  Claim via `lockf` prevents a recovering process from running records a live command holds in memory.
-  Note: no `fsync` of record or directory — durability is against process crash, not power loss.
-* **Unlinked-while-open files**: `Hashtbl_mmap` backing, spool→mapping (spool is unlinked only on
-  drop/reap), clones (`open_and_unlink`) — nothing to clean up after a kill.
-* **Pools**: FIFO hand-off, optional refusal (`Busy`). Named pools are reported in status (`pools`).
-  HTTP sockets per endpoint 32 (not the work bound). IPC one task per connection (unbounded).
-  Durable queue: 1 worker (ordered) or N (keyed).
-* **Shutdown**: cooperative, bounded by 10 s grace; nothing that is owed is lost.
-* **Offline**: `Health` takes a member out after 2 failures ≥ 1 s apart and holds 30→300 s; queues
-  back off up to 300 s per failure without dropping transient work; `settle` returns early when a
-  target is failing so commands don't hang.
-* **Advisory channels** (job reports, change notices, subscription events) never fail the caller;
-  failures are logged once.
-* **Signals**: EINTR retried everywhere (§4.2).
-* **Timeouts**: HTTP is a stall timeout (silence), not a latency budget; IPC async send 2 s.
-
----
-
-## 7. Design choices & rationale
-
-| choice | why (source) | rejected alternative |
+| pattern | path | matches |
 |---|---|---|
-| Fixed-size chunks, per-file size in manifest | clients agree without talking; ranges map arithmetically; size changeable for new files only | content-defined chunking (not used; no rationale recorded beyond simplicity) |
-| XXH3-64 × two seeds, hex, joined by `-` | fast, fixed width, filesystem safe; 128 bits of name; a Python verifier reimplements it | cryptographic hash (not needed: stores are the user's own) |
-| Children filed by `hash(leaf)` under a stable folder id | folder rename touches one marker, not the subtree (`stored_key.mli`) | path-keyed manifests |
-| Kind not encoded in the key string | a second spelling can disagree (`logical_key.ml`) | trailing `/` for dirs |
-| Item_ref ids, not paths | a directory rename changes every descendant path; refs reach system logs, so no user paths unless the caller named one | paths on the wire |
-| Stored_key has no `of_string` | a key exists only because a namer built it or a store listed it | free strings |
-| Marker membership by prefix, last `/chunks/` | manifest keys look like chunk keys; domain may be named `chunks` | leaf-shape test |
-| Temp prefix test not suffix | Syncthing `.tmp` files were deleted and re-downloaded forever (`filename.ml`) | `*.tmp` |
-| Durable record before acknowledging a write | crash leaves "owed" evidence | in-memory queue |
-| Ordered queue retries at head; keyed at tail | ordering vs. isolation (commit 5dcca235) | uniform requeue |
-| `lockf` claim beside the dir | kernel releases on death; directory holds only records | marker files |
-| Poison `Stop` vs `Drop` | Drop for rebuildable targets (deferred replica, fixed by mirror); Stop for work others reconcile | single policy |
-| `classify` supplied by the job owner | only the owner knows which of its failures clear | queue-side heuristics |
-| Unknown exception = Transient (requests) but Permanent in ordered work (`classify_in_order`) | requests: don't abandon work; ordered: a local bug would block everything behind it | — |
-| Jittered backoff ×[0.5,1.5) | a fleet failing together doesn't return together | fixed delays |
-| Health breaker with single probe | 8 retries against a dead host wastes a minute of reader time | per-request retries only |
-| Stall timeout instead of deadline | large bodies on slow links are legitimate; dead pooled connections (no FIN) hang forever | total deadline |
-| Pool replaced once per generation on Redial | a torn-down connection stays in cohttp's table as failed | per-request new connection |
-| Pooled HTTP per endpoint | per-request connections cap catch-up at dozens req/s and exhaust TIME_WAIT | — |
-| Bigstrings for bodies; Hashtbl_mmap; Listing spools | data-sized structures off the GC heap (mirror memory: 140 → 16 words/object) | heap strings/Hashtbl |
-| Spool sealed (closed) before mmap | mapping a file still open for append is unsound | map while writing |
-| Reflink snapshots for mapping sources | a concurrent truncate under a mapping is SIGBUS, not a short read | read the live file |
-| Private PRNG reseeded per pid | a fork inherits PRNG state and drew its parent's ids (a42c99e5); a shared global PRNG's seeding depends on who seeded it first | global PRNG |
-| EINTR retried inside every file helper | the failure is invisible to callers; nearly re-minted client uuid (37c0d67d) | caller discipline |
-| Runtime interface minimal (§3.1), sequencing helpers derived | every extra capability must be re-provided by every runtime binding | expose the whole runtime API |
-| One composition root names the runtime | swap cost confined to one tree (~1000 lines today); an effects-based scheduler migration was costed against it | runtime calls everywhere |
-| IPC: daemon never connects out; subscribers connect in | sandboxed extensions can always reach the daemon | daemon pushes to clients |
-| Never set TCP_NODELAY on Unix sockets | macOS answers EINVAL once the peer is gone; the accept loop died and the daemon answered nobody | runtime default |
-| Subscriber backlog 256, drop oldest | events are hints atop the journal (ponytail note) | unbounded buffers |
-| Change notices batched 0.2 s/512 | a 100k-entry catch-up would be 100k round trips | per-key sends |
-| Monotonic clock for rates | NTP steps wall time by the intervals rates are read over | wall clock |
-| Device concurrency discovered | USB BOT takes 1 command, NVMe hundreds | fixed width |
+| `**/.git` | `.git`, `a/.git`, `a/b/.git` | yes |
+| `**/.git` | `foo.git`, `a/repo.git`, `a/b/c` | no |
+| `**/node_modules` | `a/my_node_modules` | no |
+| `src/**/*.ml` | `src/foo.ml`, `src/a/b/foo.ml` | yes |
+| `src/**/*.ml` | `src/a/b/foo.c`, `srcx/foo.ml` | no |
+| `a/**` | `a/b`, `a/b/c` | yes |
+| `a/**` | `a` | no |
+| `*.ml` | `foo.ml` | yes |
+| `*.ml` | `dir/foo.ml` | no |
+| `fo?` | `foo` | yes |
+| `fo?` | `fo`, `fo/` | no |
+| `a**b` | `axyb` | yes |
+| `a**b` | `ax/yb` | no |
+| `lost+found` | `lost+found` | yes |
+| `foo.bar` | `fooXbar` | no |
+| `""` | `""` | yes |
+| `""` | `x` | no |
+| `*` | `""`, `abc` | yes |
+| `**` | `""`, `a/b/c` | yes |
 
 ---
 
-## 8. Invariants the tests pin down
+## 18. Rationale
 
-Unit tests (`tests/unit/*`, snapshot `.expected` files are authoritative):
-
-* **hash**: XXH3-64 KAT values above for seeds 0/1 at sizes 0,1,16,17,128,129,240,241,2600,1 MiB,1 MiB+1,8 MiB;
-  `hash_hex "" 0 = "2d06800538d394c2"`; chunk key = two digests joined by `-` (shared with Python verifier).
-* **chunk_pieces**: exact piece lists (§2.2), always covering the range once; nothing for length 0 or chunk 0.
-* **stored_key**: root/trash ids; `img.jpg` → `066843ea47b80079-e0e3d2bb9b72c14d`; same name same key;
-  index key `.tsync-index`; listing classification (child / index / namespace / in-flight write).
-* **logical_key**: spelling, `path`, `parent`, descending, file-descend refused, `rel_of_string` rejects
-  other domains, file≠folder of same path, leading `/` ignored.
-* **item_ref**: 16 cases (§2.4) including `d:.tsync-root`→root, colon in names, storage keys → Bad.
-* **gc_job**: gc-jobs prefix/key shapes for domains incl. `Jellyfin Media`, `chunks`, `gc-jobs`; non-job keys rejected.
-* **temp_names**: ours vs user's names (`.syncthing.*.tmp`, `my.tsync-tmp-1-2.tmp` etc. are user's).
-* **id**: forked children draw distinct ids of the same shape.
-* **eintr**: both EINTR spellings retried; other errors propagate; shadowed `Sys.file_exists` agrees with stdlib on missing/file/dir/dangling symlink.
-* **bounded**: never wider than bound and reaches it; order preserved; bound 0 serialises; `max_waiting`
-  refuses rather than queues; slots all return; `each` width, draining, first failure re-raised and stops workers.
-* **hashtbl_mmap**: find/mem/length; replace overwrites without growing count; arbitrary byte keys;
-  growth past hint; iter/fold each binding once; heap cost a fraction of stdlib Hashtbl.
-* **listing**: count before walk; arbitrary field bytes round-trip; re-walkable; add after seal raises and isn't counted.
-* **spool_reap**: dead run's spool reaped; user file and live spool kept.
-* **bigstring**: mapping survives unlink/republish; short file raises and isn't grown; writes to map don't reach file;
-  no clone left behind; snapshot isolation exactly where the FS can clone; bigstring hash = string hash.
-* **health**: the full state machine (§4.5): blip, trip on 2nd, reset by answer, single probe among 3,
-  probe failure doubles to a cap, in-flight failure no extension, same-instant burst not a trip,
-  watchers once, expired hold still `is_down`, isolated old failure not a run, `always_up` never out, timeout tally persists.
-* **shutdown**: sleep returns `Stopping` without the clock moving; unregistered hook never runs; late hook runs at once;
-  retry ladder gives up on stop with one try and no failure counted.
-* **queue_stop / drain_for_stop**: command stop runs all 6 jobs, none owed; process stop returns at once
-  having started only the running job, 6 still on disk; drain bounded by grace without cancelling.
-* **queue_claim**: claimed log left alone; unclaimed log taken over; no double run while being worked.
-* **work/queue_order**: ordered queue keeps record order through transient failure (retry at head), permanent
-  failure reported degraded with record kept (Stop) and re-offerable.
-* **work/queue_adopt**: adopt idempotent; log holds exactly what was written.
-* **work/queue_records**: `wanted` prevents opening; unparseable record dropped with err log; gone record silent;
-  unreadable-for-other-reason record left with warn (exact log lines in `.expected`).
-* **work/queue_degraded**: dropped unreadable record counted, other jobs run, `degraded=true`.
-* **work/queue_stall**: draining queue silent; a stuck queue warns yet still reports jobs as queued.
-* **subs / ipc_serve**: multi-request connections, subscribe ack, topic filtering, in-order delivery,
-  departed subscriber removed, publish-to-nobody = 0; server stops via handler/until, socket removed, nothing escapes.
-* **zip**: exact 1144-byte archive for a fixed member set (dir, text, 300-byte binary, empty, UTF-8 name) and round-trip by an unzipper.
-* **http_excerpt**: whitespace flattening and 200-char cut examples.
-* **field_spec**: boolean parsing table.
-* **metrics**: totals; 10 s window rate = total/10.
-* **progress_eta**: no estimate with nothing done; `Handled` basis estimates without publishing a rate; remaining/rate.
-* **reserve**: file sized; blocks owned where supported; size 0 is a no-op.
-* **glob** (`tests/unit/glob/glob.ml`): the literal/`*`/`?`/`**` cases listed there.
-* **desktop_mounts**: mountinfo parsing incl. octal escapes and `fuse.*` type with source `tsync`.
-
----
-
-## 9. Open questions / inconsistencies
-
-1. **Glob `**/x` over-matches**: `try_from` tries every character offset, not only segment boundaries,
-   so `**/.git` also matches `foo.git`, and `src/**/*.ml` matches `src/xfoo.ml`-like shapes. Tests do not
-   cover it. A rewrite should decide (segment-boundary semantics is almost certainly intended).
-2. **Clock inconsistency**: `Clock.now` is monotonic, but `with_stall_timeout` (Lwt binding), `Health`,
-   `Metrics` buckets, `Job_progress` all use `Unix.gettimeofday` (wall clock), which the Clock doc says steps under NTP.
-3. **Durable queue has no fsync** (records nor directory): durable across process crash only.
-4. `Durable_queue.record` bypasses the `max_queued` check; `full` counts only in-memory queue length,
-   not the keyed `pending` slots.
-5. Record `seq` is per `Records.t` instance: two `Records.t` on the same dir in one process could mint
-   the same id within one microsecond.
-6. `Spool.create ~dir ~name`: the path is `temp_path (dir/name)` = `dir/.tsync-tmp-<pid>-<n>.tmp`;
-   `name` does not appear in the file name at all (doc says it "makes the path readable").
-7. `Spool.seal` uses `stat_opt` (non-LargeFile `st_size`, an OCaml int — fine on 64-bit only).
-8. `Hashtbl_mmap.replace` appends forever; heavy rebinding grows the blob unboundedly (no compaction).
-   Its hash is OCaml's `Hashtbl.hash` — irrelevant for persistence (in-process only).
-9. `Stored_key.escape` uses a single 64-bit hash (collision ⇒ two names share a mirror handle; real name
-   recovered from body/marker, but two distinct long names would collide on one path).
-10. `Watch.drain` on macOS cannot see names, so the own-scratch wake loop is only fixed on Linux (memory
-    note "watch-reports-own-scratch-loop": macOS still open).
-11. Domain names `corrupted`, `verify-jobs`, `gc-jobs` collide with sibling roots (acknowledged, unchecked).
-12. The `lwt-agnostic-library` skill references stale paths (`lib/io`, `lib/lwt/io`, `lib/utils/retry`);
-    actual: `lib/local/io`, `lib/lwt/local/io`, `lib/core/retry.ml`.
-13. `Ipc.send` (blocking) has no timeout and reads exactly one line; a wedged daemon hangs a CLI caller.
-14. `Log.recent` only records messages that passed `min_level` (at default `info`, all warn/err pass).
-15. `lib/app` is not functorised (hundreds of direct Lwt references), so the "one module names the
-    scheduler" rule holds for libraries but not for the application layer.
-
----
-
-
----
-
-OCaml implementation notes for this subsystem: [ocaml/01-core.md](ocaml/01-core.md).
+| Rule | Why | Rejected |
+|---|---|---|
+| Fixed-size chunks, size recorded per file | clients agree without talking; ranges map arithmetically; the size can change for new files only | content-defined chunking |
+| XXH3-64 with two seeds, hex, joined by `-` | fast; fixed width; filesystem-safe; 128 bits of name; reimplemented by a bucket verifier | a cryptographic hash (the stores are the user's own; §3.2 states the limit) |
+| Children filed by leaf hash under a stable folder id | a folder rename rewrites one object, not its subtree | path-keyed manifests |
+| Kind not encoded in the key string | a second spelling can disagree with the first | trailing `/` for folders |
+| Item references by folder id | paths change under renames and leak into logs | paths on the wire |
+| No free-string constructor for stored keys | a key exists because a namer built it or a validated listing returned it | strings everywhere |
+| Malformed reference is INVALID, not ABSENT | a client told "absent" may act on it (delete, allocate the name) | answering `not_found` |
+| Reserved domain names refused, ignoring case where a filesystem store may fold case | a domain named `gc-jobs` could queue deletes of another domain's chunks; case-insensitive filesystems merge names; object stores do not, and existing domains there stay valid | trusting config |
+| Globstar only as a whole segment | `**/.git` must not exclude `project.git` | character-level `**` |
+| Temp names tested by prefix and suffix | a suffix test deleted a user's files | `*.tmp` |
+| Jittered ladder backoff | a fleet failing together must not return together | fixed delays |
+| Breaker with a single probe | failover in seconds; one request per hold pays for the probe | per-request ladders only |
+| Stall timeout, not a total deadline, per HTTP request | slow-but-flowing links are legitimate; dead connections without FIN hang forever | a total request deadline |
+| Monotonic clock for durations | wall steps at boot and under NTP trip breakers and fire stall timers | wall clock |
+| Servers never connect to clients | sandboxed clients can always reach the server | pushing to clients |
+| No TCP options on Unix sockets | an `EINVAL` on a departed peer killed an accept loop | runtime defaults |
+| Subscriber backlog drops oldest | events are hints on top of the journal | unbounded buffers |
+| Snapshot or positioned reads for files others change in place | a truncate under a mapping kills the process | mapping the live file |
+| Resource strategy left to implementations; immutable data may be mapped | only observable limits constrain interoperability; objects replaced only by rename and content-addressed data never change in place | specified pool widths and memory strategies |
+| One composition root binds the runtime | registries stay singletons; swapping the runtime touches one place | runtime calls everywhere |

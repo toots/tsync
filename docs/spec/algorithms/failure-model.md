@@ -1,456 +1,586 @@
 # Failure model
 
-One classification of what can go wrong, used by every layer from a store driver up to a
-client. It covers how each layer recognises a failure, what a failure may turn into when it
-crosses a boundary, and what each layer does about it. Today these rules are spread over
-[01-core §3.5, §4.4–4.7](../01-core.md), [06-backends §3.1, §4.1, §4.3–4.5, §4.8](../06-backends.md),
-[03-journal-sync §4.1, §4.3, §7.7](../03-journal-sync.md), [08-frontends §A2.4, §A3.4](../08-frontends.md),
-[frontends/file-provider.md §A4.2](../frontends/file-provider.md),
-[frontends/http-proxy.md §A6](../frontends/http-proxy.md) and [07-daemon-cli §2.3, §3.7](../07-daemon-cli.md).
-Sections 1–9 do not depend on the implementation. Concrete names appear only in §10.
+This file is normative. It owns principle **P3** (one failure model) and principle **P7**
+(bounded waits and deadlines): the failure kinds, how each layer recognises them, what a
+failure may become when it crosses a boundary, how each layer responds, what every client
+error code means and obliges a client to do, and the bound on every wait.
+
+Other files state their own mechanisms and link here for the kinds: the retry ladder and the
+breaker ([01 §7–8](../01-core.md)), the durable queue
+([durable-queue](durable-queue.md)), the composite over members ([replication](replication.md)),
+the IPC contract and the CLI ([07](../07-daemon-cli.md)), the frontend contract
+([08](../08-frontends.md)) and the peer wire ([backends/http-proxy](../backends/http-proxy.md)).
+Time rules are owned by [01 §4](../01-core.md#4-time-p5). Notes on the OCaml implementation are
+in [ocaml/algorithms/failure-model.md](../ocaml/algorithms/failure-model.md).
 
 ---
 
-## 1. Problem and goals
+## 1. Goals
 
-tsync keeps a user's files in object stores that can be slow, down, throttled, wrong or
-damaged. It does this on devices that crash, lose power, run out of descriptors and get
-stopped at any moment. Several independent layers ask for work and report failures: drivers, a
-composite over members, the content model, checkout, sync, request handlers, and native clients
-behind a wire protocol. Each layer decides whether to retry, wait, skip or report. Those
-decisions are correct only if every layer agrees on what a failure *means*.
-
-Goals:
-
-- **G1. No silent data loss.** Work that was acknowledged is either completed or left in a
-  durable, visible, automatically retried state. The one exception is work dropped with a named
-  repair.
-- **G2. No false "not found".** "Absent" is claimed only when an authority that could hold the
+- **G1. No silent data loss.** Acknowledged work is completed, or left in a durable, visible,
+  automatically retried state. No record is dropped on a failure.
+- **G2. No false "not found".** ABSENT is claimed only when an authority that could hold the
   thing was asked and said so. "Could not look" is never reported as "not there".
 - **G3. One unexplained failure costs one operation**, not a queue, a domain, a link or a
   process.
 - **G4. Link trouble costs time, not work.** Offline, local operations keep working and every
   remote obligation stays owed until the link returns.
 - **G5. Stopping is not failing.** A requested stop leaves work owed, counts nothing as a
-  failure and is bounded in time.
-- **G6. Every wait a human sits behind is bounded**, and the answer when the bound fires says
-  which kind of failure it was.
-- **G7. The breaker hears only evidence about the link**, measured on a clock that cannot jump.
+  failure, and is bounded in time.
+- **G6. Every wait is bounded**, and the answer when the bound fires says which kind of failure
+  it was.
+- **G7. The breaker hears only evidence about the link**, measured on a clock that cannot step.
 
-Non-goals:
-
-- Byzantine stores. A store that returns a different, well-formed object under a key is
-  caught only for content-addressed chunks, whose hash is checked.
-- Durability against power loss. It is a stated gap ([findings F8](../findings.md)), and is
-  out of scope here except where it changes a failure's kind.
-- Detecting truly concurrent edits. That is conflict policy ([03 §7.1](../03-journal-sync.md)),
-  not failure handling.
-- Automatic repair of damaged stores. Damage is surfaced with a named repair and never fixed
-  silently.
+Out of scope: stores that return a different well-formed object under a key (caught only for
+content-addressed chunks, whose key is checked); detecting truly concurrent edits (that is
+[conflict-resolution](conflict-resolution.md)); repairing damaged stores automatically (damage is
+surfaced with a named repair and never fixed silently).
 
 ---
 
-## 2. System model and assumptions
+## 2. Assumptions
 
-- **A1. Stores** answer each request with one of: a value, "absent", a refusal, or nothing
-  (an error, a hang, a dropped connection). A store's "absent" is an authoritative statement
-  about that store only. A conditional create is atomic on the store's side. A store may
-  throttle (429/503) while it is healthy.
-- **A2. Links** can be down, flapping, slow-but-flowing or dead-without-FIN. A connection that
-  dies without FIN is silent forever unless a timer ends it.
-- **A3. Several members** can hold the same content (main, replica), or different content
-  (archive). One member is the source of truth for existence: the first main.
+- **A1. Stores** answer each request with a value, "absent", a refusal, or nothing (an error, a
+  hang, a dropped connection). A store's "absent" is authoritative about that store only. A
+  conditional create is atomic on the store's side. A store may throttle while healthy.
+- **A2. Links** can be down, flapping, slow-but-flowing, or dead without a FIN. A connection
+  dead without a FIN is silent forever unless a timer ends it.
+- **A3. Members.** Several members can hold the same content (main, replica) or different
+  content (archive). The first main is the source of truth for existence.
 - **A4. Local resources** fail independently of stores: descriptor exhaustion, disk full, EIO,
-  EINTR, permission.
-- **A5. Processes** can be killed at any instruction. Atomic rename-into-place survives a
-  process crash. Without fsync it does not survive power loss.
-- **A6. Clocks.** A monotonic clock exists and never steps. The wall clock can step either way
-  by any amount: NTP corrections, or a fake hardware clock at boot on boards with no RTC. Peers'
-  wall clocks disagree.
-- **A7. Clients** (the file manager, the OS file-provider framework, Android document
-  consumers, the CLI) retry or give up on their own policy. Some can *latch* a domain offline
-  until told otherwise. The daemon cannot see a client's retries.
-- **A8. Code has bugs.** Some exceptions will be raised that nobody classified.
+  permission.
+- **A5. Processes** can be killed at any instruction.
+- **A6. Clocks** behave as in [01 §4](../01-core.md#4-time-p5).
+- **A7. Clients** (file managers, the OS file-provider framework, Android document consumers,
+  the CLI, the tray) retry or give up on their own policy, and some can *latch* a domain
+  offline until told otherwise. The owner cannot see a client's retries.
+- **A8. Code has bugs.** Some failures will be raised that nobody classified.
 
 ---
 
 ## 3. The classification
 
-### 3.1 Failure kinds
+### 3.1 Kinds
 
-Each failure has exactly one **kind**. The kind is decided by the layer that has the evidence,
-normally the lowest one. It is carried upward as data, never re-derived from prose.
+Every failure has exactly one **kind**. The layer with the evidence — normally the lowest —
+decides it, and it travels upward as data.
 
-| Kind | Definition | Link evidence? | Will repeating help? |
+| Kind | Subkinds | Definition | Repeating helps? |
 |---|---|---|---|
-| **ABSENT** | An authority for the name was reachable and answered that the named object does not exist. At domain level, *every* member that could be authoritative was asked, and the first reachable source of truth said no. | yes (link up) | no |
-| **EXISTS** | The name is held by something else: a lost claim, `EEXIST`, `ENOTEMPTY`. It is a considered answer about a name, and conflict policy resolves it. | yes (up) | no |
-| **REFUSED** | The authority answered and will give the same answer: permission or credentials (`denied`), a read-only store or domain (`read_only`), a 4xx other than those listed as transient. | yes (up) | no, until configuration changes |
-| **INVALID** | The request is malformed on this side: a bad argument, an unknown action, bad JSON. | no | no |
-| **CORRUPT** | An answer was obtained and contradicts what it must be. Examples: bytes that do not hash to their name, a length that disagrees with the manifest, a manifest with a hole, an over-long range answer, a record that cannot be decoded. It is *not* ABSENT: the thing exists and is wrong. A dependency that no store holds after all were asked (a manifest naming a missing chunk) is CORRUPT, not ABSENT. | yes (up) | no, only repair helps |
-| **UNPREPARED** | Local state cannot express the operation. For example, the parent folder has no id here, or a full rebuild is refused while metadata is owed. A user action (a sync) clears it. | no | not by itself |
-| **TRANSIENT/LINK** | No considered answer: a connection error, a 5xx, a stall (silence past the stall timeout), a probe that did not answer, TLS or DNS failure, a truncated framed answer. | **yes (against)** | yes, later |
-| **TRANSIENT/LOAD** | The authority answered "later": 429, 503 busy, a throttling code. | yes (up, but busy) | yes, later |
-| **TRANSIENT/LOCAL** | A resource on this host: `EMFILE`, `ENFILE`, `ENOSPC`, `EIO`, `EAGAIN`, `EBUSY`. | no | yes, later |
-| **UNREACHABLE** | *Derived, not raised by a driver.* Every candidate that could answer is held by the breaker, or TRANSIENT/LINK persisted past the layer's patience budget or deadline. It means "the store is the problem; stop asking until told." | aggregate | yes, after the link returns |
-| **STOPPING** | A process stop was requested. The work is untouched and **owed on disk**. | no | yes, at next start |
-| **CANCELLED** | The work is no longer wanted: a newer write superseded it, a publish was superseded by work under its own record, or the caller withdrew. Its record may be completed. | no | not applicable |
-| **DEADLINE** | *The waiter's* bound expired. The work may continue and land for the next caller. To the waiter it is reported as UNREACHABLE. It is not link evidence unless it was a probe. | only if a probe | yes |
-| **UNEXPLAINED** | Anything nobody classified (A8). | no | unknown |
+| **ABSENT** | | An authority for the name was reachable and answered that the object does not exist. At domain level, the rules of §5.2 held. | no |
+| **EXISTS** | `exists`, `not_empty` | The name is held by something else: a lost conditional create, `EEXIST`, `ENOTEMPTY`. A considered answer about a name; conflict policy resolves it. | no |
+| **REFUSED** | `denied`, `read_only`, `other` | The authority answered and will answer the same: permissions or credentials (`denied`); a read-only store or domain (`read_only`); any other permanent refusal whose cause this side cannot name (`other`). | not until configuration changes |
+| **INVALID** | | The request is malformed on this side: a bad argument, a malformed key or reference, an unknown action, bad JSON. | no |
+| **CORRUPT** | `missing_chunks`, `other` | An answer was obtained and contradicts what it must be: bytes that do not hash to their key, a length that disagrees with the manifest, a manifest with a hole, a range answer longer than asked, an undecodable object or local record, a dependency no member holds after all were asked. `missing_chunks` is a store refusing to take a manifest or version whose chunks it does not hold; it carries the missing chunk keys. The thing exists and is wrong. | no; only repair (for `missing_chunks`, the writer re-sends the named chunks) |
+| **UNPREPARED** | `paused`, `other` | Local state cannot express the operation yet: the user paused the domain's remote work and the operation needs it (`paused`); the parent folder has no id here, or a rebuild is refused while metadata is owed (`other`). A user action (resume, sync) or convergence clears it. | not by itself |
+| **TRANSIENT** | `link`, `load`, `local` | No considered answer yet. `link`: connection error, TLS or DNS failure, a 5xx that is not throttling, a stall, a transfer truncated below its announced length. `load`: the authority answered "later" (429, a throttling 503, a peer's `busy`, a conflict-in-progress answer to a conditional write). `local`: a resource on this host (`EMFILE`, `ENFILE`, `ENOMEM`, `ENOSPC`, `EDQUOT`, `EIO`, `EAGAIN`, `EBUSY`). | yes, later |
+| **UNREACHABLE** | | Derived, never raised by a driver: every candidate that could answer is held by the breaker; TRANSIENT/link persisted past the caller's patience or deadline; a deadline expired while the store was silent; or the owner does not serve the domain named. "The store (or its server) is the problem; stop asking until told." | yes, after the link returns |
+| **STOPPING** | | A process stop was requested. The work is untouched and owed on disk. | yes, at next start |
+| **CANCELLED** | | The work is no longer wanted: superseded by newer work that has its own record, or the caller withdrew. Its record may be completed. | not applicable |
+| **DEADLINE** | | A *waiter's* bound expired (§8). The work may continue and land for the next caller. §7.2 says what the waiter is told. | yes |
+| **UNEXPLAINED** | | Anything nobody classified (A8). | unknown |
 
-Three orthogonal properties follow from the table and drive every policy:
+### 3.2 The failure value
 
-1. **Retryable**: TRANSIENT/*, UNREACHABLE, STOPPING (at next start), DEADLINE.
-2. **Health evidence**: only TRANSIENT/LINK and a lost probe count *against* a member. Any
-   considered answer counts *for* it: ABSENT, EXISTS, REFUSED, CORRUPT, TRANSIENT/LOAD.
-   Nothing else moves the breaker.
-3. **Failure accounting**: STOPPING, CANCELLED and DEADLINE are never counted as failures. They
-   never mark anything degraded and never park or drop a record.
+A failure is a typed value carrying:
 
-UNEXPLAINED has a context-dependent default (§5.3). It is never ABSENT, never UNREACHABLE and
-never health evidence.
+- `kind` and `subkind`;
+- `operation`: what was attempted (a verb and its subject: a member, a key, an item);
+- `reason`: one human sentence, safe to show a user;
+- `repair` (optional): the command or action that clears it, for CORRUPT, UNPREPARED, REFUSED;
+- `retry_after` (optional): a hint from the authority, for TRANSIENT/load.
 
-### 3.2 Durable and volatile failure state
+The kind is never re-derived from `reason` text. A catch-all handler MUST first re-raise
+STOPPING and CANCELLED unchanged, then act on the kind, and MUST NOT produce ABSENT.
 
-| State | Where | Durable? | Meaning |
-|---|---|---|---|
-| Owed record (upload, metadata op, replica job) | per-domain log directories | yes (process-crash) | work acknowledged, not yet done |
-| Per-record failure note (kind, reason) | in the owed record | yes | last failure, shown by status |
-| Parked set (ordered own-ops that failed non-transiently) | memory + record left on disk | record yes, set no | skipped by the queue, re-offered by a periodic sweep |
-| Stepped-aside set (peer entries that failed non-transiently) | memory | no (the entry stays unhandled, so it is recomputed) | retried every pass, shown as "unapplied" |
-| Degraded flag | memory, re-derived at start from dropped/unreadable records | partly | a copy needs a named repair |
-| Set-aside file (undecodable local sidecar) | renamed beside the original | yes | never deleted automatically |
-| Corruption marker per chunk | on the store | yes | the finding itself |
-| Breaker cell per member | memory | no | trip run, hold, probe |
-| Last-sync mark, applied log | local files | yes | what peer work was done |
+### 3.3 Properties that drive every policy
+
+1. **Retryable:** TRANSIENT, UNREACHABLE, DEADLINE, and STOPPING (at next start).
+2. **Link evidence** (§6): only TRANSIENT/link and a lost probe count *against* a member; a
+   considered answer counts *for* it.
+3. **Not failures:** STOPPING, CANCELLED and DEADLINE are never counted as failures, never mark
+   anything degraded, and never park or drop a record.
+4. **UNEXPLAINED** is never ABSENT, never UNREACHABLE, never link evidence. Its handling per
+   context is in §7.1.
 
 ---
 
-## 4. Detection: from raw inputs to a kind
+## 4. Detection
 
-Every layer that turns a raw signal into a kind is listed here. A layer not in this table must
-pass the kind through (§5).
+A raw signal (errno, status, exception, timer) is interpreted only at the layers listed here.
+Every other layer passes the kind through (§5).
 
-| Layer | Input | Kind |
+### 4.1 Local filesystem errors
+
+One table for every local filesystem access: a local-filesystem store driver, local state
+files, staged data, the cache, durable records.
+
+| errno | Kind |
+|---|---|
+| `ENOENT`, `ENOTDIR` on read, stat, open or list | ABSENT |
+| `EEXIST` on an exclusive create or claim-by-link | EXISTS/exists |
+| `ENOTEMPTY`, `EEXIST` on rmdir or rename over a directory | EXISTS/not_empty |
+| `EINTR` | retried inline; never surfaces |
+| `ESTALE`, `ETIMEDOUT`, `EHOSTDOWN`, `EHOSTUNREACH`, `ENETDOWN`, `ENETUNREACH`, `ECONNRESET`, `ECONNREFUSED`, `ECONNABORTED`, `ENOTCONN`, `ENOLINK`, `EREMOTEIO` (a network or removable filesystem) | TRANSIENT/link |
+| `EMFILE`, `ENFILE`, `ENOMEM`, `ENOBUFS`, `ENOSPC`, `EDQUOT`, `EIO`, `EAGAIN`, `EBUSY`, `ETXTBSY` | TRANSIENT/local |
+| `EACCES`, `EPERM` | REFUSED/denied |
+| `EROFS` | REFUSED/read_only |
+| any other errno (`ENAMETOOLONG`, `ELOOP`, `EINVAL`, `EISDIR`, `EXDEV`, `EFBIG`, …) | REFUSED/other |
+
+- The same errno has the same kind on every verb.
+- A local-filesystem store has its own breaker cell; TRANSIENT/link from it counts against it
+  (§6).
+- A local store writes a chunk, reads it back, and a mismatch between the bytes and the key is
+  CORRUPT (filed as a corruption marker per [02](../02-remote-model.md)).
+
+### 4.2 HTTP object stores
+
+| Signal | Kind |
+|---|---|
+| 2xx | value |
+| 404, or a per-key "no such key" inside a bulk answer | ABSENT (a delete of an absent key is success) |
+| 412 on a conditional create | EXISTS/exists; the holder is then read |
+| 409 "conditional request conflict" (a concurrent conditional write in progress) | TRANSIENT/load |
+| 429; 503 carrying a throttling indication (a throttling error code such as `SlowDown`, or a `Retry-After` header) | TRANSIENT/load, with `retry_after` when given |
+| any other 5xx | TRANSIENT/link |
+| connection, DNS or TLS failure; a failed redial; a stall; a body shorter than its framing announced | TRANSIENT/link |
+| `EMFILE`, `ENFILE`, `ENOBUFS`, `ENOMEM` while opening a socket | TRANSIENT/local |
+| a per-key error other than "absent" inside a 2xx bulk answer (for example a bulk delete) | TRANSIENT/load for that key when the code is service-internal (internal error, slow down, service unavailable), REFUSED/other otherwise. It MUST be raised, never dropped, and is never evidence against the link: the request itself was answered |
+| 401, 403; a credential that cannot be minted because the grant is invalid or revoked | REFUSED/denied |
+| a network failure while minting a credential | TRANSIENT/link |
+| any other 4xx; a redirect | REFUSED/other |
+| a range answer longer than asked | CORRUPT (the store ignored the range) |
+| a response body that cannot be decoded | CORRUPT |
+
+**Outcome-unknown conditional writes.** A conditional create whose outcome is unknown (a
+timeout, a conflict-in-progress answer, a lost connection after the request left) MUST be
+resolved by retrying the same conditional create or by reading the key. It MUST NOT be replaced
+by an unconditional write.
+
+### 4.3 A peer tsync store (http-proxy client)
+
+The peer wire's statuses are owned by [backends/http-proxy](../backends/http-proxy.md). Read as
+kinds:
+
+| Peer answer | Kind |
+|---|---|
+| 404 on an object, empty body | ABSENT |
+| 404 with a non-empty body (the body names a domain the server does not serve) | REFUSED/denied: the domain is not served there; never ABSENT. Clients SHOULD accept this form; servers MUST NOT produce it (they answer 401) |
+| 404 on an optional capability | "no opinion"; not a failure |
+| 409 with `x-tsync-kind` | the kind or subkind it names (a value from §3.1, such as `corrupt`, `exists`, `not_empty`, `unprepared`, `invalid`), carrying the server's reason; an unknown value → REFUSED/other |
+| 409 with `x-tsync-kind: missing_chunks` | CORRUPT/missing_chunks, carrying the chunk keys listed in the answer. The writer re-sends exactly those chunks and retries the write once; a second refusal parks the record |
+| 409 without `x-tsync-kind` | REFUSED/other, carrying the server's reason. Clients SHOULD accept this form; servers MUST NOT produce it |
+| 403 | REFUSED/read_only |
+| 401 (a bad signature, or a domain the server does not serve) | REFUSED/denied. If the answer's `Date` differs from the local wall clock by more than the signature window, the reason says "clock skew". |
+| 500 | TRANSIENT/link |
+| 503 `busy`, 429 | TRANSIENT/load |
+| a framed answer truncated | TRANSIENT/link |
+
+A peer server maps its own kinds onto the wire so the client can recover these kinds: ABSENT
+distinct from every refusal, TRANSIENT/load distinct from TRANSIENT/link, `read_only` and
+`denied` distinct from other refusals, and every permanent kind distinct from every transient
+one. UNEXPLAINED travels as a transient server failure.
+
+### 4.4 Breaker and composite
+
+| Layer | Signal | Kind |
 |---|---|---|
-| Local-filesystem store driver | `ENOENT` on read or stat | ABSENT (as "no value", not an error) |
-| | `EEXIST` on claim-by-link | EXISTS (answer: the holder's body) |
-| | `EIO ENOSPC EMFILE ENFILE EAGAIN EINTR EBUSY` | TRANSIENT/LOCAL (EINTR is retried inline and never surfaces) |
-| | any other errno (`EACCES`, `EROFS`, `ENOTDIR`, …) | REFUSED |
-| | written bytes read back do not hash to their name | CORRUPT, filed as a marker; the write still succeeds |
-| HTTP object-store drivers | 2xx | value |
-| | 404, or a per-key `NoSuchKey`/`NotFound` in a bulk answer | ABSENT (a delete of an absent key is success) |
-| | 412 on a conditional create | EXISTS, then read the holder |
-| | 429, 503/throttled | TRANSIENT/LOAD |
-| | other 5xx; connection or TLS error; redial failure | TRANSIENT/LINK |
-| | stall timer fired (no byte for the stall window) | TRANSIENT/LINK |
-| | per-key non-absent error inside a 2xx bulk answer | TRANSIENT/LINK. It must be raised, never dropped. |
-| | 401, 403 | REFUSED (`denied`) |
-| | other 4xx, redirect | REFUSED |
-| | range answer longer than asked | CORRUPT (the store ignored the range) |
-| Peer tsync store (proxy client) | 404 on object | ABSENT |
-| | 404 on an optional capability | "no opinion", which is not a failure |
-| | 409 + reason | the server's permanent kind. Today the subkind is flattened to REFUSED (§8 N4). |
-| | 500 | TRANSIENT/LINK (the server's transient) |
-| | 503 `busy`, 429 | TRANSIENT/LOAD |
-| | 401 | REFUSED. Clock skew beyond the signature window is reported this way (§6). |
-| | truncated framed answer | TRANSIENT/LINK |
-| Peer tsync store (proxy server) | store kind → status | ABSENT → 404; any permanent kind → 409 + reason; TRANSIENT/* and UNEXPLAINED → 500; admission queue full → 503; read-only → 403 |
-| Breaker | ≥ 2 consecutive LINK failures spanning ≥ trip span | the member goes *held*; asks to it fail fast as UNREACHABLE |
-| | a probe gets no answer within the probe timeout | lost probe, so the hold extends |
-| Composite over members | every readable candidate held or failing, and no archive answers | UNREACHABLE (raise the first candidate's error) |
-| | first reachable source-of-truth answers absent | ABSENT (a replica miss is never consulted) |
-| | nothing answered anywhere but something was passed over | UNREACHABLE, never ABSENT and never an empty merge |
-| | no writable member | REFUSED (`read_only`) |
-| | write to a non-main while a main is down | TRANSIENT (UNREACHABLE of the main) |
-| Content model | chunk bytes do not hash to the key after one re-fetch | CORRUPT |
-| | manifest hole, or inherit slot with no base | CORRUPT |
-| | chunk length ≠ manifest's size | CORRUPT |
-| | chunk no store holds, all asked | CORRUPT (a dangling reference) |
-| Checkout | read of uncached bytes not done within the read deadline | DEADLINE (the fetch continues) |
-| | parent folder has no local id | UNPREPARED |
-| | local source of an upload is gone | CANCELLED (nothing is owed any more) |
-| | undecodable staged sidecar | CORRUPT (set aside, never deleted) |
-| Durable queue | record body unreadable because gone | nothing (already completed) |
-| | record unparseable | CORRUPT (dropped, degraded) |
-| | record read fails otherwise (`EMFILE`, `EIO`) | TRANSIENT/LOCAL (left for the next rescan) |
-| Process | stop requested | STOPPING, raised out of every backoff, ladder, queue wait and link wait |
-| Request handler | errno from the core | the errno's kind (ENOENT → ABSENT, EEXIST → EXISTS, ENOTEMPTY → EXISTS, EPERM/EACCES → REFUSED/denied, EROFS → REFUSED/read_only) |
-| Clients | transport failure to the daemon (connect or read) | TRANSIENT/LOCAL from the client's view. It is never UNREACHABLE: a daemon restart must cost one retry. |
-| | no reply within the client's request deadline | DEADLINE (today there is none; see §8) |
+| Breaker ([01 §8](../01-core.md#8-health-breaker)) | a member held | asks to it fail fast as UNREACHABLE (for that member) |
+| | a probe unanswered within `PROBE_TIMEOUT` | a lost probe |
+| Composite ([replication](replication.md)) | every readable candidate held or failing transiently, and no archive answers | UNREACHABLE, carrying the first candidate's failure as its reason |
+| | the first reachable source of truth answers absent | ABSENT |
+| | a replica or archive answers absent while a main is unreachable | UNREACHABLE (§5.2) |
+| | no writable member | REFUSED/read_only |
+| | a write to a non-main copy while a main is down | TRANSIENT (UNREACHABLE of the main, as the reason) |
+
+### 4.5 Content
+
+| Signal | Kind |
+|---|---|
+| chunk bytes do not hash to their key after one re-fetch | CORRUPT |
+| a manifest hole; a slot inheriting from a base that does not exist | CORRUPT |
+| a chunk's length differs from the manifest's | CORRUPT |
+| a chunk a manifest names that no member holds, all asked | CORRUPT (a dangling reference), not ABSENT |
+
+### 4.6 Local unpublished data
+
+Staged bodies and staged manifests are the only copy of the user's unpublished bytes. Reading
+them to upload, or to answer a local read, follows these rules:
+
+- A slot the staged manifest marks as a hole is zeros, explicitly.
+- Bytes past the end of a staged body, within the file's size, are zeros: a staged body is
+  sparse, and its length is not the file's size.
+- Opening or reading a staged body that fails with ENOENT: re-read the file's staged state
+  under its per-key content lock. If it no longer names that body (superseded by a newer write,
+  or the file was deleted), the upload is CANCELLED. If it still names it, the staged state is
+  CORRUPT: nothing is published, the record stays, and the item is surfaced.
+- Any other failure is classified by §4.1 (TRANSIENT/local is retried later; REFUSED parks).
+- A failure to read unpublished data MUST NOT be replaced by zeros or by any other substitute,
+  and MUST NOT publish anything. A local read that fails returns an error to the application,
+  never substituted bytes.
+- An undecodable staged sidecar is CORRUPT: it is set aside under a new name, never deleted.
+
+Rebuildable local data (the chunk cache) differs: a read that fails, for any reason, MAY be
+treated as "not held" provided the caller then fetches from an authority; nothing is ever
+substituted.
+
+### 4.7 Local state files and durable records
+
+For local files the system relies on (last-sync mark, applied log, cursor copies, WAL records,
+folder-id index, durable-queue records):
+
+- ENOENT → ABSENT, and the owner's rule for "none recorded" applies.
+- Undecodable → CORRUPT: set aside, surfaced, never deleted; the owning file states how to
+  proceed.
+- Any other failure → classified by §4.1. The consumer MUST NOT proceed as if the file were
+  absent. (A transient read error taken as "never synced" triggers a full rebuild.)
+
+Durable-queue record reads follow the same rule: a record gone is already completed; an
+unparseable one is CORRUPT; any other failure leaves it for the next rescan
+([durable-queue](durable-queue.md)).
+
+### 4.8 Process, request handler, clients
+
+| Layer | Signal | Kind |
+|---|---|---|
+| Process | stop requested | STOPPING, raised out of every backoff, ladder, queue wait, link wait and settle |
+| Request handler | malformed request, malformed item reference, unknown action | INVALID |
+| | a domain this owner does not serve | UNREACHABLE (the domain's server is not here) |
+| | a configured domain not yet serving (starting) | TRANSIENT/local |
+| | an operation needing remote work on a paused domain | UNPREPARED/paused |
+| | a well-formed reference that resolves to nothing | ABSENT |
+| | a mutating action on a read-only domain | REFUSED/read_only |
+| | an errno from the core | §4.1 |
+| Client | cannot connect to, or lost the connection to, the owner | TRANSIENT/local, from the client's view; never UNREACHABLE, never ABSENT |
+| | no reply within the client's deadline (§8.2) | DEADLINE, reported like a transport failure |
+| | a reply with no `code`, or a `code` it does not know | treated as `internal` |
 
 ---
 
 ## 5. Propagation
 
-### 5.1 General rules
+### 5.1 Rules
 
-- **P1. The kind is data.** It crosses every boundary in a typed field: an exception variant, a
-  status code, a wire `code`. It is never re-derived from message text.
-- **P2. Upward, a kind may only be refined by a layer with more evidence, or aggregated.** It
-  is never weakened into a more confident kind.
-- **P3. Aggregation is monotone in doubt.** When several answers combine, the result is the
-  most doubtful one that could change the answer. For existence:
-  `value > ABSENT(authoritative) > UNREACHABLE`. For a domain, "some member unreachable and the
-  rest absent" is UNREACHABLE unless the absent answer came from the source of truth.
-- **P4. A batch failure is not a per-item answer.** If a batched request fails, every item is
-  unanswered, not absent. The layer re-asks each item singly or raises.
-- **P5. STOPPING and CANCELLED pass through every layer unchanged**, and every catch-all
-  handler must re-raise them first.
+- **R1. The kind is data.** It crosses every boundary in a typed field: an exception variant, a
+  status code, a wire `code`. It is never re-derived from text.
+- **R2. Refine or aggregate, never weaken.** Upward, a kind may only be refined by a layer with
+  more evidence, or aggregated. It is never turned into a more confident kind.
+- **R3. Aggregation is monotone in doubt.** When answers combine, the result is the most
+  doubtful one that could change the answer: `value > ABSENT (authoritative) > UNREACHABLE`.
+- **R4. A batch failure is not a per-item answer.** If a batched request fails, every item is
+  unanswered: the layer re-asks each item singly or raises.
+- **R5. STOPPING and CANCELLED pass through every layer unchanged.**
 
-### 5.2 Permitted transformations by boundary
+### 5.2 Absent versus could-not-look
 
-| Boundary | Permitted | Notes |
+ABSENT has exactly three sources:
+
+1. a store's explicit absence answer for that exact key (§4.1–4.3);
+2. a composite whose first reachable source-of-truth member answered absent, per §4.4; a
+   replica's or archive's absence never stands for the domain while a main is unreachable;
+3. a local ENOENT/ENOTDIR on local state (§4.1, §4.7).
+
+Consequences:
+
+- A listing that fails, or fails partway through its pages, is a failure, never an empty or
+  shorter listing.
+- A read of a journal entry, a manifest, a marker or a mark that fails is a failure, never "no
+  entry".
+- Any action that is justified only by absence — deleting, overwriting, allocating a name,
+  zero-filling, advancing a mark past an entry, dropping a reference, reporting "no children" —
+  MUST have ABSENT, and MUST NOT proceed on any other kind.
+- ABSENT of a *dependency* (a manifest names a chunk nobody holds) is CORRUPT; ABSENT of the
+  *requested* item stays ABSENT.
+
+### 5.3 Permitted transformations
+
+| Boundary | Permitted |
+|---|---|
+| raw signal → driver | §4, the only place a raw errno or status is read |
+| driver → retry ladder | TRANSIENT retried; after the last attempt it leaves with its kind, member and operation |
+| ladder → breaker | §6 |
+| member → composite | a held member → UNREACHABLE fast; source-of-truth ABSENT → ABSENT; all failed → UNREACHABLE; a batch failure → re-ask singly |
+| composite → content | a dependency's ABSENT → CORRUPT |
+| content → checkout | CORRUPT stays CORRUPT; a waiter's DEADLINE is that waiter's only (§7.2) |
+| any layer → queue | per §7.1 |
+| core → request handler | per §7.2 |
+| handler → kernel, peer, CLI | per §7.3–7.5 |
+
+### 5.4 Forbidden transformations
+
+| # | Forbidden | Why |
 |---|---|---|
-| raw signal → driver | per §4 | the only place a raw errno or status is interpreted |
-| driver → retry ladder | TRANSIENT/* retried; after the last attempt it leaves as TRANSIENT carrying the member and op | an unclassified error inside a request is TRANSIENT in the current code; see §5.3 |
-| ladder → breaker | LINK counts against; considered answers count for | LOAD should count for (up); it counts against today (§8 N3) |
-| member → composite | held member → UNREACHABLE fast-fail; ABSENT from source of truth → ABSENT; all failed → UNREACHABLE; batch failure → re-ask singly | an archive miss never overrides an unreachable main |
-| composite → content model | ABSENT of a *dependency* (a manifest names a chunk) → CORRUPT | ABSENT of the *requested* item stays ABSENT |
-| content → checkout | CORRUPT stays CORRUPT; a waiter's DEADLINE → UNREACHABLE for that waiter only | the fetch itself continues and is not a failure |
-| checkout/sync → ordered queue | TRANSIENT/LINK and TRANSIENT/LOAD block the head; everything else (UNEXPLAINED included) parks | this is the "link failure blocks, anything else steps aside" rule |
-| sync inbound, per peer entry | TRANSIENT/* aborts the pass; everything else steps the entry aside | "could not read the entry" is TRANSIENT, never "entry gone" |
-| core → request handler | ABSENT → `not_found`; EXISTS → `exists`/`not_empty`; REFUSED → `denied`/`read_only`; INVALID → `invalid`; UNREACHABLE and DEADLINE → `unreachable`; CORRUPT, UNPREPARED, UNEXPLAINED → `internal`, with a reason naming the repair; STOPPING → `internal` ("left for the next start") | see §8 N1 for today's table |
-| handler → kernel (FUSE) | ABSENT → ENOENT; EXISTS → EEXIST/ENOTEMPTY; REFUSED → EACCES/EROFS; everything else → EIO | an errno raised by the core passes through untouched |
-| handler → HTTP peer | ABSENT → 404; permanent kinds → 409 + reason; TRANSIENT/*, UNEXPLAINED → 500; overload → 503 | the permanent subkind should travel too (§8 N4) |
-| wire → native client | map `code` one to one; an **absent `code` is `internal`**; a transport failure is a retried local error | only `unreachable` may map to a latching client state |
-| anything → CLI exit status | 0 success; 1 for every classified failure (the reason is printed); 2 for refusals about the invocation's environment; 125 only for UNEXPLAINED | see §8 N6 |
+| X1 | TRANSIENT, UNREACHABLE, UNEXPLAINED, STOPPING, CANCELLED, DEADLINE or CORRUPT → ABSENT, "empty", "no entries", "hole" or "never" | G2; it becomes data loss when the caller writes on "absent" |
+| X2 | any kind → UNREACHABLE, except held members, TRANSIENT/link that exhausted the caller's patience, a deadline on a silent store, and an unserved domain (§3.1) | UNREACHABLE latches clients; a local fault must not take a domain down (G3) |
+| X3 | UNREACHABLE → a code a client retries hot | the client never learns to back off (G6) |
+| X4 | STOPPING, CANCELLED or DEADLINE → a counted failure, degraded, parked or dropped | G5 |
+| X5 | a replica's or archive's ABSENT → the domain's ABSENT while a main is unreachable | a stale copy is not an authority |
+| X6 | a batch failure → per-key ABSENT | a caller told "absent" writes a copy missing the file |
+| X7 | TRANSIENT/load, TRANSIENT/local, UNEXPLAINED or a waiter's DEADLINE → evidence against a member | a busy peer or a local bug is not a dead link (G7) |
+| X8 | a kind → no code on the wire, or a native client dropping the code | the receiver cannot tell `not_found` from `unreachable` |
+| X9 | a failure reading local unpublished data → zeros or any substitute | uploads zeros as the file's content |
 
-### 5.3 Forbidden transformations
+---
 
-| # | Forbidden | Why | Current breaches |
+## 6. Link health evidence
+
+What the breaker ([01 §8](../01-core.md#8-health-breaker)) hears:
+
+| Outcome of a request to a member | Breaker input |
+|---|---|
+| success | answered |
+| ABSENT, EXISTS, REFUSED, CORRUPT (a considered answer) | answered |
+| TRANSIENT/load (429, throttling 503, peer `busy`) | answered: the link is up and the member is merely busy |
+| TRANSIENT/link, including a stall and a network-filesystem errno from a local store | lost; a stall also increments the member's timeout tally |
+| a per-key refusal inside an answered bulk request | answered |
+| a deliberate probe that fails or exceeds `PROBE_TIMEOUT` | probe lost |
+| TRANSIENT/local | nothing |
+| UNEXPLAINED | nothing |
+| STOPPING, CANCELLED, a waiter's DEADLINE that cancelled the request | nothing |
+
+- A long poll (a wait on a cursor) is never a probe, and its expiry is not a failure.
+- A member that only ever throttles never trips; it is slowed by its own `retry_after` and by
+  the ladder's backoff.
+
+---
+
+## 7. Response policy
+
+### 7.1 Per kind and layer
+
+"Owed" means the durable record stays; queue mechanics (backoff, park, re-arm, degraded
+marking) are owned by [durable-queue](durable-queue.md).
+
+| Kind | Ladder | Composite | Ordered queue (own metadata ops) | Ordered queue (replica/backfill jobs) | Keyed queue (uploads) | Inbound peer entry |
+|---|---|---|---|---|---|---|
+| ABSENT | return "no value" | answer if from the source of truth, else ask the next | the op's own rules decide | job's own rules decide | local source gone → §4.6 | per [wal-and-journal](wal-and-journal.md) |
+| EXISTS | return the holder | the first main arbitrates | conflict table ([conflict-resolution](conflict-resolution.md)) | job's own rules | n/a | conflict table |
+| REFUSED | one attempt | pass on | park | park; copy marked degraded | park | step aside |
+| INVALID | n/a | n/a | park | park; degraded | park | step aside |
+| CORRUPT | one attempt; a chunk is re-fetched once | ask the next member for a good copy | park | park; degraded | park | step aside |
+| UNPREPARED | n/a | n/a | refused before anything changes | n/a | park | step aside |
+| TRANSIENT (any) | retry with backoff up to the attempt limit or the caller's deadline | fail fast on a held member when another candidate exists; the last candidate is always asked | block at the head with backoff | block at the head with backoff | requeue at the tail with backoff | abort the pass without advancing |
+| UNREACHABLE | not retried by the ladder; the hold ends it | fail over to a readable copy, then archives; writes are never redirected | block at the head | block at the head | tail with backoff | abort the pass |
+| STOPPING | end at once | pass through | leave the record, uncounted | leave the record | leave the record | end the pass; nothing advances |
+| CANCELLED | pass through | pass through | complete the record | complete the record | complete the record | n/a |
+| DEADLINE | n/a | n/a | n/a | n/a | n/a | abort the pass |
+| UNEXPLAINED | retried as TRANSIENT, never link evidence | pass on | park | park | tail with backoff | step aside |
+
+- **Park** keeps the record on disk, takes it out of the running order, surfaces it with its
+  reason, and re-offers it on the re-arm cadence of [durable-queue](durable-queue.md). Every
+  queue that parks re-arms, so a repaired credential resumes work without a restart.
+- **Step aside** records the entry as unapplied with its reason, retries it on every pass, and
+  surfaces it; the pass continues with later entries only where
+  [wal-and-journal](wal-and-journal.md) allows.
+- Nothing in this table removes a record because it failed. A copy with a parked replica or
+  backfill job is marked degraded by a durable marker, with its repair, for as long as any of
+  its jobs is parked ([durable-queue](durable-queue.md), [replication](replication.md)).
+- UNEXPLAINED parks ordered work because a local bug must not block everything behind it; it
+  is retried in a ladder because a request retried a few times costs seconds.
+
+### 7.2 Client error codes
+
+The owner answers every failed request with a `code` from the IPC contract
+([07](../07-daemon-cli.md)). This table is the only mapping from kinds to codes; every socket,
+the in-process bridge and the router use it, and every failure carries a code.
+
+| `code` | Kinds | Tells the client | The client MUST |
 |---|---|---|---|
-| X1 | TRANSIENT, UNREACHABLE, UNEXPLAINED, STOPPING or DEADLINE → ABSENT (or "empty", "nothing", "hole") | G2, and it becomes G1 when the caller acts on "absent" by writing | F6, H10, N2, N5 |
-| X2 | Any kind → UNREACHABLE except link aggregation or a deadline | UNREACHABLE latches clients off; a local fault must not take a domain down (G3) | N1 (CORRUPT and UNPREPARED map to `unreachable`) |
-| X3 | UNREACHABLE → a kind a client retries hot | G6: the client never learns to back off | N1 (a held or exhausted member maps to `internal`) |
-| X4 | STOPPING or CANCELLED → counted failure, degraded, parked or dropped | G5; cancelling a drain once made the metadata queue degrade itself | F6 (swallows STOPPING); fixed for drains ("raced, not cancelled") |
-| X5 | A replica's ABSENT → the domain's ABSENT while the main is unreachable | a stale copy is not an authority | none known (the composite guards it) |
-| X6 | A batch failure → per-key ABSENT | a caller told "absent" writes a mirror or a copy missing the file | none known (the batch path re-asks) |
-| X7 | TRANSIENT/LOAD or UNEXPLAINED → evidence against a member | G7: a busy or buggy peer is not a dead link | N3 |
-| X8 | A kind → a missing kind on the wire | the receiver cannot tell `not_found` from `unreachable` | H2 (router), H10 (Kotlin) |
-| X9 | TRANSIENT/LOCAL on reading local source data → "source is empty or hole" | uploads zeros as content | N2 |
+| `not_found` | ABSENT | the item does not exist, authoritatively | drop the item from its view; treat a delete of it as success |
+| `exists` | EXISTS/exists | the name is taken | not resend unchanged; re-read, pick another name, or apply its conflict rule |
+| `not_empty` | EXISTS/not_empty | the folder has children | not resend unchanged |
+| `read_only` | REFUSED/read_only | the domain or store refuses writes | stop offering writes until the configuration changes |
+| `denied` | REFUSED/denied | permission or credentials refused | not retry automatically; show the reason |
+| `invalid` | INVALID | the request is malformed, or names something this owner does not serve | not resend unchanged |
+| `unreachable` | UNREACHABLE; DEADLINE while the store was silent for the whole wait; TRANSIENT/link that exhausted the request's patience | the store, or the domain's server, cannot be reached; nothing local is wrong | back off requests that need the store for this domain; it MAY latch the domain offline, and then MUST unlatch at the domain's recovery notice or at any later successful reply |
+| `busy` | TRANSIENT/load that exhausted the request's patience; the owner refusing admission under load | the store or owner is up but will not serve this now | retry later with backoff, no sooner than a `retryAfter` hint when the reply carries one; MUST NOT latch |
+| `paused` | UNPREPARED/paused | the user paused this domain's remote work, and the operation needs it | not retry until the domain is resumed (status or a notice says so); MUST NOT latch; may show the pause |
+| `internal` | CORRUPT, UNPREPARED/other, REFUSED/other, TRANSIENT/local, STOPPING, CANCELLED, DEADLINE while the work was progressing or waiting on local work, UNEXPLAINED | this operation failed; the domain is not known to be unavailable | MAY retry with its own backoff; MUST NOT latch; show the `error` prose, which names the repair where one exists |
 
-**UNEXPLAINED defaults.** In a single request with a retry ladder, the current code treats it as
-TRANSIENT. That keeps work from being abandoned over an unknown blip. In ordered work it is
-treated as permanent, so it parks: a local bug must not block everything behind it. At a client
-boundary it is `internal`, which is retried. The model keeps these defaults but requires that
-UNEXPLAINED never feeds the breaker (X7) and never becomes ABSENT or UNREACHABLE.
+- `not_found` is sent for ABSENT and nothing else. `unreachable` is sent for store or server
+  unavailability and nothing else: it is the only code that may latch a client.
+- A client MUST treat a missing or unknown `code` as `internal`, and a transport failure or its
+  own deadline expiry like `internal` (never `unreachable`, never `not_found`): a restarting
+  owner must cost one retry, not the domain.
+- **Recovery notice.** After an owner has answered `unreachable` for a domain, it MUST publish
+  a recovery notice to that domain's subscribers when a store request for the domain next
+  succeeds. Its form is owned by [08](../08-frontends.md).
+- **DEADLINE split.** When a request's deadline fires, the owner answers `unreachable` if the
+  request was waiting for a store and heard nothing from any store for the whole wait, and
+  `internal` ("still in progress; retry") otherwise. The work continues either way.
+- Native clients (macOS, Android, tray, file-manager plugins) MUST keep the code through their
+  own error types.
 
----
+### 7.3 Kernel (FUSE)
 
-## 6. Response policy per kind and layer
+ABSENT → `ENOENT`; EXISTS → `EEXIST` / `ENOTEMPTY`; REFUSED/denied → `EACCES`;
+REFUSED/read_only → `EROFS`; INVALID → `EINVAL`; an errno raised by local I/O passes through
+unchanged; everything else → `EIO`, recorded for status.
 
-| Kind | Driver / ladder | Composite | Ordered queue (own metadata ops, replica jobs) | Keyed queue (uploads) | Sync inbound | Request handler / client | What stays owed |
-|---|---|---|---|---|---|---|---|
-| ABSENT | return "no value" | answer if from source of truth; otherwise go on to the next | the op's fact tables decide (for example "nothing owed") | local source gone → complete | fact tables | `not_found`; delete treats it as success | nothing |
-| EXISTS | return holder | first main arbitrates | conflict table: set ours aside, re-gather | n/a | conflict table | `exists` | the conflicted copy's upload |
-| REFUSED | stop, 1 attempt, member marked up | pass on (`read_only` if no writer) | park (own ops) / drop and mark degraded (replica jobs) | stop; the record stays until next start | step aside | `denied`/`read_only`; CLI exit 1 | parked or dropped record |
-| INVALID | n/a | n/a | park | stop | step aside | `invalid`, not retried by a correct client | nothing |
-| CORRUPT | 1 attempt; chunk read re-fetched once | ask the next member for a good copy where one exists | park / drop and mark degraded | stop | step aside | `internal` + reason; marker filed; CLI exit 1 naming the repair | marker, set-aside file |
-| UNPREPARED | n/a | n/a | refused before anything changes | n/a | step aside | `internal` + "run sync"; CLI exit 1 | nothing |
-| TRANSIENT/LINK | retry with jittered exponential backoff up to the attempt limit; report to the breaker | fail fast on a held member when there is an alternative; the last candidate is always asked | block at head, back off up to the queue cap, no jitter | requeue at tail with backoff | abort the pass; retry after the floor, or at the sweep | after patience: `unreachable` (the client latches); FUSE: EIO | everything |
-| TRANSIENT/LOAD | same ladder, but should not count against the member | same | block at head | tail | abort the pass | backpressure; a client backs off | everything |
-| TRANSIENT/LOCAL | same ladder (always-up cell) | n/a | block at head | tail | abort the pass | `internal` | everything |
-| UNREACHABLE | not retried inside the ladder; the hold ends it | failover to readable replica, then archives; writes never redirected | block at head | tail | abort the pass | `unreachable`; the client latches until told; the status shows the hold | everything |
-| STOPPING | end the ladder at once | pass through | leave the record, not counted | leave the record | end the pass (the mark stays) | reply if possible, otherwise close | everything |
-| CANCELLED | pass through | pass through | complete the record | complete the record | n/a | `internal`/`userCancelled` on the client side | the replacement's record |
-| DEADLINE | n/a | n/a | n/a | n/a | n/a | `unreachable` / EIO for that waiter; the work continues | the fetch still lands |
-| UNEXPLAINED | treated as TRANSIENT in a ladder (must not feed the breaker) | pass on | park | tail with backoff (indefinitely) | step aside | `internal` (costs one op); CLI exit 125 | the record |
+### 7.4 Peer server
 
-**Time bounds.**
+A tsync server answering peers maps kinds so that §4.3 recovers them, naming every permanent
+kind in `x-tsync-kind` beside its 409 and sending `Date` on every 401; the statuses are owned
+by [backends/http-proxy](../backends/http-proxy.md). Admission refusal under load is
+TRANSIENT/load (`busy`).
 
-- **Ladder.** The delay before attempt n+1 is `min(20, 0.5·2^(n−1)) × U[0.5, 1.5)` s. With 8
-  attempts the nominal backoff totals 51.5 s (≤ 77 s), plus up to one stall window per attempt.
-  With a 60 s stall that is ≤ 8 min for an unresponsive object store. With the 300 s peer stall
-  window it is up to 40 min. The breaker cuts this to about 1–2 s whenever there is an
-  alternative. It does not cut it for the last candidate, so the client-facing deadline must
-  (G6).
-- **Breaker.** It trips after 2 LINK failures ≥ 1 s apart, where failures more than the initial
-  hold apart restart the count. It holds 30 s, doubling per lost probe up to 300 s. Exactly one
-  probe is offered per expired hold. A probe is bounded at 10 s including retries.
-- **Queues.** Backoff is `min(300, 0.5·2^min(10, n−1))` s. An ordered queue blocks at its head,
-  so one flapping member costs every job behind it up to 5 min per round. Parked ops are
-  re-offered every 60 s. A peer-entry pass that aborts is retried after 2 s; a full sweep runs
-  at least every 60 s.
-- **Read deadline.** 15 s for uncached reads.
-- **Settle and stop.** Settle waits are capped at 60 s, and end early once a target is failing.
-  A stop is bounded by the grace (10 s): the queue drain gets 0.8 × grace so the cursor still
-  flushes, the reaper waits grace + 2 s before SIGKILL, and the supervisor's stop budget must
-  exceed that.
-- **In-daemon IPC.** 2 s.
+### 7.5 CLI exit status
 
-**What is surfaced to a human.**
-
-- A tripped breaker (with its reason and the hold's end time).
-- Parked and unapplied counts with the reason.
-- Degraded copies, with the repair command ("mirror from the main").
-- Corruption markers (integrity check).
-- Set-aside files.
-- Queue stalls: a warning when there has been no progress for 60 s with work queued.
-- The CLI exits with the reason.
-
-A failure surfaced only in a log line at info level is not surfaced.
+`0` success; `1` every classified failure, printing its reason and repair as a sentence (CORRUPT
+and UNPREPARED included); `2` a refusal about the invocation's environment, as defined per
+command in [07](../07-daemon-cli.md); `125` only for UNEXPLAINED. A classified failure never
+prints a stack trace.
 
 ---
 
-## 7. Clocks
+## 8. Deadlines and bounded waits (P7)
 
-A timer that measures a **duration inside this process** must use the monotonic clock. A time
-that is **persisted, or compared with another host's time**, must use the wall clock, and must
-tolerate steps.
+Nothing waits forever on a peer, a store, a lock or another process. Every wait has one of:
 
-| Timer | Must be | Current |
-|---|---|---|
-| Retry backoff, queue backoff, interruptible sleeps | monotonic | monotonic (event-loop timers) |
-| Stall timeout (silence since the last byte) | monotonic | **wall**: a backward step delays detection by the step; a forward step fires it spuriously (G12) |
-| Breaker trip span, hold, probe re-offer | monotonic | **wall**: a forward step at boot satisfies the trip span at once, and a backward step lengthens a hold and suppresses its probe (G12) |
-| Request, probe, read, settle, grace and IPC deadlines | monotonic | monotonic (sleep-based) |
-| Rate windows (metrics, job ETA) | monotonic | **wall** (G12) |
-| Uplink governor | monotonic | monotonic |
-| Queue stall watchdog, reaper polling | monotonic | monotonic |
-| Journal entry timestamps, 30-day dedupe horizon, retention cutoffs | wall (cross-host) | wall. A peer skewed > 30 days behind is ignored ([03 §9.7](../03-journal-sync.md)). |
-| Peer request signature window (±300 s) | wall (cross-host) | wall. Skew is reported as REFUSED (401), which is permanent until the clock is fixed. It should be reported as a distinct reason. |
-| Pin expiry, orphan-sweep grace, temp-file age | wall (persisted as file times) | wall |
-| Credential token expiry | wall for the token's claims, monotonic for the cache's "refresh by" | wall |
+- a **stall bound**: it fails once there has been no progress for a window;
+- a **deadline**: it fails once a total time has passed;
+- a **liveness bound**: it continues only while a separate cheap check keeps answering in time.
 
----
+Every bound uses the monotonic clock. When a bound fires, the waiter gets the kind stated below;
+the work behind it is cancelled only where the table says so.
 
-## 8. Properties, and where the code breaks them
+### 8.1 Inside a process
 
-### 8.1 Why they hold, when they hold
-
-- **No silent loss (G1).** Each piece of work is written durably *before* it is acknowledged:
-  the owed record, the staged body, the replica job. A record is completed only on success,
-  ABSENT-of-source or CANCELLED. The failure kinds map onto three terminal states:
-  1. TRANSIENT, UNREACHABLE and STOPPING keep the record and retry it.
-  2. The non-transient kinds keep it and make it visible: parked, stepped aside, set aside, or
-     marked.
-  3. For a rebuildable copy only, the job is dropped with the copy marked degraded and a named
-     repair.
-
-  Nothing in the table in §6 unlinks a record on a kind that could clear by itself.
-- **No false not-found (G2).** ABSENT has one source: an authority's answer (§4). X1, X5 and X6
-  forbid every other route. The composite only answers ABSENT when the first reachable
-  source-of-truth member was asked. The inbound sync pass treats "could not read an entry" as
-  TRANSIENT and aborts rather than advancing.
-- **One unexplained failure costs one operation (G3).** UNEXPLAINED is never health evidence
-  (X7) and never UNREACHABLE (X2). In ordered work it parks rather than blocks, and at a client
-  it is `internal`, which is retried. The worst case is one parked op, re-offered every 60 s.
-- **Link trouble costs time (G4).** Local operations never await a store: metadata halves are
-  queued, and the lock never spans a request. TRANSIENT kinds only ever delay work. The breaker
-  limits the cost per request to the probe cadence.
-- **Stop (G5).** STOPPING passes every catch (P5), and drains are raced against the grace, not
-  cancelled.
-
-### 8.2 Known gaps
-
-Findings already listed in [findings.md](../findings.md):
-
-| ID | Rule broken | Effect |
-|---|---|---|
-| **F6** | X1, X4 | Reading a peer journal entry turns every error, STOPPING included, into "no entry". The pass does not abort and the mark advances past it. In startup recovery, a hidden newer peer entry lets a stale unpublished delete be published over the peer's file. |
-| **H2** | X8 | The multi-domain router's own refusals carry no `code`. Clients read them as `internal`, correctly retried, but a missing domain becomes an endless, uninformative retry. |
-| **H10** | X1, X8 | The Android bridge drops `code`. A failed listing reads as "no children", and name allocation then overwrites an existing file. "Deleted folder" and "server unreachable" look alike. |
-| **G9**, **H6** | G6 | The CLI's and the macOS client's blocking IPC calls have no deadline. A wedged daemon hangs `stop`, `pause`, `cache`, `versions` and the extension's read-only probe. A hang is not a transport failure, so a latching client never shows "unreachable". |
-| **G12** | §7 | Stall timeout, breaker and rate windows use the wall clock. |
-| **G10** | G5 | One frontend's stop is not grace-bounded and drains sequentially, so it can hang with a store down. |
-| **G5** | G2 (dual) | A conditional create against an older peer reads as "won" when it lost. |
-| **H7**, **H9** | G1 | Android paths where a failure or a truncated read is taken as "done" or "free". |
-| **F8** | G1 | Durability is process-crash only. |
-
-Found while writing this model; these are not in findings.md:
-
-| # | Rule broken | Evidence | Effect |
+| Wait | Bound | Parameter | On expiry |
 |---|---|---|---|
-| **N1** | X2, X3 | The client error mapping sends the store's "considered answer" error (used for CORRUPT data and for UNPREPARED "run sync") to `unreachable`, and sends the retry ladder's own failures (a member held, exhausted TRANSIENT, REFUSED 403) to `internal`. Only a bare deadline maps correctly to `unreachable`. | The mapping is inverted relative to its own stated rule. A corrupt chunk, or an op under a folder without an id, latches a macOS domain offline. A store that is actually down, or a revoked credential, is retried hot as "unknown error" and never latches. |
-| **N2** | X1, X9 | When the upload path fills a staged chunk, it treats *any* failure to open the staged body as "missing body, zero-fill". | Under descriptor exhaustion (`EMFILE`) or `EIO`, zeros are uploaded and published as the file's content. That is silent data loss, recoverable only through version history. Only ENOENT should mean "hole". |
-| **N3** | X7 | 429 and 503 are TRANSIENT, and every TRANSIENT counts against the member. So do unclassified exceptions inside a request (decoder bugs). | A throttling store or a busy peer (`503 busy` is deliberate backpressure) trips the breaker. Reads then fail over to a replica or get held for 30–300 s while the link is up. |
-| **N4** | P1 | The peer server maps every permanent kind to 409 + prose. The client sees generic REFUSED. | CORRUPT, UNPREPARED and ABSENT-of-source become indistinguishable across a peer. Local and remote corruption surface differently (N1 then maps them to different client codes). |
-| **N5** | X1 (mild) | Reading the last-sync mark treats every read error as "never synced". | A transient local read error makes the next pass consider the whole journal. For a manual sync it triggers a full rebuild. The only cost is work, because apply is idempotent. |
-| **N6** | §5.2 exit rule | The CLI prints only generic failures and ladder failures as user sentences. The store's considered-answer error (CORRUPT or UNPREPARED, including "run 'tsync sync' first") exits 125 as "internal error, uncaught exception" with a stack trace. | A user-actionable message looks like a crash. |
-| **N7** | G1 visibility | A permanently failed upload is left on disk but taken out of the queue, and is re-offered only at the next process start. Parked metadata ops, by contrast, are re-armed every 60 s. | A fixed credential does not resume uploads until restart. The status shows them as owed but not as failing. |
-| **N8** | G6 | A single-member domain asks its only member unconditionally, through the full ladder. Only uncached reads are deadline-wrapped (15 s). Whole-file `ensure_cached` and listings through the store are not. | A request handler can sit for many minutes (40 min on a stalled peer) behind a client that itself has no deadline (G9/H6). |
-| **N9** | G1 | Integrity and corruption readers turn read errors into "no good copy" / "no marker". | Reports can understate what was checked. They are reports only, so nothing is deleted on their say-so. |
+| one HTTP request | stall | the driver's stall window ([06](../06-backends.md)) | TRANSIENT/link; request cancelled |
+| a retry ladder | attempts and the caller's remaining deadline ([01 §7](../01-core.md#7-retry-ladder)) | `LADDER_ATTEMPTS` | the last failure |
+| a breaker probe | deadline, retries included | `PROBE_TIMEOUT` | probe lost |
+| a long poll on a cursor | the poll's duration plus the stall window | [backends/http-proxy](../backends/http-proxy.md), [06](../06-backends.md) | not a failure; poll again |
+| a frontend read waiting for uncached bytes | deadline | `READ_DEADLINE` | DEADLINE for that read; the fetch continues |
+| a lock guarding local state | transitively: a lock is never held across a store, peer or IPC wait ([01 §6.2](../01-core.md#62-guarantees-the-logic-requires)) | — | — |
+| a pool slot | transitively: every holder is bounded | — | — |
+| an upload waiting for link admission | stop, cancellation, and the governor's rules ([uplink-governor](uplink-governor.md)) | — | STOPPING or CANCELLED |
+| settling queues before exit | deadline | [durable-queue](durable-queue.md) | work left owed |
+| a stop | `STOP_GRACE` ([07](../07-daemon-cli.md)) | — | work left owed |
+| an advisory IPC send | deadline | owned by [07](../07-daemon-cli.md) | dropped, logged once |
+| a partial IPC request line | deadline | `IPC_LINE_DEADLINE` | connection closed |
 
-**What a correct version requires:**
+**Background loops** (journal polling, maintenance sweeps, queue workers, deferred-job workers,
+lease renewal, status collection): every wait inside a pass has one of the bounds above, so a
+pass either makes progress or fails within a bound. A loop whose pass fails backs off and runs
+again; it never exits silently. A loop that has work pending and has made no progress for
+`LOOP_STALL_WARNING` is surfaced (§9) and keeps reporting its work as pending.
 
-- A single typed failure value carrying `kind` and `reason`. Every catch-all must match on
-  kind, re-raise STOPPING and CANCELLED first, and never produce ABSENT.
-- The client code mapping as in §5.2.
-- A `code` on every wire refusal, and native clients that keep it.
-- A permanent subkind on the peer wire (for example a header beside 409).
-- LOAD split from LINK in the breaker.
-- Monotonic timers for every duration.
-- A deadline on every client-facing wait. When one fires, the answer is `unreachable` and the
-  work continues.
-- The same periodic re-arm for every durable queue that parks.
+### 8.2 Requests between processes
 
----
+- **Owner side.** The owner MUST answer every request within `REQUEST_DEADLINE`, except
+  requests the IPC contract ([07](../07-daemon-cli.md)) designates as **bulk** (those that move a
+  whole file's bytes or walk a subtree). A bulk request is bounded by `PROGRESS_DEADLINE`: it
+  fails when no byte or entry has progressed for that long. On expiry the owner answers per the
+  DEADLINE split of §7.2, and the work continues.
+- **Client side, ordinary requests.** A client MUST abandon a request after
+  `REQUEST_DEADLINE + CLIENT_DEADLINE_MARGIN`, so the owner's coded answer normally arrives
+  first and the client's own bound fires only when the owner is wedged.
+- **Client side, bulk requests.** While waiting, the client sends the contract's **liveness
+  probe** on a separate connection every `LIVENESS_INTERVAL` with deadline `LIVENESS_DEADLINE`,
+  and abandons the bulk request when a probe misses. The owner MUST answer the liveness probe
+  from memory: without awaiting a store, a lock held across I/O, or a pool.
+- An abandoned request is reported per §4.8. The client closes that connection; a late reply is
+  never read as the answer to a later request.
+- Blocking and asynchronous client calls alike obey these bounds, including one-shot CLI
+  commands and extension probes.
 
-## 9. Alternatives and rationale
+### 8.3 Parameters
 
-- **Unknown = transient for requests, permanent for ordered work.** A request retried a few
-  times costs seconds. An ordered queue blocked by a local bug cost 8 hours behind one
-  `ENOTEMPTY` (memory note *foreign-rename-enotempty-loop*; [03 §7.7](../03-journal-sync.md)).
-  A uniform default fails one of the two cases.
-- **Breaker with a single probe** rather than per-request ladders. Eight retries against a dead
-  host cost about a minute per read, and failover takes 1–2 s instead
-  ([06 §7.10](../06-backends.md)). The alternative, adaptive timeouts, still pays one timeout
-  per request.
-- **Stall timeout, not a total deadline**, for requests. Large bodies on slow links are
-  legitimate. Deadlines belong to *waiters*, which is why DEADLINE is a separate kind that does
-  not cancel the work.
-- **409 for permanent at the peer**, rather than 4xx by cause. 5xx made clients climb the ladder
-  8 times for a name that would never exist (commit 48e797b4). The model keeps 409 but asks for
-  the subkind to travel with it.
-- **Only `unreachable` latches.** A daemon restart once latched a domain off
-  ([file-provider §A15](../frontends/file-provider.md)). A conservative mapping costs retries; a
-  liberal one costs the domain.
-- **Drop vs stop for permanent queue failures.** Dropping is right only where a named repair
-  rebuilds the whole target (a replica is rebuilt from its main). Own work is reconciled by
-  others and must stay.
-- **Drains raced, not cancelled.** Cancellation reached the queue as a failure and degraded it
-  ([07 §4.2](../07-daemon-cli.md)).
-- **Plausible alternative: a result type per call instead of exceptions.** It would make X1 a
-  type error (an `Unreachable` constructor cannot be matched as `None`). Most of the breaches in
-  §8.2 are catch-alls that such a type would have refused.
-
----
-
-## 10. Mapping to the current implementation
-
-| Abstract | Concrete | Spec |
+| Parameter | Recommended | Constraint |
 |---|---|---|
-| kind TRANSIENT / "permanent" | `Retry.Failed {kind = Transient \| Permanent; op; detail}` (`lib/core/retry.ml`); LINK, LOAD and LOCAL are not distinguished | [01 §3.5](../01-core.md) |
-| CANCELLED | `Retry.Cancelled`; runtime cancellation `Clock.is_cancelled` | [01 §3.5](../01-core.md) |
-| STOPPING | `Shutdown.Stopping`, `Shutdown.request`, `grace = 10` | [01 §4.7](../01-core.md), [07 §3.4](../07-daemon-cli.md) |
-| UNEXPLAINED default in requests / ordered work | `Retry.classify` (→ Transient) / `Retry.classify_in_order` (→ Permanent) | [01 §3.5](../01-core.md) |
-| CORRUPT, UNPREPARED (conflated) | `Backend.Backend_error msg` (raised in `chunk_store.ml`, `chunk_cache.ml`, `data.ml`, `file.ml`, `gc/collection.ml`, `Backend.checked_range`) | [06 §3.1](../06-backends.md), [04 §3.3](../04-checkout-cache.md) |
-| REFUSED/read_only | `Backend.Not_writable`; `EROFS` | [06 §3.1](../06-backends.md) |
-| store classifier | `Backend.classify` | [06 §3.1](../06-backends.md) |
-| HTTP detection | `Http_client.failed` (Transient iff ≥ 500 or 429), `call_retry`, `with_stall_timeout` | [01 §3.7, §4.8](../01-core.md) |
-| local errno detection | local driver's errno table | [06 §4.2](../06-backends.md) |
-| S3 / GCS detection | `Throttled`, `Failed exn` → Transient; `Forbidden`, `Not_found`, `Unknown`, `Redirect` → Permanent; `Backend.absent_code` | [06 §4.2](../06-backends.md) |
-| ladder | `Retry.Make.with_retry`, `default_attempts = 8` | [01 §4.4](../01-core.md) |
-| breaker | `Health` (`lost`, `answered`, `check`, `probe_lost`, `trip_after`, `trip_span`, `hold_initial`, `hold_max`, `probe_timeout`); `Health_wait.until_held`; `Retry.held` | [01 §4.5](../01-core.md), [06 §4.1](../06-backends.md) |
-| composite aggregation | `Domain_store.make`: `read`, `walk`, `ask_member`, `stop_on_miss`, batch re-ask | [06 §4.3](../06-backends.md) |
-| write to copy while main down | `Write_guard.ensure` | [06 §4.5](../06-backends.md) |
-| durable queue policy | `Durable_queue.ordered` / `keyed`, `Poison.Stop` / `Drop`, backoff cap 300, `settle_all` 60 s, stall warning 60 s | [01 §3.6, §4.6](../01-core.md) |
-| own metadata ops | `Meta_queue` (ordered, `classify_in_order`, `Stop`, `parked`, `rearm` every 60 s in `Domain_engine` maintenance) | [03 §4.1](../03-journal-sync.md) |
-| uploads | `Sync_queue` (keyed, `Backend.classify`, `Stop`; `Retry.Cancelled \| ENOENT` → complete) | [03 §4.1](../03-journal-sync.md) |
-| replica/backfill jobs | `Deferred` (ordered, `Drop` → degraded) | [06 §4.4](../06-backends.md) |
-| peer entries: step aside vs abort | `Replay.apply_foreign` / `stepping_aside`, `stepped_aside`; poller `retry_floor = 2 s`, sweep 60 s | [03 §4.3](../03-journal-sync.md) |
-| F6 site | `File_store.get_journal_entry` (catch-all → `None`); callers `apply_foreign`, `overridden_since` | [findings F6](../findings.md) |
-| N2 site | `Data.fill_from_staged` (catch-all on open → zero-fill), used by `staged_source` for uploads | `lib/domain/checkout/content/data.ml` |
-| N5 site | `File_store.read_last_sync_key` (`with _ -> None`) | `lib/domain/remote/store/file_store/file_store.ml` |
-| read DEADLINE | `Chunk_cache.read_deadline = 15`, `within_deadline` | [04 §3.3](../04-checkout-cache.md) |
-| client code mapping | `Ipc_error.of_exn`, `Ipc_handler` `error_code_json` | [07 §2.3](../07-daemon-cli.md), [08 §A2.4](../08-frontends.md) |
-| FUSE mapping | errno passes through `on_loop`; other → EIO + failure ring | [08 §A4.1](../08-frontends.md) |
-| peer server mapping | 404 / 409 / 500 / 503 / 403 / 401 / 400 | [http-proxy §A5–A6](../frontends/http-proxy.md), [06 §4.8](../06-backends.md) |
-| macOS client | `DaemonError` / `FileProviderError.from`: only `unreachable` → `serverUnreachable` (latched until `signalErrorResolved`); missing code → `internal` | [file-provider §A4.2, §A7](../frontends/file-provider.md) |
-| Android client | `Cli.reply` / `Cli.Error` (code dropped, H10) | [android §A3.3](../frontends/android.md) |
-| CLI exit | `main.ml`: `Failure` / `Retry.Failed` → 1; anything else → 125; per-command 1/2 | [07 §3.7](../07-daemon-cli.md) |
-| blocking IPC without deadline | `Ipc.send` (G9); Swift `sendSync` (H6); in-daemon `send_async` 2 s | [07 §3.3](../07-daemon-cli.md) |
-| stop | `drain_for_stop` (raced against grace), queue drain 0.8 × grace, reaper grace + 2 s, `TimeoutStopSec=30` | [07 §4.2](../07-daemon-cli.md), [08 §A3.4](../08-frontends.md) |
-| clocks | `Io_lwt.Clock.now` (monotonic); `with_stall_timeout`, `Health.now`, `Metrics.now_sec` (wall, G12) | [01 §9.2](../01-core.md), [findings G12](../findings.md) |
-| durable failure state | WAL record `note_failure`; `.bad` sidecars; `tsync/corrupted/<domain>/` markers; `degraded` in queue stats | [04 §6](../04-checkout-cache.md), [06 §4.7](../06-backends.md) |
+| `READ_DEADLINE` | 15 s | |
+| `REQUEST_DEADLINE` | 30 s | > `READ_DEADLINE` |
+| `PROGRESS_DEADLINE` | 60 s | ≥ the longest stall window of the domain's stores |
+| `CLIENT_DEADLINE_MARGIN` | 5 s | > 0 |
+| `LIVENESS_INTERVAL` / `LIVENESS_DEADLINE` | 10 s / 5 s | |
+| `LOOP_STALL_WARNING` | 60 s | |
+| `PROBE_TIMEOUT` | 10 s | [01 §15](../01-core.md#15-parameters) |
+
+---
+
+## 9. Surfacing
+
+A failure a person must act on is shown in status and by the CLI, not only in a log line.
+Status MUST show:
+
+- each tripped breaker, with its reason and the hold's end;
+- parked records and unapplied peer entries, with counts and reasons;
+- degraded copies, with their repair;
+- corruption markers and set-aside local files;
+- stalled loops and queues (§8.1);
+- the reason of the last failure of each owed record.
+
+A failure surfaced only in a log line below warning level is not surfaced.
+
+---
+
+## 10. Conformance
+
+An implementation MUST exhibit:
+
+- **Absent is authoritative.** A store or local read failing with anything but an absence
+  answer never yields "absent", "empty", "no entries", a hole, or an advanced mark; injecting a
+  transient failure into a listing, a journal-entry read, a marker read or a mark read aborts
+  the operation without side effects.
+- **Batch.** A failed bulk read re-asks singly or fails; it never marks items absent.
+- **Replica absence.** With the main unreachable and a replica answering absent, the domain
+  answers `unreachable`, not `not_found`.
+- **Peer refusals.** A peer's 409 is read by its `x-tsync-kind`; an unknown value is
+  REFUSED/other; `missing_chunks` makes the writer re-send exactly the listed chunks; a 404
+  with a body is never taken as absent.
+- **Unpublished data.** An upload whose staged body cannot be opened for a reason other than
+  ENOENT publishes nothing and stays owed; with ENOENT it is cancelled if superseded and CORRUPT
+  otherwise; no zeros are ever published in place of unreadable staged bytes.
+- **Breaker evidence.** 429, a throttling 503 and per-key refusals in a bulk delete never trip a
+  member; stalls, connection failures and a local store's `ESTALE`/`ETIMEDOUT` do; a local
+  descriptor exhaustion does not; an UNEXPLAINED failure does not. An S3
+  `ConditionalRequestConflict` is retried as the same conditional write.
+- **Codes.** Each row of §7.2 produces its code: a corrupt chunk and an operation under a
+  folder without an id answer `internal` with a repair; an unreachable main answers
+  `unreachable`; a store that keeps throttling answers `busy`; a paused domain answers `paused`
+  to an operation that needs remote work; a revoked credential answers `denied`; a malformed
+  reference answers `invalid`; an unserved domain answers `unreachable`; every failure carries a
+  code.
+- **Clients.** A missing or unknown code is `internal`; a transport failure never latches; only
+  `unreachable` latches, and a recovery notice unlatches.
+- **Deadlines.** A wedged owner makes a client call fail within
+  `REQUEST_DEADLINE + CLIENT_DEADLINE_MARGIN`; an owner waiting on a silent store answers
+  `unreachable` within `REQUEST_DEADLINE`, and the fetch continues and serves the next caller; a
+  bulk request over a slow but flowing link completes.
+- **Stop.** A stop during any wait ends it with STOPPING within the grace, counts no failure,
+  degrades nothing, and leaves every record on disk.
+- **Re-arm.** A parked record of any queue runs again after its cause is fixed, without a
+  restart.
+- **CLI.** A CORRUPT or UNPREPARED failure exits 1 with a sentence naming the repair; only an
+  UNEXPLAINED failure exits 125.
+
+---
+
+## 11. Rationale
+
+- **Only `unreachable` latches.** A daemon restart once latched a domain offline. A
+  conservative mapping costs retries; a liberal one costs the domain. Corruption and missing
+  local preparation are faults of one operation, not of the store, so they map to `internal`.
+- **A malformed request is `invalid`, not `not_found`.** A client told "absent" acts on it.
+- **Throttling is not link failure.** A throttling store or a peer applying deliberate
+  backpressure is up; tripping it fails reads over to replicas or holds them for minutes while
+  the link works.
+- **Unknown is transient in requests, parked in ordered work.** A request retried a few times
+  costs seconds; an ordered queue blocked by a local bug once stalled hours of work behind one
+  failing op.
+- **Stall timeouts for requests, deadlines for waiters.** Large bodies on slow links are
+  legitimate; a person waiting is not. DEADLINE is its own kind because the work behind it
+  continues.
+- **The DEADLINE split.** A deadline is evidence about the store only if the store was silent;
+  a fetch that is progressing is not an outage.
+- **Liveness probes for bulk requests.** A fixed deadline would cut a slow but healthy transfer;
+  no deadline lets a wedged owner hang a client forever.
+- **Park and re-arm everywhere.** Work left parked until a restart looks owed but never runs.
+- **Park, never drop.** A dropped replica job leaves the copy silently short until someone runs
+  a repair; a parked one keeps retrying and keeps the copy visibly degraded.
+- **`busy` apart from `unreachable`.** A throttling store is up; latching it offline would need
+  a recovery notice that no breaker transition ever produces.
+- **No unconditional fallback for conditional writes.** It turns a race into an overwrite of the
+  winner.

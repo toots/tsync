@@ -1,443 +1,436 @@
-# 08 — Frontends: the frontend contract
+# 08 — The frontend contract and the shared request handler
 
-Scope: the frontend seam (`lib/app/frontends/api`), how the launcher runs frontends (`lib/app/cli/launcher.ml`), and the request handler every frontend shares (`lib/app/cli/runner/daemon/engine/{ipc_handler,item_row,ipc_error,domain_engine}.ml`, as far as frontends see it). Everything here is common to all frontends.
-
-Each frontend has its own spec, describing how it realises this contract on its OS surface:
+This file owns the frontend seam: what a frontend declares, what the owner gives it, and the one
+request handler every frontend, tool and command uses to act on a domain. Everything here is common
+to all frontends. Where frontends run and how processes are arranged is
+[07 §2](07-daemon-cli.md). Each frontend's realisation is in its own spec:
 
 | Frontend | Spec | OS surface |
 |---|---|---|
-| `fuse` | [frontends/fuse.md](frontends/fuse.md) | Linux FUSE3 mount; also the Linux desktop integration (mount discovery, Dolphin plugin, tray, systemd, packaging). |
-| `file_provider` | [frontends/file-provider.md](frontends/file-provider.md) | macOS File Provider: the app, the sandboxed extension, and the daemon side. |
-| `http-proxy` | [frontends/http-proxy.md](frontends/http-proxy.md) | HTTP(S) server exposing a machine's stores to other tsync clients, plus public share links and a status page. The wire protocol is [backends/http-proxy.md](backends/http-proxy.md). |
-| `android` | [frontends/android.md](frontends/android.md) | Android app embedding the core: DocumentsProvider, in-app browser, share target, camera backup. |
+| `fuse` | [frontends/fuse.md](frontends/fuse.md) | Linux FUSE mount, plus the Linux desktop integration (mount discovery, Dolphin plugin, tray, packaging) |
+| `file_provider` | [frontends/file-provider.md](frontends/file-provider.md) | macOS File Provider: app, sandboxed extension, daemon side |
+| `http-proxy` | [frontends/http-proxy.md](frontends/http-proxy.md) | HTTP(S) store server for other tsync clients, share links, status page; wire in [backends/http-proxy.md](backends/http-proxy.md) |
+| `android` | [frontends/android.md](frontends/android.md) | Android app embedding the core |
 
-Paths are relative to `/home/toots/src/tsync`.
+Implementation notes: [ocaml/08-frontends.md](ocaml/08-frontends.md).
 
 ---
 
+## 1. Problem
 
-## A1. Problem
+The domain core (mirror, chunk cache, staged edits, queues, journal replay) knows nothing about how
+a user reaches the files. A **frontend** is one way of presenting a domain on one host. Every OS has
+its own filesystem and threading model, and which frontends exist is a build-time fact. The rules
+that must not differ between frontends are owned once, here and in the file-operation interface
+([04 §3.5](04-checkout-cache.md)): how items are named, what staged and published mean, the error
+vocabulary, paging, the change feed, and what evict and restore do. Each frontend is a thin
+translation over them.
 
-A *domain* is a namespace of files whose manifests and chunks live in storage the user controls. The domain core (checkout mirror, chunk cache, staged edits, upload queues, journal replay, convergence) knows nothing about how a user reaches the files. A **frontend** is one way of presenting a domain on one host:
+**The mirror is the whole answer for names.** No frontend path asks a store for metadata; frontends
+call the file operations `kind`, `stat` and `list_children`, never inspect the mirror directly. A
+getattr of a missing name costs a local lookup (≈0.3 ms), not a store round trip (≈85 ms).
 
-| frontend | OS surface | process shape | tree kind |
-|---|---|---|---|
-| `fuse` | Linux FUSE3 mount at a directory | one process **per domain** (the mount call blocks) | replicated |
-| `file_provider` | macOS File Provider, reached by a separate sandboxed extension over a JSON socket | one process for all domains, one socket | replicated |
-| `http-proxy` | HTTP(S) server exposing the domain's *stores* to other tsync clients, plus public share links | one process for all domains on a listener | replicated |
-| `android` | Android DocumentsProvider, core embedded in the app process | no daemon: driven only by in-process calls or CLI verbs | **pulled** (lazy) |
+---
 
-Frontends are a separate abstraction for three reasons:
-- Every OS has its own filesystem model and threading model.
-- Which frontends exist is a build-time fact: FUSE is optional, File Provider is macOS-only, Android exists only in the Android cross-build.
-- The rules that must *not* differ between frontends are owned once, by the shared request handler and the file-operations interface. These rules are how items are named, what "staged" versus "published" means, the error vocabulary and the paging contract. Each frontend is a thin translation over them.
+## 2. Concepts
 
-A principle applies throughout: the local manifest mirror is the full source of truth for whether something exists. No frontend path may ask the backend for metadata, and frontends never inspect the mirror directly; they call the file operations `kind`, `stat` and `list_children`. The cost it removed: a FUSE getattr for a missing name used to take ~85 ms through a backend round trip, and now takes 0.3 ms.
+### 2.1 Frontend descriptor
 
-## A2. Concepts & data model
+Each frontend registers under a name; registration is compiled in or out per build. A descriptor
+holds:
 
-### A2.1 Frontend descriptor (the seam)
+- **name**: `fuse`, `file_provider`, `http-proxy`, `android`. The CLI group defaults to the name
+  (`file_provider` uses `fileprovider`).
+- **kind**: `presenting` (shows the domain's files to a user: `fuse`, `file_provider`, `android`) or
+  `store-serving` (serves the domain's stores to other machines: `http-proxy`). A presenting
+  frontend runs inside the domain's owner ([07 §2.4](07-daemon-cli.md)); a store-serving frontend
+  runs in the store server and owns no domain state.
+- **topology** (presenting only): `per-domain` (the frontend's serving call holds a process per
+  domain, as a FUSE mount does) or `shared` (one process presents all its domains). Declared here,
+  enacted by the supervisor.
+- **serving**: `Daemon` (the supervisor runs it) or `Commands(refusal text)` (never run by the
+  supervisor; driven by an embedding app or by CLI verbs; `tsync start` refuses it with that text).
+- **tree**: `Replicated` (the owner keeps the whole mirror and applies the journal) or
+  `Pulled(refusal text)` (the owner reads a folder from the store when it is listed and keeps no
+  replica; `tsync sync` refuses with that text and exit 2). A pulled tree's view of a folder is the
+  last pull overlaid with this client's owed work, as
+  [android.md §3.2](frontends/android.md#32-freshness-without-a-journal-poller) specifies; the
+  lazy tree itself is [04 §3.5](04-checkout-cache.md#35-the-published-tree-full-and-lazy).
+- **availability(key) → `online-only` | `cached` | `pinned(until)`**: where a file's bytes are, for
+  item rows and `tsync ls`. Synchronous and local.
+- **commands**: `(verb, doc, run(domain, positional args))`, exposed as `tsync <group> <verb>`.
+  Each verb declares its access class ([07 §2.5](07-daemon-cli.md)). The binary resolves `--domain`
+  and checks the frontend is configured for it; the frontend parses its own arguments.
+- **option spec**: each option's name, label, type, default and secret flag. The config parser
+  refuses keys not in the spec ([05 §2.1](05-ops-config.md)); the wizard prompts from it; secrets
+  are masked in reports.
 
-Each frontend registers under a name, and registration is compiled in or out per build. A descriptor holds:
+| name | kind | topology | serving | tree | commands |
+|---|---|---|---|---|---|
+| fuse | presenting | per-domain | Daemon | Replicated | — |
+| file_provider | presenting | shared | Daemon | Replicated | reimport, reset, purge |
+| http-proxy | store-serving | — | Daemon | — | — |
+| android | presenting | per-domain | Commands | Pulled | stat, list, read, open, residency, fetch, write-whole, create, mkdir, delete, rmdir, rename, share, request, status |
 
-- **name** — `fuse`, `file_provider`, `http-proxy` or `android`. The CLI group defaults to the name; `file_provider` uses `fileprovider`.
-- **availability(locality, key) → Online_only | Cached | Pinned(until)** — where a file's bytes are, used by listings (`tsync ls`, item rows). This call is synchronous and filesystem-only.
-- **serving**, one of:
-  - `Daemon { topology: One_process | Process_per_binding, listens: None | DomainSocket | ProxySocket, start(served list) — blocks until shutdown }`
-  - `Commands(refusal_text)` — never run by the launcher; driven by CLI verbs or by an app that embeds the core. The launcher answers `start` with the frontend's own refusal wording.
-- **tree** — `Replicated`, or `Pulled(refusal_text)`. A pulled frontend reads a folder only when asked, so there is no replica for a full resync to rebuild; `tsync sync` refuses with the frontend's wording.
-- **commands** — `(verb, doc, run(domain_conf, positional_args))`. They appear as `tsync <group> <verb> --domain D`. The binary resolves `--domain` and checks the frontend is configured for it, but does not parse the remaining arguments: only the frontend knows its own grammar.
-- **option spec** — the fields `tsync config --edit` prompts for, with name, label, type, default and a secret flag. Secrets are masked in reports.
+Availability is computed by the core ([04 §3.6](04-checkout-cache.md#36-stat-and-availability));
+a frontend's spec may refine it with its own replica (File Provider).
 
-A **binding** is a triple (domain conf, frontend options from `config.json`, mount point). Only FUSE uses the mount point.
+### 2.2 Item references
 
-A **served** binding adds two things: the domain wiring built by the launcher (§A3.1), and `peers`, the sockets of the domain's *other* frontends. Only the http-proxy reads `peers`, so its status page can report on the whole domain; an empty list means no other frontend serves the domain on this host.
+Non-FUSE callers name items by **reference**; the grammar (`root`, `d:<folderId>`,
+`f:<parentFolderId>/<leaf>`) is [01 §2.4](01-core.md). A reference is resolved to a key only by the
+request handler, under the owner's metadata serialisation, and resolution **mints nothing**: a read
+that minted a folder id would persist a marker and resurrect a deleted folder. A reference that does
+not resolve → `not_found`; a malformed one or a storage key → `invalid`. An `f:` reference never
+answers for a folder.
 
-Registered frontends:
+A caller holding only a path (desktop menus, the CLI) MAY send `"rel":"<domain-relative path>"`
+instead; `""` is the root, and the mirror decides the kind.
 
-| name | availability | serving | tree | commands |
-|---|---|---|---|---|
-| fuse | chunk store | Daemon(per binding, DomainSocket) | Replicated | – |
-| file_provider | replica-aware: dataless in the system replica → online-only; else pinned if the chunk store says so, else cached | Daemon(one process, DomainSocket) | Replicated | reimport, reset, purge |
-| http-proxy | chunk store | Daemon(one process, ProxySocket) | Replicated | – |
-| android | chunk store | Commands("…linked into the app, not served by a daemon…") | Pulled | stat, list, read, open, residency, fetch, write-whole, create, mkdir, delete, rmdir, rename, share, request, status |
+Why references: renaming a directory renames every descendant's path, while its folder id is stable;
+macOS treats a changed identifier as a merge instruction, so path-named folders turned a rename into
+re-identification of a whole subtree. A file has no id of its own, so (parent id, leaf) limits a
+rename's blast radius to one item. A directory reference cannot be composed by a client, only minted
+by the core, so every mutating reply carries the resulting item.
 
-**Chunk-store availability** is decided in this order:
-1. The key has a staged sidecar → `cached`.
-2. Otherwise, check whether every chunk is held. A chunk is *held* iff its chunk file exists **and** no partial-chunk manifest sits beside it (a partial one is on disk under the same name).
-3. If every chunk is held, the file is `pinned` when its pin file's mtime is ≥ now (a lapsed pin is no pin), else `cached`. If any chunk is missing → `online-only`.
+A host that maps references to its own identifiers MUST map `root` to its own root identifier, in
+both directions, including in events it receives ([file-provider.md](frontends/file-provider.md)).
 
-A partly cached file therefore reads as `online-only`. The wire spelling is `online-only`/`cached`/`pinned`, plus `pinnedUntil` (epoch seconds).
+### 2.3 Item row
 
-### A2.2 Item references
+One shape for `stat`, listings, mutation replies and change ops, fields in this order:
 
-Every non-FUSE caller names items by reference:
-- `root` — the domain root. `d:.tsync-root` normalises to root; the root folder id is `.tsync-root`.
-- `d:<folderId>` — a directory, by the id minted when it was created. The id is **stable across rename and move**.
-- `f:<parentFolderId>/<leaf>` — a file. It is split at the first `/`: neither ids nor leaves contain `/`, but leaves may contain `:`. The reference changes on rename.
-- Anything else, including a bare storage key, is malformed and answered `not_found`/`invalid`. A storage key carries no kind, so accepting one would mean guessing.
-
-Why:
-- A path is the wrong name for a directory: renaming the directory renames every descendant. The macOS system treats a changed identifier as a merge instruction, so path-named folders turned each folder rename into a silent re-identification of the whole subtree.
-- Files have no storage id of their own, so parent-id plus leaf limits a rename's blast radius to one item.
-- References reach system logs, so they avoid storage keys and user paths.
-
-Desktop callers that hold only a path (the Dolphin menu, CLI) may send `"rel":"<domain-relative path>"` instead; `""` is the root, and the mirror decides whether the path names a file or a directory.
-
-A file reference can be composed from its parent's reference. A directory reference cannot, because only the core mints folder ids. That is why every mutating reply carries the resulting item.
-
-### A2.3 Item row — one shape for stat, listings and change ops
-
-The fields, in this order:
 ```
-ref, parentRef, name, kind ("dir"|"file"|"symlink"), size, mtime (float seconds), etag, isUploaded
-[symlinkTarget] [trashed: true, only when set] [availability [pinnedUntil]]   (availability: files only)
+ref, parentRef, name, kind ("dir"|"file"|"symlink"), size, mtime (float seconds), etag, isUploaded,
+[contentId], [symlinkTarget], [trashed: true], [availability, [pinnedUntil]]
 ```
-- **Directory:** size 0, mtime 0.0, etag = its folder id, isUploaded true. These stay constant for the folder's lifetime, so a watcher is not told a directory changed on every look.
-- **Root:** name = domain name, parentRef = `root`, etag `.tsync-root`.
-- **File:** etag = the published manifest's content hash (16 hex characters, e.g. `1294bbe85c2f380b`), so identical content gives an identical etag. The etag is `""` while unpublished edits exist, and isUploaded is false while an upload is owed.
-- A row whose containing folder has no id on this client cannot be named. It is omitted and counted in an `unnamed` field, never silently dropped.
 
-`stat` puts the row at top level; lists and mutation replies nest it (`items:[…]`, `item:{…}`). Example:
+- **Directory**: size 0, mtime 0.0, etag = its folder id, isUploaded true. Constant for the
+  folder's lifetime, so a watcher is not told a directory changed on every look.
+- **Root**: `ref` and `parentRef` `root`, name = the domain name, etag `.tsync-root`.
+- **File**: etag = the published manifest's content hash (16 hex digits), so identical content has
+  an identical etag; `""` while staged edits exist. `isUploaded` false while an upload is owed.
+  `availability` and `pinnedUntil` (epoch seconds) for files only.
+- **`contentId`** (files): the whole-file digest `h1` ([02](02-remote-model.md)) of the content the
+  key resolves to, staged or published: equal to the etag when published, computed on adoption for a
+  whole staged body, absent while staged partial edits exist. It is the identity a client sends back
+  as `base` (§3.3).
+- A row whose containing folder has no id on this client cannot be named: it is omitted and counted
+  in `unnamed`, never silently dropped.
+
+`stat` puts the row at the top level; lists and mutation replies nest it (`items`, `item`).
+
 ```json
 {"ok":true,"ref":"f:9f3a/big.txt","parentRef":"d:9f3a","name":"big.txt","kind":"file","size":24,
  "mtime":1400000000.0,"etag":"1294bbe85c2f380b","isUploaded":true,"availability":"online-only"}
 ```
 
-### A2.4 Errors
-
-Every socket answers a failure as `{"ok":false,"code":"<code>","error":"<prose>"}`. Clients match on the code, never on the prose.
-
-| code | raised by |
-|---|---|
-| `not_found` | ENOENT; share not found; "no versions for" |
-| `exists` | EEXIST |
-| `not_empty` | ENOTEMPTY |
-| `denied` | EPERM, EACCES |
-| `read_only` | EROFS; store not writable; a mutating action on a read-only domain |
-| `unreachable` | backend error; timeout; share store unavailable |
-| `invalid` | bad argument; bad or missing field; bad JSON; unknown action |
-| `internal` | anything else |
-
-`unreachable` is the only code that tells a client to stop trying; the macOS client latches the domain offline on it. Anything the core cannot place must therefore be `internal`, which is retried: one unexplained failure should cost one operation, not the domain.
-
-### A2.5 Cursors and anchors
-
-- **Change anchor:** `"<generation>|<entry key>"`, for example `"1756600000000|0001756600000-abc"`.
-  - `generation` is the content of `<data_dir>/resync-<domain>`: epoch milliseconds, written atomically by `full_resync`. It is `""` if never stamped.
-  - `entry` is the last applied journal entry key, or `""` for never synced.
-  - The core owns and compares both halves. Clients carry the anchor verbatim, because the sandboxed macOS extension cannot read the generation file.
-- **Folder page cursor:** the last *name* served. A resume returns names strictly greater, compared bytewise. It is stateless: a fresh process answers the same page, and items added or removed between pages shift nothing before the cursor.
-- **Whole-domain page cursor:** `"<walk>:<line>"`.
-  - `walk` is the epoch-ms stamp of a walk and must be all digits. `line` is a 0-based line index.
-  - A cursor whose prefix is not all digits (the legacy `<container>/<name>` form) restarts the listing.
-  - Lines are used rather than names because one folder id can sit at several mirror paths, so a name cursor could jump between copies and loop forever.
-- **Kept walk file:** `<scratch dir of domain>/.tsync-list-all`.
-  - Line 1 is `{"walk":"<ms>","skipped":<n>}`.
-  - Each later line is one entry, sorted by path, in one of two forms:
-    - `{"path":"a/b.txt","container":"<folderId>","kind":"file","size":N,"mtime":F}`
-    - `{"path":"sub","container":"<id>","kind":"dir"}`
-  - Entries are JSON so a name containing a newline stays on its own line.
-  - It is written atomically by a first page, or whenever it is missing (a resync empties the scratch space). It is never invalidated by changes: the change feed covers anything that moves, since the anchor was taken before page 1.
-  - A resume against a newer walk continues at the same line, with a warning.
-
-### A2.6 Sockets
-
-- Unix stream sockets carrying **newline-delimited JSON**: one request line, one reply line. A connection may carry several requests. Replies carry no request id.
-- Linux has one socket per domain: `$XDG_DATA_HOME|~/.local/share` + `/tsync/tsync-<domain>.sock`.
-- macOS has one socket for all domains, inside the app-group container. Requests are routed by a `domain` field.
-- `proxy socket`: the http-proxy's own control socket (status and stop only).
-- `sync socket`: the launcher parent's socket (uplink lease, `rescan`).
-- Linux config lives at `$XDG_CONFIG_HOME|~/.config/tsync/config.json`.
-
-### A2.7 Frontend-specific formats
-
-FUSE mount facts, the http-proxy wire and the share manifest as the share server reads it are specified in [frontends/fuse.md](frontends/fuse.md), [backends/http-proxy.md](backends/http-proxy.md) and [frontends/http-proxy.md](frontends/http-proxy.md).
-## A3. Interface
-
-### A3.1 What a frontend is given per domain ("domain wiring")
-
-The launcher hands every frontend process the same wiring for each served domain:
-
-- **File operations**, the full interface owned by the checkout subsystem. Frontends use:
-  - `kind`, `stat`, `readlink`, `symlink`
-  - `list_children(prefix) → (files with key/size/mtime, subdir names)`, `list_tree(prefix)`
-  - `create`, `read(key, buf, offset, stream?) → n`, `write(key, buf, offset) → n`, `truncate`
-  - `close(key)` — queue an upload if staged edits exist
-  - `delete`, `mkdir`, `rmdir`, `rename(src, dst)`, `evict`
-  - `ensure_cached(key, keep?)` — fetch all chunks and pin them, 10 days by default; idempotent, and concurrent calls share the fetch
-  - `assemble_to(key, dst)`
-  - `fetch_range(key, dst, offset, length) → n` — writes at the same offset and leaves the rest sparse; short only at EOF; creates `dst` even past EOF
-  - `write_whole(key, src)` — adopt a file by rename
-  - `queue_put`, `cancel_upload`, `resolve` (staged or published), `chunk_residency`, `download_progress`, `uploads_in_flight`, plus counters.
-- **The request handler** (§A3.2), built over those operations.
-- **Lifecycle:**
-  - `start(on_upload_done?)` — ensure the root, then start this process's upload queue and metadata queue.
-  - `drain()`, in order:
-    1. metadata queue;
-    2. upload queue (raced to 0.8 × grace when stopping);
-    3. flush the published cursor;
-    4. settle pending change notices;
-    5. drain backends.
-  - `stats_fields()`.
-
-Every process serving a domain runs its **own** upload and metadata queues. Their workers are in-memory, and each posts only what it was handed.
-
-**Convergence is not a frontend's job.** Convergence covers the poller replaying foreign journals into the mirror, reconcile, and the maintenance sweeps. It runs once per host, in the launcher parent, because the mirror, applied bookmark and staged tree are shared between processes and nothing else arbitrates them. The parent tells frontends what changed by sending `{"action":"changed","domain":D,"keys":[…]}` to each frontend socket, batched to at most 512 keys and flushed every 0.2 s.
-
-### A3.2 The shared request handler
-
-A single handler answers requests for the FUSE socket, the File Provider extension, Android and the desktop menus. It is parameterised by per-frontend **hooks**, and these are the only frontend-specific behaviour:
-
-```
-hooks {
-  evict(key)
-  restore(key, keep_seconds?)
-  changed(key)          # another process applied a change to key; refresh your view
-  full_resync()
-  status_fields() -> fields
-  stats_fields()  -> fields   # must include frontend:<name>
-  on_stop()
-}
-handler(hooks, request_line) -> (reply_line, Continue | Stop | Subscribe(topic))
-key_of_ref(ref) -> key?      # for frontend commands
-item_ref(key)  -> ref?
-```
-
-The hooks as each frontend fills them:
-
-| hook | fuse | file_provider | android |
-|---|---|---|---|
-| evict | evict every file of the subtree, each failure logged and skipped | evict chunks, then publish an `evict` event (fails when nobody is subscribed) | evict one key |
-| restore | ensure_cached every file of the subtree | ensure_cached, then publish a `restore` event | ensure_cached one key |
-| changed | ask the kernel to invalidate `/<rel>` | debounced `changed` event | none (the picker re-queries) |
-| full_resync | none (the resync client rebuilt the mirror before signalling) | rebuild the folder-id index, then publish a `resync` event | none |
-| status_fields | `mount` | `subscribers` | – |
-| on_stop | unmount and stop | none | none |
-
-For the macOS order: the chunk store is acted on first because a pin is the core's promise, which holds whether or not anything is listening to move the system's copy.
-
-**Actions.** The action strings are a wire contract with the native shells and must not be renamed.
-
-| action | request fields | ok reply | mutates |
-|---|---|---|---|
-| stat | ref\|rel | row at top level. An `f:` ref must not answer for a folder | |
-| list_dir | ref\|rel, after?, limit? (1000) | `items`, `next`?, `unnamed`? | |
-| list_all | after?, limit? (1000) | `items`, `next`?, `unnamed`? | |
-| changes_since | arg=anchor, limit? (512) | `{stale:true}` or `{stale:false, cursor, more, ops}` | |
-| cursor | – | `cursor` | |
-| ensure_cached | ref\|rel, dest (required) | `localPath`; the core writes the whole file to dest | |
-| fetch_range | ref\|rel, dest, offset ≥ 0, length > 0 | `localPath, offset, length` (the served length) | |
-| download_progress | ref\|rel | `{active:false}` or `{active:true, bytesDownloaded, totalBytes}` | |
-| create | parentRef, name | `item`: empty, staged, etag "", isUploaded false | ✓ |
-| write | parentRef, name, staging, await? | `size, mtime, item`. The staging file is adopted by rename (gone afterwards). With await, the reply waits for this key's upload | ✓ |
-| mkdir | parentRef, name | `item`; idempotent | ✓ |
-| symlink | parentRef, name, target | `item` | ✓ |
-| rename | ref, parentRef, name | `item` at the destination. A dir stays a dir and keeps its id | ✓ |
-| delete / rmdir | ref\|rel | `{}`; rmdir is recursive | ✓ |
-| revert | ref\|rel, arg=version? | `{}`, then `hooks.changed` | ✓ |
-| share | ref\|rel | `url` | (not counted: the manifest lives outside the domain) |
-| evict / restore | ref\|rel, keep? (restore only) | `{}` | |
-| full_resync | – | stamps a new generation, then the hook | |
-| status | – | `domain, running, readOnly, paused, pendingUploads, pendingDownloads, uploading[{name,rel,body?,size?}], downloading, pendingBytes`, traffic, hook fields | |
-| pause | arg: `"off"` resumes, anything else pauses | `{}` | |
-| stats | arg: comma set of `totals, exact, reload, frontend` | full diagnostic report | |
-| changed | keys: [domain-relative paths] | `{}`; unknown keys are logged | |
-| stop | – | `{}`, then Stop | |
-| subscribe | domain (required) | `{}`, then the connection becomes an event stream | |
-
-The handler enforces these rules itself, rather than trusting frontends:
-- **Read-only.** The actions marked ✓ are refused with `read_only` on a read-only domain, because a direct request need not honour a frontend's advertised capabilities.
-- **Serialization.** Mutating actions for a domain run one at a time; reads run concurrently. A reference is resolved to a path *before* the mutation takes the mirror lock, and the File Provider sends requests concurrently. Without serialization, a folder rename racing a create inside that folder could resolve the create against the old path and drop the file into a folder that no longer exists there.
-- **Destinations.** Mutations need `parentRef` and a non-empty `name`. A parent that resolves to nothing gives `not_found`. A parent named by storage key is refused.
-- **write.** In order:
-  1. Cancel any upload of this key in flight; a write to a file being sent stops the send.
-  2. Adopt the staging file.
-  3. Queue the put.
-  4. Optionally wait until uploaded.
-  5. Report the size and mtime of whatever now resolves (staged or published).
-
-**changes_since algorithm:**
-1. Split the anchor at the first `|`. If its generation differs from the current one → `{stale:true}`.
-2. If neither the anchor's entry nor the applied head exists, or the two are equal → `{stale:false, cursor:anchor(head), more:false, ops:[]}`.
-3. Otherwise read up to `limit` entries after the anchor from the *applied* entries log. Because an entry is kept only once applied, an op never names an item the mirror has yet to catch up with. If the anchor is no longer kept → stale.
-4. The cursor is the last entry returned, or the anchor itself if the page is empty. Holding at the anchor stops a caller being told to start over.
-5. Each op is rendered with the forms below. Ops naming a folder this client has no id for are dropped and counted, not turned into stale: re-listing the whole domain would pay for one folder with every other.
-6. Ops are **not** filtered by author. The client id is per machine, so filtering hid CLI changes from the mount.
-
-Op forms:
-- `{"op":"put","ref","parentRef","name","item"}` — the item is read from the mirror via the current reference.
-- `{"op":"delete","ref","parentRef","name"}`
-- `{"op":"mkdir",…,"item"}` — the dir row is built from the id the op carries.
-- `{"op":"rmdir","id","ref","parentRef","name"}`
-- `{"op":"rename","is_dir","id"?,"srcRef","srcParentRef","ref","parentRef","name","item"}` — emitted only when both ends can be named; a half-reported move loses an item.
-- Folder ids resolve through an index that keeps an id after its marker is gone: a removal destroys the marker, and a rename moves it.
-
-**list_all algorithm:**
-- *First page:* walk from the root depth-first through `list_children`. A folder with no id is counted once (its subtree cannot be named). Sort by path, stamp the walk, keep it (best effort; a failure to keep is logged), then serve lines 0..limit−1.
-- *Later pages:* read the kept file from line n+1; if it is missing, re-walk and skip. The reply carries the next cursor only when one more entry exists past the page.
-
-**list_dir algorithm:** entries are sorted by name and filtered to those strictly after `after`. The page takes `limit` of them plus one extra, which only decides whether `next` is emitted (the last served name).
-
-### A3.3 Launcher contract
-
-1. Group the configured bindings by frontend. **Before forking anything**, refuse any `Commands` frontend with its own wording, so no siblings are left running behind a refusal.
-2. Fork one child per frontend group. The core must not start its event machinery before the forks, or a child inherits a shared wakeup descriptor.
-3. In each child:
-   - name the process;
-   - lease uplink bandwidth from the parent over the sync socket;
-   - route "replica job recorded" to the parent as a debounced (0.5 s) `{"action":"rescan"}`;
-   - size the blocking-I/O thread pool to `min(256, max(32, 8 × Σ(max_uploads + max_downloads)))` over the domains it serves (the figures are per domain and the pool is per process, so they are summed);
-   - build the domain wiring and call `start`.
-   - For `Process_per_binding`, fork again per binding; the last binding runs in place.
-4. The parent converges every domain, serves the sync socket, and on stop drains the domains.
-
-The pool is sized by the caller because threads are never returned once grown: the ceiling becomes a memory floor. At 256 threads, one mount settled at about 114 MB.
-
-### A3.4 Stop protocol
-
-- **Reaper.** A process that forked sends SIGTERM to its children, waits up to grace + 2 s (polling every 50 ms), then SIGKILLs and reaps what is left. It also forwards SIGTERM to its children the moment it is itself asked to stop, so nested forks stop within one grace instead of two.
-- **Drain for stop.** Run all drains in parallel, raced against the grace. On timeout, log "owed on disk and resumes at the next start" and return. The drain is not cancelled: a cancelled job would be recorded as a failure against work that was merely unfinished.
-- **systemd budget.** systemd's `TimeoutStopSec=30` must exceed the grace.
-
-## A4. Behaviour
-
-### A4.1 Per-frontend behaviour
-
-How each frontend maps its OS operations onto the file operations and the request handler, which hooks it installs, and its caching, lifecycle and error mapping are specified in its own file: [fuse](frontends/fuse.md), [http-proxy](frontends/http-proxy.md), [file-provider](frontends/file-provider.md), [android](frontends/android.md).
-### A4.2 What macOS and Android ask of the seam
-
-Both hosts reuse the same domain core and request handler. What differs is in the table below; the app internals are specified elsewhere.
-
-| | macOS File Provider | Android |
-|---|---|---|
-| Core instantiated | Launcher child, one process for all domains, domain wiring from the launcher, convergence in the launcher parent | In the app process: domain wiring with a **lazy checkout** (§below) in place of the replicated one. The host itself runs init, queue start, reconcile and the maintenance sweeps. No poller, no convergence, no socket |
-| Transport | One socket for all domains; the router picks the domain by the `domain` field (the display name). A missing field works only when one domain is served. Adds `menu`, `menu_stats` and `preview` | In-process request call: JSON bytes in, JSON bytes out, through the same handler. Plus a handle API for ranged reads: open(ref) → handle / −errno, size(handle), read(handle, off, len) → n / −errno (a stream per handle, so readers keep separate read-ahead), close |
-| Actions used | stat, list_dir, list_all, cursor, changes_since, ensure_cached (dest in a system-chosen directory, written by the core), fetch_range, download_progress, create, write (staging adopted by rename), mkdir, symlink, rename, delete, rmdir, share, evict, restore, status, pause, subscribe | stat, list_dir, share, restore, evict, ensure_cached, create, mkdir, write with `await:true` (a write answers once its own key's upload has gone or started failing), delete, rmdir, rename |
-| Hooks | evict/restore publish events to a subscriber (the app) because only that process can move replica content; `changed` is a debounced event; `full_resync` rebuilds the folder index and publishes `resync` | evict and restore act on one key; changed, full_resync and on_stop do nothing |
-| Change feed | changes_since + events: `{"event":"changed"\|"evict"\|"restore"\|"resync","domain","id":seq,"ref"?}`. `changed` is debounced to one per 0.2 s burst and names nothing. Events are not replayed | None: the picker re-queries |
-| on_upload_done | publish `changed` (upload state is part of the item's version) | none |
-| Commands | `reimport` (send `full_resync`), `reset` (write a marker naming the domain, bounce the app), `purge` (marker, wait up to 60 s for the app to clear it, then remove the agent, app and data but keep config) | CLI verbs that answer each request through the same handler: start the queue iff the request mutates, always drain |
-
-**Lazy checkout (`Pulled` tree).** It answers the checkout's listing operations as follows:
-- Listing a folder reads that one folder from the store, failing rather than skipping unreadable children. Skipping is ruled out because the listing is then pruned against the answer, and a missing child is not evidence it is gone.
-- The result is recorded into the mirror the same way a resync records it.
-- Published entries the store no longer names are dropped. Staged entries are kept: they are this client's own.
-- An absent entry means "not fetched yet", not "does not exist", and no walk is ever scheduled.
-
-Rationale: a host that cannot hold long-lived state cannot keep a replica. A resync that wiped 36,568 manifests left document ids unresolvable for 25 minutes.
-
-**No daemon on Android.** A long-running service is killed by the platform. Every operation is a function of key and offset whose state is already on disk, and reconcile at the next start publishes whatever is owed. There is therefore no ranged write and no close: whole staged bodies are committed through `write`.
-
-**Swapped per host:** storage paths (HOME and config location), the checkout implementation (replicated or lazy), who runs convergence, the event transport (socket subscribe or none), and the lifecycle hooks.
-
-## A5. Interactions
-
-**Depends on:**
-- checkout and file operations;
-- upload and metadata queues, and pause;
-- journal, applied-entries log and folder-id index;
-- the launcher parent's convergence and change notices;
-- backends (store interface, capabilities, watch, failure classification) — for the proxy and shares;
-- share creation;
-- platform runtime paths;
-- config parsing and option specs;
-- diagnostics, status report and menu rendering;
-- metrics and the shutdown signal;
-- the line-JSON socket transport with topic subscription.
-
-**Depended on by:** the `tsync` binary (launcher, `tsync <group> <verb>`), `tsync sync` (tree kind), `tsync ls` (availability), `tsync status` (queries every frontend socket), and the native shells.
-
-**Flows:**
-- **Linux cold read:** open fetches nothing; read → scheduler → `read` → only the covering chunks are fetched (plus read-ahead) → bytes.
-- **Linux write:** open with CREAT/TRUNC → create or truncate; writes land in staged chunk bodies; release → `close` queues the upload.
-- **Foreign change on Linux:** the parent's poller applies it → change notice to the domain socket → kernel invalidation.
-- **Foreign change on macOS:** notice → debounced `changed` event → the app signals the working set → `changes_since(anchor)`.
-- **Remote client:** signed `GET /o/…` → admission → store → bytes.
-
-## A6. Concurrency, durability, failure
-
-**Execution model.** Each process has **one cooperative scheduler**. Foreign threads (FUSE workers, JNI/binder threads, the main thread of a host that owns it) submit a closure and block until it completes. Several places rely on there being **no preemption between yield points**; a rewrite with real threads, or with parallel domains, must add synchronisation at each:
-
-- **FUSE counters** (`openHandles`, `filesOpened`, the release guard) are plain integers, touched only on the scheduler thread.
-- **http-proxy state:** the per-outcome tallies and in-flight count are plain integers. The watch gate table relies on atomicity at the moment a gate is dropped: the loop removes the gate when `waiters` hits 0, and a new waiter increments `waiters` and then starts the loop with no yield in between. With preemption, a waiter could attach to a gate that is being removed and never be woken.
-- **Watch gates:** each gate's `token` field is written by both the request path and the loop, with no lock.
-- **File Provider:** the `changed_pending` debounce flag and the event sequence counter are unguarded.
-- **Change notices:** the pending key set and the `scheduled` flag are unguarded.
-- **Android:** the handle table (id → key, size) and its counter are unguarded.
-- **Share server:** the manifest memo is an unguarded table with clear-when-full.
-- **Metrics counters** are plain as well.
-- **Handler serialization** is a scheduler mutex. Reads are not serialized against mutations, so reads rely on each mirror read being atomic between yields.
-- **list_all's walk** spans many yields and may observe a mirror that changes mid-walk. This is accepted: the anchor was taken first, and the change feed covers the difference.
-
-**Blocking I/O** goes to a separate thread pool: pool threads do blocking syscalls, while scheduler state is touched only on the scheduler thread.
-
-**Durability.** Everything owed is on disk: staged manifests, WAL and durable queue. A stop drains within the grace; what remains resumes at the next start (reconcile).
-
-**Offline behaviour:**
-- Metadata operations never reach the backend, so getattr and readdir work offline.
-- Reads of uncached chunks need the backend. They should fail fast: a FUSE read waiting on the network with no timeout blocked the cgroup freeze and hung a laptop's suspend.
-
-**Crash leftovers:**
-- A stale FUSE mount is cleared at start (`-uz`).
-- The socket is removed at stop; the macOS installer also removes a stale one, since a leftover socket makes callers think the daemon is up.
-
-**Idempotence:**
-- `mkdir` answers the existing folder.
-- Repeating `ensure_cached` extends the pin.
-- Clients treat `not_found` on delete as success.
-- `write` cancels an upload in flight rather than publishing torn content.
-
-**Event loss** is tolerated: events are hints, and the journal carries the same news.
-
-**Degraded paths:**
-- A File Provider `evict`/`restore` with nobody subscribed fails with a message pointing at the app, rather than reporting an eviction that never happened.
-- On the http-proxy, share responses themselves are not admission-bounded; only their block reads are (a known ceiling).
-
-## A7. Design choices & rationale
-
-Choices specific to one frontend are in its own spec.
-
-1. **References, not paths**, on every non-FUSE wire (§A2.2).
-2. **Frontends declare topology; the launcher forks.** One place decides what runs where, and it can size pools knowing what shares the process.
-3. **Convergence lives outside frontends.** It is one writer of shared on-disk state; frontends learn about changes through `changed`.
-4. **No backend read below the mirror** on any metadata path.
-5. **The core writes materialised files** into the host-chosen directory: the sandboxed consumer may not move files in. **Staging files are adopted by rename**, with no copy.
-6. **The core owns the anchor.** Stale only on reimport or a pruned anchor; ops that cannot be named are dropped individually, never turning the batch stale.
-7. **Whole-domain paging** uses a kept walk with a line cursor. The consumer's 500-byte cursor cap made client-side frontiers end enumeration silently at about 26 folders.
-8. **Error codes, not prose.** Only `unreachable` backs a client off.
-9. **Linked-in core on Android, not a process per request.** Per-request processes lost read-ahead state and could not be ordered against the upload queue, whose locks are per process (commits cc90f688, 47040bc1).
-10. **Pulled tree for hosts without long-lived state** (661d4974).
-11. **Pool ceilings are asked for, not defaulted**, and an event loop that can watch file descriptors above 1024 is mandatory.
-
-## A8. Invariants the tests pin down
-
-Tests of a single frontend are listed in its own spec.
-
-**Frontend tests (`tests/frontends/`):**
-- **presenting_domain:** stats field list; a finished upload puts the manifest in the store and publishes the cursor; the maintenance list names each sweep and its triggers.
-- **stop_publishes_cursor:** the second cursor bump is held while running and published within the grace at stop.
-
-**Other tests:**
-- **tests/scenario/ipc:**
-  - Listing, paged and flat views agree.
-  - A dirty file has an empty etag and a clean one does not; identical content shares an etag.
-  - Files and folders share one name order.
-  - A folder that cannot be named is counted, not dropped.
-  - A create under a parent named by storage key is refused.
-  - `changes_since` for: a foreign put; mkdir then put; delete; rename; rmdir with its id; a move into a folder renamed since; a dir rename with its id.
-  - The kept walk survives being dropped between pages and a write between pages; a name containing a newline does not end the listing.
-- **tests/unit/item_ref:** reference parsing and round-trip.
-- **tests/unit/menu:** a golden snapshot of every menu string and action.
-
-## A9. Open questions / inconsistencies
-
-Questions specific to one frontend are in its own spec. Numbering is kept from the first extraction.
-
-1. **Subtree evict/restore:** FUSE applies evict and restore to a whole subtree; Android and path-based callers apply them to a single key.
-7. **Sort order ignored:** `list_dir` always pages by name, whatever sort the consumer asked for; it relies only on a stable order within one enumeration.
-9. **One-key hooks on Android:** the Android evict and restore hooks take one key; a folder gesture would need the FUSE subtree walk.
+### 2.4 Error codes
+
+Every failure is `{"ok":false,"code":"<code>","error":"<sentence>"}`, on every socket and through the
+in-process bridge. The codes (including `busy` and `paused`), the kinds they stand for, and what a
+client MUST do with each are
+[failure-model.md §7.2](algorithms/failure-model.md#72-client-error-codes). A client treats a missing
+or unknown code as `internal`.
+
+### 2.5 Cursors and anchors
+
+- **Change anchor** `"<generation>|<entry key>"`, e.g. `"1756600000000|0001756600000-abc"`.
+  - `generation`: the content of the domain's resync-generation file ([07 §2.7](07-daemon-cli.md)),
+    epoch milliseconds, replaced atomically and durably by `sync --full` and `full_resync`; `""`
+    when never stamped.
+  - `entry`: the last applied journal entry key, `""` for a client that never synced.
+  - The core owns and compares both halves; clients carry the anchor verbatim.
+- **Folder page cursor**: the last name served. A resume returns names strictly greater, compared
+  bytewise. Stateless: a fresh process answers the same page, and changes before the cursor shift
+  nothing.
+- **Whole-domain page cursor** `"<walk>:<line>"`: `walk` is the all-digit epoch-ms stamp of a kept
+  walk, `line` a 0-based line index. The handler SHOULD accept a cursor whose
+  prefix is not all digits (meaning: restart the listing from the first page); it MUST NOT issue one.
+  Lines, not names: one folder id can sit at several mirror paths, and a name cursor could loop.
+- **Kept walk file** (owner-local, in the domain's scratch directory): line 1
+  `{"walk":"<ms>","skipped":<n>}`; then one JSON entry per line, sorted by path:
+  `{"path":"a/b.txt","container":"<folderId>","kind":"file","size":N,"mtime":F}` or
+  `{"path":"sub","container":"<id>","kind":"dir"}`. JSON keeps a name containing a newline on one
+  line. Written atomically by a first page or whenever missing; never invalidated by changes (the
+  change feed covers them, because the anchor is taken before page 1). A resume against a newer walk
+  continues at the same line and logs a warning.
 
 ---
 
-OCaml implementation notes for this subsystem: [ocaml/08-frontends.md](ocaml/08-frontends.md).
+## 3. The request handler
+
+### 3.1 What the owner gives a frontend
+
+The frontend runs inside the domain's owner ([07 §2.2](07-daemon-cli.md)) and receives, per domain:
+
+- the **file operations** ([04 §3.5](04-checkout-cache.md)), over the replicated or the lazy
+  checkout as the descriptor's tree says;
+- the **request handler** (§3.3) over them;
+- the domain's **lifecycle** (`start`, `drain`, `stats_fields`), which the owner, not the frontend,
+  drives ([07 §3.2, §3.4](07-daemon-cli.md)).
+
+Every local change a frontend accepts is posted to the owner's one upload queue and one metadata
+queue. Convergence is the owner's; the frontend learns of applied changes through its `changed`
+hook, called in-process.
+
+### 3.2 Hooks
+
+The only frontend-specific behaviour of the handler:
+
+```
+hooks {
+  changed(keys)           # the owner changed these keys behind the frontend: refresh your view
+  surface_evicted(ref)    # the chunk store evicted this item: mirror it on the OS surface, if any
+  surface_restored(ref)   # the chunk store fetched and pinned it: mirror it on the OS surface
+  reannounce()            # a new generation was stamped: consumers must re-list
+  on_upload_done(key)     # an upload of key published
+  status_fields() -> fields
+  stats_fields()  -> fields   # includes "frontend": <name>
+  on_stop()               # a stop was requested through the socket
+}
+```
+
+- `changed(keys)` is called by the owner after it applies peer journal entries (the keys they
+  touched), after a `revert`, and after it publishes entries for records a one-shot command
+  submitted. It MUST NOT block on the OS surface: a frontend that invalidates kernel or system
+  state does so asynchronously and never from inside a callback on the same item.
+- `surface_evicted` and `surface_restored` are called once per request, with the reference the
+  request named (a folder's reference for a subtree), after the chunk-store work of §3.4 succeeded.
+  A frontend with no separate OS replica (fuse, android) does nothing.
+
+| hook | fuse | file_provider | android |
+|---|---|---|---|
+| changed | invalidate the kernel's entries for each key | debounced `changed` event | none (the UI re-queries) |
+| surface_evicted / restored | none | publish an `evict` / `restore` event; fail when nobody is subscribed | none |
+| reannounce | none | rebuild the folder-id index, publish `resync` | none |
+| on_upload_done | none | publish `changed` | none |
+| on_stop | request the owner's stop | request the owner's stop | none |
+
+### 3.3 Actions
+
+Action strings are a wire contract with the native shells and MUST NOT be renamed. **M** = mutates
+the domain (refused with `read_only` on a read-only domain). **B** = bulk: bounded by progress and
+watched with the liveness probe ([07 §4.3](07-daemon-cli.md#43-deadlines-bulk-actions-and-the-liveness-probe)).
+**P** = refused with `paused` while paused.
+
+| action | request | ok reply | |
+|---|---|---|---|
+| `stat` | `ref`\|`rel` | row at top level | |
+| `list_dir` | `ref`\|`rel`, `after?`, `limit?` (1000) | `items`, `next?`, `unnamed?` | |
+| `list_all` | `after?`, `limit?` (1000) | `items`, `next?`, `unnamed?` | |
+| `changes_since` | `arg` = anchor, `limit?` (512) | `{stale:true}` or `{stale:false, cursor, more, ops, unnamed?}` | |
+| `cursor` | — | `cursor` (the current anchor) | |
+| `ensure_cached` | `ref`\|`rel`, `dest` | `localPath`: the whole file written to `dest` | B |
+| `fetch_range` | `ref`\|`rel`, `dest`, `offset` ≥ 0, `length` > 0 | `localPath, offset, length` (served length; short only at end of file) | B |
+| `download_progress` | `ref`\|`rel` | `{active:false}` or `{active:true, bytesDownloaded, totalBytes}` | |
+| `create` | `parentRef`, `name`, `exclusive?` | `item`: empty, staged, etag `""` | M |
+| `write` | `parentRef`, `name`, `staging`, `base?`, `exclusive?`, `await?` | `size, mtime, item`; the staging file is adopted by rename | M; B with `await` |
+| `mkdir` | `parentRef`, `name`, `exclusive?` | `item`; without `exclusive`, an existing folder is answered as is | M |
+| `symlink` | `parentRef`, `name`, `target`, `exclusive?` | `item` | M |
+| `rename` | `ref`, `parentRef`, `name`, `noreplace?` (alias `exclusive`) | `item` at the destination; a folder keeps its id | M |
+| `delete` | `ref`\|`rel` (a file or symlink) | `{}`; a folder target → `invalid` | M |
+| `rmdir` | `ref`\|`rel` (a folder) | `{}`; removes the folder **and its subtree** (a platform delete gesture) | M |
+| `revert` | `ref`\|`rel`, `arg` = version (`""` = latest) | `{}` | M, P |
+| `share` | `ref`\|`rel` | `url` | P (it writes a store) |
+| `evict` | `ref`\|`rel` | `{evicted, failed}` | B for a folder |
+| `restore` | `ref`\|`rel`, `keep?` (seconds) | `{restored, failed}` | B for a folder |
+| `full_resync` | — | `{}` after stamping a new generation and calling `reannounce` | |
+| `sync` | `arg`: `"full"` or `""` | the resync result ([05 §4.7](05-ops-config.md)) | B, P |
+| `prune` | `arg` = grace seconds | per task files and bytes | B |
+| `retry` | — | `{readopted}`: every parked record of the domain's logs re-adopted now | |
+| `set_aside` | `arg`: `""` lists; else a comma set of names, or `*` | `{items:[{name, kind, size, mtime}]}` or `{removed}` | |
+| `poll` | — | `{}` at once; the owner rescans its logs for submitted records and runs a journal pass soon | |
+| `notify_reset` | — | `{delivered: N}` after publishing a `reset` event to the domain's subscribers | |
+| `ping` | — | `{}` from memory: the liveness probe | |
+| `status` | — | `domain, running, readOnly, paused, pendingUploads, pendingDownloads, uploading[{name, rel, body?, size?}], downloading[{name, rel, bytes, size, seconds, rate}], pendingBytes`, traffic, hook fields | |
+| `pause` | `arg`: `"off"` resumes, anything else pauses | `{paused}` after the state is durable | |
+| `stats` | `arg`: comma set of `totals, exact, reload, frontend` | the owner's report ([07 §5.5](07-daemon-cli.md#55-tsync-status)); `frontend` = only this process's figures, no probes | |
+| `stop` | — | `{}`, then the owner stops ([07 §3.4](07-daemon-cli.md#34-stop)) | |
+| `subscribe` | `domain` (required), `tempDir?` | `{}`, then the connection is an event stream (§3.8) | |
+
+- `status` is cheap: no store access, no walk (menus poll it).
+- `exclusive` (on `create`, `write`, `mkdir`, `symlink`) and `noreplace` (on `rename`): an existing
+  destination answers `exists` and nothing changes; the check and the change are one step.
+- `write` with `base` (a `contentId` the client read) declares the content the edit started from; the
+  owner carries it to the published op, where it decides between a replacement and a conflicted copy
+  ([conflict-resolution.md](algorithms/conflict-resolution.md)). Without `base` the edit's base is
+  unknown.
+- `subscribe` with `tempDir` declares a directory in which the subscriber's own clients receive
+  materialised files; the owner keeps the latest declaration per domain, in memory, as a destination
+  root ([security-model.md §7.3](algorithms/security-model.md#73-paths-passed-over-ipc-confused-deputy)).
+- A socket serving several domains adds host actions (`menu`, `menu_stats` on macOS,
+  [file-provider.md](frontends/file-provider.md)) and routes every other action by `domain`; its own
+  refusals carry codes ([07 §4.2](07-daemon-cli.md#42-envelopes)), and a domain it does not serve is
+  refused `unreachable`.
+- `rename` replaces an existing destination file, as POSIX rename does; a destination that is a
+  folder, or of another kind than the source, answers `exists`. The check and the rename are one
+  step under the owner's metadata serialisation.
+
+### 3.4 Evict and restore
+
+Defined once, for every frontend and caller:
+
+- **Target**: a file, a symlink (nothing to do), or a folder. A folder, including the root, means
+  every file in its subtree, walked in the mirror under the owner's metadata serialisation.
+- **Evict** a file: drop its cached chunk bodies and its pin ([04 §3.4](04-checkout-cache.md#34-operations)). Staged
+  content is never dropped: a file with staged edits is left as is and counted as evicted (its bytes
+  are not the cache's to drop).
+- **Restore** a file: fetch every chunk and pin it until `now + keep` (default `DEFAULT_PIN_KEEP`,
+  10 days); a later restore extends the pin; concurrent restores of one file share the fetch.
+- Per-file failures are counted, logged, and do not stop the walk; the reply carries
+  `{evicted|restored, failed}`. The request fails as a whole only when the target itself cannot be
+  resolved (`not_found`) or every file failed for one reason the caller must see (for example
+  `unreachable`).
+- After the chunk-store work, the hook `surface_evicted` / `surface_restored` runs once with the
+  request's reference ([§3.2](#32-hooks)). The chunk store is acted on first: a pin is the core's
+  promise, whether or not anything moves the system's copy.
+
+### 3.5 Rules the handler enforces
+
+The handler enforces these itself, whatever a frontend advertises:
+
+- **Read-only.** Actions marked M are refused with `read_only` on a read-only domain.
+- **Pause.** Actions marked P are refused with `paused` while the domain is paused. Other mutations
+  are accepted and held in the queues.
+- **Serialisation.** Resolving a reference and acting on it are one step under the owner's per-domain
+  metadata serialisation, for every mutation. Otherwise a folder rename racing a create inside that
+  folder resolves the create against the old path and files it where the folder no longer is. Reads
+  run concurrently, each on a consistent snapshot.
+- **Destinations.** Mutations need `parentRef` and a non-empty `name` that is a valid leaf
+  ([01](01-core.md)). A parent that resolves to nothing → `not_found`; a parent given as a storage
+  key → `invalid`.
+- **Transfer paths.** `dest` and `staging` are confined to the roots the host declares, and `dest` is
+  created exclusively, never overwritten, as
+  [security-model.md §7.3](algorithms/security-model.md#73-paths-passed-over-ipc-confused-deputy)
+  specifies; a refused path answers `denied`.
+- **write**, in order: cancel any upload of this key in flight (a write to a file being sent stops
+  the send); adopt the staging file by rename, with its `base`; queue the put; with `await`, wait until this key's
+  upload has published or started failing; report the size and mtime of what now resolves (staged or
+  published).
+
+### 3.6 Change feed: `changes_since`
+
+Answers come from the **applied log** ([local-cache.md](data-model/local-cache.md)), never from the
+store: an entry is there only once applied, so an op never names an item the mirror has not caught
+up with. Ops are not filtered by author: a change made by a command on this machine must reach its
+frontends.
+
+1. Split the anchor at the first `|`. A generation different from the current one → `{stale:true}`.
+2. If the anchor's entry equals the applied head, or both are absent → `{stale:false,
+   cursor:anchor(gen, head), more:false, ops:[]}`.
+3. Read up to `limit` entries after the anchor's entry. The anchor's entry no longer kept →
+   `{stale:true}`.
+4. `cursor` is the last entry returned, or the anchor itself on an empty page (a caller is never told
+   to start over); `more` says whether entries remain.
+5. Render each op; folder ids resolve through the folder-id index, which keeps an id after its marker
+   is gone ([local-cache.md](data-model/local-cache.md)):
+   - `{"op":"put","ref","parentRef","name","item"}` — `item` read from the mirror through the
+     reference's current resolution;
+   - `{"op":"delete","ref","parentRef","name"}`;
+   - `{"op":"mkdir","ref":"d:<id>","parentRef","name","item"}`;
+   - `{"op":"rmdir","id","ref","parentRef","name"}`;
+   - `{"op":"rename","is_dir","id"?,"srcRef","srcParentRef","ref","parentRef","name","item"}`,
+     emitted only when both ends can be named (a half-reported move loses an item).
+6. An op whose item or parent cannot be named is dropped and counted in `unnamed`, never turned into
+   `stale`: re-listing the domain for one folder would cost every other.
+
+### 3.7 Listings and their order
+
+- **Order.** Every listing is in bytewise order of names (`list_dir`) or paths (`list_all`), files and
+  folders interleaved. This is the only order the handler serves. A host whose OS asks for another
+  order sorts on its side or declares the enumeration unordered to the OS.
+- **`list_dir`**: the folder's children filtered to names strictly after `after`; the page takes
+  `limit` of them plus one, the extra one only deciding whether `next` (the last name served) is
+  emitted.
+- **`list_all`**: first page: walk from the root depth-first through `list_children`; a folder with no
+  id counts once in `unnamed` and its subtree is skipped (it cannot be named); sort by path; stamp
+  and keep the walk (a failure to keep is logged); serve lines 0..limit−1. Later pages read the kept
+  file from line n+1; a missing file is re-walked and skipped to the same line. `next` is emitted only
+  when one more entry exists. The walk spans many suspension points and may observe the mirror
+  changing: the anchor was taken first, and the feed covers the difference.
+
+### 3.8 Events
+
+`subscribe` turns the connection into an event stream on the domain's topic
+([01 §11](01-core.md#11-ipc-framing)). Events are hints on top of the change feed: a lost event costs
+promptness, never correctness. Every event is one JSON line `{"event":"<name>","domain":"<name>",
+"id":<seq>, …}`, `id` increasing within one owner process. Which of `changed`, `resync`, `evict`,
+`restore` and `reset` a host publishes, and when, is in its frontend spec. Every owner publishes:
+
+- **the recovery notice** `{"event":"recovered","domain":D,"id":N}`, when a store request for the
+  domain succeeds after the owner answered `unreachable` for it
+  ([failure-model.md §7.2](algorithms/failure-model.md#72-client-error-codes)), **and when the owner
+  starts serving the domain** (a router that did not serve it answered `unreachable`, and a client
+  latched on that must clear). A client MUST treat it as clearing every latch it holds for the
+  domain; it is delivered to every subscriber of the domain, including one that subscribed after
+  the owner started.
+
+## 4. What the hosts ask of the seam
+
+| | macOS File Provider | Android |
+|---|---|---|
+| Owner | the service process owns every domain ([07 §2.4](07-daemon-cli.md#24-which-process-owns-which-domain)) | the app process |
+| Transport | one socket for all domains, routed by `domain`; adds `menu`, `menu_stats` | in-process call with the same JSON; plus a handle API for ranged reads (open → handle, size, read, close), one read-ahead state per handle |
+| Hooks | events to the subscribed app (only the app can move replica content) | none but the defaults |
+| Change feed | `changes_since` plus events | none: pulls ([android.md §3.2](frontends/android.md#32-freshness-without-a-journal-poller)) |
+| Writes | `write` with a staging file adopted by rename | `write` with `await`; no ranged write and no close (the process may die at any time) |
+
+Details: [file-provider.md](frontends/file-provider.md), [android.md](frontends/android.md).
+
+---
+
+## 5. Design rationale
+
+1. **References, not paths**, on every non-FUSE wire (§2.2).
+2. **Frontends declare topology and kind; the supervisor assigns owners.** One place decides what
+   runs where.
+3. **Presenting frontends live in the owner**: a local edit and a peer's change meet under one lock.
+4. **No store read below the mirror** on any metadata path.
+5. **The core writes materialised files** into a host-chosen directory (the sandboxed consumer may not
+   move files in), and **adopts staging files by rename**, with no copy; both only inside declared
+   roots, so a socket client cannot use the owner to reach files it could not reach itself.
+10. **The owner announces that it serves a domain** (the recovery notice), so a client latched on a
+    router's "not served" answer never stays latched after the domain comes back.
+6. **The core owns the anchor.** Stale only after a new generation or a pruned anchor; unnameable
+   ops are dropped individually.
+7. **Whole-domain paging uses a kept walk with a line cursor**: client-side frontiers under a
+   consumer's 500-byte cursor cap ended enumeration silently at about 26 folders.
+8. **Evict and restore are defined by the core, on subtrees**, so every caller and every frontend
+   means the same thing by "make available offline" on a folder.
+9. **Error codes, not prose**; only `unreachable` backs a client off.
+
+---
+
+## 6. Conformance
+
+- **Rows.** `stat` (by `ref` and by `rel`) and listings return the exact row shape of §2.3; a dirty file
+  has an empty etag and a clean one does not; identical content shares an etag and a `contentId`; a
+  whole adopted staged body has a `contentId` equal to the etag its publish yields; a directory's
+  etag, size and mtime do not change when its children change.
+- **Listings.** Paged and flat views agree; files and folders share one bytewise name order; a folder
+  that cannot be named is counted, not dropped; the kept walk survives being dropped between pages and
+  a write between pages; a name containing a newline does not end the listing.
+- **Mutations.** A create under a parent named by storage key is refused; `create`, `write`, `mkdir`
+  and `symlink` with `exclusive`, and `rename` with `noreplace`, onto an existing name answer `exists`
+  and change nothing; `delete` of a folder is `invalid`;
+  every mutation on a read-only domain answers `read_only`; `revert` and `share` while paused answer
+  `paused`.
+- **Transfer paths.** `ensure_cached`, `fetch_range` and `write` with a path outside the host's
+  declared roots, through a symlink, or (for `dest`) naming an existing file, answer `denied` and
+  touch nothing.
+- **Events.** A subscriber of a domain receives `recovered` when the owner starts serving the domain
+  and after the first successful store request following an `unreachable` answer; `notify_reset`
+  reports how many subscribers received the `reset` event.
+- **Engine seen by a frontend.** The owner's stats list pending and completed uploads, pending
+  metadata, degraded copies, unapplied peer entries with their reason, and its maintenance schedule
+  ([07 §6](07-daemon-cli.md#6-maintenance)); a finished upload puts the manifest on the store and
+  publishes the cursor.
+- **Change feed.** For a foreign put; mkdir then put; delete; rename; rmdir with its id; a move into a
+  folder renamed since; a directory rename with its id: the ops of §3.6. An up-to-date anchor returns
+  no ops and the same cursor; a pruned anchor and an anchor from another generation are stale.
+- **Evict and restore.** On a folder (and on the root), every file of the subtree becomes
+  `online-only` / `pinned` with `pinnedUntil`; a file with staged edits keeps them; the surface hook
+  runs once with the request's reference.
+- **Codes.** Every failure reply on every socket carries a code from §2.4.
+- **References.** Parsing and printing round-trip ([01](01-core.md)).

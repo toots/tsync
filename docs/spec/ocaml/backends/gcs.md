@@ -2,6 +2,19 @@
 
 Companion to the language-neutral spec [../../backends/gcs.md](../../backends/gcs.md). Shared object-store shell: [../../backends/object-store-common.md](../../backends/object-store-common.md). See [README.md](../README.md) for how these notes are organised.
 
+## B-0. Where the current code differs from the spec
+
+- **OAuth failures are Transient**: `Gcs_auth` raises bare `Failure`, which `Retry.classify` reads as Transient, so a revoked key or `invalid_grant` climbs the whole ladder and marks the link lost.
+- **No token invalidation on 401**: a token revoked before expiry keeps being sent until it ages out (≤ 1 h), each request failing Permanent meanwhile.
+- **Token freshness uses the wall clock** (`Unix.gettimeofday`): a clock jump can make an expired token look fresh.
+- **`get_range` with offset ≥ size** on a non-empty object fails 416 → Permanent.
+- **Metadata parsing is lenient**: an unparseable `size` or `updated` reads as 0; an RFC 3339 offset suffix is ignored rather than applied. Unparseable JSON in a metadata or listing answer is raised after the ladder as Transient.
+- **Bulk delete**: the answer's `<Key>` is not entity-decoded; keys holding characters XML cannot carry fail the batch (400 → Permanent).
+- **Listing asks for the full object resource**. An unmerged change (branch `json-listing`, a02b9a4d) adds `fields=items(name,size,updated),nextPageToken` — half a million objects shrink from 483 MB of JSON to ~70 MB — but drops `etag`, which would silently make every listed etag none.
+- **`copy`** is `get` + `put`, not `rewrite`.
+- **Idle connections** are kept 60 s (shared `Http_client`), not the spec's pool idle bound.
+- **The stall timeout** is `Uplink_budget.stall_timeout` (60 s) read at construction; measured rationale (55ca68f8): over a 61 956-object mirror every stalled request was answered on its first retry, so a 300 s bound only idled the caller.
+
 ## B-I. Runtime-independent learnings
 
 - **Shape**: `Gcs_backend.Over (Io) (Hc : Http_client.S) (Post : Gcs_auth.POST) (Lock) (Bounded) (Clock)` builds the string-keyed verbs and hands them to `Object_store.Over(...).make`, which renders `Stored_key.t`s and supplies the shell half. `make ?endpoint ?service_account_key ?share_url ~bucket () : (module Store)`; `spec` is the `Field_spec` list the registry shows (all `` `String ``, `serviceAccountKey` `secret = true`).
@@ -16,10 +29,10 @@ Companion to the language-neutral spec [../../backends/gcs.md](../../backends/gc
 - **`size` is a JSON string**: `Yojson.Safe.Util.member "size"` must accept `` `String `` (GCS) and `` `Int `` (emulators); `try int_of_string` → 0 on garbage.
 - **Bodies**: object verbs use `Hc.call_retry` (bigstring in, bigstring out, handed to cohttp as `` `Passthrough ``, so the caller's buffer must outlive retries); JSON/XML verbs use `Hc.call_text` and parse strings. `put_if_absent` returns `data` itself on a win — the counting wrapper tests `held != data` physically, so never copy on that path.
 - **Headers are a thunk** `unit -> Cohttp.Header.t io` evaluated per attempt inside `Clock.with_stall_timeout`: the token mint is under the request's deadline and each retry re-reads the cache.
-- **Error values**: verbs raise `Http_client.failed op code excerpt` (a `Retry.Failed` with kind from the status) or `Retry.failed ~kind:Transient` for bulk per-key errors. `Gcs_auth` raises bare `Failure`, which `Backend.classify` → `Retry.classify` treats as Transient — the source of spec §9.1. A rewrite should raise `Retry.failed ~kind:Permanent` for 4xx from the token endpoint.
+- **Error values**: verbs raise `Http_client.failed op code excerpt` (a `Retry.Failed` with kind from the status) or `Retry.failed ~kind:Transient` for bulk per-key errors. `Gcs_auth` raises bare `Failure`, which `Backend.classify` → `Retry.classify` treats as Transient (see B-0). A rewrite should raise `Retry.failed ~kind:Permanent` for 4xx from the token endpoint.
 - **Construction errors are `Failure`s** raised synchronously from the factory (key parsing), before any `io` exists.
 - **Complexities**: `list_all`'s `enough` recomputes `List.length (List.concat acc)` per page (O(pages × items)); `delete_multi` splits with two `List.filteri` per batch (O(n²/1000)). Both negligible at tsync's sizes; a rewrite should carry a running count / use a split-at.
-- **Clocks**: `Gcs_auth` calls `Unix.gettimeofday` directly, not the injected `Clock`: the JWT `iat` must be wall time. Expiry is also compared in wall time (spec §9.8); a monotonic deadline for freshness would be the fix.
+- **Clocks**: `Gcs_auth` calls `Unix.gettimeofday` directly, not the injected `Clock`: the JWT `iat` must be wall time. Expiry is also compared in wall time; a monotonic deadline for freshness would be the fix.
 
 ## B-II. Lwt / functor-specific
 
