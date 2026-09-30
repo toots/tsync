@@ -327,8 +327,10 @@ e.g. tsync/photos/versions/3f2a9c1b7d4e-1a/285b8db6c3eef5e0-7b23aee4b1561b8f/175
 
 - An integer ≥ 0 that only increases. Even: no collection has deletions on copies in flight. Odd: one
   has ([algorithms/gc.md §5.6](algorithms/gc.md#56-the-generation-and-presence-memos)).
-- Written with a plain put, only by the collecting owner holding the run lock.
-- **Reader**: absent reads as 0. A body that does not parse, or a value that is not a non-negative
+- Written with a plain put, only by a holder of the run lock: the collector at its transition to
+  closing, and the settle of [algorithms/gc.md §5.7](algorithms/gc.md#57-deletion-on-copies).
+- **Reader**: a client reads it from every main and takes the maximum (only the collected main holds
+  it); a main that cannot answer makes it odd. Absent reads as 0. A body that does not parse, or a value that is not a non-negative
   integer, reads as odd (memos untrusted) and is reported. Unknown fields are ignored.
 
 ### 2.13 Corruption marker, verify job, discard job

@@ -417,6 +417,9 @@ worker's memo of chunks it confirmed on a copy. No such belief survives a collec
     relevant was read, is even and equal to the tag. While G is odd, presence on a copy is confirmed
     afresh (a probe or a listing of the copy) and no memo entry is recorded.
   - A G that cannot be read (absent reads as 0; an unparseable body does not) is treated as odd.
+  - A client cannot tell which of its mains is collectable on another host, so it reads G from
+    **every** main and takes the maximum; a main that cannot answer makes G unknown, which is odd.
+    Only the collected main holds G, so every other main reads as 0.
 
 Why this is exact, with no timing assumption. A chunk doomed in generation *g* is absent from the main
 from its doom step on, so any manifest naming it that a copy later receives was published on the main
@@ -445,7 +448,13 @@ owner executes them as specified in
 - **Restore after.** Once a deletion has taken effect (the direct delete returned, or the request object
   is gone), list the collected main's shard for those keys (§5.8), and put back onto the copy,
   from the main, every deleted key the main still holds. Only then is the deletion settled.
-- **Settle.** When every deletion owed for generation *g* is settled, write G := *g* + 1 (even).
+- **Settle.** When every deletion owed for generation *g* is settled, write G := *g* + 1 (even),
+  holding the run lock: a collector reading G at its transition to closing would otherwise reuse *g*
+  for new deletions just as G turns even. A settle that finds the lock held retries once the lock is
+  free; the collector's own session also settles at its finish when nothing of *g* is owed.
+- **No stale forward.** A best-effort forward of a chunk to a copy that is still in flight when a
+  deletion is issued could land after it and put a doomed chunk back; the deletion waits for the
+  copy's in-flight forwards, and forwards started meanwhile are skipped.
 - The write guard applies: no deletion or restore runs while a main is unreachable.
 
 The **bucket function** deletes only chunk keys of the request's own domain, deletes each chunk's
@@ -586,7 +595,7 @@ spaces and gates promoting.
 | Parameter | Recommended | Effect / constraint |
 |---|---|---|
 | `delete_batch` | 1000 keys, ≥ 1 | keys per copy delete request; the executor may merge consecutive jobs of one copy up to it |
-| `budget` | none | elapsed time after which the run is left open |
+| `budget` | none | elapsed time after which the run is left open; a session always finishes at least one unit, so a zero budget steps |
 | `pause` | none | wait between steps |
 | `verify` | off | re-hash each chunk promoted by this run |
 | `keep` / abort | off | abandon instead of collect |

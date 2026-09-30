@@ -308,6 +308,7 @@ run(CollectionDelete(ks, r, s, g)) at copy C:
   guard(C, "delete collected chunks")                       -- §4.9
   ks := ks − [k | the collected main holds k]               -- MAY: a re-check just before
   C.ensured -= ks                                            -- before the deletion is issued
+  wait for C's in-flight forwards; skip new ones meanwhile   -- none lands after the deletion
   if C has a confirmed bucket function (06 §3.8):
       add {r, s, g, ks} to C's pending discards, durably
       write the discard request for (r, s) naming ks         -- supersedes an older one of that name
@@ -324,7 +325,8 @@ restore(C, s, keys):                                         -- mandatory; the w
   for k in keys that the main holds: sync(k)                 -- §4.3: the chunk is put back on C
 
 when no collection-delete record and no pending discard of generation g remains for any copy:
-  write G := g + 1 to the collected main                     -- even: settled
+  with the collected main's run lock (retry while held):
+     write G := g + 1 to the collected main                  -- even: settled
 ```
 
 - **Recorded before the main discards.** Deletions for direct and queued copies alike are durable before the main unlinks its outgoing chunks, so a crash repeats them instead of leaking them.

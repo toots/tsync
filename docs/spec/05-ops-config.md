@@ -235,8 +235,10 @@ Building has no side effect on the stores.
   ([07 §2.6](07-daemon-cli.md#26-pause)).
 - **GC interlock.** Every operation that publishes a reference to a chunk (a manifest from an
   upload, an import, an rsync copy or rename, a revert) does so through the writer interlock of
-  [gc.md](algorithms/gc.md). No operation keeps a process-lifetime memo of "this chunk exists" across a
-  collection.
+  [gc.md](algorithms/gc.md). No operation relies on a memo of "this chunk exists on a copy" across a
+  collection except as [gc.md §5.6](algorithms/gc.md#56-the-generation-and-presence-memos) allows;
+  a memo about a collectable main is harmless, since the gate checks presence at every publication and
+  its "missing chunks" refusal drops the named keys.
 - **Per-entry isolation.** A per-entry failure is recorded and the run continues, unless this file
   says the whole run fails.
 - **Failures** carry the kinds of [failure-model.md](algorithms/failure-model.md); "could not read"
