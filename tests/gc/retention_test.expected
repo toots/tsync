@@ -1,0 +1,60 @@
+== purge on demand
+never trashed: not in trash
+anchored live: live elsewhere
+trashed: would purge 4 objects
+
+== expire, dry run (cutoff 10 days ago)
+trash 7, versions 1, journal 1, shares 3
+  delete manifests/<sub>/926c8b039839cfc6-7969407bf35f59e9
+  delete manifests/<trashed>/4f7b4244079f8bf6-67a7ed7af26470c3
+  delete manifests/<trashed>/91e75a14034af1d0-d3be400c101eec7c
+  delete manifests/<trashed>/9b84998f74a137e7-901368d25b5bd524
+  delete manifests/.tsync-trash/e1
+  delete manifests/.tsync-trash/e4
+  delete manifests/.tsync-trash/e6
+  delete version of 40 days ago
+  delete journal entry of 45 days ago
+  delete tsync/shares/aa01
+  delete tsync/shares/cache/aa01.data
+  delete tsync/shares/cache/0123-4567.data
+  skipped, trashed recently: <recent>
+  unparseable share left: tsync/shares/aa04
+dry run changed nothing: true
+
+== expire, applied
+trash 7, versions 1, journal 1, shares 3
+  delete manifests/<sub>/926c8b039839cfc6-7969407bf35f59e9
+  delete manifests/<trashed>/4f7b4244079f8bf6-67a7ed7af26470c3
+  delete manifests/<trashed>/91e75a14034af1d0-d3be400c101eec7c
+  delete manifests/<trashed>/9b84998f74a137e7-901368d25b5bd524
+  delete manifests/.tsync-trash/e1
+  delete manifests/.tsync-trash/e4
+  delete manifests/.tsync-trash/e6
+  delete version of 40 days ago
+  delete journal entry of 45 days ago
+  delete tsync/shares/aa01
+  delete tsync/shares/cache/aa01.data
+  delete tsync/shares/cache/0123-4567.data
+  skipped, trashed recently: <recent>
+  unparseable share left: tsync/shares/aa04
+left on the store:
+  chunks/2d0/2d06800538d394c2-4dc5b0cc826f6703
+  cursor
+  journal entry of 60 days ago
+  journal entry of 20 days ago
+  journal entry of 1 days ago
+  manifests/.tsync-root/59cc797ecb3059db-353ff70097872208
+  manifests/.tsync-trash/e2
+  manifests/.tsync-trash/e3
+  manifests/.tsync-trash/e5
+  manifests/<live>/.tsync-parent
+  manifests/<live>/18954525e207201b-dcfdae3db302a2bd
+  manifests/<trashed>/.tsync-parent
+  manifests/<sub>/.tsync-parent
+  manifests/<moved>/.tsync-parent
+  manifests/<moved>/b8498c98aea80fb5-2ccd6b6d26c89eb0
+  manifests/<recent>/.tsync-parent
+  version of 5 days ago
+  tsync/shares/aa02
+  tsync/shares/aa03
+  tsync/shares/aa04

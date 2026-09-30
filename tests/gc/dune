@@ -27,3 +27,18 @@
  (alias runtest)
  (action
   (diff collector_test.expected collector_test.output)))
+
+(executable
+ (name retention_test)
+ (modules retention_test)
+ (libraries tsync_core tsync_store tsync_remote tsync_sync tsync_gc unix))
+
+(rule
+ (with-stdout-to
+  retention_test.output
+  (run ./retention_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff retention_test.expected retention_test.output)))
