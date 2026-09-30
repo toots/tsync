@@ -912,16 +912,17 @@ module Make (C : Engine_ctx.S) = struct
           sweep "";
           Mirror.rebuild_index mirror);
       let ops = List.rev !diffs in
-      let rec chunks = function
-        | [] -> ()
-        | l ->
-            let n = min 64 (List.length l) in
-            let batch = List.filteri (fun i _ -> i < n) l
-            and rest = List.filteri (fun i _ -> i >= n) l in
-            Applied.note applied (Option.get (Entry_key.parse (mint ()))) batch;
-            chunks rest
+      (* One pass over the diffs, 64 to an applied record. *)
+      let rec chunks batch n = function
+        | op :: rest when n < 64 -> chunks (op :: batch) (n + 1) rest
+        | rest ->
+            if batch <> [] then
+              Applied.note applied
+                (Option.get (Entry_key.parse (mint ())))
+                (List.rev batch);
+            if rest <> [] then chunks [] 0 rest
       in
-      chunks ops;
+      chunks [] 0 ops;
       List.iter
         (fun (k, _) ->
           if not (Applied.contains applied k) then Applied.note applied k [])
