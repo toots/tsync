@@ -45,4 +45,4 @@ val context : t -> (module Tsync_remote.Context.S)
 val store : t -> Store.t
 
 (** Available, free and total bytes of the tightest writable local member. *)
-val capacity : t -> (int64 * int64 * int64) option
+val capacity : t -> Tsync_core.Fs.space option

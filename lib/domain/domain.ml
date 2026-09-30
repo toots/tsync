@@ -139,9 +139,9 @@ let capacity t =
       if m.role = Read_only then acc
       else (
         match Option.bind m.store.local_path Fs.disk_space with
-          | Some ((avail, _, _) as r) -> (
+          | Some r -> (
               match acc with
-                | Some (a, _, _) when a <= avail -> acc
+                | Some (a : Fs.space) when a.available <= r.available -> acc
                 | _ -> Some r)
           | None -> acc))
     None t.members

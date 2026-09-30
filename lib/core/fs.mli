@@ -95,8 +95,11 @@ val pwrite_all :
 (** Reserve blocks, falling back to setting the size; size 0 is a no-op. *)
 val reserve : Unix.file_descr -> int -> unit
 
-(** Available, free and total bytes; [None] when unknown. *)
-val disk_space : string -> (int64 * int64 * int64) option
+(** Bytes: [available] to this user, [free] including the reserve, [total]. *)
+type space = { available : int64; free : int64; total : int64 }
+
+(** [None] when unknown. *)
+val disk_space : string -> space option
 
 (** A BSD lock; [false] when [block] is false and the lock is held. *)
 val flock : ?exclusive:bool -> ?block:bool -> Unix.file_descr -> bool

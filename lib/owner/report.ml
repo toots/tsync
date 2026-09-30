@@ -151,8 +151,11 @@ let slot_traffic s =
 let disk (store : Store.t) =
   Option.bind store.local_path (fun path ->
       Option.map
-        (fun (total, free, _) ->
-          { R.free_bytes = Int64.to_int free; total_bytes = Int64.to_int total })
+        (fun (s : Fs.space) ->
+          {
+            R.free_bytes = Int64.to_int s.available;
+            total_bytes = Int64.to_int s.total;
+          })
         (Fs.disk_space path))
 
 let backend t s : R.backend =

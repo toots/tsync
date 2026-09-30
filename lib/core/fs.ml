@@ -260,7 +260,12 @@ let reserve fd size =
       | exception Unix.Unix_error (e, fn, a) ->
           raise (Fail.E (Fail.of_unix e fn a)))
 
-let disk_space p = try Some (statvfs_ p) with _ -> None
+type space = { available : int64; free : int64; total : int64 }
+
+let disk_space p =
+  match statvfs_ p with
+    | available, free, total -> Some { available; free; total }
+    | exception _ -> None
 
 let flock ?(exclusive = true) ?(block = false) fd =
   sys (fun () -> flock_ fd exclusive block)

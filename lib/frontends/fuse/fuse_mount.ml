@@ -385,10 +385,10 @@ let symlink t target path =
 
 (* fuse §4.5: the tightest writable local member, else unbounded. *)
 let statfs t _ : Fuse.Unix_util.statvfs =
-  let avail, free, total =
+  let { Fs.available = avail; free; total } =
     match Tsync_domain.Domain.capacity t.domain with
       | Some c -> c
-      | None -> (unbounded, unbounded, unbounded)
+      | None -> { available = unbounded; free = unbounded; total = unbounded }
   in
   let blocks n = Int64.div n 4096L in
   {
