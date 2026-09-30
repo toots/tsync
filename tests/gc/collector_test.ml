@@ -257,10 +257,43 @@ let () =
       ignore (Unix.waitpid [] pid);
       p "after it exits: ";
       ignore (run ());
-      match
-        Chunk_spaces.with_run_lock (Chunk_spaces.create main_root) d (fun () ->
-            run ())
-      with
-        | Ok _ -> ()
-        | Error `Busy -> p "the test could not take the lock\n");
+      let () =
+        match
+          Chunk_spaces.with_run_lock (Chunk_spaces.create main_root) d
+            (fun () -> run ())
+        with
+          | Ok _ -> ()
+          | Error `Busy -> p "the test could not take the lock\n"
+      in
+      p "\n== a copy without queued deletion refuses a collection\n";
+      let remote =
+        {
+          (Local.create ~name:"bucket" (Filename.concat root "bucket")) with
+          local_path = None;
+        }
+      in
+      let c2 =
+        Composite.create ~domain:d
+          ~data_dir:(Filename.concat root "data2")
+          ~owner:true ~poke:ignore ~knowledge
+          [
+            { name = "main"; role = Main; store = main };
+            { name = "bucket"; role = Backfill; store = remote };
+          ]
+      in
+      p "collect: %s\n"
+        (match Collector.run c2 with
+          | Error (Unsupported r) -> "refused: " ^ r
+          | Error Busy -> "busy"
+          | Ok _ -> "ran");
+      p "abort: %s\n"
+        (match Collector.run ~keep:true c2 with
+          | Ok _ -> "allowed"
+          | Error _ -> "refused");
+      p "dry run: %s\n"
+        (match Collector.dry_run c2 with
+          | Ok [Ok s] ->
+              String.concat ", "
+                (List.map (fun (n, k) -> Printf.sprintf "%s %d" n k) s.per_copy)
+          | _ -> "failed"));
   Fs.rm_rf root

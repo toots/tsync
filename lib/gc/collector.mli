@@ -48,9 +48,13 @@ type survey = {
 
 (** Collect each collectable main: resume or open a run and take it as far as
     [budget] seconds allow, waiting [pause] between units; at least one unit
-    runs. [keep] abandons instead, putting back every chunk still outgoing. With
-    [verify], each chunk this run promotes is re-hashed and its marker filed or
-    cleared. *)
+    runs. [keep] abandons instead, putting back every chunk still outgoing, and
+    [verify] re-hashes each chunk this run promotes, filing or clearing its
+    marker.
+
+    Refused with [Unsupported], unless [keep], while the collecting main would
+    owe deletions to a copy that is not a filesystem store: without queued
+    deletion that copy would get one request per chunk. *)
 val run :
   ?budget:float ->
   ?pause:float ->

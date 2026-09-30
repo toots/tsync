@@ -90,3 +90,8 @@ another process: held
 run: busy
 after it exits: run: completed; promoted 7, reclaimed 0 (0 bytes)
 run: busy
+
+== a copy without queued deletion refuses a collection
+collect: refused: bucket: a remote copy without queued deletion would be sent one delete request per chunk
+abort: allowed
+dry run: bucket 0
