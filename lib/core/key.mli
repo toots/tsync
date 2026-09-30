@@ -1,8 +1,8 @@
 (** Stored keys and prefixes (spec 01 §2.1, 02 §2.3).
 
     A key is built only by the namers below or by {!of_string}, the validating
-    boundary for names that come from outside (a listing, a peer, a job
-    record); no free string reaches a store. *)
+    boundary for names that come from outside (a listing, a peer, a job record);
+    no free string reaches a store. *)
 
 type t = private string
 type prefix = private string

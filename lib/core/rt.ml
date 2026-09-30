@@ -387,6 +387,38 @@ module Condition = struct
       | Some w -> if not (w (Ok ())) then signal t
 end
 
+module Signal = struct
+  type t = {
+    m : Mutex.t;
+    mutable version : int;
+    mutable waiters : ((unit, exn) result -> bool) list;
+  }
+
+  let create () = { m = Mutex.create (); version = 0; waiters = [] }
+  let version t = Mutex.protect t.m (fun () -> t.version)
+
+  let wait ?since t =
+    suspend (fun resolve ->
+        Mutex.lock t.m;
+        match since with
+          | Some v when v <> t.version ->
+              Mutex.unlock t.m;
+              ignore (resolve (Ok ()))
+          | _ ->
+              t.waiters <- resolve :: t.waiters;
+              Mutex.unlock t.m)
+
+  let broadcast t =
+    let ws =
+      Mutex.protect t.m (fun () ->
+          t.version <- t.version + 1;
+          let l = t.waiters in
+          t.waiters <- [];
+          l)
+    in
+    List.iter (fun w -> ignore (w (Ok ()))) ws
+end
+
 module Semaphore = struct
   type t = {
     m : Mutex.t;

@@ -2,7 +2,7 @@
 ; <name>.expected snapshot, so a change reads as a diff.
 
 (executables
- (names rt_test core_test)
+ (names rt_test core_test dqueue_test)
  (libraries tsync_core unix))
 
 (rule
@@ -24,3 +24,13 @@
  (alias runtest)
  (action
   (diff core_test.expected core_test.output)))
+
+(rule
+ (with-stdout-to
+  dqueue_test.output
+  (run ./dqueue_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff dqueue_test.expected dqueue_test.output)))

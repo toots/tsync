@@ -11,7 +11,8 @@ val v : string -> t
 
 val to_string : t -> string
 
-(** The only form writers produce: [<first 12 hex of the uuid>-<counter hex>]. *)
+(** The only form writers produce: [<first 12 hex of the uuid>-<counter hex>].
+*)
 val mint : uuid:string -> counter:int -> t
 
 val is_root : t -> bool

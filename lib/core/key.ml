@@ -2,9 +2,15 @@ type t = string
 type prefix = string
 
 let of_string s = if Names.valid_key s then Some s else None
-let v ?(op = "") s = if Names.valid_key s then s else Fail.invalid ~op "invalid key %S" s
+
+let v ?(op = "") s =
+  if Names.valid_key s then s else Fail.invalid ~op "invalid key %S" s
+
 let prefix_of_string s = if Names.valid_prefix s then Some s else None
-let prefix ?(op = "") s = if Names.valid_prefix s then s else Fail.invalid ~op "invalid prefix %S" s
+
+let prefix ?(op = "") s =
+  if Names.valid_prefix s then s else Fail.invalid ~op "invalid prefix %S" s
+
 let to_string k = k
 let prefix_to_string p = p
 let as_prefix k = k ^ "/"
@@ -13,7 +19,9 @@ let equal = String.equal
 let compare = String.compare
 
 let rel p k =
-  if under p k then String.sub k (String.length p) (String.length k - String.length p) else invalid_arg "Key.rel"
+  if under p k then
+    String.sub k (String.length p) (String.length k - String.length p)
+  else invalid_arg "Key.rel"
 
 let root = "tsync/"
 let domain_prefix d = "tsync/" ^ Domain_name.to_string d ^ "/"
@@ -31,10 +39,16 @@ let verify_jobs d = "tsync/verify-jobs/" ^ Domain_name.to_string d ^ "/"
 let gc_jobs d = "tsync/gc-jobs/" ^ Domain_name.to_string d ^ "/"
 let shares = "tsync/shares/"
 let share_cache = "tsync/shares/cache/"
-let share token = if token <> "" && Names.valid_leaf token then Some (shares ^ token) else None
+
+let share token =
+  if token <> "" && Names.valid_leaf token then Some (shares ^ token) else None
+
 let shard_prefix d sss = chunks d ^ sss ^ "/"
 let chunk d k = chunks d ^ Chunk_key.shard k ^ "/" ^ Chunk_key.to_string k
-let chunk_from d k = chunks_from d ^ Chunk_key.shard k ^ "/" ^ Chunk_key.to_string k
+
+let chunk_from d k =
+  chunks_from d ^ Chunk_key.shard k ^ "/" ^ Chunk_key.to_string k
+
 let namespace d id = manifests d ^ Folder_id.to_string id ^ "/"
 let child d id leaf = namespace d id ^ Xxh.dual leaf
 let anchor d id = namespace d id ^ ".tsync-parent"
@@ -50,27 +64,32 @@ let roots d = [domain_prefix d; corrupted d; verify_jobs d; gc_jobs d]
 let split_last s =
   match String.rindex_opt s '/' with
     | None -> ("", s)
-    | Some i -> (String.sub s 0 i, String.sub s (i + 1) (String.length s - i - 1))
+    | Some i ->
+        (String.sub s 0 i, String.sub s (i + 1) (String.length s - i - 1))
 
 let leaf k = snd (split_last k)
 let parent_segment k = leaf (fst (split_last k))
 
 let rfind sub s =
   let n = String.length sub in
-  let rec go i = if i < 0 then None else if String.sub s i n = sub then Some i else go (i - 1) in
+  let rec go i =
+    if i < 0 then None else if String.sub s i n = sub then Some i else go (i - 1)
+  in
   go (String.length s - n)
 
 let chunk_of k =
   match String.split_on_char '/' k with
     | ["tsync"; _; "chunks"; sss; leaf] -> (
-        match Chunk_key.of_string leaf with Some c when Chunk_key.shard c = sss -> Some c | _ -> None)
+        match Chunk_key.of_string leaf with
+          | Some c when Chunk_key.shard c = sss -> Some c
+          | _ -> None)
     | _ -> None
 
 (* 02 §2.3: only a surviving-space chunk has a marker, found from the last
    [/chunks/] segment. *)
 let marker_of k =
   if not (String.starts_with ~prefix:root k) then None
-  else
+  else (
     match rfind "/chunks/" k with
       | None -> None
       | Some i -> (
@@ -81,7 +100,7 @@ let marker_of k =
                 match Chunk_key.of_string leaf with
                   | Some c when Chunk_key.shard c = sss -> Some (marker d c)
                   | _ -> None)
-            | _ -> None)
+            | _ -> None))
 
 let chunk_of_marker k =
   match String.split_on_char '/' k with
@@ -91,14 +110,19 @@ let chunk_of_marker k =
           | _ -> None)
     | _ -> None
 
-let after p k = if String.starts_with ~prefix:p k then Some (String.sub k (String.length p) (String.length k - String.length p)) else None
+let after p k =
+  if String.starts_with ~prefix:p k then
+    Some (String.sub k (String.length p) (String.length k - String.length p))
+  else None
 
 let parse_verify_job k =
   match after "tsync/verify-jobs/" k with
     | None -> None
     | Some rest -> (
         let d, sss = split_last rest in
-        match Domain_name.of_string d with Ok d when Names.valid_shard sss -> Some (d, sss) | _ -> None)
+        match Domain_name.of_string d with
+          | Ok d when Names.valid_shard sss -> Some (d, sss)
+          | _ -> None)
 
 let parse_discard_job k =
   match after "tsync/gc-jobs/" k with
@@ -106,16 +130,27 @@ let parse_discard_job k =
     | Some rest -> (
         let rest', shard = split_last rest in
         let d, run = split_last rest' in
-        match Domain_name.of_string d with Ok d when run <> "" && Names.valid_shard shard -> Some (d, run, shard) | _ -> None)
+        match Domain_name.of_string d with
+          | Ok d when run <> "" && Names.valid_shard shard ->
+              Some (d, run, shard)
+          | _ -> None)
 
 let is_internal_leaf leaf = String.starts_with ~prefix:".tsync-" leaf
 
 let is_child_of ~namespace k =
-  match after namespace k with Some rest -> rest <> "" && (not (String.contains rest '/')) && not (is_internal_leaf rest) | None -> false
+  match after namespace k with
+    | Some rest ->
+        rest <> ""
+        && (not (String.contains rest '/'))
+        && not (is_internal_leaf rest)
+    | None -> false
 
 let folder_of_namespace_key d k =
   match after (manifests d) k with
-    | Some rest -> (match String.index_opt rest '/' with Some i -> Folder_id.of_string (String.sub rest 0 i) | None -> None)
+    | Some rest -> (
+        match String.index_opt rest '/' with
+          | Some i -> Folder_id.of_string (String.sub rest 0 i)
+          | None -> None)
     | None -> None
 
 let run_name started = Printf.sprintf "%013.0f" (Float.round (started *. 1000.))

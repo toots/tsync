@@ -1,0 +1,15 @@
+== ordered: head retry keeps order, a refusal parks and later records pass
+ran: a#0 flaky#0 flaky#1 flaky#2 refused#0 b#0
+parked: refused/other; records on disk: 1
+
+== keyed: a new post replaces the pending job and cancels the running one
+ran: other#0 slow.1#0 slow.3#0
+records on disk: 0
+
+== restart: records persist, undecodable ones are set aside, held submissions wait
+ran: x#0; set aside: 00000000000000000001-00000000-1.bad
+after release: x#0 held#0
+
+== pause holds everything
+while paused: [], pending 1
+after resume: p#0

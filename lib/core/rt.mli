@@ -115,6 +115,18 @@ module Condition : sig
   val broadcast : t -> unit
 end
 
+(** A broadcast with no mutex and no value. A waiter reads {!Signal.version}
+    before checking its state and passes it as [since], so a broadcast between
+    the check and the wait is not lost. *)
+module Signal : sig
+  type t
+
+  val create : unit -> t
+  val version : t -> int
+  val wait : ?since:int -> t -> unit
+  val broadcast : t -> unit
+end
+
 (** Counting semaphore with FIFO hand-off. *)
 module Semaphore : sig
   type t
