@@ -158,5 +158,4 @@ let stop verbose =
                   0))
 
 let stop_cmd = cmd "stop" ~doc:"Stop tsync." Term.(const stop $ verbose)
-
 let cmds = [start_cmd; owner_cmd; stop_cmd]

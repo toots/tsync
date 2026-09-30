@@ -186,13 +186,14 @@ let native fd { host; ca_file } =
             Option.iter raw.write resp;
             Option.iter (Buffer.add_string pending) data;
             if e <> None then eof := true
-        | Error (failure, `Response resp) ->
+        | Error (failure, `Response resp) -> (
             (try raw.write resp with _ -> ());
-            (match failure with
+            match failure with
               | `Error (`AuthenticationFailure e) ->
                   untrusted host
                     (Format.asprintf "%a" X509.Validation.pp_validation_error e
-                    |> String.split_on_char '\n' |> List.rev |> List.hd |> String.trim)
+                    |> String.split_on_char '\n' |> List.rev |> List.hd
+                    |> String.trim)
               | f -> tls_failure host (Tls.Engine.string_of_failure f)))
   in
   while Tls.Engine.handshake_in_progress !state && not !eof do
@@ -253,13 +254,17 @@ let connect_fd ~host ~port =
               match Rt.wait_writable ~timeout:connect_timeout fd with
                 | exception Rt.Timeout ->
                     Unix.close fd;
-                    try_ (Some (Unix.Unix_error (ETIMEDOUT, "connect", host))) rest
+                    try_
+                      (Some (Unix.Unix_error (ETIMEDOUT, "connect", host)))
+                      rest
                 | () -> (
                     match Unix.getsockopt_error fd with
                       | None -> fd
                       | Some e ->
                           Unix.close fd;
-                          try_ (Some (Unix.Unix_error (e, "connect", host))) rest))
+                          try_
+                            (Some (Unix.Unix_error (e, "connect", host)))
+                            rest))
           | exception e ->
               Unix.close fd;
               try_ (Some e) rest)
