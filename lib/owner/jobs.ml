@@ -239,17 +239,18 @@ let integrity io (dom : Tsync_domain.Domain.t) ~repair ~apply ~detail ~source =
       I.repair_chunks ~narrate:io.narrate ~apply ?source ~cancelled:io.cancelled
         r
     in
+    let acted verb = if apply then verb else "would be " ^ verb in
     let outcome = function
-      | Integrity.Deleted -> "deleted"
-      | Anchored -> "anchored"
-      | Adopted -> "adopted into the trash"
+      | Integrity.Deleted -> acted "deleted"
+      | Anchored -> acted "anchored"
+      | Adopted -> acted "adopted into the trash"
       | Young -> "left: younger than the grace"
       | Nested -> "left: inside an unreachable folder"
       | Left -> "left: resolve by hand"
       | Failed _ -> "failed"
     and chunk_outcome = function
-      | Integrity.Cleared -> "rewritten from their own copy"
-      | Repaired _ -> "repaired from another member"
+      | Integrity.Cleared -> acted "rewritten from their own copy"
+      | Repaired _ -> acted "repaired from another member"
       | Unrepairable -> "unrepairable"
     in
     List.iter
