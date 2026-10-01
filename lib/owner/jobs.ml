@@ -4,6 +4,7 @@ open Tsync_gc
 type copies = Probe | Outstanding | Retry_outstanding [@@deriving yojson]
 
 type t =
+  | Sync of { full : bool }
   | Gc of { apply : bool; verify : bool; abort : bool; budget : float option }
   | Gc_copies of copies
   | Expire of { apply : bool; cutoff : float }
@@ -33,6 +34,8 @@ type t =
 [@@deriving yojson]
 
 let kind = function
+  | Sync { full = true } -> "sync --full"
+  | Sync _ -> "sync"
   | Gc { abort = true; _ } -> "gc --abort"
   | Gc { apply = true; _ } -> "gc --apply"
   | Gc _ -> "gc"
@@ -412,6 +415,21 @@ let run io (dom : Tsync_domain.Domain.t) engine = function
   | Gc_copies act -> copies io dom.composite act
   | Expire { apply; cutoff } -> expire io dom ~apply ~cutoff
   | Purge { apply; path } -> purge io dom ~apply ~path
+  | Sync { full } -> (
+      let module E = (val engine : Tsync_sync.Engine.S) in
+      match E.resync ~narrate:io.narrate ~full () with
+        | `Incremental n ->
+            io.out
+              (Printf.sprintf "%s from other clients"
+                 (Narrate.count ~plural:"journal entries" n "journal entry"));
+            0
+        | `Full (manifests, failed) ->
+            io.out
+              (Printf.sprintf "full resync: %s%s"
+                 (Narrate.count manifests "manifest")
+                 (if failed > 0 then Printf.sprintf " (%d failed)" failed
+                  else ""));
+            if failed > 0 then 1 else 0)
   | Mirror { source; manifests; path } ->
       if dom.domain.read_only then
         Fail.raise_ Fail.Read_only "%s is read-only"

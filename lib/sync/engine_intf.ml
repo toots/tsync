@@ -145,11 +145,12 @@ module type S = sig
   val apply_pass : unit -> int
 
   (** A full rebuild from the store's tree: manifests walked and failures. *)
-  val rebuild : ?parallelism:int -> unit -> int * int
+  val rebuild : ?narrate:Narrate.t -> ?parallelism:int -> unit -> int * int
 
   (** One pass, or a rebuild when [full] or when the client cannot bridge
       (manifests walked and failures). *)
   val resync :
+    ?narrate:Narrate.t ->
     ?full:bool ->
     ?parallelism:int ->
     unit ->

@@ -6,6 +6,7 @@ open Tsync_core
 type copies = Probe | Outstanding | Retry_outstanding [@@deriving yojson]
 
 type t =
+  | Sync of { full : bool }
   | Gc of { apply : bool; verify : bool; abort : bool; budget : float option }
   | Gc_copies of copies
   | Expire of { apply : bool; cutoff : float }

@@ -5,37 +5,6 @@ open Cli
 
 (* 07 §2.5: the owner runs the job and streams its lines; Ctrl-C asks it to
    stop at its next unit boundary. *)
-let job ?name verbose job =
-  let config = config () in
-  let dom = domain ?name config in
-  let socket = Tsync_config.Paths.owner_socket dom.name in
-  Tsync_owner.Owner.request
-    ~what:("tsync " ^ Tsync_owner.Jobs.kind job)
-    config dom
-    ~on_line:(function
-      | Started id ->
-          Rt.spawn ~name:"cancel" (fun () ->
-              Stop.wait ();
-              prerr_endline
-                "tsync: cancelling; the job stops at its next unit boundary";
-              try
-                ignore
-                  (Tsync_owner.Protocol.call socket
-                     (Tsync_owner.Protocol.Cancel id))
-              with e -> Log.warn "cannot cancel: %s" (Printexc.to_string e))
-      | line -> Tsync_owner.Handler.print_line line)
-    (Tsync_owner.Protocol.Job { job; narrate = verbose })
-
-(* Before the runtime starts, so every thread inherits the mask. *)
-let run_job ?name verbose j =
-  set_verbose verbose;
-  Tsync_owner.Owner.stop_on_signals
-    ~second:(fun () ->
-      prerr_endline "tsync: interrupted again; exiting now";
-      Unix._exit 130)
-    ();
-  run (fun () -> job ?name verbose j)
-
 let print_status (s : Collector.status) =
   say "%s: %s; generation %s%s" s.collected
     (match s.record with

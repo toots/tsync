@@ -28,23 +28,7 @@ let pause_cmd name on =
       (if on then "Hold every change of the domain." else "Resume the domain.")
     Term.(const (pause on) $ domain_arg $ verbose)
 
-let sync full name verbose =
-  set_verbose verbose;
-  run (fun () ->
-      let _, r =
-        owner_request ~bulk:true
-          ~what:(if full then "tsync sync --full" else "tsync sync")
-          name
-          (Sync { full })
-      in
-      match r with
-        | Full { manifests; failed } ->
-            say "full resync: %d manifests%s" manifests
-              (if failed > 0 then Printf.sprintf " (%d failed)" failed else "");
-            if failed > 0 then 1 else 0
-        | Incremental applied ->
-            say "%d journal entries from other clients" applied;
-            0)
+let sync full name verbose = run_job ?name verbose (Sync { full })
 
 let sync_cmd =
   let full =

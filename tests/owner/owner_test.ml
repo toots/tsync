@@ -261,9 +261,15 @@ let () =
       let line l =
         match Ipc.field l "stream" with
           | Some "narrate" -> incr narrated
-          | Some "progress" -> incr progressed
+          | Some "progress" ->
+              if Ipc.field l "text" <> Some "" then incr progressed
           | _ -> show "  line" l
       in
+      show "sync --full, narrated"
+        (Ipc.call_stream socket
+           (job ~narrate:true (Sync { full = true }))
+           ~on_line:line);
+      p "  progress streamed: %b" (!progressed > 0);
       show "gc dry run, narrated"
         (Ipc.call_stream socket (job ~narrate:true (gc ())) ~on_line:line);
       p "  narration streamed: %b, progress streamed: %b" (!narrated > 0)

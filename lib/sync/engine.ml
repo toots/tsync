@@ -808,7 +808,7 @@ module Make (C : Engine_ctx.S) = struct
   (* wal-and-journal §4.8 and 05 §4.7: rewrite the mirror in place from a
      complete walk, report the differences in the applied log, then move the
      mark; nothing is swept after an incomplete walk. *)
-  let rebuild ?(parallelism = 32) () =
+  let rebuild ?(narrate = Narrate.none) ?(parallelism = 32) () =
     if metadata_owed () then
       Fail.raise_ Fail.Unprepared
         "metadata operations are not published yet, and a rebuild would undo \
@@ -816,6 +816,12 @@ module Make (C : Engine_ctx.S) = struct
     let t0 = Unix.gettimeofday () in
     let listing = Journal.list_entries journal in
     let failures = ref 0 and diffs = ref [] and manifests = ref 0 in
+    let folders = ref 0 in
+    let walked () =
+      Narrate.progress narrate "walking the store: %s, %s"
+        (Narrate.count !folders "folder")
+        (Narrate.count !manifests "file")
+    in
     let seen_files = Hashtbl.create 4096 and seen_dirs = Hashtbl.create 1024 in
     let on_unusable =
       Tree.Skip
@@ -830,6 +836,8 @@ module Make (C : Engine_ctx.S) = struct
            match e.body with
              | Dir m ->
                  let p = Names.join dir m.name in
+                 incr folders;
+                 walked ();
                  Hashtbl.replace seen_dirs p ();
                  with_meta (fun () ->
                      match
@@ -847,6 +855,7 @@ module Make (C : Engine_ctx.S) = struct
                        | `Held _ -> ())
              | File m ->
                  incr manifests;
+                 walked ();
                  let p = Names.join dir m.name in
                  Hashtbl.replace seen_files p ();
                  with_meta (fun () ->
@@ -900,6 +909,7 @@ module Make (C : Engine_ctx.S) = struct
                         diffs := Op.Delete p :: !diffs))
               (Mirror.list mirror rel)
           in
+          Narrate.progress narrate "removing what the store no longer has";
           sweep "";
           Mirror.rebuild_index mirror);
       let ops = List.rev !diffs in
@@ -927,10 +937,14 @@ module Make (C : Engine_ctx.S) = struct
     (* A rebuild churns through every manifest of the domain: its garbage is
        given back to the kernel, not left in the allocator's arenas. *)
     Usage.release ();
+    Narrate.say narrate "rebuilt from %s and %s in %s"
+      (Narrate.count !folders "folder")
+      (Narrate.count !manifests "file")
+      (Narrate.duration (Unix.gettimeofday () -. t0));
     (!manifests, !failures)
 
   (* 05 §4.7: a pass, or a rebuild when the client cannot bridge (or when asked). *)
-  let resync ?(full = false) ?parallelism () =
+  let resync ?narrate ?(full = false) ?parallelism () =
     let full =
       full
       ||
@@ -940,14 +954,14 @@ module Make (C : Engine_ctx.S) = struct
     in
     if full then (
       Dqueue.settle ~timeout:60. metadata;
-      let m, f = rebuild ?parallelism () in
+      let m, f = rebuild ?narrate ?parallelism () in
       `Full (m, f))
     else (
       Atomic.set bridge_state Incremental;
       let n = apply_pass () in
       match Atomic.get bridge_state with
         | Hold _ ->
-            let m, f = rebuild ?parallelism () in
+            let m, f = rebuild ?narrate ?parallelism () in
             `Full (m, f)
         | Incremental -> `Incremental n)
 
