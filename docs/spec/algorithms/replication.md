@@ -292,7 +292,7 @@ read(f):
 
 **`verify_all`** asks every readable member when every main is up, and only the mains otherwise: a verification request is an object written into the store, and the write guard applies. The results are summed. `Unsupported` is returned only if every member asked answered it. Backfills are reached only by the per-member verification command ([05-ops-config.md](../05-ops-config.md)).
 
-**`discard`** is always `Unsupported` at the composite. Collection deletes on copies are jobs (§4.8).
+The composite declares no **`bucket_functions`**: collection deletes on copies are jobs (§4.8), and each copy's own declaration, with its owner's confirmation, decides how they are executed.
 
 ### 4.8 Deletions on copies outside the worker
 

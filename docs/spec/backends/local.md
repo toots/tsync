@@ -75,7 +75,7 @@ Why each fsync: the file's fsync keeps a crash from leaving the final name on an
 | `watch(k, last_seen)` | §8. |
 | `get_many`, `list_many` | Not declared: filesystem reads are not round trips. |
 | `verify_all` | `Unsupported`. Every write is already checked; whole-store checking is the client-side sweep ([05-ops-config.md](../05-ops-config.md)). |
-| `discard` | `Unsupported`. A collection on a local main deletes on the machine it runs on. |
+| `bucket_functions` | `false`. A local copy is deleted directly, one unlink per chunk on the machine that holds it. |
 | `capabilities(_)` | `{share_url = none; chunk_size = none; max_concurrency = an implementation's estimate of the device's useful concurrency, or none; verified = verifyWrites}`. |
 | `fast_read` / `local_path` | `true` / the root. |
 

@@ -90,7 +90,7 @@ The value of a watched key, as a watch compares it: the object's body with leadi
 | `watch(k, last_seen)` | unit (§3.7) | returns like any other | — |
 | `get_many`, `list_many` | optional (§3.8) | | |
 | `verify_all(chunk_prefix)` | `Queued(n)` or `Unsupported` (§3.8) | | |
-| `discard(chunk_prefix, run, name, keys)` | `Queued` or `Unsupported` (§3.8) | | |
+| `bucket_functions` | bool, a declaration (§3.8) | | |
 | `capabilities(prefix)` | caps (§2.3) for the domain the prefix identifies | | |
 | `fast_read` | whether reading a whole chunk costs about what a range does | | |
 | `local_path` | a directory granting in-process code filesystem access to the store's tree, or none | | |
@@ -159,15 +159,12 @@ The value of a watched key, as a watch compares it: the object's body with leadi
 
 **`verify_all(chunk_prefix)`** queues a server-side check of every chunk under the prefix. It answers `Queued(n)`, the number of units queued (not findings), or `Unsupported`.
 
-**`discard(chunk_prefix, run, name, keys)`** hands unreferenced chunks to the store's server-side deleter:
+**`bucket_functions`** (a declaration): requests put under `tsync/verify-jobs/` and `tsync/gc-jobs/` on this store may be consumed by a server-side function ([backends/object-store-common.md §5](backends/object-store-common.md#5-the-verify-function)). A store that declares it says only that its provider can run one; **whether one is deployed is the domain owner's knowledge**, from the probe of object-store-common §3 saved in its local state.
 
-- `Queued` means the request is durably stored before the call returns, and a consumer is known to be deployed on this store. It is never a detached promise.
-- `Unsupported` means the caller deletes the chunks itself with `delete_multi`.
-- A store MUST NOT answer `Queued` unless both conditions hold.
-- A `Queued` request is consumed later, at-least-once, by a party this client does not see. Until it is consumed, the named chunks are still on the store.
-- A collection never calls `discard` or `delete_multi` on a copy directly: its deletions on copies are jobs in the copies' durable job logs ([gc §5.7](algorithms/gc.md#57-deletion-on-copies), [replication §4.8](algorithms/replication.md#48-deletions-on-copies-outside-the-worker)).
-- **When a store answers `Queued`, its collection deletions MUST go through `discard`.** Deleting from the client costs one request per chunk: a collection's garbage on a media library is hundreds of thousands of chunks, days of requests against a copy's rate limits and quota. `delete_multi` on a copy is the fallback for stores that cannot run a deleter (a filesystem copy, or a provider without bucket-side functions).
-- **Every driver of a remote store SHOULD provide a server-side deleter wherever its provider can run one** (a bucket function triggered on object creation, [backends/object-store-common.md §5](backends/object-store-common.md#5-the-verify-function)), and answer `Queued` once it is confirmed. A driver that cannot MUST say so in its own spec file, with the cost of the fallback.
+- A request is an ordinary `put` of the request object; a consumer deletes it when done. Until it is consumed, the named chunks are still on the store, and a request can be consumed at-least-once, by a party this client does not see.
+- A collection never deletes on a copy directly: its deletions on copies are jobs in the copies' durable job logs ([gc §5.7](algorithms/gc.md#57-deletion-on-copies), [replication §4.8](algorithms/replication.md#48-deletions-on-copies-outside-the-worker)).
+- **When the owner has confirmed a copy's function, its collection deletions MUST go through requests.** Deleting from the client costs one request per chunk: a collection's garbage on a media library is hundreds of thousands of chunks, days of requests against a copy's rate limits and quota. `delete_multi` on a copy is the fallback for stores that cannot run a function (a filesystem copy, or a provider without bucket-side functions).
+- **Every driver of a remote store SHOULD declare `bucket_functions` wherever its provider can run one**, and a deployment SHOULD install it ([backends/object-store-common.md §5.5](backends/object-store-common.md#55-deployment-requirements)). A driver that cannot MUST say so in its own spec file, with the cost of the fallback.
 
 ### 3.9 Capabilities, `fast_read`, `local_path`, `health`
 
@@ -184,7 +181,7 @@ The value of a watched key, as a watch compares it: the object's body with leadi
 - Never emulate `put_if_absent`, and never fall back from it (§3.3).
 - Never read "absent" into a failure, and never read "done" into a failed `delete_multi`.
 - Re-read after a watch returns. Never assume a change happened.
-- Treat `Queued` from `discard` as "not yet deleted" until consumption is observed.
+- Treat a discard request as "not yet executed" until the request object is gone.
 
 ---
 
@@ -277,7 +274,7 @@ An implementation MUST make each of these one atomic step with respect to every 
 4. **Claims are real preconditions, never emulated and never abandoned for a plain write.**
 5. **"Could not look" is never "not there".**
 6. **Admission per attempt, at the store.** Retries, copies and job objects cross the same link as first attempts. Counting in the content layer missed GC, mirror and repair.
-7. **Capabilities are evidence.** A store claims `verified` or `Queued` only when it knows the checker or the consumer is there.
+7. **Capabilities are evidence.** A store claims `verified` only when it knows the checker is there, and a copy's deletions go through requests only once its owner has confirmed the consumer.
 8. **Listings are one store's view and are never merged** ([algorithms/replication.md](algorithms/replication.md)).
 
 ---
@@ -295,7 +292,7 @@ A conforming store, run against a real service where it has one:
 - Keys holding `& < > " ' + % # ? space` and non-ASCII characters round-trip through put, get, listing and `delete_multi`. Invalid keys (`..`, `.`, empty segments, a leading or trailing `/`) are refused INVALID before any request, and never reach a file or the network.
 - `list_prefix` answers in ascending key order, honours `max_keys` exactly, answers a listing longer than one page whole, and omits names that are not valid keys.
 - `get_many`, where declared, answers every key once in request order, across pages.
-- `capabilities.verified`, `verify_all` and `discard` answer as the store's checker actually runs: `verify_all` queues one unit per shard; a `discard` request carries exactly its keys; a deployed consumer deletes the named chunk.
+- `capabilities.verified` and `verify_all` answer as the store's checker actually runs, and `verify_all` queues one unit per shard; a discard request carries exactly its keys, and a deployed consumer deletes the named chunks, then the request.
 - Classification: a TRANSIENT failure is retried to the ladder's limit; a REFUSED one is attempted once; a health cell trips after link failures, recovers after one answer, and is kept up by a considered "no".
 - Every upload attempt, retries included, passes admission once and reports once; a best-effort write refused admission sends nothing.
 - Traffic: only bytes crossing a link count, and a filesystem store counts nothing; a lost claim counts the upload plus the holder's body read back; a put through a composite with two mains counts on both; counters are per store and summed per process.
