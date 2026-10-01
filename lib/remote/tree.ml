@@ -315,18 +315,75 @@ module Make (C : Context.S) = struct
 
   (* 02 §4.5: the listing is the truth; each child object is read and
      classified. *)
-  let children ?(on_unusable = Fail_on_unusable) id =
+  (* 02 §2.10: with two readable members a listing and an index may come from
+     different stores, so only a domain with one reads or writes indexes. *)
+  let indexing = lazy (List.length (Composite.readable C.composite) = 1)
+
+  let read_index (listed : Store.entry list) id =
+    let key = Key.index d id in
+    match
+      List.find_opt (fun (e : Store.entry) -> Key.equal e.key key) listed
+    with
+      | Some e when e.size <= Folder_index.max_bytes && Lazy.force indexing -> (
+          match Option.bind (get key) Folder_index.decode with
+            | Some entries ->
+                let t = Hashtbl.create (List.length entries) in
+                List.iter
+                  (fun (x : Folder_index.entry) -> Hashtbl.replace t x.key x)
+                  entries;
+                t
+            | None -> Hashtbl.create 0)
+      | _ -> Hashtbl.create 0
+
+  let children ?(on_unusable = Fail_on_unusable) ?(write_index = false) id =
     let ns = Key.namespace d id in
+    let listed = store.list_prefix ns in
     let listing =
       List.filter
         (fun (e : Store.entry) -> Key.is_child_of ~namespace:ns e.key)
-        (store.list_prefix ns)
+        listed
     in
+    let index = read_index listed id in
+    let from_index (e : Store.entry) =
+      match (e.etag, Hashtbl.find_opt index (Key.to_string e.key)) with
+        | Some tag, Some x when x.etag = tag -> Some x.body
+        | _ -> None
+    in
+    let need = List.filter (fun e -> from_index e = None) listing in
+    let read = Hashtbl.create (List.length need) in
+    List.iter
+      (fun (k, b) ->
+        Hashtbl.replace read (Key.to_string k)
+          (Option.map Bigstring.to_string b))
+      (Store.read_many store need);
     let bodies =
       List.map
-        (fun (_, b) -> Option.map Bigstring.to_string b)
-        (Store.read_many store listing)
+        (fun (e : Store.entry) ->
+          match from_index e with
+            | Some b -> Some b
+            | None -> Option.join (Hashtbl.find_opt read (Key.to_string e.key)))
+        listing
     in
+    let n = List.length listing in
+    let served = n - List.length need in
+    if
+      write_index && Lazy.force indexing && n > 1
+      && n <= Folder_index.max_children
+      && served * 4 < n * 3
+    then (
+      let entries =
+        List.filter_map
+          (fun ((e : Store.entry), b) ->
+            match (e.etag, b) with
+              | Some etag, Some body ->
+                  Some { Folder_index.key = Key.to_string e.key; etag; body }
+              | _ -> None)
+          (List.combine listing bodies)
+      in
+      try put (Key.index d id) (Folder_index.encode entries)
+      with e when not (Rt.is_cancelled e) ->
+        Log.debug "folder index of %s not written: %s" (Folder_id.to_string id)
+          (Printexc.to_string e));
     entries_of ~id ~on_unusable listing bodies
 
   let find id names =
@@ -360,10 +417,10 @@ module Make (C : Context.S) = struct
      [width] folders fetched ahead so at most that many listings wait in memory.
 
      A folder failing transiently under [Skip] is retried once after the walk. *)
-  let fold_tree ?(on_unusable = Fail_on_unusable) ?(width = C.max_downloads) id
-      ~root_path f acc =
+  let fold_tree ?(on_unusable = Fail_on_unusable) ?(width = C.max_downloads)
+      ?write_index id ~root_path f acc =
     let width = max 1 width in
-    let fetch id = Rt.async (fun () -> children ~on_unusable id) in
+    let fetch id = Rt.async (fun () -> children ~on_unusable ?write_index id) in
     let acc = ref acc and later = ref [] in
     let rec prefetch n = function
       | [] -> ()

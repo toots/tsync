@@ -746,6 +746,8 @@ let domain t = t.core.domain
 let members t =
   t.core.mains @ List.map (fun c -> c.member) t.core.copies @ t.core.archives
 
+let readable t = t.core.readable
+
 let in_read_order t =
   List.stable_sort
     (fun a b -> compare (read_rank a.role) (read_rank b.role))

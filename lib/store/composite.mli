@@ -85,6 +85,9 @@ val domain : t -> Domain_name.t
 (** Mains, copies, archives. *)
 val members : t -> member list
 
+(** The members reads go to: the mains, then the copies that reach. *)
+val readable : t -> member list
+
 (** The members readable first, backfills last: the order a reader or a command
     picking one member tries them in. *)
 val in_read_order : t -> member list

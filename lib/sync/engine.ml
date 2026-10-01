@@ -821,7 +821,8 @@ module Make (C : Engine_ctx.S) = struct
           Log.warn "resync: %s" (Tree.describe_unusable u))
     in
     ignore
-      (T.fold_tree ~on_unusable ~width:parallelism Folder_id.root ~root_path:""
+      (T.fold_tree ~on_unusable ~width:parallelism ~write_index:true
+         Folder_id.root ~root_path:""
          (fun () dir (e : Tree.entry) ->
            match e.body with
              | Dir m ->

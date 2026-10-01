@@ -27,3 +27,18 @@
  (alias runtest)
  (action
   (diff remote_test.expected remote_test.output)))
+
+(executable
+ (name index_test)
+ (modules index_test)
+ (libraries tsync_core tsync_store tsync_remote unix))
+
+(rule
+ (with-stdout-to
+  index_test.output
+  (run ./index_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff index_test.expected index_test.output)))

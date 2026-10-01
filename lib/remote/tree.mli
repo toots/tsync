@@ -102,8 +102,11 @@ module Make (_ : Context.S) : sig
   val remove_marker_if :
     parent:Folder_id.t -> name:string -> Folder_id.t -> unit
 
-  (** A folder's children, classified; disowned markers dropped. *)
-  val children : ?on_unusable:on_unusable -> Folder_id.t -> entry list
+  (** A folder's children, classified; disowned markers dropped. Bodies come
+      from the folder index where its entity tags still match (02 §2.10);
+      [write_index] (default false) lets this walker rewrite the index. *)
+  val children :
+    ?on_unusable:on_unusable -> ?write_index:bool -> Folder_id.t -> entry list
 
   (** One read per segment, no listing. *)
   val find :
@@ -116,6 +119,7 @@ module Make (_ : Context.S) : sig
   val fold_tree :
     ?on_unusable:on_unusable ->
     ?width:int ->
+    ?write_index:bool ->
     Folder_id.t ->
     root_path:string ->
     ('a -> string -> entry -> 'a) ->
