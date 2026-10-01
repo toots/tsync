@@ -92,12 +92,13 @@ val rescan : t -> unit
 val rearm : t -> int
 val pause : t -> unit
 val resume : t -> unit
+
 (** Run the copies' queues to completion within [timeout]; the owner then
     settles the collection generation once. *)
 val settle : ?timeout:float -> t -> unit
 
-(** The job a copy log is running: its key, how long it has run, the chunks
-    its manifest names and how many are checked, and the bytes sent. *)
+(** The job a copy log is running: its key, how long it has run, the chunks its
+    manifest names and how many are checked, and the bytes sent. *)
 type job_progress = {
   job : string;
   file : (string * int) option;  (** a manifest's name and size *)
@@ -134,8 +135,8 @@ val submit_collection_delete :
   generation:int ->
   unit
 
-(** Collection deletions of this generation not yet settled on any copy, in
-    this process's queues or submitted to the owner. *)
+(** Collection deletions of this generation not yet settled on any copy, in this
+    process's queues or submitted to the owner. *)
 val collection_owed : t -> generation:int -> int
 
 (** Whether this owner confirmed the copy's bucket function within its validity:
@@ -147,8 +148,8 @@ val function_confirmed : t -> member -> bool
 val probe : ?cancelled:(unit -> bool) -> t -> member -> bool
 
 (** Queue a check of every chunk of the domain on a copy whose bucket function
-    this owner confirmed: one verify request per shard (object-store-common
-    §3). *)
+    this owner confirmed: one verify request per shard (object-store-common §3).
+*)
 val queue_verification :
   ?cancelled:(unit -> bool) -> t -> member -> [ `Queued of int | `Unsupported ]
 
