@@ -145,7 +145,7 @@ let housekeeping (module E : Tsync_sync.Engine.S) =
     while true do
       Stop.sleep housekeeping_interval;
       E.poll ();
-      Usage.trim ()
+      Usage.release_if_grown ()
     done
   with Stop.Stopping -> ()
 

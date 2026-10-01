@@ -35,6 +35,13 @@ let sample () =
     cpu_seconds = t.tms_utime +. t.tms_stime;
   }
 
+let heap_bytes () = (Gc.quick_stat ()).heap_words * (Sys.word_size / 8)
+let compacted_heap = Atomic.make 0
+
 let release () =
   Gc.compact ();
-  trim ()
+  trim ();
+  Atomic.set compacted_heap (heap_bytes ())
+
+let release_if_grown ?(by = 64 * 1024 * 1024) () =
+  if heap_bytes () > Atomic.get compacted_heap + by then release () else trim ()

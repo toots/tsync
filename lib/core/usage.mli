@@ -26,3 +26,8 @@ val trim : unit -> unit
 (** After a large operation: compact the OCaml heap, then {!trim}. Stops every
     domain while it compacts. *)
 val release : unit -> unit
+
+(** {!release} when the heap grew by more than [by] bytes (default 64 MiB) since
+    the last one, else {!trim}: for work that never ends, such as a daemon's
+    background copies. *)
+val release_if_grown : ?by:int -> unit -> unit
