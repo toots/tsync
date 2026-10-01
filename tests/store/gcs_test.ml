@@ -225,11 +225,11 @@ let () =
           "2001-09-09T03:46:40+02:00";
           "garbage";
         ];
-      p "delete body: %s\n" (Tsync_gcs.Gcs.delete_body ["a/x"; "a/y"; "<&>\"'"]);
+      p "delete body: %s\n" (Bucket_xml.delete_body ["a/x"; "a/y"; "<&>\"'"]);
       p "no refusals: %d\n"
-        (List.length (Tsync_gcs.Gcs.delete_errors "<DeleteResult/>"));
+        (List.length (Bucket_xml.delete_errors "<DeleteResult/>"));
       List.iter
         (fun (c, k) -> p "refusal %s %s\n" c k)
-        (Tsync_gcs.Gcs.delete_errors
+        (Bucket_xml.delete_errors
            "<DeleteResult><Error><Key>a&amp;b</Key><Code>AccessDenied</Code></Error><Error><Key>c</Key><Code>NoSuchKey</Code></Error></DeleteResult>");
       Server.close server)

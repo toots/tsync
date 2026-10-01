@@ -4,5 +4,3 @@
 
 val segment : string -> string
 val rfc3339 : string -> float
-val delete_body : string list -> string
-val delete_errors : string -> (string * string) list

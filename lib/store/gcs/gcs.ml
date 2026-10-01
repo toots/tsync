@@ -25,68 +25,6 @@ let segment s =
          | c -> Printf.sprintf "%%%02X" (Char.code c))
        (List.of_seq (String.to_seq s)))
 
-let xml_escape s =
-  let b = Buffer.create (String.length s) in
-  String.iter
-    (function
-      | '&' -> Buffer.add_string b "&amp;"
-      | '<' -> Buffer.add_string b "&lt;"
-      | '>' -> Buffer.add_string b "&gt;"
-      | '"' -> Buffer.add_string b "&quot;"
-      | '\'' -> Buffer.add_string b "&apos;"
-      | c -> Buffer.add_char b c)
-    s;
-  Buffer.contents b
-
-let xml_unescape s =
-  List.fold_left
-    (fun s (sub, by) -> Text.replace_all ~sub ~by s)
-    s
-    [
-      ("&lt;", "<");
-      ("&gt;", ">");
-      ("&quot;", "\"");
-      ("&apos;", "'");
-      ("&amp;", "&");
-    ]
-
-(* XML 1.0 carries no control character but tab, newline and carriage return. *)
-let xml_safe s =
-  String.for_all
-    (fun c -> Char.code c >= 0x20 || c = '\t' || c = '\n' || c = '\r')
-    s
-
-let delete_body keys =
-  "<Delete><Quiet>true</Quiet>"
-  ^ String.concat ""
-      (List.map
-         (fun k -> "<Object><Key>" ^ xml_escape k ^ "</Key></Object>")
-         keys)
-  ^ "</Delete>"
-
-(* The <Error> elements of a bulk-delete answer, as (code, key). *)
-let delete_errors body =
-  let between s a b from =
-    match Text.find_from s a from with
-      | None -> None
-      | Some i -> (
-          let i = i + String.length a in
-          match Text.find_from s b i with
-            | Some j -> Some (String.sub s i (j - i), j + String.length b)
-            | None -> None)
-  in
-  let rec go from acc =
-    match between body "<Error>" "</Error>" from with
-      | None -> List.rev acc
-      | Some (e, next) ->
-          let field t =
-            Option.fold ~none:"" ~some:fst
-              (between e ("<" ^ t ^ ">") ("</" ^ t ^ ">") 0)
-          in
-          go next ((field "Code", xml_unescape (field "Key")) :: acc)
-  in
-  go 0 []
-
 let rfc3339 s =
   match Ptime.of_rfc3339 s with
     | Ok (t, _, _) -> Ptime.to_float_s t
@@ -248,11 +186,15 @@ let delete t k =
    XML cannot carry goes alone. *)
 let delete_page t keys =
   let unsafe, safe =
-    List.partition (fun k -> not (xml_safe (Key.to_string k))) keys
+    List.partition
+      (fun k -> not (Tsync_store.Bucket_xml.safe (Key.to_string k)))
+      keys
   in
   List.iter (fun k -> ignore (delete t k)) unsafe;
   if safe <> [] then (
-    let body = delete_body (List.map Key.to_string safe) in
+    let body =
+      Tsync_store.Bucket_xml.delete_body (List.map Key.to_string safe)
+    in
     let r =
       call t ~meth:"POST" ~body:(Bigstring.of_string body)
         ~headers:
@@ -266,7 +208,7 @@ let delete_page t keys =
     match
       List.filter
         (fun (code, _) -> code <> "NoSuchKey" && code <> "NotFound")
-        (delete_errors (Bigstring.to_string r.body))
+        (Tsync_store.Bucket_xml.delete_errors (Bigstring.to_string r.body))
     with
       | [] -> ()
       | (code, key) :: _ as refused ->
