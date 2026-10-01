@@ -70,7 +70,12 @@ let key m i =
 let keys m = List.init m.count (key m)
 
 let chunk_names body =
-  match of_body body with Some m -> ( try keys m with _ -> []) | None -> []
+  match of_body body with
+    | None -> Ok []
+    | Some m -> (
+        match keys m with
+          | ks -> Ok ks
+          | exception Fail.E e -> Error (Fail.to_string e))
 
 let is_link m = m.link <> None
 

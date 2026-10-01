@@ -27,8 +27,9 @@ val key : t -> int -> Chunk_key.t
 
 val keys : t -> Chunk_key.t list
 
-(** The chunks a body names if it is a manifest, else none. *)
-val chunk_names : Bigstring.t -> Chunk_key.t list
+(** The chunks a manifest body names; an error for a malformed key, which must
+    never read as naming nothing. *)
+val chunk_names : Bigstring.t -> (Chunk_key.t list, string) result
 
 val is_link : t -> bool
 

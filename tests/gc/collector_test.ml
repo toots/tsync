@@ -245,6 +245,33 @@ let () =
       Composite.settle ~timeout:10. c;
       p "generation settled: %b\n" (settled 100);
       state ();
+      p "\n== a manifest with one malformed key halts, keeping its chunks\n";
+      put_chunks ["solo1"; "solo2"];
+      let malformed =
+        let body = manifest [chunk "solo1"; chunk "solo2"] in
+        let key = Chunk_key.to_string (chunk "solo2") in
+        let at =
+          let rec find i =
+            if String.sub body i (String.length key) = key then i
+            else find (i + 1)
+          in
+          find 0
+        in
+        String.mapi (fun i ch -> if i = at then 'Z' else ch) body
+      in
+      let malformed_path =
+        Filename.concat main_root
+          (Key.to_string (slot Folder_id.root "malformed"))
+      in
+      Fs.write_file_for_test malformed_path malformed;
+      ignore (run ());
+      p "solo1 and solo2 kept: %b %b\n"
+        (Contract.get s (Key.chunk d (chunk "solo1")) <> None)
+        (Contract.get s (Key.chunk d (chunk "solo2")) <> None);
+      Unix.unlink malformed_path;
+      ignore (run ());
+      Composite.settle ~timeout:10. c;
+      ignore (settled 100);
       p "\n== exclusion\n";
       let to_holder, holder_in = Unix.pipe ~cloexec:true ()
       and holder_out, from_holder = Unix.pipe ~cloexec:true () in
