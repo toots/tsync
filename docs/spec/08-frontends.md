@@ -254,8 +254,10 @@ watched with the liveness probe ([07 §4.3](07-daemon-cli.md#43-deadlines-bulk-a
 
 - `status` is cheap: no store access, no walk (menus poll it).
 - `job` streams lines before its reply, each an object with a `stream` field: `{stream:"started",
-  job}` first, then `{stream:"out", text}` for each line of the command's output and, with
-  `narrate`, `{stream:"narrate", text}`. A job that would conflict with a running one answers
+  job}` first, then `{stream:"out", text}` for each line of the command's output,
+  `{stream:"progress", text, fraction?}` as it moves (a few a second at most, the latest always sent
+  before any other line; an empty `text` ends the job's progress) and, with `narrate`,
+  `{stream:"narrate", text}`. A job that would conflict with a running one answers
   `busy` naming it. A client that closes its connection does not stop the job.
 - `exclusive` (on `create`, `write`, `mkdir`, `symlink`) and `noreplace` (on `rename`): an existing
   destination answers `exists` and nothing changes; the check and the change are one step.

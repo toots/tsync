@@ -243,15 +243,17 @@ let () =
       and gc ?(apply = false) ?(abort = false) () =
         Jobs.Gc { apply; verify = false; abort; budget = None }
       in
-      let narrated = ref 0 in
+      let narrated = ref 0 and progressed = ref 0 in
       let line l =
         match Ipc.field l "stream" with
           | Some "narrate" -> incr narrated
+          | Some "progress" -> incr progressed
           | _ -> show "  line" l
       in
       show "gc dry run, narrated"
         (Ipc.call_stream socket (job ~narrate:true (gc ())) ~on_line:line);
-      p "  narration streamed: %b" (!narrated > 0);
+      p "  narration streamed: %b, progress streamed: %b" (!narrated > 0)
+        (!progressed > 0);
       let spaces =
         Tsync_store.Chunk_spaces.create (Filename.concat root "store")
       in

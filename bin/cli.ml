@@ -70,8 +70,24 @@ let use_tls (config : Config.t) tls =
           | None ->
               fail "unknown TLS implementation %S (native or openssl)" name)
 
+(* 07 §5.1: every command takes both, so the display is set from here. *)
 let verbose =
-  Arg.(value & flag & info ["v"; "verbose"] ~doc:"Log at info level.")
+  let verbose =
+    Arg.(
+      value & flag
+      & info ["v"; "verbose"]
+          ~doc:
+            "Narrate each step and decision on stderr, and log at info level.")
+  and quiet =
+    Arg.(
+      value & flag
+      & info ["q"; "quiet"] ~doc:"Show no progress or narration while running.")
+  in
+  Term.(
+    const (fun verbose quiet ->
+        Display.configure ~verbose ~quiet;
+        verbose && not quiet)
+    $ verbose $ quiet)
 
 let set_verbose v = if v then Atomic.set Log.min_level Log.Info
 

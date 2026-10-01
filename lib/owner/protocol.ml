@@ -548,18 +548,28 @@ let decode_reply : type a. a request -> Yojson.Safe.t -> a =
           | Ok a -> a
           | Error e -> Fail.invalid "unreadable stats: %s" e)
 
-type line = Started of int | Out of string | Narration of string
+type line =
+  | Started of int
+  | Out of string
+  | Narration of string
+  | Progress of { text : string; fraction : float option }
 
 let line_to_json = function
   | Started id -> `Assoc [("stream", `String "started"); ("job", `Int id)]
   | Out s -> `Assoc [("stream", `String "out"); ("text", `String s)]
   | Narration s -> `Assoc [("stream", `String "narrate"); ("text", `String s)]
+  | Progress { text; fraction } ->
+      `Assoc
+        ([("stream", `String "progress"); ("text", `String text)]
+        @ opt "fraction" (fun f -> `Float f) fraction)
 
 let line_of_json j =
   match (str j "stream", str j "text", int j "job") with
     | Some "started", _, Some id -> Some (Started id)
     | Some "out", Some s, _ -> Some (Out s)
     | Some "narrate", Some s, _ -> Some (Narration s)
+    | Some "progress", Some text, _ ->
+        Some (Progress { text; fraction = number j "fraction" })
     | _ -> None
 
 let call : type a.

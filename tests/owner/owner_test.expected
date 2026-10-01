@@ -37,7 +37,7 @@ next event                         {"event":"reset","domain":"docs","id":4}
   line                             {"stream":"started","job":1}
   line                             {"stream":"out","text":"main: 0 chunks referenced, 0 reclaimable (0 B) (dry run: nothing changed; --apply to act)"}
 gc dry run, narrated               {"ok":true,"exit":0}
-  narration streamed: true
+  narration streamed: true, progress streamed: true
 gc --apply, held at opening        {"stream":"started","job":2}
 expire meanwhile                   {"ok":false,"code":"busy","error":"busy: tsync gc --apply (job 2) is running on docs"}
 cancel it                          {"ok":true,"cancelled":true}

@@ -157,8 +157,12 @@ module Make (C : Context.S) = struct
           let folders = T.trashed () in
           Narrate.say nr "  trash: %s"
             (Narrate.count (List.length folders) "trashed folder");
-          List.iter
-            (fun (f : T.trashed) ->
+          let total = List.length folders in
+          List.iteri
+            (fun i (f : T.trashed) ->
+              Narrate.progress nr
+                ~fraction:(float i /. float total)
+                "trash: %d of %d trashed folders" (i + 1) total;
               if not (cancelled ()) then (
                 let id = f.id and newest = f.latest in
                 let name = Option.value ~default:f.name f.path in

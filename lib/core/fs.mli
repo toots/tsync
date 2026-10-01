@@ -147,3 +147,6 @@ val sweep_temps : ?older_than:float -> string -> unit
 
 (** A plain, non-durable write for tests and fixtures. *)
 val write_file_for_test : string -> string -> unit
+
+(** The width of the terminal behind [fd]; [None] when it is not one. *)
+val terminal_columns : Unix.file_descr -> int option

@@ -13,6 +13,7 @@ external flock_ : Unix.file_descr -> bool -> bool -> bool = "tsync_flock"
 external funlock_ : Unix.file_descr -> unit = "tsync_funlock"
 external rename_noreplace_ : string -> string -> unit = "tsync_rename_noreplace"
 external clone_ : string -> string -> unit = "tsync_clone"
+external terminal_columns_ : Unix.file_descr -> int = "tsync_terminal_columns"
 external is_network_fs_ : string -> bool = "tsync_is_network_fs"
 external pid_alive_ : int -> bool = "tsync_pid_alive"
 external open_nofollow_ : string -> Unix.file_descr = "tsync_open_nofollow"
@@ -321,3 +322,6 @@ let write_file_for_test p data =
   mkdir_p (Filename.dirname p);
   let fd = openfile ~perm:0o644 p [O_WRONLY; O_CREAT; O_TRUNC] in
   with_fd fd (fun fd -> write_all fd data)
+
+let terminal_columns fd =
+  match terminal_columns_ fd with 0 -> None | n -> Some n

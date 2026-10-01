@@ -3,9 +3,6 @@ open Tsync_core
 open Tsync_gc
 open Cli
 
-(* 07 §5.1: narration goes to stderr, so stdout stays the result. *)
-let narration verbose = if verbose then Narrate.stderr else Narrate.none
-
 (* 07 §2.5: the owner runs the job and streams its lines; Ctrl-C asks it to
    stop at its next unit boundary. *)
 let job ?name verbose job =
@@ -161,7 +158,7 @@ let expire_cmd =
     Term.(const expire $ apply_arg $ date $ domain_arg $ verbose)
 
 (* 07 §2.5 read class: listing the trash changes nothing, so it runs here. *)
-let trash_list name verbose =
+let trash_list name =
   let config = config () in
   let dom =
     Tsync_domain.Domain.build ~owner:false config (domain ?name config)
@@ -170,7 +167,7 @@ let trash_list name verbose =
   let restorable, stale =
     List.partition (fun (f : T.trashed) -> f.state <> `Live) (T.trashed ())
   in
-  Narrate.say (narration verbose)
+  Narrate.say (Display.narrate ())
     "%s in the trash; %s skipped (their folders are live again, and expire \
      removes the entries)"
     (Narrate.count (List.length restorable) "folder")
@@ -210,7 +207,7 @@ let trash apply purge restore name verbose =
         run (fun () ->
             match (purge, restore) with
               | Some _, Some _ -> fail "--purge and --restore go one at a time"
-              | Some _, None | None, None -> trash_list name verbose
+              | Some _, None | None, None -> trash_list name
               | None, Some path -> trash_restore name path)
 
 let trash_cmd =

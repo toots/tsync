@@ -248,8 +248,30 @@ let publish_event t ev = t.publish (event t (Protocol.event_name ev) [])
 
 let print_line = function
   | Protocol.Started _ -> ()
-  | Out s -> Printf.printf "%s\n%!" s
-  | Narration s -> Narrate.stderr s
+  | Out s -> Display.out s
+  | Narration s -> (Display.narrate ()).say s
+  | Progress { text = ""; _ } -> Display.clear ()
+  | Progress { text; fraction } -> (Display.narrate ()).progress ?fraction text
+
+(* A job reports every unit; over a socket a few a second are enough, and the
+   latest held back goes before any other line, so what is shown is current. *)
+let progress_every = 0.25
+
+let throttled send =
+  let last = ref 0. and held = ref None in
+  fun (l : Protocol.line) ->
+    match l with
+      | Progress { text; _ } when text <> "" ->
+          let now = Unix.gettimeofday () in
+          if now -. !last >= progress_every then (
+            last := now;
+            held := None;
+            send l)
+          else held := Some l
+      | _ ->
+          Option.iter send !held;
+          held := None;
+          send l
 
 (* 07 §2.5. ponytail: one job per domain at a time, so jobs that would not
    conflict wait too; a conflict table if that ever matters. *)
@@ -268,14 +290,20 @@ let run_job t ~send ~narrate job =
         | None -> "another job")
       (domain_name t);
   Fun.protect
-    ~finally:(fun () -> Atomic.set t.running None)
+    ~finally:(fun () ->
+      send (Protocol.Progress { text = ""; fraction = None });
+      Atomic.set t.running None)
     (fun () ->
       send (Protocol.Started me.id);
       Jobs.run
         {
           out = (fun s -> send (Out s));
           narrate =
-            (if narrate then fun s -> send (Narration s) else Narrate.none);
+            {
+              say = (if narrate then fun s -> send (Narration s) else ignore);
+              progress =
+                (fun ?fraction text -> send (Progress { text; fraction }));
+            };
           cancelled = (fun () -> Atomic.get me.cancelled || Stop.requested ());
         }
         t.domain job)
@@ -457,7 +485,8 @@ let answer t json =
                 (fun send ->
                   match
                     call_with t
-                      ~send:(fun l -> send (Protocol.line_to_json l))
+                      ~send:
+                        (throttled (fun l -> send (Protocol.line_to_json l)))
                       req
                   with
                     | r -> Protocol.encode_reply req r

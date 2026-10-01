@@ -12,6 +12,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/file.h>
+#include <sys/ioctl.h>
 #include <sys/resource.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -363,3 +364,10 @@ CAMLprim value tsync_malloc_trim(value unit) {
 }
 
 #endif
+
+/* The terminal's width in columns, 0 when the descriptor is not a terminal. */
+CAMLprim value tsync_terminal_columns(value fd) {
+  struct winsize w;
+  if (ioctl(Int_val(fd), TIOCGWINSZ, &w) < 0) return Val_int(0);
+  return Val_int(w.ws_col);
+}

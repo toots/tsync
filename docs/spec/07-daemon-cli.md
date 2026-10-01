@@ -551,8 +551,10 @@ for `JOB_KEEP` after their last report; a new report for a key replaces the old 
   by `sync` on a pulled tree ([08 §2.1](08-frontends.md#21-frontend-descriptor)).
 - **Durations**: `<N>d|h|m|s` with N > 0; anything else is an invalid argument.
 - **Progress on a TTY**: a redrawn block on stderr (cursor-up, clear to end), lines truncated to the
-  terminal width by code points with `…`; a persistent note is printed above the block; log lines
-  clear the block first. Not a TTY: progress lines go to the `info` log.
+  terminal width by code points with `…`, redrawn on a timer with the elapsed time so a long call
+  inside a step still shows life; a persistent note is printed above the block; log lines and result
+  lines clear the block first, and a result line ends the step shown. Not a TTY: a progress line on
+  stderr at most every 10 seconds.
 
 ### 5.2 Path arguments
 

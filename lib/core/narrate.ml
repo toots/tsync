@@ -1,21 +1,8 @@
-type t = string -> unit
+type t = { say : string -> unit; progress : ?fraction:float -> string -> unit }
 
-let none _ = ()
-
-let stderr line =
-  let tm = Unix.localtime (Unix.gettimeofday ()) in
-  prerr_endline
-    (Printf.sprintf "%02d:%02d:%02d %s" tm.tm_hour tm.tm_min tm.tm_sec line)
-
-let say t fmt = Printf.ksprintf t fmt
-
-let periodic ?(every = 10.) t =
-  let last = Atomic.make (Unix.gettimeofday ()) in
-  fun line ->
-    let now = Unix.gettimeofday () in
-    let prev = Atomic.get last in
-    if now -. prev >= every && Atomic.compare_and_set last prev now then
-      t (line ())
+let none = { say = ignore; progress = (fun ?fraction:_ _ -> ()) }
+let say t fmt = Printf.ksprintf t.say fmt
+let progress t ?fraction fmt = Printf.ksprintf (t.progress ?fraction) fmt
 
 let count ?plural n noun =
   Printf.sprintf "%d %s" n

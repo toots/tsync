@@ -206,13 +206,12 @@ module Make (C : Context.S) = struct
     and unanchored = ref [] in
     Narrate.say narrate "%s: walking the tree from the root"
       (Domain_name.to_string d);
-    let walked = ref 0 and periodic = Narrate.periodic narrate in
+    let walked = ref 0 in
     let progress path =
       incr walked;
-      periodic (fun () ->
-          Printf.sprintf "  %s walked, at %s"
-            (Narrate.count !walked "folder")
-            path)
+      Narrate.progress narrate "%s walked, at %s"
+        (Narrate.count !walked "folder")
+        path
     in
     walk ~cancelled ~progress ~reached ~disowned ~unanchored Folder_id.root
       ~root_path:"";
@@ -249,6 +248,7 @@ module Make (C : Context.S) = struct
     in
     if cancelled () then Fail.raise_ Fail.Refused "cancelled";
     Narrate.say narrate "  listing the manifest area for unreachable folders";
+    Narrate.progress narrate "listing the manifest area";
     let orphans, tombstones = orphans ~reached in
     let twice =
       Hashtbl.fold
@@ -313,8 +313,12 @@ module Make (C : Context.S) = struct
         (function Twice { id; _ } -> Some id | _ -> None)
         r.findings
     in
-    List.map
-      (fun f ->
+    let total = List.length r.findings in
+    List.mapi
+      (fun i f ->
+        Narrate.progress narrate
+          ~fraction:(float i /. float total)
+          "repairing the tree: %d of %d findings" (i + 1) total;
         let outcome =
           try repair_one ~apply ~now ~twice f with
             | (Stop.Stopping | Rt.Cancelled) as e -> raise e
@@ -344,17 +348,16 @@ module Make (C : Context.S) = struct
             Log.warn "verification on %s: %s" m.name (Printexc.to_string e);
             None
     in
-    let periodic = Narrate.periodic narrate in
     let rec go ~still last =
       let left = count (Key.verify_jobs d)
       and corrupt = count (Key.corrupted d) in
       let now = (left, corrupt) in
       let left' = Option.value ~default:(-1) left
       and corrupt' = Option.value ~default:0 corrupt in
-      periodic (fun () ->
-          Printf.sprintf
-            "  %s: %d shard requests left, %d corrupt chunks so far" m.name
-            left' corrupt');
+      Narrate.progress narrate
+        ~fraction:(1. -. (float (max 0 left') /. 4096.))
+        "%s: %d shard requests left, %d corrupt chunks so far" m.name left'
+        corrupt';
       if left = Some 0 then Done { corrupt = corrupt' }
       else (
         let still = if now = last || left = None then still + 1 else 0 in
@@ -396,10 +399,14 @@ module Make (C : Context.S) = struct
   let repair_chunks ?(narrate = Narrate.none) ?(apply = false) ?source
       ?(cancelled = Fun.const false) r =
     let members = Composite.members C.composite in
+    let total = List.length r.corrupt in
     List.filter_map
-      (fun c ->
+      (fun (i, c) ->
         if cancelled () then None
         else (
+          Narrate.progress narrate
+            ~fraction:(float i /. float total)
+            "repairing chunks: %d of %d" (i + 1) total;
           let bad =
             List.find (fun (m : Composite.member) -> m.name = c.member) members
           in
@@ -441,5 +448,5 @@ module Make (C : Context.S) = struct
               | Repaired from -> "a sound copy from " ^ from
               | Unrepairable -> "no member holds a sound copy");
           Some (c, outcome)))
-      r.corrupt
+      (List.mapi (fun i c -> (i, c)) r.corrupt)
 end

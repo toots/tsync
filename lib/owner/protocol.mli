@@ -136,9 +136,13 @@ val row_fields : row -> (string * Yojson.Safe.t) list
 val row_of_fields : Yojson.Safe.t -> row
 val failure_of_reply : Yojson.Safe.t -> Fail.t option
 
-(** What a job streams before its reply: its id, then its output and, when asked
-    for, its narration, as they happen. *)
-type line = Started of int | Out of string | Narration of string
+(** What a job streams before its reply: its id, then its output, its progress
+    and, when asked for, its narration, as they happen. *)
+type line =
+  | Started of int
+  | Out of string
+  | Narration of string
+  | Progress of { text : string; fraction : float option }
 
 val line_to_json : line -> Yojson.Safe.t
 

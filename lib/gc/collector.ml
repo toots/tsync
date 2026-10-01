@@ -342,10 +342,12 @@ let session ?budget ?pause ~narrate:nr ~verify ~keep ~cancelled composite d m =
             units phase ~progress ~write rest)
   in
   let counted total what =
-    let done_ = ref 0 and periodic = Narrate.periodic nr in
+    let done_ = ref 0 in
     fun () ->
       incr done_;
-      periodic (fun () -> what !done_ total)
+      nr.Narrate.progress
+        ~fraction:(float !done_ /. float (max 1 total))
+        (String.trim (what !done_ total))
   in
   let rec abandon cursor =
     let todo = Gc_plan.after ~cursor (shards (outgoing m d)) in
@@ -661,19 +663,17 @@ let survey_one ~narrate:nr ~verify ~cancelled d m =
       Narrate.say nr "%s: reading the manifests of %s on %s" m.member.name
         (describe_namespaces namespaces)
         m.root;
-      let periodic = Narrate.periodic nr in
       List.iteri
         (fun i ns ->
           check ();
           List.iter
             (fun c -> Hashtbl.replace referenced c false)
             (namespace_references m d ns);
-          periodic (fun () ->
-              Printf.sprintf
-                "  read %d of %d folders and version folders; %d chunks \
-                 referenced"
-                (i + 1) total
-                (Hashtbl.length referenced)))
+          Narrate.progress nr
+            ~fraction:(float (i + 1) /. float (max 1 total))
+            "read %d of %d folders and version folders; %d chunks referenced"
+            (i + 1) total
+            (Hashtbl.length referenced))
         namespaces
     with
       | exception Halt reason -> Error reason
@@ -683,15 +683,13 @@ let survey_one ~narrate:nr ~verify ~cancelled d m =
             "  %s referenced; listing the chunk area shard by shard%s"
             (Narrate.count (Hashtbl.length referenced) "chunk")
             (if verify then " and re-hashing every referenced chunk" else "");
-          let periodic = Narrate.periodic nr in
           List.iteri
             (fun i shard ->
               check ();
-              periodic (fun () ->
-                  Printf.sprintf
-                    "  listed %d of 4096 shards; %d chunks reclaimable so far \
-                     (%s)"
-                    i !reclaimable (Narrate.size !bytes));
+              Narrate.progress nr
+                ~fraction:(float i /. 4096.)
+                "listed %d of 4096 shards; %d chunks reclaimable so far (%s)" i
+                !reclaimable (Narrate.size !bytes);
               let listing =
                 m.member.store.list_prefix (Key.shard_prefix d shard)
               in
