@@ -32,6 +32,6 @@ val duration : float Cmdliner.Arg.conv
 val domain_arg : string option Cmdliner.Term.t
 val cmd : string -> doc:string -> 'a Cmdliner.Term.t -> 'a Cmdliner.Cmd.t
 
-(** Run an owner job (07 §2.5), streaming its lines; the first interrupt
-    cancels it at its next unit boundary, the second exits at once. *)
+(** Run an owner job (07 §2.5), streaming its lines; the first interrupt cancels
+    it at its next unit boundary, the second exits at once. *)
 val run_job : ?name:string -> bool -> Tsync_owner.Jobs.t -> int
