@@ -33,12 +33,6 @@ exception Refused of Server.response
 
 let refuse status msg = raise (Refused (Server.text status msg))
 
-(* security §6.1: readers serve any token of lowercase hex, 128 characters at
-   most. *)
-let valid_token t =
-  let n = String.length t in
-  n >= 1 && n <= 128 && String.for_all Names.is_hexlower t
-
 let parse_manifest body =
   match Yojson.Safe.from_string body with
     | `Assoc f -> Some f
@@ -53,7 +47,6 @@ let manifest_domain body =
 (* 02 §2.14, security §6.3: an invalid manifest is 502, another domain's is
    absent. *)
 let load t token =
-  if not (valid_token token) then refuse 400 "bad token";
   let key =
     match Key.share token with Some k -> k | None -> refuse 400 "bad token"
   in

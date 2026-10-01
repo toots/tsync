@@ -56,7 +56,9 @@ val gc_jobs : Domain_name.t -> prefix
 val shares : prefix
 val share_cache : prefix
 
-(** [tsync/shares/<token>] for a non-empty single-segment token. *)
+(** [tsync/shares/<token>] for a token a reader accepts: 1 to 128 lowercase hex
+    characters (security §6.1). Anything else in the share space is a cached
+    artifact, never a manifest. *)
 val share : string -> t option
 
 val shard_prefix : Domain_name.t -> string -> prefix

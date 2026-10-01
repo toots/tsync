@@ -41,7 +41,10 @@ let shares = "tsync/shares/"
 let share_cache = "tsync/shares/cache/"
 
 let share token =
-  if token <> "" && Names.valid_leaf token then Some (shares ^ token) else None
+  let n = String.length token in
+  if n >= 1 && n <= 128 && String.for_all Names.is_hexlower token then
+    Some (shares ^ token)
+  else None
 
 let shard_prefix d sss = chunks d ^ sss ^ "/"
 let chunk d k = chunks d ^ Chunk_key.shard k ^ "/" ^ Chunk_key.to_string k
