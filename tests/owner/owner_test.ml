@@ -224,6 +224,20 @@ let () =
       show "notify_reset" (ask [("action", "notify_reset")]);
       show "next event" (Option.get (Ipc.Client.next ~timeout:2. c));
       p "== jobs";
+      let reports = ref [] and rm = Mutex.create () in
+      let supervisor =
+        Ipc.serve ~path:(Tsync_config.Paths.supervisor_socket ()) (fun req ->
+            (match
+               ( Ipc.field req "action",
+                 Ipc.field req "kind",
+                 Ipc.field req "state" )
+             with
+              | Some "report", Some kind, Some state ->
+                  Mutex.protect rm (fun () ->
+                      reports := (kind, state) :: !reports)
+              | _ -> ());
+            Ipc.Reply (Ipc.ok []))
+      in
       let job ?(narrate = false) j =
         `Assoc
           [
@@ -281,6 +295,11 @@ let () =
       show "cancel once it ended" (cancel id);
       show "gc --abort"
         (Ipc.call_stream socket (job (gc ~abort:true ())) ~on_line:line);
+      Ipc.close supervisor;
+      p "reports the supervisor got, in order:";
+      List.iter
+        (fun (kind, state) -> p "  %s: %s" kind state)
+        (List.rev !reports);
       p "== stop";
       show "stop" (ask [("action", "stop")]);
       p "exit status %d" (Rt.Promise.await owner);

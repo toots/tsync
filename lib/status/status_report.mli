@@ -234,6 +234,7 @@ type job = {
   state : [ `Running | `Done | `Failed ];
   error : string option;
   progress : progress option;
+  step : string option;  (** what the job is doing now, as its progress says *)
 }
 [@@deriving yojson]
 

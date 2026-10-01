@@ -336,11 +336,13 @@ let jobs b (m : machine) =
                 ^ Option.fold ~none:"" ~some:(fun e -> " " ^ e) j.error
             | `Done, _ -> ": done"
             | `Running, Some p ->
-                Printf.sprintf ": %d of %d%s" p.finished p.total
+                Printf.sprintf ": %d of %d%s%s" p.finished p.total
                   (Option.fold ~none:""
                      ~some:(fun e -> ", " ^ duration e ^ " left")
                      p.eta)
-            | `Running, None -> ""))
+                  (Option.fold ~none:"" ~some:(fun s -> "; " ^ s) j.step)
+            | `Running, None ->
+                Option.fold ~none:"" ~some:(fun s -> ": " ^ s) j.step))
       m.jobs)
 
 let shown_warnings = 10

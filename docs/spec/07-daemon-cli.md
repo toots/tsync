@@ -506,8 +506,9 @@ of durable state.
   final report `done` or `failed` (with `error`). Finishing twice is a no-op. `kind` names the command
   as typed (`import`, `sync --full`, `gc --abort`, …); `progress` carries total, skipped, done,
   handled and remaining, and an ETA from the run's own rate, absent before anything settled and after
-  completion. A missing supervisor is the ordinary case: reporting never decides whether a command
-  runs.
+  completion; `step` is what the job's progress says it is doing now. An owner reports each job it
+  runs the same way, under its own pid, whoever started the job, so `status` shows it. A missing
+  supervisor is the ordinary case: reporting never decides whether a command runs.
 
 The job registry keys a report by (pid, kind, domain). A running entry not refreshed for
 `max(JOB_STALE_MIN, 4 × interval)` whose pid is gone is dropped; `done` and `failed` entries are kept

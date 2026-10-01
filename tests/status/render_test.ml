@@ -408,6 +408,7 @@ let degraded : machine =
                 remaining = 3800;
                 eta = Some 600.;
               };
+          step = Some "importing 1201 of 5000 files: Photos/2026/p.jpg";
         };
       ];
     warnings =

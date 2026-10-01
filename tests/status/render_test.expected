@@ -72,7 +72,7 @@ Processes
     NOT ANSWERING    connection refused
 
 Jobs
-  import Files (pid 300): 1200 of 5000, 10m 0s left
+  import Files (pid 300): 1200 of 5000, 10m 0s left; importing 1201 of 5000 files: Photos/2026/p.jpg
 
 Warnings (newest first)
   0m 10s ago WARN copy replica: parked (×3)

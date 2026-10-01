@@ -353,6 +353,7 @@ type job = {
   state : job_state;
   error : string option; [@default None]
   progress : progress option; [@default None]
+  step : string option; [@default None]
 }
 [@@deriving yojson { strict = false }]
 

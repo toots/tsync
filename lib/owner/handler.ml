@@ -273,6 +273,46 @@ let throttled send =
           held := None;
           send l
 
+(* 07 §4.6 JOB_REPORT_INTERVAL. *)
+let job_report_interval = 10.
+
+(* A job's fraction as the report's counts, and an ETA from its own rate; none
+   before anything moved or once it is done. *)
+let job_progress ~started = function
+  | Some f when f > 0. && f < 1. ->
+      let finished = int_of_float (f *. 100.) in
+      Some
+        {
+          Tsync_status.Status_report.total = 100;
+          skipped = 0;
+          finished;
+          handled = finished;
+          remaining = 100 - finished;
+          eta = Some ((Rt.now () -. started) *. (1. -. f) /. f);
+        }
+  | _ -> None
+
+(* 07 §4.6: a missing supervisor is the ordinary case, and reporting never
+   decides whether a job runs. *)
+let send_report t ~kind ~state ~error ~progress ~step =
+  match
+    Tsync_status.Status_report.job_to_yojson
+      {
+        pid = Unix.getpid ();
+        kind;
+        domain = Some (domain_name t);
+        state;
+        error;
+        progress;
+        step;
+      }
+  with
+    | `Assoc fields ->
+        Ipc.advisory
+          (Tsync_config.Paths.supervisor_socket ())
+          (`Assoc (("action", `String "report") :: fields))
+    | _ -> ()
+
 (* 07 §2.5. ponytail: one job per domain at a time, so jobs that would not
    conflict wait too; a conflict table if that ever matters. *)
 let run_job t ~send ~narrate job =
@@ -289,25 +329,63 @@ let run_job t ~send ~narrate job =
         | Some j -> Printf.sprintf "tsync %s (job %d)" j.kind j.id
         | None -> "another job")
       (domain_name t);
-  Fun.protect
-    ~finally:(fun () ->
-      send (Protocol.Progress { text = ""; fraction = None });
-      Atomic.set t.running None;
-      Usage.release ())
-    (fun () ->
-      send (Protocol.Started me.id);
-      Jobs.run
-        {
-          out = (fun s -> send (Out s));
-          narrate =
+  let latest = Atomic.make ("", None) and started = Rt.now () in
+  let report state ?error () =
+    let text, fraction = Atomic.get latest in
+    send_report t ~kind:me.kind ~state ~error
+      ~progress:(job_progress ~started fraction)
+      ~step:(if text = "" || state <> `Running then None else Some text)
+  in
+  let finished = Atomic.make false in
+  report `Running ();
+  Rt.spawn ~name:"job report" (fun () ->
+      let rec loop () =
+        Rt.sleep job_report_interval;
+        if not (Atomic.get finished) then (
+          report `Running ();
+          loop ())
+      in
+      loop ());
+  let outcome =
+    Fun.protect
+      ~finally:(fun () ->
+        Atomic.set finished true;
+        send (Protocol.Progress { text = ""; fraction = None });
+        Atomic.set t.running None;
+        Usage.release ())
+      (fun () ->
+        send (Protocol.Started me.id);
+        match
+          Jobs.run
             {
-              say = (if narrate then fun s -> send (Narration s) else ignore);
-              progress =
-                (fun ?fraction text -> send (Progress { text; fraction }));
-            };
-          cancelled = (fun () -> Atomic.get me.cancelled || Stop.requested ());
-        }
-        t.domain t.engine job)
+              out = (fun s -> send (Out s));
+              narrate =
+                {
+                  say =
+                    (if narrate then fun s -> send (Narration s) else ignore);
+                  progress =
+                    (fun ?fraction text ->
+                      Atomic.set latest (text, fraction);
+                      send (Progress { text; fraction }));
+                };
+              cancelled =
+                (fun () -> Atomic.get me.cancelled || Stop.requested ());
+            }
+            t.domain t.engine job
+        with
+          | code -> Ok code
+          | exception e -> Error e)
+  in
+  match outcome with
+    | Ok code ->
+        report
+          (if code = 0 then `Done else `Failed)
+          ?error:(if code = 0 then None else Some "finished with failures")
+          ();
+        code
+    | Error e ->
+        report `Failed ~error:(Fail.classify e).reason ();
+        raise e
 
 let cancel t id =
   match Atomic.get t.running with

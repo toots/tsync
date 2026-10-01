@@ -47,6 +47,13 @@ cancel once it ended               {"ok":true,"cancelled":false}
   line                             {"stream":"started","job":4}
   line                             {"stream":"out","text":"main: completed; 0 namespaces marked, 0 chunks promoted, 0 reclaimed (0 B)"}
 gc --abort                         {"ok":true,"exit":0}
+reports the supervisor got, in order:
+  gc: running
+  gc: done
+  gc --apply: running
+  gc --apply: done
+  gc --abort: running
+  gc --abort: done
 == stop
 stop                               {"ok":true}
 exit status 0
