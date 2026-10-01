@@ -92,8 +92,16 @@ async function poll() {
   } catch (e) {
     say("Cannot reach the server; retrying.", true);
   }
-  timer = setTimeout(poll, 5000);
+  // A hidden tab does not poll: every poll costs the owners a report.
+  if (!document.hidden) timer = setTimeout(poll, 10000);
 }
+
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && secret) {
+    clearTimeout(timer);
+    poll();
+  }
+});
 
 $("login").addEventListener("submit", (event) => {
   event.preventDefault();

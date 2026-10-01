@@ -5,6 +5,7 @@ module Domain = Tsync_domain.Domain
 module R = Tsync_status.Status_report
 
 let store_state_window = 5.
+let journal_window = 60.
 let listing_grace = 2.
 let probe_wait = Health.probe_timeout
 
@@ -18,8 +19,9 @@ type slot = {
   member : Composite.member;
   m : Mutex.t;
   mutable probe : (R.reach * float) option;
-  mutable listing : R.journal option;
+  mutable listing : (R.journal * float) option;
   mutable refreshing : bool;
+  mutable listing_refreshing : bool;
   rates : rates;
   copied : Tsync_status.Self_report.rate;
 }
@@ -48,6 +50,7 @@ let create (domain : Domain.t) engine ~frontend =
             probe = None;
             listing = None;
             refreshing = false;
+            listing_refreshing = false;
             rates =
               {
                 up = Tsync_status.Self_report.rate ~now:(Rt.now ());
@@ -74,7 +77,7 @@ let behind t entries =
            | None -> true)
        entries)
 
-let refresh t s =
+let refresh_probe t s =
   let store = s.member.store in
   let t0 = Rt.now () in
   let reach =
@@ -84,19 +87,23 @@ let refresh t s =
       | () -> R.Reachable { latency_ms = (Rt.now () -. t0) *. 1000. }
       | exception e -> Unreachable (Fail.classify e).reason
   in
-  Mutex.protect s.m (fun () -> s.probe <- Some (reach, Rt.now ()));
+  Mutex.protect s.m (fun () ->
+      s.probe <- Some (reach, Rt.now ());
+      s.refreshing <- false)
+
+let refresh_listing t s =
   let listing =
     match
       Tsync_sync.Journal.list_entries
-        (Tsync_sync.Journal.create t.domain.name store)
+        (Tsync_sync.Journal.create t.domain.name s.member.store)
     with
       | entries ->
           R.Entries { entries = List.length entries; behind = behind t entries }
       | exception e -> Unreadable (Fail.classify e).reason
   in
   Mutex.protect s.m (fun () ->
-      s.listing <- Some listing;
-      s.refreshing <- false)
+      s.listing <- Some (listing, Rt.now ());
+      s.listing_refreshing <- false)
 
 let rec wait_for ~deadline f =
   if f () || Rt.now () >= deadline then ()
@@ -105,39 +112,45 @@ let rec wait_for ~deadline f =
     wait_for ~deadline f)
 
 (* A held member is not probed; a stale sample is served while a fresh one is
-   taken behind the answer. *)
+   taken behind the answer. A journal listing reads every entry, so however
+   often status is asked it is taken at most once per [journal_window]. *)
 let reach_and_journal t s =
   let store = s.member.store in
   if Health.is_held store.health then
     ( R.Unreachable
         (Option.value ~default:"held down" (Health.describe store.health)),
-      Mutex.protect s.m (fun () -> Option.value ~default:R.Counting s.listing)
-    )
-  else (
-    let start =
       Mutex.protect s.m (fun () ->
-          let stale =
-            match s.probe with
-              | None -> true
-              | Some (_, at) -> Rt.now () -. at > store_state_window
-          in
-          let start = stale && not s.refreshing in
-          if start then s.refreshing <- true;
-          start)
+          Option.fold ~none:R.Counting ~some:fst s.listing) )
+  else (
+    let stale window = function
+      | None -> true
+      | Some (_, at) -> Rt.now () -. at > window
     in
-    if start then Rt.spawn ~name:"status probe" (fun () -> refresh t s);
+    let probe, list =
+      Mutex.protect s.m (fun () ->
+          let probe = stale store_state_window s.probe && not s.refreshing in
+          let list =
+            stale journal_window s.listing && not s.listing_refreshing
+          in
+          if probe then s.refreshing <- true;
+          if list then s.listing_refreshing <- true;
+          (probe, list))
+    in
+    if probe then Rt.spawn ~name:"status probe" (fun () -> refresh_probe t s);
+    if list then Rt.spawn ~name:"status listing" (fun () -> refresh_listing t s);
     wait_for
       ~deadline:(Rt.now () +. probe_wait)
       (fun () -> Mutex.protect s.m (fun () -> s.probe <> None));
     wait_for
       ~deadline:(Rt.now () +. listing_grace)
       (fun () ->
-        Mutex.protect s.m (fun () -> s.listing <> None || not s.refreshing));
+        Mutex.protect s.m (fun () ->
+            s.listing <> None || not s.listing_refreshing));
     Mutex.protect s.m (fun () ->
         ( (match s.probe with
             | Some (r, _) -> r
             | None -> R.Unreachable "no answer yet"),
-          Option.value ~default:R.Counting s.listing )))
+          Option.fold ~none:R.Counting ~some:fst s.listing )))
 
 let slot_traffic s =
   Option.map

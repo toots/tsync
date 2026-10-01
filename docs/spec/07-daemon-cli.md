@@ -664,8 +664,10 @@ asked for its own figures asks nobody. A failed answer becomes a process entry
 
 **Cost rules.**
 
-- A member's probe, journal listing and corruption listing are cached per owner for
-  `STORE_STATE_WINDOW`, shared by every asker, and refreshed behind the answer. An answer waits for
+- A member's probe and corruption listing are cached per owner for `STORE_STATE_WINDOW`, and its
+  journal listing for `JOURNAL_WINDOW`, shared by every asker, and refreshed behind the answer. A
+  journal listing reads every entry (thousands of objects, several pages on a remote store), so a
+  status page or `status --watch` polling every few seconds must not take one per poll. An answer waits for
   a listing at most `LISTING_GRACE` after the probe, else reports `{"counting":true}`.
 - A member held down by its breaker is not probed (`reachable:false`, error = the hold).
 - `journal.behind` counts listed entries newer than the last-sync mark and not authored by this
@@ -895,6 +897,7 @@ An implementation MUST exhibit:
 | `OWNER_HELD` exit status | 75 | |
 | `JOB_REPORT_INTERVAL` / `JOB_STALE_MIN` / `JOB_KEEP` | 10 s / 45 s / 300 s | |
 | `STORE_STATE_WINDOW` / `LISTING_GRACE` | 5 s / 2 s | |
+| `JOURNAL_WINDOW` | 60 s | a member's journal listing in status |
 | status listing timeout | 30 s | journal and corruption listings |
 | corrupted sample | 1000 (+1 to detect truncation) | |
 | `HOUSEKEEPING_INTERVAL` | 60 s | |

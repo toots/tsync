@@ -262,7 +262,7 @@ The browse template (shared with the cloud share function) is filled in **one pa
 
 ## A10. Status page, `/domains`, `/stats`
 
-- **`GET /`**: the static status login page. The user types a secret; the page keeps it in memory only, signs `GET /stats[?totals=1|exact][&reload=1]` with Web Crypto, polls every 5 s, and on 401 forgets it ("wrong secret, or clock off by more than 5 minutes"). Outside a secure context it refuses the secret ([security §10.4](../algorithms/security-model.md#104-in-a-browser)).
+- **`GET /`**: the static status login page. The user types a secret; the page keeps it in memory only, signs `GET /stats[?totals=1|exact][&reload=1]` with Web Crypto, polls every 10 s while visible (a hidden tab does not poll; showing it again polls at once), and on 401 forgets it ("wrong secret, or clock off by more than 5 minutes"). Outside a secure context it refuses the secret ([security §10.4](../algorithms/security-model.md#104-in-a-browser)).
 - **`/domains`, `/stats`, `/api/v1/stats`**: authorised and filtered per [security §12](../algorithms/security-model.md#12-status-and-discovery-authorisation). `totals=1` asks for a sampled estimate, `totals=exact` for a full count, `reload=1` (with totals) recounts.
 - **Report content**, for the verified domains only:
   - per route, the domain's diagnostics section with this listener as a frontend entry `{"type":"http-proxy","shared":true,"reachable":true,"readOnly","shares","options"(masked),"traffic"}`;
