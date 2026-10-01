@@ -272,22 +272,8 @@ let trash_list name verbose =
     Tsync_domain.Domain.build ~owner:false config (domain ?name config)
   in
   let module T = Tsync_remote.Tree.Make ((val Tsync_domain.Domain.context dom)) in
-  let folders = Hashtbl.create 16 in
-  List.iter
-    (fun ((e : Tsync_store.Store.entry), (m : Folder.marker), path) ->
-      let id = Folder_id.to_string m.id in
-      let newest =
-        match Hashtbl.find_opt folders id with
-          | Some (_, _, t) -> Float.max t e.last_modified
-          | None -> e.last_modified
-      in
-      Hashtbl.replace folders id (m, path, newest))
-    (T.trash_entries ());
   let restorable, stale =
-    List.partition
-      (fun ((m : Folder.marker), _, _) ->
-        match T.anchor m.id with Some a -> Folder.in_trash a | None -> true)
-      (Hashtbl.fold (fun _ v acc -> v :: acc) folders [])
+    List.partition (fun (f : T.trashed) -> f.state <> `Live) (T.trashed ())
   in
   Narrate.say (narration verbose)
     "%s in the trash; %s skipped (their folders are live again, and expire \
@@ -295,10 +281,12 @@ let trash_list name verbose =
     (Narrate.count (List.length restorable) "folder")
     (Narrate.count (List.length stale) "stale entry" ~plural:"stale entries");
   List.iter
-    (fun ((m : Folder.marker), path, at) ->
-      say "%s  %s" (Narrate.date at)
-        (Option.value ~default:(m.name ^ " (path not recorded)") path))
-    (List.sort (fun (_, _, a) (_, _, b) -> compare b a) restorable);
+    (fun (f : T.trashed) ->
+      say "%s  %s" (Narrate.date f.latest)
+        (Option.value ~default:(f.name ^ " (path not recorded)") f.path))
+    (List.sort
+       (fun (a : T.trashed) (b : T.trashed) -> compare b.latest a.latest)
+       restorable);
   0
 
 let trash_restore name path =

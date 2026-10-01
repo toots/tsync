@@ -161,14 +161,18 @@ let () =
       p "\n== trash and restore\n";
       T.trash sub ~old:(Folder_id.root, "Moved") ~path:"Moved";
       p "trash entries: %d; anchor in trash: %b; live: %s\n"
-        (List.length (T.trash_entries ()))
+        (List.fold_left
+           (fun n (f : T.trashed) -> n + List.length f.entries)
+           0 (T.trashed ()))
         (match T.anchor sub with Some a -> Folder.in_trash a | None -> false)
         (match T.find Folder_id.root ["Moved"] with
           | `Missing -> "gone"
           | _ -> "still there");
       ignore (T.restore sub ~parent:Folder_id.root ~name:"Restored");
       p "after restore: entries %d, found %b\n"
-        (List.length (T.trash_entries ()))
+        (List.fold_left
+           (fun n (f : T.trashed) -> n + List.length f.entries)
+           0 (T.trashed ()))
         (T.find Folder_id.root ["Restored"] = `Folder sub);
       p "\n== a placement onto a taken name\n";
       let other = Folder_id.mint ~uuid:"bbbbbbbbbbbb" ~counter:1 in

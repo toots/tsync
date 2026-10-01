@@ -187,6 +187,49 @@ module Make (C : Context.S) = struct
            Key.is_child_of ~namespace:(Key.namespace d Folder_id.trash) e.key)
          (store.list_prefix (Key.namespace d Folder_id.trash)))
 
+  let trash_state id =
+    match anchor id with
+      | None -> `No_anchor
+      | Some a when Folder.in_trash a -> `In_trash
+      | Some _ -> `Live
+
+  type trashed = {
+    id : Folder_id.t;
+    name : string;
+    path : string option;
+    entries : Store.entry list;
+    latest : float;
+    state : [ `In_trash | `Live | `No_anchor ];
+  }
+
+  let trashed () =
+    let groups = Hashtbl.create 16 in
+    List.iter
+      (fun ((e : Store.entry), (m : Folder.marker), path) ->
+        let k = Folder_id.to_string m.id in
+        Hashtbl.replace groups k
+          ((e, m, path) :: Option.value ~default:[] (Hashtbl.find_opt groups k)))
+      (trash_entries ());
+    Hashtbl.fold
+      (fun _ group acc ->
+        let newest =
+          List.fold_left
+            (fun ((b : Store.entry), _, _) ((e : Store.entry), m, p) ->
+              if e.last_modified > b.last_modified then (e, m, p) else (b, m, p))
+            (List.hd group) group
+        in
+        let (e : Store.entry), (m : Folder.marker), path = newest in
+        {
+          id = m.id;
+          name = m.name;
+          path;
+          entries = List.map (fun (e, _, _) -> e) group;
+          latest = e.last_modified;
+          state = trash_state m.id;
+        }
+        :: acc)
+      groups []
+
   let restore id ~parent ~name =
     match place id ~parent ~name with
       | `Placed ->

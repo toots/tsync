@@ -1083,16 +1083,11 @@ module Make (C : Engine_ctx.S) = struct
   let restore_from_trash path =
     match
       List.find_opt
-        (fun (_, (m : Folder.marker), p) ->
-          p = Some path
-          &&
-            match T.anchor m.id with
-            | Some a -> Folder.in_trash a
-            | None -> true)
-        (T.trash_entries ())
+        (fun (f : T.trashed) -> f.path = Some path && f.state <> `Live)
+        (T.trashed ())
     with
       | None -> `Not_in_trash
-      | Some (_, (m : Folder.marker), _) ->
+      | Some m ->
           if kind path <> `Absent then `Exists
           else (
             let parent = require_parent path in

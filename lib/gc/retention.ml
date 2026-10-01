@@ -26,11 +26,14 @@ module Make (C : Context.S) = struct
   let store = C.store
   let anchor_leaf = Key.leaf (Key.anchor d Folder_id.root)
 
-  let anchor_state id =
-    match T.anchor id with
-      | None -> Gc_plan.No_anchor
-      | Some a when Folder.in_trash a -> In_trash
-      | Some _ -> Live
+  let anchor_state id : Gc_plan.anchor =
+    match T.trash_state id with
+      | `No_anchor -> No_anchor
+      | `In_trash -> In_trash
+      | `Live -> Live
+
+  let entries_of (f : T.trashed) =
+    List.map (fun (e : Store.entry) -> (e.key, e.last_modified)) f.entries
 
   (* Filed markers only: a subfolder moved out of the trashed tree is not part
      of it, since its marker is disowned by its anchor. *)
@@ -128,18 +131,6 @@ module Make (C : Context.S) = struct
           if apply && doomed <> [] then st.delete_multi doomed;
           Ok (doomed, !bad)
 
-  let by_folder () =
-    let groups = Hashtbl.create 16 in
-    List.iter
-      (fun ((e : Store.entry), (m : Folder.marker), path) ->
-        let l =
-          Option.value ~default:[]
-            (Hashtbl.find_opt groups (Folder_id.to_string m.id))
-        in
-        Hashtbl.replace groups (Folder_id.to_string m.id) ((m.id, e, path) :: l))
-      (T.trash_entries ());
-    Hashtbl.fold (fun _ l acc -> l :: acc) groups []
-
   let expire ?(narrate = Narrate.none) ?(apply = false)
       ?(now = Unix.gettimeofday ()) ~cutoff () =
     let nr = narrate in
@@ -160,22 +151,16 @@ module Make (C : Context.S) = struct
     let skipped = ref [] and stopped = ref [] and unparseable = ref [] in
     let trash_deleted =
       count (fun () ->
-          let groups = by_folder () in
+          let folders = T.trashed () in
           Narrate.say nr "  trash: %s"
-            (Narrate.count (List.length groups) "trashed folder");
+            (Narrate.count (List.length folders) "trashed folder");
           List.iter
-            (fun group ->
-              let id, _, path = List.hd group in
-              let name = Option.value ~default:(Folder_id.to_string id) path in
-              let entries =
-                List.map
-                  (fun (_, (e : Store.entry), _) -> (e.key, e.last_modified))
-                  group
-              in
-              let newest =
-                List.fold_left (fun a (_, m) -> Float.max a m) 0. entries
-              in
-              match Gc_plan.trash ~anchor:(anchor_state id) ~cutoff entries with
+            (fun (f : T.trashed) ->
+              let id = f.id and newest = f.latest in
+              let name = Option.value ~default:f.name f.path in
+              match
+                Gc_plan.trash ~anchor:(anchor_state id) ~cutoff (entries_of f)
+              with
                 | Delete_stale keys ->
                     Narrate.say nr "    %s: the folder is live again; %s" name
                       (if keys = [] then
@@ -206,7 +191,7 @@ module Make (C : Context.S) = struct
                       | Error reason ->
                           Narrate.say nr "    %s: purge stopped: %s" name reason;
                           stopped := (id, reason) :: !stopped))
-            groups)
+            folders)
     in
     let versions_deleted =
       count (fun () ->
@@ -292,22 +277,14 @@ module Make (C : Context.S) = struct
   let purge ?(narrate = Narrate.none) ?(apply = false) path =
     let nr = narrate in
     let delete keys = if apply && keys <> [] then store.delete_multi keys in
-    match List.filter (fun (_, _, p) -> p = Some path) (T.trash_entries ()) with
-      | [] -> Not_in_trash
-      | (_, (m : Folder.marker), _) :: _ -> (
-          let all =
-            List.concat_map
-              (fun g ->
-                List.filter_map
-                  (fun (id, (e : Store.entry), _) ->
-                    if Folder_id.equal id m.id then Some (e.key, e.last_modified)
-                    else None)
-                  g)
-              (by_folder ())
-          in
+    match
+      List.find_opt (fun (f : T.trashed) -> f.path = Some path) (T.trashed ())
+    with
+      | None -> Not_in_trash
+      | Some f -> (
           match
-            Gc_plan.trash ~anchor:(anchor_state m.id) ~cutoff:0. ~on_demand:true
-              all
+            Gc_plan.trash ~anchor:(anchor_state f.id) ~cutoff:0. ~on_demand:true
+              (entries_of f)
           with
             | Refuse_live ->
                 Narrate.say nr
@@ -320,7 +297,7 @@ module Make (C : Context.S) = struct
                    before each folder that it is still in the trash%s"
                   path
                   (if apply then "" else " (dry run: nothing is deleted)");
-                match purge_folder ~apply ~delete m.id keys with
+                match purge_folder ~apply ~delete f.id keys with
                   | Ok n ->
                       Narrate.say nr "  %s, then %s" (Narrate.count n "object")
                         (Narrate.count ~plural:"trash entries"

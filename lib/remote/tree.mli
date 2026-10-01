@@ -70,8 +70,22 @@ module Make (_ : Context.S) : sig
   *)
   val trash : Folder_id.t -> old:Folder_id.t * string -> path:string -> unit
 
-  val trash_entries :
-    unit -> (Tsync_store.Store.entry * Folder.marker * string option) list
+  (** Where a trashed folder's anchor stands: still in the trash, live again
+      (its trash entries are stale), or unanchored. *)
+  val trash_state : Folder_id.t -> [ `In_trash | `Live | `No_anchor ]
+
+  (** One trashed folder: every trash entry naming it, the path the newest one
+      records, when it was last trashed, and its state. *)
+  type trashed = {
+    id : Folder_id.t;
+    name : string;
+    path : string option;
+    entries : Tsync_store.Store.entry list;
+    latest : float;
+    state : [ `In_trash | `Live | `No_anchor ];
+  }
+
+  val trashed : unit -> trashed list
 
   (** Place at the destination, then delete the entries naming the id. *)
   val restore :
