@@ -47,9 +47,10 @@ let client name : (module Engine.S) * (module Tsync_remote.Context.S) =
 
 let drain (module E : Engine.S) = E.drain ~grace:10. ()
 
-let report label (r : Export.report) =
-  p "%s: exported %d (%d bytes), already there %d, failed %d%s\n" label
-    r.exported r.bytes r.already_there (List.length r.failed)
+let report ?(bytes = true) label (r : Export.report) =
+  p "%s: exported %d%s, already there %d, failed %d%s\n" label r.exported
+    (if bytes then Printf.sprintf " (%d bytes)" r.bytes else "")
+    r.already_there (List.length r.failed)
     (if r.cancelled then ", cancelled" else "");
   List.iter
     (fun (d, why) -> p "  failed %s: %s\n" (Filename.basename d) why)
@@ -90,11 +91,11 @@ let () =
       ignore (A.import src);
       drain (module A);
       let cache_root = Filename.concat root "A/cache" in
-      let export ?cancelled dst paths =
+      let export ?bytes ?cancelled dst paths =
         match
           X.export ?cancelled ~cache_root ~dst:(Filename.concat root dst) paths
         with
-          | r -> report dst r
+          | r -> report ?bytes dst r
           | exception Fail.E f ->
               p "%s: refused: %s\n" dst
                 (Text.replace_all ~sub:(root ^ "/") ~by:"" f.reason)
@@ -120,13 +121,13 @@ let () =
         (read (Filename.concat root "resumed/b.bin") = big);
       p "\n== changed upstream since an interrupted export: started over\n";
       let checks = ref 0 in
-      export "changed" ["notes/a.txt"; "notes/deep/b.bin"] ~cancelled:(fun () ->
+      export "changed" ~bytes:false ["notes/deep/b.bin"] ~cancelled:(fun () ->
           incr checks;
           !checks > 3);
       file src "notes/deep/b.bin" (String.uppercase_ascii big);
       ignore (A.import ~only:["notes/deep/b.bin"] ~force_rehash:true src);
       drain (module A);
-      export "changed" ["notes/a.txt"; "notes/deep/b.bin"];
+      export "changed" ~bytes:false ["notes/deep/b.bin"];
       p "  content is the new one: %b\n"
         (read (Filename.concat root "changed/b.bin")
         = String.uppercase_ascii big);

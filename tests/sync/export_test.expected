@@ -17,10 +17,9 @@ resumed: exported 1 (39992 bytes), already there 0, failed 0
   content equal: true
 
 == changed upstream since an interrupted export: started over
-changed: exported 0 (0 bytes), already there 0, failed 2, cancelled
-  failed a.txt: cancelled
+changed: exported 0, already there 0, failed 1, cancelled
   failed b.bin: cancelled
-changed: exported 2 (40001 bytes), already there 0, failed 0
+changed: exported 1, already there 0, failed 0
   content is the new one: true
 
 == refusals

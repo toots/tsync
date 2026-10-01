@@ -262,7 +262,7 @@ module Make (C : Context.S) = struct
       exported = !exported;
       bytes = !bytes;
       already_there = !already;
-      failed = List.rev !failed @ unsettled;
+      failed = List.sort compare (List.rev !failed @ unsettled);
       pending;
       cancelled = cancelled ();
     }
