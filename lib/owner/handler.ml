@@ -347,6 +347,19 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
           | `Restored n -> Protocol.Restored n
           | `Not_in_trash -> Not_in_trash
           | `Exists -> Name_taken)
+    | Share r ->
+        let module S =
+          Tsync_gc.Share.Make ((val Tsync_domain.Domain.context t.domain)) in
+        let c = S.create ?expires:r.expires ?token:r.token r.rel in
+        { Protocol.url = c.url; expires = c.expires }
+    | Share_revoke s ->
+        let module S =
+          Tsync_gc.Share.Make ((val Tsync_domain.Domain.context t.domain)) in
+        S.revoke s
+    | Share_clear_cache ->
+        let module S =
+          Tsync_gc.Share.Make ((val Tsync_domain.Domain.context t.domain)) in
+        S.clear_cache ()
     | Job r -> run_job t ~send ~narrate:r.narrate r.job
     | Cancel id -> cancel t id
     | Notify_reset -> publish_event t Reset

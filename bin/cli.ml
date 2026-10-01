@@ -91,6 +91,24 @@ let verbose =
 
 let set_verbose v = if v then Atomic.set Log.min_level Log.Info
 
+(* 07 §5.1: <N>d|h|m|s with N > 0, in seconds. *)
+let duration =
+  let parse s =
+    let n = String.length s in
+    let unit_ = if n > 0 then Some s.[n - 1] else None in
+    match (unit_, int_of_string_opt (String.sub s 0 (max 0 (n - 1)))) with
+      | Some u, Some v when v > 0 -> (
+          match u with
+            | 'd' -> Ok (float v *. 86400.)
+            | 'h' -> Ok (float v *. 3600.)
+            | 'm' -> Ok (float v *. 60.)
+            | 's' -> Ok (float v)
+            | _ -> Error (`Msg (s ^ ": a duration is <N>d, <N>h, <N>m or <N>s"))
+          )
+      | _ -> Error (`Msg (s ^ ": a duration is <N>d, <N>h, <N>m or <N>s"))
+  in
+  Arg.conv (parse, fun f s -> Format.fprintf f "%.0fs" s)
+
 let domain_arg =
   Arg.(
     value

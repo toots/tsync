@@ -24,6 +24,10 @@ trash_restore     request reads back, reply reads back
 job               request reads back, reply reads back
 job               request reads back, reply reads back
 job               request reads back, reply reads back
+share             request reads back, reply reads back
+share             request reads back, reply reads back
+share_revoke      request reads back, reply reads back
+share_clear_cache request reads back, reply reads back
 cancel            request reads back, reply reads back
 cancel            request reads back, reply reads back
 retry             request reads back, reply reads back

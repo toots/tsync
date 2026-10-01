@@ -124,3 +124,18 @@
  (alias runtest)
  (action
   (diff mirror_test.expected mirror_test.output)))
+
+(executable
+ (name share_test)
+ (modules share_test)
+ (libraries tsync_core tsync_store tsync_remote tsync_gc unix))
+
+(rule
+ (with-stdout-to
+  share_test.output
+  (run ./share_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff share_test.expected share_test.output)))

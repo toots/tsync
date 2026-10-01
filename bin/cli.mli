@@ -25,5 +25,9 @@ val use_tls : Config.t -> string option -> unit
 
 val verbose : bool Cmdliner.Term.t
 val set_verbose : bool -> unit
+
+(** 07 §5.1: [<N>d|h|m|s] with N > 0, as seconds. *)
+val duration : float Cmdliner.Arg.conv
+
 val domain_arg : string option Cmdliner.Term.t
 val cmd : string -> doc:string -> 'a Cmdliner.Term.t -> 'a Cmdliner.Cmd.t

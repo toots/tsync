@@ -500,6 +500,76 @@ let mirror_cmd =
        destination."
     Term.(const mirror $ source $ manifests $ path $ domain_arg $ verbose)
 
+let share path expires token revoke clear name verbose =
+  set_verbose verbose;
+  run (fun () ->
+      let config = config () in
+      let dom = domain ?name config in
+      let ask req =
+        Tsync_owner.Owner.request ~what:"tsync share" config dom req
+      in
+      match (revoke, clear, path) with
+        | Some _, true, _ | Some _, _, Some _ | _, true, Some _ ->
+            fail "--revoke, --clear-cache and a path go one at a time"
+        | Some s, false, None ->
+            if ask (Tsync_owner.Protocol.Share_revoke s) then (
+              say "revoked";
+              0)
+            else (
+              say "no share of %s holds that token"
+                (Domain_name.to_string dom.name);
+              1)
+        | None, true, None ->
+            let n, bytes = ask Tsync_owner.Protocol.Share_clear_cache in
+            say "%d cached share objects deleted (%s)" n (Narrate.size bytes);
+            0
+        | None, false, path ->
+            let rel =
+              String.concat "/"
+                (List.filter (( <> ) "")
+                   (String.split_on_char '/' (Option.value ~default:"" path)))
+            in
+            let r = ask (Tsync_owner.Protocol.Share { rel; expires; token }) in
+            say "%s" r.url;
+            prerr_endline ("expires " ^ Narrate.date r.expires);
+            0)
+
+let share_cmd =
+  let path =
+    Arg.(
+      value
+      & pos 0 (some string) None
+      & info [] ~docv:"PATH"
+          ~doc:"The file or folder to share; the whole domain when none.")
+  and expires =
+    Arg.(
+      value
+      & opt (some duration) None
+      & info ["expires"] ~docv:"DUR"
+          ~doc:"How long the link lives (7d by default).")
+  and token =
+    Arg.(
+      value
+      & opt (some string) None
+      & info ["token"] ~docv:"HEX"
+          ~doc:"Use this token, 32 to 128 lowercase hex characters.")
+  and revoke =
+    Arg.(
+      value
+      & opt (some string) None
+      & info ["revoke"] ~docv:"TOKEN|URL" ~doc:"Revoke a link of this domain.")
+  and clear =
+    Arg.(
+      value & flag
+      & info ["clear-cache"]
+          ~doc:"Delete cached share downloads; links keep working.")
+  in
+  cmd "share"
+    ~doc:"Create a public, expiring link to a file or folder (URL on stdout)."
+    Term.(
+      const share $ path $ expires $ token $ revoke $ clear $ domain_arg
+      $ verbose)
+
 let cmds =
   [
     gc_cmd;
@@ -510,4 +580,5 @@ let cmds =
     rsync_cmd;
     export_cmd;
     mirror_cmd;
+    share_cmd;
   ]

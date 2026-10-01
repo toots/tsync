@@ -95,6 +95,14 @@ let cases =
           },
         1 );
     Case (Job { job = Gc_copies Probe; narrate = false }, 0);
+    Case
+      ( Share { rel = "docs/a.txt"; expires = Some 3600.; token = None },
+        { url = "https://s.example/d/0123"; expires = 1790000000. } );
+    Case
+      ( Share { rel = ""; expires = None; token = Some (String.make 32 'a') },
+        { url = "https://s.example/d/aaaa"; expires = 1790000000. } );
+    Case (Share_revoke "https://s.example/d/0123", true);
+    Case (Share_clear_cache, (3, 4096));
     Case (Cancel 3, true);
     Case (Cancel 4, false);
     Case (Retry, 4);

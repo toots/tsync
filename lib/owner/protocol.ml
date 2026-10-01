@@ -26,6 +26,7 @@ type counted = { succeeded : int; failed : int }
 type progress = Inactive | Active of { downloaded : int; total : int }
 type resynced = Incremental of int | Full of { manifests : int; failed : int }
 type trash_restored = Restored of int | Not_in_trash | Name_taken
+type shared = { url : string; expires : float }
 
 type status = {
   domain : string;
@@ -77,6 +78,14 @@ type _ request =
   | Full_resync : unit request
   | Sync : { full : bool } -> resynced request
   | Trash_restore : string -> trash_restored request
+  | Share : {
+      rel : string;
+      expires : float option;
+      token : string option;
+    }
+      -> shared request
+  | Share_revoke : string -> bool request
+  | Share_clear_cache : (int * int) request
   | Job : { job : Jobs.t; narrate : bool } -> int request
   | Cancel : int -> bool request
   | Retry : int request
@@ -109,6 +118,9 @@ let action : type a. a request -> string = function
   | Full_resync -> "full_resync"
   | Sync _ -> "sync"
   | Trash_restore _ -> "trash_restore"
+  | Share _ -> "share"
+  | Share_revoke _ -> "share_revoke"
+  | Share_clear_cache -> "share_clear_cache"
   | Job _ -> "job"
   | Cancel _ -> "cancel"
   | Retry -> "retry"
@@ -131,7 +143,9 @@ let bulk : type a. a request -> bool = function
   | _ -> false
 
 let refused_while_paused : type a. a request -> bool = function
-  | Sync _ | Trash_restore _ | Job _ -> true
+  | Sync _ | Trash_restore _ | Job _ | Share _ | Share_revoke _
+  | Share_clear_cache ->
+      true
   | _ -> false
 
 type event = Recovered | Reset
@@ -189,7 +203,8 @@ let destination_of j =
 
 let request_fields : type a. a request -> (string * Yojson.Safe.t) list =
   function
-  | Ping | Cursor | Full_resync | Retry | Poll | Notify_reset | Status | Stop ->
+  | Ping | Cursor | Full_resync | Retry | Poll | Notify_reset | Status | Stop
+  | Share_clear_cache ->
       []
   | Stat t | Download_progress t | Delete t | Rmdir t | Evict t ->
       target_fields t
@@ -220,6 +235,11 @@ let request_fields : type a. a request -> (string * Yojson.Safe.t) list =
   | Restore r -> target_fields r.item @ opt "keep" (fun k -> `Float k) r.keep
   | Sync r -> [("arg", `String (if r.full then "full" else ""))]
   | Trash_restore path -> [("path", `String path)]
+  | Share r ->
+      [("rel", `String r.rel)]
+      @ opt "expires" (fun e -> `Float e) r.expires
+      @ opt "token" (fun t -> `String t) r.token
+  | Share_revoke s -> [("arg", `String s)]
   | Job r -> [("job", Jobs.to_yojson r.job); ("narrate", `Bool r.narrate)]
   | Cancel id -> [("job", `Int id)]
   | Pause on -> [("arg", `String (if on then "on" else "off"))]
@@ -293,6 +313,16 @@ let decode j =
         match str j "path" with
           | Some p -> Request (Trash_restore p)
           | None -> Fail.invalid "trash_restore needs a path")
+    | "share" ->
+        Request
+          (Share
+             {
+               rel = Option.value ~default:"" (str j "rel");
+               expires = number j "expires";
+               token = str j "token";
+             })
+    | "share_revoke" -> Request (Share_revoke (required j "arg"))
+    | "share_clear_cache" -> Request Share_clear_cache
     | "job" -> (
         match Option.map Jobs.of_yojson (member j "job") with
           | Some (Ok job) -> Request (Job { job; narrate = flag j "narrate" })
@@ -432,6 +462,12 @@ let encode_reply : type a. a request -> a -> Yojson.Safe.t =
                   ("manifests", `Int f.manifests);
                   ("failed", `Int f.failed);
                 ])
+    | Share _ ->
+        ok [("url", `String reply.url); ("expires", `Float reply.expires)]
+    | Share_revoke _ -> ok [("revoked", `Bool reply)]
+    | Share_clear_cache ->
+        let n, bytes = reply in
+        ok [("deleted", `Int n); ("bytes", `Int bytes)]
     | Job _ -> ok [("exit", `Int reply)]
     | Cancel _ -> ok [("cancelled", `Bool reply)]
     | Retry -> ok [("readopted", `Int reply)]
@@ -530,6 +566,13 @@ let decode_reply : type a. a request -> Yojson.Safe.t -> a =
         if str j "mode" = Some "full" then
           Full { manifests = count "manifests" j; failed = count "failed" j }
         else Incremental (count "applied" j)
+    | Share _ ->
+        {
+          url = Option.value ~default:"" (str j "url");
+          expires = Option.value ~default:0. (number j "expires");
+        }
+    | Share_revoke _ -> flag j "revoked"
+    | Share_clear_cache -> (count "deleted" j, count "bytes" j)
     | Job _ -> count "exit" j
     | Cancel _ -> flag j "cancelled"
     | Retry -> count "readopted" j

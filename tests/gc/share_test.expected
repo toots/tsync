@@ -1,0 +1,30 @@
+== the object must be on the member serving links
+a.txt: refused (refused/other): a.txt is not on copy yet
+
+== by kind
+a.txt: https://s.example/d/<token>, in 7 days
+  {"v":1,"expires":<exp>,"domain":"d","type":"file","key":"tsync/d/manifests/.tsync-root/f01e5cbbc09d4fc4-9a0fcd66f030de75","filename":"a.txt"}
+docs: https://s.example/d/<token>, in 0 days
+  {"v":1,"expires":<exp>,"domain":"d","type":"dir","folderId":"0000000000a1-1","filename":"docs.zip"}
+the domain: https://s.example/d/<token>, in 30 days
+  {"v":1,"expires":<exp>,"domain":"d","type":"dir","folderId":".tsync-root","filename":"d.zip"}
+empty: refused (absent): empty: an empty folder has nothing to share
+nowhere: refused (absent): nowhere: no such file or folder in d
+
+== chosen tokens
+a token: https://s.example/d/<token>, in 7 days
+  {"v":1,"expires":<exp>,"domain":"d","type":"file","key":"tsync/d/manifests/.tsync-root/f01e5cbbc09d4fc4-9a0fcd66f030de75","filename":"a.txt"}
+the same token: refused (exists/exists): the token aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa is taken
+a short token: refused (invalid): a token is 32 to 128 lowercase hex characters
+
+== revoke
+revoke by link: true
+manifest gone: true, cached download gone: true
+again: false
+another domain's share: false, still there: true
+
+== the share cache
+deleted 2 objects (8 bytes); links kept: true
+
+== no member serves links
+refused: Sharing is not available for d.

@@ -38,6 +38,7 @@ type counted = { succeeded : int; failed : int }
 type progress = Inactive | Active of { downloaded : int; total : int }
 type resynced = Incremental of int | Full of { manifests : int; failed : int }
 type trash_restored = Restored of int | Not_in_trash | Name_taken
+type shared = { url : string; expires : float }
 
 type status = {
   domain : string;
@@ -89,6 +90,14 @@ type _ request =
   | Full_resync : unit request
   | Sync : { full : bool } -> resynced request
   | Trash_restore : string -> trash_restored request
+  | Share : {
+      rel : string;
+      expires : float option;  (** seconds from now *)
+      token : string option;
+    }
+      -> shared request
+  | Share_revoke : string -> bool request  (** whether a share was there *)
+  | Share_clear_cache : (int * int) request  (** objects and bytes deleted *)
   | Job : { job : Jobs.t; narrate : bool } -> int request
       (** the exit status; its lines stream before the reply (07 §2.5) *)
   | Cancel : int -> bool request  (** whether that job was running *)
