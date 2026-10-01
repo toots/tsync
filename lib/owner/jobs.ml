@@ -134,7 +134,8 @@ let copies io c act =
           (fun (m : Tsync_store.Composite.member) ->
             say "%s: probing its bucket function (up to 3 minutes)" m.name;
             say "  %s"
-              (if Tsync_store.Composite.probe c m then "confirmed"
+              (if Tsync_store.Composite.probe ~cancelled:io.cancelled c m then
+                 "confirmed"
                else "not confirmed: requests were not consumed"))
           copies;
         0
@@ -270,7 +271,9 @@ let integrity io (dom : Tsync_domain.Domain.t) ~repair ~apply ~detail ~source =
           r.corrupt));
     if Integrity.healthy r then 0 else 1)
   else (
-    let tree = I.repair_tree ~narrate:io.narrate ~apply r in
+    let tree =
+      I.repair_tree ~narrate:io.narrate ~apply ~cancelled:io.cancelled r
+    in
     let chunks =
       I.repair_chunks ~narrate:io.narrate ~apply ?source ~cancelled:io.cancelled
         r

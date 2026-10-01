@@ -142,8 +142,14 @@ module Make (C : Context.S) = struct
       (if apply then "" else " (dry run: nothing is deleted)");
     let deleted = ref [] in
     let delete keys =
-      deleted := List.rev_append keys !deleted;
-      if apply && keys <> [] then store.delete_multi keys
+      if not apply then deleted := List.rev_append keys !deleted
+      else
+        ignore
+          (Cancel.batches cancelled
+             (fun batch ->
+               store.delete_multi batch;
+               deleted := List.rev_append batch !deleted)
+             keys)
     in
     (* A cancelled expiry skips what is left, phase by phase. *)
     let count f =
@@ -208,7 +214,8 @@ module Make (C : Context.S) = struct
             Gc_plan.versions ~cutoff
               (List.map
                  (fun (e : Store.entry) -> e.key)
-                 (store.list_prefix (Key.versions d)))
+                 (Cancel.race cancelled (fun () ->
+                      store.list_prefix (Key.versions d))))
           in
           Narrate.say nr "  versions: %s older than %s"
             (Narrate.count (List.length expired) "version")
@@ -227,7 +234,10 @@ module Make (C : Context.S) = struct
                   Log.warn "the journal cursor does not parse: %S" body;
                   None
           in
-          let entries = Tsync_sync.Journal.list_entries journal in
+          let entries =
+            Cancel.race cancelled (fun () ->
+                Tsync_sync.Journal.list_entries journal)
+          in
           let doomed =
             Gc_plan.journal ~now ~horizon:Tsync_sync.Outbound.horizon ~cutoff
               ~cursor entries
@@ -287,7 +297,9 @@ module Make (C : Context.S) = struct
   let purge ?(narrate = Narrate.none) ?(apply = false)
       ?(cancelled = Fun.const false) path =
     let nr = narrate in
-    let delete keys = if apply && keys <> [] then store.delete_multi keys in
+    let delete keys =
+      if apply then ignore (Cancel.batches cancelled store.delete_multi keys)
+    in
     match
       List.find_opt (fun (f : T.trashed) -> f.path = Some path) (T.trashed ())
     with

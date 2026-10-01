@@ -68,9 +68,12 @@ val orphan_grace : float
 module Make (_ : Tsync_remote.Context.S) : sig
   val report : ?narrate:Narrate.t -> ?cancelled:(unit -> bool) -> unit -> report
 
+  (** Stops before the next finding once [cancelled] holds, answering what it
+      did. *)
   val repair_tree :
     ?narrate:Narrate.t ->
     ?apply:bool ->
+    ?cancelled:(unit -> bool) ->
     ?now:float ->
     report ->
     (finding * tree_repair) list

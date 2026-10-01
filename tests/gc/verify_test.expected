@@ -10,7 +10,8 @@ function deployed:
 function no longer notified:
   main: unsupported
   bucket: stalled, 4096 left, 1 corrupt
-cancelled:
+cancelled while queueing, the function consuming what was written: cancelled
+cancelled while following:
   main: unsupported
   bucket: abandoned, 4096 left, 1 corrupt
   requests left for the function: 4096

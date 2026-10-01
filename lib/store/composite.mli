@@ -144,12 +144,13 @@ val function_confirmed : t -> member -> bool
 
 (** Probe the copy's bucket function now (object-store-common §3), saving a
     confirmation; [false] for a store that declares none. *)
-val probe : t -> member -> bool
+val probe : ?cancelled:(unit -> bool) -> t -> member -> bool
 
 (** Queue a check of every chunk of the domain on a copy whose bucket function
     this owner confirmed: one verify request per shard (object-store-common
     §3). *)
-val queue_verification : t -> member -> [ `Queued of int | `Unsupported ]
+val queue_verification :
+  ?cancelled:(unit -> bool) -> t -> member -> [ `Queued of int | `Unsupported ]
 
 (** A discard request present on a copy, with the keys it names and its age. *)
 type outstanding = { copy : string; request : Key.t; keys : int; age : float }

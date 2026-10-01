@@ -102,7 +102,7 @@ module Make (C : Context.S) = struct
            | _ -> ()))
       id ~root_path
       (fun () parent_path (e : Tree.entry) ->
-        if cancelled () then Fail.raise_ Fail.Refused "cancelled";
+        Cancel.check cancelled;
         match e.body with
           | Dir m ->
               let path = Names.join parent_path m.name in
@@ -121,7 +121,7 @@ module Make (C : Context.S) = struct
       ()
 
   (* gc §4.6: every namespace of the manifest area with what it holds. *)
-  let namespaces () =
+  let namespaces ~cancelled =
     let by_ns = Hashtbl.create 64 in
     List.iter
       (fun (e : Store.entry) ->
@@ -131,21 +131,21 @@ module Make (C : Context.S) = struct
               Hashtbl.replace by_ns k
                 ((id, e) :: Option.value ~default:[] (Hashtbl.find_opt by_ns k))
           | None -> ())
-      (store.list_prefix (Key.manifests d));
+      (Cancel.race cancelled (fun () -> store.list_prefix (Key.manifests d)));
     Hashtbl.fold
       (fun _ l acc ->
         let id = fst (List.hd l) in
         (id, List.map snd l) :: acc)
       by_ns []
 
-  let orphans ~reached =
+  let orphans ~cancelled ~reached =
     let unreached =
       List.filter
         (fun (id, _) ->
           (not (Folder_id.equal id Folder_id.root))
           && (not (Folder_id.equal id Folder_id.trash))
           && not (Hashtbl.mem reached (Folder_id.to_string id)))
-        (namespaces ())
+        (namespaces ~cancelled)
     in
     let is_anchor (e : Store.entry) = Key.leaf e.key = anchor_leaf in
     let tombstones, orphans =
@@ -188,7 +188,7 @@ module Make (C : Context.S) = struct
     in
     (found, List.length tombstones)
 
-  let corrupt_chunks () =
+  let corrupt_chunks ~cancelled =
     List.concat_map
       (fun (m : Composite.member) ->
         List.filter_map
@@ -197,7 +197,8 @@ module Make (C : Context.S) = struct
               | Some (d', chunk) when Domain_name.equal d' d ->
                   Some { member = m.name; chunk }
               | _ -> None)
-          (m.store.list_prefix (Key.corrupted d)))
+          (Cancel.race cancelled (fun () ->
+               m.store.list_prefix (Key.corrupted d))))
       (Composite.members C.composite)
 
   let report ?(narrate = Narrate.none) ?(cancelled = Fun.const false) () =
@@ -246,10 +247,10 @@ module Make (C : Context.S) = struct
             []))
         trashed
     in
-    if cancelled () then Fail.raise_ Fail.Refused "cancelled";
+    Cancel.check cancelled;
     Narrate.say narrate "  listing the manifest area for unreachable folders";
     Narrate.progress narrate "listing the manifest area";
-    let orphans, tombstones = orphans ~reached in
+    let orphans, tombstones = orphans ~cancelled ~reached in
     let twice =
       Hashtbl.fold
         (fun k paths acc ->
@@ -266,7 +267,7 @@ module Make (C : Context.S) = struct
           !disowned
       @ trashed_live @ List.rev !unanchored @ orphans
     in
-    let corrupt = corrupt_chunks () in
+    let corrupt = corrupt_chunks ~cancelled in
     Narrate.say narrate "  %s, %s, %s"
       (Narrate.count (List.length findings) "finding")
       (Narrate.count tombstones "tombstone")
@@ -307,38 +308,39 @@ module Make (C : Context.S) = struct
         Adopted
 
   let repair_tree ?(narrate = Narrate.none) ?(apply = false)
-      ?(now = Unix.gettimeofday ()) r =
+      ?(cancelled = Fun.const false) ?(now = Unix.gettimeofday ()) r =
     let twice =
       List.filter_map
         (function Twice { id; _ } -> Some id | _ -> None)
         r.findings
     in
     let total = List.length r.findings in
-    List.mapi
-      (fun i f ->
-        Narrate.progress narrate
-          ~fraction:(float i /. float total)
-          "repairing the tree: %d of %d findings" (i + 1) total;
-        let outcome =
-          try repair_one ~apply ~now ~twice f with
-            | (Stop.Stopping | Rt.Cancelled) as e -> raise e
-            | e -> Failed (Printexc.to_string e)
-        in
-        Narrate.say narrate "  %s: %s" (describe f)
-          (match outcome with
-            | Deleted -> if apply then "deleted" else "would be deleted"
-            | Anchored -> if apply then "anchored" else "would be anchored"
-            | Adopted ->
-                if apply then "adopted into the trash"
-                else "would be adopted into the trash"
-            | Young -> "younger than the grace; left"
-            | Nested ->
-                "inside another unreachable folder; considered once that one \
-                 is adopted"
-            | Left -> "left; resolve it by hand"
-            | Failed reason -> "failed: " ^ reason);
-        (f, outcome))
-      r.findings
+    List.mapi (fun i f -> (i, f)) r.findings
+    |> List.filter_map (fun (i, f) ->
+        if cancelled () then None
+        else (
+          Narrate.progress narrate
+            ~fraction:(float i /. float total)
+            "repairing the tree: %d of %d findings" (i + 1) total;
+          let outcome =
+            try repair_one ~apply ~now ~twice f with
+              | (Stop.Stopping | Rt.Cancelled) as e -> raise e
+              | e -> Failed (Printexc.to_string e)
+          in
+          Narrate.say narrate "  %s: %s" (describe f)
+            (match outcome with
+              | Deleted -> if apply then "deleted" else "would be deleted"
+              | Anchored -> if apply then "anchored" else "would be anchored"
+              | Adopted ->
+                  if apply then "adopted into the trash"
+                  else "would be adopted into the trash"
+              | Young -> "younger than the grace; left"
+              | Nested ->
+                  "inside another unreachable folder; considered once that one \
+                   is adopted"
+              | Left -> "left; resolve it by hand"
+              | Failed reason -> "failed: " ^ reason);
+          Some (f, outcome)))
 
   let follow ~narrate ~cancelled ~poll ~stall_polls (m : Composite.member) =
     let count p =
@@ -376,7 +378,7 @@ module Make (C : Context.S) = struct
     let queued =
       List.map
         (fun (m : Composite.member) ->
-          match Composite.queue_verification C.composite m with
+          match Composite.queue_verification ~cancelled C.composite m with
             | `Queued n ->
                 Narrate.say narrate
                   "%s: queued %d shard requests for its bucket function" m.name
@@ -385,9 +387,22 @@ module Make (C : Context.S) = struct
             | `Unsupported -> (m, false))
         members
     in
+    (* Queueing cut short checks part of the store: never reported as done. *)
     List.map
       (fun ((m : Composite.member), q) ->
         if not q then (m.name, Unsupported)
+        else if cancelled () then (
+          let count p =
+            try List.length (m.store.list_prefix p) with
+              | (Stop.Stopping | Rt.Cancelled) as e -> raise e
+              | _ -> 0
+          in
+          ( m.name,
+            Abandoned
+              {
+                left = count (Key.verify_jobs d);
+                corrupt = count (Key.corrupted d);
+              } ))
         else (m.name, follow ~narrate ~cancelled ~poll ~stall_polls m))
       queued
 

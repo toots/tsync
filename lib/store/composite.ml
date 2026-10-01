@@ -927,23 +927,29 @@ let function_confirmed t m =
 
 (* object-store-common §3: one request per shard, populated or not; listing
    which shards exist would cost more than the empty requests. *)
-let queue_verification t m =
+let queue_verification ?(cancelled = Fun.const false) t m =
   match copy_of t m with
     | Some c when queued c ->
         guard t c.member ("queue verification on " ^ c.member.name);
-        let shards = List.init 4096 (Printf.sprintf "%03x") in
-        List.iter
-          (fun shard ->
-            c.member.store.put
-              (Key.verify_job t.core.domain shard)
-              Bigstring.empty)
-          shards;
-        `Queued (List.length shards)
+        let written = ref 0 in
+        ignore
+          (Cancel.batches ~size:64 cancelled
+             (List.iter (fun shard ->
+                  c.member.store.put
+                    (Key.verify_job t.core.domain shard)
+                    Bigstring.empty;
+                  incr written))
+             (List.init 4096 (Printf.sprintf "%03x")));
+        `Queued !written
     | _ -> `Unsupported
 
-let probe t m =
+(* A cancel stops the waiting only: the probe runs on in its own fiber, since
+   other callers may share its answer. *)
+let probe ?(cancelled = Fun.const false) t m =
   match copy_of t m with
-    | Some c when c.member.store.bucket_functions -> probe_copy t.core c
+    | Some c when c.member.store.bucket_functions ->
+        let answer = Rt.async (fun () -> probe_copy t.core c) in
+        Cancel.race cancelled (fun () -> Rt.Promise.await answer)
     | _ -> false
 
 type outstanding = { copy : string; request : Key.t; keys : int; age : float }

@@ -182,6 +182,8 @@ let () =
         (match I.report ~cancelled:(Fun.const true) () with
           | _ -> "finished"
           | exception Fail.E f -> f.reason);
+      p "a repair cancelled before it starts repairs %d findings\n"
+        (List.length (I.repair_tree ~cancelled:(Fun.const true) (I.report ())));
       p "\n== repair, dry run\n";
       let before = listing () in
       repair ~apply:false;

@@ -24,11 +24,14 @@ let check_shard (inner : Store.t) request =
         ignore (inner.delete request)
     | None -> ignore (inner.delete request)
 
-let bucket ~function_on (inner : Store.t) =
+(* [at_once] consumes each request inside its put, so what was written is gone
+   before anyone looks. *)
+let bucket ~function_on ~at_once (inner : Store.t) =
   let notify key =
     if Atomic.get function_on then
       if Key.parse_verify_job key <> None then
-        Rt.spawn ~name:"bucket function" (fun () -> check_shard inner key)
+        if Atomic.get at_once then check_shard inner key
+        else Rt.spawn ~name:"bucket function" (fun () -> check_shard inner key)
       else if Key.parse_discard_job key <> None then
         Rt.spawn ~name:"bucket function" (fun () -> ignore (inner.delete key))
   in
@@ -51,8 +54,8 @@ let () =
   Fs.rm_rf root;
   let main = Local.create ~name:"main" (Filename.concat root "main") in
   let inner = Local.create ~name:"bucket" (Filename.concat root "bucket") in
-  let function_on = Atomic.make false in
-  let copy = bucket ~function_on inner in
+  let function_on = Atomic.make false and at_once = Atomic.make false in
+  let copy = bucket ~function_on ~at_once inner in
   Rt.run_sync (fun () ->
       let c =
         Composite.create
@@ -126,6 +129,23 @@ let () =
       Atomic.set function_on false;
       show "function no longer notified" (verify ());
       clear ();
-      show "cancelled" (verify ~cancelled:(Fun.const true) ());
+      let after n =
+        let checks = ref 0 in
+        fun () ->
+          incr checks;
+          !checks > n
+      in
+      Atomic.set function_on true;
+      Atomic.set at_once true;
+      p
+        "cancelled while queueing, the function consuming what was written: %s\n"
+        (match verify ~cancelled:(after 3) () with
+          | [_; (_, Abandoned _)] -> "cancelled"
+          | [_; (_, Done _)] -> "done"
+          | _ -> "other");
+      Atomic.set function_on false;
+      Atomic.set at_once false;
+      clear ();
+      show "cancelled while following" (verify ~cancelled:(after 66) ());
       p "  requests left for the function: %d\n" (leftover ()));
   Fs.rm_rf root
