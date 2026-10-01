@@ -532,14 +532,20 @@ for `JOB_KEEP` after their last report; a new report for a key replaces the old 
   - each decision that is not obvious and why: what it skipped, kept, refused, retried or waited for,
     and the rule that decided it;
   - counts and progress through long steps, at a pace a person can read (a line per unit of work, or
-    periodic totals when units are many);
+    periodic totals when units are many), with **no prolonged silence**: a step that runs longer than
+    a few seconds reports where it is at regular intervals, so a silence means something is wrong;
   - plain sentences that name things as the operator knows them (paths, member names, dates), never
     internal identifiers alone.
 
   Narration goes to stderr and never changes stdout, so a script reading the result sees the same
   bytes with or without `-v`. It is not a log level: logs serve the program's maintainers and keep
   their own level (§5.7); `-v` also lowers the CLI's log level to `info`. Without `-v`, a command
-  prints its result and only what needs the operator's attention.
+  prints its result and only what needs the operator's attention, and its progress.
+- **Progress by default.** A command whose work can take more than a few seconds shows its progress
+  on stderr while it runs, with or without `-v`: a user who sees none assumes it is stuck. On a TTY it
+  is the redrawn block below (a progress bar, counts, the current step); not on a TTY, periodic lines.
+  `-q/--quiet`, accepted by every command, suppresses every kind of in-progress output (progress and
+  narration), leaving the result and what needs the operator's attention.
 - **Exit status**: [failure-model.md §7.5](algorithms/failure-model.md#75-cli-exit-status); a classified
   failure prints `tsync: <sentence>`. Status 2 (a refusal about the invocation's environment) is used
   by `sync` on a pulled tree ([08 §2.1](08-frontends.md#21-frontend-descriptor)).
