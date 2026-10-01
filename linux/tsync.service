@@ -1,0 +1,22 @@
+# User unit for a source install (make install-system), which enables
+# lingering so it starts at boot. The packages ship tsync@.service instead.
+
+[Unit]
+Description=tsync
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=%h/.local/bin/tsync start
+ExecStop=%h/.local/bin/tsync stop
+Restart=on-failure
+RestartSec=5
+# 78 is an invalid config, which a restart would only repeat.
+RestartPreventExitStatus=78
+# Above STOP_WAIT (42 s): what is still in flight then is owed on disk and
+# resumes at the next start.
+TimeoutStopSec=60
+LimitNOFILE=65536
+
+[Install]
+WantedBy=default.target

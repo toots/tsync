@@ -5,7 +5,7 @@ name: conformance
 
 on:
   push:
-    branches: [rewrite]
+    branches: [rewrite, main]
   workflow_dispatch:
 
 jobs:
@@ -28,9 +28,15 @@ jobs:
       - name: Build
         run: opam exec -- dune build
 
-      # fuse §2: the Linux release build must include the mount.
-      - name: The FUSE frontend is built
-        run: opam exec -- ./_build/default/bin/tsync.exe build-info | grep -E '^frontends:.*\bfuse\b'
+      # fuse §2 and 05 tls: the mount and both TLS implementations are built;
+      # an optional library whose dependency is missing is skipped quietly.
+      - name: The FUSE frontend and both TLS implementations are built
+        run: |
+          info=$(opam exec -- ./_build/default/bin/tsync.exe build-info)
+          echo "$info"
+          echo "$info" | grep -Eq '^frontends:.*\bfuse\b'
+          echo "$info" | grep -Eq '^tls:.*\bopenssl\b'
+          echo "$info" | grep -Eq '^tls:.*\bnative\b'
 
       - name: Tests
         env:
@@ -38,3 +44,29 @@ jobs:
           TSYNC_CI_GCS_BUCKET: ${{ secrets.TSYNC_CI_GCS_BUCKET }}
           TSYNC_CI_GCS_SERVICE_ACCOUNT_KEY: ${{ secrets.TSYNC_CI_GCS_SERVICE_ACCOUNT_KEY }}
         run: opam exec -- dune build @runtest --force
+
+  # opam's default resolution of tsync's TLS alternative, and a build with one
+  # implementation: what `opam install tsync` gives a user.
+  opam-default:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: System libraries
+        run: sudo apt-get update && sudo apt-get install -y libfuse3-dev pkg-config
+
+      - uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: "5.5"
+
+      - name: Install tsync alone
+        run: opam pin -ny . && opam install -y tsync
+
+      - name: Native TLS only
+        run: |
+          info=$(opam exec -- tsync build-info)
+          echo "$info"
+          opam list --installed --short | grep -qx tsync-tls
+          if opam list --installed --short | grep -qx tsync-ssl; then exit 1; fi
+          echo "$info" | grep -Eq '^tls: native$'

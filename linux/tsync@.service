@@ -1,0 +1,26 @@
+# System unit shipped by the deb and rpm, instanced on the user to run as since
+# a package cannot know it: `systemctl enable --now tsync@alice`.
+#
+# No ProtectHome=, PrivateTmp= or PrivateMounts=: a private mount namespace
+# hides the FUSE mount from everyone else.
+
+[Unit]
+Description=tsync for %i
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=%i
+ExecStart=/usr/bin/tsync start
+ExecStop=/usr/bin/tsync stop
+Restart=on-failure
+RestartSec=5
+# 78 is an invalid config, which a restart would only repeat.
+RestartPreventExitStatus=78
+# Above STOP_WAIT (42 s): what is still in flight then is owed on disk and
+# resumes at the next start.
+TimeoutStopSec=60
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,102 @@
+name: release-deb
+
+# Builds, packages and install-tests on every push to rewrite, publishing
+# nothing: the nightly release and the repository serve main. On main it runs
+# after conformance passes, so a red build never reaches the nightly URL.
+# workflow_run fires only from the default branch's copy of this file.
+on:
+  push:
+    branches: [rewrite]
+  workflow_run:
+    workflows: [conformance]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: release-deb-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  deb:
+    if: >-
+      github.event_name != 'workflow_run'
+      || github.event.workflow_run.conclusion == 'success'
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [debian:13, "ubuntu:26.04"]
+        arch: [amd64, arm64]
+        # `arch` has to be a matrix key: an include entry sharing no key with
+        # the matrix is merged into every combination instead of selecting one.
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    container: ${{ matrix.image }}
+    timeout-minutes: 90
+    permissions:
+      contents: write
+    env:
+      SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+      RUN_NUMBER: ${{ github.run_number }}
+      PUBLISH: >-
+        ${{ (github.event_name == 'workflow_run'
+             && github.event.workflow_run.head_branch == 'main')
+            || (github.event_name == 'workflow_dispatch'
+                && github.ref == 'refs/heads/main') }}
+    steps:
+      - name: Install system dependencies
+        # fuse3, not fuse: libfuse3 mounts through the setuid fusermount3,
+        # which only fuse3 provides. libgmp-dev is for mirage-crypto-pk, and gh
+        # for the publish step.
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            opam build-essential dpkg-dev m4 pkg-config git curl \
+            ca-certificates unzip rsync gh binutils \
+            libfuse3-dev fuse3 libssl-dev libgmp-dev
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SHA }}
+
+      # linux/build.sh builds a whole opam switch, which is nearly all of this
+      # job. A hit is fast rather than stale: build.sh updates and upgrades
+      # before it installs.
+      - name: Restore the opam root
+        id: opam-root
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.opam
+          key: opam-${{ matrix.image }}-${{ matrix.arch }}-${{ hashFiles('*.opam', 'linux/build.sh') }}
+
+      - name: Build
+        run: ./linux/build.sh
+
+      - name: Save the opam root
+        if: steps.opam-root.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.opam
+          key: opam-${{ matrix.image }}-${{ matrix.arch }}-${{ hashFiles('*.opam', 'linux/build.sh') }}
+
+      - name: Package
+        run: ./linux/deb/build.sh
+
+      - name: Verify the package installs
+        run: ./linux/deb/verify.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tsync-deb-${{ matrix.arch }}-${{ strategy.job-index }}
+          path: dist/*.deb
+
+      - if: env.PUBLISH == 'true'
+        uses: ./.github/actions/publish-nightly
+        with:
+          files: dist/*.deb
+          sha: ${{ env.SHA }}
+          token: ${{ github.token }}
