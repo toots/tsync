@@ -114,5 +114,23 @@ let () =
         (Dqueue.pending q);
       Dqueue.resume q;
       settle q;
+      p "after resume: %s\n" (String.concat " " (List.rev !log));
+      p "\n== a keyed queue paused with a ready record waits, not spins\n";
+      log := [];
+      let r = Dqueue.Records.open_ (Filename.concat dir "paused-keyed") in
+      let q =
+        Dqueue.create ~workers:2 ~name:"paused-keyed" ~ordered:false kind r
+      in
+      Dqueue.start q run;
+      Dqueue.pause q;
+      ignore (Dqueue.post q ("k", 0));
+      let cpu () = (Usage.sample ()).cpu_seconds in
+      let before = cpu () in
+      Rt.sleep 1.;
+      p "CPU over a paused second below 0.3 s: %b; ran: [%s]\n"
+        (cpu () -. before < 0.3)
+        (String.concat " " !log);
+      Dqueue.resume q;
+      settle q;
       p "after resume: %s\n" (String.concat " " (List.rev !log)));
   Fs.rm_rf dir

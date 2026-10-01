@@ -13,3 +13,7 @@ after release: x#0 held#0
 == pause holds everything
 while paused: [], pending 1
 after resume: p#0
+
+== a keyed queue paused with a ready record waits, not spins
+CPU over a paused second below 0.3 s: true; ran: []
+after resume: k#0

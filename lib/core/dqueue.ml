@@ -471,11 +471,13 @@ let keyed_worker t =
                     else acc)
                   t.slots infinity)
           in
+          (* A record ready while paused waits for the resume: nothing else
+             would end the wait, and looping at once spins a core. *)
           if delay < infinity && delay > 0. then
             ignore
               (Rt.first
                  [(fun () -> Stop.sleep delay); (fun () -> wait_work ~since t)])
-          else if delay = infinity then wait_work ~since t;
+          else wait_work ~since t;
           loop ()
       | Some (k, s, id) -> (
           match decode_record t id with
