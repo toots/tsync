@@ -104,7 +104,10 @@ module Line = struct
     go 0
 end
 
-type answer = Reply of json | Subscribe of string * json * json list
+type answer =
+  | Reply of json
+  | Subscribe of string * json * json list
+  | Stream of ((json -> unit) -> json)
 
 type conn = {
   line : Line.t;
@@ -207,6 +210,18 @@ let stream_events t c topic first =
       in
       loop ())
 
+(* A client that went away does not stop the work it asked for (07 §4.3): its
+   lines are dropped from then on. *)
+let stream_lines c =
+  let gone = ref false in
+  fun j ->
+    if not !gone then (
+      try
+        Line.write
+          ~deadline:(Rt.now () +. line_deadline)
+          c.line (Yojson.Safe.to_string j)
+      with e when not (Rt.is_cancelled e) -> gone := true)
+
 let parse l =
   match Yojson.Safe.from_string l with
     | `Assoc _ as j -> Ok j
@@ -233,6 +248,9 @@ let serve_conn t c handler =
                   | Subscribe (topic, r, first) ->
                       reply r;
                       stream_events t c topic first
+                  | Stream run ->
+                      reply (run (stream_lines c));
+                      loop ()
                   | exception e ->
                       reply (failure (Fail.classify e));
                       loop ()))
@@ -400,15 +418,25 @@ let call ?timeout path req =
 
 let ping = `Assoc [("action", `String "ping")]
 
-let call_bulk path req =
+let streamed j =
+  match j with `Assoc l -> List.mem_assoc "stream" l | _ -> false
+
+let call_stream path req ~on_line =
   with_client path (fun c ->
       Line.write c (Yojson.Safe.to_string req);
       Rt.first
         [
           (fun () ->
-            match Client.read c with
-              | Some j -> j
-              | None -> Fail.raise_ Fail.Link "the server closed the connection");
+            let rec next () =
+              match Client.read c with
+                | Some j when streamed j ->
+                    on_line j;
+                    next ()
+                | Some j -> j
+                | None ->
+                    Fail.raise_ Fail.Link "the server closed the connection"
+            in
+            next ());
           (fun () ->
             let rec probe () =
               Rt.sleep liveness_interval;
@@ -420,6 +448,8 @@ let call_bulk path req =
             in
             probe ());
         ])
+
+let call_bulk path req = call_stream path req ~on_line:ignore
 
 let advisory path req =
   try ignore (call ~timeout:advisory_deadline path req) with

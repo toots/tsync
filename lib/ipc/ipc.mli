@@ -32,6 +32,9 @@ type answer =
   | Subscribe of string * json * json list
       (** the topic, the reply, and the first events queued once the connection
           carries the topic's events *)
+  | Stream of ((json -> unit) -> json)
+      (** run with a sender of lines, each an object with a [stream] field, then
+          the reply; the connection serves further requests *)
 
 type server
 
@@ -75,6 +78,10 @@ val call : ?timeout:float -> string -> json -> json
 (** A bulk request (07 §4.3): no total deadline; abandoned when a [ping] on a
     separate connection misses its deadline. *)
 val call_bulk : string -> json -> json
+
+(** {!call_bulk} for a {!Stream} answer: each streamed line goes to [on_line]
+    before the reply. *)
+val call_stream : string -> json -> on_line:(json -> unit) -> json
 
 (** Never fails its caller: failures are logged once per path and kind. *)
 val advisory : string -> json -> unit
