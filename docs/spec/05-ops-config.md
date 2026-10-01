@@ -251,6 +251,10 @@ Building has no side effect on the stores.
 - **Progress callbacks.** Totals (`on_plan`, `on_scan`) fire once before work; `on_start` fires when
   an item is picked up; `on_file` / `on_entry` when it is done. Byte totals planned equal the bytes
   later reported, and a file's progress sums to its size.
+- **Narration.** Every operation takes a narration sink and tells it what [07 §5.1](07-daemon-cli.md#51-conventions)
+  `--verbose` promises: its steps, its non-obvious decisions with their reasons, and its progress, as
+  sentences for an operator. The operation owns what it says, since only it knows why it decided; the
+  caller only chooses where the sentences go (stderr for the CLI, nowhere by default).
 
 ### 4.2 Announcing what an operation published (import, rsync, trash restore)
 

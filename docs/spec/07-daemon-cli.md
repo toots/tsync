@@ -497,8 +497,23 @@ for `JOB_KEEP` after their last report; a new report for a key replaces the old 
   is configured (a recorded name that is not configured is ignored with a warning), else the sole
   configured domain, else the error "multiple domains configured — use --domain to select" (or "no
   domains configured").
-- **Output.** Results on stdout; progress and logs on stderr. `-v/--verbose` sets the log level to
-  `info` (default `warn`).
+- **Output.** Results on stdout; progress, narration and logs on stderr.
+- **`-v/--verbose`**, accepted by every command, makes the operation narrate itself for a human
+  operator who wants to follow it as it runs, understand what it decides, and debug it, in more detail
+  than an operator normally needs:
+  - each step as it starts and ends, with what it covers (which domain, member, folder or phase) and
+    how long it took;
+  - each decision that is not obvious and why: what it skipped, kept, refused, retried or waited for,
+    and the rule that decided it;
+  - counts and progress through long steps, at a pace a person can read (a line per unit of work, or
+    periodic totals when units are many);
+  - plain sentences that name things as the operator knows them (paths, member names, dates), never
+    internal identifiers alone.
+
+  Narration goes to stderr and never changes stdout, so a script reading the result sees the same
+  bytes with or without `-v`. It is not a log level: logs serve the program's maintainers and keep
+  their own level (§5.7); `-v` also lowers the CLI's log level to `info`. Without `-v`, a command
+  prints its result and only what needs the operator's attention.
 - **Exit status**: [failure-model.md §7.5](algorithms/failure-model.md#75-cli-exit-status); a classified
   failure prints `tsync: <sentence>`. Status 2 (a refusal about the invocation's environment) is used
   by `sync` on a pulled tree ([08 §2.1](08-frontends.md#21-frontend-descriptor)).
