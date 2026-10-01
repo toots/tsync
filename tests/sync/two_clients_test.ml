@@ -158,6 +158,32 @@ let () =
       drain a;
       pass b;
       show "converged" both;
+      p "\n== a folder removed while B adds to it, then restored (05 §4.8)\n";
+      A.mkdir "box" ~exclusive:false;
+      write a "box/a.txt" "first";
+      drain a;
+      pass b;
+      write b "box/b.txt" "added meanwhile";
+      drain b;
+      A.delete "box/a.txt";
+      A.rmdir "box";
+      drain a;
+      pass b;
+      pass a;
+      show "box trashed, with B's addition inside" both;
+      p "restore: %s\n"
+        (match A.restore_from_trash "box" with
+          | `Restored n -> Printf.sprintf "%d announced" n
+          | `Not_in_trash -> "not in the trash"
+          | `Exists -> "name taken");
+      p "again: %s\n"
+        (match A.restore_from_trash "box" with
+          | `Restored n -> Printf.sprintf "%d announced" n
+          | `Not_in_trash -> "not in the trash"
+          | `Exists -> "name taken");
+      drain a;
+      pass b;
+      show "after B's pass" both;
       p "\nowed: A %d/%d, B %d/%d; unapplied: %d %d\n" (A.pending_uploads ())
         (A.pending_metadata ()) (B.pending_uploads ()) (B.pending_metadata ())
         (List.length (A.unapplied ()))

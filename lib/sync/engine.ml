@@ -1077,6 +1077,55 @@ module Make (C : Engine_ctx.S) = struct
           | _ -> ())
       r.ops
 
+  (* 05 §4.8, §4.2: the store side first, so the folder is filed where its
+     Mkdir says; then the folder and its whole subtree are announced, since
+     peers dropped them when it was trashed. *)
+  let restore_from_trash path =
+    match
+      List.find_opt
+        (fun (_, (m : Folder.marker), p) ->
+          p = Some path
+          &&
+            match T.anchor m.id with
+            | Some a -> Folder.in_trash a
+            | None -> true)
+        (T.trash_entries ())
+    with
+      | None -> `Not_in_trash
+      | Some (_, (m : Folder.marker), _) ->
+          if kind path <> `Absent then `Exists
+          else (
+            let parent = require_parent path in
+            match T.restore m.id ~parent ~name:(Names.leaf_of path) with
+              | `Taken _ | `Taken_by_file -> `Exists
+              | `Placed ->
+                  let announced = ref 1 in
+                  with_meta (fun () ->
+                      record_owed
+                        [Op.Mkdir { path; id = Some m.id }]
+                        (fun () ->
+                          ignore (Mirror.record_folder mirror path m.id)));
+                  T.fold_tree m.id ~root_path:path
+                    (fun () dir (e : Tree.entry) ->
+                      incr announced;
+                      match e.body with
+                        | Dir d ->
+                            let p = Names.join dir d.name in
+                            with_meta (fun () ->
+                                record_owed
+                                  [Op.Mkdir { path = p; id = Some d.id }]
+                                  (fun () ->
+                                    ignore (Mirror.record_folder mirror p d.id)))
+                        | File f ->
+                            let p = Names.join dir f.name in
+                            with_meta (fun () ->
+                                with_key p (fun () ->
+                                    Mirror.write_file mirror p f));
+                            post_put p f.size None)
+                    ();
+                  changed [path];
+                  `Restored !announced)
+
   let reconcile () =
     List.iter
       (fun id ->

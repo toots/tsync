@@ -265,12 +265,68 @@ let expire_cmd =
     ~doc:"Remove trash, versions, journal entries and shares older than DATE."
     Term.(const expire $ apply_arg $ date $ domain_arg $ verbose)
 
-let trash apply purge name verbose =
+(* 07 §2.5 read class: listing the trash changes nothing, so it runs here. *)
+let trash_list name verbose =
+  let config = config () in
+  let dom =
+    Tsync_domain.Domain.build ~owner:false config (domain ?name config)
+  in
+  let module T = Tsync_remote.Tree.Make ((val Tsync_domain.Domain.context dom)) in
+  let folders = Hashtbl.create 16 in
+  List.iter
+    (fun ((e : Tsync_store.Store.entry), (m : Folder.marker), path) ->
+      let id = Folder_id.to_string m.id in
+      let newest =
+        match Hashtbl.find_opt folders id with
+          | Some (_, _, t) -> Float.max t e.last_modified
+          | None -> e.last_modified
+      in
+      Hashtbl.replace folders id (m, path, newest))
+    (T.trash_entries ());
+  let restorable, stale =
+    List.partition
+      (fun ((m : Folder.marker), _, _) ->
+        match T.anchor m.id with Some a -> Folder.in_trash a | None -> true)
+      (Hashtbl.fold (fun _ v acc -> v :: acc) folders [])
+  in
+  Narrate.say (narration verbose)
+    "%s in the trash; %s skipped (their folders are live again, and expire \
+     removes the entries)"
+    (Narrate.count (List.length restorable) "folder")
+    (Narrate.count (List.length stale) "stale entry" ~plural:"stale entries");
+  List.iter
+    (fun ((m : Folder.marker), path, at) ->
+      say "%s  %s" (Narrate.date at)
+        (Option.value ~default:(m.name ^ " (path not recorded)") path))
+    (List.sort (fun (_, _, a) (_, _, b) -> compare b a) restorable);
+  0
+
+let trash_restore name path =
+  let config = config () in
+  match
+    Tsync_owner.Owner.request ~bulk:true ~what:"tsync trash --restore" config
+      (domain ?name config) (Tsync_owner.Protocol.Trash_restore path)
+  with
+    | Restored n ->
+        say "%s restored: %s announced to the other clients" path
+          (Narrate.count n "folder and file" ~plural:"folders and files");
+        0
+    | Not_in_trash ->
+        say "%s is not in the trash" path;
+        1
+    | Name_taken ->
+        say "%s already exists; restore it elsewhere or move that one first"
+          path;
+        1
+
+let trash apply purge restore name verbose =
   set_verbose verbose;
   run (fun () ->
-      match purge with
-        | None -> fail "only --purge PATH is available"
-        | Some path ->
+      match (purge, restore) with
+        | Some _, Some _ -> fail "--purge and --restore go one at a time"
+        | None, None -> trash_list name verbose
+        | None, Some path -> trash_restore name path
+        | Some path, None ->
             store_command ~what:"tsync trash --purge" name (fun dom ->
                 let module R =
                   Retention.Make ((val Tsync_domain.Domain.context dom)) in
@@ -291,8 +347,14 @@ let trash_cmd =
       value
       & opt (some string) None
       & info ["purge"] ~docv:"PATH" ~doc:"Purge this trashed folder now.")
+  and restore =
+    Arg.(
+      value
+      & opt (some string) None
+      & info ["restore"] ~docv:"PATH"
+          ~doc:"Bring this trashed folder back where it was.")
   in
-  cmd "trash" ~doc:"Act on the trash."
-    Term.(const trash $ apply_arg $ purge $ domain_arg $ verbose)
+  cmd "trash" ~doc:"List the trash, or restore or purge a trashed folder."
+    Term.(const trash $ apply_arg $ purge $ restore $ domain_arg $ verbose)
 
 let cmds = [gc_cmd; expire_cmd; trash_cmd]

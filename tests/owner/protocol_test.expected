@@ -18,6 +18,9 @@ restore           request reads back, reply reads back
 full_resync       request reads back, reply reads back
 sync              request reads back, reply reads back
 sync              request reads back, reply reads back
+trash_restore     request reads back, reply reads back
+trash_restore     request reads back, reply reads back
+trash_restore     request reads back, reply reads back
 retry             request reads back, reply reads back
 poll              request reads back, reply reads back
 notify_reset      request reads back, reply reads back

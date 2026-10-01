@@ -104,6 +104,13 @@ module type S = sig
       grace; what is left stays owed on disk. *)
   val drain : ?grace:float -> unit -> unit
 
+  (** Bring the trashed folder whose trash entry records [path] back at [path]
+      (05 §4.8): placed on the store, then the folder and every folder and file
+      beneath it announced; how many. UNPREPARED when this client has not
+      resolved the parent folder. *)
+  val restore_from_trash :
+    string -> [ `Restored of int | `Not_in_trash | `Exists ]
+
   (** Adopt records other processes submitted, then run a journal pass soon. *)
   val poll : unit -> unit
 

@@ -267,6 +267,11 @@ let act : type a. t -> a Protocol.request -> a =
         E.set_paused on;
         E.is_paused ()
     | Retry -> E.rearm ()
+    | Trash_restore path -> (
+        match E.restore_from_trash path with
+          | `Restored n -> Protocol.Restored n
+          | `Not_in_trash -> Not_in_trash
+          | `Exists -> Name_taken)
     | Notify_reset -> publish_event t Reset
     | Full_resync ->
         E.stamp_generation ();

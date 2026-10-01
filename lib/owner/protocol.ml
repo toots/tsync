@@ -25,6 +25,7 @@ type fetched = { local_path : string; offset : int; length : int }
 type counted = { succeeded : int; failed : int }
 type progress = Inactive | Active of { downloaded : int; total : int }
 type resynced = Incremental of int | Full of { manifests : int; failed : int }
+type trash_restored = Restored of int | Not_in_trash | Name_taken
 
 type status = {
   domain : string;
@@ -75,6 +76,7 @@ type _ request =
   | Restore : { item : target; keep : float option } -> counted request
   | Full_resync : unit request
   | Sync : { full : bool } -> resynced request
+  | Trash_restore : string -> trash_restored request
   | Retry : int request
   | Poll : unit request
   | Notify_reset : int request
@@ -104,6 +106,7 @@ let action : type a. a request -> string = function
   | Restore _ -> "restore"
   | Full_resync -> "full_resync"
   | Sync _ -> "sync"
+  | Trash_restore _ -> "trash_restore"
   | Retry -> "retry"
   | Poll -> "poll"
   | Notify_reset -> "notify_reset"
@@ -118,11 +121,13 @@ let mutates : type a. a request -> bool = function
   | _ -> false
 
 let bulk : type a. a request -> bool = function
-  | Ensure_cached _ | Fetch_range _ | Evict _ | Restore _ | Sync _ -> true
+  | Ensure_cached _ | Fetch_range _ | Evict _ | Restore _ | Sync _
+  | Trash_restore _ ->
+      true
   | _ -> false
 
 let refused_while_paused : type a. a request -> bool = function
-  | Sync _ -> true
+  | Sync _ | Trash_restore _ -> true
   | _ -> false
 
 type event = Recovered | Reset
@@ -210,6 +215,7 @@ let request_fields : type a. a request -> (string * Yojson.Safe.t) list =
       @ [("noreplace", `Bool r.noreplace)]
   | Restore r -> target_fields r.item @ opt "keep" (fun k -> `Float k) r.keep
   | Sync r -> [("arg", `String (if r.full then "full" else ""))]
+  | Trash_restore path -> [("path", `String path)]
   | Pause on -> [("arg", `String (if on then "on" else "off"))]
   | Stats args -> [("arg", `String (String.concat "," args))]
 
@@ -277,6 +283,10 @@ let decode j =
         Request (Restore { item = target_of j; keep = number j "keep" })
     | "full_resync" -> Request Full_resync
     | "sync" -> Request (Sync { full = str j "arg" = Some "full" })
+    | "trash_restore" -> (
+        match str j "path" with
+          | Some p -> Request (Trash_restore p)
+          | None -> Fail.invalid "trash_restore needs a path")
     | "retry" -> Request Retry
     | "poll" -> Request Poll
     | "notify_reset" -> Request Notify_reset
@@ -390,6 +400,12 @@ let encode_reply : type a. a request -> a -> Yojson.Safe.t =
         ok [("evicted", `Int reply.succeeded); ("failed", `Int reply.failed)]
     | Restore _ ->
         ok [("restored", `Int reply.succeeded); ("failed", `Int reply.failed)]
+    | Trash_restore _ -> (
+        match reply with
+          | Restored n ->
+              ok [("outcome", `String "restored"); ("announced", `Int n)]
+          | Not_in_trash -> ok [("outcome", `String "not_in_trash")]
+          | Name_taken -> ok [("outcome", `String "name_taken")])
     | Sync _ -> (
         match reply with
           | Incremental n ->
@@ -488,6 +504,11 @@ let decode_reply : type a. a request -> Yojson.Safe.t -> a =
         }
     | Evict _ -> { succeeded = count "evicted" j; failed = count "failed" j }
     | Restore _ -> { succeeded = count "restored" j; failed = count "failed" j }
+    | Trash_restore _ -> (
+        match str j "outcome" with
+          | Some "restored" -> Restored (count "announced" j)
+          | Some "not_in_trash" -> Not_in_trash
+          | _ -> Name_taken)
     | Sync _ ->
         if str j "mode" = Some "full" then
           Full { manifests = count "manifests" j; failed = count "failed" j }

@@ -37,6 +37,7 @@ type fetched = { local_path : string; offset : int; length : int }
 type counted = { succeeded : int; failed : int }
 type progress = Inactive | Active of { downloaded : int; total : int }
 type resynced = Incremental of int | Full of { manifests : int; failed : int }
+type trash_restored = Restored of int | Not_in_trash | Name_taken
 
 type status = {
   domain : string;
@@ -87,6 +88,7 @@ type _ request =
   | Restore : { item : target; keep : float option } -> counted request
   | Full_resync : unit request
   | Sync : { full : bool } -> resynced request
+  | Trash_restore : string -> trash_restored request
   | Retry : int request  (** records re-adopted *)
   | Poll : unit request
   | Notify_reset : int request  (** subscribers reached *)

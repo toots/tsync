@@ -70,6 +70,9 @@ let cases =
     Case (Full_resync, ());
     Case (Sync { full = true }, Full { manifests = 12; failed = 1 });
     Case (Sync { full = false }, Incremental 5);
+    Case (Trash_restore "Holidays/2019", Restored 42);
+    Case (Trash_restore "nowhere", Not_in_trash);
+    Case (Trash_restore "Holidays/2019", Name_taken);
     Case (Retry, 4);
     Case (Poll, ());
     Case (Notify_reset, 2);
