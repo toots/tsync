@@ -36,3 +36,8 @@ val read_body :
 val framing : headers -> [ `Length of int | `Chunked | `Eof ]
 
 val write_head : Buffer.t -> string -> headers -> unit
+
+(** An IMF-fixdate, ["Wed, 30 Sep 2026 12:28:28 GMT"]. *)
+val http_date : float -> string
+
+val parse_http_date : string -> float option

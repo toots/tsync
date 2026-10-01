@@ -61,6 +61,9 @@ let () =
       show (Client.request e ~meth:"HEAD" "/echo");
       show (Client.request e ~meth:"GET" "/stream");
       show (Client.request e ~meth:"GET" "/nothing");
+      p "http date: %s, parsed back: %b, garbage: %b" (Codec.http_date 1e9)
+        (Codec.parse_http_date (Codec.http_date 1e9) = Some 1e9)
+        (Codec.parse_http_date "garbage" = None);
       p "host header carries the port: %b"
         (Bigstring.to_string (Client.request e ~meth:"GET" "/host").body
         |> String.trim

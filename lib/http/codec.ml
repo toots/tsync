@@ -179,3 +179,36 @@ let write_head b first h =
       Buffer.add_string b "\r\n")
     h;
   Buffer.add_string b "\r\n"
+
+let days = [| "Sun"; "Mon"; "Tue"; "Wed"; "Thu"; "Fri"; "Sat" |]
+
+let months =
+  [|
+    "Jan";
+    "Feb";
+    "Mar";
+    "Apr";
+    "May";
+    "Jun";
+    "Jul";
+    "Aug";
+    "Sep";
+    "Oct";
+    "Nov";
+    "Dec";
+  |]
+
+let http_date t =
+  let t = Unix.gmtime t in
+  Printf.sprintf "%s, %02d %s %04d %02d:%02d:%02d GMT" days.(t.tm_wday)
+    t.tm_mday months.(t.tm_mon) (t.tm_year + 1900) t.tm_hour t.tm_min t.tm_sec
+
+let parse_http_date d =
+  try
+    Scanf.sscanf d "%_s %d %s %d %d:%d:%d GMT" (fun day mon year h m sec ->
+        Option.bind
+          (Array.find_index (String.equal mon) months)
+          (fun i ->
+            Option.map Ptime.to_float_s
+              (Ptime.of_date_time ((year, i + 1, day), ((h, m, sec), 0)))))
+  with _ -> None

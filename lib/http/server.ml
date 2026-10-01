@@ -73,27 +73,6 @@ let reason = function
   | 503 -> "Service Unavailable"
   | _ -> "Status"
 
-let http_date () =
-  let t = Unix.gmtime (Unix.gettimeofday ()) in
-  Printf.sprintf "%s, %02d %s %04d %02d:%02d:%02d GMT"
-    [| "Sun"; "Mon"; "Tue"; "Wed"; "Thu"; "Fri"; "Sat" |].(t.tm_wday)
-    t.tm_mday
-    [|
-      "Jan";
-      "Feb";
-      "Mar";
-      "Apr";
-      "May";
-      "Jun";
-      "Jul";
-      "Aug";
-      "Sep";
-      "Oct";
-      "Nov";
-      "Dec";
-    |].(t.tm_mon)
-    (t.tm_year + 1900) t.tm_hour t.tm_min t.tm_sec
-
 let write_response lim conn ~head_only ~close r =
   let b = Buffer.create 256 in
   let framing =
@@ -105,7 +84,7 @@ let write_response lim conn ~head_only ~close r =
   in
   Codec.write_head b
     (Printf.sprintf "HTTP/1.1 %d %s" r.status (reason r.status))
-    ((("date", http_date ()) :: r.headers)
+    ((("date", Codec.http_date (Unix.gettimeofday ())) :: r.headers)
     @ framing
     @ if close then [("connection", "close")] else []);
   let write s = Transport.write_string ~timeout:lim.idle_timeout conn s in

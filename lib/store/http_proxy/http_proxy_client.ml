@@ -38,37 +38,12 @@ let success s = s >= 200 && s < 300
 
 (* §3.3: a 401 whose Date is off by more than the window is clock skew, not a
    bad secret. *)
-let months =
-  [
-    "Jan";
-    "Feb";
-    "Mar";
-    "Apr";
-    "May";
-    "Jun";
-    "Jul";
-    "Aug";
-    "Sep";
-    "Oct";
-    "Nov";
-    "Dec";
-  ]
-
-(* An IMF-fixdate, "Wed, 30 Sep 2026 12:28:28 GMT". *)
-let http_date d =
-  try
-    Scanf.sscanf d "%_s %d %s %d %d:%d:%d GMT" (fun day mon year h m sec ->
-        let rec index i = function
-          | [] -> None
-          | x :: rest -> if x = mon then Some i else index (i + 1) rest
-        in
-        Option.bind (index 1 months) (fun month ->
-            Option.map Ptime.to_float_s
-              (Ptime.of_date_time ((year, month, day), ((h, m, sec), 0)))))
-  with _ -> None
-
 let skewed (r : answer) =
-  match Option.bind (Tsync_http.Codec.header r.headers "date") http_date with
+  match
+    Option.bind
+      (Tsync_http.Codec.header r.headers "date")
+      Tsync_http.Codec.parse_http_date
+  with
     | Some t -> Float.abs (t -. Unix.gettimeofday ()) > W.max_clock_skew
     | None -> false
 
