@@ -23,17 +23,25 @@ let count ?plural n noun =
      else (match plural with Some p -> p | None -> noun ^ "s"))
 
 let duration s =
-  let s = int_of_float s in
-  if s < 60 then Printf.sprintf "%ds" s
-  else if s < 3600 then Printf.sprintf "%dm%02ds" (s / 60) (s mod 60)
-  else Printf.sprintf "%dh%02dm" (s / 3600) (s / 60 mod 60)
+  let s = int_of_float (Float.max 0. s) in
+  if s < 3600 then Printf.sprintf "%dm %ds" (s / 60) (s mod 60)
+  else if s < 86400 then Printf.sprintf "%dh %dm" (s / 3600) (s mod 3600 / 60)
+  else Printf.sprintf "%dd %dh" (s / 86400) (s mod 86400 / 3600)
 
-let size n =
-  let f = float_of_int n in
-  if n < 1024 then Printf.sprintf "%d B" n
-  else if f < 1048576. then Printf.sprintf "%.1f KiB" (f /. 1024.)
-  else if f < 1073741824. then Printf.sprintf "%.1f MiB" (f /. 1048576.)
-  else Printf.sprintf "%.1f GiB" (f /. 1073741824.)
+let size_of_float b =
+  if b < 1024. then Printf.sprintf "%.0f B" b
+  else (
+    let rec go b = function
+      | [u] -> Printf.sprintf "%.1f %s" b u
+      | u :: rest ->
+          if b < 1024. then Printf.sprintf "%.1f %s" b u
+          else go (b /. 1024.) rest
+      | [] -> assert false
+    in
+    go (b /. 1024.) ["KiB"; "MiB"; "GiB"; "TiB"])
+
+let size n = size_of_float (float_of_int n)
+let rate b = size_of_float b ^ "/s"
 
 let date t =
   let tm = Unix.localtime t in

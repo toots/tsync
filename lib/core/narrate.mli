@@ -19,11 +19,15 @@ val periodic : ?every:float -> t -> (unit -> string) -> unit
 (** [1 chunk], [3 chunks]; [plural] when it is not the noun plus [s]. *)
 val count : ?plural:string -> int -> string -> string
 
-(** [42s], [6m12s], [2h05m]. *)
+(** [0m 42s], [6m 12s], [2h 5m], [3d 4h]: every duration shown to a person, in
+    narration and in the status report alike. *)
 val duration : float -> string
 
-(** [512 B], [3.0 MiB]. *)
+(** [512 B], [3.0 MiB], up to TiB: every byte count shown to a person. *)
 val size : int -> string
+
+(** [size] per second. *)
+val rate : float -> string
 
 (** Local [YYYY-MM-DD HH:MM]. *)
 val date : float -> string

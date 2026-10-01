@@ -1,26 +1,9 @@
 open Status_report
 module Uplink = Tsync_store.Uplink
 
-let size b =
-  if b < 1024. then Printf.sprintf "%.0f B" b
-  else (
-    let rec go b = function
-      | [u] -> Printf.sprintf "%.1f %s" b u
-      | u :: rest ->
-          if b < 1024. then Printf.sprintf "%.1f %s" b u
-          else go (b /. 1024.) rest
-      | [] -> assert false
-    in
-    go (b /. 1024.) ["KiB"; "MiB"; "GiB"; "TiB"])
-
-let isize n = size (float_of_int n)
-let rate b = size b ^ "/s"
-
-let duration s =
-  let s = int_of_float (Float.max 0. s) in
-  if s < 3600 then Printf.sprintf "%dm %ds" (s / 60) (s mod 60)
-  else if s < 86400 then Printf.sprintf "%dh %dm" (s / 3600) (s mod 3600 / 60)
-  else Printf.sprintf "%dd %dh" (s / 86400) (s mod 86400 / 3600)
+let isize = Tsync_core.Narrate.size
+let rate = Tsync_core.Narrate.rate
+let duration = Tsync_core.Narrate.duration
 
 (* The first folder and as many trailing parts as fit in [width]. *)
 let shorten ?(width = 60) path =

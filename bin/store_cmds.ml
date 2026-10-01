@@ -13,8 +13,6 @@ let store_command ~what name f =
 let dry_note apply =
   if apply then "" else " (dry run: nothing changed; --apply to act)"
 
-let mib n = float_of_int n /. 1048576.
-
 let outcome = function
   | Collector.Completed -> "completed"
   | Suspended { phase; cursor } ->
@@ -24,8 +22,9 @@ let outcome = function
   | Halted reason -> "stopped, left open: " ^ reason
 
 let print_survey (s : Collector.survey) =
-  say "%s: %d chunks referenced, %d reclaimable (%.1f MiB)%s" s.surveyed
-    s.chunks_referenced s.chunks_reclaimable (mib s.bytes_reclaimable)
+  say "%s: %d chunks referenced, %d reclaimable (%s)%s" s.surveyed
+    s.chunks_referenced s.chunks_reclaimable
+    (Narrate.size s.bytes_reclaimable)
     (dry_note false);
   Option.iter
     (fun (phase, cursor) ->
@@ -46,10 +45,10 @@ let print_survey (s : Collector.survey) =
     say "  %d referenced chunks misread" s.chunks_corrupt
 
 let print_stats (s : Collector.stats) =
-  say
-    "%s: %s; %d namespaces marked, %d chunks promoted, %d reclaimed (%.1f MiB)"
+  say "%s: %s; %d namespaces marked, %d chunks promoted, %d reclaimed (%s)"
     s.main (outcome s.outcome) s.roots_marked s.chunks_promoted
-    s.chunks_reclaimed (mib s.bytes_reclaimed);
+    s.chunks_reclaimed
+    (Narrate.size s.bytes_reclaimed);
   if s.chunks_verified > 0 then
     say "  verified %d: %d corrupt, %d unreadable, %d markers cleared"
       s.chunks_verified s.chunks_corrupt s.chunks_unreadable s.chunks_cleared
