@@ -166,6 +166,7 @@ CAMLprim value tsync_raise_nofile(value target) {
 #if defined(__linux__)
 
 #include <linux/fs.h>
+#include <sys/inotify.h>
 #include <malloc.h>
 #include <sys/ioctl.h>
 #include <sys/statfs.h>
@@ -274,6 +275,51 @@ CAMLprim value tsync_malloc_trim(value unit) {
   return Val_unit;
 }
 
+/* 01 §14: a non-recursive watch of a directory's entries. */
+CAMLprim value tsync_watch_open(value path) {
+  CAMLparam1(path);
+  int fd = inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
+  if (fd < 0) uerror("inotify_init1", path);
+  if (inotify_add_watch(fd, String_val(path),
+                        IN_CREATE | IN_MOVED_TO | IN_CLOSE_WRITE | IN_DELETE |
+                            IN_MOVED_FROM | IN_DELETE_SELF | IN_MOVE_SELF) < 0) {
+    int e = errno;
+    close(fd);
+    errno = e;
+    uerror("inotify_add_watch", path);
+  }
+  CAMLreturn(Val_int(fd));
+}
+
+/* The names of pending events, and whether the directory went away; a
+   bounded number of reads, so a registration that never clears cannot spin. */
+CAMLprim value tsync_watch_drain(value vfd) {
+  CAMLparam1(vfd);
+  CAMLlocal3(names, cell, res);
+  char buf[4096] __attribute__((aligned(__alignof__(struct inotify_event))));
+  int gone = 0;
+  names = Val_emptylist;
+  for (int reads = 0; reads < 64; reads++) {
+    ssize_t n = read(Int_val(vfd), buf, sizeof buf);
+    if (n <= 0) break;
+    for (char *p = buf; p < buf + n;) {
+      struct inotify_event *ev = (struct inotify_event *)p;
+      if (ev->mask & (IN_DELETE_SELF | IN_MOVE_SELF | IN_IGNORED)) gone = 1;
+      if (ev->len > 0) {
+        cell = caml_alloc(2, 0);
+        Store_field(cell, 0, caml_copy_string(ev->name));
+        Store_field(cell, 1, names);
+        names = cell;
+      }
+      p += sizeof(struct inotify_event) + ev->len;
+    }
+  }
+  res = caml_alloc_tuple(2);
+  Store_field(res, 0, names);
+  Store_field(res, 1, Val_bool(gone));
+  CAMLreturn(res);
+}
+
 #elif defined(__APPLE__)
 
 #include <mach/mach.h>
@@ -362,6 +408,24 @@ CAMLprim value tsync_memory_split(value unit) {
 CAMLprim value tsync_malloc_trim(value unit) {
   malloc_zone_pressure_relief(NULL, 0);
   return Val_unit;
+}
+
+/* No watch here: kqueue reports no names, so it could not discard the
+   consumer's own temporaries (01 §14); the consumer polls. */
+CAMLprim value tsync_watch_open(value path) {
+  CAMLparam1(path);
+  errno = ENOSYS;
+  uerror("watch", path);
+  CAMLreturn(Val_unit);
+}
+
+CAMLprim value tsync_watch_drain(value vfd) {
+  CAMLparam1(vfd);
+  CAMLlocal1(res);
+  res = caml_alloc_tuple(2);
+  Store_field(res, 0, Val_emptylist);
+  Store_field(res, 1, Val_true);
+  CAMLreturn(res);
 }
 
 #endif

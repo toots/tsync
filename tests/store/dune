@@ -148,3 +148,18 @@
  (alias runtest)
  (action
   (diff gc_scoping.expected gc_scoping.output)))
+
+(executable
+ (name watch_test)
+ (modules watch_test)
+ (libraries tsync_core tsync_store unix))
+
+(rule
+ (with-stdout-to
+  watch_test.output
+  (run ./watch_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff watch_test.expected watch_test.output)))

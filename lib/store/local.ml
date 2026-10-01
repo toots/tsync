@@ -299,10 +299,37 @@ let create ?(verify_writes = true) ~name root =
                   Fail.absent ~op:"copy" "%s: no such object"
                     (Key.to_string src)))
   in
-  (* ponytail: polls at the interval; a directory watch would wake sooner. *)
+  (* local §8: a watch on the key's directory, armed before the read, kept per
+     directory and reopened once it went away. On a network filesystem it
+     would hear only this host's changes, so the wait is a plain sleep. *)
+  let watchers = Hashtbl.create 4 and wm = Mutex.create () in
+  let watcher dir =
+    Mutex.protect wm (fun () ->
+        match Hashtbl.find_opt watchers dir with
+          | Some w -> Some w
+          | None -> (
+              match Dir_watch.open_ dir with
+                | Some w ->
+                    Hashtbl.replace watchers dir w;
+                    Some w
+                | None -> None))
+  in
+  let drop dir =
+    Mutex.protect wm (fun () ->
+        Option.iter Dir_watch.close (Hashtbl.find_opt watchers dir);
+        Hashtbl.remove watchers dir)
+  in
   let watch key last =
+    let dir = Filename.dirname (path root key) in
+    let w = if mappable () then watcher dir else None in
     let current = try Store.token (read_opt key) with _ -> last in
-    if current = last then Rt.sleep Store.watch_interval
+    if current = last then (
+      match w with
+        | None -> Rt.sleep Store.watch_interval
+        | Some w -> (
+            match Dir_watch.wait w ~timeout:Store.watch_interval with
+              | `Gone -> drop dir
+              | `Changed | `Timeout -> ()))
   in
   Store.checked
     {
