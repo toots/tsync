@@ -47,5 +47,5 @@ rfc3339 2001-09-09T03:46:40+02:00: 1000000000.000
 rfc3339 garbage: corrupt/other
 delete body: <Delete><Quiet>true</Quiet><Object><Key>a/x</Key></Object><Object><Key>a/y</Key></Object><Object><Key>&lt;&amp;&gt;&quot;&apos;</Key></Object></Delete>
 no refusals: 0
-refusal AccessDenied a&b
+refusal AccessDenied a&b'✓&bogus;
 refusal NoSuchKey c

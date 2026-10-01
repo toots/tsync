@@ -8,6 +8,13 @@ val unescape : string -> string
     carriage return. *)
 val safe : string -> bool
 
+(** The contents of each [<tag>] element, in order, unescaped by the caller
+    through {!field}; elements do not nest under the same tag. *)
+val elements : string -> string -> string list
+
+(** The unescaped text of the first [<tag>] inside an element. *)
+val field : string -> string -> string option
+
 (** A quiet [<Delete>] request for [keys]. *)
 val delete_body : string list -> string
 

@@ -231,5 +231,5 @@ let () =
       List.iter
         (fun (c, k) -> p "refusal %s %s\n" c k)
         (Bucket_xml.delete_errors
-           "<DeleteResult><Error><Key>a&amp;b</Key><Code>AccessDenied</Code></Error><Error><Key>c</Key><Code>NoSuchKey</Code></Error></DeleteResult>");
+           "<DeleteResult><Error><Key>a&amp;b&#39;&#x2713;&bogus;</Key><Code>AccessDenied</Code></Error><Error><Key>c</Key><Code>NoSuchKey</Code></Error></DeleteResult>");
       Server.close server)
