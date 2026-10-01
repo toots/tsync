@@ -55,6 +55,11 @@ val replace : ?perm:int -> string -> string -> unit
 (** Durable create-if-absent by hard link (or no-replace rename). *)
 val create_if_absent : ?perm:int -> string -> string -> [ `Created | `Exists ]
 
+(** [create_if_absent], answering the created file's descriptor holding a BSD
+    lock taken before the file had its name. *)
+val create_if_absent_locked :
+  ?perm:int -> string -> string -> [ `Created of Unix.file_descr | `Exists ]
+
 (** One write of a whole line, then fsync. *)
 val append_durable : ?perm:int -> string -> string -> unit
 

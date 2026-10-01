@@ -31,6 +31,11 @@ module Records : sig
       default), minting again when the name is taken. *)
   val create : ?mint:(unit -> string) -> t -> string -> string
 
+  (** {!create}, the record held from birth (see {!hold}); it must not be
+      rewritten while held, since a rewrite replaces the locked file. *)
+  val create_held :
+    ?mint:(unit -> string) -> t -> string -> string * Unix.file_descr
+
   val read : t -> string -> [ `Body of string | `Gone ]
 
   (** Durable read-modify-write; a record gone meanwhile is left gone. *)

@@ -909,6 +909,13 @@ module Make (C : Engine_ctx.S) = struct
           | None -> b);
     Dqueue.adopt metadata id
 
+  (* A namespace change with its local half: Intent, the local effects, then
+     Prepared for the metadata queue. *)
+  let record_owed ?priors ops local =
+    let id = record_intent ?priors ops in
+    local ();
+    prepare id
+
   let abandon id = Dqueue.Records.complete wal id
 
   (* Owed work names local effects, so they are durable before Prepared. *)

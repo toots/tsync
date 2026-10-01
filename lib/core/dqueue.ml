@@ -52,6 +52,12 @@ module Records = struct
       | `Created -> id
       | `Exists -> create ~mint t body
 
+  let rec create_held ?(mint = submission_id) t body =
+    let id = mint () in
+    match Fs.create_if_absent_locked (path t id) body with
+      | `Created fd -> (id, fd)
+      | `Exists -> create_held ~mint t body
+
   let read t id =
     match Fs.read_file_opt (path t id) with Some b -> `Body b | None -> `Gone
 

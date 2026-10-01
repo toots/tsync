@@ -220,11 +220,6 @@ module Make (C : Engine_ctx.S) = struct
       | None -> ());
     Mirror.remove_file mirror l
 
-  let record_owed ?priors ops local =
-    let id = record_intent ?priors ops in
-    local ();
-    prepare id
-
   let file_aside l =
     let dst = aside_name l ~is_dir:false in
     with_key l (fun () -> Staged.move ~new_file:true staged ~src:l ~dst);

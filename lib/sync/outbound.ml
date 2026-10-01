@@ -646,13 +646,41 @@ module Make (C : Engine_ctx.S) = struct
 
   (* 04 §4.6: chunks without the lock, the commit under it only if the edit
      generation is still the one read. *)
-  let run_upload id (r : Wal.record) ~cancel =
-    wait_gate ();
-    let path =
-      match r.ops with
-        | [Op.Put { path; _ }] -> path
-        | _ -> Fail.invalid "not a single put"
+  (* durable-queue §7.3: a bulk publisher's batch, released once its uploads
+     ran; an op whose manifest never landed is dropped. *)
+  let publish_landed id (r : Wal.record) =
+    let landed =
+      List.filter
+        (function
+          | Op.Put { path; _ } -> (
+              wait_dependencies path id;
+              match store_manifest path with
+                | Some m ->
+                    if Mirror.manifest mirror path = None then
+                      with_meta (fun () ->
+                          with_key path (fun () ->
+                              Mirror.write_file mirror path m));
+                    true
+                | None -> false)
+          | _ -> false)
+        r.ops
     in
+    if landed = [] then Dqueue.Records.complete wal id
+    else (
+      let id = mark_executed id landed in
+      discharge id landed)
+
+  let rec run_upload id (r : Wal.record) ~cancel =
+    wait_gate ();
+    match r.ops with
+      | [Op.Put { path; _ }] -> run_one_upload id r path ~cancel
+      | _ -> (
+          try publish_landed id r
+          with e ->
+            note_link_failure e;
+            raise e)
+
+  and run_one_upload id (r : Wal.record) path ~cancel =
     wait_dependencies path id;
     let state =
       with_key path (fun () -> (Staged.read staged path, generation path))

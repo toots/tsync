@@ -176,13 +176,14 @@ let link a b = sys (fun () -> Unix.link a b)
 
 (* Durable create-if-absent: the winner's body is whole the instant its name
    appears. *)
-let create_if_absent ?perm p data =
+let create_if_absent_with ?perm ~on_temp p data =
   let dir = Filename.dirname p in
   mkdir_p dir;
   let tmp = write_temp ?perm dir data in
   Fun.protect
     ~finally:(fun () -> unlink_quiet tmp)
     (fun () ->
+      on_temp tmp;
       match eintr (fun () -> Unix.link tmp p) with
         | () ->
             fsync_dir dir;
@@ -200,6 +201,9 @@ let create_if_absent ?perm p data =
                   raise (Fail.E (Fail.of_unix e fn a)))
         | exception Unix.Unix_error (e, fn, a) ->
             raise (Fail.E (Fail.of_unix e fn a)))
+
+let create_if_absent ?perm p data =
+  create_if_absent_with ?perm ~on_temp:ignore p data
 
 let append_durable ?(perm = 0o600) p line =
   let existed = exists p in
@@ -270,6 +274,25 @@ let disk_space p =
 
 let flock ?(exclusive = true) ?(block = false) fd =
   sys (fun () -> flock_ fd exclusive block)
+
+(* The lock is taken on the temporary file, which becomes the name: no reader
+   ever sees the file unlocked. *)
+let create_if_absent_locked ?perm p data =
+  let fd = ref None in
+  let lock tmp =
+    let f = openfile tmp [O_RDONLY] in
+    fd := Some f;
+    if not (flock ~block:true f) then
+      Fail.raise_ Fail.Local "cannot lock %s" tmp
+  in
+  match create_if_absent_with ?perm ~on_temp:lock p data with
+    | `Created -> `Created (Option.get !fd)
+    | `Exists ->
+        Option.iter Unix.close !fd;
+        `Exists
+    | exception e ->
+        Option.iter Unix.close !fd;
+        raise e
 
 let funlock fd = funlock_ fd
 let ignore_sigpipe () = Sys.set_signal Sys.sigpipe Sys.Signal_ignore
