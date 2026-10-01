@@ -1,6 +1,9 @@
 (lang dune 3.17)
 (name tsync)
 (license MIT)
+(maintainers "Romain Beauxis <toots@rastageeks.org>")
+(authors "Romain Beauxis <toots@rastageeks.org>")
+(source (github toots/tsync))
 (implicit_transitive_deps false)
 (generate_opam_files true)
 

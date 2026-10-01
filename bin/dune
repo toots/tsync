@@ -2,6 +2,8 @@
 
 (executable
  (name tsync)
+ (public_name tsync)
+ (package tsync)
  (libraries
   cmdliner
   tsync_core
