@@ -173,6 +173,13 @@ module Make (C : Context.S) = struct
     write_anchor id ~parent:Folder_id.trash ~name:on;
     remove_marker_if ~parent:op ~name:on id
 
+  (* Create-if-absent: a restore racing the repair keeps its live anchor. *)
+  let anchor_in_trash id ~name =
+    ignore
+      (store.put_if_absent (Key.anchor d id)
+         (Bigstring.of_string
+            (Folder.anchor_body { parent = Folder_id.trash; aname = name })))
+
   let trash_entries () =
     List.filter_map
       (fun (e : Store.entry) ->

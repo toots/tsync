@@ -32,6 +32,7 @@ let () =
       ("tomb", "0000000000a8-1");
       ("gone", "0000000000a9-1");
       ("binned", "0000000000b1-1");
+      ("unbinned", "0000000000b2-1");
     ]
   in
   let id n = Folder_id.v (List.assoc n ids) in
@@ -85,6 +86,11 @@ let () =
       file (id "binned") "d.txt";
       put (Key.trash_entry d "e2")
         (Folder.trash_body { name = "binned"; id = id "binned" } ~path:"binned");
+      file (id "unbinned") "e.txt";
+      put (Key.trash_entry d "e3")
+        (Folder.trash_body
+           { name = "unbinned"; id = id "unbinned" }
+           ~path:"old/unbinned");
       let sound n = Chunk_key.of_body n in
       List.iter
         (fun n ->

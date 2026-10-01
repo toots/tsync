@@ -537,12 +537,16 @@ first) to re-fire the copy's notification. Both are safe to repeat.
 
 - `tree_report()`: a read-only walk from the root. Per folder: its id and paths; a missing anchor →
   `Unanchored{path, id, parent}`; a marker disowned by its anchor → `Disowned{marker, anchor}`; an id
-  at two or more paths → `Twice`; a trash entry whose id was reached from the root → `Trashed_live`.
+  at two or more paths → `Twice`; a trash entry whose id was reached from the root → `Trashed_live`;
+  a trashed folder not reached from the root that has no anchor → `Unanchored` with the trash as its
+  parent.
   **Orphans**: list the manifest namespaces on the first main (any store type), mark every
   namespace reachable from the root and from each trashed id; each unmarked namespace holding a child
   object → `Orphan{id, objects, sample ≤ 3}` ([gc.md §4.6](algorithms/gc.md#46-orphan-namespaces)). Order: Twice (sorted), Disowned, Trashed_live, Unanchored, Orphan.
 - `repair_tree(dry_run)`: refused on a read-only domain unless dry; Disowned and Trashed_live →
-  delete the stale object; Unanchored → write the anchor; a top-level Orphan older than
+  delete the stale object; Unanchored → write the anchor (for a trashed folder its "in trash" anchor,
+  created only if still absent, so a restore racing the repair keeps its live anchor); a top-level
+  Orphan older than
   `orphan_grace` → adopted into the trash, and a tombstone MAY be deleted, as
   [gc.md §4.6](algorithms/gc.md#46-orphan-namespaces) specifies; Twice is left and reported, and so
   is an Unanchored folder whose id is also Twice: anchoring it would choose where it lives.

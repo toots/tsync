@@ -70,6 +70,10 @@ module Make (_ : Context.S) : sig
   *)
   val trash : Folder_id.t -> old:Folder_id.t * string -> path:string -> unit
 
+  (** Anchor a trashed folder that has no anchor "in trash", unless one appeared
+      meanwhile. *)
+  val anchor_in_trash : Folder_id.t -> name:string -> unit
+
   (** Where a trashed folder's anchor stands: still in the trash, live again
       (its trash entries are stale), or unanchored. *)
   val trash_state : Folder_id.t -> [ `In_trash | `Live | `No_anchor ]

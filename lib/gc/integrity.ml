@@ -46,9 +46,11 @@ let describe = function
   | Trashed_live { entry; id } ->
       Printf.sprintf "trash entry %s names folder %s, which is live"
         (Key.to_string entry) (Folder_id.to_string id)
-  | Unanchored { path; id; _ } ->
-      Printf.sprintf "%s (folder %s) has no anchor" path
+  | Unanchored { path; id; parent; _ } ->
+      Printf.sprintf "%s (folder %s)%s has no anchor" path
         (Folder_id.to_string id)
+        (if Folder_id.equal parent Folder_id.trash then ", in the trash,"
+         else "")
   | Orphan { id; name; objects; sample; top_level; _ } ->
       Printf.sprintf "folder %s (%S) is unreachable, holding %s%s: %s"
         (Folder_id.to_string id) name
@@ -211,6 +213,16 @@ module Make (C : Context.S) = struct
                 Trashed_live { entry = e.key; id = f.id })
               f.entries
           else (
+            if f.state = `No_anchor then
+              unanchored :=
+                Unanchored
+                  {
+                    path = Option.value ~default:f.name f.path;
+                    id = f.id;
+                    parent = Folder_id.trash;
+                    name = f.name;
+                  }
+                :: !unanchored;
             if not (cancelled ()) then (
               Hashtbl.replace reached (Folder_id.to_string f.id) [];
               walk ~reached ~disowned ~unanchored f.id ~root_path:f.name);
@@ -258,6 +270,9 @@ module Make (C : Context.S) = struct
         Deleted
     | Unanchored { id; parent; name; _ } ->
         if not apply then Anchored
+        else if Folder_id.equal parent Folder_id.trash then (
+          T.anchor_in_trash id ~name;
+          Anchored)
         else (
           match T.place id ~parent ~name with
             | `Placed -> Anchored

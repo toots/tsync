@@ -5,6 +5,7 @@ healthy false, 1 tombstones
   trash entry manifests/.tsync-trash/e1 names folder <live>, which is live
   twice (folder <twice>) has no anchor
   live/twice-again (folder <twice>) has no anchor
+  old/unbinned (folder <unbinned>), in the trash, has no anchor
   folder <lost> ("lost") is unreachable, holding 1 object: manifests/<lost>/f01e5cbbc09d4fc4-9a0fcd66f030de75
   folder <nested> ("nested") is unreachable, holding 1 object, inside another unreachable folder: manifests/<nested>/3c697ec236bbf61f-698ad1290042cc94
   folder <young> ("<young>") is unreachable, holding 1 object: manifests/<young>/d6d50f267ed1aabb-7fe71c7d92c1e0c0
@@ -18,6 +19,7 @@ healthy false, 1 tombstones
   trash entry manifests/.tsync-trash/e1 names folder <live>, which is live -> deleted
   twice (folder <twice>) has no anchor -> left
   live/twice-again (folder <twice>) has no anchor -> left
+  old/unbinned (folder <unbinned>), in the trash, has no anchor -> anchored
   folder <lost> ("lost") is unreachable, holding 1 object: manifests/<lost>/f01e5cbbc09d4fc4-9a0fcd66f030de75 -> adopted
   folder <nested> ("nested") is unreachable, holding 1 object, inside another unreachable folder: manifests/<nested>/3c697ec236bbf61f-698ad1290042cc94 -> nested
   folder <young> ("<young>") is unreachable, holding 1 object: manifests/<young>/d6d50f267ed1aabb-7fe71c7d92c1e0c0 -> young
@@ -32,6 +34,7 @@ dry run changed nothing: true
   trash entry manifests/.tsync-trash/e1 names folder <live>, which is live -> deleted
   twice (folder <twice>) has no anchor -> left
   live/twice-again (folder <twice>) has no anchor -> left
+  old/unbinned (folder <unbinned>), in the trash, has no anchor -> anchored
   folder <lost> ("lost") is unreachable, holding 1 object: manifests/<lost>/f01e5cbbc09d4fc4-9a0fcd66f030de75 -> adopted
   folder <nested> ("nested") is unreachable, holding 1 object, inside another unreachable folder: manifests/<nested>/3c697ec236bbf61f-698ad1290042cc94 -> nested
   folder <young> ("<young>") is unreachable, holding 1 object: manifests/<young>/d6d50f267ed1aabb-7fe71c7d92c1e0c0 -> young
@@ -47,5 +50,5 @@ healthy false, 1 tombstones
   folder <nested> ("nested") is unreachable, holding 1 object: manifests/<nested>/3c697ec236bbf61f-698ad1290042cc94
   folder <young> ("<young>") is unreachable, holding 1 object: manifests/<young>/d6d50f267ed1aabb-7fe71c7d92c1e0c0
   corrupt on main: <nowhere>
-trash: <binned> at binned, <lost> at lost
+trash: <binned> at binned, <lost> at lost, <unbinned> at old/unbinned
 replica's copy of <on main> sound: true
