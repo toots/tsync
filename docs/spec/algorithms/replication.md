@@ -290,7 +290,7 @@ read(f):
 - If no main answered and the domain has a main, the call fails UNREACHABLE. An empty merge would be memoised as fact.
 - Archives have no say.
 
-**`verify_all`** asks every readable member when every main is up, and only the mains otherwise: a verification request is an object written into the store, and the write guard applies. The results are summed. `Unsupported` is returned only if every member asked answered it. Backfills are reached only by the per-member verification command ([05-ops-config.md](../05-ops-config.md)).
+**Whole-store verification** is the owner's, per member: it writes verify requests to each member whose bucket function it confirmed, behind the write guard, since a request is an object written into the store ([05-ops-config.md §4.10](../05-ops-config.md#410-integrity)).
 
 The composite declares no **`bucket_functions`**: collection deletes on copies are jobs (§4.8), and each copy's own declaration, with its owner's confirmation, decides how they are executed.
 

@@ -9,6 +9,7 @@ type t =
   | Expire of { apply : bool; cutoff : float }
   | Purge of { apply : bool; path : string }
   | Integrity of {
+      verify : bool;
       repair : bool;
       apply : bool;
       detail : bool;
@@ -25,6 +26,7 @@ let kind = function
   | Gc_copies Retry_outstanding -> "gc --retry-outstanding"
   | Expire _ -> "expire"
   | Purge _ -> "trash --purge"
+  | Integrity { verify = true; _ } -> "data-integrity --verify"
   | Integrity { repair = true; _ } -> "data-integrity --repair"
   | Integrity _ -> "data-integrity"
 
@@ -207,6 +209,40 @@ let unfixed = function
   | Integrity.Left | Young | Nested | Failed _ -> true
   | Deleted | Anchored | Adopted -> false
 
+let verify io (dom : Tsync_domain.Domain.t) =
+  let say fmt = Printf.ksprintf io.out fmt in
+  let module I = Integrity.Make ((val Tsync_domain.Domain.context dom)) in
+  let results = I.verify ~narrate:io.narrate ~cancelled:io.cancelled () in
+  let followed =
+    List.filter (fun (_, v) -> v <> Integrity.Unsupported) results
+  in
+  if followed = [] then (
+    say "nothing queued: no member has a confirmed bucket function (gc --probe)";
+    1)
+  else (
+    List.iter
+      (fun (member, v) ->
+        match v with
+          | Integrity.Unsupported -> ()
+          | Done { corrupt = 0 } -> say "%s: verified, no corrupt chunk" member
+          | Done { corrupt } ->
+              say "%s: verified, %d corrupt chunks (data-integrity --repair)"
+                member corrupt
+          | Stalled { left; corrupt } ->
+              say
+                "%s: stalled with %d shard requests left and %d corrupt chunks \
+                 so far: is its bucket function deployed and notified?"
+                member left corrupt
+          | Abandoned { left; corrupt } ->
+              say
+                "%s: cancelled with %d shard requests left and %d corrupt \
+                 chunks so far; its function still consumes them"
+                member left corrupt)
+      followed;
+    if List.for_all (fun (_, v) -> v = Integrity.Done { corrupt = 0 }) followed
+    then 0
+    else 1)
+
 let integrity io (dom : Tsync_domain.Domain.t) ~repair ~apply ~detail ~source =
   let say fmt = Printf.ksprintf io.out fmt in
   if repair && apply && dom.domain.read_only then
@@ -286,5 +322,6 @@ let run io (dom : Tsync_domain.Domain.t) = function
   | Gc_copies act -> copies io dom.composite act
   | Expire { apply; cutoff } -> expire io dom ~apply ~cutoff
   | Purge { apply; path } -> purge io dom ~apply ~path
-  | Integrity { repair; apply; detail; source } ->
+  | Integrity { verify = true; _ } -> verify io dom
+  | Integrity { repair; apply; detail; source; _ } ->
       integrity io dom ~repair ~apply ~detail ~source

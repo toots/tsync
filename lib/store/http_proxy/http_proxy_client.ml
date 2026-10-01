@@ -451,7 +451,6 @@ let create ~domain ~admission ~name fields =
       watch = watch t;
       get_many = Some (get_many t);
       list_many = Some (list_many t);
-      verify_all = (fun _ -> `Unsupported);
       bucket_functions = false;
       capabilities = capabilities t;
       fast_read = false;

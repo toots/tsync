@@ -229,12 +229,24 @@ let trash_cmd =
   cmd "trash" ~doc:"List the trash, or restore or purge a trashed folder."
     Term.(const trash $ apply_arg $ purge $ restore $ domain_arg $ verbose)
 
-let data_integrity repair dry_run detail source name verbose =
-  run_job ?name verbose
-    (Integrity { repair; apply = repair && not dry_run; detail; source })
+let data_integrity verify repair dry_run detail source name verbose =
+  if verify && repair then (
+    prerr_endline "tsync: --verify and --repair go one at a time";
+    2)
+  else
+    run_job ?name verbose
+      (Integrity
+         { verify; repair; apply = repair && not dry_run; detail; source })
 
 let data_integrity_cmd =
-  let repair =
+  let verify =
+    Arg.(
+      value & flag
+      & info ["verify"]
+          ~doc:
+            "Have each copy's bucket function re-check every chunk, and follow \
+             it until done.")
+  and repair =
     Arg.(
       value & flag
       & info ["repair"]
@@ -257,7 +269,7 @@ let data_integrity_cmd =
   cmd "data-integrity"
     ~doc:"Check the domain's folder tree and chunks (exit 1 if unhealthy)."
     Term.(
-      const data_integrity $ repair $ dry_run $ detail $ source $ domain_arg
-      $ verbose)
+      const data_integrity $ verify $ repair $ dry_run $ detail $ source
+      $ domain_arg $ verbose)
 
 let cmds = [gc_cmd; expire_cmd; trash_cmd; data_integrity_cmd]

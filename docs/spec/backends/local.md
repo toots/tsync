@@ -74,7 +74,6 @@ Why each fsync: the file's fsync keeps a crash from leaving the final name on an
 | `list_prefix(p, max)` | A walk of `<root>/<p>` that reports every regular file whose relative name is a valid key, with `{size; mtime; etag = none}`. It omits temporary names, the files of §3 that are not store objects, directories, symbolic links and other file types. It descends into directories and never follows symbolic links. ENOENT on the prefix → an empty list. Sorted by key, truncated to `max`. |
 | `watch(k, last_seen)` | §8. |
 | `get_many`, `list_many` | Not declared: filesystem reads are not round trips. |
-| `verify_all` | `Unsupported`. Every write is already checked; whole-store checking is the client-side sweep ([05-ops-config.md](../05-ops-config.md)). |
 | `bucket_functions` | `false`. A local copy is deleted directly, one unlink per chunk on the machine that holds it. |
 | `capabilities(_)` | `{share_url = none; chunk_size = none; max_concurrency = an implementation's estimate of the device's useful concurrency, or none; verified = verifyWrites}`. |
 | `fast_read` / `local_path` | `true` / the root. |

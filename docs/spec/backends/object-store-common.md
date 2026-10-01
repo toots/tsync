@@ -52,14 +52,13 @@ A driver supplies only the verbs of §2.1, its share URL and its breaker cell. T
 | `get_many`, `list_many` | not declared | No native multi-read. The generic batcher fans out `get_opt`. |
 | `watch(key, last_seen)` | sleep WATCH_INTERVAL, then return | Buckets offer no change notification a client can wait on. The caller re-reads. |
 | `capabilities(prefix)` | `{share_url = driver's; chunk_size = none; max_concurrency = none; verified = function_confirmed}` | `verified` only once the function is confirmed deployed (§3). |
-| `verify_all(chunk_prefix)` | Unconfirmed function → `Unsupported`. Otherwise one empty verification request per shard (4096), and `Queued(4096)` | Every shard, not only populated ones: learning which exist costs more listings than empty requests cost invocations. |
 | `bucket_functions` | `true` | Every bucket can run the function; the domain owner confirms one is deployed (§3) before writing discard requests, and a request is durable once its `put` returns. |
 
 Request objects are written through the driver's `put`, and so are admitted and counted like any upload.
 
 ## 3. Confirming the bucket-side function
 
-A store claims `verified`, and answers `verify_all` with `Queued`, only after it has evidence that the verify function is deployed on its bucket, and a domain owner writes discard requests to it only after the same evidence. Every object-store driver SHOULD support the function wherever its provider can run one: without it, a collection deletes each chunk with its own request ([06 §3.8](../06-backends.md#38-optional-operations)), and once it is confirmed a collection's deletions MUST use it. A bucket without it (a manual setup, an S3-compatible provider, a notification the operator never wired) otherwise claims checks nobody runs and accepts deletes nobody executes.
+A store claims `verified` only after it has evidence that the verify function is deployed on its bucket, and a domain owner writes verify and discard requests to it only after the same evidence. Whole-store verification is one empty verify request per shard (4096), every shard and not only populated ones: learning which exist costs more listings than empty requests cost invocations. Every object-store driver SHOULD support the function wherever its provider can run one: without it, a collection deletes each chunk with its own request ([06 §3.8](../06-backends.md#38-optional-operations)), and once it is confirmed a collection's deletions MUST use it. A bucket without it (a manual setup, an S3-compatible provider, a notification the operator never wired) otherwise claims checks nobody runs and accepts deletes nobody executes.
 
 **The probe.** An empty collection delete request, at the reserved run name `0000000000000` and shard `000`:
 
@@ -160,6 +159,6 @@ A function deployed beside a bucket MAY serve the bucket's share links; its URL 
 - A verification request sweeps its shard and is then removed; an empty shard's request is removed.
 - A delete request drops its chunks and their markers, refuses keys of other domains and non-chunks, and a redelivery is a no-op; a refused key leaves the request in place.
 - An empty delete request is consumed without deleting anything (the probe).
-- A store whose bucket has no function answers `verified = false` and `Unsupported` to `verify_all`, its owner records it unconfirmed and sends it no discard request, and no probe request is left behind; with the function, it answers `true` and `Queued`, `verify_all` queues 4096 shard-named requests, and a discard request carries exactly its keys.
+- A store whose bucket has no function answers `verified = false`, its owner records it unconfirmed and sends it no verify or discard request, and no probe request is left behind; with the function, it answers `true`, a whole-store verification writes 4096 shard-named requests, and a discard request carries exactly its keys.
 - The share function refuses a manifest naming another domain's key or folder, stops serving a trashed folder, escapes a folder name holding `</script>`, and rebuilds an archive older than `share_archive_max_age`.
 - Transport: a slow but flowing answer is not a stall; a stall is measured from the last byte; 429 and throttling 503 are LOAD, other 5xx LINK, 403 REFUSED, whatever the error body.

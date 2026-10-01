@@ -89,7 +89,6 @@ The value of a watched key, as a watch compares it: the object's body with leadi
 | `list_prefix(p, max_keys?)` | entries (§3.6) | empty list | CORRUPT for a listing that contradicts itself |
 | `watch(k, last_seen)` | unit (§3.7) | returns like any other | — |
 | `get_many`, `list_many` | optional (§3.8) | | |
-| `verify_all(chunk_prefix)` | `Queued(n)` or `Unsupported` (§3.8) | | |
 | `bucket_functions` | bool, a declaration (§3.8) | | |
 | `capabilities(prefix)` | caps (§2.3) for the domain the prefix identifies | | |
 | `fast_read` | whether reading a whole chunk costs about what a range does | | |
@@ -157,9 +156,7 @@ The value of a watched key, as a watch compares it: the object's body with leadi
 
 **`list_many(prefixes)`** returns, for each folder asked, its full listing plus a body for each child object, in request order. The store MAY stop early or skip folders, and the caller asks those one by one.
 
-**`verify_all(chunk_prefix)`** queues a server-side check of every chunk under the prefix. It answers `Queued(n)`, the number of units queued (not findings), or `Unsupported`.
-
-**`bucket_functions`** (a declaration): requests put under `tsync/verify-jobs/` and `tsync/gc-jobs/` on this store may be consumed by a server-side function ([backends/object-store-common.md §5](backends/object-store-common.md#5-the-verify-function)). A store that declares it says only that its provider can run one; **whether one is deployed is the domain owner's knowledge**, from the probe of object-store-common §3 saved in its local state.
+**`bucket_functions`** (a declaration): requests put under `tsync/verify-jobs/` and `tsync/gc-jobs/` on this store may be consumed by a server-side function ([backends/object-store-common.md §5](backends/object-store-common.md#5-the-verify-function)). A store that declares it says only that its provider can run one; **whether one is deployed is the domain owner's knowledge**, from the probe of object-store-common §3 saved in its local state. Whole-store verification is therefore not a store operation: the owner writes the verify requests to a store whose function it confirmed ([05 §4.10](05-ops-config.md#410-integrity)).
 
 - A request is an ordinary `put` of the request object; a consumer deletes it when done. Until it is consumed, the named chunks are still on the store, and a request can be consumed at-least-once, by a party this client does not see.
 - A collection never deletes on a copy directly: its deletions on copies are jobs in the copies' durable job logs ([gc §5.7](algorithms/gc.md#57-deletion-on-copies), [replication §4.8](algorithms/replication.md#48-deletions-on-copies-outside-the-worker)).
@@ -292,7 +289,7 @@ A conforming store, run against a real service where it has one:
 - Keys holding `& < > " ' + % # ? space` and non-ASCII characters round-trip through put, get, listing and `delete_multi`. Invalid keys (`..`, `.`, empty segments, a leading or trailing `/`) are refused INVALID before any request, and never reach a file or the network.
 - `list_prefix` answers in ascending key order, honours `max_keys` exactly, answers a listing longer than one page whole, and omits names that are not valid keys.
 - `get_many`, where declared, answers every key once in request order, across pages.
-- `capabilities.verified` and `verify_all` answer as the store's checker actually runs, and `verify_all` queues one unit per shard; a discard request carries exactly its keys, and a deployed consumer deletes the named chunks, then the request.
+- `capabilities.verified` answers as the store's checker actually runs; a discard request carries exactly its keys, and a deployed consumer deletes the named chunks, then the request.
 - Classification: a TRANSIENT failure is retried to the ladder's limit; a REFUSED one is attempted once; a health cell trips after link failures, recovers after one answer, and is kept up by a considered "no".
 - Every upload attempt, retries included, passes admission once and reports once; a best-effort write refused admission sends nothing.
 - Traffic: only bytes crossing a link count, and a filesystem store counts nothing; a lost claim counts the upload plus the holder's body read back; a put through a composite with two mains counts on both; counters are per store and summed per process.

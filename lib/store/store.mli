@@ -61,11 +61,10 @@ type t = {
           {!watch_interval}; the argument is the token last seen *)
   get_many : (Key.t list -> Bigstring.t option list) option;
   list_many : (Key.prefix list -> folder list) option;
-  verify_all : Key.prefix -> [ `Queued of int | `Unsupported ];
   bucket_functions : bool;
-      (** requests put under [tsync/gc-jobs/] may be consumed by a bucket-side
-          function; whether one is deployed is the owner's confirmation (06
-          §3.8) *)
+      (** requests put under [tsync/gc-jobs/] and [tsync/verify-jobs/] may be
+          consumed by a bucket-side function; whether one is deployed is the
+          owner's confirmation (06 §3.8) *)
   capabilities : Key.prefix -> caps;
   fast_read : bool;
   local_path : string option;

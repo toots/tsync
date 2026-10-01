@@ -69,6 +69,12 @@ type tree_repair =
 
 type chunk_repair = Cleared | Repaired of string | Unrepairable
 
+type verified =
+  | Unsupported
+  | Done of { corrupt : int }
+  | Stalled of { left : int; corrupt : int }
+  | Abandoned of { left : int; corrupt : int }
+
 let orphan_grace = Tsync_sync.Outbound.horizon +. (7. *. 86400.)
 
 let rank = function
@@ -319,6 +325,58 @@ module Make (C : Context.S) = struct
             | Failed reason -> "failed: " ^ reason);
         (f, outcome))
       r.findings
+
+  let follow ~narrate ~cancelled ~poll ~stall_polls (m : Composite.member) =
+    let count p =
+      try Some (List.length (m.store.list_prefix p)) with
+        | (Stop.Stopping | Rt.Cancelled) as e -> raise e
+        | e ->
+            Log.warn "verification on %s: %s" m.name (Printexc.to_string e);
+            None
+    in
+    let periodic = Narrate.periodic narrate in
+    let rec go ~still last =
+      let left = count (Key.verify_jobs d)
+      and corrupt = count (Key.corrupted d) in
+      let now = (left, corrupt) in
+      let left' = Option.value ~default:(-1) left
+      and corrupt' = Option.value ~default:0 corrupt in
+      periodic (fun () ->
+          Printf.sprintf
+            "  %s: %d shard requests left, %d corrupt chunks so far" m.name
+            left' corrupt');
+      if left = Some 0 then Done { corrupt = corrupt' }
+      else (
+        let still = if now = last || left = None then still + 1 else 0 in
+        if still >= stall_polls then
+          Stalled { left = left'; corrupt = corrupt' }
+        else if cancelled () then Abandoned { left = left'; corrupt = corrupt' }
+        else (
+          Rt.sleep poll;
+          go ~still now))
+    in
+    go ~still:0 (None, None)
+
+  let verify ?(narrate = Narrate.none) ?(cancelled = Fun.const false)
+      ?(poll = 3.) ?(stall_polls = 5) () =
+    let members = Composite.members C.composite in
+    let queued =
+      List.map
+        (fun (m : Composite.member) ->
+          match Composite.queue_verification C.composite m with
+            | `Queued n ->
+                Narrate.say narrate
+                  "%s: queued %d shard requests for its bucket function" m.name
+                  n;
+                (m, true)
+            | `Unsupported -> (m, false))
+        members
+    in
+    List.map
+      (fun ((m : Composite.member), q) ->
+        if not q then (m.name, Unsupported)
+        else (m.name, follow ~narrate ~cancelled ~poll ~stall_polls m))
+      queued
 
   let sound chunk (s : Store.t) =
     match s.get_opt (Key.chunk d chunk) with

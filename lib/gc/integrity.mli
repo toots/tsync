@@ -51,6 +51,17 @@ type chunk_repair =
   | Repaired of string  (** from that member *)
   | Unrepairable
 
+(** One member's verification: what its bucket function found once no request
+    was left, or how many requests were left when it stopped following. *)
+type verified =
+  | Unsupported  (** no confirmed bucket function *)
+  | Done of { corrupt : int }  (** corruption markers on the member *)
+  | Stalled of { left : int; corrupt : int }
+      (** nothing moved for [stall_polls] polls: a function not deployed or not
+          notified *)
+  | Abandoned of { left : int; corrupt : int }
+      (** cancelled; the queued requests stay and are still consumed *)
+
 (** The journal retention horizon plus 7 days. *)
 val orphan_grace : float
 
@@ -63,6 +74,18 @@ module Make (_ : Tsync_remote.Context.S) : sig
     ?now:float ->
     report ->
     (finding * tree_repair) list
+
+  (** Queue a check of every chunk on each member with a confirmed bucket
+      function, then follow each every [poll] seconds (default 3) until no
+      request is left. A failed listing counts as no progress, never as none
+      left. *)
+  val verify :
+    ?narrate:Narrate.t ->
+    ?cancelled:(unit -> bool) ->
+    ?poll:float ->
+    ?stall_polls:int ->
+    unit ->
+    (string * verified) list
 
   (** [source] restricts where a sound copy is read from. The local cache is
       never a source; no corruption marker is deleted here. *)

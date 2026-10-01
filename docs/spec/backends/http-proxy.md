@@ -291,7 +291,7 @@ Before its first operation, an instance learns two facts, concurrently with its 
 | `list_many prefixes` | `POST /children-multi` | paged, §8.3; the folders answered. Folders the server skipped or omitted are absent from the result; the caller lists them singly ([store contract](../06-backends.md)). |
 | `watch key last_seen` | §7 | unit |
 | `capabilities prefix` | §8.4 | |
-| `verify_all`, `bucket_functions` | none | `Unsupported` and `false`: queueing work in the peer's store is its administrator's decision; a collection's deletions use the bulk `delete_multi`, one request per batch. |
+| `bucket_functions` | none | `false`: queueing work in the peer's store is its administrator's decision; a collection's deletions use the bulk `delete_multi`, one request per batch. |
 | `fast_read` / `local_path` | — | `false` / `None` |
 | `health` | — | per-instance health fed by every request's outcome (§9) |
 

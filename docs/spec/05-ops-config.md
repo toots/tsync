@@ -550,8 +550,9 @@ first) to re-fire the copy's notification. Both are safe to repeat.
   `orphan_grace` → adopted into the trash, and a tombstone MAY be deleted, as
   [gc.md §4.6](algorithms/gc.md#46-orphan-namespaces) specifies; Twice is left and reported, and so
   is an Unanchored folder whose id is also Twice: anchoring it would choose where it lives.
-- `verify()`: per member (write guard first), ask the store's own verifier to queue its chunks;
-  `Queued n | Unsupported`; none queued → `Nothing_queued`; else follow each queued member: poll
+- `verify()`: per member whose bucket function this owner confirmed (write guard first), one verify
+  request per shard ([object-store-common §3](backends/object-store-common.md)): `Queued n`; any other
+  member `Unsupported`; none queued → `Nothing_queued`; else follow each queued member: poll
   every `VERIFY_POLL` the remaining jobs and corruption markers; done at 0; unchanged for
   `VERIFY_STALL_POLLS` polls → `on_stalled` (a verifier not deployed or not notified). A failed
   listing is not "0 left".

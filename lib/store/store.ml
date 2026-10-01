@@ -39,7 +39,6 @@ type t = {
   watch : Key.t -> string option -> unit;
   get_many : (Key.t list -> Bigstring.t option list) option;
   list_many : (Key.prefix list -> folder list) option;
-  verify_all : Key.prefix -> [ `Queued of int | `Unsupported ];
   bucket_functions : bool;
   capabilities : Key.prefix -> caps;
   fast_read : bool;

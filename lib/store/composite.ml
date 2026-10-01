@@ -619,22 +619,6 @@ let make_store t ~source_only =
             Option.map
               (fun f ps -> if Health.is_down m.store.health then [] else f ps)
               m.store.list_many);
-      verify_all =
-        (fun p ->
-          let targets =
-            if List.exists (fun m -> Health.is_down m.store.health) t.mains then
-              t.mains
-            else readable
-          in
-          let answers = List.map (fun m -> m.store.verify_all p) targets in
-          if answers <> [] && List.for_all (( = ) `Unsupported) answers then
-            `Unsupported
-          else
-            `Queued
-              (List.fold_left
-                 (fun acc -> function
-                   | `Queued n -> acc + n | `Unsupported -> acc)
-                 0 answers));
       bucket_functions = false;
       capabilities =
         (fun p ->
@@ -940,6 +924,22 @@ let copy_of t (m : member) =
 
 let function_confirmed t m =
   match copy_of t m with Some c -> queued c | None -> false
+
+(* object-store-common §3: one request per shard, populated or not; listing
+   which shards exist would cost more than the empty requests. *)
+let queue_verification t m =
+  match copy_of t m with
+    | Some c when queued c ->
+        guard t c.member ("queue verification on " ^ c.member.name);
+        let shards = List.init 4096 (Printf.sprintf "%03x") in
+        List.iter
+          (fun shard ->
+            c.member.store.put
+              (Key.verify_job t.core.domain shard)
+              Bigstring.empty)
+          shards;
+        `Queued (List.length shards)
+    | _ -> `Unsupported
 
 let probe t m =
   match copy_of t m with

@@ -11,6 +11,7 @@ type t =
   | Expire of { apply : bool; cutoff : float }
   | Purge of { apply : bool; path : string }
   | Integrity of {
+      verify : bool;
       repair : bool;
       apply : bool;
       detail : bool;

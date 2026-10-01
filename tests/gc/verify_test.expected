@@ -1,0 +1,16 @@
+no confirmed function:
+  main: unsupported
+  bucket: unsupported
+  requests written: 0
+probe: true
+function deployed:
+  main: unsupported
+  bucket: done, 1 corrupt
+  rotten chunk marked: true, sound ones not: true
+function no longer notified:
+  main: unsupported
+  bucket: stalled, 4096 left, 1 corrupt
+cancelled:
+  main: unsupported
+  bucket: abandoned, 4096 left, 1 corrupt
+  requests left for the function: 4096

@@ -150,7 +150,6 @@ let make ~name ~admission ?share_url v =
       watch = (fun _ _ -> Stop.sleep Store.watch_interval);
       get_many = None;
       list_many = None;
-      verify_all = (fun _ -> `Unsupported);
       bucket_functions = true;
       capabilities = (fun _ -> { Store.no_caps with share_url });
       fast_read = false;
