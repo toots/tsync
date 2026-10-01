@@ -28,6 +28,9 @@ dry run changed nothing: true
 trash 0, versions 0, journal 0, shares 0
 cancelled: true
 
+== expire, cancelled at the first share read
+stopped: cancelled
+
 == expire, applied
 trash 7, versions 2, journal 1, shares 4
   delete manifests/<sub>/926c8b039839cfc6-7969407bf35f59e9

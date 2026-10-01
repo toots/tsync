@@ -88,7 +88,7 @@ module Make (C : Context.S) = struct
 
   (* §4.5: each member holding shares, since a share may sit on a copy alone;
      copies behind the write guard, archives never. *)
-  let shares_on ~apply ~now ~cutoff (m : Composite.member) =
+  let shares_on ~apply ~cancelled ~now ~cutoff (m : Composite.member) =
     match
       if m.role <> Main then Composite.guard C.composite m "expire shares"
     with
@@ -96,7 +96,9 @@ module Make (C : Context.S) = struct
       | exception e -> Error (Printexc.to_string e)
       | () ->
           let st = m.store in
-          let listing = st.list_prefix Key.shares in
+          let listing =
+            Cancel.race cancelled (fun () -> st.list_prefix Key.shares)
+          in
           let artifact (e : Store.entry) =
             String.ends_with ~suffix:".data" (Key.leaf e.key)
           in
@@ -107,6 +109,7 @@ module Make (C : Context.S) = struct
                 if artifact e then
                   if e.last_modified < cutoff then [e.key] else []
                 else (
+                  Cancel.check cancelled;
                   match st.get_opt e.key with
                     | None -> []
                     | Some b -> (
@@ -130,8 +133,16 @@ module Make (C : Context.S) = struct
                           | Kept | Other_domain -> [])))
               listing
           in
-          if apply && doomed <> [] then st.delete_multi doomed;
-          Ok (doomed, !bad)
+          let deleted = ref [] in
+          if apply then
+            ignore
+              (Cancel.batches cancelled
+                 (fun batch ->
+                   st.delete_multi batch;
+                   deleted := List.rev_append batch !deleted)
+                 doomed)
+          else deleted := List.rev doomed;
+          Ok (List.rev !deleted, !bad)
 
   let expire ?(narrate = Narrate.none) ?(apply = false)
       ?(cancelled = Fun.const false) ?(now = Unix.gettimeofday ()) ~cutoff () =
@@ -258,28 +269,29 @@ module Make (C : Context.S) = struct
           let seen = Hashtbl.create 16 in
           List.iter
             (fun (m : Composite.member) ->
-              match shares_on ~apply ~now ~cutoff m with
-                | Error reason ->
-                    Log.warn "shares on %s not expired: %s" m.name reason
-                | Ok (keys, bad) ->
-                    Narrate.say nr "  shares on %s: %s and stale artifacts%s"
-                      m.name
-                      (Narrate.count (List.length keys) "expired share")
-                      (if bad = [] then ""
-                       else
-                         Printf.sprintf "; %d unparseable, left in place"
-                           (List.length bad));
-                    List.iter
-                      (fun k ->
-                        if not (Hashtbl.mem seen k) then (
-                          Hashtbl.replace seen k ();
-                          deleted := k :: !deleted))
-                      keys;
-                    List.iter
-                      (fun k ->
-                        if not (List.exists (Key.equal k) !unparseable) then
-                          unparseable := k :: !unparseable)
-                      bad)
+              if not (cancelled ()) then (
+                match shares_on ~apply ~cancelled ~now ~cutoff m with
+                  | Error reason ->
+                      Log.warn "shares on %s not expired: %s" m.name reason
+                  | Ok (keys, bad) ->
+                      Narrate.say nr "  shares on %s: %s and stale artifacts%s"
+                        m.name
+                        (Narrate.count (List.length keys) "expired share")
+                        (if bad = [] then ""
+                         else
+                           Printf.sprintf "; %d unparseable, left in place"
+                             (List.length bad));
+                      List.iter
+                        (fun k ->
+                          if not (Hashtbl.mem seen k) then (
+                            Hashtbl.replace seen k ();
+                            deleted := k :: !deleted))
+                        keys;
+                      List.iter
+                        (fun k ->
+                          if not (List.exists (Key.equal k) !unparseable) then
+                            unparseable := k :: !unparseable)
+                        bad))
             (List.filter
                (fun (m : Composite.member) -> m.role <> Read_only)
                (Composite.members C.composite)))

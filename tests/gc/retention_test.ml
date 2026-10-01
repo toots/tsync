@@ -130,6 +130,16 @@ let () =
            (Printf.sprintf {|{"v":1,"expires":%.0f,"domain":"d","type":"file"}|}
               (now -. day)));
       put ~age:30. (Key.v "tsync/shares/cache/0123-4567.data") "old";
+      let share_read = ref false in
+      let watched =
+        {
+          main with
+          get_opt =
+            (fun k ->
+              if Key.under Key.shares k then share_read := true;
+              main.get_opt k);
+        }
+      in
       let composite =
         Composite.create ~domain:d
           ~data_dir:(Filename.concat root "data")
@@ -140,7 +150,7 @@ let () =
               is_journal = (fun _ -> false);
             }
           [
-            { name = "main"; role = Main; store = main };
+            { name = "main"; role = Main; store = watched };
             { name = "replica"; role = Replica; store = replica };
           ]
       in
@@ -196,6 +206,15 @@ let () =
       let r = R.expire ~cancelled:(Fun.const true) ~now ~cutoff () in
       show r;
       p "cancelled: %b\n" r.cancelled;
+      p "\n== expire, cancelled at the first share read\n";
+      share_read := false;
+      (match
+         R.expire ~cancelled:(fun () -> !share_read) ~now ~cutoff ()
+       with
+        | r ->
+            p "ran to the end: shares %d, cancelled %b\n"
+              r.counts.shares_deleted r.cancelled
+        | exception Fail.E f -> p "stopped: %s\n" f.reason);
       p "\n== expire, applied\n";
       show (R.expire ~apply:true ~now ~cutoff ());
       let dir rel =
