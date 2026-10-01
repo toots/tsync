@@ -1,13 +1,19 @@
 (** A byte stream over TCP, plain or TLS (security-model §9), read and written
-    from fibers. Two TLS implementations are selectable: OpenSSL and the OCaml
-    one. *)
+    from fibers. Each TLS implementation the build has registers itself: OpenSSL
+    ([tsync_http_ssl]) and the OCaml one ([tsync_http_native]). *)
 
 type t
 type tls_impl = Openssl | Native
 
-(** The implementation new connections use; [Openssl] by default. *)
-val tls_impl : tls_impl Atomic.t
+(** The implementation new connections use; [None] is the build's default,
+    OpenSSL when it was built. INVALID at the next connection when the build
+    lacks the one set. *)
+val tls_impl : tls_impl option Atomic.t
 
+(** The implementations this build has. *)
+val available : unit -> tls_impl list
+
+val impl_name : tls_impl -> string
 val tls_impl_of_string : string -> tls_impl option
 
 (** Verified TLS: the system trust store, or [ca_file] alone when given, and the
@@ -32,6 +38,32 @@ val accept_tls : timeout:float -> server_tls -> t -> t
 
 (** A connection already accepted by a plain listener. *)
 val of_fd : Unix.file_descr -> t
+
+(** {2 For TLS implementations} *)
+
+(** A plain stream over a non-blocking descriptor. *)
+val plain : Unix.file_descr -> t
+
+val make :
+  fd:Unix.file_descr ->
+  read:(?timeout:float -> Tsync_core.Bigstring.t -> int -> int -> int) ->
+  write:(?timeout:float -> Tsync_core.Bigstring.t -> unit) ->
+  close:(unit -> unit) ->
+  t
+
+(** A handshake or session failure: TRANSIENT/LINK. *)
+val tls_failure : string -> string -> 'a
+
+(** A certificate that does not verify, which a retry will not change. *)
+val untrusted : string -> string -> 'a
+
+type backend = {
+  client : Unix.file_descr -> tls -> t;  (** the client handshake *)
+  server : certificate:string -> key:string -> Unix.file_descr -> t;
+      (** loads the chain once, then the server handshake per connection *)
+}
+
+val register : tls_impl -> backend -> unit
 
 (** Up to [len] bytes; 0 at end of stream. [timeout] bounds the wait. *)
 val read : ?timeout:float -> t -> Tsync_core.Bigstring.t -> int -> int -> int

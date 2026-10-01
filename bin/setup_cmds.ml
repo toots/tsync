@@ -152,6 +152,12 @@ let default_domain_cmd =
 let build_info () =
   say "frontends: %s" (String.concat ", " (Frontend.names ()));
   say "drivers: %s" (String.concat ", " (Tsync_store.Driver.names ()));
+  say "tls: %s"
+    (match Tsync_http.Transport.available () with
+      | [] -> "none"
+      | l ->
+          String.concat ", "
+            (List.map Tsync_http.Transport.impl_name (List.sort compare l)));
   say "log sink: stderr";
   say "config: %s" (Paths.config_file ());
   say "data: %s" (Paths.data_dir ());

@@ -1,9 +1,8 @@
-module Host_name = Domain_name
 open Tsync_core
 
 type tls_impl = Openssl | Native
 
-let tls_impl = Atomic.make Openssl
+let tls_impl = Atomic.make None
 
 let tls_impl_of_string = function
   | "openssl" -> Some Openssl
@@ -50,227 +49,41 @@ let of_fd fd =
   Unix.set_nonblock fd;
   plain fd
 
-let ssl_initialised = Atomic.make false
-
-let ssl_context ca_file =
-  if not (Atomic.exchange ssl_initialised true) then Ssl.init ();
-  let ctx = Ssl.create_context Ssl.TLSv1_2 Ssl.Client_context in
-  Ssl.set_min_protocol_version ctx Ssl.TLSv1_2;
-  (match ca_file with
-    | Some f -> Ssl.load_verify_locations ctx f ""
-    | None ->
-        if not (Ssl.set_default_verify_paths ctx) then
-          Fail.raise_ Fail.Local "OpenSSL has no system trust store");
-  Ssl.set_verify ctx [Ssl.Verify_peer] None;
-  ctx
-
-(* One context per trust store, shared by every connection. *)
-let ssl_contexts = Mutex.create ()
-
-let ssl_context_cache : (string option, Ssl.context) Hashtbl.t =
-  Hashtbl.create 2
-
-let ssl_context ca_file =
-  Mutex.protect ssl_contexts (fun () ->
-      match Hashtbl.find_opt ssl_context_cache ca_file with
-        | Some c -> c
-        | None ->
-            let c = ssl_context ca_file in
-            Hashtbl.replace ssl_context_cache ca_file c;
-            c)
-
+let make ~fd ~read ~write ~close = { fd; read; write; close }
 let tls_failure host what = Fail.raise_ Fail.Link "TLS with %s: %s" host what
 
 (* A certificate that does not verify will not verify on a retry either. *)
 let untrusted host what = Fail.raise_ Fail.Refused "TLS with %s: %s" host what
 
-(* A non-blocking OpenSSL call answers "want read" or "want write" until the
-   socket is ready. *)
-let rec ssl_retry ?timeout fd f =
-  match f () with
-    | v -> v
-    | exception
-        ( Ssl.Read_error Error_want_read
-        | Ssl.Write_error Error_want_read
-        | Ssl.Connection_error Error_want_read
-        | Ssl.Accept_error Error_want_read ) ->
-        Rt.wait_readable ?timeout fd;
-        ssl_retry ?timeout fd f
-    | exception
-        ( Ssl.Read_error Error_want_write
-        | Ssl.Write_error Error_want_write
-        | Ssl.Connection_error Error_want_write
-        | Ssl.Accept_error Error_want_write ) ->
-        Rt.wait_writable ?timeout fd;
-        ssl_retry ?timeout fd f
+type backend = {
+  client : Unix.file_descr -> tls -> t;
+  server : certificate:string -> key:string -> Unix.file_descr -> t;
+}
 
-let of_ssl fd s =
-  let read ?timeout buf off len =
-    try ssl_retry ?timeout fd (fun () -> Ssl.read_into_bigarray s buf off len)
-    with Ssl.Read_error (Error_zero_return | Error_syscall) -> 0
-  in
-  let write ?timeout b =
-    let rec go off =
-      if off < Bigstring.length b then
-        go
-          (off
-          + ssl_retry ?timeout fd (fun () ->
-              Ssl.write_bigarray s b off (Bigstring.length b - off)))
-    in
-    go 0
-  in
-  {
-    fd;
-    read;
-    write;
-    close =
-      (fun () ->
-        (try ignore (Ssl.close_notify s) with _ -> ());
-        try Unix.close fd with _ -> ());
-  }
+let backends = Atomic.make []
 
-let openssl fd { host; ca_file } =
-  let s = Ssl.embed_socket fd (ssl_context ca_file) in
-  Ssl.set_client_SNI_hostname s host;
-  Ssl.set_host s host;
-  (try ssl_retry fd (fun () -> Ssl.connect s)
-   with Ssl.Connection_error _ ->
-     let v = Ssl.get_verify_result s in
-     if v <> 0 then untrusted host (Ssl.get_verify_error_string v)
-     else tls_failure host "handshake failed");
-  of_ssl fd s
+let rec register impl b =
+  let l = Atomic.get backends in
+  if not (Atomic.compare_and_set backends l ((impl, b) :: l)) then
+    register impl b
 
-let rng_initialised = Atomic.make false
+let available () = List.map fst (Atomic.get backends)
+let impl_name = function Openssl -> "openssl" | Native -> "native"
 
-let init_rng () =
-  if not (Atomic.exchange rng_initialised true) then
-    Mirage_crypto_rng_unix.use_default ()
-
-let authenticator ca_file =
-  match ca_file with
+(* 05 §2 [tls]: unset is the build's default, OpenSSL when it was built. *)
+let backend () =
+  let built impl = List.assoc_opt impl (Atomic.get backends) in
+  match Atomic.get tls_impl with
+    | Some impl -> (
+        match built impl with
+          | Some b -> b
+          | None ->
+              Fail.raise_ Fail.Invalid "this build has no %s TLS"
+                (impl_name impl))
     | None -> (
-        match Ca_certs.authenticator () with
-          | Ok a -> a
-          | Error (`Msg m) ->
-              Fail.raise_ Fail.Local "no system trust store: %s" m)
-    | Some f -> (
-        let pem = Fs.read_file f in
-        match X509.Certificate.decode_pem_multiple pem with
-          | Ok cas ->
-              X509.Authenticator.chain_of_trust
-                ~time:(fun () -> Some (Ptime_clock.now ()))
-                cas
-          | Error (`Msg m) -> Fail.raise_ Fail.Invalid "%s: %s" f m)
-
-(* The OCaml TLS engine is a state machine over records: bytes read from the
-   socket go in, application data and records to send come out. *)
-let native_client { host; ca_file } =
-  init_rng ();
-  let peer_name =
-    match Host_name.of_string host with
-      | Ok d -> (
-          match Host_name.host d with Ok h -> Some h | Error _ -> None)
-      | Error _ -> None
-  in
-  let config =
-    match
-      Tls.Config.client ~authenticator:(authenticator ca_file) ?peer_name ()
-    with
-      | Ok c -> c
-      | Error (`Msg m) -> tls_failure host m
-  in
-  let state, hello = Tls.Engine.client config in
-  (state, Some hello)
-
-(* [first] is what this side sends before reading: a client's hello, nothing
-   for a server. *)
-let native_session ?timeout fd ~host
-    ((state, first) : Tls.Engine.state * string option) =
-  let raw = plain fd in
-  let state = ref state in
-  (* The engine speaks strings: what it hands back is copied once into the
-     caller's buffer. *)
-  let pending = ref "" and pending_pos = ref 0 in
-  let eof = ref false in
-  let chunk = Bigstring.create 16384 in
-  let send ?timeout s = raw.write ?timeout (Bigstring.of_string s) in
-  Option.iter send first;
-  let pump ?timeout () =
-    let n = raw.read ?timeout chunk 0 (Bigstring.length chunk) in
-    if n = 0 then eof := true
-    else (
-      match Tls.Engine.handle_tls !state (Bigstring.to_string ~len:n chunk) with
-        | Ok (s, e, `Response resp, `Data data) ->
-            state := s;
-            Option.iter send resp;
-            Option.iter
-              (fun d ->
-                pending :=
-                  String.sub !pending !pending_pos
-                    (String.length !pending - !pending_pos)
-                  ^ d;
-                pending_pos := 0)
-              data;
-            if e <> None then eof := true
-        | Error (failure, `Response resp) -> (
-            (try send resp with _ -> ());
-            match failure with
-              | `Error (`AuthenticationFailure e) ->
-                  untrusted host
-                    (Format.asprintf "%a" X509.Validation.pp_validation_error e
-                    |> String.split_on_char '\n' |> List.rev |> List.hd
-                    |> String.trim)
-              | f -> tls_failure host (Tls.Engine.string_of_failure f)))
-  in
-  while Tls.Engine.handshake_in_progress !state && not !eof do
-    pump ?timeout ()
-  done;
-  if !eof then tls_failure host "the connection closed during the handshake";
-  let available () = String.length !pending - !pending_pos in
-  let read ?timeout buf off len =
-    while available () = 0 && not !eof do
-      pump ?timeout ()
-    done;
-    let n = min len (available ()) in
-    Bigstring.blit_from_bytes
-      (Bytes.unsafe_of_string !pending)
-      !pending_pos buf off n;
-    pending_pos := !pending_pos + n;
-    n
-  in
-  (* ocaml-tls takes strings: one record's worth at a time, so a mapped chunk
-     is never copied whole onto the heap. *)
-  let record = 16384 in
-  let write ?timeout b =
-    let n = Bigstring.length b in
-    let rec go off =
-      if off < n then (
-        let len = min record (n - off) in
-        match
-          Tls.Engine.send_application_data !state
-            [Bigstring.to_string ~off ~len b]
-        with
-          | Some (st, out) ->
-              state := st;
-              send ?timeout out;
-              go (off + len)
-          | None -> tls_failure host "the session is not ready")
-    in
-    go 0
-  in
-  {
-    fd;
-    read;
-    write;
-    close =
-      (fun () ->
-        (try
-           let st, out = Tls.Engine.send_close_notify !state in
-           state := st;
-           send ~timeout:1. out
-         with _ -> ());
-        raw.close ());
-  }
+        match (built Openssl, built Native) with
+          | Some b, _ | None, Some b -> b
+          | None, None -> Fail.raise_ Fail.Invalid "this build has no TLS")
 
 (* An unroutable address family must not hold the next address back. *)
 let connect_timeout = 10.
@@ -327,59 +140,17 @@ let connect ?(handshake_timeout = connect_timeout) ?tls ~host ~port () =
     | Some tls -> (
         try
           bounded_handshake ~host:tls.host handshake_timeout (fun () ->
-              match Atomic.get tls_impl with
-                | Openssl -> openssl fd tls
-                | Native -> native_session fd ~host:tls.host (native_client tls))
+              (backend ()).client fd tls)
         with e ->
           (try Unix.close fd with _ -> ());
           raise e)
 
-type server_tls =
-  | Openssl_server of Ssl.context
-  | Native_server of Tls.Config.server
+type server_tls = Unix.file_descr -> t
 
-let server_tls ~certificate ~key =
-  let fail what = Fail.raise_ Fail.Invalid "TLS %s" what in
-  match Atomic.get tls_impl with
-    | Openssl -> (
-        if not (Atomic.exchange ssl_initialised true) then Ssl.init ();
-        let ctx = Ssl.create_context Ssl.TLSv1_2 Ssl.Server_context in
-        Ssl.set_min_protocol_version ctx Ssl.TLSv1_2;
-        match Ssl.use_certificate ctx certificate key with
-          | () -> Openssl_server ctx
-          | exception e ->
-              fail
-                (Printf.sprintf "certificate %s or key %s: %s" certificate key
-                   (Printexc.to_string e)))
-    | Native -> (
-        init_rng ();
-        let certs =
-          match
-            X509.Certificate.decode_pem_multiple (Fs.read_file certificate)
-          with
-            | Ok (_ :: _ as l) -> l
-            | Ok [] -> fail (certificate ^ ": no certificate")
-            | Error (`Msg m) -> fail (certificate ^ ": " ^ m)
-        and pk =
-          match X509.Private_key.decode_pem (Fs.read_file key) with
-            | Ok k -> k
-            | Error (`Msg m) -> fail (key ^ ": " ^ m)
-        in
-        match Tls.Config.server ~certificates:(`Single (certs, pk)) () with
-          | Ok c -> Native_server c
-          | Error (`Msg m) -> fail m)
+let server_tls ~certificate ~key = (backend ()).server ~certificate ~key
 
 let accept_tls ~timeout server t =
-  bounded_handshake ~host:"client" timeout (fun () ->
-      match server with
-        | Openssl_server ctx ->
-            let s = Ssl.embed_socket t.fd ctx in
-            (try ssl_retry t.fd (fun () -> Ssl.accept s)
-             with Ssl.Accept_error _ ->
-               tls_failure "client" "handshake failed");
-            of_ssl t.fd s
-        | Native_server config ->
-            native_session t.fd ~host:"client" (Tls.Engine.server config, None))
+  bounded_handshake ~host:"client" timeout (fun () -> server t.fd)
 
 let read ?timeout t buf off len = t.read ?timeout buf off len
 let write ?timeout t b = t.write ?timeout b

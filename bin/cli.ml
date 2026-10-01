@@ -60,13 +60,14 @@ let run body =
           ^ Option.fold ~none:"" ~some:(fun r -> " (" ^ r ^ ")") f.repair);
         if f.kind = Fail.Unexplained then 125 else 1
 
-(* security §9: [--tls] wins over the config's [tls]; OpenSSL otherwise. *)
+(* security §9: [--tls] wins over the config's [tls]; the build's default
+   otherwise. *)
 let use_tls (config : Config.t) tls =
   match Option.fold ~none:config.tls ~some:Option.some tls with
     | None -> ()
     | Some name -> (
         match Tsync_http.Transport.tls_impl_of_string name with
-          | Some impl -> Atomic.set Tsync_http.Transport.tls_impl impl
+          | Some impl -> Atomic.set Tsync_http.Transport.tls_impl (Some impl)
           | None ->
               fail "unknown TLS implementation %S (native or openssl)" name)
 

@@ -100,7 +100,7 @@ let () =
   Rt.run_sync (fun () ->
       p "== TLS listener";
       let listen impl =
-        Atomic.set Transport.tls_impl impl;
+        Atomic.set Transport.tls_impl (Some impl);
         let tls =
           Transport.server_tls ~certificate:"tls_cert.pem" ~key:"tls_key.pem"
         in
@@ -124,7 +124,7 @@ let () =
         (fun (server_impl, (_, port)) ->
           List.iter
             (fun client_impl ->
-              Atomic.set Transport.tls_impl client_impl;
+              Atomic.set Transport.tls_impl (Some client_impl);
               let url = Printf.sprintf "https://localhost:%d" port in
               let e = Client.endpoint ~ca_file:"tls_cert.pem" url in
               let r = Client.request e ~meth:"GET" "/echo?tls=1" in
@@ -163,7 +163,7 @@ let () =
       in
       List.iter
         (fun (name, impl) ->
-          Atomic.set Transport.tls_impl impl;
+          Atomic.set Transport.tls_impl (Some impl);
           let server =
             Transport.server_tls ~certificate:"tls_cert.pem" ~key:"tls_key.pem"
           in
@@ -189,7 +189,7 @@ let () =
           Transport.close c;
           Unix.close l)
         [("openssl", Transport.Openssl); ("ocaml-tls", Native)];
-      Atomic.set Transport.tls_impl Openssl;
+      Atomic.set Transport.tls_impl (Some Openssl);
       let tls_server =
         Transport.server_tls ~certificate:"tls_cert.pem" ~key:"tls_key.pem"
       in

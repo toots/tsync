@@ -1,45 +1,28 @@
 (lang dune 3.17)
 (name tsync)
 (license MIT)
-(maintainers "Romain Beauxis <toots@rastageeks.org>")
-(authors "Romain Beauxis <toots@rastageeks.org>")
-(source (github toots/tsync))
 (implicit_transitive_deps false)
-(generate_opam_files true)
+
+; The opam files are written by hand, not generated from these stanzas: tsync
+; depends on one of two TLS packages and dune has no syntax for an opam
+; alternative. What is left here is what dune itself reads: the packages it
+; builds with `dune build -p`.
 
 (package
- (name tsync)
- (synopsis "Synchronise folders through object stores")
- (depends
-  (ocaml (>= 5.5))
-  dune
-  base64
-  ca-certs
-  cmdliner
-  digestif
-  domain-name
-  eqaf
-  mem_usage
-  mirage-crypto-pk
-  mirage-crypto-rng
-  ppx_deriving_yojson
-  ptime
-  re
-  ssl
-  tls
-  x509
-  yojson)
- (depopts tsync-fuse)
- (conflicts
-  (fuse3 (< 3.10.0.1))))
+ (name tsync))
 
-; Installing it is what enables FUSE: it brings the binding, and as a depopt
-; of tsync it rebuilds tsync, whose optional FUSE library and the catalog's
-; select then link it in. It installs nothing of its own.
+; tsync-tls, tsync-ssl and tsync-fuse install nothing of their own: each brings
+; a library that tsync takes as a depopt, so installing one rebuilds tsync,
+; whose optional library and the catalog's select then link it in.
+
+(package
+ (name tsync-tls)
+ (allow_empty))
+
+(package
+ (name tsync-ssl)
+ (allow_empty))
 
 (package
  (name tsync-fuse)
- (synopsis "FUSE frontend support for tsync")
- (allow_empty)
- (depends
-  (fuse3 (>= 3.10.0.1))))
+ (allow_empty))

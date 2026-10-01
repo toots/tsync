@@ -5,12 +5,13 @@ license: "MIT"
 homepage: "https://github.com/toots/tsync"
 bug-reports: "https://github.com/toots/tsync/issues"
 dev-repo: "git+https://github.com/toots/tsync.git"
-synopsis: "FUSE frontend support for tsync"
+synopsis: "Native OCaml TLS for tsync"
 depends: [
   "dune" {>= "3.17"}
-  "fuse3" {>= "3.10.0.1"}
+  "tls"
+  "ca-certs"
+  "mirage-crypto-rng"
 ]
-available: os = "linux"
 build: [
   ["dune" "subst"] {dev}
   ["dune" "build" "-p" name "-j" jobs "@install" "@runtest" {with-test} "@doc" {with-doc}]

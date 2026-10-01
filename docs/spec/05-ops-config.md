@@ -73,7 +73,7 @@ every tool that reads or writes a config (the daemon, every command, the Android
 | key | type | default | rule |
 |---|---|---|---|
 | `name` | string | the host name | client name, labels conflicted copies; non-empty |
-| `tls` | `"native"` \| `"openssl"` | unset (the build's default) | |
+| `tls` | `"native"` \| `"openssl"` | unset (the build's default) | A build has one or both. The default is OpenSSL when the build has it, else native; naming one the build lacks fails each connection INVALID. `tsync build-info` lists them. |
 | `maxUploads` | int ≥ 0 | 4 | concurrent upload files; 0 means the default |
 | `maxChunkBuffers` | int ≥ 0 | `maxUploads` | chunk bodies in memory across all uploads; also bounds deferred forwards and `tsync mirror` copies; 0 means the default |
 | `maxDownloads` | int ≥ 0 | 8 | concurrent file downloads; 0 means the default |
