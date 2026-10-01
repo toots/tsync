@@ -126,8 +126,8 @@ let () =
               cursor
         | Halted r -> "halted: " ^ r
       in
-      let run ?budget ?verify ?keep () =
-        match Collector.run ?budget ?verify ?keep c with
+      let run ?budget ?verify ?keep ?cancelled () =
+        match Collector.run ?budget ?verify ?keep ?cancelled c with
           | Ok [st] ->
               p "run: %s; promoted %d, reclaimed %d (%d bytes)%s\n"
                 (outcome st.outcome) st.chunks_promoted st.chunks_reclaimed
@@ -176,6 +176,10 @@ let () =
                     sv.per_copy))
         | _ -> p "dry run failed\n");
       p "dry run changed nothing on the main: %b\n" (files main_root = before);
+      p "a cancelled dry run: %s\n"
+        (match Collector.dry_run ~cancelled:(Fun.const true) c with
+          | Ok [Error reason] -> reason
+          | _ -> "not stopped");
       p "\n== a collection (§5.5)\n";
       ignore (run ());
       Composite.settle ~timeout:10. c;
@@ -205,7 +209,8 @@ let () =
       state ();
       p "\n== abort puts back everything still outgoing\n";
       put_chunks ["junk5"];
-      ignore (run ~budget:0. ());
+      p "  a run cancelled at once stops like a spent budget\n";
+      ignore (run ~cancelled:(Fun.const true) ());
       p "junk5 outgoing: %b\n"
         (on_disk main_root (Key.chunk_from d (chunk "junk5")));
       ignore (run ~keep:true ());

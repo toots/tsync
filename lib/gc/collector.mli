@@ -47,10 +47,10 @@ type survey = {
 }
 
 (** Collect each collectable main: resume or open a run and take it as far as
-    [budget] seconds allow, waiting [pause] between units; at least one unit
-    runs. [keep] abandons instead, putting back every chunk still outgoing, and
-    [verify] re-hashes each chunk this run promotes, filing or clearing its
-    marker.
+    [budget] seconds allow and until [cancelled] holds, waiting [pause] between
+    units; at least one unit runs. [keep] abandons instead, putting back every
+    chunk still outgoing, and [verify] re-hashes each chunk this run promotes,
+    filing or clearing its marker.
 
     Refused with [Unsupported], unless [keep], while the collecting main would
     owe deletions to a remote copy whose bucket function this owner has not
@@ -61,6 +61,7 @@ val run :
   ?narrate:Narrate.t ->
   ?verify:bool ->
   ?keep:bool ->
+  ?cancelled:(unit -> bool) ->
   Composite.t ->
   (stats list, failure) result
 
@@ -77,9 +78,11 @@ type status = {
 val status : Composite.t -> status list
 
 (** Report what a collection would reclaim, per main; [Error reason] inside the
-    list when a body stops the survey as it would stop marking. *)
+    list when a body stops the survey as it would stop marking, or once
+    [cancelled] holds. *)
 val dry_run :
   ?narrate:Narrate.t ->
   ?verify:bool ->
+  ?cancelled:(unit -> bool) ->
   Composite.t ->
   ((survey, string) result list, failure) result

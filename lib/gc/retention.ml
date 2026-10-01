@@ -15,9 +15,10 @@ type report = {
   skipped_recent : Folder_id.t list;
   stopped : (Folder_id.t * string) list;
   unparseable_shares : Key.t list;
+  cancelled : bool;
 }
 
-type purge = Purged of int | Not_in_trash | Live_elsewhere
+type purge = Purged of int | Not_in_trash | Live_elsewhere | Stopped of string
 
 module Make (C : Context.S) = struct
   module T = Tree.Make (C)
@@ -46,7 +47,7 @@ module Make (C : Context.S) = struct
 
   (* §4.2: deepest first, re-reading the trashed folder's anchor before each
      namespace; anchors stay as tombstones. *)
-  let purge_folder ~apply ~delete id entries =
+  let purge_folder ~apply ~delete ~cancelled id entries =
     let rec go n = function
       | [] ->
           delete entries;
@@ -54,6 +55,7 @@ module Make (C : Context.S) = struct
       | ns :: rest ->
           if apply && anchor_state id = Live then
             Error "restored while it was being purged"
+          else if cancelled () then Error "cancelled"
           else (
             let keys =
               List.filter_map
@@ -132,7 +134,7 @@ module Make (C : Context.S) = struct
           Ok (doomed, !bad)
 
   let expire ?(narrate = Narrate.none) ?(apply = false)
-      ?(now = Unix.gettimeofday ()) ~cutoff () =
+      ?(cancelled = Fun.const false) ?(now = Unix.gettimeofday ()) ~cutoff () =
     let nr = narrate in
     Narrate.say nr
       "expiring %s: trash, versions, journal and shares older than %s%s"
@@ -143,9 +145,10 @@ module Make (C : Context.S) = struct
       deleted := List.rev_append keys !deleted;
       if apply && keys <> [] then store.delete_multi keys
     in
+    (* A cancelled expiry skips what is left, phase by phase. *)
     let count f =
       let before = List.length !deleted in
-      f ();
+      if not (cancelled ()) then f ();
       List.length !deleted - before
     in
     let skipped = ref [] and stopped = ref [] and unparseable = ref [] in
@@ -156,41 +159,43 @@ module Make (C : Context.S) = struct
             (Narrate.count (List.length folders) "trashed folder");
           List.iter
             (fun (f : T.trashed) ->
-              let id = f.id and newest = f.latest in
-              let name = Option.value ~default:f.name f.path in
-              match
-                Gc_plan.trash ~anchor:(anchor_state id) ~cutoff (entries_of f)
-              with
-                | Delete_stale keys ->
-                    Narrate.say nr "    %s: the folder is live again; %s" name
-                      (if keys = [] then
-                         "its trash entries are younger than the cutoff and \
-                          stay"
-                       else
-                         Printf.sprintf "%s %s, the folder stays"
-                           (if apply then "deleting" else "would delete")
-                           (Narrate.count ~plural:"stale trash entries"
-                              (List.length keys) "stale trash entry"));
-                    delete keys
-                | Skip_recent ->
-                    Narrate.say nr "    %s: kept, trashed again on %s" name
-                      (Narrate.date newest);
-                    skipped := id :: !skipped
-                | Refuse_live -> ()
-                | Purge keys -> (
-                    match purge_folder ~apply ~delete id keys with
-                      | Ok n ->
-                          Narrate.say nr
-                            "    %s: %s (trashed on %s): %s, deepest folder \
-                             first, then %s"
-                            name
-                            (if apply then "purged" else "would be purged")
-                            (Narrate.date newest) (Narrate.count n "object")
-                            (Narrate.count ~plural:"trash entries"
-                               (List.length keys) "trash entry")
-                      | Error reason ->
-                          Narrate.say nr "    %s: purge stopped: %s" name reason;
-                          stopped := (id, reason) :: !stopped))
+              if not (cancelled ()) then (
+                let id = f.id and newest = f.latest in
+                let name = Option.value ~default:f.name f.path in
+                match
+                  Gc_plan.trash ~anchor:(anchor_state id) ~cutoff (entries_of f)
+                with
+                  | Delete_stale keys ->
+                      Narrate.say nr "    %s: the folder is live again; %s" name
+                        (if keys = [] then
+                           "its trash entries are younger than the cutoff and \
+                            stay"
+                         else
+                           Printf.sprintf "%s %s, the folder stays"
+                             (if apply then "deleting" else "would delete")
+                             (Narrate.count ~plural:"stale trash entries"
+                                (List.length keys) "stale trash entry"));
+                      delete keys
+                  | Skip_recent ->
+                      Narrate.say nr "    %s: kept, trashed again on %s" name
+                        (Narrate.date newest);
+                      skipped := id :: !skipped
+                  | Refuse_live -> ()
+                  | Purge keys -> (
+                      match purge_folder ~apply ~delete ~cancelled id keys with
+                        | Ok n ->
+                            Narrate.say nr
+                              "    %s: %s (trashed on %s): %s, deepest folder \
+                               first, then %s"
+                              name
+                              (if apply then "purged" else "would be purged")
+                              (Narrate.date newest) (Narrate.count n "object")
+                              (Narrate.count ~plural:"trash entries"
+                                 (List.length keys) "trash entry")
+                        | Error reason ->
+                            Narrate.say nr "    %s: purge stopped: %s" name
+                              reason;
+                            stopped := (id, reason) :: !stopped)))
             folders)
     in
     let versions_deleted =
@@ -272,9 +277,11 @@ module Make (C : Context.S) = struct
       skipped_recent = !skipped;
       stopped = !stopped;
       unparseable_shares = !unparseable;
+      cancelled = cancelled ();
     }
 
-  let purge ?(narrate = Narrate.none) ?(apply = false) path =
+  let purge ?(narrate = Narrate.none) ?(apply = false)
+      ?(cancelled = Fun.const false) path =
     let nr = narrate in
     let delete keys = if apply && keys <> [] then store.delete_multi keys in
     match
@@ -297,7 +304,7 @@ module Make (C : Context.S) = struct
                    before each folder that it is still in the trash%s"
                   path
                   (if apply then "" else " (dry run: nothing is deleted)");
-                match purge_folder ~apply ~delete f.id keys with
+                match purge_folder ~apply ~delete ~cancelled f.id keys with
                   | Ok n ->
                       Narrate.say nr "  %s, then %s" (Narrate.count n "object")
                         (Narrate.count ~plural:"trash entries"
@@ -305,6 +312,6 @@ module Make (C : Context.S) = struct
                       Purged n
                   | Error reason ->
                       Narrate.say nr "  stopped: %s" reason;
-                      Live_elsewhere)
+                      Stopped reason)
             | Delete_stale _ | Skip_recent -> Live_elsewhere)
 end

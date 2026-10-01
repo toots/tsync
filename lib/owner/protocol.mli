@@ -89,6 +89,9 @@ type _ request =
   | Full_resync : unit request
   | Sync : { full : bool } -> resynced request
   | Trash_restore : string -> trash_restored request
+  | Job : { job : Jobs.t; narrate : bool } -> int request
+      (** the exit status; its lines stream before the reply (07 §2.5) *)
+  | Cancel : int -> bool request  (** whether that job was running *)
   | Retry : int request  (** records re-adopted *)
   | Poll : unit request
   | Notify_reset : int request  (** subscribers reached *)
@@ -133,6 +136,19 @@ val row_fields : row -> (string * Yojson.Safe.t) list
 val row_of_fields : Yojson.Safe.t -> row
 val failure_of_reply : Yojson.Safe.t -> Fail.t option
 
-(** One request over a socket, typed both ways; [bulk] is 07 §4.3's call. *)
+(** What a job streams before its reply: its id, then its output and, when asked
+    for, its narration, as they happen. *)
+type line = Started of int | Out of string | Narration of string
+
+val line_to_json : line -> Yojson.Safe.t
+
+(** One request over a socket, typed both ways; [bulk] is 07 §4.3's call, which
+    a {!Job} always is, its lines going to [on_line]. *)
 val call :
-  ?bulk:bool -> ?timeout:float -> ?domain:string -> string -> 'a request -> 'a
+  ?bulk:bool ->
+  ?timeout:float ->
+  ?domain:string ->
+  ?on_line:(line -> unit) ->
+  string ->
+  'a request ->
+  'a

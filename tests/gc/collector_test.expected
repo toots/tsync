@@ -1,6 +1,7 @@
 == dry run (§5.9)
 referenced 5, reclaimable 2 (10 bytes), missing 0, corrupt 0, per copy replica 2
 dry run changed nothing on the main: true
+a cancelled dry run: cancelled
 
 == a collection (§5.5)
 run: completed; promoted 5, reclaimed 2 (10 bytes)
@@ -46,6 +47,7 @@ generation settled: true
   run open false, outgoing space false, G 6
 
 == abort puts back everything still outgoing
+  a run cancelled at once stops like a spent budget
 run: suspended in marking at "m/.tsync-root"; promoted 4, reclaimed 0 (0 bytes)
 junk5 outgoing: true
 run: completed; promoted 0, reclaimed 0 (0 bytes)

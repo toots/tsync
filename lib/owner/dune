@@ -11,4 +11,8 @@
   unix
   threads.posix
   tsync_status
-  yojson))
+  tsync_gc
+  tsync_remote
+  yojson)
+ (preprocess
+  (pps ppx_deriving_yojson)))

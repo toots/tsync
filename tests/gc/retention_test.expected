@@ -2,6 +2,7 @@
 never trashed: not in trash
 anchored live: live elsewhere
 trashed: would purge 4 objects
+trashed, cancelled: stopped: cancelled
 
 == expire, dry run (cutoff 10 days ago)
 trash 7, versions 2, journal 1, shares 4
@@ -22,6 +23,10 @@ trash 7, versions 2, journal 1, shares 4
   skipped, trashed recently: <recent>
   unparseable share left: tsync/shares/aa04
 dry run changed nothing: true
+
+== expire, cancelled before it starts
+trash 0, versions 0, journal 0, shares 0
+cancelled: true
 
 == expire, applied
 trash 7, versions 2, journal 1, shares 4

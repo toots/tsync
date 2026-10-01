@@ -237,6 +237,9 @@ watched with the liveness probe ([07 §4.3](07-daemon-cli.md#43-deadlines-bulk-a
 | `restore` | `ref`\|`rel`, `keep?` (seconds) | `{restored, failed}` | B for a folder |
 | `full_resync` | — | `{}` after stamping a new generation and calling `reannounce` | |
 | `sync` | `arg`: `"full"` or `""` | the resync result ([05 §4.7](05-ops-config.md)) | B, P |
+| `trash_restore` | `path`: a trashed folder as its trash entry records it | `{outcome:"restored", announced}`, `{outcome:"not_in_trash"}` or `{outcome:"name_taken"}` | B, P |
+| `job` | `job`: the owner job and its arguments; `narrate?` | streamed lines, then `{exit}`: the command's exit status ([07 §2.5](07-daemon-cli.md#25-one-shot-commands)) | B, P |
+| `cancel` | `job`: the id a `job` streamed | `{cancelled}`: whether that job was running; it stops at its next unit boundary | |
 | `prune` | `arg` = grace seconds | per task files and bytes | B |
 | `retry` | — | `{readopted}`: every parked record of the domain's logs re-adopted now | |
 | `set_aside` | `arg`: `""` lists; else a comma set of names, or `*` | `{items:[{name, kind, size, mtime}]}` or `{removed}` | |
@@ -250,6 +253,10 @@ watched with the liveness probe ([07 §4.3](07-daemon-cli.md#43-deadlines-bulk-a
 | `subscribe` | `domain` (required), `tempDir?` | `{}`, then the connection is an event stream (§3.8) | |
 
 - `status` is cheap: no store access, no walk (menus poll it).
+- `job` streams lines before its reply, each an object with a `stream` field: `{stream:"started",
+  job}` first, then `{stream:"out", text}` for each line of the command's output and, with
+  `narrate`, `{stream:"narrate", text}`. A job that would conflict with a running one answers
+  `busy` naming it. A client that closes its connection does not stop the job.
 - `exclusive` (on `create`, `write`, `mkdir`, `symlink`) and `noreplace` (on `rename`): an existing
   destination answers `exists` and nothing changes; the check and the change are one step.
 - `write` with `base` (a `contentId` the client read) declares the content the edit started from; the

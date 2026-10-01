@@ -21,6 +21,11 @@ sync              request reads back, reply reads back
 trash_restore     request reads back, reply reads back
 trash_restore     request reads back, reply reads back
 trash_restore     request reads back, reply reads back
+job               request reads back, reply reads back
+job               request reads back, reply reads back
+job               request reads back, reply reads back
+cancel            request reads back, reply reads back
+cancel            request reads back, reply reads back
 retry             request reads back, reply reads back
 poll              request reads back, reply reads back
 notify_reset      request reads back, reply reads back

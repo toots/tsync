@@ -60,22 +60,12 @@ val one_shot :
   (Handler.t -> 'a) ->
   'a
 
-(** A store-class command (07 §2.5): beside a serving owner, [f] gets a
-    non-owner build of the domain whose copy jobs are submitted to the owner,
-    poked when [f] returns; with no owner, the command owns the domain for [f]'s
-    duration and drains before releasing it. PAUSED while the domain is paused.
-*)
-val store_command :
-  what:string ->
-  Tsync_config.Config.t ->
-  Tsync_config.Config.domain ->
-  (Tsync_domain.Domain.t -> 'a) ->
-  'a
-
 (** An owner-class request (07 §2.5): sent to the domain's owner, else answered
-    by {!one_shot}. *)
+    by {!one_shot}. A job's lines go to [on_line] from an owner; in-process they
+    are this process's output. *)
 val request :
   ?bulk:bool ->
+  ?on_line:(Protocol.line -> unit) ->
   what:string ->
   Tsync_config.Config.t ->
   Tsync_config.Config.domain ->

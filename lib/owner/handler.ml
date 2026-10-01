@@ -19,6 +19,8 @@ let no_hooks =
     frontend = (fun () -> None);
   }
 
+type running = { id : int; kind : string; cancelled : bool Atomic.t }
+
 type t = {
   domain : Tsync_domain.Domain.t;
   engine : (module Engine.S);
@@ -29,11 +31,13 @@ type t = {
   dest_roots : string list Atomic.t;
   staging_roots : string list;
   answered_unreachable : bool Atomic.t;
+  running : running option Atomic.t;
 }
 
 let default_pin_keep = 10. *. 86400.
 let page_limit = 1000
 let event_ids = Atomic.make 0
+let job_ids = Atomic.make 0
 
 let create ~domain ~engine ~hooks ~publish ~stats ~stop ~dest_roots
     ~staging_roots =
@@ -47,6 +51,7 @@ let create ~domain ~engine ~hooks ~publish ~stats ~stop ~dest_roots
     dest_roots = Atomic.make dest_roots;
     staging_roots;
     answered_unreachable = Atomic.make false;
+    running = Atomic.make None;
   }
 
 let domain_name t = Domain_name.to_string t.domain.name
@@ -241,10 +246,51 @@ let list_dir t dir ~after ~limit : Protocol.page =
 
 let publish_event t ev = t.publish (event t (Protocol.event_name ev) [])
 
+let print_line = function
+  | Protocol.Started _ -> ()
+  | Out s -> Printf.printf "%s\n%!" s
+  | Narration s -> Narrate.stderr s
+
+(* 07 §2.5. ponytail: one job per domain at a time, so jobs that would not
+   conflict wait too; a conflict table if that ever matters. *)
+let run_job t ~send ~narrate job =
+  let me =
+    {
+      id = Atomic.fetch_and_add job_ids 1 + 1;
+      kind = Jobs.kind job;
+      cancelled = Atomic.make false;
+    }
+  in
+  if not (Atomic.compare_and_set t.running None (Some me)) then
+    Fail.raise_ Fail.Load "busy: %s is running on %s"
+      (match Atomic.get t.running with
+        | Some j -> Printf.sprintf "tsync %s (job %d)" j.kind j.id
+        | None -> "another job")
+      (domain_name t);
+  Fun.protect
+    ~finally:(fun () -> Atomic.set t.running None)
+    (fun () ->
+      send (Protocol.Started me.id);
+      Jobs.run
+        {
+          out = (fun s -> send (Out s));
+          narrate =
+            (if narrate then fun s -> send (Narration s) else Narrate.none);
+          cancelled = (fun () -> Atomic.get me.cancelled || Stop.requested ());
+        }
+        t.domain job)
+
+let cancel t id =
+  match Atomic.get t.running with
+    | Some j when j.id = id ->
+        Atomic.set j.cancelled true;
+        true
+    | _ -> false
+
 (* 08 §3.3, one request; [ref] names the surface to update after evict and
    restore. *)
-let act : type a. t -> a Protocol.request -> a =
- fun t req ->
+let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
+ fun t ~send req ->
   let (module E : Engine.S) = t.engine in
   let mutate f = E.atomically f in
   let surface = function Protocol.Ref r -> r | Rel _ -> "root" in
@@ -272,6 +318,8 @@ let act : type a. t -> a Protocol.request -> a =
           | `Restored n -> Protocol.Restored n
           | `Not_in_trash -> Not_in_trash
           | `Exists -> Name_taken)
+    | Job r -> run_job t ~send ~narrate:r.narrate r.job
+    | Cancel id -> cancel t id
     | Notify_reset -> publish_event t Reset
     | Full_resync ->
         E.stamp_generation ();
@@ -370,17 +418,30 @@ let bounded f =
   with Rt.Timeout -> Fail.raise_ Fail.Deadline "still in progress; retry"
 
 (* 08 §3.5: the rules every request meets before it acts. *)
-let call : type a. t -> a Protocol.request -> a =
- fun t req ->
+let call_with : type a.
+    t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
+ fun t ~send req ->
   let (module E : Engine.S) = t.engine in
   if Protocol.mutates req && t.domain.domain.read_only then
     Fail.raise_ Fail.Read_only "%s is read-only" (domain_name t);
   if Protocol.refused_while_paused req && E.is_paused () then
     Fail.raise_ Fail.Paused "%s is paused" (domain_name t);
   match req with
-    | Ping | Stop -> act t req
-    | _ when Protocol.bulk req -> act t req
-    | _ -> bounded (fun () -> act t req)
+    | Ping | Stop -> act t ~send req
+    | _ when Protocol.bulk req -> act t ~send req
+    | _ -> bounded (fun () -> act t ~send req)
+
+let call t req = call_with t ~send:print_line req
+
+(* 08 §3.8: a bulk success after an [unreachable] answer tells subscribers
+   the domain recovered. *)
+let note_reachability t ~bulk reply =
+  match Ipc.field reply "code" with
+    | Some "unreachable" -> Atomic.set t.answered_unreachable true
+    | Some _ -> ()
+    | None ->
+        if bulk && Atomic.exchange t.answered_unreachable false then
+          ignore (publish_event t Recovered)
 
 let answer t json =
   match Ipc.field json "action" with
@@ -389,20 +450,24 @@ let answer t json =
           (fun d -> Atomic.set t.dest_roots (d :: Atomic.get t.dest_roots))
           (Ipc.field json "tempDir");
         Ipc.Subscribe (domain_name t, Ipc.ok [], [event t "recovered" []])
-    | _ ->
-        let reply, bulk =
-          match Protocol.decode json with
-            | Request req -> (
+    | _ -> (
+        match Protocol.decode json with
+          | Request (Job _ as req) ->
+              Ipc.Stream
+                (fun send ->
+                  match
+                    call_with t
+                      ~send:(fun l -> send (Protocol.line_to_json l))
+                      req
+                  with
+                    | r -> Protocol.encode_reply req r
+                    | exception e -> Ipc.failure (Fail.classify e))
+          | Request req ->
+              let reply =
                 match call t req with
-                  | r -> (Protocol.encode_reply req r, Protocol.bulk req)
-                  | exception e ->
-                      (Ipc.failure (Fail.classify e), Protocol.bulk req))
-            | exception e -> (Ipc.failure (Fail.classify e), false)
-        in
-        (match Ipc.field reply "code" with
-          | Some "unreachable" -> Atomic.set t.answered_unreachable true
-          | Some _ -> ()
-          | None ->
-              if bulk && Atomic.exchange t.answered_unreachable false then
-                ignore (publish_event t Recovered));
-        Ipc.Reply reply
+                  | r -> Protocol.encode_reply req r
+                  | exception e -> Ipc.failure (Fail.classify e)
+              in
+              note_reachability t ~bulk:(Protocol.bulk req) reply;
+              Ipc.Reply reply
+          | exception e -> Ipc.Reply (Ipc.failure (Fail.classify e)))

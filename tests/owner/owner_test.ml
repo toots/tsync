@@ -223,6 +223,62 @@ let () =
       show "first event" (Option.get (Ipc.Client.next ~timeout:2. c));
       show "notify_reset" (ask [("action", "notify_reset")]);
       show "next event" (Option.get (Ipc.Client.next ~timeout:2. c));
+      p "== jobs";
+      let job ?(narrate = false) j =
+        `Assoc
+          [
+            ("action", `String "job");
+            ("domain", `String "docs");
+            ("job", Jobs.to_yojson j);
+            ("narrate", `Bool narrate);
+          ]
+      and cancel id =
+        Ipc.call socket
+          (`Assoc
+             [
+               ("action", `String "cancel");
+               ("domain", `String "docs");
+               ("job", `Int id);
+             ])
+      and gc ?(apply = false) ?(abort = false) () =
+        Jobs.Gc { apply; verify = false; abort; budget = None }
+      in
+      let narrated = ref 0 in
+      let line l =
+        match Ipc.field l "stream" with
+          | Some "narrate" -> incr narrated
+          | _ -> show "  line" l
+      in
+      show "gc dry run, narrated"
+        (Ipc.call_stream socket (job ~narrate:true (gc ())) ~on_line:line);
+      p "  narration streamed: %b" (!narrated > 0);
+      let spaces =
+        Tsync_store.Chunk_spaces.create (Filename.concat root "store")
+      in
+      let c = Ipc.Client.connect socket in
+      let id =
+        Tsync_store.Chunk_spaces.with_publish_lock spaces (Domain_name.v "docs")
+          ~exclusive:false (fun () ->
+            let started = Ipc.Client.request c (job (gc ~apply:true ())) in
+            show "gc --apply, held at opening" started;
+            show "expire meanwhile"
+              (Ipc.call socket (job (Expire { apply = false; cutoff = 0. })));
+            let id = Yojson.Safe.Util.(to_int (member "job" started)) in
+            show "cancel it" (cancel id);
+            id)
+      in
+      let rec rest () =
+        match Ipc.Client.next ~timeout:60. c with
+          | Some l ->
+              line l;
+              if Ipc.field l "stream" <> None then rest ()
+          | None -> ()
+      in
+      rest ();
+      Ipc.Client.close c;
+      show "cancel once it ended" (cancel id);
+      show "gc --abort"
+        (Ipc.call_stream socket (job (gc ~abort:true ())) ~on_line:line);
       p "== stop";
       show "stop" (ask [("action", "stop")]);
       p "exit status %d" (Rt.Promise.await owner);

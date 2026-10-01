@@ -177,19 +177,25 @@ let () =
           r.unparseable_shares
       in
       p "== purge on demand\n";
-      let purge path =
-        match R.purge path with
+      let purge ?cancelled path =
+        match R.purge ?cancelled path with
           | Purged n -> Printf.sprintf "would purge %d objects" n
           | Not_in_trash -> "not in trash"
           | Live_elsewhere -> "live elsewhere"
+          | Stopped reason -> "stopped: " ^ reason
       in
       p "never trashed: %s\n" (purge "nowhere");
       p "anchored live: %s\n" (purge "live");
       p "trashed: %s\n" (purge "trashed");
+      p "trashed, cancelled: %s\n" (purge ~cancelled:(Fun.const true) "trashed");
       p "\n== expire, dry run (cutoff 10 days ago)\n";
       let before = listing () in
       show (R.expire ~now ~cutoff ());
       p "dry run changed nothing: %b\n" (listing () = before);
+      p "\n== expire, cancelled before it starts\n";
+      let r = R.expire ~cancelled:(Fun.const true) ~now ~cutoff () in
+      show r;
+      p "cancelled: %b\n" r.cancelled;
       p "\n== expire, applied\n";
       show (R.expire ~apply:true ~now ~cutoff ());
       let dir rel =

@@ -77,6 +77,8 @@ type _ request =
   | Full_resync : unit request
   | Sync : { full : bool } -> resynced request
   | Trash_restore : string -> trash_restored request
+  | Job : { job : Jobs.t; narrate : bool } -> int request
+  | Cancel : int -> bool request
   | Retry : int request
   | Poll : unit request
   | Notify_reset : int request
@@ -107,6 +109,8 @@ let action : type a. a request -> string = function
   | Full_resync -> "full_resync"
   | Sync _ -> "sync"
   | Trash_restore _ -> "trash_restore"
+  | Job _ -> "job"
+  | Cancel _ -> "cancel"
   | Retry -> "retry"
   | Poll -> "poll"
   | Notify_reset -> "notify_reset"
@@ -122,12 +126,12 @@ let mutates : type a. a request -> bool = function
 
 let bulk : type a. a request -> bool = function
   | Ensure_cached _ | Fetch_range _ | Evict _ | Restore _ | Sync _
-  | Trash_restore _ ->
+  | Trash_restore _ | Job _ ->
       true
   | _ -> false
 
 let refused_while_paused : type a. a request -> bool = function
-  | Sync _ | Trash_restore _ -> true
+  | Sync _ | Trash_restore _ | Job _ -> true
   | _ -> false
 
 type event = Recovered | Reset
@@ -216,6 +220,8 @@ let request_fields : type a. a request -> (string * Yojson.Safe.t) list =
   | Restore r -> target_fields r.item @ opt "keep" (fun k -> `Float k) r.keep
   | Sync r -> [("arg", `String (if r.full then "full" else ""))]
   | Trash_restore path -> [("path", `String path)]
+  | Job r -> [("job", Jobs.to_yojson r.job); ("narrate", `Bool r.narrate)]
+  | Cancel id -> [("job", `Int id)]
   | Pause on -> [("arg", `String (if on then "on" else "off"))]
   | Stats args -> [("arg", `String (String.concat "," args))]
 
@@ -287,6 +293,15 @@ let decode j =
         match str j "path" with
           | Some p -> Request (Trash_restore p)
           | None -> Fail.invalid "trash_restore needs a path")
+    | "job" -> (
+        match Option.map Jobs.of_yojson (member j "job") with
+          | Some (Ok job) -> Request (Job { job; narrate = flag j "narrate" })
+          | Some (Error e) -> Fail.invalid "unreadable job: %s" e
+          | None -> Fail.invalid "job needs a job")
+    | "cancel" -> (
+        match int j "job" with
+          | Some id -> Request (Cancel id)
+          | None -> Fail.invalid "cancel needs a job")
     | "retry" -> Request Retry
     | "poll" -> Request Poll
     | "notify_reset" -> Request Notify_reset
@@ -417,6 +432,8 @@ let encode_reply : type a. a request -> a -> Yojson.Safe.t =
                   ("manifests", `Int f.manifests);
                   ("failed", `Int f.failed);
                 ])
+    | Job _ -> ok [("exit", `Int reply)]
+    | Cancel _ -> ok [("cancelled", `Bool reply)]
     | Retry -> ok [("readopted", `Int reply)]
     | Notify_reset -> ok [("delivered", `Int reply)]
     | Status ->
@@ -513,6 +530,8 @@ let decode_reply : type a. a request -> Yojson.Safe.t -> a =
         if str j "mode" = Some "full" then
           Full { manifests = count "manifests" j; failed = count "failed" j }
         else Incremental (count "applied" j)
+    | Job _ -> count "exit" j
+    | Cancel _ -> flag j "cancelled"
     | Retry -> count "readopted" j
     | Notify_reset -> count "delivered" j
     | Status ->
@@ -529,8 +548,34 @@ let decode_reply : type a. a request -> Yojson.Safe.t -> a =
           | Ok a -> a
           | Error e -> Fail.invalid "unreadable stats: %s" e)
 
-let call ?(bulk = false) ?timeout ?domain socket req =
+type line = Started of int | Out of string | Narration of string
+
+let line_to_json = function
+  | Started id -> `Assoc [("stream", `String "started"); ("job", `Int id)]
+  | Out s -> `Assoc [("stream", `String "out"); ("text", `String s)]
+  | Narration s -> `Assoc [("stream", `String "narrate"); ("text", `String s)]
+
+let line_of_json j =
+  match (str j "stream", str j "text", int j "job") with
+    | Some "started", _, Some id -> Some (Started id)
+    | Some "out", Some s, _ -> Some (Out s)
+    | Some "narrate", Some s, _ -> Some (Narration s)
+    | _ -> None
+
+let call : type a.
+    ?bulk:bool ->
+    ?timeout:float ->
+    ?domain:string ->
+    ?on_line:(line -> unit) ->
+    string ->
+    a request ->
+    a =
+ fun ?(bulk = false) ?timeout ?domain ?(on_line = ignore) socket req ->
   let json = encode ?domain req in
   decode_reply req
-    (if bulk then Tsync_ipc.Ipc.call_bulk socket json
-     else Tsync_ipc.Ipc.call ?timeout socket json)
+    (match req with
+      | Job _ ->
+          Tsync_ipc.Ipc.call_stream socket json ~on_line:(fun j ->
+              Option.iter on_line (line_of_json j))
+      | _ when bulk -> Tsync_ipc.Ipc.call_bulk socket json
+      | _ -> Tsync_ipc.Ipc.call ?timeout socket json)

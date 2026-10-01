@@ -35,7 +35,12 @@ val create :
     process (08 §3.8); how many received it. *)
 val publish_event : t -> Protocol.event -> int
 
-(** In-process: the rules of 08 §3.5, then the request; a failure raises. *)
+(** Where a job's lines go in this process: output to stdout, narration to
+    stderr (07 §5.1). *)
+val print_line : Protocol.line -> unit
+
+(** In-process: the rules of 08 §3.5, then the request; a failure raises. A
+    job's output goes to this process's stdout, its narration to stderr. *)
 val call : t -> 'a Protocol.request -> 'a
 
 (** The socket edge: decodes a request, answers it, and encodes the reply or the

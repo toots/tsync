@@ -73,6 +73,30 @@ let cases =
     Case (Trash_restore "Holidays/2019", Restored 42);
     Case (Trash_restore "nowhere", Not_in_trash);
     Case (Trash_restore "Holidays/2019", Name_taken);
+    Case
+      ( Job
+          {
+            job =
+              Gc
+                {
+                  apply = true;
+                  verify = false;
+                  abort = false;
+                  budget = Some 60.;
+                };
+            narrate = true;
+          },
+        0 );
+    Case
+      ( Job
+          {
+            job = Purge { apply = false; path = "Holidays/2019" };
+            narrate = false;
+          },
+        1 );
+    Case (Job { job = Gc_copies Probe; narrate = false }, 0);
+    Case (Cancel 3, true);
+    Case (Cancel 4, false);
     Case (Retry, 4);
     Case (Poll, ());
     Case (Notify_reset, 2);

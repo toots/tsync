@@ -18,9 +18,12 @@ type report = {
   skipped_recent : Folder_id.t list;  (** trashed again after the cutoff *)
   stopped : (Folder_id.t * string) list;  (** purges a restore interrupted *)
   unparseable_shares : Key.t list;  (** left in place *)
+  cancelled : bool;  (** what was left when it was cancelled is not counted *)
 }
 
-type purge = Purged of int | Not_in_trash | Live_elsewhere
+(** [Stopped] a purge that was cancelled or met a restore partway, leaving the
+    rest in the trash. *)
+type purge = Purged of int | Not_in_trash | Live_elsewhere | Stopped of string
 
 module Make (_ : Tsync_remote.Context.S) : sig
   (** Trash, versions, journal, shares, in that order, against [cutoff] (seconds
@@ -29,6 +32,7 @@ module Make (_ : Tsync_remote.Context.S) : sig
   val expire :
     ?narrate:Narrate.t ->
     ?apply:bool ->
+    ?cancelled:(unit -> bool) ->
     ?now:float ->
     cutoff:float ->
     unit ->
@@ -36,5 +40,10 @@ module Make (_ : Tsync_remote.Context.S) : sig
 
   (** Purge the trashed folder whose trash entry records [path], whatever its
       age; a folder anchored live is refused. *)
-  val purge : ?narrate:Narrate.t -> ?apply:bool -> string -> purge
+  val purge :
+    ?narrate:Narrate.t ->
+    ?apply:bool ->
+    ?cancelled:(unit -> bool) ->
+    string ->
+    purge
 end

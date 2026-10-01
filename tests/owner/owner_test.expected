@@ -33,6 +33,20 @@ subscribe                          {"ok":true}
 first event                        {"event":"recovered","domain":"docs","id":3}
 notify_reset                       {"ok":true,"delivered":1}
 next event                         {"event":"reset","domain":"docs","id":4}
+== jobs
+  line                             {"stream":"started","job":1}
+  line                             {"stream":"out","text":"main: 0 chunks referenced, 0 reclaimable (0 B) (dry run: nothing changed; --apply to act)"}
+gc dry run, narrated               {"ok":true,"exit":0}
+  narration streamed: true
+gc --apply, held at opening        {"stream":"started","job":2}
+expire meanwhile                   {"ok":false,"code":"busy","error":"busy: tsync gc --apply (job 2) is running on docs"}
+cancel it                          {"ok":true,"cancelled":true}
+  line                             {"stream":"out","text":"main: completed; 0 namespaces marked, 0 chunks promoted, 0 reclaimed (0 B)"}
+  line                             {"ok":true,"exit":0}
+cancel once it ended               {"ok":true,"cancelled":false}
+  line                             {"stream":"started","job":4}
+  line                             {"stream":"out","text":"main: completed; 0 namespaces marked, 0 chunks promoted, 0 reclaimed (0 B)"}
+gc --abort                         {"ok":true,"exit":0}
 == stop
 stop                               {"ok":true}
 exit status 0

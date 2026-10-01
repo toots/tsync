@@ -313,11 +313,14 @@ let say_start nr m (r0 : Gc_record.read) (plan : Gc_plan.start) =
         Narrate.say nr "%s: opening a collection run on %s" m.member.name m.root
 
 (* One session on one main, under its run lock (§5.5). *)
-let session ?budget ?pause ~narrate:nr ~verify ~keep composite d m =
+let session ?budget ?pause ~narrate:nr ~verify ~keep ~cancelled composite d m =
   let n = counters () in
   let t0 = Rt.now () in
   let deadline = Option.map (fun b -> Rt.now () +. b) budget in
-  let over () = match deadline with Some t -> Rt.now () > t | None -> false in
+  let over () =
+    cancelled ()
+    || match deadline with Some t -> Rt.now () > t | None -> false
+  in
   let between () =
     Stop.check ();
     Option.iter Rt.sleep pause
@@ -542,9 +545,11 @@ let session ?budget ?pause ~narrate:nr ~verify ~keep composite d m =
   (match outcome with
     | Suspended { phase; cursor } ->
         Narrate.say nr
-          "%s: the budget ran out; the run stays open in %s after %S, and the \
-           next run continues from there"
-          m.member.name (phase_words phase) cursor
+          "%s: %s; the run stays open in %s after %S, and the next run \
+           continues from there"
+          m.member.name
+          (if cancelled () then "cancelled" else "the budget ran out")
+          (phase_words phase) cursor
     | Halted reason ->
         Narrate.say nr
           "%s: stopped, leaving the run open and nothing discarded: %s"
@@ -620,7 +625,7 @@ let direct_deletes_refused composite =
     | [] -> []
 
 let run ?budget ?pause ?(narrate = Narrate.none) ?(verify = false)
-    ?(keep = false) composite =
+    ?(keep = false) ?(cancelled = Fun.const false) composite =
   let d = Composite.domain composite in
   match direct_deletes_refused composite with
     | _ :: _ as copies when not keep ->
@@ -633,102 +638,110 @@ let run ?budget ?pause ?(narrate = Narrate.none) ?(verify = false)
                    (List.map (fun (c : Composite.member) -> c.name) copies))))
     | _ ->
         each composite
-          (session ?budget ?pause ~narrate ~verify ~keep composite d)
+          (session ?budget ?pause ~narrate ~verify ~keep ~cancelled composite d)
 
 (* §5.9 on a main of millions of chunks: one table of referenced chunks, each
    flagged once a shard listing shows it, and the chunk area read one shard at
    a time. *)
-let survey_one ~narrate:nr ~verify d m =
-  let referenced : (Chunk_key.t, bool) Hashtbl.t = Hashtbl.create 65536 in
-  let corrupt = ref 0 in
-  let run, run_unreadable =
-    match Gc_record.read m.member.store d with
-      | Record r -> (Some (r.phase, r.cursor), false)
-      | Unreadable -> (None, true)
-      | Absent -> (None, false)
-  in
-  let t0 = Rt.now () in
-  match
-    let namespaces = enumerate m d ~after:"" in
-    let total = List.length namespaces in
-    Narrate.say nr "%s: reading the manifests of %s on %s" m.member.name
-      (describe_namespaces namespaces)
-      m.root;
-    let periodic = Narrate.periodic nr in
-    List.iteri
-      (fun i ns ->
-        List.iter
-          (fun c -> Hashtbl.replace referenced c false)
-          (namespace_references m d ns);
-        periodic (fun () ->
-            Printf.sprintf
-              "  read %d of %d folders and version folders; %d chunks \
-               referenced"
-              (i + 1) total
-              (Hashtbl.length referenced)))
-      namespaces
-  with
-    | exception Halt reason -> Error reason
-    | () ->
-        let reclaimable = ref 0 and bytes = ref 0 in
-        Narrate.say nr
-          "  %s referenced; listing the chunk area shard by shard%s"
-          (Narrate.count (Hashtbl.length referenced) "chunk")
-          (if verify then " and re-hashing every referenced chunk" else "");
-        let periodic = Narrate.periodic nr in
-        List.iteri
-          (fun i shard ->
-            periodic (fun () ->
-                Printf.sprintf
-                  "  listed %d of 4096 shards; %d chunks reclaimable so far \
-                   (%s)"
-                  i !reclaimable (Narrate.size !bytes));
-            let listing =
-              m.member.store.list_prefix (Key.shard_prefix d shard)
-            in
-            let s =
-              Gc_plan.unreferenced ~referenced:(Hashtbl.mem referenced) listing
-            in
-            reclaimable := !reclaimable + s.reclaimable;
-            bytes := !bytes + s.bytes;
-            List.iter
-              (fun (e : Store.entry) ->
-                match Key.chunk_of e.key with
-                  | Some c when Hashtbl.mem referenced c ->
-                      Hashtbl.replace referenced c true;
-                      if verify then (
-                        match m.member.store.get_opt e.key with
-                          | Some b
-                            when Chunk_key.equal (Chunk_key.of_bigstring b) c ->
-                              ()
-                          | _ -> incr corrupt)
-                  | _ -> ())
-              listing)
-          (List.init 4096 (Printf.sprintf "%03x"));
-        Narrate.say nr "  survey done in %s"
-          (Narrate.duration (Rt.now () -. t0));
-        let missing =
-          Hashtbl.fold
-            (fun c seen acc -> if seen then acc else c :: acc)
-            referenced []
-          |> List.sort Chunk_key.compare
-        in
-        Ok
-          {
-            surveyed = m.member.name;
-            run;
-            run_unreadable;
-            chunks_referenced = Hashtbl.length referenced;
-            chunks_reclaimable = !reclaimable;
-            bytes_reclaimable = !bytes;
-            chunks_missing = missing;
-            per_copy =
-              List.map
-                (fun (c : Composite.member) -> (c.name, !reclaimable))
-                m.tells;
-            chunks_corrupt = !corrupt;
-          }
+let survey_one ~narrate:nr ~verify ~cancelled d m =
+  let check () = if cancelled () then raise (Halt "cancelled") in
+  try
+    let referenced : (Chunk_key.t, bool) Hashtbl.t = Hashtbl.create 65536 in
+    let corrupt = ref 0 in
+    let run, run_unreadable =
+      match Gc_record.read m.member.store d with
+        | Record r -> (Some (r.phase, r.cursor), false)
+        | Unreadable -> (None, true)
+        | Absent -> (None, false)
+    in
+    let t0 = Rt.now () in
+    match
+      let namespaces = enumerate m d ~after:"" in
+      let total = List.length namespaces in
+      Narrate.say nr "%s: reading the manifests of %s on %s" m.member.name
+        (describe_namespaces namespaces)
+        m.root;
+      let periodic = Narrate.periodic nr in
+      List.iteri
+        (fun i ns ->
+          check ();
+          List.iter
+            (fun c -> Hashtbl.replace referenced c false)
+            (namespace_references m d ns);
+          periodic (fun () ->
+              Printf.sprintf
+                "  read %d of %d folders and version folders; %d chunks \
+                 referenced"
+                (i + 1) total
+                (Hashtbl.length referenced)))
+        namespaces
+    with
+      | exception Halt reason -> Error reason
+      | () ->
+          let reclaimable = ref 0 and bytes = ref 0 in
+          Narrate.say nr
+            "  %s referenced; listing the chunk area shard by shard%s"
+            (Narrate.count (Hashtbl.length referenced) "chunk")
+            (if verify then " and re-hashing every referenced chunk" else "");
+          let periodic = Narrate.periodic nr in
+          List.iteri
+            (fun i shard ->
+              check ();
+              periodic (fun () ->
+                  Printf.sprintf
+                    "  listed %d of 4096 shards; %d chunks reclaimable so far \
+                     (%s)"
+                    i !reclaimable (Narrate.size !bytes));
+              let listing =
+                m.member.store.list_prefix (Key.shard_prefix d shard)
+              in
+              let s =
+                Gc_plan.unreferenced ~referenced:(Hashtbl.mem referenced)
+                  listing
+              in
+              reclaimable := !reclaimable + s.reclaimable;
+              bytes := !bytes + s.bytes;
+              List.iter
+                (fun (e : Store.entry) ->
+                  match Key.chunk_of e.key with
+                    | Some c when Hashtbl.mem referenced c ->
+                        Hashtbl.replace referenced c true;
+                        if verify then (
+                          match m.member.store.get_opt e.key with
+                            | Some b
+                              when Chunk_key.equal (Chunk_key.of_bigstring b) c
+                              ->
+                                ()
+                            | _ -> incr corrupt)
+                    | _ -> ())
+                listing)
+            (List.init 4096 (Printf.sprintf "%03x"));
+          Narrate.say nr "  survey done in %s"
+            (Narrate.duration (Rt.now () -. t0));
+          let missing =
+            Hashtbl.fold
+              (fun c seen acc -> if seen then acc else c :: acc)
+              referenced []
+            |> List.sort Chunk_key.compare
+          in
+          Ok
+            {
+              surveyed = m.member.name;
+              run;
+              run_unreadable;
+              chunks_referenced = Hashtbl.length referenced;
+              chunks_reclaimable = !reclaimable;
+              bytes_reclaimable = !bytes;
+              chunks_missing = missing;
+              per_copy =
+                List.map
+                  (fun (c : Composite.member) -> (c.name, !reclaimable))
+                  m.tells;
+              chunks_corrupt = !corrupt;
+            }
+  with Halt reason -> Error reason
 
-let dry_run ?(narrate = Narrate.none) ?(verify = false) composite =
+let dry_run ?(narrate = Narrate.none) ?(verify = false)
+    ?(cancelled = Fun.const false) composite =
   let d = Composite.domain composite in
-  each composite (survey_one ~narrate ~verify d)
+  each composite (survey_one ~narrate ~verify ~cancelled d)
