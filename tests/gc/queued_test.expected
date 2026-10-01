@@ -19,5 +19,9 @@ collect: completed, 1 reclaimed
 consumed as written; generation settled: true (6)
 restored on bucket: true
 
+== a request written slower than the discard poll
+collect: completed, 1 reclaimed
+generation settled: true; slow on bucket once it settled: false
+
 == two batches of one shard make one request
 outstanding: [abc 2 keys]

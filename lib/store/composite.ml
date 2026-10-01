@@ -451,20 +451,19 @@ let run_job_body t src c r =
         let ks = List.filter (fun k -> not (main_holds src k)) cd.keys in
         Copy_memo.forget c.memo (List.filter_map Key.chunk_of ks);
         if queued c then (
-          if ks <> [] then (
-            let p =
-              Discards.add c.discards
-                {
-                  run = cd.run;
-                  shard = cd.shard;
-                  generation = cd.generation;
-                  keys = List.map Key.to_string ks;
-                }
-            in
-            without_forwards c (fun () ->
-                c.member.store.put
-                  (Discards.request_key t.domain p)
-                  (Discards.body p.keys))))
+          if ks <> [] then
+            Discards.add c.discards
+              {
+                run = cd.run;
+                shard = cd.shard;
+                generation = cd.generation;
+                keys = List.map Key.to_string ks;
+              }
+              ~write:(fun p ->
+                without_forwards c (fun () ->
+                    c.member.store.put
+                      (Discards.request_key t.domain p)
+                      (Discards.body p.keys))))
         else (
           let markers = List.filter_map Key.marker_of ks in
           without_forwards c (fun () ->

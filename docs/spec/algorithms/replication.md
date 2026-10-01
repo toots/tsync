@@ -310,8 +310,8 @@ run(CollectionDelete(ks, r, s, g)) at copy C:
   C.ensured -= ks                                            -- before the deletion is issued
   wait for C's in-flight forwards; skip new ones meanwhile   -- none lands after the deletion
   if C has a confirmed bucket function (06 §3.8):              -- MUST be used when it has one
-      add {r, s, g, ks} to C's pending discards, durably
       write the discard request for (r, s) naming ks         -- supersedes an older one of that name
+      add {r, s, g, ks} to C's pending discards, durably     -- only once the request exists
   else:
       delete ks and their corruption markers                  -- absent keys count as deleted
       restore(C, s, ks)                                      -- settled
@@ -335,6 +335,7 @@ when no collection-delete record and no pending discard of generation g remains 
 - **At start** the owner resumes every unsettled collection-delete record and pending discard, settles them, and then makes G even.
 - **A request never consumed** leaves G odd: copy memos go unused for the domain, which costs listings and puts, never safety. Re-delivery ([gc §5.7](gc.md#57-deletion-on-copies)) rewrites it with only the keys still absent from the main.
 - A collection-delete record completes only after its direct deletion and restore, or once its discard is recorded pending; a pending discard is removed only after its restore.
+- **Written before pending.** A pending discard is recorded only once its request is on the copy, so a poll that finds the request gone knows it was consumed, never not yet written. A crash in between leaves the collection-delete record owed, and its rerun writes the request again.
 - Failures follow the queue discipline of §4.3.
 
 ### 4.9 Write guard

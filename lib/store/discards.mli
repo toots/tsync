@@ -28,9 +28,10 @@ val record_confirmation : t -> at:float -> unit
 (** Each pending request with its record id. *)
 val pending : t -> (string * pending) list
 
-(** Records [p] durably, merged into a pending request of the same run and
-    shard, and answers the request to write. *)
-val add : t -> pending -> pending
+(** Merges [p] into a pending request of the same run and shard, has [write] put
+    that request on the copy, then records it durably: a pending request whose
+    key is absent was consumed, never not yet written. *)
+val add : t -> pending -> write:(pending -> unit) -> unit
 
 (** The request was consumed and its restore check done. *)
 val remove : t -> string -> unit

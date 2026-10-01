@@ -36,7 +36,8 @@ let consume (inner : Store.t) request =
         inner.delete_multi (keys @ List.filter_map Key.marker_of keys);
         ignore (inner.delete request)
 
-let bucket ~function_on (inner : Store.t) =
+(* [slow_requests] delays each request write past a discard poll. *)
+let bucket ~function_on ~slow_requests (inner : Store.t) =
   let notify key =
     if Atomic.get function_on && Key.parse_discard_job key <> None then
       Rt.spawn ~name:"bucket function" (fun () ->
@@ -49,6 +50,8 @@ let bucket ~function_on (inner : Store.t) =
     bucket_functions = true;
     put =
       (fun ?mode key body ->
+        if Atomic.get slow_requests && Key.parse_discard_job key <> None then
+          Rt.sleep 1.;
         inner.put ?mode key body;
         notify key);
   }
@@ -62,8 +65,8 @@ let () =
   Fs.rm_rf root;
   let main = Local.create ~name:"main" (Filename.concat root "main") in
   let inner = Local.create ~name:"bucket" (Filename.concat root "bucket") in
-  let function_on = Atomic.make false in
-  let copy = bucket ~function_on inner in
+  let function_on = Atomic.make false and slow_requests = Atomic.make false in
+  let copy = bucket ~function_on ~slow_requests inner in
   let names = Hashtbl.create 8 in
   let chunk n =
     let c = Chunk_key.of_body n in
@@ -199,6 +202,15 @@ let () =
       let ok = settled () in
       p "consumed as written; generation settled: %b (%s)\n" ok (generation ());
       p "restored on bucket: %b\n" (until (fun () -> on_bucket "again"));
+      p "\n== a request written slower than the discard poll\n";
+      Atomic.set slow_requests true;
+      put_chunks ["slow"];
+      p "collect: %s\n" (collect ());
+      Composite.settle ~timeout:10. c;
+      let ok = settled () in
+      p "generation settled: %b; slow on bucket once it settled: %b\n" ok
+        (on_bucket "slow");
+      Atomic.set slow_requests false;
       p "\n== two batches of one shard make one request\n";
       Atomic.set function_on false;
       let x = chunk "x1" and y = chunk "y1" in

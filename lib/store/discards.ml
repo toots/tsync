@@ -47,23 +47,24 @@ let encode p = Yojson.Safe.to_string (pending_to_yojson p)
 
 (* replication §4.8: a later batch of the same run and shard supersedes the
    request, so the record grows to cover both. *)
-let add t p =
+let same_request t p =
+  List.find_opt (fun (_, q) -> q.run = p.run && q.shard = p.shard) (pending t)
+
+let add t p ~write =
+  let merged =
+    Mutex.protect t.m (fun () ->
+        let keys =
+          match same_request t p with
+            | Some (_, q) -> q.keys @ p.keys
+            | None -> p.keys
+        in
+        { p with keys = List.sort_uniq String.compare keys })
+  in
+  write merged;
   Mutex.protect t.m (fun () ->
-      match
-        List.find_opt
-          (fun (_, q) -> q.run = p.run && q.shard = p.shard)
-          (pending t)
-      with
-        | Some (id, q) ->
-            let merged =
-              { q with keys = List.sort_uniq String.compare (q.keys @ p.keys) }
-            in
-            Dqueue.Records.replace t.records id (encode merged);
-            merged
-        | None ->
-            let p = { p with keys = List.sort_uniq String.compare p.keys } in
-            ignore (Dqueue.Records.create t.records (encode p));
-            p)
+      match same_request t merged with
+        | Some (id, _) -> Dqueue.Records.replace t.records id (encode merged)
+        | None -> ignore (Dqueue.Records.create t.records (encode merged)))
 
 let remove t id = Dqueue.Records.complete t.records id
 let request_key d p = Key.discard_job d ~run:p.run ~shard:p.shard
