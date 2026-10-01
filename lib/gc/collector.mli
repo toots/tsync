@@ -58,6 +58,7 @@ type survey = {
 val run :
   ?budget:float ->
   ?pause:float ->
+  ?narrate:Narrate.t ->
   ?verify:bool ->
   ?keep:bool ->
   Composite.t ->
@@ -78,4 +79,7 @@ val status : Composite.t -> status list
 (** Report what a collection would reclaim, per main; [Error reason] inside the
     list when a body stops the survey as it would stop marking. *)
 val dry_run :
-  ?verify:bool -> Composite.t -> ((survey, string) result list, failure) result
+  ?narrate:Narrate.t ->
+  ?verify:bool ->
+  Composite.t ->
+  ((survey, string) result list, failure) result

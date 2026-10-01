@@ -262,9 +262,60 @@ let settle m d composite =
   Gc_generation.settle m.member.store d ~owed:(fun g ->
       Composite.collection_owed composite ~generation:g)
 
+(* Folders and version folders, as an operator knows them, rather than the
+   namespace tags they are marked by. *)
+let describe_namespaces tags =
+  let versions =
+    List.length (List.filter (fun n -> String.starts_with ~prefix:"v/" n) tags)
+  in
+  Printf.sprintf "%s and %s"
+    (Narrate.count (List.length tags - versions) "folder")
+    (Narrate.count versions "version folder")
+
+let phase_words = function
+  | Gc_record.Opening -> "opening"
+  | Marking -> "marking"
+  | Closing -> "closing"
+  | Abandoning -> "abandoning"
+
+let say_start nr m (r0 : Gc_record.read) (plan : Gc_plan.start) =
+  let since = function
+    | Gc_record.Record r -> " (started " ^ Narrate.date r.started ^ ")"
+    | _ -> ""
+  in
+  match (plan, r0) with
+    | Resume_keep _, Unreadable ->
+        Narrate.say nr
+          "%s: the run record does not parse; abandoning that run, which puts \
+           every chunk back (the safe direction)"
+          m.member.name
+    | Resume_keep cursor, _ ->
+        Narrate.say nr "%s: continuing to abandon the run%s, after shard %S"
+          m.member.name (since r0) cursor
+    | Begin_keep, Absent ->
+        Narrate.say nr "%s: no run is open; nothing to abandon" m.member.name
+    | Begin_keep, _ ->
+        Narrate.say nr
+          "%s: abandoning the open run%s as asked: every outgoing chunk goes \
+           back"
+          m.member.name (since r0)
+    | Resume_close { after; generation }, _ ->
+        Narrate.say nr "%s: resuming the run%s in closing, after shard %S%s"
+          m.member.name (since r0) after
+          (if generation = None then
+             "; its record has no generation, so it gets a fresh odd one"
+           else "")
+    | Open { started = Some _; after }, _ ->
+        Narrate.say nr "%s: resuming the run%s in marking, after %S"
+          m.member.name (since r0)
+          (if after = "" then "the start" else after)
+    | Open { started = None; _ }, _ ->
+        Narrate.say nr "%s: opening a collection run on %s" m.member.name m.root
+
 (* One session on one main, under its run lock (§5.5). *)
-let session ?budget ?pause ~verify ~keep composite d m =
+let session ?budget ?pause ~narrate:nr ~verify ~keep composite d m =
   let n = counters () in
+  let t0 = Rt.now () in
   let deadline = Option.map (fun b -> Rt.now () +. b) budget in
   let over () = match deadline with Some t -> Rt.now () > t | None -> false in
   let between () =
@@ -276,20 +327,30 @@ let session ?budget ?pause ~verify ~keep composite d m =
     match r0 with Record r -> r.started | _ -> Unix.gettimeofday ()
   in
   (* At least one unit per session, so a zero budget steps. *)
-  let rec units phase ~write todo =
+  let rec units phase ~progress ~write todo =
     match todo with
       | [] -> None
       | u :: rest ->
           write u;
+          progress ();
           if rest <> [] && over () then Some (Suspended { phase; cursor = u })
           else (
             between ();
-            units phase ~write rest)
+            units phase ~progress ~write rest)
+  in
+  let counted total what =
+    let done_ = ref 0 and periodic = Narrate.periodic nr in
+    fun () ->
+      incr done_;
+      periodic (fun () -> what !done_ total)
   in
   let rec abandon cursor =
     let todo = Gc_plan.after ~cursor (shards (outgoing m d)) in
     match
       units Abandoning
+        ~progress:
+          (counted (List.length todo) (fun i n ->
+               Printf.sprintf "  put back %d of %d outgoing shards" i n))
         ~write:(fun shard ->
           keep_one m d shard;
           record m d
@@ -298,55 +359,111 @@ let session ?budget ?pause ~verify ~keep composite d m =
     with
       | Some s -> s
       | None ->
-          if shards (outgoing m d) <> [] then abandon ""
+          if shards (outgoing m d) <> [] then (
+            Narrate.say nr
+              "  shards appeared in the outgoing space meanwhile; another round";
+            abandon "")
           else (
             Fs.rm_rf (outgoing m d);
             Gc_record.clear m.member.store d;
+            Narrate.say nr
+              "%s: abandoned in %s; every chunk is back and the run record is \
+               removed"
+              m.member.name
+              (Narrate.duration (Rt.now () -. t0));
             Completed)
   in
-  let finish () =
+  let finish g =
     Fs.rm_rf (outgoing m d);
     Gc_record.clear m.member.store d;
     settle m d composite;
+    Narrate.say nr "%s: run complete in %s: %s deleted (%s)" m.member.name
+      (Narrate.duration (Rt.now () -. t0))
+      (Narrate.count n.reclaimed "chunk")
+      (Narrate.size n.bytes);
+    (match generation m d with
+      | Some g' when g' mod 2 = 0 ->
+          Narrate.say nr "  generation %d: every deletion has settled" g'
+      | _ ->
+          Narrate.say nr
+            "  generation %d stays odd until the copies' deletions settle; the \
+             domain's owner finishes them (gc --outstanding shows what is \
+             left)"
+            g);
     Completed
   in
   let close_from ~after g =
     let run = Key.run_name started in
     let all =
-      List.sort_uniq String.compare
-        (shards (surviving m d) @ shards (outgoing m d))
+      Gc_plan.after ~cursor:after
+        (List.sort_uniq String.compare
+           (shards (surviving m d) @ shards (outgoing m d)))
     in
+    Narrate.say nr
+      "  closing %s: deleting every outgoing chunk no namespace kept%s"
+      (Narrate.count (List.length all) "shard")
+      (match m.tells with
+        | [] -> ""
+        | copies ->
+            Printf.sprintf "; copies owed the same deletions: %s"
+              (String.concat ", "
+                 (List.map
+                    (fun (c : Composite.member) ->
+                      if Composite.function_confirmed composite c then
+                        c.name ^ " (through its bucket function)"
+                      else c.name)
+                    copies)));
     match
       units Closing
+        ~progress:
+          (counted (List.length all) (fun i total ->
+               Printf.sprintf "  closed %d of %d shards; %d chunks deleted (%s)"
+                 i total n.reclaimed (Narrate.size n.bytes)))
         ~write:(fun shard ->
           if Fs.is_dir (Filename.concat (outgoing m d) shard) then
             close m d n composite ~run ~generation:g shard;
           record m d
             { phase = Closing; started; cursor = shard; generation = Some g })
-        (Gc_plan.after ~cursor:after all)
+        all
     with
       | Some s -> s
-      | None -> finish ()
+      | None -> finish g
   in
   let fresh_generation () =
     match Gc_plan.closing_generation (generation m d) with
       | Error e -> raise (Halt e)
       | Ok g ->
-          if generation m d <> Some g then
+          if generation m d <> Some g then (
             Gc_generation.write m.member.store d g;
+            Narrate.say nr
+              "  generation %d (odd): the copies' presence memos are set aside \
+               until this run's deletions settle"
+              g)
+          else
+            Narrate.say nr
+              "  reusing generation %d, left odd by an earlier run whose \
+               deletions have settled"
+              g;
           g
   in
-  let rec wait_settled () =
+  let rec wait_settled ~said =
     match generation m d with
       | Some g
         when g mod 2 = 1
              && Composite.collection_owed composite ~generation:g > 0 ->
+          if not said then
+            Narrate.say nr
+              "  waiting for an earlier run's copy deletions to settle \
+               (generation %d, %d batches owed) before closing"
+              g
+              (Composite.collection_owed composite ~generation:g);
           if over () then false
           else (
             Rt.sleep 5.;
-            wait_settled ())
+            wait_settled ~said:true)
       | _ -> true
   in
+  say_start nr m r0 (Gc_plan.start ~r0 ~keep);
   let outcome =
     try
       match Gc_plan.start ~r0 ~keep with
@@ -370,13 +487,27 @@ let session ?budget ?pause ~verify ~keep composite d m =
                     cursor = after;
                     generation = None;
                   };
-                if not (Fs.exists (outgoing m d)) then
-                  ignore (rename_quiet (surviving m d) (outgoing m d)));
+                if not (Fs.exists (outgoing m d)) then (
+                  ignore (rename_quiet (surviving m d) (outgoing m d));
+                  Narrate.say nr
+                    "  moved the chunk area aside in one rename: every chunk \
+                     waits in the outgoing space until a namespace keeps it")
+                else Narrate.say nr "  the outgoing space is already there");
             let todo = enumerate m d ~after in
+            Narrate.say nr
+              "  marking %s: every chunk a manifest names moves back"
+              (describe_namespaces todo);
             record m d
               { phase = Marking; started; cursor = after; generation = None };
+            let t_mark = Rt.now () in
             match
               units Marking
+                ~progress:
+                  (counted (List.length todo) (fun i total ->
+                       Printf.sprintf
+                         "  marked %d of %d folders and version folders; %d \
+                          chunks kept so far"
+                         i total n.promoted))
                 ~write:(fun ns ->
                   mark m d n ~verify ns;
                   record m d
@@ -385,7 +516,16 @@ let session ?budget ?pause ~verify ~keep composite d m =
             with
               | Some s -> s
               | None ->
-                  if not (wait_settled ()) then
+                  Narrate.say nr "  marking done in %s: %s kept%s"
+                    (Narrate.duration (Rt.now () -. t_mark))
+                    (Narrate.count n.promoted "chunk")
+                    (if verify then
+                       Printf.sprintf
+                         " (verified %d: %d corrupt, %d unreadable, %d markers \
+                          cleared)"
+                         n.verified n.corrupt n.unreadable n.cleared
+                     else "");
+                  if not (wait_settled ~said:false) then
                     Suspended { phase = Marking; cursor = "" }
                   else (
                     let g = fresh_generation () in
@@ -399,6 +539,17 @@ let session ?budget ?pause ~verify ~keep composite d m =
                     close_from ~after:"" g))
     with Halt reason -> Halted reason
   in
+  (match outcome with
+    | Suspended { phase; cursor } ->
+        Narrate.say nr
+          "%s: the budget ran out; the run stays open in %s after %S, and the \
+           next run continues from there"
+          m.member.name (phase_words phase) cursor
+    | Halted reason ->
+        Narrate.say nr
+          "%s: stopped, leaving the run open and nothing discarded: %s"
+          m.member.name reason
+    | Completed -> ());
   {
     main = m.member.name;
     outcome;
@@ -468,7 +619,8 @@ let direct_deletes_refused composite =
           m.tells
     | [] -> []
 
-let run ?budget ?pause ?(verify = false) ?(keep = false) composite =
+let run ?budget ?pause ?(narrate = Narrate.none) ?(verify = false)
+    ?(keep = false) composite =
   let d = Composite.domain composite in
   match direct_deletes_refused composite with
     | _ :: _ as copies when not keep ->
@@ -479,12 +631,14 @@ let run ?budget ?pause ?(verify = false) ?(keep = false) composite =
                  be sent one delete request per chunk (gc --probe)"
                 (String.concat ", "
                    (List.map (fun (c : Composite.member) -> c.name) copies))))
-    | _ -> each composite (session ?budget ?pause ~verify ~keep composite d)
+    | _ ->
+        each composite
+          (session ?budget ?pause ~narrate ~verify ~keep composite d)
 
 (* §5.9 on a main of millions of chunks: one table of referenced chunks, each
    flagged once a shard listing shows it, and the chunk area read one shard at
    a time. *)
-let survey_one ~verify d m =
+let survey_one ~narrate:nr ~verify d m =
   let referenced : (Chunk_key.t, bool) Hashtbl.t = Hashtbl.create 65536 in
   let corrupt = ref 0 in
   let run, run_unreadable =
@@ -493,19 +647,42 @@ let survey_one ~verify d m =
       | Unreadable -> (None, true)
       | Absent -> (None, false)
   in
+  let t0 = Rt.now () in
   match
-    List.iter
-      (fun ns ->
+    let namespaces = enumerate m d ~after:"" in
+    let total = List.length namespaces in
+    Narrate.say nr "%s: reading the manifests of %s on %s" m.member.name
+      (describe_namespaces namespaces)
+      m.root;
+    let periodic = Narrate.periodic nr in
+    List.iteri
+      (fun i ns ->
         List.iter
           (fun c -> Hashtbl.replace referenced c false)
-          (namespace_references m d ns))
-      (enumerate m d ~after:"")
+          (namespace_references m d ns);
+        periodic (fun () ->
+            Printf.sprintf
+              "  read %d of %d folders and version folders; %d chunks \
+               referenced"
+              (i + 1) total
+              (Hashtbl.length referenced)))
+      namespaces
   with
     | exception Halt reason -> Error reason
     | () ->
         let reclaimable = ref 0 and bytes = ref 0 in
-        List.iter
-          (fun shard ->
+        Narrate.say nr
+          "  %s referenced; listing the chunk area shard by shard%s"
+          (Narrate.count (Hashtbl.length referenced) "chunk")
+          (if verify then " and re-hashing every referenced chunk" else "");
+        let periodic = Narrate.periodic nr in
+        List.iteri
+          (fun i shard ->
+            periodic (fun () ->
+                Printf.sprintf
+                  "  listed %d of 4096 shards; %d chunks reclaimable so far \
+                   (%s)"
+                  i !reclaimable (Narrate.size !bytes));
             let listing =
               m.member.store.list_prefix (Key.shard_prefix d shard)
             in
@@ -528,6 +705,8 @@ let survey_one ~verify d m =
                   | _ -> ())
               listing)
           (List.init 4096 (Printf.sprintf "%03x"));
+        Narrate.say nr "  survey done in %s"
+          (Narrate.duration (Rt.now () -. t0));
         let missing =
           Hashtbl.fold
             (fun c seen acc -> if seen then acc else c :: acc)
@@ -550,6 +729,6 @@ let survey_one ~verify d m =
             chunks_corrupt = !corrupt;
           }
 
-let dry_run ?(verify = false) composite =
+let dry_run ?(narrate = Narrate.none) ?(verify = false) composite =
   let d = Composite.domain composite in
-  each composite (survey_one ~verify d)
+  each composite (survey_one ~narrate ~verify d)

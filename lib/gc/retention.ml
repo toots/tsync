@@ -140,7 +140,13 @@ module Make (C : Context.S) = struct
       (T.trash_entries ());
     Hashtbl.fold (fun _ l acc -> l :: acc) groups []
 
-  let expire ?(apply = false) ?(now = Unix.gettimeofday ()) ~cutoff () =
+  let expire ?(narrate = Narrate.none) ?(apply = false)
+      ?(now = Unix.gettimeofday ()) ~cutoff () =
+    let nr = narrate in
+    Narrate.say nr
+      "expiring %s: trash, versions, journal and shares older than %s%s"
+      (Domain_name.to_string d) (Narrate.date cutoff)
+      (if apply then "" else " (dry run: nothing is deleted)");
     let deleted = ref [] in
     let delete keys =
       deleted := List.rev_append keys !deleted;
@@ -154,28 +160,53 @@ module Make (C : Context.S) = struct
     let skipped = ref [] and stopped = ref [] and unparseable = ref [] in
     let trash_deleted =
       count (fun () ->
+          let groups = by_folder () in
+          Narrate.say nr "  trash: %s"
+            (Narrate.count (List.length groups) "trashed folder");
           List.iter
             (fun group ->
-              let id, _, _ = List.hd group in
+              let id, _, path = List.hd group in
+              let name = Option.value ~default:(Folder_id.to_string id) path in
               let entries =
                 List.map
                   (fun (_, (e : Store.entry), _) -> (e.key, e.last_modified))
                   group
               in
+              let newest =
+                List.fold_left (fun a (_, m) -> Float.max a m) 0. entries
+              in
               match Gc_plan.trash ~anchor:(anchor_state id) ~cutoff entries with
                 | Delete_stale keys ->
-                    List.iter
-                      (fun k ->
-                        Log.info "stale trash entry %s" (Key.to_string k))
-                      keys;
+                    Narrate.say nr "    %s: the folder is live again; %s" name
+                      (if keys = [] then
+                         "its trash entries are younger than the cutoff and \
+                          stay"
+                       else
+                         Printf.sprintf "%s %s, the folder stays"
+                           (if apply then "deleting" else "would delete")
+                           (Narrate.count ~plural:"stale trash entries"
+                              (List.length keys) "stale trash entry"));
                     delete keys
-                | Skip_recent -> skipped := id :: !skipped
+                | Skip_recent ->
+                    Narrate.say nr "    %s: kept, trashed again on %s" name
+                      (Narrate.date newest);
+                    skipped := id :: !skipped
                 | Refuse_live -> ()
                 | Purge keys -> (
                     match purge_folder ~apply ~delete id keys with
-                      | Ok _ -> ()
-                      | Error reason -> stopped := (id, reason) :: !stopped))
-            (by_folder ()))
+                      | Ok n ->
+                          Narrate.say nr
+                            "    %s: %s (trashed on %s): %s, deepest folder \
+                             first, then %s"
+                            name
+                            (if apply then "purged" else "would be purged")
+                            (Narrate.date newest) (Narrate.count n "object")
+                            (Narrate.count ~plural:"trash entries"
+                               (List.length keys) "trash entry")
+                      | Error reason ->
+                          Narrate.say nr "    %s: purge stopped: %s" name reason;
+                          stopped := (id, reason) :: !stopped))
+            groups)
     in
     let versions_deleted =
       count (fun () ->
@@ -185,6 +216,9 @@ module Make (C : Context.S) = struct
                  (fun (e : Store.entry) -> e.key)
                  (store.list_prefix (Key.versions d)))
           in
+          Narrate.say nr "  versions: %s older than %s"
+            (Narrate.count (List.length expired) "version")
+            (Narrate.date cutoff);
           delete expired;
           if apply then remove_empty_groups expired)
     in
@@ -199,10 +233,21 @@ module Make (C : Context.S) = struct
                   Log.warn "the journal cursor does not parse: %S" body;
                   None
           in
-          delete
-            (Gc_plan.journal ~now ~horizon:Tsync_sync.Outbound.horizon ~cutoff
-               ~cursor
-               (Tsync_sync.Journal.list_entries journal)))
+          let entries = Tsync_sync.Journal.list_entries journal in
+          let doomed =
+            Gc_plan.journal ~now ~horizon:Tsync_sync.Outbound.horizon ~cutoff
+              ~cursor entries
+          in
+          Narrate.say nr
+            "  journal: %d of %s older than %s and than the retention horizon \
+             (%s)%s"
+            (List.length doomed)
+            (Narrate.count ~plural:"entries are" (List.length entries)
+               "entry is")
+            (Narrate.date cutoff)
+            (Narrate.date (now -. Tsync_sync.Outbound.horizon))
+            (if cursor = None then "" else "; the cursor's entry is kept");
+          delete doomed)
     in
     let shares_deleted =
       count (fun () ->
@@ -213,6 +258,13 @@ module Make (C : Context.S) = struct
                 | Error reason ->
                     Log.warn "shares on %s not expired: %s" m.name reason
                 | Ok (keys, bad) ->
+                    Narrate.say nr "  shares on %s: %s and stale artifacts%s"
+                      m.name
+                      (Narrate.count (List.length keys) "expired share")
+                      (if bad = [] then ""
+                       else
+                         Printf.sprintf "; %d unparseable, left in place"
+                           (List.length bad));
                     List.iter
                       (fun k ->
                         if not (Hashtbl.mem seen k) then (
@@ -237,7 +289,8 @@ module Make (C : Context.S) = struct
       unparseable_shares = !unparseable;
     }
 
-  let purge ?(apply = false) path =
+  let purge ?(narrate = Narrate.none) ?(apply = false) path =
+    let nr = narrate in
     let delete keys = if apply && keys <> [] then store.delete_multi keys in
     match List.filter (fun (_, _, p) -> p = Some path) (T.trash_entries ()) with
       | [] -> Not_in_trash
@@ -256,10 +309,25 @@ module Make (C : Context.S) = struct
             Gc_plan.trash ~anchor:(anchor_state m.id) ~cutoff:0. ~on_demand:true
               all
           with
-            | Refuse_live -> Live_elsewhere
+            | Refuse_live ->
+                Narrate.say nr
+                  "%s: its folder is live again elsewhere; nothing is purged"
+                  path;
+                Live_elsewhere
             | Purge keys -> (
+                Narrate.say nr
+                  "%s: purging its subtree deepest folder first, re-checking \
+                   before each folder that it is still in the trash%s"
+                  path
+                  (if apply then "" else " (dry run: nothing is deleted)");
                 match purge_folder ~apply ~delete m.id keys with
-                  | Ok n -> Purged n
-                  | Error _ -> Live_elsewhere)
+                  | Ok n ->
+                      Narrate.say nr "  %s, then %s" (Narrate.count n "object")
+                        (Narrate.count ~plural:"trash entries"
+                           (List.length keys) "trash entry");
+                      Purged n
+                  | Error reason ->
+                      Narrate.say nr "  stopped: %s" reason;
+                      Live_elsewhere)
             | Delete_stale _ | Skip_recent -> Live_elsewhere)
 end

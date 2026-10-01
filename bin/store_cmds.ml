@@ -3,6 +3,9 @@ open Tsync_core
 open Tsync_gc
 open Cli
 
+(* 07 §5.1: narration goes to stderr, so stdout stays the result. *)
+let narration verbose = if verbose then Narrate.stderr else Narrate.none
+
 let store_command ~what name f =
   let config = config () in
   Tsync_owner.Owner.store_command ~what config (domain ?name config) f
@@ -138,7 +141,10 @@ let gc apply verify abort budget show_status copies name verbose =
                 (fun dom ->
                   let c = dom.composite in
                   if apply || abort then (
-                    match Collector.run ?budget ~verify ~keep:abort c with
+                    match
+                      Collector.run ?budget ~narrate:(narration verbose) ~verify
+                        ~keep:abort c
+                    with
                       | Error f -> failure f
                       | Ok stats ->
                           List.iter print_stats stats;
@@ -150,7 +156,9 @@ let gc apply verify abort budget show_status copies name verbose =
                           then 0
                           else 1)
                   else (
-                    match Collector.dry_run ~verify c with
+                    match
+                      Collector.dry_run ~narrate:(narration verbose) ~verify c
+                    with
                       | Error f -> failure f
                       | Ok surveys ->
                           List.iter
@@ -234,13 +242,10 @@ let expire apply date name verbose =
       let cutoff = cutoff_of date in
       store_command ~what:"tsync expire" name (fun dom ->
           let module R = Retention.Make ((val Tsync_domain.Domain.context dom)) in
-          let r = R.expire ~apply ~cutoff () in
+          let r = R.expire ~narrate:(narration verbose) ~apply ~cutoff () in
           say "trash %d, versions %d, journal entries %d, shares %d%s"
             r.counts.trash_deleted r.counts.versions_deleted
             r.counts.journal_deleted r.counts.shares_deleted (dry_note apply);
-          List.iter
-            (fun k -> if verbose then say "  %s" (Key.to_string k))
-            r.deleted;
           List.iter
             (fun (id, reason) ->
               say "  purge of %s stopped: %s" (Folder_id.to_string id) reason)
@@ -270,7 +275,7 @@ let trash apply purge name verbose =
             store_command ~what:"tsync trash --purge" name (fun dom ->
                 let module R =
                   Retention.Make ((val Tsync_domain.Domain.context dom)) in
-                match R.purge ~apply path with
+                match R.purge ~narrate:(narration verbose) ~apply path with
                   | Purged n ->
                       say "%s: %d objects purged%s" path n (dry_note apply);
                       0

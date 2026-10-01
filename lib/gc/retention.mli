@@ -26,9 +26,15 @@ module Make (_ : Tsync_remote.Context.S) : sig
   (** Trash, versions, journal, shares, in that order, against [cutoff] (seconds
       since the epoch). The journal keeps every entry younger than the retention
       horizon and the one the cursor names. *)
-  val expire : ?apply:bool -> ?now:float -> cutoff:float -> unit -> report
+  val expire :
+    ?narrate:Narrate.t ->
+    ?apply:bool ->
+    ?now:float ->
+    cutoff:float ->
+    unit ->
+    report
 
   (** Purge the trashed folder whose trash entry records [path], whatever its
       age; a folder anchored live is refused. *)
-  val purge : ?apply:bool -> string -> purge
+  val purge : ?narrate:Narrate.t -> ?apply:bool -> string -> purge
 end
