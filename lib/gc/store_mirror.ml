@@ -14,12 +14,6 @@ type copied = {
 
 type report = { source : string; copies : copied list; cancelled : bool }
 
-let role_order members =
-  List.stable_sort
-    (fun (a : Composite.member) (b : Composite.member) ->
-      compare (Composite.read_rank a.role) (Composite.read_rank b.role))
-    members
-
 let index_leaf = ".tsync-index"
 
 module Make (C : Context.S) = struct
@@ -164,7 +158,7 @@ module Make (C : Context.S) = struct
               | None ->
                   Fail.raise_ Fail.Invalid "%s has no member named %s"
                     (Domain_name.to_string d) name)
-        | None -> List.hd (role_order members)
+        | None -> List.hd (Composite.in_read_order C.composite)
     in
     (match scope with
       | All | Path _ -> refuse_open_collection ()

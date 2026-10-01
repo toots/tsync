@@ -746,6 +746,11 @@ let domain t = t.core.domain
 let members t =
   t.core.mains @ List.map (fun c -> c.member) t.core.copies @ t.core.archives
 
+let in_read_order t =
+  List.stable_sort
+    (fun a b -> compare (read_rank a.role) (read_rank b.role))
+    (members t)
+
 (* replication §4.8: once a request is gone, every deleted key the main still
    holds is put back before the deletion counts as settled. *)
 let check_discards t src c =
