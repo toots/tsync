@@ -238,12 +238,25 @@ let native_session ?timeout fd ~host
     pending_pos := !pending_pos + n;
     n
   in
+  (* ocaml-tls takes strings: one record's worth at a time, so a mapped chunk
+     is never copied whole onto the heap. *)
+  let record = 16384 in
   let write ?timeout b =
-    match Tls.Engine.send_application_data !state [Bigstring.to_string b] with
-      | Some (st, out) ->
-          state := st;
-          send ?timeout out
-      | None -> tls_failure host "the session is not ready"
+    let n = Bigstring.length b in
+    let rec go off =
+      if off < n then (
+        let len = min record (n - off) in
+        match
+          Tls.Engine.send_application_data !state
+            [Bigstring.to_string ~off ~len b]
+        with
+          | Some (st, out) ->
+              state := st;
+              send ?timeout out;
+              go (off + len)
+          | None -> tls_failure host "the session is not ready")
+    in
+    go 0
   in
   {
     fd;
