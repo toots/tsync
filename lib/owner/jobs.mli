@@ -16,6 +16,14 @@ type t =
       exclude : string list;
       force_rehash : bool;
     }
+  | Rsync of {
+      src : string;
+      src_in_domain : bool;
+      dst : string;
+      dst_in_domain : bool;
+      move : bool;
+      dry_run : bool;
+    }
   | Integrity of {
       verify : bool;
       repair : bool;

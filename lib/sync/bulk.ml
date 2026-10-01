@@ -24,7 +24,7 @@ module Make (C : Engine_ctx.S) = struct
       with_meta (fun () ->
           with_key rel (fun () -> Mirror.write_file ~own:true mirror rel m))
 
-    let upload_file rel path =
+    let upload_file ?sent rel path =
       let st = Unix.stat path in
       let size = st.st_size and cs = R.chunk_size () in
       Fs.with_fd (Fs.openfile path [O_RDONLY]) (fun fd ->
@@ -35,7 +35,7 @@ module Make (C : Engine_ctx.S) = struct
             Bigstring.sub buf ~off:0 ~len:n
           in
           let m =
-            R.upload_chunks ~name:(Names.leaf_of rel) ~size ~chunk_size:cs
+            R.upload_chunks ?sent ~name:(Names.leaf_of rel) ~size ~chunk_size:cs
               ~mtime:st.st_mtime (fun i -> Remote.Lazy (fun () -> read i))
           in
           let resend ck =

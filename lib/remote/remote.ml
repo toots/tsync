@@ -155,7 +155,7 @@ module Make (C : Context.S) = struct
   (* Chunks only: every chunk the manifest names is on the store when this
      returns. *)
   let upload_chunks ?(cancel = Atomic.make false) ?(progress = fun _ -> ())
-      ~name ~size ~chunk_size ~mtime source =
+      ?(sent = fun _ -> ()) ~name ~size ~chunk_size ~mtime source =
     let count = Chunking.manifest_count ~size ~cs:chunk_size in
     let one i =
       if Atomic.get cancel then raise Rt.Cancelled;
@@ -171,7 +171,9 @@ module Make (C : Context.S) = struct
                 if Bigstring.length b <> expected then
                   raise (Source_changed name);
                 let ck = Chunk_key.of_bigstring b in
-                if not (known ck) then put_chunk ck b;
+                if not (known ck) then (
+                  put_chunk ck b;
+                  sent (Bigstring.length b));
                 progress (Bigstring.length b);
                 ck)
     in

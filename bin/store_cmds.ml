@@ -310,4 +310,74 @@ let import_cmd =
     Term.(
       const import $ src $ only $ exclude $ force_rehash $ domain_arg $ verbose)
 
-let cmds = [gc_cmd; expire_cmd; trash_cmd; data_integrity_cmd; import_cmd]
+(* [DOMAIN:PATH] names the domain side, [:PATH] the default domain's; anything
+   else is a local path, made absolute since the owner's directory is not
+   ours. *)
+let endpoint arg =
+  match String.index_opt arg ':' with
+    | Some i when not (String.contains (String.sub arg 0 i) '/') ->
+        let domain = String.sub arg 0 i
+        and path = String.sub arg (i + 1) (String.length arg - i - 1) in
+        let path =
+          String.concat "/"
+            (List.filter (( <> ) "") (String.split_on_char '/' path))
+        in
+        `Domain ((if domain = "" then None else Some domain), path)
+    | _ ->
+        `Local
+          (if Filename.is_relative arg then Filename.concat (Sys.getcwd ()) arg
+           else arg)
+
+let rsync src dst move dry_run name verbose =
+  let refuse msg =
+    prerr_endline ("tsync: " ^ msg);
+    2
+  in
+  let side = function
+    | `Domain (d, p) -> (d, true, p)
+    | `Local p -> (None, false, p)
+  in
+  let sd, src_in_domain, src = side (endpoint src)
+  and dd, dst_in_domain, dst = side (endpoint dst) in
+  match (sd, dd) with
+    | _ when not (src_in_domain || dst_in_domain) ->
+        refuse "one side must be in a domain (DOMAIN:PATH or :PATH)"
+    | Some a, Some b when a <> b ->
+        refuse "both sides must be in the same domain"
+    | Some d, _ | None, Some d ->
+        if name <> None && name <> Some d then
+          refuse "the domain named in a path differs from --domain"
+        else
+          run_job ~name:d verbose
+            (Rsync { src; src_in_domain; dst; dst_in_domain; move; dry_run })
+    | None, None ->
+        run_job ?name verbose
+          (Rsync { src; src_in_domain; dst; dst_in_domain; move; dry_run })
+
+let rsync_cmd =
+  let src =
+    Arg.(
+      required
+      & pos 0 (some string) None
+      & info [] ~docv:"SRC" ~doc:"A local path, or DOMAIN:PATH in a domain.")
+  and dst =
+    Arg.(
+      required
+      & pos 1 (some string) None
+      & info [] ~docv:"DST" ~doc:"A local path, or DOMAIN:PATH in a domain.")
+  and move =
+    Arg.(
+      value & flag & info ["move"] ~doc:"Drop each source once it is copied.")
+  and dry_run =
+    Arg.(
+      value & flag
+      & info ["n"; "dry-run"] ~doc:"Print each decision; change nothing.")
+  in
+  cmd "rsync"
+    ~doc:
+      "Copy or move between a local path and a domain, or within a domain, \
+       sending only what differs (exit 1 if anything failed)."
+    Term.(const rsync $ src $ dst $ move $ dry_run $ domain_arg $ verbose)
+
+let cmds =
+  [gc_cmd; expire_cmd; trash_cmd; data_integrity_cmd; import_cmd; rsync_cmd]

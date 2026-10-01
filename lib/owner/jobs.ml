@@ -14,6 +14,14 @@ type t =
       exclude : string list;
       force_rehash : bool;
     }
+  | Rsync of {
+      src : string;
+      src_in_domain : bool;
+      dst : string;
+      dst_in_domain : bool;
+      move : bool;
+      dry_run : bool;
+    }
   | Integrity of {
       verify : bool;
       repair : bool;
@@ -33,6 +41,8 @@ let kind = function
   | Expire _ -> "expire"
   | Purge _ -> "trash --purge"
   | Import _ -> "import"
+  | Rsync { move = true; _ } -> "rsync --move"
+  | Rsync _ -> "rsync"
   | Integrity { verify = true; _ } -> "data-integrity --verify"
   | Integrity { repair = true; _ } -> "data-integrity --repair"
   | Integrity _ -> "data-integrity"
@@ -341,6 +351,34 @@ let import io (module E : Tsync_sync.Engine.S) ~src ~only ~exclude ~force_rehash
   List.iter (fun (path, reason) -> say "  %s: %s" path reason) r.failed;
   if r.failed = [] && not r.cancelled then 0 else 1
 
+let rsync io (module E : Tsync_sync.Engine.S) ~src ~dst ~move ~dry_run =
+  let say fmt = Printf.ksprintf io.out fmt in
+  let r =
+    E.rsync ~narrate:io.narrate ~cancelled:io.cancelled ~move ~dry_run ~src ~dst
+      ()
+  in
+  if dry_run then
+    List.iter
+      (fun (rel, d) ->
+        say "%s: %s"
+          (if rel = "" then "." else rel)
+          (Tsync_sync.Rsync_plan.describe d))
+      r.planned
+  else (
+    say
+      "copied %d (%s moved), %d identical, %d folders, %d skipped, %d failed%s"
+      r.copied
+      (Narrate.size r.bytes_moved)
+      r.identical r.dirs (List.length r.skipped) (List.length r.failed)
+      (if r.cancelled then "; cancelled before the end" else "");
+    let shown p = if p = "" then "." else p in
+    List.iter (fun (p, why) -> say "  skipped %s: %s" (shown p) why) r.skipped;
+    List.iter (fun (p, why) -> say "  failed %s: %s" (shown p) why) r.failed);
+  List.iter
+    (fun p -> say "  not copied, unpublished edits here: %s" p)
+    r.unpublished;
+  if r.failed = [] && not r.cancelled then 0 else 1
+
 let run io (dom : Tsync_domain.Domain.t) engine = function
   | Gc { apply; verify; abort; budget } ->
       gc io dom.composite ~apply ~verify ~abort ~budget
@@ -352,6 +390,17 @@ let run io (dom : Tsync_domain.Domain.t) engine = function
         Fail.raise_ Fail.Read_only "%s is read-only"
           (Domain_name.to_string dom.name);
       import io engine ~src ~only ~exclude ~force_rehash
+  | Rsync { src; src_in_domain; dst; dst_in_domain; move; dry_run } ->
+      let side b : Tsync_sync.Rsync_plan.side = if b then Domain else Local in
+      if
+        dom.domain.read_only && (not dry_run)
+        && (dst_in_domain || (move && src_in_domain))
+      then
+        Fail.raise_ Fail.Read_only "%s is read-only"
+          (Domain_name.to_string dom.name);
+      rsync io engine ~move ~dry_run
+        ~src:{ side = side src_in_domain; path = src }
+        ~dst:{ side = side dst_in_domain; path = dst }
   | Integrity { verify = true; _ } -> verify io dom
   | Integrity { repair; apply; detail; source; _ } ->
       integrity io dom ~repair ~apply ~detail ~source

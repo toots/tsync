@@ -20,7 +20,12 @@ type target =
   | File_at of local
   | Key_at of Manifest.t
 
-type skip = Source_missing | Target_not_a_dir | Target_is_dir | Not_in_domain
+type skip =
+  | Source_missing
+  | Target_not_a_dir
+  | Target_is_dir
+  | Not_in_domain
+  | Under_skipped  (** inside a folder that was skipped *)
 
 type decision =
   | Skip of skip
@@ -44,3 +49,22 @@ val decide : move:bool -> source -> target -> decision
 val disposes : move:bool -> decision -> bool
 
 val skip_name : skip -> string
+
+(** One end of an rsync: a local path (absolute), or a path in the domain. *)
+type endpoint = { side : side; path : string }
+
+type report = {
+  copied : int;
+      (** uploads, manifest copies, renames, assembled and patched files *)
+  identical : int;
+  skipped : (string * string) list;  (** path and why *)
+  dirs : int;
+  failed : (string * string) list;  (** path and reason *)
+  bytes_moved : int;
+  planned : (string * decision) list;  (** every entry's decision, in order *)
+  unpublished : string list;
+      (** edits of this client under a domain source, not copied *)
+  cancelled : bool;
+}
+
+val describe : decision -> string

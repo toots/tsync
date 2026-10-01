@@ -596,7 +596,7 @@ for `JOB_KEEP` after their last report; a new report for a key replaces the old 
 | `mirror [--source] [--manifests\|--path P]` | owner | [05 §4.6](05-ops-config.md); needs at least two members |
 | `import DIR [--only G] [--exclude G] [--force-rehash]` | owner | [05 §4.3](05-ops-config.md); exit 1 if any entry failed |
 | `export [PATH...] DIR [--source] [-j N]` | read | [05 §4.4](05-ops-config.md); one domain per run; exit 1 on failures or on pending local changes (listed on stderr) |
-| `rsync SRC DST [--move] [-n]` | owner | [05 §4.5](05-ops-config.md) |
+| `rsync SRC DST [--move] [-n]` | owner | [05 §4.5](05-ops-config.md). A side in a domain is `DOMAIN:PATH`, or `:PATH` for the domain `--domain` or the default resolves; any other argument is a local path (one holding a `:` before its first `/` is written `./…` or absolute). Two local sides, or two different domains, are refused with exit 2. `-n` prints each entry's decision and changes nothing |
 | `share [PATH] [--expires DUR] [--token HEX] \| --clear-cache` | owner | [05 §4.11](05-ops-config.md); URL on stdout, expiry on stderr |
 | `config [--edit]` | none | print the parsed config with secrets masked, or run the wizard (§5.9) |
 | `default-domain [NAME] [--clear]` | none | set (must be configured), clear, or print (exit 1 when unset) |

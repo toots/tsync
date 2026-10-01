@@ -39,10 +39,12 @@ module Make (_ : Context.S) : sig
   val get_chunk_range : Chunk_key.t -> int -> int -> Bigstring.t
 
   (** Put every chunk the store does not know and build the manifest; nothing is
-      published. A marked chunk is re-sent rather than deduplicated. *)
+      published. A marked chunk is re-sent rather than deduplicated. [progress]
+      hears every chunk read, [sent] only those put. *)
   val upload_chunks :
     ?cancel:bool Atomic.t ->
     ?progress:(int -> unit) ->
+    ?sent:(int -> unit) ->
     name:string ->
     size:int ->
     chunk_size:int ->

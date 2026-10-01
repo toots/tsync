@@ -10,7 +10,12 @@ type target =
   | File_at of local
   | Key_at of Manifest.t
 
-type skip = Source_missing | Target_not_a_dir | Target_is_dir | Not_in_domain
+type skip =
+  | Source_missing
+  | Target_not_a_dir
+  | Target_is_dir
+  | Not_in_domain
+  | Under_skipped
 
 type decision =
   | Skip of skip
@@ -70,3 +75,30 @@ let skip_name = function
   | Target_not_a_dir -> "a file holds the folder's name at the target"
   | Target_is_dir -> "a folder holds the file's name at the target"
   | Not_in_domain -> "neither side is in the domain"
+  | Under_skipped -> "its folder was skipped"
+
+type endpoint = { side : side; path : string }
+
+type report = {
+  copied : int;
+  identical : int;
+  skipped : (string * string) list;
+  dirs : int;
+  failed : (string * string) list;
+  bytes_moved : int;
+  planned : (string * decision) list;
+  unpublished : string list;
+  cancelled : bool;
+}
+
+let describe = function
+  | Skip s -> "skip: " ^ skip_name s
+  | Make_dir _ -> "make the folder"
+  | Identical -> "identical"
+  | Copy_manifest _ -> "copy within the domain"
+  | Rename_in_domain _ -> "move within the domain"
+  | Upload `Fresh -> "upload"
+  | Upload `Replacing -> "upload, replacing"
+  | Assemble _ -> "download"
+  | Patch_local (_, is) ->
+      Printf.sprintf "download %d differing chunks" (List.length is)

@@ -396,6 +396,7 @@ Key(manifest)`; `target = Absent(side) | Dir(side) | File(local) | Key(manifest)
 | Key m, Absent Local | Assemble m |
 | Key m, File l | `differing`: unknown → Identical if unchanged else Assemble; none → Identical; some indices → Patch_local(m, indices) |
 | File, Absent Local / File | Skip `Not_in_domain` |
+| any entry inside a folder whose own decision was a Skip | Skip `Under_skipped`, without gathering its facts |
 
 - `unchanged`: link vs symlink manifest → same target; hashed keys vs a file manifest → same count
   and every key equal; unhashed → false; a kind mismatch → false. **Identity is bytes**, never mtime.
@@ -421,7 +422,12 @@ Key(manifest)`; `target = Absent(side) | Dir(side) | File(local) | Key(manifest)
 - Make_dir: local `mkdir -p`, or a domain folder and `Mkdir(rel, id)`.
 - Drop source (move): local unlink, or delete the manifest and announce `Delete`.
 - The end closes the last batch and pokes the owner (§4.2).
-- Unpublished local edits under a domain source are not part of the copy; they are listed on stderr.
+- Unpublished local edits under a domain source are not part of the copy; they are listed with the
+  result.
+- `bytes_moved` counts what crossed: chunks an upload actually put (deduplicated ones are not
+  counted), and chunks a download fetched.
+- A folder that could not be created fails every entry beneath it with that reason, without
+  attempting them.
 
 ### 4.6 `tsync mirror` (store to store)
 

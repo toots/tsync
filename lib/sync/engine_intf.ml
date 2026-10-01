@@ -124,6 +124,20 @@ module type S = sig
     string ->
     Import_plan.report
 
+  (** Copy or move between a local path and the domain, or within the domain (05
+      §4.5): every entry decided from fresh facts, then folders, domain writes,
+      local writes, moves within the domain, and on a move the sources dropped.
+      [dry_run] decides only. *)
+  val rsync :
+    ?narrate:Narrate.t ->
+    ?cancelled:(unit -> bool) ->
+    ?move:bool ->
+    ?dry_run:bool ->
+    src:Rsync_plan.endpoint ->
+    dst:Rsync_plan.endpoint ->
+    unit ->
+    Rsync_plan.report
+
   (** Adopt records other processes submitted, then run a journal pass soon. *)
   val poll : unit -> unit
 

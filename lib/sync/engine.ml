@@ -10,7 +10,7 @@ let pause_flag ~data_dir d =
   List.fold_left Filename.concat data_dir ["paused"; Domain_name.to_string d]
 
 module Make (C : Engine_ctx.S) = struct
-  include Import.Make (C)
+  include Rsync.Make (C)
 
   (* Unpublished work of ours, read once per entry under the metadata lock. *)
   type owed = { ops : (string * Wal.record) list }
@@ -211,14 +211,6 @@ module Make (C : Engine_ctx.S) = struct
           Mirror.ensure_dirs mirror (Names.parent_of l);
           Mirror.write_file mirror l m
       | None -> ()
-
-  let remove_local_file l =
-    Dqueue.cancel_key uploads l;
-    end_lineage l;
-    (match Mirror.manifest mirror l with
-      | Some m -> Cache.evict cache m
-      | None -> ());
-    Mirror.remove_file mirror l
 
   let file_aside l =
     let dst = aside_name l ~is_dir:false in

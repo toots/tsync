@@ -909,6 +909,14 @@ module Make (C : Engine_ctx.S) = struct
           | None -> b);
     Dqueue.adopt metadata id
 
+  let remove_local_file l =
+    Dqueue.cancel_key uploads l;
+    end_lineage l;
+    (match Mirror.manifest mirror l with
+      | Some m -> Cache.evict cache m
+      | None -> ());
+    Mirror.remove_file mirror l
+
   (* A namespace change with its local half: Intent, the local effects, then
      Prepared for the metadata queue. *)
   let record_owed ?priors ops local =
