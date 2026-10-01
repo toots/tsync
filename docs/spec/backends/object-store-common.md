@@ -68,7 +68,7 @@ A store claims `verified` only after it has evidence that the verify function is
 
 **Rules:**
 
-- The probe runs only on a store the domain writes (a main or a copy), only with the write guard satisfied ([replication §4.9](../algorithms/replication.md#49-write-guard)), and at most once per FUNCTION_PROBE_VALIDITY per store and domain.
+- The probe runs only on a store the domain writes (a main or a copy), only with the write guard satisfied ([replication §4.9](../algorithms/replication.md#49-write-guard)), and at most once per FUNCTION_PROBE_VALIDITY per store and domain, except that a confirmation in its last day is renewed by a fresh probe, so a running owner never sees one lapse.
 - One probe of a store runs at a time, and a probe asked for while one runs answers with its outcome: every probe writes the same request, and one that gives up deletes it, so a second would read another's deletion as consumption.
 - The outcome, with its time, is saved in the owner's local state. Until a confirmation younger than FUNCTION_PROBE_VALIDITY is known, the store answers as unconfirmed.
 - The reserved run name is older than any real collection, so it never collides with a real request, and a client listing pending requests sees it only for as long as it is really pending.

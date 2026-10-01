@@ -143,15 +143,14 @@ let copies io c act =
   let say fmt = Printf.ksprintf io.out fmt in
   match act with
     | Probe ->
-        let copies =
+        let stores =
           List.filter
             (fun (m : Tsync_store.Composite.member) ->
-              (m.role = Replica || m.role = Backfill)
-              && m.store.bucket_functions)
+              m.role <> Read_only && m.store.bucket_functions)
             (Tsync_store.Composite.members c)
         in
-        if copies = [] then
-          say "no copy of this domain can run a bucket function";
+        if stores = [] then
+          say "no store of this domain can run a bucket function";
         List.iter
           (fun (m : Tsync_store.Composite.member) ->
             say "%s: probing its bucket function (up to 3 minutes)" m.name;
@@ -159,7 +158,7 @@ let copies io c act =
               (if Tsync_store.Composite.probe ~cancelled:io.cancelled c m then
                  "confirmed"
                else "not confirmed: requests were not consumed"))
-          copies;
+          stores;
         0
     | Outstanding ->
         (match Tsync_store.Composite.outstanding c with

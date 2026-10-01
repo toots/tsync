@@ -1,7 +1,6 @@
 (** One copy's queued collection deletions (spec algorithms/replication.md §4.8,
     gc.md §5.7): the discard requests its owner wrote and has not seen consumed,
-    in a durable log beside the copy's job log, and the owner's confirmation
-    that a bucket function consumes them (object-store-common §3). *)
+    in a durable log beside the copy's job log. *)
 
 open Tsync_core
 
@@ -15,15 +14,8 @@ type pending = {
 
 type t
 
-(** [dir] is the copy's job log directory; the log is [<dir>.discards/] and the
-    confirmation [<dir>.function]. *)
+(** [dir] is the copy's job log directory; the log is [<dir>.discards/]. *)
 val open_ : dir:string -> t
-
-(** A confirmation younger than FUNCTION_PROBE_VALIDITY (7 days). *)
-val confirmed : ?now:float -> t -> bool
-
-val confirmed_at : t -> float option
-val record_confirmation : t -> at:float -> unit
 
 (** Each pending request with its record id. *)
 val pending : t -> (string * pending) list

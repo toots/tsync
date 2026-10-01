@@ -8,26 +8,10 @@ type pending = {
 }
 [@@deriving yojson]
 
-type t = { records : Dqueue.Records.t; confirmation : string; m : Mutex.t }
-
-let validity = 7. *. 86400.
+type t = { records : Dqueue.Records.t; m : Mutex.t }
 
 let open_ ~dir =
-  {
-    records = Dqueue.Records.open_ (dir ^ ".discards");
-    confirmation = dir ^ ".function";
-    m = Mutex.create ();
-  }
-
-let confirmed_at t =
-  Option.bind (Fs.read_file_opt t.confirmation) (fun s ->
-      float_of_string_opt (String.trim s))
-
-let confirmed ?(now = Unix.gettimeofday ()) t =
-  match confirmed_at t with Some at -> now -. at < validity | None -> false
-
-let record_confirmation t ~at =
-  Fs.durable_replace ~perm:0o600 t.confirmation (Printf.sprintf "%.3f\n" at)
+  { records = Dqueue.Records.open_ (dir ^ ".discards"); m = Mutex.create () }
 
 let decode body =
   match pending_of_yojson (Yojson.Safe.from_string body) with

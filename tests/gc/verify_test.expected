@@ -15,3 +15,9 @@ cancelled while following:
   main: unsupported
   bucket: abandoned, 4096 left, 1 corrupt
   requests left for the function: 4096
+
+== a bucket as the main
+verified before any probe: false
+confirmed by the owner's start: true, verified: true
+verify on the main:
+  main-bucket: done, 1 corrupt

@@ -146,17 +146,18 @@ val submit_collection_delete :
     process's queues or submitted to the owner. *)
 val collection_owed : t -> generation:int -> int
 
-(** Whether this owner confirmed the copy's bucket function within its validity:
-    its collection deletions then go through discard requests (gc §5.7). *)
+(** Whether this machine confirmed the member's bucket function within its
+    validity: the member then counts as verified, takes verification requests,
+    and as a copy is told its collection deletions by requests (gc §5.7). *)
 val function_confirmed : t -> member -> bool
 
-(** Probe the copy's bucket function now (object-store-common §3), saving a
-    confirmation; [false] for a store that declares none. *)
+(** Probe a main's or a copy's bucket function now (object-store-common §3),
+    saving a confirmation; [false] for a store that declares none. The owner
+    probes each one at its start and before a confirmation lapses. *)
 val probe : ?cancelled:(unit -> bool) -> t -> member -> bool
 
-(** Queue a check of every chunk of the domain on a copy whose bucket function
-    this owner confirmed: one verify request per shard (object-store-common §3).
-*)
+(** Queue a check of every chunk of the domain on a member whose bucket function
+    is confirmed: one verify request per shard (object-store-common §3). *)
 val queue_verification :
   ?cancelled:(unit -> bool) -> t -> member -> [ `Queued of int | `Unsupported ]
 

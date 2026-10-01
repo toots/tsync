@@ -39,6 +39,7 @@ let bucket ~function_on ~at_once (inner : Store.t) =
     inner with
     local_path = None;
     bucket_functions = true;
+    capabilities = (fun p -> { (inner.capabilities p) with verified = false });
     put =
       (fun ?mode key body ->
         inner.put ?mode key body;
@@ -147,5 +148,58 @@ let () =
       Atomic.set at_once false;
       clear ();
       show "cancelled while following" (verify ~cancelled:(after 66) ());
-      p "  requests left for the function: %d\n" (leftover ()));
+      p "  requests left for the function: %d\n" (leftover ());
+      p "\n== a bucket as the main\n";
+      let inner =
+        Local.create ~name:"main-bucket" (Filename.concat root "mb")
+      in
+      inner.put
+        (Key.chunk d (Chunk_key.of_body "rot"))
+        (Bigstring.of_string "rotten");
+      let on = Atomic.make true in
+      let c =
+        Composite.create
+          ~timing:{ discard_poll = 0.2; probe_poll = 0.05; probe_wait = 0.5 }
+          ~domain:d
+          ~data_dir:(Filename.concat root "data-main")
+          ~owner:true ~poke:ignore
+          ~knowledge:
+            {
+              Composite.is_index = (fun _ -> false);
+              is_journal = (fun _ -> false);
+            }
+          [
+            {
+              name = "main-bucket";
+              role = Main;
+              store = bucket ~function_on:on ~at_once inner;
+            };
+          ]
+      in
+      let main = List.hd (Composite.members c) in
+      let verified () =
+        ((Composite.store c).capabilities (Key.domain_prefix d)).verified
+      in
+      p "verified before any probe: %b\n" (verified ());
+      Composite.start c;
+      let rec wait n =
+        if n > 0 && not (Composite.function_confirmed c main) then (
+          Rt.sleep 0.05;
+          wait (n - 1))
+      in
+      wait 40;
+      p "confirmed by the owner's start: %b, verified: %b\n"
+        (Composite.function_confirmed c main)
+        (verified ());
+      let module C = struct
+        let domain = d
+        let store = Composite.store c
+        let composite = c
+        let versioning = true
+        let chunk_size_config = None
+        let max_downloads = 4
+        let max_chunk_buffers = 4
+      end in
+      let module I = Integrity.Make (C) in
+      show "verify on the main" (I.verify ~poll:0.05 ~stall_polls:3 ()));
   Fs.rm_rf root

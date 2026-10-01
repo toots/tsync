@@ -163,9 +163,6 @@ type copy = {
   forwards : Rt.Semaphore.t;
   discards : Discards.t;
   mutable running : running option;  (** under [memo_m] *)
-  mutable probing : bool Rt.Promise.t option;
-      (** under [memo_m]; every probe writes the same request, so a probe asked
-          for while one runs shares its answer *)
 }
 
 type core = {
@@ -173,6 +170,8 @@ type core = {
   mains : member list;
   archives : member list;
   copies : copy list;
+  functions : (string * Bucket_function.t) list;
+      (** by member name: each main and copy whose store may run one *)
   readable : member list;
   owner : bool;
   poke : unit -> unit;
@@ -442,7 +441,15 @@ let without_forwards c f =
 
 (* gc §5.7: a copy whose function this owner confirmed is told by requests;
    the restore check waits until the function consumed each one. *)
-let queued c = c.member.store.bucket_functions && Discards.confirmed c.discards
+let function_of t m =
+  if m.store.bucket_functions then List.assoc_opt m.name t.functions else None
+
+let confirmed t m =
+  match function_of t m with
+    | Some f -> Bucket_function.confirmed f
+    | None -> false
+
+let queued t c = confirmed t c.member
 
 let run_job_body t src c r =
   guard t c.member.role ("copy to " ^ c.member.name);
@@ -453,7 +460,7 @@ let run_job_body t src c r =
     | Collection_delete cd ->
         let ks = List.filter (fun k -> not (main_holds src k)) cd.keys in
         Copy_memo.forget c.memo (List.filter_map Key.chunk_of ks);
-        if queued c then (
+        if queued t c then (
           if ks <> [] then
             Discards.add c.discards
               {
@@ -658,7 +665,9 @@ let make_store t ~source_only =
               asked <> []
               && List.length asked
                  = List.length (t.mains @ List.map (fun c -> c.member) t.copies)
-              && List.for_all (fun (_, c) -> c.Store.verified) asked;
+              && List.for_all
+                   (fun (m, c) -> c.Store.verified || confirmed t m)
+                   asked;
           });
       fast_read =
         (match first with Some m -> m.store.fast_read | None -> false);
@@ -682,17 +691,22 @@ let create ?(timing = default_timing) ~domain ~data_dir ~owner ~poke ~knowledge
   let generation () =
     Gc_generation.read_mains (List.map (fun m -> m.store) mains) domain
   in
+  let member_dir m =
+    List.fold_left Filename.concat data_dir
+      ["deferred-pending"; Domain_name.to_string domain; escape_name m.name]
+  in
+  let functions =
+    List.filter_map
+      (fun m ->
+        if m.store.bucket_functions then
+          Some (m.name, Bucket_function.open_ ~path:(member_dir m ^ ".function"))
+        else None)
+      (mains @ copy_members)
+  in
   let copies =
     List.map
       (fun m ->
-        let dir =
-          List.fold_left Filename.concat data_dir
-            [
-              "deferred-pending";
-              Domain_name.to_string domain;
-              escape_name m.name;
-            ]
-        in
+        let dir = member_dir m in
         let records = Dqueue.Records.open_ dir in
         {
           member = m;
@@ -707,7 +721,6 @@ let create ?(timing = default_timing) ~domain ~data_dir ~owner ~poke ~knowledge
           forwards = Rt.Semaphore.create ~name:"forwards" max_forwards;
           discards = Discards.open_ ~dir;
           running = None;
-          probing = None;
         })
       copy_members
   in
@@ -723,6 +736,7 @@ let create ?(timing = default_timing) ~domain ~data_dir ~owner ~poke ~knowledge
       mains;
       archives;
       copies;
+      functions;
       readable;
       owner;
       poke;
@@ -794,55 +808,39 @@ let probe_shard = "000"
 
 (* object-store-common §3: an empty request a deployed function consumes;
    still there after FUNCTION_PROBE_WAIT, it is removed and nothing is saved. *)
-let run_probe t c =
+let run_probe t m =
   let key = Key.discard_job t.domain ~run:probe_run ~shard:probe_shard in
-  let store = c.member.store in
-  store.put key Bigstring.empty;
+  m.store.put key Bigstring.empty;
   let deadline = Rt.now () +. t.timing.probe_wait in
   let rec wait () =
-    if store.head_opt key = None then true
+    if m.store.head_opt key = None then true
     else if Rt.now () > deadline then false
     else (
       Rt.sleep t.timing.probe_poll;
       wait ())
   in
   let confirmed = wait () in
-  if confirmed then
-    Discards.record_confirmation c.discards ~at:(Unix.gettimeofday ())
-  else ignore (store.delete key);
-  Log.info "bucket function of %s: %s" c.member.name
+  if not confirmed then ignore (m.store.delete key);
+  Log.info "bucket function of %s: %s" m.name
     (if confirmed then "confirmed" else "not confirmed");
   confirmed
 
-let probe_copy t c =
-  guard t c.member.role ("probe the bucket function of " ^ c.member.name);
-  let answer, mine =
-    Mutex.protect c.memo_m (fun () ->
-        match c.probing with
-          | Some p -> (p, false)
-          | None ->
-              let p = Rt.Promise.create () in
-              c.probing <- Some p;
-              (p, true))
-  in
-  if mine then (
-    let r = try Ok (run_probe t c) with e -> Error e in
-    Mutex.protect c.memo_m (fun () -> c.probing <- None);
-    ignore (Rt.Promise.try_resolve_result answer r));
-  Rt.Promise.await answer
+let probe_member t m f =
+  guard t m.role ("probe the bucket function of " ^ m.name);
+  Bucket_function.probe f (fun () -> run_probe t m)
 
 let probe_due t =
   List.iter
-    (fun c ->
-      if c.member.store.bucket_functions && not (Discards.confirmed c.discards)
-      then
-        Rt.spawn ~name:"probe bucket function" (fun () ->
-            try ignore (probe_copy t c) with
-              | (Stop.Stopping | Rt.Cancelled) as e -> raise e
-              | e ->
-                  Log.warn "probe of %s: %s" c.member.name
-                    (Printexc.to_string e)))
-    t.copies
+    (fun m ->
+      match function_of t m with
+        | Some f when Bucket_function.due f ->
+            Rt.spawn ~name:"probe bucket function" (fun () ->
+                try ignore (probe_member t m f) with
+                  | (Stop.Stopping | Rt.Cancelled) as e -> raise e
+                  | e ->
+                      Log.warn "probe of %s: %s" m.name (Printexc.to_string e))
+        | _ -> ())
+    (t.mains @ List.map (fun c -> c.member) t.copies)
 
 let start ?(paused = false) (t : t) =
   if t.core.owner then (
@@ -850,10 +848,17 @@ let start ?(paused = false) (t : t) =
     List.iter
       (fun c -> Dqueue.start ~paused c.queue (run_job t.core t.source_store c))
       t.core.copies;
-    if List.exists (fun c -> c.member.store.bucket_functions) t.core.copies then (
-      probe_due t.core;
+    if t.core.functions <> [] then
+      Rt.spawn ~name:"bucket function probes" (fun () ->
+          let rec loop () =
+            probe_due t.core;
+            Stop.sleep 3600.;
+            loop ()
+          in
+          loop ());
+    if List.exists (fun c -> c.member.store.bucket_functions) t.core.copies then
       Rt.spawn ~name:"discard requests" (fun () ->
-          poll_discards t.core t.source_store)))
+          poll_discards t.core t.source_store))
 
 let rescan t = List.iter (fun c -> Dqueue.rescan c.queue) t.core.copies
 
@@ -928,39 +933,31 @@ let submit_collection_delete t (m : member) ~keys ~run ~shard ~generation =
     t.core.copies
 
 let collection_owed t ~generation = collection_owed t.core ~generation ()
-
-let copy_of t (m : member) =
-  List.find_opt (fun c -> c.member.name = m.name) t.core.copies
-
-let function_confirmed t m =
-  match copy_of t m with Some c -> queued c | None -> false
+let function_confirmed t m = confirmed t.core m
 
 (* object-store-common §3: one request per shard, populated or not; listing
    which shards exist would cost more than the empty requests. *)
 let queue_verification ?(cancelled = Fun.const false) t m =
-  match copy_of t m with
-    | Some c when queued c ->
-        guard t c.member ("queue verification on " ^ c.member.name);
-        let written = ref 0 in
-        ignore
-          (Cancel.batches ~size:64 cancelled
-             (List.iter (fun shard ->
-                  c.member.store.put
-                    (Key.verify_job t.core.domain shard)
-                    Bigstring.empty;
-                  incr written))
-             (List.init 4096 (Printf.sprintf "%03x")));
-        `Queued !written
-    | _ -> `Unsupported
+  if not (confirmed t.core m) then `Unsupported
+  else (
+    guard t m ("queue verification on " ^ m.name);
+    let written = ref 0 in
+    ignore
+      (Cancel.batches ~size:64 cancelled
+         (List.iter (fun shard ->
+              m.store.put (Key.verify_job t.core.domain shard) Bigstring.empty;
+              incr written))
+         (List.init 4096 (Printf.sprintf "%03x")));
+    `Queued !written)
 
 (* A cancel stops the waiting only: the probe runs on in its own fiber, since
    other callers may share its answer. *)
 let probe ?(cancelled = Fun.const false) t m =
-  match copy_of t m with
-    | Some c when c.member.store.bucket_functions ->
-        let answer = Rt.async (fun () -> probe_copy t.core c) in
+  match function_of t.core m with
+    | Some f ->
+        let answer = Rt.async (fun () -> probe_member t.core m f) in
         Cancel.race cancelled (fun () -> Rt.Promise.await answer)
-    | _ -> false
+    | None -> false
 
 type outstanding = { copy : string; request : Key.t; keys : int; age : float }
 
