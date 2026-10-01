@@ -40,12 +40,7 @@ type t = {
   get_many : (Key.t list -> Bigstring.t option list) option;
   list_many : (Key.prefix list -> folder list) option;
   verify_all : Key.prefix -> [ `Queued of int | `Unsupported ];
-  discard :
-    chunk_prefix:Key.prefix ->
-    run:string ->
-    name:string ->
-    Key.t list ->
-    [ `Queued | `Unsupported ];
+  bucket_functions : bool;
   capabilities : Key.prefix -> caps;
   fast_read : bool;
   local_path : string option;

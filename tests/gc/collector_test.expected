@@ -92,6 +92,6 @@ after it exits: run: completed; promoted 7, reclaimed 0 (0 bytes)
 run: busy
 
 == a copy without queued deletion refuses a collection
-collect: refused: bucket: a remote copy without queued deletion would be sent one delete request per chunk
+collect: refused: bucket: a remote copy without a confirmed bucket function would be sent one delete request per chunk (gc --probe)
 abort: allowed
 dry run: bucket 0

@@ -1,0 +1,23 @@
+== no function deployed
+probe: false; confirmed: false; probe request left behind: false
+collect: refused: bucket: a remote copy without a confirmed bucket function would be sent one delete request per chunk (gc --probe)
+
+== the function deployed
+probe: true; confirmed: true
+collect: completed, 2 reclaimed
+generation settled: true (2); requests left: []
+bucket: live true, junk1 false, junk2 false
+
+== a missed notification: the request waits, G stays odd
+collect: completed, 1 reclaimed
+generation 3; outstanding: [a5c 1 keys]; junk3 on bucket true
+re-delivered: 1
+generation settled: true (4); outstanding: []; junk3 on bucket false
+
+== a chunk referenced again while its request waits is put back
+collect: completed, 1 reclaimed
+consumed as written; generation settled: true (6)
+restored on bucket: true
+
+== two batches of one shard make one request
+outstanding: [abc 2 keys]

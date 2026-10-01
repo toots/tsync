@@ -53,8 +53,8 @@ type survey = {
     marker.
 
     Refused with [Unsupported], unless [keep], while the collecting main would
-    owe deletions to a copy that is not a filesystem store: without queued
-    deletion that copy would get one request per chunk. *)
+    owe deletions to a remote copy whose bucket function this owner has not
+    confirmed: that copy would get one delete request per chunk. *)
 val run :
   ?budget:float ->
   ?pause:float ->

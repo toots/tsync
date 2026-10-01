@@ -161,6 +161,7 @@ type copy = {
   memo_m : Mutex.t;
   memo : Copy_memo.t;
   forwards : Rt.Semaphore.t;
+  discards : Discards.t;
   mutable running : running option;  (** under [memo_m] *)
 }
 
@@ -176,7 +177,10 @@ type core = {
   heard : (string, unit) Hashtbl.t;
   heard_m : Mutex.t;
   settle_pending : bool Atomic.t;
+  timing : timing;
 }
+
+and timing = { discard_poll : float; probe_poll : float; probe_wait : float }
 
 type t = { core : core; source_store : Store.t; whole : Store.t }
 
@@ -430,6 +434,10 @@ let without_forwards c f =
       done)
     f
 
+(* gc §5.7: a copy whose function this owner confirmed is told by requests;
+   the restore check waits until the function consumed each one. *)
+let queued c = c.member.store.bucket_functions && Discards.confirmed c.discards
+
 let run_job_body t src c r =
   guard t c.member.role ("copy to " ^ c.member.name);
   match r.job with
@@ -439,10 +447,26 @@ let run_job_body t src c r =
     | Collection_delete cd ->
         let ks = List.filter (fun k -> not (main_holds src k)) cd.keys in
         Copy_memo.forget c.memo (List.filter_map Key.chunk_of ks);
-        let markers = List.filter_map Key.marker_of ks in
-        without_forwards c (fun () ->
-            c.member.store.delete_multi (ks @ markers));
-        List.iter (fun k -> if main_holds src k then sync t src c k 0) cd.keys
+        if queued c then (
+          if ks <> [] then (
+            let p =
+              Discards.add c.discards
+                {
+                  run = cd.run;
+                  shard = cd.shard;
+                  generation = cd.generation;
+                  keys = List.map Key.to_string ks;
+                }
+            in
+            without_forwards c (fun () ->
+                c.member.store.put
+                  (Discards.request_key t.domain p)
+                  (Discards.body p.keys))))
+        else (
+          let markers = List.filter_map Key.marker_of ks in
+          without_forwards c (fun () ->
+              c.member.store.delete_multi (ks @ markers));
+          List.iter (fun k -> if main_holds src k then sync t src c k 0) cd.keys)
 
 let collection_owed t ~generation () =
   List.fold_left
@@ -458,7 +482,11 @@ let collection_owed t ~generation () =
                   | _ -> n)
             | `Gone -> n)
         n
-        (Dqueue.Records.list c.records))
+        (Dqueue.Records.list c.records)
+      + List.length
+          (List.filter
+             (fun (_, (p : Discards.pending)) -> p.generation = generation)
+             (Discards.pending c.discards)))
     0 t.copies
 
 (* Whether some main's run lock was busy, so G may still await settling. *)
@@ -605,7 +633,7 @@ let make_store t ~source_only =
                  (fun acc -> function
                    | `Queued n -> acc + n | `Unsupported -> acc)
                  0 answers));
-      discard = (fun ~chunk_prefix:_ ~run:_ ~name:_ _ -> `Unsupported);
+      bucket_functions = false;
       capabilities =
         (fun p ->
           let asked =
@@ -650,7 +678,12 @@ let make_store t ~source_only =
       traffic = None;
     }
 
-let create ~domain ~data_dir ~owner ~poke ~knowledge members =
+(* replication §7 DISCARD_POLL; object-store-common §7 PROBE_POLL and
+   FUNCTION_PROBE_WAIT. *)
+let default_timing = { discard_poll = 60.; probe_poll = 5.; probe_wait = 180. }
+
+let create ?(timing = default_timing) ~domain ~data_dir ~owner ~poke ~knowledge
+    members =
   let mains = List.filter (fun m -> m.role = Main) members in
   let archives = List.filter (fun m -> m.role = Read_only) members in
   let copy_members =
@@ -683,6 +716,7 @@ let create ~domain ~data_dir ~owner ~poke ~knowledge members =
           memo_m = Mutex.create ();
           memo = Copy_memo.create ~generation ();
           forwards = Rt.Semaphore.create ~name:"forwards" max_forwards;
+          discards = Discards.open_ ~dir;
           running = None;
         })
       copy_members
@@ -706,6 +740,7 @@ let create ~domain ~data_dir ~owner ~poke ~knowledge members =
       heard = Hashtbl.create 4;
       heard_m = Mutex.create ();
       settle_pending = Atomic.make false;
+      timing;
     }
   in
   {
@@ -721,12 +756,91 @@ let domain t = t.core.domain
 let members t =
   t.core.mains @ List.map (fun c -> c.member) t.core.copies @ t.core.archives
 
+(* replication §4.8: once a request is gone, every deleted key the main still
+   holds is put back before the deletion counts as settled. *)
+let check_discards t src c =
+  match Discards.pending c.discards with
+    | [] -> ()
+    | pending ->
+        guard t c.member.role ("check discard requests on " ^ c.member.name);
+        List.iter
+          (fun (id, (p : Discards.pending)) ->
+            if c.member.store.head_opt (Discards.request_key t.domain p) = None
+            then (
+              List.iter
+                (fun k ->
+                  match Key.of_string k with
+                    | Some k when main_holds src k -> sync t src c k 0
+                    | _ -> ())
+                p.keys;
+              Discards.remove c.discards id;
+              settle_later t))
+          pending
+
+let poll_discards t src =
+  let rec loop () =
+    Rt.sleep t.timing.discard_poll;
+    List.iter
+      (fun c ->
+        try check_discards t src c with
+          | (Stop.Stopping | Rt.Cancelled) as e -> raise e
+          | e ->
+              Log.warn "discard requests on %s: %s" c.member.name
+                (Printexc.to_string e))
+      t.copies;
+    loop ()
+  in
+  loop ()
+
+let probe_run = "0000000000000"
+let probe_shard = "000"
+
+(* object-store-common §3: an empty request a deployed function consumes;
+   still there after FUNCTION_PROBE_WAIT, it is removed and nothing is saved. *)
+let probe_copy t c =
+  guard t c.member.role ("probe the bucket function of " ^ c.member.name);
+  let key = Key.discard_job t.domain ~run:probe_run ~shard:probe_shard in
+  let store = c.member.store in
+  store.put key Bigstring.empty;
+  let deadline = Rt.now () +. t.timing.probe_wait in
+  let rec wait () =
+    if store.head_opt key = None then true
+    else if Rt.now () > deadline then false
+    else (
+      Rt.sleep t.timing.probe_poll;
+      wait ())
+  in
+  let confirmed = wait () in
+  if confirmed then
+    Discards.record_confirmation c.discards ~at:(Unix.gettimeofday ())
+  else ignore (store.delete key);
+  Log.info "bucket function of %s: %s" c.member.name
+    (if confirmed then "confirmed" else "not confirmed");
+  confirmed
+
+let probe_due t =
+  List.iter
+    (fun c ->
+      if c.member.store.bucket_functions && not (Discards.confirmed c.discards)
+      then
+        Rt.spawn ~name:"probe bucket function" (fun () ->
+            try ignore (probe_copy t c) with
+              | (Stop.Stopping | Rt.Cancelled) as e -> raise e
+              | e ->
+                  Log.warn "probe of %s: %s" c.member.name
+                    (Printexc.to_string e)))
+    t.copies
+
 let start ?(paused = false) (t : t) =
   if t.core.owner then (
     settle_later t.core;
     List.iter
       (fun c -> Dqueue.start ~paused c.queue (run_job t.core t.source_store c))
-      t.core.copies)
+      t.core.copies;
+    if List.exists (fun c -> c.member.store.bucket_functions) t.core.copies then (
+      probe_due t.core;
+      Rt.spawn ~name:"discard requests" (fun () ->
+          poll_discards t.core t.source_store)))
 
 let rescan t = List.iter (fun c -> Dqueue.rescan c.queue) t.core.copies
 
@@ -801,3 +915,67 @@ let submit_collection_delete t (m : member) ~keys ~run ~shard ~generation =
     t.core.copies
 
 let collection_owed t ~generation = collection_owed t.core ~generation ()
+
+let copy_of t (m : member) =
+  List.find_opt (fun c -> c.member.name = m.name) t.core.copies
+
+let function_confirmed t m =
+  match copy_of t m with Some c -> queued c | None -> false
+
+let probe t m =
+  match copy_of t m with
+    | Some c when c.member.store.bucket_functions -> probe_copy t.core c
+    | _ -> false
+
+type outstanding = { copy : string; request : Key.t; keys : int; age : float }
+
+let requests c d =
+  List.filter
+    (fun (e : Store.entry) -> Key.parse_discard_job e.key <> None)
+    (c.member.store.list_prefix (Key.gc_jobs d))
+
+let outstanding t =
+  let now = Unix.gettimeofday () in
+  List.concat_map
+    (fun c ->
+      if not c.member.store.bucket_functions then []
+      else
+        List.map
+          (fun (e : Store.entry) ->
+            {
+              copy = c.member.name;
+              request = e.key;
+              keys =
+                List.length
+                  (Option.fold ~none:[] ~some:Discards.keys_of_body
+                     (c.member.store.get_opt e.key));
+              age = now -. e.last_modified;
+            })
+          (requests c t.core.domain))
+    t.core.copies
+
+(* gc §5.7 re-delivery: only the keys still absent from the collected main,
+   which raises a fresh notification; a request left with none is deleted. *)
+let retry_outstanding t =
+  List.fold_left
+    (fun n c ->
+      if not c.member.store.bucket_functions then n
+      else (
+        guard t c.member ("re-deliver requests to " ^ c.member.name);
+        List.fold_left
+          (fun n (e : Store.entry) ->
+            match c.member.store.get_opt e.key with
+              | None -> n
+              | Some b ->
+                  (match
+                     List.filter
+                       (fun k -> not (main_holds t.source_store k))
+                       (Discards.keys_of_body b)
+                   with
+                    | [] -> ignore (c.member.store.delete e.key)
+                    | keys ->
+                        c.member.store.put e.key
+                          (Discards.body (List.map Key.to_string keys)));
+                  n + 1)
+          n (requests c t.core.domain)))
+    0 t.core.copies

@@ -73,49 +73,92 @@ let print_status (s : Collector.status) =
        Printf.sprintf ", %d deletion batches owed to copies" s.owed
      else "")
 
-let gc apply verify abort budget show_status name verbose =
+(* The copies' side of a collection (gc §5.7): the bucket function, and the
+   discard requests it has not consumed. *)
+let copies_action act (dom : Tsync_domain.Domain.t) =
+  let c = dom.composite in
+  match act with
+    | `Probe ->
+        let copies =
+          List.filter
+            (fun (m : Tsync_store.Composite.member) ->
+              (m.role = Replica || m.role = Backfill)
+              && m.store.bucket_functions)
+            (Tsync_store.Composite.members c)
+        in
+        if copies = [] then
+          say "no copy of this domain can run a bucket function";
+        List.iter
+          (fun (m : Tsync_store.Composite.member) ->
+            say "%s: probing its bucket function (up to 3 minutes)" m.name;
+            say "  %s"
+              (if Tsync_store.Composite.probe c m then "confirmed"
+               else "not confirmed: requests were not consumed"))
+          copies;
+        0
+    | `Outstanding ->
+        (match Tsync_store.Composite.outstanding c with
+          | [] -> say "no discard request outstanding"
+          | l ->
+              List.iter
+                (fun (o : Tsync_store.Composite.outstanding) ->
+                  say "%s: %s, %d keys, %.0f min old" o.copy
+                    (Key.to_string o.request) o.keys (o.age /. 60.))
+                l);
+        0
+    | `Retry ->
+        say "%d discard requests re-delivered"
+          (Tsync_store.Composite.retry_outstanding c);
+        0
+
+let gc apply verify abort budget show_status copies name verbose =
   set_verbose verbose;
   run (fun () ->
-      if show_status then (
-        let config = config () in
-        let dom =
-          Tsync_domain.Domain.build ~owner:false config (domain ?name config)
-        in
-        match Collector.status dom.composite with
-          | [] ->
-              fail
-                "no main of this domain is a filesystem store local to this \
-                 host"
-          | l ->
-              List.iter print_status l;
-              0)
-      else
-        store_command
-          ~what:(if abort then "tsync gc --abort" else "tsync gc")
-          name
-          (fun dom ->
-            let c = dom.composite in
-            if apply || abort then (
-              match Collector.run ?budget ~verify ~keep:abort c with
-                | Error f -> failure f
-                | Ok stats ->
-                    List.iter print_stats stats;
-                    if
-                      List.for_all
-                        (fun (s : Collector.stats) -> s.outcome = Completed)
-                        stats
-                    then 0
-                    else 1)
-            else (
-              match Collector.dry_run ~verify c with
-                | Error f -> failure f
-                | Ok surveys ->
-                    List.iter
-                      (function
-                        | Ok s -> print_survey s
-                        | Error reason -> say "survey stopped: %s" reason)
-                      surveys;
-                    if List.for_all Result.is_ok surveys then 0 else 1)))
+      match copies with
+        | Some act -> store_command ~what:"tsync gc" name (copies_action act)
+        | None ->
+            if show_status then (
+              let config = config () in
+              let dom =
+                Tsync_domain.Domain.build ~owner:false config
+                  (domain ?name config)
+              in
+              match Collector.status dom.composite with
+                | [] ->
+                    fail
+                      "no main of this domain is a filesystem store local to \
+                       this host"
+                | l ->
+                    List.iter print_status l;
+                    0)
+            else
+              store_command
+                ~what:(if abort then "tsync gc --abort" else "tsync gc")
+                name
+                (fun dom ->
+                  let c = dom.composite in
+                  if apply || abort then (
+                    match Collector.run ?budget ~verify ~keep:abort c with
+                      | Error f -> failure f
+                      | Ok stats ->
+                          List.iter print_stats stats;
+                          if
+                            List.for_all
+                              (fun (s : Collector.stats) ->
+                                s.outcome = Completed)
+                              stats
+                          then 0
+                          else 1)
+                  else (
+                    match Collector.dry_run ~verify c with
+                      | Error f -> failure f
+                      | Ok surveys ->
+                          List.iter
+                            (function
+                              | Ok s -> print_survey s
+                              | Error reason -> say "survey stopped: %s" reason)
+                            surveys;
+                          if List.for_all Result.is_ok surveys then 0 else 1)))
 
 let apply_arg =
   Arg.(value & flag & info ["apply"] ~doc:"Act; without it, only report.")
@@ -137,12 +180,29 @@ let gc_cmd =
     Arg.(
       value & flag
       & info ["status"] ~doc:"Show the collection state; change nothing.")
+  and copies =
+    Arg.(
+      value
+      & vflag None
+          [
+            ( Some `Probe,
+              info ["probe"]
+                ~doc:"Check that each copy's bucket function is deployed." );
+            ( Some `Outstanding,
+              info ["outstanding"]
+                ~doc:"List discard requests the copies have not consumed." );
+            ( Some `Retry,
+              info ["retry-outstanding"]
+                ~doc:
+                  "Rewrite outstanding requests with the keys still to delete, \
+                   firing them again." );
+          ])
   in
   cmd "gc"
     ~doc:"Collect chunks no file or version names (a dry run by default)."
     Term.(
-      const gc $ apply_arg $ verify $ abort $ budget $ show_status $ domain_arg
-      $ verbose)
+      const gc $ apply_arg $ verify $ abort $ budget $ show_status $ copies
+      $ domain_arg $ verbose)
 
 (* 07 §5.3: a date at local midnight. *)
 let cutoff_of date =

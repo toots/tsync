@@ -53,11 +53,19 @@ val escape_name : string -> string
 
 type t
 
+(** How often the owner checks its pending discard requests, and how the
+    bucket-function probe polls and how long it waits. *)
+type timing = { discard_poll : float; probe_poll : float; probe_wait : float }
+
+(** 60 s, 5 s and 180 s. *)
+val default_timing : timing
+
 (** [data_dir] holds the copies' job logs under
     [deferred-pending/<domain>/<escaped name>/]. A process that is not the
     domain's [owner] submits copy jobs and calls [poke] instead of running them.
 *)
 val create :
+  ?timing:timing ->
   domain:Domain_name.t ->
   data_dir:string ->
   owner:bool ->
@@ -129,3 +137,20 @@ val submit_collection_delete :
 (** Collection deletions of this generation not yet settled on any copy, in
     this process's queues or submitted to the owner. *)
 val collection_owed : t -> generation:int -> int
+
+(** Whether this owner confirmed the copy's bucket function within its validity:
+    its collection deletions then go through discard requests (gc §5.7). *)
+val function_confirmed : t -> member -> bool
+
+(** Probe the copy's bucket function now (object-store-common §3), saving a
+    confirmation; [false] for a store that declares none. *)
+val probe : t -> member -> bool
+
+(** A discard request present on a copy, with the keys it names and its age. *)
+type outstanding = { copy : string; request : Key.t; keys : int; age : float }
+
+val outstanding : t -> outstanding list
+
+(** Rewrite each outstanding request with only the keys the mains still lack,
+    deleting one left with none; how many were rewritten or deleted. *)
+val retry_outstanding : t -> int

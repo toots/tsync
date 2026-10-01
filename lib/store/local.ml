@@ -335,7 +335,7 @@ let create ?(verify_writes = true) ~name root =
       get_many = None;
       list_many = None;
       verify_all = (fun _ -> `Unsupported);
-      discard = (fun ~chunk_prefix:_ ~run:_ ~name:_ _ -> `Unsupported);
+      bucket_functions = false;
       capabilities = (fun _ -> { Store.no_caps with verified = verify_writes });
       fast_read = true;
       local_path = Some root;

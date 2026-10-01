@@ -456,13 +456,15 @@ let status composite =
       })
     (targets composite)
 
-(* ponytail: every copy that is not a filesystem store is refused until queued
-   deletion (gc §5.7) exists; then only copies without a confirmed deleter. *)
+(* gc §5.7: a remote copy is told by requests, so it needs a function this
+   owner confirmed; deleting there one request per chunk is refused. *)
 let direct_deletes_refused composite =
   match targets composite with
     | m :: _ ->
         List.filter
-          (fun (c : Composite.member) -> c.store.local_path = None)
+          (fun (c : Composite.member) ->
+            c.store.local_path = None
+            && not (Composite.function_confirmed composite c))
           m.tells
     | [] -> []
 
@@ -473,8 +475,8 @@ let run ?budget ?pause ?(verify = false) ?(keep = false) composite =
         Error
           (Unsupported
              (Printf.sprintf
-                "%s: a remote copy without queued deletion would be sent one \
-                 delete request per chunk"
+                "%s: a remote copy without a confirmed bucket function would \
+                 be sent one delete request per chunk (gc --probe)"
                 (String.concat ", "
                    (List.map (fun (c : Composite.member) -> c.name) copies))))
     | _ -> each composite (session ?budget ?pause ~verify ~keep composite d)
