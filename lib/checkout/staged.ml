@@ -182,11 +182,16 @@ let manifest_path t rel = Filename.concat t.manifests (Names.escape_path rel)
 let body_path t id = Filename.concat t.chunks id
 let whole_path t id = Filename.concat t.whole id
 
+(* Staged manifests mirror the tree, so a path with edits beneath it is a
+   directory here: that path itself has no edit. *)
 let read t rel =
-  match Fs.read_file_opt (manifest_path t rel) with
-    | None -> `Absent
-    | Some b -> (
-        match decode b with Some e -> `Edit e | None -> `Unparseable)
+  let p = manifest_path t rel in
+  if Fs.is_dir p then `Absent
+  else (
+    match Fs.read_file_opt p with
+      | None -> `Absent
+      | Some b -> (
+          match decode b with Some e -> `Edit e | None -> `Unparseable))
 
 let edit t rel = match read t rel with `Edit e -> Some e | _ -> None
 
