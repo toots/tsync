@@ -71,7 +71,7 @@ let release fd =
   Fs.funlock fd;
   Unix.close fd
 
-let stop_on_signals () =
+let stop_on_signals ?second () =
   let signals = [Sys.sigterm; Sys.sigint] in
   ignore (Thread.sigmask SIG_BLOCK signals);
   ignore
@@ -79,9 +79,12 @@ let stop_on_signals () =
        (fun () ->
          while true do
            let s = Thread.wait_signal signals in
-           Log.info "received %s; stopping"
-             (if s = Sys.sigterm then "SIGTERM" else "SIGINT");
-           Stop.request ()
+           match second with
+             | Some f when Stop.requested () -> f ()
+             | _ ->
+                 Log.info "received %s; stopping"
+                   (if s = Sys.sigterm then "SIGTERM" else "SIGINT");
+                 Stop.request ()
          done)
        ())
 

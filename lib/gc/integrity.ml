@@ -87,7 +87,7 @@ module Make (C : Context.S) = struct
 
   (* Every folder a walk from [id] reaches, with its paths; markers whose
      anchor disowns them are reported, not followed. *)
-  let walk ~reached ~disowned ~unanchored id ~root_path =
+  let walk ~cancelled ~reached ~disowned ~unanchored id ~root_path =
     T.fold_tree
       ~on_unusable:
         (Skip
@@ -96,6 +96,7 @@ module Make (C : Context.S) = struct
            | _ -> ()))
       id ~root_path
       (fun () parent_path (e : Tree.entry) ->
+        if cancelled () then Fail.raise_ Fail.Refused "cancelled";
         match e.body with
           | Dir m ->
               let path = Names.join parent_path m.name in
@@ -198,7 +199,7 @@ module Make (C : Context.S) = struct
     and unanchored = ref [] in
     Narrate.say narrate "%s: walking the tree from the root"
       (Domain_name.to_string d);
-    walk ~reached ~disowned ~unanchored Folder_id.root ~root_path:"";
+    walk ~cancelled ~reached ~disowned ~unanchored Folder_id.root ~root_path:"";
     let live = Hashtbl.copy reached in
     let trashed = T.trashed () in
     Narrate.say narrate "  %s reached; walking %s"
@@ -225,7 +226,8 @@ module Make (C : Context.S) = struct
                 :: !unanchored;
             if not (cancelled ()) then (
               Hashtbl.replace reached (Folder_id.to_string f.id) [];
-              walk ~reached ~disowned ~unanchored f.id ~root_path:f.name);
+              walk ~cancelled ~reached ~disowned ~unanchored f.id
+                ~root_path:f.name);
             []))
         trashed
     in

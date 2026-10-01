@@ -174,6 +174,11 @@ progress rather than by a total deadline (§4.3):
   without cancelling does not stop the job; it runs to completion (§4.3).
 - Two jobs that would conflict on one domain (two collections, a collection and a purge of the same
   folder) do not run at once: the second is refused `busy`, naming the first.
+- **Bounded stop.** As far as possible, a command and the work it asks for stop within a reasonable
+  time of being asked. A job checks for cancellation at units small enough that the next boundary
+  comes within seconds (a folder of a walk, a shard, a batch of keys), and every wait it makes is
+  bounded by a timeout, a deadline or a stall rule. A second interrupt ends the CLI at once without
+  waiting for the job's answer; the job still stops at its next boundary.
 
 ### 2.6 Pause
 

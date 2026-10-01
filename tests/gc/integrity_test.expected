@@ -12,6 +12,7 @@ healthy false, 1 tombstones
   corrupt on main: <own copy>
   corrupt on main: <nowhere>
   corrupt on replica: <on main>
+a cancelled report: cancelled
 
 == repair, dry run
   folder <twice> is at 2 paths: live/twice-again, twice -> left

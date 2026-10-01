@@ -32,7 +32,11 @@ let job ?name verbose job =
 (* Before the runtime starts, so every thread inherits the mask. *)
 let run_job ?name verbose j =
   set_verbose verbose;
-  Tsync_owner.Owner.stop_on_signals ();
+  Tsync_owner.Owner.stop_on_signals
+    ~second:(fun () ->
+      prerr_endline "tsync: interrupted again; exiting now";
+      Unix._exit 130)
+    ();
   run (fun () -> job ?name verbose j)
 
 let print_status (s : Collector.status) =

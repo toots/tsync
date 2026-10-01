@@ -178,6 +178,10 @@ let () =
       in
       p "== report\n";
       show (I.report ());
+      p "a cancelled report: %s\n"
+        (match I.report ~cancelled:(Fun.const true) () with
+          | _ -> "finished"
+          | exception Fail.E f -> f.reason);
       p "\n== repair, dry run\n";
       let before = listing () in
       repair ~apply:false;

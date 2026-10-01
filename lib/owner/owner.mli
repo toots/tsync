@@ -30,9 +30,10 @@ val holder : Domain_name.t -> holder option
 (** Exit status of an owner that found its domain owned. *)
 val owner_held : int
 
-(** SIGTERM and SIGINT request the process stop. Call before the runtime starts
-    any domain, so every thread inherits the mask. *)
-val stop_on_signals : unit -> unit
+(** SIGTERM and SIGINT request the process stop; with [second], a signal after
+    that runs it. Call before the runtime starts any domain, so every thread
+    inherits the mask. *)
+val stop_on_signals : ?second:(unit -> unit) -> unit -> unit
 
 (** What a presenting frontend does for its domain once its engine has started:
     the hooks the handler calls, and what presents it once the socket serves. *)
