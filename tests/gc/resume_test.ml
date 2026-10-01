@@ -115,7 +115,10 @@ let () =
             | _ -> ());
       case root "F removed, R not yet deleted"
         (fun ~main ~c ~rename:_ ~s_dir:_ ~f_dir:_ ~record ->
-          (* The doom step recorded the copy's deletion before unlinking. *)
+          (* The doom step owes the copy its deletion while the chunk is
+             outgoing; here it is gone from the main first, so the delete
+             job's restore check cannot find it surviving. *)
+          ignore (main.delete (Key.chunk d junk));
           (match Composite.members c with
             | _ :: replica :: _ ->
                 Composite.submit_collection_delete c replica
@@ -123,7 +126,6 @@ let () =
                   ~run:(Key.run_name started) ~shard:(Chunk_key.shard junk)
                   ~generation:1
             | _ -> ());
-          ignore (main.delete (Key.chunk d junk));
           Gc_generation.write main d 1;
           record
             { phase = Closing; started; cursor = "fff"; generation = Some 1 });
