@@ -208,9 +208,7 @@ let () =
       p "cancelled: %b\n" r.cancelled;
       p "\n== expire, cancelled at the first share read\n";
       share_read := false;
-      (match
-         R.expire ~cancelled:(fun () -> !share_read) ~now ~cutoff ()
-       with
+      (match R.expire ~cancelled:(fun () -> !share_read) ~now ~cutoff () with
         | r ->
             p "ran to the end: shares %d, cancelled %b\n"
               r.counts.shares_deleted r.cancelled
