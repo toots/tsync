@@ -379,5 +379,96 @@ let rsync_cmd =
        sending only what differs (exit 1 if anything failed)."
     Term.(const rsync $ src $ dst $ move $ dry_run $ domain_arg $ verbose)
 
+(* 07 §2.5 read class: export changes no domain state, so it runs here,
+   reading the stores. *)
+let export args source jobs name verbose =
+  match List.rev args with
+    | [] ->
+        prerr_endline "tsync: export needs a destination directory";
+        2
+    | dir :: rpaths ->
+        set_verbose verbose;
+        Tsync_owner.Owner.stop_on_signals
+          ~second:(fun () ->
+            prerr_endline "tsync: interrupted again; exiting now";
+            Unix._exit 130)
+          ();
+        let dst =
+          if Filename.is_relative dir then Filename.concat (Sys.getcwd ()) dir
+          else dir
+        in
+        let paths =
+          match List.rev rpaths with
+            | [] -> [""]
+            | l ->
+                List.map
+                  (fun p ->
+                    String.concat "/"
+                      (List.filter (( <> ) "") (String.split_on_char '/' p)))
+                  l
+        in
+        run (fun () ->
+            let config = config () in
+            let dom =
+              Tsync_domain.Domain.build ~owner:false config
+                (domain ?name config)
+            in
+            let module X =
+              Tsync_sync.Export.Make
+                ((val Tsync_domain.Domain.context ?reading_from:source
+                        ?reading_at_most:jobs dom)) in
+            let r =
+              X.export ~narrate:(Display.narrate ()) ~cancelled:Stop.requested
+                ~cache_root:dom.cache_root ~dst paths
+            in
+            Display.clear ();
+            say "exported %s (%s written), %d already there, %d failed%s"
+              (Narrate.count r.exported "file")
+              (Narrate.size r.bytes) r.already_there (List.length r.failed)
+              (if r.cancelled then "; cancelled before the end" else "");
+            List.iter (fun (d, why) -> say "  %s: %s" d why) r.failed;
+            List.iter
+              (fun p ->
+                prerr_endline
+                  ("tsync: " ^ p
+                 ^ " has local changes not yet published; its published \
+                    version was exported"))
+              r.pending;
+            if r.failed = [] && r.pending = [] && not r.cancelled then 0 else 1)
+
+let export_cmd =
+  let args =
+    Arg.(
+      non_empty & pos_all string []
+      & info [] ~docv:"PATH... DIR"
+          ~doc:
+            "Domain paths to export (the whole domain when none), then the \
+             directory.")
+  and source =
+    Arg.(
+      value
+      & opt (some string) None
+      & info ["source"] ~docv:"MEMBER" ~doc:"Read from this member only.")
+  and jobs =
+    Arg.(
+      value
+      & opt (some int) None
+      & info ["j"] ~docv:"N" ~doc:"Read at most N files at once.")
+  in
+  cmd "export"
+    ~doc:
+      "Write a domain's files to a local directory from the stores, resuming \
+       an interrupted file (exit 1 on failures or on unpublished local \
+       changes)."
+    Term.(const export $ args $ source $ jobs $ domain_arg $ verbose)
+
 let cmds =
-  [gc_cmd; expire_cmd; trash_cmd; data_integrity_cmd; import_cmd; rsync_cmd]
+  [
+    gc_cmd;
+    expire_cmd;
+    trash_cmd;
+    data_integrity_cmd;
+    import_cmd;
+    rsync_cmd;
+    export_cmd;
+  ]

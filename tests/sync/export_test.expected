@@ -1,0 +1,33 @@
+== landing: the root, a file, a folder
+all: exported 3 (40008 bytes), already there 0, failed 0
+  notes/a.txt (5)  notes/deep/b.bin (40000)  top.txt (3)
+one: exported 1 (40000 bytes), already there 0, failed 0
+  b.bin (40000)
+folder: exported 1 (40000 bytes), already there 0, failed 0
+  deep/b.bin (40000)
+  content equal: true
+
+== a rerun finds everything there
+all: exported 0 (0 bytes), already there 3, failed 0
+
+== cancelled partway, then resumed
+resumed: exported 0 (0 bytes), already there 0, failed 1, cancelled
+  failed b.bin: cancelled
+resumed: exported 1 (39992 bytes), already there 0, failed 0
+  content equal: true
+
+== changed upstream since an interrupted export: started over
+changed: exported 0 (0 bytes), already there 0, failed 2, cancelled
+  failed a.txt: cancelled
+  failed b.bin: cancelled
+changed: exported 2 (40001 bytes), already there 0, failed 0
+  content is the new one: true
+
+== refusals
+missing: refused: nowhere: no such file or folder in docs
+clash: refused: two paths land on clash/a.txt
+
+== unpublished edits are listed
+pending: exported 2 (40005 bytes), already there 0, failed 0
+  pending notes/a.txt
+  a.txt exported as published: true

@@ -38,8 +38,14 @@ val engine : t -> (module Engine.S)
 val probe : Tsync_core.Domain_name.t -> Store.t -> unit
 
 (** The remote layer's view of the domain, for readers that are not its owner.
-*)
-val context : t -> (module Tsync_remote.Context.S)
+    [reading_from] sends every read to that member, writes still going through
+    the composite; [reading_at_most] bounds parallel reads (05 §3.1). INVALID
+    for an unknown member or a bound below 1. *)
+val context :
+  ?reading_from:string ->
+  ?reading_at_most:int ->
+  t ->
+  (module Tsync_remote.Context.S)
 
 (** The composite store. *)
 val store : t -> Store.t

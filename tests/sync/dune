@@ -105,3 +105,24 @@
  (alias runtest)
  (action
   (diff rsync_test.expected rsync_test.output)))
+
+(executable
+ (name export_test)
+ (modules export_test)
+ (libraries
+  tsync_core
+  tsync_store
+  tsync_remote
+  tsync_checkout
+  tsync_sync
+  unix))
+
+(rule
+ (with-stdout-to
+  export_test.output
+  (run ./export_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff export_test.expected export_test.output)))

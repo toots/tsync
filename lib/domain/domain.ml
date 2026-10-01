@@ -82,14 +82,52 @@ let build ?(owner = true) ?(poke = ignore) ?(lazy_tree = false) ?cache_root
     poke;
   }
 
-let context t : (module Tsync_remote.Context.S) =
+(* 05 §3.1 reading_from: reads go to the member, writes still through the
+   composite, so deferred targets still fill. *)
+let reading_from t name =
+  match
+    List.find_opt
+      (fun (m : Composite.member) -> m.name = name)
+      (Composite.members t.composite)
+  with
+    | None ->
+        Fail.raise_ Fail.Invalid "%s has no member named %s"
+          (Domain_name.to_string t.name)
+          name
+    | Some m ->
+        let s = m.store in
+        {
+          (Composite.store t.composite) with
+          get_opt = s.get_opt;
+          get_range = s.get_range;
+          head_opt = s.head_opt;
+          list_prefix = s.list_prefix;
+          watch = s.watch;
+          get_many = s.get_many;
+          list_many = s.list_many;
+          health = s.health;
+        }
+
+let context ?reading_from:source ?reading_at_most t :
+    (module Tsync_remote.Context.S) =
+  let store =
+    match source with
+      | Some name -> reading_from t name
+      | None -> Composite.store t.composite
+  in
+  let max_downloads =
+    match reading_at_most with
+      | Some n when n < 1 -> Fail.raise_ Fail.Invalid "-j needs at least 1"
+      | Some n -> n
+      | None -> t.config.max_downloads
+  in
   (module struct
     let domain = t.name
-    let store = Composite.store t.composite
+    let store = store
     let composite = t.composite
     let versioning = t.domain.versioning
     let chunk_size_config = t.domain.chunk_size
-    let max_downloads = t.config.max_downloads
+    let max_downloads = max_downloads
     let max_chunk_buffers = t.config.max_chunk_buffers
   end)
 
