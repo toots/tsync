@@ -126,3 +126,24 @@
  (alias runtest)
  (action
   (diff export_test.expected export_test.output)))
+
+(executable
+ (name recover_test)
+ (modules recover_test)
+ (libraries
+  tsync_core
+  tsync_store
+  tsync_checkout
+  tsync_sync
+  unix))
+
+(rule
+ (with-stdout-to
+  recover_test.output
+  (run ./recover_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff recover_test.expected recover_test.output)))
+

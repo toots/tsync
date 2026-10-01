@@ -1210,6 +1210,7 @@ module Make (C : Engine_ctx.S) = struct
               (fun b -> Hashtbl.replace named b ())
               (Staged.bodies_named e)
         | `Bad p ->
+            let body = Option.value ~default:"" (Fs.read_file_opt p) in
             let base = Filename.basename p in
             if not (Staged.is_set_aside_name base) then (
               let rec pick n =
@@ -1220,7 +1221,6 @@ module Make (C : Engine_ctx.S) = struct
               in
               Fs.rename p (pick 1);
               Log.warn "set aside the undecodable staged manifest %s" p);
-            let body = Option.value ~default:"" (Fs.read_file_opt p) in
             let re = hex_runs body in
             List.iter (fun b -> Hashtbl.replace named b ()) re)
       ();
