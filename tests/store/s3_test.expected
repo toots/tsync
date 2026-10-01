@@ -1,0 +1,56 @@
+== SigV4 (backends/s3 §3)
+amz date: 20130524T000000Z
+GET object: true
+PUT object: true
+GET bucket: true
+key encoding: tsync/d/x/a%2Bb%25c%20d~%C3%A9
+
+== round trips
+get_opt a: "hello"; absent: none; get absent: absent
+head a size: 5
+chunk-sized body identical: true
+copy: "hello"; copy of absent: absent
+
+== ranges
+[0,+3) "012"
+[4,+2) "45"
+[7,+3) "789"
+[0,+10) "0123456789"
+[7,+100) "789"
+[10,+5) ""
+[20,+1) ""
+absent: none; length 0: invalid
+
+== claims
+five racing claims: 1 won, losers told the holder: true
+later claim: held true
+same body again: won
+free name: won
+
+== delete
+delete: true then false
+delete_multi over 2100 keys, survivors left: 0
+
+== awkward keys
+"tsync/d/x/& < > \" ' + % # ? space" round-trips: true
+"tsync/d/x/\195\169lan \226\156\147" round-trips: true
+listed: true
+after delete_multi: 0 listed
+invalid keys refused before anything: invalid invalid invalid invalid invalid
+
+== listing
+all: a,b,c,d,e
+max_keys 2: a,b
+empty prefix: 0
+
+== capabilities
+verified false, share_url none
+
+== s3 wire
+clock off: refused/denied, get: local clock is off by more than 15 minutes
+wrong region: refused/other, get: the bucket is in another region or endpoint (region eu-west-1)
+claim on a provider without If-None-Match: refused/other, s3: this store cannot claim a name
+a provider ignoring If-None-Match: refused/other, s3: this store ignores If-None-Match, so it cannot claim a name
+and again: refused/other, s3: this store ignores If-None-Match, so it cannot claim a name
+a provider honouring it: won
+every request signed correctly: true (12 requests)

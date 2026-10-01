@@ -163,3 +163,35 @@
  (alias runtest)
  (action
   (diff watch_test.expected watch_test.output)))
+
+(executable
+ (name s3_test)
+ (modules s3_test)
+ (libraries
+  contract
+  tsync_core
+  tsync_store
+  tsync_s3
+  tsync_http
+  unix
+  ptime
+  base64
+  digestif))
+
+(rule
+ (deps
+  (env_var TSYNC_CI_S3_BUCKET)
+  (env_var TSYNC_CI_S3_ACCESS_KEY_ID)
+  (env_var TSYNC_CI_S3_SECRET_ACCESS_KEY)
+  (env_var TSYNC_CI_S3_ENDPOINT)
+  (env_var TSYNC_CI_S3_REGION)
+  (env_var TSYNC_CI_REQUIRE_REAL))
+ (action
+  (with-stdout-to
+   s3_test.output
+   (run ./s3_test.exe))))
+
+(rule
+ (alias runtest)
+ (action
+  (diff s3_test.expected s3_test.output)))
