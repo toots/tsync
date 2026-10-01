@@ -69,3 +69,18 @@
  (alias runtest)
  (action
   (diff import_test.expected import_test.output)))
+
+(executable
+ (name rsync_plan_test)
+ (modules rsync_plan_test)
+ (libraries tsync_core tsync_sync))
+
+(rule
+ (with-stdout-to
+  rsync_plan_test.output
+  (run ./rsync_plan_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff rsync_plan_test.expected rsync_plan_test.output)))
