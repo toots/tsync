@@ -157,6 +157,11 @@ module Make (C : Context.S) = struct
   let upload_chunks ?(cancel = Atomic.make false) ?(progress = fun _ -> ())
       ?(sent = fun _ -> ()) ~name ~size ~chunk_size ~mtime source =
     let count = Chunking.manifest_count ~size ~cs:chunk_size in
+    (* The chunks go up in parallel, possibly on several domains, and a caller
+       counting into a ref would lose updates. *)
+    let m = Mutex.create () in
+    let sent n = Mutex.protect m (fun () -> sent n)
+    and progress n = Mutex.protect m (fun () -> progress n) in
     let one i =
       if Atomic.get cancel then raise Rt.Cancelled;
       Stop.check ();

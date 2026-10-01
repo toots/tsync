@@ -40,7 +40,7 @@ module Make (_ : Context.S) : sig
 
   (** Put every chunk the store does not know and build the manifest; nothing is
       published. A marked chunk is re-sent rather than deduplicated. [progress]
-      hears every chunk read, [sent] only those put. *)
+      hears every chunk read, [sent] only those put, one call at a time. *)
   val upload_chunks :
     ?cancel:bool Atomic.t ->
     ?progress:(int -> unit) ->

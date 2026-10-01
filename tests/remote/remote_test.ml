@@ -115,6 +115,20 @@ let () =
       let b = upload "b.txt" "0123456789abcdef" in
       p "a: %d chunks, b: %d chunks, chunk objects: %d\n" a.count b.count
         (List.length (main.list_prefix (Key.chunks d)));
+      (let n = 400 in
+       let total = ref 0 and calls = Atomic.make 0 in
+       let content = String.init (n * 8) (fun i -> Char.chr (i mod 251)) in
+       ignore
+         (R.upload_chunks ~name:"counted" ~size:(n * 8) ~chunk_size:8 ~mtime:1.
+            ~sent:(fun k ->
+              let seen = !total in
+              Atomic.incr calls;
+              Thread.yield ();
+              total := seen + k)
+            (fun i ->
+              Bytes (Bigstring.of_string (String.sub content (i * 8) 8))));
+       p "parallel chunk uploads count every byte sent: %b\n"
+         (!total = 8 * Atomic.get calls));
       let e = upload "empty" "" in
       p "empty file names the empty chunk once: %b\n"
         (e.count = 1 && Chunk_key.equal (Manifest.key e 0) Chunk_key.empty);
