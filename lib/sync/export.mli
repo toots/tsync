@@ -20,6 +20,13 @@ type report = {
 (** [EXPORT_MTIME_SLACK]. *)
 val mtime_slack : float
 
+(** [EXPORT_RECORD_GRACE]: 30 days. *)
+val record_grace : float
+
+(** The owner's daily sweep (04 §4.11): records older than the grace that no
+    export holds locked are removed; how many. *)
+val sweep_records : cache_root:string -> Domain_name.t -> int
+
 module Make (_ : Tsync_remote.Context.S) : sig
   (** [paths] are domain-relative ([""] is the root); [dst] must be absolute. A
       missing path, a [.] or [..] segment, or two paths landing on one

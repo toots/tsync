@@ -30,3 +30,8 @@ clash: refused: two paths land on clash/a.txt
 pending: exported 2 (40005 bytes), already there 0, failed 0
   pending notes/a.txt
   a.txt exported as published: true
+
+== the owner's sweep of export records
+a second lock on the held record is refused: true
+removed 1
+stale gone true, held kept true, fresh kept true

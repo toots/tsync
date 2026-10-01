@@ -143,5 +143,31 @@ let () =
       p "  a.txt exported as published: %b\n"
         (read (Filename.concat root "pending/notes/a.txt") = "alpha");
       A.set_paused false;
-      drain (module A));
+      drain (module A);
+      p "\n== the owner's sweep of export records\n";
+      let dir = Filename.concat cache_root "docs/exports" in
+      Fs.mkdir_p dir;
+      let old = Unix.gettimeofday () -. Export.record_grace -. 86400. in
+      let make name age =
+        let path = Filename.concat dir name in
+        Out_channel.with_open_bin path (fun oc ->
+            output_string oc "tsync-export 1\n");
+        Unix.utimes path age age;
+        path
+      in
+      let stale = make "stale" old
+      and held = make "held" old
+      and fresh = make "fresh" (Unix.gettimeofday ()) in
+      let lock = Fs.openfile held [O_RDWR] in
+      ignore (Fs.flock ~block:false lock);
+      let others =
+        Fs.with_fd (Fs.openfile held [O_RDWR]) (fun fd ->
+            Fs.flock ~block:false fd)
+      in
+      p "a second lock on the held record is refused: %b\n" (not others);
+      p "removed %d\n" (Export.sweep_records ~cache_root (Domain_name.v "docs"));
+      p "stale gone %b, held kept %b, fresh kept %b\n"
+        (not (Sys.file_exists stale))
+        (Sys.file_exists held) (Sys.file_exists fresh);
+      Unix.close lock);
   Fs.rm_rf root

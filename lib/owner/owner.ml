@@ -140,11 +140,20 @@ let stats_reply reports report : Tsync_status.Status_report.answer =
         ~role:"owner" ~serves:(List.map fst reports) ();
   }
 
-let housekeeping (module E : Tsync_sync.Engine.S) =
+(* 04 §4.11: the daily tasks run on the first pass after a day went by. *)
+let housekeeping (domain : Domain.t) (module E : Tsync_sync.Engine.S) =
+  let daily = ref (Unix.gettimeofday ()) in
   try
     while true do
       Stop.sleep housekeeping_interval;
       E.poll ();
+      if Unix.gettimeofday () -. !daily >= 86400. then (
+        daily := Unix.gettimeofday ();
+        let n =
+          Tsync_sync.Export.sweep_records ~cache_root:domain.cache_root
+            domain.name
+        in
+        if n > 0 then Log.info "removed %d stale export records" n);
       Usage.release_if_grown ()
     done
   with Stop.Stopping -> ()
@@ -165,7 +174,7 @@ let serve ?present ~socket config domains =
         let engine = Domain.engine domain in
         let (module E : Tsync_sync.Engine.S) = engine in
         E.start ();
-        Rt.spawn ~name:"housekeeping" (fun () -> housekeeping engine);
+        Rt.spawn ~name:"housekeeping" (fun () -> housekeeping domain engine);
         let hooks, go =
           match present with
             | Some p -> p domain engine

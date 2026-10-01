@@ -713,6 +713,7 @@ Token, expiry, overwrite and revocation rules are
 | `ENTRY_OPS` / `ENTRY_AGE` | 2000 ops / 10 s | ops per announced batch |
 | `RESYNC_NOTE_OPS` | 64 | ops per locally noted resync entry |
 | `EXPORT_MTIME_SLACK` | 2 s | |
+| `EXPORT_RECORD_GRACE` | 30 days | age past which the owner's daily sweep removes an unlocked export record |
 | resync walk parallelism | CLI `-j`, default 32 | |
 | `VERIFY_POLL` / `VERIFY_STALL_POLLS` | 3 s / 5 | |
 | `SHARE_DEFAULT_EXPIRY` | 7 days | [security-model.md §6.2](algorithms/security-model.md#62-lifetime) |

@@ -17,6 +17,10 @@ let mtime_slack = 2.
 
 type file = { dest : string; manifest : Manifest.t }
 
+let records_dir ~cache_root domain =
+  List.fold_left Filename.concat cache_root
+    [Domain_name.to_string domain; "exports"]
+
 module Make (C : Context.S) = struct
   module T = Tree.Make (C)
   module R = Remote.Make (C)
@@ -66,10 +70,6 @@ module Make (C : Context.S) = struct
         Hashtbl.replace seen f.dest ())
       files
 
-  let record_dir ~cache_root =
-    List.fold_left Filename.concat cache_root
-      [Domain_name.to_string C.domain; "exports"]
-
   let header (m : Manifest.t) dest =
     Printf.sprintf "tsync-export 1 %s %s %d %d %s\n" m.h1 m.h2 m.size
       m.chunk_size (Names.escape_path dest)
@@ -99,7 +99,7 @@ module Make (C : Context.S) = struct
 
   let export_one ~narrate ~cancelled ~cache_root f =
     let m = f.manifest in
-    let dir = record_dir ~cache_root in
+    let dir = records_dir ~cache_root C.domain in
     Fs.mkdir_p dir;
     let record = Filename.concat dir (Xxh.dual f.dest) in
     let header = header m f.dest in
@@ -267,3 +267,23 @@ module Make (C : Context.S) = struct
       cancelled = cancelled ();
     }
 end
+
+let record_grace = 30. *. 86400.
+
+let sweep_records ~cache_root domain =
+  let dir = records_dir ~cache_root domain in
+  let now = Unix.gettimeofday () in
+  List.fold_left
+    (fun n name ->
+      let path = Filename.concat dir name in
+      match Unix.lstat path with
+        | { st_kind = S_REG; st_mtime; _ } when now -. st_mtime > record_grace
+          ->
+            Fs.with_fd (Fs.openfile path [O_RDWR]) (fun fd ->
+                if Fs.flock ~block:false fd then (
+                  Fs.unlink_quiet path;
+                  n + 1)
+                else n)
+        | _ | (exception Unix.Unix_error _) -> n)
+    0
+    (try Array.to_list (Sys.readdir dir) with Sys_error _ -> [])
