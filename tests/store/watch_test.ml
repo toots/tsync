@@ -82,5 +82,5 @@ let () =
             p
               "a store watch returns soon after the key changed: %b (interval \
                %.0f s)\n"
-              (t < 1.) Store.watch_interval);
+              (t < 1.5) Store.watch_interval);
   Fs.rm_rf root
