@@ -305,13 +305,11 @@ module Make (C : Context.S) = struct
     in
     go id names
 
-  (* Depth first, each folder visited before its descent and [f] handed the real
-     path of the containing folder; subfolders are fetched ahead, which leaves
-     the visit order unchanged. A folder failing transiently under [Skip] is
-     retried once after the walk. *)
-  (* Depth first over an explicit stack; only the next [width] folders in visit
-     order are fetched ahead, so at most that many listings wait in memory
-     whatever the tree's width. *)
+  (* Depth first over an explicit stack, each folder visited before its descent
+     and [f] handed the real path of the containing folder, with only the next
+     [width] folders fetched ahead so at most that many listings wait in memory.
+
+     A folder failing transiently under [Skip] is retried once after the walk. *)
   let fold_tree ?(on_unusable = Fail_on_unusable) ?(width = C.max_downloads) id
       ~root_path f acc =
     let width = max 1 width in

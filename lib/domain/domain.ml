@@ -15,11 +15,11 @@ type t = {
   poke : unit -> unit;
 }
 
-(* 05 §3.2: parsing registered the type, so the driver is linked. *)
 (* uplink-governor §8: a metadata read of the domain cursor exists on every
    written store and costs almost nothing. *)
 let probe d (store : Store.t) = ignore (store.head_opt (Key.cursor d))
 
+(* 05 §3.2: parsing registered the type, so the driver is linked. *)
 let create_store config d (b : Config.backend) =
   let admission =
     match b.link with

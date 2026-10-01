@@ -35,10 +35,10 @@ let domain ?name config =
   try Config.resolve ?name ?default config
   with Config.Invalid e -> fail "%s" e
 
-(* failure-model §7.5: a classified failure prints its sentence, never a
-   trace. *)
-(* Every process leases its uplinks from the supervisor; the supervisor itself
-   takes ownership in place of this. *)
+(* Every process leases its uplinks from the supervisor, which takes ownership
+   in place of this.
+
+   failure-model §7.5: a classified failure prints its sentence, never a trace. *)
 let run body =
   Printexc.record_backtrace true;
   Tsync_store.Uplink.lease (fun request ->

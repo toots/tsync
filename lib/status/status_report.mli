@@ -46,9 +46,8 @@ type level = Log.level [@@deriving yojson]
 type log_line = { t : float; level : level; message : string }
 [@@deriving yojson]
 
-(** A process's description of itself. *)
-(** An http-proxy listener's counters (frontends/http-proxy §A12): bytes are
-    the server's own, once per request; [requests] is one tally per kind. *)
+(** An http-proxy listener's counters (frontends/http-proxy §A12): bytes are the
+    server's own, once per request; [requests] is one tally per kind. *)
 type listener = {
   port : int option;
   tls : bool;
@@ -60,6 +59,7 @@ type listener = {
 }
 [@@deriving yojson]
 
+(** A process's description of itself. *)
 type self = {
   server : server;
   usage : usage;

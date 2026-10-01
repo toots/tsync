@@ -96,8 +96,6 @@ val resume : t -> unit
     settles the collection generation once. *)
 val settle : ?timeout:float -> t -> unit
 
-(** A copy log: jobs owed, the parked among them, and jobs completed since the
-    process started. *)
 (** The job a copy log is running: its key, how long it has run, the chunks
     its manifest names and how many are checked, and the bytes sent. *)
 type job_progress = {
@@ -109,6 +107,8 @@ type job_progress = {
   sent : int;
 }
 
+(** A copy log: jobs owed, the parked among them, and jobs completed since the
+    process started. *)
 type copy_stats = {
   copy : string;
   owed : int;
