@@ -130,8 +130,19 @@ module Make (C : Engine_ctx.S) = struct
       | Some _ when under_trashed_removal parent_path -> `Absent
       | Some pid -> (
           match R.get_slot pid leaf with
-            | Some b -> `Record (Manifest.decode b)
+            | Some b -> (
+                match Folder.classify_marker b with
+                  | `Marker _ | `Unclassifiable -> `Folder
+                  | `Not_marker -> `Record (Manifest.decode b))
             | None -> `Absent)
+
+  (* A folder marker in the slot is a peer's record in place: a file never
+     overwrites it. *)
+  let slot_moved_on path ~expected =
+    match store_record (Names.parent_of path) (Names.leaf_of path) with
+      | `Folder -> true
+      | `Record (Some m) -> not (expected (Some m))
+      | `Record None | `Absent | `Unresolved -> false
 
   let store_manifest path =
     match store_record (Names.parent_of path) (Names.leaf_of path) with
@@ -419,9 +430,8 @@ module Make (C : Engine_ctx.S) = struct
                 | Some _ -> dst
                 | None -> dst
             in
-            let sd = store_manifest dst in
-            if sd <> None && not (expected_matches (Wal.prior r i) sd) then
-              (Destination_taken, [])
+            if slot_moved_on dst ~expected:(expected_matches (Wal.prior r i))
+            then (Destination_taken, [])
             else (
               let emit = [Op.Rename { rn with dst }] in
               match
@@ -720,12 +730,12 @@ module Make (C : Engine_ctx.S) = struct
                       (fun (m : Manifest.t) -> m.h1)
                       (Mirror.manifest mirror path)
             in
-            let current =
-              Option.map (fun (m : Manifest.t) -> m.h1) (store_manifest path)
-            in
             (* An edit outlives a delete: only a peer's record in place moves
                the edit aside (conflict-resolution §5.1). *)
-            if current <> None && base <> current then (
+            if
+              slot_moved_on path ~expected:(fun m ->
+                  Option.map (fun (m : Manifest.t) -> m.h1) m = base)
+            then (
               with_meta (fun () ->
                   with_key path (fun () ->
                       if Staged.edit staged path <> None then (

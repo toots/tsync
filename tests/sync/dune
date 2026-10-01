@@ -147,3 +147,23 @@
  (action
   (diff recover_test.expected recover_test.output)))
 
+(executable
+ (name marker_slot_test)
+ (modules marker_slot_test)
+ (libraries
+  tsync_core
+  tsync_store
+  tsync_remote
+  tsync_checkout
+  tsync_sync
+  unix))
+
+(rule
+ (with-stdout-to
+  marker_slot_test.output
+  (run ./marker_slot_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff marker_slot_test.expected marker_slot_test.output)))
