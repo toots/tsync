@@ -163,6 +163,9 @@ type copy = {
   forwards : Rt.Semaphore.t;
   discards : Discards.t;
   mutable running : running option;  (** under [memo_m] *)
+  mutable probing : bool Rt.Promise.t option;
+      (** under [memo_m]; every probe writes the same request, so a probe asked
+          for while one runs shares its answer *)
 }
 
 type core = {
@@ -718,6 +721,7 @@ let create ?(timing = default_timing) ~domain ~data_dir ~owner ~poke ~knowledge
           forwards = Rt.Semaphore.create ~name:"forwards" max_forwards;
           discards = Discards.open_ ~dir;
           running = None;
+          probing = None;
         })
       copy_members
   in
@@ -797,8 +801,7 @@ let probe_shard = "000"
 
 (* object-store-common §3: an empty request a deployed function consumes;
    still there after FUNCTION_PROBE_WAIT, it is removed and nothing is saved. *)
-let probe_copy t c =
-  guard t c.member.role ("probe the bucket function of " ^ c.member.name);
+let run_probe t c =
   let key = Key.discard_job t.domain ~run:probe_run ~shard:probe_shard in
   let store = c.member.store in
   store.put key Bigstring.empty;
@@ -817,6 +820,23 @@ let probe_copy t c =
   Log.info "bucket function of %s: %s" c.member.name
     (if confirmed then "confirmed" else "not confirmed");
   confirmed
+
+let probe_copy t c =
+  guard t c.member.role ("probe the bucket function of " ^ c.member.name);
+  let answer, mine =
+    Mutex.protect c.memo_m (fun () ->
+        match c.probing with
+          | Some p -> (p, false)
+          | None ->
+              let p = Rt.Promise.create () in
+              c.probing <- Some p;
+              (p, true))
+  in
+  if mine then (
+    let r = try Ok (run_probe t c) with e -> Error e in
+    Mutex.protect c.memo_m (fun () -> c.probing <- None);
+    ignore (Rt.Promise.try_resolve_result answer r));
+  Rt.Promise.await answer
 
 let probe_due t =
   List.iter
