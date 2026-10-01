@@ -32,6 +32,11 @@ let () =
         let r = f () in
         (r, Rt.now () -. t0)
       in
+      (* Events left from the case before, such as a write's close after its
+         create woke the wait, are drained so each case sees its own. *)
+      let rec quiet w =
+        if Dir_watch.wait w ~timeout:0.3 <> `Timeout then quiet w
+      in
       let show = function
         | `Changed -> "changed"
         | `Gone -> "gone"
@@ -41,19 +46,26 @@ let () =
         | None -> p "no directory watch on this platform\n"
         | Some w ->
             p "nothing happens: %s\n" (show (Dir_watch.wait w ~timeout:0.3));
+            quiet w;
             after 0.1 (fun () -> write (Names.temp_name ()));
             p "a temporary file only: %s\n"
               (show (Dir_watch.wait w ~timeout:0.5));
+            quiet w;
             after 0.1 (fun () -> write "real");
             let r, t = timed (fun () -> Dir_watch.wait w ~timeout:5.) in
             p "a file written: %s within a second: %b\n" (show r) (t < 1.);
+            quiet w;
             after 0.1 (fun () ->
                 let tmp = Filename.concat dir (Names.temp_name ()) in
                 Out_channel.with_open_bin tmp (fun oc -> output_string oc "y");
                 Unix.rename tmp (Filename.concat dir "renamed"));
             let r, t = timed (fun () -> Dir_watch.wait w ~timeout:5.) in
             p "a rename into place: %s within a second: %b\n" (show r) (t < 1.);
-            after 0.1 (fun () -> Fs.rm_rf dir);
+            List.iter
+              (fun n -> Sys.remove (Filename.concat dir n))
+              (Array.to_list (Sys.readdir dir));
+            quiet w;
+            after 0.1 (fun () -> Unix.rmdir dir);
             p "the directory removed: %s\n"
               (show (Dir_watch.wait w ~timeout:5.));
             Dir_watch.close w;
