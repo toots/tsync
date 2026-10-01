@@ -78,7 +78,13 @@ collections and little retained heap is a garbage storm, not a leak.
   anonymous memory stayed resident under the default allocator, 245 MiB with two arenas: freed
   blocks held in per-thread arenas (OCaml 5 mallocs large blocks individually, and the scheduler
   runs on several domains). `malloc_trim(0)` after compaction returned 564 MiB at once, leaving
-  155 MiB private for an 81 MiB heap: retention, not live data. A rebuild ends with `Gc.compact`
-  and `Usage.trim` (`malloc_trim` on Linux, `malloc_zone_pressure_relief` on macOS), and the owner
-  trims at every housekeeping pass.
+  155 MiB private for an 81 MiB heap: retention, not live data. A rebuild and every owner job end
+  with `Usage.release`: `Gc.compact`, then `Usage.trim` (`malloc_trim` on Linux,
+  `malloc_zone_pressure_relief` on macOS); the owner also trims at every housekeeping pass.
+- **The major heap is not given back without compaction.** OCaml 5 keeps freed major-heap pools for
+  reuse and returns them only on `Gc.compact`, which never runs on its own. Jelly's Files owner held
+  1.1 GB resident (heap 750 MiB, peak 1.85 GB) for hours after two `data-integrity` walks of 16k
+  folders; a long-lived owner pays for each large job until something compacts. Measured on an
+  owner importing 20,000 small files (22 MiB before): 125 and 361 MiB resident after the job in two
+  runs without the release, 85 and 81 MiB with it.
 - Peaks vary by about 100 MiB between identical runs with scheduling; compare retained figures.

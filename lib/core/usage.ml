@@ -34,3 +34,7 @@ let sample () =
     major_collections = g.major_collections;
     cpu_seconds = t.tms_utime +. t.tms_stime;
   }
+
+let release () =
+  Gc.compact ();
+  trim ()

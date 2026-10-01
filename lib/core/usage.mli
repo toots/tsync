@@ -22,3 +22,7 @@ val sample : unit -> t
 (** Returns the allocator's free memory to the kernel, after a large operation.
 *)
 val trim : unit -> unit
+
+(** After a large operation: compact the OCaml heap, then {!trim}. Stops every
+    domain while it compacts. *)
+val release : unit -> unit

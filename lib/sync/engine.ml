@@ -930,8 +930,7 @@ module Make (C : Engine_ctx.S) = struct
       changed (List.concat_map Op.paths ops));
     (* A rebuild churns through every manifest of the domain: its garbage is
        given back to the kernel, not left in the allocator's arenas. *)
-    Gc.compact ();
-    Usage.trim ();
+    Usage.release ();
     (!manifests, !failures)
 
   (* 05 §4.7: a pass, or a rebuild when the client cannot bridge (or when asked). *)

@@ -292,7 +292,8 @@ let run_job t ~send ~narrate job =
   Fun.protect
     ~finally:(fun () ->
       send (Protocol.Progress { text = ""; fraction = None });
-      Atomic.set t.running None)
+      Atomic.set t.running None;
+      Usage.release ())
     (fun () ->
       send (Protocol.Started me.id);
       Jobs.run
