@@ -61,6 +61,9 @@ val of_string : string -> t
 
 val of_json : Yojson.Safe.t -> t
 
+(** The client name when the config gives none. *)
+val hostname : unit -> string
+
 (** [512K], [8M], [1.5 GiB], [1048576]. *)
 val parse_size : string -> int option
 

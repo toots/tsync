@@ -65,9 +65,62 @@ let show_config () =
               ]));
       0)
 
+(* 07 §5.9: secrets are read with the terminal's echo off. *)
+let terminal_io : Config_wizard.io =
+  let ask (p : Config_wizard.prompt) =
+    Printf.printf "%s%s: %!" p.label
+      (match p.default with Some d -> " [" ^ d ^ "]" | None -> "");
+    let echo_off = p.secret && Unix.isatty Unix.stdin in
+    let saved = if echo_off then Some (Unix.tcgetattr Unix.stdin) else None in
+    Option.iter
+      (fun a -> Unix.tcsetattr Unix.stdin TCSANOW { a with c_echo = false })
+      saved;
+    let line =
+      Fun.protect
+        ~finally:(fun () ->
+          Option.iter (fun a -> Unix.tcsetattr Unix.stdin TCSANOW a) saved;
+          if echo_off then print_newline ())
+        (fun () ->
+          try input_line stdin with End_of_file -> raise (Exit_with 1))
+    in
+    line
+  in
+  { ask; say = print_endline }
+
+let edit_config () =
+  run (fun () ->
+      let path = Paths.config_file () in
+      let current =
+        match Fs.read_file_opt path with
+          | None -> None
+          | Some text -> (
+              match Yojson.Safe.from_string text with
+                | j -> Some j
+                | exception Yojson.Json_error e ->
+                    fail "%s is not valid JSON (%s); fix it by hand first" path
+                      e)
+      in
+      match Config_wizard.edit terminal_io current with
+        | None ->
+            say "nothing written";
+            0
+        | Some j -> (
+            match Config_wizard.prepare j with
+              | Error e -> fail "not written: %s" e
+              | Ok j ->
+                  Fs.mkdir_p (Filename.dirname path);
+                  Fs.durable_replace ~perm:0o600 path
+                    (Yojson.Safe.pretty_to_string j ^ "\n");
+                  say "written to %s; run tsync restart to apply it" path;
+                  0))
+
 let config_cmd =
-  cmd "config" ~doc:"Print the config, secrets masked."
-    Term.(const show_config $ const ())
+  let edit =
+    Arg.(value & flag & info ["edit"] ~doc:"Edit the config through prompts.")
+  in
+  cmd "config" ~doc:"Print the config, secrets masked, or edit it."
+    Term.(
+      const (fun edit -> if edit then edit_config () else show_config ()) $ edit)
 
 let default_domain name clear =
   run (fun () ->

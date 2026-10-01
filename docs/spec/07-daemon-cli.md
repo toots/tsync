@@ -732,7 +732,9 @@ menu (served as JSON by the File Provider process's `menu` action):
   `replica` for a cloud store once a `main` exists, else `main`; optional filling of s3/gcs fields
   from `terraform|tofu -chdir=DIR output -json`), and frontends (from the frontend registry).
 - Prompts: blank keeps the current value; required fields are asked again; secrets are read without
-  echo.
+  echo; an answer a field's own check refuses (a size, a port, a choice) is said and asked again. A
+  blank answer to a field with no value writes nothing when the parser applies that default itself,
+  and writes the wizard's own defaults (`versioning`, `symlinks`, `maxCache`, a backend's `role`).
 - On write: drop per-link settings no backend uses; validate with the parser's own rules
   ([05 §2](05-ops-config.md)) and refuse to write an invalid config (exit 1); write to a temporary
   file **created with mode 0600**, fsync, rename over the config, fsync the directory; tell the user

@@ -1,5 +1,6 @@
 (executable
  (name config_test)
+ (modules config_test)
  (libraries
   tsync_core
   tsync_config
@@ -16,3 +17,18 @@
  (alias runtest)
  (action
   (diff config_test.expected config_test.output)))
+
+(executable
+ (name wizard_test)
+ (modules wizard_test)
+ (libraries tsync_core tsync_config tsync_catalog yojson))
+
+(rule
+ (with-stdout-to
+  wizard_test.output
+  (run ./wizard_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff wizard_test.expected wizard_test.output)))
