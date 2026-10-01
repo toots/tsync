@@ -186,8 +186,8 @@ Every write of an authoritative local object (the classes in
   - it then pokes the owner ([07](../07-daemon-cli.md) §4.6).
 
   Submitters are the non-owner writers of [07](../07-daemon-cli.md) §2: the store server
-  records deferred replica and backfill jobs caused by writes it accepted, and store- or
-  publish-class commands record deferred jobs and WAL batch records (§7.3).
+  records deferred replica and backfill jobs caused by writes it accepted. Commands that change a
+  domain run in its owner ([07](../07-daemon-cli.md) §2.5) and submit nothing.
 
   The owner adopts submitted records by rescanning the log at ownership start, on a poke, and
   every `REARM_INTERVAL`. It runs a submitted record only after taking that record's lock
@@ -428,13 +428,10 @@ Bulk publishers (import, rsync), revert and the recovery of a Put whose staged e
 one rule, so that a manifest on the store is never left unannounced:
 
 1. Durably record a WAL record `Prepared` listing the batch's Put ops **before** the first
-   manifest put. A publisher that is not the owner submits this record (§4.2) and holds its lock
-   until step 2 is over.
+   manifest put. Publishers run in the owner ([07](../07-daemon-cli.md) §2.5).
 2. Put the chunks, then the manifests (GC interlock).
-3. Install each manifest in the mirror if the mirror lacks that path, durably (the owner does
-   this; a submitter leaves it to the owner).
-4. Discharge (the owner; a submitter's acknowledgement is the durable record plus the manifests
-   on the store, and the owner publishes the entry).
+3. Install each manifest in the mirror if the mirror lacks that path, durably.
+4. Discharge: publish the entry.
 
 Recovery of a `Prepared` Put op with no staged edit asks the store whether a manifest exists at
 the op's path: if yes, it ensures the mirror holds a manifest for the path (fetching the store's

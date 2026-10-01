@@ -140,21 +140,40 @@ from the stores and never passes through the owner's chunk cache. It keeps no ot
 
 ### 2.5 One-shot commands
 
-Each command has an **access class**. It decides what the command may do beside a running owner.
+The domain's owner is expected to be running at all times: it holds the domain's mirror, queues,
+logs and locks, so **every command that changes a domain is a request to its owner**, and the work
+runs there. The CLI sends the request, follows it, and prints its result.
 
-| Class | Commands | Beside a serving owner | No owner | Owner held but not serving |
+A command MAY do its work in its own process only for a reason this file states beside it. The
+reasons today: a **read** changes nothing, so it has nothing for the owner to serialize and runs
+wherever it is invoked; and **no owner serving** makes the command take ownership for its run. A new
+command is an owner request unless such a reason is written down. Each command has an **access
+class**:
+
+| Class | Commands | Owner serving | No owner | Owner held but not serving |
 |---|---|---|---|---|
 | **none** | `config`, `default-domain`, `build-info`, `logs`, `status`, `start`, `stop`, `restart` | n/a | n/a | n/a |
 | **read** | `ls`, `versions` (listing), `trash` (listing), `export` | reads stores and permitted local files | same | same |
-| **store** | `expire`, `gc`, `mirror`, `data-integrity`, `share`, `trash --purge` | writes stores directly; submits deferred work to the inbox and pokes the owner | as beside an owner; then takes ownership to settle what it submitted (§3.5) | submits to the inbox; the holder runs it |
-| **publish** | `import`, `rsync` with a domain side, `trash --restore` | puts chunks, manifests and markers on the store and submits the WAL records announcing them; the owner publishes the journal entries and updates its mirror | takes ownership for its whole run and publishes itself | submits; the holder publishes at its next rescan |
-| **owner** | `pause`, `resume`, `retry`, `set-aside`, `cache --evict/--fetch/--prune`, `versions --revert`, `sync`, every `<group> <verb>` whose frontend declares it owner-class (the whole desktop `tsync android` group) | sends the request to the owner | takes ownership for its run and performs the request itself | refuses with `busy`, naming the holder |
+| **owner** | `pause`, `resume`, `retry`, `set-aside`, `cache --evict/--fetch/--prune`, `versions --revert`, `sync`, `gc`, `expire`, `trash --purge`, `trash --restore`, `mirror`, `data-integrity`, `share`, `import`, `rsync` with a domain side, every `<group> <verb>` whose frontend declares it owner-class (the whole desktop `tsync android` group) | sends the request to the owner, which runs it | takes ownership for its run and performs the request itself (§3.5) | refuses with `busy`, naming the holder |
 
 "Serving" means the holder record names a socket and the socket answers. A command that takes
 ownership is an owner for its duration with every duty of §2.2 except continuous journal polling,
-and it runs the owner's drain before releasing the lock.
+and it runs the owner's drain before releasing the lock. Taking ownership is the fallback for a
+machine where the daemon is not running, not the design: the same operation runs either way.
 
-Commands in the **store** and **publish** classes refuse while the domain is paused (§2.6).
+**Owner jobs.** A request whose work takes long (`sync`, `cache --fetch`, `cache --prune`, `gc`,
+`expire`, `trash --purge`, `mirror`, `data-integrity`, `import`, `rsync`) is a **job**, bounded by
+progress rather than by a total deadline (§4.3):
+
+- With `--verbose`, the request asks for narration: the owner streams the job's narration
+  ([05 §4.1](05-ops-config.md#41-rules-common-to-every-operation)) on the request's connection as it
+  happens, and the CLI writes it to stderr. The final answer carries the result.
+- Every job reports to the job registry (§4.6), so `status` shows it whoever started it.
+- An operator's interrupt (Ctrl-C) makes the CLI send `cancel` naming its job: the job stops at its
+  next unit boundary and leaves its durable state as any interruption does. A client that goes away
+  without cancelling does not stop the job; it runs to completion (§4.3).
+- Two jobs that would conflict on one domain (two collections, a collection and a purge of the same
+  folder) do not run at once: the second is refused `busy`, naming the first.
 
 ### 2.6 Pause
 
@@ -164,9 +183,9 @@ Commands in the **store** and **publish** classes refuse while the domain is pau
 - applying peers' journal entries (the poller holds; it MAY still list the journal to report how far
   behind it is);
 - forwarding deferred work to replicas and backfills;
-- one-shot commands of the **store** and **publish** classes, owner requests that write stores
-  directly (`revert`, `share`) and owner jobs that apply or rebuild (`sync`): these refuse with
-  `paused` ([08 §3.3](08-frontends.md) marks them).
+- owner requests and jobs that change the domain's stores or apply work (`revert`, `share`, `sync`,
+  `gc`, `expire`, `trash --purge`, `trash --restore`, `mirror`, `data-integrity --repair`, `import`,
+  `rsync`): these refuse with `paused` ([08 §3.3](08-frontends.md) marks them).
 
 It does not stop: reads and the fetches they cause, local edits (accepted, staged, recorded and
 held in the queues), local cache maintenance, requests from the store server's remote clients (their
@@ -357,13 +376,15 @@ managers' stop timeouts MUST exceed it.
 
 ### 3.5 One-shot lifecycle
 
+A command sends its request to a serving owner and follows it. The steps below are the fallback,
+when no owner serves and the command takes ownership for its run:
+
 1. Load and validate config; fail before any terminal output.
-2. If the command's class needs it (§2.5), find the owner or take ownership.
+2. If the command's class needs it (§2.5), take ownership.
 3. Lease the uplink from the governor's owner, or become it (§2.4).
 4. Start a job report (§4.6) if the command reports.
 5. Run the body.
-6. Drain: if it is the owner, run the owner's drain; otherwise its submissions are already durable,
-   and it pokes the owner.
+6. Drain: run the owner's drain.
 7. Finish the job report (`done` or `failed`).
 8. Release ownership by exiting, **then** decide the exit status: exiting from inside the body skips
    the drain.
@@ -553,17 +574,17 @@ for `JOB_KEEP` after their last report; a new report for a key replaces the old 
 | `versions [PATH]` | read | versions of a file, newest first (`time  human  size`), or every deleted file of the domain |
 | `versions --revert PATH [--version TS]` | owner | `revert` (latest when no version) |
 | `trash` | read | trashed folders |
-| `trash --restore PATH` | publish | [05 §4.8](05-ops-config.md); exit 1 on `Parent_unknown` |
-| `trash --purge PATH` | store | exit 1 on `Live_elsewhere` or `Not_in_trash` |
-| `expire DATE` | store | cutoff `YYYY-MM-DD` at local midnight; prints removed trash entries, versions and journal entries |
-| `gc [...]` | store | [05 §4.9](05-ops-config.md) |
+| `trash --restore PATH` | owner | [05 §4.8](05-ops-config.md); exit 1 on `Parent_unknown` |
+| `trash --purge PATH` | owner | exit 1 on `Live_elsewhere` or `Not_in_trash` |
+| `expire DATE` | owner | cutoff `YYYY-MM-DD` at local midnight; prints removed trash entries, versions and journal entries |
+| `gc [...]` | owner | [05 §4.9](05-ops-config.md) |
 | `sync [--full] [--source NAME] [-j N]` | owner | the resync operation ([05 §4.7](05-ops-config.md)) in the owner (`sync`, a bulk action); refuses with exit 2 for a pulled tree; prints `N journal entries from other clients` or `full resync: N manifests (K failed …)`, exit 1 if any failed |
-| `data-integrity [--verify\|--repair] [--detail] [--source] [--dry-run]` | store | [05 §4.10](05-ops-config.md); exit 1 if unhealthy |
-| `mirror [--source] [--manifests\|--path P]` | store | [05 §4.6](05-ops-config.md); needs at least two members |
-| `import DIR [--only G] [--exclude G] [--force-rehash]` | publish | [05 §4.3](05-ops-config.md); exit 1 if any entry failed |
+| `data-integrity [--verify\|--repair] [--detail] [--source] [--dry-run]` | owner | [05 §4.10](05-ops-config.md); exit 1 if unhealthy |
+| `mirror [--source] [--manifests\|--path P]` | owner | [05 §4.6](05-ops-config.md); needs at least two members |
+| `import DIR [--only G] [--exclude G] [--force-rehash]` | owner | [05 §4.3](05-ops-config.md); exit 1 if any entry failed |
 | `export [PATH...] DIR [--source] [-j N]` | read | [05 §4.4](05-ops-config.md); one domain per run; exit 1 on failures or on pending local changes (listed on stderr) |
-| `rsync SRC DST [--move] [-n]` | publish | [05 §4.5](05-ops-config.md) |
-| `share [PATH] [--expires DUR] [--token HEX] \| --clear-cache` | store | [05 §4.11](05-ops-config.md); URL on stdout, expiry on stderr |
+| `rsync SRC DST [--move] [-n]` | owner | [05 §4.5](05-ops-config.md) |
+| `share [PATH] [--expires DUR] [--token HEX] \| --clear-cache` | owner | [05 §4.11](05-ops-config.md); URL on stdout, expiry on stderr |
 | `config [--edit]` | none | print the parsed config with secrets masked, or run the wizard (§5.9) |
 | `default-domain [NAME] [--clear]` | none | set (must be configured), clear, or print (exit 1 when unset) |
 | `build-info` | none | compiled frontends and drivers, log sink, paths, sockets |
@@ -754,10 +775,15 @@ drift between hosts. Every host that owns a domain runs the same list, the Andro
   peer's change meet under one metadata lock.
 - **The supervisor owns no domain state**: a crash or restart of one owner leaves the other domains
   untouched, and the supervisor never has to arbitrate between presenter and converger.
-- **Submission instead of IPC for owed work**: a record created exclusively is already a durable
-  request; the owner is poked but need not be up.
+- **Commands are requests to the daemon**: the owner already holds the domain's mirror, queues, logs
+  and locks and serializes every change to it, so an operator's command joins that one stream
+  instead of racing it from another process. Taking ownership is only the fallback when the daemon
+  is not running.
+- **Submission instead of IPC for owed work** between processes that are not commands (a store
+  server's copy jobs): a record created exclusively is already a durable request; the owner is poked
+  but need not be up.
 - **Only the owner publishes journal entries**: entry keys are minted by one process, the applied log
-  has one writer, and a command beside a running owner never touches the mirror.
+  has one writer, and a command never touches the mirror unless it is the owner.
 - **Pause is persisted** because a user who holds changes before a flight expects them held after a
   reboot.
 - **Bulk actions bounded by progress, with a liveness probe**, give every request a bound without
@@ -787,12 +813,12 @@ An implementation MUST exhibit:
   file, no lock or pause file) converts nothing: the domain comes up owned and not paused, every owed
   record and deferred job is adopted and runs, and nothing is lost or rewritten except by the owner's
   ordinary work.
-- **Commands beside an owner.** `tsync sync` with a running owner runs the resync in the owner and
+- **Commands run in the owner.** `tsync sync` with a running owner runs the resync in the owner and
   prints its count; with no owner it takes ownership and releases it at exit; with a non-serving
-  holder it refuses with `busy`. An import beside a running owner appears in the mount once the owner
-  has adopted its submitted records, with no process but the owner writing the mirror or publishing
-  journal entries; killing the import at any point leaves no manifest on the store unannounced after
-  the owner's next start.
+  holder it refuses with `busy`. An import sent to a running owner runs there and appears in the
+  mount as it publishes; killing the owner at any point leaves no manifest on the store unannounced
+  after its next start. With `-v` the command's stderr shows the job's narration; Ctrl-C cancels the
+  job at its next unit boundary, and closing the client without it lets the job finish.
 - **Pause.** While paused: nothing is published, no peer entry is applied, no deferred copy runs,
   and store/publish commands refuse; local edits are accepted and held. The pause survives a
   restart. A drain overrides pause: it completes while paused.

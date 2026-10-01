@@ -38,7 +38,8 @@ per-domain policies. Around the per-file engine two things are needed:
 2. **Whole-domain jobs** over whole trees and keyspaces: seeding a domain from a
    folder, writing it out, copying without moving bytes already stored, repairing one store from
    another, rebuilding this client's view, trimming history, reclaiming chunks, checking integrity,
-   publishing links. They run as commands, beside a running owner or without one.
+   publishing links. They run in the domain's owner, sent there by their commands; a command runs
+   one itself only when no owner is serving ([07 §2.5](07-daemon-cli.md#25-one-shot-commands)).
 
 The operations are applications of the layers below; nothing depends on them but the CLI and the
 request handler.
@@ -226,11 +227,10 @@ Building has no side effect on the stores.
 
 ### 4.1 Rules common to every operation
 
-- **Where it runs.** Each operation's CLI command has an access class
-  ([07 §2.5](07-daemon-cli.md#25-one-shot-commands)), which says whether it runs beside the owner,
-  asks it, or takes ownership. An operation that is not the owner never writes the owner's local
-  state and never publishes a journal entry: it writes stores, submits records to the domain's logs
-  (§4.2), and pokes the owner.
+- **Where it runs.** An operation that changes a domain runs in the domain's owner: its CLI command
+  sends the request, and only when no owner serves does the command take ownership and run it
+  itself ([07 §2.5](07-daemon-cli.md#25-one-shot-commands)). An operation that only reads may run in
+  any process. Running elsewhere needs a stated reason in 07 §2.5.
 - **Pause.** Operations that write a domain's stores refuse while the domain is paused
   ([07 §2.6](07-daemon-cli.md#26-pause)).
 - **GC interlock.** Every operation that publishes a reference to a chunk (a manifest from an
@@ -265,10 +265,9 @@ announces its changes by the rule of
 
 - Ops are grouped into batches of at most `ENTRY_OPS` ops, a batch closing early once `ENTRY_AGE`
   has passed since the previous one. Each batch becomes one WAL record listing its ops, made durable
-  (by the owner, or submitted by a non-owner and held locked) **before** the first object it announces
-  is put on the store; it is released to the owner once those objects are on the store.
+  by the owner **before** the first object it announces is put on the store.
 - The owner publishes one journal entry per record, updates its mirror and applied log, and bumps
-  the cursor. A non-owner pokes it (`poll`) after each release and at the end of the run.
+  the cursor.
 - **No peer sees a `put` before the `mkdir` naming its folder**: an operation's folder records are
   released before any record holding a file beneath those folders, and the owner publishes an
   operation's records in the order they were released.
