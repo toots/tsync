@@ -672,7 +672,10 @@ module Make (C : Engine_ctx.S) = struct
   let hold reason =
     if Atomic.get bridge_state = Incremental then
       Log.warn "cannot bridge the journal: %s; holding until a rebuild" reason;
-    Atomic.set bridge_state (Hold reason)
+    Atomic.set bridge_state (Hold reason);
+    (* wal-and-journal §4.8: the catch-up gate does not apply in hold, so a
+       queue waiting at it must hear of it. *)
+    Rt.Signal.broadcast gate_signal
 
   (* wal-and-journal §4.8: evidence that entries could be missed above the
      mark, never the mark's age. *)
