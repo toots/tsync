@@ -108,9 +108,26 @@ module Make (C : Engine_ctx.S) = struct
     if ops <> [] then publish_entry id ops;
     Dqueue.Records.complete wal id
 
+  (* A folder we removed is read through while our removal is unpublished
+     (A2 rescues what landed in it); once the store has it in the trash, the
+     paths beneath it hold nothing (conflict-resolution §3.5 [S(p)]). *)
+  let under_trashed_removal path =
+    let rec up p =
+      if p = "" then false
+      else (
+        match Mirror.whereabouts mirror p with
+          | `Removed id -> (
+              match T.anchor id with
+                | Some a when Folder.in_trash a -> true
+                | _ -> up (Names.parent_of p))
+          | _ -> up (Names.parent_of p))
+    in
+    up path
+
   let store_record parent_path leaf =
     match Mirror.lookup_id_removed mirror parent_path with
       | None -> `Unresolved
+      | Some _ when under_trashed_removal parent_path -> `Absent
       | Some pid -> (
           match R.get_slot pid leaf with
             | Some b -> `Record (Manifest.decode b)
