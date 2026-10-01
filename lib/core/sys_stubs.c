@@ -13,6 +13,7 @@
 #include <string.h>
 #include <sys/file.h>
 #include <sys/ioctl.h>
+#include <sys/mman.h>
 #include <sys/resource.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -370,4 +371,18 @@ CAMLprim value tsync_terminal_columns(value fd) {
   struct winsize w;
   if (ioctl(Int_val(fd), TIOCGWINSZ, &w) < 0) return Val_int(0);
   return Val_int(w.ws_col);
+}
+
+/* Only a mapping's pages: on a malloc'd buffer MADV_DONTNEED would zero data.
+   The mappings are private and never written, so a later read faults the
+   pages back in from the file. */
+CAMLprim value tsync_drop_mapped_pages(value v) {
+  struct caml_ba_array *b = Caml_ba_array_val(v);
+  if ((b->flags & CAML_BA_MANAGED_MASK) == CAML_BA_MAPPED_FILE && b->data != NULL) {
+    uintptr_t page = (uintptr_t)sysconf(_SC_PAGESIZE);
+    uintptr_t start = (uintptr_t)b->data & ~(page - 1);
+    size_t len = caml_ba_byte_size(b) + ((uintptr_t)b->data - start);
+    if (len > 0) madvise((void *)start, len, MADV_DONTNEED);
+  }
+  return Val_unit;
 }

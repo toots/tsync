@@ -1,0 +1,4 @@
+a 64 MiB mapping, read: resident grew by at least 48 MiB: true
+after the drop: shrank by at least 48 MiB: true
+content reads the same after the drop: true
+a malloc'd buffer is untouched: true

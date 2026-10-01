@@ -70,3 +70,18 @@
  (alias runtest)
  (action
   (diff dqueue_test.expected dqueue_test.output)))
+
+(executable
+ (name mapped_pages_test)
+ (modules mapped_pages_test)
+ (libraries tsync_core unix))
+
+(rule
+ (with-stdout-to
+  mapped_pages_test.output
+  (run ./mapped_pages_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff mapped_pages_test.expected mapped_pages_test.output)))

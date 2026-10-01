@@ -383,7 +383,9 @@ let rec sync t src c key restarts =
             names
         in
         match missing with
-          | None -> c.member.store.put key b
+          | None ->
+              c.member.store.put key b;
+              Fs.drop_mapped_pages b
           | Some ck ->
               if
                 restarts < 3
@@ -413,6 +415,7 @@ and ensure_chunk t (src : Store.t) c v ck =
     | None -> false
     | Some b ->
         c.member.store.put (Key.chunk d ck) b;
+        Fs.drop_mapped_pages b;
         progress c (fun r -> r.sent <- r.sent + Bigstring.length b);
         Copy_memo.note v ck;
         true

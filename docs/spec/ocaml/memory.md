@@ -42,6 +42,21 @@ and that each process reports its memory ([07 §5.5](../07-daemon-cli.md#55-tsyn
   bigarrays, and their pages are the kernel's to reclaim; the owner held about 800 mappings, far
   from `vm.max_map_count`.
 
+- **The path of a copied chunk stays file-backed end to end** (audited 2026-10-01): the local store
+  maps it, the composite's copy job hands it unchanged to the copy's `put`, the GCS driver sends it
+  as the `uploadType=media` body, the HTTP client writes it after the headers, and OpenSSL encrypts
+  from the mapping (`Ssl.write_bigarray`). ocaml-tls takes strings, so its transport converts one
+  16 KiB record at a time, never the whole body.
+- **The collector does not count a mapping's size.** `Unix.map_file` allocates a small custom
+  block, so a mapping is unmapped only when a major collection finalizes it, and a daemon that
+  allocates little (an owner copying for hours to a throttled replica) piles them up: jelly's Files
+  owner held 87 MiB of mapped chunks. The copy job calls `Fs.drop_mapped_pages` once a chunk is
+  sent (`madvise(MADV_DONTNEED)` on mappings only; the mapping is private and never written, so a
+  later read pages it back in), and the owner's housekeeping compacts once the heap grew 64 MiB past
+  its last compaction (`Usage.release_if_grown`).
+- tmpfs pages a process maps count as `RssShmem`, not `RssFile`: a test of mapped memory on `/tmp`
+  must read `VmRSS`.
+
 ## M.3 Measuring: what each number means
 
 `Tsync_core.Usage.sample` is what every process reports in its `stats` process block, and what

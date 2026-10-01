@@ -142,6 +142,12 @@ val map_file : string -> bigstring
 (** The same, of an open descriptor. *)
 val map_fd : Unix.file_descr -> bigstring
 
+(** After a body read with {!map_fd} has been used: its pages leave this
+    process's resident set, a later read paging them back in from the file. A
+    body that is not a mapping is left alone. The collector unmaps a mapping
+    only when it finalizes it, and does not count its size. *)
+val drop_mapped_pages : bigstring -> unit
+
 (** The whole file by positioned reads: for data that may change or vanish under
     a mapping (network mounts, files tsync does not own). *)
 val read_fd_bigstring : Unix.file_descr -> bigstring
