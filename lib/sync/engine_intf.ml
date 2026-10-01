@@ -111,6 +111,19 @@ module type S = sig
   val restore_from_trash :
     string -> [ `Restored of int | `Not_in_trash | `Exists ]
 
+  (** Bring the content of a local directory into the domain at the same
+      relative paths (05 §4.3): folders claimed and announced first, then files
+      uploaded and announced in batches; what exists is skipped unless
+      [force_rehash]. *)
+  val import :
+    ?narrate:Narrate.t ->
+    ?cancelled:(unit -> bool) ->
+    ?only:string list ->
+    ?exclude:string list ->
+    ?force_rehash:bool ->
+    string ->
+    Import_plan.report
+
   (** Adopt records other processes submitted, then run a journal pass soon. *)
   val poll : unit -> unit
 

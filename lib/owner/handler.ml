@@ -306,7 +306,7 @@ let run_job t ~send ~narrate job =
             };
           cancelled = (fun () -> Atomic.get me.cancelled || Stop.requested ());
         }
-        t.domain job)
+        t.domain t.engine job)
 
 let cancel t id =
   match Atomic.get t.running with

@@ -265,7 +265,11 @@ announces its changes by the rule of
 
 - Ops are grouped into batches of at most `ENTRY_OPS` ops, a batch closing early once `ENTRY_AGE`
   has passed since the previous one. Each batch becomes one WAL record listing its ops, made durable
-  by the owner **before** the first object it announces is put on the store.
+  by the owner **before** the first object it announces is put on the store, and held (a submitter's
+  lock, [durable-queue.md §4.2](algorithms/durable-queue.md#42-ownership), taken before the record
+  has its name) until its puts ran, so the queue never decides on a manifest still landing. An op
+  whose manifest never landed (a failure, a cancel, a file left for the next batch) is dropped when
+  the record is published.
 - The owner publishes one journal entry per record, updates its mirror and applied log, and bumps
   the cursor.
 - **No peer sees a `put` before the `mkdir` naming its folder**: an operation's folder records are

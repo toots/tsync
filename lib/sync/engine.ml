@@ -10,7 +10,7 @@ let pause_flag ~data_dir d =
   List.fold_left Filename.concat data_dir ["paused"; Domain_name.to_string d]
 
 module Make (C : Engine_ctx.S) = struct
-  include Outbound.Make (C)
+  include Import.Make (C)
 
   (* Unpublished work of ours, read once per entry under the metadata lock. *)
   type owed = { ops : (string * Wal.record) list }

@@ -10,6 +10,12 @@ type t =
   | Gc_copies of copies
   | Expire of { apply : bool; cutoff : float }
   | Purge of { apply : bool; path : string }
+  | Import of {
+      src : string;
+      only : string list;
+      exclude : string list;
+      force_rehash : bool;
+    }
   | Integrity of {
       verify : bool;
       repair : bool;
@@ -28,5 +34,6 @@ type io = {
   cancelled : unit -> bool;
 }
 
-(** The command's exit status; a refusal raises. *)
-val run : io -> Tsync_domain.Domain.t -> t -> int
+(** The command's exit status; a refusal raises. [engine] is the owner's. *)
+val run :
+  io -> Tsync_domain.Domain.t -> (module Tsync_sync.Engine.S) -> t -> int

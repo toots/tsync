@@ -269,4 +269,45 @@ let data_integrity_cmd =
       const data_integrity $ verify $ repair $ dry_run $ detail $ source
       $ domain_arg $ verbose)
 
-let cmds = [gc_cmd; expire_cmd; trash_cmd; data_integrity_cmd]
+(* The owner's working directory is not ours: the source goes absolute. *)
+let import src only exclude force_rehash name verbose =
+  let src =
+    if Filename.is_relative src then Filename.concat (Sys.getcwd ()) src
+    else src
+  in
+  if not (Sys.file_exists src && Sys.is_directory src) then (
+    prerr_endline ("tsync: " ^ src ^ " is not a directory");
+    2)
+  else run_job ?name verbose (Import { src; only; exclude; force_rehash })
+
+let import_cmd =
+  let src =
+    Arg.(
+      required
+      & pos 0 (some string) None
+      & info [] ~docv:"DIR" ~doc:"The directory whose content is imported.")
+  and only =
+    Arg.(
+      value & opt_all string []
+      & info ["only"] ~docv:"GLOB"
+          ~doc:
+            "Import only what matches, and everything under a matching folder.")
+  and exclude =
+    Arg.(
+      value & opt_all string []
+      & info ["exclude"] ~docv:"GLOB"
+          ~doc:"Leave out what matches, by path or by name, at any depth.")
+  and force_rehash =
+    Arg.(
+      value & flag
+      & info ["force-rehash"]
+          ~doc:"Upload and announce files the domain already has.")
+  in
+  cmd "import"
+    ~doc:
+      "Bring a local directory's content into the domain at the same relative \
+       paths (exit 1 if any file failed)."
+    Term.(
+      const import $ src $ only $ exclude $ force_rehash $ domain_arg $ verbose)
+
+let cmds = [gc_cmd; expire_cmd; trash_cmd; data_integrity_cmd; import_cmd]

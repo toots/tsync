@@ -8,6 +8,12 @@ type t =
   | Gc_copies of copies
   | Expire of { apply : bool; cutoff : float }
   | Purge of { apply : bool; path : string }
+  | Import of {
+      src : string;
+      only : string list;
+      exclude : string list;
+      force_rehash : bool;
+    }
   | Integrity of {
       verify : bool;
       repair : bool;
@@ -26,6 +32,7 @@ let kind = function
   | Gc_copies Retry_outstanding -> "gc --retry-outstanding"
   | Expire _ -> "expire"
   | Purge _ -> "trash --purge"
+  | Import _ -> "import"
   | Integrity { verify = true; _ } -> "data-integrity --verify"
   | Integrity { repair = true; _ } -> "data-integrity --repair"
   | Integrity _ -> "data-integrity"
@@ -319,12 +326,32 @@ let integrity io (dom : Tsync_domain.Domain.t) ~repair ~apply ~detail ~source =
     then 1
     else 0)
 
-let run io (dom : Tsync_domain.Domain.t) = function
+let import io (module E : Tsync_sync.Engine.S) ~src ~only ~exclude ~force_rehash
+    =
+  let say fmt = Printf.ksprintf io.out fmt in
+  let r =
+    E.import ~narrate:io.narrate ~cancelled:io.cancelled ~only ~exclude
+      ~force_rehash src
+  in
+  say
+    "imported %s (%s); %d already in the domain, %d links skipped, %d failed%s"
+    (Narrate.count r.imported "file")
+    (Narrate.size r.bytes) r.skipped r.skipped_symlinks (List.length r.failed)
+    (if r.cancelled then "; cancelled before the end" else "");
+  List.iter (fun (path, reason) -> say "  %s: %s" path reason) r.failed;
+  if r.failed = [] && not r.cancelled then 0 else 1
+
+let run io (dom : Tsync_domain.Domain.t) engine = function
   | Gc { apply; verify; abort; budget } ->
       gc io dom.composite ~apply ~verify ~abort ~budget
   | Gc_copies act -> copies io dom.composite act
   | Expire { apply; cutoff } -> expire io dom ~apply ~cutoff
   | Purge { apply; path } -> purge io dom ~apply ~path
+  | Import { src; only; exclude; force_rehash } ->
+      if dom.domain.read_only then
+        Fail.raise_ Fail.Read_only "%s is read-only"
+          (Domain_name.to_string dom.name);
+      import io engine ~src ~only ~exclude ~force_rehash
   | Integrity { verify = true; _ } -> verify io dom
   | Integrity { repair; apply; detail; source; _ } ->
       integrity io dom ~repair ~apply ~detail ~source
