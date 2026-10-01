@@ -10,6 +10,12 @@ type t =
   | Gc_copies of copies
   | Expire of { apply : bool; cutoff : float }
   | Purge of { apply : bool; path : string }
+  | Integrity of {
+      repair : bool;
+      apply : bool;
+      detail : bool;
+      source : string option;
+    }
 [@@deriving yojson]
 
 (** The command as typed, naming the job a conflicting one is refused for. *)

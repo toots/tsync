@@ -79,3 +79,18 @@
  (alias runtest)
  (action
   (diff queued_test.expected queued_test.output)))
+
+(executable
+ (name integrity_test)
+ (modules integrity_test)
+ (libraries tsync_core tsync_store tsync_remote tsync_gc unix))
+
+(rule
+ (with-stdout-to
+  integrity_test.output
+  (run ./integrity_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff integrity_test.expected integrity_test.output)))

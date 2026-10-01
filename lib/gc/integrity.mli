@@ -1,0 +1,76 @@
+(** Integrity (spec 05 §4.10, gc.md §4.6): what is wrong with a domain's tree
+    and chunks, and the repairs that put it right. Without [apply] a repair is a
+    dry run: every read and decision, nothing written. *)
+
+open Tsync_core
+
+type finding =
+  | Twice of { id : Folder_id.t; paths : string list }
+  | Disowned of { marker : Key.t; anchor : Folder.anchor }
+  | Trashed_live of { entry : Key.t; id : Folder_id.t }
+  | Unanchored of {
+      path : string;
+      id : Folder_id.t;
+      parent : Folder_id.t;
+      name : string;
+    }
+  | Orphan of {
+      id : Folder_id.t;
+      name : string;  (** from its anchor, else its id *)
+      parent : Folder_id.t option;  (** its anchor's *)
+      objects : int;
+      sample : Key.t list;  (** at most 3 *)
+      newest : float;  (** its anchor's and objects' latest write *)
+      top_level : bool;  (** its anchor's parent is not an orphan *)
+    }
+
+(** A chunk a member marked corrupt. *)
+type corrupt = { member : string; chunk : Chunk_key.t }
+
+type report = {
+  findings : finding list;
+      (** Twice (sorted), Disowned, Trashed_live, Unanchored, Orphan *)
+  tombstones : int;  (** namespaces holding only their anchor *)
+  corrupt : corrupt list;
+}
+
+val healthy : report -> bool
+val describe : finding -> string
+
+type tree_repair =
+  | Deleted  (** the stale marker or trash entry *)
+  | Anchored
+  | Adopted  (** into the trash, at the root under its name *)
+  | Young  (** an orphan younger than [orphan_grace] *)
+  | Nested  (** an orphan inside another, considered once that one is adopted *)
+  | Left  (** Twice: reported only *)
+  | Failed of string
+
+type chunk_repair =
+  | Cleared  (** the marked member's own copy is sound: rewritten over itself *)
+  | Repaired of string  (** from that member *)
+  | Unrepairable
+
+(** The journal retention horizon plus 7 days. *)
+val orphan_grace : float
+
+module Make (_ : Tsync_remote.Context.S) : sig
+  val report : ?narrate:Narrate.t -> ?cancelled:(unit -> bool) -> unit -> report
+
+  val repair_tree :
+    ?narrate:Narrate.t ->
+    ?apply:bool ->
+    ?now:float ->
+    report ->
+    (finding * tree_repair) list
+
+  (** [source] restricts where a sound copy is read from. The local cache is
+      never a source; no corruption marker is deleted here. *)
+  val repair_chunks :
+    ?narrate:Narrate.t ->
+    ?apply:bool ->
+    ?source:string ->
+    ?cancelled:(unit -> bool) ->
+    report ->
+    (corrupt * chunk_repair) list
+end

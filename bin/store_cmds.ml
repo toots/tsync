@@ -225,4 +225,35 @@ let trash_cmd =
   cmd "trash" ~doc:"List the trash, or restore or purge a trashed folder."
     Term.(const trash $ apply_arg $ purge $ restore $ domain_arg $ verbose)
 
-let cmds = [gc_cmd; expire_cmd; trash_cmd]
+let data_integrity repair dry_run detail source name verbose =
+  run_job ?name verbose
+    (Integrity { repair; apply = repair && not dry_run; detail; source })
+
+let data_integrity_cmd =
+  let repair =
+    Arg.(
+      value & flag
+      & info ["repair"]
+          ~doc:
+            "Repair what can be: delete stale markers and trash entries, \
+             anchor folders, adopt unreachable folders into the trash, rewrite \
+             corrupt chunks from a sound copy.")
+  and dry_run =
+    Arg.(
+      value & flag
+      & info ["dry-run"] ~doc:"With --repair, report what it would do.")
+  and detail = Arg.(value & flag & info ["detail"] ~doc:"List every finding.")
+  and source =
+    Arg.(
+      value
+      & opt (some string) None
+      & info ["source"] ~docv:"MEMBER"
+          ~doc:"Read sound copies of corrupt chunks from this member only.")
+  in
+  cmd "data-integrity"
+    ~doc:"Check the domain's folder tree and chunks (exit 1 if unhealthy)."
+    Term.(
+      const data_integrity $ repair $ dry_run $ detail $ source $ domain_arg
+      $ verbose)
+
+let cmds = [gc_cmd; expire_cmd; trash_cmd; data_integrity_cmd]

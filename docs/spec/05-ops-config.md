@@ -544,7 +544,8 @@ first) to re-fire the copy's notification. Both are safe to repeat.
 - `repair_tree(dry_run)`: refused on a read-only domain unless dry; Disowned and Trashed_live →
   delete the stale object; Unanchored → write the anchor; a top-level Orphan older than
   `orphan_grace` → adopted into the trash, and a tombstone MAY be deleted, as
-  [gc.md §4.6](algorithms/gc.md#46-orphan-namespaces) specifies; Twice is left and reported.
+  [gc.md §4.6](algorithms/gc.md#46-orphan-namespaces) specifies; Twice is left and reported, and so
+  is an Unanchored folder whose id is also Twice: anchoring it would choose where it lives.
 - `verify()`: per member (write guard first), ask the store's own verifier to queue its chunks;
   `Queued n | Unsupported`; none queued → `Nothing_queued`; else follow each queued member: poll
   every `VERIFY_POLL` the remaining jobs and corruption markers; done at 0; unchanged for

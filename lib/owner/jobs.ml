@@ -8,6 +8,12 @@ type t =
   | Gc_copies of copies
   | Expire of { apply : bool; cutoff : float }
   | Purge of { apply : bool; path : string }
+  | Integrity of {
+      repair : bool;
+      apply : bool;
+      detail : bool;
+      source : string option;
+    }
 [@@deriving yojson]
 
 let kind = function
@@ -19,6 +25,8 @@ let kind = function
   | Gc_copies Retry_outstanding -> "gc --retry-outstanding"
   | Expire _ -> "expire"
   | Purge _ -> "trash --purge"
+  | Integrity { repair = true; _ } -> "data-integrity --repair"
+  | Integrity _ -> "data-integrity"
 
 type io = {
   out : string -> unit;
@@ -179,9 +187,103 @@ let purge io dom ~apply ~path =
         say "%s: purge stopped, the rest stays in the trash: %s" path reason;
         1
 
+let kind_name = function
+  | Integrity.Twice _ -> "folders at two paths"
+  | Disowned _ -> "disowned markers"
+  | Trashed_live _ -> "trash entries of live folders"
+  | Unanchored _ -> "folders without an anchor"
+  | Orphan _ -> "unreachable folders"
+
+let counted names =
+  let tally = Hashtbl.create 8 in
+  List.iter
+    (fun n ->
+      Hashtbl.replace tally n
+        (1 + Option.value ~default:0 (Hashtbl.find_opt tally n)))
+    names;
+  List.sort compare (Hashtbl.fold (fun n k acc -> (n, k) :: acc) tally [])
+
+let unfixed = function
+  | Integrity.Left | Young | Nested | Failed _ -> true
+  | Deleted | Anchored | Adopted -> false
+
+let integrity io (dom : Tsync_domain.Domain.t) ~repair ~apply ~detail ~source =
+  let say fmt = Printf.ksprintf io.out fmt in
+  if repair && apply && dom.domain.read_only then
+    Fail.raise_ Fail.Read_only "%s is read-only"
+      (Domain_name.to_string dom.name);
+  let module I = Integrity.Make ((val Tsync_domain.Domain.context dom)) in
+  let r = I.report ~narrate:io.narrate ~cancelled:io.cancelled () in
+  if not repair then (
+    if Integrity.healthy r then
+      say "%s: healthy (%d tombstones)"
+        (Domain_name.to_string dom.name)
+        r.tombstones
+    else (
+      List.iter
+        (fun (n, k) -> say "%d %s" k n)
+        (counted (List.map kind_name r.findings));
+      if r.corrupt <> [] then say "%d corrupt chunks" (List.length r.corrupt);
+      if detail then (
+        List.iter (fun f -> say "  %s" (Integrity.describe f)) r.findings;
+        List.iter
+          (fun (c : Integrity.corrupt) ->
+            say "  %s marked corrupt on %s"
+              (Chunk_key.to_string c.chunk)
+              c.member)
+          r.corrupt));
+    if Integrity.healthy r then 0 else 1)
+  else (
+    let tree = I.repair_tree ~narrate:io.narrate ~apply r in
+    let chunks =
+      I.repair_chunks ~narrate:io.narrate ~apply ?source ~cancelled:io.cancelled
+        r
+    in
+    let outcome = function
+      | Integrity.Deleted -> "deleted"
+      | Anchored -> "anchored"
+      | Adopted -> "adopted into the trash"
+      | Young -> "left: younger than the grace"
+      | Nested -> "left: inside an unreachable folder"
+      | Left -> "left: resolve by hand"
+      | Failed _ -> "failed"
+    and chunk_outcome = function
+      | Integrity.Cleared -> "rewritten from their own copy"
+      | Repaired _ -> "repaired from another member"
+      | Unrepairable -> "unrepairable"
+    in
+    List.iter
+      (fun (n, k) -> say "%d %s" k n)
+      (counted
+         (List.map (fun (_, o) -> outcome o) tree
+         @ List.map (fun (_, o) -> "chunks " ^ chunk_outcome o) chunks));
+    if detail then (
+      List.iter
+        (fun (f, o) ->
+          say "  %s: %s%s" (Integrity.describe f) (outcome o)
+            (match o with Failed reason -> " (" ^ reason ^ ")" | _ -> ""))
+        tree;
+      List.iter
+        (fun ((c : Integrity.corrupt), o) ->
+          say "  %s on %s: %s%s"
+            (Chunk_key.to_string c.chunk)
+            c.member (chunk_outcome o)
+            (match o with Repaired from -> " (" ^ from ^ ")" | _ -> ""))
+        chunks);
+    if tree = [] && chunks = [] then
+      say "%s: nothing to repair" (Domain_name.to_string dom.name);
+    if not apply then say "(dry run: nothing changed; drop --dry-run to act)";
+    if
+      List.exists (fun (_, o) -> unfixed o) tree
+      || List.exists (fun (_, o) -> o = Integrity.Unrepairable) chunks
+    then 1
+    else 0)
+
 let run io (dom : Tsync_domain.Domain.t) = function
   | Gc { apply; verify; abort; budget } ->
       gc io dom.composite ~apply ~verify ~abort ~budget
   | Gc_copies act -> copies io dom.composite act
   | Expire { apply; cutoff } -> expire io dom ~apply ~cutoff
   | Purge { apply; path } -> purge io dom ~apply ~path
+  | Integrity { repair; apply; detail; source } ->
+      integrity io dom ~repair ~apply ~detail ~source
