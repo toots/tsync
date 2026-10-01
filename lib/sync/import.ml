@@ -60,7 +60,7 @@ module Make (C : Engine_ctx.S) = struct
     Narrate.say narrate "  %s created and announced"
       (Narrate.count !created "folder");
     let under_blocked rel =
-      List.exists (fun b -> String.starts_with ~prefix:(b ^ "/") rel) !blocked
+      List.exists (fun dir -> Names.is_under ~dir rel) !blocked
     in
     let imported = ref 0 and bytes = ref 0 and skipped = ref 0 in
     let skipped_links = ref 0 and failed = ref [] in
