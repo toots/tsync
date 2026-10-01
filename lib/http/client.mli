@@ -12,6 +12,10 @@ val endpoint : ?ca_file:string -> ?max_connections:int -> string -> endpoint
 
 val base_path : endpoint -> string
 val host : endpoint -> string
+
+(** The [Host] header: the host, and the port when it is not the scheme's. *)
+val authority : endpoint -> string
+
 val url : endpoint -> string
 
 type response = {

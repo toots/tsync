@@ -5,6 +5,7 @@
   200 ""
   200 "one two three" (chunked)
   404 "not found\n"
+host header carries the port: true
 == keep-alive
   same connection: true
   new connection after close: true

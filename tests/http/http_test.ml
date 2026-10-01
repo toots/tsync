@@ -9,6 +9,9 @@ let handler (r : Server.request) read_body =
         let body = Bigstring.to_string (read_body ~limit:16) in
         Server.text 200 (Printf.sprintf "%s %s %S" r.meth r.query body)
     | "/peer" -> Server.text 200 r.peer
+    | "/host" ->
+        Server.text 200
+          (Option.value ~default:"" (Codec.header r.headers "host"))
     | "/stream" ->
         {
           status = 200;
@@ -58,6 +61,10 @@ let () =
       show (Client.request e ~meth:"HEAD" "/echo");
       show (Client.request e ~meth:"GET" "/stream");
       show (Client.request e ~meth:"GET" "/nothing");
+      p "host header carries the port: %b"
+        (Bigstring.to_string (Client.request e ~meth:"GET" "/host").body
+        |> String.trim
+        = Printf.sprintf "127.0.0.1:%d" port);
       p "== keep-alive";
       let a = Client.request e ~meth:"GET" "/peer" in
       let b = Client.request e ~meth:"GET" "/peer" in

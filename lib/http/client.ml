@@ -13,6 +13,7 @@ type conn = {
 type endpoint = {
   host : string;
   port : int;
+  authority : string;
   tls : Transport.tls option;
   base : string;
   url : string;
@@ -70,9 +71,15 @@ let endpoint ?ca_file ?(max_connections = 32) url =
       | "http" -> None
       | _ -> Fail.invalid "%s: not an http(s) URL" url
   in
+  let authority =
+    let h = if String.contains host ':' then "[" ^ host ^ "]" else host in
+    if port = if tls = None then 80 else 443 then h
+    else Printf.sprintf "%s:%d" h port
+  in
   {
     host;
     port;
+    authority;
     tls;
     base;
     url;
@@ -82,6 +89,7 @@ let endpoint ?ca_file ?(max_connections = 32) url =
 
 let base_path e = e.base
 let host e = e.host
+let authority e = e.authority
 let url e = e.url
 
 type response = { status : int; headers : Codec.headers; body : Bigstring.t }
@@ -132,7 +140,7 @@ let link fmt = Fail.raise_ Fail.Link fmt
 let exchange e c ~meth ~target ~headers ~body ~reused =
   let b = Buffer.create 256 in
   let head =
-    [("host", e.host)]
+    [("host", e.authority)]
     @ headers
     @
       match body with
