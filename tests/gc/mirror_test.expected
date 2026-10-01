@@ -1,0 +1,24 @@
+== everything
+all: main -> copy, 10 checked, 10 copied (455 bytes), 0 refused
+order of kinds: chunk, other, cursor
+index copied: false
+
+== again
+all: main -> copy, 10 checked, 0 copied (0 bytes), 0 refused
+
+== a changed manifest and a short chunk on the copy
+all: main -> copy, 10 checked, 2 copied (112 bytes), 0 refused
+
+== manifests only
+manifests: main -> copy, 5 checked, 0 copied (0 bytes), 1 refused
+
+== a path, with a chunk missing from the source
+path: refused: tsync/d/chunks/de5/de50e7a571250a97-6ed340dd3302d426 is missing from source main
+path: main -> copy, 7 checked, 2 copied (114 bytes), 0 refused
+
+== a collection open
+all: refused: main has a collection open in marking, started 3d 0h ago: the chunk area is partly under another name; finish it with tsync gc, or undo it with tsync gc --abort
+manifests: main -> copy, 5 checked, 0 copied (0 bytes), 0 refused
+
+== an unknown source
+source: refused: d has no member named nowhere

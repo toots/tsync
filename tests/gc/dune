@@ -109,3 +109,18 @@
  (alias runtest)
  (action
   (diff verify_test.expected verify_test.output)))
+
+(executable
+ (name mirror_test)
+ (modules mirror_test)
+ (libraries tsync_core tsync_store tsync_remote tsync_gc unix))
+
+(rule
+ (with-stdout-to
+  mirror_test.output
+  (run ./mirror_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff mirror_test.expected mirror_test.output)))

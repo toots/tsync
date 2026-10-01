@@ -22,6 +22,7 @@ type t =
       move : bool;
       dry_run : bool;
     }
+  | Mirror of { source : string option; manifests : bool; path : string option }
   | Integrity of {
       verify : bool;
       repair : bool;
@@ -41,6 +42,7 @@ let kind = function
   | Expire _ -> "expire"
   | Purge _ -> "trash --purge"
   | Import _ -> "import"
+  | Mirror _ -> "mirror"
   | Rsync { move = true; _ } -> "rsync --move"
   | Rsync _ -> "rsync"
   | Integrity { verify = true; _ } -> "data-integrity --verify"
@@ -379,12 +381,42 @@ let rsync io (module E : Tsync_sync.Engine.S) ~src ~dst ~move ~dry_run =
     r.unpublished;
   if r.failed = [] && not r.cancelled then 0 else 1
 
+let mirror io (dom : Tsync_domain.Domain.t) ~source ~manifests ~path =
+  let say fmt = Printf.ksprintf io.out fmt in
+  let module M = Store_mirror.Make ((val Tsync_domain.Domain.context dom)) in
+  let scope : Store_mirror.scope =
+    match (manifests, path) with
+      | true, _ -> Manifests
+      | false, Some p -> Path p
+      | false, None -> All
+  in
+  let r = M.mirror ~narrate:io.narrate ~cancelled:io.cancelled ?source scope in
+  List.iter
+    (fun (c : Store_mirror.copied) ->
+      say "%s -> %s: %d checked, %d copied (%s), %d refused" r.source c.name
+        c.checked c.copied
+        (Narrate.size c.copied_bytes)
+        (List.length c.failed);
+      List.iter (fun (k, why) -> say "  %s: %s" k why) c.failed)
+    r.copies;
+  if r.cancelled then say "cancelled before the end";
+  if
+    r.cancelled
+    || List.exists (fun (c : Store_mirror.copied) -> c.failed <> []) r.copies
+  then 1
+  else 0
+
 let run io (dom : Tsync_domain.Domain.t) engine = function
   | Gc { apply; verify; abort; budget } ->
       gc io dom.composite ~apply ~verify ~abort ~budget
   | Gc_copies act -> copies io dom.composite act
   | Expire { apply; cutoff } -> expire io dom ~apply ~cutoff
   | Purge { apply; path } -> purge io dom ~apply ~path
+  | Mirror { source; manifests; path } ->
+      if dom.domain.read_only then
+        Fail.raise_ Fail.Read_only "%s is read-only"
+          (Domain_name.to_string dom.name);
+      mirror io dom ~source ~manifests ~path
   | Import { src; only; exclude; force_rehash } ->
       if dom.domain.read_only then
         Fail.raise_ Fail.Read_only "%s is read-only"

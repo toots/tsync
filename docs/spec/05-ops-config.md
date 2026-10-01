@@ -461,6 +461,10 @@ copied_bytes}`.
    destination never sees a manifest whose chunks are not there yet, or a cursor ahead of its
    entries.
 
+An object a destination refuses (a reference gate missing the chunks a manifest names, under
+`Manifests`) is counted refused for that destination with its reason, and the run goes on; any
+refusal makes the command exit 1.
+
 Additive: nothing is deleted on a destination. A chunk's content (same size, wrong bytes) is
 integrity's (§4.10). Stateless: a restart re-lists.
 

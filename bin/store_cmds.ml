@@ -462,6 +462,44 @@ let export_cmd =
        changes)."
     Term.(const export $ args $ source $ jobs $ domain_arg $ verbose)
 
+let mirror source manifests path name verbose =
+  if manifests && path <> None then (
+    prerr_endline "tsync: --manifests and --path go one at a time";
+    2)
+  else (
+    let path =
+      Option.map
+        (fun p ->
+          String.concat "/"
+            (List.filter (( <> ) "") (String.split_on_char '/' p)))
+        path
+    in
+    run_job ?name verbose (Mirror { source; manifests; path }))
+
+let mirror_cmd =
+  let source =
+    Arg.(
+      value
+      & opt (some string) None
+      & info ["source"] ~docv:"MEMBER"
+          ~doc:"Copy from this member; the first in role order by default.")
+  and manifests =
+    Arg.(
+      value & flag
+      & info ["manifests"] ~doc:"Only manifests and folder markers.")
+  and path =
+    Arg.(
+      value
+      & opt (some string) None
+      & info ["path"] ~docv:"P"
+          ~doc:"Only this file or folder, with every chunk it names.")
+  in
+  cmd "mirror"
+    ~doc:
+      "Copy what one member holds to the others; nothing is deleted on a \
+       destination."
+    Term.(const mirror $ source $ manifests $ path $ domain_arg $ verbose)
+
 let cmds =
   [
     gc_cmd;
@@ -471,4 +509,5 @@ let cmds =
     import_cmd;
     rsync_cmd;
     export_cmd;
+    mirror_cmd;
   ]
