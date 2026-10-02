@@ -23,3 +23,4 @@ replica holds it: false
 
 == write guard
 guarded write to the replica: transient/link
+batch read with the main held down: unreachable

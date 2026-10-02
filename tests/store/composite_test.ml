@@ -19,6 +19,7 @@ let switchable (s : Store.t) =
       delete = (fun key -> g (fun () -> s.delete key));
       list_prefix =
         (fun ?max_keys pr -> g (fun () -> s.list_prefix ?max_keys pr));
+      get_many = Some (fun keys -> g (fun () -> List.map s.get_opt keys));
     } )
 
 let manifest_body cks =
@@ -149,5 +150,7 @@ let () =
              Composite.guard c
                { name = "replica"; role = Replica; store = replica }
                "copy"));
+      p "batch read with the main held down: %s\n"
+        (kind (fun () -> Option.get s.get_many [k "tsync/d/old"]));
       main_up := true);
   Fs.rm_rf root

@@ -586,6 +586,10 @@ let make_store t ~source_only =
   let batch_owner =
     match first with Some m when not source_only -> Some m | _ -> None
   in
+  let batch_reachable m =
+    if Health.is_down m.store.health then
+      Fail.raise_ Fail.Unreachable "%s is held down" m.store.name
+  in
   Store.checked
     {
       Store.name = "composite";
@@ -618,18 +622,21 @@ let make_store t ~source_only =
             (rd ~probing:false (fun s ->
                  s.watch key last;
                  Some ())));
+      (* A batch read of a member held down answers nothing: reading that as
+         every key absent would turn live folders into orphans. *)
       get_many =
         Option.bind batch_owner (fun m ->
             Option.map
               (fun f keys ->
-                if Health.is_down m.store.health then
-                  List.map (fun _ -> None) keys
-                else f keys)
+                batch_reachable m;
+                f keys)
               m.store.get_many);
       list_many =
         Option.bind batch_owner (fun m ->
             Option.map
-              (fun f ps -> if Health.is_down m.store.health then [] else f ps)
+              (fun f ps ->
+                batch_reachable m;
+                f ps)
               m.store.list_many);
       bucket_functions = false;
       capabilities =
