@@ -432,7 +432,7 @@ Key(manifest)`; `target = Absent(side) | Dir(side) | File(local) | Key(manifest)
 ### 4.6 `tsync mirror` (store to store)
 
 `mirror ?source ?scope:(All | Manifests | Path rel)` → per destination `{name, checked, copied,
-copied_bytes}`.
+copied_bytes, changed, unguarded}`.
 
 1. Source: the named member, else the first member in role order.
 2. `All` and `Path` are refused while a collection is open ([gc.md](algorithms/gc.md): the chunk
@@ -451,22 +451,47 @@ copied_bytes}`.
 4. `on_scan(objects, bytes)`.
 5. For each other member, in config order: the write guard
    ([replication.md](algorithms/replication.md)) must allow writing it. Compare each source object
-   with the destination's (from a listing of the destination for listed scopes, a head per object for
-   `Path`):
-   - a **chunk** (content-addressed, immutable) is copied when absent or of another size;
+   with the destination's entry (from a listing of the destination for listed scopes, a head per
+   object for `Path`). An object's size, etag and checksum always come from one entry, never a
+   listing's value paired with a later read:
+   - a **chunk** is named by its content ([01 §3.2](01-core.md#32-chunk-keys)): it is copied only when the destination has no entry for
+     it, or when the destination's is of another size. It is never compared by content: a present
+     chunk of the right size is taken as equal, and one with damaged bytes is integrity's (§4.10);
    - **every other key** (manifests, markers, anchors, versions, journal entries, the cursor) is
-     mutable, and is copied when absent or when its body differs from the source's.
-   A copy is a get from the source and a put to the destination.
-6. Every chunk is copied before any manifest that names it, and the cursor last: a reader of the
-   destination never sees a manifest whose chunks are not there yet, or a cursor ahead of its
-   entries.
+     copied when the destination has no entry, when the sizes differ, or when the checksums differ
+     (step 6).
+6. **Checksum comparison** of a key both sides hold at the same size
+   ([06 §2.5](06-backends.md#25-checksums)):
+   1. both entries carry comparable checksums → compare them, with no request;
+   2. one entry carries a checksum → `compute_checksum` of its algorithm on the other side;
+   3. neither carries one → `compute_checksum(md5)` on both sides;
+   4. both carry checksums that are not comparable → compute, on one side, the algorithm the other
+      carries.
+
+   Where either side could compute, the side of lower `locality`
+   ([06 §3.12](06-backends.md#312-compute_checksum-and-locality)) does (`Local < Proxy < Remote`);
+   at equal locality, the source, whose body a copy would read anyway. A body crosses a link for a
+   comparison only when no closer side can hash it.
+7. **A copy** is a `get` from the source, then on the destination:
+   - a chunk: `put`. Its name is its content, so there is nothing to guard;
+   - any other key: `put_if_unchanged` with the destination's entry the comparison used (`none` when
+     it had none). `Changed` means the destination was written after it was read: the mirror leaves
+     it, counts it `changed`, and the next run compares it again. A destination that cannot evaluate
+     the precondition (REFUSED) is written with `put`, and the key is counted `unguarded`.
+8. Comparisons and copies run concurrently, at most `maxDownloads` at once, with the bodies held for
+   copies bounded by `maxChunkBuffers` (§2.1).
+9. The batches run in order, each finished before the next starts: every chunk is copied before any
+   manifest that names it, and the cursor last. A reader of the destination never sees a manifest
+   whose chunks are not there yet, or a cursor ahead of its entries.
 
 An object a destination refuses (a reference gate missing the chunks a manifest names, under
 `Manifests`) is counted refused for that destination with its reason, and the run goes on; any
 refusal makes the command exit 1.
 
-Additive: nothing is deleted on a destination. A chunk's content (same size, wrong bytes) is
-integrity's (§4.10). Stateless: a restart re-lists.
+Additive: nothing is deleted on a destination. A chunk's content (same size, wrong bytes) is integrity's (§4.10).
+Stateless: a restart re-lists. A race with another writer costs nothing: the conditional replace
+never overwrites a destination object written after the comparison read it, and a source object
+changed after it was compared is copied as read, or found by the next run.
 
 ### 4.7 Resync (`tsync sync`)
 
@@ -612,7 +637,8 @@ Token, expiry, overwrite and revocation rules are
 - **Import and rsync**: every manifest put is named by a durable record first (§4.2); mkdirs before
   puts; a crash leaves nothing unannounced and a rerun converges.
 - **Export**: record header before the file, per-chunk fsync then claim; resume from claims.
-- **Mirror**: stateless, additive, idempotent.
+- **Mirror**: stateless, additive, idempotent; it never overwrites a destination object written
+  after its comparison read it, on a destination that evaluates the precondition.
 - **Resync**: runs in the owner under its serialisation; mark and sweep only after a complete walk.
 - **Restore**: anchor before marker, announcement after.
 - **GC**: every phase saved before acting ([gc.md](algorithms/gc.md)); exclusive per domain (§4.9).
@@ -638,8 +664,12 @@ Token, expiry, overwrite and revocation rules are
   the interlock.
 - **Export off the stores**, with preallocation and claims; a record is believed only beside a file
   of the right length.
-- **Mirror** orders chunks before manifests and compares mutable keys by body: a same-size stale
-  manifest or cursor would otherwise stay stale forever.
+- **Mirror** orders chunks before manifests, compares chunks by name and size (their name is their
+  content, and both come with the listing), and compares mutable keys by checksum: a same-size stale manifest or cursor would
+  otherwise stay stale forever. Checksums come from the stores' listings where the service keeps
+  them, and are otherwise computed on the closest side, so a run checks hundreds of thousands of
+  manifests without downloading them; comparing by body read every one of them from both sides,
+  one at a time. Copies of mutable keys are conditional on the destination being as compared.
 - **Resync rewrites in place and reports ops** rather than clearing: clearing served an empty tree
   for minutes and forced every reader to re-list.
 - **Shares** at a fixed root (IAM and lifecycle target one prefix), created exclusively, verified on
@@ -683,9 +713,15 @@ Token, expiry, overwrite and revocation rules are
   names and relative destinations refused.
 - **Rsync**: the full decision table including patch indices; a copy within a domain moves no bytes;
   a move of a file the mirror does not hold yet succeeds.
-- **Mirror**: heals a missing chunk, a wrong-size chunk and a missing manifest on a secondary; an
-  in-sync run copies nothing; a same-size stale manifest or cursor is replaced; no destination ever
-  holds a manifest without its chunks.
+- **Mirror**: heals a missing chunk, a wrong-size chunk and a missing manifest on a secondary; a
+  present chunk of the right size is never read; an in-sync run copies nothing; a same-size stale manifest or cursor
+  is replaced; no destination ever holds a manifest without its chunks. Local to GCS over in-sync
+  manifests issues no request per object on GCS and hashes only local files; http-proxy to GCS
+  hashes on the proxy's server; against an S3 destination with `etagIsMd5: false`, each key is
+  hashed on the source where the source keeps or computes it, and on S3 by downloading it, never
+  copied without a comparison. A destination key written between the comparison and the copy is left as
+  written and counted `changed`; a destination without conditional replace is written and counted
+  `unguarded`.
 - **Resync**: no mark → rebuild with a reason; a clean rebuild sets the mark; a caught-up client
   applies the journal and reports nothing; `--full` reports nothing for unchanged files; the mirror is
   rewritten in place (chunks survive); moves, recreations and removals of folders are reported by id;

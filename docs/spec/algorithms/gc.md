@@ -235,7 +235,7 @@ name paths or locations, never chunks.
 ### 5.4 The collection interlock
 
 Every write that makes a chunk reference visible on a collectable main MUST go through the **reference
-gate** of that main's store driver. A reference-publishing write is any put or server-side copy whose
+gate** of that main's store driver. A reference-publishing write is any put (plain, claimed or conditional) or server-side copy whose
 destination lies in the manifest area or the version area. This covers, among others: publishing an
 upload, a file rename (copy then delete), an in-domain copy or move, re-publishing a cached manifest,
 reverting to a version, restoring a deleted file, a version snapshot, import, mirror or repair writing
