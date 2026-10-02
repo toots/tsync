@@ -887,13 +887,26 @@ module Make (C : Engine_ctx.S) = struct
         !post_put_hook path e.size (base_hex e);
         e)
 
-  (* Local namespace changes and promotions; a rebuild sweeps only when none
-     happened during its walk. *)
-  let local_changes = Atomic.make 0
+  (* The paths local namespace changes and promotions touched while a rebuild
+     walks: its sweep leaves them alone. *)
+  let touched : (string, unit) Hashtbl.t option Atomic.t = Atomic.make None
+  let touched_m = Mutex.create ()
+
+  let note_touched paths =
+    Mutex.protect touched_m (fun () ->
+        Option.iter
+          (fun h -> List.iter (fun p -> Hashtbl.replace h p ()) paths)
+          (Atomic.get touched))
+
+  let was_touched p =
+    Mutex.protect touched_m (fun () ->
+        match Atomic.get touched with
+          | Some h -> Hashtbl.mem h p
+          | None -> false)
 
   (* WAL records of namespace changes: durable intent before the local half. *)
   let record_intent ?(priors = []) ops =
-    Atomic.incr local_changes;
+    note_touched (List.concat_map Op.paths ops);
     let body =
       Wal.encode
         {

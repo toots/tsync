@@ -1,4 +1,4 @@
-rebuild with a mkdir during its walk: full, 1 failures; hook ran: true
+rebuild with a mkdir during its walk: full, 0 failures; hook ran: true
 A: kept/ kept.txt late/
 after A drains
   A: kept/ kept.txt late/

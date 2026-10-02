@@ -1,4 +1,4 @@
-(* A rebuild sweeps nothing when local work happened during its walk
+(* A rebuild's sweep leaves alone the paths local work touched during its walk
    (wal-and-journal §4.8). *)
 
 open Tsync_core
