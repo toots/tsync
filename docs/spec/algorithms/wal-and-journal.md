@@ -463,9 +463,12 @@ runs after it ([04](../04-checkout-cache.md) §4.10). Parked records of both que
 **The horizon.** An entry is due only if its key is at most `H` old (`e.ms ≥ now − H`). The handled
 set covers every key of that window because the applied log keeps it:
 
-- **Applied-log retention.** A shard MAY be deleted only when it is not the newest shard and every
-  key in it is older than `now − H − LIST_SLACK`. Nothing else deletes applied-log lines; there is
-  no size-based pruning. (Keys older than the horizon are never due, so their lines are no longer
+- **Applied-log retention.** A shard MAY be deleted only when it is not the newest shard, every
+  key in it is older than `now − H − LIST_SLACK`, and it was handled entirely before the entry the
+  feed watermark names (the shard holding that entry is kept, and every later one;
+  [08 §3.6](../08-frontends.md#36-change-feed-changes_since)). Deleting a shard sets the
+  dropped-shard record durably first. Nothing else deletes applied-log lines; there is no
+  size-based pruning. (Keys older than the horizon are never due, so their lines are no longer
   needed for dedupe; the margin covers a clock step between prune and pass.)
 - **Journal retention** ([gc.md](gc.md)). Expiry MUST NOT delete an entry whose key is younger than
   `H`, and MUST keep the entry the cursor names. Age is the only safe criterion: nothing on the
@@ -514,7 +517,9 @@ An empty journal with no cursor is a fresh domain: it satisfies none of B2–B4 
 2. Takes `t0 := wall now` and a complete journal listing **before** walking the tree.
 3. Walks the store's tree and rewrites the replica in place; staged edits are untouched. Each
    difference is appended to the applied log under a freshly minted key with the ops it amounts to,
-   so feed readers learn it.
+   so feed readers learn it. A rebuild stamps no new resync generation: outstanding change-feed
+   anchors stay valid and read the difference as ordinary ops. At its end the owner rebuilds the
+   reverse folder index from the mirror.
 4. Only if the walk had no failures: notes every listed key not yet handled with empty ops (their
    effect is in the tree just read), sets the mark to `key(t0 − LIST_SLACK)`, clears the
    stepped-aside set, and returns the domain to `incremental`.

@@ -97,7 +97,7 @@ The constraints that shape everything:
 | **applied log** | The owner's log of every journal entry handled; also the change feed frontends read. |
 | **converge** | Recover owed work, apply peers' journal entries, run maintenance. Done by the domain's owner. |
 | **frontend** | One way of presenting a domain on a host: `fuse`, `file_provider`, `http-proxy`, `android`. |
-| **item reference** | How non-FUSE callers name items: `root`, `d:<folderId>`, `f:<parentFolderId>/<leaf>`. |
+| **item reference** | How non-FUSE callers name items: `root`, `d:<folderId>`, `i:<fileId>` (a local id kept across renames), or `f:<parentFolderId>/<leaf>`. |
 | **uplink governor** | Admits uploads on a network link at a rate chosen from measured queueing delay. |
 
 ## 4. Architecture

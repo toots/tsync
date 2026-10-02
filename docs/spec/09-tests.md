@@ -114,6 +114,7 @@ implementation's harness MUST provide equivalents:
 
 - random folder ids → `<folder-N>`, numbered by walking from the root, then the trash, children in name
   order; the root and trash ids are constants and printed raw;
+- file ids → `<file-N>`, numbered in order of first appearance in the output;
 - journal entry names → `<entry-N>`; version timestamps → `#N`, oldest first;
 - mtimes → `<mtime>` / `<zero>`; pin deadlines → `<deadline>`;
 - walk ids in page cursors → `<walk>`; a cursor's generation → `<cursor>` / `<empty>`.
@@ -237,8 +238,8 @@ Each driver prints its step list, then the state of §4.1.
 | single client | one client, two main stores | tree, content, store dump (and the second store's when a step touched it) |
 | two clients | A and B with separate caches, data and identities over one shared store | both trees, contents and owed work; both applied logs; the store |
 | listing | one client | each folder listed whole and paged, and the whole-domain listing paged |
-| change feed | A mutates, B syncs | B's feed from a baseline anchor, from its cursor, from a pruned anchor, and after a generation bump |
-| page stability | one client | the whole-domain listing with the kept walk deleted between pages, and with a write between pages |
+| change feed | A mutates, B syncs | B's feed from a baseline anchor, from its cursor, from a pruned anchor, after a generation bump, after a rebuild (still valid), and past the horizon with a watermark (still valid); a file renamed by A keeps its `i:` reference in B's feed |
+| page stability | one client | the whole-domain listing with a write between pages (no gap or repeat), and with the kept walk deleted between pages (`{stale:true}`) |
 | report | one client | the structure of the status report, and its text rendering |
 
 A step failure is printed as `ERROR <failure>` and the state dump still follows, so a golden file can

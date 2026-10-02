@@ -277,7 +277,7 @@ until its last close. POSIX gives this for inodes; the mount gives it for keys:
 | hook ([08 §3.2](../08-frontends.md)) | behaviour |
 |---|---|
 | `changed(keys)` | kernel invalidation (§4.7), asynchronous |
-| `surface_evicted`, `surface_restored`, `reannounce`, `on_upload_done` | nothing |
+| `reannounce`, `on_upload_done` | nothing |
 | `status_fields()` | `mount: <mount point>` |
 | `stats_fields()` | `frontend:"fuse"`, `mountPoint`, `openHandles`, `filesOpened`, `bytesRead`, `bytesWritten`, `bytesReadPerSec`, `bytesWrittenPerSec`, `handlerFailures` |
 | `on_stop()` | request the owner's stop |

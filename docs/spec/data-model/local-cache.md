@@ -85,6 +85,10 @@ This client's projection of the domain's namespace as of the journal entries it 
   client stored even when that upload's promotion was abandoned, moves with a local rename and
   goes with a local delete. An undecodable entry is CORRUPT for its path and skipped by
   listings.
+- **File id.** Attr of a file entry: its local file id ([01 §2.7](../01-core.md#27-item-references)).
+  It moves with the entry on a local or applied rename, survives every replacement of the entry
+  at the same path (a new version, a peer's put, a resync), and goes with the entry's removal. An
+  entry found without one is given a fresh id the first time the owner writes or names it.
 - **Name record.** Id: the folder entry. Attr: the real leaf of a folder whose local name had to
   be escaped.
 - Mut: entries are replaced whole; the tree changes by create, move and remove.
@@ -189,8 +193,8 @@ One record per unit of work this client owes the store.
 ### 3.8 Applied log
 
 The journal entries this client has published or applied, in the order handled; the change
-feed. Format: [03](../03-journal-sync.md). Retention: by age only, never by size
-([wal-and-journal](../algorithms/wal-and-journal.md) §4.8).
+feed. Format: [03](../03-journal-sync.md). Retention: by age, never by size, and never past the
+feed watermark ([wal-and-journal](../algorithms/wal-and-journal.md) §4.8).
 
 - Id of a line: its entry key; position, not key order, is the feed order.
 - Mut: append-only.
@@ -205,8 +209,15 @@ feed. Format: [03](../03-journal-sync.md). Retention: by age only, never by size
 - **Resync generation**: an opaque token carried by change-feed anchors; an anchor of another
   generation reads as stale ([07](../07-daemon-cli.md)).
 - **Pause flag** ([07](../07-daemon-cli.md) §2.6).
+- **Feed watermark**: the entry of the oldest anchor a change-feed consumer may still present, and
+  when it last moved ([08 §3.6](../08-frontends.md#36-change-feed-changes_since)). Absent: no
+  consumer holds an anchor.
+- **Dropped-shard record**: whether the applied log has ever dropped a shard, so an anchor naming
+  no entry can be judged ([08 §3.6](../08-frontends.md#36-change-feed-changes_since)).
 - Mut: replaced whole, durably. Class: authoritative bookkeeping; loss costs a rebuild, a
-  re-list or a lost pause, never data.
+  re-list or a lost pause, never data. A lost watermark or dropped-shard record reads as absent and
+  as "dropped": the first costs at most a re-list after the horizon, the second a re-list of a
+  consumer holding an empty anchor.
 
 ### 3.10 Export records
 
@@ -312,6 +323,8 @@ erDiagram
 8. **Folder ids are final and unique**: a folder holds at most one id, a browse never replaces
    it, ids are unique across clients (uuid prefix) and processes (leases).
 9. **The reverse index is verified before use.**
+9a. **File ids are unique and stable**: on a full tree every file entry has one file id, no two
+    entries share one, and an id is never given to another file.
 10. **Mirror completeness** (full tree): absence in the mirror is absence in the domain, as of
     the entries applied.
 11. **The last-sync mark is monotone.**
@@ -363,7 +376,8 @@ manifest is durable, and after every read handle on them has closed.
 | client uuid, leases | **authoritative identity** | never |
 | pins | authoritative user intent | re-pin |
 | applied log | authoritative history | not rebuildable; loss causes re-application (idempotent) and a stale feed |
-| last-sync mark, resync generation, pause flag | authoritative bookkeeping | loss causes a rebuild, a re-list, a lost pause |
+| last-sync mark, resync generation, pause flag, feed watermark, dropped-shard record | authoritative bookkeeping | loss causes a rebuild, a re-list, a lost pause |
+| file ids | authoritative, local only | not rebuildable; loss re-identifies the files to hosts that persist identifiers (they are re-fetched once) |
 | export records | authoritative about the destination only | re-export |
 | folder ids in the mirror | authoritative once minted here, until published; otherwise projection of store markers | resync (the store's id wins) |
 | removed-id records | history | not rebuildable; loss makes some old ops unnameable |
@@ -399,7 +413,7 @@ The two trees differ in what the mirror promises, not in their entities.
 | set-aside manifests and records | reported; removed only by an explicit user request |
 | WAL, deferred logs | discharge; they grow with owed work while offline, by design |
 | parked records | retried; reported until they succeed |
-| applied log | age only ([wal-and-journal](../algorithms/wal-and-journal.md) §4.8) |
+| applied log | age, held back by the feed watermark until it lapses ([wal-and-journal](../algorithms/wal-and-journal.md) §4.8) |
 | removed-id records | retention of [04](../04-checkout-cache.md) §4.9 |
 | id leases | [03](../03-journal-sync.md) §2.1 (never reusing a block) |
 | export records | deleted on completion; age sweep ([05](../05-ops-config.md)) |
@@ -416,7 +430,7 @@ Every optional field and optional file has a stated meaning when absent
 
 | Entity | Specified in |
 |---|---|
-| mirror entries, folder, name and own markers | [04](../04-checkout-cache.md) §2.3 |
+| mirror entries, folder, name, own and file-id markers | [04](../04-checkout-cache.md) §2.3 |
 | reverse entries, removed-id records | [04](../04-checkout-cache.md) §2.4 |
 | staged manifests, set-aside names | [04](../04-checkout-cache.md) §2.5 |
 | staged bodies | [04](../04-checkout-cache.md) §2.6 |
@@ -427,7 +441,7 @@ Every optional field and optional file has a stated meaning when absent
 | applied log, last-sync mark, entry keys, client uuid, leases | [03](../03-journal-sync.md) |
 | deferred job bodies | [06](../06-backends.md) |
 | export records, spools | [05](../05-ops-config.md) |
-| ownership lock, pause flag, resync generation, kept walk | [07](../07-daemon-cli.md) |
+| ownership lock, pause flag, resync generation, feed watermark, dropped-shard record, kept walk | [07](../07-daemon-cli.md) |
 | temporary names, leaf escaping | [01](../01-core.md) |
 
 ## 10. Conformance

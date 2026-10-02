@@ -184,20 +184,21 @@ of its own. Nearly every regression came from one of three sources:
 
 ---
 
-## 3. Changes the new spec needs elsewhere (not yet made)
+## 3. Changes made elsewhere
 
-The FP spec now relies on these. They belong to other files, which are not edited yet. **S1 (stable
-file ids) is the decision to confirm first**: it is the one change that reaches the core data model.
+Stable file ids and the feed retention reach the core; they were made in the follow-up commits of
+this review, each rule in the file that owns it:
 
 | File | Change |
 |---|---|
-| [01-core §2.7](../spec/01-core.md) | Add `i:<file id>` to the item-reference grammar. A file id is local to the client, minted by the owner, never reused, kept across rename and content change |
-| [data-model/local-cache](../spec/data-model/local-cache.md) | Mirror file entries carry the file id (minted lazily for entries without one). The applied log records, with each op naming a file, the id the file had when the op was applied (renderers read it rather than resolving a path that may have moved since). New: feed watermark and dropped-shard record per domain |
-| [wal-and-journal §4.8](../spec/algorithms/wal-and-journal.md) | Applied-log retention also MUST NOT drop a shard holding an entry after the feed watermark |
-| [08 §2.2, §2.3](../spec/08-frontends.md) | Rows name files by `i:`; add `[readOnly: true]` to the row. A host MAY still accept `f:` from callers that hold only a path (desktop menus, Android) |
-| [08 §3.2](../spec/08-frontends.md) | `file_provider`: `surface_evicted`/`surface_restored` do nothing; `reannounce` rebuilds the folder-id index and raises `changed` |
-| [08 §3.3](../spec/08-frontends.md) | `stat` also takes `parentRef`+`name`. `write` takes `ref` (replace that item's content) besides `parentRef`+`name`. A `write` whose content identity equals the key's current one is a no-op. `ensure_cached` and `fetch_range` replies carry `item`. An `exists` refusal carries the occupying `item` when known. `subscribe` loses `tempDir`. A `list_all` cursor naming a missing or other walk answers `stale` (replacing "continues at the same line") |
-| [08 §2.5](../spec/08-frontends.md) | The kept-walk mismatch rule as above; empty-entry anchors stale after a dropped shard |
-| [security-model §7.3](../spec/algorithms/security-model.md) | On macOS the App Group is the boundary: no declared roots, path rules only |
-| [ocaml/frontends/file-provider.md](../spec/ocaml/frontends/file-provider.md) | Its section references point at the old numbering; refresh when the implementation exists |
-| Menu model (shared with the tray) | No quit row for the macOS host |
+| [01-core §2.7](../spec/01-core.md) | `i:<file id>` in the item-reference grammar; what a file id is |
+| [data-model/local-cache](../spec/data-model/local-cache.md) | file ids on mirror file entries; feed watermark and dropped-shard record |
+| [04 §2.3](../spec/04-checkout-cache.md) | the file-id marker encoding |
+| [03 §2.7](../spec/03-journal-sync.md) | applied-log ops carry the file's local `fid` |
+| [wal-and-journal §4.8](../spec/algorithms/wal-and-journal.md), [05 §4](../spec/05-ops-config.md) | retention held back by the watermark; a rebuild stamps no generation and rebuilds the reverse folder index itself |
+| [08](../spec/08-frontends.md) | `i:` in replies; `readOnly` row field; `stat` by parent and name; `write` by `ref`, identical content a no-op; content replies carry `item`; `exists` carries the occupant; rename onto its own place a no-op; feed watermark and empty-anchor rule; a cursor on another walk answers `{stale:true}`; `tempDir` and the surface hooks removed |
+| [security-model §7.3](../spec/algorithms/security-model.md) | a host whose socket only its clients reach may declare no roots |
+| [07](../spec/07-daemon-cli.md) | watermark and dropped-shard paths; no quit row on macOS |
+| [09](../spec/09-tests.md) | feed and paging scenarios; `<file-N>` alias |
+
+Still to refresh once an implementation exists: [ocaml/frontends/file-provider.md](../spec/ocaml/frontends/file-provider.md), whose section references follow the old numbering.

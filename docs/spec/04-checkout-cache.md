@@ -131,6 +131,12 @@ requires rewriting a valid existing file into another form.
   manifest; it is removed before the entry is replaced by any other record (a peer's, a resync's,
   a pull's) and when the entry is removed; a file rename moves it with the entry. An entry
   without a marker is not own; a lost marker reads as not own, which only falls back to the conflict rule used without `base`.
+- **File-id marker.** The file id ([01 §2.7](01-core.md#27-item-references)) of a file entry with
+  real leaf `l` is the marker `.tsync-fid-<hex16(XXH3-64(l, 0))>` in the entry's directory; its body
+  is the 32-digit id, a newline, then `l`'s bytes. It belongs to the entry iff the body's leaf equals
+  `l`. Replacing the entry at the same path keeps the marker; a rename moves it with the entry (the
+  leaf rewritten), written before the source entry is removed; a removal deletes it after the entry.
+  An entry without a valid marker gets a fresh id, written durably before the id is first reported.
 - Mirror entries are replaced only by rename, never modified in place, so a reader SHOULD read
   them by mapping them read-only.
 - Mirror files are projections: they are written by *replace*, and made durable when a later
