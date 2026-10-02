@@ -331,25 +331,47 @@ module Make (C : Context.S) = struct
                    (fun (e : Store.entry) -> dst.store.head_opt e.key)
                    entries)
           in
+          (* 07 §5.1: each area ends with what it checked and copied, and how
+             long it took; the chunk area is its 4096 shards together. *)
+          let area label f =
+            if not (cancelled ()) then (
+              let checked, copied, bytes =
+                tally counts (fun c -> (c.checked, c.copied, c.bytes))
+              and started = Unix.gettimeofday () in
+              f ();
+              let checked', copied', bytes' =
+                tally counts (fun c -> (c.checked, c.copied, c.bytes))
+              in
+              Narrate.say narrate "  %s: %s, %d checked, %d copied (%s) in %s"
+                dst.name label (checked' - checked) (copied' - copied)
+                (Narrate.size (bytes' - bytes))
+                (Narrate.duration (Unix.gettimeofday () -. started)))
+          in
           (match (scope, path) with
             | ((All | Skip_chunks) as scope), _ ->
                 if scope = All then
-                  List.iter
-                    (fun i ->
-                      let shard = Printf.sprintf "%03x" i in
-                      listed_batch ~part:(i, 4096) ("chunk shard " ^ shard)
-                        (Key.shard_prefix d shard) ~chunks:true)
-                    (List.init 4096 Fun.id);
-                listed_batch "manifests" (Key.manifests d) ~chunks:false
-                  ~source:(fun _ -> manifest_area src.store);
-                listed_batch "versions" (Key.versions d) ~chunks:false;
-                listed_batch "journal" (Key.journal d) ~chunks:false;
-                headed "cursor"
-                  (Option.to_list (src.store.head_opt (Key.cursor d)))
-                  ~chunks:false
+                  area "chunks" (fun () ->
+                      List.iter
+                        (fun i ->
+                          let shard = Printf.sprintf "%03x" i in
+                          listed_batch ~part:(i, 4096) ("chunk shard " ^ shard)
+                            (Key.shard_prefix d shard) ~chunks:true)
+                        (List.init 4096 Fun.id));
+                area "manifests" (fun () ->
+                    listed_batch "manifests" (Key.manifests d) ~chunks:false
+                      ~source:(fun _ -> manifest_area src.store));
+                area "versions" (fun () ->
+                    listed_batch "versions" (Key.versions d) ~chunks:false);
+                area "journal" (fun () ->
+                    listed_batch "journal" (Key.journal d) ~chunks:false);
+                area "cursor" (fun () ->
+                    headed "cursor"
+                      (Option.to_list (src.store.head_opt (Key.cursor d)))
+                      ~chunks:false)
             | Path _, Some (chunks, keys) ->
-                headed "chunks" chunks ~chunks:true;
-                headed "manifests" keys ~chunks:false
+                area "chunks" (fun () -> headed "chunks" chunks ~chunks:true);
+                area "manifests" (fun () ->
+                    headed "manifests" keys ~chunks:false)
             | Path _, None -> ());
           let c = counts in
           Narrate.say narrate "  %s: %d checked, %d copied (%s)%s%s" dst.name

@@ -175,7 +175,15 @@ let () =
          and comparing = first (fun l -> Text.contains l "manifests, 1 of") in
          listing >= 0 && listing < comparing);
       List.iter
-        (fun s -> if Text.contains s "listed" then p "said:%s\n" s)
+        (fun s ->
+          if Text.contains s "listed" || Text.contains s "checked" then (
+            (* durations vary from run to run *)
+            let rec cut i =
+              if i < 0 then s
+              else if String.sub s i 4 = " in " then String.sub s 0 i
+              else cut (i - 1)
+            in
+            p "said:%s\n" (cut (String.length s - 4))))
         (List.rev !said);
       p "\n== again\n";
       reads := 0;
