@@ -331,7 +331,7 @@ module Make (C : Engine_ctx.S) = struct
 
   (* conflict-resolution §4.4: facts, then the pure decision, then its
      actions; the ops emitted are the ops as they are here now. *)
-  let rec publish_op ?(rounds = 0) (r : Wal.record) i op =
+  let rec publish_op ?(rounds = 0) id (r : Wal.record) i op =
     let fact, emit =
       match op with
         | Op.Delete p ->
@@ -477,10 +477,8 @@ module Make (C : Engine_ctx.S) = struct
             Fail.raise_ Fail.Exists "every name tried for %s is taken"
               (Op.to_string op)
           else (
-            let r' = Option.value ~default:r (read_record_of_op r) in
-            publish_op ~rounds:(rounds + 1) r' i (List.nth r'.ops i))
-
-  and read_record_of_op r = Some r
+            let r' = Option.value ~default:r (read_record id) in
+            publish_op ~rounds:(rounds + 1) id r' i (List.nth r'.ops i))
 
   and source_gone dst =
     Conflict.Source_gone
@@ -610,7 +608,7 @@ module Make (C : Engine_ctx.S) = struct
       let emitted =
         List.concat
           (List.mapi
-             (fun i op -> match publish_op r i op with `Emit l -> l)
+             (fun i op -> match publish_op id r i op with `Emit l -> l)
              r.ops)
       in
       if emitted = [] then Dqueue.Records.complete wal id

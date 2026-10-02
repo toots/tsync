@@ -7,12 +7,12 @@ holds: no last-sync mark
 == A renames a file onto folder y, which B just created
 -- after both passes
   A: x/  x/inside.txt = "B's"  x (conflicted copy from A) = "A's file"  y/  y/kept.txt = "B's"  y (conflicted copy from A) = "renamed"
-  B: f.txt = "renamed"  x/  x/inside.txt = "B's"  x (conflicted copy from A) = "A's file"  y/  y/kept.txt = "B's"
+  B: x/  x/inside.txt = "B's"  x (conflicted copy from A) = "A's file"  y/  y/kept.txt = "B's"  y (conflicted copy from A) = "renamed"
 -- after B's next pass
   A: x/  x/inside.txt = "B's"  x (conflicted copy from A) = "A's file"  y/  y/kept.txt = "B's"  y (conflicted copy from A) = "renamed"
-  B: f.txt = "renamed"  x/  x/inside.txt = "B's"  x (conflicted copy from A) = "A's file"  y/  y/kept.txt = "B's"
+  B: x/  x/inside.txt = "B's"  x (conflicted copy from A) = "A's file"  y/  y/kept.txt = "B's"  y (conflicted copy from A) = "renamed"
 holds: no last-sync mark
 -- a new client, rebuilt from the store
-  C: f.txt = "renamed"  x/  x/inside.txt = "B's"  x (conflicted copy from A) = "A's file"  y/  y/kept.txt = "B's"
+  C: x/  x/inside.txt = "B's"  x (conflicted copy from A) = "A's file"  y/  y/kept.txt = "B's"  y (conflicted copy from A) = "renamed"
 
 owed: A 0/0, B 0/0
