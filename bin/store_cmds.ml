@@ -498,7 +498,10 @@ let share path expires token revoke clear name verbose =
                 (List.filter (( <> ) "")
                    (String.split_on_char '/' (Option.value ~default:"" path)))
             in
-            let r = ask (Tsync_owner.Protocol.Share { rel; expires; token }) in
+            let r =
+              ask
+                (Tsync_owner.Protocol.Share { item = Rel rel; expires; token })
+            in
             say "%s" r.url;
             prerr_endline ("expires " ^ Narrate.date r.expires);
             0)

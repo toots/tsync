@@ -658,7 +658,7 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
     | Share r ->
         let module S =
           Tsync_gc.Share.Make ((val Tsync_domain.Domain.context t.domain)) in
-        let c = S.create ?expires:r.expires ?token:r.token r.rel in
+        let c = S.create ?expires:r.expires ?token:r.token (target t r.item) in
         { Protocol.url = c.url; expires = c.expires }
     | Share_revoke s ->
         let module S =
