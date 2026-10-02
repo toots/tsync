@@ -274,6 +274,13 @@ CAMLprim value tsync_is_network_fs(value path) {
   case 0x65735546: /* FUSE */
   case 0x564c:     /* NCP */
   case 0x6B414653: /* AFS */
+  case 0x5346414F: /* OpenAFS */
+  case 0x01021997: /* 9P */
+  case 0x00C36400: /* CEPH */
+  case 0x0BD00BD0: /* Lustre */
+  case 0x01161970: /* GFS2 */
+  case 0x7461636F: /* OCFS2 */
+  case 0x73757245: /* CODA */
     CAMLreturn(Val_true);
   default:
     CAMLreturn(Val_false);

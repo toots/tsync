@@ -1,20 +1,14 @@
 open Tsync_core
 
-type t = { root : string; network : bool option Atomic.t }
+type t = { root : string }
 
-let create root = { root; network = Atomic.make None }
-
-(* gc.md A1: a network filesystem may be written by another host. *)
+let create root = { root }
 let root t = t.root
 
-let collectable t =
-  match Atomic.get t.network with
-    | Some n -> not n
-    | None ->
-        let n = try Fs.is_network_fs t.root with _ -> true in
-        Atomic.set t.network (Some n);
-        not n
+(* gc.md A1: a network filesystem may be written by another host.
 
+   Asked on every use, since a share may be mounted over the root after start. *)
+let collectable t = not (Fs.is_network_fs t.root)
 let publish_wait = 30.
 
 let of_store (store : Store.t) =

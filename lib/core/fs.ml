@@ -300,7 +300,15 @@ let funlock fd = funlock_ fd
 let ignore_sigpipe () = Sys.set_signal Sys.sigpipe Sys.Signal_ignore
 let rename_noreplace a b = sys (fun () -> rename_noreplace_ a b)
 let clone a b = sys (fun () -> clone_ a b)
-let is_network_fs p = try is_network_fs_ p with _ -> false
+
+(* A missing path will be made on its nearest existing ancestor's filesystem. *)
+let rec is_network_fs p =
+  match is_network_fs_ p with
+    | n -> n
+    | exception Unix.Unix_error (ENOENT, _, _) when Filename.dirname p <> p ->
+        is_network_fs (Filename.dirname p)
+    | exception _ -> true
+
 let pid_alive pid = pid_alive_ pid
 
 (* ELOOP means the last component is a symbolic link. *)

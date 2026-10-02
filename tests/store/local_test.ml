@@ -56,5 +56,15 @@ let () =
              (Fs.readdir dir)
          in
          walk root;
-         !n));
+         !n);
+      let blocked = Filename.concat root "blocked" in
+      Fs.write_file_for_test blocked "a file";
+      let spaces = Chunk_spaces.create (Filename.concat blocked "root") in
+      p "collectable while its root cannot be told: %b\n"
+        (Chunk_spaces.collectable spaces);
+      Unix.unlink blocked;
+      p "collectable once that clears: %b\n" (Chunk_spaces.collectable spaces);
+      p "collectable while not yet made, on a local parent: %b\n"
+        (Chunk_spaces.collectable
+           (Chunk_spaces.create (Filename.concat root "later/root"))));
   Fs.rm_rf root

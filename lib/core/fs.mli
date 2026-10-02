@@ -118,6 +118,8 @@ val ignore_sigpipe : unit -> unit
 (** Copy-on-write clone into a new file. *)
 val clone : string -> string -> unit
 
+(** A missing path answers for its nearest existing ancestor; any other failure
+    answers true, so a store that cannot be told is treated as shared. *)
 val is_network_fs : string -> bool
 
 (** Built for macOS. *)

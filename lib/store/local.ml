@@ -174,15 +174,7 @@ let expand_home p =
 let create ?(verify_writes = true) ~name root =
   let root = expand_home root in
   let health = Health.create name in
-  let network = Atomic.make None in
-  let mappable () =
-    match Atomic.get network with
-      | Some n -> not n
-      | None ->
-          let n = try Fs.is_network_fs root with _ -> true in
-          Atomic.set network (Some n);
-          not n
-  in
+  let mappable () = not (Fs.is_network_fs root) in
   (* Only link-kind failures (a network filesystem away) count against it. *)
   let fed f =
     match f () with

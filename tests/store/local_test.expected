@@ -47,3 +47,6 @@ good chunk marker: false
 scrambled chunk marker: "3e412ba99e948577-a63ad6226cbe4988"
 rewrite clears it: true
 leftover temporaries: 0
+collectable while its root cannot be told: false
+collectable once that clears: true
+collectable while not yet made, on a local parent: true
