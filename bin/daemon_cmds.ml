@@ -186,10 +186,10 @@ let stop verbose =
                server itself. *)
             let sockets =
               if Fs.is_macos then [Paths.service_socket ()]
-              else
+              else (
                 match config_opt () with
                   | Some c -> owner_sockets c @ [Paths.store_server_socket ()]
-                  | None -> [Paths.store_server_socket ()]
+                  | None -> [Paths.store_server_socket ()])
             in
             let asked =
               List.filter_map
