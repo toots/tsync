@@ -132,5 +132,41 @@ let () =
         (String.concat " " !log);
       Dqueue.resume q;
       settle q;
-      p "after resume: %s\n" (String.concat " " (List.rev !log)));
+      p "after resume: %s\n" (String.concat " " (List.rev !log));
+      p "\n== an unreadable record waits, and its worker survives\n";
+      let unreadable r id f =
+        let path = Filename.concat (Dqueue.Records.dir r) id in
+        Unix.chmod path 0;
+        Fun.protect ~finally:(fun () -> Unix.chmod path 0o644) f
+      in
+      log := [];
+      let r = Dqueue.Records.open_ (Filename.concat dir "unreadable-start") in
+      let id = Dqueue.Records.create r "s:0" in
+      let q = Dqueue.create ~name:"unreadable-start" ~ordered:true kind r in
+      unreadable r id (fun () ->
+          p "start: %s\n"
+            (match Dqueue.start q run with
+              | () -> "ok"
+              | exception e -> Printexc.to_string e));
+      Dqueue.rescan q;
+      settle q;
+      p "after a rescan: %s\n" (String.concat " " (List.rev !log));
+      List.iter
+        (fun (name, ordered) ->
+          log := [];
+          let r = Dqueue.Records.open_ (Filename.concat dir name) in
+          let q = Dqueue.create ~name ~ordered kind r in
+          Dqueue.start ~paused:true q run;
+          let id = Dqueue.post q ("u", 0) in
+          ignore (Dqueue.post q ("v", 0));
+          unreadable r id (fun () ->
+              Dqueue.resume q;
+              Rt.sleep 0.2);
+          settle q;
+          ignore (Dqueue.post q ("u", 0));
+          settle q;
+          p "%s: ran %s, records on disk: %d\n" name
+            (String.concat " " (List.rev !log))
+            (List.length (Dqueue.Records.list r)))
+        [("ordered-unreadable", true); ("keyed-unreadable", false)]);
   Fs.rm_rf dir

@@ -242,21 +242,28 @@ let take t id job =
               | None -> s.pending <- Some id);
             if not (List.mem k t.ready) then t.ready <- t.ready @ [k]))
 
+(* durable-queue R6: a record that cannot be read stays in place for a later
+   attempt. *)
 let decode_record t id =
   match Records.read t.log id with
-    | `Gone -> None
+    | `Gone -> `Gone
     | `Body b -> (
         match t.kind.decode b with
-          | Some j -> Some j
+          | Some j -> `Job j
           | None ->
               Records.set_aside t.log id;
-              None)
+              `Gone)
+    | exception ((Stop.Stopping | Rt.Cancelled) as e) -> raise e
+    | exception e -> `Unreadable (Fail.classify e)
 
 let adopt t id =
   match decode_record t id with
-    | Some job when t.kind.accepts job ->
+    | `Job job when t.kind.accepts job ->
         Mutex.protect t.m (fun () -> take t id job);
         Rt.Signal.broadcast t.wake
+    | `Unreadable fl ->
+        Log.warn "%s: cannot read %s, left for a later rescan: %s" t.name id
+          (Fail.to_string fl)
     | _ -> ()
 
 let post ?mint t job =
@@ -281,17 +288,23 @@ let rescan ?(rekey : (string -> string option) option) t =
         let blocked =
           match pid with Some p -> Hashtbl.mem held_pids p | None -> false
         in
-        if blocked || Records.is_held t.log id then
-          Option.iter (fun p -> Hashtbl.replace held_pids p ()) pid
-        else (
-          let id =
-            match Option.bind rekey (fun f -> f id) with
-              | Some id' ->
-                  Records.rekey t.log id id';
-                  id'
-              | None -> id
-          in
-          adopt t id)))
+        try
+          if blocked || Records.is_held t.log id then
+            Option.iter (fun p -> Hashtbl.replace held_pids p ()) pid
+          else (
+            let id =
+              match Option.bind rekey (fun f -> f id) with
+                | Some id' ->
+                    Records.rekey t.log id id';
+                    id'
+                | None -> id
+            in
+            adopt t id)
+        with
+          | (Stop.Stopping | Rt.Cancelled) as e -> raise e
+          | e ->
+              Log.warn "%s: cannot read %s, left for a later rescan: %s" t.name
+                id (Printexc.to_string e)))
     (Records.list t.log)
 
 let rearm t =
@@ -312,17 +325,20 @@ let resume t =
 
 let is_paused t = Mutex.protect t.m (fun () -> t.paused)
 
-let note_failure t id job fl =
-  let n =
-    (match Hashtbl.find_opt t.failures id with
-      | Some f -> f.attempts
-      | None -> 0)
-    + 1
-  in
-  let note = { attempts = n; last = fl } in
+let count_failure t id fl =
   Mutex.protect t.m (fun () ->
+      let n =
+        match Hashtbl.find_opt t.failures id with
+          | Some f -> f.attempts
+          | None -> 0
+      in
+      let note = { attempts = n + 1; last = fl } in
       Hashtbl.replace t.failures id note;
-      t.last_failure_at <- Rt.now ());
+      t.last_failure_at <- Rt.now ();
+      note)
+
+let note_failure t id fl =
+  let note = count_failure t id fl in
   (try
      Records.update t.log id (fun b ->
          match t.kind.decode b with
@@ -331,7 +347,6 @@ let note_failure t id job fl =
    with e ->
      Log.warn "%s: cannot note the failure of %s: %s" t.name id
        (Printexc.to_string e));
-  ignore job;
   note
 
 let forget t id =
@@ -346,37 +361,43 @@ let done_ t id =
       t.outcome_count <- t.outcome_count + 1);
   forget t id
 
+let failed t id e =
+  let fl = Fail.classify e in
+  let note = note_failure t id fl in
+  Mutex.protect t.m (fun () -> t.outcome_count <- t.outcome_count + 1);
+  let retryable =
+    Fail.retryable fl.kind && not (t.ordered && fl.kind = Unexplained)
+  in
+  let retryable = retryable || ((not t.ordered) && fl.kind = Unexplained) in
+  if retryable then (
+    Log.info "%s: %s failed (%s), retrying" t.name id (Fail.to_string fl);
+    `Retry (backoff note.attempts))
+  else (
+    Log.warn "%s: %s parked: %s" t.name id (Fail.to_string fl);
+    Mutex.protect t.m (fun () ->
+        t.loaded <- List.filter (( <> ) id) t.loaded;
+        t.parked <- (id, note) :: List.remove_assoc id t.parked);
+    `Parked)
+
 (* One job, to one outcome (durable-queue §4.6). *)
 let run_one t id job cancel =
   match t.run id job ~cancel with
-    | () ->
-        done_ t id;
-        `Done
-    | exception Rt.Cancelled ->
-        done_ t id;
-        `Done
+    | () | (exception Rt.Cancelled) -> (
+        match done_ t id with
+          | () -> `Done
+          | exception Stop.Stopping ->
+              forget t id;
+              `Stopping
+          | exception e -> failed t id e)
     | exception Stop.Stopping ->
         forget t id;
         `Stopping
-    | exception e ->
-        let fl = Fail.classify e in
-        let note = note_failure t id job fl in
-        Mutex.protect t.m (fun () -> t.outcome_count <- t.outcome_count + 1);
-        let retryable =
-          Fail.retryable fl.kind && not (t.ordered && fl.kind = Unexplained)
-        in
-        let retryable =
-          retryable || ((not t.ordered) && fl.kind = Unexplained)
-        in
-        if retryable then (
-          Log.info "%s: %s failed (%s), retrying" t.name id (Fail.to_string fl);
-          `Retry (backoff note.attempts))
-        else (
-          Log.warn "%s: %s parked: %s" t.name id (Fail.to_string fl);
-          Mutex.protect t.m (fun () ->
-              t.loaded <- List.filter (( <> ) id) t.loaded;
-              t.parked <- (id, note) :: List.remove_assoc id t.parked);
-          `Parked)
+    | exception e -> failed t id e
+
+let unreadable t id fl =
+  let note = count_failure t id fl in
+  Log.warn "%s: cannot read %s, retrying: %s" t.name id (Fail.to_string fl);
+  backoff note.attempts
 
 let wait_work ?since t =
   if Stop.requested () then raise Stop.Stopping;
@@ -406,11 +427,14 @@ let ordered_worker t =
                 t.order <- List.filter (( <> ) id) t.order)
           in
           match decode_record t id with
-            | None ->
+            | `Gone ->
                 drop ();
                 forget t id;
                 loop ()
-            | Some job -> (
+            | `Unreadable fl ->
+                Stop.sleep (unreadable t id fl);
+                loop ()
+            | `Job job -> (
                 Mutex.protect t.m (fun () -> t.active <- 1);
                 let r = run_one t id job (Atomic.make false) in
                 Mutex.protect t.m (fun () -> t.active <- 0);
@@ -480,26 +504,28 @@ let keyed_worker t =
           else wait_work ~since t;
           loop ()
       | Some (k, s, id) -> (
-          match decode_record t id with
-            | None ->
-                forget t id;
+          let outcome =
+            match decode_record t id with
+              | `Gone ->
+                  forget t id;
+                  `Done
+              | `Unreadable fl -> `Retry (unreadable t id fl)
+              | `Job job -> run_one t id job s.cancel
+          in
+          match outcome with
+            | `Done | `Parked ->
                 finish k s ~requeue:false;
                 loop ()
-            | Some job -> (
-                match run_one t id job s.cancel with
-                  | `Done | `Parked ->
-                      finish k s ~requeue:false;
-                      loop ()
-                  | `Stopping -> finish k s ~requeue:false
-                  | `Retry d ->
-                      Mutex.protect t.m (fun () ->
-                          if s.pending = None then s.pending <- Some id
-                          else (
-                            Records.complete t.log id;
-                            forget t id);
-                          s.not_before <- Rt.now () +. d);
-                      finish k s ~requeue:true;
-                      loop ()))
+            | `Stopping -> finish k s ~requeue:false
+            | `Retry d ->
+                Mutex.protect t.m (fun () ->
+                    if s.pending = None then s.pending <- Some id
+                    else (
+                      Records.complete t.log id;
+                      forget t id);
+                    s.not_before <- Rt.now () +. d);
+                finish k s ~requeue:true;
+                loop ())
   in
   try loop () with Stop.Stopping -> ()
 

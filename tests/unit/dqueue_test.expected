@@ -17,3 +17,9 @@ after resume: p#0
 == a keyed queue paused with a ready record waits, not spins
 CPU over a paused second below 0.3 s: true; ran: []
 after resume: k#0
+
+== an unreadable record waits, and its worker survives
+start: ok
+after a rescan: s#0
+ordered-unreadable: ran u#0 v#0 u#0, records on disk: 0
+keyed-unreadable: ran v#0 u#0 u#0, records on disk: 0
