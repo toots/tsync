@@ -655,9 +655,35 @@ module Make (C : Engine_ctx.S) = struct
         members;
       old)
 
-  let write_edit path old (e : Staged.edit) =
-    Staged.write ~durable:false staged path e;
-    Option.iter (fun o -> release_unnamed o (Some e)) old
+  let fsync_bodies (e : Staged.edit) =
+    List.iter
+      (fun b ->
+        let p =
+          if Fs.exists (Staged.body_path staged b) then
+            Staged.body_path staged b
+          else Staged.whole_path staged b
+        in
+        match Fs.opt (fun () -> Unix.openfile p [O_RDONLY; O_CLOEXEC] 0) with
+          | Some fd -> Fs.with_fd fd Fs.fsync
+          | None -> ())
+      (Staged.bodies_named e);
+    Fs.fsync_dir (Filename.dirname (Staged.body_path staged "x"))
+
+  (* A body the durable edit may still name is released only once the edit
+     replacing it is durable, its bodies first. *)
+  let write_edit ?(replaced = []) path old (e : Staged.edit) =
+    let keep = Staged.bodies_named e in
+    let gone =
+      List.sort_uniq String.compare
+        (List.filter
+           (fun b -> not (List.mem b keep))
+           (replaced @ Option.fold ~none:[] ~some:Staged.bodies_named old))
+    in
+    if gone = [] then Staged.write ~durable:false staged path e
+    else (
+      fsync_bodies e;
+      Staged.write staged path e);
+    List.iter release_body gone
 
   let dirty : (string, unit) Hashtbl.t = Hashtbl.create 16
   let dirty_m = Mutex.create ()
@@ -708,11 +734,7 @@ module Make (C : Engine_ctx.S) = struct
                   | _ -> assert false)
               pieces);
         let e = { e with mtime = Unix.gettimeofday (); state = Owed } in
-        write_edit path before e;
-        List.iter
-          (fun b ->
-            if not (List.mem b (Staged.bodies_named e)) then release_body b)
-          !replaced;
+        write_edit ~replaced:!replaced path before e;
         bump path;
         mark_dirty path)
 
@@ -801,20 +823,7 @@ module Make (C : Engine_ctx.S) = struct
     match Staged.edit staged path with
       | None -> ()
       | Some e ->
-          List.iter
-            (fun b ->
-              let p =
-                if Fs.exists (Staged.body_path staged b) then
-                  Staged.body_path staged b
-                else Staged.whole_path staged b
-              in
-              match
-                Fs.opt (fun () -> Unix.openfile p [O_RDONLY; O_CLOEXEC] 0)
-              with
-                | Some fd -> Fs.with_fd fd Fs.fsync
-                | None -> ())
-            (Staged.bodies_named e);
-          Fs.fsync_dir (Filename.dirname (Staged.body_path staged "x"));
+          fsync_bodies e;
           Staged.write staged path e
 
   let sync path = with_key path (fun () -> sync_edit path)
