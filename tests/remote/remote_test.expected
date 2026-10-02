@@ -27,6 +27,9 @@ after restore: entries 0, found true
 == a placement onto a taken name
 taken by Photos
 
+== a range read is not queued behind whole-chunk reads
+range "234" within 0.5s: true
+
 == store
   tsync/photos/chunks/025/025af5159b2bb7be-ff06005faa214512 (8)
   tsync/photos/chunks/025/025bf29515e61add-b256e565b822c46d (8)

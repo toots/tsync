@@ -241,6 +241,28 @@ let () =
               if Folder_id.equal j w then "taken by Photos" else "taken"
           | `Placed -> "PLACED OVER"
           | `Taken_by_file -> "file");
+      p "\n== a range read is not queued behind whole-chunk reads\n";
+      let module Slow = Remote.Make (struct
+        include C
+
+        let store =
+          {
+            C.store with
+            get_opt =
+              (fun k ->
+                Rt.sleep 2.;
+                C.store.get_opt k);
+          }
+      end) in
+      let ck = Manifest.key a 0 in
+      let busy =
+        List.init 8 (fun _ -> Rt.async (fun () -> ignore (Slow.get_chunk ck)))
+      in
+      Rt.sleep 0.1;
+      let t0 = Rt.now () in
+      let range = Bigstring.to_string (Slow.get_chunk_range ck 2 3) in
+      p "range %S within 0.5s: %b\n" range (Rt.now () -. t0 < 0.5);
+      List.iter Rt.Promise.await busy;
       p "\n== store\n";
       dump ());
   Fs.rm_rf root

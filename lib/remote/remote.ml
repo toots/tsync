@@ -16,6 +16,10 @@ module Make (C : Context.S) = struct
   let store = C.store
   let buffers = Rt.Semaphore.create ~name:"chunk-buffers" C.max_chunk_buffers
   let downloads = Rt.Semaphore.create ~name:"downloads" C.max_downloads
+
+  (* Demand range reads have their own lane: queued behind whole-group
+     prefetches, a reader's few bytes would miss their deadline. *)
+  let ranges = Rt.Semaphore.create ~name:"range reads" C.max_downloads
   let resolved_chunk_size = Atomic.make None
 
   (* 01 §3.5: configured, else the main's recommendation within range, else
@@ -141,7 +145,7 @@ module Make (C : Context.S) = struct
           (Chunk_key.to_string ck))
 
   let get_chunk_range ck off len =
-    Rt.Semaphore.with_slot downloads (fun () ->
+    Rt.Semaphore.with_slot ranges (fun () ->
         match store.get_range (Key.chunk d ck) off len with
           | Some b -> b
           | None ->
