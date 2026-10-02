@@ -968,7 +968,12 @@ module Make (C : Engine_ctx.S) = struct
                   | `File _ ->
                       if not (Hashtbl.mem seen_files p) then
                         with_key p (fun () ->
-                            if not (was_touched p) then (
+                            (* An owed edit outlives a peer's delete: its
+                               upload publishes the file again. *)
+                            if
+                              (not (was_touched p))
+                              && Staged.edit staged p = None
+                            then (
                               remove_local_file p;
                               diffs := Op.Delete p :: !diffs)))
               (Mirror.list mirror rel)

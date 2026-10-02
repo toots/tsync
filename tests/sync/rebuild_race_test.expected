@@ -4,3 +4,7 @@ after A drains
   A: kept/ kept.txt late/
   B: kept/ kept.txt late/
 owed: A 0/0
+== B's upload in flight while A deletes the file, then a full rebuild of B
+  A: f.txt kept/ kept.txt late/
+  B: f.txt kept/ kept.txt late/
+owed: B 0/0

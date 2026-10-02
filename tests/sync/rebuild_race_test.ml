@@ -22,6 +22,23 @@ let during_walk : (unit -> unit) option Atomic.t = Atomic.make None
 let once () =
   match Atomic.exchange during_walk None with Some f -> f () | None -> ()
 
+(* While armed, a chunk put waits for the release: an upload held in flight. *)
+let held_put : unit Rt.Promise.t option Atomic.t = Atomic.make None
+
+let holding (s : Store.t) =
+  {
+    s with
+    put =
+      (fun ?mode key body ->
+        (match Atomic.get held_put with
+          | Some release
+            when String.starts_with ~prefix:"tsync/docs/chunks/"
+                   (Key.to_string key) ->
+              Rt.Promise.await release
+          | _ -> ());
+        s.put ?mode key body);
+  }
+
 let hooked (s : Store.t) =
   {
     s with
@@ -89,7 +106,7 @@ let pass (module E : Engine.S) =
 let () =
   Fs.rm_rf root;
   Rt.run_sync (fun () ->
-      let a = client ~wrap:hooked "A" and b = client "B" in
+      let a = client ~wrap:hooked "A" and b = client ~wrap:holding "B" in
       let (module A) = a and (module B) = b in
       A.start ~poll_journal:false ();
       B.start ~poll_journal:false ();
@@ -115,5 +132,24 @@ let () =
       pass b;
       p "after A drains\n  A: %s\n  B: %s\n" (tree a) (tree b);
       p "owed: A %d/%d\n" (A.pending_uploads ()) (A.pending_metadata ());
+      p
+        "== B's upload in flight while A deletes the file, then a full rebuild \
+         of B\n";
+      write a "f.txt" "original";
+      A.drain ~grace:10. ();
+      pass b;
+      let release = Rt.Promise.create () in
+      Atomic.set held_put (Some release);
+      write b "f.txt" "B's edit";
+      Rt.sleep 0.2;
+      A.delete "f.txt";
+      A.drain ~grace:10. ();
+      ignore (B.resync ~full:true ());
+      Atomic.set held_put None;
+      Rt.Promise.resolve release ();
+      B.drain ~grace:10. ();
+      pass a;
+      p "  A: %s\n  B: %s\n" (tree a) (tree b);
+      p "owed: B %d/%d\n" (B.pending_uploads ()) (B.pending_metadata ());
       Stop.request ());
   Fs.rm_rf root
