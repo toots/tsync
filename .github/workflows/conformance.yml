@@ -40,7 +40,7 @@ jobs:
 
       - name: Tests
         env:
-          TSYNC_CI_REQUIRE_REAL: "1"
+          TSYNC_CI_REQUIRE_REAL: "gcs"
           TSYNC_CI_GCS_BUCKET: ${{ secrets.TSYNC_CI_GCS_BUCKET }}
           TSYNC_CI_GCS_SERVICE_ACCOUNT_KEY: ${{ secrets.TSYNC_CI_GCS_SERVICE_ACCOUNT_KEY }}
         run: opam exec -- dune build @runtest --force

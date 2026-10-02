@@ -322,10 +322,10 @@ let () =
                 ~finally:(fun () -> Contract.cleanup real)
                 (fun () -> Contract.run ~domain_name real);
               None
-          | _ when Sys.getenv_opt "TSYNC_CI_REQUIRE_REAL" = Some "1" ->
+          | _ when Contract.real_required "s3" ->
               prerr_endline
-                "s3_test: TSYNC_CI_REQUIRE_REAL is set but the bucket or keys \
-                 are missing";
+                "s3_test: TSYNC_CI_REQUIRE_REAL names s3 but the bucket or \
+                 keys are missing";
               exit 2
           | _ -> Some ()
       in

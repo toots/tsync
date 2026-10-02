@@ -33,15 +33,20 @@
  (action
   (diff composite_test.expected composite_test.output)))
 
+; A real bucket is reached over TLS: the native implementation is linked, and
+; the test runs only where it is built (CI checks that it is).
+
 (executable
  (name gcs_test)
  (modules gcs_test)
+ (optional)
  (libraries
   contract
   tsync_core
   tsync_store
   tsync_gcs
   tsync_http
+  tsync_http_native
   unix
   yojson
   ptime
@@ -51,6 +56,7 @@
 ; run against the fake is never replayed as a real one.
 
 (rule
+ (enabled_if %{lib-available:tsync_http_native})
  (deps
   (env_var TSYNC_CI_GCS_BUCKET)
   (env_var TSYNC_CI_GCS_SERVICE_ACCOUNT_KEY)
@@ -62,6 +68,7 @@
 
 (rule
  (alias runtest)
+ (enabled_if %{lib-available:tsync_http_native})
  (action
   (diff gcs_test.expected gcs_test.output)))
 

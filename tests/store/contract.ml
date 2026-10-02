@@ -25,6 +25,13 @@ let claim (s : Store.t) key v =
     | Store.Won -> `Won
     | Held b -> `Held (Bigstring.to_string b)
 
+(* TSYNC_CI_REQUIRE_REAL lists the stores, comma-separated, whose test must
+   run against a real bucket rather than its fake. *)
+let real_required store =
+  match Sys.getenv_opt "TSYNC_CI_REQUIRE_REAL" with
+    | Some v -> List.mem store (String.split_on_char ',' v)
+    | None -> false
+
 let kind_of f =
   match f () with
     | _ -> "ok"

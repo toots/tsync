@@ -180,6 +180,10 @@ let () =
             Sys.getenv_opt "TSYNC_CI_GCS_SERVICE_ACCOUNT_KEY" )
         with
           | Some b, Some key when b <> "" && key <> "" ->
+              if Tsync_http.Transport.available () = [] then (
+                prerr_endline
+                  "gcs_test: a real bucket needs TLS, and none is linked";
+                exit 2);
               let run =
                 Option.value
                   ~default:(string_of_int (Unix.getpid ()))
@@ -195,10 +199,10 @@ let () =
                   ("serviceAccountKey", Field_spec.S key);
                 ],
                 "ci-" ^ run )
-          | _ when Sys.getenv_opt "TSYNC_CI_REQUIRE_REAL" = Some "1" ->
+          | _ when Contract.real_required "gcs" ->
               prerr_endline
-                "gcs_test: TSYNC_CI_REQUIRE_REAL is set but the bucket or key \
-                 is missing";
+                "gcs_test: TSYNC_CI_REQUIRE_REAL names gcs but the bucket or \
+                 key is missing";
               exit 2
           | _ -> (fake, "d")
       in
