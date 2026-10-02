@@ -704,21 +704,40 @@ module Make (C : Engine_ctx.S) = struct
               | _ -> ())
 
   (* conflict-resolution §4.1: store facts are read ahead, local ones under the
-     lock; one entry's ops are enacted within one hold of the lock. *)
+     lock; one entry's ops are enacted within one hold of the lock. Answers the
+     file ids its ops named (03 §2.7): a delete's read before it runs. *)
   let apply_entry ops =
     adopt_ancestors (List.concat_map Op.paths ops);
     let answers = read_ahead ops in
+    let fids = ref [] in
     after_lock := [];
     (try
        with_meta (fun () ->
            let o = owed () in
-           List.iter (apply_op o answers) ops)
+           List.iteri
+             (fun i op ->
+               let before =
+                 match op with
+                   | Op.Delete p -> Mirror.file_id mirror p
+                   | _ -> None
+               in
+               apply_op o answers op;
+               let id =
+                 match op with
+                   | Op.Put { path; _ } -> Mirror.file_id mirror path
+                   | Rename { is_dir = false; dst; _ } ->
+                       Mirror.file_id mirror dst
+                   | _ -> before
+               in
+               Option.iter (fun id -> fids := (i, id) :: !fids) id)
+             ops)
      with Exit ->
        Fail.raise_ Fail.Local "local state changed during the read-ahead");
     let later = List.rev !after_lock in
     after_lock := [];
     List.iter (fun f -> f ()) later;
-    changed (List.concat_map Op.paths ops)
+    changed (List.concat_map Op.paths ops);
+    !fids
 
   let mark () = Mark.read ~data_dir:C.data_dir d
 
@@ -820,8 +839,10 @@ module Make (C : Engine_ctx.S) = struct
                           if !oldest_open = None then oldest_open := Some k
                       | Some ops -> (
                           match apply_entry ops with
-                            | () ->
-                                Applied.note applied k ops;
+                            | fids ->
+                                Applied.note
+                                  ~fids:(note_fids ~known:fids ops)
+                                  applied k ops;
                                 Mutex.protect stepped_m (fun () ->
                                     Hashtbl.remove stepped_aside
                                       (Entry_key.to_string k));
@@ -875,6 +896,7 @@ module Make (C : Engine_ctx.S) = struct
     Fun.protect ~finally:(fun () -> Atomic.set touched None) @@ fun () ->
     let listing = Journal.list_entries journal in
     let failures = ref 0 and diffs = ref [] and manifests = ref 0 in
+    let deleted_fids = Hashtbl.create 64 in
     let folders = ref 0 in
     let walked () =
       Narrate.progress narrate "walking the store: %s, %s"
@@ -974,6 +996,9 @@ module Make (C : Engine_ctx.S) = struct
                               (not (was_touched p))
                               && Staged.edit staged p = None
                             then (
+                              Option.iter
+                                (Hashtbl.replace deleted_fids p)
+                                (Mirror.file_id mirror p);
                               remove_local_file p;
                               diffs := Op.Delete p :: !diffs)))
               (Mirror.list mirror rel)
@@ -986,10 +1011,23 @@ module Make (C : Engine_ctx.S) = struct
       let rec chunks batch n = function
         | op :: rest when n < 64 -> chunks (op :: batch) (n + 1) rest
         | rest ->
-            if batch <> [] then
-              Applied.note applied
+            if batch <> [] then (
+              let batch = List.rev batch in
+              let known =
+                List.concat
+                  (List.mapi
+                     (fun i op ->
+                       match op with
+                         | Op.Delete p -> (
+                             match Hashtbl.find_opt deleted_fids p with
+                               | Some id -> [(i, id)]
+                               | None -> [])
+                         | _ -> [])
+                     batch)
+              in
+              Applied.note ~fids:(note_fids ~known batch) applied
                 (Option.get (Entry_key.parse (mint ())))
-                (List.rev batch);
+                batch);
             if rest <> [] then chunks [] 0 rest
       in
       (* The walk wrote the mirror without fsyncs: one flush makes it durable
@@ -1231,7 +1269,13 @@ module Make (C : Engine_ctx.S) = struct
                                       post_put path size base
                                   | _ -> ())
                               puts;
-                            let r = { r with ops = meta } in
+                            let r =
+                              {
+                                r with
+                                ops = meta;
+                                fids = Wal.carry_fids r meta;
+                              }
+                            in
                             redo r;
                             Dqueue.Records.update wal id (fun _ ->
                                 Wal.encode
@@ -1302,7 +1346,13 @@ module Make (C : Engine_ctx.S) = struct
                 (Fs.release
                    (Filename.concat (Filename.concat staged_dir sub) b)))
           (Fs.readdir (Filename.concat staged_dir sub)))
-      ["chunks"; "whole"]
+      ["chunks"; "whole"];
+    (* 04 §4.10 step 8: no read path mints a file id. *)
+    let minted = Mirror.backfill_file_ids mirror in
+    List.iter
+      (fun (p, _) -> ignore (Mirror.ensure_file_id mirror p))
+      (Staged.edits staged);
+    if minted > 0 then Log.info "gave file ids to %d files" minted
 
   let adopt_unrecorded () =
     let named =

@@ -32,8 +32,17 @@ let config =
        root root)
 
 (* Folder ids ([<12 hex>-<counter>]) and content hashes (16 hex digits) are
-   shown as stable placeholders. *)
+   shown as stable placeholders, file ids (32 hex digits) as [<file-N>]. *)
 let ids = Hashtbl.create 16
+let file_ids = Hashtbl.create 16
+
+let file_placeholder id =
+  match Hashtbl.find_opt file_ids id with
+    | Some k -> k
+    | None ->
+        let k = Printf.sprintf "<file-%d>" (Hashtbl.length file_ids + 1) in
+        Hashtbl.replace file_ids id k;
+        k
 
 let placeholder id =
   match Hashtbl.find_opt ids id with
@@ -65,7 +74,9 @@ let scrub_string s =
         in
         let token = String.sub s i (j - i) in
         Buffer.add_string b
-          (if j - i = 16 || String.contains token '-' then placeholder token
+          (if j - i = 32 then file_placeholder token
+           else if j - i = 16 || String.contains token '-' then
+             placeholder token
            else token);
         go j)
       else (
@@ -234,7 +245,7 @@ let () =
              ("parentRef", a_ref);
              ("name", "g.txt");
            ]);
-      show "stat the old ref" (ask [("action", "stat"); ("ref", f_ref)]);
+      show "stat its ref after" (ask [("action", "stat"); ("ref", f_ref)]);
       show "delete a folder" (ask [("action", "delete"); ("ref", a_ref)]);
       show "rmdir a" (ask [("action", "rmdir"); ("ref", a_ref)]);
       show "list_dir root" (ask [("action", "list_dir"); ("ref", "root")]);

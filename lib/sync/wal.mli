@@ -14,6 +14,9 @@ type record = {
   priors : (int * prior) list;  (** by op index; local only *)
   local_from : (int * string) list;
       (** where a retargeted rename's file sits until redone *)
+  fids : (int * string) list;
+      (** by op index: the file id of the file an op names, read when the local
+          operation ran; local only, copied into the applied log *)
   last_error : (string * string) option;
       (** kind name and detail, reported only *)
 }
@@ -30,3 +33,11 @@ val is_metadata : record -> bool
 
 val puts_only : record -> bool
 val prior : record -> int -> prior
+
+(** The file an op names, and how: a put's path, a delete's path, a file
+    rename's source; [None] for folder ops. *)
+val subject : Op.t -> ([ `Put | `Delete | `Rename ] * string) option
+
+(** [r]'s file ids re-indexed onto [ops], a rewrite of [r.ops]: an op keeps the
+    id of the op that named the same file the same way. *)
+val carry_fids : record -> Op.t list -> (int * string) list

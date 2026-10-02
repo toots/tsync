@@ -35,7 +35,22 @@ val ensure_dirs : t -> string -> unit
     EXISTS when the escape handle is held by another name. *)
 val write_file : ?durable:bool -> ?own:bool -> t -> string -> Manifest.t -> unit
 
+(** Removes the entry, then its file id. *)
 val remove_file : t -> string -> unit
+
+(** The file id of the file at a path (01 §2.7, 04 §2.3); never writes. *)
+val file_id : t -> string -> string option
+
+(** The current path of a file id; verified against the marker. *)
+val path_of_file_id : t -> string -> string option
+
+(** The path's file id, minted and recorded when it has none: for an entry first
+    occupying a path, including a staged-only file. *)
+val ensure_file_id : ?durable:bool -> t -> string -> string
+
+(** Give a file id to every file entry without one (04 §4.10); how many. *)
+val backfill_file_ids : t -> int
+
 val is_own : t -> string -> bool
 
 (** Record a folder with an id: directory, markers, removed-id record and
@@ -56,7 +71,8 @@ val remove_folder : t -> string -> unit
 (** Move a folder with every record that names it. *)
 val move_folder : t -> src:string -> dst:string -> unit
 
-(** Move a file entry, its own marker and its recorded name. *)
+(** Move a file entry, its own marker, its file id and its recorded name; a
+    staged-only file's id moves too. *)
 val move_file : t -> src:string -> dst:string -> unit
 
 type child = {

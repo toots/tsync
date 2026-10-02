@@ -9,6 +9,7 @@ type record = {
   ops : Op.t list;
   priors : (int * prior) list;
   local_from : (int * string) list;
+  fids : (int * string) list;
   last_error : (string * string) option;
 }
 
@@ -44,6 +45,12 @@ let encode r =
              [
                ( "localFrom",
                  `Assoc (List.map (fun (i, p) -> (idx i, `String p)) l) );
+             ])
+       @ (match r.fids with
+         | [] -> []
+         | l ->
+             [
+               ("fids", `Assoc (List.map (fun (i, id) -> (idx i, `String id)) l));
              ])
        @
          match r.last_error with
@@ -113,6 +120,18 @@ let decode body =
                     l
               | _ -> raise Unparseable
           in
+          let fids =
+            match List.assoc_opt "fids" f with
+              | None -> []
+              | Some (`Assoc l) ->
+                  List.map
+                    (fun (k, v) ->
+                      match v with
+                        | `String id when Names.valid_file_id id -> (index k, id)
+                        | _ -> raise Unparseable)
+                    l
+              | _ -> raise Unparseable
+          in
           let attempts =
             match List.assoc_opt "attempts" f with
               | Some (`Int a) when a >= 0 -> a
@@ -129,7 +148,7 @@ let decode body =
                     | _ -> None)
               | _ -> None
           in
-          Some { state; attempts; ops; priors; local_from; last_error }
+          Some { state; attempts; ops; priors; local_from; fids; last_error }
       | _ -> raise Unparseable
   with Unparseable | Yojson.Json_error _ -> (
     (* An op-list body: one op per line, meaning an intent with nothing
@@ -152,6 +171,7 @@ let decode body =
             ops;
             priors = [];
             local_from = [];
+            fids = [];
             last_error = None;
           }
     with _ -> None)
@@ -161,3 +181,28 @@ let puts_only r = r.ops <> [] && List.for_all Op.is_put r.ops
 
 let prior r i =
   match List.assoc_opt i r.priors with Some p -> p | None -> Unknown
+
+(* The file an op names: what a file id follows when ops are rewritten. *)
+let subject = function
+  | Op.Put { path; _ } -> Some (`Put, path)
+  | Delete path -> Some (`Delete, path)
+  | Rename { is_dir = false; src; _ } -> Some (`Rename, src)
+  | Mkdir _ | Rmdir _ | Rename _ -> None
+
+let carry_fids r ops =
+  let by_subject =
+    List.filter_map
+      (fun (i, id) ->
+        Option.bind (List.nth_opt r.ops i) (fun op ->
+            Option.map (fun s -> (s, id)) (subject op)))
+      r.fids
+  in
+  List.concat
+    (List.mapi
+       (fun i op ->
+         match
+           Option.bind (subject op) (fun s -> List.assoc_opt s by_subject)
+         with
+           | Some id -> [(i, id)]
+           | None -> [])
+       ops)

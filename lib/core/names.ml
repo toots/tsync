@@ -93,7 +93,15 @@ let join a b = if a = "" then b else if b = "" then a else a ^ "/" ^ b
 let is_under ~dir p =
   dir = "" || p = dir || String.starts_with ~prefix:(dir ^ "/") p
 
-type item_ref = Root | Dir of string | File of string * string
+type item_ref =
+  | Root
+  | Dir of string
+  | File_id of string
+  | File of string * string
+
+let valid_file_id s =
+  String.length s = 32
+  && String.for_all (function '0' .. '9' | 'a' .. 'f' -> true | _ -> false) s
 
 let parse_ref s =
   if s = "root" then Ok Root
@@ -102,6 +110,9 @@ let parse_ref s =
     if id = root_id then Ok Root
     else if valid_folder_id id && id <> trash_id then Ok (Dir id)
     else Error ())
+  else if String.starts_with ~prefix:"i:" s then (
+    let id = String.sub s 2 (String.length s - 2) in
+    if valid_file_id id then Ok (File_id id) else Error ())
   else if String.starts_with ~prefix:"f:" s then (
     let rest = String.sub s 2 (String.length s - 2) in
     match String.index_opt rest '/' with
@@ -117,6 +128,7 @@ let parse_ref s =
 let ref_to_string = function
   | Root -> "root"
   | Dir id -> "d:" ^ id
+  | File_id id -> "i:" ^ id
   | File (id, leaf) -> "f:" ^ id ^ "/" ^ leaf
 
 let dir_ref id = if id = root_id then Root else Dir id

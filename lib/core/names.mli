@@ -58,7 +58,14 @@ val valid_shard : string -> bool
 
 (** {1 Item references (§2.7)} *)
 
-type item_ref = Root | Dir of string | File of string * string
+type item_ref =
+  | Root
+  | Dir of string
+  | File_id of string  (** a file by its local file id *)
+  | File of string * string  (** a file by its parent's id and its leaf *)
+
+(** 32 lowercase hex digits. *)
+val valid_file_id : string -> bool
 
 (** Total: every string is a reference or malformed; [d:.tsync-root] is {!Root}.
 *)

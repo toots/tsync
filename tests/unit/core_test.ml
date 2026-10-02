@@ -97,6 +97,10 @@ let () =
       "d:..";
       "d:Photos";
       "tsync/d/manifests/x";
+      "i:6c1e0b9a2f4d47e8a3b5c7d9e1f20384";
+      "i:6C1E0B9A2F4D47E8A3B5C7D9E1F20384";
+      "i:6c1e0b9a";
+      "i:";
     ];
   p "\n== temporary names (01 §2.9)\n";
   List.iter
