@@ -585,7 +585,7 @@ or overwrites on the store (§2.8): the view of that path when the local half ra
 | `mkdir(key, exclusive)` | parent id required; an existing folder: nothing to do (EXISTS with `exclusive`); otherwise mint a folder id; create the directory, marker, reverse entry and removed-id record. The record carries the id, which is final | yes |
 | `rmdir(key)` | parent id required; read the folder's id; in one step under the lock, refuse a folder with any child (mirror entry, folder or staged edit) as EXISTS, else remove it; keep the removed-id record | yes, unless the folder was never published |
 | `rename(src, dst, exclusive)` | the POSIX rules of §3.4; take the key locks of `src`, `dst` and every staged key under a moved folder; for a folder, the parent of `src` must have an id; replacing an existing `dst` discards `dst`'s staged edit and mirror entry (an open handle on it keeps its content, §3.3); move the staged manifests and the mirror entry (§4.1), re-stamping names; for a folder, reparent its id (§4.9); re-post the upload of every moved staged edit under the new key, with a record key minted after the rename's | yes, unless the source was a never-published staged file |
-| `symlink(key, target)` | write a symlink manifest into the mirror; then post `Prepared [put]` (the upload puts the manifest) | yes (as an upload) |
+| `symlink(key, target)` | post `Prepared [put]`, then write a symlink manifest into the mirror, both under the key's lock (the upload puts the manifest; one that finds no link owes nothing) | yes (as an upload) |
 
 The Arrival decisions and their enactment for a peer's entry
 ([conflict-resolution](algorithms/conflict-resolution.md) §4.1–§4.6) use these same local steps

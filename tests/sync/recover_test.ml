@@ -91,6 +91,18 @@ let () =
                | None -> false)
            (Fs.readdir (Filename.dirname manifest)));
       p "status counts it set aside: %d\n" (E.activity ()).set_aside;
+      let wal =
+        List.fold_left Filename.concat data_dir
+          ["journal-pending"; Domain_name.to_string d]
+      in
+      Unix.chmod wal 0o500;
+      p "a symlink nothing could owe: %s\n"
+        (match E.symlink "ln" ~target:"f.txt" ~exclusive:true with
+          | () -> "made"
+          | exception Fail.E f -> Fail.kind_name f.kind);
+      Unix.chmod wal 0o700;
+      p "left in the mirror unowed: %b\n"
+        (match E.readlink "ln" with _ -> true | exception Fail.E _ -> false);
       List.iter
         (fun b -> p "body kept: %b\n" (Staged.body_size staged b >= 0))
         bodies);

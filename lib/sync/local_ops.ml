@@ -1196,10 +1196,11 @@ module Make (C : Engine_ctx.S) = struct
             if exclusive && exists path then
               Fail.raise_ Fail.Exists "%s exists" path;
             ignore (require_parent path);
+            (* Owed before it exists: the upload waits for this key's lock. *)
+            !post_put_hook path (String.length target) None;
             Mirror.write_file mirror path
               (Manifest.symlink ~name:(Names.leaf_of path)
-                 ~mtime:(Unix.gettimeofday ()) target);
-            !post_put_hook path (String.length target) None));
+                 ~mtime:(Unix.gettimeofday ()) target)));
     changed [path]
 
   (* 04 §4.7: every step idempotent; bodies go last so a reader of either
