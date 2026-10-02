@@ -143,13 +143,15 @@ let () =
           (List.init 8 Fun.id)
       in
       let t0 = Rt.now () in
-      p "  once its backlog is full: %s within 1s: %b"
-        (match Ipc.Client.connect ~timeout:0.3 full with
+      let outcome =
+        match Ipc.Client.connect ~timeout:0.3 full with
           | c ->
               Ipc.Client.close c;
               "connected"
           | exception Fail.E f -> Fail.kind_name f.kind
-          | exception e -> Printexc.to_string e)
+          | exception e -> Printexc.to_string e
+      in
+      p "  once its backlog is full: %s within 1s: %b" outcome
         (Rt.now () -. t0 < 1.);
       List.iter Ipc.Client.close held;
       Unix.close l;
