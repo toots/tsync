@@ -156,6 +156,7 @@ let () =
               (h.socket = Some socket)
         | Error None -> p "held, no record");
       p "== rows and mutations";
+      let feed_start = get (ask [("action", "cursor")]) "cursor" in
       show "stat root" (ask [("action", "stat"); ("ref", "root")]);
       let a = ask [("action", "mkdir"); ("parentRef", "root"); ("name", "a")] in
       show "mkdir a" a;
@@ -279,6 +280,13 @@ let () =
               ]));
       show "stat root of a read-only domain"
         (ask ~domain:(Some "ro") [("action", "stat"); ("ref", "root")]);
+      (* The files publish before they move, so the feed names them. *)
+      let rec drained n =
+        if pending () > 0 && n > 0 then (
+          Rt.sleep 0.1;
+          drained (n - 1))
+      in
+      drained 100;
       show "rename to g.txt"
         (ask
            [
@@ -291,6 +299,26 @@ let () =
       show "delete a folder" (ask [("action", "delete"); ("ref", a_ref)]);
       show "rmdir a" (ask [("action", "rmdir"); ("ref", a_ref)]);
       show "list_dir root" (ask [("action", "list_dir"); ("ref", "root")]);
+      p "== change feed";
+      (* Own changes reach the feed once published: wait for the rmdir. *)
+      let rec until_published n =
+        let r = ask [("action", "changes_since"); ("arg", feed_start)] in
+        let ops =
+          match r with
+            | `Assoc l -> (
+                match List.assoc_opt "ops" l with
+                  | Some (`List o) -> o
+                  | _ -> [])
+            | _ -> []
+        in
+        if n = 0 || List.exists (fun o -> Ipc.field o "op" = Some "rmdir") ops
+        then ops
+        else (
+          Rt.sleep 0.1;
+          until_published (n - 1))
+      in
+      List.iter (show "  op") (until_published 100);
+      show "a stale anchor" (ask [("action", "changes_since"); ("arg", "1|")]);
       p "== refusals";
       show "malformed ref" (ask [("action", "stat"); ("ref", "x:1")]);
       show "storage key" (ask [("action", "stat"); ("ref", "tsync/docs/x")]);

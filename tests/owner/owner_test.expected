@@ -22,11 +22,20 @@ write on a stale base              {"ok":true,"size":11,"mtime":"<t>","item":{"r
 create onto a file, exclusive      {"ok":false,"code":"exists","error":"a/f.txt exists","item":{"ref":"i:<file-1>","parentRef":"d:<id1>","name":"f.txt","kind":"file","size":11,"mtime":"<t>","etag":"","isUploaded":false,"contentId":"<id3>","availability":"cached"}}
 rename onto its own place          {"ok":true,"item":{"ref":"i:<file-1>","parentRef":"d:<id1>","name":"f.txt","kind":"file","size":11,"mtime":"<t>","etag":"","isUploaded":false,"contentId":"<id3>","availability":"cached"}}
 stat root of a read-only domain    {"ok":true,"ref":"root","parentRef":"root","name":"ro","kind":"dir","size":0,"mtime":"<t>","etag":".tsync-root","isUploaded":true,"readOnly":true}
-rename to g.txt                    {"ok":true,"item":{"ref":"i:<file-1>","parentRef":"d:<id1>","name":"g.txt","kind":"file","size":11,"mtime":"<t>","etag":"","isUploaded":false,"contentId":"<id3>","availability":"cached"}}
-stat its ref after                 {"ok":true,"ref":"i:<file-1>","parentRef":"d:<id1>","name":"g.txt","kind":"file","size":11,"mtime":"<t>","etag":"","isUploaded":false,"contentId":"<id3>","availability":"cached"}
+rename to g.txt                    {"ok":true,"item":{"ref":"i:<file-1>","parentRef":"d:<id1>","name":"g.txt","kind":"file","size":11,"mtime":"<t>","etag":"<id3>","isUploaded":true,"contentId":"<id3>","availability":"online-only"}}
+stat its ref after                 {"ok":true,"ref":"i:<file-1>","parentRef":"d:<id1>","name":"g.txt","kind":"file","size":11,"mtime":"<t>","etag":"<id3>","isUploaded":true,"contentId":"<id3>","availability":"online-only"}
 delete a folder                    {"ok":false,"code":"invalid","error":"a folder is removed with rmdir"}
 rmdir a                            {"ok":true}
 list_dir root                      {"ok":true,"items":[]}
+== change feed
+  op                               {"op":"mkdir","ref":"d:<id1>","parentRef":"root","name":"a"}
+  op                               {"op":"put","ref":"i:<file-2>","parentRef":"d:<id1>","name":"f (conflicted copy from test).txt"}
+  op                               {"op":"put","ref":"i:<file-1>","parentRef":"d:<id1>","name":"f.txt"}
+  op                               {"op":"rename","is_dir":false,"srcRef":"i:<file-1>","srcParentRef":"d:<id1>","ref":"i:<file-1>","parentRef":"d:<id1>","name":"g.txt"}
+  op                               {"op":"delete","ref":"i:<file-2>","parentRef":"d:<id1>","name":"f (conflicted copy from test).txt"}
+  op                               {"op":"delete","ref":"i:<file-1>","parentRef":"d:<id1>","name":"g.txt"}
+  op                               {"op":"rmdir","id":"<id1>","ref":"d:<id1>","parentRef":"root","name":"a"}
+a stale anchor                     {"ok":true,"stale":true}
 == refusals
 malformed ref                      {"ok":false,"code":"invalid","error":"malformed item reference \"x:1\""}
 storage key                        {"ok":false,"code":"invalid","error":"malformed item reference \"tsync/docs/x\""}
@@ -48,14 +57,14 @@ next event                         {"event":"reset","domain":"docs","id":4}
 sync --full, narrated              {"ok":true,"exit":0}
   progress streamed: true
   line                             {"stream":"started","job":2}
-  line                             {"stream":"out","text":"main: 0 chunks referenced, 0 reclaimable (0 B) (dry run: nothing changed; --apply to act)"}
+  line                             {"stream":"out","text":"main: 2 chunks referenced, 0 reclaimable (0 B) (dry run: nothing changed; --apply to act)"}
 gc dry run, narrated               {"ok":true,"exit":0}
   narration streamed: true, progress streamed: true
 gc --apply, held at opening        {"stream":"started","job":3}
 expire meanwhile                   {"ok":false,"code":"busy","error":"busy: tsync gc --apply (job 3) is running on docs"}
 cancel it                          {"ok":true,"cancelled":true}
-  line                             {"stream":"out","text":"main: completed; 0 namespaces marked, 0 chunks promoted, 0 reclaimed (0 B)"}
-  line                             {"ok":true,"exit":0}
+  line                             {"stream":"out","text":"main: left open in marking after \"m/.tsync-root\"; 1 namespaces marked, 0 chunks promoted, 0 reclaimed (0 B)"}
+  line                             {"ok":true,"exit":1}
 cancel once it ended               {"ok":true,"cancelled":false}
   line                             {"stream":"started","job":5}
   line                             {"stream":"out","text":"main: completed; 0 namespaces marked, 0 chunks promoted, 0 reclaimed (0 B)"}
@@ -66,7 +75,7 @@ reports the supervisor got, in order:
   gc: running
   gc: done
   gc --apply: running
-  gc --apply: done
+  gc --apply: failed
   gc --abort: running
   gc --abort: done
 == stop

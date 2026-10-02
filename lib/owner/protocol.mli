@@ -43,6 +43,27 @@ type fetched = {
 }
 
 type cached = { local_path : string; item : row }
+(** A change-feed op as 08 §3.6 renders it: items named by reference. *)
+type feed_op =
+  | Put_op of { ref_ : string; parent_ref : string; name : string; item : row option }
+  | Delete_op of { ref_ : string; parent_ref : string; name : string }
+  | Mkdir_op of { ref_ : string; parent_ref : string; name : string; item : row option }
+  | Rmdir_op of { id : string; ref_ : string; parent_ref : string; name : string }
+  | Rename_op of {
+      is_dir : bool;
+      id : string option;
+      src_ref : string;
+      src_parent_ref : string;
+      ref_ : string;
+      parent_ref : string;
+      name : string;
+      item : row option;
+    }
+
+type changes =
+  | Stale
+  | Changes of { cursor : string; more : bool; ops : feed_op list; unnamed : int }
+
 type counted = { succeeded : int; failed : int }
 type progress = Inactive | Active of { downloaded : int; total : int }
 type resynced = Incremental of int | Full of { manifests : int; failed : int }
@@ -67,6 +88,7 @@ type _ request =
     }
       -> page request
   | Cursor : string request
+  | Changes_since : { anchor : string; limit : int option } -> changes request
   | Ensure_cached : { item : target; dest : string } -> cached request
   | Fetch_range : {
       item : target;

@@ -157,7 +157,9 @@ let housekeeping (domain : Domain.t) (module E : Tsync_sync.Engine.S) =
         Tsync_sync.Export.sweep_records ~cache_root:domain.cache_root
           domain.name
       in
-      if n > 0 then Log.info "removed %d stale export records" n);
+      if n > 0 then Log.info "removed %d stale export records" n;
+      let n = E.prune_applied () in
+      if n > 0 then Log.info "pruned %d applied-log shards" n);
     Usage.release_if_grown ()
   in
   try
