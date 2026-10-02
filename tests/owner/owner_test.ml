@@ -219,6 +219,11 @@ let () =
                 | _ -> -1)
           | _ -> -1
       in
+      let rec drained n =
+        if pending () > 0 && n > 0 then (
+          Rt.sleep 0.1;
+          drained (n - 1))
+      in
       let before = pending () in
       show "write by ref, same content"
         (ask
@@ -238,6 +243,8 @@ let () =
           ]
       in
       show "write by ref on its base" w2;
+      (* One upload at a time keeps the feed's order fixed. *)
+      drained 100;
       show "write on a stale base"
         (ask
            [
@@ -281,11 +288,6 @@ let () =
       show "stat root of a read-only domain"
         (ask ~domain:(Some "ro") [("action", "stat"); ("ref", "root")]);
       (* The files publish before they move, so the feed names them. *)
-      let rec drained n =
-        if pending () > 0 && n > 0 then (
-          Rt.sleep 0.1;
-          drained (n - 1))
-      in
       drained 100;
       show "rename to g.txt"
         (ask
@@ -319,6 +321,86 @@ let () =
       in
       List.iter (show "  op") (until_published 100);
       show "a stale anchor" (ask [("action", "changes_since"); ("arg", "1|")]);
+      p "== whole-domain listing";
+      let b =
+        item_ref
+          (ask [("action", "mkdir"); ("parentRef", "root"); ("name", "b")])
+      in
+      List.iter
+        (fun (parent, name) ->
+          ignore
+            (ask
+               [
+                 ("action", "write");
+                 ("parentRef", parent);
+                 ("name", name);
+                 ("staging", staging ("w" ^ name) name);
+               ]))
+        [(b, "1.txt"); (b, "2.txt"); (b, "3.txt"); ("root", "c.txt")];
+      let list_all after =
+        let r =
+          Ipc.call socket
+            (`Assoc
+               ([
+                  ("domain", `String "docs");
+                  ("action", `String "list_all");
+                  ("limit", `Int 2);
+                ]
+               @
+                 match after with
+                 | Some a -> [("after", `String a)]
+                 | None -> []))
+        in
+        let names =
+          match r with
+            | `Assoc l -> (
+                match List.assoc_opt "items" l with
+                  | Some (`List items) ->
+                      List.map (fun i -> Option.get (Ipc.field i "name")) items
+                  | _ -> [])
+            | _ -> []
+        in
+        (names, Ipc.field r "next", r)
+      in
+      let rec pages n after =
+        let names, next, r = list_all after in
+        if Ipc.field r "stale" = None then
+          p "  page %d: %s%s" n (String.concat ", " names)
+            (if next = None then " (last)" else "")
+        else p "  page %d: stale" n;
+        if n = 2 then
+          ignore
+            (ask
+               [
+                 ("action", "write");
+                 ("parentRef", "root");
+                 ("name", "a0.txt");
+                 ("staging", staging "wa0" "a0");
+               ]);
+        match next with Some c -> pages (n + 1) (Some c) | None -> ()
+      in
+      pages 1 None;
+      let _, second, _ = list_all None in
+      let second = Option.get second in
+      ignore (list_all None);
+      show "a cursor of a remade walk"
+        (ask [("action", "list_all"); ("after", second)]);
+      let off =
+        match String.split_on_char ':' second with
+          | [_; o] -> int_of_string o
+          | _ -> assert false
+      in
+      let _, current, _ = list_all None in
+      let current_walk =
+        List.hd (String.split_on_char ':' (Option.get current))
+      in
+      show "an offset inside a line"
+        (ask
+           [
+             ("action", "list_all");
+             ("after", current_walk ^ ":" ^ string_of_int (off + 1));
+           ]);
+      show "not a cursor" (ask [("action", "list_all"); ("after", "x:1")]);
       p "== refusals";
       show "malformed ref" (ask [("action", "stat"); ("ref", "x:1")]);
       show "storage key" (ask [("action", "stat"); ("ref", "tsync/docs/x")]);

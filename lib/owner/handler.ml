@@ -392,6 +392,81 @@ let changes t ~anchor ~limit : Protocol.changes =
             unnamed = List.length (List.filter Option.is_none rendered);
           }
 
+(* 08 §3.7: the first page walks the mirror, sorts by path and keeps the walk;
+   later pages read the kept file from the cursor's offset. An entry whose path
+   no longer resolves is skipped: the feed reports its change. *)
+let walk_file t =
+  let (module E : Engine.S) = t.engine in
+  Filename.concat
+    (Filename.concat (Tsync_checkout.Mirror.root E.mirror) "scratch")
+    ".tsync-walk"
+
+let walk_domain t =
+  let (module E : Engine.S) = t.engine in
+  let skipped = ref 0 in
+  let rec walk dir container acc =
+    List.fold_left
+      (fun acc (e : E.entry) ->
+        let path = Names.join dir e.name in
+        if e.is_dir then (
+          match E.folder_id path with
+            | None ->
+                incr skipped;
+                acc
+            | Some id ->
+                walk path (Folder_id.to_string id)
+                  ({
+                     Kept_walk.path;
+                     container;
+                     kind = `Dir;
+                     size = 0;
+                     mtime = 0.;
+                   }
+                  :: acc))
+        else
+          {
+            Kept_walk.path;
+            container;
+            kind = `File;
+            size = e.st.size;
+            mtime = e.st.mtime;
+          }
+          :: acc)
+      acc (E.list_children dir)
+  in
+  let entries = walk "" (Folder_id.to_string Folder_id.root) [] in
+  ( List.sort
+      (fun (a : Kept_walk.entry) b -> String.compare a.path b.path)
+      entries,
+    !skipped )
+
+let list_all t ~after ~limit : Protocol.listing =
+  let limit = Option.value ~default:page_limit limit in
+  if limit < 1 then invalid "limit must be positive";
+  let file = walk_file t in
+  let cursor, unnamed =
+    match after with
+      | Some c -> (Some c, 0)
+      | None -> (
+          let entries, skipped = walk_domain t in
+          match Kept_walk.write file ~skipped entries with
+            | _ -> (Kept_walk.first_cursor file, skipped)
+            | exception e ->
+                Log.warn "%s: the kept walk could not be written: %s"
+                  (domain_name t) (Printexc.to_string e);
+                (None, skipped))
+  in
+  match cursor with
+    | None -> Walk_stale
+    | Some cursor -> (
+        match Kept_walk.page file ~cursor ~limit with
+          | `Stale -> Walk_stale
+          | `Page (paths, next) ->
+              let rows =
+                List.map (fun p -> try row_of t p with _ -> None) paths
+              in
+              Listed { items = List.filter_map Fun.id rows; next; unnamed })
+
 let publish_event t ev = t.publish (event t (Protocol.event_name ev) [])
 
 let print_line = function
@@ -553,6 +628,7 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
     | Ping -> ()
     | Stat item -> row_or_unnamed t (target t item)
     | List_dir r -> list_dir t r.dir ~after:r.after ~limit:r.limit
+    | List_all r -> list_all t ~after:r.after ~limit:r.limit
     | Status ->
         {
           Protocol.domain = domain_name t;

@@ -39,6 +39,11 @@ let cases =
       ( List_dir { dir = Ref "d:9f3a"; after = Some "a"; limit = Some 2 },
         { items = [row; dir]; next = Some "big.txt"; unnamed = 1 } );
     Case (Cursor, "1756600000000|0001756600000-abc");
+    Case (List_all { after = None; limit = Some 2 }, Walk_stale);
+    Case
+      ( List_all { after = Some "1700000000000:42"; limit = None },
+        Listed
+          { items = [row; dir]; next = Some "1700000000000:99"; unnamed = 0 } );
     Case (Changes_since { anchor = "1|"; limit = None }, Stale);
     Case
       ( Changes_since { anchor = "1|"; limit = Some 10 },

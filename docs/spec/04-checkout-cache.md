@@ -60,7 +60,9 @@ requires rewriting a valid existing file into another form.
   manifests/<escaped dir>/.tsync-dir           folder marker
   manifests/<escaped dir>/.tsync-name          name marker (only when the dir's leaf is escaped)
   manifests/<escaped dir>/.tsync-own-<hex16>   own marker of a file entry this client stored
+  manifests/<escaped dir>/.tsync-fid-<hex16>   file-id marker of a file entry (§2.3)
   scratch/<escaped path>                       frontend scratch; wiped by resync ([07](07-daemon-cli.md))
+  scratch/.tsync-walk                          kept walk of a whole-domain listing ([08 §2.5](08-frontends.md#25-cursors-and-anchors))
   chunks/<shard>/<group key>                   whole cache body
   chunks/<shard>/<group key>.partial           partial cache body
   chunks/<shard>/<group key>.pin               pin

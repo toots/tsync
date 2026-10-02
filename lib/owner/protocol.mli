@@ -33,6 +33,9 @@ type row = {
 (** [unnamed] counts rows whose container has no id on this client. *)
 type page = { items : row list; next : string option; unnamed : int }
 
+(** A whole-domain page, or [Walk_stale] for a cursor on another walk. *)
+type listing = Listed of page | Walk_stale
+
 type written = { size : int; mtime : float; item : row }
 
 type fetched = {
@@ -87,6 +90,7 @@ type _ request =
       limit : int option;
     }
       -> page request
+  | List_all : { after : string option; limit : int option } -> listing request
   | Cursor : string request
   | Changes_since : { anchor : string; limit : int option } -> changes request
   | Ensure_cached : { item : target; dest : string } -> cached request
