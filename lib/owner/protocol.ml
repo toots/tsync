@@ -188,9 +188,12 @@ let refused_while_paused : type a. a request -> bool = function
       true
   | _ -> false
 
-type event = Recovered | Reset
+type event = Recovered | Reset | Changed
 
-let event_name = function Recovered -> "recovered" | Reset -> "reset"
+let event_name = function
+  | Recovered -> "recovered"
+  | Reset -> "reset"
+  | Changed -> "changed"
 
 (* Field access on the owner side: a wrong type is INVALID, never a crash. *)
 let member j k = match j with `Assoc l -> List.assoc_opt k l | _ -> None

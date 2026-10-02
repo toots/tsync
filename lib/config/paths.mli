@@ -8,6 +8,9 @@ val config_file : unit -> string
 val data_dir : unit -> string
 val cache_root : unit -> string
 
+(** The macOS service process's one socket for every domain (07 §2.7). *)
+val service_socket : unit -> string
+
 (** One socket per owner on Linux; the service process's one socket on macOS. *)
 val owner_socket : Domain_name.t -> string
 

@@ -29,8 +29,10 @@ let cache_root () =
   if Fs.is_macos then Filename.concat (data_dir ()) "cache"
   else Filename.concat (env_dir "XDG_CACHE_HOME" ".cache") "tsync"
 
+let service_socket () = Filename.concat (data_dir ()) "tsync.sock"
+
 let owner_socket domain =
-  if Fs.is_macos then Filename.concat (data_dir ()) "tsync.sock"
+  if Fs.is_macos then service_socket ()
   else
     Filename.concat (data_dir ())
       (Printf.sprintf "tsync-%s.sock" (Domain_name.to_string domain))
