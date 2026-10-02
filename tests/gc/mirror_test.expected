@@ -3,6 +3,9 @@ all: main -> copy, 10 checked, 10 copied (455 bytes), 0 refused, 0 changed, 0 un
 order of kinds: chunk, other, cursor
 index copied: false
 
+== progress
+chunk shard progress never goes back: true, ends at 1: true
+
 == again
 all: main -> copy, 10 checked, 0 copied (0 bytes), 0 refused, 0 changed, 0 unguarded
 reads of the copy: 0, checksums computed on it: 0

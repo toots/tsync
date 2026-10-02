@@ -76,7 +76,14 @@ module Make (C : Context.S) = struct
 
   (* One batch of keys to compare and copy, listed together. Chunks are named
      by their content: compared by name and size, written plainly. *)
-  type batch = { label : string; source : Store.entry list; chunks : bool }
+  type batch = {
+    label : string;
+    source : Store.entry list;
+    chunks : bool;
+    part : int * int;
+        (** its place among a run of like batches (the 4096 chunk shards), so
+            progress runs across the whole run, not per batch *)
+  }
 
   (* 05 §4.6 step 7: a chunk is put; anything else replaces the entry the
      comparison read, and is put plainly only where the destination cannot
@@ -125,6 +132,23 @@ module Make (C : Context.S) = struct
                 tally c (fun c ->
                     c.failed <- (Key.to_string e.key, reason) :: c.failed))
 
+  let report ~narrate ~(dst : Store.t) c b ~done_ ~total =
+    let index, parts = b.part in
+    let fraction =
+      (float_of_int index
+      +. if total = 0 then 1. else float_of_int done_ /. float_of_int total)
+      /. float_of_int (max 1 parts)
+    in
+    if parts > 1 then
+      Narrate.progress narrate ~fraction
+        "%s: %s (%d of %d), %d checked, %d copied" dst.name b.label (index + 1)
+        parts
+        (c.checked + if done_ = total then 0 else done_)
+        c.copied
+    else
+      Narrate.progress narrate ~fraction "%s: %s, %d of %d compared, %d copied"
+        dst.name b.label done_ total c.copied
+
   let copy_batch ~narrate ~cancelled ~(src : Store.t) ~(dst : Store.t) ~listed c
       b =
     let there = Hashtbl.create 256 in
@@ -149,17 +173,12 @@ module Make (C : Context.S) = struct
             | Some x -> differs ~src ~dst e x
         in
         if changed then copy ~narrate ~src ~dst c b e theirs;
-        let k =
-          Mutex.protect m (fun () ->
-              incr seen;
-              !seen)
-        in
-        Narrate.progress narrate
-          ~fraction:(float_of_int k /. float_of_int (max 1 total))
-          "%s: %s, %d of %d compared" dst.name b.label k total);
+        (* reported under the lock, so the count never runs backwards *)
+        Mutex.protect m (fun () ->
+            incr seen;
+            report ~narrate ~dst c b ~done_:!seen ~total));
     tally c (fun c -> c.checked <- c.checked + total);
-    Narrate.progress narrate "%s: %s, %d checked, %d copied" dst.name b.label
-      c.checked c.copied
+    report ~narrate ~dst c b ~done_:total ~total
 
   let refuse_open_collection () =
     match Collector.status C.composite with
@@ -273,18 +292,19 @@ module Make (C : Context.S) = struct
               copy_batch ~narrate ~cancelled ~src:src.store ~dst:dst.store
                 ~listed counts b
           in
-          let listed_batch label prefix ~chunks ~filter =
+          let listed_batch ?(part = (0, 1)) label prefix ~chunks ~filter =
             run
               {
                 label;
                 source = List.filter filter (src.store.list_prefix prefix);
                 chunks;
+                part;
               }
               ~listed:(dst.store.list_prefix prefix)
           in
           let headed label entries ~chunks =
             run
-              { label; source = entries; chunks }
+              { label; source = entries; chunks; part = (0, 1) }
               ~listed:
                 (List.filter_map
                    (fun (e : Store.entry) -> dst.store.head_opt e.key)
@@ -293,16 +313,18 @@ module Make (C : Context.S) = struct
           (match (scope, path) with
             | All, _ ->
                 List.iter
-                  (fun shard ->
-                    listed_batch ("chunk shard " ^ shard)
+                  (fun i ->
+                    let shard = Printf.sprintf "%03x" i in
+                    listed_batch ~part:(i, 4096) ("chunk shard " ^ shard)
                       (Key.shard_prefix d shard) ~chunks:true ~filter:(fun _ ->
                         true))
-                  (List.init 4096 (Printf.sprintf "%03x"));
+                  (List.init 4096 Fun.id);
                 run
                   {
                     label = "manifests";
                     source = manifest_area src.store;
                     chunks = false;
+                    part = (0, 1);
                   }
                   ~listed:(dst.store.list_prefix (Key.manifests d));
                 listed_batch "versions" (Key.versions d) ~chunks:false
@@ -318,6 +340,7 @@ module Make (C : Context.S) = struct
                     label = "manifests";
                     source = manifest_area src.store;
                     chunks = false;
+                    part = (0, 1);
                   }
                   ~listed:(dst.store.list_prefix (Key.manifests d))
             | Path _, Some (chunks, keys) ->
