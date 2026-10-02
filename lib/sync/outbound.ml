@@ -132,6 +132,13 @@ module Make (C : Engine_ctx.S) = struct
     in
     up path
 
+  (* A move or trash whose answer was lost may leave the old marker behind:
+     every retry deletes it again, so no walk keeps meeting it disowned. *)
+  let drop_old_marker path id =
+    Option.iter
+      (fun pid -> T.remove_marker_if ~parent:pid ~name:(Names.leaf_of path) id)
+      (Mirror.lookup_id_removed mirror (Names.parent_of path))
+
   let store_record parent_path leaf =
     match Mirror.lookup_id_removed mirror parent_path with
       | None -> `Unresolved
@@ -373,7 +380,9 @@ module Make (C : Engine_ctx.S) = struct
         | Rmdir { id = None; _ } -> (No_id, [op])
         | Rmdir { path; id = Some id } -> (
             match place_of id with
-              | `Trash -> (Already_trashed, [op])
+              | `Trash ->
+                  drop_old_marker path id;
+                  (Already_trashed, [op])
               | `At _ -> (Published, [op])
               | `None ->
                   let old =
@@ -405,6 +414,7 @@ module Make (C : Engine_ctx.S) = struct
                       when Mirror.folder_id mirror (Names.parent_of here)
                            = Some a.parent
                            && a.aname = Names.leaf_of here ->
+                        drop_old_marker src id;
                         (Filed_here_already, emit)
                     | place ->
                         let old =

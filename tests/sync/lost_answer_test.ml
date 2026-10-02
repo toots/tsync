@@ -18,7 +18,7 @@ let knowledge =
   { Composite.is_index = (fun _ -> false); is_journal = (fun _ -> false) }
 
 (* The next call of the armed kind on a matching key fails: a "put" or "copy"
-   after it is made, a "refused put" before. *)
+   after it is made, a "refused put" or "refused delete" before. *)
 let armed : (string * (Key.t -> bool)) option Atomic.t = Atomic.make None
 
 let lose kind key =
@@ -36,6 +36,10 @@ let lossy (s : Store.t) =
         lose "refused put" key;
         s.put ?mode key body;
         lose "put" key);
+    delete =
+      (fun key ->
+        lose "refused delete" key;
+        s.delete key);
     copy =
       (fun src dst ->
         s.copy src dst;
@@ -91,6 +95,17 @@ let pass (module E : Engine.S) =
     | Engine.Hold _ -> ignore (E.resync ())
     | Incremental -> ()
 
+module Str_index = struct
+  let find s sub =
+    let n = String.length sub in
+    let rec go i =
+      if i + n > String.length s then None
+      else if String.sub s i n = sub then Some i
+      else go (i + 1)
+    in
+    go 0
+end
+
 let under prefix key = String.starts_with ~prefix (Key.to_string key)
 
 let () =
@@ -117,6 +132,7 @@ let () =
       in
       A.mkdir "d1" ~exclusive:false;
       A.mkdir "d2" ~exclusive:false;
+      A.mkdir "x" ~exclusive:false;
       write a "f.txt" "file";
       A.drain ~grace:10. ();
       pass b;
@@ -129,5 +145,29 @@ let () =
       step "file rename, the copy's answer lost" "copy"
         (fun _ -> true)
         (fun () -> A.rename ~src:"f.txt" ~dst:"g.txt" ~exclusive:false);
+      step "folder rename, the old marker's delete refused" "refused delete"
+        (fun k ->
+          Key.to_string k = Key.to_string (Key.child d Folder_id.root "x"))
+        (fun () -> A.rename ~src:"x" ~dst:"y" ~exclusive:false);
+      let store = Local.create ~name:"main" (Filename.concat root "store") in
+      let slot name = Key.child d Folder_id.root name in
+      p "  old marker left: %b\n" (store.get_opt (slot "x") <> None);
+      let rebuild label =
+        p "a full rebuild of B %s: %s\n" label
+          (match B.resync ~full:true () with
+            | `Full (_, failures) -> Printf.sprintf "%d failures" failures
+            | `Incremental _ -> "incremental")
+      in
+      rebuild "after the rename";
+      let marker =
+        Bigstring.to_string (Option.get (store.get_opt (slot "y")))
+      in
+      let at = Option.get (Str_index.find marker {|"name":"y"|}) in
+      store.put (slot "x")
+        (Bigstring.of_string
+           (String.sub marker 0 at ^ {|"name":"x"|}
+           ^ String.sub marker (at + 10) (String.length marker - at - 10)));
+      rebuild "with a disowned marker";
+      p "B: %s\n" (tree b);
       Stop.request ());
   Fs.rm_rf root

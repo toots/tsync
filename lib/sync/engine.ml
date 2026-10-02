@@ -834,7 +834,7 @@ module Make (C : Engine_ctx.S) = struct
     let on_unusable =
       Tree.Skip
         (fun u ->
-          incr failures;
+          (match u with Tree.Disowned _ -> () | _ -> incr failures);
           Log.warn "resync: %s" (Tree.describe_unusable u))
     in
     ignore
