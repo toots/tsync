@@ -431,17 +431,19 @@ Key(manifest)`; `target = Absent(side) | Dir(side) | File(local) | Key(manifest)
 
 ### 4.6 `tsync mirror` (store to store)
 
-`mirror ?source ?scope:(All | Manifests | Path rel)` → per destination `{name, checked, copied,
+`mirror ?source ?scope:(All | Skip_chunks | Path rel)` → per destination `{name, checked, copied,
 copied_bytes, changed, unguarded}`.
 
 1. Source: the named member, else the first member in role order.
 2. `All` and `Path` are refused while a collection is open ([gc.md](algorithms/gc.md): the chunk
    space is partly under another name); the message names the phase and age and suggests `tsync gc`
-   or `tsync gc --abort`. `Manifests` is allowed.
+   or `tsync gc --abort`. `Skip_chunks` is allowed: it reads and writes no chunk.
 3. **Source listing**:
    - `All`: chunks, then the domain's manifests, markers and versions, then journal entries, then
      the cursor.
-   - `Manifests`: the domain's manifests and markers.
+   - `Skip_chunks`: as `All`, without the chunks. For a destination whose chunks are known to be
+     there (a run that just compared them, or a copy kept current by its jobs), it skips the
+     longest listing of the run.
    - `Path rel`: walk the folder tree down to and under `rel`, collecting markers and manifests and
      every chunk key those manifests name; each is checked on the source (missing → the run fails
      `<key> is missing from source <name>`); no journal, versions or cursor (they would state a
@@ -485,7 +487,7 @@ copied_bytes, changed, unguarded}`.
    whose chunks are not there yet, or a cursor ahead of its entries.
 
 An object a destination refuses (a reference gate missing the chunks a manifest names, under
-`Manifests`) is counted refused for that destination with its reason, and the run goes on; any
+`Skip_chunks`) is counted refused for that destination with its reason, and the run goes on; any
 refusal makes the command exit 1.
 
 Additive: nothing is deleted on a destination. A chunk's content (same size, wrong bytes) is integrity's (§4.10).
