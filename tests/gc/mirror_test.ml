@@ -142,12 +142,13 @@ let () =
       p "index copied: %b\n"
         (inner.head_opt (Key.index d Folder_id.root) <> None);
       p "\n== progress\n";
-      let shards = ref [] in
+      let shards = ref [] and lines = ref [] and said = ref [] in
       let narrate =
         {
-          Narrate.say = ignore;
+          Narrate.say = (fun s -> said := s :: !said);
           progress =
             (fun ?fraction text ->
+              lines := text :: !lines;
               if Text.contains text "chunk shard" then
                 shards := Option.value ~default:(-1.) fraction :: !shards);
         }
@@ -161,6 +162,21 @@ let () =
       p "chunk shard progress never goes back: %b, ends at 1: %b\n"
         (rising fractions)
         (List.nth_opt (List.rev fractions) 0 = Some 1.);
+      let lines = List.rev !lines in
+      let first f =
+        let rec go i = function
+          | [] -> -1
+          | l :: rest -> if f l then i else go (i + 1) rest
+        in
+        go 0 lines
+      in
+      p "manifests listings shown before comparing: %b\n"
+        (let listing = first (fun l -> Text.contains l "manifests, listing")
+         and comparing = first (fun l -> Text.contains l "manifests, 1 of") in
+         listing >= 0 && listing < comparing);
+      List.iter
+        (fun s -> if Text.contains s "listed" then p "said:%s\n" s)
+        (List.rev !said);
       p "\n== again\n";
       reads := 0;
       checksums := 0;
