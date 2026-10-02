@@ -32,7 +32,7 @@ Nothing is secret. Building a store touches no file.
 - The object under key `k` is the regular file `<root>/<k>`, with `/` as the separator and no escaping. Directories exist only to hold files; they are created as needed and hold no object. No key names a directory ([06 §2.1](../06-backends.md#21-keys-and-prefixes)).
 - **Confinement** is [security §5.3](../algorithms/security-model.md#53-filesystem-mapped-stores): keys are checked lexically before any system call, and resolution never follows a symbolic link at or below the root. The root itself may be reached through a symbolic link. This holds whoever supplied the key: a peer through the http-proxy, a listing of another store, a job record.
 - **Temporary names** follow the one grammar of [01 §2.9](../01-core.md#29-temporary-and-reserved-local-names): every name that starts with `.tsync-tmp-` and ends with `.tmp`, file or directory, is temporary. Such names are never listed, read or reported, and are swept by age (§7). Readers SHOULD accept the pid form `.tsync-tmp-<pid>-<seq>.tmp` and a scratch directory `.tsync-tmp-scratch.tmp` at the root (meaning temporaries like any other); writers MUST NOT produce them in a store. A new temporary file uses the random form, in the directory of the target, created with exclusive create, so two writers, on one host or on two hosts sharing a mount, never share one.
-- **Files that are not store objects** live beside the layout: the collection's lock file `tsync/<d>/gc-run.lock` ([gc §5.4](../algorithms/gc.md#54-the-collection-interlock)), which may exist before any collection ran (the gate creates it). Listings omit it.
+- **Files that are not store objects** live beside the layout: the collection's lock files `tsync/<d>/gc-run.lock` and `tsync/<d>/gc-publish.lock` ([gc §5.4](../algorithms/gc.md#54-the-collection-interlock)), which may exist before any collection ran (the gate creates the second). Listings omit them.
 - **Filesystem limit.** The key space must be prefix-free between objects and directories: keys `a` and `a/b` cannot both hold objects. A write that meets this fails REFUSED. tsync's layout never needs both.
 
 ## 4. Primitives
@@ -83,7 +83,7 @@ Why each fsync: the file's fsync keeps a crash from leaving the final name on an
 The driver of a collectable main hosts the interlock of [gc §5.4](../algorithms/gc.md#54-the-collection-interlock), so no writer can bypass it:
 
 - Every `put` or `copy` whose destination is in the manifest area or the version area passes the **reference gate** before it writes: shared publish lock, promotion of the named chunks when the run record is present, a presence check of every named chunk, and a refusal naming the missing chunks ([gc §5.4](../algorithms/gc.md#54-the-collection-interlock)).
-- The lock file carries the **run lock** and the **publish lock** as host-level locks. The driver offers no exclusion across hosts beyond what the filesystem's lock manager provides (§12).
+- The two lock files carry the **run lock** and the **publish lock** as host-level locks. The driver offers no exclusion across hosts beyond what the filesystem's lock manager provides (§12).
 
 ## 7. Orphaned temporary files
 

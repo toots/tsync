@@ -92,8 +92,9 @@ tsync/D/chunks/<sss>/<chunk key>                chunks, surviving space; sss = f
 tsync/D/chunks.from/<sss>/<chunk key>           outgoing space, only during a collection run
 tsync/D/gc-run                                  collection run record, collectable main only
 tsync/D/gc-generation                           collection generation, first collectable main only
-tsync/D/gc-run.lock                             lock file (filesystem stores only; not a store object;
+tsync/D/gc-run.lock                             run lock file (filesystem stores only; not a store object;
                                                 MAY exist before any collection ran)
+tsync/D/gc-publish.lock                         publish lock file (likewise)
 tsync/D/versions/<folder id>/<leaf hash>/<ns>   version snapshots
 tsync/D/journal/<YYYY-MM>/<entry key>           journal entries (format: 03-journal-sync.md)
 tsync/D/cursor                                  cursor (format: 03-journal-sync.md)

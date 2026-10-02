@@ -243,11 +243,12 @@ onto the main, a copy refilling a main, and every such write an http-proxy liste
 client. A chunk put received by a listener is a writer path too: it goes through the same driver and
 lands in S like any other writer's. Because the gate sits in the driver of the store that has the spaces, no caller can bypass it.
 
-The main's lock file carries two independent host-level locks:
+The main carries two independent host-level locks, each on its own lock file:
 
 - the **run lock**, exclusive, held by the collector for the whole of its session: at most one collector
-  per collectable main. It is a POSIX record lock on the lock file.
-- the **publish lock**, a reader/writer lock that does not conflict with the run lock: shared by the
+  per collectable main. It is a POSIX record lock on `gc-run.lock`. No other lock lives on that file,
+  since closing any descriptor of it drops the process's record lock.
+- the **publish lock**, a reader/writer lock on `gc-publish.lock`: shared by the
   gate, exclusive by the collector during opening (§5.5) and during each shard's doom step. A gate MUST
   bound its wait for the shared side ([algorithms/failure-model.md](failure-model.md)); a timeout is a
   transient failure of the write.

@@ -297,6 +297,23 @@ let () =
           | Ok _ -> ()
           | Error `Busy -> p "the test could not take the lock\n"
       in
+      let spaces = Chunk_spaces.create main_root in
+      ignore
+        (Chunk_spaces.with_run_lock spaces d (fun () ->
+             Chunk_spaces.with_publish_lock spaces d ~exclusive:false ignore;
+             let to_holder, holder_in = Unix.pipe ~cloexec:true ()
+             and holder_out, from_holder = Unix.pipe ~cloexec:true () in
+             let pid =
+               Unix.create_process "./lock_holder.exe"
+                 [| "./lock_holder.exe"; main_root; "d" |]
+                 to_holder from_holder Unix.stderr
+             in
+             Unix.close to_holder;
+             Unix.close from_holder;
+             p "after a publish lock, another process: %s\n"
+               (input_line (Unix.in_channel_of_descr holder_out));
+             Unix.close holder_in;
+             ignore (Unix.waitpid [] pid)));
       p "\n== a copy without queued deletion refuses a collection\n";
       let remote =
         {

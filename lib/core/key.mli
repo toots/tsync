@@ -47,8 +47,12 @@ val cursor : Domain_name.t -> t
 val gc_run : Domain_name.t -> t
 val gc_generation : Domain_name.t -> t
 
-(** The collection's lock file on a filesystem store; not a store object. *)
+(** The collection's run lock file on a filesystem store; not a store object. *)
 val gc_lock : Domain_name.t -> t
+
+(** The collection's publish lock file on a filesystem store; not a store
+    object. *)
+val gc_publish_lock : Domain_name.t -> t
 
 val corrupted : Domain_name.t -> prefix
 val verify_jobs : Domain_name.t -> prefix

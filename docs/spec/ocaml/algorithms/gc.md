@@ -10,7 +10,7 @@ Companion to the language-neutral spec [../../algorithms/gc.md](../../algorithms
 | Collectable (A1) | `Chunk_spaces.of_store`: a store with a `local_path` not on a network filesystem |
 | Driver-scoped access (§5.8) | `Local.create` routes every chunk read, delete and listing through `Chunk_spaces.read`, `twins`, `list` |
 | Reference classification | `Chunk_spaces.references`: the gate refuses exactly what marking halts on |
-| Gate, publish lock, promote | `Chunk_spaces.gate`, `with_publish_lock` (`flock`), `promote` + `sync_shards` |
+| Gate, publish lock, promote | `Chunk_spaces.gate`, `with_publish_lock` (`flock` on `gc-publish.lock`), `promote` + `sync_shards` |
 | Run lock | `Chunk_spaces.with_run_lock`: in-process check-and-set, then `lockf F_TLOCK` on `gc-run.lock` |
 | Run record R | `Gc_record` (typed; `reconciling` reads as closing) |
 | Generation G | `Gc_generation`: `read`, `read_mains` (maximum over mains), `write`, `settle` |
@@ -41,12 +41,9 @@ Companion to the language-neutral spec [../../algorithms/gc.md](../../algorithms
 
 - The run lock must stay a POSIX record lock (`lockf`/`fcntl`) on `gc-run.lock` so older collectors and
   newer ones exclude each other.
-- The publish lock must not conflict with it. On Linux, `flock` locks and `fcntl` record locks are
-  independent, so `flock(LOCK_SH)` / `flock(LOCK_EX)` on the same file gives a reader/writer lock that an
-  older collector's `lockf` neither blocks nor is blocked by. Verify the independence on each target
-  kernel (BSD-derived systems implement both on shared structures) before relying on it there; a byte
-  range of the same file under `fcntl` is not an option, because an older collector's `lockf(0)` locks
-  the whole file.
+- The publish lock lives on its own file, `gc-publish.lock`: POSIX drops a process's record locks at
+  any close of the file they lock, and macOS implements `flock` and `fcntl` on shared structures. An
+  older writer's gate, which takes `flock` on `gc-run.lock`, is not excluded by a newer collector.
 - `lockf` needs the file open for writing; `flock` works on any open descriptor.
 - Record locks merge within one process, which is why the in-process check-and-set is needed at all.
 

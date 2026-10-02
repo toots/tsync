@@ -687,7 +687,7 @@ of a chunk key.
 | Folder index | binary `tsyncidx1` at `…/manifests/<folder id>/.tsync-index` |
 | Version | manifest body at `tsync/D/versions/<folder id>/<leaf hash>/<ns>` |
 | Journal entry, cursor | `tsync/D/journal/…`, `tsync/D/cursor` ([03-journal-sync.md](../03-journal-sync.md)) |
-| Collection run | JSON at `tsync/D/gc-run`; lock file `gc-run.lock` beside it (filesystem only, not a store object) |
+| Collection run | JSON at `tsync/D/gc-run`; lock files `gc-run.lock` and `gc-publish.lock` beside it (filesystem only, not store objects) |
 | Collection generation | JSON at `tsync/D/gc-generation` |
 | Collection spaces | surviving `tsync/D/chunks/`, outgoing `tsync/D/chunks.from/` |
 | Corruption marker | JSON at `tsync/corrupted/D/sss/<chunk key>` |

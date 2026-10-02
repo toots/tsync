@@ -36,8 +36,10 @@ let in_surviving t d c =
     | Some { st_kind = S_REG; _ } -> true
     | _ -> false
 
+(* Its own file: closing any descriptor of the run lock's file would drop this
+   process's record lock on it. *)
 let with_publish_lock ?(wait = publish_wait) t d ~exclusive f =
-  let p = file t (Key.gc_lock d) in
+  let p = file t (Key.gc_publish_lock d) in
   Fs.mkdir_p ~perm:0o755 (Filename.dirname p);
   Fs.with_fd
     (Fs.openfile ~perm:0o644 p [O_RDWR; O_CREAT])
@@ -48,7 +50,7 @@ let with_publish_lock ?(wait = publish_wait) t d ~exclusive f =
           if Rt.now () > deadline then
             Fail.raise_ Fail.Deadline ~op:"publish lock"
               "%s: a collection holds the publish lock"
-              (Key.to_string (Key.gc_lock d));
+              (Key.to_string (Key.gc_publish_lock d));
           Rt.sleep delay;
           take (Float.min 0.1 (delay *. 2.)))
       in

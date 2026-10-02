@@ -11,7 +11,7 @@ let temp_name () = ".tsync-tmp-" ^ Ids.short () ^ ".tmp"
 
 let is_gc_lock rel =
   match String.split_on_char '/' rel with
-    | ["tsync"; _; "gc-run.lock"] -> true
+    | ["tsync"; _; ("gc-run.lock" | "gc-publish.lock")] -> true
     | _ -> false
 
 let path = Local_path.path
