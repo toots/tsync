@@ -173,6 +173,7 @@ Version 2, one JSON object per locally edited path:
 | `chunkSize` | chunk size of the edit; writers MUST write it | integer > 0. Readers SHOULD accept it absent, meaning the default chunk size ([01](01-core.md)) |
 | `slots` | one slot per chunk index | array; absent (and no `whole`): empty |
 | `whole` | body id of a whole-file body | string; when present, `slots` is ignored |
+| `h1` | the whole-file digest of a `whole` body: the key's `content_id`, computed at adoption with the edit's `chunkSize` (§4.3) | 16 lowercase hex; ignored without `whole`. Readers SHOULD accept it absent with `whole`, computing the digest from the body when it is first needed |
 | `base` | the **base** of the edit ([conflict-resolution](algorithms/conflict-resolution.md) §3.3): the content identity `h1` of the view the edit started from | 16 lowercase hex, or `null` for *none* (the edit started from no record); absent: *unknown* |
 | `published` | the commit record: standard padded base64 of the manifest the upload produced | present: **Committed**; absent: **Owed**. A value that does not decode to a manifest reads as Owed (the upload is redone; dedup makes it free) |
 
@@ -552,14 +553,16 @@ domain's chunk size); release the old bodies as in `write`.
 
 **`write_whole(key, src, base?, exclusive)`**:
 0. With `exclusive`, EXISTS if the key exists. With `base` different from `content_id(key)`, the
-   key becomes `aside(key)` for the steps below and the reply names it
-   ([conflict-resolution](algorithms/conflict-resolution.md) §4.9).
+   key becomes `aside(key)` for the steps below; the reply names the original key as it now
+   resolves ([conflict-resolution](algorithms/conflict-resolution.md) §4.9).
 1. Adopt `src` as a new whole body: rename it into `staged/whole/<new id>`; across filesystems,
    copy it, fsync the copy, then unlink `src`.
 2. fsync the body and its directory; durably replace the staged manifest with `whole` set and
    size and mtime taken from `src`, and `base` = the supplied `base`, else the view's `h1`
    (none without a view). Compute the body's whole-file digest (the key's `content_id`)
-   with the chunk size the upload will use.
+   with the chunk size the upload will use, and record it as the manifest's `h1`. When the
+   digest equals the key's `content_id` before the write, nothing changes: the body is released
+   and no upload is queued (a replay of content the store already has).
 3. Release the old bodies after the manifest is durable; then close (§4.4).
 
 **Reading staged content**: a whole body is read directly. Otherwise per chunk: Staged reads the
