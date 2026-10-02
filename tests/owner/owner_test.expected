@@ -43,6 +43,7 @@ a stale anchor                     {"ok":true,"stale":true}
 a cursor of a remade walk          {"ok":true,"stale":true}
 an offset inside a line            {"ok":true,"stale":true}
 not a cursor                       {"ok":true,"stale":true}
+symlink                            {"ok":true,"item":{"ref":"i:<file-3>","parentRef":"root","name":"l","kind":"symlink","size":5,"mtime":"<t>","etag":"<id4>","isUploaded":true,"contentId":"<id4>","symlinkTarget":"c.txt"}}
 == refusals
 malformed ref                      {"ok":false,"code":"invalid","error":"malformed item reference \"x:1\""}
 storage key                        {"ok":false,"code":"invalid","error":"malformed item reference \"tsync/docs/x\""}
@@ -60,7 +61,7 @@ notify_reset                       {"ok":true,"delivered":1}
 next event                         {"event":"reset","domain":"docs","id":4}
 == jobs
   line                             {"stream":"started","job":1}
-  line                             {"stream":"out","text":"full resync: 5 manifests"}
+  line                             {"stream":"out","text":"full resync: 6 manifests"}
 sync --full, narrated              {"ok":true,"exit":0}
   progress streamed: true
   line                             {"stream":"started","job":2}
