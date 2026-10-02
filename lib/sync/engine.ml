@@ -1147,14 +1147,7 @@ module Make (C : Engine_ctx.S) = struct
                   | Some r when r.ops = [] -> Dqueue.Records.complete wal id
                   | Some r -> (
                       match r.state with
-                        | Executed ->
-                            if
-                              Journal.entry_exists journal
-                                (Option.get (Entry_key.parse id))
-                            then Dqueue.Records.complete wal id
-                            else (
-                              let id = mark_executed id r.ops in
-                              discharge id r.ops)
+                        | Executed -> discharge_executed id r
                         | Prepared -> ()
                         | Intent when Wal.puts_only r ->
                             Dqueue.Records.update wal id (fun _ ->

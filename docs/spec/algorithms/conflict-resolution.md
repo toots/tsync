@@ -407,7 +407,7 @@ entry.
 | P10 | mkdir | `claimed` | — | publish | |
 | P11 | mkdir | `name_taken` | `ours-aside` | again | the next round claims the conflicted name |
 | P12 | rmdir | `no_id` | — | publish | nothing to retire by id; peers act by path |
-| P13 | rmdir | `already_trashed` | — | nothing_owed | |
+| P13 | rmdir | `already_trashed` | — | publish | the trash move precedes the entry: it may be ours from before a crash, as in P4 |
 | P14 | rmdir | `never_published` | — | nothing_owed | |
 | P15 | rmdir | `published` | `retire-to-trash` | publish | |
 | P16 | rename dir | `gone_here` | — | nothing_owed | |

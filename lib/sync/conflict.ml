@@ -216,7 +216,7 @@ let publish (op : op_kind) fact =
     | `Mkdir, Claimed -> ([], Publish)
     | `Mkdir, Name_taken -> ([P_ours_aside], Again)
     | `Rmdir, No_id -> ([], Publish)
-    | `Rmdir, Already_trashed -> ([], Nothing_owed)
+    | `Rmdir, Already_trashed -> ([], Publish)
     | `Rmdir, Never_published -> ([], Nothing_owed)
     | `Rmdir, Published -> ([P_retire_to_trash], Publish)
     | `Rename_dir, Gone_here -> ([], Nothing_owed)

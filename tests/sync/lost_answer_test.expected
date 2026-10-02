@@ -1,0 +1,7 @@
+B: d1/ d2/ f.txt
+== rmdir, the journal entry refused
+  failed once: true; B: d2/ f.txt; A parked 0, owed 0
+== rmdir, the anchor's answer lost
+  failed once: true; B: f.txt; A parked 0, owed 0
+== file rename, the copy's answer lost
+  failed once: true; B: g.txt; A parked 0, owed 0

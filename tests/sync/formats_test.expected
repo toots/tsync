@@ -253,7 +253,7 @@ v1.2           -> v1.2 (conflicted copy from laptop)
   mkdir        claimed                                           publish
   mkdir        name_taken               ours-aside               again
   rmdir        no_id                                             publish
-  rmdir        already_trashed                                   nothing_owed
+  rmdir        already_trashed                                   publish
   rmdir        never_published                                   nothing_owed
   rmdir        published                retire-to-trash          publish
   rename dir   gone_here                                         nothing_owed

@@ -108,6 +108,14 @@ module Make (C : Engine_ctx.S) = struct
     if ops <> [] then publish_entry id ops;
     Dqueue.Records.complete wal id
 
+  (* An EXECUTED record's store half is done: only its entry may be owed. *)
+  let discharge_executed id (r : Wal.record) =
+    if Journal.entry_exists journal (Option.get (Entry_key.parse id)) then
+      Dqueue.Records.complete wal id
+    else (
+      let id = mark_executed id r.ops in
+      discharge id r.ops)
+
   (* A folder we removed is read through while our removal is unpublished
      (A2 rescues what landed in it); once the store has it in the trash, the
      paths beneath it hold nothing (conflict-resolution §3.5 [S(p)]). *)
@@ -365,7 +373,7 @@ module Make (C : Engine_ctx.S) = struct
         | Rmdir { id = None; _ } -> (No_id, [op])
         | Rmdir { path; id = Some id } -> (
             match place_of id with
-              | `Trash -> (Already_trashed, [])
+              | `Trash -> (Already_trashed, [op])
               | `At _ -> (Published, [op])
               | `None ->
                   let old =
@@ -430,7 +438,16 @@ module Make (C : Engine_ctx.S) = struct
                 | Some _ -> dst
                 | None -> dst
             in
-            if slot_moved_on dst ~expected:(expected_matches (Wal.prior r i))
+            (* The mirror holds what we moved at [dst]: finding it there is our
+               own copy from an attempt whose answer was lost. *)
+            let ours (m : Manifest.t option) =
+              match (m, Mirror.manifest mirror dst) with
+                | Some m, Some here -> m.h1 = here.h1
+                | _ -> false
+            in
+            if
+              slot_moved_on dst ~expected:(fun m ->
+                  expected_matches (Wal.prior r i) m || ours m)
             then (Destination_taken, [])
             else (
               let emit = [Op.Rename { rn with dst }] in
@@ -605,16 +622,18 @@ module Make (C : Engine_ctx.S) = struct
     wait_gate ();
     let r = match read_record id with Some r -> r | None -> r in
     try
-      let emitted =
-        List.concat
-          (List.mapi
-             (fun i op -> match publish_op id r i op with `Emit l -> l)
-             r.ops)
-      in
-      if emitted = [] then Dqueue.Records.complete wal id
+      if r.state = Executed then discharge_executed id r
       else (
-        let id = mark_executed id emitted in
-        discharge id emitted)
+        let emitted =
+          List.concat
+            (List.mapi
+               (fun i op -> match publish_op id r i op with `Emit l -> l)
+               r.ops)
+        in
+        if emitted = [] then Dqueue.Records.complete wal id
+        else (
+          let id = mark_executed id emitted in
+          discharge id emitted))
     with e ->
       note_link_failure e;
       raise e

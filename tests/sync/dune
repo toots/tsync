@@ -198,3 +198,18 @@
  (alias runtest)
  (action
   (diff poller_retry_test.expected poller_retry_test.output)))
+
+(executable
+ (name lost_answer_test)
+ (modules lost_answer_test)
+ (libraries tsync_core tsync_store tsync_checkout tsync_sync unix))
+
+(rule
+ (with-stdout-to
+  lost_answer_test.output
+  (run ./lost_answer_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff lost_answer_test.expected lost_answer_test.output)))
