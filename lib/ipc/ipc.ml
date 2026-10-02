@@ -373,11 +373,34 @@ let () =
 module Client = struct
   type t = Line.t
 
-  let connect path =
+  (* A server that stopped accepting fills its backlog: a blocking connect
+     would then pin a scheduler thread, so the attempt is bounded. *)
+  let connect_timeout = 5.
+
+  let connect ?(timeout = connect_timeout) path =
     Tsync_core.Fs.ignore_sigpipe ();
     check_length path;
     let fd = Unix.socket ~cloexec:true PF_UNIX SOCK_STREAM 0 in
-    match Unix.connect fd (ADDR_UNIX path) with
+    Unix.set_nonblock fd;
+    let deadline = Rt.now () +. timeout in
+    let rec attempt () =
+      match Unix.connect fd (ADDR_UNIX path) with
+        | () -> ()
+        | exception Unix.Unix_error ((EAGAIN | EWOULDBLOCK), _, _)
+          when Rt.now () < deadline ->
+            Rt.sleep 0.05;
+            attempt ()
+        | exception Unix.Unix_error ((EAGAIN | EWOULDBLOCK), _, _) ->
+            Fail.raise_ Fail.Deadline "%s accepts no connection" path
+        | exception Unix.Unix_error (EINPROGRESS, _, _) -> (
+            (try Rt.wait_writable ~timeout:(deadline -. Rt.now ()) fd
+             with Rt.Timeout ->
+               Fail.raise_ Fail.Deadline "%s accepts no connection" path);
+            match Unix.getsockopt_error fd with
+              | None -> ()
+              | Some e -> raise (Unix.Unix_error (e, "connect", path)))
+    in
+    match attempt () with
       | () -> Line.make fd
       | exception Unix.Unix_error ((ENOENT | ECONNREFUSED | ENOTSOCK), _, _) ->
           Unix.close fd;

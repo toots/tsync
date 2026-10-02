@@ -39,6 +39,8 @@
 == no server
   Not_serving
   advisory to nobody returned
+== a server that stopped accepting
+  once its backlog is full: deadline within 1s: true
 == close
   closed within 1s: true, socket file gone: true
   a1: end of stream

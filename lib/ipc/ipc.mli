@@ -60,7 +60,9 @@ exception Not_serving of string
 module Client : sig
   type t
 
-  val connect : string -> t
+  (** Connects within [timeout] (default 5 s); DEADLINE when the server's
+      backlog stays full, {!Not_serving} when nothing listens. *)
+  val connect : ?timeout:float -> string -> t
 
   (** Sends one request and reads its reply within [timeout] (default
       {!client_deadline}); DEADLINE otherwise. *)

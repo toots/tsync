@@ -129,6 +129,30 @@ let () =
        with Ipc.Not_serving _ -> p "  Not_serving");
       Ipc.advisory (Filename.concat dir "none.sock") (action "poll");
       p "  advisory to nobody returned";
+      p "== a server that stopped accepting";
+      let full = Filename.concat dir "full.sock" in
+      let l = Unix.socket ~cloexec:true PF_UNIX SOCK_STREAM 0 in
+      Unix.bind l (ADDR_UNIX full);
+      Unix.listen l 1;
+      let held =
+        List.filter_map
+          (fun _ ->
+            match Ipc.Client.connect ~timeout:0.2 full with
+              | c -> Some c
+              | exception Fail.E _ -> None)
+          (List.init 8 Fun.id)
+      in
+      let t0 = Rt.now () in
+      p "  once its backlog is full: %s within 1s: %b"
+        (match Ipc.Client.connect ~timeout:0.3 full with
+          | c ->
+              Ipc.Client.close c;
+              "connected"
+          | exception Fail.E f -> Fail.kind_name f.kind
+          | exception e -> Printexc.to_string e)
+        (Rt.now () -. t0 < 1.);
+      List.iter Ipc.Client.close held;
+      Unix.close l;
       p "== close";
       let t0 = Rt.now () in
       Ipc.close (Option.get !server);
