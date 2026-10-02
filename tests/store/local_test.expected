@@ -40,6 +40,7 @@ empty prefix: 0
 verified true, share_url none
 
 == local driver (backends/local §13)
+version names: a read keeps it true; listing agrees true; a rewrite of the same bytes changes it true; a hard-link copy carries it true
 listing: .syncthing.x.tmp,a,b,c,d,e
 read through a planted link: invalid
 write through a planted link: invalid

@@ -14,6 +14,20 @@ let () =
       let s = Local.create ~name:"local" root in
       Contract.run s;
       p "\n== local driver (backends/local §13)\n";
+      let vk = Key.v "tsync/d/v/a" in
+      let etag () = Option.bind (s.head_opt vk) (fun e -> e.etag) in
+      Contract.put s vk "same";
+      let first = etag () in
+      ignore (s.get_opt vk);
+      p "version names: a read keeps it %b; " (etag () = first);
+      p "listing agrees %b; "
+        ((List.hd (s.list_prefix (Key.prefix "tsync/d/v/"))).etag = first);
+      Contract.put s vk "same";
+      p "a rewrite of the same bytes changes it %b; " (etag () <> first);
+      s.copy vk (Key.v "tsync/d/v/b");
+      p "a hard-link copy carries it %b\n"
+        (Option.bind (s.head_opt (Key.v "tsync/d/v/b")) (fun e -> e.etag)
+        = etag ());
       let dir = Filename.concat root "tsync/d/l" in
       Fs.write_file_for_test (Filename.concat dir ".tsync-tmp-abc.tmp") "staged";
       Fs.write_file_for_test (Filename.concat dir ".syncthing.x.tmp") "user";
