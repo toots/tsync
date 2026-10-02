@@ -141,6 +141,9 @@ type op =
   | Head of Key.t
   | Put of Key.t
   | Claim of Key.t
+  | Put_if_unchanged of Key.t * string option
+      (** the etag the client read, or [None] for no object *)
+  | Checksum of Key.t * string
   | Delete of Key.t
   | Get_multi
   | Children_multi
@@ -160,6 +163,8 @@ let tally = function
   | Head _ -> "head"
   | Put _ -> "put"
   | Claim _ -> "putIfAbsent"
+  | Put_if_unchanged _ -> "putIfUnchanged"
+  | Checksum _ -> "checksum"
   | Delete _ -> "delete"
   | Get_multi -> "getMulti"
   | Children_multi -> "childrenMulti"
@@ -173,7 +178,9 @@ let tally = function
 
 (* §A5: data operations are gated, metadata never waits behind transfers. *)
 let is_data = function
-  | Get _ | Range _ | Get_multi | Children_multi | Put _ -> true
+  | Get _ | Range _ | Get_multi | Children_multi | Put _ | Put_if_unchanged _
+  | Checksum _ ->
+      true
   | _ -> false
 
 (* §5: decimal digits only, at most 15. *)
@@ -248,18 +255,32 @@ let parse_op t (r : Server.request) params =
               only [];
               Head k
           | "PUT" -> (
-              only ["if_absent"];
-              match param "if_absent" with
-                | None -> Put k
-                | Some v -> (
+              only ["if_absent"; "if_match"; "if_none_match"];
+              match
+                (param "if_absent", param "if_match", param "if_none_match")
+              with
+                | None, None, None -> Put k
+                | Some v, None, None -> (
                     match if_absent v with
                       | Some true -> Claim k
                       | Some false -> Put k
-                      | None -> bad_request t))
+                      | None -> bad_request t)
+                | None, Some etag, None when etag <> "" ->
+                    Put_if_unchanged (k, Some etag)
+                | None, None, Some "1" -> Put_if_unchanged (k, None)
+                | _ -> bad_request t)
           | "DELETE" ->
               only [];
               Delete k
           | _ -> answer (text 405 "method not allowed"))
+    | "GET", [""; "checksum"; enc] -> (
+        only ["algo"];
+        let k =
+          match W.decode_key enc with Some k -> k | None -> bad_request t
+        in
+        match param "algo" with
+          | Some algo when Checksum.known algo -> Checksum (k, algo)
+          | _ -> bad_request t)
     | "POST", [""; "get-multi"] ->
         only [];
         Get_multi
@@ -302,6 +323,8 @@ let key_names = function
   | Head k
   | Put k
   | Claim k
+  | Put_if_unchanged (k, _)
+  | Checksum (k, _)
   | Delete k ->
       [Key.to_string k]
   | Copy (s, d) -> [Key.to_string s; Key.to_string d]
@@ -352,7 +375,8 @@ let share_candidates t op body names =
       | (Get_multi | Children_multi | Delete_multi | Copy _), _
         when List.exists is_manifest_name names ->
           []
-      | (Put _ | Claim _), [name] when is_manifest_name name -> (
+      | (Put _ | Claim _ | Put_if_unchanged _), [name]
+        when is_manifest_name name -> (
           match Share_server.manifest_domain (Bigstring.to_string body) with
             | None -> []
             | Some d ->
@@ -410,7 +434,7 @@ let fresh (r : Server.request) =
 let body_limit t op =
   let l = t.listener in
   match op with
-    | Put _ | Claim _ ->
+    | Put _ | Claim _ | Put_if_unchanged _ ->
         Option.fold
           ~none:(256 * 1024 * 1024)
           ~some:(fun (l : Proxy_options.listener) -> l.max_put_body)
@@ -574,6 +598,32 @@ let execute t route op body =
         match s.put_if_absent k body with
           | Won -> { Server.status = 200; headers = []; body = Bigstring body }
           | Held b -> { Server.status = 200; headers = []; body = Bigstring b })
+    | Put_if_unchanged (k, etag) -> (
+        writable route k;
+        let expected =
+          Option.map
+            (fun etag ->
+              {
+                Store.key = k;
+                size = 0;
+                last_modified = 0.;
+                etag = Some etag;
+                checksum = None;
+              })
+            etag
+        in
+        match s.put_if_unchanged k body expected with
+          | Written -> empty 200
+          | Changed -> empty 412)
+    | Checksum (k, algo) -> (
+        match s.compute_checksum k algo with
+          | Some c ->
+              {
+                Server.status = 200;
+                headers = [("content-type", "text/plain")];
+                body = String (Checksum.to_string c);
+              }
+          | None -> empty 404)
     | Delete k ->
         writable route k;
         if s.delete k then empty 200 else empty 204

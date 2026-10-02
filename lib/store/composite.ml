@@ -316,6 +316,28 @@ let put_if_absent t key body =
   List.iter (fun m -> m.store.put key held) (List.tl t.mains);
   r
 
+(* replication §4.2: the first main alone evaluates the precondition; an etag
+   read from another member never matches it, which answers [Changed]. *)
+let put_if_unchanged t ~fill_copies key body expected =
+  let m0 = first_main t in
+  match m0.store.put_if_unchanged key body expected with
+    | Store.Changed -> Store.Changed
+    | Written ->
+        if fill_copies then fill t (Put key);
+        List.iter (fun m -> m.store.put key body) (List.tl t.mains);
+        Written
+
+(* replication §4.6: a checksum describes the view the listings describe, so
+   only the readable members are asked, never the archives. *)
+let compute_checksum t key algo =
+  match
+    walk ~probing:true ~stop_on_miss:true t.readable (fun s ->
+        s.compute_checksum key algo)
+  with
+    | Answer c -> Some c
+    | Miss -> None
+    | Unreach e -> raise (unreachable_of e)
+
 let write_all t job f =
   let m0 = first_main t in
   let v = f m0.store in
@@ -602,9 +624,13 @@ let make_store t ~source_only =
         (fun key body ->
           if source_only then (first_main t).store.put_if_absent key body
           else put_if_absent t key body);
+      put_if_unchanged =
+        (fun key body expected ->
+          put_if_unchanged t ~fill_copies:(not source_only) key body expected);
       get_opt = (fun key -> rd (fun s -> s.get_opt key));
       get_range = (fun key off len -> rd (fun s -> s.get_range key off len));
       head_opt = (fun key -> rd (fun s -> s.head_opt key));
+      compute_checksum = (fun key algo -> compute_checksum tt key algo);
       delete = (fun key -> write_job (Delete key) (fun s -> s.delete key));
       delete_multi =
         (fun keys ->
@@ -680,6 +706,8 @@ let make_store t ~source_only =
           });
       fast_read =
         (match first with Some m -> m.store.fast_read | None -> false);
+      locality =
+        (match first with Some m -> m.store.locality | None -> Store.Remote);
       local_path = None;
       health = Health.always_up;
       traffic = None;

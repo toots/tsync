@@ -175,10 +175,22 @@ let handler (r : Server.request) read_body =
                       | None -> error 404 "NoSuchKey")
                 | None ->
                     let body = body () in
+                    let lax = String.starts_with ~prefix:"/lax/" r.path in
+                    let if_match = Codec.header r.headers "if-match" in
                     if
                       Codec.header r.headers "if-none-match" = Some "*"
-                      && (not (String.starts_with ~prefix:"/lax/" r.path))
-                      && Hashtbl.mem objects name
+                      && (not lax) && Hashtbl.mem objects name
+                    then error 412 "PreconditionFailed"
+                    else if
+                      if_match <> None && (not lax)
+                      && not (Hashtbl.mem objects name)
+                    then error 404 "NoSuchKey"
+                    else if
+                      (not lax)
+                      && Option.fold ~none:false
+                           ~some:(fun m ->
+                             m <> etag (fst (Hashtbl.find objects name)))
+                           if_match
                     then error 412 "PreconditionFailed"
                     else (
                       Hashtbl.replace objects name (body, Unix.gettimeofday ());
@@ -421,6 +433,18 @@ let () =
       p "a provider ignoring If-None-Match: %s\n" (claim lax "tsync/lax/first");
       p "and again: %s\n" (claim lax "tsync/lax/second");
       p "a provider honouring it: %s\n" (claim s "tsync/d/wire/claimed");
+      let replace (s : Store.t) name =
+        let k = Key.v name in
+        s.put k (Bigstring.of_string "v1");
+        match
+          s.put_if_unchanged k (Bigstring.of_string "v2") (s.head_opt k)
+        with
+          | Written -> "written"
+          | Changed -> "changed"
+          | exception Fail.E f -> Fail.kind_name f.kind ^ ", " ^ f.reason
+      in
+      p "a provider ignoring If-Match: %s\n" (replace lax "tsync/lax/replaced");
+      p "a provider honouring it: %s\n" (replace s "tsync/d/wire/replaced");
       p "every request signed correctly: %b (%d requests)\n"
         (!bad_signatures = 0) !signed;
       Server.close server)

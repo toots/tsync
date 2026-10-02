@@ -42,6 +42,41 @@ let kind_of f =
    live under [tsync/<domain>/], which the output never shows. *)
 let run ?(domain_name = "d") (s : Store.t) =
   domain := domain_name;
+  p "== conditional replace and checksums (06 §3.11, §3.12)\n";
+  let ck = k "tsync/d/cond" in
+  let read () = s.head_opt ck in
+  p "replace a free key: %s\n"
+    (match s.put_if_unchanged ck (bs "v1") None with
+      | Written -> "written"
+      | Changed -> "changed");
+  let v1 = read () in
+  p "replace with the entry just read: %s\n"
+    (match s.put_if_unchanged ck (bs "v2") v1 with
+      | Written -> "written"
+      | Changed -> "changed");
+  put s ck "v3";
+  p "replace with a stale entry: %s, the other write stays: %b\n"
+    (match s.put_if_unchanged ck (bs "v4") v1 with
+      | Written -> "written"
+      | Changed -> "changed")
+    (get s ck = Some "v3");
+  p "create over an existing key: %s\n"
+    (match s.put_if_unchanged ck (bs "v5") None with
+      | Written -> "written"
+      | Changed -> "changed");
+  let md5 v = Checksum.to_string (Checksum.of_body Checksum.md5 (bs v)) in
+  p "computed checksum is the body's: %b; absent: %s; unknown algorithm: %s\n"
+    (Option.map Checksum.to_string (s.compute_checksum ck Checksum.md5)
+    = Some (md5 "v3"))
+    (match s.compute_checksum (k "tsync/d/zz") Checksum.md5 with
+      | Some _ -> "some"
+      | None -> "none")
+    (kind_of (fun () -> s.compute_checksum ck "sha9"));
+  p "an entry's checksum, when it carries one, is the body's: %b\n"
+    (match read () with
+      | Some { checksum = Some c; _ } -> Checksum.to_string c = md5 "v3"
+      | _ -> true);
+  ignore (s.delete ck);
   p "== round trips\n";
   put s (k "tsync/d/a") "hello";
   p "get_opt a: %s; absent: %s; get absent: %s\n"

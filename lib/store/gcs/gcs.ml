@@ -148,6 +148,25 @@ let put_if_absent t k body =
   in
   go claim_retries
 
+(* §3: the generation read, or 0 for "no live object". *)
+let put_if_unchanged t k body expected =
+  let is_generation g =
+    g <> "" && String.for_all (fun c -> c >= '0' && c <= '9') g
+  in
+  match expected with
+    | Some g when not (is_generation g) ->
+        (* a version another store named: never this object's *)
+        Tsync_store.Store.Changed
+    | _ -> (
+        match
+          upload t
+            ~extra:("&ifGenerationMatch=" ^ Option.value ~default:"0" expected)
+            k body
+        with
+          | r when success r.status -> Tsync_store.Store.Written
+          | { status = 412; _ } -> Changed
+          | r -> fail ~op:"put_if_unchanged" r)
+
 (* A 206 must say it starts where asked; a 200 is the whole object, which is
    only an answer when it fits the range. *)
 let get_range t k off len =
@@ -321,6 +340,7 @@ let create ~domain:_ ~admission ~name fields =
           let r = upload t k body in
           if not (success r.status) then fail ~op:"put" r);
       put_if_absent = put_if_absent t;
+      put_if_unchanged = put_if_unchanged t;
       get_opt = get_opt t;
       get_range = get_range t;
       head_opt = head_opt t;

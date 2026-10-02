@@ -21,6 +21,9 @@ type raw_entry = {
 type verbs = {
   put : Key.t -> Bigstring.t -> unit;
   put_if_absent : Key.t -> Bigstring.t -> Store.claim;
+  put_if_unchanged : Key.t -> Bigstring.t -> string option -> Store.replaced;
+      (** the service's precondition on the version named, or on no live object
+          for [None] *)
   get_opt : Key.t -> Bigstring.t option;
   get_range : Key.t -> int -> int -> Bigstring.t option;
   head_opt : Key.t -> Store.entry option;
