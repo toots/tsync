@@ -24,4 +24,10 @@ imported 1 (3 bytes), skipped 2, links skipped 0, failed 0
 -- after the rerun
   B: empty/  more/  more/one.txt = "one"  more/three.txt = "three"  more/two.txt = "two"  notes/  notes/a.txt = "alpha"  notes/deep/  notes/deep/b.txt = "a body longer than one chunk"  top-link = ""  top.txt = "top, changed"
 
+== a file rewritten in place while it is read
+imported 0 (0 bytes), skipped 0, links skipped 0, failed 1
+  swap.txt: swap.txt changed while it was read [transient/local]
+-- after B's pass
+  B: empty/  more/  more/one.txt = "one"  more/three.txt = "three"  more/two.txt = "two"  notes/  notes/a.txt = "alpha"  notes/deep/  notes/deep/b.txt = "a body longer than one chunk"  top-link = ""  top.txt = "top, changed"
+
 owed: A 0/0, unapplied B 0

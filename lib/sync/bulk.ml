@@ -24,10 +24,16 @@ module Make (C : Engine_ctx.S) = struct
       with_meta (fun () ->
           with_key rel (fun () -> Mirror.write_file ~own:true mirror rel m))
 
+    let unchanged (a : Unix.stats) (b : Unix.stats) =
+      a.st_size = b.st_size && a.st_mtime = b.st_mtime
+      && a.st_ctime = b.st_ctime
+
+    (* The stat is of the open descriptor, and taken again once every chunk is
+       read: a file renamed or rewritten meanwhile is never published. *)
     let upload_file ?sent rel path =
-      let st = Unix.stat path in
-      let size = st.st_size and cs = R.chunk_size () in
       Fs.with_fd (Fs.openfile path [O_RDONLY]) (fun fd ->
+          let st = Unix.fstat fd in
+          let size = st.st_size and cs = R.chunk_size () in
           let read i =
             let len = if size = 0 then 0 else Chunking.length ~size ~cs i in
             let buf = Bigstring.create len in
@@ -46,6 +52,8 @@ module Make (C : Engine_ctx.S) = struct
             in
             find 0
           in
+          if not (unchanged st (Unix.fstat fd)) then
+            Fail.raise_ Fail.Local "%s changed while it was read" rel;
           publish ~resend rel m;
           size)
 

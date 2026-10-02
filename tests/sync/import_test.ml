@@ -17,9 +17,24 @@ let d = Domain_name.v "docs"
 let knowledge =
   { Composite.is_index = (fun _ -> false); is_journal = (fun _ -> false) }
 
+(* Runs once, on the next chunk put. *)
+let on_chunk_put = ref ignore
+
 let client name : (module Engine.S) =
   let data_dir = Filename.concat root (name ^ "/data") in
   let store = Local.create ~name:"main" (Filename.concat root "store") in
+  let store =
+    {
+      store with
+      put =
+        (fun ?mode key body ->
+          if Key.chunk_of key <> None then (
+            let f = !on_chunk_put in
+            on_chunk_put := ignore;
+            f ());
+          store.put ?mode key body);
+    }
+  in
   let composite =
     Composite.create ~domain:d ~data_dir ~owner:true ~poke:ignore ~knowledge
       [{ name = "main"; role = Main; store }]
@@ -144,6 +159,13 @@ let () =
       drain a;
       pass b;
       show "after the rerun" [("B", b)];
+      p "\n== a file rewritten in place while it is read\n";
+      file "swap.txt" "abcdefgh";
+      (on_chunk_put := fun () -> file "swap.txt" "ABCDEFGH");
+      report (A.import ~only:["swap.txt"] src);
+      drain a;
+      pass b;
+      show "after B's pass" [("B", b)];
       p "\nowed: A %d/%d, unapplied B %d\n" (A.pending_uploads ())
         (A.pending_metadata ())
         (List.length (B.unapplied ())));
