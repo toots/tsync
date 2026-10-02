@@ -93,7 +93,7 @@ let checked s =
           | Some { etag = None; _ } ->
               Fail.raise_ Fail.Refused
                 "%s: %s was read without a version, so it cannot be \
-                 replaced                  conditionally"
+                 replaced conditionally"
                 s.name (Key.to_string key)
           | _ -> s.put_if_unchanged key body expected);
     compute_checksum =
