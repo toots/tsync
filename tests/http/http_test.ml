@@ -138,6 +138,36 @@ let () =
               (String.concat "" (List.tl (String.split_on_char ':' f.reason))));
       (try Rt.with_timeout 5. (fun () -> Rt.Promise.await sink) with _ -> ());
       Unix.close l;
+      p "== a client trickling its head";
+      let strict =
+        Server.serve
+          ~limits:{ Server.default_limits with header_timeout = 0.5 }
+          [Unix.ADDR_INET (Unix.inet_addr_loopback, 0)]
+          handler
+      in
+      let strict_port =
+        match Server.addresses strict with
+          | [ADDR_INET (_, p)] -> p
+          | _ -> assert false
+      in
+      let slow = Transport.connect ~host:"127.0.0.1" ~port:strict_port () in
+      let t0 = Rt.now () in
+      let rec trickle i =
+        if i >= 15 then false
+        else (
+          match
+            Transport.write_string slow
+              (String.make 1 "GET / HTTP/1.1".[i mod 14]);
+            Transport.read ~timeout:0.2 slow (Bigstring.create 1) 0 1
+          with
+            | 0 -> true
+            | _ -> true
+            | exception Rt.Timeout -> trickle (i + 1)
+            | exception _ -> true)
+      in
+      p "  dropped within 1.5s: %b" (trickle 0 && Rt.now () -. t0 < 1.5);
+      Transport.close slow;
+      Server.close ~grace:0.1 strict;
       p "== redial after the server dropped an idle connection";
       Server.close ~grace:0.1 server;
       let server =

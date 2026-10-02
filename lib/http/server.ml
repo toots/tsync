@@ -118,7 +118,12 @@ let serve_conn lim handle conn requests =
   let peer = Transport.peer conn in
   let rec loop first =
     let timeout = if first then lim.header_timeout else lim.keepalive_timeout in
-    match Codec.read_head ~timeout ~limit:lim.header_bytes reader with
+    (* One deadline for the whole head: a client trickling a byte at a time
+       must not hold the connection. *)
+      match
+        Rt.with_timeout timeout (fun () ->
+            Codec.read_head ~limit:lim.header_bytes reader)
+      with
       | None -> ()
       | exception Codec.Too_large ->
           write_response lim conn ~head_only:false ~close:true
@@ -227,8 +232,9 @@ let rec accept_loop ?tls t lim handle lfd =
                         match tls with
                           | None -> conn
                           | Some tls ->
-                              Transport.accept_tls ~timeout:lim.header_timeout
-                                tls conn
+                              Rt.with_timeout lim.header_timeout (fun () ->
+                                  Transport.accept_tls
+                                    ~timeout:lim.header_timeout tls conn)
                       in
                       serve_conn lim handle conn t.requests
                     with e when not (Rt.is_cancelled e) ->

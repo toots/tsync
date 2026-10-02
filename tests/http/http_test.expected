@@ -15,6 +15,8 @@ host header carries the port: true
   200 "late\n"
 == a body still being accepted is progress
   200 "ok"
+== a client trickling its head
+  dropped within 1.5s: true
 == redial after the server dropped an idle connection
   200 "GET after=restart \"\"\n"
 == nothing listening
