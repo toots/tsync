@@ -868,6 +868,14 @@ module Make (C : Engine_ctx.S) = struct
               let data = Fs.read_file src in
               Fs.durable_replace dst data;
               Fs.unlink_quiet src);
+        (* The handover was checked before the rename: whatever was swapped in
+           since must still be a regular file, never a link the owner follows. *)
+        (match Fs.lstat_opt dst with
+          | Some { st_kind = S_REG; _ } -> ()
+          | _ ->
+              Fs.unlink_quiet dst;
+              Fail.raise_ Fail.Invalid
+                "%s: the handed-over file is not a regular file" path);
         Fs.with_fd (Fs.openfile dst [O_RDONLY]) Fs.fsync;
         Fs.fsync_dir (Filename.dirname dst);
         let st = Fs.sys (fun () -> Unix.LargeFile.stat dst) in

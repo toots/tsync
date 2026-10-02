@@ -13,6 +13,9 @@ staging outside the roots          {"ok":false,"code":"denied","error":"/etc/hos
 ensure_cached                      {"ok":true,"localPath":"<root>/home/out.txt"}
   content                          "hello world"
 ensure_cached onto a file          {"ok":false,"code":"denied","error":"<root>/home/out.txt: already exists"}
+after tempDir=/: a dest outside    denied
+a dest in the declared tempDir     ok
+the earlier tempDir, once replaced denied
 rename to g.txt                    {"ok":true,"item":{"ref":"f:<id1>/g.txt","parentRef":"d:<id1>","name":"g.txt","kind":"file","size":11,"mtime":"<t>","etag":"","isUploaded":false,"contentId":"<id2>","availability":"cached"}}
 stat the old ref                   {"ok":false,"code":"not_found","error":"f:<id1>/f.txt: no such file"}
 delete a folder                    {"ok":false,"code":"invalid","error":"a folder is removed with rmdir"}
@@ -30,9 +33,9 @@ sync while paused                  {"ok":false,"code":"paused","error":"docs is 
 resume                             {"ok":true,"paused":false}
 == events
 subscribe                          {"ok":true}
-first event                        {"event":"recovered","domain":"docs","id":3}
+first event                        {"event":"recovered","domain":"docs","id":6}
 notify_reset                       {"ok":true,"delivered":1}
-next event                         {"event":"reset","domain":"docs","id":4}
+next event                         {"event":"reset","domain":"docs","id":7}
 == jobs
   line                             {"stream":"started","job":1}
   line                             {"stream":"out","text":"full resync: 0 manifests"}

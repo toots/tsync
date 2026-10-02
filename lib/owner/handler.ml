@@ -28,7 +28,9 @@ type t = {
   publish : Ipc.json -> int;
   stats : string list -> Tsync_status.Status_report.answer;
   stop : unit -> unit;
-  dest_roots : string list Atomic.t;
+  dest_roots : string list;
+  temp_dir : string option Atomic.t;
+      (** the subscriber's latest declared directory (08 §3.3) *)
   staging_roots : string list;
   answered_unreachable : bool Atomic.t;
   running : running option Atomic.t;
@@ -48,13 +50,15 @@ let create ~domain ~engine ~hooks ~publish ~stats ~stop ~dest_roots
     publish;
     stats;
     stop;
-    dest_roots = Atomic.make dest_roots;
+    dest_roots;
+    temp_dir = Atomic.make None;
     staging_roots;
     answered_unreachable = Atomic.make false;
     running = Atomic.make None;
   }
 
 let domain_name t = Domain_name.to_string t.domain.name
+let dest_roots t = Option.to_list (Atomic.get t.temp_dir) @ t.dest_roots
 
 let event t name fields =
   `Assoc
@@ -454,14 +458,14 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
           | `Full (manifests, failed) -> Protocol.Full { manifests; failed })
     | Ensure_cached r ->
         let path = target t r.item in
-        Transfer.check_dest ~roots:(Atomic.get t.dest_roots) r.dest;
+        Transfer.check_dest ~roots:(dest_roots t) r.dest;
         E.assemble_to path r.dest;
         r.dest
     | Fetch_range r ->
         let path = target t r.item in
         if r.offset < 0 || r.length <= 0 then
           invalid "offset ≥ 0 and length > 0 are required";
-        Transfer.check_dest ~roots:(Atomic.get t.dest_roots) r.dest;
+        Transfer.check_dest ~roots:(dest_roots t) r.dest;
         let length = E.fetch_range path r.dest ~off:r.offset ~len:r.length in
         { Protocol.local_path = r.dest; offset = r.offset; length }
     | Download_progress _ -> Protocol.Inactive
@@ -567,7 +571,15 @@ let answer t json =
   match Ipc.field json "action" with
     | Some "subscribe" ->
         Option.iter
-          (fun d -> Atomic.set t.dest_roots (d :: Atomic.get t.dest_roots))
+          (fun d ->
+            match Unix.lstat d with
+              | { st_kind = S_DIR; st_uid; _ }
+                when st_uid = Unix.getuid () && not (Filename.is_relative d) ->
+                  Atomic.set t.temp_dir (Some d)
+              | _ | (exception Unix.Unix_error _) ->
+                  Log.warn
+                    "%s: ignored tempDir %s: not a directory of this user"
+                    (domain_name t) d)
           (Ipc.field json "tempDir");
         Ipc.Subscribe (domain_name t, Ipc.ok [], [event t "recovered" []])
     | _ -> (

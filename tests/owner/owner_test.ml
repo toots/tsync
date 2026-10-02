@@ -189,6 +189,43 @@ let () =
       p "%-34s %S" "  content" (Fs.read_file dest);
       show "ensure_cached onto a file"
         (ask [("action", "ensure_cached"); ("ref", f_ref); ("dest", dest)]);
+      let subscribe dir =
+        let c = Ipc.Client.connect socket in
+        ignore
+          (Ipc.Client.request c
+             (`Assoc
+                [
+                  ("action", `String "subscribe");
+                  ("domain", `String "docs");
+                  ("tempDir", `String dir);
+                ]));
+        c
+      in
+      let outside n =
+        let d = Filename.temp_dir ("tsync-owner-temp" ^ n) "" in
+        (d, Filename.concat d "out.txt")
+      in
+      let first, first_dest = outside "1" and _, second_dest = outside "2" in
+      let outcome label r =
+        p "%-34s %s" label (Option.value ~default:"ok" (Ipc.field r "code"))
+      in
+      let s1 = subscribe "/" in
+      outcome "after tempDir=/: a dest outside"
+        (ask
+           [("action", "ensure_cached"); ("ref", f_ref); ("dest", second_dest)]);
+      let s2 = subscribe first in
+      outcome "a dest in the declared tempDir"
+        (ask
+           [("action", "ensure_cached"); ("ref", f_ref); ("dest", first_dest)]);
+      let s3 = subscribe (Filename.dirname second_dest) in
+      outcome "the earlier tempDir, once replaced"
+        (ask
+           [
+             ("action", "ensure_cached");
+             ("ref", f_ref);
+             ("dest", Filename.concat first "again.txt");
+           ]);
+      List.iter Ipc.Client.close [s1; s2; s3];
       show "rename to g.txt"
         (ask
            [
