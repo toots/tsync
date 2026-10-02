@@ -239,7 +239,7 @@ watched with the liveness probe ([07 §4.3](07-daemon-cli.md#43-deadlines-bulk-a
 | `delete` | `ref`\|`rel` (a file or symlink) | `{}`; a folder target → `invalid` | M |
 | `rmdir` | `ref`\|`rel` (a folder) | `{}`; removes the folder **and its subtree** (a platform delete gesture) | M |
 | `revert` | `ref`\|`rel`, `arg` = version (`""` = latest) | `{}` | M, P |
-| `share` | `rel`, `expires?` (seconds from now), `token?` | `url`, `expires` (epoch seconds) | P (it writes a store) |
+| `share` | `ref`\|`rel`, `expires?` (seconds from now), `token?` | `url`, `expires` (epoch seconds) | P (it writes a store) |
 | `share_revoke` | `arg`: a token or a link | `{revoked}`: whether a share of this domain held it | P |
 | `share_clear_cache` | — | `{deleted, bytes}`: cached share artifacts removed, links unchanged | P |
 | `evict` | `ref`\|`rel` | `{evicted, failed}` | B for a folder |
