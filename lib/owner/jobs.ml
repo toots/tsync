@@ -23,7 +23,11 @@ type t =
       move : bool;
       dry_run : bool;
     }
-  | Mirror of { source : string option; manifests : bool; path : string option }
+  | Mirror of {
+      source : string option;
+      skip_chunks : bool;
+      path : string option;
+    }
   | Integrity of {
       verify : bool;
       repair : bool;
@@ -383,12 +387,12 @@ let rsync io (module E : Tsync_sync.Engine.S) ~src ~dst ~move ~dry_run =
     r.unpublished;
   if r.failed = [] && not r.cancelled then 0 else 1
 
-let mirror io (dom : Tsync_domain.Domain.t) ~source ~manifests ~path =
+let mirror io (dom : Tsync_domain.Domain.t) ~source ~skip_chunks ~path =
   let say fmt = Printf.ksprintf io.out fmt in
   let module M = Store_mirror.Make ((val Tsync_domain.Domain.context dom)) in
   let scope : Store_mirror.scope =
-    match (manifests, path) with
-      | true, _ -> Manifests
+    match (skip_chunks, path) with
+      | true, _ -> Skip_chunks
       | false, Some p -> Path p
       | false, None -> All
   in
@@ -435,11 +439,11 @@ let run io (dom : Tsync_domain.Domain.t) engine = function
                  (if failed > 0 then Printf.sprintf " (%d failed)" failed
                   else ""));
             if failed > 0 then 1 else 0)
-  | Mirror { source; manifests; path } ->
+  | Mirror { source; skip_chunks; path } ->
       if dom.domain.read_only then
         Fail.raise_ Fail.Read_only "%s is read-only"
           (Domain_name.to_string dom.name);
-      mirror io dom ~source ~manifests ~path
+      mirror io dom ~source ~skip_chunks ~path
   | Import { src; only; exclude; force_rehash } ->
       if dom.domain.read_only then
         Fail.raise_ Fail.Read_only "%s is read-only"

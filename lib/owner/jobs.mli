@@ -25,7 +25,11 @@ type t =
       move : bool;
       dry_run : bool;
     }
-  | Mirror of { source : string option; manifests : bool; path : string option }
+  | Mirror of {
+      source : string option;
+      skip_chunks : bool;
+      path : string option;
+    }
   | Integrity of {
       verify : bool;
       repair : bool;

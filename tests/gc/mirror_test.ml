@@ -202,10 +202,17 @@ let () =
       unguarded := true;
       run "all" All;
       unguarded := false;
-      p "\n== manifests only\n";
+      p "\n== everything but the chunks\n";
       put_chunk "c9";
       put (Key.child d folder "new.txt") (manifest "new.txt" ["c9"]);
-      run "manifests" Manifests;
+      put (Key.journal_entry d ~month:"2026-10" ~entry:"e2") "[]";
+      put (Key.cursor d) "e2";
+      run "skip-chunks" Skip_chunks;
+      p "journal entry and same-size cursor copied: %b\n"
+        (inner.head_opt (Key.journal_entry d ~month:"2026-10" ~entry:"e2")
+         <> None
+        && Option.map Bigstring.to_string (inner.get_opt (Key.cursor d))
+           = Some "e2");
       p "\n== a path, with a chunk missing from the source\n";
       ignore (main.delete (Key.chunk d (chunk "c9")));
       run "path" (Path "docs");
@@ -220,7 +227,7 @@ let () =
           generation = None;
         };
       run "all" All;
-      run "manifests" Manifests;
+      run "skip-chunks" Skip_chunks;
       Gc_record.clear main d;
       p "\n== an unknown source\n";
       run "source" ~source:"nowhere" All);

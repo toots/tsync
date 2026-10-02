@@ -2,7 +2,7 @@ open Tsync_core
 open Tsync_store
 open Tsync_remote
 
-type scope = All | Manifests | Path of string
+type scope = All | Skip_chunks | Path of string
 
 type copied = {
   name : string;
@@ -268,7 +268,7 @@ module Make (C : Context.S) = struct
     in
     (match scope with
       | All | Path _ -> refuse_open_collection ()
-      | Manifests -> ());
+      | Skip_chunks -> ());
     let dests =
       List.filter
         (fun (m : Composite.member) ->
@@ -332,13 +332,14 @@ module Make (C : Context.S) = struct
                    entries)
           in
           (match (scope, path) with
-            | All, _ ->
-                List.iter
-                  (fun i ->
-                    let shard = Printf.sprintf "%03x" i in
-                    listed_batch ~part:(i, 4096) ("chunk shard " ^ shard)
-                      (Key.shard_prefix d shard) ~chunks:true)
-                  (List.init 4096 Fun.id);
+            | ((All | Skip_chunks) as scope), _ ->
+                if scope = All then
+                  List.iter
+                    (fun i ->
+                      let shard = Printf.sprintf "%03x" i in
+                      listed_batch ~part:(i, 4096) ("chunk shard " ^ shard)
+                        (Key.shard_prefix d shard) ~chunks:true)
+                    (List.init 4096 Fun.id);
                 listed_batch "manifests" (Key.manifests d) ~chunks:false
                   ~source:(fun _ -> manifest_area src.store);
                 listed_batch "versions" (Key.versions d) ~chunks:false;
@@ -346,9 +347,6 @@ module Make (C : Context.S) = struct
                 headed "cursor"
                   (Option.to_list (src.store.head_opt (Key.cursor d)))
                   ~chunks:false
-            | Manifests, _ ->
-                listed_batch "manifests" (Key.manifests d) ~chunks:false
-                  ~source:(fun _ -> manifest_area src.store)
             | Path _, Some (chunks, keys) ->
                 headed "chunks" chunks ~chunks:true;
                 headed "manifests" keys ~chunks:false
