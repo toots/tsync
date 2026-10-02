@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>$(DEVELOPMENT_LANGUAGE)</string>
+    <key>CFBundleDisplayName</key>
+    <string>TsyncFileProvider</string>
+    <key>CFBundleExecutable</key>
+    <string>$(EXECUTABLE_NAME)</string>
+    <key>CFBundleIdentifier</key>
+    <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>$(PRODUCT_NAME)</string>
+    <key>CFBundlePackageType</key>
+    <string>XPC!</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>NSExtension</key>
+    <dict>
+        <key>NSExtensionFileProviderDocumentGroup</key>
+        <string>group.org.feverdreamtv.tsync</string>
+        <key>NSExtensionFileProviderSupportsEnumeration</key>
+        <true/>
+        <!-- No NSExtensionFileProviderDownloadPipelineDepth on purpose. Raising
+             it multiplies the range fetches in flight, and each one costs the
+             serving daemon a group read plus read-ahead — which against a small
+             chunk size on slow storage is how the backend gets buried rather
+             than kept busy. The system's own default holds until there is a
+             measurement that says otherwise. -->
+
+        <key>NSExtensionFileProviderAllowsUserControlledEviction</key>
+        <true/>
+        <key>NSExtensionFileProviderActions</key>
+        <array>
+            <dict>
+                <key>NSExtensionFileProviderActionIdentifier</key>
+                <string>org.feverdreamtv.tsync.copyShareURL</string>
+                <key>NSExtensionFileProviderActionName</key>
+                <string>Copy Share URL</string>
+                <key>NSExtensionFileProviderActionActivationRule</key>
+                <string>TRUEPREDICATE</string>
+            </dict>
+            <!-- Both reach the daemon's chunk cache, which is what a pin is
+                 about; Finder's own Download Now and Remove Download act on
+                 the replica and leave the pin alone. A repeat on a pinned item
+                 moves its deadline, which is the whole of keeping it longer. -->
+            <dict>
+                <key>NSExtensionFileProviderActionIdentifier</key>
+                <string>org.feverdreamtv.tsync.makeAvailableOffline</string>
+                <key>NSExtensionFileProviderActionName</key>
+                <string>Make Available Offline</string>
+                <key>NSExtensionFileProviderActionActivationRule</key>
+                <string>TRUEPREDICATE</string>
+            </dict>
+            <dict>
+                <key>NSExtensionFileProviderActionIdentifier</key>
+                <string>org.feverdreamtv.tsync.makeOnlineOnly</string>
+                <key>NSExtensionFileProviderActionName</key>
+                <string>Make Online Only</string>
+                <key>NSExtensionFileProviderActionActivationRule</key>
+                <string>TRUEPREDICATE</string>
+            </dict>
+        </array>
+        <key>NSExtensionPointIdentifier</key>
+        <string>com.apple.fileprovider-nonui</string>
+        <key>NSExtensionPrincipalClass</key>
+        <string>$(PRODUCT_MODULE_NAME).TsyncExtension</string>
+    </dict>
+</dict>
+</plist>
