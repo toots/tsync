@@ -141,6 +141,26 @@ let () =
       p "order of kinds: %s\n" (String.concat ", " (firsts [] ks));
       p "index copied: %b\n"
         (inner.head_opt (Key.index d Folder_id.root) <> None);
+      p "\n== progress\n";
+      let shards = ref [] in
+      let narrate =
+        {
+          Narrate.say = ignore;
+          progress =
+            (fun ?fraction text ->
+              if Text.contains text "chunk shard" then
+                shards := Option.value ~default:(-1.) fraction :: !shards);
+        }
+      in
+      ignore (M.mirror ~narrate All);
+      let fractions = List.rev !shards in
+      let rec rising = function
+        | a :: (b :: _ as rest) -> a <= b && rising rest
+        | _ -> true
+      in
+      p "chunk shard progress never goes back: %b, ends at 1: %b\n"
+        (rising fractions)
+        (List.nth_opt (List.rev fractions) 0 = Some 1.);
       p "\n== again\n";
       reads := 0;
       checksums := 0;
