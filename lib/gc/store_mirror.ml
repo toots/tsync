@@ -292,15 +292,36 @@ module Make (C : Context.S) = struct
               copy_batch ~narrate ~cancelled ~src:src.store ~dst:dst.store
                 ~listed counts b
           in
-          let listed_batch ?(part = (0, 1)) label prefix ~chunks ~filter =
-            run
-              {
-                label;
-                source = List.filter filter (src.store.list_prefix prefix);
-                chunks;
-                part;
-              }
-              ~listed:(dst.store.list_prefix prefix)
+          (* 07 §5.1: a listing of a whole area can take minutes; say which
+             runs and what it found. A shard's listing is short and counted by
+             the shard progress instead. *)
+          let listing ~announce label (s : Store.t) f =
+            if not announce then f ()
+            else (
+              Narrate.progress narrate "%s: %s, listing %s" dst.name label
+                s.name;
+              let started = Unix.gettimeofday () in
+              let l = f () in
+              Narrate.say narrate "  %s: %s, listed %s on %s in %s" dst.name
+                label
+                (Narrate.count (List.length l) "object")
+                s.name
+                (Narrate.duration (Unix.gettimeofday () -. started));
+              l)
+          in
+          let listed_batch ?(part = (0, 1))
+              ?(source = fun p -> src.store.list_prefix p) label prefix ~chunks
+              =
+            if not (cancelled ()) then (
+              let announce = snd part = 1 in
+              let source =
+                listing ~announce label src.store (fun () -> source prefix)
+              in
+              let listed =
+                listing ~announce label dst.store (fun () ->
+                    dst.store.list_prefix prefix)
+              in
+              run { label; source; chunks; part } ~listed)
           in
           let headed label entries ~chunks =
             run
@@ -316,33 +337,18 @@ module Make (C : Context.S) = struct
                   (fun i ->
                     let shard = Printf.sprintf "%03x" i in
                     listed_batch ~part:(i, 4096) ("chunk shard " ^ shard)
-                      (Key.shard_prefix d shard) ~chunks:true ~filter:(fun _ ->
-                        true))
+                      (Key.shard_prefix d shard) ~chunks:true)
                   (List.init 4096 Fun.id);
-                run
-                  {
-                    label = "manifests";
-                    source = manifest_area src.store;
-                    chunks = false;
-                    part = (0, 1);
-                  }
-                  ~listed:(dst.store.list_prefix (Key.manifests d));
-                listed_batch "versions" (Key.versions d) ~chunks:false
-                  ~filter:(fun _ -> true);
-                listed_batch "journal" (Key.journal d) ~chunks:false
-                  ~filter:(fun _ -> true);
+                listed_batch "manifests" (Key.manifests d) ~chunks:false
+                  ~source:(fun _ -> manifest_area src.store);
+                listed_batch "versions" (Key.versions d) ~chunks:false;
+                listed_batch "journal" (Key.journal d) ~chunks:false;
                 headed "cursor"
                   (Option.to_list (src.store.head_opt (Key.cursor d)))
                   ~chunks:false
             | Manifests, _ ->
-                run
-                  {
-                    label = "manifests";
-                    source = manifest_area src.store;
-                    chunks = false;
-                    part = (0, 1);
-                  }
-                  ~listed:(dst.store.list_prefix (Key.manifests d))
+                listed_batch "manifests" (Key.manifests d) ~chunks:false
+                  ~source:(fun _ -> manifest_area src.store)
             | Path _, Some (chunks, keys) ->
                 headed "chunks" chunks ~chunks:true;
                 headed "manifests" keys ~chunks:false

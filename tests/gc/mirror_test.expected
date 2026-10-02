@@ -5,6 +5,13 @@ index copied: false
 
 == progress
 chunk shard progress never goes back: true, ends at 1: true
+manifests listings shown before comparing: true
+said:  copy: manifests, listed 4 objects on main in 0m 0s
+said:  copy: manifests, listed 4 objects on copy in 0m 0s
+said:  copy: versions, listed 1 object on main in 0m 0s
+said:  copy: versions, listed 1 object on copy in 0m 0s
+said:  copy: journal, listed 1 object on main in 0m 0s
+said:  copy: journal, listed 1 object on copy in 0m 0s
 
 == again
 all: main -> copy, 10 checked, 0 copied (0 bytes), 0 refused, 0 changed, 0 unguarded
