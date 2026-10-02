@@ -78,18 +78,25 @@ let () =
         size = 3;
         last_modified = 1727600000.25;
         etag = Some "\"9b2c\"";
+        checksum = Some (Checksum.of_body Checksum.md5 (bs "abc"));
       };
       {
         Store.key = Key.v "tsync/d/b";
         size = 0;
         last_modified = 1.;
         etag = None;
+        checksum = None;
       };
     ]
   in
   let j = W.listing_to_json entries in
   p "%s" j;
   p "round trip: %b" (W.listing_of_json j = entries);
+  p "unknown checksum algorithm read as none: %b"
+    ((List.hd
+        (W.listing_of_json
+           {|[{"key":"tsync/d/a","size":1,"lastModified":1,"checksum":"sha9:00"}]|}))
+       .checksum = None);
   p "not an array: %s"
     (try
        ignore (W.listing_of_json "{}");
@@ -137,6 +144,7 @@ let () =
             size = 2;
             last_modified = 5.;
             etag = None;
+            checksum = None;
           };
         ];
       bodies =

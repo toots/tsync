@@ -52,7 +52,21 @@ let entry_of_json j =
       | Some u -> rfc3339 u
       | None -> Fail.corrupt "gcs: no time for %s" name
   in
-  { Tsync_store.Object_store.name; size; last_modified; etag = str "etag" }
+  (* §3.1: the generation is the version ifGenerationMatch compares; md5Hash
+     is the service's own checksum, absent on a composite object. *)
+  let etag =
+    match member "generation" j with
+      | `String g -> Some g
+      | `Int g -> Some (string_of_int g)
+      | _ -> None
+  in
+  {
+    Tsync_store.Object_store.name;
+    size;
+    last_modified;
+    etag;
+    checksum = Option.bind (str "md5Hash") Tsync_store.Checksum.md5_of_base64;
+  }
 
 type t = {
   api : Tsync_http.Client.endpoint;
@@ -172,6 +186,7 @@ let head_opt t k =
             size = e.size;
             last_modified = e.last_modified;
             etag = e.etag;
+            checksum = e.checksum;
           }
     | { status = 404; _ } -> None
     | r -> fail ~op:"head" r
@@ -253,7 +268,7 @@ let list_page t ~prefix ~token ~max =
     Printf.sprintf "/storage/v1/b/%s/o?prefix=%s&fields=%s%s%s"
       (segment t.bucket)
       (segment (Key.prefix_to_string prefix))
-      (segment "items(name,size,updated,etag),nextPageToken")
+      (segment "items(name,size,updated,generation,md5Hash),nextPageToken")
       (match token with Some tok -> "&pageToken=" ^ segment tok | None -> "")
       (match max with
         | Some m -> Printf.sprintf "&maxResults=%d" (min m 1000)

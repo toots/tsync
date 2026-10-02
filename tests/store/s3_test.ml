@@ -355,6 +355,34 @@ let () =
       s.copy k (Key.v "tsync/d/wire/copy");
       s.delete_multi [k; Key.v "tsync/d/wire/copy"];
       p "\n== s3 wire\n";
+      let sum (e : Store.entry option) =
+        Option.fold ~none:"none" ~some:Checksum.to_string
+          (Option.bind e (fun (e : Store.entry) -> e.checksum))
+      in
+      let ck = Key.v "tsync/d/wire/sum" in
+      s.put ck (Bigstring.of_string "abc");
+      p "checksum listed: %s; headed: %s\n"
+        (sum (List.nth_opt (s.list_prefix (Key.prefix "tsync/d/wire/")) 0))
+        (sum (s.head_opt ck));
+      let not_md5 =
+        (Option.get (Driver.find "s3")).create ~admission:Uplink.none
+          ~domain:(Domain_name.v "d") ~name:"s3"
+          [
+            ("bucket", Field_spec.S "b");
+            ( "endpoint",
+              Field_spec.S (Printf.sprintf "http://127.0.0.1:%d" port) );
+            ("accessKeyId", Field_spec.S credentials.access_key);
+            ("secretAccessKey", Field_spec.S credentials.secret);
+            ("etagIsMd5", Field_spec.B false);
+          ]
+      in
+      p "etagIsMd5 false: listed %s; headed %s\n"
+        (sum
+           (List.nth_opt (not_md5.list_prefix (Key.prefix "tsync/d/wire/")) 0))
+        (sum (not_md5.head_opt ck));
+      p "a multipart ETag is no MD5: %b\n"
+        (Checksum.md5_of_hex "900150983cd24fb0d6963f7d28e17f72-2" = None);
+      s.delete ck |> ignore;
       List.iter
         (fun (label, f) ->
           p "%s: %s\n" label

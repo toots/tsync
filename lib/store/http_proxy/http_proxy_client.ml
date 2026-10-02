@@ -264,7 +264,14 @@ let head_opt t k =
         with
           | Some size, Some last_modified ->
               Some
-                { Store.key = k; size; last_modified; etag = h "x-tsync-etag" }
+                {
+                  Store.key = k;
+                  size;
+                  last_modified;
+                  etag = h "x-tsync-etag";
+                  checksum =
+                    Option.bind (h "x-tsync-checksum") Checksum.of_string;
+                }
           | _ -> Fail.corrupt "%s: a HEAD answer without size or time" t.name)
     | { status = 404; _ } -> None
     | r -> failure t ~op:"head" r

@@ -28,6 +28,7 @@ let fields =
       f ~secret:true ~required:true "secretAccessKey" "Secret access key" String;
       f ~default:"false" "unsignedPayload" "Unsigned payload" Bool;
       f "shareUrl" "Share URL" String;
+      f ~default:"true" "etagIsMd5" "ETags are MD5s" Bool;
     ]
 
 (* §2: the same string is signed and sent; [/] separates a key's segments. *)
@@ -102,6 +103,7 @@ type t = {
   bucket : string;
   credentials : credentials;
   unsigned_payload : bool;
+  etag_is_md5 : bool;  (** §4.5: an ETag of 32 hex digits is the body's MD5 *)
   domain : Domain_name.t;
   claims : claims Atomic.t;  (** [Honoured] from the start on AWS *)
 }
@@ -247,6 +249,12 @@ let unquote s =
   let n = String.length s in
   if n >= 2 && s.[0] = '"' && s.[n - 1] = '"' then String.sub s 1 (n - 2) else s
 
+(* §4.5: a multipart ETag ([…-n]) is no MD5, and neither is any ETag of a
+   store configured otherwise. *)
+let checksum t etag =
+  if t.etag_is_md5 then Option.bind etag Tsync_store.Checksum.md5_of_hex
+  else None
+
 let head_opt t k =
   match call t ~meth:"HEAD" (Some k) with
     | r when success r.status -> (
@@ -263,6 +271,7 @@ let head_opt t k =
                   size;
                   last_modified;
                   etag = Some (unquote etag);
+                  checksum = checksum t (Some (unquote etag));
                 }
           | _ ->
               Fail.corrupt "s3: %s: a HEAD answer without size, time or tag"
@@ -338,7 +347,7 @@ let iso8601 s =
     | Ok (t, _, _) -> Ptime.to_float_s t
     | Error _ -> Fail.corrupt "s3: bad time %S" s
 
-let entry_of_xml e =
+let entry_of_xml t e =
   let get tag =
     match Xml.field e tag with
       | Some v -> v
@@ -353,6 +362,7 @@ let entry_of_xml e =
         | None -> Fail.corrupt "s3: bad size for %s" name);
     last_modified = iso8601 (get "LastModified");
     etag = Option.map unquote (Xml.field e "ETag");
+    checksum = checksum t (Option.map unquote (Xml.field e "ETag"));
   }
 
 let list_page t ~prefix ~token ~max =
@@ -366,7 +376,7 @@ let list_page t ~prefix ~token ~max =
   match call t ~meth:"GET" ~query None with
     | r when success r.status ->
         let body = Bigstring.to_string r.body in
-        ( List.map entry_of_xml (Xml.elements body "Contents"),
+        ( List.map (entry_of_xml t) (Xml.elements body "Contents"),
           Xml.field body "NextContinuationToken" )
     | r -> fail ~op:"list" r
 
@@ -442,6 +452,10 @@ let create ~domain ~admission ~name fields =
         (match List.assoc_opt "unsignedPayload" fields with
           | Some (Field_spec.B b) -> b
           | _ -> false);
+      etag_is_md5 =
+        (match List.assoc_opt "etagIsMd5" fields with
+          | Some (Field_spec.B b) -> b
+          | _ -> true);
       domain;
       claims =
         Atomic.make (if str "endpoint" = None then Honoured else Unchecked);

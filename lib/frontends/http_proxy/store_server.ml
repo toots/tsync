@@ -557,7 +557,11 @@ let execute t route op body =
                   ]
                   @ Option.fold ~none:[]
                       ~some:(fun t -> [("x-tsync-etag", t)])
-                      e.etag;
+                      e.etag
+                  @ Option.fold ~none:[]
+                      ~some:(fun c ->
+                        [("x-tsync-checksum", Checksum.to_string c)])
+                      e.checksum;
                 body = Empty;
               }
           | None -> empty 404)

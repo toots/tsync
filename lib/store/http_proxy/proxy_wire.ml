@@ -125,7 +125,11 @@ let listing_to_json entries =
                ]
               @ Option.fold ~none:[]
                   ~some:(fun t -> [("etag", `String t)])
-                  e.etag))
+                  e.etag
+              @ Option.fold ~none:[]
+                  ~some:(fun c ->
+                    [("checksum", `String (Checksum.to_string c))])
+                  e.checksum))
           entries))
 
 let corrupt fmt = Fail.corrupt fmt
@@ -157,8 +161,14 @@ let listing_of_json s =
                     | Some (`String t) -> Some t
                     | _ -> None
                 in
+                let checksum =
+                  match List.assoc_opt "checksum" f with
+                    | Some (`String c) -> Checksum.of_string c
+                    | _ -> None
+                in
                 match Store.listed "http-proxy" key with
-                  | Some key -> Some { Store.key; size; last_modified; etag }
+                  | Some key ->
+                      Some { Store.key; size; last_modified; etag; checksum }
                   | None -> None)
             | _ -> corrupt "a listing entry that is not an object")
           l
