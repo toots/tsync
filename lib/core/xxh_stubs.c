@@ -5,14 +5,24 @@
 #include <caml/custom.h>
 #include <caml/memory.h>
 #include <caml/mlvalues.h>
+#include <caml/threads.h>
 #include <string.h>
 
 CAMLprim value tsync_xxh3_string(value s, value off, value len, value seed) {
   return caml_copy_int64(XXH3_64bits_withSeed(String_val(s) + Long_val(off), Long_val(len), (XXH64_hash_t)Int64_val(seed)));
 }
 
+/* A bigstring may be a mapping of a slow disk: hashing it can fault for a long
+   time, so the runtime is released while it runs. */
 CAMLprim value tsync_xxh3_bigstring(value b, value off, value len, value seed) {
-  return caml_copy_int64(XXH3_64bits_withSeed((char *)Caml_ba_data_val(b) + Long_val(off), Long_val(len), (XXH64_hash_t)Int64_val(seed)));
+  CAMLparam4(b, off, len, seed);
+  const char *data = (char *)Caml_ba_data_val(b) + Long_val(off);
+  size_t n = Long_val(len);
+  XXH64_hash_t s = (XXH64_hash_t)Int64_val(seed);
+  caml_release_runtime_system();
+  XXH64_hash_t h = XXH3_64bits_withSeed(data, n, s);
+  caml_acquire_runtime_system();
+  CAMLreturn(caml_copy_int64(h));
 }
 
 #define State_val(v) (*((XXH3_state_t **)Data_custom_val(v)))
@@ -40,8 +50,14 @@ CAMLprim value tsync_xxh3_update_string(value st, value s, value off, value len)
 }
 
 CAMLprim value tsync_xxh3_update_bigstring(value st, value b, value off, value len) {
-  XXH3_64bits_update(State_val(st), (char *)Caml_ba_data_val(b) + Long_val(off), Long_val(len));
-  return Val_unit;
+  CAMLparam4(st, b, off, len);
+  XXH3_state_t *state = State_val(st);
+  const char *data = (char *)Caml_ba_data_val(b) + Long_val(off);
+  size_t n = Long_val(len);
+  caml_release_runtime_system();
+  XXH3_64bits_update(state, data, n);
+  caml_acquire_runtime_system();
+  CAMLreturn(Val_unit);
 }
 
 CAMLprim value tsync_xxh3_digest(value st) { return caml_copy_int64(XXH3_64bits_digest(State_val(st))); }

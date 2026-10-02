@@ -76,10 +76,10 @@ CAMLprim value tsync_flock(value fd, value exclusive, value block) {
   CAMLparam3(fd, exclusive, block);
   int op = (Bool_val(exclusive) ? LOCK_EX : LOCK_SH) | (Bool_val(block) ? 0 : LOCK_NB);
   int r;
-  if (Bool_val(block)) caml_release_runtime_system();
+  caml_release_runtime_system();
   do { r = flock(Int_val(fd), op); } while (r < 0 && errno == EINTR);
   int e = errno;
-  if (Bool_val(block)) caml_acquire_runtime_system();
+  caml_acquire_runtime_system();
   if (r < 0) {
     if (e == EWOULDBLOCK) CAMLreturn(Val_false);
     errno = e;
@@ -199,11 +199,17 @@ CAMLprim value tsync_reserve(value fd, value len) {
 
 CAMLprim value tsync_rename_noreplace(value src, value dst) {
   CAMLparam2(src, dst);
+  char *s = caml_stat_strdup(String_val(src)), *d = caml_stat_strdup(String_val(dst));
   int r;
+  caml_release_runtime_system();
   do {
-    r = syscall(SYS_renameat2, AT_FDCWD, String_val(src), AT_FDCWD, String_val(dst), 1 /* RENAME_NOREPLACE */);
+    r = syscall(SYS_renameat2, AT_FDCWD, s, AT_FDCWD, d, 1 /* RENAME_NOREPLACE */);
   } while (r < 0 && errno == EINTR);
-  if (r < 0) uerror("rename", dst);
+  int e = errno;
+  caml_acquire_runtime_system();
+  caml_stat_free(s);
+  caml_stat_free(d);
+  if (r < 0) { errno = e; uerror("rename", dst); }
   CAMLreturn(Val_unit);
 }
 
@@ -217,22 +223,40 @@ CAMLprim value tsync_peer_uid(value fd) {
 
 CAMLprim value tsync_clone(value src, value dst) {
   CAMLparam2(src, dst);
-  int s = open(String_val(src), O_RDONLY | O_CLOEXEC);
-  if (s < 0) uerror("open", src);
-  int d = open(String_val(dst), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
-  if (d < 0) { int e = errno; close(s); errno = e; uerror("open", dst); }
-  int r = ioctl(d, FICLONE, s);
-  int e = errno;
-  close(s);
-  close(d);
-  if (r < 0) { unlink(String_val(dst)); errno = e; uerror("ficlone", dst); }
+  char *sp = caml_stat_strdup(String_val(src)), *dp = caml_stat_strdup(String_val(dst));
+  const char *what = "open";
+  int r = -1, e = 0, at_dst = 0;
+  caml_release_runtime_system();
+  int s = open(sp, O_RDONLY | O_CLOEXEC);
+  if (s < 0) e = errno;
+  else {
+    int d = open(dp, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
+    at_dst = 1;
+    if (d < 0) e = errno;
+    else {
+      r = ioctl(d, FICLONE, s);
+      e = errno;
+      close(d);
+      if (r < 0) { unlink(dp); what = "ficlone"; }
+    }
+    close(s);
+  }
+  caml_acquire_runtime_system();
+  caml_stat_free(sp);
+  caml_stat_free(dp);
+  if (r < 0) { errno = e; uerror(what, at_dst ? dst : src); }
   CAMLreturn(Val_unit);
 }
 
 CAMLprim value tsync_is_network_fs(value path) {
   CAMLparam1(path);
   struct statfs s;
-  if (statfs(String_val(path), &s) < 0) uerror("statfs", path);
+  char *p = caml_stat_strdup(String_val(path));
+  caml_release_runtime_system();
+  int r = statfs(p, &s), e = errno;
+  caml_acquire_runtime_system();
+  caml_stat_free(p);
+  if (r < 0) { errno = e; uerror("statfs", path); }
   switch ((unsigned long)s.f_type) {
   case 0x6969:     /* NFS */
   case 0xFF534D42: /* CIFS */
@@ -359,9 +383,15 @@ CAMLprim value tsync_reserve(value fd, value len) {
 
 CAMLprim value tsync_rename_noreplace(value src, value dst) {
   CAMLparam2(src, dst);
+  char *s = caml_stat_strdup(String_val(src)), *d = caml_stat_strdup(String_val(dst));
   int r;
-  do { r = renamex_np(String_val(src), String_val(dst), RENAME_EXCL); } while (r < 0 && errno == EINTR);
-  if (r < 0) uerror("rename", dst);
+  caml_release_runtime_system();
+  do { r = renamex_np(s, d, RENAME_EXCL); } while (r < 0 && errno == EINTR);
+  int e = errno;
+  caml_acquire_runtime_system();
+  caml_stat_free(s);
+  caml_stat_free(d);
+  if (r < 0) { errno = e; uerror("rename", dst); }
   CAMLreturn(Val_unit);
 }
 
@@ -375,14 +405,25 @@ CAMLprim value tsync_peer_uid(value fd) {
 
 CAMLprim value tsync_clone(value src, value dst) {
   CAMLparam2(src, dst);
-  if (clonefile(String_val(src), String_val(dst), 0) < 0) uerror("clonefile", dst);
+  char *s = caml_stat_strdup(String_val(src)), *d = caml_stat_strdup(String_val(dst));
+  caml_release_runtime_system();
+  int r = clonefile(s, d, 0), e = errno;
+  caml_acquire_runtime_system();
+  caml_stat_free(s);
+  caml_stat_free(d);
+  if (r < 0) { errno = e; uerror("clonefile", dst); }
   CAMLreturn(Val_unit);
 }
 
 CAMLprim value tsync_is_network_fs(value path) {
   CAMLparam1(path);
   struct statfs s;
-  if (statfs(String_val(path), &s) < 0) uerror("statfs", path);
+  char *p = caml_stat_strdup(String_val(path));
+  caml_release_runtime_system();
+  int r = statfs(p, &s), e = errno;
+  caml_acquire_runtime_system();
+  caml_stat_free(p);
+  if (r < 0) { errno = e; uerror("statfs", path); }
   CAMLreturn(Val_bool(!(s.f_flags & MNT_LOCAL)));
 }
 
