@@ -17,6 +17,8 @@ host header carries the port: true
   200 "ok"
 == a client trickling its head
   dropped within 1.5s: true
+== a cancelled connect closes its socket
+  ten cancelled connects leave fewer than 5 descriptors: true
 == redial after the server dropped an idle connection
   200 "GET after=restart \"\"\n"
 == nothing listening

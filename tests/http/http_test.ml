@@ -168,6 +168,34 @@ let () =
       p "  dropped within 1.5s: %b" (trickle 0 && Rt.now () -. t0 < 1.5);
       Transport.close slow;
       Server.close ~grace:0.1 strict;
+      p "== a cancelled connect closes its socket";
+      let l = Unix.socket PF_INET SOCK_STREAM 0 in
+      Unix.bind l (ADDR_INET (Unix.inet_addr_loopback, 0));
+      Unix.listen l 0;
+      let full_port =
+        match Unix.getsockname l with
+          | ADDR_INET (_, port) -> port
+          | _ -> assert false
+      in
+      let fds () = Array.length (Sys.readdir "/proc/self/fd") in
+      let attempt () =
+        try
+          Rt.with_timeout 0.1 (fun () ->
+              Transport.close
+                (Transport.connect ~host:"127.0.0.1" ~port:full_port ()))
+        with _ -> ()
+      in
+      (* The first attempts fill the backlog; the later ones stay pending. *)
+      for _ = 1 to 4 do
+        attempt ()
+      done;
+      let before = fds () in
+      for _ = 1 to 10 do
+        attempt ()
+      done;
+      p "  ten cancelled connects leave fewer than 5 descriptors: %b"
+        (fds () - before < 5);
+      Unix.close l;
       p "== redial after the server dropped an idle connection";
       Server.close ~grace:0.1 server;
       let server =

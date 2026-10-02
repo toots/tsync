@@ -110,6 +110,9 @@ let connect_fd ~host ~port =
                     try_
                       (Some (Unix.Unix_error (ETIMEDOUT, "connect", host)))
                       rest
+                | exception e ->
+                    Unix.close fd;
+                    raise e
                 | () -> (
                     match Unix.getsockopt_error fd with
                       | None -> fd
