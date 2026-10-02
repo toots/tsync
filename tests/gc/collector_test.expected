@@ -92,6 +92,22 @@ run: halted: tsync/d/manifests/.tsync-root/5ffe782ea6b2b6e6-2be70dcf7b213db4: ma
 solo1 and solo2 kept: true true
 run: completed; promoted 7, reclaimed 2 (10 bytes)
 
+== a settle leaves G odd while a run is suspended in closing
+run: suspended in marking at "m/.tsync-root"; promoted 4, reclaimed 0 (0 bytes)
+run: suspended in marking at "m/0123456789ab-1"; promoted 2, reclaimed 0 (0 bytes)
+run: suspended in closing at "2b6"; promoted 1, reclaimed 0 (0 bytes)
+suspended in closing: true
+G odd after a settle: true
+run: suspended in closing at "307"; promoted 0, reclaimed 0 (0 bytes)
+run: suspended in closing at "3ef"; promoted 0, reclaimed 1 (5 bytes)
+run: suspended in closing at "59d"; promoted 0, reclaimed 1 (5 bytes)
+run: suspended in closing at "7ff"; promoted 0, reclaimed 0 (0 bytes)
+run: suspended in closing at "88a"; promoted 0, reclaimed 0 (0 bytes)
+run: suspended in closing at "8a5"; promoted 0, reclaimed 0 (0 bytes)
+run: suspended in closing at "975"; promoted 0, reclaimed 0 (0 bytes)
+run: completed; promoted 0, reclaimed 0 (0 bytes)
+generation settled: true
+
 == exclusion
 another process: held
 run: busy

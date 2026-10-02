@@ -510,8 +510,10 @@ let settle_generation t =
         | Some spaces -> (
             match
               Chunk_spaces.with_run_lock spaces t.domain (fun () ->
-                  Gc_generation.settle m.store t.domain ~owed:(fun g ->
-                      collection_owed t ~generation:g ()))
+                  (* A run suspended in closing still dooms under G. *)
+                  if not (Chunk_spaces.run_open spaces t.domain) then
+                    Gc_generation.settle m.store t.domain ~owed:(fun g ->
+                        collection_owed t ~generation:g ()))
             with
               | Ok () -> false
               | Error `Busy -> true))

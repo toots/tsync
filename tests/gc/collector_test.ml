@@ -272,6 +272,28 @@ let () =
       ignore (run ());
       Composite.settle ~timeout:10. c;
       ignore (settled 100);
+      p "\n== a settle leaves G odd while a run is suspended in closing\n";
+      put_chunks ["junk6"; "junk7"];
+      let rec to_closing i =
+        match run ~budget:0. () with
+          | Collector.Suspended { phase = Closing; _ } -> true
+          | Suspended _ when i < 20 -> to_closing (i + 1)
+          | _ -> false
+      in
+      p "suspended in closing: %b\n" (to_closing 0);
+      Composite.settle ~timeout:10. c;
+      p "G odd after a settle: %b\n"
+        (match Gc_generation.read main d with
+          | Some g -> g mod 2 = 1
+          | None -> false);
+      let rec finish i =
+        match run ~budget:0. () with
+          | Collector.Suspended _ when i < 20 -> finish (i + 1)
+          | _ -> ()
+      in
+      finish 0;
+      Composite.settle ~timeout:10. c;
+      p "generation settled: %b\n" (settled 100);
       p "\n== exclusion\n";
       let to_holder, holder_in = Unix.pipe ~cloexec:true ()
       and holder_out, from_holder = Unix.pipe ~cloexec:true () in

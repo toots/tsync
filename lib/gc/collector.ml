@@ -477,8 +477,12 @@ let session ?budget ?pause ~narrate:nr ~verify ~keep ~cancelled composite d m =
             record m d
               { phase = Abandoning; started; cursor = ""; generation = None };
             abandon ""
-        | Resume_close { after; generation = Some g } -> close_from ~after g
-        | Resume_close { after; generation = None } ->
+        | Resume_close { after; generation = Some g }
+          when generation m d = Some g ->
+            close_from ~after g
+        (* A generation that moved on while the run was suspended is never
+           doomed under: the run takes a fresh odd one. *)
+        | Resume_close { after; _ } ->
             let g = fresh_generation () in
             record m d
               { phase = Closing; started; cursor = after; generation = Some g };
