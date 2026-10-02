@@ -143,18 +143,28 @@ let stats_reply reports report : Tsync_status.Status_report.answer =
 (* 04 §4.11: the daily tasks run on the first pass after a day went by. *)
 let housekeeping (domain : Domain.t) (module E : Tsync_sync.Engine.S) =
   let daily = ref (Unix.gettimeofday ()) in
+  let rearmed = ref (Unix.gettimeofday ()) in
+  let pass () =
+    E.poll ();
+    if Unix.gettimeofday () -. !rearmed >= Dqueue.rearm_interval then (
+      rearmed := Unix.gettimeofday ();
+      let n = E.rearm () in
+      if n > 0 then Log.info "retrying %d parked records" n);
+    if Unix.gettimeofday () -. !daily >= 86400. then (
+      daily := Unix.gettimeofday ();
+      let n =
+        Tsync_sync.Export.sweep_records ~cache_root:domain.cache_root
+          domain.name
+      in
+      if n > 0 then Log.info "removed %d stale export records" n);
+    Usage.release_if_grown ()
+  in
   try
     while true do
       Stop.sleep housekeeping_interval;
-      E.poll ();
-      if Unix.gettimeofday () -. !daily >= 86400. then (
-        daily := Unix.gettimeofday ();
-        let n =
-          Tsync_sync.Export.sweep_records ~cache_root:domain.cache_root
-            domain.name
-        in
-        if n > 0 then Log.info "removed %d stale export records" n);
-      Usage.release_if_grown ()
+      try pass () with
+        | Stop.Stopping -> raise Stop.Stopping
+        | e -> Log.warn "housekeeping: %s" (Printexc.to_string e)
     done
   with Stop.Stopping -> ()
 
