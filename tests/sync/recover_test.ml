@@ -63,7 +63,33 @@ let () =
         (String.sub encoded 0 (String.length encoded - 1));
       let (module E) = engine () in
       E.start ~poll_journal:false ();
-      p "set aside: %b\n" (Fs.exists (manifest ^ ".bad"));
+      p "set aside: %b\n"
+        (List.exists Staged.is_set_aside_name
+           (Fs.readdir (Filename.dirname manifest)));
+      p "a user file named f.txt.bad: %s\n"
+        (match
+           E.create "f.txt.bad" ~exclusive:false;
+           E.write "f.txt.bad" ~off:0 (Bigstring.of_string "mine");
+           E.close "f.txt.bad";
+           let h = E.open_read "f.txt.bad" in
+           Fun.protect
+             ~finally:(fun () -> E.close_read h)
+             (fun () -> Bigstring.to_string (E.read h ~off:0 ~len:100))
+         with
+          | s -> Printf.sprintf "%S" s
+          | exception e -> Printexc.to_string e);
+      p "the set-aside manifest is still there: %b\n"
+        (List.exists
+           (fun n ->
+             Staged.is_set_aside_name n
+             &&
+               match
+                 Fs.read_file_opt
+                   (Filename.concat (Filename.dirname manifest) n)
+               with
+               | Some b -> Staged.decode b = None
+               | None -> false)
+           (Fs.readdir (Filename.dirname manifest)));
       p "status counts it set aside: %d\n" (E.activity ()).set_aside;
       List.iter
         (fun b -> p "body kept: %b\n" (Staged.body_size staged b >= 0))

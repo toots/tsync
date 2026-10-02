@@ -67,6 +67,10 @@ val bodies_named : edit -> string list
 val slots : edit -> slot array
 
 val is_set_aside_name : string -> bool
+
+(** The free set-aside name for the staged manifest at [p], in its directory. *)
+val set_aside_path : string -> string
+
 val new_body_id : unit -> string
 
 (** Open a body read-write, creating it exclusively when [create]. *)

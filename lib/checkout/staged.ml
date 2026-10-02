@@ -204,15 +204,21 @@ let remove t rel =
   let p = manifest_path t rel in
   if Fs.release p then Fs.fsync_dir (Filename.dirname p)
 
-let is_set_aside_name n =
-  String.ends_with ~suffix:".bad" n
-  ||
-    match String.rindex_opt n '.' with
-    | Some i ->
-        String.ends_with ~suffix:".bad" (String.sub n 0 i)
-        && int_of_string_opt (String.sub n (i + 1) (String.length n - i - 1))
-           <> None
-    | None -> false
+(* An internal leaf, which no user name escapes to (04 §2.5). *)
+let set_aside_prefix = ".tsync-bad-"
+let is_set_aside_name n = String.starts_with ~prefix:set_aside_prefix n
+
+let set_aside_path p =
+  let dir = Filename.dirname p and leaf = Filename.basename p in
+  let rec pick n =
+    let c =
+      Filename.concat dir
+        (if n = 1 then set_aside_prefix ^ leaf
+         else Printf.sprintf "%s%d-%s" set_aside_prefix n leaf)
+    in
+    if Fs.exists c then pick (n + 1) else c
+  in
+  pick 1
 
 (* Every decodable file of the tree is an edit, whatever its name. An escaped
    folder's real name is the mirror's, which files the same escaped path. *)
@@ -220,7 +226,10 @@ let fold t f acc =
   let rec walk dir rel acc =
     List.fold_left
       (fun acc local ->
-        if Names.is_temp_name local || Names.is_internal_local local then acc
+        if
+          Names.is_temp_name local
+          || (Names.is_internal_local local && not (is_set_aside_name local))
+        then acc
         else (
           let p = Filename.concat dir local in
           match Fs.lstat_opt p with

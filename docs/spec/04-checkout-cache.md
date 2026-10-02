@@ -65,7 +65,7 @@ requires rewriting a valid existing file into another form.
   chunks/<shard>/<group key>.partial           partial cache body
   chunks/<shard>/<group key>.pin               pin
   staged/manifests/<escaped path>              staged manifest
-  staged/manifests/<escaped path>.bad          set-aside staged manifest (or `.bad.<n>`)
+  staged/manifests/<dir>/.tsync-bad-<leaf>     set-aside staged manifest (or `.tsync-bad-<n>-<leaf>`)
   staged/chunks/<body id>                      staged group body
   staged/whole/<body id>                       staged whole body
   folders/<folder id>                          reverse index entry
@@ -182,11 +182,11 @@ SHOULD accept more (the extra ones are ignored) or fewer (the missing ones mean 
 - The state (Owed or Committed) is part of the type: a local mutation can only produce Owed,
   which is what retires a pending promotion (§4.7).
 - **Set-aside.** An unparseable staged manifest ([durable-queue](algorithms/durable-queue.md)
-  R6) is renamed, in its directory, to `<escaped leaf>.bad`, or `<escaped leaf>.bad.<n>` with `n`
-  the smallest integer ≥ 2 not taken. Any file of the staged manifest tree that does not decode
-  is a set-aside manifest, whatever its name: it is kept in place, reported, never listed. A file
-  that decodes is a staged edit, whatever its name (a user's file named `x.bad` is an ordinary
-  edit).
+  R6) is renamed, in its directory, to `.tsync-bad-<escaped leaf>`, or
+  `.tsync-bad-<n>-<escaped leaf>` with `n` the smallest integer ≥ 2 not taken: an internal leaf
+  ([01](01-core.md) §2.9) that no user name escapes to. Any file of the staged manifest tree that
+  does not decode is a set-aside manifest, whatever its name: it is kept in place, reported, never
+  listed. A file that decodes is a staged edit, whatever its name.
 
 ### 2.6 Staged bodies
 
@@ -705,7 +705,7 @@ checkout to a consistent state:
 2. Remove every cache file that is not a whole body or a pin (§2.7), each body before its
    companions.
 3. Read every file of the staged manifest tree. Rename each one that does not decode and whose
-   name does not already end in `.bad` or `.bad.<n>` to its set-aside name (§2.5); report every
+   name is not already a set-aside name to its set-aside name (§2.5); report every
    set-aside manifest. The set of **named bodies** is every body id named by a decodable manifest,
    plus, for each set-aside manifest, every maximal run of exactly 16 lowercase hex characters in
    its bytes. False positives only keep a body longer.

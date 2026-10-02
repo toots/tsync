@@ -1284,13 +1284,7 @@ module Make (C : Engine_ctx.S) = struct
             let body = Option.value ~default:"" (Fs.read_file_opt p) in
             let base = Filename.basename p in
             if not (Staged.is_set_aside_name base) then (
-              let rec pick n =
-                let c =
-                  if n = 1 then p ^ ".bad" else Printf.sprintf "%s.bad.%d" p n
-                in
-                if Fs.exists c then pick (n + 1) else c
-              in
-              Fs.rename p (pick 1);
+              Fs.rename p (Staged.set_aside_path p);
               Log.warn "set aside the undecodable staged manifest %s" p);
             let re = hex_runs body in
             List.iter (fun b -> Hashtbl.replace named b ()) re)
