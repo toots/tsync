@@ -106,11 +106,13 @@ let rec claim ~mappable root key body retries =
                   (Key.to_string key)
               else claim ~mappable root key body (retries - 1))
 
-(* local §5.1: every write renames a new inode into place, so the inode with
-   the modification time's exact bits and the size names one version. *)
+(* local §5.1: every write renames a new inode into place, so the device and
+   inode with the exact bits of the modification and change times and the size
+   name one version. *)
 let version (st : Unix.LargeFile.stats) =
-  Printf.sprintf "%x-%Lx-%Lx" st.st_ino
+  Printf.sprintf "%x-%x-%Lx-%Lx-%Lx" st.st_dev st.st_ino
     (Int64.bits_of_float st.st_mtime)
+    (Int64.bits_of_float st.st_ctime)
     st.st_size
 
 let entry_of rel (st : Unix.LargeFile.stats) =
