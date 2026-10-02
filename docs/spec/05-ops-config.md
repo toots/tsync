@@ -493,8 +493,9 @@ paused.
      `Rmdir(rel, old id)` then `Mkdir`; after a complete walk, removed entries (and their cached
      bodies) are reported as removals;
    - counts unusable children, logging a sample;
-   - ends by stamping a new resync generation and calling the frontend's `reannounce`
-     ([08 §3.2](08-frontends.md#32-hooks)).
+   - ends by rebuilding the reverse folder index from the mirror. It stamps no new resync
+     generation: the differences it noted are the change feed's
+     ([wal-and-journal.md §4.8](algorithms/wal-and-journal.md#48-retention-horizon-bridging-and-rebuild)).
    The mount serves the mirror throughout.
 
 ### 4.8 Trash, deleted files and retention

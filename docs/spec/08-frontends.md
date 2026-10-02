@@ -77,21 +77,23 @@ a frontend's spec may refine it with its own replica (File Provider).
 
 ### 2.2 Item references
 
-Non-FUSE callers name items by **reference**; the grammar (`root`, `d:<folderId>`,
-`f:<parentFolderId>/<leaf>`) is [01 §2.4](01-core.md). A reference is resolved to a key only by the
-request handler, under the owner's metadata serialisation, and resolution **mints nothing**: a read
+Non-FUSE callers name items by **reference**; the grammar (`root`, `d:<folderId>`, `i:<fileId>`,
+`f:<parentFolderId>/<leaf>`) is [01 §2.7](01-core.md#27-item-references). The owner names every
+file by `i:` in its replies; it accepts `f:` from a caller that composes a reference. A reference
+is resolved to a key only by the request handler, under the owner's metadata serialisation, and resolution **mints nothing**: a read
 that minted a folder id would persist a marker and resurrect a deleted folder. A reference that does
-not resolve → `not_found`; a malformed one or a storage key → `invalid`. An `f:` reference never
-answers for a folder.
+not resolve → `not_found`; a malformed one or a storage key → `invalid`. An `i:` or `f:` reference
+never answers for a folder.
 
 A caller holding only a path (desktop menus, the CLI) MAY send `"rel":"<domain-relative path>"`
 instead; `""` is the root, and the mirror decides the kind.
 
 Why references: renaming a directory renames every descendant's path, while its folder id is stable;
 macOS treats a changed identifier as a merge instruction, so path-named folders turned a rename into
-re-identification of a whole subtree. A file has no id of its own, so (parent id, leaf) limits a
-rename's blast radius to one item. A directory reference cannot be composed by a client, only minted
-by the core, so every mutating reply carries the resulting item.
+re-identification of a whole subtree. A file's store identity is its parent and leaf, so the owner
+keeps a local file id for it ([local-cache §3.1](data-model/local-cache.md#31-namespace-mirror)):
+a rename keeps every identifier, and a remote rename reaches a host as an update of the same item.
+Neither id can be composed by a client, so every mutating reply carries the resulting item.
 
 A host that maps references to its own identifiers MUST map `root` to its own root identifier, in
 both directions, including in events it receives ([file-provider.md](frontends/file-provider.md)).
@@ -102,7 +104,7 @@ One shape for `stat`, listings, mutation replies and change ops, fields in this 
 
 ```
 ref, parentRef, name, kind ("dir"|"file"|"symlink"), size, mtime (float seconds), etag, isUploaded,
-[contentId], [symlinkTarget], [trashed: true], [availability, [pinnedUntil]]
+[contentId], [symlinkTarget], [trashed: true], [readOnly: true], [availability, [pinnedUntil]]
 ```
 
 - **Directory**: size 0, mtime 0.0, etag = its folder id, isUploaded true. Constant for the
@@ -115,13 +117,17 @@ ref, parentRef, name, kind ("dir"|"file"|"symlink"), size, mtime (float seconds)
   key resolves to, staged or published: equal to the etag when published, computed on adoption for a
   whole staged body, absent while staged partial edits exist. It is the identity a client sends back
   as `base` (§3.3).
+- **`readOnly`**: present when the item cannot be written: the domain is read-only, or its name is
+  not valid UTF-8 (a client decoding names lossily would name something else). A client presents
+  such an item read-only and decides writability no other way.
 - A row whose containing folder has no id on this client cannot be named: it is omitted and counted
-  in `unnamed`, never silently dropped.
+  in `unnamed`, never silently dropped. A non-zero count is reported in `status` with its repair
+  (`tsync sync --full`).
 
 `stat` puts the row at the top level; lists and mutation replies nest it (`items`, `item`).
 
 ```json
-{"ok":true,"ref":"f:9f3a/big.txt","parentRef":"d:9f3a","name":"big.txt","kind":"file","size":24,
+{"ok":true,"ref":"i:6c1e0b9a2f4d47e8a3b5c7d9e1f20384","parentRef":"d:9f3a","name":"big.txt","kind":"file","size":24,
  "mtime":1400000000.0,"etag":"1294bbe85c2f380b","isUploaded":true,"availability":"online-only"}
 ```
 
@@ -137,24 +143,24 @@ or unknown code as `internal`.
 
 - **Change anchor** `"<generation>|<entry key>"`, e.g. `"1756600000000|0001756600000-abc"`.
   - `generation`: the content of the domain's resync-generation file ([07 §2.7](07-daemon-cli.md)),
-    epoch milliseconds, replaced atomically and durably by `sync --full` and `full_resync`; `""`
-    when never stamped.
+    epoch milliseconds, replaced atomically and durably by `full_resync` only; `""` when never
+    stamped.
   - `entry`: the last applied journal entry key, `""` for a client that never synced.
   - The core owns and compares both halves; clients carry the anchor verbatim.
 - **Folder page cursor**: the last name served. A resume returns names strictly greater, compared
   bytewise. Stateless: a fresh process answers the same page, and changes before the cursor shift
   nothing.
 - **Whole-domain page cursor** `"<walk>:<line>"`: `walk` is the all-digit epoch-ms stamp of a kept
-  walk, `line` a 0-based line index. The handler SHOULD accept a cursor whose
-  prefix is not all digits (meaning: restart the listing from the first page); it MUST NOT issue one.
-  Lines, not names: one folder id can sit at several mirror paths, and a name cursor could loop.
+  walk, `line` a 0-based line index. A cursor whose walk is not the kept walk (it is gone, or was
+  remade), or whose prefix is not all digits, is answered `{stale:true}`: the consumer restarts the
+  listing. Lines, not names: one folder id can sit at several mirror paths, and a name cursor could
+  loop; and never another walk's line, which would skip items.
 - **Kept walk file** (owner-local, in the domain's scratch directory): line 1
   `{"walk":"<ms>","skipped":<n>}`; then one JSON entry per line, sorted by path:
   `{"path":"a/b.txt","container":"<folderId>","kind":"file","size":N,"mtime":F}` or
   `{"path":"sub","container":"<id>","kind":"dir"}`. JSON keeps a name containing a newline on one
-  line. Written atomically by a first page or whenever missing; never invalidated by changes (the
-  change feed covers them, because the anchor is taken before page 1). A resume against a newer walk
-  continues at the same line and logs a warning.
+  line. Written atomically by a first page; never invalidated by changes (the change feed covers
+  them, because the anchor is taken before page 1).
 
 ---
 
@@ -181,9 +187,7 @@ The only frontend-specific behaviour of the handler:
 ```
 hooks {
   changed(keys)           # the owner changed these keys behind the frontend: refresh your view
-  surface_evicted(ref)    # the chunk store evicted this item: mirror it on the OS surface, if any
-  surface_restored(ref)   # the chunk store fetched and pinned it: mirror it on the OS surface
-  reannounce()            # a new generation was stamped: consumers must re-list
+  reannounce()            # full_resync stamped a new generation: consumers must re-list
   on_upload_done(key)     # an upload of key published
   status_fields() -> fields
   stats_fields()  -> fields   # includes "frontend": <name>
@@ -195,15 +199,11 @@ hooks {
   touched), after a `revert`, and after it publishes entries for records a one-shot command
   submitted. It MUST NOT block on the OS surface: a frontend that invalidates kernel or system
   state does so asynchronously and never from inside a callback on the same item.
-- `surface_evicted` and `surface_restored` are called once per request, with the reference the
-  request named (a folder's reference for a subtree), after the chunk-store work of §3.4 succeeded.
-  A frontend with no separate OS replica (fuse, android) does nothing.
 
 | hook | fuse | file_provider | android |
 |---|---|---|---|
 | changed | invalidate the kernel's entries for each key | debounced `changed` event | none (the UI re-queries) |
-| surface_evicted / restored | none | publish an `evict` / `restore` event; fail when nobody is subscribed | none |
-| reannounce | none | rebuild the folder-id index, publish `resync` | none |
+| reannounce | none | debounced `changed` event | none |
 | on_upload_done | none | publish `changed` | none |
 | on_stop | request the owner's stop | request the owner's stop | none |
 
@@ -216,19 +216,19 @@ watched with the liveness probe ([07 §4.3](07-daemon-cli.md#43-deadlines-bulk-a
 
 | action | request | ok reply | |
 |---|---|---|---|
-| `stat` | `ref`\|`rel` | row at top level | |
+| `stat` | `ref`\|`rel`\|(`parentRef`, `name`) | row at top level | |
 | `list_dir` | `ref`\|`rel`, `after?`, `limit?` (1000) | `items`, `next?`, `unnamed?` | |
-| `list_all` | `after?`, `limit?` (1000) | `items`, `next?`, `unnamed?` | |
+| `list_all` | `after?`, `limit?` (1000) | `items`, `next?`, `unnamed?`; or `{stale:true}` for a cursor on another walk | |
 | `changes_since` | `arg` = anchor, `limit?` (512) | `{stale:true}` or `{stale:false, cursor, more, ops, unnamed?}` | |
 | `cursor` | — | `cursor` (the current anchor) | |
-| `ensure_cached` | `ref`\|`rel`, `dest` | `localPath`: the whole file written to `dest` | B |
-| `fetch_range` | `ref`\|`rel`, `dest`, `offset` ≥ 0, `length` > 0 | `localPath, offset, length` (served length; short only at end of file) | B |
+| `ensure_cached` | `ref`\|`rel`, `dest` | `localPath`, `item`: the whole file written to `dest`, and the row of exactly those bytes | B |
+| `fetch_range` | `ref`\|`rel`, `dest`, `offset` ≥ 0, `length` > 0 | `localPath, offset, length, item` (served length, short only at end of file; the row of the version served) | B |
 | `download_progress` | `ref`\|`rel` | `{active:false}` or `{active:true, bytesDownloaded, totalBytes}` | |
 | `create` | `parentRef`, `name`, `exclusive?` | `item`: empty, staged, etag `""` | M |
-| `write` | `parentRef`, `name`, `staging`, `base?`, `exclusive?`, `await?` | `size, mtime, item`; the staging file is adopted by rename | M; B with `await` |
+| `write` | (`parentRef`, `name`)\|`ref`, `staging`, `base?`, `exclusive?`, `await?` | `size, mtime, item`; the staging file is adopted by rename | M; B with `await` |
 | `mkdir` | `parentRef`, `name`, `exclusive?` | `item`; without `exclusive`, an existing folder is answered as is | M |
 | `symlink` | `parentRef`, `name`, `target`, `exclusive?` | `item` | M |
-| `rename` | `ref`, `parentRef`, `name`, `noreplace?` (alias `exclusive`) | `item` at the destination; a folder keeps its id | M |
+| `rename` | `ref`, `parentRef`, `name`, `noreplace?` (alias `exclusive`) | `item` at the destination; a folder keeps its id, a file its file id | M |
 | `delete` | `ref`\|`rel` (a file or symlink) | `{}`; a folder target → `invalid` | M |
 | `rmdir` | `ref`\|`rel` (a folder) | `{}`; removes the folder **and its subtree** (a platform delete gesture) | M |
 | `revert` | `ref`\|`rel`, `arg` = version (`""` = latest) | `{}` | M, P |
@@ -252,7 +252,7 @@ watched with the liveness probe ([07 §4.3](07-daemon-cli.md#43-deadlines-bulk-a
 | `pause` | `arg`: `"off"` resumes, anything else pauses | `{paused}` after the state is durable | |
 | `stats` | `arg`: comma set of `totals, exact, reload, frontend` | the owner's report ([07 §5.5](07-daemon-cli.md#55-tsync-status)); `frontend` = only this process's figures, no probes | |
 | `stop` | — | `{}`, then the owner stops ([07 §3.4](07-daemon-cli.md#34-stop)) | |
-| `subscribe` | `domain` (required), `tempDir?` | `{}`, then the connection is an event stream (§3.8) | |
+| `subscribe` | `domain` (required) | `{}`, then the connection is an event stream (§3.8) | |
 
 - `status` is cheap: no store access, no walk (menus poll it).
 - `job` streams lines before its reply, each an object with a `stream` field: `{stream:"started",
@@ -262,14 +262,20 @@ watched with the liveness probe ([07 §4.3](07-daemon-cli.md#43-deadlines-bulk-a
   `{stream:"narrate", text}`. A job that would conflict with a running one answers
   `busy` naming it. A client that closes its connection does not stop the job.
 - `exclusive` (on `create`, `write`, `mkdir`, `symlink`) and `noreplace` (on `rename`): an existing
-  destination answers `exists` and nothing changes; the check and the change are one step.
+  destination answers `exists`, carrying the occupant's `item` when it can be named, and nothing
+  changes; the check and the change are one step. A rename onto the item's own current place is a
+  no-op answered with its item, `noreplace` notwithstanding.
+- `stat` by `parentRef` and `name` names the child of that folder with that leaf, whichever kind it
+  is.
+- `write` by `ref` replaces that file's content in place; by `parentRef` and `name` it writes the
+  file at that place. A `write` whose staged content has the key's current content identity
+  changes nothing and queues no upload.
+- `ensure_cached` and `fetch_range` resolve the item and serve its bytes in one step, so the
+  reply's `item` describes exactly the bytes written; its `size` is the size of that content.
 - `write` with `base` (a `contentId` the client read) declares the content the edit started from; the
   owner carries it to the published op, where it decides between a replacement and a conflicted copy
   ([conflict-resolution.md](algorithms/conflict-resolution.md)). Without `base` the edit's base is
   unknown.
-- `subscribe` with `tempDir` declares a directory in which the subscriber's own clients receive
-  materialised files; the owner keeps the latest declaration per domain, in memory, as a destination
-  root ([security-model.md §7.3](algorithms/security-model.md#73-paths-passed-over-ipc-confused-deputy)).
 - A socket serving several domains adds host actions (`menu`, `menu_stats` on macOS,
   [file-provider.md](frontends/file-provider.md)) and routes every other action by `domain`; its own
   refusals carry codes ([07 §4.2](07-daemon-cli.md#42-envelopes)), and a domain it does not serve is
@@ -293,9 +299,10 @@ Defined once, for every frontend and caller:
   `{evicted|restored, failed}`. The request fails as a whole only when the target itself cannot be
   resolved (`not_found`) or every file failed for one reason the caller must see (for example
   `unreachable`).
-- After the chunk-store work, the hook `surface_evicted` / `surface_restored` runs once with the
-  request's reference ([§3.2](#32-hooks)). The chunk store is acted on first: a pin is the core's
-  promise, whether or not anything moves the system's copy.
+- Evict and restore act on the chunk store only. A host whose OS keeps its own copy (the File
+  Provider replica) moves that copy from its own client
+  ([file-provider §6.7](frontends/file-provider.md#67-custom-actions)); a pin is the core's promise
+  either way.
 
 ### 3.5 Rules the handler enforces
 
@@ -328,23 +335,38 @@ up with. Ops are not filtered by author: a change made by a command on this mach
 frontends.
 
 1. Split the anchor at the first `|`. A generation different from the current one → `{stale:true}`.
-2. If the anchor's entry equals the applied head, or both are absent → `{stale:false,
+2. An anchor with no entry ("before every entry") once the dropped-shard record is set →
+   `{stale:true}`: entries it never saw may be gone.
+3. If the anchor's entry equals the applied head, or both are absent → `{stale:false,
    cursor:anchor(gen, head), more:false, ops:[]}`.
-3. Read up to `limit` entries after the anchor's entry. The anchor's entry no longer kept →
+4. Read up to `limit` entries after the anchor's entry. The anchor's entry no longer kept →
    `{stale:true}`.
-4. `cursor` is the last entry returned, or the anchor itself on an empty page (a caller is never told
+5. `cursor` is the last entry returned, or the anchor itself on an empty page (a caller is never told
    to start over); `more` says whether entries remain.
-5. Render each op; folder ids resolve through the folder-id index, which keeps an id after its marker
-   is gone ([local-cache.md](data-model/local-cache.md)):
+6. Render each op; folder ids resolve through the folder-id index, which keeps an id after its marker
+   is gone, and a file is named by the file id its applied-log op carries
+   ([03 §2.7](03-journal-sync.md#27-applied-log-local)), so it is named the same after it moved or
+   went:
    - `{"op":"put","ref","parentRef","name","item"}` — `item` read from the mirror through the
      reference's current resolution;
    - `{"op":"delete","ref","parentRef","name"}`;
    - `{"op":"mkdir","ref":"d:<id>","parentRef","name","item"}`;
    - `{"op":"rmdir","id","ref","parentRef","name"}`;
    - `{"op":"rename","is_dir","id"?,"srcRef","srcParentRef","ref","parentRef","name","item"}`,
-     emitted only when both ends can be named (a half-reported move loses an item).
-6. An op whose item or parent cannot be named is dropped and counted in `unnamed`, never turned into
+     emitted only when both ends can be named (a half-reported move loses an item); `srcRef` equals
+     `ref` for a folder and for a file named by its file id.
+7. An op whose item or parent cannot be named is dropped and counted in `unnamed`, never turned into
    `stale`: re-listing the domain for one folder would cost every other.
+
+**Feed watermark.** An anchor stays answerable for as long as its consumer may present it. The owner
+records durably, as the domain's feed watermark, the entry of the oldest anchor a consumer may still
+present: it is set by a `cursor` answer when no watermark exists, moves to the entry of the anchor
+each `changes_since` names (the consumer will not present an older one), and is cleared when a new
+generation is stamped. Applied-log retention keeps the shard holding the watermark's entry and every
+later one ([wal-and-journal §4.8](algorithms/wal-and-journal.md#48-retention-horizon-bridging-and-rebuild)).
+A watermark that has not moved for `FEED_WATERMARK_MAX_AGE` (recommended 180 days) lapses, is logged,
+and holds nothing back: a consumer gone that long (an extension disabled, a domain unregistered) must
+not grow the log without bound, and one that returns re-lists.
 
 ### 3.7 Listings and their order
 
@@ -357,7 +379,8 @@ frontends.
 - **`list_all`**: first page: walk from the root depth-first through `list_children`; a folder with no
   id counts once in `unnamed` and its subtree is skipped (it cannot be named); sort by path; stamp
   and keep the walk (a failure to keep is logged); serve lines 0..limit−1. Later pages read the kept
-  file from line n+1; a missing file is re-walked and skipped to the same line. `next` is emitted only
+  file from line n+1; a cursor naming a walk other than the kept one, or a missing kept file, is
+  answered `{stale:true}`. `next` is emitted only
   when one more entry exists. The walk spans many suspension points and may observe the mirror
   changing: the anchor was taken first, and the feed covers the difference.
 
@@ -366,8 +389,8 @@ frontends.
 `subscribe` turns the connection into an event stream on the domain's topic
 ([01 §11](01-core.md#11-ipc-framing)). Events are hints on top of the change feed: a lost event costs
 promptness, never correctness. Every event is one JSON line `{"event":"<name>","domain":"<name>",
-"id":<seq>, …}`, `id` increasing within one owner process. Which of `changed`, `resync`, `evict`,
-`restore` and `reset` a host publishes, and when, is in its frontend spec. Every owner publishes:
+"id":<seq>, …}`, `id` increasing within one owner process. Which of `changed` and `reset` a host
+publishes, and when, is in its frontend spec. Every owner publishes:
 
 - **the recovery notice** `{"event":"recovered","domain":D,"id":N}`, when a store request for the
   domain succeeds after the owner answered `unreachable` for it
@@ -383,7 +406,7 @@ promptness, never correctness. Every event is one JSON line `{"event":"<name>","
 |---|---|---|
 | Owner | the service process owns every domain ([07 §2.4](07-daemon-cli.md#24-which-process-owns-which-domain)) | the app process |
 | Transport | one socket for all domains, routed by `domain`; adds `menu`, `menu_stats` | in-process call with the same JSON; plus a handle API for ranged reads (open → handle, size, read, close), one read-ahead state per handle |
-| Hooks | events to the subscribed app (only the app can move replica content) | none but the defaults |
+| Hooks | `changed` events to the subscribed app (only a process holding a File Provider manager signals the system) | none but the defaults |
 | Change feed | `changes_since` plus events | none: pulls ([android.md §3.2](frontends/android.md#32-freshness-without-a-journal-poller)) |
 | Writes | `write` with a staging file adopted by rename | `write` with `await`; no ranged write and no close (the process may die at any time) |
 
@@ -399,8 +422,9 @@ Details: [file-provider.md](frontends/file-provider.md), [android.md](frontends/
 3. **Presenting frontends live in the owner**: a local edit and a peer's change meet under one lock.
 4. **No store read below the mirror** on any metadata path.
 5. **The core writes materialised files** into a host-chosen directory (the sandboxed consumer may not
-   move files in), and **adopts staging files by rename**, with no copy; both only inside declared
-   roots, so a socket client cannot use the owner to reach files it could not reach itself.
+   move files in), and **adopts staging files by rename**, with no copy; both only inside the roots
+   the host declares, or by path rules alone where only the host's own clients reach the socket, so
+   a socket client cannot use the owner to reach files it could not reach itself.
 10. **The owner announces that it serves a domain** (the recovery notice), so a client latched on a
     router's "not served" answer never stays latched after the domain comes back.
 6. **The core owns the anchor.** Stale only after a new generation or a pruned anchor; unnameable
@@ -420,15 +444,14 @@ Details: [file-provider.md](frontends/file-provider.md), [android.md](frontends/
   whole adopted staged body has a `contentId` equal to the etag its publish yields; a directory's
   etag, size and mtime do not change when its children change.
 - **Listings.** Paged and flat views agree; files and folders share one bytewise name order; a folder
-  that cannot be named is counted, not dropped; the kept walk survives being dropped between pages and
-  a write between pages; a name containing a newline does not end the listing.
+  that cannot be named is counted, not dropped; a write between pages shifts no page; a cursor on a dropped or remade walk answers `{stale:true}`; a name containing a newline does not end the listing.
 - **Mutations.** A create under a parent named by storage key is refused; `create`, `write`, `mkdir`
   and `symlink` with `exclusive`, and `rename` with `noreplace`, onto an existing name answer `exists`
   and change nothing; `delete` of a folder is `invalid`;
   every mutation on a read-only domain answers `read_only`; `revert` and `share` while paused answer
   `paused`.
 - **Transfer paths.** `ensure_cached`, `fetch_range` and `write` with a path outside the host's
-  declared roots, through a symlink, or (for `dest`) naming an existing file, answer `denied` and
+  declared roots (where it declares them), through a symlink, or (for `dest`) naming an existing file, answer `denied` and
   touch nothing.
 - **Events.** A subscriber of a domain receives `recovered` when the owner starts serving the domain
   and after the first successful store request following an `unreachable` answer; `notify_reset`
@@ -441,7 +464,16 @@ Details: [file-provider.md](frontends/file-provider.md), [android.md](frontends/
   folder renamed since; a directory rename with its id: the ops of §3.6. An up-to-date anchor returns
   no ops and the same cursor; a pruned anchor and an anchor from another generation are stale.
 - **Evict and restore.** On a folder (and on the root), every file of the subtree becomes
-  `online-only` / `pinned` with `pinnedUntil`; a file with staged edits keeps them; the surface hook
-  runs once with the request's reference.
+  `online-only` / `pinned` with `pinnedUntil`; a file with staged edits keeps them.
 - **Codes.** Every failure reply on every socket carries a code from §2.4.
-- **References.** Parsing and printing round-trip ([01](01-core.md)).
+- **References.** Parsing and printing round-trip ([01](01-core.md)). A file keeps its `i:`
+  reference across a local rename, a peer's rename, a new version and a rebuild; a feed op for a file
+  that later moved or went still names it by that reference; `f:` and `i:` name the same file.
+- **Feed retention.** An anchor handed out by `cursor`, and the last anchor named by
+  `changes_since`, stay answerable after the horizon passes; a rebuild leaves them valid; an anchor
+  with no entry is stale once a shard was dropped; a watermark idle for `FEED_WATERMARK_MAX_AGE`
+  holds nothing back.
+- **Replies that describe content.** `ensure_cached` and `fetch_range` reply with the row of the
+  bytes written; `write` of the key's current content queues nothing; a row of a read-only domain or
+  of a non-UTF-8 name carries `readOnly`; `exists` carries the occupant; a rename onto the item's own
+  place answers the item.

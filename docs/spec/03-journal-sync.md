@@ -195,6 +195,12 @@ never written as `null`, so older readers see what they always saw.
 - **Contents**: this client's published entries; peers' applied entries; rebuild findings (under
   freshly minted keys, with the ops a rebuild's diff amounts to); keys a rebuild marked handled
   (with `[]`).
+- **Local file ids.** An op naming a file (`put`, `delete`, and `rename` of a file) MAY carry
+  `"fid":"<file id>"` in its applied-log copy only: the file's local id
+  ([01 §2.7](01-core.md#27-item-references)) when the op was handled, so the change feed names the
+  file even after it moved again or went. Writers MUST record it; it is never published. Readers
+  SHOULD accept an op without it: the feed then names the file by the id now at the op's path, or
+  counts it unnamed.
 - **Reading**: split on `\n`; a line that has no tab, whose key does not parse, or whose second
   field is not a JSON array is dropped (a torn record). Ops inside a kept line are decoded by §2.3,
   except that an op the reader cannot decode is dropped from the line rather than failing it.

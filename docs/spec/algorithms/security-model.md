@@ -185,7 +185,7 @@ On every accepted connection the server MUST read the peer's credentials from th
 
 Some clients are less privileged than the owner process (the sandboxed macOS extension; any future sandboxed client). A request may carry file paths (`staging` for a write adopted by rename, `dest` for a file the core writes). The owner process MUST NOT use its own privileges on a path the client could not have used:
 
-- Each host declares, per client kind, a **staging root** and a **destination root** (on macOS: the extension's own staging directory and the File Provider temporary directory). A path outside the declared root is refused `denied`. A host with no sandboxed clients MAY declare the owner's home as both roots.
+- Each host declares, per client kind, a **staging root** and a **destination root**. A path outside the declared root is refused `denied`. A host with no sandboxed clients MAY declare the owner's home as both roots. A host whose socket only its own clients can reach, and whose sandboxed client receives files in a directory the owner cannot learn, MAY declare no roots and rely on the rules below: on macOS the App Group container is that boundary (only the app, the extension and unsandboxed processes of the user reach the socket), and the File Provider temporary directory has no location the owner could derive ([file-provider §4.4](../frontends/file-provider.md#44-transfer-paths)).
 - The path's parent is resolved without following symbolic links and MUST lie under the root; the final component MUST NOT be a symbolic link.
 - `staging` MUST be a regular file owned by the owner uid. It is adopted by rename within the same filesystem; it MAY have other hard links (the system's own name for the file).
 - `dest` MUST NOT exist: the core creates it exclusively, without following links, mode 0600. It never overwrites.
@@ -296,7 +296,7 @@ An implementation MUST exhibit:
 - A share with a past or missing expiry answers 410; a revoked share answers 404 at once; a share of a folder that was since trashed is no longer served.
 - A caller-chosen token that is taken is refused, not overwritten.
 - A socket in a directory with group or other access is not served; a connection from another uid is closed without an answer.
-- A `staging` or `dest` path outside its declared root, or through a symbolic link, is refused `denied`; an existing `dest` is not overwritten.
+- A `staging` or `dest` path outside its declared root (where one is declared), or through a symbolic link, is refused `denied`; an existing `dest` is not overwritten.
 - With `allowOther`, another user can read and cannot create, write, rename or delete.
 - A client refuses a non-loopback `http://` URL; a plaintext listener binds loopback unless told otherwise.
 - On Android, a server certificate chaining only to a user-installed CA is refused; one chaining to a configured `ca_certificate` is accepted.

@@ -221,6 +221,8 @@ Rules:
 | governor lock | [uplink-governor.md §4.5](algorithms/uplink-governor.md#45-governor-ownership-and-the-lease-protocol) | same |
 | pause flag | `<data dir>/paused/<domain>` (present = paused) | same |
 | resync generation | `<data dir>/resync-<domain>` ([08 §2.5](08-frontends.md)) | same |
+| feed watermark | `<data dir>/feed-watermark-<domain>`: the entry key, a space, the epoch ms it last moved ([08 §3.6](08-frontends.md#36-change-feed-changes_since)) | same |
+| dropped-shard record | `<data dir>/feed-dropped-<domain>` (present = a shard was dropped) | same |
 | default domain | `<data dir>/default-domain` (one line, the name) | same |
 | restart (through the service manager, never by signalling processes found by name) | `systemctl --user restart tsync` | `launchctl kickstart -k gui/$UID/org.feverdreamtv.tsync.daemon`, then open the app |
 | log reader | `journalctl -t tsync -n N [-f]` | `tail -n N [-f] ~/Library/Logs/tsync-daemon.log` |
@@ -714,8 +716,9 @@ menu (served as JSON by the File Provider process's `menu` action):
   rows revealing the file; a traffic line "X sent · Y to go" when non-zero; a rate line
   "R/s · 2h 13m left" (two largest non-zero units; none under a minute); a Stats submenu filled on
   open (placeholder "Reading…", never empty); "Hold changes", checked when all domains are paused,
-  disabled when all are unreachable, whose action pauses or resumes every domain; quit, labelled for
-  the icon ("Quit tsync tray"), which leaves the daemon running.
+  disabled when all are unreachable, whose action pauses or resumes every domain; on the Linux tray,
+  quit, labelled "Quit tsync tray", which leaves the daemon running. The macOS menu has no quit row:
+  the app carrying it also relays change signals ([file-provider §2](frontends/file-provider.md#2-processes-and-ownership)).
 - **JSON**: `{icon?, tooltip, entries:[{separator} | {label, enabled, indent, checked?, submenu?,
   action: openFolder | reveal{domain, rel} | setPaused | stats | quit}]}`.
 

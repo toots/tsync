@@ -183,25 +183,38 @@ never a path for a folder, so it survives renames of any ancestor.
 ```
 item-ref = "root"
          | "d:" folder-id                       ; a folder
+         | "i:" file-id                         ; a file, by its local file id
          | "f:" folder-id "/" leaf              ; a file: its parent's id and its leaf
+file-id  = 32hexlower
 ```
+
+- A **file id** names one file of a domain on one client for the file's whole life there: it is
+  kept across renames, moves and content changes made locally or applied from peers, and never
+  reused. It is minted by the owner from the platform CSPRNG (128 bits) and is never published:
+  another client knows the same file by another id. Where it is recorded is
+  [local-cache §3.1](data-model/local-cache.md#31-namespace-mirror).
+- The owner names files by `i:` in every reply. `f:` remains for callers that compose a reference
+  from a parent and a leaf; both resolve to the same file.
 
 - Parsing is total: every string yields either a reference or "malformed".
 - `d:.tsync-root` denotes the root and MUST be normalised to `root`.
+- An `i:` id MUST be exactly 32 lowercase hex digits.
 - For `f:`, the first `/` separates the id from the leaf. The id MUST satisfy `folder-id`, and
   the leaf MUST satisfy `leaf` (so it contains no `/`); a leaf MAY contain `:`.
-- Anything else — an empty id or leaf, a bare `d:` or `f:`, an id or leaf violating its
+- Anything else — an empty id or leaf, a bare `d:`, `i:` or `f:`, an id or leaf violating its
   grammar, a store key — is **malformed**. A malformed reference is INVALID; it is never
   answered as ABSENT. A well-formed reference that resolves to nothing is ABSENT.
-- A reference names a kind: an `f:` reference MUST NOT resolve to a folder, and a `d:`
+- A reference names a kind: an `i:` or `f:` reference MUST NOT resolve to a folder, and a `d:`
   reference MUST NOT resolve to a file.
-- Formatting a parsed reference MUST reproduce the canonical string (`root`, `d:<id>`,
+- Formatting a parsed reference MUST reproduce the canonical string (`root`, `d:<id>`, `i:<id>`,
   `f:<id>/<leaf>`).
-- Resolving a reference MUST NOT mint a folder id or write anything: a resolution that minted
+- Resolving a reference MUST NOT mint an id or write anything: a resolution that minted
   would publish a marker and could resurrect a deleted folder.
 
 Rationale: a directory rename changes every descendant's path, and references reach system
-logs, so no user path appears in one unless the caller named it.
+logs, so no user path appears in one unless the caller named it. A file id exists because a host
+that persists identifiers (macOS File Provider) reads a changed identifier as a merge, so a
+parent-and-leaf name would turn every file rename into a removal and a re-download.
 
 ### 2.8 Mirror escaping (local names for real paths)
 
@@ -755,7 +768,8 @@ An implementation MUST exhibit these observable properties.
   for a domain with a local-filesystem store and accepted otherwise, and `Family Photos` and
   `chunks` are accepted; folder ids of 12, 16 and 32 hex digits, with or without a `-<counter>`, are accepted.
 - **Item references.** `d:.tsync-root` is the root; a leaf may contain `:`
-  (`f:3f2a9c1b7d4e-1a/a:b`); `f:3f2a9c1b7d4e-1a/a/b`, `d:`, `f:3f2a9c1b7d4e-1a/`, `f:/x`,
+  (`f:3f2a9c1b7d4e-1a/a:b`); `i:` followed by 32 lowercase hex digits is a file; `f:3f2a9c1b7d4e-1a/a/b`,
+  `d:`, `i:`, `i:ABC`, an `i:` id of 31 digits, `f:3f2a9c1b7d4e-1a/`, `f:/x`,
   `d:..`, `d:Photos` and a storage key are malformed and answered INVALID; formatting
   round-trips.
 - **Temporary names.** `.tsync-tmp-1-2.tmp` (owner pid 1 recoverable),
