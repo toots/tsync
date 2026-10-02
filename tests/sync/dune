@@ -213,3 +213,18 @@
  (alias runtest)
  (action
   (diff lost_answer_test.expected lost_answer_test.output)))
+
+(executable
+ (name rebuild_race_test)
+ (modules rebuild_race_test)
+ (libraries tsync_core tsync_store tsync_checkout tsync_sync unix))
+
+(rule
+ (with-stdout-to
+  rebuild_race_test.output
+  (run ./rebuild_race_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff rebuild_race_test.expected rebuild_race_test.output)))

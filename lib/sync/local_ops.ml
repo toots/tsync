@@ -887,8 +887,13 @@ module Make (C : Engine_ctx.S) = struct
         !post_put_hook path e.size (base_hex e);
         e)
 
+  (* Local namespace changes and promotions; a rebuild sweeps only when none
+     happened during its walk. *)
+  let local_changes = Atomic.make 0
+
   (* WAL records of namespace changes: durable intent before the local half. *)
   let record_intent ?(priors = []) ops =
+    Atomic.incr local_changes;
     let body =
       Wal.encode
         {

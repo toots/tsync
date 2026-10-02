@@ -808,6 +808,8 @@ module Make (C : Engine_ctx.S) = struct
 
   let apply_pass () = try apply_pass () with Exit -> 0
 
+  exception Moved_on
+
   let metadata_owed () =
     List.exists (fun (_, (r : Wal.record)) -> Wal.is_metadata r) (owed ()).ops
 
@@ -820,6 +822,10 @@ module Make (C : Engine_ctx.S) = struct
         "metadata operations are not published yet, and a rebuild would undo \
          them";
     let t0 = Unix.gettimeofday () in
+    let changes0 = Atomic.get local_changes in
+    let check_unchanged () =
+      if Atomic.get local_changes <> changes0 then raise Moved_on
+    in
     let listing = Journal.list_entries journal in
     let failures = ref 0 and diffs = ref [] and manifests = ref 0 in
     let folders = ref 0 in
@@ -878,46 +884,60 @@ module Make (C : Engine_ctx.S) = struct
                          Op.Put { path = p; size = m.size; base = None }
                          :: !diffs)))
          ());
-    if !failures = 0 then (
-      with_meta (fun () ->
-          let rec sweep rel =
-            List.iter
-              (fun (c : Mirror.child) ->
-                let p = Names.join rel c.name in
-                match c.kind with
-                  | `Dir id ->
-                      if Hashtbl.mem seen_dirs p then sweep p
-                      else (
-                        (match id with
-                          | Some id -> (
-                              Mirror.remove_folder mirror p;
-                              match Mirror.key_of_id mirror id with
-                                | Some now ->
-                                    diffs :=
-                                      Op.Rename
-                                        {
-                                          dst = now;
-                                          src = p;
-                                          is_dir = true;
-                                          size = None;
-                                          id = Some id;
-                                        }
-                                      :: !diffs
-                                | None ->
-                                    diffs :=
-                                      Op.Rmdir { path = p; id = Some id }
-                                      :: !diffs)
-                          | None -> Mirror.remove_folder mirror p);
-                        ())
-                  | `File _ ->
-                      if not (Hashtbl.mem seen_files p) then (
-                        remove_local_file p;
-                        diffs := Op.Delete p :: !diffs))
-              (Mirror.list mirror rel)
-          in
-          Narrate.progress narrate "removing what the store no longer has";
-          sweep "";
-          Mirror.rebuild_index mirror);
+    if
+      !failures = 0
+      &&
+        try
+          with_meta (fun () ->
+              check_unchanged ();
+              let rec sweep rel =
+                List.iter
+                  (fun (c : Mirror.child) ->
+                    let p = Names.join rel c.name in
+                    match c.kind with
+                      | `Dir id ->
+                          if Hashtbl.mem seen_dirs p then sweep p
+                          else (
+                            (match id with
+                              | Some id -> (
+                                  Mirror.remove_folder mirror p;
+                                  match Mirror.key_of_id mirror id with
+                                    | Some now ->
+                                        diffs :=
+                                          Op.Rename
+                                            {
+                                              dst = now;
+                                              src = p;
+                                              is_dir = true;
+                                              size = None;
+                                              id = Some id;
+                                            }
+                                          :: !diffs
+                                    | None ->
+                                        diffs :=
+                                          Op.Rmdir { path = p; id = Some id }
+                                          :: !diffs)
+                              | None -> Mirror.remove_folder mirror p);
+                            ())
+                      | `File _ ->
+                          if not (Hashtbl.mem seen_files p) then
+                            with_key p (fun () ->
+                                check_unchanged ();
+                                remove_local_file p;
+                                diffs := Op.Delete p :: !diffs))
+                  (Mirror.list mirror rel)
+              in
+              Narrate.progress narrate "removing what the store no longer has";
+              Fun.protect
+                ~finally:(fun () -> Mirror.rebuild_index mirror)
+                (fun () -> sweep "");
+              true)
+        with Moved_on ->
+          incr failures;
+          changed (List.concat_map Op.paths !diffs);
+          Log.info "resync: local changes during the walk; still in hold";
+          false
+    then (
       let ops = List.rev !diffs in
       (* One pass over the diffs, 64 to an applied record. *)
       let rec chunks batch n = function

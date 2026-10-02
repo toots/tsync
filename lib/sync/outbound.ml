@@ -835,6 +835,7 @@ module Make (C : Engine_ctx.S) = struct
                   raise Rt.Cancelled;
                 R.publish ~resend ~parent:pid ~leaf:(Names.leaf_of path) m;
                 let m = Manifest.rename m (Names.leaf_of path) in
+                Atomic.incr local_changes;
                 Mirror.write_file ~own:true mirror path m;
                 Staged.write staged path
                   { e with state = Committed m; base = Base m.h1 });
