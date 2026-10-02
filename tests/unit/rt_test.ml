@@ -117,5 +117,24 @@ let () =
         Stop.sleep 0.000001
       done;
       check "cancelled waits on the stop promise are withdrawn"
-        (live () - before < 1_000_000));
+        (live () - before < 1_000_000);
+      let before = live () in
+      let ended = Atomic.make 0 in
+      for _ = 1 to 50_000 do
+        Rt.spawn (fun () -> Atomic.incr ended)
+      done;
+      while Atomic.get ended < 50_000 do
+        Rt.sleep 0.01
+      done;
+      Rt.sleep 0.05;
+      check "ended fibers leave no context behind" (live () - before < 1_000_000));
+  let live () =
+    Gc.full_major ();
+    (Gc.stat ()).live_words * (Sys.word_size / 8)
+  in
+  let before = live () in
+  for _ = 1 to 20_000 do
+    Rt.run_sync ignore
+  done;
+  check "run_sync leaves no context behind" (live () - before < 1_000_000);
   Printf.printf "%d checks\n" !checks

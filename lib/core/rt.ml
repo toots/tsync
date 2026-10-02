@@ -118,7 +118,14 @@ let spawn_in ?(name = "task") ctx fn =
           []);
     }
 
-let spawn ?name fn = spawn_in ?name (child_ctx root) fn
+(* The context leaves its parent's children when the fiber ends. *)
+let spawn_child ?name parent fn =
+  let c = child_ctx parent in
+  spawn_in ?name c (fun () ->
+      Fun.protect ~finally:(fun () -> detach_ctx parent c) fn);
+  c
+
+let spawn ?name fn = ignore (spawn_child ?name root fn)
 
 (* [register] receives a resolver that answers whether it was the one to wake
    the fiber, since a cancellation may win the race.
@@ -294,14 +301,12 @@ end
 
 let async_child parent fn =
   let p = Promise.create () in
-  let c = child_ctx parent in
-  spawn_in c (fun () ->
-      Fun.protect
-        ~finally:(fun () -> detach_ctx parent c)
-        (fun () ->
-          match fn () with
-            | v -> ignore (Promise.try_resolve p v)
-            | exception e -> Promise.fail p e));
+  let c =
+    spawn_child parent (fun () ->
+        match fn () with
+          | v -> ignore (Promise.try_resolve p v)
+          | exception e -> Promise.fail p e)
+  in
   (p, c)
 
 let async fn = fst (async_child (current ()) fn)
@@ -567,7 +572,7 @@ let run_sync fn =
   ensure_started ();
   let m = Mutex.create () and c = Stdlib.Condition.create () in
   let result = ref None in
-  spawn_in (child_ctx root) (fun () ->
+  spawn (fun () ->
       let r =
         try Ok (fn ()) with e -> Error (e, Printexc.get_raw_backtrace ())
       in
