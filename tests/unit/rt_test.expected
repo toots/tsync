@@ -8,4 +8,6 @@ ok   promise
 ok   cancel runs finally
 ok   first waits for a loser
 ok   a cancelled first still waits for its losers
-10 checks
+ok   cancelled acquires leave no waiter
+ok   cancelled waits on the stop promise are withdrawn
+12 checks

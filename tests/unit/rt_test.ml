@@ -99,5 +99,23 @@ let () =
                ])
        with Rt.Timeout -> ());
       check "a cancelled first still waits for its losers"
-        (Atomic.get caller_cancelled));
+        (Atomic.get caller_cancelled);
+      let full = Rt.Semaphore.create ~name:"full" 1 in
+      Rt.Semaphore.acquire full;
+      for _ = 1 to 200 do
+        try Rt.with_timeout 0.0005 (fun () -> Rt.Semaphore.acquire full)
+        with Rt.Timeout -> ()
+      done;
+      let _, _, waiting, _ = Rt.Semaphore.stats full in
+      check "cancelled acquires leave no waiter" (waiting = 0);
+      let live () =
+        Gc.full_major ();
+        (Gc.stat ()).live_words * (Sys.word_size / 8)
+      in
+      let before = live () in
+      for _ = 1 to 20_000 do
+        Stop.sleep 0.000001
+      done;
+      check "cancelled waits on the stop promise are withdrawn"
+        (live () - before < 1_000_000));
   Printf.printf "%d checks\n" !checks

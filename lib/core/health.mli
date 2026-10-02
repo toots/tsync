@@ -36,8 +36,8 @@ val answered : t -> unit
 (** A deliberate probe failed or exceeded {!probe_timeout}. *)
 val probe_lost : ?reason:string -> t -> unit
 
-(** One-shot: called at the next trip. *)
-val on_trip : t -> (unit -> unit) -> unit
+(** One-shot: called at the next trip; answers how to unregister it. *)
+val on_trip : t -> (unit -> unit) -> unit -> unit
 
 (** The tally of attempts that hit a stall detector. *)
 val timed_out : t -> unit

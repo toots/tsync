@@ -124,8 +124,12 @@ let probe_lost ?(reason = "") t =
            go_out t now hold))
 
 let on_trip t f =
-  if not t.always_up then
-    Mutex.protect t.m (fun () -> t.watchers <- f :: t.watchers)
+  if t.always_up then ignore
+  else (
+    Mutex.protect t.m (fun () -> t.watchers <- f :: t.watchers);
+    fun () ->
+      Mutex.protect t.m (fun () ->
+          t.watchers <- List.filter (( != ) f) t.watchers))
 
 let timed_out t = Mutex.protect t.m (fun () -> t.timeouts <- t.timeouts + 1)
 let timeouts t = Mutex.protect t.m (fun () -> t.timeouts)

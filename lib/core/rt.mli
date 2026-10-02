@@ -30,8 +30,9 @@ val run_sync : (unit -> 'a) -> 'a
 
 (** Park until the resolver handed to [register] is called. The resolver may be
     called from any thread; it answers [false] when the fiber was already woken,
-    by a cancellation for example. *)
-val suspend : ((('a, exn) result -> bool) -> unit) -> 'a
+    by a cancellation for example. [register] answers how to withdraw the
+    resolver, run (perhaps twice) when a cancellation woke the fiber. *)
+val suspend : ((('a, exn) result -> bool) -> unit -> unit) -> 'a
 
 (** The calling fiber's identity; code outside any fiber shares one. *)
 type fiber

@@ -121,11 +121,15 @@ let spawn_in ?(name = "task") ctx fn =
 let spawn ?name fn = spawn_in ?name (child_ctx root) fn
 
 (* [register] receives a resolver that answers whether it was the one to wake
-   the fiber, since a cancellation may win the race. *)
-let suspend (register : (('a, exn) result -> bool) -> unit) : 'a =
+   the fiber, since a cancellation may win the race.
+
+   It returns how to withdraw what it registered, run when a cancellation won
+   from whichever side of that race finishes last, so it must be idempotent. *)
+let suspend (register : (('a, exn) result -> bool) -> unit -> unit) : 'a =
   let ctx = current () in
   check ();
   let cell = Atomic.make None in
+  let withdraw = Atomic.make ignore and by_cancel = Atomic.make false in
   Duppy.suspend ~priority:() scheduler (fun resume ->
       let finish r =
         if Atomic.compare_and_set cell None (Some r) then (
@@ -139,9 +143,16 @@ let suspend (register : (('a, exn) result -> bool) -> unit) : 'a =
             Mutex.unlock ctx.cm;
             ignore (finish (Error e))
         | None ->
-            ctx.hook <- Some (fun e -> ignore (finish (Error e)));
+            ctx.hook <-
+              Some
+                (fun e ->
+                  if finish (Error e) then (
+                    Atomic.set by_cancel true;
+                    (Atomic.get withdraw) ()));
             Mutex.unlock ctx.cm;
-            register finish);
+            let w = register finish in
+            Atomic.set withdraw w;
+            if Atomic.get by_cancel then w ());
   Mutex.protect ctx.cm (fun () -> ctx.hook <- None);
   match Atomic.get cell with
     | Some (Ok v) -> v
@@ -161,9 +172,15 @@ let timer d fire =
 
 let sleep d =
   if d <= 0. then check ()
-  else suspend (fun resolve -> timer d (fun () -> ignore (resolve (Ok ()))))
+  else
+    suspend (fun resolve ->
+        timer d (fun () -> ignore (resolve (Ok ())));
+        ignore)
 
-let yield () = suspend (fun resolve -> ignore (resolve (Ok ())))
+let yield () =
+  suspend (fun resolve ->
+      ignore (resolve (Ok ()));
+      ignore)
 
 (* Each wait is bounded so that a cancelled one never leaves its task
    registered on a descriptor for ever. *)
@@ -187,7 +204,8 @@ let wait_fd ?(timeout = infinity) ev fd =
                              (function `Delay _ -> false | _ -> true)
                              evs)));
                   []);
-            })
+            };
+          ignore)
     in
     if not fired then loop ()
   in
@@ -239,13 +257,19 @@ module Promise = struct
       | None ->
           suspend (fun resolve ->
               Mutex.lock p.m;
-              match p.st with
+              (match p.st with
                 | Done r ->
                     Mutex.unlock p.m;
                     ignore (resolve r)
                 | Pending ws ->
                     p.st <- Pending (resolve :: ws);
-                    Mutex.unlock p.m)
+                    Mutex.unlock p.m);
+              fun () ->
+                Mutex.protect p.m (fun () ->
+                    match p.st with
+                      | Pending ws ->
+                          p.st <- Pending (List.filter (( != ) resolve) ws)
+                      | Done _ -> ()))
 
   (* Not cancellable: a caller cancelled meanwhile still waits. *)
   let join p =
@@ -338,6 +362,12 @@ let with_stall_timeout window fn =
   in
   first [(fun () -> fn (fun () -> Atomic.set last (now ()))); watchdog]
 
+let withdraw_from m q w () =
+  Mutex.protect m (fun () ->
+      let kept = Queue.of_seq (Seq.filter (( != ) w) (Queue.to_seq q)) in
+      Queue.clear q;
+      Queue.transfer kept q)
+
 module Fmutex = struct
   type t = {
     m : Mutex.t;
@@ -374,7 +404,8 @@ module Fmutex = struct
             if not (resolve (Ok ())) then unlock t)
           else (
             Queue.push resolve t.waiters;
-            Mutex.unlock t.m)))
+            Mutex.unlock t.m);
+          withdraw_from t.m t.waiters resolve))
 
   let with_lock t fn =
     lock t;
@@ -396,7 +427,8 @@ module Condition = struct
       (fun () ->
         suspend (fun resolve ->
             Mutex.protect t.m (fun () -> Queue.push resolve t.waiters);
-            Fmutex.unlock mutex))
+            Fmutex.unlock mutex;
+            withdraw_from t.m t.waiters resolve))
 
   let broadcast t =
     let ws =
@@ -426,13 +458,16 @@ module Signal = struct
   let wait ?since t =
     suspend (fun resolve ->
         Mutex.lock t.m;
-        match since with
+        (match since with
           | Some v when v <> t.version ->
               Mutex.unlock t.m;
               ignore (resolve (Ok ()))
           | _ ->
               t.waiters <- resolve :: t.waiters;
-              Mutex.unlock t.m)
+              Mutex.unlock t.m);
+        fun () ->
+          Mutex.protect t.m (fun () ->
+              t.waiters <- List.filter (( != ) resolve) t.waiters))
 
   let broadcast t =
     let ws =
@@ -485,7 +520,8 @@ module Semaphore = struct
             if not (resolve (Ok ())) then release t)
           else (
             Queue.push resolve t.waiters;
-            Mutex.unlock t.m))
+            Mutex.unlock t.m);
+          withdraw_from t.m t.waiters resolve)
 
   let with_slot t fn =
     acquire t;
