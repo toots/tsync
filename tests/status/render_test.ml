@@ -67,6 +67,7 @@ let clean_wal =
     prepared = 0;
     executed = 0;
     stuck = 0;
+    retrying = 0;
     set_aside = 0;
     last_error = None;
   }
@@ -294,6 +295,7 @@ let degraded : machine =
                 prepared = 1;
                 executed = 1;
                 stuck = 1;
+                retrying = 2;
                 set_aside = 2;
                 last_error = Some "DEADLINE: store did not answer";
               };
@@ -440,6 +442,22 @@ let degraded : machine =
       ];
   }
 
+let retrying : machine =
+  let wal =
+    {
+      clean_wal with
+      retrying = 1;
+      last_error = Some "LOCAL: Media/notes.txt: Permission denied";
+    }
+  in
+  {
+    healthy with
+    domains =
+      List.map
+        (function Answered d -> Answered { d with wal } | other -> other)
+        healthy.domains;
+  }
+
 let () =
   List.iter
     (fun (name, m) ->
@@ -450,4 +468,4 @@ let () =
            (Yojson.Safe.from_string
               (Yojson.Safe.to_string (machine_to_yojson m)))
         = Ok m))
-    [("healthy", healthy); ("degraded", degraded)]
+    [("healthy", healthy); ("degraded", degraded); ("retrying", retrying)]

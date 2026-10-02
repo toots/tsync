@@ -48,8 +48,14 @@ let () =
       List.iter
         (fun j -> ignore (Dqueue.post q (j, 0)))
         ["a"; "flaky"; "refused"; "b"];
+      let seen_retrying = ref [] in
       let rec wait n =
         if n > 0 && Dqueue.pending q > 0 then (
+          List.iter
+            (fun (_, (n : Dqueue.failure_note)) ->
+              if not (List.mem n.attempts !seen_retrying) then
+                seen_retrying := n.attempts :: !seen_retrying)
+            (Dqueue.retrying q);
           Rt.sleep 0.1;
           wait (n - 1))
       in
@@ -61,6 +67,10 @@ let () =
               (fun (_, (n : Dqueue.failure_note)) -> Fail.kind_name n.last.kind)
               (Dqueue.parked q)))
         (List.length (Dqueue.Records.list r));
+      p "retrying seen at attempts: %s; retrying after: %d\n"
+        (String.concat ","
+           (List.map string_of_int (List.sort compare !seen_retrying)))
+        (List.length (Dqueue.retrying q));
       log := [];
       p
         "\n\

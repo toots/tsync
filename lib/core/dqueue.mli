@@ -120,6 +120,10 @@ val pending : 'job t -> int
 
 val idle : 'job t -> bool
 val parked : 'job t -> (string * failure_note) list
+
+(** Loaded records whose last attempt failed and that are due another. *)
+val retrying : 'job t -> (string * failure_note) list
+
 val running : 'job t -> string list
 val loaded : 'job t -> string list
 val completed : 'job t -> int

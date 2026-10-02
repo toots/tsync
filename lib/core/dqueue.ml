@@ -544,6 +544,13 @@ let pending t = Mutex.protect t.m (fun () -> List.length t.loaded)
 let idle t = Mutex.protect t.m (fun () -> t.loaded = [] && t.active = 0)
 let parked t = Mutex.protect t.m (fun () -> t.parked)
 
+let retrying t =
+  Mutex.protect t.m (fun () ->
+      List.filter_map
+        (fun id ->
+          Option.map (fun n -> (id, n)) (Hashtbl.find_opt t.failures id))
+        t.loaded)
+
 let running t =
   Mutex.protect t.m (fun () ->
       Hashtbl.fold

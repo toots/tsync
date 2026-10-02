@@ -300,6 +300,7 @@ let domain_body t : R.domain_body =
         prepared = a.prepared;
         executed = a.executed;
         stuck = a.stuck;
+        retrying = a.retrying;
         set_aside = a.set_aside;
         last_error = a.last_error;
       };

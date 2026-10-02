@@ -9,6 +9,7 @@ type activity = {
   prepared : int;
   executed : int;
   stuck : int;  (** parked records: retried only on {!S.rearm} *)
+  retrying : int;  (** records whose last attempt failed, retried on backoff *)
   set_aside : int;
       (** WAL records and staged manifests set aside: never run, kept until a
           user removes them (durable-queue §6) *)

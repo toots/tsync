@@ -104,7 +104,12 @@ let wal b (w : wal) =
   if w.stuck > 0 then
     row b "  " "WAL STUCK"
       (plural w.stuck "record" "records"
-      ^ Option.fold ~none:"" ~some:(fun e -> ": " ^ e) w.last_error)
+      ^ Option.fold ~none:"" ~some:(fun e -> ": " ^ e) w.last_error);
+  if w.retrying > 0 then
+    row b "  " "RETRYING"
+      (plural w.retrying "record" "records"
+      ^ " failing, retried with backoff"
+      ^ match w.last_error with Some e when w.stuck = 0 -> ": " ^ e | _ -> "")
 
 let traffic b indent (t : traffic) =
   row b indent "traffic"

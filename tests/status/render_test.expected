@@ -51,6 +51,7 @@ Domain Files
   metadata         1 change pending
   SET ASIDE        2 records that cannot be read, kept and never run
   WAL STUCK        1 record: DEADLINE: store did not answer
+  RETRYING         2 records failing, retried with backoff
   Frontend http-proxy port 5446  NOT ANSWERING
   Backend gcs (gcs, main)  bucket files
     link             wan
@@ -78,6 +79,44 @@ Jobs
 Warnings (newest first)
   0m 10s ago WARN copy replica: parked (×3)
   8m 20s ago ERROR cannot bridge the journal
+
+survives the wire: true
+
+== retrying
+tsync on example — 1 domain, 3 processes, up 11m 11s, load 0.4
+
+Domain Media
+  settings         versioning on, symlinks keep, chunk 8.0 MiB (default), cache chunk 16.0 MiB
+  concurrency      4 uploads, 4 chunk buffers, 8 downloads
+  read-only        yes
+  cache            7494 chunks, 9.9 GiB of 10.0 GiB
+  RETRYING         1 record failing, retried with backoff: LOCAL: Media/notes.txt: Permission denied
+  Frontend fuse       pid 101  /home/u/tsync/Media
+  Frontend http-proxy pid 102  port 5446  shared  share links
+    io               read 3.0 MiB, written 1.0 KiB
+  Backend gcs (gcs, main)  bucket media-bucket
+    link             wan
+    reachable        yes (51 ms)
+    journal          1444 entries, 0 to apply
+    corrupted        not checked — no verification has run
+    traffic          up 0 B (0 B/s), down 92 B (4 B/s)
+
+Processes
+  supervisor   pid 100  up 11m 11s  1.2% cpu
+    memory           private 61.0 MiB (heap 18.0 MiB, anonymous 61.0 MiB), mapped files 9.0 MiB
+  store-server pid 102  up 11m 9s  1.2% cpu  Media
+    memory           private 61.0 MiB (heap 18.0 MiB, anonymous 61.0 MiB), mapped files 9.0 MiB
+    listener         port 5446, TLS, 3 in flight (1 data), read 3.0 MiB, written 1.0 KiB
+    requests         get 12, put 2
+  owner        pid 101  up 11m 10s  1.2% cpu  Media
+    memory           private 61.0 MiB (heap 18.0 MiB, anonymous 61.0 MiB), mapped files 9.0 MiB
+    traffic          up 0 B (0 B/s), down 1.9 KiB (9 B/s)
+    uplink wan       2.8 MiB/s leased, 8.0 MiB in flight, 1 waiting
+
+Uplinks
+  wan        steady, 2.8 MiB/s (measured)
+    measured         sent 2.7 MiB/s, capacity 3.5 MiB/s, queueing 2 ms over a baseline of 31 ms
+    shares           owner Media 2.8 MiB/s
 
 survives the wire: true
 

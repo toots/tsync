@@ -1387,16 +1387,18 @@ module Make (C : Engine_ctx.S) = struct
         0 records
     in
     let parked = Dqueue.parked uploads @ Dqueue.parked metadata in
+    let retrying = Dqueue.retrying uploads @ Dqueue.retrying metadata in
     {
       intent = count Intent;
       prepared = count Prepared;
       executed = count Executed;
       stuck = List.length parked;
+      retrying = List.length retrying;
       set_aside =
         Atomic.get staged_set_aside
         + List.length (Dqueue.Records.set_aside_records wal);
       last_error =
-        (match parked with
+        (match parked @ retrying with
           | (_, n) :: _ -> Some (Fail.to_string n.last)
           | [] -> None);
       in_flight =
