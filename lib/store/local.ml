@@ -101,12 +101,19 @@ let rec claim ~mappable root key body retries =
                   (Key.to_string key)
               else claim ~mappable root key body (retries - 1))
 
+(* local §5.1: every write renames a new inode into place, so the inode with
+   the modification time's exact bits and the size names one version. *)
+let version (st : Unix.LargeFile.stats) =
+  Printf.sprintf "%x-%Lx-%Lx" st.st_ino
+    (Int64.bits_of_float st.st_mtime)
+    st.st_size
+
 let entry_of rel (st : Unix.LargeFile.stats) =
   {
     Store.key = rel;
     size = Int64.to_int st.st_size;
     last_modified = st.st_mtime;
-    etag = None;
+    etag = Some (version st);
     checksum = None;
   }
 
@@ -172,6 +179,16 @@ let expand_home p =
     Filename.concat (Sys.getenv "HOME") (String.sub p 2 (String.length p - 2))
   else p
 
+(* local §5.2: every write of a key holds that key's lock, so a conditional
+   replace's check and rename are one step against this process's writers.
+   Taken inside the collection's gate, never around it. *)
+let key_locks = Array.init 64 (fun _ -> Mutex.create ())
+
+let with_key key f =
+  Mutex.protect
+    key_locks.(Hashtbl.hash (Key.to_string key) land (Array.length key_locks - 1))
+    f
+
 let create ?(verify_writes = true) ~name root =
   let root = expand_home root in
   let health = Health.create name in
@@ -192,7 +209,7 @@ let create ?(verify_writes = true) ~name root =
     fed (fun () ->
         Chunk_spaces.gate spaces ~key
           ~body:(fun () -> body)
-          (fun () -> durable_write root key body);
+          (fun () -> with_key key (fun () -> durable_write root key body));
         if verify_writes then verify_written ~read:read_opt root key)
   in
   let get_range key off len =
@@ -238,7 +255,7 @@ let create ?(verify_writes = true) ~name root =
   let delete key =
     fed (fun () ->
         List.fold_left
-          (fun removed k -> delete_one k || removed)
+          (fun removed k -> with_key k (fun () -> delete_one k) || removed)
           false
           (Chunk_spaces.twins spaces key))
   in
@@ -250,7 +267,7 @@ let create ?(verify_writes = true) ~name root =
             let p = path root key in
             match Fs.lstat_opt p with
               | Some { st_kind = S_REG; _ } ->
-                  ignore (Fs.release p);
+                  with_key key (fun () -> ignore (Fs.release p));
                   Hashtbl.replace dirs (Filename.dirname p) ()
               | _ -> ())
           (List.concat_map (Chunk_spaces.twins spaces) keys);
@@ -264,7 +281,8 @@ let create ?(verify_writes = true) ~name root =
             | None ->
                 Fail.absent ~op:"copy" "%s: no such object" (Key.to_string src)
         in
-        Chunk_spaces.gate spaces ~key:dst ~body (fun () ->
+        Chunk_spaces.gate spaces ~key:dst ~body @@ fun () ->
+        with_key dst (fun () ->
             let s = path root src and d = path root dst in
             match Fs.lstat_opt s with
               | Some { st_kind = S_REG; _ } -> (
@@ -333,7 +351,7 @@ let create ?(verify_writes = true) ~name root =
           fed (fun () ->
               Chunk_spaces.gate spaces ~key
                 ~body:(fun () -> body)
-                (fun () -> claim ~mappable root key body 3)));
+                (fun () -> with_key key (fun () -> claim ~mappable root key body 3))));
       get_opt = (fun key -> fed (fun () -> read_opt key));
       get_range;
       head_opt;
