@@ -9,6 +9,9 @@ type activity = {
   prepared : int;
   executed : int;
   stuck : int;  (** parked records: retried only on {!S.rearm} *)
+  set_aside : int;
+      (** WAL records and staged manifests set aside: never run, kept until a
+          user removes them (durable-queue §6) *)
   last_error : string option;
   in_flight : string list;  (** paths of the uploads running now *)
   bytes_owed : int;  (** whole-file bytes of every unpublished put *)

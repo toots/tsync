@@ -137,6 +137,7 @@ type wal = {
   prepared : int;
   executed : int;
   stuck : int;
+  set_aside : int; [@key "setAside"] [@default 0]
   last_error : string option; [@key "lastError"] [@default None]
 }
 [@@deriving yojson { strict = false }]

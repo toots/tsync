@@ -62,7 +62,14 @@ let idle_sync =
   }
 
 let clean_wal =
-  { intent = 0; prepared = 0; executed = 0; stuck = 0; last_error = None }
+  {
+    intent = 0;
+    prepared = 0;
+    executed = 0;
+    stuck = 0;
+    set_aside = 0;
+    last_error = None;
+  }
 
 let no_queues =
   { pending_files = 0; pending_metadata = 0; in_flight = []; bytes_owed = 0 }
@@ -287,6 +294,7 @@ let degraded : machine =
                 prepared = 1;
                 executed = 1;
                 stuck = 1;
+                set_aside = 2;
                 last_error = Some "DEADLINE: store did not answer";
               };
             queues =

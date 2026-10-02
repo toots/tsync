@@ -1257,6 +1257,8 @@ module Make (C : Engine_ctx.S) = struct
     go 0 []
 
   (* 04 §4.10: before anything is served. *)
+  let staged_set_aside = Atomic.make 0
+
   let recover_local () =
     let root = Mirror.root mirror in
     let rec sweep_temps dir =
@@ -1278,6 +1280,7 @@ module Make (C : Engine_ctx.S) = struct
               (fun b -> Hashtbl.replace named b ())
               (Staged.bodies_named e)
         | `Bad p ->
+            Atomic.incr staged_set_aside;
             let body = Option.value ~default:"" (Fs.read_file_opt p) in
             let base = Filename.basename p in
             if not (Staged.is_set_aside_name base) then (
@@ -1395,6 +1398,9 @@ module Make (C : Engine_ctx.S) = struct
       prepared = count Prepared;
       executed = count Executed;
       stuck = List.length parked;
+      set_aside =
+        Atomic.get staged_set_aside
+        + List.length (Dqueue.Records.set_aside_records wal);
       last_error =
         (match parked with
           | (_, n) :: _ -> Some (Fail.to_string n.last)

@@ -49,6 +49,7 @@ Domain Files
   parked           1 metadata change
   uploads          3 files pending, 50.0 MiB owed, sending Photos/a.jpg, Photos/b.jpg
   metadata         1 change pending
+  SET ASIDE        2 records that cannot be read, kept and never run
   WAL STUCK        1 record: DEADLINE: store did not answer
   Frontend http-proxy port 5446  NOT ANSWERING
   Backend gcs (gcs, main)  bucket files

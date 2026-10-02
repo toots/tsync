@@ -64,6 +64,7 @@ let () =
       let (module E) = engine () in
       E.start ~poll_journal:false ();
       p "set aside: %b\n" (Fs.exists (manifest ^ ".bad"));
+      p "status counts it set aside: %d\n" (E.activity ()).set_aside;
       List.iter
         (fun b -> p "body kept: %b\n" (Staged.body_size staged b >= 0))
         bodies);

@@ -105,6 +105,7 @@ type wal = {
   prepared : int;
   executed : int;
   stuck : int;
+  set_aside : int;
   last_error : string option;
 }
 [@@deriving yojson]

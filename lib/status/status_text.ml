@@ -97,6 +97,10 @@ let queues b (q : queues) =
       (plural q.pending_metadata "change" "changes" ^ " pending")
 
 let wal b (w : wal) =
+  if w.set_aside > 0 then
+    row b "  " "SET ASIDE"
+      (plural w.set_aside "record" "records"
+      ^ " that cannot be read, kept and never run");
   if w.stuck > 0 then
     row b "  " "WAL STUCK"
       (plural w.stuck "record" "records"
