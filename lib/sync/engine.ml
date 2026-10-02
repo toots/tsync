@@ -152,9 +152,10 @@ module Make (C : Engine_ctx.S) = struct
                             | `Moved _ | `Removed _ -> ()
                             | _ ->
                                 with_meta (fun () ->
-                                    ignore
-                                      (Mirror.record_folder ~on_other:`Keep
-                                         mirror next id)));
+                                    if Mirror.kind mirror next = `Dir then
+                                      ignore
+                                        (Mirror.record_folder ~on_other:`Keep
+                                           mirror next id)));
                           down next rest
                       | None -> ())
                 | `Dir, Some _, _ -> down next rest

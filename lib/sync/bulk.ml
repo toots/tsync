@@ -17,7 +17,7 @@ module Make (C : Engine_ctx.S) = struct
     let exists rel = kind rel <> `Absent || store_manifest rel <> None
 
     let publish ?resend rel m =
-      let pid = ensure_folder_id (Names.parent_of rel) in
+      let pid = ensure_folder_id ~create:true (Names.parent_of rel) in
       let leaf = Names.leaf_of rel in
       R.publish ?resend ~parent:pid ~leaf m;
       let m = Manifest.rename m leaf in
@@ -60,7 +60,7 @@ module Make (C : Engine_ctx.S) = struct
         | `File -> Error "a file holds this name in the domain"
         | `Dir when Mirror.folder_id mirror rel <> None -> Ok false
         | _ ->
-            let id = ensure_folder_id rel in
+            let id = ensure_folder_id ~create:true rel in
             with_meta (fun () ->
                 record_owed [Op.Mkdir { path = rel; id = Some id }] ignore);
             Ok true

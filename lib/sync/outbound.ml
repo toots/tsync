@@ -176,12 +176,15 @@ module Make (C : Engine_ctx.S) = struct
     pick 1
 
   (* 02 §4.3: an id held locally costs no round trip; a folder with none claims
-     itself and its ancestors, root down. *)
-  let rec ensure_folder_id path =
+     itself and its ancestors, root down.
+
+     [create] is for a bulk import, which makes the folders it names; elsewhere
+     a folder missing once the claim answers moved or went away meanwhile. *)
+  let rec ensure_folder_id ?(create = false) path =
     match Mirror.folder_id mirror path with
       | Some id -> id
       | None ->
-          let pid = ensure_folder_id (Names.parent_of path) in
+          let pid = ensure_folder_id ~create (Names.parent_of path) in
           let cand = Identity.mint folder_minter in
           let id =
             match T.claim ~parent:pid ~name:(Names.leaf_of path) cand with
@@ -189,11 +192,17 @@ module Make (C : Engine_ctx.S) = struct
               | `Taken j -> j
           in
           with_meta (fun () ->
-              match Mirror.folder_id mirror path with
-                | Some held -> held
-                | None ->
+              match (Mirror.kind mirror path, Mirror.folder_id mirror path) with
+                | _, Some held -> held
+                | `Dir, None ->
                     ignore (Mirror.record_folder mirror path id);
-                    id)
+                    id
+                | `Absent, None when create ->
+                    ignore (Mirror.record_folder mirror path id);
+                    id
+                | _ ->
+                    Fail.raise_ Fail.Local "%s moved while its id was claimed"
+                      path)
 
   let claims =
     Dqueue.Records.open_
