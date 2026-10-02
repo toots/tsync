@@ -24,6 +24,9 @@ type row = {
 }
 
 type page = { items : row list; next : string option; unnamed : int }
+
+(** A whole-domain page, or [Walk_stale] for a cursor on another walk. *)
+type listing = Listed of page | Walk_stale
 type written = { size : int; mtime : float; item : row }
 
 type fetched = {
@@ -78,6 +81,7 @@ type _ request =
       limit : int option;
     }
       -> page request
+  | List_all : { after : string option; limit : int option } -> listing request
   | Cursor : string request
   | Changes_since : { anchor : string; limit : int option } -> changes request
   | Ensure_cached : { item : target; dest : string } -> cached request
@@ -136,6 +140,7 @@ let action : type a. a request -> string = function
   | Ping -> "ping"
   | Stat _ -> "stat"
   | List_dir _ -> "list_dir"
+  | List_all _ -> "list_all"
   | Cursor -> "cursor"
   | Changes_since _ -> "changes_since"
   | Ensure_cached _ -> "ensure_cached"
@@ -246,6 +251,9 @@ let request_fields : type a. a request -> (string * Yojson.Safe.t) list =
       []
   | Stat t | Download_progress t | Delete t | Rmdir t | Evict t ->
       target_fields t
+  | List_all r ->
+      opt "after" (fun a -> `String a) r.after
+      @ opt "limit" (fun l -> `Int l) r.limit
   | Changes_since r ->
       ("arg", `String r.anchor) :: opt "limit" (fun l -> `Int l) r.limit
   | List_dir r ->
@@ -298,6 +306,8 @@ let decode j =
         Request
           (List_dir
              { dir = target_of j; after = str j "after"; limit = int j "limit" })
+    | "list_all" ->
+        Request (List_all { after = str j "after"; limit = int j "limit" })
     | "cursor" -> Request Cursor
     | "changes_since" ->
         Request (Changes_since { anchor = required j "arg"; limit = int j "limit" })
@@ -518,6 +528,11 @@ let feed_op_of_json j =
           }
     | o -> Fail.invalid "unknown feed op %s" o
 
+let page_fields (pg : page) =
+  [("items", `List (List.map (fun r -> `Assoc (row_fields r)) pg.items))]
+  @ opt "next" (fun n -> `String n) pg.next
+  @ if pg.unnamed > 0 then [("unnamed", `Int pg.unnamed)] else []
+
 let encode_reply : type a. a request -> a -> Yojson.Safe.t =
  fun req reply ->
   match req with
@@ -527,15 +542,11 @@ let encode_reply : type a. a request -> a -> Yojson.Safe.t =
     | Mkdir _ -> ok (item reply)
     | Symlink _ -> ok (item reply)
     | Rename _ -> ok (item reply)
-    | List_dir _ ->
-        ok
-          ([
-             ( "items",
-               `List (List.map (fun r -> `Assoc (row_fields r)) reply.items) );
-           ]
-          @ opt "next" (fun n -> `String n) reply.next
-          @ if reply.unnamed > 0 then [("unnamed", `Int reply.unnamed)] else []
-          )
+    | List_dir _ -> ok (page_fields reply)
+    | List_all _ -> (
+        match reply with
+          | Walk_stale -> ok [("stale", `Bool true)]
+          | Listed pg -> ok (page_fields pg))
     | Cursor -> ok [("cursor", `String reply)]
     | Changes_since _ -> (
         match reply with
@@ -636,6 +647,16 @@ let failure_of_reply j =
 
 let count k j = Option.value ~default:0 (int j k)
 
+let page_of j =
+  {
+    items =
+      (match member j "items" with
+        | Some (`List l) -> List.map row_of_fields l
+        | _ -> []);
+    next = str j "next";
+    unnamed = count "unnamed" j;
+  }
+
 let decode_reply : type a. a request -> Yojson.Safe.t -> a =
  fun req j ->
   Option.iter (fun f -> raise (Fail.E f)) (failure_of_reply j);
@@ -656,15 +677,8 @@ let decode_reply : type a. a request -> Yojson.Safe.t -> a =
     | Mkdir _ -> item ()
     | Symlink _ -> item ()
     | Rename _ -> item ()
-    | List_dir _ ->
-        {
-          items =
-            (match member j "items" with
-              | Some (`List l) -> List.map row_of_fields l
-              | _ -> []);
-          next = str j "next";
-          unnamed = count "unnamed" j;
-        }
+    | List_dir _ -> page_of j
+    | List_all _ -> if flag j "stale" then Walk_stale else Listed (page_of j)
     | Cursor -> required j "cursor"
     | Changes_since _ ->
         if flag j "stale" then Stale
