@@ -1027,15 +1027,17 @@ module Make (C : Engine_ctx.S) = struct
          with
           | Stop.Stopping -> raise Stop.Stopping
           | _ -> ());
-        (match Journal.cursor_token journal with
-          | token ->
-              let moved = token <> !last_seen in
-              let due = Rt.now () -. !last_listing >= Outbound.sweep in
-              let asked = Rt.Signal.version poll_signal <> since in
-              if moved || due || asked then (
-                last_listing := Rt.now ();
-                ignore (apply_pass ());
-                last_seen := token)
+        (match
+           let token = Journal.cursor_token journal in
+           let moved = token <> !last_seen in
+           let due = Rt.now () -. !last_listing >= Outbound.sweep in
+           let asked = Rt.Signal.version poll_signal <> since in
+           if moved || due || asked then (
+             last_listing := Rt.now ();
+             ignore (apply_pass ());
+             last_seen := token)
+         with
+          | () -> ()
           | exception ((Stop.Stopping | Rt.Cancelled) as e) -> raise e
           | exception e ->
               note_link_failure e;
