@@ -67,14 +67,10 @@ module type S = sig
   val truncate : string -> int -> unit
   val create : string -> exclusive:bool -> unit
 
-  (** Adopt a complete file by rename, then close. *)
+  (** Adopt a complete file by rename, then close; staged aside when [base] is
+      not the key's current content, nothing when the content is the same. *)
   val write_whole :
-    string ->
-    src:string ->
-    ?base:string ->
-    exclusive:bool ->
-    unit ->
-    Staged.edit
+    string -> src:string -> ?base:string -> exclusive:bool -> unit -> unit
 
   val sync : string -> unit
 

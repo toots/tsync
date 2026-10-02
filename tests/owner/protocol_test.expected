@@ -4,9 +4,11 @@ stat              request reads back, reply reads back
 list_dir          request reads back, reply reads back
 cursor            request reads back, reply reads back
 ensure_cached     request reads back, reply reads back
+stat              request reads back, reply reads back
 fetch_range       request reads back, reply reads back
 download_progress request reads back, reply reads back
 create            request reads back, reply reads back
+write             request reads back, reply reads back
 write             request reads back, reply reads back
 mkdir             request reads back, reply reads back
 symlink           request reads back, reply reads back

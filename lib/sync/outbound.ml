@@ -184,17 +184,6 @@ module Make (C : Engine_ctx.S) = struct
       | `Record m -> m
       | _ -> None
 
-  let aside_name path ~is_dir =
-    let parent = Names.parent_of path and leaf = Names.leaf_of path in
-    let rec pick n =
-      let cand =
-        Names.join parent
-          (Conflict.conflict_name ~client:C.client_name ~is_dir leaf n)
-      in
-      if kind cand = `Absent then cand else pick (n + 1)
-    in
-    pick 1
-
   (* 02 §4.3: an id held locally costs no round trip; a folder with none claims
      itself and its ancestors, root down.
 
@@ -807,7 +796,7 @@ module Make (C : Engine_ctx.S) = struct
               raise Rt.Cancelled);
             let source i =
               match e.content with
-                | Whole b ->
+                | Whole { body = b; _ } ->
                     Remote.Lazy
                       (fun () ->
                         let len =

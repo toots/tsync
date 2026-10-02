@@ -29,8 +29,6 @@ type t = {
   stats : string list -> Tsync_status.Status_report.answer;
   stop : unit -> unit;
   dest_roots : string list;
-  temp_dir : string option Atomic.t;
-      (** the subscriber's latest declared directory (08 §3.3) *)
   staging_roots : string list;
   answered_unreachable : bool Atomic.t;
   running : running option Atomic.t;
@@ -51,14 +49,12 @@ let create ~domain ~engine ~hooks ~publish ~stats ~stop ~dest_roots
     stats;
     stop;
     dest_roots;
-    temp_dir = Atomic.make None;
     staging_roots;
     answered_unreachable = Atomic.make false;
     running = Atomic.make None;
   }
 
 let domain_name t = Domain_name.to_string t.domain.name
-let dest_roots t = Option.to_list (Atomic.get t.temp_dir) @ t.dest_roots
 
 let event t name fields =
   `Assoc
@@ -72,7 +68,7 @@ let event t name fields =
 let invalid fmt = Fail.invalid fmt
 
 (* 08 §2.3: [None] when the row's container has no id on this client. *)
-let row (module E : Engine.S) ~root_name path : Protocol.row option =
+let row (module E : Engine.S) ~root_name ~read_only path : Protocol.row option =
   let st = E.stat path in
   let id_of p = Option.map Folder_id.to_string (E.folder_id p) in
   let dir_ref id = Names.ref_to_string (Names.dir_ref id) in
@@ -106,6 +102,7 @@ let row (module E : Engine.S) ~root_name path : Protocol.row option =
             is_uploaded = not st.staged;
             content_id = None;
             symlink_target = None;
+            read_only;
             availability = None;
           }
         in
@@ -136,8 +133,12 @@ let row (module E : Engine.S) ~root_name path : Protocol.row option =
                 })
     | _ -> None
 
+let row_of t path =
+  row t.engine ~root_name:(domain_name t) ~read_only:t.domain.domain.read_only
+    path
+
 let row_or_unnamed t path =
-  match row t.engine ~root_name:(domain_name t) path with
+  match row_of t path with
     | Some r -> r
     | None ->
         Fail.raise_ Fail.Unprepared "%s cannot be named on this client" path
@@ -170,10 +171,6 @@ let resolve_rel (module E : Engine.S) rel =
   if E.kind rel = `Absent then Fail.absent "%s: not found" rel;
   rel
 
-let target t : Protocol.target -> string = function
-  | Ref r -> resolve_ref t.engine r
-  | Rel rel -> resolve_rel t.engine rel
-
 (* 08 §3.5: a destination is a parent folder and a valid leaf. *)
 let destination t (d : Protocol.destination) =
   let (module E : Engine.S) = t.engine in
@@ -181,6 +178,44 @@ let destination t (d : Protocol.destination) =
   if E.kind parent <> `Dir then invalid "parentRef does not name a folder";
   if not (Names.valid_leaf d.name) then invalid "invalid name %S" d.name;
   Names.join parent d.name
+
+let target t : Protocol.target -> string = function
+  | Ref r -> resolve_ref t.engine r
+  | Rel rel -> resolve_rel t.engine rel
+  | Child d ->
+      let (module E : Engine.S) = t.engine in
+      let path = destination t d in
+      if E.kind path = `Absent then Fail.absent "%s: not found" d.name;
+      path
+
+(* 08 §3.3: [exists] carries the occupant's row when it can be named. *)
+exception Occupied of Fail.t * Protocol.row
+
+let occupied t path f =
+  try f ()
+  with Fail.E ({ kind = Exists; _ } as fail) as e -> (
+    match row_of t path with
+      | Some r -> raise (Occupied (fail, r))
+      | None | (exception _) -> raise e)
+
+(* 08 §3.5: the reply's row describes exactly the bytes written. The content
+   is read again after the transfer; a change in between is served again. *)
+let transfer_attempts = 3
+
+let serving t path dest f =
+  let identity (r : Protocol.row) = (r.content_id, r.etag, r.size, r.mtime) in
+  let rec go n =
+    let before = row_or_unnamed t path in
+    let result = f () in
+    let after = row_or_unnamed t path in
+    if identity before = identity after then (result, after)
+    else (
+      Fs.unlink_quiet dest;
+      if n <= 1 then
+        Fail.raise_ Fail.Load "%s changed while it was being served" path;
+      go (n - 1))
+  in
+  go transfer_attempts
 
 (* 08 §3.4: per-file failures are counted and do not stop the walk. *)
 let each_file t path f =
@@ -237,10 +272,7 @@ let list_dir t dir ~after ~limit : Protocol.page =
   in
   let page, more = take limit [] names in
   let rows =
-    List.map
-      (fun (e : E.entry) ->
-        row t.engine ~root_name:(domain_name t) (Names.join path e.name))
-      page
+    List.map (fun (e : E.entry) -> row_of t (Names.join path e.name)) page
   in
   {
     items = List.filter_map Fun.id rows;
@@ -407,7 +439,7 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
  fun t ~send req ->
   let (module E : Engine.S) = t.engine in
   let mutate f = E.atomically f in
-  let surface = function Protocol.Ref r -> r | Rel _ -> "root" in
+  let surface = function Protocol.Ref r -> r | Rel _ | Child _ -> "root" in
   match req with
     | Ping -> ()
     | Stat item -> row_or_unnamed t (target t item)
@@ -461,16 +493,21 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
           | `Full (manifests, failed) -> Protocol.Full { manifests; failed })
     | Ensure_cached r ->
         let path = target t r.item in
-        Transfer.check_dest ~roots:(dest_roots t) r.dest;
-        E.assemble_to path r.dest;
-        r.dest
+        Transfer.check_dest ~roots:t.dest_roots r.dest;
+        let (), item =
+          serving t path r.dest (fun () -> E.assemble_to path r.dest)
+        in
+        { Protocol.local_path = r.dest; item }
     | Fetch_range r ->
         let path = target t r.item in
         if r.offset < 0 || r.length <= 0 then
           invalid "offset ≥ 0 and length > 0 are required";
-        Transfer.check_dest ~roots:(dest_roots t) r.dest;
-        let length = E.fetch_range path r.dest ~off:r.offset ~len:r.length in
-        { Protocol.local_path = r.dest; offset = r.offset; length }
+        Transfer.check_dest ~roots:t.dest_roots r.dest;
+        let length, item =
+          serving t path r.dest (fun () ->
+              E.fetch_range path r.dest ~off:r.offset ~len:r.length)
+        in
+        { Protocol.local_path = r.dest; offset = r.offset; length; item }
     | Download_progress _ -> Protocol.Inactive
     | Evict item ->
         let succeeded, failed = each_file t (target t item) E.evict in
@@ -486,42 +523,48 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
     | Create r ->
         mutate (fun () ->
             let path = destination t r.at in
-            E.create path ~exclusive:r.exclusive;
+            occupied t path (fun () -> E.create path ~exclusive:r.exclusive);
             E.close path;
             row_or_unnamed t path)
     | Write r ->
         Transfer.check_staging ~roots:t.staging_roots r.staging;
         mutate (fun () ->
-            let path = destination t r.at in
-            let e =
-              E.write_whole path ~src:r.staging ?base:r.base
-                ~exclusive:r.exclusive ()
+            let path =
+              match r.at with
+                | Child d -> destination t d
+                | at ->
+                    let p = target t at in
+                    if E.kind p <> `File then invalid "write names a file";
+                    p
             in
-            {
-              Protocol.size = e.size;
-              mtime = e.mtime;
-              item = row_or_unnamed t path;
-            })
+            occupied t path (fun () ->
+                E.write_whole path ~src:r.staging ?base:r.base
+                  ~exclusive:r.exclusive ());
+            let item = row_or_unnamed t path in
+            { Protocol.size = item.size; mtime = item.mtime; item })
     | Mkdir r ->
         mutate (fun () ->
             let path = destination t r.at in
             if r.exclusive || E.kind path <> `Dir then
-              E.mkdir path ~exclusive:r.exclusive;
+              occupied t path (fun () -> E.mkdir path ~exclusive:r.exclusive);
             row_or_unnamed t path)
     | Symlink r ->
         mutate (fun () ->
             let path = destination t r.at in
-            E.symlink path ~target:r.link_target ~exclusive:r.exclusive;
+            occupied t path (fun () ->
+                E.symlink path ~target:r.link_target ~exclusive:r.exclusive);
             row_or_unnamed t path)
     | Rename r ->
         mutate (fun () ->
             let src = resolve_ref t.engine r.src in
             let dst = destination t r.at in
-            (match (E.kind src, E.kind dst) with
-              | _, `Absent -> ()
-              | `File, `File when not r.noreplace -> ()
-              | _ -> Fail.raise_ Fail.Exists "%s exists" dst);
-            E.rename ~src ~dst ~exclusive:r.noreplace;
+            if src <> dst then
+              occupied t dst (fun () ->
+                  (match (E.kind src, E.kind dst) with
+                    | _, `Absent -> ()
+                    | `File, `File when not r.noreplace -> ()
+                    | _ -> Fail.raise_ Fail.Exists "%s exists" dst);
+                  E.rename ~src ~dst ~exclusive:r.noreplace);
             row_or_unnamed t dst)
     | Delete item ->
         mutate (fun () ->
@@ -558,7 +601,9 @@ let call_with : type a.
     | _ when Protocol.bulk req -> act t ~send req
     | _ -> bounded (fun () -> act t ~send req)
 
-let call t req = call_with t ~send:print_line req
+let call t req =
+  try call_with t ~send:print_line req
+  with Occupied (f, _) -> raise (Fail.E f)
 
 (* 08 §3.8: a bulk success after an [unreachable] answer tells subscribers
    the domain recovered. *)
@@ -573,17 +618,6 @@ let note_reachability t ~bulk reply =
 let answer t json =
   match Ipc.field json "action" with
     | Some "subscribe" ->
-        Option.iter
-          (fun d ->
-            match Unix.lstat d with
-              | { st_kind = S_DIR; st_uid; _ }
-                when st_uid = Unix.getuid () && not (Filename.is_relative d) ->
-                  Atomic.set t.temp_dir (Some d)
-              | _ | (exception Unix.Unix_error _) ->
-                  Log.warn
-                    "%s: ignored tempDir %s: not a directory of this user"
-                    (domain_name t) d)
-          (Ipc.field json "tempDir");
         Ipc.Subscribe (domain_name t, Ipc.ok [], [event t "recovered" []])
     | _ -> (
         match Protocol.decode json with
@@ -600,8 +634,12 @@ let answer t json =
                     | exception e -> Ipc.failure (Fail.classify e))
           | Request req ->
               let reply =
-                match call t req with
+                match call_with t ~send:print_line req with
                   | r -> Protocol.encode_reply req r
+                  | exception Occupied (f, r) -> (
+                      match Ipc.failure f with
+                        | `Assoc l -> `Assoc (l @ Protocol.item r)
+                        | j -> j)
                   | exception e -> Ipc.failure (Fail.classify e)
               in
               note_reachability t ~bulk:(Protocol.bulk req) reply;

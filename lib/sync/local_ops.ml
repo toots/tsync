@@ -220,28 +220,28 @@ module Make (C : Engine_ctx.S) = struct
       folder_id = None;
     }
 
+  (* The digest an upload of the body with chunk size [cs] yields. *)
+  let digest_of_body ~size ~cs body =
+    try
+      let fd = Fs.openfile (Staged.whole_path staged body) [O_RDONLY] in
+      Fs.with_fd fd (fun fd ->
+          let n = Chunking.manifest_count ~size ~cs in
+          let buf = Bigstring.create cs in
+          let keys =
+            List.init n (fun i ->
+                let len = if size = 0 then 0 else Chunking.length ~size ~cs i in
+                let got = Fs.pread_full fd buf ~boff:0 ~len ~off:(i * cs) in
+                Chunk_key.of_bigstring ~len:got buf)
+          in
+          Some (fst (Manifest.digest_of ~size ~cs keys)))
+    with _ -> None
+
+  (* 04 §2.5: recorded at adoption; computed only for a manifest without it. *)
   let whole_digest e =
     match e.Staged.content with
-      | Whole b -> (
-          try
-            let fd = Fs.openfile (Staged.whole_path staged b) [O_RDONLY] in
-            Fs.with_fd fd (fun fd ->
-                let cs = e.chunk_size in
-                let n = Chunking.manifest_count ~size:e.size ~cs in
-                let buf = Bigstring.create cs in
-                let keys =
-                  List.init n (fun i ->
-                      let len =
-                        if e.size = 0 then 0
-                        else Chunking.length ~size:e.size ~cs i
-                      in
-                      let got =
-                        Fs.pread_full fd buf ~boff:0 ~len ~off:(i * cs)
-                      in
-                      Chunk_key.of_bigstring ~len:got buf)
-                in
-                Some (fst (Manifest.digest_of ~size:e.size ~cs keys)))
-          with _ -> None)
+      | Whole { h1 = Some h; _ } -> Some h
+      | Whole { body; h1 = None } ->
+          digest_of_body ~size:e.size ~cs:e.chunk_size body
       | Slots _ -> None
 
   let content_id path =
@@ -350,7 +350,7 @@ module Make (C : Engine_ctx.S) = struct
     if len = 0 then Bigstring.empty
     else (
       match e.content with
-        | Whole b ->
+        | Whole { body = b; _ } ->
             let fd = Fs.openfile (Staged.whole_path staged b) [O_RDONLY] in
             Fs.with_fd fd (fun fd ->
                 let buf = Bigstring.create len in
@@ -503,7 +503,7 @@ module Make (C : Engine_ctx.S) = struct
     match Staged.read staged path with
       | `Unparseable ->
           Fail.corrupt "%s: its staged manifest cannot be decoded" path
-      | `Edit ({ content = Whole b; _ } as e) ->
+      | `Edit ({ content = Whole { body = b; _ }; _ } as e) ->
           let cs = C.chunk_size_config |> Option.value ~default:e.chunk_size in
           let count = Chunking.count ~size:e.size ~cs in
           let slots = Array.make count Staged.Zero in
@@ -856,16 +856,35 @@ module Make (C : Engine_ctx.S) = struct
               !post_put_hook path e.size (base_hex e)
           | _ -> ())
 
+  let aside_name path ~is_dir =
+    let parent = Names.parent_of path and leaf = Names.leaf_of path in
+    let rec pick n =
+      let cand =
+        Names.join parent
+          (Conflict.conflict_name ~client:C.client_name ~is_dir leaf n)
+      in
+      if kind cand = `Absent then cand else pick (n + 1)
+    in
+    pick 1
+
   (* 04 §4.3 [write_whole]: the handed-over file is adopted by rename, never
-     copied when on the same filesystem. *)
+     copied when on the same filesystem. An edit of a version this client no
+     longer holds is staged aside as a new file (conflict-resolution §4.9). *)
   let write_whole path ~src ?base ~exclusive () =
     check_writable ();
+    if exclusive && exists path then Fail.raise_ Fail.Exists "%s exists" path;
+    let stale =
+      match base with Some b -> content_id path <> Some b | None -> false
+    in
+    let path, base =
+      if stale then (aside_name path ~is_dir:false, Some Staged.Base_none)
+      else (path, Option.map (fun b -> Staged.Base b) base)
+    in
     with_key path (fun () ->
-        if exclusive && exists path then
-          Fail.raise_ Fail.Exists "%s exists" path;
         if Mirror.kind mirror path = `Dir then
           Fail.raise_ Fail.Exists "%s is a folder" path;
         let before = Staged.edit staged path in
+        let current = content_id path in
         let id = Staged.new_body_id () in
         let dst = Staged.whole_path staged id in
         Fs.mkdir_p (Filename.dirname dst);
@@ -886,31 +905,34 @@ module Make (C : Engine_ctx.S) = struct
         Fs.with_fd (Fs.openfile dst [O_RDONLY]) Fs.fsync;
         Fs.fsync_dir (Filename.dirname dst);
         let st = Fs.sys (fun () -> Unix.LargeFile.stat dst) in
-        let base =
-          match base with
-            | Some b -> Staged.Base b
-            | None -> (
-                match Mirror.manifest mirror path with
-                  | Some m -> Base m.h1
-                  | None -> Base_none)
-        in
-        let e =
-          {
-            Staged.name = Names.leaf_of path;
-            size = Int64.to_int st.st_size;
-            mtime = st.st_mtime;
-            chunk_size = R.chunk_size ();
-            content = Whole id;
-            base;
-            state = Owed;
-          }
-        in
-        Staged.write staged path e;
-        ignore (Mirror.ensure_file_id mirror path);
-        Option.iter (fun o -> release_unnamed o (Some e)) before;
-        bump path;
-        !post_put_hook path e.size (base_hex e);
-        e)
+        let size = Int64.to_int st.st_size and chunk_size = R.chunk_size () in
+        let h1 = digest_of_body ~size ~cs:chunk_size id in
+        if h1 <> None && h1 = current then release_body id
+        else (
+          let base =
+            match base with
+              | Some b -> b
+              | None -> (
+                  match Mirror.manifest mirror path with
+                    | Some m -> Base m.h1
+                    | None -> Base_none)
+          in
+          let e =
+            {
+              Staged.name = Names.leaf_of path;
+              size;
+              mtime = st.st_mtime;
+              chunk_size;
+              content = Whole { body = id; h1 };
+              base;
+              state = Owed;
+            }
+          in
+          Staged.write staged path e;
+          ignore (Mirror.ensure_file_id mirror path);
+          Option.iter (fun o -> release_unnamed o (Some e)) before;
+          bump path;
+          !post_put_hook path e.size (base_hex e)))
 
   (* The paths local namespace changes and promotions touched while a rebuild
      walks: its sweep leaves them alone. *)

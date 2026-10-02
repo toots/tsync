@@ -8,7 +8,10 @@ open Tsync_core
     a staged body at an offset. *)
 type slot = Inherit | Zero | Staged of { body : string; off : int }
 
-type content = Slots of slot array | Whole of string
+(** [h1]: the body's whole-file digest, the key's [content_id] (04 §2.5). *)
+type content =
+  | Slots of slot array
+  | Whole of { body : string; h1 : string option }
 
 (** The content identity the edit started from: unknown, none (no record), or a
     manifest's [h1]. *)

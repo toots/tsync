@@ -6,8 +6,10 @@ let components path =
   List.filter (fun c -> c <> "") (String.split_on_char '/' path)
 
 (* The parent is walked from the root with lstat, so no link on the way
-   redirects it. *)
+   redirects it. A host declaring no roots (security-model §7.3) walks it from
+   [/]. *)
 let check_under ~roots path =
+  let roots = if roots = [] then ["/"] else roots in
   if Filename.is_relative path then denied path "not an absolute path";
   let parts = components path in
   if List.exists (fun c -> c = "." || c = "..") parts then
