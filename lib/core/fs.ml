@@ -349,3 +349,15 @@ let write_file_for_test p data =
 
 let terminal_columns fd =
   match terminal_columns_ fd with 0 -> None | n -> Some n
+
+let resolve_parent p =
+  match
+    List.rev
+      (List.filter (fun s -> s <> "" && s <> ".") (String.split_on_char '/' p))
+  with
+    | [] -> "/"
+    | leaf :: parents ->
+        let parent = "/" ^ String.concat "/" (List.rev parents) in
+        Filename.concat
+          (try Unix.realpath parent with Unix.Unix_error _ -> parent)
+          leaf

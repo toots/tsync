@@ -113,3 +113,11 @@ chunks      chunk chunks true; outgoing chunks true; marker true; reference chun
 manifests   chunk manifests true; outgoing manifests true; marker true; reference manifests; version manifests; manifest marker true
 versions    chunk versions true; outgoing versions true; marker true; reference versions; version versions; manifest marker true
 chunks.from chunk chunks.from true; outgoing chunks.from true; marker true; reference chunks.from; version chunks.from; manifest marker true
+
+== a mount point, its parent resolved
+real/Drive               true
+real/Drive/              true
+real/./Drive             true
+real//Drive              true
+link/Drive               true
+/                        /

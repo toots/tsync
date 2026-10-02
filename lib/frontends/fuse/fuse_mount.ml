@@ -570,13 +570,16 @@ let options (d : Config.domain) =
        (fun (f : Config.frontend) -> f.options)
        (Config.frontend d "fuse"))
 
+(* The kernel's mount table names the resolved path: a trailing slash or a
+   symlinked parent would hide a stale mount. *)
 let mount_point ~mount (d : Config.domain) =
-  match mount with
-    | Some m -> m
-    | None -> (
-        match Config.fstr (options d) "mountPoint" with
-          | Some m -> m
-          | None -> Paths.mount_point d.name)
+  Fs.resolve_parent
+    (match mount with
+      | Some m -> m
+      | None -> (
+          match Config.fstr (options d) "mountPoint" with
+            | Some m -> m
+            | None -> Paths.mount_point d.name))
 
 (* 07 §3.7: FUSE owns the main thread, so the owner runs on another, and the
    main thread enters the loop only once the owner serves its socket. *)

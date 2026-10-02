@@ -161,3 +161,7 @@ val write_file_for_test : string -> string -> unit
 
 (** The width of the terminal behind [fd]; [None] when it is not one. *)
 val terminal_columns : Unix.file_descr -> int option
+
+(** An absolute path without empty or [.] segments, its parent resolved and its
+    last segment left as is: a dead mount there answers ENOTCONN. *)
+val resolve_parent : string -> string
