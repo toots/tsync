@@ -5,6 +5,13 @@ PUT object: true
 GET bucket: true
 key encoding: tsync/d/x/a%2Bb%25c%20d~%C3%A9
 
+== conditional replace and checksums (06 §3.11, §3.12)
+replace a free key: written
+replace with the entry just read: written
+replace with a stale entry: changed, the other write stays: true
+create over an existing key: changed
+computed checksum is the body's: true; absent: none; unknown algorithm: invalid
+an entry's checksum, when it carries one, is the body's: true
 == round trips
 get_opt a: "hello"; absent: none; get absent: absent
 head a size: 5
@@ -56,4 +63,6 @@ claim on a provider without If-None-Match: refused/other, s3: this store cannot 
 a provider ignoring If-None-Match: refused/other, s3: this store ignores If-None-Match, so it cannot claim a name
 and again: refused/other, s3: this store ignores If-None-Match, so it cannot claim a name
 a provider honouring it: won
-every request signed correctly: true (19 requests)
+a provider ignoring If-Match: refused/other, s3: this store ignores If-Match, so it cannot replace conditionally
+a provider honouring it: written
+every request signed correctly: true (26 requests)

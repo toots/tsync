@@ -72,6 +72,10 @@ let () =
         (show (Contract.get s (k "tsync/d/only-on-replica")));
       p "archive answers a source miss: %s\n"
         (show (Contract.get s (k "tsync/d/old")));
+      p "but is never asked for a checksum: %s\n"
+        (match s.compute_checksum (k "tsync/d/old") Checksum.md5 with
+          | Some _ -> "some"
+          | None -> "none");
       main_up := false;
       p "main down, replica answers: %s\n"
         (show (Contract.get s (k "tsync/d/only-on-replica")));
@@ -152,5 +156,26 @@ let () =
                "copy"));
       p "batch read with the main held down: %s\n"
         (kind (fun () -> Option.get s.get_many [k "tsync/d/old"]));
-      main_up := true);
+      main_up := true;
+      p "\n== conditional replace\n";
+      Contract.put main (k "tsync/d/cond") "on main";
+      Contract.put replica (k "tsync/d/cond") "on replica";
+      p
+        "an entry read from another member replaces nothing: %s, main keeps %s\n"
+        (match
+           s.put_if_unchanged (k "tsync/d/cond")
+             (Bigstring.of_string "new")
+             (replica.head_opt (k "tsync/d/cond"))
+         with
+          | Written -> "written"
+          | Changed -> "changed")
+        (show (Contract.get main (k "tsync/d/cond")));
+      p "with the main's entry: %s\n"
+        (match
+           s.put_if_unchanged (k "tsync/d/cond")
+             (Bigstring.of_string "new")
+             (main.head_opt (k "tsync/d/cond"))
+         with
+          | Written -> "written"
+          | Changed -> "changed"));
   Fs.rm_rf root

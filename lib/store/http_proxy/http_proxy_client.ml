@@ -27,6 +27,8 @@ type t = {
   admission : Uplink.t;
   served : bool option Atomic.t;
   claims : bool option Atomic.t;
+  checksums : bool option Atomic.t;
+      (** the server answers /checksum, and so honours if_match *)
   caps : (string * Store.caps) list Atomic.t;
   no_get_many : bool Atomic.t;
   no_list_many : bool Atomic.t;
@@ -233,6 +235,26 @@ let put_if_absent t k body =
   else if Bigstring.equal r.body body then Store.Won
   else Held r.body
 
+let checksum_request t k algo =
+  call t "checksum" ~meth:"GET"
+    ~query:[("algo", algo)]
+    ("/checksum/" ^ W.encode_key k)
+
+(* §8.1: a server that answers /checksum, even 404 with an empty body,
+   honours if_match and if_none_match; a 404 with a body has neither. *)
+let checksums_supported t =
+  match Atomic.get t.checksums with
+    | Some b -> b
+    | None ->
+        let r = checksum_request t (Key.cursor t.domain) Checksum.md5 in
+        let supported =
+          if success r.status || empty_404 r then true
+          else if r.status = 404 then false
+          else failure t ~op:"checksum" r
+        in
+        Atomic.set t.checksums (Some supported);
+        supported
+
 let get_opt t k =
   match call t "get" ~meth:"GET" (obj k) with
     | r when success r.status -> Some r.body
@@ -275,6 +297,36 @@ let head_opt t k =
           | _ -> Fail.corrupt "%s: a HEAD answer without size or time" t.name)
     | { status = 404; _ } -> None
     | r -> failure t ~op:"head" r
+
+(* §8.2: hashed where the bytes are, on the server; downloaded and hashed here
+   only against a server without the endpoint. *)
+let compute_checksum t k algo =
+  if checksums_supported t then (
+    match checksum_request t k algo with
+      | r when success r.status -> (
+          match
+            Checksum.of_string (String.trim (Bigstring.to_string r.body))
+          with
+            | Some c when c.algo = algo -> Some c
+            | _ -> Fail.corrupt "%s: a checksum answer that is not one" t.name)
+      | r when empty_404 r -> None
+      | r -> failure t ~op:"checksum" r)
+  else Option.map (Checksum.of_body algo) (get_opt t k)
+
+let put_if_unchanged t k body (expected : Store.entry option) =
+  if not (checksums_supported t) then
+    Fail.raise_ Fail.Refused "%s: server lacks conditional replace" t.name;
+  let query =
+    match expected with
+      | None -> [("if_none_match", "1")]
+      | Some { etag = Some etag; _ } -> [("if_match", etag)]
+      | Some { etag = None; _ } ->
+          Fail.raise_ Fail.Refused "%s: no version to replace against" t.name
+  in
+  match call t "put_if_unchanged" ~meth:"PUT" ~query ~body (obj k) with
+    | r when success r.status -> Store.Written
+    | { status = 412; _ } -> Changed
+    | r -> failure t ~op:"put_if_unchanged" r
 
 let delete t k =
   match call t "delete" ~meth:"DELETE" (obj k) with
@@ -408,6 +460,7 @@ let create ~domain ~admission ~name fields =
       admission;
       served = Atomic.make None;
       claims = Atomic.make None;
+      checksums = Atomic.make None;
       caps = Atomic.make [];
       no_get_many = Atomic.make false;
       no_list_many = Atomic.make false;
@@ -420,9 +473,11 @@ let create ~domain ~admission ~name fields =
         (fun ?mode k body ->
           expect t "put" (call ?mode t "put" ~meth:"PUT" ~body (obj k)));
       put_if_absent = put_if_absent t;
+      put_if_unchanged = put_if_unchanged t;
       get_opt = get_opt t;
       get_range = get_range t;
       head_opt = head_opt t;
+      compute_checksum = compute_checksum t;
       delete = delete t;
       delete_multi = delete_multi t;
       copy =
@@ -438,6 +493,7 @@ let create ~domain ~admission ~name fields =
       bucket_functions = false;
       capabilities = capabilities t;
       fast_read = false;
+      locality = Proxy;
       local_path = None;
       health = t.health;
       traffic = Some t.traffic;

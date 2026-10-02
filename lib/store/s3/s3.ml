@@ -106,6 +106,7 @@ type t = {
   etag_is_md5 : bool;  (** §4.5: an ETag of 32 hex digits is the body's MD5 *)
   domain : Domain_name.t;
   claims : claims Atomic.t;  (** [Honoured] from the start on AWS *)
+  replaces : claims Atomic.t;  (** If-Match, likewise *)
 }
 
 let success s = s >= 200 && s < 300
@@ -192,10 +193,11 @@ let put_request t ?(headers = []) k body =
 
 let claim_retries = 3
 
-let cannot_claim (r : Client.response) =
+let refuses_header header (r : Client.response) =
   r.status = 501
-  || r.status = 400
-     && Text.contains (Bigstring.to_string r.body) "If-None-Match"
+  || (r.status = 400 && Text.contains (Bigstring.to_string r.body) header)
+
+let cannot_claim = refuses_header "If-None-Match"
 
 (* §4.2: a 412 reads the holder back; its own bytes mean its own earlier
    attempt won. *)
@@ -405,6 +407,52 @@ let check_claims t =
               ignored ()
           | r -> fail ~op:"put_if_absent" r)
 
+(* §4.2: a provider that honours If-Match answers 412 to a write of the empty
+   chunk naming an ETag it cannot have; one that ignores it rewrites the same
+   bytes, harmlessly, and is never trusted with a conditional replace. *)
+let impossible_etag = "\"" ^ String.make 32 '0' ^ "\""
+
+let check_replaces t =
+  let ignored () =
+    Fail.raise_ Fail.Refused
+      "s3: this store ignores If-Match, so it cannot replace conditionally"
+  in
+  match Atomic.get t.replaces with
+    | Honoured -> ()
+    | Ignored -> ignored ()
+    | Unchecked -> (
+        let k = Key.chunk t.domain Chunk_key.empty in
+        let r = put_request t k Bigstring.empty in
+        if not (success r.status) then fail ~op:"put" r;
+        match
+          put_request t
+            ~headers:[("if-match", impossible_etag)]
+            k Bigstring.empty
+        with
+          | { status = 412; _ } -> Atomic.set t.replaces Honoured
+          | r when success r.status || refuses_header "If-Match" r ->
+              Atomic.set t.replaces Ignored;
+              ignored ()
+          | r -> fail ~op:"put_if_unchanged" r)
+
+(* §4: [None] is a create that never reads the holder; an ETag is the
+   version the caller read. *)
+let put_if_unchanged t k body expected =
+  (match expected with None -> check_claims t | Some _ -> ());
+  check_replaces t;
+  let header =
+    match expected with
+      | None -> ("if-none-match", "*")
+      | Some etag -> ("if-match", "\"" ^ etag ^ "\"")
+  in
+  match put_request t ~headers:[header] k body with
+    | r when success r.status -> Tsync_store.Store.Written
+    | { status = 412; _ } -> Changed
+    | { status = 404; _ } when expected <> None -> Changed
+    | r when refuses_header "If-Match" r || cannot_claim r ->
+        Fail.raise_ Fail.Refused "s3: this store cannot replace conditionally"
+    | r -> fail ~op:"put_if_unchanged" r
+
 (* §1: AWS by region, else the endpoint as given, https for a bare host. *)
 let endpoint_url ~region = function
   | None ->
@@ -459,6 +507,8 @@ let create ~domain ~admission ~name fields =
       domain;
       claims =
         Atomic.make (if str "endpoint" = None then Honoured else Unchecked);
+      replaces =
+        Atomic.make (if str "endpoint" = None then Honoured else Unchecked);
     }
   in
   Object_store.make ~name ~admission ?share_url:(str "shareUrl")
@@ -471,6 +521,7 @@ let create ~domain ~admission ~name fields =
         (fun k body ->
           check_claims t;
           put_if_absent t k body);
+      put_if_unchanged = put_if_unchanged t;
       get_opt = get_opt t;
       get_range = get_range t;
       head_opt = head_opt t;

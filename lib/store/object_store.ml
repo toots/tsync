@@ -11,6 +11,7 @@ type raw_entry = {
 type verbs = {
   put : Key.t -> Bigstring.t -> unit;
   put_if_absent : Key.t -> Bigstring.t -> Store.claim;
+  put_if_unchanged : Key.t -> Bigstring.t -> string option -> Store.replaced;
   get_opt : Key.t -> Bigstring.t option;
   get_range : Key.t -> int -> int -> Bigstring.t option;
   head_opt : Key.t -> Store.entry option;
@@ -121,6 +122,13 @@ let make ~name ~admission ?share_url v =
               in
               (match r with Held b -> down (Some b) | Won -> ());
               r));
+      put_if_unchanged =
+        (fun k body expected ->
+          ladder "put_if_unchanged" (fun () ->
+              Uplink.admitted admission Wait (Bigstring.length body) (fun () ->
+                  up (Bigstring.length body);
+                  v.put_if_unchanged k body
+                    (Option.bind expected (fun (e : Store.entry) -> e.etag)))));
       get_opt =
         (fun k ->
           ladder "get" (fun () ->
@@ -139,6 +147,19 @@ let make ~name ~admission ?share_url v =
               down r;
               r));
       head_opt = (fun k -> ladder "head" (fun () -> v.head_opt k));
+      (* object-store-common §2.2: the service's checksum costs a metadata
+         request; the body moves only when it keeps none of that algorithm. *)
+      compute_checksum =
+        (fun k algo ->
+          match ladder "head" (fun () -> v.head_opt k) with
+            | None -> None
+            | Some { checksum = Some c; _ } when c.algo = algo -> Some c
+            | Some _ ->
+                Option.map (Checksum.of_body algo)
+                  (ladder "get" (fun () ->
+                       let r = v.get_opt k in
+                       down r;
+                       r)));
       delete = (fun k -> ladder "delete" (fun () -> v.delete k));
       delete_multi =
         (fun keys ->
@@ -155,6 +176,7 @@ let make ~name ~admission ?share_url v =
       bucket_functions = true;
       capabilities = (fun _ -> { Store.no_caps with share_url });
       fast_read = false;
+      locality = Remote;
       local_path = None;
       health;
       traffic = Some traffic;

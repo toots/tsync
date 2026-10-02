@@ -1,3 +1,10 @@
+== conditional replace and checksums (06 §3.11, §3.12)
+replace a free key: written
+replace with the entry just read: written
+replace with a stale entry: changed, the other write stays: true
+create over an existing key: changed
+computed checksum is the body's: true; absent: none; unknown algorithm: invalid
+an entry's checksum, when it carries one, is the body's: true
 == round trips
 get_opt a: "hello"; absent: none; get absent: absent
 head a size: 5
@@ -40,8 +47,8 @@ empty prefix: 0
 verified false, share_url none
 
 == gcs wire (backends/gcs §6)
-listed: etag 1019 checksum md5:900150983cd24fb0d6963f7d28e17f72
-headed: etag 1019 checksum md5:900150983cd24fb0d6963f7d28e17f72
+listed: etag 1022 checksum md5:900150983cd24fb0d6963f7d28e17f72
+headed: etag 1022 checksum md5:900150983cd24fb0d6963f7d28e17f72
 the etag is the generation: true
 a rewrite changes the etag: true
 segment: tsync%2Fd%2F.chunks%2Faabb-ccdd | a-b_c.d~e

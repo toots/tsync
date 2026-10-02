@@ -60,7 +60,9 @@ let durable_write root key body =
   in
   attempt 0
 
-let rec claim ~mappable root key body retries =
+(* local §4: link (or rename without replacement) a fully written temporary
+   onto the name, so the name appears whole or not at all. *)
+let create_new root key body =
   let p = path root key in
   mkdirs root key;
   let dir = Filename.dirname p in
@@ -89,7 +91,10 @@ let rec claim ~mappable root key body retries =
               raise (Fail.E (Fail.of_unix e fn a)))
   in
   Fs.fsync_dir dir;
-  match outcome with
+  outcome
+
+let rec claim ~mappable root key body retries =
+  match create_new root key body with
     | `Won -> Store.Won
     | `Taken -> (
         match read_opt ~mappable root key with
@@ -211,6 +216,32 @@ let create ?(verify_writes = true) ~name root =
           ~body:(fun () -> body)
           (fun () -> with_key key (fun () -> durable_write root key body));
         if verify_writes then verify_written ~read:read_opt root key)
+  in
+  (* local §5: the check and the rename are one step under the key's lock; a
+     claim when nothing was read, without reading the holder. *)
+  let put_if_unchanged key body (expected : Store.entry option) =
+    fed (fun () ->
+        let replaced =
+          Chunk_spaces.gate spaces ~key
+            ~body:(fun () -> body)
+            (fun () ->
+              with_key key (fun () ->
+                  match expected with
+                    | None -> (
+                        match create_new root key body with
+                          | `Won -> Store.Written
+                          | `Taken -> Changed)
+                    | Some e -> (
+                        match Fs.lstat_opt (path root key) with
+                          | Some ({ st_kind = S_REG; _ } as st)
+                            when Some (version st) = e.etag ->
+                              durable_write root key body;
+                              Written
+                          | _ -> Changed)))
+        in
+        if replaced = Written && verify_writes then
+          verify_written ~read:read_opt root key;
+        replaced)
   in
   let get_range key off len =
     fed (fun () ->
@@ -351,10 +382,15 @@ let create ?(verify_writes = true) ~name root =
           fed (fun () ->
               Chunk_spaces.gate spaces ~key
                 ~body:(fun () -> body)
-                (fun () -> with_key key (fun () -> claim ~mappable root key body 3))));
+                (fun () ->
+                  with_key key (fun () -> claim ~mappable root key body 3))));
+      put_if_unchanged;
       get_opt = (fun key -> fed (fun () -> read_opt key));
       get_range;
       head_opt;
+      compute_checksum =
+        (fun key algo ->
+          fed (fun () -> Option.map (Checksum.of_body algo) (read_opt key)));
       delete;
       delete_multi;
       copy;
@@ -375,6 +411,7 @@ let create ?(verify_writes = true) ~name root =
       bucket_functions = false;
       capabilities = (fun _ -> { Store.no_caps with verified = verify_writes });
       fast_read = true;
+      locality = Local;
       local_path = Some root;
       health;
       traffic = None;

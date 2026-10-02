@@ -34,6 +34,13 @@ type claim = Won | Held of Bigstring.t
     rather than wait. *)
 type mode = Wait | Best_effort
 
+(** The answer to a conditional replace (06 §3.11): [Changed] when the key no
+    longer held the object the caller read, and nothing was written. *)
+type replaced = Written | Changed
+
+(** Where [compute_checksum] reads the bytes, cheapest first (06 §3.12). *)
+type locality = Local | Proxy | Remote
+
 (** One folder of a [list_many] answer: its whole listing and a body (or
     absence) for each child object. *)
 type folder = {
@@ -48,11 +55,17 @@ type t = {
   name : string;  (** for messages: the member's name *)
   put : ?mode:mode -> Key.t -> Bigstring.t -> unit;
   put_if_absent : Key.t -> Bigstring.t -> claim;
+  put_if_unchanged : Key.t -> Bigstring.t -> entry option -> replaced;
+      (** write only if the key still holds the object of that entry's etag, or
+          no object for [None]; REFUSED when that cannot be evaluated *)
   get_opt : Key.t -> Bigstring.t option;
   get_range : Key.t -> int -> int -> Bigstring.t option;
       (** [offset], [length]: the bytes up to the end, empty past it, [None]
           when absent. *)
   head_opt : Key.t -> entry option;
+  compute_checksum : Key.t -> string -> Checksum.t option;
+      (** the body's checksum under an algorithm of {!Checksum}, computed where
+          the bytes are; [None] when absent *)
   delete : Key.t -> bool;  (** whether an object was removed *)
   delete_multi : Key.t list -> unit;
       (** absent keys succeed; any other refusal fails the whole call *)
@@ -70,6 +83,7 @@ type t = {
           owner's confirmation (06 §3.8) *)
   capabilities : Key.prefix -> caps;
   fast_read : bool;
+  locality : locality;
   local_path : string option;
   health : Tsync_core.Health.t;
   traffic : traffic option;

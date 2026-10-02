@@ -17,6 +17,8 @@ type caps = {
 
 type claim = Won | Held of Bigstring.t
 type mode = Wait | Best_effort
+type replaced = Written | Changed
+type locality = Local | Proxy | Remote
 
 type folder = {
   prefix : Key.prefix;
@@ -30,9 +32,11 @@ type t = {
   name : string;
   put : ?mode:mode -> Key.t -> Bigstring.t -> unit;
   put_if_absent : Key.t -> Bigstring.t -> claim;
+  put_if_unchanged : Key.t -> Bigstring.t -> entry option -> replaced;
   get_opt : Key.t -> Bigstring.t option;
   get_range : Key.t -> int -> int -> Bigstring.t option;
   head_opt : Key.t -> entry option;
+  compute_checksum : Key.t -> string -> Checksum.t option;
   delete : Key.t -> bool;
   delete_multi : Key.t list -> unit;
   copy : Key.t -> Key.t -> unit;
@@ -43,6 +47,7 @@ type t = {
   bucket_functions : bool;
   capabilities : Key.prefix -> caps;
   fast_read : bool;
+  locality : locality;
   local_path : string option;
   health : Health.t;
   traffic : traffic option;
@@ -82,6 +87,21 @@ let checked s =
           Fail.invalid ~op:"get_range" "bad range %d+%d" off len;
         s.get_range key off len);
     delete_multi = (fun keys -> if keys <> [] then s.delete_multi keys);
+    put_if_unchanged =
+      (fun key body expected ->
+        match expected with
+          | Some { etag = None; _ } ->
+              Fail.raise_ Fail.Refused
+                "%s: %s was read without a version, so it cannot be \
+                 replaced                  conditionally"
+                s.name (Key.to_string key)
+          | _ -> s.put_if_unchanged key body expected);
+    compute_checksum =
+      (fun key algo ->
+        if not (Checksum.known algo) then
+          Fail.invalid ~op:"compute_checksum" "unknown checksum algorithm %S"
+            algo;
+        s.compute_checksum key algo);
     get_many =
       Option.map (fun f keys -> if keys = [] then [] else f keys) s.get_many;
     list_many =

@@ -124,7 +124,7 @@ let () =
       p "a signed read meanwhile: %s within 2s: %b\n" read (Rt.now () -. t0 < 2.);
       List.iter Transport.close drips;
       p "== a 401 from a skewed clock is not remembered\n";
-      let skewed = ref true in
+      let skewed = ref true and conditional_puts = ref 0 in
       let l = Unix.socket PF_INET SOCK_STREAM 0 in
       Unix.bind l (ADDR_INET (Unix.inet_addr_loopback, 0));
       Unix.listen l 4;
@@ -149,6 +149,16 @@ let () =
                 ("401 Unauthorized", Unix.gettimeofday () -. 3600., "stale")
               else if String.starts_with ~prefix:"GET /list" head then
                 ("200 OK", Unix.gettimeofday (), "[]")
+              else if String.starts_with ~prefix:"GET /checksum" head then
+                (* a server from before the endpoint *)
+                ("404 Not Found", Unix.gettimeofday (), "not found")
+              else if
+                String.starts_with ~prefix:"PUT" head
+                && (Text.contains head "if_match"
+                   || Text.contains head "if_none_match")
+              then (
+                incr conditional_puts;
+                ("200 OK", Unix.gettimeofday (), ""))
               else ("404 Not Found", Unix.gettimeofday (), "")
             in
             Transport.write_string t
@@ -174,6 +184,16 @@ let () =
       skewed := false;
       p "once the clocks agree: %s\n"
         (kind (fun () -> behind.get_opt (Key.v "tsync/d/a")));
+      p "== a server without /checksum\n";
+      p "conditional replace: %s, conditional PUTs sent: %d\n"
+        (kind (fun () ->
+             behind.put_if_unchanged (Key.v "tsync/d/a")
+               (Bigstring.of_string "x") None))
+        !conditional_puts;
+      p "checksum falls back to a read: %s\n"
+        (match behind.compute_checksum (Key.v "tsync/d/a") Checksum.md5 with
+          | Some _ -> "some"
+          | None -> "none");
       Unix.close l;
       p "== watch\n";
       let cursor = Key.cursor d in
