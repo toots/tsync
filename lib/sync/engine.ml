@@ -111,6 +111,8 @@ module Make (C : Engine_ctx.S) = struct
   type answers = {
     manifests : (string, Manifest.t option) Hashtbl.t;
     anchors : (string, Folder.anchor option) Hashtbl.t;
+    legacy_ids : (string, Folder_id.t) Hashtbl.t;
+        (** an id-less mkdir's or folder rename's id, by its target path *)
   }
 
   let store_at answers p =
@@ -184,7 +186,13 @@ module Make (C : Engine_ctx.S) = struct
       paths
 
   let read_ahead ops =
-    let a = { manifests = Hashtbl.create 8; anchors = Hashtbl.create 4 } in
+    let a =
+      {
+        manifests = Hashtbl.create 8;
+        anchors = Hashtbl.create 4;
+        legacy_ids = Hashtbl.create 1;
+      }
+    in
     let man p =
       if not (Hashtbl.mem a.manifests p) then
         Hashtbl.replace a.manifests p
@@ -195,6 +203,11 @@ module Make (C : Engine_ctx.S) = struct
             | _ -> None);
       if not (Hashtbl.mem a.manifests (translate p)) then
         Hashtbl.replace a.manifests (translate p) (Hashtbl.find a.manifests p)
+    in
+    let holder path =
+      Option.bind
+        (Mirror.lookup_id_removed mirror (Names.parent_of path))
+        (fun pid -> T.holder_at pid (Names.leaf_of path))
     in
     let anchor id =
       if not (Hashtbl.mem a.anchors (Folder_id.to_string id)) then
@@ -212,6 +225,25 @@ module Make (C : Engine_ctx.S) = struct
             man path
         | Rename { is_dir = true; id = Some id; src; dst; _ } ->
             anchor id;
+            man src;
+            man dst
+        | Mkdir { id = None; path } ->
+            Option.iter
+              (fun id ->
+                Hashtbl.replace a.legacy_ids path id;
+                anchor id)
+              (holder path);
+            man path
+        | Rename { is_dir = true; id = None; src; dst; _ } ->
+            (match
+               match Mirror.folder_id mirror (translate src) with
+                 | Some id -> Some id
+                 | None -> holder dst
+             with
+              | Some id ->
+                  Hashtbl.replace a.legacy_ids dst id;
+                  anchor id
+              | None -> ());
             man src;
             man dst
         | Rename { src; dst; _ } ->
@@ -467,10 +499,7 @@ module Make (C : Engine_ctx.S) = struct
           let id =
             match id with
               | Some id -> Some id
-              | None ->
-                  Option.bind
-                    (Mirror.lookup_id_removed mirror (Names.parent_of path))
-                    (fun pid -> T.holder_at pid (Names.leaf_of path))
+              | None -> Hashtbl.find_opt answers.legacy_ids path
           in
           match id with
             | None ->
@@ -549,7 +578,7 @@ module Make (C : Engine_ctx.S) = struct
           let id =
             match id with
               | Some id -> Some id
-              | None -> Mirror.folder_id mirror (translate src)
+              | None -> Hashtbl.find_opt answers.legacy_ids dst
           in
           match id with
             | None -> ()

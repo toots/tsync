@@ -243,3 +243,18 @@
  (alias runtest)
  (action
   (diff missing_parent_test.expected missing_parent_test.output)))
+
+(executable
+ (name legacy_entry_test)
+ (modules legacy_entry_test)
+ (libraries tsync_core tsync_store tsync_checkout tsync_sync unix))
+
+(rule
+ (with-stdout-to
+  legacy_entry_test.output
+  (run ./legacy_entry_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff legacy_entry_test.expected legacy_entry_test.output)))
