@@ -113,9 +113,10 @@ ref, parentRef, name, kind ("dir"|"file"|"symlink"), size, mtime (float seconds)
 - **File**: etag = the published manifest's content hash (16 hex digits), so identical content has
   an identical etag; `""` while staged edits exist. `isUploaded` false while an upload is owed.
   `availability` and `pinnedUntil` (epoch seconds) for files only.
-- **`contentId`** (files): the whole-file digest `h1` ([02](02-remote-model.md)) of the content the
-  key resolves to, staged or published: equal to the etag when published, computed on adoption for a
-  whole staged body, absent while staged partial edits exist. It is the identity a client sends back
+- **`contentId`** (files and symlinks): the whole-file digest `h1` ([02](02-remote-model.md)) of the
+  content the key resolves to, staged or published: equal to the etag when published, computed on
+  adoption for a whole staged body, absent while staged partial edits exist. A symlink's is its
+  symlink digest, which changes exactly when its target does. It is the identity a client sends back
   as `base` (§3.3).
 - **`readOnly`**: present when the item cannot be written, which is when the domain is read-only.
   A client presents such an item read-only and decides writability no other way. A name that is not
