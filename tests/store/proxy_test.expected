@@ -49,6 +49,9 @@ a key of another route: refused/denied
 capabilities: chunk 4096, concurrency 4, verified true
 get_many across pages: 2500 answers
 list_many: 1 folders
+copy into a share manifest: refused/denied
+copy out of a share manifest: refused/denied
+copy within the share cache: ok
 == watch
 behind: returned at once true
 a change wakes the watch: true

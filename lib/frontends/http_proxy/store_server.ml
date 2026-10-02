@@ -349,7 +349,7 @@ let share_candidates t op body names =
   if not (List.for_all in_share_space names) then []
   else (
     match (op, names) with
-      | (Get_multi | Children_multi | Delete_multi), _
+      | (Get_multi | Children_multi | Delete_multi | Copy _), _
         when List.exists is_manifest_name names ->
           []
       | (Put _ | Claim _), [name] when is_manifest_name name -> (

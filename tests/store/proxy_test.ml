@@ -85,6 +85,15 @@ let () =
       p "list_many: %d folders\n"
         (List.length
            (Option.get s.list_many [Key.prefix "tsync/d/manifests/x/"]));
+      let staged = Key.v "tsync/shares/cache/x" in
+      Contract.put s staged {|{"domain":"ro","dir":"root"}|};
+      p "copy into a share manifest: %s\n"
+        (kind (fun () -> s.copy staged (Key.v "tsync/shares/abcd")));
+      p "copy out of a share manifest: %s\n"
+        (kind (fun () ->
+             s.copy (Key.v "tsync/shares/abcd") (Key.v "tsync/shares/cache/y")));
+      p "copy within the share cache: %s\n"
+        (kind (fun () -> s.copy staged (Key.v "tsync/shares/cache/z")));
       p "== watch\n";
       let cursor = Key.cursor d in
       Contract.put s cursor "one";
