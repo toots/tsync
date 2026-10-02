@@ -117,7 +117,7 @@ type _ request =
   | Sync : { full : bool } -> resynced request
   | Trash_restore : string -> trash_restored request
   | Share : {
-      rel : string;
+      item : target;  (** the domain root when the request names nothing *)
       expires : float option;
       token : string option;
     }
@@ -287,7 +287,7 @@ let request_fields : type a. a request -> (string * Yojson.Safe.t) list =
   | Sync r -> [("arg", `String (if r.full then "full" else ""))]
   | Trash_restore path -> [("path", `String path)]
   | Share r ->
-      [("rel", `String r.rel)]
+      target_fields r.item
       @ opt "expires" (fun e -> `Float e) r.expires
       @ opt "token" (fun t -> `String t) r.token
   | Share_revoke s -> [("arg", `String s)]
@@ -372,7 +372,10 @@ let decode j =
         Request
           (Share
              {
-               rel = Option.value ~default:"" (str j "rel");
+               item =
+                 (match str j "ref" with
+                   | Some r -> Ref r
+                   | None -> Rel (Option.value ~default:"" (str j "rel")));
                expires = number j "expires";
                token = str j "token";
              })

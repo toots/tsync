@@ -126,7 +126,7 @@ type _ request =
   | Sync : { full : bool } -> resynced request
   | Trash_restore : string -> trash_restored request
   | Share : {
-      rel : string;
+      item : target;  (** the domain root when the request names nothing *)
       expires : float option;  (** seconds from now *)
       token : string option;
     }
