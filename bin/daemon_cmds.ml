@@ -16,21 +16,16 @@ let macos_service tls (config : Config.t) =
       Tsync_store.Uplink.own
         ~state_file:(Filename.concat (Paths.data_dir ()) "uplink.json")
         (fun link -> Config.uplink_settings (Config.link_settings config link));
-      (* ponytail: the store server is started once, not restarted; a
-         supervision loop if it ever needs to survive a crash. *)
       let store_server =
-        if
-          List.exists
-            (fun d -> Config.frontend d "http-proxy" <> None)
-            config.domains
-        then (
-          let exe = Sys.executable_name in
-          let tls = Option.fold ~none:[] ~some:(fun t -> ["--tls"; t]) tls in
-          Some
-            (Unix.create_process exe
-               (Array.of_list ((exe :: ["store-server"]) @ tls))
-               Unix.stdin Unix.stdout Unix.stderr))
-        else None
+        List.filter
+          (fun (c : Tsync_supervisor.Supervisor.child) ->
+            List.hd c.args = "store-server")
+          (Tsync_supervisor.Supervisor.assign ?tls config)
+      in
+      let children =
+        Rt.async (fun () ->
+            Tsync_supervisor.Supervisor.keep_running ~exe:Sys.executable_name
+              store_server)
       in
       let serve present =
         Owner.run ?present ~shared:true ~socket:(Paths.service_socket ()) config
@@ -38,11 +33,8 @@ let macos_service tls (config : Config.t) =
       in
       Fun.protect
         ~finally:(fun () ->
-          Option.iter
-            (fun pid ->
-              (try Unix.kill pid Sys.sigterm with Unix.Unix_error _ -> ());
-              ignore (Unix.waitpid [] pid))
-            store_server)
+          Stop.request ();
+          Rt.Promise.await children)
         (fun () ->
           match Owner.host_for config.domains with
             | Some host ->
@@ -190,10 +182,14 @@ let stop verbose =
                  and resumes at the next start"
                 (Stop.grace +. 2. +. Ipc.request_deadline)
         | `Absent -> (
+            (* On macOS the service owns every domain and stops its store
+               server itself. *)
             let sockets =
-              match config_opt () with
-                | Some c -> owner_sockets c @ [Paths.store_server_socket ()]
-                | None -> [Paths.store_server_socket ()]
+              if Fs.is_macos then [Paths.service_socket ()]
+              else
+                match config_opt () with
+                  | Some c -> owner_sockets c @ [Paths.store_server_socket ()]
+                  | None -> [Paths.store_server_socket ()]
             in
             let asked =
               List.filter_map
@@ -232,4 +228,71 @@ let store_server_cmd =
        ~docs:"INTERNAL COMMANDS")
     Term.(const store_server $ tls)
 
-let cmds = [start_cmd; owner_cmd; store_server_cmd; stop_cmd]
+(* 08 §2.1: [tsync <group> <verb>], resolved to a domain configured with the
+   frontend. *)
+let frontend_cmds =
+  List.filter_map
+    (fun name ->
+      match Frontend.find name with
+        | Some ({ commands = _ :: _; _ } as f) ->
+            let group = Option.value ~default:name f.group in
+            let verb (c : Frontend.command) =
+              let args =
+                Arg.(value & pos_all string [] & info [] ~docv:"ARG")
+              in
+              cmd c.verb ~doc:c.doc
+                Term.(
+                  const (fun domain_name args verbose ->
+                      set_verbose verbose;
+                      run (fun () ->
+                          let d = domain ?name:domain_name (config ()) in
+                          if Config.frontend d name = None then
+                            fail "%s is not configured with %s"
+                              (Domain_name.to_string d.name)
+                              name;
+                          c.run ~domain:(Domain_name.to_string d.name) args))
+                  $ domain_arg $ args $ verbose)
+            in
+            Some
+              (Cmd.group
+                 (Cmd.info group
+                    ~doc:("Commands of the " ^ name ^ " frontend."))
+                 (List.map verb f.commands))
+        | _ -> None)
+    (Frontend.names ())
+
+let process_status args =
+  match
+    Unix.create_process (List.hd args) (Array.of_list args) Unix.stdin
+      Unix.stdout Unix.stderr
+  with
+    | pid -> ( match snd (Unix.waitpid [] pid) with WEXITED n -> n | _ -> 1)
+    | exception Unix.Unix_error _ -> 127
+
+(* 07 §2.7: through the service manager, never by signalling a process found
+   by name (the macOS service's binary lives in the app bundle). *)
+let restart verbose =
+  set_verbose verbose;
+  if Fs.is_macos then (
+    let target =
+      Printf.sprintf "gui/%d/org.feverdreamtv.tsync.daemon" (Unix.getuid ())
+    in
+    if process_status ["/bin/launchctl"; "kickstart"; "-k"; target] <> 0 then
+      fail "the tsync service is not installed";
+    ignore
+      (process_status ["/usr/bin/open"; "-g"; "-b"; "org.feverdreamtv.tsync"]);
+    say "Restarted tsync.";
+    0)
+  else if process_status ["systemctl"; "--user"; "restart"; "tsync"] <> 0 then
+    fail "the tsync service is not installed"
+  else (
+    say "Restarted tsync.";
+    0)
+
+let restart_cmd =
+  cmd "restart" ~doc:"Restart the service through the service manager."
+    Term.(const restart $ verbose)
+
+let cmds =
+  [start_cmd; owner_cmd; store_server_cmd; stop_cmd; restart_cmd]
+  @ frontend_cmds

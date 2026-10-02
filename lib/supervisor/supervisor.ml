@@ -353,6 +353,22 @@ let handle children req =
           (Ipc.failure (Fail.make Fail.Invalid ("unknown action: " ^ a)))
     | None -> Ipc.Reply (Ipc.failure (Fail.make Fail.Invalid "no action"))
 
+let keep_running ~exe children =
+  let children =
+    List.map
+      (fun child ->
+        {
+          child;
+          pid = None;
+          started = 0.;
+          restart_at = 0.;
+          backoff = backoff_min;
+        })
+      children
+  in
+  supervise exe children;
+  stop_children children
+
 let run ~exe (config : Config.t) children =
   let path = Paths.supervisor_socket () in
   match

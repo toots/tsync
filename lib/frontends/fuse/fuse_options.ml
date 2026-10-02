@@ -23,4 +23,10 @@ let fields =
 
 let () =
   Tsync_config.Frontend.register "fuse"
-    { fields; presenting = Some `Per_domain; commands_only = None }
+    {
+      fields;
+      presenting = Some `Per_domain;
+      commands_only = None;
+      group = None;
+      commands = [];
+    }

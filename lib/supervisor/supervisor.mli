@@ -13,6 +13,11 @@ type child = {
     domains listing [http-proxy] one store server. *)
 val assign : ?mount:string -> ?tls:string -> Tsync_config.Config.t -> child list
 
+(** Start [children], restart each one that exits, until the process stop; then
+    stop them (07 §3.3, §3.4). The macOS service keeps its store server this way
+    without a supervisor. *)
+val keep_running : exe:string -> child list -> unit
+
 (** Serve until stopped, as the uplink governor owner, then stop the children
     and answer the exit status: 0, 1 when another supervisor answers, 2 when the
     socket cannot be bound. *)
