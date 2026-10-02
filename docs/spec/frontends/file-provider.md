@@ -287,8 +287,8 @@ Both versions MUST be non-empty and at most 128 bytes.
     published, [08 §2.3](../08-frontends.md#23-item-row)). It does not change when this client's own
     upload of content the system already holds completes: a changed contentVersion makes the system
     fetch a materialised file again and replace the file the user just saved.
-  - Symlink: `"l:"` followed by `hex16(XXH3-64(target, 0))`, so a retarget changes it and a long
-    target still fits.
+  - Symlink: `"l:"` followed by the row's `contentId`, the symlink digest, so a retarget changes it
+    and a long target still fits. The extension computes no digest of its own.
   - Directory: its folder id, constant for its life. Children changes arrive through the working
     set, never through the parent's version.
 - **metadataVersion** = contentVersion. The system stores it and otherwise ignores it; metadata
