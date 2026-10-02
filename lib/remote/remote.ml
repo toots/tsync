@@ -219,7 +219,7 @@ module Make (C : Context.S) = struct
   let save_version key =
     if C.versioning then (
       try
-        Rt.with_timeout snapshot_deadline (fun () ->
+        Rt.with_timeout ~detach:true snapshot_deadline (fun () ->
             match store.get_opt key with
               | Some body when Manifest.is_manifest body ->
                   let group = group_of key in

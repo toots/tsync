@@ -1085,7 +1085,7 @@ module Make (C : Engine_ctx.S) = struct
           | _ -> ());
         let since = Rt.Signal.version poll_signal in
         (try
-           Rt.first
+           Rt.first ~detach:true
              [
                (fun () -> Journal.cursor_wait journal !last_seen);
                (fun () -> Rt.Signal.wait ~since poll_signal);

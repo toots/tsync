@@ -246,6 +246,26 @@ module Promise = struct
                 | Pending ws ->
                     p.st <- Pending (resolve :: ws);
                     Mutex.unlock p.m)
+
+  (* Not cancellable: a caller cancelled meanwhile still waits. *)
+  let join p =
+    if not (is_resolved p) then
+      Duppy.suspend ~priority:() scheduler (fun resume ->
+          let woken = Atomic.make false in
+          let wake _ =
+            if Atomic.compare_and_set woken false true then (
+              resume ();
+              true)
+            else false
+          in
+          Mutex.lock p.m;
+          match p.st with
+            | Done _ ->
+                Mutex.unlock p.m;
+                ignore (wake ())
+            | Pending ws ->
+                p.st <- Pending (wake :: ws);
+                Mutex.unlock p.m)
 end
 
 let async_child parent fn =
@@ -279,26 +299,27 @@ let both f g =
 let map_concurrently f l = all (List.map (fun x () -> f x) l)
 let iter_concurrently f l = ignore (map_concurrently f l)
 
-let first fns =
+let first ?(detach = false) fns =
   let parent = current () in
   let winner = Promise.create () in
   let children =
     List.map
       (fun fn ->
-        snd
-          (async_child parent (fun () ->
-               match fn () with
-                 | v -> ignore (Promise.try_resolve winner v)
-                 | exception e ->
-                     ignore (Promise.try_resolve_result winner (Error e)))))
+        async_child parent (fun () ->
+            match fn () with
+              | v -> ignore (Promise.try_resolve winner v)
+              | exception e ->
+                  ignore (Promise.try_resolve_result winner (Error e))))
       fns
   in
   Fun.protect
-    ~finally:(fun () -> List.iter (fun c -> cancel_ctx c Cancelled) children)
+    ~finally:(fun () ->
+      List.iter (fun (_, c) -> cancel_ctx c Cancelled) children;
+      if not detach then List.iter (fun (p, _) -> Promise.join p) children)
     (fun () -> Promise.await winner)
 
-let with_timeout d fn =
-  first
+let with_timeout ?detach d fn =
+  first ?detach
     [
       fn;
       (fun () ->

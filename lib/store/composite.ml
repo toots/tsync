@@ -325,7 +325,7 @@ let write_all t job f =
 
 let probe_main t m =
   match
-    Rt.with_timeout Health.probe_timeout (fun () ->
+    Rt.with_timeout ~detach:true Health.probe_timeout (fun () ->
         Retry.ladder ~health:m.store.health ~op:"probe" (fun () ->
             m.store.get_opt (Key.cursor t.domain)))
   with

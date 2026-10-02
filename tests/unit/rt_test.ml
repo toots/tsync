@@ -69,5 +69,35 @@ let () =
                (fun () -> Rt.sleep 5.))
        with Rt.Timeout -> ());
       Rt.sleep 0.01;
-      check "cancel runs finally" (Atomic.get finalized));
+      check "cancel runs finally" (Atomic.get finalized);
+      let slow_loser_done () =
+        let finished = Atomic.make false in
+        let busy () =
+          let t0 = Unix.gettimeofday () in
+          while Unix.gettimeofday () -. t0 < 0.3 do
+            ()
+          done;
+          Atomic.set finished true
+        in
+        (try Rt.first [busy; (fun () -> Rt.sleep 0.02)]
+         with Rt.Cancelled -> ());
+        Atomic.get finished
+      in
+      check "first waits for a loser" (slow_loser_done ());
+      let caller_cancelled = Atomic.make false in
+      (try
+         Rt.with_timeout 0.02 (fun () ->
+             Rt.first
+               [
+                 (fun () ->
+                   let t0 = Unix.gettimeofday () in
+                   while Unix.gettimeofday () -. t0 < 0.3 do
+                     ()
+                   done;
+                   Atomic.set caller_cancelled true);
+                 (fun () -> Rt.sleep 10.);
+               ])
+       with Rt.Timeout -> ());
+      check "a cancelled first still waits for its losers"
+        (Atomic.get caller_cancelled));
   Printf.printf "%d checks\n" !checks

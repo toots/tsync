@@ -91,10 +91,13 @@ val iter_bounded : width:int -> ('a -> unit) -> 'a list -> unit
 (** [width] workers pull from [next] until it answers [None]. *)
 val each : width:int -> (unit -> 'a option) -> ('a -> unit) -> unit
 
-(** The first to finish, successfully or not, wins; the others are cancelled. *)
-val first : (unit -> 'a) list -> 'a
+(** The first to finish, successfully or not, wins; the others are cancelled
+    and, unless [detach], waited for, so none outlives the call. Detach only
+    around work cancellation cannot interrupt, such as a blocking system call.
+*)
+val first : ?detach:bool -> (unit -> 'a) list -> 'a
 
-val with_timeout : float -> (unit -> 'a) -> 'a
+val with_timeout : ?detach:bool -> float -> (unit -> 'a) -> 'a
 
 (** [with_stall_timeout window fn] passes [fn] a progress signal and fails with
     {!Timeout} once [window] passes without it. *)

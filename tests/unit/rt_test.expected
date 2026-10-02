@@ -6,4 +6,6 @@ ok   mutex exclusion
 ok   semaphore bound
 ok   promise
 ok   cancel runs finally
-8 checks
+ok   first waits for a loser
+ok   a cancelled first still waits for its losers
+10 checks
