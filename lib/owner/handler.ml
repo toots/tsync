@@ -120,7 +120,12 @@ let row (module E : Engine.S) ~root_name ~read_only path : Protocol.row option =
                       | Some id when path <> "" -> Folder_id.to_string id
                       | _ -> ".tsync-root");
                 }
-            | `Symlink -> { (file `Symlink) with symlink_target = st.target }
+            | `Symlink ->
+                {
+                  (file `Symlink) with
+                  symlink_target = st.target;
+                  content_id = st.content_id;
+                }
             | `File ->
                 {
                   (file `File) with

@@ -401,6 +401,14 @@ let () =
              ("after", current_walk ^ ":" ^ string_of_int (off + 1));
            ]);
       show "not a cursor" (ask [("action", "list_all"); ("after", "x:1")]);
+      show "symlink"
+        (ask
+           [
+             ("action", "symlink");
+             ("parentRef", "root");
+             ("name", "l");
+             ("target", "c.txt");
+           ]);
       p "== refusals";
       show "malformed ref" (ask [("action", "stat"); ("ref", "x:1")]);
       show "storage key" (ask [("action", "stat"); ("ref", "tsync/docs/x")]);
