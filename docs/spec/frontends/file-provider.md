@@ -232,27 +232,19 @@ for changes from it afterwards. The anchor MUST therefore describe a state at or
 pages show. The owner's anchor names the last applied entry and the kept walk is taken at page 1,
 after it, so a change landing in between is delivered twice, which is harmless.
 
-**Anchors do not expire on a running installation.** An anchor is answered stale only after a new
-generation (`reimport`) or when the entries after it are gone. The second never happens to an anchor
-the system can still use:
+**Anchors do not expire on a running installation.** The core keeps an anchor valid for as long as
+its consumer may present it ([08 §3.6](../08-frontends.md#36-change-feed-changes_since)): the applied
+log keeps every entry from the feed watermark on, the watermark being the oldest anchor the extension
+was handed or asked from; a rebuild appends its difference to the applied log and stamps no new
+generation. An anchor is stale only after `reimport` stamps a new generation, or after the watermark
+lapsed because the domain was not enumerated for `FEED_WATERMARK_MAX_AGE`. So a machine off for months
+resumes with a change enumeration, not a rescan.
 
-- **Retention watermark.** Each time the extension asks for changes from an anchor, the owner records
-  that anchor's entry durably as the domain's *feed watermark* (the system only ever asks from the
-  last anchor it requested or was given, so nothing before the watermark is asked again). Applied-log
-  retention ([wal-and-journal §4.8](../algorithms/wal-and-journal.md)) MUST NOT delete a shard holding
-  an entry after the watermark. A domain that is never enumerated has no watermark and is not
-  constrained.
-- **Empty anchors.** An anchor whose entry part is empty means "before every entry". It is stale once
-  the applied log has dropped any shard; the owner records that it did.
-- **Rebuilds are deltas.** An owner rebuild appends its difference to the applied log
-  ([wal-and-journal §4.8](../algorithms/wal-and-journal.md)), so it never expires an anchor.
-
-So a machine off for months resumes with a change enumeration, not a rescan.
-
-**Page expiry.** A whole-domain page cursor naming a kept walk that no longer exists, or a walk other
-than the current one, is refused with `stale`; the extension finishes the enumeration with the
-framework's page-expired error and the system restarts it. Continuing at the same line of another
-walk would skip items, and an unchanged item skipped there is never enumerated again.
+**Page expiry.** A whole-domain page cursor naming a kept walk that is gone, or a walk other than the
+current one, is answered `{stale:true}` ([08 §3.7](../08-frontends.md#37-listings-and-their-order));
+the extension finishes the enumeration with the framework's page-expired error and the system
+restarts it. Continuing at the same line of another walk would skip items, and an unchanged item
+skipped there is never enumerated again.
 
 ## 6. File Provider mapping (extension)
 
@@ -293,8 +285,9 @@ Both versions MUST be non-empty and at most 128 bytes.
   - File: the row's `contentId` (the whole-file digest of the content the key resolves to, staged or
     published, [08 §2.3](../08-frontends.md#23-item-row)). It does not change when this client's own
     upload of content the system already holds completes: a changed contentVersion makes the system
-    fetch a materialised file again and replace the file the user just saved. A symlink appends
-    `":<target>"`.
+    fetch a materialised file again and replace the file the user just saved.
+  - Symlink: `"l:"` followed by `hex16(XXH3-64(target, 0))`, so a retarget changes it and a long
+    target still fits.
   - Directory: its folder id, constant for its life. Children changes arrive through the working
     set, never through the parent's version.
 - **metadataVersion** = contentVersion. The system stores it and otherwise ignores it; metadata
@@ -335,7 +328,7 @@ item or an error. A creation or modification never completes with neither.
 | fetch partial contents | `stat`; with strict versioning and a contentVersion other than the requested one → version-no-longer-available. Range = `aligned` (§6.8) against the stat's size; empty → version-no-longer-available (a length of 0 is invalid to the owner, and an unknown error is retried forever). `fetch_range(ref, dest, offset, length)`. A reply item whose contentVersion differs from the stat's (the content changed in between, so the range may be misaligned) → version-no-longer-available, and the system asks again. Complete with the served range and the reply's `item`. |
 | create item | Read-only item or domain → cannot-synchronize. Directory iff the type is folder, or the type conforms to directory and no contents are offered (a flat file named like a package is offered contents). Directory → `mkdir`; symlink → `symlink` (target required); contents → stage (§6.6) and `write(parentRef, name)`; else `create`. Every creation is `exclusive:true` except a may-already-exist replay (below). |
 | create item, may already exist | A reimport replays every on-disk item. Directory → `mkdir` without `exclusive` (it answers an existing folder as is). Otherwise `stat(parentRef, name)`: `not_found` → create as above; present and no contents offered → return it; present with contents → stage and `write(ref, base: its contentId)`, which the owner answers without uploading when the content is identical. Only `not_found` means absent; any other error propagates. |
-| modify item | Read-only → cannot-synchronize. Moved (filename or parent changed): `rename(ref, parentRef, name, noreplace:true)`. Then contents changed: stage and `write(ref, base)`, where `base` is the contentVersion of the base version the system gave. Return the last reply's `item`. Neither: return a fresh `stat`. |
+| modify item | Read-only → cannot-synchronize. Moved (filename or parent changed): `rename(ref, parentRef, name, noreplace:true)`; a rename onto the item's own current place is a no-op answered with the item, so a modification retried after its write failed converges. Then contents changed: stage and `write(ref, base)`, where `base` is the contentVersion of the base version the system gave. Return the last reply's `item`. Neither: return a fresh `stat`. |
 | delete item | Read-only → cannot-synchronize. A directory without the recursive flag: `list_dir(limit: 1)`; non-empty → directory-not-empty. Then `rmdir` or `delete`; `not_found` → success. |
 | custom actions | §6.7. |
 
@@ -448,9 +441,10 @@ for (i, op) in ops where last[op.ref] = i:
 Every change is reported wherever it sits. The extension MUST NOT filter by what the system has
 materialised: a folder holding a child the system was never told about is never removed.
 
-Every op must be nameable: the owner names every file and folder of a replicated domain (§6.1). An op
-the owner reports as `unnamed` is an owner defect, surfaced in status; it is never turned into
-`stale`.
+An op or listing entry the owner could not name (a folder with no id on this client) is counted in
+`unnamed`, never turned into `stale`. The item is missing from the replica until it can be named, so
+the owner surfaces a non-zero count in status with its repair (`tsync sync --full`), as
+[08 §2.3](../08-frontends.md#23-item-row) specifies.
 
 ## 8. Change signalling
 
@@ -541,8 +535,8 @@ finds it gone.
 
 ### 9.2 Reimport
 
-`tsync fileprovider reimport` sends `full_resync`. The owner stamps a new generation, rebuilds the
-folder-id index from the mirror and raises `changed`. Every outstanding anchor becomes stale, the
+`tsync fileprovider reimport` sends `full_resync`. The owner stamps a new generation and raises
+`changed`. Every outstanding anchor becomes stale, the
 system re-enumerates the working set and may replay on-disk items with may-already-exist, which §6.5
 turns into no-ops. The command fails (exit 1) unless the owner answered `ok`.
 
@@ -711,16 +705,17 @@ checked.
   owner; concurrent tasks share no unsynchronised client state.
 - An existing `dest`, or a link at any component, is refused `denied` and touches nothing.
 - `create`, `mkdir`, `symlink` and `write` with `exclusive`, and `rename` with `noreplace`, onto a
-  taken name answer `exists` and change nothing.
+  taken name answer `exists` and change nothing; a rename onto the item's own place answers the item.
 
 **Enumeration and feed**
 - Folder pages and whole-domain pages lie end to end with no gap or repeat; a resume against a remade
-  walk answers `stale`, never another walk's line.
+  walk answers `{stale:true}`, never another walk's line.
 - A change enumeration that fails finishes with an error, never at its starting anchor.
 - Change batches: create then delete → only deleted; rename then delete → deleted; a→b→c → one update
   at c; a removal needs no item; an update without an item is not invented.
-- An anchor the extension last asked from survives applied-log retention past the horizon; an
-  empty-entry anchor is stale once a shard was dropped; a rebuild leaves outstanding anchors valid.
+- The anchor of the last full enumeration, and the last anchor asked from, survive applied-log
+  retention past the horizon; an empty-entry anchor is stale once a shard was dropped; a rebuild
+  leaves outstanding anchors valid.
 - Oversized pages or anchors are refused; sentinels are not names; non-UTF-8 anchor bytes are no
   anchor.
 
