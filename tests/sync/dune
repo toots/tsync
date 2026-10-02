@@ -228,3 +228,18 @@
  (alias runtest)
  (action
   (diff rebuild_race_test.expected rebuild_race_test.output)))
+
+(executable
+ (name missing_parent_test)
+ (modules missing_parent_test)
+ (libraries tsync_core tsync_store tsync_checkout tsync_sync unix))
+
+(rule
+ (with-stdout-to
+  missing_parent_test.output
+  (run ./missing_parent_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff missing_parent_test.expected missing_parent_test.output)))

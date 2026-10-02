@@ -129,7 +129,8 @@ module Make (C : Engine_ctx.S) = struct
       | None -> raise Exit
 
   (* Ancestor adoption never mints: a folder with no id here takes the id the
-     store's marker names, unless this client moved or removed that id. *)
+     store's marker names, and a folder missing here is made from it, unless
+     this client moved or removed that id. *)
   let adopt_ancestors paths =
     List.iter
       (fun p ->
@@ -155,6 +156,26 @@ module Make (C : Engine_ctx.S) = struct
                           down next rest
                       | None -> ())
                 | `Dir, Some _, _ -> down next rest
+                | `Absent, None, Some pid when Staged.edit staged next = None
+                  -> (
+                    match T.holder_at pid seg with
+                      | Some id
+                        when Mirror.key_of_id mirror id = None
+                             &&
+                               match Mirror.whereabouts mirror next with
+                               | `Moved _ | `Removed _ -> false
+                               | _ -> true ->
+                          let made =
+                            with_meta (fun () ->
+                                Mirror.kind mirror next = `Absent
+                                &&
+                                (ignore (Mirror.record_folder mirror next id);
+                                 true))
+                          in
+                          if made then (
+                            changed [next];
+                            down next rest)
+                      | _ -> ())
                 | _ -> ())
         in
         down ""
