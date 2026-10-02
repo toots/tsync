@@ -146,7 +146,12 @@ let write_at fd ~off b =
 let rec ensure_whole ?(force = false) t g =
   let p = Mutex.protect t.m (fun () -> Hashtbl.find_opt t.in_flight g.gkey) in
   match p with
-    | Some p -> Rt.Promise.await p
+    | Some p -> (
+        (* Another reader's cancellation is not this one's. *)
+        try Rt.Promise.await p
+        with Rt.Cancelled ->
+          Rt.check ();
+          ensure_whole ~force t g)
     | None ->
         let p = Rt.Promise.create () in
         let mine =
@@ -157,12 +162,16 @@ let rec ensure_whole ?(force = false) t g =
                 true))
         in
         if not mine then ensure_whole ~force t g
-        else
-          Fun.protect
-            ~finally:(fun () ->
-              Mutex.protect t.m (fun () -> Hashtbl.remove t.in_flight g.gkey);
-              ignore (Rt.Promise.try_resolve p ()))
-            (fun () -> if force || not (is_whole t g.gkey) then fetch_group t g)
+        else (
+          let r =
+            try Ok (if force || not (is_whole t g.gkey) then fetch_group t g)
+            with e -> Error (e, Printexc.get_raw_backtrace ())
+          in
+          Mutex.protect t.m (fun () -> Hashtbl.remove t.in_flight g.gkey);
+          ignore (Rt.Promise.try_resolve_result p (Result.map_error fst r));
+          match r with
+            | Ok () -> ()
+            | Error (e, bt) -> Printexc.raise_with_backtrace e bt)
 
 (* 04 §2.7: a whole body is created only verified, data fsynced, renamed. *)
 and fetch_group t g =

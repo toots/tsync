@@ -31,10 +31,14 @@ let probe t check =
   if mine then (
     let r = try Ok (check ()) with e -> Error e in
     (match r with
-      | Ok true ->
-          Fs.mkdir_p (Filename.dirname t.path);
-          Fs.durable_replace ~perm:0o600 t.path
-            (Printf.sprintf "%.3f\n" (Unix.gettimeofday ()))
+      | Ok true -> (
+          try
+            Fs.mkdir_p (Filename.dirname t.path);
+            Fs.durable_replace ~perm:0o600 t.path
+              (Printf.sprintf "%.3f\n" (Unix.gettimeofday ()))
+          with e ->
+            Log.warn "cannot record the bucket function's confirmation: %s"
+              (Printexc.to_string e))
       | _ -> ());
     Mutex.protect t.m (fun () -> t.probing <- None);
     ignore (Rt.Promise.try_resolve_result answer r));

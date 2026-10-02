@@ -1,0 +1,7 @@
+== a failed fetch, as its waiter sees it
+  fetching reader: transient/link
+  waiting reader: transient/link
+== a confirmation that cannot be saved
+  first probe: ok
+  next probe: ok
+  checks run: 2
