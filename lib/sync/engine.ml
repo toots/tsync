@@ -1051,6 +1051,7 @@ module Make (C : Engine_ctx.S) = struct
     Dqueue.rescan uploads
 
   let wake_poller () = Rt.Signal.broadcast poll_signal
+  let trim_cache () = ignore (Cache.enforce_cap cache)
 
   let poll () =
     rescan_logs ();

@@ -146,6 +146,7 @@ let housekeeping (domain : Domain.t) (module E : Tsync_sync.Engine.S) =
   let rearmed = ref (Unix.gettimeofday ()) in
   let pass () =
     E.poll ();
+    E.trim_cache ();
     if Unix.gettimeofday () -. !rearmed >= Dqueue.rearm_interval then (
       rearmed := Unix.gettimeofday ();
       let n = E.rearm () in

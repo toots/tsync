@@ -141,6 +141,10 @@ module type S = sig
   (** Adopt records other processes submitted, then run a journal pass soon. *)
   val poll : unit -> unit
 
+  (** Evicts down to the cache cap (04 §4.11), as housekeeping does on every
+      pass: a host that mostly reads uploads nothing that would. *)
+  val trim_cache : unit -> unit
+
   (** One discovery-and-application pass; the number of entries applied. *)
   val apply_pass : unit -> int
 
