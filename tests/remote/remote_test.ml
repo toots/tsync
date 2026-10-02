@@ -157,6 +157,51 @@ let () =
           | `Folder id ->
               if Folder_id.equal id sub then "the folder" else "another"
           | _ -> "missing");
+      p "\n== a listing that fails once is walked again with its subtree\n";
+      ignore
+        (T.claim ~parent:sub ~name:"Day1"
+           (Folder_id.mint ~uuid:"aaaaaaaaaaaa" ~counter:8));
+      let fail_once = Atomic.make true in
+      let photos = Key.prefix_to_string (Key.namespace d w) in
+      let check prefix =
+        if
+          Key.prefix_to_string prefix = photos
+          && Atomic.exchange fail_once false
+        then Fail.raise_ Fail.Link "listing lost"
+      in
+      let module Flaky = Tree.Make (struct
+        include C
+
+        let store =
+          {
+            C.store with
+            list_prefix =
+              (fun ?max_keys prefix ->
+                check prefix;
+                C.store.list_prefix ?max_keys prefix);
+            list_many =
+              Option.map
+                (fun f prefixes ->
+                  List.iter check prefixes;
+                  f prefixes)
+                C.store.list_many;
+          }
+      end) in
+      let unusable = ref 0 in
+      let dirs =
+        Flaky.fold_tree
+          ~on_unusable:(Skip (fun _ -> incr unusable))
+          Folder_id.root ~root_path:""
+          (fun acc path (e : Tree.entry) ->
+            match e.body with
+              | Dir m -> Names.join path m.name :: acc
+              | File _ -> acc)
+          []
+      in
+      p "failed once: %b; unusable: %d; folders: %s\n"
+        (not (Atomic.get fail_once))
+        !unusable
+        (String.concat " " (List.rev dirs));
       p "\n== a move whose old-marker delete was lost\n";
       ignore (T.place sub ~parent:Folder_id.root ~name:"Moved");
       p "listed at: %s\n"

@@ -416,7 +416,8 @@ module Make (C : Context.S) = struct
      and [f] handed the real path of the containing folder, with only the next
      [width] folders fetched ahead so at most that many listings wait in memory.
 
-     A folder failing transiently under [Skip] is retried once after the walk. *)
+     A folder failing transiently under [Skip] is walked again once after the
+     walk, its subtree with it. *)
   let fold_tree ?(on_unusable = Fail_on_unusable) ?(width = C.max_downloads)
       ?write_index id ~root_path f acc =
     let width = max 1 width in
@@ -429,7 +430,7 @@ module Make (C : Context.S) = struct
           if !p = None then p := Some (fetch id);
           prefetch (n - 1) rest
     in
-    let rec loop = function
+    let rec loop ~last = function
       | [] -> ()
       | (id, path, p) :: rest as stack -> (
           prefetch width stack;
@@ -447,24 +448,23 @@ module Make (C : Context.S) = struct
                         | File _ -> None)
                     entries
                 in
-                loop (dirs @ rest)
-            | exception (Fail.E fl as e) when Fail.retryable fl.kind -> (
+                loop ~last (dirs @ rest)
+            | exception (Fail.E fl as e) when Fail.retryable fl.kind && not last
+              -> (
                 match on_unusable with
                   | Skip _ ->
                       later := (id, path) :: !later;
-                      loop rest
+                      loop ~last rest
+                  | Fail_on_unusable -> raise e)
+            | exception e when last && not (Rt.is_cancelled e) -> (
+                match on_unusable with
+                  | Skip r ->
+                      r (Unreadable (Key.anchor d id, Printexc.to_string e));
+                      loop ~last rest
                   | Fail_on_unusable -> raise e))
     in
-    loop [(id, root_path, ref None)];
-    List.iter
-      (fun (id, path) ->
-        match children ~on_unusable id with
-          | entries -> List.iter (fun e -> acc := f !acc path e) entries
-          | exception e -> (
-              match on_unusable with
-                | Skip r ->
-                    r (Unreadable (Key.anchor d id, Printexc.to_string e))
-                | Fail_on_unusable -> raise e))
-      (List.rev !later);
+    loop ~last:false [(id, root_path, ref None)];
+    loop ~last:true
+      (List.rev_map (fun (id, path) -> (id, path, ref None)) !later);
     !acc
 end

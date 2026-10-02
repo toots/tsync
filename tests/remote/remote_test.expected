@@ -13,8 +13,11 @@ renamed manifest records its new leaf: c.txt
 Photos/ Photos/Trip/ Photos/empty Photos/c.txt Photos/a.txt
 find Photos/Trip: the folder
 
+== a listing that fails once is walked again with its subtree
+failed once: true; unusable: 0; folders: Photos Photos/Trip Photos/Trip/Day1
+
 == a move whose old-marker delete was lost
-listed at: Photos Moved
+listed at: Photos Moved Moved/Day1
 old path: missing
 
 == trash and restore
@@ -288,6 +291,8 @@ taken by Photos
   tsync/photos/manifests/<photos-id>/d6d50f267ed1aabb-7fe71c7d92c1e0c0 (143)
   tsync/photos/manifests/<photos-id>/f01e5cbbc09d4fc4-9a0fcd66f030de75 (110)
   tsync/photos/manifests/aaaaaaaaaaaa-7/.tsync-parent (42)
+  tsync/photos/manifests/aaaaaaaaaaaa-7/507610a8e2b0c3b5-f763932de49b6c0d (48)
+  tsync/photos/manifests/aaaaaaaaaaaa-8/.tsync-parent (41)
   tsync/photos/manifests/bbbbbbbbbbbb-1/.tsync-parent (40)
   tsync/photos/versions/<photos-id>/3c697ec236bbf61f-698ad1290042cc94/<ns> (143)
   tsync/photos/versions/<photos-id>/f01e5cbbc09d4fc4-9a0fcd66f030de75/<ns> (176)
