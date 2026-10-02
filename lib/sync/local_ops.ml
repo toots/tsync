@@ -671,7 +671,8 @@ module Make (C : Engine_ctx.S) = struct
 
   (* A body the durable edit may still name is released only once the edit
      replacing it is durable, its bodies first. *)
-  let write_edit ?(replaced = []) path old (e : Staged.edit) =
+  let write_edit ?(durable = false) ?(replaced = []) path old (e : Staged.edit)
+      =
     let keep = Staged.bodies_named e in
     let gone =
       List.sort_uniq String.compare
@@ -679,7 +680,7 @@ module Make (C : Engine_ctx.S) = struct
            (fun b -> not (List.mem b keep))
            (replaced @ Option.fold ~none:[] ~some:Staged.bodies_named old))
     in
-    if gone = [] then Staged.write ~durable:false staged path e
+    if gone = [] && not durable then Staged.write ~durable:false staged path e
     else (
       fsync_bodies e;
       Staged.write staged path e);
@@ -750,13 +751,14 @@ module Make (C : Engine_ctx.S) = struct
           Array.init n (fun i ->
               if i < Array.length old then old.(i) else Staged.Zero)
         in
+        let replaced = ref [] and cut = ref None in
         if n > 0 && size < e.size then (
           let last = n - 1 in
           let new_len = member_len ~size ~cs last in
           let old_len = member_len ~size:e.size ~cs last in
           match slots.(last) with
             | Staged.Inherit when new_len <> old_len -> (
-                ignore (ensure_group path e slots last);
+                replaced := ensure_group path e slots last;
                 match slots.(last) with
                   | Staged.Staged { body; off } ->
                       let fd = Staged.open_body staged body in
@@ -768,13 +770,9 @@ module Make (C : Engine_ctx.S) = struct
                   | _ -> ())
             | Staged.Staged { body; off } when Staged.body_links staged body = 1
               ->
-                let fd = Staged.open_body staged body in
-                Fs.with_fd fd (fun fd ->
-                    if Staged.body_size staged body > off + new_len then
-                      Fs.sys (fun () ->
-                          Unix.LargeFile.ftruncate fd
-                            (Int64.of_int (off + new_len))))
-            | Staged.Staged _ -> ignore (ensure_group path e slots last)
+                if Staged.body_size staged body > off + new_len then
+                  cut := Some (body, off + new_len)
+            | Staged.Staged _ -> replaced := ensure_group path e slots last
             | _ -> ());
         let e =
           {
@@ -785,7 +783,15 @@ module Make (C : Engine_ctx.S) = struct
             state = Owed;
           }
         in
-        write_edit path before e;
+        (* A body the durable edit names is cut only once the shorter edit is
+           durable: cut first, a crash would leave the old size over it. *)
+        write_edit ~durable:(!cut <> None) ~replaced:!replaced path before e;
+        Option.iter
+          (fun (body, len) ->
+            Fs.with_fd (Staged.open_body staged body) (fun fd ->
+                Fs.sys (fun () ->
+                    Unix.LargeFile.ftruncate fd (Int64.of_int len))))
+          !cut;
         bump path;
         mark_dirty path)
 
