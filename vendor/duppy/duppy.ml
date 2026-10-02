@@ -182,6 +182,8 @@ let register s t =
   if t.deadline < infinity then
     s.timers <- Timers.add (t.deadline, t.id) t s.timers
 
+(* A descriptor closed while tasks still wait on it cannot be re-armed: its
+   interest is dropped, and those tasks end at their deadline. *)
 let unregister s t =
   List.iter
     (fun fd ->
@@ -190,7 +192,7 @@ let unregister s t =
         | Some tasks ->
             Hashtbl.replace s.by_fd fd
               (List.filter (fun x -> x.id <> t.id) tasks));
-      rearm s fd)
+      try rearm s fd with Unix.Unix_error _ -> Pollset.remove s.pollset fd)
     (fds_of_events t.events);
   if t.deadline < infinity then
     s.timers <- Timers.remove (t.deadline, t.id) s.timers
@@ -333,12 +335,24 @@ module Task = struct
   let add_t s items =
     let ready = ref 0 in
     let pinned = ref [] in
-    let f item =
+    (* A wait on a descriptor that cannot be watched fires at once, so its
+       fiber meets the error from its own I/O. *)
+    let fired item =
       match fired_events item [] with
-        | [] ->
-            Mutex.lock s.tasks_m;
-            register s item;
-            Mutex.unlock s.tasks_m
+        | [] -> (
+            try
+              Mutex.protect s.tasks_m (fun () -> register s item);
+              []
+            with Unix.Unix_error _ ->
+              Mutex.protect s.tasks_m (fun () -> unregister s item);
+              List.filter
+                (function `Delay _ -> false | _ -> true)
+                (item.events :> event list))
+        | fired -> fired
+    in
+    let f item =
+      match fired item with
+        | [] -> ()
         | fired ->
             item.dispatched <- true;
             Mutex.lock s.ready_m;

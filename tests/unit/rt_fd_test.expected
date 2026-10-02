@@ -1,0 +1,3 @@
+two waits outliving their descriptor: the scheduler runs on
+a wait on a closed descriptor: returns at once
+a sleep after it completes

@@ -85,3 +85,18 @@
  (alias runtest)
  (action
   (diff mapped_pages_test.expected mapped_pages_test.output)))
+
+(executable
+ (name rt_fd_test)
+ (modules rt_fd_test)
+ (libraries tsync_core threads.posix unix))
+
+(rule
+ (with-stdout-to
+  rt_fd_test.output
+  (run ./rt_fd_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff rt_fd_test.expected rt_fd_test.output)))
