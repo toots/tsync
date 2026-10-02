@@ -112,6 +112,7 @@ type answer =
 type conn = {
   line : Line.t;
   mutable idle_since : float option;  (** [None] while busy or subscribed *)
+  mutable answering : bool;
 }
 
 type subscriber = { queue : json Queue.t; wake : Rt.Signal.t }
@@ -124,6 +125,8 @@ type server = {
   topics : (string, subscriber list) Hashtbl.t;
   stopping : unit Rt.Promise.t;
   finished : unit Rt.Promise.t;
+  mutable closing : bool;
+  left : Rt.Signal.t;
 }
 
 (* sun_path, NUL included. *)
@@ -231,11 +234,18 @@ let parse l =
 let serve_conn t c handler =
   let reply j = Line.write c.line (Yojson.Safe.to_string j) in
   let rec loop () =
-    c.idle_since <- Some (Rt.now ());
-    match Line.read c.line with
+    let open_ =
+      Mutex.protect t.m (fun () ->
+          c.answering <- false;
+          if not t.closing then c.idle_since <- Some (Rt.now ());
+          not t.closing)
+    in
+    match if open_ then Line.read c.line else None with
       | None -> ()
       | Some l -> (
-          c.idle_since <- None;
+          Mutex.protect t.m (fun () ->
+              c.idle_since <- None;
+              c.answering <- true);
           match parse l with
             | Error r ->
                 reply r;
@@ -247,6 +257,7 @@ let serve_conn t c handler =
                       loop ()
                   | Subscribe (topic, r, first) ->
                       reply r;
+                      Mutex.protect t.m (fun () -> c.answering <- false);
                       stream_events t c topic first
                   | Stream run ->
                       reply (run (stream_lines c));
@@ -261,7 +272,8 @@ let serve_conn t c handler =
     | e -> Log.debug "%s: connection closed: %s" t.path (Printexc.to_string e)
 
 let unregister t c =
-  Mutex.protect t.m (fun () -> t.conns <- List.filter (( != ) c) t.conns)
+  Mutex.protect t.m (fun () -> t.conns <- List.filter (( != ) c) t.conns);
+  Rt.Signal.broadcast t.left
 
 (* Called under [t.m]: a connection leaves the list before its descriptor is
    closed, so this never reaches a reused descriptor. *)
@@ -275,7 +287,7 @@ let admit t fd handler =
       "%s: refused a connection from another user" t.path;
     Unix.close fd)
   else (
-    let c = { line = Line.make fd; idle_since = None } in
+    let c = { line = Line.make fd; idle_since = None; answering = false } in
     let admitted =
       Mutex.protect t.m (fun () ->
           if List.length t.conns >= max_connections then (
@@ -347,6 +359,8 @@ let serve ~path handler =
       topics = Hashtbl.create 4;
       stopping = Rt.Promise.create ();
       finished = Rt.Promise.create ();
+      closing = false;
+      left = Rt.Signal.create ();
     }
   in
   Rt.spawn ~name:("ipc " ^ path) (fun () ->
@@ -358,9 +372,31 @@ let serve ~path handler =
         (fun () -> accept_loop t handler));
   t
 
+let close_grace = 5.
+
+(* A connection answering a request, such as the one asking to stop, gets
+   [close_grace] to write its reply. *)
 let close t =
   ignore (Rt.Promise.try_resolve t.stopping ());
   Rt.Promise.await t.finished;
+  let answering () =
+    Mutex.protect t.m (fun () ->
+        t.closing <- true;
+        List.iter (fun c -> if not c.answering then hang_up c) t.conns;
+        List.exists (fun c -> c.answering) t.conns)
+  in
+  let deadline = Rt.now () +. close_grace in
+  let rec wait () =
+    let v = Rt.Signal.version t.left in
+    if answering () && Rt.now () < deadline then (
+      (try
+         Rt.with_timeout
+           (deadline -. Rt.now ())
+           (fun () -> Rt.Signal.wait ~since:v t.left)
+       with Rt.Timeout -> ());
+      wait ())
+  in
+  wait ();
   Mutex.protect t.m (fun () -> List.iter hang_up t.conns)
 
 exception Not_serving of string

@@ -162,6 +162,19 @@ let () =
         (Rt.now () -. t0 < 1.)
         (not (Sys.file_exists path));
       next "a1" a1;
+      p "== a request that closes its own server";
+      let stopping = ref None in
+      let stop_path = Filename.concat dir "stop.sock" in
+      stopping :=
+        Some
+          (Ipc.serve ~path:stop_path (fun _ ->
+               Rt.spawn (fun () -> Ipc.close (Option.get !stopping));
+               Rt.sleep 0.2;
+               Ipc.Reply (Ipc.ok [])));
+      p "  answered: %s"
+        (match Ipc.call stop_path (action "stop") with
+          | r -> str r
+          | exception e -> Printexc.to_string e);
       p "== directory checks";
       let open_dir = Filename.temp_dir "tsync-ipc" "" in
       Unix.chmod open_dir 0o755;

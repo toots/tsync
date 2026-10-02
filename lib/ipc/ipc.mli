@@ -44,7 +44,8 @@ type server
     closes that connection only. *)
 val serve : path:string -> (json -> answer) -> server
 
-(** Stops accepting, ends every connection, removes the socket file once. *)
+(** Stops accepting, ends every connection, removes the socket file once. A
+    connection answering a request is given a few seconds to write its reply. *)
 val close : server -> unit
 
 (** The number of subscribers of [topic] the event was queued for. A

@@ -44,6 +44,8 @@
 == close
   closed within 1s: true, socket file gone: true
   a1: end of stream
+== a request that closes its own server
+  answered: {"ok":true}
 == directory checks
   0755: denied
   long path: invalid
