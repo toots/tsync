@@ -1,8 +1,12 @@
 open Tsync_core
 module R = Tsync_status.Status_report
 
-type target = Ref of string | Rel of string
 type availability = Online_only | Cached | Pinned of float
+
+(** A new item: a parent folder's reference and a leaf. *)
+type destination = { parent_ref : string; name : string }
+
+type target = Ref of string | Rel of string | Child of destination
 
 type row = {
   ref_ : string;
@@ -15,13 +19,21 @@ type row = {
   is_uploaded : bool;
   content_id : string option;
   symlink_target : string option;
+  read_only : bool;
   availability : availability option;
 }
 
 type page = { items : row list; next : string option; unnamed : int }
-type destination = { parent_ref : string; name : string }
 type written = { size : int; mtime : float; item : row }
-type fetched = { local_path : string; offset : int; length : int }
+
+type fetched = {
+  local_path : string;
+  offset : int;
+  length : int;
+  item : row;  (** the version whose bytes were written *)
+}
+
+type cached = { local_path : string; item : row }
 type counted = { succeeded : int; failed : int }
 type progress = Inactive | Active of { downloaded : int; total : int }
 type resynced = Incremental of int | Full of { manifests : int; failed : int }
@@ -46,7 +58,7 @@ type _ request =
     }
       -> page request
   | Cursor : string request
-  | Ensure_cached : { item : target; dest : string } -> string request
+  | Ensure_cached : { item : target; dest : string } -> cached request
   | Fetch_range : {
       item : target;
       dest : string;
@@ -57,7 +69,7 @@ type _ request =
   | Download_progress : target -> progress request
   | Create : { at : destination; exclusive : bool } -> row request
   | Write : {
-      at : destination;
+      at : target;  (** a file by [Ref], or a place by [Child] *)
       staging : string;
       base : string option;
       exclusive : bool;
@@ -185,18 +197,21 @@ let number j k =
 
 let opt k f = function Some v -> [(k, f v)] | None -> []
 
+let destination_fields (d : destination) =
+  [("parentRef", `String d.parent_ref); ("name", `String d.name)]
+
 let target_fields = function
   | Ref r -> [("ref", `String r)]
   | Rel p -> [("rel", `String p)]
+  | Child d -> destination_fields d
 
 let target_of j =
-  match (str j "ref", str j "rel") with
-    | Some r, _ -> Ref r
-    | None, Some p -> Rel p
-    | None, None -> Fail.invalid "ref or rel is required"
-
-let destination_fields (d : destination) =
-  [("parentRef", `String d.parent_ref); ("name", `String d.name)]
+  match (str j "ref", str j "rel", str j "parentRef") with
+    | Some r, _, _ -> Ref r
+    | None, Some p, _ -> Rel p
+    | None, None, Some parent_ref ->
+        Child { parent_ref; name = required j "name" }
+    | None, None, None -> Fail.invalid "ref, rel or parentRef is required"
 
 let destination_of j =
   { parent_ref = required j "parentRef"; name = required j "name" }
@@ -222,7 +237,7 @@ let request_fields : type a. a request -> (string * Yojson.Safe.t) list =
         ]
   | Create r -> destination_fields r.at @ [("exclusive", `Bool r.exclusive)]
   | Write r ->
-      destination_fields r.at
+      target_fields r.at
       @ [("staging", `String r.staging); ("exclusive", `Bool r.exclusive)]
       @ opt "base" (fun b -> `String b) r.base
   | Mkdir r -> destination_fields r.at @ [("exclusive", `Bool r.exclusive)]
@@ -278,7 +293,7 @@ let decode j =
         Request
           (Write
              {
-               at = destination_of j;
+               at = target_of j;
                staging = required j "staging";
                base = str j "base";
                exclusive = flag j "exclusive";
@@ -364,6 +379,7 @@ let row_fields r =
   ]
   @ opt "contentId" (fun c -> `String c) r.content_id
   @ opt "symlinkTarget" (fun t -> `String t) r.symlink_target
+  @ (if r.read_only then [("readOnly", `Bool true)] else [])
   @
     match r.availability with
     | None -> []
@@ -388,6 +404,7 @@ let row_of_fields j =
     is_uploaded = flag j "isUploaded";
     content_id = str j "contentId";
     symlink_target = str j "symlinkTarget";
+    read_only = flag j "readOnly";
     availability =
       (match str j "availability" with
         | Some "online-only" -> Some Online_only
@@ -419,14 +436,16 @@ let encode_reply : type a. a request -> a -> Yojson.Safe.t =
           @ if reply.unnamed > 0 then [("unnamed", `Int reply.unnamed)] else []
           )
     | Cursor -> ok [("cursor", `String reply)]
-    | Ensure_cached _ -> ok [("localPath", `String reply)]
+    | Ensure_cached _ ->
+        ok (("localPath", `String reply.local_path) :: item reply.item)
     | Fetch_range _ ->
         ok
-          [
-            ("localPath", `String reply.local_path);
-            ("offset", `Int reply.offset);
-            ("length", `Int reply.length);
-          ]
+          ([
+             ("localPath", `String reply.local_path);
+             ("offset", `Int reply.offset);
+             ("length", `Int reply.length);
+           ]
+          @ item reply.item)
     | Download_progress _ -> (
         match reply with
           | Inactive -> ok [("active", `Bool false)]
@@ -534,12 +553,13 @@ let decode_reply : type a. a request -> Yojson.Safe.t -> a =
           unnamed = count "unnamed" j;
         }
     | Cursor -> required j "cursor"
-    | Ensure_cached _ -> required j "localPath"
+    | Ensure_cached _ -> { local_path = required j "localPath"; item = item () }
     | Fetch_range _ ->
         {
           local_path = required j "localPath";
           offset = count "offset" j;
           length = count "length" j;
+          item = item ();
         }
     | Download_progress _ ->
         if flag j "active" then

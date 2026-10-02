@@ -5,11 +5,14 @@
 
 open Tsync_core
 
-(** An item named by reference or, for callers holding only a path, by its
-    domain-relative path (08 §2.2). *)
-type target = Ref of string | Rel of string
-
 type availability = Online_only | Cached | Pinned of float
+
+(** A new item: a parent folder's reference and a leaf. *)
+type destination = { parent_ref : string; name : string }
+
+(** An item named by reference, by its parent folder and leaf (08 §3.3), or, for
+    callers holding only a path, by its domain-relative path (08 §2.2). *)
+type target = Ref of string | Rel of string | Child of destination
 
 (** 08 §2.3. *)
 type row = {
@@ -23,17 +26,23 @@ type row = {
   is_uploaded : bool;
   content_id : string option;
   symlink_target : string option;
+  read_only : bool;
   availability : availability option;  (** files only *)
 }
 
 (** [unnamed] counts rows whose container has no id on this client. *)
 type page = { items : row list; next : string option; unnamed : int }
 
-(** A new item: a parent folder's reference and a leaf. *)
-type destination = { parent_ref : string; name : string }
-
 type written = { size : int; mtime : float; item : row }
-type fetched = { local_path : string; offset : int; length : int }
+
+type fetched = {
+  local_path : string;
+  offset : int;
+  length : int;
+  item : row;  (** the version whose bytes were written *)
+}
+
+type cached = { local_path : string; item : row }
 type counted = { succeeded : int; failed : int }
 type progress = Inactive | Active of { downloaded : int; total : int }
 type resynced = Incremental of int | Full of { manifests : int; failed : int }
@@ -58,7 +67,7 @@ type _ request =
     }
       -> page request
   | Cursor : string request
-  | Ensure_cached : { item : target; dest : string } -> string request
+  | Ensure_cached : { item : target; dest : string } -> cached request
   | Fetch_range : {
       item : target;
       dest : string;
@@ -69,7 +78,7 @@ type _ request =
   | Download_progress : target -> progress request
   | Create : { at : destination; exclusive : bool } -> row request
   | Write : {
-      at : destination;
+      at : target;  (** a file by [Ref], or a place by [Child] *)
       staging : string;
       base : string option;
       exclusive : bool;
@@ -143,6 +152,10 @@ val encode_reply : 'a request -> 'a -> Yojson.Safe.t
 val row_fields : row -> (string * Yojson.Safe.t) list
 
 val row_of_fields : Yojson.Safe.t -> row
+
+(** [["item", row]], as replies nest a row. *)
+val item : row -> (string * Yojson.Safe.t) list
+
 val failure_of_reply : Yojson.Safe.t -> Fail.t option
 
 (** What a job streams before its reply: its id, then its output, its progress

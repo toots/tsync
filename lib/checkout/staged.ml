@@ -1,7 +1,16 @@
 open Tsync_core
 
-type slot = Inherit | Zero | Staged of { body : string; off : int }
-type content = Slots of slot array | Whole of string
+type slot =
+  | Inherit
+  | Zero
+  | Staged of { body : string; off : int }
+      (** [h1]: the body's whole-file digest, the key's [content_id] (04 §2.5).
+      *)
+
+type content =
+  | Slots of slot array
+  | Whole of { body : string; h1 : string option }
+
 type base = Base_unknown | Base_none | Base of string
 type state = Owed | Committed of Manifest.t
 
@@ -32,7 +41,9 @@ let encode e =
     ]
     @ (match e.content with
       | Slots s -> [("slots", `List (Array.to_list (Array.map encode_slot s)))]
-      | Whole b -> [("whole", `String b)])
+      | Whole { body; h1 } ->
+          ("whole", `String body)
+          :: (match h1 with Some h -> [("h1", `String h)] | None -> []))
     @ (match e.base with
       | Base_unknown -> []
       | Base_none -> [("base", `Null)]
@@ -102,7 +113,17 @@ let decode body =
                       match
                         (List.assoc_opt "whole" f, List.assoc_opt "slots" f)
                       with
-                        | Some (`String b), _ -> Some (Whole b)
+                        | Some (`String body), _ ->
+                            Some
+                              (Whole
+                                 {
+                                   body;
+                                   h1 =
+                                     (match List.assoc_opt "h1" f with
+                                       | Some (`String h) when is_hex16 h ->
+                                           Some h
+                                       | _ -> None);
+                                 })
                         | _, Some (`List l) ->
                             let parsed = List.map slot l in
                             if List.exists Option.is_none parsed then None
@@ -286,7 +307,7 @@ let move ?(new_file = false) t ~src ~dst =
 
 let bodies_named e =
   match e.content with
-    | Whole b -> [b]
+    | Whole { body; _ } -> [body]
     | Slots s ->
         List.sort_uniq compare
           (Array.to_list

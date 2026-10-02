@@ -200,43 +200,85 @@ let () =
       p "%-34s %S" "  content" (Fs.read_file dest);
       show "ensure_cached onto a file"
         (ask [("action", "ensure_cached"); ("ref", f_ref); ("dest", dest)]);
-      let subscribe dir =
-        let c = Ipc.Client.connect socket in
-        ignore
-          (Ipc.Client.request c
-             (`Assoc
-                [
-                  ("action", `String "subscribe");
-                  ("domain", `String "docs");
-                  ("tempDir", `String dir);
-                ]));
-        c
+      show "stat by parent and name"
+        (ask [("action", "stat"); ("parentRef", a_ref); ("name", "f.txt")]);
+      let content_id r =
+        match r with
+          | `Assoc l -> (
+              match List.assoc_opt "item" l with
+                | Some i -> Option.get (Ipc.field i "contentId")
+                | None -> get r "contentId")
+          | _ -> assert false
       in
-      let outside n =
-        let d = Filename.temp_dir ("tsync-owner-temp" ^ n) "" in
-        (d, Filename.concat d "out.txt")
+      let pending () =
+        match ask [("action", "status")] with
+          | `Assoc l -> (
+              match List.assoc_opt "pendingUploads" l with
+                | Some (`Int n) -> n
+                | _ -> -1)
+          | _ -> -1
       in
-      let first, first_dest = outside "1" and _, second_dest = outside "2" in
-      let outcome label r =
-        p "%-34s %s" label (Option.value ~default:"ok" (Ipc.field r "code"))
-      in
-      let s1 = subscribe "/" in
-      outcome "after tempDir=/: a dest outside"
-        (ask
-           [("action", "ensure_cached"); ("ref", f_ref); ("dest", second_dest)]);
-      let s2 = subscribe first in
-      outcome "a dest in the declared tempDir"
-        (ask
-           [("action", "ensure_cached"); ("ref", f_ref); ("dest", first_dest)]);
-      let s3 = subscribe (Filename.dirname second_dest) in
-      outcome "the earlier tempDir, once replaced"
+      let before = pending () in
+      show "write by ref, same content"
         (ask
            [
-             ("action", "ensure_cached");
+             ("action", "write");
              ("ref", f_ref);
-             ("dest", Filename.concat first "again.txt");
+             ("staging", staging "s2" "hello world");
            ]);
-      List.iter Ipc.Client.close [s1; s2; s3];
+      p "  uploads queued by it: %d" (pending () - before);
+      let w2 =
+        ask
+          [
+            ("action", "write");
+            ("ref", f_ref);
+            ("staging", staging "s3" "second text");
+            ("base", content_id w);
+          ]
+      in
+      show "write by ref on its base" w2;
+      show "write on a stale base"
+        (ask
+           [
+             ("action", "write");
+             ("ref", f_ref);
+             ("staging", staging "s4" "stale edit");
+             ("base", content_id w);
+           ]);
+      p "  a now holds: %s"
+        (match ask [("action", "list_dir"); ("ref", a_ref)] with
+          | `Assoc l -> (
+              match List.assoc_opt "items" l with
+                | Some (`List items) ->
+                    String.concat ", "
+                      (List.map
+                         (fun i -> Option.get (Ipc.field i "name"))
+                         items)
+                | _ -> "?")
+          | _ -> "?");
+      show "create onto a file, exclusive"
+        (Ipc.call socket
+           (`Assoc
+              [
+                ("domain", `String "docs");
+                ("action", `String "create");
+                ("parentRef", `String a_ref);
+                ("name", `String "f.txt");
+                ("exclusive", `Bool true);
+              ]));
+      show "rename onto its own place"
+        (Ipc.call socket
+           (`Assoc
+              [
+                ("domain", `String "docs");
+                ("action", `String "rename");
+                ("ref", `String f_ref);
+                ("parentRef", `String a_ref);
+                ("name", `String "f.txt");
+                ("noreplace", `Bool true);
+              ]));
+      show "stat root of a read-only domain"
+        (ask ~domain:(Some "ro") [("action", "stat"); ("ref", "root")]);
       show "rename to g.txt"
         (ask
            [

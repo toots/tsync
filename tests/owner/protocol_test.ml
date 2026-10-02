@@ -5,7 +5,7 @@ type case = Case : 'a request * 'a -> case
 
 let row : row =
   {
-    ref_ = "f:9f3a/big.txt";
+    ref_ = "i:6c1e0b9a2f4d47e8a3b5c7d9e1f20384";
     parent_ref = "d:9f3a";
     name = "big.txt";
     kind = `File;
@@ -15,6 +15,7 @@ let row : row =
     is_uploaded = true;
     content_id = Some "1294bbe85c2f380b";
     symlink_target = None;
+    read_only = false;
     availability = Some (Pinned 1500000000.);
   }
 
@@ -39,16 +40,33 @@ let cases =
         { items = [row; dir]; next = Some "big.txt"; unnamed = 1 } );
     Case (Cursor, "1756600000000|0001756600000-abc");
     Case
-      (Ensure_cached { item = Ref "f:9f3a/big.txt"; dest = "/tmp/x" }, "/tmp/x");
+      ( Ensure_cached { item = Ref "f:9f3a/big.txt"; dest = "/tmp/x" },
+        { local_path = "/tmp/x"; item = row } );
+    Case (Stat (Child at), { row with read_only = true });
     Case
       ( Fetch_range
           { item = Rel "big.txt"; dest = "/tmp/y"; offset = 4; length = 8 },
-        { local_path = "/tmp/y"; offset = 4; length = 8 } );
+        { local_path = "/tmp/y"; offset = 4; length = 8; item = row } );
     Case
       (Download_progress (Rel "big.txt"), Active { downloaded = 3; total = 9 });
     Case (Create { at; exclusive = true }, row);
     Case
-      ( Write { at; staging = "/tmp/s"; base = Some "abcd"; exclusive = false },
+      ( Write
+          {
+            at = Child at;
+            staging = "/tmp/s";
+            base = Some "abcd";
+            exclusive = false;
+          },
+        { size = 24; mtime = 1400000000.; item = row } );
+    Case
+      ( Write
+          {
+            at = Ref row.ref_;
+            staging = "/tmp/s";
+            base = None;
+            exclusive = false;
+          },
         { size = 24; mtime = 1400000000.; item = row } );
     Case (Mkdir { at; exclusive = false }, dir);
     Case

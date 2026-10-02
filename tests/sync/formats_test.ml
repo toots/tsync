@@ -158,7 +158,9 @@ let () =
                                   Printf.sprintf "S(%s@%d)"
                                     (String.sub body 0 4) off)
                             s))
-                | Whole b -> "whole " ^ b)
+                | Whole { body; h1 } ->
+                    "whole " ^ body
+                    ^ Option.fold ~none:"" ~some:(fun h -> " h1 " ^ h) h1)
               ^
                 match e.base with
                 | Base_unknown -> ", base unknown"

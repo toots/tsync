@@ -4,20 +4,26 @@ held by role=daemon what=tsync start socket=true
 stat root                          {"ok":true,"ref":"root","parentRef":"root","name":"docs","kind":"dir","size":0,"mtime":"<t>","etag":".tsync-root","isUploaded":true}
 mkdir a                            {"ok":true,"item":{"ref":"d:<id1>","parentRef":"root","name":"a","kind":"dir","size":0,"mtime":"<t>","etag":"<id1>","isUploaded":true}}
 mkdir a again                      {"ok":true,"item":{"ref":"d:<id1>","parentRef":"root","name":"a","kind":"dir","size":0,"mtime":"<t>","etag":"<id1>","isUploaded":true}}
-mkdir a exclusive                  {"ok":false,"code":"exists","error":"a exists"}
+mkdir a exclusive                  {"ok":false,"code":"exists","error":"a exists","item":{"ref":"d:<id1>","parentRef":"root","name":"a","kind":"dir","size":0,"mtime":"<t>","etag":"<id1>","isUploaded":true}}
 write a/f.txt                      {"ok":true,"size":11,"mtime":"<t>","item":{"ref":"i:<file-1>","parentRef":"d:<id1>","name":"f.txt","kind":"file","size":11,"mtime":"<t>","etag":"","isUploaded":false,"contentId":"<id2>","availability":"cached"}}
 stat by rel                        {"ok":true,"ref":"i:<file-1>","parentRef":"d:<id1>","name":"f.txt","kind":"file","size":11,"mtime":"<t>","etag":"","isUploaded":false,"contentId":"<id2>","availability":"cached"}
 list_dir root                      {"ok":true,"items":[{"ref":"d:<id1>","parentRef":"root","name":"a","kind":"dir","size":0,"mtime":"<t>","etag":"<id1>","isUploaded":true}]}
 list_dir a                         {"ok":true,"items":[{"ref":"i:<file-1>","parentRef":"d:<id1>","name":"f.txt","kind":"file","size":11,"mtime":"<t>","etag":"","isUploaded":false,"contentId":"<id2>","availability":"cached"}]}
 staging outside the roots          {"ok":false,"code":"denied","error":"/etc/hostname: outside the roots this host declares"}
-ensure_cached                      {"ok":true,"localPath":"<root>/home/out.txt"}
+ensure_cached                      {"ok":true,"localPath":"<root>/home/out.txt","item":{"ref":"i:<file-1>","parentRef":"d:<id1>","name":"f.txt","kind":"file","size":11,"mtime":"<t>","etag":"","isUploaded":false,"contentId":"<id2>","availability":"cached"}}
   content                          "hello world"
 ensure_cached onto a file          {"ok":false,"code":"denied","error":"<root>/home/out.txt: already exists"}
-after tempDir=/: a dest outside    denied
-a dest in the declared tempDir     ok
-the earlier tempDir, once replaced denied
-rename to g.txt                    {"ok":true,"item":{"ref":"i:<file-1>","parentRef":"d:<id1>","name":"g.txt","kind":"file","size":11,"mtime":"<t>","etag":"","isUploaded":false,"contentId":"<id2>","availability":"cached"}}
-stat its ref after                 {"ok":true,"ref":"i:<file-1>","parentRef":"d:<id1>","name":"g.txt","kind":"file","size":11,"mtime":"<t>","etag":"","isUploaded":false,"contentId":"<id2>","availability":"cached"}
+stat by parent and name            {"ok":true,"ref":"i:<file-1>","parentRef":"d:<id1>","name":"f.txt","kind":"file","size":11,"mtime":"<t>","etag":"","isUploaded":false,"contentId":"<id2>","availability":"cached"}
+write by ref, same content         {"ok":true,"size":11,"mtime":"<t>","item":{"ref":"i:<file-1>","parentRef":"d:<id1>","name":"f.txt","kind":"file","size":11,"mtime":"<t>","etag":"","isUploaded":false,"contentId":"<id2>","availability":"cached"}}
+  uploads queued by it: 0
+write by ref on its base           {"ok":true,"size":11,"mtime":"<t>","item":{"ref":"i:<file-1>","parentRef":"d:<id1>","name":"f.txt","kind":"file","size":11,"mtime":"<t>","etag":"","isUploaded":false,"contentId":"<id3>","availability":"cached"}}
+write on a stale base              {"ok":true,"size":11,"mtime":"<t>","item":{"ref":"i:<file-1>","parentRef":"d:<id1>","name":"f.txt","kind":"file","size":11,"mtime":"<t>","etag":"","isUploaded":false,"contentId":"<id3>","availability":"cached"}}
+  a now holds: f (conflicted copy from test).txt, f.txt
+create onto a file, exclusive      {"ok":false,"code":"exists","error":"a/f.txt exists","item":{"ref":"i:<file-1>","parentRef":"d:<id1>","name":"f.txt","kind":"file","size":11,"mtime":"<t>","etag":"","isUploaded":false,"contentId":"<id3>","availability":"cached"}}
+rename onto its own place          {"ok":true,"item":{"ref":"i:<file-1>","parentRef":"d:<id1>","name":"f.txt","kind":"file","size":11,"mtime":"<t>","etag":"","isUploaded":false,"contentId":"<id3>","availability":"cached"}}
+stat root of a read-only domain    {"ok":true,"ref":"root","parentRef":"root","name":"ro","kind":"dir","size":0,"mtime":"<t>","etag":".tsync-root","isUploaded":true,"readOnly":true}
+rename to g.txt                    {"ok":true,"item":{"ref":"i:<file-1>","parentRef":"d:<id1>","name":"g.txt","kind":"file","size":11,"mtime":"<t>","etag":"","isUploaded":false,"contentId":"<id3>","availability":"cached"}}
+stat its ref after                 {"ok":true,"ref":"i:<file-1>","parentRef":"d:<id1>","name":"g.txt","kind":"file","size":11,"mtime":"<t>","etag":"","isUploaded":false,"contentId":"<id3>","availability":"cached"}
 delete a folder                    {"ok":false,"code":"invalid","error":"a folder is removed with rmdir"}
 rmdir a                            {"ok":true}
 list_dir root                      {"ok":true,"items":[]}
@@ -33,9 +39,9 @@ sync while paused                  {"ok":false,"code":"paused","error":"docs is 
 resume                             {"ok":true,"paused":false}
 == events
 subscribe                          {"ok":true}
-first event                        {"event":"recovered","domain":"docs","id":6}
+first event                        {"event":"recovered","domain":"docs","id":3}
 notify_reset                       {"ok":true,"delivered":1}
-next event                         {"event":"reset","domain":"docs","id":7}
+next event                         {"event":"reset","domain":"docs","id":4}
 == jobs
   line                             {"stream":"started","job":1}
   line                             {"stream":"out","text":"full resync: 0 manifests"}
