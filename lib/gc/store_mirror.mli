@@ -6,7 +6,7 @@
 
 open Tsync_core
 
-type scope = All | Manifests | Path of string
+type scope = All | Skip_chunks | Path of string
 
 type copied = {
   name : string;  (** the destination member *)

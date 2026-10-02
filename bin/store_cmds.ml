@@ -431,9 +431,9 @@ let export_cmd =
        changes)."
     Term.(const export $ args $ source $ jobs $ domain_arg $ verbose)
 
-let mirror source manifests path name verbose =
-  if manifests && path <> None then (
-    prerr_endline "tsync: --manifests and --path go one at a time";
+let mirror source skip_chunks path name verbose =
+  if skip_chunks && path <> None then (
+    prerr_endline "tsync: --skip-chunks and --path go one at a time";
     2)
   else (
     let path =
@@ -443,7 +443,7 @@ let mirror source manifests path name verbose =
             (List.filter (( <> ) "") (String.split_on_char '/' p)))
         path
     in
-    run_job ?name verbose (Mirror { source; manifests; path }))
+    run_job ?name verbose (Mirror { source; skip_chunks; path }))
 
 let mirror_cmd =
   let source =
@@ -452,10 +452,14 @@ let mirror_cmd =
       & opt (some string) None
       & info ["source"] ~docv:"MEMBER"
           ~doc:"Copy from this member; the first in role order by default.")
-  and manifests =
+  and skip_chunks =
     Arg.(
       value & flag
-      & info ["manifests"] ~doc:"Only manifests and folder markers.")
+      & info ["skip-chunks"]
+          ~doc:
+            "Everything but the chunks: manifests, folder markers, versions, \
+             journal entries and the cursor. Allowed while a collection is \
+             open.")
   and path =
     Arg.(
       value
@@ -467,7 +471,7 @@ let mirror_cmd =
     ~doc:
       "Copy what one member holds to the others; nothing is deleted on a \
        destination."
-    Term.(const mirror $ source $ manifests $ path $ domain_arg $ verbose)
+    Term.(const mirror $ source $ skip_chunks $ path $ domain_arg $ verbose)
 
 let share path expires token revoke clear name verbose =
   set_verbose verbose;

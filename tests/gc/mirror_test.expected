@@ -28,8 +28,9 @@ all: main -> copy, 10 checked, 1 copied (110 bytes), 0 refused, 0 changed, 0 ung
 == a copy that cannot replace conditionally
 all: main -> copy, 10 checked, 1 copied (110 bytes), 0 refused, 0 changed, 1 unguarded
 
-== manifests only
-manifests: main -> copy, 5 checked, 0 copied (0 bytes), 1 refused, 0 changed, 0 unguarded
+== everything but the chunks
+skip-chunks: main -> copy, 9 checked, 2 copied (4 bytes), 1 refused, 0 changed, 0 unguarded
+journal entry and same-size cursor copied: true
 
 == a path, with a chunk missing from the source
 path: refused: tsync/d/chunks/de5/de50e7a571250a97-6ed340dd3302d426 is missing from source main
@@ -37,7 +38,7 @@ path: main -> copy, 7 checked, 2 copied (114 bytes), 0 refused, 0 changed, 0 ung
 
 == a collection open
 all: refused: main has a collection open in marking, started 3d 0h ago: the chunk area is partly under another name; finish it with tsync gc, or undo it with tsync gc --abort
-manifests: main -> copy, 5 checked, 0 copied (0 bytes), 0 refused, 0 changed, 0 unguarded
+skip-chunks: main -> copy, 9 checked, 0 copied (0 bytes), 0 refused, 0 changed, 0 unguarded
 
 == an unknown source
 source: refused: d has no member named nowhere
