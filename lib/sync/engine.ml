@@ -992,6 +992,9 @@ module Make (C : Engine_ctx.S) = struct
                 (List.rev batch);
             if rest <> [] then chunks [] 0 rest
       in
+      (* The walk wrote the mirror without fsyncs: one flush makes it durable
+         before the applied log and the mark claim it. *)
+      Fs.syncfs (Mirror.root mirror);
       chunks [] 0 ops;
       List.iter
         (fun (k, _) ->

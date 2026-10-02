@@ -213,6 +213,15 @@ CAMLprim value tsync_rename_noreplace(value src, value dst) {
   CAMLreturn(Val_unit);
 }
 
+CAMLprim value tsync_syncfs(value fd) {
+  CAMLparam1(fd);
+  caml_release_runtime_system();
+  int r = syncfs(Int_val(fd)), e = errno;
+  caml_acquire_runtime_system();
+  if (r < 0) { errno = e; uerror("syncfs", Nothing); }
+  CAMLreturn(Val_unit);
+}
+
 CAMLprim value tsync_peer_uid(value fd) {
   CAMLparam1(fd);
   struct ucred c;
@@ -392,6 +401,15 @@ CAMLprim value tsync_rename_noreplace(value src, value dst) {
   caml_stat_free(s);
   caml_stat_free(d);
   if (r < 0) { errno = e; uerror("rename", dst); }
+  CAMLreturn(Val_unit);
+}
+
+/* No syncfs here: sync flushes every filesystem. */
+CAMLprim value tsync_syncfs(value fd) {
+  CAMLparam1(fd);
+  caml_release_runtime_system();
+  sync();
+  caml_acquire_runtime_system();
   CAMLreturn(Val_unit);
 }
 

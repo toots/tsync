@@ -165,3 +165,7 @@ val terminal_columns : Unix.file_descr -> int option
 (** An absolute path without empty or [.] segments, its parent resolved and its
     last segment left as is: a dead mount there answers ENOTCONN. *)
 val resolve_parent : string -> string
+
+(** Flushes the filesystem holding [dir], when it exists: many replaced files
+    made durable at once. *)
+val syncfs : string -> unit

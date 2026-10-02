@@ -7,6 +7,7 @@ external pwrite_ : Unix.file_descr -> bigstring -> int -> int -> int64 -> int
   = "tsync_pwrite"
 
 external fsync_ : Unix.file_descr -> unit = "tsync_fsync"
+external syncfs_ : Unix.file_descr -> unit = "tsync_syncfs"
 external reserve_ : Unix.file_descr -> int64 -> unit = "tsync_reserve"
 external statvfs_ : string -> int64 * int64 * int64 = "tsync_statvfs"
 external flock_ : Unix.file_descr -> bool -> bool -> bool = "tsync_flock"
@@ -361,3 +362,8 @@ let resolve_parent p =
         Filename.concat
           (try Unix.realpath parent with Unix.Unix_error _ -> parent)
           leaf
+
+let syncfs dir =
+  Option.iter
+    (fun fd -> with_fd fd (fun fd -> sys (fun () -> syncfs_ fd)))
+    (opt (fun () -> Unix.openfile dir [O_RDONLY; O_CLOEXEC] 0))
