@@ -52,6 +52,8 @@ list_many: 1 folders
 copy into a share manifest: refused/denied
 copy out of a share manifest: refused/denied
 copy within the share cache: ok
+== unsigned bodies dripping do not hold the data slots
+a signed read meanwhile: ok within 2s: true
 == a 401 from a skewed clock is not remembered
 while skewed: transient/link
 once the clocks agree: ok

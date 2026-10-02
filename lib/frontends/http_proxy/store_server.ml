@@ -438,6 +438,10 @@ let admitted t f =
       ~finally:(fun () -> Atomic.decr t.pending)
       (fun () -> Rt.Semaphore.with_slot t.slots f)
 
+(* A body arrives within a minute plus a second per 16 KiB: a slow uplink fits,
+   a drip holding reserved memory does not. *)
+let body_deadline n = 60. +. (float_of_int n /. 16384.)
+
 (* security §11: bodies are reserved from their declared length before a byte
    is read. *)
 let read_within t (r : Server.request) read_body limit =
@@ -460,10 +464,14 @@ let read_within t (r : Server.request) read_body limit =
           ~finally:(fun () ->
             ignore (Atomic.fetch_and_add t.body_memory (-reserve)))
           (fun () ->
-            try read_body ~limit
-            with Server.Body_too_large ->
-              count t "tooLarge";
-              answer (text 413 "too large"))
+            try
+              Rt.with_timeout (body_deadline reserve) (fun () ->
+                  read_body ~limit)
+            with
+              | Server.Body_too_large ->
+                  count t "tooLarge";
+                  answer (text 413 "too large")
+              | Rt.Timeout -> answer (text 408 "body too slow"))
 
 (* §A4.5: a share manifest may be written on a read-only route. *)
 let writable route k =
@@ -928,28 +936,32 @@ let handle t (r : Server.request) read_body =
                     share_candidates t op body names
                 | _ -> Option.to_list (route_for t names)
             in
-            let run body names =
+            let authorised body names =
               match
                 List.find_opt
                   (fun route -> verifies r params body route.secret)
                   (candidates body names)
               with
                 | None -> unauthorized t
-                | Some route -> (
-                    try counted t route body (execute t route op body)
-                    with Fail.E f -> store_failure t f)
+                | Some route -> route
             in
-            let go () =
+            (* The body is read and its signature checked before a data slot
+               is taken, so an unsigned body cannot hold one while it drips. *)
+            let route, body =
               match op with
                 | Get_multi | Children_multi | Delete_multi ->
                     let body = read_within t r read_body limit in
-                    run body (bulk_names t body)
+                    (authorised body (bulk_names t body), body)
                 | _ ->
                     (match names with
                       | first :: _ when in_share_space first -> ()
                       | _ -> if route_for t names = None then unauthorized t);
                     let body = read_within t r read_body limit in
-                    run body names
+                    (authorised body names, body)
+            in
+            let go () =
+              try counted t route body (execute t route op body)
+              with Fail.E f -> store_failure t f
             in
             if is_data op then admitted t go else go ())
   with Answer response -> response

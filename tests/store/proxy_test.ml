@@ -94,6 +94,35 @@ let () =
              s.copy (Key.v "tsync/shares/abcd") (Key.v "tsync/shares/cache/y")));
       p "copy within the share cache: %s\n"
         (kind (fun () -> s.copy staged (Key.v "tsync/shares/cache/z")));
+      p "== unsigned bodies dripping do not hold the data slots\n";
+      let port =
+        match Server.addresses server with
+          | [ADDR_INET (_, port)] -> port
+          | _ -> assert false
+      in
+      let drips =
+        List.init 12 (fun i ->
+            let c = Transport.connect ~host:"127.0.0.1" ~port () in
+            Transport.write_string c
+              (Printf.sprintf
+                 "PUT /o/%s HTTP/1.1\r\n\
+                  host: x\r\n\
+                  x-tsync-timestamp: %d\r\n\
+                  x-tsync-signature: %s\r\n\
+                  content-length: 1000\r\n\
+                  \r\n\
+                  x"
+                 (Tsync_http_proxy_client.Proxy_wire.encode_key
+                    (Key.v (Printf.sprintf "tsync/d/drip%d" i)))
+                 (int_of_float (Unix.gettimeofday ()))
+                 (String.make 64 '0'));
+            c)
+      in
+      Rt.sleep 0.2;
+      let t0 = Rt.now () in
+      let read = kind (fun () -> s.get_opt (Key.v "tsync/d/a")) in
+      p "a signed read meanwhile: %s within 2s: %b\n" read (Rt.now () -. t0 < 2.);
+      List.iter Transport.close drips;
       p "== a 401 from a skewed clock is not remembered\n";
       let skewed = ref true in
       let l = Unix.socket PF_INET SOCK_STREAM 0 in
