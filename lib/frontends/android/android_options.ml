@@ -9,4 +9,6 @@ let () =
         Some
           "the android frontend is driven by the Android app, not by tsync \
            start";
+      group = None;
+      commands = [];
     }
