@@ -588,9 +588,9 @@ module Make (C : Engine_ctx.S) = struct
                        local_from;
                        priors;
                      });
-                with_key old_dst (fun () ->
-                    ignore
-                      (rename_local ~src:old_dst ~dst:new_dst ~is_dir:false));
+                repost_moved
+                  (with_key old_dst (fun () ->
+                       rename_local ~src:old_dst ~dst:new_dst ~is_dir:false));
                 Dqueue.Records.update wal id (fun b ->
                     match Wal.decode b with
                       | Some r ->
@@ -710,14 +710,10 @@ module Make (C : Engine_ctx.S) = struct
                   R.publish ~parent:pid ~leaf:(Names.leaf_of path) m;
                   let id = mark_executed id r.ops in
                   discharge id r.ops
-              | _ -> (
-                  match store_manifest path with
-                    | Some m ->
-                        if Mirror.manifest mirror path = None then
-                          with_meta (fun () -> Mirror.write_file mirror path m);
-                        let id = mark_executed id r.ops in
-                        discharge id r.ops
-                    | None -> Dqueue.Records.complete wal id))
+              | `File _ when store_manifest path <> None ->
+                  let id = mark_executed id r.ops in
+                  discharge id r.ops
+              | _ -> Dqueue.Records.complete wal id)
         | `Edit e, g ->
             let base =
               match e.base with
@@ -734,14 +730,21 @@ module Make (C : Engine_ctx.S) = struct
               slot_moved_on path ~expected:(fun m ->
                   Option.map (fun (m : Manifest.t) -> m.h1) m = base)
             then (
+              materialise_inherited path;
               with_meta (fun () ->
                   with_key path (fun () ->
-                      if Staged.edit staged path <> None then (
-                        let dst = aside_name path ~is_dir:false in
-                        Staged.move ~new_file:true staged ~src:path ~dst;
-                        match Staged.edit staged dst with
-                          | Some e -> post_put dst e.size None
-                          | None -> ())));
+                      match Staged.edit staged path with
+                        | Some { content = Slots s; _ }
+                          when Array.exists (( = ) Staged.Inherit) s ->
+                            Fail.raise_ Fail.Link
+                              "%s was written while being set aside" path
+                        | Some _ -> (
+                            let dst = aside_name path ~is_dir:false in
+                            move_edit ~new_file:true ~src:path ~dst ();
+                            match Staged.edit staged dst with
+                              | Some e -> post_put dst e.size None
+                              | None -> ())
+                        | None -> ()));
               changed [path];
               raise Rt.Cancelled);
             let source i =

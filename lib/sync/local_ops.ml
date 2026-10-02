@@ -1024,9 +1024,55 @@ module Make (C : Engine_ctx.S) = struct
       (fun (p, (e : Staged.edit)) -> !post_put_hook p e.size (base_hex e))
       moved
 
+  (* The source key's upload is superseded: a running one fails its commit
+     check, a queued one finds no edit there. *)
+  let supersede src =
+    bump src;
+    Dqueue.cancel_key uploads src
+
+  let move_edit ?new_file ~src ~dst () =
+    supersede src;
+    Staged.move ?new_file staged ~src ~dst
+
+  (* Inherit slots resolve through the mirror at the edit's own path (04 §2.6),
+     so an edit about to leave its base behind takes a copy of those bytes. *)
+  let rec materialise_inherited path =
+    match
+      with_key path (fun () -> (Staged.edit staged path, generation path))
+    with
+      | Some ({ content = Slots slots; _ } as e), g
+        when Array.exists (( = ) Staged.Inherit) slots ->
+          let body = Staged.new_body_id () in
+          let filled = Array.copy slots in
+          Fs.with_fd (Staged.open_body ~create:true staged body) (fun fd ->
+              Array.iteri
+                (fun i slot ->
+                  let len = Chunking.length ~size:e.size ~cs:e.chunk_size i in
+                  if slot = Staged.Inherit && len > 0 then (
+                    let off = i * e.chunk_size in
+                    let bytes = read_staged path e ~off ~len in
+                    Fs.pwrite_all fd bytes ~boff:0 ~len:(Bigstring.length bytes)
+                      ~off;
+                    filled.(i) <- Staged.Staged { body; off }))
+                slots;
+              Fs.fsync fd);
+          Fs.fsync_dir (Filename.dirname (Staged.body_path staged body));
+          let kept =
+            with_key path (fun () ->
+                generation path = g
+                &&
+                (Staged.write staged path { e with content = Slots filled };
+                 true))
+          in
+          if not kept then (
+            release_body body;
+            materialise_inherited path)
+      | _ -> ()
+
   let rename_local ~src ~dst ~is_dir =
     if is_dir then (
       let moved = Staged.edits_under staged src in
+      List.iter (fun (p, _) -> supersede p) moved;
       Mirror.move_folder mirror ~src ~dst;
       let sdir = Staged.manifest_path staged src
       and ddir = Staged.manifest_path staged dst in
@@ -1044,7 +1090,7 @@ module Make (C : Engine_ctx.S) = struct
         moved)
     else (
       let e = Staged.edit staged src in
-      Staged.move staged ~src ~dst;
+      move_edit ~src ~dst ();
       Mirror.move_file mirror ~src ~dst;
       move_handles ~src ~dst;
       match e with Some e -> [(dst, e)] | None -> [])

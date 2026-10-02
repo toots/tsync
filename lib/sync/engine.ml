@@ -212,9 +212,13 @@ module Make (C : Engine_ctx.S) = struct
           Mirror.write_file mirror l m
       | None -> ()
 
+  (* ponytail: inherited bytes are copied under the metadata lock, so a cold
+     cache fetches under it; fetch them with the arrival's store answers if that
+     shows. *)
   let file_aside l =
     let dst = aside_name l ~is_dir:false in
-    with_key l (fun () -> Staged.move ~new_file:true staged ~src:l ~dst);
+    materialise_inherited l;
+    with_key l (fun () -> move_edit ~new_file:true ~src:l ~dst ());
     (match Staged.edit staged dst with
       | Some e -> post_put dst e.size None
       | None -> ());
@@ -298,7 +302,8 @@ module Make (C : Engine_ctx.S) = struct
           if Staged.edit staged p <> None then (
             let dst = rebase p in
             Mirror.ensure_dirs mirror (Names.parent_of dst);
-            with_key p (fun () -> Staged.move staged ~src:p ~dst);
+            materialise_inherited p;
+            with_key p (fun () -> move_edit ~src:p ~dst ());
             post_put dst e.size None))
         staged_items;
       List.iter
@@ -615,8 +620,9 @@ module Make (C : Engine_ctx.S) = struct
             (function
               | Conflict.Arrive ->
                   if source_here then (
-                    with_keys [s'; t] (fun () ->
-                        ignore (rename_local ~src:s' ~dst:t ~is_dir:false));
+                    repost_moved
+                      (with_keys [s'; t] (fun () ->
+                           rename_local ~src:s' ~dst:t ~is_dir:false));
                     if
                       Staged.edit staged t = None
                       && not
@@ -1072,7 +1078,7 @@ module Make (C : Engine_ctx.S) = struct
                   | None -> src
               in
               if kind from <> `Absent && kind dst = `Absent then
-                ignore (rename_local ~src:from ~dst ~is_dir:false)
+                repost_moved (rename_local ~src:from ~dst ~is_dir:false)
           | Rename { is_dir = true; dst; id = Some id; _ } -> (
               match Mirror.key_of_id mirror id with
                 | Some here when kind dst = `Absent && here <> dst ->

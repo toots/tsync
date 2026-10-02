@@ -167,3 +167,24 @@
  (alias runtest)
  (action
   (diff marker_slot_test.expected marker_slot_test.output)))
+
+(executable
+ (name moved_edit_test)
+ (modules moved_edit_test)
+ (libraries
+  tsync_core
+  tsync_store
+  tsync_remote
+  tsync_checkout
+  tsync_sync
+  unix))
+
+(rule
+ (with-stdout-to
+  moved_edit_test.output
+  (run ./moved_edit_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff moved_edit_test.expected moved_edit_test.output)))
