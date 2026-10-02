@@ -782,7 +782,7 @@ module Make (C : Engine_ctx.S) = struct
     match Atomic.get bridge_state with
       | Hold _ -> 0
       | Incremental -> (
-          let t0 = Unix.gettimeofday () in
+          let t0 = Unix.gettimeofday () and epoch = gate_epoch () in
           let listing = Journal.list_entries journal in
           let cursor =
             match Journal.cursor_read journal with
@@ -854,7 +854,7 @@ module Make (C : Engine_ctx.S) = struct
                 (match mark () with
                   | Some m when Entry_key.compare m target >= 0 -> ()
                   | _ -> Mark.write ~data_dir:C.data_dir d target);
-                open_gate ();
+                open_gate ~since:epoch ();
                 !applied_n)
 
   let apply_pass () = try apply_pass () with Exit -> 0
@@ -870,7 +870,7 @@ module Make (C : Engine_ctx.S) = struct
       Fail.raise_ Fail.Unprepared
         "metadata operations are not published yet, and a rebuild would undo \
          them";
-    let t0 = Unix.gettimeofday () in
+    let t0 = Unix.gettimeofday () and epoch = gate_epoch () in
     Atomic.set touched (Some (Hashtbl.create 64));
     Fun.protect ~finally:(fun () -> Atomic.set touched None) @@ fun () ->
     let listing = Journal.list_entries journal in
@@ -1004,7 +1004,7 @@ module Make (C : Engine_ctx.S) = struct
         (Entry_key.of_time ~client:C.client_uuid (t0 -. Outbound.list_slack));
       Mutex.protect stepped_m (fun () -> Hashtbl.reset stepped_aside);
       Atomic.set bridge_state Incremental;
-      open_gate ();
+      open_gate ~since:epoch ();
       changed (List.concat_map Op.paths ops));
     (* A rebuild churns through every manifest of the domain: its garbage is
        given back to the kernel, not left in the allocator's arenas. *)

@@ -21,12 +21,28 @@ module Make (C : Engine_ctx.S) = struct
   let gate_signal = Rt.Signal.create ()
   let poll_signal = Rt.Signal.create ()
   let paused = Atomic.make false
+  let gate_m = Mutex.create ()
+  let link_failures = ref 0
 
-  let open_gate () =
-    Atomic.set gate true;
-    Rt.Signal.broadcast gate_signal
+  (* A pass passes [since], the {!gate_epoch} it began at: one that began
+     before the last link failure leaves the gate closed. *)
+  let open_gate ?since () =
+    let opened =
+      Mutex.protect gate_m (fun () ->
+          match since with
+            | Some e when e <> !link_failures -> false
+            | _ ->
+                Atomic.set gate true;
+                true)
+    in
+    if opened then Rt.Signal.broadcast gate_signal
 
-  let close_gate () = Atomic.set gate false
+  let gate_epoch () = Mutex.protect gate_m (fun () -> !link_failures)
+
+  let close_gate () =
+    Mutex.protect gate_m (fun () ->
+        incr link_failures;
+        Atomic.set gate false)
 
   (* wal-and-journal §4.2 rule 9: neither queue publishes before a clean apply
      pass that began after the start or the last link failure. *)

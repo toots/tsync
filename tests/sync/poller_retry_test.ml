@@ -35,6 +35,31 @@ let flaky (s : Store.t) =
         else s.list_prefix ?max_keys prefix);
   }
 
+(* The next journal listing waits for this promise; chunk puts fail while
+   [fail_put] is set. *)
+let hold_listing : unit Rt.Promise.t option Atomic.t = Atomic.make None
+let fail_put = Atomic.make false
+let put_failed = Atomic.make false
+
+let staged (s : Store.t) =
+  {
+    s with
+    list_prefix =
+      (fun ?max_keys prefix ->
+        if
+          String.starts_with
+            ~prefix:(Key.prefix_to_string (Key.prefix "tsync/docs/journal/"))
+            (Key.prefix_to_string prefix)
+        then Option.iter Rt.Promise.await (Atomic.exchange hold_listing None);
+        s.list_prefix ?max_keys prefix);
+    put =
+      (fun ?mode key body ->
+        if Key.chunk_of key <> None && Atomic.get fail_put then (
+          Atomic.set put_failed true;
+          Fail.raise_ Fail.Unreachable "injected: the store went away");
+        s.put ?mode key body);
+  }
+
 let client ?(wrap = Fun.id) name : (module Engine.S) =
   let data_dir = Filename.concat root (name ^ "/data") in
   let store = wrap (Local.create ~name:"main" (Filename.concat root "store")) in
@@ -105,5 +130,27 @@ let () =
              pass a;
              List.mem "b.txt" (names a)));
       p "owed: B %d/%d\n" (B.pending_uploads ()) (B.pending_metadata ());
+      let c = client ~wrap:staged "C" in
+      let (module C) = c in
+      C.start ~poll_journal:false ();
+      pass c;
+      write c "warm.txt" "gate open";
+      C.drain ~grace:10. ();
+      let release = Rt.Promise.create () in
+      Atomic.set hold_listing (Some release);
+      let begun_before = Rt.async (fun () -> C.apply_pass ()) in
+      Rt.sleep 0.1;
+      Atomic.set fail_put true;
+      write c "c.txt" "from C";
+      p "C's upload met the failure: %b\n"
+        (until 50 (fun () -> Atomic.get put_failed));
+      Rt.Promise.resolve release ();
+      ignore (Rt.Promise.await begun_before);
+      Atomic.set fail_put false;
+      p "C publishes after a pass begun before the failure: %b\n"
+        (until 20 (fun () -> C.pending_uploads () = 0));
+      ignore (C.apply_pass ());
+      p "C publishes after a pass begun after it: %b\n"
+        (until 50 (fun () -> C.pending_uploads () = 0));
       Stop.request ());
   Fs.rm_rf root
