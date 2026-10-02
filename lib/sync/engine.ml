@@ -1078,14 +1078,122 @@ module Make (C : Engine_ctx.S) = struct
   let resync_generation_path =
     Filename.concat C.data_dir ("resync-" ^ Domain_name.to_string d)
 
-  let stamp_generation () =
-    Fs.durable_replace resync_generation_path
-      (Printf.sprintf "%.0f" (Unix.gettimeofday () *. 1000.))
-
   let resync_generation () =
     match Fs.read_file_opt resync_generation_path with
       | Some s -> String.trim s
       | None -> ""
+
+  (* 08 §3.6: the entry of the oldest anchor the feed's consumer may present,
+     and when it last moved. *)
+  let watermark_path =
+    Filename.concat C.data_dir ("feed-watermark-" ^ Domain_name.to_string d)
+
+  let dropped_path =
+    Filename.concat C.data_dir ("feed-dropped-" ^ Domain_name.to_string d)
+
+  let feed_watermark_max_age = 180. *. 86400.
+  let feed_m = Mutex.create ()
+
+  (* [None]: no consumer holds an anchor; an entry of [None] is "before every
+     entry". A lost or torn record reads as absent. *)
+  let read_watermark () =
+    match Fs.read_file_opt watermark_path with
+      | None -> None
+      | Some s -> (
+          match String.split_on_char ' ' (String.trim s) with
+            | [entry; ms] -> (
+                match (entry, Int64.of_string_opt ms) with
+                  | "", Some ms -> Some (None, ms)
+                  | e, Some ms ->
+                      Option.map (fun k -> (Some k, ms)) (Entry_key.parse e)
+                  | _, None -> None)
+            | [ms] -> Option.map (fun ms -> (None, ms)) (Int64.of_string_opt ms)
+            | _ -> None)
+
+  let write_watermark entry =
+    Fs.durable_replace watermark_path
+      (Printf.sprintf "%s %.0f"
+         (Option.fold ~none:"" ~some:Entry_key.to_string entry)
+         (Unix.gettimeofday () *. 1000.))
+
+  let stamp_generation () =
+    Mutex.protect feed_m (fun () ->
+        Fs.durable_replace resync_generation_path
+          (Printf.sprintf "%.0f" (Unix.gettimeofday () *. 1000.));
+        if Fs.release watermark_path then Fs.fsync_dir C.data_dir)
+
+  let anchor_of gen entry =
+    gen ^ "|" ^ Option.fold ~none:"" ~some:Entry_key.to_string entry
+
+  let cursor () =
+    Mutex.protect feed_m (fun () ->
+        let head = Applied.head applied in
+        if read_watermark () = None then write_watermark head;
+        anchor_of (resync_generation ()) head)
+
+  let changes_since anchor ~limit =
+    Mutex.protect feed_m (fun () ->
+        let gen = resync_generation () in
+        match String.index_opt anchor '|' with
+          | None -> `Stale
+          | Some i -> (
+              let entry_s =
+                String.sub anchor (i + 1) (String.length anchor - i - 1)
+              in
+              let entry =
+                if entry_s = "" then Some None
+                else Option.map Option.some (Entry_key.parse entry_s)
+              in
+              match entry with
+                | None -> `Stale
+                | Some _ when String.sub anchor 0 i <> gen -> `Stale
+                | Some None when Fs.exists dropped_path -> `Stale
+                | Some entry ->
+                    write_watermark entry;
+                    let head = Applied.head applied in
+                    let same =
+                      match (entry, head) with
+                        | None, None -> true
+                        | Some a, Some b -> Entry_key.equal a b
+                        | _ -> false
+                    in
+                    if same then `Page (anchor_of gen head, false, [])
+                    else (
+                      match Applied.since applied entry limit with
+                        | `Stale -> `Stale
+                        | `Page (pg : Applied.page) ->
+                            let cursor =
+                              match List.rev pg.entries with
+                                | (k, _) :: _ -> anchor_of gen (Some k)
+                                | [] -> anchor
+                            in
+                            `Page
+                              (cursor, pg.more, List.concat_map snd pg.entries))
+              ))
+
+  (* wal-and-journal §4.8: held back by the watermark until it lapses. *)
+  let prune_applied () =
+    let hold =
+      Mutex.protect feed_m (fun () ->
+          match read_watermark () with
+            | None -> `Nothing
+            | Some (_, ms)
+              when Unix.gettimeofday () -. (Int64.to_float ms /. 1000.)
+                   > feed_watermark_max_age ->
+                Log.warn
+                  "%s: the change feed's consumer has not read it for %.0f \
+                   days; its anchor no longer holds the applied log"
+                  (Domain_name.to_string d)
+                  (feed_watermark_max_age /. 86400.);
+                `Nothing
+            | Some (None, _) -> `Everything
+            | Some (Some k, _) -> `From k)
+    in
+    Applied.prune ~hold
+      ~before_drop:(fun () ->
+        if not (Fs.exists dropped_path) then Fs.durable_replace dropped_path "")
+      applied ~now:(Unix.gettimeofday ())
+      ~keep:(Outbound.horizon +. Outbound.list_slack)
 
   (* durable-queue §4.2: records other processes submitted, a WAL record
      without an entry key getting one. *)

@@ -39,6 +39,52 @@ let cases =
       ( List_dir { dir = Ref "d:9f3a"; after = Some "a"; limit = Some 2 },
         { items = [row; dir]; next = Some "big.txt"; unnamed = 1 } );
     Case (Cursor, "1756600000000|0001756600000-abc");
+    Case (Changes_since { anchor = "1|"; limit = None }, Stale);
+    Case
+      ( Changes_since { anchor = "1|"; limit = Some 10 },
+        Changes
+          {
+            cursor = "1|0001756600000-abc";
+            more = true;
+            unnamed = 2;
+            ops =
+              [
+                Put_op
+                  {
+                    ref_ = row.ref_;
+                    parent_ref = "d:9f3a";
+                    name = "big.txt";
+                    item = Some row;
+                  };
+                Delete_op
+                  { ref_ = row.ref_; parent_ref = "d:9f3a"; name = "big.txt" };
+                Mkdir_op
+                  {
+                    ref_ = "d:9f3a";
+                    parent_ref = "root";
+                    name = "d";
+                    item = None;
+                  };
+                Rmdir_op
+                  {
+                    id = "9f3a";
+                    ref_ = "d:9f3a";
+                    parent_ref = "root";
+                    name = "d";
+                  };
+                Rename_op
+                  {
+                    is_dir = false;
+                    id = None;
+                    src_ref = row.ref_;
+                    src_parent_ref = "root";
+                    ref_ = row.ref_;
+                    parent_ref = "d:9f3a";
+                    name = "big.txt";
+                    item = Some row;
+                  };
+              ];
+          } );
     Case
       ( Ensure_cached { item = Ref "f:9f3a/big.txt"; dest = "/tmp/x" },
         { local_path = "/tmp/x"; item = row } );

@@ -3,6 +3,8 @@ stat              request reads back, reply reads back
 stat              request reads back, reply reads back
 list_dir          request reads back, reply reads back
 cursor            request reads back, reply reads back
+changes_since     request reads back, reply reads back
+changes_since     request reads back, reply reads back
 ensure_cached     request reads back, reply reads back
 stat              request reads back, reply reads back
 fetch_range       request reads back, reply reads back

@@ -279,3 +279,24 @@
  (alias runtest)
  (action
   (diff file_ids_test.expected file_ids_test.output)))
+
+(executable
+ (name feed_test)
+ (modules feed_test)
+ (libraries
+  tsync_core
+  tsync_store
+  tsync_remote
+  tsync_checkout
+  tsync_sync
+  unix))
+
+(rule
+ (with-stdout-to
+  feed_test.output
+  (run ./feed_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff feed_test.expected feed_test.output)))

@@ -186,7 +186,22 @@ module type S = sig
   (** The resync generation stamp, [""] when never stamped. *)
   val resync_generation : unit -> string
 
+  (** Stamps a new generation and clears the feed watermark (08 §3.6). *)
   val stamp_generation : unit -> unit
+
+  (** The current change anchor [<generation>|<entry>]; sets the feed watermark
+      when none exists (08 §2.5, §3.6). *)
+  val cursor : unit -> string
+
+  (** 08 §3.6 steps 1–5: [`Page (cursor, more, ops)] after the anchor, the
+      watermark moved to the anchor's entry; [`Stale] for another generation, an
+      entry no longer kept, or an empty entry once a shard was dropped. *)
+  val changes_since :
+    string -> limit:int -> [ `Stale | `Page of string * bool * Applied.op list ]
+
+  (** Applied-log retention (wal-and-journal §4.8); shards removed. *)
+  val prune_applied : unit -> int
+
   val mirror : Mirror.t
   val staged_edits : unit -> (string * Staged.edit) list
 end

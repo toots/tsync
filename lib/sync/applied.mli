@@ -29,6 +29,13 @@ type page = { entries : (Entry_key.t * op list) list; more : bool }
     anchor is not kept. *)
 val since : t -> Entry_key.t option -> int -> [ `Page of page | `Stale ]
 
-(** Remove shards whose keys are all older than [now - keep], never the newest;
-    answers how many. *)
-val prune : t -> now:float -> keep:float -> int
+(** Remove shards whose keys are all older than [now - keep], never the newest
+    nor the shard holding [hold]'s entry or a later one ([`Everything]: none
+    goes); [before_drop] runs before each removal. Answers how many. *)
+val prune :
+  ?hold:[ `Nothing | `Everything | `From of Entry_key.t ] ->
+  ?before_drop:(unit -> unit) ->
+  t ->
+  now:float ->
+  keep:float ->
+  int

@@ -1,0 +1,23 @@
+== a consumer's first anchor sets the watermark
+  watermark before: none
+  cursor |, watermark before every entry
+== a peer's changes reach B's feed, files named by B's ids
+  from the baseline: cursor |<entry1> more=false
+    put x.txt                  
+    mkdir dir                  
+    rename x.txt->dir/y.txt    <file2>
+  watermark: before every entry
+  from its cursor: cursor |<entry1> more=false
+  watermark: <entry1>
+== a rebuild keeps anchors valid
+  from the cursor after a rebuild: cursor |<entry1> more=false
+== a new generation makes every anchor stale
+  watermark: none
+  from the old cursor: stale
+  new cursor <gen3>|<entry1>
+== retention: an old shard is kept while the watermark names it
+  pruned with the watermark on it: 0, dropped: false
+== a watermark idle past its age holds nothing
+  pruned: 1, dropped: true
+  an anchor naming the dropped entry: stale
+  an empty anchor once a shard was dropped: stale

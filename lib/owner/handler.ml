@@ -36,6 +36,7 @@ type t = {
 
 let default_pin_keep = 10. *. 86400.
 let page_limit = 1000
+let feed_limit = 512
 let event_ids = Atomic.make 0
 let job_ids = Atomic.make 0
 
@@ -283,6 +284,114 @@ let list_dir t dir ~after ~limit : Protocol.page =
     unnamed = List.length (List.filter Option.is_none rows);
   }
 
+(* 08 §3.6 step 6: names come from the folder-id index, which keeps an id after
+   its marker went, and from the file id the applied log recorded, so an op
+   names its item even after it moved or went; [None] counts as unnamed. *)
+let feed_op t (o : Applied.op) : Protocol.feed_op option =
+  let (module E : Engine.S) = t.engine in
+  let module M = Tsync_checkout.Mirror in
+  let dir_ref id =
+    Names.ref_to_string (Names.dir_ref (Folder_id.to_string id))
+  in
+  let parent_ref path =
+    Option.map dir_ref (M.lookup_id_removed E.mirror (Names.parent_of path))
+  in
+  let file_ref path =
+    match o.fid with Some id -> Some id | None -> M.file_id E.mirror path
+  in
+  let file_item fid = Option.bind (M.path_of_file_id E.mirror fid) (row_of t) in
+  let dir_item id = Option.bind (M.key_of_id E.mirror id) (row_of t) in
+  let folder_id path given =
+    match given with
+      | Some id -> Some id
+      | None -> M.lookup_id_removed E.mirror path
+  in
+  let leaf = Names.leaf_of in
+  let ( let* ) = Option.bind in
+  match o.op with
+    | Put { path; _ } ->
+        let* fid = file_ref path in
+        let* parent_ref = parent_ref path in
+        Some
+          (Protocol.Put_op
+             {
+               ref_ = Names.ref_to_string (File_id fid);
+               parent_ref;
+               name = leaf path;
+               item = file_item fid;
+             })
+    | Delete path ->
+        let* fid = file_ref path in
+        let* parent_ref = parent_ref path in
+        Some
+          (Protocol.Delete_op
+             {
+               ref_ = Names.ref_to_string (File_id fid);
+               parent_ref;
+               name = leaf path;
+             })
+    | Mkdir { path; id } ->
+        let* id = folder_id path id in
+        let* parent_ref = parent_ref path in
+        Some
+          (Protocol.Mkdir_op
+             {
+               ref_ = dir_ref id;
+               parent_ref;
+               name = leaf path;
+               item = dir_item id;
+             })
+    | Rmdir { path; id } ->
+        let* id = folder_id path id in
+        let* parent_ref = parent_ref path in
+        Some
+          (Protocol.Rmdir_op
+             {
+               id = Folder_id.to_string id;
+               ref_ = dir_ref id;
+               parent_ref;
+               name = leaf path;
+             })
+    | Rename { src; dst; is_dir; id; _ } ->
+        let* ref_, id, item =
+          if is_dir then
+            let* id = folder_id dst id in
+            Some (dir_ref id, Some (Folder_id.to_string id), dir_item id)
+          else
+            let* fid = file_ref dst in
+            Some (Names.ref_to_string (File_id fid), None, file_item fid)
+        in
+        let* src_parent_ref = parent_ref src in
+        let* parent_ref = parent_ref dst in
+        Some
+          (Protocol.Rename_op
+             {
+               is_dir;
+               id;
+               src_ref = ref_;
+               src_parent_ref;
+               ref_;
+               parent_ref;
+               name = leaf dst;
+               item;
+             })
+
+let changes t ~anchor ~limit : Protocol.changes =
+  let (module E : Engine.S) = t.engine in
+  let limit = Option.value ~default:feed_limit limit in
+  if limit < 1 then invalid "limit must be positive";
+  match E.changes_since anchor ~limit with
+    | `Stale -> Stale
+    | `Page (cursor, more, ops) ->
+        let rendered = List.map (feed_op t) ops in
+        Changes
+          {
+            cursor;
+            more;
+            ops = List.filter_map Fun.id rendered;
+            unnamed = List.length (List.filter Option.is_none rendered);
+          }
+
 let publish_event t ev = t.publish (event t (Protocol.event_name ev) [])
 
 let print_line = function
@@ -483,10 +592,8 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
     | Full_resync ->
         E.stamp_generation ();
         t.hooks.reannounce ()
-    | Cursor ->
-        E.resync_generation () ^ "|"
-        ^ Option.fold ~none:"" ~some:Entry_key.to_string
-            (Applied.head E.applied)
+    | Cursor -> E.cursor ()
+    | Changes_since r -> changes t ~anchor:r.anchor ~limit:r.limit
     | Sync r -> (
         match E.resync ~full:r.full () with
           | `Incremental n -> Protocol.Incremental n

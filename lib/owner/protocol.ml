@@ -34,6 +34,27 @@ type fetched = {
 }
 
 type cached = { local_path : string; item : row }
+(** A change-feed op as 08 §3.6 renders it: items named by reference. *)
+type feed_op =
+  | Put_op of { ref_ : string; parent_ref : string; name : string; item : row option }
+  | Delete_op of { ref_ : string; parent_ref : string; name : string }
+  | Mkdir_op of { ref_ : string; parent_ref : string; name : string; item : row option }
+  | Rmdir_op of { id : string; ref_ : string; parent_ref : string; name : string }
+  | Rename_op of {
+      is_dir : bool;
+      id : string option;
+      src_ref : string;
+      src_parent_ref : string;
+      ref_ : string;
+      parent_ref : string;
+      name : string;
+      item : row option;
+    }
+
+type changes =
+  | Stale
+  | Changes of { cursor : string; more : bool; ops : feed_op list; unnamed : int }
+
 type counted = { succeeded : int; failed : int }
 type progress = Inactive | Active of { downloaded : int; total : int }
 type resynced = Incremental of int | Full of { manifests : int; failed : int }
@@ -58,6 +79,7 @@ type _ request =
     }
       -> page request
   | Cursor : string request
+  | Changes_since : { anchor : string; limit : int option } -> changes request
   | Ensure_cached : { item : target; dest : string } -> cached request
   | Fetch_range : {
       item : target;
@@ -115,6 +137,7 @@ let action : type a. a request -> string = function
   | Stat _ -> "stat"
   | List_dir _ -> "list_dir"
   | Cursor -> "cursor"
+  | Changes_since _ -> "changes_since"
   | Ensure_cached _ -> "ensure_cached"
   | Fetch_range _ -> "fetch_range"
   | Download_progress _ -> "download_progress"
@@ -223,6 +246,8 @@ let request_fields : type a. a request -> (string * Yojson.Safe.t) list =
       []
   | Stat t | Download_progress t | Delete t | Rmdir t | Evict t ->
       target_fields t
+  | Changes_since r ->
+      ("arg", `String r.anchor) :: opt "limit" (fun l -> `Int l) r.limit
   | List_dir r ->
       target_fields r.dir
       @ opt "after" (fun a -> `String a) r.after
@@ -274,6 +299,8 @@ let decode j =
           (List_dir
              { dir = target_of j; after = str j "after"; limit = int j "limit" })
     | "cursor" -> Request Cursor
+    | "changes_since" ->
+        Request (Changes_since { anchor = required j "arg"; limit = int j "limit" })
     | "ensure_cached" ->
         Request (Ensure_cached { item = target_of j; dest = required j "dest" })
     | "fetch_range" ->
@@ -416,6 +443,80 @@ let row_of_fields j =
 
 let ok fields = `Assoc (("ok", `Bool true) :: fields)
 let item r = [("item", `Assoc (row_fields r))]
+let item_opt = function Some r -> item r | None -> []
+
+let feed_op_to_json = function
+  | Put_op o ->
+      `Assoc
+        ([
+           ("op", `String "put");
+           ("ref", `String o.ref_);
+           ("parentRef", `String o.parent_ref);
+           ("name", `String o.name);
+         ]
+        @ item_opt o.item)
+  | Delete_op o ->
+      `Assoc
+        [
+          ("op", `String "delete");
+          ("ref", `String o.ref_);
+          ("parentRef", `String o.parent_ref);
+          ("name", `String o.name);
+        ]
+  | Mkdir_op o ->
+      `Assoc
+        ([
+           ("op", `String "mkdir");
+           ("ref", `String o.ref_);
+           ("parentRef", `String o.parent_ref);
+           ("name", `String o.name);
+         ]
+        @ item_opt o.item)
+  | Rmdir_op o ->
+      `Assoc
+        [
+          ("op", `String "rmdir");
+          ("id", `String o.id);
+          ("ref", `String o.ref_);
+          ("parentRef", `String o.parent_ref);
+          ("name", `String o.name);
+        ]
+  | Rename_op o ->
+      `Assoc
+        ([("op", `String "rename"); ("is_dir", `Bool o.is_dir)]
+        @ opt "id" (fun i -> `String i) o.id
+        @ [
+            ("srcRef", `String o.src_ref);
+            ("srcParentRef", `String o.src_parent_ref);
+            ("ref", `String o.ref_);
+            ("parentRef", `String o.parent_ref);
+            ("name", `String o.name);
+          ]
+        @ item_opt o.item)
+
+let feed_op_of_json j =
+  let item = Option.map row_of_fields (member j "item") in
+  let ref_ = required j "ref"
+  and parent_ref = required j "parentRef"
+  and name = required j "name" in
+  match required j "op" with
+    | "put" -> Put_op { ref_; parent_ref; name; item }
+    | "delete" -> Delete_op { ref_; parent_ref; name }
+    | "mkdir" -> Mkdir_op { ref_; parent_ref; name; item }
+    | "rmdir" -> Rmdir_op { id = required j "id"; ref_; parent_ref; name }
+    | "rename" ->
+        Rename_op
+          {
+            is_dir = flag j "is_dir";
+            id = str j "id";
+            src_ref = required j "srcRef";
+            src_parent_ref = required j "srcParentRef";
+            ref_;
+            parent_ref;
+            name;
+            item;
+          }
+    | o -> Fail.invalid "unknown feed op %s" o
 
 let encode_reply : type a. a request -> a -> Yojson.Safe.t =
  fun req reply ->
@@ -436,6 +537,18 @@ let encode_reply : type a. a request -> a -> Yojson.Safe.t =
           @ if reply.unnamed > 0 then [("unnamed", `Int reply.unnamed)] else []
           )
     | Cursor -> ok [("cursor", `String reply)]
+    | Changes_since _ -> (
+        match reply with
+          | Stale -> ok [("stale", `Bool true)]
+          | Changes c ->
+              ok
+                ([
+                   ("stale", `Bool false);
+                   ("cursor", `String c.cursor);
+                   ("more", `Bool c.more);
+                   ("ops", `List (List.map feed_op_to_json c.ops));
+                 ]
+                @ if c.unnamed > 0 then [("unnamed", `Int c.unnamed)] else []))
     | Ensure_cached _ ->
         ok (("localPath", `String reply.local_path) :: item reply.item)
     | Fetch_range _ ->
@@ -553,6 +666,19 @@ let decode_reply : type a. a request -> Yojson.Safe.t -> a =
           unnamed = count "unnamed" j;
         }
     | Cursor -> required j "cursor"
+    | Changes_since _ ->
+        if flag j "stale" then Stale
+        else
+          Changes
+            {
+              cursor = required j "cursor";
+              more = flag j "more";
+              ops =
+                (match member j "ops" with
+                  | Some (`List l) -> List.map feed_op_of_json l
+                  | _ -> []);
+              unnamed = count "unnamed" j;
+            }
     | Ensure_cached _ -> { local_path = required j "localPath"; item = item () }
     | Fetch_range _ ->
         {

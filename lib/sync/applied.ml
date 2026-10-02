@@ -10,10 +10,12 @@ type t = {
 let open_ dir =
   { dir; m = Mutex.create (); handled = Hashtbl.create 4096; head = None }
 
+(* [YYYY-MM.log]: name order is time order. *)
 let shards t =
-  List.filter
-    (fun n -> String.length n = 11 && String.ends_with ~suffix:".log" n)
-    (Fs.readdir t.dir)
+  List.sort compare
+    (List.filter
+       (fun n -> String.length n = 11 && String.ends_with ~suffix:".log" n)
+       (Fs.readdir t.dir))
 
 type op = { op : Op.t; fid : string option }
 
@@ -137,14 +139,28 @@ let since t anchor limit =
         let entries = List.filteri (fun i _ -> i < limit) rest in
         `Page { entries; more = List.length rest > limit }
 
-(* wal-and-journal §4.8: a shard goes only when it is not the newest and every
-   key in it is older than [horizon] + [slack]. *)
-let prune t ~now ~keep =
+(* wal-and-journal §4.8: a shard goes only when it is not the newest, every key
+   in it is older than [keep], and it comes before the shard holding [hold]'s
+   entry. *)
+let prune ?(hold = `Nothing) ?(before_drop = ignore) t ~now ~keep =
   let all = shards t in
   let newest = List.fold_left max "" all in
+  let held_from =
+    match hold with
+      | `Nothing -> None
+      | `Everything -> Some ""
+      | `From k ->
+          List.find_opt
+            (fun shard ->
+              List.exists
+                (fun (k', _) -> Entry_key.equal k k')
+                (lines_of t shard))
+            all
+  in
   List.fold_left
     (fun removed shard ->
-      if shard = newest then removed
+      let held = match held_from with Some h -> shard >= h | None -> false in
+      if shard = newest || held then removed
       else (
         let lines = lines_of t shard in
         if
@@ -153,6 +169,7 @@ let prune t ~now ~keep =
               Int64.to_float (Entry_key.ms k) /. 1000. < now -. keep)
             lines
         then (
+          before_drop ();
           ignore (Fs.release (Filename.concat t.dir shard));
           Mutex.protect t.m (fun () ->
               List.iter
