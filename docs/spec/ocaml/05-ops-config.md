@@ -90,8 +90,6 @@ Companion to the language-neutral spec [../05-ops-config.md](../05-ops-config.md
 
 ## B.4 Where the current code differs from the spec
 
-- **Mirror** (`lib/gc/store_mirror.ml`) compares mutable keys by body: each one is read from both stores inside a sequential filter, before the concurrent copy loop. Copies are plain `put`s, and progress is reported only when a batch ends.
-
 **Config.**
 - Frontend objects keep every key as an option (`parse_frontend`): `{"type":"fuse","mountPoin":"/x"}`
   is accepted and the domain mounts at the default (finding G1). Backend keys are checked only when

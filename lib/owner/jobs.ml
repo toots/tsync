@@ -395,10 +395,16 @@ let mirror io (dom : Tsync_domain.Domain.t) ~source ~manifests ~path =
   let r = M.mirror ~narrate:io.narrate ~cancelled:io.cancelled ?source scope in
   List.iter
     (fun (c : Store_mirror.copied) ->
-      say "%s -> %s: %d checked, %d copied (%s), %d refused" r.source c.name
+      say "%s -> %s: %d checked, %d copied (%s), %d refused%s%s" r.source c.name
         c.checked c.copied
         (Narrate.size c.copied_bytes)
-        (List.length c.failed);
+        (List.length c.failed)
+        (if c.changed > 0 then
+           Printf.sprintf ", %d changed since compared (next run)" c.changed
+         else "")
+        (if c.unguarded > 0 then
+           Printf.sprintf ", %d written unguarded" c.unguarded
+         else "");
       List.iter (fun (k, why) -> say "  %s: %s" k why) c.failed)
     r.copies;
   if r.cancelled then say "cancelled before the end";
