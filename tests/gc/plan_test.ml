@@ -234,6 +234,7 @@ let () =
       size;
       last_modified = 0.;
       etag = None;
+      checksum = None;
     }
   in
   let s =

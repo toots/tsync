@@ -13,6 +13,7 @@ type raw_entry = {
   size : int;
   last_modified : float;
   etag : string option;
+  checksum : Checksum.t option;
 }
 
 (** Each verb is one attempt: a transient failure raises for the ladder, a clean

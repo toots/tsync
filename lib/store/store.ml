@@ -5,6 +5,7 @@ type entry = {
   size : int;
   last_modified : float;
   etag : string option;
+  checksum : Checksum.t option;
 }
 
 type caps = {

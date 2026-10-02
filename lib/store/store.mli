@@ -13,6 +13,9 @@ type entry = {
   last_modified : float;
       (** wall-clock epoch seconds, finest resolution kept *)
   etag : string option;  (** the store's version name, when it has one *)
+  checksum : Checksum.t option;
+      (** the checksum the store's service keeps for the body, never one
+          computed to fill the field (06 §2.2) *)
 }
 
 type caps = {

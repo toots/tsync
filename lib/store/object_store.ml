@@ -5,6 +5,7 @@ type raw_entry = {
   size : int;
   last_modified : float;
   etag : string option;
+  checksum : Checksum.t option;
 }
 
 type verbs = {
@@ -71,6 +72,7 @@ let list_all v ~store ?max_keys prefix =
               size = e.size;
               last_modified = e.last_modified;
               etag = e.etag;
+              checksum = e.checksum;
             })
           (Store.listed store e.name))
     |> List.sort (fun (a : Store.entry) b -> Key.compare a.key b.key)

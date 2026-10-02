@@ -8,6 +8,15 @@ let p = Contract.p
 let objects : (string, string * float) Hashtbl.t = Hashtbl.create 64
 let requests = ref []
 
+(* Each write of a name gets a new generation, as GCS gives it. *)
+let generations : (string, int) Hashtbl.t = Hashtbl.create 64
+let next_generation = ref 1000
+
+let store name v =
+  incr next_generation;
+  Hashtbl.replace generations name !next_generation;
+  Hashtbl.replace objects name v
+
 let pct_decode s =
   let b = Buffer.create (String.length s) in
   let rec go i =
@@ -42,7 +51,12 @@ let meta name (body, t) =
       ( "updated",
         `String (Ptime.to_rfc3339 ~frac_s:3 (Option.get (Ptime.of_float_s t)))
       );
-      ("etag", `String (Digest.to_hex (Digest.string body)));
+      ("etag", `String "CJ+d4a/x5+8CEAE=");
+      ( "generation",
+        `String
+          (string_of_int
+             (Option.value ~default:0 (Hashtbl.find_opt generations name))) );
+      ("md5Hash", `String (Base64.encode_string (Digest.string body)));
     ]
 
 let json j =
@@ -55,16 +69,18 @@ let handler (r : Server.request) read_body =
   requests := (r.meth ^ " " ^ r.path) :: !requests;
   let q = query r.query in
   match (r.meth, String.split_on_char '/' r.path) with
-    | "POST", [""; "upload"; "storage"; "v1"; "b"; _; "o"] ->
+    | "POST", [""; "upload"; "storage"; "v1"; "b"; _; "o"] -> (
         let name = List.assoc "name" q
         and body = Bigstring.to_string (read_body ~limit:max_int) in
-        if
-          List.assoc_opt "ifGenerationMatch" q = Some "0"
-          && Hashtbl.mem objects name
-        then empty 412
-        else (
-          Hashtbl.replace objects name (body, Unix.gettimeofday ());
-          json (meta name (body, 0.)))
+        let current =
+          Option.value ~default:0 (Hashtbl.find_opt generations name)
+        in
+        let current = if Hashtbl.mem objects name then current else 0 in
+        match List.assoc_opt "ifGenerationMatch" q with
+          | Some g when g <> string_of_int current -> empty 412
+          | _ ->
+              store name (body, Unix.gettimeofday ());
+              json (meta name (body, 0.)))
     | "GET", [""; "storage"; "v1"; "b"; _; "o"] ->
         let prefix = Option.value ~default:"" (List.assoc_opt "prefix" q) in
         let names =
@@ -95,8 +111,7 @@ let handler (r : Server.request) read_body =
       -> (
         match Hashtbl.find_opt objects (pct_decode src) with
           | Some (body, _) ->
-              Hashtbl.replace objects (pct_decode dst)
-                (body, Unix.gettimeofday ());
+              store (pct_decode dst) (body, Unix.gettimeofday ());
               json (`Assoc [("done", `Bool true)])
           | None -> empty 404)
     | meth, [""; "storage"; "v1"; "b"; _; "o"; k] -> (
@@ -215,6 +230,28 @@ let () =
         ~finally:(fun () -> Contract.cleanup s)
         (fun () -> Contract.run ~domain_name s);
       p "\n== gcs wire (backends/gcs §6)\n";
+      if fields == fake then (
+        let k = Key.v "tsync/d/wire/x" in
+        s.put k (Bigstring.of_string "abc");
+        let listed = s.list_prefix (Key.prefix "tsync/d/wire/") in
+        let headed = s.head_opt k in
+        let show (e : Store.entry option) =
+          match e with
+            | Some e ->
+                Printf.sprintf "etag %s checksum %s"
+                  (Option.value ~default:"none" e.etag)
+                  (Option.fold ~none:"none" ~some:Checksum.to_string e.checksum)
+            | None -> "none"
+        in
+        p "listed: %s\nheaded: %s\nthe etag is the generation: %b\n"
+          (show (List.nth_opt listed 0))
+          (show headed)
+          (Option.bind headed (fun e -> e.etag)
+          = Option.map string_of_int
+              (Hashtbl.find_opt generations "tsync/d/wire/x"));
+        s.put k (Bigstring.of_string "abd");
+        p "a rewrite changes the etag: %b\n"
+          ((Option.get (s.head_opt k)).etag <> (Option.get headed).etag));
       p "segment: %s | %s\n"
         (Tsync_gcs.Gcs.segment "tsync/d/.chunks/aabb-ccdd")
         (Tsync_gcs.Gcs.segment "a-b_c.d~e");

@@ -107,6 +107,7 @@ let entry_of rel (st : Unix.LargeFile.stats) =
     size = Int64.to_int st.st_size;
     last_modified = st.st_mtime;
     etag = None;
+    checksum = None;
   }
 
 let list name root prefix =
