@@ -34,13 +34,14 @@ A driver supplies only the verbs of §2.1, its share URL and its breaker cell. T
 |---|---|
 | `put(key, data)` | One request; atomic at the service. |
 | `put_if_absent(key, data)` | One request with the service's "no live object" precondition. Precondition failed → read the holder and answer `Held`, or `Won` when the holder is byte-identical ([06 §3.3](../06-backends.md#33-put_if_absent)). |
+| `put_if_unchanged(key, data, expected)` | One request with the service's precondition on the expected version, or on no live object for `none`. Precondition failed → `Changed` ([06 §3.11](../06-backends.md#311-put_if_unchanged)). |
 | `get`, `get_opt` | 404 → ABSENT or `none`. |
 | `get_range(key, offset, length)` | The service's range read (`Range: bytes=offset-(offset+length−1)`). 416 (range not satisfiable) on an existing object → an empty body. The answer is checked against the requested range and the service's reported `Content-Range`. |
-| `head_opt` | `{key, size, last_modified, etag}`. |
+| `head_opt` | `{key, size, last_modified, etag, checksum}`, the checksum the service keeps where the driver's file says it keeps one. |
 | `delete` | Honest existence result. |
 | `delete_multi` | Pages of at most 1000 keys, sent in order, stopping at the first failed page; per-key codes mapped per [failure-model §4.2](../algorithms/failure-model.md#42-http-object-stores). |
 | `copy(src, dst)` | Either a server-side copy, or `get` then `put`. Either way every body sent upstream is admitted. |
-| `list(prefix, max_keys?)` | Flat and recursive; follows pagination to the end, or until `max_keys` entries are held; the shell sorts by key, truncates to `max_keys`, and omits names that are not valid keys. |
+| `list(prefix, max_keys?)` | Entries as `head_opt`'s. Flat and recursive; follows pagination to the end, or until `max_keys` entries are held; the shell sorts by key, truncates to `max_keys`, and omits names that are not valid keys. |
 | `share_url()` | From configuration. |
 
 ### 2.2 What the shell answers itself
@@ -50,6 +51,8 @@ A driver supplies only the verbs of §2.1, its share URL and its breaker cell. T
 | `fast_read` | `false` | A range costs the same round trip as a whole object. |
 | `local_path` | none | No filesystem access. |
 | `get_many`, `list_many` | not declared | No native multi-read. The generic batcher fans out `get_opt`. |
+| `compute_checksum(key, algo)` | `head_opt`; the entry's checksum when it is of `algo`, else `get` and hash the body | The service's checksum costs one metadata request, never a retrieval; the body moves only when the service keeps none. |
+| `locality` | `Remote` | Every byte is behind the service. |
 | `watch(key, last_seen)` | sleep WATCH_INTERVAL, then return | Buckets offer no change notification a client can wait on. The caller re-reads. |
 | `capabilities(prefix)` | `{share_url = driver's; chunk_size = none; max_concurrency = none; verified = function_confirmed}` | `verified` only once the function is confirmed deployed (§3). |
 | `bucket_functions` | `true` | Every bucket can run the function; the domain owner confirms one is deployed (§3) before writing discard requests, and a request is durable once its `put` returns. |

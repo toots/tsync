@@ -79,6 +79,7 @@ A key revoked before its token expired is therefore noticed on the next request,
 |---|---|---|---|
 | `put` | `POST B/upload/storage/v1/b/<bucket>/o?uploadType=media&name=<key>`, `Content-Type: application/octet-stream` | 2xx | mapping |
 | `put_if_absent` | the same plus `&ifGenerationMatch=0` | 2xx → `Won` | 412 → read the holder, answer `Held`, or `Won` if it is byte-identical; other → mapping |
+| `put_if_unchanged` | as `put`, plus `&ifGenerationMatch=<expected.etag>`, or `&ifGenerationMatch=0` for `none` | 2xx → `Written` | 412 → `Changed`; other → mapping |
 | `get` / `get_opt` | `GET B/storage/v1/b/<bucket>/o/K?alt=media` | 2xx → body | 404 → ABSENT / `none` |
 | `get_range` | the same plus `Range: bytes=<off>-<off+len−1>` | 206, or 200 when the whole object fits in the range → body, checked against `Content-Range` | 404 → `none`; 416 → empty body; an answer longer than `len` → CORRUPT |
 | `head_opt` | `GET B/storage/v1/b/<bucket>/o/K` (metadata) | entry (§3.1) | 404 → `none` |
@@ -86,6 +87,7 @@ A key revoked before its token expired is therefore noticed on the next request,
 | `delete_multi` | XML API, §3.3 | | |
 | `copy` | server-side `POST B/storage/v1/b/<bucket>/o/<src>/rewriteTo/b/<bucket>/o/<dst>` (repeated with `rewriteToken` until done), or `get` + `put` | | a missing source → ABSENT |
 | `list_prefix` | §3.2 | | |
+| `compute_checksum(k, md5)` | `head_opt` | the entry's checksum | an entry without one → `get`, and hash the body |
 
 - **Uploads.** Simple uploads only: one request carries the whole body, which is atomic at the service. Chunks are bounded by the chunk size.
 - **Mapping.** "Mapping" is [failure-model §4.2](../algorithms/failure-model.md#42-http-object-stores), plus the 401 rule of §2.
@@ -95,12 +97,13 @@ A key revoked before its token expired is therefore noticed on the next request,
 - `key`: the resource's `name`.
 - `size`: GCS sends a decimal string, and an integer is also accepted. Anything else makes the answer CORRUPT.
 - `last_modified`: `updated` (RFC 3339), with the fraction kept and any offset applied. Unparseable → CORRUPT.
-- `etag`: the resource's `etag`. It changes on every rewrite, so it is a valid cache validator.
+- `etag`: the resource's `generation`, in decimal. It changes on every rewrite of the body and only then (a metadata update changes `metageneration`), so it is a valid cache validator, and it is what `ifGenerationMatch` compares, so it is the precondition token of `put_if_unchanged`.
+- `checksum`: `md5Hash`, decoded from base64 and written as `md5:<hex>`. GCS computes it at upload for every object written in one request, which is every object this driver writes. A composite object has none, and its entry carries no checksum.
 
 ### 3.2 Listing
 
 - `GET B/storage/v1/b/<bucket>/o?prefix=<prefix>[&pageToken=<t>][&maxResults=<n>]`, with no delimiter.
-- A listing SHOULD ask only for the fields it uses: `fields=items(name,size,updated,etag),nextPageToken`. That shrinks large listings several times over. It MUST keep `etag`.
+- A listing SHOULD ask only for the fields it uses: `fields=items(name,size,updated,generation,md5Hash),nextPageToken`. That shrinks large listings several times over. It MUST keep `generation` and `md5Hash`.
 - Follow `nextPageToken` until absent, or until `max_keys` entries are held. An absent `items` is an empty page. A failure on any page fails the listing.
 
 ### 3.3 Bulk delete over the XML API
@@ -114,16 +117,16 @@ The JSON API has no multi-object delete. The XML API takes up to 1000 keys per r
 
 ### 3.4 Shell-supplied members
 
-Capabilities, watch, verification, discard, share URL and the absence of `get_many` and `list_many` are all from [object-store-common.md](object-store-common.md).
+Capabilities, watch, verification, discard, share URL, `locality` and the absence of `get_many` and `list_many` are all from [object-store-common.md](object-store-common.md).
 
 ---
 
 ## 4. Service consistency relied on
 
 - Strong read-after-write, read-after-delete and list-after-write.
-- Single-request uploads are atomic, and `ifGenerationMatch=0` is atomic across concurrent writers.
+- Single-request uploads are atomic, and `ifGenerationMatch` (`0` or a generation) is evaluated atomically with the upload across concurrent writers.
 - GCS rate-limits writes to one object name (about one per second). A burst gets 429, which is LOAD and retried.
-- The `ARCHIVE` storage class stays online: reads work unchanged, at retrieval cost.
+- The `ARCHIVE` storage class stays online: reads work unchanged, at retrieval cost. Listings and metadata reads, checksums included, are operations, not retrievals.
 - Objects are stored as `application/octet-stream` with no content encoding, so GCS never transcodes a download.
 
 ---
@@ -145,7 +148,9 @@ Beyond [06 §10](../06-backends.md#10-conformance) and [object-store-common §8]
 
 - Key encoding: `tsync/d/.chunks/aabb-ccdd` → `tsync%2Fd%2F.chunks%2Faabb-ccdd`; `a-b_c.d~e` unchanged.
 - RFC 3339: `1970-01-01T00:00:00.000Z` → 0; `2001-09-09T01:46:40Z` → 1 000 000 000; an offset is applied; garbage makes the answer CORRUPT.
-- A listing page reads a string `size`, returns `nextPageToken`, and treats an absent token as the last page; a projected listing keeps `etag`.
+- A listing page reads a string `size`, returns `nextPageToken`, and treats an absent token as the last page; a projected listing keeps `generation` and `md5Hash`.
+- An entry's etag is the generation, and its checksum is `md5:` with the hex of the decoded `md5Hash`, equal to the MD5 of the body read back.
+- `put_if_unchanged` with the generation just read answers `Written`; with a generation older than the object's, `Changed`; with `none` on an existing object, `Changed`.
 - The bulk-delete body for `["a/x","a/y"]` is exactly as §3.3, with the five XML metacharacters escaped. `<DeleteResult/>` has no refusals, `NoSuchKey` is absent, and `AccessDenied` is REFUSED.
 - A token endpoint answering `invalid_grant` makes the storage attempt REFUSED after one attempt, without tripping the member's health. A storage 401 re-mints once and retries once.
 - A range starting at or past the end answers an empty body.

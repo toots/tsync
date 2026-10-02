@@ -36,10 +36,11 @@ Layering rule: a store knows how bytes are stored and found, never what the doma
 ### 2.2 Entries
 
 ```
-entry = { key: key; size: bytes; last_modified: wall-clock epoch seconds; etag: string? }
+entry = { key: key; size: bytes; last_modified: wall-clock epoch seconds; etag: string?; checksum: checksum? }
 ```
 
-- `etag` is the store's own version name for the object. When a store has one it MUST report it, in listings and in `head_opt` alike, and it MUST change whenever the object's body changes.
+- `etag` is the store's own version name for the object. When a store has one it MUST report it, in listings and in `head_opt` alike, and it MUST change whenever the object's body changes. It is also the precondition token of a conditional replace (§3.11).
+- `checksum` is a data-integrity checksum of the object's body (§2.5) that the store's service keeps, computed by the service from the bytes it holds. When the service keeps one of an algorithm of §2.5 for the object, the store MUST report it, in listings and in `head_opt` alike. A store MUST NOT report a value it cannot vouch for as the checksum of exactly the bytes `get` returns, and MUST NOT compute one to fill the field: an entry's checksum is the service's own statement, consistent with the body by the service's own consistency.
 - When a store has no etag, `(size, last_modified)` is the validator, and the store MUST report `last_modified` at the finest resolution it keeps.
 - A caller that caches a body against an entry MUST use the etag when present: a body rewritten within the same second at the same length is invisible to `(size, last_modified)` on a store with whole-second times.
 
@@ -57,6 +58,22 @@ caps = { share_url: string?;       -- base URL of the share endpoint serving thi
 ### 2.4 Watch token
 
 The value of a watched key, as a watch compares it: the object's body with leading and trailing whitespace removed. Tokens are compared only for equality.
+
+### 2.5 Checksums
+
+```
+checksum = { algo: string; value: string }       -- written "<algo>:<value>" on every wire
+```
+
+A checksum identifies a body's content, so that two stores' copies of an object can be compared without moving the object. It detects change, not tampering: the model is not adversarial. The algorithms, which every component implements to compute a checksum from bytes it holds:
+
+| `algo` | `value` |
+|---|---|
+| `md5` | MD5 (RFC 1321) of the body, 32 lowercase hex characters |
+
+- Two checksums are **comparable** when their `algo` is the same. Comparable checksums are equal iff the bodies are; collisions are ignored.
+- A store reports only an algorithm of this table, and only what its service keeps (§2.2). Each driver's file says which, and from where.
+- A component that meets an `algo` it does not know treats the entry as carrying no checksum.
 
 ---
 
@@ -86,6 +103,8 @@ The value of a watched key, as a watch compares it: the object's body with leadi
 | `delete(k)` | `true` if an object was removed, `false` if none was there (§3.4) | `false` | — |
 | `delete_multi(keys)` | unit (§3.4) | success | the most doubtful kind among per-key refusals |
 | `copy(src, dst)` | unit; `dst` holds `src`'s body as it was at some instant during the call, replacing any previous `dst` | fails ABSENT (the source) | — |
+| `put_if_unchanged(k, body, expected)` | `Written` or `Changed` (§3.11) | with `expected = none`: created, `Written` | REFUSED when the store cannot evaluate the precondition |
+| `compute_checksum(k, algo)` | checksum (§3.12) or `none` | `none` | INVALID for an algorithm outside §2.5 |
 | `list_prefix(p, max_keys?)` | entries (§3.6) | empty list | CORRUPT for a listing that contradicts itself |
 | `watch(k, last_seen)` | unit (§3.7) | returns like any other | — |
 | `get_many`, `list_many` | optional (§3.8) | | |
@@ -93,6 +112,7 @@ The value of a watched key, as a watch compares it: the object's body with leadi
 | `capabilities(prefix)` | caps (§2.3) for the domain the prefix identifies | | |
 | `fast_read` | whether reading a whole chunk costs about what a range does | | |
 | `local_path` | a directory granting in-process code filesystem access to the store's tree, or none | | |
+| `locality` | `Local`, `Proxy` or `Remote`: where `compute_checksum` reads the bytes (§3.12) | | |
 | `health` | the member's health cell ([01-core.md](01-core.md)) | | |
 
 ### 3.3 `put_if_absent`
@@ -176,9 +196,34 @@ The value of a watched key, as a watch compares it: the object's body with leadi
 - Pass only valid keys and prefixes (§2.1).
 - Keep request bodies valid until the operation returns (§3.1).
 - Never emulate `put_if_absent`, and never fall back from it (§3.3).
+- Never fall back from `put_if_unchanged` to `put` silently: a caller that does reports it (§3.11).
 - Never read "absent" into a failure, and never read "done" into a failed `delete_multi`.
 - Re-read after a watch returns. Never assume a change happened.
 - Treat a discard request as "not yet executed" until the request object is gone.
+
+### 3.11 `put_if_unchanged`
+
+A conditional replace: write `body` at `k` only if `k` still holds the object the caller read. `expected` is the entry the caller read for `k`, from a listing or `head_opt`, or `none` for "no object".
+
+- The store MUST evaluate the precondition itself, atomically with the write: with `expected = none`, that no object has the name; otherwise, that the object's current etag equals `expected.etag`. A check followed by a write is not conforming, except where a driver's file declares its evaluation best-effort and says how far it holds.
+- `Written` means the name now holds `body`. `Changed` means the precondition failed, and this call wrote nothing.
+- An `expected` entry without an etag cannot be evaluated: the store fails REFUSED without writing. So does a store that cannot evaluate the precondition at all.
+- `Changed` may follow this call's own write whose answer was lost, the retry finding the object changed by itself. A caller MUST NOT conclude that another writer exists; it re-reads when it needs to know.
+- It is not a claim (§3.3): `Changed` carries no body, and an identical holder is not `Written`. A conditional replace guards a newer object against being overwritten; it does not arbitrate a name.
+- A caller MAY fall back to `put` on REFUSED, accepting the window between its read and its write, and reports that it did.
+
+### 3.12 `compute_checksum` and `locality`
+
+`compute_checksum(k, algo)` returns the checksum of `k`'s current body under `algo` (§2.5), or `none` when `k` is absent. It is computed where reading the bytes costs least for this store, and `locality` declares where that is:
+
+| `locality` | Stores | How |
+|---|---|---|
+| `Local` | a filesystem store | reads the file and hashes it on this machine |
+| `Proxy` | a peer tsync machine (http-proxy) | the peer computes it with its own store's `compute_checksum`; only the checksum crosses the link |
+| `Remote` | a cloud object store | the checksum the service keeps when it is of `algo` (one metadata request); otherwise the body is fetched and hashed, a download billed at the object's storage class |
+
+- The order `Local < Proxy < Remote` is the cost of asking: a caller choosing which of two stores computes a checksum picks the lower.
+- The answer describes the body at some instant during the call, and may be stale by the time the caller acts on it. A caller that writes on the strength of it uses `put_if_unchanged`.
 
 ---
 
@@ -273,6 +318,8 @@ An implementation MUST make each of these one atomic step with respect to every 
 6. **Admission per attempt, at the store.** Retries, copies and job objects cross the same link as first attempts. Counting in the content layer missed GC, mirror and repair.
 7. **Capabilities are evidence.** A store claims `verified` only when it knows the checker is there, and a copy's deletions go through requests only once its owner has confirmed the consumer.
 8. **Listings are one store's view and are never merged** ([algorithms/replication.md](algorithms/replication.md)).
+9. **Checksums are the store's own.** An entry carries only the checksum the service keeps, computed by the service from the bytes it holds, so value and body cannot drift apart. A checksum tsync wrote beside an object (custom metadata, a sidecar) would be a writer's claim: every writer, copy path or crash that forgot to update it would leave a value that reads as "equal" forever, a local store has nowhere to keep it atomically, and S3 listings do not carry custom metadata.
+10. **A conditional replace is the store's precondition**, keyed by the etag the caller read, so the store's own consistency closes the window between a read and a write.
 
 ---
 
@@ -289,6 +336,9 @@ A conforming store, run against a real service where it has one:
 - Keys holding `& < > " ' + % # ? space` and non-ASCII characters round-trip through put, get, listing and `delete_multi`. Invalid keys (`..`, `.`, empty segments, a leading or trailing `/`) are refused INVALID before any request, and never reach a file or the network.
 - `list_prefix` answers in ascending key order, honours `max_keys` exactly, answers a listing longer than one page whole, and omits names that are not valid keys.
 - `get_many`, where declared, answers every key once in request order, across pages.
+- Entries carry the service's checksum where the driver's file says the service keeps one, the same in a listing and in `head_opt`, equal to the MD5 of the body read back; a store whose service keeps none reports none.
+- `compute_checksum` equals the checksum of the body `get` returns; an absent key answers `none`; an unknown algorithm is INVALID before any request.
+- `put_if_unchanged` with the entry just read answers `Written`; after another write of the key, the same call answers `Changed` and the key holds the other write; with `none` on an existing key, `Changed`; with `none` on a free key, `Written`. Five concurrent calls with the same expected entry give at most one `Written` on a store that evaluates the precondition atomically.
 - `capabilities.verified` answers as the store's checker actually runs; a discard request carries exactly its keys, and a deployed consumer deletes the named chunks, then the request.
 - Classification: a TRANSIENT failure is retried to the ladder's limit; a REFUSED one is attempted once; a health cell trips after link failures, recovers after one answer, and is kept up by a considered "no".
 - Every upload attempt, retries included, passes admission once and reports once; a best-effort write refused admission sends nothing.

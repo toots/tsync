@@ -105,10 +105,10 @@ Secret `s3cret`, timestamp `1727600000`. Canonical strings shown with each line 
 A JSON array of entries:
 
 ```json
-[{"key":"tsync/d/manifests/ab/f-0","size":123,"lastModified":1727600000.25,"etag":"\"9b2c…\""}]
+[{"key":"tsync/d/manifests/ab/f-0","size":123,"lastModified":1727600000.25,"etag":"\"9b2c…\"","checksum":"md5:5d41402abc4b2a76b9719d911017c592"}]
 ```
 
-`key` string; `size` non-negative integer; `lastModified` number (Unix seconds, integer or fractional); `etag` string, **omitted** when the store names no version (absent ≠ empty). A body that is not an array of such objects is CORRUPT.
+`key` string; `size` non-negative integer; `lastModified` number (Unix seconds, integer or fractional); `etag` string, **omitted** when the store names no version (absent ≠ empty); `checksum` string `<algo>:<value>` ([store contract §2.5](../06-backends.md#25-checksums)), **omitted** when the store reports none. A `checksum` of an unknown algorithm, or that does not parse, is treated as absent. A body that is not an array of such objects is CORRUPT.
 
 ### 4.3 Frames
 
@@ -140,9 +140,11 @@ Decoders MUST bound every length by the bytes **remaining**, never by `pos + n` 
 | `GET /o/<k>` | 200, body = the object. 404, empty body, when absent. |
 | `GET /o/<k>?offset=O&length=L` | 200, bytes `[O, O+L)` clipped at the object's end (empty when `O ≥ size`). 404 when absent. Both required, `L ≥ 1`; one without the other → 400, never widened. |
 | `GET /o/<k>?wait=S[&last_seen=T]` | Watch, §7. `S` is a decimal number (digits, optional `.` and digits), finite, `≥ 0`; clamped to 30. Anything else → 400. `offset`/`length` with `wait` → 400. |
-| `HEAD /o/<k>` | 200 with `x-tsync-size: <int>`, `x-tsync-last-modified: <decimal seconds>`, and `x-tsync-etag: <etag>` when the store names a version; empty body. 404 when absent. |
+| `HEAD /o/<k>` | 200 with `x-tsync-size: <int>`, `x-tsync-last-modified: <decimal seconds>`, `x-tsync-etag: <etag>` when the store names a version, and `x-tsync-checksum: <algo>:<value>` when it reports one; empty body. 404 when absent. |
 | `PUT /o/<k>` (Ro) | Body = the object. Last writer wins. 200, empty body. |
 | `PUT /o/<k>?if_absent=1` (Ro) | Conditional create arbitrated by the server's store. 200, body = **whatever is at the key afterwards**: the request body if this call created it, the earlier writer's body if not. A client MUST send `if_absent=1`. A server SHOULD accept `true`, `yes`, `on` (case-insensitive) as meaning `1`, and `0`, `false`, `no`, `off` as a plain PUT; any other value → 400. |
+| `PUT /o/<k>?if_match=<etag>` or `?if_none_match=1` (Ro) | Conditional replace by the server's store ([store contract §3.11](../06-backends.md#311-put_if_unchanged)): body = the object, written only if the key still holds the object of that etag, or no object. 200, empty body, when written; **412**, empty body, when the precondition failed. `if_match`, `if_none_match` and `if_absent` are mutually exclusive; `if_none_match` takes only `1`; anything else → 400. |
+| `GET /checksum/<k>?algo=<algo>` | 200, body = `<algo>:<value>`, computed by the server's store (`compute_checksum`), so the object's bytes stay on the server. 404, empty body, when absent. An algorithm outside the store contract's table → 400. |
 | `DELETE /o/<k>` (Ro) | 200 when an object was removed, 204 when nothing was there. Empty body. |
 
 ### 5.2 Bulk
@@ -213,7 +215,7 @@ The first rule that applies decides the answer.
 4. Declared body length over its limit → **413** `too large`.
 5. Resolve the route from the operation's first key or prefix ([frontend §A4.3](../frontends/http-proxy.md)); check the timestamp; read the body; verify the signature; check every key and prefix against the route. Any failure here → **401** `unauthorized`, one status and body for all of them ([security §5.2](../algorithms/security-model.md#52-routes-on-a-listener)).
 6. Admission for object reads and writes; queue full → **503** `busy`.
-7. Execute. A write on a read-only route → **403** `read-only domain`. Absent object where the operation says so → 404 (empty body) / `ABSENT` / 204. A store failure → **409** if its kind is permanent, **500** if transient, both with the reason text.
+7. Execute. A write on a read-only route → **403** `read-only domain`. A conditional replace whose precondition failed → **412**, empty body. Absent object where the operation says so → 404 (empty body) / `ABSENT` / 204. A store failure → **409** if its kind is permanent, **500** if transient, both with the reason text.
 
 Error bodies are short `text/plain` sentences for humans. Clients act on the status and on `x-tsync-kind` (§6.2), never on the body.
 
@@ -240,6 +242,7 @@ Statuses are read as failure kinds per [failure-model §4.3](../algorithms/failu
 | 401 | REFUSED (`denied`) |
 | 403 | REFUSED (`read_only`): the store contract's "not writable" |
 | 409 | the kind in `x-tsync-kind` |
+| 412 on a conditional replace | `Changed` |
 | 429, 503 | TRANSIENT/LOAD |
 | other 5xx, transport error, stall, truncated body | TRANSIENT/LINK |
 | undecodable listing or frames after a 2xx | CORRUPT |
@@ -273,6 +276,10 @@ Before its first operation, an instance learns two facts, concurrently with its 
 - **Served.** `GET /list?mode=all&prefix=tsync/<d>/cursor&max_keys=1`. 200 → served. 401 or 404 → the server does not serve this domain for this secret: every operation fails REFUSED with "domain not served by <url>". `/list` is core, so its 404 can only mean an unserved domain.
 - **Claims.** Claim support is proven by `/verified` answering 200: every server that answers `/verified` honours `if_absent`. When `/verified` answers 404, `put_if_absent` fails REFUSED with "server lacks conditional create" **without sending the PUT**: a server without it would perform a plain overwrite and clobber the real winner.
 
+On the first `put_if_unchanged` or `compute_checksum`, the instance learns one more fact, memoised and forgotten like the others:
+
+- **Checksums and conditional replace.** `GET /checksum/<cursor key>?algo=md5`. A 200, or a 404 with an empty body, proves both: every server that answers `/checksum` honours `if_match` and `if_none_match`. A 404 with a non-empty body (no endpoint, on a served domain) means neither: `put_if_unchanged` fails REFUSED with "server lacks conditional replace" **without sending the PUT**, and `compute_checksum` gets the body and hashes it.
+
 ### 8.2 Mapping
 
 | Contract op | Request | Result |
@@ -282,7 +289,9 @@ Before its first operation, an instance learns two facts, concurrently with its 
 | `get key` | `GET /o/<k>` | body; ABSENT on 404 |
 | `get_opt key` | `GET /o/<k>` | `Some body`; `None` on 404 with empty body |
 | `get_range key off len` | `GET /o/<k>?offset=off&length=len` | body, **checked**: more than `len` bytes is CORRUPT (a server that ignored the range); `None` on 404. `len = 0` answers empty without a request. |
-| `head_opt key` | `HEAD /o/<k>` | entry with `size`, `last_modified`, `etag` from `x-tsync-etag` when present; `None` on 404. A missing or malformed size or time header is CORRUPT. |
+| `head_opt key` | `HEAD /o/<k>` | entry with `size`, `last_modified`, `etag` from `x-tsync-etag` and `checksum` from `x-tsync-checksum` when present; `None` on 404. A missing or malformed size or time header is CORRUPT. |
+| `put_if_unchanged key data expected` | `PUT /o/<k>?if_match=<expected.etag>`, or `?if_none_match=1` for `none` (only when supported, §8.1) | 200 → `Written`; 412 → `Changed`. An `expected` without an etag fails REFUSED without a request. |
+| `compute_checksum key algo` | `GET /checksum/<k>?algo=<algo>` (only when supported, §8.1; else `get` and hash) | the parsed answer, which MUST name `algo` (CORRUPT otherwise); `None` on 404 |
 | `delete key` | `DELETE /o/<k>` | 204 or 404 → `false`; other 2xx → `true` |
 | `delete_multi keys` | `POST /delete-multi` | paged, §8.3 |
 | `copy src dst` | `POST /copy?src=…&dst=…` | ok. Bytes do not cross the link. |
@@ -293,6 +302,7 @@ Before its first operation, an instance learns two facts, concurrently with its 
 | `capabilities prefix` | §8.4 | |
 | `bucket_functions` | none | `false`: queueing work in the peer's store is its administrator's decision; a collection's deletions use the bulk `delete_multi`, one request per batch. |
 | `fast_read` / `local_path` | — | `false` / `None` |
+| `locality` | — | `Proxy` |
 | `health` | — | per-instance health fed by every request's outcome (§9) |
 
 Keys read back from listings and frames are validated against the grammar before use ([security §5.1](../algorithms/security-model.md#51-names)).
@@ -339,6 +349,8 @@ There is no version negotiation. The **core** every server answers is: the objec
 | Watch parameters | the answer lacks `x-tsync-watched` | sleeps `watch_floor` (§7) |
 | Range parameters | the answer is longer than asked | CORRUPT, never served as the range |
 | `etag` in listings, `x-tsync-etag` on HEAD | field or header absent | etag unknown (`None`) |
+| `checksum` in listings, `x-tsync-checksum` on HEAD | field or header absent | no checksum |
+| `/checksum`, conditional replace (`if_match`, `if_none_match`) | `/checksum` answers 404 with a body (§8.1) | `compute_checksum` downloads and hashes; `put_if_unchanged` is refused locally, never sent |
 | `x-tsync-kind` on 409 | header absent | REFUSED/`other` |
 | 204 on DELETE of nothing | a 200 | reads as "removed" |
 | 409 for permanent failures | a 500 | retried by the ladder before failing |
@@ -360,7 +372,9 @@ A server MUST answer every client that uses only the core correctly: new endpoin
 
 - Signature: a fresh signature verifies; a wrong secret, tampered target, tampered body, tampered signature, upper-case hex, a non-decimal timestamp, or a timestamp outside the window fails. A range signed at one offset does not verify at another. The four test vectors of §3.4 reproduce. A client behind a base path signs the API path.
 - Canonical query: a value containing `,`, space, `+`, `&` and non-ASCII bytes signs and verifies; a repeated parameter, a part without `=` or a malformed escape is 400.
-- Keys round-trip through base64url; listing entries round-trip through JSON, `etag` included; HEAD carries the etag when the store names one.
+- Keys round-trip through base64url; listing entries round-trip through JSON, `etag` and `checksum` included; HEAD carries the etag and the checksum when the store has them.
+- Conditional replace: with the etag just read → 200; after another write → 412 and the other write stays; `if_none_match=1` on an existing key → 412; `if_match` with `if_absent`, or `if_none_match=0`, → 400. Against a server without `/checksum`, no conditional PUT is sent.
+- `/checksum` answers the MD5 of the server store's body without the body crossing the link; 404 for an absent key; an unknown algorithm is 400; a client against a server without it hashes a downloaded body.
 - get-multi frames: keys, order and bodies round-trip; an empty body is not an absent one; a truncated body, fewer or more entries than keys, and a length prefix cut in half are CORRUPT; a 200 000-byte body round-trips.
 - children-multi frames round-trip whole folders including an absent body; an empty answer decodes to no folders; a folder or child outside what was asked is CORRUPT.
 - Budget: a folder exactly at the budget is taken first; one over it is skipped; one that would pass the running total ends the answer.

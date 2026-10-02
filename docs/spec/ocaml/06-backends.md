@@ -30,6 +30,7 @@ Companion to the language-neutral spec [../06-backends.md](../06-backends.md). S
 - **`list_prefix ~max_keys`** is a stop signal: the result may exceed `max_keys` by up to one page, and is in service order (local sorts). The spec returns exactly the first `n` in key order.
 - **Admission is per call, not per attempt.** `counted` wraps `put` and `put_if_absent` only, around the whole ladder: retries are not re-admitted, `elapsed` includes backoff sleeps, and the `get`+`put` inside the object-store `copy`, verify and discard job PUTs go through the driver directly, neither counted nor gated.
 - **`try_admit` then `acquire`** is two calls, atomic only because nothing yields between them under Lwt (the deferred forward spawns a task that runs synchronously up to `acquire`). The spec's `try_acquire` takes in one step.
+- **Checksums and conditional replace.** Entries carry no `checksum`; GCS reports its `etag` rather than its `generation`; no store has `put_if_unchanged`, `compute_checksum` or `locality`, the local driver reports no etag, and the http-proxy wire has no `/checksum`, `if_match` or `if_none_match`.
 - **Capabilities.** `verified = true` and `discard = Queued` are literals in the object-store shell; nothing checks the bucket function is deployed.
 - **Local health** is `Health.always_up`; the spec gives local stores a cell fed by link-kind errnos and stalls.
 - **Unrecognised exceptions are Transient** in `Retry.classify`, and count against health; the spec splits LOAD from LINK and keeps UNEXPLAINED out of the breaker.

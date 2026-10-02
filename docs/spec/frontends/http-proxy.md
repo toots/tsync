@@ -106,21 +106,23 @@ Given the operation's first key or prefix `k`:
 | get | data | `B.get_opt`; 200 with the bytes; absent → 404 |
 | ranged get | data | `B.get_range`; 200 / 404 |
 | watch | none | §A7 |
-| head | none | `B.head_opt`; 200 with size, time and etag headers; 404 |
+| head | none | `B.head_opt`; 200 with size, time, etag and checksum headers; 404 |
 | put | data | writable check (§A4.5); `B.put` → 200 |
 | claim | none | writable check; `held = B.put_if_absent` → 200 with `held` |
+| conditional put | data | writable check; `B.put_if_unchanged` → 200 `Written` / 412 `Changed` |
+| checksum | data | `B.compute_checksum`; 200 with `<algo>:<value>`; 404. It reads the whole body on this host, hence a data operation |
 | delete | none | writable check; `B.delete` → 200 removed / 204 nothing there |
 | get-multi | data | every key read; frames in request order |
 | children-multi | data | §A8 |
 | delete-multi | none | writable check (no share exemption); `B.delete_multi` → 200 |
 | copy | none | writable check on `dst`; `B.copy` server-side → 200 |
-| list | none | `B.list_prefix`; listing JSON with etags. On the share space, manifest keys are filtered out ([security §6.4](../algorithms/security-model.md#64-the-share-space-on-a-listener)) |
+| list | none | `B.list_prefix`; listing JSON with etags and checksums. On the share space, manifest keys are filtered out ([security §6.4](../algorithms/security-model.md#64-the-share-space-on-a-listener)) |
 | chunk-size | none | the route's configured chunk size, else 404. Not chained through `B` |
 | max-concurrency | none | the listener's bound (§A5), else 404 |
 | share-url | none | route serves shares → `{"self":true}`; else `B.capabilities(prefix).share_url` → `{"url":u}`; else 404 |
 | verified | none | `{"verified": B.capabilities(prefix).verified}` |
 
-**Garbage collection.** Every manifest or version write (put, claim, copy into those areas) passes the store driver's reference gate ([gc.md §5.4](../algorithms/gc.md#54-the-collection-interlock)): during a run it promotes the named chunks, and it refuses a write naming a chunk the main lacks with 409 `missing_chunks` listing them ([wire §6.2](../backends/http-proxy.md#62-failure-kind-header)). During a run, chunk reads (get, range, head, get-multi) are answered from either space ([gc.md §5.8](../algorithms/gc.md#58-chunk-access-is-scoped-by-the-driver)).
+**Garbage collection.** Every manifest or version write (put, conditional put, claim, copy into those areas) passes the store driver's reference gate ([gc.md §5.4](../algorithms/gc.md#54-the-collection-interlock)): during a run it promotes the named chunks, and it refuses a write naming a chunk the main lacks with 409 `missing_chunks` listing them ([wire §6.2](../backends/http-proxy.md#62-failure-kind-header)). During a run, chunk reads (get, range, head, checksum, get-multi) are answered from either space ([gc.md §5.8](../algorithms/gc.md#58-chunk-access-is-scoped-by-the-driver)).
 
 ### A4.5 Read-only
 
@@ -130,7 +132,7 @@ Given the operation's first key or prefix `k`:
 
 ## A5. Admission
 
-- One listener-wide bound of `max_concurrent` data operations (get, ranged get, get-multi, children-multi, put) in flight, body read included. Past it, requests wait in a bounded queue; a request that finds the queue full is answered 503 `busy` at once.
+- One listener-wide bound of `max_concurrent` data operations (get, ranged get, get-multi, children-multi, put, conditional put, checksum) in flight, body read included. Past it, requests wait in a bounded queue; a request that finds the queue full is answered 503 `busy` at once.
 - Other operations are not held behind data operations: metadata must never wait behind transfers, and a watch holds for up to 30 s by design. They are bounded by `max_connections`.
 - **Bound**, derived once at start and logged with its origin: `max_concurrent` from config; else the minimum of the routes' stores' `max_concurrency` capabilities, ignoring stores with no opinion or whose query fails; else `default_max_concurrent` (16). It is published at `/max-concurrency` so clients hold their own excess.
 - Share responses have their own bound (`max_share_responses`, [security §11](../algorithms/security-model.md#11-request-size-and-time-limits-listener)).

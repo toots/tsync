@@ -130,6 +130,13 @@ put_if_absent(k, b):
   for m in mains[1..]: m.put(k, held)                 -- followers copy the arbitrated result
   return r
 
+put_if_unchanged(k, b, expected):
+  r := mains[0].put_if_unchanged(k, b, expected)      -- the first main alone evaluates it
+  if r = Changed: return Changed                      -- nothing written, no copy told
+  fill(Put(k))
+  for m in mains[1..]: m.put(k, b)
+  return Written
+
 delete(k):        removed := mains[0].delete(k); fill(Delete(k)); for m in mains[1..]: m.delete(k); return removed
 delete_multi(ks): mains[0].delete_multi(ks); fill(DeleteMany(ks)); for m in mains[1..]: m.delete_multi(ks)
 copy(s, d):       mains[0].copy(s, d); fill(Copy(s, d)); for m in mains[1..]: m.copy(s, d)
@@ -142,7 +149,8 @@ fill(job): for c in copies (configuration order):
 - The first main is the authority. Its answer is the operation's answer, and its failure aborts before any other member is written or told.
 - Once the first main took a write, the copies are told, even if a later main then fails. The copies read the source, whose read primary holds the write, so they converge on what readers see.
 - A failure on a later main is raised after the fill. The caller treats the whole write as still owed and repeats it: every writer above the composite holds its work durably until success ([durable-queue](durable-queue.md)), and every write is idempotent.
-- The followers' plain `put` of the arbitrated body is not a fallback from a claim: the arbitration already happened, on the first main.
+- The followers' plain `put` of the arbitrated body is not a fallback from a claim: the arbitration already happened, on the first main. The same holds after a conditional replace.
+- `expected` was read through the composite, from whichever member answered (§4.6). An etag from another member does not match the first main's, and the call answers `Changed`: the safe answer, since the caller has not seen what the first main holds.
 - A write returns once every main has it and every copy has durably recorded the job, or has decided on a chunk forward.
 
 **Accepting at a copy:**
@@ -270,7 +278,8 @@ read(f):
 - Archives are asked both when the source of truth misses and when it is unreachable.
 - When everything is unreachable, the first unreachable error is raised, never "absent" ([failure-model §5.2](failure-model.md#52-absent-versus-could-not-look)).
 - `get` is `read(get_opt)`, with a clean `none` turned into ABSENT.
-- `list_prefix` returns the first reachable member's listing, never merged. An empty list is an answer.
+- `list_prefix` returns the first reachable member's listing, never merged. An empty list is an answer. Its etags and checksums are that member's.
+- `compute_checksum` walks the readable members as `list_prefix` does, never the archives: a checksum describes the view the composite's listings and entries describe. `locality` is the first readable member's.
 - `watch` is a non-probing read: a long poll must never be the request that finds out whether a member is back.
 - The single probe per lapsed hold is the breaker's ([01 §8](../01-core.md#8-health-breaker)); concurrent reads that do not get it pass to the next member.
 
