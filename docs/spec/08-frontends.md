@@ -117,9 +117,10 @@ ref, parentRef, name, kind ("dir"|"file"|"symlink"), size, mtime (float seconds)
   key resolves to, staged or published: equal to the etag when published, computed on adoption for a
   whole staged body, absent while staged partial edits exist. It is the identity a client sends back
   as `base` (§3.3).
-- **`readOnly`**: present when the item cannot be written: the domain is read-only, or its name is
-  not valid UTF-8 (a client decoding names lossily would name something else). A client presents
-  such an item read-only and decides writability no other way.
+- **`readOnly`**: present when the item cannot be written, which is when the domain is read-only.
+  A client presents such an item read-only and decides writability no other way. A name that is not
+  valid UTF-8 does not make an item read-only: `d:` and `i:` references carry no name, so a client
+  that decodes names lossily still names the item exactly.
 - A row whose containing folder has no id on this client cannot be named: it is omitted and counted
   in `unnamed`, never silently dropped. A non-zero count is reported in `status` with its repair
   (`tsync sync --full`).
@@ -150,11 +151,16 @@ or unknown code as `internal`.
 - **Folder page cursor**: the last name served. A resume returns names strictly greater, compared
   bytewise. Stateless: a fresh process answers the same page, and changes before the cursor shift
   nothing.
-- **Whole-domain page cursor** `"<walk>:<line>"`: `walk` is the all-digit epoch-ms stamp of a kept
-  walk, `line` a 0-based line index. A cursor whose walk is not the kept walk (it is gone, or was
-  remade), or whose prefix is not all digits, is answered `{stale:true}`: the consumer restarts the
-  listing. Lines, not names: one folder id can sit at several mirror paths, and a name cursor could
-  loop; and never another walk's line, which would skip items.
+- **Whole-domain page cursor** `"<walk>:<offset>"`: `walk` is the all-digit epoch-ms stamp of a kept
+  walk, `offset` the decimal byte offset in the kept walk file of the first entry line not yet
+  served. A cursor whose walk is not the kept walk (it is gone, or was remade), whose fields are not
+  all digits, or whose offset is not the start of an entry line of that file (past the header line,
+  at most the file's size, and just after a newline), is answered
+  `{stale:true}`: the consumer restarts the listing. Positions, not names: one folder id can sit at
+  several mirror paths, and a name cursor could loop; and never another walk's position, which would
+  skip items. A byte offset, not a line index: the file is immutable, so the offset is as stateless
+  as a line number, and a page seeks to it instead of scanning every earlier line (a line index would
+  make a whole-domain listing quadratic in its size).
 - **Kept walk file** (owner-local, in the domain's scratch directory): line 1
   `{"walk":"<ms>","skipped":<n>}`; then one JSON entry per line, sorted by path:
   `{"path":"a/b.txt","container":"<folderId>","kind":"file","size":N,"mtime":F}` or
@@ -252,7 +258,7 @@ watched with the liveness probe ([07 §4.3](07-daemon-cli.md#43-deadlines-bulk-a
 | `pause` | `arg`: `"off"` resumes, anything else pauses | `{paused}` after the state is durable | |
 | `stats` | `arg`: comma set of `totals, exact, reload, frontend` | the owner's report ([07 §5.5](07-daemon-cli.md#55-tsync-status)); `frontend` = only this process's figures, no probes | |
 | `stop` | — | `{}`, then the owner stops ([07 §3.4](07-daemon-cli.md#34-stop)) | |
-| `subscribe` | `domain` (required) | `{}`, then the connection is an event stream (§3.8) | |
+| `subscribe` | `domain?` | `{}`, then the connection is an event stream (§3.8) | |
 
 - `status` is cheap: no store access, no walk (menus poll it).
 - `job` streams lines before its reply, each an object with a `stream` field: `{stream:"started",
@@ -358,6 +364,12 @@ frontends.
 7. An op whose item or parent cannot be named is dropped and counted in `unnamed`, never turned into
    `stale`: re-listing the domain for one folder would cost every other.
 
+**One consumer.** A domain has at most one change-feed consumer: the host whose frontend spec
+reads the feed (the File Provider's working set, which the framework guarantees is enumerated by
+one consumer at a time). The feed watermark below and the kept walk of §3.7 are single slots on that
+assumption; a second consumer would move the watermark past the first one's anchor and remake the
+walk under its pages. Nothing else calls `changes_since` or `list_all`.
+
 **Feed watermark.** An anchor stays answerable for as long as its consumer may present it. The owner
 records durably, as the domain's feed watermark, the entry of the oldest anchor a consumer may still
 present: it is set by a `cursor` answer when no watermark exists, moves to the entry of the anchor
@@ -378,16 +390,22 @@ not grow the log without bound, and one that returns re-lists.
   emitted.
 - **`list_all`**: first page: walk from the root depth-first through `list_children`; a folder with no
   id counts once in `unnamed` and its subtree is skipped (it cannot be named); sort by path; stamp
-  and keep the walk (a failure to keep is logged); serve lines 0..limit−1. Later pages read the kept
-  file from line n+1; a cursor naming a walk other than the kept one, or a missing kept file, is
-  answered `{stale:true}`. `next` is emitted only
-  when one more entry exists. The walk spans many suspension points and may observe the mirror
+  and keep the walk (a failure to keep is logged); serve the first `limit` entries. Later pages seek
+  the kept file to the cursor's offset and serve `limit` entries from there; a cursor naming a walk
+  other than the kept one, a missing kept file, or an offset that is not the start of an entry line
+  is answered `{stale:true}`. `next` is the offset just past the last entry served, emitted only
+  when one more entry exists. An entry whose path no longer resolves in the mirror is skipped (the
+  feed covers its removal); every other entry is served as its current row. The walk spans many suspension points and may observe the mirror
   changing: the anchor was taken first, and the feed covers the difference.
 
 ### 3.8 Events
 
 `subscribe` turns the connection into an event stream on the domain's topic
-([01 §11](01-core.md#11-ipc-framing)). Events are hints on top of the change feed: a lost event costs
+([01 §11](01-core.md#11-ipc-framing)). On a host whose socket routes several domains, a `subscribe`
+without `domain` is answered by the router and subscribes to every domain it serves, including
+domains it starts serving later; every event names its domain. A host with one listener for all its
+domains needs no subscription per domain, and a client listening with none configured still learns
+when the first one is served. Events are hints on top of the change feed: a lost event costs
 promptness, never correctness. Every event is one JSON line `{"event":"<name>","domain":"<name>",
 "id":<seq>, …}`, `id` increasing within one owner process. Which of `changed` and `reset` a host
 publishes, and when, is in its frontend spec. Every owner publishes:
@@ -429,7 +447,7 @@ Details: [file-provider.md](frontends/file-provider.md), [android.md](frontends/
     router's "not served" answer never stays latched after the domain comes back.
 6. **The core owns the anchor.** Stale only after a new generation or a pruned anchor; unnameable
    ops are dropped individually.
-7. **Whole-domain paging uses a kept walk with a line cursor**: client-side frontiers under a
+7. **Whole-domain paging uses a kept walk with a byte-offset cursor**: client-side frontiers under a
    consumer's 500-byte cursor cap ended enumeration silently at about 26 folders.
 8. **Evict and restore are defined by the core, on subtrees**, so every caller and every frontend
    means the same thing by "make available offline" on a folder.
@@ -444,7 +462,7 @@ Details: [file-provider.md](frontends/file-provider.md), [android.md](frontends/
   whole adopted staged body has a `contentId` equal to the etag its publish yields; a directory's
   etag, size and mtime do not change when its children change.
 - **Listings.** Paged and flat views agree; files and folders share one bytewise name order; a folder
-  that cannot be named is counted, not dropped; a write between pages shifts no page; a cursor on a dropped or remade walk answers `{stale:true}`; a name containing a newline does not end the listing.
+  that cannot be named is counted, not dropped; a write between pages shifts no page; a cursor on a dropped or remade walk, or with an offset inside a line, answers `{stale:true}`; a page's cost does not grow with its position in the walk; a name containing a newline does not end the listing.
 - **Mutations.** A create under a parent named by storage key is refused; `create`, `write`, `mkdir`
   and `symlink` with `exclusive`, and `rename` with `noreplace`, onto an existing name answer `exists`
   and change nothing; `delete` of a folder is `invalid`;
@@ -453,7 +471,7 @@ Details: [file-provider.md](frontends/file-provider.md), [android.md](frontends/
 - **Transfer paths.** `ensure_cached`, `fetch_range` and `write` with a path outside the host's
   declared roots (where it declares them), through a symlink, or (for `dest`) naming an existing file, answer `denied` and
   touch nothing.
-- **Events.** A subscriber of a domain receives `recovered` when the owner starts serving the domain
+- **Events.** A subscriber of a domain, and a router-level subscriber, receives `recovered` when the owner starts serving the domain
   and after the first successful store request following an `unreachable` answer; `notify_reset`
   reports how many subscribers received the `reset` event.
 - **Engine seen by a frontend.** The owner's stats list pending and completed uploads, pending
@@ -474,6 +492,6 @@ Details: [file-provider.md](frontends/file-provider.md), [android.md](frontends/
   with no entry is stale once a shard was dropped; a watermark idle for `FEED_WATERMARK_MAX_AGE`
   holds nothing back.
 - **Replies that describe content.** `ensure_cached` and `fetch_range` reply with the row of the
-  bytes written; `write` of the key's current content queues nothing; a row of a read-only domain or
-  of a non-UTF-8 name carries `readOnly`; `exists` carries the occupant; a rename onto the item's own
+  bytes written; `write` of the key's current content queues nothing; a row of a read-only domain
+  carries `readOnly` and a row with a non-UTF-8 name does not; `exists` carries the occupant; a rename onto the item's own
   place answers the item.

@@ -87,8 +87,11 @@ This client's projection of the domain's namespace as of the journal entries it 
   listings.
 - **File id.** Attr of a file entry: its local file id ([01 §2.7](../01-core.md#27-item-references)).
   It moves with the entry on a local or applied rename, survives every replacement of the entry
-  at the same path (a new version, a peer's put, a resync), and goes with the entry's removal. An
-  entry found without one is given a fresh id the first time the owner writes or names it.
+  at the same path (a new version, a peer's put, a resync), and goes with the entry's removal. It is
+  minted when an entry is first written at a path that has none (a local create, a peer's put, a
+  resync or a pull). Owner start gives one to every entry found without one, before any request is
+  served ([04 §4.10](../04-checkout-cache.md#410-owner-start-local-recovery)). Naming an entry never
+  writes: a `stat` or a listing reads ids and mints none.
 - **Name record.** Id: the folder entry. Attr: the real leaf of a folder whose local name had to
   be escaped.
 - Mut: entries are replaced whole; the tree changes by create, move and remove.

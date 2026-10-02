@@ -53,7 +53,7 @@ anchor expiry practically never happen, and to make every change reachable throu
          ┌───────────────────┴─────────────────────────┐
    Agent: tsync service                           Login item: TsyncApp (sandboxed)
          │                                          - registers and reconciles domains
-         └─ owner of every File Provider domain     - one event relay per domain
+         └─ owner of every File Provider domain     - one event relay        
             (converges each domain it owns;         - menu bar status item
              serves the request socket)  ◄──────────┘ subscribe, menu, pause
                   ▲
@@ -243,7 +243,7 @@ resumes with a change enumeration, not a rescan.
 **Page expiry.** A whole-domain page cursor naming a kept walk that is gone, or a walk other than the
 current one, is answered `{stale:true}` ([08 §3.7](../08-frontends.md#37-listings-and-their-order));
 the extension finishes the enumeration with the framework's page-expired error and the system
-restarts it. Continuing at the same line of another walk would skip items, and an unchanged item
+restarts it. Continuing at the same position in another walk would skip items, and an unchanged item
 skipped there is never enumerated again.
 
 ## 6. File Provider mapping (extension)
@@ -272,9 +272,10 @@ skipped there is never enumerated again.
   file again after every download); `contentModificationDate` = mtime, absent when mtime ≤ 0.
 - `isUploaded` = the row's `isUploaded`; `symlinkTargetPath` = its target.
 - `contentPolicy` = download lazily, set on the root and inherited.
-- **Writability is the owner's.** A row carries `readOnly: true` when the item cannot be written: the
-  domain is read-only, or its name is not valid UTF-8 (a lossily decoded name names nothing the owner
-  holds). The extension presents such an item read-only (§6.4) and never decides it otherwise. The
+- **Writability is the owner's.** A row carries `readOnly: true` when the item cannot be written
+  (the domain is read-only). The extension presents such an item read-only (§6.4) and never decides
+  it otherwise. A name that is not valid UTF-8 reaches the system lossily decoded; the item stays
+  writable, because its identifier, not its name, is what the extension sends back. The
   root is answered by `stat("root")` like any item.
 
 ### 6.3 Versions
@@ -450,7 +451,8 @@ the owner surfaces a non-zero count in status with its repair (`tsync sync --ful
 
 ### 8.1 Events
 
-A subscription (`subscribe` with the domain) receives one JSON line per event:
+The app subscribes once, without a domain ([08 §3.8](../08-frontends.md#38-events)): the router
+answers and streams the events of every domain it serves, now or later. One JSON line per event:
 
 ```json
 {"event":"changed","domain":"Files","id":42}
@@ -472,16 +474,17 @@ A subscription (`subscribe` with the domain) receives one JSON line per event:
 
 ### 8.2 The app's relay
 
-One relay per registered domain, on its own thread:
+One relay for the app, on its own thread:
 
 ```
 loop:
-  connect; subscribe(domain)
+  connect; subscribe()
   on acknowledgement:
-    signal the working set
-    signal resolved: serverUnreachable, cannotSynchronize
     reconcile domain registrations (§9.1)
-  for each event:
+    for every registered domain:
+      signal the working set
+      signal resolved: serverUnreachable, cannotSynchronize
+  for each event, on the registered domain it names (none → ignored):
     reset → reconcile domain registrations (§9.1)
     otherwise → signal the working set; signal resolved: serverUnreachable
   back off, then retry
@@ -489,6 +492,8 @@ loop:
 
 - Signalling on every acknowledgement catches up on whatever was missed, since events are not
   replayed; reconciling then is how a changed configuration takes effect once the owner restarts.
+  The relay exists with no domain registered, so the first domain added to a fresh install is
+  registered by the same path as any other.
 - Backoff starts at `relay_backoff_min`, doubles to `relay_backoff_max`, and resets only when a
   connection lived at least `relay_backoff_reset`: an acknowledgement costs the owner nothing, and a
   crash-looping owner would otherwise cause a working-set enumeration per second. The relay never
@@ -511,7 +516,7 @@ not overlap (a pass requested during one runs once after it).
 3. If the purge marker exists: remove every domain; only if all were removed, unregister the agent and
    the login item and delete the marker. Register nothing and stop.
 4. If the config cannot be read, leave every domain untouched (reconciling against no names would
-   remove every domain), keep the relays, and stop.
+   remove every domain), keep the relay, and stop.
 5. List existing domains. A failure to list counts as an empty list and marks the pass *unlisted*.
 6. `stale` = every existing domain unless the identity-scheme record says 2, this spec's scheme
    (identifiers as §6.1 defines them). Writers MUST NOT record another scheme. Readers SHOULD accept
@@ -525,7 +530,7 @@ not overlap (a pass requested during one runs once after it).
     (a domain the system refuses to release must not force a rebuild of all domains at every launch).
 11. Clear the reset marker only if the pass was listed and every requested domain that existed was
     removed; a failed removal keeps the marker for the next pass.
-12. Keep exactly one relay per registered domain; refresh each domain's user-visible root for the
+12. Refresh each domain's user-visible root for the
     menu.
 
 **Removal keeps dirty data.** Every removal uses the framework's preserve-dirty-user-data mode, so
@@ -580,15 +585,21 @@ There is no settings window; configuration is `config.json`. The app's only UI i
 content the owner renders (`menu`) from the model shared with the Linux tray ([fuse.md](fuse.md)), so
 the platforms cannot drift.
 
+`menu` answers `{"ok":true,"menu":<menu JSON>}`, the menu model's JSON
+([07 §5.8](../07-daemon-cli.md#58-menu-model-tray-and-macos-menu-bar)):
+
 ```json
-{"ok":true,"menu":{"icon":"tsync-sync-symbolic","tooltip":"…",
-  "submenuPlaceholder":[{"label":"Reading…","enabled":false}],
-  "rows":[{"label":"Files","action":{"openFolder":"Files"}},
-          {"label":"movie.mkv — 40%","indent":1,"action":{"reveal":{"domain":"Files","rel":"a/movie.mkv"}}},
-          {"separator":true},
-          {"label":"Pause","checked":false,"action":{"setPaused":true}},
-          {"label":"Stats","submenu":true,"action":{"stats":true}}]}}
+{"ok":true,"menu":{"icon":"tsync-sync-symbolic","tooltip":"Uploading 1 · Downloading 1",
+  "entries":[{"label":"Files","enabled":true,"indent":0,"action":{"openFolder":"Files"}},
+             {"label":"movie.mkv — 40%","enabled":true,"indent":1,"action":{"reveal":{"domain":"Files","rel":"a/movie.mkv"}}},
+             {"separator":true},
+             {"label":"Stats","enabled":true,"indent":0,"submenu":true,"action":{"stats":true}},
+             {"label":"Hold changes","enabled":true,"indent":0,"checked":false,"action":{"setPaused":true}}]}}
 ```
+
+`menu_stats` answers `{"ok":true,"entries":[…]}`: the Stats submenu, one disabled entry per line of
+the `tsync status` report ([07 §5.5](../07-daemon-cli.md#55-tsync-status)). Until it arrives the
+submenu shows one disabled "Reading…" entry.
 
 - Poll every `menu_poll_interval`, skipping a poll while one is outstanding; a poll that exceeds its
   deadline counts as a failure and releases the latch. The menu is not rebuilt while open and is
@@ -598,7 +609,7 @@ the platforms cannot drift.
 - Icons are named as on the Linux panel (`tsync-idle|sync|paused|error-symbolic`); unknown → idle.
 - `openFolder` opens the domain's user-visible root (asked of the framework, never derived from the
   display name) in Finder; `reveal` selects the file and never opens it.
-- Pause toggles all domains through the owner (`pause`), with the semantics of
+- "Hold changes" toggles all domains through the owner (`pause`), with the semantics of
   [07 §2.6](../07-daemon-cli.md#26-pause). The state shown is read back by the next poll.
 - The stats submenu is fetched with `menu_stats` when it opens, at most once per
   `menu_stats_interval`; a failure leaves the placeholder.
@@ -611,9 +622,12 @@ the platforms cannot drift.
 - The package's post-install step creates the CLI link and launches the app as the console user. The
   app registers the owner's agent and itself as a login item through the service-management API.
 - The owner's agent is defined inside the bundle (its program named relative to the bundle), runs
-  `tsync start` at login, and is restarted on any unclean exit. The service exits cleanly when no
-  domain is configured, which is every fresh install, and is not restarted then. A leftover request
-  socket is removed before the owner binds: a stale socket makes callers believe the owner is running.
+  `tsync start` at login, and is restarted on any unclean exit. With no config, or no domain
+  configured (every fresh install), the service still serves the request socket, answering `menu`
+  with "No domains configured" and holding the app's subscription: the app then needs no other path
+  to learn of the first domain, which takes effect at `tsync restart` like any configuration change. A
+  leftover request socket is removed before the owner binds: a stale socket makes callers believe the
+  owner is running.
 - Where the bundled agent cannot be registered, a per-user agent definition in the user's launch
   agents directory is acceptable; it MUST name the app's bundle identifier as its associated bundle,
   so the system attributes it to the app in Login Items.
@@ -682,7 +696,8 @@ checked.
   update, not a deletion; a materialised file stays materialised across a remote rename.
 - A directory's version is stable across looks and renames.
 - Two configured names with the same identifier are refused.
-- A non-UTF-8 name and every item of a read-only domain carry `readOnly`; a declared package
+- Every item of a read-only domain carries `readOnly`; an item with a non-UTF-8 name does not, and
+  can be renamed, rewritten and deleted through the replica; a declared package
   directory takes its package type; a folder named like a flat file stays a folder.
 
 **Versions and content**
@@ -709,7 +724,8 @@ checked.
 
 **Enumeration and feed**
 - Folder pages and whole-domain pages lie end to end with no gap or repeat; a resume against a remade
-  walk answers `{stale:true}`, never another walk's line.
+  walk answers `{stale:true}`, never another walk's position; the last page of a whole-domain listing
+  costs no more than the first.
 - A change enumeration that fails finishes with an error, never at its starting anchor.
 - Change batches: create then delete → only deleted; rename then delete → deleted; a→b→c → one update
   at c; a removal needs no item; an update without an item is not invented.
@@ -720,8 +736,8 @@ checked.
   anchor.
 
 **Lifecycle**
-- A domain added to the config is registered after the owner restarts, without restarting the app;
-  the new domain is enumerated without user action.
+- A domain added to the config is registered after the owner restarts, without restarting the app,
+  including the first domain of a fresh install; the new domain is enumerated without user action.
 - `reset` leaves the owner running and the domain re-registered and enumerated; no process is
   terminated; `purge` removes domains before stopping the owner; an unreadable config removes nothing;
   a removal preserves dirty data.
@@ -735,7 +751,7 @@ checked.
 
 - **The owner holds the anchor and compares it.** The sandbox denies the extension every file the
   owner writes; an extension-side token was always empty and reimport expired nothing.
-- **The working set is one owner-paged listing over a kept walk.** Walking in the extension carried a
+- **The working set is one owner-paged listing over a kept walk, resumed by byte offset.** Walking in the extension carried a
   frontier in the page, which overflowed 500 bytes at about 26 folders and ended enumeration silently;
   re-walking per page cost a minute a page at 220k items; a name cursor looped on a folder id at two
   paths.

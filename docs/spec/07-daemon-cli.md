@@ -255,6 +255,9 @@ domain and the limit.
 1. Initialise daemon logging (§5.7).
 2. No config file, or a config with no domains: say so on stderr and **exit 0**. An installer starts
    the service before configuration; a non-zero status would make the service manager respawn it.
+   On macOS the service process instead keeps serving its request socket with no domain
+   ([file-provider.md §11](frontends/file-provider.md#11-installation)): the app's subscription and
+   menu need a listener before the first domain exists.
 3. Load and validate the config ([05 §2](05-ops-config.md)). Invalid: print the error and exit with
    status **78** (`EX_CONFIG`), which the Linux units exclude from restarts.
 4. Refuse, before starting any process, a configured frontend whose descriptor is `Commands`
