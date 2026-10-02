@@ -40,12 +40,17 @@ val stop_on_signals : ?second:(unit -> unit) -> unit -> unit
 type present =
   Tsync_domain.Domain.t ->
   (module Tsync_sync.Engine.S) ->
+  publish:(Protocol.event -> unit) ->
   Handler.hooks * (unit -> unit)
 
 (** Owner start, serve until the process stop, then drain within the grace.
-    Answers the exit status: 0, or {!owner_held}. *)
+    Answers the exit status: 0, or {!owner_held}. [shared] (macOS): one socket
+    for every domain, possibly none, whose router answers [subscribe], [menu],
+    [menu_stats], [pause] and [stop] without a domain, and which declares no
+    transfer roots (file-provider §4). *)
 val run :
   ?present:present ->
+  ?shared:bool ->
   ?socket:string ->
   Tsync_config.Config.t ->
   Tsync_config.Config.domain list ->

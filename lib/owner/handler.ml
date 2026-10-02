@@ -467,7 +467,8 @@ let list_all t ~after ~limit : Protocol.listing =
               in
               Listed { items = List.filter_map Fun.id rows; next; unnamed })
 
-let publish_event t ev = t.publish (event t (Protocol.event_name ev) [])
+let event_json t ev = event t (Protocol.event_name ev) []
+let publish_event t ev = t.publish (event_json t ev)
 
 let print_line = function
   | Protocol.Started _ -> ()

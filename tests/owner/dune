@@ -35,3 +35,35 @@
  (alias runtest)
  (action
   (diff protocol_test.expected protocol_test.output)))
+
+(executable
+ (name shared_test)
+ (modules shared_test)
+ (libraries
+  tsync_core
+  tsync_config
+  tsync_catalog
+  tsync_ipc
+  tsync_owner
+  unix
+  yojson))
+
+(rule
+ (with-stdout-to
+  shared_empty_test.output
+  (run ./shared_test.exe empty)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff shared_empty_test.expected shared_empty_test.output)))
+
+(rule
+ (with-stdout-to
+  shared_two_test.output
+  (run ./shared_test.exe two)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff shared_two_test.expected shared_two_test.output)))

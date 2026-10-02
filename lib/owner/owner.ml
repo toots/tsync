@@ -91,6 +91,7 @@ let stop_on_signals ?second () =
 type present =
   Tsync_domain.Domain.t ->
   (module Tsync_sync.Engine.S) ->
+  publish:(Protocol.event -> unit) ->
   Handler.hooks * (unit -> unit)
 
 type served = {
@@ -102,21 +103,27 @@ type served = {
 
 let answered_while_draining = ["stats"; "status"; "stop"; "ping"]
 
+(* 08 §3.3: actions the router of a shared socket answers itself when no
+   domain is named. *)
+let router_actions = ["subscribe"; "menu"; "menu_stats"; "pause"; "stop"]
+
 (* A socket serving several domains routes by [domain]; one serving a single
    domain may be asked without it. *)
-let route ~draining served req =
+let route ~draining ~router served req =
   let action = Option.value ~default:"" (Ipc.field req "action") in
   if action = "ping" then Ipc.Reply (Ipc.ok [])
   else if Atomic.get draining && not (List.mem action answered_while_draining)
   then Ipc.Reply (Ipc.failure (Fail.make Fail.Unexplained "stopping"))
   else (
-    match (Ipc.field req "domain", served) with
-      | None, [s] -> Handler.answer s.handler req
-      | None, _ ->
+    match (Ipc.field req "domain", served, router) with
+      | None, _, Some answer when List.mem action router_actions ->
+          answer action req
+      | None, [s], _ -> Handler.answer s.handler req
+      | None, _, _ ->
           Ipc.Reply
             (Ipc.failure
                (Fail.make Fail.Invalid "domain is required on this socket"))
-      | Some d, _ -> (
+      | Some d, _, _ -> (
           match
             List.find_opt
               (fun s -> Domain_name.to_string s.domain.name = d)
@@ -171,14 +178,79 @@ let housekeeping (domain : Domain.t) (module E : Tsync_sync.Engine.S) =
     done
   with Stop.Stopping -> ()
 
-let serve ?present ~socket config domains =
+(* The router of a shared socket (file-provider §4.2, §8.1, §10). *)
+let all_topics = "*"
+
+let shared_router served reports action req =
+  let now () = Unix.gettimeofday () in
+  match action with
+    | "subscribe" ->
+        Ipc.Subscribe
+          ( all_topics,
+            Ipc.ok [],
+            List.map (fun s -> Handler.event_json s.handler Recovered) served )
+    | "menu" ->
+        let answers =
+          List.map
+            (fun s ->
+              ( Domain_name.to_string s.domain.Domain.name,
+                match Handler.call s.handler Status with
+                  | st -> Ok st
+                  | exception e -> Error (Fail.classify e).reason ))
+            served
+        in
+        Ipc.Reply (Ipc.ok [("menu", Menu.render answers)])
+    | "menu_stats" ->
+        let machine : Tsync_status.Status_report.machine =
+          {
+            host = Unix.gethostname ();
+            domains =
+              Tsync_status.Status_report.answered
+                (List.map
+                   (fun (name, report) ->
+                     (name, Ok (stats_reply reports report)))
+                   reports);
+            processes = [];
+            uplinks = [];
+            jobs = [];
+            warnings = [];
+          }
+        in
+        Ipc.Reply
+          (Ipc.ok
+             [
+               ( "entries",
+                 `List
+                   (Menu.stats_entries
+                      (Tsync_status.Status_text.render ~now:(now ()) machine))
+               );
+             ])
+    | "stop" ->
+        Stop.request ();
+        Ipc.Reply (Ipc.ok [])
+    | "pause" ->
+        let on = Ipc.field req "arg" <> Some "off" in
+        let paused =
+          List.for_all (fun s -> Handler.call s.handler (Pause on)) served
+        in
+        Ipc.Reply (Ipc.ok [("paused", `Bool paused)])
+    | _ ->
+        Ipc.Reply (Ipc.failure (Fail.make Fail.Invalid "unknown router action"))
+
+let serve ?present ?(shared = false) ~socket config domains =
   let draining = Atomic.make false in
   let server = ref None in
   let served = ref [] in
   let publish d ev =
-    match !server with Some srv -> Ipc.publish srv d ev | None -> 0
+    match !server with
+      | Some srv ->
+          Ipc.publish srv d ev
+          + if shared then Ipc.publish srv all_topics ev else 0
+      | None -> 0
   in
-  let home = Paths.home () in
+  (* security-model §7.3: a shared socket's sandboxed clients hand over paths
+     the owner cannot derive, so it declares no roots. *)
+  let roots = if shared then [] else [Paths.home ()] in
   let reports = ref [] in
   served :=
     List.map
@@ -188,26 +260,33 @@ let serve ?present ~socket config domains =
         let (module E : Tsync_sync.Engine.S) = engine in
         E.start ();
         Rt.spawn ~name:"housekeeping" (fun () -> housekeeping domain engine);
+        let handler = ref None in
         let hooks, go =
           match present with
-            | Some p -> p domain engine
+            | Some p ->
+                p domain engine ~publish:(fun ev ->
+                    Option.iter
+                      (fun h -> ignore (Handler.publish_event h ev))
+                      !handler)
             | None -> (Handler.no_hooks, ignore)
         in
         E.set_changed_hook hooks.changed;
         let report = Report.create domain engine ~frontend:hooks.frontend in
         reports := (Domain_name.to_string dom.name, report) :: !reports;
-        {
-          domain;
-          engine;
-          go;
-          handler =
-            Handler.create ~domain ~engine ~hooks
-              ~publish:(publish (Domain_name.to_string dom.name))
-              ~stats:(fun _ -> stats_reply !reports report)
-              ~stop:Stop.request ~dest_roots:[home] ~staging_roots:[home];
-        })
+        let h =
+          Handler.create ~domain ~engine ~hooks
+            ~publish:(publish (Domain_name.to_string dom.name))
+            ~stats:(fun _ -> stats_reply !reports report)
+            ~stop:Stop.request ~dest_roots:roots ~staging_roots:roots
+        in
+        handler := Some h;
+        { domain; engine; go; handler = h })
       domains;
-  server := Some (Ipc.serve ~path:socket (route ~draining !served));
+  let router =
+    if shared then Some (fun a r -> shared_router !served !reports a r)
+    else None
+  in
+  server := Some (Ipc.serve ~path:socket (route ~draining ~router !served));
   List.iter
     (fun s -> ignore (Handler.publish_event s.handler Recovered))
     !served;
@@ -221,12 +300,12 @@ let serve ?present ~socket config domains =
     !served;
   Option.iter Ipc.close !server
 
-let run ?present ?socket config (domains : Config.domain list) =
+let run ?present ?shared ?socket config (domains : Config.domain list) =
   let socket =
     match (socket, domains) with
       | Some s, _ -> s
-      | None, [d] -> Paths.owner_socket d.name
-      | None, _ -> Paths.owner_socket (List.hd domains).name
+      | None, d :: _ -> Paths.owner_socket d.name
+      | None, [] -> invalid_arg "Owner.run: no domain and no socket"
   in
   let rec take = function
     | [] -> Ok ()
@@ -244,7 +323,7 @@ let run ?present ?socket config (domains : Config.domain list) =
   match take domains with
     | Error () -> owner_held
     | Ok () ->
-        serve ?present ~socket config domains;
+        serve ?present ?shared ~socket config domains;
         0
 
 (* 07 §2.5, §3.5: an owner for the command's duration, with every duty but

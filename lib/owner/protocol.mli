@@ -159,7 +159,7 @@ val bulk : 'a request -> bool
 val refused_while_paused : 'a request -> bool
 
 (** An event on a domain's topic (08 §3.8). *)
-type event = Recovered | Reset
+type event = Recovered | Reset | Changed
 
 val event_name : event -> string
 

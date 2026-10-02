@@ -31,6 +31,9 @@ val create :
   staging_roots:string list ->
   t
 
+(** An event of this domain, numbered as {!publish_event} numbers them. *)
+val event_json : t -> Protocol.event -> Ipc.json
+
 (** Publishes an event to the domain's subscribers, [id] increasing within the
     process (08 §3.8); how many received it. *)
 val publish_event : t -> Protocol.event -> int

@@ -1,0 +1,4 @@
+subscribe without a domain   {"ok":true}
+menu                         {"icon":"tsync-error-symbolic","tooltip":"No domains configured","entries":[{"separator":true},{"label":"Stats","enabled":true,"indent":0,"submenu":true,"action":{"stats":true}},{"label":"Hold changes","enabled":false,"indent":0,"checked":false,"action":{"setPaused":true}}]}
+stop                         {"ok":true}
+exit status 0

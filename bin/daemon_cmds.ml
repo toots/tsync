@@ -5,11 +5,66 @@ open Tsync_config
 open Tsync_owner
 open Cli
 
+(* 07 §2.4, §3.1 on macOS: no supervisor. The service process takes the
+   governor, starts the store server as its child when a domain is served over
+   HTTP, and owns every domain on one socket, which it serves even with no
+   domain configured (file-provider §11). *)
+let macos_service tls (config : Config.t) =
+  ignore (Fs.raise_nofile 65536);
+  Owner.stop_on_signals ();
+  run (fun () ->
+      Tsync_store.Uplink.own
+        ~state_file:(Filename.concat (Paths.data_dir ()) "uplink.json")
+        (fun link -> Config.uplink_settings (Config.link_settings config link));
+      (* ponytail: the store server is started once, not restarted; a
+         supervision loop if it ever needs to survive a crash. *)
+      let store_server =
+        if
+          List.exists
+            (fun d -> Config.frontend d "http-proxy" <> None)
+            config.domains
+        then (
+          let exe = Sys.executable_name in
+          let tls = Option.fold ~none:[] ~some:(fun t -> ["--tls"; t]) tls in
+          Some
+            (Unix.create_process exe
+               (Array.of_list ((exe :: ["store-server"]) @ tls))
+               Unix.stdin Unix.stdout Unix.stderr))
+        else None
+      in
+      let serve present =
+        Owner.run ?present ~shared:true ~socket:(Paths.service_socket ()) config
+          config.domains
+      in
+      Fun.protect
+        ~finally:(fun () ->
+          Option.iter
+            (fun pid ->
+              (try Unix.kill pid Sys.sigterm with Unix.Unix_error _ -> ());
+              ignore (Unix.waitpid [] pid))
+            store_server)
+        (fun () ->
+          match Owner.host_for config.domains with
+            | Some host ->
+                host ~mount:None config.domains ~run:(fun p -> serve (Some p))
+            | None -> serve None))
+
+let no_domains () = Config.of_string {|{"domains":[]}|}
+
 (* 07 §3.1 *)
 let start mount tls verbose =
   set_verbose verbose;
   Atomic.set Log.min_level Log.Debug;
   match Paths.read_config () with
+    | None when Fs.is_macos ->
+        prerr_endline "tsync: no config; serving the menu until one exists";
+        macos_service tls (no_domains ())
+    | Some text when Fs.is_macos -> (
+        match Config.of_string text with
+          | exception Config.Invalid e ->
+              prerr_endline ("tsync: " ^ e);
+              78
+          | config -> macos_service tls config)
     | None ->
         prerr_endline "tsync: no config; nothing to start";
         0

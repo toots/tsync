@@ -601,7 +601,7 @@ let host ~mount domains ~run =
         state := s;
         Condition.broadcast c)
   in
-  let present domain engine =
+  let present domain engine ~publish:_ =
     let t =
       {
         engine;
