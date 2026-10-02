@@ -88,9 +88,8 @@ let row (module E : Engine.S) ~root_name path : Protocol.row option =
             Option.map dir_ref (Option.map Folder_id.to_string st.folder_id)
         | `File | `Symlink ->
             Option.map
-              (fun id ->
-                Names.ref_to_string (Names.File (id, Names.leaf_of path)))
-              (id_of (Names.parent_of path)))
+              (fun id -> Names.ref_to_string (Names.File_id id))
+              (Tsync_checkout.Mirror.file_id E.mirror path))
   in
   match (ref_, parent_ref) with
     | Some ref_, Some parent_ref ->
@@ -153,6 +152,10 @@ let resolve_ref (module E : Engine.S) s =
         match Option.bind (Folder_id.of_string id) E.path_of_id with
           | Some p -> p
           | None -> Fail.absent "%s: no such folder" s)
+    | Ok (File_id id) -> (
+        match Tsync_checkout.Mirror.path_of_file_id E.mirror id with
+          | Some p when E.kind p = `File -> p
+          | _ -> Fail.absent "%s: no such file" s)
     | Ok (File (id, leaf)) -> (
         match Option.bind (Folder_id.of_string id) E.path_of_id with
           | Some parent ->

@@ -5,10 +5,10 @@ stat root                          {"ok":true,"ref":"root","parentRef":"root","n
 mkdir a                            {"ok":true,"item":{"ref":"d:<id1>","parentRef":"root","name":"a","kind":"dir","size":0,"mtime":"<t>","etag":"<id1>","isUploaded":true}}
 mkdir a again                      {"ok":true,"item":{"ref":"d:<id1>","parentRef":"root","name":"a","kind":"dir","size":0,"mtime":"<t>","etag":"<id1>","isUploaded":true}}
 mkdir a exclusive                  {"ok":false,"code":"exists","error":"a exists"}
-write a/f.txt                      {"ok":true,"size":11,"mtime":"<t>","item":{"ref":"f:<id1>/f.txt","parentRef":"d:<id1>","name":"f.txt","kind":"file","size":11,"mtime":"<t>","etag":"","isUploaded":false,"contentId":"<id2>","availability":"cached"}}
-stat by rel                        {"ok":true,"ref":"f:<id1>/f.txt","parentRef":"d:<id1>","name":"f.txt","kind":"file","size":11,"mtime":"<t>","etag":"","isUploaded":false,"contentId":"<id2>","availability":"cached"}
+write a/f.txt                      {"ok":true,"size":11,"mtime":"<t>","item":{"ref":"i:<file-1>","parentRef":"d:<id1>","name":"f.txt","kind":"file","size":11,"mtime":"<t>","etag":"","isUploaded":false,"contentId":"<id2>","availability":"cached"}}
+stat by rel                        {"ok":true,"ref":"i:<file-1>","parentRef":"d:<id1>","name":"f.txt","kind":"file","size":11,"mtime":"<t>","etag":"","isUploaded":false,"contentId":"<id2>","availability":"cached"}
 list_dir root                      {"ok":true,"items":[{"ref":"d:<id1>","parentRef":"root","name":"a","kind":"dir","size":0,"mtime":"<t>","etag":"<id1>","isUploaded":true}]}
-list_dir a                         {"ok":true,"items":[{"ref":"f:<id1>/f.txt","parentRef":"d:<id1>","name":"f.txt","kind":"file","size":11,"mtime":"<t>","etag":"","isUploaded":false,"contentId":"<id2>","availability":"cached"}]}
+list_dir a                         {"ok":true,"items":[{"ref":"i:<file-1>","parentRef":"d:<id1>","name":"f.txt","kind":"file","size":11,"mtime":"<t>","etag":"","isUploaded":false,"contentId":"<id2>","availability":"cached"}]}
 staging outside the roots          {"ok":false,"code":"denied","error":"/etc/hostname: outside the roots this host declares"}
 ensure_cached                      {"ok":true,"localPath":"<root>/home/out.txt"}
   content                          "hello world"
@@ -16,8 +16,8 @@ ensure_cached onto a file          {"ok":false,"code":"denied","error":"<root>/h
 after tempDir=/: a dest outside    denied
 a dest in the declared tempDir     ok
 the earlier tempDir, once replaced denied
-rename to g.txt                    {"ok":true,"item":{"ref":"f:<id1>/g.txt","parentRef":"d:<id1>","name":"g.txt","kind":"file","size":11,"mtime":"<t>","etag":"","isUploaded":false,"contentId":"<id2>","availability":"cached"}}
-stat the old ref                   {"ok":false,"code":"not_found","error":"f:<id1>/f.txt: no such file"}
+rename to g.txt                    {"ok":true,"item":{"ref":"i:<file-1>","parentRef":"d:<id1>","name":"g.txt","kind":"file","size":11,"mtime":"<t>","etag":"","isUploaded":false,"contentId":"<id2>","availability":"cached"}}
+stat its ref after                 {"ok":true,"ref":"i:<file-1>","parentRef":"d:<id1>","name":"g.txt","kind":"file","size":11,"mtime":"<t>","etag":"","isUploaded":false,"contentId":"<id2>","availability":"cached"}
 delete a folder                    {"ok":false,"code":"invalid","error":"a folder is removed with rmdir"}
 rmdir a                            {"ok":true}
 list_dir root                      {"ok":true,"items":[]}

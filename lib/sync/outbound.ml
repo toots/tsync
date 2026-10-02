@@ -82,6 +82,7 @@ module Make (C : Engine_ctx.S) = struct
         ops = [Op.Put { path; size; base }];
         priors = [];
         local_from = [];
+        fids = fids_of [Op.Put { path; size; base }];
         last_error = None;
       }
     in
@@ -108,14 +109,17 @@ module Make (C : Engine_ctx.S) = struct
     in
     Dqueue.Records.update wal id (fun b ->
         match Wal.decode b with
-          | Some r -> Wal.encode { r with state = Executed; ops }
+          | Some r ->
+              Wal.encode
+                { r with state = Executed; ops; fids = Wal.carry_fids r ops }
           | None -> b);
     id
 
   (* The one publishing operation: note, put the entry, announce, cursor. *)
   let publish_entry id ops =
     let k = Option.get (Entry_key.parse id) in
-    Applied.note applied k ops;
+    let known = match read_record id with Some r -> r.fids | None -> [] in
+    Applied.note ~fids:(note_fids ~known ops) applied k ops;
     Journal.write_entry journal k ops;
     changed (List.concat_map Op.paths ops);
     Journal.note journal k

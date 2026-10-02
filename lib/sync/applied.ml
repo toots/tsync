@@ -15,6 +15,20 @@ let shards t =
     (fun n -> String.length n = 11 && String.ends_with ~suffix:".log" n)
     (Fs.readdir t.dir)
 
+type op = { op : Op.t; fid : string option }
+
+let fid_of = function
+  | `Assoc f -> (
+      match List.assoc_opt "fid" f with
+        | Some (`String id) when Names.valid_file_id id -> Some id
+        | _ -> None)
+  | _ -> None
+
+let op_to_json ?fid op =
+  match (Op.to_json op, fid) with
+    | `Assoc f, Some id -> `Assoc (f @ [("fid", `String id)])
+    | j, _ -> j
+
 (* A line with no tab, a key that does not parse or a second field that is not
    an array is a torn record, dropped. *)
 let parse_line l =
@@ -28,8 +42,16 @@ let parse_line l =
                 Yojson.Safe.from_string
                   (String.sub l (i + 1) (String.length l - i - 1))
               with
-                | j ->
-                    Option.map (fun ops -> (k, ops)) (Op.list_of_json_lenient j)
+                | `List l ->
+                    Some
+                      ( k,
+                        List.filter_map
+                          (fun j ->
+                            match Op.of_json j with
+                              | Some op -> Some { op; fid = fid_of j }
+                              | None | (exception Op.Bad _) -> None)
+                          l )
+                | _ -> None
                 | exception _ -> None))
 
 let lines_of t shard =
@@ -69,18 +91,22 @@ let current_shard () =
 
 (* The newline leads, so a record torn by a crash is closed by the next
    append and only that record is lost. *)
-let note t k ops =
+let note ?(fids = []) t k ops =
   Mutex.protect t.m (fun () ->
       if not (Hashtbl.mem t.handled (Entry_key.to_string k)) then (
         Fs.mkdir_p t.dir;
         Fs.append_durable
           (Filename.concat t.dir (current_shard ()))
           ("\n" ^ Entry_key.to_string k ^ "\t"
-          ^ Yojson.Safe.to_string (Op.list_to_json ops));
+          ^ Yojson.Safe.to_string
+              (`List
+                 (List.mapi
+                    (fun i op -> op_to_json ?fid:(List.assoc_opt i fids) op)
+                    ops)));
         Hashtbl.replace t.handled (Entry_key.to_string k) ();
         t.head <- Some k))
 
-type page = { entries : (Entry_key.t * Op.t list) list; more : bool }
+type page = { entries : (Entry_key.t * op list) list; more : bool }
 
 (* Positions are line order, the earliest line of a key being its position. *)
 let since t anchor limit =

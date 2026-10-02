@@ -6,6 +6,9 @@ type t = {
   folders : string;
   by_path : string;
   key_prefix : string;
+  by_fid : (string, string) Hashtbl.t option ref;
+      (** file id → path, built on first use and kept by every marker write *)
+  by_fid_m : Mutex.t;
 }
 
 let create ~cache_root domain =
@@ -16,7 +19,13 @@ let create ~cache_root domain =
     folders = Filename.concat root "folders";
     by_path = Filename.concat (Filename.concat root "folders") "by-path";
     key_prefix = Key.prefix_to_string (Key.manifests domain);
+    by_fid = ref None;
+    by_fid_m = Mutex.create ();
   }
+
+(* An index not built yet needs no upkeep: its first walk sees the markers. *)
+let with_fid_index t f =
+  Mutex.protect t.by_fid_m (fun () -> Option.iter f !(t.by_fid))
 
 let root t = t.root
 
@@ -29,6 +38,10 @@ let name_marker dir = Filename.concat dir ".tsync-name"
 
 let own_marker dir leaf =
   Filename.concat dir (".tsync-own-" ^ Xxh.hex16 (Xxh.string leaf))
+
+(* 04 §2.3: the file-id marker of a file entry with leaf [leaf]. *)
+let fid_marker dir leaf =
+  Filename.concat dir (".tsync-fid-" ^ Xxh.hex16 (Xxh.string leaf))
 
 let write ?(durable = true) p data =
   if durable then Fs.durable_replace p data else Fs.replace p data
@@ -124,19 +137,78 @@ let set_own t rel =
   let leaf = Names.leaf_of rel in
   write (own_marker (path t (Names.parent_of rel)) leaf) leaf
 
-(* Every write stamps the recorded name, and replaces the entry whole. *)
+(* The marker belongs to the entry only when it records the entry's leaf. *)
+let file_id t rel =
+  let leaf = Names.leaf_of rel in
+  match Fs.read_file_opt (fid_marker (path t (Names.parent_of rel)) leaf) with
+    | Some body
+      when String.length body = 33 + String.length leaf
+           && body.[32] = '\n'
+           && String.sub body 33 (String.length leaf) = leaf ->
+        let id = String.sub body 0 32 in
+        if Names.valid_file_id id then Some id else None
+    | _ -> None
+
+let set_file_id ?durable t rel id =
+  let leaf = Names.leaf_of rel in
+  write ?durable
+    (fid_marker (path t (Names.parent_of rel)) leaf)
+    (id ^ "\n" ^ leaf);
+  with_fid_index t (fun h -> Hashtbl.replace h id rel)
+
+let ensure_file_id ?durable t rel =
+  match file_id t rel with
+    | Some id -> id
+    | None ->
+        let id = Ids.token () in
+        set_file_id ?durable t rel id;
+        id
+
+let clear_file_id t rel =
+  Option.iter
+    (fun id ->
+      with_fid_index t (fun h ->
+          if Hashtbl.find_opt h id = Some rel then Hashtbl.remove h id))
+    (file_id t rel);
+  let dir = path t (Names.parent_of rel) in
+  if Fs.release (fid_marker dir (Names.leaf_of rel)) then Fs.fsync_dir dir
+
+(* Index paths under [src] move to [dst], or go when [dst] is [None]. *)
+let move_fid_subtree t ~src ~dst =
+  with_fid_index t (fun h ->
+      let under =
+        Hashtbl.fold
+          (fun id p acc ->
+            if Names.is_under ~dir:src p then (id, p) :: acc else acc)
+          h []
+      in
+      List.iter
+        (fun (id, p) ->
+          match dst with
+            | Some dst ->
+                Hashtbl.replace h id
+                  (dst
+                  ^ String.sub p (String.length src)
+                      (String.length p - String.length src))
+            | None -> Hashtbl.remove h id)
+        under)
+
+(* Every write stamps the recorded name, and replaces the entry whole; a path
+   keeps its file id across replacements. *)
 let write_file ?durable ?(own = false) t rel (m : Manifest.t) =
   ensure_dirs t (Names.parent_of rel);
   check_handle t rel;
   let m = Manifest.rename m (Names.leaf_of rel) in
   if not own then clear_own t rel;
   write ?durable (path t rel) m.body;
+  ignore (ensure_file_id ?durable t rel);
   if own then set_own t rel
 
 let remove_file t rel =
   clear_own t rel;
   let p = path t rel in
-  if Fs.release p then Fs.fsync_dir (Filename.dirname p)
+  if Fs.release p then Fs.fsync_dir (Filename.dirname p);
+  clear_file_id t rel
 
 let md5_hex s = Digest.to_hex (Digest.string s)
 
@@ -195,6 +267,7 @@ let record_folder ?durable ?(on_other = `Replace) t rel id =
 let mkdir_without_id t rel = ensure_dirs t rel
 
 let remove_folder t rel =
+  move_fid_subtree t ~src:rel ~dst:None;
   let p = path t rel in
   Fs.rm_rf p;
   Fs.fsync_dir (Filename.dirname p)
@@ -254,6 +327,7 @@ let move_folder t ~src ~dst =
   check_handle t dst;
   let id = folder_id t src in
   Fs.rename (path t src) (path t dst);
+  move_fid_subtree t ~src ~dst:(Some dst);
   Fs.fsync_dir (Filename.dirname (path t src));
   Fs.fsync_dir (Filename.dirname (path t dst));
   let p = path t dst and leaf = Names.leaf_of dst in
@@ -261,18 +335,24 @@ let move_folder t ~src ~dst =
   else Fs.unlink_quiet (name_marker p);
   Option.iter (fun id -> replace_folder t dst id) id
 
+(* The file id goes first, so the destination entry is never written under
+   another id; a staged-only file has a marker and no entry. *)
 let move_file t ~src ~dst =
-  match manifest t src with
+  let fid = file_id t src in
+  ensure_dirs t (Names.parent_of dst);
+  (match fid with
+    | Some id -> set_file_id t dst id
+    | None -> clear_file_id t dst);
+  (match manifest t src with
     | Some m ->
         let own = is_own t src in
         write_file ~own t dst m;
         remove_file t src
     | None -> (
         match Fs.lstat_opt (path t src) with
-          | Some _ ->
-              ensure_dirs t (Names.parent_of dst);
-              Fs.rename (path t src) (path t dst)
-          | None -> ())
+          | Some _ -> Fs.rename (path t src) (path t dst)
+          | None -> ()));
+  clear_file_id t src
 
 type child = {
   name : string;
@@ -373,3 +453,63 @@ let sweep_removed_records t ~older_than =
             ignore (Fs.release p)
         | _ -> ())
     (Fs.readdir t.by_path)
+
+(* 04 §4.10 step 8: one flush instead of a fsync per marker. *)
+let backfill_file_ids t =
+  let minted = ref 0 in
+  let rec walk rel =
+    List.iter
+      (fun c ->
+        let r = Names.join rel c.name in
+        match c.kind with
+          | `Dir _ -> walk r
+          | `File _ ->
+              if file_id t r = None then (
+                set_file_id ~durable:false t r (Ids.token ());
+                incr minted))
+      (list t rel)
+  in
+  walk "";
+  if !minted > 0 then Fs.syncfs t.root;
+  !minted
+
+(* Every marker, a staged-only file's included: those have no entry to list. *)
+let scan_file_ids t =
+  let h = Hashtbl.create 4096 in
+  let rec walk rel =
+    let dir = path t rel in
+    List.iter
+      (fun local ->
+        if String.starts_with ~prefix:".tsync-fid-" local then (
+          match Fs.read_file_opt (Filename.concat dir local) with
+            | Some body when String.length body > 33 && body.[32] = '\n' ->
+                let id = String.sub body 0 32 in
+                let leaf = String.sub body 33 (String.length body - 33) in
+                if Names.valid_file_id id && Names.valid_leaf leaf then
+                  Hashtbl.replace h id (Names.join rel leaf)
+            | _ -> ()))
+      (Option.value ~default:[] (Fs.readdir_opt dir));
+    List.iter
+      (fun c ->
+        match c.kind with
+          | `Dir _ -> walk (Names.join rel c.name)
+          | `File _ -> ())
+      (list t rel)
+  in
+  walk "";
+  h
+
+let path_of_file_id t id =
+  let lookup () =
+    Mutex.protect t.by_fid_m (fun () ->
+        let h =
+          match !(t.by_fid) with
+            | Some h -> h
+            | None ->
+                let h = scan_file_ids t in
+                t.by_fid := Some h;
+                h
+        in
+        Hashtbl.find_opt h id)
+  in
+  match lookup () with Some p when file_id t p = Some id -> Some p | _ -> None

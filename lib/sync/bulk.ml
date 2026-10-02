@@ -101,6 +101,7 @@ module Make (C : Engine_ctx.S) = struct
                        ops = List.map op chosen;
                        priors = [];
                        local_from = [];
+                       fids = [];
                        last_error = None;
                      })
               in

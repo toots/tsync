@@ -822,6 +822,7 @@ module Make (C : Engine_ctx.S) = struct
           }
         in
         write_edit path before e;
+        ignore (Mirror.ensure_file_id mirror path);
         bump path;
         mark_dirty path)
 
@@ -905,6 +906,7 @@ module Make (C : Engine_ctx.S) = struct
           }
         in
         Staged.write staged path e;
+        ignore (Mirror.ensure_file_id mirror path);
         Option.iter (fun o -> release_unnamed o (Some e)) before;
         bump path;
         !post_put_hook path e.size (base_hex e);
@@ -927,6 +929,39 @@ module Make (C : Engine_ctx.S) = struct
           | Some h -> Hashtbl.mem h p
           | None -> false)
 
+  (* 04 §2.8 [fids]: read before the local half, which may remove a marker. *)
+  let fids_of ops =
+    List.concat
+      (List.mapi
+         (fun i op ->
+           match
+             Option.bind (Wal.subject op) (fun (_, p) ->
+                 Mirror.file_id mirror p)
+           with
+             | Some id -> [(i, id)]
+             | None -> [])
+         ops)
+
+  (* The ids an applied-log copy of [ops] carries: [known] by index, else the
+     id now at the path an op leaves its file at. *)
+  let note_fids ?(known = []) ops =
+    List.concat
+      (List.mapi
+         (fun i op ->
+           match List.assoc_opt i known with
+             | Some id -> [(i, id)]
+             | None -> (
+                 let at =
+                   match op with
+                     | Op.Put { path; _ } -> Some path
+                     | Rename { is_dir = false; dst; _ } -> Some dst
+                     | _ -> None
+                 in
+                 match Option.bind at (Mirror.file_id mirror) with
+                   | Some id -> [(i, id)]
+                   | None -> []))
+         ops)
+
   (* WAL records of namespace changes: durable intent before the local half. *)
   let record_intent ?(priors = []) ops =
     note_touched (List.concat_map Op.paths ops);
@@ -938,6 +973,7 @@ module Make (C : Engine_ctx.S) = struct
           ops;
           priors;
           local_from = [];
+          fids = fids_of ops;
           last_error = None;
         }
     in

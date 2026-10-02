@@ -1,0 +1,46 @@
+== a staged-only file has an id, kept through publish
+  A staged: x.txt=<id1>
+  A published: x.txt=<id1>
+== a rename and a rewrite keep it; a peer mints its own
+  <id1> resolves to x.txt
+  <id1> resolves to y.txt
+  A: x.txt=none  y.txt=<id1>
+  B: y.txt=<id2>
+== a peer's rename keeps the receiver's id
+  B: y.txt=none  z.txt=<id2>
+== a rename onto a file gives the destination the source's id
+  A before: p.txt=<id3>  q.txt=<id4>
+  A after: p.txt=none  q.txt=<id3>
+== a folder move carries its files' ids, and they resolve there
+  <id5> resolves to moved/f.txt
+== deletes are noted with the id the file had
+  B: z.txt=none
+  A's applied log:
+    put x.txt                fid=<id1>
+    rename x.txt->y.txt      fid=<id1>
+    put y.txt                fid=<id1>
+    rename y.txt->z.txt      fid=<id1>
+    put p.txt                fid=<id3>
+    put q.txt                fid=<id4>
+    rename p.txt->q.txt      fid=<id3>
+    mkdir dir                fid=-
+    put dir/f.txt            fid=<id5>
+    rename dir->moved        fid=-
+    delete z.txt             fid=<id1>
+  B's applied log:
+    put x.txt                fid=-
+    rename x.txt->y.txt      fid=<id2>
+    put y.txt                fid=<id2>
+    rename y.txt->z.txt      fid=<id2>
+    put p.txt                fid=-
+    put q.txt                fid=<id6>
+    rename p.txt->q.txt      fid=<id6>
+    mkdir dir                fid=-
+    put dir/f.txt            fid=-
+    rename dir->moved        fid=-
+    delete z.txt             fid=<id2>
+== owner start gives an id to a file found without one
+  B before: q.txt=<id6>
+  B without its marker: q.txt=none
+  backfilled: 1
+  B after: q.txt=<id7>

@@ -73,13 +73,15 @@ let () =
       p "%-26s %s\n" what
         (match Wal.decode b with
           | Some r ->
-              Printf.sprintf "%s, %d ops, attempts %d, priors %d, localFrom %d"
+              Printf.sprintf
+                "%s, %d ops, attempts %d, priors %d, localFrom %d, fids %d"
                 (Wal.state_name r.state) (List.length r.ops) r.attempts
                 (List.length r.priors) (List.length r.local_from)
+                (List.length r.fids)
           | None -> "unparseable"))
     [
       ( "spec example",
-        {|{"state":"intent","attempts":2,"ops":[{"op":"rename","key":"b/new.txt","src":"a/old.txt","is_dir":false,"size":1234}],"priors":{"0":"3f2a9c1e0b7d4455"},"localFrom":{"0":"a/old (conflicted copy from laptop).txt"},"lastError":{"kind":"transient/link","detail":"connection reset"}}|}
+        {|{"state":"intent","attempts":2,"ops":[{"op":"rename","key":"b/new.txt","src":"a/old.txt","is_dir":false,"size":1234}],"priors":{"0":"3f2a9c1e0b7d4455"},"localFrom":{"0":"a/old (conflicted copy from laptop).txt"},"fids":{"0":"6c1e0b9a2f4d47e8a3b5c7d9e1f20384"},"lastError":{"kind":"transient/link","detail":"connection reset"}}|}
       );
       ("unknown state", {|{"state":"weird","ops":[{"op":"delete","key":"a"}]}|});
       ( "op list",
@@ -89,10 +91,52 @@ let () =
       ( "priors naming no op",
         {|{"state":"prepared","ops":[{"op":"delete","key":"a"}],"priors":{"3":null}}|}
       );
+      ( "fid not an id",
+        {|{"state":"prepared","ops":[{"op":"delete","key":"a"}],"fids":{"0":"x"}}|}
+      );
+      ( "fids naming no op",
+        {|{"state":"prepared","ops":[{"op":"delete","key":"a"}],"fids":{"1":"6c1e0b9a2f4d47e8a3b5c7d9e1f20384"}}|}
+      );
       ("empty op list body", "\n\n");
       ("empty ops", {|{"state":"prepared","ops":[]}|});
       ("torn", {|{"state":"prep|});
     ];
+  let id = "6c1e0b9a2f4d47e8a3b5c7d9e1f20384" in
+  let r =
+    {
+      Wal.state = Prepared;
+      attempts = 0;
+      ops =
+        [
+          Op.Rmdir { path = "d"; id = None };
+          Op.Delete "a";
+          Op.Rename
+            { dst = "c"; src = "b"; is_dir = false; size = Some 1; id = None };
+        ];
+      priors = [];
+      local_from = [];
+      fids = [(1, id); (2, id)];
+      last_error = None;
+    }
+  in
+  p "fids round trip: %b\n" (Wal.decode (Wal.encode r) = Some r);
+  p "fids carried onto rewritten ops: %s\n"
+    (String.concat " "
+       (List.map
+          (fun (i, _) -> string_of_int i)
+          (Wal.carry_fids r
+             [
+               Op.Rename
+                 {
+                   dst = "c (conflicted copy)";
+                   src = "b";
+                   is_dir = false;
+                   size = Some 1;
+                   id = None;
+                 };
+               Op.Put { path = "x"; size = 0; base = None };
+               Op.Delete "a";
+             ])));
   p "\n== staged manifests (04 §2.5)\n";
   let ex =
     {|{"v":2,"name":"report.txt","size":34,"mtime":1727600000.25,"chunkSize":8,"slots":[{}, {"u":"9f3c1a2b4d5e6f70"}, {"u":"9f3c1a2b4d5e6f70","o":8}, {"z":true}]}|}
@@ -141,7 +185,11 @@ let () =
   let log = Applied.open_ dir in
   let k n = Entry_key.make ~ms:(Int64.of_int n) ~client:"c" in
   List.iter
-    (fun n -> Applied.note log (k n) [Op.Delete (Printf.sprintf "f%d" n)])
+    (fun n ->
+      Applied.note
+        ~fids:(if n = 1 then [(0, id)] else [])
+        log (k n)
+        [Op.Delete (Printf.sprintf "f%d" n)])
     [1; 3; 2];
   Applied.note log (k 3) [];
   Fs.append_durable
@@ -158,7 +206,17 @@ let () =
     | `Page (pg : Applied.page) ->
         Printf.sprintf "[%s] more=%b"
           (String.concat " "
-             (List.map (fun (k, _) -> Entry_key.to_string k) pg.entries))
+             (List.map
+                (fun (k, (ops : Applied.op list)) ->
+                  Entry_key.to_string k
+                  ^ String.concat ""
+                      (List.map
+                         (fun (o : Applied.op) ->
+                           match o.fid with
+                             | Some id -> "(fid " ^ String.sub id 0 4 ^ ")"
+                             | None -> "")
+                         ops))
+                pg.entries))
           pg.more
   in
   p "from start: %s\n" (show (Applied.since reopened None 10));

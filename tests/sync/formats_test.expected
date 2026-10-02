@@ -23,14 +23,18 @@ uppercase base                     CORRUPT (a base)
 not JSON                           CORRUPT (a JSON object)
 
 == WAL records (04 §2.8)
-spec example               intent, 1 ops, attempts 2, priors 1, localFrom 1
-unknown state              intent, 1 ops, attempts 0, priors 0, localFrom 0
-op list                    intent, 2 ops, attempts 0, priors 0, localFrom 0
+spec example               intent, 1 ops, attempts 2, priors 1, localFrom 1, fids 1
+unknown state              intent, 1 ops, attempts 0, priors 0, localFrom 0, fids 0
+op list                    intent, 2 ops, attempts 0, priors 0, localFrom 0, fids 0
 unknown op                 unparseable
 priors naming no op        unparseable
+fid not an id              unparseable
+fids naming no op          unparseable
 empty op list body         unparseable
-empty ops                  prepared, 0 ops, attempts 0, priors 0, localFrom 0
+empty ops                  prepared, 0 ops, attempts 0, priors 0, localFrom 0, fids 0
 torn                       unparseable
+fids round trip: true
+fids carried onto rewritten ops: 0 2
 
 == staged manifests (04 §2.5)
 spec example           I S(9f3c@0) S(9f3c@8) Z Z, base unknown
@@ -40,7 +44,7 @@ version 3              set aside
 round trip: true
 
 == applied log (03 §2.7)
-from start: [0000000000001-c 0000000000003-c 0000000000002-c] more=false
+from start: [0000000000001-c(fid 6c1e) 0000000000003-c 0000000000002-c] more=false
 after 3, limit 1: [0000000000002-c] more=false
 after the head: [] more=false
 unknown anchor: stale
