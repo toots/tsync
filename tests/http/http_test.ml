@@ -82,6 +82,62 @@ let () =
             p "  %s: %s" (Fail.kind_name f.kind)
               (String.concat "" (List.tl (String.split_on_char ':' f.reason))));
       show (Client.request ~stall:3. e ~meth:"GET" "/slow");
+      p "== a body still being accepted is progress";
+      let l = Unix.socket PF_INET SOCK_STREAM 0 in
+      Unix.bind l (ADDR_INET (Unix.inet_addr_loopback, 0));
+      Unix.listen l 1;
+      let sink_port =
+        match Unix.getsockname l with
+          | ADDR_INET (_, port) -> port
+          | _ -> assert false
+      in
+      let size = 16 * 1024 * 1024 in
+      let sink =
+        Rt.async (fun () ->
+            Rt.wait_readable l;
+            let fd, _ = Unix.accept l in
+            Unix.setsockopt_int fd SO_RCVBUF 65536;
+            let t = Transport.of_fd fd in
+            let buf = Bigstring.create 262144 in
+            let first = Transport.read t buf 0 262144 in
+            let head =
+              let s =
+                Bigstring.to_string (Bigstring.sub buf ~off:0 ~len:first)
+              in
+              let rec find i =
+                if String.sub s i 4 = "\r\n\r\n" then i + 4 else find (i + 1)
+              in
+              find 0
+            in
+            let rec slowly total =
+              if total < head + size then (
+                Rt.sleep 0.02;
+                slowly
+                  (total
+                  + Transport.read t buf 0 (min 262144 (head + size - total))))
+            in
+            slowly first;
+            Transport.write_string t
+              "HTTP/1.1 200 OK\r\n\
+               content-length: 2\r\n\
+               connection: close\r\n\
+               \r\n\
+               ok";
+            Transport.close t)
+      in
+      (match
+         Client.request ~stall:1.
+           (Client.endpoint (Printf.sprintf "http://127.0.0.1:%d" sink_port))
+           ~meth:"PUT"
+           ~body:(Bigstring.of_string (String.make size 'x'))
+           "/sink"
+       with
+        | r -> show r
+        | exception Fail.E f ->
+            p "  %s: %s" (Fail.kind_name f.kind)
+              (String.concat "" (List.tl (String.split_on_char ':' f.reason))));
+      (try Rt.with_timeout 5. (fun () -> Rt.Promise.await sink) with _ -> ());
+      Unix.close l;
       p "== redial after the server dropped an idle connection";
       Server.close ~grace:0.1 server;
       let server =

@@ -137,7 +137,20 @@ let link fmt = Fail.raise_ Fail.Link fmt
 
 (* A pooled connection the server closed while idle fails on write or answers
    nothing at all; only then is the request sent again, on a fresh one. *)
-let exchange e c ~meth ~target ~headers ~body ~reused =
+(* 01 §10: request-body bytes accepted by the socket are progress, so a slow
+   uplink sending a large body never reads as a stall. *)
+let write_body ~progress t body =
+  let slice = 65536 in
+  let rec go off =
+    if off < Bigstring.length body then (
+      let len = min slice (Bigstring.length body - off) in
+      Transport.write t (Bigstring.sub body ~off ~len);
+      progress ();
+      go (off + len))
+  in
+  go 0
+
+let exchange e c ~progress ~meth ~target ~headers ~body ~reused =
   let b = Buffer.create 256 in
   let head =
     [("host", e.authority)]
@@ -154,7 +167,7 @@ let exchange e c ~meth ~target ~headers ~body ~reused =
     head;
   (try
      Transport.write_string c.t (Buffer.contents b);
-     Option.iter (Transport.write c.t) body
+     Option.iter (write_body ~progress c.t) body
    with e when reused && not (Rt.is_cancelled e) -> raise Dead_before_answer);
   let head =
     match Codec.read_head ~limit:65536 c.reader with
@@ -199,7 +212,9 @@ let request ?(stall = default_stall) ?(headers = fun () -> []) ?body e ~meth
             let headers = headers () in
             progress ();
             let attempt c ~reused =
-              match exchange e c ~meth ~target ~headers ~body ~reused with
+              match
+                exchange e c ~progress ~meth ~target ~headers ~body ~reused
+              with
                 | r, keep ->
                     if keep then put_idle e c else Transport.close c.t;
                     r

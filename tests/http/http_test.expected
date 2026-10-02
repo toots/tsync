@@ -13,6 +13,8 @@ host header carries the port: true
 == stall
   transient/link:  no progress for 0.5s
   200 "late\n"
+== a body still being accepted is progress
+  200 "ok"
 == redial after the server dropped an idle connection
   200 "GET after=restart \"\"\n"
 == nothing listening
