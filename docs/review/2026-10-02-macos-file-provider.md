@@ -181,6 +181,10 @@ of its own. Nearly every regression came from one of three sources:
   - Does `SMAppService.agent` with `BundleProgram` register?
   - What does `remove(mode: .preserveDirtyUserData)` return?
   - Can the extension unlink leftovers in its temporary directory?
+  - Does the upload badge clear when an upload publishes, with metadataVersion = contentVersion
+    (both unchanged by the publish)? If the system skips an update whose versions it already holds,
+    `isUploaded` never reaches Finder; the fallback is a metadataVersion that appends the upload
+    state.
 
 ---
 
@@ -202,3 +206,19 @@ this review, each rule in the file that owns it:
 | [09](../spec/09-tests.md) | feed and paging scenarios; `<file-N>` alias |
 
 Still to refresh once an implementation exists: [ocaml/frontends/file-provider.md](../spec/ocaml/frontends/file-provider.md), whose section references follow the old numbering.
+
+---
+
+## 4. Second pass, before implementing
+
+Made against the spec as left by §3, before any macOS code was written:
+
+| Change | Why | Where |
+|---|---|---|
+| Whole-domain page cursor is `<walk>:<byte offset>` | A line index forced every page to scan the kept walk from its start: about 24 GB read for one 220k-item enumeration | [08 §2.5, §3.7](../spec/08-frontends.md) |
+| One change-feed consumer per domain, stated | The watermark and the kept walk are single slots; a second consumer would unprotect the first's anchor and remake its walk | [08 §3.6](../spec/08-frontends.md) |
+| File ids minted when an entry is written, backfilled at owner start | Minting on first report made `stat` and `list_all` write durably, once per file on the first enumeration after an upgrade | [04 §2.3, §4.10](../spec/04-checkout-cache.md), [local-cache](../spec/data-model/local-cache.md) |
+| WAL records carry `fids`, copied as `fid` into the applied log | An own delete removes the file's marker long before its entry is published and noted, so the feed could not name the deleted file: it stayed in the replica | [04 §2.8](../spec/04-checkout-cache.md) |
+| A non-UTF-8 name no longer makes an item read-only | `d:` and `i:` references carry no name, so the lossy decoding names the item exactly | [08 §2.3](../spec/08-frontends.md), [file-provider §6.2](../spec/frontends/file-provider.md) |
+| One router-level subscription; the macOS service stays up with no domain | With one relay per registered domain, a fresh install never had a connection to learn of its first domain | [08 §3.8](../spec/08-frontends.md), [07 §3.1](../spec/07-daemon-cli.md), [file-provider §8, §9.1, §11](../spec/frontends/file-provider.md) |
+| `menu` example follows the menu model's JSON; `menu_stats` defined | The example used fields the model does not have | [file-provider §10](../spec/frontends/file-provider.md) |

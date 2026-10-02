@@ -136,7 +136,9 @@ requires rewriting a valid existing file into another form.
   is the 32-digit id, a newline, then `l`'s bytes. It belongs to the entry iff the body's leaf equals
   `l`. Replacing the entry at the same path keeps the marker; a rename moves it with the entry (the
   leaf rewritten), written before the source entry is removed; a removal deletes it after the entry.
-  An entry without a valid marker gets a fresh id, written durably before the id is first reported.
+  The marker is written, durably, with the entry that first occupies a path (create, peer put,
+  resync, pull). An entry found without a valid marker gets a fresh one at owner start (§4.10);
+  nothing on a read path writes a marker.
 - Mirror entries are replaced only by rename, never modified in place, so a reader SHOULD read
   them by mapping them read-only.
 - Mirror files are projections: they are written by *replace*, and made durable when a later
@@ -236,6 +238,7 @@ JSON object:
  "ops":[{"op":"rename","key":"b/new.txt","src":"a/old.txt","is_dir":false,"size":1234}],
  "priors":{"0":"3f2a9c1e0b7d4455"},
  "localFrom":{"0":"a/old (conflicted copy from laptop).txt"},
+ "fids":{"0":"6c1e0b9a2f4d47e8a3b5c7d9e1f20384"},
  "lastError":{"kind":"transient/link","detail":"connection reset"}}
 ```
 
@@ -246,9 +249,10 @@ JSON object:
 | `ops` | array of journal ops ([03](03-journal-sync.md) §2.3). Every element MUST decode; a record with an op this reader does not know is unparseable (set aside), never run with the op dropped |
 | `priors` | optional object mapping an op's index (decimal string) to the **expected prior record** of that op ([conflict-resolution](algorithms/conflict-resolution.md) §3.3), for `delete` and file `rename` ops only: the prior's content identity `h1` (16 lowercase hex), or `null` for *none*. An index absent from the object (or no `priors` field) means *unknown*. Local only: never published |
 | `localFrom` | optional object mapping an op's index to the path the file occupies locally until the op's move is redone; written only while a retargeted record is in `intent` ([conflict-resolution](algorithms/conflict-resolution.md) §4.6) and removed with the move to `prepared`. Local only |
+| `fids` | optional object mapping an op's index to the file id ([01 §2.7](01-core.md#27-item-references)) of the file a `put`, `delete` or file `rename` op names, read when the local operation ran, before a delete removed its marker. Copied as `fid` into the op's applied-log copy when the entry is noted ([03 §2.7](03-journal-sync.md#27-applied-log-local)). An index without one: the applied-log copy carries none. Local only: never published |
 | `lastError` | optional `{"kind", "detail"}`; `kind` is a failure-kind name of [failure-model](algorithms/failure-model.md) §3.1 in lowercase. Readers SHOULD accept `transient` and `permanent` (meaning a retryable and a non-retryable kind); writers MUST NOT produce them. Only reported, never acted on |
 
-Readers ignore unknown fields; an op index in `priors` or `localFrom`
+Readers ignore unknown fields; an op index in `priors`, `localFrom` or `fids`
 that names no op, or a value of the wrong type, makes the record unparseable.
 
 Writers MUST NOT produce the following forms; readers SHOULD accept them as stated:
@@ -723,6 +727,9 @@ checkout to a consistent state:
    size)]` for it (the crash fell between a write and its close).
 7. Anchor the cache counts ([read-path-and-cache](algorithms/read-path-and-cache.md) §4.9); this
    MAY run lazily.
+8. Give a file-id marker (§2.3) to every mirror file entry without a valid one, durably. On a lazy
+   tree this covers the entries present. A crash midway leaves entries without a marker, which the
+   next start completes; no id was reported for them yet.
 
 Set-aside manifests are never adopted, promoted or removed automatically. Status reports them;
 only an explicit user request ([07](07-daemon-cli.md)) removes one, after which its bodies become
