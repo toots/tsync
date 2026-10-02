@@ -9,6 +9,8 @@ type copied = {
   checked : int;
   copied : int;
   copied_bytes : int;
+  changed : int;
+  unguarded : int;
   failed : (string * string) list;
 }
 
@@ -16,36 +18,119 @@ type report = { source : string; copies : copied list; cancelled : bool }
 
 let index_leaf = ".tsync-index"
 
+(* One destination's tallies, shared by the batch's workers. *)
+type counts = {
+  m : Mutex.t;
+  mutable checked : int;
+  mutable copied : int;
+  mutable bytes : int;
+  mutable changed : int;
+  mutable unguarded : int;
+  mutable failed : (string * string) list;
+}
+
+let counts () =
+  {
+    m = Mutex.create ();
+    checked = 0;
+    copied = 0;
+    bytes = 0;
+    changed = 0;
+    unguarded = 0;
+    failed = [];
+  }
+
+let tally c f = Mutex.protect c.m (fun () -> f c)
+
+let rank : Store.locality -> int = function
+  | Local -> 0
+  | Proxy -> 1
+  | Remote -> 2
+
+(* 05 §4.6 step 6: compare what the entries carry; else compute what the other
+   side carries on the side that lacks it; else MD5 on both. Between sides
+   that could both compute, the closer one does, the source on a tie. A body
+   that vanished meanwhile reads as different, and the copy sorts it out. *)
+let differs ~(src : Store.t) ~(dst : Store.t) (ours : Store.entry)
+    (theirs : Store.entry) =
+  let on (s : Store.t) (e : Store.entry) algo = s.compute_checksum e.key algo in
+  let against side e (c : Checksum.t) =
+    match on side e c.algo with Some x -> x <> c | None -> true
+  in
+  match (ours.checksum, theirs.checksum) with
+    | Some a, Some b when Checksum.comparable a b -> a <> b
+    | Some a, None -> against dst theirs a
+    | None, Some b -> against src ours b
+    | Some a, Some b ->
+        if rank src.locality <= rank dst.locality then against src ours b
+        else against dst theirs a
+    | None, None -> (
+        match (on src ours Checksum.md5, on dst theirs Checksum.md5) with
+          | Some a, Some b -> a <> b
+          | _ -> true)
+
 module Make (C : Context.S) = struct
   module T = Tree.Make (C)
 
   let d = C.domain
 
-  (* One batch of keys to compare and copy, listed together; [mutable_] keys
-     are compared by body, chunks by size. *)
-  type batch = { label : string; source : Store.entry list; mutable_ : bool }
+  (* One batch of keys to compare and copy, listed together. Chunks are named
+     by their content: compared by name and size, written plainly. *)
+  type batch = { label : string; source : Store.entry list; chunks : bool }
 
-  let copy_batch ~narrate ~cancelled ~(src : Store.t) ~(dst : Store.t) ~listed
-      counts b =
+  (* 05 §4.6 step 7: a chunk is put; anything else replaces the entry the
+     comparison read, and is put plainly only where the destination cannot
+     evaluate that. *)
+  let copy ~narrate ~(src : Store.t) ~(dst : Store.t) c b (e : Store.entry)
+      theirs =
+    match src.get_opt e.key with
+      | None -> ()
+      | Some body -> (
+          let n = Bigstring.length body in
+          let written () =
+            tally c (fun c ->
+                c.copied <- c.copied + 1;
+                c.bytes <- c.bytes + n)
+          in
+          match
+            if b.chunks then (
+              dst.put e.key body;
+              `Written)
+            else (
+              match dst.put_if_unchanged e.key body theirs with
+                | Written -> `Written
+                | Changed -> `Changed
+                | exception Fail.E { kind = Refused; _ } ->
+                    dst.put e.key body;
+                    `Unguarded)
+          with
+            | outcome -> (
+                Fs.drop_mapped_pages body;
+                match outcome with
+                  | `Written -> written ()
+                  | `Unguarded ->
+                      written ();
+                      tally c (fun c -> c.unguarded <- c.unguarded + 1)
+                  | `Changed ->
+                      Narrate.say narrate
+                        "  %s: %s changed since it was compared; left for the \
+                         next run"
+                        dst.name (Key.to_string e.key);
+                      tally c (fun c -> c.changed <- c.changed + 1))
+            | exception ((Stop.Stopping | Rt.Cancelled) as x) -> raise x
+            | exception x ->
+                let reason = (Fail.classify x).reason in
+                Narrate.say narrate "  %s refused %s: %s" dst.name
+                  (Key.to_string e.key) reason;
+                tally c (fun c ->
+                    c.failed <- (Key.to_string e.key, reason) :: c.failed))
+
+  let copy_batch ~narrate ~cancelled ~(src : Store.t) ~(dst : Store.t) ~listed c
+      b =
     let there = Hashtbl.create 256 in
     List.iter (fun (e : Store.entry) -> Hashtbl.replace there e.key e) listed;
-    let checked, copied, bytes, failed = counts in
-    let changed =
-      List.filter
-        (fun (e : Store.entry) ->
-          incr checked;
-          match Hashtbl.find_opt there e.key with
-            | None -> true
-            | Some x when x.size <> e.size -> true
-            | Some _ when not b.mutable_ -> false
-            | Some _ -> (
-                match (src.get_opt e.key, dst.get_opt e.key) with
-                  | Some a, Some b -> not (Bigstring.equal a b)
-                  | Some _, None -> true
-                  | None, _ -> false))
-        b.source
-    in
-    let todo = ref changed and m = Mutex.create () in
+    let total = List.length b.source in
+    let todo = ref b.source and m = Mutex.create () and seen = ref 0 in
     let next () =
       Mutex.protect m (fun () ->
           match !todo with
@@ -55,24 +140,26 @@ module Make (C : Context.S) = struct
             | _ -> None)
     in
     Rt.each ~width:(max 1 C.max_downloads) next (fun (e : Store.entry) ->
-        match src.get_opt e.key with
-          | None -> ()
-          | Some body -> (
-              match dst.put e.key body with
-                | () ->
-                    Fs.drop_mapped_pages body;
-                    Mutex.protect m (fun () ->
-                        incr copied;
-                        bytes := !bytes + Bigstring.length body)
-                | exception ((Stop.Stopping | Rt.Cancelled) as x) -> raise x
-                | exception x ->
-                    let reason = (Fail.classify x).reason in
-                    Narrate.say narrate "  %s refused %s: %s" dst.name
-                      (Key.to_string e.key) reason;
-                    Mutex.protect m (fun () ->
-                        failed := (Key.to_string e.key, reason) :: !failed)));
+        let theirs = Hashtbl.find_opt there e.key in
+        let changed =
+          match theirs with
+            | None -> true
+            | Some x when x.size <> e.size -> true
+            | Some _ when b.chunks -> false
+            | Some x -> differs ~src ~dst e x
+        in
+        if changed then copy ~narrate ~src ~dst c b e theirs;
+        let k =
+          Mutex.protect m (fun () ->
+              incr seen;
+              !seen)
+        in
+        Narrate.progress narrate
+          ~fraction:(float_of_int k /. float_of_int (max 1 total))
+          "%s: %s, %d of %d compared" dst.name b.label k total);
+    tally c (fun c -> c.checked <- c.checked + total);
     Narrate.progress narrate "%s: %s, %d checked, %d copied" dst.name b.label
-      !checked !copied
+      c.checked c.copied
 
   let refuse_open_collection () =
     match Collector.status C.composite with
@@ -180,24 +267,24 @@ module Make (C : Context.S) = struct
       List.map
         (fun (dst : Composite.member) ->
           Composite.guard C.composite dst "mirror";
-          let counts = (ref 0, ref 0, ref 0, ref []) in
+          let counts = counts () in
           let run b ~listed =
             if not (cancelled ()) then
               copy_batch ~narrate ~cancelled ~src:src.store ~dst:dst.store
                 ~listed counts b
           in
-          let listed_batch label prefix ~mutable_ ~filter =
+          let listed_batch label prefix ~chunks ~filter =
             run
               {
                 label;
                 source = List.filter filter (src.store.list_prefix prefix);
-                mutable_;
+                chunks;
               }
               ~listed:(dst.store.list_prefix prefix)
           in
-          let headed label entries ~mutable_ =
+          let headed label entries ~chunks =
             run
-              { label; source = entries; mutable_ }
+              { label; source = entries; chunks }
               ~listed:
                 (List.filter_map
                    (fun (e : Store.entry) -> dst.store.head_opt e.key)
@@ -208,44 +295,55 @@ module Make (C : Context.S) = struct
                 List.iter
                   (fun shard ->
                     listed_batch ("chunk shard " ^ shard)
-                      (Key.shard_prefix d shard) ~mutable_:false
-                      ~filter:(fun _ -> true))
+                      (Key.shard_prefix d shard) ~chunks:true ~filter:(fun _ ->
+                        true))
                   (List.init 4096 (Printf.sprintf "%03x"));
                 run
                   {
                     label = "manifests";
                     source = manifest_area src.store;
-                    mutable_ = true;
+                    chunks = false;
                   }
                   ~listed:(dst.store.list_prefix (Key.manifests d));
-                listed_batch "versions" (Key.versions d) ~mutable_:true
+                listed_batch "versions" (Key.versions d) ~chunks:false
                   ~filter:(fun _ -> true);
-                listed_batch "journal" (Key.journal d) ~mutable_:true
+                listed_batch "journal" (Key.journal d) ~chunks:false
                   ~filter:(fun _ -> true);
                 headed "cursor"
                   (Option.to_list (src.store.head_opt (Key.cursor d)))
-                  ~mutable_:true
+                  ~chunks:false
             | Manifests, _ ->
                 run
                   {
                     label = "manifests";
                     source = manifest_area src.store;
-                    mutable_ = true;
+                    chunks = false;
                   }
                   ~listed:(dst.store.list_prefix (Key.manifests d))
             | Path _, Some (chunks, keys) ->
-                headed "chunks" chunks ~mutable_:false;
-                headed "manifests" keys ~mutable_:true
+                headed "chunks" chunks ~chunks:true;
+                headed "manifests" keys ~chunks:false
             | Path _, None -> ());
-          let checked, copied, bytes, failed = counts in
-          Narrate.say narrate "  %s: %d checked, %d copied (%s)" dst.name
-            !checked !copied (Narrate.size !bytes);
+          let c = counts in
+          Narrate.say narrate "  %s: %d checked, %d copied (%s)%s%s" dst.name
+            c.checked c.copied (Narrate.size c.bytes)
+            (if c.changed > 0 then
+               Printf.sprintf ", %d changed since compared" c.changed
+             else "")
+            (if c.unguarded > 0 then
+               Printf.sprintf
+                 ", %d written without a precondition (the destination cannot \
+                  evaluate one)"
+                 c.unguarded
+             else "");
           {
             name = dst.name;
-            checked = !checked;
-            copied = !copied;
-            copied_bytes = !bytes;
-            failed = List.rev !failed;
+            checked = c.checked;
+            copied = c.copied;
+            copied_bytes = c.bytes;
+            changed = c.changed;
+            unguarded = c.unguarded;
+            failed = List.rev c.failed;
           })
         dests
     in

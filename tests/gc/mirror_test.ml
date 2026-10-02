@@ -18,6 +18,17 @@ let () =
   let main = Local.create ~name:"main" (Filename.concat root "main")
   and inner = Local.create ~name:"copy" (Filename.concat root "copy") in
   let order = ref [] in
+  (* The copy behaves as a bucket: its entries carry the MD5 its service
+     keeps, it is Remote, and every read of it is counted. *)
+  let reads = ref 0 and checksums = ref 0 in
+  let race = ref None and unguarded = ref false in
+  let kept (e : Store.entry) =
+    {
+      e with
+      checksum =
+        Option.map (Checksum.of_body Checksum.md5) (inner.get_opt e.key);
+    }
+  in
   let copy =
     {
       inner with
@@ -25,6 +36,28 @@ let () =
         (fun ?mode k b ->
           order := Key.to_string k :: !order;
           inner.put ?mode k b);
+      put_if_unchanged =
+        (fun k b expected ->
+          order := Key.to_string k :: !order;
+          if !unguarded then Fail.raise_ Fail.Refused "no preconditions here";
+          (match !race with
+            | Some (rk, body) when Key.equal rk k ->
+                race := None;
+                inner.put k (Bigstring.of_string body)
+            | _ -> ());
+          inner.put_if_unchanged k b expected);
+      get_opt =
+        (fun k ->
+          incr reads;
+          inner.get_opt k);
+      compute_checksum =
+        (fun k algo ->
+          incr checksums;
+          inner.compute_checksum k algo);
+      head_opt = (fun k -> Option.map kept (inner.head_opt k));
+      list_prefix =
+        (fun ?max_keys p -> List.map kept (inner.list_prefix ?max_keys p));
+      locality = Remote;
     }
   in
   let cs = Chunking.chunk_size_min in
@@ -82,9 +115,10 @@ let () =
               List.iter
                 (fun (c : Store_mirror.copied) ->
                   p
-                    "%s: %s -> %s, %d checked, %d copied (%d bytes), %d refused\n"
+                    "%s: %s -> %s, %d checked, %d copied (%d bytes), %d \
+                     refused, %d changed, %d unguarded\n"
                     label r.source c.name c.checked c.copied c.copied_bytes
-                    (List.length c.failed))
+                    (List.length c.failed) c.changed c.unguarded)
                 r.copies
           | exception Fail.E f -> p "%s: refused: %s\n" label f.reason
       in
@@ -108,11 +142,30 @@ let () =
       p "index copied: %b\n"
         (inner.head_opt (Key.index d Folder_id.root) <> None);
       p "\n== again\n";
+      reads := 0;
+      checksums := 0;
       run "all" All;
+      p "reads of the copy: %d, checksums computed on it: %d\n" !reads
+        !checksums;
       p "\n== a changed manifest and a short chunk on the copy\n";
       put (Key.child d Folder_id.root "a.txt") (manifest "a.txt" ["c2"]);
       inner.put (Key.chunk d (chunk "c3")) (Bigstring.of_string "c");
       run "all" All;
+      p "\n== a manifest written on the copy after it was compared\n";
+      put (Key.child d Folder_id.root "a.txt") (manifest "a.txt" ["c3"]);
+      let meanwhile = manifest "a.txt" ["c2"; "c3"] in
+      race := Some (Key.child d Folder_id.root "a.txt", meanwhile);
+      run "all" All;
+      p "the copy keeps the other write: %b\n"
+        (Option.map Bigstring.to_string
+           (inner.get_opt (Key.child d Folder_id.root "a.txt"))
+        = Some meanwhile);
+      run "all" All;
+      p "\n== a copy that cannot replace conditionally\n";
+      put (Key.child d Folder_id.root "a.txt") (manifest "a.txt" ["c1"]);
+      unguarded := true;
+      run "all" All;
+      unguarded := false;
       p "\n== manifests only\n";
       put_chunk "c9";
       put (Key.child d folder "new.txt") (manifest "new.txt" ["c9"]);
