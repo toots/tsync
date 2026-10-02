@@ -56,6 +56,7 @@ let failure t ~op (r : answer) =
     match r.status with
       | 404 -> Fail.Denied
       | 400 | 413 | 414 | 431 -> Fail.Invalid
+      | 401 when skewed r -> Fail.Link
       | 401 -> Fail.Denied
       | 403 -> Fail.Read_only
       | 409 -> (
@@ -105,7 +106,8 @@ let ladder t op f = Retry.ladder ~health:t.health ~op f
 let obj k = "/o/" ^ W.encode_key k
 let empty_404 (r : answer) = r.status = 404 && Bigstring.length r.body = 0
 
-(* §8.1: learned once per instance, forgotten when asking failed. *)
+(* §8.1: learned once per instance, forgotten when asking failed; only a
+   considered 404 is remembered, since a 401 may be this clock's skew. *)
 let ensure_served t =
   match Atomic.get t.served with
     | Some true -> ()
@@ -130,7 +132,7 @@ let ensure_served t =
         in
         match r.status with
           | s when success s -> Atomic.set t.served (Some true)
-          | 401 | 404 ->
+          | 404 when not (empty_404 r) ->
               Atomic.set t.served (Some false);
               Fail.raise_ Fail.Denied "%s: domain not served by %s" t.name
                 (Tsync_http.Client.url t.endpoint)

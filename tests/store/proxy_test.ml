@@ -94,6 +94,58 @@ let () =
              s.copy (Key.v "tsync/shares/abcd") (Key.v "tsync/shares/cache/y")));
       p "copy within the share cache: %s\n"
         (kind (fun () -> s.copy staged (Key.v "tsync/shares/cache/z")));
+      p "== a 401 from a skewed clock is not remembered\n";
+      let skewed = ref true in
+      let l = Unix.socket PF_INET SOCK_STREAM 0 in
+      Unix.bind l (ADDR_INET (Unix.inet_addr_loopback, 0));
+      Unix.listen l 4;
+      let fake_url =
+        match Unix.getsockname l with
+          | ADDR_INET (_, port) -> Printf.sprintf "http://127.0.0.1:%d" port
+          | _ -> assert false
+      in
+      (* A raw responder: the server would add a Date of its own first. *)
+      Rt.spawn (fun () ->
+          let rec serve () =
+            Rt.wait_readable l;
+            let fd, _ = Unix.accept l in
+            let t = Transport.of_fd fd in
+            let buf = Bigstring.create 4096 in
+            let head =
+              Bigstring.to_string
+                (Bigstring.sub buf ~off:0 ~len:(Transport.read t buf 0 4096))
+            in
+            let status, date, body =
+              if !skewed then
+                ("401 Unauthorized", Unix.gettimeofday () -. 3600., "stale")
+              else if String.starts_with ~prefix:"GET /list" head then
+                ("200 OK", Unix.gettimeofday (), "[]")
+              else ("404 Not Found", Unix.gettimeofday (), "")
+            in
+            Transport.write_string t
+              (Printf.sprintf
+                 "HTTP/1.1 %s\r\n\
+                  date: %s\r\n\
+                  content-length: %d\r\n\
+                  connection: close\r\n\
+                  \r\n\
+                  %s"
+                 status (Codec.http_date date) (String.length body) body);
+            Transport.close t;
+            serve ()
+          in
+          try serve () with _ -> ());
+      let behind =
+        (Option.get (Driver.find "http-proxy")).create ~admission:Uplink.none
+          ~domain:d ~name:"skewed"
+          [("url", Field_spec.S fake_url); ("secret", Field_spec.S secret)]
+      in
+      p "while skewed: %s\n"
+        (kind (fun () -> behind.get_opt (Key.v "tsync/d/a")));
+      skewed := false;
+      p "once the clocks agree: %s\n"
+        (kind (fun () -> behind.get_opt (Key.v "tsync/d/a")));
+      Unix.close l;
       p "== watch\n";
       let cursor = Key.cursor d in
       Contract.put s cursor "one";
