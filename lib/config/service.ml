@@ -6,7 +6,15 @@ let run args =
     Unix.create_process (List.hd args) (Array.of_list args) Unix.stdin
       Unix.stdout Unix.stderr
   with
-    | pid -> ( match snd (Unix.waitpid [] pid) with WEXITED n -> n | _ -> 1)
+    | pid ->
+        (* Reaped on every path: an interrupted wait is resumed. *)
+        let rec reap () =
+          match snd (Unix.waitpid [] pid) with
+            | WEXITED n -> n
+            | _ -> 1
+            | exception Unix.Unix_error (EINTR, _, _) -> reap ()
+        in
+        reap ()
     | exception Unix.Unix_error _ -> 127
 
 let target () = Printf.sprintf "gui/%d/%s" (Unix.getuid ()) label

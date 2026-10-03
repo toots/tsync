@@ -23,9 +23,9 @@ let log_to_service_file () =
         [O_WRONLY; O_APPEND; O_CREAT; O_CLOEXEC]
         0o644
     in
-    Unix.dup2 ~cloexec:false fd Unix.stdout;
-    Unix.dup2 ~cloexec:false fd Unix.stderr;
-    Unix.close fd)
+    Fs.with_fd fd (fun fd ->
+        Unix.dup2 ~cloexec:false fd Unix.stdout;
+        Unix.dup2 ~cloexec:false fd Unix.stderr))
 
 (* 07 §2.4, §3.1 on macOS: no supervisor. The service process takes the
    governor, starts the store server as its child when a domain is served over

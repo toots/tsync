@@ -146,7 +146,13 @@ let terraform_outputs io =
           (Filename.quote dir)
       in
       let ic = Unix.open_process_in cmd in
-      let out = In_channel.input_all ic in
+      let out =
+        match In_channel.input_all ic with
+          | out -> out
+          | exception e ->
+              ignore (Unix.close_process_in ic);
+              raise e
+      in
       match Unix.close_process_in ic with
         | WEXITED 0 -> (
             match Yojson.Safe.from_string out with
