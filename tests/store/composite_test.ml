@@ -178,4 +178,4 @@ let () =
          with
           | Written -> "written"
           | Changed -> "changed"));
-  Fs.rm_rf root
+  Test_support.remove_root root

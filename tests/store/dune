@@ -21,7 +21,7 @@
 (executable
  (name composite_test)
  (modules composite_test)
- (libraries contract tsync_core tsync_store unix))
+ (libraries test_support contract tsync_core tsync_store unix))
 
 (rule
  (with-stdout-to
