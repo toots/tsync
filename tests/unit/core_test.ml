@@ -281,3 +281,46 @@ let () =
       p "changed by a bump: %b; a bumped key keeps its entry: %d\n"
         (Keyed_locks.generation locks "k" <> before)
         (Keyed_locks.size locks))
+
+let () =
+  p "\n== a set of chunk keys, packed\n";
+  let key i = Chunk_key.of_body (string_of_int i) in
+  let set = Chunk_set.create () in
+  let n = 100_000 in
+  for i = 0 to n - 1 do
+    Chunk_set.add set (key i)
+  done;
+  Chunk_set.add set (key 0);
+  p "added %d keys, one twice: %d held\n" n (Chunk_set.cardinal set);
+  let found = ref 0 in
+  for i = 0 to n - 1 do
+    if Chunk_set.mem set (key i) then incr found
+  done;
+  p "found: %d; a key never added: %b\n" !found (Chunk_set.mem set (key n));
+  (* A table of key strings holds the same in about 8.5 MB. *)
+  p "held in under 4 MB: %b\n"
+    (Obj.reachable_words (Obj.repr set) * (Sys.word_size / 8) < 4_000_000);
+  Chunk_set.remove set (key 7);
+  p "removed one: %b, %d held\n"
+    (not (Chunk_set.mem set (key 7)))
+    (Chunk_set.cardinal set);
+  let shard = Chunk_key.shard (key 1) in
+  let in_shard =
+    List.length
+      (List.filter
+         (fun i -> Chunk_key.shard (key i) = shard && i <> 7)
+         (List.init n Fun.id))
+  in
+  Chunk_set.clear_shard set shard;
+  p "cleared a shard: its key gone %b, the count follows %b\n"
+    (not (Chunk_set.mem set (key 1)))
+    (Chunk_set.cardinal set = n - 1 - in_shard);
+  let overflowed = ref 0 in
+  let small =
+    Chunk_set.create ~max:10 ~on_overflow:(fun () -> incr overflowed) ()
+  in
+  for i = 0 to 24 do
+    Chunk_set.add small (key i)
+  done;
+  p "25 keys into a set of at most 10: %d held, emptied %d times\n"
+    (Chunk_set.cardinal small) !overflowed

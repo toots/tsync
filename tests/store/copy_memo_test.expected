@@ -1,0 +1,7 @@
+noted under G=2: held true, another chunk false
+a shard learnt twice is listed 1 time(s); its chunk held true
+after forgetting its chunk it is listed again: 2
+under an odd G: trusted false, held false
+under G=4: what G=2 confirmed is held false
+an old view after G moved on: held false, and it records nothing: true
+G unreadable: trusted false
