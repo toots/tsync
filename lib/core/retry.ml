@@ -2,6 +2,9 @@ let attempts = 8
 let base = 0.5
 let cap = 20.
 
+(* Unseeded, every client draws the same jitter and retries in step. *)
+let () = Random.self_init ()
+
 let delay n =
   let d = min cap (base *. (2. ** float_of_int (min 10 (n - 1)))) in
   d *. (0.5 +. Random.float 1.)
