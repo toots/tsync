@@ -39,10 +39,18 @@
     put dir/f.txt            fid=-
     rename dir->moved        fid=-
     delete z.txt             fid=<id2>
+== a peer's delete under a folder renamed here, rename unpublished
+  B's X/f.txt: <id7>
+  B: Y/f.txt=none
+  last applied: delete X/f.txt fid=<id7>
+== the same with the rename published: the file is kept, no id named
+  B's X2/f.txt: <id8>
+  B: Y2/f.txt=<id8>
+  last applied: delete X2/f.txt fid=-
 == owner start gives an id to a file found without one
   B before: q.txt=<id6>
   B without its marker: q.txt=none
   a start after a complete pass: 0
   the first pass: 1
-  B after: q.txt=<id7>
+  B after: q.txt=<id9>
   the next one: 0
