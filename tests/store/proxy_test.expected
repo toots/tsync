@@ -59,6 +59,8 @@ list_many: 1 folders
 copy into a share manifest: refused/denied
 copy out of a share manifest: refused/denied
 copy within the share cache: ok
+== a backend that throttles for two seconds
+a read through it: ok; the peer's breaker tripped: false
 == unsigned bodies dripping do not hold the data slots
 a signed read meanwhile: ok within 2s: true
 == a 401 from a skewed clock is not remembered

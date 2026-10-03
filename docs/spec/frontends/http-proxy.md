@@ -146,7 +146,8 @@ Rationale: a client opening one large file can ask for many ranges at once; unbo
 | situation | status | body | `x-tsync-kind` | log |
 |---|---|---|---|---|
 | store failure of a permanent kind | 409 | the failure's reason (for `missing_chunks`, the key list of the wire) | the kind | info |
-| store failure of a transient or unexplained kind | 500 | reason | — | error |
+| store failure of kind load (the backend throttles) | 503 | reason | — | info |
+| store failure of another transient kind, or unexplained | 500 | reason | — | error |
 | gate full, body memory exhausted | 503 | `busy` | — | — |
 | read-only violation | 403 | `read-only domain` | — | — |
 | bad signature, stale timestamp, unserved domain, key outside route | 401, with `Date` | `unauthorized` | — | — |
