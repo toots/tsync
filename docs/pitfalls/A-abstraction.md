@@ -864,8 +864,8 @@ This file covers mistakes that are true of any implementation in any language: s
 
 ### A-10.14 Pause consulted by one loop, held per process
 - **Pitfall** — Pause held uploads only: renames, deletes and peer entries still changed the tree. Pause was a per-process ref, so the converging parent never saw `tsync pause`, and it did not persist.
-- **Check** — One persistent pause switch owned by the owner, consulted by every state-changing loop; test each loop's check.
-- **Seen** — bde81092, notes (07 B.2). recurred ×2.
+- **Check** — One persistent pause switch owned by the owner, consulted by every state-changing loop; test each loop's check. An owner that does not start its queues (a read-only one-shot) still reports the durable switch.
+- **Seen** — bde81092, notes (07 B.2). recurred ×3, rewrite: the flag was read only when the queues started, so `status` from the next `tsync android` process answered `paused: false`.
 
 ### A-10.15 A destructive walk built on a listing that does not list what it removes
 - **Pitfall** — `rmdir` of a non-empty folder deleted every file under it, then removed its subfolders from `list_tree`, which recurses into folders but lists only files. No subfolder was removed, the final `rmdir` failed "not empty", and the client got an error after its files were already gone; a nested empty folder failed the same way.
