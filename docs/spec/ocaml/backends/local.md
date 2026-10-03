@@ -29,7 +29,6 @@ Code: `lib/store/local.ml`, `local_path.ml`, `chunk_spaces.ml`, `corruption_mark
 
 - **No local stall bound** (§10). A filesystem call runs on the calling fiber's thread with no deadline, so a hung mount holds that fiber and never fails LINK.
 - **Temporaries in a store root are never swept** (§7). The listing walk skips them and removes none; the owner's daily sweep covers the checkout tree only (finding 122).
-- **`fast_read` is `true` on a network filesystem too** (finding 148).
 - **`max_concurrency` is always none**: the driver does not probe the device.
 - **`delete_multi` takes the key lock around the unlink only**; the `lstat` that picks regular files runs before it.
 - **`check_no_links` and the access are separate system calls**: a directory swapped for a link between them is followed. Reads open the final component with `Fs.open_nofollow`; writes rename or link onto it, which never follows a link there.

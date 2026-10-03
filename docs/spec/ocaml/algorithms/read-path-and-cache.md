@@ -38,9 +38,6 @@ table and its group states.
   prefetch the reader has passed is not dropped.
 - **A prefetch reserves before it has a slot, and every read rebuilds the group list** (finding 80).
   `prefetch` calls `Cache.groups` over the whole manifest on each read.
-- **`fast_read` is the first readable member's** (finding 98): with a local main held down, every
-  small read from the remote copy still fetches a whole group.
-- **A local store is `fast_read` on a network filesystem too** (finding 148).
 - **An eviction can report success while the body stays** (finding 134): a fetch in flight installs
   the body after the eviction answered.
 - **The cap pass counts a fetch's temporary as a body** (finding 135) and under-evicts by its size.
