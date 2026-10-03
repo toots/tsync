@@ -57,14 +57,15 @@ type chunk_repair =
   | Unrepairable
 
 (** One member's verification: what its bucket function found once no request
-    was left, or how many requests were left when it stopped following. *)
+    was left, or how many requests were left when it stopped following. A count
+    is [None] when its listing failed. *)
 type verified =
   | Unsupported  (** no confirmed bucket function *)
   | Done of { corrupt : int }  (** corruption markers on the member *)
-  | Stalled of { left : int; corrupt : int }
+  | Stalled of { left : int option; corrupt : int option }
       (** nothing moved for [stall_polls] polls: a function not deployed or not
           notified *)
-  | Abandoned of { left : int; corrupt : int }
+  | Abandoned of { left : int option; corrupt : int option }
       (** cancelled; the queued requests stay and are still consumed *)
 
 (** The journal retention horizon plus 7 days. *)
@@ -85,8 +86,8 @@ module Make (_ : Tsync_remote.Context.S) : sig
 
   (** Queue a check of every chunk on each member with a confirmed bucket
       function, then follow each every [poll] seconds (default 3) until no
-      request is left. A failed listing counts as no progress, never as none
-      left. *)
+      request is left and its markers were counted. A failed listing counts as
+      no progress, never as none left or none corrupt. *)
   val verify :
     ?narrate:Narrate.t ->
     ?cancelled:(unit -> bool) ->

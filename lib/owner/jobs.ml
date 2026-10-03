@@ -239,6 +239,10 @@ let verify io (dom : Tsync_domain.Domain.t) =
   let say fmt = Printf.ksprintf io.out fmt in
   let module I = Integrity.Make ((val Tsync_domain.Domain.context dom)) in
   let results = I.verify ~narrate:io.narrate ~cancelled:io.cancelled () in
+  let count = function
+    | Some n -> string_of_int n
+    | None -> "an unknown number of"
+  in
   let followed =
     List.filter (fun (_, v) -> v <> Integrity.Unsupported) results
   in
@@ -254,16 +258,21 @@ let verify io (dom : Tsync_domain.Domain.t) =
           | Done { corrupt } ->
               say "%s: verified, %d corrupt chunks (data-integrity --repair)"
                 member corrupt
+          | Stalled { left = Some 0; corrupt = None } ->
+              say
+                "%s: every shard was checked, but its corruption markers could \
+                 not be listed: the result is unknown"
+                member
           | Stalled { left; corrupt } ->
               say
-                "%s: stalled with %d shard requests left and %d corrupt chunks \
+                "%s: stalled with %s shard requests left and %s corrupt chunks \
                  so far: is its bucket function deployed and notified?"
-                member left corrupt
+                member (count left) (count corrupt)
           | Abandoned { left; corrupt } ->
               say
-                "%s: cancelled with %d shard requests left and %d corrupt \
+                "%s: cancelled with %s shard requests left and %s corrupt \
                  chunks so far; its function still consumes them"
-                member left corrupt)
+                member (count left) (count corrupt))
       followed;
     if List.for_all (fun (_, v) -> v = Integrity.Done { corrupt = 0 }) followed
     then 0
