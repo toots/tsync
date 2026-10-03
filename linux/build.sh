@@ -21,14 +21,8 @@ export OPAMCONFIRMLEVEL=unsafe-yes
 opam switch list --short | grep -qx "$SWITCH" || opam switch create "$SWITCH" "$COMPILER"
 eval "$(opam env --switch="$SWITCH" --set-switch)"
 
-# A switch restored from a cache already satisfies every dependency, so
-# without an update and upgrade it would build against whatever was current
-# the day the cache was written.
-opam pin -ny .
-opam update
-opam upgrade -y
 # A release ships both TLS implementations, OpenSSL the default.
-opam install --deps-only -y tsync tsync-tls tsync-ssl tsync-fuse
+./scripts/opam_deps.sh tsync tsync-tls tsync-ssl tsync-fuse
 
 # Sources, build trees and logs, which are most of a switch and nothing the
 # next run needs: every CI job caches a root, within one budget.

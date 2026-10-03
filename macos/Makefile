@@ -30,6 +30,6 @@ clean:
 ## Run the Swift unit tests
 test:
 	xcodegen generate --quiet
-	xcodebuild -project $(PROJ) -scheme TsyncApp -destination 'platform=macOS' test
+	xcodebuild -project $(PROJ) -scheme TsyncApp -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO test
 
 .PHONY: test

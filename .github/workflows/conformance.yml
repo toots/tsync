@@ -1,72 +1,73 @@
-# Runs every snapshot test, the store contract against the CI GCS bucket
-# included; missing secrets fail the job rather than test the fake.
-
+# The store contract against the real GCS and S3 services (10 §3.3): the
+# things it asks about are the ones an emulator approximates least well,
+# whether a write precondition is honoured and whether a bulk delete reports
+# per key what it refused.
+#
+# Manual only: per push it dominated the CI object-store spend. One job on
+# purpose: a run works under a prefix named after the run id, which every job
+# of a run shares, so a second job would sweep the first one's objects.
 name: conformance
 
 on:
-  push:
-    branches: [rewrite, main]
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  tests:
+  stores:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v5
 
       - name: System libraries
-        run: sudo apt-get update && sudo apt-get install -y libssl-dev libfuse3-dev pkg-config
+        run: sudo apt-get update && sudo apt-get install -y libssl-dev libgmp-dev pkg-config
 
       - uses: ocaml/setup-ocaml@v3
         with:
           ocaml-compiler: "5.5"
 
+      - name: Restore the opam switch
+        id: opam-switch
+        uses: actions/cache/restore@v4
+        with:
+          path: _opam
+          key: opam-conformance-${{ hashFiles('*.opam', 'scripts/opam_deps.sh') }}
+
+      # No fuse: the store drivers are all this asks about.
       - name: OCaml libraries
-        run: opam install -y . --deps-only && opam install -y fuse3
+        run: ./scripts/opam_deps.sh tsync tsync-tls
 
-      - name: Build
-        run: opam exec -- dune build
+      - name: Save the opam switch
+        if: steps.opam-switch.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: _opam
+          key: opam-conformance-${{ hashFiles('*.opam', 'scripts/opam_deps.sh') }}
 
-      # fuse §2 and 05 tls: the mount and both TLS implementations are built;
-      # an optional library whose dependency is missing is skipped quietly.
-      - name: The FUSE frontend and both TLS implementations are built
-        run: |
-          info=$(opam exec -- ./_build/default/bin/tsync.exe build-info)
-          echo "$info"
-          echo "$info" | grep -Eq '^frontends:.*\bfuse\b'
-          echo "$info" | grep -Eq '^tls:.*\bopenssl\b'
-          echo "$info" | grep -Eq '^tls:.*\bnative\b'
-
-      - name: Tests
+      - name: Store contract (real GCS and S3)
         env:
-          TSYNC_CI_REQUIRE_REAL: "gcs"
+          TSYNC_CI_REQUIRE_REAL: "gcs,s3"
           TSYNC_CI_GCS_BUCKET: ${{ secrets.TSYNC_CI_GCS_BUCKET }}
           TSYNC_CI_GCS_SERVICE_ACCOUNT_KEY: ${{ secrets.TSYNC_CI_GCS_SERVICE_ACCOUNT_KEY }}
-        run: opam exec -- dune build @runtest --force
-
-  # opam's default resolution of tsync's TLS alternative, and a build with one
-  # implementation: what `opam install tsync` gives a user.
-  opam-default:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: System libraries
-        run: sudo apt-get update && sudo apt-get install -y libfuse3-dev pkg-config
-
-      - uses: ocaml/setup-ocaml@v3
-        with:
-          ocaml-compiler: "5.5"
-
-      - name: Install tsync alone
-        run: opam pin -ny . && opam install -y tsync
-
-      - name: Native TLS only
+          TSYNC_CI_S3_BUCKET: ${{ secrets.TSYNC_CI_S3_BUCKET }}
+          TSYNC_CI_S3_REGION: ${{ secrets.TSYNC_CI_S3_REGION }}
+          TSYNC_CI_S3_ACCESS_KEY_ID: ${{ secrets.TSYNC_CI_S3_ACCESS_KEY_ID }}
+          TSYNC_CI_S3_SECRET_ACCESS_KEY: ${{ secrets.TSYNC_CI_S3_SECRET_ACCESS_KEY }}
         run: |
-          info=$(opam exec -- tsync build-info)
-          echo "$info"
-          opam list --installed --short | grep -qx tsync-tls
-          if opam list --installed --short | grep -qx tsync-ssl; then exit 1; fi
-          echo "$info" | grep -Eq '^tls: native$'
+          # 10 §6: an absent secret arrives as the empty string; name it and
+          # the script that provisions it rather than fail inside the suite.
+          missing=
+          for v in TSYNC_CI_GCS_BUCKET TSYNC_CI_GCS_SERVICE_ACCOUNT_KEY \
+                   TSYNC_CI_S3_BUCKET TSYNC_CI_S3_REGION \
+                   TSYNC_CI_S3_ACCESS_KEY_ID TSYNC_CI_S3_SECRET_ACCESS_KEY; do
+            [ -n "${!v}" ] || missing="$missing $v"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::conformance needs these repository secrets:$missing"
+            echo "::error::run scripts/setup_ci_secrets.sh to provision them"
+            exit 1
+          fi
+          opam exec -- dune build @tests/store/runtest --force
