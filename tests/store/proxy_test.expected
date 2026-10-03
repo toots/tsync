@@ -69,6 +69,8 @@ once the clocks agree: ok
 == a server without /checksum
 conditional replace: refused/other, conditional PUTs sent: 0
 checksum falls back to a read: none
+== a captive portal answering 200 is not remembered
+behind the portal: corrupt/other; once past it: ok
 == watch
 behind: returned at once true
 a change wakes the watch: true
