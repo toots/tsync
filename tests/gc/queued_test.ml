@@ -155,6 +155,37 @@ let () =
       p "probe: %b; confirmed: %b; probe request left behind: %b\n" probed
         confirmed left;
       p "collect: %s\n" (collect ());
+      p "\n== overlapping probes, still no function\n";
+      let peer =
+        Composite.create
+          ~timing:{ discard_poll = 0.2; probe_poll = 0.05; probe_wait = 0.5 }
+          ~domain:d
+          ~data_dir:(Filename.concat root "peer-data")
+          ~owner:true ~poke:ignore
+          ~knowledge:
+            {
+              Composite.is_index = (fun _ -> false);
+              is_journal = (fun _ -> false);
+            }
+          [
+            { name = "main"; role = Main; store = main };
+            { name = "bucket"; role = Backfill; store = copy };
+          ]
+      in
+      let peer_member =
+        List.find
+          (fun (m : Composite.member) -> m.name = "bucket")
+          (Composite.members peer)
+      in
+      let first = Rt.async (fun () -> Composite.probe c member) in
+      Rt.sleep 0.2;
+      let second = Composite.probe peer peer_member in
+      p "two clients probing one bucket: %b, %b\n" (Rt.Promise.await first)
+        second;
+      let during = Rt.async (fun () -> Composite.probe c member) in
+      Rt.sleep 0.2;
+      ignore (Composite.retry_outstanding c);
+      p "a probe during a re-delivery: %b\n" (Rt.Promise.await during);
       p "\n== the function deployed\n";
       Atomic.set function_on true;
       let probed = Composite.probe c member in

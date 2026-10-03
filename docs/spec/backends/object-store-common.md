@@ -63,18 +63,18 @@ Request objects are written through the driver's `put`, and so are admitted and 
 
 A store claims `verified` only after it has evidence that the verify function is deployed on its bucket, and a domain owner writes verify and discard requests to it only after the same evidence. Whole-store verification is one empty verify request per shard (4096), every shard and not only populated ones: learning which exist costs more listings than empty requests cost invocations. Every object-store driver SHOULD support the function wherever its provider can run one: without it, a collection deletes each chunk with its own request ([06 §3.8](../06-backends.md#38-optional-operations)), and once it is confirmed a collection's deletions MUST use it. A bucket without it (a manual setup, an S3-compatible provider, a notification the operator never wired) otherwise claims checks nobody runs and accepts deletes nobody executes.
 
-**The probe.** An empty collection delete request, at the reserved run name `0000000000000` and shard `000`:
+**The probe.** An empty collection delete request, at a reserved run name of its own, `0` followed by twelve random hex digits (`<probe>` below), and shard `000`:
 
-1. Put `tsync/gc-jobs/<domain>/0000000000000/000` with an empty body. An empty request names no keys, so a deployed function deletes nothing and removes the request.
+1. Put `tsync/gc-jobs/<domain>/<probe>/000` with an empty body. An empty request names no keys, so a deployed function deletes nothing and removes the request.
 2. Read the request's metadata every PROBE_POLL until it is gone, for at most FUNCTION_PROBE_WAIT.
 3. Gone → the function is confirmed. Still there → it is not: delete the request and record the store as unconfirmed.
 
 **Rules:**
 
 - The probe runs only on a store the domain writes (a main or a copy), only with the write guard satisfied ([replication §4.9](../algorithms/replication.md#49-write-guard)), and at most once per FUNCTION_PROBE_VALIDITY per store and domain, except that a confirmation in its last day is renewed by a fresh probe, so a running owner never sees one lapse.
-- One probe of a store runs at a time, and a probe asked for while one runs answers with its outcome: every probe writes the same request, and one that gives up deletes it, so a second would read another's deletion as consumption.
+- One probe of a store runs at a time in a process, and a probe asked for while one runs answers with its outcome. Clients sharing a bucket probe it independently: each probe has its own request, so one that gives up deletes only its own, and no other reads that deletion as consumption. Nothing but its prober removes a probe request: re-delivery ([gc §5.7](../algorithms/gc.md)) skips reserved run names.
 - The outcome, with its time, is saved in the owner's local state. Until a confirmation younger than FUNCTION_PROBE_VALIDITY is known, the store answers as unconfirmed.
-- The reserved run name is older than any real collection, so it never collides with a real request, and a client listing pending requests sees it only for as long as it is really pending.
+- A reserved run name is older than any real collection, so it never collides with a real request, and a client listing pending requests sees it only for as long as it is really pending.
 - The probe proves that the function is deployed and triggered for objects under `tsync/`. A deployment MUST trigger it for every object created under `tsync/` (§5.1), so the same evidence covers chunk checks and verification requests.
 
 ## 4. Transport

@@ -15,7 +15,6 @@ val confirmed_at : t -> float option
     confirmation lapses. *)
 val due : t -> bool
 
-(** Runs [check] and saves a confirmation when it answers [true]. Every probe
-    writes the same request, so one asked for while another runs waits for that
-    one's answer instead. *)
+(** Runs [check] and saves a confirmation when it answers [true]. One asked for
+    while another runs waits for that one's answer instead. *)
 val probe : t -> (unit -> bool) -> bool

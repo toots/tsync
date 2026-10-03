@@ -843,13 +843,15 @@ let poll_discards t src =
   in
   loop ()
 
-let probe_run = "0000000000000"
 let probe_shard = "000"
 
-(* object-store-common §3: an empty request a deployed function consumes;
-   still there after FUNCTION_PROBE_WAIT, it is removed and nothing is saved. *)
+(* object-store-common §3: an empty request of its own name, which a deployed
+   function consumes; still there after FUNCTION_PROBE_WAIT, it is removed and
+   nothing is saved. *)
 let run_probe t m =
-  let key = Key.discard_job t.domain ~run:probe_run ~shard:probe_shard in
+  let key =
+    Key.discard_job t.domain ~run:(Key.probe_run ()) ~shard:probe_shard
+  in
   m.store.put key Bigstring.empty;
   let deadline = Rt.now () +. t.timing.probe_wait in
   let rec wait () =
@@ -1009,9 +1011,12 @@ let probe ?(cancelled = Fun.const false) t m =
 
 type outstanding = { copy : string; request : Key.t; keys : int; age : float }
 
-let requests c d =
+let requests ?(probes = true) c d =
   List.filter
-    (fun (e : Store.entry) -> Key.parse_discard_job e.key <> None)
+    (fun (e : Store.entry) ->
+      match Key.parse_discard_job e.key with
+        | Some (_, run, _) -> probes || not (Key.is_probe_run run)
+        | None -> false)
     (c.member.store.list_prefix (Key.gc_jobs d))
 
 let outstanding t =
@@ -1035,7 +1040,8 @@ let outstanding t =
     t.core.copies
 
 (* gc §5.7 re-delivery: only the keys still absent from the collected main,
-   which raises a fresh notification; a request left with none is deleted. *)
+   which raises a fresh notification; a request left with none is deleted. A
+   probe's request is its prober's to remove. *)
 let retry_outstanding t =
   List.fold_left
     (fun n c ->
@@ -1057,5 +1063,6 @@ let retry_outstanding t =
                         c.member.store.put e.key
                           (Discards.body (List.map Key.to_string keys)));
                   n + 1)
-          n (requests c t.core.domain)))
+          n
+          (requests ~probes:false c t.core.domain)))
     0 t.core.copies

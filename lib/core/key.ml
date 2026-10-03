@@ -165,3 +165,7 @@ let folder_of_namespace_key d k =
     | None -> None
 
 let run_name started = Printf.sprintf "%013.0f" (Float.round (started *. 1000.))
+
+(* A leading zero is older than any collection's run name. *)
+let probe_run () = "0" ^ String.sub (Ids.token ()) 0 12
+let is_probe_run run = String.length run = 13 && run.[0] = '0'
