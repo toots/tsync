@@ -7,7 +7,7 @@ $ tsync android mkdir root photos
 $ tsync android mkdir root photos
   exit 0  {"ok":true,"item":{"ref":"d:<folder1>","parentRef":"root","name":"photos","kind":"dir","size":0,"mtime":0.0,"etag":"<folder1>","isUploaded":true}}
 $ tsync android create d:<folder1> empty.txt
-  exit 0  {"ok":true,"item":{"ref":"i:<file2>","parentRef":"d:<folder1>","name":"empty.txt","kind":"file","size":0,"mtime":"<time>","etag":"","isUploaded":false,"availability":"cached"}}
+  exit 0  {"ok":true,"item":{"ref":"i:<file2>","parentRef":"d:<folder1>","name":"empty.txt","kind":"file","size":0,"mtime":"<time>"}}
 $ tsync android write-whole d:<folder1> hello.txt s1
   exit 0  {"ok":true,"size":14,"mtime":"<time>","item":{"ref":"i:<file3>","parentRef":"d:<folder1>","name":"hello.txt","kind":"file","size":14,"mtime":"<time>","etag":"<hash4>","isUploaded":true,"contentId":"<hash4>","availability":"online-only"}}
 $ tsync android list d:<folder1>

@@ -89,12 +89,29 @@ let spawn ?(input = "") args =
   let _, status = Unix.waitpid [] pid in
   ((match status with WEXITED n -> n | _ -> -1), Fs.read_file out)
 
-(* One call: its reply, and the reply parsed for what the next call names. *)
-let run args =
+(* One call: its reply, and the reply parsed for what the next call names.
+   [racing] names the item fields that depend on whether the file's upload
+   finished before the reply was built; they are not shown. *)
+let run ?(racing = []) args =
   Hashtbl.replace driven (List.hd args) ();
   let code, out = spawn args in
+  let settled = function
+    | `Assoc l ->
+        `Assoc
+          (List.map
+             (function
+               | "item", `Assoc item ->
+                   ( "item",
+                     `Assoc
+                       (List.filter
+                          (fun (k, _) -> not (List.mem k racing))
+                          item) )
+               | kv -> kv)
+             l)
+    | j -> j
+  in
   let reply =
-    try scrub (Yojson.Safe.from_string out)
+    try scrub (settled (Yojson.Safe.from_string out))
     with _ -> `String (String.trim out)
   in
   p "$ tsync android %s\n  exit %d  %s"
@@ -138,7 +155,12 @@ let () =
   ignore (run ["list"; "root"]);
   let dir = item_ref (run ["mkdir"; "root"; "photos"]) in
   ignore (run ["mkdir"; "root"; "photos"]);
-  let empty = item_ref (run ["create"; dir; "empty.txt"]) in
+  let empty =
+    item_ref
+      (run
+         ~racing:["etag"; "isUploaded"; "contentId"; "availability"]
+         ["create"; dir; "empty.txt"])
+  in
   let file =
     item_ref
       (run ["write-whole"; dir; "hello.txt"; staged "s1" "hello, android"])
