@@ -147,11 +147,17 @@ let serve_conn lim handle conn requests =
                 let req =
                   { meth; target; path; query; headers; peer; body_length }
                 in
+                (* Pitfall A-9.10: the connection is reused only once the
+                   body was read to its end; [started] refuses a second read
+                   after a failed one. *)
                 let consumed = ref (body_length = `Length 0) in
+                let started = ref false in
                 let read_body ~limit =
                   if !consumed then Bigstring.empty
+                  else if !started then
+                    raise (Codec.Malformed "body read twice")
                   else (
-                    consumed := true;
+                    started := true;
                     (match body_length with
                       | `Length n when n > limit -> raise Body_too_large
                       | `Length n when n < 0 ->
@@ -160,10 +166,14 @@ let serve_conn lim handle conn requests =
                     if Codec.header headers "expect" = Some "100-continue" then
                       Transport.write_string ~timeout:lim.idle_timeout conn
                         "HTTP/1.1 100 Continue\r\n\r\n";
-                    try
-                      Codec.read_body ~timeout:lim.idle_timeout ~limit reader
-                        body_length
-                    with Codec.Too_large -> raise Body_too_large)
+                    let body =
+                      try
+                        Codec.read_body ~timeout:lim.idle_timeout ~limit reader
+                          body_length
+                      with Codec.Too_large -> raise Body_too_large
+                    in
+                    consumed := true;
+                    body)
                 in
                 Atomic.incr requests;
                 let r =
