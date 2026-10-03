@@ -294,6 +294,49 @@ cohttp/conduit/S3 client, `lib/app` with ~378 direct Lwt refs), (3) swap the sch
 run two permanently. Keep `Bounded` regardless; assume one main worker plus blocking threads unless every
 B.3.3 item has been made domain-safe.
 
+### B.2.6 Scheduling on duppy (implements spec §6.5)
+
+`Rt` (`lib/core/rt.ml`) runs every fiber on one duppy scheduler whose priority type is duppy's
+execution class, so the three kinds of spec §6.5 are the three classes:
+
+| Spec kind | Class | How duppy runs it |
+|---|---|---|
+| may-block | `` `Threaded `` | on an auxiliary thread of a worker's domain, holding one of the `max_blocking` slots |
+| non-blocking I/O | `` `Immediate `` | every ready one as a batch on the worker itself; no slot |
+| time-sensitive | `` `Direct `` | one at a time on the worker itself, taken before any `` `Threaded `` task; no slot |
+
+* A fiber starts `` `Threaded ``. `Rt.within cls fn` moves the calling fiber into `cls` for the
+  duration of `fn` and back, by parking and resuming under that priority; nesting the same class
+  costs nothing. The class is kept in the fiber's context, and `Rt.suspend` resumes under it,
+  which is how a kind survives its own waits.
+* `Rt.within` is a suspension point that may resume on another system thread: never inside
+  `Mutex.protect`.
+* A detached fiber takes its class from `Rt.spawn ?execution`; a child (`async`, `all`, `first`,
+  and so `with_timeout`) starts in its parent's class, so a race or a timeout built inside a
+  region stays in it.
+* The tasks that only wake a fiber (a timer firing, a descriptor becoming ready) are
+  `` `Immediate ``.
+* Socket reads and writes try the call in the caller's class and enter `` `Immediate `` only
+  when it would block, for the wait and the retries (`Transport.plain`, `Http_ssl.ssl_retry`,
+  `Ipc.Line`). The IPC and HTTP accept loops and each IPC connection are `` `Immediate ``
+  fibers.
+* `Ipc.serve` answers `ping` itself and runs the handler through `Rt.within`, in the class its
+  `?execution` gives the request: `` `Threaded `` unless the server says otherwise. The
+  supervisor names `uplink` `` `Direct ``.
+* `Rt.within` entering `` `Threaded `` waits for a slot and that wait is not cancellable.
+* An `` `Immediate `` or `` `Direct `` region stalls its worker for as long as it runs. `Log`
+  writes to a sink that can block, so they stay outside.
+* A `` `Direct `` task shares its domain's runtime lock with that worker's auxiliary threads.
+
+Departures from spec §6.5:
+
+* **The lessee's renewal is not independent of may-block work.** The governor's ticker is a
+  `` `Threaded `` fiber, because its tick also probes stores and saves state; only the renewal
+  request and its timeout run `` `Direct ``. With every slot held the ticker does not wake, so
+  a lessee still misses renewals. The owner's answer, the admitter's timer and the liveness
+  answer are independent.
+* The control law's computation runs inside that tick, as may-block work.
+
 ## B.3 Where each spec concept lives, and where the code departs from it
 
 ### B.3.1 Module map

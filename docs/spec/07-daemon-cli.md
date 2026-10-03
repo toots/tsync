@@ -472,8 +472,10 @@ designates:
   ([08 §3.3](08-frontends.md) marks them **B**).
 - **The liveness probe** that [failure-model.md §8.2](algorithms/failure-model.md#82-requests-between-processes)
   requires: `ping`, answered `{"ok":true}` from memory by every server (owner, store
-  server, supervisor), never waiting on a store, a lock held across I/O, or a pool. A client waiting
-  on a bulk action probes on a separate connection.
+  server, supervisor), never waiting on a store, a lock held across I/O, or a pool. It is
+  time-sensitive work ([01 §6.5](01-core.md#65-scheduling)), answered by the socket layer before
+  the request reaches a server's own dispatch. A client waiting on a bulk action probes on a
+  separate connection.
 
 A client that abandons a request closes its connection; the server's work continues and lands for
 the next caller.

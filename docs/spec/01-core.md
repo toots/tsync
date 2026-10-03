@@ -502,6 +502,34 @@ the live one.)
 - **Disk space** reports available, free and total bytes; a failure to query is reported as
   unknown, never as zero or full.
 
+### 6.5 Scheduling
+
+How many executors a runtime has, and how it shares them, is the implementation's. What
+callers and peers can observe is which work may be delayed by which. Every piece of work is of
+one of three kinds:
+
+| Kind | What it is | In tsync |
+|---|---|---|
+| **may-block** | anything that can block or run long for any reason: a disk or network-filesystem call, a store request, waiting for a process, a loop sized by its data | everything not listed below; the default |
+| **non-blocking I/O** | reads and writes on descriptors set non-blocking, the wait for their readiness, and the bookkeeping that only wakes other work | sockets of §10 and §11, their accept loops, the watch descriptor of §14, the delivery of timeouts, cancellations and stop (§6.1 R2, §9) |
+| **time-sensitive** | work with a deadline another party observes, of bounded and predictable duration | the liveness answer ([07 §4.3](07-daemon-cli.md#43-deadlines-bulk-actions-and-the-liveness-probe)); of the [uplink governor](algorithms/uplink-governor.md): the admitter, the lease renewal and its answer, and the control law's computation (its probes and its saved state are may-block) |
+
+- **Default.** Work is may-block unless this section names it. Naming work non-blocking or
+  time-sensitive is a claim about every call it contains.
+- **No blocking call inside.** Non-blocking and time-sensitive work MUST NOT contain a call that
+  can block: no disk or store call, no wait for a process, no write to a log sink that can
+  block. It MAY wait on a mutex, a promise, a semaphore or a sleep.
+- **A kind survives its own waits.** Work that waits resumes as the kind it was when it waited.
+- **Independence from may-block work.** Non-blocking and time-sensitive work MUST NOT wait for
+  may-block work to finish, nor for capacity that may-block work holds. With every executor
+  slot for may-block work taken by calls that do not return (a stalled disk, a dead network
+  filesystem), a sleep and a timeout in such work still end at their deadline, a stop still
+  reaches its stop-aware waits, a `ping` is still answered within its deadline, and a lease is
+  still renewed and answered.
+- **Time-sensitive before may-block.** When both are ready, time-sensitive work runs first.
+- **Bounded.** Time-sensitive work is bounded by a constant or by a count the process controls
+  (links, lessees, waiters admitted in one step), never by the size of user data.
+
 ---
 
 ## 7. Retry ladder
@@ -806,6 +834,11 @@ An implementation MUST exhibit these observable properties.
   file being imported fails the read rather than the process; no clone is left behind.
 - **Reservation.** The file is sized; blocks are owned where the filesystem supports it; size
   0 is a no-op.
+- **Scheduling.** With every slot for may-block work held by calls that do not return: a
+  sleep and a timeout end at their deadline, a non-blocking socket exchange completes, a `ping`
+  is answered, and work that waited inside non-blocking or time-sensitive work resumes without
+  a slot; a may-block task submitted meanwhile does not start until a slot is released (the
+  control that shows the slots were held).
 - **IPC.** Many requests per connection; a subscription acknowledges, then delivers only its
   topic's events in order; a departed subscriber is removed; publishing to nobody returns 0; an
   over-long line is refused; a stalled partial line is closed after `IPC_LINE_DEADLINE`; the

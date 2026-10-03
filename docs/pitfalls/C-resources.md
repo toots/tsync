@@ -202,7 +202,7 @@ Measured numbers from the material:
 
 ### C-7.1 Blocking syscalls on scheduler workers
 - **Pitfall** — pwrite, `map_file` (open, FICLONE, mmap), statvfs and page faults on mapped bodies ran on the event-loop thread. On a NAS or failing disk every chunk write stalled every task. Under duppy the same holds per domain.
-- **Check** — Disk and network-filesystem calls are classified blocking and run off fiber workers; only cheap calls stay inline.
+- **Check** — Disk and network-filesystem calls run as may-block work (spec 01 §6.5), off the workers; work named non-blocking or time-sensitive contains none.
 - **Seen** — notes:backends/local B13, notes:01-core B.2.5, notes:03-journal-sync B-II.7.
 
 ### C-7.2 Long work on a thread that serves others
@@ -238,6 +238,11 @@ Measured numbers from the material:
 ### C-7.8 An index over the tree built by reading every file, inside a request
 - **Pitfall** — The file-id index was built lazily by the first request naming an `i:` reference: a walk opening every marker (274k on the reference Mac domain, about 80 µs per small-file read on macOS, so 1-2 min), past the 30 s request deadline. It ran after every restart, the requests behind it waited on a system mutex, which stalled their runtime domain, and the system's retry backoff turned the minute into a longer gap before a new file reached the owner. Neither a sized read buffer nor skipping manifest decode changed the time: the cost is one `open` and `read` per file.
 - **Check** — No request walks the tree. An index over every file survives a clean stop as one snapshot read at start, and is rebuilt in the background only after a crash; a waiter for it waits as a fiber, outside the metadata serialisation.
+- **Seen** — rewrite.
+
+### C-7.9 Deadline-bound work queued behind blocked calls
+- **Pitfall** — Every task of the runtime ran in the one class that holds a blocking slot: fiber resumes, timers, descriptor wake-ups. A worker with no slot left takes none of them, so calls stuck on a stalled disk (256 slots) also stopped timeouts from firing, `ping` from being answered and uplink leases from being renewed: a disk stall read as a dead owner and lost leases.
+- **Check** — Timeout, stop and wake-up delivery, non-blocking socket I/O, the liveness answer and the governor's admission and renewal run in classes that hold no blocking slot (spec 01 §6.5). A test pins every slot and shows they still run, and that a may-block task does not.
 - **Seen** — rewrite.
 
 ## 8. CPU loops and polling
@@ -384,7 +389,7 @@ Measured numbers from the material:
 4. **Caches** — Does every cache on a long-running path have a cap, tested both ways? Is its size client-chosen? Does an off-heap table reclaim superseded records?
 5. **Server bounds** — Is every request buffer capped by bytes or keys? Is admission decided before bodies are read? Do unauthenticated routes have their own pool, visible in reports?
 6. **Runtime memory** — Does every long-running activity reach a compact + `malloc_trim`? Do thread pools shrink? Do tests compare retained anonymous/file/heap figures rather than RSS peaks?
-7. **Disk and blocking** — Does any disk or NFS syscall run on a fiber worker? Is there O(tree) work at startup? Are sizes counters rather than walks? Are sockets counted in deadline tests?
+7. **Disk and blocking** — Does any disk or NFS syscall run on a fiber worker, or inside work named non-blocking or time-sensitive? Does deadline-bound work need a blocking slot? Is there O(tree) work at startup? Are sizes counters rather than walks? Are sockets counted in deadline tests?
 8. **CPU loops** — Can a handler's side effect re-wake it? Does every worker-loop branch block? Does every retry back off? Is status cost independent of poll rate? Any `filteri`/`nth`/`@` in a loop over data?
 9. **Round trips** — Is cost proportional to what exists, not 4096 shards? Bulk verbs used? Connections pooled? Existence checked by listing diff? Any backend read on a metadata path?
 10. **Read path** — Do demand reads have their own pool? Are slow stores read by range? Is read-ahead at least one group ahead and not multiplied by pipelining?
