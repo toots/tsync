@@ -152,6 +152,7 @@ let () =
       List.iter Transport.close drips;
       p "== a 401 from a skewed clock is not remembered\n";
       let skewed = ref true and conditional_puts = ref 0 in
+      let portal = ref false in
       let l = Unix.socket PF_INET SOCK_STREAM 0 in
       Unix.bind l (ADDR_INET (Unix.inet_addr_loopback, 0));
       Unix.listen l 4;
@@ -174,6 +175,9 @@ let () =
             let status, date, body =
               if !skewed then
                 ("401 Unauthorized", Unix.gettimeofday () -. 3600., "stale")
+              else if
+                !portal && not (String.starts_with ~prefix:"GET /list" head)
+              then ("200 OK", Unix.gettimeofday (), "<html>sign in</html>")
               else if String.starts_with ~prefix:"GET /list" head then
                 ("200 OK", Unix.gettimeofday (), "[]")
               else if String.starts_with ~prefix:"GET /checksum" head then
@@ -221,6 +225,19 @@ let () =
         (match behind.compute_checksum (Key.v "tsync/d/a") Checksum.md5 with
           | Some _ -> "some"
           | None -> "none");
+      p "== a captive portal answering 200 is not remembered\n";
+      let roaming =
+        (Option.get (Driver.find "http-proxy")).create ~admission:Uplink.none
+          ~domain:d ~name:"roaming"
+          [("url", Field_spec.S fake_url); ("secret", Field_spec.S secret)]
+      in
+      let asked () =
+        kind (fun () -> roaming.capabilities (Key.domain_prefix d))
+      in
+      portal := true;
+      let behind_it = asked () in
+      portal := false;
+      p "behind the portal: %s; once past it: %s\n" behind_it (asked ());
       Unix.close l;
       p "== watch\n";
       let cursor = Key.cursor d in

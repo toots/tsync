@@ -156,8 +156,11 @@ let capability t prefix path =
     request t ~meth:"GET" ~query:[("prefix", Key.prefix_to_string prefix)] path
   with
     | r when success r.status -> (
+        (* Not a tsync server's answer (a captive portal): nothing to keep. *)
         try Some (Yojson.Safe.from_string (Bigstring.to_string r.body))
-        with _ -> None)
+        with _ ->
+          Fail.corrupt "%s answered %s with something that is not JSON" t.name
+            path)
     | { status = 404; _ } -> None
     | r -> failure t ~op:path r
 
