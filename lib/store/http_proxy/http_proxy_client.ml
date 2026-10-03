@@ -90,12 +90,18 @@ let request ?(mode = Store.Wait) ?(headers = []) t ~meth ?(query = [])
   let target =
     if query = [] then path else path ^ "?" ^ W.canonical_query query
   in
+  (* Counted once answered: an attempt that never reached the peer sent
+     nothing. *)
   let send () =
+    let r =
+      Tsync_http.Client.request ~stall:stall_timeout t.endpoint ~meth
+        ?body:(if meth = "PUT" || meth = "POST" then Some body else None)
+        ~headers:(fun () ->
+          headers @ W.sign ~secret:t.secret ~meth ~target body)
+        target
+    in
     ignore (Atomic.fetch_and_add t.traffic.uploaded (Bigstring.length body));
-    Tsync_http.Client.request ~stall:stall_timeout t.endpoint ~meth
-      ?body:(if meth = "PUT" || meth = "POST" then Some body else None)
-      ~headers:(fun () -> headers @ W.sign ~secret:t.secret ~meth ~target body)
-      target
+    r
   in
   let r =
     if Bigstring.length body = 0 then send ()

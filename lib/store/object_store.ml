@@ -109,16 +109,17 @@ let make ~name ~admission ?share_url v =
         (fun ?(mode = Store.Wait) k body ->
           ladder "put" (fun () ->
               Uplink.admitted admission mode (Bigstring.length body) (fun () ->
-                  up (Bigstring.length body);
-                  v.put k body)));
+                  v.put k body;
+                  up (Bigstring.length body))));
       put_if_absent =
         (fun k body ->
           ladder "put_if_absent" (fun () ->
               let r =
                 Uplink.admitted admission Wait (Bigstring.length body)
                   (fun () ->
+                    let r = v.put_if_absent k body in
                     up (Bigstring.length body);
-                    v.put_if_absent k body)
+                    r)
               in
               (match r with Held b -> down (Some b) | Won -> ());
               r));
@@ -126,9 +127,12 @@ let make ~name ~admission ?share_url v =
         (fun k body expected ->
           ladder "put_if_unchanged" (fun () ->
               Uplink.admitted admission Wait (Bigstring.length body) (fun () ->
+                  let r =
+                    v.put_if_unchanged k body
+                      (Option.bind expected (fun (e : Store.entry) -> e.etag))
+                  in
                   up (Bigstring.length body);
-                  v.put_if_unchanged k body
-                    (Option.bind expected (fun (e : Store.entry) -> e.etag)))));
+                  r)));
       get_opt =
         (fun k ->
           ladder "get" (fun () ->
