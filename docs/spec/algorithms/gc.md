@@ -574,9 +574,10 @@ Per publication on the collected main: one lock, one read of R, one stat per nam
 
 | Interrupted at | State on the main | Resume does |
 |---|---|---|
-| after writing Opening, before the rename | R = Opening, S intact | renames (skipped if F exists; S absent is fine) |
+| after writing Opening, before the rename | R = Opening, S intact | renames (skipped if F exists; S absent is fine); the rename happens only in Opening, never once Marking is recorded |
 | after the rename, before Marking | R = Opening, F exists | enumerates again, marks from the start |
 | mid-namespace | R = Marking(previous namespace) | re-lists and re-marks that namespace |
+| mid-namespace, and no F (the open found no chunk space to move) | R = Marking, no F | never renames: every chunk in S was written since the open and is live; marks on from the cursor |
 | after Closing was recorded, before the first shard | R = Closing("") | lists shards again |
 | mid doom step, jobs appended, F/shard not yet unlinked | R = Closing(previous shard) | re-dooms the same keys and appends them again (duplicate deletes are harmless) |
 | after the unlink, before the cursor | shard gone from F | nothing left to doom there |
