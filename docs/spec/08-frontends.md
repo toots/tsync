@@ -255,13 +255,20 @@ watched with the liveness probe ([07 §4.3](07-daemon-cli.md#43-deadlines-bulk-a
 | `poll` | — | `{}` at once; the owner rescans its logs for submitted records and runs a journal pass soon | |
 | `notify_reset` | — | `{delivered: N}` after publishing a `reset` event to the domain's subscribers | |
 | `ping` | — | `{}` from memory: the liveness probe | |
-| `status` | — | `domain, running, readOnly, paused, pendingUploads, pendingDownloads, uploading[{name, rel, body?, size?}], downloading[{name, rel, bytes, size, seconds, rate}], pendingBytes`, traffic, hook fields | |
+| `status` | — | `domain, running, readOnly, paused, pendingUploads, pendingDownloads, uploading[{name, rel, body?, size?}], downloading[{name, rel, bytes, size, seconds, rate}], pendingBytes, subscribers, unnamed?`, traffic, hook fields | |
 | `pause` | `arg`: `"off"` resumes, anything else pauses | `{paused}` after the state is durable | |
 | `stats` | `arg`: comma set of `totals, exact, reload, frontend` | the owner's report ([07 §5.5](07-daemon-cli.md#55-tsync-status)); `frontend` = only this process's figures, no probes | |
 | `stop` | — | `{}`, then the owner stops ([07 §3.4](07-daemon-cli.md#34-stop)) | |
 | `subscribe` | `domain?` | `{}`, then the connection is an event stream (§3.8) | |
 
 - `status` is cheap: no store access, no walk (menus poll it).
+- `uploading` lists the uploads running now; `pendingBytes` is the whole-file bytes still owed.
+  `downloading` lists every transfer of a file's bytes from the store running now (a fetch, a range,
+  a restore), `bytes` of `size` done since it started `seconds` ago at `rate` bytes per second;
+  `pendingDownloads` counts them. `traffic` is the domain's `{upBytes, upRate, downBytes,
+  downRate}`. `subscribers` counts the connections subscribed to the domain's events. `unnamed`, when
+  non-zero, is how many items the last listing or feed page could not name (§2.3); its repair is
+  `tsync sync --full`.
 - `job` streams lines before its reply, each an object with a `stream` field: `{stream:"started",
   job}` first, then `{stream:"out", text}` for each line of the command's output,
   `{stream:"progress", text, fraction?}` as it moves (a few a second at most, the latest always sent
