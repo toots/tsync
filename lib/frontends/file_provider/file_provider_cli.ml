@@ -2,9 +2,7 @@ open Tsync_core
 open Tsync_config
 open Tsync_owner
 
-(* file-provider §3.1, §3.2, §13. *)
-let app_bundle_id = "org.feverdreamtv.tsync"
-let service_label = "org.feverdreamtv.tsync.daemon"
+(* file-provider §3.2, §13. *)
 let app_path = "/Applications/TsyncApp.app"
 let cli_link = "/usr/local/bin/tsync"
 let purge_wait = 60.
@@ -18,24 +16,6 @@ let fail fmt =
       prerr_endline ("tsync: " ^ s);
       1)
     fmt
-
-let status args =
-  match
-    Unix.create_process (List.hd args) (Array.of_list args) Unix.stdin
-      Unix.stdout Unix.stderr
-  with
-    | pid -> ( match snd (Unix.waitpid [] pid) with WEXITED n -> n | _ -> 1)
-    | exception Unix.Unix_error _ -> 127
-
-(* Launches the app if it is not running; never terminates a process. *)
-let launch_app () = status ["/usr/bin/open"; "-g"; "-b"; app_bundle_id] = 0
-
-let agent_definition () =
-  Filename.concat (Paths.home ())
-    ("Library/LaunchAgents/" ^ service_label ^ ".plist")
-
-let service_target () =
-  Printf.sprintf "gui/%d/%s" (Unix.getuid ()) service_label
 
 let lines file =
   List.filter
@@ -61,7 +41,7 @@ let reimport ~domain _ =
    relay acknowledgement. *)
 let reach_app ~domain =
   let delivered = try ask ~domain Notify_reset with _ -> 0 in
-  delivered > 0 || launch_app ()
+  delivered > 0 || Service.launch_app ()
 
 let reset ~domain _ =
   let marker = reset_marker () in
@@ -114,9 +94,7 @@ let purge ~domain _ =
   if not released then
     fail "the app did not release its domains within %.0fs" purge_wait
   else (
-    ignore (status ["/bin/launchctl"; "bootout"; service_target ()]);
-    (* §11: no later login starts a service whose bundle is gone. *)
-    (try Unix.unlink (agent_definition ()) with Unix.Unix_error _ -> ());
+    Service.remove_agent ();
     remove_app ();
     Fs.rm_rf (Paths.data_dir ());
     remove_link ();
