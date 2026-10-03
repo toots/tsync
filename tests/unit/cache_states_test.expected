@@ -1,0 +1,3 @@
+after reading 200 groups whole: 0 states kept
+a group read in part keeps its state: 1
+once its ranges complete it: 0, whole: true

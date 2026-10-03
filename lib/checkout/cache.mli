@@ -38,6 +38,10 @@ val create :
   t
 
 val cc : t -> int
+
+(** Groups whose state is kept: those with a partial body, or in use. *)
+val tracked : t -> int
+
 val whole_path : t -> string -> string
 val is_whole : t -> string -> bool
 
