@@ -121,6 +121,60 @@ let () =
       unwatch ();
       p "a read through it: %s; the peer's breaker tripped: %b\n" read
         (Atomic.get trips > 0);
+      p "== a data slot is held until its answer is written\n";
+      let big = Key.v "tsync/d/big" in
+      s.put big (Bigstring.create (32 * 1024 * 1024));
+      (* One slot, and a peer that asks for the object and reads nothing. *)
+      let narrow =
+        Server.serve
+          [Unix.ADDR_INET (Unix.inet_addr_loopback, 0)]
+          (P.handle (P.create ~max_concurrent:1 [route "d" "d" (local "d")]))
+      in
+      let narrow_port =
+        match Server.addresses narrow with
+          | [ADDR_INET (_, port)] -> port
+          | _ -> assert false
+      in
+      let target = "/o/" ^ Tsync_http_proxy_client.Proxy_wire.encode_key big in
+      let head =
+        String.concat ""
+          (List.map
+             (fun (k, v) -> Printf.sprintf "%s: %s\r\n" k v)
+             (Tsync_http_proxy_client.Proxy_wire.sign ~secret ~meth:"GET"
+                ~target Bigstring.empty))
+      in
+      let stuck = Unix.socket PF_INET SOCK_STREAM 0 in
+      Unix.connect stuck (ADDR_INET (Unix.inet_addr_loopback, narrow_port));
+      let req =
+        Printf.sprintf "GET %s HTTP/1.1\r\nHost: x\r\n%s\r\n" target head
+      in
+      ignore (Unix.write_substring stuck req 0 (String.length req));
+      Rt.sleep 0.5;
+      let other =
+        (Option.get (Driver.find "http-proxy")).create ~admission:Uplink.none
+          ~domain:d ~name:"narrow"
+          [
+            ( "url",
+              Field_spec.S (Printf.sprintf "http://127.0.0.1:%d" narrow_port) );
+            ("secret", Field_spec.S secret);
+          ]
+      in
+      let read () =
+        match
+          Rt.with_timeout 1.5 (fun () -> other.get_opt (Key.v "tsync/d/a"))
+        with
+          | _ -> "answered"
+          | exception Rt.Timeout -> "waits for the slot"
+          | exception Fail.E f -> Fail.kind_name f.kind
+      in
+      let during = read () in
+      Unix.close stuck;
+      Rt.sleep 0.3;
+      p
+        "another read while the 32 MiB answer waits on its peer: %s; after: %s\n"
+        during (read ());
+      Server.close narrow;
+      ignore (s.delete big);
       p "== unsigned bodies dripping do not hold the data slots\n";
       let port =
         match Server.addresses server with

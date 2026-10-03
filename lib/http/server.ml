@@ -32,6 +32,7 @@ type body =
   | String of string
   | Bigstring of Bigstring.t
   | Stream of { write : (Bigstring.t -> unit) -> unit; finally : unit -> unit }
+  | Held of { bytes : Bigstring.t; finally : unit -> unit }
 
 let stream ?(finally = ignore) write = Stream { write; finally }
 
@@ -76,14 +77,20 @@ let reason = function
   | _ -> "Status"
 
 let write_response lim conn ~head_only ~close r =
-  let finally = match r.body with Stream s -> s.finally | _ -> ignore in
+  let finally =
+    match r.body with
+      | Stream s -> s.finally
+      | Held h -> h.finally
+      | _ -> ignore
+  in
   Fun.protect ~finally @@ fun () ->
   let b = Buffer.create 256 in
   let framing =
     match r.body with
       | Empty -> [("content-length", "0")]
       | String s -> [("content-length", string_of_int (String.length s))]
-      | Bigstring b -> [("content-length", string_of_int (Bigstring.length b))]
+      | Bigstring b | Held { bytes = b; _ } ->
+          [("content-length", string_of_int (Bigstring.length b))]
       | Stream _ -> [("transfer-encoding", "chunked")]
   in
   Codec.write_head b
@@ -97,7 +104,7 @@ let write_response lim conn ~head_only ~close r =
     | String s when not head_only ->
         Buffer.add_string b s;
         write (Buffer.contents b)
-    | Bigstring body when not head_only ->
+    | (Bigstring body | Held { bytes = body; _ }) when not head_only ->
         write (Buffer.contents b);
         write_body body
     | Stream { write = f; _ } when not head_only ->
