@@ -228,6 +228,22 @@ let () =
         (on_disk main_root (Key.marker d (chunk "live2")));
       Composite.settle ~timeout:10. c;
       ignore (settled 100);
+      p "\n== verify, resumed, checks a chunk promoted before the kill\n";
+      put_chunks ["rot"];
+      publish (slot trashed "rot") ["rot"];
+      ignore (run ~budget:0. ());
+      Fs.write_file_for_test
+        (Filename.concat main_root
+           (Key.to_string (Key.chunk_from d (chunk "rot"))))
+        "scrambled";
+      p "promoted, as by a session killed before verifying: %b\n"
+        (Chunk_spaces.promote
+           (Option.get (Chunk_spaces.of_store main))
+           d (chunk "rot"));
+      ignore (run ~verify:true ());
+      p "rot marked: %b\n" (on_disk main_root (Key.marker d (chunk "rot")));
+      Composite.settle ~timeout:10. c;
+      ignore (settled 100);
       p "\n== a body that is not a manifest halts, leaving the run open\n";
       Fs.write_file_for_test
         (Filename.concat main_root

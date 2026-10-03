@@ -69,10 +69,16 @@ junk5 back in S: true
 run: completed; promoted 7, reclaimed 1 (5 bytes), verified 7, corrupt 1
 live2 kept: true, marked: true
 
+== verify, resumed, checks a chunk promoted before the kill
+run: suspended in marking at "m/.tsync-root"; promoted 4, reclaimed 0 (0 bytes)
+promoted, as by a session killed before verifying: true
+run: completed; promoted 3, reclaimed 0 (0 bytes), verified 4, corrupt 1
+rot marked: true
+
 == a body that is not a manifest halts, leaving the run open
 run: halted: tsync/d/manifests/.tsync-root/fa2ef02b5771334f-adbc8e9d6edde589: neither a manifest nor a folder marker; promoted 0, reclaimed 0 (0 bytes)
 run open: true, live1 outgoing and readable: true true
-run: completed; promoted 7, reclaimed 0 (0 bytes)
+run: completed; promoted 8, reclaimed 0 (0 bytes)
 generation settled: true
   junk1    main S false F false, replica false
   junk2    main S false F false, replica false
@@ -83,18 +89,19 @@ generation settled: true
   live2    main S true F false, replica true
   live3    main S true F false, replica true
   live4    main S true F false, replica true
+  rot      main S true F false, replica true
   trashed  main S true F false, replica true
   ver      main S true F false, replica true
-  run open false, outgoing space false, G 10
+  run open false, outgoing space false, G 12
 
 == a manifest with one malformed key halts, keeping its chunks
 run: halted: tsync/d/manifests/.tsync-root/5ffe782ea6b2b6e6-2be70dcf7b213db4: manifest "f": malformed chunk key "Z44f98a5b4c06b8c-47fc84d7b95d2dc3"; promoted 0, reclaimed 0 (0 bytes)
 solo1 and solo2 kept: true true
-run: completed; promoted 7, reclaimed 2 (10 bytes)
+run: completed; promoted 8, reclaimed 2 (10 bytes)
 
 == a settle leaves G odd while a run is suspended in closing
 run: suspended in marking at "m/.tsync-root"; promoted 4, reclaimed 0 (0 bytes)
-run: suspended in marking at "m/0123456789ab-1"; promoted 2, reclaimed 0 (0 bytes)
+run: suspended in marking at "m/0123456789ab-1"; promoted 3, reclaimed 0 (0 bytes)
 run: suspended in closing at "2b6"; promoted 1, reclaimed 0 (0 bytes)
 suspended in closing: true
 G odd after a settle: true
@@ -105,13 +112,14 @@ run: suspended in closing at "7ff"; promoted 0, reclaimed 0 (0 bytes)
 run: suspended in closing at "88a"; promoted 0, reclaimed 0 (0 bytes)
 run: suspended in closing at "8a5"; promoted 0, reclaimed 0 (0 bytes)
 run: suspended in closing at "975"; promoted 0, reclaimed 0 (0 bytes)
+run: suspended in closing at "9db"; promoted 0, reclaimed 0 (0 bytes)
 run: completed; promoted 0, reclaimed 0 (0 bytes)
 generation settled: true
 
 == exclusion
 another process: held
 run: busy
-after it exits: run: completed; promoted 7, reclaimed 0 (0 bytes)
+after it exits: run: completed; promoted 8, reclaimed 0 (0 bytes)
 run: busy
 after a publish lock, another process: busy
 
