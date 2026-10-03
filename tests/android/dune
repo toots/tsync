@@ -2,6 +2,7 @@
  (name lazy_test)
  (modules lazy_test)
  (libraries
+  test_support
   tsync_core
   tsync_store
   tsync_remote
@@ -37,6 +38,7 @@
   (include_dirs ../../lib/frontends/android/jni)
   (names stress_stubs))
  (libraries
+  test_support
   tsync_core
   tsync_catalog
   tsync_android

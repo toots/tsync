@@ -450,5 +450,5 @@ let () =
        && (String.sub st i 16 = "Frontend android" || has (i + 1))
      in
      has 0);
-  Fs.rm_rf root;
+  Test_support.remove_root root;
   exit 0
