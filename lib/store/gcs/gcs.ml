@@ -109,8 +109,10 @@ let fail ~op (r : Tsync_http.Client.response) =
           r.status))
 
 let json ~op (r : Tsync_http.Client.response) =
-  try Yojson.Safe.from_string (Bigstring.to_string r.body)
-  with _ -> Fail.corrupt "gcs %s: an answer that is not JSON" op
+  match Yojson.Safe.from_string (Bigstring.to_string r.body) with
+    | `Assoc _ as j -> j
+    | _ | (exception _) ->
+        Fail.corrupt "gcs %s: an answer that is not a JSON object" op
 
 let obj t k =
   Printf.sprintf "/storage/v1/b/%s/o/%s" (segment t.bucket)
