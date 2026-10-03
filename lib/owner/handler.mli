@@ -6,8 +6,6 @@ open Tsync_ipc
 (** The frontend-specific behaviour (08 §3.2); {!no_hooks} does nothing. *)
 type hooks = {
   changed : string list -> unit;
-  surface_evicted : string -> unit;
-  surface_restored : string -> unit;
   reannounce : unit -> unit;
   frontend : unit -> Tsync_status.Status_report.frontend option;
 }

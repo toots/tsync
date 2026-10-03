@@ -4,20 +4,12 @@ open Tsync_sync
 
 type hooks = {
   changed : string list -> unit;
-  surface_evicted : string -> unit;
-  surface_restored : string -> unit;
   reannounce : unit -> unit;
   frontend : unit -> Tsync_status.Status_report.frontend option;
 }
 
 let no_hooks =
-  {
-    changed = ignore;
-    surface_evicted = ignore;
-    surface_restored = ignore;
-    reannounce = ignore;
-    frontend = (fun () -> None);
-  }
+  { changed = ignore; reannounce = ignore; frontend = (fun () -> None) }
 
 type running = { id : int; kind : string; cancelled : bool Atomic.t }
 
@@ -623,13 +615,11 @@ let cancel t id =
         true
     | _ -> false
 
-(* 08 §3.3, one request; [ref] names the surface to update after evict and
-   restore. *)
+(* 08 §3.3, one request. *)
 let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
  fun t ~send req ->
   let (module E : Engine.S) = t.engine in
   let mutate f = E.atomically f in
-  let surface = function Protocol.Ref r -> r | Rel _ | Child _ -> "root" in
   match req with
     | Ping -> ()
     | Stat item -> row_or_unnamed t (target t item)
@@ -700,14 +690,12 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
     | Download_progress _ -> Protocol.Inactive
     | Evict item ->
         let succeeded, failed = each_file t (target t item) E.evict in
-        t.hooks.surface_evicted (surface item);
         { Protocol.succeeded; failed }
     | Restore r ->
         let keep = Option.value ~default:default_pin_keep r.keep in
         let succeeded, failed =
           each_file t (target t r.item) (fun p -> E.pin p ~keep)
         in
-        t.hooks.surface_restored (surface r.item);
         { Protocol.succeeded; failed }
     | Create r ->
         mutate (fun () ->
