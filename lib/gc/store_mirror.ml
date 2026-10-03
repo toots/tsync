@@ -366,12 +366,38 @@ module Make (C : Context.S) = struct
             | ((All | Skip_chunks) as scope), _ ->
                 if scope = All then
                   area "chunks" (fun () ->
-                      List.iter
-                        (fun i ->
-                          let shard = Printf.sprintf "%03x" i in
-                          listed_batch ~part:(i, 4096) ("chunk shard " ^ shard)
-                            (Key.shard_prefix d shard) ~chunks:true)
-                        (List.init 4096 Fun.id));
+                      (* Eight shards listed at a time, on both sides, then
+                         compared in order: 8192 listings one after another
+                         is twenty minutes for an almost empty domain. *)
+                      let rec windows = function
+                        | [] -> ()
+                        | shards when cancelled () -> ignore shards
+                        | shards ->
+                            let now = List.filteri (fun i _ -> i < 8) shards
+                            and later =
+                              List.filteri (fun i _ -> i >= 8) shards
+                            in
+                            Rt.map_bounded ~width:8
+                              (fun i ->
+                                let prefix =
+                                  Key.shard_prefix d (Printf.sprintf "%03x" i)
+                                in
+                                ( i,
+                                  src.store.list_prefix prefix,
+                                  dst.store.list_prefix prefix ))
+                              now
+                            |> List.iter (fun (i, source, listed) ->
+                                run
+                                  {
+                                    label = Printf.sprintf "chunk shard %03x" i;
+                                    source;
+                                    chunks = true;
+                                    part = (i, 4096);
+                                  }
+                                  ~listed);
+                            windows later
+                      in
+                      windows (List.init 4096 Fun.id));
                 chunks_then (fun () ->
                     area "manifests" (fun () ->
                         listed_batch "manifests" (Key.manifests d) ~chunks:false
