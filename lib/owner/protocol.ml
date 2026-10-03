@@ -180,6 +180,7 @@ let bulk : type a. a request -> bool = function
   | Ensure_cached _ | Fetch_range _ | Evict _ | Restore _ | Sync _
   | Trash_restore _ | Job _ ->
       true
+  | List_all { after = None; _ } -> true
   | _ -> false
 
 let refused_while_paused : type a. a request -> bool = function
