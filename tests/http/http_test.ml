@@ -22,6 +22,15 @@ let handler (r : Server.request) read_body : Server.response =
     | "/host" ->
         Server.text 200
           (Option.value ~default:"" (Codec.header r.headers "host"))
+    | "/broken" ->
+        {
+          status = 200;
+          headers = [];
+          body =
+            Server.stream (fun w ->
+                w (Bigstring.of_string "part");
+                failwith "a chunk is missing");
+        }
     | "/stream" ->
         {
           status = 200;
@@ -76,6 +85,14 @@ let () =
       show (Client.request e ~meth:"GET" "/finally");
       show (Client.request e ~meth:"HEAD" "/finally");
       p "  released: %d of 2" (Atomic.get finished);
+      p "== a stream that fails partway is never delivered complete";
+      p "  %s"
+        (match Client.request e ~meth:"GET" "/broken" with
+          | r ->
+              Printf.sprintf "delivered %d %S" r.status
+                (Bigstring.to_string r.body)
+          | exception Fail.E f -> "refused: " ^ Fail.kind_name f.kind
+          | exception x -> "refused: " ^ Printexc.to_string x);
       p "== a body refused partway closes its connection";
       let smuggled = "GET /smuggled HTTP/1.1\r\nHost: x\r\n\r\n" in
       let fd = Unix.socket PF_INET SOCK_STREAM 0 in

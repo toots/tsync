@@ -254,7 +254,8 @@ let parse_range size header =
     | _ -> `Whole
 
 (* §A9.4: only the chunks the range covers, each checked against its key; a
-   short read ends the stream. *)
+   chunk missing or failing it aborts the response, which the client then
+   sees incomplete. *)
 let stream t (m : Manifest.t) ~off ~len feed =
   let stop = off + len in
   let rec go i =
@@ -272,7 +273,8 @@ let stream t (m : Manifest.t) ~off ~len feed =
               feed (Bigstring.sub b ~off:lo ~len:(hi - lo));
               go (i + 1)
           | _ ->
-              Log.warn "share: chunk %s is unavailable; the stream ends"
+              Fail.corrupt
+                "share: chunk %s is missing or does not match its key"
                 (Chunk_key.to_string ck))
       else if start < stop then go (i + 1))
   in
