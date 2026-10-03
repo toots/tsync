@@ -125,8 +125,13 @@ let supervise exe children =
           if
             r.pid = None && Rt.now () >= r.restart_at && not (Stop.requested ())
           then (
+            (* A child that cannot be spawned backs off like one that dies. *)
             try spawn exe r
-            with e -> Log.err "cannot start %s: %s" exe (Printexc.to_string e)))
+            with e ->
+              Log.err "cannot start %s: %s; retrying in %.0fs" exe
+                (Printexc.to_string e) r.backoff;
+              r.restart_at <- Rt.now () +. r.backoff;
+              r.backoff <- Float.min backoff_max (2. *. r.backoff)))
         children;
       Stop.sleep 0.5
     done
@@ -202,7 +207,7 @@ let ask_stats arg r =
     (fun d ->
       ( d,
         match
-          Tsync_owner.Protocol.call ~timeout:Ipc.request_deadline ~domain:d
+          Tsync_owner.Protocol.call ~timeout:Ipc.client_deadline ~domain:d
             r.child.socket
             (Stats ("frontend" :: arg))
         with

@@ -382,10 +382,10 @@ let serve ?(execution = fun _ -> `Threaded) ~path handler =
   let lfd = Unix.socket ~cloexec:true PF_UNIX SOCK_STREAM 0 in
   (* The accept fiber owns the socket once spawned. *)
   Tsync_core.Fs.or_close lfd @@ fun lfd ->
-  let umask = Unix.umask 0o177 in
-  Fun.protect
-    ~finally:(fun () -> ignore (Unix.umask umask))
-    (fun () -> Unix.bind lfd (ADDR_UNIX path));
+  (* The directory is this user's alone, so the mode is set after the bind:
+     the umask is the process's, and other domains create files meanwhile. *)
+  Unix.bind lfd (ADDR_UNIX path);
+  Unix.chmod path 0o600;
   Unix.listen lfd 64;
   Unix.set_nonblock lfd;
   let t =
