@@ -75,7 +75,12 @@ final class WorkingSetEnumerator: NSObject, NSFileProviderEnumerator {
             do {
                 var fields: [String: Any] = ["limit": limit]
                 if let after = after { fields["after"] = after }
-                let reply = try owner.call("list_all", fields, cancellation: cancellation)
+                // A first page walks the whole domain: bulk, watched by the
+                // liveness probe instead of bounded by the request deadline.
+                let reply =
+                    after == nil
+                    ? try owner.bulk("list_all", fields, cancellation: cancellation)
+                    : try owner.call("list_all", fields, cancellation: cancellation)
                 // A cursor on another walk: the system restarts the listing.
                 if reply["stale"] as? Bool == true {
                     observer.finishEnumeratingWithError(
