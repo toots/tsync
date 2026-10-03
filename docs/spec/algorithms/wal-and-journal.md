@@ -436,6 +436,11 @@ Promotion of committed edits runs before reconcile, and adoption of staged edits
 runs after it ([04](../04-checkout-cache.md) §4.10). Parked records of both queues are re-armed
 ([durable-queue.md](durable-queue.md) §4.7).
 
+A record still INTENT that the metadata queue takes while the owner runs (its local half raised,
+and a rescan adopted it) is handled the same way, under the metadata serialisation: local redo, then
+PREPARED, then publish. The queue never publishes an INTENT record's ops as they stand, since its
+local half may be partly done.
+
 **Local redo** (INTENT metadata; idempotent):
 
 - `delete(p)`: remove the local file at `p` if present.
