@@ -79,8 +79,9 @@ module Make (C : Engine_ctx.S) = struct
     up (Names.parent_of l)
 
   (* Folder translation: a folder this client moved, and the store still files
-     under the peer's name, is where the peer's path lands here. *)
-  let translate p =
+     under the peer's name, is where the peer's path lands here. [placed] says
+     whether the store files the folder there. *)
+  let translate ~placed p =
     let segs = if p = "" then [] else String.split_on_char '/' p in
     List.fold_left
       (fun cur seg ->
@@ -88,7 +89,7 @@ module Make (C : Engine_ctx.S) = struct
         match Mirror.whereabouts mirror cand with
           | `Moved (id, at) -> (
               match Mirror.folder_id mirror cur with
-                | Some pid when T.placed id ~parent:pid ~name:seg = `Here -> at
+                | Some pid when placed id ~parent:pid ~name:seg -> at
                 | _ -> cand)
           | _ -> cand)
       "" segs
@@ -113,7 +114,17 @@ module Make (C : Engine_ctx.S) = struct
     anchors : (string, Folder.anchor option) Hashtbl.t;
     legacy_ids : (string, Folder_id.t) Hashtbl.t;
         (** an id-less mkdir's or folder rename's id, by its target path *)
+    placements : (string, bool) Hashtbl.t;
+        (** whether the store files a folder at a slot, by {!placement} *)
   }
+
+  let placement id ~parent ~name =
+    String.concat "/" [Folder_id.to_string id; Folder_id.to_string parent; name]
+
+  let placed_answer answers id ~parent ~name =
+    match Hashtbl.find_opt answers.placements (placement id ~parent ~name) with
+      | Some here -> here
+      | None -> raise Exit
 
   let store_at answers p =
     match Hashtbl.find_opt answers.manifests p with
@@ -192,8 +203,19 @@ module Make (C : Engine_ctx.S) = struct
         manifests = Hashtbl.create 8;
         anchors = Hashtbl.create 4;
         legacy_ids = Hashtbl.create 1;
+        placements = Hashtbl.create 1;
       }
     in
+    let placed id ~parent ~name =
+      let k = placement id ~parent ~name in
+      match Hashtbl.find_opt a.placements k with
+        | Some here -> here
+        | None ->
+            let here = T.placed id ~parent ~name = `Here in
+            Hashtbl.replace a.placements k here;
+            here
+    in
+    let translate = translate ~placed in
     let man p =
       if not (Hashtbl.mem a.manifests p) then
         Hashtbl.replace a.manifests p
@@ -252,6 +274,19 @@ module Make (C : Engine_ctx.S) = struct
             man dst
         | _ -> ())
       ops;
+    (* An edit an arrival may put aside takes its inherited bytes here, where a
+       cold cache fetches them without the metadata lock. *)
+    List.iter
+      (fun op ->
+        List.iter
+          (fun p ->
+            let l = translate p in
+            materialise_inherited l;
+            List.iter
+              (fun (under, _) -> materialise_inherited under)
+              (Staged.edits_under staged l))
+          (Op.paths op))
+      ops;
     a
 
   (* wal-and-journal §4.4: one pass or rebuild at a time, so the deferred
@@ -269,9 +304,10 @@ module Make (C : Engine_ctx.S) = struct
           Mirror.write_file mirror l m
       | None -> ()
 
-  (* ponytail: inherited bytes are copied under the metadata lock, so a cold
-     cache fetches under it; fetch them with the arrival's store answers if that
-     shows. *)
+  (* ponytail: the read-ahead materialises an edit at the op's own paths; one
+     reached only through an owed rename of ours still fetches its inherited
+     bytes under the metadata lock. Follow owed renames in the read-ahead if
+     that shows. *)
   let file_aside l =
     let dst = aside_name l ~is_dir:false in
     materialise_inherited l;
@@ -439,6 +475,7 @@ module Make (C : Engine_ctx.S) = struct
      the op acts on here (pitfall A-6.25): a put's and a rename's afterwards,
      a delete's only when it removed the file. *)
   let apply_op o answers ~fid op =
+    let translate = translate ~placed:(placed_answer answers) in
     let decision_and_enact facts enact =
       let decision = Conflict.arrival facts in
       if Conflict.clashed decision then
