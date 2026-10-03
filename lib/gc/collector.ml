@@ -652,13 +652,13 @@ let run ?budget ?pause ?(narrate = Narrate.none) ?(verify = false)
         each composite
           (session ?budget ?pause ~narrate ~verify ~keep ~cancelled composite d)
 
-(* §5.9 on a main of millions of chunks: one table of referenced chunks, each
-   flagged once a shard listing shows it, and the chunk area read one shard at
-   a time. *)
+(* §5.9 on a main of millions of chunks: one packed set of referenced chunks,
+   each taken out once a shard listing shows it, and the chunk area read one
+   shard at a time. What is left was referenced and never listed. *)
 let survey_one ~narrate:nr ~verify ~cancelled d m =
   let check () = if cancelled () then raise (Halt "cancelled") in
   try
-    let referenced : (Chunk_key.t, bool) Hashtbl.t = Hashtbl.create 65536 in
+    let referenced = Chunk_set.create ~max:max_int () in
     let corrupt = ref 0 in
     let run, run_unreadable =
       match Gc_record.read m.member.store d with
@@ -676,22 +676,21 @@ let survey_one ~narrate:nr ~verify ~cancelled d m =
       List.iteri
         (fun i ns ->
           check ();
-          List.iter
-            (fun c -> Hashtbl.replace referenced c false)
-            (namespace_references m d ns);
+          List.iter (Chunk_set.add referenced) (namespace_references m d ns);
           Narrate.progress nr
             ~fraction:(float (i + 1) /. float (max 1 total))
             "read %d of %d folders and version folders; %d chunks referenced"
             (i + 1) total
-            (Hashtbl.length referenced))
+            (Chunk_set.cardinal referenced))
         namespaces
     with
       | exception Halt reason -> Error reason
       | () ->
           let reclaimable = ref 0 and bytes = ref 0 in
+          let chunks_referenced = Chunk_set.cardinal referenced in
           Narrate.say nr
             "  %s referenced; listing the chunk area shard by shard%s"
-            (Narrate.count (Hashtbl.length referenced) "chunk")
+            (Narrate.count chunks_referenced "chunk")
             (if verify then " and re-hashing every referenced chunk" else "");
           List.iteri
             (fun i shard ->
@@ -704,7 +703,7 @@ let survey_one ~narrate:nr ~verify ~cancelled d m =
                 m.member.store.list_prefix (Key.shard_prefix d shard)
               in
               let s =
-                Gc_plan.unreferenced ~referenced:(Hashtbl.mem referenced)
+                Gc_plan.unreferenced ~referenced:(Chunk_set.mem referenced)
                   listing
               in
               reclaimable := !reclaimable + s.reclaimable;
@@ -712,8 +711,8 @@ let survey_one ~narrate:nr ~verify ~cancelled d m =
               List.iter
                 (fun (e : Store.entry) ->
                   match Key.chunk_of e.key with
-                    | Some c when Hashtbl.mem referenced c ->
-                        Hashtbl.replace referenced c true;
+                    | Some c when Chunk_set.mem referenced c ->
+                        Chunk_set.remove referenced c;
                         if verify then (
                           match m.member.store.get_opt e.key with
                             | Some b
@@ -727,17 +726,14 @@ let survey_one ~narrate:nr ~verify ~cancelled d m =
           Narrate.say nr "  survey done in %s"
             (Narrate.duration (Rt.now () -. t0));
           let missing =
-            Hashtbl.fold
-              (fun c seen acc -> if seen then acc else c :: acc)
-              referenced []
-            |> List.sort Chunk_key.compare
+            List.sort Chunk_key.compare (Chunk_set.elements referenced)
           in
           Ok
             {
               surveyed = m.member.name;
               run;
               run_unreadable;
-              chunks_referenced = Hashtbl.length referenced;
+              chunks_referenced;
               chunks_reclaimable = !reclaimable;
               bytes_reclaimable = !bytes;
               chunks_missing = missing;

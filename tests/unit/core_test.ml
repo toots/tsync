@@ -334,6 +334,9 @@ let () =
   (* A table of key strings holds the same in about 8.5 MB. *)
   p "held in under 4 MB: %b\n"
     (Obj.reachable_words (Obj.repr set) * (Sys.word_size / 8) < 4_000_000);
+  p "listed back: %b\n"
+    (List.sort compare (Chunk_set.elements set)
+    = List.sort compare (List.init n key));
   Chunk_set.remove set (key 7);
   p "removed one: %b, %d held\n"
     (not (Chunk_set.mem set (key 7)))

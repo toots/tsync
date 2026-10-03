@@ -16,4 +16,8 @@ val remove : t -> Chunk_key.t -> unit
 val clear_shard : t -> string -> unit
 
 val clear : t -> unit
+
+(** Every key, shard by shard. *)
+val elements : t -> Chunk_key.t list
+
 val cardinal : t -> int
