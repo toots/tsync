@@ -33,18 +33,16 @@ Code: `lib/frontends/http_proxy/` (`store_server.ml`, `share_server.ml`, `watch_
   `read_within`'s reservation and verifies the signature, then calls `admitted`, so an unsigned body
   that drips holds memory reserved from its declared length and no slot. §A4.2 and §A5 count the
   body read inside the slot. A body slower than `body_deadline` is answered 408 `body too slow`.
-- **The slot is released before the response body is written** (finding 79): `admitted` wraps
-  `execute`, which answers a response value.
 - **Counters.** `Status_report.listener` has `in_flight`, `data_in_flight` (requests holding or
   awaiting a slot, together), the two byte totals and the tallies. It has no `dataWaiting`, no
   `requestsPerSec` and nothing of the share bound (finding 142).
 - **Status collection** asks the owner socket of each verified route for
   `Stats ("frontend" :: arg)`, not a list of peer sockets. The `totals` arguments are forwarded and
   the owners ignore them ([07](../07-daemon-cli.md)).
-- **Memory.** Besides the early release above: a bulk
-  answer is encoded whole (`Proxy_wire.encode_bodies`, `encode_folders`) after reading eight bodies
-  at a time inside one slot (finding 78); a share response holds a share slot only and reads each
-  chunk it covers whole (finding 81); the process never compacts or trims its heap (finding 95).
+- **Memory.** A bulk answer is encoded whole (`Proxy_wire.encode_bodies`, `encode_folders`) after
+  reading eight bodies at a time inside one slot; for a client sending `Proxy_wire.partial_header`
+  a get-multi answer stops once it holds `bulk_answer_budget`. A share response holds a share slot
+  only and reads each chunk it covers whole (finding 81).
 
 ## Learnings
 

@@ -50,11 +50,6 @@ parentheses are the spec's. The request handler itself is in [08-frontends.md](0
 - **Loop death (§3.7).** The runtime is a pool of domains with no single loop to die. A failing
   scheduler task is logged with its backtrace (`Rt.task_error`, set by `Log`) and a failing detached
   fiber with its name (`Rt.detached_failure`); neither ends the process.
-- **Supervision.** A child that cannot be spawned is retried at every 0.5 s tick, logging each time
-  (finding 127). The supervisor asks an owner for `stats` with the owner's own request deadline, so
-  a slow owner reads as unanswered (finding 107).
-- **Socket bind.** `Ipc.serve` changes the process umask around the bind while other domains may
-  create files (finding 115).
 
 ## Learnings
 

@@ -43,8 +43,6 @@ formats and operations are mapped in [../04-checkout-cache.md](../04-checkout-ca
 - **Mirror entries are read into the heap**, not mapped
   ([../04-checkout-cache.md](../04-checkout-cache.md)).
 - **Owner start walks the whole of `<C>`** for temporaries before serving (review finding 88).
-- **An unparseable last-sync mark is left in place**: `Mark.read` reports it and answers no mark,
-  and nothing sets the file aside (review finding 125).
 
 ## Learnings
 

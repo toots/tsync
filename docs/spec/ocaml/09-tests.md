@@ -117,14 +117,11 @@ that the output never shows, so every driver is diffed against the same lines.
   decision; the two-client tests pick pairs by hand.
 - **Fixed sleeps as negative waits** (finding 158): `tests/store/spaces_test`, `tests/unit/dqueue_test`,
   `tests/gc/queued_test`. Under load a broken guard passes.
-- **Tests that cannot fail for their reason.** The Dqueue "cancels the running one" case gives the
-  same log when the job ends normally (finding 105); "callbacks one at a time" in `remote_test`
-  depends on a `Thread.yield` window (finding 106); the proxy watch test passes at the 2 s polling
-  floor (finding 103); the S3 signature verifier uses the product's own canonicaliser (finding 159).
-- **Native TLS** (findings 99, 100, 152). Body bytes are not checked against position-dependent data,
-  multi-record writes are untested, system trust is seen to succeed only in the dispatch-only
-  conformance job, and the piecewise-read test hangs on an early end of file instead of failing.
-- **Cleanup hides the cause** (finding 153): an exception in the cloud tests' cleanup masks the
-  contract's failure. `s3_test` scopes real objects by pid alone (finding 154).
+- **Tests that cannot fail for their reason.** "Callbacks one at a time" in `remote_test` depends
+  on a `Thread.yield` window (finding 106); the proxy watch test passes at the 2 s polling floor
+  (finding 103); the S3 signature verifier uses the product's own canonicaliser (finding 159).
+- **Native TLS** (findings 99, 100). Body bytes are not checked against position-dependent data,
+  multi-record writes are untested, and system trust is seen to succeed only in the dispatch-only
+  conformance job.
 - **Environment-dependent snapshots** (finding 157): `gc_scoping` sorts without a pinned locale, and
   `config_test.expected` lists the backends and frontends of the build.

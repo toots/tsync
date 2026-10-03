@@ -37,10 +37,6 @@ collectable main owes its deletions to every replica and backfill (`targets` in 
   collector's exclusive take times out after 30 s, and the error names a collection as the holder.
 - **Every manifest write wakes the cursor watch** (finding 138): the publish lock file sits in the
   directory the local driver watches.
-- **Outstanding discard requests are not in the collector's report** (finding 131). They are listed by
-  `Composite.outstanding`, which only the `Outstanding` action of `Jobs.copies` prints.
-- **`Delete_many` on a copy is one read and one delete per key** (finding 96): an expiry of many keys
-  is serial on the replica.
 - **Integrity holds the whole tree before it reports** (finding 85).
 - **Collection is refused while a remote copy would be told key by key.** `Collector.run` answers
   `Unsupported`, unless `keep`, when the collecting main owes deletions to a remote copy whose bucket
