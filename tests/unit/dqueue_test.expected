@@ -27,3 +27,6 @@ keyed-unreadable: ran v#0 u#0 u#0, records on disk: 0
 
 == keyed: a retry while a newer job for its key is pending
 ran: sf.1#0 sf.2#0 sf.2#1 other.1#0; idle: true; records on disk: 0
+
+== a stop waits for the running job and takes no other
+when the settle returned: long.1#0, long.1 finished; later: long.1#0, long.1 finished; left on disk: 1
