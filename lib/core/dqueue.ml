@@ -124,11 +124,17 @@ module Records = struct
                 false)
               else true)
 
+  (* Pitfall C-7.10: the descriptor is the caller's only once locked. *)
   let hold t id =
     let fd = Fs.openfile (path t id) [O_RDONLY] in
-    if not (Fs.flock ~block:true fd) then
-      Fail.raise_ Fail.Local "cannot hold %s" id;
-    fd
+    match Fs.flock ~block:true fd with
+      | true -> fd
+      | false ->
+          Fs.close fd;
+          Fail.raise_ Fail.Local "cannot hold %s" id
+      | exception e ->
+          Fs.close fd;
+          raise e
 end
 
 type 'job kind = {
