@@ -176,3 +176,6 @@ Related notes: [data-model/local-cache.md](data-model/local-cache.md),
   tear those files behind a record that survives the crash. Writes that a later durable record
   depends on keep their own fsync, and their directories are fsynced before the record is written.
   Dropping the per-file fsync made the file-id backfill fast and left exactly that hole.
+  Still open: a rebuild fsyncs each entry's data but writes the last-sync mark after a `syncfs`
+  only, so a crash right after the mark can lose entries' directory records (never tear them)
+  until the next full resync.
