@@ -2,7 +2,7 @@ import AppKit
 import FileProvider
 import ServiceManagement
 
-/// The login item (§2): registers the service and itself, reconciles domains,
+/// The login item (§2): registers itself, reconciles domains,
 /// relays the owner's events and shows the menu. It never offers to quit:
 /// without it no remote change reaches the replica until the next login.
 @main
@@ -27,7 +27,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         })
         self.menu = menu
-        menu.update(registrationProblem: registerServices())
+        menu.update(registrationProblem: registerLoginItem())
         reconciler.onPass = { [relay] domains, report in
             relay.update(domains)
             menu.update(domains: domains, report: report)
@@ -36,21 +36,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         relay.start()
     }
 
-    /// §11: the login item and the service's agent, both through the
-    /// service-management API. Answers what the menu should say when either
-    /// failed.
-    private func registerServices() -> String? {
+    /// §11: the app as a login item. The service's agent is the installer's:
+    /// a sandboxed app may register only sandboxed agents. Answers what the menu
+    /// should say when registration failed.
+    private func registerLoginItem() -> String? {
         if FileManager.default.fileExists(atPath: Tsync.purgeMarker.path) { return nil }
-        var problems: [String] = []
         do { try SMAppService.mainApp.register() } catch {
-            problems.append("login item: \(error.localizedDescription)")
+            return "Not registered as a login item: \(error.localizedDescription)"
         }
-        let agent = SMAppService.agent(plistName: Reconciler.agentPlist)
-        if agent.status != .enabled {
-            do { try agent.register() } catch {
-                problems.append("service: \(error.localizedDescription)")
-            }
-        }
-        return problems.isEmpty ? nil : "Not registered: " + problems.joined(separator: "; ")
+        return nil
     }
 }

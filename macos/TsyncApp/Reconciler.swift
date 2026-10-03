@@ -78,12 +78,12 @@ final class Reconciler {
         let fm = FileManager.default
 
         // Step 3: purge. Nothing is registered, and the marker goes only once
-        // every domain was removed and the services unregistered.
+        // every domain was removed and the login item unregistered; the
+        // service's agent is the purge command's to remove (§9.4).
         if fm.fileExists(atPath: Tsync.purgeMarker.path) {
             let (existing, _) = listDomains(until)
             let removed = existing.filter { remove($0, until, &report) }
             if removed.count == existing.count {
-                try? SMAppService.agent(plistName: Self.agentPlist).unregister()
                 try? SMAppService.mainApp.unregister()
                 try? fm.removeItem(at: Tsync.purgeMarker)
             }
@@ -162,8 +162,6 @@ final class Reconciler {
         report.preserved = preserved
         return (registered, report)
     }
-
-    static let agentPlist = "\(Tsync.serviceLabel).plist"
 
     /// A failure to list counts as an empty list and marks the pass unlisted.
     private func listDomains(_ until: Date) -> ([NSFileProviderDomain], Bool) {
