@@ -41,8 +41,16 @@ type server
 (** Binds [path] after checking its directory (0700, owned by this uid) and its
     length, removing a stale socket file, and serves until {!close}. Each
     connection's peer must be this uid. A failure while serving one connection
-    closes that connection only. *)
-val serve : path:string -> (json -> answer) -> server
+    closes that connection only.
+
+    A [ping] is answered [ok] here and never reaches the handler (07 §4.3). The
+    handler runs as [execution] says of its request, may-block work by default
+    (01 §6.5). *)
+val serve :
+  ?execution:(json -> Tsync_core.Rt.execution) ->
+  path:string ->
+  (json -> answer) ->
+  server
 
 (** Stops accepting, ends every connection, removes the socket file once. A
     connection answering a request is given a few seconds to write its reply. *)

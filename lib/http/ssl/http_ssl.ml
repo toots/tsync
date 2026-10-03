@@ -31,7 +31,7 @@ let ssl_context ca_file =
             c)
 
 (* A non-blocking OpenSSL call answers "want read" or "want write" until the
-   socket is ready. *)
+   socket is ready; the wait and the retry are non-blocking I/O (01 §6.5). *)
 let rec ssl_retry ?timeout fd f =
   match f () with
     | v -> v
@@ -40,15 +40,17 @@ let rec ssl_retry ?timeout fd f =
         | Ssl.Write_error Error_want_read
         | Ssl.Connection_error Error_want_read
         | Ssl.Accept_error Error_want_read ) ->
-        Rt.wait_readable ?timeout fd;
-        ssl_retry ?timeout fd f
+        Rt.within `Immediate (fun () ->
+            Rt.wait_readable ?timeout fd;
+            ssl_retry ?timeout fd f)
     | exception
         ( Ssl.Read_error Error_want_write
         | Ssl.Write_error Error_want_write
         | Ssl.Connection_error Error_want_write
         | Ssl.Accept_error Error_want_write ) ->
-        Rt.wait_writable ?timeout fd;
-        ssl_retry ?timeout fd f
+        Rt.within `Immediate (fun () ->
+            Rt.wait_writable ?timeout fd;
+            ssl_retry ?timeout fd f)
 
 let of_ssl fd s =
   let read ?timeout buf off len =

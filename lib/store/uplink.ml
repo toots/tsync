@@ -200,7 +200,7 @@ and arm g =
           let delay = Budget.wait_for g.budget ~now:(Rt.now ()) w.bytes in
           if delay < infinity then (
             g.armed <- true;
-            Rt.timer (Float.max 0.001 delay) (fun () ->
+            Rt.timer ~execution:`Direct (Float.max 0.001 delay) (fun () ->
                 Mutex.protect g.m (fun () ->
                     g.armed <- false;
                     pump g;
@@ -352,7 +352,10 @@ let renew gates reports =
         let request =
           { Lease.pid = Unix.getpid (); links = reports; flat = false }
         in
-        (match Rt.with_timeout renewal_timeout (fun () -> call request) with
+        (match
+           Rt.within `Direct (fun () ->
+               Rt.with_timeout renewal_timeout (fun () -> call request))
+         with
           | Some (answer : Lease.answer) ->
               Mutex.protect proc_m (fun () ->
                   proc.missed <- 0;

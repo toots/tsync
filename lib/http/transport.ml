@@ -22,13 +22,16 @@ let retry_io = function
   | Unix.Unix_error ((EAGAIN | EWOULDBLOCK | EINTR), _, _) -> true
   | _ -> false
 
+(* 01 §6.5: a call that would block waits and retries as non-blocking I/O;
+   one that goes through costs no change of class. *)
 let plain fd =
   let rec read ?timeout buf off len =
     match Unix.read_bigarray fd buf off len with
       | n -> n
       | exception e when retry_io e ->
-          Rt.wait_readable ?timeout fd;
-          read ?timeout buf off len
+          Rt.within `Immediate (fun () ->
+              Rt.wait_readable ?timeout fd;
+              read ?timeout buf off len)
   in
   let write ?timeout b =
     let rec go off =
@@ -38,8 +41,9 @@ let plain fd =
         with
           | n -> go (off + n)
           | exception e when retry_io e ->
-              Rt.wait_writable ?timeout fd;
-              go off)
+              Rt.within `Immediate (fun () ->
+                  Rt.wait_writable ?timeout fd;
+                  go off))
     in
     go 0
   in

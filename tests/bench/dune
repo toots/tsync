@@ -2,6 +2,7 @@
 
 (executable
  (name rebuild_mem)
+ (modules rebuild_mem)
  (libraries
   tsync_core
   tsync_store
@@ -10,3 +11,8 @@
   tsync_sync
   mem_usage
   unix))
+
+(executable
+ (name class_bench)
+ (modules class_bench)
+ (libraries tsync_core tsync_ipc threads.posix unix))

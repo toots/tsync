@@ -101,15 +101,14 @@ type served = {
   go : unit -> unit;
 }
 
-let answered_while_draining = ["stats"; "status"; "stop"; "ping"]
+let answered_while_draining = ["stats"; "status"; "stop"]
 
 (* A socket serving several domains routes by [domain]; one serving a single
    domain may be asked without it. *)
 let route ~draining ~router served req =
   let action = Option.value ~default:"" (Ipc.field req "action") in
-  if action = "ping" then Ipc.Reply (Ipc.ok [])
-  else if Atomic.get draining && not (List.mem action answered_while_draining)
-  then Ipc.Reply (Ipc.failure (Fail.make Fail.Unexplained "stopping"))
+  if Atomic.get draining && not (List.mem action answered_while_draining) then
+    Ipc.Reply (Ipc.failure (Fail.make Fail.Unexplained "stopping"))
   else (
     (* 08 §3.3: a shared socket's router answers its own actions when no domain
        is named, and declines the rest. *)

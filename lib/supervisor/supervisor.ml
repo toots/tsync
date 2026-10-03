@@ -314,9 +314,12 @@ let machine_report arg children : R.machine =
            processes);
   }
 
+(* 01 §6.5: a lease renewal's answer is time-sensitive. *)
+let execution req =
+  if Ipc.field req "action" = Some "uplink" then `Direct else `Threaded
+
 let handle children req =
   match Ipc.field req "action" with
-    | Some "ping" -> Ipc.Reply (Ipc.ok [])
     | Some "stop" ->
         Stop.request ();
         Ipc.Reply (Ipc.ok [])
@@ -391,7 +394,7 @@ let run ~exe (config : Config.t) children =
               })
             children
         in
-        match Ipc.serve ~path (handle children) with
+        match Ipc.serve ~execution ~path (handle children) with
           | exception e ->
               Log.err "cannot serve %s: %s" path (Printexc.to_string e);
               2
