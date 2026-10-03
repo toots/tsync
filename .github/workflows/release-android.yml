@@ -1,0 +1,143 @@
+name: release-android
+
+# Builds and checks the APK on every pull request and push to rewrite,
+# publishing nothing (10 §1). On main it runs after the gate, `test`, passes.
+# workflow_run fires only from the default branch's copy of this file.
+on:
+  push:
+    branches: [rewrite]
+  pull_request:
+  workflow_run:
+    workflows: [test]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: release-android-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  apk:
+    # 10 §2: only a gate run for a push to this repository releases.
+    if: >-
+      github.event_name != 'workflow_run'
+      || (github.event.workflow_run.conclusion == 'success'
+          && github.event.workflow_run.event == 'push'
+          && github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: write
+    env:
+      SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+      # 10 §5.4: each build outranks the one before.
+      BUILD_NUMBER: ${{ github.run_number }}
+      PUBLISH: >-
+        ${{ (github.event_name == 'workflow_run'
+             && github.event.workflow_run.event == 'push'
+             && github.event.workflow_run.head_repository.full_name == github.repository
+             && github.event.workflow_run.head_branch == 'main')
+            || (github.event_name == 'workflow_dispatch'
+                && github.ref == 'refs/heads/main') }}
+      # A pull request never signs with the tsync key, and a fork has no secret.
+      KEYSTORE_B64: ${{ github.event_name != 'pull_request' && secrets.ANDROID_KEYSTORE_B64 || '' }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ github.event_name != 'pull_request' && secrets.ANDROID_KEYSTORE_PASSWORD || '' }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.SHA }}
+
+      # The app's minimum platform level (android-app §12): the prefix names it.
+      - name: The NDK toolchain
+        run: |
+          echo "ANDROID_NDK_HOME=$ANDROID_NDK_LATEST_HOME" >> "$GITHUB_ENV"
+          echo "TOOLPREF64=$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android26-" >> "$GITHUB_ENV"
+
+      # The cross compiler is built from, and for, this compiler version.
+      - uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: "5.4.1"
+
+      - name: The cross-compilation repository
+        run: opam repository add android git+https://github.com/ocaml-cross/opam-cross-android.git
+
+      - name: Restore the opam switch
+        id: opam-switch
+        uses: actions/cache/restore@v4
+        with:
+          path: _opam
+          key: opam-android-cross-${{ hashFiles('tsync-android.opam', 'scripts/opam_deps.sh') }}
+
+      # 10 §4.1: the package list is tsync-android.opam.
+      - name: The cross switch
+        run: ./scripts/opam_deps.sh tsync-android
+
+      - name: Save the opam switch
+        if: steps.opam-switch.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: _opam
+          key: opam-android-cross-${{ hashFiles('tsync-android.opam', 'scripts/opam_deps.sh') }}
+
+      # The context's path, not the bare target: the native context would want
+      # every desktop dependency.
+      - name: Cross-build the core
+        run: opam exec -- dune build --profile release -x android _build/default.android/lib/frontends/android/jni/libtsyncjni.so
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: The signing key
+        if: env.KEYSTORE_B64 != ''
+        run: |
+          echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/tsync.jks"
+          echo "ANDROID_KEYSTORE_FILE=$RUNNER_TEMP/tsync.jks" >> "$GITHUB_ENV"
+
+      # Fails without the core library (android-app §12). Without the key, the
+      # package is signed with a throwaway one.
+      - name: Package
+        working-directory: android
+        run: |
+          ./gradlew :app:assembleRelease
+          mkdir -p ../dist
+          cp app/build/outputs/apk/release/app-release.apk ../dist/tsync-arm64-v8a.apk
+
+      - name: The package holds the core, aligned for 16 KB pages
+        run: |
+          tools=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          echo "BUILD_TOOLS=$tools" >> "$GITHUB_ENV"
+          unzip -l dist/tsync-arm64-v8a.apk | grep -q 'lib/arm64-v8a/libtsyncjni\.so$'
+          "$tools/zipalign" -c -P 16 -v 4 dist/tsync-arm64-v8a.apk > zipalign.log
+          grep -q 'lib/arm64-v8a/libtsyncjni\.so (OK)' zipalign.log
+
+      # 10 §5.4: any other signer is refused, since a phone would refuse it as
+      # an update.
+      - name: The signer is the tsync key
+        if: env.KEYSTORE_B64 != ''
+        run: |
+          "$BUILD_TOOLS/apksigner" verify --print-certs dist/tsync-arm64-v8a.apk > signer.log
+          cat signer.log
+          grep -q 'Signer #1 certificate DN: CN=tsync$' signer.log
+
+      - name: Signing half not run
+        if: env.KEYSTORE_B64 == ''
+        run: |
+          echo "::notice::not signed with the tsync key (a pull request, or no ANDROID_KEYSTORE_B64: scripts/setup_android_signing.sh provisions it)"
+          if [ "$PUBLISH" = true ]; then
+            echo "refusing to publish an APK signed with another key"; exit 1
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tsync-apk
+          path: dist/*.apk
+
+      - if: env.PUBLISH == 'true'
+        uses: ./.github/actions/publish-nightly
+        with:
+          files: dist/*.apk
+          sha: ${{ env.SHA }}
+          token: ${{ github.token }}
