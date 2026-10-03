@@ -7,6 +7,9 @@ function deployed:
   main: unsupported
   bucket: done, 1 corrupt
   rotten chunk marked: true, sound ones not: true
+every shard checked, markers unlistable:
+  main: unsupported
+  bucket: stalled, 0 left, unknown corrupt
 function no longer notified:
   main: unsupported
   bucket: stalled, 4096 left, 1 corrupt

@@ -25,8 +25,8 @@ let check_shard (inner : Store.t) request =
     | None -> ignore (inner.delete request)
 
 (* [at_once] consumes each request inside its put, so what was written is gone
-   before anyone looks. *)
-let bucket ~function_on ~at_once (inner : Store.t) =
+   before anyone looks; [markers_down] fails every listing of the markers. *)
+let bucket ~function_on ~at_once ~markers_down (inner : Store.t) =
   let notify key =
     if Atomic.get function_on then
       if Key.parse_verify_job key <> None then
@@ -40,6 +40,11 @@ let bucket ~function_on ~at_once (inner : Store.t) =
     local_path = None;
     bucket_functions = true;
     capabilities = (fun p -> { (inner.capabilities p) with verified = false });
+    list_prefix =
+      (fun ?max_keys p ->
+        if Atomic.get markers_down && p = Key.corrupted d then
+          Fail.raise_ Fail.Link "markers unreachable";
+        inner.list_prefix ?max_keys p);
     put =
       (fun ?mode key body ->
         inner.put ?mode key body;
@@ -56,7 +61,8 @@ let () =
   let main = Local.create ~name:"main" (Filename.concat root "main") in
   let inner = Local.create ~name:"bucket" (Filename.concat root "bucket") in
   let function_on = Atomic.make false and at_once = Atomic.make false in
-  let copy = bucket ~function_on ~at_once inner in
+  let markers_down = Atomic.make false in
+  let copy = bucket ~function_on ~at_once ~markers_down inner in
   Rt.run_sync (fun () ->
       let c =
         Composite.create
@@ -95,6 +101,7 @@ let () =
             (Key.chunk d (Chunk_key.of_body body))
             (Bigstring.of_string stored))
         [("one", "one"); ("two", "two"); ("rot", "rotten")];
+      let count = function Some n -> string_of_int n | None -> "unknown" in
       let show label results =
         p "%s:\n" label;
         List.iter
@@ -104,9 +111,11 @@ let () =
                 | Integrity.Unsupported -> "unsupported"
                 | Done { corrupt } -> Printf.sprintf "done, %d corrupt" corrupt
                 | Stalled { left; corrupt } ->
-                    Printf.sprintf "stalled, %d left, %d corrupt" left corrupt
+                    Printf.sprintf "stalled, %s left, %s corrupt" (count left)
+                      (count corrupt)
                 | Abandoned { left; corrupt } ->
-                    Printf.sprintf "abandoned, %d left, %d corrupt" left corrupt))
+                    Printf.sprintf "abandoned, %s left, %s corrupt" (count left)
+                      (count corrupt)))
           results
       in
       let leftover () = List.length (inner.list_prefix (Key.verify_jobs d)) in
@@ -127,6 +136,9 @@ let () =
       p "  rotten chunk marked: %b, sound ones not: %b\n"
         (inner.head_opt (Key.marker d (Chunk_key.of_body "rot")) <> None)
         (inner.head_opt (Key.marker d (Chunk_key.of_body "one")) = None);
+      Atomic.set markers_down true;
+      show "every shard checked, markers unlistable" (verify ());
+      Atomic.set markers_down false;
       Atomic.set function_on false;
       show "function no longer notified" (verify ());
       clear ();
@@ -172,7 +184,7 @@ let () =
             {
               name = "main-bucket";
               role = Main;
-              store = bucket ~function_on:on ~at_once inner;
+              store = bucket ~function_on:on ~at_once ~markers_down inner;
             };
           ]
       in

@@ -74,8 +74,8 @@ type chunk_repair = Cleared | Repaired of string | Unrepairable
 type verified =
   | Unsupported
   | Done of { corrupt : int }
-  | Stalled of { left : int; corrupt : int }
-  | Abandoned of { left : int; corrupt : int }
+  | Stalled of { left : int option; corrupt : int option }
+  | Abandoned of { left : int option; corrupt : int option }
 
 let orphan_grace = Tsync_sync.Outbound.horizon +. (7. *. 86400.)
 
@@ -366,21 +366,23 @@ module Make (C : Context.S) = struct
       let left = count (Key.verify_jobs d)
       and corrupt = count (Key.corrupted d) in
       let now = (left, corrupt) in
-      let left' = Option.value ~default:(-1) left
-      and corrupt' = Option.value ~default:0 corrupt in
+      let shown = function Some n -> string_of_int n | None -> "?" in
       Narrate.progress narrate
-        ~fraction:(1. -. (float (max 0 left') /. 4096.))
-        "%s: %d shard requests left, %d corrupt chunks so far" m.name left'
-        corrupt';
-      if left = Some 0 then Done { corrupt = corrupt' }
-      else (
-        let still = if now = last || left = None then still + 1 else 0 in
-        if still >= stall_polls then
-          Stalled { left = left'; corrupt = corrupt' }
-        else if cancelled () then Abandoned { left = left'; corrupt = corrupt' }
-        else (
-          Rt.sleep poll;
-          go ~still now))
+        ~fraction:(1. -. (float (Option.value ~default:4096 left) /. 4096.))
+        "%s: %s shard requests left, %s corrupt chunks so far" m.name
+        (shown left) (shown corrupt);
+      match now with
+        | Some 0, Some corrupt -> Done { corrupt }
+        | _ ->
+            let still =
+              if now = last || left = None || corrupt = None then still + 1
+              else 0
+            in
+            if still >= stall_polls then Stalled { left; corrupt }
+            else if cancelled () then Abandoned { left; corrupt }
+            else (
+              Rt.sleep poll;
+              go ~still now)
     in
     go ~still:0 (None, None)
 
@@ -405,9 +407,9 @@ module Make (C : Context.S) = struct
         if not q then (m.name, Unsupported)
         else if cancelled () then (
           let count p =
-            try List.length (m.store.list_prefix p) with
+            try Some (List.length (m.store.list_prefix p)) with
               | (Stop.Stopping | Rt.Cancelled) as e -> raise e
-              | _ -> 0
+              | _ -> None
           in
           ( m.name,
             Abandoned
