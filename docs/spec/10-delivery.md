@@ -128,7 +128,8 @@ without the secrets (a fork), the job builds and tests the app unsigned and repo
 ## 6. Secrets
 
 - Every secret a workflow needs is provisioned by a script in `scripts/`: `setup_ci_secrets.sh` for
-  the live stores, `setup_repo_signing.sh` for the repository key, and one per signing identity.
+  the live stores and `setup_repo_signing.sh` for the repository key. The macOS signing secrets are
+  the exception: their certificate is exported by hand, so `macos/RELEASING.md` states the steps.
 - A job that requires a secret fails naming each missing one and its script; a job on a fork, which
   receives no secrets, skips the steps that need them and says so.
 
