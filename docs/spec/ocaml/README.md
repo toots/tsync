@@ -59,6 +59,13 @@ therefore separates two kinds of note:
    every finished listing wait in memory; a large domain's rebuild peaked near 1.8 GB. Measure with
    private memory split into anonymous, file-backed and OCaml heap before guessing.
    ([memory.md](memory.md))
+8. **An action owed on every path is a `Fun.protect ~finally`, not a copy per branch.** Closing a
+   descriptor, releasing a slot or a hold, unlocking: written once in `finally`, it also runs when
+   the body raises, which a copy at the end of each branch does not, and a later branch cannot
+   forget it. Keep in the body only what runs on success (handing a record to its queue). A
+   resource handed to the caller on success but owed back on failure (a descriptor opened then
+   locked, a slot passed to a response) is a `match … with exception e -> release; raise e` around
+   every step after its acquisition, not a release on one failure branch.
 
 ## Migration order, if moving off Lwt
 
