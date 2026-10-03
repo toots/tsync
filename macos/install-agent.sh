@@ -20,6 +20,12 @@ LOG="$HOME/Library/Logs/tsync-daemon.log"
 }
 
 launchctl bootout "gui/$UID/$LABEL" 2>/dev/null || true
+# A service still draining after bootout makes the bootstrap below fail with
+# an I/O error; wait until launchd has let it go.
+for _ in $(seq 1 60); do
+    launchctl print "gui/$UID/$LABEL" >/dev/null 2>&1 || break
+    sleep 0.5
+done
 # A leftover socket makes callers think the daemon is up before it is.
 rm -f "$SOCKET"
 

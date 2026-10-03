@@ -43,8 +43,11 @@ let own_marker dir leaf =
 let fid_marker dir leaf =
   Filename.concat dir (".tsync-fid-" ^ Xxh.hex16 (Xxh.string leaf))
 
+(* A non-durable write is part of a bulk pass that flushes once at its end
+   (rebuild, backfill) or of a rebuildable projection; each reader treats a torn
+   file as absent. *)
 let write ?(durable = true) p data =
-  if durable then Fs.durable_replace p data else Fs.replace p data
+  if durable then Fs.durable_replace p data else Fs.replace_unsynced p data
 
 (* Skip the write when the file already holds these bytes, so a directory's
    mtime moves only when its set of children changes. *)

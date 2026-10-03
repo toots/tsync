@@ -174,6 +174,20 @@ let replace_gen ~dir_sync ?perm p data =
 
 let durable_replace ?perm p data = replace_gen ~dir_sync:true ?perm p data
 let replace ?perm p data = replace_gen ~dir_sync:false ?perm p data
+
+let replace_unsynced ?(perm = 0o600) p data =
+  let dir = Filename.dirname p in
+  mkdir_p dir;
+  let tmp = temp_in dir in
+  try
+    with_fd
+      (openfile ~perm tmp [O_WRONLY; O_CREAT; O_EXCL])
+      (fun fd -> write_all fd data);
+    rename tmp p
+  with e ->
+    unlink_quiet tmp;
+    raise e
+
 let link a b = sys (fun () -> Unix.link a b)
 
 (* Durable create-if-absent: the winner's body is whole the instant its name
