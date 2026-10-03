@@ -10,8 +10,8 @@ it is published, which artifacts are released and how, and how a build obtains i
 
 - **Nothing is published from a commit that has not passed the gate (§3) on that commit.** A release
   runs after the gate, never alongside it, and builds the commit the gate passed, not the branch head.
-- **Packaging is checked before merge.** Every release build and its install test run on every push
-  and pull request, publishing nothing; a change that breaks a package is red on its own pull request.
+- **Packaging is checked before merge.** Every release build and its install test run on every pull
+  request and push to the development branch, publishing nothing; a change that breaks a package is red on its own pull request.
 - **A job proves what it did** (09 §10.1). A build asserts the components it was meant to contain
   (§4.3); a suite that ran nothing fails; a check missing a credential it requires fails and names it.
 - **Each rule has one home.** Installing dependencies (§4.1), publishing to the nightly release
@@ -25,7 +25,7 @@ it is published, which artifacts are released and how, and how a build obtains i
 |---|---|---|---|
 | `test`, the gate (§3) | every push, every pull request, the merge queue | merging, every release | nothing |
 | `conformance` (§3.3) | manual dispatch | nothing automatically | nothing |
-| `release-deb`, `release-rpm`, `release-macos` | every push and pull request, without publishing; `test` passing on `main`; manual dispatch | — | the nightly release, only for a commit of `main` that passed `test` |
+| `release-deb`, `release-rpm`, `release-macos` | every pull request and push to the development branch, without publishing; `test` passing on `main`; manual dispatch | — | the nightly release, only for a commit of `main` that passed `test` |
 | `release-repo` | a package release publishing; manual dispatch on `main` | — | the apt and dnf repositories |
 
 - A newer `test` run for the same ref cancels the older one. A release workflow is serialised per ref
@@ -98,7 +98,7 @@ to contain a component asserts it from `tsync build-info` before it is tested or
 | Artifact | Built on | Install test |
 |---|---|---|
 | `.deb` | Debian stable and Ubuntu latest, amd64 and arm64, in containers | install the package on the image it was built for and run the binary |
-| `.rpm` | the two latest Fedora releases, amd64 and arm64, in containers | as for `.deb` |
+| `.rpm` | the latest Fedora release, amd64 and arm64, in containers | as for `.deb` |
 | `tsync.pkg` | macOS, Apple silicon | check the package signature and that Gatekeeper accepts the notarized package |
 | Android APK | TODO (§7) | — |
 
@@ -139,17 +139,17 @@ without the secrets (a fork), the job builds and tests the app unsigned and repo
 
 ## 8. Where the workflows depart
 
-- `conformance` on the `rewrite` branch is the gate and also runs the live GCS contract on every push.
-  §2 splits them: the hermetic gate as `test`, the live stores by dispatch.
-- `scripts/opam_deps.sh`, `scripts/setup_repo_signing.sh` and `scripts/setup_ci_secrets.sh` are not on
-  the `rewrite` branch, and `linux/build.sh` spells its own installation.
-- No release workflow for macOS exists on `rewrite`.
+- No check drives a real FUSE mount (§3.1 item 1): the end-to-end FUSE test of `main` was not
+  rewritten.
+- The bucket-side verifier function is not exercised by `conformance`: the rewritten store tests do
+  not read `TSYNC_CI_*_VERIFY_FUNCTION`.
 
 ## Conformance
 
 - No artifact on the nightly release or in a repository was built from a commit whose gate failed or
   did not run, or from a branch other than `main`.
-- Every release build and install test runs on every pull request.
+- Every release build and install test runs on every pull request and push to the development
+  branch.
 - Every build that claims a component asserts it from `tsync build-info`.
 - Exactly one script installs OCaml dependencies, and every building job other than the user-install
   job calls it.
