@@ -53,6 +53,8 @@ type listener = {
   tls : bool;
   in_flight : int;
   data_in_flight : int;
+  shares_in_flight : int;  (** share responses open, of [shares_max] *)
+  shares_max : int;
   bytes_read : int;
   bytes_written : int;
   requests : (string * int) list;

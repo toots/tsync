@@ -73,6 +73,8 @@ type listener = {
   tls : bool;
   in_flight : int; [@key "inFlight"]
   data_in_flight : int; [@key "dataInFlight"]
+  shares_in_flight : int; [@key "sharesInFlight"] [@default 0]
+  shares_max : int; [@key "sharesMax"] [@default 0]
   bytes_read : int; [@key "bytesRead"]
   bytes_written : int; [@key "bytesWritten"]
   requests : (string * int) list;

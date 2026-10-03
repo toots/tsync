@@ -249,6 +249,11 @@ let listener b (l : listener) =
             Some
               (Printf.sprintf "%d in flight (%d data)" l.in_flight
                  l.data_in_flight);
+            (if l.shares_in_flight > 0 then
+               Some
+                 (Printf.sprintf "%d of %d share responses" l.shares_in_flight
+                    l.shares_max)
+             else None);
             Some
               (Printf.sprintf "read %s, written %s" (isize l.bytes_read)
                  (isize l.bytes_written));
