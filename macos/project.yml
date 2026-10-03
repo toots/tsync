@@ -22,6 +22,15 @@ targets:
     sources:
       - path: Shared
       - path: TsyncApp
+        excludes:
+          - LaunchAgents
+      # file-provider §11: the service's agent, defined inside the bundle for
+      # SMAppService.agent(plistName:).
+      - path: TsyncApp/LaunchAgents/org.feverdreamtv.tsync.daemon.plist
+        buildPhase:
+          copyFiles:
+            destination: wrapper
+            subpath: Contents/Library/LaunchAgents
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: org.feverdreamtv.tsync
@@ -53,10 +62,8 @@ targets:
         ENABLE_HARDENED_RUNTIME: YES
         ENABLE_PREVIEWS: NO
 
-  # Logic the two targets share, checked on its own. The identifier scheme and
-  # the error mapping are both contracts with the daemon that nothing else
-  # notices breaking: an identifier that round-trips wrong renames every item,
-  # and an error mapped to the wrong domain silently stops the system retrying.
+  # The pure parts of both targets, checked against the spec: references,
+  # versions, change batches, ranges, error codes, cursors and config reading.
   TsyncTests:
     type: bundle.unit-test
     platform: macOS
@@ -64,17 +71,13 @@ targets:
     sources:
       - path: Shared
       - path: TsyncTests
-      # The item model belongs with the extension, but building one out of what
-      # the daemon actually said is part of what these tests check.
+      - path: TsyncFileProvider/Row.swift
       - path: TsyncFileProvider/Item.swift
-      # Range arithmetic against an alignment the system picks at runtime, so
-      # there is no value to hard-code and no way to eyeball it in place.
-      - path: TsyncFileProvider/PartialRange.swift
-      # The page and anchor encodings, and the rules deciding which changes the
-      # system hears about. Both are pure, and both are things a listing does not
-      # show going wrong.
-      - path: TsyncFileProvider/Cursor.swift
       - path: TsyncFileProvider/ChangeBatch.swift
+      - path: TsyncFileProvider/PartialRange.swift
+      - path: TsyncFileProvider/Cursors.swift
+      - path: TsyncFileProvider/Errors.swift
+      - path: TsyncApp/Reconciler.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: org.feverdreamtv.tsync.tests
