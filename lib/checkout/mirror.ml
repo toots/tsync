@@ -44,7 +44,7 @@ let fid_marker dir leaf =
   Filename.concat dir (".tsync-fid-" ^ Xxh.hex16 (Xxh.string leaf))
 
 (* A non-durable write still fsyncs its data, so it is never torn; only its
-   directory entry waits for the caller's flush (ocaml 04: syncfs is no barrier
+   directory entry waits for the caller's flush (pitfall B-1.12: syncfs is no barrier
    on macOS). *)
 let write ?(durable = true) p data =
   if durable then Fs.durable_replace p data else Fs.replace p data

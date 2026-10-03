@@ -59,6 +59,11 @@ This file collects the traps that came from the implementation medium rather tha
 - **Check** — Wrappers re-raise two-path syscall errors naming the operand at fault.
 - **Seen** — PR #94.
 
+### B-1.12 `syncfs` is not a barrier on macOS
+- **Pitfall** — macOS has no `syncfs(2)`; the stub falls back to `sync()`, which only schedules the flush. A bulk pass that wrote without a fsync per file and then relied on one `syncfs` before a durable record (the file-id backfill's completion record) could lose or tear files behind a record that survives the crash: the backfill never ran again, and the files without an id never appeared in Finder. The rebuild's last-sync mark, written after a `syncfs`, still has the directory half of this exposure.
+- **Check** — Writes that a later durable record depends on keep their own data fsync, and their directories are fsynced before the record. No code treats `syncfs` as a barrier on a platform where it is `sync()`.
+- **Seen** — c2d525c8, rewrite.
+
 ## 2. Store API semantics: S3, GCS, S3-compatibles, http-proxy [store]
 
 ### B-2.1 Conditional write silently ignored by an S3-compatible
@@ -407,6 +412,11 @@ This file collects the traps that came from the implementation medium rather tha
 - **Pitfall** — The default 90 s stop timeout masked a hanging drain. With a bad config, `tsync start` exited 0 and the unit had no `RestartPreventExitStatus`; a stale unit pointing at a missing binary restart-looped every 5 s. The fd soft-limit target (8192) disagreed with the unit (65536). In the rewrite a first start failed when the data directory did not exist, and an unanswered socket surfaced as a raw exception. `graphical-session.target` is unpopulated on XFCE and Cinnamon.
 - **Check** — `TimeoutStopSec` matches the designed grace (30 s). Config errors exit with a status the unit will not restart on. Parent directories are created at start. Every IPC failure is a sentence. Desktop autostart uses XDG autostart.
 - **Seen** — PR #105, PR #48, dd18fa63; rewrite.
+
+### B-8.15 A throwing Swift initializer still runs `deinit`
+- **Pitfall** — Once every stored property is set, a `throw` from an initializer still runs `deinit`. The subscription closed its socket and then threw, and `deinit` closed the same number again; the second close can hit a descriptor another thread just reused (a request socket, a manager's descriptor). The relay retries every few seconds while the service is down, so it fires often.
+- **Check** — A descriptor is closed in exactly one place, `deinit`, or marked invalid before any `throw`.
+- **Seen** — ed6931d6, rewrite.
 
 ## 9. Cloud functions, IAM and event pipelines [store]
 

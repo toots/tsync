@@ -433,7 +433,7 @@ module Make (C : Engine_ctx.S) = struct
       | None -> ()
 
   (* [fid] receives the file id of the local file the op acted on, at the path
-     the op acts on here (ocaml 03 B-III.1): a put's and a rename's afterwards,
+     the op acts on here (pitfall A-6.25): a put's and a rename's afterwards,
      a delete's only when it removed the file. *)
   let apply_op o answers ~fid op =
     let decision_and_enact facts enact =
@@ -840,7 +840,7 @@ module Make (C : Engine_ctx.S) = struct
                           match apply_entry ops with
                             | fids ->
                                 (* Only what apply_op reported: a peer's paths
-                                   are not this client's (ocaml 03 B-III.1). *)
+                                   are not this client's (pitfall A-6.25). *)
                                 Applied.note ~fids applied k ops;
                                 Mutex.protect stepped_m (fun () ->
                                     Hashtbl.remove stepped_aside

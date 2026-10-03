@@ -12,8 +12,8 @@ read against fibers on a domain pool, where nothing is atomic between two statem
 
 | File | Covers | Entries |
 |---|---|---|
-| [A-abstraction.md](A-abstraction.md) | Logical and structural issues true of any implementation: durability, concurrency, namespace and conflicts, failure classification, queues, journal, store contract, caches, security, ownership, liveness, reporting. | 197 |
-| [B-implementation.md](B-implementation.md) | OCaml- and implementation-specific issues: runtime and C stubs, POSIX and platform corner cases (FUSE, macOS, Android), store API quirks (S3, GCS), build and test-harness traps. | 111 |
+| [A-abstraction.md](A-abstraction.md) | Logical and structural issues true of any implementation: durability, concurrency, namespace and conflicts, failure classification, queues, journal, store contract, caches, security, ownership, liveness, reporting. | 198 |
+| [B-implementation.md](B-implementation.md) | OCaml- and implementation-specific issues: runtime and C stubs, POSIX and platform corner cases (FUSE, macOS, Android), store API quirks (S3, GCS), build and test-harness traps. | 113 |
 | [C-resources.md](C-resources.md) | CPU, memory, disk, network and descriptor consumption, measured against the Raspberry Pi Zero 2 W as reference host. | 64 |
 
 ## Entry form
@@ -37,7 +37,7 @@ Each file ends with a review checklist, one line per theme.
 | B-12.5 | Tests waiting on durations instead of conditions | ×10 |
 | A-10.4 | Copies of one rule drift apart | ×8, rewrite |
 | B-12.1 | Suites that verified nothing and reported success | ×8 |
-| A-2.5 | Store round trip under the global metadata lock | ×7 |
+| A-2.5 | Store round trip under the global metadata lock | ×8, rewrite |
 | A-10.8 | Item kind derived from a key's spelling | ×7 |
 | C-1.1 | Fan-out width chosen by the data | ×7, rewrite |
 | A-4.10 | One unappliable item blocks an ordered consumer | ×6 |
