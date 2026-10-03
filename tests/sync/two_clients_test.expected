@@ -45,4 +45,8 @@ again: not in the trash
   A: archive/  archive/one (conflicted copy from A).txt = "from A"  archive/one.txt = "from B"  archive/top.txt = "B edits top"  box/  box/b.txt = "added meanwhile"  crate (conflicted copy from A)/  crate (conflicted copy from A)/b1.txt = "one"  crate (conflicted copy from A)/b2.txt = "two"  x = "a file"  x (conflicted copy from B)/  x (conflicted copy from B)/in = "inside"
   B: archive/  archive/one (conflicted copy from A).txt = "from A"  archive/one.txt = "from B"  archive/top.txt = "B edits top"  box/  box/b.txt = "added meanwhile"  crate (conflicted copy from A)/  crate (conflicted copy from A)/b1.txt = "one"  crate (conflicted copy from A)/b2.txt = "two"  x = "a file"  x (conflicted copy from B)/  x (conflicted copy from B)/in = "inside"
 
+== a file takes the name of a folder removed after an edit in it
+create: written
+B reads it: true
+
 owed: A 0/0, B 0/0; unapplied: 0 0

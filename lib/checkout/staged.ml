@@ -216,9 +216,12 @@ let read t rel =
 
 let edit t rel = match read t rel with `Edit e -> Some e | _ -> None
 
+(* A folder whose edits are all gone leaves its directory here, in the way of
+   a file taking its name. *)
 let write ?(durable = true) t rel e =
   let p = manifest_path t rel in
   Fs.mkdir_p (Filename.dirname p);
+  if Fs.is_dir p then Unix.rmdir p;
   if durable then Fs.durable_replace p (encode e) else Fs.replace p (encode e)
 
 let remove t rel =

@@ -203,6 +203,18 @@ let () =
       drain b;
       pass a;
       show "converged" both;
+      p "\n== a file takes the name of a folder removed after an edit in it\n";
+      A.mkdir "was-a-folder" ~exclusive:false;
+      write a "was-a-folder/f" "inside";
+      A.delete "was-a-folder/f";
+      A.rmdir "was-a-folder";
+      p "create: %s\n"
+        (match write a "was-a-folder" "now a file" with
+          | () -> "written"
+          | exception e -> Printexc.to_string e);
+      drain a;
+      pass b;
+      p "B reads it: %b\n" (B.kind "was-a-folder" = `File);
       p "\nowed: A %d/%d, B %d/%d; unapplied: %d %d\n" (A.pending_uploads ())
         (A.pending_metadata ()) (B.pending_uploads ()) (B.pending_metadata ())
         (List.length (A.unapplied ()))
