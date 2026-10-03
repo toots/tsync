@@ -141,6 +141,8 @@ type _ request =
   | Rmdir : target -> unit request
   | Evict : target -> counted request
   | Restore : { item : target; keep : float option } -> counted request
+  | Revert : { item : target; version : int64 option } -> unit request
+      (** [version]: a timestamp in ns; none is the newest *)
   | Full_resync : unit request
   | Sync : { full : bool } -> resynced request
   | Trash_restore : string -> trash_restored request

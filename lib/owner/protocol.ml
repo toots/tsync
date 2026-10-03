@@ -131,6 +131,8 @@ type _ request =
   | Rmdir : target -> unit request
   | Evict : target -> counted request
   | Restore : { item : target; keep : float option } -> counted request
+  | Revert : { item : target; version : int64 option } -> unit request
+      (** [version]: a timestamp in ns; none is the newest *)
   | Full_resync : unit request
   | Sync : { full : bool } -> resynced request
   | Trash_restore : string -> trash_restored request
@@ -173,6 +175,7 @@ let action : type a. a request -> string = function
   | Rmdir _ -> "rmdir"
   | Evict _ -> "evict"
   | Restore _ -> "restore"
+  | Revert _ -> "revert"
   | Full_resync -> "full_resync"
   | Sync _ -> "sync"
   | Trash_restore _ -> "trash_restore"
@@ -190,7 +193,8 @@ let action : type a. a request -> string = function
   | Stop -> "stop"
 
 let mutates : type a. a request -> bool = function
-  | Create _ | Write _ | Mkdir _ | Symlink _ | Rename _ | Delete _ | Rmdir _ ->
+  | Create _ | Write _ | Mkdir _ | Symlink _ | Rename _ | Delete _ | Rmdir _
+  | Revert _ ->
       true
   | _ -> false
 
@@ -202,7 +206,7 @@ let bulk : type a. a request -> bool = function
   | _ -> false
 
 let refused_while_paused : type a. a request -> bool = function
-  | Sync _ | Trash_restore _ | Job _ | Share _ | Share_revoke _
+  | Revert _ | Sync _ | Trash_restore _ | Job _ | Share _ | Share_revoke _
   | Share_clear_cache ->
       true
   | _ -> false
@@ -303,6 +307,9 @@ let request_fields : type a. a request -> (string * Yojson.Safe.t) list =
       (("ref", `String r.src) :: destination_fields r.at)
       @ [("noreplace", `Bool r.noreplace)]
   | Restore r -> target_fields r.item @ opt "keep" (fun k -> `Float k) r.keep
+  | Revert r ->
+      target_fields r.item
+      @ [("arg", `String (Option.fold ~none:"" ~some:Int64.to_string r.version))]
   | Sync r -> [("arg", `String (if r.full then "full" else ""))]
   | Trash_restore path -> [("path", `String path)]
   | Share r ->
@@ -381,6 +388,16 @@ let decode j =
     | "evict" -> Request (Evict (target_of j))
     | "restore" ->
         Request (Restore { item = target_of j; keep = number j "keep" })
+    | "revert" ->
+        let version =
+          match str j "arg" with
+            | None | Some "" -> None
+            | Some v -> (
+                match Int64.of_string_opt v with
+                  | Some ns -> Some ns
+                  | None -> Fail.invalid "version must be a timestamp")
+        in
+        Request (Revert { item = target_of j; version })
     | "full_resync" -> Request Full_resync
     | "sync" -> Request (Sync { full = str j "arg" = Some "full" })
     | "trash_restore" -> (
@@ -561,7 +578,7 @@ let page_fields (pg : page) =
 let encode_reply : type a. a request -> a -> Yojson.Safe.t =
  fun req reply ->
   match req with
-    | Ping | Full_resync | Poll | Stop | Delete _ | Rmdir _ -> ok []
+    | Ping | Full_resync | Poll | Stop | Delete _ | Rmdir _ | Revert _ -> ok []
     | Stat _ -> ok (row_fields reply)
     | Create _ -> ok (item reply)
     | Mkdir _ -> ok (item reply)
@@ -698,6 +715,7 @@ let decode_reply : type a. a request -> Yojson.Safe.t -> a =
   match req with
     | Ping -> ()
     | Full_resync -> ()
+    | Revert _ -> ()
     | Poll -> ()
     | Stop -> ()
     | Delete _ -> ()

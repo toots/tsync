@@ -43,6 +43,10 @@ a stale anchor                     {"ok":true,"stale":true}
 a cursor of a remade walk          {"ok":true,"stale":true}
 an offset inside a line            {"ok":true,"stale":true}
 not a cursor                       {"ok":true,"stale":true}
+== revert
+revert to the latest version       {"ok":true}
+  content after revert             "first"
+revert to no such version          {"ok":false,"code":"not_found","error":"r.txt: no such version"}
 symlink                            {"ok":true,"item":{"ref":"i:<file-3>","parentRef":"root","name":"l","kind":"symlink","size":5,"mtime":"<t>","etag":"<id4>","isUploaded":true,"contentId":"<id4>","symlinkTarget":"c.txt"}}
 == refusals
 malformed ref                      {"ok":false,"code":"invalid","error":"malformed item reference \"x:1\""}
@@ -61,17 +65,17 @@ notify_reset                       {"ok":true,"delivered":1}
 next event                         {"event":"reset","domain":"docs","id":4}
 == jobs
   line                             {"stream":"started","job":1}
-  line                             {"stream":"out","text":"full resync: 6 manifests"}
+  line                             {"stream":"out","text":"full resync: 7 manifests"}
 sync --full, narrated              {"ok":true,"exit":0}
   progress streamed: true
   line                             {"stream":"started","job":2}
-  line                             {"stream":"out","text":"main: 7 chunks referenced, 0 reclaimable (0 B) (dry run: nothing changed; --apply to act)"}
+  line                             {"stream":"out","text":"main: 9 chunks referenced, 0 reclaimable (0 B) (dry run: nothing changed; --apply to act)"}
 gc dry run, narrated               {"ok":true,"exit":0}
   narration streamed: true, progress streamed: true
 gc --apply, held at opening        {"stream":"started","job":3}
 expire meanwhile                   {"ok":false,"code":"busy","error":"busy: tsync gc --apply (job 3) is running on docs"}
 cancel it                          {"ok":true,"cancelled":true}
-  line                             {"stream":"out","text":"main: left open in marking after \"m/.tsync-root\"; 1 namespaces marked, 2 chunks promoted, 0 reclaimed (0 B)"}
+  line                             {"stream":"out","text":"main: left open in marking after \"m/.tsync-root\"; 1 namespaces marked, 3 chunks promoted, 0 reclaimed (0 B)"}
   line                             {"ok":true,"exit":1}
 cancel once it ended               {"ok":true,"cancelled":false}
   line                             {"stream":"started","job":5}

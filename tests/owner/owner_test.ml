@@ -401,6 +401,30 @@ let () =
              ("after", current_walk ^ ":" ^ string_of_int (off + 1));
            ]);
       show "not a cursor" (ask [("action", "list_all"); ("after", "x:1")]);
+      p "== revert";
+      let r =
+        item_ref
+          (ask
+             [
+               ("action", "write");
+               ("parentRef", "root");
+               ("name", "r.txt");
+               ("staging", staging "r1" "first");
+             ])
+      in
+      drained 100;
+      ignore
+        (ask
+           [("action", "write"); ("ref", r); ("staging", staging "r2" "second")]);
+      drained 100;
+      show "revert to the latest version"
+        (ask [("action", "revert"); ("ref", r); ("arg", "")]);
+      drained 100;
+      let back = Filename.concat home "reverted.txt" in
+      ignore (ask [("action", "ensure_cached"); ("ref", r); ("dest", back)]);
+      p "%-34s %S" "  content after revert" (Fs.read_file back);
+      show "revert to no such version"
+        (ask [("action", "revert"); ("ref", r); ("arg", "1")]);
       show "symlink"
         (ask
            [
