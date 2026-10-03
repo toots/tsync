@@ -234,4 +234,7 @@ let request ?(stall = default_stall) ?(headers = fun () -> []) ?body e ~meth
         | Unix.Unix_error (err, _, _) ->
             link "%s: %s" e.host (Unix.error_message err)
         | Codec.Malformed m -> link "%s: %s" e.host m
+        | Codec.Too_large ->
+            Fail.corrupt "%s: its answer is larger than this client accepts"
+              e.host
         | Dead_before_answer -> link "%s closed the connection" e.host)

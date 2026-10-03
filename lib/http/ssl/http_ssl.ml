@@ -52,10 +52,17 @@ let rec ssl_retry ?timeout fd f =
             Rt.wait_writable ?timeout fd;
             ssl_retry ?timeout fd f)
 
+(* Pitfall A-11.6: a failure of the session is a broken connection, which the
+   callers of a transport know as a socket error, not as OpenSSL's own. *)
+let broken what = raise (Unix.Unix_error (Unix.ECONNRESET, "tls " ^ what, ""))
+
 let of_ssl fd s =
   let read ?timeout buf off len =
-    try ssl_retry ?timeout fd (fun () -> Ssl.read_into_bigarray s buf off len)
-    with Ssl.Read_error (Error_zero_return | Error_syscall) -> 0
+    try
+      ssl_retry ?timeout fd (fun () -> Ssl.read_into_bigarray s buf off len)
+    with
+      | Ssl.Read_error (Error_zero_return | Error_syscall) -> 0
+      | Ssl.Read_error _ -> broken "read"
   in
   let write ?timeout b =
     let rec go off =
@@ -65,7 +72,7 @@ let of_ssl fd s =
           + ssl_retry ?timeout fd (fun () ->
               Ssl.write_bigarray s b off (Bigstring.length b - off)))
     in
-    go 0
+    try go 0 with Ssl.Write_error _ -> broken "write"
   in
   Transport.make ~fd ~read ~write ~close:(fun () ->
       (try ignore (Ssl.close_notify s) with _ -> ());
