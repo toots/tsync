@@ -42,7 +42,8 @@ formats and operations are mapped in [../04-checkout-cache.md](../04-checkout-ca
   body is not fsynced before the manifest that names it (review finding 20).
 - **Mirror entries are read into the heap**, not mapped
   ([../04-checkout-cache.md](../04-checkout-cache.md)).
-- **Owner start walks the whole of `<C>`** for temporaries before serving (review finding 88).
+- **Owner start lists every cache shard before serving** (review finding 88); the walk of `<C>` for
+  dead temporaries runs behind the start.
 
 ## Learnings
 

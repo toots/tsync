@@ -56,8 +56,8 @@ and that each process reports its memory ([07 §5.5](../07-daemon-cli.md#55-tsyn
   sent (`madvise(MADV_DONTNEED)` on mappings only; the mapping is private and never written, so a
   later read pages it back in), and the owner's housekeeping compacts once the heap grew 64 MiB past
   its last compaction (`Usage.release_if_grown`).
-- The read and verify paths do not drop their mappings: those wait for a major collection (review
-  finding 86).
+- A ranged read does not drop its mapping, which waits for a major collection (review finding 86);
+  the store server's whole reads and the local store's write check do.
 - tmpfs pages a process maps count as `RssShmem`, not `RssFile`: a test of mapped memory on `/tmp`
   must read `VmRSS`.
 

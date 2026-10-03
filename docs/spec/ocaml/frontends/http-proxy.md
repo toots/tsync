@@ -34,8 +34,8 @@ Code: `lib/frontends/http_proxy/` (`store_server.ml`, `share_server.ml`, `watch_
   that drips holds memory reserved from its declared length and no slot. §A4.2 and §A5 count the
   body read inside the slot. A body slower than `body_deadline` is answered 408 `body too slow`.
 - **Counters.** `Status_report.listener` has `in_flight`, `data_in_flight` (requests holding or
-  awaiting a slot, together), the two byte totals and the tallies. It has no `dataWaiting`, no
-  `requestsPerSec` and nothing of the share bound (finding 142).
+  awaiting a slot, together), the two byte totals and the tallies. It has `shares_in_flight` and
+  `shares_max`, and no `dataWaiting` nor `requestsPerSec`.
 - **Status collection** asks the owner socket of each verified route for
   `Stats ("frontend" :: arg)`, not a list of peer sockets. The `totals` arguments are forwarded and
   the owners ignore them ([07](../07-daemon-cli.md)).

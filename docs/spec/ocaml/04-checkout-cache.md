@@ -62,9 +62,10 @@ Companion to [../04-checkout-cache.md](../04-checkout-cache.md). Not normative. 
 - **The rebuild sweeps by what the walk saw, not by mtime.** `Engine.rebuild` removes every entry
   whose path the walk did not yield, sparing paths changed during the walk (`was_touched`) and
   files with a staged edit. There is no `record` / `sweep_stale(cutoff)` pair.
-- **Owner start walks the whole cache root** for temporaries before it serves (review finding 88).
-- **The cache cap** is walked after every upload (review finding 89), runs on housekeeping passes
-  but does not count growth between them (review finding 34), and counts an in-flight fetch's
+- **Owner start lists every cache shard** before it serves (`Cache.sweep_at_start`, review finding
+  88); dead temporaries are swept behind the start.
+- **The cache cap** runs on housekeeping passes but does not count growth between them (review
+  finding 34), and counts an in-flight fetch's
   temporary as a body (review finding 135). An eviction can be undone by a fetch in flight (review
   finding 134).
 - **Prefetch** is spawned per sequential read for the current and the next group, uncapped per
