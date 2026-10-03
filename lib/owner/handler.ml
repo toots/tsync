@@ -253,15 +253,18 @@ let each_file t path f =
     | _ -> ());
   (!ok, !failed)
 
+(* Pitfall A-10.15: walked level by level, each folder removed after its
+   contents. *)
 let rmdir_subtree (module E : Engine.S) path =
-  let entries = E.list_tree path in
-  List.iter
-    (fun (p, (st : Local_ops.stat)) -> if st.kind <> `Dir then E.delete p)
-    entries;
-  List.iter
-    (fun (p, (st : Local_ops.stat)) -> if st.kind = `Dir then E.rmdir p)
-    (List.rev entries);
-  E.rmdir path
+  let rec remove path =
+    List.iter
+      (fun (e : E.entry) ->
+        let p = Names.join path e.name in
+        if e.is_dir then remove p else E.delete p)
+      (E.list_children path);
+    E.rmdir path
+  in
+  remove path
 
 (* 08 §2.3: the last count of items a listing or feed page could not name,
    reported by [status]. *)
