@@ -184,7 +184,8 @@ of its own. Nearly every regression came from one of three sources:
   - What does `remove(mode: .preserveDirtyUserData)` return?
   - Can the extension unlink leftovers in its temporary directory?
   - Does the upload badge clear when an upload publishes, with metadataVersion = contentVersion
-    (both unchanged by the publish)? If the system skips an update whose versions it already holds,
+    (both unchanged by the publish)? **Yes** (checked 2026-10-02): a file created through the replica
+    went from `isUploaded = 0` to `1` with no version change. If the system skips an update whose versions it already holds,
     `isUploaded` never reaches Finder; the fallback is a metadataVersion that appends the upload
     state.
 
