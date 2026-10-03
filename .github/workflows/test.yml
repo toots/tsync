@@ -186,6 +186,6 @@ jobs:
         run: |
           info=$(opam exec -- tsync build-info)
           echo "$info"
-          opam list --installed --short | grep -qx tsync-tls
-          if opam list --installed --short | grep -qx tsync-ssl; then exit 1; fi
+          opam list --installed --short --color=never | grep -qx tsync-tls
+          if opam list --installed --short --color=never | grep -qx tsync-ssl; then exit 1; fi
           echo "$info" | grep -Eq '^tls: native$'
