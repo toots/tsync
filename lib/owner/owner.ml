@@ -171,7 +171,8 @@ let housekeeping (domain : Domain.t) (module E : Tsync_sync.Engine.S) =
       in
       if n > 0 then Log.info "removed %d stale export records" n;
       let n = E.prune_applied () in
-      if n > 0 then Log.info "pruned %d applied-log shards" n);
+      if n > 0 then Log.info "pruned %d applied-log shards" n;
+      E.daily_maintenance ());
     Usage.release_if_grown ()
   in
   try

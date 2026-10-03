@@ -2,3 +2,6 @@ restore: 1 announced
 the name was taken meanwhile: true
 tree: box/  box (conflicted copy from A)
 owed after draining: 0 uploads, 0 metadata, 0 parked
+== the daily sweep of local state
+records of removed folders swept: 1; of live ones kept: true
+a dead process's temporary file swept: true

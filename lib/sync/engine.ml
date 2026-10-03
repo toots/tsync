@@ -1475,7 +1475,7 @@ module Make (C : Engine_ctx.S) = struct
   (* 04 §4.10: before anything is served. *)
   let staged_set_aside = Atomic.make 0
 
-  let recover_local () =
+  let sweep_local_temps () =
     let root = Mirror.root mirror in
     let rec sweep_temps dir =
       Fs.sweep_temps ~older_than:86400. dir;
@@ -1485,7 +1485,18 @@ module Make (C : Engine_ctx.S) = struct
           if Fs.kind p = `Dir then sweep_temps p)
         (Fs.readdir dir)
     in
-    if Fs.is_dir root then sweep_temps root;
+    if Fs.is_dir root then sweep_temps root
+
+  (* 04 §4.9: a removed folder's record is kept while a journal entry may still
+     name the folder, a week past the horizon. *)
+  let daily_maintenance () =
+    sweep_local_temps ();
+    Mirror.sweep_removed_records mirror
+      ~older_than:(Outbound.horizon +. (7. *. 86400.))
+
+  let recover_local () =
+    let root = Mirror.root mirror in
+    sweep_local_temps ();
     Cache.sweep_at_start cache;
     let named = Hashtbl.create 64 in
     let staged_dir = Filename.concat root "staged" in
