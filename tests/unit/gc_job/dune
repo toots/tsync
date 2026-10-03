@@ -1,0 +1,13 @@
+(executable
+ (name gc_job)
+ (libraries tsync_core))
+
+(rule
+ (with-stdout-to
+  gc_job.output
+  (run ./gc_job.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff gc_job.expected gc_job.output)))
