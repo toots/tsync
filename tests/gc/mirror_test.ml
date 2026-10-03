@@ -221,6 +221,15 @@ let () =
          <> None
         && Option.map Bigstring.to_string (inner.get_opt (Key.cursor d))
            = Some "e2");
+      p "\n== a chunk that does not hash to its key on the source\n";
+      main.put (Key.chunk d (chunk "sound")) (Bigstring.of_string "rotten");
+      put (Key.child d Folder_id.root "r.txt") (manifest "r.txt" ["sound"]);
+      run "all" All;
+      p "the copy holds the chunk: %b, the manifest naming it: %b\n"
+        (inner.head_opt (Key.chunk d (chunk "sound")) <> None)
+        (inner.head_opt (Key.child d Folder_id.root "r.txt") <> None);
+      ignore (main.delete (Key.chunk d (chunk "sound")));
+      ignore (main.delete (Key.child d Folder_id.root "r.txt"));
       p "\n== a path, with a chunk missing from the source\n";
       ignore (main.delete (Key.chunk d (chunk "c9")));
       run "path" (Path "docs");
