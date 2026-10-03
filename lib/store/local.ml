@@ -67,14 +67,15 @@ let create_new root key body =
   mkdirs root key;
   let dir = Filename.dirname p in
   let tmp = Filename.concat dir (temp_name ()) in
-  let fd = Fs.openfile ~perm:0o644 tmp [O_WRONLY; O_CREAT; O_EXCL] in
-  Fs.with_fd fd (fun fd ->
-      write_body fd body;
-      Fs.fsync fd);
   let outcome =
     Fun.protect
       ~finally:(fun () -> Fs.unlink_quiet tmp)
       (fun () ->
+        Fs.with_fd
+          (Fs.openfile ~perm:0o644 tmp [O_WRONLY; O_CREAT; O_EXCL])
+          (fun fd ->
+            write_body fd body;
+            Fs.fsync fd);
         match Fs.eintr (fun () -> Unix.link tmp p) with
           | () -> `Won
           | exception Unix.Unix_error (Unix.EEXIST, _, _) -> `Taken
