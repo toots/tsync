@@ -294,7 +294,7 @@ let file_response t (r : Server.request) ~name ~inline (m : Manifest.t) =
     ]
   in
   let body off len =
-    if len = 0 then Server.Empty else Server.Stream (stream t m ~off ~len)
+    if len = 0 then Server.Empty else Server.stream (stream t m ~off ~len)
   in
   match parse_range size (Codec.header r.headers "range") with
     | `Unsatisfiable ->
@@ -409,8 +409,7 @@ let zip_response t ~max_members id filename =
         ("referrer-policy", "no-referrer");
       ];
     body =
-      Stream
-        (fun write ->
+      Server.stream (fun write ->
           let z = Zip.create write in
           List.iter
             (function

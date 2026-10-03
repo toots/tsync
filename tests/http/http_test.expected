@@ -5,6 +5,10 @@
   200 ""
   200 "one two three" (chunked)
   404 "not found\n"
+== a stream's resources are released whether or not its body is written
+  200 "body" (chunked)
+  200 "" (chunked)
+  released: 2 of 2
 http date: Sun, 09 Sep 2001 01:46:40 GMT, parsed back: true, garbage: true
 host header carries the port: true
 == keep-alive

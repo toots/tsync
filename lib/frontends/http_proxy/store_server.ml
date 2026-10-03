@@ -710,15 +710,19 @@ let count_bytes counters ~written (response : Server.response) =
     | Bigstring b ->
         add (fun c -> c.read) (Bigstring.length b);
         response
-    | Stream f ->
+    | Stream s ->
         {
           response with
           body =
             Stream
-              (fun write ->
-                f (fun chunk ->
-                    add (fun c -> c.read) (Bigstring.length chunk);
-                    write chunk));
+              {
+                s with
+                write =
+                  (fun write ->
+                    s.write (fun chunk ->
+                        add (fun c -> c.read) (Bigstring.length chunk);
+                        write chunk));
+              };
         }
 
 let counted t route body response =
@@ -940,15 +944,19 @@ let serve_share t (r : Server.request) params rest =
     Share_server.handle share ~max_zip_members r ~token ~sub params
     |> count_bytes [t.total] ~written:0
   with
-    | { body = Stream f; _ } as response ->
+    | { body = Stream s; _ } as response ->
         {
           response with
           body =
             Stream
-              (fun write ->
-                Fun.protect
-                  ~finally:(fun () -> Rt.Semaphore.release t.share_slots)
-                  (fun () -> f write));
+              {
+                s with
+                finally =
+                  (fun () ->
+                    Fun.protect
+                      ~finally:(fun () -> Rt.Semaphore.release t.share_slots)
+                      s.finally);
+              };
         }
     | response ->
         Rt.Semaphore.release t.share_slots;
