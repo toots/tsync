@@ -349,6 +349,9 @@ index(cs, pos)        = ⌊pos / cs⌋
   value MUST lie in `[CHUNK_SIZE_MIN, CHUNK_SIZE_MAX]`; a store recommendation outside it is
   ignored with a warning, and a configured value outside it is refused by the validator. Every
   other client must be able to read what a writer chooses, so the range is part of the format.
+- Choosing a chunk size never waits on a store: a local write is offline work. Until the main
+  store's recommendation has been learned (asked in the background, from owner start on), a writer
+  uses `DEFAULT_CHUNK_SIZE`. Only deduplication across files of different chunk sizes is lost.
 - A reader MUST accept any chunk size in `[1, CHUNK_SIZE_READ_MAX]` found in an existing
   manifest, and treat a larger or non-positive one as CORRUPT.
 - A symlink manifest records `DEFAULT_CHUNK_SIZE` and no chunks.

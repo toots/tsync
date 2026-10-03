@@ -179,3 +179,7 @@ Related notes: [data-model/local-cache.md](data-model/local-cache.md),
   Still open: a rebuild fsyncs each entry's data but writes the last-sync mark after a `syncfs`
   only, so a crash right after the mark can lose entries' directory records (never tear them)
   until the next full resync.
+- **No store call under the metadata lock.** Creating a file asked the store for its recommended
+  chunk size, through the retry ladder, while the request handler held the metadata lock: with the
+  store down, every mutation of the domain waited for the ladder to give up. Anything a local
+  operation needs from a store is learned beforehand, in the background, or defaulted.
