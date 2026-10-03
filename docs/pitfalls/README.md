@@ -13,7 +13,7 @@ read against fibers on a domain pool, where nothing is atomic between two statem
 | File | Covers | Entries |
 |---|---|---|
 | [A-abstraction.md](A-abstraction.md) | Logical and structural issues true of any implementation: durability, concurrency, namespace and conflicts, failure classification, queues, journal, store contract, caches, security, ownership, liveness, reporting. | 198 |
-| [B-implementation.md](B-implementation.md) | OCaml- and implementation-specific issues: runtime and C stubs, POSIX and platform corner cases (FUSE, macOS, Android), store API quirks (S3, GCS), build and test-harness traps. | 114 |
+| [B-implementation.md](B-implementation.md) | OCaml- and implementation-specific issues: runtime and C stubs, POSIX and platform corner cases (FUSE, macOS, Android), store API quirks (S3, GCS), build and test-harness traps. | 117 |
 | [C-resources.md](C-resources.md) | CPU, memory, disk, network and descriptor consumption, measured against the Raspberry Pi Zero 2 W as reference host. | 66 |
 
 ## Entry form
