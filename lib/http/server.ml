@@ -218,42 +218,59 @@ let rec accept_loop ?tls t lim handle lfd =
     if Atomic.get t.connections >= lim.max_connections then Rt.sleep 0.05
     else (
       match Unix.accept ~cloexec:true lfd with
-        | fd, _ ->
-            let conn = Transport.of_fd fd in
-            Atomic.incr t.connections;
-            let rec add () =
-              let l = Atomic.get t.conns in
-              if not (Atomic.compare_and_set t.conns l (conn :: l)) then add ()
-            in
-            let rec remove () =
-              let l = Atomic.get t.conns in
-              if
-                not
-                  (Atomic.compare_and_set t.conns l
-                     (List.filter (( != ) conn) l))
-              then remove ()
-            in
-            add ();
-            Rt.spawn ~name:"http connection" (fun () ->
-                Fun.protect
-                  ~finally:(fun () ->
+        | fd, _ -> (
+            (* Lesson 8: the connection's fiber owns the descriptor once
+               spawned; a failure before gives it back and leaves the loop
+               running. *)
+            try
+              Fs.or_close fd @@ fun fd ->
+              let conn = Transport.of_fd fd in
+              Atomic.incr t.connections;
+              let rec add () =
+                let l = Atomic.get t.conns in
+                if not (Atomic.compare_and_set t.conns l (conn :: l)) then
+                  add ()
+              in
+              let rec remove () =
+                let l = Atomic.get t.conns in
+                if
+                  not
+                    (Atomic.compare_and_set t.conns l
+                       (List.filter (( != ) conn) l))
+                then remove ()
+              in
+              add ();
+              match
+                Rt.spawn ~name:"http connection" (fun () ->
+                    Fun.protect
+                      ~finally:(fun () ->
+                        remove ();
+                        Transport.close conn;
+                        Atomic.decr t.connections)
+                      (fun () ->
+                        try
+                          let conn =
+                            match tls with
+                              | None -> conn
+                              | Some tls ->
+                                  Rt.with_timeout lim.header_timeout (fun () ->
+                                      Transport.accept_tls
+                                        ~timeout:lim.header_timeout tls conn)
+                          in
+                          serve_conn lim handle conn t.requests
+                        with e when not (Rt.is_cancelled e) ->
+                          Log.debug "http %s: %s" (Transport.peer conn)
+                            (Printexc.to_string e)))
+              with
+                | () -> ()
+                | exception e ->
                     remove ();
-                    Transport.close conn;
-                    Atomic.decr t.connections)
-                  (fun () ->
-                    try
-                      let conn =
-                        match tls with
-                          | None -> conn
-                          | Some tls ->
-                              Rt.with_timeout lim.header_timeout (fun () ->
-                                  Transport.accept_tls
-                                    ~timeout:lim.header_timeout tls conn)
-                      in
-                      serve_conn lim handle conn t.requests
-                    with e when not (Rt.is_cancelled e) ->
-                      Log.debug "http %s: %s" (Transport.peer conn)
-                        (Printexc.to_string e)))
+                    Atomic.decr t.connections;
+                    raise e
+            with e when not (Rt.is_cancelled e) ->
+              Rt.within `Threaded (fun () ->
+                  Log.warn "http: cannot take a connection: %s"
+                    (Printexc.to_string e)))
         | exception
             Unix.Unix_error ((EAGAIN | EWOULDBLOCK | EINTR | ECONNABORTED), _, _)
           ->
@@ -269,6 +286,7 @@ let bind addr =
   let fd =
     Unix.socket ~cloexec:true (Unix.domain_of_sockaddr addr) SOCK_STREAM 0
   in
+  Fs.or_close fd @@ fun fd ->
   Unix.setsockopt fd SO_REUSEADDR true;
   (match addr with
     | ADDR_INET (a, _)
@@ -282,7 +300,18 @@ let bind addr =
 
 let serve ?(limits = default_limits) ?tls addrs handle =
   Fs.ignore_sigpipe ();
-  let listeners = List.map bind addrs in
+  (* Lesson 8: a bind that fails closes those already bound. *)
+  let listeners =
+    List.rev
+      (List.fold_left
+         (fun bound addr ->
+           match bind addr with
+             | fd -> fd :: bound
+             | exception e ->
+                 List.iter Fs.close bound;
+                 raise e)
+         [] addrs)
+  in
   let t =
     {
       listeners;
@@ -294,16 +323,26 @@ let serve ?(limits = default_limits) ?tls addrs handle =
     }
   in
   let running = Atomic.make (List.length listeners) in
-  List.iter
-    (fun lfd ->
-      Rt.spawn ~name:"http accept" ~execution:`Immediate (fun () ->
-          Fun.protect
-            ~finally:(fun () ->
-              Unix.close lfd;
-              if Atomic.fetch_and_add running (-1) = 1 then
-                Rt.Promise.resolve t.finished ())
-            (fun () -> accept_loop ?tls t limits handle lfd)))
-    listeners;
+  (* Each accept fiber owns its listener; a spawn that fails closes its own
+     and those not yet handed on. *)
+  let rec spawn_all = function
+    | [] -> ()
+    | lfd :: rest -> (
+        match
+          Rt.spawn ~name:"http accept" ~execution:`Immediate (fun () ->
+              Fun.protect
+                ~finally:(fun () ->
+                  Unix.close lfd;
+                  if Atomic.fetch_and_add running (-1) = 1 then
+                    Rt.Promise.resolve t.finished ())
+                (fun () -> accept_loop ?tls t limits handle lfd))
+        with
+          | () -> spawn_all rest
+          | exception e ->
+              List.iter Fs.close (lfd :: rest);
+              raise e)
+  in
+  spawn_all listeners;
   t
 
 let close ?(grace = Stop.grace) t =
