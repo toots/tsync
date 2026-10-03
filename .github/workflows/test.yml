@@ -63,6 +63,64 @@ jobs:
       - name: Tests
         run: opam exec -- dune build @runtest --force
 
+  # 10 §3.1 item 5: the android frontend in the desktop binary, its hermetic
+  # checks, then the app's JVM suites, the wire suite against that binary. No
+  # device and no cross toolchain.
+  android:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: System libraries
+        run: sudo apt-get update && sudo apt-get install -y libgmp-dev pkg-config
+
+      - uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: "5.5"
+
+      - name: Restore the opam switch
+        id: opam-switch
+        uses: actions/cache/restore@v4
+        with:
+          path: _opam
+          key: opam-test-android-${{ hashFiles('*.opam', 'scripts/opam_deps.sh') }}
+
+      - name: OCaml libraries
+        run: ./scripts/opam_deps.sh tsync tsync-tls
+
+      - name: Save the opam switch
+        if: steps.opam-switch.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: _opam
+          key: opam-test-android-${{ hashFiles('*.opam', 'scripts/opam_deps.sh') }}
+
+      - name: Build
+        run: opam exec -- dune build
+
+      - name: The android frontend is built
+        run: |
+          info=$(opam exec -- ./_build/default/bin/tsync.exe build-info)
+          echo "$info"
+          echo "$info" | grep -Eq '^frontends:.*\bandroid\b'
+
+      - name: Frontend tests
+        run: opam exec -- dune build @tests/android/runtest --force
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      # Each task fails when it executed no test, and :core:test when the wire
+      # suite ran none against TSYNC_BIN.
+      - name: App JVM suites
+        working-directory: android
+        env:
+          TSYNC_BIN: ${{ github.workspace }}/_build/default/bin/tsync.exe
+        run: ./gradlew :core:test :app:testDebugUnitTest -PnoCore
+
   macos:
     runs-on: macos-latest
     timeout-minutes: 60
