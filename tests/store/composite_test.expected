@@ -22,6 +22,12 @@ replica parked: corrupt/other
 backfill parked: corrupt/other
 replica holds it: false
 
+== a chunk that does not hash to its key parks its copy
+parked: 4; replica holds the chunk: false, its manifest: false
+
+== a chunk whose bytes are a manifest is copied as a chunk
+replica holds it: true; parked: 4
+
 == write guard
 guarded write to the replica: transient/link
 batch read with the main held down: unreachable

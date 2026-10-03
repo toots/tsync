@@ -380,12 +380,23 @@ let guard t role what =
 
 let progress c f = Mutex.protect c.memo_m (fun () -> Option.iter f c.running)
 
+(* A-7.14: a main's rotten chunk parks its copy instead of spreading. *)
+let sound_chunk ck b =
+  if not (Chunk_key.equal (Chunk_key.of_bigstring b) ck) then
+    Fail.corrupt "chunk %s does not hash to its key on the main"
+      (Chunk_key.to_string ck)
+
 let rec sync t src c key restarts =
-  match src.Store.get_opt key with
-    | None ->
-        Option.iter (fun ck -> Copy_memo.forget c.memo [ck]) (Key.chunk_of key);
+  match (src.Store.get_opt key, Key.chunk_of key) with
+    | None, ck ->
+        Option.iter (fun ck -> Copy_memo.forget c.memo [ck]) ck;
         ignore (c.member.store.delete key)
-    | Some b -> (
+    | Some b, Some ck ->
+        (* A chunk names nothing, whatever its bytes decode as. *)
+        sound_chunk ck b;
+        c.member.store.put key b;
+        Fs.drop_mapped_pages b
+    | Some b, None -> (
         let v = Copy_memo.look c.memo in
         let m = Manifest.of_body b in
         let names = Option.fold ~none:[] ~some:Manifest.keys m in
@@ -435,6 +446,7 @@ and ensure_chunk t (src : Store.t) c v ck =
     match src.get_opt (Key.chunk d ck) with
     | None -> false
     | Some b ->
+        sound_chunk ck b;
         c.member.store.put (Key.chunk d ck) b;
         Fs.drop_mapped_pages b;
         progress c (fun r -> r.sent <- r.sent + Bigstring.length b);
