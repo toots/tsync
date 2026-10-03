@@ -5,10 +5,6 @@ open Tsync_config
 open Tsync_owner
 open Cli
 
-(* 07 §2.4, §3.1 on macOS: no supervisor. The service process takes the
-   governor, starts the store server as its child when a domain is served over
-   HTTP, and owns every domain on one socket, which it serves even with no
-   domain configured (file-provider §11). *)
 (* 07 §2.7: the service log. An agent registered through SMAppService cannot
    name a path under the user's home for its output, so the service opens the
    log itself when it is not run from a terminal. *)
@@ -31,6 +27,10 @@ let log_to_service_file () =
     Unix.dup2 ~cloexec:false fd Unix.stderr;
     Unix.close fd)
 
+(* 07 §2.4, §3.1 on macOS: no supervisor. The service process takes the
+   governor, starts the store server as its child when a domain is served over
+   HTTP, and owns every domain on one socket, which it serves even with no
+   domain configured (file-provider §11). *)
 let macos_service tls (config : Config.t) =
   ignore (Fs.raise_nofile 65536);
   Owner.stop_on_signals ();

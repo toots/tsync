@@ -135,8 +135,6 @@ exception Dead_before_answer
 
 let link fmt = Fail.raise_ Fail.Link fmt
 
-(* A pooled connection the server closed while idle fails on write or answers
-   nothing at all; only then is the request sent again, on a fresh one. *)
 (* 01 §10: request-body bytes accepted by the socket are progress, so a slow
    uplink sending a large body never reads as a stall. *)
 let write_body ~progress t body =
@@ -204,6 +202,8 @@ let exchange e c ~progress ~meth ~target ~headers ~body ~reused =
   in
   ({ status; headers; body }, keep)
 
+(* A pooled connection the server closed while idle fails on write or answers
+   nothing at all; only then is the request sent again, on a fresh one. *)
 let request ?(stall = default_stall) ?(headers = fun () -> []) ?body e ~meth
     target =
   Rt.Semaphore.with_slot e.slots (fun () ->

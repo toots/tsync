@@ -108,8 +108,6 @@ module Make (C : Engine_ctx.S) = struct
   let bump path = incr (snd (klock path))
   let meta_holder = Atomic.make None
 
-  (* Reentrant for its holder, so the request handler resolves a reference and
-     acts on it in one hold (08 §3.5). *)
   (* Pitfall A-2.5: a long hold stalls every mutation of the domain, so one is
      reported with the stack that held or waited. *)
   let slow_meta = 2.
@@ -119,6 +117,8 @@ module Make (C : Engine_ctx.S) = struct
       Log.warn "metadata lock %s %.1f s at:\n%s" what seconds
         (Printexc.raw_backtrace_to_string (Printexc.get_callstack 16))
 
+  (* Reentrant for its holder, so the request handler resolves a reference and
+     acts on it in one hold (08 §3.5). *)
   let with_meta f =
     match Atomic.get meta_holder with
       | Some h when Rt.same h (Rt.self ()) -> f ()

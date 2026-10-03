@@ -55,9 +55,9 @@ let typed (kind : Field_spec.kind) s : (json, string) result =
                 (String.split_on_char ',' s)))
 
 (* Blank keeps the current value; a required field without one is asked
-   again; a check's refusal is said and asked again. *)
-(* A default the parser applies itself stays out of the file; [write_default]
-   writes the wizard's own (§5.9) and those the parser requires. *)
+   again; a check's refusal is said and asked again. A default the parser
+   applies itself stays out of the file; [write_default] writes the wizard's
+   own (§5.9) and those the parser requires. *)
 let rec field io j ?(secret = false) ?(required = false)
     ?(check = fun _ -> None) ?(write_default = false) ?default name label kind =
   let current = Option.bind (get j name) show in

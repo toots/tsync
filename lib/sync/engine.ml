@@ -1301,9 +1301,6 @@ module Make (C : Engine_ctx.S) = struct
           | _ -> ())
       r.ops
 
-  (* 05 §4.8, §4.2: the store side first, so the folder is filed where its
-     Mkdir says; then the folder and its whole subtree are announced, since
-     peers dropped them when it was trashed. *)
   (* 04 §4.6: the version's manifest first; then, under the locks, the staged
      edit goes and a put is owed before the store and the mirror change, so the
      upload queue discharges the record by the no-staged-edit rule. *)
@@ -1335,6 +1332,9 @@ module Make (C : Engine_ctx.S) = struct
                   Mirror.write_file ~own:true mirror path m));
           changed [path]
 
+  (* 05 §4.8, §4.2: the store side first, so the folder is filed where its
+     Mkdir says; then the folder and its whole subtree are announced, since
+     peers dropped them when it was trashed. *)
   let restore_from_trash path =
     match
       List.find_opt
