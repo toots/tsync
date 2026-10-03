@@ -414,16 +414,19 @@ error.
 | `exists` | `filenameCollision`, carrying the occupying item when the reply names it | Cocoa read-unknown |
 | `not_empty` | `directoryNotEmpty` | Cocoa read-unknown |
 | `read_only`, `denied`, `invalid` | `cannotSynchronize`, carrying the owner's sentence | Cocoa read-no-permission for `denied`; read-unknown otherwise |
-| `unreachable` | `serverUnreachable` | `serverUnreachable` |
-| `paused`, `busy`, `internal`, unknown or missing, transport failure, client deadline | Cocoa write-unknown | Cocoa read-unknown |
+| `unreachable`; no owner listening (nothing accepts the connection) | `serverUnreachable` | `serverUnreachable` |
+| `paused`, `busy`, `internal`, unknown or missing, another transport failure, client deadline | Cocoa write-unknown | Cocoa read-unknown |
 | cancellation | Cocoa user-cancelled | Cocoa user-cancelled |
 
 - `cannotSynchronize` stops the system retrying that item until it is modified on disk again or the
   error is signalled resolved; it is exactly "do not resend unchanged". The relay signals it resolved
   when the owner restarts (§8.2), which is when a configuration may have changed.
 - `serverUnreachable` makes the system back off until signalled; the relay signals it resolved on
-  every event. Only the owner's `unreachable` produces it: a restarting owner costs one retried
-  operation, never a latched domain.
+  every event and every acknowledgement, so it lasts until the owner answers again. It is produced
+  by the owner's `unreachable`, and by an owner that is not listening (restarting, or not started
+  yet): the relay's next acknowledgement is that owner coming back. Any other error is retried with
+  the system's own backoff, which grows to tens of minutes and is not shortened by a signal; an
+  owner restart reported that way left the working set unlisted for twenty minutes.
 - Everything else is retried by the system with its own backoff.
 
 ## 7. Change batch resolution
@@ -768,8 +771,9 @@ checked.
 - **Stable file ids.** Name-derived file identifiers made every file rename a merge and every remote
   rename a re-download; they also needed a read-only rule for lossy names and source-retiring logic in
   change batches.
-- **Only `unreachable` latches.** Latching on other codes took domains offline for weeks after a
-  one-second owner restart.
+- **Only `unreachable` and an absent owner latch, and both are unlatched by the relay.** Latching on
+  other codes took domains offline for weeks after a one-second owner restart, when nothing
+  signalled them resolved.
 - **The owner writes fetched files into the system's temporary directory.** The extension cannot move
   files there.
 - **Content identity survives the upload.** A version that moved on publish re-fetched every saved
