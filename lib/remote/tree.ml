@@ -219,10 +219,12 @@ module Make (C : Context.S) = struct
       (trash_entries ());
     Hashtbl.fold
       (fun _ group acc ->
+        (* Pitfall B-10.10: the newest element whole. *)
         let newest =
           List.fold_left
-            (fun ((b : Store.entry), _, _) ((e : Store.entry), m, p) ->
-              if e.last_modified > b.last_modified then (e, m, p) else (b, m, p))
+            (fun (((b : Store.entry), _, _) as best)
+                 (((e : Store.entry), _, _) as cur) ->
+              if e.last_modified > b.last_modified then cur else best)
             (List.hd group) group
         in
         let (e : Store.entry), (m : Folder.marker), path = newest in

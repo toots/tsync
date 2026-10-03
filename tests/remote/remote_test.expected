@@ -24,6 +24,9 @@ old path: missing
 trash entries: 1; anchor in trash: true; live: gone
 after restore: entries 0, found true
 
+== a folder trashed twice reports its newest path
+paths: Two Two Two Two Two
+
 == a placement onto a taken name
 taken by Photos
 
