@@ -369,8 +369,10 @@ let keep_running ~exe children =
         })
       children
   in
-  supervise exe children;
-  stop_children children
+  (* Lesson 8: the children are stopped and reaped however supervision ends. *)
+  Fun.protect
+    ~finally:(fun () -> stop_children children)
+    (fun () -> supervise exe children)
 
 let run ~exe (config : Config.t) children =
   let path = Paths.supervisor_socket () in
@@ -399,11 +401,14 @@ let run ~exe (config : Config.t) children =
               Log.err "cannot serve %s: %s" path (Printexc.to_string e);
               2
           | server ->
+              (* Lesson 8: children stopped, then the socket closed, however
+                 supervision ends. *)
+              Fun.protect ~finally:(fun () -> Ipc.close server) @@ fun () ->
+              Fun.protect ~finally:(fun () -> stop_children children)
+              @@ fun () ->
               Tsync_store.Uplink.own
                 ~state_file:(Filename.concat (Paths.data_dir ()) "uplink.json")
                 (fun link ->
                   Config.uplink_settings (Config.link_settings config link));
               supervise exe children;
-              stop_children children;
-              Ipc.close server;
               0)
