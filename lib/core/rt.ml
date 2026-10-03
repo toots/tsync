@@ -105,6 +105,19 @@ let with_ctx (type r) (ctx : ctx) (fn : unit -> r) : r =
             | _ -> None);
     }
 
+(* Outside any fiber there is nothing to move. *)
+let within execution fn =
+  let ctx = current () in
+  let previous = ctx.execution in
+  if ctx == root || previous = execution then fn ()
+  else (
+    let move execution =
+      ctx.execution <- execution;
+      Duppy.reschedule ~priority:execution scheduler
+    in
+    move execution;
+    Fun.protect ~finally:(fun () -> move previous) fn)
+
 let detached_failure =
   ref (fun name exn ->
       Printf.eprintf "tsync: %s: %s\n%!" name (Printexc.to_string exn))
@@ -121,7 +134,8 @@ let spawn_in ?(name = "task") ctx fn =
               with_ctx ctx (fun () ->
                   try fn () with
                     | Cancelled -> ()
-                    | exn -> !detached_failure name exn));
+                    | exn ->
+                        within `Threaded (fun () -> !detached_failure name exn)));
           []);
     }
 
@@ -133,19 +147,6 @@ let spawn_child ?name ?execution parent fn =
   c
 
 let spawn ?name ?execution fn = ignore (spawn_child ?name ?execution root fn)
-
-(* Outside any fiber there is nothing to move. *)
-let within execution fn =
-  let ctx = current () in
-  let previous = ctx.execution in
-  if ctx == root || previous = execution then fn ()
-  else (
-    let move execution =
-      ctx.execution <- execution;
-      Duppy.reschedule ~priority:execution scheduler
-    in
-    move execution;
-    Fun.protect ~finally:(fun () -> move previous) fn)
 
 (* [register] receives a resolver that answers whether it was the one to wake
    the fiber, since a cancellation may win the race.

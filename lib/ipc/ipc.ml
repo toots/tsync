@@ -81,6 +81,7 @@ module Line = struct
                 | a, None -> a
                 | None, b -> b
             in
+            Rt.within `Immediate @@ fun () ->
             Rt.wait_readable ?timeout:(remaining limit) t.fd;
             match Unix.read t.fd t.chunk 0 (Bytes.length t.chunk) with
               | 0 -> None
@@ -89,7 +90,7 @@ module Line = struct
                   go started
               | exception e when retry_io e -> go started)
     in
-    Rt.within `Immediate (fun () -> go None)
+    go None
 
   let write ?deadline t s =
     let s = s ^ "\n" in
@@ -238,7 +239,8 @@ let parse l =
 
 (* 01 §6.5: a connection is read, parsed and answered as non-blocking I/O, and
    only the handler leaves for the class its request names. The liveness
-   answer (07 §4.3) never leaves. *)
+   answer (07 §4.3) never leaves. Answers the failure that ended the
+   connection, for its caller to log once the descriptor is closed. *)
 let serve_conn t c ~execution handler =
   let reply j = Line.write c.line (Yojson.Safe.to_string j) in
   let handler req =
@@ -280,12 +282,12 @@ let serve_conn t c ~execution handler =
                       reply (failure (Fail.classify e));
                       loop ()))
   in
-  try loop () with
-    | Line.Too_long -> (
-        try reply (invalid "request line too long") with _ -> ())
-    | e ->
-        Rt.within `Threaded (fun () ->
-            Log.debug "%s: connection closed: %s" t.path (Printexc.to_string e))
+  match loop () with
+    | () -> None
+    | exception Line.Too_long ->
+        (try reply (invalid "request line too long") with _ -> ());
+        None
+    | exception e -> Some e
 
 let unregister t c =
   Mutex.protect t.m (fun () -> t.conns <- List.filter (( != ) c) t.conns);
@@ -330,7 +332,11 @@ let admit t fd ~execution handler =
             ~finally:(fun () ->
               unregister t c;
               Unix.close fd)
-            (fun () -> serve_conn t c ~execution handler)))
+            (fun () -> serve_conn t c ~execution handler)
+          |> Option.iter (fun e ->
+              Rt.within `Threaded (fun () ->
+                  Log.debug "%s: connection closed: %s" t.path
+                    (Printexc.to_string e)))))
 
 let rec accept_loop t ~execution handler =
   let ready =
@@ -385,7 +391,8 @@ let serve ?(execution = fun _ -> `Threaded) ~path handler =
       Fun.protect
         ~finally:(fun () ->
           Unix.close lfd;
-          (try Unix.unlink path with Unix.Unix_error _ -> ());
+          Rt.within `Threaded (fun () ->
+              try Unix.unlink path with Unix.Unix_error _ -> ());
           Rt.Promise.resolve t.finished ())
         (fun () -> accept_loop t ~execution handler));
   t
