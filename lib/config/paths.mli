@@ -16,6 +16,10 @@ val owner_socket : Domain_name.t -> string
 
 val store_server_socket : unit -> string
 val supervisor_socket : unit -> string
+
+(** Locked by the supervisor for as long as it runs. *)
+val supervisor_lock : unit -> string
+
 val ownership_lock : Domain_name.t -> string
 val default_domain_file : unit -> string
 

@@ -106,3 +106,18 @@
  (alias runtest)
  (action
   (diff jobs_test.expected jobs_test.output)))
+
+(executable
+ (name supervisor_test)
+ (modules supervisor_test)
+ (libraries tsync_core tsync_config tsync_catalog tsync_supervisor unix))
+
+(rule
+ (with-stdout-to
+  supervisor_test.output
+  (run ./supervisor_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff supervisor_test.expected supervisor_test.output)))
