@@ -225,7 +225,7 @@ watched with the liveness probe ([07 §4.3](07-daemon-cli.md#43-deadlines-bulk-a
 |---|---|---|---|
 | `stat` | `ref`\|`rel`\|(`parentRef`, `name`) | row at top level | |
 | `list_dir` | `ref`\|`rel`, `after?`, `limit?` (1000) | `items`, `next?`, `unnamed?` | |
-| `list_all` | `after?`, `limit?` (1000) | `items`, `next?`, `unnamed?`; or `{stale:true}` for a cursor on another walk | |
+| `list_all` | `after?`, `limit?` (1000) | `items`, `next?`, `unnamed?`; or `{stale:true}` for a cursor on another walk | B for a first page (it walks the whole domain) |
 | `changes_since` | `arg` = anchor, `limit?` (512) | `{stale:true}` or `{stale:false, cursor, more, ops, unnamed?}` | |
 | `cursor` | — | `cursor` (the current anchor) | |
 | `ensure_cached` | `ref`\|`rel`, `dest` | `localPath`, `item`: the whole file written to `dest`, and the row of exactly those bytes | B |
