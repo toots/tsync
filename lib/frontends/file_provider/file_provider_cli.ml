@@ -30,6 +30,10 @@ let status args =
 (* Launches the app if it is not running; never terminates a process. *)
 let launch_app () = status ["/usr/bin/open"; "-g"; "-b"; app_bundle_id] = 0
 
+let agent_definition () =
+  Filename.concat (Paths.home ())
+    ("Library/LaunchAgents/" ^ service_label ^ ".plist")
+
 let service_target () =
   Printf.sprintf "gui/%d/%s" (Unix.getuid ()) service_label
 
@@ -111,6 +115,8 @@ let purge ~domain _ =
     fail "the app did not release its domains within %.0fs" purge_wait
   else (
     ignore (status ["/bin/launchctl"; "bootout"; service_target ()]);
+    (* §11: no later login starts a service whose bundle is gone. *)
+    (try Unix.unlink (agent_definition ()) with Unix.Unix_error _ -> ());
     remove_app ();
     Fs.rm_rf (Paths.data_dir ());
     remove_link ();

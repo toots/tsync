@@ -22,15 +22,6 @@ targets:
     sources:
       - path: Shared
       - path: TsyncApp
-        excludes:
-          - LaunchAgents
-      # file-provider §11: the service's agent, defined inside the bundle for
-      # SMAppService.agent(plistName:).
-      - path: TsyncApp/LaunchAgents/org.feverdreamtv.tsync.daemon.plist
-        buildPhase:
-          copyFiles:
-            destination: wrapper
-            subpath: Contents/Library/LaunchAgents
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: org.feverdreamtv.tsync
