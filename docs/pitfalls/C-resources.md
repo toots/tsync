@@ -250,6 +250,11 @@ Measured numbers from the material:
 - **Check** — Timeout, stop and wake-up delivery, non-blocking socket I/O, the liveness answer and the governor's admission and renewal run in classes that hold no blocking slot (spec 01 §6.5). A test pins every slot and shows they still run, and that a may-block task does not.
 - **Seen** — rewrite.
 
+### C-7.10 A descriptor released on some failure paths but not on a raising step
+- **Pitfall** — `Dqueue.Records.hold` opened a record and raised when it could not lock it, without closing the descriptor. `Owner.acquire` took the ownership lock, then wrote the holder record: a failing truncate or write raised past the lock, so the descriptor, and the domain's ownership lock with it, stayed held by a process that reported failure. A cleanup written as a copy per branch (closing a held batch record in each branch of its release) had the same hole for any step that raises.
+- **Check** — Every step after an acquisition either runs under `Fun.protect ~finally` (released on every path) or under `match … with exception` (released on failure, handed over on success). A branch that releases by hand is a branch a later raise skips.
+- **Seen** — rewrite (review of PR #118).
+
 ## 8. CPU loops and polling
 
 ### C-8.1 A watcher woken by its own writes
