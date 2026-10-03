@@ -1574,6 +1574,10 @@ module Make (C : Engine_ctx.S) = struct
 
   let start ?(poll_journal = not C.lazy_tree) () =
     Applied.load applied;
+    (* wal-and-journal §4.9: the minter starts past the applied log and the
+       mark too, which are read only here. *)
+    List.iter (Entry_key.observe keys) (Applied.keys applied);
+    Option.iter (Entry_key.observe keys) (Mark.read ~data_dir:C.data_dir d);
     let is_paused = Fs.exists paused_path in
     Atomic.set paused is_paused;
     recover_local ();
