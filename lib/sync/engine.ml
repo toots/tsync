@@ -432,7 +432,10 @@ module Make (C : Engine_ctx.S) = struct
           changed [source; dst]
       | None -> ()
 
-  let apply_op o answers op =
+  (* [fid] receives the file id of the local file the op acted on, at the path
+     the op acts on here (ocaml 03 B-III.1): a put's and a rename's afterwards,
+     a delete's only when it removed the file. *)
+  let apply_op o answers ~fid op =
     let decision_and_enact facts enact =
       let decision = Conflict.arrival facts in
       if Conflict.clashed decision then
@@ -444,6 +447,8 @@ module Make (C : Engine_ctx.S) = struct
     match op with
       | Op.Put { path; _ } ->
           let l = follow_owed_renames o (translate path) in
+          Fun.protect ~finally:(fun () -> fid (Mirror.file_id mirror l))
+          @@ fun () ->
           let s = store_at answers path in
           let occ = occupant o ~op_id:None l in
           let a2a =
@@ -478,6 +483,10 @@ module Make (C : Engine_ctx.S) = struct
               | _ -> ())
       | Delete p ->
           let l = translate p in
+          let before = Mirror.file_id mirror l in
+          Fun.protect ~finally:(fun () ->
+              if Mirror.file_id mirror l = None then fid before)
+          @@ fun () ->
           let s = store_at answers p in
           decision_and_enact
             (Delete_facts
@@ -654,6 +663,8 @@ module Make (C : Engine_ctx.S) = struct
                     | _ -> ()))
       | Rename { src; dst; _ } ->
           let s' = translate src and t = translate dst in
+          Fun.protect ~finally:(fun () -> fid (Mirror.file_id mirror t))
+          @@ fun () ->
           let sd = store_at answers dst in
           let ss = try store_at answers src with Exit -> None in
           let source_here =
@@ -716,20 +727,8 @@ module Make (C : Engine_ctx.S) = struct
            let o = owed () in
            List.iteri
              (fun i op ->
-               let before =
-                 match op with
-                   | Op.Delete p -> Mirror.file_id mirror p
-                   | _ -> None
-               in
-               apply_op o answers op;
-               let id =
-                 match op with
-                   | Op.Put { path; _ } -> Mirror.file_id mirror path
-                   | Rename { is_dir = false; dst; _ } ->
-                       Mirror.file_id mirror dst
-                   | _ -> before
-               in
-               Option.iter (fun id -> fids := (i, id) :: !fids) id)
+               apply_op o answers op
+                 ~fid:(Option.iter (fun id -> fids := (i, id) :: !fids)))
              ops)
      with Exit ->
        Fail.raise_ Fail.Local "local state changed during the read-ahead");
@@ -840,9 +839,9 @@ module Make (C : Engine_ctx.S) = struct
                       | Some ops -> (
                           match apply_entry ops with
                             | fids ->
-                                Applied.note
-                                  ~fids:(note_fids ~known:fids ops)
-                                  applied k ops;
+                                (* Only what apply_op reported: a peer's paths
+                                   are not this client's (ocaml 03 B-III.1). *)
+                                Applied.note ~fids applied k ops;
                                 Mutex.protect stepped_m (fun () ->
                                     Hashtbl.remove stepped_aside
                                       (Entry_key.to_string k));

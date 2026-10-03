@@ -157,6 +157,41 @@ let () =
       show "B" b ["z.txt"];
       feed "A" a;
       feed "B" b;
+      let last_applied (module E : Engine.S) =
+        match Applied.since E.applied None 1000 with
+          | `Page pg -> (
+              match List.rev pg.entries with
+                | (_, ops) :: _ ->
+                    List.iter
+                      (fun (o : Applied.op) ->
+                        p "  last applied: %s fid=%s\n" (op_name o.op)
+                          (match o.fid with Some id -> alias id | None -> "-"))
+                      ops
+                | [] -> p "  the applied log is empty\n")
+          | `Stale -> p "  stale\n"
+      in
+      let peer_delete_under_renamed_folder ~published x y =
+        A.mkdir x ~exclusive:false;
+        write a (x ^ "/f.txt") "f";
+        drain a;
+        pass b;
+        p "  B's %s/f.txt: %s\n" x
+          (alias (Option.get (Mirror.file_id B.mirror (x ^ "/f.txt"))));
+        if not published then B.set_paused true;
+        B.rename ~src:x ~dst:y ~exclusive:false;
+        drain b;
+        A.delete (x ^ "/f.txt");
+        drain a;
+        pass b;
+        show "B" b [y ^ "/f.txt"];
+        last_applied b;
+        B.set_paused false;
+        drain b
+      in
+      p "== a peer's delete under a folder renamed here, rename unpublished\n";
+      peer_delete_under_renamed_folder ~published:false "X" "Y";
+      p "== the same with the rename published: the file is kept, no id named\n";
+      peer_delete_under_renamed_folder ~published:true "X2" "Y2";
       p "== owner start gives an id to a file found without one\n";
       let marker =
         Filename.concat (Mirror.path B.mirror "")
