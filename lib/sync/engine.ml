@@ -1505,7 +1505,6 @@ module Make (C : Engine_ctx.S) = struct
 
   let recover_local () =
     let root = Mirror.root mirror in
-    sweep_local_temps ();
     Cache.sweep_at_start cache;
     let named = Hashtbl.create 64 in
     let staged_dir = Filename.concat root "staged" in
@@ -1590,6 +1589,12 @@ module Make (C : Engine_ctx.S) = struct
     let is_paused = Fs.exists paused_path in
     Atomic.set paused is_paused;
     recover_local ();
+    (* Every reader skips a temporary, so dead ones are swept behind the
+       start: the walk is an lstat per file of the domain. *)
+    Rt.spawn ~name:"sweep temporaries" (fun () ->
+        try sweep_local_temps () with
+          | (Stop.Stopping | Rt.Cancelled) as e -> raise e
+          | e -> Log.warn "temporaries not swept: %s" (Printexc.to_string e));
     Dqueue.start ~paused:is_paused uploads run_upload;
     Dqueue.start ~paused:is_paused metadata run_metadata;
     reconcile ();
