@@ -50,8 +50,10 @@ let macos_service tls (config : Config.t) =
               store_server)
       in
       let serve present =
-        Owner.run ?present ~shared:true ~socket:(Paths.service_socket ()) config
-          config.domains
+        (* file-provider §4.4: the App Group is the trust boundary, and the
+           extension's temporary directory has no location to declare. *)
+        Owner.run ?present ~shared:true ~roots:[]
+          ~socket:(Paths.service_socket ()) config config.domains
       in
       Fun.protect
         ~finally:(fun () ->
