@@ -502,10 +502,17 @@ let writable route k =
   if route.read_only && not (Key.under Key.shares k) then
     answer (text 403 "read-only domain")
 
-(* §A6, failure-model §7.4: permanent kinds are 409 with their name, the rest
-   500. *)
+(* §A6, failure-model §7.4: permanent kinds are 409 with their name, the
+   backend's own throttling 503, the rest 500. *)
 let store_failure t (f : Fail.t) =
-  if Fail.retryable f.kind || f.kind = Unexplained || f.kind = Deadline then (
+  if f.kind = Load then (
+    (* The backend said later: the peer backs off instead of counting a
+       failure of this link. *)
+    count t "busy";
+    Log.info "http-proxy: %s" f.reason;
+    text 503 f.reason)
+  else if Fail.retryable f.kind || f.kind = Unexplained || f.kind = Deadline
+  then (
     count t "error";
     Log.err "http-proxy: %s" f.reason;
     text 500 f.reason)

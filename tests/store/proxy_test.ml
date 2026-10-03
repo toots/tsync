@@ -28,10 +28,24 @@ let () =
           share = None;
         }
       in
+      (* A backend that answers "later" until told otherwise. *)
+      let throttling = Atomic.make false in
+      let throttled =
+        let inner = local "throttled" in
+        {
+          inner with
+          get_opt =
+            (fun k ->
+              if Atomic.get throttling then
+                Fail.raise_ Fail.Load "the backend throttles";
+              inner.get_opt k);
+        }
+      in
       let proxy =
         P.create ~max_concurrent:4
           [
             route "d" "d" (local "d");
+            route "throttled" "throttled" throttled;
             route "ro" "ro" ~read_only:true ~secret:ro_secret (local "ro");
           ]
       in
@@ -94,6 +108,19 @@ let () =
              s.copy (Key.v "tsync/shares/abcd") (Key.v "tsync/shares/cache/y")));
       p "copy within the share cache: %s\n"
         (kind (fun () -> s.copy staged (Key.v "tsync/shares/cache/z")));
+      p "== a backend that throttles for two seconds\n";
+      let slow = client "throttled" in
+      Contract.put slow (Key.v "tsync/throttled/a") "a";
+      Atomic.set throttling true;
+      Rt.spawn ~name:"throttling ends" (fun () ->
+          Rt.sleep 2.;
+          Atomic.set throttling false);
+      let trips = Atomic.make 0 in
+      let unwatch = Health.on_trip slow.health (fun () -> Atomic.incr trips) in
+      let read = kind (fun () -> slow.get_opt (Key.v "tsync/throttled/a")) in
+      unwatch ();
+      p "a read through it: %s; the peer's breaker tripped: %b\n" read
+        (Atomic.get trips > 0);
       p "== unsigned bodies dripping do not hold the data slots\n";
       let port =
         match Server.addresses server with
