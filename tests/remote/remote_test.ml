@@ -233,6 +233,34 @@ let () =
            (fun n (f : T.trashed) -> n + List.length f.entries)
            0 (T.trashed ()))
         (T.find Folder_id.root ["Restored"] = `Folder sub);
+      p "\n== a folder trashed twice reports its newest path\n";
+      let twice =
+        List.init 5 (fun i ->
+            Folder_id.mint ~uuid:"cccccccccccc" ~counter:(i + 1))
+      in
+      List.iter
+        (fun id -> T.trash id ~old:(Folder_id.root, "One") ~path:"One")
+        twice;
+      Unix.sleepf 1.1;
+      List.iter
+        (fun id -> T.trash id ~old:(Folder_id.root, "Two") ~path:"Two")
+        twice;
+      let paths =
+        List.filter_map
+          (fun (f : T.trashed) ->
+            if List.exists (Folder_id.equal f.id) twice then f.path else None)
+          (T.trashed ())
+      in
+      p "paths: %s\n" (String.concat " " (List.sort compare paths));
+      (* Their keys are random, and the store is listed below. *)
+      List.iter
+        (fun (f : T.trashed) ->
+          if List.exists (Folder_id.equal f.id) twice then (
+            List.iter
+              (fun (e : Store.entry) -> ignore (main.delete e.key))
+              f.entries;
+            ignore (main.delete (Key.anchor d f.id))))
+        (T.trashed ());
       p "\n== a placement onto a taken name\n";
       let other = Folder_id.mint ~uuid:"bbbbbbbbbbbb" ~counter:1 in
       p "%s\n"
