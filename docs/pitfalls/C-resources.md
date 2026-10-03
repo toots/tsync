@@ -110,6 +110,11 @@ Measured numbers from the material:
 - **Check** — Storage concurrency is sized from the device, asked once per store. A bounded queue refuses rather than accumulates, and a refusal does not consume a slot.
 - **Seen** — 45112c33, f3d4c61b.
 
+### C-2.9 Slot released only on the path that consumes the body
+- **Pitfall** — A share response took a slot and released it in the `finally` of its streamed body. The server never runs a streamed body for a HEAD request, nor when the client is gone before the head is written, so each HEAD on `/s/<token>` (a link preview, `curl -I`) kept a slot: 64 of them and every share link answered 503 until restart.
+- **Check** — A resource a response holds is released by the server on every path that ends the response: written, skipped for HEAD, failed on the head or the body. A streamed body is not a lifetime.
+- **Seen** — rewrite (review of PR #114).
+
 ## 3. Body bytes and mappings
 
 ### C-3.1 Bodies copied through the OCaml heap
