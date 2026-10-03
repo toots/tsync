@@ -53,7 +53,7 @@
 (executable
  (name resume_test)
  (modules resume_test)
- (libraries tsync_core tsync_store tsync_gc unix))
+ (libraries test_support tsync_core tsync_store tsync_gc unix))
 
 (rule
  (with-stdout-to

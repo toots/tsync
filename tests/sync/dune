@@ -311,6 +311,7 @@
  (name file_ids_test)
  (modules file_ids_test)
  (libraries
+  test_support
   tsync_core
   tsync_store
   tsync_remote
