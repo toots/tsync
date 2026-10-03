@@ -221,7 +221,7 @@
 (executable
  (name copy_memo_test)
  (modules copy_memo_test)
- (libraries tsync_core tsync_store))
+ (libraries tsync_core tsync_store unix))
 
 (rule
  (with-stdout-to

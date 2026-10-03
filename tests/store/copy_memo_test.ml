@@ -43,3 +43,45 @@ let () =
      not (Copy_memo.holds later b));
   g := None;
   p "G unreadable: trusted %b" (Copy_memo.trusted (Copy_memo.look memo))
+
+(* 06 §5: a store with no batch read answers many keys a few at a time. *)
+let () =
+  Rt.run_sync (fun () ->
+      let inner =
+        Local.create ~name:"slow"
+          (Filename.concat
+             (Filename.get_temp_dir_name ())
+             (Printf.sprintf "tsync-read-many-%d" (Unix.getpid ())))
+      in
+      let reading = Atomic.make 0 and most = Atomic.make 0 in
+      let slow =
+        {
+          inner with
+          get_many = None;
+          get_opt =
+            (fun k ->
+              let now = Atomic.fetch_and_add reading 1 + 1 in
+              if now > Atomic.get most then Atomic.set most now;
+              Rt.sleep 0.05;
+              Atomic.decr reading;
+              inner.get_opt k);
+        }
+      in
+      let entries =
+        List.init 24 (fun i ->
+            let key = Key.v (Printf.sprintf "tsync/d/many/%02d" i) in
+            inner.put key (Bigstring.of_string (string_of_int i));
+            Option.get (inner.head_opt key))
+      in
+      let got = Store.read_many slow entries in
+      p
+        "24 keys read singly: in order %b, more than one at a time %b, at most \
+         8 %b"
+        (List.mapi
+           (fun i (_, b) ->
+             Option.map Bigstring.to_string b = Some (string_of_int i))
+           got
+        |> List.for_all Fun.id)
+        (Atomic.get most > 1)
+        (Atomic.get most <= 8);
+      inner.delete_multi (List.map (fun (e : Store.entry) -> e.key) entries))

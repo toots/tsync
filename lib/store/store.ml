@@ -122,11 +122,18 @@ let max_batch_keys = 256
 let max_batch_bytes = 8 * 1024 * 1024
 let max_batch_folders = 64
 
+(* A store with no batch read is read a few keys at a time: one after another
+   is an hour for a folder of twenty thousand children on an object store. *)
+let single_read_width = 8
+
 (* 06 §5: the one way to read many keys. A batch that fails permanently is
    answered key by key; a transient failure is raised. *)
 let read_many s (entries : entry list) =
   match s.get_many with
-    | None -> List.map (fun e -> (e.key, s.get_opt e.key)) entries
+    | None ->
+        Rt.map_bounded ~width:single_read_width
+          (fun e -> (e.key, s.get_opt e.key))
+          entries
     | Some f ->
         let rec batches acc cur n bytes = function
           | [] -> List.rev (if cur = [] then acc else List.rev cur :: acc)

@@ -113,8 +113,8 @@ val max_batch_bytes : int
 val max_batch_folders : int
 
 (** Read many listed entries: native batches within the key and byte caps where
-    declared, else one read each. A batch failing permanently is re-asked key by
-    key. *)
+    declared, else one read each, eight at a time. A batch failing permanently
+    is re-asked key by key. *)
 val read_many : t -> entry list -> (Key.t * Bigstring.t option) list
 
 val count_up : t -> int -> unit
