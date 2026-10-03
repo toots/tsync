@@ -1278,6 +1278,9 @@ module Make (C : Engine_ctx.S) = struct
      a wait's expiry. *)
   let poller () =
     let last_seen = ref None and last_listing = ref neg_infinity in
+    (* A failing pass is retried every few seconds: said when its reason
+       changes, not at every attempt. *)
+    let failing = ref None in
     let rec loop () =
       Stop.check ();
       if Atomic.get paused then (
@@ -1312,11 +1315,17 @@ module Make (C : Engine_ctx.S) = struct
              ignore (apply_pass ());
              last_seen := token)
          with
-          | () -> ()
+          | () ->
+              if !failing <> None then Log.info "journal passes run again";
+              failing := None
           | exception ((Stop.Stopping | Rt.Cancelled) as e) -> raise e
           | exception e ->
               note_link_failure e;
-              Log.info "journal pass failed: %s" (Printexc.to_string e);
+              let reason = Printexc.to_string e in
+              if !failing <> Some reason then
+                Log.info "journal pass failed, retrying until it runs: %s"
+                  reason;
+              failing := Some reason;
               Stop.sleep Outbound.retry_floor);
         loop ())
     in
