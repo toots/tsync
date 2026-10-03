@@ -225,5 +225,19 @@ let () =
       batch x;
       batch y;
       Composite.settle ~timeout:10. c;
-      p "outstanding: [%s]\n" (outstanding ()));
+      p "outstanding: [%s]\n" (outstanding ());
+      p "\n== a batch merged after a poll saw the request gone\n";
+      let log = Discards.open_ ~dir:(Filename.concat root "merged") in
+      let request keys =
+        { Discards.run = "1790000000001"; shard = "abc"; generation = 9; keys }
+      in
+      Discards.add log (request ["k1"]) ~write:ignore;
+      let id, seen = List.hd (Discards.pending log) in
+      Discards.add log (request ["k2"]) ~write:ignore;
+      let removed = Discards.remove log id ~seen in
+      p "the poll removed the record: %b; keys still pending: %d\n" removed
+        (List.length
+           (List.concat_map
+              (fun (_, (q : Discards.pending)) -> q.keys)
+              (Discards.pending log))));
   Fs.rm_rf root

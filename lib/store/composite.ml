@@ -825,8 +825,7 @@ let check_discards t src c =
                     | Some k when main_holds src k -> sync t src c k 0
                     | _ -> ())
                 p.keys;
-              Discards.remove c.discards id;
-              settle_later t))
+              if Discards.remove c.discards id ~seen:p then settle_later t))
           pending
 
 let poll_discards t src =

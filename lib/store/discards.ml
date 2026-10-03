@@ -50,7 +50,16 @@ let add t p ~write =
         | Some (id, _) -> Dqueue.Records.replace t.records id (encode merged)
         | None -> ignore (Dqueue.Records.create t.records (encode merged)))
 
-let remove t id = Dqueue.Records.complete t.records id
+(* A later batch may have grown the record since [seen] was read: the request
+   now on the copy is that merged one, not the one seen gone. *)
+let remove t id ~seen =
+  Mutex.protect t.m (fun () ->
+      match Dqueue.Records.read t.records id with
+        | `Body b when decode b = Some seen ->
+            Dqueue.Records.complete t.records id;
+            true
+        | _ -> false)
+
 let request_key d p = Key.discard_job d ~run:p.run ~shard:p.shard
 let body keys = Bigstring.of_string (String.concat "\n" keys)
 
