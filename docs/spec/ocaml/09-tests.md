@@ -118,8 +118,8 @@ that the output never shows, so every driver is diffed against the same lines.
 - **Fixed sleeps as negative waits** (finding 158): `tests/store/spaces_test`, `tests/unit/dqueue_test`,
   `tests/gc/queued_test`. Under load a broken guard passes.
 - **Tests that cannot fail for their reason.** "Callbacks one at a time" in `remote_test` depends
-  on a `Thread.yield` window (finding 106); the proxy watch test passes at the 2 s polling floor
-  (finding 103); the S3 signature verifier uses the product's own canonicaliser (finding 159).
+  on a `Thread.yield` window (finding 106); the S3 signature verifier uses the product's own
+  canonicaliser (finding 159).
 - **Native TLS** (findings 99, 100). Body bytes are not checked against position-dependent data,
   multi-record writes are untested, and system trust is seen to succeed only in the dispatch-only
   conformance job.
