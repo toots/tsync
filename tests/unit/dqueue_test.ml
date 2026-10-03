@@ -33,7 +33,9 @@ let run _id (k, n) ~cancel =
     record (k ^ " finished"));
   if String.starts_with ~prefix:"slow" k then (
     Rt.sleep 0.2;
-    if Atomic.get cancel then raise Rt.Cancelled)
+    if Atomic.get cancel then (
+      record (k ^ " saw its cancel");
+      raise Rt.Cancelled))
 
 let dir =
   Filename.concat
