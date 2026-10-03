@@ -58,6 +58,8 @@ checksum listed: md5:900150983cd24fb0d6963f7d28e17f72; headed: md5:900150983cd24
 etagIsMd5 false: listed none; headed none
 a multipart ETag is no MD5: true
 clock off: refused/denied, get: local clock is off by more than 15 minutes
+a request the service timed out, once: ok
+an operation the service aborted, once: ok
 wrong region: refused/other, get: the bucket is in another region or endpoint (region eu-west-1)
 claim on a provider without If-None-Match: refused/other, s3: this store cannot claim a name
 a provider ignoring If-None-Match: refused/other, s3: this store ignores If-None-Match, so it cannot claim a name
@@ -65,4 +67,4 @@ and again: refused/other, s3: this store ignores If-None-Match, so it cannot cla
 a provider honouring it: won
 a provider ignoring If-Match: refused/other, s3: this store ignores If-Match, so it cannot replace conditionally
 a provider honouring it: written
-every request signed correctly: true (26 requests)
+every request signed correctly: true (30 requests)

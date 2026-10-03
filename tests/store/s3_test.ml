@@ -87,6 +87,9 @@ let error status code =
   xml status (Printf.sprintf "<Error><Code>%s</Code></Error>" code)
 
 let page_size = 3
+
+(* Keys whose first request was answered with a transient error. *)
+let answered_once : (string, unit) Hashtbl.t = Hashtbl.create 4
 let etag body = "\"" ^ Digest.to_hex (Digest.string body) ^ "\""
 
 let listing q =
@@ -151,6 +154,16 @@ let handler (r : Server.request) read_body =
         match (meth, Hashtbl.find_opt objects name) with
           | _, _ when String.ends_with ~suffix:"/skewed" name ->
               error 403 "RequestTimeTooSkewed"
+          | _, _
+            when String.ends_with ~suffix:"/timed-out-once" name
+                 && not (Hashtbl.mem answered_once name) ->
+              Hashtbl.replace answered_once name ();
+              error 400 "RequestTimeout"
+          | _, _
+            when String.ends_with ~suffix:"/aborted-once" name
+                 && not (Hashtbl.mem answered_once name) ->
+              Hashtbl.replace answered_once name ();
+              error 409 "OperationAborted"
           | _, _ when String.ends_with ~suffix:"/elsewhere" name ->
               {
                 (error 301 "PermanentRedirect") with
@@ -404,6 +417,10 @@ let () =
                   Printf.sprintf "%s, %s" (Fail.kind_name f.kind) f.reason))
         [
           ("clock off", fun () -> ignore (s.get_opt (Key.v "tsync/d/skewed")));
+          ( "a request the service timed out, once",
+            fun () -> ignore (s.get_opt (Key.v "tsync/d/timed-out-once")) );
+          ( "an operation the service aborted, once",
+            fun () -> ignore (s.get_opt (Key.v "tsync/d/aborted-once")) );
           ( "wrong region",
             fun () -> ignore (s.get_opt (Key.v "tsync/d/elsewhere")) );
           ( "claim on a provider without If-None-Match",
