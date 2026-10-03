@@ -165,23 +165,35 @@ let owner_cmd =
        ~docs:"INTERNAL COMMANDS")
     Term.(const owner $ names $ mount $ tls)
 
+(* Each owner socket with the domains it serves: one socket for all of them on
+   macOS, one per domain elsewhere. *)
 let owner_sockets config =
-  List.sort_uniq compare
-    (List.map
-       (fun (d : Config.domain) -> Paths.owner_socket d.name)
-       config.Config.domains)
+  let names =
+    List.map (fun (d : Config.domain) -> d.name) config.Config.domains
+  in
+  List.map
+    (fun socket ->
+      ( socket,
+        List.filter (fun name -> Paths.owner_socket name = socket) names ))
+    (List.sort_uniq compare (List.map Paths.owner_socket names))
 
-(* 07 §5.4 *)
-let wait_gone socket =
+(* 07 §5.4: a socket with no domain has no holder record to consult, and a
+   refusal alone decides. *)
+let wait_gone (socket, domains) =
   let deadline = Rt.now () +. Stop.grace +. 2. +. Ipc.request_deadline in
+  let again () =
+    Rt.now () < deadline
+    &&
+    (Rt.sleep 0.1;
+     true)
+  in
   let rec go () =
     match Ipc.Client.connect socket with
       | c ->
           Ipc.Client.close c;
-          if Rt.now () < deadline then (
-            Rt.sleep 0.1;
-            go ())
-          else false
+          if again () then go () else false
+      | exception _ when List.exists Owner.served domains ->
+          if again () then go () else false
       | exception _ -> true
   in
   go ()
@@ -189,14 +201,19 @@ let wait_gone socket =
 let stop verbose =
   set_verbose verbose;
   run (fun () ->
-      let ask socket =
-        match Protocol.call socket Stop with
-          | _ -> `Asked socket
+      let ask (socket, domains) =
+        match
+          Owner.retry_refused domains (fun () -> Protocol.call socket Stop)
+        with
+          | _ -> `Asked (socket, domains)
+          | exception Ipc.Not_serving _ when List.exists Owner.served domains ->
+              fail "%s refused connections for %.0fs while its owner runs"
+                socket Ipc.request_deadline
           | exception Ipc.Not_serving _ -> `Absent
           | exception Fail.E { kind = Deadline; _ } ->
               fail "%s did not answer within %.0fs" socket Ipc.client_deadline
       in
-      match ask (Paths.supervisor_socket ()) with
+      match ask (Paths.supervisor_socket (), []) with
         | `Asked s ->
             if wait_gone s then (
               say "Stopped tsync.";
@@ -209,12 +226,15 @@ let stop verbose =
         | `Absent -> (
             (* On macOS the service owns every domain and stops its store
                server itself. *)
+            let owners =
+              match config_opt () with
+                | Some c -> owner_sockets c
+                | None -> []
+            in
             let sockets =
-              if Fs.is_macos then [Paths.service_socket ()]
-              else (
-                match config_opt () with
-                  | Some c -> owner_sockets c @ [Paths.store_server_socket ()]
-                  | None -> [Paths.store_server_socket ()])
+              if Fs.is_macos then
+                if owners = [] then [(Paths.service_socket (), [])] else owners
+              else owners @ [(Paths.store_server_socket (), [])]
             in
             let asked =
               List.filter_map

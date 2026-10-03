@@ -27,6 +27,15 @@ val release : lock -> unit
 (** The record in a domain's lock file; advisory, the lock may be free. *)
 val holder : Domain_name.t -> holder option
 
+(** Whether the domain's recorded holder lives and names a socket (07 §2.5):
+    the signal that an owner serves it, which a refused connection is not. *)
+val served : Domain_name.t -> bool
+
+(** Runs a call to the socket serving these domains, retrying
+    {!Tsync_ipc.Ipc.Not_serving} every 100 ms while one of them is {!served},
+    until the request deadline. *)
+val retry_refused : Domain_name.t list -> (unit -> 'a) -> 'a
+
 (** Exit status of an owner that found its domain owned. *)
 val owner_held : int
 

@@ -115,6 +115,7 @@ jobs:
             echo "sign=false" >> "$GITHUB_OUTPUT"
           else
             echo "::error::release-macos needs these repository secrets:$missing"
+            echo "::error::macos/RELEASING.md says how to provision them"
             exit 1
           fi
 
