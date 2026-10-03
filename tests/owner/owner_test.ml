@@ -536,6 +536,24 @@ let () =
       List.iter
         (fun (kind, state) -> p "  %s: %s" kind state)
         (List.rev !reports);
+      p "== rmdir of a folder holding folders";
+      let mk parent name =
+        item_ref
+          (ask [("action", "mkdir"); ("parentRef", parent); ("name", name)])
+      in
+      let t = mk "root" "t" in
+      let sub = mk t "sub" in
+      ignore (mk t "empty");
+      ignore
+        (ask
+           [
+             ("action", "write");
+             ("parentRef", sub);
+             ("name", "f.txt");
+             ("staging", staging "wt" "deep");
+           ]);
+      show "rmdir t" (ask [("action", "rmdir"); ("ref", t)]);
+      show "stat t after" (ask [("action", "stat"); ("rel", "t")]);
       p "== stop";
       show "stop" (ask [("action", "stop")]);
       p "exit status %d" (Rt.Promise.await owner);

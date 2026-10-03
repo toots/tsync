@@ -90,6 +90,9 @@ reports the supervisor got, in order:
   gc --apply: failed
   gc --abort: running
   gc --abort: done
+== rmdir of a folder holding folders
+rmdir t                            {"ok":true}
+stat t after                       {"ok":false,"code":"not_found","error":"t: not found"}
 == stop
 stop                               {"ok":true}
 exit status 0
