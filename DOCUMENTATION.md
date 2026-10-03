@@ -835,7 +835,7 @@ provides, so it inherits that platform's requirements:
 | Platform | Reads | Requires |
 |---|---|---|
 | Linux | the systemd journal, via `journalctl -t tsync` | **systemd-journald**. On a system without it there is nothing to read, and `tsync logs` says so. Use your syslog daemon's own files instead. |
-| macOS | `~/Library/Logs/tsync-daemon.log`, via `tail` | the LaunchAgent installed by `install-agent.sh`, which is what points the daemon's output at that file. |
+| macOS | `~/Library/Logs/tsync-daemon.log`, via `tail` | nothing: the service opens that file itself whenever it does not run in a terminal. |
 
 On Linux the journal is matched by syslog identity (`tsync`), not by unit name, so renaming
 the unit or switching between the user unit and the packaged system instance does not affect
@@ -973,14 +973,22 @@ native` or `"tls": "native"`. `tsync start` logs which is active and what's avai
 The File Provider frontend contributes its own commands:
 
 ```bash
-tsync fileprovider reimport   # drop the extension's cached index and re-enumerate
+tsync fileprovider reimport   # make Finder enumerate the domain again
+tsync fileprovider reset      # remove the domain from Finder and add it back
 tsync fileprovider purge      # remove everything installed on this machine
+tsync restart                 # restart the service through launchd
 ```
 
-`reimport` is for when Finder disagrees with `tsync ls` — it rebuilds the index from the
-domain instead of the cache. `purge` unregisters the File Provider domains and the launchd
-agent, then removes the app bundle and cache; it keeps `config.json`, so reinstalling the
+`reimport` is for when Finder misses items `tsync ls` shows: the system re-lists the whole domain.
+It does not remove items Finder shows that no longer exist; `reset` does, by removing the domain
+from the system and adding it again (local edits Finder had not handed over are kept, and the menu
+says where). `purge` unregisters the domains and the login item, stops the service and removes its
+launchd agent, the app bundle and the data directory; it keeps `config.json`, so reinstalling the
 app puts you back.
+
+The menu bar item is how the service shows itself: its icon follows uploads, downloads and pauses,
+and the menu lists the transfers running now. There is no Quit: the app relays remote changes to
+Finder, and without it nothing reaches Finder until the next login.
 
 Unlike the FUSE mount, the extension hands back whole files rather than deltas, so a large
 file edited in place is re-uploaded in full. Chunk dedup still keeps unchanged blocks off the

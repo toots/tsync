@@ -208,7 +208,7 @@ this review, each rule in the file that owns it:
 | [07](../spec/07-daemon-cli.md) | watermark and dropped-shard paths; no quit row on macOS |
 | [09](../spec/09-tests.md) | feed and paging scenarios; `<file-N>` alias |
 
-Still to refresh once an implementation exists: [ocaml/frontends/file-provider.md](../spec/ocaml/frontends/file-provider.md), whose section references follow the old numbering.
+[ocaml/frontends/file-provider.md](../spec/ocaml/frontends/file-provider.md) describes the implementation that followed.
 
 ---
 
