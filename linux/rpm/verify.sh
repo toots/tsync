@@ -15,9 +15,13 @@ echo "$info" | grep -Eq '^tls:.*\bnative\b'
 # ldd cannot fail here, where the -devel packages installed every library; the
 # declared requirements are what a clean machine gets.
 requires=$(rpm -qpR "$rpm")
-for lib in libssl libfuse3 libgmp fuse3; do
-  echo "$requires" | grep -q "$lib"
+# A library by its prefix, the fuse3 package by its whole name, which
+# libfuse3 would otherwise satisfy.
+names=$(echo "$requires" | sed 's/ .*//')
+for lib in libssl libfuse3 libgmp; do
+  echo "$names" | grep -q "^$lib"
 done
+echo "$names" | grep -qx fuse3
 
 # The scriptlets no-op in a container, where /run/systemd/system is absent, so
 # only their presence can be checked; and that the restart and the stop name

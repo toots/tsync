@@ -43,7 +43,7 @@ it is published, which artifacts are released and how, and how a build obtains i
 `test` is hermetic: it needs no secret and runs on forks. It MUST:
 
 1. **Linux**: build everything with the FUSE frontend and both TLS implementations, assert them from
-   `tsync build-info` (§4.3), and run every hermetic check of tiers Pure through Multi-process and the
+   `tsync build-info` (§4.3), check that the sources are formatted, and run every hermetic check of tiers Pure through Multi-process and the
    Platform tier for FUSE (09 §2), including a real mount driven by file-system calls.
 2. **macOS**: build everything, run the same hermetic tiers, then build the Swift targets unsigned
    and run their tests, including the extension-side client against an owner started from this
