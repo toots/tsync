@@ -30,6 +30,8 @@ it is published, which artifacts are released and how, and how a build obtains i
 
 - A newer `test` run for the same ref cancels the older one. A release workflow is serialised per ref
   and never cancelled: a cancelled publish or deploy leaves the release or the site half-written.
+- A release is triggered only by a gate run for a push to this repository. A pull request's gate
+  run triggers none, whatever its head branch is named: a fork's branch called `main` is not `main`.
 - A release triggered by the gate builds that run's `head_sha`. Nothing triggered from a branch
   other than `main`, including a manual dispatch, publishes or deploys.
 

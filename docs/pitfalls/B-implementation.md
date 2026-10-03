@@ -616,6 +616,11 @@ This file collects the traps that came from the implementation medium rather tha
 - **Check** — A check that parses a tool's output asks for its plain form (`--color=never`, `--porcelain`, JSON). A check is seen passing on a correct build before it is trusted, as it is seen failing on a broken one (09 §10.2).
 - **Seen** — rewrite (conformance, then test).
 
+### B-12.14 A fallback branch behind a lookup that exits the script
+- **Pitfall** — `macos/build.sh` looked up a signing identity with `security find-identity | grep "Apple Development" | head -1 | sed ...` under `set -euo pipefail`, then branched on an empty result to sign ad-hoc. With no such identity `grep` exits 1, the pipeline fails and the script dies in the assignment: the ad-hoc branch was unreachable, and the unsigned build a fork is promised (10 §5.3) was red on every runner. It passed on every developer machine, which all hold the identity.
+- **Check** — Under `pipefail`, a pipeline whose empty output is a handled case ends in `|| true`. Each branch of a build script is run once in the environment it exists for; a "no secrets" path is seen green on a runner without them.
+- **Seen** — rewrite (ci-workflows).
+
 ## Review checklist
 
 1. **Durability and mapping** — Is every renamed/linked file fsynced first? Is anything mapped that is not immutable and rename-published? Does a no-reflink fallback map a live file? Is shared-fd I/O positioned? Do listings hide scratch names and keep key order?

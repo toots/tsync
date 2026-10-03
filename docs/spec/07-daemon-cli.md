@@ -159,8 +159,10 @@ class**:
 "Serving" means the holder record names a socket and the socket answers. A refused connection does
 not by itself mean the owner is gone: some platforms refuse a connection while the socket's backlog
 is full, with the same error as a socket nobody listens on (macOS). Only a free ownership lock means
-no owner; a command whose connection is refused while the lock is held retries it until the
-request's deadline (§4.3), and only then treats the owner as held but not serving. A command that takes
+no owner; a command whose connection is refused while the lock is held by a holder whose record
+names a socket retries it until the request's deadline (§4.3), and only then treats the owner as held
+but not serving. A holder whose record names no socket (a command that took ownership) never serves,
+so the refusal is immediate. A command that takes
 ownership is an owner for its duration with every duty of §2.2 except continuous journal polling,
 and it runs the owner's drain before releasing the lock. Taking ownership is the fallback for a
 machine where the daemon is not running, not the design: the same operation runs either way.
