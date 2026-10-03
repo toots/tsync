@@ -47,12 +47,28 @@ type fetched = {
 }
 
 type cached = { local_path : string; item : row }
+
 (** A change-feed op as 08 §3.6 renders it: items named by reference. *)
 type feed_op =
-  | Put_op of { ref_ : string; parent_ref : string; name : string; item : row option }
+  | Put_op of {
+      ref_ : string;
+      parent_ref : string;
+      name : string;
+      item : row option;
+    }
   | Delete_op of { ref_ : string; parent_ref : string; name : string }
-  | Mkdir_op of { ref_ : string; parent_ref : string; name : string; item : row option }
-  | Rmdir_op of { id : string; ref_ : string; parent_ref : string; name : string }
+  | Mkdir_op of {
+      ref_ : string;
+      parent_ref : string;
+      name : string;
+      item : row option;
+    }
+  | Rmdir_op of {
+      id : string;
+      ref_ : string;
+      parent_ref : string;
+      name : string;
+    }
   | Rename_op of {
       is_dir : bool;
       id : string option;
@@ -66,7 +82,12 @@ type feed_op =
 
 type changes =
   | Stale
-  | Changes of { cursor : string; more : bool; ops : feed_op list; unnamed : int }
+  | Changes of {
+      cursor : string;
+      more : bool;
+      ops : feed_op list;
+      unnamed : int;
+    }
 
 type counted = { succeeded : int; failed : int }
 type progress = Inactive | Active of { downloaded : int; total : int }
