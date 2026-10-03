@@ -52,11 +52,6 @@ val durable_replace : ?perm:int -> string -> string -> unit
 (** Replace without the directory fsync: never torn, not yet durable. *)
 val replace : ?perm:int -> string -> string -> unit
 
-(** Replace with no fsync at all: a crash before the next {!syncfs} may leave
-    the file torn or empty. For bulk writes a caller flushes once, and reads
-    back a torn file as absent. *)
-val replace_unsynced : ?perm:int -> string -> string -> unit
-
 (** Durable create-if-absent by hard link (or no-replace rename). *)
 val create_if_absent : ?perm:int -> string -> string -> [ `Created | `Exists ]
 

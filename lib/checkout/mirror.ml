@@ -43,11 +43,11 @@ let own_marker dir leaf =
 let fid_marker dir leaf =
   Filename.concat dir (".tsync-fid-" ^ Xxh.hex16 (Xxh.string leaf))
 
-(* A non-durable write is part of a bulk pass that flushes once at its end
-   (rebuild, backfill) or of a rebuildable projection; each reader treats a torn
-   file as absent. *)
+(* A non-durable write still fsyncs its data, so it is never torn; only its
+   directory entry waits for the caller's flush (ocaml 04: syncfs is no barrier
+   on macOS). *)
 let write ?(durable = true) p data =
-  if durable then Fs.durable_replace p data else Fs.replace_unsynced p data
+  if durable then Fs.durable_replace p data else Fs.replace p data
 
 (* Skip the write when the file already holds these bytes, so a directory's
    mtime moves only when its set of children changes. *)
@@ -466,7 +466,7 @@ let file_ids_record t = Filename.concat t.root "file-ids-complete"
 let backfill_file_ids t =
   if Fs.exists (file_ids_record t) then 0
   else begin
-    let minted = ref 0 in
+    let minted = ref 0 and touched = Hashtbl.create 64 in
     let rec walk rel =
       let dir = path t rel in
       List.iter
@@ -482,12 +482,14 @@ let backfill_file_ids t =
                   let r = Names.join rel leaf in
                   if file_id t r = None then (
                     set_file_id ~durable:false t r (Ids.token ());
+                    Hashtbl.replace touched dir ();
                     incr minted)
               | _ -> ()))
         (Option.value ~default:[] (Fs.readdir_opt dir))
     in
     walk "";
-    if !minted > 0 then Fs.syncfs t.root;
+    (* Every marker is on disk before the record says the pass completed. *)
+    Hashtbl.iter (fun dir () -> Fs.fsync_dir dir) touched;
     Fs.durable_replace (file_ids_record t) "";
     !minted
   end
