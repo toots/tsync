@@ -3,7 +3,6 @@
 
 open Tsync_core
 open Tsync_store
-open Tsync_remote
 open Tsync_sync
 
 let mib n = float_of_int n /. 1048576.
