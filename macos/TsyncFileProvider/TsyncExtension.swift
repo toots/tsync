@@ -344,7 +344,8 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, NSFileP
         var request = target
         request["staging"] = file.path
         if let base = base, base != "-" { request["base"] = base }
-        return try Owner.row(owner.call("write", request, cancellation: c))
+        // Bulk: adopting the file digests all of it (08 §3.3).
+        return try Owner.row(owner.bulk("write", request, cancellation: c))
     }
 
     // MARK: Custom actions (§6.7)

@@ -177,7 +177,7 @@ let mutates : type a. a request -> bool = function
   | _ -> false
 
 let bulk : type a. a request -> bool = function
-  | Ensure_cached _ | Fetch_range _ | Evict _ | Restore _ | Sync _
+  | Ensure_cached _ | Fetch_range _ | Write _ | Evict _ | Restore _ | Sync _
   | Trash_restore _ | Job _ ->
       true
   | List_all { after = None; _ } -> true
