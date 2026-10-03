@@ -93,5 +93,5 @@ let () =
     scrub 0
   in
   p "a command while the host owns it      exit %d: %s" code said;
-  Fs.rm_rf root;
+  Test_support.remove_root root;
   exit 0
