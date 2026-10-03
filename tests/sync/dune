@@ -413,3 +413,24 @@
  (alias runtest)
  (action
   (diff arrival_lock_test.expected arrival_lock_test.output)))
+
+(executable
+ (name restore_race_test)
+ (modules restore_race_test)
+ (libraries
+  tsync_core
+  tsync_store
+  tsync_remote
+  tsync_checkout
+  tsync_sync
+  unix))
+
+(rule
+ (with-stdout-to
+  restore_race_test.output
+  (run ./restore_race_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff restore_race_test.expected restore_race_test.output)))
