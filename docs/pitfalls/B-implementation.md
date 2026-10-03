@@ -423,6 +423,11 @@ This file collects the traps that came from the implementation medium rather tha
 - **Check** — A descriptor is closed in exactly one place, `deinit`, or marked invalid before any `throw`.
 - **Seen** — ed6931d6, rewrite.
 
+### B-8.16 A full backlog on macOS reads as nothing listening
+- **Pitfall** — `Ipc.Client.connect` promises a deadline when a server's backlog stays full and `Not_serving` only when nothing listens. Linux tells the two apart (`EAGAIN` on a non-blocking connect against a full backlog, `ECONNREFUSED` for a stale socket); macOS answers `ECONNREFUSED` for both, so a busy owner is reported as absent and a caller may fall back to acting as if no owner ran.
+- **Check** — "Nothing listens" is decided from a fact that cannot be confused with load (the ownership lock), not from the connect errno alone, on every platform the client runs on.
+- **Seen** — rewrite (ipc_test, run on macOS); open.
+
 ## 9. Cloud functions, IAM and event pipelines [store]
 
 ### B-9.1 Function wiring failures look like a clean store
@@ -539,6 +544,11 @@ This file collects the traps that came from the implementation medium rather tha
 - **Check** — Artifact names include package name and are matched after the host's rewriting. APKs are signed with one persistent key and CI refuses others.
 - **Seen** — 5c560e55, 722cc3f5, b4ab5e52, PR #48.
 
+### B-11.11 A rewrite that deletes code deletes the checks resting on it
+- **Pitfall** — The rewrite removed the old implementation and, with it, the generators of golden files that a second implementation reads: `tests/unit/hash` and `tests/unit/gc_job`, whose output the bucket functions' Python tests check their chunk and delete-request keys against. It also dropped the workflows that ran those tests, and left `release-repo` pointing at `scripts/setup_repo_signing.sh`, which no longer existed. Nothing failed: the checks simply stopped existing.
+- **Check** — Before deleting a tree, list what reads from it (golden files read across languages, scripts named in workflows and docs, workflow `uses:` and `run:` paths) and carry each over or delete its reader. Every path a workflow names exists in the tree.
+- **Seen** — rewrite (ci-workflows).
+
 ## 12. Test harnesses that pass while testing nothing [tests]
 
 ### B-12.1 Suites that verified nothing and reported success
@@ -595,6 +605,11 @@ This file collects the traps that came from the implementation medium rather tha
 - **Pitfall** — Tests exported only HOME; `XDG_CONFIG_HOME` (set on CI runners) wins on Linux and macOS uses a group container, so tests read the runner's config. Fixed `/tmp` dirs and socket paths were shared and deleted by concurrent runs. Conformance cleanup hand-built the jobs prefix, which would have left 4096 objects per run after a layout move; two CI jobs sharing `GITHUB_RUN_ID` would delete each other's objects.
 - **Check** — The harness sets every XDG variable and asks the binary where its files go. Scratch dirs and socket paths are per run (pid). Tests ask the layout module for paths. Cleanup scopes are unique per job.
 - **Seen** — f2729184, e163bd6f, 5aa45ac1, df10ce32, PR #57, PR #77; recurred ×4.
+
+### B-12.12 A suite written on one platform pins that platform
+- **Pitfall** — The rewrite's suite, written and run on Linux, failed ten tests on macOS, most of them the tests and not the code: descriptor counts from `/proc/self/fd`, memory from `/proc/self/status`, a path cut by the length of `/tmp/...` when the library reports the resolved `/private/tmp/...`, an owner's socket under a home rooted in dune's long temp directory (past the 104-byte limit), configs naming the `fuse` frontend a macOS build does not contain, a snapshot of a directory watch macOS lacks. Among them hid one real bug (B-3.10), found only because the suite finally ran there.
+- **Check** — The gate runs the full suite on every platform tsync ships for. A test uses facilities present on each (`/dev/fd`, resolved paths, a short socket root), or declares the platform it needs and is reported "not run" elsewhere, never silently skipped.
+- **Seen** — rewrite (ci-workflows).
 
 ## Review checklist
 
