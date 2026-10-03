@@ -622,6 +622,11 @@ let host ~mount domains ~run =
   let mount_point = mount_point ~mount d in
   let allow_other = Config.flag (options d) "allowOther" in
   let presentation = presentation (options d) in
+  if presentation.uid <> Unix.getuid () && not allow_other then
+    Log.warn
+      "fuse: uid %d is not this process's and allowOther is off: no user can \
+       reach the mount as its owner"
+      presentation.uid;
   let subtype =
     match Config.fstr (options d) "mountSubtype" with
       | Some s when String.trim s <> "" -> s

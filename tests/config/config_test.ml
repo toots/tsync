@@ -155,6 +155,8 @@ let () =
   try_ "fuse unknown user"
     (config
        [domain ~frontends:{|[{"type":"fuse","uid":"no-such-user-x"}]|} "F"]);
+  try_ "fuse uid out of range"
+    (config [domain ~frontends:{|[{"type":"fuse","uid":"4294967296"}]|} "F"]);
   try_ "fuse unknown group"
     (config
        [domain ~frontends:{|[{"type":"fuse","gid":"no-such-group-x"}]|} "F"]);
