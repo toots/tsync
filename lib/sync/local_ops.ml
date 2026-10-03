@@ -63,11 +63,10 @@ module Make (C : Engine_ctx.S) = struct
       ~fast:(fun () -> C.store.fast_read)
       ~get_whole:R.get_chunk ~get_range:R.get_chunk_range ~cap:C.max_cache
 
+  (* The applied log and the mark are observed once loaded, at start. *)
   let keys =
     Entry_key.minter ~client:C.client_uuid
-      ~seen:
-        (List.filter_map Entry_key.parse (Dqueue.Records.list wal)
-        @ Applied.keys applied)
+      ~seen:(List.filter_map Entry_key.parse (Dqueue.Records.list wal))
 
   let mint () = Entry_key.to_string (Entry_key.mint keys)
 
