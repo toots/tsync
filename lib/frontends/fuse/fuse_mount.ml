@@ -177,8 +177,16 @@ let fopen t path (fi : Fuse.file_info) =
       let (module E : Tsync_sync.Engine.S) = t.engine in
       call (fun () ->
           if E.kind rel <> `File then errno ENOENT;
-          if has O_TRUNC then E.truncate rel 0;
-          Some (E.open_read rel)))
+          if has O_TRUNC then (
+            E.truncate rel 0;
+            (* Pitfall C-7.10: a truncated file with no handle to close it
+               owes its upload record now. *)
+              match E.open_read rel with
+              | h -> Some h
+              | exception e ->
+                  E.close rel;
+                  raise e)
+          else Some (E.open_read rel)))
   in
   let fh = fresh_fh t in
   locked t (fun () ->
@@ -314,8 +322,9 @@ let release t _ (fi : Fuse.file_info) =
           Atomic.set t.open_handles 0;
         let (module E : Tsync_sync.Engine.S) = t.engine in
         call (fun () ->
-            Option.iter E.close_read h.read;
-            if h.modified then E.close h.rel)
+            Fun.protect
+              ~finally:(fun () -> if h.modified then E.close h.rel)
+              (fun () -> Option.iter E.close_read h.read))
 
 let fsync t path _ _ =
   let rel = rel path in
