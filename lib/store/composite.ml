@@ -860,7 +860,15 @@ let run_probe t m =
       Rt.sleep t.timing.probe_poll;
       wait ())
   in
-  let confirmed = wait () in
+  (* Pitfall C-7.10: an unconfirmed probe is taken back, also when the wait
+     raises; a store with no function would keep it for good. *)
+  let confirmed =
+    match wait () with
+      | c -> c
+      | exception e ->
+          (try ignore (m.store.delete key) with _ -> ());
+          raise e
+  in
   if not confirmed then ignore (m.store.delete key);
   Log.info "bucket function of %s: %s" m.name
     (if confirmed then "confirmed" else "not confirmed");
