@@ -4,7 +4,7 @@ parked: refused/other; records on disk: 1
 retrying seen at attempts: 1,2; retrying after: 0
 
 == keyed: a new post replaces the pending job and cancels the running one
-ran: other#0 slow.1#0 slow.3#0
+ran: other#0 slow.1 saw its cancel slow.1#0 slow.3#0
 records on disk: 0
 
 == restart: records persist, undecodable ones are set aside, held submissions wait
