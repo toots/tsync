@@ -123,19 +123,23 @@ module Make (C : Engine_ctx.S) = struct
                  full record in between; the rewrite ends the hold itself. *)
               let release () =
                 let ran = List.rev !ran in
-                if List.length ran = List.length chosen then (
-                  Unix.close fd;
-                  Dqueue.adopt queue id)
-                else if ran = [] then (
-                  Dqueue.Records.complete wal id;
-                  Unix.close fd)
-                else (
-                  Dqueue.Records.update wal id (fun body ->
-                      match Wal.decode body with
-                        | Some r -> Wal.encode { r with ops = List.map op ran }
-                        | None -> body);
-                  Unix.close fd;
-                  Dqueue.adopt queue id)
+                let announces =
+                  Fun.protect
+                    ~finally:(fun () -> Unix.close fd)
+                    (fun () ->
+                      if List.length ran = List.length chosen then true
+                      else if ran = [] then (
+                        Dqueue.Records.complete wal id;
+                        false)
+                      else (
+                        Dqueue.Records.update wal id (fun body ->
+                            match Wal.decode body with
+                              | Some r ->
+                                  Wal.encode { r with ops = List.map op ran }
+                              | None -> body);
+                        true))
+                in
+                if announces then Dqueue.adopt queue id
               in
               let left = Fun.protect ~finally:release (fun () -> step chosen) in
               Narrate.say narrate "  announced a batch of %s"
