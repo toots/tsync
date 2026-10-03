@@ -15,11 +15,6 @@ CAMLprim value tsync_test_open_before_start(value _unit) {
   return Val_long(tsync_bridge_open("root", 4));
 }
 
-CAMLprim value tsync_test_started(value _unit) {
-  tsync_bridge_started();
-  return Val_unit;
-}
-
 struct reader {
   char ref[64];
   long reads, size;

@@ -51,8 +51,7 @@ jobs:
       # The app's minimum platform level (android-app §12): the prefix names it.
       - name: The NDK toolchain
         run: |
-          echo "ANDROID_NDK_HOME=$ANDROID_NDK_LATEST_HOME" >> "$GITHUB_ENV"
-          echo "TOOLPREF64=$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android26-" >> "$GITHUB_ENV"
+          echo "TOOLPREF64=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android26-" >> "$GITHUB_ENV"
 
       # The cross compiler is built from, and for, this compiler version.
       - uses: ocaml/setup-ocaml@v3

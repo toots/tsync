@@ -2,6 +2,8 @@
    into C would end a host that has no supervisor. *)
 open Tsync_android
 
+external started : unit -> unit = "tsync_bridge_started_by_ocaml"
+
 let eio = -5
 let text f arg = try f arg with e -> Printexc.to_string e
 let number f arg = try f arg with _ -> eio
