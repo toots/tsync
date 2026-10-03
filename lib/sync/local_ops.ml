@@ -984,8 +984,10 @@ module Make (C : Engine_ctx.S) = struct
             }
           in
           Staged.write staged path e;
-          ignore (Mirror.ensure_file_id mirror path);
+          (* The bodies the new edit superseded go first: a raise from the
+             file id must not keep them (pitfall C-7.10). *)
           Option.iter (fun o -> release_unnamed o (Some e)) before;
+          ignore (Mirror.ensure_file_id mirror path);
           bump path;
           !post_put_hook path e.size (base_hex e)))
 
@@ -1421,8 +1423,9 @@ module Make (C : Engine_ctx.S) = struct
                                        (Staged.body_path staged "x"))
                                     data
                                 in
-                                Cache.adopt_body cache g.gkey tmp;
-                                Fs.unlink_quiet tmp))
+                                Fun.protect
+                                  ~finally:(fun () -> Fs.unlink_quiet tmp)
+                                  (fun () -> Cache.adopt_body cache g.gkey tmp)))
                       (Cache.groups ~cc m)
                 | Whole _ -> ());
               Mirror.write_file ~own:true mirror path m;
@@ -1508,9 +1511,10 @@ module Make (C : Engine_ctx.S) = struct
       ~finally:(fun () -> close_read h)
       (fun () ->
         let size = size_of path in
-        let fd = create_dest dst in
-        downloading path ~size (fun fetched ->
-            Fs.with_fd fd (fun fd ->
+        (* Lesson 8: the destination is closed whatever happens once it is
+           open. *)
+        Fs.with_fd (create_dest dst) (fun fd ->
+            downloading path ~size (fun fetched ->
                 let step = 4 * 1024 * 1024 in
                 let rec go off =
                   if off < size then (
