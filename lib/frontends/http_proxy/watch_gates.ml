@@ -71,10 +71,19 @@ let wait t ~route ~store k ~last_seen ~wait =
     ~finally:(fun () ->
       Mutex.protect t.m (fun () -> g.waiters <- g.waiters - 1))
     (fun () ->
-      Atomic.set g.token (read store k);
+      (* Pitfall C-7.10: a loop that ends any other way than its own check
+         gives the watch back, so the next waiter starts another; it starts
+         before the first read, which may raise. *)
       if start then
         Rt.spawn ~name:"watch gate" (fun () ->
-            try loop t id g store k with Stop.Stopping -> ());
+            Fun.protect
+              ~finally:(fun () ->
+                Mutex.protect t.m (fun () ->
+                    if g.watching then (
+                      g.watching <- false;
+                      if g.waiters = 0 then Hashtbl.remove t.gates id)))
+              (fun () -> try loop t id g store k with Stop.Stopping -> ()));
+      Atomic.set g.token (read store k);
       let deadline = Rt.now () +. wait in
       (* A stop answers every held watch at once, so the server's close does
          not wait out their deadlines. *)
