@@ -53,6 +53,9 @@ val encode_key : Key.t -> string
 val decode_key : string -> Key.t option
 val listing_to_json : Tsync_store.Store.entry list -> string
 
+(** [listing_to_json]'s text, handed to [write] in pieces. *)
+val listing_pieces : Tsync_store.Store.entry list -> (string -> unit) -> unit
+
 (** CORRUPT for anything that is not an array of entries. *)
 val listing_of_json : string -> Tsync_store.Store.entry list
 

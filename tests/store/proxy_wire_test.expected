@@ -30,6 +30,7 @@ undecodable: true
 == listing JSON
 [{"key":"tsync/d/a","size":3,"lastModified":1727600000.25,"etag":"\"9b2c\"","checksum":"md5:900150983cd24fb0d6963f7d28e17f72"},{"key":"tsync/d/b","size":0,"lastModified":1.0}]
 round trip: true
+2000 entries: several pieces true, the same text true, none past 64 KiB true
 unknown checksum algorithm read as none: true
 not an array: corrupt/other
 == get-multi frames (§4.3)

@@ -92,6 +92,16 @@ let () =
   let j = W.listing_to_json entries in
   p "%s" j;
   p "round trip: %b" (W.listing_of_json j = entries);
+  let many =
+    List.init 2000 (fun i ->
+        { (List.hd entries) with key = Key.v (Printf.sprintf "tsync/d/k%d" i) })
+  in
+  let pieces = ref [] in
+  W.listing_pieces many (fun s -> pieces := s :: !pieces);
+  p "2000 entries: several pieces %b, the same text %b, none past 64 KiB %b"
+    (List.length !pieces > 1)
+    (String.concat "" (List.rev !pieces) = W.listing_to_json many)
+    (List.for_all (fun s -> String.length s <= 65536) !pieces);
   p "unknown checksum algorithm read as none: %b"
     ((List.hd
         (W.listing_of_json
