@@ -125,7 +125,10 @@ let () =
     with Fail.E f -> Fail.kind_name f.kind
   in
   p "fewer keys than frames: %s" (kind (fun () -> W.decode_bodies ~count:3 enc));
-  p "more keys than frames: %s" (kind (fun () -> W.decode_bodies ~count:5 enc));
+  p "more keys than frames, a partial answer: %d of 5"
+    (List.length (W.decode_bodies ~count:5 enc));
+  p "no frame at all: %s"
+    (kind (fun () -> W.decode_bodies ~count:5 Bigstring.empty));
   p "truncated body: %s"
     (kind (fun () ->
          W.decode_bodies ~count:4
