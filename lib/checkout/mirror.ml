@@ -6,10 +6,19 @@ type t = {
   folders : string;
   by_path : string;
   key_prefix : string;
-  by_fid : (string, string) Hashtbl.t option ref;
-      (** file id → path, built on first use and kept by every marker write *)
+  by_fid : fid_index ref;
   by_fid_m : Mutex.t;
+  fid_ready : unit Rt.Promise.t;
 }
+
+(** File id → path (04 §2.3). *)
+and fid_index =
+  | Unbuilt  (** nothing to keep: the build's walk sees every marker *)
+  | Building of ((string, string) Hashtbl.t -> unit) Queue.t
+      (** changes made during the build, applied when it completes *)
+  | Ready of (string, string) Hashtbl.t
+  | Saved of (string, string) Hashtbl.t
+      (** written to the snapshot, which the next change removes *)
 
 let create ~cache_root domain =
   let root = Filename.concat cache_root (Domain_name.to_string domain) in
@@ -19,13 +28,23 @@ let create ~cache_root domain =
     folders = Filename.concat root "folders";
     by_path = Filename.concat (Filename.concat root "folders") "by-path";
     key_prefix = Key.prefix_to_string (Key.manifests domain);
-    by_fid = ref None;
+    by_fid = ref Unbuilt;
     by_fid_m = Mutex.create ();
+    fid_ready = Rt.Promise.create ();
   }
 
-(* An index not built yet needs no upkeep: its first walk sees the markers. *)
+let fid_snapshot t = Filename.concat t.root "file-ids-index"
+
 let with_fid_index t f =
-  Mutex.protect t.by_fid_m (fun () -> Option.iter f !(t.by_fid))
+  Mutex.protect t.by_fid_m (fun () ->
+      match !(t.by_fid) with
+        | Unbuilt -> ()
+        | Building pending -> Queue.push f pending
+        | Ready h -> f h
+        | Saved h ->
+            ignore (Fs.release (fid_snapshot t));
+            t.by_fid := Ready h;
+            f h)
 
 let root t = t.root
 
@@ -520,17 +539,81 @@ let scan_file_ids t =
   walk "";
   h
 
+let start_fid_build t =
+  let start =
+    Mutex.protect t.by_fid_m (fun () ->
+        match !(t.by_fid) with
+          | Unbuilt ->
+              let pending = Queue.create () in
+              t.by_fid := Building pending;
+              Some pending
+          | _ -> None)
+  in
+  Option.iter
+    (fun pending ->
+      Rt.spawn ~name:"file-id index" (fun () ->
+          match scan_file_ids t with
+            | h ->
+                Mutex.protect t.by_fid_m (fun () ->
+                    Queue.iter (fun f -> f h) pending;
+                    t.by_fid := Ready h);
+                ignore (Rt.Promise.try_resolve t.fid_ready ())
+            | exception e ->
+                Log.warn "cannot build the file-id index: %s"
+                  (Printexc.to_string e);
+                ignore (Rt.Promise.try_resolve_result t.fid_ready (Error e))))
+    start
+
+let load_file_ids t =
+  let snapshot = fid_snapshot t in
+  match Fs.read_file_opt snapshot with
+    | Some body when Mutex.protect t.by_fid_m (fun () -> !(t.by_fid) = Unbuilt)
+      ->
+        let h = Hashtbl.create 4096 in
+        List.iter
+          (fun record ->
+            match String.index_opt record ' ' with
+              | Some 32 ->
+                  Hashtbl.replace h (String.sub record 0 32)
+                    (String.sub record 33 (String.length record - 33))
+              | _ -> ())
+          (String.split_on_char '\000' body);
+        (* Gone before any marker can change, so it never outlives the index. *)
+        ignore (Fs.release snapshot);
+        Fs.fsync_dir t.root;
+        Mutex.protect t.by_fid_m (fun () -> t.by_fid := Ready h);
+        ignore (Rt.Promise.try_resolve t.fid_ready ())
+    | Some _ ->
+        ignore (Fs.release snapshot);
+        Fs.fsync_dir t.root
+    | None -> start_fid_build t
+
+let save_file_ids t =
+  Mutex.protect t.by_fid_m (fun () ->
+      match !(t.by_fid) with
+        | Ready h | Saved h ->
+            let b = Buffer.create (Hashtbl.length h * 64) in
+            Hashtbl.iter
+              (fun id rel ->
+                Buffer.add_string b id;
+                Buffer.add_char b ' ';
+                Buffer.add_string b rel;
+                Buffer.add_char b '\000')
+              h;
+            write (fid_snapshot t) (Buffer.contents b);
+            t.by_fid := Saved h
+        | _ -> ())
+
+let await_file_ids t =
+  start_fid_build t;
+  Rt.Promise.await t.fid_ready
+
 let path_of_file_id t id =
+  await_file_ids t;
   let lookup () =
     Mutex.protect t.by_fid_m (fun () ->
-        let h =
-          match !(t.by_fid) with
-            | Some h -> h
-            | None ->
-                let h = scan_file_ids t in
-                t.by_fid := Some h;
-                h
-        in
-        Hashtbl.find_opt h id)
+        match !(t.by_fid) with
+          | Ready h | Saved h -> Hashtbl.find_opt h id
+          | Unbuilt | Building _ -> None)
   in
   match lookup () with Some p when file_id t p = Some id -> Some p | _ -> None

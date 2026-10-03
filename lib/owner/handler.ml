@@ -655,7 +655,13 @@ let pending_bytes t now =
 let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
  fun t ~send req ->
   let (module E : Engine.S) = t.engine in
-  let mutate f = E.atomically f in
+  (* 08 §2.2: an i: reference waits for the file-id index outside the hold.
+     ponytail: every mutation waits, which differs only after a crash, while
+     the index rebuilds. *)
+  let mutate f =
+    Tsync_checkout.Mirror.await_file_ids E.mirror;
+    E.atomically f
+  in
   match req with
     | Ping -> ()
     | Stat item -> row_or_unnamed t (target t item)

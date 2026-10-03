@@ -44,6 +44,17 @@ val file_id : t -> string -> string option
 (** The current path of a file id; verified against the marker. *)
 val path_of_file_id : t -> string -> string option
 
+(** 04 §2.3, §4.10 step 8: the file-id index from its snapshot, which is
+    removed; else its build starts in the background. *)
+val load_file_ids : t -> unit
+
+(** The index into its snapshot, at a clean stop; the next marker change removes
+    it. *)
+val save_file_ids : t -> unit
+
+(** Until the index is built; starts the build if nothing has. *)
+val await_file_ids : t -> unit
+
 (** The path's file id, minted and recorded when it has none: for an entry first
     occupying a path, including a staged-only file. *)
 val ensure_file_id : ?durable:bool -> t -> string -> string

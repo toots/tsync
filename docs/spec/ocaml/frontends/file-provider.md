@@ -25,6 +25,10 @@ Companion to the language-neutral spec [../../frontends/file-provider.md](../../
 - **Rebuild durability.** A rebuild writes the last-sync mark after a `syncfs`, which macOS only
   schedules ([pitfall B-1.12](../../../pitfalls/B-implementation.md)): a crash right after the mark
   can lose mirror entries until the next full resync.
+- **File-id index wait.** Every mutation waits for the file-id index before the metadata hold, not
+  only one naming an `i:` reference; it differs only while the index rebuilds after a crash. The
+  test does not force a marker change during the build's walk, so the queue of changes made
+  meanwhile is covered by review only.
 - **Store-server restarts** reuse the supervisor's loop (`Supervisor.keep_running`), so the macOS
   service process restarts its store-server child with the supervisor's backoff.
 

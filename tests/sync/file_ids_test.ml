@@ -208,5 +208,38 @@ let () =
         (Filename.concat (Mirror.root B.mirror) "file-ids-complete");
       p "  the first pass: %d\n" (Mirror.backfill_file_ids B.mirror);
       show "B after" b ["q.txt"];
-      p "  the next one: %d\n" (Mirror.backfill_file_ids B.mirror));
+      p "  the next one: %d\n" (Mirror.backfill_file_ids B.mirror);
+      (* A second mirror over A's directory is a restarted owner. *)
+      let restarted () =
+        Mirror.create ~cache_root:(Filename.dirname (Mirror.root A.mirror)) d
+      in
+      let snapshot = Filename.concat (Mirror.root A.mirror) "file-ids-index" in
+      let resolves m id =
+        Option.value ~default:"nothing" (Mirror.path_of_file_id m id)
+      in
+      p "== a clean stop keeps the index for the next start\n";
+      drain a;
+      p "  snapshot after the stop: %b\n" (Sys.file_exists snapshot);
+      let m = restarted () in
+      Mirror.load_file_ids m;
+      p "  snapshot after the start: %b\n" (Sys.file_exists snapshot);
+      p "  %s resolves to %s\n" (alias fid) (resolves m fid);
+      p "== a marker change after the stop removes the snapshot\n";
+      drain a;
+      p "  snapshot after the stop: %b\n" (Sys.file_exists snapshot);
+      write a "late.txt" "late";
+      p "  snapshot: %b\n" (Sys.file_exists snapshot);
+      drain a;
+      p
+        "== without a snapshot the start builds it, with changes made meanwhile\n";
+      (* A crash leaves none. *)
+      Fs.unlink_quiet snapshot;
+      let m = restarted () in
+      Mirror.load_file_ids m;
+      Mirror.write_file m "during.txt"
+        (Manifest.make ~name:"during.txt" ~size:1 ~mtime:0. ~chunk_size:4
+           [Chunk_key.of_bigstring (Bigstring.of_string "x")]);
+      let during = Mirror.ensure_file_id m "during.txt" in
+      p "  %s resolves to %s\n" (alias fid) (resolves m fid);
+      p "  the id minted during the build resolves to %s\n" (resolves m during));
   Fs.rm_rf root
