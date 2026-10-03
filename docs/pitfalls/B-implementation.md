@@ -188,6 +188,11 @@ This file collects the traps that came from the implementation medium rather tha
 - **Check** — Durations, deadlines and rates use a monotonic clock; wall time only for timestamps another party reads (JWT `iat`, manifest mtimes).
 - **Seen** — 80b5e045.
 
+### B-3.10 A poller backend that swallows an error on registration
+- **Pitfall** — The scheduler fires a wait at once when its descriptor cannot be watched, so the fiber meets the error from its own I/O. The epoll backend reports `EBADF` on `EPOLL_CTL_ADD`; the kqueue backend treated `EBADF` and `ENOENT` as success for an `EV_ADD` as well as an `EV_DELETE`, so on macOS a wait on a closed descriptor registered nothing, reported success, and slept until its timeout, or forever without one.
+- **Check** — Each backend ignores "not registered" or "bad descriptor" only on removal. The closed-descriptor check runs on every poller backend the build can select, not only the Linux one.
+- **Seen** — rewrite (rt_fd_test, run on macOS).
+
 ## 4. Fork, randomness, locks and per-process identity [runtime]
 
 ### B-4.1 Shared or replayed PRNG state
