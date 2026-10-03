@@ -453,16 +453,58 @@ let max_body_memory t =
     ~some:(fun (l : Proxy_options.listener) -> l.max_body_memory)
     t.listener
 
+(* The slot leaves with the answer's last byte, not with the answer's value:
+   a body still to write is as much in flight as one being read (C-2.5). *)
+let held_until_written (r : Server.response) release =
+  match r.body with
+    | Empty | String _ ->
+        release ();
+        r
+    | Bigstring bytes -> { r with body = Held { bytes; finally = release } }
+    | Held h ->
+        {
+          r with
+          body =
+            Held
+              {
+                h with
+                finally = (fun () -> Fun.protect ~finally:release h.finally);
+              };
+        }
+    | Stream s ->
+        {
+          r with
+          body =
+            Stream
+              {
+                s with
+                finally = (fun () -> Fun.protect ~finally:release s.finally);
+              };
+        }
+
 (* §A5: past the bound, a bounded queue; past the queue, 503 at once. *)
 let admitted t f =
   if Atomic.fetch_and_add t.pending 1 >= t.bound * (1 + queue_per_slot) then (
     Atomic.decr t.pending;
     count t "busy";
     answer (text 503 "busy"))
-  else
-    Fun.protect
-      ~finally:(fun () -> Atomic.decr t.pending)
-      (fun () -> Rt.Semaphore.with_slot t.slots f)
+  else (
+    (match Rt.Semaphore.acquire t.slots with
+      | () -> ()
+      | exception e ->
+          Atomic.decr t.pending;
+          raise e);
+    let released = Atomic.make false in
+    let release () =
+      if not (Atomic.exchange released true) then (
+        Rt.Semaphore.release t.slots;
+        Atomic.decr t.pending)
+    in
+    match f () with
+      | r -> held_until_written r release
+      | exception e ->
+          release ();
+          raise e)
 
 (* A body arrives within a minute plus a second per 16 KiB: a slow uplink fits,
    a drip holding reserved memory does not. *)
@@ -716,7 +758,7 @@ let count_bytes counters ~written (response : Server.response) =
     | String s ->
         add (fun c -> c.read) (String.length s);
         response
-    | Bigstring b ->
+    | Bigstring b | Held { bytes = b; _ } ->
         add (fun c -> c.read) (Bigstring.length b);
         response
     | Stream s ->

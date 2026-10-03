@@ -33,6 +33,9 @@ type body =
           (** run once the response ends, on every path: written, skipped for
               HEAD, failed on its head or body (pitfall C-2.9) *)
     }
+  | Held of { bytes : Tsync_core.Bigstring.t; finally : unit -> unit }
+      (** a body of known length whose [finally] runs as a stream's does: for a
+          resource held until the body is written *)
 
 type response = { status : int; headers : Codec.headers; body : body }
 
