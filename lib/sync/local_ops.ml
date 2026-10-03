@@ -149,6 +149,25 @@ module Make (C : Engine_ctx.S) = struct
           ignore (Fs.release (Staged.body_path staged id));
           ignore (Fs.release (Staged.whole_path staged id))))
 
+  (* Pitfall C-7.10: a body made for an edit is the edit's once the staged
+     manifest naming it is written; if [f] raises, the bodies it registered
+     that the manifest now on disk does not name are released. *)
+  let with_new_bodies path f =
+    let created = ref [] in
+    match f (fun b -> created := b :: !created) with
+      | v -> v
+      | exception e ->
+          let named =
+            match Staged.edit staged path with
+              | Some x -> Staged.bodies_named x
+              | None -> []
+          in
+          List.iter
+            (fun b ->
+              if not (List.mem b named) then (try release_body b with _ -> ()))
+            !created;
+          raise e
+
   (* R3: bodies go only after the manifest that switched away is durable, and
      not while an ended lineage still reads them. *)
   let release_unnamed old_edit new_edit =
@@ -535,35 +554,37 @@ module Make (C : Engine_ctx.S) = struct
           let count = Chunking.count ~size:e.size ~cs in
           let slots = Array.make count Staged.Zero in
           let per = Cache.per ~cs ~cc:C.cache_chunk_size in
-          let src = Fs.openfile (Staged.whole_path staged b) [O_RDONLY] in
-          Fs.with_fd src (fun src ->
-              let g = ref 0 in
-              while !g * per < count do
-                let body = Staged.new_body_id () in
-                let fd = Staged.open_body ~create:true staged body in
-                Fs.with_fd fd (fun fd ->
-                    for j = 0 to per - 1 do
-                      let i = (!g * per) + j in
-                      if i < count then (
-                        let len = Chunking.length ~size:e.size ~cs i in
-                        let buf = Bigstring.create len in
-                        let n =
-                          Fs.pread_full src buf ~boff:0 ~len ~off:(i * cs)
-                        in
-                        Fs.pwrite_all fd buf ~boff:0 ~len:n ~off:(j * cs);
-                        slots.(i) <- Staged.Staged { body; off = j * cs })
-                    done;
-                    Fs.fsync fd);
-                incr g
-              done);
-          Fs.fsync_dir
-            (Filename.concat
-               (Filename.dirname (Staged.body_path staged "x"))
-               "");
-          let e' =
-            { e with chunk_size = cs; content = Slots slots; state = Owed }
-          in
-          Staged.write staged path e';
+          with_new_bodies path (fun register ->
+              let src = Fs.openfile (Staged.whole_path staged b) [O_RDONLY] in
+              Fs.with_fd src (fun src ->
+                  let g = ref 0 in
+                  while !g * per < count do
+                    let body = Staged.new_body_id () in
+                    register body;
+                    let fd = Staged.open_body ~create:true staged body in
+                    Fs.with_fd fd (fun fd ->
+                        for j = 0 to per - 1 do
+                          let i = (!g * per) + j in
+                          if i < count then (
+                            let len = Chunking.length ~size:e.size ~cs i in
+                            let buf = Bigstring.create len in
+                            let n =
+                              Fs.pread_full src buf ~boff:0 ~len ~off:(i * cs)
+                            in
+                            Fs.pwrite_all fd buf ~boff:0 ~len:n ~off:(j * cs);
+                            slots.(i) <- Staged.Staged { body; off = j * cs })
+                        done;
+                        Fs.fsync fd);
+                    incr g
+                  done);
+              Fs.fsync_dir
+                (Filename.concat
+                   (Filename.dirname (Staged.body_path staged "x"))
+                   "");
+              let e' =
+                { e with chunk_size = cs; content = Slots slots; state = Owed }
+              in
+              Staged.write staged path e');
           release_body b;
           staged_for path
       | `Edit e -> e
@@ -624,7 +645,7 @@ module Make (C : Engine_ctx.S) = struct
                     path i))
 
   (* 04 §4.3 [ensure the group body]. *)
-  let ensure_group path (e : Staged.edit) slots i =
+  let ensure_group ~register path (e : Staged.edit) slots i =
     let cs = e.chunk_size in
     let per = Cache.per ~cs ~cc:C.cache_chunk_size in
     let g = i / per in
@@ -661,6 +682,7 @@ module Make (C : Engine_ctx.S) = struct
       [])
     else (
       let body = Staged.new_body_id () in
+      register body;
       let fd = Staged.open_body ~create:true staged body in
       Fs.with_fd fd (fun fd ->
           List.iter
@@ -739,6 +761,7 @@ module Make (C : Engine_ctx.S) = struct
         in
         let e = { e with size = new_size; content = Slots slots } in
         let pieces = Chunking.pieces ~cs ~count:n ~off ~len in
+        with_new_bodies path @@ fun register ->
         let replaced = ref [] in
         let fds = Hashtbl.create 2 in
         Fun.protect
@@ -746,7 +769,8 @@ module Make (C : Engine_ctx.S) = struct
           (fun () ->
             List.iter
               (fun (pc : Chunking.piece) ->
-                replaced := ensure_group path e0 slots pc.index @ !replaced;
+                replaced :=
+                  ensure_group ~register path e0 slots pc.index @ !replaced;
                 match slots.(pc.index) with
                   | Staged.Staged { body; off = boff } ->
                       let fd =
@@ -778,6 +802,7 @@ module Make (C : Engine_ctx.S) = struct
           Array.init n (fun i ->
               if i < Array.length old then old.(i) else Staged.Zero)
         in
+        with_new_bodies path @@ fun register ->
         let replaced = ref [] and cut = ref None in
         if n > 0 && size < e.size then (
           let last = n - 1 in
@@ -785,7 +810,7 @@ module Make (C : Engine_ctx.S) = struct
           let old_len = member_len ~size:e.size ~cs last in
           match slots.(last) with
             | Staged.Inherit when new_len <> old_len -> (
-                replaced := ensure_group path e slots last;
+                replaced := ensure_group ~register path e slots last;
                 match slots.(last) with
                   | Staged.Staged { body; off } ->
                       let fd = Staged.open_body staged body in
@@ -799,7 +824,8 @@ module Make (C : Engine_ctx.S) = struct
               ->
                 if Staged.body_size staged body > off + new_len then
                   cut := Some (body, off + new_len)
-            | Staged.Staged _ -> replaced := ensure_group path e slots last
+            | Staged.Staged _ ->
+                replaced := ensure_group ~register path e slots last
             | _ -> ());
         let e =
           {
@@ -912,7 +938,9 @@ module Make (C : Engine_ctx.S) = struct
           Fail.raise_ Fail.Exists "%s is a folder" path;
         let before = Staged.edit staged path in
         let current = content_id path in
+        with_new_bodies path @@ fun register ->
         let id = Staged.new_body_id () in
+        register id;
         let dst = Staged.whole_path staged id in
         Fs.mkdir_p (Filename.dirname dst);
         (match Fs.rename src dst with
@@ -1168,7 +1196,9 @@ module Make (C : Engine_ctx.S) = struct
     with
       | Some ({ content = Slots slots; _ } as e), g
         when Array.exists (( = ) Staged.Inherit) slots ->
+          with_new_bodies path @@ fun register ->
           let body = Staged.new_body_id () in
+          register body;
           let filled = Array.copy slots in
           Fs.with_fd (Staged.open_body ~create:true staged body) (fun fd ->
               Array.iteri
