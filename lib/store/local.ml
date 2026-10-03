@@ -414,7 +414,7 @@ let create ?(verify_writes = true) ~name root =
       list_many = None;
       bucket_functions = false;
       capabilities = (fun _ -> { Store.no_caps with verified = verify_writes });
-      fast_read = true;
+      fast_read = mappable;
       locality = Local;
       local_path = Some root;
       health;

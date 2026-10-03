@@ -179,7 +179,7 @@ let make ~name ~admission ?share_url v =
       list_many = None;
       bucket_functions = true;
       capabilities = (fun _ -> { Store.no_caps with share_url });
-      fast_read = false;
+      fast_read = Fun.const false;
       locality = Remote;
       local_path = None;
       health;

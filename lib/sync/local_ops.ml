@@ -60,8 +60,8 @@ module Make (C : Engine_ctx.S) = struct
 
   let cache =
     Cache.create ~cache_root:C.cache_root ~domain:d ~cc:C.cache_chunk_size
-      ~fast:(fun () -> C.store.fast_read)
-      ~get_whole:R.get_chunk ~get_range:R.get_chunk_range ~cap:C.max_cache
+      ~fast:C.store.fast_read ~get_whole:R.get_chunk
+      ~get_range:R.get_chunk_range ~cap:C.max_cache
 
   (* The applied log and the mark are observed once loaded, at start. *)
   let keys =

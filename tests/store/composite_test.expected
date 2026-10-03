@@ -38,3 +38,6 @@ batch read with the main held down: unreachable
 == conditional replace
 an entry read from another member replaces nothing: changed, main keeps "on main"
 with the main's entry: written
+
+== what a read costs follows the member that answers
+whole chunks cheap with the local main: true; with it held down and a slow replica answering: false

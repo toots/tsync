@@ -63,6 +63,7 @@ let () =
             (fun ks ->
               incr bulk_deletes;
               inner.delete_multi ks);
+          fast_read = Fun.const false;
         }
       and backfill = loc "backfill"
       and archive = loc "archive" in
@@ -255,5 +256,17 @@ let () =
              (main.head_opt (k "tsync/d/cond"))
          with
           | Written -> "written"
-          | Changed -> "changed"));
+          | Changed -> "changed");
+      p "\n== what a read costs follows the member that answers\n";
+      main_up := true;
+      Health.answered main.health;
+      let cheap = s.fast_read () in
+      main_up := false;
+      ignore (Health.lost main.health);
+      Unix.sleepf 1.1;
+      ignore (Health.lost main.health);
+      p
+        "whole chunks cheap with the local main: %b; with it held down and a \
+         slow replica answering: %b\n"
+        cheap (s.fast_read ()));
   Test_support.remove_root root

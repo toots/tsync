@@ -46,7 +46,7 @@ type t = {
   list_many : (Key.prefix list -> folder list) option;
   bucket_functions : bool;
   capabilities : Key.prefix -> caps;
-  fast_read : bool;
+  fast_read : unit -> bool;
   locality : locality;
   local_path : string option;
   health : Health.t;

@@ -726,8 +726,16 @@ let make_store t ~source_only =
                    (fun (m, c) -> c.Store.verified || confirmed t m)
                    asked;
           });
+      (* The member a read reaches now: the first not held down. *)
       fast_read =
-        (match first with Some m -> m.store.fast_read | None -> false);
+        (fun () ->
+          match
+            List.find_opt
+              (fun m -> not (Health.is_held m.store.health))
+              readable
+          with
+            | Some m -> m.store.fast_read ()
+            | None -> false);
       locality =
         (match first with Some m -> m.store.locality | None -> Store.Remote);
       local_path = None;

@@ -82,7 +82,9 @@ type t = {
           consumed by a bucket-side function; whether one is deployed is the
           owner's confirmation (06 §3.8) *)
   capabilities : Key.prefix -> caps;
-  fast_read : bool;
+  fast_read : unit -> bool;
+      (** whether a whole chunk costs about what a range does, asked at each
+          read: a composite answers for the member that reads now *)
   locality : locality;
   local_path : string option;
   health : Tsync_core.Health.t;
