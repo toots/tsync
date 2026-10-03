@@ -1222,5 +1222,12 @@ let run config =
                 (String.concat ", " (List.map (fun r -> r.name) routes))
                 listener.port
                 (if tls = None then "" else " (TLS)");
-              Stop.wait ();
+              (* A burst's heap goes back to the system, as an owner's does:
+                 the server runs beside one on a small host. *)
+              (try
+                 while true do
+                   Stop.sleep 60.;
+                   Usage.release_if_grown ()
+                 done
+               with Stop.Stopping -> ());
               0)
