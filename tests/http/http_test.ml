@@ -177,7 +177,7 @@ let () =
           | ADDR_INET (_, port) -> port
           | _ -> assert false
       in
-      let fds () = Array.length (Sys.readdir "/proc/self/fd") in
+      let fds () = Array.length (Sys.readdir "/dev/fd") in
       let attempt () =
         try
           Rt.with_timeout 0.1 (fun () ->
