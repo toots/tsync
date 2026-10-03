@@ -31,6 +31,7 @@ val with_fd : Unix.file_descr -> (Unix.file_descr -> 'a) -> 'a
     returns, to its caller or to a fiber [f] spawns, and owed back otherwise
     (spec ocaml README, lesson 8). *)
 val or_close : Unix.file_descr -> (Unix.file_descr -> 'a) -> 'a
+
 val read_fd_all : Unix.file_descr -> string
 val read_file_opt : string -> string option
 
