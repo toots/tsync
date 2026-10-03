@@ -46,7 +46,7 @@ table and its group states.
 - **The cap pass counts a fetch's temporary as a body** (finding 135) and under-evicts by its size.
 - **A reader of a whole staged edit can meet `ENOENT`** when the first write splits that edit into
   slots and releases the body (finding 109).
-- **Startup walks the cache root before the owner serves** (finding 88).
+- **Startup lists every cache shard before the owner serves** (finding 88).
 
 ## Learnings
 

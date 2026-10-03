@@ -31,12 +31,8 @@ collectable main owes its deletions to every replica and backfill (`targets` in 
 
 ## Where the code departs from the spec
 
-- **A chunk-area listing lists S before F** (finding 132, `Chunk_spaces.list`): a chunk promoted
-  between the two listings is missed, and a dry run reports it as damage.
-- **The publish lock can starve the collector** (finding 133): a busy import holds it shared, the
-  collector's exclusive take times out after 30 s, and the error names a collection as the holder.
-- **Every manifest write wakes the cursor watch** (finding 138): the publish lock file sits in the
-  directory the local driver watches.
+- **The publish lock can starve the collector** (finding 133): it is taken by polling, so a busy
+  import holding it shared can keep the collector's exclusive take waiting until it times out.
 - **Integrity holds the whole tree before it reports** (finding 85).
 - **Collection is refused while a remote copy would be told key by key.** `Collector.run` answers
   `Unsupported`, unless `keep`, when the collecting main owes deletions to a remote copy whose bucket
