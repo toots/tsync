@@ -92,19 +92,25 @@ let refresh_probe t s =
       s.probe <- Some (reach, Rt.now ());
       s.refreshing <- false)
 
+(* Pitfall C-7.10: the claim is given back on every path. *)
 let refresh_listing t s =
-  let listing =
-    match
-      Tsync_sync.Journal.list_entries
-        (Tsync_sync.Journal.create t.domain.name s.member.store)
-    with
-      | entries ->
+  Fun.protect
+    ~finally:(fun () ->
+      Mutex.protect s.m (fun () -> s.listing_refreshing <- false))
+    (fun () ->
+      let listing =
+        match
+          let entries =
+            Tsync_sync.Journal.list_entries
+              (Tsync_sync.Journal.create t.domain.name s.member.store)
+          in
           R.Entries { entries = List.length entries; behind = behind t entries }
-      | exception e -> Unreadable (Fail.classify e).reason
-  in
-  Mutex.protect s.m (fun () ->
-      s.listing <- Some (listing, Rt.now ());
-      s.listing_refreshing <- false)
+        with
+          | listing -> listing
+          | exception e when not (Rt.is_cancelled e) ->
+              Unreadable (Fail.classify e).reason
+      in
+      Mutex.protect s.m (fun () -> s.listing <- Some (listing, Rt.now ())))
 
 let rec wait_for ~deadline f =
   if f () || Rt.now () >= deadline then ()
