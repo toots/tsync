@@ -455,19 +455,27 @@ let sweep_removed_records t ~older_than =
     (Fs.readdir t.by_path)
 
 (* 04 §4.10 step 8: one flush instead of a fsync per marker. *)
+(* Names come from the directory, not from decoding every manifest: only an
+   escaped name is read back from its entry. *)
 let backfill_file_ids t =
   let minted = ref 0 in
   let rec walk rel =
+    let dir = path t rel in
     List.iter
-      (fun c ->
-        let r = Names.join rel c.name in
-        match c.kind with
-          | `Dir _ -> walk r
-          | `File _ ->
-              if file_id t r = None then (
-                set_file_id ~durable:false t r (Ids.token ());
-                incr minted))
-      (list t rel)
+      (fun local ->
+        if not (Names.is_internal_local local || Names.is_temp_name local) then (
+          match
+            (Fs.lstat_opt (Filename.concat dir local), real_name dir local)
+          with
+            | Some { st_kind = S_DIR; _ }, Some name ->
+                walk (Names.join rel name)
+            | Some { st_kind = S_REG; _ }, Some leaf ->
+                let r = Names.join rel leaf in
+                if file_id t r = None then (
+                  set_file_id ~durable:false t r (Ids.token ());
+                  incr minted)
+            | _ -> ()))
+      (Option.value ~default:[] (Fs.readdir_opt dir))
   in
   walk "";
   if !minted > 0 then Fs.syncfs t.root;
