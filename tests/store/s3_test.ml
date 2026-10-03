@@ -417,6 +417,19 @@ let () =
                   Printf.sprintf "%s, %s" (Fail.kind_name f.kind) f.reason))
         [
           ("clock off", fun () -> ignore (s.get_opt (Key.v "tsync/d/skewed")));
+          ( "a put the service refuses counts no upload",
+            fun () ->
+              let sent () =
+                match s.traffic with
+                  | Some t -> Atomic.get t.uploaded
+                  | None -> -1
+              in
+              let before = sent () in
+              (try s.put (Key.v "tsync/d/skewed") (Bigstring.of_string "12345")
+               with Fail.E _ -> ());
+              if sent () <> before then
+                Fail.raise_ Fail.Corrupt "%d bytes counted" (sent () - before)
+          );
           ( "a request the service timed out, once",
             fun () -> ignore (s.get_opt (Key.v "tsync/d/timed-out-once")) );
           ( "an operation the service aborted, once",
