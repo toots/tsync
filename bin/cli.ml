@@ -133,8 +133,9 @@ let job ?name verbose job =
                 "tsync: cancelling; the job stops at its next unit boundary";
               try
                 ignore
-                  (Tsync_owner.Protocol.call socket
-                     (Tsync_owner.Protocol.Cancel id))
+                  (Tsync_owner.Protocol.call
+                     ~domain:(Domain_name.to_string dom.name)
+                     socket (Tsync_owner.Protocol.Cancel id))
               with e -> Log.warn "cannot cancel: %s" (Printexc.to_string e))
       | line -> Tsync_owner.Handler.print_line line)
     (Tsync_owner.Protocol.Job { job; narrate = verbose })
