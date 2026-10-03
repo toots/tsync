@@ -124,7 +124,7 @@ let read_body ?timeout ~limit r framing =
           if not (fill ?timeout r) then Bigstring.concat (List.rev acc)
           else (
             let n = r.len - r.pos in
-            if total + n > limit then raise Too_large;
+            if n > limit - total then raise Too_large;
             go (piece ?timeout r n :: acc) (total + n))
         in
         go [] 0
@@ -144,7 +144,7 @@ let read_body ?timeout ~limit r framing =
                       trailers ();
                       Bigstring.concat (List.rev acc)
                   | Some n when n > 0 ->
-                      if total + n > limit then raise Too_large;
+                      if n > limit - total then raise Too_large;
                       let b = piece ?timeout r n in
                       ignore (line ?timeout ~limit:2 r);
                       chunks (b :: acc) (total + n)
