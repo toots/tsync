@@ -75,9 +75,10 @@ module Make (C : Engine_ctx.S) = struct
 
     (* durable-queue §7.3: a batch's record lists its items' ops before any of
        them runs, and is held until they ran; it is then rewritten to the ops
-       of the items whose [run] answered true and handed to [queue]. Items a
-       batch did not reach go to the next one. [admit] decides when a batch
-       forms whether an item is published at all. *)
+       of the items whose [run] answered that their store half happened, and
+       handed to [queue]. Items a batch did not reach go to the next one.
+       [admit] decides when a batch forms whether an item is published at
+       all. *)
     let batches ?(narrate = Narrate.none) ~noun ~cancelled ~queue ~op ~admit
         ~run items =
       let rec go = function
@@ -118,18 +119,22 @@ module Make (C : Engine_ctx.S) = struct
                     if run e then ran := e :: !ran;
                     step rest
               in
-              (* A held record is rewritten only once released. *)
+              (* Rewritten before the hold is released, so no rescan adopts the
+                 full record in between; the rewrite ends the hold itself. *)
               let release () =
-                Unix.close fd;
                 let ran = List.rev !ran in
-                if List.length ran = List.length chosen then
-                  Dqueue.adopt queue id
-                else if ran = [] then Dqueue.Records.complete wal id
+                if List.length ran = List.length chosen then (
+                  Unix.close fd;
+                  Dqueue.adopt queue id)
+                else if ran = [] then (
+                  Dqueue.Records.complete wal id;
+                  Unix.close fd)
                 else (
                   Dqueue.Records.update wal id (fun body ->
                       match Wal.decode body with
                         | Some r -> Wal.encode { r with ops = List.map op ran }
                         | None -> body);
+                  Unix.close fd;
                   Dqueue.adopt queue id)
               in
               let left = Fun.protect ~finally:release (fun () -> step chosen) in
