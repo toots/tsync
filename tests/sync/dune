@@ -392,3 +392,24 @@
  (alias runtest)
  (action
   (diff offline_proxy_test.expected offline_proxy_test.output)))
+
+(executable
+ (name arrival_lock_test)
+ (modules arrival_lock_test)
+ (libraries
+  tsync_core
+  tsync_store
+  tsync_remote
+  tsync_checkout
+  tsync_sync
+  unix))
+
+(rule
+ (with-stdout-to
+  arrival_lock_test.output
+  (run ./arrival_lock_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff arrival_lock_test.expected arrival_lock_test.output)))
