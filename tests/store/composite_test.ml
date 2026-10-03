@@ -153,6 +153,49 @@ let () =
         (parked 100);
       p "replica holds it: %b\n"
         (has replica (k "tsync/d/manifests/.tsync-root/bbbb"));
+      p "\n== a chunk that does not hash to its key parks its copy\n";
+      let rot = Chunk_key.of_body "sound" in
+      Contract.put main (Key.chunk d rot) "rotten";
+      Contract.put s
+        (k "tsync/d/manifests/.tsync-root/cccc")
+        (manifest_body [rot]);
+      Composite.settle ~timeout:10. c;
+      let rec parked_at_least k n =
+        if List.length (Composite.parked c) >= k || n = 0 then ()
+        else (
+          Rt.sleep 0.1;
+          parked_at_least k (n - 1))
+      in
+      parked_at_least 4 100;
+      p "parked: %d; replica holds the chunk: %b, its manifest: %b\n"
+        (List.length (Composite.parked c))
+        (has replica (Key.chunk d rot))
+        (has replica (k "tsync/d/manifests/.tsync-root/cccc"));
+      p "\n== a chunk whose bytes are a manifest is copied as a chunk\n";
+      let guest =
+        Composite.create ~domain:d
+          ~data_dir:(Filename.concat root "data")
+          ~owner:false ~poke:ignore ~knowledge
+          [
+            { name = "main"; role = Main; store = main };
+            { name = "replica"; role = Replica; store = replica };
+            { name = "backfill"; role = Backfill; store = backfill };
+            { name = "archive"; role = Read_only; store = archive };
+          ]
+      in
+      let lookalike = manifest_body [Chunk_key.of_body "held nowhere"] in
+      let lookalike_key = Key.chunk d (Chunk_key.of_body lookalike) in
+      Contract.put (Composite.store guest) lookalike_key lookalike;
+      Composite.rescan c;
+      let rec copied n =
+        has replica lookalike_key
+        || n > 0
+           &&
+           (Rt.sleep 0.1;
+            copied (n - 1))
+      in
+      p "replica holds it: %b; parked: %d\n" (copied 50)
+        (List.length (Composite.parked c));
       p "\n== write guard\n";
       main_up := false;
       ignore (Health.lost main.health);
