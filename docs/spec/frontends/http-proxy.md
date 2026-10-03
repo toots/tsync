@@ -232,7 +232,9 @@ Refusals are `text/plain` bodies `<message>\n`. Any other failure is 500 `intern
 
 - Content streams from the domain's composite store: a range fetches only the chunks it covers, read from the store (from either space during a collection), each checked against its chunk key. Nothing is assembled whole, and nothing is written to any local domain state.
 - At most `max_share_responses` responses are open at once; beyond it a new share request is answered 503 before any header. Once headers are sent, a response is never refused mid-stream.
-- A short read ends the stream early.
+- A chunk that is missing or fails its key aborts the response: the connection closes without the
+  chunked terminator, so the client sees an incomplete transfer, never a complete file that is
+  shorter than its manifest (or than its `Content-Range`).
 
 ### A9.5 Headers and ranges
 
@@ -258,7 +260,7 @@ The browse template (shared with the cloud share function) is filled in **one pa
 
 - Members are computed before the response starts, up to `max_zip_members`: a depth-first walk from the shared folder, children sorted bytewise by name, directories emitted as entries, paths rooted at `filename` without its extension. Member names are the validated leaf names ([01-core](../01-core.md)); none contains `..` or a leading `/`.
 - 200, `application/zip`, attachment, no content length. The archive format is [01 §13](../01-core.md#13-streaming-zip64-archives); directory entries carry mtime 0, files their manifest's mtime.
-- A member whose manifest vanished since the walk is skipped and logged; a short read ends the member early. A failure after headers truncates the stream and is logged.
+- A member whose manifest vanished since the walk is skipped and logged; a chunk that is missing or fails its key aborts the archive as above, rather than ending its member early. A failure after headers truncates the stream and is logged.
 
 ---
 
