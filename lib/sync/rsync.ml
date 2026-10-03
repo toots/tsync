@@ -169,13 +169,21 @@ module Make (C : Engine_ctx.S) = struct
       failed := (rel, reason) :: !failed
     in
     let blocked = ref [] in
+    (* Whether [f] ran to its end. *)
     let attempt rel f =
-      if rel <> "" && under !blocked rel then
-        fail rel "its folder could not be created"
-      else if not (cancelled ()) then (
-        try f () with
+      if rel <> "" && under !blocked rel then (
+        fail rel "its folder could not be created";
+        false)
+      else if cancelled () then false
+      else (
+        try
+          f ();
+          true
+        with
           | (Stop.Stopping | Rt.Cancelled) as e -> raise e
-          | e -> fail rel (Printexc.to_string e))
+          | e ->
+              fail rel (Printexc.to_string e);
+              false)
     in
     let with_decision pred = List.filter (fun (_, d) -> pred d) planned in
     if not dry_run then (
@@ -191,17 +199,18 @@ module Make (C : Engine_ctx.S) = struct
       (* Folders first, so nothing lands under a folder that is not there. *)
       List.iter
         (fun (rel, _) ->
-          attempt rel (fun () ->
-              match dst.side with
-                | Local ->
-                    Fs.mkdir_p (local_path dst.path rel);
-                    incr dirs
-                | Domain -> (
-                    match Bulk.folder (domain_path dst.path rel) with
-                      | Ok _ -> incr dirs
-                      | Error reason ->
-                          blocked := rel :: !blocked;
-                          fail rel reason)))
+          ignore @@ attempt rel
+          @@ fun () ->
+          match dst.side with
+            | Local ->
+                Fs.mkdir_p (local_path dst.path rel);
+                incr dirs
+            | Domain -> (
+                match Bulk.folder (domain_path dst.path rel) with
+                  | Ok _ -> incr dirs
+                  | Error reason ->
+                      blocked := rel :: !blocked;
+                      fail rel reason))
         (with_decision (function Make_dir _ -> true | _ -> false));
       let upload rel tp path =
         let sent = ref 0 in
@@ -221,7 +230,8 @@ module Make (C : Engine_ctx.S) = struct
         ~run:(fun (rel, d) ->
           let tp = domain_path dst.path rel in
           Narrate.progress narrate "copying into the domain: %s" tp;
-          attempt rel (fun () ->
+          ignore
+          @@ attempt rel (fun () ->
               match d with
                 | Rsync_plan.Copy_manifest m ->
                     Bulk.publish tp m;
@@ -241,7 +251,9 @@ module Make (C : Engine_ctx.S) = struct
                             | _ | (exception Unix.Unix_error _) ->
                                 skipped :=
                                   (rel, "a dangling symlink") :: !skipped)
-                      | _ -> upload rel tp path)))
+                      | _ -> upload rel tp path));
+          (* A skipped symlink completes without publishing anything. *)
+          Hashtbl.mem done_ rel)
         (with_decision (function
           | Copy_manifest _ | Upload _ -> true
           | _ -> false));
@@ -250,7 +262,8 @@ module Make (C : Engine_ctx.S) = struct
         (fun (rel, d) ->
           let path = local_path dst.path rel in
           Narrate.progress narrate "copying out of the domain: %s" path;
-          attempt rel (fun () ->
+          ignore
+          @@ attempt rel (fun () ->
               match d with
                 | Rsync_plan.Assemble ({ link = Some target; _ } : Manifest.t)
                   ->
@@ -319,17 +332,19 @@ module Make (C : Engine_ctx.S) = struct
         ~admit:(fun _ -> true)
         ~run:(fun (rel, d) ->
           let sp = domain_path src.path rel and tp = domain_path dst.path rel in
-          attempt rel (fun () ->
-              match d with
-                | Rsync_plan.Rename_in_domain m ->
-                    Bulk.publish tp m;
-                    Option.iter
-                      (fun (pid, leaf) -> ignore (R.delete_slot pid leaf))
-                      (slot sp);
-                    with_meta (fun () ->
-                        with_key sp (fun () -> remove_local_file sp));
-                    succeed rel 0
-                | _ -> ()))
+          ignore
+            (attempt rel (fun () ->
+                 match d with
+                   | Rsync_plan.Rename_in_domain m ->
+                       Bulk.publish tp m;
+                       Option.iter
+                         (fun (pid, leaf) -> ignore (R.delete_slot pid leaf))
+                         (slot sp);
+                       with_meta (fun () ->
+                           with_key sp (fun () -> remove_local_file sp));
+                       succeed rel 0
+                   | _ -> ()));
+          Hashtbl.mem done_ rel)
         (with_decision (function Rename_in_domain _ -> true | _ -> false));
       (* A move drops each source whose action ran. *)
       let drops =
@@ -341,7 +356,8 @@ module Make (C : Engine_ctx.S) = struct
         | Local ->
             List.iter
               (fun (rel, _) ->
-                attempt rel (fun () -> Unix.unlink (local_path src.path rel)))
+                ignore
+                  (attempt rel (fun () -> Unix.unlink (local_path src.path rel))))
               drops
         | Domain ->
             Bulk.batches ~narrate ~noun:"removal" ~cancelled ~queue:metadata

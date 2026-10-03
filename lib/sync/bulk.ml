@@ -74,7 +74,8 @@ module Make (C : Engine_ctx.S) = struct
             Ok true
 
     (* durable-queue §7.3: a batch's record lists its items' ops before any of
-       them runs, and is held until they ran, then handed to [queue]; items a
+       them runs, and is held until they ran; it is then rewritten to the ops
+       of the items whose [run] answered true and handed to [queue]. Items a
        batch did not reach go to the next one. [admit] decides when a batch
        forms whether an item is published at all. *)
     let batches ?(narrate = Narrate.none) ~noun ~cancelled ~queue ~op ~admit
@@ -106,6 +107,7 @@ module Make (C : Engine_ctx.S) = struct
                      })
               in
               let started = Unix.gettimeofday () in
+              let ran = ref [] in
               let rec step = function
                 | [] -> []
                 | left
@@ -113,18 +115,26 @@ module Make (C : Engine_ctx.S) = struct
                        || Unix.gettimeofday () -. started > entry_age ->
                     left
                 | e :: rest ->
-                    run e;
+                    if run e then ran := e :: !ran;
                     step rest
               in
-              let left =
-                Fun.protect
-                  ~finally:(fun () ->
-                    Unix.close fd;
-                    Dqueue.adopt queue id)
-                  (fun () -> step chosen)
+              (* A held record is rewritten only once released. *)
+              let release () =
+                Unix.close fd;
+                let ran = List.rev !ran in
+                if List.length ran = List.length chosen then
+                  Dqueue.adopt queue id
+                else if ran = [] then Dqueue.Records.complete wal id
+                else (
+                  Dqueue.Records.update wal id (fun body ->
+                      match Wal.decode body with
+                        | Some r -> Wal.encode { r with ops = List.map op ran }
+                        | None -> body);
+                  Dqueue.adopt queue id)
               in
+              let left = Fun.protect ~finally:release (fun () -> step chosen) in
               Narrate.say narrate "  announced a batch of %s"
-                (Narrate.count (List.length chosen - List.length left) noun);
+                (Narrate.count (List.length !ran) noun);
               go (left @ rest))
       in
       go items
