@@ -492,6 +492,11 @@ This file collects the traps that came from the implementation medium rather tha
 - **Check** — Polymorphic helpers are eta-expanded. Monad-parametrised first-class modules use `with type` equations and name the instantiated signature at use.
 - **Seen** — 4b60fb43, fb433875, f6df70b7.
 
+### B-10.9 An effect run through a short-circuiting fold
+- **Pitfall** — The shared socket's `pause` applied the request to every domain with `List.for_all (fun s -> Handler.call s.handler (Pause on))`, folding the effect and its answer in one pass. `for_all` stops at the first `false`, and a resume answers `false`: only the first domain resumed, and the menu, reading the reply as "not paused", offered Pause only.
+- **Check** — An effect applied to every element is a `List.iter` or `List.map`; its answers are folded afterwards. `for_all`, `exists`, `&&` and `||` take pure predicates only.
+- **Seen** — rewrite (review of PR #114).
+
 ## 11. Build, link and packaging [build]
 
 ### B-11.1 Link-time registration silently drops drivers and frontends
