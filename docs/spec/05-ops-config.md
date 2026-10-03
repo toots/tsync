@@ -486,7 +486,9 @@ copied_bytes, changed, unguarded}`.
    copies bounded by `maxChunkBuffers` (§2.1).
 9. The batches run in order, each finished before the next starts: every chunk is copied before any
    manifest that names it, and the cursor last. A reader of the destination never sees a manifest
-   whose chunks are not there yet, or a cursor ahead of its entries.
+   whose chunks are not there yet, or a cursor ahead of its entries. A chunk read from the source
+   that does not hash to its name is not copied and is counted refused; a destination that did not
+   take every chunk of the run receives none of the later batches.
 
 An object a destination refuses (a reference gate missing the chunks a manifest names, under
 `Skip_chunks`) is counted refused for that destination with its reason, and the run goes on; any

@@ -101,6 +101,11 @@ module Make (C : Context.S) = struct
           in
           match
             if b.chunks then (
+              (match Key.chunk_of e.key with
+                | Some ck
+                  when not (Chunk_key.equal (Chunk_key.of_bigstring body) ck) ->
+                    Fail.corrupt "it does not hash to its key on %s" src.name
+                | _ -> ());
               dst.put e.key body;
               `Written)
             else (
@@ -347,6 +352,16 @@ module Make (C : Context.S) = struct
                 (Narrate.size (bytes' - bytes))
                 (Narrate.duration (Unix.gettimeofday () -. started)))
           in
+          (* 05 §4.6 step 9: nothing that names chunks reaches a destination
+             that did not take every chunk. *)
+          let chunks_then rest =
+            match tally counts (fun c -> List.length c.failed) with
+              | 0 -> rest ()
+              | n ->
+                  Narrate.say narrate
+                    "  %s: %s not copied; nothing naming chunks is copied to it"
+                    dst.name (Narrate.count n "chunk")
+          in
           (match (scope, path) with
             | ((All | Skip_chunks) as scope), _ ->
                 if scope = All then
@@ -357,21 +372,23 @@ module Make (C : Context.S) = struct
                           listed_batch ~part:(i, 4096) ("chunk shard " ^ shard)
                             (Key.shard_prefix d shard) ~chunks:true)
                         (List.init 4096 Fun.id));
-                area "manifests" (fun () ->
-                    listed_batch "manifests" (Key.manifests d) ~chunks:false
-                      ~source:(fun _ -> manifest_area src.store));
-                area "versions" (fun () ->
-                    listed_batch "versions" (Key.versions d) ~chunks:false);
-                area "journal" (fun () ->
-                    listed_batch "journal" (Key.journal d) ~chunks:false);
-                area "cursor" (fun () ->
-                    headed "cursor"
-                      (Option.to_list (src.store.head_opt (Key.cursor d)))
-                      ~chunks:false)
+                chunks_then (fun () ->
+                    area "manifests" (fun () ->
+                        listed_batch "manifests" (Key.manifests d) ~chunks:false
+                          ~source:(fun _ -> manifest_area src.store));
+                    area "versions" (fun () ->
+                        listed_batch "versions" (Key.versions d) ~chunks:false);
+                    area "journal" (fun () ->
+                        listed_batch "journal" (Key.journal d) ~chunks:false);
+                    area "cursor" (fun () ->
+                        headed "cursor"
+                          (Option.to_list (src.store.head_opt (Key.cursor d)))
+                          ~chunks:false))
             | Path _, Some (chunks, keys) ->
                 area "chunks" (fun () -> headed "chunks" chunks ~chunks:true);
-                area "manifests" (fun () ->
-                    headed "manifests" keys ~chunks:false)
+                chunks_then (fun () ->
+                    area "manifests" (fun () ->
+                        headed "manifests" keys ~chunks:false))
             | Path _, None -> ());
           let c = counts in
           Narrate.say narrate "  %s: %d checked, %d copied (%s)%s%s" dst.name
