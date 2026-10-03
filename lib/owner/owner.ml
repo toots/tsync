@@ -103,10 +103,6 @@ type served = {
 
 let answered_while_draining = ["stats"; "status"; "stop"; "ping"]
 
-(* 08 §3.3: actions the router of a shared socket answers itself when no
-   domain is named. *)
-let router_actions = ["subscribe"; "menu"; "menu_stats"; "pause"; "stop"]
-
 (* A socket serving several domains routes by [domain]; one serving a single
    domain may be asked without it. *)
 let route ~draining ~router served req =
@@ -115,15 +111,21 @@ let route ~draining ~router served req =
   else if Atomic.get draining && not (List.mem action answered_while_draining)
   then Ipc.Reply (Ipc.failure (Fail.make Fail.Unexplained "stopping"))
   else (
-    match (Ipc.field req "domain", served, router) with
-      | None, _, Some answer when List.mem action router_actions ->
-          answer action req
-      | None, [s], _ -> Handler.answer s.handler req
-      | None, _, _ ->
+    (* 08 §3.3: a shared socket's router answers its own actions when no domain
+       is named, and declines the rest. *)
+    let own =
+      match (Ipc.field req "domain", router) with
+        | None, Some answer -> answer action req
+        | _ -> None
+    in
+    match (own, Ipc.field req "domain", served) with
+      | Some reply, _, _ -> reply
+      | None, None, [s] -> Handler.answer s.handler req
+      | None, None, _ ->
           Ipc.Reply
             (Ipc.failure
                (Fail.make Fail.Invalid "domain is required on this socket"))
-      | Some d, _, _ -> (
+      | None, Some d, _ -> (
           match
             List.find_opt
               (fun s -> Domain_name.to_string s.domain.name = d)
@@ -185,10 +187,12 @@ let shared_router served reports action req =
   let now () = Unix.gettimeofday () in
   match action with
     | "subscribe" ->
-        Ipc.Subscribe
-          ( all_topics,
-            Ipc.ok [],
-            List.map (fun s -> Handler.event_json s.handler Recovered) served )
+        Some
+          (Ipc.Subscribe
+             ( all_topics,
+               Ipc.ok [],
+               List.map (fun s -> Handler.event_json s.handler Recovered) served
+             ))
     | "menu" ->
         let answers =
           List.map
@@ -199,7 +203,7 @@ let shared_router served reports action req =
                   | exception e -> Error (Fail.classify e).reason ))
             served
         in
-        Ipc.Reply (Ipc.ok [("menu", Menu.render answers)])
+        Some (Ipc.Reply (Ipc.ok [("menu", Menu.render answers)]))
     | "menu_stats" ->
         let machine : Tsync_status.Status_report.machine =
           {
@@ -216,26 +220,26 @@ let shared_router served reports action req =
             warnings = [];
           }
         in
-        Ipc.Reply
-          (Ipc.ok
-             [
-               ( "entries",
-                 `List
-                   (Menu.stats_entries
-                      (Tsync_status.Status_text.render ~now:(now ()) machine))
-               );
-             ])
+        Some
+          (Ipc.Reply
+             (Ipc.ok
+                [
+                  ( "entries",
+                    `List
+                      (Menu.stats_entries
+                         (Tsync_status.Status_text.render ~now:(now ()) machine))
+                  );
+                ]))
     | "stop" ->
         Stop.request ();
-        Ipc.Reply (Ipc.ok [])
+        Some (Ipc.Reply (Ipc.ok []))
     | "pause" ->
         let on = Ipc.field req "arg" <> Some "off" in
         let paused =
           List.for_all (fun s -> Handler.call s.handler (Pause on)) served
         in
-        Ipc.Reply (Ipc.ok [("paused", `Bool paused)])
-    | _ ->
-        Ipc.Reply (Ipc.failure (Fail.make Fail.Invalid "unknown router action"))
+        Some (Ipc.Reply (Ipc.ok [("paused", `Bool paused)]))
+    | _ -> None
 
 let serve ?present ?(shared = false) ?roots ~socket config domains =
   let draining = Atomic.make false in
