@@ -82,3 +82,27 @@
  (alias runtest)
  (action
   (diff menu_test.expected menu_test.output)))
+
+(executable
+ (name jobs_test)
+ (modules jobs_test)
+ (libraries
+  tsync_core
+  tsync_config
+  tsync_catalog
+  tsync_domain
+  tsync_gc
+  tsync_owner
+  tsync_remote
+  tsync_store
+  unix))
+
+(rule
+ (with-stdout-to
+  jobs_test.output
+  (run ./jobs_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff jobs_test.expected jobs_test.output)))

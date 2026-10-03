@@ -155,15 +155,20 @@ let copies io c act =
         in
         if stores = [] then
           say "no store of this domain can run a bucket function";
-        List.iter
-          (fun (m : Tsync_store.Composite.member) ->
-            say "%s: probing its bucket function (up to 3 minutes)" m.name;
-            say "  %s"
-              (if Tsync_store.Composite.probe ~cancelled:io.cancelled c m then
-                 "confirmed"
-               else "not confirmed: requests were not consumed"))
-          stores;
-        0
+        let confirmed =
+          List.map
+            (fun (m : Tsync_store.Composite.member) ->
+              say "%s: probing its bucket function (up to 3 minutes)" m.name;
+              let confirmed =
+                Tsync_store.Composite.probe ~cancelled:io.cancelled c m
+              in
+              say "  %s"
+                (if confirmed then "confirmed"
+                 else "not confirmed: requests were not consumed");
+              confirmed)
+            stores
+        in
+        if List.for_all Fun.id confirmed then 0 else 1
     | Outstanding ->
         (match Tsync_store.Composite.outstanding c with
           | [] -> say "no discard request outstanding"
@@ -348,11 +353,19 @@ let integrity io (dom : Tsync_domain.Domain.t) ~repair ~apply ~detail ~source =
             c.member (chunk_outcome o)
             (match o with Repaired from -> " (" ^ from ^ ")" | _ -> ""))
         chunks);
-    if tree = [] && chunks = [] then
+    (* A cancelled repair returns only what it considered. *)
+    let skipped =
+      List.length r.findings - List.length tree
+      + (List.length r.corrupt - List.length chunks)
+    in
+    if r.findings = [] && r.corrupt = [] then
       say "%s: nothing to repair" (Domain_name.to_string dom.name);
+    if skipped > 0 then
+      say "cancelled: %s not considered" (Narrate.count skipped "finding");
     if not apply then say "(dry run: nothing changed; drop --dry-run to act)";
     if
-      List.exists (fun (_, o) -> unfixed o) tree
+      skipped > 0
+      || List.exists (fun (_, o) -> unfixed o) tree
       || List.exists (fun (_, o) -> o = Integrity.Unrepairable) chunks
     then 1
     else 0)

@@ -1,0 +1,22 @@
+== gc --probe
+no function deployed:
+  bucket: probing its bucket function (up to 3 minutes)
+    not confirmed: requests were not consumed
+  exit 1
+the function deployed:
+  bucket: probing its bucket function (up to 3 minutes)
+    confirmed
+  exit 0
+no store with a bucket function:
+  no store of this domain can run a bucket function
+  exit 0
+== data-integrity --repair
+two findings, a dry run:
+  2 would be deleted
+  (dry run: nothing changed; drop --dry-run to act)
+  exit 0
+cancelled after the first:
+  1 would be deleted
+  cancelled: 1 finding not considered
+  (dry run: nothing changed; drop --dry-run to act)
+  exit 1
