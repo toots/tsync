@@ -611,6 +611,11 @@ This file collects the traps that came from the implementation medium rather tha
 - **Check** — The gate runs the full suite on every platform tsync ships for. A test uses facilities present on each (`/dev/fd`, resolved paths, a short socket root), or declares the platform it needs and is reported "not run" elsewhere, never silently skipped.
 - **Seen** — rewrite (ci-workflows).
 
+### B-12.13 A check matching output styled for a terminal
+- **Pitfall** — The user-install job asserted `opam list --installed --short | grep -qx tsync-tls`. setup-ocaml sets `OPAMCOLOR=always`, so each name arrived wrapped in escape codes and the exact-line match failed on a correct install: the job was red on every run of the `rewrite` branch, and a gate that is always red is read as noise.
+- **Check** — A check that parses a tool's output asks for its plain form (`--color=never`, `--porcelain`, JSON). A check is seen passing on a correct build before it is trusted, as it is seen failing on a broken one (09 §10.2).
+- **Seen** — rewrite (conformance, then test).
+
 ## Review checklist
 
 1. **Durability and mapping** — Is every renamed/linked file fsynced first? Is anything mapped that is not immutable and rename-published? Does a no-reflink fallback map a live file? Is shared-fd I/O positioned? Do listings hide scratch names and keep key order?
