@@ -887,8 +887,7 @@ module Make (C : Engine_ctx.S) = struct
             let ops = [Op.Put { path; size = m.size; base }] in
             let id = mark_executed id ops in
             promote path;
-            discharge id ops;
-            ignore (Cache.enforce_cap cache)
+            discharge id ops
     with e ->
       note_link_failure e;
       raise e
