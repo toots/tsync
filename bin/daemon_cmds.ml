@@ -9,6 +9,28 @@ open Cli
    governor, starts the store server as its child when a domain is served over
    HTTP, and owns every domain on one socket, which it serves even with no
    domain configured (file-provider §11). *)
+(* 07 §2.7: the service log. An agent registered through SMAppService cannot
+   name a path under the user's home for its output, so the service opens the
+   log itself when it is not run from a terminal. *)
+let log_to_service_file () =
+  if not (Unix.isatty Unix.stderr) then (
+    let dir = Filename.concat (Paths.home ()) "Library/Logs" in
+    let rec mkdir_p d =
+      if not (Sys.file_exists d) then (
+        mkdir_p (Filename.dirname d);
+        try Unix.mkdir d 0o755 with Unix.Unix_error (EEXIST, _, _) -> ())
+    in
+    mkdir_p dir;
+    let fd =
+      Unix.openfile
+        (Filename.concat dir "tsync-daemon.log")
+        [O_WRONLY; O_APPEND; O_CREAT; O_CLOEXEC]
+        0o644
+    in
+    Unix.dup2 ~cloexec:false fd Unix.stdout;
+    Unix.dup2 ~cloexec:false fd Unix.stderr;
+    Unix.close fd)
+
 let macos_service tls (config : Config.t) =
   ignore (Fs.raise_nofile 65536);
   Owner.stop_on_signals ();
@@ -45,6 +67,7 @@ let no_domains () = Config.of_string {|{"domains":[]}|}
 
 (* 07 §3.1 *)
 let start mount tls verbose =
+  if Fs.is_macos then log_to_service_file ();
   set_verbose verbose;
   Atomic.set Log.min_level Log.Debug;
   match Paths.read_config () with
