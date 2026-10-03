@@ -738,7 +738,9 @@ let execute ?(partial = false) t route op body =
         {
           Server.status = 200;
           headers = [("content-type", "application/json")];
-          body = Bigstring (bs (W.listing_to_json entries));
+          body =
+            Server.stream (fun write ->
+                W.listing_pieces entries (fun s -> write (bs s)));
         }
     | List_key k ->
         {

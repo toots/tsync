@@ -112,25 +112,39 @@ let decode_key s =
     | Ok k -> Key.of_string k
     | Error _ -> None
 
+let entry_to_json (e : Store.entry) : Yojson.Safe.t =
+  `Assoc
+    ([
+       ("key", `String (Key.to_string e.key));
+       ("size", `Int e.size);
+       ("lastModified", `Float e.last_modified);
+     ]
+    @ Option.fold ~none:[] ~some:(fun t -> [("etag", `String t)]) e.etag
+    @ Option.fold ~none:[]
+        ~some:(fun c -> [("checksum", `String (Checksum.to_string c))])
+        e.checksum)
+
 let listing_to_json entries =
-  Yojson.Safe.to_string
-    (`List
-       (List.map
-          (fun (e : Store.entry) ->
-            `Assoc
-              ([
-                 ("key", `String (Key.to_string e.key));
-                 ("size", `Int e.size);
-                 ("lastModified", `Float e.last_modified);
-               ]
-              @ Option.fold ~none:[]
-                  ~some:(fun t -> [("etag", `String t)])
-                  e.etag
-              @ Option.fold ~none:[]
-                  ~some:(fun c ->
-                    [("checksum", `String (Checksum.to_string c))])
-                  e.checksum))
-          entries))
+  Yojson.Safe.to_string (`List (List.map entry_to_json entries))
+
+(* The same text in pieces of a few hundred entries, so a listing of a whole
+   area is never held as one string. *)
+let listing_pieces entries write =
+  let piece = Buffer.create 65536 in
+  let flush () =
+    if Buffer.length piece > 0 then (
+      write (Buffer.contents piece);
+      Buffer.clear piece)
+  in
+  Buffer.add_char piece '[';
+  List.iteri
+    (fun i e ->
+      if i > 0 then Buffer.add_char piece ',';
+      Buffer.add_string piece (Yojson.Safe.to_string (entry_to_json e));
+      if Buffer.length piece >= 60000 then flush ())
+    entries;
+  Buffer.add_char piece ']';
+  flush ()
 
 let corrupt fmt = Fail.corrupt fmt
 
