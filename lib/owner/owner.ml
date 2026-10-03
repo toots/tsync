@@ -103,12 +103,7 @@ type present =
   publish:(Protocol.event -> unit) ->
   Handler.hooks * (unit -> unit)
 
-type served = {
-  domain : Domain.t;
-  engine : (module Tsync_sync.Engine.S);
-  handler : Handler.t;
-  go : unit -> unit;
-}
+type served = { domain : Domain.t; handler : Handler.t; go : unit -> unit }
 
 let answered_while_draining = ["stats"; "status"; "stop"]
 
@@ -266,6 +261,18 @@ let serve ?present ?(shared = false) ?roots ~socket config domains =
      it says otherwise. *)
   let roots = Option.value ~default:[Paths.home ()] roots in
   let reports = ref [] in
+  (* Lesson 8: every engine started is drained and the socket closed, on a
+     stop or on a failure to start the rest. *)
+  let started = ref [] in
+  Fun.protect ~finally:(fun () ->
+      Atomic.set draining true;
+      Rt.iter_concurrently
+        (fun engine ->
+          let (module E : Tsync_sync.Engine.S) = engine in
+          E.drain ())
+        !started;
+      Option.iter Ipc.close !server)
+  @@ fun () ->
   served :=
     List.map
       (fun (dom : Config.domain) ->
@@ -273,6 +280,7 @@ let serve ?present ?(shared = false) ?roots ~socket config domains =
         let engine = Domain.engine domain in
         let (module E : Tsync_sync.Engine.S) = engine in
         E.start ();
+        started := engine :: !started;
         Rt.spawn ~name:"housekeeping" (fun () -> housekeeping domain engine);
         let handler = ref None in
         let hooks, go =
@@ -303,7 +311,7 @@ let serve ?present ?(shared = false) ?roots ~socket config domains =
             ~stop:Stop.request ~dest_roots:roots ~staging_roots:roots ()
         in
         handler := Some h;
-        { domain; engine; go; handler = h })
+        { domain; go; handler = h })
       domains;
   let router =
     if shared then Some (fun a r -> shared_router !served !reports a r)
@@ -314,14 +322,7 @@ let serve ?present ?(shared = false) ?roots ~socket config domains =
     (fun s -> ignore (Handler.publish_event s.handler Recovered))
     !served;
   List.iter (fun s -> s.go ()) !served;
-  Stop.wait ();
-  Atomic.set draining true;
-  Rt.iter_concurrently
-    (fun s ->
-      let (module E : Tsync_sync.Engine.S) = s.engine in
-      E.drain ())
-    !served;
-  Option.iter Ipc.close !server
+  Stop.wait ()
 
 let run ?present ?shared ?roots ?socket config (domains : Config.domain list) =
   let socket =
