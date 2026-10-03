@@ -8,17 +8,21 @@ type t = {
   key_prefix : string;
   by_fid : fid_index ref;
   by_fid_m : Mutex.t;
-  fid_ready : unit Rt.Promise.t;
 }
 
 (** File id → path (04 §2.3). *)
 and fid_index =
   | Unbuilt  (** nothing to keep: the build's walk sees every marker *)
-  | Building of ((string, string) Hashtbl.t -> unit) Queue.t
-      (** changes made during the build, applied when it completes *)
+  | Building of building
   | Ready of (string, string) Hashtbl.t
   | Saved of (string, string) Hashtbl.t
       (** written to the snapshot, which the next change removes *)
+
+and building = {
+  pending : ((string, string) Hashtbl.t -> unit) Queue.t;
+      (** changes made during the build, applied when it completes *)
+  ready : unit Rt.Promise.t;  (** this build's outcome *)
+}
 
 let create ~cache_root domain =
   let root = Filename.concat cache_root (Domain_name.to_string domain) in
@@ -30,7 +34,6 @@ let create ~cache_root domain =
     key_prefix = Key.prefix_to_string (Key.manifests domain);
     by_fid = ref Unbuilt;
     by_fid_m = Mutex.create ();
-    fid_ready = Rt.Promise.create ();
   }
 
 let fid_snapshot t = Filename.concat t.root "file-ids-index"
@@ -39,7 +42,7 @@ let with_fid_index t f =
   Mutex.protect t.by_fid_m (fun () ->
       match !(t.by_fid) with
         | Unbuilt -> ()
-        | Building pending -> Queue.push f pending
+        | Building b -> Queue.push f b.pending
         | Ready h -> f h
         | Saved h ->
             ignore (Fs.release (fid_snapshot t));
@@ -539,30 +542,39 @@ let scan_file_ids t =
   walk "";
   h
 
+(* Pitfall A-11.19: a failed build returns to [Unbuilt], so the next caller
+   starts another; its waiters see its error once. *)
 let start_fid_build t =
-  let start =
+  let action =
     Mutex.protect t.by_fid_m (fun () ->
         match !(t.by_fid) with
           | Unbuilt ->
-              let pending = Queue.create () in
-              t.by_fid := Building pending;
-              Some pending
-          | _ -> None)
+              let b =
+                { pending = Queue.create (); ready = Rt.Promise.create () }
+              in
+              t.by_fid := Building b;
+              `Start b
+          | Building b -> `Wait b.ready
+          | Ready _ | Saved _ -> `Done)
   in
-  Option.iter
-    (fun pending ->
-      Rt.spawn ~name:"file-id index" (fun () ->
-          match scan_file_ids t with
-            | h ->
-                Mutex.protect t.by_fid_m (fun () ->
-                    Queue.iter (fun f -> f h) pending;
-                    t.by_fid := Ready h);
-                ignore (Rt.Promise.try_resolve t.fid_ready ())
-            | exception e ->
-                Log.warn "cannot build the file-id index: %s"
-                  (Printexc.to_string e);
-                ignore (Rt.Promise.try_resolve_result t.fid_ready (Error e))))
-    start
+  (match action with
+    | `Start ({ pending; ready } : building) ->
+        Rt.spawn ~name:"file-id index" (fun () ->
+            match scan_file_ids t with
+              | h ->
+                  Mutex.protect t.by_fid_m (fun () ->
+                      Queue.iter (fun f -> f h) pending;
+                      t.by_fid := Ready h);
+                  ignore (Rt.Promise.try_resolve ready ())
+              | exception e ->
+                  Log.warn "cannot build the file-id index: %s"
+                    (Printexc.to_string e);
+                  Mutex.protect t.by_fid_m (fun () -> t.by_fid := Unbuilt);
+                  ignore (Rt.Promise.try_resolve_result ready (Error e)))
+    | _ -> ());
+  match action with
+    | `Start { ready; _ } | `Wait ready -> Some ready
+    | `Done -> None
 
 let load_file_ids t =
   let snapshot = fid_snapshot t in
@@ -581,12 +593,11 @@ let load_file_ids t =
         (* Gone before any marker can change, so it never outlives the index. *)
         ignore (Fs.release snapshot);
         Fs.fsync_dir t.root;
-        Mutex.protect t.by_fid_m (fun () -> t.by_fid := Ready h);
-        ignore (Rt.Promise.try_resolve t.fid_ready ())
+        Mutex.protect t.by_fid_m (fun () -> t.by_fid := Ready h)
     | Some _ ->
         ignore (Fs.release snapshot);
         Fs.fsync_dir t.root
-    | None -> start_fid_build t
+    | None -> ignore (start_fid_build t)
 
 let save_file_ids t =
   Mutex.protect t.by_fid_m (fun () ->
@@ -604,9 +615,7 @@ let save_file_ids t =
             t.by_fid := Saved h
         | _ -> ())
 
-let await_file_ids t =
-  start_fid_build t;
-  Rt.Promise.await t.fid_ready
+let await_file_ids t = Option.iter Rt.Promise.await (start_fid_build t)
 
 let path_of_file_id t id =
   await_file_ids t;
