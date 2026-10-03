@@ -2,7 +2,10 @@
 
 The macOS deliverable is a single notarized `tsync.pkg` holding one
 self-contained `TsyncApp.app`: the Swift app, the File Provider extension, the
-OCaml daemon and every non-system library it needs all live inside the bundle.
+OCaml service and every non-system library it needs all live inside the bundle.
+How the pieces divide the work is the spec's
+([`docs/spec/frontends/file-provider.md`](../docs/spec/frontends/file-provider.md));
+this file is about building and shipping them.
 
 It is an installer package rather than a disk image because the daemon doubles as
 the `tsync` CLI, and a sandboxed app cannot put anything outside its own bundle.
@@ -15,27 +18,25 @@ mounted image.
 ```
 TsyncApp.app/Contents
 ├── MacOS/TsyncApp                        the app (a background login item)
-├── MacOS/tsync                           the OCaml daemon + CLI
-├── libs/                                 Homebrew dylibs the daemon links
-├── Resources/install-agent.sh            installs the daemon's LaunchAgent
+├── MacOS/tsync                           the OCaml service + CLI
+├── libs/                                 Homebrew dylibs the service links
+├── Resources/install-agent.sh            installs the service's LaunchAgent
 └── PlugIns/TsyncFileProvider.appex       the File Provider extension
 ```
 
-The app registers itself as a login item through `SMAppService`
-(`TsyncApp/LoginItem.swift`). The daemon is a plain LaunchAgent written to
-`~/Library/LaunchAgents` by `install-agent.sh`, which both `scripts/postinstall`
-and `deploy.sh` call.
+The app registers itself as a login item through `SMAppService.mainApp`. The
+service is a per-user LaunchAgent written to `~/Library/LaunchAgents` by
+`install-agent.sh`, which `scripts/postinstall` and `deploy.sh` both call; it
+names the app as its associated bundle, so Login Items attributes it to the app.
 
-> A bundled `SMAppService.agent` in `Contents/Library/LaunchAgents` is the
-> modern equivalent and would avoid the second plist, but it does not work here:
-> with the agent correctly placed, sealed into the signature and signed with the
-> app's Team ID, `SMAppService.agent(plistName:)` reports `.notFound` and
-> `register()` fails with `Operation not permitted`, so the daemon never starts.
-> `SMAppService.mainApp` works, which is why the login item still uses it.
+> The service cannot be a bundled `SMAppService.agent`: the system lets a
+> sandboxed app register only sandboxed executables ("SMAppService target
+> executable must be sandboxed because the app is sandboxed", from
+> backgroundtaskmanagementd), and the service must not be sandboxed.
 
-Uninstalling is `tsync fileprovider purge`: it unregisters the domains and the
-login item and removes the bundle, agent plist, cache and symlink, keeping
-`config.json`.
+Uninstalling is `tsync fileprovider purge`: the app unregisters the domains and
+its login item, then the command stops the service, removes its agent plist, the
+bundle, the data directory and the CLI link, keeping `config.json`.
 
 ## Identifiers
 
@@ -47,8 +48,10 @@ login item and removes the bundle, agent plist, cache and symlink, keeping
 | Daemon agent label | `org.feverdreamtv.tsync.daemon` |
 | Team ID | `PSE2VP6582` |
 
-All five have to agree across `project.yml`, both `.entitlements` files,
-`Shared/Config.swift`, `install-agent.sh` and `lib/platform/runtime/macos_runtime.ml`.
+They have to agree across `project.yml`, both `.entitlements` files and
+`Info.plist`s, `Shared/Tsync.swift`, `install-agent.sh`, `deploy.sh`,
+`lib/config/paths.ml`, `lib/frontends/file_provider/file_provider_cli.ml` and
+`bin/daemon_cmds.ml`.
 Changing the App Group changes the container path, which orphans any existing
 local cache and config.
 
@@ -56,7 +59,8 @@ local cache and config.
 
 ## Building locally
 
-Needs [opam](https://opam.ocaml.org/) with OCaml ≥ 5.5, Xcode, and:
+Needs [opam](https://opam.ocaml.org/) with OCaml ≥ 5.5 and tsync's dependencies
+(`build.sh` uses the current switch; set `OPAMSWITCH` to pick another), Xcode, and:
 
 ```bash
 brew install xcodegen dylibbundler xxhash
@@ -67,7 +71,13 @@ cd macos
 make generate    # regenerate tsync.xcodeproj; only needed after editing project.yml
 make build       # complete TsyncApp.app, path printed on stdout
 make deploy      # the same build, installed into /Applications and started
+make test        # the Swift unit tests
 ```
+
+`make deploy` cannot replace a bundle a pkg installed: that one is root-owned,
+so remove it with `sudo rm -rf /Applications/TsyncApp.app` first. Each rebuild
+has a new signature, so macOS may ask again whether `tsync` may access data from
+other apps; until that prompt is answered the service waits.
 
 `build.sh` is the single entry point everything else calls. It:
 
@@ -92,8 +102,9 @@ It takes a few environment variables:
 | `BUNDLE_VERSION` / `BUNDLE_SHORT_VERSION` | override `CFBundleVersion` / `CFBundleShortVersionString` |
 | `JOBS` | parallel `xcodebuild` jobs, default 12 |
 
-A plain `make build` signs ad-hoc, which is enough to run the app on the machine
-that built it. Ad-hoc signatures carry no Team ID, so the hardened runtime's
+A plain `make build` signs with your Apple Development identity when the keychain
+has one (Xcode provisions a development profile for the App Group), and ad-hoc
+otherwise, which is enough to run the app on the machine that built it. Ad-hoc signatures carry no Team ID, so the hardened runtime's
 library validation would reject the bundled dylibs — `build.sh` therefore only
 turns on the hardened runtime and a secure timestamp once a real `SIGN_IDENTITY`
 is given. That difference is why a release build must be installed from a real
@@ -102,10 +113,10 @@ pkg at least once, not only via `make deploy`.
 ### Watching it run
 
 ```bash
-log stream --predicate 'subsystem == "org.feverdreamtv.tsync"' --level debug
-log stream --process tsync                                    # daemon stdout/stderr
+log stream --predicate 'subsystem == "org.feverdreamtv.tsync"' --level info   # app and extension
+tail -f ~/Library/Logs/tsync-daemon.log                        # the service
 launchctl print "gui/$UID/org.feverdreamtv.tsync.daemon"      # agent state
-launchctl kickstart -k "gui/$UID/org.feverdreamtv.tsync.daemon"   # restart it
+tsync restart                                                  # restart it
 ```
 
 The extension has to be approved once in **System Settings → General → Login Items
