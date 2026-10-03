@@ -49,10 +49,10 @@ parser against this spec ([05 §2.1](../05-ops-config.md)):
 |---|---|---|---|
 | `mountPoint` | absolute path | `$HOME/tsync/<domain>` | where to mount. Normalised at validation (no trailing `/`, no `.` or `..` segments); a relative path or one starting with `~` is refused. |
 | `allowOther` | bool | `false` | other local users may reach the mount, with the access `uid`, `gid`, `fileMode` and `dirMode` grant them (§4.4). Requires `user_allow_other` in `/etc/fuse.conf`, else the mount fails with that sentence. |
-| `uid` | user name or decimal uid | the owner process's uid | the owner every entry reports (§4.3). A name is resolved through the system's user database; one it does not know is refused. |
-| `gid` | group name or decimal gid | the owner process's gid | the group every entry reports (§4.3), resolved as `uid` is. |
-| `fileMode` | octal permission bits, `[0-7]{3}` with an optional leading `0` | `"0644"` | the mode files report (§4.3). |
-| `dirMode` | octal permission bits, as `fileMode` | `"0755"` | the mode directories report (§4.3). |
+| `uid` | string: a user name or a decimal uid below 2³²−1 | the owner process's uid | the owner every entry reports (§4.3). A name is resolved through the system's user database; one it does not know is refused. |
+| `gid` | string: a group name or a decimal gid below 2³²−1 | the owner process's gid | the group every entry reports (§4.3), resolved as `uid` is. |
+| `fileMode` | string: octal permission bits, `[0-7]{3}` with an optional leading `0` | `"0644"` | the mode files report (§4.3). |
+| `dirMode` | string, as `fileMode` | `"0755"` | the mode directories report (§4.3). |
 | `mountSubtype` | string matching `[A-Za-z0-9._-]*` | `"sshfs"` | the mount reports fstype `fuse.<mountSubtype>`; blank means `sshfs` (§B2). |
 
 The mount point is resolved by one rule shared with the tray, the CLI and discovery: the domain's

@@ -25,6 +25,7 @@ frontend type not built                  refused: domains[0].frontends[0]: front
 fuse mode not octal                      refused: domains[0].frontends[0].fileMode: three octal digits, optionally after a leading 0
 fuse mode with special bits              refused: domains[0].frontends[0].dirMode: three octal digits, optionally after a leading 0
 fuse unknown user                        refused: domains[0].frontends[0].uid: no such user
+fuse uid out of range                    refused: domains[0].frontends[0].uid: a decimal id is at most 4294967294
 fuse unknown group                       refused: domains[0].frontends[0].gid: no such group
 a frontend twice                         refused: domains[0].frontends: fuse is listed twice
 unused link                              refused: links.slow: no backend uses this link

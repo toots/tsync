@@ -14,15 +14,24 @@ let subtype_chars s =
 
 let is_decimal s = s <> "" && String.for_all (fun c -> c >= '0' && c <= '9') s
 
+(* The kernel's ids are 32 bits wide, and the all-ones id means "none". *)
+let max_id = 0xFFFF_FFFE
+
 let resolve lookup name =
-  if is_decimal name then int_of_string_opt name
+  if is_decimal name then
+    Option.bind (int_of_string_opt name) (fun id ->
+        if id <= max_id then Some id else None)
   else (match lookup name with id -> Some id | exception Not_found -> None)
 
 let user_id = resolve (fun name -> (Unix.getpwnam name).pw_uid)
 let group_id = resolve (fun name -> (Unix.getgrnam name).gr_gid)
 
 let known what id name =
-  match id name with Some _ -> None | None -> Some ("no such " ^ what)
+  match id name with
+    | Some _ -> None
+    | None when is_decimal name ->
+        Some (Printf.sprintf "a decimal id is at most %d" max_id)
+    | None -> Some ("no such " ^ what)
 
 let mode s =
   let digits =
