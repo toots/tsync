@@ -113,6 +113,11 @@ module type S = sig
       grace; what is left stays owed on disk. *)
   val drain : ?grace:float -> unit -> unit
 
+  (** 04 §4.6: put a saved version of the file at [path] back, the newest when
+      [version] (its timestamp in ns) is none. The current content is saved as a
+      version first. ABSENT when no such version; needs versioning. *)
+  val revert : ?version:int64 -> string -> unit
+
   (** Bring the trashed folder whose trash entry records [path] back at [path]
       (05 §4.8): placed on the store, then the folder and every folder and file
       beneath it announced; how many. UNPREPARED when this client has not

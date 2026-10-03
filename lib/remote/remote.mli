@@ -84,6 +84,10 @@ module Make (_ : Context.S) : sig
   (** Versions of a slot, newest first, with their timestamps in ns. *)
   val list_versions : Folder_id.t -> string -> (int64 * Store.entry) list
 
+  (** Every version group ([<folder id>/<leaf hash>]) with its versions, newest
+      first: one listing of the version area. *)
+  val all_versions : unit -> (string * (int64 * Store.entry) list) list
+
   val get_version : Store.entry -> string
 
   (** Put a version's body back at the slot (after snapshotting the current

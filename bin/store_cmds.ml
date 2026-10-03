@@ -542,8 +542,129 @@ let share_cmd =
       const share $ path $ expires $ token $ revoke $ clear $ domain_arg
       $ verbose)
 
+(* 07 §5.6 [versions]: a read command, from the store; [--revert] goes through
+   the owner. *)
+module Versions (C : Tsync_remote.Context.S) = struct
+  module R = Tsync_remote.Remote.Make (C)
+  module T = Tsync_remote.Tree.Make (C)
+
+  let manifest e = Manifest.decode (R.get_version e)
+
+  (* A folder's path, climbed through its anchors; none for a folder in the
+     trash or without an anchor. *)
+  let folder_path id =
+    let rec climb id acc depth =
+      if Folder_id.is_root id then Some (String.concat "/" acc)
+      else if depth > 256 then None
+      else (
+        match T.anchor id with
+          | Some a when not (Folder.in_trash a) ->
+              climb a.parent (a.aname :: acc) (depth + 1)
+          | _ -> None)
+    in
+    climb id [] 0
+
+  let line ns size what =
+    say "%Ld  %s  %s%s" ns
+      (Narrate.date (Int64.to_float ns /. 1e9))
+      (Narrate.size size)
+      (if what = "" then "" else "  " ^ what)
+
+  let of_file path =
+    let parent = Names.parent_of path and leaf = Names.leaf_of path in
+    let parts = List.filter (( <> ) "") (String.split_on_char '/' parent) in
+    let folder =
+      if parts = [] then Some Folder_id.root
+      else (
+        match T.find Folder_id.root parts with
+          | `Folder id -> Some id
+          | _ -> None)
+    in
+    match folder with
+      | None -> fail "%s: no such folder" parent
+      | Some id ->
+          let versions = R.list_versions id leaf in
+          if versions = [] then say "%s has no saved versions" path;
+          List.iter
+            (fun (ns, e) ->
+              match manifest e with
+                | Some m -> line ns m.size ""
+                | None -> line ns 0 "(unreadable)")
+            versions;
+          0
+
+  let deleted () =
+    let found =
+      List.filter_map
+        (fun (group, versions) ->
+          match (String.index_opt group '/', versions) with
+            | Some i, (ns, e) :: _ -> (
+                match
+                  (Folder_id.of_string (String.sub group 0 i), manifest e)
+                with
+                  | Some id, Some m when R.head_slot id m.name = None ->
+                      Some
+                        ( ns,
+                          m.size,
+                          match folder_path id with
+                            | Some dir -> Names.join dir m.name
+                            | None -> m.name ^ " (folder gone)" )
+                  | _ -> None)
+            | _ -> None)
+        (R.all_versions ())
+    in
+    say "%s with saved versions"
+      (Narrate.count (List.length found) "deleted file");
+    List.iter
+      (fun (ns, size, path) -> line ns size path)
+      (List.sort (fun (a, _, _) (b, _, _) -> compare b a) found);
+    0
+end
+
+let versions path revert version name verbose =
+  set_verbose verbose;
+  run (fun () ->
+      let config = config () in
+      match (revert, path) with
+        | true, None -> fail "--revert needs the PATH of a file"
+        | true, Some path ->
+            Tsync_owner.Owner.request ~what:"tsync versions --revert" config
+              (domain ?name config)
+              (Tsync_owner.Protocol.Revert { item = Rel path; version });
+            say "%s is back at %s" path
+              (match version with
+                | Some ns -> Narrate.date (Int64.to_float ns /. 1e9)
+                | None -> "its latest saved version");
+            0
+        | false, _ -> (
+            let dom =
+              Tsync_domain.Domain.build ~owner:false config
+                (domain ?name config)
+            in
+            let module V = Versions ((val Tsync_domain.Domain.context dom)) in
+            match path with Some p -> V.of_file p | None -> V.deleted ()))
+
+let versions_cmd =
+  let path = Arg.(value & pos 0 (some string) None & info [] ~docv:"PATH")
+  and revert =
+    Arg.(
+      value & flag & info ["revert"] ~doc:"Put a saved version of PATH back.")
+  and version =
+    Arg.(
+      value
+      & opt (some int64) None
+      & info ["version"] ~docv:"TS"
+          ~doc:"The version to put back, as listed; the latest by default.")
+  in
+  cmd "versions"
+    ~doc:
+      "List a file's saved versions, or every deleted file; --revert puts one \
+       back."
+    Term.(const versions $ path $ revert $ version $ domain_arg $ verbose)
+
 let cmds =
   [
+    versions_cmd;
     gc_cmd;
     expire_cmd;
     trash_cmd;

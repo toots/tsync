@@ -718,6 +718,10 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
     | Job r -> run_job t ~send ~narrate:r.narrate r.job
     | Cancel id -> cancel t id
     | Notify_reset -> publish_event t Reset
+    | Revert r ->
+        let path = target t r.item in
+        if E.kind path <> `File then invalid "revert names a file";
+        E.revert ?version:r.version path
     | Full_resync ->
         E.stamp_generation ();
         t.hooks.reannounce ()

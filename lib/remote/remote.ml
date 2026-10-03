@@ -295,6 +295,29 @@ module Make (C : Context.S) = struct
          (Key.as_prefix (Key.v (Key.prefix_to_string (Key.versions d) ^ group))))
     |> List.sort (fun (a, _) (b, _) -> compare b a)
 
+  let all_versions () =
+    let prefix = Key.prefix_to_string (Key.versions d) in
+    let groups = Hashtbl.create 64 in
+    List.iter
+      (fun (e : Store.entry) ->
+        let k = Key.to_string e.key in
+        let rel =
+          String.sub k (String.length prefix)
+            (String.length k - String.length prefix)
+        in
+        let group, ts = Key.split_last rel in
+        match Int64.of_string_opt ts with
+          | Some ns ->
+              Hashtbl.replace groups group
+                ((ns, e)
+                :: Option.value ~default:[] (Hashtbl.find_opt groups group))
+          | None -> ())
+      (store.list_prefix (Key.versions d));
+    Hashtbl.fold
+      (fun group vs acc ->
+        (group, List.sort (fun (a, _) (b, _) -> compare b a) vs) :: acc)
+      groups []
+
   let get_version (e : Store.entry) =
     Bigstring.to_string (Store.get store e.key)
 

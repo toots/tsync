@@ -21,6 +21,8 @@ delete            request reads back, reply reads back
 rmdir             request reads back, reply reads back
 evict             request reads back, reply reads back
 restore           request reads back, reply reads back
+revert            request reads back, reply reads back
+revert            request reads back, reply reads back
 full_resync       request reads back, reply reads back
 sync              request reads back, reply reads back
 sync              request reads back, reply reads back

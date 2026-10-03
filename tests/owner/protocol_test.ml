@@ -136,6 +136,14 @@ let cases =
     Case
       ( Restore { item = Ref "root"; keep = Some 60. },
         { succeeded = 2; failed = 0 } );
+    Case (Revert { item = Rel "a.txt"; version = None }, ());
+    Case
+      ( Revert
+          {
+            item = Ref "i:6c1e0b9a2f4d47e8a3b5c7d9e1f20384";
+            version = Some 1759140000500000000L;
+          },
+        () );
     Case (Full_resync, ());
     Case (Sync { full = true }, Full { manifests = 12; failed = 1 });
     Case (Sync { full = false }, Incremental 5);

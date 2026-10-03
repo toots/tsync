@@ -1304,6 +1304,37 @@ module Make (C : Engine_ctx.S) = struct
   (* 05 §4.8, §4.2: the store side first, so the folder is filed where its
      Mkdir says; then the folder and its whole subtree are announced, since
      peers dropped them when it was trashed. *)
+  (* 04 §4.6: the version's manifest first; then, under the locks, the staged
+     edit goes and a put is owed before the store and the mirror change, so the
+     upload queue discharges the record by the no-staged-edit rule. *)
+  let revert ?version path =
+    if not C.versioning then
+      Fail.raise_ Fail.Refused "%s does not keep versions"
+        (Domain_name.to_string d);
+    let parent = require_parent path and leaf = Names.leaf_of path in
+    let versions = R.list_versions parent leaf in
+    let chosen =
+      match version with
+        | None -> List.nth_opt versions 0
+        | Some ns -> List.find_opt (fun (v, _) -> Int64.equal v ns) versions
+    in
+    match chosen with
+      | None -> Fail.absent "%s: no such version" path
+      | Some (_, entry) ->
+          let m =
+            match Manifest.decode (R.get_version entry) with
+              | Some m -> Manifest.rename m leaf
+              | None -> Fail.corrupt "%s: the version is not a manifest" path
+          in
+          with_meta (fun () ->
+              with_key path (fun () ->
+                  ignore (discard_edit path);
+                  bump path;
+                  post_put path m.size None;
+                  R.revert ~parent ~leaf entry;
+                  Mirror.write_file ~own:true mirror path m));
+          changed [path]
+
   let restore_from_trash path =
     match
       List.find_opt
