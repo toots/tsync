@@ -124,6 +124,34 @@ let () =
           (String.split_on_char '\n' (Buffer.contents buf))
       in
       p "  answers: %s" (String.concat ", " (List.map String.trim answers));
+      p "== a second chunk whose size overflows the running total";
+      let fd = Unix.socket PF_INET SOCK_STREAM 0 in
+      Unix.connect fd (ADDR_INET (Unix.inet_addr_loopback, port));
+      let req =
+        "PUT /echo HTTP/1.1\r\n\
+         Host: x\r\n\
+         Transfer-Encoding: chunked\r\n\
+         \r\n\
+         1\r\n\
+         x\r\n\
+         3fffffffffffffff\r\n\
+         xx"
+      in
+      ignore (Unix.write_substring fd req 0 (String.length req));
+      let answer =
+        match
+          Rt.with_timeout 2. (fun () ->
+              Rt.wait_readable fd;
+              Unix.read fd chunk 0 4096)
+        with
+          | 0 -> "closed without an answer"
+          | n ->
+              List.hd (String.split_on_char '\r' (Bytes.sub_string chunk 0 n))
+          | exception Rt.Timeout -> "no answer"
+          | exception Unix.Unix_error (e, _, _) -> Unix.error_message e
+      in
+      Unix.close fd;
+      p "  answers: %s" answer;
       p "http date: %s, parsed back: %b, garbage: %b" (Codec.http_date 1e9)
         (Codec.parse_http_date (Codec.http_date 1e9) = Some 1e9)
         (Codec.parse_http_date "garbage" = None);

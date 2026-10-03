@@ -13,6 +13,8 @@
   refused: transient/link
 == a body refused partway closes its connection
   answers: HTTP/1.1 413 Content Too Large
+== a second chunk whose size overflows the running total
+  answers: HTTP/1.1 413 Content Too Large
 http date: Sun, 09 Sep 2001 01:46:40 GMT, parsed back: true, garbage: true
 host header carries the port: true
 == keep-alive
