@@ -274,6 +274,20 @@ let () =
   p "  %-34s %S" "check_config of another domain"
     (Android_host.check_config "nope");
 
+  p "== cleartext only to loopback";
+  List.iter
+    (fun host -> p "  %-34s %b" host (Tsync_http.Transport.is_loopback host))
+    [
+      "localhost";
+      "127.0.0.1";
+      "127.9.9.9";
+      "[::1]";
+      "127.0.0.1.example.org";
+      "127.example.org";
+      "192.168.1.4";
+      "127.0.0.256";
+    ];
+
   peer_writes "a.txt" "from the peer";
   peer_does (fun (module E) -> E.mkdir "sub" ~exclusive:true);
   peer_writes "sub/deep.txt" "deep";

@@ -3,6 +3,15 @@
   open                               -5
   check_config                       ""
   check_config of another domain     "domain not found: nope"
+== cleartext only to loopback
+  localhost                          true
+  127.0.0.1                          true
+  127.9.9.9                          true
+  [::1]                              true
+  127.0.0.1.example.org              false
+  127.example.org                    false
+  192.168.1.4                        false
+  127.0.0.256                        false
 == boot
   boot                               ""
   boot again                         ""

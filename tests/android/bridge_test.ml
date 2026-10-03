@@ -5,7 +5,6 @@ open Tsync_core
 open Tsync_android
 
 external open_before_start : unit -> int = "tsync_test_open_before_start"
-external started : unit -> unit = "tsync_test_started"
 
 external stress : string -> threads:int -> reads:int -> size:int -> int
   = "tsync_test_stress"
@@ -54,7 +53,7 @@ let () =
           "backends":[{"type":"local","name":"main","role":"main","path":"%s/store"}]}]}|}
        root);
   p "open before the runtime is announced  %d" (open_before_start ());
-  started ();
+  Tsync_android_bridge.Android_bridge.started ();
   p "open before boot                      %d" (Android_host.open_ "root");
   p "boot                                  %S" (Android_host.boot "");
   let staging = Filename.concat (Sys.getenv "HOME") "staged" in

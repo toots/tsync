@@ -54,7 +54,11 @@ class KeepAliveService : Service() {
                 startForeground(NOTIFICATION_ID, notification)
             }
         } catch (e: RuntimeException) {
+            // A started service that never goes foreground gets the process killed; stopped, the
+            // work goes on for as long as the process lives (app §9).
             Log.w(Tsync.TAG, "keep-alive service cannot go foreground", e)
+            stopSelf()
+            return
         }
         if (held.total == 0) stop()
     }

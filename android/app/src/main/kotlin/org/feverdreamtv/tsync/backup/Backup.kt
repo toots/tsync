@@ -245,9 +245,11 @@ class BackupWorker(context: Context, parameters: WorkerParameters) : Worker(cont
         try {
             return if (backup.pass(userInitiated, ::isStopped)) Result.retry() else Result.success()
         } finally {
-            // A content trigger fires once. Appended, so that it never cancels the run it is enqueued from.
+            // A content trigger fires once, so the run it started enqueues the next: appended, since
+            // replacing would cancel this very run. Any other run finds the trigger still enqueued.
             if (backup.prefs.settings.enabled) {
-                BackupSchedule.onMediaChanges(applicationContext, backup.prefs.settings, ExistingWorkPolicy.APPEND_OR_REPLACE)
+                val policy = if (BackupSchedule.ON_CHANGES in tags) ExistingWorkPolicy.APPEND_OR_REPLACE else ExistingWorkPolicy.KEEP
+                BackupSchedule.onMediaChanges(applicationContext, backup.prefs.settings, policy)
             }
         }
     }
@@ -259,7 +261,7 @@ class BackupWorker(context: Context, parameters: WorkerParameters) : Worker(cont
 
 /** The three unique jobs of app §11.6. */
 object BackupSchedule {
-    private const val ON_CHANGES = "camera-backup-changes"
+    const val ON_CHANGES = "camera-backup-changes"
     private const val PERIODIC = "camera-backup-periodic"
     private const val NOW = "camera-backup-now"
 
@@ -275,7 +277,7 @@ object BackupSchedule {
             .setTriggerContentUpdateDelay(Parameters.TRIGGER_DELAY_S, TimeUnit.SECONDS)
             .setTriggerContentMaxDelay(Parameters.TRIGGER_MAX_DELAY_S, TimeUnit.SECONDS)
             .build()
-        val request = OneTimeWorkRequest.Builder(BackupWorker::class.java).setConstraints(constraints).build()
+        val request = OneTimeWorkRequest.Builder(BackupWorker::class.java).setConstraints(constraints).addTag(ON_CHANGES).build()
         WorkManager.getInstance(context).enqueueUniqueWork(ON_CHANGES, policy, request)
     }
 

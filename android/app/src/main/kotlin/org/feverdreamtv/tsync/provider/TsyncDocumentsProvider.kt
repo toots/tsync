@@ -264,8 +264,10 @@ class TsyncDocumentsProvider : DocumentsProvider() {
         tsync.keepAlive.retain(Work.SAVE)
         val ingest = tsync.ingest
         // The intent is durable before the staging file exists or is handed to anyone (app §8.2).
-        val name = ingest.stage(Target.Existing(ref, document.name), exclusive = false)
+        var staged: String? = null
         try {
+            val name = ingest.stage(Target.Existing(ref, document.name), exclusive = false)
+            staged = name
             val staging = ingest.staging(name)
             val keepsBody = ('r' in mode || 'a' in mode) && 't' !in mode
             val base = if (keepsBody) {
@@ -279,7 +281,7 @@ class TsyncDocumentsProvider : DocumentsProvider() {
             val access = ParcelFileDescriptor.MODE_READ_WRITE or if ('a' in mode) ParcelFileDescriptor.MODE_APPEND else 0
             return ParcelFileDescriptor.open(staging, access, closer) { failure -> closed(name, document.name, failure) }
         } catch (e: Exception) {
-            ingest.abandon(name)
+            staged?.let(ingest::abandon)
             tsync.keepAlive.release(Work.SAVE)
             throw FileNotFoundException(e.message)
         }

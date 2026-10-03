@@ -39,6 +39,14 @@ void tsync_bridge_started(void) {
   atomic_store(&started, 1);
 }
 
+/* For a runtime that OCaml code started. As a primitive of this library it
+   also has the linker keep this file's object for C callers: a static archive
+   member nothing references is dropped. */
+CAMLprim value tsync_bridge_started_by_ocaml(value _unit) {
+  tsync_bridge_started();
+  return Val_unit;
+}
+
 /* Registration returns with the runtime lock released, so the acquisition
    that follows is not optional. An unregistered thread has no runtime state
    and would crash at its first blocking section instead of failing. */

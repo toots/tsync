@@ -66,7 +66,13 @@ class Save(private val tsync: Tsync, val sources: List<Source>, private val pare
     private fun copy(index: Int, source: Source): String? {
         mark(index, Copy.COPYING)
         val ingest = tsync.ingest
-        val staging = ingest.stage(Target.Child(parentRef, Naming.sanitizeLeaf(source.name)), exclusive = true)
+        val staging = try {
+            ingest.stage(Target.Child(parentRef, Naming.sanitizeLeaf(source.name)), exclusive = true)
+        } catch (e: Exception) {
+            // The intent could not be made durable: this file fails, the others go on.
+            mark(index, Copy.FAILED)
+            return null
+        }
         return try {
             val input = tsync.context.contentResolver.openInputStream(source.uri) ?: throw java.io.IOException("no stream")
             input.use { ingest.staging(staging).outputStream().use(it::copyTo) }

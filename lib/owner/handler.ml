@@ -920,7 +920,7 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
     | Write r ->
         Transfer.check_staging ~roots:t.staging_roots r.staging;
         (match r.at with Child d -> pull_destination d | _ -> ());
-        let path =
+        let path, item =
           mutate (fun () ->
               let path =
                 match r.at with
@@ -934,10 +934,17 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
                   E.write_whole path ~src:r.staging ?base:r.base
                     ~exclusive:r.exclusive ());
               keys_changed t [path];
-              path)
+              (path, row_or_unnamed t path))
         in
-        if r.await then E.await_upload path;
-        let item = row_or_unnamed t path in
+        (* The row is the write's, read under its hold. After a wait it is read
+           again for [isUploaded]; a file renamed or removed meanwhile still
+           answers for the write that was made. *)
+        let item =
+          if not r.await then item
+          else (
+            E.await_upload path;
+            try row_or_unnamed t path with Fail.E _ -> item)
+        in
         { Protocol.size = item.size; mtime = item.mtime; item }
     | Mkdir r ->
         pull_destination r.at;

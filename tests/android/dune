@@ -11,6 +11,7 @@
   tsync_owner
   tsync_catalog
   tsync_android
+  tsync_http
   threads.posix
   unix
   yojson))

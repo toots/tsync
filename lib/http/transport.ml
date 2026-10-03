@@ -141,9 +141,15 @@ let bounded_handshake ~host timeout f =
   with Rt.Timeout ->
     tls_failure host (Printf.sprintf "no handshake within %gs" timeout)
 
+(* A name is never loopback by its spelling: 127.0.0.1.example.org is a host
+   like any other. *)
 let is_loopback host =
   host = "localhost" || host = "::1" || host = "[::1]"
-  || String.starts_with ~prefix:"127." host
+  ||
+    match List.map int_of_string_opt (String.split_on_char '.' host) with
+    | [Some 127; Some b; Some c; Some d] ->
+        List.for_all (fun octet -> octet >= 0 && octet <= 255) [b; c; d]
+    | _ -> false
 
 let cleartext_loopback_only = Atomic.make false
 
