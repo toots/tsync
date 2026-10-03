@@ -110,13 +110,29 @@ module Make (C : Engine_ctx.S) = struct
 
   (* Reentrant for its holder, so the request handler resolves a reference and
      acts on it in one hold (08 §3.5). *)
+  (* Pitfall A-2.5: a long hold stalls every mutation of the domain, so one is
+     reported with the stack that held or waited. *)
+  let slow_meta = 2.
+
+  let report_slow_meta what seconds =
+    if seconds > slow_meta then
+      Log.warn "metadata lock %s %.1f s at:\n%s" what seconds
+        (Printexc.raw_backtrace_to_string (Printexc.get_callstack 16))
+
   let with_meta f =
     match Atomic.get meta_holder with
       | Some h when Rt.same h (Rt.self ()) -> f ()
       | _ ->
+          let asked = Rt.now () in
           Rt.Fmutex.with_lock meta (fun () ->
+              let taken = Rt.now () in
+              report_slow_meta "waited" (taken -. asked);
               Atomic.set meta_holder (Some (Rt.self ()));
-              Fun.protect ~finally:(fun () -> Atomic.set meta_holder None) f)
+              Fun.protect
+                ~finally:(fun () ->
+                  Atomic.set meta_holder None;
+                  report_slow_meta "held" (Rt.now () -. taken))
+                f)
 
   let changed_hook : (string list -> unit) ref = ref (fun _ -> ())
   let changed paths = try !changed_hook paths with _ -> ()
