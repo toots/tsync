@@ -138,10 +138,19 @@ let () =
       ignore (main.delete (Key.chunk d ghost));
       Composite.resume c;
       Composite.settle ~timeout:10. c;
+      (* Pitfall B-12.5: settling can return before the backfill's copy parks;
+         wait for both copies to have parked, not for a duration. *)
+      let rec parked n =
+        let l = Composite.parked c in
+        if List.length l >= 2 || n = 0 then l
+        else (
+          Rt.sleep 0.1;
+          parked (n - 1))
+      in
       List.iter
         (fun (n, _, (note : Dqueue.failure_note)) ->
           p "%s parked: %s\n" n (Fail.kind_name note.last.kind))
-        (Composite.parked c);
+        (parked 100);
       p "replica holds it: %b\n"
         (has replica (k "tsync/d/manifests/.tsync-root/bbbb"));
       p "\n== write guard\n";
