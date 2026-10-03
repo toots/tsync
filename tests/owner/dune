@@ -67,3 +67,18 @@
  (alias runtest)
  (action
   (diff shared_two_test.expected shared_two_test.output)))
+
+(executable
+ (name menu_test)
+ (modules menu_test)
+ (libraries tsync_owner yojson))
+
+(rule
+ (with-stdout-to
+  menu_test.output
+  (run ./menu_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff menu_test.expected menu_test.output)))

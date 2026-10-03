@@ -152,6 +152,10 @@ let check_dir dir =
        serve"
       dir
 
+let subscribers t topic =
+  Mutex.protect t.m (fun () ->
+      List.length (Option.value ~default:[] (Hashtbl.find_opt t.topics topic)))
+
 let publish t topic ev =
   Mutex.protect t.m (fun () ->
       let subs = Option.value ~default:[] (Hashtbl.find_opt t.topics topic) in

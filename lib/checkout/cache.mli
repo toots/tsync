@@ -57,9 +57,9 @@ val verified_member : t -> group -> member -> Bigstring.t
 val evict : t -> Manifest.t -> unit
 val unpin : t -> Manifest.t -> unit
 
-(** Pin every group until [until] (wall time), durably, then fetch them whole.
-*)
-val pin : t -> Manifest.t -> until:float -> unit
+(** Pin every group until [until] (wall time), durably, then fetch them whole;
+    [fetched] gets each group's size once it is whole. *)
+val pin : ?fetched:(int -> unit) -> t -> Manifest.t -> until:float -> unit
 
 val availability :
   t -> Manifest.t -> [ `Online_only | `Cached | `Pinned of float ]

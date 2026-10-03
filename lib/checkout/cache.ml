@@ -386,7 +386,7 @@ let unpin t (m : Manifest.t) =
 
 (* read-path §4.8: pins are durable before the fetch, so the cap cannot take a
    group between its fetch and its pin. *)
-let pin t (m : Manifest.t) ~until =
+let pin ?(fetched = ignore) t (m : Manifest.t) ~until =
   let gs = groups ~cc:t.cc m in
   List.iter
     (fun g ->
@@ -395,7 +395,11 @@ let pin t (m : Manifest.t) ~until =
       if not (Fs.exists p) then Fs.durable_replace p "";
       Unix.utimes p until until)
     gs;
-  List.iter (fun g -> ensure_whole t g) gs
+  List.iter
+    (fun g ->
+      ensure_whole t g;
+      fetched g.gsize)
+    gs
 
 let availability t (m : Manifest.t) =
   let gs = groups ~cc:t.cc m in

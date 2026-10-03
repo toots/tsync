@@ -64,11 +64,29 @@ type resynced = Incremental of int | Full of { manifests : int; failed : int }
 type trash_restored = Restored of int | Not_in_trash | Name_taken
 type shared = { url : string; expires : float }
 
+(** A transfer as [status] lists it (08 §3.3). *)
+type transfer = {
+  name : string;
+  rel : string;
+  bytes : int;
+  size : int;
+  seconds : float;
+  rate : float;
+}
+[@@deriving yojson { strict = false }]
+
 type status = {
   domain : string;
   read_only : bool;
   paused : bool;
   pending_uploads : int;
+  pending_downloads : int;
+  uploading : transfer list;
+  downloading : transfer list;
+  pending_bytes : int;
+  subscribers : int;
+  unnamed : int;
+  traffic : R.traffic;
   mount : string option;
 }
 
@@ -623,6 +641,7 @@ let encode_reply : type a. a request -> a -> Yojson.Safe.t =
     | Retry -> ok [("readopted", `Int reply)]
     | Notify_reset -> ok [("delivered", `Int reply)]
     | Status ->
+        let transfers l = `List (List.map transfer_to_yojson l) in
         ok
           ([
              ("domain", `String reply.domain);
@@ -630,10 +649,14 @@ let encode_reply : type a. a request -> a -> Yojson.Safe.t =
              ("readOnly", `Bool reply.read_only);
              ("paused", `Bool reply.paused);
              ("pendingUploads", `Int reply.pending_uploads);
-             ("pendingDownloads", `Int 0);
-             ("uploading", `List []);
-             ("downloading", `List []);
+             ("pendingDownloads", `Int reply.pending_downloads);
+             ("uploading", transfers reply.uploading);
+             ("downloading", transfers reply.downloading);
+             ("pendingBytes", `Int reply.pending_bytes);
+             ("subscribers", `Int reply.subscribers);
+             ("traffic", R.traffic_to_yojson reply.traffic);
            ]
+          @ (if reply.unnamed > 0 then [("unnamed", `Int reply.unnamed)] else [])
           @ opt "mount" (fun m -> `String m) reply.mount)
     | Pause _ -> ok [("paused", `Bool reply)]
     | Stats _ -> (
@@ -745,11 +768,31 @@ let decode_reply : type a. a request -> Yojson.Safe.t -> a =
     | Retry -> count "readopted" j
     | Notify_reset -> count "delivered" j
     | Status ->
+        let transfers k =
+          match member j k with
+            | Some (`List l) ->
+                List.filter_map
+                  (fun t -> Result.to_option (transfer_of_yojson t))
+                  l
+            | _ -> []
+        in
+        let traffic =
+          match Option.map R.traffic_of_yojson (member j "traffic") with
+            | Some (Ok tr) -> tr
+            | _ -> { up_bytes = 0; up_rate = 0.; down_bytes = 0; down_rate = 0. }
+        in
         {
           domain = Option.value ~default:"" (str j "domain");
           read_only = flag j "readOnly";
           paused = flag j "paused";
           pending_uploads = count "pendingUploads" j;
+          pending_downloads = count "pendingDownloads" j;
+          uploading = transfers "uploading";
+          downloading = transfers "downloading";
+          pending_bytes = count "pendingBytes" j;
+          subscribers = count "subscribers" j;
+          unnamed = count "unnamed" j;
+          traffic;
           mount = str j "mount";
         }
     | Pause _ -> flag j "paused"

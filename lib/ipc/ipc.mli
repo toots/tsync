@@ -53,6 +53,9 @@ val close : server -> unit
 *)
 val publish : server -> string -> json -> int
 
+(** How many connections are subscribed to [topic] now. *)
+val subscribers : server -> string -> int
+
 (** {1 Client} *)
 
 (** Nothing accepts connections at the path. *)

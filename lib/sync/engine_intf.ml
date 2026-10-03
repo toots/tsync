@@ -3,6 +3,15 @@
 open Tsync_core
 open Tsync_checkout
 
+(** A transfer running now (08 §3.3 status): [bytes] of [size] moved since
+    [started] (wall time). *)
+type transfer = Local_ops.transfer = {
+  path : string;
+  size : int;
+  bytes : int;
+  started : float;
+}
+
 (** What the status report reads of an engine (07 §5.5). *)
 type activity = {
   intent : int;
@@ -168,6 +177,13 @@ module type S = sig
   val unapplied : unit -> (string * string) list
 
   val pending_uploads : unit -> int
+
+  (** The uploads running now; cheap: reads only their records. *)
+  val uploads : unit -> transfer list
+
+  (** Every transfer of a file's bytes from the store running now: a fetch, a
+      range, a restore. *)
+  val downloads : unit -> transfer list
 
   (** Reads every WAL record: meant for a report, not a hot path. *)
   val activity : unit -> activity
