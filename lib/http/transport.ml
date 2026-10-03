@@ -97,37 +97,38 @@ let connect_fd ~host ~port =
     Unix.getaddrinfo host (string_of_int port) [AI_SOCKTYPE SOCK_STREAM]
   in
   if addrs = [] then Fail.raise_ Fail.Link "%s: no address" host;
+  (* One address: the connected socket, or the failure that moves on to the
+     next one; anything else raises, the socket closed (lesson 8). *)
+  let connect_one (a : Unix.addr_info) =
+    let fd = Unix.socket ~cloexec:true a.ai_family a.ai_socktype 0 in
+    let failed =
+      Fs.or_close fd (fun fd ->
+          Unix.set_nonblock fd;
+          match Unix.connect fd a.ai_addr with
+            | () -> None
+            | exception Unix.Unix_error (EINPROGRESS, _, _) -> (
+                match Rt.wait_writable ~timeout:connect_timeout fd with
+                  | exception Rt.Timeout ->
+                      Some (Unix.Unix_error (ETIMEDOUT, "connect", host))
+                  | () ->
+                      Option.map
+                        (fun e -> Unix.Unix_error (e, "connect", host))
+                        (Unix.getsockopt_error fd))
+            | exception e when not (Rt.is_cancelled e) -> Some e)
+    in
+    match failed with
+      | None -> Ok fd
+      | Some e ->
+          Fs.close fd;
+          Error e
+  in
   let rec try_ last = function
     | [] -> (
         match last with
           | Some e -> raise e
           | None -> Fail.raise_ Fail.Link "%s: no address" host)
-    | (a : Unix.addr_info) :: rest -> (
-        let fd = Unix.socket ~cloexec:true a.ai_family a.ai_socktype 0 in
-        Unix.set_nonblock fd;
-        match Unix.connect fd a.ai_addr with
-          | () -> fd
-          | exception Unix.Unix_error (EINPROGRESS, _, _) -> (
-              match Rt.wait_writable ~timeout:connect_timeout fd with
-                | exception Rt.Timeout ->
-                    Unix.close fd;
-                    try_
-                      (Some (Unix.Unix_error (ETIMEDOUT, "connect", host)))
-                      rest
-                | exception e ->
-                    Unix.close fd;
-                    raise e
-                | () -> (
-                    match Unix.getsockopt_error fd with
-                      | None -> fd
-                      | Some e ->
-                          Unix.close fd;
-                          try_
-                            (Some (Unix.Unix_error (e, "connect", host)))
-                            rest))
-          | exception e ->
-              Unix.close fd;
-              try_ (Some e) rest)
+    | a :: rest -> (
+        match connect_one a with Ok fd -> fd | Error e -> try_ (Some e) rest)
   in
   let fd = try_ None addrs in
   (try Unix.setsockopt fd TCP_NODELAY true with Unix.Unix_error _ -> ());
