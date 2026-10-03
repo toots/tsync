@@ -139,7 +139,7 @@ This file covers mistakes that are true of any implementation in any language: s
 ### A-2.4 Reference resolved outside the lock it mutates under
 - **Pitfall** — An IPC handler resolved a reference to a path before taking the mirror lock. With several File Provider requests in flight, `mv f4 sub/` racing `mv sub sub2` re-created `sub` beside the renamed folder, journaled it, and every replica agreed on the wrong tree. The rewrite hit the same need and required a reentrant metadata lock.
 - **Check** — Resolve and mutate in one lock hold. If helpers re-take the lock, it is reentrant or has an explicit locked/unlocked split. Tests assert the intended tree, not only convergence.
-- **Seen** — b7e4c849, b7fd7943, PR #87, 5ee48495. recurred ×2, rewrite.
+- **Seen** — b7e4c849, b7fd7943, PR #87, 5ee48495, rewrite (`Dqueue` retry called `forget` holding `t.m`; OCaml 5 raises on the second lock and the worker died). recurred ×3, rewrite.
 
 ### A-2.5 Store round trip under the global metadata lock
 - **Pitfall** — The lock FUSE and IPC handlers wait on was held across network I/O: an inline cursor bump in a rename, every rename/delete/rmdir's store half and retry ladder (the mount froze while one store call failed), a version snapshot retrying a 500 for about 50 s, a peer entry's manifest fetches, store reads passed in as closures, a revert fetching and publishing under it, a new file asking an http-proxy store for its recommended chunk size (with the store down, every mutation of the domain waited for the retry ladder).
