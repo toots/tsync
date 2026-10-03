@@ -77,5 +77,5 @@ checksum falls back to a read: none
 behind the portal: corrupt/other; once past it: ok
 == watch
 behind: returned at once true
-a change wakes the watch: true
+a change wakes the watch before a poll would: true
 a stop answers a held watch, closing in under 2s: true

@@ -332,7 +332,9 @@ let () =
       Rt.sleep 0.5;
       Contract.put s cursor "two";
       let took = Rt.Promise.await waiter in
-      p "a change wakes the watch: %b\n" (took < 5.);
+      (* Made half a second in: a watch that only polls returns at its 2 s
+         floor. *)
+      p "a change wakes the watch before a poll would: %b\n" (took < 1.5);
       let held =
         Rt.async (fun () -> try s.watch cursor (Some "two") with _ -> ())
       in
