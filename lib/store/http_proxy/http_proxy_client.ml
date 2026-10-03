@@ -85,8 +85,8 @@ let failure t ~op (r : answer) =
   in
   raise (Fail.E (Fail.make ~op kind reason))
 
-let request ?(mode = Store.Wait) t ~meth ?(query = []) ?(body = Bigstring.empty)
-    path =
+let request ?(mode = Store.Wait) ?(headers = []) t ~meth ?(query = [])
+    ?(body = Bigstring.empty) path =
   let target =
     if query = [] then path else path ^ "?" ^ W.canonical_query query
   in
@@ -94,7 +94,7 @@ let request ?(mode = Store.Wait) t ~meth ?(query = []) ?(body = Bigstring.empty)
     ignore (Atomic.fetch_and_add t.traffic.uploaded (Bigstring.length body));
     Tsync_http.Client.request ~stall:stall_timeout t.endpoint ~meth
       ?body:(if meth = "PUT" || meth = "POST" then Some body else None)
-      ~headers:(fun () -> W.sign ~secret:t.secret ~meth ~target body)
+      ~headers:(fun () -> headers @ W.sign ~secret:t.secret ~meth ~target body)
       target
   in
   let r =
@@ -140,10 +140,10 @@ let ensure_served t =
                 (Tsync_http.Client.url t.endpoint)
           | _ -> failure t ~op:"bind" r)
 
-let call ?mode t op ~meth ?query ?body path =
+let call ?mode ?headers t op ~meth ?query ?body path =
   ensure_served t;
   ladder t op (fun () ->
-      let r = request ?mode t ~meth ?query ?body path in
+      let r = request ?mode ?headers t ~meth ?query ?body path in
       match r.status with
         | 429 | 503 -> failure t ~op r
         | s when s >= 500 -> failure t ~op r
@@ -365,19 +365,25 @@ let delete_multi t keys =
    the instance falls back for its life. *)
 let get_many t keys =
   if Atomic.get t.no_get_many then List.map (get_opt t) keys
-  else
-    List.concat_map
-      (fun page ->
-        match
-          call t "get_many" ~meth:"POST" ~body:(json_keys page) "/get-multi"
-        with
-          | r when success r.status ->
-              W.decode_bodies ~count:(List.length page) r.body
-          | { status = 404; _ } ->
-              Atomic.set t.no_get_many true;
-              List.map (get_opt t) page
-          | r -> failure t ~op:"get_many" r)
-      (pages W.bulk_keys_max keys)
+  else (
+    (* The server may answer the first keys only, to bound its answer: the
+       rest is asked again. *)
+    let rec page_of keys =
+      match
+        call t "get_many" ~meth:"POST"
+          ~headers:[(W.partial_header, "1")]
+          ~body:(json_keys keys) "/get-multi"
+      with
+        | r when success r.status ->
+            let got = W.decode_bodies ~count:(List.length keys) r.body in
+            let rest = List.filteri (fun i _ -> i >= List.length got) keys in
+            if rest = [] then got else got @ page_of rest
+        | { status = 404; _ } ->
+            Atomic.set t.no_get_many true;
+            List.map (get_opt t) keys
+        | r -> failure t ~op:"get_many" r
+    in
+    List.concat_map page_of (pages W.bulk_keys_max keys))
 
 let list_many t prefixes =
   if Atomic.get t.no_list_many then []

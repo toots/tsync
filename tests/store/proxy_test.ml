@@ -49,10 +49,18 @@ let () =
             route "ro" "ro" ~read_only:true ~secret:ro_secret (local "ro");
           ]
       in
+      (* The largest answer to a batch read, as the server built it. *)
+      let largest_batch = ref 0 in
       let server =
         Server.serve
           [Unix.ADDR_INET (Unix.inet_addr_loopback, 0)]
-          (P.handle proxy)
+          (fun r read_body ->
+            let answer = P.handle proxy r read_body in
+            (match (r.path, answer.body) with
+              | "/get-multi", (Bigstring b | Held { bytes = b; _ }) ->
+                  largest_batch := max !largest_batch (Bigstring.length b)
+              | _ -> ());
+            answer)
       in
       let url =
         match Server.addresses server with
@@ -121,6 +129,22 @@ let () =
       unwatch ();
       p "a read through it: %s; the peer's breaker tripped: %b\n" read
         (Atomic.get trips > 0);
+      p "== a batch read of more than the answer budget\n";
+      let batch =
+        List.init 12 (fun i -> Key.v (Printf.sprintf "tsync/d/batch/%d" i))
+      in
+      List.iter (fun k -> s.put k (Bigstring.create (3 * 1024 * 1024))) batch;
+      largest_batch := 0;
+      let got = (Option.get s.get_many) batch in
+      (* Eight are read at a time, so an answer stops at the first eight. *)
+      p "12 objects of 3 MiB: %d answered whole; largest answer: %d MiB\n"
+        (List.length
+           (List.filter
+              (function
+                | Some b -> Bigstring.length b = 3 * 1024 * 1024 | None -> false)
+              got))
+        (!largest_batch / (1024 * 1024));
+      s.delete_multi batch;
       p "== a data slot is held until its answer is written\n";
       let big = Key.v "tsync/d/big" in
       s.put big (Bigstring.create (32 * 1024 * 1024));

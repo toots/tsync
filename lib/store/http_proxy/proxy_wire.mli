@@ -59,7 +59,12 @@ val listing_of_json : string -> Tsync_store.Store.entry list
 (** §4.3: get-multi frames, one per key in request order. *)
 val encode_bodies : Bigstring.t option list -> Bigstring.t
 
-(** CORRUPT unless the frames answer exactly [count] keys. *)
+(** Sent with a get-multi request by a client that takes an answer to the first
+    keys only and asks again for the rest (§8.3). *)
+val partial_header : string
+
+(** The bodies of the first keys asked, in order: at least one, at most [count].
+    CORRUPT for none, or for more. *)
 val decode_bodies : count:int -> Bigstring.t -> Bigstring.t option list
 
 val encode_folders : Tsync_store.Store.folder list -> Bigstring.t

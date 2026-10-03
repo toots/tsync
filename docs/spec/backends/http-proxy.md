@@ -310,6 +310,7 @@ Keys read back from listings and frames are validated against the grammar before
 ### 8.3 Bulk operations: paging, empty lists, fallbacks
 
 - **Empty list**: no request. `get_many []` and `list_many []` answer `[]`; `delete_multi []` succeeds.
+- **Partial answers**: a `get_many` request carries the header `x-tsync-partial: 1`. A server that knows it MAY then answer the bodies of the first keys only, at least one, once its answer holds `bulk_answer_budget` bytes; the client asks again for the keys left. A server that does not know the header answers every key, and a server never answers a prefix to a request without it.
 - **Paging**: `get_many` and `delete_multi` send pages of at most `bulk_keys_max` keys; `list_many` pages of at most `bulk_folders_max` prefixes. Pages are sent one after another; a failed page fails the call (earlier pages' effects stand; every bulk op is idempotent).
 - **Fallback for a server without bulk endpoints**: a 404 with a non-empty body from `/get-multi` or `/children-multi`, on an instance whose domain is known to be served (§8.1), means the endpoint does not exist. The instance remembers "unsupported" for its life: `get_many` then reads each key with `get_opt`, `list_many` answers `[]` so the caller lists folders singly.
 

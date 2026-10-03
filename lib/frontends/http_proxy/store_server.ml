@@ -607,7 +607,7 @@ let children route prefixes =
   in
   go false 0 [] prefixes
 
-let execute t route op body =
+let execute ?(partial = false) t route op body =
   let s = route.store in
   let bs = Bigstring.of_string in
   match op with
@@ -691,7 +691,22 @@ let execute t route op body =
         { Server.status; headers = [("x-tsync-watched", "1")]; body = Empty }
     | Get_multi ->
         let keys = List.map Key.v (bulk_names t body) in
-        let bodies = Rt.map_bounded ~width:8 s.get_opt keys in
+        (* §8.3: eight at a time; for a client that takes a partial answer,
+           no further once the answer holds [bulk_answer_budget]. *)
+        let rec read acc total keys =
+          if keys = [] || (partial && total >= W.bulk_answer_budget) then
+            List.rev acc
+          else (
+            let now = List.filteri (fun i _ -> i < 8) keys
+            and later = List.filteri (fun i _ -> i >= 8) keys in
+            let got = Rt.map_bounded ~width:8 s.get_opt now in
+            read (List.rev_append got acc)
+              (List.fold_left
+                 (fun n b -> n + Option.fold ~none:0 ~some:Bigstring.length b)
+                 total got)
+              later)
+        in
+        let bodies = read [] 0 keys in
         {
           Server.status = 200;
           headers = [];
@@ -1073,7 +1088,10 @@ let handle t (r : Server.request) read_body =
                     (authorised body names, body)
             in
             let go () =
-              try counted t route body (execute t route op body)
+              let partial =
+                Codec.header r.headers W.partial_header = Some "1"
+              in
+              try counted t route body (execute ~partial t route op body)
               with Fail.E f -> store_failure t f
             in
             if is_data op then admitted t go else go ())
