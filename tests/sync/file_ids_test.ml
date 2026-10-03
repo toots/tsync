@@ -209,6 +209,44 @@ let () =
       p "  the first pass: %d\n" (Mirror.backfill_file_ids B.mirror);
       show "B after" b ["q.txt"];
       p "  the next one: %d\n" (Mirror.backfill_file_ids B.mirror);
+      p "== an Intent record the queue takes at runtime is redone first\n";
+      let wal =
+        Dqueue.Records.open_
+          (List.fold_left Filename.concat root
+             ["A/data"; "journal-pending"; Domain_name.to_string d])
+      in
+      ignore
+        (Dqueue.Records.create wal
+           (Wal.encode
+              {
+                Wal.state = Intent;
+                attempts = 0;
+                ops =
+                  [
+                    Op.Mkdir
+                      {
+                        path = "intent-dir";
+                        id =
+                          Some (Folder_id.mint ~uuid:"dddddddddddd" ~counter:1);
+                      };
+                  ];
+                priors = [];
+                local_from = [];
+                fids = [];
+                last_error = None;
+              }));
+      A.poll ();
+      drain a;
+      pass b;
+      p "  A: %s; B: %s\n"
+        (match A.kind "intent-dir" with
+          | `Dir -> "folder"
+          | `File -> "file"
+          | `Absent -> "absent")
+        (match B.kind "intent-dir" with
+          | `Dir -> "folder"
+          | `File -> "file"
+          | `Absent -> "absent");
       p "== passes started together run one at a time\n";
       for i = 1 to 20 do
         write a (Printf.sprintf "many/%02d.txt" i) "x"

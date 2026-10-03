@@ -649,6 +649,22 @@ module Make (C : Engine_ctx.S) = struct
   let run_metadata id (r : Wal.record) ~cancel:_ =
     wait_gate ();
     let r = match read_record id with Some r -> r | None -> r in
+    (* wal-and-journal §4.7: an INTENT record's local half may be partly done;
+       it is redone under the metadata lock, which its creator holds until it
+       prepares, before anything is published. *)
+    let r =
+      if r.state <> Intent then r
+      else
+        with_meta (fun () ->
+            match read_record id with
+              | Some ({ state = Intent; _ } as r) ->
+                  redo r;
+                  let r = { r with state = Prepared; local_from = [] } in
+                  Dqueue.Records.replace wal id (Wal.encode r);
+                  r
+              | Some r -> r
+              | None -> r)
+    in
     try
       if r.state = Executed then discharge_executed id r
       else (
