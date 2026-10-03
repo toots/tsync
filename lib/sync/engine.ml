@@ -341,14 +341,32 @@ module Make (C : Engine_ctx.S) = struct
     Mirror.move_folder mirror ~src:l ~dst;
     changed [l; dst]
 
+  (* R(F) of conflict-resolution §3.5: the first conflicted name that is free,
+     made here, or already holds a folder an unpublished mkdir of ours made. *)
   let rescue_folder f =
-    let r = aside_name f ~is_dir:true in
-    if Mirror.kind mirror r = `Absent then (
-      let id = Identity.mint folder_minter in
-      record_owed
-        [Op.Mkdir { path = r; id = Some id }]
-        (fun () -> ignore (Mirror.record_folder mirror r id)));
-    r
+    let ours id =
+      List.exists
+        (function
+          | Op.Mkdir { id = Some i; _ } -> Folder_id.equal i id | _ -> false)
+        (owed_ops (owed ()))
+    in
+    let rec pick n =
+      let r =
+        Names.join (Names.parent_of f)
+          (Conflict.conflict_name ~client:C.client_name ~is_dir:true
+             (Names.leaf_of f) n)
+      in
+      match (kind r, Mirror.folder_id mirror r) with
+        | `Absent, _ ->
+            let id = Identity.mint folder_minter in
+            record_owed
+              [Op.Mkdir { path = r; id = Some id }]
+              (fun () -> ignore (Mirror.record_folder mirror r id));
+            r
+        | `Dir, Some id when ours id -> r
+        | _ -> pick (n + 1)
+    in
+    pick 1
 
   (* rescue-ours-under: our unpublished items below a folder a peer removed
      keep their structure in a conflicted copy of it. *)
