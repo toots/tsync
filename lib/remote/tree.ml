@@ -317,14 +317,14 @@ module Make (C : Context.S) = struct
 
   (* 02 §2.10: with two readable members a listing and an index may come from
      different stores, so only a domain with one reads or writes indexes. *)
-  let indexing = lazy (List.length (Composite.readable C.composite) = 1)
+  let indexing () = List.length (Composite.readable C.composite) = 1
 
   let read_index (listed : Store.entry list) id =
     let key = Key.index d id in
     match
       List.find_opt (fun (e : Store.entry) -> Key.equal e.key key) listed
     with
-      | Some e when e.size <= Folder_index.max_bytes && Lazy.force indexing -> (
+      | Some e when e.size <= Folder_index.max_bytes && indexing () -> (
           match Option.bind (get key) Folder_index.decode with
             | Some entries ->
                 let t = Hashtbl.create (List.length entries) in
@@ -369,7 +369,7 @@ module Make (C : Context.S) = struct
     let n = List.length listing in
     let served = n - List.length need in
     if
-      write_index && Lazy.force indexing && n > 1
+      write_index && indexing () && n > 1
       && n <= Folder_index.max_children
       && served * 4 < n * 3
     then (
