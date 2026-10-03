@@ -313,8 +313,6 @@ module Make (C : Context.S) = struct
             (describe_unusable u)
       | None -> out
 
-  (* 02 §4.5: the listing is the truth; each child object is read and
-     classified. *)
   (* 02 §2.10: with two readable members a listing and an index may come from
      different stores, so only a domain with one reads or writes indexes. *)
   let indexing = lazy (List.length (Composite.readable C.composite) = 1)
@@ -335,6 +333,8 @@ module Make (C : Context.S) = struct
             | None -> Hashtbl.create 0)
       | _ -> Hashtbl.create 0
 
+  (* 02 §4.5: the listing is the truth; each child object is read and
+     classified. *)
   let children ?(on_unusable = Fail_on_unusable) ?(write_index = false) id =
     let ns = Key.namespace d id in
     let listed = store.list_prefix ns in

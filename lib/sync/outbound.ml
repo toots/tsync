@@ -699,8 +699,6 @@ module Make (C : Engine_ctx.S) = struct
       Stop.sleep 0.2
     done
 
-  (* 04 §4.6: chunks without the lock, the commit under it only if the edit
-     generation is still the one read. *)
   (* durable-queue §7.3: a bulk publisher's batch, released once its uploads
      ran; an op whose manifest never landed is dropped. *)
   let publish_landed id (r : Wal.record) =
@@ -735,6 +733,8 @@ module Make (C : Engine_ctx.S) = struct
             note_link_failure e;
             raise e)
 
+  (* 04 §4.6: chunks without the lock, the commit under it only if the edit
+     generation is still the one read. *)
   and run_one_upload id (r : Wal.record) path ~cancel =
     wait_dependencies path id;
     let state =

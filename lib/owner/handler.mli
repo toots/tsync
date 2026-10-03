@@ -17,9 +17,9 @@ type t
 (** [publish] sends an event to the domain's subscribers and answers how many
     received it; [stats] answers the owner's report for an [arg] set; [stop]
     requests the owner's stop. [dest_roots] and [staging_roots] confine the
-    paths clients pass (security-model §7.3). *)
-(** [subscribers] counts the connections subscribed to the domain's events and
-    [traffic] measures its stores, for [status] (08 §3.3). *)
+    paths clients pass (security-model §7.3). [subscribers] counts the
+    connections subscribed to the domain's events and [traffic] measures its
+    stores, for [status] (08 §3.3). *)
 val create :
   ?subscribers:(unit -> int) ->
   ?traffic:(unit -> Tsync_status.Status_report.traffic) ->
