@@ -909,6 +909,44 @@ module Make (C : Engine_ctx.S) = struct
     in
     pick 1
 
+  (* security-model §7.3: a file handed over from another filesystem is read a
+     block at a time, and only if what was opened is the regular file its name
+     held, never a link's target. *)
+  let copy_regular ~src ~dst =
+    let named = Fs.lstat_opt src in
+    Fs.with_fd (Fs.openfile src [O_RDONLY]) @@ fun from ->
+    let opened = Unix.LargeFile.fstat from in
+    (match named with
+      | Some { st_kind = S_REG; st_dev; st_ino; _ }
+        when st_dev = opened.st_dev && st_ino = opened.st_ino ->
+          ()
+      | _ ->
+          Fail.raise_ Fail.Invalid
+            "%s: the handed-over file is not a regular file" src);
+    let tmp = Fs.temp_in (Filename.dirname dst) in
+    match
+      Fs.with_fd
+        (Fs.openfile tmp [O_WRONLY; O_CREAT; O_EXCL])
+        (fun into ->
+          let block = Bytes.create (1 lsl 20) in
+          let rec pump () =
+            match
+              Fs.sys (fun () -> Unix.read from block 0 (Bytes.length block))
+            with
+              | 0 -> ()
+              | n ->
+                  Fs.write_all into (Bytes.sub_string block 0 n);
+                  pump ()
+          in
+          pump ();
+          Fs.fsync into);
+      Fs.rename tmp dst
+    with
+      | () -> ()
+      | exception e ->
+          Fs.unlink_quiet tmp;
+          raise e
+
   (* 04 §4.3 [write_whole]: the handed-over file is adopted by rename, never
      copied when on the same filesystem. An edit of a version this client no
      longer holds is staged aside as a new file (conflict-resolution §4.9). *)
@@ -935,8 +973,7 @@ module Make (C : Engine_ctx.S) = struct
         (match Fs.rename src dst with
           | () -> ()
           | exception Fail.E { kind = Refused; _ } ->
-              let data = Fs.read_file src in
-              Fs.durable_replace dst data;
+              copy_regular ~src ~dst;
               Fs.unlink_quiet src);
         (* The handover was checked before the rename: whatever was swapped in
            since must still be a regular file, never a link the owner follows. *)

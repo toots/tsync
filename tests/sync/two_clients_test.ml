@@ -215,6 +215,31 @@ let () =
       drain a;
       pass b;
       p "B reads it: %b\n" (B.kind "was-a-folder" = `File);
+      p "\n== a file handed over from another filesystem (security §7.3)\n";
+      (* The build directory, where this runs, is not the temporary one. *)
+      let elsewhere n = Filename.concat (Sys.getcwd ()) ("handed-" ^ n) in
+      let secret = elsewhere "secret" and link = elsewhere "link" in
+      Fs.write_file_for_test secret "not for the store";
+      (try Unix.unlink link with Unix.Unix_error _ -> ());
+      Unix.symlink secret link;
+      let hand_over name src =
+        match A.write_whole name ~src ~exclusive:false () with
+          | () -> "adopted"
+          | exception Fail.E f -> Fail.kind_name f.kind
+      in
+      let linked = hand_over "from-link.txt" link in
+      p "a link to a file: %s; staged here: %b\n" linked
+        (A.kind "from-link.txt" = `File);
+      let plain = elsewhere "plain" in
+      Fs.write_file_for_test plain "handed over";
+      let adopted = hand_over "from-file.txt" plain in
+      p "a regular file: %s; the source is gone: %b\n" adopted
+        (not (Sys.file_exists plain));
+      (try Unix.unlink link with Unix.Unix_error _ -> ());
+      Unix.unlink secret;
+      drain a;
+      pass b;
+      show "B reads what was adopted" [("B", b)];
       p "\nowed: A %d/%d, B %d/%d; unapplied: %d %d\n" (A.pending_uploads ())
         (A.pending_metadata ()) (B.pending_uploads ()) (B.pending_metadata ())
         (List.length (A.unapplied ()))

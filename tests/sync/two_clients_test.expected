@@ -49,4 +49,10 @@ again: not in the trash
 create: written
 B reads it: true
 
+== a file handed over from another filesystem (security §7.3)
+a link to a file: invalid; staged here: false
+a regular file: adopted; the source is gone: true
+-- B reads what was adopted
+  B: archive/  archive/one (conflicted copy from A).txt = "from A"  archive/one.txt = "from B"  archive/top.txt = "B edits top"  box/  box/b.txt = "added meanwhile"  crate (conflicted copy from A)/  crate (conflicted copy from A)/b1.txt = "one"  crate (conflicted copy from A)/b2.txt = "two"  from-file.txt = "handed over"  was-a-folder = "now a file"  x = "a file"  x (conflicted copy from B)/  x (conflicted copy from B)/in = "inside"
+
 owed: A 0/0, B 0/0; unapplied: 0 0
