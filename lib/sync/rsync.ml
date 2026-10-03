@@ -159,6 +159,9 @@ module Make (C : Engine_ctx.S) = struct
     let copied = ref 0 and identical = ref 0 and dirs = ref 0 in
     let skipped = ref [] and failed = ref [] and bytes = ref 0 in
     let done_ = Hashtbl.create 64 in
+    (* durable-queue §7.3: the items whose store half happened, announced even
+       if a later local step failed. *)
+    let stored = Hashtbl.create 64 in
     let succeed rel n =
       incr copied;
       bytes := !bytes + n;
@@ -337,6 +340,7 @@ module Make (C : Engine_ctx.S) = struct
                  match d with
                    | Rsync_plan.Rename_in_domain m ->
                        Bulk.publish tp m;
+                       Hashtbl.replace stored rel ();
                        Option.iter
                          (fun (pid, leaf) -> ignore (R.delete_slot pid leaf))
                          (slot sp);
@@ -344,7 +348,7 @@ module Make (C : Engine_ctx.S) = struct
                            with_key sp (fun () -> remove_local_file sp));
                        succeed rel 0
                    | _ -> ()));
-          Hashtbl.mem done_ rel)
+          Hashtbl.mem stored rel)
         (with_decision (function Rename_in_domain _ -> true | _ -> false));
       (* A move drops each source whose action ran. *)
       let drops =
@@ -365,12 +369,15 @@ module Make (C : Engine_ctx.S) = struct
               ~admit:(fun _ -> true)
               ~run:(fun (rel, _) ->
                 let sp = domain_path src.path rel in
-                attempt rel (fun () ->
-                    Option.iter
-                      (fun (pid, leaf) -> ignore (R.delete_slot pid leaf))
-                      (slot sp);
-                    with_meta (fun () ->
-                        with_key sp (fun () -> remove_local_file sp))))
+                ignore
+                  (attempt rel (fun () ->
+                       Option.iter
+                         (fun (pid, leaf) -> ignore (R.delete_slot pid leaf))
+                         (slot sp);
+                       Hashtbl.replace stored rel ();
+                       with_meta (fun () ->
+                           with_key sp (fun () -> remove_local_file sp))));
+                Hashtbl.mem stored rel)
               drops);
     {
       Rsync_plan.copied = !copied;
