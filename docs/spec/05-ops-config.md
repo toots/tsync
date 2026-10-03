@@ -423,7 +423,9 @@ Key(manifest)`; `target = Absent(side) | Dir(side) | File(local) | Key(manifest)
 - Drop source (move): local unlink, or delete the manifest and announce `Delete`.
 - The end closes the last batch and pokes the owner (§4.2).
 - Unpublished local edits under a domain source are not part of the copy; they are listed with the
-  result.
+  result as skipped. An unpublished edit is a staged edit ([04 §2.5](04-checkout-cache.md)): local
+  bytes the store has not received. A pending record over bytes the store already holds (an earlier
+  copy or move not yet announced) is not one, and its file is copied.
 - `bytes_moved` counts what crossed: chunks an upload actually put (deduplicated ones are not
   counted), and chunks a download fetched.
 - A folder that could not be created fails every entry beneath it with that reason, without
