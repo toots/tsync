@@ -41,6 +41,8 @@ let tally_names =
     "head";
     "put";
     "putIfAbsent";
+    "putIfUnchanged";
+    "checksum";
     "delete";
     "getMulti";
     "childrenMulti";
