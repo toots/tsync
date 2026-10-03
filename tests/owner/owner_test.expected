@@ -94,3 +94,6 @@ reports the supervisor got, in order:
 stop                               {"ok":true}
 exit status 0
 socket gone: true
+== a holder that does not serve
+refused: busy
+refused at once: true

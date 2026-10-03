@@ -20,9 +20,13 @@ concurrency:
 
 jobs:
   macos:
+    # 10 §2: only a gate run for a push to this repository releases. A fork
+    # pull request's gate run carries the fork's branch name as head_branch.
     if: >-
       github.event_name != 'workflow_run'
-      || github.event.workflow_run.conclusion == 'success'
+      || (github.event.workflow_run.conclusion == 'success'
+          && github.event.workflow_run.event == 'push'
+          && github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: macos-latest
     # A keychain prompt or a stalled notarization otherwise holds the runner
     # until the platform's cap, and every queued release behind it.
@@ -33,6 +37,8 @@ jobs:
       SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
       PUBLISH: >-
         ${{ (github.event_name == 'workflow_run'
+             && github.event.workflow_run.event == 'push'
+             && github.event.workflow_run.head_repository.full_name == github.repository
              && github.event.workflow_run.head_branch == 'main')
             || (github.event_name == 'workflow_dispatch'
                 && github.ref == 'refs/heads/main') }}

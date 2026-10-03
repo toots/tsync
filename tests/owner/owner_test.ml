@@ -539,4 +539,20 @@ let () =
       p "== stop";
       show "stop" (ask [("action", "stop")]);
       p "exit status %d" (Rt.Promise.await owner);
-      p "socket gone: %b" (not (Sys.file_exists socket)))
+      p "socket gone: %b" (not (Sys.file_exists socket));
+      p "== a holder that does not serve";
+      let held =
+        {
+          (List.hd config.Tsync_config.Config.domains) with
+          name = Domain_name.v "held";
+        }
+      in
+      let lock =
+        Result.get_ok (Owner.acquire ~role:"command" ~what:"test" held.name)
+      in
+      let asked = Rt.now () in
+      (match Owner.request ~what:"test" config held Protocol.Ping with
+        | () -> p "request answered"
+        | exception Fail.E e -> p "refused: %s" (Fail.code e.kind));
+      p "refused at once: %b" (Rt.now () -. asked < 5.);
+      Owner.release lock)
