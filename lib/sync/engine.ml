@@ -1482,6 +1482,10 @@ module Make (C : Engine_ctx.S) = struct
 
   let paused_path = pause_flag ~data_dir:C.data_dir d
 
+  (* An owner that never starts its queues still answers for the durable
+     state (pitfall A-10.14). *)
+  let () = Atomic.set paused (Fs.exists paused_path)
+
   let set_paused on =
     if on then Fs.durable_replace paused_path ""
     else if Fs.release paused_path then
@@ -1606,6 +1610,248 @@ module Make (C : Engine_ctx.S) = struct
     }
 
   let pending_metadata () = Dqueue.pending metadata
+
+  let residency path =
+    match resolve path with
+      | Some (Published m) -> Cache.resident cache m
+      | Some (Staged_edit _) -> (1, 1)
+      | None -> Fail.absent "%s: no such file" path
+
+  (* ponytail: polled; a per-key signal from the queue if the latency of a
+     saved file's acknowledgement ever matters. *)
+  let await_upload path =
+    let names (id, _) =
+      match read_record id with
+        | Some r -> List.mem path (List.concat_map Op.paths r.ops)
+        | None -> false
+    in
+    let failing () =
+      List.exists names (Dqueue.retrying uploads @ Dqueue.parked uploads)
+      || Dqueue.retrying metadata @ Dqueue.parked metadata <> []
+    in
+    while
+      Staged.edit staged path <> None
+      && (not (Atomic.get paused))
+      && not (failing ())
+    do
+      Stop.sleep 0.1
+    done
+
+  (* 04 §2.3: the lazy tree's markers, decimal epoch milliseconds. *)
+  let pull_marker dir = Filename.concat (Mirror.path mirror dir) ".tsync-pulled"
+
+  let hold_marker dir =
+    Filename.concat (Mirror.path mirror dir) ".tsync-view-hold"
+
+  let read_seconds path =
+    Option.bind (Fs.read_file_opt path) (fun s ->
+        Option.map (fun ms -> ms /. 1000.) (float_of_string_opt (String.trim s)))
+
+  let write_seconds path at =
+    Fs.replace path (Printf.sprintf "%.0f" (at *. 1000.))
+
+  let pulled_at dir = read_seconds (pull_marker dir)
+  let view_hold dir = read_seconds (hold_marker dir)
+
+  let hold_views dir ~until =
+    let rec up dir =
+      (match view_hold dir with
+        | Some held when held >= until -> ()
+        | _ ->
+            if Fs.is_dir (Mirror.path mirror dir) then
+              write_seconds (hold_marker dir) until);
+      if dir <> "" then up (Names.parent_of dir)
+    in
+    up dir
+
+  (* What local changes and uploads touch while a pull's listing is in flight
+     is newer than the listing: its sweep leaves it alone, as a rebuild's does. *)
+  let pulls_running = ref 0
+
+  let while_noting_touched f =
+    Mutex.protect touched_m (fun () ->
+        if !pulls_running = 0 then Atomic.set touched (Some (Hashtbl.create 16));
+        incr pulls_running);
+    Fun.protect f ~finally:(fun () ->
+        Mutex.protect touched_m (fun () ->
+            decr pulls_running;
+            if !pulls_running = 0 then Atomic.set touched None))
+
+  (* 04 §3.5: the store's listing replaces the folder's published entries,
+     overlaid with this client's owed work. *)
+  let pull_folder dir =
+    let id =
+      match Mirror.folder_id mirror dir with
+        | Some id -> id
+        | None ->
+            Fail.raise_ Fail.Unprepared "%s: this client has not resolved it"
+              dir
+    in
+    while_noting_touched @@ fun () ->
+    let entries = T.children ~on_unusable:Tree.Fail_on_unusable id in
+    with_meta @@ fun () ->
+    if Mirror.folder_id mirror dir <> Some id then
+      Fail.raise_ Fail.Local "%s moved while it was being pulled" dir;
+    let o = owed () in
+    let ops = owed_ops o in
+    let differs = ref false in
+    let listed = Hashtbl.create 64 in
+    let free p = Staged.edit staged p = None && not (was_touched p) in
+    let owed_below p =
+      List.exists
+        (fun op -> List.exists (Names.is_under ~dir:p) (Op.paths op))
+        ops
+    in
+    let removes_file p =
+      List.exists
+        (function
+          | Op.Delete q -> q = p
+          | Rename { is_dir = false; src; _ } -> src = p
+          | _ -> false)
+        ops
+    in
+    let creates_file p =
+      renamed_onto o p
+      || List.exists
+           (function Op.Put { path; _ } -> path = p | _ -> false)
+           ops
+    in
+    let ours = function Some id -> owed_carries o id | None -> false in
+    let record p id =
+      ignore
+        (Mirror.record_folder ~durable:false ~on_other:`Replace mirror p id);
+      differs := true
+    in
+    let folder p (m : Folder.marker) =
+      if not (owed_rmdir o m.id || owed_carries o m.id) then (
+        match (Mirror.key_of_id mirror m.id, Mirror.kind mirror p) with
+          | Some here, _ when here = p -> ()
+          | Some here, `Absent when free p ->
+              repost_moved (rename_local ~src:here ~dst:p ~is_dir:true);
+              differs := true
+          | Some _, _ -> ()
+          | None, `Absent -> if free p then record p m.id
+          | None, `Dir ->
+              if not (ours (Mirror.folder_id mirror p)) then record p m.id
+          | None, `File ->
+              if free p then (
+                remove_local_file p;
+                record p m.id))
+    in
+    let file p (m : Manifest.t) =
+      if free p && not (removes_file p) then (
+        let write () =
+          with_key p (fun () ->
+              end_lineage p;
+              Mirror.write_file ~durable:false mirror p m);
+          differs := true
+        in
+        match Mirror.file mirror p with
+          | `File old when Manifest.equal_content old m && old.mtime = m.mtime
+            ->
+              ()
+          | `Dir ->
+              if
+                (not (ours (Mirror.folder_id mirror p)))
+                && Staged.edits_under staged p = []
+                && not (owed_below p)
+              then (
+                Mirror.remove_folder mirror p;
+                write ())
+          | _ -> write ())
+    in
+    List.iter
+      (fun (e : Tree.entry) ->
+        match e.body with
+          | Dir m ->
+              Hashtbl.replace listed m.name ();
+              folder (Names.join dir m.name) m
+          | File m ->
+              Hashtbl.replace listed m.name ();
+              file (Names.join dir m.name) m)
+      entries;
+    List.iter
+      (fun (c : Mirror.child) ->
+        let p = Names.join dir c.name in
+        if (not (Hashtbl.mem listed c.name)) && not (was_touched p) then (
+          match c.kind with
+            | `File _ ->
+                if Staged.edit staged p = None && not (creates_file p) then (
+                  remove_local_file p;
+                  differs := true)
+            | `Dir id ->
+                if
+                  (not (ours id))
+                  && Staged.edits_under staged p = []
+                  && not (owed_below p)
+                then (
+                  Mirror.remove_folder mirror p;
+                  differs := true)))
+      (Mirror.list mirror dir);
+    write_seconds (pull_marker dir) (Unix.gettimeofday ());
+    !differs
+
+  let pulling : (string, bool Rt.Promise.t) Hashtbl.t = Hashtbl.create 8
+  let pulling_m = Mutex.create ()
+
+  (* Concurrent pulls of one folder share one store read. *)
+  let pull dir =
+    let running, mine =
+      Mutex.protect pulling_m (fun () ->
+          match Hashtbl.find_opt pulling dir with
+            | Some p -> (p, false)
+            | None ->
+                let p = Rt.Promise.create () in
+                Hashtbl.replace pulling dir p;
+                (p, true))
+    in
+    if mine then (
+      let outcome = try Ok (pull_folder dir) with e -> Error e in
+      Mutex.protect pulling_m (fun () -> Hashtbl.remove pulling dir);
+      ignore (Rt.Promise.try_resolve_result running outcome));
+    Rt.Promise.await running
+
+  (* android §3.2 rule 3: the store's current manifest becomes the entry. *)
+  let refresh_file path =
+    if Staged.edit staged path = None then
+      while_noting_touched @@ fun () ->
+      match store_record (Names.parent_of path) (Names.leaf_of path) with
+        | `Unresolved -> ()
+        | `Record (Some m) ->
+            with_meta (fun () ->
+                let same =
+                  match Mirror.manifest mirror path with
+                    | Some old ->
+                        Manifest.equal_content old m && old.mtime = m.mtime
+                    | None -> false
+                in
+                if
+                  (not same)
+                  && Staged.edit staged path = None
+                  && (not (was_touched path))
+                  && Mirror.kind mirror path <> `Dir
+                then (
+                  with_key path (fun () ->
+                      end_lineage path;
+                      Mirror.write_file ~durable:false mirror path
+                        (Manifest.rename m (Names.leaf_of path)));
+                  changed [path]))
+        | `Record None | `Absent | `Folder ->
+            with_meta (fun () ->
+                if
+                  Staged.edit staged path = None
+                  && (not (was_touched path))
+                  && Mirror.kind mirror path = `File
+                  && not
+                       (List.exists
+                          (function
+                            | Op.Put { path = p; _ } -> p = path
+                            | Rename { is_dir = false; dst; _ } -> dst = path
+                            | _ -> false)
+                          (owed_ops (owed ())))
+                then (
+                  remove_local_file path;
+                  changed [path]))
 
   type handle = Local_ops.handle
 

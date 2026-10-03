@@ -465,8 +465,8 @@ let adopt_body t gkey source =
               | exception Unix.Unix_error (Unix.EEXIST, _, _) -> ()
               | exception
                   Unix.Unix_error
-                    ( ( Unix.EPERM | Unix.ENOSYS | Unix.EOPNOTSUPP | Unix.EXDEV
-                      | Unix.EMLINK ),
+                    ( ( Unix.EPERM | Unix.EACCES | Unix.ENOSYS | Unix.EOPNOTSUPP
+                      | Unix.EXDEV | Unix.EMLINK ),
                       _,
                       _ ) ->
                   t.links <- `No;

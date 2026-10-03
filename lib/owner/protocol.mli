@@ -32,7 +32,19 @@ type row = {
 }
 
 (** [unnamed] counts rows whose container has no id on this client. *)
-type page = { items : row list; next : string option; unnamed : int }
+type page = {
+  items : row list;
+  next : string option;
+  unnamed : int;
+  pulled_at : float option;
+      (** pulled tree: when the pull the rows reflect completed (android §3.2)
+      *)
+  outdated : bool;  (** pulled tree: the rows are not from a fresh pull *)
+}
+
+(** android §3.2 rule 1: pull unless fresh, pull even when fresh, or answer the
+    mirror. *)
+type pull = [ `Auto | `Now | `Never ]
 
 (** A whole-domain page, or [Walk_stale] for a cursor on another walk. *)
 type listing = Listed of page | Walk_stale
@@ -128,6 +140,7 @@ type _ request =
       dir : target;
       after : string option;
       limit : int option;
+      pull : pull;
     }
       -> page request
   | List_all : { after : string option; limit : int option } -> listing request
@@ -148,6 +161,7 @@ type _ request =
       staging : string;
       base : string option;
       exclusive : bool;
+      await : bool;  (** answer once the upload published or started failing *)
     }
       -> written request
   | Mkdir : { at : destination; exclusive : bool } -> row request

@@ -199,9 +199,12 @@ let create_if_absent_with ?perm ~on_temp p data =
             `Created
         | exception Unix.Unix_error (Unix.EEXIST, _, _) -> `Exists
         | exception
-            Unix.Unix_error ((Unix.EPERM | Unix.EOPNOTSUPP | Unix.EMLINK), _, _)
+            Unix.Unix_error
+              ((Unix.EPERM | Unix.EACCES | Unix.EOPNOTSUPP | Unix.EMLINK), _, _)
           -> (
-            match eintr (fun () -> rename_noreplace_ tmp p) with
+            (* Android's policy denies link(2) in app data with EACCES (pitfall
+               B-8.11). *)
+              match eintr (fun () -> rename_noreplace_ tmp p) with
               | () ->
                   fsync_dir dir;
                   `Created

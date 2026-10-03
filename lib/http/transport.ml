@@ -141,7 +141,15 @@ let bounded_handshake ~host timeout f =
   with Rt.Timeout ->
     tls_failure host (Printf.sprintf "no handshake within %gs" timeout)
 
+let is_loopback host =
+  host = "localhost" || host = "::1" || host = "[::1]"
+  || String.starts_with ~prefix:"127." host
+
+let cleartext_loopback_only = Atomic.make false
+
 let connect ?(handshake_timeout = connect_timeout) ?tls ~host ~port () =
+  if tls = None && Atomic.get cleartext_loopback_only && not (is_loopback host)
+  then Fail.raise_ Fail.Refused "%s: cleartext connections are refused" host;
   let fd = connect_fd ~host ~port in
   match tls with
     | None -> plain fd

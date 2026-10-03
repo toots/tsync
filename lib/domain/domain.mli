@@ -23,7 +23,6 @@ type t = {
 val build :
   ?owner:bool ->
   ?poke:(unit -> unit) ->
-  ?lazy_tree:bool ->
   ?cache_root:string ->
   ?data_dir:string ->
   Config.t ->
@@ -52,3 +51,7 @@ val store : t -> Store.t
 
 (** Available, free and total bytes of the tightest writable local member. *)
 val capacity : t -> Tsync_core.Fs.space option
+
+(** The refusal text of the domain's pulled frontend, when it has one (08 §2.1).
+*)
+val pulled : Tsync_config.Config.domain -> string option

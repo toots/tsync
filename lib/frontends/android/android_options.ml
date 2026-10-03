@@ -9,6 +9,10 @@ let () =
         Some
           "the android frontend is driven by the Android app, not by tsync \
            start";
+      pulled =
+        Some
+          "the android frontend keeps a pulled tree, which has no replica to \
+           sync";
       group = None;
-      commands = [];
+      commands = Android_cli.commands;
     }

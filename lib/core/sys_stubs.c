@@ -216,7 +216,8 @@ CAMLprim value tsync_rename_noreplace(value src, value dst) {
 CAMLprim value tsync_syncfs(value fd) {
   CAMLparam1(fd);
   caml_release_runtime_system();
-  int r = syncfs(Int_val(fd)), e = errno;
+  /* Bionic declares syncfs from API 28 only; the kernel has always had it. */
+  int r = syscall(SYS_syncfs, Int_val(fd)), e = errno;
   caml_acquire_runtime_system();
   if (r < 0) { errno = e; uerror("syncfs", Nothing); }
   CAMLreturn(Val_unit);
@@ -311,7 +312,9 @@ CAMLprim value tsync_memory_split(value unit) {
 
 /* Hands the allocator's free memory back to the kernel. */
 CAMLprim value tsync_malloc_trim(value unit) {
+#ifndef __ANDROID__
   malloc_trim(0);
+#endif
   return Val_unit;
 }
 

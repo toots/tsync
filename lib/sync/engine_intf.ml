@@ -53,6 +53,9 @@ module type S = sig
 
   val availability : string -> [ `Online_only | `Cached | `Pinned of float ]
 
+  (** Cache groups of a file whole on this machine, and its groups. *)
+  val residency : string -> int * int
+
   (** The folder id held at a path; never mints. *)
   val folder_id : string -> Folder_id.t option
 
@@ -80,6 +83,10 @@ module type S = sig
       not the key's current content, nothing when the content is the same. *)
   val write_whole :
     string -> src:string -> ?base:string -> exclusive:bool -> unit -> unit
+
+  (** Returns once the key's upload has published or started failing (08 §3.5
+      [write] with [await]), or the domain is paused. *)
+  val await_upload : string -> unit
 
   val sync : string -> unit
 
@@ -222,6 +229,25 @@ module type S = sig
 
   (** Applied-log retention (wal-and-journal §4.8); shards removed. *)
   val prune_applied : unit -> int
+
+  (** The lazy tree (04 §3.5): the store's listing of a folder replaces its
+      published entries, overlaid with this client's owed work; whether its
+      children changed. UNPREPARED for a folder with no id here; a failed pull
+      changes nothing. Concurrent pulls of one folder share one read. *)
+  val pull : string -> bool
+
+  (** When the folder's last pull completed, by its pull marker (04 §2.3). *)
+  val pulled_at : string -> float option
+
+  (** Until when the folder's view is answered whatever its age. *)
+  val view_hold : string -> float option
+
+  (** Raises the view hold of a folder and of every ancestor. *)
+  val hold_views : string -> until:float -> unit
+
+  (** The store's current manifest of a file becomes its entry; an entry the
+      store no longer has is removed (android §3.2 rule 3). *)
+  val refresh_file : string -> unit
 
   val mirror : Mirror.t
   val staged_edits : unit -> (string * Staged.edit) list

@@ -1,0 +1,58 @@
+$ tsync android stat root
+  exit 0  {"ok":true,"ref":"root","parentRef":"root","name":"docs","kind":"dir","size":0,"mtime":0.0,"etag":".tsync-root","isUploaded":true}
+$ tsync android list root
+  exit 0  {"ok":true,"items":[],"pulledAt":"<time>"}
+$ tsync android mkdir root photos
+  exit 0  {"ok":true,"item":{"ref":"d:<folder1>","parentRef":"root","name":"photos","kind":"dir","size":0,"mtime":0.0,"etag":"<folder1>","isUploaded":true}}
+$ tsync android mkdir root photos
+  exit 0  {"ok":true,"item":{"ref":"d:<folder1>","parentRef":"root","name":"photos","kind":"dir","size":0,"mtime":0.0,"etag":"<folder1>","isUploaded":true}}
+$ tsync android create d:<folder1> empty.txt
+  exit 0  {"ok":true,"item":{"ref":"i:<file2>","parentRef":"d:<folder1>","name":"empty.txt","kind":"file","size":0,"mtime":"<time>","etag":"","isUploaded":false,"availability":"cached"}}
+$ tsync android write-whole d:<folder1> hello.txt s1
+  exit 0  {"ok":true,"size":14,"mtime":"<time>","item":{"ref":"i:<file3>","parentRef":"d:<folder1>","name":"hello.txt","kind":"file","size":14,"mtime":"<time>","etag":"<hash4>","isUploaded":true,"contentId":"<hash4>","availability":"online-only"}}
+$ tsync android list d:<folder1>
+  exit 0  {"ok":true,"items":[{"ref":"i:<file2>","parentRef":"d:<folder1>","name":"empty.txt","kind":"file","size":0,"mtime":"<time>","etag":"<hash5>","isUploaded":true,"contentId":"<hash5>","availability":"online-only"},{"ref":"i:<file3>","parentRef":"d:<folder1>","name":"hello.txt","kind":"file","size":14,"mtime":"<time>","etag":"<hash4>","isUploaded":true,"contentId":"<hash4>","availability":"online-only"}],"pulledAt":"<time>"}
+$ tsync android list d:<folder1> empty.txt 1
+  exit 0  {"ok":true,"items":[{"ref":"i:<file3>","parentRef":"d:<folder1>","name":"hello.txt","kind":"file","size":14,"mtime":"<time>","etag":"<hash4>","isUploaded":true,"contentId":"<hash4>","availability":"online-only"}],"pulledAt":"<time>","outdated":true}
+$ tsync android stat i:<file3>
+  exit 0  {"ok":true,"ref":"i:<file3>","parentRef":"d:<folder1>","name":"hello.txt","kind":"file","size":14,"mtime":"<time>","etag":"<hash4>","isUploaded":true,"contentId":"<hash4>","availability":"online-only"}
+$ tsync android residency i:<file3>
+  exit 0  {"ok":true,"cached":0,"total":1}
+$ tsync android read i:<file3> range 7 100
+  exit 0  {"ok":true,"localPath":"<home>/range","offset":7,"length":7,"item":{"ref":"i:<file3>","parentRef":"d:<folder1>","name":"hello.txt","kind":"file","size":14,"mtime":"<time>","etag":"<hash4>","isUploaded":true,"contentId":"<hash4>","availability":"cached"}}
+  the range file: "\\000\\000\\000\\000\\000\\000\\000android"
+$ tsync android fetch i:<file3> whole
+  exit 0  {"ok":true,"localPath":"<home>/whole","item":{"ref":"i:<file3>","parentRef":"d:<folder1>","name":"hello.txt","kind":"file","size":14,"mtime":"<time>","etag":"<hash4>","isUploaded":true,"contentId":"<hash4>","availability":"cached"}}
+  the whole file: "hello, android"
+$ tsync android fetch i:<file3> whole
+  exit 1  {"ok":false,"code":"denied","error":"<home>/whole: already exists"}
+$ tsync android residency i:<file3>
+  exit 0  {"ok":true,"cached":1,"total":1}
+$ tsync android open i:<file3>  <  "0 5", "nonsense", "7 100"
+  exit 0  "{\"ok\":true,\"size\":14}\n{\"ok\":true,\"length\":5}\nhello{\"ok\":false,\"code\":\"invalid\",\"error\":\"a read is \\\"OFFSET LENGTH\\\", offset \226\137\165 0 and length > 0\"}\n{\"ok\":true,\"length\":7}\nandroid"
+$ tsync android rename i:<file3> root moved.txt
+  exit 0  {"ok":true,"item":{"ref":"i:<file3>","parentRef":"root","name":"moved.txt","kind":"file","size":14,"mtime":"<time>","etag":"<hash4>","isUploaded":true,"contentId":"<hash4>","availability":"cached"}}
+  the reference survived the move: true
+$ tsync android request {"action":"create","parentRef":"root","name":"moved.txt","exclusive":true}
+  exit 1  {"ok":false,"code":"exists","error":"moved.txt exists","item":{"ref":"i:<file3>","parentRef":"root","name":"moved.txt","kind":"file","size":14,"mtime":"<time>","etag":"<hash4>","isUploaded":true,"contentId":"<hash4>","availability":"cached"}}
+$ tsync android request {nope
+  exit 1  {"ok":false,"code":"invalid","error":"invalid JSON"}
+$ tsync android share i:<file3>
+  exit 1  {"ok":false,"code":"internal","error":"Sharing is not available for docs."}
+$ tsync android delete i:<file2>
+  exit 0  {"ok":true}
+$ tsync android delete d:<folder1>
+  exit 1  {"ok":false,"code":"invalid","error":"a folder is removed with rmdir"}
+$ tsync android rmdir d:<folder1>
+  exit 0  {"ok":true}
+$ tsync android list root
+  exit 0  {"ok":true,"items":[{"ref":"i:<file3>","parentRef":"root","name":"moved.txt","kind":"file","size":14,"mtime":"<time>","etag":"<hash4>","isUploaded":true,"contentId":"<hash4>","availability":"cached"}],"pulledAt":"<time>"}
+$ tsync android stat
+  exit 2  ""
+$ tsync android read i:<file3> x seven 1
+  exit 2  ""
+$ tsync android status
+  exit 0  (the status text)
+registered and not driven: []
+driven and not registered: []
+verbs driven: 15

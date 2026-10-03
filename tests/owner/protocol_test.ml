@@ -36,14 +36,27 @@ let cases =
     Case (Stat (Ref "f:9f3a/big.txt"), row);
     Case (Stat (Rel "docs/big.txt"), row);
     Case
-      ( List_dir { dir = Ref "d:9f3a"; after = Some "a"; limit = Some 2 },
-        { items = [row; dir]; next = Some "big.txt"; unnamed = 1 } );
+      ( List_dir
+          { dir = Ref "d:9f3a"; after = Some "a"; limit = Some 2; pull = `Auto },
+        {
+          items = [row; dir];
+          next = Some "big.txt";
+          unnamed = 1;
+          pulled_at = Some 1700000000.;
+          outdated = true;
+        } );
     Case (Cursor, "1756600000000|0001756600000-abc");
     Case (List_all { after = None; limit = Some 2 }, Walk_stale);
     Case
       ( List_all { after = Some "1700000000000:42"; limit = None },
         Listed
-          { items = [row; dir]; next = Some "1700000000000:99"; unnamed = 0 } );
+          {
+            items = [row; dir];
+            next = Some "1700000000000:99";
+            unnamed = 0;
+            pulled_at = None;
+            outdated = false;
+          } );
     Case (Changes_since { anchor = "1|"; limit = None }, Stale);
     Case
       ( Changes_since { anchor = "1|"; limit = Some 10 },
@@ -108,6 +121,7 @@ let cases =
             staging = "/tmp/s";
             base = Some "abcd";
             exclusive = false;
+            await = true;
           },
         { size = 24; mtime = 1400000000.; item = row } );
     Case
@@ -117,6 +131,7 @@ let cases =
             staging = "/tmp/s";
             base = None;
             exclusive = false;
+            await = false;
           },
         { size = 24; mtime = 1400000000.; item = row } );
     Case (Mkdir { at; exclusive = false }, dir);

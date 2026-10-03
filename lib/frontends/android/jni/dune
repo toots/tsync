@@ -1,0 +1,38 @@
+; The bridge a host's native code calls (android §5), and the JNI library the
+; app loads, built only for Android.
+
+(library
+ (name tsync_android_bridge)
+ (modules android_bridge)
+ (library_flags (-linkall))
+ (foreign_stubs
+  (language c)
+  (names tsync_bridge))
+ (libraries tsync_core tsync_android threads.posix))
+
+; Dune names a shared object after its executable and sets no soname; the
+; loader searches by soname, so the two must agree. 16 KB pages are what
+; current Android requires.
+
+(executable
+ (name libtsyncjni)
+ (enabled_if
+  (= %{context_name} default.android))
+ (modes shared_object)
+ (modules libtsyncjni)
+ (foreign_stubs
+  (language c)
+  (names tsync_jni))
+ (link_flags
+  (-ccopt
+   -Wl,-soname,libtsyncjni.so
+   -ccopt
+   -Wl,-z,max-page-size=16384
+   -cclib
+   -llog))
+ (libraries
+  tsync_core
+  tsync_android_bridge
+  tsync_store
+  tsync_http_proxy_client
+  tsync_http_native))

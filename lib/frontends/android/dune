@@ -3,4 +3,14 @@
 (library
  (name tsync_android)
  (library_flags (-linkall))
- (libraries tsync_core tsync_config))
+ (libraries
+  tsync_core
+  tsync_config
+  tsync_owner
+  tsync_sync
+  tsync_ipc
+  tsync_status
+  tsync_http
+  unix
+  threads.posix
+  yojson))

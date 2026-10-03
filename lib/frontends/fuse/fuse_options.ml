@@ -71,6 +71,7 @@ let () =
       fields;
       presenting = Some `Per_domain;
       commands_only = None;
+      pulled = None;
       group = None;
       commands = [];
     }
