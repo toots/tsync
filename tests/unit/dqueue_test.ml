@@ -85,7 +85,14 @@ let () =
       let q = Dqueue.create ~workers:4 ~name:"keyed" ~ordered:false kind r in
       Dqueue.start q run;
       ignore (Dqueue.post q ("slow.1", 0));
-      Rt.sleep 0.05;
+      (* Pitfall B-12.5: the next posts must find slow.1 running; wait for it
+         to have started, not for a duration. *)
+      let rec started n =
+        if n > 0 && not (List.mem "slow.1#0" !log) then (
+          Rt.sleep 0.01;
+          started (n - 1))
+      in
+      started 500;
       ignore (Dqueue.post q ("slow.2", 0));
       ignore (Dqueue.post q ("slow.3", 0));
       ignore (Dqueue.post q ("other", 0));
