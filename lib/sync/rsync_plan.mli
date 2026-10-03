@@ -26,6 +26,7 @@ type skip =
   | Target_is_dir
   | Not_in_domain
   | Under_skipped  (** inside a folder that was skipped *)
+  | Unpublished  (** this client's edit of it is not published yet *)
 
 type decision =
   | Skip of skip

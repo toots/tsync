@@ -93,6 +93,18 @@ module Make (C : Engine_ctx.S) = struct
     let under dirs rel =
       List.exists (fun dir -> Names.is_under ~dir rel) dirs
     in
+    (* 05 rsync: a file whose local bytes the store has not received yet (a
+       staged edit) is not copied; a pending record over bytes the store holds
+       (an earlier copy) does not stop it. *)
+    let unpublished =
+      if src.side <> Domain then []
+      else
+        List.map fst
+          (Tsync_checkout.Staged.edits_under
+             (Tsync_checkout.Staged.create ~cache_root:C.cache_root C.domain)
+             src.path)
+        |> List.sort_uniq compare
+    in
     let skipped_dirs = ref [] in
     let planned =
       List.mapi
@@ -100,6 +112,14 @@ module Make (C : Engine_ctx.S) = struct
           Cancel.check cancelled;
           if rel <> "" && under !skipped_dirs rel then
             (rel, Rsync_plan.Skip Under_skipped)
+          else if
+            List.exists
+              (fun u ->
+                let p = Names.join src.path rel in
+                p = u || Names.is_under ~dir:p u || Names.is_under ~dir:u p)
+              unpublished
+            && match s with `Local_dir | `Domain_dir -> false | _ -> true
+          then (rel, Rsync_plan.Skip Unpublished)
           else (
             Narrate.progress narrate
               ~fraction:(float i /. float (max 1 total))
@@ -130,20 +150,6 @@ module Make (C : Engine_ctx.S) = struct
               | _ -> ());
             (rel, d)))
         entries
-    in
-    let unpublished =
-      if src.side <> Domain then []
-      else
-        List.filter_map
-          (fun id ->
-            match read_record id with
-              | Some r when r.state <> Executed ->
-                  List.find_opt
-                    (fun p -> Names.is_under ~dir:src.path p)
-                    (List.concat_map Op.paths r.ops)
-              | _ -> None)
-          (Dqueue.Records.list wal)
-        |> List.sort_uniq compare
     in
     List.iter
       (fun p ->
