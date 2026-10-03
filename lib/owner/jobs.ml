@@ -232,7 +232,7 @@ let counted names =
   List.sort compare (Hashtbl.fold (fun n k acc -> (n, k) :: acc) tally [])
 
 let unfixed = function
-  | Integrity.Left | Young | Nested | Failed _ -> true
+  | Integrity.Left | Young | Nested | Incomplete | Failed _ -> true
   | Deleted | Anchored | Adopted -> false
 
 let verify io (dom : Tsync_domain.Domain.t) =
@@ -286,6 +286,9 @@ let integrity io (dom : Tsync_domain.Domain.t) ~repair ~apply ~detail ~source =
         (fun (n, k) -> say "%d %s" k n)
         (counted (List.map kind_name r.findings));
       if r.corrupt <> [] then say "%d corrupt chunks" (List.length r.corrupt);
+      if r.unreadable <> [] then
+        say "%d folders could not be read: the walk is incomplete"
+          (List.length r.unreadable);
       if detail then (
         List.iter (fun f -> say "  %s" (Integrity.describe f)) r.findings;
         List.iter
@@ -311,6 +314,7 @@ let integrity io (dom : Tsync_domain.Domain.t) ~repair ~apply ~detail ~source =
       | Young -> "left: younger than the grace"
       | Nested -> "left: inside an unreachable folder"
       | Left -> "left: resolve by hand"
+      | Incomplete -> "left: the walk could not read every folder"
       | Failed _ -> "failed"
     and chunk_outcome = function
       | Integrity.Cleared -> acted "rewritten from their own copy"
