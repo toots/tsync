@@ -1,19 +1,33 @@
 open Tsync_core
 
+(* Entries of one generation only: G moving on makes every older one dead, so
+   the first use under a later G empties the memo. *)
 type t = {
   m : Mutex.t;
-  held : (string, int) Hashtbl.t;
-  shards : (string, int) Hashtbl.t;
+  mutable g : int;
+  held : Chunk_set.t;
+  learnt : Bytes.t;  (** one flag per shard listed under [g] *)
+  overflows : int ref;
   generation : unit -> int option;
 }
 
 type view = { memo : t; g : int option }
 
+let forget_shards learnt = Bytes.fill learnt 0 4096 '\000'
+
 let create ~generation () =
+  let learnt = Bytes.make 4096 '\000' and overflows = ref 0 in
   {
     m = Mutex.create ();
-    held = Hashtbl.create 1024;
-    shards = Hashtbl.create 64;
+    g = 0;
+    held =
+      Chunk_set.create
+        ~on_overflow:(fun () ->
+          forget_shards learnt;
+          incr overflows)
+        ();
+    learnt;
+    overflows;
     generation;
   }
 
@@ -28,40 +42,52 @@ let look memo =
 
 let trusted v = v.g <> None
 
+(* Whether entries may be recorded under [g]; the memo's lock is held. *)
+let current (memo : t) g =
+  if g > memo.g then (
+    Chunk_set.clear memo.held;
+    forget_shards memo.learnt;
+    memo.g <- g);
+  g = memo.g
+
+let shard_index sss = int_of_string ("0x" ^ sss)
+
 let holds v ck =
   match v.g with
     | None -> false
     | Some g ->
         Mutex.protect v.memo.m (fun () ->
-            Hashtbl.find_opt v.memo.held (Chunk_key.to_string ck) = Some g)
+            g = v.memo.g && Chunk_set.mem v.memo.held ck)
 
 let note v ck =
   match v.g with
     | None -> ()
     | Some g ->
         Mutex.protect v.memo.m (fun () ->
-            Hashtbl.replace v.memo.held (Chunk_key.to_string ck) g)
+            if current v.memo g then Chunk_set.add v.memo.held ck)
 
 let learn_shard v sss list =
   match v.g with
     | None -> ()
     | Some g ->
+        let i = shard_index sss in
         if
           Mutex.protect v.memo.m (fun () ->
-              Hashtbl.find_opt v.memo.shards sss <> Some g)
+              not (g = v.memo.g && Bytes.get v.memo.learnt i = '\001'))
         then (
           let cks = list () in
           Mutex.protect v.memo.m (fun () ->
-              List.iter
-                (fun ck ->
-                  Hashtbl.replace v.memo.held (Chunk_key.to_string ck) g)
-                cks;
-              Hashtbl.replace v.memo.shards sss g))
+              if current v.memo g then (
+                let before = !(v.memo.overflows) in
+                List.iter (Chunk_set.add v.memo.held) cks;
+                (* A-7.10: a shard is known only with every key it listed. *)
+                if !(v.memo.overflows) = before then
+                  Bytes.set v.memo.learnt i '\001')))
 
-let forget memo cks =
+let forget (memo : t) cks =
   Mutex.protect memo.m (fun () ->
       List.iter
         (fun ck ->
-          Hashtbl.remove memo.held (Chunk_key.to_string ck);
-          Hashtbl.remove memo.shards (Chunk_key.shard ck))
+          Chunk_set.remove memo.held ck;
+          Bytes.set memo.learnt (shard_index (Chunk_key.shard ck)) '\000')
         cks)

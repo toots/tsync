@@ -131,3 +131,11 @@ after locking 1000 keys once: 0 entries
 four holders of one key overlapped: false; entries after: 0
 generation unchanged by a hold: true
 changed by a bump: true; a bumped key keeps its entry: 1
+
+== a set of chunk keys, packed
+added 100000 keys, one twice: 100000 held
+found: 100000; a key never added: false
+held in under 4 MB: true
+removed one: true, 99999 held
+cleared a shard: its key gone true, the count follows true
+25 keys into a set of at most 10: 5 held, emptied 2 times

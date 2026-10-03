@@ -217,3 +217,18 @@
  (alias runtest)
  (action
   (diff s3_test.expected s3_test.output)))
+
+(executable
+ (name copy_memo_test)
+ (modules copy_memo_test)
+ (libraries tsync_core tsync_store))
+
+(rule
+ (with-stdout-to
+  copy_memo_test.output
+  (run ./copy_memo_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff copy_memo_test.expected copy_memo_test.output)))

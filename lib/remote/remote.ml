@@ -112,18 +112,12 @@ module Make (C : Context.S) = struct
         Hashtbl.remove marked (Chunk_key.to_string ck))
 
   let memo_m = Mutex.create ()
-  let memo : (string, unit) Hashtbl.t = Hashtbl.create 4096
-
-  let remembered ck =
-    Mutex.protect memo_m (fun () -> Hashtbl.mem memo (Chunk_key.to_string ck))
-
-  let remember ck =
-    Mutex.protect memo_m (fun () ->
-        Hashtbl.replace memo (Chunk_key.to_string ck) ())
+  let memo = Chunk_set.create ()
+  let remembered ck = Mutex.protect memo_m (fun () -> Chunk_set.mem memo ck)
+  let remember ck = Mutex.protect memo_m (fun () -> Chunk_set.add memo ck)
 
   let drop_memo cks =
-    Mutex.protect memo_m (fun () ->
-        List.iter (fun ck -> Hashtbl.remove memo (Chunk_key.to_string ck)) cks)
+    Mutex.protect memo_m (fun () -> List.iter (Chunk_set.remove memo) cks)
 
   let present ck = store.head_opt (Key.chunk d ck) <> None
 
@@ -221,6 +215,11 @@ module Make (C : Context.S) = struct
             | Some l when now <= l -> Int64.succ l
             | _ -> now
         in
+        (* Only a stamp not yet in the past can collide with the next one. *)
+        if Hashtbl.length last_version > 1024 then
+          Hashtbl.filter_map_inplace
+            (fun _ l -> if l >= now then Some l else None)
+            last_version;
         Hashtbl.replace last_version group ts;
         ts)
 
