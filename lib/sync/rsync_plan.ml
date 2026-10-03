@@ -16,6 +16,7 @@ type skip =
   | Target_is_dir
   | Not_in_domain
   | Under_skipped
+  | Unpublished
 
 type decision =
   | Skip of skip
@@ -76,6 +77,7 @@ let skip_name = function
   | Target_is_dir -> "a folder holds the file's name at the target"
   | Not_in_domain -> "neither side is in the domain"
   | Under_skipped -> "its folder was skipped"
+  | Unpublished -> "this client's edit of it is not published yet"
 
 type endpoint = { side : side; path : string }
 

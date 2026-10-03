@@ -37,6 +37,11 @@ local inbox now: []
 -- B sees
   copy/  dest/  dest/notes/  dest/notes/a.txt (5)  dest/notes/big.bin (210000)  dest/top.txt (3)  inbox/  inbox/x.txt (1)  inbox/y.txt (1)  moved/  moved/a.txt (5)  moved/big.bin (210000)
 
+== a move leaves a file with an unpublished edit where it is
+copied 1 (0 bytes), identical 0, folders 1, skipped 1, failed 0
+  skipped f.txt: this client's edit of it is not published yet
+pend2/f.txt copied: false; pend/f.txt kept: true; pend2/g.txt copied: true
+
 == refusals
 copied 0 (0 bytes), identical 0, folders 0, skipped 6, failed 0
   skipped .: a file holds the folder's name at the target

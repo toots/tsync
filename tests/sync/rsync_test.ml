@@ -126,6 +126,8 @@ let () =
       file src "notes/big.bin"
         (String.mapi (fun i c -> if i = 75000 then 'Z' else c) big);
       report (rs (local src) (domain "dest"));
+      (* Published first: an unpublished edit is not copied (05 rsync). *)
+      drain a;
       p "\n== out of the domain, then one local chunk off is patched\n";
       report (rs (domain "dest") (local out));
       p "big.bin equal: %b\n"
@@ -157,6 +159,24 @@ let () =
       drain a;
       pass b;
       shape "B sees" b;
+      p "\n== a move leaves a file with an unpublished edit where it is\n";
+      let put path body =
+        A.create path ~exclusive:false;
+        A.write path ~off:0 (Bigstring.of_string body);
+        A.close path
+      in
+      put "pend/f.txt" "published";
+      put "pend/g.txt" "g";
+      drain a;
+      A.set_paused true;
+      put "pend/f.txt" "edited here";
+      report (rs ~move:true (domain "pend") (domain "pend2"));
+      p "pend2/f.txt copied: %b; pend/f.txt kept: %b; pend2/g.txt copied: %b\n"
+        (A.kind "pend2/f.txt" = `File)
+        (A.kind "pend/f.txt" = `File)
+        (A.kind "pend2/g.txt" = `File);
+      A.set_paused false;
+      drain a;
       p "\n== refusals\n";
       report (rs (local src) (domain "dest/top.txt"));
       drain a;
