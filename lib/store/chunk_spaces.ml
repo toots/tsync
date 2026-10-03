@@ -31,20 +31,24 @@ let in_surviving t d c =
     | _ -> false
 
 (* Its own file: closing any descriptor of the run lock's file would drop this
-   process's record lock on it. *)
+   process's record lock on it. Opened for reading, so closing it is no write
+   for the watch on the cursor's directory to wake on. *)
 let with_publish_lock ?(wait = publish_wait) t d ~exclusive f =
   let p = file t (Key.gc_publish_lock d) in
   Fs.mkdir_p ~perm:0o755 (Filename.dirname p);
   Fs.with_fd
-    (Fs.openfile ~perm:0o644 p [O_RDWR; O_CREAT])
+    (Fs.openfile ~perm:0o644 p [O_RDONLY; O_CREAT])
     (fun fd ->
       let deadline = Rt.now () +. wait in
       let rec take delay =
         if not (Fs.flock ~exclusive ~block:false fd) then (
           if Rt.now () > deadline then
-            Fail.raise_ Fail.Deadline ~op:"publish lock"
-              "%s: a collection holds the publish lock"
-              (Key.to_string (Key.gc_publish_lock d));
+            Fail.raise_ Fail.Deadline ~op:"publish lock" "%s: %s"
+              (Key.to_string (Key.gc_publish_lock d))
+              (if exclusive then
+                 "publications in progress kept the publish lock from a \
+                  collection"
+               else "a collection holds the publish lock");
           Rt.sleep delay;
           take (Float.min 0.1 (delay *. 2.)))
       in
@@ -166,10 +170,12 @@ let twins t key =
 let list t p raw =
   if not (collectable t) then raw p
   else (
-    let listed = raw p in
+    (* The outgoing space first: a chunk promoted between the two listings is
+       then in one of them, where the other order could miss it in both. *)
     let outgoing =
       match Key.outgoing_prefix p with Some fp -> raw fp | None -> []
     in
+    let listed = raw p in
     let surviving, rest =
       List.partition
         (fun (e : Store.entry) -> not (Key.is_outgoing e.key))
