@@ -4,7 +4,7 @@ type start =
   | Resume_keep of string
   | Begin_keep
   | Resume_close of { after : string; generation : int option }
-  | Open of { started : float option; after : string }
+  | Open of { started : float option; after : string; marking : bool }
 
 let start ~(r0 : Gc_record.read) ~keep =
   match r0 with
@@ -13,9 +13,11 @@ let start ~(r0 : Gc_record.read) ~keep =
     | _ when keep -> Begin_keep
     | Record { phase = Closing; cursor; generation; _ } ->
         Resume_close { after = cursor; generation }
-    | Record { phase = Opening | Marking; started; cursor; _ } ->
-        Open { started = Some started; after = cursor }
-    | Absent -> Open { started = None; after = "" }
+    | Record { phase = Opening; started; cursor; _ } ->
+        Open { started = Some started; after = cursor; marking = false }
+    | Record { phase = Marking; started; cursor; _ } ->
+        Open { started = Some started; after = cursor; marking = true }
+    | Absent -> Open { started = None; after = ""; marking = false }
 
 let namespaces ~manifests ~versions ~after =
   List.sort String.compare

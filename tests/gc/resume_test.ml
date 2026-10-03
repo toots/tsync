@@ -138,6 +138,11 @@ let () =
                d live);
           Gc_generation.write main d 4;
           record { phase = Closing; started; cursor = ""; generation = None });
+      case root "marking, no outgoing space: chunks since stay"
+        (fun ~main:_ ~c:_ ~rename:_ ~s_dir:_ ~f_dir:_ ~record ->
+          (* The open found no chunk space, so nothing was moved aside; what S
+             holds now was written while the run was suspended. *)
+          record { phase = Marking; started; cursor = "m/~"; generation = None });
       case root "unreadable run record: abandoned"
         (fun ~main ~c:_ ~rename:_ ~s_dir ~f_dir ~record:_ ->
           Unix.rename s_dir f_dir;
