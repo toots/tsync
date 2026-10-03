@@ -85,6 +85,25 @@ let () =
       run with_bucket (Gc_copies Probe);
       p "no store with a bucket function:";
       run dom (Gc_copies Probe);
+      p "== status: corruption markers";
+      let corrupted () =
+        let report = Report.create dom engine ~frontend:(fun () -> None) in
+        String.concat ", "
+          (List.map
+             (fun (b : Tsync_status.Status_report.backend) ->
+               match b.corrupted with
+                 | Not_checked _ -> "not checked"
+                 | Checked { chunks; truncated } ->
+                     Printf.sprintf "%d corrupt%s" chunks
+                       (if truncated then " or more" else ""))
+             (Report.domain_body report).backends)
+      in
+      p "a store that verifies its writes, no marker: %s" (corrupted ());
+      main.put
+        (Key.marker d (Chunk_key.of_body "rot"))
+        (Bigstring.of_string "{}");
+      p "with a marker: %s" (corrupted ());
+      ignore (main.delete (Key.marker d (Chunk_key.of_body "rot")));
       p "== data-integrity --repair";
       let live = Folder_id.v "0000000000a1-1" in
       let put key body = main.put key (Bigstring.of_string body) in

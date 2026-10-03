@@ -10,6 +10,9 @@ the function deployed:
 no store with a bucket function:
   no store of this domain can run a bucket function
   exit 0
+== status: corruption markers
+a store that verifies its writes, no marker: 0 corrupt
+with a marker: 1 corrupt
 == data-integrity --repair
 two findings, a dry run:
   2 would be deleted

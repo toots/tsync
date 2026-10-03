@@ -1,7 +1,7 @@
 (** A domain's body in the status report (spec 07 §5.5), answered by its owner.
-    Each member's probe and journal listing are cached for STORE_STATE_WINDOW
-    and refreshed behind the answer, which waits for a listing at most
-    LISTING_GRACE after the probe. *)
+    Each member's probe, corruption markers and journal listing are cached for
+    STORE_STATE_WINDOW and refreshed behind the answer, which waits for a
+    listing at most LISTING_GRACE after the probe. *)
 
 type t
 
