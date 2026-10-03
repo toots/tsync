@@ -26,9 +26,11 @@ type retained = {
 type t = {
   engine : (module Tsync_sync.Engine.S);
   domain : Tsync_domain.Domain.t;
-  allow_other : bool;
+  owner_only_writes : bool;
   uid : int;
   gid : int;
+  file_mode : int;
+  dir_mode : int;
   handles : (int64, handle) Hashtbl.t;
   listings : (int64, string list) Hashtbl.t;
   hidden : (string, retained) Hashtbl.t;
@@ -60,9 +62,11 @@ let is_hidden rel =
 
 let fresh_fh t = Int64.of_int (Atomic.fetch_and_add t.next_fh 1)
 
-(* security-model §8: another user under allowOther only reads. *)
+(* security-model §8: while the configuration grants write access to the
+   mounting user alone, another user under allowOther only reads. *)
 let check_mutation t =
-  if t.allow_other && (Fuse.get_context ()).uid <> t.uid then errno EACCES
+  if t.owner_only_writes && (Fuse.get_context ()).uid <> Unix.getuid () then
+    errno EACCES
 
 let read_only t = t.domain.domain.read_only
 
@@ -93,7 +97,7 @@ let getattr t path _ =
   if is_hidden rel then (
     match locked t (fun () -> Hashtbl.find_opt t.hidden rel) with
       | Some r ->
-          stats t ~kind:S_REG ~perm:0o644 ~nlink:0 ~size:(retained_size r)
+          stats t ~kind:S_REG ~perm:t.file_mode ~nlink:0 ~size:(retained_size r)
             ~mtime:r.mtime
       | None -> errno ENOENT)
   else (
@@ -103,9 +107,10 @@ let getattr t path _ =
         let st = E.stat rel in
         match st.kind with
           | `Dir ->
-              stats t ~kind:S_DIR ~perm:0o755 ~nlink:2 ~size:0 ~mtime:st.mtime
+              stats t ~kind:S_DIR ~perm:t.dir_mode ~nlink:2 ~size:0
+                ~mtime:st.mtime
           | `File ->
-              stats t ~kind:S_REG ~perm:0o644 ~nlink:1 ~size:st.size
+              stats t ~kind:S_REG ~perm:t.file_mode ~nlink:1 ~size:st.size
                 ~mtime:st.mtime
           | `Symlink ->
               stats t ~kind:S_LNK ~perm:0o777 ~nlink:1 ~size:st.size
@@ -570,6 +575,35 @@ let options (d : Config.domain) =
        (fun (f : Config.frontend) -> f.options)
        (Config.frontend d "fuse"))
 
+type presentation = { uid : int; gid : int; file_mode : int; dir_mode : int }
+
+(* fuse §2.1: the options were validated when the config was read; a user or
+   group removed since is refused here. *)
+let presentation options =
+  let id resolve what key default =
+    match Config.fstr options key with
+      | None -> default
+      | Some name -> (
+          match resolve name with
+            | Some id -> id
+            | None -> Fail.raise_ Fail.Refused "%s: no such %s %S" key what name
+          )
+  in
+  let mode key default =
+    Option.value ~default
+      (Option.bind (Config.fstr options key) Fuse_options.mode)
+  in
+  {
+    uid = id Fuse_options.user_id "user" "uid" (Unix.getuid ());
+    gid = id Fuse_options.group_id "group" "gid" (Unix.getgid ());
+    file_mode = mode "fileMode" 0o644;
+    dir_mode = mode "dirMode" 0o755;
+  }
+
+(* security-model §8 *)
+let grants_others_write p =
+  p.uid <> Unix.getuid () || p.file_mode lor p.dir_mode land 0o022 <> 0
+
 (* The kernel's mount table names the resolved path: a trailing slash or a
    symlinked parent would hide a stale mount. *)
 let mount_point ~mount (d : Config.domain) =
@@ -587,6 +621,7 @@ let host ~mount domains ~run =
   let d = List.hd domains in
   let mount_point = mount_point ~mount d in
   let allow_other = Config.flag (options d) "allowOther" in
+  let presentation = presentation (options d) in
   let subtype =
     match Config.fstr (options d) "mountSubtype" with
       | Some s when String.trim s <> "" -> s
@@ -606,9 +641,12 @@ let host ~mount domains ~run =
       {
         engine;
         domain;
-        allow_other;
-        uid = Unix.getuid ();
-        gid = Unix.getgid ();
+        owner_only_writes =
+          allow_other && not (grants_others_write presentation);
+        uid = presentation.uid;
+        gid = presentation.gid;
+        file_mode = presentation.file_mode;
+        dir_mode = presentation.dir_mode;
         handles = Hashtbl.create 64;
         listings = Hashtbl.create 16;
         hidden = Hashtbl.create 4;

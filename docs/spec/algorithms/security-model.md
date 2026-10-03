@@ -195,7 +195,10 @@ Some clients are less privileged than the owner process (the sandboxed macOS ext
 ## 8. FUSE multi-user access
 
 - By default a mount is reachable only by the mounting user.
-- `allowOther` makes the mount reachable by other users **read-only**. It MUST always be combined with kernel permission checking (`default_permissions`), files MUST report the mounting user as owner with modes 0644 (files) and 0755 (directories), and the filesystem MUST refuse every mutating call whose caller uid is not the mounting user's with `EACCES`, independently of the kernel check.
+- `allowOther` makes the mount reachable by other users. It MUST always be combined with kernel permission checking (`default_permissions`), so access follows the ownership and modes the mount reports, never more.
+- Ownership and modes are explicit configuration (`uid`, `gid`, `fileMode`, `dirMode`, [fuse §2.1](../frontends/fuse.md#21-options)), defaulting to the mounting user as owner with modes 0644 (files) and 0755 (directories): read-only for everyone else.
+- While the configuration grants write access to the mounting user alone (reported uid is the mounting user's and neither mode has a group or other write bit), the filesystem MUST also refuse every mutating call whose caller uid is not the mounting user's with `EACCES`, independently of the kernel check. A configuration that grants others write access is an explicit decision to let the kernel's check be the only one.
+- A read-only domain clears every write bit, whatever the configured modes.
 - Request-handler actions reach the mount's owner only over the owner-only socket (§7), never through the mount.
 
 ---

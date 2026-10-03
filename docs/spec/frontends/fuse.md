@@ -48,7 +48,11 @@ parser against this spec ([05 §2.1](../05-ops-config.md)):
 | JSON name | type | default | meaning |
 |---|---|---|---|
 | `mountPoint` | absolute path | `$HOME/tsync/<domain>` | where to mount. Normalised at validation (no trailing `/`, no `.` or `..` segments); a relative path or one starting with `~` is refused. |
-| `allowOther` | bool | `false` | other local users may read the mount (§4.4). Requires `user_allow_other` in `/etc/fuse.conf`, else the mount fails with that sentence. |
+| `allowOther` | bool | `false` | other local users may reach the mount, with the access `uid`, `gid`, `fileMode` and `dirMode` grant them (§4.4). Requires `user_allow_other` in `/etc/fuse.conf`, else the mount fails with that sentence. |
+| `uid` | user name or decimal uid | the owner process's uid | the owner every entry reports (§4.3). A name is resolved through the system's user database; one it does not know is refused. |
+| `gid` | group name or decimal gid | the owner process's gid | the group every entry reports (§4.3), resolved as `uid` is. |
+| `fileMode` | octal permission bits, `[0-7]{3}` with an optional leading `0` | `"0644"` | the mode files report (§4.3). |
+| `dirMode` | octal permission bits, as `fileMode` | `"0755"` | the mode directories report (§4.3). |
 | `mountSubtype` | string matching `[A-Za-z0-9._-]*` | `"sshfs"` | the mount reports fstype `fuse.<mountSubtype>`; blank means `sshfs` (§B2). |
 
 The mount point is resolved by one rule shared with the tray, the CLI and discovery: the domain's
@@ -144,15 +148,17 @@ File locks (`flock`, POSIX locks) are handled by the kernel and are local to thi
 
 | kind | mode | nlink | size | mtime | ctime, atime |
 |---|---|---|---|---|---|
-| directory | `S_IFDIR 0755` | 2 | 0 | the time its set of children last changed on this client ([04](../04-checkout-cache.md)) | = mtime |
-| staged file | `S_IFREG 0644` | 1 | staged size | staged mtime | = mtime |
-| published file | `S_IFREG 0644` | 1 | manifest size | manifest mtime | = mtime |
+| directory | `S_IFDIR` `dirMode` | 2 | 0 | the time its set of children last changed on this client ([04](../04-checkout-cache.md)) | = mtime |
+| staged file | `S_IFREG` `fileMode` | 1 | staged size | staged mtime | = mtime |
+| published file | `S_IFREG` `fileMode` | 1 | manifest size | manifest mtime | = mtime |
 | published symlink | `S_IFLNK 0777` | 1 | length of the target | manifest mtime | = mtime |
-| retained (hidden) file | `S_IFREG 0644` | 0 | retained size | retained mtime | = mtime |
+| retained (hidden) file | `S_IFREG` `fileMode` | 0 | retained size | retained mtime | = mtime |
 
 - Every time is stable between changes: a directory's mtime moves when a child is added, removed or
   renamed on this client (locally or by an applied peer change), never on a mere look.
-- uid and gid are the owner process's.
+- uid and gid are the configured `uid` and `gid`, the owner process's by default. Modes and
+  ownership are presentation only: the store keeps neither, `chmod` and `chown` change nothing, and
+  every client may present the same domain with its own.
 - A read-only domain clears the write bits.
 - `utimens` is a no-op, so a file's mtime is its last staged write or its manifest's.
 
@@ -162,9 +168,12 @@ File locks (`flock`, POSIX locks) are handled by the kernel and are local to thi
   reaches the owner. The owner's request handler refuses mutating actions itself
   ([08 §3.5](../08-frontends.md#35-rules-the-handler-enforces)).
 - **Other users**: by default only the mounting user reaches the mount. `allowOther` opens it to other
-  local users **read-only**, always together with `default_permissions`, the modes of §4.3, and the
-  owner's own refusal (EACCES) of every mutating call from another uid, as
-  [security-model.md §8](../algorithms/security-model.md#8-fuse-multi-user-access) specifies.
+  local users, always together with `default_permissions`: the kernel grants each caller what the
+  ownership and modes of §4.3 grant it, supplementary groups included. With the default `uid`,
+  `fileMode` and `dirMode` that is read-only, and the owner also refuses (EACCES) every mutating call
+  from another uid; a configuration that grants anyone else write access leaves that decision to the
+  kernel alone, as [security-model.md §8](../algorithms/security-model.md#8-fuse-multi-user-access)
+  specifies. A typical shared library: `"gid": "media", "fileMode": "0664", "dirMode": "0775"`.
 
 ### 4.5 statfs
 
@@ -337,7 +346,7 @@ The mapping from failure kinds to errno is
 | `create` with `O_EXCL`, `mknod`, `mkdir` of an existing name; `RENAME_NOREPLACE` onto one | EEXIST |
 | `rmdir` of a non-empty folder; rename onto a non-empty folder | ENOTEMPTY |
 | file renamed onto a folder / folder onto a file | EISDIR / ENOTDIR |
-| a mutating call from another user under `allowOther` | EACCES |
+| a mutating call from another user under `allowOther`, when the configuration grants only the owner process's user write access | EACCES |
 | xattr, `fallocate` | EOPNOTSUPP |
 | an interrupted request | EINTR |
 
@@ -364,7 +373,10 @@ Recording happens on the failing worker and MUST NOT do anything that can fail (
   bytes; the upload then publishes them.
 - **Freshness.** Another client's create, edit, delete, folder create and removal appear in the mount
   (lookup, attributes and a fresh listing), and a remote folder rename keeps the folder's identity.
-- **Multi-user.** With `allowOther`, another user can read but not write, rename or delete.
+- **Multi-user.** With `allowOther` and the default ownership and modes, another user can read but not
+  write, rename or delete. With `gid` set to a group another user belongs to (as a supplementary
+  group) and `fileMode` `0664`, `dirMode` `0775`, that user can create, write, rename and delete, a
+  user outside the group still only reads, and `stat` reports the configured gid and modes.
 - **Store path.** A create reaches the store; an edit becomes a new version; `cp` within the domain; a
   folder plus a file; a delete leaves no manifest; `rm -rf` of the mount's content empties the store
   of the domain's live manifests. The mount and the store agree, and the mount's listing equals a
