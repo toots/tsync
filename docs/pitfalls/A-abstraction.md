@@ -790,6 +790,11 @@ This file covers mistakes that are true of any implementation in any language: s
 - **Check** — Escape JSON for script context, substitute in one pass, sandbox CSP or attachment for user content, secrets in memory only.
 - **Seen** — notes (security-model), fe5b0e87.
 
+### A-9.10 A request refused mid-body leaves the connection open
+- **Pitfall** — The HTTP server marked a request body consumed before checking its length or reading it, and kept the connection alive when it was consumed. A body refused partway (413 over the limit, 408 too slow, 400 for a bad length) left its unread bytes on a connection the server went on reading as the next request: responses desynchronised, and a sender could smuggle a request inside a body, for example to the unauthenticated `/s/` endpoints.
+- **Check** — A connection is reused only after its request's body was read to its end; any failure while reading it, or a handler that never read it, closes the connection.
+- **Seen** — rewrite (review of PR #114).
+
 ## 10. State ownership, single owners for rules, and types
 
 ### A-10.1 State keyed per instance instead of per thing
