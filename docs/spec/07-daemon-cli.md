@@ -156,7 +156,11 @@ class**:
 | **read** | `ls`, `versions` (listing), `trash` (listing), `export` | reads stores and permitted local files | same | same |
 | **owner** | `pause`, `resume`, `retry`, `set-aside`, `cache --evict/--fetch/--prune`, `versions --revert`, `sync`, `gc`, `expire`, `trash --purge`, `trash --restore`, `mirror`, `data-integrity`, `share`, `import`, `rsync` with a domain side, every `<group> <verb>` whose frontend declares it owner-class (the whole desktop `tsync android` group) | sends the request to the owner, which runs it | takes ownership for its run and performs the request itself (§3.5) | refuses with `busy`, naming the holder |
 
-"Serving" means the holder record names a socket and the socket answers. A command that takes
+"Serving" means the holder record names a socket and the socket answers. A refused connection does
+not by itself mean the owner is gone: some platforms refuse a connection while the socket's backlog
+is full, with the same error as a socket nobody listens on (macOS). Only a free ownership lock means
+no owner; a command whose connection is refused while the lock is held retries it until the
+request's deadline (§4.3), and only then treats the owner as held but not serving. A command that takes
 ownership is an owner for its duration with every duty of §2.2 except continuous journal polling,
 and it runs the owner's drain before releasing the lock. Taking ownership is the fallback for a
 machine where the daemon is not running, not the design: the same operation runs either way.
