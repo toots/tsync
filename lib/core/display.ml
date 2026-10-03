@@ -2,7 +2,7 @@ type mode = Quiet | Normal | Verbose
 
 let mode = Atomic.make Normal
 let m = Mutex.create ()
-let tty = lazy (Unix.isatty Unix.stderr)
+let tty = Unix.isatty Unix.stderr
 let text = ref None
 let fraction = ref None
 let started = ref None
@@ -43,7 +43,7 @@ let erase () =
 
 let draw () =
   match (!text, !started) with
-    | Some s, Some t0 when Lazy.force tty ->
+    | Some s, Some t0 when tty ->
         let width =
           Option.value ~default:80 (Fs.terminal_columns Unix.stderr)
         in
@@ -87,7 +87,7 @@ let progress ?fraction:f s =
           last_plain := Unix.gettimeofday ());
         text := Some s;
         fraction := f;
-        if Lazy.force tty then start_ticker ()
+        if tty then start_ticker ()
         else (
           let now = Unix.gettimeofday () in
           if now -. !last_plain >= plain_every then (
