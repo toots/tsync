@@ -119,6 +119,26 @@ let () =
       export "resumed" ["notes/deep/b.bin"];
       p "  content equal: %b\n"
         (read (Filename.concat root "resumed/b.bin") = big);
+      p "\n== a record torn mid-line, resumed twice\n";
+      let after n =
+        let checks = ref 0 in
+        fun () ->
+          incr checks;
+          !checks > n
+      in
+      export "torn" ~bytes:false ["notes/deep/b.bin"] ~cancelled:(after 3);
+      let records = Filename.concat cache_root "docs/exports" in
+      Array.iter
+        (fun n ->
+          let oc =
+            open_out_gen [Open_append] 0o600 (Filename.concat records n)
+          in
+          output_string oc "1";
+          close_out oc)
+        (Sys.readdir records);
+      export "torn" ~bytes:false ["notes/deep/b.bin"] ~cancelled:(after 3);
+      export "torn" ~bytes:false ["notes/deep/b.bin"];
+      p "  content equal: %b\n" (read (Filename.concat root "torn/b.bin") = big);
       p "\n== changed upstream since an interrupted export: started over\n";
       let checks = ref 0 in
       export "changed" ~bytes:false ["notes/deep/b.bin"] ~cancelled:(fun () ->

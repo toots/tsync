@@ -143,7 +143,20 @@ module Make (C : Context.S) = struct
                 else (
                   let done_ =
                     match resume with
-                      | Some l -> l
+                      | Some l ->
+                          (* A torn last line would be joined by the next
+                             index appended. *)
+                          Option.iter
+                            (fun body ->
+                              let whole =
+                                match String.rindex_opt body '\n' with
+                                  | Some i -> i + 1
+                                  | None -> 0
+                              in
+                              if whole < String.length body then
+                                Unix.ftruncate lock whole)
+                            existing;
+                          l
                       | None ->
                           (* The record before any byte of its file. *)
                           Unix.ftruncate lock 0;
@@ -179,9 +192,11 @@ module Make (C : Context.S) = struct
                           []
                   in
                   let written = ref 0 in
+                  let had = Array.make m.count false in
+                  List.iter (fun i -> had.(i) <- true) done_;
                   Fs.with_fd (Fs.openfile f.dest [O_WRONLY]) (fun fd ->
                       for i = 0 to m.count - 1 do
-                        if not (List.mem i done_) then (
+                        if not had.(i) then (
                           Cancel.check cancelled;
                           let b = R.get_verified_chunk (Manifest.key m i) in
                           let len =
