@@ -305,7 +305,7 @@ let say_start nr m (r0 : Gc_record.read) (plan : Gc_plan.start) =
           (if generation = None then
              "; its record has no generation, so it gets a fresh odd one"
            else "")
-    | Open { started = Some _; after }, _ ->
+    | Open { started = Some _; after; _ }, _ ->
         Narrate.say nr "%s: resuming the run%s in marking, after %S"
           m.member.name (since r0)
           (if after = "" then "the start" else after)
@@ -487,16 +487,19 @@ let session ?budget ?pause ~narrate:nr ~verify ~keep ~cancelled composite d m =
             record m d
               { phase = Closing; started; cursor = after; generation = Some g };
             close_from ~after g
-        | Open { after; _ } -> (
+        | Open { after; marking; _ } -> (
             Chunk_spaces.with_publish_lock m.spaces d ~exclusive:true (fun () ->
-                record m d
-                  {
-                    phase = Opening;
-                    started;
-                    cursor = after;
-                    generation = None;
-                  };
-                if not (Fs.exists (outgoing m d)) then (
+                if not marking then
+                  record m d
+                    {
+                      phase = Opening;
+                      started;
+                      cursor = after;
+                      generation = None;
+                    };
+                if marking then
+                  Narrate.say nr "  resuming the marking: no rename aside"
+                else if not (Fs.exists (outgoing m d)) then (
                   ignore (rename_quiet (surviving m d) (outgoing m d));
                   Narrate.say nr
                     "  moved the chunk area aside in one rename: every chunk \

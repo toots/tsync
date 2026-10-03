@@ -23,10 +23,11 @@ let show_start = function
   | Resume_close { after; generation } ->
       Printf.sprintf "close after %S, generation %s" after
         (Option.fold ~none:"fresh" ~some:string_of_int generation)
-  | Open { started; after } ->
-      Printf.sprintf "open (started %s), mark after %S"
+  | Open { started; after; marking } ->
+      Printf.sprintf "open (started %s), mark after %S%s"
         (Option.fold ~none:"now" ~some:(Printf.sprintf "%.0f") started)
         after
+        (if marking then ", no rename" else "")
 
 let keys l = String.concat " " (List.map (fun k -> Key.leaf k) l)
 

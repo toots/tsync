@@ -11,8 +11,10 @@ type start =
   | Begin_keep  (** write an abandoning record, then keep every shard *)
   | Resume_close of { after : string; generation : int option }
       (** a closing record; [None] needs a fresh odd generation first *)
-  | Open of { started : float option; after : string }
-      (** open (or reopen) and mark the namespaces after [after] *)
+  | Open of { started : float option; after : string; marking : bool }
+      (** open (or reopen) and mark the namespaces after [after]; [marking]: a
+          run already marking, whose chunk space is never renamed aside again
+          (gc.md §7) *)
 
 (** An unreadable record is abandoning, the safe direction; an abandoning run
     stays abandoning; [keep] overrides every other phase. *)
