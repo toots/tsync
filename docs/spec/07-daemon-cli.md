@@ -715,9 +715,12 @@ menu (served as JSON by the File Provider process's `menu` action):
   "Uploading N · Downloading M" plus " · paused" when any domain is paused.
 - **Icon**: all unreachable or no domains → error; all paused → paused; any transferring → sync;
   else idle.
-- **Rows**: per domain a row opening its folder; up to 5 upload rows then "… and N more"; download
-  rows revealing the file; a traffic line "X sent · Y to go" when non-zero; a rate line
-  "R/s · 2h 13m left" (two largest non-zero units; none under a minute); a Stats submenu filled on
+- **Rows**: per domain a row opening its folder; up to 5 upload rows (the file's name, indented,
+  not actionable) then "… and N more"; download rows revealing the file ("name — P%" from `bytes`
+  of `size`, indented); a traffic line "X sent · Y to go" when non-zero (X: every domain's
+  `traffic.upBytes`, Y: every domain's `pendingBytes`); a rate line "R/s · 2h 13m left" while
+  uploading (R: every domain's `traffic.upRate`, the time Y / R; two largest non-zero units; none
+  under a minute); a Stats submenu filled on
   open (placeholder "Reading…", never empty); "Hold changes", checked when all domains are paused,
   disabled when all are unreachable, whose action pauses or resumes every domain; on the Linux tray,
   quit, labelled "Quit tsync tray", which leaves the daemon running. The macOS menu has no quit row:
