@@ -184,6 +184,25 @@ let () =
       drain a;
       pass b;
       show "after B's pass" both;
+      p "\n== two additions under A's unpublished rmdir share R(F) (§3.5)\n";
+      A.mkdir "crate" ~exclusive:false;
+      write a "crate/a.txt" "first";
+      drain a;
+      pass b;
+      A.set_paused true;
+      A.delete "crate/a.txt";
+      A.rmdir "crate";
+      write b "crate/b1.txt" "one";
+      drain b;
+      write b "crate/b2.txt" "two";
+      drain b;
+      pass a;
+      A.set_paused false;
+      drain a;
+      pass b;
+      drain b;
+      pass a;
+      show "converged" both;
       p "\nowed: A %d/%d, B %d/%d; unapplied: %d %d\n" (A.pending_uploads ())
         (A.pending_metadata ()) (B.pending_uploads ()) (B.pending_metadata ())
         (List.length (A.unapplied ()))
