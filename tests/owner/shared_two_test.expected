@@ -5,6 +5,7 @@ menu_stats entries: true
 pause every domain           {"ok":true,"paused":true}
 menu while held              {"icon":"tsync-paused-symbolic","tooltip":"Paused","entries":[{"label":"docs","enabled":true,"indent":0,"action":{"openFolder":"docs"}},{"label":"pics","enabled":true,"indent":0,"action":{"openFolder":"pics"}},{"separator":true},{"label":"Stats","enabled":true,"indent":0,"submenu":true,"action":{"stats":true}},{"label":"Hold changes","enabled":true,"indent":0,"checked":true,"action":{"setPaused":false}}]}
 resume                       {"ok":true,"paused":false}
+paused after resume: docs=false, pics=false
 notify_reset of pics         {"ok":true,"delivered":1}
 full_resync of docs          {"ok":true}
 then: reset pics, changed docs
