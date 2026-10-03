@@ -28,7 +28,7 @@ open /Applications/TsyncApp.app
 
 SOCK="$HOME/Library/Group Containers/group.org.feverdreamtv.tsync/tsync/tsync.sock"
 echo -n "==> Waiting for socket" >&2
-deadline=$(( $(date +%s) + 15 ))
+deadline=$(( $(date +%s) + 60 ))
 until [[ -S "$SOCK" ]]; do
     [[ $(date +%s) -lt $deadline ]] || { echo " timeout" >&2; exit 1; }
     sleep 1; echo -n "." >&2
