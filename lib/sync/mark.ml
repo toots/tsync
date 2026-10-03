@@ -10,8 +10,17 @@ let read ~data_dir domain =
         match Entry_key.parse (String.trim s) with
           | Some k -> Some k
           | None ->
-              Log.warn "%s does not hold an entry key; treating it as no mark"
-                (path ~data_dir domain);
+              (* Set aside, so the rebuild it causes writes a mark that holds. *)
+              let p = path ~data_dir domain in
+              let aside =
+                Filename.concat (Filename.dirname p)
+                  (".tsync-bad-" ^ Filename.basename p)
+              in
+              Log.warn
+                "%s does not hold an entry key; set aside as %s and treated as \
+                 no mark"
+                p aside;
+              (try Fs.rename p aside with _ -> ());
               None)
 
 let write ~data_dir domain k =
