@@ -21,9 +21,35 @@ module Make (C : Context.S) = struct
      prefetches, a reader's few bytes would miss their deadline. *)
   let ranges = Rt.Semaphore.create ~name:"range reads" C.max_downloads
   let resolved_chunk_size = Atomic.make None
+  let resolving_chunk_size = Atomic.make false
+
+  (* The main's recommendation, asked once in the background; a failure leaves
+     it unknown, to be asked again by the next caller. *)
+  let resolve_chunk_size () =
+    if Atomic.compare_and_set resolving_chunk_size false true then
+      Rt.spawn ~name:"chunk size" (fun () ->
+          match (store.capabilities (Key.domain_prefix d)).chunk_size with
+            | Some cs
+              when cs >= Chunking.chunk_size_min
+                   && cs <= Chunking.chunk_size_max ->
+                Atomic.set resolved_chunk_size (Some cs)
+            | Some cs ->
+                Log.warn
+                  "ignoring the store's recommended chunk size %d, out of range"
+                  cs;
+                Atomic.set resolved_chunk_size
+                  (Some Chunking.default_chunk_size)
+            | None ->
+                Atomic.set resolved_chunk_size
+                  (Some Chunking.default_chunk_size)
+            | exception e ->
+                Log.info "the store's recommended chunk size is unknown yet: %s"
+                  (Printexc.to_string e);
+                Atomic.set resolving_chunk_size false)
 
   (* 01 §3.5: configured, else the main's recommendation within range, else
-     the default. *)
+     the default; never waiting for the store, so a local write stays offline
+     work. *)
   let chunk_size () =
     match C.chunk_size_config with
       | Some cs -> cs
@@ -31,24 +57,8 @@ module Make (C : Context.S) = struct
           match Atomic.get resolved_chunk_size with
             | Some cs -> cs
             | None ->
-                let cs =
-                  match
-                    (store.capabilities (Key.domain_prefix d)).chunk_size
-                  with
-                    | Some cs
-                      when cs >= Chunking.chunk_size_min
-                           && cs <= Chunking.chunk_size_max ->
-                        cs
-                    | Some cs ->
-                        Log.warn
-                          "ignoring the store's recommended chunk size %d, out \
-                           of range"
-                          cs;
-                        Chunking.default_chunk_size
-                    | None -> Chunking.default_chunk_size
-                in
-                Atomic.set resolved_chunk_size (Some cs);
-                cs)
+                resolve_chunk_size ();
+                Chunking.default_chunk_size)
 
   let marked_m = Mutex.create ()
   let marked : (string, unit) Hashtbl.t = Hashtbl.create 16

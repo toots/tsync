@@ -130,7 +130,15 @@
 (executable
  (name recover_test)
  (modules recover_test)
- (libraries tsync_core tsync_store tsync_checkout tsync_sync unix))
+ (libraries
+  tsync_core
+  tsync_store
+  tsync_checkout
+  tsync_sync
+  tsync_config
+  tsync_domain
+  tsync_catalog
+  unix))
 
 (rule
  (with-stdout-to
@@ -187,7 +195,15 @@
 (executable
  (name poller_retry_test)
  (modules poller_retry_test)
- (libraries tsync_core tsync_store tsync_checkout tsync_sync unix))
+ (libraries
+  tsync_core
+  tsync_store
+  tsync_checkout
+  tsync_sync
+  tsync_config
+  tsync_domain
+  tsync_catalog
+  unix))
 
 (rule
  (with-stdout-to
@@ -202,7 +218,15 @@
 (executable
  (name lost_answer_test)
  (modules lost_answer_test)
- (libraries tsync_core tsync_store tsync_checkout tsync_sync unix))
+ (libraries
+  tsync_core
+  tsync_store
+  tsync_checkout
+  tsync_sync
+  tsync_config
+  tsync_domain
+  tsync_catalog
+  unix))
 
 (rule
  (with-stdout-to
@@ -217,7 +241,15 @@
 (executable
  (name rebuild_race_test)
  (modules rebuild_race_test)
- (libraries tsync_core tsync_store tsync_checkout tsync_sync unix))
+ (libraries
+  tsync_core
+  tsync_store
+  tsync_checkout
+  tsync_sync
+  tsync_config
+  tsync_domain
+  tsync_catalog
+  unix))
 
 (rule
  (with-stdout-to
@@ -232,7 +264,15 @@
 (executable
  (name missing_parent_test)
  (modules missing_parent_test)
- (libraries tsync_core tsync_store tsync_checkout tsync_sync unix))
+ (libraries
+  tsync_core
+  tsync_store
+  tsync_checkout
+  tsync_sync
+  tsync_config
+  tsync_domain
+  tsync_catalog
+  unix))
 
 (rule
  (with-stdout-to
@@ -247,7 +287,15 @@
 (executable
  (name legacy_entry_test)
  (modules legacy_entry_test)
- (libraries tsync_core tsync_store tsync_checkout tsync_sync unix))
+ (libraries
+  tsync_core
+  tsync_store
+  tsync_checkout
+  tsync_sync
+  tsync_config
+  tsync_domain
+  tsync_catalog
+  unix))
 
 (rule
  (with-stdout-to
@@ -300,3 +348,46 @@
  (alias runtest)
  (action
   (diff feed_test.expected feed_test.output)))
+
+(executable
+ (name offline_test)
+ (modules offline_test)
+ (libraries
+  tsync_core
+  tsync_store
+  tsync_checkout
+  tsync_sync
+  tsync_config
+  tsync_domain
+  tsync_catalog
+  unix))
+
+(rule
+ (with-stdout-to
+  offline_nopoll_test.output
+  (run ./offline_test.exe nopoll)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff offline_nopoll_test.expected offline_nopoll_test.output)))
+
+(rule
+ (with-stdout-to
+  offline_poll_test.output
+  (run ./offline_test.exe poll)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff offline_poll_test.expected offline_poll_test.output)))
+
+(rule
+ (with-stdout-to
+  offline_proxy_test.output
+  (run ./offline_test.exe proxy)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff offline_proxy_test.expected offline_proxy_test.output)))
