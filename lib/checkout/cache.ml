@@ -367,6 +367,25 @@ let verified_member t g (x : member) =
     | Some s when Bigstring.length s = x.len -> s
     | _ -> Fail.corrupt "cache body %s is short" g.gkey
 
+let live_pin t gkey ~now =
+  match Fs.stat_opt (pin_path t gkey) with
+    | Some ps -> ps.st_mtime >= now
+    | None -> false
+
+(* read-path §4.9: the cap takes a body only, and not one pinned since its walk
+   listed it. *)
+let drop_body t gkey ~now =
+  let s = state t gkey in
+  if Rt.Fmutex.is_locked s.lock then false
+  else
+    Rt.Fmutex.with_lock s.lock (fun () ->
+        if live_pin t gkey ~now:(max now (Unix.gettimeofday ())) then false
+        else (
+          Fs.unlink_quiet (whole_path t gkey);
+          Fs.unlink_quiet (partial_path t gkey);
+          forget s;
+          true))
+
 let evict_group t gkey =
   let s = state t gkey in
   if Rt.Fmutex.is_locked s.lock then false
@@ -513,11 +532,7 @@ let enforce_cap t =
                     else n
                   in
                   let bytes = Int64.to_int st.st_size in
-                  let live_pin =
-                    match Fs.stat_opt (pin_path t gkey) with
-                      | Some ps -> ps.st_mtime >= now
-                      | None -> false
-                  in
+                  let live_pin = live_pin t gkey ~now in
                   total := !total + bytes;
                   incr count;
                   if live_pin then pinned := !pinned + bytes
@@ -530,7 +545,7 @@ let enforce_cap t =
         let over = ref (!total - !pinned - cap) in
         List.iter
           (fun (_, gkey, bytes) ->
-            if !over > 0 && evict_group t gkey then (
+            if !over > 0 && drop_body t gkey ~now then (
               over := !over - bytes;
               decr count;
               total := !total - bytes))
