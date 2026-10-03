@@ -62,6 +62,7 @@ requires rewriting a valid existing file into another form.
   manifests/<escaped dir>/.tsync-own-<hex16>   own marker of a file entry this client stored
   manifests/<escaped dir>/.tsync-fid-<hex16>   file-id marker of a file entry (§2.3)
   scratch/<escaped path>                       frontend scratch; wiped by resync ([07](07-daemon-cli.md))
+  file-ids-complete                            file-id record: a backfill pass completed (§4.10)
   scratch/.tsync-walk                          kept walk of a whole-domain listing ([08 §2.5](08-frontends.md#25-cursors-and-anchors))
   chunks/<shard>/<group key>                   whole cache body
   chunks/<shard>/<group key>.partial           partial cache body
@@ -734,7 +735,10 @@ checkout to a consistent state:
    MAY run lazily.
 8. Give a file-id marker (§2.3) to every mirror file entry without a valid one, durably. On a lazy
    tree this covers the entries present. A crash midway leaves entries without a marker, which the
-   next start completes; no id was reported for them yet.
+   next start completes; no id was reported for them yet. Once a pass completes, the
+   **file-id record** says so durably and later starts skip this step: every write path gives an id
+   from then on, and a bulk pass that writes markers without a fsync each (a rebuild) re-mints a torn
+   one when it is redone.
 
 Set-aside manifests are never adopted, promoted or removed automatically. Status reports them;
 only an explicit user request ([07](07-daemon-cli.md)) removes one, after which its bodies become
