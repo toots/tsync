@@ -1,0 +1,13 @@
+(executable
+ (name hash)
+ (libraries tsync_core))
+
+(rule
+ (with-stdout-to
+  hash.output
+  (run ./hash.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff hash.expected hash.output)))
