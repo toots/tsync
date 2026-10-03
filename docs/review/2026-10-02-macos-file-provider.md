@@ -178,7 +178,9 @@ of its own. Nearly every regression came from one of three sources:
 - Verify on the Mac:
   - Can the extension evict and request downloads through its own manager from inside
     `performAction`?
-  - Does `SMAppService.agent` with `BundleProgram` register?
+  - Does `SMAppService.agent` with `BundleProgram` register? **No** (checked 2026-10-02):
+    backgroundtaskmanagementd refuses it with "SMAppService target executable must be sandboxed
+    because the app is sandboxed". The per-user agent is the only path (§11).
   - What does `remove(mode: .preserveDirtyUserData)` return?
   - Can the extension unlink leftovers in its temporary directory?
   - Does the upload badge clear when an upload publishes, with metadataVersion = contentVersion
@@ -225,3 +227,4 @@ Made against the spec as left by §3, before any macOS code was written:
 | The staged manifest records a whole body's digest as `h1`; `write_whole` of the current content changes nothing; a stale-base write's reply names the original key | `content_id` was otherwise recomputed from the whole body on every `stat`; 04 §4.3 contradicted conflict-resolution §4.9 on what the reply names | [04 §2.5, §4.3](../spec/04-checkout-cache.md) |
 | A symlink's row carries `contentId`; its contentVersion is `"l:"` + that | The extension would otherwise hash the target itself, restating the owner's digest rule in Swift with a bundled xxHash | [08 §2.3](../spec/08-frontends.md), [file-provider §6.3](../spec/frontends/file-provider.md) |
 | `share` takes `ref` as well as `rel` | Copy Share URL (file-provider §6.7) shares an item the extension knows only by reference | [08 §3.3](../spec/08-frontends.md) |
+| The owner's agent is the per-user definition the package writes; purge removes it | Checked on the Mac: a sandboxed app may register only sandboxed agents, so the bundled agent is refused | [file-provider §9.1, §9.4, §11, §12](../spec/frontends/file-provider.md) |

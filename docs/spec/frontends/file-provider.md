@@ -505,7 +505,7 @@ loop:
 
 ### 9.1 Registration (app)
 
-The app registers itself as a login item and the owner's agent (§11) at launch, then reconciles
+The app registers itself as a login item (§11) at launch, then reconciles
 domains. Reconciliation also runs on every relay acknowledgement and on a `reset` event; passes do
 not overlap (a pass requested during one runs once after it).
 
@@ -513,8 +513,9 @@ not overlap (a pass requested during one runs once after it).
 2. Take one deadline, `registration_deadline`, for every framework call of this pass. A call failing
    with provider-not-found (the installer is swapping the extension) is retried every
    `registration_retry` until that deadline.
-3. If the purge marker exists: remove every domain; only if all were removed, unregister the agent and
-   the login item and delete the marker. Register nothing and stop.
+3. If the purge marker exists: remove every domain; only if all were removed, unregister the login
+   item and delete the marker. Register nothing and stop. (The owner's agent is the purge command's to
+   remove, §9.4: the sandboxed app cannot.)
 4. If the config cannot be read, leave every domain untouched (reconciling against no names would
    remove every domain), keep the relay, and stop.
 5. List existing domains. A failure to list counts as an empty list and marks the pass *unlisted*.
@@ -570,7 +571,8 @@ is served again as soon as the app re-adds it.
 2. waits up to `purge_wait` for the marker to disappear. On timeout it deletes the marker (else the
    app would purge at every later launch) and fails. When the app is not installed or cannot be
    launched, unregistration is skipped;
-3. stops the owner through the service manager (when the app did not already unregister it);
+3. stops the owner through the service manager and removes the agent definition (§11), so no login
+   starts a service whose bundle is gone;
 4. removes the app bundle and the data directory, keeping `config.json`;
 5. removes the CLI link when it may; when the link is owned by root it prints the command that
    removes it. The link is tested without following it, since it dangles by then.
@@ -619,18 +621,21 @@ submenu shows one disabled "Reading…" entry.
 
 - Distributed as a notarised installer package installing the app bundle into `/Applications`. A disk
   image cannot install the CLI link and exposes the app to translocation.
-- The package's post-install step creates the CLI link and launches the app as the console user. The
-  app registers the owner's agent and itself as a login item through the service-management API.
-- The owner's agent is defined inside the bundle (its program named relative to the bundle), runs
-  `tsync start` at login, and is restarted on any unclean exit. With no config, or no domain
+- The package's post-install step creates the CLI link, writes the owner's agent definition and loads
+  it, and launches the app, all as the console user. The app registers itself as a login item through
+  the service-management API.
+- The owner's agent is a per-user agent definition in the user's launch agents directory, naming the
+  program inside the app bundle by its absolute path. It MUST name the app's bundle identifier as its
+  associated bundle, so the system attributes it to the app in Login Items. It runs `tsync start` at
+  login, sends its output to the service log, and is restarted on any unclean exit. With no config, or no domain
   configured (every fresh install), the service still serves the request socket, answering `menu`
   with "No domains configured" and holding the app's subscription: the app then needs no other path
   to learn of the first domain, which takes effect at `tsync restart` like any configuration change. A
   leftover request socket is removed before the owner binds: a stale socket makes callers believe the
   owner is running.
-- Where the bundled agent cannot be registered, a per-user agent definition in the user's launch
-  agents directory is acceptable; it MUST name the app's bundle identifier as its associated bundle,
-  so the system attributes it to the app in Login Items.
+- The agent cannot be bundled and registered by the app: the system lets a sandboxed app register
+  only sandboxed executables through the service-management API ("SMAppService target executable must
+  be sandboxed because the app is sandboxed"), and the owner must not be sandboxed.
 - The user approves the extension once in System Settings. The owner reads and writes inside the
   extension's container (staging and temporary files), so its first start may prompt once for access
   to data from other apps.
@@ -664,7 +669,8 @@ submenu shows one disabled "Reading…" entry.
     container, or read files other processes wrote there. The system clones and unlinks a fetched file
     and unlinks a contents URL once the callback completes.
 11. Domain calls may fail with provider-not-found while an installer swaps the extension.
-12. Only a process holding a manager can register, signal, evict or request downloads.
+12. Only a process holding a manager can register, signal, evict or request downloads. A sandboxed app
+    can register only sandboxed executables as agents.
 13. Trash syncing defaults to on and must be turned off unless trash is implemented.
 14. A field returned neither stored nor pending is written to disk from the reply; returning exactly
     the offered set as pending marks those fields unsupported.
