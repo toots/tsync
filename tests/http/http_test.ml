@@ -203,9 +203,11 @@ let () =
             let rec slowly total =
               if total < head + size then (
                 Rt.sleep 0.02;
-                slowly
-                  (total
-                  + Transport.read t buf 0 (min 262144 (head + size - total))))
+                match
+                  Transport.read t buf 0 (min 262144 (head + size - total))
+                with
+                  | 0 -> ()
+                  | got -> slowly (total + got))
             in
             slowly first;
             Transport.write_string t
@@ -377,9 +379,13 @@ let () =
             Rt.async (fun () ->
                 let conn = Transport.accept_tls ~timeout:5. server (accept l) in
                 let buf = Bigstring.create 100 in
+                (* A close before the 3000 bytes ends the count short. *)
                 let rec go n =
                   if n >= 3000 then n
-                  else go (n + Transport.read ~timeout:2. conn buf 0 100)
+                  else (
+                    match Transport.read ~timeout:2. conn buf 0 100 with
+                      | 0 -> n
+                      | got -> go (n + got))
                 in
                 let n = go 0 in
                 Transport.close conn;

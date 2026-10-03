@@ -323,7 +323,7 @@ let () =
             env "TSYNC_CI_S3_SECRET_ACCESS_KEY" )
         with
           | Some bucket, Some akid, Some secret ->
-              let domain_name = "ci-" ^ string_of_int (Unix.getpid ()) in
+              let domain_name = Contract.run_scope () in
               prerr_endline
                 ("s3_test: against bucket " ^ bucket ^ ", domain " ^ domain_name);
               let opt k field =
