@@ -511,29 +511,46 @@ let keyed_worker t =
                  [(fun () -> Stop.sleep delay); (fun () -> wait_work ~since t)])
           else wait_work ~since t;
           loop ()
-      | Some (k, s, id) -> (
-          let outcome =
-            match decode_record t id with
-              | `Gone ->
-                  forget t id;
-                  `Done
-              | `Unreadable fl -> `Retry (unreadable t id fl)
-              | `Job job -> run_one t id job s.cancel
-          in
-          match outcome with
-            | `Done | `Parked ->
-                finish k s ~requeue:false;
-                loop ()
-            | `Stopping -> finish k s ~requeue:false
-            | `Retry d ->
-                Mutex.protect t.m (fun () ->
-                    if s.pending = None then s.pending <- Some id
-                    else (
-                      Records.complete t.log id;
-                      forget_locked t id);
-                    s.not_before <- Rt.now () +. d);
-                finish k s ~requeue:true;
-                loop ())
+      | Some (k, s, id) ->
+          (* Pitfall C-7.10: the slot is finished once, on every path; a record
+             that fails to decode is retried like an unreadable one. *)
+          let requeue = ref false and stopping = ref false in
+          Fun.protect
+            ~finally:(fun () -> finish k s ~requeue:!requeue)
+            (fun () ->
+              let outcome =
+                match decode_record t id with
+                  | `Gone ->
+                      forget t id;
+                      `Done
+                  | `Unreadable fl -> `Retry (unreadable t id fl)
+                  | `Job job -> run_one t id job s.cancel
+                  | exception ((Stop.Stopping | Rt.Cancelled) as e) -> raise e
+                  | exception e -> `Retry (unreadable t id (Fail.classify e))
+              in
+              match outcome with
+                | `Done | `Parked -> ()
+                | `Stopping -> stopping := true
+                | `Retry d ->
+                    requeue := true;
+                    let superseded =
+                      Mutex.protect t.m (fun () ->
+                          s.not_before <- Rt.now () +. d;
+                          if s.pending = None then (
+                            s.pending <- Some id;
+                            false)
+                          else (
+                            forget_locked t id;
+                            true))
+                    in
+                    (* A newer job replaced it; a record left behind is
+                       adopted again by the next rescan. *)
+                    if superseded then (
+                      try Records.complete t.log id
+                      with e when not (Rt.is_cancelled e) ->
+                        Log.warn "%s: cannot complete %s: %s" t.name id
+                          (Printexc.to_string e)));
+          if not !stopping then loop ()
   in
   try loop () with Stop.Stopping -> ()
 

@@ -145,3 +145,18 @@
  (alias runtest)
  (action
   (diff shared_outcome_test.expected shared_outcome_test.output)))
+
+(executable
+ (name dqueue_raise_test)
+ (modules dqueue_raise_test)
+ (libraries tsync_core unix))
+
+(rule
+ (with-stdout-to
+  dqueue_raise_test.output
+  (run ./dqueue_raise_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff dqueue_raise_test.expected dqueue_raise_test.output)))
