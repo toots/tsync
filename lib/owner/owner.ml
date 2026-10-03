@@ -273,11 +273,20 @@ let serve ?present ?(shared = false) ~socket config domains =
         E.set_changed_hook hooks.changed;
         let report = Report.create domain engine ~frontend:hooks.frontend in
         reports := (Domain_name.to_string dom.name, report) :: !reports;
+        let name = Domain_name.to_string dom.name in
+        let subscribers () =
+          match !server with
+            | Some srv ->
+                Ipc.subscribers srv name
+                + if shared then Ipc.subscribers srv all_topics else 0
+            | None -> 0
+        in
         let h =
-          Handler.create ~domain ~engine ~hooks
-            ~publish:(publish (Domain_name.to_string dom.name))
+          Handler.create ~subscribers
+            ~traffic:(fun () -> Report.traffic [report])
+            ~domain ~engine ~hooks ~publish:(publish name)
             ~stats:(fun _ -> stats_reply !reports report)
-            ~stop:Stop.request ~dest_roots:roots ~staging_roots:roots
+            ~stop:Stop.request ~dest_roots:roots ~staging_roots:roots ()
         in
         handler := Some h;
         { domain; engine; go; handler = h })
@@ -357,7 +366,7 @@ let one_shot ~what config dom f =
           ~publish:(fun _ -> 0)
           ~stats:(fun _ ->
             stats_reply [(Domain_name.to_string domain.name, report)] report)
-          ~stop:ignore ~dest_roots:[home] ~staging_roots:[home]
+          ~stop:ignore ~dest_roots:[home] ~staging_roots:[home] ()
       in
       f handler)
 

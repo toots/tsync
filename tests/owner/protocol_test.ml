@@ -189,6 +189,34 @@ let cases =
           read_only = false;
           paused = true;
           pending_uploads = 3;
+          pending_downloads = 1;
+          uploading =
+            [
+              {
+                name = "a.mkv";
+                rel = "v/a.mkv";
+                bytes = 0;
+                size = 9;
+                seconds = 1.;
+                rate = 0.;
+              };
+            ];
+          downloading =
+            [
+              {
+                name = "b.mkv";
+                rel = "b.mkv";
+                bytes = 4;
+                size = 8;
+                seconds = 2.;
+                rate = 2.;
+              };
+            ];
+          pending_bytes = 9;
+          subscribers = 2;
+          unnamed = 1;
+          traffic =
+            { up_bytes = 10; up_rate = 1.5; down_bytes = 4; down_rate = 2. };
           mount = Some "/m";
         } );
     Case (Pause false, false);

@@ -15,6 +15,9 @@ type stat = {
   folder_id : Folder_id.t option;
 }
 
+(** A transfer running now: [bytes] of [size] since [started] (wall time). *)
+type transfer = { path : string; size : int; bytes : int; started : float }
+
 type handle = {
   hid : int;
   mutable path : string;
@@ -1344,14 +1347,46 @@ module Make (C : Engine_ctx.S) = struct
       | Some m -> Cache.evict cache m
       | None -> ()
 
+  (* 08 §3.3 status [downloading]: the transfers of file bytes running now. *)
+  type download = { size : int; started : float; done_ : int Atomic.t }
+
+  let downloads_m = Mutex.create ()
+  let running_downloads : (int, string * download) Hashtbl.t = Hashtbl.create 8
+  let download_ids = Atomic.make 0
+
+  let downloading path ~size f =
+    let id = Atomic.fetch_and_add download_ids 1 in
+    let d = { size; started = Unix.gettimeofday (); done_ = Atomic.make 0 } in
+    Mutex.protect downloads_m (fun () ->
+        Hashtbl.replace running_downloads id (path, d));
+    Fun.protect
+      ~finally:(fun () ->
+        Mutex.protect downloads_m (fun () ->
+            Hashtbl.remove running_downloads id))
+      (fun () -> f (fun n -> ignore (Atomic.fetch_and_add d.done_ n)))
+
+  let downloads () =
+    Mutex.protect downloads_m (fun () ->
+        Hashtbl.fold
+          (fun _ (path, d) acc ->
+            {
+              path;
+              size = d.size;
+              bytes = Atomic.get d.done_;
+              started = d.started;
+            }
+            :: acc)
+          running_downloads [])
+
   let pin path ~keep =
+    let pin_manifest (m : Manifest.t) =
+      downloading path ~size:m.size (fun fetched ->
+          Cache.pin ~fetched cache m ~until:(Unix.gettimeofday () +. keep))
+    in
     match resolve path with
-      | Some (Published m) ->
-          Cache.pin cache m ~until:(Unix.gettimeofday () +. keep)
+      | Some (Published m) -> pin_manifest m
       | Some (Staged_edit _) -> (
-          match base_of path with
-            | Some m -> Cache.pin cache m ~until:(Unix.gettimeofday () +. keep)
-            | None -> ())
+          match base_of path with Some m -> pin_manifest m | None -> ())
       | None -> Fail.absent "%s: no such file" path
 
   let unpin path =
@@ -1385,18 +1420,20 @@ module Make (C : Engine_ctx.S) = struct
       (fun () ->
         let size = size_of path in
         let fd = create_dest dst in
-        Fs.with_fd fd (fun fd ->
-            let step = 4 * 1024 * 1024 in
-            let rec go off =
-              if off < size then (
-                let s = read h ~off ~len:(min step (size - off)) in
-                let n = Bigstring.length s in
-                if n = 0 then Fail.corrupt "%s: short read at %d" path off;
-                Fs.pwrite_all fd s ~boff:0 ~len:n ~off;
-                go (off + n))
-            in
-            go 0;
-            Fs.fsync fd);
+        downloading path ~size (fun fetched ->
+            Fs.with_fd fd (fun fd ->
+                let step = 4 * 1024 * 1024 in
+                let rec go off =
+                  if off < size then (
+                    let s = read h ~off ~len:(min step (size - off)) in
+                    let n = Bigstring.length s in
+                    if n = 0 then Fail.corrupt "%s: short read at %d" path off;
+                    Fs.pwrite_all fd s ~boff:0 ~len:n ~off;
+                    fetched n;
+                    go (off + n))
+                in
+                go 0;
+                Fs.fsync fd));
         let st = stat path in
         try Unix.utimes dst st.mtime st.mtime with _ -> ())
 
@@ -1405,7 +1442,12 @@ module Make (C : Engine_ctx.S) = struct
     Fun.protect
       ~finally:(fun () -> close_read h)
       (fun () ->
-        let s = read h ~off ~len in
+        let s =
+          downloading path ~size:len (fun fetched ->
+              let s = read h ~off ~len in
+              fetched (Bigstring.length s);
+              s)
+        in
         let fd = create_dest dst in
         Fs.with_fd fd (fun fd ->
             if Bigstring.length s > 0 then

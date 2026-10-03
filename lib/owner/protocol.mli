@@ -4,6 +4,7 @@
     that the native shells speak. *)
 
 open Tsync_core
+module R = Tsync_status.Status_report
 
 type availability = Online_only | Cached | Pinned of float
 
@@ -73,11 +74,29 @@ type resynced = Incremental of int | Full of { manifests : int; failed : int }
 type trash_restored = Restored of int | Not_in_trash | Name_taken
 type shared = { url : string; expires : float }
 
+(** A transfer as [status] lists it (08 §3.3). *)
+type transfer = {
+  name : string;
+  rel : string;
+  bytes : int;
+  size : int;
+  seconds : float;
+  rate : float;
+}
+[@@deriving yojson]
+
 type status = {
   domain : string;
   read_only : bool;
   paused : bool;
   pending_uploads : int;
+  pending_downloads : int;
+  uploading : transfer list;
+  downloading : transfer list;
+  pending_bytes : int;
+  subscribers : int;
+  unnamed : int;
+  traffic : R.traffic;
   mount : string option;
 }
 

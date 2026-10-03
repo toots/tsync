@@ -18,7 +18,11 @@ type t
     received it; [stats] answers the owner's report for an [arg] set; [stop]
     requests the owner's stop. [dest_roots] and [staging_roots] confine the
     paths clients pass (security-model §7.3). *)
+(** [subscribers] counts the connections subscribed to the domain's events and
+    [traffic] measures its stores, for [status] (08 §3.3). *)
 val create :
+  ?subscribers:(unit -> int) ->
+  ?traffic:(unit -> Tsync_status.Status_report.traffic) ->
   domain:Tsync_domain.Domain.t ->
   engine:(module Tsync_sync.Engine.S) ->
   hooks:hooks ->
@@ -27,6 +31,7 @@ val create :
   stop:(unit -> unit) ->
   dest_roots:string list ->
   staging_roots:string list ->
+  unit ->
   t
 
 (** An event of this domain, numbered as {!publish_event} numbers them. *)

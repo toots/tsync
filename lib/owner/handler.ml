@@ -24,6 +24,10 @@ type t = {
   staging_roots : string list;
   answered_unreachable : bool Atomic.t;
   running : running option Atomic.t;
+  subscribers : unit -> int;
+  traffic : unit -> Tsync_status.Status_report.traffic;
+  unnamed : int Atomic.t;  (** the last listing's or feed page's count *)
+  owed : (float * int) option Atomic.t;  (** when [pendingBytes] was read *)
 }
 
 let default_pin_keep = 10. *. 86400.
@@ -32,9 +36,16 @@ let feed_limit = 512
 let event_ids = Atomic.make 0
 let job_ids = Atomic.make 0
 
-let create ~domain ~engine ~hooks ~publish ~stats ~stop ~dest_roots
-    ~staging_roots =
+let no_traffic : Tsync_status.Status_report.traffic =
+  { up_bytes = 0; up_rate = 0.; down_bytes = 0; down_rate = 0. }
+
+let create ?(subscribers = fun () -> 0) ?(traffic = fun () -> no_traffic)
+    ~domain ~engine ~hooks ~publish ~stats ~stop ~dest_roots ~staging_roots () =
   {
+    subscribers;
+    traffic;
+    unnamed = Atomic.make 0;
+    owed = Atomic.make None;
     domain;
     engine;
     hooks;
@@ -252,6 +263,12 @@ let rmdir_subtree (module E : Engine.S) path =
     (List.rev entries);
   E.rmdir path
 
+(* 08 §2.3: the last count of items a listing or feed page could not name,
+   reported by [status]. *)
+let note_unnamed t n =
+  Atomic.set t.unnamed n;
+  n
+
 let list_dir t dir ~after ~limit : Protocol.page =
   let (module E : Engine.S) = t.engine in
   let path = target t dir in
@@ -278,7 +295,7 @@ let list_dir t dir ~after ~limit : Protocol.page =
       (match (more, List.rev page) with
         | true, (last : E.entry) :: _ -> Some last.name
         | _ -> None);
-    unnamed = List.length (List.filter Option.is_none rows);
+    unnamed = note_unnamed t (List.length (List.filter Option.is_none rows));
   }
 
 (* 08 §3.6 step 6: names come from the folder-id index, which keeps an id after
@@ -386,7 +403,8 @@ let changes t ~anchor ~limit : Protocol.changes =
             cursor;
             more;
             ops = List.filter_map Fun.id rendered;
-            unnamed = List.length (List.filter Option.is_none rendered);
+            unnamed =
+              note_unnamed t (List.length (List.filter Option.is_none rendered));
           }
 
 (* 08 §3.7: the first page walks the mirror, sorts by path and keeps the walk;
@@ -462,7 +480,12 @@ let list_all t ~after ~limit : Protocol.listing =
               let rows =
                 List.map (fun p -> try row_of t p with _ -> None) paths
               in
-              Listed { items = List.filter_map Fun.id rows; next; unnamed })
+              Listed
+                {
+                  items = List.filter_map Fun.id rows;
+                  next;
+                  unnamed = note_unnamed t unnamed;
+                })
 
 let event_json t ev = event t (Protocol.event_name ev) []
 let publish_event t ev = t.publish (event_json t ev)
@@ -615,6 +638,19 @@ let cancel t id =
         true
     | _ -> false
 
+(* 08 §3.3 [pendingBytes]: every owed record's size, which reads the whole
+   WAL, so a menu polling [status] reads it at most every [owed_window]. *)
+let owed_window = 5.
+
+let pending_bytes t now =
+  let (module E : Engine.S) = t.engine in
+  match Atomic.get t.owed with
+    | Some (at, bytes) when now -. at < owed_window -> bytes
+    | _ ->
+        let bytes = (E.activity ()).bytes_owed in
+        Atomic.set t.owed (Some (now, bytes));
+        bytes
+
 (* 08 §3.3, one request. *)
 let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
  fun t ~send req ->
@@ -626,11 +662,32 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
     | List_dir r -> list_dir t r.dir ~after:r.after ~limit:r.limit
     | List_all r -> list_all t ~after:r.after ~limit:r.limit
     | Status ->
+        let now = Unix.gettimeofday () in
+        let transfer (x : Engine_intf.transfer) : Protocol.transfer =
+          let seconds = Float.max 0. (now -. x.started) in
+          {
+            name = Names.leaf_of x.path;
+            rel = x.path;
+            bytes = x.bytes;
+            size = x.size;
+            seconds;
+            rate =
+              (if seconds > 0. then float_of_int x.bytes /. seconds else 0.);
+          }
+        in
+        let downloading = List.map transfer (E.downloads ()) in
         {
           Protocol.domain = domain_name t;
           read_only = t.domain.domain.read_only;
           paused = E.is_paused ();
           pending_uploads = E.pending_uploads ();
+          pending_downloads = List.length downloading;
+          uploading = List.map transfer (E.uploads ());
+          downloading;
+          pending_bytes = pending_bytes t now;
+          subscribers = t.subscribers ();
+          unnamed = Atomic.get t.unnamed;
+          traffic = t.traffic ();
           mount = Option.bind (t.hooks.frontend ()) (fun f -> f.mount);
         }
     | Stats args -> t.stats args
@@ -687,7 +744,15 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
               E.fetch_range path r.dest ~off:r.offset ~len:r.length)
         in
         { Protocol.local_path = r.dest; offset = r.offset; length; item }
-    | Download_progress _ -> Protocol.Inactive
+    | Download_progress item -> (
+        let path = target t item in
+        match
+          List.find_opt
+            (fun (x : Engine_intf.transfer) -> x.path = path)
+            (E.downloads ())
+        with
+          | Some x -> Protocol.Active { downloaded = x.bytes; total = x.size }
+          | None -> Inactive)
     | Evict item ->
         let succeeded, failed = each_file t (target t item) E.evict in
         { Protocol.succeeded; failed }

@@ -1522,6 +1522,26 @@ module Make (C : Engine_ctx.S) = struct
 
   let pending_uploads () = Dqueue.pending uploads
 
+  let uploads_running () =
+    List.concat_map
+      (fun id ->
+        match read_record id with
+          | Some r ->
+              List.filter_map
+                (function
+                  | Op.Put { path; size; _ } ->
+                      Some
+                        {
+                          Engine_intf.path;
+                          size;
+                          bytes = 0;
+                          started = Unix.gettimeofday ();
+                        }
+                  | _ -> None)
+                r.ops
+          | None -> [])
+      (Dqueue.running uploads)
+
   let activity () : Engine_intf.activity =
     let records =
       List.filter_map
@@ -1594,4 +1614,7 @@ module Make (C : Engine_ctx.S) = struct
 
   let set_changed_hook f = changed_hook := f
   let staged_edits () = Staged.edits staged
+
+  (* Last: [uploads] is the upload queue everywhere above. *)
+  let uploads = uploads_running
 end
