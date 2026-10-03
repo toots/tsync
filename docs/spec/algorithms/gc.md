@@ -187,6 +187,10 @@ its anchor, or its id; path equal to that name, at the root), then anchor it "in
 ordinary trashed folder: restorable, and purged by expiry. A client that later completes the interrupted
 placement re-anchors the folder live; the adoption's entry then becomes stale and expiry deletes it.
 
+A walk that could not read a folder (its listing or its marker failed, failure-model §5.2) is
+**incomplete**: below that folder it cannot tell an orphan from a folder it never reached. The report
+names every folder it could not read, and repair adopts no orphan from an incomplete walk.
+
 A namespace holding only its anchor is a tombstone, not an orphan. Repair MAY delete a tombstone once
 its full enumeration found no marker naming that id.
 
