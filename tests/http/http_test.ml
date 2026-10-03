@@ -2,9 +2,19 @@ open Tsync_core
 open Tsync_http
 
 let p fmt = Printf.printf (fmt ^^ "\n%!")
+let finished = Atomic.make 0
 
-let handler (r : Server.request) read_body =
+let handler (r : Server.request) read_body : Server.response =
   match r.path with
+    | "/finally" ->
+        {
+          status = 200;
+          headers = [];
+          body =
+            Server.stream
+              ~finally:(fun () -> Atomic.incr finished)
+              (fun w -> w (Bigstring.of_string "body"));
+        }
     | "/echo" ->
         let body = Bigstring.to_string (read_body ~limit:16) in
         Server.text 200 (Printf.sprintf "%s %s %S" r.meth r.query body)
@@ -17,8 +27,7 @@ let handler (r : Server.request) read_body =
           status = 200;
           headers = [];
           body =
-            Stream
-              (fun w ->
+            Server.stream (fun w ->
                 List.iter
                   (fun s -> w (Bigstring.of_string s))
                   ["one "; ""; "two "; "three"]);
@@ -61,6 +70,12 @@ let () =
       show (Client.request e ~meth:"HEAD" "/echo");
       show (Client.request e ~meth:"GET" "/stream");
       show (Client.request e ~meth:"GET" "/nothing");
+      p
+        "== a stream's resources are released whether or not its body is \
+         written";
+      show (Client.request e ~meth:"GET" "/finally");
+      show (Client.request e ~meth:"HEAD" "/finally");
+      p "  released: %d of 2" (Atomic.get finished);
       p "http date: %s, parsed back: %b, garbage: %b" (Codec.http_date 1e9)
         (Codec.parse_http_date (Codec.http_date 1e9) = Some 1e9)
         (Codec.parse_http_date "garbage" = None);

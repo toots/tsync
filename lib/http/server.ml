@@ -31,7 +31,9 @@ type body =
   | Empty
   | String of string
   | Bigstring of Bigstring.t
-  | Stream of ((Bigstring.t -> unit) -> unit)
+  | Stream of { write : (Bigstring.t -> unit) -> unit; finally : unit -> unit }
+
+let stream ?(finally = ignore) write = Stream { write; finally }
 
 type response = { status : int; headers : Codec.headers; body : body }
 
@@ -74,6 +76,8 @@ let reason = function
   | _ -> "Status"
 
 let write_response lim conn ~head_only ~close r =
+  let finally = match r.body with Stream s -> s.finally | _ -> ignore in
+  Fun.protect ~finally @@ fun () ->
   let b = Buffer.create 256 in
   let framing =
     match r.body with
@@ -96,7 +100,7 @@ let write_response lim conn ~head_only ~close r =
     | Bigstring body when not head_only ->
         write (Buffer.contents b);
         write_body body
-    | Stream f when not head_only ->
+    | Stream { write = f; _ } when not head_only ->
         write (Buffer.contents b);
         f (fun piece ->
             if Bigstring.length piece > 0 then (

@@ -26,10 +26,19 @@ type body =
   | Empty
   | String of string  (** short texts *)
   | Bigstring of Tsync_core.Bigstring.t
-  | Stream of ((Tsync_core.Bigstring.t -> unit) -> unit)
-      (** written as chunks; a failure after the headers truncates it *)
+  | Stream of {
+      write : (Tsync_core.Bigstring.t -> unit) -> unit;
+          (** written as chunks; a failure after the headers truncates it *)
+      finally : unit -> unit;
+          (** run once the response ends, on every path: written, skipped for
+              HEAD, failed on its head or body (pitfall C-2.9) *)
+    }
 
 type response = { status : int; headers : Codec.headers; body : body }
+
+(** A streamed body; [finally] defaults to nothing. *)
+val stream :
+  ?finally:(unit -> unit) -> ((Tsync_core.Bigstring.t -> unit) -> unit) -> body
 
 (** A [text/plain] answer of one line. *)
 val text : ?headers:Codec.headers -> int -> string -> response
