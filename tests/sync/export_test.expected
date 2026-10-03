@@ -16,6 +16,14 @@ resumed: exported 0 (0 bytes), already there 0, failed 1, cancelled
 resumed: exported 1 (39992 bytes), already there 0, failed 0
   content equal: true
 
+== a record torn mid-line, resumed twice
+torn: exported 0, already there 0, failed 1, cancelled
+  failed b.bin: cancelled
+torn: exported 0, already there 0, failed 1, cancelled
+  failed b.bin: cancelled
+torn: exported 1, already there 0, failed 0
+  content equal: true
+
 == changed upstream since an interrupted export: started over
 changed: exported 0, already there 0, failed 1, cancelled
   failed b.bin: cancelled
