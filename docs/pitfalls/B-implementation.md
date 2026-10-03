@@ -497,6 +497,11 @@ This file collects the traps that came from the implementation medium rather tha
 - **Check** — An effect applied to every element is a `List.iter` or `List.map`; its answers are folded afterwards. `for_all`, `exists`, `&&` and `||` take pure predicates only.
 - **Seen** — rewrite (review of PR #114).
 
+### B-10.10 A fold that keeps only part of its best element
+- **Pitfall** — Choosing a trashed folder's newest entry folded over triples `(entry, marker, path)` and, when the current element was not newer, returned `(best_entry, current_marker, current_path)`: the date of one entry beside the path of another. A folder trashed twice under different paths reported the path of whichever entry the fold visited last, so `trash --purge PATH` missed the folder just trashed or purged an older one.
+- **Check** — A fold selecting an element keeps or replaces it whole (`if better cur best then cur else best`), never rebuilding the accumulator from pieces of both; or it selects by a key (`List.sort`, a max by key) and destructures once.
+- **Seen** — rewrite (review of PR #114).
+
 ## 11. Build, link and packaging [build]
 
 ### B-11.1 Link-time registration silently drops drivers and frontends
