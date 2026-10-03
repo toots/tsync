@@ -142,3 +142,13 @@ stalls the whole Lwt loop (every domain) for its duration; acceptable because ea
 tiny local file operation. Under domains it only stalls the calling fiber's domain, but a
 blocking call inside an effects scheduler still blocks that scheduler — keep them tiny or
 route them through the runtime's blocking-call offload.
+
+## B-III. Pitfalls met in the File Provider rewrite
+
+**B-III.1 A peer op's local facts live at its translated path (§2.7 `fid`).** A peer names the
+path it saw; the local half of the op acts at that path translated through this client's moved
+folders and owed renames. Anything read about the local file, its file id first, must be read where
+the op acts, not at the peer's path: read at the peer's path, a delete under a folder this client
+renamed finds no id (the feed drops it as unnamed, and the replica keeps the file), or finds the id
+of an unrelated file now at that path (the replica drops a file that still exists). The arrival
+code that does the translation is the one place that may read it; it reports the id it acted on.
