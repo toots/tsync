@@ -451,15 +451,19 @@ let job_key = function
 (* A forward in flight when the deletion lands would put a doomed chunk back
    on the copy; later forwards are skipped while every slot is held. *)
 let without_forwards c f =
-  for _ = 1 to max_forwards do
-    Rt.Semaphore.acquire c.forwards
-  done;
+  (* Pitfall C-7.10: a cancel while taking the slots gives back those taken. *)
+  let taken = ref 0 in
   Fun.protect
     ~finally:(fun () ->
-      for _ = 1 to max_forwards do
+      for _ = 1 to !taken do
         Rt.Semaphore.release c.forwards
       done)
-    f
+    (fun () ->
+      for _ = 1 to max_forwards do
+        Rt.Semaphore.acquire c.forwards;
+        incr taken
+      done;
+      f ())
 
 (* gc §5.7: a copy whose function this owner confirmed is told by requests;
    the restore check waits until the function consumed each one. *)
