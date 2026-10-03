@@ -44,7 +44,9 @@ let series ?(gap = 0.) ?(limit = 5.) path request count =
 let quantile l q =
   match l with
     | [] -> nan
-    | _ -> List.nth l (min (List.length l - 1) (int_of_float (q *. float (List.length l))))
+    | _ ->
+        List.nth l
+          (min (List.length l - 1) (int_of_float (q *. float (List.length l))))
 
 let switches () =
   match Sys.readdir "/proc/self/task" with
@@ -77,13 +79,14 @@ let cpu () =
   t.tms_utime +. t.tms_stime
 
 let report name ~asked l ~wall ~cpu:c ~switched =
-  Printf.printf "%-34s answered %5d/%-5d  p50 %8.3f ms  p99 %8.3f ms  max %8.3f ms"
-    name (List.length l) asked (quantile l 0.5) (quantile l 0.99)
-    (quantile l 1.);
+  Printf.printf
+    "%-34s answered %5d/%-5d  p50 %8.3f ms  p99 %8.3f ms  max %8.3f ms" name
+    (List.length l) asked (quantile l 0.5) (quantile l 0.99) (quantile l 1.);
   Printf.printf "  wall %6.2f s  cpu %5.2f s" wall c;
   (match switched with
     | Some s when l <> [] ->
-        Printf.printf "  %5.1f switches/request" (float s /. float (List.length l))
+        Printf.printf "  %5.1f switches/request"
+          (float s /. float (List.length l))
     | _ -> ());
   Printf.printf "\n%!"
 
@@ -95,7 +98,8 @@ let measure name ?gap ?limit path request count =
   in
   report name ~asked:count l
     ~wall:(Unix.gettimeofday () -. t0)
-    ~cpu:(cpu () -. c0) ~switched
+    ~cpu:(cpu () -. c0)
+    ~switched
 
 let ping = {|{"action":"ping"}|}
 let other = {|{"action":"other"}|}
