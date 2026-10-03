@@ -245,8 +245,9 @@ let rec accept_loop ?tls t lim handle lfd =
           ->
             ()
         | exception e when not (Rt.is_cancelled e) ->
-            Log.once "http accept" Log.Warn "http accept: %s"
-              (Printexc.to_string e);
+            Rt.within `Threaded (fun () ->
+                Log.once "http accept" Log.Warn "http accept: %s"
+                  (Printexc.to_string e));
             Rt.sleep 0.1);
     accept_loop ?tls t lim handle lfd)
 
@@ -281,7 +282,7 @@ let serve ?(limits = default_limits) ?tls addrs handle =
   let running = Atomic.make (List.length listeners) in
   List.iter
     (fun lfd ->
-      Rt.spawn ~name:"http accept" (fun () ->
+      Rt.spawn ~name:"http accept" ~execution:`Immediate (fun () ->
           Fun.protect
             ~finally:(fun () ->
               Unix.close lfd;

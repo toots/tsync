@@ -87,6 +87,21 @@
   (diff mapped_pages_test.expected mapped_pages_test.output)))
 
 (executable
+ (name rt_class_test)
+ (modules rt_class_test)
+ (libraries tsync_core tsync_ipc threads.posix unix))
+
+(rule
+ (with-stdout-to
+  rt_class_test.output
+  (run ./rt_class_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff rt_class_test.expected rt_class_test.output)))
+
+(executable
  (name rt_fd_test)
  (modules rt_fd_test)
  (libraries tsync_core threads.posix unix))

@@ -19,9 +19,25 @@ val now : unit -> float
 (** Raises the pending cancellation of the calling fiber, if any. *)
 val check : unit -> unit
 
+(** How a fiber is scheduled, spec 01 §6.5: [`Threaded] is may-block work and
+    the default, [`Immediate] is non-blocking I/O, [`Direct] is time-sensitive
+    work. The last two run on a worker of the pool itself and stall it for as
+    long as they run. *)
+type execution = [ `Immediate | `Direct | `Threaded ]
+
 (** Run a detached fiber. It never fails: an escaping exception other than a
     cancellation is logged. *)
-val spawn : ?name:string -> (unit -> unit) -> unit
+val spawn : ?name:string -> ?execution:execution -> (unit -> unit) -> unit
+
+(** [within execution fn] runs [fn] with the calling fiber scheduled as
+    [execution], then puts it back. Waits inside [fn] resume as [execution], and
+    children started inside it ({!async}, {!all}, {!first}) start as it. Free
+    when the fiber is already scheduled so.
+
+    Entering and leaving are suspension points that may resume on another system
+    thread, so never inside [Mutex.protect]. Entering [`Threaded] waits for a
+    slot, and that wait is not cancellable. *)
+val within : execution -> (unit -> 'a) -> 'a
 
 (** Block the calling system thread until [fn], run as a fiber, returns or
     raises. This is how the main thread and foreign threads (FUSE, JNI) enter
@@ -51,7 +67,7 @@ val wait_readable : ?timeout:float -> Unix.file_descr -> unit
 val wait_writable : ?timeout:float -> Unix.file_descr -> unit
 
 (** Call [fire] once, [delay] seconds from now, outside any fiber. *)
-val timer : float -> (unit -> unit) -> unit
+val timer : ?execution:execution -> float -> (unit -> unit) -> unit
 
 (** One-shot promises. Resolving never runs a waiter inside the resolver. *)
 module Promise : sig
@@ -71,8 +87,8 @@ module Promise : sig
   val is_resolved : 'a t -> bool
 end
 
-(** Run [fn] in a child fiber of the caller; cancelling the caller cancels it.
-*)
+(** Run [fn] in a child fiber of the caller, scheduled as the caller is;
+    cancelling the caller cancels it. *)
 val async : (unit -> 'a) -> 'a Promise.t
 
 (** Run concurrently and wait for all; results keep input order and the first

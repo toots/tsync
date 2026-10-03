@@ -89,7 +89,7 @@ module Line = struct
                   go started
               | exception e when retry_io e -> go started)
     in
-    go None
+    Rt.within `Immediate (fun () -> go None)
 
   let write ?deadline t s =
     let s = s ^ "\n" in
@@ -98,8 +98,9 @@ module Line = struct
         match Unix.write_substring t.fd s off (String.length s - off) with
           | n -> go (off + n)
           | exception e when retry_io e ->
-              Rt.wait_writable ?timeout:(remaining deadline) t.fd;
-              go off)
+              Rt.within `Immediate (fun () ->
+                  Rt.wait_writable ?timeout:(remaining deadline) t.fd;
+                  go off))
     in
     go 0
 end
@@ -235,8 +236,15 @@ let parse l =
     | _ -> Error (invalid "expected a JSON object")
     | exception Yojson.Json_error _ -> Error (invalid "invalid JSON")
 
-let serve_conn t c handler =
+(* 01 §6.5: a connection is read, parsed and answered as non-blocking I/O, and
+   only the handler leaves for the class its request names. The liveness
+   answer (07 §4.3) never leaves. *)
+let serve_conn t c ~execution handler =
   let reply j = Line.write c.line (Yojson.Safe.to_string j) in
+  let handler req =
+    if field req "action" = Some "ping" then Reply (ok [])
+    else Rt.within (execution req) (fun () -> handler req)
+  in
   let rec loop () =
     let open_ =
       Mutex.protect t.m (fun () ->
@@ -264,7 +272,9 @@ let serve_conn t c handler =
                       Mutex.protect t.m (fun () -> c.answering <- false);
                       stream_events t c topic first
                   | Stream run ->
-                      reply (run (stream_lines c));
+                      reply
+                        (Rt.within (execution req) (fun () ->
+                             run (stream_lines c)));
                       loop ()
                   | exception e ->
                       reply (failure (Fail.classify e));
@@ -273,7 +283,9 @@ let serve_conn t c handler =
   try loop () with
     | Line.Too_long -> (
         try reply (invalid "request line too long") with _ -> ())
-    | e -> Log.debug "%s: connection closed: %s" t.path (Printexc.to_string e)
+    | e ->
+        Rt.within `Threaded (fun () ->
+            Log.debug "%s: connection closed: %s" t.path (Printexc.to_string e))
 
 let unregister t c =
   Mutex.protect t.m (fun () -> t.conns <- List.filter (( != ) c) t.conns);
@@ -285,11 +297,12 @@ let hang_up c = try Unix.shutdown c.line.fd SHUTDOWN_ALL with _ -> ()
 
 (* 01 §11: at the bound, the connection idle the longest makes room; with none
    idle the newcomer is refused. *)
-let admit t fd handler =
+let admit t fd ~execution handler =
   if (try Fs.peer_uid fd with _ -> -1) <> Unix.getuid () then (
-    Log.once ("ipc peer " ^ t.path) Log.Warn
-      "%s: refused a connection from another user" t.path;
-    Unix.close fd)
+    Unix.close fd;
+    Rt.within `Threaded (fun () ->
+        Log.once ("ipc peer " ^ t.path) Log.Warn
+          "%s: refused a connection from another user" t.path))
   else (
     let c = { line = Line.make fd; idle_since = None; answering = false } in
     let admitted =
@@ -312,14 +325,14 @@ let admit t fd handler =
     in
     if not admitted then Unix.close fd
     else
-      Rt.spawn ~name:"ipc connection" (fun () ->
+      Rt.spawn ~name:"ipc connection" ~execution:`Immediate (fun () ->
           Fun.protect
             ~finally:(fun () ->
               unregister t c;
               Unix.close fd)
-            (fun () -> serve_conn t c handler)))
+            (fun () -> serve_conn t c ~execution handler)))
 
-let rec accept_loop t handler =
+let rec accept_loop t ~execution handler =
   let ready =
     Rt.first
       [
@@ -333,16 +346,17 @@ let rec accept_loop t handler =
   in
   if ready then (
     (match Unix.accept ~cloexec:true t.lfd with
-      | fd, _ -> admit t fd handler
+      | fd, _ -> admit t fd ~execution handler
       | exception e when retry_io e -> ()
       | exception Unix.Unix_error (ECONNABORTED, _, _) -> ()
       | exception e when not (Rt.is_cancelled e) ->
-          Log.once ("ipc accept " ^ t.path) Log.Warn "%s: accept: %s" t.path
-            (Printexc.to_string e);
+          Rt.within `Threaded (fun () ->
+              Log.once ("ipc accept " ^ t.path) Log.Warn "%s: accept: %s" t.path
+                (Printexc.to_string e));
           Rt.sleep 0.1);
-    accept_loop t handler)
+    accept_loop t ~execution handler)
 
-let serve ~path handler =
+let serve ?(execution = fun _ -> `Threaded) ~path handler =
   Tsync_core.Fs.ignore_sigpipe ();
   check_dir (Filename.dirname path);
   check_length path;
@@ -367,13 +381,13 @@ let serve ~path handler =
       left = Rt.Signal.create ();
     }
   in
-  Rt.spawn ~name:("ipc " ^ path) (fun () ->
+  Rt.spawn ~name:("ipc " ^ path) ~execution:`Immediate (fun () ->
       Fun.protect
         ~finally:(fun () ->
           Unix.close lfd;
           (try Unix.unlink path with Unix.Unix_error _ -> ());
           Rt.Promise.resolve t.finished ())
-        (fun () -> accept_loop t handler));
+        (fun () -> accept_loop t ~execution handler));
   t
 
 let close_grace = 5.
@@ -501,6 +515,7 @@ let call_stream path req ~on_line =
             in
             next ());
           (fun () ->
+            Rt.within `Direct @@ fun () ->
             let rec probe () =
               Rt.sleep liveness_interval;
               (try ignore (call ~timeout:liveness_deadline path ping)

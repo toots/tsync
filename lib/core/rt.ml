@@ -4,15 +4,19 @@
 exception Cancelled
 exception Timeout
 
+type execution = Duppy.execution_class
+
+(* [execution] is written by the fiber itself only. *)
 type ctx = {
   cm : Mutex.t;
   mutable cancel : exn option;
   mutable hook : (exn -> unit) option;
   mutable children : ctx list;
+  mutable execution : execution;
 }
 
-let new_ctx () =
-  { cm = Mutex.create (); cancel = None; hook = None; children = [] }
+let new_ctx execution =
+  { cm = Mutex.create (); cancel = None; hook = None; children = []; execution }
 
 let rec cancel_ctx c exn =
   Mutex.lock c.cm;
@@ -25,8 +29,8 @@ let rec cancel_ctx c exn =
         Option.iter (fun h -> h exn) hook;
         List.iter (fun ch -> cancel_ctx ch exn) children
 
-let child_ctx parent =
-  let c = new_ctx () in
+let child_ctx ?(execution = `Threaded) parent =
+  let c = new_ctx execution in
   Mutex.lock parent.cm;
   let inherited = parent.cancel in
   if inherited = None then parent.children <- c :: parent.children;
@@ -40,7 +44,7 @@ let detach_ctx parent c =
 
 type _ Effect.t += Current : ctx Effect.t
 
-let root = new_ctx ()
+let root = new_ctx `Threaded
 let current () = try Effect.perform Current with Effect.Unhandled _ -> root
 
 type fiber = ctx
@@ -60,11 +64,14 @@ let task_error =
       Printf.eprintf "tsync: scheduler task failed: %s\n%!"
         (Printexc.to_string exn))
 
-let scheduler : unit Duppy.scheduler =
+(* Spec 01 §6.5: time-sensitive work is taken before may-block work. *)
+let rank = function `Immediate -> 0 | `Direct -> 1 | `Threaded -> 2
+
+let scheduler : execution Duppy.scheduler =
   Duppy.create
     ~on_error:(fun exn bt -> !task_error exn bt)
-    ~classify:(fun () -> `Threaded)
-    ()
+    ~compare:(fun a b -> Int.compare (rank a) (rank b))
+    ~classify:Fun.id ()
 
 let start_lock = Mutex.create ()
 
@@ -106,7 +113,7 @@ let spawn_in ?(name = "task") ctx fn =
   ensure_started ();
   Duppy.Task.add scheduler
     {
-      priority = ();
+      priority = ctx.execution;
       events = [`Delay 0.];
       handler =
         (fun _ ->
@@ -119,13 +126,26 @@ let spawn_in ?(name = "task") ctx fn =
     }
 
 (* The context leaves its parent's children when the fiber ends. *)
-let spawn_child ?name parent fn =
-  let c = child_ctx parent in
+let spawn_child ?name ?execution parent fn =
+  let c = child_ctx ?execution parent in
   spawn_in ?name c (fun () ->
       Fun.protect ~finally:(fun () -> detach_ctx parent c) fn);
   c
 
-let spawn ?name fn = ignore (spawn_child ?name root fn)
+let spawn ?name ?execution fn = ignore (spawn_child ?name ?execution root fn)
+
+(* Outside any fiber there is nothing to move. *)
+let within execution fn =
+  let ctx = current () in
+  let previous = ctx.execution in
+  if ctx == root || previous = execution then fn ()
+  else (
+    let move execution =
+      ctx.execution <- execution;
+      Duppy.reschedule ~priority:execution scheduler
+    in
+    move execution;
+    Fun.protect ~finally:(fun () -> move previous) fn)
 
 (* [register] receives a resolver that answers whether it was the one to wake
    the fiber, since a cancellation may win the race.
@@ -137,7 +157,7 @@ let suspend (register : (('a, exn) result -> bool) -> unit -> unit) : 'a =
   check ();
   let cell = Atomic.make None in
   let withdraw = Atomic.make ignore and by_cancel = Atomic.make false in
-  Duppy.suspend ~priority:() scheduler (fun resume ->
+  Duppy.suspend ~priority:ctx.execution scheduler (fun resume ->
       let finish r =
         if Atomic.compare_and_set cell None (Some r) then (
           resume ();
@@ -166,10 +186,10 @@ let suspend (register : (('a, exn) result -> bool) -> unit -> unit) : 'a =
     | Some (Error e) -> raise e
     | None -> assert false
 
-let timer d fire =
+let timer ?(execution = `Threaded) d fire =
   Duppy.Task.add scheduler
     {
-      priority = ();
+      priority = execution;
       events = [`Delay d];
       handler =
         (fun _ ->
@@ -181,7 +201,7 @@ let sleep d =
   if d <= 0. then check ()
   else
     suspend (fun resolve ->
-        timer d (fun () -> ignore (resolve (Ok ())));
+        timer ~execution:`Immediate d (fun () -> ignore (resolve (Ok ())));
         ignore)
 
 let yield () =
@@ -200,7 +220,7 @@ let wait_fd ?(timeout = infinity) ev fd =
       suspend (fun resolve ->
           Duppy.Task.add scheduler
             {
-              priority = ();
+              priority = `Immediate;
               events = [ev fd; `Delay (min left 30.)];
               handler =
                 (fun evs ->
@@ -281,7 +301,7 @@ module Promise = struct
   (* Not cancellable: a caller cancelled meanwhile still waits. *)
   let join p =
     if not (is_resolved p) then
-      Duppy.suspend ~priority:() scheduler (fun resume ->
+      Duppy.suspend ~priority:(current ()).execution scheduler (fun resume ->
           let woken = Atomic.make false in
           let wake _ =
             if Atomic.compare_and_set woken false true then (
@@ -299,10 +319,12 @@ module Promise = struct
                 Mutex.unlock p.m)
 end
 
+(* A child starts in its parent's class, so a wait built from children (a
+   race, a timeout) keeps the class of the work that waits. *)
 let async_child parent fn =
   let p = Promise.create () in
   let c =
-    spawn_child parent (fun () ->
+    spawn_child ~execution:parent.execution parent (fun () ->
         match fn () with
           | v -> ignore (Promise.try_resolve p v)
           | exception e -> Promise.fail p e)

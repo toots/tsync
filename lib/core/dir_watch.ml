@@ -26,6 +26,6 @@ let wait t ~timeout =
                   then `Changed
                   else go ()))
   in
-  go ()
+  Rt.within `Immediate go
 
 let close t = try Unix.close t.fd with Unix.Unix_error _ -> ()
