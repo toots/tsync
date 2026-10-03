@@ -341,6 +341,7 @@ let () =
         {
           (Local.create ~name:"bucket" (Filename.concat root "bucket")) with
           local_path = None;
+          bucket_functions = true;
         }
       in
       let c2 =
@@ -366,5 +367,26 @@ let () =
           | Ok [Ok s] ->
               String.concat ", "
                 (List.map (fun (n, k) -> Printf.sprintf "%s %d" n k) s.per_copy)
-          | _ -> "failed"));
+          | _ -> "failed");
+      p "\n== a remote copy that deletes a batch in a request is collected\n";
+      let peer =
+        {
+          (Local.create ~name:"peer" (Filename.concat root "peer")) with
+          local_path = None;
+        }
+      in
+      let c3 =
+        Composite.create ~domain:d
+          ~data_dir:(Filename.concat root "data3")
+          ~owner:true ~poke:ignore ~knowledge
+          [
+            { name = "main"; role = Main; store = main };
+            { name = "peer"; role = Backfill; store = peer };
+          ]
+      in
+      p "collect: %s\n"
+        (match Collector.run c3 with
+          | Error (Unsupported r) -> "refused: " ^ r
+          | Error Busy -> "busy"
+          | Ok _ -> "ran"));
   Fs.rm_rf root
