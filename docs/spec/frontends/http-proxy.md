@@ -294,7 +294,7 @@ The store-server socket of [07 §4.1](../07-daemon-cli.md#41-sockets), access-co
 
 ## A12. Counters
 
-- `requests`: `inFlight`, `requestsPerSec`, `dataInFlight` (gate slots held), `dataWaiting` (gate queue length), and one integer per tally: `get getRange watch head put putIfAbsent delete getMulti childrenMulti deleteMulti copy list shareUrl chunkSize maxConcurrency verified share page stats domains unauthorized notFound badRequest tooLarge busy error`. Keys sorted.
+- `requests`: `inFlight`, `requestsPerSec`, `dataInFlight` (gate slots held), `dataWaiting` (gate queue length), `sharesInFlight` and `sharesMax` (share responses open, and their bound), and one integer per tally: `get getRange watch head put putIfAbsent putIfUnchanged checksum delete getMulti childrenMulti deleteMulti copy list shareUrl chunkSize maxConcurrency verified share page stats domains unauthorized notFound badRequest tooLarge busy error`. Keys sorted.
 - Byte counters are the server's own (once per request), distinct from backend link counters.
 - Counters are updated atomically.
 

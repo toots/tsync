@@ -21,7 +21,7 @@ Processes
     memory           private 61.0 MiB (heap 18.0 MiB, anonymous 61.0 MiB), mapped files 9.0 MiB
   store-server pid 102  up 11m 9s  1.2% cpu  Media
     memory           private 61.0 MiB (heap 18.0 MiB, anonymous 61.0 MiB), mapped files 9.0 MiB
-    listener         port 5446, TLS, 3 in flight (1 data), read 3.0 MiB, written 1.0 KiB
+    listener         port 5446, TLS, 3 in flight (1 data), 2 of 64 share responses, read 3.0 MiB, written 1.0 KiB
     requests         get 12, put 2
   owner        pid 101  up 11m 10s  1.2% cpu  Media
     memory           private 61.0 MiB (heap 18.0 MiB, anonymous 61.0 MiB), mapped files 9.0 MiB
@@ -106,7 +106,7 @@ Processes
     memory           private 61.0 MiB (heap 18.0 MiB, anonymous 61.0 MiB), mapped files 9.0 MiB
   store-server pid 102  up 11m 9s  1.2% cpu  Media
     memory           private 61.0 MiB (heap 18.0 MiB, anonymous 61.0 MiB), mapped files 9.0 MiB
-    listener         port 5446, TLS, 3 in flight (1 data), read 3.0 MiB, written 1.0 KiB
+    listener         port 5446, TLS, 3 in flight (1 data), 2 of 64 share responses, read 3.0 MiB, written 1.0 KiB
     requests         get 12, put 2
   owner        pid 101  up 11m 10s  1.2% cpu  Media
     memory           private 61.0 MiB (heap 18.0 MiB, anonymous 61.0 MiB), mapped files 9.0 MiB

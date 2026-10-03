@@ -843,6 +843,12 @@ let listener_report t : R.listener =
     tls = (match t.listener with Some l -> l.tls <> None | None -> false);
     in_flight = Atomic.get t.in_flight;
     data_in_flight = Atomic.get t.pending;
+    shares_in_flight =
+      (let _, held, _, _ = Rt.Semaphore.stats t.share_slots in
+       held);
+    shares_max =
+      (let _, _, _, width = Rt.Semaphore.stats t.share_slots in
+       width);
     bytes_read = Atomic.get t.total.read;
     bytes_written = Atomic.get t.total.written;
     requests =
