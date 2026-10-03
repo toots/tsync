@@ -115,17 +115,19 @@ Offline is normal. A request MUST NOT wait on a silent store for longer than the
 when the mirror or the cache can answer it.
 
 **Listings: answer the last view, then catch up.**
-- A folder pulled before (it has a pull stamp): the listing waits for its pull at most
+- A folder pulled less than `view_max_age` ago, by its pull marker: the listing waits for its pull at most
   `pull_patience`. If the pull has not completed by then, or the store's health breaker
   ([01](../01-core.md)) is open, it answers the mirror's view at once with `outdated: true` and
   `pulledAt`. The pull continues in the background; when it completes with different children the
   owner sends a `changed` notice, and the next listing is fresh.
-- A folder never pulled has no view to fall back on: the listing waits for the pull and fails with
-  the pull's code (`unreachable` when the store is silent). A failed listing is never an empty
-  folder.
-- There is no age beyond which a view is withheld. A file made available offline must stay
-  reachable by name however long the store has been away; the age is carried in `pulledAt` for the
-  host to show.
+- A folder never pulled, or whose view is older than `view_max_age`, has nothing to fall back on:
+  the listing waits for the pull and fails with the pull's code (`unreachable` when the store is
+  silent). A failed listing is never an empty folder. An expired view is not deleted: the next
+  completed pull replaces it.
+- `view_max_age` MUST be at least the default pin lifetime
+  ([08 §3.4](../08-frontends.md#34-evict-and-restore)): a file made available offline stays
+  reachable by name for as long as its pin holds its bytes. The view's age is carried in `pulledAt`
+  for the host to show.
 
 **Opens: serve the version known here.**
 - The manifest read of rule 3 waits at most `pull_patience`, and not at all while the breaker is
@@ -275,6 +277,7 @@ input ends it. Framing is by count, never by delimiter.
 | Parameter | Recommended | Constraint |
 |---|---|---|
 | `pull_freshness` | 5 s | the window in which a folder is listed again without asking the store |
+| `view_max_age` | 10 days | ≥ `DEFAULT_PIN_KEEP`; how old a view may be and still be answered while the store is silent |
 | `pull_patience` | 2 s | < `REQUEST_DEADLINE`; how long an answer the mirror can give waits for the store |
 
 ## 9. Conformance
@@ -310,7 +313,8 @@ checked. Properties of the shared handler are [08](../08-frontends.md)'s.
 **Without the store**
 - With the store silent, a previously listed folder is answered within `pull_patience` with
   `outdated: true` and its `pulledAt`; with the breaker open it is answered without waiting; a
-  never-listed folder answers `unreachable`, never an empty listing.
+  never-listed folder, and one last pulled more than `view_max_age` ago, answers `unreachable`,
+  never an empty listing.
 - With the store silent, a cached file opens and reads; a pinned file reads whole; `create`,
   `mkdir`, `write`, `rename` and `delete` in a previously listed folder succeed and are published
   after the store returns, across a process kill.
@@ -332,6 +336,8 @@ checked. Properties of the shared handler are [08](../08-frontends.md)'s.
   as one record kept failing.
 - **Answer the last view, flagged, rather than fail.** A listing that failed whenever the store was
   silent made cached and pinned files unreachable exactly when they mattered.
+- **A view expires.** A listing weeks old shown as the folder's contents misleads more than it
+  helps; the bound is the pin lifetime, so that it never strands a file made available offline.
 - **Freshness is judged per process, on the monotonic clock.** A wall-clock stamp read after a clock
   jump would call an old view fresh.
 - **Read-ahead keyed by handle, not by file.** A probe elsewhere in the file must not reset a

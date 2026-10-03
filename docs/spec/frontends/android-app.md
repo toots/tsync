@@ -158,7 +158,8 @@ A document id is the item's reference. File references are `i:` references
   notification address so a `changed` notice refreshes it. While the result is open the folder is
   **observed** (§7.1).
   - `outdated`: the rows, with the info message "Offline: showing this folder as of <time>".
-  - `unreachable`: no rows, with the error "Cannot reach the server".
+  - `unreachable` (the folder was never listed, or its last view is too old to show): no rows,
+    with the error "Cannot reach the server".
   - `not_found`: the folder no longer exists; the platform is told its parent changed.
   - any other code: the error message naming the failure.
 - **Is child.** True iff walking the document's `parentRef` chain upward through `stat` reaches the

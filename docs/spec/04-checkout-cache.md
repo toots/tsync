@@ -146,7 +146,8 @@ requires rewriting a valid existing file into another form.
 - **Pull marker** (lazy tree only) `.tsync-pulled`, in a folder entry and in the mirror's root: the
   wall-clock time of the last completed pull of that folder, decimal epoch milliseconds. Written
   atomically after the pull's entries. Absent means never pulled. It says that a view exists and how
-  old it is; whether a view is fresh is never judged from it
+  old it is, which bounds how long the view is answered while the store is silent; whether a view
+  is fresh is never judged from it
   ([android §3.2](frontends/android.md#32-freshness-without-a-journal-poller)).
 - **File-id index.** The owner resolves a file id to a path through an index in memory, kept with
   every marker it writes, moves or removes. The markers are its truth: a lookup answers a path only
