@@ -112,8 +112,31 @@ let refuse = function
       Fail.raise_ Fail.Load "another collection holds this domain's run lock"
   | Unsupported reason -> Fail.raise_ Fail.Refused "cannot collect: %s" reason
 
+(* gc §5.7: a request no function consumes keeps G odd for good, and only
+   this says so. *)
+let report_outstanding out c =
+  match Tsync_store.Composite.outstanding c with
+    | [] -> ()
+    | l ->
+        let oldest =
+          List.fold_left
+            (fun a (o : Tsync_store.Composite.outstanding) -> Float.max a o.age)
+            0. l
+        in
+        Printf.ksprintf out
+          "%s outstanding, the oldest for %s: is the bucket function deployed \
+           and notified? (gc --outstanding)"
+          (Narrate.count (List.length l) "discard request")
+          (Narrate.duration oldest)
+    | exception ((Stop.Stopping | Rt.Cancelled) as e) -> raise e
+    | exception e ->
+        Printf.ksprintf out "outstanding discard requests not read: %s"
+          (Fail.classify e).reason
+
 let gc io c ~apply ~verify ~abort ~budget =
   let say fmt = Printf.ksprintf io.out fmt in
+  let finally () = report_outstanding io.out c in
+  Fun.protect ~finally @@ fun () ->
   if apply || abort then (
     match
       Collector.run ?budget ~narrate:io.narrate ~verify ~keep:abort

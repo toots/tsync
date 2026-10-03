@@ -85,6 +85,42 @@ let () =
       run with_bucket (Gc_copies Probe);
       p "no store with a bucket function:";
       run dom (Gc_copies Probe);
+      p "== gc says when a request waits on a copy";
+      let junk = Key.chunk d (Chunk_key.of_body "junk") in
+      main.put junk (Bigstring.of_string "junk");
+      copy.put junk (Bigstring.of_string "junk");
+      let live = Chunk_key.of_body "live" in
+      main.put (Key.chunk d live) (Bigstring.of_string "live");
+      main.put
+        (Key.child d Folder_id.root "kept.txt")
+        (Bigstring.of_string
+           (Manifest.make ~name:"kept.txt" ~size:Chunking.chunk_size_min
+              ~mtime:0. ~chunk_size:Chunking.chunk_size_min [live])
+             .body);
+      Atomic.set function_on false;
+      Composite.start with_bucket.composite;
+      let said = ref [] in
+      let quiet job =
+        let io =
+          {
+            Jobs.out = (fun l -> said := l :: !said);
+            narrate = Narrate.none;
+            cancelled = Fun.const false;
+          }
+        in
+        ignore (Jobs.run io with_bucket engine job)
+      in
+      quiet (Gc { apply = true; verify = false; abort = false; budget = None });
+      Composite.settle ~timeout:10. with_bucket.composite;
+      said := [];
+      quiet (Gc { apply = false; verify = false; abort = false; budget = None });
+      p "a later dry run, the function not notified: %s"
+        (match List.filter (fun l -> Text.contains l "outstanding") !said with
+          | [] -> "says nothing of the request"
+          | l ->
+              (* Its age varies. *)
+              String.concat "; "
+                (List.map (fun l -> List.hd (String.split_on_char ',' l)) l));
       p "== status: corruption markers";
       let corrupted () =
         let report = Report.create dom engine ~frontend:(fun () -> None) in
