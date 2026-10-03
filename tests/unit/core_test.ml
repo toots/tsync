@@ -272,6 +272,21 @@ let () =
   p "two processes drew the same first delay: %b\n" (first = draw ())
 
 let () =
+  p "\n== a stall is counted for the uplink governor, another failure not\n";
+  Rt.run_sync (fun () ->
+      let tally raise_once =
+        let health = Health.create "store" and tried = ref false in
+        Retry.ladder ~health ~op:"read" (fun () ->
+            if not !tried then (
+              tried := true;
+              raise_once ()));
+        Health.timeouts health
+      in
+      p "a wait that heard nothing: %d; a refused connection: %d\n"
+        (tally (fun () -> raise Rt.Timeout))
+        (tally (fun () -> Fail.raise_ Fail.Link "refused")))
+
+let () =
   p "\n== keyed locks keep no entry for an idle key\n";
   Rt.run_sync (fun () ->
       let locks = Keyed_locks.create () in

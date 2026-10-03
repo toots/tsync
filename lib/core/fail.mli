@@ -27,16 +27,26 @@ type t = {
   reason : string;  (** one sentence, safe to show a user *)
   repair : string option;
   retry_after : float option;
+  stalled : bool;
+      (** a wait that heard nothing for its whole bound: what the uplink
+          governor counts as a timeout *)
 }
 
 exception E of t
 
 val make :
-  ?repair:string -> ?retry_after:float -> ?op:string -> kind -> string -> t
+  ?repair:string ->
+  ?retry_after:float ->
+  ?stalled:bool ->
+  ?op:string ->
+  kind ->
+  string ->
+  t
 
 val raise_ :
   ?repair:string ->
   ?retry_after:float ->
+  ?stalled:bool ->
   ?op:string ->
   kind ->
   ('a, unit, string, 'b) format4 ->

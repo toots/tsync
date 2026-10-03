@@ -230,7 +230,9 @@ let request ?(stall = default_stall) ?(headers = fun () -> []) ?body e ~meth
                     attempt (dial e progress) ~reused:false)
               | None -> attempt (dial e progress) ~reused:false)
       with
-        | Rt.Timeout -> link "%s: no progress for %gs" e.host stall
+        | Rt.Timeout ->
+            Fail.raise_ ~stalled:true Fail.Link "%s: no progress for %gs" e.host
+              stall
         | Unix.Unix_error (err, _, _) ->
             link "%s: %s" e.host (Unix.error_message err)
         | Codec.Malformed m -> link "%s: %s" e.host m

@@ -26,16 +26,18 @@ type t = {
   reason : string;
   repair : string option;
   retry_after : float option;
+  stalled : bool;
 }
 
 exception E of t
 
-let make ?repair ?retry_after ?(op = "") kind reason =
-  { kind; op; reason; repair; retry_after }
+let make ?repair ?retry_after ?(stalled = false) ?(op = "") kind reason =
+  { kind; op; reason; repair; retry_after; stalled }
 
-let raise_ ?repair ?retry_after ?op kind fmt =
+let raise_ ?repair ?retry_after ?stalled ?op kind fmt =
   Printf.ksprintf
-    (fun reason -> raise (E (make ?repair ?retry_after ?op kind reason)))
+    (fun reason ->
+      raise (E (make ?repair ?retry_after ?stalled ?op kind reason)))
     fmt
 
 let kind_name = function
@@ -103,7 +105,7 @@ let of_unix ?(op = "") err fn arg =
 let classify ?(op = "") = function
   | E f -> f
   | Unix.Unix_error (e, fn, arg) -> of_unix ~op e fn arg
-  | Rt.Timeout -> make ~op Link "stalled"
+  | Rt.Timeout -> make ~stalled:true ~op Link "stalled"
   | Out_of_memory -> make ~op Local "out of memory"
   | exn -> make ~op Unexplained (Printexc.to_string exn)
 
