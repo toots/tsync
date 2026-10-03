@@ -150,10 +150,10 @@ A document id is the item's reference. File references are `i:` references
   diagnose): root id = the domain name, document id `root`, title `tsync`, summary = the domain
   name, supporting is-child, and create unless the domain is read-only.
 - **Document.** `root` is synthesised (a fresh install has no mirror). Otherwise `stat`.
-  - Folder: the directory MIME type; supports create, delete and rename.
-  - File: MIME type from the name's extension (default octet-stream); supports write, delete and
-    rename; size; last-modified = `mtime`, absent when 0.
-  - A row carrying `readOnly` supports none of create, write, delete or rename.
+  - Folder: the directory MIME type; supports create, delete, rename and move.
+  - File: MIME type from the name's extension (default octet-stream); supports write, delete,
+    rename and move; size; last-modified = `mtime`, absent when 0.
+  - A row carrying `readOnly` supports none of create, write, delete, rename or move.
 - **Children.** Walk every page of `list_dir` into one result, registered on the folder's
   notification address so a `changed` notice refreshes it. While the result is open the folder is
   **observed** (§7.1).
@@ -169,6 +169,10 @@ A document id is the item's reference. File references are `i:` references
 - **Delete.** `rmdir` for a folder, `delete` for a file.
 - **Rename.** `rename(doc, stat(doc).parentRef, sanitised name)` with `noreplace: true`; an existing
   name is refused to the caller. Answers the reference from the reply's item.
+- **Move.** `rename(doc, target parent, the document's current name)` with `noreplace: true`; a
+  name taken in the target is refused to the caller, as is a folder moved into itself or its own
+  subtree. Answers the reference from the reply's item, which is the document's own: a move changes
+  no document id.
 - **Open for reading** (a mode without `w`): `open(ref)`, retain keep-alive (§9), and return a
   seekable proxy descriptor whose callbacks run on a small fixed set of callback threads, one
   assigned per open: get-size → `size`; read → `read` (a negative answer raises its errno);
@@ -189,7 +193,7 @@ A document id is the item's reference. File references are `i:` references
      commit (§8.1) on a thread that does not serve descriptor reads. A failure is posted as a
      problem notification and the intent stays ready.
   6. Release keep-alive when the commit ends or the staging file is deleted.
-- **Not provided**: move and copy between folders, thumbnails, search, recents.
+- **Not provided**: copy, thumbnails, search, recents.
 
 ### 7.1 Observed folders
 
@@ -326,6 +330,7 @@ Offered in a sheet titled with the item's name; each ends with a short confirmat
 | Keep offline longer | pinned files | `restore` again, which extends the pin. |
 | Remove download | all not `online-only` | `evict`, with counts for a folder. A file waiting to upload keeps its bytes. |
 | Rename | all, when writable | A name prompt pre-filled with the current name; `rename` in place with `noreplace: true`; `exists` is shown on the field. |
+| Move | all, when writable | Files in pick mode (§10.6) to choose the destination folder, the item itself and its subtree not offered; then `rename` into it under the same name with `noreplace: true`. `exists` is shown with the owner's sentence. |
 | Delete | all, when writable | A confirmation naming the item, and for a folder saying that everything in it is deleted; then `delete` or `rmdir`. |
 | Details | all | Name, kind, size, modified, where its bytes are, pinned until, whether it is uploaded. |
 
@@ -348,7 +353,8 @@ the screen is visible, and not at all otherwise.
 
 ### 10.6 Saving into the domain
 
-One flow for the share target and for "Upload files".
+One flow for the share target and for "Upload files". Its pick mode also chooses the destination
+of a Move (§10.4), titled "Move <name> to <path>" and offering "Move here".
 
 - **Share target.** No streams → "Only files can be saved to tsync"; no config → "Set up tsync
   before saving to it"; in both cases the activity finishes. Otherwise Files opens in **pick mode**:
@@ -585,9 +591,10 @@ checked.
 
 **Provider**
 - `isChildDocument` is true for every descendant of a tree root and false for anything else.
-- A document id is unchanged by a rename of the document or of any ancestor.
+- A document id is unchanged by a rename or a move of the document or of any ancestor.
+- A move onto a taken name, and a move of a folder into its own subtree, change nothing.
 - An edit of a document renamed while it was open is saved to the renamed document.
-- A read-only domain's documents offer no write, create, delete or rename.
+- A read-only domain's documents offer no write, create, delete, rename or move.
 - A children result of a folder listed before is served, flagged, while the store is silent; a
   folder never listed reports the failure and no rows.
 - An observed folder shows a peer's change within `observed_refresh` plus one pull.
