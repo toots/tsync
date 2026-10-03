@@ -5,6 +5,12 @@ let p fmt = Printf.printf fmt
 let bytes_pattern n =
   String.init n (fun i -> Char.chr (((31 * i) + 7) land 255))
 
+(* The child of the jitter case below: one delay, and nothing else. *)
+let () =
+  if Array.length Sys.argv > 1 && Sys.argv.(1) = "jitter" then (
+    p "%.17g\n" (Retry.delay 3);
+    exit 0)
+
 let () =
   p "== hashes (01 §3.1)\n";
   List.iter
@@ -251,6 +257,19 @@ let () =
     ["real/Drive"; "real/Drive/"; "real/./Drive"; "real//Drive"; "link/Drive"];
   p "%-24s %s\n" "/" (Fs.resolve_parent "/");
   Fs.rm_rf dir
+
+let () =
+  p "\n== retry jitter differs between processes\n";
+  let draw () =
+    let ic =
+      Unix.open_process_in (Filename.quote Sys.executable_name ^ " jitter")
+    in
+    let l = input_line ic in
+    ignore (Unix.close_process_in ic);
+    l
+  in
+  let first = draw () in
+  p "two processes drew the same first delay: %b\n" (first = draw ())
 
 let () =
   p "\n== keyed locks keep no entry for an idle key\n";

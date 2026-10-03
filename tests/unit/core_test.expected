@@ -126,6 +126,9 @@ real//Drive              true
 link/Drive               true
 /                        /
 
+== retry jitter differs between processes
+two processes drew the same first delay: false
+
 == keyed locks keep no entry for an idle key
 after locking 1000 keys once: 0 entries
 four holders of one key overlapped: false; entries after: 0
