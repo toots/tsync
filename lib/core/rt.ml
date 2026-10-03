@@ -442,37 +442,6 @@ module Fmutex = struct
   let is_locked t = Mutex.protect t.m (fun () -> t.locked)
 end
 
-module Condition = struct
-  type t = { m : Mutex.t; waiters : ((unit, exn) result -> bool) Queue.t }
-
-  let create () = { m = Mutex.create (); waiters = Queue.create () }
-
-  (* The waiter is queued before [mutex] is released, so a signal from a later
-     holder of [mutex] is not lost. *)
-  let wait t mutex =
-    Fun.protect
-      ~finally:(fun () -> Fmutex.lock mutex)
-      (fun () ->
-        suspend (fun resolve ->
-            Mutex.protect t.m (fun () -> Queue.push resolve t.waiters);
-            Fmutex.unlock mutex;
-            withdraw_from t.m t.waiters resolve))
-
-  let broadcast t =
-    let ws =
-      Mutex.protect t.m (fun () ->
-          let l = List.of_seq (Queue.to_seq t.waiters) in
-          Queue.clear t.waiters;
-          l)
-    in
-    List.iter (fun w -> ignore (w (Ok ()))) ws
-
-  let rec signal t =
-    match Mutex.protect t.m (fun () -> Queue.take_opt t.waiters) with
-      | None -> ()
-      | Some w -> if not (w (Ok ())) then signal t
-end
-
 module Signal = struct
   type t = {
     m : Mutex.t;
