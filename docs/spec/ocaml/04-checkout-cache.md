@@ -167,3 +167,12 @@ Related notes: [data-model/local-cache.md](data-model/local-cache.md),
 - **Read-ahead and pull-table counters are `ref`s mutated on the loop**; `pulling_now` is
   deliberately synchronous (a `Hashtbl.fold` that yielded would see the table mutate). With
   domains, protect or confine them.
+
+## Pitfalls met in the File Provider rewrite
+
+- **`syncfs` is not a barrier on macOS.** There is no `syncfs(2)`; the stub falls back to `sync()`,
+  which only schedules the flush. A bulk pass that writes without a fsync per file and then relies
+  on one `syncfs` before a durable record (a completion record, the last-sync mark) can lose or
+  tear those files behind a record that survives the crash. Writes that a later durable record
+  depends on keep their own fsync, and their directories are fsynced before the record is written.
+  Dropping the per-file fsync made the file-id backfill fast and left exactly that hole.
