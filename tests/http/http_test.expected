@@ -9,6 +9,8 @@
   200 "body" (chunked)
   200 "" (chunked)
   released: 2 of 2
+== a stream that fails partway is never delivered complete
+  refused: transient/link
 == a body refused partway closes its connection
   answers: HTTP/1.1 413 Content Too Large
 http date: Sun, 09 Sep 2001 01:46:40 GMT, parsed back: true, garbage: true
