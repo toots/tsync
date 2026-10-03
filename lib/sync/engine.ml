@@ -1485,7 +1485,9 @@ module Make (C : Engine_ctx.S) = struct
                    (Filename.concat (Filename.concat staged_dir sub) b)))
           (Fs.readdir (Filename.concat staged_dir sub)))
       ["chunks"; "whole"];
-    (* 04 §4.10 step 8: no read path mints a file id. *)
+    (* 04 §4.10 step 8: the index first, so it sees every marker minted here;
+       no read path mints a file id. *)
+    Mirror.load_file_ids mirror;
     let minted = Mirror.backfill_file_ids mirror in
     List.iter
       (fun (p, _) -> ignore (Mirror.ensure_file_id mirror p))
@@ -1549,7 +1551,8 @@ module Make (C : Engine_ctx.S) = struct
        Log.info "queues still busy after the grace; the rest is owed on disk");
     Journal.flush journal;
     let left = deadline -. Rt.now () in
-    if left > 0. then Tsync_store.Composite.settle ~timeout:left C.composite
+    if left > 0. then Tsync_store.Composite.settle ~timeout:left C.composite;
+    Mirror.save_file_ids mirror
 
   let pending_uploads () = Dqueue.pending uploads
 
