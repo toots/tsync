@@ -54,3 +54,10 @@ healthy false, 1 tombstones
   corrupt on main: <nowhere>
 trash: <binned> at binned, <lost> at lost, <unbinned> at old/unbinned
 replica's copy of <on main> sound: true
+
+== a folder the walk cannot list
+unreadable: manifests/<top>/.tsync-parent; healthy false
+  folder <nested> ("nested") is unreachable, holding 1 object: manifests/<nested>/3c697ec236bbf61f-698ad1290042cc94 -> incomplete
+  folder <young> ("<young>") is unreachable, holding 1 object: manifests/<young>/d6d50f267ed1aabb-7fe71c7d92c1e0c0 -> incomplete
+  folder <inner> ("inner") is unreachable, holding 1 object: manifests/<inner>/2af84fa98a68a9b1-19465e194feef43e -> incomplete
+inner still live: true

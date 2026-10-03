@@ -27,10 +27,11 @@ type corrupt = { member : string; chunk : Chunk_key.t }
 type report = {
   findings : finding list;
   tombstones : int;
+  unreadable : Key.t list;
   corrupt : corrupt list;
 }
 
-let healthy r = r.findings = [] && r.corrupt = []
+let healthy r = r.findings = [] && r.corrupt = [] && r.unreadable = []
 
 let folder id =
   if Folder_id.equal id Folder_id.root then "the root"
@@ -65,6 +66,7 @@ type tree_repair =
   | Young
   | Nested
   | Left
+  | Incomplete
   | Failed of string
 
 type chunk_repair = Cleared | Repaired of string | Unrepairable
@@ -93,12 +95,14 @@ module Make (C : Context.S) = struct
 
   (* Every folder a walk from [id] reaches, with its paths; markers whose
      anchor disowns them are reported, not followed. *)
-  let walk ~cancelled ~progress ~reached ~disowned ~unanchored id ~root_path =
+  let walk ~cancelled ~progress ~reached ~disowned ~unanchored ~unreadable id
+      ~root_path =
     T.fold_tree
       ~on_unusable:
         (Skip
            (function
            | Disowned (k, a) -> disowned := (k, a) :: !disowned
+           | Unreadable (k, _) -> unreadable := k :: !unreadable
            | _ -> ()))
       id ~root_path
       (fun () parent_path (e : Tree.entry) ->
@@ -204,7 +208,8 @@ module Make (C : Context.S) = struct
   let report ?(narrate = Narrate.none) ?(cancelled = Fun.const false) () =
     let reached = Hashtbl.create 1024
     and disowned = ref []
-    and unanchored = ref [] in
+    and unanchored = ref []
+    and unreadable = ref [] in
     Narrate.say narrate "%s: walking the tree from the root"
       (Domain_name.to_string d);
     let walked = ref 0 in
@@ -214,8 +219,8 @@ module Make (C : Context.S) = struct
         (Narrate.count !walked "folder")
         path
     in
-    walk ~cancelled ~progress ~reached ~disowned ~unanchored Folder_id.root
-      ~root_path:"";
+    walk ~cancelled ~progress ~reached ~disowned ~unanchored ~unreadable
+      Folder_id.root ~root_path:"";
     let live = Hashtbl.copy reached in
     let trashed = T.trashed () in
     Narrate.say narrate "  %s reached; walking %s"
@@ -242,8 +247,8 @@ module Make (C : Context.S) = struct
                 :: !unanchored;
             if not (cancelled ()) then (
               Hashtbl.replace reached (Folder_id.to_string f.id) [];
-              walk ~cancelled ~progress ~reached ~disowned ~unanchored f.id
-                ~root_path:f.name);
+              walk ~cancelled ~progress ~reached ~disowned ~unanchored
+                ~unreadable f.id ~root_path:f.name);
             []))
         trashed
     in
@@ -277,11 +282,12 @@ module Make (C : Context.S) = struct
         List.stable_sort (fun a b -> compare (rank a) (rank b)) findings;
       tombstones;
       corrupt;
+      unreadable = List.rev !unreadable;
     }
 
   (* An id at two paths is anchored at neither: where it lives is a person's
      choice. *)
-  let repair_one ~apply ~now ~twice = function
+  let repair_one ~apply ~now ~twice ~incomplete = function
     | Twice _ -> Left
     | Unanchored { id; _ } when List.exists (Folder_id.equal id) twice -> Left
     | Disowned { marker = k; _ } | Trashed_live { entry = k; _ } ->
@@ -298,6 +304,7 @@ module Make (C : Context.S) = struct
             | `Taken other ->
                 Failed ("the slot holds folder " ^ Folder_id.to_string other)
             | `Taken_by_file -> Failed "the slot holds a file")
+    | Orphan _ when incomplete -> Incomplete
     | Orphan { top_level = false; _ } -> Nested
     | Orphan { newest; _ } when now -. newest < orphan_grace -> Young
     | Orphan { id; name; parent; _ } ->
@@ -323,7 +330,9 @@ module Make (C : Context.S) = struct
             ~fraction:(float i /. float total)
             "repairing the tree: %d of %d findings" (i + 1) total;
           let outcome =
-            try repair_one ~apply ~now ~twice f with
+            try
+              repair_one ~apply ~now ~twice ~incomplete:(r.unreadable <> []) f
+            with
               | (Stop.Stopping | Rt.Cancelled) as e -> raise e
               | e -> Failed (Printexc.to_string e)
           in
@@ -339,6 +348,9 @@ module Make (C : Context.S) = struct
                   "inside another unreachable folder; considered once that one \
                    is adopted"
               | Left -> "left; resolve it by hand"
+              | Incomplete ->
+                  "left: the walk could not read every folder, so it cannot \
+                   tell an orphan from a folder below one it missed"
               | Failed reason -> "failed: " ^ reason);
           Some (f, outcome)))
 

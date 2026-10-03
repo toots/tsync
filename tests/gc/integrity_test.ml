@@ -33,6 +33,8 @@ let () =
       ("gone", "0000000000a9-1");
       ("binned", "0000000000b1-1");
       ("unbinned", "0000000000b2-1");
+      ("top", "0000000000c1-1");
+      ("inner", "0000000000c2-1");
     ]
   in
   let id n = Folder_id.v (List.assoc n ids) in
@@ -150,6 +152,7 @@ let () =
         | Young -> "young"
         | Nested -> "nested"
         | Left -> "left"
+        | Incomplete -> "incomplete"
         | Failed r -> "failed: " ^ r
       and chunk_outcome = function
         | Integrity.Cleared -> "cleared"
@@ -204,5 +207,62 @@ let () =
       p "trash: %s\n" (String.concat ", " (List.sort compare trash));
       p "replica's copy of <on main> sound: %b\n"
         (replica.get_opt (Key.chunk d (sound "on main"))
-        = Some (Bigstring.of_string "on main")));
+        = Some (Bigstring.of_string "on main"));
+      p "\n== a folder the walk cannot list\n";
+      marker ~age:1000. Folder_id.root "top" "top";
+      anchor ~age:1000. "top" Folder_id.root "top";
+      marker ~age:1000. (id "top") "inner" "inner";
+      anchor ~age:1000. "inner" (id "top") "inner";
+      file ~age:1000. (id "inner") "kept.txt";
+      let unlistable = Key.namespace d (id "top") in
+      let flaky =
+        {
+          main with
+          list_prefix =
+            (fun ?max_keys prefix ->
+              if Key.prefix_to_string prefix = Key.prefix_to_string unlistable
+              then Fail.raise_ Link "listing failed"
+              else main.list_prefix ?max_keys prefix);
+          list_many = None;
+        }
+      in
+      let composite =
+        Composite.create ~domain:d
+          ~data_dir:(Filename.concat root "data-flaky")
+          ~owner:true ~poke:ignore
+          ~knowledge:
+            {
+              Composite.is_index = (fun _ -> false);
+              is_journal = (fun _ -> false);
+            }
+          [{ name = "main"; role = Main; store = flaky }]
+      in
+      let module F = struct
+        let domain = d
+        let store = Composite.store composite
+        let composite = composite
+        let versioning = true
+        let chunk_size_config = None
+        let max_downloads = 4
+        let max_chunk_buffers = 4
+      end in
+      let module I = Integrity.Make (F) in
+      let r = I.report () in
+      p "unreadable: %s; healthy %b\n"
+        (String.concat ", "
+           (List.map (fun k -> alias (Key.to_string k)) r.unreadable))
+        (Integrity.healthy r);
+      List.iter
+        (fun (f, o) ->
+          match f with
+            | Integrity.Orphan _ ->
+                p "  %s -> %s\n" (alias (Integrity.describe f)) (tree_outcome o)
+            | _ -> ())
+        (I.repair_tree ~apply:true r);
+      p "inner still live: %b\n"
+        (main.get_opt (Key.child d (id "inner") "kept.txt") <> None
+        && main.get_opt (Key.anchor d (id "inner"))
+           = Some
+               (Bigstring.of_string
+                  (Folder.anchor_body { parent = id "top"; aname = "inner" }))));
   Fs.rm_rf root

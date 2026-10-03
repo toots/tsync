@@ -31,6 +31,9 @@ type report = {
   findings : finding list;
       (** Twice (sorted), Disowned, Trashed_live, Unanchored, Orphan *)
   tombstones : int;  (** namespaces holding only their anchor *)
+  unreadable : Key.t list;
+      (** folders the walk could not read: the walk is incomplete, and no orphan
+          is adopted from it (gc §4.6) *)
   corrupt : corrupt list;
 }
 
@@ -44,6 +47,8 @@ type tree_repair =
   | Young  (** an orphan younger than [orphan_grace] *)
   | Nested  (** an orphan inside another, considered once that one is adopted *)
   | Left  (** Twice: reported only *)
+  | Incomplete
+      (** an orphan, not adopted: the walk could not read every folder *)
   | Failed of string
 
 type chunk_repair =
