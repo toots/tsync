@@ -48,3 +48,9 @@ chunk size out of range                  refused: domains[0].chunkSize: must lie
 F: secret inherited true, shares true, read-only false
 G: secret inherited true, shares false, read-only true
 H: secret inherited true, shares false, read-only false
+
+== a config other users can read (security-model §10.2)
+no file: absent
+mode 644, a service: refused/denied, left at 644
+mode 644, at a terminal: loaded, now 600
+mode 600, a service: loaded

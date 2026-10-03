@@ -6,7 +6,8 @@
   tsync_config
   tsync_catalog
   tsync_store
-  tsync_http_proxy))
+  tsync_http_proxy
+  unix))
 
 (rule
  (enabled_if %{lib-available:tsync_fuse})

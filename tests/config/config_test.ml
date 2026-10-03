@@ -205,3 +205,32 @@ let () =
               (Tsync_core.Domain_name.to_string b.domain.name)
               (b.secret = secret) b.shares b.read_only)
           bindings
+
+let () =
+  p "\n== a config other users can read (security-model §10.2)\n";
+  let root =
+    Filename.concat
+      (Filename.get_temp_dir_name ())
+      (Printf.sprintf "tsync-config-mode-%d" (Unix.getpid ()))
+  in
+  Tsync_core.Fs.rm_rf root;
+  Unix.putenv "HOME" root;
+  Unix.putenv "XDG_CONFIG_HOME" (Filename.concat root "config");
+  let path = Paths.config_file () in
+  Tsync_core.Fs.mkdir_p ~perm:0o700 (Filename.dirname path);
+  let load ~interactive =
+    match Paths.read_config ~interactive () with
+      | Some _ -> "loaded"
+      | None -> "absent"
+      | exception Tsync_core.Fail.E f -> Tsync_core.Fail.kind_name f.kind
+  in
+  let mode () = (Unix.stat path).st_perm in
+  p "no file: %s\n" (load ~interactive:false);
+  Tsync_core.Fs.write_file_for_test path "{}";
+  Unix.chmod path 0o644;
+  let service = load ~interactive:false in
+  p "mode 644, a service: %s, left at %o\n" service (mode ());
+  let terminal = load ~interactive:true in
+  p "mode 644, at a terminal: %s, now %o\n" terminal (mode ());
+  p "mode 600, a service: %s\n" (load ~interactive:false);
+  Tsync_core.Fs.rm_rf root
