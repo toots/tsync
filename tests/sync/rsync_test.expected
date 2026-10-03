@@ -42,6 +42,11 @@ copied 1 (0 bytes), identical 0, folders 1, skipped 1, failed 0
   skipped f.txt: this client's edit of it is not published yet
 pend2/f.txt copied: false; pend/f.txt kept: true; pend2/g.txt copied: true
 
+== a move cancelled mid-batch announces only the moves made
+copied 1 (0 bytes), identical 0, folders 1, skipped 0, failed 0, cancelled
+A: mv [a.txt c.txt d.txt] mv2 [b.txt]
+B: mv [a.txt c.txt d.txt] mv2 [b.txt]
+
 == refusals
 copied 0 (0 bytes), identical 0, folders 0, skipped 6, failed 0
   skipped .: a file holds the folder's name at the target

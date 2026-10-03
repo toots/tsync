@@ -177,6 +177,24 @@ let () =
         (A.kind "pend2/g.txt" = `File);
       A.set_paused false;
       drain a;
+      p "\n== a move cancelled mid-batch announces only the moves made\n";
+      List.iter
+        (fun n -> put ("mv/" ^ n) n)
+        ["a.txt"; "b.txt"; "c.txt"; "d.txt"];
+      drain a;
+      pass b;
+      report
+        (A.rsync ~move:true
+           ~cancelled:(fun () -> A.kind "mv2/b.txt" = `File)
+           ~src:(domain "mv") ~dst:(domain "mv2") ());
+      drain a;
+      pass b;
+      let files (module E : Engine.S) dir =
+        String.concat " "
+          (List.map (fun (e : E.entry) -> e.name) (E.list_children dir))
+      in
+      p "A: mv [%s] mv2 [%s]\n" (files a "mv") (files a "mv2");
+      p "B: mv [%s] mv2 [%s]\n" (files b "mv") (files b "mv2");
       p "\n== refusals\n";
       report (rs (local src) (domain "dest/top.txt"));
       drain a;

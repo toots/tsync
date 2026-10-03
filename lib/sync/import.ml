@@ -94,10 +94,13 @@ module Make (C : Engine_ctx.S) = struct
         (!imported + !skipped + !skipped_links + List.length !failed + 1)
         plan.files (Narrate.size !seen_bytes) (Narrate.size plan.bytes)
         (rel_of e);
-      note e
-        (try import_one e with
+      let outcome =
+        try import_one e with
           | (Stop.Stopping | Rt.Cancelled) as x -> raise x
-          | x -> Failed (Printexc.to_string x))
+          | x -> Failed (Printexc.to_string x)
+      in
+      note e outcome;
+      match outcome with Imported _ -> true | _ -> false
     in
     Bulk.batches ~narrate ~noun:"file" ~cancelled ~queue:uploads
       ~op:(fun e -> Op.Put { path = rel_of e; size = size_of e; base = None })
