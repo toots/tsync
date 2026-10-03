@@ -1,169 +1,118 @@
-# 04 — Checkout & local cache (the local side) — OCaml implementation notes
+# 04 — Checkout: local formats and the file-operation interface — OCaml implementation notes
 
-Companion to the language-neutral spec [../04-checkout-cache.md](../04-checkout-cache.md). See [README.md](README.md) for how these notes are organised.
-Related notes: [data-model/local-cache.md](data-model/local-cache.md),
+Companion to [../04-checkout-cache.md](../04-checkout-cache.md). Not normative. Related notes:
+[data-model/local-cache.md](data-model/local-cache.md),
 [algorithms/read-path-and-cache.md](algorithms/read-path-and-cache.md),
-[algorithms/durable-queue.md](algorithms/durable-queue.md).
+[algorithms/durable-queue.md](algorithms/durable-queue.md), [memory.md](memory.md).
 
-## B.0 Where the spec lives in the code (tree at `4c32fa96`)
+## Code map
+
+`Local_ops`, `Outbound` and `Engine` below are layers of the one functor `Engine.Make`
+([03-journal-sync.md](03-journal-sync.md)); `Mirror`, `Staged`, `Cache` and `Identity` are
+`lib/checkout`.
 
 | Spec concept | Code |
 |---|---|
-| layout paths, `per`, shards | `lib/domain/cache_layout`, `Conf.chunks_per_group`, `Chunk_layout.shard_of` |
-| group, group key | `Manifest.Group` (`key_of`, `of_table`, `all`) |
-| mirror entries, memo | `Manifests` (`published` memoised by `(ino,size,mtime)`, FIFO 1024, an implementation choice the spec leaves open; `write` is the sole writer and stamps names; `current` is the single resolution point) |
-| staged manifest codec | `Staged_manifest` (`staged_of_string`, `staged_to_string`, version check, `.bad` set-aside in `read`) |
-| staged bodies | `Staged_body` (`ensure`, `resize`, `copy_chunk`, `link_group`, `adopt_whole`) |
-| staged write path | `Data.write_locked`, `ensure_group_body`, `truncate_locked`, `stage_whole`, `split_whole` (`lib/domain/checkout/content/data.ml`) |
-| upload and promotion | `Data.sync`, `upload_staged`, `promote_pending`, `promote`; `File.upload` |
-| WAL codec and log | `Wal` (`of_body`, `Job`, `Owed`, `log_for`, `discharge`, `owed_metadata`) |
-| file-operation interface | `File_ops.S` (`lib/domain/checkout/ops/file_ops.ml`), implemented by `File.Make_with_layout` |
-| tree interface | `Checkout_intf.S`: `Checkout` (full), `Lazy_checkout` (lazy, `PULL.children`) |
-| folder-id index | `Folder_ids` (`lookup_id`, `write`/`replace`, `key_of_id`, `whereabouts`, `rebuild`) |
-| resync primitives | `Checkout.record`, `Checkout.sweep_stale`, `Cache_layout.clear_projection`, `Cache_layout.sweep_stale` |
-| availability | `Checkout.availability` (synchronous, no event loop) |
-| maintenance | `Temp_files`, `Staged_orphans` (grace 3600 s, on demand), `Export_records`, `Maintenance_lwt` |
-| peer application, publish decisions | `File.apply_foreign_ops`, `File.backend_ops`, `Resolve.Arrival`, `Resolve.Publish` |
+| Layout, escaping, internal leaves (§2.1) | `Mirror.path`, `Staged.manifest_path` / `body_path` / `whole_path`, `Cache.whole_path`; `Names.escape`, `escape_path`, `is_internal_local`, `is_temp_name` |
+| `per`, group, group key (§2.2) | `Cache.per`, `group_of`, `groups`, `group_index`, `group_key` |
+| File entry, own marker (§2.3) | `Mirror`: `file`, `manifest`, `write_file`, `remove_file`, `move_file`, `is_own` |
+| File-id marker and index | `Mirror`: `file_id`, `ensure_file_id`, `path_of_file_id`, `load_file_ids`, `save_file_ids`, `await_file_ids`, `backfill_file_ids` |
+| Pull marker, view hold | `Engine`: `pulled_at`, `view_hold`, `hold_views` |
+| Folder entry, folder-id index (§2.4, §4.9) | `Mirror`: `folder_id`, `record_folder`, `mkdir_without_id`, `remove_folder`, `move_folder`, `lookup_id_removed`, `key_of_id`, `whereabouts`, `forget_subtree`, `rebuild_index`, `sweep_removed_records` |
+| Staged manifest (§2.5) | `Staged`: `encode`, `decode`, `read`, `write`, `remove`, `move`, `fold`, `edits`, `set_aside_path` |
+| Staged bodies (§2.6) | `Staged`: `new_body_id`, `open_body`, `read_body`, `write_body_at`, `body_size`, `body_links` |
+| Cache files (§2.7) | `Cache`: `ensure_whole`, `read_piece`, `verified_member`, `pin`, `unpin`, `evict`, `adopt_body`, `sweep_at_start`, `enforce_cap` |
+| WAL record (§2.8) | `Wal`; the log is `Dqueue.Records` |
+| Pending claim confirmation (§2.9) | `Outbound`: `claim_kind`, `claim_queue`, `record_claim`, `run_claim` |
+| File-operation interface (§3.4) | `Engine_intf.S`, implemented by `Local_ops.Make` |
+| Metadata lock, key locks, edit generation (§3.2) | `Local_ops`: `with_meta`, `with_key`, `with_keys`, `generation`, `bump`, over `Keyed_locks` |
+| Read handles, retention (§3.3) | `Local_ops`: `open_read`, `read`, `close_read`, `retain`, `release`, `end_lineage`, `move_handles` |
+| Resolution (§4.2) | `Local_ops.resolve` |
+| Staged writes (§4.3) | `Local_ops`: `staged_for`, `ensure_group`, `write`, `truncate`, `create`, `write_whole`, `write_edit`, `release_unnamed`, `read_staged` |
+| Sync and close (§4.4) | `Local_ops.sync`, `close`; the record is posted by `Outbound.post_put` |
+| Namespace operations (§4.5) | `Local_ops`: `delete`, `mkdir`, `rmdir`, `rename`, `symlink`; the WAL sequence is `with_intent` (`record_intent`, `prepare`, `abandon`); the redo is `redo` |
+| Upload and commit (§4.6) | `Outbound.run_upload`, `run_one_upload`; `Engine.revert` |
+| Promotion, hand-over to the cache (§4.7–4.8) | `Local_ops.promote`, `Cache.adopt_body` |
+| Full tree: record and sweep (§3.5) | inside `Engine.rebuild` |
+| Lazy tree: pull | `Engine`: `pull`, `pull_folder`, `refresh_file` |
+| Stat, availability (§3.6) | `Local_ops.stat`, `availability`; `Cache.availability`, `Cache.resident` |
+| Owner start (§4.10) | `Engine.start`: `recover_local`, `reconcile`, `adopt_unrecorded` |
+| Maintenance (§4.11) | `Engine`: `trim_cache`, `prune_applied`, `daily_maintenance`; `Export.sweep_records` |
 
-## B.0.1 Where the current code differs from the spec
+## Departures from the spec
 
-- **Several writer processes.** FUSE children, the converging parent and one-shot `tsync sync`
-  all write one cache root; `meta_mutex` (`file.ml`) and `with_key` (`data.ml`) are per-process
-  Lwt mutexes, and `File.write` does not take `meta_mutex`. A peer `Delete` applied in the
-  parent can discard a staged edit a FUSE child just wrote. The spec makes one owner per domain
-  and re-checks staged facts under the key lock (spec §3.2).
-- **No fsync.** `Fs.atomic_write` / `with_temp_rename` / `atomic_write_at` rename unsynced temps.
-  The spec's primitives fsync the temp before every replace.
-- **Release before switch.** `ensure_group_body`'s slow path and `truncate_locked` call
-  `Sb.forget` on old bodies before `Mfs.write` writes the new sidecar; a crash between leaves a
-  sidecar naming a deleted body, and `Sync_queue` then treats the ENOENT as "nothing owed" and
-  abandons the edit.
-- **Set-aside sidecars lose their bodies.** `Staged_manifest.fold` skips `.bad` files, so
-  `uuids ()` omits their bodies and `Staged_orphans` reaps them on `tsync cache --prune`. The
-  set-aside name `<leaf>.bad` also collides with a user file named so.
-- **Persisted partial records.** Partial bodies are named `<group key>` with a strict-parsed
-  `<group key>.manifest` interval record; the spec keeps held intervals in memory only and names
-  partial bodies `.partial`.
-- **Undecodable WAL records.** `Wal.Job.of_string` never fails; garbage decodes as an empty
-  `Intent` that reconcile deletes, and unknown ops are dropped by `filter_map`.
-- **Promotion before `Executed`.** `Data.sync` promotes (deleting the staged sidecar) before
-  `Sync_queue.run` calls `W.discharge`; a crash between completes a `Prepared` record without
-  publishing its entry.
-- **Upload cancellation is cooperative only.** `File.write` calls `cancel_upload`, but nothing
-  stops a manifest put already past the cancel check; the spec's edit generation closes this.
-- **No read handles in FUSE.** `internal_ops.ml` `read` resolves the key on every call, so a
-  peer update between two reads of one descriptor mixes versions; `assemble_to` loops over
-  reads the same way.
-- **`rmdir` removes non-empty folders**; rename flags (NOREPLACE, EXCHANGE) are ignored; FUSE
-  `fsync`/`flush` are no-ops.
-- **Directory `stat` mtime is `now`** on every call.
-- **Removed-id records (`folders/by-path/`) are never pruned**; `rebuild` calls `unlink_quiet`
-  on the `by-path` directory, which fails quietly.
-- **Orphan sweep uses a 1 h grace** and runs only on demand; the spec runs it exactly at owner
-  start.
-- **Revert** puts the manifest and writes the journal entry directly, with no WAL record.
-- **No own marker, no staged `base`, no WAL `priors`/`localFrom`, no re-keying, no `exclusive`
-  or `base` on writes, no `retain`/`release`**: all are spec additions.
-- **The view** is updated only by promotion; an abandoned promotion leaves the old manifest in
-  the mirror.
+- **Mirror entries are read, not mapped.** `Mirror.file` reads the entry into a string and decodes
+  it (`Manifest.decode`); §2.3 recommends a read-only mapping.
+- **No `STEP_DEADLINE`.** The manifest put that `run_one_upload` makes under the key lock is bounded
+  only by the store's own deadlines and retries. The one deadline in this layer is
+  `Cache.read_deadline`.
+- **`revert` holds both locks across the store.** `Engine.revert` calls `R.revert`, which snapshots
+  the current version and puts the manifest, inside `with_meta` and `with_key` (§3.2 rule 3).
+- **Promotion ends the lineage.** `promote` calls `end_lineage` before it removes the staged
+  manifest, so a handle open across a promotion keeps reading the edit as it was, and holds its
+  bodies until it closes. A later write is not visible through that handle (§3.3).
+- **A write's manifest is not durable.** `write_edit` replaces the staged manifest without a
+  directory fsync when no body goes away; the bodies and the manifest become durable at `sync`
+  and `close` (review finding 20).
+- **`create` takes the key lock only**, so it can race a `mkdir` of the same name (review finding
+  120).
+- **A local half that fails after discarding state is abandoned** as it stands (review finding
+  108). A reader that resolved a whole body can lose it to the split of a first write (review
+  finding 109).
+- **The rebuild sweeps by what the walk saw, not by mtime.** `Engine.rebuild` removes every entry
+  whose path the walk did not yield, sparing paths changed during the walk (`was_touched`) and
+  files with a staged edit. There is no `record` / `sweep_stale(cutoff)` pair.
+- **Owner start walks the whole cache root** for temporaries before it serves (review finding 88).
+- **The cache cap** is walked after every upload (review finding 89), runs on housekeeping passes
+  but does not count growth between them (review finding 34), and counts an in-flight fetch's
+  temporary as a body (review finding 135). An eviction can be undone by a fetch in flight (review
+  finding 134).
+- **Prefetch** is spawned per sequential read for the current and the next group, uncapped per
+  handle, and recomputes the file's groups each time (review findings 35 and 80).
 
+## Learnings
 
-## B.1 Runtime-independent learnings (valid under Lwt or OCaml 5 direct style)
-
-- **Manifests are `mmap`ed, and a cached manifest pins its mapping** (spec §4.2). A `Bigarray`
-  mapping is released only when the value is collected, so an unbounded memo of decoded
-  manifests held 19,261 live mappings (75 MB of pinned page cache) during an import. Bound any
-  cache of mapped values by count, not bytes; FIFO suffices. Memo validity uses `(st_ino,
-  st_size, st_mtime)` so a write by another process is noticed without coordination.
-- **Chunk bodies live off the OCaml heap** (`Bigstring` = `Bigarray.Array1` of chars, commit
-  acf20d86). Group assembly, staged copies and upload fillers allocate `Bigstring.create len`
-  per member; `Fs.read/write` take bigstring slices (`Bigarray.Array1.sub`, no copy). Keep
-  buffers as bigstrings end to end — a `string`/`bytes` round trip doubles memory for 8 MiB
-  chunks.
-- **`Manifest.t` is the body itself** (a mapped bigstring); header fields and chunk keys are read
-  by offset, never materialized into lists (a 32 GB file has 31,230 keys). Group keys are hashed
-  by streaming XXH3 over the member keys (C stub, `XXH_INLINE_ALL`, `XXH3_64bits_withSeed`).
-- **Syscall retry wrapper** (`Syscalls.S`): every `stat/open/rename/link/utimes/...` goes through
-  an EINTR-retrying layer (commit 37c0d67d: "an interrupted syscall is not an answer"). Missing on
-  any one call surfaced as spurious ENOENT/EIO under FUSE signal delivery.
-- **`Filename.temp_path` naming** (`.tsync-tmp-<pid>-<seq>.tmp`) is also used by
-  `Bigstring.snapshot` (reflink clone via `FICLONE` in `Device.clone`) in the *same directory* as
-  the source. On a reflink-capable fs this created/unlinked a temp file in a directory an inotify
-  watch was on, so every read woke the poller (OOM loop on a Pi). `O_TMPFILE` does not avoid it
-  (closing still fires an event, with no name to filter). Keep scratch out of watched
-  directories or filter temp names at the watcher. Clonability is cached per directory; on a
-  non-clonable fs the first attempt per directory still creates and unlinks a temp.
-- **`atomic_write_at`** `ftruncate`s the temp to the final size before producing pieces (fails
-  fast on ENOSPC) and requires every byte to be covered exactly once — the member length check
-  is what enforces that.
-- **Type-level lifecycle**: `Staged_manifest.state = Owed of staged | Committed of staged *
-  Manifest.t`, with `write` only able to produce `Owed`, makes "a mutation silently carries a
-  finished upload's commit record" unrepresentable. Keep that shape (sum type, not an option
-  field).
-- **Decision tables as pure functions over variant "facts"** (`Resolve.Arrival`,
-  `Resolve.Publish`) with exhaustive `match`, printed whole by a test. Polymorphic variants for
-  small fact enums avoid module dependencies. The enact step pattern-matches `(action, op)` and
-  treats impossible pairs as `invalid_arg`.
-- **Capability hiding by shadowing**: `File.Local` redefines `St`, `Js`, `Hs`, `R` as empty
-  modules (`module St = struct end [@@warning "-60"]`) so nothing under the metadata lock can
-  call the store. It is a convention, not a boundary (`C.store` is still reachable); a separate
-  functor/module without those arguments would enforce it.
-- **Process-wide singletons via top-level `Hashtbl` keyed by directory/root**: because the
-  per-domain `Make (C)` functors are applied by many consumers (file ops, diagnostics, share
-  server, export, resync), any state that must be unique (WAL log + id counter, both `Owed`
-  hand-offs, manifest memo, cache `held` counts) lives *outside* `Make`, in a table keyed by the
-  directory, and `Make` looks it up. State accidentally left inside `Make` is duplicated per
-  application — this is the case for `Chunk_cache.fetching`/`slots` and `Data`'s pull table
-  (spec §9 item 5). Bindings modules (`*_lwt.ml`) apply the outer functors exactly once.
-- **Forked processes**: `Id.short` reseeds its PRNG when `getpid` changes (a forked child would
-  otherwise mint its parent's uuids). Any per-process table (locks, memos, counters) is copied
-  by `fork` and must not be trusted as shared.
-- **Synchronous CLI paths** (`Checkout.availability`, `Staged_manifest.sidecar_path`) are plain
-  functions outside any functor so a command with no event loop can call them.
-- **Yojson** for every small JSON file; `Yojson.Basic.Util.member` returns `` `Null `` on missing
-  fields, which is how optional fields (`o`, `z`, `whole`, `published`, `v`) are decoded; wrap
-  decoding in `try` and map failure to "set aside" (staged) or "legacy Intent" (WAL).
-
-## B.2 Lwt / functor-specific learnings
-
-- **Functor over a concurrency signature.** Every module is `Over (Io : Io.S) (Fs) (Syscalls)
-  (Lock) (Bounded) (Clock) … = struct module Make (C : Conf.S) = … end`; `lib/lwt/domain/…`
-  applies them to `Io_lwt.*`. It let tests drive components with fakes and kept the domain
-  library free of Lwt. Cost: two-level functor application everywhere, singleton state having to
-  be hoisted out of `Make` (B.1), and type-equation noise (`with type 'a io := 'a Io.t and type fd
-  = Fs.fd`). Under OCaml 5 direct style the `Io` parameter disappears; the capability parameters
-  (Fs, Clock, Bounded, Fetch) remain useful as plain records/first-class modules for testing.
-- **The monad marks the yield points, and the code relies on them** (spec §6, "Reliance on
-  cooperative scheduling"). Sections written "with no `let*` between lookup and update" —
-  `Partial.take`, the `ensure_fetched` table insert (gated by `Io.wait`/`wakeup_later`),
-  `with_key`'s holder count, `Partial.publish`'s promise chain — are atomic only because Lwt
-  cannot preempt. With effects the yield points become invisible (any call may perform an
-  effect); with domains there is real parallelism. Each of those needs a `Mutex`/`Atomic` or
-  must be confined to one domain.
-- **`Partial.publish` serializes by promise chaining** (`let t = prev >>= write in replace table
-  key t`). Direct-style equivalent: a per-body mutex; note the chain entry is never pruned while
-  the body stays partial.
-- **Fan-out bounds.** `Io.iter_p` over a group's members is unbounded at the cache layer (bounded
-  by the wire pools in the chunk store below `Remote`); `Bounded.map_with`/`iter_with` pools
-  (`slots`, `piece_slots`, `group_slots`, `metadata_slots`, `dir_slots`, `stat_slots`) bound
-  caller-sized fan-outs. **Never take a pool inside the same pool** (a directory holding a slot
-  while its entries wait for one deadlocks) — hence two stat pools and recursion outside the
-  pool in `Temp_files`. Under effects/domains these become semaphores; the same nesting rule
-  applies, and unbounded `iter_p` becomes unbounded fibers.
-- **Deadline without cancelling shared work** (`within_deadline`): `Lwt.async` the work, resolve
-  a separate `Lwt.wait` promise from it, and `with_timeout` only the waiter — `Lwt.pick`/cancel on
-  the work itself would cancel the fetch for every reader joined to it. Direct style: spawn the
-  fetch as its own fiber, wait on a promise/ivar with timeout.
-- **Fire-and-forget read-ahead** uses `Io.async` with `finalize` decrementing a counter and
-  `catch` swallowing errors; an exception escaping `Lwt.async` would reach
-  `async_exception_hook` (the engine treats a dead loop as fatal). Keep every detached task
-  wrapped.
-- **`Owed` hand-off** is a mutable closure field (`take`), not a stream: `signal` returns only
-  when the consumer's `take` returns, which is what makes "a delete right after a close finds an
-  upload to cancel" hold. A `Lwt_stream`/channel would decouple the two and lose that.
-- **`Lock.with_lock` on an Lwt mutex** is non-reentrant: code already holding the metadata lock
-  calls the inner `*_body`/unlocked variants (`rename_body`, `write_locked`, `promote` from
-  `promote_pending`). Keep the locked/unlocked split explicit in a rewrite.
-- **Read-ahead and pull-table counters are `ref`s mutated on the loop**; `pulling_now` is
-  deliberately synchronous (a `Hashtbl.fold` that yielded would see the table mutate). With
-  domains, protect or confine them.
+- **The commit record is a constructor argument.** `Staged.state = Owed | Committed of
+  Manifest.t`: a Committed edit always carries the manifest its upload stored, and every mutation
+  in `Local_ops` writes `state = Owed`.
+- **Any file of the staged tree that decodes is an edit, whatever its name**; `Staged.fold`
+  yields the rest as `` `Bad ``. The set-aside prefix is an internal leaf, so no user name escapes
+  to it (A-1.9). `recover_local` reads a bad manifest's bytes before renaming it: its bodies are
+  named from those bytes.
+- **`with_meta` is reentrant by holder identity** (`Rt.self`, `Rt.same`), so a request handler
+  resolves a reference and acts on it in one hold (`Engine_intf.S.atomically`). A wait or a hold
+  longer than 2 s is logged with the call stack (A-2.5).
+- **Lock order is in the helpers.** `with_keys` sorts and deduplicates its paths, and namespace
+  operations take `with_key` inside `with_meta`. `Keyed_locks` drops the entry of a key nobody holds, waits
+  for or ever bumped, so a walk locking every path leaves nothing behind.
+- **Body release is reference-counted against ended lineages.** `end_lineage` freezes every open
+  handle of a path and counts its bodies in `body_refs`, in one hold of `handles_m`;
+  `release_body` on a counted body records it in `deferred_release`, and `close_read` releases it
+  when the count reaches zero.
+- **Bodies made for an edit are released if the edit is never written.** `with_new_bodies`
+  collects the bodies its function registers and, on an exception, releases those the staged
+  manifest on disk does not name (C-7.10).
+- **Bodies before manifest before release.** `write_edit` fsyncs the bodies, replaces the manifest
+  durably, then releases the bodies the new manifest does not name; `promote` hands bodies to the cache, writes the
+  mirror entry, removes the staged manifest, and releases bodies last.
+- **`close` posts through a forward reference.** `Local_ops.post_put_hook` is a `ref` that
+  `Outbound` sets to `post_put`, because the layer that owns `close` is included by the layer
+  that owns the queues. A close without a write since the last one posts nothing (`dirty`).
+- **The upload commits on an unchanged generation.** `run_one_upload` reads the edit and its
+  generation under the key lock, uploads chunks without it, and under the lock again fails
+  `Rt.Cancelled` if the generation moved or the job was cancelled.
+- **The file-id index is a state machine**: `Unbuilt | Building | Ready | Saved`. Marker changes
+  made during a build are queued and applied when it completes; the first change after a snapshot
+  was saved removes the snapshot; a failed build returns to `Unbuilt` (A-11.19).
+- **A bulk pass writes without a fsync each.** `Mirror` writes take `~durable:false`; the rebuild
+  then calls `Fs.syncfs` once on the mirror root, before the applied log and the mark claim the
+  result. A non-durable write still fsyncs its data, so an entry is never torn (B-1.12).
+- **A reader's deadline does not cancel the fetch.** `Cache.within_deadline` runs the work in a
+  spawned fiber resolving a promise; the reader waits on the promise with `Rt.with_timeout` and
+  fails DEADLINE, and the fetch lands for the next reader.
+- **Cache group state is kept only while it says something.** `Cache.using` drops a group's entry
+  once nobody uses it and it holds no interval; a generation is never repeated, so a state made
+  again is not taken for the one dropped.
+- **`await_upload` polls** every 0.1 s until the staged edit is gone, the domain is paused or a
+  record naming the path is retrying or parked (a `ponytail:` comment names a per-key signal as
+  the upgrade).

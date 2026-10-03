@@ -1,62 +1,60 @@
 # Durable queue and crash immunity — OCaml implementation notes
 
-Companion to [../../algorithms/durable-queue.md](../../algorithms/durable-queue.md). Descriptive
-notes about the tree at `4c32fa96`; the spec is normative.
+Companion to [../../algorithms/durable-queue.md](../../algorithms/durable-queue.md). Not normative.
+Finding numbers refer to [the 2026-10-01 review](../../../review/2026-10-01-rewrite.md).
 
 ## Spec → code
 
 | Spec | Code |
 |---|---|
-| queue, records, claim, rescan, settle | `lib/core/durable_queue.ml` (`Records`, `Make.Make`, `claim`, `with_claim`, `rescan`, `settle_all`), `durable_queue_intf.ml` |
-| scheduler binding; absent vs failed read | `lib/lwt/core/durable_queue_lwt.ml` (`Files.read_file`: `Body`, `Gone`, `Failed`) |
-| record id | `%020Ld-%08d-%d` (µs, seq, pid); `list` keeps names starting with a digit |
-| ordered / keyed | `Q.ordered` / `Q.keyed`; `put_back` (head vs tail); `take` (slot, `pending`, `cancel`) |
-| failure classes | `Retry.classify`, `Retry.classify_in_order`, `Backend.classify`, `Shutdown.Stopping`, `Retry.Cancelled` |
-| poison policies | `Durable_queue.Stop` (metadata, uploads), `Drop` (deferred) |
-| upload queue | `lib/domain/sync/sync_queue.ml` (ENOENT or `Cancelled` ⇒ abandon) |
-| metadata queue, parking, rearm | `lib/domain/sync/meta_queue.ml`; rearm via the "metadata retry" maintenance task |
-| WAL log and hand-offs | `lib/domain/checkout/wal/wal.ml` (`Owed`, `log_for`, `discharge`, `list` filtered by client uuid) |
-| reconcile, adoption | `lib/domain/sync/replay.ml` (`reconcile_record`, `resume_prepared`, `replay_unpublished`, `adopt_unrecorded`) |
-| deferred job log | `lib/backends/api/deferred.ml` (`resumed_starts`, `start_resumed`, `on_recorded`, `post` vs `record`) |
-| drain and stop | `Domain_engine.drain` (metadata queue, then uploads, raced against 0.8·grace; `flush_cursor`), `drain_for_stop` |
-| one-shot drain | `Oneshot.run` → backend drain → `settle_all` |
-| Android lifecycle | `android_jni.ml` `load_domain` (`resume = false`), `start_queue`, `run_maintenance`, no drain |
-| Android share and ingest | `Ingest.kt` (`commit` fsyncs staging; `sweepOrphans` 24 h), `MainActivity.kt` share save |
-| atomic write | `lib/local/io/fs.ml` `atomic_write`, `with_temp_rename` (no fsync) |
-| import spool | `lib/domain/ops/import.ml` (`Skipped_exists` adds no op), `publish.ml` batches (2000 ops / 10 s) |
+| Primitives (§3.2) | `Fs.durable_replace`, `Fs.replace`, `Fs.create_if_absent`, `Fs.create_if_absent_locked`, `Fs.mkdir_p`, `Fs.append_durable`, `Fs.release`, `Fs.fsync_dir` (`lib/core/fs.ml`) |
+| Log, record, id grammar (§4.1) | `Dqueue.Records` (`open_`, `create`, `read`, `update`, `replace`, `complete`, `list`), `Dqueue.valid_id`, `Dqueue.submission_id` (`lib/core/dqueue.ml`) |
+| Set aside, R6 | `Records.set_aside`, `Records.set_aside_records`; a record that cannot be read stays in place and is retried (`decode_record`, `` `Unreadable ``) |
+| Submission, hold, release order (§4.2) | `Records.create`, `Records.create_held`, `Records.hold`, `Records.is_held`; `Dqueue.rescan` skips a held record and every later one of the same pid |
+| Re-key of an adopted WAL record | `Records.rekey`, the `rekey` argument of `Dqueue.start` and `rescan` (`Engine.rescan_logs` mints an entry key) |
+| `post`, `adopt`, `update`, `complete` (§4.3) | `Dqueue.post`, `adopt`, `Records.update`, `Records.complete` |
+| Ordered and keyed queues (§4.5) | `Dqueue.create ~ordered`; `ordered_worker`, `keyed_worker`, coalescing in `take` |
+| Outcomes (§4.6) | `run_one`, `failed`; `Rt.Cancelled` completes, `Stop.Stopping` leaves the record, `Fail.retryable` decides retry or park; `Dqueue.backoff` |
+| Parking, re-arm (§4.7) | `Dqueue.parked`, `Dqueue.rearm`, `rearm_interval`; `Engine.rearm` from the owner's `housekeeping` (`lib/owner/owner.ml`) and from the retry request |
+| Settle, pause (§4.8) | `Dqueue.settle`, `settle_timeout`, `pause`, `resume`; `Engine.drain`, `Composite.settle` |
+| Job kind | `'job Dqueue.kind` (`decode`, `encode`, `key`, `note`, `accepts`); two queues share the WAL through `accepts` |
+| The logs of a domain | the WAL with its `uploads` (keyed) and `metadata` (ordered) queues (`lib/sync/local_ops.ml`), `claims` (`lib/sync/outbound.ml`), one copy log per replica or backfill (`lib/store/composite.ml`), pending discards (`lib/store/discards.ml`) |
+| Start and recovery | `Engine.start`: `recover_local`, `Dqueue.start`, `reconcile`, `rescan_logs`, `adopt_unrecorded` |
+| Bulk publisher (§7.3) | `Bulk.batches` (`lib/sync/bulk.ml`): a record held from birth, rewritten to the ops whose store half happened, then adopted |
+| Non-owner submitter | `Composite.create ~owner:false`: `submit` creates the record and calls `poke` |
+| Tests | `tests/unit/dqueue_test`, `dqueue_raise_test`, `tests/sync/recover_test`, `tests/gc/queued_test` |
 
-## Differences from the spec
+## Departures from the spec
 
-- **No fsync** of records, their directory, staged data or the client uuid.
-- **Claims.** Every runner `lockf`s `<dir>.owner` and runs anyway when another holds it; the WAL
-  claim is checked by nobody (reconcile, `tsync sync` and the parent's 60 s metadata rearm read
-  every record), so a `Prepared` metadata record can be published by two processes, in either
-  order. `lockf` is released by any close of the file in the process.
-- **Recorder/resumer roles.** Frontends only `record` deferred jobs and poke the parent; one-shot
-  commands run their own posts; Android never resumes; a daemon-less machine leaves a timed-out
-  command's records for nobody.
-- **`MAX_QUEUED` drops posts** (100 000): the record is not written and the queue is marked
-  degraded. The spec never drops for capacity.
-- **Drop poison** for deferred jobs unlinks a permanently failing job; **Stop** parks, but upload
-  records parked in a long-running process are never re-armed until restart.
-- **Record update is not conditional**: a `note_failure` racing a completion in another process
-  resurrects the record.
-- **Unparseable records** are unlinked by `Records.list` (deferred) or decoded as an empty
-  `Intent` (WAL).
-- **Promotion precedes `Executed`**, so a crash between them completes the record without
-  publishing (see [../04-checkout-cache.md](../04-checkout-cache.md) B.0.1).
-- **Import** puts manifests before the batch's journal entry, and a re-run skips existing keys
-  without re-emitting their ops: a kill between leaves manifests nobody announces.
-- **Android share sheet** calls `finish()` before the commits run; a kill then loses the shared
-  files, and the staging copies are swept after 24 h.
-- **Camera backup** stores the pass-start MediaStore generation, so failed and unsettled photos
-  are never retried.
-- **Metadata `Executed`** keeps the original ops, not the as-published ones.
+- **Every record is loaded.** `post` and `rescan` take each record into memory; nothing stays on disk
+  past a window (§4.4 leaves this to the implementation). `loaded`, `order` and `ready` are lists, so a
+  backlog of hundreds of thousands of records makes start-up and each rescan quadratic (finding 90).
+- **The `claims` queue is not re-armed while the owner runs.** `Engine.rearm` covers the upload,
+  metadata and copy queues only (§4.7 asks it of every queue).
+- **A keyed queue retries UNEXPLAINED at the tail** (`failed`), as failure-model §7.1 asks; the outcome
+  table of §4.6 lists it as non-retryable.
+- **`settle` polls.** It samples the queue every 50 ms instead of waiting on a condition; a
+  cancellation ends it.
+- **No watchdog per queue** (finding 43). Status counts retrying and parked records; a queue whose
+  worker waits at a closed gate looks like one that is working.
+- **A first write's body is not fsynced before its staged manifest names it** (finding 20, rule R2).
+- **A failed local half is not rolled back** (finding 108): `delete` drops the staged edit before the
+  mirror removal, and an I/O error in between leaves the old content visible.
+- **Revive-ours publishes without a record** (finding 39): see
+  [conflict-resolution](conflict-resolution.md).
 
-## Resource strategy (not normative)
+## Learnings
 
-- `MAX_QUEUED = 100 000` records per queue in memory; the current code refuses (drops) posts past
-  it. A rewrite should keep records past the window on disk and load them in id order.
-- Upload workers: `maxUploads` (config), keyed parallelism. Ordered queues use one worker, as
-  the spec requires.
-- `rescan` pokes are debounced at 0.5 s with a 1 s timeout.
+- Only `Stop.Stopping` ends a worker. A read error on a record (`EMFILE`, `EIO`) is an outcome like any
+  other: the ordered worker backs off at the head, the keyed worker requeues the key (finding 8).
+- Under a stop, `settle` returns once no job is running, and a worker takes no other: the running job
+  finishes within the grace `Engine.drain` gives it, and the next record is not started (finding 123).
+- A keyed slot is finished exactly once, in a `Fun.protect`, on every path out of a run
+  (pitfall C-7.10).
+- A descriptor that holds a record's lock is the caller's only once the lock is taken: `Records.hold`
+  closes it on every failure (pitfall C-7.10).
+- A held record is rewritten before its hold is released, never after: a rescan between the two would
+  adopt the full record (`Bulk.batches`).
+- A retried record is superseded when a newer job for its key arrived meanwhile; its record is completed
+  then, and a record left behind is adopted again by the next rescan.
+- `Records.update` never resurrects a record completed meanwhile; both run under the record's mutex.

@@ -1,43 +1,42 @@
 # gcs — Google Cloud Storage driver — OCaml implementation notes
 
-Companion to the language-neutral spec [../../backends/gcs.md](../../backends/gcs.md). Shared object-store shell: [../../backends/object-store-common.md](../../backends/object-store-common.md). See [README.md](../README.md) for how these notes are organised.
+Companion to the language-neutral spec [../../backends/gcs.md](../../backends/gcs.md). The shell every bucket shares is in [s3.md](s3.md). See [README.md](../README.md) for how these notes are organised.
 
-## B-0. Where the current code differs from the spec
+Code: `lib/store/gcs/gcs.ml` and `gcs_auth.ml` (a `private_modules` of `tsync_gcs`), over `Tsync_store.Object_store`, `Tsync_store.Bucket_xml` and `Tsync_http.Client`.
 
-- **OAuth failures are Transient**: `Gcs_auth` raises bare `Failure`, which `Retry.classify` reads as Transient, so a revoked key or `invalid_grant` climbs the whole ladder and marks the link lost.
-- **No token invalidation on 401**: a token revoked before expiry keeps being sent until it ages out (≤ 1 h), each request failing Permanent meanwhile.
-- **Token freshness uses the wall clock** (`Unix.gettimeofday`): a clock jump can make an expired token look fresh.
-- **`get_range` with offset ≥ size** on a non-empty object fails 416 → Permanent.
-- **Metadata parsing is lenient**: an unparseable `size` or `updated` reads as 0; an RFC 3339 offset suffix is ignored rather than applied. Unparseable JSON in a metadata or listing answer is raised after the ladder as Transient.
-- **Bulk delete**: the answer's `<Key>` is not entity-decoded; keys holding characters XML cannot carry fail the batch (400 → Permanent).
-- **Listing asks for the full object resource**. An unmerged change (branch `json-listing`, a02b9a4d) adds `fields=items(name,size,updated),nextPageToken` — half a million objects shrink from 483 MB of JSON to ~70 MB — but drops `etag`, which would silently make every listed etag none.
-- **`copy`** is `get` + `put`, not `rewrite`.
-- **Idle connections** are kept 60 s (shared `Http_client`), not the spec's pool idle bound.
-- **The stall timeout** is `Uplink_budget.stall_timeout` (60 s) read at construction; measured rationale (55ca68f8): over a 61 956-object mirror every stalled request was answered on its first retry, so a 300 s bound only idled the caller.
+## Map
 
-## B-I. Runtime-independent learnings
+| Spec | Code |
+|---|---|
+| Fields (§1) | `fields` in `gcs.ml`: `bucket`, `serviceAccountKey` (secret), `endpoint` (`Field_spec.http_url`), `shareUrl`; `create` trims one trailing `/` and refuses an anonymous store off loopback |
+| Service-account key (§1.1) | `Gcs_auth.create`, with the four messages of the table |
+| JWT (§2) | `jwt` in `gcs_auth.ml`: `Mirage_crypto_pk.Rsa.PKCS1.sign ~mask:`No ~hash:`SHA256`, key from `X509.Private_key.decode_pem` |
+| Exchange and its kinds (§2) | `mint` |
+| Token cache (§2) | `Gcs_auth.token`: an `Atomic` of the token and its expiry on `Rt.now`, minted under `Rt.Fmutex` with a second look inside |
+| 401 from storage (§2) | `call` in `gcs.ml`: `Gcs_auth.invalidate`, one fresh token, one more send |
+| Key encoding (§3) | `Gcs.segment` |
+| Verbs (§3) | `upload`, `put_if_absent`, `put_if_unchanged`, `get_opt`, `get_range`, `head_opt`, `delete`, `copy` (`rewriteTo`, repeated while the answer carries a `rewriteToken`) |
+| Metadata to entry (§3.1) | `entry_of_json`, `Gcs.rfc3339` (`Ptime.of_rfc3339`), `Checksum.md5_of_base64` |
+| Listing (§3.2) | `list_page`, with the `fields` projection that keeps `generation` and `md5Hash` |
+| Bulk delete (§3.3) | `delete_page`: `Bucket_xml.delete_body`, `Content-MD5` from `Digest.string`, `Bucket_xml.delete_errors`, `Object_store.per_key_failure`; a key `Bucket_xml.safe` refuses goes through `delete` |
+| Status mapping | `fail` over `Object_store.status_failure`, with `Retry-After` |
+| Registration | the top-level `Driver.register "gcs"` |
 
-- **Shape**: `Gcs_backend.Over (Io) (Hc : Http_client.S) (Post : Gcs_auth.POST) (Lock) (Bounded) (Clock)` builds the string-keyed verbs and hands them to `Object_store.Over(...).make`, which renders `Stored_key.t`s and supplies the shell half. `make ?endpoint ?service_account_key ?share_url ~bucket () : (module Store)`; `spec` is the `Field_spec` list the registry shows (all `` `String ``, `serviceAccountKey` `secret = true`).
-- **Pure helpers live outside the functor** (`enc_key`, `parse_rfc3339`, `parse_list`, `delete_body`, `delete_errors`, `xml_escape`) so `tests/backends/gcs` tests them without instantiating a runtime. Keep new wire-format code there for the same reason.
-- **`gcs_auth` is a `private_modules`** of the driver library; tests reach it only through the store.
-- **Crypto with no RNG**: `Mirage_crypto_pk.Rsa.PKCS1.sign ~mask:`No ~hash:`SHA256`. Any masked/blinded signing would need `Mirage_crypto_rng` initialised, which nothing does before the first TLS connection. Key from `X509.Private_key.decode_pem` (`` `RSA k `` only). base64url via `Base64.encode_string ~alphabet:Base64.uri_safe_alphabet ~pad:false`.
-- **`Uri.pct_encode ~component:`Generic`** is exactly "escape everything but unreserved", uppercase `%XX` — the one-segment object name. Two traps:
-  - `Uri.of_string` keeps an already-encoded path verbatim, which is why `%2F` survives to the wire; building the path with `Uri.with_path` or `Uri.make ~path` would re-encode `%` or split on `/`.
-  - `Uri.add_query_param'` (used for `ifGenerationMatch`) decodes and re-serialises the *whole* query with `Query_value` rules, so the `name=` value of a claim goes out with `/` raw and `+ & ; ,` escaped, unlike a plain `put`. Both decode to the same key server-side; do not "fix" one to match the other without a conformance run.
-- **`Stdlib.Digest` is MD5** — all `Content-MD5` needs; `Base64.encode_string` (standard, padded) of the raw digest.
-- **No XML or date dependency**: hand-written escape + substring scan, Hinnant's days-from-civil. `find_from` is O(n·m) naive search; fine for ≤ 1000-error answers.
-- **`size` is a JSON string**: `Yojson.Safe.Util.member "size"` must accept `` `String `` (GCS) and `` `Int `` (emulators); `try int_of_string` → 0 on garbage.
-- **Bodies**: object verbs use `Hc.call_retry` (bigstring in, bigstring out, handed to cohttp as `` `Passthrough ``, so the caller's buffer must outlive retries); JSON/XML verbs use `Hc.call_text` and parse strings. `put_if_absent` returns `data` itself on a win — the counting wrapper tests `held != data` physically, so never copy on that path.
-- **Headers are a thunk** `unit -> Cohttp.Header.t io` evaluated per attempt inside `Clock.with_stall_timeout`: the token mint is under the request's deadline and each retry re-reads the cache.
-- **Error values**: verbs raise `Http_client.failed op code excerpt` (a `Retry.Failed` with kind from the status) or `Retry.failed ~kind:Transient` for bulk per-key errors. `Gcs_auth` raises bare `Failure`, which `Backend.classify` → `Retry.classify` treats as Transient (see B-0). A rewrite should raise `Retry.failed ~kind:Permanent` for 4xx from the token endpoint.
-- **Construction errors are `Failure`s** raised synchronously from the factory (key parsing), before any `io` exists.
-- **Complexities**: `list_all`'s `enough` recomputes `List.length (List.concat acc)` per page (O(pages × items)); `delete_multi` splits with two `List.filteri` per batch (O(n²/1000)). Both negligible at tsync's sizes; a rewrite should carry a running count / use a split-at.
-- **Clocks**: `Gcs_auth` calls `Unix.gettimeofday` directly, not the injected `Clock`: the JWT `iat` must be wall time. Expiry is also compared in wall time; a monotonic deadline for freshness would be the fix.
+## Departures
 
-## B-II. Lwt / functor-specific
+- **The token is fetched before the storage request, on its own endpoint**, not inside the storage attempt's stall window. `Gcs_auth` has its own `Client.endpoint` (two connections) and `mint` is bounded by that request's stall timeout.
+- **`put_if_unchanged` answers `Changed` without a request for an etag that is not a decimal generation**: such a version was named by another store.
 
-- **`Post` is its own tiny signature** (`post : headers -> body:string -> Uri.t -> (int * string) io`) because the token POST must not go through `Hc` (it would need a token to authorise itself, and `Hc`'s retry/health semantics are the storage request's). Lwt binding: `Cohttp_lwt_unix.Client.post`, unpooled, no timeout of its own — it inherits the storage request's stall window. *OCaml 5*: a plain function over the Eio/cohttp-eio client; keep it outside the pooled client.
-- **Refresh lock**: `Lock.with_lock` (`Lwt_mutex`) + re-check of `t.cached` inside. Cancellation: the stall timeout is `Lwt.pick [f alive; watch ()]`, so a hung mint is cancelled; `Lwt_mutex.with_lock` releases via `finalize`, and waiters proceed to their own mint. `t.cached` is a plain mutable field read without the lock on the fast path — safe only because Lwt is single-threaded. *OCaml 5*: store the cache in an `Atomic.t`; replace the mutex with a single-flight cell (a promise/`Eio.Promise` of the in-progress mint that later callers await), and never hold a `Stdlib.Mutex` across the network call (it would block the domain). With Eio, cancellation of the minting fiber must not poison the shared promise for other waiters — resolve it with the error and let each caller retry.
-- **`let+`/`let*` with `raise` inside the continuation**: verbs `raise` in `Io.map` callbacks; under Lwt that becomes a rejected promise. With direct style it is an ordinary exception — same behaviour, no change needed.
-- **Registration**: `gcs_backend_lwt.ml`'s top-level `let () = Backend_lwt.register ~spec "gcs" …` runs only because the library has `(library_flags (-linkall))`; drop it and the driver silently disappears from `Backend_lwt.types ()`. Field reading there maps `Some ""` to `None` for optional fields and fails `gcs backend: missing field: <k>` for `bucket`.
-- **Functor stack**: `Over (Io_lwt.Core) (Http_client_lwt) (Post) (Io_lwt.Lock) (Io_lwt.Bounded) (Io_lwt.Clock)`. `'a io := 'a Io.t` destructive substitution on every argument is what lets the same body compile for another runtime. *OCaml 5*: the functor collapses to a module over direct-style `Http_client`, `Mutex`/single-flight, and `Eio.Time`; the pure helpers and the verb bodies are unchanged.
+## Learnings
+
+- **REFUSED with a reason is `Fail.Denied`** (`refused/denied`): a refused grant in `mint`, and a second 401 through `Object_store.status_failure`. Both are permanent and cost one attempt; `Retry.ladder` counts a permanent failure as an answer for the member's health.
+- **No RNG is needed.** PKCS#1 v1.5 signing with `` ~mask:`No `` is deterministic, so the driver signs before anything has seeded `Mirage_crypto_rng`.
+- **The cache is an `Atomic`, the mint a fiber mutex.** The fast path reads without a lock from any domain; `Rt.Fmutex` suspends the waiting fibers instead of blocking their threads across the token request. A failed mint caches nothing, so each waiter runs its own.
+- **`invalidate` compares the token it was handed** and clears with `compare_and_set`: a 401 on an old token never drops one a concurrent caller has just minted.
+- **Freshness is on the monotonic clock, `iat` on the wall clock.** `Rt.now` decides whether the cached token is fresh; `Unix.gettimeofday` fills the claims, which Google compares with its own time.
+- **Targets are built by hand.** `segment` escapes every byte outside the unreserved set, `/` included, and the string goes to `Client.request` as the target; no URI library sits in between to turn `%2F` back into `/` (pitfall B-2.8).
+- **`json` refuses an answer that is not a JSON object as CORRUPT**, so `Yojson.Safe.Util.member`, which raises `Type_error` on anything else, never sees one at the top level (pitfall B-10.6).
+- **`size` is a JSON string on GCS and an integer on emulators**; `entry_of_json` accepts both and fails CORRUPT on anything else. `generation` is read the same way.
+- **The etag is the generation, the checksum the service's `md5Hash`.** A composite object carries no `md5Hash`, and `Object_store`'s `compute_checksum` then downloads the body.
+- **Bulk delete is the one XML call.** It shares `Bucket_xml` with S3, takes the same bearer token, and needs `Content-MD5` (`Stdlib.Digest` is MD5). `NoSuchKey` and `NotFound` are both absences.
+- **Tests.** `tests/store/gcs_test` runs the contract against a fake served by `Tsync_http.Server` on loopback, and against a real bucket when `TSYNC_CI_GCS_BUCKET` and `TSYNC_CI_GCS_SERVICE_ACCOUNT_KEY` are set. `segment` and `rfc3339` are exported past `(**/**)` for it.

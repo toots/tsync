@@ -1,62 +1,80 @@
 # Retention and garbage collection — OCaml implementation notes
 
-Companion to the language-neutral spec [../../algorithms/gc.md](../../algorithms/gc.md).
+Companion to the language-neutral spec [../../algorithms/gc.md](../../algorithms/gc.md). Not normative.
+Finding numbers refer to [the 2026-10-01 review](../../../review/2026-10-01-rewrite.md).
 
 ## Code map
 
 | Spec concept | Code |
 |---|---|
-| Surviving space S, outgoing space F | `tsync/<D>/chunks/`, `tsync/<D>/chunks.from/` under the collectable main's root; only `Chunk_spaces` and `lib/gc` name F (`tests/store/gc_scoping` lists them) |
-| Collectable (A1) | `Chunk_spaces.of_store`: a store with a `local_path` not on a network filesystem |
-| Driver-scoped access (§5.8) | `Local.create` routes every chunk read, delete and listing through `Chunk_spaces.read`, `twins`, `list` |
-| Reference classification | `Chunk_spaces.references`: the gate refuses exactly what marking halts on |
-| Gate, publish lock, promote | `Chunk_spaces.gate`, `with_publish_lock` (`flock` on `gc-publish.lock`), `promote` + `sync_shards` |
-| Run lock | `Chunk_spaces.with_run_lock`: in-process check-and-set, then `lockf F_TLOCK` on `gc-run.lock` |
-| Run record R | `Gc_record` (typed; `reconciling` reads as closing) |
-| Generation G | `Gc_generation`: `read`, `read_mains` (maximum over mains), `write`, `settle` |
-| Every keep/delete decision | `Gc_plan` (pure; `tests/gc/plan_test`) |
-| Phases, dry run | `Collector.run ?budget ?pause ?verify ?keep`, `Collector.dry_run` |
-| Copy deletions, settling | `Composite.submit_collection_delete` (owner queue or inbox), `collection_owed`, `settle_later` |
-| Copy presence memo | `Copy_memo`, which reads G itself |
+| Surviving space S, outgoing space F | `Key.chunks`, `Key.chunks_from` under the collectable main's root; only `Chunk_spaces` and `lib/gc` name F (`tests/store/gc_scoping` lists the sources that do) |
+| Collectable (A1) | `Chunk_spaces.of_store`, `collectable`: a store with a `local_path` not on a network filesystem, asked on every use |
+| Driver-scoped access (§5.8) | `Chunk_spaces.read`, `twins`, `list`, called by the local driver (`lib/store/local.ml`) |
+| Reference classification (§5.3) | `Chunk_spaces.references`: the gate refuses exactly what marking halts on |
+| Gate, publish lock, promote (§5.4) | `Chunk_spaces.gate`, `with_publish_lock` (`flock` on `Key.gc_publish_lock`), `promote`, `sync_shards` |
+| Run lock | `Chunk_spaces.with_run_lock`: an in-process check-and-set, then `lockf F_TLOCK` on `Key.gc_lock` |
+| Run record R | `Gc_record` (`read`, `write`, `clear`, `run_name`; `reconciling` reads as closing) |
+| Generation G (§5.6) | `Gc_generation`: `read`, `read_mains` (maximum over mains), `write`, `settle` |
+| Every keep or delete decision | `Gc_plan`, pure: `start`, `namespaces`, `closing_generation`, `doomed`, `keep_plan`, `trash`, `purge_order`, `versions`, `journal`, `share`, `unreferenced` (`tests/gc/plan_test`) |
+| Phases (§5.5) | `Collector.run ?budget ?pause ?verify ?keep`; outcomes `Completed`, `Suspended`, `Halted` |
+| Dry run (§5.9), status | `Collector.dry_run`, `Collector.status` |
+| Deletion on copies (§5.7) | `Composite.submit_collection_delete`, the copy job `Collection_delete`, `collection_owed`, `settle_later` (`lib/store/composite.ml`) |
+| Queued discards, the bucket function | `Discards` (`add`, `pending`, `remove`), `Bucket_function` (`probe`, `confirmed`, `due`), `Composite.probe`, `outstanding`, `retry_outstanding` |
+| Presence memo | `Copy_memo`, which reads G itself; `Chunk_set` holds its keys |
+| Retention (§4) | `Retention.Make`: `expire`, `purge`, dry runs unless `apply` |
+| Orphan namespaces (§4.6), integrity | `Integrity.Make`: `report`, `repair_tree`, `verify`, `repair_chunks` |
+| Shares (§4.5) | `Share.Make`: `create`, `revoke`, `clear_cache`; expiry in `Retention` |
+| Tests | `tests/gc/` (`plan_test`, `collector_test`, `resume_test`, `queued_test`, `verify_test`, `retention_test`, `integrity_test`, `share_test`, `mirror_test`), `tests/store/spaces_test`, `tests/store/gc_scoping`, `tests/unit/gc_job` |
 
-## Lessons
+The collector takes one session per collectable main, each under that main's run lock; the first
+collectable main owes its deletions to every replica and backfill (`targets` in `collector.ml`).
 
-- A read that falls back to F must hold the publish lock shared: under load, a copy's delete job
-  running in the owner read a chunk from a shard its doom step had not yet emptied, skipped the
-  delete and restored the chunk (`tests/gc/collector_test` under 10 concurrent instances: 2/10
-  without the lock, 0/10 with it).
-- A best-effort chunk forward can outlive a collection delete on the same copy; the delete takes every
-  forward slot first.
-- A settle that meets the collector's run lock must retry: the job's own attempt runs before its record
-  completes, and the collector counts that record as owed, so neither would settle.
-- Domain names hold no `/`: keys are parsed by segment. Searching for the last `/chunks/` raised for a
-  domain named `chunks`.
+## Where the code departs from the spec
 
-## Gaps
+- **A chunk-area listing lists S before F** (finding 132, `Chunk_spaces.list`): a chunk promoted
+  between the two listings is missed, and a dry run reports it as damage.
+- **The publish lock can starve the collector** (finding 133): a busy import holds it shared, the
+  collector's exclusive take times out after 30 s, and the error names a collection as the holder.
+- **Every manifest write wakes the cursor watch** (finding 138): the publish lock file sits in the
+  directory the local driver watches.
+- **Outstanding discard requests are not in the collector's report** (finding 131). They are listed by
+  `Composite.outstanding`, which only the `Outstanding` action of `Jobs.copies` prints.
+- **`Delete_many` on a copy is one read and one delete per key** (finding 96): an expiry of many keys
+  is serial on the replica.
+- **Integrity holds the whole tree before it reports** (finding 85).
+- **Collection is refused while a remote copy would be told key by key.** `Collector.run` answers
+  `Unsupported`, unless `keep`, when the collecting main owes deletions to a remote copy whose bucket
+  function this owner has not confirmed.
 
-- Queued discards (a copy with a bucket function) are not built: no driver supports `discard`.
-- Crash tests stop at unit boundaries (`budget` 0), not inside a unit.
+## Learnings
 
-## Implementation notes for the spec's locks
+- A read that falls back to F holds the publish lock shared. Without it a copy's delete job read a
+  chunk from a shard its doom step had not yet emptied, skipped the delete and restored the chunk.
+- A best-effort chunk forward can outlive a collection delete on the same copy: the delete takes every
+  forward slot first (`without_forwards`).
+- A settle that meets the collector's run lock retries (`settle_later`): the job's own attempt runs
+  before its record completes, and the collector counts that record as owed.
+- Settle never turns G while a run record is present (`Chunk_spaces.run_open`): a run suspended in
+  closing still dooms under its odd generation (finding 25).
+- A body that cannot be classified is not "no references". `Chunk_spaces.references` answers `Error`
+  for a manifest with a malformed key, marking halts with the run left open, and the gate refuses the
+  body (finding 3).
+- The run lock and the publish lock are two files. A record lock is dropped by any close of its file
+  in the process, so a `flock` taken and released on the run lock's file would release the run lock
+  (finding 24). Record locks also merge within one process, which is why the in-process check-and-set
+  comes first.
+- `--verify` reads a promoted chunk with a positioned read, never a mapping: a block the disk cannot
+  return fails the read and files a marker, where a mapping kills the process (pitfall A-7.4).
+- A chunk is verified once per process (`Chunk_set`), and a resumed run verifies every chunk a unit
+  names, since a promotion may precede the kill.
+- The dry run holds its referenced set as packed 16-byte keys (`Chunk_set`), not a table of strings
+  (finding 82).
+- Domain names hold no `/`: keys are parsed by segment, never by searching for `/chunks/`.
 
-- The run lock must stay a POSIX record lock (`lockf`/`fcntl`) on `gc-run.lock` so older collectors and
-  newer ones exclude each other.
-- The publish lock lives on its own file, `gc-publish.lock`: POSIX drops a process's record locks at
-  any close of the file they lock, and macOS implements `flock` and `fcntl` on shared structures. An
-  older writer's gate, which takes `flock` on `gc-run.lock`, is not excluded by a newer collector.
-- `lockf` needs the file open for writing; `flock` works on any open descriptor.
-- Record locks merge within one process, which is why the in-process check-and-set is needed at all.
+## Resource choices (not normative)
 
-## Tests
-
-`tests/gc/plan_test` (every decision), `tests/gc/collector_test` (a local main and replica: survey,
-run, stepping, a mid-run publication, abort, verify, halt, exclusion, the generation),
-`tests/store/spaces_test` (the driver's scoping and the gate), `tests/store/gc_scoping`.
-
-## Resource strategy (not normative)
-
-- Marking reads one namespace at a time, sequentially; promotions of a namespace are made durable with
-  one `fsync` per touched shard before its cursor is written.
-- Copy deletions are recorded in batches of 1000 keys.
-- The gate waits at most 30 s for the shared publish lock; a settle retries every 2 s while the run
-  lock is held, one pending attempt per domain.
+- Marking reads one namespace at a time; the promotions of a namespace are made durable with one
+  `fsync` per touched shard directory before its cursor is written.
+- Copy deletions are recorded in batches of 1000 keys (`delete_batch`).
+- The gate waits at most 30 s for the publish lock (`publish_wait`); a settle retries every 2 s while
+  the run lock is held (`settle_retry`), one pending attempt per domain.

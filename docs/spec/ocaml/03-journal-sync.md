@@ -1,144 +1,93 @@
-# 03 — Multi-machine synchronisation (journal, sync, conflict resolution) — OCaml implementation notes
+# 03 — Journal and sync: formats and interfaces — OCaml implementation notes
 
-Companion to the language-neutral spec [../03-journal-sync.md](../03-journal-sync.md). See [README.md](README.md) for how these notes are organised.
-The mapping of the protocol and of the conflict tables to the code, the implementation choices
-(widths, batch sizes, read bounds) and the code's deviations from the spec are in
-[algorithms/wal-and-journal.md](algorithms/wal-and-journal.md) and
-[algorithms/conflict-resolution.md](algorithms/conflict-resolution.md). Section numbers in
-parentheses below name the concept, not a section of the current spec.
+Companion to [../03-journal-sync.md](../03-journal-sync.md). Not normative. The protocol and the
+conflict tables are mapped in [algorithms/wal-and-journal.md](algorithms/wal-and-journal.md) and
+[algorithms/conflict-resolution.md](algorithms/conflict-resolution.md); the local formats in
+[04-checkout-cache.md](04-checkout-cache.md).
 
+## Code map
 
-Each note names the spec concept it implements. B-I holds what stays true under any
-OCaml concurrency model (including OCaml 5 direct style with effects/domains); B-II holds
-what is tied to the Lwt monadic style and the functor-over-runtime pattern, with what each
-becomes under effects/domains.
+| Spec concept | Code |
+|---|---|
+| Client uuid, folder-id leases (§2.1) | `Identity` (`lib/checkout`): `client_uuid`, `minter`, `mint` |
+| Entry key (§2.2) | `Entry_key`: `parse`, `make`, `of_time`, `month`, `compare`, `journal_key`; minting in `Entry_key.minter` / `mint` |
+| Journal ops (§2.3) | `Op`: `to_json`, `of_json` (`None` for an unknown op, `Bad` for a known op with a bad field), `paths`, `encode_entry`, `decode_entry` |
+| Journal entry, cursor (§2.4–2.5), the store seam (§3.1) | `Journal`: `list_entries`, `read_entry`, `entry_exists`, `write_entry`, `cursor_read`, `cursor_token`, `cursor_wait`, `note`, `bump`, `flush` |
+| Last-sync mark (§2.6) | `Mark`: `read`, `write` |
+| Applied log (§2.7, §3.2) | `Applied`: `load`, `note`, `contains`, `keys`, `head`, `since`, `prune` |
+| WAL record (§2.8) | `Wal`: `encode`, `decode`, `is_metadata`, `puts_only`, `subject`, `carry_fids`; the log is `Dqueue.Records` over `<data_dir>/journal-pending/<domain>` |
+| Conflicted-copy name (§2.9) | `Conflict.conflict_name`, picked free by `Local_ops.aside_name` |
+| `PUBLISH` (§3.3) | `Outbound.publish_entry`, reached through `discharge` and `discharge_executed` |
+| Replication engine (§3.4) | `Engine.Make`: `reconcile`, `apply_pass`, `apply_entry`, `rebuild`, `resync`, `unapplied`, `bridge`, `cannot_bridge` |
+| Poller (§3.5) | `Engine.Make`: `poller`, `poll`, `wake_poller` |
+| Outbound queues (§3.6) | two `Dqueue.t` over the one WAL, created in `Local_ops` (`uploads`, `metadata`), run by `Outbound.run_upload` and `run_metadata` |
+| Conflict decisions (§3.7) | `Conflict`: `arrival`, `publish`, `clashed`, `publish_clashed`, `describe` |
+| Fact gathering and enactment | arrival: `Engine.read_ahead`, `apply_op`; publish: `Outbound.publish_op` |
+| Change feed over the applied log | `Engine.Make`: `cursor`, `changes_since`, `stamp_generation`, `prune_applied` |
+| Parameters | `Outbound.horizon`, `list_slack`, `rekey_age`, `sweep`, `retry_floor`, `claim_settle`; `Journal.cursor_interval` |
 
-## B-I. Runtime-independent learnings
+`Engine.Make (C)` is one functor chain, each layer including the one below: `Local_ops` (local
+state and file operations), `Outbound` (publishing and the queue runners), `Bulk`, `Import`,
+`Rsync`, then `Engine` (arrival, passes, rebuild, start and drain). `Tsync_domain.Domain.engine`
+applies it once per domain, in the owner.
 
-**B-I.1 Abstract `Entry_key.t` (§2.2).** A private record `{ms; client_uuid}` with
-`of_string` as the only constructor; the type system forbids comparing a bare key to a
-prefixed or month-sharded spelling — the bug class (two readers "permanently behind") it
-was introduced to kill. `File_store.journal_key` is the only function producing a backend
-key from it. Keep this whatever the runtime.
+## Departures from the spec
 
-**B-I.2 Ops as polymorphic variants (§2.3).** ``[ `Put | `Delete | `Mkdir | `Rmdir |
-`Rename of rename_op ]``: modules build and match ops without depending on `Journal`'s
-definitions (untangles the module DAG); `rename_op` is a record because it has >2 fields.
-The conflict tables use ordinary closed variants for `facts`/`action`/`ending`, where
-exhaustiveness across the table *is* the point (`tests/unit/resolve` enumerates them).
+- **The mark is not part of the journal seam.** `mark_read` and `mark_write` are `Mark.read` and
+  `Mark.write`, taking the data directory.
+- **`rebuild_done` is not a separate operation.** `Engine.rebuild` notes the listed keys, moves the
+  mark and reopens the gate itself.
+- **A failed pass is retried after `retry_floor`**, with a log line each time (review finding
+  145).
+- **An upload waits for its dependencies by polling**, 5 times a second, re-reading metadata
+  records (`Outbound.wait_dependencies`, review finding 143).
+- **A store read can still happen under the metadata lock** during arrival, for an edit reached
+  only through an owed rename of ours (review finding 52).
+- **revive-ours publishes with no WAL record** (review finding 39).
 
-**B-I.3 "The lock cannot be held across a request" by module scoping (§4.4, §7.6).**
-Everything that changes local state lives in `File.Local`, which owns the private
-`meta_mutex`; the store modules are shadowed inside it, so code under `with_meta` has no
-name through which to reach the store. This is a module-system technique and survives a
-move to direct style. Peer entries therefore get store answers as a data table
-(`store_reads`); a missing answer is the exception
-``Unread (`Marker k | `Manifest k)`` used as control flow: the read-ahead catches it,
-fetches, and restarts its survey; under the lock it becomes
-`Retry.failed ~kind:Transient`, so the replay pass aborts and retries instead of stepping
-the entry aside.
+## Learnings
 
-**B-I.4 Failure classification by exception tagging (§4.1, §4.3, §7.7).** The retry loop
-raises `Retry.Failed {kind; op; detail}` when out of tries; `classify_in_order` returns that
-kind and `Permanent` for any other exception (`Unix_error ENOTEMPTY`, `Invalid_argument` …).
-`Retry.Cancelled` = superseded; `Shutdown.Stopping` must be re-raised untouched so the
-record stays for the next start; `Unix_error (ENOENT, _, _)` from an upload = staged bytes
-gone, nothing owed. A catch-all handler anywhere on these paths silently changes policy —
-review every `with _ ->` against this list (e.g. `get_journal_entry` swallowing all
-errors; see [algorithms/wal-and-journal.md](algorithms/wal-and-journal.md) §3).
-
-**B-I.5 State hoisted to module-global tables because functors are applied many times
-(§2.10, §4.2).** `Make (C)` is applied in every module that touches the journal (queues,
-replay, resync, engine, tests), so `let x = ref …` inside it is one copy *per
-application*. Every fix has the same shape — a global `Hashtbl` keyed by what the state
-really belongs to: the cursor debouncer by cursor object key (per-application debouncers
-meant a flush in one never published another's pending bump); `Replay.stepped_aside` by
-domain (the poller steps aside, the engine reports); `Wal.logs` by directory (a second log
-over one dir kept its own id counter), with the two hand-offs stored alongside;
-`Journal.uuid_cache`/`leases` by data dir (lease tagged by pid because a forked child
-inherits the heap). The `handled` set is still per application ([algorithms/wal-and-journal.md](algorithms/wal-and-journal.md) §3). This is about
-generative functor application, not Lwt: it applies to any design that instantiates
-per-domain modules repeatedly. Under domains these tables additionally need
-synchronisation (B-II.2).
-
-**B-I.6 Blocking local I/O where it is cheap and hot (§2.1, §2.6).** Client uuid, folder
-id leases and the last-sync mark use synchronous `Unix`/`Stdlib` I/O (called on every
-journal write; ponytail comment `journal.ml:19`). uuid creation uses `link(2)` for
-cross-process atomicity; the mark uses write-to-`.<pid>.tmp` + `Sys.rename`; leases use
-`O_CREAT|O_EXCL`.
-
-**B-I.7 JSON via Yojson.Basic (§2.3, §2.7).** `size` is ``` `Int (Int64.to_int size) ```
-— fine with 63-bit ints, would truncate on a 32-bit target. `of_json` wraps everything in
-`try … with _ -> None` so decoding is total (forward compatibility).
-
-**B-I.8 Snapshot scenario tests (§8).** `Test_runner.run_two_client_scenarios` runs two
-full clients over one backend in one process with separate data/cache dirs; steps are a
-variant (`A (Write …)`, `B Sync`, ``B (Metadata `Paused)``, `A HideNewestJournalEntry`,
-`A (CrashBeforeCommit …)`); output is diffed against `<exe>.expected`, never substring
-assertions, and contents are shown (a split brain passes a names-only check). A green
-`dune build` compiles neither the runner nor the scenario executables; run the `runtest`
-aliases and read the exit status; env-only changes need `dune build --force` (dune
-replays cached actions).
-
-## B-II. Lwt- and functor-specific learnings
-
-**B-II.1 Functor over a concurrency signature (§3).** Each component is
-`Over (Io : Io.S) (deps …) = struct module Make (C : Conf.S with type 'a io = 'a Io.t) …
-end`: the outer functor fixes the runtime and its dependencies' implementations, the inner
-one the domain; `lib/lwt/domain/sync/sync_lwt.ml` is the only place Lwt is chosen
-(`Replay.Over (Io_lwt.Core) (Io_lwt.Bounded) (File_store_lwt) (Wal_lwt)
-(Staged_lwt.Manifest)`, `Sync_poller.Over (Io_lwt.Core) (Io_lwt.Clock) (File_store_lwt)
-(Replay)`, queues over `Wal_lwt.Q`). *Solved*: domain logic compiled without Lwt,
-testable with a fake runtime; the poller takes Replay through an inline signature exposing
-only `apply_foreign`, so tests can substitute it. *Cost*: a parallel `lib/lwt/…` mirror
-tree, `with type 'a io := 'a Io.t` constraints on every signature, and the per-application
-state trap (B-I.5). *Under effects/domains*: `'a io` collapses to `'a`, the outer functor
-and the mirror tree disappear; keep the inner per-domain parameterisation (or replace it
-with a first-class record of the domain's config) and keep the dependency seams that tests
-substitute.
-
-**B-II.2 The monad marks every yield, and unlocked state depends on it.** Under Lwt a
-check-then-act with no `let*` in between is atomic. These pieces of shared state rely on that, with
-no lock: entry-key minting (`last_ms`), the folder-id lease counter, the cursor debouncer
-(`pending`, `timer_armed`, `last_published`; the publish itself is under a mutex), the dedupe set
-and `stepped_aside`, the poller's `last_version`/`last_swept`, the metadata queue's `parked` set,
-the WAL hand-off slot and log registry, and in-process applied-log appends. Under effects any function call may
-suspend the fiber, and under domains other code runs in parallel. Each of these needs
-an explicit mechanism: `Atomic` for `last_ms`/lease `next`/counters, `Mutex` (or a single
-owning fiber with a message queue) for the debouncer, dedupe set, parked set and log
-registry, and one `write` per applied-log record under a per-file mutex.
-
-**B-II.3 The poller as a detached loop (§4.3).** `Io.async` (= `Lwt.async`): an exception
-escaping it goes to `Lwt.async_exception_hook`, which hosts override to log because the
-default exits the process — so the loop catches everything itself and sleeps
-`retry_floor`. The wait uses `Clock.with_timeout` and swallows the timeout by
-`Clock.is_timeout`. `paused` is a polled closure (0.2 s tick), not a condition variable.
-*Under effects*: a fiber in a switch/nursery with structured cancellation; the pause
-becomes a condition the loop blocks on; an unhandled exception should fail the switch
-rather than rely on a global hook.
-
-**B-II.4 Hand-off without waiting (§4.1).** `Wal.Owed` is a mutable slot holding the
-consumer's `take : 'a -> unit Lwt.t`; `signal` calls it directly, so the producer returns
-only once the consumer has adopted the record (a delete right after a close finds an upload
-to cancel) and never blocks when nothing drains (the record is durable). *Under
-effects/domains*: the same slot must be an `Atomic.t` (swap vs. call), or become a bounded
-channel whose `send` returns after enqueue — the "returns after adoption" property is what
-must be kept.
-
-**B-II.5 Bounds (§6).** `Bounded.create ~max:32` for reconcile's journal reads, created at
-module scope so overlapping recoveries share one bound (a promise per entry up front was
-both memory and a request storm); upload workers = `max_uploads` in the durable queue; the
-metadata queue is one worker. *Under effects*: bounded fan-out becomes a semaphore around
-fibers; an unbounded `Lwt_list.iter_p` becomes unbounded fibers — the same hazard.
-
-**B-II.6 Applied-log appends (§2.7).** `Lwt_unix.openfile [O_WRONLY; O_APPEND; O_CREAT]`
-plus a short-write loop (`write_all`) that fails on a 0-byte write. Because the loop can
-yield between partial writes, two in-process writers could interleave; the record format
-(newline-led) makes cross-process tears cost one record, and in-process safety relies on
-records being small enough that one `write` completes (B-II.2).
-
-**B-II.7 Blocking calls inside the event loop (§2.1, §2.6).** B-I.6's synchronous I/O
-stalls the whole Lwt loop (every domain) for its duration; acceptable because each is a
-tiny local file operation. Under domains it only stalls the calling fiber's domain, but a
-blocking call inside an effects scheduler still blocks that scheduler — keep them tiny or
-route them through the runtime's blocking-call offload.
+- **`Entry_key.t` is a private string** whose only constructors are `parse`, `make` and `of_time`.
+  `parse` takes the last `/` segment, so a listing path, a cursor body and an applied-log field all
+  go through it; `journal_key` is the one function that spells the store key.
+- **Ops are an ordinary closed variant** with record payloads (`Op.t`). `of_json` separates the
+  two reader rules by type: `None` is an op to ignore, `Bad` makes the entry CORRUPT.
+  `Wal.decode` turns both into "unparseable", so a record is never run with an op dropped, while
+  `Applied` drops an undecodable op from its line.
+- **The conflict tables are pure and printed whole.** `Conflict.arrival` and `Conflict.publish`
+  are total functions over closed variants; `tests/sync/formats_test` prints every row to its
+  `.expected` file, so a policy change shows as a diff.
+- **Store answers are read ahead, then looked up under the lock.** `read_ahead` fills an `answers`
+  record of hash tables; under `with_meta` a missing answer raises `Exit`, which `apply_entry`
+  reports as a LOCAL failure, so the pass fails and retries instead of stepping the entry aside.
+  Store work an enactment owes is queued with `defer` and run after the lock is released.
+- **Failure policy is a match on `Fail.kind`.** In `apply_pass`: `Stop.Stopping` and
+  `Rt.Cancelled` propagate; a retryable kind fails the pass; CORRUPT or INVALID on the read, and
+  any other failure of the enactment, step the entry aside and hold the mark below it. A handler
+  added on these paths changes policy.
+- **The poller waits on three things at once**: `Journal.cursor_wait`, the poll signal and a
+  `sweep` sleep, raced with `Rt.first ~detach:true`. Whether to list is then decided from the
+  cursor token, the time of the last listing and the signal's version, never from which branch
+  won.
+- **One pass or rebuild at a time**: `pass_lock`, an `Rt.Fmutex`. The deferred list is a plain
+  `ref` because only the holder touches it.
+- **The catch-up gate carries an epoch.** `close_gate` counts link failures; a pass reads
+  `gate_epoch` when it starts and `open_gate ~since` opens only if no failure came meanwhile, so a
+  pass that began before an outage cannot let the queues publish after it.
+- **Each piece of shared state has its own small lock.** The minter, the lease minter, the cursor
+  debouncer (`pending`, `armed`, `last_publish`), the handled set and the stepped-aside table each
+  sit behind a `Mutex`; flags are `Atomic`. The cursor put itself is serialised by an `Rt.Fmutex`,
+  which a fiber may hold across the request.
+- **The debouncer is one spawned fiber per armed interval.** `note` arms it under the mutex;
+  the fiber sleeps, disarms and flushes. A failed flush is logged and dropped: the cursor is a
+  hint.
+- **The applied log appends with one `Fs.append_durable`** under the log's mutex, after the
+  handled-set test, so a key is written at most once and the record is durable before `note`
+  returns. The shard is the month of handling, read from the clock at each append.
+- **Identity files are arbitrated by `Fs.create_if_absent`** (B-4.2). The lease minter records the
+  pid it leased under and leases again when `getpid` differs (B-4.3).
+- **Stale keys are replaced at EXECUTED.** `mark_executed` re-keys a record older than `rekey_age`
+  with `Dqueue.Records.rekey` before writing the ops it will publish, in one durable update.
+- **Scenario tests are snapshot tests** (`tests/sync/*_test.ml` against `<name>.expected`):
+  `two_clients_test` applies `Engine.Make` twice over one local store in one process, each client
+  with its own data and cache directories. Output is diffed, never matched by substring.

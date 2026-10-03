@@ -1,34 +1,58 @@
 # Security model — OCaml implementation notes
 
-Companion to [../../algorithms/security-model.md](../../algorithms/security-model.md). Where each mechanism lives in the OCaml tree, and where the code at the spec snapshot falls short of the spec. Paths are relative to the repository root.
+Companion to [../../algorithms/security-model.md](../../algorithms/security-model.md). Not normative.
+Finding numbers refer to [the 2026-10-01 review](../../../review/2026-10-01-rewrite.md).
 
 ## Where the mechanisms live
 
 | Spec section | Code |
 |---|---|
-| §4 signature, freshness | `lib/backends/api/http_proxy.ml` (`Auth.canonical`, `sign`, `verify`, `max_skew = 300.`); constant-time compare is `Eqaf.equal` after a length check |
-| §5.1 key and name validation | `lib/core/stored_key.ml` (`listed` is the constructor for a key a peer reported), `lib/core/logical_key.ml`, domain names in `lib/domain/config/parsing/conf_parsing.ml` |
-| §5.2 route confinement | `within`, `op_keys`, `route_for` in `lib/app/frontends/http_proxy/http_proxy_frontend.ml` |
-| §5.3 filesystem stores | `resolve` in `lib/backends/drivers/local/local_backend.ml` |
-| §6 shares | `lib/domain/ops/share.ml` (`create`, `clear_cache`, token from `Id.token 16`), `lib/app/cli/cmd_share.ml`, `lib/app/frontends/http_proxy/share_server.ml`, `lambda/handler.py` (`load_share`) |
-| §7 sockets | `lib/core/ipc.ml` (`serve` creates the parent `0o700` via `Fs.mkdir_p_sync ~perm`); staging and dest in `lib/app/cli/runner/daemon/engine/ipc_handler.ml` (`handle_write`, `ensure_cached`, `fetch_range`) and `lib/domain/checkout/content/data.ml` |
-| §8 FUSE | `lib/app/frontends/fuse/fuse_frontend.ml` (`allowOther` option), `fuse_fs.ml` (`mount ~allow_other`) |
-| §10 secrets | `lib/app/wizard/wizard.ml` (config write), `field_spec.ml` (masking) |
-| §13 HTML | `share_server.ml` (browse page substitution), `lambda/browse.html`, `lib/app/frontends/http_proxy/stats.html` |
+| §4 signature, freshness | `Proxy_wire.verify` (constant-time `Eqaf.equal`), `Proxy_wire.fresh`, `max_clock_skew` (`lib/store/http_proxy/proxy_wire.ml`); `verifies`, `fresh`, `verified_routes` in `lib/frontends/http_proxy/store_server.ml` |
+| §4.3 answers | `unauthorized`: one 401 for a bad signature and for a domain no route serves |
+| §5.1 keys and names | `Key.t` and `Key.prefix` are private strings built only by the namers or by `Key.of_string` (`lib/core/key.ml`); the grammar is `Names.valid_key`, `valid_prefix`, `valid_leaf`, `valid_path`; `Domain_name.of_string` refuses reserved names (`Names.reserved_roots`) |
+| §5.2 route confinement | `within`, `route_for`, `writable`, `share_candidates` (`store_server.ml`) |
+| §5.3 filesystem stores | `Local_path.path`, `check_no_links`: no symbolic link between the root and the key; the local driver opens with `Fs.open_nofollow` |
+| §6 shares | `Share.Make` (`create`, `revoke`, `clear_cache`; `lib/gc/share.ml`), token from `Ids.token`, `Key.share` accepts 1 to 128 lowercase hex; served by `Share_server` (`claims`, `manifest_domain`, `handle`); expiry in `Retention` |
+| §7.1 socket directory and file | `Ipc.serve`: `check_dir` (0700, this uid), the socket bound under `umask 0o177` (`lib/ipc/ipc.ml`) |
+| §7.2 peer credentials | `Fs.peer_uid` (`SO_PEERCRED`, `getpeereid` in `sys_stubs.c`), checked per connection |
+| §7.3 paths over IPC | `Transfer.check_dest`, `check_staging` against the roots the host declares (`lib/owner/transfer.ml`); `Owner` defaults them to the user's home |
+| §8 FUSE | `allowOther` always with `default_permissions`; `owner_only_writes` refuses other uids unless the configured modes grant others write (`lib/frontends/fuse/fuse_mount.ml`) |
+| §9 TLS | `Transport.tls` (`host`, `ca_file`), `lib/http/native`, `lib/http/ssl`; `Field_spec.http_url` refuses `http://` to a host that is not loopback at config validation; `Transport.cleartext_loopback_only` on Android; a plaintext listener binds loopback unless `bind` says otherwise (`proxy_options.ml`) |
+| §10.1 generation and strength | `Ids.secret` (32 bytes of `/dev/urandom`), `Field_spec.secret_length`, `min_secret_length` |
+| §10.2 at rest | `Fs.durable_replace ~perm:0o600` from the wizard command (`bin/setup_cmds.ml`): the mode is set on the temporary; `Paths.read_config` refuses a config readable by group or other, or fixes it when interactive; `Fs.mkdir_p` creates 0700 |
+| §10.3 masking | `Config.masked_fields`: a field is shown only when its `Field_spec` marks it non-secret |
+| §10.4 in a browser | `status_page.html`: the secret in a variable only, Web Crypto, refused outside a secure context |
+| §11 listener limits | `Server.limits` (`header_bytes`, `header_timeout`, `idle_timeout`, `keepalive_timeout`, `max_connections`; `lib/http/server.ml`); `Proxy_options.listener` (`max_put_body`, `max_bulk_body`, `max_body_memory`, `max_zip_members`); `admitted`, `body_deadline` |
+| §12 status | `/stats` answers for `verified_routes` only: the domains whose secret signed the request |
+| §13 HTML | `Share_server.script_json`, `fill`; `content-security-policy: sandbox` and `nosniff` on served files |
 
-## Gaps at the spec snapshot
+## Where the code departs from the spec
 
-Each is a place the code does not yet meet the spec. They are listed so a reader of the code is not misled by it.
+- **A listing is built whole, unpaged and outside admission** (finding 77): `list` of a chunk area
+  holds every entry three times, and `max_keys` cuts after listing.
+- **get-multi has no byte cap** (finding 78): up to the key bound of whole chunks in one frame, read
+  eight at a time inside one data slot.
+- **The data slot is released before the response body is written** (finding 79), so bodies in flight
+  are bounded by the connection cap, not by the slots.
+- **Share reads are outside the storage bound** (finding 81): a range request reads whole chunks, and
+  the ZIP member walk is quadratic.
+- **`umask` is process-wide** (finding 115). `Ipc.serve` narrows it around `bind`; a directory another
+  domain creates in that window gets mode 0600.
 
-- **Key traversal (§5.1, §5.3).** `within` checks only that a key starts with a route root; `Stored_key.listed` is the identity; the local driver's `resolve` joins the key onto its root without normalising. A signed `tsync/<d>/../../<path>` reads, writes and deletes outside the store with the listener's privileges (reproduced). Keys copied between stores by mirror, backfill and GC go through the same unchecked join.
-- **Domain names (§5.1).** Not validated; `shares`, `corrupted`, `verify-jobs`, `gc-jobs`, `/` and `..` break prefix confinement.
-- **Unserved domain and bad signature** answer 404 `unknown domain` and 401 respectively, so domain names can be enumerated.
-- **Share space (§6.4).** Share-prefix keys route to any verifying route with no check of the manifest's `domain`: any domain's secret can list, read, overwrite and delete every manifest in its store. The lambda handler does not check a file share's `key` against its `domain`. `tsync share --token` accepts any non-empty hex and overwrites with a plain put; there is no revoke; expired manifests are never deleted.
-- **Browse page (§13).** `__SHARE_DATA__` is `Yojson.Safe.to_string` (and `json.dumps` in the lambda) inside `<script>`, unescaped; the `__OG_*` substitutions run first, so a title containing a placeholder is substituted again. Shared files are served inline without a sandbox CSP.
-- **Status (§10.4, §12).** `/stats` accepts any route's secret and reports every domain. `stats.html` keeps the secret in `sessionStorage` under `tsync-secret` and carries a JS SHA-256/HMAC fallback for non-secure contexts.
-- **Limits (§11).** `Cohttp_lwt.Body.to_bigstring` reads the whole body before routing, authentication and admission; there is no header, idle or keep-alive timeout and no connection cap; share responses and the ZIP member list are unbounded.
-- **Sockets (§7).** Only `Ipc.serve` creates the socket directory `0o700`; the durable queue can create it first with `0o755`. Socket files are created under the process umask. No peer-credential check.
-- **Confused deputy (§7.3).** `staging` and `dest` are used as given; `dest` is opened `O_WRONLY|O_CREAT` without `O_EXCL` or `O_NOFOLLOW`.
-- **FUSE (§8).** `allow_other` is passed without `default_permissions`; no caller check.
-- **TLS (§9).** `http://` is accepted for any host; the listener binds all interfaces; no `ca_certificate`. Android permits cleartext and builds its CA bundle once.
-- **Secrets (§10).** No generation or length check. The wizard writes `config.json` then `Unix.chmod path 0o600` (`wizard.ml:881`). Masking in `field_spec.ml` masks only fields the spec marks secret, so unknown fields print in clear. Android Auto Backup copies the config.
+## Learnings
+
+- A key that comes from outside (a listing, a peer, a job record) passes `Key.of_string` or does not
+  exist: the type is private, so no free string reaches a driver, and the local driver joins nothing
+  it has not validated.
+- A copy carries two names, so it escapes a check written for one. `share_candidates` gives no route
+  to a copy or a bulk operation that names a share manifest, and a manifest write only to the route
+  whose domain the body names (finding 6).
+- One deadline is computed at accept and after each response; every read of the head and of the TLS
+  handshake gets what is left of it. A timeout per read lets a client trickle a header for days
+  (finding 29).
+- A request's body is read and its signature verified before it takes a data slot, under a deadline
+  sized from the declared length (`body_deadline`, finding 30).
+- Staging and destination paths are checked through directories only (`check_under`); the host
+  declares its roots, and a client's request adds none (finding 31).
+- A mount point is normalised once at intake: compared as written, a stale mount under a trailing
+  slash or a symlink is never found (finding 33).

@@ -1,52 +1,54 @@
 # Backend driver `http-proxy` — OCaml implementation notes
 
-Companion to [../../backends/http-proxy.md](../../backends/http-proxy.md). Generic backend notes: [../06-backends.md](../06-backends.md). Security gaps of this code against the spec: [../algorithms/security-model.md](../algorithms/security-model.md).
+Companion to [../../backends/http-proxy.md](../../backends/http-proxy.md). Generic backend notes: [../06-backends.md](../06-backends.md). The server behind the endpoints: [../frontends/http-proxy.md](../frontends/http-proxy.md).
 
-Layout: `lib/backends/api/http_proxy.ml` (wire module, in the backend API library so client and server link the same code), `lib/backends/drivers/http_proxy/http_proxy_backend.ml` (the functor `Over (Io) (Hc) (Clock)`), `lib/lwt/backends/drivers/http_proxy/http_proxy_backend_lwt.ml` (instantiation + registration). Server: `lib/app/frontends/http_proxy/http_proxy_frontend.ml`.
+Code: `lib/store/http_proxy/proxy_wire.ml` (the wire, linked by both ends), `lib/store/http_proxy/http_proxy_client.ml` (the client driver), over `Tsync_http.Client`. The server is `lib/frontends/http_proxy/store_server.ml`.
 
-## Runtime-independent
+## Map
 
-- **One wire module for both ends.** `Http_proxy.{Auth, Watch, Wire}` holds the header names, the canonical string, the long-poll parameter names and the 30 s cap, the key encoding and both framings. Client and server never spell these themselves. Keep it transport-free: plain functions over strings and bigstrings.
-- **The canonical target is `Uri.path_and_query`, on both ends.** The client signs `Uri.path_and_query uri` of the URI it sends; the server recomputes `Uri.path_and_query (Cohttp.Request.uri req)`, which re-encodes the parsed query with ocaml-uri's `Query_key`/`Query_value` safe sets and upper-case hex. That is the byte-exact rule of spec §3.2. ocaml-uri also splits a value on literal `,` and rejoins it with `,`, which is why a raw `,` happens to verify too. `Uri.add_query_param'` **prepends**, so the watch URI is `?last_seen=…&wait=30`.
-- **`Uri.with_path base_uri "/…"` replaces the whole path**: the code drops a base path in `url` (spec §1 requires keeping it and signing the API path only).
-- **Body hash over the bigstring** (`Digestif.SHA256.digest_bigstring`): a chunk body is never materialised as a string to be signed.
-- **Timestamp** is `Printf.sprintf "%.0f" (Unix.time ())`, which rounds; the JS and Kotlin signers floor. The verifier parses with `float_of_string_opt`, so it accepts forms (`1.7e9`) the spec now refuses.
-- **`Wire.decode_key`** is base64 with `~pad:false` and the URI-safe alphabet; the result is taken with `Stored_key.listed`, which validates nothing at the snapshot.
-- **Frame decoders raise `Failure`** on a malformed answer and bound each length by the bytes remaining. `Failure` is not `Retry.Failed`, so `Backend.classify` calls it transient, where the spec says CORRUPT.
-- **Bulk answers are built in pieces** (`body_parts`, `folder_parts`); concatenations of them are exactly `bodies_to_string` / `children_to_string`. The server streams the pieces; the client decodes one string.
-- **Client decode copies three times** (bigstring → string → per-body `String.sub` + `Bigstring.of_string`), ~24 MiB transient for an 8 MiB answer. Decoding off the bigstring with `Bigstring.sub` views removes two copies.
-- **Watch tokens are abstract** (`Backend.Watch_token.t`, trimmed body): `to_wire` / `of_wire` / `equal`.
-- **`put_if_absent` returns a fresh buffer**, so the counting wrapper's physical-equality test (`held != data`) always sees a loss. The naming layer judges the claim by parsing the marker.
-- **Capability parsing**: `ask` maps 404 and any JSON exception to the default; `positive` accepts only `` `Int n `` with `n > 0`.
-- **Registration** is a side effect of linking `tsync_http_proxy_backend_lwt`, kept by `(library_flags (-linkall))`.
-- **Test seams**: the HTTP client is a functor argument (`Hc : Http_client.S`), used by `tests/backends/proxy_watch_client`; `tests/backends/proxy_permanent` uses a raw socket to count requests.
+| Spec | Code |
+|---|---|
+| Fields (§1) | `fields` in `http_proxy_client.ml`: `url` (`Field_spec.http_url`), `secret` (`Field_spec.secret_length`), `ca_certificate` (`Field_spec.absolute_path`) |
+| Base path (§1) | `Client.endpoint` keeps the URL's path and prefixes every target with it; `request` signs the API target it builds, before that prefix |
+| Stall timeout (§2) | `stall_timeout` (300 s), passed as `~stall` to `Client.request` |
+| Signing (§3.1) | `Proxy_wire.signature`, `Proxy_wire.sign` (timestamp from the wall clock, floored) |
+| Canonical query (§3.2) | `Proxy_wire.canonical_query` (client), `Proxy_wire.parse_query` (server) |
+| Verification (§3.3) | `Proxy_wire.fresh`, `Proxy_wire.verify` (`Eqaf.equal`); `Proxy_wire.max_clock_skew` |
+| Key encoding (§4.1) | `Proxy_wire.encode_key`, `decode_key` (through `Key.of_string`) |
+| Listing JSON (§4.2) | `Proxy_wire.listing_to_json`, `listing_of_json` |
+| Frames (§4.3) | `Proxy_wire.encode_bodies`, `decode_bodies ~count`, `encode_folders`, `decode_folders ~asked` |
+| Bulk limits (§5.2) | `Proxy_wire.bulk_keys_max`, `bulk_folders_max`, `bulk_answer_budget` |
+| Client status mapping (§6.3) | `failure`, with `Fail.of_wire_kind` for `x-tsync-kind` and the `missing_chunks` body parsed into `Fail.Missing_chunks`; `skewed` |
+| Watch (§7) | `watch`; `watch_floor`; `Proxy_wire.watch_max` |
+| Binding (§8.1) | `ensure_served`, memo `served` |
+| Claim support (§8.1) | `claims_supported`, memo `claims`, set when `capabilities` hears `/verified` |
+| Checksum and conditional-replace support (§8.1) | `checksums_supported`, memo `checksums` |
+| Operations (§8.2) | the record built in `create`; `call` (bind, ladder, transient statuses raised), `expect` |
+| Paging and fallbacks (§8.3) | `pages`, `get_many`, `list_many`, `delete_multi`; memos `no_get_many`, `no_list_many` |
+| Capabilities (§8.4) | `capabilities`: `Rt.map_concurrently` over the four paths inside one ladder, kept per prefix in `caps` |
+| Retry and health (§9) | `ladder` (`Retry.ladder ~health`) |
+| Registration | the top-level `Driver.register "http-proxy"` |
 
-## Gaps at the spec snapshot
+## Departures
 
-- `delete_multi` is not paged; empty bulk lists are sent (400); `get_many` has no fallback on 404; `list_many`'s sticky 404 flag does not distinguish an unserved domain.
-- No first-use binding or claim probe: an unserved domain reads as an empty store on `get_opt`, `get_range`, `head_opt`, `delete`; `put_if_absent` against a server older than `if_absent` overwrites the winner and reads its empty answer as a win.
-- 403 surfaces as a generic permanent `HTTP 403`, not `Backend.Not_writable`.
-- HEAD carries no etag; 409 carries no kind header.
-- Watch goes through the full retry ladder before its failure is swallowed, and swallows cancellation too.
-- The capability memo is not keyed by prefix.
+- **A 401 on the binding request is not memoised.** Only a 404 with a body sets `served = Some false`; a 401 raises `Denied` and the next operation asks again, since it may be this clock's skew (finding 27, listed there as a spec gap in §8.1).
+- **Binding is sequential and lazy.** `ensure_served` runs before each operation until it has an answer; claim support is learned from the first `capabilities`, not concurrently with the binding.
+- **The capability memo is not shared by concurrent first callers.** Each sends its four requests and adds its answer to `caps`; later callers read the first entry for the prefix.
+- **`get_range` with a length of 0 fails INVALID** in `Store.checked`, as 06 §3.2 has it, where §8.2 answers empty.
+- **A zero-length body is sent without admission** (`request`).
+- **Upload bytes are counted before admission** (finding 136).
 
-## Lwt / functor-specific
+## Learnings
 
-- **`( and* )` is built on `Io.join`** with two `ref` cells, so the four capability requests start together. Under OCaml 5: `Eio.Fiber.all`.
-- **Capability memo** (`caps_cache : Backend.caps Io.t option`): the promise is stored before anything awaits, so concurrent callers share it; `Io.catch` clears the slot on failure. This relies on no preemption between the match and the assignment; with domains it needs a mutex or a resettable once-cell.
-- **`no_list_many`** is a plain mutable bool; under domains an `Atomic.t` suffices.
-- **Stall timeout** is `Clock.with_stall_timeout` inside `Http_client.call`, pinged per received piece by the pool. It does not cover the upload. Under Eio: a timeout restarted per chunk, or a watchdog fiber reading a last-progress timestamp.
-- **Retry ladder** is `Retry.Make(Io)(Clock).with_retry`; its sleep is `Shutdown.Sleep`, so a stop interrupts a backoff.
-- **Watch floor** is `Clock.sleep Backend.default_watch_interval` (2 s).
-- **Request bodies** go to cohttp as `Body.of_bigstring (`Passthrough body)`: the buffer must stay valid until the request, retries included, is answered.
-- **TLS library** is conduit's global `tls_library` ref, set once by `Tls_conf`; no per-instance TLS config, hence no `ca_certificate` yet. OpenSSL preferred; ocaml-tls selectable.
-
-## Resource strategy (not normative)
-
-- One connection pool per driver instance, at most 32 parallel connections per endpoint, idle connections kept 60 s; a pooled connection found dead before the request left is redialled once, on a fresh pool shared by every request that raced into the dead one.
-- Request bodies are sent from the caller's buffer without a copy; an answer is held whole before it is interpreted.
-- `get_many` callers pack runs to ≤ 256 keys and ≤ 8 MiB of listed sizes before the driver sees them.
-
-## When each capability appeared in this code base
-
-Core (2026-07-24); `/chunk-size` 07-27; `/max-concurrency` and 503 `busy` 08-01; `if_absent` 08-07; `/domains` 08-09; `/verified` 08-14; `/get-multi`, bulk confinement, listing `etag` 08-21; watch parameters 08-26; range parameters 08-29; `/children-multi` 09-03; 204 on DELETE 09-06; 409 for permanent failures 09-17. The claim probe of spec §8.1 relies on `/verified` postdating `if_absent`.
+- **One wire module for both ends.** Header names, the canonical string, the limits and both framings live in `Proxy_wire`, a library of plain functions over strings and bigstrings; `store_server.ml` and the driver spell none of it themselves, and `tests/store/proxy_wire_test` reproduces the §3.4 vectors against it.
+- **The query is escaped by hand** (`escape` with the two allowed sets), so the bytes signed are the bytes sent. No URI library re-serialises the query (pitfall B-2.15).
+- **The body hash reads the bigstring** (`Digestif.SHA256.digest_bigstring`): a chunk is never copied to the heap to be signed.
+- **Frames decode into views.** `decode_bodies` and `decode_folders` return `Bigstring.sub` slices of the answer, and every length is compared with the bytes remaining, never with `pos + n`.
+- **A considered answer never climbs the ladder.** `call` raises inside the ladder only for 429 and 5xx; every other status is returned and judged by the verb, so a 409 costs one request.
+- **Memos are `Atomic`, set only by an answer.** A failed ask raises before the `Atomic.set`, so nothing is remembered from a failure (pitfall A-4.2). A 2xx capability answer that is not JSON fails CORRUPT and is not kept: a captive portal's page is not "no claim support".
+- **`skewed` reads the 401's `Date`.** A 401 off by more than the window is raised as LINK with a clock-skew reason, after the ladder returned it: the caller's own retry redoes the operation, and nothing is remembered as an unserved domain.
+- **An empty 404 is ABSENT, a 404 with a body is not.** `empty_404` is the test on every object read; HEAD has no body, so `head_opt` relies on `ensure_served` having run.
+- **A claim's answer is judged by bytes**: `Won` when the answer equals the body sent, `Held` otherwise, CORRUPT when it is empty.
+- **Watch feeds health itself.** It runs outside the ladder, so it calls `Health.answered` on a watched answer and `Health.lost` on a LINK failure; every failure but a stop or a cancellation ends in `Stop.sleep watch_floor`.
+- **TLS implementation and trust.** `ca_certificate` goes to `Client.endpoint ?ca_file`; the implementation is the process-wide `Transport.tls_impl`.
+- **Tests.** `tests/store/proxy_test` runs the contract through a real `store_server` and covers the skewed 401, a server without `/checksum`, a captive portal and watch; its watch case passes at the polling floor, so broken long-polling stays green (finding 103).
