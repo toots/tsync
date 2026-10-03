@@ -242,4 +242,14 @@ let () =
       let during = Mirror.ensure_file_id m "during.txt" in
       p "  %s resolves to %s\n" (alias fid) (resolves m fid);
       p "  the id minted during the build resolves to %s\n" (resolves m during));
-  Fs.rm_rf root
+  (* pitfall B-12.11: a store's background work may still write under the
+     root while this removes it.
+     ponytail: retried, as in tests/gc/resume_test.ml; stopping the store's
+     background work would end the race for every test. *)
+  let rec remove n =
+    try Fs.rm_rf root
+    with _ when n > 0 ->
+      Unix.sleepf 0.2;
+      remove (n - 1)
+  in
+  remove 10
