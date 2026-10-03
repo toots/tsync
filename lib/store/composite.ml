@@ -1009,14 +1009,15 @@ let queue_verification ?(cancelled = Fun.const false) t m =
   if not (confirmed t.core m) then `Unsupported
   else (
     guard t m ("queue verification on " ^ m.name);
-    let written = ref 0 in
+    (* Eight at a time: one after another is ten minutes of empty puts. *)
+    let written = Atomic.make 0 in
     ignore
       (Cancel.batches ~size:64 cancelled
-         (List.iter (fun shard ->
+         (Rt.iter_bounded ~width:8 (fun shard ->
               m.store.put (Key.verify_job t.core.domain shard) Bigstring.empty;
-              incr written))
+              Atomic.incr written))
          (List.init 4096 (Printf.sprintf "%03x")));
-    `Queued !written)
+    `Queued (Atomic.get written))
 
 (* A cancel stops the waiting only: the probe runs on in its own fiber, since
    other callers may share its answer. *)
