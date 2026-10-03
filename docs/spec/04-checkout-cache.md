@@ -149,6 +149,10 @@ requires rewriting a valid existing file into another form.
   old it is, which bounds how long the view is answered while the store is silent; whether a view
   is fresh is never judged from it
   ([android §3.2](frontends/android.md#32-freshness-without-a-journal-poller)).
+- **View hold** (lazy tree only) `.tsync-view-hold`, beside the pull marker: decimal epoch
+  milliseconds until which the folder's view is answered whatever its age. Written atomically by a
+  restore, on the folder of each file it pins and on every ancestor, and only ever raised. Absent
+  or past means no hold.
 - **File-id index.** The owner resolves a file id to a path through an index in memory, kept with
   every marker it writes, moves or removes. The markers are its truth: a lookup answers a path only
   when that path's marker holds the id. A clean stop writes the index to `file-ids-index`, one

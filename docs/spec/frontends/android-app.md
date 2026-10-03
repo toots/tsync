@@ -101,8 +101,9 @@ The bundle the core is given ([android.md §4.1](android.md#41-what-the-host-pro
   are one step in the owner, so two concurrent saves never overwrite each other.
 - **Offline.** A listing reply's `outdated` and `pulledAt`
   ([android.md §3.2](android.md#32-freshness-without-a-journal-poller)) are shown, never hidden
-  (§7, §10.3). An `unreachable` answer puts the app in the offline state until a later successful
-  reply or the `recovered` notice.
+  (§7, §10.3). An `unreachable` answer or an `outdated` listing puts the app in the offline state. Only
+  the `recovered` notice, or a listing that is not `outdated`, clears it: `stat`, `status` and
+  mutations succeed without the store and say nothing about it.
 
 ## 6. Configuration and secrets
 
@@ -186,12 +187,14 @@ A document id is the item's reference. File references are `i:` references
   release → `close` and release keep-alive. If the descriptor cannot be made, close and release at
   once.
 - **Open for writing** (a mode containing `w`):
-  1. Retain keep-alive. Create a staging file and a durable ingest intent for it (§8.2) naming the
-     document's reference.
-  2. If the mode contains `r` or `a` and does not truncate, assemble the current body into the
-     staging file (`ensure_cached`) and record the reply item's `contentId` as the intent's `base`.
-     On failure, delete staging and intent and refuse the open: starting empty would publish a
-     truncated file on close. A truncating open records as `base` the `contentId` of `stat`.
+  1. Retain keep-alive. Take a staging name, without creating the file, and write a durable ingest
+     intent for it (§8.2) naming the document's reference and its current name.
+  2. If the mode contains `r` or `a` and does not truncate, have the core assemble the current body
+     at the staging name (`ensure_cached`, which creates its `dest` itself and refuses one that
+     exists) and record the reply item's `contentId` as the intent's `base`. On failure, delete
+     staging and intent and refuse the open: starting empty would publish a truncated file on
+     close. A truncating open creates the staging file empty and records as `base` the `contentId`
+     of `stat`.
   3. Return a read-write descriptor on the staging file with a close listener, positioned as the mode
      says (at the end for an append mode).
   4. On a close reporting an error: delete staging and intent (a truncated write is worse than a
@@ -239,20 +242,22 @@ durable intent record, one JSON object in `<home>/intents/<staging name>.json`:
  "base":"1294bbe85c2f380b", "modified":1755347464000, "state":"ready"}
 ```
 
-- `target`: `{"parentRef","name"}` for a file to be made, or `{"ref"}` for an existing file.
+- `target`: `{"parentRef","name"}` for a file to be made, or `{"ref","name"}` for an existing
+  file, `name` being its name when the intent was written (only the fallback below uses it).
 - `exclusive`: whether the commit must not replace an existing item. `base` (optional): the
   `contentId` the edit started from. `modified` (optional): epoch milliseconds.
-- `state`: `open` or `ready`. Readers ignore unknown fields and treat an unknown state as `open`.
+- `state`: `open` or `ready`. Readers ignore unknown fields.
 - The record is written and replaced atomically and durably (temporary file, fsync, rename, fsync
-  of the directory). A record that does not decode is left in place with its staging file and
-  reported as a problem; it is never swept.
+  of the directory). A record that does not decode, or whose state is neither of the two, is left
+  in place with its staging file and reported as a problem; it is never discarded or swept.
 
 - The intent is written before the staging file is handed to anyone. It becomes `ready`, with the
   staging file fsynced, before the platform or the user is told the operation succeeded.
 - After boot the app commits every `ready` intent, then deletes it. An `open` intent found at
   process start is an interrupted write and is discarded with its staging file.
-- A target that no longer exists at commit time (`not_found`) commits to the domain root under the
-  same name, exclusive, and notifies the user where the file went.
+- A target that no longer exists at commit time (`not_found`: the parent, or the file a reference
+  named) commits to the domain root under the target's `name`, exclusive, and notifies the user
+  where the file went.
 - The staging sweep deletes only staging files that no intent names and whose name-embedded creation
   time is older than `staging_orphan_age`.
 
@@ -365,7 +370,7 @@ left running: its outcome is then a notification.
 What the app is doing and what went wrong, read from the `status` action every `status_poll` while
 the screen is visible, and not at all otherwise.
 
-- **State line**: connected, offline (last answer `unreachable`), paused, or read-only.
+- **State line**: connected, offline (the offline state of §5), paused, or read-only.
 - **Uploads**: the files uploading now, how many more are waiting and how many bytes are owed.
 - **Downloads**: each transfer running now with its progress and rate.
 - **Problems**: failed saves, with Retry (commit the intent again) where a ready intent remains; and
@@ -595,9 +600,10 @@ the level below `battery_floor` → "battery low".
 
 What the app's build MUST guarantee; where it runs and what it gates is [10](../10-delivery.md).
 
-- **One core, the commit's own.** The package carries the core library cross-built from the same
-  commit; a package build fails when that library is missing, and no built library is kept in the
-  repository.
+- **One core, the commit's own.** A package meant to run carries the core library cross-built from
+  the same commit, and its build fails when that library is missing; no built library is kept in
+  the repository. The device suite's package is the one exception: it carries none, deliberately
+  (10 §3.4).
 - **Floors agree.** The app's minimum platform version equals the platform API level the core is
   cross-built against. One ABI is shipped: 64-bit ARM. The library is linked for 16 KB pages, which
   current platforms require.
