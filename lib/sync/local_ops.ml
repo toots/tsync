@@ -1213,6 +1213,41 @@ module Make (C : Engine_ctx.S) = struct
       move_handles ~src ~dst;
       match e with Some e -> [(dst, e)] | None -> [])
 
+  (* Local redo of an INTENT record (wal-and-journal §4.7): idempotent. *)
+  let redo (r : Wal.record) =
+    List.iteri
+      (fun i op ->
+        match op with
+          | Op.Delete p ->
+              if Staged.edit staged p = None then Mirror.remove_file mirror p
+          | Mkdir { path; id = Some id } ->
+              if
+                Mirror.key_of_id mirror id = None
+                && Mirror.kind mirror path = `Absent
+              then ignore (Mirror.record_folder mirror path id)
+          | Rmdir { id = Some id; _ } -> (
+              match Mirror.key_of_id mirror id with
+                | Some p -> Mirror.remove_folder mirror p
+                | None -> ())
+          | Rmdir { path; id = None } ->
+              if Mirror.kind mirror path = `Dir then
+                Mirror.remove_folder mirror path
+          | Rename { is_dir = false; src; dst; _ } ->
+              let from =
+                match List.assoc_opt i r.local_from with
+                  | Some x -> x
+                  | None -> src
+              in
+              if kind from <> `Absent && kind dst = `Absent then
+                repost_moved (rename_local ~src:from ~dst ~is_dir:false)
+          | Rename { is_dir = true; dst; id = Some id; _ } -> (
+              match Mirror.key_of_id mirror id with
+                | Some here when kind dst = `Absent && here <> dst ->
+                    repost_moved (rename_local ~src:here ~dst ~is_dir:true)
+                | _ -> ())
+          | _ -> ())
+      r.ops
+
   let rename ~src ~dst ~exclusive =
     check_writable ();
     if src = dst then ()
