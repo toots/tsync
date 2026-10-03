@@ -199,21 +199,14 @@ let () =
                 prerr_endline
                   "gcs_test: a real bucket needs TLS, and none is linked";
                 exit 2);
-              let run =
-                Option.value
-                  ~default:(string_of_int (Unix.getpid ()))
-                  (Sys.getenv_opt "GITHUB_RUN_ID")
-                ^ "-"
-                ^ Option.value ~default:"0"
-                    (Sys.getenv_opt "GITHUB_RUN_ATTEMPT")
-              in
+              let scope = Contract.run_scope () in
               prerr_endline
-                ("gcs_test: against bucket " ^ b ^ ", domain ci-" ^ run);
+                ("gcs_test: against bucket " ^ b ^ ", domain " ^ scope);
               ( [
                   ("bucket", Field_spec.S b);
                   ("serviceAccountKey", Field_spec.S key);
                 ],
-                "ci-" ^ run )
+                scope )
           | _ when Contract.real_required "gcs" ->
               prerr_endline
                 "gcs_test: TSYNC_CI_REQUIRE_REAL names gcs but the bucket or \

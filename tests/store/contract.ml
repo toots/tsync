@@ -175,8 +175,22 @@ let run ?(domain_name = "d") (s : Store.t) =
   p "verified %b, share_url %s\n" c.verified (show c.share_url)
 
 (* Everything a run left under its domain. *)
+(* Pitfall B-12.4: run in a [finally], so its own failure is said and never
+   raised over the contract's. *)
 let cleanup (s : Store.t) =
-  s.delete_multi
-    (List.map
-       (fun (e : Store.entry) -> e.key)
-       (s.list_prefix (prefix "tsync/d/")))
+  try
+    s.delete_multi
+      (List.map
+         (fun (e : Store.entry) -> e.key)
+         (s.list_prefix (prefix "tsync/d/")))
+  with e -> prerr_endline ("cleanup failed: " ^ Printexc.to_string e)
+
+(* Pitfall B-12.11: what a live run names its objects by, so two runs at once
+   never delete each other's: the CI run and attempt, else this process. *)
+let run_scope () =
+  "ci-"
+  ^ Option.value
+      ~default:(string_of_int (Unix.getpid ()))
+      (Sys.getenv_opt "GITHUB_RUN_ID")
+  ^ "-"
+  ^ Option.value ~default:"0" (Sys.getenv_opt "GITHUB_RUN_ATTEMPT")
