@@ -159,16 +159,19 @@ module Make (C : Engine_ctx.S) = struct
       (fun b -> if not (List.mem b keep) then release_body b)
       (Staged.bodies_named old_edit)
 
+  (* Holding [handles_m]. *)
+  let ref_bodies_locked e delta =
+    List.iter
+      (fun b ->
+        let n =
+          Option.value ~default:0 (Hashtbl.find_opt body_refs b) + delta
+        in
+        if n <= 0 then Hashtbl.remove body_refs b
+        else Hashtbl.replace body_refs b n)
+      (Staged.bodies_named e)
+
   let ref_bodies e delta =
-    Mutex.protect handles_m (fun () ->
-        List.iter
-          (fun b ->
-            let n =
-              Option.value ~default:0 (Hashtbl.find_opt body_refs b) + delta
-            in
-            if n <= 0 then Hashtbl.remove body_refs b
-            else Hashtbl.replace body_refs b n)
-          (Staged.bodies_named e))
+    Mutex.protect handles_m (fun () -> ref_bodies_locked e delta)
 
   let resolve path =
     match Staged.read staged path with
@@ -182,22 +185,27 @@ module Make (C : Engine_ctx.S) = struct
                 Fail.corrupt "%s: its mirror entry cannot be decoded" path
             | _ -> None)
 
-  (* A change outside a handle's lineage freezes what the handle reads. *)
+  (* A change outside a handle's lineage freezes what the handle reads. The
+     handles still open are frozen and their references taken in one hold, so a
+     close in between neither misses a reference nor sees a freeze half done
+     (pitfall A-2.1). *)
   let end_lineage path =
-    let hs =
-      Mutex.protect handles_m (fun () ->
-          Hashtbl.fold
-            (fun _ h acc ->
-              if h.path = path && h.ended = None then h :: acc else acc)
-            handles [])
+    let open_on_path () =
+      Hashtbl.fold
+        (fun _ h acc ->
+          if h.path = path && h.ended = None then h :: acc else acc)
+        handles []
     in
-    if hs <> [] then (
+    if Mutex.protect handles_m (fun () -> open_on_path () <> []) then (
       let current = try resolve path with _ -> None in
-      List.iter
-        (fun h ->
-          h.ended <- current;
-          match current with Some (Staged_edit e) -> ref_bodies e 1 | _ -> ())
-        hs)
+      Mutex.protect handles_m (fun () ->
+          List.iter
+            (fun h ->
+              h.ended <- current;
+              match current with
+                | Some (Staged_edit e) -> ref_bodies_locked e 1
+                | _ -> ())
+            (open_on_path ())))
 
   let move_handles ~src ~dst =
     Mutex.protect handles_m (fun () ->
