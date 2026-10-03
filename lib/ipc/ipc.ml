@@ -306,7 +306,10 @@ let admit t fd ~execution handler =
         Log.once ("ipc peer " ^ t.path) Log.Warn
           "%s: refused a connection from another user" t.path))
   else (
-    let c = { line = Line.make fd; idle_since = None; answering = false } in
+    let c =
+      Tsync_core.Fs.or_close fd (fun fd ->
+          { line = Line.make fd; idle_since = None; answering = false })
+    in
     let admitted =
       Mutex.protect t.m (fun () ->
           if List.length t.conns >= max_connections then (
@@ -327,16 +330,25 @@ let admit t fd ~execution handler =
     in
     if not admitted then Unix.close fd
     else
-      Rt.spawn ~name:"ipc connection" ~execution:`Immediate (fun () ->
-          Fun.protect
-            ~finally:(fun () ->
-              unregister t c;
-              Unix.close fd)
-            (fun () -> serve_conn t c ~execution handler)
-          |> Option.iter (fun e ->
-              Rt.within `Threaded (fun () ->
-                  Log.debug "%s: connection closed: %s" t.path
-                    (Printexc.to_string e)))))
+      (* The spawned fiber owns the descriptor; a spawn that raises gives it
+         back, and the connection its place. *)
+      Tsync_core.Fs.or_close fd (fun fd ->
+          match
+            Rt.spawn ~name:"ipc connection" ~execution:`Immediate (fun () ->
+                Fun.protect
+                  ~finally:(fun () ->
+                    unregister t c;
+                    Unix.close fd)
+                  (fun () -> serve_conn t c ~execution handler)
+                |> Option.iter (fun e ->
+                    Rt.within `Threaded (fun () ->
+                        Log.debug "%s: connection closed: %s" t.path
+                          (Printexc.to_string e))))
+          with
+            | () -> ()
+            | exception e ->
+                unregister t c;
+                raise e))
 
 let rec accept_loop t ~execution handler =
   let ready =
@@ -368,6 +380,8 @@ let serve ?(execution = fun _ -> `Threaded) ~path handler =
   check_length path;
   (try Unix.unlink path with Unix.Unix_error (ENOENT, _, _) -> ());
   let lfd = Unix.socket ~cloexec:true PF_UNIX SOCK_STREAM 0 in
+  (* The accept fiber owns the socket once spawned. *)
+  Tsync_core.Fs.or_close lfd @@ fun lfd ->
   let umask = Unix.umask 0o177 in
   Fun.protect
     ~finally:(fun () -> ignore (Unix.umask umask))
@@ -442,6 +456,7 @@ module Client = struct
     Tsync_core.Fs.ignore_sigpipe ();
     check_length path;
     let fd = Unix.socket ~cloexec:true PF_UNIX SOCK_STREAM 0 in
+    Tsync_core.Fs.or_close fd @@ fun fd ->
     Unix.set_nonblock fd;
     let deadline = Rt.now () +. timeout in
     let rec attempt () =
@@ -464,11 +479,7 @@ module Client = struct
     match attempt () with
       | () -> Line.make fd
       | exception Unix.Unix_error ((ENOENT | ECONNREFUSED | ENOTSOCK), _, _) ->
-          Unix.close fd;
           raise (Not_serving path)
-      | exception e ->
-          Unix.close fd;
-          raise e
 
   let read ?timeout t =
     let deadline = Option.map (( +. ) (Rt.now ())) timeout in
