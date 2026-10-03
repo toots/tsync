@@ -1379,6 +1379,12 @@ module Make (C : Engine_ctx.S) = struct
               | `Placed ->
                   let announced = ref 1 in
                   with_meta (fun () ->
+                      (* Unpublished work of ours took the name during the
+                         round trip: it steps aside. *)
+                      (match kind path with
+                        | `File -> file_aside path
+                        | `Dir -> folder_aside path
+                        | `Absent -> ());
                       record_owed
                         [Op.Mkdir { path; id = Some m.id }]
                         (fun () ->
