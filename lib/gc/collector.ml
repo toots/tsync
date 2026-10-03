@@ -166,11 +166,13 @@ let mark m d n ~verify ns =
   if verify then List.iter (verify_promoted m d n) moved;
   n.marked <- n.marked + 1
 
-let rec batches l =
-  if List.length l <= delete_batch then [l]
-  else
-    List.filteri (fun i _ -> i < delete_batch) l
-    :: batches (List.filteri (fun i _ -> i >= delete_batch) l)
+let batches l =
+  let rec go acc batch n = function
+    | [] -> List.rev (if batch = [] then acc else List.rev batch :: acc)
+    | k :: rest when n = delete_batch -> go (List.rev batch :: acc) [k] 1 rest
+    | k :: rest -> go acc (k :: batch) (n + 1) rest
+  in
+  match go [] [] 0 l with [] -> [[]] | b -> b
 
 let file_size path =
   match Fs.lstat_opt path with Some st -> Int64.to_int st.st_size | None -> 0
@@ -621,14 +623,15 @@ let status composite =
       })
     (targets composite)
 
-(* gc §5.7: a remote copy is told by requests, so it needs a function this
-   owner confirmed; deleting there one request per chunk is refused. *)
+(* gc §5.7: a store that can run a bucket function is told by requests, so it
+   needs one this owner confirmed; deleting there one request per chunk is
+   refused. A copy that cannot run one deletes a batch in a request. *)
 let direct_deletes_refused composite =
   match targets composite with
     | m :: _ ->
         List.filter
           (fun (c : Composite.member) ->
-            c.store.local_path = None
+            c.store.bucket_functions
             && not (Composite.function_confirmed composite c))
           m.tells
     | [] -> []

@@ -119,3 +119,6 @@ after a publish lock, another process: busy
 collect: refused: bucket: a remote copy without a confirmed bucket function would be sent one delete request per chunk (gc --probe)
 abort: allowed
 dry run: bucket 0
+
+== a remote copy that deletes a batch in a request is collected
+collect: ran
