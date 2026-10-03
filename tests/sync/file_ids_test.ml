@@ -166,6 +166,12 @@ let () =
       show "B before" b ["q.txt"];
       Fs.unlink_quiet marker;
       show "B without its marker" b ["q.txt"];
-      p "  backfilled: %d\n" (Mirror.backfill_file_ids B.mirror);
-      show "B after" b ["q.txt"]);
+      p "  a start after a complete pass: %d\n"
+        (Mirror.backfill_file_ids B.mirror);
+      (* An install from before file ids has no record of a pass. *)
+      Fs.unlink_quiet
+        (Filename.concat (Mirror.root B.mirror) "file-ids-complete");
+      p "  the first pass: %d\n" (Mirror.backfill_file_ids B.mirror);
+      show "B after" b ["q.txt"];
+      p "  the next one: %d\n" (Mirror.backfill_file_ids B.mirror));
   Fs.rm_rf root

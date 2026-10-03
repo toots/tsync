@@ -42,5 +42,7 @@
 == owner start gives an id to a file found without one
   B before: q.txt=<id6>
   B without its marker: q.txt=none
-  backfilled: 1
+  a start after a complete pass: 0
+  the first pass: 1
   B after: q.txt=<id7>
+  the next one: 0

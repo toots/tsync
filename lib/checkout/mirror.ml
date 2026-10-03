@@ -458,31 +458,39 @@ let sweep_removed_records t ~older_than =
     (Fs.readdir t.by_path)
 
 (* 04 §4.10 step 8: one flush instead of a fsync per marker. *)
+let file_ids_record t = Filename.concat t.root "file-ids-complete"
+
 (* Names come from the directory, not from decoding every manifest: only an
-   escaped name is read back from its entry. *)
+   escaped name is read back from its entry. Once a pass completed, every write
+   path gives an id, so later starts skip it (04 §4.10 step 8). *)
 let backfill_file_ids t =
-  let minted = ref 0 in
-  let rec walk rel =
-    let dir = path t rel in
-    List.iter
-      (fun local ->
-        if not (Names.is_internal_local local || Names.is_temp_name local) then (
-          match
-            (Fs.lstat_opt (Filename.concat dir local), real_name dir local)
-          with
-            | Some { st_kind = S_DIR; _ }, Some name ->
-                walk (Names.join rel name)
-            | Some { st_kind = S_REG; _ }, Some leaf ->
-                let r = Names.join rel leaf in
-                if file_id t r = None then (
-                  set_file_id ~durable:false t r (Ids.token ());
-                  incr minted)
-            | _ -> ()))
-      (Option.value ~default:[] (Fs.readdir_opt dir))
-  in
-  walk "";
-  if !minted > 0 then Fs.syncfs t.root;
-  !minted
+  if Fs.exists (file_ids_record t) then 0
+  else begin
+    let minted = ref 0 in
+    let rec walk rel =
+      let dir = path t rel in
+      List.iter
+        (fun local ->
+          if not (Names.is_internal_local local || Names.is_temp_name local)
+          then (
+            match
+              (Fs.lstat_opt (Filename.concat dir local), real_name dir local)
+            with
+              | Some { st_kind = S_DIR; _ }, Some name ->
+                  walk (Names.join rel name)
+              | Some { st_kind = S_REG; _ }, Some leaf ->
+                  let r = Names.join rel leaf in
+                  if file_id t r = None then (
+                    set_file_id ~durable:false t r (Ids.token ());
+                    incr minted)
+              | _ -> ()))
+        (Option.value ~default:[] (Fs.readdir_opt dir))
+    in
+    walk "";
+    if !minted > 0 then Fs.syncfs t.root;
+    Fs.durable_replace (file_ids_record t) "";
+    !minted
+  end
 
 (* Every marker, a staged-only file's included: those have no entry to list. *)
 let scan_file_ids t =
