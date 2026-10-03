@@ -1134,6 +1134,9 @@ let run config =
             ~path:(Tsync_config.Paths.store_server_socket ())
             (control t Stop.request)
         in
+        (* Lesson 8: the control socket and the listeners close on every
+           path, a stop or a failure. *)
+        Fun.protect ~finally:(fun () -> Tsync_ipc.Ipc.close ctl) @@ fun () ->
         match
           Server.serve ~limits:listener.limits ?tls (addresses listener)
             (handle t)
@@ -1141,14 +1144,12 @@ let run config =
           | exception e ->
               Log.err "http-proxy: cannot listen on port %d: %s" listener.port
                 (Printexc.to_string e);
-              Tsync_ipc.Ipc.close ctl;
               1
           | server ->
+              Fun.protect ~finally:(fun () -> Server.close server) @@ fun () ->
               Log.info "http-proxy: serving %s on port %d%s"
                 (String.concat ", " (List.map (fun r -> r.name) routes))
                 listener.port
                 (if tls = None then "" else " (TLS)");
               Stop.wait ();
-              Server.close server;
-              Tsync_ipc.Ipc.close ctl;
               0)
