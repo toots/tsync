@@ -61,6 +61,8 @@ copy out of a share manifest: refused/denied
 copy within the share cache: ok
 == a backend that throttles for two seconds
 a read through it: ok; the peer's breaker tripped: false
+== a batch read of more than the answer budget
+12 objects of 3 MiB: 12 answered whole; largest answer: 24 MiB
 == a data slot is held until its answer is written
 another read while the 32 MiB answer waits on its peer: waits for the slot; after: answered
 == unsigned bodies dripping do not hold the data slots

@@ -251,11 +251,19 @@ let read_body c =
   match u32 c with n when n = absent -> None | n -> Some (bytes c n)
 
 let read_text c = Bigstring.to_string (bytes c (u32 c))
+let partial_header = "x-tsync-partial"
 
+(* §8.3: a server that honours [partial_header] may answer a prefix of the
+   keys, at least one. *)
 let decode_bodies ~count buf =
   let c = { buf; pos = 0 } in
-  let bodies = List.init count (fun _ -> read_body c) in
+  let rec go n acc =
+    if n = count || remaining c = 0 then List.rev acc
+    else go (n + 1) (read_body c :: acc)
+  in
+  let bodies = go 0 [] in
   if remaining c <> 0 then corrupt "a get-multi answer with bytes left over";
+  if bodies = [] && count > 0 then corrupt "a get-multi answer with no body";
   bodies
 
 let decode_folders ~asked buf =
