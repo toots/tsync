@@ -239,7 +239,9 @@ is durable before the original is released.
    failures). A rename follows the mkdir it moves; a create follows the rename that freed its name.
 7. **An upload waits for earlier unpublished records it depends on**: a folder mkdir or folder
    rename that places one of its ancestors (so the folder's marker is filed before any content under
-   it), and a file rename from or to its path. Publishing a rename copies
+   it), a folder rmdir or folder rename that frees its own name (else the upload meets our own
+   folder still filed there and lands as a conflicted copy), and a file rename from or to its path.
+   Publishing a rename copies
    the source's record over the destination on the store; an upload of the destination landing first
    would be overwritten by the older content. A parked rename does not hold the upload (G5); when it
    is re-armed, its destination check finds the upload and retargets it
