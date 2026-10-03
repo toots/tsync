@@ -6,9 +6,10 @@ pause every domain           {"ok":true,"paused":true}
 menu while held              {"icon":"tsync-paused-symbolic","tooltip":"Paused","entries":[{"label":"docs","enabled":true,"indent":0,"action":{"openFolder":"docs"}},{"label":"pics","enabled":true,"indent":0,"action":{"openFolder":"pics"}},{"separator":true},{"label":"Stats","enabled":true,"indent":0,"submenu":true,"action":{"stats":true}},{"label":"Hold changes","enabled":true,"indent":0,"checked":true,"action":{"setPaused":false}}]}
 resume                       {"ok":true,"paused":false}
 paused after resume: docs=false, pics=false
+after the first rebuilds: changed docs, changed pics
 notify_reset of pics         {"ok":true,"delivered":1}
 full_resync of docs          {"ok":true}
-then: reset pics, changed docs
+then: changed docs, reset pics
 write, no declared roots     {"ok":true,"size":5,"mtime":"<x>","item":{"ref":"<x>","parentRef":"<x>","name":"f.txt","kind":"file","size":5,"mtime":"<x>","etag":"<x>","isUploaded":false,"contentId":"<x>","availability":"cached"}}
 a dest that exists           {"ok":false,"code":"denied","error":"<dir>/taken: already exists"}
 a dest under a link          {"ok":false,"code":"denied","error":"<dir>/link/out: a component is not a directory"}
