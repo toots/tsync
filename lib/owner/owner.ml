@@ -380,9 +380,10 @@ let alive pid =
     | exception Unix.Unix_error _ -> false
 
 (* 07 §2.5: a refused connection is not an absent owner, since a full backlog
-   gives the same error on macOS. While the recorded holder lives, the request
-   is retried until its deadline; then the one-shot's lock acquisition decides,
-   taking ownership if the lock is free and refusing busy if not. *)
+   gives the same error on macOS. While the recorded holder lives and names a
+   socket, the request is retried until its deadline; then the one-shot's lock
+   acquisition decides, taking ownership if the lock is free and refusing busy
+   if not. *)
 let request ?(bulk = false) ?on_line ~what config (dom : Config.domain) req =
   let deadline = Rt.now () +. Ipc.request_deadline in
   let call () =
@@ -397,7 +398,7 @@ let request ?(bulk = false) ?on_line ~what config (dom : Config.domain) req =
       | exception Ipc.Not_serving _
         when Rt.now () < deadline
              && Option.fold ~none:false
-                  ~some:(fun h -> alive h.pid)
+                  ~some:(fun h -> h.socket <> None && alive h.pid)
                   (holder dom.name) ->
           Rt.sleep 0.1;
           attempt ()
