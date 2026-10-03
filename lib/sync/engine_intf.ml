@@ -230,6 +230,10 @@ module type S = sig
   (** Applied-log retention (wal-and-journal §4.8); shards removed. *)
   val prune_applied : unit -> int
 
+  (** The owner's daily sweep of local state: stale temporaries, and the records
+      of folders removed longer ago than any entry can name. *)
+  val daily_maintenance : unit -> unit
+
   (** The lazy tree (04 §3.5): the store's listing of a folder replaces its
       published entries, overlaid with this client's owed work; whether its
       children changed. UNPREPARED for a folder with no id here; a failed pull

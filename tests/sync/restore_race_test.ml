@@ -108,5 +108,26 @@ let () =
       A.drain ~grace:10. ();
       p "owed after draining: %d uploads, %d metadata, %d parked"
         (A.pending_uploads ()) (A.pending_metadata ())
-        (List.length (A.parked ())));
+        (List.length (A.parked ()));
+      p "== the daily sweep of local state";
+      A.mkdir "gone" ~exclusive:false;
+      A.drain ~grace:10. ();
+      A.rmdir "gone";
+      A.drain ~grace:10. ();
+      let local = Filename.concat root "A/cache/docs" in
+      let records = Filename.concat local "folders/by-path" in
+      let long_ago = Unix.gettimeofday () -. (40. *. 86400.) in
+      let age p = Unix.utimes p long_ago long_ago in
+      Array.iter
+        (fun n -> age (Filename.concat records n))
+        (Sys.readdir records);
+      (* Its name carries a pid no process has. *)
+      let temp = Filename.concat local ".tsync-tmp-4194999-1.tmp" in
+      Fs.write_file_for_test temp "left by a kill";
+      let before = Array.length (Sys.readdir records) in
+      A.daily_maintenance ();
+      p "records of removed folders swept: %d; of live ones kept: %b"
+        (before - Array.length (Sys.readdir records))
+        (A.kind "box" = `Dir && Array.length (Sys.readdir records) > 0);
+      p "a dead process's temporary file swept: %b" (not (Sys.file_exists temp)));
   Fs.rm_rf root
