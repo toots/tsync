@@ -336,6 +336,12 @@ APPLY_PASS(c):
   catch-up gate := open
 ```
 
+**One pass at a time.** A domain's passes and rebuilds (§4.8) are serialised, whoever starts them:
+the poller, a catch-up, a `sync` job or a resync request. A second one waits for the running one to
+end. Run together, two passes both see an entry unhandled and apply it twice, one pass discards the
+other's deferred work, and a rebuild's sweep can remove a file a pass installed after the walk went
+past its folder.
+
 A pass is **clean** when it ran to its end (entries stepped aside do not make it unclean). The mark
 is written durably, forward only, only at the end of a clean pass.
 
