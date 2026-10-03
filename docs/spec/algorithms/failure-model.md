@@ -110,6 +110,20 @@ STOPPING and CANCELLED unchanged, then act on the kind, and MUST NOT produce ABS
 A raw signal (errno, status, exception, timer) is interpreted only at the layers listed here.
 Every other layer passes the kind through (§5).
 
+**Application logic is driven by signals the application owns, never by third-party error
+codes.** An errno, an HTTP status or a library's exception means what its platform, its version
+and its configuration make it mean: macOS refuses a connection to a full backlog with the same
+`ECONNREFUSED` as a socket nobody listens on, where Linux tells the two apart. So:
+
+- Each external interface has a boundary that translates its conditions into the failure kinds of
+  §3, and nothing past that boundary reads the raw code.
+- A decision about the application's own state (is an owner running, does an object exist, is a
+  peer alive, did a write land) is made from a signal the application owns and defines: the
+  ownership lock, a holder record, a protocol reply, a conditional write's outcome, a marker. An
+  external code may hint at it, but never decides it.
+- Where one external code covers conditions the application must tell apart, the boundary reports
+  the ambiguity (the kind that covers both), and the caller resolves it with its own signal.
+
 ### 4.1 Local filesystem errors
 
 One table for every local filesystem access: a local-filesystem store driver, local state

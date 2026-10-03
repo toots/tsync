@@ -62,7 +62,7 @@ The constraints that shape everything:
 | **One local owner per domain.** | On a machine, one process at a time owns a domain's local state; every other process acts through it. | [07](07-daemon-cli.md) |
 | **Durability before acknowledgement.** | Nothing is acknowledged, or relied on for recovery, before it is durable; a referent is durable before its referrer. | [durable-queue](algorithms/durable-queue.md) |
 | **Unpublished data lives in a store nothing else can reach.** | The cache bound, eviction and a rebuild cannot delete staged bytes. | [04](04-checkout-cache.md) |
-| **One failure model.** | Every layer classifies failures the same way; "could not look" is never reported as "absent". | [failure-model](algorithms/failure-model.md) |
+| **One failure model.** | Every layer classifies failures the same way; "could not look" is never reported as "absent". Decisions rest on signals the application owns (locks, records, protocol replies), never on a third party's error code, which is platform-dependent. | [failure-model](algorithms/failure-model.md) |
 | **A composite of stores is itself a store.** | Callers never know whether they face one bucket or five; roles are applied inside the composite. | [replication](algorithms/replication.md) |
 | **Garbage collection is safe against every writer.** | Any operation that publishes a chunk reference goes through one interlock with the collector. | [gc](algorithms/gc.md) |
 | **Names are validated at every trust boundary.** | Keys, domain names and paths passed between processes are checked where they enter. | [01](01-core.md), [security-model](algorithms/security-model.md) |
