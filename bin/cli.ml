@@ -121,7 +121,6 @@ let cmd name ~doc term = Cmd.v (Cmd.info name ~doc) term
 let job ?name verbose job =
   let config = config () in
   let dom = domain ?name config in
-  let socket = Tsync_config.Paths.owner_socket dom.name in
   Tsync_owner.Owner.request
     ~what:("tsync " ^ Tsync_owner.Jobs.kind job)
     config dom
@@ -133,9 +132,7 @@ let job ?name verbose job =
                 "tsync: cancelling; the job stops at its next unit boundary";
               try
                 ignore
-                  (Tsync_owner.Protocol.call
-                     ~domain:(Domain_name.to_string dom.name)
-                     socket (Tsync_owner.Protocol.Cancel id))
+                  (Tsync_owner.Owner.ask dom (Tsync_owner.Protocol.Cancel id))
               with e -> Log.warn "cannot cancel: %s" (Printexc.to_string e))
       | line -> Tsync_owner.Handler.print_line line)
     (Tsync_owner.Protocol.Job { job; narrate = verbose })

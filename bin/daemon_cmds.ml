@@ -173,8 +173,7 @@ let owner_sockets config =
   in
   List.map
     (fun socket ->
-      ( socket,
-        List.filter (fun name -> Paths.owner_socket name = socket) names ))
+      (socket, List.filter (fun name -> Paths.owner_socket name = socket) names))
     (List.sort_uniq compare (List.map Paths.owner_socket names))
 
 (* 07 §5.4: a socket with no domain has no holder record to consult, and a
@@ -227,9 +226,7 @@ let stop verbose =
             (* On macOS the service owns every domain and stops its store
                server itself. *)
             let owners =
-              match config_opt () with
-                | Some c -> owner_sockets c
-                | None -> []
+              match config_opt () with Some c -> owner_sockets c | None -> []
             in
             let sockets =
               if Fs.is_macos then
