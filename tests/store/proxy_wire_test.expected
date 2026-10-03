@@ -35,7 +35,8 @@ not an array: corrupt/other
 == get-multi frames (§4.3)
 decoded: 3,absent,0,200000
 fewer keys than frames: corrupt/other
-more keys than frames: corrupt/other
+more keys than frames, a partial answer: 4 of 5
+no frame at all: corrupt/other
 truncated body: corrupt/other
 length cut in half: corrupt/other
 == children-multi frames (§4.3)
