@@ -50,7 +50,20 @@ let () =
   let loc n = Local.create ~name:n (Filename.concat root n) in
   Rt.run_sync (fun () ->
       let main_up, main = switchable (loc "main") in
-      let replica = loc "replica"
+      let single_deletes = ref 0 and bulk_deletes = ref 0 in
+      let replica =
+        let inner = loc "replica" in
+        {
+          inner with
+          delete =
+            (fun k ->
+              incr single_deletes;
+              inner.delete k);
+          delete_multi =
+            (fun ks ->
+              incr bulk_deletes;
+              inner.delete_multi ks);
+        }
       and backfill = loc "backfill"
       and archive = loc "archive" in
       let c =
@@ -123,6 +136,19 @@ let () =
       ignore (s.delete manifest);
       Composite.settle ~timeout:10. c;
       p "after delete, replica manifest %b\n" (has replica manifest);
+      p "\n== a bulk delete reaches a copy as one\n";
+      let doomed =
+        List.init 3 (fun i -> k (Printf.sprintf "tsync/d/doomed/%d" i))
+      in
+      List.iter (fun key -> Contract.put s key "x") doomed;
+      Composite.settle ~timeout:10. c;
+      single_deletes := 0;
+      bulk_deletes := 0;
+      s.delete_multi doomed;
+      Composite.settle ~timeout:10. c;
+      p "replica: %d gone, by %d single deletes and %d bulk\n"
+        (List.length (List.filter (fun key -> not (has replica key)) doomed))
+        !single_deletes !bulk_deletes;
       p "\n== a manifest naming a chunk no main holds parks, degraded\n";
       let ghost = Chunk_key.of_body "ghost" in
       p "the gate refuses it: %s\n"
