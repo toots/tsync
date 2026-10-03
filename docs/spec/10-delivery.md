@@ -93,7 +93,8 @@ deliberate, never an accident of the checkout. The job fails when the reports co
   job that builds tsync calls it with its package list, the container release build included; the
   only exception is the gate's user-install job (§3.1 item 6), whose point is to not use it.
 - The Android cross switch is installed by the same script, from the cross-compilation repository
-  the workflow registers first; the package list lives in the repository, not in the workflow.
+  the workflow registers first; the package list lives in the repository (the dependencies of the
+  `tsync-android` package), not in the workflow.
 - System libraries are installed by the job, since their package names differ per platform.
 - A job MAY restore its switch from a cache: the script's update and upgrade make a restored switch
   hold what a fresh one would. The switch is saved right after the install, so a failed job neither
@@ -168,9 +169,8 @@ reports the signing half "not run".
 
 ## 8. Where the workflows depart
 
-- No Android job exists: the app, the `android` frontend beyond its option spec, and their suites
-  are not rewritten yet
-  (§3.1 item 5, §3.4, `release-android`).
+- `release-android` and `test-android-device` have never run: neither the cross build on a Linux
+  runner nor the instrumented suite on an emulator has been seen passing or failing.
 - No check drives a real FUSE mount (§3.1 item 1): the end-to-end FUSE test of `main` was not
   rewritten.
 - The bucket-side verifier function is not exercised by `conformance`: the rewritten store tests do

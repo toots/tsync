@@ -57,13 +57,14 @@ Boot is idempotent within a process; concurrent callers wait for the first.
 2. Load and validate the config; apply its TLS settings; take the ownership lock; build the domain
    over the lazy tree.
 3. Start the scheduler on a thread of its own
-   ([07 §3.7](../07-daemon-cli.md#37-event-loop-hosting)), ensure the mirror's root, and report
-   ready. Callers wait for this step only: it reads no store.
-4. In the background: start the upload and metadata queues and reconcile
-   ([wal-and-journal.md](../algorithms/wal-and-journal.md)); resume deferred replica and backfill
-   work left by earlier processes ([replication.md](../algorithms/replication.md)); start the
-   maintenance schedule, the same list every owner runs
-   ([07 §6](../07-daemon-cli.md#6-maintenance)).
+   ([07 §3.7](../07-daemon-cli.md#37-event-loop-hosting)), run local recovery
+   ([04 §4.10](../04-checkout-cache.md#410-owner-start-local-recovery)), start the upload and
+   metadata queues, reconcile ([wal-and-journal.md](../algorithms/wal-and-journal.md)), and report
+   ready. Callers wait up to here: none of it reads a store, and a request answered before
+   reconciliation would see local state a crash left half-applied.
+4. In the background: resume deferred replica and backfill work left by earlier processes
+   ([replication.md](../algorithms/replication.md)); start the maintenance schedule, the same list
+   every owner runs ([07 §6](../07-daemon-cli.md#6-maintenance)).
 
 - A failure in steps 1–3 is answered to the caller as text, the lock released, and a later boot may
   succeed. A lock held by another process is such a failure, naming the holder.
@@ -101,7 +102,9 @@ Concurrent pulls of one folder share one store read. `stat` never pulls: it answ
 
 **The listing says how fresh it is.** On a pulled tree a `list_dir` reply carries `pulledAt` (epoch
 seconds of the pull its rows reflect; absent for a folder never pulled) and `outdated: true` when the
-rows do not come from a pull made for this request or within `pull_freshness`.
+rows do not come from a pull made for this request or within `pull_freshness`. A page asked with
+`after` carries the flags of the view it continues: `outdated` only when this process never
+completed a pull of the folder. A client takes a listing's flags from its first page.
 
 **Notices.** After a pull that changed a folder's children, after the first completed pull of a
 folder it answered `outdated`, whether or not its children differ, and after every mutation it
@@ -215,7 +218,7 @@ the Basic Multilingual Plane, which the JVM's native string encoding cannot carr
 
 | Operation | In | Out | Semantics |
 |---|---|---|---|
-| `check_config(domain)` | domain | `""` or error text | Loads and validates the config and selects the domain, starting nothing and taking no lock. Callable before or after boot. |
+| `check_config(domain, candidate?)` | domain; optionally a config's text | `""` or error text | Loads and validates the config, or the candidate text in its place, and selects the domain, starting nothing, writing nothing and taking no lock. Callable before or after boot. |
 | `boot(domain)` | domain | `""` or error text | §3.1. |
 | `request(json)` | request | reply | One request, one reply, through the shared handler ([08 §3.3](../08-frontends.md#33-actions)). |
 | `status()` | — | text | The same report as desktop `tsync status` for this domain, with `frontend: android`. |

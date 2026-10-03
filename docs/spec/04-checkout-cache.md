@@ -479,8 +479,12 @@ Listing never touches the network. The resync primitives ([05](05-ops-config.md)
 - is refused as UNPREPARED when the folder has no local id;
 - reads the store's listing of the folder; a child that cannot be read fails the whole pull
   (never skipped), and a failed pull changes nothing;
-- records each child with `on_other = keep`, then removes every published entry directly in the
-  folder that the listing lacks;
+- records each child, then removes every published entry directly in the folder that the listing
+  lacks. A folder held here under another id keeps its id only when that id is this client's owed
+  work (`on_other = keep`); otherwise the store's id replaces it, since a pulled tree has no resync
+  to repair a folder a peer removed and made again;
+- leaves alone every path this client changed or published while the store's listing was in
+  flight: the listing is older than they are;
 - is **overlaid** with the owed work touching the folder, never skipped because of it: a name an
   owed operation removes or renames away stays hidden, a name an owed operation creates or
   renames in stays shown, and staged edits are kept. A record that cannot be discharged therefore

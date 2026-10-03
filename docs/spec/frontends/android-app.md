@@ -126,8 +126,9 @@ The bundle the core is given ([android.md §4.1](android.md#41-what-the-host-pro
      [security-model.md §10.1](../algorithms/security-model.md#101-generation-and-strength);
   3. the domain name follows the grammar of [01-core.md](../01-core.md);
   4. the core accepts the candidate (`check_config`); its message is shown verbatim.
-- **A config the core refused is never the app's config.** The candidate is written beside the
-  config, checked, and renamed over it only when accepted; a refused candidate is deleted.
+- **A config the core refused is never the app's config.** The candidate's text is checked
+  (`check_config` with the candidate) and written to the config file only when accepted; a refused
+  candidate is never written anywhere.
 - The config is written atomically with owner-only permissions.
 - Saving a changed config while the core is booted offers "Restart now", which finishes every
   activity and exits the process, or "Later", which keeps serving the old config until the process
@@ -189,7 +190,7 @@ A document id is the item's reference. File references are `i:` references
 - **Open for writing** (a mode containing `w`):
   1. Retain keep-alive. Take a staging name, without creating the file, and write a durable ingest
      intent for it (§8.2) naming the document's reference and its current name.
-  2. If the mode contains `r` or `a` and does not truncate, have the core assemble the current body
+  2. A mode truncates when it says so or contains neither `r` nor `a`. If it does not truncate, have the core assemble the current body
      at the staging name (`ensure_cached`, which creates its `dest` itself and refuses one that
      exists) and record the reply item's `contentId` as the intent's `base`. On failure, delete
      staging and intent and refuse the open: starting empty would publish a truncated file on
@@ -228,6 +229,11 @@ name, or the reference of an existing file:
 3. `write` with `await`, the given exclusivity and base. On success the core owns the file and the
    intent is deleted. On failure the staging file is kept while its intent is ready, else deleted.
 
+4. An exclusive commit carrying `modified` that is refused `exists` by an occupant of the staging
+   file's size and of that modification time has already happened: a process died between the
+   adoption and its own record of it. The commit succeeds with the occupant and the staging file
+   is deleted; picking the next name would save the body twice.
+
 A commit succeeds once the core has adopted the body, whether or not it is uploaded yet;
 `isUploaded` in the reply says which, and the queues keep retrying.
 
@@ -254,7 +260,8 @@ durable intent record, one JSON object in `<home>/intents/<staging name>.json`:
 - The intent is written before the staging file is handed to anyone. It becomes `ready`, with the
   staging file fsynced, before the platform or the user is told the operation succeeded.
 - After boot the app commits every `ready` intent, then deletes it. An `open` intent found at
-  process start is an interrupted write and is discarded with its staging file.
+  process start is an interrupted write and is discarded with its staging file. A `ready` intent
+  whose staging file is gone was adopted just before the process died: its record is deleted.
 - A target that no longer exists at commit time (`not_found`: the parent, or the file a reference
   named) commits to the domain root under the target's `name`, exclusive, and notifies the user
   where the file went.
@@ -367,7 +374,7 @@ left running: its outcome is then a notification.
 
 ### 10.5 Activity
 
-What the app is doing and what went wrong, read from the `status` action every `status_poll` while
+What the app is doing and what went wrong, read from the `status` and `stats` actions every `status_poll` while
 the screen is visible, and not at all otherwise.
 
 - **State line**: connected, offline (the offline state of §5), paused, or read-only.
@@ -408,7 +415,8 @@ of a Move (§10.4), titled "Move <name> to <path>" and offering "Move here".
   checked does not block setup: the domain name can be typed.
 - **Settings**:
   - *Server*: the same fields, with the restart prompt of §6.1 on a change.
-  - *Storage*: the cache limit; how much the cache and the staged bodies hold now (from `status`);
+  - *Storage*: the cache limit; how much the cache (from `stats`) and the staged bodies (from
+    `status`) hold now;
     "Free up space" (`evict` on the root, after a confirmation saying that files made available
     offline are removed from the phone too).
   - *Camera backup*: the controls of §11.6.
@@ -495,9 +503,10 @@ A discovery pass, per volume:
    modification generation greater than the mark's where available; else date-added greater than the
    mark minus `date_added_lookback`, since date-added is not monotonic.
 3. For each row, in one transaction with the mark's advance to the highest value seen:
-   - no record and no `DONE` record with the same target and size (a renumbered id) → insert `PENDING`
+   - no record and no record with the same target and size (a renumbered id) → insert `PENDING`
      (or `BASELINE` during a "from now on" baseline pass);
-   - a renumbered `DONE` record → re-key it to the new id;
+   - a renumbered record, whatever its state → re-key it to the new id: a `BASELINE` record that
+     came back `PENDING` after a rebuild would upload what "from now on" excluded;
    - an existing `DONE` record whose size or modification changed → `PENDING` (re-upload to the same
      target);
    - an existing `PENDING` or `FAILED` record → update size and modification.
@@ -706,7 +715,8 @@ checked.
 - **Intents, not best effort.** A share that closed its screen before committing, and a picker edit
   committed after the close, were lost to a process death with nothing to show for it.
 - **The candidate config is checked before it replaces the config.** A refused config left on disk
-  opened the app on a domain that could not boot.
+  opened the app on a domain that could not boot. It is checked as text, not as a file: a check
+  that only reads the config's own path forces the candidate into that path first.
 - **Kind from the row, ids that survive renames.** A document id that spelled its parent and leaf
   made a rename drop the edit of an open document, and made tree grants stop at the first level.
 

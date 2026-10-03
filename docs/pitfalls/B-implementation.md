@@ -399,9 +399,9 @@ This file collects the traps that came from the implementation medium rather tha
 - **Seen** — 5ac172e2, 1ba3f1bb.
 
 ### B-8.11 Android libc and platform API differences
-- **Pitfall** — A Linux guard let `getloadavg` through on Android, where it is absent before API 29. `LIMIT` in a MediaProvider sort order is rejected by recent versions. The trust bundle was built once and never rebuilt. A domain cannot be reopened in-process after a config change.
-- **Check** — C platform guards distinguish Android and API level. Trust material is rebuilt on change.
-- **Seen** — 7a9ba837, rewrite notes (frontends/android).
+- **Pitfall** — A Linux guard let `getloadavg` through on Android, where it is absent before API 29. `LIMIT` in a MediaProvider sort order is rejected by recent versions. The trust bundle was built once and never rebuilt. A domain cannot be reopened in-process after a config change. SELinux denies `link(2)` in an app's data directory with EACCES, not EPERM: a hard-link fallback keyed on EPERM never ran, and the first boot on a phone failed with "permission denied" while creating an identity file. Reading `/proc/loadavg` is denied too, and the read raised instead of answering "unknown", so every `stats` request failed on the phone. Bionic has no `malloc_trim` and declares `syncfs` from API 28 only.
+- **Check** — C platform guards distinguish Android and API level. Trust material is rebuilt on change. Every `link` call site falls back on EACCES as on EPERM, and was run on a device, not only cross-compiled.
+- **Seen** — 7a9ba837, rewrite notes (frontends/android). recurred ×2, rewrite: first device run of the rebuilt app.
 
 ### B-8.12 Desktop plugins doing IPC on the UI thread
 - **Pitfall** — The Dolphin plugin swept daemon sockets on the menu thread: two daemons accepting without answering cost 0.3 s per right-click, and one sending bytes without a newline froze Dolphin. KF6 reads `MimeTypes` at the JSON root as empty, and `QDir::AllEntries` excludes unix sockets.
