@@ -28,6 +28,9 @@ let run _id (k, n) ~cancel =
   if String.starts_with ~prefix:"sf." k then (
     Rt.sleep 0.2;
     if n < 1 then Fail.raise_ Link "slow and flaky");
+  if String.starts_with ~prefix:"long" k then (
+    Rt.sleep 0.3;
+    record (k ^ " finished"));
   if String.starts_with ~prefix:"slow" k then (
     Rt.sleep 0.2;
     if Atomic.get cancel then raise Rt.Cancelled)
@@ -212,5 +215,26 @@ let () =
       p "ran: %s; idle: %b; records on disk: %d\n"
         (String.concat " " (List.rev !log))
         (Dqueue.idle q)
+        (List.length (Dqueue.Records.list r));
+      (* Last: a stop is for the process. *)
+      p "\n== a stop waits for the running job and takes no other\n";
+      log := [];
+      let r = Dqueue.Records.open_ (Filename.concat dir "stopping") in
+      let q = Dqueue.create ~name:"stopping" ~ordered:true kind r in
+      Dqueue.start q run;
+      ignore (Dqueue.post q ("long.1", 0));
+      ignore (Dqueue.post q ("next.1", 0));
+      let rec started n =
+        if n > 0 && !log = [] then (
+          Rt.sleep 0.02;
+          started (n - 1))
+      in
+      started 100;
+      Stop.request ();
+      Dqueue.settle ~timeout:5. q;
+      let at_return = String.concat ", " (List.rev !log) in
+      Rt.sleep 0.5;
+      p "when the settle returned: %s; later: %s; left on disk: %d\n" at_return
+        (String.concat ", " (List.rev !log))
         (List.length (Dqueue.Records.list r)));
   Fs.rm_rf dir

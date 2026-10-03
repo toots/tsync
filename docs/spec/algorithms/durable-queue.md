@@ -295,8 +295,9 @@ block every later record forever.
 
 ### 4.8 Settle, stop and pause
 
-- `settle(q)` returns when the queue is idle, is not running, a stop was requested, or has a
-  failure noted since the settle began (the target is down: the work stays on disk).
+- `settle(q)` returns when the queue is idle, is not running, has a failure noted since the settle
+  began (the target is down: the work stays on disk), or, once a stop was requested, when the jobs
+  then running have finished.
   `settle_all(timeout)` settles every queue of the owner concurrently, bounded by
   `SETTLE_TIMEOUT` (by the remaining grace while stopping).
 - `stop`: workers take no new job; a running job is allowed to finish up to the grace, and a

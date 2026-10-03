@@ -419,6 +419,8 @@ let wait_work ?since t =
 
 let ordered_worker t =
   let rec loop () =
+    (* §4.8: under a stop, no new job is taken. *)
+    Stop.check ();
     let since = Rt.Signal.version t.wake in
     let head =
       Mutex.protect t.m (fun () ->
@@ -491,6 +493,7 @@ let keyed_worker t =
     Rt.Signal.broadcast t.wake
   in
   let rec loop () =
+    Stop.check ();
     let since = Rt.Signal.version t.wake in
     match next () with
       | None ->
@@ -592,8 +595,9 @@ let cancel_key t k =
         | Some s -> Atomic.set s.cancel true
         | None -> ())
 
-(* Returns once idle, not running, stopping, paused, or once a failure was
-   noted after the settle began. *)
+(* Returns once idle, not running, paused, or once a failure was noted after
+   the settle began; under a stop, once the jobs then running have finished
+   (§4.8: a stop takes no new job and cancels none). A cancelled wait ends. *)
 let settle ?(timeout = settle_timeout) t =
   let began = Rt.now () in
   let deadline = began +. timeout in
@@ -602,11 +606,11 @@ let settle ?(timeout = settle_timeout) t =
       Mutex.protect t.m (fun () ->
           (t.loaded = [] && t.active = 0)
           || (not t.started) || t.paused || t.last_failure_at >= began
-          || List.for_all (fun id -> List.mem_assoc id t.parked) t.loaded)
+          || List.for_all (fun id -> List.mem_assoc id t.parked) t.loaded
+          || (Stop.requested () && t.active = 0))
     in
-    if stop || Stop.requested () || Rt.now () >= deadline then ()
+    if stop || Rt.now () >= deadline then ()
     else (
-      (try Rt.sleep 0.05 with Rt.Cancelled -> ());
-      loop ())
+      match Rt.sleep 0.05 with () -> loop () | exception Rt.Cancelled -> ())
   in
   loop ()
