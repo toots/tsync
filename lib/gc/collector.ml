@@ -122,10 +122,12 @@ type counters = {
   mutable cleared : int;
   mutable reclaimed : int;
   mutable bytes : int;
+  checked : Chunk_set.t;  (** verified by this process's run *)
 }
 
 let counters () =
   {
+    checked = Chunk_set.create ~max:max_int ();
     marked = 0;
     promoted = 0;
     verified = 0;
@@ -142,7 +144,18 @@ let verify_promoted m d n c =
   let store = m.member.store in
   let marker = Key.marker d c in
   n.verified <- n.verified + 1;
-  match store.get_opt (Key.chunk d c) with
+  (* Pitfall A-7.4: read, never mapped: a block the disk cannot return fails
+     a read, and kills the process under a mapping. *)
+  let read key =
+    match Fs.open_nofollow (Local_path.path m.root key) with
+      | None -> None
+      | Some fd -> (
+          match Fs.with_fd fd Fs.read_fd_bigstring with
+            | b -> Some b
+            | exception ((Stop.Stopping | Rt.Cancelled) as e) -> raise e
+            | exception _ -> None)
+  in
+  match read (Key.chunk d c) with
     | Some b when Chunk_key.equal (Chunk_key.of_bigstring b) c ->
         if store.delete marker then n.cleared <- n.cleared + 1
     | Some b ->
@@ -163,7 +176,18 @@ let mark m d n ~verify ns =
   let moved = List.filter (Chunk_spaces.promote m.spaces d) cs in
   Chunk_spaces.sync_shards m.spaces d moved;
   n.promoted <- n.promoted + List.length moved;
-  if verify then List.iter (verify_promoted m d n) moved;
+  (* A run killed after a promotion finds the chunk promoted when it resumes:
+     what is verified is every chunk the unit names, once per process. *)
+  if verify then
+    List.iter
+      (fun c ->
+        if
+          (not (Chunk_set.mem n.checked c))
+          && Chunk_spaces.in_surviving m.spaces d c
+        then (
+          Chunk_set.add n.checked c;
+          verify_promoted m d n c))
+      cs;
   n.marked <- n.marked + 1
 
 let batches l =
