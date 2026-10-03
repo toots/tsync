@@ -5,3 +5,4 @@ under an odd G: trusted false, held false
 under G=4: what G=2 confirmed is held false
 an old view after G moved on: held false, and it records nothing: true
 G unreadable: trusted false
+24 keys read singly: in order true, more than one at a time true, at most 8 true
