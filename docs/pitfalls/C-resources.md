@@ -235,6 +235,11 @@ Measured numbers from the material:
 - **Check** — Avoid many small scattered writes and simultaneous read+write on one bus. Full-resync load is tested against the smallest host's budget.
 - **Seen** — session memories (small-host USB disk failure, small-host proxy OOM).
 
+### C-7.8 An index over the tree built by reading every file, inside a request
+- **Pitfall** — The file-id index was built lazily by the first request naming an `i:` reference: a walk opening every marker (274k on the reference Mac domain, about 80 µs per small-file read on macOS, so 1-2 min), past the 30 s request deadline. It ran after every restart, the requests behind it waited on a system mutex, which stalled their runtime domain, and the system's retry backoff turned the minute into a longer gap before a new file reached the owner. Neither a sized read buffer nor skipping manifest decode changed the time: the cost is one `open` and `read` per file.
+- **Check** — No request walks the tree. An index over every file survives a clean stop as one snapshot read at start, and is rebuilt in the background only after a crash; a waiter for it waits as a fiber, outside the metadata serialisation.
+- **Seen** — rewrite.
+
 ## 8. CPU loops and polling
 
 ### C-8.1 A watcher woken by its own writes

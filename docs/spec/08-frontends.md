@@ -80,7 +80,7 @@ a frontend's spec may refine it with its own replica (File Provider).
 Non-FUSE callers name items by **reference**; the grammar (`root`, `d:<folderId>`, `i:<fileId>`,
 `f:<parentFolderId>/<leaf>`) is [01 §2.7](01-core.md#27-item-references). The owner names every
 file by `i:` in its replies; it accepts `f:` from a caller that composes a reference. A reference
-is resolved to a key only by the request handler, under the owner's metadata serialisation, and resolution **mints nothing**: a read
+is resolved to a key only by the request handler, under the owner's metadata serialisation (an `i:` reference first waits, outside it, for the file-id index: [04 §2.3](04-checkout-cache.md#23-mirror-entries-and-markers)), and resolution **mints nothing**: a read
 that minted a folder id would persist a marker and resurrect a deleted folder. A reference that does
 not resolve → `not_found`; a malformed one or a storage key → `invalid`. An `i:` or `f:` reference
 never answers for a folder.
