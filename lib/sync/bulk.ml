@@ -40,9 +40,17 @@ module Make (C : Engine_ctx.S) = struct
             let n = Fs.pread_full fd buf ~boff:0 ~len ~off:(i * cs) in
             Bigstring.sub buf ~off:0 ~len:n
           in
+          (* A short chunk and a changed stat are one condition, reported
+             one way whichever notices first. *)
+          let changed () =
+            Fail.raise_ Fail.Local "%s changed while it was read" rel
+          in
           let m =
-            R.upload_chunks ?sent ~name:(Names.leaf_of rel) ~size ~chunk_size:cs
-              ~mtime:st.st_mtime (fun i -> Remote.Lazy (fun () -> read i))
+            try
+              R.upload_chunks ?sent ~name:(Names.leaf_of rel) ~size
+                ~chunk_size:cs ~mtime:st.st_mtime (fun i ->
+                  Remote.Lazy (fun () -> read i))
+            with Remote.Source_changed _ -> changed ()
           in
           let resend ck =
             let rec find i =
@@ -52,8 +60,7 @@ module Make (C : Engine_ctx.S) = struct
             in
             find 0
           in
-          if not (unchanged st (Unix.fstat fd)) then
-            Fail.raise_ Fail.Local "%s changed while it was read" rel;
+          if not (unchanged st (Unix.fstat fd)) then changed ();
           publish ~resend rel m;
           size)
 
