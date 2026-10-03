@@ -97,3 +97,5 @@ socket gone: true
 == a holder that does not serve
 refused: busy
 refused at once: true
+== a refusal while the holder serves
+answered once it serves

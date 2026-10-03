@@ -555,4 +555,21 @@ let () =
         | () -> p "request answered"
         | exception Fail.E e -> p "refused: %s" (Fail.code e.kind));
       p "refused at once: %b" (Rt.now () -. asked < 5.);
+      Owner.release lock;
+      p "== a refusal while the holder serves";
+      let late = { held with name = Domain_name.v "late" } in
+      let path = Tsync_config.Paths.owner_socket late.name in
+      let lock =
+        Result.get_ok
+          (Owner.acquire ~socket:path ~role:"daemon" ~what:"test" late.name)
+      in
+      let server =
+        Rt.async (fun () ->
+            Rt.sleep 0.5;
+            Ipc.serve ~path (fun _ -> Ipc.Reply (Ipc.ok [])))
+      in
+      (match Owner.request ~what:"test" config late Protocol.Ping with
+        | () -> p "answered once it serves"
+        | exception Fail.E e -> p "refused: %s" (Fail.code e.kind));
+      Ipc.close (Rt.Promise.await server);
       Owner.release lock)

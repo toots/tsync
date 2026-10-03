@@ -379,33 +379,38 @@ let alive pid =
     | exception Unix.Unix_error (Unix.EPERM, _, _) -> true
     | exception Unix.Unix_error _ -> false
 
+let served name =
+  match holder name with
+    | Some { socket = Some _; pid; _ } -> alive pid
+    | _ -> false
+
 (* 07 §2.5: a refused connection is not an absent owner, since a full backlog
-   gives the same error on macOS. While the recorded holder lives and names a
-   socket, the request is retried until its deadline; then the one-shot's lock
-   acquisition decides, taking ownership if the lock is free and refusing busy
-   if not. *)
-let request ?(bulk = false) ?on_line ~what config (dom : Config.domain) req =
+   gives the same error on macOS. *)
+let retry_refused names call =
   let deadline = Rt.now () +. Ipc.request_deadline in
-  let call () =
-    Protocol.call ~bulk ?on_line
-      ~domain:(Domain_name.to_string dom.name)
-      (Paths.owner_socket dom.name)
-      req
-  in
   let rec attempt () =
     match call () with
       | reply -> reply
       | exception Ipc.Not_serving _
-        when Rt.now () < deadline
-             && Option.fold ~none:false
-                  ~some:(fun h -> h.socket <> None && alive h.pid)
-                  (holder dom.name) ->
+        when Rt.now () < deadline && List.exists served names ->
           Rt.sleep 0.1;
           attempt ()
-      | exception Ipc.Not_serving _ ->
-          one_shot ~what config dom (fun h -> Handler.call h req)
   in
   attempt ()
+
+(* Past the retry, the one-shot's lock acquisition decides: it takes ownership
+   if the lock is free and refuses busy if not. *)
+let request ?(bulk = false) ?on_line ~what config (dom : Config.domain) req =
+  match
+    retry_refused [dom.name] (fun () ->
+        Protocol.call ~bulk ?on_line
+          ~domain:(Domain_name.to_string dom.name)
+          (Paths.owner_socket dom.name)
+          req)
+  with
+    | reply -> reply
+    | exception Ipc.Not_serving _ ->
+        one_shot ~what config dom (fun h -> Handler.call h req)
 
 type host =
   mount:string option ->
