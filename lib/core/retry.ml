@@ -33,7 +33,9 @@ let ladder ?(attempts = attempts) ?deadline ?(health = Health.always_up) ~op f =
           match fl.kind with
             | Link | Load | Local | Unexplained ->
                 (match fl.kind with
-                  | Link -> ignore (Health.lost ~reason:fl.reason health)
+                  | Link ->
+                      if fl.stalled then Health.timed_out health;
+                      ignore (Health.lost ~reason:fl.reason health)
                   | Load -> Health.answered health
                   | _ -> ());
                 let d = delay n in
