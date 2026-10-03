@@ -253,7 +253,7 @@ Measured numbers from the material:
 ### C-7.10 A descriptor released on some failure paths but not on a raising step
 - **Pitfall** — `Dqueue.Records.hold` opened a record and raised when it could not lock it, without closing the descriptor. `Owner.acquire` took the ownership lock, then wrote the holder record: a failing truncate or write raised past the lock, so the descriptor, and the domain's ownership lock with it, stayed held by a process that reported failure. A cleanup written as a copy per branch (closing a held batch record in each branch of its release) had the same hole for any step that raises.
 - **Check** — Every step after an acquisition either runs under `Fun.protect ~finally` (released on every path) or under `match … with exception` (released on failure, handed over on success). A branch that releases by hand is a branch a later raise skips.
-- **Seen** — rewrite (review of PR #118); rewrite (resource inventory: the durable queue's keyed worker, whose slot a raising decode or completion left running, killing the worker and stranding its key). recurred ×2.
+- **Seen** — rewrite (review of PR #118); rewrite (resource inventory: the durable queue's keyed worker, whose slot a raising decode or completion left running, killing the worker and stranding its key; a job slot claimed before its finally, which also sent a progress line before freeing it, leaving the domain busy). recurred ×3.
 
 ## 8. CPU loops and polling
 
