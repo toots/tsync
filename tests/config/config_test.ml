@@ -60,6 +60,14 @@ let () =
            ~extra:{|,"chunkSize":"8M","maxCache":"1.5 GiB","readOnly":"no"|}
            "Files";
        ]);
+  try_ "fuse ownership and modes for a group"
+    (config
+       [
+         domain
+           ~frontends:
+             {|[{"type":"fuse","allowOther":true,"uid":"1000","gid":"root","fileMode":"0664","dirMode":"775"}]|}
+           "Media";
+       ]);
   p "\n== refused, each naming its path\n";
   try_ "unknown top-level key" (config ~top:{|,"maxUpload":4|} [domain "Files"]);
   try_ "unknown backend key"
@@ -140,6 +148,16 @@ let () =
            "F";
        ]);
   try_ "frontend type not built" (config [domain ~frontends:{|["webdav"]|} "F"]);
+  try_ "fuse mode not octal"
+    (config [domain ~frontends:{|[{"type":"fuse","fileMode":"0684"}]|} "F"]);
+  try_ "fuse mode with special bits"
+    (config [domain ~frontends:{|[{"type":"fuse","dirMode":"4755"}]|} "F"]);
+  try_ "fuse unknown user"
+    (config
+       [domain ~frontends:{|[{"type":"fuse","uid":"no-such-user-x"}]|} "F"]);
+  try_ "fuse unknown group"
+    (config
+       [domain ~frontends:{|[{"type":"fuse","gid":"no-such-group-x"}]|} "F"]);
   try_ "a frontend twice" (config [domain ~frontends:{|["fuse","fuse"]|} "F"]);
   try_ "unused link"
     (config ~top:{|,"links":{"slow":{"maxRate":"1M"}}|} [domain "F"]);

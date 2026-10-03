@@ -3,6 +3,7 @@ minimal                                  ok: Files ro=false backends=disk:main
 read order main < replica < archive < backfill ok: Files ro=false backends=m:main,r:replica,a:readOnly,b:backfill
 a lone readOnly store forces read-only   ok: Archive ro=true backends=a:readOnly
 sizes and string booleans                ok: Files ro=false backends=disk:main
+fuse ownership and modes for a group     ok: Media ro=false backends=disk:main
 
 == refused, each naming its path
 unknown top-level key                    refused: unknown key(s) "maxUpload"
@@ -21,6 +22,10 @@ plain http to loopback                   ok: F ro=false backends=nas:main
 two presenting frontends                 refused: domains[0].frontends: at most one presenting frontend (fuse, file_provider, android) per domain
 backend type not built                   refused: domains[0].backends[0].type: backend type "ftp" is unknown or not compiled into this build (built: gcs, http-proxy, local, s3)
 frontend type not built                  refused: domains[0].frontends[0]: frontend type "webdav" is unknown or not compiled into this build (built: android, fuse, http-proxy)
+fuse mode not octal                      refused: domains[0].frontends[0].fileMode: three octal digits, optionally after a leading 0
+fuse mode with special bits              refused: domains[0].frontends[0].dirMode: three octal digits, optionally after a leading 0
+fuse unknown user                        refused: domains[0].frontends[0].uid: no such user
+fuse unknown group                       refused: domains[0].frontends[0].gid: no such group
 a frontend twice                         refused: domains[0].frontends: fuse is listed twice
 unused link                              refused: links.slow: no backend uses this link
 maxRate below minRate                    refused: uplink.maxRate: is below minRate
