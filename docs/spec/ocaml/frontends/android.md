@@ -1,6 +1,6 @@
 # Android frontend and application — implementation notes
 
-Companion to the language-neutral specs [../../frontends/android.md](../../frontends/android.md) (the frontend) and [../../frontends/android-app.md](../../frontends/android-app.md) (the application). See [README.md](../README.md) for how these notes are organised. Both were written from the specs alone; the implementation they replaced is described at commit `26a8dbf0`.
+Companion to the language-neutral specs [../../frontends/android.md](../../frontends/android.md) (the frontend) and [../../frontends/android-app.md](../../frontends/android-app.md) (the application). See [README.md](../README.md) for how these notes are organised.
 
 ## 1. Where things are
 
@@ -25,7 +25,7 @@ Companion to the language-neutral specs [../../frontends/android.md](../../front
 - **"The breaker is open"** means every main member's health cell is down. A double with an always-up cell never takes that path: the tests cover patience and `unreachable`, not the breaker.
 - **Notices are a queue**, not an upcall. `Android_host.next_notice` blocks a host thread; the app runs one daemon thread on it. The core never calls into the JVM, so no core thread is ever attached to it, and the sink cannot call back into the bridge. The queue holds 1024 notices and drops the oldest.
 - **The log sink is the platform's log**, written by a C stub (`tsync_log_write`), tag `tsync`.
-- **`write` with `await`** polls every 100 ms until the staged edit is gone, an upload or metadata record of the key is retrying or parked, or the domain is paused.
+- **`write` with `await`** polls every 100 ms (the engine's `await_upload`) until the staged edit is gone, an upload record of the key or any metadata record is retrying or parked, or the domain is paused.
 - **`check_config` with a candidate** crosses the bridge as `domain NUL candidate` in one text argument.
 - **Cleartext.** `Transport.cleartext_loopback_only`, set by `Android_host.init`, refuses a connection without TLS to a host that is not loopback; `check_config` and boot refuse a backend whose `url` field says so.
 - **Errno** values are Linux's, as constants: the consumer is the Android host.

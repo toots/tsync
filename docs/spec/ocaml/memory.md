@@ -1,7 +1,7 @@
 # Bodies, mapping and memory — OCaml implementation notes
 
-Learnings from the OCaml 5 rewrite (branch `rewrite`), measured on a copy of a real domain: 305,754
-store objects, 258,440 file manifests, 1.2 GB of manifests. Not normative: the spec only asks that
+Measured on a copy of a real domain: 305,754 store objects, 258,440 file manifests, 1.2 GB of
+manifests. Not normative: the spec only asks that
 bodies move as off-heap buffers ([01 §10](../01-core.md#10-http-request-discipline)), that data
 which may change under a reader is never mapped ([01 §12](../01-core.md#12-reading-data-that-may-change-under-the-reader)),
 and that each process reports its memory ([07 §5.5](../07-daemon-cli.md#55-tsync-status)).
@@ -14,8 +14,9 @@ and that each process reports its memory ([07 §5.5](../07-daemon-cli.md#55-tsyn
   collector scans and moves it; a bigstring is allocated once, outside the heap.
 - Small metadata (manifests, folder markers, anchors, journal entries, cursors, JSON) stays a
   `string`, converted where it leaves the store. `Manifest.of_body` checks the magic on the
-  bigstring and converts only a real manifest: the composite asks `chunk_names` of every body it
-  copies, chunks included, and converting those would copy every chunk to the heap.
+  bigstring and converts only a real manifest. The composite's copy job (`sync`) never decodes a
+  chunk: a body under a chunk key (`Key.chunk_of`) names nothing, is hashed in place
+  (`sound_chunk`) and put; only a body under another key goes to `Manifest.of_body`.
 - Views, not copies: `Bigstring.sub` shares memory. A FUSE write hands the kernel's buffer to the
   file operations as a view (the worker waits for the scheduler, so the buffer outlives the call);
   a read blits into the kernel's buffer with `Bigarray.Array1.blit`. Bulk frames decode into views
@@ -32,8 +33,9 @@ and that each process reports its memory ([07 §5.5](../07-daemon-cli.md#55-tsyn
   modified in place, so a mapping stays valid even if the file is deleted, and a range read is a
   view of the mapping with no read at all.
 - A store root on a network filesystem is read with positioned reads instead
-  (`Fs.read_fd_bigstring`), decided once per store by `statfs`: an NFS or SMB server can fault a
-  mapped page (`SIGBUS`), which a positioned read turns into an error.
+  (`Fs.read_fd_bigstring`): an NFS or SMB server can fault a mapped page (`SIGBUS`), which a
+  positioned read turns into an error. `Fs.is_network_fs` asks `statfs` at every read and is never
+  cached, so a store opened before its mount is not taken for a local one.
 - Never mapped: user files (import, rsync sources), live staged bodies (they change size under a
   reader), cache bodies read per kernel request (one `mmap` per 128 KiB read costs more than the
   `pread` it saves; the page cache serves both).
@@ -54,6 +56,8 @@ and that each process reports its memory ([07 §5.5](../07-daemon-cli.md#55-tsyn
   sent (`madvise(MADV_DONTNEED)` on mappings only; the mapping is private and never written, so a
   later read pages it back in), and the owner's housekeeping compacts once the heap grew 64 MiB past
   its last compaction (`Usage.release_if_grown`).
+- The read and verify paths do not drop their mappings: those wait for a major collection (review
+  finding 86).
 - tmpfs pages a process maps count as `RssShmem`, not `RssFile`: a test of mapped memory on `/tmp`
   must read `VmRSS`.
 
@@ -84,8 +88,8 @@ collections and little retained heap is a garbage storm, not a leak.
 
 - **Prefetch must be bounded by position, not by concurrency.** A semaphore bounded the fetches in
   flight, but not the finished listings waiting to be visited; on a wide tree every listing, with
-  its manifest bodies, waited in memory. The walk now keeps an explicit stack and fetches only the
-  next `width` folders in visit order.
+  its manifest bodies, waited in memory. The walk (`fold_tree` in `lib/remote/tree.ml`) keeps an
+  explicit stack and fetches only the next `width` folders in visit order.
 - **No `List.filteri` batching.** Splitting a 258k-element list into batches of 64 by filtering the
   remainder for each batch was quadratic; its garbage drove the heap past 1.6 GB and 700 major
   collections. Batch in one pass.

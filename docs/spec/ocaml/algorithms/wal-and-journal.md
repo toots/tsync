@@ -1,70 +1,73 @@
 # WAL and journal — OCaml implementation notes
 
 Companion to the language-neutral spec [../../algorithms/wal-and-journal.md](../../algorithms/wal-and-journal.md).
-See [../README.md](../README.md) for how these notes are organised. Formats and interfaces:
-[../03-journal-sync.md](../03-journal-sync.md).
+Not normative. Formats and interfaces: [../03-journal-sync.md](../03-journal-sync.md). Finding numbers
+refer to [the 2026-10-01 review](../../../review/2026-10-01-rewrite.md).
 
-## 1. Where each abstraction lives
+## Where each abstraction lives
 
-| Abstract | OCaml |
+| Spec | Code (`lib/sync/`) |
 |---|---|
-| entry key | `Journal.Entry_key.t` `{ms; client_uuid}` (`lib/domain/journal/journal.ml`), printed `%013Ld-<uuid>`; `of_string` is the only constructor |
-| op vocabulary | `Journal.op` (`` `Put | `Delete | `Mkdir | `Rmdir | `Rename ``), `to_json`/`of_json`, NDJSON `encode`/`decode` |
-| journal store seam | `File_store` (`lib/domain/remote/store/file_store/`), host binding `file_store_lwt.ml`; `journal_key` is the only function producing an entry's store key |
-| `PUBLISH` | `file_store_lwt.ml` `write_journal_entry` (applied-log `note`, put, `Change_notice.send`), `note_local` for rebuild findings |
-| cursor debouncer | `file_store.ml` `note_cursor`/`bump_cursor`/`flush_cursor`, `cursor_flush_interval = 2 s`, state in a global table keyed by cursor object |
-| last-sync mark | `read/write_last_sync_key`, `<data_dir>/last-sync-<domain>` |
-| applied log | `Applied_entries` (`note`, `since`, `head`, `keys`, `prune`), `keep_days = 30` |
-| WAL | `Wal` (`record`, `advance`, `note_failure`, `update_ops`, `complete`, `discharge`, `list`, `owed_metadata`); hand-off `Wal.Owed` |
-| metadata queue | `Meta_queue` (ordered durable queue, `Retry.classify_in_order`, poison `Stop`, `parked`, `rearm`) |
-| upload queue | `Sync_queue` (keyed pool, `workers = max 1 max_uploads`) |
-| poller | `Sync_poller` (`sync_once`, `start`, `sweep_interval = 60 s`, `retry_floor = 2 s`, `held_tick = 0.2 s`) |
-| apply pass, handled set, step aside | `Replay.apply_foreign`, `handled_set`, `stepped_aside` (per domain), `unapplied` |
-| reconcile | `Replay.reconcile` (`finish_executed`, `resume_prepared`, `replay_unpublished`, `overridden_since`, `adopt_unrecorded`) |
-| bridge check, rebuild | `Entry_key.cannot_bridge`, `Resync.run` (`tsync sync [--full]`), `refuse_if_metadata_owed`, `Replay.mark_handled` |
-| host wiring | `lib/lwt/domain/sync/sync_lwt.ml`; converge in `Domain_engine.converge` |
+| Entry key, minting | `Entry_key.t` (a private string), `parse`, `make`, `of_time`, `month`, `journal_key`; `Entry_key.minter`, `mint`, seeded in `local_ops.ml` from the WAL's ids, and in `Engine.start` from the applied log and the mark |
+| Op vocabulary | `Op.t` (`Put` with `base`, `Delete`, `Mkdir`, `Rmdir`, `Rename`), `encode_entry`, `decode_entry` |
+| Journal store, cursor | `Journal`: `list_entries`, `read_entry`, `entry_exists`, `write_entry`, `cursor_read`, `cursor_token`, `cursor_wait` |
+| Cursor debouncer (§4.2) | `Journal.note`, `bump`, `flush`; `cursor_interval`; one `Journal.t` per domain in the owner |
+| Last-sync mark | `Mark.read`, `Mark.write` (`<data_dir>/last-sync-<domain>`) |
+| Applied log, change feed | `Applied`: `load`, `contains`, `note`, `head`, `since`, `prune`; `Engine.changes_since`, `prune_applied` |
+| WAL record, states (§4.1) | `Wal.record` (`state`, `ops`, `priors`, `local_from`, `fids`, `last_error`), `Wal.encode`, `decode`; the log is a `Dqueue.Records` directory |
+| Writer, metadata op | `record_intent`, `prepare`, `record_owed`, `with_intent`, `abandon` under `with_meta` (`local_ops.ml`) |
+| Writer, content | `post_put` (`outbound.ml`), reached from `close` through `post_put_hook` |
+| Metadata queue | `metadata` (ordered), `run_metadata`, `publish_op` (`outbound.ml`) |
+| Upload queue | `uploads` (keyed, `max_uploads` workers), `run_upload`, `run_one_upload`, `publish_landed` |
+| `MARK_EXECUTED`, re-keying | `mark_executed`, `is_stale`, `rekey_age`, `Dqueue.Records.rekey` |
+| `PUBLISH` | `publish_entry`: `Applied.note`, `Journal.write_entry`, the change hook, `Journal.note`; `discharge`, `discharge_executed` |
+| Rule 7, dependency wait | `depends_on`, `wait_dependencies` |
+| Rule 9, catch-up gate | `wait_gate`, `open_gate`, `close_gate`, `gate_epoch`, `note_link_failure` |
+| Poller, sweep (§4.3) | `poller`, `poll`, `wake_poller` (`engine.ml`); `Outbound.sweep`, `retry_floor` |
+| Apply pass, step aside (§4.4) | `apply_pass`, `apply_entry`, `apply_op`; `stepped_aside`, `Engine.unapplied` |
+| Reconcile (§4.7) | `Engine.start`: `recover_local`, `reconcile`, `rescan_logs`, `adopt_unrecorded`; the local redo is `redo` (`local_ops.ml`) |
+| Bridge check, hold, rebuild (§4.8) | `cannot_bridge`, `hold`, `Engine.bridge`, `rebuild`, `resync`; `Outbound.horizon`, `list_slack` |
+| Drain order | `Engine.drain`: metadata, uploads, `Journal.flush`, the copies |
+| Batch puts | `Bulk.batches` (`bulk.ml`) |
+| Tests | `tests/sync/` (`formats_test`, `recover_test`, `two_clients_test`, `offline_test`, `poller_retry_test`, `feed_test`, `legacy_entry_test`, `rebuild_race_test`) |
 
-## 2. Implementation choices (not spec)
+`Engine.Make` includes `Outbound.Make`, which includes `Local_ops.Make`: one functor application per
+domain holds the WAL, both queues, the mirror, the staged tree and the cache.
 
-- Upload width is `maxUploads` (default 4); the metadata queue has one worker.
-- Reconcile's journal reads (`overridden_since`) are bounded by `Bounded.create ~max:32`, created
-  at module scope so overlapping recoveries share one bound.
-- Import batches puts into entries of 2000 ops or 10 s; a rebuild reports its findings through
-  `note_local` every 64 ops.
-- `Applied_entries.prune` is called daily with `keep_bytes = 64 MiB`.
-- The applied-log `since` reads shards newest first until it finds the anchor's shard, so its cost
-  is proportional to what follows the anchor; `head` reads an 8 KiB tail and the whole shard only
-  when the tail holds no complete line.
-- Shutdown races the queue drain against 0.8 × grace so the cursor flush still runs.
+## Where the code departs from the spec
 
-## 3. Where the code at the spec snapshot differs from the spec
+- **Revive-ours publishes without a WAL record** (finding 39): see
+  [conflict-resolution](conflict-resolution.md).
+- **Store reads under the metadata lock remain on one path** (finding 52, rule 11): an edit reached
+  only through an owed rename of ours.
+- **The dependency wait polls** (finding 143). `wait_dependencies` re-reads the loaded metadata records
+  every 0.2 s; behind a stuck head that is thousands of record reads a second across waiting uploads.
+- **An undecodable mark is read as no mark** (finding 125) and is not set aside.
+- **"Behind" leaves out own-id and below-mark entries** (finding 118, `lib/owner/report.ml`): status can
+  report nothing behind while entries are due.
+- **Each status call reads every WAL record** (finding 91, `Engine.activity`).
+- **A failed pass is retried every `retry_floor` with no backoff, logging each time** (finding 145).
+- **`rsync --move` can publish the source's delete before the destination's put** (finding 121).
+- **Stepped-aside entries are kept in memory** (`stepped_aside`). They are found again by the first
+  pass after a restart, since nothing noted them in the applied log.
 
-- **No bridge check in the owner.** Only `tsync sync` calls `cannot_bridge`, and only with the
-  "oldest key newer than the mark" condition; an empty journal counts as unbridgeable. The poller
-  never enters `hold`, has no check for listed entries hidden by the horizon (B2), and a client
-  stopped longer than 30 days skips unpruned entries older than the horizon.
-- **Mark semantics.** The mark is the newest key applied (before month sharding it was written as `journal_prefix ^ key`) (moved forward per entry, including past
-  entries that failed to read), not the pass start bounded by the oldest unhandled entry.
-- **Applied-log prune** drops shards by mtime or by the 64 MiB byte cap, folding newest first; it
-  can drop the newest shard or shards inside the horizon.
-- **Handled set** is loaded once per functor application; `tsync sync` beside a daemon has its own.
-- **`get_journal_entry`** turns every error into `None`; the pass then skips the entry without
-  stepping it aside and still advances the mark. `overridden_since` has the same hole.
-- **Own entries** (`client_uuid = mine`) are skipped by the pass rather than deduplicated by the
-  handled set.
-- **EXECUTED keeps the original ops**; `Meta_queue` publishes the rewritten ops (`as_published`), so a
-  crash between the two makes reconcile publish the originals.
-- **Promotion window.** An upload promotes before `Wal.discharge` advances to Executed; a crash in
-  between leaves a Prepared record with no staged edit, which reconcile completes without publishing.
-- **Upload into a folder whose mkdir is owed**: the upload claims the folder's marker itself
-  instead of waiting for the mkdir record to publish.
-- **No `base`** field is written in put ops or read from them, and the view does not record whether
-  this client wrote it.
-- **No re-keying** of stale records and no catch-up gate; no ordering between an upload and an
-  earlier unpublished rename of its path.
-- **Key minting** is monotonic per process only (`last_ms`), not initialised from used keys; any
-  process sharing the uuid mints.
-- **Duplicate applied-log lines**: a record noted and then failing its put is noted again on retry.
-- **Mixed records** fall through to `replay_unpublished`; INTENT non-metadata records use
-  `overridden_since` to drop ops a peer touched later.
-- **No fsync** of WAL records or applied-log appends.
+## Learnings
+
+- The mark is a time, not the newest key applied: `apply_pass` writes the pass start minus
+  `list_slack`, bounded by the oldest entry it stepped aside, and only moves it forward.
+- The applied log is the dedupe set, not the mark: an entry is due when it is inside the horizon and
+  not in `Applied`. Own entries are noted before they are put, so the pass skips them by the same test.
+- A pass that began before the last link failure does not reopen the gate (`gate_epoch`, finding 51).
+- The poller's sweep is timed from the last listing, never from a wait's expiry, and a failed pass
+  goes through the same classification as a queue job; the loop ends only on `Stop.Stopping`
+  (finding 7).
+- An EXECUTED record is never decided again: `run_metadata` and `reconcile` hand it to
+  `discharge_executed`, which only asks whether the entry is there (finding 10).
+- An INTENT record met by the metadata queue is redone under the metadata lock, which its creator
+  holds until it prepares, before anything is published.
+- A due entry that vanished between the listing and its read is evidence of pruning: the pass holds
+  for a rebuild instead of skipping it.
+- A rebuild's sweep spares what local work touched since the walk began (`note_touched`,
+  `was_touched`): the walk runs for minutes against a mount that stays writable (finding 13).
+- Only the fids `apply_op` reported go into the applied log: a peer's paths are not this client's
+  (pitfall A-6.25).

@@ -1,46 +1,62 @@
 # Conflict resolution — OCaml implementation notes
 
 Companion to the language-neutral spec [../../algorithms/conflict-resolution.md](../../algorithms/conflict-resolution.md).
-See [../README.md](../README.md) for how these notes are organised.
+Not normative. Finding numbers refer to [the 2026-10-01 review](../../../review/2026-10-01-rewrite.md).
 
-## 1. Where each abstraction lives
+## Where each abstraction lives
 
-| Abstract | OCaml |
+| Spec | Code (`lib/sync/`) |
 |---|---|
-| Arrival and Publish tables, `clashed` | `Resolve.Arrival.decide`, `Resolve.Publish.decide`, `clashed` (`lib/domain/checkout/file/resolve.ml`); printed exhaustively by `tests/unit/resolve` |
-| Arrival fact gathering, translation, enactment | `Local.Peer_entry.gather`, `local_folder`, `renamed_since`, `renamed_onto`, `enact`, `apply` (`file.ml`) |
-| Read-ahead, ancestor adoption, missing answer | `Foreign.read_ahead`, `adopt_ancestor_ids`, `adopt_folder_id`, exception ``Unread (`Marker k | `Manifest k)`` → `Retry.Transient` |
-| Publish gathering and enactment, "as it is here now" | `Backend_half.gather_*`, `enact`, `as_published`, `backend_ops` |
-| Conflict name, aside | `conflict_key`, `aside_name`, `move_aside`, `publish_aside` |
-| Rescue | `Peer_entry.rescue_staged` |
-| Retire stale source | `Peer_entry.retire_stale_copy` (`Folders.forget`, `Folders.reparent`) |
-| Retarget | `Peer_entry.retarget_our_rename` + `W.update_ops` |
-| Claims, anchors, trash | `St.claim_folder`, `placed`, `get_anchor`, `put_folder_marker`, `retire_to_trash`, `remove_old_marker` |
-| Two-client rows | `tests/scenario/conflicts` (snapshot `.expected`); publish races in `tests/scenario/sync` |
+| Occupants, places, facts (§3.5, §4.2) | `Conflict.occupant`, `place`, `arrival`, `publish_fact` |
+| Arrival table (§4.3), `clashed` | `Conflict.arrival`, `Conflict.clashed`; printed exhaustively by `tests/sync/formats_test` |
+| Publish table (§4.5) | `Conflict.publish`, `Conflict.publish_clashed`, `Conflict.max_claim_rounds` |
+| Conflicted-copy name (§4.7) | `Conflict.conflict_name`; the free name is picked by `aside_name` (`local_ops.ml`) |
+| Read-ahead of store answers, ancestor adoption | `read_ahead`, `placed_answer`, `store_at`, `place_answer`, `adopt_ancestors` (`engine.ml`) |
+| Arrival fact gathering, translation through our owed renames | `apply_op`, `occupant`, `removal`, `translate`, `follow_owed_renames` (`engine.ml`) |
+| Arrival actions (§4.6) | `install`, `file_aside`, `file_aside_published`, `folder_aside`, `folder_aside_local`, `rescue_folder`, `rescue_ours_under`, `rescue_theirs`, `revive_ours`, `retire_stale_source` (`engine.ml`) |
+| Publish gathering, the claim and move attempts | `publish_op`, `store_record`, `claim_place`, `expected_matches` (`outbound.ml`) |
+| Publish actions, retarget | `enact_publish`, `retarget_rename` (`outbound.ml`) |
+| Expected prior records | `Wal.prior`, `Wal.record.priors`, read by `view_prior` (`local_ops.ml`) |
+| `base` of a put | `Op.Put.base`, `Staged.edit.base`, `base_hex` (`local_ops.ml`) |
+| Moving a staged edit with its owed upload | `move_edit`, `repost_moved`, `materialise_inherited` (`local_ops.ml`) |
+| Late name loss of a claim | the `claims` queue, `run_claim`, `set_folder_aside` (`outbound.ml`) |
+| Two-client rows | `tests/sync/two_clients_test`, `moved_edit_test`, `marker_slot_test`, `missing_parent_test`, `lost_answer_test`, `restore_race_test` |
 
-Facts, actions and endings are ordinary closed variants: exhaustiveness across the table is the point.
-The metadata lock (`meta_mutex`) lives in `File.Local`, where the store modules are shadowed, so code
-under the lock has no name through which to reach the store.
+Facts, actions and endings are closed variants, so a new row fails to compile until every table handles
+it. `Conflict` does no I/O: `engine.ml` and `outbound.ml` gather the facts and enact the answer.
 
-## 2. Where the code at the spec snapshot differs from the spec
+## Where the code departs from the spec
 
-- **Occupant model.** The code gathers independent booleans (`renamed_onto`, `folder`, `staged`,
-  `another_folder` …) whose product has 65 Arrival situations, several impossible; the spec uses one
-  occupant per name. There is no `folder(published)` vs `folder(ours)` distinction: a published
-  folder yields to a put (A3 in the code), and a published file is not moved aside for a folder.
-- **Store-current reconciliation.** `delete` and file `rename` arrivals consult no store record; a
-  re-applied or late delete removes a file a later write restored. Folder arrivals do not consult the
-  anchor (`place(id)`), and there is no `fill-vacated`.
-- **No `renamed_onto` for `delete` or rename destinations**: B renaming x over f while A deletes f,
-  and A renaming onto the destination of B's pending rename, diverge.
-- **Retarget order**: the file is moved before the record is rewritten; a crash between re-derives a
-  second aside name.
-- **Retire stale source** moves and forgets before re-pointing the id.
-- **Rescue** flattens rescued staged files beside the removed folder; unpublished subfolders vanish.
-  Their additions under our unpublished rmdir are not rescued (they end in the trash).
-- **Publish side**: no expected prior records, so `delete` and file `rename` never detect a record
-  changed since; puts have no base check; rename-dir has no `trashed` fact (a rename published after a
-  peer's rmdir pulls the folder out of the trash); a file rename versions only the source.
-- **Revert** does not version the replaced content.
-- **`base`** is not implemented: neither on `write` from a frontend nor in put entries (A2a, P1's
-  base comparison and the re-check at version save).
+- **The put rows are decided by the upload itself.** `run_one_upload` compares the store's record with
+  the edit's base through `slot_moved_on` and moves the edit aside; it does not call `Conflict.publish`.
+  The comparison is made once, before the chunks are sent: `Remote.publish` takes no expected record, so
+  it is not repeated when the replaced record is read for its version save (§4.4).
+- **Revive-ours owes nothing durably** (finding 39). `revive_ours` installs the aside and publishes
+  from a deferred step with no WAL record: a failed publish picks a new aside name on the next pass, and
+  a kill between the publish and its put leaves the store holding ours with no entry.
+- **Store reads under the metadata lock** (finding 52, pitfall A-2.5). The read-ahead covers the
+  answers an entry needs, except an edit reached only through an owed rename of ours, whose inherited
+  bytes are fetched under the lock.
+- **`create` and `mkdir` take different locks** (finding 120): the key lock and the metadata lock, so a
+  file and a folder can hold one name.
+- **Moves and restores are not confirmed** (finding 122): only a claim has a `claims` record; a marker
+  raced during a move is not re-claimed.
+- **The claim confirmation is timed on the wall clock** (finding 140): `run_claim` waits
+  `claim_settle` from `landedAt` by `Unix.gettimeofday`.
+- **A parked `claims` record waits for the next start.** `Engine.rearm` re-arms the upload, metadata
+  and copy queues, not `claim_queue`, and `Engine.parked` does not list it.
+- **Landing names are not announced** (finding 119): a path translated through an owed rename is not
+  passed to the frontend's change hook, and a failed notification is not reported.
+
+## Learnings
+
+- "Could not tell" is its own answer. `store_record` answers `` `Unresolved `` when the parent folder
+  cannot be named, and a folder marker in a file's slot is `` `Folder ``, never "no manifest"
+  (pitfall A-4.1; findings 2 and 16).
+- Every move of a staged edit goes through `move_edit`, which bumps the source key's generation and
+  cancels its upload; `repost_moved` posts the upload at the new key. A move that skips either leaves
+  the old name's upload live (findings 4, 5, 12).
+- A retried round re-reads its record from the WAL (`read_record`): a retarget rewrites the record, and
+  the copy in memory is stale (finding 11).
+- An edit whose slots inherit from a base is materialised (`materialise_inherited`) before it is moved
+  to a name that has no base.
