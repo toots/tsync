@@ -103,7 +103,8 @@ let () =
   Rt.run_sync (fun () ->
       let owner =
         Rt.async (fun () ->
-            Owner.run ~present ~shared:true ~socket config config.domains)
+            Owner.run ~present ~shared:true ~roots:[] ~socket config
+              config.domains)
       in
       wait_serving 100;
       let c = Ipc.Client.connect socket in

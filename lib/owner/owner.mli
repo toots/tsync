@@ -46,11 +46,13 @@ type present =
 (** Owner start, serve until the process stop, then drain within the grace.
     Answers the exit status: 0, or {!owner_held}. [shared] (macOS): one socket
     for every domain, possibly none, whose router answers [subscribe], [menu],
-    [menu_stats], [pause] and [stop] without a domain, and which declares no
-    transfer roots (file-provider §4). *)
+    [menu_stats], [pause] and [stop] without a domain (file-provider §4).
+    [roots]: the transfer roots the host declares (security-model §7.3), the
+    user's home by default. *)
 val run :
   ?present:present ->
   ?shared:bool ->
+  ?roots:string list ->
   ?socket:string ->
   Tsync_config.Config.t ->
   Tsync_config.Config.domain list ->

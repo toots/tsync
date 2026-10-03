@@ -237,7 +237,7 @@ let shared_router served reports action req =
     | _ ->
         Ipc.Reply (Ipc.failure (Fail.make Fail.Invalid "unknown router action"))
 
-let serve ?present ?(shared = false) ~socket config domains =
+let serve ?present ?(shared = false) ?roots ~socket config domains =
   let draining = Atomic.make false in
   let server = ref None in
   let served = ref [] in
@@ -248,9 +248,9 @@ let serve ?present ?(shared = false) ~socket config domains =
           + if shared then Ipc.publish srv all_topics ev else 0
       | None -> 0
   in
-  (* security-model §7.3: a shared socket's sandboxed clients hand over paths
-     the owner cannot derive, so it declares no roots. *)
-  let roots = if shared then [] else [Paths.home ()] in
+  (* security-model §7.3: the host declares its roots; the user's home unless
+     it says otherwise. *)
+  let roots = Option.value ~default:[Paths.home ()] roots in
   let reports = ref [] in
   served :=
     List.map
@@ -309,7 +309,7 @@ let serve ?present ?(shared = false) ~socket config domains =
     !served;
   Option.iter Ipc.close !server
 
-let run ?present ?shared ?socket config (domains : Config.domain list) =
+let run ?present ?shared ?roots ?socket config (domains : Config.domain list) =
   let socket =
     match (socket, domains) with
       | Some s, _ -> s
@@ -332,7 +332,7 @@ let run ?present ?shared ?socket config (domains : Config.domain list) =
   match take domains with
     | Error () -> owner_held
     | Ok () ->
-        serve ?present ?shared ~socket config domains;
+        serve ?present ?shared ?roots ~socket config domains;
         0
 
 (* 07 §2.5, §3.5: an owner for the command's duration, with every duty but
