@@ -125,8 +125,6 @@ Numbers are findings of [the review](../../review/2026-10-01-rewrite.md) that ar
 - **Detached failure (§6.1 R1).** A detached fiber that raises is logged and ends; the process is
   not stopped, and nothing restarts the fiber.
 - **Store-root temporaries (§2.9).** Nothing sweeps the local store's random-form temporaries (122).
-- **`Rt.Condition.wait`** does not keep mutual exclusion when its waiter is cancelled (112); it has
-  no caller.
 - **`Ipc.serve`** changes the process-wide `umask` around its bind while other domains create
   files (115).
 - The blocking-thread pool grows to its 256 slots and never shrinks (94).

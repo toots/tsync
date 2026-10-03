@@ -131,16 +131,6 @@ module Fmutex : sig
   val is_locked : t -> bool
 end
 
-(** A condition carrying no value: a woken waiter re-reads its state. *)
-module Condition : sig
-  type t
-
-  val create : unit -> t
-  val wait : t -> Fmutex.t -> unit
-  val signal : t -> unit
-  val broadcast : t -> unit
-end
-
 (** A broadcast with no mutex and no value. A waiter reads {!Signal.version}
     before checking its state and passes it as [since], so a broadcast between
     the check and the wait is not lost. *)
