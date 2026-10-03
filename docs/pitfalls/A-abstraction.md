@@ -142,9 +142,9 @@ This file covers mistakes that are true of any implementation in any language: s
 - **Seen** — b7e4c849, b7fd7943, PR #87, 5ee48495. recurred ×2, rewrite.
 
 ### A-2.5 Store round trip under the global metadata lock
-- **Pitfall** — The lock FUSE and IPC handlers wait on was held across network I/O: an inline cursor bump in a rename, every rename/delete/rmdir's store half and retry ladder (the mount froze while one store call failed), a version snapshot retrying a 500 for about 50 s, a peer entry's manifest fetches, store reads passed in as closures, a revert fetching and publishing under it.
+- **Pitfall** — The lock FUSE and IPC handlers wait on was held across network I/O: an inline cursor bump in a rename, every rename/delete/rmdir's store half and retry ladder (the mount froze while one store call failed), a version snapshot retrying a 500 for about 50 s, a peer entry's manifest fetches, store reads passed in as closures, a revert fetching and publishing under it, a new file asking an http-proxy store for its recommended chunk size (with the store down, every mutation of the domain waited for the retry ladder).
 - **Check** — Read the store first, then take the lock and decide from data (tables, not callbacks). Local ops complete from local state plus a WAL record. Make holding the lock across a request fail to compile: the lock is private to the module changing local state.
-- **Seen** — 88db71c8, ed04657a, 39568d9c, e8fe2452, 1cd593db, ab3811bd, 2a59d643, PR #92. recurred ×7.
+- **Seen** — 88db71c8, ed04657a, 39568d9c, e8fe2452, 1cd593db, ab3811bd, 2a59d643, PR #92, 2d146f24. recurred ×8, rewrite.
 
 ### A-2.6 Buffer released while an asynchronous consumer still reads it
 - **Pitfall** — `Bytes.unsafe_to_string` on a pooled buffer was passed to put; it returned to the pool while a deferred target still sent it, so the next chunk's bytes went out under this chunk's key. Size checks could not see it and dedup spread the bad bytes into every later file with that chunk. Fixed again in the mirror path.
@@ -583,6 +583,11 @@ This file covers mistakes that are true of any implementation in any language: s
 - **Pitfall** — The camera sweep advanced by `DATE_MODIFIED` while the query cut on `DATE_ADDED`, so photos were never uploaded on API 26-29. It stored the generation read at pass start, so failed photos never returned. "From now on" could leave `dateAdded` at 0 and back up everything.
 - **Check** — A watermark is the field the query compares, owned by one function, advanced only past settled items.
 - **Seen** — PR #57, notes (android B-0). recurred ×2.
+
+### A-6.25 A peer op's local facts read at the peer's path
+- **Pitfall** — A peer names the path it saw; the local half of its op acts at that path translated through this client's moved folders and owed renames. The file id the change feed names was read at the peer's path: a delete under a folder renamed here found no id (the feed dropped it and the replica kept the file), or the id of an unrelated file now at that path (the replica dropped a file that still exists). Naming the file the delete *would* have removed is as wrong: when the arrival decision keeps it, the replica drops a live file.
+- **Check** — The arrival code that translates the path is the only reader of local facts for a peer op, and it reports what it acted on: a put's and a rename's id afterwards, a delete's only when it removed the file. No fallback reads the peer's spelling of the path.
+- **Seen** — b0a14d08, rewrite.
 
 ## 7. Store contract, replication, GC and content integrity
 
