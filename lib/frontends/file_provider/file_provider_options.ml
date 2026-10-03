@@ -6,6 +6,7 @@ let () =
       fields;
       presenting = Some `Shared;
       commands_only = None;
+      pulled = None;
       group = Some "fileprovider";
       commands = File_provider_cli.commands;
     }

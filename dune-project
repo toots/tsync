@@ -26,3 +26,10 @@
 (package
  (name tsync-fuse)
  (allow_empty))
+
+; tsync-android installs nothing either: its dependencies are the cross switch
+; the Android app's core library is built in.
+
+(package
+ (name tsync-android)
+ (allow_empty))

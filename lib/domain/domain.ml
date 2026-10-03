@@ -46,8 +46,16 @@ let knowledge d =
 
 (* 05 §3.2: one store client per backend, shared by every layer above it;
    deferred logs are resumed only by the owner. *)
-let build ?(owner = true) ?(poke = ignore) ?(lazy_tree = false) ?cache_root
-    ?data_dir (config : Config.t) (dom : Config.domain) =
+(* 08 §2.1: the tree is the frontend's, whichever process owns the domain. *)
+let pulled (dom : Config.domain) =
+  List.find_map
+    (fun (f : Config.frontend) ->
+      Option.bind (Frontend.find f.ftype) (fun r -> r.Frontend.pulled))
+    dom.frontends
+
+let build ?(owner = true) ?(poke = ignore) ?cache_root ?data_dir
+    (config : Config.t) (dom : Config.domain) =
+  let lazy_tree = pulled dom <> None in
   let cache_root =
     match cache_root with Some c -> c | None -> Paths.cache_root ()
   in

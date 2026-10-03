@@ -33,6 +33,7 @@ let () =
       fields;
       presenting = None;
       commands_only = None;
+      pulled = None;
       group = None;
       commands = [];
     }

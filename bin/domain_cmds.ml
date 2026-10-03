@@ -28,7 +28,16 @@ let pause_cmd name on =
       (if on then "Hold every change of the domain." else "Resume the domain.")
     Term.(const (pause on) $ domain_arg $ verbose)
 
-let sync full name verbose = run_job ?name verbose (Sync { full })
+(* 08 §2.1: a pulled tree has no replica to resync. *)
+let sync full name verbose =
+  match
+    try Tsync_domain.Domain.pulled (domain ?name (config ()))
+    with Exit_with _ -> None
+  with
+    | Some refusal ->
+        prerr_endline ("tsync: " ^ refusal);
+        2
+    | None -> run_job ?name verbose (Sync { full })
 
 let sync_cmd =
   let full =

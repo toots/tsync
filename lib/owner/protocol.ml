@@ -23,7 +23,19 @@ type row = {
   availability : availability option;
 }
 
-type page = { items : row list; next : string option; unnamed : int }
+type page = {
+  items : row list;
+  next : string option;
+  unnamed : int;
+  pulled_at : float option;
+      (** pulled tree: when the pull the rows reflect completed (android §3.2)
+      *)
+  outdated : bool;  (** pulled tree: the rows are not from a fresh pull *)
+}
+
+(** android §3.2 rule 1: pull unless fresh, pull even when fresh, or answer the
+    mirror. *)
+type pull = [ `Auto | `Now | `Never ]
 
 (** A whole-domain page, or [Walk_stale] for a cursor on another walk. *)
 type listing = Listed of page | Walk_stale
@@ -119,6 +131,7 @@ type _ request =
       dir : target;
       after : string option;
       limit : int option;
+      pull : pull;
     }
       -> page request
   | List_all : { after : string option; limit : int option } -> listing request
@@ -139,6 +152,7 @@ type _ request =
       staging : string;
       base : string option;
       exclusive : bool;
+      await : bool;  (** answer once the upload published or started failing *)
     }
       -> written request
   | Mkdir : { at : destination; exclusive : bool } -> row request
@@ -304,10 +318,15 @@ let request_fields : type a. a request -> (string * Yojson.Safe.t) list =
       @ opt "limit" (fun l -> `Int l) r.limit
   | Changes_since r ->
       ("arg", `String r.anchor) :: opt "limit" (fun l -> `Int l) r.limit
-  | List_dir r ->
+  | List_dir r -> (
       target_fields r.dir
       @ opt "after" (fun a -> `String a) r.after
       @ opt "limit" (fun l -> `Int l) r.limit
+      @
+        match r.pull with
+        | `Auto -> []
+        | `Now -> [("pull", `String "now")]
+        | `Never -> [("pull", `String "never")])
   | Ensure_cached r -> target_fields r.item @ [("dest", `String r.dest)]
   | Fetch_range r ->
       target_fields r.item
@@ -321,6 +340,7 @@ let request_fields : type a. a request -> (string * Yojson.Safe.t) list =
       target_fields r.at
       @ [("staging", `String r.staging); ("exclusive", `Bool r.exclusive)]
       @ opt "base" (fun b -> `String b) r.base
+      @ if r.await then [("await", `Bool true)] else []
   | Mkdir r -> destination_fields r.at @ [("exclusive", `Bool r.exclusive)]
   | Symlink r ->
       destination_fields r.at
@@ -358,7 +378,17 @@ let decode j =
     | "list_dir" ->
         Request
           (List_dir
-             { dir = target_of j; after = str j "after"; limit = int j "limit" })
+             {
+               dir = target_of j;
+               after = str j "after";
+               limit = int j "limit";
+               pull =
+                 (match str j "pull" with
+                   | None -> `Auto
+                   | Some "now" -> `Now
+                   | Some "never" -> `Never
+                   | Some p -> Fail.invalid "unknown pull %S" p);
+             })
     | "list_all" ->
         Request (List_all { after = str j "after"; limit = int j "limit" })
     | "cursor" -> Request Cursor
@@ -388,6 +418,7 @@ let decode j =
                staging = required j "staging";
                base = str j "base";
                exclusive = flag j "exclusive";
+               await = flag j "await";
              })
     | "mkdir" ->
         Request
@@ -598,7 +629,9 @@ let feed_op_of_json j =
 let page_fields (pg : page) =
   [("items", `List (List.map (fun r -> `Assoc (row_fields r)) pg.items))]
   @ opt "next" (fun n -> `String n) pg.next
-  @ if pg.unnamed > 0 then [("unnamed", `Int pg.unnamed)] else []
+  @ (if pg.unnamed > 0 then [("unnamed", `Int pg.unnamed)] else [])
+  @ opt "pulledAt" (fun at -> `Int (int_of_float at)) pg.pulled_at
+  @ if pg.outdated then [("outdated", `Bool true)] else []
 
 let encode_reply : type a. a request -> a -> Yojson.Safe.t =
  fun req reply ->
@@ -727,6 +760,8 @@ let page_of j =
         | _ -> []);
     next = str j "next";
     unnamed = count "unnamed" j;
+    pulled_at = Option.map float_of_int (int j "pulledAt");
+    outdated = flag j "outdated";
   }
 
 let decode_reply : type a. a request -> Yojson.Safe.t -> a =

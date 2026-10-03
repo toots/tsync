@@ -372,6 +372,50 @@ let with_ownership ~what config (dom : Config.domain) f =
               ~finally:(fun () -> E.drain ())
               (fun () -> f domain engine))
 
+type embedded = {
+  lock : lock;
+  domain : Domain.t;
+  engine : (module Tsync_sync.Engine.S);
+  handler : Handler.t;
+}
+
+let held_by = function
+  | Some h -> Printf.sprintf "%s (pid %d)" h.what h.pid
+  | None -> "another process"
+
+(* 07 §3.6: no socket and no supervisor; requests arrive by direct call. *)
+let embed ?(start = true) ?pull_params ~role ~what ~roots ~publish ~frontend
+    config (dom : Config.domain) =
+  match acquire ~role ~what dom.name with
+    | Error h ->
+        Fail.raise_ Fail.Load "%s is owned by %s"
+          (Domain_name.to_string dom.name)
+          (held_by h)
+    | Ok lock -> (
+        try
+          let domain = Domain.build ~owner:true config dom in
+          let engine = Domain.engine domain in
+          let (module E : Tsync_sync.Engine.S) = engine in
+          if start then E.start ();
+          let report = Report.create domain engine ~frontend in
+          let name = Domain_name.to_string dom.name in
+          let handler =
+            Handler.create ?pull_params ~domain ~engine
+              ~hooks:{ Handler.no_hooks with frontend }
+              ~publish
+              ~traffic:(fun () -> Report.traffic [report])
+              ~stats:(fun _ -> stats_reply [(name, report)] report)
+              ~stop:ignore ~dest_roots:roots ~staging_roots:roots ()
+          in
+          E.set_changed_hook (Handler.keys_changed handler);
+          { lock; domain; engine; handler }
+        with e ->
+          release lock;
+          raise e)
+
+let maintain (e : embedded) =
+  Rt.spawn ~name:"housekeeping" (fun () -> housekeeping e.domain e.engine)
+
 let one_shot ~what config dom f =
   with_ownership ~what config dom (fun domain engine ->
       let home = Paths.home () in

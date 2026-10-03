@@ -10,6 +10,7 @@ type t = {
   fields : Field_spec.field list;
   presenting : [ `Per_domain | `Shared ] option;
   commands_only : string option;
+  pulled : string option;
   group : string option;
   commands : command list;
 }

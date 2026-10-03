@@ -28,6 +28,7 @@ type t = {
   traffic : unit -> Tsync_status.Status_report.traffic;
   unnamed : int Atomic.t;  (** the last listing's or feed page's count *)
   owed : (float * int) option Atomic.t;  (** when [pendingBytes] was read *)
+  pulls : Pulls.t option;  (** on a pulled tree *)
 }
 
 let default_pin_keep = 10. *. 86400.
@@ -39,9 +40,61 @@ let job_ids = Atomic.make 0
 let no_traffic : Tsync_status.Status_report.traffic =
   { up_bytes = 0; up_rate = 0.; down_bytes = 0; down_rate = 0. }
 
+(* android §4.2: a pulled tree's [changed] event names the folders concerned. *)
+let folders_changed ~domain ~(engine : (module Engine.S)) ~publish dirs =
+  let (module E) = engine in
+  let ref_of dir =
+    if dir = "" then Some "root"
+    else
+      Option.map
+        (fun id -> Names.ref_to_string (Names.dir_ref (Folder_id.to_string id)))
+        (E.folder_id dir)
+  in
+  match List.sort_uniq compare (List.filter_map ref_of dirs) with
+    | [] -> ()
+    | refs ->
+        ignore
+          (publish
+             (`Assoc
+                [
+                  ("event", `String "changed");
+                  ("domain", `String domain);
+                  ("id", `Int (Atomic.fetch_and_add event_ids 1 + 1));
+                  ("refs", `List (List.map (fun r -> `String r) refs));
+                ]))
+
+(* android §3.3: the breaker of every store that could answer a read is open. *)
+let silent (domain : Tsync_domain.Domain.t) () =
+  let mains =
+    List.filter_map
+      (fun ( (_ : Tsync_config.Config.backend),
+             (m : Tsync_store.Composite.member) ) ->
+        if m.role = Main then Some m.store.health else None)
+      domain.members
+  in
+  mains <> [] && List.for_all Health.is_down mains
+
 let create ?(subscribers = fun () -> 0) ?(traffic = fun () -> no_traffic)
-    ~domain ~engine ~hooks ~publish ~stats ~stop ~dest_roots ~staging_roots () =
+    ?pull_params ~(domain : Tsync_domain.Domain.t) ~engine ~hooks ~publish
+    ~stats ~stop ~dest_roots ~staging_roots () =
+  let name = Domain_name.to_string domain.name in
   {
+    pulls =
+      (if domain.lazy_tree then
+         Some
+           (Pulls.create ?params:pull_params ~engine ~silent:(silent domain)
+              ~changed:(folders_changed ~domain:name ~engine ~publish)
+              ~recovered:(fun () ->
+                ignore
+                  (publish
+                     (`Assoc
+                        [
+                          ("event", `String "recovered");
+                          ("domain", `String name);
+                          ("id", `Int (Atomic.fetch_and_add event_ids 1 + 1));
+                        ])))
+              ())
+       else None);
     subscribers;
     traffic;
     unnamed = Atomic.make 0;
@@ -59,6 +112,13 @@ let create ?(subscribers = fun () -> 0) ?(traffic = fun () -> no_traffic)
   }
 
 let domain_name t = Domain_name.to_string t.domain.name
+
+let notify_folders t dirs =
+  if t.pulls <> None then
+    folders_changed ~domain:(domain_name t) ~engine:t.engine ~publish:t.publish
+      dirs
+
+let keys_changed t keys = notify_folders t (List.map Names.parent_of keys)
 
 let event t name fields =
   `Assoc
@@ -227,31 +287,61 @@ let serving t path dest f =
   go transfer_attempts
 
 (* 08 §3.4: per-file failures are counted and do not stop the walk. *)
-let each_file t path f =
+let files_under t path =
   let (module E : Engine.S) = t.engine in
-  let files =
-    if E.kind path = `Dir then
-      E.atomically (fun () ->
-          List.filter_map
-            (fun (p, (st : Local_ops.stat)) ->
-              if st.kind = `File then Some p else None)
-            (E.list_tree path))
-    else [path]
+  if E.kind path = `Dir then
+    E.atomically (fun () ->
+        List.filter_map
+          (fun (p, (st : Local_ops.stat)) ->
+            if st.kind = `File then Some p else None)
+          (E.list_tree path))
+  else [path]
+
+(* android §3.2 rule 4: each folder is pulled as the walk reaches it; the
+   target's own pull failing fails the walk, a folder's below it is one failed
+   item. *)
+let pulled_files_under t pulls path =
+  let (module E : Engine.S) = t.engine in
+  let rec walk dir =
+    List.concat_map
+      (fun (e : E.entry) ->
+        let p = Names.join dir e.name in
+        if not e.is_dir then [`File p]
+        else (
+          match Pulls.for_walk pulls p with
+            | () -> walk p
+            | exception e when not (Rt.is_cancelled e) -> [`Unread (p, e)]))
+      (E.list_children dir)
   in
+  if E.kind path = `Dir then (
+    Pulls.for_walk pulls path;
+    walk path)
+  else [`File path]
+
+let each_item items f =
   let ok = ref 0 and failed = ref 0 and last = ref None in
+  let failure p e =
+    incr failed;
+    last := Some (Fail.classify e);
+    Log.info "%s: %s" p (Printexc.to_string e)
+  in
   List.iter
-    (fun p ->
-      match f p with
-        | () -> incr ok
-        | exception e when not (Rt.is_cancelled e) ->
-            incr failed;
-            last := Some (Fail.classify e);
-            Log.info "%s: %s" p (Printexc.to_string e))
-    files;
+    (function
+      | `Unread (p, e) -> failure p e
+      | `File p -> (
+          match f p with
+            | () -> incr ok
+            | exception e when not (Rt.is_cancelled e) -> failure p e))
+    items;
   (match !last with
     | Some f when !ok = 0 && f.kind = Unreachable -> raise (Fail.E f)
     | _ -> ());
   (!ok, !failed)
+
+(* android §4.2: an item of these folders changed state. *)
+let state_changed t path =
+  let (module E : Engine.S) = t.engine in
+  notify_folders t [(if E.kind path = `Dir then path else Names.parent_of path)]
 
 (* Pitfall A-10.15: walked level by level, each folder removed after its
    contents. *)
@@ -272,10 +362,20 @@ let note_unnamed t n =
   Atomic.set t.unnamed n;
   n
 
-let list_dir t dir ~after ~limit : Protocol.page =
+let each_file t path f =
+  each_item (List.map (fun p -> `File p) (files_under t path)) f
+
+let list_dir t dir ~after ~limit ~pull : Protocol.page =
   let (module E : Engine.S) = t.engine in
   let path = target t dir in
   if E.kind path <> `Dir then invalid "not a folder";
+  let view =
+    Option.map
+      (fun pulls ->
+        if after = None then Pulls.for_listing pulls ~pull path
+        else Pulls.continued pulls path)
+      t.pulls
+  in
   let after = Option.value ~default:"" after in
   let limit = Option.value ~default:page_limit limit in
   if limit < 1 then invalid "limit must be positive";
@@ -299,6 +399,9 @@ let list_dir t dir ~after ~limit : Protocol.page =
         | true, (last : E.entry) :: _ -> Some last.name
         | _ -> None);
     unnamed = note_unnamed t (List.length (List.filter Option.is_none rows));
+    pulled_at = Option.bind view (fun (v : Pulls.view) -> v.pulled_at);
+    outdated =
+      (match view with Some (v : Pulls.view) -> v.outdated | None -> false);
   }
 
 (* 08 §3.6 step 6: names come from the folder-id index, which keeps an id after
@@ -488,6 +591,8 @@ let list_all t ~after ~limit : Protocol.listing =
                   items = List.filter_map Fun.id rows;
                   next;
                   unnamed = note_unnamed t unnamed;
+                  pulled_at = None;
+                  outdated = false;
                 })
 
 let event_json t ev = event t (Protocol.event_name ev) []
@@ -668,10 +773,23 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
     Tsync_checkout.Mirror.await_file_ids E.mirror;
     E.atomically f
   in
+  (* android §3.2 rule 2, before the hold: an existence check sees peers'
+     entries. *)
+  let pull_destination (d : Protocol.destination) =
+    Option.iter
+      (fun pulls ->
+        match resolve_ref t.engine d.parent_ref with
+          | dir -> Pulls.before_mutation pulls dir
+          | exception _ -> ())
+      t.pulls
+  in
+  let refreshed path =
+    Option.iter (fun p -> Pulls.before_open p path) t.pulls
+  in
   match req with
     | Ping -> ()
     | Stat item -> row_or_unnamed t (target t item)
-    | List_dir r -> list_dir t r.dir ~after:r.after ~limit:r.limit
+    | List_dir r -> list_dir t r.dir ~after:r.after ~limit:r.limit ~pull:r.pull
     | List_all r -> list_all t ~after:r.after ~limit:r.limit
     | Status ->
         let now = Unix.gettimeofday () in
@@ -746,6 +864,7 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
     | Ensure_cached r ->
         let path = target t r.item in
         Transfer.check_dest ~roots:t.dest_roots r.dest;
+        refreshed path;
         let (), item =
           serving t path r.dest (fun () -> E.assemble_to path r.dest)
         in
@@ -755,6 +874,7 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
         if r.offset < 0 || r.length <= 0 then
           invalid "offset ≥ 0 and length > 0 are required";
         Transfer.check_dest ~roots:t.dest_roots r.dest;
+        refreshed path;
         let length, item =
           serving t path r.dest (fun () ->
               E.fetch_range path r.dest ~off:r.offset ~len:r.length)
@@ -770,49 +890,71 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
           | Some x -> Protocol.Active { downloaded = x.bytes; total = x.size }
           | None -> Inactive)
     | Evict item ->
-        let succeeded, failed = each_file t (target t item) E.evict in
+        let path = target t item in
+        let succeeded, failed = each_file t path E.evict in
+        state_changed t path;
         { Protocol.succeeded; failed }
     | Restore r ->
         let keep = Option.value ~default:default_pin_keep r.keep in
+        let path = target t r.item in
         let succeeded, failed =
-          each_file t (target t r.item) (fun p -> E.pin p ~keep)
+          match t.pulls with
+            | None -> each_file t path (fun p -> E.pin p ~keep)
+            | Some pulls ->
+                (* android §3.3: a pin holds the views that lead to it. *)
+                each_item (pulled_files_under t pulls path) (fun p ->
+                    E.pin p ~keep;
+                    E.hold_views (Names.parent_of p)
+                      ~until:(Unix.gettimeofday () +. keep))
         in
+        state_changed t path;
         { Protocol.succeeded; failed }
     | Create r ->
+        pull_destination r.at;
         mutate (fun () ->
             let path = destination t r.at in
             occupied t path (fun () -> E.create path ~exclusive:r.exclusive);
             E.close path;
+            keys_changed t [path];
             row_or_unnamed t path)
     | Write r ->
         Transfer.check_staging ~roots:t.staging_roots r.staging;
-        mutate (fun () ->
-            let path =
-              match r.at with
-                | Child d -> destination t d
-                | at ->
-                    let p = target t at in
-                    if E.kind p <> `File then invalid "write names a file";
-                    p
-            in
-            occupied t path (fun () ->
-                E.write_whole path ~src:r.staging ?base:r.base
-                  ~exclusive:r.exclusive ());
-            let item = row_or_unnamed t path in
-            { Protocol.size = item.size; mtime = item.mtime; item })
+        (match r.at with Child d -> pull_destination d | _ -> ());
+        let path =
+          mutate (fun () ->
+              let path =
+                match r.at with
+                  | Child d -> destination t d
+                  | at ->
+                      let p = target t at in
+                      if E.kind p <> `File then invalid "write names a file";
+                      p
+              in
+              occupied t path (fun () ->
+                  E.write_whole path ~src:r.staging ?base:r.base
+                    ~exclusive:r.exclusive ());
+              keys_changed t [path];
+              path)
+        in
+        if r.await then E.await_upload path;
+        let item = row_or_unnamed t path in
+        { Protocol.size = item.size; mtime = item.mtime; item }
     | Mkdir r ->
+        pull_destination r.at;
         mutate (fun () ->
             let path = destination t r.at in
             if r.exclusive || E.kind path <> `Dir then
               occupied t path (fun () -> E.mkdir path ~exclusive:r.exclusive);
             row_or_unnamed t path)
     | Symlink r ->
+        pull_destination r.at;
         mutate (fun () ->
             let path = destination t r.at in
             occupied t path (fun () ->
                 E.symlink path ~target:r.link_target ~exclusive:r.exclusive);
             row_or_unnamed t path)
     | Rename r ->
+        pull_destination r.at;
         mutate (fun () ->
             let src = resolve_ref t.engine r.src in
             let dst = destination t r.at in
@@ -854,6 +996,11 @@ let call_with : type a.
     Fail.raise_ Fail.Read_only "%s is read-only" (domain_name t);
   if Protocol.refused_while_paused req && E.is_paused () then
     Fail.raise_ Fail.Paused "%s is paused" (domain_name t);
+  (match (t.pulls, req) with
+    | Some _, (Changes_since _ | List_all _ | Cursor | Full_resync | Sync _) ->
+        invalid "%s keeps a pulled tree, which has no %s" (domain_name t)
+          (Protocol.action req)
+    | _ -> ());
   match req with
     | Ping | Stop -> act t ~send req
     | _ when Protocol.bulk req -> act t ~send req
@@ -867,7 +1014,9 @@ let call t req =
    the domain recovered. *)
 let note_reachability t ~bulk reply =
   match Ipc.field reply "code" with
-    | Some "unreachable" -> Atomic.set t.answered_unreachable true
+    | Some "unreachable" ->
+        Option.iter Pulls.note_unreachable t.pulls;
+        Atomic.set t.answered_unreachable true
     | Some _ -> ()
     | None ->
         if bulk && Atomic.exchange t.answered_unreachable false then
@@ -875,6 +1024,11 @@ let note_reachability t ~bulk reply =
 
 let answer t json =
   match Ipc.field json "action" with
+    | Some "subscribe" when t.pulls <> None ->
+        Ipc.Reply
+          (Ipc.failure
+             (Fail.make Fail.Invalid
+                (domain_name t ^ " keeps a pulled tree, which has no subscribe")))
     | Some "subscribe" ->
         Ipc.Subscribe (domain_name t, Ipc.ok [], [event t "recovered" []])
     | _ -> (
@@ -903,3 +1057,14 @@ let answer t json =
               note_reachability t ~bulk:(Protocol.bulk req) reply;
               Ipc.Reply reply
           | exception e -> Ipc.Reply (Ipc.failure (Fail.classify e)))
+
+(* android §5 [open]: the file's current version (§3.2 rule 3), held as it is
+   now whatever happens to the file. *)
+let open_version t ref_ =
+  let (module E : Engine.S) = t.engine in
+  let path = resolve_ref t.engine ref_ in
+  Option.iter (fun p -> Pulls.before_open p path) t.pulls;
+  Tsync_checkout.Mirror.await_file_ids E.mirror;
+  E.atomically (fun () -> E.retain (resolve_ref t.engine ref_))
+
+let path_of_ref t ref_ = resolve_ref t.engine ref_

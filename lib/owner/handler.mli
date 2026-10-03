@@ -19,10 +19,12 @@ type t
     requests the owner's stop. [dest_roots] and [staging_roots] confine the
     paths clients pass (security-model §7.3). [subscribers] counts the
     connections subscribed to the domain's events and [traffic] measures its
-    stores, for [status] (08 §3.3). *)
+    stores, for [status] (08 §3.3). On a pulled tree [publish] also receives the
+    notices of android §4.2. *)
 val create :
   ?subscribers:(unit -> int) ->
   ?traffic:(unit -> Tsync_status.Status_report.traffic) ->
+  ?pull_params:Pulls.params ->
   domain:Tsync_domain.Domain.t ->
   engine:(module Tsync_sync.Engine.S) ->
   hooks:hooks ->
@@ -52,3 +54,14 @@ val call : t -> 'a Protocol.request -> 'a
 (** The socket edge: decodes a request, answers it, and encodes the reply or the
     failure's code; also turns [subscribe] into an event stream. *)
 val answer : t -> Ipc.json -> Ipc.answer
+
+(** Pulled tree: a [changed] notice naming the folders of these keys; what the
+    engine's changed hook is set to. *)
+val keys_changed : t -> string list -> unit
+
+(** android §5 [open]: resolves a file reference to its current version and
+    retains it; released with the engine's [release]. *)
+val open_version : t -> string -> Tsync_sync.Local_ops.handle
+
+(** The path a reference resolves to; mints nothing (08 §2.2). *)
+val path_of_ref : t -> string -> string

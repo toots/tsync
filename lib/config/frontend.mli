@@ -20,6 +20,10 @@ type t = {
           domain or from one process for all its domains *)
   commands_only : string option;
       (** never run by [tsync start], which refuses it with this text *)
+  pulled : string option;
+      (** keeps a pulled tree (08 §2.1): its owner reads a folder when it is
+          listed and keeps no replica, and [tsync sync] refuses it with this
+          text *)
   group : string option;  (** the CLI group; the frontend's name by default *)
   commands : command list;
 }

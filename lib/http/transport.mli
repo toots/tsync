@@ -20,6 +20,13 @@ val tls_impl_of_string : string -> tls_impl option
     certificate checked against [host]. *)
 type tls = { host : string; ca_file : string option }
 
+(** [localhost] or a loopback address literal. *)
+val is_loopback : string -> bool
+
+(** Set by a host whose platform cannot veto the core's traffic (android §4.1):
+    a connection without TLS to a host that is not {!is_loopback} is REFUSED. *)
+val cleartext_loopback_only : bool Atomic.t
+
 (** Connects to the first address of [host] that answers, IPv4 or IPv6. The
     whole TLS handshake is bounded by [handshake_timeout] (10 s); a failed
     handshake closes the socket, so the peer sees the end of the stream. *)

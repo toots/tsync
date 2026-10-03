@@ -87,6 +87,33 @@ val ask :
   'a Protocol.request ->
   'a
 
+(** A domain owned by a host with no socket (07 §3.6). *)
+type embedded = {
+  lock : lock;
+  domain : Tsync_domain.Domain.t;
+  engine : (module Tsync_sync.Engine.S);
+  handler : Handler.t;
+}
+
+(** Takes the domain's ownership and builds its request handler, which sends its
+    events to [publish]; BUSY naming the holder when another process owns it.
+    Without [start] the queues are not started and nothing is reconciled.
+    [roots] confine transfer paths. *)
+val embed :
+  ?start:bool ->
+  ?pull_params:Pulls.params ->
+  role:string ->
+  what:string ->
+  roots:string list ->
+  publish:(Tsync_ipc.Ipc.json -> int) ->
+  frontend:(unit -> Tsync_status.Status_report.frontend option) ->
+  Tsync_config.Config.t ->
+  Tsync_config.Config.domain ->
+  embedded
+
+(** Runs the owner's maintenance schedule (07 §6) until the process stops. *)
+val maintain : embedded -> unit
+
 (** An owner-class request (07 §2.5): sent to the domain's owner, else answered
     by {!one_shot}. A job's lines go to [on_line] from an owner; in-process they
     are this process's output. *)
