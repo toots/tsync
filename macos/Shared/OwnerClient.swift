@@ -6,8 +6,12 @@ import Foundation
 enum OwnerFailure: Error, @unchecked Sendable {
     /// The owner's coded refusal; `item` is the occupant an `exists` names.
     case refused(code: String, message: String, item: [String: Any]?)
-    /// No answer: no owner, a broken connection, or the client's own deadline.
-    /// Treated as `internal`, never as `unreachable` or `not_found`.
+    /// Nothing accepted the connection: the owner is restarting or not started.
+    /// Reported as `unreachable`, which the relay unlatches when the owner
+    /// answers again (file-provider §6.10).
+    case noOwner(String)
+    /// No answer from a connected owner: a broken connection or the client's
+    /// own deadline. Treated as `internal`, never `unreachable` or `not_found`.
     case transport(String)
     case cancelled
 
@@ -16,6 +20,7 @@ enum OwnerFailure: Error, @unchecked Sendable {
         switch self {
         case .refused(let code, _, _):
             return OwnerFailure.knownCodes.contains(code) ? code : "internal"
+        case .noOwner: return "unreachable"
         case .transport: return "internal"
         case .cancelled: return "cancelled"
         }
@@ -24,7 +29,7 @@ enum OwnerFailure: Error, @unchecked Sendable {
     var message: String {
         switch self {
         case .refused(_, let message, _): return message
-        case .transport(let why): return why
+        case .noOwner(let why), .transport(let why): return why
         case .cancelled: return "cancelled"
         }
     }
@@ -174,7 +179,7 @@ enum OwnerClient {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { Darwin.connect(fd, $0, size) }
         }
         if c.isCancelled { throw OwnerFailure.cancelled }
-        if status != 0 { throw OwnerFailure.transport(errnoText("no owner at \(path)")) }
+        if status != 0 { throw OwnerFailure.noOwner(errnoText("no owner at \(path)")) }
     }
 
     private static func wait(

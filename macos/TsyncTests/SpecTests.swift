@@ -173,7 +173,8 @@ final class SpecTests: XCTestCase {
             .refused(code: "busy", message: "m", item: nil),
             .refused(code: "internal", message: "m", item: nil),
             .refused(code: "frobnicated", message: "m", item: nil),
-            .transport("no owner"),
+            .noOwner("nothing listening"),
+            .transport("connection reset"),
             .cancelled,
         ]
         func name(_ e: NSError) -> String {
@@ -199,6 +200,7 @@ final class SpecTests: XCTestCase {
             let label: String
             switch f {
             case .refused(let code, _, _): label = code
+            case .noOwner: label = "no owner"
             case .transport: label = "transport"
             case .cancelled: label = "cancelled"
             }
@@ -216,6 +218,7 @@ final class SpecTests: XCTestCase {
             busy: mutation=write-unknown read=read-unknown
             internal: mutation=write-unknown read=read-unknown
             frobnicated: mutation=write-unknown read=read-unknown
+            no owner: mutation=serverUnreachable read=serverUnreachable
             transport: mutation=write-unknown read=read-unknown
             cancelled: mutation=user-cancelled read=user-cancelled
             """)
