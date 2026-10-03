@@ -42,11 +42,9 @@ domain holds the WAL, both queues, the mirror, the staged tree and the cache.
   only through an owed rename of ours.
 - **The dependency wait polls** (finding 143). `wait_dependencies` re-reads the loaded metadata records
   every 0.2 s; behind a stuck head that is thousands of record reads a second across waiting uploads.
-- **An undecodable mark is read as no mark** (finding 125) and is not set aside.
 - **"Behind" leaves out own-id and below-mark entries** (finding 118, `lib/owner/report.ml`): status can
   report nothing behind while entries are due.
 - **Each status call reads every WAL record** (finding 91, `Engine.activity`).
-- **A failed pass is retried every `retry_floor` with no backoff, logging each time** (finding 145).
 - **`rsync --move` can publish the source's delete before the destination's put** (finding 121).
 - **Stepped-aside entries are kept in memory** (`stepped_aside`). They are found again by the first
   pass after a restart, since nothing noted them in the applied log.

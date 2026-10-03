@@ -28,16 +28,11 @@ Finding numbers refer to [the 2026-10-01 review](../../../review/2026-10-01-rewr
 
 ## Where the code departs from the spec
 
-- **A listing is built whole, unpaged and outside admission** (finding 77): `list` of a chunk area
-  holds every entry three times, and `max_keys` cuts after listing.
-- **get-multi has no byte cap** (finding 78): up to the key bound of whole chunks in one frame, read
-  eight at a time inside one data slot.
-- **The data slot is released before the response body is written** (finding 79), so bodies in flight
-  are bounded by the connection cap, not by the slots.
+- **A listing is unpaged and outside admission** (finding 77): `list` of a chunk area holds every
+  entry of the store's listing, and `max_keys` cuts after listing; only its JSON is written in
+  pieces (`Proxy_wire.listing_pieces`).
 - **Share reads are outside the storage bound** (finding 81): a range request reads whole chunks, and
   the ZIP member walk is quadratic.
-- **`umask` is process-wide** (finding 115). `Ipc.serve` narrows it around `bind`; a directory another
-  domain creates in that window gets mode 0600.
 
 ## Learnings
 

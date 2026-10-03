@@ -32,9 +32,7 @@ Companion to the language-neutral spec [../06-backends.md](../06-backends.md). S
 ## Departures
 
 - **Admission wraps the attempt in each driver, not in one wrapper.** `Object_store.make` and `Http_proxy_client.request` call `Uplink.admitted` inside `Retry.ladder`, so a retry is admitted again. The http-proxy driver sends a zero-length body without admission.
-- **Upload bytes are counted before the attempt is sent** (`up` in `Object_store.make`, the `fetch_and_add` at the top of `send` in the proxy driver): an attempt that fails to connect still counts (finding 136).
 - **`verified` of an object store is decided in the composite.** The shell answers `verified = false`; `Composite.store`'s `capabilities` adds `confirmed`, the owner's saved probe outcome. A caller that asks a leaf store directly sees `false`.
-- **Whole-store verification writes its 4096 requests one after another** (`Composite.queue_verification`, finding 150).
 - **A driver absent from the build is refused when the config is parsed**, not when it is used: see [05](05-ops-config.md).
 
 ## Learnings

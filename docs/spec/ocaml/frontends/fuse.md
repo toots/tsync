@@ -39,7 +39,6 @@ Code: `lib/frontends/fuse/fuse_options.ml` (the descriptor and its option checks
   `handlerFailures` and the per-second rates are not reported.
 - **Ring entries carry no trace.** `Fuse.set_backtrace_capture` is never called, so
   `report_failures` logs the operation, the path and the exception.
-- **`readdir` filters the whole snapshot at every offset call** (finding 146).
 - **The exit waits for the unmount at most 5 s** after the drain, then happens whether or not it
   finished.
 - **No test mounts.** `tests/config/config_test` checks the options through the catalog, and says

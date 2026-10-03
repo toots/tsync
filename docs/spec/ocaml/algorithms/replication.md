@@ -39,14 +39,10 @@ and the local driver falls back to it through `Chunk_spaces.read`
 - **A batch read of a member that is held down raises UNREACHABLE** (`batch_reachable`), where §4.6
   answers empty and sends each key back through `read`. Answering empty turned live folders into
   orphans in callers that took the batch as final (finding 26).
-- **`Delete_many` syncs key by key** (finding 96): one read of the source and one delete per key, with
-  no listing per parent prefix.
 - **`fast_read` and `locality` are fixed from the first readable member** (finding 98), whatever
   member answers a read.
 - **A forward's body is outside the chunk buffer budget** (finding 141): up to `max_forwards` bodies
   per copy stay alive beside the buffers the upload path counts.
-- **Verification queues one request per shard, serially** (finding 150): 4096 puts whatever the
-  domain's size.
 - **Mirror lists whole areas on both sides** (findings 83, 149): `--path` builds every chunk key and
   probes each serially, and the chunk area is 4096 shard listings per side.
 - **Concurrency is bounded per job, not per device** (finding 87): the copy job, the mirror and the

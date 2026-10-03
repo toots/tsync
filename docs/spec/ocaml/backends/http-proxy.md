@@ -36,7 +36,6 @@ Code: `lib/store/http_proxy/proxy_wire.ml` (the wire, linked by both ends), `lib
 - **The capability memo is not shared by concurrent first callers.** Each sends its four requests and adds its answer to `caps`; later callers read the first entry for the prefix.
 - **`get_range` with a length of 0 fails INVALID** in `Store.checked`, as 06 §3.2 has it, where §8.2 answers empty.
 - **A zero-length body is sent without admission** (`request`).
-- **Upload bytes are counted before admission** (finding 136).
 
 ## Learnings
 

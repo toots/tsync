@@ -37,8 +37,6 @@ Not normative. Finding numbers refer to [the 2026-10-01 review](../../../review/
   zero takes `r / √step` unbounded by throughput, so the rate overshoots.
 - **Lessee bytes are credited as a tick-long burst** (finding 137): `step` calls `Uplink_law.completed`
   with `elapsed = tick_interval` for what lessees report, whatever each body took.
-- **Traffic counts attempts that never reached the wire** (finding 136): `Object_store.make` adds a
-  body's size to `uploaded` when the attempt starts.
 
 ## Learnings
 

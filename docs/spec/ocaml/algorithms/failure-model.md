@@ -37,15 +37,8 @@ with the evidence sets it.
 - **The DEADLINE split always answers `internal`** (finding 126). `Fail.code Deadline` is `internal`,
   and `bounded` does not look at whether a store was silent for the whole wait, so a client never
   latches offline on a deadline.
-- **An undecodable last-sync mark is read as no mark** (finding 125). `Mark.read` warns and answers
-  `None`; the file is not set aside, and the next pass holds for a full rebuild.
 - **Stalled queues look like busy ones** (finding 43). Status counts retrying and parked records; a
   worker waiting at a closed gate is not told apart from one that is working.
-- **The supervisor asks an owner for its stats under the owner's own deadline** (finding 107), so a
-  slow owner shows as "no answer" instead of its coded answer.
-- **The poller retries a failed pass every few seconds and logs each one** (finding 145):
-  `Outbound.retry_floor` with no backoff.
-- **An unspawnable child is retried every 0.5 s** (finding 127).
 
 ## Learnings
 
