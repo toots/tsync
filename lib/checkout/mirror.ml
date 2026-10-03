@@ -558,19 +558,28 @@ let start_fid_build t =
           | Ready _ | Saved _ -> `Done)
   in
   (match action with
-    | `Start ({ pending; ready } : building) ->
-        Rt.spawn ~name:"file-id index" (fun () ->
-            match scan_file_ids t with
-              | h ->
-                  Mutex.protect t.by_fid_m (fun () ->
-                      Queue.iter (fun f -> f h) pending;
-                      t.by_fid := Ready h);
-                  ignore (Rt.Promise.try_resolve ready ())
-              | exception e ->
-                  Log.warn "cannot build the file-id index: %s"
-                    (Printexc.to_string e);
-                  Mutex.protect t.by_fid_m (fun () -> t.by_fid := Unbuilt);
-                  ignore (Rt.Promise.try_resolve_result ready (Error e)))
+    | `Start ({ pending; ready } : building) -> (
+        (* Pitfall C-7.10: whatever raises, from the walk to the replay of the
+           changes made meanwhile or the spawn itself, ends this build. *)
+        let failed e =
+          Log.warn "cannot build the file-id index: %s" (Printexc.to_string e);
+          Mutex.protect t.by_fid_m (fun () -> t.by_fid := Unbuilt);
+          ignore (Rt.Promise.try_resolve_result ready (Error e))
+        in
+        let build () =
+          let h = scan_file_ids t in
+          Mutex.protect t.by_fid_m (fun () ->
+              Queue.iter (fun f -> f h) pending;
+              t.by_fid := Ready h)
+        in
+        try
+          Rt.spawn ~name:"file-id index" (fun () ->
+              match build () with
+                | () -> ignore (Rt.Promise.try_resolve ready ())
+                | exception e -> failed e)
+        with e ->
+          failed e;
+          raise e)
     | _ -> ());
   match action with
     | `Start { ready; _ } | `Wait ready -> Some ready
