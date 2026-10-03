@@ -177,17 +177,14 @@ let rec ensure_whole ?(force = false) t g =
 and fetch_group t g =
   Fs.mkdir_p (shard_dir t g.gkey);
   let tmp = Fs.temp_in (shard_dir t g.gkey) in
-  let fd = Fs.openfile tmp [O_WRONLY; O_CREAT; O_EXCL] in
-  (try
-     Fs.with_fd fd (fun fd ->
-         Fs.reserve fd g.gsize;
-         List.iter
-           (fun x -> write_at fd ~off:x.off (fetch_verified t x))
-           g.members;
-         Fs.fsync fd)
-   with e ->
-     Fs.unlink_quiet tmp;
-     raise e);
+  (* Lesson 8: gone on every path; after the rename there is nothing left. *)
+  Fun.protect ~finally:(fun () -> Fs.unlink_quiet tmp) @@ fun () ->
+  Fs.with_fd
+    (Fs.openfile tmp [O_WRONLY; O_CREAT; O_EXCL])
+    (fun fd ->
+      Fs.reserve fd g.gsize;
+      List.iter (fun x -> write_at fd ~off:x.off (fetch_verified t x)) g.members;
+      Fs.fsync fd);
   let s = state t g.gkey in
   Rt.Fmutex.with_lock s.lock (fun () ->
       Fs.rename tmp (whole_path t g.gkey);
@@ -456,7 +453,9 @@ let adopt_body t gkey source =
       let copy () =
         let data = Fs.read_file source in
         let tmp = Fs.write_temp (shard_dir t gkey) data in
-        Fs.rename tmp (whole_path t gkey)
+        Fun.protect
+          ~finally:(fun () -> Fs.unlink_quiet tmp)
+          (fun () -> Fs.rename tmp (whole_path t gkey))
       in
       (match t.links with
         | `No -> copy ()
