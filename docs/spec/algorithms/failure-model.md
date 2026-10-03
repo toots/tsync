@@ -401,7 +401,9 @@ the in-process bridge and the router use it, and every failure carries a code.
   unavailability and nothing else: it is the only code that may latch a client.
 - A client MUST treat a missing or unknown `code` as `internal`, and a transport failure or its
   own deadline expiry like `internal` (never `unreachable`, never `not_found`): a restarting
-  owner must cost one retry, not the domain.
+  owner must cost one retry, not the domain. One exception: a host whose spec unlatches the domain
+  when its owner comes back MAY report a connection nothing accepted (no owner listening) as
+  `unreachable` ([file-provider §6.10](../frontends/file-provider.md#610-mapping-codes-to-the-framework)).
 - **Recovery notice.** After an owner has answered `unreachable` for a domain, it MUST publish
   a recovery notice to that domain's subscribers when a store request for the domain next
   succeeds. Its form is owned by [08](../08-frontends.md).
@@ -543,8 +545,9 @@ An implementation MUST exhibit:
   to an operation that needs remote work; a revoked credential answers `denied`; a malformed
   reference answers `invalid`; an unserved domain answers `unreachable`; every failure carries a
   code.
-- **Clients.** A missing or unknown code is `internal`; a transport failure never latches; only
-  `unreachable` latches, and a recovery notice unlatches.
+- **Clients.** A missing or unknown code is `internal`; a transport failure never latches, except
+  no owner listening on a host that unlatches when the owner returns; only `unreachable` latches,
+  and a recovery notice unlatches.
 - **Deadlines.** A wedged owner makes a client call fail within
   `REQUEST_DEADLINE + CLIENT_DEADLINE_MARGIN`; an owner waiting on a silent store answers
   `unreachable` within `REQUEST_DEADLINE`, and the fetch continues and serves the next caller; a
