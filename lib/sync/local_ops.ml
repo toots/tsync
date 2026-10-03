@@ -84,19 +84,8 @@ module Make (C : Engine_ctx.S) = struct
   (* 04 §3.2: the metadata lock serialises every namespace change; each key's
      lock every content change of that key, taken after the metadata lock. *)
   let meta = Rt.Fmutex.create ()
-  let klocks_m = Mutex.create ()
-  let klocks : (string, Rt.Fmutex.t * int ref) Hashtbl.t = Hashtbl.create 64
-
-  let klock path =
-    Mutex.protect klocks_m (fun () ->
-        match Hashtbl.find_opt klocks path with
-          | Some l -> l
-          | None ->
-              let l = (Rt.Fmutex.create (), ref 0) in
-              Hashtbl.replace klocks path l;
-              l)
-
-  let with_key path f = Rt.Fmutex.with_lock (fst (klock path)) f
+  let klocks = Keyed_locks.create ()
+  let with_key path f = Keyed_locks.with_key klocks path f
 
   let with_keys paths f =
     List.fold_right
@@ -104,8 +93,8 @@ module Make (C : Engine_ctx.S) = struct
       (List.sort_uniq compare paths)
       f ()
 
-  let generation path = !(snd (klock path))
-  let bump path = incr (snd (klock path))
+  let generation = Keyed_locks.generation klocks
+  let bump = Keyed_locks.bump klocks
   let meta_holder = Atomic.make None
 
   (* Pitfall A-2.5: a long hold stalls every mutation of the domain, so one is

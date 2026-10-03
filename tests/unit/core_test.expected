@@ -125,3 +125,9 @@ real/./Drive             true
 real//Drive              true
 link/Drive               true
 /                        /
+
+== keyed locks keep no entry for an idle key
+after locking 1000 keys once: 0 entries
+four holders of one key overlapped: false; entries after: 0
+generation unchanged by a hold: true
+changed by a bump: true; a bumped key keeps its entry: 1

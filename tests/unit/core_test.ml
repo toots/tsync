@@ -251,3 +251,33 @@ let () =
     ["real/Drive"; "real/Drive/"; "real/./Drive"; "real//Drive"; "link/Drive"];
   p "%-24s %s\n" "/" (Fs.resolve_parent "/");
   Fs.rm_rf dir
+
+let () =
+  p "\n== keyed locks keep no entry for an idle key\n";
+  Rt.run_sync (fun () ->
+      let locks = Keyed_locks.create () in
+      List.iter
+        (fun i -> Keyed_locks.with_key locks (string_of_int i) ignore)
+        (List.init 1000 Fun.id);
+      p "after locking 1000 keys once: %d entries\n" (Keyed_locks.size locks);
+      let inside = Atomic.make 0 and overlapped = Atomic.make false in
+      let hold () =
+        Keyed_locks.with_key locks "k" (fun () ->
+            if Atomic.fetch_and_add inside 1 > 0 then Atomic.set overlapped true;
+            Rt.sleep 0.05;
+            Atomic.decr inside)
+      in
+      let others = List.init 3 (fun _ -> Rt.async hold) in
+      hold ();
+      List.iter Rt.Promise.await others;
+      p "four holders of one key overlapped: %b; entries after: %d\n"
+        (Atomic.get overlapped) (Keyed_locks.size locks);
+      let before = Keyed_locks.generation locks "k" in
+      Keyed_locks.with_key locks "k" ignore;
+      p "generation unchanged by a hold: %b\n"
+        (Keyed_locks.generation locks "k" = before);
+      Keyed_locks.bump locks "k";
+      Keyed_locks.with_key locks "k" ignore;
+      p "changed by a bump: %b; a bumped key keeps its entry: %d\n"
+        (Keyed_locks.generation locks "k" <> before)
+        (Keyed_locks.size locks))
