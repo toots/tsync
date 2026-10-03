@@ -41,6 +41,7 @@ let store_server_socket () =
   Filename.concat (data_dir ()) "tsync-http-proxy.sock"
 
 let supervisor_socket () = Filename.concat (data_dir ()) "tsync-sync.sock"
+let supervisor_lock () = Filename.concat (data_dir ()) "tsync-sync.lock"
 
 let ownership_lock domain =
   Filename.concat

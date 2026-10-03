@@ -1,0 +1,3 @@
+the lock taken: true
+a start beside a supervisor that does not answer: exit 1
+a start once it is gone: serving

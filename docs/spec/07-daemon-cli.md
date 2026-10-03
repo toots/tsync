@@ -272,8 +272,9 @@ domain and the limit.
 5. `--mount P` replaces the FUSE mount point only when exactly one domain is configured; otherwise
    it is refused. `--tls` overrides the TLS implementation for every process it starts.
 6. Raise the descriptor soft limit to the hard limit, capped at `FD_SOFT_TARGET`, never lowering it.
-7. Take the supervisor role: refuse to start if another supervisor answers on the supervisor socket
-   ("tsync is already running", exit 1).
+7. Take the supervisor role: refuse to start if another supervisor holds the supervisor lock, an
+   advisory lock held for the supervisor's life ("tsync is already running", exit 1). A supervisor
+   that does not answer on its socket still runs.
 8. Start one owner process per owner assignment (§2.4) and the store server if any domain lists
    `http-proxy`. Each child MUST start with no runtime state inherited from the supervisor other
    than its arguments and environment: it is either a fresh execution of the binary or a fork made

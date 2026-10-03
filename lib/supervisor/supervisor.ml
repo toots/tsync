@@ -374,16 +374,20 @@ let keep_running ~exe children =
     ~finally:(fun () -> stop_children children)
     (fun () -> supervise exe children)
 
+(* 07 §3.1 step 7: a supervisor that is slow to answer still runs, so its
+   lock, not a ping, says whether one does; close-on-exec keeps it from the
+   children. *)
 let run ~exe (config : Config.t) children =
   let path = Paths.supervisor_socket () in
-  match
-    Ipc.call ~timeout:Ipc.advisory_deadline path
-      (`Assoc [("action", `String "ping")])
-  with
-    | _ ->
+  let lock_path = Paths.supervisor_lock () in
+  Fs.mkdir_p ~perm:0o700 (Filename.dirname lock_path);
+  let lock = Unix.openfile lock_path [O_RDWR; O_CREAT; O_CLOEXEC] 0o600 in
+  Fun.protect ~finally:(fun () -> Unix.close lock) @@ fun () ->
+  match Fs.flock ~exclusive:true ~block:false lock with
+    | false ->
         prerr_endline "tsync is already running";
         1
-    | exception _ -> (
+    | true -> (
         let children =
           List.map
             (fun child ->

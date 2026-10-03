@@ -19,6 +19,6 @@ val assign : ?mount:string -> ?tls:string -> Tsync_config.Config.t -> child list
 val keep_running : exe:string -> child list -> unit
 
 (** Serve until stopped, as the uplink governor owner, then stop the children
-    and answer the exit status: 0, 1 when another supervisor answers, 2 when the
-    socket cannot be bound. *)
+    and answer the exit status: 0, 1 when another supervisor holds the
+    supervisor lock, 2 when the socket cannot be bound. *)
 val run : exe:string -> Tsync_config.Config.t -> child list -> int
