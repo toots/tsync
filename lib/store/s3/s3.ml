@@ -147,6 +147,13 @@ let fail ~op (r : Client.response) =
     Object_store.status_failure ~op ?retry_after ~body:(Client.excerpt r.body)
       r.status
   in
+  (* 4xx codes that say "again", which the status alone reads as a refusal. *)
+  let f =
+    match code with
+      | Some "RequestTimeout" -> { f with kind = Fail.Link }
+      | Some "OperationAborted" -> { f with kind = Fail.Load }
+      | _ -> f
+  in
   let reason =
     match code with
       | Some "RequestTimeTooSkewed" ->
@@ -281,9 +288,17 @@ let head_opt t k =
     | { status = 404; _ } -> None
     | r -> fail ~op:"head" r
 
-(* §4: S3 answers 204 whether or not the object was there. *)
+(* §4: S3 answers 204 whether or not the object was there, so its presence is
+   asked first; only the status is read, so a HEAD lacking a header the entry
+   needs does not fail the delete. *)
+let present t k =
+  match call t ~meth:"HEAD" (Some k) with
+    | r when success r.status -> true
+    | { status = 404; _ } -> false
+    | r -> fail ~op:"head" r
+
 let delete t k =
-  head_opt t k <> None
+  present t k
   &&
     match call t ~meth:"DELETE" (Some k) with
     | r when success r.status -> true
