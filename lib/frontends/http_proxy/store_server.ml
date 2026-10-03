@@ -612,8 +612,17 @@ let execute ?(partial = false) t route op body =
   let bs = Bigstring.of_string in
   match op with
     | Get k -> (
-        match s.get_opt k with
-          | Some b -> { Server.status = 200; headers = []; body = Bigstring b }
+        (* memory.md M.2: a mapped body's pages leave this process once it is
+           written, not when a major collection finalizes it. *)
+          match s.get_opt k with
+          | Some b ->
+              {
+                Server.status = 200;
+                headers = [];
+                body =
+                  Held
+                    { bytes = b; finally = (fun () -> Fs.drop_mapped_pages b) };
+              }
           | None -> empty 404)
     | Range (k, o, l) -> (
         match s.get_range k o l with

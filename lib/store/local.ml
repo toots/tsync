@@ -176,6 +176,7 @@ let verify_written ~read root key =
               marker_write (marker_body ~reason:"vanished after write" None)
           | Some b ->
               let computed = Xxh.dual_bigstring b in
+              Fs.drop_mapped_pages b;
               if computed = leaf then (
                 match Fs.release (path root marker) with _ -> ())
               else
