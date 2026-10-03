@@ -55,10 +55,28 @@ let mount_point domain =
     (Filename.concat (home ()) "tsync")
     (Domain_name.to_string domain)
 
-let read_config () =
+(* security-model §10.2: the config holds secrets. *)
+let private_config ~interactive path =
+  match Fs.stat_opt path with
+    | Some { st_perm; _ } when st_perm land 0o077 <> 0 ->
+        if interactive then (
+          Unix.chmod path 0o600;
+          Printf.eprintf
+            "tsync: %s was readable by other users (mode %o); it is now 600\n%!"
+            path st_perm)
+        else
+          Fail.raise_ Fail.Denied
+            "%s holds secrets and is readable by other users (mode %o): chmod \
+             600 it"
+            path st_perm
+    | _ -> ()
+
+let read_config ?(interactive = Unix.isatty Unix.stderr) () =
   match Sys.getenv_opt "TSYNC_CONFIG_JSON" with
     | Some text -> Some text
-    | None -> Fs.read_file_opt (config_file ())
+    | None ->
+        private_config ~interactive (config_file ());
+        Fs.read_file_opt (config_file ())
 
 let default_domain () =
   Option.map String.trim (Fs.read_file_opt (default_domain_file ())) |> function

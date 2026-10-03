@@ -26,7 +26,10 @@ val default_domain_file : unit -> string
 (** [$HOME/tsync/<domain>], the default FUSE mount point. *)
 val mount_point : Domain_name.t -> string
 
-(** [$TSYNC_CONFIG_JSON] when set, else the config file; [None] when absent. *)
-val read_config : unit -> string option
+(** [$TSYNC_CONFIG_JSON] when set, else the config file; [None] when absent. A
+    config file readable by group or other is refused (DENIED), or, when
+    [interactive] (by default, when stderr is a terminal), made private with a
+    warning. *)
+val read_config : ?interactive:bool -> unit -> string option
 
 val default_domain : unit -> string option
