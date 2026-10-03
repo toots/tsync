@@ -234,9 +234,11 @@ let shared_router served reports action req =
         Some (Ipc.Reply (Ipc.ok []))
     | "pause" ->
         let on = Ipc.field req "arg" <> Some "off" in
-        let paused =
-          List.for_all (fun s -> Handler.call s.handler (Pause on)) served
+        (* Pitfall B-10.9: every domain first, then the fold. *)
+        let answers =
+          List.map (fun s -> Handler.call s.handler (Pause on)) served
         in
+        let paused = List.for_all Fun.id answers in
         Some (Ipc.Reply (Ipc.ok [("paused", `Bool paused)]))
     | _ -> None
 

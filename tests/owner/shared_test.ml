@@ -139,6 +139,17 @@ let () =
         show "pause every domain" (call [("action", "pause"); ("arg", "on")]);
         show "menu while held" (menu ());
         show "resume" (call [("action", "pause"); ("arg", "off")]);
+        p "paused after resume: %s"
+          (String.concat ", "
+             (List.map
+                (fun d ->
+                  d ^ "="
+                  ^ Yojson.Safe.to_string
+                      (Option.value ~default:`Null
+                         (match call [("action", "status"); ("domain", d)] with
+                           | `Assoc l -> List.assoc_opt "paused" l
+                           | _ -> None)))
+                ["docs"; "pics"]));
         show "notify_reset of pics"
           (call [("action", "notify_reset"); ("domain", "pics")]);
         show "full_resync of docs"
