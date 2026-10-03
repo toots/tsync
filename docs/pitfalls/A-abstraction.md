@@ -964,6 +964,11 @@ This file covers mistakes that are true of any implementation in any language: s
 - **Check** — Admission happens before headers; afterwards backpressure waits.
 - **Seen** — fe6c0cf2.
 
+### A-11.19 A background build that fails once stays failed
+- **Pitfall** — The file-id index built in the background resolved a promise made once per mirror. When the build raised, the promise was rejected but the state stayed "building": no later lookup started another build, each re-raised the first error until restart, and every marker change kept queuing for a build that would never apply it.
+- **Check** — A failed attempt returns to a state from which the next caller starts a fresh one; a promise belongs to one attempt, not to the object that may need several.
+- **Seen** — rewrite (review of PR #114).
+
 ## 12. Truthful reporting, accounting and rate control
 
 ### A-12.1 Reporting an effect that did not happen
