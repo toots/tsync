@@ -83,7 +83,9 @@ folder ([04 §2.3](../04-checkout-cache.md#23-mirror-entries-and-markers)); a fo
 this process completed a pull of it less than `pull_freshness` ago, measured on the monotonic clock.
 
 **When the owner pulls.**
-1. A child listing (`list_dir`) pulls the folder first unless it is fresh. A caller MAY say
+1. A child listing (`list_dir`) pulls the folder first unless it is fresh. A request carrying
+   `after` never pulls: it continues the view its first page was answered from, however long ago,
+   so a listing is never re-read under its own pages. A caller MAY say
    `"pull":"now"` (pull even when fresh: a user's refresh gesture) or `"pull":"never"` (answer the
    mirror).
 2. A mutation that names a child by name (`create`, `mkdir`, `write` by parent and name, `symlink`,
@@ -101,8 +103,9 @@ Concurrent pulls of one folder share one store read. `stat` never pulls: it answ
 seconds of the pull its rows reflect; absent for a folder never pulled) and `outdated: true` when the
 rows do not come from a pull made for this request or within `pull_freshness`.
 
-**Notices.** After a pull that changed a folder's children, and after every mutation it performs, the
-owner sends the host a `changed` notice naming each folder whose children changed (§4.2). The host
+**Notices.** After a pull that changed a folder's children, after the first completed pull of a
+folder it answered `outdated`, whether or not its children differ, and after every mutation it
+performs, the owner sends the host a `changed` notice naming each folder concerned (§4.2). The host
 tells the platform; the owner does not track what the platform displays.
 
 Conflicts between this client's unpublished work and peers' changes are settled when the owner
@@ -124,10 +127,12 @@ when the mirror or the cache can answer it.
   the listing waits for the pull and fails with the pull's code (`unreachable` when the store is
   silent). A failed listing is never an empty folder. An expired view is not deleted: the next
   completed pull replaces it.
-- `view_max_age` MUST be at least the default pin lifetime
-  ([08 §3.4](../08-frontends.md#34-evict-and-restore)): a file made available offline stays
-  reachable by name for as long as its pin holds its bytes. The view's age is carried in `pulledAt`
-  for the host to show.
+- **A pin holds the views that lead to it.** `restore` of a file records its pin's deadline as a
+  **view hold** on the file's folder and on every ancestor up to the root
+  ([04 §2.3](../04-checkout-cache.md#23-mirror-entries-and-markers)), needing no store to do so. A
+  view is answered until its hold passes, whatever its age: a file made available offline stays
+  reachable by name for as long as its pin holds its bytes, however the pin was set or extended.
+- The view's age is carried in `pulledAt` for the host to show.
 
 **Opens: serve the version known here.**
 - The manifest read of rule 3 waits at most `pull_patience`, and not at all while the breaker is
@@ -277,7 +282,7 @@ input ends it. Framing is by count, never by delimiter.
 | Parameter | Recommended | Constraint |
 |---|---|---|
 | `pull_freshness` | 5 s | the window in which a folder is listed again without asking the store |
-| `view_max_age` | 10 days | ≥ `DEFAULT_PIN_KEEP`; how old a view may be and still be answered while the store is silent |
+| `view_max_age` | 10 days | how old a view no pin holds may be and still be answered while the store is silent |
 | `pull_patience` | 2 s | < `REQUEST_DEADLINE`; how long an answer the mirror can give waits for the store |
 
 ## 9. Conformance
@@ -299,8 +304,8 @@ checked. Properties of the shared handler are [08](../08-frontends.md)'s.
 **Freshness**
 - With the mirror wiped, listing root works without any sync and reads only root; descending reads
   only that folder.
-- Two listings of a folder within `pull_freshness`, and every page of one paged listing, cost one
-  store read; `"pull":"now"` costs one more.
+- Two listings of a folder within `pull_freshness`, and every page of one paged listing however
+  far apart its pages are asked for, cost one store read; `"pull":"now"` costs one more.
 - A file a peer deleted disappears from the next pull and from the mirror; a peer's new file appears;
   an open of a file a peer replaced serves the new version; an open of a file a peer deleted is
   `not_found`.
@@ -313,8 +318,12 @@ checked. Properties of the shared handler are [08](../08-frontends.md)'s.
 **Without the store**
 - With the store silent, a previously listed folder is answered within `pull_patience` with
   `outdated: true` and its `pulledAt`; with the breaker open it is answered without waiting; a
-  never-listed folder, and one last pulled more than `view_max_age` ago, answers `unreachable`,
-  never an empty listing.
+  never-listed folder, and one last pulled more than `view_max_age` ago that no pin holds, answers
+  `unreachable`, never an empty listing.
+- A file pinned in a folder whose ancestors were pulled long before, and a pin extended while the
+  store is silent, stay reachable from the root until the pin's deadline.
+- A listing answered `outdated` on patience alone is followed by a `changed` notice when its pull
+  completes with the same children.
 - With the store silent, a cached file opens and reads; a pinned file reads whole; `create`,
   `mkdir`, `write`, `rename` and `delete` in a previously listed folder succeed and are published
   after the store returns, across a process kill.
@@ -336,8 +345,10 @@ checked. Properties of the shared handler are [08](../08-frontends.md)'s.
   as one record kept failing.
 - **Answer the last view, flagged, rather than fail.** A listing that failed whenever the store was
   silent made cached and pinned files unreachable exactly when they mattered.
-- **A view expires.** A listing weeks old shown as the folder's contents misleads more than it
-  helps; the bound is the pin lifetime, so that it never strands a file made available offline.
+- **A view expires, unless a pin holds it.** A listing weeks old shown as the folder's contents
+  misleads more than it helps. Tying the bound to the pin lifetime did not keep pinned files
+  reachable: a view ages from its own folder's pull, not from the pin, so the folders above a file
+  pinned later expired first.
 - **Freshness is judged per process, on the monotonic clock.** A wall-clock stamp read after a clock
   jump would call an old view fresh.
 - **Read-ahead keyed by handle, not by file.** A probe elsewhere in the file must not reset a
