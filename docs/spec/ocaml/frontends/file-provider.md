@@ -245,3 +245,11 @@ still occupies a pool slot.
 `Clock.with_timeout 2.` (used by the converger's change notices, 1 s for rescans). The Swift
 client has none (B-0). *Under effects*: a cancellation-aware timeout (switch/cancel
 context) around the whole connect-write-read, not just the read.
+
+## Pitfalls met in the rewrite
+
+- **A throwing Swift initializer still runs `deinit`** once every stored property is set. A
+  descriptor closed before the `throw` is closed again by `deinit`, and that second close can hit a
+  number another thread just reused (a request socket, a manager's descriptor). The relay retries a
+  subscription every few seconds while the service is down, so this fires often. Close in one place:
+  `deinit`, or mark the descriptor invalid before throwing.
