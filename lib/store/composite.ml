@@ -494,7 +494,13 @@ let run_job_body t src c r =
   match r.job with
     | Put k | Delete k -> sync t src c k 0
     | Copy (_, d) -> sync t src c d 0
-    | Delete_many ks -> List.iter (fun k -> sync t src c k 0) ks
+    | Delete_many ks ->
+        (* What the main no longer holds goes in one bulk delete; a key it
+           holds again is copied instead. *)
+        let gone, back = List.partition (fun k -> not (main_holds src k)) ks in
+        Copy_memo.forget c.memo (List.filter_map Key.chunk_of gone);
+        if gone <> [] then c.member.store.delete_multi gone;
+        List.iter (fun k -> sync t src c k 0) back
     | Collection_delete cd ->
         let ks = List.filter (fun k -> not (main_holds src k)) cd.keys in
         Copy_memo.forget c.memo (List.filter_map Key.chunk_of ks);
