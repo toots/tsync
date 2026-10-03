@@ -372,6 +372,12 @@ let live_pin t gkey ~now =
     | Some ps -> ps.st_mtime >= now
     | None -> false
 
+(* Holding the group's body lock. *)
+let remove_bodies t s gkey =
+  Fs.unlink_quiet (whole_path t gkey);
+  Fs.unlink_quiet (partial_path t gkey);
+  forget s
+
 (* read-path §4.9: the cap takes a body only, and not one pinned since its walk
    listed it. *)
 let drop_body t gkey ~now =
@@ -381,9 +387,7 @@ let drop_body t gkey ~now =
     Rt.Fmutex.with_lock s.lock (fun () ->
         if live_pin t gkey ~now:(max now (Unix.gettimeofday ())) then false
         else (
-          Fs.unlink_quiet (whole_path t gkey);
-          Fs.unlink_quiet (partial_path t gkey);
-          forget s;
+          remove_bodies t s gkey;
           true))
 
 let evict_group t gkey =
@@ -391,10 +395,8 @@ let evict_group t gkey =
   if Rt.Fmutex.is_locked s.lock then false
   else
     Rt.Fmutex.with_lock s.lock (fun () ->
-        Fs.unlink_quiet (whole_path t gkey);
-        Fs.unlink_quiet (partial_path t gkey);
+        remove_bodies t s gkey;
         Fs.unlink_quiet (pin_path t gkey);
-        forget s;
         true)
 
 let evict t (m : Manifest.t) =
