@@ -150,11 +150,15 @@ let () =
                            | `Assoc l -> List.assoc_opt "paused" l
                            | _ -> None)))
                 ["docs"; "pics"]));
+        (* Each domain's first rebuild ends with one [changed], whenever its
+           poller gets there: read both before provoking the next two. *)
+        p "after the first rebuilds: %s"
+          (String.concat ", " (List.sort compare (events 2)));
         show "notify_reset of pics"
           (call [("action", "notify_reset"); ("domain", "pics")]);
         show "full_resync of docs"
           (call [("action", "full_resync"); ("domain", "docs")]);
-        p "then: %s" (String.concat ", " (events 2));
+        p "then: %s" (String.concat ", " (List.sort compare (events 2)));
         (* Path rules refuse a link anywhere on the way (/tmp is one on
            macOS). *)
         let real = Unix.realpath sock_dir in
