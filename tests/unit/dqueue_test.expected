@@ -24,3 +24,6 @@ start: ok
 after a rescan: s#0
 ordered-unreadable: ran u#0 v#0 u#0, records on disk: 0
 keyed-unreadable: ran v#0 u#0 u#0, records on disk: 0
+
+== keyed: a retry while a newer job for its key is pending
+ran: sf.1#0 sf.2#0 sf.2#1 other.1#0; idle: true; records on disk: 0

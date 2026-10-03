@@ -23,6 +23,11 @@ let run _id (k, n) ~cancel =
   record (Printf.sprintf "%s#%d" k n);
   if String.starts_with ~prefix:"flaky" k && n < 2 then Fail.raise_ Link "flaky";
   if String.starts_with ~prefix:"refused" k then Fail.raise_ Refused "refused";
+  (* Fails once, slowly and whatever its cancel, so a job posted for its key
+     meanwhile is pending when it does. *)
+  if String.starts_with ~prefix:"sf." k then (
+    Rt.sleep 0.2;
+    if n < 1 then Fail.raise_ Link "slow and flaky");
   if String.starts_with ~prefix:"slow" k then (
     Rt.sleep 0.2;
     if Atomic.get cancel then raise Rt.Cancelled)
@@ -178,5 +183,27 @@ let () =
           p "%s: ran %s, records on disk: %d\n" name
             (String.concat " " (List.rev !log))
             (List.length (Dqueue.Records.list r)))
-        [("ordered-unreadable", true); ("keyed-unreadable", false)]);
+        [("ordered-unreadable", true); ("keyed-unreadable", false)];
+      p "\n== keyed: a retry while a newer job for its key is pending\n";
+      log := [];
+      let r = Dqueue.Records.open_ (Filename.concat dir "retry-pending") in
+      let q =
+        Dqueue.create ~workers:2 ~name:"retry-pending" ~ordered:false kind r
+      in
+      Dqueue.start q run;
+      ignore (Dqueue.post q ("sf.1", 0));
+      Rt.sleep 0.05;
+      ignore (Dqueue.post q ("sf.2", 0));
+      let rec wait n =
+        if n > 0 && not (Dqueue.idle q) then (
+          Rt.sleep 0.1;
+          wait (n - 1))
+      in
+      wait 50;
+      ignore (Dqueue.post q ("other.1", 0));
+      wait 50;
+      p "ran: %s; idle: %b; records on disk: %d\n"
+        (String.concat " " (List.rev !log))
+        (Dqueue.idle q)
+        (List.length (Dqueue.Records.list r)));
   Fs.rm_rf dir

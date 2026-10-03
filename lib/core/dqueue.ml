@@ -349,10 +349,12 @@ let note_failure t id fl =
        (Printexc.to_string e));
   note
 
-let forget t id =
-  Mutex.protect t.m (fun () ->
-      t.loaded <- List.filter (( <> ) id) t.loaded;
-      Hashtbl.remove t.failures id)
+(* Holding [t.m]. *)
+let forget_locked t id =
+  t.loaded <- List.filter (( <> ) id) t.loaded;
+  Hashtbl.remove t.failures id
+
+let forget t id = Mutex.protect t.m (fun () -> forget_locked t id)
 
 let done_ t id =
   Records.complete t.log id;
@@ -522,7 +524,7 @@ let keyed_worker t =
                     if s.pending = None then s.pending <- Some id
                     else (
                       Records.complete t.log id;
-                      forget t id);
+                      forget_locked t id);
                     s.not_before <- Rt.now () +. d);
                 finish k s ~requeue:true;
                 loop ())
