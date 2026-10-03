@@ -142,6 +142,7 @@ changed by a bump: true; a bumped key keeps its entry: 1
 added 100000 keys, one twice: 100000 held
 found: 100000; a key never added: false
 held in under 4 MB: true
+listed back: true
 removed one: true, 99999 held
 cleared a shard: its key gone true, the count follows true
 25 keys into a set of at most 10: 5 held, emptied 2 times

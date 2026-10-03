@@ -91,4 +91,18 @@ let clear_shard t sss =
   sh.keys <- Bytes.empty;
   sh.count <- 0
 
+let unpack keys at =
+  let hex off =
+    String.concat ""
+      (List.init 8 (fun i ->
+           Printf.sprintf "%02x" (Char.code (Bytes.get keys (at + off + i)))))
+  in
+  Chunk_key.v (hex 0 ^ "-" ^ hex 8)
+
+let elements t =
+  Array.fold_right
+    (fun sh acc ->
+      List.init sh.count (fun i -> unpack sh.keys (i * width)) @ acc)
+    t.shards []
+
 let cardinal t = t.total
