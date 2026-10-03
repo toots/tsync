@@ -867,6 +867,11 @@ This file covers mistakes that are true of any implementation in any language: s
 - **Check** — One persistent pause switch owned by the owner, consulted by every state-changing loop; test each loop's check.
 - **Seen** — bde81092, notes (07 B.2). recurred ×2.
 
+### A-10.15 A destructive walk built on a listing that does not list what it removes
+- **Pitfall** — `rmdir` of a non-empty folder deleted every file under it, then removed its subfolders from `list_tree`, which recurses into folders but lists only files. No subfolder was removed, the final `rmdir` failed "not empty", and the client got an error after its files were already gone; a nested empty folder failed the same way.
+- **Check** — A recursive removal walks the tree itself, level by level, and removes each folder after its contents. A listing's contract (files only, or every entry) is in its name or its interface, and a test removes a tree holding folders, empty ones included.
+- **Seen** — rewrite (review of PR #114).
+
 ## 11. Deadlines, health, liveness and shutdown
 
 ### A-11.1 Request without a deadline
