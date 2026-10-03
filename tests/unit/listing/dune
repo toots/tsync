@@ -1,5 +1,0 @@
-(executable
- (flags
-  (:standard -open Tsync_core_lwt -open Tsync_test_harness))
- (name listing_test)
- (libraries tsync_test_harness tsync_core_lwt lwt lwt.unix unix))

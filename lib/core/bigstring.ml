@@ -1,49 +1,55 @@
-include Bigstringaf
+type t = (char, Bigarray.int8_unsigned_elt, Bigarray.c_layout) Bigarray.Array1.t
 
-(* Bigstringaf's takes a range; a caller with a whole string to hand over should
-   not have to spell one. *)
-let of_string s = Bigstringaf.of_string s ~off:0 ~len:(String.length s)
+external memcmp_ : t -> int -> t -> int -> int -> int = "tsync_bigstring_memcmp"
 
-(* Synchronous because [mmap] moves no data: the reads happen later, on the pages
-   actually touched. *)
-let map_fd fd ~offset ~len =
-  if len = 0 then empty
-  else
-    Bigarray.array1_of_genarray
-      (Unix.map_file fd ~pos:(Int64.of_int offset) Bigarray.char
-         Bigarray.c_layout false [| len |])
+external blit_from_bytes_ : Bytes.t -> int -> t -> int -> int -> unit
+  = "tsync_bigstring_blit_from_bytes"
 
-(* Keyed by directory, because an import source and the cache need not be on the
-   same filesystem, and remembered so one that cannot clone costs a single
-   failed attempt rather than one per mapping. *)
-let clonable : (string, bool) Hashtbl.t = Hashtbl.create 8
-let warned_no_clone = ref false
+external blit_to_bytes_ : t -> int -> Bytes.t -> int -> int -> unit
+  = "tsync_bigstring_blit_to_bytes"
 
-let snapshot ?scratch path =
-  let dir = Filename.dirname path in
-  if Hashtbl.find_opt clonable dir = Some false then None
-  else (
-    let fd =
-      try Device.clone ?scratch ~src:path () with Unix.Unix_error _ -> None
-    in
-    Hashtbl.replace clonable dir (Option.is_some fd);
-    if Option.is_none fd && not !warned_no_clone then (
-      warned_no_clone := true;
-      Log.warn
-        "%s is on a filesystem that cannot clone: mappings there are of the \
-         file itself, and read whatever it holds when the pages are touched"
-        dir);
-    fd)
+let create n = Bigarray.Array1.create Bigarray.char Bigarray.c_layout n
+let empty = create 0
+let length = Bigarray.Array1.dim
+let sub t ~off ~len = Bigarray.Array1.sub t off len
 
-let open_snapshot ?scratch path =
-  match snapshot ?scratch path with
-    | Some fd -> fd
-    | None -> Unix.openfile path [Unix.O_RDONLY] 0
+let check t off len =
+  if off < 0 || len < 0 || off + len > length t then invalid_arg "Bigstring"
 
-let map_file ?scratch ~path ~offset ~len () =
-  if len = 0 then empty
-  else (
-    let fd = open_snapshot ?scratch path in
-    Fun.protect
-      ~finally:(fun () -> Unix.close fd)
-      (fun () -> map_fd fd ~offset ~len))
+let blit_from_bytes b boff t off len =
+  if boff < 0 || boff + len > Bytes.length b then invalid_arg "Bigstring";
+  check t off len;
+  blit_from_bytes_ b boff t off len
+
+let blit_to_bytes t off b boff len =
+  if boff < 0 || boff + len > Bytes.length b then invalid_arg "Bigstring";
+  check t off len;
+  blit_to_bytes_ t off b boff len
+
+let of_string s =
+  let t = create (String.length s) in
+  blit_from_bytes (Bytes.unsafe_of_string s) 0 t 0 (String.length s);
+  t
+
+let to_string ?(off = 0) ?len t =
+  let len = match len with Some l -> l | None -> length t - off in
+  let b = Bytes.create len in
+  blit_to_bytes t off b 0 len;
+  Bytes.unsafe_to_string b
+
+let equal a b = length a = length b && memcmp_ a 0 b 0 (length a) = 0
+
+let blit ~src ~src_off ~dst ~dst_off ~len =
+  Bigarray.Array1.blit (sub src ~off:src_off ~len) (sub dst ~off:dst_off ~len)
+
+let concat = function
+  | [t] -> t
+  | l ->
+      let t = create (List.fold_left (fun n b -> n + length b) 0 l) in
+      ignore
+        (List.fold_left
+           (fun off b ->
+             blit ~src:b ~src_off:0 ~dst:t ~dst_off:off ~len:(length b);
+             off + length b)
+           0 l);
+      t

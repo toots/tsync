@@ -1,0 +1,10 @@
+staged bodies: 3
+set aside: true
+a user file named f.txt.bad: "mine"
+the set-aside manifest is still there: true
+status counts it set aside: 1
+a symlink nothing could owe: refused/denied
+left in the mirror unowed: false
+body kept: true
+body kept: true
+body kept: true

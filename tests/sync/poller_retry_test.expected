@@ -1,0 +1,7 @@
+B applies A's file: true
+B's first listing failed: true
+B publishes: true
+owed: B 0/0
+C's upload met the failure: true
+C publishes after a pass begun before the failure: false
+C publishes after a pass begun after it: true

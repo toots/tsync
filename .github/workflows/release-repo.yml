@@ -11,6 +11,7 @@ on:
   workflow_run:
     workflows: [release-deb, release-rpm]
     types: [completed]
+    branches: [main]
   workflow_dispatch:
 
 # Serialized and never cancelled: a queued run supersedes its predecessor's
@@ -22,9 +23,12 @@ concurrency:
 
 jobs:
   publish:
+    # Pages serves main: a dispatch from another branch would deploy its
+    # builder over main's site.
     if: >-
-      github.event_name == 'workflow_dispatch'
-      || github.event.workflow_run.conclusion == 'success'
+      github.ref == 'refs/heads/main'
+      && (github.event_name == 'workflow_dispatch'
+          || github.event.workflow_run.conclusion == 'success')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -90,7 +94,7 @@ jobs:
               apt-get update
               apt-get install -y --no-install-recommends curl ca-certificates
               sh /check/setup.sh
-              apt-get install -y tsync tsync-tray
+              apt-get install -y tsync
               command -v tsync'
           done
           for d in check/rpm/*/; do
@@ -99,7 +103,7 @@ jobs:
               set -eux
               command -v curl || dnf install -y curl
               sh /check/setup.sh
-              dnf install -y tsync tsync-tray
+              dnf install -y tsync
               command -v tsync'
           done
 

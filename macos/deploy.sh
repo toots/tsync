@@ -9,12 +9,13 @@ say() { echo "==> $*" >&2; }
 
 APP=$("$MACOS_DIR/build.sh" | tail -n1)
 
+# Never signal by a pattern over paths: the service's binary lives inside the
+# app bundle, so matching "TsyncApp" kills it too (file-provider §9.3). The
+# service stops through launchd, the app by asking it, the extension by name.
 say "Stopping"
-for label in org.feverdreamtv.tsync org.feverdreamtv.tsync.daemon; do
-    launchctl bootout "gui/$UID/$label" 2>/dev/null || true
-done
-pkill -f TsyncFileProvider 2>/dev/null || true
-pkill -f TsyncApp 2>/dev/null || true
+launchctl bootout "gui/$UID/org.feverdreamtv.tsync.daemon" 2>/dev/null || true
+osascript -e 'tell application id "org.feverdreamtv.tsync" to quit' 2>/dev/null || true
+pkill -x TsyncFileProvider 2>/dev/null || true
 sleep 2
 
 say "Installing to /Applications"
@@ -27,7 +28,7 @@ open /Applications/TsyncApp.app
 
 SOCK="$HOME/Library/Group Containers/group.org.feverdreamtv.tsync/tsync/tsync.sock"
 echo -n "==> Waiting for socket" >&2
-deadline=$(( $(date +%s) + 15 ))
+deadline=$(( $(date +%s) + 60 ))
 until [[ -S "$SOCK" ]]; do
     [[ $(date +%s) -lt $deadline ]] || { echo " timeout" >&2; exit 1; }
     sleep 1; echo -n "." >&2

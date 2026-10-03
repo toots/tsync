@@ -1,0 +1,46 @@
+== everything, links kept: 11 files, 38 bytes
+  folder .git
+  file   .git/config (1)
+  file   a b (2)
+  file   a.txt (1)
+  folder a
+  folder a/deep
+  file   a/deep/y.ml (4)
+  file   a/x.txt (3)
+  link   dangling -> nowhere (7)
+  folder empty
+  link   link -> a/x.txt (7)
+  folder locked
+  link   photos-link -> photos (6)
+  folder photos
+  folder photos/2026
+  file   photos/2026/p.jpg (5)
+  file   photos/notes.txt (1)
+  folder sub
+  folder sub/.git
+  file   sub/.git/HEAD (1)
+  unreadable locked
+== excluding **/.git and every *.txt by basename: 6 files, 11 bytes
+  file   a b (2)
+  folder a
+  folder a/deep
+  file   a/deep/y.ml (4)
+  link   dangling -> nowhere (0)
+  folder empty
+  link   link -> a/x.txt (0)
+  folder locked
+  link   photos-link -> photos (0)
+  folder photos
+  folder photos/2026
+  file   photos/2026/p.jpg (5)
+  folder sub
+  unreadable locked
+== only photos/** and **/*.ml, links followed: 3 files, 10 bytes
+  folder a
+  folder a/deep
+  file   a/deep/y.ml (4)
+  folder photos
+  folder photos/2026
+  file   photos/2026/p.jpg (5)
+  file   photos/notes.txt (1)
+  unreadable locked

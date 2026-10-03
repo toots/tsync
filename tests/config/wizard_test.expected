@@ -1,0 +1,202 @@
+== a new config
+  A new config: first the settings for this machine, then a domain.
+? client name [<host>] -> laptop
+? uploads at once [4] -> 
+? chunk buffers [4] -> 
+? downloads at once [8] -> 
+? govern uploads to the network's capacity [true] -> 
+? TLS implementation (openssl, native) [openssl] -> 
+? domain name -> docs
+? versioning [true] -> 
+? symlinks (keep, follow, skip) [keep] -> 
+? read-only [false] -> 
+? chunk size (blank: the store's) -> 
+? cache chunk size (blank: default) -> 
+? cache limit [1 GiB] -> 
+? backends: [a]dd [e]dit N [r]emove N [d]one [d] -> a
+? type (gcs, http-proxy, local, s3) [local] -> local
+? backend name -> main
+? role (main, replica, backfill, readOnly) [main] -> 
+? Store root -> /srv/docs
+? Verify chunk writes [true] -> 
+    1. main (local, main)
+? backends: [a]dd [e]dit N [r]emove N [d]one [d] -> d
+? frontends: [a]dd [e]dit N [r]emove N [d]one [d] -> a
+? frontend (android, fuse, http-proxy) [android] -> http-proxy
+? Port -> 5446
+? Bind addresses -> 
+? Concurrent data operations -> 
+? TLS certificate -> 
+? TLS key -> 
+? Shared secret -> (secret)
+? Serve share links [false] -> 
+? Read-only [false] -> 
+? Largest PUT body -> 
+? Largest bulk body -> 
+? Body memory -> 
+? Idle timeout (s) -> 
+? Header timeout (s) -> 
+? Keep-alive timeout (s) -> 
+? Connections -> 
+? Concurrent share responses -> 
+? ZIP members -> 
+    1. http-proxy
+? frontends: [a]dd [e]dit N [r]emove N [d]one [d] -> d
+  Domains:
+    1. docs: 1 backends
+? [a]dd [e]dit N [r]emove N [g]lobals [w]rite [q]uit -> w
+new: would write
+{
+  "name": "laptop",
+  "domains": [
+    {
+      "name": "docs",
+      "versioning": true,
+      "symlinks": "keep",
+      "maxCache": "1 GiB",
+      "backends": [
+        {
+          "type": "local",
+          "name": "main",
+          "role": "main",
+          "path": "/srv/docs"
+        }
+      ],
+      "frontends": [
+        {
+          "type": "http-proxy",
+          "port": 5446,
+          "secret": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      ]
+    }
+  ]
+}
+
+== an existing config: what is not asked is kept, an unused link dropped
+  Domains:
+    1. docs: 2 backends
+? [a]dd [e]dit N [r]emove N [g]lobals [w]rite [q]uit -> e 1
+? domain name [docs] -> 
+? versioning [true] -> 
+? symlinks (keep, follow, skip) [keep] -> 
+? read-only [false] -> 
+? chunk size (blank: the store's) -> 
+? cache chunk size (blank: default) -> 
+? cache limit [1 GiB] -> 2 GiB
+    1. main (local, main)
+    2. far (http-proxy, replica)
+? backends: [a]dd [e]dit N [r]emove N [d]one [d] -> a
+? type (gcs, http-proxy, local, s3) [local] -> local
+? backend name -> copy
+? role (main, replica, backfill, readOnly) [main] -> 
+? Store root -> /srv/copy
+? Verify chunk writes [true] -> 
+    1. main (local, main)
+    2. far (http-proxy, replica)
+    3. copy (local, main)
+? backends: [a]dd [e]dit N [r]emove N [d]one [d] -> d
+    1. http-proxy
+? frontends: [a]dd [e]dit N [r]emove N [d]one [d] -> d
+  Domains:
+    1. docs: 3 backends
+? [a]dd [e]dit N [r]emove N [g]lobals [w]rite [q]uit -> w
+edit: would write
+{
+  "name": "box",
+  "links": { "wan": { "maxRate": 1000, "minRate": 200 } },
+  "domains": [
+    {
+      "name": "docs",
+      "symlinks": "keep",
+      "versioning": true,
+      "frontends": [ "http-proxy" ],
+      "backends": [
+        {
+          "type": "local",
+          "name": "main",
+          "role": "main",
+          "path": "/srv/docs"
+        },
+        {
+          "type": "http-proxy",
+          "name": "far",
+          "role": "replica",
+          "link": "wan",
+          "url": "https://far.example:5446",
+          "secret": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        {
+          "type": "local",
+          "name": "copy",
+          "role": "main",
+          "path": "/srv/copy"
+        }
+      ],
+      "maxCache": "2 GiB"
+    }
+  ]
+}
+
+== invalid answers are asked again
+  Domains:
+    1. docs: 2 backends
+? [a]dd [e]dit N [r]emove N [g]lobals [w]rite [q]uit -> e 1
+? domain name [docs] -> 
+? versioning [true] -> 
+? symlinks (keep, follow, skip) [keep] -> sometimes
+  symlinks (keep, follow, skip): keep, follow or skip
+? symlinks (keep, follow, skip) [keep] -> skip
+? read-only [false] -> 
+? chunk size (blank: the store's) -> 
+? cache chunk size (blank: default) -> 
+? cache limit [1 GiB] -> lots
+  cache limit: a size such as 8M or 1.5 GiB
+? cache limit [1 GiB] -> 
+    1. main (local, main)
+    2. far (http-proxy, replica)
+? backends: [a]dd [e]dit N [r]emove N [d]one [d] -> d
+    1. http-proxy
+? frontends: [a]dd [e]dit N [r]emove N [d]one [d] -> d
+  Domains:
+    1. docs: 2 backends
+? [a]dd [e]dit N [r]emove N [g]lobals [w]rite [q]uit -> w
+invalid: would write
+{
+  "name": "box",
+  "links": { "wan": { "maxRate": 1000, "minRate": 200 } },
+  "domains": [
+    {
+      "name": "docs",
+      "symlinks": "skip",
+      "versioning": true,
+      "frontends": [ "http-proxy" ],
+      "backends": [
+        {
+          "type": "local",
+          "name": "main",
+          "role": "main",
+          "path": "/srv/docs"
+        },
+        {
+          "type": "http-proxy",
+          "name": "far",
+          "role": "replica",
+          "link": "wan",
+          "url": "https://far.example:5446",
+          "secret": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      ],
+      "maxCache": "1 GiB"
+    }
+  ]
+}
+
+== quit
+  Domains:
+    1. docs: 2 backends
+? [a]dd [e]dit N [r]emove N [g]lobals [w]rite [q]uit -> q
+quit: quit
+
+== not an object
+refused: the config is not a JSON object

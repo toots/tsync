@@ -1,168 +1,196 @@
+let trip_after = 2
+let trip_span = 1.
+let hold_initial = 30.
+let hold_max = 300.
+let probe_timeout = 10.
+
 type t = {
-  tracked : bool;
+  m : Mutex.t;
+  name : string;
+  always_up : bool;
+  now : unit -> float;
   mutable consecutive : int;
-  mutable held_until : float;
-  mutable hold : float;
-  mutable reason : string;
-  mutable sampled : bool;
   mutable failing_since : float;
   mutable last_lost : float;
+  mutable held_until : float option;
+  mutable hold : float;
   mutable probing : bool;
-  mutable next_watch : int;
-  watchers : (int, unit -> unit) Hashtbl.t;
   mutable timeouts : int;
+  mutable reason : string;
+  mutable watchers : (unit -> unit) list;
 }
 
-let trip_after = ref 2
-let trip_span = ref 1.
-let hold_initial = ref 30.
-let hold_max = ref 300.
-let probe_timeout = ref 10.
-
-let make ~tracked =
+let create ?(now = Rt.now) name =
   {
-    tracked;
+    m = Mutex.create ();
+    name;
+    always_up = false;
+    now;
     consecutive = 0;
-    held_until = 0.;
-    hold = !hold_initial;
-    reason = "";
-    sampled = not tracked;
     failing_since = 0.;
-    last_lost = 0.;
+    last_lost = neg_infinity;
+    held_until = None;
+    hold = hold_initial;
     probing = false;
-    next_watch = 0;
-    watchers = Hashtbl.create 4;
     timeouts = 0;
+    reason = "";
+    watchers = [];
   }
 
-let always_up = make ~tracked:false
-let create () = make ~tracked:true
+let always_up = { (create "always-up") with always_up = true }
+let name t = t.name
 
-(* A tally apart from the trip: whoever governs the link this member is on
-   reads it, and a timeout is evidence for the link whether or not it took
-   the member out. The untracked cell is shared, so it counts nothing. *)
-let timed_out t = if t.tracked then t.timeouts <- t.timeouts + 1
-let timeouts t = t.timeouts
-let now = Unix.gettimeofday
-let out t = t.held_until > 0.
-let is_held t = out t && now () < t.held_until
-let is_down = out
-let sampled t = t.sampled
+let fire t =
+  let ws = t.watchers in
+  t.watchers <- [];
+  ws
+
+let notify ws = List.iter (fun f -> try f () with _ -> ()) ws
+
+let go_out t now hold =
+  t.hold <- hold;
+  t.held_until <- Some (now +. hold);
+  t.probing <- false;
+  fire t
+
+let lost ?(reason = "") t =
+  if t.always_up then `Up
+  else (
+    let r, ws =
+      Mutex.protect t.m (fun () ->
+          let now = t.now () in
+          if reason <> "" then t.reason <- reason;
+          let out = t.held_until <> None in
+          if
+            t.consecutive = 0 || ((not out) && now -. t.last_lost > hold_initial)
+          then (
+            t.consecutive <- 0;
+            t.failing_since <- now);
+          t.consecutive <- t.consecutive + 1;
+          t.last_lost <- now;
+          match t.held_until with
+            | Some until ->
+                if t.probing || now >= until then
+                  (`Tripped, go_out t now (min hold_max (2. *. t.hold)))
+                else (`Held, [])
+            | None ->
+                if
+                  t.consecutive >= trip_after
+                  && now -. t.failing_since >= trip_span
+                then (`Tripped, go_out t now hold_initial)
+                else (`Up, []))
+    in
+    notify ws;
+    r)
 
 let check t =
-  if not (out t) then `Up
-  else if now () < t.held_until then `Held
-  else begin
-    t.held_until <- now () +. t.hold;
-    t.probing <- true;
-    `Probe
-  end
+  if t.always_up then `Up
+  else
+    Mutex.protect t.m (fun () ->
+        match t.held_until with
+          | None -> `Up
+          | Some until ->
+              let now = t.now () in
+              if now < until then `Held
+              else (
+                t.held_until <- Some (now +. t.hold);
+                t.probing <- true;
+                `Probe))
+
+let is_held t =
+  Mutex.protect t.m (fun () ->
+      match t.held_until with Some u -> t.now () < u | None -> false)
+
+let is_down t = Mutex.protect t.m (fun () -> t.held_until <> None)
 
 let answered t =
-  if t.tracked then begin
-    t.sampled <- true;
-    t.consecutive <- 0;
-    t.probing <- false;
-    t.held_until <- 0.;
-    t.hold <- !hold_initial
-  end
+  if not t.always_up then
+    Mutex.protect t.m (fun () ->
+        t.consecutive <- 0;
+        t.held_until <- None;
+        t.hold <- hold_initial;
+        t.probing <- false)
 
-let on_held t told =
-  let id = t.next_watch in
-  t.next_watch <- id + 1;
-  if t.tracked then Hashtbl.replace t.watchers id told;
-  id
+let probe_lost ?(reason = "") t =
+  if not t.always_up then
+    notify
+      (Mutex.protect t.m (fun () ->
+           if reason <> "" then t.reason <- reason;
+           let now = t.now () in
+           let hold =
+             if t.held_until <> None then min hold_max (2. *. t.hold)
+             else hold_initial
+           in
+           go_out t now hold))
 
-let off t id = Hashtbl.remove t.watchers id
+let on_trip t f =
+  if t.always_up then ignore
+  else (
+    Mutex.protect t.m (fun () -> t.watchers <- f :: t.watchers);
+    fun () ->
+      Mutex.protect t.m (fun () ->
+          t.watchers <- List.filter (( != ) f) t.watchers))
 
-let tell t =
-  let told = Hashtbl.fold (fun _ f acc -> f :: acc) t.watchers [] in
-  Hashtbl.reset t.watchers;
-  List.iter (fun f -> f ()) told
-
-let hold_for t seconds =
-  t.hold <- seconds;
-  t.held_until <- now () +. seconds
-
-(* A request already on its way when the member went out fails into a hold
-   that is none of its doing, and only the probe's failure is news; past the
-   hold every failure is one, nobody having to have asked for a probe.
-
-   Failures a hold's length apart are not a run: the first says nothing about
-   the link by the time the second comes. *)
-let lost t reason =
-  if not t.tracked then `Up
-  else begin
-    let at = now () in
-    t.sampled <- true;
-    t.reason <- reason;
-    if t.consecutive = 0 || ((not (out t)) && at -. t.last_lost > !hold_initial)
-    then begin
-      t.consecutive <- 0;
-      t.failing_since <- at
-    end;
-    t.last_lost <- at;
-    t.consecutive <- t.consecutive + 1;
-    if out t then
-      if t.probing || at >= t.held_until then begin
-        t.probing <- false;
-        hold_for t (Float.min !hold_max (t.hold *. 2.));
-        tell t;
-        `Tripped
-      end
-      else `Held
-    else if t.consecutive >= !trip_after && at -. t.failing_since >= !trip_span
-    then begin
-      hold_for t !hold_initial;
-      tell t;
-      `Tripped
-    end
-    else `Up
-  end
-
-(* The hold [lost] would have chosen, taken on one report rather than a run. *)
-let probe_lost t reason =
-  if t.tracked then begin
-    let at = now () in
-    let held = out t in
-    t.sampled <- true;
-    t.reason <- reason;
-    if t.consecutive = 0 then t.failing_since <- at;
-    t.consecutive <- t.consecutive + 1;
-    t.last_lost <- at;
-    t.probing <- false;
-    hold_for t
-      (if held then Float.min !hold_max (t.hold *. 2.) else !hold_initial);
-    tell t
-  end
+let timed_out t = Mutex.protect t.m (fun () -> t.timeouts <- t.timeouts + 1)
+let timeouts t = Mutex.protect t.m (fun () -> t.timeouts)
 
 let describe t =
-  if not (out t) then ""
-  else
-    Printf.sprintf "held down for %.0fs after %d failure%s (%s)"
-      (Float.max 0. (t.held_until -. now ()))
-      t.consecutive
-      (if t.consecutive = 1 then "" else "s")
-      t.reason
+  Mutex.protect t.m (fun () ->
+      match t.held_until with
+        | None -> None
+        | Some until ->
+            let left = max 0. (until -. t.now ()) in
+            Some
+              (Printf.sprintf "held down for %.0fs after %d failures%s" left
+                 t.consecutive
+                 (if t.reason = "" then "" else " (" ^ t.reason ^ ")")))
 
-let clock at =
-  let tm = Unix.localtime at in
-  Printf.sprintf "%02d:%02d:%02d" tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
+type state =
+  | Up
+  | Down of { held_for : float; failures : int; reason : string }
 
-let json t =
-  if not (out t) then []
-  else
-    [
-      ( "health",
-        `Assoc
-          [
-            ("heldUntil", `Float t.held_until);
-            ("heldUntilLocal", `String (clock t.held_until));
-            ("heldSeconds", `Float (Float.max 0. (t.held_until -. now ())));
-            ("failures", `Int t.consecutive);
-            ("reason", `String t.reason);
-          ] );
-    ]
+let state t =
+  Mutex.protect t.m (fun () ->
+      match t.held_until with
+        | None -> Up
+        | Some until ->
+            Down
+              {
+                held_for = max 0. (until -. t.now ());
+                failures = t.consecutive;
+                reason = t.reason;
+              })
 
-let expire t = if out t then t.held_until <- now ()
-let hold_length t = t.hold
+let state_to_yojson = function
+  | Up -> `Assoc [("state", `String "up")]
+  | Down d ->
+      `Assoc
+        [
+          ("state", `String "down");
+          ("heldForSeconds", `Float d.held_for);
+          ("failures", `Int d.failures);
+          ("reason", `String d.reason);
+        ]
+
+let state_of_yojson = function
+  | `Assoc l -> (
+      let num k =
+        match List.assoc_opt k l with
+          | Some (`Float f) -> f
+          | Some (`Int i) -> float_of_int i
+          | _ -> 0.
+      in
+      match List.assoc_opt "state" l with
+        | Some (`String "down") ->
+            Ok
+              (Down
+                 {
+                   held_for = num "heldForSeconds";
+                   failures = truncate (num "failures");
+                   reason =
+                     (match List.assoc_opt "reason" l with
+                       | Some (`String r) -> r
+                       | _ -> "");
+                 })
+        | _ -> Ok Up)
+  | _ -> Error "health: not an object"

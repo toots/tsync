@@ -1,8 +1,13 @@
 name: release-macos
 
-# Runs after `test` passes on main, so a red build never reaches the nightly
-# download URL. workflow_dispatch is there to re-cut a release by hand.
+# Builds, signs, notarizes and checks the package on every pull request and push
+# to rewrite, publishing nothing (10 §1). On main it runs after the gate, `test`,
+# passes, so a red build never reaches the nightly URL. workflow_run fires only
+# from the default branch's copy of this file.
 on:
+  push:
+    branches: [rewrite]
+  pull_request:
   workflow_run:
     workflows: [test]
     types: [completed]
@@ -10,69 +15,119 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: release-macos
+  group: release-macos-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
   macos:
+    # 10 §2: only a gate run for a push to this repository releases. A fork
+    # pull request's gate run carries the fork's branch name as head_branch.
     if: >-
-      github.event_name == 'workflow_dispatch'
-      || github.event.workflow_run.conclusion == 'success'
+      github.event_name != 'workflow_run'
+      || (github.event.workflow_run.conclusion == 'success'
+          && github.event.workflow_run.event == 'push'
+          && github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: macos-latest
-    # A keychain prompt or a stalled notarization otherwise sits until the
-    # 6-hour job cap, and blocks every queued release behind it.
+    # A keychain prompt or a stalled notarization otherwise holds the runner
+    # until the platform's cap, and every queued release behind it.
     timeout-minutes: 60
     permissions:
       contents: write
     env:
-      # workflow_run checks out the default branch unless told otherwise.
       SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+      PUBLISH: >-
+        ${{ (github.event_name == 'workflow_run'
+             && github.event.workflow_run.event == 'push'
+             && github.event.workflow_run.head_repository.full_name == github.repository
+             && github.event.workflow_run.head_branch == 'main')
+            || (github.event_name == 'workflow_dispatch'
+                && github.ref == 'refs/heads/main') }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          ref: ${{ env.SHA }}
+
+      - name: System libraries
+        id: brew
+        run: |
+          brew install xcodegen dylibbundler pkg-config openssl@3 gmp
+          # openssl@3 is keg-only, so conf-libssl finds it only via pkg-config.
+          echo "PKG_CONFIG_PATH=$(brew --prefix openssl@3)/lib/pkgconfig:$PKG_CONFIG_PATH" >> "$GITHUB_ENV"
+          # 10 §4.1: a restored switch links the Cellar directory of these
+          # formulae, which a newer version moves.
+          echo "linked=$(brew list --versions openssl@3 gmp | tr ' ' '-' | paste -sd_ -)" >> "$GITHUB_OUTPUT"
+
       - uses: ocaml/setup-ocaml@v3
         with:
           ocaml-compiler: "5.5"
-      - name: Install dependencies
-        id: brew
-        run: |
-          brew install xcodegen libev coreutils dylibbundler pkg-config openssl@3 pcre2 gmp
-          echo "CPATH=$(brew --prefix libev)/include:$CPATH" >> $GITHUB_ENV
-          echo "LIBRARY_PATH=$(brew --prefix libev)/lib:$LIBRARY_PATH" >> $GITHUB_ENV
-          # openssl@3 is keg-only, so conf-libssl only finds it via pkg-config.
-          echo "PKG_CONFIG_PATH=$(brew --prefix openssl@3)/lib/pkgconfig:$PKG_CONFIG_PATH" >> $GITHUB_ENV
-          # The libraries the switch links through pkg-config, which resolves
-          # to the versioned Cellar directory. See the cache key below.
-          echo "linked=$(brew list --versions openssl@3 pcre2 gmp | tr ' ' '-' | paste -sd_ -)" >> $GITHUB_OUTPUT
-      # The dependencies setup-ocaml leaves out of its own cache; see the linux
-      # job of test.yml for why that is its default and why restoring them here
-      # is not the stale-cache trap it looks like.
-      #
-      # Except for one thing opam_deps.sh cannot see: ssl, pcre2 and zarith
-      # bake the Cellar path of the brew formula they were built against into
-      # their link flags, and a runner image that bumps that formula leaves a
-      # restored switch pointing at a directory that is gone -- `ld: library
-      # 'ssl' not found`, with no opam package having changed. So those
-      # versions are part of the key.
+
       - name: Restore the opam switch
         id: opam-switch
         uses: actions/cache/restore@v4
         with:
           path: _opam
-          key: opam-release-macos-${{ hashFiles('opam/*.opam', 'scripts/opam_deps.sh', '.github/workflows/release-macos.yml') }}-${{ steps.brew.outputs.linked }}
-      - name: Install OCaml dependencies
-        # Both TLS backends: tsync alone would pull tsync-tls, and a released
-        # build should also carry tsync-ssl, the faster one.
-        run: ./scripts/opam_deps.sh tsync tsync-libs tsync-tls tsync-ssl tsync-s3
+          key: opam-release-macos-${{ hashFiles('*.opam', 'scripts/opam_deps.sh') }}-${{ steps.brew.outputs.linked }}
+
+      # 10 §4.2: a release ships both TLS implementations.
+      - name: OCaml libraries
+        run: ./scripts/opam_deps.sh tsync tsync-tls tsync-ssl
+
       - name: Save the opam switch
         if: steps.opam-switch.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: _opam
-          key: opam-release-macos-${{ hashFiles('opam/*.opam', 'scripts/opam_deps.sh', '.github/workflows/release-macos.yml') }}-${{ steps.brew.outputs.linked }}
+          key: opam-release-macos-${{ hashFiles('*.opam', 'scripts/opam_deps.sh') }}-${{ steps.brew.outputs.linked }}
+
+      - name: The File Provider frontend and both TLS implementations are built
+        run: |
+          opam exec -- dune build --profile release bin/tsync.exe
+          info=$(./_build/default/bin/tsync.exe build-info)
+          echo "$info"
+          echo "$info" | grep -Eq '^frontends:.*\bfile_provider\b'
+          echo "$info" | grep -Eq '^tls:.*\bopenssl\b'
+          echo "$info" | grep -Eq '^tls:.*\bnative\b'
+
+      # 10 §5.3: a fork receives no secrets. It builds the app unsigned and says
+      # the signing half did not run; a run that should have them fails naming
+      # each missing one.
+      - name: Signing secrets
+        id: secrets
+        env:
+          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          MACOS_PROFILE_APP: ${{ secrets.MACOS_PROFILE_APP }}
+          MACOS_PROFILE_APPEX: ${{ secrets.MACOS_PROFILE_APPEX }}
+          AC_API_KEY_P8: ${{ secrets.AC_API_KEY_P8 }}
+          AC_API_KEY_ID: ${{ secrets.AC_API_KEY_ID }}
+          AC_API_ISSUER_ID: ${{ secrets.AC_API_ISSUER_ID }}
+          FORK: ${{ github.event.pull_request.head.repo.fork || false }}
+        run: |
+          missing=
+          for v in MACOS_CERT_P12 MACOS_CERT_PASSWORD MACOS_PROFILE_APP \
+                   MACOS_PROFILE_APPEX AC_API_KEY_P8 AC_API_KEY_ID AC_API_ISSUER_ID; do
+            [ -n "${!v}" ] || missing="$missing $v"
+          done
+          if [ -z "$missing" ]; then
+            echo "sign=true" >> "$GITHUB_OUTPUT"
+          elif [ "$FORK" = true ]; then
+            echo "::notice::signing not run: a fork receives no secrets"
+            echo "sign=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::release-macos needs these repository secrets:$missing"
+            echo "::error::macos/RELEASING.md says how to provision them"
+            exit 1
+          fi
+
+      - name: Build unsigned
+        if: steps.secrets.outputs.sign != 'true'
+        env:
+          BUNDLE_VERSION: ${{ github.run_number }}
+          BUNDLE_SHORT_VERSION: 0.0.0
+        run: opam exec -- ./macos/build.sh
 
       - name: Import signing assets
+        if: steps.secrets.outputs.sign == 'true'
         env:
           CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
           CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
@@ -85,11 +140,11 @@ jobs:
           security create-keychain -p "$password" "$keychain"
           security set-keychain-settings -lut 3600 "$keychain"
           security unlock-keychain -p "$password" "$keychain"
+          # shellcheck disable=SC2046 # one argument per existing keychain
           security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
 
-          # -A, not -T codesign: pkgbuild needs the Installer key too, and any
-          # tool missing from the ACL raises a keychain prompt that hangs the
-          # runner forever. This keychain is a throwaway in RUNNER_TEMP.
+          # -A, not -T codesign: pkgbuild needs the Installer key too, and a
+          # tool missing from the ACL raises a prompt that hangs the runner.
           echo "$CERT_P12" | base64 -d > "$RUNNER_TEMP/cert.p12"
           security import "$RUNNER_TEMP/cert.p12" -k "$keychain" -P "$CERT_PASSWORD" -A
           security set-key-partition-list -S apple-tool:,apple:,codesign: \
@@ -99,18 +154,18 @@ jobs:
           echo "$PROFILE_APPEX_B64" | base64 -d > "$RUNNER_TEMP/appex.provisionprofile"
           echo "$AC_API_KEY_P8" | base64 -d > "$RUNNER_TEMP/ac_key.p8"
 
-          # The .p12 holds both Developer ID certificates: Application signs the
-          # bundle, Installer signs the .pkg. Only the former is a codesigning
-          # identity, so the latter has to be looked up without -p codesigning.
+          # The .p12 holds both Developer ID certificates; only Application is a
+          # codesigning identity, so Installer is looked up without -p.
           app_identity=$(security find-identity -v -p codesigning "$keychain" \
             | grep "Developer ID Application" | head -1 | sed 's/.*"\(.*\)"/\1/')
           installer_identity=$(security find-identity -v "$keychain" \
             | grep "Developer ID Installer" | head -1 | sed 's/.*"\(.*\)"/\1/')
           test -n "$app_identity" -a -n "$installer_identity"
-          echo "SIGN_IDENTITY=$app_identity" >> $GITHUB_ENV
-          echo "INSTALLER_IDENTITY=$installer_identity" >> $GITHUB_ENV
+          echo "SIGN_IDENTITY=$app_identity" >> "$GITHUB_ENV"
+          echo "INSTALLER_IDENTITY=$installer_identity" >> "$GITHUB_ENV"
 
       - name: Package
+        if: steps.secrets.outputs.sign == 'true'
         env:
           PROFILE_APP: ${{ runner.temp }}/app.provisionprofile
           PROFILE_APPEX: ${{ runner.temp }}/appex.provisionprofile
@@ -119,17 +174,25 @@ jobs:
           AC_API_ISSUER_ID: ${{ secrets.AC_API_ISSUER_ID }}
           BUNDLE_VERSION: ${{ github.run_number }}
           BUNDLE_SHORT_VERSION: 0.0.0
+        run: opam exec -- ./macos/package.sh
+
+      # 10 §5: the package is signed by the Installer identity and Gatekeeper
+      # accepts it, which needs the notarization ticket stapled.
+      - name: Verify the package
+        if: steps.secrets.outputs.sign == 'true'
         run: |
-          make generate
-          opam exec -- ./package.sh
-        working-directory: macos
+          pkgutil --check-signature macos/dist/tsync.pkg | tee /dev/stderr \
+            | grep -q "Developer ID Installer"
+          spctl --assess --type install -vv macos/dist/tsync.pkg
 
       - uses: actions/upload-artifact@v4
+        if: steps.secrets.outputs.sign == 'true'
         with:
           name: tsync-pkg
           path: macos/dist/tsync.pkg
 
-      - uses: ./.github/actions/publish-nightly
+      - if: env.PUBLISH == 'true' && steps.secrets.outputs.sign == 'true'
+        uses: ./.github/actions/publish-nightly
         with:
           files: macos/dist/tsync.pkg
           sha: ${{ env.SHA }}

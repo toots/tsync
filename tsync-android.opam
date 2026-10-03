@@ -1,0 +1,34 @@
+opam-version: "2.0"
+maintainer: ["Romain Beauxis <toots@rastageeks.org>"]
+authors: ["Romain Beauxis <toots@rastageeks.org>"]
+license: "MIT"
+homepage: "https://github.com/toots/tsync"
+bug-reports: "https://github.com/toots/tsync/issues"
+dev-repo: "git+https://github.com/toots/tsync.git"
+synopsis: "What cross-building the tsync core for Android needs"
+description: """
+Installs nothing: its dependencies are the cross switch of the Android app's
+core library (spec 10 §4.1), from https://github.com/ocaml-cross/opam-cross-android.
+Build with `dune build -x android`."""
+depends: [
+  "dune" {>= "3.17"}
+  "ocaml-android"
+  # dune runs the preprocessor in the native context.
+  "ppx_deriving_yojson"
+  # Cross-builds GMP into the sysroot, for conf-gmp-android.
+  "build-gmp-android"
+  "base64-android"
+  "ca-certs-android"
+  "digestif-android"
+  "domain-name-android"
+  "eqaf-android"
+  "mem_usage-android"
+  "mirage-crypto-pk-android"
+  "mirage-crypto-rng-android"
+  "ppx_deriving_yojson-android"
+  "ptime-android"
+  "re-android"
+  "tls-android"
+  "x509-android"
+  "yojson-android"
+]

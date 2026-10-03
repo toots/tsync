@@ -1,0 +1,70 @@
+== a staged-only file has an id, kept through publish
+  A staged: x.txt=<id1>
+  A published: x.txt=<id1>
+== a rename and a rewrite keep it; a peer mints its own
+  <id1> resolves to x.txt
+  <id1> resolves to y.txt
+  A: x.txt=none  y.txt=<id1>
+  B: y.txt=<id2>
+== a peer's rename keeps the receiver's id
+  B: y.txt=none  z.txt=<id2>
+== a rename onto a file gives the destination the source's id
+  A before: p.txt=<id3>  q.txt=<id4>
+  A after: p.txt=none  q.txt=<id3>
+== a folder move carries its files' ids, and they resolve there
+  <id5> resolves to moved/f.txt
+== deletes are noted with the id the file had
+  B: z.txt=none
+  A's applied log:
+    put x.txt                fid=<id1>
+    rename x.txt->y.txt      fid=<id1>
+    put y.txt                fid=<id1>
+    rename y.txt->z.txt      fid=<id1>
+    put p.txt                fid=<id3>
+    put q.txt                fid=<id4>
+    rename p.txt->q.txt      fid=<id3>
+    mkdir dir                fid=-
+    put dir/f.txt            fid=<id5>
+    rename dir->moved        fid=-
+    delete z.txt             fid=<id1>
+  B's applied log:
+    put x.txt                fid=-
+    rename x.txt->y.txt      fid=<id2>
+    put y.txt                fid=<id2>
+    rename y.txt->z.txt      fid=<id2>
+    put p.txt                fid=-
+    put q.txt                fid=<id6>
+    rename p.txt->q.txt      fid=<id6>
+    mkdir dir                fid=-
+    put dir/f.txt            fid=-
+    rename dir->moved        fid=-
+    delete z.txt             fid=<id2>
+== a peer's delete under a folder renamed here, rename unpublished
+  B's X/f.txt: <id7>
+  B: Y/f.txt=none
+  last applied: delete X/f.txt fid=<id7>
+== the same with the rename published: the file is kept, no id named
+  B's X2/f.txt: <id8>
+  B: Y2/f.txt=<id8>
+  last applied: delete X2/f.txt fid=-
+== owner start gives an id to a file found without one
+  B before: q.txt=<id6>
+  B without its marker: q.txt=none
+  a start after a complete pass: 0
+  the first pass: 1
+  B after: q.txt=<id9>
+  the next one: 0
+== an Intent record the queue takes at runtime is redone first
+  A: folder; B: folder
+== passes started together run one at a time
+  entries noted: 20 new, noted twice: 0
+== a clean stop keeps the index for the next start
+  snapshot after the stop: true
+  snapshot after the start: false
+  <id5> resolves to moved/f.txt
+== a marker change after the stop removes the snapshot
+  snapshot after the stop: true
+  snapshot: false
+== without a snapshot the start builds it, with changes made meanwhile
+  <id5> resolves to moved/f.txt
+  the id minted during the build resolves to during.txt

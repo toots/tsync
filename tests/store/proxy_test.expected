@@ -1,0 +1,73 @@
+== conditional replace and checksums (06 §3.11, §3.12)
+replace a free key: written
+replace with the entry just read: written
+replace with a stale entry: changed, the other write stays: true
+create over an existing key: changed
+computed checksum is the body's: true; absent: none; unknown algorithm: invalid
+an entry's checksum, when it carries one, is the body's: true
+== round trips
+get_opt a: "hello"; absent: none; get absent: absent
+head a size: 5
+chunk-sized body identical: true
+copy: "hello"; copy of absent: absent
+
+== ranges
+[0,+3) "012"
+[4,+2) "45"
+[7,+3) "789"
+[0,+10) "0123456789"
+[7,+100) "789"
+[10,+5) ""
+[20,+1) ""
+absent: none; length 0: invalid
+
+== claims
+five racing claims: 1 won, losers told the holder: true
+later claim: held true
+same body again: won
+free name: won
+
+== delete
+delete: true then false
+delete_multi over 2100 keys, survivors left: 0
+
+== awkward keys
+"tsync/d/x/& < > \" ' + % # ? space" round-trips: true
+"tsync/d/x/\195\169lan \226\156\147" round-trips: true
+listed: true
+after delete_multi: 0 listed
+invalid keys refused before anything: invalid invalid invalid invalid invalid
+
+== listing
+all: a,b,c,d,e
+max_keys 2: a,b
+empty prefix: 0
+
+== capabilities
+verified true, share_url none
+
+== http-proxy (backends/http-proxy §12)
+read-only put: refused/read_only
+read-only get of an absent key: none
+wrong secret: refused/denied
+unserved domain get_opt: refused/denied
+unserved domain head: refused/denied
+a key of another route: refused/denied
+capabilities: chunk 4096, concurrency 4, verified true
+get_many across pages: 2500 answers
+list_many: 1 folders
+copy into a share manifest: refused/denied
+copy out of a share manifest: refused/denied
+copy within the share cache: ok
+== unsigned bodies dripping do not hold the data slots
+a signed read meanwhile: ok within 2s: true
+== a 401 from a skewed clock is not remembered
+while skewed: transient/link
+once the clocks agree: ok
+== a server without /checksum
+conditional replace: refused/other, conditional PUTs sent: 0
+checksum falls back to a read: none
+== watch
+behind: returned at once true
+a change wakes the watch: true
+a stop answers a held watch, closing in under 2s: true

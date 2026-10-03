@@ -50,7 +50,7 @@ say "Generating project"
 #              identity is what makes a local install behave like a real one.
 if [[ "$SIGN_IDENTITY" == "-" ]]; then
     dev_identity=$(security find-identity -v -p codesigning \
-        | grep "Apple Development" | head -1 | sed 's/.*"\(.*\)"/\1/')
+        | grep "Apple Development" | head -1 | sed 's/.*"\(.*\)"/\1/' || true)
     if [[ -n "$dev_identity" ]]; then
         SIGN_IDENTITY="$dev_identity"
         XCODE_SIGNING=(CODE_SIGN_STYLE=Automatic -allowProvisioningUpdates)

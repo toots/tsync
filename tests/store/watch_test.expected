@@ -1,0 +1,7 @@
+nothing happens: timeout
+a temporary file only: timeout
+a file written: changed within a second: true
+a rename into place: changed within a second: true
+the directory removed: gone
+a missing directory can be watched: false
+a store watch returns soon after the key changed: true (interval 2 s)

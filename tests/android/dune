@@ -1,0 +1,75 @@
+(executable
+ (name lazy_test)
+ (modules lazy_test)
+ (libraries
+  test_support
+  tsync_core
+  tsync_store
+  tsync_remote
+  tsync_checkout
+  tsync_sync
+  tsync_config
+  tsync_owner
+  tsync_catalog
+  tsync_android
+  tsync_http
+  threads.posix
+  unix
+  yojson))
+
+(rule
+ (with-stdout-to
+  lazy_test.output
+  (run ./lazy_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff lazy_test.expected lazy_test.output)))
+
+; The bridge from threads the runtime did not create, and the ownership an
+; embedding host holds against a spawned command.
+
+(executable
+ (name bridge_test)
+ (modules bridge_test)
+ (foreign_stubs
+  (language c)
+  (include_dirs ../../lib/frontends/android/jni)
+  (names stress_stubs))
+ (libraries
+  test_support
+  tsync_core
+  tsync_catalog
+  tsync_android
+  tsync_android_bridge
+  threads.posix
+  unix
+  yojson))
+
+(rule
+ (with-stdout-to
+  bridge_test.output
+  (run ./bridge_test.exe %{exe:../../bin/tsync.exe})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff bridge_test.expected bridge_test.output)))
+
+; The command group, one spawned process per call.
+
+(executable
+ (name cli_test)
+ (modules cli_test)
+ (libraries tsync_core tsync_config tsync_catalog unix yojson))
+
+(rule
+ (with-stdout-to
+  cli_test.output
+  (run ./cli_test.exe %{exe:../../bin/tsync.exe})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff cli_test.expected cli_test.output)))

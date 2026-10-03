@@ -1,0 +1,47 @@
+== requests
+  200 "GET a=1 \"\"\n"
+  200 "PUT  \"hello\"\n"
+  413 "too large\n"
+  200 ""
+  200 "one two three" (chunked)
+  404 "not found\n"
+== a stream's resources are released whether or not its body is written
+  200 "body" (chunked)
+  200 "" (chunked)
+  released: 2 of 2
+== a stream that fails partway is never delivered complete
+  refused: transient/link
+== a body refused partway closes its connection
+  answers: HTTP/1.1 413 Content Too Large
+http date: Sun, 09 Sep 2001 01:46:40 GMT, parsed back: true, garbage: true
+host header carries the port: true
+== keep-alive
+  same connection: true
+  new connection after close: true
+== stall
+  transient/link:  no progress for 0.5s
+  200 "late\n"
+== a body still being accepted is progress
+  200 "ok"
+== a client trickling its head
+  dropped within 1.5s: true
+== a cancelled connect closes its socket
+  ten cancelled connects leave fewer than 5 descriptors: true
+== redial after the server dropped an idle connection
+  200 "GET after=restart \"\"\n"
+== nothing listening
+  transient/link
+== TLS listener
+  openssl server, openssl client: 200
+    without the CA: refused/other
+  openssl server, ocaml-tls client: 200
+    without the CA: refused/other
+  ocaml-tls server, openssl client: 200
+    without the CA: refused/other
+  ocaml-tls server, ocaml-tls client: 200
+    without the CA: refused/other
+== TLS edge cases
+  openssl: one 3000-byte record read 100 bytes at a time: 3000 bytes
+  ocaml-tls: one 3000-byte record read 100 bytes at a time: 3000 bytes
+  a client that never speaks TLS is dropped: end of stream
+  a server that never speaks TLS fails the client: transient/link: TLS with localhost: no handshake within 0.3s

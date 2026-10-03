@@ -1,0 +1,43 @@
+holds: no last-sync mark
+holds: no last-sync mark
+== A creates, B applies
+-- after B's pass
+  A: papers/  papers/one.txt = "hello world"  top.txt = "top"
+  B: papers/  papers/one.txt = "hello world"  top.txt = "top"
+
+== B edits inside one chunk; A applies
+-- after A's pass
+  A: papers/  papers/one.txt = "hello WORLD"  top.txt = "top"
+  B: papers/  papers/one.txt = "hello WORLD"  top.txt = "top"
+
+== renames travel with their folder id
+-- after A's pass
+  A: archive/  archive/one.txt = "hello WORLD"  archive/top.txt = "top"
+  B: archive/  archive/one.txt = "hello WORLD"  archive/top.txt = "top"
+
+== edit/edit: B publishes first, A's edit still unpublished (F9)
+-- converged
+  A: archive/  archive/one (conflicted copy from A).txt = "from A"  archive/one.txt = "from B"  archive/top.txt = "top"
+  B: archive/  archive/one (conflicted copy from A).txt = "from A"  archive/one.txt = "from B"  archive/top.txt = "top"
+
+== an unpublished edit outlives a delete (F12)
+-- converged
+  A: archive/  archive/one (conflicted copy from A).txt = "from A"  archive/one.txt = "from B"  archive/top.txt = "B edits top"
+  B: archive/  archive/one (conflicted copy from A).txt = "from A"  archive/one.txt = "from B"  archive/top.txt = "B edits top"
+
+== kind clash: A's file published, B's folder unpublished (K1')
+-- converged
+  A: archive/  archive/one (conflicted copy from A).txt = "from A"  archive/one.txt = "from B"  archive/top.txt = "B edits top"  x = "a file"  x (conflicted copy from B)/  x (conflicted copy from B)/in = "inside"
+  B: archive/  archive/one (conflicted copy from A).txt = "from A"  archive/one.txt = "from B"  archive/top.txt = "B edits top"  x = "a file"  x (conflicted copy from B)/  x (conflicted copy from B)/in = "inside"
+
+== a folder removed while B adds to it, then restored (05 §4.8)
+-- box trashed, with B's addition inside
+  A: archive/  archive/one (conflicted copy from A).txt = "from A"  archive/one.txt = "from B"  archive/top.txt = "B edits top"  x = "a file"  x (conflicted copy from B)/  x (conflicted copy from B)/in = "inside"
+  B: archive/  archive/one (conflicted copy from A).txt = "from A"  archive/one.txt = "from B"  archive/top.txt = "B edits top"  x = "a file"  x (conflicted copy from B)/  x (conflicted copy from B)/in = "inside"
+restore: 2 announced
+again: not in the trash
+-- after B's pass
+  A: archive/  archive/one (conflicted copy from A).txt = "from A"  archive/one.txt = "from B"  archive/top.txt = "B edits top"  box/  box/b.txt = "added meanwhile"  x = "a file"  x (conflicted copy from B)/  x (conflicted copy from B)/in = "inside"
+  B: archive/  archive/one (conflicted copy from A).txt = "from A"  archive/one.txt = "from B"  archive/top.txt = "B edits top"  box/  box/b.txt = "added meanwhile"  x = "a file"  x (conflicted copy from B)/  x (conflicted copy from B)/in = "inside"
+
+owed: A 0/0, B 0/0; unapplied: 0 0

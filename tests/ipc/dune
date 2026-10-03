@@ -1,0 +1,13 @@
+(executable
+ (name ipc_test)
+ (libraries tsync_core tsync_ipc unix yojson))
+
+(rule
+ (with-stdout-to
+  ipc_test.output
+  (run ./ipc_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff ipc_test.expected ipc_test.output)))

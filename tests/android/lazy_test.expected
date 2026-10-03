@@ -1,0 +1,81 @@
+== before boot
+  request                            {"ok":false,"code":"internal","error":"the core is not booted"}
+  open                               -5
+  check_config                       ""
+  check_config of another domain     "domain not found: nope"
+== cleartext only to loopback
+  localhost                          true
+  127.0.0.1                          true
+  127.9.9.9                          true
+  [::1]                              true
+  127.0.0.1.example.org              false
+  127.example.org                    false
+  192.168.1.4                        false
+  127.0.0.256                        false
+== boot
+  boot                               ""
+  boot again                         ""
+  not JSON                           {"ok":false,"code":"invalid","error":"invalid JSON"}
+== freshness
+  root, mirror empty                 [a.txt, sub/] read the store
+  root again, within freshness       [a.txt, sub/] no read
+  root, pull now                     [a.txt, sub/] read the store
+  sub, pull never                    [] no read, never pulled, outdated
+  sub                                [deep.txt] read the store
+  notices                            {changed d:<folder1>, changed root}
+  root, first page of 1              [a.txt] read the store
+  root, next page, later             [sub/] no read
+== a peer's changes
+  open a.txt                         "from the peer"
+  open a.txt after the peer replaced it "replaced by the peer"
+  the handle opened before           "from the peer" of 13
+  read after close                   -9
+  root                               [a.txt, b.txt, sub/] read the store
+  notices                            {changed root}
+  open b.txt after the peer deleted it errno 2
+  root                               [a.txt, sub/] read the store
+  notices                            {changed root}
+== owed work survives a pull
+  pause                              ok
+  create mine.txt                    ok
+  create mine.txt, exclusive         exists (mine.txt exists)
+  delete a.txt                       ok
+  root, pull now                     [mine.txt (not uploaded), sub/] read the store
+  resume                             ok
+  notices                            {changed root}
+== refused on a pulled tree
+  changes_since                      invalid (docs keeps a pulled tree, which has no changes_since)
+  list_all                           invalid (docs keeps a pulled tree, which has no list_all)
+  cursor                             invalid (docs keeps a pulled tree, which has no cursor)
+  full_resync                        invalid (docs keeps a pulled tree, which has no full_resync)
+  sync                               invalid (docs keeps a pulled tree, which has no sync)
+  subscribe                          invalid (docs keeps a pulled tree, which has no subscribe)
+== the store pends
+  root, listed before                [mine.txt, sub/] read the store, outdated
+  mkdir offline                      ok
+== the store is down
+  write note.txt                     ok, not uploaded
+  root, pull never                   [mine.txt, note.txt (not uploaded), offline/, sub/] no read, outdated
+  rename note.txt                    ok
+  open n2.txt                        "written offline"
+  status answers                     ok
+  root, listed before                [mine.txt, n2.txt (not uploaded), offline/, sub/] read the store, outdated
+  root, pull never                   [mine.txt, n2.txt (not uploaded), offline/, sub/] no read, outdated
+  a folder never listed              unreachable (the store is down), read the store
+  root, its view too old             unreachable (the store is down), read the store
+== the store returns
+  root                               [c.txt, mine.txt, n2.txt (not uploaded), offline/, sub/] read the store
+  notices                            {changed root, recovered}
+  root, uploads published            [c.txt, mine.txt, n2.txt, offline/, sub/] read the store
+  the peer sees                      [c.txt, mine.txt, n2.txt, offline, sub]
+== a pin holds the views that lead to it
+  sub                                [deep.txt] read the store
+  restore sub/deep.txt               {"ok":true,"restored":1,"failed":0}
+  root, view old but held            [c.txt, mine.txt, n2.txt, offline/, sub/] read the store, outdated
+  sub, view old but held             [deep.txt] read the store, outdated
+  open the pinned file               "deep"
+  restore root                       {"ok":false,"code":"unreachable","error":"the store is down"}
+  evict root                         {"ok":true,"evicted":4,"failed":0}
+  restore root                       {"ok":true,"restored":4,"failed":0}
+== status
+  names the frontend                 true

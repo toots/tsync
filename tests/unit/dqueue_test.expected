@@ -1,0 +1,29 @@
+== ordered: head retry keeps order, a refusal parks and later records pass
+ran: a#0 flaky#0 flaky#1 flaky#2 refused#0 b#0
+parked: refused/other; records on disk: 1
+retrying seen at attempts: 1,2; retrying after: 0
+
+== keyed: a new post replaces the pending job and cancels the running one
+ran: other#0 slow.1#0 slow.3#0
+records on disk: 0
+
+== restart: records persist, undecodable ones are set aside, held submissions wait
+ran: x#0; set aside: 00000000000000000001-00000000-1.bad
+after release: x#0 held#0
+
+== pause holds everything
+while paused: [], pending 1
+after resume: p#0
+
+== a keyed queue paused with a ready record waits, not spins
+CPU over a paused second below 0.3 s: true; ran: []
+after resume: k#0
+
+== an unreadable record waits, and its worker survives
+start: ok
+after a rescan: s#0
+ordered-unreadable: ran u#0 v#0 u#0, records on disk: 0
+keyed-unreadable: ran v#0 u#0 u#0, records on disk: 0
+
+== keyed: a retry while a newer job for its key is pending
+ran: sf.1#0 sf.2#0 sf.2#1 other.1#0; idle: true; records on disk: 0

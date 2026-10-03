@@ -1,0 +1,6 @@
+open before the runtime is announced  -5
+open before boot                      -5
+boot                                  ""
+open of an absent reference           -2
+8 foreign threads × 64 reads           0 failures
+a command while the host owns it      exit 1: tsync: docs is owned by the tsync app (pid <pid>)

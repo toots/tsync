@@ -1,0 +1,31 @@
+== the gate with no run open
+manifest naming present chunks: ok
+manifest naming an absent chunk: corrupt/missing_chunks
+refused manifest not written: true
+folder marker: ok
+JSON that is not a folder marker: invalid
+folder index (internal leaf): ok
+body that is neither: invalid
+claim naming an absent chunk: corrupt/missing_chunks
+copy into the version area: ok
+
+== a run opens: R written, S renamed to F
+get one: "one"; head two: true; range one: "ne"
+chunk put lands in S: true
+listing the chunk area: two one four
+listing one shard: two
+listing the domain names no outgoing key: true
+
+== publications during the run promote
+put promotes one: in S true, in F false
+copy promotes two: in S true, in F false
+delete removes both spaces: S false, F false
+
+== the publish lock orders publications with the collector
+publication waits while the lock is held: true
+a record naming no chunk does not wait: ok
+publication completes once released: true
+
+== the run ends
+promoted chunks read: true true
+absent chunk: none

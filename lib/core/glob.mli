@@ -1,6 +1,4 @@
-type t
+(** Glob patterns (spec 01 §17): anchored at both ends, byte-wise, [**] only as
+    a whole segment, [*] and [?] never cross [/], no escapes or classes. *)
 
-(** Parse a shell-like glob pattern ([*], [?], [**]). *)
-val of_pattern : string -> t
-
-val matches : t -> string -> bool
+val matches : string -> string -> bool

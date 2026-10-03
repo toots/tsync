@@ -1,0 +1,17 @@
+opam-version: "2.0"
+maintainer: ["Romain Beauxis <toots@rastageeks.org>"]
+authors: ["Romain Beauxis <toots@rastageeks.org>"]
+license: "MIT"
+homepage: "https://github.com/toots/tsync"
+bug-reports: "https://github.com/toots/tsync/issues"
+dev-repo: "git+https://github.com/toots/tsync.git"
+synopsis: "FUSE frontend support for tsync"
+depends: [
+  "dune" {>= "3.17"}
+  "fuse3" {>= "3.10.0.1"}
+]
+available: os = "linux"
+build: [
+  ["dune" "subst"] {dev}
+  ["dune" "build" "-p" name "-j" jobs "@install" "@runtest" {with-test} "@doc" {with-doc}]
+]

@@ -1,0 +1,8 @@
+; linkall: the local driver registers itself even when nothing names it.
+
+(library
+ (name tsync_store)
+ (library_flags (-linkall))
+ (libraries tsync_core unix yojson digestif base64)
+ (preprocess
+  (pps ppx_deriving_yojson)))

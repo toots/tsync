@@ -1,0 +1,8 @@
+; linkall: the frontend registers itself when linked.
+
+(library
+ (name tsync_file_provider)
+ (enabled_if
+  (= %{system} macosx))
+ (library_flags (-linkall))
+ (libraries tsync_core tsync_config tsync_owner unix))

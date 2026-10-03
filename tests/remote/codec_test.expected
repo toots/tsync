@@ -1,0 +1,39 @@
+== manifest example (02 §2.6)
+h = d94b4e9626fdc9c1-f3f6d793ca1ea424, 114 bytes
+0000  74 73 79 6e 63 6d 30 33 0b 00 00 00 00 00 00 00  tsyncm03........
+0010  00 00 20 28 96 36 da 41 00 00 80 00 01 00 00 00  .. (.6.A........
+0020  09 00 00 00 00 00 00 00 64 39 34 62 34 65 39 36  ........d94b4e96
+0030  32 36 66 64 63 39 63 31 66 33 66 36 64 37 39 33  26fdc9c1f3f6d793
+0040  63 61 31 65 61 34 32 34 68 65 6c 6c 6f 2e 74 78  ca1ea424hello.tx
+0050  74 64 34 34 37 62 31 65 61 34 30 65 36 39 38 38  td447b1ea40e6988
+0060  62 2d 62 37 61 65 62 35 32 61 31 30 66 64 61 66  b-b7aeb52a10fdaf
+0070  32 64                                            2d
+empty regular file names the empty chunk once; h1 = 06b4b04bae2346bf
+symlink: count 0, size 6, link target
+
+== readers refuse
+short                  refused
+other magic            refused
+negative size          refused
+length mismatch        refused
+renamed records the new leaf: other.txt
+
+== folder bodies (02 §2.7–2.9)
+{"dir":true,"name":"Photos","id":"3f2a9c1b7d4e-1a"}
+{"parent":".tsync-root","name":"Photos"}
+{"dir":true,"name":"Photos","id":"3f2a9c1b7d4e-1a","path":"Archive/Photos"}
+{"id":"3f2a9c1b7d4e-1a","dir":true,"x":1}        marker 3f2a9c1b7d4e-1a
+{"dir":true,"name":"a","id":""}                  unclassifiable
+{"parent":".tsync-root","name":"a"}              not a marker
+
+== keys
+tsync/photos/manifests/.tsync-root/857fcda0047eeab4-a677d171b8d38674
+tsync/photos/manifests/3f2a9c1b7d4e-1a/.tsync-parent
+tsync/photos/manifests/3f2a9c1b7d4e-1a/285b8db6c3eef5e0-7b23aee4b1561b8f
+tsync/photos/chunks/d44/d447b1ea40e6988b-b7aeb52a10fdaf2d
+marker of chunk: tsync/corrupted/photos/d44/d447b1ea40e6988b-b7aeb52a10fdaf2d
+marker of outgoing chunk: none
+run name of 1755300000.5: 1755300000500
+tsync/gc-jobs/My Files/1755300000500/a3f My Files/1755300000500/a3f
+tsync/gc-jobs/d/000                      not a job
+tsync/gc-jobs/d/1/zz                     not a job

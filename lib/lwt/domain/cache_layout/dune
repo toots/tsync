@@ -1,8 +1,0 @@
-; The checkout layout and the folder-id index on Lwt.
-
-(library
- (flags
-  (:standard -open Tsync_cache_layout -open Tsync_io_lwt))
- (name tsync_cache_layout_lwt)
- (public_name tsync-libs.cache_layout_lwt)
- (libraries tsync_cache_layout tsync_io_lwt lwt))

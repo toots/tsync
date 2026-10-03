@@ -1,0 +1,26 @@
+== budget (uplink-governor §4.2), 1000 B/s: burst 2000, window 30000
+admits 1500 at 0: true
+admits 1000 at 0: false, waits 0.50s
+admits 1000 at 0.5: true
+a body over the bucket alone: true
+then the window blocks: waits until a completion
+after its completion, debt paid by 100s: true
+== gate at 1 MiB/s
+4 MiB in 512 KiB bodies: about 2 s (the burst is 2 s of rate)
+a best-effort body beyond the budget: refused
+a disabled link admits at once: true
+== lease split (§4.5), 1000 B/s, min_rate 100, interval 2 s
+three waiting: 333 333 333 (sum 1000)
+waiting, idle: 900 100 (sum 1000)
+waiting, mover at 100 B/s: 875 125 (sum 1000)
+idle, idle: 500 500 (sum 1000)
+held back counts as waiting: 900 100 (sum 1000)
+floors fit a small link: 50 50 50
+== renewal shapes
+  {"action":"uplink","pid":1234,"links":{"wan":{"inFlight":10,"completed":200.0,"timeouts":1,"waiting":3,"heldBack":true,"probeMs":41.2,"probesMs":{"gcs":41.2}}}}
+  pid 1234 flat false wan: inFlight 10 heldBack true probes ["gcs" 0.0412]
+an old flat report, without heldBack or probesMs:
+  pid 7 flat true wan: inFlight 5 heldBack true probes ["" 0.0125]
+  {"ok":true,"interval":2.0,"rate":1250000.0,"links":{"wan":{"rate":1250000.0,"limit":"measured"}}}
+answer with links: interval 2, wan 1250000
+answer without links: refused

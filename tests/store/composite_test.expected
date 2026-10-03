@@ -1,0 +1,31 @@
+== reads
+main misses, replica not asked: none
+archive answers a source miss: "archived"
+but is never asked for a checksum: none
+main down, replica answers: "stale"
+main down, absent on replica and archive: unreachable
+
+== writes with the main down
+put: transient/link
+replica owes nothing: 0 records
+
+== deferred copies
+owed before start: replica 3, backfill 1
+no copy job left running: true
+replica: chunks true true, manifest true, journal true, cursor true, index false
+backfill: chunks true true, manifest true, journal false, cursor false, index false
+after delete, replica manifest false
+
+== a manifest naming a chunk no main holds parks, degraded
+the gate refuses it: corrupt/missing_chunks
+replica parked: corrupt/other
+backfill parked: corrupt/other
+replica holds it: false
+
+== write guard
+guarded write to the replica: transient/link
+batch read with the main held down: unreachable
+
+== conditional replace
+an entry read from another member replaces nothing: changed, main keeps "on main"
+with the main's entry: written

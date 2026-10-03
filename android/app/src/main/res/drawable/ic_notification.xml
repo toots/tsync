@@ -1,6 +1,4 @@
-<!-- A status bar icon is drawn as a silhouette in whatever colour the system
-     picks, so this carries the mark alone on its own 24 grid: any field would
-     come out as a filled square. -->
+<!-- The mark of assets/tsync.svg alone: the status bar tints it. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"

@@ -1,37 +1,45 @@
-(** One configuration setting, described rather than coded.
+(** Field specifications (spec 05 §2.1, 06 §5): each driver and frontend
+    declares its own fields; the config parser refuses keys a spec does not
+    list, the wizard prompts from them, and reports mask every field not
+    declared non-secret. *)
 
-    A backend or frontend declares what it needs alongside its factory, so
-    adding a setting is a line in a driver rather than an edit to the
-    [tsync config --edit] UI, which knows nothing of buckets or listen ports. *)
+type kind = String | Bool | Int | Size | Path | List | Float
 
-type typ = [ `String | `Bool | `Int ]
-
-type t = {
-  name : string;  (** The JSON key this is stored under. *)
-  label : string;  (** What the prompt calls it. *)
-  typ : typ;
+type field = {
+  name : string;
+  label : string;
+  kind : kind;
   default : string option;
-      (** [None] is required, [Some ""] is optional and omitted from the config
-          when left blank, [Some s] is optional with default [s]. Always the
-          textual form, whatever {!typ} says. *)
   secret : bool;
-      (** Read without echo, and masked wherever the config is printed. *)
+  required : bool;
+  check : string -> string option;  (** a rule on the value's text, or [None] *)
 }
 
-(** Read a [`Bool] field's value, as a driver or frontend receives it: a string,
-    since [tsync config --edit] writes a JSON boolean that {!Conf_parsing}
-    flattens and a hand-edited config holds whatever was typed.
+val f :
+  ?secret:bool ->
+  ?required:bool ->
+  ?default:string ->
+  ?check:(string -> string option) ->
+  string ->
+  string ->
+  kind ->
+  field
 
-    [default] is what an absent or unrecognised value means, and is why this is
-    shared rather than spelled at each reader. *)
-val bool : default:bool -> string option -> bool
+(** A parsed field value. *)
+type value =
+  | S of string
+  | B of bool
+  | I of int
+  | F of float
+  | L of string list
 
-(** What a report or a prompt shows in place of a secret that is set. *)
-val masked : string
+val is_loopback : string -> bool
 
-(** [v] as it may be shown: {!masked} for a secret field that is set. *)
-val mask : t -> string -> string
+(** Refuses plain http to a host that is not a loopback address; a bare host is
+    accepted when [bare_host]. *)
+val http_url : ?bare_host:bool -> string -> string option
 
-(** {!mask} for the field named [name] in [spec]; a name the spec does not know
-    is shown as it is. *)
-val mask_named : t list -> string -> string -> string
+val min_secret_length : int
+val secret_length : string -> string option
+val absolute_path : string -> string option
+val absolute_or_home : string -> string option

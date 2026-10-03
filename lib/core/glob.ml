@@ -1,48 +1,39 @@
-(* Simple shell-style glob matcher.
-   Spec:
-   - [*]  matches any sequence of characters except [/]
-   - [**] matches any sequence of characters including [/]
-   - [?]  matches any single character except [/]
-   - everything else matches itself literally (including [+], [.], [(], [)], …)
-   No brace expansion, no character classes — we don't need them. *)
-
-type t = string
-
-let of_pattern p = p
-
-let rec match_from pat pi str si =
-  if pi = String.length pat then si = String.length str
-  else (
-    match pat.[pi] with
-      | '*' when pi + 1 < String.length pat && pat.[pi + 1] = '*' ->
-          (* **/ matches zero or more path segments (including their trailing /),
-         so **/.git matches both .git and a/b/.git.
-         Plain ** (not followed by /) matches any sequence of characters. *)
-          let rest =
-            if pi + 2 < String.length pat && pat.[pi + 2] = '/' then pi + 3
-            else pi + 2
-          in
-          let rec try_from i =
-            if match_from pat rest str i then true
-            else if i < String.length str then try_from (i + 1)
-            else false
-          in
-          try_from si
-      | '*' ->
-          (* * matches any sequence that does not cross a path separator *)
-          let rec try_from i =
-            if match_from pat (pi + 1) str i then true
-            else if i < String.length str && str.[i] <> '/' then try_from (i + 1)
-            else false
-          in
-          try_from si
-      | '?' ->
-          si < String.length str
-          && str.[si] <> '/'
-          && match_from pat (pi + 1) str (si + 1)
-      | c ->
-          si < String.length str
-          && str.[si] = c
-          && match_from pat (pi + 1) str (si + 1))
-
-let matches pat str = match_from pat 0 str 0
+let matches pattern path =
+  let pl = String.length pattern and sl = String.length path in
+  let seg_start i = i = 0 || pattern.[i - 1] = '/' in
+  let rec m i j =
+    if i = pl then j = sl
+    else if
+      seg_start i
+      && i + 1 < pl
+      && pattern.[i] = '*'
+      && pattern.[i + 1] = '*'
+      && (i + 2 = pl || pattern.[i + 2] = '/')
+    then
+      if i + 2 = pl then true
+      else (
+        let rest = i + 3 in
+        let rec after k =
+          k <= sl
+          && (m rest k
+             ||
+               match String.index_from_opt path k '/' with
+               | Some n -> after (n + 1)
+               | None -> false)
+        in
+        after j)
+    else (
+      match pattern.[i] with
+        | '*' ->
+            let rec skip i =
+              if i < pl && pattern.[i] = '*' then skip (i + 1) else i
+            in
+            let i' = skip i in
+            let rec try_ k =
+              m i' k || (k < sl && path.[k] <> '/' && try_ (k + 1))
+            in
+            try_ j
+        | '?' -> j < sl && path.[j] <> '/' && m (i + 1) (j + 1)
+        | c -> j < sl && path.[j] = c && m (i + 1) (j + 1))
+  in
+  m 0 0

@@ -1,0 +1,122 @@
+(** The local mirror of a domain's namespace (spec 04 §2.3–2.4, §4.1, §4.9): one
+    manifest file per published file and one directory per folder, filed by real
+    path with escape handles, plus the folder-id index.
+
+    Only the owner writes it; other processes may read entries, which are only
+    ever replaced by rename. *)
+
+open Tsync_core
+
+type t
+
+val create : cache_root:string -> Domain_name.t -> t
+
+(** [<cache_root>/<domain>]. *)
+val root : t -> string
+
+(** The local path of a domain-relative path, escaped component by component. *)
+val path : t -> string -> string
+
+type file = [ `File of Manifest.t | `Corrupt | `Dir | `Absent ]
+
+val file : t -> string -> file
+val manifest : t -> string -> Manifest.t option
+val kind : t -> string -> [ `Dir | `File | `Absent ]
+
+(** The folder id held at a path: [.tsync-root] for the root, the marker's id
+    otherwise. Never mints. *)
+val folder_id : t -> string -> Folder_id.t option
+
+(** Create the missing folders of a path, escaped, with name markers. *)
+val ensure_dirs : t -> string -> unit
+
+(** Replace a file entry with a manifest recording the path's leaf. [own] says
+    this client stored it (the own marker, 04 §2.3). [durable] defaults to true.
+    EXISTS when the escape handle is held by another name. *)
+val write_file : ?durable:bool -> ?own:bool -> t -> string -> Manifest.t -> unit
+
+(** Removes the entry, then its file id. *)
+val remove_file : t -> string -> unit
+
+(** The file id of the file at a path (01 §2.7, 04 §2.3); never writes. *)
+val file_id : t -> string -> string option
+
+(** The current path of a file id; verified against the marker. *)
+val path_of_file_id : t -> string -> string option
+
+(** 04 §2.3, §4.10 step 8: the file-id index from its snapshot, which is
+    removed; else its build starts in the background. *)
+val load_file_ids : t -> unit
+
+(** The index into its snapshot, at a clean stop; the next marker change removes
+    it. *)
+val save_file_ids : t -> unit
+
+(** Until the index is built; starts the build if nothing has. *)
+val await_file_ids : t -> unit
+
+(** The path's file id, minted and recorded when it has none: for an entry first
+    occupying a path, including a staged-only file. *)
+val ensure_file_id : ?durable:bool -> t -> string -> string
+
+(** Give a file id to every file entry without one (04 §4.10); how many. *)
+val backfill_file_ids : t -> int
+
+val is_own : t -> string -> bool
+
+(** Record a folder with an id: directory, markers, removed-id record and
+    reverse entry. With [on_other = `Keep] an id already held is kept. *)
+val record_folder :
+  ?durable:bool ->
+  ?on_other:[ `Keep | `Replace ] ->
+  t ->
+  string ->
+  Folder_id.t ->
+  [ `Same | `Changed | `Replaced of Folder_id.t | `Held of Folder_id.t ]
+
+(** A folder without an id (created under an op before its mkdir arrives). *)
+val mkdir_without_id : t -> string -> unit
+
+val remove_folder : t -> string -> unit
+
+(** Move a folder with every record that names it. *)
+val move_folder : t -> src:string -> dst:string -> unit
+
+(** Move a file entry, its own marker, its file id and its recorded name; a
+    staged-only file's id moves too. *)
+val move_file : t -> src:string -> dst:string -> unit
+
+type child = {
+  name : string;
+  kind : [ `Dir of Folder_id.t option | `File of Manifest.t ];
+}
+
+(** Real names; internal leaves, temporaries and undecodable entries skipped. *)
+val list : t -> string -> child list
+
+(** The time the folder's set of children last changed here. *)
+val dir_mtime : t -> string -> float
+
+(** The live id, else the id last removed from this path. *)
+val lookup_id_removed : t -> string -> Folder_id.t option
+
+(** The current path of an id through the reverse entries, verified against the
+    forward marker; a cycle or a stale entry answers nothing. *)
+val key_of_id : t -> Folder_id.t -> string option
+
+val whereabouts :
+  t ->
+  string ->
+  [ `Live of Folder_id.t
+  | `Moved of Folder_id.t * string
+  | `Removed of Folder_id.t
+  | `Unknown ]
+
+(** Re-derive the reverse entries from the markers. *)
+val rebuild_index : t -> unit
+
+(** Remove every folder marker under a subtree and the path's removed-id record.
+*)
+val forget_subtree : t -> string -> unit
+
+val sweep_removed_records : t -> older_than:float -> unit

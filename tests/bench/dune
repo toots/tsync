@@ -1,0 +1,18 @@
+; Manual measurements against real data; not part of runtest.
+
+(executable
+ (name rebuild_mem)
+ (modules rebuild_mem)
+ (libraries
+  tsync_core
+  tsync_store
+  tsync_remote
+  tsync_checkout
+  tsync_sync
+  mem_usage
+  unix))
+
+(executable
+ (name class_bench)
+ (modules class_bench)
+ (libraries tsync_core tsync_ipc threads.posix unix))

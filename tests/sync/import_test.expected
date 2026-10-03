@@ -1,0 +1,33 @@
+holds: no last-sync mark
+holds: no last-sync mark
+== A imports a tree, B applies the journal
+imported 4 (36 bytes), skipped 0, links skipped 0, failed 0
+-- after B's pass
+  A: empty/  notes/  notes/a.txt = "alpha"  notes/deep/  notes/deep/b.txt = "a body longer than one chunk"  top-link = ""  top.txt = "top"
+  B: empty/  notes/  notes/a.txt = "alpha"  notes/deep/  notes/deep/b.txt = "a body longer than one chunk"  top-link = ""  top.txt = "top"
+
+== a rerun finds everything there
+imported 0 (0 bytes), skipped 4, links skipped 0, failed 0
+entries B applies: 0
+
+== a changed file stays skipped unless forced
+imported 0 (0 bytes), skipped 1, links skipped 0, failed 0
+imported 1 (12 bytes), skipped 0, links skipped 0, failed 0
+-- after B's pass
+  B: empty/  notes/  notes/a.txt = "alpha"  notes/deep/  notes/deep/b.txt = "a body longer than one chunk"  top-link = ""  top.txt = "top, changed"
+
+== cancelled partway: only what was uploaded is announced
+imported 2 (8 bytes), skipped 0, links skipped 0, failed 0, cancelled
+-- after B's pass
+  B: empty/  more/  more/one.txt = "one"  more/three.txt = "three"  notes/  notes/a.txt = "alpha"  notes/deep/  notes/deep/b.txt = "a body longer than one chunk"  top-link = ""  top.txt = "top, changed"
+imported 1 (3 bytes), skipped 2, links skipped 0, failed 0
+-- after the rerun
+  B: empty/  more/  more/one.txt = "one"  more/three.txt = "three"  more/two.txt = "two"  notes/  notes/a.txt = "alpha"  notes/deep/  notes/deep/b.txt = "a body longer than one chunk"  top-link = ""  top.txt = "top, changed"
+
+== a file rewritten in place while it is read
+imported 0 (0 bytes), skipped 0, links skipped 0, failed 1
+  swap.txt: swap.txt changed while it was read [transient/local]
+-- after B's pass
+  B: empty/  more/  more/one.txt = "one"  more/three.txt = "three"  more/two.txt = "two"  notes/  notes/a.txt = "alpha"  notes/deep/  notes/deep/b.txt = "a body longer than one chunk"  top-link = ""  top.txt = "top, changed"
+
+owed: A 0/0, unapplied B 0

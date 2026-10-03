@@ -1,0 +1,6 @@
+; linkall: the driver registers itself when linked.
+
+(library
+ (name tsync_s3)
+ (library_flags (-linkall))
+ (libraries tsync_core tsync_store tsync_http unix digestif base64 ptime))

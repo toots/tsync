@@ -1,0 +1,14 @@
+ok   a sleep ends
+ok   a timeout fires
+ok   a time-sensitive timer fires
+ok   a non-blocking socket read completes
+ok   a wait inside non-blocking work resumes
+ok   a fiber spawned as non-blocking starts
+ok   a liveness probe is answered
+ok   a request to the handler waits for a slot
+ok   no pinned call has returned
+ok   may-block work has not run
+ok   may-block work runs once slots are released
+ok   the handler answers once slots are released
+ok   leaving for may-block work and coming back
+13 checks

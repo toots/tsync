@@ -1,0 +1,15 @@
+ok   sleep
+ok   timeout
+ok   first
+ok   all order
+ok   mutex exclusion
+ok   semaphore bound
+ok   promise
+ok   cancel runs finally
+ok   first waits for a loser
+ok   a cancelled first still waits for its losers
+ok   cancelled acquires leave no waiter
+ok   cancelled waits on the stop promise are withdrawn
+ok   ended fibers leave no context behind
+ok   run_sync leaves no context behind
+14 checks

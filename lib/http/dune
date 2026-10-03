@@ -1,0 +1,3 @@
+(library
+ (name tsync_http)
+ (libraries tsync_core unix ptime.clock.os))

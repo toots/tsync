@@ -1,0 +1,141 @@
+(executable
+ (name plan_test)
+ (modules plan_test)
+ (libraries tsync_core tsync_store tsync_sync tsync_gc))
+
+(rule
+ (with-stdout-to
+  plan_test.output
+  (run ./plan_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff plan_test.expected plan_test.output)))
+
+(executable
+ (name collector_test)
+ (modules collector_test)
+ (libraries contract tsync_core tsync_store tsync_gc unix))
+
+(executable
+ (name lock_holder)
+ (modules lock_holder)
+ (libraries tsync_core tsync_store))
+
+(rule
+ (deps lock_holder.exe)
+ (action
+  (with-stdout-to
+   collector_test.output
+   (run ./collector_test.exe))))
+
+(rule
+ (alias runtest)
+ (action
+  (diff collector_test.expected collector_test.output)))
+
+(executable
+ (name retention_test)
+ (modules retention_test)
+ (libraries tsync_core tsync_store tsync_remote tsync_sync tsync_gc unix))
+
+(rule
+ (with-stdout-to
+  retention_test.output
+  (run ./retention_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff retention_test.expected retention_test.output)))
+
+(executable
+ (name resume_test)
+ (modules resume_test)
+ (libraries test_support tsync_core tsync_store tsync_gc unix))
+
+(rule
+ (with-stdout-to
+  resume_test.output
+  (run ./resume_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff resume_test.expected resume_test.output)))
+
+(executable
+ (name queued_test)
+ (modules queued_test)
+ (libraries tsync_core tsync_store tsync_gc unix))
+
+(rule
+ (with-stdout-to
+  queued_test.output
+  (run ./queued_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff queued_test.expected queued_test.output)))
+
+(executable
+ (name integrity_test)
+ (modules integrity_test)
+ (libraries tsync_core tsync_store tsync_remote tsync_gc unix))
+
+(rule
+ (with-stdout-to
+  integrity_test.output
+  (run ./integrity_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff integrity_test.expected integrity_test.output)))
+
+(executable
+ (name verify_test)
+ (modules verify_test)
+ (libraries tsync_core tsync_store tsync_remote tsync_gc unix))
+
+(rule
+ (with-stdout-to
+  verify_test.output
+  (run ./verify_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff verify_test.expected verify_test.output)))
+
+(executable
+ (name mirror_test)
+ (modules mirror_test)
+ (libraries tsync_core tsync_store tsync_remote tsync_gc unix))
+
+(rule
+ (with-stdout-to
+  mirror_test.output
+  (run ./mirror_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff mirror_test.expected mirror_test.output)))
+
+(executable
+ (name share_test)
+ (modules share_test)
+ (libraries tsync_core tsync_store tsync_remote tsync_gc unix))
+
+(rule
+ (with-stdout-to
+  share_test.output
+  (run ./share_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff share_test.expected share_test.output)))

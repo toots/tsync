@@ -1,0 +1,219 @@
+(library
+ (name contract)
+ (modules contract)
+ (libraries tsync_core tsync_store unix))
+
+(executable
+ (name local_test)
+ (modules local_test)
+ (libraries contract tsync_core tsync_store unix yojson))
+
+(rule
+ (with-stdout-to
+  local_test.output
+  (run ./local_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff local_test.expected local_test.output)))
+
+(executable
+ (name composite_test)
+ (modules composite_test)
+ (libraries test_support contract tsync_core tsync_store unix))
+
+(rule
+ (with-stdout-to
+  composite_test.output
+  (run ./composite_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff composite_test.expected composite_test.output)))
+
+; A real bucket is reached over TLS: the native implementation is linked, and
+; the test runs only where it is built (CI checks that it is).
+
+(executable
+ (name gcs_test)
+ (modules gcs_test)
+ (optional)
+ (libraries
+  contract
+  tsync_core
+  tsync_store
+  tsync_gcs
+  tsync_http
+  tsync_http_native
+  unix
+  yojson
+  ptime
+  base64))
+
+; The CI variables select a real bucket; they are dependencies, so a cached
+; run against the fake is never replayed as a real one.
+
+(rule
+ (enabled_if %{lib-available:tsync_http_native})
+ (deps
+  (env_var TSYNC_CI_GCS_BUCKET)
+  (env_var TSYNC_CI_GCS_SERVICE_ACCOUNT_KEY)
+  (env_var TSYNC_CI_REQUIRE_REAL))
+ (action
+  (with-stdout-to
+   gcs_test.output
+   (run ./gcs_test.exe))))
+
+(rule
+ (alias runtest)
+ (enabled_if %{lib-available:tsync_http_native})
+ (action
+  (diff gcs_test.expected gcs_test.output)))
+
+(executable
+ (name proxy_wire_test)
+ (modules proxy_wire_test)
+ (libraries tsync_core tsync_store tsync_http_proxy_client))
+
+(rule
+ (with-stdout-to
+  proxy_wire_test.output
+  (run ./proxy_wire_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff proxy_wire_test.expected proxy_wire_test.output)))
+
+(executable
+ (name proxy_test)
+ (modules proxy_test)
+ (libraries
+  contract
+  tsync_core
+  tsync_store
+  tsync_http
+  tsync_http_proxy_client
+  tsync_http_proxy
+  unix))
+
+(rule
+ (with-stdout-to
+  proxy_test.output
+  (run ./proxy_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff proxy_test.expected proxy_test.output)))
+
+(executable
+ (name share_test)
+ (modules share_test)
+ (libraries tsync_http_proxy yojson))
+
+(rule
+ (with-stdout-to
+  share_test.output
+  (run ./share_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff share_test.expected share_test.output)))
+
+(executable
+ (name spaces_test)
+ (modules spaces_test)
+ (libraries contract tsync_core tsync_store unix))
+
+(rule
+ (with-stdout-to
+  spaces_test.output
+  (run ./spaces_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff spaces_test.expected spaces_test.output)))
+
+; Which library sources know the collection exists (gc.md §5.8, §10 "Scoped
+; access"): a new name in this list is a caller that learned about GC.
+
+(rule
+ (deps
+  (source_tree %{workspace_root}/lib))
+ (action
+  (with-stdout-to
+   gc_scoping.output
+   (system
+    "cd %{workspace_root}/lib && grep -rlE 'Key\\.(chunks_from|chunk_from|gc_run|gc_lock|gc_generation|outgoing_chunk|outgoing_prefix|is_outgoing)|Gc_generation\\.|Chunk_spaces\\.' --include='*.ml' --exclude-dir=.formatted . | sort"))))
+
+(rule
+ (alias runtest)
+ (action
+  (diff gc_scoping.expected gc_scoping.output)))
+
+(executable
+ (name watch_test)
+ (modules watch_test)
+ (libraries tsync_core tsync_store unix))
+
+(rule
+ (enabled_if
+  (= %{system} linux))
+ (action
+  (with-stdout-to
+   watch_test.output
+   (run ./watch_test.exe))))
+
+(rule
+ (alias runtest)
+ (enabled_if
+  (= %{system} linux))
+ (action
+  (diff watch_test.expected watch_test.output)))
+
+; 09 §10.1: reported, not silently skipped, where it cannot run.
+
+(rule
+ (alias runtest)
+ (enabled_if
+  (not
+   (= %{system} linux)))
+ (action
+  (echo "watch_test: not run, no directory watch on this platform\n")))
+
+(executable
+ (name s3_test)
+ (modules s3_test)
+ (libraries
+  contract
+  tsync_core
+  tsync_store
+  tsync_s3
+  tsync_http
+  unix
+  ptime
+  base64
+  digestif))
+
+(rule
+ (deps
+  (env_var TSYNC_CI_S3_BUCKET)
+  (env_var TSYNC_CI_S3_ACCESS_KEY_ID)
+  (env_var TSYNC_CI_S3_SECRET_ACCESS_KEY)
+  (env_var TSYNC_CI_S3_ENDPOINT)
+  (env_var TSYNC_CI_S3_REGION)
+  (env_var TSYNC_CI_REQUIRE_REAL))
+ (action
+  (with-stdout-to
+   s3_test.output
+   (run ./s3_test.exe))))
+
+(rule
+ (alias runtest)
+ (action
+  (diff s3_test.expected s3_test.output)))

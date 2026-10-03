@@ -1,0 +1,8 @@
+no index, a reader that may not write        3 children: 3 child reads, 0 index reads, 0 index writes
+no index, the rebuild walker                 3 children: 3 child reads, 0 index reads, 1 index writes
+a valid index                                3 children: 0 child reads, 1 index reads, 0 index writes
+one child rewritten                          3 children: 1 child reads, 1 index reads, 1 index writes
+the index rewritten                          3 children: 0 child reads, 1 index reads, 0 index writes
+an index that does not parse                 3 children: 3 child reads, 1 index reads, 0 index writes
+two readable members                         3 children: 3 child reads, 0 index reads, 0 index writes
+a rewritten child reads its new body: true

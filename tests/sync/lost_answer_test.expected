@@ -1,0 +1,13 @@
+B: d1/ d2/ f.txt x/
+== rmdir, the journal entry refused
+  failed once: true; B: d2/ f.txt x/; A parked 0, owed 0
+== rmdir, the anchor's answer lost
+  failed once: true; B: f.txt x/; A parked 0, owed 0
+== file rename, the copy's answer lost
+  failed once: true; B: g.txt x/; A parked 0, owed 0
+== folder rename, the old marker's delete refused
+  failed once: true; B: g.txt y/; A parked 0, owed 0
+  old marker left: false
+a full rebuild of B after the rename: 0 failures
+a full rebuild of B with a disowned marker: 0 failures
+B: g.txt y/

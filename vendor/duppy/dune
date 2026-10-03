@@ -1,0 +1,11 @@
+; Copied from liquidsoap src/modules/duppy and src/modules/stdlib-utils, with
+; two changes: timers run on the monotonic clock, and [suspend] parks a
+; computation until an arbitrary resumer is called.
+
+(library
+ (name duppy)
+ (wrapped false)
+ (libraries unix threads.posix re)
+ (foreign_stubs
+  (language c)
+  (names unix_utils_stubs pollset_stubs clock_stubs)))

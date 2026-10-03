@@ -1,8 +1,0 @@
-; The backend API and the composite on Lwt.
-
-(library
- (flags
-  (:standard -open Tsync_backend_api -open Tsync_core_lwt -open Tsync_io_lwt))
- (name tsync_backend_lwt)
- (public_name tsync-libs.backend_lwt)
- (libraries tsync_backend_api tsync_core_lwt tsync_io_lwt lwt))

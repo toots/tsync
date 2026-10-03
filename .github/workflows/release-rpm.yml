@@ -1,34 +1,40 @@
 name: release-rpm
 
-# Same trigger as release-macos: runs after `test` passes on main, so a red
-# build never reaches the nightly download URL.
+# Builds, packages and install-tests on every pull request and push to rewrite,
+# publishing nothing (10 §1): a change that breaks a package is red on its own
+# pull request. On main it runs after the gate, `test`, passes, so a red build
+# never reaches the nightly URL. workflow_run fires only from the default
+# branch's copy of this file.
 on:
+  push:
+    branches: [rewrite]
+  pull_request:
   workflow_run:
     workflows: [test]
     types: [completed]
     branches: [main]
   workflow_dispatch:
 
-# Its own group, so the four release workflows do not serialize behind each
-# other. They all upload to the same nightly tag, which the publish step below
-# is written to tolerate.
 concurrency:
-  group: release-rpm
+  group: release-rpm-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
   rpm:
+    # 10 §2: only a gate run for a push to this repository releases. A fork
+    # pull request's gate run carries the fork's branch name as head_branch.
     if: >-
-      github.event_name == 'workflow_dispatch'
-      || github.event.workflow_run.conclusion == 'success'
+      github.event_name != 'workflow_run'
+      || (github.event.workflow_run.conclusion == 'success'
+          && github.event.workflow_run.event == 'push'
+          && github.event.workflow_run.head_repository.full_name == github.repository)
     strategy:
       fail-fast: false
       matrix:
-        image: ["fedora:43", "fedora:44"]
+        image: ["fedora:44"]
         arch: [amd64, arm64]
-        # `arch` has to be a matrix key, not only an include key: an include
-        # entry sharing no key with the matrix is merged into every combination
-        # instead of selecting one, which collapses this to two jobs.
+        # `arch` has to be a matrix key: an include entry sharing no key with
+        # the matrix is merged into every combination instead of selecting one.
         include:
           - arch: amd64
             runner: ubuntu-latest
@@ -42,38 +48,37 @@ jobs:
     env:
       SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
       RUN_NUMBER: ${{ github.run_number }}
+      PUBLISH: >-
+        ${{ (github.event_name == 'workflow_run'
+             && github.event.workflow_run.event == 'push'
+             && github.event.workflow_run.head_repository.full_name == github.repository
+             && github.event.workflow_run.head_branch == 'main')
+            || (github.event_name == 'workflow_dispatch'
+                && github.ref == 'refs/heads/main') }}
     steps:
       - name: Install system dependencies
-        # fuse3, not fuse: the daemon links libfuse3, which mounts by running
-        # the setuid fusermount3, and only fuse3 provides it.
-        #
-        # gmp-devel is for mirage-crypto-pk -> conf-gmp.
+        # fuse3, not fuse: libfuse3 mounts through the setuid fusermount3,
+        # which only fuse3 provides. gmp-devel is for mirage-crypto-pk, and gh
+        # for the publish step.
         run: |
           dnf install -y \
-            opam gcc gcc-c++ make m4 pkgconf-pkg-config git curl unzip rsync \
-            tar gzip rpm-build systemd-rpm-macros gh \
-            fuse3-devel fuse3 xxhash-devel libev-devel openssl-devel gmp-devel \
-            pcre2-devel dbus-devel \
-            cmake extra-cmake-modules qt6-qtbase-devel kf6-kio-devel
+            opam gcc make m4 pkgconf-pkg-config git curl unzip rsync tar gzip \
+            rpm-build systemd-rpm-macros gh binutils \
+            fuse3-devel fuse3 openssl-devel gmp-devel
 
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          ref: ${{ env.SHA }}
 
       # linux/build.sh builds a whole opam switch, which is nearly all of this
-      # job. The key covers everything that decides what the switch should hold
-      # -- the opam files, the compiler build.sh names, the pin list. What a
-      # restored switch cannot know, a git pin that moved or a new release in
-      # opam-repository, is what scripts/opam_deps.sh updates and upgrades to
-      # before it installs, so a hit is fast rather than stale. build.sh runs
-      # `opam clean` after: every container job keeps one of these and they
-      # share the repository's cache budget.
+      # job. A hit is fast rather than stale: build.sh updates and upgrades
+      # before it installs.
       - name: Restore the opam root
         id: opam-root
         uses: actions/cache/restore@v4
         with:
           path: ~/.opam
-          key: opam-${{ matrix.image }}-${{ matrix.arch }}-${{ hashFiles('opam/*.opam', 'linux/build.sh', 'scripts/opam_deps.sh') }}
+          key: opam-${{ matrix.image }}-${{ matrix.arch }}-${{ hashFiles('*.opam', 'linux/build.sh') }}
 
       - name: Build
         run: ./linux/build.sh
@@ -83,61 +88,21 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: ~/.opam
-          key: opam-${{ matrix.image }}-${{ matrix.arch }}-${{ hashFiles('opam/*.opam', 'linux/build.sh', 'scripts/opam_deps.sh') }}
+          key: opam-${{ matrix.image }}-${{ matrix.arch }}-${{ hashFiles('*.opam', 'linux/build.sh') }}
 
       - name: Package
         run: ./linux/rpm/build.sh
 
-      - name: Verify the packages install
-        # Catches a bad Requires or a missing library before anyone downloads it.
-        # ldd alone cannot fail here -- the build container installed dbus-devel,
-        # so the runtime library is present whatever the package declares. The
-        # Requires assertions are what actually hold: the tray must ask for
-        # libdbus, and tsync must not, which is the point of shipping them
-        # separately.
-        run: |
-          dnf install -y ./dist/*.rpm
-          for b in tsync tsync-tray; do
-            test "$(ldd "$(command -v $b)" | grep -c 'not found')" = 0
-          done
-          # Nothing in an install proves these shipped -- they no-op in a
-          # container, where /run/systemd/system does not exist. Unqualified
-          # %post in the spec means the base package and nothing else, which is
-          # what the tray assertion holds to.
-          for s in postinstall preuninstall; do
-            rpm -qp --scripts dist/tsync_*.rpm | grep -q "^$s scriptlet"
-          done
-          # And that both of them name the instances rather than the template
-          # alone: the systemd macros act on tsync@.service, which no running
-          # tsync@<user> answers to, so a spec that only calls them restarts
-          # nothing and stops nothing.
-          test "$(rpm -qp --scripts dist/tsync_*.rpm | grep -c "'tsync@\*\.service'")" = 2
-          ! rpm -qp --scripts dist/tsync-tray_*.rpm | grep -q 'scriptlet'
-          rpm -qpR dist/tsync-tray_*.rpm | grep -q libdbus-1
-          rpm -qpR dist/tsync-dolphin_*.rpm | grep -q libKF6
-          ! rpm -qpR dist/tsync-tray_*.rpm | grep -q libKF6
-          # The plugin resolves the mount rules by soname along its rpath, and
-          # the object answering that soname ships in the base package. ldd
-          # finding it is what says the two halves agree.
-          test "$(ldd /usr/lib*/qt6/plugins/kf6/kfileitemaction/tsyncdolphin.so \
-            | grep -c 'not found')" = 0
-          ldd /usr/lib*/qt6/plugins/kf6/kfileitemaction/tsyncdolphin.so \
-            | grep -q libtsync_mounts.so
-          # ldd alone cannot catch a leaked build path here: this is the machine
-          # that built it, so the build tree still exists and the bogus entry
-          # resolves. What ships would not.
-          ! objdump -p /usr/lib*/qt6/plugins/kf6/kfileitemaction/tsyncdolphin.so \
-            | grep -E 'RPATH|RUNPATH' | grep -q _build
-          rpm -ql tsync | grep -q libtsync_mounts.so
-          ! rpm -ql tsync-dolphin | grep -q libtsync_mounts.so
-          ! rpm -qpR dist/tsync_*.rpm | grep -q libdbus-1
+      - name: Verify the package installs
+        run: ./linux/rpm/verify.sh
 
       - uses: actions/upload-artifact@v4
         with:
           name: tsync-rpm-${{ matrix.arch }}-${{ strategy.job-index }}
           path: dist/*.rpm
 
-      - uses: ./.github/actions/publish-nightly
+      - if: env.PUBLISH == 'true'
+        uses: ./.github/actions/publish-nightly
         with:
           files: dist/*.rpm
           sha: ${{ env.SHA }}

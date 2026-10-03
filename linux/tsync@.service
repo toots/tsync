@@ -1,14 +1,11 @@
-# System unit shipped by the deb/rpm. Instanced on the user to run as, since a
-# package cannot know it: `systemctl enable --now tsync@alice`.
+# System unit shipped by the deb and rpm, instanced on the user to run as since
+# a package cannot know it: `systemctl enable --now tsync@alice`.
 #
-# The source install uses tsync.service instead — a user unit, which needs
-# lingering to survive reboot. This one starts at boot on its own.
-#
-# Do not add ProtectHome=, PrivateTmp= or PrivateMounts=: they give the service
-# a private mount namespace, and the FUSE mount then exists for nobody else.
+# No ProtectHome=, PrivateTmp= or PrivateMounts=: a private mount namespace
+# hides the FUSE mount from everyone else.
 
 [Unit]
-Description=tsync FUSE filesystem for %i
+Description=tsync for %i
 After=network-online.target
 Wants=network-online.target
 
@@ -18,9 +15,11 @@ ExecStart=/usr/bin/tsync start
 ExecStop=/usr/bin/tsync stop
 Restart=on-failure
 RestartSec=5
-# A stop takes at most about ten seconds: what is still in flight then is
-# owed on disk and resumes at the next start.
-TimeoutStopSec=30
+# 78 is an invalid config, which a restart would only repeat.
+RestartPreventExitStatus=78
+# Above STOP_WAIT (42 s): what is still in flight then is owed on disk and
+# resumes at the next start.
+TimeoutStopSec=60
 LimitNOFILE=65536
 
 [Install]

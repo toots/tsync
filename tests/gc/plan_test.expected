@@ -1,0 +1,76 @@
+== run record (02 §2.12)
+{"phase":"marking","started":1759140000.123,"cursor":"m/3f2a"} -> marking started=1759140000.123 cursor="m/3f2a" generation=-
+{"phase":"closing","started":1759140000,"cursor":"a3f","generation":7} -> closing started=1759140000.000 cursor="a3f" generation=7
+{"phase":"reconciling","started":1,"cursor":"a3f"}             -> closing started=1.000 cursor="a3f" generation=-
+{"phase":"opening","started":1,"extra":true}                   -> opening started=1.000 cursor="" generation=-
+{"phase":"sweeping","started":1}                               -> unreadable
+{"phase":"closing","started":1,"generation":0}                 -> unreadable
+{"started":1}                                                  -> unreadable
+not json                                                       -> unreadable
+encode round trip: true; run name 1759140000123
+
+== where a session starts (§5.5)
+absent                 keep=false -> open (started now), mark after ""
+absent                 keep=true  -> write abandoning, keep all
+unreadable             keep=false -> keep after ""
+unreadable             keep=true  -> keep after ""
+opening                keep=false -> open (started 100), mark after ""
+opening                keep=true  -> write abandoning, keep all
+marking m/b            keep=false -> open (started 100), mark after "m/b", no rename
+marking m/b            keep=true  -> write abandoning, keep all
+closing a3f gen 7      keep=false -> close after "a3f", generation 7
+closing a3f gen 7      keep=true  -> write abandoning, keep all
+closing, no generation keep=false -> close after "a3f", generation fresh
+closing, no generation keep=true  -> write abandoning, keep all
+abandoning 0ff         keep=false -> keep after "0ff"
+abandoning 0ff         keep=true  -> keep after "0ff"
+
+== namespaces: m/ before v/, after the cursor, directory prefixes
+from the start: m/.tsync-root m/a m/b v/a
+after m/a:      m/b v/a
+after m/b:      v/a
+prefixes: tsync/d/manifests/a/ tsync/d/versions/a/
+
+== generation
+G 0 -> run generation 1
+G 4 -> run generation 5
+G 5 -> run generation 5
+G unreadable -> stop: the collection generation is unreadable
+settled after 5: 6
+
+== doom step: only chunk keys of the shard absent from S (P4)
+doomed: dead
+
+== abandoning one shard
+S    0, F  500 -> rename F's shard
+S    3, F  500 -> push S's entries down, then rename
+S  200, F  500 -> push S's entries down, then rename
+S  499, F  500 -> move F's entries across
+shards after 0ff: 100 a00
+
+== trash (§4.1): cutoff 1000
+live, entries old and new          -> delete stale entries: e0
+live, on demand                    -> refuse: live elsewhere
+in trash, one entry recent         -> skip: trashed again recently
+in trash, all old                  -> purge the subtree, then entries: e0 e1
+no anchor, old                     -> purge the subtree, then entries: e0
+in trash, recent, on demand        -> purge the subtree, then entries: e0
+purge order: tsync/d/manifests/deep/ tsync/d/manifests/mid/ tsync/d/manifests/mid2/ tsync/d/manifests/top/
+
+== versions (§4.3): cutoff 2 s
+deleted: 1000000000
+
+== journal (§4.4): now 100 days, horizon 30 days
+cutoff day 60                            -> day10 day50
+cutoff day 100: the horizon holds        -> day10 day50 day69
+cutoff day 60, cursor names day 10       -> day50
+
+== shares (§4.5): now 100
+{"v":1,"expires":50,"domain":"d","type":"file"}    -> expired: delete
+{"v":1,"expires":150,"domain":"d","type":"file"}   -> kept
+{"v":1,"expires":50,"domain":"e","type":"file"}    -> another domain's
+{"v":1,"domain":"d"}                               -> unparseable: left, reported
+garbage                                            -> unparseable: left, reported
+
+== dry run survey (§5.9)
+reclaimable 2 chunks, 50 bytes

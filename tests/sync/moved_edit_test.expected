@@ -1,0 +1,19 @@
+holds: no last-sync mark
+holds: no last-sync mark
+== A edits a published file, then renames it before the upload runs
+-- after both passes
+  A: b.txt = "version two"
+  B: b.txt = "version two"
+== A edits part of a file in place while B replaces it
+-- after both passes
+  A: b.txt = "version two"  f (conflicted copy from A).txt = "aaaaXXXXccccdddd"  f.txt = "B's whole new text"
+  B: b.txt = "version two"  f (conflicted copy from A).txt = "aaaaXXXXccccdddd"  f.txt = "B's whole new text"
+== B edits a file offline while A's rename of it arrives
+-- after both passes
+  A: b.txt = "version two"  f (conflicted copy from A).txt = "aaaaXXXXccccdddd"  f.txt = "B's whole new text"  h.txt = "B's edit"
+  B: b.txt = "version two"  f (conflicted copy from A).txt = "aaaaXXXXccccdddd"  f.txt = "B's whole new text"  h.txt = "B's edit"
+holds: no last-sync mark
+-- a new client, rebuilt from the store
+  C: b.txt = "version two"  f (conflicted copy from A).txt = "aaaaXXXXccccdddd"  f.txt = "B's whole new text"  h.txt = "B's edit"
+
+owed: A 0/0, B 0/0

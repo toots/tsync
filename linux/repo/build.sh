@@ -24,7 +24,7 @@ mkdir -p "$site"
 gpg --export --armor > "$site/tsync.asc"
 
 # The distro a package was built for is the middle field of its name --
-# tsync-tray_deb13_amd64.deb -- and a package name carries no underscore, so the
+# tsync_deb13_amd64.deb -- and a package name carries no underscore, so the
 # split is unambiguous. Both architectures land in one directory: apt and dnf
 # each pick the entry matching the machine out of a single index.
 sort_by_distro() {

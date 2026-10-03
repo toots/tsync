@@ -1,302 +1,202 @@
 import AppKit
 import FileProvider
-import Foundation
-import os
 
-private let log = Logger(subsystem: "org.feverdreamtv.tsync", category: "menu")
-
-/// The menu bar item: an icon whose glyph says what tsync is doing, and a menu
-/// listing the files in flight.
-///
-/// It decides none of that. The daemon answers `menu` with the icon, the tooltip
-/// and every row, rendered from the same model the Linux tray links, so the two
-/// platforms cannot say different things about the same state. What is left here
-/// is what only this process can do: turn a row into an `NSMenuItem`, and turn a
-/// domain and a relative path into a place on disk — which means asking the File
-/// Provider, since where a domain's folder was surfaced is the system's answer to
-/// give, not the daemon's.
-@MainActor
+/// §10: the status item. The owner renders its content (`menu`); the app only
+/// draws it, and adds what only it knows (registration problems). No quit row.
 final class StatusMenu: NSObject, NSMenuDelegate {
+    /// §13 menu_poll_interval / menu_stats_interval.
+    static let pollInterval: TimeInterval = 3
+    static let statsInterval: TimeInterval = 1
+
     private let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-    private let clients: [DaemonClient]
-    private var menu: DaemonMenu?
-    private var timer: Timer?
-
-    private static let pollInterval: TimeInterval = 3
-    private static let iconSide: CGFloat = 32
-
-    /// Where each domain's folder is, asked of the system once: the Finder name
-    /// is derived from the display name by rules that are not ours to guess.
-    private var domainURLs: [String: URL] = [:]
-
-    /// The submenu under the Stats row, kept so the delegate callbacks can tell
-    /// it from the menu it hangs under. Its rows are not part of the poll: the
-    /// daemon reaches every backend to answer, so they are asked for when it
-    /// opens and it says "Reading…" until they arrive.
-    private var statsMenu: NSMenu?
-
-    /// A host that asks twice for one opening would cost two round trips to
-    /// every backend.
-    private var lastStatsFetch: Date = .distantPast
-    private static let statsSettled: TimeInterval = 1
-
-    /// Rebuilding under an open menu would dismiss it. Rows hold still for as
-    /// long as it is up.
-    private var isOpen = false
-
-    override init() { fatalError("use init(domains:)") }
-
-    init(domains: [String]) {
-        clients = domains.map { DaemonClient(domain: $0) }
-        super.init()
-        item.menu = NSMenu()
-        render()
-        let timer = Timer.scheduledTimer(withTimeInterval: Self.pollInterval,
-                                         repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.poll() }
-        }
-        // The counts are ambient information; letting the system coalesce this
-        // with other wakeups matters more than hitting the interval.
-        timer.tolerance = 1
-        self.timer = timer
-        poll()
-        Task { await findDomainFolders() }
-    }
-
-    deinit {
-        timer?.invalidate()
-    }
-
-    // MARK: - Polling
-
-    /// A daemon slower to answer than the interval would otherwise collect a
-    /// request every three seconds on top of the ones already waiting.
+    private let menu = NSMenu()
+    private let lock = NSLock()
     private var polling = false
+    private var isOpen = false
+    private var latest: [String: Any]?
+    private var reachable = true
+    private var report = ReconcileReport()
+    private var registrationProblem: String?
+    private var domains: [String: NSFileProviderDomain] = [:]
+    private var statsFetched = Date.distantPast
+    private var statsEntries: [[String: Any]]?
 
-    /// One call, not one per domain: this daemon serves them all over the one
-    /// socket, and the summary and the icon are decided across the set.
+    let pause: (Bool) -> Void
+
+    init(pause: @escaping (Bool) -> Void) {
+        self.pause = pause
+        super.init()
+        menu.delegate = self
+        menu.autoenablesItems = false
+        item.menu = menu
+        rebuild()
+        Timer.scheduledTimer(withTimeInterval: Self.pollInterval, repeats: true) { [weak self] _ in
+            self?.poll()
+        }
+        poll()
+    }
+
+    func update(domains registered: [NSFileProviderDomain], report: ReconcileReport) {
+        DispatchQueue.main.async {
+            self.domains = Dictionary(uniqueKeysWithValues: registered.map { ($0.displayName, $0) })
+            self.report = report
+            if !self.isOpen { self.rebuild() }
+        }
+    }
+
+    func update(registrationProblem: String?) {
+        DispatchQueue.main.async {
+            self.registrationProblem = registrationProblem
+            if !self.isOpen { self.rebuild() }
+        }
+    }
+
+    /// One poll at a time; a poll past its deadline counts as a failure and
+    /// releases the latch.
     private func poll() {
-        guard let client = clients.first, !polling else { return }
+        lock.lock()
+        if polling {
+            lock.unlock()
+            return
+        }
         polling = true
-        Task {
-            let fresh = try? await client.menu()
-            await MainActor.run {
-                self.polling = false
-                if let fresh { self.menu = fresh }
-                self.render()
+        lock.unlock()
+        Thread.detachNewThread {
+            let reply = try? OwnerClient.call(["action": "menu"], deadline: Self.pollInterval * 2)
+            self.lock.lock()
+            self.polling = false
+            self.lock.unlock()
+            DispatchQueue.main.async {
+                self.latest = reply?["menu"] as? [String: Any]
+                self.reachable = self.latest != nil
+                if !self.isOpen { self.rebuild() }
             }
         }
     }
 
-    private func findDomainFolders() async {
-        let domains = (try? await NSFileProviderManager.domains()) ?? []
-        var found: [String: URL] = [:]
-        for domain in domains {
-            guard let manager = NSFileProviderManager(for: domain),
-                  let url = try? await manager.getUserVisibleURL(for: .rootContainer)
-            else { continue }
-            found[domain.displayName] = url
-        }
-        let resolved = found
-        await MainActor.run {
-            self.domainURLs = resolved
-            self.render()
-        }
-    }
-
-    // MARK: - Resolving a row's target
-
-    private func folderURL(_ domain: String) -> URL? { domainURLs[domain] }
-
-    private func fileURL(_ target: DaemonMenuAction.Target) -> URL? {
-        guard let root = domainURLs[target.domain] else { return nil }
-        return root.appending(path: target.rel)
-    }
-
-    // MARK: - Rendering
-
-    /// The daemon names icons the way a Linux panel looks them up, and the
-    /// asset catalog carries an image set under each of those names — so there
-    /// is no mapping table here, and a fifth state needs only a fifth imageset.
-    /// An unknown name falls back to idle rather than to no icon at all: a menu
-    /// bar extra with a nil image is a dead gap the user cannot click.
-    private static func statusImage(named name: String) -> NSImage? {
-        let image = NSImage(named: name) ?? NSImage(named: "tsync-idle-symbolic")
-        // Template, so AppKit paints it black on a light menu bar and white on
-        // a dark one instead of drawing our own colour into both.
-        image?.isTemplate = true
-        image?.size = NSSize(width: 18, height: 18)
-        image?.accessibilityDescription = "tsync"
-        return image
-    }
-
-    private func render() {
-        guard !isOpen else { return }
-
-        item.button?.image = Self.statusImage(named: menu?.icon ?? "")
-        item.button?.toolTip = menu?.tooltip
-
-        let built = NSMenu()
-        // Off, or AppKit disables every item with no action and draws it grey —
-        // which is how information ends up looking like a broken command.
-        built.autoenablesItems = false
-        built.delegate = self
-        for row in menu?.rows ?? [] {
-            built.addItem(row.isSeparator ? .separator() : self.entry(row))
-        }
-        item.menu = built
-    }
-
-    private func entry(_ row: DaemonMenuRow) -> NSMenuItem {
-        let title = row.label ?? ""
-        let entry = NSMenuItem(title: title, action: nil, keyEquivalent: "")
-        // Enabled, but with nothing to do unless its action stands for
-        // something: it takes a click without acting on it, and reads as text
-        // rather than as something switched off.
-        entry.isEnabled = row.enabled ?? true
-        let indent = row.indent ?? 0
-        entry.indentationLevel = indent
-
-        if let checked = row.checked { entry.state = checked ? .on : .off }
-
-        if let action = row.action {
-            if let domain = action.openFolder, let url = folderURL(domain) {
-                entry.action = #selector(openInFinder)
-                entry.target = self
-                entry.representedObject = url
-                entry.toolTip = url.path(percentEncoded: false)
-            } else if let target = action.reveal, let url = fileURL(target) {
-                entry.action = #selector(revealInFinder)
-                entry.target = self
-                entry.representedObject = url
-                entry.toolTip = url.path(percentEncoded: false)
-                // From the path, not from the label: a long name reaches the
-                // row ellipsised, and a name cut short of its extension asks
-                // the workspace about a file type that does not exist.
-                entry.image = Self.icon(forFileNamed: (target.rel as NSString).lastPathComponent)
-            } else if action.setPaused != nil {
-                entry.action = #selector(togglePause)
-                entry.target = self
-            } else if action.quit == true {
-                entry.action = #selector(NSApplication.terminate(_:))
-                entry.keyEquivalent = "q"
-            }
-        }
-
-        // A submenu the daemon has not filled in yet still has to open as one,
-        // or the row moves under the pointer once it does.
-        if row.submenu == true {
-            let submenu = NSMenu()
-            submenu.autoenablesItems = false
-            submenu.delegate = self
-            for row in menu?.submenuPlaceholder ?? [] {
-                submenu.addItem(self.entry(row))
-            }
-            entry.submenu = submenu
-            if row.action?.stats == true { statsMenu = submenu }
-        }
-
-        // The deliberate grey for a detail under a heading, as opposed to the
-        // one AppKit applies to anything it thinks is unavailable.
-        entry.attributedTitle = NSAttributedString(
-            string: title,
-            attributes: [
-                .font: NSFont.menuFont(ofSize: 0),
-                .foregroundColor: indent > 0 ? NSColor.secondaryLabelColor
-                                             : NSColor.labelColor,
-            ])
-        return entry
-    }
-
-    private static func icon(forFileNamed name: String) -> NSImage {
-        let image = NSWorkspace.shared.icon(forFile: NSTemporaryDirectory() + "/" + name)
-        image.size = NSSize(width: Self.iconSide, height: Self.iconSide)
-        return image
-    }
-
-    // MARK: - NSMenuDelegate
-
-    /// Only the menu bar's own menu decides this. A submenu opening and closing
-    /// is not the menu closing, and re-rendering on it would rebuild the rows
-    /// under the pointer.
-    func menuWillOpen(_ menu: NSMenu) {
-        guard menu === item.menu else { return }
-        isOpen = true
-    }
+    func menuWillOpen(_ menu: NSMenu) { isOpen = true }
 
     func menuDidClose(_ menu: NSMenu) {
-        guard menu === item.menu else { return }
         isOpen = false
-        render()
+        rebuild()
     }
 
-    /// Every time it opens, not once: the point of the submenu is what is true
-    /// now.
-    func menuNeedsUpdate(_ menu: NSMenu) {
-        guard menu === statsMenu else { return }
-        let now = Date()
-        guard now.timeIntervalSince(lastStatsFetch) >= Self.statsSettled else { return }
-        lastStatsFetch = now
-        guard let client = clients.first else { return }
-        Task {
-            // A failure leaves the placeholder standing rather than replacing
-            // it with a message of our own: what to say about a daemon that did
-            // not answer is the model's to decide, and it already does when it
-            // answers at all.
-            guard let rows = try? await client.menuStats(), !rows.isEmpty else { return }
-            await MainActor.run {
-                guard menu === self.statsMenu else { return }
-                menu.removeAllItems()
-                for row in rows {
-                    menu.addItem(row.isSeparator ? .separator() : self.entry(row))
+    /// An owner that cannot be reached shows the error icon and says so,
+    /// rather than the last known state.
+    private func rebuild() {
+        let model = reachable ? latest : nil
+        let icon = model?["icon"] as? String ?? "tsync-error-symbolic"
+        let image = NSImage(named: icon) ?? NSImage(named: "tsync-idle-symbolic")
+        image?.isTemplate = true
+        item.button?.image = image
+        item.button?.toolTip = model?["tooltip"] as? String ?? "tsync: the service is unreachable"
+
+        menu.removeAllItems()
+        for line in localLines() {
+            let entry = NSMenuItem(title: line, action: nil, keyEquivalent: "")
+            entry.isEnabled = false
+            menu.addItem(entry)
+        }
+        if !localLines().isEmpty { menu.addItem(.separator()) }
+        if let model = model {
+            for entry in model["entries"] as? [[String: Any]] ?? [] {
+                menu.addItem(menuItem(entry))
+            }
+        } else {
+            let entry = NSMenuItem(title: "The tsync service is unreachable", action: nil, keyEquivalent: "")
+            entry.isEnabled = false
+            menu.addItem(entry)
+        }
+    }
+
+    private func localLines() -> [String] {
+        var lines: [String] = []
+        if let problem = registrationProblem { lines.append(problem) }
+        if !report.collisions.isEmpty {
+            lines.append("Not registered, same identifier: " + report.collisions.joined(separator: ", "))
+        }
+        for (name, url) in report.preserved.sorted(by: { $0.key < $1.key }) {
+            lines.append("\(name): local edits kept at \(url.path)")
+        }
+        lines.append(contentsOf: report.failures)
+        return lines
+    }
+
+    private func menuItem(_ entry: [String: Any]) -> NSMenuItem {
+        if entry["separator"] as? Bool == true { return .separator() }
+        let title = entry["label"] as? String ?? ""
+        let item = NSMenuItem(title: title, action: #selector(act(_:)), keyEquivalent: "")
+        item.target = self
+        item.isEnabled = entry["enabled"] as? Bool ?? true
+        item.indentationLevel = entry["indent"] as? Int ?? 0
+        if let checked = entry["checked"] as? Bool { item.state = checked ? .on : .off }
+        item.representedObject = entry["action"]
+        if entry["submenu"] as? Bool == true {
+            let submenu = NSMenu()
+            submenu.autoenablesItems = false
+            fillStats(submenu)
+            item.submenu = submenu
+            item.action = nil
+        }
+        return item
+    }
+
+    /// Fetched when the submenu is drawn, at most once per stats interval; a
+    /// failure leaves the placeholder.
+    private func fillStats(_ submenu: NSMenu) {
+        let placeholder = NSMenuItem(title: "Reading…", action: nil, keyEquivalent: "")
+        placeholder.isEnabled = false
+        let entries = statsEntries
+        if let entries = entries, !entries.isEmpty {
+            for entry in entries {
+                let line = NSMenuItem(title: entry["label"] as? String ?? "", action: nil, keyEquivalent: "")
+                line.isEnabled = false
+                submenu.addItem(line)
+            }
+        } else {
+            submenu.addItem(placeholder)
+        }
+        guard Date().timeIntervalSince(statsFetched) >= Self.statsInterval else { return }
+        statsFetched = Date()
+        Thread.detachNewThread {
+            let reply = try? OwnerClient.call(["action": "menu_stats"])
+            guard let entries = reply?["entries"] as? [[String: Any]] else { return }
+            DispatchQueue.main.async {
+                self.statsEntries = entries
+                submenu.removeAllItems()
+                for entry in entries {
+                    let line = NSMenuItem(
+                        title: entry["label"] as? String ?? "", action: nil, keyEquivalent: "")
+                    line.isEnabled = false
+                    submenu.addItem(line)
                 }
             }
         }
     }
 
-    // MARK: - Actions
-
-    /// A Finder window rooted at the folder. Not [NSWorkspace.open], which is
-    /// this app opening a folder the sandbox never granted it: asking the Finder
-    /// to show it is a request, and the access is the Finder's own.
-    ///
-    /// [getUserVisibleURL] answers with a security-scoped URL, and the claim has
-    /// to be made before the path names anything — without it the call reports
-    /// failure and nothing happens at all.
-    @objc private func openInFinder(_ sender: NSMenuItem) {
-        guard let url = sender.representedObject as? URL else { return }
-        let claimed = url.startAccessingSecurityScopedResource()
-        defer { if claimed { url.stopAccessingSecurityScopedResource() } }
-        let opened = NSWorkspace.shared.selectFile(
-            nil, inFileViewerRootedAtPath: url.path(percentEncoded: false))
-        if !opened {
-            log.error("open '\(url.path, privacy: .public)': claimed=\(claimed)")
-            // Naming it in its parent is the weaker gesture the Finder always
-            // allows, so a click is never inert.
-            NSWorkspace.shared.activateFileViewerSelecting([url])
+    @objc private func act(_ sender: NSMenuItem) {
+        guard let action = sender.representedObject as? [String: Any] else { return }
+        if let name = action["openFolder"] as? String {
+            withRoot(of: name) { NSWorkspace.shared.open($0) }
+        } else if let reveal = action["reveal"] as? [String: Any],
+            let name = reveal["domain"] as? String, let rel = reveal["rel"] as? String
+        {
+            withRoot(of: name) {
+                NSWorkspace.shared.activateFileViewerSelecting([$0.appendingPathComponent(rel)])
+            }
+        } else if let paused = action["setPaused"] as? Bool {
+            // The state shown is read back by the next poll.
+            pause(paused)
         }
     }
 
-    /// A file is selected in its folder instead: opening it would launch
-    /// whatever owns the type, and may pull down a body that is still moving.
-    @objc private func revealInFinder(_ sender: NSMenuItem) {
-        guard let url = sender.representedObject as? URL else { return }
-        NSWorkspace.shared.activateFileViewerSelecting([url])
-    }
-
-    /// One switch for every domain. The new state is not applied locally: the
-    /// next poll reads it back, so the checkmark shows what the daemon did.
-    @objc private func togglePause(_ sender: NSMenuItem) {
-        let paused = sender.state != .on
-        let clients = self.clients
-        Task {
-            for client in clients {
-                do { try await client.setPaused(paused) }
-                catch {
-                    log.error("pause '\(client.domain, privacy: .public)': \(error, privacy: .public)")
-                }
-            }
-            await MainActor.run { self.poll() }
+    /// The domain's user-visible root, asked of the framework, never derived
+    /// from the display name.
+    private func withRoot(of name: String, _ body: @escaping (URL) -> Void) {
+        guard let domain = domains[name], let manager = NSFileProviderManager(for: domain) else { return }
+        manager.getUserVisibleURL(for: .rootContainer) { url, _ in
+            guard let url = url else { return }
+            DispatchQueue.main.async { body(url) }
         }
     }
 }

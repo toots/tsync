@@ -1,0 +1,3 @@
+(library
+ (name tsync_ipc)
+ (libraries tsync_core unix yojson))

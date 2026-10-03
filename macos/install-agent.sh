@@ -1,11 +1,9 @@
 #!/usr/bin/env bash
-# Install and start the daemon LaunchAgent for the current user.
+# Install and start the service's LaunchAgent for the current user.
 #
-# The daemon runs from a plist in ~/Library/LaunchAgents pointing at an absolute
-# path inside the app bundle, rather than as an SMAppService agent bundled in
-# Contents/Library/LaunchAgents. SMAppService reports .notFound for a correctly
-# placed, sealed and Team-ID-signed bundled agent on this OS version, so the
-# daemon never starts; a plain LaunchAgent works and needs no approval UI.
+# file-provider §11: a per-user agent definition, acceptable where the bundled
+# SMAppService agent cannot be registered. It names the app as its associated
+# bundle so the system attributes it to the app in Login Items.
 #
 # Runs as the user who will own the agent — never as root.
 set -euo pipefail
@@ -22,6 +20,12 @@ LOG="$HOME/Library/Logs/tsync-daemon.log"
 }
 
 launchctl bootout "gui/$UID/$LABEL" 2>/dev/null || true
+# A service still draining after bootout makes the bootstrap below fail with
+# an I/O error; wait until launchd has let it go.
+for _ in $(seq 1 60); do
+    launchctl print "gui/$UID/$LABEL" >/dev/null 2>&1 || break
+    sleep 0.5
+done
 # A leftover socket makes callers think the daemon is up before it is.
 rm -f "$SOCKET"
 
@@ -38,10 +42,14 @@ cat > "$PLIST" <<EOF
         <string>$APP/Contents/MacOS/tsync</string>
         <string>start</string>
     </array>
+    <key>AssociatedBundleIdentifiers</key>
+    <array>
+        <string>org.feverdreamtv.tsync</string>
+    </array>
     <key>RunAtLoad</key>
     <true/>
-    <!-- Restart on a crash, but respect a clean exit: the daemon exits 0 when
-         there is no config yet, which happens on every fresh install. -->
+    <!-- Restart on any unclean exit. The service keeps running with no domain
+         configured, so a clean exit is a requested stop. -->
     <key>KeepAlive</key>
     <dict>
         <key>SuccessfulExit</key>

@@ -1,0 +1,48 @@
+== cold start on a 4 MiB/s link, headroom 0.8
+  t=  2 rate 0.50 MiB/s   queueing   0 ms  ramping
+  t=  4 rate 1.00 MiB/s   queueing   0 ms  ramping
+  t=  6 rate 2.00 MiB/s   queueing   0 ms  ramping
+  t=  8 rate 4.00 MiB/s   queueing   0 ms  ramping
+  t= 10 rate 8.00 MiB/s   queueing   0 ms  ramping
+  t= 12 rate 8.00 MiB/s   queueing 125 ms  ramping
+  t= 14 rate 4.53 MiB/s   queueing 188 ms  steady
+  t= 16 rate 3.39 MiB/s   queueing 219 ms  steady
+  t= 18 rate 2.55 MiB/s   queueing 109 ms  steady
+  t= 20 rate 2.49 MiB/s   queueing  55 ms  steady
+  t= 22 rate 2.77 MiB/s   queueing  27 ms  steady
+  t= 24 rate 3.27 MiB/s   queueing  14 ms  steady
+  t= 26 rate 3.98 MiB/s   queueing   7 ms  steady
+  t= 28 rate 4.53 MiB/s   queueing   3 ms  steady
+  t= 30 rate 3.39 MiB/s   queueing 127 ms  steady
+  t= 32 rate 2.87 MiB/s   queueing  63 ms  steady
+  t= 34 rate 2.87 MiB/s   queueing  32 ms  steady
+  t= 36 rate 2.87 MiB/s   queueing  16 ms  steady
+  t= 38 rate 2.87 MiB/s   queueing   8 ms  steady
+  t= 40 rate 2.87 MiB/s   queueing   4 ms  steady
+steady at headroom of the measured capacity: true, queue drained: true
+capacity 3.58 MiB/s
+base delay learnt: 30 ms
+limit: measured
+== a competitor takes half of the link at t=40
+yields to its share: 1.85 MiB/s (true)
+after it leaves, back within a probe interval and a ramp: true
+== a timeout
+halves: true, backing off
+holds for 8 s: backing off at true
+then ramps: ramping
+no tick cut more than half: true
+== no growth without demand or completions
+idle for 60 s: 0.25 MiB/s
+held back, nothing completing: 0.25 MiB/s
+== configured ceiling and floor
+maxRate 1 MiB/s on 10 MiB/s: 1.00 MiB/s, configured
+timeouts on every tick stop at minRate: 0.06 MiB/s
+== no samples while busy holds the queueing delay
+busy, probes held down: true
+idle: drains to 6 ms
+== a standing queue does not become the baseline
+0.2 s of standing delay for 1200 s (two windows) raises the baseline 53 ms, at most 100
+== restart
+fresh saved state starts at 1.60 MiB/s
+then steps ×1.25
+state older than a day starts cold: 0.25 MiB/s

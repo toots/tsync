@@ -1,32 +1,26 @@
-type level = [ `debug | `info | `warn | `err ]
+(** Logging (spec 07 §5.7). The sink is replaceable (syslog, logcat); the last
+    50 warnings and errors are kept for status. *)
 
-(** Drop messages below this level. Default: [`info]. *)
-val set_min_level : level -> unit
+type level = Debug | Info | Warn | Err
 
-(** Prepend [s] to every subsequent message. Set per-process (e.g. to a domain
-    name) so per-domain daemon processes are distinguishable in a shared log. *)
-val set_prefix : string -> unit
+val name : level -> string
+val min_level : level Atomic.t
 
-(** The last 50 emitted [`warn]/[`err] messages, newest first, with the time
-    each was logged. For a process reporting on itself — see the http-proxy
-    status endpoint, which has no log of its own to point at. *)
-val recent : unit -> (float * level * string) list
+(** Prefixed to every line, such as ["[Files] "]. *)
+val prefix : string Atomic.t
 
-(** Send every message somewhere else, for a frontend linked into a host process
-    with neither a stderr anyone reads nor a syslog: the Android app, whose log
-    is logcat. *)
-val set_sink : (level -> string -> unit) -> unit
-
-(** The sink in place, for one that wraps it. *)
-val sink : unit -> level -> string -> unit
-
+val sink : (level -> string -> unit) Atomic.t
+val stderr_sink : level -> string -> unit
 val debug : ('a, unit, string, unit) format4 -> 'a
 val info : ('a, unit, string, unit) format4 -> 'a
 val warn : ('a, unit, string, unit) format4 -> 'a
 val err : ('a, unit, string, unit) format4 -> 'a
+val f : level -> ('a, unit, string, unit) format4 -> 'a
 
-(** Daemon preset: syslog when the syslog library is available, else stderr. *)
-module Daemon : sig
-  val implementation : string
-  val init : unit -> unit
-end
+(** Log once per [key] for the life of the process. *)
+val once : string -> level -> ('a, unit, string, unit) format4 -> 'a
+
+(** Time, level and message of recent warnings and errors, newest first. *)
+val recent : unit -> (float * level * string) list
+
+val timestamp : float -> string

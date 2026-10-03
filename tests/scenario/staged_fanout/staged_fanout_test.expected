@@ -1,4 +1,0 @@
-  32 chunks, 4 buffers, peak 4 live at once
-live bodies do not scale with the file: ok
-but the upload is not serialised either: ok
-every chunk still lands: ok

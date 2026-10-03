@@ -1,0 +1,6 @@
+ids stripped from mkdir entries: 1
+after an id-less mkdir
+  B: x/ x/f.txt
+ids stripped from rename entries: 1
+after an id-less folder rename
+  B: after.txt y/ y/f.txt

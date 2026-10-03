@@ -1,5 +1,0 @@
-(executable
- (flags
-  (:standard -open Tsync_core))
- (name zip_test)
- (libraries tsync_core))

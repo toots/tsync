@@ -1,0 +1,22 @@
+; The test compares the two TLS implementations, so it needs both.
+
+(executable
+ (name http_test)
+ (optional)
+ (libraries tsync_core tsync_http tsync_http_ssl tsync_http_native unix))
+
+(rule
+ (enabled_if
+  (and %{lib-available:tsync_http_ssl} %{lib-available:tsync_http_native}))
+ (deps tls_cert.pem tls_key.pem)
+ (action
+  (with-stdout-to
+   http_test.output
+   (run ./http_test.exe))))
+
+(rule
+ (alias runtest)
+ (enabled_if
+  (and %{lib-available:tsync_http_ssl} %{lib-available:tsync_http_native}))
+ (action
+  (diff http_test.expected http_test.output)))

@@ -1,0 +1,50 @@
+== everything
+all: main -> copy, 10 checked, 10 copied (455 bytes), 0 refused, 0 changed, 0 unguarded
+order of kinds: chunk, other, cursor
+index copied: false
+
+== progress
+chunk shard progress never goes back: true, ends at 1: true
+manifests listings shown before comparing: true
+said:  copy: chunks, 3 checked, 0 copied (0 B)
+said:  copy: manifests, listed 4 objects on main
+said:  copy: manifests, listed 4 objects on copy
+said:  copy: manifests, 4 checked, 0 copied (0 B)
+said:  copy: versions, listed 1 object on main
+said:  copy: versions, listed 1 object on copy
+said:  copy: versions, 1 checked, 0 copied (0 B)
+said:  copy: journal, listed 1 object on main
+said:  copy: journal, listed 1 object on copy
+said:  copy: journal, 1 checked, 0 copied (0 B)
+said:  copy: cursor, 1 checked, 0 copied (0 B)
+said:  copy: 10 checked, 0 copied (0 B)
+
+== again
+all: main -> copy, 10 checked, 0 copied (0 bytes), 0 refused, 0 changed, 0 unguarded
+reads of the copy: 0, checksums computed on it: 0
+
+== a changed manifest and a short chunk on the copy
+all: main -> copy, 10 checked, 2 copied (112 bytes), 0 refused, 0 changed, 0 unguarded
+
+== a manifest written on the copy after it was compared
+all: main -> copy, 10 checked, 0 copied (0 bytes), 0 refused, 1 changed, 0 unguarded
+the copy keeps the other write: true
+all: main -> copy, 10 checked, 1 copied (110 bytes), 0 refused, 0 changed, 0 unguarded
+
+== a copy that cannot replace conditionally
+all: main -> copy, 10 checked, 1 copied (110 bytes), 0 refused, 0 changed, 1 unguarded
+
+== everything but the chunks
+skip-chunks: main -> copy, 9 checked, 2 copied (4 bytes), 1 refused, 0 changed, 0 unguarded
+journal entry and same-size cursor copied: true
+
+== a path, with a chunk missing from the source
+path: refused: tsync/d/chunks/de5/de50e7a571250a97-6ed340dd3302d426 is missing from source main
+path: main -> copy, 7 checked, 2 copied (114 bytes), 0 refused, 0 changed, 0 unguarded
+
+== a collection open
+all: refused: main has a collection open in marking, started 3d 0h ago: the chunk area is partly under another name; finish it with tsync gc, or undo it with tsync gc --abort
+skip-chunks: main -> copy, 9 checked, 0 copied (0 bytes), 0 refused, 0 changed, 0 unguarded
+
+== an unknown source
+source: refused: d has no member named nowhere

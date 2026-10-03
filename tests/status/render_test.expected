@@ -1,0 +1,122 @@
+== healthy
+tsync on example — 1 domain, 3 processes, up 11m 11s, load 0.4
+
+Domain Media
+  settings         versioning on, symlinks keep, chunk 8.0 MiB (default), cache chunk 16.0 MiB
+  concurrency      4 uploads, 4 chunk buffers, 8 downloads
+  read-only        yes
+  cache            7494 chunks, 9.9 GiB of 10.0 GiB
+  Frontend fuse       pid 101  /home/u/tsync/Media
+  Frontend http-proxy pid 102  port 5446  shared  share links
+    io               read 3.0 MiB, written 1.0 KiB
+  Backend gcs (gcs, main)  bucket media-bucket
+    link             wan
+    reachable        yes (51 ms)
+    journal          1444 entries, 0 to apply
+    corrupted        not checked — no verification has run
+    traffic          up 0 B (0 B/s), down 92 B (4 B/s)
+
+Processes
+  supervisor   pid 100  up 11m 11s  1.2% cpu
+    memory           private 61.0 MiB (heap 18.0 MiB, anonymous 61.0 MiB), mapped files 9.0 MiB
+  store-server pid 102  up 11m 9s  1.2% cpu  Media
+    memory           private 61.0 MiB (heap 18.0 MiB, anonymous 61.0 MiB), mapped files 9.0 MiB
+    listener         port 5446, TLS, 3 in flight (1 data), read 3.0 MiB, written 1.0 KiB
+    requests         get 12, put 2
+  owner        pid 101  up 11m 10s  1.2% cpu  Media
+    memory           private 61.0 MiB (heap 18.0 MiB, anonymous 61.0 MiB), mapped files 9.0 MiB
+    traffic          up 0 B (0 B/s), down 1.9 KiB (9 B/s)
+    uplink wan       2.8 MiB/s leased, 8.0 MiB in flight, 1 waiting
+
+Uplinks
+  wan        steady, 2.8 MiB/s (measured)
+    measured         sent 2.7 MiB/s, capacity 3.5 MiB/s, queueing 2 ms over a baseline of 31 ms
+    shares           owner Media 2.8 MiB/s
+
+survives the wire: true
+
+== degraded
+tsync on example — 2 domains, 2 processes, up 1d 1h, load 0.4
+
+Domain Files
+  settings         versioning on, symlinks follow, chunk 4.0 MiB, cache chunk 16.0 MiB
+  concurrency      1 upload, 1 chunk buffer, 1 download
+  cache            1088 chunks, 9.5 GiB of 200.0 GiB, 316.4 MiB pinned
+  PAUSED           changes stay local until resumed
+  MAIN OFFLINE     reads and publishing wait for it
+  SYNC HELD        no last-sync mark; holding until a rebuild
+  unapplied        2 peer entries (a peer's folder rename meets a local edit)
+  parked           1 metadata change
+  uploads          3 files pending, 50.0 MiB owed, sending Photos/a.jpg, Photos/b.jpg
+  metadata         1 change pending
+  SET ASIDE        2 records that cannot be read, kept and never run
+  WAL STUCK        1 record: DEADLINE: store did not answer
+  RETRYING         2 records failing, retried with backoff
+  Frontend http-proxy port 5446  NOT ANSWERING
+  Backend gcs (gcs, main)  bucket files
+    link             wan
+    HELD DOWN        for 0m 42s after 5 failures (connection refused)
+    journal          counting…
+    CORRUPTED        3 chunks or more
+    copies           1204 objects owed (2 parked), 0.0/s
+    sending          Music Production/…/XDROOT/Clip/ALLWAYS0010.MXF (4.8 GiB): chunk 205 of 615, 1.6 GiB sent, done in at most 2h 0m
+  Backend disk (local, replica)  path /srv/tsync
+    reachable        yes (0 ms)
+    journal          unreadable: permission denied
+    disk             1.0 TiB free of 10.0 TiB
+
+Domain Media  NOT ANSWERING
+
+Processes
+  supervisor   pid 100  up 1d 1h  1.2% cpu
+    memory           private 61.0 MiB (heap 18.0 MiB, anonymous 61.0 MiB), mapped files 9.0 MiB
+  owner        pid 102  Media
+    NOT ANSWERING    connection refused
+
+Jobs
+  import Files (pid 300): 1200 of 5000, 10m 0s left; importing 1201 of 5000 files: Photos/2026/p.jpg
+
+Warnings (newest first)
+  0m 10s ago WARN copy replica: parked (×3)
+  8m 20s ago ERROR cannot bridge the journal
+
+survives the wire: true
+
+== retrying
+tsync on example — 1 domain, 3 processes, up 11m 11s, load 0.4
+
+Domain Media
+  settings         versioning on, symlinks keep, chunk 8.0 MiB (default), cache chunk 16.0 MiB
+  concurrency      4 uploads, 4 chunk buffers, 8 downloads
+  read-only        yes
+  cache            7494 chunks, 9.9 GiB of 10.0 GiB
+  RETRYING         1 record failing, retried with backoff: LOCAL: Media/notes.txt: Permission denied
+  Frontend fuse       pid 101  /home/u/tsync/Media
+  Frontend http-proxy pid 102  port 5446  shared  share links
+    io               read 3.0 MiB, written 1.0 KiB
+  Backend gcs (gcs, main)  bucket media-bucket
+    link             wan
+    reachable        yes (51 ms)
+    journal          1444 entries, 0 to apply
+    corrupted        not checked — no verification has run
+    traffic          up 0 B (0 B/s), down 92 B (4 B/s)
+
+Processes
+  supervisor   pid 100  up 11m 11s  1.2% cpu
+    memory           private 61.0 MiB (heap 18.0 MiB, anonymous 61.0 MiB), mapped files 9.0 MiB
+  store-server pid 102  up 11m 9s  1.2% cpu  Media
+    memory           private 61.0 MiB (heap 18.0 MiB, anonymous 61.0 MiB), mapped files 9.0 MiB
+    listener         port 5446, TLS, 3 in flight (1 data), read 3.0 MiB, written 1.0 KiB
+    requests         get 12, put 2
+  owner        pid 101  up 11m 10s  1.2% cpu  Media
+    memory           private 61.0 MiB (heap 18.0 MiB, anonymous 61.0 MiB), mapped files 9.0 MiB
+    traffic          up 0 B (0 B/s), down 1.9 KiB (9 B/s)
+    uplink wan       2.8 MiB/s leased, 8.0 MiB in flight, 1 waiting
+
+Uplinks
+  wan        steady, 2.8 MiB/s (measured)
+    measured         sent 2.7 MiB/s, capacity 3.5 MiB/s, queueing 2 ms over a baseline of 31 ms
+    shares           owner Media 2.8 MiB/s
+
+survives the wire: true
+

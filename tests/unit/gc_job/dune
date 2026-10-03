@@ -1,5 +1,13 @@
 (executable
- (flags
-  (:standard -open Tsync_core))
  (name gc_job)
- (libraries tsync-libs.core tsync_core unix))
+ (libraries tsync_core))
+
+(rule
+ (with-stdout-to
+  gc_job.output
+  (run ./gc_job.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff gc_job.expected gc_job.output)))

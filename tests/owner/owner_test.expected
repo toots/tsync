@@ -1,0 +1,104 @@
+== ownership
+held by role=daemon what=tsync start socket=true
+== rows and mutations
+stat root                          {"ok":true,"ref":"root","parentRef":"root","name":"docs","kind":"dir","size":0,"mtime":"<t>","etag":".tsync-root","isUploaded":true}
+mkdir a                            {"ok":true,"item":{"ref":"d:<id1>","parentRef":"root","name":"a","kind":"dir","size":0,"mtime":"<t>","etag":"<id1>","isUploaded":true}}
+mkdir a again                      {"ok":true,"item":{"ref":"d:<id1>","parentRef":"root","name":"a","kind":"dir","size":0,"mtime":"<t>","etag":"<id1>","isUploaded":true}}
+mkdir a exclusive                  {"ok":false,"code":"exists","error":"a exists","item":{"ref":"d:<id1>","parentRef":"root","name":"a","kind":"dir","size":0,"mtime":"<t>","etag":"<id1>","isUploaded":true}}
+write a/f.txt                      {"ok":true,"size":11,"mtime":"<t>","item":{"ref":"i:<file-1>","parentRef":"d:<id1>","name":"f.txt","kind":"file","size":11,"mtime":"<t>","etag":"","isUploaded":false,"contentId":"<id2>","availability":"cached"}}
+stat by rel                        {"ok":true,"ref":"i:<file-1>","parentRef":"d:<id1>","name":"f.txt","kind":"file","size":11,"mtime":"<t>","etag":"","isUploaded":false,"contentId":"<id2>","availability":"cached"}
+list_dir root                      {"ok":true,"items":[{"ref":"d:<id1>","parentRef":"root","name":"a","kind":"dir","size":0,"mtime":"<t>","etag":"<id1>","isUploaded":true}]}
+list_dir a                         {"ok":true,"items":[{"ref":"i:<file-1>","parentRef":"d:<id1>","name":"f.txt","kind":"file","size":11,"mtime":"<t>","etag":"","isUploaded":false,"contentId":"<id2>","availability":"cached"}]}
+staging outside the roots          {"ok":false,"code":"denied","error":"/etc/hostname: outside the roots this host declares"}
+ensure_cached                      {"ok":true,"localPath":"<root>/home/out.txt","item":{"ref":"i:<file-1>","parentRef":"d:<id1>","name":"f.txt","kind":"file","size":11,"mtime":"<t>","etag":"","isUploaded":false,"contentId":"<id2>","availability":"cached"}}
+  content                          "hello world"
+ensure_cached onto a file          {"ok":false,"code":"denied","error":"<root>/home/out.txt: already exists"}
+stat by parent and name            {"ok":true,"ref":"i:<file-1>","parentRef":"d:<id1>","name":"f.txt","kind":"file","size":11,"mtime":"<t>","etag":"","isUploaded":false,"contentId":"<id2>","availability":"cached"}
+write by ref, same content         {"ok":true,"size":11,"mtime":"<t>","item":{"ref":"i:<file-1>","parentRef":"d:<id1>","name":"f.txt","kind":"file","size":11,"mtime":"<t>","etag":"","isUploaded":false,"contentId":"<id2>","availability":"cached"}}
+  uploads queued by it: 0
+write by ref on its base           {"ok":true,"size":11,"mtime":"<t>","item":{"ref":"i:<file-1>","parentRef":"d:<id1>","name":"f.txt","kind":"file","size":11,"mtime":"<t>","etag":"","isUploaded":false,"contentId":"<id3>","availability":"cached"}}
+write on a stale base              {"ok":true,"size":11,"mtime":"<t>","item":{"ref":"i:<file-1>","parentRef":"d:<id1>","name":"f.txt","kind":"file","size":11,"mtime":"<t>","etag":"<id3>","isUploaded":true,"contentId":"<id3>","availability":"online-only"}}
+  a now holds: f (conflicted copy from test).txt, f.txt
+create onto a file, exclusive      {"ok":false,"code":"exists","error":"a/f.txt exists","item":{"ref":"i:<file-1>","parentRef":"d:<id1>","name":"f.txt","kind":"file","size":11,"mtime":"<t>","etag":"<id3>","isUploaded":true,"contentId":"<id3>","availability":"online-only"}}
+rename onto its own place          {"ok":true,"item":{"ref":"i:<file-1>","parentRef":"d:<id1>","name":"f.txt","kind":"file","size":11,"mtime":"<t>","etag":"<id3>","isUploaded":true,"contentId":"<id3>","availability":"online-only"}}
+stat root of a read-only domain    {"ok":true,"ref":"root","parentRef":"root","name":"ro","kind":"dir","size":0,"mtime":"<t>","etag":".tsync-root","isUploaded":true,"readOnly":true}
+rename to g.txt                    {"ok":true,"item":{"ref":"i:<file-1>","parentRef":"d:<id1>","name":"g.txt","kind":"file","size":11,"mtime":"<t>","etag":"<id3>","isUploaded":true,"contentId":"<id3>","availability":"online-only"}}
+stat its ref after                 {"ok":true,"ref":"i:<file-1>","parentRef":"d:<id1>","name":"g.txt","kind":"file","size":11,"mtime":"<t>","etag":"<id3>","isUploaded":true,"contentId":"<id3>","availability":"online-only"}
+delete a folder                    {"ok":false,"code":"invalid","error":"a folder is removed with rmdir"}
+rmdir a                            {"ok":true}
+list_dir root                      {"ok":true,"items":[]}
+== change feed
+  op                               {"op":"mkdir","ref":"d:<id1>","parentRef":"root","name":"a"}
+  op                               {"op":"put","ref":"i:<file-1>","parentRef":"d:<id1>","name":"f.txt"}
+  op                               {"op":"put","ref":"i:<file-2>","parentRef":"d:<id1>","name":"f (conflicted copy from test).txt"}
+  op                               {"op":"rename","is_dir":false,"srcRef":"i:<file-1>","srcParentRef":"d:<id1>","ref":"i:<file-1>","parentRef":"d:<id1>","name":"g.txt"}
+  op                               {"op":"delete","ref":"i:<file-2>","parentRef":"d:<id1>","name":"f (conflicted copy from test).txt"}
+  op                               {"op":"delete","ref":"i:<file-1>","parentRef":"d:<id1>","name":"g.txt"}
+  op                               {"op":"rmdir","id":"<id1>","ref":"d:<id1>","parentRef":"root","name":"a"}
+a stale anchor                     {"ok":true,"stale":true}
+== whole-domain listing
+  page 1: b, 1.txt
+  page 2: 2.txt, 3.txt
+  page 3: c.txt (last)
+a cursor of a remade walk          {"ok":true,"stale":true}
+an offset inside a line            {"ok":true,"stale":true}
+not a cursor                       {"ok":true,"stale":true}
+== revert
+revert to the latest version       {"ok":true}
+  content after revert             "first"
+revert to no such version          {"ok":false,"code":"not_found","error":"r.txt: no such version"}
+symlink                            {"ok":true,"item":{"ref":"i:<file-3>","parentRef":"root","name":"l","kind":"symlink","size":5,"mtime":"<t>","etag":"<id4>","isUploaded":true,"contentId":"<id4>","symlinkTarget":"c.txt"}}
+== refusals
+malformed ref                      {"ok":false,"code":"invalid","error":"malformed item reference \"x:1\""}
+storage key                        {"ok":false,"code":"invalid","error":"malformed item reference \"tsync/docs/x\""}
+unknown action                     {"ok":false,"code":"invalid","error":"unknown action: frobnicate"}
+read-only domain                   {"ok":false,"code":"read_only","error":"ro is read-only"}
+no domain on a shared socket       {"ok":false,"code":"invalid","error":"domain is required on this socket"}
+a domain not served                {"ok":false,"code":"unreachable","error":"nope is not served here"}
+pause                              {"ok":true,"paused":true}
+sync while paused                  {"ok":false,"code":"paused","error":"docs is paused"}
+resume                             {"ok":true,"paused":false}
+== events
+subscribe                          {"ok":true}
+first event                        {"event":"recovered","domain":"docs","id":3}
+notify_reset                       {"ok":true,"delivered":1}
+next event                         {"event":"reset","domain":"docs","id":4}
+== jobs
+  line                             {"stream":"started","job":1}
+  line                             {"stream":"out","text":"full resync: 7 manifests"}
+sync --full, narrated              {"ok":true,"exit":0}
+  progress streamed: true
+  line                             {"stream":"started","job":2}
+  line                             {"stream":"out","text":"main: 9 chunks referenced, 0 reclaimable (0 B) (dry run: nothing changed; --apply to act)"}
+gc dry run, narrated               {"ok":true,"exit":0}
+  narration streamed: true, progress streamed: true
+gc --apply, held at opening        {"stream":"started","job":3}
+expire meanwhile                   {"ok":false,"code":"busy","error":"busy: tsync gc --apply (job 3) is running on docs"}
+cancel it                          {"ok":true,"cancelled":true}
+  line                             {"stream":"out","text":"main: left open in marking after \"m/.tsync-root\"; 1 namespaces marked, 3 chunks promoted, 0 reclaimed (0 B)"}
+  line                             {"ok":true,"exit":1}
+cancel once it ended               {"ok":true,"cancelled":false}
+  line                             {"stream":"started","job":5}
+  line                             {"stream":"out","text":"main: completed; 0 namespaces marked, 0 chunks promoted, 0 reclaimed (0 B)"}
+gc --abort                         {"ok":true,"exit":0}
+reports the supervisor got, in order:
+  sync --full: running
+  sync --full: done
+  gc: running
+  gc: done
+  gc --apply: running
+  gc --apply: failed
+  gc --abort: running
+  gc --abort: done
+== rmdir of a folder holding folders
+rmdir t                            {"ok":true}
+stat t after                       {"ok":false,"code":"not_found","error":"t: not found"}
+== stop
+stop                               {"ok":true}
+exit status 0
+socket gone: true
+== a holder that does not serve
+refused: busy
+refused at once: true
+== a refusal while the holder serves
+answered once it serves

@@ -1,0 +1,394 @@
+(executable
+ (name formats_test)
+ (modules formats_test)
+ (libraries tsync_core tsync_remote tsync_checkout tsync_sync yojson unix))
+
+(rule
+ (with-stdout-to
+  formats_test.output
+  (run ./formats_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff formats_test.expected formats_test.output)))
+
+(executable
+ (name two_clients_test)
+ (modules two_clients_test)
+ (libraries
+  tsync_core
+  tsync_store
+  tsync_remote
+  tsync_checkout
+  tsync_sync
+  unix))
+
+(rule
+ (with-stdout-to
+  two_clients_test.output
+  (run ./two_clients_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff two_clients_test.expected two_clients_test.output)))
+
+(executable
+ (name import_plan_test)
+ (modules import_plan_test)
+ (libraries tsync_core tsync_sync unix))
+
+(rule
+ (with-stdout-to
+  import_plan_test.output
+  (run ./import_plan_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff import_plan_test.expected import_plan_test.output)))
+
+(executable
+ (name import_test)
+ (modules import_test)
+ (libraries
+  tsync_core
+  tsync_store
+  tsync_remote
+  tsync_checkout
+  tsync_sync
+  unix))
+
+(rule
+ (with-stdout-to
+  import_test.output
+  (run ./import_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff import_test.expected import_test.output)))
+
+(executable
+ (name rsync_plan_test)
+ (modules rsync_plan_test)
+ (libraries tsync_core tsync_sync))
+
+(rule
+ (with-stdout-to
+  rsync_plan_test.output
+  (run ./rsync_plan_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff rsync_plan_test.expected rsync_plan_test.output)))
+
+(executable
+ (name rsync_test)
+ (modules rsync_test)
+ (libraries
+  tsync_core
+  tsync_store
+  tsync_remote
+  tsync_checkout
+  tsync_sync
+  unix))
+
+(rule
+ (with-stdout-to
+  rsync_test.output
+  (run ./rsync_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff rsync_test.expected rsync_test.output)))
+
+(executable
+ (name export_test)
+ (modules export_test)
+ (libraries
+  tsync_core
+  tsync_store
+  tsync_remote
+  tsync_checkout
+  tsync_sync
+  unix))
+
+(rule
+ (with-stdout-to
+  export_test.output
+  (run ./export_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff export_test.expected export_test.output)))
+
+(executable
+ (name recover_test)
+ (modules recover_test)
+ (libraries
+  tsync_core
+  tsync_store
+  tsync_checkout
+  tsync_sync
+  tsync_config
+  tsync_domain
+  tsync_catalog
+  unix))
+
+(rule
+ (with-stdout-to
+  recover_test.output
+  (run ./recover_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff recover_test.expected recover_test.output)))
+
+(executable
+ (name marker_slot_test)
+ (modules marker_slot_test)
+ (libraries
+  tsync_core
+  tsync_store
+  tsync_remote
+  tsync_checkout
+  tsync_sync
+  unix))
+
+(rule
+ (with-stdout-to
+  marker_slot_test.output
+  (run ./marker_slot_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff marker_slot_test.expected marker_slot_test.output)))
+
+(executable
+ (name moved_edit_test)
+ (modules moved_edit_test)
+ (libraries
+  tsync_core
+  tsync_store
+  tsync_remote
+  tsync_checkout
+  tsync_sync
+  unix))
+
+(rule
+ (with-stdout-to
+  moved_edit_test.output
+  (run ./moved_edit_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff moved_edit_test.expected moved_edit_test.output)))
+
+(executable
+ (name poller_retry_test)
+ (modules poller_retry_test)
+ (libraries
+  tsync_core
+  tsync_store
+  tsync_checkout
+  tsync_sync
+  tsync_config
+  tsync_domain
+  tsync_catalog
+  unix))
+
+(rule
+ (with-stdout-to
+  poller_retry_test.output
+  (run ./poller_retry_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff poller_retry_test.expected poller_retry_test.output)))
+
+(executable
+ (name lost_answer_test)
+ (modules lost_answer_test)
+ (libraries
+  tsync_core
+  tsync_store
+  tsync_checkout
+  tsync_sync
+  tsync_config
+  tsync_domain
+  tsync_catalog
+  unix))
+
+(rule
+ (with-stdout-to
+  lost_answer_test.output
+  (run ./lost_answer_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff lost_answer_test.expected lost_answer_test.output)))
+
+(executable
+ (name rebuild_race_test)
+ (modules rebuild_race_test)
+ (libraries
+  tsync_core
+  tsync_store
+  tsync_checkout
+  tsync_sync
+  tsync_config
+  tsync_domain
+  tsync_catalog
+  unix))
+
+(rule
+ (with-stdout-to
+  rebuild_race_test.output
+  (run ./rebuild_race_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff rebuild_race_test.expected rebuild_race_test.output)))
+
+(executable
+ (name missing_parent_test)
+ (modules missing_parent_test)
+ (libraries
+  tsync_core
+  tsync_store
+  tsync_checkout
+  tsync_sync
+  tsync_config
+  tsync_domain
+  tsync_catalog
+  unix))
+
+(rule
+ (with-stdout-to
+  missing_parent_test.output
+  (run ./missing_parent_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff missing_parent_test.expected missing_parent_test.output)))
+
+(executable
+ (name legacy_entry_test)
+ (modules legacy_entry_test)
+ (libraries
+  tsync_core
+  tsync_store
+  tsync_checkout
+  tsync_sync
+  tsync_config
+  tsync_domain
+  tsync_catalog
+  unix))
+
+(rule
+ (with-stdout-to
+  legacy_entry_test.output
+  (run ./legacy_entry_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff legacy_entry_test.expected legacy_entry_test.output)))
+
+(executable
+ (name file_ids_test)
+ (modules file_ids_test)
+ (libraries
+  test_support
+  tsync_core
+  tsync_store
+  tsync_remote
+  tsync_checkout
+  tsync_sync
+  unix))
+
+(rule
+ (with-stdout-to
+  file_ids_test.output
+  (run ./file_ids_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff file_ids_test.expected file_ids_test.output)))
+
+(executable
+ (name feed_test)
+ (modules feed_test)
+ (libraries
+  tsync_core
+  tsync_store
+  tsync_remote
+  tsync_checkout
+  tsync_sync
+  unix))
+
+(rule
+ (with-stdout-to
+  feed_test.output
+  (run ./feed_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff feed_test.expected feed_test.output)))
+
+(executable
+ (name offline_test)
+ (modules offline_test)
+ (libraries
+  tsync_core
+  tsync_store
+  tsync_checkout
+  tsync_sync
+  tsync_config
+  tsync_domain
+  tsync_catalog
+  unix))
+
+(rule
+ (with-stdout-to
+  offline_nopoll_test.output
+  (run ./offline_test.exe nopoll)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff offline_nopoll_test.expected offline_nopoll_test.output)))
+
+(rule
+ (with-stdout-to
+  offline_poll_test.output
+  (run ./offline_test.exe poll)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff offline_poll_test.expected offline_poll_test.output)))
+
+(rule
+ (with-stdout-to
+  offline_proxy_test.output
+  (run ./offline_test.exe proxy)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff offline_proxy_test.expected offline_proxy_test.output)))

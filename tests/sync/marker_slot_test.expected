@@ -1,0 +1,18 @@
+holds: no last-sync mark
+holds: no last-sync mark
+== B creates folder x while A, not yet told, uploads a file x
+-- after both passes
+  A: x/  x/inside.txt = "B's"  x (conflicted copy from A) = "A's file"
+  B: x/  x/inside.txt = "B's"  x (conflicted copy from A) = "A's file"
+== A renames a file onto folder y, which B just created
+-- after both passes
+  A: x/  x/inside.txt = "B's"  x (conflicted copy from A) = "A's file"  y/  y/kept.txt = "B's"  y (conflicted copy from A) = "renamed"
+  B: x/  x/inside.txt = "B's"  x (conflicted copy from A) = "A's file"  y/  y/kept.txt = "B's"  y (conflicted copy from A) = "renamed"
+-- after B's next pass
+  A: x/  x/inside.txt = "B's"  x (conflicted copy from A) = "A's file"  y/  y/kept.txt = "B's"  y (conflicted copy from A) = "renamed"
+  B: x/  x/inside.txt = "B's"  x (conflicted copy from A) = "A's file"  y/  y/kept.txt = "B's"  y (conflicted copy from A) = "renamed"
+holds: no last-sync mark
+-- a new client, rebuilt from the store
+  C: x/  x/inside.txt = "B's"  x (conflicted copy from A) = "A's file"  y/  y/kept.txt = "B's"  y (conflicted copy from A) = "renamed"
+
+owed: A 0/0, B 0/0

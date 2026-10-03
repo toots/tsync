@@ -1,0 +1,84 @@
+(executable
+ (name owner_test)
+ (modules owner_test)
+ (libraries
+  tsync_core
+  tsync_config
+  tsync_catalog
+  tsync_ipc
+  tsync_owner
+  tsync_store
+  unix
+  yojson))
+
+(rule
+ (with-stdout-to
+  owner_test.output
+  (run ./owner_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff owner_test.expected owner_test.output)))
+
+(executable
+ (name protocol_test)
+ (modules protocol_test)
+ (libraries tsync_core tsync_owner yojson))
+
+(rule
+ (with-stdout-to
+  protocol_test.output
+  (run ./protocol_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff protocol_test.expected protocol_test.output)))
+
+(executable
+ (name shared_test)
+ (modules shared_test)
+ (libraries
+  tsync_core
+  tsync_config
+  tsync_catalog
+  tsync_ipc
+  tsync_owner
+  unix
+  yojson))
+
+(rule
+ (with-stdout-to
+  shared_empty_test.output
+  (run ./shared_test.exe empty)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff shared_empty_test.expected shared_empty_test.output)))
+
+(rule
+ (with-stdout-to
+  shared_two_test.output
+  (run ./shared_test.exe two)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff shared_two_test.expected shared_two_test.output)))
+
+(executable
+ (name menu_test)
+ (modules menu_test)
+ (libraries tsync_owner yojson))
+
+(rule
+ (with-stdout-to
+  menu_test.output
+  (run ./menu_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff menu_test.expected menu_test.output)))

@@ -1,46 +1,34 @@
-(* Known-answer test for the key a delete request is filed under.
+(* Known answers for the key a delete request is filed under (gc.md). OCaml
+   composes it when a collection hands its deletes over; the bucket function
+   parses it back to learn which domain asks, and refuses anything outside that
+   domain's chunks. The rows are read back by [lambda/test_gc_job_key.py]
+   (10 §3.1 item 4): a disagreement leaves every request ignored. *)
 
-   OCaml composes it when a collection hands its deletes over; the function in
-   the bucket parses it back to learn which domain is asking, and refuses to
-   delete anything outside that domain's chunks. So a disagreement is not a
-   cosmetic one: parsing that fails leaves every request ignored and the copy
-   never emptied, and parsing that reads the wrong domain is the check on what a
-   request may name reading the wrong answer.
+open Tsync_core
 
-   The rows are read back by [lambda/test_gc_job_key.py], which parses them with
-   the Python implementation. One golden file, checked from both sides, with no
-   third copy to drift.
+(* "gc-jobs" itself is a reserved domain name (01 §2.1). *)
+let domains = ["dom"; "Jellyfin Media"; "chunks"; "gc-job"]
 
-   Domains cover what a real one looks like: a plain name, one with a space, and
-   one spelled like the segments around it. *)
-
-let chunk_prefix domain = "tsync/" ^ domain ^ "/chunks/"
-let domains = ["dom"; "Jellyfin Media"; "chunks"; "gc-jobs"]
-
-(* Fixed rather than taken from a clock, so the file is the same on every run.
-   Two of them, because a name colliding across collections is what putting the
-   run in the key exists to stop. *)
+(* Fixed, so the file is the same on every run; two, because the run in the
+   key keeps collections half a second apart from sharing a name. *)
 let runs = [1755300000.; 1755300000.5]
 
 let () =
   List.iter
-    (fun domain ->
-      let module L = Chunk_layout.Make (struct
-        let chunk_prefix = chunk_prefix domain
-      end) in
-      Printf.printf "prefix|%s|%s\n" domain L.gc_jobs_prefix;
+    (fun name ->
+      let d = Domain_name.v name in
+      Printf.printf "prefix|%s|%s\n" name (Key.prefix_to_string (Key.gc_jobs d));
       List.iter
         (fun started ->
-          let run = Chunk_layout.gc_run_name started in
+          let run = Key.run_name started in
           List.iter
             (fun shard ->
-              Printf.printf "job|%s|%s|%s|%s\n" domain run shard
-                (Stored_key.to_string (L.gc_job_key ~run shard)))
+              Printf.printf "job|%s|%s|%s|%s\n" name run shard
+                (Key.to_string (Key.discard_job d ~run ~shard)))
             ["000"; "abb"; "fff"])
         runs)
     domains;
-  (* Spelled like a request but for the pieces that make one: what the Python
-     must refuse, so that a chunk is never handed to the delete path. *)
+  (* What the Python must refuse, so a chunk never reaches the delete path. *)
   List.iter
     (fun key -> Printf.printf "not-a-job|%s\n" key)
     [
@@ -52,20 +40,12 @@ let () =
       "tsync/gc-jobs/dom/1755300000000/";
       "tsync/gc-jobs//1755300000000/abb";
     ];
-  (* Two collections a half second apart must not share a name: a bare shard
-     would let the later one overwrite a request the earlier left unconsumed,
-     losing its keys and the evidence that it stuck. *)
-  assert (
-    Chunk_layout.gc_run_name (List.nth runs 0)
-    <> Chunk_layout.gc_run_name (List.nth runs 1));
-  (* A request is never mistaken for a chunk on this side either. *)
+  assert (Key.run_name (List.nth runs 0) <> Key.run_name (List.nth runs 1));
   List.iter
-    (fun domain ->
-      let module L = Chunk_layout.Make (struct
-        let chunk_prefix = chunk_prefix domain
-      end) in
-      let key = L.gc_job_key ~run:"1755300000000" "abb" in
-      assert (Chunk_layout.marker_key key = None);
-      assert (Chunk_layout.shard_of_job (Stored_key.to_string key) = Some "abb"))
+    (fun name ->
+      let d = Domain_name.v name in
+      let key = Key.discard_job d ~run:"1755300000000" ~shard:"abb" in
+      assert (Key.chunk_of_marker key = None);
+      assert (Key.parse_discard_job key = Some (d, "1755300000000", "abb")))
     domains;
   print_endline "ok"

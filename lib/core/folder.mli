@@ -1,40 +1,25 @@
-(** The backend's folder inode model.
+(** Folder markers, anchors and trash entries (spec 02 §2.7–2.9). *)
 
-    A directory is identified by a stable random id, not by its mutable name, so
-    renaming or moving one rewrites only the parent's marker entry and never its
-    descendants, whose keys live under [manifests/<id>/…].
+(** "the folder [id] appears here under [name]" *)
+type marker = { name : string; id : Folder_id.t }
 
-    Two kinds of object live at [manifests/<folder id>/<hash of child name>] — a
-    file manifest, or a folder marker naming a child directory and the namespace
-    holding its children — told apart only by their body, which is what
-    {!marker_of_string} is for. *)
+(** Where a folder says it lives; the authority between markers. *)
+type anchor = { parent : Folder_id.t; aname : string }
 
-type marker = { name : string; id : string }
+(** Exactly [{"dir":true,"name":…,"id":…}]. *)
+val marker_body : marker -> string
 
-val marker_to_string : marker -> string
+(** A marker body plus the path at deletion time. *)
+val trash_body : marker -> path:string -> string
 
-(** A trashed folder's marker also records its original path, so it can be
-    listed and restored. The extra field is ignored by {!marker_of_string}. *)
-val trash_marker_to_string : name:string -> id:string -> path:string -> string
+val anchor_body : anchor -> string
 
-(** The [path] a trashed marker recorded, or [None] if it has none. *)
-val trash_path_of_string : string -> string option
+(** A marker (with the trash entry's path, if any), a marker whose id is not a
+    folder id, or not a marker at all. *)
+val classify_marker :
+  string -> [ `Marker of marker * string option | `Unclassifiable | `Not_marker ]
 
-(** [Some marker] when the body is a folder marker, [None] when it is a file
-    manifest or cannot be parsed. *)
-val marker_of_string : string -> marker option
+(** [None] unless both fields are strings and the parent is a folder id. *)
+val decode_anchor : string -> anchor option
 
-(** Where a folder lives, kept inside its own namespace at
-    {!Stored_key.anchor_key}: the id of the folder holding it and its name
-    there. The marker under the parent says the same from the other side; when a
-    marker and the anchor disagree, the marker is stale, which is how a marker a
-    move left behind is told from the folder's real place. *)
-type anchor = { parent : string; name : string }
-
-(** Whether the anchor files its folder in the trash, which retires it. *)
 val in_trash : anchor -> bool
-
-val anchor_to_string : anchor -> string
-
-(** [None] for anything that is not an anchor, a marker included. *)
-val anchor_of_string : string -> anchor option

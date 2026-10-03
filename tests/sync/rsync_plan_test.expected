@@ -1,0 +1,29 @@
+missing source                                 skip: the source is missing
+folder to nothing in the domain                make a domain folder
+folder to a local folder                       make a local folder
+folder onto a local file                       skip: a file holds the folder's name at the target
+folder onto a domain file                      skip: a file holds the folder's name at the target
+domain file onto a local folder                skip: a folder holds the file's name at the target
+local file onto a domain folder                skip: a folder holds the file's name at the target
+domain file to nothing in the domain           copy the manifest f
+domain file to nothing, moved                  rename f in the domain
+domain file onto the same content              identical
+domain file onto other content                 copy the manifest f
+domain file onto the same content, moved       identical; the source is dropped
+local file to nothing in the domain            upload, fresh
+local file equal to the domain's               identical
+local file differing from the domain's         upload, replacing
+unhashed local file onto a domain file         upload, replacing
+local link equal to the domain's               identical
+local link onto a domain file                  upload, replacing
+domain file to nothing locally                 assemble f
+domain file onto an equal local file           identical
+domain file onto a local file, one chunk off   patch chunks 1
+domain file onto a shorter local file          assemble f
+domain link onto the same local link           identical
+domain link onto another local link            assemble l
+domain file onto an unhashed local file        assemble f
+local file to nothing locally                  skip: neither side is in the domain
+local file onto a local file                   skip: neither side is in the domain
+local file to the domain, moved                upload, fresh; the source is dropped
+folder, moved                                  make a domain folder

@@ -1,7 +1,24 @@
-; The binary is a name and an entry point; everything it does is tsync_cli.
+; tsync_catalog links every driver and frontend this build has.
 
 (executable
  (name tsync)
  (public_name tsync)
  (package tsync)
- (libraries tsync_cli))
+ (libraries
+  cmdliner
+  tsync_core
+  tsync_store
+  tsync_config
+  tsync_catalog
+  tsync_ipc
+  tsync_owner
+  tsync_domain
+  tsync_gc
+  tsync_remote
+  tsync_sync
+  tsync_supervisor
+  tsync_status
+  tsync_http
+  tsync_http_proxy
+  unix
+  yojson))

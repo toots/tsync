@@ -1,0 +1,17 @@
+; linkall: the implementation registers itself when linked.
+
+(library
+ (name tsync_http_native)
+ (optional)
+ (library_flags (-linkall))
+ (libraries
+  tsync_core
+  tsync_http
+  tls
+  x509
+  ca-certs
+  domain-name
+  ptime
+  ptime.clock.os
+  mirage-crypto-rng.unix
+  unix))

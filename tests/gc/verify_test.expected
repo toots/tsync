@@ -1,0 +1,23 @@
+no confirmed function:
+  main: unsupported
+  bucket: unsupported
+  requests written: 0
+probe: true
+function deployed:
+  main: unsupported
+  bucket: done, 1 corrupt
+  rotten chunk marked: true, sound ones not: true
+function no longer notified:
+  main: unsupported
+  bucket: stalled, 4096 left, 1 corrupt
+cancelled while queueing, the function consuming what was written: cancelled
+cancelled while following:
+  main: unsupported
+  bucket: abandoned, 4096 left, 1 corrupt
+  requests left for the function: 4096
+
+== a bucket as the main
+verified before any probe: false
+confirmed by the owner's start: true, verified: true
+verify on the main:
+  main-bucket: done, 1 corrupt

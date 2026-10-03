@@ -1,11 +1,14 @@
-// Imported rather than spelled out at the use site: `java` there resolves to the
-// Java plugin extension, not the package.
-import java.util.concurrent.atomic.AtomicInteger
-
 plugins {
-    id("com.android.application") version "8.7.3"
-    kotlin("android") version "2.0.21"
+    id("com.android.application")
+    id("org.jetbrains.kotlin.plugin.compose")
 }
+
+val buildNumber = providers.environmentVariable("BUILD_NUMBER").map { it.toInt() }.getOrElse(1)
+val commit = providers.exec { commandLine("git", "rev-parse", "--short=12", "HEAD") }
+    .standardOutput.asText.map { it.trim() }.getOrElse("unknown")
+val keystore = providers.environmentVariable("ANDROID_KEYSTORE_FILE").orNull
+val keystorePassword = providers.environmentVariable("ANDROID_KEYSTORE_PASSWORD").orNull
+val noCore = providers.gradleProperty("noCore").isPresent
 
 android {
     namespace = "org.feverdreamtv.tsync"
@@ -13,32 +16,25 @@ android {
 
     defaultConfig {
         applicationId = "org.feverdreamtv.tsync"
-        // openProxyFileDescriptor (ranged reads, a later milestone) is API 26,
-        // and the daemon is built against the android26 NDK headers. Both floors
-        // have to agree.
+        // Equals the API level the core is cross-built against (app §12).
         minSdk = 26
         targetSdk = 35
-        // A nightly has to outrank the one before it or installing over it is
-        // refused as a downgrade.
-        versionCode = (System.getenv("BUILD_NUMBER") ?: "1").toInt()
-        versionName = "0.1"
-        ndk { abiFilters += "arm64-v8a" }
+        versionCode = buildNumber
+        versionName = "1.0.$buildNumber-$commit"
+        buildConfigField("String", "COMMIT", "\"$commit\"")
+        // One ABI is shipped. The device suite's package carries no core and runs on an
+        // emulator of another ABI, so it keeps every ABI of its other libraries.
+        if (!noCore) ndk { abiFilters += "arm64-v8a" }
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
-    // One key for every build that leaves CI, or a phone refuses each one as an
-    // update to the last: AGP mints a debug key per runner, and the runners are
-    // ephemeral. The keystore reaches a run through scripts/setup_android_signing.sh;
-    // without it a release build falls back to the local debug key, so a build
-    // on a developer's machine still installs over its predecessors there.
-    val keystore = System.getenv("ANDROID_KEYSTORE")?.let(::file)?.takeIf { it.isFile }
     signingConfigs {
-        if (keystore != null) {
-            create("release") {
-                storeFile = keystore
-                storePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+        if (keystore != null && keystorePassword != null) {
+            create("tsync") {
+                storeFile = file(keystore)
+                storePassword = keystorePassword
                 keyAlias = "tsync"
-                keyPassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+                keyPassword = keystorePassword
             }
         }
     }
@@ -46,112 +42,75 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = false
-            signingConfig =
-                if (keystore != null) signingConfigs.getByName("release")
-                else signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.findByName("tsync") ?: signingConfigs.getByName("debug")
         }
+    }
+
+    buildFeatures {
+        compose = true
+        buildConfig = true
     }
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlinOptions { jvmTarget = "17" }
 
     testOptions {
-        unitTests {
-            isIncludeAndroidResources = true
-            isReturnDefaultValues = true
-        }
+        unitTests.isIncludeAndroidResources = true
     }
 }
 
 dependencies {
-    // api, not implementation: keys and the wire's error type are part of what
-    // the app's own classes hand each other.
-    api(project(":core"))
-    implementation("androidx.work:work-runtime-ktx:2.10.1")
+    implementation(project(":core"))
+    implementation(platform("androidx.compose:compose-bom:2025.04.01"))
+    implementation("androidx.compose.ui:ui")
+    implementation("androidx.compose.material3:material3")
+    implementation("androidx.activity:activity-compose:1.10.1")
+    implementation("androidx.core:core-ktx:1.16.0")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.9.0")
+    implementation("androidx.work:work-runtime:2.10.1")
 
     testImplementation("junit:junit:4.13.2")
-    // The real thing: android.jar is stubbed for unit tests, and the protocol
-    // test reads replies rather than asserting against a default-valued object.
-    testImplementation("org.json:json:20240303")
-    testImplementation("org.robolectric:robolectric:4.14.1")
+    testImplementation("org.robolectric:robolectric:4.15.1")
     testImplementation("androidx.test:core:1.6.1")
-    testImplementation("androidx.work:work-testing:2.10.1")
-    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")
 
-    androidTestImplementation("androidx.test:core:1.6.1")
-    androidTestImplementation("androidx.test:runner:1.6.2")
-    androidTestImplementation("androidx.test:rules:1.6.1")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    androidTestImplementation("androidx.test:runner:1.6.2")
 }
 
-// A test task reports success when it ran nothing at all — a missing source set,
-// a filter that matched no class, a runner that never started. Count what
-// actually executed and refuse to call zero a pass.
-tasks.withType<Test>().configureEach {
-    val executed = AtomicInteger()
-    addTestListener(object : TestListener {
-        override fun beforeSuite(suite: TestDescriptor) {}
-        override fun afterSuite(suite: TestDescriptor, result: TestResult) {}
-        override fun beforeTest(test: TestDescriptor) {}
-        override fun afterTest(test: TestDescriptor, result: TestResult) {
-            executed.incrementAndGet()
-        }
-    })
+// app §12: the package carries the core cross-built from this commit, and no built library is
+// kept in the repository. The device suite's package (-PnoCore) carries none, deliberately.
+val coreLibrary = rootProject.file("../_build/default.android/lib/frontends/android/jni/libtsyncjni.so")
+val stagedLibrary = layout.projectDirectory.file("src/main/jniLibs/arm64-v8a/libtsyncjni.so").asFile
+val ndkHome = providers.environmentVariable("ANDROID_NDK_HOME").orNull
+
+val stageCore by tasks.registering {
+    inputs.property("noCore", noCore)
+    inputs.files(coreLibrary).optional()
+    outputs.upToDateWhen { false }
     doLast {
-        if (executed.get() == 0) throw GradleException("$path ran zero tests")
-    }
-}
-
-// The domain is built by dune, not gradle. Stage it straight out of the cross
-// build so the APK can never ship a stale library, and so a 14MB artifact stays
-// out of git.
-// One prebuilt directory per host platform, so it is looked up rather than
-// spelled out: a CI runner's NDK is not where a homebrew cask puts one.
-val ndkStrip: File by lazy {
-    val ndk = file(System.getenv("ANDROID_NDK_ROOT")
-        ?: System.getenv("ANDROID_NDK_LATEST_HOME")
-        ?: "/opt/homebrew/share/android-ndk")
-    val strip = ndk.resolve("toolchains/llvm/prebuilt").listFiles().orEmpty()
-        .map { it.resolve("bin/llvm-strip") }.firstOrNull { it.exists() }
-    requireNotNull(strip) { "no llvm-strip under $ndk — set ANDROID_NDK_ROOT" }
-}
-
-// An APK without the domain is useless, but a *test* without it is not: the unit
-// suites drive the protocol against a natively built binary, or against a fake.
-// So a missing cross build skips the staging rather than failing every task in
-// the project, and the release build asks for the hard failure with
-// -PrequireDaemon.
-val requireDaemon = providers.gradleProperty("requireDaemon").isPresent
-
-// A FileCollection, not inputs.file: that one fails the task outright when the
-// path does not exist, which is the case the gate exists to allow.
-fun stage(name: String, from: String, to: String) =
-    tasks.register(name) {
-        val built = rootProject.file(from)
-        val staged = file(to)
-        inputs.files(built)
-        outputs.file(staged)
-        onlyIf { built.exists() || requireDaemon }
-        doLast {
-            require(built.exists()) {
-                "missing $built — run `dune build -x android $from` first"
-            }
-            staged.parentFile.mkdirs()
-            built.copyTo(staged, overwrite = true)
-            staged.setWritable(true)
-            // llvm-strip drops .symtab and the debug sections but keeps
-            // .dynsym, so the Java_* entry points still resolve.
-            exec { commandLine(ndkStrip.absolutePath, staged.absolutePath) }
+        if (noCore) {
+            if (stagedLibrary.exists()) throw GradleException("-PnoCore: $stagedLibrary is staged, and this package must carry no core")
+            return@doLast
+        }
+        if (!coreLibrary.exists()) {
+            throw GradleException("The core library is missing: build $coreLibrary from this commit, or pass -PnoCore for a package without it")
+        }
+        coreLibrary.copyTo(stagedLibrary, overwrite = true)
+        if (ndkHome != null) {
+            val strip = fileTree(ndkHome) { include("toolchains/llvm/prebuilt/*/bin/llvm-strip") }.singleFile
+            // Drops the symbol table and debug sections; the dynamic symbols JNI resolves stay.
+            providers.exec { commandLine(strip.path, "--strip-unneeded", stagedLibrary.path) }.result.get().assertNormalExitValue()
         }
     }
+}
 
-val stageLibrary = stage(
-    "stageLibrary",
-    "../_build/default.android/lib/app/frontends/android/jni/libtsyncjni.so",
-    "src/main/jniLibs/arm64-v8a/libtsyncjni.so"
-)
+tasks.matching { it.name.startsWith("merge") && it.name.endsWith("JniLibFolders") }.configureEach {
+    dependsOn(stageCore)
+}
 
-tasks.named("preBuild") { dependsOn(stageLibrary) }
+tasks.withType<Test>().configureEach {
+    // Robolectric runs the platform's SQLite and resources on the JVM.
+    systemProperty("robolectric.logging", "stderr")
+}

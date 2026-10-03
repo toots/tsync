@@ -1,0 +1,63 @@
+== report
+healthy false, 1 tombstones
+  folder <twice> is at 2 paths: live/twice-again, twice
+  manifests/<other>/3d1f6d2e0f2564f6-a4edf94725a4bfb8 names a folder whose anchor files it under the root as "moved"
+  trash entry manifests/.tsync-trash/e1 names folder <live>, which is live
+  twice (folder <twice>) has no anchor
+  live/twice-again (folder <twice>) has no anchor
+  old/unbinned (folder <unbinned>), in the trash, has no anchor
+  folder <lost> ("lost") is unreachable, holding 1 object: manifests/<lost>/f01e5cbbc09d4fc4-9a0fcd66f030de75
+  folder <nested> ("nested") is unreachable, holding 1 object, inside another unreachable folder: manifests/<nested>/3c697ec236bbf61f-698ad1290042cc94
+  folder <young> ("<young>") is unreachable, holding 1 object: manifests/<young>/d6d50f267ed1aabb-7fe71c7d92c1e0c0
+  corrupt on main: <own copy>
+  corrupt on main: <nowhere>
+  corrupt on replica: <on main>
+a cancelled report: cancelled
+a repair cancelled before it starts repairs 0 findings
+
+== repair, dry run
+  folder <twice> is at 2 paths: live/twice-again, twice -> left
+  manifests/<other>/3d1f6d2e0f2564f6-a4edf94725a4bfb8 names a folder whose anchor files it under the root as "moved" -> deleted
+  trash entry manifests/.tsync-trash/e1 names folder <live>, which is live -> deleted
+  twice (folder <twice>) has no anchor -> left
+  live/twice-again (folder <twice>) has no anchor -> left
+  old/unbinned (folder <unbinned>), in the trash, has no anchor -> anchored
+  folder <lost> ("lost") is unreachable, holding 1 object: manifests/<lost>/f01e5cbbc09d4fc4-9a0fcd66f030de75 -> adopted
+  folder <nested> ("nested") is unreachable, holding 1 object, inside another unreachable folder: manifests/<nested>/3c697ec236bbf61f-698ad1290042cc94 -> nested
+  folder <young> ("<young>") is unreachable, holding 1 object: manifests/<young>/d6d50f267ed1aabb-7fe71c7d92c1e0c0 -> young
+  <own copy> on main -> cleared
+  <nowhere> on main -> unrepairable
+  <on main> on replica -> repaired from main
+dry run changed nothing: true
+
+== repair
+  folder <twice> is at 2 paths: live/twice-again, twice -> left
+  manifests/<other>/3d1f6d2e0f2564f6-a4edf94725a4bfb8 names a folder whose anchor files it under the root as "moved" -> deleted
+  trash entry manifests/.tsync-trash/e1 names folder <live>, which is live -> deleted
+  twice (folder <twice>) has no anchor -> left
+  live/twice-again (folder <twice>) has no anchor -> left
+  old/unbinned (folder <unbinned>), in the trash, has no anchor -> anchored
+  folder <lost> ("lost") is unreachable, holding 1 object: manifests/<lost>/f01e5cbbc09d4fc4-9a0fcd66f030de75 -> adopted
+  folder <nested> ("nested") is unreachable, holding 1 object, inside another unreachable folder: manifests/<nested>/3c697ec236bbf61f-698ad1290042cc94 -> nested
+  folder <young> ("<young>") is unreachable, holding 1 object: manifests/<young>/d6d50f267ed1aabb-7fe71c7d92c1e0c0 -> young
+  <own copy> on main -> cleared
+  <nowhere> on main -> unrepairable
+  <on main> on replica -> repaired from main
+
+== report after the repair
+healthy false, 1 tombstones
+  folder <twice> is at 2 paths: live/twice-again, twice
+  twice (folder <twice>) has no anchor
+  live/twice-again (folder <twice>) has no anchor
+  folder <nested> ("nested") is unreachable, holding 1 object: manifests/<nested>/3c697ec236bbf61f-698ad1290042cc94
+  folder <young> ("<young>") is unreachable, holding 1 object: manifests/<young>/d6d50f267ed1aabb-7fe71c7d92c1e0c0
+  corrupt on main: <nowhere>
+trash: <binned> at binned, <lost> at lost, <unbinned> at old/unbinned
+replica's copy of <on main> sound: true
+
+== a folder the walk cannot list
+unreadable: manifests/<top>/.tsync-parent; healthy false
+  folder <nested> ("nested") is unreachable, holding 1 object: manifests/<nested>/3c697ec236bbf61f-698ad1290042cc94 -> incomplete
+  folder <young> ("<young>") is unreachable, holding 1 object: manifests/<young>/d6d50f267ed1aabb-7fe71c7d92c1e0c0 -> incomplete
+  folder <inner> ("inner") is unreachable, holding 1 object: manifests/<inner>/2af84fa98a68a9b1-19465e194feef43e -> incomplete
+inner still live: true

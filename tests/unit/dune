@@ -1,0 +1,162 @@
+; Each test prints what it checked; the output is compared with a committed
+; <name>.expected snapshot, so a change reads as a diff.
+
+(executables
+ (names rt_test core_test dqueue_test)
+ (modules rt_test core_test dqueue_test)
+ (libraries tsync_core unix))
+
+(executables
+ (names uplink_test uplink_law_test uplink_modes_test)
+ (modules uplink_test uplink_law_test uplink_modes_test)
+ (libraries tsync_core tsync_store yojson unix))
+
+(rule
+ (with-stdout-to
+  uplink_modes_test.output
+  (run ./uplink_modes_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff uplink_modes_test.expected uplink_modes_test.output)))
+
+(rule
+ (with-stdout-to
+  uplink_law_test.output
+  (run ./uplink_law_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff uplink_law_test.expected uplink_law_test.output)))
+
+(rule
+ (with-stdout-to
+  uplink_test.output
+  (run ./uplink_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff uplink_test.expected uplink_test.output)))
+
+(rule
+ (with-stdout-to
+  rt_test.output
+  (run ./rt_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff rt_test.expected rt_test.output)))
+
+(rule
+ (with-stdout-to
+  core_test.output
+  (run ./core_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff core_test.expected core_test.output)))
+
+(rule
+ (with-stdout-to
+  dqueue_test.output
+  (run ./dqueue_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff dqueue_test.expected dqueue_test.output)))
+
+(executable
+ (name mapped_pages_test)
+ (modules mapped_pages_test)
+ (libraries tsync_core unix))
+
+(rule
+ (enabled_if
+  (= %{system} linux))
+ (action
+  (with-stdout-to
+   mapped_pages_test.output
+   (run ./mapped_pages_test.exe))))
+
+(rule
+ (alias runtest)
+ (enabled_if
+  (= %{system} linux))
+ (action
+  (diff mapped_pages_test.expected mapped_pages_test.output)))
+
+; 09 §10.1: reported, not silently skipped, where it cannot run.
+
+(rule
+ (alias runtest)
+ (enabled_if
+  (not
+   (= %{system} linux)))
+ (action
+  (echo "mapped_pages_test: not run, it reads /proc\n")))
+
+(executable
+ (name rt_class_test)
+ (modules rt_class_test)
+ (libraries tsync_core tsync_ipc threads.posix unix))
+
+(rule
+ (with-stdout-to
+  rt_class_test.output
+  (run ./rt_class_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff rt_class_test.expected rt_class_test.output)))
+
+(executable
+ (name rt_fd_test)
+ (modules rt_fd_test)
+ (libraries tsync_core threads.posix unix))
+
+(rule
+ (with-stdout-to
+  rt_fd_test.output
+  (run ./rt_fd_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff rt_fd_test.expected rt_fd_test.output)))
+
+(executable
+ (name shared_outcome_test)
+ (modules shared_outcome_test)
+ (libraries tsync_core tsync_store tsync_checkout unix))
+
+(rule
+ (with-stdout-to
+  shared_outcome_test.output
+  (run ./shared_outcome_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff shared_outcome_test.expected shared_outcome_test.output)))
+
+(executable
+ (name dqueue_raise_test)
+ (modules dqueue_raise_test)
+ (libraries tsync_core unix))
+
+(rule
+ (with-stdout-to
+  dqueue_raise_test.output
+  (run ./dqueue_raise_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff dqueue_raise_test.expected dqueue_raise_test.output)))

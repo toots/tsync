@@ -1,0 +1,127 @@
+== hashes (01 §3.1)
+""             2d06800538d394c2 4dc5b0cc826f6703
+hello world    d447b1ea40e6988b b7aeb52a10fdaf2d
+8 MiB pattern  29a6314906cb27cd 314dbe6e90136337
+streaming equals one-shot: 0:true 1:true 16:true 17:true 128:true 129:true 240:true 241:true 2600:true 1048576:true 1048577:true
+dual "hello world" d447b1ea40e6988b-b7aeb52a10fdaf2d
+dual ""         2d06800538d394c2-4dc5b0cc826f6703
+dual "img.jpg"  066843ea47b80079-e0e3d2bb9b72c14d
+dual "hello.txt" 285b8db6c3eef5e0-7b23aee4b1561b8f
+dual "Photos"   857fcda0047eeab4-a677d171b8d38674
+
+== chunk keys
+"d447b1ea40e6988b-b7aeb52a10fdaf2d"  true
+"D447b1ea40e6988b-b7aeb52a10fdaf2d"  false
+"d447b1ea40e6988b_b7aeb52a10fdaf2d"  false
+"ab"                                 false
+shard of ab: _
+
+== keys and domain names (01 §2.1–2.2)
+key "a/b"          true
+key ""             false
+key "/a"           false
+key "a/"           false
+key "a//b"         false
+key "a/./b"        false
+key "a/../b"       false
+key "a\000b"       false
+domain "shares"   local=false false
+domain "gc-jobs"  local=false false
+domain "a/b"      local=false false
+domain ".."       local=false false
+domain ".tsync-x" local=false false
+domain "SHARES"   local=true  false
+domain "SHARES"   local=false true
+domain "Family Photos" local=false true
+domain "chunks"   local=false true
+folder id "3f2a9c1b7d4e"                       true
+folder id "9f3a1c0428b6d5e7"                   true
+folder id "0123456789abcdef0123456789abcdef"   true
+folder id "3f2a9c1b7d4e-1a"                    true
+folder id "Photos"                             false
+folder id ".."                                 false
+
+== item references (01 §2.7)
+"root"                   root
+"d:.tsync-root"          root
+"f:3f2a9c1b7d4e-1a/a:b"  f:3f2a9c1b7d4e-1a/a:b
+"f:3f2a9c1b7d4e-1a/a/b"  malformed
+"d:"                     malformed
+"f:3f2a9c1b7d4e-1a/"     malformed
+"f:/x"                   malformed
+"d:.."                   malformed
+"d:Photos"               malformed
+"tsync/d/manifests/x"    malformed
+"i:6c1e0b9a2f4d47e8a3b5c7d9e1f20384" i:6c1e0b9a2f4d47e8a3b5c7d9e1f20384
+"i:6C1E0B9A2F4D47E8A3B5C7D9E1F20384" malformed
+"i:6c1e0b9a"             malformed
+"i:"                     malformed
+
+== temporary names (01 §2.9)
+".tsync-tmp-1-2.tmp"     ours=true  owner=1
+".tsync-tmp-9f3a0c.tmp"  ours=true  owner=-
+".tsync-tmp-scratch.tmp" ours=true  owner=-
+".syncthing.X.mkv.tmp"   ours=false owner=-
+"x.tmp"                  ours=false owner=-
+".tsync-tmp-1-2.txt"     ours=false owner=-
+"my.tsync-tmp-1-2.tmp"   ours=false owner=-
+escape "a:b" -> .tsync-esc-35a5819dd7f7c459
+
+== pieces (01 §3.4), cs = 8
+[6,10) count 3: #0[6,8)@0 #1[0,2)@2
+[12,28) count 2: #1[4,8)@0
+[16,24) count 2:
+[0,0) count 2:
+
+== glob (01 §17)
+"**/.git"      ".git"         true
+"**/.git"      "a/.git"       true
+"**/.git"      "a/b/.git"     true
+"**/.git"      "foo.git"      false
+"**/.git"      "a/repo.git"   false
+"**/.git"      "a/b/c"        false
+"**/node_modules" "a/my_node_modules" false
+"src/**/*.ml"  "src/foo.ml"   true
+"src/**/*.ml"  "src/a/b/foo.ml" true
+"src/**/*.ml"  "src/a/b/foo.c" false
+"src/**/*.ml"  "srcx/foo.ml"  false
+"a/**"         "a/b"          true
+"a/**"         "a/b/c"        true
+"a/**"         "a"            false
+"*.ml"         "foo.ml"       true
+"*.ml"         "dir/foo.ml"   false
+"fo?"          "foo"          true
+"fo?"          "fo"           false
+"fo?"          "fo/"          false
+"a**b"         "axyb"         true
+"a**b"         "ax/yb"        false
+"lost+found"   "lost+found"   true
+"foo.bar"      "fooXbar"      false
+""             ""             true
+""             "x"            false
+"*"            ""             true
+"*"            "abc"          true
+"**"           ""             true
+"**"           "a/b/c"        true
+
+== zip (01 §13)
+unzip -t: ok, extract: ok
+d/text.txt       byte-exact
+d/bin            byte-exact
+d/empty          byte-exact
+d/héllo ✓.txt byte-exact
+
+== key areas: a domain may be named like an area
+d           chunk d true; outgoing d true; marker true; reference d; version d; manifest marker true
+chunks      chunk chunks true; outgoing chunks true; marker true; reference chunks; version chunks; manifest marker true
+manifests   chunk manifests true; outgoing manifests true; marker true; reference manifests; version manifests; manifest marker true
+versions    chunk versions true; outgoing versions true; marker true; reference versions; version versions; manifest marker true
+chunks.from chunk chunks.from true; outgoing chunks.from true; marker true; reference chunks.from; version chunks.from; manifest marker true
+
+== a mount point, its parent resolved
+real/Drive               true
+real/Drive/              true
+real/./Drive             true
+real//Drive              true
+link/Drive               true
+/                        /

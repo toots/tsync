@@ -1,0 +1,59 @@
+holds: no last-sync mark
+holds: no last-sync mark
+== local to the domain, a dry run first
+  .: make the folder
+  notes: make the folder
+  notes/a.txt: upload
+  notes/big.bin: upload
+  top.txt: upload
+copied 3 (210008 bytes), identical 0, folders 2, skipped 0, failed 0
+-- B sees
+  dest/  dest/notes/  dest/notes/a.txt (5)  dest/notes/big.bin (210000)  dest/top.txt (3)
+
+== again: everything identical
+copied 0 (0 bytes), identical 3, folders 2, skipped 0, failed 0
+
+== one local chunk changed is uploaded again
+copied 1 (4 bytes), identical 2, folders 2, skipped 0, failed 0
+
+== out of the domain, then one local chunk off is patched
+copied 3 (210008 bytes), identical 0, folders 2, skipped 0, failed 0
+big.bin equal: true
+  .: make the folder
+  big.bin: download 1 differing chunks
+  a.txt: identical
+copied 1 (4 bytes), identical 1, folders 1, skipped 0, failed 0
+big.bin equal again: true
+
+== a copy, then a move, within the domain
+copied 2 (0 bytes), identical 0, folders 1, skipped 0, failed 0
+copied 2 (0 bytes), identical 0, folders 1, skipped 0, failed 0
+-- B sees
+  copy/  dest/  dest/notes/  dest/notes/a.txt (5)  dest/notes/big.bin (210000)  dest/top.txt (3)  moved/  moved/a.txt (5)  moved/big.bin (210000)
+
+== a local move drops the local sources
+copied 2 (2 bytes), identical 0, folders 1, skipped 0, failed 0
+local inbox now: []
+-- B sees
+  copy/  dest/  dest/notes/  dest/notes/a.txt (5)  dest/notes/big.bin (210000)  dest/top.txt (3)  inbox/  inbox/x.txt (1)  inbox/y.txt (1)  moved/  moved/a.txt (5)  moved/big.bin (210000)
+
+== a move leaves a file with an unpublished edit where it is
+copied 1 (0 bytes), identical 0, folders 1, skipped 1, failed 0
+  skipped f.txt: this client's edit of it is not published yet
+pend2/f.txt copied: false; pend/f.txt kept: true; pend2/g.txt copied: true
+
+== a move cancelled mid-batch announces only the moves made
+copied 1 (0 bytes), identical 0, folders 1, skipped 0, failed 0, cancelled
+A: mv [a.txt c.txt d.txt] mv2 [b.txt]
+B: mv [a.txt c.txt d.txt] mv2 [b.txt]
+
+== refusals
+copied 0 (0 bytes), identical 0, folders 0, skipped 6, failed 0
+  skipped .: a file holds the folder's name at the target
+  skipped inbox: its folder was skipped
+  skipped notes: its folder was skipped
+  skipped notes/a.txt: its folder was skipped
+  skipped notes/big.bin: its folder was skipped
+  skipped top.txt: its folder was skipped
+
+owed: A 0/0, unapplied B 0

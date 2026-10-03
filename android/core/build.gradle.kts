@@ -1,43 +1,50 @@
-// The half of the app with no Android in it: storage keys, the daemon's wire,
-// and everything that decides what a camera backup should do.
-//
-// A module of its own so those decisions are tested on a plain JVM. It is also
-// what lets the protocol test drive a real daemon over a unix socket: android.jar
-// carries its own java.nio and java.lang, and inside the app module it shadows
-// the JDK classes that test needs.
-import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 
 plugins {
-    kotlin("jvm") version "2.0.21"
+    id("org.jetbrains.kotlin.jvm")
 }
 
-repositories { mavenCentral() }
+kotlin {
+    jvmToolchain(21)
+    compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17) }
+}
 
-kotlin { jvmToolchain(17) }
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
 
 dependencies {
-    // Supplied by the platform on a device, so it is not packaged from here.
-    compileOnly("org.json:json:20240303")
-
-    testImplementation("org.json:json:20240303")
-    testImplementation("junit:junit:4.13.2")
+    // The platform ships org.json; the JVM suites bring their own.
+    compileOnly("org.json:json:20250517")
+    testImplementation("org.json:json:20250517")
+    testImplementation(kotlin("test"))
 }
 
-tasks.withType<Test>().configureEach {
-    // The daemon the protocol test drives, when the caller has not said.
-    systemProperty("tsync.repo", rootProject.projectDir.parent)
-
-    // A test task reports success when it ran nothing at all.
-    val executed = AtomicInteger()
+tasks.test {
+    useJUnitPlatform()
+    val wireBinary = providers.environmentVariable("TSYNC_BIN")
+    inputs.property("tsyncBin", wireBinary.orElse(""))
+    // The binary is not a tracked input: its tests must run again against a rebuilt one.
+    outputs.upToDateWhen { !wireBinary.isPresent }
+    val wireTests = AtomicLong()
     addTestListener(object : TestListener {
         override fun beforeSuite(suite: TestDescriptor) {}
         override fun afterSuite(suite: TestDescriptor, result: TestResult) {}
         override fun beforeTest(test: TestDescriptor) {}
         override fun afterTest(test: TestDescriptor, result: TestResult) {
-            executed.incrementAndGet()
+            val wire = test.className?.endsWith(".WireTest") == true
+            if (wire && result.resultType != TestResult.ResultType.SKIPPED) wireTests.incrementAndGet()
         }
     })
+    doFirst { wireTests.set(0) }
     doLast {
-        if (executed.get() == 0) throw GradleException("$path ran zero tests")
+        if (!wireBinary.isPresent) {
+            logger.warn("\n*** WIRE SUITE NOT RUN: TSYNC_BIN is unset, so no request or reply shape was checked against a real tsync. ***\n")
+        } else if (wireTests.get() == 0L) {
+            throw GradleException("TSYNC_BIN is set but the wire suite executed no test")
+        } else {
+            logger.lifecycle("wire suite executed ${wireTests.get()} tests against ${wireBinary.get()}")
+        }
     }
 }

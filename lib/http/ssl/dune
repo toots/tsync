@@ -1,0 +1,7 @@
+; linkall: the implementation registers itself when linked.
+
+(library
+ (name tsync_http_ssl)
+ (optional)
+ (library_flags (-linkall))
+ (libraries tsync_core tsync_http ssl unix))

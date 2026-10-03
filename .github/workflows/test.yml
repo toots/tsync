@@ -1,47 +1,207 @@
+# The gate (10 §3): hermetic, so it needs no secret and runs on forks. Every
+# release waits on it, and nothing is published from a commit it did not pass.
 name: test
 
 on:
   push:
-    branches: [main]
+    branches: [main, rewrite]
   pull_request:
   merge_group:
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  lambda-s3:
-    runs-on: ubuntu-latest
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
+
+      - name: System libraries
+        run: sudo apt-get update && sudo apt-get install -y libssl-dev libfuse3-dev fuse3 libgmp-dev pkg-config
+
+      - uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: "5.5"
+
+      # 10 §4.1: setup-ocaml caches the compiler only; the switch is cached
+      # here and saved right after the install, so a failed job neither loses
+      # it nor saves a half-built one.
+      - name: Restore the opam switch
+        id: opam-switch
+        uses: actions/cache/restore@v4
+        with:
+          path: _opam
+          key: opam-test-linux-${{ hashFiles('*.opam', 'scripts/opam_deps.sh') }}
+
+      - name: OCaml libraries
+        run: ./scripts/opam_deps.sh tsync tsync-tls tsync-ssl tsync-fuse
+
+      - name: Save the opam switch
+        if: steps.opam-switch.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: _opam
+          key: opam-test-linux-${{ hashFiles('*.opam', 'scripts/opam_deps.sh') }}
+
+      - name: Build
+        run: opam exec -- dune build
+
+      # 10 §4.3: an optional library whose dependency is missing is skipped
+      # quietly.
+      - name: The FUSE frontend and both TLS implementations are built
+        run: |
+          info=$(opam exec -- ./_build/default/bin/tsync.exe build-info)
+          echo "$info"
+          echo "$info" | grep -Eq '^frontends:.*\bfuse\b'
+          echo "$info" | grep -Eq '^tls:.*\bopenssl\b'
+          echo "$info" | grep -Eq '^tls:.*\bnative\b'
+
+      - name: Tests
+        run: opam exec -- dune build @runtest --force
+
+  # 10 §3.1 item 5: the android frontend in the desktop binary, its hermetic
+  # checks, then the app's JVM suites, the wire suite against that binary. No
+  # device and no cross toolchain.
+  android:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: System libraries
+        run: sudo apt-get update && sudo apt-get install -y libgmp-dev pkg-config
+
+      - uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: "5.5"
+
+      - name: Restore the opam switch
+        id: opam-switch
+        uses: actions/cache/restore@v4
+        with:
+          path: _opam
+          key: opam-test-android-${{ hashFiles('*.opam', 'scripts/opam_deps.sh') }}
+
+      - name: OCaml libraries
+        run: ./scripts/opam_deps.sh tsync tsync-tls
+
+      - name: Save the opam switch
+        if: steps.opam-switch.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: _opam
+          key: opam-test-android-${{ hashFiles('*.opam', 'scripts/opam_deps.sh') }}
+
+      - name: Build
+        run: opam exec -- dune build
+
+      - name: The android frontend is built
+        run: |
+          info=$(opam exec -- ./_build/default/bin/tsync.exe build-info)
+          echo "$info"
+          echo "$info" | grep -Eq '^frontends:.*\bandroid\b'
+
+      - name: Frontend tests
+        run: opam exec -- dune build @tests/android/runtest --force
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      # Each task fails when it executed no test, and :core:test when the wire
+      # suite ran none against TSYNC_BIN.
+      - name: App JVM suites
+        working-directory: android
+        env:
+          TSYNC_BIN: ${{ github.workspace }}/_build/default/bin/tsync.exe
+        run: ./gradlew :core:test :app:testDebugUnitTest -PnoCore
+
+  macos:
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: System libraries
+        id: brew
+        run: |
+          brew install xcodegen pkg-config openssl@3 gmp
+          # openssl@3 is keg-only, so conf-libssl finds it only via pkg-config.
+          echo "PKG_CONFIG_PATH=$(brew --prefix openssl@3)/lib/pkgconfig:$PKG_CONFIG_PATH" >> "$GITHUB_ENV"
+          # 10 §4.1: a restored switch links the Cellar directory of these
+          # formulae, which a newer version moves.
+          echo "linked=$(brew list --versions openssl@3 gmp | tr ' ' '-' | paste -sd_ -)" >> "$GITHUB_OUTPUT"
+
+      - uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: "5.5"
+
+      - name: Restore the opam switch
+        id: opam-switch
+        uses: actions/cache/restore@v4
+        with:
+          path: _opam
+          key: opam-test-macos-${{ hashFiles('*.opam', 'scripts/opam_deps.sh') }}-${{ steps.brew.outputs.linked }}
+
+      - name: OCaml libraries
+        run: ./scripts/opam_deps.sh tsync tsync-tls tsync-ssl
+
+      - name: Save the opam switch
+        if: steps.opam-switch.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: _opam
+          key: opam-test-macos-${{ hashFiles('*.opam', 'scripts/opam_deps.sh') }}-${{ steps.brew.outputs.linked }}
+
+      - name: Build
+        run: opam exec -- dune build
+
+      - name: The File Provider frontend and both TLS implementations are built
+        run: |
+          info=$(opam exec -- ./_build/default/bin/tsync.exe build-info)
+          echo "$info"
+          echo "$info" | grep -Eq '^frontends:.*\bfile_provider\b'
+          echo "$info" | grep -Eq '^tls:.*\bopenssl\b'
+          echo "$info" | grep -Eq '^tls:.*\bnative\b'
+
+      # A short TMPDIR: the runner's own is past the 104-byte socket path limit
+      # (09 §5.9).
+      - name: Tests
+        env:
+          TMPDIR: /tmp
+        run: opam exec -- dune build @runtest --force
+
+      - name: Swift tests
+        run: make -C macos test
+
+  # 10 §3.1 items 3 and 4: the bucket functions, and the vectors that keep
+  # their second implementation of the chunk key and the delete-request key in
+  # agreement with the OCaml suite's golden files.
+  lambda-s3:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      - name: Install test dependencies
+      - name: Python libraries
         run: pip install boto3 moto pytest xxhash
-      - name: Run share handler tests (S3 store)
-        run: pytest lambda/test_handler.py
-      - name: Run chunk verifier tests (S3 store)
-        run: pytest lambda/test_verify.py
-      # The key this computes must equal the one OCaml uploaded under. If the
-      # two implementations disagree the verifier does not miss corruption --
-      # it files every chunk in the store as corrupt. Checked against
-      # tests/unit/hash/hash.expected, which the OCaml side generates.
-      - name: Check chunk keys agree with the OCaml implementation
-        run: pytest lambda/test_chunk_key.py
-      # Same shape, and quieter when it breaks: OCaml composes the key a delete
-      # request is filed under and this parses it back to decide which domain
-      # may have its chunks dropped. Disagree and every request is ignored, the
-      # copy is never emptied, and only a later `tsync gc --status` says so.
-      # Checked against tests/unit/gc_job/gc_job.expected, which OCaml generates.
-      - name: Check delete-request keys agree with the OCaml implementation
-        run: pytest lambda/test_gc_job_key.py
+      - name: Share handler and chunk verifier (S3)
+        run: pytest lambda/test_handler.py lambda/test_verify.py
+      - name: Keys agree with the OCaml implementation
+        run: pytest lambda/test_chunk_key.py lambda/test_gc_job_key.py
 
   lambda-gcs:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
@@ -49,148 +209,41 @@ jobs:
         run: |
           docker run -d --name fake-gcs -p 4443:4443 \
             fsouza/fake-gcs-server -scheme http -public-host localhost:4443
-          for i in $(seq 1 30); do
-            curl -sf "http://localhost:4443/storage/v1/b?project=test" >/dev/null && break
+          for _ in $(seq 1 30); do
+            curl -sf "http://localhost:4443/storage/v1/b?project=test" >/dev/null && exit 0
             sleep 1
           done
-      - name: Install test dependencies
+          echo "fake-gcs-server did not answer"; exit 1
+      - name: Python libraries
         run: pip install google-cloud-storage pytest xxhash
-      - name: Run GCS store tests
+      - name: Store and chunk verifier (GCS)
         env:
           STORAGE_EMULATOR_HOST: http://localhost:4443
-        run: pytest lambda/test_store_gcs.py
-      - name: Run chunk verifier tests (GCS store)
-        env:
-          STORAGE_EMULATOR_HOST: http://localhost:4443
-        run: pytest lambda/test_verify_gcs.py
+        run: pytest lambda/test_store_gcs.py lambda/test_verify_gcs.py
 
-  linux:
-    runs-on: ubuntu-latest
+  # 10 §3.1 item 5: opam's default resolution of tsync's TLS alternative, and a
+  # build with one implementation: what `opam install tsync` gives a user. It
+  # does not use scripts/opam_deps.sh, on purpose.
+  opam-default:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libfuse3-dev fuse3 pkg-config libev-dev libdbus-1-dev
+      - uses: actions/checkout@v5
+
+      - name: System libraries
+        run: sudo apt-get update && sudo apt-get install -y libfuse3-dev pkg-config
+
       - uses: ocaml/setup-ocaml@v3
         with:
           ocaml-compiler: "5.5"
-      # setup-ocaml caches the opam root and a switch holding the compiler alone.
-      # It stops there on purpose, so that a stale cache can never freeze the
-      # dependency solution -- which leaves every dependency to be compiled on
-      # every run, and that is most of this job. Cache the switch as well and
-      # let scripts/opam_deps.sh do the unfreezing instead: it updates and
-      # upgrades before it installs, so a restored switch ends up holding what a
-      # fresh one would have resolved to.
-      #
-      # Restored after setup-ocaml rather than before it: both hold the same
-      # compiler, so this only adds the dependencies on top, whereas going first
-      # would have the action put its compiler-only copy back over them.
-      #
-      # Two steps rather than one because actions/cache saves from a post step
-      # that does not run when the job fails, so a red run left the next one to
-      # build the switch again. Saving right after the install instead also
-      # keeps a half-built switch out of the cache: a failure there skips it.
-      - name: Restore the opam switch
-        id: opam-switch
-        uses: actions/cache/restore@v4
-        with:
-          path: _opam
-          key: opam-test-linux-${{ hashFiles('opam/*.opam', 'scripts/opam_deps.sh', '.github/workflows/test.yml') }}
-      - name: Install OCaml dependencies
-        run: ./scripts/opam_deps.sh tsync tsync-libs tsync-android tsync-tls tsync-s3 tsync-fuse tsync-tray
-      - name: Save the opam switch
-        if: steps.opam-switch.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: _opam
-          key: opam-test-linux-${{ hashFiles('opam/*.opam', 'scripts/opam_deps.sh', '.github/workflows/test.yml') }}
-      - name: Build OCaml daemon
-        run: opam exec -- dune build
-      - name: Run tests
-        run: opam exec -- dune test
-      # Drives a real FUSE mount: a store, a mount, and a second client, all
-      # staged under a scratch directory and taken down again. Separate from
-      # `dune test`, which must stay hermetic — this one mounts a filesystem.
-      # Everything it touches is its own, so there is nothing to clean up after.
-      - name: End-to-end (FUSE)
-        run: opam exec -- make -C linux e2e
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "17"
-          cache: gradle
-      # The Kotlin half of the IPC contract, against the daemon built above.
-      # That daemon is this runner's own build rather than the cross-built one
-      # that ships, which is the point: what is under test is the wire, and it
-      # is the same wire on both.
-      - name: Android unit and IPC contract tests
-        run: ./gradlew --no-daemon :core:test :app:testDebugUnitTest
-        working-directory: android
-        env:
-          CI: "true"
-          TSYNC_DAEMON: ${{ github.workspace }}/_build/default/bin/tsync.exe
 
-  macos:
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ocaml/setup-ocaml@v3
-        with:
-          ocaml-compiler: "5.5"
-      - name: Install dependencies
-        id: brew
+      - name: Install tsync alone
+        run: opam pin -ny . && opam install -y tsync
+
+      - name: Native TLS only
         run: |
-          brew install xcodegen libev coreutils pkg-config openssl@3 pcre2 gmp
-          echo "CPATH=$(brew --prefix libev)/include:$CPATH" >> $GITHUB_ENV
-          echo "LIBRARY_PATH=$(brew --prefix libev)/lib:$LIBRARY_PATH" >> $GITHUB_ENV
-          # openssl@3 is keg-only, so conf-libssl only finds it via pkg-config.
-          echo "PKG_CONFIG_PATH=$(brew --prefix openssl@3)/lib/pkgconfig:$PKG_CONFIG_PATH" >> $GITHUB_ENV
-          # The libraries the switch links through pkg-config, which resolves
-          # to the versioned Cellar directory. See the cache key below.
-          echo "linked=$(brew list --versions openssl@3 pcre2 gmp | tr ' ' '-' | paste -sd_ -)" >> $GITHUB_OUTPUT
-      # The dependencies setup-ocaml leaves out of its own cache; see the linux
-      # job of test.yml for why that is its default and why restoring them here
-      # is not the stale-cache trap it looks like.
-      #
-      # Except for one thing opam_deps.sh cannot see: ssl, pcre2 and zarith
-      # bake the Cellar path of the brew formula they were built against into
-      # their link flags, and a runner image that bumps that formula leaves a
-      # restored switch pointing at a directory that is gone -- `ld: library
-      # 'ssl' not found`, with no opam package having changed. So those
-      # versions are part of the key.
-      - name: Restore the opam switch
-        id: opam-switch
-        uses: actions/cache/restore@v4
-        with:
-          path: _opam
-          key: opam-test-macos-${{ hashFiles('opam/*.opam', 'scripts/opam_deps.sh', '.github/workflows/test.yml') }}-${{ steps.brew.outputs.linked }}
-      - name: Install OCaml dependencies
-        # Both TLS backends: tsync alone would pull tsync-tls, and a released
-        # build should also carry tsync-ssl, the faster one.
-        run: ./scripts/opam_deps.sh tsync tsync-libs tsync-tls tsync-ssl tsync-s3
-      - name: Save the opam switch
-        if: steps.opam-switch.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: _opam
-          key: opam-test-macos-${{ hashFiles('opam/*.opam', 'scripts/opam_deps.sh', '.github/workflows/test.yml') }}-${{ steps.brew.outputs.linked }}
-      - name: Build OCaml daemon
-        run: opam exec -- dune build
-      - name: Run tests
-        run: opam exec -- dune test
-      # Builds the Swift targets and runs their tests. The protocol tests start
-      # the daemon built above against a local store in a temporary directory, so
-      # they need no network, no signing and no registered domain — and they are
-      # what holds the two halves of the IPC contract together.
-      #
-      # Assembling the bundle — embedding the daemon, dylibbundler, signing,
-      # packaging — is exercised by the release workflow, which has the signing
-      # credentials.
-      - name: Build and test macOS app
-        run: |
-          make generate
-          xcodebuild -project tsync.xcodeproj -scheme TsyncApp \
-            -configuration Debug -destination 'platform=macOS' \
-            CODE_SIGNING_ALLOWED=NO test
-        working-directory: macos
+          info=$(opam exec -- tsync build-info)
+          echo "$info"
+          opam list --installed --short --color=never | grep -qx tsync-tls
+          if opam list --installed --short --color=never | grep -qx tsync-ssl; then exit 1; fi
+          echo "$info" | grep -Eq '^tls: native$'

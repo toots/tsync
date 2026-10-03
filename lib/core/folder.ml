@@ -1,56 +1,50 @@
-type marker = { name : string; id : string }
+type marker = { name : string; id : Folder_id.t }
+type anchor = { parent : Folder_id.t; aname : string }
 
-let marker_to_string { name; id } =
-  Yojson.Basic.to_string
-    (`Assoc [("dir", `Bool true); ("name", `String name); ("id", `String id)])
+let marker_body m =
+  Printf.sprintf {|{"dir":true,"name":%s,"id":%s}|}
+    (Yojson.Safe.to_string (`String m.name))
+    (Yojson.Safe.to_string (`String (Folder_id.to_string m.id)))
 
-(* A trashed folder's marker additionally records its original path, so it can be
-   listed and restored. Extra fields are ignored by {!marker_of_string}. *)
-let trash_marker_to_string ~name ~id ~path =
-  Yojson.Basic.to_string
-    (`Assoc
-       [
-         ("dir", `Bool true);
-         ("name", `String name);
-         ("id", `String id);
-         ("path", `String path);
-       ])
+let trash_body m ~path =
+  Printf.sprintf {|{"dir":true,"name":%s,"id":%s,"path":%s}|}
+    (Yojson.Safe.to_string (`String m.name))
+    (Yojson.Safe.to_string (`String (Folder_id.to_string m.id)))
+    (Yojson.Safe.to_string (`String path))
 
-let trash_path_of_string data =
-  match Yojson.Basic.from_string data with
-    | `Assoc fields -> (
-        match List.assoc_opt "path" fields with
-          | Some (`String s) -> Some s
-          | _ -> None)
-    | _ | (exception _) -> None
+let anchor_body a =
+  Printf.sprintf {|{"parent":%s,"name":%s}|}
+    (Yojson.Safe.to_string (`String (Folder_id.to_string a.parent)))
+    (Yojson.Safe.to_string (`String a.aname))
 
-type anchor = { parent : string; name : string }
+let fields body =
+  match Yojson.Safe.from_string body with
+    | `Assoc f -> Some f
+    | _ -> None
+    | exception _ -> None
 
-let in_trash a = a.parent = Stored_key.trash_id
+let str f n =
+  match List.assoc_opt n f with Some (`String s) -> Some s | _ -> None
 
-let anchor_to_string { parent; name } =
-  Yojson.Basic.to_string
-    (`Assoc [("parent", `String parent); ("name", `String name)])
+(* A body is a marker iff it is an object with "dir": true; one whose id is not
+   a folder id is unclassifiable. *)
+let classify_marker body =
+  match fields body with
+    | Some f when List.assoc_opt "dir" f = Some (`Bool true) -> (
+        let name = Option.value ~default:"" (str f "name") in
+        match Option.bind (str f "id") Folder_id.of_string with
+          | Some id -> `Marker ({ name; id }, str f "path")
+          | None -> `Unclassifiable)
+    | _ -> `Not_marker
 
-(* No ["dir"] field, so {!marker_of_string} never takes an anchor for a marker. *)
-let anchor_of_string data =
-  match Yojson.Basic.from_string data with
-    | `Assoc fields -> (
+let decode_anchor body =
+  match fields body with
+    | Some f -> (
         match
-          (List.assoc_opt "parent" fields, List.assoc_opt "name" fields)
+          (Option.bind (str f "parent") Folder_id.of_string, str f "name")
         with
-          | Some (`String parent), Some (`String name) -> Some { parent; name }
+          | Some parent, Some aname -> Some { parent; aname }
           | _ -> None)
-    | _ -> None
-    | exception _ -> None
+    | None -> None
 
-(* [Some marker] when [data] is a folder marker; [None] for a file manifest. *)
-let marker_of_string data =
-  match Yojson.Basic.from_string data with
-    | `Assoc fields when List.assoc_opt "dir" fields = Some (`Bool true) ->
-        let str k =
-          match List.assoc_opt k fields with Some (`String s) -> s | _ -> ""
-        in
-        Some { name = str "name"; id = str "id" }
-    | _ -> None
-    | exception _ -> None
+let in_trash a = Folder_id.equal a.parent Folder_id.trash

@@ -1,0 +1,33 @@
+; Links every driver and frontend this build has; each registers itself. The
+; select stubs are empty: they only make the optional libraries dependencies
+; when they are built.
+
+(library
+ (name tsync_catalog)
+ (libraries
+  tsync_store
+  tsync_gcs
+  tsync_s3
+  tsync_http_proxy_client
+  tsync_http_proxy
+  tsync_android
+  (select
+   catalog_fuse.ml
+   from
+   (tsync_fuse -> catalog_fuse.enabled.ml)
+   (-> catalog_fuse.disabled.ml))
+  (select
+   catalog_ssl.ml
+   from
+   (tsync_http_ssl -> catalog_ssl.enabled.ml)
+   (-> catalog_ssl.disabled.ml))
+  (select
+   catalog_native_tls.ml
+   from
+   (tsync_http_native -> catalog_native_tls.enabled.ml)
+   (-> catalog_native_tls.disabled.ml))
+  (select
+   catalog_file_provider.ml
+   from
+   (tsync_file_provider -> catalog_file_provider.enabled.ml)
+   (-> catalog_file_provider.disabled.ml))))

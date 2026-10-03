@@ -1,20 +1,13 @@
+# The store contract against the real GCS and S3 services (10 §3.3): the
+# things it asks about are the ones an emulator approximates least well,
+# whether a write precondition is honoured and whether a bulk delete reports
+# per key what it refused.
+#
+# Manual only: per push it dominated the CI object-store spend. One job on
+# purpose: a run works under a prefix named after the run id, which every job
+# of a run shares, so a second job would sweep the first one's objects.
 name: conformance
 
-# Against the real object stores, because the things this asks about are exactly
-# the ones an emulator approximates least well: whether a write precondition is
-# honoured, and whether a bulk delete reports per key what it refused.
-#
-# Its own workflow rather than a step of `test`, because it is the only job that
-# needs credentials and the only one that touches something outside the runner.
-# A failure here means the bucket disagreed with us, which is a different thing
-# from the build being broken and is worth being able to re-run on its own.
-#
-# One job on purpose: the test works under a prefix named after the run, and
-# GITHUB_RUN_ID is shared by every job of a run — a second job here would sweep
-# the first one's objects out from under it.
-
-# Manual only: running this per push and pull request dominates the CI
-# object-store spend, and what it asks about changes rarely.
 on:
   workflow_dispatch:
 
@@ -23,60 +16,49 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  conformance:
-    runs-on: ubuntu-latest
-    # Forks receive no secrets, so this reports itself skipped there rather than
-    # failing for a reason nobody who sent the pull request can act on.
-    if: >-
-      github.event_name != 'pull_request' ||
-      github.event.pull_request.head.repo.full_name == github.repository
+  stores:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y pkg-config libev-dev
+      - uses: actions/checkout@v5
+
+      - name: System libraries
+        run: sudo apt-get update && sudo apt-get install -y libssl-dev libgmp-dev pkg-config
+
       - uses: ocaml/setup-ocaml@v3
         with:
           ocaml-compiler: "5.5"
-      # The dependencies setup-ocaml leaves out of its own cache; see the linux
-      # job of test.yml for why that is its default and why restoring them here
-      # is not the stale-cache trap it looks like.
+
       - name: Restore the opam switch
         id: opam-switch
         uses: actions/cache/restore@v4
         with:
           path: _opam
-          key: opam-conformance-${{ hashFiles('opam/*.opam', 'scripts/opam_deps.sh', '.github/workflows/conformance.yml') }}
-      # No fuse: this builds one executable over the backend drivers, and the
-      # frontends are no part of what it asks.
-      - name: Install OCaml dependencies
-        run: ./scripts/opam_deps.sh tsync tsync-libs tsync-tls tsync-s3
+          key: opam-conformance-${{ hashFiles('*.opam', 'scripts/opam_deps.sh') }}
+
+      # No fuse: the store drivers are all this asks about.
+      - name: OCaml libraries
+        run: ./scripts/opam_deps.sh tsync tsync-tls
+
       - name: Save the opam switch
         if: steps.opam-switch.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: _opam
-          key: opam-conformance-${{ hashFiles('opam/*.opam', 'scripts/opam_deps.sh', '.github/workflows/conformance.yml') }}
-      - name: Backend conformance (real GCS and S3)
+          key: opam-conformance-${{ hashFiles('*.opam', 'scripts/opam_deps.sh') }}
+
+      - name: Store contract (real GCS and S3)
         env:
+          TSYNC_CI_REQUIRE_REAL: "gcs,s3"
           TSYNC_CI_GCS_BUCKET: ${{ secrets.TSYNC_CI_GCS_BUCKET }}
           TSYNC_CI_GCS_SERVICE_ACCOUNT_KEY: ${{ secrets.TSYNC_CI_GCS_SERVICE_ACCOUNT_KEY }}
           TSYNC_CI_S3_BUCKET: ${{ secrets.TSYNC_CI_S3_BUCKET }}
           TSYNC_CI_S3_REGION: ${{ secrets.TSYNC_CI_S3_REGION }}
           TSYNC_CI_S3_ACCESS_KEY_ID: ${{ secrets.TSYNC_CI_S3_ACCESS_KEY_ID }}
           TSYNC_CI_S3_SECRET_ACCESS_KEY: ${{ secrets.TSYNC_CI_S3_SECRET_ACCESS_KEY }}
-          # Absent unless a verifier is deployed on that bucket, which is what
-          # decides whether the suite exercises the function or reports that
-          # half not run. Deliberately not in the required list below: a store
-          # with no deployed stack is a legitimate setup, and failing on it
-          # would make the common case red.
-          TSYNC_CI_GCS_VERIFY_FUNCTION: ${{ secrets.TSYNC_CI_GCS_VERIFY_FUNCTION }}
-          TSYNC_CI_S3_VERIFY_FUNCTION: ${{ secrets.TSYNC_CI_S3_VERIFY_FUNCTION }}
         run: |
-          # A secret that is absent arrives as the empty string, and the test
-          # would then report "no credentials" and exit 2. Say which one is
-          # missing instead: that is a repository setting, not a code failure.
+          # 10 §6: an absent secret arrives as the empty string; name it and
+          # the script that provisions it rather than fail inside the suite.
           missing=
           for v in TSYNC_CI_GCS_BUCKET TSYNC_CI_GCS_SERVICE_ACCOUNT_KEY \
                    TSYNC_CI_S3_BUCKET TSYNC_CI_S3_REGION \
@@ -88,4 +70,4 @@ jobs:
             echo "::error::run scripts/setup_ci_secrets.sh to provision them"
             exit 1
           fi
-          opam exec -- make -C linux conformance
+          opam exec -- dune build @tests/store/runtest --force
