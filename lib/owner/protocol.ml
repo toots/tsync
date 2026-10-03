@@ -27,6 +27,7 @@ type page = { items : row list; next : string option; unnamed : int }
 
 (** A whole-domain page, or [Walk_stale] for a cursor on another walk. *)
 type listing = Listed of page | Walk_stale
+
 type written = { size : int; mtime : float; item : row }
 
 type fetched = {
@@ -37,12 +38,28 @@ type fetched = {
 }
 
 type cached = { local_path : string; item : row }
+
 (** A change-feed op as 08 §3.6 renders it: items named by reference. *)
 type feed_op =
-  | Put_op of { ref_ : string; parent_ref : string; name : string; item : row option }
+  | Put_op of {
+      ref_ : string;
+      parent_ref : string;
+      name : string;
+      item : row option;
+    }
   | Delete_op of { ref_ : string; parent_ref : string; name : string }
-  | Mkdir_op of { ref_ : string; parent_ref : string; name : string; item : row option }
-  | Rmdir_op of { id : string; ref_ : string; parent_ref : string; name : string }
+  | Mkdir_op of {
+      ref_ : string;
+      parent_ref : string;
+      name : string;
+      item : row option;
+    }
+  | Rmdir_op of {
+      id : string;
+      ref_ : string;
+      parent_ref : string;
+      name : string;
+    }
   | Rename_op of {
       is_dir : bool;
       id : string option;
@@ -56,7 +73,12 @@ type feed_op =
 
 type changes =
   | Stale
-  | Changes of { cursor : string; more : bool; ops : feed_op list; unnamed : int }
+  | Changes of {
+      cursor : string;
+      more : bool;
+      ops : feed_op list;
+      unnamed : int;
+    }
 
 type counted = { succeeded : int; failed : int }
 type progress = Inactive | Active of { downloaded : int; total : int }
@@ -309,7 +331,9 @@ let request_fields : type a. a request -> (string * Yojson.Safe.t) list =
   | Restore r -> target_fields r.item @ opt "keep" (fun k -> `Float k) r.keep
   | Revert r ->
       target_fields r.item
-      @ [("arg", `String (Option.fold ~none:"" ~some:Int64.to_string r.version))]
+      @ [
+          ("arg", `String (Option.fold ~none:"" ~some:Int64.to_string r.version));
+        ]
   | Sync r -> [("arg", `String (if r.full then "full" else ""))]
   | Trash_restore path -> [("path", `String path)]
   | Share r ->
@@ -339,7 +363,8 @@ let decode j =
         Request (List_all { after = str j "after"; limit = int j "limit" })
     | "cursor" -> Request Cursor
     | "changes_since" ->
-        Request (Changes_since { anchor = required j "arg"; limit = int j "limit" })
+        Request
+          (Changes_since { anchor = required j "arg"; limit = int j "limit" })
     | "ensure_cached" ->
         Request (Ensure_cached { item = target_of j; dest = required j "dest" })
     | "fetch_range" ->
@@ -797,7 +822,8 @@ let decode_reply : type a. a request -> Yojson.Safe.t -> a =
         let traffic =
           match Option.map R.traffic_of_yojson (member j "traffic") with
             | Some (Ok tr) -> tr
-            | _ -> { up_bytes = 0; up_rate = 0.; down_bytes = 0; down_rate = 0. }
+            | _ ->
+                { up_bytes = 0; up_rate = 0.; down_bytes = 0; down_rate = 0. }
         in
         {
           domain = Option.value ~default:"" (str j "domain");
