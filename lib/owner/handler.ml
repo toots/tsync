@@ -584,23 +584,26 @@ let run_job t ~send ~narrate job =
       ~step:(if text = "" || state <> `Running then None else Some text)
   in
   let finished = Atomic.make false in
-  report `Running ();
-  Rt.spawn ~name:"job report" (fun () ->
-      let rec loop () =
-        Rt.sleep job_report_interval;
-        if not (Atomic.get finished) then (
-          report `Running ();
-          loop ())
-      in
-      loop ());
+  (* Pitfall C-7.10: everything after the claim runs under the finally that
+     frees the slot, which it does before anything that can raise. *)
   let outcome =
     Fun.protect
       ~finally:(fun () ->
         Atomic.set finished true;
-        send (Protocol.Progress { text = ""; fraction = None });
         Atomic.set t.running None;
-        Usage.release ())
+        Usage.release ();
+        try send (Protocol.Progress { text = ""; fraction = None })
+        with e when not (Rt.is_cancelled e) -> ())
       (fun () ->
+        report `Running ();
+        Rt.spawn ~name:"job report" (fun () ->
+            let rec loop () =
+              Rt.sleep job_report_interval;
+              if not (Atomic.get finished) then (
+                report `Running ();
+                loop ())
+            in
+            loop ());
         send (Protocol.Started me.id);
         match
           Jobs.run
