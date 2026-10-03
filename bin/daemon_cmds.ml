@@ -241,13 +241,20 @@ let stop verbose =
             let stopped =
               List.filter Fun.id (Rt.map_concurrently wait_gone asked)
             in
-            match asked with
-              | [] ->
+            match List.length asked - List.length stopped with
+              | _ when asked = [] ->
                   say "tsync is not running.";
                   0
-              | _ ->
+              | 0 ->
                   say "Stopped %d process(es)." (List.length stopped);
-                  0))
+                  0
+              | left ->
+                  fail
+                    "%d of %d process(es) still stopping after %.0fs; \
+                     unfinished work is owed on disk and resumes at the next \
+                     start"
+                    left (List.length asked)
+                    (Stop.grace +. 2. +. Ipc.request_deadline)))
 
 let stop_cmd = cmd "stop" ~doc:"Stop tsync." Term.(const stop $ verbose)
 
