@@ -25,3 +25,6 @@ generation settled: true; slow on bucket once it settled: false
 
 == two batches of one shard make one request
 outstanding: [abc 2 keys]
+
+== a batch merged after a poll saw the request gone
+the poll removed the record: false; keys still pending: 2

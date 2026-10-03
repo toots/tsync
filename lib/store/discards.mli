@@ -25,8 +25,9 @@ val pending : t -> (string * pending) list
     key is absent was consumed, never not yet written. *)
 val add : t -> pending -> write:(pending -> unit) -> unit
 
-(** The request was consumed and its restore check done. *)
-val remove : t -> string -> unit
+(** The request [seen] was consumed and its restore check done. False, the
+    record left in place, when a later batch was merged into it meanwhile. *)
+val remove : t -> string -> seen:pending -> bool
 
 val request_key : Domain_name.t -> pending -> Key.t
 
