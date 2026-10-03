@@ -363,7 +363,7 @@ steps are specified by the file operations of [04](../04-checkout-cache.md) §3�
 | Whole-file handover (File Provider, Android) | the call returns | durable | the handed-over file adopted as a staged whole body and fsynced, staged manifest durable, WAL record durable |
 | mkdir, rmdir, rename, delete, symlink | the call returns | durable | WAL record `Intent` durable before the local half; the local half's effects durable; the record `Prepared` durable |
 | Pin ("make available offline") | the call returns | durable | every group whole and each pin durable ([read-path-and-cache.md](read-path-and-cache.md) §4.8) |
-| Android share-sheet save, picker close | the app reports success to the platform | durable | every file handed over and closed as above, or its staging copy fsynced with a durable *ready* ingest intent that the next app start commits ([android](../frontends/android.md) §9.2) |
+| Android share-sheet save, in-app upload, picker close | the app reports success to the platform | durable | every file handed over and closed as above, or its staging copy fsynced with a durable *ready* ingest intent that the next app start commits ([android-app](../frontends/android-app.md) §8.2) |
 | Write to a domain with replica or backfill targets | the publishing step returns | durable | the mains hold the object and each target's deferred job record is durable ([replication.md](replication.md)) |
 | Bulk publish (import, rsync), revert | the command returns 0 / the call returns | durable | every manifest put, every Put op recorded (§7.3) and discharged or durably owed |
 | Any one-shot command | exit status 0 | durable | its effects, plus any owed remainder durable in the domain's logs (reported on exit) |
@@ -399,8 +399,8 @@ owner finds it at start.
 | E15 | Export progress record | owned by [05](../05-ops-config.md): header first, a line per chunk after the chunk is fsynced | a re-run of the export | Every kill point resumes. |
 | E16 | Owed work left by a one-shot command | E4–E8 | the next owner of the domain (daemon or next command) | Nothing is lost; the command reported it on exit. |
 | E17 | GC run marker and lock, GC discard and verify jobs | owned by [gc.md](gc.md) | the next collection | Resumable; see gc.md. |
-| E18 | Android staging copies and ingest intents (share sheet, picker, camera) | owned by [android](../frontends/android.md) §9: copy fsynced, intent durable before success is reported | the next app start commits every *ready* intent | Before the intent is ready: not acknowledged; copy and intent discarded. Ready, not committed: committed at start. Committed: E1–E5. |
-| E19 | Android camera-backup records | owned by [android](../frontends/android.md) | the backup worker | A photo is marked done only after its close was acknowledged; failed and unsettled photos are retried. |
+| E18 | Android staging copies and ingest intents (share sheet, picker, camera) | owned by [android-app](../frontends/android-app.md) §8: copy fsynced, intent durable before success is reported | the next app start commits every *ready* intent | Before the intent is ready: not acknowledged; copy and intent discarded. Ready, not committed: committed at start. Committed: E1–E5. |
+| E19 | Android camera-backup records | owned by [android-app](../frontends/android-app.md) §11 | the backup worker | A photo is marked done only after its close was acknowledged; failed and unsettled photos are retried. |
 | E20 | Cache bodies and pins | whole bodies: data fsynced before the rename that installs them; pins: durable create | the cache walk at owner start | A partial body is discarded at start; a whole body is whole; a pin survives ([read-path-and-cache.md](read-path-and-cache.md) §6). |
 | E21 | Locally written configuration | owned by [05](../05-ops-config.md): durable replace | read at start | Old or new config, whole. |
 

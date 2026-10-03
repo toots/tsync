@@ -157,7 +157,7 @@ nothing depends on them except the CLI and the request handler.
 | [local](backends/local.md) | a directory or mounted NAS | [fuse](frontends/fuse.md) | Linux FUSE mount, and the Linux desktop integration |
 | [s3](backends/s3.md) | AWS S3 and S3-compatible services | [file-provider](frontends/file-provider.md) | macOS File Provider: app, extension and owner |
 | [gcs](backends/gcs.md) | Google Cloud Storage | [http-proxy](frontends/http-proxy.md) | the store server, share links and status page |
-| [object-store-common](backends/object-store-common.md) | what s3 and gcs share, and the bucket-side functions | [android](frontends/android.md) | the Android app embedding the core |
+| [object-store-common](backends/object-store-common.md) | what s3 and gcs share, and the bucket-side functions | [android](frontends/android.md), [android-app](frontends/android-app.md) | the owner embedded in the Android app; the app itself |
 | [http-proxy](backends/http-proxy.md) | another tsync machine; owns the wire protocol | | |
 
 ### 4.4 Data models and algorithms
@@ -256,7 +256,7 @@ Anything written to a store, to local disk or onto a wire is a compatibility con
 | IPC envelope, error codes, actions, item rows, anchors, events | [07 §4](07-daemon-cli.md), [08](08-frontends.md), [failure-model](algorithms/failure-model.md) |
 | http-proxy wire protocol | [backends/http-proxy](backends/http-proxy.md) |
 | Uplink lease messages | [uplink-governor](algorithms/uplink-governor.md) |
-| Host-specific state (macOS, Android) | [file-provider](frontends/file-provider.md), [android](frontends/android.md) |
+| Host-specific state (macOS, Android) | [file-provider](frontends/file-provider.md), [android-app](frontends/android-app.md) |
 
 ## 8. Building an implementation
 

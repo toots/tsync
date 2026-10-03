@@ -143,6 +143,11 @@ requires rewriting a valid existing file into another form.
   The marker is written, durably, with the entry that first occupies a path (create, peer put,
   resync, pull). An entry found without a valid marker gets a fresh one at owner start (§4.10);
   nothing on a read path writes a marker.
+- **Pull marker** (lazy tree only) `.tsync-pulled`, in a folder entry and in the mirror's root: the
+  wall-clock time of the last completed pull of that folder, decimal epoch milliseconds. Written
+  atomically after the pull's entries. Absent means never pulled. It says that a view exists and how
+  old it is; whether a view is fresh is never judged from it
+  ([android §3.2](frontends/android.md#32-freshness-without-a-journal-poller)).
 - **File-id index.** The owner resolves a file id to a path through an index in memory, kept with
   every marker it writes, moves or removes. The markers are its truth: a lookup answers a path only
   when that path's marker holds the id. A clean stop writes the index to `file-ids-index`, one
@@ -475,6 +480,7 @@ Listing never touches the network. The resync primitives ([05](05-ops-config.md)
   owed operation removes or renames away stays hidden, a name an owed operation creates or
   renames in stays shown, and staged edits are kept. A record that cannot be discharged therefore
   never freezes a folder;
+- writes the folder's pull marker (§2.3) when it completes;
 - never writes to the store.
 
 ### 3.6 Stat and availability

@@ -1,9 +1,8 @@
 # Android application — OCaml implementation notes
 
-Companion to the language-neutral spec [../../frontends/android.md](../../frontends/android.md). See [README.md](../README.md) for how these notes are organised.
+Companion to the language-neutral specs [../../frontends/android.md](../../frontends/android.md) (the frontend) and [../../frontends/android-app.md](../../frontends/android-app.md) (the application). See [README.md](../README.md) for how these notes are organised.
 
-
-Section numbers in parentheses (§n) refer to the spec.
+These notes describe the implementation on `main` (`4c32fa96`), which the rewrite replaces; its behaviour is restated in full at commit `26a8dbf0`. Section numbers in parentheses (§n) refer to the spec as it stood before it was split in two, so they no longer match.
 
 ## B-0. Where the current code departs from the spec
 

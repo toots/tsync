@@ -1,675 +1,344 @@
-# The Android host — as built on `main`
+# The Android frontend
 
-Scope: the behaviour of the Android integration as `main` (`4c32fa96`) implements it: the Kotlin app
-(`android/app`, `android/core`), the JNI bridge and the `android` frontend
-(`lib/app/frontends/android`), and the parts of the shared core the app relies on. Build, signing,
-CI and release are out of scope.
+Scope: the core side of tsync on Android: the `android` frontend, the owner embedded in a host
+process, how its lazy tree stays fresh and keeps answering while the store does not, the bridge the
+host calls, and the desktop command group. The application built on it (DocumentsProvider, user
+interface, share target, camera backup, packaging) is [android-app.md](android-app.md).
 
-This is an extraction, not a design: every rule below is what the code does, including where that is
-wrong. Defects are left in and marked **[as built]** where they are worth calling out; the cleaned
-spec is a separate pass. The request handler described here is `main`'s (`f:` file references, no
-exclusive creation), not the one [08](../08-frontends.md) now specifies.
+Rules shared by every frontend are owned elsewhere and only referenced here:
+- the frontend contract, item references, the item row, the actions and the shared request handler:
+  [the frontend contract](../08-frontends.md);
+- the process model, the ownership lock and one-shot commands: [daemon and CLI](../07-daemon-cli.md);
+- the lazy tree and what a pull does: [04 §3.5](../04-checkout-cache.md#35-the-published-tree-full-and-lazy);
+- durability of local writes: [durable queue](../algorithms/durable-queue.md);
+- failure kinds, codes and deadlines: [failure model](../algorithms/failure-model.md);
+- trust boundaries, TLS and secrets: [security model](../algorithms/security-model.md);
+- conflicts: [conflict resolution](../algorithms/conflict-resolution.md).
 
 ---
 
-## 1. Processes and components
+## 1. Problem
 
-One process: the app's. There is no daemon, no socket and no stop; the core is a shared library
-(`libtsyncjni.so`) loaded into the app, and it runs for as long as the process does.
+Android kills and freezes processes at will, caps foreground-service time, and reaps executed
+children. A long-lived daemon is the wrong shape there. The core is therefore a library the host
+process loads, and three things follow:
 
-| Component | Kind | Role |
-|---|---|---|
-| `MainActivity` | launcher activity; also the target of `SEND` / `SEND_MULTIPLE` of `*/*`, labelled "Save to tsync" | Setup form, file browser, status screen, share target, camera-backup controls. |
-| `TsyncProvider` | DocumentsProvider, authority `org.feverdreamtv.tsync.documents`, exported, guarded by `MANAGE_DOCUMENTS`, `grantUriPermissions` | The domain in the system picker. |
-| `OpenDocumentsService` | foreground service, type `dataSync`, not exported | Keeps the process running while it serves open files (§9). |
-| `BackupWorker` | WorkManager `CoroutineWorker` | One camera-backup pass (§12). |
-| Core | OCaml runtime, one event loop on its own thread | The domain: mirror, cache, queues, the shared request handler. |
+1. **The host process is the owner.** There is no supervisor and no socket; requests arrive by direct
+   call from threads the platform owns.
+2. **No replica.** A process that may die at any moment cannot keep a full mirror converged:
+   rebuilding one leaves every reference unresolvable until it ends. The owner reads a folder from
+   the store when it is asked for (the lazy tree) and applies no journal entry.
+3. **A phone is often offline, or on a link that does not answer.** What was already seen and what is
+   already cached MUST keep working without the store, and say that it may be out of date.
 
-- Every component runs in the app's default process and calls the core directly through the bridge
-  (§4).
-- The app serves one domain: `domains[0]` of its config (§6).
-- Nothing takes an ownership lock **[as built]**. A second process on the same state (the desktop
-  `tsync android` verbs, §11) is not excluded.
-- Process death is a crash-stop. The next boot's reconcile finishes owed work (§3.1).
+## 2. Ownership and process model
 
-Platform floor: `minSdk` 26, `targetSdk` 35, `arm64-v8a` only.
+- **The host process owns its domain.** At boot it takes the domain's ownership lock
+  ([07 §2.3](../07-daemon-cli.md#23-the-ownership-lock)) with role `app` and no socket, and holds it
+  for the life of the process; process death releases it. Only this process changes the domain's
+  local state.
+- There is no stop and no drain. Process death is a crash-stop; the next boot reconciles
+  ([07 §3.6](../07-daemon-cli.md#36-embedded-host-android)).
+- One booted domain per process: the one the host names, or the only one the config names.
+- The frontend's descriptor ([08 §2.1](../08-frontends.md#21-frontend-descriptor)): presenting,
+  per-domain, serving `Commands` (`tsync start` refuses it), tree `Pulled` (`tsync sync` refuses it),
+  availability as the core computes it.
+- The desktop command group (§7) is owner-class
+  ([07 §2.5](../07-daemon-cli.md#25-one-shot-commands)): each invocation takes ownership for its own
+  duration. An `app` holder serves no socket, so a command meeting one is refused, naming the holder.
 
-Permissions declared: `INTERNET`, `ACCESS_NETWORK_STATE`, `FOREGROUND_SERVICE`,
-`FOREGROUND_SERVICE_DATA_SYNC`, `POST_NOTIFICATIONS`, `READ_MEDIA_IMAGES`, `READ_MEDIA_VIDEO`,
-`READ_MEDIA_VISUAL_USER_SELECTED`, `READ_EXTERNAL_STORAGE` (max SDK 32), `ACCESS_MEDIA_LOCATION`.
-WorkManager's `SystemForegroundService` is merged with `foregroundServiceType="dataSync"`: without it
-the worker's foreground request throws on the service's own thread.
-
-`usesCleartextTraffic="true"`. No backup rules are declared, so the platform's Auto Backup and device
-transfer copy the app's files, the config and its secret included **[as built]**.
-
-## 2. Identifiers, paths and local state
-
-| Thing | Value |
-|---|---|
-| Application id | `org.feverdreamtv.tsync` |
-| Provider authority | `org.feverdreamtv.tsync.documents` |
-| Home | `<filesDir>`; the core derives every path from `HOME` as on Linux with no XDG overrides |
-| Config | `<filesDir>/.config/tsync/config.json` |
-| Trust bundle | `<filesDir>/ca-bundle.pem` |
-| Staging | `<filesDir>/staging/<epochMillis>-<uuid>` |
-| Camera-backup settings | SharedPreferences `camera-backup`: `enabled` (false), `unmeteredOnly` (true), `whenBatteryOk` (true), `lastOutcome`, `settled` |
-| Camera-backup records | SQLite `camera-backup.db`, version 2 (§12.2) |
-| Notification channels | `tsync-backup` "Camera backup" (low), `tsync-open-documents` "Open files" (low), `tsync-problems` "Problems" (default) |
-| Notification ids | backup 2, open documents 3, problem 4 |
-| Log tags | `tsync` (core and app), `tsyncsaf` (provider), `tsync-open` (service), `tsync-backup` |
-
-- A staging name carries its creation time because commit rewrites the file's mtime (§8).
-- All problem notifications share one id, so a later one replaces an earlier one **[as built]**.
-- `POST_NOTIFICATIONS` is requested only in the camera-backup permission flow (§12.6); without it
-  the problem and keep-alive notifications are not shown **[as built]**.
-
-**Trust bundle.** Built by concatenating every `-----BEGIN CERTIFICATE-----` …
-`-----END CERTIFICATE-----` block of every file in `/apex/com.android.conscrypt/cacerts`, else
-`/system/etc/security/cacerts` (system authorities only). The core requires the file even for plain
-HTTP. Built once: an existing non-empty bundle is never rebuilt, so a trust-store update on the
-device is never picked up **[as built]**. The write is not atomic. With neither directory present a
-warning is logged and the path of a file that does not exist is handed to the core.
-
-## 3. The core's lifecycle
+## 3. What the owner runs
 
 ### 3.1 Boot
 
-Boot is `Native.ensure`, called before every `request`, `status` and read-only open. It is
-synchronised and idempotent: the first caller waits, later callers return at once. A failed boot
-leaves it unbooted and throws "tsync could not open the domain: …"; the next call tries again.
+Boot is idempotent within a process; concurrent callers wait for the first.
 
-1. Start the OCaml runtime if it is not running, after setting `HOME` = `<filesDir>` and
-   `SSL_CERT_FILE` = the trust bundle. The runtime is started by the first `check_config` or boot,
-   whichever comes first.
-2. Install the log sink (platform log, tag `tsync`; levels debug, info, warn, error).
-3. Load and validate the config; apply its TLS settings; select the domain the app names, or the
-   config's only domain when the name is empty.
-4. Build the domain over the **lazy tree** (§3.2).
-5. Start the event loop on a thread of its own. On it, in order:
-   1. ensure the mirror's root exists, then report ready: the booting caller returns here;
-   2. start the upload and metadata queues and reconcile the WAL;
-   3. start the maintenance schedule, the same task list every owner runs: the cache maintenance
-      tasks, the chunk cap (after each upload and every 60 s), the deferred rescan (60 s) and the
-      metadata retry (60 s);
-   4. wait for ever.
+1. Install the log sink and the notice sink (§4), before anything that can fail.
+2. Load and validate the config; apply its TLS settings; take the ownership lock; build the domain
+   over the lazy tree.
+3. Start the scheduler on a thread of its own
+   ([07 §3.7](../07-daemon-cli.md#37-event-loop-hosting)), ensure the mirror's root, and report
+   ready. Callers wait for this step only: it reads no store.
+4. In the background: start the upload and metadata queues and reconcile
+   ([wal-and-journal.md](../algorithms/wal-and-journal.md)); resume deferred replica and backfill
+   work left by earlier processes ([replication.md](../algorithms/replication.md)); start the
+   maintenance schedule, the same list every owner runs
+   ([07 §6](../07-daemon-cli.md#6-maintenance)).
 
-- A failure in steps 2–4 is returned as text. A failure on the loop, at any time, ends the process
-  (`_exit(1)`) after logging **[as built]**.
-- Deferred replica and backfill work left by an earlier process is not resumed **[as built]**.
-- An unhandled failure in detached work is logged, not fatal.
-- The core's blocking-call pool is capped at 16 threads.
-- Boot must not run on the UI thread; every caller is a binder, worker or ad-hoc thread.
-
-Saving a changed config while booted offers "Restart now" (finish every activity, exit the process)
-or "Later" (keep serving the old config until the process dies).
+- A failure in steps 1–3 is answered to the caller as text, the lock released, and a later boot may
+  succeed. A lock held by another process is such a failure, naming the holder.
+- A config changed after boot is not picked up: the process serves the config it booted with until
+  it dies.
+- If the scheduler itself dies the process exits
+  ([07 §3.7](../07-daemon-cli.md#37-event-loop-hosting)); the host is restarted by the platform at
+  its next use, and boots again.
 
 ### 3.2 Freshness without a journal poller
 
-The core runs no journal poller and applies no peer entry. Its view of what peers did comes only
-from **pulls**.
+The owner runs no journal poller and applies no peer entry. Its view of what peers did comes from
+**pulls**: a pull reads one folder's children from the store and replaces the mirror's view of that
+folder, overlaid with this client's owed work, as the lazy tree specifies
+([04 §3.5](../04-checkout-cache.md#35-the-published-tree-full-and-lazy)). A completed pull stamps the
+folder ([04 §2.3](../04-checkout-cache.md#23-mirror-entries-and-markers)); a folder is **fresh** when
+this process completed a pull of it less than `pull_freshness` ago, measured on the monotonic clock.
 
-**Pull.** Listing a folder's children (`list_dir`) first reads that folder's children from the store,
-records each in the mirror, and removes from the mirror every published entry the store did not list.
-Staged entries are kept. Then the listing is answered from the mirror.
+**When the owner pulls.**
+1. A child listing (`list_dir`) pulls the folder first unless it is fresh. A caller MAY say
+   `"pull":"now"` (pull even when fresh: a user's refresh gesture) or `"pull":"never"` (answer the
+   mirror).
+2. A mutation that names a child by name (`create`, `mkdir`, `write` by parent and name, `symlink`,
+   the destination of a `rename`) pulls the destination folder first unless it is fresh, so that an
+   existence check sees peers' entries.
+3. Opening a file (the bridge's `open`, `ensure_cached`, `fetch_range`) reads the file's current
+   manifest from the store and updates the mirror's entry; if the store no longer has it, the entry
+   is removed and the answer is `not_found`.
+4. `restore` of a folder pulls each folder of the subtree as it walks, so the subtree restored is the
+   one the store holds. `evict` walks the mirror only.
 
-- Every `list_dir` request pulls, each page of a paged listing included **[as built]**.
-- A folder with no id in the local mirror is not pulled; the listing answers what the mirror holds.
-- A folder is **not pulled at all** while any owed metadata WAL record names one of its direct
-  children **[as built]**: a record that keeps failing hides peers' changes in that folder for as
-  long as it is owed.
-- A pull that fails fails the listing; there is no fallback to the last pulled view **[as built]**.
-  A child the store listed but that could not be read fails the whole pull rather than being pruned.
+Concurrent pulls of one folder share one store read. `stat` never pulls: it answers from the mirror.
 
-**Everything else answers from the mirror alone.**
+**The listing says how fresh it is.** On a pulled tree a `list_dir` reply carries `pulledAt` (epoch
+seconds of the pull its rows reflect; absent for a folder never pulled) and `outdated: true` when the
+rows do not come from a pull made for this request or within `pull_freshness`.
 
-- `stat`, opening a file, and the destination of a mutation are resolved in the mirror with no store
-  read. An item in a folder never listed in this install is `not_found`.
-- An open does not re-read the file's manifest: it serves the version the last pull of its folder
-  recorded **[as built]**.
-- `mkdir` under a parent that was never pulled does not see a folder of that name a peer made, and
-  mints a second id for it **[as built]**.
-- A listing handed to the platform is never refreshed while displayed, and the platform is never
-  told that a folder's children changed, after a pull or after a mutation **[as built]**.
+**Notices.** After a pull that changed a folder's children, and after every mutation it performs, the
+owner sends the host a `changed` notice naming each folder whose children changed (§4.2). The host
+tells the platform; the owner does not track what the platform displays.
 
-Changes this client makes are published to the journal and cursor as on any owner, so peers see
-them.
+Conflicts between this client's unpublished work and peers' changes are settled when the owner
+publishes, as the publish side of [conflict resolution](../algorithms/conflict-resolution.md)
+specifies.
 
-### 3.3 What is left out
+### 3.3 Working without the store
 
-- Journal polling and entry application; full resync (`tsync sync` refuses on a pulled tree; the
-  frontend's `full_resync` and `changed` hooks do nothing).
-- Change events and subscriptions.
-- Symlinks: the config sets `symlinks: "skip"`.
+Offline is normal. A request MUST NOT wait on a silent store for longer than the patience below
+when the mirror or the cache can answer it.
+
+**Listings: answer the last view, then catch up.**
+- A folder pulled before (it has a pull stamp): the listing waits for its pull at most
+  `pull_patience`. If the pull has not completed by then, or the store's health breaker
+  ([01](../01-core.md)) is open, it answers the mirror's view at once with `outdated: true` and
+  `pulledAt`. The pull continues in the background; when it completes with different children the
+  owner sends a `changed` notice, and the next listing is fresh.
+- A folder never pulled has no view to fall back on: the listing waits for the pull and fails with
+  the pull's code (`unreachable` when the store is silent). A failed listing is never an empty
+  folder.
+- There is no age beyond which a view is withheld. A file made available offline must stay
+  reachable by name however long the store has been away; the age is carried in `pulledAt` for the
+  host to show.
+
+**Opens: serve the version known here.**
+- The manifest read of rule 3 waits at most `pull_patience`, and not at all while the breaker is
+  open. Without an answer the open serves the mirror's version.
+- Bytes come from the chunk cache. A read that needs a chunk the cache lacks waits for the store as
+  any read does and fails with DEADLINE ([failure-model.md](../algorithms/failure-model.md)) when it
+  stays silent. A pinned file ([08 §3.4](../08-frontends.md#34-evict-and-restore)) is read whole
+  without the store.
+
+**Mutations: accepted, published later.**
+- The destination pull of rule 2 waits at most `pull_patience`. Without it the mutation proceeds on
+  the mirror's view, is recorded in the WAL and answered; the queues publish it when the store
+  returns, across restarts.
+- An exclusive creation checked against an out-of-date view may meet a name a peer took meanwhile.
+  It is settled at publish as a conflict, and nothing is overwritten.
+- `write` with `await` answers once the upload has published or has started failing; `isUploaded`
+  in the reply's item says which.
+
+**What does need the store.** `share`, `restore` of bytes not yet cached, and the first listing of a
+folder answer `unreachable`. `status` never touches the store.
+
+**Recovery.** When a store request succeeds after the owner answered `unreachable`, or answered a
+listing `outdated` because the breaker was open, the owner sends the `recovered` notice. A host that
+showed an offline state clears it and re-lists what it displays.
+
+### 3.4 What is left out
+
+- The journal poller and entry application, and therefore full resync and the change feed
+  (`changes_since`, `list_all`, `cursor`): a pulled tree has no replica to rebuild or to diff.
+- Subscriptions: there is no socket. The notice sink carries the same events (§4.2).
+- Symlinks: the host's config sets `symlinks: "skip"`; the platform's document model has none.
 - Ranged writes and `close`: the only write is whole-body adoption of a staged file.
-- Subtree evict and restore: both act on one key (§10.2).
 
-## 4. The bridge
+## 4. Host environment
 
-Text crosses as **UTF-8 byte arrays**, never platform strings (the JVM's native string encoding
-cannot carry characters outside the Basic Multilingual Plane). The two paths given at startup cross
-as platform strings.
+### 4.1 What the host provides
 
-| Entry | In | Out | Semantics |
+Before the core initialises:
+
+1. **Home**: a private directory of the host. The config and cache locations derive from it, as on
+   Linux with no XDG overrides.
+2. **Trust store**: the path of a PEM bundle of certificate authorities. The core's TLS client uses
+   it for every connection ([security-model.md §9](../algorithms/security-model.md#9-tls)). Boot
+   fails, naming the trust store, when the file is missing or holds no certificate.
+3. **A log sink** `(level ∈ {debug, info, warn, error}, message)`.
+4. **A notice sink** (§4.2).
+5. The name of the domain to serve (empty = the only one the config names).
+6. **Transfer roots** ([security-model.md §7.3](../algorithms/security-model.md#73-paths-passed-over-ipc-confused-deputy)):
+   one directory under home that every `staging` and `dest` path MUST lie in.
+
+**Cleartext.** The core's network traffic does not go through the platform's network stack, so the
+platform's cleartext switch does not reach it. On this host the core MUST refuse to connect to a
+cleartext URL whose host is not a loopback address, even when a config names one, and
+`check_config` MUST refuse such a config.
+
+### 4.2 Notices
+
+The one call from the core to the host other than the log sink. A notice is one JSON object, the
+event a subscriber would receive ([08 §3.8](../08-frontends.md#38-events)):
+
+- `{"event":"changed","domain":D,"id":N,"refs":["root","d:<id>",…]}`: the children of these folders
+  changed (§3.2), or an item in them changed state (an upload published, a pin was set or dropped).
+- `{"event":"recovered","domain":D,"id":N}` (§3.3).
+
+Notices are hints: a lost one costs promptness, never correctness. The sink is called on a thread of
+the core's; it MUST return quickly and MUST NOT call back into the bridge from inside the call.
+
+### 4.3 Threads
+
+The host calls the core from threads it owns (binder threads, descriptor callback threads, worker
+threads). The core MUST accept calls from threads it did not create, MUST block only the calling
+thread, and MUST apply the per-domain serialisation of
+[08 §3.5](../08-frontends.md#35-rules-the-handler-enforces) whatever thread a call arrives on. Every
+piece of state a call touches, the handle table included, is touched only on the scheduler.
+
+## 5. The bridge
+
+All text crosses as **UTF-8 byte arrays**, never platform strings: names may hold characters outside
+the Basic Multilingual Plane, which the JVM's native string encoding cannot carry.
+
+| Operation | In | Out | Semantics |
 |---|---|---|---|
-| `check_config(home, bundle, domain)` | paths, domain name | nothing, or error text | Starts the runtime if needed; loads and validates the config, applies its TLS settings, selects the domain; starts nothing. |
-| `boot(home, bundle, domain)` | same | nothing, or error text | §3.1. |
-| `request(json)` | request | reply | One request, one reply, through the shared handler (§5). The handler's continuation is ignored. |
-| `status()` | — | text | The desktop `tsync status` report for this domain, with `frontend: android`; on failure `tsync could not report: …`. |
-| `open(ref)` | reference | handle > 0, or −errno | Resolves the reference in the mirror (staged or published) and records `{key, size now}` under a new handle. |
-| `size(handle)` | handle | size, or −1 | The size recorded at open. |
-| `read(handle, offset, length, dest)` | | bytes served, or −errno | Reads the handle's **key** at `offset`. Short only at end of content; 0 past it. Each handle is its own read-ahead stream. |
+| `check_config(domain)` | domain | `""` or error text | Loads and validates the config and selects the domain, starting nothing and taking no lock. Callable before or after boot. |
+| `boot(domain)` | domain | `""` or error text | §3.1. |
+| `request(json)` | request | reply | One request, one reply, through the shared handler ([08 §3.3](../08-frontends.md#33-actions)). |
+| `status()` | — | text | The same report as desktop `tsync status` for this domain, with `frontend: android`. |
+| `open(ref)` | reference | handle > 0, or −errno | Resolves the file's current version (§3.2 rule 3, §3.3) and pins it to a new handle. |
+| `size(handle)` | handle | size, or −errno | The size of the handle's version. |
+| `read(handle, offset, length, dest)` | | bytes served, or −errno | Bytes `[offset, offset+n)` of the handle's version. Short only at end of content; 0 past it. Each handle is its own read stream for read-ahead. |
 | `close(handle)` | handle | 0 | Forgets the handle. Idempotent. |
 
-- Entries other than `check_config` and `boot` assume the runtime is running; the app guarantees it
-  by booting first.
-- **Threads.** Every entry may be called from any thread. The caller's work runs on the core's one
-  event loop; only the calling thread blocks, and other callers proceed meanwhile.
-- **A handle is a key, not a version [as built].** A file rewritten while open is read at its new
-  content with the size recorded at open.
-- `size` and `close` touch the handle table on the calling thread, outside the loop **[as built]**.
-- **Errno**: ENOENT (2) for a reference that parses to nothing or resolves to nothing; EBADF (9) for
-  an unknown or closed handle; EACCES (13) and ENOSPC (28) when the core raises them; EIO (5) for
-  every other failure.
-- **Every entry is total.** A failure becomes a reply, an error text or a −errno; nothing propagates
-  into the host. A failed `request` is answered
-  `{"ok":false,"code":"internal","error":…}`; a request that is not JSON is answered
-  `{"ok":false,"code":"invalid","error":"invalid JSON"}`.
-- The core never calls the host, other than the log sink.
-- A read allocates a buffer of `length` bytes and copies the served bytes out; the platform array is
-  never pinned across the read.
+- **A handle serves one version.** Size and bytes both come from the version resolved at open, never
+  from a later one. If that version's bytes become unavailable (a staged body replaced meanwhile),
+  reads fail with EIO rather than mixing versions.
+- **Errno**: ENOENT for a reference naming nothing; EBADF for an unknown or closed handle; EACCES;
+  ENOSPC; EIO for anything else, a read deadline included.
+- **Every entry is total.** Any failure becomes a reply, an error text or a −errno; nothing
+  propagates into the host, which has no supervisor. A call before boot is such a failure. A request
+  that is not JSON is answered `{"ok":false,"code":"invalid","error":"invalid JSON"}`; every failed
+  request carries a code ([failure-model.md §7.2](../algorithms/failure-model.md#72-client-error-codes)).
+- `busy` cannot be answered for want of an owner: the caller is the owner.
 
-## 5. Requests the app sends
+## 6. The handler on a pulled tree
 
-Requests are `{"action":…, …}`. The app sends no `domain`.
+The actions are [08 §3.3](../08-frontends.md#33-actions)'s. What differs here:
 
-| action | request | reply relied on |
-|---|---|---|
-| `stat` | `ref` | the row at top level: `name`, `parentRef`, `size`, `mtime` |
-| `list_dir` | `ref`, `after` (`""` first), `limit?` | `items[]` (`ref`, `name`, `kind`, `size`, `mtime`, `availability`), `next?` |
-| `mkdir` / `create` | `parentRef`, `name` | ok only |
-| `write` | `parentRef`, `name`, `staging`, `await: true` | ok only |
-| `rename` | `ref`, `parentRef`, `name` | ok only |
-| `delete` / `rmdir` | `ref` | ok |
-| `ensure_cached` | `ref`, `dest` | ok |
-| `share` | `ref` | `url` |
-| `restore` / `evict` | `ref` | ok |
+- `list_dir` takes `pull?` and answers `pulledAt?` and `outdated?` (§3.2).
+- `changes_since`, `list_all`, `cursor`, `full_resync`, `sync` and `subscribe` are refused `invalid`,
+  naming the pulled tree.
+- `evict` and `restore` on a folder walk its subtree and answer counts, as
+  [08 §3.4](../08-frontends.md#34-evict-and-restore) specifies, with the pulls of §3.2 rule 4.
+- Hooks: `changed` and `on_upload_done` become `changed` notices; `reannounce` and `on_stop` do
+  nothing.
 
-Handler rules the app depends on:
+## 7. The `tsync android` command group (desktop)
 
-- **References**: `root`, `d:<folderId>`, `f:<parentFolderId>/<leaf>`. The app treats `root` and
-  every `d:` reference as a folder and anything else as a file, from the spelling alone.
-- **`list_dir`** orders by name, resumes after the name `after`, defaults to 1000 rows, and answers
-  `next` (the last name served) only when more follow.
-- **Item row**: `ref, parentRef, name, kind, size, mtime, etag, isUploaded, [availability,
-  pinnedUntil]`. A directory has size 0 and mtime 0.
-- **`mkdir`** of an existing folder answers that folder. **`create`** of an existing file replaces it
-  with an empty staged file. **`write`** and **`rename`** replace an existing destination. There is
-  no exclusive mode **[as built]**.
-- **`write`** cancels any upload of the key in flight, adopts the staging file by rename (it is gone
-  afterwards), keeps its mtime as the item's mtime, and queues the upload. With `await` it answers
-  once the key's upload has left the queue or has started failing (the queue keeps retrying).
-- **`share`** publishes a link valid 7 days. A domain whose backends cannot hold a share answers
-  `internal` with a sentence.
-- **`restore`** fetches every chunk of one file and pins it for 10 days; **`evict`** drops one
-  file's chunks and its pin.
-- Mutating actions (`create, write, delete, rename, mkdir, rmdir, symlink, revert`) run one at a
-  time per domain, and are refused `read_only` on a read-only domain.
-- `ensure_cached` writes the whole body to `dest`; `dest` and `staging` are not confined to any
-  directory **[as built]**.
-
-How the app reads replies:
-
-- `ok:false` raises an error carrying the reply's `error` sentence (`"request failed"` when absent).
-  **The `code` is dropped [as built]**: no caller can tell `not_found` from `unreachable`.
-- An empty reply raises "the domain answered nothing"; an unparseable one, "unparseable reply: …".
-- The `item` in a mutation reply is ignored; the app finds what it made by listing the parent again
-  and matching on name (§7, §8) **[as built]**.
-
-## 6. Configuration and setup
-
-### 6.1 The config the app writes
-
-```json
-{ "name": "<Build.MODEL, else 'android'>",
-  "domains": [ { "name": "<domain>", "versioning": true, "symlinks": "skip",
-    "maxCache": "<cache limit>", "frontends": ["android"],
-    "backends": [ { "type": "http-proxy", "name": "server", "role": "main",
-                    "url": "<url>", "secret": "<secret>" } ] } ] }
-```
-
-The app reads back `domains[0].name`, `domains[0].maxCache` (default `2G`) and
-`domains[0].backends[0].{url, secret}`; an unreadable config is "no config". The app shows setup when
-no config file exists and the browser when one does.
-
-### 6.2 Setup form
-
-Fields: domain name (free text with a dropdown filled by Check server), server URL, shared secret
-(masked), cache limit (blank → `2G`). All are trimmed.
-
-**Save and start**:
-1. Validate; the first failure is attached to its field, which takes focus:
-   - domain: required; at most 32 characters; no `/` and no control character. The 32-character
-     limit is justified by a socket path that no longer exists **[as built]**;
-   - URL: required; starts with `http://` or `https://` (cleartext to any host is accepted
-     **[as built]**);
-   - secret: required (no strength rule **[as built]**).
-2. Write the config (pretty-printed, not atomic).
-3. Off the UI thread, `check_config`. A refusal is shown as "tsync rejected the config:\n<text>";
-   **the rejected config stays on disk [as built]**, so the next launch opens the browser on it.
-4. On acceptance, tell the platform the provider's roots changed. If the core is already booted,
-   offer the restart of §3.1; else open the browser.
-
-Back from the form returns to the browser when a config existed on entry.
-
-### 6.3 Check server
-
-The one request the app makes itself, before any config exists.
-
-- `GET <url without trailing slashes>/domains`, connect and read timeouts 10 s, through the
-  platform's HTTP stack.
-- Headers: `x-tsync-timestamp` = epoch seconds; `x-tsync-signature` = lowercase hex of
-  HMAC-SHA256(secret, `"GET\n/domains\n<timestamp>\n<hex SHA-256 of the empty body>"`). The signed
-  path is `/domains` whatever path the URL carries.
-- 200 → the `name` of each element of `domains`. One name fills the domain field ("Server reached,
-  serving "<name>""); several open the dropdown ("Server reached — pick a domain"); none: "Server
-  reached, but it serves this secret no domain".
-- 401 → "the secret was refused (or this device's clock is off)"; 404 → "this server cannot list its
-  domains — update tsync on it"; other → "the server answered HTTP <code>". Each is shown after
-  "Cannot use this server: ".
-
-## 7. DocumentsProvider
-
-A document id **is** the handler's reference.
-
-- **Roots.** Always one, even when the core cannot boot: root id = the configured domain name
-  (`media` with no config), document id `root`, title `tsync`, summary = the domain name, flags
-  create and is-child, the launcher icon. The platform is told roots changed when the activity
-  starts with a config and when settings are saved.
-- **Document.** `root` is synthesised as a directory named `tsync`, never `stat`ed. Otherwise
-  `stat`; a failure propagates as an exception. The row's kind is taken from the reference's
-  spelling.
-  - Folder: directory MIME type; flags create, delete, rename.
-  - File: MIME type from the name's extension (default `application/octet-stream`); flags write,
-    delete, rename; size.
-  - Last-modified = `mtime` in milliseconds, absent when 0.
-  - The flags are the same on a read-only domain **[as built]**.
-- **Children.** Walk every page of `list_dir` (500 rows per page) into one cursor. On **any**
-  failure the cursor holds what was gathered and carries the error "tsync could not reach the server
-  for this folder", whatever the cause **[as built]**. The cursor has no notification URI.
-- **Is child.** True iff `doc` is `f:<parent's folder id>/…` or `d:<parent's folder id>`: only a
-  file directly inside the parent, or the parent itself. A subfolder and everything below it is
-  rejected, so a tree grant reaches only the top level **[as built]**.
-- **Create.** Leaf = the sanitised display name (§12.5); `mkdir` for the directory MIME type, else
-  `create`; then list the parent's first page (1000 rows) and answer the reference of the row with
-  that name, failing when it is not on that page **[as built]**. An existing file of that name is
-  emptied and an existing folder is answered (§5).
-- **Delete.** `rmdir` for a folder reference, `delete` for a file.
-- **Rename.** Parent = `stat(doc).parentRef`; `rename(doc, parent, sanitised name)`, replacing any
-  item of that name. Answers the unchanged id for a folder; for a file, the reference found by
-  listing the parent's first page.
-- **Open for reading** (a mode without `w`): boot, `open(ref)` (a negative answer raises its errno),
-  retain keep-alive (§9), and return a seekable proxy descriptor. Its callbacks run on one of 4
-  fixed callback threads, assigned round-robin per open: get-size → `size`; read → `read` (a negative
-  answer raises its errno; a read of 1 s or more is logged); release → `close` and release
-  keep-alive. If the descriptor cannot be made, close and release at once. The cancellation signal
-  is ignored.
-- **Open for writing** (a mode containing `w`):
-  1. Take a staging name.
-  2. If the mode contains `r` or `a`, assemble the current body into it (`ensure_cached`). On failure
-     delete the staging file and refuse the open as file-not-found: starting empty would publish a
-     truncated file on close.
-  3. Create the staging file if absent and return a read-write descriptor on it with a close
-     listener. The descriptor is positioned at 0 and not truncated whatever the mode, so an append
-     mode overwrites from the start **[as built]**.
-  4. On a close reporting an error: delete the staging file.
-  5. On a clean close, on a new thread (the callback threads serve other files' reads):
-     `stat(doc)` for its parent and name, then commit (§8). A failure is logged and posted as the
-     problem notification "Could not save <document id>: …".
-  - Keep-alive is not retained for a write open or its commit **[as built]**.
-  - A document renamed, moved or deleted while open fails the `stat` (a file's reference spells its
-    parent and leaf), and the edit is dropped **[as built]**.
-  - A process death between the close and the commit loses the edit: the staging file is an orphan
-    the sweep deletes later (§8) **[as built]**.
-- Not implemented: move, copy, remove-from-parent, thumbnails, search, recents, root capacity.
-- The platform is never notified of a change by any of the mutations above **[as built]**.
-
-## 8. Ingest
-
-Bytes enter the domain from the app only through commit.
-
-**Commit** `(parent, name, staging, modified?)`:
-1. fsync the staging file: adoption is a rename, and unsynced bytes would publish a truncated body
-   after a power loss.
-2. If `modified` is given, set the staging file's mtime to it; the adopted file's mtime becomes the
-   item's.
-3. `write` with `await` (§5). On success the core owns the file. On failure the staging file is
-   deleted and the failure raised.
-
-An existing item of that name is replaced. `isUploaded` in the reply is not read: a commit succeeds
-once the core has adopted the body, whether or not it is uploaded yet.
-
-**Folders by path** `folderFor(path, known)`: for each directory segment of `path` (its last segment
-is the file), use `known[path so far]` when present; else find the child of that name in the parent's
-first listing page, `mkdir` it when absent and look it up again (failing "could not create …" when it
-is still not found), and remember the reference in `known`. A listing that fails is taken as "no
-children" **[as built]**. A remembered reference is never checked or dropped **[as built]**.
-
-**Free name** `freeName(parent, name)`: `name` when the parent's first listing page does not hold it,
-else the first `<stem> (<n>)<ext>`, n = 1, 2, …, not on that page. `<ext>` starts at the last dot. A
-listing that fails is taken as an empty folder, and the check and the write are separate requests, so
-an existing file can be replaced **[as built]**.
-
-**Orphan sweep** (run at the start of each camera-backup pass): delete every staging file whose
-name-embedded creation time is more than 24 h old. It does not know whether a picker still holds the
-file open or a commit is pending **[as built]**. There is no durable record of a staged write: a
-write the platform considers finished is lost if the process dies before its commit **[as built]**.
-
-## 9. Keep-alive
-
-Proxy-descriptor reads are answered in the app process, and the platform freezes cached processes:
-a player then drains its buffer and waits for ever.
-
-- A process-wide counter: `retain` reports true exactly on 0→1, `release` exactly on 1→0; a release
-  at 0 is ignored, so the counter is never negative.
-- On 0→1 start the foreground service (data-sync type; low-importance notification "Serving an open
-  file" / "Serving N open files", N read once at start); on 1→0 stop it. The service is not sticky.
-- A platform refusal to start it is logged and ignored: reads keep working while the process lives.
-- On the platform's foreground timeout the service stops itself rather than letting the process be
-  killed.
-- Retained by each read-only open (released at descriptor release or on a failed open) and by a
-  share save from its start until its last commit ends (§10.1).
-
-## 10. User interface
-
-Views are built in code; one activity shows one screen at a time and handles back itself.
-
-### 10.1 Share target ("Save to tsync")
-
-- Streams = `EXTRA_STREAM` of a `SEND`, or the list of a `SEND_MULTIPLE`. None → toast "Nothing to
-  save: only files can be saved to tsync" and finish. No config → toast "Set up tsync before saving
-  to it" and finish.
-- The browser opens in save mode: taps only navigate folders; item actions are off; the heading reads
-  "Save N file(s) to /<path>"; the buttons are "Save here" and "Cancel" (finish).
-- One file: a "Save as" dialog with the name pre-filled from the stream's display name (else the
-  URI's last segment, else "shared file"). Several: each keeps its own name.
-- **Save**: retain keep-alive, toast "Saving N file(s)…", then on a worker thread:
-  1. copy each stream into its own staging file while the activity holds the read grant; a failed
-     copy deletes its staging file and posts "Could not read <name>: …";
-  2. **finish the activity**;
-  3. for each staged file: leaf = `freeName(folder, sanitised name)`, then commit; a failure posts
-     "Could not save <name>: …" and the rest continue;
-  4. release keep-alive.
-- The activity closes before any file is committed and nothing reports success **[as built]**.
-
-### 10.2 Browser
-
-- A trail of `(reference, name)` from the root. The screen lists the current folder with `list_dir`
-  pages of 200, loading the next page when the list scrolls within 10 rows of its end.
-- A failed page shows "Cannot read this folder: <error>" and stops paging; an empty folder shows
-  "Empty folder".
-- Rows: an icon by kind (folder, or image / video / audio / file from the MIME type), the name, and
-  "Folder" or the size.
-- Folder tap descends; back pops the trail, and leaves the app at the root.
-- The listing is read when a folder is shown and never again: not on resume, and there is no refresh
-  gesture **[as built]**.
-- Buttons: Settings (§6.2), Status (§10.3). Heading: the trail's names joined by `/`, or `tsync`.
-- **Item actions** (tap a file, long-press anything):
-  - Open (files): a view intent on the provider's document URI with the name's MIME type and a read
-    grant, through a chooser; "No app on this phone opens <name>" when nothing takes it.
-  - Share link: `share`, then a dialog with the URL and Copy / Send (a text send intent) / Close.
-    A failure toasts "Cannot share <name>: …".
-  - "Make available offline", or "Keep offline longer" when the row's `availability` is `pinned`:
-    `restore`. "Make online only", offered unless `availability` is `online-only`: `evict`. Both
-    toast "<name> is available offline" / "<name> is online only" on an ok reply, "Failed: …"
-    otherwise.
-  - A folder row has no `availability`, so both are offered; they act on one key, which for a folder
-    does nothing, and the toast still reports success **[as built]**.
-
-### 10.3 Status and settings
-
-- **Status**: Files and Refresh buttons; monospace text = the camera-backup line (§12.8) followed by
-  `status()` verbatim, or "tsync could not start: …" when boot fails.
-- **Settings**: the setup form (§6.2) followed by the camera-backup controls (§12.6).
-
-## 11. The `tsync android` command group (desktop)
-
-For shells and tests, on a desktop build that includes the frontend. Arguments are positional; bad
-usage prints `tsync android <verb>: <usage>` and exits 2. Each invocation is its own process: it
-starts the core, answers, drains the queues and exits. It takes no lock and never forwards to a
-running owner **[as built]**.
-
-A verb that sends a mutating action starts the queues and reconciles first; every other verb only
-ensures the mirror's root.
+For shells and tests on a desktop build that includes the frontend. Arguments are positional; bad
+usage exits 2. Each invocation follows the one-shot rule of §2, answers through the same handler and
+bridge semantics, drains, and exits.
 
 | Verb | Request or behaviour |
 |---|---|
 | `stat REF` | `stat` |
 | `list REF [AFTER [LIMIT]]` | `list_dir` |
-| `read REF DEST OFFSET LENGTH` | `fetch_range`: the range is written into DEST at the same offset, sparse elsewhere; replies `localPath`, `offset`, `length` served |
+| `read REF DEST OFFSET LENGTH` | `fetch_range`: the range is written into DEST at the same offset, sparse elsewhere |
 | `open REF` | the session below |
-| `residency REF` | `{"ok":true,"cached":n,"total":m}`: chunks of REF on this device |
+| `residency REF` | `{"ok":true,"cached":n,"total":m}`: chunks of REF on this machine |
 | `fetch REF DEST` | `ensure_cached` |
 | `write-whole PARENT NAME STAGING` | `write` with `await` |
 | `create PARENT NAME`, `mkdir PARENT NAME` | `create`, `mkdir` |
 | `delete REF`, `rmdir REF` | `delete`, `rmdir` |
 | `rename SRC PARENT NAME` | `rename` |
 | `share REF` | `share` |
-| `request JSON` | the request, verbatim: the wire the app speaks |
+| `request JSON` | the request, verbatim: the wire a host speaks |
 | `status` | the status text |
 
-`open REF` session: a reference that does not parse prints to stderr and exits 1. First line
-`{"ok":true,"size":N}`, or a `not_found` refusal. Then for each input line `"OFFSET LENGTH"` (offset
-≥ 0, length > 0): a line `{"ok":true,"length":n}` followed by exactly `n` raw bytes. A malformed line
-is answered with an `invalid` refusal and the session continues. End of input ends it. Framing is by
-count, never by delimiter.
+Only a verb that sends a mutating action starts the queues and reconciles; the others only ensure
+the mirror's root.
 
-The frontend's descriptor: serving `Commands` (`tsync start` refuses it), tree `Pulled` (`tsync sync`
-refuses it), availability as the core computes it.
+`open REF` session: first line `{"ok":true,"size":N}` or a refusal; then for each input line
+`"OFFSET LENGTH"` (offset ≥ 0, length > 0) a line `{"ok":true,"length":n}` followed by exactly `n`
+raw bytes; a malformed line is answered with an `invalid` refusal and the session continues; end of
+input ends it. Framing is by count, never by delimiter.
 
-## 12. Camera backup
+## 8. Parameters
 
-### 12.1 Principle
+| Parameter | Recommended | Constraint |
+|---|---|---|
+| `pull_freshness` | 5 s | the window in which a folder is listed again without asking the store |
+| `pull_patience` | 2 s | < `REQUEST_DEADLINE`; how long an answer the mirror can give waits for the store |
 
-Photos and videos under DCIM are copied into `Camera Uploads/` in the domain. Progress is a
-**per-volume watermark** plus a **record per media item**. The domain is never asked whether a photo
-exists: the device's records are authoritative, so a photo deleted from the domain is not uploaded
-again.
+## 9. Conformance
 
-### 12.2 Records
+An implementation MUST exhibit these properties; [09-tests.md](../09-tests.md) says how they are
+checked. Properties of the shared handler are [08](../08-frontends.md)'s.
 
-```sql
-CREATE TABLE media (media_id INTEGER PRIMARY KEY, volume TEXT NOT NULL,
-  relative_path TEXT NOT NULL, size_bytes INTEGER NOT NULL,
-  modified_seconds INTEGER NOT NULL, state TEXT NOT NULL,   -- 'DONE' | 'FAILED'
-  attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT, updated_at INTEGER NOT NULL);
-CREATE UNIQUE INDEX media_path ON media(relative_path);
-CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-  -- 'watermark.<volume>.generation', 'watermark.<volume>.dateAdded'
-CREATE TABLE dirs (path TEXT PRIMARY KEY, ref TEXT NOT NULL);
-```
+**Ownership and boot**
+- A second process cannot own the domain while a host does; a desktop command meeting an `app`
+  holder is refused naming it, and otherwise owns the domain for its duration.
+- Deferred replica or backfill work left by a killed process is completed after the next boot.
+- Every bridge entry is total, before boot included; a non-JSON request is answered with the exact
+  `invalid JSON` reply.
+- Concurrent reads from foreign threads return exact bytes; a read after close is −EBADF; an open of
+  an absent reference is −ENOENT; a handle keeps serving the version it opened after the file is
+  rewritten.
+- A cleartext backend URL to a non-loopback host is refused by `check_config` and by the core.
 
-- `relative_path` is the item's target in the domain, frozen at first sight.
-- Every write is insert-or-replace: a new media id claiming a recorded target replaces the old row.
-- A state other than `DONE` reads as `FAILED`. `attempts` is never written.
-- `dirs` is the persisted `known` map of `folderFor` (§8). An upgrade drops and recreates only
-  `dirs`.
-- A missing watermark reads as `(0, 0)`.
+**Freshness**
+- With the mirror wiped, listing root works without any sync and reads only root; descending reads
+  only that folder.
+- Two listings of a folder within `pull_freshness`, and every page of one paged listing, cost one
+  store read; `"pull":"now"` costs one more.
+- A file a peer deleted disappears from the next pull and from the mirror; a peer's new file appears;
+  an open of a file a peer replaced serves the new version; an open of a file a peer deleted is
+  `not_found`.
+- A locally created, unpublished file survives a pull; a locally removed, unpublished file is not
+  listed back; a folder with a metadata record that cannot be published is still refreshed from the
+  store.
+- A pull that changed a folder's children, and every mutation, sends a `changed` notice naming the
+  folder.
 
-### 12.3 A sweep
+**Without the store**
+- With the store silent, a previously listed folder is answered within `pull_patience` with
+  `outdated: true` and its `pulledAt`; with the breaker open it is answered without waiting; a
+  never-listed folder answers `unreachable`, never an empty listing.
+- With the store silent, a cached file opens and reads; a pinned file reads whole; `create`,
+  `mkdir`, `write`, `rename` and `delete` in a previously listed folder succeed and are published
+  after the store returns, across a process kill.
+- When the store returns, the host receives `recovered`, and a `changed` notice for each folder
+  whose background pull found different children.
+- An exclusive creation made offline onto a name a peer took meanwhile replaces nothing.
 
-For each volume (every external volume name; the single external volume below API 29):
+**Command group**
+- Every verb is driven by a spawned process per call, and the registered verbs are exactly the ones
+  tested.
 
-1. Read the volume's watermark, and its current media-store generation (0 below API 30).
-2. For the image collection, then the video collection:
-   1. Query rows under DCIM at any depth (`RELATIVE_PATH LIKE 'DCIM/%'`; below API 29
-      `DATA LIKE '%/DCIM/%'`) that are newer than the watermark: `GENERATION_MODIFIED` greater than
-      its generation on API 30 and up; else `DATE_ADDED` greater than its date-added minus 24 h.
-      Ordered by id.
-   2. Plan the rows against all records (§12.4).
-   3. For each planned action, in order, first check the stop conditions: the job was stopped; the
-      run is not user-initiated and the gate blocks (§12.7); 512 MiB or more were staged by this
-      sweep; 8 min or more have passed. Any of them ends the **whole sweep** with "more to do",
-      saving `known` and **not** moving the watermark.
-   4. Skip *already done*: advance the date-added mark to the row's. Skip *still pending* or
-      *unsettled*: mark "more to do". Skip *empty*: nothing.
-   5. Upload (§12.5). Success: count it, add its size to the staged total, advance the date-added
-      mark. Failure: count it.
-3. Store the watermark `(generation read in step 1, highest date-added reached)`.
+## 10. Rationale (do not undo)
 
-Then save `known`.
-
-On API 30 and up the generation stored in step 3 is the one read before the queries, and it is stored
-whatever happened to the rows: a row that was pending, unsettled or failed is not returned by the
-next query unless it is modified again, and nothing re-reads `FAILED` records. Such a photo is never
-uploaded **[as built]**. Below API 30 the 24 h overlap brings recent rows back.
-
-### 12.4 Planning
-
-Pure and deterministic: the same rows and records give the same plan. Rows are taken in id order.
-
-1. Pending in the media store → skip *still pending*.
-2. Size ≤ 0 → skip *empty*.
-3. Modified less than 10 s ago → skip *unsettled*.
-4. A record exists for the id: `DONE` with the same size and modification time → skip *already
-   done*; otherwise upload to the record's target.
-5. No record: for sequence 0, 1, … 999, form the candidate name (§12.5):
-   - a `DONE` record holds that target with this row's size → skip *already done* (a renumbered id;
-     the record keeps its old id);
-   - the target is held by no record and no earlier claim in this plan → claim it and upload there.
-   With no free name after 1000 tries the sweep fails.
-
-A row's capture time is its date-taken when positive, else its date-added.
-
-### 12.5 Uploading and naming
-
-Upload of one row to a target:
-
-1. Free space in the staging directory less than twice the row's size → fail.
-2. `folderFor(target)` (§8).
-3. Copy the **original** stream (location metadata kept, where the platform has the notion and
-   allows it; else the plain stream) into a staging file. A copied length different from the row's
-   size → fail.
-4. Commit with `modified` = capture time (§8). Whatever already holds the target name is replaced,
-   another device's photo included **[as built]**.
-5. Success → record `DONE` with the row's size and modification time. Any failure → delete the
-   staging file and record `FAILED` with the error text.
-
-**Target**: `Camera Uploads/<yyyy>/<yyyy-MM-dd HH.mm.ss>[ (n)]<.ext>`.
-
-- Time = capture time in the phone's time zone when the target is first computed.
-- `(n)` is the sequence; 0 omits it.
-- The extension comes from the display name: the part after the last dot, when the dot is neither
-  first nor last and the part is letters and digits only; lower-cased. Otherwise none.
-- **Leaf sanitising** (also applied to every name the provider and the share target create): `/`, `\`
-  and control characters → `_`; leading whitespace and trailing spaces and dots trimmed; empty →
-  `unnamed`.
-- Example: `IMG_1234.JPG` captured 2026-08-16 12:31:04 UTC in Paris →
-  `Camera Uploads/2026/2026-08-16 14.31.04.jpg`.
-
-### 12.6 Access, enabling and schedule
-
-- **Access level.** API 33 and up: full when both image and video read access are granted;
-  selected-only when either one, or the user-selection access (API 34 and up), is; denied otherwise.
-  Below: full when external-storage read is granted, else denied.
-- **Requested together**: the read permissions for the API level, media-location access (API 29 and
-  up), notifications (API 33 and up).
-- **Controls**: "Back up camera photos and videos", "Only over wifi" (default on), "Not when the
-  battery is low" (default on), "Back up now".
-- **Enabling.** Ticking the box sets `enabled` at once and asks "Everything" or "From now on" (not
-  dismissable). "From now on" first moves every volume's watermark to (current generation, newest
-  date-added) — on the UI thread, before any permission is granted, with a query whose `LIMIT` in
-  the sort order recent platforms reject **[as built]**. Then the permissions are requested; denied →
-  toast "tsync cannot back up photos without access to them"; selected-only → toast "Only the photos
-  you selected will be backed up"; and the schedule is enabled when anything is readable. `enabled`
-  stays set when access is denied **[as built]**.
-- **Disabling** cancels the three jobs.
-- **Schedule**, three unique jobs sharing one pass lock:
-  - *watch*: one-shot, triggered by changes under the external image and video collections
-    (descendants included), update delay 10 s, maximum delay 300 s; replaces any previous one;
-    exponential backoff from 5 min; re-enqueued at the end of every pass, since a trigger fires once;
-  - *periodic*: every 6 h; updated in place; exponential backoff from 15 min;
-  - *now*: one-shot, no constraints, user-initiated; kept if one is already enqueued. "Back up now"
-    refuses with a toast while backup is off.
-  - Constraints of the first two: network unmetered when "Only over wifi" is set, else connected;
-    battery not low when "Not when the battery is low" is set; storage not low always. Changing
-    either setting while enabled re-enqueues both.
-
-### 12.7 Gate
-
-Checked at the start of a scheduled pass and before every planned action of one. A user-initiated
-pass ignores it.
-
-- "Only over wifi" set, and the active network is absent or metered → "waiting for wifi".
-- "Not when the battery is low" set, the battery neither charging nor full, and its level below
-  15 % → "battery low".
-
-### 12.8 A pass
-
-1. Try the process-wide pass lock; held → success, nothing done.
-2. Backup disabled → success. No read access → outcome "photo access not granted", success.
-3. Not user-initiated and the gate blocks → outcome = the reason, retry later.
-4. Try to become a foreground job (notification "Backing up camera photos"); a refusal is ignored.
-5. Orphan sweep (§8), then the sweep (§12.3). With no config the sweep does nothing.
-6. Outcome `"<u> uploaded[, <f> failed][, more to do]"`; `settled` = no "more to do" and no failure
-   in this pass. "More to do" → retry later; else success. Failures alone do not ask for a retry
-   **[as built]**.
-7. An exception → outcome "last sweep failed: …", retry later.
-8. Always re-enqueue the watch job.
-
-**Status line**: `camera backup: off`, or `camera backup: <state>[ — <last error, 80 chars>][ —
-<hold>][ (only the photos you selected)]` and, on the next line, `last sweep: <outcome>`.
-
-- `<state>`: `<n> failed` when any `FAILED` record exists (with the most recent recorded error);
-  else `not started yet` (no pass has set `settled`), `more to upload`, or `up to date`.
-- `<hold>`: the gate's reason, else `no access to photos` when access is denied.
-
-## 13. Parameters
-
-| Parameter | Value |
-|---|---|
-| Blocking-call pool | 16 threads |
-| Maintenance period | 60 s |
-| Proxy-descriptor callback threads | 4 |
-| Slow-read log threshold | 1 s |
-| Provider listing page | 500 |
-| Browser listing page / load-ahead | 200 / 10 rows |
-| Default `list_dir` page (child lookups) | 1000 |
-| Domain name length | ≤ 32 |
-| Default cache limit | `2G` |
-| Check-server timeouts | 10 s connect, 10 s read |
-| Share link lifetime | 7 days |
-| Pin lifetime (`restore`) | 10 days |
-| Staging orphan age | 24 h |
-| Settle time | 10 s |
-| Date-added overlap | 24 h |
-| Name sequence bound | 1000 |
-| Staged-bytes budget per sweep | 512 MiB |
-| Sweep time budget | 8 min |
-| Free-space factor | 2 × the item's size |
-| Battery floor | 15 % |
-| Watch trigger delay / maximum | 10 s / 300 s |
-| Periodic interval | 6 h |
-| Job backoff (watch / periodic) | exponential from 5 min / 15 min |
-
-## 14. What `main` checks
-
-- **Spawned command group** (`tests/frontends/android`): every verb, one process per call, full
-  replies snapshotted; fails when a registered verb is not driven.
-- **Lazy tree** (`tests/frontends/android_lazy`): root lists with the mirror wiped and reads only
-  root; descending reads only that folder; a file a peer deleted is pruned; a staged file survives a
-  pull.
-- **Bridge** (`tests/frontends/android_bridge`): the entry points linked in-process; 8 foreign
-  threads × 64 reads return exact bytes; a non-JSON request gets the `invalid JSON` reply; a write
-  with `await` is sent before it answers; read after close is −9; open of an absent name is −2.
-- **JVM** (`:core`): the wire against a real binary through `tsync android request`; leaf
-  sanitising; the keep-alive counter; photo naming; the planner.
-- **Robolectric** (`:app`): the record store.
-- **Device, opt-in**: the media-store queries on an emulator.
-- Every Gradle test task fails when it ran zero tests.
-
-Not checked: the provider, the activity, the share target, the worker, the sweep, and everything
-marked **[as built]**.
+- **Linked core, not a daemon or a process per call.** Android reaped the daemon; per-call processes
+  had no read-ahead state and could not be ordered against the upload queue.
+- **Pulled tree.** A host without long-lived state cannot keep a replica: a resync wiped the mirror
+  and left every document unresolvable until it ended.
+- **Pulls overlaid with owed work, never skipped because of it.** Skipping froze a folder for as long
+  as one record kept failing.
+- **Answer the last view, flagged, rather than fail.** A listing that failed whenever the store was
+  silent made cached and pinned files unreachable exactly when they mattered.
+- **Freshness is judged per process, on the monotonic clock.** A wall-clock stamp read after a clock
+  jump would call an old view fresh.
+- **Read-ahead keyed by handle, not by file.** A probe elsewhere in the file must not reset a
+  sequential reader.
+- **A handle is a version.** A handle that was a key served a rewritten file's new bytes under its
+  old size.
+- **Notices, not tracking.** The core does not know what the platform displays; the host does.
 
 ---
 

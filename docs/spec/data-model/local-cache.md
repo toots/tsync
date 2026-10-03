@@ -63,7 +63,7 @@ the **pause flag** a file per domain whose presence means paused; both are speci
 **Host-owned state** lives outside the owner's domain state and outside this model: a host MAY
 keep state of its own that feeds the owner through its request interface, and it is responsible
 for that state's durability. On Android these are the ingest intents with their staging copies,
-and the camera-backup records ([android](../frontends/android.md) §9 and §13). Once the owner has
+and the camera-backup records ([android-app](../frontends/android-app.md) §8 and §11). Once the owner has
 acknowledged a handover, the content is in the staged tree and the host's copy is disposable.
 
 ## 3. Entities
