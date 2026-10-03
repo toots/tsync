@@ -70,6 +70,7 @@ final class WorkingSetEnumerator: NSObject, NSFileProviderEnumerator {
             return
         }
         let limit = Cursors.limit(observer.suggestedPageSize ?? 0)
+        log.info("working set: list from \(after ?? "the start", privacy: .public)")
         detached { [owner, cancellation] in
             do {
                 var fields: [String: Any] = ["limit": limit]
@@ -110,6 +111,7 @@ final class WorkingSetEnumerator: NSObject, NSFileProviderEnumerator {
             return
         }
         let limit = Cursors.limit(observer.suggestedBatchSize ?? 0)
+        log.info("working set: changes from \(from, privacy: .public)")
         detached { [owner, cancellation] in
             do {
                 let reply = try owner.call(
@@ -144,6 +146,7 @@ final class WorkingSetEnumerator: NSObject, NSFileProviderEnumerator {
     func currentSyncAnchor(completionHandler: @escaping (NSFileProviderSyncAnchor?) -> Void) {
         detached { [owner] in
             let cursor = (try? owner.call("cursor"))?["cursor"] as? String
+            log.info("working set: anchor \(cursor ?? "none", privacy: .public)")
             completionHandler(cursor.flatMap(Cursors.anchor))
         }
     }

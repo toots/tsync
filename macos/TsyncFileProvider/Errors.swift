@@ -1,5 +1,8 @@
 import FileProvider
 import Foundation
+import os
+
+let log = Logger(subsystem: "org.feverdreamtv.tsync", category: "fileprovider")
 
 /// §6.10: an owner failure as an error of the Cocoa or File Provider domain,
 /// the only domains the system accepts.
@@ -12,7 +15,11 @@ enum Errors {
         _ error: Error, _ kind: Kind, missing: NSFileProviderItemIdentifier? = nil,
         occupant: NSFileProviderItem? = nil
     ) -> NSError {
-        guard let failure = error as? OwnerFailure else {
+        let failure = error as? OwnerFailure
+        log.error(
+            "\(kind == .mutation ? "mutation" : "read", privacy: .public) failed: \(failure?.code ?? "-", privacy: .public) \(failure?.message ?? error.localizedDescription, privacy: .public)"
+        )
+        guard let failure = failure else {
             if (error as NSError).domain == NSFileProviderErrorDomain
                 || (error as NSError).domain == NSCocoaErrorDomain
             {
