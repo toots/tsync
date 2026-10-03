@@ -139,7 +139,7 @@ let () =
           (fun _ ->
             match Ipc.Client.connect ~timeout:0.2 full with
               | c -> Some c
-              | exception Fail.E _ -> None)
+              | exception (Fail.E _ | Ipc.Not_serving _) -> None)
           (List.init 8 Fun.id)
       in
       let t0 = Rt.now () in
@@ -149,10 +149,14 @@ let () =
               Ipc.Client.close c;
               "connected"
           | exception Fail.E f -> Fail.kind_name f.kind
+          | exception Ipc.Not_serving _ -> "not serving"
           | exception e -> Printexc.to_string e
       in
-      p "  once its backlog is full: %s within 1s: %b" outcome
-        (Rt.now () -. t0 < 1.);
+      (* macOS refuses a full backlog as if nothing listened (pitfall B-8.16);
+         what holds everywhere is that the connect gives up at once. *)
+      if Sys.file_exists "/proc/self" then assert (outcome = "deadline");
+      p "  once its backlog is full: the connect gives up within 1s: %b"
+        (outcome <> "connected" && Rt.now () -. t0 < 1.);
       List.iter Ipc.Client.close held;
       Unix.close l;
       p "== close";

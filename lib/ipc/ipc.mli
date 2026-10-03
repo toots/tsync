@@ -73,7 +73,10 @@ module Client : sig
   type t
 
   (** Connects within [timeout] (default 5 s); DEADLINE when the server's
-      backlog stays full, {!Not_serving} when nothing listens. *)
+      backlog stays full, {!Not_serving} when nothing listens. macOS refuses a
+      connection to a full backlog as if nothing listened, so it gives
+      {!Not_serving} there too: absence is decided by the ownership lock (07
+      §2.5). *)
   val connect : ?timeout:float -> string -> t
 
   (** Sends one request and reads its reply within [timeout] (default

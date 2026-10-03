@@ -373,16 +373,38 @@ let one_shot ~what config dom f =
       in
       f handler)
 
+let alive pid =
+  match Unix.kill pid 0 with
+    | () -> true
+    | exception Unix.Unix_error (Unix.EPERM, _, _) -> true
+    | exception Unix.Unix_error _ -> false
+
+(* 07 §2.5: a refused connection is not an absent owner, since a full backlog
+   gives the same error on macOS. While the recorded holder lives, the request
+   is retried until its deadline; then the one-shot's lock acquisition decides,
+   taking ownership if the lock is free and refusing busy if not. *)
 let request ?(bulk = false) ?on_line ~what config (dom : Config.domain) req =
-  match
+  let deadline = Rt.now () +. Ipc.request_deadline in
+  let call () =
     Protocol.call ~bulk ?on_line
       ~domain:(Domain_name.to_string dom.name)
       (Paths.owner_socket dom.name)
       req
-  with
-    | reply -> reply
-    | exception Ipc.Not_serving _ ->
-        one_shot ~what config dom (fun h -> Handler.call h req)
+  in
+  let rec attempt () =
+    match call () with
+      | reply -> reply
+      | exception Ipc.Not_serving _
+        when Rt.now () < deadline
+             && Option.fold ~none:false
+                  ~some:(fun h -> alive h.pid)
+                  (holder dom.name) ->
+          Rt.sleep 0.1;
+          attempt ()
+      | exception Ipc.Not_serving _ ->
+          one_shot ~what config dom (fun h -> Handler.call h req)
+  in
+  attempt ()
 
 type host =
   mount:string option ->
