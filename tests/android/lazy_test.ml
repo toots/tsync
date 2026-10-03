@@ -48,7 +48,7 @@ let gated (s : Store.t) : Store.t =
     watch = (fun k t -> gate (fun () -> s.watch k t));
     get_many = None;
     list_many = None;
-    fast_read = false;
+    fast_read = Fun.const false;
     local_path = None;
     health = Health.always_up;
   }
