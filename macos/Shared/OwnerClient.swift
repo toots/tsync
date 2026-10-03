@@ -248,7 +248,9 @@ final class Subscription {
     private let fd: Int32
     private var buffer = Data()
 
-    /// Connects, subscribes and reads the acknowledgement.
+    /// Connects, subscribes and reads the acknowledgement. On failure the
+    /// descriptor is closed by `deinit` alone: a throwing initializer still
+    /// runs it, and a second close could hit a reused descriptor.
     init(request: [String: Any], socketPath: String = Tsync.socketPath) throws {
         fd = socket(AF_UNIX, SOCK_STREAM, 0)
         guard fd >= 0 else { throw OwnerFailure.transport("socket") }
@@ -258,7 +260,6 @@ final class Subscription {
         address.sun_family = sa_family_t(AF_UNIX)
         let bytes = Array(socketPath.utf8)
         guard bytes.count < MemoryLayout.size(ofValue: address.sun_path) else {
-            Darwin.close(fd)
             throw OwnerFailure.transport("the socket path is too long")
         }
         withUnsafeMutableBytes(of: &address.sun_path) { $0.copyBytes(from: bytes + [0]) }
@@ -266,14 +267,10 @@ final class Subscription {
         let status = withUnsafePointer(to: &address) {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { Darwin.connect(fd, $0, size) }
         }
-        guard status == 0 else {
-            Darwin.close(fd)
-            throw OwnerFailure.transport("no owner")
-        }
+        guard status == 0 else { throw OwnerFailure.noOwner("no owner") }
         let line = try JSONSerialization.data(withJSONObject: request) + Data([0x0a])
         let written = line.withUnsafeBytes { Darwin.write(fd, $0.baseAddress!, line.count) }
         guard written == line.count, let ack = next(), ack["ok"] as? Bool == true else {
-            Darwin.close(fd)
             throw OwnerFailure.transport("the subscription was not acknowledged")
         }
     }
@@ -304,5 +301,7 @@ final class Subscription {
         }
     }
 
-    deinit { Darwin.close(fd) }
+    deinit {
+        if fd >= 0 { Darwin.close(fd) }
+    }
 }
