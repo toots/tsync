@@ -63,6 +63,7 @@ requires rewriting a valid existing file into another form.
   manifests/<escaped dir>/.tsync-fid-<hex16>   file-id marker of a file entry (§2.3)
   scratch/<escaped path>                       frontend scratch; wiped by resync ([07](07-daemon-cli.md))
   file-ids-complete                            file-id record: a backfill pass completed (§4.10)
+  file-ids-index                               file-id index snapshot, only between a clean stop and the next start (§2.3)
   scratch/.tsync-walk                          kept walk of a whole-domain listing ([08 §2.5](08-frontends.md#25-cursors-and-anchors))
   chunks/<shard>/<group key>                   whole cache body
   chunks/<shard>/<group key>.partial           partial cache body
@@ -142,6 +143,16 @@ requires rewriting a valid existing file into another form.
   The marker is written, durably, with the entry that first occupies a path (create, peer put,
   resync, pull). An entry found without a valid marker gets a fresh one at owner start (§4.10);
   nothing on a read path writes a marker.
+- **File-id index.** The owner resolves a file id to a path through an index in memory, kept with
+  every marker it writes, moves or removes. The markers are its truth: a lookup answers a path only
+  when that path's marker holds the id. A clean stop writes the index to `file-ids-index`, one
+  record per file: the 32-digit id, a space, the path, a NUL byte. The next start reads it and
+  removes it durably before any marker can change; it cannot be stale, because only an owner writes
+  markers, and a marker change after the snapshot is written removes it. Without the snapshot (a crash, a first start) the start builds the index from the
+  markers in the background, and marker changes made meanwhile are applied when it completes.
+  Building it reads every marker, which takes minutes on a large domain, so it never runs inside a
+  request: a request resolving a file id waits for the index before it takes the metadata
+  serialisation ([08 §2.2](08-frontends.md#22-item-references)), within its deadline.
 - Mirror entries are replaced only by rename, never modified in place, so a reader SHOULD read
   them by mapping them read-only.
 - Mirror files are projections: they are written by *replace*, and made durable when a later
@@ -733,7 +744,8 @@ checkout to a consistent state:
    size)]` for it (the crash fell between a write and its close).
 7. Anchor the cache counts ([read-path-and-cache](algorithms/read-path-and-cache.md) §4.9); this
    MAY run lazily.
-8. Give a file-id marker (§2.3) to every mirror file entry without a valid one, durably. On a lazy
+8. Load the file-id index (§2.3) from its snapshot and remove the snapshot, else start building
+   it in the background; then give a file-id marker to every mirror file entry without a valid one, durably. On a lazy
    tree this covers the entries present. A crash midway leaves entries without a marker, which the
    next start completes; no id was reported for them yet. Once a pass completes, the
    **file-id record** says so durably and later starts skip this step: every write path gives an id
