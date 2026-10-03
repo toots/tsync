@@ -19,6 +19,7 @@ type slot = {
   member : Composite.member;
   m : Mutex.t;
   mutable probe : (R.reach * float) option;
+  mutable corrupted : R.corrupted;
   mutable listing : (R.journal * float) option;
   mutable refreshing : bool;
   mutable listing_refreshing : bool;
@@ -48,6 +49,7 @@ let create (domain : Domain.t) engine ~frontend =
             member;
             m = Mutex.create ();
             probe = None;
+            corrupted = Not_checked "no answer yet";
             listing = None;
             refreshing = false;
             listing_refreshing = false;
@@ -77,6 +79,25 @@ let behind t entries =
            | None -> true)
        entries)
 
+let corrupted_sample = 1000
+
+(* 07 §5.5: a store that verifies nothing and holds no marker was looked at by
+   nobody, which is not clean. *)
+let corrupted t (store : Store.t) : R.corrupted =
+  let d = t.domain.name in
+  match
+    Rt.with_timeout ~detach:true probe_wait (fun () ->
+        List.length
+          (store.list_prefix ~max_keys:(corrupted_sample + 1) (Key.corrupted d)))
+  with
+    | 0 when not (store.capabilities (Key.domain_prefix d)).verified ->
+        Not_checked "the store verifies no write and no verification has run"
+    | n ->
+        Checked
+          { chunks = min n corrupted_sample; truncated = n > corrupted_sample }
+    | exception e when not (Rt.is_cancelled e) ->
+        Not_checked (Fail.classify e).reason
+
 let refresh_probe t s =
   let store = s.member.store in
   let t0 = Rt.now () in
@@ -88,8 +109,14 @@ let refresh_probe t s =
       | () -> R.Reachable { latency_ms = (Rt.now () -. t0) *. 1000. }
       | exception e -> Unreachable (Fail.classify e).reason
   in
+  let corrupted =
+    match reach with
+      | R.Reachable _ -> corrupted t store
+      | Unreachable reason -> Not_checked reason
+  in
   Mutex.protect s.m (fun () ->
       s.probe <- Some (reach, Rt.now ());
+      s.corrupted <- corrupted;
       s.refreshing <- false)
 
 (* Pitfall C-7.10: the claim is given back on every path. *)
@@ -250,7 +277,7 @@ let backend t s : R.backend =
         (Config.masked_fields ~specs b.fields);
     reach;
     journal;
-    corrupted = Not_checked "no verification has run";
+    corrupted = Mutex.protect s.m (fun () -> s.corrupted);
     health = Health.state store.health;
     disk = disk store;
     copies = copies t s;
