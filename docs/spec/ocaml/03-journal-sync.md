@@ -152,3 +152,6 @@ the op acts, not at the peer's path: read at the peer's path, a delete under a f
 renamed finds no id (the feed drops it as unnamed, and the replica keeps the file), or finds the id
 of an unrelated file now at that path (the replica drops a file that still exists). The arrival
 code that does the translation is the one place that may read it; it reports the id it acted on.
+And only what it acted on: a delete names the file it removed, read before removing it, and nothing
+when the arrival decision kept the file (a peer's delete of a file this client moved since): naming
+the kept file would make the replica drop it.
