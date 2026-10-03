@@ -401,6 +401,9 @@ convenient seams tends to miss:
   ([gc.md](algorithms/gc.md));
 - automatic cache-cap triggering, and retry backoff with jitter on the fake clock;
 - stalling (Outage) links in failover and write-guard checks, not only refusing ones.
+- scheduling under a stalled disk: with every slot for may-block work held, timeouts, stop, the
+  liveness answer and non-blocking socket exchanges still proceed, and a may-block task does not
+  ([01 §6.5](01-core.md#65-scheduling));
 - ownership: one owner per domain on a machine, delegation of one-shot commands to a running owner,
   refusal with `busy` when the holder cannot take the request, takeover after the owner dies (§7.5,
   [07 §2](07-daemon-cli.md#2-process-model));

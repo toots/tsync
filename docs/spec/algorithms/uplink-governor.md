@@ -222,6 +222,8 @@ enter(p):     phase = p; since = now; settled = false
 
 ### 4.5 Governor ownership and the lease protocol
 
+Admission, renewal and its answer, and the law's computation are time-sensitive work in the sense of [01 §6.5](../01-core.md#65-scheduling); probes and saved state are not.
+
 One process per machine is the **governor owner**. It runs each link's law, splits each law's rate among the processes using the link, and answers renewals.
 
 - The machine-level supervisor, when there is one, is the governor owner ([07-daemon-cli.md](../07-daemon-cli.md)). Otherwise the owner is whichever process holds the machine-wide governor lock, an exclusive local lock that the kernel drops when its holder dies.

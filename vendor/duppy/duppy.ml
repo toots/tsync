@@ -463,10 +463,10 @@ type 'a work =
 
     Immediate tasks go as one batch: they do not block, so running them in
     sequence on the calling domain costs less than a hand-off each. Direct and
-    blocking tasks go one at a time, so they spread over the pool: batching them
-    would run several long tasks in sequence on one domain. A direct task holds
-    no blocking slot, since it runs on the domain rather than on one of its
-    auxiliary threads. *)
+    blocking tasks go one at a time, so they spread over the pool rather than
+    queue behind one another on one domain. A direct task holds no blocking
+    slot, since it runs on the domain rather than on one of its auxiliary
+    threads, so a worker out of slots still takes it. *)
 let take_work s w =
   let mine, others =
     List.partition
