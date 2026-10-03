@@ -34,6 +34,10 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, NSFileP
         let done = Once { (result: (NSFileProviderItem?, Error?)) in
             completionHandler(result.0, result.1)
         }
+        if identifier == .trashContainer {
+            done((nil, NSError(domain: NSCocoaErrorDomain, code: CocoaError.featureUnsupported.rawValue)))
+            return Progress(totalUnitCount: 1)
+        }
         return task(onCancel: { done((nil, Errors.map(OwnerFailure.cancelled, .read))) }) {
             [owner] c, _ in
             do {
