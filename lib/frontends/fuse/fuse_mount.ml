@@ -123,6 +123,8 @@ let readlink t path =
         | `Symlink -> E.readlink (rel path)
         | _ -> errno EINVAL)
 
+let readdir_window = 4096
+
 let opendir t _ _ =
   { Fuse.default_file_info_update with fi_update_fh = Some (fresh_fh t) }
 
@@ -144,7 +146,10 @@ let readdir t path offset (fi : Fuse.file_info) _ =
           locked t (fun () -> Hashtbl.replace t.listings fi.fi_fh names);
           names
   in
-  List.filteri (fun i _ -> Int64.of_int i >= offset) names
+  (* A call's buffer holds far fewer entries than this: the rest of a large
+     folder is not rebuilt at every offset. *)
+  let first = Int64.to_int offset in
+  List.filteri (fun i _ -> i >= first && i < first + readdir_window) names
   |> List.mapi (fun i name ->
       {
         Fuse.entry_name = name;
