@@ -53,10 +53,16 @@ The app has to do four things with one process the platform may kill at any mome
 | Home | the app's private files directory |
 | Trust bundle | `<home>/ca-bundle.pem` (§4) |
 | Staging and transfer root | `<home>/staging/`, files `<epochMillis>-<uuid>` |
-| Ingest intents | `<home>/intents/`, one record per staging file (§8.2) |
-| Camera-backup settings and records | app-private preferences and database (§11.2) |
+| Ingest intents | `<home>/intents/<staging name>.json` (§8.2) |
+| Camera-backup settings | the app's preferences file `camera-backup` (§11.2) |
+| Camera-backup records | the app's SQLite database `camera-backup.db` (§11.2) |
 | Notification channels | "Camera backup" (low), "Open files" (low), "Problems" (default) |
 
+- These locations and the formats of §8.2 and §11.2 are persistent formats
+  ([README §7](../README.md#7-persistent-formats)): an implementation MUST use what an earlier one
+  left on the phone as it is, with no conversion step. A phone that ran the app `main` shipped
+  holds a config, staging files, camera-backup settings and a version-2 record database, and no
+  intents.
 - A staging name carries its creation time, because commit rewrites the file's mtime.
 - Every notification about a problem has its own identity (the item it concerns), so one never
   replaces another; tapping it opens the Activity screen (§10.5).
@@ -226,8 +232,20 @@ A commit succeeds once the core has adopted the body, whether or not it is uploa
 
 A write the platform considers finished (a picker's clean close, a share the user confirmed, a file
 picked for upload) is acknowledged before the owner can commit it. Each staging file therefore has a
-durable intent record:
-`{staging name, target (parent reference and name, or file reference), exclusive, base?, modified?, state: open | ready}`.
+durable intent record, one JSON object in `<home>/intents/<staging name>.json`:
+
+```json
+{"target":{"parentRef":"d:9f3a","name":"report.pdf"}, "exclusive":true,
+ "base":"1294bbe85c2f380b", "modified":1755347464000, "state":"ready"}
+```
+
+- `target`: `{"parentRef","name"}` for a file to be made, or `{"ref"}` for an existing file.
+- `exclusive`: whether the commit must not replace an existing item. `base` (optional): the
+  `contentId` the edit started from. `modified` (optional): epoch milliseconds.
+- `state`: `open` or `ready`. Readers ignore unknown fields and treat an unknown state as `open`.
+- The record is written and replaced atomically and durably (temporary file, fsync, rename, fsync
+  of the directory). A record that does not decode is left in place with its staging file and
+  reported as a problem; it is never swept.
 
 - The intent is written before the staging file is handed to anyone. It becomes `ready`, with the
   staging file fsynced, before the platform or the user is told the operation succeeded.
@@ -284,12 +302,16 @@ implementation's.
 - **Accessible.** Every control has a text label or content description, touch targets meet the
   platform minimum, text scales with the system font size, and state is never carried by colour
   alone.
+- **Wording.** Text quoted in this spec is the recommended English wording. The distinctions it
+  draws, and what each message must tell the user, are normative; the words are not.
 - **Localisable.** Every user-visible string is a resource; sizes, dates and counts are formatted by
   the platform for the user's locale.
 
 ### 10.2 Structure
 
-Until a config exists the app shows only Setup (§10.7). After that, three top-level destinations
+Until a config exists the app shows only Setup (§10.7). A config the core refuses at boot (one
+written by an earlier version, for instance with a cleartext URL) also shows Setup, with its fields
+filled from that config and the core's message; nothing is deleted. After that, three top-level destinations
 reachable from every screen: **Files** (the start destination), **Activity** and **Settings**.
 Process death and configuration changes restore the destination and, in Files, the folder trail.
 
@@ -423,6 +445,36 @@ full discovery that finds one records it:
   time, or if there is no record at all and the mark is 0 (a backfill that never completed): it was
   captured while backup was running;
 - `BASELINE` otherwise: it existed before backup started.
+
+**Storage.** The records, marks and folder cache are one SQLite database, schema version 3:
+
+```sql
+CREATE TABLE media (
+  media_id INTEGER PRIMARY KEY,
+  volume TEXT NOT NULL,
+  relative_path TEXT NOT NULL,        -- the target
+  size_bytes INTEGER NOT NULL,
+  modified_seconds INTEGER NOT NULL,  -- epoch seconds
+  state TEXT NOT NULL,                -- 'PENDING' | 'DONE' | 'FAILED' | 'BASELINE'
+  attempts INTEGER NOT NULL DEFAULT 0,
+  last_error TEXT,
+  updated_at INTEGER NOT NULL,        -- epoch milliseconds
+  etag TEXT,                          -- since version 3
+  next_attempt_at INTEGER);           -- since version 3, epoch milliseconds
+CREATE UNIQUE INDEX media_path ON media(relative_path);
+CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE dirs (path TEXT PRIMARY KEY, ref TEXT NOT NULL);   -- the folder cache of §8.3
+```
+
+- `meta` keys, values in decimal unless said: `watermark.<volume>.generation` and
+  `watermark.<volume>.dateAdded` (the discovery mark; epoch seconds for the latter),
+  `volume.<volume>.version` (the version string), `fullDiscovery.<volume>` (epoch milliseconds).
+- A version-2 database lacks the two last columns of `media` and the two last kinds of `meta` key.
+  Opening one adds the columns and rewrites no row; its rows and marks then read as the table above
+  says records and marks without their optional parts read.
+- The settings are the preferences `enabled` (boolean, default false), `unmeteredOnly` (boolean,
+  default true), `whenBatteryOk` (boolean, default true) and `lastOutcome` (string, absent until a
+  pass ran). Readers ignore other keys.
 
 Opening the record store never rewrites a record; a record is rewritten only when its item's state
 changes. The folder cache of §8.3 MAY be kept beside the records; it is disposable.
@@ -589,6 +641,9 @@ checked.
 - A commit adopts the staging file (it is gone afterwards) and keeps its mtime.
 - Every surfaced failure carries its code; a failed listing is never taken as an empty folder.
 - A config the core refuses is never left as the app's config.
+- Started on the state `main`'s app left (its config, staging files, settings and version-2 record
+  database), the app converts nothing, uploads no photo again and loses no setting; a config it can
+  no longer accept leads to Setup with the reason.
 
 **Provider**
 - `isChildDocument` is true for every descendant of a tree root and false for anything else.
