@@ -319,7 +319,7 @@ item or an error. A creation or modification never completes with neither.
 
 | Callback | Behaviour |
 |---|---|
-| item for identifier | `stat(ref)`, the root included. It is the system's authority on existence: `noSuchItem` deletes the item from disk, so it is returned for the owner's `not_found` and for nothing else. |
+| item for identifier | `stat(ref)`, the root included. It is the system's authority on existence: `noSuchItem` deletes the item from disk, so it is returned for the owner's `not_found` and for nothing else. The trash container is answered feature-unsupported without asking the owner, as its enumerator is. |
 | enumerator for container | Working set → the working-set enumerator; trash → feature-unsupported; any other container → a directory enumerator. Creating one does no I/O. |
 | directory: enumerate items | `list_dir(ref, after: page, limit)`. No change enumeration and no anchor: a folder enumerator is used once, at materialisation. |
 | working set: enumerate items | `list_all` pages over the whole domain; items carry their real parent. |
