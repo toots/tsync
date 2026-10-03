@@ -183,8 +183,8 @@ Requests are `{"action": <verb>, "domain": <display name>, …}`, routed as
   is not UTF-8 costs that item, not the reply.
 - **Deadlines.** Every request obeys the client deadlines of
   [failure-model.md §8.2](../algorithms/failure-model.md#82-requests-between-processes). The
-  extension treats `ensure_cached`, `fetch_range` and `write` as bulk and bounds them with the
-  liveness probe (`ping`). An expired deadline closes the socket and is reported like a transport
+  extension treats `ensure_cached`, `fetch_range`, `write` and a first `list_all` page as bulk and
+  bounds them with the liveness probe (`ping`). An expired deadline closes the socket and is reported like a transport
   failure.
 - **Cancellation**: cancelling a request shuts the socket down in both directions under a lock and
   returns at once with a cancellation error. A request cancelled before its connection opened never
