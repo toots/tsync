@@ -286,33 +286,13 @@ let frontend_cmds =
         | _ -> None)
     (Frontend.names ())
 
-let process_status args =
-  match
-    Unix.create_process (List.hd args) (Array.of_list args) Unix.stdin
-      Unix.stdout Unix.stderr
-  with
-    | pid -> ( match snd (Unix.waitpid [] pid) with WEXITED n -> n | _ -> 1)
-    | exception Unix.Unix_error _ -> 127
-
-(* 07 §2.7: through the service manager, never by signalling a process found
+(* 07 §2.7: through the service manager, never by signalling processes found
    by name (the macOS service's binary lives in the app bundle). *)
 let restart verbose =
   set_verbose verbose;
-  if Fs.is_macos then (
-    let target =
-      Printf.sprintf "gui/%d/org.feverdreamtv.tsync.daemon" (Unix.getuid ())
-    in
-    if process_status ["/bin/launchctl"; "kickstart"; "-k"; target] <> 0 then
-      fail "the tsync service is not installed";
-    ignore
-      (process_status ["/usr/bin/open"; "-g"; "-b"; "org.feverdreamtv.tsync"]);
-    say "Restarted tsync.";
-    0)
-  else if process_status ["systemctl"; "--user"; "restart"; "tsync"] <> 0 then
-    fail "the tsync service is not installed"
-  else (
-    say "Restarted tsync.";
-    0)
+  if not (Service.restart ()) then fail "the tsync service is not installed";
+  say "Restarted tsync.";
+  0
 
 let restart_cmd =
   cmd "restart" ~doc:"Restart the service through the service manager."
