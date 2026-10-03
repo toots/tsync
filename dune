@@ -1,9 +1,11 @@
-; A plain `dune build` builds the code; tests run under @runtest.
+; A plain `dune build` builds the code and the manual benchmarks, which no
+; test runs; tests run under @runtest.
 
 (rule
  (alias default)
  (deps
   (alias_rec bin/all)
   (alias_rec lib/all)
+  (alias_rec tests/bench/all)
   (alias_rec vendor/all))
  (action (progn)))
