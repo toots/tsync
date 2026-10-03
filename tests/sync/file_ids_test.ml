@@ -209,6 +209,26 @@ let () =
       p "  the first pass: %d\n" (Mirror.backfill_file_ids B.mirror);
       show "B after" b ["q.txt"];
       p "  the next one: %d\n" (Mirror.backfill_file_ids B.mirror);
+      p "== passes started together run one at a time\n";
+      for i = 1 to 20 do
+        write a (Printf.sprintf "many/%02d.txt" i) "x"
+      done;
+      drain a;
+      let before =
+        match Applied.since B.applied None 100_000 with
+          | `Page pg -> List.length pg.entries
+          | `Stale -> 0
+      in
+      Rt.iter_concurrently (fun () -> ignore (B.apply_pass ())) [(); (); (); ()];
+      let keys =
+        match Applied.since B.applied None 100_000 with
+          | `Page pg -> List.map fst pg.entries
+          | `Stale -> []
+      in
+      let unique = List.sort_uniq Entry_key.compare keys in
+      p "  entries noted: %d new, noted twice: %d\n"
+        (List.length keys - before)
+        (List.length keys - List.length unique);
       (* A second mirror over A's directory is a restarted owner. *)
       let restarted () =
         Mirror.create ~cache_root:(Filename.dirname (Mirror.root A.mirror)) d

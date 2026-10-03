@@ -54,6 +54,8 @@
   the first pass: 1
   B after: q.txt=<id9>
   the next one: 0
+== passes started together run one at a time
+  entries noted: 20 new, noted twice: 0
 == a clean stop keeps the index for the next start
   snapshot after the stop: true
   snapshot after the start: false

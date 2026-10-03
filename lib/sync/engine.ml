@@ -254,6 +254,9 @@ module Make (C : Engine_ctx.S) = struct
       ops;
     a
 
+  (* wal-and-journal §4.4: one pass or rebuild at a time, so the deferred
+     list below belongs to the one running. *)
+  let pass_lock = Rt.Fmutex.create ()
   let after_lock : (unit -> unit) list ref = ref []
   let defer f = after_lock := f :: !after_lock
 
@@ -877,7 +880,8 @@ module Make (C : Engine_ctx.S) = struct
                 open_gate ~since:epoch ();
                 !applied_n)
 
-  let apply_pass () = try apply_pass () with Exit -> 0
+  let apply_pass () =
+    Rt.Fmutex.with_lock pass_lock (fun () -> try apply_pass () with Exit -> 0)
 
   let metadata_owed () =
     List.exists (fun (_, (r : Wal.record)) -> Wal.is_metadata r) (owed ()).ops
@@ -885,7 +889,11 @@ module Make (C : Engine_ctx.S) = struct
   (* wal-and-journal §4.8 and 05 §4.7: rewrite the mirror in place from a
      complete walk, report the differences in the applied log, then move the
      mark; nothing is swept after an incomplete walk. *)
-  let rebuild ?(narrate = Narrate.none) ?(parallelism = 32) () =
+  let rec rebuild ?narrate ?parallelism () =
+    Rt.Fmutex.with_lock pass_lock (fun () ->
+        rebuild_locked ?narrate ?parallelism ())
+
+  and rebuild_locked ?(narrate = Narrate.none) ?(parallelism = 32) () =
     if metadata_owed () then
       Fail.raise_ Fail.Unprepared
         "metadata operations are not published yet, and a rebuild would undo \
