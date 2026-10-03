@@ -160,3 +160,18 @@
  (alias runtest)
  (action
   (diff dqueue_raise_test.expected dqueue_raise_test.output)))
+
+(executable
+ (name cache_states_test)
+ (modules cache_states_test)
+ (libraries tsync_core tsync_checkout unix))
+
+(rule
+ (with-stdout-to
+  cache_states_test.output
+  (run ./cache_states_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff cache_states_test.expected cache_states_test.output)))

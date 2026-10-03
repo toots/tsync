@@ -54,7 +54,13 @@ type gstate = {
   mutable generation : int;
   held : (int, int * int) Hashtbl.t;
   mutable from_ranges : int list;
+  mutable users : int;
 }
+
+(* Never repeated, so a state dropped and made again is not taken for the one
+   a fetch planned against. *)
+let generations = Atomic.make 0
+let fresh_generation () = Atomic.fetch_and_add generations 1
 
 type counts = { bytes : int; pinned : int; bodies : int }
 
@@ -97,26 +103,44 @@ let partial_path t gkey = whole_path t gkey ^ ".partial"
 let pin_path t gkey = whole_path t gkey ^ ".pin"
 let is_whole t gkey = Fs.exists (whole_path t gkey)
 
-let state t gkey =
-  Mutex.protect t.m (fun () ->
-      match Hashtbl.find_opt t.states gkey with
-        | Some s -> s
-        | None ->
-            let s =
-              {
-                lock = Rt.Fmutex.create ();
-                generation = 0;
-                held = Hashtbl.create 2;
-                from_ranges = [];
-              }
-            in
-            Hashtbl.replace t.states gkey s;
-            s)
+(* A group's state says what its partial body holds: one with nothing to say
+   is kept only while someone uses it. *)
+let using t gkey f =
+  let s =
+    Mutex.protect t.m (fun () ->
+        let s =
+          match Hashtbl.find_opt t.states gkey with
+            | Some s -> s
+            | None ->
+                let s =
+                  {
+                    lock = Rt.Fmutex.create ();
+                    generation = fresh_generation ();
+                    held = Hashtbl.create 2;
+                    from_ranges = [];
+                    users = 0;
+                  }
+                in
+                Hashtbl.replace t.states gkey s;
+                s
+        in
+        s.users <- s.users + 1;
+        s)
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      Mutex.protect t.m (fun () ->
+          s.users <- s.users - 1;
+          if s.users = 0 && Hashtbl.length s.held = 0 && s.from_ranges = [] then
+            Hashtbl.remove t.states gkey))
+    (fun () -> f s)
+
+let tracked t = Mutex.protect t.m (fun () -> Hashtbl.length t.states)
 
 let forget s =
   Hashtbl.reset s.held;
   s.from_ranges <- [];
-  s.generation <- s.generation + 1
+  s.generation <- fresh_generation ()
 
 (* The work runs detached; a reader waits at most [read_deadline] and the
    work lands for the next reader. *)
@@ -185,7 +209,7 @@ and fetch_group t g =
       Fs.reserve fd g.gsize;
       List.iter (fun x -> write_at fd ~off:x.off (fetch_verified t x)) g.members;
       Fs.fsync fd);
-  let s = state t g.gkey in
+  using t g.gkey @@ fun s ->
   Rt.Fmutex.with_lock s.lock (fun () ->
       Fs.rename tmp (whole_path t g.gkey);
       Fs.unlink_quiet (partial_path t g.gkey);
@@ -255,7 +279,7 @@ let all_held g s =
     g.members
 
 let rec fill t g (x : member) (c, dd) =
-  let s = state t g.gkey in
+  using t g.gkey @@ fun s ->
   let plan =
     Rt.Fmutex.with_lock s.lock (fun () ->
         if is_whole t g.gkey then `Whole
@@ -378,7 +402,7 @@ let remove_bodies t s gkey =
 (* read-path §4.9: the cap takes a body only, and not one pinned since its walk
    listed it. *)
 let drop_body t gkey ~now =
-  let s = state t gkey in
+  using t gkey @@ fun s ->
   if Rt.Fmutex.is_locked s.lock then false
   else
     Rt.Fmutex.with_lock s.lock (fun () ->
@@ -388,7 +412,7 @@ let drop_body t gkey ~now =
           true))
 
 let evict_group t gkey =
-  let s = state t gkey in
+  using t gkey @@ fun s ->
   if Rt.Fmutex.is_locked s.lock then false
   else
     Rt.Fmutex.with_lock s.lock (fun () ->
@@ -444,7 +468,7 @@ let resident t (m : Manifest.t) =
 (* 04 §4.8: the promoted staged body becomes a second name of the same inode. *)
 let adopt_body t gkey source =
   Fs.mkdir_p (shard_dir t gkey);
-  let s = state t gkey in
+  using t gkey @@ fun s ->
   Rt.Fmutex.with_lock s.lock (fun () ->
       Fs.unlink_quiet (partial_path t gkey);
       forget s;
