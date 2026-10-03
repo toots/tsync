@@ -136,3 +136,9 @@ val folder_of_namespace_key : Domain_name.t -> t -> Folder_id.t option
 
 (** A collection's run name: [started * 1000] rounded, 13 digits. *)
 val run_name : float -> string
+
+(** A fresh reserved run name for one bucket-function probe (02 §2.13): [0] and
+    twelve random hex digits, which no collection's run name is. *)
+val probe_run : unit -> string
+
+val is_probe_run : string -> bool

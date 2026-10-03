@@ -2,6 +2,10 @@
 probe: false; confirmed: false; probe request left behind: false
 collect: refused: bucket: a remote copy without a confirmed bucket function would be sent one delete request per chunk (gc --probe)
 
+== overlapping probes, still no function
+two clients probing one bucket: false, false
+a probe during a re-delivery: false
+
 == the function deployed
 probe: true; confirmed: true
 collect: completed, 2 reclaimed

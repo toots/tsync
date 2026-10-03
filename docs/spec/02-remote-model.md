@@ -358,8 +358,8 @@ right into `<domain>/<shard>` with a valid shard.
 - `<run>` is the collection's run name (§2.12); `<shard>` is the last shard of the batch.
 - Body: full chunk keys (`tsync/D/chunks/<sss>/<chunk key>`) joined by `\n`; no trailing newline
   required; empty lines ignored.
-- **Probe**: the reserved run name `0000000000000` with shard `000` and an empty body is the
-  bucket-function probe; its procedure is [backends/object-store-common.md](backends/object-store-common.md)
+- **Probe**: a reserved run name, `0` followed by twelve random hex digits and chosen afresh for
+  each probe, with shard `000` and an empty body is a bucket-function probe; its procedure is [backends/object-store-common.md](backends/object-store-common.md)
   ("The probe"). An empty request deletes nothing.
 - **Reader**: a key counts as a discard job iff, after `tsync/gc-jobs/`, it splits from the right into
   `<domain>/<run>/<shard>` with a valid shard and a non-empty domain and run. A listed key under the
