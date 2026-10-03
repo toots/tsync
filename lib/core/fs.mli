@@ -26,6 +26,11 @@ val kind : string -> [ `Absent | `Dir | `File | `Link | `Other ]
 val openfile : ?perm:int -> string -> Unix.open_flag list -> Unix.file_descr
 val close : Unix.file_descr -> unit
 val with_fd : Unix.file_descr -> (Unix.file_descr -> 'a) -> 'a
+
+(** [f fd], closing [fd] if it raises: for a descriptor handed on when [f]
+    returns, to its caller or to a fiber [f] spawns, and owed back otherwise
+    (spec ocaml README, lesson 8). *)
+val or_close : Unix.file_descr -> (Unix.file_descr -> 'a) -> 'a
 val read_fd_all : Unix.file_descr -> string
 val read_file_opt : string -> string option
 

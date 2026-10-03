@@ -64,6 +64,13 @@ let openfile ?(perm = 0o600) p flags =
 let close fd = try Unix.close fd with _ -> ()
 let with_fd fd f = Fun.protect ~finally:(fun () -> close fd) (fun () -> f fd)
 
+let or_close fd f =
+  match f fd with
+    | v -> v
+    | exception e ->
+        close fd;
+        raise e
+
 let read_fd_all fd =
   let buf = Buffer.create 4096 and chunk = Bytes.create 65536 in
   let rec go () =
