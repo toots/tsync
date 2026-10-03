@@ -10,7 +10,7 @@ to all frontends. Where frontends run and how processes are arranged is
 | `fuse` | [frontends/fuse.md](frontends/fuse.md) | Linux FUSE mount, plus the Linux desktop integration (mount discovery, Dolphin plugin, tray, packaging) |
 | `file_provider` | [frontends/file-provider.md](frontends/file-provider.md) | macOS File Provider: app, sandboxed extension, daemon side |
 | `http-proxy` | [frontends/http-proxy.md](frontends/http-proxy.md) | HTTP(S) store server for other tsync clients, share links, status page; wire in [backends/http-proxy.md](backends/http-proxy.md) |
-| `android` | [frontends/android.md](frontends/android.md) | Android app embedding the core |
+| `android` | [frontends/android.md](frontends/android.md) | The owner embedded in a host process on Android; the app is [frontends/android-app.md](frontends/android-app.md) |
 
 Implementation notes: [ocaml/08-frontends.md](ocaml/08-frontends.md).
 
@@ -209,9 +209,9 @@ hooks {
 
 | hook | fuse | file_provider | android |
 |---|---|---|---|
-| changed | invalidate the kernel's entries for each key | debounced `changed` event | none (the UI re-queries) |
+| changed | invalidate the kernel's entries for each key | debounced `changed` event | `changed` notice to the host |
 | reannounce | none | debounced `changed` event | none |
-| on_upload_done | none | publish `changed` | none |
+| on_upload_done | none | publish `changed` | `changed` notice to the host |
 | on_stop | request the owner's stop | request the owner's stop | none |
 
 ### 3.3 Actions
@@ -262,6 +262,9 @@ watched with the liveness probe ([07 §4.3](07-daemon-cli.md#43-deadlines-bulk-a
 | `subscribe` | `domain?` | `{}`, then the connection is an event stream (§3.8) | |
 
 - `status` is cheap: no store access, no walk (menus poll it).
+- On a pulled tree `list_dir` also takes `pull` and answers `pulledAt` and `outdated`, and the
+  change-feed actions are refused
+  ([android.md §6](frontends/android.md#6-the-handler-on-a-pulled-tree)).
 - `uploading` lists the uploads running now; `pendingBytes` is the whole-file bytes still owed.
   `downloading` lists every transfer of a file's bytes from the store running now (a fetch, a range,
   a restore), `bytes` of `size` done since it started `seconds` ago at `rate` bytes per second;
@@ -432,11 +435,11 @@ publishes, and when, is in its frontend spec. Every owner publishes:
 |---|---|---|
 | Owner | the service process owns every domain ([07 §2.4](07-daemon-cli.md#24-which-process-owns-which-domain)) | the app process |
 | Transport | one socket for all domains, routed by `domain`; adds `menu`, `menu_stats` | in-process call with the same JSON; plus a handle API for ranged reads (open → handle, size, read, close), one read-ahead state per handle |
-| Hooks | `changed` events to the subscribed app (only a process holding a File Provider manager signals the system) | none but the defaults |
+| Hooks | `changed` events to the subscribed app (only a process holding a File Provider manager signals the system) | notices to the host in place of events ([android.md §4.2](frontends/android.md#42-notices)) |
 | Change feed | `changes_since` plus events | none: pulls ([android.md §3.2](frontends/android.md#32-freshness-without-a-journal-poller)) |
 | Writes | `write` with a staging file adopted by rename | `write` with `await`; no ranged write and no close (the process may die at any time) |
 
-Details: [file-provider.md](frontends/file-provider.md), [android.md](frontends/android.md).
+Details: [file-provider.md](frontends/file-provider.md), [android.md](frontends/android.md), [android-app.md](frontends/android-app.md).
 
 ---
 
