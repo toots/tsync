@@ -703,8 +703,9 @@ module Make (C : Engine_ctx.S) = struct
                   | Op.Rename { is_dir = false; src; dst; _ } ->
                       src = path || dst = path
                   | Op.Mkdir { path = p; _ } -> List.mem p ancestors
-                  | Op.Rename { is_dir = true; dst; _ } ->
-                      List.mem dst ancestors
+                  | Op.Rename { is_dir = true; src; dst; _ } ->
+                      List.mem dst ancestors || src = path
+                  | Op.Rmdir { path = p; _ } -> p = path
                   | _ -> false)
                 r.ops
           | _ -> false)
