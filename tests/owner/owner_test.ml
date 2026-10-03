@@ -4,11 +4,9 @@ open Tsync_owner
 
 let p fmt = Printf.printf (fmt ^^ "\n%!")
 
-let root =
-  Filename.concat
-    (Filename.get_temp_dir_name ())
-    (Printf.sprintf "tsync-owner-%d" (Unix.getpid ()))
-
+(* Short: on macOS the owner's socket lives under the home directory, and a
+   Unix socket path holds about 100 bytes. *)
+let root = Printf.sprintf "/tmp/tsync-owner-%d" (Unix.getpid ())
 let home = Filename.concat root "home"
 
 let () =

@@ -153,4 +153,13 @@ let () =
             Filename.concat root (Key.to_string (Key.chunk_from d live))
           in
           Fs.write_file_for_test f "live"));
-  Fs.rm_rf root
+  (* A store's deferred generation settle (Composite.settle_later) may still
+     take a case's run lock, recreating its lock file while this removes it.
+     ponytail: retried; a stop for the deferred settle would end the race. *)
+  let rec remove n =
+    try Fs.rm_rf root
+    with _ when n > 0 ->
+      Unix.sleepf 0.2;
+      remove (n - 1)
+  in
+  remove 10

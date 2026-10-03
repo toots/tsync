@@ -46,12 +46,15 @@ let () =
         | Link { rel; target; size; _ } ->
             p "  link   %s -> %s (%d)\n" rel target size)
       plan.entries;
+    (* Unreadable folders are named by their resolved path, and /tmp is a
+       symbolic link on macOS. *)
+    let real = Unix.realpath src in
     List.iter
       (fun d ->
         p "  unreadable %s\n"
           (String.sub d
-             (String.length src + 1)
-             (String.length d - String.length src - 1)))
+             (String.length real + 1)
+             (String.length d - String.length real - 1)))
       plan.unreadable
   in
   show "everything, links kept" `Keep;

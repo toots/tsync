@@ -77,14 +77,29 @@
  (libraries tsync_core unix))
 
 (rule
- (with-stdout-to
-  mapped_pages_test.output
-  (run ./mapped_pages_test.exe)))
+ (enabled_if
+  (= %{system} linux))
+ (action
+  (with-stdout-to
+   mapped_pages_test.output
+   (run ./mapped_pages_test.exe))))
 
 (rule
  (alias runtest)
+ (enabled_if
+  (= %{system} linux))
  (action
   (diff mapped_pages_test.expected mapped_pages_test.output)))
+
+; 09 §10.1: reported, not silently skipped, where it cannot run.
+
+(rule
+ (alias runtest)
+ (enabled_if
+  (not
+   (= %{system} linux)))
+ (action
+  (echo "mapped_pages_test: not run, it reads /proc\n")))
 
 (executable
  (name rt_class_test)
