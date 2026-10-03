@@ -297,7 +297,9 @@ enforce_cap():            # after every upload, and every HOUSEKEEPING_INTERVAL
   if CAP set and bytes − pinned > CAP:
     candidates := bodies without a live pin, by mtime ascending (coldest first)
     for each, while bytes − pinned > CAP:
-      if body_lock(g) is free: take it; remove the body; forget held(g); generation(g)++
+      if body_lock(g) is free: take it
+        if g has a live pin now: skip it       # pinned after the walk listed it
+        remove the body (never a pin); forget held(g); generation(g)++
 ```
 
 - Bytes are counted by allocated size where the filesystem reports it, else by apparent size.
