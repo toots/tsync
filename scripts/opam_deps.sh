@@ -15,3 +15,9 @@ opam pin -ny .
 opam update
 opam upgrade -y
 opam install --deps-only -y "$@"
+
+# The gate's formatting check needs the formatter at the version the
+# repository pins.
+if [ "${TSYNC_FORMATTER:-}" = 1 ]; then
+  opam install -y "ocamlformat.$(sed -n 's/^version=//p' .ocamlformat)"
+fi

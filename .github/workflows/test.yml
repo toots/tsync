@@ -35,9 +35,11 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: _opam
-          key: opam-test-linux-${{ hashFiles('*.opam', 'scripts/opam_deps.sh') }}
+          key: opam-test-linux-${{ hashFiles('*.opam', 'scripts/opam_deps.sh', '.ocamlformat') }}
 
       - name: OCaml libraries
+        env:
+          TSYNC_FORMATTER: 1
         run: ./scripts/opam_deps.sh tsync tsync-tls tsync-ssl tsync-fuse
 
       - name: Save the opam switch
@@ -45,10 +47,13 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: _opam
-          key: opam-test-linux-${{ hashFiles('*.opam', 'scripts/opam_deps.sh') }}
+          key: opam-test-linux-${{ hashFiles('*.opam', 'scripts/opam_deps.sh', '.ocamlformat') }}
 
       - name: Build
         run: opam exec -- dune build
+
+      - name: Formatting
+        run: opam exec -- dune build @fmt
 
       # 10 §4.3: an optional library whose dependency is missing is skipped
       # quietly.

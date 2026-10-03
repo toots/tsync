@@ -95,7 +95,7 @@ jobs:
               apt-get install -y --no-install-recommends curl ca-certificates
               sh /check/setup.sh
               apt-get install -y tsync
-              command -v tsync'
+              tsync build-info'
           done
           for d in check/rpm/*/; do
             docker run --rm --network host -v "$PWD/check:/check:ro" \
@@ -104,7 +104,7 @@ jobs:
               command -v curl || dnf install -y curl
               sh /check/setup.sh
               dnf install -y tsync
-              command -v tsync'
+              tsync build-info'
           done
 
       - name: Build the site
