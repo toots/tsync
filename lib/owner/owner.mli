@@ -27,8 +27,8 @@ val release : lock -> unit
 (** The record in a domain's lock file; advisory, the lock may be free. *)
 val holder : Domain_name.t -> holder option
 
-(** Whether the domain's recorded holder lives and names a socket (07 §2.5):
-    the signal that an owner serves it, which a refused connection is not. *)
+(** Whether the domain's recorded holder lives and names a socket (07 §2.5): the
+    signal that an owner serves it, which a refused connection is not. *)
 val served : Domain_name.t -> bool
 
 (** Runs a call to the socket serving these domains, retrying
@@ -75,6 +75,16 @@ val one_shot :
   Tsync_config.Config.t ->
   Tsync_config.Config.domain ->
   (Handler.t -> 'a) ->
+  'a
+
+(** A request to the domain's running owner, retrying a refused connection like
+    {!request} but never taking ownership: for what only a running owner can
+    answer, such as a job's cancel. *)
+val ask :
+  ?bulk:bool ->
+  ?on_line:(Protocol.line -> unit) ->
+  Tsync_config.Config.domain ->
+  'a Protocol.request ->
   'a
 
 (** An owner-class request (07 §2.5): sent to the domain's owner, else answered

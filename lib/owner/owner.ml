@@ -400,16 +400,17 @@ let retry_refused names call =
   in
   attempt ()
 
+let ask ?(bulk = false) ?on_line (dom : Config.domain) req =
+  retry_refused [dom.name] (fun () ->
+      Protocol.call ~bulk ?on_line
+        ~domain:(Domain_name.to_string dom.name)
+        (Paths.owner_socket dom.name)
+        req)
+
 (* Past the retry, the one-shot's lock acquisition decides: it takes ownership
    if the lock is free and refuses busy if not. *)
-let request ?(bulk = false) ?on_line ~what config (dom : Config.domain) req =
-  match
-    retry_refused [dom.name] (fun () ->
-        Protocol.call ~bulk ?on_line
-          ~domain:(Domain_name.to_string dom.name)
-          (Paths.owner_socket dom.name)
-          req)
-  with
+let request ?bulk ?on_line ~what config (dom : Config.domain) req =
+  match ask ?bulk ?on_line dom req with
     | reply -> reply
     | exception Ipc.Not_serving _ ->
         one_shot ~what config dom (fun h -> Handler.call h req)
