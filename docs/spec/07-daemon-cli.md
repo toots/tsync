@@ -631,6 +631,11 @@ parallelism (`reading_at_most`).
    and the store-server socket of this configuration, concurrently, and wait for each the same way.
    - At least one stopped: print `Stopped <N> process(es).` and exit 0.
    - None was running: print `tsync is not running.` and exit 0.
+
+   An owner socket is absent only when no domain it serves has a live holder naming a socket
+   (§2.5): a refusal while one does is retried until the request's deadline, then reported as
+   `tsync: <socket> refused connections for <N>s while its owner runs`, exit 1. Likewise an owner
+   is gone once its socket refuses and its holder no longer lives, not at the first refusal.
 3. A socket that accepts but does not reply within the client deadline: print
    `tsync: <socket> did not answer within <N>s` and exit 1.
 
