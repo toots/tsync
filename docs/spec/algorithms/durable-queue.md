@@ -433,6 +433,12 @@ one rule, so that a manifest on the store is never left unannounced:
 3. Install each manifest in the mirror if the mirror lacks that path, durably.
 4. Discharge: publish the entry.
 
+A batch announces only what it did. Before its record is handed to the queue that discharges it,
+the record is rewritten to the ops of the items that ran; an item the batch did not reach (a cancel,
+the batch's age limit) goes to the next batch, and an item whose step failed is reported failed.
+Neither is announced by this record, and a batch none of whose items ran announces nothing. Only a
+crash before that rewrite leaves ops of items that did not run, which recovery handles as below.
+
 Recovery of a `Prepared` Put op with no staged edit asks the store whether a manifest exists at
 the op's path: if yes, it ensures the mirror holds a manifest for the path (fetching the store's
 if the mirror has none) and publishes the op; if no, the op is dropped from the record; if the
