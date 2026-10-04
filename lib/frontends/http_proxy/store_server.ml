@@ -706,8 +706,7 @@ let execute ?(partial = false) t route op body =
           if keys = [] || (partial && total >= W.bulk_answer_budget) then
             List.rev acc
           else (
-            let now = List.filteri (fun i _ -> i < 8) keys
-            and later = List.filteri (fun i _ -> i >= 8) keys in
+            let now, later = Pages.take 8 keys in
             let got = Rt.map_bounded ~width:8 s.get_opt now in
             read (List.rev_append got acc)
               (List.fold_left

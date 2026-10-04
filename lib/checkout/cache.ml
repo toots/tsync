@@ -156,10 +156,7 @@ let within_deadline f =
 
 let fetch_verified t (x : member) =
   let b = t.get_whole x.ck in
-  if
-    Bigstring.length b <> x.len
-    || not (Chunk_key.equal (Chunk_key.of_bigstring b) x.ck)
-  then
+  if Bigstring.length b <> x.len || not (Chunk_key.names x.ck b) then
     Fail.corrupt "chunk %s: %d bytes that do not hash to its key"
       (Chunk_key.to_string x.ck) (Bigstring.length b);
   b
@@ -251,7 +248,7 @@ let install_from_partial t g s =
               Fs.with_fd fd (fun fd ->
                   let buf = Bigstring.create x.len in
                   let n = Fs.pread_full fd buf ~boff:0 ~len:x.len ~off:x.off in
-                  n = x.len && Chunk_key.equal (Chunk_key.of_bigstring buf) x.ck))
+                  n = x.len && Chunk_key.names x.ck buf))
       g.members
   in
   if ok then (

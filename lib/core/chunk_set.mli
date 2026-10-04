@@ -12,6 +12,9 @@ val mem : t -> Chunk_key.t -> bool
 val add : t -> Chunk_key.t -> unit
 val remove : t -> Chunk_key.t -> unit
 
+(** A shard's place among the 4096, from its three hex digits. *)
+val shard_index : string -> int
+
 (** Removes every key of a shard, named by its three hex digits. *)
 val clear_shard : t -> string -> unit
 

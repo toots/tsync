@@ -85,8 +85,10 @@ let remove t ck =
         sh.count <- sh.count - 1;
         t.total <- t.total - 1
 
+let shard_index sss = int_of_string ("0x" ^ sss)
+
 let clear_shard t sss =
-  let sh = t.shards.(int_of_string ("0x" ^ sss)) in
+  let sh = t.shards.(shard_index sss) in
   t.total <- t.total - sh.count;
   sh.keys <- Bytes.empty;
   sh.count <- 0

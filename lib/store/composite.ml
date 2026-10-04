@@ -382,7 +382,7 @@ let progress c f = Mutex.protect c.memo_m (fun () -> Option.iter f c.running)
 
 (* A-7.14: a main's rotten chunk parks its copy instead of spreading. *)
 let sound_chunk ck b =
-  if not (Chunk_key.equal (Chunk_key.of_bigstring b) ck) then
+  if not (Chunk_key.names ck b) then
     Fail.corrupt "chunk %s does not hash to its key on the main"
       (Chunk_key.to_string ck)
 

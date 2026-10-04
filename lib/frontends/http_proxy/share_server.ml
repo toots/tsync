@@ -265,9 +265,7 @@ let stream t (m : Manifest.t) ~off ~len feed =
       if start < stop && start + clen > off then (
         let ck = Manifest.key m i in
         match t.store.get_opt (Key.chunk t.domain ck) with
-          | Some b
-            when Bigstring.length b = clen
-                 && Chunk_key.equal (Chunk_key.of_bigstring b) ck ->
+          | Some b when Bigstring.length b = clen && Chunk_key.names ck b ->
               let lo = max off start - start
               and hi = min stop (start + clen) - start in
               feed (Bigstring.sub b ~off:lo ~len:(hi - lo));

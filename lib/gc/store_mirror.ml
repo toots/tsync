@@ -102,8 +102,7 @@ module Make (C : Context.S) = struct
           match
             if b.chunks then (
               (match Key.chunk_of e.key with
-                | Some ck
-                  when not (Chunk_key.equal (Chunk_key.of_bigstring body) ck) ->
+                | Some ck when not (Chunk_key.names ck body) ->
                     Fail.corrupt "it does not hash to its key on %s" src.name
                 | _ -> ());
               dst.put e.key body;
@@ -373,10 +372,7 @@ module Make (C : Context.S) = struct
                         | [] -> ()
                         | shards when cancelled () -> ignore shards
                         | shards ->
-                            let now = List.filteri (fun i _ -> i < 8) shards
-                            and later =
-                              List.filteri (fun i _ -> i >= 8) shards
-                            in
+                            let now, later = Pages.take 8 shards in
                             Rt.map_bounded ~width:8
                               (fun i ->
                                 let prefix =

@@ -138,7 +138,7 @@ module Make (C : Context.S) = struct
               Fail.corrupt "chunk %s is on no store" (Chunk_key.to_string ck))
 
   let get_verified_chunk ck =
-    let check b = Chunk_key.equal (Chunk_key.of_bigstring b) ck in
+    let check b = Chunk_key.names ck b in
     let b = get_chunk ck in
     if check b then b
     else (
