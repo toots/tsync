@@ -1063,7 +1063,7 @@ let outstanding t =
                      (c.member.store.get_opt e.key));
               age = now -. e.last_modified;
             })
-          (requests c t.core.domain))
+          (requests ~probes:false c t.core.domain))
     t.core.copies
 
 (* gc §5.7 re-delivery: only the keys still absent from the collected main,
@@ -1075,6 +1075,19 @@ let retry_outstanding t =
       if not c.member.store.bucket_functions then n
       else (
         guard t c.member ("re-deliver requests to " ^ c.member.name);
+        (* A probe's request outlives it only when its prober died or could
+           not delete it: past twice the probe's wait, it is nobody's. *)
+        let now = Unix.gettimeofday () in
+        List.iter
+          (fun (e : Store.entry) ->
+            match Key.parse_discard_job e.key with
+              | Some (_, run, _)
+                when Key.is_probe_run run
+                     && now -. e.last_modified > 2. *. t.core.timing.probe_wait
+                ->
+                  ignore (c.member.store.delete e.key)
+              | _ -> ())
+          (requests c t.core.domain);
         List.fold_left
           (fun n (e : Store.entry) ->
             match c.member.store.get_opt e.key with

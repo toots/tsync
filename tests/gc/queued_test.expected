@@ -5,6 +5,7 @@ collect: refused: bucket: a remote copy without a confirmed bucket function woul
 == overlapping probes, still no function
 two clients probing one bucket: false, false
 a probe during a re-delivery: false
+an orphaned probe request: listed as pending false; left after a re-delivery false
 
 == the function deployed
 probe: true; confirmed: true

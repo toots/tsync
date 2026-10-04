@@ -72,9 +72,9 @@ A store claims `verified` only after it has evidence that the verify function is
 **Rules:**
 
 - The probe runs only on a store the domain writes (a main or a copy), only with the write guard satisfied ([replication §4.9](../algorithms/replication.md#49-write-guard)), and at most once per FUNCTION_PROBE_VALIDITY per store and domain, except that a confirmation in its last day is renewed by a fresh probe, so a running owner never sees one lapse.
-- One probe of a store runs at a time in a process, and a probe asked for while one runs answers with its outcome. Clients sharing a bucket probe it independently: each probe has its own request, so one that gives up deletes only its own, and no other reads that deletion as consumption. Nothing but its prober removes a probe request: re-delivery ([gc §5.7](../algorithms/gc.md)) skips reserved run names.
+- One probe of a store runs at a time in a process, and a probe asked for while one runs answers with its outcome. Clients sharing a bucket probe it independently: each probe has its own request, so one that gives up deletes only its own, and no other reads that deletion as consumption. A prober removes its own probe request; one left behind by a prober that died is deleted by re-delivery ([gc §5.7](../algorithms/gc.md)) once it is older than twice FUNCTION_PROBE_WAIT, and re-delivery otherwise skips reserved run names. A listing of pending requests leaves probe requests out.
 - The outcome, with its time, is saved in the owner's local state. Until a confirmation younger than FUNCTION_PROBE_VALIDITY is known, the store answers as unconfirmed.
-- A reserved run name is older than any real collection, so it never collides with a real request, and a client listing pending requests sees it only for as long as it is really pending.
+- A reserved run name is older than any real collection, so it never collides with a real request.
 - The probe proves that the function is deployed and triggered for objects under `tsync/`. A deployment MUST trigger it for every object created under `tsync/` (§5.1), so the same evidence covers chunk checks and verification requests.
 
 ## 4. Transport
