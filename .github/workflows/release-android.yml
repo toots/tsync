@@ -95,6 +95,12 @@ jobs:
           echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/tsync.jks"
           echo "ANDROID_KEYSTORE_FILE=$RUNNER_TEMP/tsync.jks" >> "$GITHUB_ENV"
 
+      # A missing password fails here, where Gradle would sign with a throwaway
+      # key.
+      - name: The certificate of the signing key
+        if: env.KEYSTORE_B64 != ''
+        run: keytool -exportcert -keystore "$ANDROID_KEYSTORE_FILE" -storepass:env ANDROID_KEYSTORE_PASSWORD -alias tsync -file "$RUNNER_TEMP/tsync.der"
+
       # Fails without the core library (android-app §12). Without the key, the
       # package is signed with a throwaway one.
       - name: Package
@@ -107,19 +113,17 @@ jobs:
       - name: The package holds the core, aligned for 16 KB pages
         run: |
           tools=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
-          echo "BUILD_TOOLS=$tools" >> "$GITHUB_ENV"
           unzip -l dist/tsync-arm64-v8a.apk | grep -q 'lib/arm64-v8a/libtsyncjni\.so$'
           "$tools/zipalign" -c -P 16 -v 4 dist/tsync-arm64-v8a.apk > zipalign.log
           grep -q 'lib/arm64-v8a/libtsyncjni\.so (OK)' zipalign.log
 
-      # 10 §5.4: any other signer is refused, since a phone would refuse it as
-      # an update.
-      - name: The signer is the tsync key
+      # 10 §5.4: a phone refuses any other certificate as an update.
+      - name: The package is signed with that key
         if: env.KEYSTORE_B64 != ''
         run: |
-          "$BUILD_TOOLS/apksigner" verify --print-certs dist/tsync-arm64-v8a.apk > signer.log
-          cat signer.log
-          grep -q 'Signer #1 certificate DN: CN=tsync$' signer.log
+          tools=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          "$tools/apksigner" verify --print-certs-pem dist/tsync-arm64-v8a.apk > certs.pem
+          openssl x509 -in certs.pem -outform DER | cmp - "$RUNNER_TEMP/tsync.der"
 
       - name: Signing half not run
         if: env.KEYSTORE_B64 == ''
