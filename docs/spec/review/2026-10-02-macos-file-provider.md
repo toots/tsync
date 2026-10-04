@@ -1,6 +1,6 @@
 # macOS File Provider: extraction, adversarial pass and history (2026-10-02)
 
-Companion to [`docs/spec/frontends/file-provider.md`](../spec/frontends/file-provider.md). Work was done
+Companion to [`docs/spec/frontends/file-provider.md`](../frontends/file-provider.md). Work was done
 on Linux, without compiling or running any Swift. Three passes:
 
 1. **Extraction**: the normative behaviour of `main`'s Swift app (`macos/`), its extension and the
@@ -96,7 +96,7 @@ need.
 - **`disconnect(reason:)` for an owner outage.** It is documented for updates and log-out only.
 - **Streaming progress on the bulk connection** instead of `download_progress` polling plus a
   separate `ping`. One mechanism would give progress and liveness together. It is a core change to
-  bulk actions ([failure-model §8.2](../spec/algorithms/failure-model.md)). Proposed, not written.
+  bulk actions ([failure-model §8.2](../algorithms/failure-model.md)). Proposed, not written.
 - **A periodic working-set signal** as a safety net. Not needed while the relay re-signals on every
   connection and the queue drops only redundant `changed` events.
 
@@ -198,17 +198,17 @@ this review, each rule in the file that owns it:
 
 | File | Change |
 |---|---|
-| [01-core §2.7](../spec/01-core.md) | `i:<file id>` in the item-reference grammar; what a file id is |
-| [data-model/local-cache](../spec/data-model/local-cache.md) | file ids on mirror file entries; feed watermark and dropped-shard record |
-| [04 §2.3](../spec/04-checkout-cache.md) | the file-id marker encoding |
-| [03 §2.7](../spec/03-journal-sync.md) | applied-log ops carry the file's local `fid` |
-| [wal-and-journal §4.8](../spec/algorithms/wal-and-journal.md), [05 §4](../spec/05-ops-config.md) | retention held back by the watermark; a rebuild stamps no generation and rebuilds the reverse folder index itself |
-| [08](../spec/08-frontends.md) | `i:` in replies; `readOnly` row field; `stat` by parent and name; `write` by `ref`, identical content a no-op; content replies carry `item`; `exists` carries the occupant; rename onto its own place a no-op; feed watermark and empty-anchor rule; a cursor on another walk answers `{stale:true}`; `tempDir` and the surface hooks removed |
-| [security-model §7.3](../spec/algorithms/security-model.md) | a host whose socket only its clients reach may declare no roots |
-| [07](../spec/07-daemon-cli.md) | watermark and dropped-shard paths; no quit row on macOS |
-| [09](../spec/09-tests.md) | feed and paging scenarios; `<file-N>` alias |
+| [01-core §2.7](../01-core.md) | `i:<file id>` in the item-reference grammar; what a file id is |
+| [data-model/local-cache](../data-model/local-cache.md) | file ids on mirror file entries; feed watermark and dropped-shard record |
+| [04 §2.3](../04-checkout-cache.md) | the file-id marker encoding |
+| [03 §2.7](../03-journal-sync.md) | applied-log ops carry the file's local `fid` |
+| [wal-and-journal §4.8](../algorithms/wal-and-journal.md), [05 §4](../05-ops-config.md) | retention held back by the watermark; a rebuild stamps no generation and rebuilds the reverse folder index itself |
+| [08](../08-frontends.md) | `i:` in replies; `readOnly` row field; `stat` by parent and name; `write` by `ref`, identical content a no-op; content replies carry `item`; `exists` carries the occupant; rename onto its own place a no-op; feed watermark and empty-anchor rule; a cursor on another walk answers `{stale:true}`; `tempDir` and the surface hooks removed |
+| [security-model §7.3](../algorithms/security-model.md) | a host whose socket only its clients reach may declare no roots |
+| [07](../07-daemon-cli.md) | watermark and dropped-shard paths; no quit row on macOS |
+| [09](../09-tests.md) | feed and paging scenarios; `<file-N>` alias |
 
-[ocaml/frontends/file-provider.md](../spec/ocaml/frontends/file-provider.md) describes the implementation that followed.
+[ocaml/frontends/file-provider.md](../ocaml/frontends/file-provider.md) describes the implementation that followed.
 
 ---
 
@@ -218,19 +218,19 @@ Made against the spec as left by §3, before any macOS code was written:
 
 | Change | Why | Where |
 |---|---|---|
-| Whole-domain page cursor is `<walk>:<byte offset>` | A line index forced every page to scan the kept walk from its start: about 24 GB read for one 220k-item enumeration | [08 §2.5, §3.7](../spec/08-frontends.md) |
-| One change-feed consumer per domain, stated | The watermark and the kept walk are single slots; a second consumer would unprotect the first's anchor and remake its walk | [08 §3.6](../spec/08-frontends.md) |
-| File ids minted when an entry is written, backfilled at owner start | Minting on first report made `stat` and `list_all` write durably, once per file on the first enumeration after an upgrade | [04 §2.3, §4.10](../spec/04-checkout-cache.md), [local-cache](../spec/data-model/local-cache.md) |
-| WAL records carry `fids`, copied as `fid` into the applied log | An own delete removes the file's marker long before its entry is published and noted, so the feed could not name the deleted file: it stayed in the replica | [04 §2.8](../spec/04-checkout-cache.md) |
-| A non-UTF-8 name no longer makes an item read-only | `d:` and `i:` references carry no name, so the lossy decoding names the item exactly | [08 §2.3](../spec/08-frontends.md), [file-provider §6.2](../spec/frontends/file-provider.md) |
-| One router-level subscription; the macOS service stays up with no domain | With one relay per registered domain, a fresh install never had a connection to learn of its first domain | [08 §3.8](../spec/08-frontends.md), [07 §3.1](../spec/07-daemon-cli.md), [file-provider §8, §9.1, §11](../spec/frontends/file-provider.md) |
-| `menu` example follows the menu model's JSON; `menu_stats` defined | The example used fields the model does not have | [file-provider §10](../spec/frontends/file-provider.md) |
-| The staged manifest records a whole body's digest as `h1`; `write_whole` of the current content changes nothing; a stale-base write's reply names the original key | `content_id` was otherwise recomputed from the whole body on every `stat`; 04 §4.3 contradicted conflict-resolution §4.9 on what the reply names | [04 §2.5, §4.3](../spec/04-checkout-cache.md) |
-| A symlink's row carries `contentId`; its contentVersion is `"l:"` + that | The extension would otherwise hash the target itself, restating the owner's digest rule in Swift with a bundled xxHash | [08 §2.3](../spec/08-frontends.md), [file-provider §6.3](../spec/frontends/file-provider.md) |
-| `share` takes `ref` as well as `rel` | Copy Share URL (file-provider §6.7) shares an item the extension knows only by reference | [08 §3.3](../spec/08-frontends.md) |
-| The owner's agent is the per-user definition the package writes; purge removes it | Checked on the Mac: a sandboxed app may register only sandboxed agents, so the bundled agent is refused | [file-provider §9.1, §9.4, §11, §12](../spec/frontends/file-provider.md) |
-| A durable record lets owner start skip the file-id backfill after one complete pass | Measured on a 241k-file mirror: re-reading every marker kept each start from serving for minutes | [04 §2.1, §4.10](../spec/04-checkout-cache.md) |
-| A first `list_all` page is bulk | Measured on a 241k-file mirror: the walk outlasts the request deadline, so every first page answered "still in progress" and the working set was never listed | [08 §3.3](../spec/08-frontends.md), [file-provider §4.3](../spec/frontends/file-provider.md) |
-| No owner listening maps to `serverUnreachable`, an exception in failure-model §7.2 | Observed: mapped as `internal`, an owner restart throttled the working set for twenty minutes and a signal did not lift it; the relay already unlatches `serverUnreachable` when the owner returns | [failure-model §7.2](../spec/algorithms/failure-model.md), [file-provider §6.10, §15](../spec/frontends/file-provider.md) |
-| `write` is bulk | 08 said bulk only with `await` while file-provider §4.3 said bulk; adopting digests the whole file, so a large save outlasted the request deadline | [08 §3.3](../spec/08-frontends.md) |
-| Choosing a chunk size never waits on a store | Found offline: the first file created asked the store for its recommendation under the metadata lock, freezing every mutation until the store answered or its retries ran out | [01 §3.5](../spec/01-core.md) |
+| Whole-domain page cursor is `<walk>:<byte offset>` | A line index forced every page to scan the kept walk from its start: about 24 GB read for one 220k-item enumeration | [08 §2.5, §3.7](../08-frontends.md) |
+| One change-feed consumer per domain, stated | The watermark and the kept walk are single slots; a second consumer would unprotect the first's anchor and remake its walk | [08 §3.6](../08-frontends.md) |
+| File ids minted when an entry is written, backfilled at owner start | Minting on first report made `stat` and `list_all` write durably, once per file on the first enumeration after an upgrade | [04 §2.3, §4.10](../04-checkout-cache.md), [local-cache](../data-model/local-cache.md) |
+| WAL records carry `fids`, copied as `fid` into the applied log | An own delete removes the file's marker long before its entry is published and noted, so the feed could not name the deleted file: it stayed in the replica | [04 §2.8](../04-checkout-cache.md) |
+| A non-UTF-8 name no longer makes an item read-only | `d:` and `i:` references carry no name, so the lossy decoding names the item exactly | [08 §2.3](../08-frontends.md), [file-provider §6.2](../frontends/file-provider.md) |
+| One router-level subscription; the macOS service stays up with no domain | With one relay per registered domain, a fresh install never had a connection to learn of its first domain | [08 §3.8](../08-frontends.md), [07 §3.1](../07-daemon-cli.md), [file-provider §8, §9.1, §11](../frontends/file-provider.md) |
+| `menu` example follows the menu model's JSON; `menu_stats` defined | The example used fields the model does not have | [file-provider §10](../frontends/file-provider.md) |
+| The staged manifest records a whole body's digest as `h1`; `write_whole` of the current content changes nothing; a stale-base write's reply names the original key | `content_id` was otherwise recomputed from the whole body on every `stat`; 04 §4.3 contradicted conflict-resolution §4.9 on what the reply names | [04 §2.5, §4.3](../04-checkout-cache.md) |
+| A symlink's row carries `contentId`; its contentVersion is `"l:"` + that | The extension would otherwise hash the target itself, restating the owner's digest rule in Swift with a bundled xxHash | [08 §2.3](../08-frontends.md), [file-provider §6.3](../frontends/file-provider.md) |
+| `share` takes `ref` as well as `rel` | Copy Share URL (file-provider §6.7) shares an item the extension knows only by reference | [08 §3.3](../08-frontends.md) |
+| The owner's agent is the per-user definition the package writes; purge removes it | Checked on the Mac: a sandboxed app may register only sandboxed agents, so the bundled agent is refused | [file-provider §9.1, §9.4, §11, §12](../frontends/file-provider.md) |
+| A durable record lets owner start skip the file-id backfill after one complete pass | Measured on a 241k-file mirror: re-reading every marker kept each start from serving for minutes | [04 §2.1, §4.10](../04-checkout-cache.md) |
+| A first `list_all` page is bulk | Measured on a 241k-file mirror: the walk outlasts the request deadline, so every first page answered "still in progress" and the working set was never listed | [08 §3.3](../08-frontends.md), [file-provider §4.3](../frontends/file-provider.md) |
+| No owner listening maps to `serverUnreachable`, an exception in failure-model §7.2 | Observed: mapped as `internal`, an owner restart throttled the working set for twenty minutes and a signal did not lift it; the relay already unlatches `serverUnreachable` when the owner returns | [failure-model §7.2](../algorithms/failure-model.md), [file-provider §6.10, §15](../frontends/file-provider.md) |
+| `write` is bulk | 08 said bulk only with `await` while file-provider §4.3 said bulk; adopting digests the whole file, so a large save outlasted the request deadline | [08 §3.3](../08-frontends.md) |
+| Choosing a chunk size never waits on a store | Found offline: the first file created asked the store for its recommendation under the metadata lock, freezing every mutation until the store answered or its retries ran out | [01 §3.5](../01-core.md) |

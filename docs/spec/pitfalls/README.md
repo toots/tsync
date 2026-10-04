@@ -2,8 +2,8 @@
 
 This directory is the knowledge base for adversarial review of the rewrite. It lists the issues met
 while building tsync, extracted from the commits on `main`, the pull requests, the rewrite branch,
-the OCaml implementation notes ([`../spec/ocaml/`](../spec/ocaml/README.md)) and earlier working
-notes. It is descriptive, not normative: the spec in [`../spec/`](../spec/README.md) stays the
+the OCaml implementation notes ([`../spec/ocaml/`](../ocaml/README.md)) and earlier working
+notes. It is descriptive, not normative: the spec in [`../spec/`](../README.md) stays the
 contract, and each entry here is a way the contract was broken before.
 
 Lessons that existed only because of a library no longer used (Lwt, cohttp, conduit, the aws-s3

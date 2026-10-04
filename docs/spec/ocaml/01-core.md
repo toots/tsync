@@ -104,7 +104,7 @@ The scheduler's priority type is duppy's execution class, so the three kinds are
 
 ## C.4 Where the code departs from the spec
 
-Numbers are findings of [the review](../../review/2026-10-01-rewrite.md) that are still open.
+Numbers are findings of [the review](../review/2026-10-01-rewrite.md) that are still open.
 
 - **Redial (§10).** `Client.request` sends a request again on a fresh connection when a pooled one
   fails while the request is written or closes before any byte of an answer. Such a request may

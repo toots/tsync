@@ -1,7 +1,7 @@
 # Retention and garbage collection — OCaml implementation notes
 
 Companion to the language-neutral spec [../../algorithms/gc.md](../../algorithms/gc.md). Not normative.
-Finding numbers refer to [the 2026-10-01 review](../../../review/2026-10-01-rewrite.md).
+Finding numbers refer to [the 2026-10-01 review](../../review/2026-10-01-rewrite.md).
 
 ## Code map
 
