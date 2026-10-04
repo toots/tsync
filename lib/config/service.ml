@@ -24,14 +24,6 @@ let agent_definition () =
 
 let launch_app () = run ["/usr/bin/open"; "-g"; "-b"; app_bundle_id] = 0
 
-let restart () =
-  if Tsync_core.Fs.is_macos then
-    run ["/bin/launchctl"; "kickstart"; "-k"; target ()] = 0
-    &&
-    (ignore (launch_app ());
-     true)
-  else run ["systemctl"; "--user"; "restart"; "tsync"] = 0
-
 let remove_agent () =
   ignore (run ["/bin/launchctl"; "bootout"; target ()]);
   try Unix.unlink (agent_definition ()) with Unix.Unix_error _ -> ()

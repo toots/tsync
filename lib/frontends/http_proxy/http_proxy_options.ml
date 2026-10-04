@@ -31,6 +31,20 @@ let () =
   Tsync_config.Frontend.register "http-proxy"
     {
       fields;
+      wizard =
+        Some
+          {
+            systems = [`Linux; `Macos];
+            question = "serve it to other machines over HTTPS";
+            asks =
+              [
+                "port";
+                "secret";
+                "ssl_certificate";
+                "ssl_certificate_key";
+                "shares";
+              ];
+          };
       presenting = None;
       commands_only = None;
       pulled = None;

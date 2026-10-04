@@ -234,3 +234,58 @@ let () =
   p "mode 644, at a terminal: %s, now %o\n" terminal (mode ());
   p "mode 600, a service: %s\n" (load ~interactive:false);
   Tsync_core.Fs.rm_rf root
+
+let () =
+  p "\n== path arguments (07 §5.2)\n";
+  let c =
+    Config.of_string
+      {|{"domains":[
+          {"name":"media","symlinks":"keep","versioning":true,
+           "frontends":[{"type":"fuse","mountPoint":"/mnt/media"}],
+           "backends":[{"type":"local","name":"a","role":"main","path":"/srv/a"}]},
+          {"name":"media:raw","symlinks":"keep","versioning":true,"frontends":["http-proxy"],
+           "backends":[{"type":"local","name":"a","role":"main","path":"/srv/b"}]}]}|}
+  in
+  let domain = Option.value ~default:"(resolved)" in
+  List.iter
+    (fun token ->
+      p "%-24s as a side: %s; in a domain: %s\n" token
+        (match Domain_path.parse c token with
+          | In_domain { domain = d; rel } -> domain d ^ " " ^ "[" ^ rel ^ "]"
+          | Local path when Filename.dirname path = Sys.getcwd () ->
+              "local <cwd>/" ^ Filename.basename path
+          | Local path -> "local " ^ path)
+        (match Domain_path.in_domain c token with
+          | Ok (d, rel) -> domain d ^ " [" ^ rel ^ "]"
+          | Error e -> "refused: " ^ e))
+    [
+      "media:/a//b/";
+      "media:a";
+      "media:";
+      "media:raw:x";
+      ":x/y";
+      "other:x";
+      "/mnt/media";
+      "/mnt/media/a/b";
+      "/mnt/mediaX/a";
+      "/etc/passwd";
+    ];
+  p "a relative token in a domain: [%s]\n"
+    (match Domain_path.in_domain c "a//b/" with
+      | Ok (None, rel) -> rel
+      | _ -> "?");
+  List.iter
+    (fun (name, named) ->
+      p "--domain %s with %s: %s\n"
+        (Option.value ~default:"-" name)
+        (String.concat ", " (List.map (Option.value ~default:"-") named))
+        (match Domain_path.agree ?name named with
+          | Ok d -> Option.value ~default:"(resolved)" d
+          | Error e -> "refused: " ^ e))
+    [
+      (None, [None; None]);
+      (None, [Some "media"; None; Some "media"]);
+      (Some "media", [Some "media"]);
+      (Some "media", [Some "other"]);
+      (None, [Some "media"; Some "other"]);
+    ]

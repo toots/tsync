@@ -8,6 +8,21 @@ let configured (d : Config.domain) =
         | None -> Paths.mount_point d.name)
     (Config.frontend d "fuse")
 
+let holding (config : Config.t) path =
+  List.filter_map
+    (fun (d : Config.domain) ->
+      Option.bind (configured d) (fun mount ->
+          let n = String.length mount in
+          if path = mount then Some (n, (d, ""))
+          else if String.starts_with ~prefix:(mount ^ "/") path then
+            Some (n, (d, String.sub path (n + 1) (String.length path - n - 1)))
+          else None))
+    config.domains
+  |> List.sort (fun (a, _) (b, _) -> compare b a)
+  |> function
+  | (_, held) :: _ -> Some held
+  | [] -> None
+
 let decode s =
   let n = String.length s in
   let b = Buffer.create n in

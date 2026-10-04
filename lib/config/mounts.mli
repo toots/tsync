@@ -6,6 +6,11 @@
     [$HOME/tsync/<domain>]; [None] without a [fuse] frontend. *)
 val configured : Config.domain -> string option
 
+(** The configured domain whose mount point holds [path], with the rest of the
+    path: the mount point itself or a prefix of it followed by [/], the longest
+    when several hold it (dolphin §2). Lexical: it asks no filesystem. *)
+val holding : Config.t -> string -> (Config.domain * string) option
+
 (** A mount point as the mount table writes it, decoded (§3.2). *)
 val decode : string -> string
 

@@ -4,6 +4,7 @@ let () =
   Tsync_config.Frontend.register "android"
     {
       fields;
+      wizard = None;
       presenting = Some `Per_domain;
       commands_only =
         Some

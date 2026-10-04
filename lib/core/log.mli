@@ -1,5 +1,5 @@
-(** Logging (spec 07 §5.7). The sink is replaceable (syslog, logcat); the last
-    50 warnings and errors are kept for status. *)
+(** Logging (spec 07 §5.7). The sink is stderr, replaceable by a host (logcat);
+    the last 50 warnings and errors are kept for status. *)
 
 type level = Debug | Info | Warn | Err
 

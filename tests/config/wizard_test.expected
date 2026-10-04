@@ -13,38 +13,25 @@
 ? chunk size (blank: the store's) -> 
 ? cache chunk size (blank: default) -> 
 ? cache limit [1 GiB] -> 
-? backends: [a]dd [e]dit N [r]emove N [d]one [d] -> a
 ? type (gcs, http-proxy, local, s3) [local] -> local
 ? backend name -> main
 ? role (main, replica, backfill, readOnly) [main] -> 
 ? Store root -> /srv/docs
 ? Verify chunk writes [true] -> 
     1. main (local, main)
-? backends: [a]dd [e]dit N [r]emove N [d]one [d] -> d
-? frontends: [a]dd [e]dit N [r]emove N [d]one [d] -> a
-? frontend (android, fuse, http-proxy) [android] -> http-proxy
+? backends: a number to edit, [a]dd, [r]emove N, [d]one [d] -> 
+? mount it as a folder on this machine (fuse) [yes] -> 
+? fuse: other options [no] -> 
+? serve it to other machines over HTTPS (http-proxy) [no] -> yes
 ? Port -> 5446
-? Bind addresses -> 
-? Concurrent data operations -> 
 ? TLS certificate -> 
 ? TLS key -> 
 ? Shared secret -> (secret)
 ? Serve share links [false] -> 
-? Read-only [false] -> 
-? Largest PUT body -> 
-? Largest bulk body -> 
-? Body memory -> 
-? Idle timeout (s) -> 
-? Header timeout (s) -> 
-? Keep-alive timeout (s) -> 
-? Connections -> 
-? Concurrent share responses -> 
-? ZIP members -> 
-    1. http-proxy
-? frontends: [a]dd [e]dit N [r]emove N [d]one [d] -> d
+? http-proxy: other options [no] -> 
   Domains:
     1. docs: 1 backends
-? [a]dd [e]dit N [r]emove N [g]lobals [w]rite [q]uit -> w
+? a number to edit that domain, [a]dd, [r]emove N, [g]lobals, [w]rite, [q]uit -> w
 new: would write
 {
   "name": "laptop",
@@ -63,6 +50,7 @@ new: would write
         }
       ],
       "frontends": [
+        "fuse",
         {
           "type": "http-proxy",
           "port": 5446,
@@ -76,7 +64,7 @@ new: would write
 == an existing config: what is not asked is kept, an unused link dropped
   Domains:
     1. docs: 2 backends
-? [a]dd [e]dit N [r]emove N [g]lobals [w]rite [q]uit -> e 1
+? a number to edit that domain, [a]dd, [r]emove N, [g]lobals, [w]rite, [q]uit -> 1
 ? domain name [docs] -> 
 ? versioning [true] -> 
 ? symlinks (keep, follow, skip) [keep] -> 
@@ -86,7 +74,7 @@ new: would write
 ? cache limit [1 GiB] -> 2 GiB
     1. main (local, main)
     2. far (http-proxy, replica)
-? backends: [a]dd [e]dit N [r]emove N [d]one [d] -> a
+? backends: a number to edit, [a]dd, [r]emove N, [d]one [d] -> a
 ? type (gcs, http-proxy, local, s3) [local] -> local
 ? backend name -> copy
 ? role (main, replica, backfill, readOnly) [main] -> 
@@ -95,12 +83,18 @@ new: would write
     1. main (local, main)
     2. far (http-proxy, replica)
     3. copy (local, main)
-? backends: [a]dd [e]dit N [r]emove N [d]one [d] -> d
-    1. http-proxy
-? frontends: [a]dd [e]dit N [r]emove N [d]one [d] -> d
+? backends: a number to edit, [a]dd, [r]emove N, [d]one [d] -> d
+? mount it as a folder on this machine (fuse) [no] -> 
+? serve it to other machines over HTTPS (http-proxy) [yes] -> 
+? Port -> 
+? TLS certificate -> 
+? TLS key -> 
+? Shared secret -> 
+? Serve share links [false] -> 
+? http-proxy: other options [no] -> 
   Domains:
     1. docs: 3 backends
-? [a]dd [e]dit N [r]emove N [g]lobals [w]rite [q]uit -> w
+? a number to edit that domain, [a]dd, [r]emove N, [g]lobals, [w]rite, [q]uit -> w
 edit: would write
 {
   "name": "box",
@@ -141,7 +135,7 @@ edit: would write
 == invalid answers are asked again
   Domains:
     1. docs: 2 backends
-? [a]dd [e]dit N [r]emove N [g]lobals [w]rite [q]uit -> e 1
+? a number to edit that domain, [a]dd, [r]emove N, [g]lobals, [w]rite, [q]uit -> e 1
 ? domain name [docs] -> 
 ? versioning [true] -> 
 ? symlinks (keep, follow, skip) [keep] -> sometimes
@@ -155,12 +149,24 @@ edit: would write
 ? cache limit [1 GiB] -> 
     1. main (local, main)
     2. far (http-proxy, replica)
-? backends: [a]dd [e]dit N [r]emove N [d]one [d] -> d
-    1. http-proxy
-? frontends: [a]dd [e]dit N [r]emove N [d]one [d] -> d
+? backends: a number to edit, [a]dd, [r]emove N, [d]one [d] -> 7
+  a number of the list, a, r N or d
+    1. main (local, main)
+    2. far (http-proxy, replica)
+? backends: a number to edit, [a]dd, [r]emove N, [d]one [d] -> d
+? mount it as a folder on this machine (fuse) [no] -> maybe
+  answer yes or no
+? mount it as a folder on this machine (fuse) [no] -> no
+? serve it to other machines over HTTPS (http-proxy) [yes] -> 
+? Port -> 
+? TLS certificate -> 
+? TLS key -> 
+? Shared secret -> 
+? Serve share links [false] -> 
+? http-proxy: other options [no] -> 
   Domains:
     1. docs: 2 backends
-? [a]dd [e]dit N [r]emove N [g]lobals [w]rite [q]uit -> w
+? a number to edit that domain, [a]dd, [r]emove N, [g]lobals, [w]rite, [q]uit -> w
 invalid: would write
 {
   "name": "box",
@@ -195,8 +201,48 @@ invalid: would write
 == quit
   Domains:
     1. docs: 2 backends
-? [a]dd [e]dit N [r]emove N [g]lobals [w]rite [q]uit -> q
+? a number to edit that domain, [a]dd, [r]emove N, [g]lobals, [w]rite, [q]uit -> q
 quit: quit
+
+== what each system offers; an entry it does not offer is kept
+linux: fuse, http-proxy
+macos: http-proxy
+  Domains:
+    1. docs: 1 backends
+? a number to edit that domain, [a]dd, [r]emove N, [g]lobals, [w]rite, [q]uit -> 1
+? domain name [docs] -> 
+? versioning [true] -> 
+? symlinks (keep, follow, skip) [keep] -> 
+? read-only [false] -> 
+? chunk size (blank: the store's) -> 
+? cache chunk size (blank: default) -> 
+? cache limit [1 GiB] -> 
+    1. main (local, main)
+? backends: a number to edit, [a]dd, [r]emove N, [d]one [d] -> d
+? serve it to other machines over HTTPS (http-proxy) [no] -> 
+  Domains:
+    1. docs: 1 backends
+? a number to edit that domain, [a]dd, [r]emove N, [g]lobals, [w]rite, [q]uit -> w
+kept: would write
+{
+  "domains": [
+    {
+      "name": "docs",
+      "symlinks": "keep",
+      "versioning": true,
+      "frontends": [ "fuse" ],
+      "backends": [
+        {
+          "type": "local",
+          "name": "main",
+          "role": "main",
+          "path": "/srv/docs"
+        }
+      ],
+      "maxCache": "1 GiB"
+    }
+  ]
+}
 
 == a deployment's outputs
 s3 files: bucket=b1 region=eu-west-1 accessKeyId=AK shareUrl=https://s secretAccessKey=SK

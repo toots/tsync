@@ -310,18 +310,4 @@ let frontend_cmds =
         | _ -> None)
     (Frontend.names ())
 
-(* 07 §2.7: through the service manager, never by signalling processes found
-   by name (the macOS service's binary lives in the app bundle). *)
-let restart verbose =
-  set_verbose verbose;
-  if not (Service.restart ()) then fail "the tsync service is not installed";
-  say "Restarted tsync.";
-  0
-
-let restart_cmd =
-  cmd "restart" ~doc:"Restart the service through the service manager."
-    Term.(const restart $ verbose)
-
-let cmds =
-  [start_cmd; owner_cmd; store_server_cmd; stop_cmd; restart_cmd]
-  @ frontend_cmds
+let cmds = [start_cmd; owner_cmd; store_server_cmd; stop_cmd] @ frontend_cmds
