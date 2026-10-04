@@ -281,18 +281,31 @@ module Make (C : Engine_ctx.S) = struct
         | _ -> ())
       ops;
     (* An edit an arrival may put aside takes its inherited bytes here, where a
-       cold cache fetches them without the metadata lock. *)
-    List.iter
-      (fun op ->
-        List.iter
-          (fun p ->
-            let l = translate p in
-            materialise_inherited l;
-            List.iter
-              (fun (under, _) -> materialise_inherited under)
-              (Staged.edits_under staged l))
-          (Op.paths op))
-      ops;
+       cold cache fetches them without the metadata lock: asked only of the ops
+       that can set one aside, and a failure is left to the attempt under it. *)
+    let files, folders =
+      List.fold_left
+        (fun (files, folders) -> function
+          | Op.Put { path; _ } | Delete path -> (path :: files, folders)
+          | Rename { is_dir = false; src; dst; _ } ->
+              (src :: dst :: files, folders)
+          | Rmdir { path; _ } -> (files, path :: folders)
+          | Rename { is_dir = true; src; _ } -> (files, src :: folders)
+          | _ -> (files, folders))
+        ([], []) ops
+    in
+    let ahead p =
+      try materialise_inherited p with
+        | (Stop.Stopping | Rt.Cancelled) as e -> raise e
+        | _ -> ()
+    in
+    List.iter (fun p -> ahead (translate p)) files;
+    if folders <> [] then (
+      let dirs = List.map translate folders in
+      List.iter
+        (fun (p, _) ->
+          if List.exists (fun dir -> Names.is_under ~dir p) dirs then ahead p)
+        (Staged.edits staged));
     a
 
   (* wal-and-journal §4.4: one pass or rebuild at a time, so the deferred
