@@ -1,0 +1,30 @@
+; A libdbus binding holding only what the tray's two protocols need. The
+; include path comes from pkg-config: dbus-arch-deps.h sits in a directory
+; that differs per distribution and architecture.
+
+(rule
+ (targets c_flags.sexp c_library_flags.sexp)
+ (enabled_if
+  (= %{system} linux))
+ (action
+  (progn
+   (with-stdout-to
+    c_flags.sexp
+    (system "echo \"($(pkg-config --cflags dbus-1))\""))
+   (with-stdout-to
+    c_library_flags.sexp
+    (system "echo \"($(pkg-config --libs dbus-1))\"")))))
+
+(library
+ (name tsync_dbus)
+ (enabled_if
+  (= %{system} linux))
+ (libraries unix)
+ (foreign_stubs
+  (language c)
+  (names dbus_stubs)
+  (flags
+   :standard
+   (:include c_flags.sexp)))
+ (c_library_flags
+  (:include c_library_flags.sexp)))

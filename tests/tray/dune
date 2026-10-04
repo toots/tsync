@@ -1,0 +1,35 @@
+; The tray on a private session bus (linux-tray.md §9). It needs dbus-daemon
+; and no desktop; it runs for about two minutes: the scenarios that measure a
+; bound one at a time, then the rest side by side, one of which waits the
+; minute a host that reports no close is given.
+
+(executable
+ (name tray_test)
+ (enabled_if
+  (= %{system} linux))
+ (libraries
+  tsync_core
+  tsync_ipc
+  tsync_dbus
+  tsync_tray_lib
+  unix
+  threads.posix
+  yojson))
+
+(rule
+ (enabled_if
+  (= %{system} linux))
+ (action
+  (with-stdout-to
+   tray_test.output
+   (run
+    ./tray_test.exe
+    %{exe:../../linux/tray/tsync_tray.exe}
+    %{exe:../desktop/owner_double.exe}))))
+
+(rule
+ (alias runtest)
+ (enabled_if
+  (= %{system} linux))
+ (action
+  (diff tray_test.expected tray_test.output)))

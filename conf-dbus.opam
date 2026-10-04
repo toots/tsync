@@ -1,0 +1,19 @@
+opam-version: "2.0"
+maintainer: ["Romain Beauxis <toots@rastageeks.org>"]
+authors: ["Romain Beauxis <toots@rastageeks.org>"]
+license: "MIT"
+homepage: "https://github.com/toots/tsync"
+bug-reports: "https://github.com/toots/tsync/issues"
+dev-repo: "git+https://github.com/toots/tsync.git"
+synopsis: "Virtual package relying on a libdbus system installation"
+description: "Installs only if the system provides libdbus-1 and its headers."
+flags: conf
+available: os = "linux"
+depends: ["conf-pkg-config" {build}]
+build: ["pkg-config" "--exists" "dbus-1"]
+depexts: [
+  ["libdbus-1-dev"] {os-family = "debian" | os-family = "ubuntu"}
+  ["dbus-devel"] {os-distribution = "fedora" | os-family = "rhel" | os-family = "suse" | os-family = "opensuse"}
+  ["dbus"] {os-family = "arch"}
+  ["dbus-dev"] {os-distribution = "alpine"}
+]
