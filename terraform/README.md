@@ -1,11 +1,12 @@
 # tsync stores (Terraform)
 
-Single point of entry for provisioning the cloud storage behind a tsync domain, on
-**AWS (S3)** or **Google Cloud (GCS)**. What it has to provision, and why, is specified
-in [`docs/spec/11-infrastructure.md`](../docs/spec/11-infrastructure.md).
+This configuration provisions the cloud storage behind a tsync domain, on **AWS (S3)**
+or **Google Cloud (GCS)**. You need it only if a bucket is one of your backends; a
+domain on a disk, or a client of a tsync server, needs none of it.
 
-The two are equal citizens: same capabilities, same options, same outputs. Pick one
-per store, or run both.
+Both clouds get the same capabilities, options and outputs. Pick one per store, or
+use both. What is provisioned, and why, is specified in
+[`docs/spec/11-infrastructure.md`](../docs/spec/11-infrastructure.md).
 
 A **store** is one bucket and everything that has to exist around it:
 
@@ -69,12 +70,13 @@ Terraform (`terraform`), 1.10 or later. Commands below are written with `tofu`. 
 scripts and `tsync config --edit` all pick the same one: the program named by
 `TSYNC_TF` if you set it, otherwise `tofu` if installed, otherwise `terraform`.
 
-Then wire the store into a tsync domain. The easy path is `tsync config --edit`: edit
-the s3 or gcs domain and choose **Sync from Terraform**.
+Then put the store in a tsync domain. Run `tsync config --edit`, add or edit an `s3`
+or `gcs` backend, and at the prompt `fill from the deployment in directory` give the
+path of this directory.
 
 That reads the deployment's outputs, asks which store when there are several, and
-writes its fields onto the backend. Nothing Terraform-specific ends up in your tsync
-config.
+fills in the backend's bucket, credentials and share URL. Nothing Terraform-specific
+ends up in your tsync config.
 
 ---
 
@@ -198,7 +200,8 @@ GCS only: `location`, `function_region`.
 
 ## Wiring a store into tsync
 
-`tsync config --edit` → **Sync from Terraform** does this for you. By hand, read the
+`tsync config --edit` does this for you at its `fill from the deployment in directory`
+prompt. By hand, read the
 outputs — both are keyed by store name, whatever the cloud:
 
 ```
@@ -207,11 +210,12 @@ tofu output -json store_secrets | jq '.["files"]'
 ```
 
 Each entry's members are named like the backend's fields, so the two merge into a
-backend as they are, minus `type`. For an s3 store:
+backend as they are. Add a `name` and a `role` of your own. For an s3 store:
 
 ```json
 {
   "type": "s3",
+  "name": "cloud",
   "bucket": "...",
   "region": "...",
   "accessKeyId": "...",
@@ -243,8 +247,8 @@ Each link carries **its own expiration**, set per share when it is created and
 enforced on every request. Nothing in the bucket expires them on a shared clock, so
 `--expires` means what it says.
 
-The link is guarded only by the unguessable token in it. To revoke one early, delete
-its manifest object under `tsync/shares/`.
+The link is guarded only by the unguessable token in it. To stop one early:
+`tsync share --revoke <link>`. Links that have expired are removed by `tsync expire`.
 
 A file or folder is refused with a 413 above `max_share_bytes`, and the build has to
 finish within 15 minutes.
@@ -422,7 +426,7 @@ one rule every store needs by hand: abort incomplete multipart uploads after 1 d
 ### Option A — carry rules in `extra_lifecycle_rules` (recommended)
 
 List the bucket's current rules in the store entry and the module emits them
-**alongside** its own, so nothing is lost:
+**alongside** its own, so nothing is lost. The shape of a rule:
 
 ```hcl
 stores = {
@@ -527,8 +531,8 @@ No chunk leaves the region to be checked.
 A delete request is cleared only once every chunk it names is gone, so a partial or
 failed run leaves it behind. Nothing retries on its own.
 
-`tsync gc --status` lists what is outstanding, and `tsync gc --retry-jobs`
-re-delivers it.
+`tsync gc --outstanding` lists what is outstanding, and `tsync gc --retry-outstanding`
+hands it over again. `tsync gc --probe` checks that each bucket's function is deployed.
 
 An outstanding request means a copy is still holding chunks nothing references —
 wasted space rather than lost data.
