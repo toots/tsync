@@ -1,0 +1,10 @@
+silent        status -> no answer, by the deadline: true
+silent        stats  -> no answer, by the deadline: true
+silent        pause  -> no answer, by the deadline: true
+trickle       status -> no answer, by the deadline: true
+trickle       stats  -> no answer, by the deadline: true
+trickle       pause  -> no answer, by the deadline: true
+not listening status -> no answer, by the deadline: true
+not listening stats  -> no answer, by the deadline: true
+not listening pause  -> no answer, by the deadline: true
+9 exchanges

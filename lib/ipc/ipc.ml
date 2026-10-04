@@ -511,6 +511,14 @@ let with_client path f =
 let call ?timeout path req =
   with_client path (fun c -> Client.request ?timeout c req)
 
+let ask ~deadline path req =
+  match
+    Rt.with_timeout deadline (fun () -> call ~timeout:deadline path req)
+  with
+    | `Assoc _ as reply -> Some reply
+    | _ -> None
+    | exception e when not (Rt.is_cancelled e) -> None
+
 let ping = `Assoc [("action", `String "ping")]
 
 let streamed j =

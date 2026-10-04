@@ -1,0 +1,25 @@
+; The discovery library (linux-desktop.md §3.4). dune names a shared object
+; after its executable and records no SONAME; the loader searches by SONAME,
+; so the two are made equal here.
+
+(executable
+ (name libtsync_mounts)
+ (modules libtsync_mounts)
+ (modes shared_object)
+ (enabled_if
+  (= %{system} linux))
+ (link_flags
+  (-cclib -Wl,-soname,libtsync_mounts.so))
+ (libraries tsync_config tsync_catalog))
+
+; The stand-in for the tests of an extension: the same entry point with fixed
+; pairs. Never installed.
+
+(executable
+ (name libtsync_mounts_fake)
+ (modules libtsync_mounts_fake)
+ (modes shared_object)
+ (enabled_if
+  (= %{system} linux))
+ (link_flags
+  (-cclib -Wl,-soname,libtsync_mounts_fake.so)))

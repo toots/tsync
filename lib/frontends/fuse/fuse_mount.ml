@@ -536,27 +536,6 @@ let unmount ~loop_ended mount_point done_ =
     if not (run_command ["fusermount3"; "-uz"; mount_point]) then
       Log.err "could not unmount %s; the next start clears it" mount_point)
 
-(* The mount table writes a space, tab, newline or backslash as \ooo. *)
-let unescape_mount s =
-  let b = Buffer.create (String.length s) in
-  let n = String.length s in
-  let rec go i =
-    if i < n then
-      if s.[i] = '\\' && i + 3 < n then (
-        match int_of_string_opt ("0o" ^ String.sub s (i + 1) 3) with
-          | Some c ->
-              Buffer.add_char b (Char.chr (c land 255));
-              go (i + 4)
-          | None ->
-              Buffer.add_char b s.[i];
-              go (i + 1))
-      else (
-        Buffer.add_char b s.[i];
-        go (i + 1))
-  in
-  go 0;
-  Buffer.contents b
-
 let mounted_at mount_point =
   match Fs.read_file_opt "/proc/self/mounts" with
     | None -> None
@@ -565,7 +544,7 @@ let mounted_at mount_point =
         |> List.find_map (fun line ->
             match String.split_on_char ' ' line with
               | source :: target :: fstype :: _
-                when unescape_mount target = mount_point ->
+                when Mounts.decode target = mount_point ->
                   Some (source, fstype)
               | _ -> None)
 
@@ -624,10 +603,8 @@ let mount_point ~mount (d : Config.domain) =
   Fs.resolve_parent
     (match mount with
       | Some m -> m
-      | None -> (
-          match Config.fstr (options d) "mountPoint" with
-            | Some m -> m
-            | None -> Paths.mount_point d.name))
+      | None ->
+          Option.value ~default:(Paths.mount_point d.name) (Mounts.configured d))
 
 (* 07 §3.7: FUSE owns the main thread, so the owner runs on another, and the
    main thread enters the loop only once the owner serves its socket. *)
