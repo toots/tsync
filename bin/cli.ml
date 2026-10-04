@@ -35,6 +35,31 @@ let domain ?name config =
   try Config.resolve ?name ?default config
   with Config.Invalid e -> fail "%s" e
 
+(* 07 §5.2: the domain and the domain-relative paths a command's tokens name,
+   through the one parser of them. *)
+let paths_in_domain ?name tokens =
+  let config = config () in
+  let parsed =
+    List.map
+      (fun token ->
+        match Domain_path.in_domain config token with
+          | Ok p -> p
+          | Error e -> fail "%s" e)
+      tokens
+  in
+  match Domain_path.agree ?name (List.map fst parsed) with
+    | Ok name -> (name, List.map snd parsed)
+    | Error e -> fail "%s" e
+
+(* For what a command settles before its runtime starts. *)
+let early body =
+  match body () with
+    | code -> code
+    | exception Exit_with code -> code
+    | exception Config.Invalid e ->
+        prerr_endline ("tsync: " ^ e);
+        1
+
 (* Every process leases its uplinks from the supervisor, which takes ownership
    in place of this.
 

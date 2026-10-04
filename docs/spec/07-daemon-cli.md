@@ -152,7 +152,7 @@ class**:
 
 | Class | Commands | Owner serving | No owner | Owner held but not serving |
 |---|---|---|---|---|
-| **none** | `config`, `default-domain`, `build-info`, `logs`, `status`, `start`, `stop`, `restart` | n/a | n/a | n/a |
+| **none** | `config`, `default-domain`, `build-info`, `logs`, `status`, `start`, `stop` | n/a | n/a | n/a |
 | **read** | `ls`, `versions` (listing), `trash` (listing), `export` | reads stores and permitted local files | same | same |
 | **owner** | `pause`, `resume`, `retry`, `set-aside`, `cache --evict/--fetch/--prune`, `versions --revert`, `sync`, `gc`, `expire`, `trash --purge`, `trash --restore`, `mirror`, `data-integrity`, `share`, `import`, `rsync` with a domain side, every `<group> <verb>` whose frontend declares it owner-class (the whole desktop `tsync android` group) | sends the request to the owner, which runs it | takes ownership for its run and performs the request itself (§3.5) | refuses with `busy`, naming the holder |
 
@@ -230,8 +230,13 @@ Rules:
 | feed watermark | `<data dir>/feed-watermark-<domain>`: the entry key, a space, the epoch ms it last moved ([08 §3.6](08-frontends.md#36-change-feed-changes_since)) | same |
 | dropped-shard record | `<data dir>/feed-dropped-<domain>` (present = a shard was dropped) | same |
 | default domain | `<data dir>/default-domain` (one line, the name) | same |
-| restart (through the service manager, never by signalling processes found by name) | `systemctl --user restart tsync` | `launchctl kickstart -k gui/$UID/org.feverdreamtv.tsync.daemon`, then open the app |
+| restart | the service manager's own command, on the unit the installer set up: `systemctl --user restart tsync` (source install) or `systemctl restart tsync@<user>` (packages) | `launchctl kickstart -k gui/$UID/org.feverdreamtv.tsync.daemon` |
 | log reader | `journalctl -t tsync -n N [-f]` | `tail -n N [-f] ~/Library/Logs/tsync-daemon.log` |
+
+tsync has **no restart command**. Which unit runs the service is the installer's choice (a user
+unit, a system template instance, a launch agent), and a command that guesses it restarts the wrong
+one or none. Restarting is the service manager's command above; nothing signals processes found by
+name. User documentation gives the command for each kind of install.
 
 `$TSYNC_CONFIG_JSON`, when set, is the config text itself and overrides the file. Modes and
 ownership of the data dir and of every directory holding a socket, lock or flag:
@@ -573,13 +578,27 @@ for `JOB_KEEP` after their last report; a new report for a key replaces the old 
 
 ### 5.2 Path arguments
 
-- `DOMAIN:/path` or `DOMAIN:path` names a domain outright iff `DOMAIN` is a configured domain name;
-  otherwise the token is a local path containing a colon.
-- A command reads a relative token either as domain-relative (in the resolved domain, wherever it
-  runs from) or as a local path, and says which in its help.
-- A local absolute path resolves to a domain by lying under one of the domain's roots, tried in
-  order: its mount point, its File Provider folder (macOS), then the data directory. A path under no
-  root is refused with exit 1.
+**One parser.** Every command that takes a path which may name an item of a domain reads it through
+one parser, so the spellings below mean the same everywhere and a new command cannot spell them
+differently. A command MUST NOT split a token on `:` or `/` itself.
+
+- `DOMAIN:/path` or `DOMAIN:path` names an item of `DOMAIN` iff `DOMAIN` is a configured domain
+  name; when several configured names fit (a name may hold a colon), the longest does. Otherwise
+  the token holds a colon and is not a domain path.
+- `:path` names an item of the domain the command resolves (§5.1).
+- The path after the colon is domain-relative: empty segments are dropped, so `media:/a//b/` is
+  `a/b` and `media:` is the domain's root.
+- A command reads its path arguments in one of two ways, and says which in its help:
+  - **a side** (`rsync SRC DST`): a token that is not one of the two spellings above is a local
+    path, made absolute against the working directory. An absolute path is local even under a mount
+    point;
+  - **in a domain** (`cache`, `versions`, `share`, `trash --restore`/`--purge`, `mirror --path`, the
+    paths of `export`): a relative token is domain-relative in the resolved domain, wherever the
+    command runs from; an absolute token names the domain whose mount point it lies under, and is
+    refused with exit 1 (`<path> is under no domain's mount point`) when it lies under none.
+- **One domain per run.** The domains a command's tokens name and `--domain` MUST agree: two
+  different names are refused before anything runs (`the domain named in a path differs from
+  --domain`, or `the paths name more than one domain`), with exit 1, or exit 2 for `rsync`.
 - Resolving a path to an item reference reads the domain's folder markers (a permitted read,
   §2.2). A folder this client holds no id for is refused with "this client has not resolved its
   folder; run 'tsync sync'".
@@ -590,12 +609,11 @@ for `JOB_KEEP` after their last report; a new report for a key replaces the old 
 |---|---|---|
 | `start [--mount P] [--tls native\|openssl]` | none | §3.1 |
 | `stop` | none | §5.4 |
-| `restart` | none | the platform restart through the service manager (§2.7); exit 1 if the service is not installed |
 | `status [--json] [--totals [--exact] [--reload]] [-w S]` | none | §5.5 |
 | `logs [-f] [-n N]` | none | executes the platform log reader (default N = 200); explains what is missing if it cannot |
 | `pause` / `resume` | owner | §2.6; also spelled `pause-uploads` / `resume-uploads` |
 | `ls [PATH] [--deleted] [--frontend F]` | read | children sorted case-insensitively: `dir    name/`, or `<availability>  name  N bytes` (`pinned until <time>`); `--deleted` appends `deleted  name` rows |
-| `cache --evict\|--fetch [--keep DUR] PATH...` | owner | `evict` / `restore` per path ([08 §3.4](08-frontends.md)), as bulk actions; one line per path, exit 1 if any failed; `--keep` default 10 days |
+| `cache --evict\|--fetch [--keep DUR] PATH...` | owner | makes each path online only (`evict`) or available offline (`restore`) ([08 §3.4](08-frontends.md)), one bulk action per path, in order; a folder covers its subtree. One line per path on stdout, `<path>: <N> files online only` or `<path>: <N> files available offline`, followed by `, <F> failed` when any did; a refused path prints `tsync: <path>: <sentence>` and the others still run; exit 1 if any path failed or was refused. `--keep` (with `--fetch` only) default 10 days. Neither or both of `--evict` and `--fetch`, or `--keep` with `--evict`, is refused with exit 2 |
 | `cache --prune [--grace DUR]` | owner | runs every on-demand maintenance task (§6) in the owner (`prune`, a bulk action); prints per task files and bytes; `--grace` default 1 h |
 | `retry` | owner | re-adopt every parked record of the domain's logs now ([durable-queue.md §4.7](algorithms/durable-queue.md#47-parking-and-retry-of-parked-records)); owner action `retry`; prints the count re-adopted |
 | `set-aside [--remove NAME... \| --remove-all]` | owner | lists the domain's set-aside objects (staged manifests, WAL and log records that could not be decoded) with their size and time, or removes the named ones after the user inspected them ([durable-queue.md §3.3](algorithms/durable-queue.md#33-ordering-rules), [04 §4.10](04-checkout-cache.md#410-owner-start-local-recovery)); owner action `set_aside` |
@@ -610,12 +628,12 @@ for `JOB_KEEP` after their last report; a new report for a key replaces the old 
 | `data-integrity [--verify\|--repair] [--detail] [--source] [--dry-run]` | owner | [05 §4.10](05-ops-config.md); exit 1 if unhealthy |
 | `mirror [--source] [--skip-chunks\|--path P]` | owner | [05 §4.6](05-ops-config.md); needs at least two members |
 | `import DIR [--only G] [--exclude G] [--force-rehash]` | owner | [05 §4.3](05-ops-config.md); exit 1 if any entry failed |
-| `export [PATH...] DIR [--source] [-j N]` | read | [05 §4.4](05-ops-config.md); one domain per run; exit 1 on failures or on pending local changes (listed on stderr) |
-| `rsync SRC DST [--move] [-n]` | owner | [05 §4.5](05-ops-config.md). A side in a domain is `DOMAIN:PATH`, or `:PATH` for the domain `--domain` or the default resolves; any other argument is a local path (one holding a `:` before its first `/` is written `./…` or absolute). Two local sides, or two different domains, are refused with exit 2. `-n` prints each entry's decision and changes nothing |
+| `export [PATH...] DIR [--source] [-j N]` | read | [05 §4.4](05-ops-config.md); each `PATH` is read in a domain (§5.2), `DIR` is local; one domain per run; exit 1 on failures or on pending local changes (listed on stderr) |
+| `rsync SRC DST [--move] [-n]` | owner | [05 §4.5](05-ops-config.md). Each argument is a side (§5.2). Two local sides, or two different domains, are refused with exit 2. `-n` prints each entry's decision and changes nothing |
 | `share [PATH] [--expires DUR] [--token HEX] \| --revoke TOKEN\|URL \| --clear-cache` | owner | [05 §4.11](05-ops-config.md); URL on stdout, expiry on stderr; `--revoke` exits 1 when no share of the domain held the token |
 | `config [--edit]` | none | print the parsed config with secrets masked, or run the wizard (§5.9) |
 | `default-domain [NAME] [--clear]` | none | set (must be configured), clear, or print (exit 1 when unset) |
-| `build-info` | none | compiled frontends and drivers, log sink, paths, sockets |
+| `build-info` | none | compiled frontends and drivers, TLS implementations, the platform's reader of the service log (§2.7, the one `logs` executes), paths, sockets |
 | `<group> <verb> [ARGS...]` | per verb | frontend-contributed ([08 §2.1](08-frontends.md)); the binary resolves `--domain`, checks the frontend is configured for it, and passes the remaining arguments uninterpreted. `fileprovider reset` terminates no process and `fileprovider purge` stops the owner only after the app released its domains ([file-provider.md §9.3–9.4](frontends/file-provider.md#93-reset)); the desktop `tsync android` group is owner-class |
 
 `--source NAME` reads from one member ([05 §3.1](05-ops-config.md) `reading_from`); `-j N` sets read
@@ -723,8 +741,12 @@ owner, takes ownership and writes or removes the pause flag durably itself (§2.
 - Levels `debug`, `info`, `warn`, `err`; CLI default `warn` (`-v` → `info`), daemons `debug`. An
   owner of one domain prefixes its lines with `[<domain>] `. The sink is replaceable (Android logs to
   logcat). The last 50 warnings and errors are kept with timestamps for `recentErrors`.
-- Daemons log to syslog (ident `tsync`, facility daemon, with pid), echoing to stderr only when
-  stderr is a terminal; without syslog, to stderr. tsync writes no log files of its own.
+- Every process logs to stderr, and the service manager keeps what a service writes there: on
+  Linux the unit's stderr goes to the systemd journal, under the identifier `tsync` (the program's
+  name), which is what the log reader of §2.7 selects; on macOS the service process, when its stderr
+  is not a terminal, redirects its own stdout and stderr to the service log (§2.8), since a launch
+  agent cannot name a path under the user's home for its output. tsync has no other sink on a
+  desktop host, rotates nothing and writes no other log file.
 
 ### 5.8 Menu model (tray and macOS menu bar)
 
@@ -742,11 +764,23 @@ rows, shared by the Linux tray and the macOS menu so that the two cannot drift. 
 - New file: prompts for globals (client name, default the hostname; `maxUploads`; `maxChunkBuffers`,
   default `maxUploads`; `maxDownloads`; uplink settings; per-link ceilings for links some backend
   uses; TLS implementation when more than one is available), then a domain.
-- Main loop: select by number; `[a]dd [e]dit [r]emove [g]lobals [w]rite [q]uit`. A domain prompts for
+- Main loop: a number alone edits that domain; `[a]dd`, `[r]emove N`, `[g]lobals`, `[w]rite`,
+  `[q]uit`. No answer is ever a letter and a number where a number says enough. A domain prompts for
   its name, `versioning` (default true), `symlinks`, `readOnly`, sizes, `maxCache` (default 1 GiB),
-  backends (type default `local`; field prompts from the driver's option spec; role default
+  then its backends and its frontends.
+- **Backends** are a list edited the same way (a number edits, `[a]dd`, `[r]emove N`, `[d]one`). An
+  empty list goes straight to the prompts of its first backend, since a domain needs one. Per
+  backend: type (default `local`); field prompts from the driver's option spec; role default
   `replica` for a cloud store once a `main` exists, else `main`; optional filling of s3/gcs fields
-  from a deployment's outputs, per [11 §11](11-infrastructure.md#11-outputs)), and frontends (from the frontend registry).
+  from a deployment's outputs, per [11 §11](11-infrastructure.md#11-outputs).
+- **Frontends** are one yes-or-no question per frontend whose descriptor offers it on this system
+  ([08 §2.1](08-frontends.md#21-frontend-descriptor) **wizard**), presenting ones first, with the
+  descriptor's question. On a domain with no frontend yet the default answer is yes for a presenting
+  frontend and no for the others; otherwise it is whether the domain has it. A yes prompts for the
+  options the descriptor says to ask, then asks once whether to go through its other options
+  (default no). A frontend the descriptor does not offer here (another system's, or one its host
+  configures itself, such as `android`) is never asked about, and an entry of that type already in
+  the file is kept as it is.
 - Prompts: blank keeps the current value; required fields are asked again; secrets are read without
   echo; an answer a field's own check refuses (a size, a port, a choice) is said and asked again. A
   blank answer to a field with no value writes nothing when the parser applies that default itself,
@@ -754,7 +788,7 @@ rows, shared by the Linux tray and the macOS menu so that the two cannot drift. 
 - On write: drop per-link settings no backend uses; validate with the parser's own rules
   ([05 §2](05-ops-config.md)) and refuse to write an invalid config (exit 1); write to a temporary
   file **created with mode 0600**, fsync, rename over the config, fsync the directory; tell the user
-  to `tsync restart`.
+  to restart the service (§2.7).
 
 ---
 
@@ -896,9 +930,20 @@ An implementation MUST exhibit:
 - **Menu.** [frontends/menu-model.md §8](frontends/menu-model.md#8-conformance).
 - **CLI parsing.** Shell completion offers configured domains and `DOMAIN:/` items that exist,
   folders ending in `/`, and every offer is accepted by the command; `ls` shows availability, name
-  and size per file and folders with a trailing `/`; a path command finds its domain's owner socket; a path under no domain is refused with exit 1 by `ls`,
-  `cache --evict` and `versions`. `tsync export` accepts and refuses the path spellings of
-  [05 §4.4](05-ops-config.md).
+  and size per file and folders with a trailing `/`; a path command finds its domain's owner socket.
+- **Path arguments (§5.2).** For a config with domains `media` (mounted at `/mnt/media`) and
+  `media:raw`: `media:/a//b/` and `media:a/b` name `a/b` in `media`; `media:` its root;
+  `media:raw:x` names `x` in `media:raw`; `:x` names `x` in the resolved domain; `other:x` is a local
+  path as a side and the relative path `other:x` in a domain; `/mnt/media/a/b` names `a/b` in
+  `media` in a domain and is local as a side; `/mnt/mediaX/a` and `/etc/passwd` are refused in a
+  domain. `cache`, `versions`, `share`, `trash`, `mirror --path` and `export` all accept
+  `DOMAIN:path`; tokens naming two domains, or one differing from `--domain`, are refused before
+  anything runs.
+- **Cache.** `cache --fetch` on a folder makes every file beneath it pinned and prints the count;
+  `cache --evict` makes them online only; a path that does not exist is reported and the remaining
+  paths still run, with exit 1.
+- **Wizard.** On a new config, answering only the required prompts yields a valid config whose
+  domain has this system's presenting frontend; no prompt offers `android`; a number alone edits.
 
 ---
 

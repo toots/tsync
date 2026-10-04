@@ -169,15 +169,20 @@ let trash_restore name path =
         1
 
 let trash apply purge restore name verbose =
-  match (purge, restore) with
-    | Some path, None -> run_job ?name verbose (Purge { apply; path })
-    | _ ->
-        set_verbose verbose;
-        run (fun () ->
-            match (purge, restore) with
-              | Some _, Some _ -> fail "--purge and --restore go one at a time"
-              | Some _, None | None, None -> trash_list name
-              | None, Some path -> trash_restore name path)
+  early (fun () ->
+      let name, paths =
+        paths_in_domain ?name (Option.to_list purge @ Option.to_list restore)
+      in
+      match (purge, restore, paths) with
+        | Some _, None, [path] -> run_job ?name verbose (Purge { apply; path })
+        | _ ->
+            set_verbose verbose;
+            run (fun () ->
+                match (purge, restore, paths) with
+                  | Some _, Some _, _ ->
+                      fail "--purge and --restore go one at a time"
+                  | None, Some _, [path] -> trash_restore name path
+                  | _ -> trash_list name))
 
 let trash_cmd =
   let purge =
@@ -279,49 +284,29 @@ let import_cmd =
     Term.(
       const import $ src $ only $ exclude $ force_rehash $ domain_arg $ verbose)
 
-(* [DOMAIN:PATH] names the domain side, [:PATH] the default domain's; anything
-   else is a local path, made absolute since the owner's directory is not
-   ours. *)
-let endpoint arg =
-  match String.index_opt arg ':' with
-    | Some i when not (String.contains (String.sub arg 0 i) '/') ->
-        let domain = String.sub arg 0 i
-        and path = String.sub arg (i + 1) (String.length arg - i - 1) in
-        let path =
-          String.concat "/"
-            (List.filter (( <> ) "") (String.split_on_char '/' path))
-        in
-        `Domain ((if domain = "" then None else Some domain), path)
-    | _ ->
-        `Local
-          (if Filename.is_relative arg then Filename.concat (Sys.getcwd ()) arg
-           else arg)
-
+(* 07 §5.2: a side is in a domain or local. *)
 let rsync src dst move dry_run name verbose =
-  let refuse msg =
-    prerr_endline ("tsync: " ^ msg);
-    2
-  in
-  let side = function
-    | `Domain (d, p) -> (d, true, p)
-    | `Local p -> (None, false, p)
-  in
-  let sd, src_in_domain, src = side (endpoint src)
-  and dd, dst_in_domain, dst = side (endpoint dst) in
-  match (sd, dd) with
-    | _ when not (src_in_domain || dst_in_domain) ->
-        refuse "one side must be in a domain (DOMAIN:PATH or :PATH)"
-    | Some a, Some b when a <> b ->
-        refuse "both sides must be in the same domain"
-    | Some d, _ | None, Some d ->
-        if name <> None && name <> Some d then
-          refuse "the domain named in a path differs from --domain"
-        else
-          run_job ~name:d verbose
-            (Rsync { src; src_in_domain; dst; dst_in_domain; move; dry_run })
-    | None, None ->
-        run_job ?name verbose
-          (Rsync { src; src_in_domain; dst; dst_in_domain; move; dry_run })
+  early (fun () ->
+      let config = config () in
+      let side token =
+        match Tsync_config.Domain_path.parse config token with
+          | In_domain { domain; rel } -> (domain, true, rel)
+          | Local path -> (None, false, path)
+      in
+      let sd, src_in_domain, src = side src
+      and dd, dst_in_domain, dst = side dst in
+      if not (src_in_domain || dst_in_domain) then (
+        prerr_endline
+          "tsync: one side must be in a domain (DOMAIN:PATH or :PATH)";
+        2)
+      else (
+        match Tsync_config.Domain_path.agree ?name [sd; dd] with
+          | Error e ->
+              prerr_endline ("tsync: " ^ e);
+              2
+          | Ok name ->
+              run_job ?name verbose
+                (Rsync { src; src_in_domain; dst; dst_in_domain; move; dry_run })))
 
 let rsync_cmd =
   let src =
@@ -366,15 +351,11 @@ let export args source jobs name verbose =
           if Filename.is_relative dir then Filename.concat (Sys.getcwd ()) dir
           else dir
         in
-        let paths =
-          match List.rev rpaths with
-            | [] -> [""]
-            | l ->
-                List.map
-                  (fun p ->
-                    String.concat "/"
-                      (List.filter (( <> ) "") (String.split_on_char '/' p)))
-                  l
+        early @@ fun () ->
+        let name, paths =
+          match paths_in_domain ?name (List.rev rpaths) with
+            | name, [] -> (name, [""])
+            | named -> named
         in
         run (fun () ->
             let config = config () in
@@ -435,15 +416,11 @@ let mirror source skip_chunks path name verbose =
   if skip_chunks && path <> None then (
     prerr_endline "tsync: --skip-chunks and --path go one at a time";
     2)
-  else (
-    let path =
-      Option.map
-        (fun p ->
-          String.concat "/"
-            (List.filter (( <> ) "") (String.split_on_char '/' p)))
-        path
-    in
-    run_job ?name verbose (Mirror { source; skip_chunks; path }))
+  else
+    early (fun () ->
+        let name, paths = paths_in_domain ?name (Option.to_list path) in
+        run_job ?name verbose
+          (Mirror { source; skip_chunks; path = List.nth_opt paths 0 }))
 
 let mirror_cmd =
   let source =
@@ -475,6 +452,8 @@ let mirror_cmd =
 
 let share path expires token revoke clear name verbose =
   set_verbose verbose;
+  early @@ fun () ->
+  let name, paths = paths_in_domain ?name (Option.to_list path) in
   run (fun () ->
       let config = config () in
       let dom = domain ?name config in
@@ -496,12 +475,8 @@ let share path expires token revoke clear name verbose =
             let n, bytes = ask Tsync_owner.Protocol.Share_clear_cache in
             say "%d cached share objects deleted (%s)" n (Narrate.size bytes);
             0
-        | None, false, path ->
-            let rel =
-              String.concat "/"
-                (List.filter (( <> ) "")
-                   (String.split_on_char '/' (Option.value ~default:"" path)))
-            in
+        | None, false, _ ->
+            let rel = Option.value ~default:"" (List.nth_opt paths 0) in
             let r =
               ask
                 (Tsync_owner.Protocol.Share { item = Rel rel; expires; token })
@@ -627,6 +602,9 @@ end
 
 let versions path revert version name verbose =
   set_verbose verbose;
+  early @@ fun () ->
+  let name, paths = paths_in_domain ?name (Option.to_list path) in
+  let path = List.nth_opt paths 0 in
   run (fun () ->
       let config = config () in
       match (revert, path) with
@@ -666,8 +644,82 @@ let versions_cmd =
        back."
     Term.(const versions $ path $ revert $ version $ domain_arg $ verbose)
 
+(* 07 §5.3: each path is one bulk request to the owner; a failed path does not
+   stop the others. *)
+let cache evict fetch keep paths name verbose =
+  set_verbose verbose;
+  match (evict, fetch) with
+    | true, true | false, false ->
+        prerr_endline "tsync: cache needs one of --evict and --fetch";
+        2
+    | _ when keep <> None && evict ->
+        prerr_endline "tsync: --keep goes with --fetch";
+        2
+    | _ ->
+        early @@ fun () ->
+        let name, rels = paths_in_domain ?name paths in
+        run (fun () ->
+            let config = config () in
+            let dom = domain ?name config in
+            let shown rel =
+              if rel = "" then Domain_name.to_string dom.name else rel
+            in
+            let one rel =
+              match
+                Tsync_owner.Owner.request ~bulk:true ~what:"tsync cache" config
+                  dom
+                  (if evict then Tsync_owner.Protocol.Evict (Rel rel)
+                   else Restore { item = Rel rel; keep })
+              with
+                | (r : Tsync_owner.Protocol.counted) ->
+                    say "%s: %s %s%s" (shown rel)
+                      (Narrate.count r.succeeded "file")
+                      (if evict then "online only" else "available offline")
+                      (if r.failed > 0 then
+                         Printf.sprintf ", %d failed" r.failed
+                       else "");
+                    r.failed = 0
+                | exception (Fail.E _ as e) ->
+                    prerr_endline
+                      ("tsync: " ^ shown rel ^ ": " ^ (Fail.classify e).reason);
+                    false
+            in
+            if List.for_all Fun.id (List.map one rels) then 0 else 1)
+
+let cache_cmd =
+  let evict =
+    Arg.(
+      value & flag
+      & info ["evict"]
+          ~doc:
+            "Make the paths online only: drop their content from this machine.")
+  and fetch =
+    Arg.(
+      value & flag
+      & info ["fetch"]
+          ~doc:
+            "Make the paths available offline: download and keep their content.")
+  and keep =
+    Arg.(
+      value
+      & opt (some duration) None
+      & info ["keep"] ~docv:"DUR"
+          ~doc:"With --fetch, how long the content is kept (10d by default).")
+  and paths =
+    Arg.(
+      non_empty & pos_all string []
+      & info [] ~docv:"PATH"
+          ~doc:"Files or folders of the domain; a folder covers its subtree.")
+  in
+  cmd "cache"
+    ~doc:
+      "Make files online only or available offline on this machine (exit 1 if \
+       any failed)."
+    Term.(const cache $ evict $ fetch $ keep $ paths $ domain_arg $ verbose)
+
 let cmds =
   [
+    cache_cmd;
     versions_cmd;
     gc_cmd;
     expire_cmd;

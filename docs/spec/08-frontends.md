@@ -61,16 +61,22 @@ holds:
 - **commands**: `(verb, doc, run(domain, positional args))`, exposed as `tsync <group> <verb>`.
   Each verb declares its access class ([07 §2.5](07-daemon-cli.md)). The binary resolves `--domain`
   and checks the frontend is configured for it; the frontend parses its own arguments.
+- **wizard**: how `tsync config --edit` offers the frontend
+  ([07 §5.9](07-daemon-cli.md#59-config-wizard-tsync-config---edit)), or nothing for a frontend its
+  host configures itself, which the wizard never offers. It holds the **systems** it is offered on
+  (`linux`, `macos`), the yes-or-no **question** that adds it to a domain, and the **options asked**
+  on a yes; the remaining options sit behind one more question. Whether the answer defaults to yes
+  on a new domain follows from the kind (presenting: yes).
 - **option spec**: each option's name, label, type, default and secret flag. The config parser
   refuses keys not in the spec ([05 §2.1](05-ops-config.md)); the wizard prompts from it; secrets
   are masked in reports.
 
-| name | kind | topology | serving | tree | commands |
-|---|---|---|---|---|---|
-| fuse | presenting | per-domain | Daemon | Replicated | — |
-| file_provider | presenting | shared | Daemon | Replicated | reimport, reset, purge |
-| http-proxy | store-serving | — | Daemon | — | — |
-| android | presenting | per-domain | Commands | Pulled | stat, list, read, open, residency, fetch, write-whole, create, mkdir, delete, rmdir, rename, share, request, status |
+| name | kind | topology | serving | tree | wizard | commands |
+|---|---|---|---|---|---|---|
+| fuse | presenting | per-domain | Daemon | Replicated | linux; "mount it as a folder on this machine"; asks nothing | — |
+| file_provider | presenting | shared | Daemon | Replicated | macos; "show it in Finder on this machine"; asks nothing | reimport, reset, purge |
+| http-proxy | store-serving | — | Daemon | — | linux, macos; "serve it to other machines over HTTPS"; asks `port`, `secret`, `ssl_certificate`, `ssl_certificate_key`, `shares` | — |
+| android | presenting | per-domain | Commands | Pulled | never offered: the app writes its own config | stat, list, read, open, residency, fetch, write-whole, create, mkdir, delete, rmdir, rename, share, request, status |
 
 Availability is computed by the core ([04 §3.6](04-checkout-cache.md#36-stat-and-availability));
 a frontend's spec may refine it with its own replica (File Provider).

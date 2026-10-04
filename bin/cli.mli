@@ -35,3 +35,11 @@ val cmd : string -> doc:string -> 'a Cmdliner.Term.t -> 'a Cmdliner.Cmd.t
 (** Run an owner job (07 §2.5), streaming its lines; the first interrupt cancels
     it at its next unit boundary, the second exits at once. *)
 val run_job : ?name:string -> bool -> Tsync_owner.Jobs.t -> int
+
+(** The domain and the domain-relative paths that [--domain] and a command's
+    path tokens name (07 §5.2); a refusal exits 1. *)
+val paths_in_domain : ?name:string -> string list -> string option * string list
+
+(** Answers the status of a body that may {!fail} before {!run} or {!run_job}
+    takes over. *)
+val early : (unit -> int) -> int

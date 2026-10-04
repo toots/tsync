@@ -9,7 +9,7 @@ host the handler are in [07-daemon-cli.md](07-daemon-cli.md).
 
 | Spec | Code |
 |---|---|
-| Descriptor and registry (§2.1) | `Tsync_config.Frontend`: `register`, `find`, `names`, and `t` with `fields`, `presenting`, `commands_only`, `pulled`, `group`, `commands`. Each frontend's `*_options.ml` registers at module initialisation: `Fuse_options`, `Http_proxy_options`, `File_provider_options`, `Android_options`. |
+| Descriptor and registry (§2.1) | `Tsync_config.Frontend`: `register`, `find`, `names`, and `t` with `fields`, `wizard`, `presenting`, `commands_only`, `pulled`, `group`, `commands`. Each frontend's `*_options.ml` registers at module initialisation: `Fuse_options`, `Http_proxy_options`, `File_provider_options`, `Android_options`. |
 | What is linked | `lib/catalog/dune`: a `select` per optional library whose two alternatives are empty files; every frontend library is `(library_flags (-linkall))`. `bin/dune` links `tsync_catalog`. |
 | Hosting a presenting frontend (§3.1) | `Owner.present` (the hooks, and what presents once the socket serves), `Owner.host`, `register_host`, `host_for`. `Fuse_mount` and `File_provider_host` register one. |
 | Item references (§2.2) | `Protocol.target` (`Ref`, `Rel`, `Child`); `Handler` `resolve_ref`, `resolve_rel`, `destination`, `target`; `Handler.path_of_ref`. |

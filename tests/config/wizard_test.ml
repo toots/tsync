@@ -55,17 +55,15 @@ let finish label j =
 let () =
   p "== a new config\n";
   finish "new"
-    (Config_wizard.edit
+    (Config_wizard.edit ~system:`Linux
        (scripted
           [
             ("client name", ["laptop"]);
             ("domain name", ["docs"]);
-            ("backends:", ["a"; "d"]);
             ("type (", ["local"]);
             ("backend name", ["main"]);
             ("Store root", ["/srv/docs"]);
-            ("frontends:", ["a"; "d"]);
-            ("frontend (", ["http-proxy"]);
+            ("(http-proxy)", ["yes"]);
             ("Port", ["5446"]);
             ("Shared secret", [String.make 32 'a']);
             ("[w]rite", ["w"]);
@@ -83,34 +81,48 @@ let () =
                        "url":"https://far.example:5446","secret":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}]}]}|}
   in
   finish "edit"
-    (Config_wizard.edit
+    (Config_wizard.edit ~system:`Linux
        (scripted
           [
-            ("[w]rite", ["e 1"; "w"]);
+            ("[w]rite", ["1"; "w"]);
             ("cache limit", ["2 GiB"]);
             ("backends:", ["a"; "d"]);
             ("type (", ["local"]);
             ("backend name", ["copy"]);
             ("role", [""]);
             ("Store root", ["/srv/copy"]);
-            ("frontends:", ["d"]);
           ])
        (Some existing));
   p "\n== invalid answers are asked again\n";
   finish "invalid"
-    (Config_wizard.edit
+    (Config_wizard.edit ~system:`Linux
        (scripted
           [
             ("[w]rite", ["e 1"; "w"]);
             ("symlinks", ["sometimes"; "skip"]);
             ("cache limit", ["lots"]);
-            ("backends:", ["d"]);
-            ("frontends:", ["d"]);
+            ("backends:", ["7"; "d"]);
+            ("(fuse)", ["maybe"; "no"]);
           ])
        (Some existing));
   p "\n== quit\n";
   finish "quit"
-    (Config_wizard.edit (scripted [("[w]rite", ["q"])]) (Some existing));
+    (Config_wizard.edit ~system:`Linux
+       (scripted [("[w]rite", ["q"])])
+       (Some existing));
+  p "\n== what each system offers; an entry it does not offer is kept\n";
+  List.iter
+    (fun (label, system) ->
+      p "%s: %s\n" label
+        (String.concat ", " (List.map fst (Frontend.offered system))))
+    [("linux", `Linux); ("macos", `Macos)];
+  finish "kept"
+    (Config_wizard.edit ~system:`Macos
+       (scripted [("[w]rite", ["1"; "w"]); ("backends:", ["d"])])
+       (Some
+          (Yojson.Safe.from_string
+             {|{"domains":[{"name":"docs","symlinks":"keep","versioning":true,"frontends":["fuse"],
+                "backends":[{"type":"local","name":"main","role":"main","path":"/srv/docs"}]}]}|})));
   p "\n== a deployment's outputs\n";
   let outputs =
     {|{"stores":{"value":{

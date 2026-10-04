@@ -23,28 +23,26 @@ parentheses are the spec's. The request handler itself is in [08-frontends.md](0
 | Sockets, envelopes, deadlines (§4.1–§4.3) | `Tsync_ipc.Ipc`: `serve`, `close`, `publish`, `subscribers`, `Client`, `call`, `call_bulk`, `call_stream`, `advisory`, `ok`, `failure`. |
 | Supervisor socket (§4.4) | `Supervisor` `handle`: `stop`, `stats`, `report`, `uplink`. |
 | Job reports and registry (§4.6) | `Handler` `send_report` through `Ipc.advisory`; `Supervisor` `record_job`, `live_jobs`. |
-| CLI conventions (§5.1) | `Cli`: `domain`, `run`, `fail`, `Exit_with`, `verbose`, `duration`, `run_job`; `Display`; `Narrate`. |
+| CLI conventions (§5.1) | `Cli`: `domain`, `run`, `early`, `fail`, `Exit_with`, `verbose`, `duration`, `run_job`; `Display`; `Narrate`. |
+| Path arguments (§5.2) | `Tsync_config.Domain_path`: `parse` (a side), `in_domain`, `agree`; `Cli.paths_in_domain` is what every in-domain command calls. |
 | Commands (§5.3) | `Daemon_cmds`, `Status_cmd`, `Domain_cmds`, `Store_cmds`, `Setup_cmds`. Frontend groups: `Daemon_cmds.frontend_cmds`, from `Frontend.t.commands`. |
 | `tsync stop` (§5.4) | `Daemon_cmds.stop`, `wait_gone`, `owner_sockets`. |
 | `tsync status` (§5.5) | `Status_cmd.report`, `fold_owners`; `Supervisor` `machine_report`; `Report.domain_body`, `Report.traffic`; `Self_report.self`; the types of `Status_report`; `Status_text.render`. |
-| Logging (§5.7) | `Log`: `min_level`, `prefix`, `sink`, `once`, `recent`. |
+| Logging (§5.7) | `Log`: `min_level`, `prefix`, `sink` (stderr, replaced only by the Android host), `once`, `recent`. The reader `tsync logs` executes and `build-info` prints as `service log:` is `Setup_cmds.log_reader`; the macOS redirection is `Daemon_cmds.log_to_service_file`. |
 | Menu model (§5.8) | `Tsync_menu.Menu_model` (`render`, `stats`), in `lib/menu`; see [frontends/linux-desktop.md §2](frontends/linux-desktop.md#2-the-menu-model). |
-| Config wizard (§5.9) | `Config_wizard.edit`, `prepare`; `Setup_cmds.edit_config` writes with `Fs.durable_replace ~perm:0o600`. |
+| Config wizard (§5.9) | `Config_wizard.edit` (`?system` for tests), `prepare`; the frontends offered are `Frontend.offered`; `Setup_cmds.edit_config` writes with `Fs.durable_replace ~perm:0o600`. |
 | Maintenance (§6) | `Owner` `housekeeping`: every 60 s the engine's `poll` and `trim_cache`, `rearm` every `Dqueue.rearm_interval`; daily `Export.sweep_records`, `prune_applied`, `daily_maintenance`. |
 
 ## Where the code departs from the spec
 
-- **Commands.** `ls`, `cache` and `set-aside` do not exist, nor do the `prune` and `set_aside`
-  actions. `sync` takes no `--source` and no `-j`.
+- **Commands.** `ls`, `cache --prune` and `set-aside` do not exist, nor do the `prune` and
+  `set_aside` actions; `cache` has `--evict` and `--fetch` (`Store_cmds.cache`). `sync` takes no `--source` and no `-j`.
 - **Status totals.** `status` takes `--json` and `-w` only. The supervisor forwards the `stats`
   argument, and an owner ignores it (`Owner` `stats_reply`): `Status_report` has no store totals.
 - **Status self-description.** `Status_report.self` has no `pools` and no `backend` block. With no
   supervisor, `Status_cmd.fold_owners` reports no uplinks, no jobs and no warnings.
 - **Jobs.** One job runs per domain at a time (`Handler` `run_job`): a second one is refused
   `busy` whether or not it would conflict. A job's report carries its fraction as counts out of 100.
-- **Logging.** There is no syslog sink. Every process logs to stderr, `build-info` prints
-  `log sink: stderr`, and `tsync logs` reads `journalctl -t tsync`, so the Linux service depends on
-  its unit sending stderr to the journal.
 - **Progress on a terminal** is one line redrawn in place with the elapsed time (`Display`), not a
   block with a bar.
 - **Loop death (§3.7).** The runtime is a pool of domains with no single loop to die. A failing

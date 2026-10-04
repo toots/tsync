@@ -69,6 +69,13 @@ let () =
   Tsync_config.Frontend.register "fuse"
     {
       fields;
+      wizard =
+        Some
+          {
+            systems = [`Linux];
+            question = "mount it as a folder on this machine";
+            asks = [];
+          };
       presenting = Some `Per_domain;
       commands_only = None;
       pulled = None;

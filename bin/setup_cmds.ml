@@ -111,7 +111,8 @@ let edit_config () =
                   Fs.mkdir_p (Filename.dirname path);
                   Fs.durable_replace ~perm:0o600 path
                     (Yojson.Safe.pretty_to_string j ^ "\n");
-                  say "written to %s; run tsync restart to apply it" path;
+                  say "written to %s; restart the tsync service to apply it"
+                    path;
                   0))
 
 let config_cmd =
@@ -149,6 +150,13 @@ let default_domain_cmd =
   cmd "default-domain" ~doc:"Set, clear or print the default domain."
     Term.(const default_domain $ name $ clear)
 
+(* 07 §2.7: the platform's reader of the service log, shared by [logs] and
+   [build-info]. *)
+let log_reader () =
+  if Fs.is_macos then
+    ["tail"; Filename.concat (Paths.home ()) "Library/Logs/tsync-daemon.log"]
+  else ["journalctl"; "-t"; "tsync"]
+
 let build_info () =
   say "frontends: %s" (String.concat ", " (Frontend.names ()));
   say "drivers: %s" (String.concat ", " (Tsync_store.Driver.names ()));
@@ -158,7 +166,7 @@ let build_info () =
       | l ->
           String.concat ", "
             (List.map Tsync_http.Transport.impl_name (List.sort compare l)));
-  say "log sink: stderr";
+  say "service log: %s" (String.concat " " (log_reader ()));
   say "config: %s" (Paths.config_file ());
   say "data: %s" (Paths.data_dir ());
   say "cache: %s" (Paths.cache_root ());
@@ -173,13 +181,12 @@ let build_info_cmd =
 
 let logs follow lines =
   let args =
-    if Fs.is_macos then
-      ["tail"; "-n"; string_of_int lines]
-      @ (if follow then ["-f"] else [])
-      @ [Filename.concat (Paths.home ()) "Library/Logs/tsync-daemon.log"]
-    else
-      ["journalctl"; "-t"; "tsync"; "-n"; string_of_int lines]
-      @ if follow then ["-f"] else []
+    match log_reader () with
+      | reader :: target ->
+          reader :: "-n" :: string_of_int lines
+          :: (if follow then ["-f"] else [])
+          @ target
+      | [] -> []
   in
   try Unix.execvp (List.hd args) (Array.of_list args)
   with Unix.Unix_error (e, _, _) ->

@@ -580,9 +580,9 @@ is served again as soon as the app re-adds it.
 5. removes the CLI link when it may; when the link is owned by root it prints the command that
    removes it. The link is tested without following it, since it dangles by then.
 
-`tsync restart` restarts the owner through the service manager's own restart (never a signal matched
-by process name: the owner's binary lives inside the app bundle) and launches the app if it is not
-running.
+The owner is restarted by the service manager's own command
+([07 §2.7](../07-daemon-cli.md#27-runtime-paths)), never by a signal matched by process name: the
+owner's binary lives inside the app bundle. tsync has no restart command.
 
 ## 10. Menu bar
 
@@ -635,7 +635,7 @@ submenu shows the model's placeholder row.
   login, sends its output to the service log, and is restarted on any unclean exit. With no config, or no domain
   configured (every fresh install), the service still serves the request socket, answering `menu`
   with "No domains configured" and holding the app's subscription: the app then needs no other path
-  to learn of the first domain, which takes effect at `tsync restart` like any configuration change. A
+  to learn of the first domain, which takes effect when the service is restarted, like any configuration change. A
   leftover request socket is removed before the owner binds: a stale socket makes callers believe the
   owner is running.
 - The agent cannot be bundled and registered by the app: the system lets a sandboxed app register

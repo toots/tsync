@@ -116,7 +116,7 @@ pkg at least once, not only via `make deploy`.
 log stream --predicate 'subsystem == "org.feverdreamtv.tsync"' --level info   # app and extension
 tail -f ~/Library/Logs/tsync-daemon.log                        # the service
 launchctl print "gui/$UID/org.feverdreamtv.tsync.daemon"      # agent state
-tsync restart                                                  # restart it
+launchctl kickstart -k "gui/$UID/org.feverdreamtv.tsync.daemon"   # restart it
 ```
 
 The extension has to be approved once in **System Settings → General → Login Items

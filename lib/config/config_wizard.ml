@@ -246,6 +246,19 @@ let backend io ~has_main b =
 
 let list_of j k = match get j k with Some (`List l) -> l | _ -> []
 
+(* A pick of the list: [N] or [e N] edits, [r N] removes. *)
+let pick ~count s =
+  let number n =
+    match int_of_string_opt n with
+      | Some i when i >= 1 && i <= count -> Some (i - 1)
+      | _ -> None
+  in
+  match List.filter (( <> ) "") (String.split_on_char ' ' s) with
+    | [n] | ["e"; n] -> Option.map (fun i -> `Edit i) (number n)
+    | ["r"; n] -> Option.map (fun i -> `Remove i) (number n)
+    | _ -> None
+
+(* An empty list goes straight to its first item: a domain needs one. *)
 let edit_list io ~noun ~describe ~one items =
   let rec loop items =
     List.iteri
@@ -255,7 +268,9 @@ let edit_list io ~noun ~describe ~one items =
       String.trim
         (io.ask
            {
-             label = Printf.sprintf "%s: [a]dd [e]dit N [r]emove N [d]one" noun;
+             label =
+               Printf.sprintf "%s: a number to edit, [a]dd, [r]emove N, [d]one"
+                 noun;
              default = Some "d";
              secret = false;
            })
@@ -263,26 +278,90 @@ let edit_list io ~noun ~describe ~one items =
       | "" | "d" -> items
       | "a" -> loop (items @ [one items (`Assoc [])])
       | s -> (
-          match String.split_on_char ' ' s with
-            | [(("e" | "r") as c); n] -> (
-                match int_of_string_opt n with
-                  | Some i when i >= 1 && i <= List.length items ->
-                      if c = "e" then
-                        loop
-                          (List.mapi
-                             (fun k x -> if k = i - 1 then one items x else x)
-                             items)
-                      else loop (List.filteri (fun k _ -> k <> i - 1) items)
-                  | _ ->
-                      io.say "no such number";
-                      loop items)
-            | _ ->
-                io.say "a, e N, r N or d";
+          match pick ~count:(List.length items) s with
+            | Some (`Edit i) ->
+                loop
+                  (List.mapi
+                     (fun k x -> if k = i then one items x else x)
+                     items)
+            | Some (`Remove i) -> loop (List.filteri (fun k _ -> k <> i) items)
+            | None ->
+                io.say "a number of the list, a, r N or d";
                 loop items)
   in
-  loop items
+  loop (if items = [] then [one [] (`Assoc [])] else items)
 
-let domain io d =
+let rec yes io ~default label =
+  match
+    Config.bool_of_string_opt
+      (match
+         String.trim
+           (io.ask
+              {
+                label;
+                default = Some (if default then "yes" else "no");
+                secret = false;
+              })
+       with
+        | "" -> string_of_bool default
+        | a -> a)
+  with
+    | Some b -> b
+    | None ->
+        io.say "answer yes or no";
+        yes io ~default label
+
+let frontend_type = function
+  | `String t -> Some t
+  | f -> Option.bind (get f "type") show
+
+(* 07 §5.9: one question per frontend this system offers; an entry of another
+   type is kept as it is. A new domain starts with the presenting one. *)
+let frontends io ~system current =
+  let offered = Frontend.offered system in
+  let kept =
+    List.filter
+      (fun f ->
+        not (List.exists (fun (name, _) -> frontend_type f = Some name) offered))
+      current
+  in
+  let asked =
+    List.filter_map
+      (fun (name, (fe : Frontend.t)) ->
+        let w = Option.get fe.wizard in
+        let existing =
+          List.find_opt (fun f -> frontend_type f = Some name) current
+        in
+        let default =
+          if current = [] then fe.presenting <> None else existing <> None
+        in
+        if not (yes io ~default (Printf.sprintf "%s (%s)" w.question name)) then
+          None
+        else (
+          let f =
+            match existing with
+              | Some (`Assoc _ as f) -> f
+              | _ -> `Assoc [("type", `String name)]
+          in
+          let basic, other =
+            List.partition
+              (fun (s : Field_spec.field) -> List.mem s.name w.asks)
+              fe.fields
+          in
+          let f = spec_fields io f basic in
+          let f =
+            if
+              other <> []
+              && yes io ~default:false (Printf.sprintf "%s: other options" name)
+            then spec_fields io f other
+            else f
+          in
+          Some (if fields f = [("type", `String name)] then `String name else f)))
+      offered
+  in
+  kept @ asked
+
+let domain io ~system d =
   let d = field io d ~required:true "name" "domain name" String in
   let d =
     field io d "versioning" "versioning" ~default:"true" ~write_default:true
@@ -326,33 +405,7 @@ let domain io d =
       (list_of d "backends")
   in
   let d = set d "backends" (`List backends) in
-  let types = Frontend.names () in
-  let frontends =
-    edit_list io ~noun:"frontends"
-      ~describe:(function
-        | `String t -> t
-        | f -> Option.value ~default:"?" (Option.bind (get f "type") show))
-      ~one:(fun _ f ->
-        let f =
-          match f with `String t -> `Assoc [("type", `String t)] | f -> f
-        in
-        let t =
-          choose io ~label:"frontend"
-            ~default:
-              (Option.value ~default:(List.hd types)
-                 (Option.bind (get f "type") show))
-            types
-        in
-        let f = set f "type" (`String t) in
-        let f =
-          match Frontend.find t with
-            | Some fe -> spec_fields io f fe.fields
-            | None -> f
-        in
-        if fields f = [("type", `String t)] then `String t else f)
-      (list_of d "frontends")
-  in
-  set d "frontends" (`List frontends)
+  set d "frontends" (`List (frontends io ~system (list_of d "frontends")))
 
 let links_used j =
   List.concat_map
@@ -407,7 +460,8 @@ let describe_domain d =
     (Option.value ~default:"?" (Option.bind (get d "name") show))
     (List.length (list_of d "backends"))
 
-let edit io start =
+let edit ?(system = Frontend.system ()) io start =
+  let domain = domain io ~system in
   let j =
     match start with
       | Some (`Assoc _ as j) -> j
@@ -416,7 +470,7 @@ let edit io start =
           io.say
             "A new config: first the settings for this machine, then a domain.";
           let j = globals io (`Assoc []) in
-          set j "domains" (`List [domain io (`Assoc [])])
+          set j "domains" (`List [domain (`Assoc [])])
   in
   let rec loop j =
     let ds = list_of j "domains" in
@@ -429,33 +483,32 @@ let edit io start =
       String.trim
         (io.ask
            {
-             label = "[a]dd [e]dit N [r]emove N [g]lobals [w]rite [q]uit";
+             label =
+               "a number to edit that domain, [a]dd, [r]emove N, [g]lobals, \
+                [w]rite, [q]uit";
              default = None;
              secret = false;
            })
     with
-      | "a" -> loop (set j "domains" (`List (ds @ [domain io (`Assoc [])])))
+      | "a" -> loop (set j "domains" (`List (ds @ [domain (`Assoc [])])))
       | "g" -> loop (globals io j)
       | "w" -> Some j
       | "q" -> None
       | s -> (
-          match String.split_on_char ' ' s with
-            | [(("e" | "r") as c); n] -> (
-                match int_of_string_opt n with
-                  | Some i when i >= 1 && i <= List.length ds ->
-                      let ds =
-                        if c = "e" then
-                          List.mapi
-                            (fun k d -> if k = i - 1 then domain io d else d)
-                            ds
-                        else List.filteri (fun k _ -> k <> i - 1) ds
-                      in
-                      loop (set j "domains" (`List ds))
-                  | _ ->
-                      io.say "no such domain";
-                      loop j)
-            | _ ->
-                io.say "a, e N, r N, g, w or q";
+          match pick ~count:(List.length ds) s with
+            | Some (`Edit i) ->
+                loop
+                  (set j "domains"
+                     (`List
+                        (List.mapi
+                           (fun k d -> if k = i then domain d else d)
+                           ds)))
+            | Some (`Remove i) ->
+                loop
+                  (set j "domains"
+                     (`List (List.filteri (fun k _ -> k <> i) ds)))
+            | None ->
+                io.say "a number of the list, a, r N, g, w or q";
                 loop j)
   in
   loop j
