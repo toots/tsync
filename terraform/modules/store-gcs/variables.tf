@@ -1,6 +1,12 @@
 variable "name" {
   type        = string
-  description = "Logical store name; suffixes SA/function names, so keep it short and unique ([a-z0-9-])."
+  description = "Logical store name; suffixes service-account and function names."
+
+  # "tsync-client-<name>" has to be a service account id: 30 characters at most.
+  validation {
+    condition     = can(regex("^[a-z]([a-z0-9-]{0,15}[a-z0-9])?$", var.name))
+    error_message = "A GCS store name is 1 to 17 lowercase letters, digits and dashes, starting with a letter and not ending with a dash."
+  }
 }
 
 variable "bucket" {
@@ -11,6 +17,7 @@ variable "bucket" {
 variable "create_bucket" {
   type        = bool
   default     = true
+  nullable    = false
   description = "Create and manage the bucket (uniform access, public access prevented). False = use a pre-existing bucket; its access settings and lifecycle are left untouched."
 }
 
@@ -28,12 +35,6 @@ variable "custom_domain" {
   type        = string
   default     = null
   description = "Vanity domain for share links (e.g. share.example.org). null = raw function URL. Requires the parent domain to be verified for the deploying account; see domain.tf."
-}
-
-variable "manage_lifecycle" {
-  type        = bool
-  default     = true
-  description = "Manage the bucket lifecycle (abandoned-upload cleanup + archive_domains). Only applies when create_bucket = true — GCS lifecycle is a property of the bucket, not a separate resource."
 }
 
 variable "archive_domains" {
@@ -91,14 +92,16 @@ variable "archive_domains" {
 
 variable "presign_ttl" {
   type        = number
-  default     = 600
+  default     = 300
+  nullable    = false
   description = "Lifetime (seconds) of the V4 signed download URL."
 }
 
-variable "memory_mb" {
+variable "share_memory_mb" {
   type        = number
   default     = 2048
-  description = "Function memory (MB). Note: on Cloud Functions gen2, /tmp is RAM-backed, so folder-zip assembly is bounded by this — keep max_share_bytes below it."
+  nullable    = false
+  description = "Memory for the share function. Its /tmp is memory, so this is also where a folder archive is built."
 }
 
 variable "timeout_seconds" {
@@ -108,8 +111,9 @@ variable "timeout_seconds" {
 
 variable "max_share_bytes" {
   type        = number
-  default     = 10737418240 # 10 GiB
-  description = "Reject assembling a single file or folder zip larger than this (bytes) with 413. Keep below memory_mb for folder zips (see memory_mb)."
+  default     = 1073741824 # 1 GiB
+  nullable    = false
+  description = "Refuse a file or folder larger than this (bytes) with 413. At most share_memory_mb less 512 MB."
 }
 
 variable "source_bucket" {
@@ -117,14 +121,9 @@ variable "source_bucket" {
   description = "GCS bucket holding the function source zip."
 }
 
-variable "source_zip" {
+variable "source_object" {
   type        = string
-  description = "Path to the packaged handler zip (built once at the root)."
-}
-
-variable "source_hash" {
-  type        = string
-  description = "base64 sha256 of the source zip, for redeploy detection."
+  description = "Name of the function package in source_bucket. It is named by its hash, so a new package is a new name."
 }
 
 # ── Chunk verification ─────────────────────────────────────────────────────
@@ -132,12 +131,14 @@ variable "source_hash" {
 variable "verify_timeout_seconds" {
   type        = number
   default     = 120
+  nullable    = false
   description = "Timeout for the chunk verifier. One chunk per upload event, or one batch of chunk deletes per gc request, so this is a stall guard rather than a budget."
 }
 
 variable "verify_memory_mb" {
   type        = number
   default     = 512
+  nullable    = false
   description = "Memory for the chunk verifier; the work is dominated by reading one chunk."
 }
 
@@ -146,15 +147,17 @@ variable "project" {
   description = "GCP project id. Needed explicitly for the project-level IAM binding the chunk verifier's trigger requires; every other resource here takes it from the provider."
 }
 
-variable "verify_max_instances" {
+variable "verify_max_concurrency" {
   type        = number
   default     = 32
+  nullable    = false
   description = "Ceiling on concurrent chunk-verifier instances. A whole-store sweep makes one request per shard (4096) deliverable at once; this is what stops that from being 4096 concurrent readers."
 }
 
 variable "deploy_share" {
-  type    = bool
-  default = true
+  type     = bool
+  default  = true
+  nullable = false
   # False deploys the verification half alone: the chunk verifier, its trigger
   # and the client credentials, without the share function or the public
   # endpoint that fronts it. That is what a bucket used only for testing wants —

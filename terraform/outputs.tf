@@ -1,66 +1,46 @@
-# Non-secret config per store. Wire each onto the matching tsync s3 backend:
-#   bucket / region / accessKeyId, and shareUrl = share_url.
+# Member names are the backend's own field names, so a store's entry here and in
+# store_secrets merge into a tsync backend with nothing translated.
 output "stores" {
-  description = "Per-store bucket, share_url, and access_key_id."
-  value = {
-    for k, m in module.store : k => {
-      bucket        = m.bucket
-      region        = var.region
-      share_url     = m.share_url
-      access_key_id = m.access_key_id
-    }
-  }
+  description = "Per store: its backend type and every non-secret backend field the deployment decides."
+  value = merge(
+    {
+      for name, store in module.store : name => merge(
+        {
+          type        = "s3"
+          bucket      = store.bucket
+          region      = store.region
+          accessKeyId = store.access_key_id
+        },
+        store.share_url == null ? {} : { shareUrl = store.share_url },
+      )
+    },
+    {
+      for name, store in module.store_gcs : name => merge(
+        {
+          type   = "gcs"
+          bucket = store.bucket
+        },
+        store.share_url == null ? {} : { shareUrl = store.share_url },
+      )
+    },
+  )
 }
 
-# DNS records to add at your provider for stores with a custom_domain. Only
-# populated for those stores; empty otherwise.
+output "store_secrets" {
+  description = "Per store: the secret fields of its backend."
+  sensitive   = true
+  value = merge(
+    { for name, store in module.store : name => { secretAccessKey = store.secret_access_key } },
+    { for name, store in module.store_gcs : name => { serviceAccountKey = store.service_account_key } },
+  )
+}
+
 output "custom_domain_dns" {
-  description = "Per-store DNS records to create for the custom domain (ACM validation + the domain CNAME target)."
+  description = "Per store with a custom domain: the domain and the DNS records to publish."
   value = {
-    for k, m in module.store : k => {
-      acm_validation = m.acm_validation_records
-      cname_target   = m.custom_domain_target
-    } if m.custom_domain != null
-  }
-}
-
-# Read one with:
-#   terraform output -json secret_access_keys | jq -r '.["<store>"]'
-output "secret_access_keys" {
-  description = "Per-store s3 backend secretAccessKey."
-  sensitive   = true
-  value       = { for k, m in module.store : k => m.secret_access_key }
-}
-
-# ── GCS stores ─────────────────────────────────────────────────────────────
-# Wire each onto the matching tsync gcs backend: bucket / shareUrl.
-output "gcs_stores" {
-  description = "Per-GCS-store bucket and share_url."
-  value = {
-    for k, m in module.store_gcs : k => {
-      bucket    = m.bucket
-      share_url = m.share_url
-    }
-  }
-}
-
-# The gcs backend `serviceAccountKey` (JSON) per store. Read one with:
-#   terraform output -json gcs_service_account_keys | jq -r '.["<store>"]'
-output "gcs_service_account_keys" {
-  description = "Per-GCS-store gcs backend serviceAccountKey (JSON)."
-  sensitive   = true
-  value       = { for k, m in module.store_gcs : k => m.service_account_key }
-}
-
-# Records to publish per GCS store with a custom_domain; only populated for those
-# stores.
-output "gcs_custom_domain_dns" {
-  description = "Per-GCS-store DNS records for the custom domain, as Cloud Run reports them."
-  value = {
-    for k, m in module.store_gcs : k => {
-      domain  = m.custom_domain
-      records = m.custom_domain_dns_records
-    }
-    if m.custom_domain != null
+    for name, store in merge(module.store, module.store_gcs) : name => {
+      domain  = store.custom_domain
+      records = store.custom_domain_dns_records
+    } if store.custom_domain != null
   }
 }

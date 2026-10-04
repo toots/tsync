@@ -1,10 +1,23 @@
+terraform {
+  required_providers {
+    aws = { source = "hashicorp/aws", version = ">= 6.0" }
+  }
+}
+
 locals {
   iam_user_name = coalesce(var.iam_user_name, "tsync-client-${var.name}")
-  # Fixed, domain-independent shares root (matches Conf_parsing.shares_prefix in
-  # the daemon). Share manifests + cached artifacts live under tsync/shares/.
-  # This is the write scope for the share function and nothing else: a share
-  # carries its own expiration, granted per link, and no rule here expires them.
-  shares_prefix = "tsync/shares/"
+  # The share function's whole write scope: assembled artifacts, never a share
+  # manifest, which sits one level up at tsync/shares/<token>.
+  share_cache_prefix = "tsync/shares/cache/"
+
+  # Storage classes a chunk can be read from with no restore step.
+  online_classes = ["STANDARD_IA", "ONEZONE_IA", "INTELLIGENT_TIERING", "GLACIER_IR"]
+
+  # Operator rules whose filter can match a key under tsync/.
+  rules_under_tsync = [
+    for rule in var.extra_lifecycle_rules : rule
+    if startswith("tsync/", rule.prefix) || startswith(rule.prefix, "tsync/")
+  ]
 
   # A store deployed without the share function has nothing serving links and
   # nothing writing cached artifacts; a CI stack wants the verification half
@@ -15,11 +28,13 @@ locals {
 # ── Store bucket ───────────────────────────────────────────────────────────
 
 resource "aws_s3_bucket" "store" {
+  region = var.region
   count  = var.create_bucket ? 1 : 0
   bucket = var.bucket
 }
 
 data "aws_s3_bucket" "store" {
+  region = var.region
   count  = var.create_bucket ? 0 : 1
   bucket = var.bucket
 }
@@ -32,6 +47,7 @@ locals {
 # Lock a freshly created bucket down: no public access, TLS-only. Skipped for a
 # pre-existing bucket so we don't clobber its existing access settings.
 resource "aws_s3_bucket_public_access_block" "store" {
+  region                  = var.region
   count                   = var.create_bucket ? 1 : 0
   bucket                  = local.bucket_id
   block_public_acls       = true
@@ -59,6 +75,7 @@ data "aws_iam_policy_document" "bucket" {
 }
 
 resource "aws_s3_bucket_policy" "store" {
+  region     = var.region
   count      = var.create_bucket ? 1 : 0
   bucket     = local.bucket_id
   policy     = data.aws_iam_policy_document.bucket.json
@@ -69,6 +86,34 @@ resource "aws_s3_bucket_policy" "store" {
 
 resource "aws_iam_user" "client" {
   name = local.iam_user_name
+
+  # Checked here because this is the one resource every store has: a refusal
+  # stops the plan whatever else the store was asked for.
+  lifecycle {
+    precondition {
+      condition     = var.custom_domain == null || var.deploy_share
+      error_message = "Store ${var.name}: custom_domain needs the share function (share = true)."
+    }
+    precondition {
+      condition     = var.max_share_bytes <= (var.share_scratch_mb - 1024) * 1024 * 1024
+      error_message = "Store ${var.name}: max_share_bytes must leave 1 GiB of share_scratch_mb free, since a folder archive is built there."
+    }
+    precondition {
+      condition = alltrue([
+        for rule in local.rules_under_tsync : rule.expiration_days == null && alltrue([
+          for transition in rule.transitions : contains(local.online_classes, transition.storage_class)
+        ])
+      ])
+      error_message = "Store ${var.name}: an extra lifecycle rule that can match under tsync/ must not expire anything, and may transition only to ${join(", ", local.online_classes)}."
+    }
+    precondition {
+      condition = alltrue([
+        for rule in var.extra_lifecycle_rules :
+        rule.id != "tsync-abort-incomplete" && !startswith(rule.id, "tsync-archive-")
+      ])
+      error_message = "Store ${var.name}: extra lifecycle rule ids must differ from the store's own (tsync-abort-incomplete, tsync-archive-<domain>)."
+    }
+  }
 }
 
 data "aws_iam_policy_document" "client" {
@@ -130,10 +175,9 @@ data "aws_iam_policy_document" "share" {
     actions   = ["s3:GetObject"]
     resources = ["${local.bucket_arn}/*"]
   }
-  # Write only cached artifacts under the shares prefix.
   statement {
     actions   = ["s3:PutObject", "s3:AbortMultipartUpload"]
-    resources = ["${local.bucket_arn}/${local.shares_prefix}*"]
+    resources = ["${local.bucket_arn}/${local.share_cache_prefix}*"]
   }
   statement {
     actions   = ["s3:ListBucket"]
@@ -149,6 +193,7 @@ resource "aws_iam_role_policy" "share" {
 }
 
 resource "aws_lambda_function" "share" {
+  region           = var.region
   count            = local.share_enabled
   function_name    = "tsync-share-${var.name}"
   role             = aws_iam_role.share[0].arn
@@ -157,7 +202,7 @@ resource "aws_lambda_function" "share" {
   filename         = var.lambda_zip
   source_code_hash = var.lambda_zip_hash
   timeout          = 900
-  memory_size      = var.lambda_memory_mb
+  memory_size      = var.share_memory_mb
 
   # Deliberately not pinned, though the zip it shares with the verify function
   # carries an aarch64 xxhash extension: nothing in handler.py imports it, so
@@ -165,7 +210,7 @@ resource "aws_lambda_function" "share" {
   # every existing deployment to buy nothing.
 
   ephemeral_storage {
-    size = var.ephemeral_storage_mb
+    size = var.share_scratch_mb
   }
 
   environment {
@@ -178,19 +223,31 @@ resource "aws_lambda_function" "share" {
 }
 
 resource "aws_lambda_function_url" "share" {
+  region             = var.region
   count              = local.share_enabled
   function_name      = aws_lambda_function.share[0].function_name
   authorization_type = "NONE"
 }
 
-# NONE auth still needs an explicit public invoke permission or it 403s.
+# A public function URL answers 403 unless both permissions are granted.
 resource "aws_lambda_permission" "url" {
+  region                 = var.region
   count                  = local.share_enabled
   statement_id           = "AllowPublicFunctionUrl"
   action                 = "lambda:InvokeFunctionUrl"
   function_name          = aws_lambda_function.share[0].function_name
   principal              = "*"
   function_url_auth_type = "NONE"
+}
+
+resource "aws_lambda_permission" "url_invoke" {
+  region                   = var.region
+  count                    = local.share_enabled
+  statement_id             = "AllowPublicFunctionUrlInvoke"
+  action                   = "lambda:InvokeFunction"
+  function_name            = aws_lambda_function.share[0].function_name
+  principal                = "*"
+  invoked_via_function_url = true
 }
 
 # ── Bucket lifecycle ───────────────────────────────────────────────────────
@@ -206,6 +263,7 @@ moved {
 }
 
 resource "aws_s3_bucket_lifecycle_configuration" "store" {
+  region = var.region
   count  = var.manage_lifecycle ? 1 : 0
   bucket = local.bucket_id
 

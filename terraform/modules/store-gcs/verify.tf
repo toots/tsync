@@ -136,7 +136,7 @@ resource "google_cloudfunctions2_function" "verify" {
     source {
       storage_source {
         bucket = var.source_bucket
-        object = google_storage_bucket_object.source.name
+        object = var.source_object
       }
     }
   }
@@ -147,7 +147,7 @@ resource "google_cloudfunctions2_function" "verify" {
 
     # A whole-store sweep makes one request per shard deliverable at once.
     # Unbounded, that is thousands of concurrent readers against one bucket.
-    max_instance_count    = var.verify_max_instances
+    max_instance_count    = var.verify_max_concurrency
     service_account_email = google_service_account.verify.email
     environment_variables = {
       BUCKET = local.bucket_name

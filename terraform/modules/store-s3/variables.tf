@@ -11,7 +11,14 @@ variable "bucket" {
 variable "create_bucket" {
   type        = bool
   default     = true
+  nullable    = false
   description = "Create and manage the bucket (public access blocked, TLS-only). False = use a pre-existing bucket read-only."
+}
+
+variable "region" {
+  type        = string
+  default     = null
+  description = "Region of the bucket and everything attached to it. Null = the provider's."
 }
 
 variable "iam_user_name" {
@@ -23,6 +30,7 @@ variable "iam_user_name" {
 variable "manage_lifecycle" {
   type        = bool
   default     = true
+  nullable    = false
   description = "Manage the bucket lifecycle config. aws_s3_bucket_lifecycle_configuration owns it entirely, so this REPLACES any rules already on the bucket. False = leave it untouched, and nothing aborts abandoned multipart uploads."
 }
 
@@ -42,7 +50,8 @@ variable "archive_domains" {
     an S3 rule filter holds one literal prefix: no wildcard spans domains, and a
     domain left out simply never archives.
 
-    storage_class defaults to GLACIER_IR (cold, instant retrieval).
+    storage_class defaults to GLACIER_IR (cold, instant retrieval). Only classes
+    a chunk can be read from with no restore step are accepted.
   EOT
 
   # Deliberately only "not a path": a domain name is free-form and may well
@@ -67,10 +76,10 @@ variable "archive_domains" {
   validation {
     condition = alltrue([
       for cfg in values(var.archive_domains) : cfg.storage_class == null || contains(
-        ["STANDARD_IA", "ONEZONE_IA", "INTELLIGENT_TIERING", "GLACIER_IR", "GLACIER", "DEEP_ARCHIVE"],
+        ["STANDARD_IA", "ONEZONE_IA", "INTELLIGENT_TIERING", "GLACIER_IR"],
       cfg.storage_class)
     ])
-    error_message = "archive_domains storage_class must be one of STANDARD_IA, ONEZONE_IA, INTELLIGENT_TIERING, GLACIER_IR, GLACIER, DEEP_ARCHIVE."
+    error_message = "archive_domains storage_class must be one of STANDARD_IA, ONEZONE_IA, INTELLIGENT_TIERING, GLACIER_IR: GLACIER and DEEP_ARCHIVE need a restore before a chunk can be read."
   }
 
   # AWS rejects the whole configuration if either IA class is asked for sooner.
@@ -100,7 +109,8 @@ variable "extra_lifecycle_rules" {
 
 variable "presign_ttl" {
   type        = number
-  default     = 600
+  default     = 300
+  nullable    = false
   description = "Lifetime (seconds) of the presigned download URL."
 }
 
@@ -113,25 +123,30 @@ variable "custom_domain" {
     validation) fronting the Lambda, and share_url points at it. When null the
     store just uses the raw Lambda Function URL — no DNS setup needed.
 
-    DNS is not managed here: after apply, add the acm_validation_records CNAME to
-    validate the cert, then CNAME the domain to custom_domain_target. See README.
+    DNS is not managed here: publish the records the custom_domain_dns_records
+    output lists. See README.
   EOT
 }
 
-variable "lambda_memory_mb" {
-  type    = number
-  default = 2048
+variable "share_memory_mb" {
+  type        = number
+  default     = 2048
+  nullable    = false
+  description = "Memory for the share function."
 }
 
-variable "ephemeral_storage_mb" {
-  type    = number
-  default = 10240
+variable "share_scratch_mb" {
+  type        = number
+  default     = 10240
+  nullable    = false
+  description = "Ephemeral storage for the share function, where a folder archive is built."
 }
 
 variable "max_share_bytes" {
   type        = number
-  default     = 10737418240 # 10 GiB
-  description = "Reject assembling a single file or folder zip larger than this (bytes) with 413. Keep below the /tmp ephemeral size for zips."
+  default     = 8589934592 # 8 GiB
+  nullable    = false
+  description = "Refuse a file or folder larger than this (bytes) with 413. At most share_scratch_mb less 1 GiB."
 }
 
 variable "lambda_zip" {
@@ -149,30 +164,35 @@ variable "lambda_zip_hash" {
 variable "manage_notifications" {
   type        = bool
   default     = true
+  nullable    = false
   description = "Manage the bucket's notification config. aws_s3_bucket_notification owns it entirely, so this REPLACES any notification already on the bucket. False = leave it untouched and wire the verify function yourself."
 }
 
 variable "verify_timeout_seconds" {
   type        = number
   default     = 120
+  nullable    = false
   description = "Timeout for the chunk verifier. One chunk per upload event, or one batch of chunk deletes per gc request, so this is a stall guard rather than a budget."
 }
 
 variable "verify_memory_mb" {
   type        = number
   default     = 512
+  nullable    = false
   description = "Memory for the chunk verifier. Lambda scales CPU and network with memory, and the work is dominated by reading one chunk."
 }
 
 variable "verify_max_concurrency" {
   type        = number
   default     = 32
+  nullable    = false
   description = "Ceiling on concurrent chunk-verifier invocations. A whole-store sweep queues one request per shard (4096) and they become deliverable at once; this is what stops that from being 4096 concurrent readers. -1 removes the ceiling."
 }
 
 variable "deploy_share" {
-  type    = bool
-  default = true
+  type     = bool
+  default  = true
+  nullable = false
   # False deploys the verification half alone: the chunk verifier, its trigger
   # and the client credentials, without the share Lambda or the unauthenticated
   # function URL that fronts it. That is what a bucket used only for testing

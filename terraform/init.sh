@@ -1,15 +1,22 @@
 #!/usr/bin/env bash
 #
 # Interactive setup: defines your first store in terraform.tfvars, provisions the
-# bucket that holds Terraform state, activates the matching backend, and runs
-# `terraform init`. Works for either cloud — S3 or GCS.
+# bucket that holds the state, activates the matching backend, and initialises
+# the deployment. Works for either cloud — S3 or GCS — and with either CLI.
 #
 # Add more stores — for multiple domains or redundant storage — by adding entries
-# to the stores map in terraform.tfvars, then re-apply. Review the plan and
-# `terraform apply` yourself after this finishes.
+# to the stores map in terraform.tfvars, then re-apply. This never applies the
+# deployment: review the plan and apply it yourself afterwards.
 
 set -euo pipefail
 cd "$(dirname "$0")"
+
+. ./tf-cli.sh
+TF=$(tf_cli) || {
+  echo "Neither tofu nor terraform is installed${TSYNC_TF:+ (TSYNC_TF=$TSYNC_TF was not found)}." >&2
+  exit 1
+}
+echo "Using $TF."
 
 TFVARS="terraform.tfvars"
 BACKEND_HCL="backend.hcl"
@@ -121,10 +128,13 @@ EOF
   fi
   echo "Wrote $TFVARS"
 
-  # Warn if a pre-existing S3 bucket already has lifecycle rules apply would
-  # replace. (GCS lifecycle is only managed on buckets this config creates.)
-  if [ "$CLOUD" = s3 ] && [ "$CREATE_BUCKET" = false ] && command -v aws >/dev/null 2>&1; then
-    if ! aws s3api head-bucket --bucket "$BUCKET" --region "$REGION" 2>/dev/null; then
+  # An adopted S3 bucket has two documents that applying replaces whole.
+  if [ "$CLOUD" = s3 ] && [ "$CREATE_BUCKET" = false ]; then
+    if ! command -v aws >/dev/null 2>&1; then
+      echo "WARNING: no aws CLI, so '$BUCKET' was not looked at. Applying REPLACES its" >&2
+      echo "lifecycle and notification configurations unless you decline them" >&2
+      echo "(manage_lifecycle = false, manage_notifications = false)." >&2
+    elif ! aws s3api head-bucket --bucket "$BUCKET" --region "$REGION" 2>/dev/null; then
       echo "WARNING: cannot access bucket '$BUCKET' (may not exist, or no credentials)." >&2
     else
       existing=$(aws s3api get-bucket-lifecycle-configuration \
@@ -133,23 +143,41 @@ EOF
         echo
         echo "WARNING: this bucket already has lifecycle rules:"
         echo "$existing"
-        echo "terraform apply will REPLACE them. Copy them into extra_lifecycle_rules"
+        echo "Applying will REPLACE them. Copy them into extra_lifecycle_rules"
         echo "for the '$STORE' store in $TFVARS, or set manage_lifecycle = false."
       fi
+      # An empty configuration answers "{}" or nothing, depending on the CLI.
+      existing=$(aws s3api get-bucket-notification-configuration \
+        --bucket "$BUCKET" --region "$REGION" --output json 2>/dev/null | tr -d ' \n' || true)
+      if [ -n "$existing" ] && [ "$existing" != "{}" ]; then
+        echo
+        echo "WARNING: this bucket already has notifications:"
+        echo "$existing"
+        echo "Applying will REPLACE them. Set manage_notifications = false for the"
+        echo "'$STORE' store in $TFVARS and add the tsync/ trigger to your own"
+        echo "(README.md > If you wire the trigger yourself)."
+      fi
     fi
+  fi
+
+  if [ "$CLOUD" = gcs ] && [ "$CREATE_BUCKET" = false ]; then
+    echo
+    echo "NOTE: the lifecycle of an adopted GCS bucket stays yours. Add one rule to it:"
+    echo "  abort incomplete multipart uploads after 1 day"
+    echo "and nothing that deletes objects under tsync/."
   fi
 fi
 
 # ── Remote state bucket ────────────────────────────────────────────────────
 
 echo
-echo "Terraform state is kept in the ${CLOUD} state bucket (see bootstrap-${CLOUD}/)."
+echo "The state is kept in the ${CLOUD} state bucket (see bootstrap-${CLOUD}/)."
 if [ "$CLOUD" = s3 ]; then
   [ -n "$SEED" ] && STATE_BUCKET_DEFAULT="tsync-tfstate-${SEED}" || STATE_BUCKET_DEFAULT=""
 else
   STATE_BUCKET_DEFAULT="${PROJECT}-tfstate"
 fi
-prompt STATE_BUCKET "Bucket for Terraform state (globally unique)" "$STATE_BUCKET_DEFAULT"
+prompt STATE_BUCKET "Bucket for the state (globally unique)" "$STATE_BUCKET_DEFAULT"
 [ -n "$STATE_BUCKET" ] || {
   echo "state bucket is required" >&2
   exit 1
@@ -175,20 +203,20 @@ EOF
 fi
 
 if [ "$CLOUD" = s3 ]; then
-  create_cmd=(terraform -chdir=bootstrap-s3 apply -var state_bucket="$STATE_BUCKET" -var region="$REGION")
+  create_cmd=("$TF" -chdir=bootstrap-s3 apply -var state_bucket="$STATE_BUCKET" -var region="$REGION")
 else
-  create_cmd=(terraform -chdir=bootstrap-gcs apply -var project="$PROJECT" -var location="$LOCATION" -var state_bucket="$STATE_BUCKET")
+  create_cmd=("$TF" -chdir=bootstrap-gcs apply -var project="$PROJECT" -var location="$LOCATION" -var state_bucket="$STATE_BUCKET")
 fi
 
 read -rp "Create the state bucket now (skip if it already exists)? [Y/n]: " mkstate
 case "$mkstate" in
   [nN]*)
     echo "Skipping. Create it later with:"
-    echo "  terraform -chdir=bootstrap-${CLOUD} init"
+    echo "  $TF -chdir=bootstrap-${CLOUD} init"
     echo "  ${create_cmd[*]}"
     ;;
   *)
-    terraform -chdir="bootstrap-${CLOUD}" init
+    "$TF" -chdir="bootstrap-${CLOUD}" init
     "${create_cmd[@]}"
     ;;
 esac
@@ -199,30 +227,16 @@ esac
 [ -f "backend-${CLOUD}.tf" ] || cp "backend-${CLOUD}.tf.example" "backend-${CLOUD}.tf"
 
 echo
-terraform init -backend-config="$BACKEND_HCL"
+"$TF" init -backend-config="$BACKEND_HCL"
 
-if [ "$CLOUD" = s3 ]; then
-  cat <<'EOF'
-
-Done. Next steps:
-  terraform plan     # review what will be created/changed
-  terraform apply    # provision the store(s)
-
-Then set these on the s3 backend in your tsync config (or let `tsync config --edit`
-pull them for you): bucket, accessKeyId, secretAccessKey, shareUrl.
-  terraform output stores
-  terraform output -json secret_access_keys | jq -r '.["<store>"]'
-EOF
-else
-  cat <<'EOF'
+cat <<EOF
 
 Done. Next steps:
-  terraform plan     # review what will be created/changed
-  terraform apply    # provision the store(s)
+  $TF plan     # review what will be created/changed
+  $TF apply    # provision the store(s)
 
-Then set these on the gcs backend in your tsync config (or let `tsync config --edit`
-pull them for you): bucket, serviceAccountKey, shareUrl.
-  terraform output gcs_stores
-  terraform output -json gcs_service_account_keys | jq -r '.["<store>"]'
+Then set the store's fields on the $CLOUD backend in your tsync config, or let
+\`tsync config --edit\` fill them from this directory:
+  $TF output stores
+  $TF output -json store_secrets | jq '.["<store>"]'
 EOF
-fi

@@ -107,7 +107,7 @@ in this order:
 | Chunk size / cache chunk size / max local cache | `default` / `none` — [tuning](#11-tuning). |
 | Backend type | `s3`, `gcs`, `local` or `http-proxy`; defaults to `local`, the one type that needs no bucket or credentials. See [backend types](#backend-type-reference). |
 | Backend name | A label, used by `mirror --source`. |
-| *(s3/gcs)* Fill from Terraform? | Only with the [bundled Terraform](terraform/README.md), applied with either `terraform` or `tofu`; otherwise `n` and type the bucket and keys. |
+| *(s3/gcs)* Fill from the deployment in directory | Only with the [bundled Terraform](terraform/README.md), applied with either `terraform` or `tofu`; otherwise `n` and type the bucket and keys. |
 | Role | `main` for the first backend; a cloud backend added after one defaults to `replica`. The others in [step 8](#8-add-a-second-backend). |
 | Add another backend? | No, for now. |
 | Frontend type | `fuse` on Linux, `file_provider` on macOS — both offered as the default. `android` is for a domain the Android app links into its own process, with nothing to mount; it ships in its own `tsync-android` opam package, so a desktop build does not carry it. |

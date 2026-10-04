@@ -18,3 +18,8 @@ val edit : io -> Yojson.Safe.t option -> Yojson.Safe.t option
 (** What is written: per-link settings no backend uses dropped, then the
     parser's own validation; [Error] names what is wrong. *)
 val prepare : Yojson.Safe.t -> (Yojson.Safe.t, string) result
+
+(** The stores of backend type [btype] in a deployment's outputs, as JSON text
+    (spec 11 §11): each store's name with the backend fields it decides. *)
+val stores_of_outputs :
+  btype:string -> string -> (string * (string * string) list) list
