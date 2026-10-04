@@ -730,12 +730,12 @@ let serve bus =
         prerr_endline "tsync-tray: cannot claim org.tsync.Tray";
         1
     | `Owner -> (
+        exported := objects t;
         match claim bus t.item_name with
           | `Taken | `Failed ->
               prerr_endline ("tsync-tray: cannot claim " ^ t.item_name);
               1
           | `Owner ->
-              exported := objects t;
               Rt.spawn ~name:"tray watcher" (fun () ->
                   ignore
                     (bus_call bus "AddMatch"

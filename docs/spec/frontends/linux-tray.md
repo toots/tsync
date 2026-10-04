@@ -44,10 +44,12 @@ In order:
 3. **Single instance.** Request the bus name `org.tsync.Tray` **without queueing**. Not the owner
    → print `tsync-tray is already running`, exit 0. Two trays would draw two icons and act on one
    hold switch; a second tray that queued would take over silently when the first exits.
-4. **Item name.** Request `org.kde.StatusNotifierItem-<pid>-1` without queueing. Failure is fatal.
-5. **Export** the item at `/StatusNotifierItem` (§3) and the menu at `/MenuBar` (§4). Calls are
+4. **Export** the item at `/StatusNotifierItem` (§3) and the menu at `/MenuBar` (§4). Calls are
    answered from here on (§5.1). Until the first refresh installs a layout, the menu is the root
    alone.
+5. **Item name.** Request `org.kde.StatusNotifierItem-<pid>-1` without queueing. Failure is fatal.
+   The objects MUST be exported before the name is requested: a name on the bus whose objects do
+   not answer yet refuses the first call of whoever saw the name appear.
 6. **Register** with the watcher (§3.1), and ask whether a host is registered. If none is, warn
    once: `tray: no StatusNotifier host is running, so nothing will draw the icon; on GNOME this
    needs the AppIndicator extension`. The tray keeps running.
