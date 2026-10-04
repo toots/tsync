@@ -1,0 +1,157 @@
+== the bus is served while owners are silent
+GetLayout and GetAll within BUS_ANSWER_BOUND during a poll, a stats fetch, a silent file manager and a hold switch: yes
+the silent owner's row: quiet — not answering
+the stats fetch reached the silent owner: yes
+the hold switch reached the other owner: yes
+
+== one silent owner of 2
+2 domains, 1 silent: every row current after one status deadline: yes
+
+== one silent owner of 20
+20 domains, 1 silent: every row current after one status deadline: yes
+
+== 20 silent owners of 20
+20 domains, 20 silent: every row current after one status deadline: yes
+
+== every call is answered
+org.kde.StatusNotifierItem GetAll                    answered
+org.kde.StatusNotifierItem Get IconName              answered
+org.kde.StatusNotifierItem Activate                  answered
+org.kde.StatusNotifierItem SecondaryActivate         answered
+org.kde.StatusNotifierItem ContextMenu               answered
+org.kde.StatusNotifierItem Scroll                    answered
+org.kde.StatusNotifierItem Nope                      UnknownMethod
+org.freedesktop.StatusNotifierItem GetAll            answered
+org.freedesktop.StatusNotifierItem Get IconName      answered
+org.freedesktop.StatusNotifierItem Activate          answered
+org.freedesktop.StatusNotifierItem SecondaryActivate answered
+org.freedesktop.StatusNotifierItem ContextMenu       answered
+org.freedesktop.StatusNotifierItem Scroll            answered
+org.freedesktop.StatusNotifierItem Nope              UnknownMethod
+item Get, unknown property                           UnknownProperty
+item Get, another interface                          UnknownInterface
+item GetAll, another interface                       UnknownInterface
+item Set                                             PropertyReadOnly
+item Introspect                                      answered
+item Peer.Ping                                       answered
+item Peer.GetMachineId                               answered
+item, a known member on an unknown interface         UnknownInterface
+item, no interface header, Activate                  answered
+item, no interface header, GetAll                    answered
+item, no interface header, unknown member            UnknownMethod
+an unknown path                                      UnknownMethod
+menu GetLayout                                       answered
+menu GetLayout                                       answered
+menu GetGroupProperties                              answered
+menu GetProperty                                     answered
+menu AboutToShow                                     answered
+menu AboutToShowGroup                                answered
+menu Event                                           answered
+menu EventGroup                                      answered
+menu Nope                                            UnknownMethod
+menu GetLayout                                       InvalidArgs
+menu GetAll                                          answered
+menu Introspect                                      answered
+dbusmenu Version: 3
+a parent that names no row: id 9999, 0 properties, 0 children
+a property of no row: ""
+depth 0 gives no children: 0
+depth 1 gives the rows without theirs: true
+root properties: children-display
+row "photos — Downloading 1": enabled=true, visible=true
+row "    my__file__v2.txt": enabled=true, visible=true, icon-name=text-x-generic
+row "        1 B of 2 B": enabled=true, visible=true
+row "---": type=separator
+row "Stats": enabled=true, visible=true, children-display=submenu
+row "Hold changes": enabled=true, visible=true, toggle-type=checkmark, toggle-state=0
+row "---": type=separator
+row "Quit tsync tray": enabled=true, visible=true
+the revision increases: yes
+
+== ids, grouped events, signals only on change
+two refreshes with the same status: 0 LayoutUpdated, 0 NewIcon, 0 NewToolTip
+and no id changed: yes
+the changed row has another id: yes
+the unchanged row kept its id: yes
+clicks on the old ids of a changed and of a removed row: 0 actions
+click on an unchanged row: ShowFolders file:///reported/stable%20dir
+EventGroup answers the ids that name no row: true
+the same click through EventGroup: ShowFolders file:///reported/stable%20dir
+AboutToShowGroup answers the ids that name no row: true
+AboutToShowGroup starts the stats fetch: yes
+AboutToShowGroup marks the menu open: 0 root updates while it is
+over churning rows no id is seen on two different rows: yes
+the revision increases: yes
+
+== an open menu is not replaced; stats
+before any opening the Stats row holds: Reading…
+after the answers the rows are the model's: yes
+the Stats row holds: box — owner | pid 7 · up 1h | --- | photos — versioned
+announced against the Stats row, with the menu open: true
+one opening announced twice: 1 stats requests
+content changing at every poll, menu open: 0 root updates
+the row list is still the one fetched at the opening: photos — Idle
+a row fetched at the opening is still clickable: yes
+after closed for the Stats row: 0 root updates
+after closed for the root the next layout is announced: yes
+and reads: photos — Uploading 1
+the stats rows are still there after the redraw: yes
+and after two polls and a domain added above: yes
+the revision increases: yes
+
+== a host that reports no close
+held while open: photos — Idle
+the next opening of the root installs it at once: true, photos — Uploading 1
+held again: photos — Uploading 1
+with no close ever sent, current within MENU_OPEN_BOUND: yes
+the revision increases: yes
+
+== hold switch, mount point, reveal
+with one owner silent the others are asked: yes
+the refusal is logged with the domain and the reason: yes
+and the click costs one deadline: yes
+the checkmark is what the owners report: unchecked
+with no file manager the helper is run: yes
+xdg-open /cfg/quiet
+xdg-open /reported/refusing
+xdg-open /reported/refusing/sub dir
+ShowFolders file:///cfg/quiet
+ShowFolders file:///reported/refusing
+ShowItems file:///reported/refusing/sub%20dir/a%20b.txt
+the helper was not run again: 3 lines
+
+== nobody answering
+with no owner answering the Stats row holds: No daemon answering
+icon tsync-error-symbolic, switch enabled false
+
+== panel lifecycle
+started before the watcher: 0 registrations
+registered when the watcher appears: yes
+registered again when the watcher's name changes owner: yes
+then NewIcon and NewToolTip on both interfaces: yes
+with no host at start it runs and warns once: 1
+
+== session and quit
+no bus address and no session socket: exit 1
+tsync-tray: no session bus: the tray needs a running desktop session
+no bus was started for it: true
+with the session socket present it uses it: yes
+a second tray: exit 0 at once: true
+tsync-tray is already running
+items on the bus: 1
+a command-line error: exit 1
+after Quit: exit 0
+and the owner still answers: true
+when the bus closes: exit 0
+
+== config
+with no config it runs and shows no domains: yes
+the domains appear after it is written: yes
+a config that is not JSON shows no domains: yes
+repaired within two poll intervals: yes
+a config that fails validation shows no domains: yes
+repaired within two poll intervals: yes
+rewritten twice in quick succession: music — Idle
+one warning per distinct reason: 3
+
+13 scenarios

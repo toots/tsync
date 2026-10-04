@@ -1,0 +1,25 @@
+(library
+ (name tsync_tray_lib)
+ (modules bus layout tray)
+ (enabled_if
+  (= %{system} linux))
+ (libraries
+  tsync_core
+  tsync_config
+  tsync_catalog
+  tsync_ipc
+  tsync_owner
+  tsync_menu
+  tsync_dbus
+  unix
+  threads.posix
+  yojson))
+
+(executable
+ (name tsync_tray)
+ (public_name tsync-tray)
+ (package tsync-tray)
+ (modules tsync_tray)
+ (enabled_if
+  (= %{system} linux))
+ (libraries cmdliner tsync_core tsync_tray_lib))

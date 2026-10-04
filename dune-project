@@ -27,6 +27,19 @@
  (name tsync-fuse)
  (allow_empty))
 
+; The tray is its own package so that the bus library stays off a headless
+; install (frontends/linux-desktop.md §5.1).
+
+(package
+ (name tsync-tray)
+ (allow_empty))
+
+; conf-dbus builds nothing: it stands for the system's libdbus.
+
+(package
+ (name conf-dbus)
+ (allow_empty))
+
 ; tsync-android installs nothing either: its dependencies are the cross switch
 ; the Android app's core library is built in.
 
