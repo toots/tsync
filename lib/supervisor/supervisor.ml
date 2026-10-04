@@ -384,15 +384,12 @@ let keep_running ~exe children =
    children. *)
 let run ~exe (config : Config.t) children =
   let path = Paths.supervisor_socket () in
-  let lock_path = Paths.supervisor_lock () in
-  Fs.mkdir_p ~perm:0o700 (Filename.dirname lock_path);
-  let lock = Unix.openfile lock_path [O_RDWR; O_CREAT; O_CLOEXEC] 0o600 in
-  Fun.protect ~finally:(fun () -> Unix.close lock) @@ fun () ->
-  match Fs.flock ~exclusive:true ~block:false lock with
-    | false ->
+  match Fs.lifetime_lock (Paths.supervisor_lock ()) with
+    | None ->
         prerr_endline "tsync is already running";
         1
-    | true -> (
+    | Some lock -> (
+        Fun.protect ~finally:(fun () -> Unix.close lock) @@ fun () ->
         let children =
           List.map
             (fun child ->

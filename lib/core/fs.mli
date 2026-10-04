@@ -117,6 +117,12 @@ val flock : ?exclusive:bool -> ?block:bool -> Unix.file_descr -> bool
 
 val funlock : Unix.file_descr -> unit
 
+(** A process's claim on a role, held for its life: the exclusive lock of a file
+    in a directory of this user, on a close-on-exec descriptor, so only the
+    holder's exit releases it and no child inherits it. [None] when another
+    process holds it. *)
+val lifetime_lock : string -> Unix.file_descr option
+
 (** A write to a closed socket fails with EPIPE instead of killing the process;
     every process that writes to peers calls it. *)
 val ignore_sigpipe : unit -> unit

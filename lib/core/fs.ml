@@ -307,6 +307,19 @@ let create_if_absent_locked ?perm p data =
         raise e
 
 let funlock fd = funlock_ fd
+
+let lifetime_lock path =
+  mkdir_p ~perm:0o700 (Filename.dirname path);
+  let fd = Unix.openfile path [O_RDWR; O_CREAT; O_CLOEXEC] 0o600 in
+  match flock ~exclusive:true ~block:false fd with
+    | true -> Some fd
+    | false ->
+        Unix.close fd;
+        None
+    | exception e ->
+        Unix.close fd;
+        raise e
+
 let ignore_sigpipe () = Sys.set_signal Sys.sigpipe Sys.Signal_ignore
 let rename_noreplace a b = sys (fun () -> rename_noreplace_ a b)
 let clone a b = sys (fun () -> clone_ a b)

@@ -51,30 +51,24 @@ let holder d =
 (* 07 §2.3: flock on a close-on-exec descriptor is released only by the
    holder's exit, never by an unrelated close. *)
 let acquire ?socket ~role ~what d =
-  let path = Paths.ownership_lock d in
-  Fs.mkdir_p ~perm:0o700 (Filename.dirname path);
-  let fd = Unix.openfile path [O_RDWR; O_CREAT; O_CLOEXEC] 0o600 in
-  (* Pitfall C-7.10: closing the descriptor releases the lock, which a failed
-     record write must not keep. *)
-    match
-      if Fs.flock ~exclusive:true ~block:false fd then (
-        let record =
-          Yojson.Safe.to_string
-            (holder_json { pid = Unix.getpid (); role; what; socket })
-        in
-        Unix.ftruncate fd 0;
-        ignore (Unix.lseek fd 0 SEEK_SET);
-        Fs.write_all fd record;
-        true)
-      else false
-    with
-    | true -> Ok fd
-    | false ->
-        Unix.close fd;
-        Error (holder d)
-    | exception e ->
-        Fs.close fd;
-        raise e
+  match Fs.lifetime_lock (Paths.ownership_lock d) with
+    | None -> Error (holder d)
+    | Some fd -> (
+        (* Pitfall C-7.10: closing the descriptor releases the lock, which a
+           failed record write must not keep. *)
+          match
+            let record =
+              Yojson.Safe.to_string
+                (holder_json { pid = Unix.getpid (); role; what; socket })
+            in
+            Unix.ftruncate fd 0;
+            ignore (Unix.lseek fd 0 SEEK_SET);
+            Fs.write_all fd record
+          with
+          | () -> Ok fd
+          | exception e ->
+              Fs.close fd;
+              raise e)
 
 let release fd =
   Fs.funlock fd;
