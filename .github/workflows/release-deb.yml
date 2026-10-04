@@ -59,13 +59,16 @@ jobs:
       - name: Install system dependencies
         # fuse3, not fuse: libfuse3 mounts through the setuid fusermount3,
         # which only fuse3 provides. libgmp-dev is for mirage-crypto-pk, and gh
-        # for the publish step.
+        # for the publish step. libdbus is the tray's; cmake, Qt 6 and KDE
+        # Frameworks 6 are the Dolphin plugin's, and its tests start the bus.
         run: |
           apt-get update
           apt-get install -y --no-install-recommends \
             opam build-essential dpkg-dev m4 pkg-config git curl \
             ca-certificates unzip rsync gh binutils \
-            libfuse3-dev fuse3 libssl-dev libgmp-dev
+            libfuse3-dev fuse3 libssl-dev libgmp-dev \
+            libdbus-1-dev cmake extra-cmake-modules qt6-base-dev \
+            libkf6coreaddons-dev libkf6kio-dev
 
       - uses: actions/checkout@v4
         with:

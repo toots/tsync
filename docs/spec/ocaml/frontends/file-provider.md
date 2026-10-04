@@ -16,7 +16,7 @@ Companion to the language-neutral spec [../../frontends/file-provider.md](../../
 | Events and the relay (§8) | `lib/frontends/file_provider/file_provider_host.ml`: the debounced `changed` | `TsyncApp/Relay.swift` |
 | Registration (§9.1) | — | `TsyncApp/Reconciler.swift` |
 | Reset, purge, reimport (§9.2–§9.4) | `lib/frontends/file_provider/file_provider_cli.ml` | — |
-| Menu (§10) | `lib/owner/menu.ml`, the model of 07 §5.8 | `TsyncApp/StatusMenu.swift` |
+| Menu (§10) | `lib/menu/menu_model.ml`, the model of 07 §5.8, called by the shared router of `lib/owner/owner.ml` | `TsyncApp/StatusMenu.swift` |
 
 ## Where the code departs from the spec
 

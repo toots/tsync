@@ -28,7 +28,7 @@ parentheses are the spec's. The request handler itself is in [08-frontends.md](0
 | `tsync stop` (§5.4) | `Daemon_cmds.stop`, `wait_gone`, `owner_sockets`. |
 | `tsync status` (§5.5) | `Status_cmd.report`, `fold_owners`; `Supervisor` `machine_report`; `Report.domain_body`, `Report.traffic`; `Self_report.self`; the types of `Status_report`; `Status_text.render`. |
 | Logging (§5.7) | `Log`: `min_level`, `prefix`, `sink`, `once`, `recent`. |
-| Menu model (§5.8) | `Menu.render`, `Menu.stats_entries`. |
+| Menu model (§5.8) | `Tsync_menu.Menu_model` (`render`, `stats`), in `lib/menu`; see [frontends/linux-desktop.md §2](frontends/linux-desktop.md#2-the-menu-model). |
 | Config wizard (§5.9) | `Config_wizard.edit`, `prepare`; `Setup_cmds.edit_config` writes with `Fs.durable_replace ~perm:0o600`. |
 | Maintenance (§6) | `Owner` `housekeeping`: every 60 s the engine's `poll` and `trim_cache`, `rearm` every `Dqueue.rearm_interval`; daily `Export.sweep_records`, `prune_applied`, `daily_maintenance`. |
 

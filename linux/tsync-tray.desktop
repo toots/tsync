@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=tsync tray
+Comment=Sync status in the system tray
+Exec=/usr/bin/tsync-tray
+Icon=tsync
+Terminal=false
+Categories=Utility;
+X-GNOME-Autostart-enabled=true
