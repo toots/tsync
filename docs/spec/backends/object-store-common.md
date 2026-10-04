@@ -126,12 +126,10 @@ The client puts back any deleted chunk the main still holds once the request is 
 
 ### 5.5 Deployment requirements
 
-- **Trigger:** object created, prefix `tsync/`, covering chunks, verification requests and collection delete requests.
-- **Least privilege.** The function may read chunks, and create and delete markers. It may read and delete requests, and delete chunks. It may list the bucket (bucket-wide only where the provider cannot condition listing by prefix). It MUST NOT be able to write a chunk: a wrong body would be silent, a wrong delete at least visible. The client's credentials are scoped to the bucket's objects, with no bucket or permission administration.
-- **Why markers and requests sit beside the domains** (`tsync/corrupted/<d>/…` rather than `tsync/<d>/corrupted/…`): notification filters and permission conditions take one literal prefix, so one prefix must cover every domain.
-- **Bucket settings.** Public access blocked; plain-HTTP requests denied where the provider allows it.
-- **Lifecycle.** Incomplete multipart uploads are aborted after one day. Archival transitions MAY apply to `tsync/<d>/chunks/` only, and only to a storage class that reads online. No lifecycle rule may expire anything under `tsync/gc-jobs/`: an expired request is a silent leak.
-- **Invocation bound** sized for one shard walk or one delete request (recommended 120 s).
+What is deployed beside a bucket (the trigger, the function's identity and permissions, its limits, the bucket's settings and lifecycle) is owned by [11 — Store infrastructure](../11-infrastructure.md). Two of its rules follow from this file's formats:
+
+- Markers and requests sit beside the domains (`tsync/corrupted/<d>/…` rather than `tsync/<d>/corrupted/…`) because notification filters and permission conditions take one literal prefix, so one prefix has to cover every domain.
+- A request under `tsync/gc-jobs/` is the only record of a delete promised and not yet made, which is why [11 §9](../11-infrastructure.md#9-lifecycle) lets no lifecycle rule expire it.
 
 ## 6. The share function
 
@@ -140,9 +138,10 @@ A function deployed beside a bucket MAY serve the bucket's share links; its URL 
 - It serves a manifest only if it is valid ([data-model/backend §2.18](../data-model/backend.md#218-share)), and its `key` or `folderId` lies within the manifest's `domain`.
 - It resolves every name inside a folder share through that domain's folder namespaces, applying the anchor rule ([data-model/backend §6.3](../data-model/backend.md#63-settling-the-anchor-decides)), and stops serving a folder share once the folder is trashed.
 - Pages are built by single-pass, escaped templating.
+- A file or folder above the deployment's share ceiling ([11 §7](../11-infrastructure.md#7-share-function)) is refused as too large.
 - Downloads are redirects to presigned URLs that expire within the share presign TTL and never after the share.
 - A token-keyed cached archive is rebuilt once older than `share_archive_max_age` ([data-model/backend §2.19](../data-model/backend.md#219-share-artifact-cache)).
-- Its grants are read on the bucket, and create and delete on the share cache only.
+- Its grants are those of [11 §7](../11-infrastructure.md#7-share-function): read on the bucket, and write to the share cache only.
 
 ## 7. Parameters
 
