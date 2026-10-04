@@ -753,7 +753,7 @@ menu (served as JSON by the File Provider process's `menu` action):
   its name, `versioning` (default true), `symlinks`, `readOnly`, sizes, `maxCache` (default 1 GiB),
   backends (type default `local`; field prompts from the driver's option spec; role default
   `replica` for a cloud store once a `main` exists, else `main`; optional filling of s3/gcs fields
-  from `terraform|tofu -chdir=DIR output -json`), and frontends (from the frontend registry).
+  from a deployment's outputs, per [11 §11](11-infrastructure.md#11-outputs)), and frontends (from the frontend registry).
 - Prompts: blank keeps the current value; required fields are asked again; secrets are read without
   echo; an answer a field's own check refuses (a size, a port, a choice) is said and asked again. A
   blank answer to a field with no value writes nothing when the parser applies that default itself,

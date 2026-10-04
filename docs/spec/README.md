@@ -149,6 +149,8 @@ nothing depends on them except the CLI and the request handler.
 | 07 | [Process model & CLI](07-daemon-cli.md) | Roles and ownership; lifecycle; the IPC contract; every CLI command; maintenance. |
 | 08 | [Frontends](08-frontends.md) | The frontend contract: descriptor, item references and rows, the request handler, change feed, events. |
 | 09 | [Conformance](09-tests.md) | How conformance is checked: tiers, golden files, harness seams, fault and crash injection, property-based conflict testing, required coverage. |
+| 10 | [Delivery](10-delivery.md) | Where each tier runs, the gate, builds, releases, secrets. |
+| 11 | [Store infrastructure](11-infrastructure.md) | What is deployed around a bucket: client identity, the two functions, their triggers and permissions, lifecycle, outputs, operator state and tooling. Per provider: [aws](infrastructure/aws.md), [gcs](infrastructure/gcs.md). |
 
 ### 4.3 Implementations of the two plug-in seams
 
