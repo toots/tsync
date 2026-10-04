@@ -44,7 +44,10 @@ it is published, which artifacts are released and how, and how a build obtains i
 
 1. **Linux**: build everything with the FUSE frontend and both TLS implementations, assert them from
    `tsync build-info` (§4.3), check that the sources are formatted, and run every hermetic check of tiers Pure through Multi-process and the
-   Platform tier for FUSE (09 §2), including a real mount driven by file-system calls.
+   Platform tier for FUSE (09 §2), including a real mount driven by file-system calls. This includes
+   the menu model, mount discovery, the discovery library under a C host, and the tray as a process
+   on a private session bus. The Dolphin plugin's checks need its toolkit and run in the Linux
+   release builds, which run on every pull request (§2).
 2. **macOS**: build everything, run the same hermetic tiers, then build the Swift targets unsigned
    and run their tests, including the extension-side client against an owner started from this
    build (09 §5.9).
@@ -105,7 +108,10 @@ deliberate, never an accident of the checkout. The job fails when the reports co
 ### 4.2 Release builds
 
 - A release ships both TLS implementations, OpenSSL the default, and uses the release profile.
-- A Linux release includes the FUSE frontend; a macOS release includes the File Provider app.
+- A Linux release includes the FUSE frontend, the tray, the discovery library and the Dolphin
+  plugin, and fails when the plugin's toolkit is absent; before it packages the plugin it runs the
+  plugin's own checks ([dolphin.md §7](frontends/dolphin.md#7-conformance)) on the artifact it
+  ships. A macOS release includes the File Provider app.
 - An Android release cross-builds the core for the app's one ABI at the app's minimum platform
   level, from the commit being released, and packages it
   ([android-app §12](frontends/android-app.md#12-build)). The package build fails without it.
@@ -119,7 +125,7 @@ to contain a component asserts it from `tsync build-info` before it is tested or
 
 | Artifact | Built on | Install test |
 |---|---|---|
-| `.deb` | Debian stable and Ubuntu latest, amd64 and arm64, in containers | install the package on the image it was built for and run the binary |
+| `.deb` (`tsync`, `tsync-tray`, `tsync-dolphin`) | Debian stable and Ubuntu latest, amd64 and arm64, in containers | install the three packages on the image they were built for, run the binary and the tray, and make the package checks of [linux-desktop.md §6.3](frontends/linux-desktop.md#63-packages) |
 | `.rpm` | the latest Fedora release, amd64 and arm64, in containers | as for `.deb` |
 | `tsync.pkg` | macOS, Apple silicon | check the package signature and that Gatekeeper accepts the notarized package |
 | `tsync-arm64-v8a.apk` | Linux, cross-compiled | check that the package holds the core library for its ABI, aligned for 16 KB pages, and that its signer is the tsync key (§5.4) |
@@ -165,7 +171,10 @@ except the signer's, and reports the signing half "not run".
 
 ## 7. Not delivered
 
-- **Linux tray** (TODO): `main` shipped `tsync-tray` in both packages; the rewrite does not build it.
+Nothing the spec describes is left out of a release. The Linux desktop clients ship as their own
+packages, `tsync-tray` and `tsync-dolphin`, built and checked by the Linux release builds
+([frontends/linux-desktop.md §5](frontends/linux-desktop.md#5-delivery),
+[§6.3](frontends/linux-desktop.md#63-packages)).
 
 ## 8. Where the workflows depart
 

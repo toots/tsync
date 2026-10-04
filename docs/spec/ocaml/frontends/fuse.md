@@ -88,20 +88,8 @@ Code: `lib/frontends/fuse/fuse_options.ml` (the descriptor and its option checks
 
 ## Linux desktop (Part II)
 
-The tray, the Dolphin plugin and the mount-discovery shared library are not built in this tree.
-What they will rest on is here: the mount reports `fsname=tsync` and `subtype=<mountSubtype>`
-(§B1, §B2), `Menu.render` is the menu model (§B4, `tests/owner/menu_test`), and the units and
-packages are under `linux/` (§B5, §B6).
-
-Rules for when the discovery library is rebuilt as an OCaml shared object called from C++; none
-depends on how the old one was written:
-
-- Build it as `(executable (modes shared_object))`. `(modes object)` links a runtime that is not
-  position-independent, which the linker refuses inside a `.so` on aarch64.
-- dune sets no soname and names the file after the executable. Pass `-Wl,-soname,<name>` and give
-  the executable that name; a mismatch fails when the plugin loads, not when it links. The JNI
-  library of [android.md](android.md) is built this way.
-- Every closure registered for C is total: an exception crossing into the host aborts it.
-- `caml_startup` runs once, from one thread; other threads register before they call in.
-- Test the C++ decoding against a second shared object that registers the same entry with fixed
-  answers, never against the machine's mounts.
+The tray, the Dolphin plugin and the discovery library are described in
+[linux-desktop.md](linux-desktop.md). What this frontend owes them: the mount reports
+`fsname=tsync` and `subtype=<mountSubtype>` (§B1, §B2), and it takes its configured mount point and
+its decoding of the mount table from `Tsync_config.Mounts`, the module discovery answers from. The
+units and packages are under `linux/` (§B5, §B6).

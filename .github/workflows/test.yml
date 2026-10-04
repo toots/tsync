@@ -21,7 +21,9 @@ jobs:
       - uses: actions/checkout@v5
 
       - name: System libraries
-        run: sudo apt-get update && sudo apt-get install -y libssl-dev libfuse3-dev fuse3 libgmp-dev pkg-config
+        # libdbus and the bus daemon are for the tray and its suite, which
+        # runs on a private session bus.
+        run: sudo apt-get update && sudo apt-get install -y libssl-dev libfuse3-dev fuse3 libgmp-dev pkg-config libdbus-1-dev dbus
 
       - uses: ocaml/setup-ocaml@v3
         with:
@@ -40,7 +42,7 @@ jobs:
       - name: OCaml libraries
         env:
           TSYNC_FORMATTER: 1
-        run: ./scripts/opam_deps.sh tsync tsync-tls tsync-ssl tsync-fuse
+        run: ./scripts/opam_deps.sh tsync tsync-tls tsync-ssl tsync-fuse tsync-tray
 
       - name: Save the opam switch
         if: steps.opam-switch.outputs.cache-hit != 'true'

@@ -29,7 +29,7 @@ is an open finding of [the review](../../review/2026-10-01-rewrite.md) is cited 
 | Bodies, mapping and memory, with measurements | [memory.md](memory.md) |
 | Backend drivers | [local](backends/local.md), [s3 and object-store common](backends/s3.md), [gcs](backends/gcs.md), [http-proxy](backends/http-proxy.md) |
 | FUSE (libfuse binding, KIO plugin via shared object) | [frontends/fuse.md](frontends/fuse.md) |
-| Linux desktop clients (the tray's D-Bus binding, the discovery shared object), as built on `main` | [frontends/linux-desktop.md](frontends/linux-desktop.md) |
+| Linux desktop clients: the menu model, mount discovery and its shared object, the D-Bus binding, the tray on the runtime, the plugin build | [frontends/linux-desktop.md](frontends/linux-desktop.md) |
 | http-proxy server | [frontends/http-proxy.md](frontends/http-proxy.md) |
 | macOS (the File Provider host) | [frontends/file-provider.md](frontends/file-provider.md) |
 | Android (cross-compilation, JNI, embedding the runtime) | [frontends/android.md](frontends/android.md) |

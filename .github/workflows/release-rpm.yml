@@ -59,12 +59,15 @@ jobs:
       - name: Install system dependencies
         # fuse3, not fuse: libfuse3 mounts through the setuid fusermount3,
         # which only fuse3 provides. gmp-devel is for mirage-crypto-pk, and gh
-        # for the publish step.
+        # for the publish step. dbus-devel is the tray's; cmake, Qt 6 and KDE
+        # Frameworks 6 are the Dolphin plugin's.
         run: |
           dnf install -y \
-            opam gcc make m4 pkgconf-pkg-config git curl unzip rsync tar gzip \
+            opam gcc gcc-c++ make m4 pkgconf-pkg-config git curl unzip rsync tar gzip \
             rpm-build systemd-rpm-macros gh binutils \
-            fuse3-devel fuse3 openssl-devel gmp-devel
+            fuse3-devel fuse3 openssl-devel gmp-devel \
+            dbus-devel cmake extra-cmake-modules qt6-qtbase-devel \
+            kf6-kcoreaddons-devel kf6-kio-devel
 
       - uses: actions/checkout@v4
         with:
