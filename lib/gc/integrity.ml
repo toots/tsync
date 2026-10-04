@@ -77,7 +77,7 @@ type verified =
   | Stalled of { left : int option; corrupt : int option }
   | Abandoned of { left : int option; corrupt : int option }
 
-let orphan_grace = Tsync_sync.Outbound.horizon +. (7. *. 86400.)
+let orphan_grace = Tsync_sync.Outbound.nameable
 
 let rank = function
   | Twice _ -> 0
@@ -422,7 +422,7 @@ module Make (C : Context.S) = struct
 
   let sound chunk (s : Store.t) =
     match s.get_opt (Key.chunk d chunk) with
-      | Some b when Chunk_key.equal (Chunk_key.of_bigstring b) chunk -> Some b
+      | Some b when Chunk_key.names chunk b -> Some b
       | _ -> None
 
   let repair_chunks ?(narrate = Narrate.none) ?(apply = false) ?source

@@ -42,6 +42,12 @@ module Make (C : Engine_ctx.S) = struct
         | _ -> false)
       (owed_ops o)
 
+  let owed_mkdir o id =
+    List.exists
+      (function
+        | Op.Mkdir { id = Some i; _ } -> Folder_id.equal i id | _ -> false)
+      (owed_ops o)
+
   let owed_rmdir o id =
     List.exists
       (function
@@ -344,12 +350,7 @@ module Make (C : Engine_ctx.S) = struct
   (* R(F) of conflict-resolution §3.5: the first conflicted name that is free,
      made here, or already holds a folder an unpublished mkdir of ours made. *)
   let rescue_folder f =
-    let ours id =
-      List.exists
-        (function
-          | Op.Mkdir { id = Some i; _ } -> Folder_id.equal i id | _ -> false)
-        (owed_ops (owed ()))
-    in
+    let ours id = owed_mkdir (owed ()) id in
     let rec pick n =
       let r =
         Names.join (Names.parent_of f)
@@ -1500,8 +1501,7 @@ module Make (C : Engine_ctx.S) = struct
      name the folder, a week past the horizon. *)
   let daily_maintenance () =
     sweep_local_temps ();
-    Mirror.sweep_removed_records mirror
-      ~older_than:(Outbound.horizon +. (7. *. 86400.))
+    Mirror.sweep_removed_records mirror ~older_than:Outbound.nameable
 
   let recover_local () =
     let root = Mirror.root mirror in

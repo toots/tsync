@@ -14,3 +14,4 @@ let shard k = String.sub k 0 3
 let empty = Xxh.dual ""
 let equal = String.equal
 let compare = String.compare
+let names k b = equal (of_bigstring b) k

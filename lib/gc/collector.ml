@@ -156,7 +156,7 @@ let verify_promoted m d n c =
             | exception _ -> None)
   in
   match read (Key.chunk d c) with
-    | Some b when Chunk_key.equal (Chunk_key.of_bigstring b) c ->
+    | Some b when Chunk_key.names c b ->
         if store.delete marker then n.cleared <- n.cleared + 1
     | Some b ->
         n.corrupt <- n.corrupt + 1;
@@ -190,13 +190,7 @@ let mark m d n ~verify ns =
       cs;
   n.marked <- n.marked + 1
 
-let batches l =
-  let rec go acc batch n = function
-    | [] -> List.rev (if batch = [] then acc else List.rev batch :: acc)
-    | k :: rest when n = delete_batch -> go (List.rev batch :: acc) [k] 1 rest
-    | k :: rest -> go acc (k :: batch) (n + 1) rest
-  in
-  match go [] [] 0 l with [] -> [[]] | b -> b
+let batches l = match Pages.cut delete_batch l with [] -> [[]] | b -> b
 
 let file_size path =
   match Fs.lstat_opt path with Some st -> Int64.to_int st.st_size | None -> 0
@@ -739,10 +733,7 @@ let survey_one ~narrate:nr ~verify ~cancelled d m =
                         Chunk_set.remove referenced c;
                         if verify then (
                           match m.member.store.get_opt e.key with
-                            | Some b
-                              when Chunk_key.equal (Chunk_key.of_bigstring b) c
-                              ->
-                                ()
+                            | Some b when Chunk_key.names c b -> ()
                             | _ -> incr corrupt)
                     | _ -> ())
                 listing)

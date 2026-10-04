@@ -19,4 +19,9 @@ val shard : t -> string
 val empty : t
 
 val equal : t -> t -> bool
+
+(** Whether these bytes are the chunk the key names: the one check of a chunk
+    read from anywhere. *)
+val names : t -> Xxh.bigstring -> bool
+
 val compare : t -> t -> int

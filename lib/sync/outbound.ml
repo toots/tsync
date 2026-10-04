@@ -3,6 +3,9 @@ open Tsync_remote
 open Tsync_checkout
 
 let horizon = 30. *. 86400.
+
+(* How long what an entry may still name is kept: a week past the horizon. *)
+let nameable = horizon +. (7. *. 86400.)
 let list_slack = 86400.
 let rekey_age = 86400.
 let sweep = 60.

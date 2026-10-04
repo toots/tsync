@@ -50,7 +50,7 @@ let current (memo : t) g =
     memo.g <- g);
   g = memo.g
 
-let shard_index sss = int_of_string ("0x" ^ sss)
+let shard_index = Chunk_set.shard_index
 
 let holds v ck =
   match v.g with

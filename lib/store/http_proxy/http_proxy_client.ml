@@ -344,15 +344,7 @@ let delete t k =
     | r when success r.status -> true
     | r -> failure t ~op:"delete" r
 
-let rec pages n = function
-  | [] -> []
-  | l ->
-      let rec take k acc = function
-        | x :: rest when k > 0 -> take (k - 1) (x :: acc) rest
-        | rest -> (List.rev acc, rest)
-      in
-      let page, rest = take n [] l in
-      page :: pages n rest
+let pages = Pages.cut
 
 let json_keys keys =
   Bigstring.of_string
@@ -382,7 +374,7 @@ let get_many t keys =
       with
         | r when success r.status ->
             let got = W.decode_bodies ~count:(List.length keys) r.body in
-            let rest = List.filteri (fun i _ -> i >= List.length got) keys in
+            let rest = snd (Pages.take (List.length got) keys) in
             if rest = [] then got else got @ page_of rest
         | { status = 404; _ } ->
             Atomic.set t.no_get_many true;
