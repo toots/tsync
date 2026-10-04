@@ -92,6 +92,12 @@ end
 (** One request on its own connection. *)
 val call : ?timeout:float -> string -> json -> json
 
+(** One exchange of a client tool under one deadline covering connecting,
+    writing and reading the reply line (frontends/linux-desktop.md §4.1). [None]
+    is no answer: a transport failure, the deadline, or a reply that is not one
+    JSON object. Never raises. *)
+val ask : deadline:float -> string -> json -> json option
+
 (** A bulk request (07 §4.3): no total deadline; abandoned when a [ping] on a
     separate connection misses its deadline. *)
 val call_bulk : string -> json -> json

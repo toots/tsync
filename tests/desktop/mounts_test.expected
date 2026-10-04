@@ -1,0 +1,40 @@
+== the fixture table: 7
+  <root>/home/tsync/default  <root>/data/tsync/tsync-default.sock
+  <root>/mnt/files  <root>/data/tsync/tsync-files.sock
+  <root>/mnt/files/alias/below  <root>/data/tsync/tsync-below.sock
+  <root>/mnt/files/nested  <root>/data/tsync/tsync-nested.sock
+  <root>/mnt/honest  <root>/data/tsync/tsync-honest.sock
+  <root>/mnt/spaced name  <root>/data/tsync/tsync-spaced.sock
+  <root>/real/inside  <root>/data/tsync/tsync-linked.sock
+== decoding
+  "a\\040b" -> "a b"
+  "a\\011\\012\\134" -> "a\t\n\\"
+  "a\\9zz" -> "a\\9zz"
+  "a\\777" -> "a\\777"
+  "a\\04" -> "a\\04"
+  "a\\" -> "a\\"
+  "\\0401" -> " 1"
+== owners that accept and never answer: same answer true, connections 0, under 100 ms true
+== no mount table: 0
+== a config that is not JSON: 0
+== a config that fails validation: 0
+== no home directory: 0
+== home directory back: 7
+  <root>/home/tsync/default  <root>/data/tsync/tsync-default.sock
+  <root>/mnt/files  <root>/data/tsync/tsync-files.sock
+  <root>/mnt/files/alias/below  <root>/data/tsync/tsync-below.sock
+  <root>/mnt/files/nested  <root>/data/tsync/tsync-nested.sock
+  <root>/mnt/honest  <root>/data/tsync/tsync-honest.sock
+  <root>/mnt/spaced name  <root>/data/tsync/tsync-spaced.sock
+  <root>/real/inside  <root>/data/tsync/tsync-linked.sock
+== the config as a file: 7
+  <root>/home/tsync/default  <root>/data/tsync/tsync-default.sock
+  <root>/mnt/files  <root>/data/tsync/tsync-files.sock
+  <root>/mnt/files/alias/below  <root>/data/tsync/tsync-below.sock
+  <root>/mnt/files/nested  <root>/data/tsync/tsync-nested.sock
+  <root>/mnt/honest  <root>/data/tsync/tsync-honest.sock
+  <root>/mnt/spaced name  <root>/data/tsync/tsync-spaced.sock
+  <root>/real/inside  <root>/data/tsync/tsync-linked.sock
+== no config: 0
+2 checks in the child
+7 checks

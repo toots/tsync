@@ -1,0 +1,37 @@
+(executable
+ (name mounts_test)
+ (modules mounts_test)
+ (libraries tsync_core tsync_config tsync_catalog unix))
+
+(rule
+ (enabled_if %{lib-available:tsync_fuse})
+ (action
+  (with-stdout-to
+   mounts_test.output
+   (run ./mounts_test.exe))))
+
+(rule
+ (alias runtest)
+ (enabled_if %{lib-available:tsync_fuse})
+ (action
+  (diff mounts_test.expected mounts_test.output)))
+
+(executable
+ (name owner_double)
+ (modules owner_double)
+ (libraries unix threads.posix yojson))
+
+(executable
+ (name wedged_test)
+ (modules wedged_test)
+ (libraries tsync_core tsync_ipc unix yojson))
+
+(rule
+ (with-stdout-to
+  wedged_test.output
+  (run ./wedged_test.exe %{exe:owner_double.exe})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff wedged_test.expected wedged_test.output)))

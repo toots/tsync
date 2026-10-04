@@ -1,0 +1,23 @@
+== the stand-in: 3 pairs
+  [/mnt/files] [/run/tsync/tsync-files.sock]
+  [/mnt/files/media] [/run/tsync/tsync-media.sock]
+  [/mnt/spaced name] [/run/tsync/tsync-spaced name.sock]
+  asked again: the same answer
+  signal dispositions changed: 0
+  signal stack, directory, locale, environment unchanged: yes
+== no home directory: 0 pairs
+  asked again: the same answer
+  signal dispositions changed: 0
+  signal stack, directory, locale, environment unchanged: yes
+== no config: 0 pairs
+  asked again: the same answer
+  signal dispositions changed: 0
+  signal stack, directory, locale, environment unchanged: yes
+== invalid config: 0 pairs
+  asked again: the same answer
+  signal dispositions changed: 0
+  signal stack, directory, locale, environment unchanged: yes
+== config refused by validation: 0 pairs
+  asked again: the same answer
+  signal dispositions changed: 0
+  signal stack, directory, locale, environment unchanged: yes

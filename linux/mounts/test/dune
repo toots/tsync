@@ -1,0 +1,93 @@
+; linux-desktop.md §6.2: a C host against the stand-in, and against the real
+; library on inputs that must each answer nothing. Linking by name and
+; running proves the SONAME equals the file name.
+
+(rule
+ (targets host_fake.exe)
+ (enabled_if
+  (= %{system} linux))
+ (deps
+  host_test.c
+  ../tsync_mounts_host.c
+  ../tsync_mounts.h
+  ../libtsync_mounts_fake.so)
+ (action
+  (run
+   %{cc}
+   -I
+   %{ocaml_where}
+   -I
+   ..
+   host_test.c
+   ../tsync_mounts_host.c
+   -L..
+   -ltsync_mounts_fake
+   -Wl,-rpath,$ORIGIN/..
+   -o
+   %{targets})))
+
+(rule
+ (targets host_real.exe)
+ (enabled_if
+  (= %{system} linux))
+ (deps
+  host_test.c
+  ../tsync_mounts_host.c
+  ../tsync_mounts.h
+  ../libtsync_mounts.so)
+ (action
+  (run
+   %{cc}
+   -I
+   %{ocaml_where}
+   -I
+   ..
+   host_test.c
+   ../tsync_mounts_host.c
+   -L..
+   -ltsync_mounts
+   -Wl,-rpath,$ORIGIN/..
+   -o
+   %{targets})))
+
+(rule
+ (enabled_if
+  (= %{system} linux))
+ (deps
+  host_real.exe
+  host_fake.exe
+  ../libtsync_mounts.so
+  ../libtsync_mounts_fake.so)
+ (action
+  (with-stdout-to
+   host_test.output
+   (progn
+    (run ./host_fake.exe "the stand-in")
+    (run
+     env
+     -u
+     HOME
+     -u
+     TSYNC_CONFIG_JSON
+     ./host_real.exe
+     "no home directory")
+    (run
+     env
+     -u
+     TSYNC_CONFIG_JSON
+     XDG_CONFIG_HOME=/nonexistent
+     ./host_real.exe
+     "no config")
+    (run env "TSYNC_CONFIG_JSON={not json" ./host_real.exe "invalid config")
+    (run
+     env
+     "TSYNC_CONFIG_JSON={\"domains\":[{\"name\":\"x\"}]}"
+     ./host_real.exe
+     "config refused by validation")))))
+
+(rule
+ (alias runtest)
+ (enabled_if
+  (= %{system} linux))
+ (action
+  (diff host_test.expected host_test.output)))

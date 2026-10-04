@@ -87,8 +87,11 @@ The inputs are read on every call. A mount or unmount is reflected by the next c
    and make it canonical: resolve the symbolic links of its **parent** directory, and append the
    last component unchanged. The last component is not resolved: it is the mount itself, and
    looking through it would ask the owner. A parent that cannot be resolved leaves the configured
-   string as it is.
-2. Read `/proc/self/mountinfo`. A line is fields separated by single spaces.
+   string as it is. Resolution stops at the first prefix that is a mount point kept in step 2, and
+   the rest of the path is appended as written: a domain mounted inside another domain's mount
+   must not make discovery ask the outer owner (§3.1).
+2. Read `/proc/self/mountinfo`, before step 1 resolves anything. A line is fields separated by
+   single spaces.
    - Field 5 (1-based) is the mount point.
    - After it comes a variable number of optional fields, ended by a field equal to `-`. The two
      fields after `-` are the filesystem type and the source.
@@ -254,6 +257,8 @@ Driven by fixture files, never by the machine's real mounts.
 - A non-FUSE mount whose source is `tsync` is not reported (the type decides).
 - A configured mount point reached through a symbolic link in a parent directory is reported, with
   the canonical path the table lists.
+- A configured mount point below another tsync mount is reported without anything at or below the
+  outer mount being read: a symbolic link there is not followed.
 - A domain with no `fuse` frontend is not reported.
 - A table holding an unparseable line, and one holding a malformed escape, still yields every
   other mount.
