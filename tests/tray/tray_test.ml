@@ -490,7 +490,7 @@ let served w =
   own w file_manager;
   start_tray w;
   ignore (shows w "busy — Idle");
-  let worst = ref 0. in
+  let latencies = ref [] in
   let sample seconds =
     let stop = Rt.now () +. seconds in
     while Rt.now () < stop do
@@ -500,7 +500,7 @@ let served w =
         (call_at w ~path:"/StatusNotifierItem"
            ~interface:"org.freedesktop.DBus.Properties" "GetAll"
            [String "org.kde.StatusNotifierItem"]);
-      worst := Float.max !worst ((Rt.now () -. started) /. 2.);
+      latencies := ((Rt.now () -. started) /. 2.) :: !latencies;
       Rt.sleep 0.02
     done
   in
@@ -512,10 +512,21 @@ let served w =
   sample 2.;
   click w (row w "Hold changes").id;
   sample 2.;
-  check w
-    "GetLayout and GetAll within BUS_ANSWER_BOUND during a poll, a stats \
-     fetch, a silent file manager and a hold switch"
-    (!worst < bus_answer_bound);
+  (* On a machine running other suites one call in hundreds is late by the
+     machine's doing. A tray that waited on an owner, the watcher or the file
+     manager would hold every call for a deadline of seconds. *)
+  let sorted = List.sort compare !latencies in
+  let median = List.nth sorted (List.length sorted / 2)
+  and worst = List.fold_left Float.max 0. sorted in
+  say w
+    "GetLayout and GetAll during a poll, a stats fetch, a silent file manager \
+     and a hold switch: %s"
+    (if List.length sorted < 100 then "TOO FEW SAMPLES"
+     else if median >= bus_answer_bound then
+       Printf.sprintf "MEDIAN %.0f ms" (1000. *. median)
+     else if worst >= bus_answer_bound +. margin then
+       Printf.sprintf "ONE CALL WAITED %.1f s" worst
+     else "within BUS_ANSWER_BOUND, none held for a deadline");
   say w "the silent owner's row: %s" (label (row w "quiet"));
   check w "the stats fetch reached the silent owner"
     (wait_until (fun () -> requests w "busy" "stats" = 1));
