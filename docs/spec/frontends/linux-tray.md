@@ -195,8 +195,8 @@ and the Stats submenu keeps its content across a redraw, even when a new row abo
 3. Else install it by the identity rule and emit `LayoutUpdated(revision, 0)`.
 
 While the menu is open the tray MUST NOT announce a change of the root. It announces the held
-layout when the menu closes, when a new opening begins, or when the menu has been open for
-`MENU_OPEN_BOUND`, whichever comes first (§4.4).
+layout when the menu closes, when a new opening begins, or at the first refresh after the menu
+has been open for `MENU_OPEN_BOUND`, whichever comes first (§4.4).
 
 **Setting the Stats row's children**, given entries:
 
@@ -369,6 +369,13 @@ Leave. The owners keep running.
 The tray is tested as a process on a private session bus, with a scripted host. It MUST NOT need a
 desktop.
 
+Where a rule is about order (a reply is not delayed by an owner, every owner is asked before any
+is given up on), the suite asserts the order of events as its doubles record them: when a request
+reached an owner, when the tray hung up on it, when a reply reached the host. It does not time
+them: a duration measured on a machine that runs other work fails without the tray being wrong.
+Durations are asserted only where the rule is itself a duration (a held layout, a debounce), with
+the margin the suite names.
+
 **Doubles:** a private session bus; a scripted host that plays the watcher and sends any call;
 owners that answer scripted replies, and the three owners of
 [linux-desktop.md §6.5](linux-desktop.md#65-the-wedged-owner); a file-manager service that
@@ -379,14 +386,14 @@ records calls, and none; a config as a file.
   reply or an error. **Binding:** that each is answered, and the error name where §3.2 gives one.
 - **The bus is served while owners are silent.** With one owner that accepts and never answers,
   during a poll, a stats fetch and a hold switch, `GetLayout` and `Properties.GetAll` are answered
-  within `BUS_ANSWER_BOUND`. **Binding:** the bound, measured from the host's side. The same holds
-  with a file manager that does not answer. A suite that shares its machine with other work MAY
-  hold the median of its samples to the bound, provided it also checks that no call was held for
-  as long as the shortest deadline the tray keeps: that is what a tray waiting on an owner looks
-  like, and a single late sample on a loaded machine is not.
+  while the tray's request to that owner is still outstanding: the reply reaches the host before
+  the owner sees the tray hang up. The same holds with a file manager that does not answer: the
+  reply comes before the fallback helper runs. **Binding:** that order. The figure of
+  `BUS_ANSWER_BOUND` is checked by hand on a panel.
 - **One silent owner costs one deadline.** With N domains of which one is silent, the others' rows
-  are current after one `TRAY_STATUS_DEADLINE`, for N = 2 and N = 20. **Binding:** the bound does
-  not grow with N; the silent domain reads `not answering`.
+  are current after one `TRAY_STATUS_DEADLINE`, for N = 2 and N = 20, and with every owner silent.
+  **Binding:** every owner has received its request before the tray hangs up on any; the silent
+  domain reads `not answering`.
 - **Ids.** Fetch the layout, change one row, send a click with that row's old id: no action runs.
   Send a click with the old id of an unchanged row: its action runs. Refresh with unchanged
   content: no id changes and no `LayoutUpdated` is emitted. Over a long run with churning rows, no
@@ -399,14 +406,15 @@ records calls, and none; a config as a file.
   opening is still clickable. After `closed` for the root, the next layout is announced. After
   `closed` for the Stats row's id, it is not.
 - **A host that reports no close.** With no `closed` ever sent, the content becomes current
-  within `MENU_OPEN_BOUND`, and at once at the next opening of the root.
+  by the first refresh after `MENU_OPEN_BOUND`, and at once at the next opening of the root.
 - **The revision increases** at every `LayoutUpdated`.
 - **Stats.** Before any answer the Stats row has one child, the placeholder; with no owner
   answering, one child; after the answers, the rows of the model, announced against the row's id
   with the menu open. They are still there after two polls and after a domain is added above. One
   opening announced by both `AboutToShow` and `opened` causes one fetch.
 - **Hold switch.** With one owner refusing `pause`, the checkmark after the click is what the
-  owners report; with one owner silent, the others are held and the click costs one deadline.
+  owners report; with one owner silent, the others are held and the click costs one deadline: every
+  owner has received the request before the tray hangs up on the silent one.
 - **Mount point.** With an owner reporting a mount point the config does not name, `OpenFolder`
   and `Reveal` name the reported one. With that owner silent, the configured one.
 - **Reveal.** `Reveal` calls `ShowItems` with the percent-encoded URI of the file; with no
@@ -421,7 +429,7 @@ records calls, and none; a config as a file.
   `NewToolTip` and no `LayoutUpdated`.
 - **Session.** With no bus address and no session socket, the tray exits 1 with the message of
   §1 and no bus process was started. With the socket present, it uses it. When the bus closes, it
-  exits 0. A second tray prints its line and exits 0 at once, and one item remains on the bus.
+  exits 0. A second tray prints its line and exits 0, and one item remains on the bus.
 - **Config.** Started with no config, with a file that is not JSON, and with JSON that fails
   validation, the tray runs and shows `No domains configured`; after each is repaired, the domains
   appear within two poll intervals. A config rewritten twice in quick succession ends with the

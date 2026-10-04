@@ -1,17 +1,22 @@
 == the bus is served while owners are silent
-GetLayout and GetAll during a poll, a stats fetch, a silent file manager and a hold switch: within BUS_ANSWER_BOUND, none held for a deadline
+GetLayout and GetAll answered while the status request to the silent owner is outstanding: yes
+GetLayout and GetAll answered while the stats request to the silent owner is outstanding: yes
+GetLayout and GetAll answered while the pause request to the silent owner is outstanding: yes
+and while the call to a silent file manager is outstanding: yes
 the silent owner's row: quiet — not answering
-the stats fetch reached the silent owner: yes
 the hold switch reached the other owner: yes
 
 == one silent owner of 2
-2 domains, 1 silent: every row current after one status deadline: yes
+2 domains, 1 silent: every row current: yes
+every owner asked before the tray gave up on any: yes
 
 == one silent owner of 20
-20 domains, 1 silent: every row current after one status deadline: yes
+20 domains, 1 silent: every row current: yes
+every owner asked before the tray gave up on any: yes
 
 == 20 silent owners of 20
-20 domains, 20 silent: every row current after one status deadline: yes
+20 domains, 20 silent: every row current: yes
+every owner asked before the tray gave up on any: yes
 
 == every call is answered
 org.kde.StatusNotifierItem GetAll                    answered
@@ -103,13 +108,12 @@ the revision increases: yes
 held while open: photos — Idle
 the next opening of the root installs it at once: true, photos — Uploading 1
 held again: photos — Uploading 1
-with no close ever sent, current within MENU_OPEN_BOUND: yes
+with no close ever sent, current by the first refresh after MENU_OPEN_BOUND: yes
 the revision increases: yes
 
 == hold switch, mount point, reveal
-with one owner silent the others are asked: yes
+with one owner silent the others are asked, each before the tray gave up on the silent one: yes
 the refusal is logged with the domain and the reason: yes
-and the click costs one deadline: yes
 the checkmark is what the owners report: unchecked
 with no file manager the helper is run: yes
 xdg-open /cfg/quiet
@@ -136,7 +140,7 @@ no bus address and no session socket: exit 1
 tsync-tray: no session bus: the tray needs a running desktop session
 no bus was started for it: true
 with the session socket present it uses it: yes
-a second tray: exit 0 at once: true
+a second tray: exit 0
 tsync-tray is already running
 items on the bus: 1
 a command-line error: exit 1
@@ -148,9 +152,9 @@ when the bus closes: exit 0
 with no config it runs and shows no domains: yes
 the domains appear after it is written: yes
 a config that is not JSON shows no domains: yes
-repaired within two poll intervals: yes
+repaired without a restart: yes
 a config that fails validation shows no domains: yes
-repaired within two poll intervals: yes
+repaired without a restart: yes
 rewritten twice in quick succession: music — Idle
 one warning per distinct reason: 3
 

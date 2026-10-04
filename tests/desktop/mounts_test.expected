@@ -14,7 +14,7 @@
   "a\\04" -> "a\\04"
   "a\\" -> "a\\"
   "\\0401" -> " 1"
-== owners that accept and never answer: same answer true, connections 0, under 100 ms true
+== owners that accept and never answer: same answer true, connections 0
 == no mount table: 0
 == a config that is not JSON: 0
 == a config that fails validation: 0

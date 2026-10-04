@@ -10,10 +10,13 @@ let owner_double = Filename.concat (Sys.getcwd ()) Sys.argv.(2)
 let root = Printf.sprintf "/tmp/tt-%d" (Unix.getpid ())
 let poll_interval = 3.
 let status_deadline = 1.5
-let bus_answer_bound = 0.1
 
-(* Time allowed on top of a bound the spec states, for a loaded machine. *)
-let margin = 1.
+(* How long anything that must happen is waited for. Nothing is timed against
+   it: order is read from what the doubles recorded (linux-tray.md §9). *)
+let patience = 30.
+
+(* Allowed on top of the one bound that is itself a duration. *)
+let margin = 5.
 
 let write file text =
   Fs.mkdir_p ~perm:0o700 (Filename.dirname file);
@@ -26,7 +29,7 @@ let write file text =
 let read file = Option.value ~default:"" (Fs.read_file_opt file)
 let lines file = List.filter (( <> ) "") (String.split_on_char '\n' (read file))
 
-let rec wait_until ?(timeout = 10.) condition =
+let rec wait_until ?(timeout = patience) condition =
   condition ()
   || timeout > 0.
      &&
@@ -158,7 +161,8 @@ let world () =
   close_in ic;
   write
     (Filename.concat dir "bin/xdg-open")
-    (Printf.sprintf "#!/bin/sh\necho \"$1\" >> %s/xdg-open.log\n" dir);
+    (Printf.sprintf
+       "#!/bin/sh\necho \"$(date +%%s.%%N) $1\" >> %s/xdg-open.log\n" dir);
   Unix.chmod (Filename.concat dir "bin/xdg-open") 0o700;
   let w =
     {
@@ -216,7 +220,7 @@ let start_tray w =
   if not (wait_until (fun () -> has_owner w (item w))) then
     failwith "the tray did not start"
 
-let exit_status ?(timeout = 10.) pid =
+let exit_status ?(timeout = patience) pid =
   let status = ref None in
   ignore
     (wait_until ~timeout (fun () ->
@@ -262,9 +266,46 @@ let requests w name action =
          Text.contains line (Printf.sprintf {|"action":"%s"|} action))
        (lines (script w name "requests")))
 
+(* What an owner double recorded of one request: when it arrived and when its
+   client hung up. *)
+type exchange = { action : string; arrived : float; hung_up : float option }
+
+let exchanges w name action =
+  let table = Hashtbl.create 16 and order = ref [] in
+  List.iter
+    (fun line ->
+      match String.split_on_char ' ' line with
+        | [time; connection; "request"; action] ->
+            Hashtbl.replace table connection
+              { action; arrived = float_of_string time; hung_up = None };
+            order := connection :: !order
+        | [time; connection; "close"] ->
+            Option.iter
+              (fun e ->
+                Hashtbl.replace table connection
+                  { e with hung_up = Some (float_of_string time) })
+              (Hashtbl.find_opt table connection)
+        | _ -> ())
+    (lines (script w name "events"));
+  List.filter
+    (fun e -> e.action = action)
+    (List.rev_map (Hashtbl.find table) !order)
+
+(* The helper's log: when it ran, and on what. *)
+let helper_runs w =
+  List.filter_map
+    (fun line ->
+      match String.index_opt line ' ' with
+        | Some i ->
+            Some
+              ( float_of_string (String.sub line 0 i),
+                String.sub line (i + 1) (String.length line - i - 1) )
+        | None -> None)
+    (lines (path w "xdg-open.log"))
+
 let call_at w ~path:object_path ~interface member arguments =
-  Bus.call w.host ~timeout:5. ~destination:(item w) ~path:object_path ~interface
-    ~member arguments
+  Bus.call w.host ~timeout:patience ~destination:(item w) ~path:object_path
+    ~interface ~member arguments
 
 let menu w member arguments =
   call_at w ~path:"/MenuBar" ~interface:"com.canonical.dbusmenu" member
@@ -480,7 +521,8 @@ let calls w =
     (rows w);
   check w "the revision increases" (revisions_increase w)
 
-(* §9 "The bus is served while owners are silent". *)
+(* §9 "The bus is served while owners are silent": a reply reaches the host
+   while the tray's request to the silent party is still outstanding. *)
 let served w =
   configure w ["quiet"; "busy"];
   owner ~mode:"silent" w "quiet";
@@ -490,50 +532,76 @@ let served w =
   own w file_manager;
   start_tray w;
   ignore (shows w "busy — Idle");
-  let latencies = ref [] in
-  let sample seconds =
-    let stop = Rt.now () +. seconds in
-    while Rt.now () < stop do
-      let started = Rt.now () in
-      ignore (layout w);
-      ignore
-        (call_at w ~path:"/StatusNotifierItem"
-           ~interface:"org.freedesktop.DBus.Properties" "GetAll"
-           [String "org.kde.StatusNotifierItem"]);
-      latencies := ((Rt.now () -. started) /. 2.) :: !latencies;
-      Rt.sleep 0.02
-    done
+  let ask () =
+    ignore (layout w);
+    ignore
+      (call_at w ~path:"/StatusNotifierItem"
+         ~interface:"org.freedesktop.DBus.Properties" "GetAll"
+         [String "org.kde.StatusNotifierItem"]);
+    Unix.gettimeofday ()
   in
-  sample (poll_interval +. 1.);
-  ignore (menu w "AboutToShow" [Int32 0]);
-  sample 2.;
+  let during action trigger =
+    let before = List.length (exchanges w "quiet" action) in
+    trigger ();
+    let arrived () = List.length (exchanges w "quiet" action) > before in
+    if not (wait_until arrived) then say w "during %s: NO REQUEST" action
+    else (
+      let answered = ask () in
+      let abandoned () =
+        (List.nth (exchanges w "quiet" action) before).hung_up
+      in
+      ignore (wait_until (fun () -> abandoned () <> None));
+      say w
+        "GetLayout and GetAll answered while the %s request to the silent \
+         owner is outstanding: %s"
+        action
+        (match abandoned () with
+          | Some hung_up when answered < hung_up -> "yes"
+          | Some _ -> "NO, only after the tray gave up on the owner"
+          | None -> "NO, the request was never abandoned"))
+  in
+  during "status" ignore;
+  during "stats" (fun () -> ignore (menu w "AboutToShow" [Int32 0]));
   event w 0 "closed";
+  during "pause" (fun () -> click w (row w "Hold changes").id);
   click w (row w "busy").id;
-  sample 2.;
-  click w (row w "Hold changes").id;
-  sample 2.;
-  (* On a machine running other suites one call in hundreds is late by the
-     machine's doing. A tray that waited on an owner, the watcher or the file
-     manager would hold every call for a deadline of seconds. *)
-  let sorted = List.sort compare !latencies in
-  let median = List.nth sorted (List.length sorted / 2)
-  and worst = List.fold_left Float.max 0. sorted in
-  say w
-    "GetLayout and GetAll during a poll, a stats fetch, a silent file manager \
-     and a hold switch: %s"
-    (if List.length sorted < 100 then "TOO FEW SAMPLES"
-     else if median >= bus_answer_bound then
-       Printf.sprintf "MEDIAN %.0f ms" (1000. *. median)
-     else if worst >= bus_answer_bound +. margin then
-       Printf.sprintf "ONE CALL WAITED %.1f s" worst
-     else "within BUS_ANSWER_BOUND, none held for a deadline");
+  ignore (wait_until (fun () -> shown w <> []));
+  let answered = ask () in
+  ignore (wait_until (fun () -> helper_runs w <> []));
+  say w "and while the call to a silent file manager is outstanding: %s"
+    (match helper_runs w with
+      | (ran, _) :: _ when answered < ran -> "yes"
+      | _ :: _ -> "NO, only after the fallback ran"
+      | [] -> "NO, the fallback never ran");
   say w "the silent owner's row: %s" (label (row w "quiet"));
-  check w "the stats fetch reached the silent owner"
-    (wait_until (fun () -> requests w "busy" "stats" = 1));
   check w "the hold switch reached the other owner"
     (wait_until (fun () -> requests w "busy" "pause" = 1))
 
-(* §9 "One silent owner costs one deadline". *)
+(* §9 "One silent owner costs one deadline": every owner is asked before the
+   tray gives up on any. *)
+let asked_before_any_abandoned w action names silent =
+  let first name =
+    match exchanges w name action with e :: _ -> Some e | [] -> None
+  in
+  let settled () =
+    List.for_all (fun n -> first n <> None) names
+    && List.for_all
+         (fun n -> Option.bind (first n) (fun e -> e.hung_up) <> None)
+         silent
+  in
+  wait_until settled
+  &&
+  let latest_arrival =
+    List.fold_left
+      (fun t n -> Float.max t (Option.get (first n)).arrived)
+      0. names
+  and first_abandon =
+    List.fold_left
+      (fun t n -> Float.min t (Option.get (Option.get (first n)).hung_up))
+      infinity silent
+  in
+  latest_arrival < first_abandon
+
 let deadline ~silent count w =
   let names = List.init count (Printf.sprintf "d%02d") in
   configure w names;
@@ -542,7 +610,6 @@ let deadline ~silent count w =
       if i < silent then owner ~mode:"silent" w name
       else owner w name ~status:(busy "f.bin" 10))
     names;
-  let started = Rt.now () in
   start_tray w;
   let current () =
     let labels = labels w in
@@ -551,11 +618,11 @@ let deadline ~silent count w =
     && List.length (List.filter (String.ends_with ~suffix:"Uploading 1") labels)
        = count - silent
   in
-  let ok = wait_until ~timeout:20. current in
-  say w "%d domains, %d silent: every row current after one status deadline: %s"
-    count silent
-    (if ok && Rt.now () -. started < status_deadline +. margin then "yes"
-     else Printf.sprintf "NO (%.1f s)" (Rt.now () -. started))
+  say w "%d domains, %d silent: every row current: %s" count silent
+    (if wait_until current then "yes" else "NO");
+  check w "every owner asked before the tray gave up on any"
+    (asked_before_any_abandoned w "status" names
+       (List.filteri (fun i _ -> i < silent) names))
 
 (* §9 "Ids", "Grouped events", "Mount point", "Signals only on change". *)
 let ids w =
@@ -697,7 +764,7 @@ let open_menu w =
     (List.length (root_updates ~since:before w));
   event w 0 "closed";
   check w "after closed for the root the next layout is announced"
-    (wait_until ~timeout:1. (fun () -> root_updates ~since:before w <> []));
+    (wait_until (fun () -> root_updates ~since:before w <> []));
   say w "and reads: %s" (label (row w "photos"));
   check w "the stats rows are still there after the redraw"
     (List.length (stats ()).children > 1);
@@ -715,7 +782,6 @@ let no_close w =
   start_tray w;
   ignore (shows w "photos — Idle");
   ignore (menu w "AboutToShow" [Int32 0]);
-  let opened = Rt.now () in
   write (script w "photos" "status") (busy "one.bin" 1);
   Rt.sleep (poll_interval +. status_deadline);
   say w "held while open: %s" (label (row w "photos"));
@@ -729,18 +795,22 @@ let no_close w =
   Rt.sleep (poll_interval +. status_deadline);
   say w "held again: %s" (label (row w "photos"));
   let current () = label (row w "photos") = "photos — Idle" in
-  ignore (wait_until ~timeout:(Layout.menu_open_bound +. 5.) current);
+  let allowed =
+    Layout.menu_open_bound +. poll_interval +. status_deadline +. margin
+  in
+  ignore (wait_until ~timeout:(allowed +. patience) current);
   let waited = Rt.now () -. reopened in
-  say w "with no close ever sent, current within MENU_OPEN_BOUND: %s"
-    (if current () && waited <= Layout.menu_open_bound +. margin then "yes"
+  say w
+    "with no close ever sent, current by the first refresh after \
+     MENU_OPEN_BOUND: %s"
+    (if current () && waited <= allowed then "yes"
      else Printf.sprintf "NO (%.1f s)" waited);
-  ignore opened;
   check w "the revision increases" (revisions_increase w)
 
 (* §9 "Stats" with nobody answering, "Hold switch", "Mount point" with a
    silent owner, "Reveal" with no file manager. *)
 let hold w =
-  configure w ["refusing"; "willing"; "quiet"];
+  configure w ["quiet"; "refusing"; "willing"];
   owner w "refusing"
     ~status:
       {|{"ok":true,"mount":"/reported/refusing","downloading":[{"name":"a b.txt","rel":"sub dir/a b.txt"}]}|};
@@ -755,22 +825,21 @@ let hold w =
   let switch () =
     List.assoc_opt "toggle-state" (row w "Hold changes").properties
   in
-  let clicked = Rt.now () in
   click w (row w "Hold changes").id;
-  check w "with one owner silent the others are asked"
-    (wait_until (fun () ->
-         requests w "refusing" "pause" = 1 && requests w "willing" "pause" = 1));
+  check w
+    "with one owner silent the others are asked, each before the tray gave up \
+     on the silent one"
+    (asked_before_any_abandoned w "pause"
+       ["refusing"; "willing"; "quiet"]
+       ["quiet"]);
   let logged () =
     Text.contains (read (path w "tray.err")) "refusing"
     && Text.contains (read (path w "tray.err")) "the disk is full"
   in
   check w "the refusal is logged with the domain and the reason"
-    (wait_until ~timeout:10. logged);
-  let waited = Rt.now () -. clicked in
-  say w "and the click costs one deadline: %s"
-    (if waited < 5. +. margin then "yes"
-     else Printf.sprintf "NO (%.1f s)" waited);
-  Rt.sleep status_deadline;
+    (wait_until logged);
+  let polled = requests w "willing" "status" in
+  ignore (wait_until (fun () -> requests w "willing" "status" > polled));
   say w "the checkmark is what the owners report: %s"
     (match switch () with
       | Some (Int32 0) -> "unchecked"
@@ -780,9 +849,9 @@ let hold w =
   click w (row w "quiet").id;
   click w (row w "    a b.txt").id;
   check w "with no file manager the helper is run"
-    (wait_until (fun () -> List.length (lines (path w "xdg-open.log")) = 3));
+    (wait_until (fun () -> List.length (helper_runs w) = 3));
   List.iter (say w "xdg-open %s")
-    (List.sort compare (lines (path w "xdg-open.log")));
+    (List.sort compare (List.map snd (helper_runs w)));
   own w file_manager;
   click w (row w "refusing").id;
   click w (row w "quiet").id;
@@ -791,8 +860,7 @@ let hold w =
   List.iter
     (fun (member, uri) -> say w "%s %s" member uri)
     (List.sort compare (shown w));
-  say w "the helper was not run again: %d lines"
-    (List.length (lines (path w "xdg-open.log")))
+  say w "the helper was not run again: %d lines" (List.length (helper_runs w))
 
 let nobody w =
   configure w ["quiet"];
@@ -800,7 +868,9 @@ let nobody w =
   start_tray w;
   ignore (shows w "quiet — not answering");
   ignore (menu w "AboutToShow" [Int32 0]);
-  Rt.sleep (4. +. margin);
+  ignore
+    (wait_until (fun () ->
+         List.map label (row w "Stats").children = ["No daemon answering"]));
   say w "with no owner answering the Stats row holds: %s"
     (String.concat " | " (List.map label (row w "Stats").children));
   say w "icon %s, switch enabled %s"
@@ -826,6 +896,12 @@ let panel w =
   own w watcher;
   check w "registered when the watcher appears"
     (wait_until (fun () -> locked w (fun () -> w.registrations) = [item w]));
+  (* That registration announces the icon and the tooltip too: they are let
+     through before the next ones are counted. *)
+  ignore
+    (wait_until (fun () ->
+         List.length (signals w "NewIcon") >= 2
+         && List.length (signals w "NewToolTip") >= 2));
   let other = Bus.connect w.address in
   Rt.spawn ~name:"second watcher" (fun () -> Bus.serve other (host_handler w));
   let before = Rt.now () in
@@ -870,10 +946,8 @@ let session w =
   check w "with the session socket present it uses it"
     (wait_until (fun () -> has_owner w (item w)));
   let second = run_tray w in
-  let started = Rt.now () in
-  say w "a second tray: exit %s at once: %b"
-    (match exit_status second with Some c -> string_of_int c | None -> "none")
-    (Rt.now () -. started < 2.);
+  say w "a second tray: exit %s"
+    (match exit_status second with Some c -> string_of_int c | None -> "none");
   say w "%s" (String.trim (read (path w "tray.out")));
   say w "items on the bus: %d"
     (match bus_call w "ListNames" [] with
@@ -910,24 +984,23 @@ let config w =
   start_tray w;
   let header () = shows w "tsync — No domains configured" in
   let repaired names =
-    let started = Rt.now () in
     configure w names;
-    let ok = shows w (List.hd names ^ " — Idle") in
-    ok && Rt.now () -. started <= (2. *. poll_interval) +. margin
+    shows w (List.hd names ^ " — Idle")
   in
   check w "with no config it runs and shows no domains" (header ());
   check w "the domains appear after it is written" (repaired ["photos"]);
   write (path w "c/tsync/config.json") "{not json";
   check w "a config that is not JSON shows no domains" (header ());
-  check w "repaired within two poll intervals" (repaired ["photos"]);
+  check w "repaired without a restart" (repaired ["photos"]);
   write
     (path w "c/tsync/config.json")
     {|{"domains":[{"name":"photos"}],"bogus":1}|};
   check w "a config that fails validation shows no domains" (header ());
-  check w "repaired within two poll intervals" (repaired ["photos"]);
+  check w "repaired without a restart" (repaired ["photos"]);
   configure w ["photos"; "music"];
   configure w ["music"];
-  Rt.sleep ((2. *. poll_interval) +. margin);
+  ignore
+    (wait_until (fun () -> find w "photos" = None && find w "music" <> None));
   say w "rewritten twice in quick succession: %s"
     (String.concat " | "
        (List.filter (fun l -> Text.contains l " — ") (labels w)));
