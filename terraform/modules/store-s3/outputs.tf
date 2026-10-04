@@ -19,31 +19,41 @@ output "share_url" {
   : null)
 }
 
-# Add this CNAME at your DNS provider so ACM can issue the cert.
-output "acm_validation_records" {
-  description = "CNAME record(s) to add for ACM DNS validation (empty when no custom_domain)."
-  value = var.custom_domain == null ? [] : [
-    for o in aws_acm_certificate.share[0].domain_validation_options : {
-      name  = o.resource_record_name
-      type  = o.resource_record_type
-      value = o.resource_record_value
-    }
-  ]
+output "verify_function" {
+  description = "Name of the verify function."
+  value       = aws_lambda_function.verify.function_name
 }
 
-# Then CNAME custom_domain -> this. null until the domain resource exists (i.e.
-# after the cert validates and the full apply runs). try() keeps it null-safe
-# during the cert-only targeted apply, so it never breaks custom_domain_dns.
-output "custom_domain_target" {
-  description = "CNAME target for the custom domain (null until the full apply completes)."
-  value       = try(aws_apigatewayv2_domain_name.share[0].domain_name_configuration[0].target_domain_name, null)
+output "region" {
+  description = "Region of the store (s3 backend `region`)."
+  value       = aws_lambda_function.verify.region
 }
 
-# Signals whether this store has a custom domain configured, so the root
-# custom_domain_dns output can list it as soon as the cert exists.
 output "custom_domain" {
-  description = "The configured custom domain, or null."
-  value       = var.custom_domain
+  description = "The custom domain share links are served from, or null."
+  value       = local.domain_enabled == 1 ? var.custom_domain : null
+}
+
+# The certificate's validation record first: the CNAME to the domain's target
+# only exists once that one resolves.
+output "custom_domain_dns_records" {
+  description = "DNS records to publish for the custom domain (name/type/value)."
+  value = local.domain_enabled == 0 ? [] : concat(
+    [
+      for option in aws_acm_certificate.share[0].domain_validation_options : {
+        name  = option.resource_record_name
+        type  = option.resource_record_type
+        value = option.resource_record_value
+      }
+    ],
+    [
+      for target in aws_apigatewayv2_domain_name.share[*].domain_name_configuration[0].target_domain_name : {
+        name  = var.custom_domain
+        type  = "CNAME"
+        value = target
+      }
+    ],
+  )
 }
 
 output "access_key_id" {

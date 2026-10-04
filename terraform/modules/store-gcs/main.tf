@@ -1,11 +1,13 @@
-# One GCS store: bucket + client service-account key + share Cloud Function +
-# lifecycle. Mirrors modules/store (the AWS variant) on the google provider.
+terraform {
+  required_providers {
+    google = { source = "hashicorp/google", version = ">= 5.0" }
+  }
+}
 
 # ── Store bucket ───────────────────────────────────────────────────────────
 #
-# GCS lifecycle is a property of the bucket resource (no separate resource), so
-# it can only be managed on a bucket we create. A pre-existing bucket is read
-# via a data source and left untouched.
+# Lifecycle is part of the bucket itself, so it is managed on a bucket this
+# store created and never on an adopted one.
 
 resource "google_storage_bucket" "store" {
   count                       = var.create_bucket ? 1 : 0
@@ -14,13 +16,9 @@ resource "google_storage_bucket" "store" {
   uniform_bucket_level_access = true
   public_access_prevention    = "enforced"
 
-  # Abort dangling resumable uploads.
-  dynamic "lifecycle_rule" {
-    for_each = var.manage_lifecycle ? [1] : []
-    content {
-      condition { age = 1 }
-      action { type = "AbortIncompleteMultipartUpload" }
-    }
+  lifecycle_rule {
+    condition { age = 1 }
+    action { type = "AbortIncompleteMultipartUpload" }
   }
 
   # One rule per archived domain, over that domain's chunks and nothing else. A
@@ -31,7 +29,7 @@ resource "google_storage_bucket" "store" {
   # stays STANDARD: manifests, versions, the journal and the cursor are read on
   # every sync, and shares are the application's to expire.
   dynamic "lifecycle_rule" {
-    for_each = { for domain, cfg in var.archive_domains : domain => cfg if var.manage_lifecycle }
+    for_each = var.archive_domains
     content {
       condition {
         age            = lifecycle_rule.value.after_days
@@ -52,11 +50,10 @@ data "google_storage_bucket" "store" {
 
 locals {
   bucket_name = var.create_bucket ? google_storage_bucket.store[0].name : data.google_storage_bucket.store[0].name
-  # Fixed, domain-independent shares root (matches Conf_parsing.shares_prefix in
-  # the daemon). Share manifests + cached artifacts live under tsync/shares/.
-  # This is the write scope for the share function and nothing else: a share
-  # carries its own expiration, granted per link, and no rule here expires them.
-  shares_prefix = "tsync/shares/"
+  # The share function's whole write scope: assembled artifacts and the
+  # temporary objects that build them, never a share manifest, which sits one
+  # level up at tsync/shares/<token>.
+  share_cache_prefix = "tsync/shares/cache/"
 
   # A store deployed without the share function has nothing serving links and
   # nothing writing cached artifacts; a CI stack wants the verification half
@@ -69,6 +66,23 @@ locals {
 resource "google_service_account" "client" {
   account_id   = "tsync-client-${var.name}"
   display_name = "tsync client ${var.name}"
+
+  # Checked here because this is the one resource every store has: a refusal
+  # stops the plan whatever else the store was asked for.
+  lifecycle {
+    precondition {
+      condition     = var.custom_domain == null || var.deploy_share
+      error_message = "Store ${var.name}: custom_domain needs the share function (share = true)."
+    }
+    precondition {
+      condition     = var.max_share_bytes <= (var.share_memory_mb - 512) * 1024 * 1024
+      error_message = "Store ${var.name}: max_share_bytes must leave 512 MB of share_memory_mb free, since a folder archive is built in memory. Raise the two together."
+    }
+    precondition {
+      condition     = var.create_bucket || length(var.archive_domains) == 0
+      error_message = "Store ${var.name}: archive_domains needs a bucket this store creates; an adopted bucket's lifecycle is yours."
+    }
+  }
 }
 
 # The daemon mints its token with the devstorage.full_control scope, because the
@@ -104,16 +118,16 @@ resource "google_storage_bucket_iam_member" "share_read" {
   member = "serviceAccount:${google_service_account.share[0].email}"
 }
 
-# Write (and delete temp compose objects) only under the shares prefix. GCS IAM
-# is bucket-granular, so the prefix scope is expressed as an IAM Condition.
+# Write, and delete the temporary objects compose goes through, under the share
+# cache only. A bucket grant is scoped to a prefix by a condition.
 resource "google_storage_bucket_iam_member" "share_write" {
   count  = local.share_enabled
   bucket = local.bucket_name
   role   = "roles/storage.objectUser"
   member = "serviceAccount:${google_service_account.share[0].email}"
   condition {
-    title      = "shares-prefix-only"
-    expression = "resource.name.startsWith(\"projects/_/buckets/${local.bucket_name}/objects/${local.shares_prefix}\")"
+    title      = "share-cache-only"
+    expression = "resource.name.startsWith(\"projects/_/buckets/${local.bucket_name}/objects/${local.share_cache_prefix}\")"
   }
 }
 
@@ -124,12 +138,6 @@ resource "google_service_account_iam_member" "share_signer" {
   service_account_id = google_service_account.share[0].name
   role               = "roles/iam.serviceAccountTokenCreator"
   member             = "serviceAccount:${google_service_account.share[0].email}"
-}
-
-resource "google_storage_bucket_object" "source" {
-  name   = "tsync-share-${var.name}/${var.source_hash}.zip"
-  bucket = var.source_bucket
-  source = var.source_zip
 }
 
 resource "google_cloudfunctions2_function" "share" {
@@ -148,13 +156,13 @@ resource "google_cloudfunctions2_function" "share" {
     source {
       storage_source {
         bucket = var.source_bucket
-        object = google_storage_bucket_object.source.name
+        object = var.source_object
       }
     }
   }
 
   service_config {
-    available_memory      = "${var.memory_mb}M"
+    available_memory      = "${var.share_memory_mb}M"
     timeout_seconds       = var.timeout_seconds
     service_account_email = google_service_account.share[0].email
     environment_variables = {

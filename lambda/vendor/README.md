@@ -3,7 +3,7 @@
 `verify.py` hashes stored chunks with XXH3-64, which is not in the standard
 library. GCP installs it from `../requirements.txt` — the Cloud Functions gen2
 buildpack reads that file — but AWS Lambda does not: the deployment zip is a
-plain `archive_file` over this directory tree (`terraform/main.tf`) with no pip
+plain `archive_file` over this directory tree (`terraform/modules/package`) with no pip
 step, and the runtime ships only boto3. So the extension is committed here.
 
 That makes the wheel architecture-specific, which is why

@@ -38,12 +38,14 @@ EXPIRE_DAYS="${EXPIRE_DAYS:-2}"
 # writing an object and trusting a function to act on it, and nothing else
 # proves that wiring exists.
 #
-# Its own terraform state, and never the one next door: that one holds real
-# stores, and an apply pointed at CI buckets with the wrong state is how they
-# would be reached. The bucket is the same, the prefix is not.
+# Its own state, and never the one next door: that one holds real stores, and an
+# apply pointed at CI buckets with the wrong state is how they would be reached.
+# The bucket is the same, the name in it is not.
 DEPLOY_FUNCTIONS="${DEPLOY_FUNCTIONS:-1}"
 TF_STATE_PREFIX="${TF_STATE_PREFIX:-tsync-ci}"
 TF_STATE_BUCKET="${TF_STATE_BUCKET:-}"
+# s3 or gcs: where the state bucket lives. Defaults to the deployment's.
+TF_STATE_BACKEND="${TF_STATE_BACKEND:-}"
 
 usage() {
   sed -n '3,15p' "$0" | sed 's/^#\{0,1\} \{0,1\}//'
@@ -100,13 +102,10 @@ if ! command -v aws >/dev/null || ! aws sts get-caller-identity >/dev/null 2>&1;
   warn "The s3 backend's put_if_absent stays unverified until it is set up."
 fi
 
-# Either binary drives the same configuration; the README says as much for a
-# real deployment, so the test stack is no different.
 TF=""
 if [ "$DEPLOY_FUNCTIONS" = 1 ]; then
-  for candidate in tofu terraform; do
-    command -v "$candidate" >/dev/null && { TF="$candidate"; break; }
-  done
+  . terraform/tf-cli.sh
+  TF=$(tf_cli) || TF=""
   if [ -z "$TF" ]; then
     DEPLOY_FUNCTIONS=0
     warn "neither tofu nor terraform found -- not deploying the chunk verifier."
@@ -320,8 +319,26 @@ if [ "$DEPLOY_FUNCTIONS" = 1 ]; then
     TF_STATE_BUCKET=$(sed -n 's/^ *bucket *= *"\(.*\)"/\1/p' terraform/backend.hcl)
   fi
   [ -n "$TF_STATE_BUCKET" ] \
-    || die "no terraform state bucket: set TF_STATE_BUCKET, or run ./terraform/init.sh first"
-  info "state gs://$TF_STATE_BUCKET/$TF_STATE_PREFIX (never the deployment's own prefix)"
+    || die "no state bucket: set TF_STATE_BUCKET, or run ./terraform/init.sh first"
+  if [ -z "$TF_STATE_BACKEND" ]; then
+    TF_STATE_BACKEND=gcs
+    [ -f terraform/backend-s3.tf ] && TF_STATE_BACKEND=s3
+  fi
+  case "$TF_STATE_BACKEND" in
+    gcs)
+      TF_STATE_ARGS="-backend-config=bucket=$TF_STATE_BUCKET -backend-config=prefix=$TF_STATE_PREFIX"
+      info "state gs://$TF_STATE_BUCKET/$TF_STATE_PREFIX (never the deployment's own prefix)" ;;
+    s3)
+      TF_STATE_REGION=$(sed -n 's/^ *region *= *"\(.*\)"/\1/p' terraform/backend.hcl 2>/dev/null || true)
+      TF_STATE_ARGS="-backend-config=bucket=$TF_STATE_BUCKET -backend-config=key=$TF_STATE_PREFIX/terraform.tfstate"
+      TF_STATE_ARGS="$TF_STATE_ARGS -backend-config=region=${TF_STATE_REGION:-$AWS_REGION}"
+      info "state s3://$TF_STATE_BUCKET/$TF_STATE_PREFIX (never the deployment's own key)" ;;
+    *) die "TF_STATE_BACKEND must be s3 or gcs, not '$TF_STATE_BACKEND'" ;;
+  esac
+  # One backend block per configuration: the stack takes the deployment's
+  # template, and drops the other if an earlier run left it.
+  run "rm -f terraform/ci/backend-s3.tf terraform/ci/backend-gcs.tf"
+  run "cp terraform/backend-$TF_STATE_BACKEND.tf.example terraform/ci/backend-$TF_STATE_BACKEND.tf"
 
   TF_ARGS="-var=gcs_bucket=$GCS_BUCKET -var=gcp_project=$GCP_PROJECT"
   TF_ARGS="$TF_ARGS -var=gcp_region=$GCS_LOCATION -var=gcp_function_region=$GCS_LOCATION"
@@ -329,9 +346,7 @@ if [ "$DEPLOY_FUNCTIONS" = 1 ]; then
     TF_ARGS="$TF_ARGS -var=s3_bucket=$S3_BUCKET -var=aws_region=$AWS_REGION"
   fi
 
-  run "(cd terraform/ci && $TF init -input=false -reconfigure \
-        -backend-config=bucket=$TF_STATE_BUCKET \
-        -backend-config=prefix=$TF_STATE_PREFIX >/dev/null)"
+  run "(cd terraform/ci && $TF init -input=false -reconfigure $TF_STATE_ARGS >/dev/null)"
   run "(cd terraform/ci && $TF apply -input=false -auto-approve $TF_ARGS >/dev/null)"
 
   if [ $DRY_RUN = 0 ]; then
@@ -341,8 +356,11 @@ if [ "$DEPLOY_FUNCTIONS" = 1 ]; then
     out=$(cd terraform/ci && $TF output -json 2>/dev/null || echo '{}')
     getout() { printf '%s' "$out" | python3 -c \
       'import json,sys;d=json.load(sys.stdin);v=d.get(sys.argv[1],{}).get("value");print(v if v else "")' "$1"; }
-    [ -n "$(getout gcs_verify_function)" ] && DEPLOYED_GCS=1
-    [ -n "$(getout s3_verify_function)" ] && DEPLOYED_S3=1
+    GCS_VERIFY_FUNCTION=$(getout gcs_verify_function)
+    GCS_FUNCTION_REGION=$(getout gcs_function_region)
+    S3_VERIFY_FUNCTION=$(getout s3_verify_function)
+    [ -n "$GCS_VERIFY_FUNCTION" ] && DEPLOYED_GCS=1
+    [ -n "$S3_VERIFY_FUNCTION" ] && DEPLOYED_S3=1
     info "gcs verifier: $([ $DEPLOYED_GCS = 1 ] && echo deployed || echo 'not deployed')"
     info "s3 verifier:  $([ $DEPLOYED_S3 = 1 ] && echo deployed || echo 'not deployed')"
   fi
@@ -360,8 +378,8 @@ else
   # nothing: a run that finds this set and the function absent fails on a
   # timeout, which is the one failure that looks like a code fault and is not.
   if [ $DEPLOYED_GCS = 1 ]; then
-    gh secret set TSYNC_CI_GCS_VERIFY_FUNCTION -R "$REPO" --body "tsync-verify-ci"
-    gh secret set TSYNC_CI_GCS_FUNCTION_REGION -R "$REPO" --body "$GCS_LOCATION"
+    gh secret set TSYNC_CI_GCS_VERIFY_FUNCTION -R "$REPO" --body "$GCS_VERIFY_FUNCTION"
+    gh secret set TSYNC_CI_GCS_FUNCTION_REGION -R "$REPO" --body "$GCS_FUNCTION_REGION"
     info "TSYNC_CI_GCS_VERIFY_FUNCTION, TSYNC_CI_GCS_FUNCTION_REGION"
   else
     gh secret delete TSYNC_CI_GCS_VERIFY_FUNCTION -R "$REPO" >/dev/null 2>&1 || true
@@ -374,7 +392,7 @@ else
     gh secret set TSYNC_CI_S3_SECRET_ACCESS_KEY -R "$REPO" --body "$SK"
     info "TSYNC_CI_S3_BUCKET, _REGION, _ACCESS_KEY_ID, _SECRET_ACCESS_KEY"
     if [ $DEPLOYED_S3 = 1 ]; then
-      gh secret set TSYNC_CI_S3_VERIFY_FUNCTION -R "$REPO" --body "tsync-verify-ci"
+      gh secret set TSYNC_CI_S3_VERIFY_FUNCTION -R "$REPO" --body "$S3_VERIFY_FUNCTION"
       info "TSYNC_CI_S3_VERIFY_FUNCTION"
     else
       gh secret delete TSYNC_CI_S3_VERIFY_FUNCTION -R "$REPO" >/dev/null 2>&1 || true

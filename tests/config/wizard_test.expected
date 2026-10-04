@@ -198,5 +198,10 @@ invalid: would write
 ? [a]dd [e]dit N [r]emove N [g]lobals [w]rite [q]uit -> q
 quit: quit
 
+== a deployment's outputs
+s3 files: bucket=b1 region=eu-west-1 accessKeyId=AK shareUrl=https://s secretAccessKey=SK
+gcs media: bucket=b2 serviceAccountKey={}
+not json: 0
+
 == not an object
 refused: the config is not a JSON object

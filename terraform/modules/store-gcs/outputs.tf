@@ -14,16 +14,27 @@ output "share_url" {
   : null)
 }
 
+output "verify_function" {
+  description = "Name of the verify function."
+  value       = google_cloudfunctions2_function.verify.name
+}
+
 output "custom_domain" {
-  description = "The configured vanity domain, or null."
-  value       = var.custom_domain
+  description = "The custom domain share links are served from, or null."
+  value       = local.domain_enabled == 1 ? var.custom_domain : null
 }
 
 # Records Cloud Run wants published for the mapped domain; empty when there is no
 # custom_domain, and unpopulated until the mapping leaves PENDING.
 output "custom_domain_dns_records" {
-  description = "DNS records to create for custom_domain (name/type/rrdata)."
-  value       = local.domain_enabled == 1 ? google_cloud_run_domain_mapping.share[0].status[0].resource_records : []
+  description = "DNS records to publish for the custom domain (name/type/value)."
+  value = local.domain_enabled == 0 ? [] : [
+    for record in try(google_cloud_run_domain_mapping.share[0].status[0].resource_records, []) : {
+      name  = record.name
+      type  = record.type
+      value = record.rrdata
+    }
+  ]
 }
 
 # The service-account JSON key the daemon consumes as `serviceAccountKey`.

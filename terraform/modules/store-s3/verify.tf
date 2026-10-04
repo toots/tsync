@@ -69,6 +69,7 @@ resource "aws_iam_role_policy" "verify" {
 }
 
 resource "aws_lambda_function" "verify" {
+  region           = var.region
   function_name    = "tsync-verify-${var.name}"
   role             = aws_iam_role.verify.arn
   runtime          = "python3.13"
@@ -103,7 +104,17 @@ resource "aws_lambda_function" "verify" {
   }
 }
 
+# A failed check is not retried: a function that cannot read would otherwise
+# retry every chunk. The event age stays the provider's default, which is what
+# lets a whole-store sweep wait for a slot under the concurrency ceiling.
+resource "aws_lambda_function_event_invoke_config" "verify" {
+  region                 = var.region
+  function_name          = aws_lambda_function.verify.function_name
+  maximum_retry_attempts = 0
+}
+
 resource "aws_lambda_permission" "verify_s3" {
+  region        = var.region
   statement_id  = "AllowExecutionFromS3"
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.verify.function_name
@@ -126,6 +137,7 @@ resource "aws_lambda_permission" "verify_s3" {
 # returns None for a marker, so the second invocation reads nothing and writes
 # nothing.
 resource "aws_s3_bucket_notification" "chunks" {
+  region = var.region
   count  = var.manage_notifications ? 1 : 0
   bucket = local.bucket_id
 

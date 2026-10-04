@@ -111,6 +111,27 @@ let () =
   p "\n== quit\n";
   finish "quit"
     (Config_wizard.edit (scripted [("[w]rite", ["q"])]) (Some existing));
+  p "\n== a deployment's outputs\n";
+  let outputs =
+    {|{"stores":{"value":{
+        "files":{"type":"s3","bucket":"b1","region":"eu-west-1","accessKeyId":"AK","shareUrl":"https://s"},
+        "media":{"type":"gcs","bucket":"b2"}}},
+       "store_secrets":{"sensitive":true,"value":{
+        "files":{"secretAccessKey":"SK"},
+        "media":{"serviceAccountKey":"{}"}}},
+       "custom_domain_dns":{"value":{}}}|}
+  in
+  List.iter
+    (fun btype ->
+      List.iter
+        (fun (name, filled) ->
+          p "%s %s:%s\n" btype name
+            (String.concat ""
+               (List.map (fun (k, v) -> Printf.sprintf " %s=%s" k v) filled)))
+        (Config_wizard.stores_of_outputs ~btype outputs))
+    ["s3"; "gcs"; "local"];
+  p "not json: %d\n"
+    (List.length (Config_wizard.stores_of_outputs ~btype:"s3" "nope"));
   p "\n== not an object\n";
   match Config_wizard.edit (scripted []) (Some (`List [])) with
     | _ -> p "accepted\n"

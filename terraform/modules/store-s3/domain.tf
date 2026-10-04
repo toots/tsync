@@ -9,10 +9,11 @@
 # Both are exposed as outputs. See README > Custom domain.
 
 locals {
-  domain_enabled = var.custom_domain == null ? 0 : 1
+  domain_enabled = var.custom_domain == null || !var.deploy_share ? 0 : 1
 }
 
 resource "aws_acm_certificate" "share" {
+  region            = var.region
   count             = local.domain_enabled
   domain_name       = var.custom_domain
   validation_method = "DNS"
@@ -25,11 +26,13 @@ resource "aws_acm_certificate" "share" {
 # Waits until ACM reports the cert issued. With external DNS, apply blocks here
 # until you add the validation CNAME; it then completes on its own.
 resource "aws_acm_certificate_validation" "share" {
+  region          = var.region
   count           = local.domain_enabled
   certificate_arn = aws_acm_certificate.share[0].arn
 }
 
 resource "aws_apigatewayv2_api" "share" {
+  region        = var.region
   count         = local.domain_enabled
   name          = "tsync-share-${var.name}"
   protocol_type = "HTTP"
@@ -38,6 +41,7 @@ resource "aws_apigatewayv2_api" "share" {
 # Payload format 2.0 gives the handler event.rawPath + queryStringParameters,
 # same shape as the Function URL, so the Python handler is unchanged.
 resource "aws_apigatewayv2_integration" "share" {
+  region                 = var.region
   count                  = local.domain_enabled
   api_id                 = aws_apigatewayv2_api.share[0].id
   integration_type       = "AWS_PROXY"
@@ -46,6 +50,7 @@ resource "aws_apigatewayv2_integration" "share" {
 }
 
 resource "aws_apigatewayv2_route" "share" {
+  region    = var.region
   count     = local.domain_enabled
   api_id    = aws_apigatewayv2_api.share[0].id
   route_key = "$default"
@@ -53,6 +58,7 @@ resource "aws_apigatewayv2_route" "share" {
 }
 
 resource "aws_apigatewayv2_stage" "share" {
+  region      = var.region
   count       = local.domain_enabled
   api_id      = aws_apigatewayv2_api.share[0].id
   name        = "$default"
@@ -60,6 +66,7 @@ resource "aws_apigatewayv2_stage" "share" {
 }
 
 resource "aws_lambda_permission" "apigw" {
+  region        = var.region
   count         = local.domain_enabled
   statement_id  = "AllowApiGatewayInvoke"
   action        = "lambda:InvokeFunction"
@@ -69,6 +76,7 @@ resource "aws_lambda_permission" "apigw" {
 }
 
 resource "aws_apigatewayv2_domain_name" "share" {
+  region      = var.region
   count       = local.domain_enabled
   domain_name = var.custom_domain
 
@@ -80,6 +88,7 @@ resource "aws_apigatewayv2_domain_name" "share" {
 }
 
 resource "aws_apigatewayv2_api_mapping" "share" {
+  region      = var.region
   count       = local.domain_enabled
   api_id      = aws_apigatewayv2_api.share[0].id
   domain_name = aws_apigatewayv2_domain_name.share[0].id

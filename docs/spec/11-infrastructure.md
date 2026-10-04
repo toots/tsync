@@ -223,7 +223,7 @@ be translated.
   and with `tofu`, at version 1.10 or later. Every configuration declares that minimum.
 - **One rule picks the CLI**, for every script and for the wizard: the program named by the
   environment variable `TSYNC_TF` when set; otherwise `tofu` when installed; otherwise `terraform`.
-  With neither, the tool says so and does nothing. No script names either program directly.
+  With neither, the tool says so and does nothing that needs one. No script names either program directly.
 - **The setup script** is interactive. It asks the provider, the provider's location inputs, a
   first store's name, bucket and whether to create it, and where to keep the state. It then:
   1. refuses to continue when a different state location is already active;

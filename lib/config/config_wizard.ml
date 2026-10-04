@@ -125,56 +125,83 @@ let choose io ~label ~default options =
   in
   go ()
 
-(* §5.9: optional filling of a cloud store's fields from an infrastructure
-   tool's outputs, whose names match the driver's fields. *)
-let terraform_outputs io =
+(* 11 §11: the stores of one backend type in a deployment's outputs, each with
+   the backend fields it decides. *)
+let stores_of_outputs ~btype outputs =
+  match Yojson.Safe.from_string outputs with
+    | exception Yojson.Json_error _ -> []
+    | j ->
+        let value name = Option.bind (get j name) (fun o -> get o "value") in
+        let strings j =
+          List.filter_map
+            (function k, `String s -> Some (k, s) | _ -> None)
+            (fields j)
+        in
+        let secrets = Option.value ~default:`Null (value "store_secrets") in
+        List.filter_map
+          (fun (name, store) ->
+            if get store "type" = Some (`String btype) then
+              Some
+                ( name,
+                  List.remove_assoc "type" (strings store)
+                  @ strings (Option.value ~default:`Null (get secrets name)) )
+            else None)
+          (fields (Option.value ~default:`Null (value "stores")))
+
+(* 11 §13: the shell answers 127 for a program it cannot find. *)
+let deployment_outputs dir =
+  let run cli =
+    let cmd =
+      Printf.sprintf "%s -chdir=%s output -json 2>/dev/null"
+        (Filename.quote cli) (Filename.quote dir)
+    in
+    let ic = Unix.open_process_in cmd in
+    let out =
+      match In_channel.input_all ic with
+        | out -> out
+        | exception e ->
+            ignore (Unix.close_process_in ic);
+            raise e
+    in
+    match Unix.close_process_in ic with
+      | WEXITED 0 -> `Outputs out
+      | WEXITED 127 -> `Not_installed
+      | _ -> `Failed
+  in
+  match Sys.getenv_opt "TSYNC_TF" with
+    | Some cli when cli <> "" -> run cli
+    | _ -> ( match run "tofu" with `Not_installed -> run "terraform" | r -> r)
+
+let filled_from_deployment io ~btype =
   let dir =
     String.trim
       (io.ask
          {
-           label =
-             "fill from terraform or tofu outputs in directory (blank to skip)";
+           label = "fill from the deployment in directory (blank to skip)";
            default = None;
            secret = false;
          })
   in
   if dir = "" then []
   else (
-    let run tool =
-      let cmd =
-        Printf.sprintf "%s -chdir=%s output -json 2>/dev/null" tool
-          (Filename.quote dir)
-      in
-      let ic = Unix.open_process_in cmd in
-      let out =
-        match In_channel.input_all ic with
-          | out -> out
-          | exception e ->
-              ignore (Unix.close_process_in ic);
-              raise e
-      in
-      match Unix.close_process_in ic with
-        | WEXITED 0 -> (
-            match Yojson.Safe.from_string out with
-              | `Assoc l ->
-                  Some
-                    (List.filter_map
-                       (fun (k, o) ->
-                         match get o "value" with
-                           | Some (`String s) -> Some (k, s)
-                           | _ -> None)
-                       l)
-              | _ | (exception Yojson.Json_error _) -> None)
-        | _ -> None
-    in
-    match run "terraform" with
-      | Some l -> l
-      | None -> (
-          match run "tofu" with
-            | Some l -> l
-            | None ->
-                io.say "no outputs could be read there";
-                []))
+    match deployment_outputs dir with
+      | `Not_installed ->
+          io.say "neither tofu nor terraform is installed";
+          []
+      | `Failed ->
+          io.say "no outputs could be read there";
+          []
+      | `Outputs outputs -> (
+          match stores_of_outputs ~btype outputs with
+            | [] ->
+                io.say ("that deployment has no " ^ btype ^ " store");
+                []
+            | [(_, filled)] -> filled
+            | stores ->
+                let names = List.map fst stores in
+                List.assoc
+                  (choose io ~label:"store" ~default:(List.hd names) names)
+                  stores))
 
 let backend io ~has_main b =
   let types = Tsync_store.Driver.names () in
@@ -200,7 +227,8 @@ let backend io ~has_main b =
     | None -> b
     | Some d ->
         let filled =
-          if btype = "s3" || btype = "gcs" then terraform_outputs io else []
+          if btype = "s3" || btype = "gcs" then filled_from_deployment io ~btype
+          else []
         in
         let b =
           List.fold_left

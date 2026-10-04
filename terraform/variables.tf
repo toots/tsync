@@ -1,10 +1,8 @@
 variable "region" {
   type        = string
   default     = null
-  description = "AWS region for s3 stores. Required only when stores is non-empty (leave unset for a GCS-only deployment). For buckets in different regions, see README > Multi-region."
+  description = "Default AWS region of an s3 store. Required only when stores is non-empty."
 }
-
-# ── GCS ────────────────────────────────────────────────────────────────────
 
 variable "gcp_project" {
   type        = string
@@ -15,71 +13,47 @@ variable "gcp_project" {
 variable "gcp_region" {
   type        = string
   default     = null
-  description = "Default bucket location for GCS stores — region or multi-region (US, EU). Required only when gcs_stores is non-empty."
+  description = "Default bucket location of a GCS store, a region or a multi-region (US, EU), and the location of the function source bucket. Required only when gcs_stores is non-empty."
 }
 
 variable "gcp_function_region" {
   type        = string
   default     = "us-central1"
-  description = "Default region for share Cloud Functions. Must be a specific region (not a multi-region like US), since Cloud Functions/Run are regional."
+  description = "Default region of a GCS store's functions. A region, never a multi-region."
 }
 
 variable "gcp_functions_source_bucket" {
   type        = string
   default     = null
-  description = "Bucket to hold the function source zip. Defaults to <project>-tsync-functions-src."
+  description = "Bucket holding the function package. Defaults to <project>-tsync-functions-src."
 }
 
-variable "gcs_stores" {
-  description = <<-EOT
-    GCS stores to provision, keyed by a short logical name ([a-z0-9-], suffixes
-    SA/function names). One entry = one bucket + client SA key + share Cloud
-    Function + lifecycle. Uses native OAuth (service-account key), not S3 interop.
-  EOT
-  type = map(object({
-    bucket           = string
-    create_bucket    = optional(bool, true)
-    location         = optional(string) # bucket location; default: var.gcp_region
-    function_region  = optional(string) # default: var.gcp_function_region
-    custom_domain    = optional(string) # vanity share domain; null = raw function URL
-    manage_lifecycle = optional(bool, true)
-    archive_domains = optional(map(object({ # cold-storage transition per domain, over its chunks only
-      after_days    = number
-      storage_class = optional(string) # default: ARCHIVE
-    })), {})
-    presign_ttl            = optional(number, 600)
-    memory_mb              = optional(number, 2048)
-    verify_timeout_seconds = optional(number, 120)
-    verify_memory_mb       = optional(number, 512)
-    verify_max_instances   = optional(number, 32)
-    max_share_bytes        = optional(number, 10737418240)
-  }))
-  default = {}
-}
+# The options both maps share carry the same names; an option left out takes
+# the default its store module declares (docs/spec/11-infrastructure.md §10).
 
 variable "stores" {
-  description = <<-EOT
-    Stores to provision, keyed by a short logical name ([A-Za-z0-9-_], suffixes
-    IAM/Lambda names). One entry = one bucket + client IAM keys + share Lambda +
-    lifecycle. Add entries for more domains or redundant storage.
-  EOT
+  description = "S3 stores, keyed by store name. A name is unique across stores and gcs_stores."
   type = map(object({
-    bucket           = string
-    create_bucket    = optional(bool, true)
-    iam_user_name    = optional(string) # default: tsync-client-<key>
-    custom_domain    = optional(string) # vanity share domain; null = raw Lambda URL
-    manage_lifecycle = optional(bool, true)
-    archive_domains = optional(map(object({ # cold-storage transition per domain, over its chunks only
+    bucket        = string
+    create_bucket = optional(bool)
+    share         = optional(bool)
+    custom_domain = optional(string)
+    archive_domains = optional(map(object({
       after_days    = number
       storage_class = optional(string) # default: GLACIER_IR
     })), {})
-    presign_ttl            = optional(number, 600)
-    lambda_memory_mb       = optional(number, 2048)
-    ephemeral_storage_mb   = optional(number, 10240)
-    manage_notifications   = optional(bool, true)
-    verify_timeout_seconds = optional(number, 120)
-    verify_memory_mb       = optional(number, 512)
-    verify_max_concurrency = optional(number, 32)
+    presign_ttl            = optional(number)
+    max_share_bytes        = optional(number)
+    share_memory_mb        = optional(number)
+    verify_timeout_seconds = optional(number)
+    verify_memory_mb       = optional(number)
+    verify_max_concurrency = optional(number)
+
+    region               = optional(string) # default: var.region
+    iam_user_name        = optional(string) # default: tsync-client-<name>
+    manage_lifecycle     = optional(bool)
+    manage_notifications = optional(bool)
+    share_scratch_mb     = optional(number)
     extra_lifecycle_rules = optional(list(object({
       id              = string
       prefix          = optional(string, "")
@@ -89,6 +63,35 @@ variable "stores" {
         storage_class = string
       })), [])
     })), [])
+  }))
+  default = {}
+
+  validation {
+    condition     = alltrue([for name in keys(var.stores) : can(regex("^[A-Za-z0-9_-]{1,51}$", name))])
+    error_message = "An s3 store name is 1 to 51 letters, digits, dashes and underscores."
+  }
+}
+
+variable "gcs_stores" {
+  description = "GCS stores, keyed by store name. A name is unique across stores and gcs_stores."
+  type = map(object({
+    bucket        = string
+    create_bucket = optional(bool)
+    share         = optional(bool)
+    custom_domain = optional(string)
+    archive_domains = optional(map(object({
+      after_days    = number
+      storage_class = optional(string) # default: ARCHIVE
+    })), {})
+    presign_ttl            = optional(number)
+    max_share_bytes        = optional(number)
+    share_memory_mb        = optional(number)
+    verify_timeout_seconds = optional(number)
+    verify_memory_mb       = optional(number)
+    verify_max_concurrency = optional(number)
+
+    location        = optional(string) # default: var.gcp_region
+    function_region = optional(string) # default: var.gcp_function_region
   }))
   default = {}
 }
