@@ -460,7 +460,7 @@ let describe_domain d =
     (Option.value ~default:"?" (Option.bind (get d "name") show))
     (List.length (list_of d "backends"))
 
-let edit ?(system = Frontend.system ()) io start =
+let edit ?(system = if Fs.is_macos then `Macos else `Linux) io start =
   let domain = domain io ~system in
   let j =
     match start with

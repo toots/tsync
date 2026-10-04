@@ -47,9 +47,6 @@ val find : string -> t option
 (** The registered types, sorted. *)
 val names : unit -> string list
 
-(** The system this binary runs on, as a {!wizard} names it. *)
-val system : unit -> [ `Linux | `Macos ]
-
 (** The registered types the wizard offers on [system], each with its
     descriptor: presenting ones first, then by name. *)
 val offered : [ `Linux | `Macos ] -> (string * t) list
