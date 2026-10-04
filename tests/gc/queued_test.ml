@@ -151,7 +151,7 @@ let () =
       p "== no function deployed\n";
       let probed = Composite.probe c member in
       let confirmed = Composite.function_confirmed c member in
-      let left = Composite.outstanding c <> [] in
+      let left = inner.list_prefix (Key.gc_jobs d) <> [] in
       p "probe: %b; confirmed: %b; probe request left behind: %b\n" probed
         confirmed left;
       p "collect: %s\n" (collect ());
@@ -186,6 +186,20 @@ let () =
       Rt.sleep 0.2;
       ignore (Composite.retry_outstanding c);
       p "a probe during a re-delivery: %b\n" (Rt.Promise.await during);
+      (* A probe request whose prober died before deleting it. *)
+      let orphan = Key.discard_job d ~run:(Key.probe_run ()) ~shard:"000" in
+      inner.put orphan Bigstring.empty;
+      let long_ago = Unix.gettimeofday () -. 3600. in
+      Unix.utimes
+        (Filename.concat (Filename.concat root "bucket") (Key.to_string orphan))
+        long_ago long_ago;
+      let listed = Composite.outstanding c <> [] in
+      ignore (Composite.retry_outstanding c);
+      p
+        "an orphaned probe request: listed as pending %b; left after a \
+         re-delivery %b\n"
+        listed
+        (inner.head_opt orphan <> None);
       p "\n== the function deployed\n";
       Atomic.set function_on true;
       let probed = Composite.probe c member in
