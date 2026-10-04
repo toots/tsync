@@ -241,7 +241,7 @@ let () =
     Config.of_string
       {|{"domains":[
           {"name":"media","symlinks":"keep","versioning":true,
-           "frontends":[{"type":"fuse","mountPoint":"/mnt/media"}],
+           "frontends":[{"type":"fuse","mountPoint":"/mnt/media/"}],
            "backends":[{"type":"local","name":"a","role":"main","path":"/srv/a"}]},
           {"name":"media:raw","symlinks":"keep","versioning":true,"frontends":["http-proxy"],
            "backends":[{"type":"local","name":"a","role":"main","path":"/srv/b"}]}]}|}
