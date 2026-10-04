@@ -35,11 +35,9 @@ let start () =
 let () =
   Rt.run_sync (fun () ->
       (* A running supervisor that answers nothing: its lock held, no socket. *)
-      let path = Paths.supervisor_lock () in
-      Fs.mkdir_p ~perm:0o700 (Filename.dirname path);
-      let held = Unix.openfile path [O_RDWR; O_CREAT; O_CLOEXEC] 0o600 in
-      p "the lock taken: %b" (Fs.flock ~exclusive:true ~block:false held);
+      let held = Fs.lifetime_lock (Paths.supervisor_lock ()) in
+      p "the lock taken: %b" (held <> None);
       p "a start beside a supervisor that does not answer: %s" (start ());
-      Unix.close held;
+      Option.iter Unix.close held;
       p "a start once it is gone: %s" (start ()));
   Fs.rm_rf root
