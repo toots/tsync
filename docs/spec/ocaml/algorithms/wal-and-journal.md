@@ -2,7 +2,7 @@
 
 Companion to the language-neutral spec [../../algorithms/wal-and-journal.md](../../algorithms/wal-and-journal.md).
 Not normative. Formats and interfaces: [../03-journal-sync.md](../03-journal-sync.md). Finding numbers
-refer to [the 2026-10-01 review](../../../review/2026-10-01-rewrite.md).
+refer to [the 2026-10-01 review](../../review/2026-10-01-rewrite.md).
 
 ## Where each abstraction lives
 

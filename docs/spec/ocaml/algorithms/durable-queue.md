@@ -1,7 +1,7 @@
 # Durable queue and crash immunity — OCaml implementation notes
 
 Companion to [../../algorithms/durable-queue.md](../../algorithms/durable-queue.md). Not normative.
-Finding numbers refer to [the 2026-10-01 review](../../../review/2026-10-01-rewrite.md).
+Finding numbers refer to [the 2026-10-01 review](../../review/2026-10-01-rewrite.md).
 
 ## Spec → code
 

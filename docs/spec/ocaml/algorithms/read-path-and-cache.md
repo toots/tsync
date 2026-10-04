@@ -1,7 +1,7 @@
 # Read path and chunk cache — OCaml implementation notes
 
 Companion to [../../algorithms/read-path-and-cache.md](../../algorithms/read-path-and-cache.md). Not
-normative. Finding numbers refer to [the 2026-10-01 review](../../../review/2026-10-01-rewrite.md).
+normative. Finding numbers refer to [the 2026-10-01 review](../../review/2026-10-01-rewrite.md).
 What bodies are made of, and what is mapped, is in [../memory.md](../memory.md).
 
 ## Spec → code

@@ -1,7 +1,7 @@
 # Security model — OCaml implementation notes
 
 Companion to [../../algorithms/security-model.md](../../algorithms/security-model.md). Not normative.
-Finding numbers refer to [the 2026-10-01 review](../../../review/2026-10-01-rewrite.md).
+Finding numbers refer to [the 2026-10-01 review](../../review/2026-10-01-rewrite.md).
 
 ## Where the mechanisms live
 

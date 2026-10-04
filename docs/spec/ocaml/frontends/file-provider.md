@@ -1,6 +1,6 @@
 # The macOS application (File Provider frontend) — implementation notes
 
-Companion to the language-neutral spec [../../frontends/file-provider.md](../../frontends/file-provider.md). See [README.md](../README.md) for how these notes are organised. Section numbers in parentheses refer to the spec. The pitfalls met while building it are in [`docs/pitfalls`](../../../pitfalls/README.md).
+Companion to the language-neutral spec [../../frontends/file-provider.md](../../frontends/file-provider.md). See [README.md](../README.md) for how these notes are organised. Section numbers in parentheses refer to the spec. The pitfalls met while building it are in [`docs/spec/pitfalls`](../../pitfalls/README.md).
 
 ## Where each part lives
 
@@ -23,7 +23,7 @@ Companion to the language-neutral spec [../../frontends/file-provider.md](../../
 - **Upload progress.** `status.uploading` lists the running uploads with `bytes = 0`: the upload
   queue does not count bytes per file, so the menu shows which files are uploading but not how far.
 - **Rebuild durability.** A rebuild writes the last-sync mark after a `syncfs`, which macOS only
-  schedules ([pitfall B-1.12](../../../pitfalls/B-implementation.md)): a crash right after the mark
+  schedules ([pitfall B-1.12](../../pitfalls/B-implementation.md)): a crash right after the mark
   can lose mirror entries until the next full resync.
 - **File-id index wait.** Every mutation waits for the file-id index before the metadata hold, not
   only one naming an `i:` reference; it differs only while the index rebuilds after a crash. The
@@ -37,4 +37,4 @@ Companion to the language-neutral spec [../../frontends/file-provider.md](../../
 - OCaml: `tests/owner/{owner,shared,protocol,menu}_test.ml`, `tests/sync/{file_ids,feed,offline}_test.ml`.
 - Swift: `macos/TsyncTests/SpecTests.swift` (`make test`), snapshots of the pure parts.
 - Nothing drives the extension against the framework automatically; the checks made on a Mac are
-  recorded in [the review](../../../review/2026-10-02-macos-file-provider.md) §2.4.
+  recorded in [the review](../../review/2026-10-02-macos-file-provider.md) §2.4.

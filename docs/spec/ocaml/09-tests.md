@@ -1,8 +1,8 @@
 # 09 — Conformance — OCaml implementation notes
 
 Companion to the language-neutral spec [../09-tests.md](../09-tests.md). Not normative. Section numbers
-in parentheses (§n) refer to the spec; pitfall IDs to [../../pitfalls/](../../pitfalls/README.md);
-finding numbers to [the 2026-10-01 review](../../review/2026-10-01-rewrite.md).
+in parentheses (§n) refer to the spec; pitfall IDs to [../pitfalls/](../pitfalls/README.md);
+finding numbers to [the 2026-10-01 review](../review/2026-10-01-rewrite.md).
 
 ## T.1 The harness: one executable, one snapshot
 

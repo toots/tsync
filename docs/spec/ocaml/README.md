@@ -12,8 +12,8 @@ has an `.mli` whose doc comments are the first thing to read.
 
 Each note gives a map from spec concept to module and function, the departures the code has from
 the spec, and what the code learned. A known pitfall is cited by its ID in
-[`../../pitfalls/`](../../pitfalls/README.md) (`A-7.9`) instead of being retold; a departure that
-is an open finding of [the review](../../review/2026-10-01-rewrite.md) is cited by its number.
+[`../pitfalls/`](../pitfalls/README.md) (`A-7.9`) instead of being retold; a departure that
+is an open finding of [the review](../review/2026-10-01-rewrite.md) is cited by its number.
 
 | Subsystem | Notes |
 |---|---|

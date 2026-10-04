@@ -1,7 +1,7 @@
 # Conflict resolution — OCaml implementation notes
 
 Companion to the language-neutral spec [../../algorithms/conflict-resolution.md](../../algorithms/conflict-resolution.md).
-Not normative. Finding numbers refer to [the 2026-10-01 review](../../../review/2026-10-01-rewrite.md).
+Not normative. Finding numbers refer to [the 2026-10-01 review](../../review/2026-10-01-rewrite.md).
 
 ## Where each abstraction lives
 
