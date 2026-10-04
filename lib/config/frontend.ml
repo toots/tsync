@@ -26,7 +26,6 @@ let registry = Registry.create ()
 let register = Registry.register registry
 let find = Registry.find registry
 let names () = Registry.names registry
-let system () = if Fs.is_macos then `Macos else `Linux
 
 let offered system =
   List.filter_map
