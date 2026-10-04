@@ -1,10 +1,16 @@
 open Tsync_core
 
+let rec without_trailing_slashes path =
+  let n = String.length path in
+  if n > 1 && path.[n - 1] = '/' then
+    without_trailing_slashes (String.sub path 0 (n - 1))
+  else path
+
 let configured (d : Config.domain) =
   Option.map
     (fun (f : Config.frontend) ->
       match Config.fstr f.options "mountPoint" with
-        | Some m -> m
+        | Some m -> without_trailing_slashes m
         | None -> Paths.mount_point d.name)
     (Config.frontend d "fuse")
 

@@ -59,19 +59,24 @@ let paths_in_domain ?name tokens =
     | Ok name -> (name, List.map snd parsed)
     | Error e -> refuse "%s" e
 
+(* failure-model §7.5: a classified failure prints its sentence, never a trace. *)
+let status_of_failure = function
+  | Exit_with code -> code
+  | Config.Invalid e ->
+      prerr_endline ("tsync: " ^ e);
+      1
+  | e ->
+      let f = Fail.classify e in
+      prerr_endline
+        ("tsync: " ^ f.reason
+        ^ Option.fold ~none:"" ~some:(fun r -> " (" ^ r ^ ")") f.repair);
+      if f.kind = Fail.Unexplained then 125 else 1
+
 (* For what a command settles before its runtime starts. *)
-let early body =
-  match body () with
-    | code -> code
-    | exception Exit_with code -> code
-    | exception Config.Invalid e ->
-        prerr_endline ("tsync: " ^ e);
-        1
+let early body = try body () with e -> status_of_failure e
 
 (* Every process leases its uplinks from the supervisor, which takes ownership
-   in place of this.
-
-   failure-model §7.5: a classified failure prints its sentence, never a trace. *)
+   in place of this. *)
 let run body =
   Printexc.record_backtrace true;
   Tsync_store.Uplink.lease (fun request ->
@@ -80,18 +85,7 @@ let run body =
           (Ipc.call ~timeout:1.
              (Paths.supervisor_socket ())
              (request_to_json request))));
-  match Rt.run_sync body with
-    | code -> code
-    | exception Exit_with code -> code
-    | exception Config.Invalid e ->
-        prerr_endline ("tsync: " ^ e);
-        1
-    | exception e ->
-        let f = Fail.classify e in
-        prerr_endline
-          ("tsync: " ^ f.reason
-          ^ Option.fold ~none:"" ~some:(fun r -> " (" ^ r ^ ")") f.repair);
-        if f.kind = Fail.Unexplained then 125 else 1
+  try Rt.run_sync body with e -> status_of_failure e
 
 (* security §9: [--tls] wins over the config's [tls]; the build's default
    otherwise. *)

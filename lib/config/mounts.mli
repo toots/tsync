@@ -2,8 +2,8 @@
     asked to be mounted, and which configured domains the kernel mount table
     lists as mounted now. *)
 
-(** The [mountPoint] of the domain's [fuse] frontend, else
-    [$HOME/tsync/<domain>]; [None] without a [fuse] frontend. *)
+(** The [mountPoint] of the domain's [fuse] frontend without trailing slashes,
+    else [$HOME/tsync/<domain>]; [None] without a [fuse] frontend. *)
 val configured : Config.domain -> string option
 
 (** The configured domain whose mount point holds [path], with the rest of the
