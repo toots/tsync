@@ -1,5 +1,5 @@
 == the bus is served while owners are silent
-GetLayout and GetAll within BUS_ANSWER_BOUND during a poll, a stats fetch, a silent file manager and a hold switch: yes
+GetLayout and GetAll during a poll, a stats fetch, a silent file manager and a hold switch: within BUS_ANSWER_BOUND, none held for a deadline
 the silent owner's row: quiet — not answering
 the stats fetch reached the silent owner: yes
 the hold switch reached the other owner: yes

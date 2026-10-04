@@ -380,7 +380,10 @@ records calls, and none; a config as a file.
 - **The bus is served while owners are silent.** With one owner that accepts and never answers,
   during a poll, a stats fetch and a hold switch, `GetLayout` and `Properties.GetAll` are answered
   within `BUS_ANSWER_BOUND`. **Binding:** the bound, measured from the host's side. The same holds
-  with a file manager that does not answer.
+  with a file manager that does not answer. A suite that shares its machine with other work MAY
+  hold the median of its samples to the bound, provided it also checks that no call was held for
+  as long as the shortest deadline the tray keeps: that is what a tray waiting on an owner looks
+  like, and a single late sample on a loaded machine is not.
 - **One silent owner costs one deadline.** With N domains of which one is silent, the others' rows
   are current after one `TRAY_STATUS_DEADLINE`, for N = 2 and N = 20. **Binding:** the bound does
   not grow with N; the silent domain reads `not answering`.
