@@ -11,6 +11,10 @@ val say : ('a, out_channel, unit, unit, unit, unit) format6 -> 'a
 (** Prints [tsync: <sentence>] and ends the command with status 1. *)
 val fail : ('a, unit, string, 'b) format4 -> 'a
 
+(** Prints [tsync: <sentence>] and ends the command with status 2: the
+    invocation itself is refused (failure-model §7.5). *)
+val refuse : ('a, unit, string, 'b) format4 -> 'a
+
 val config_opt : unit -> Config.t option
 val config : unit -> Config.t
 
@@ -37,7 +41,7 @@ val cmd : string -> doc:string -> 'a Cmdliner.Term.t -> 'a Cmdliner.Cmd.t
 val run_job : ?name:string -> bool -> Tsync_owner.Jobs.t -> int
 
 (** The domain and the domain-relative paths that [--domain] and a command's
-    path tokens name (07 §5.2); a refusal exits 1. *)
+    path tokens name (07 §5.2); a refusal exits 2. *)
 val paths_in_domain : ?name:string -> string list -> string option * string list
 
 (** Answers the status of a body that may {!fail} before {!run} or {!run_job}
