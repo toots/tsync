@@ -909,19 +909,20 @@ module Make (C : Engine_ctx.S) = struct
     pick 1
 
   (* security-model §7.3: a file handed over from another filesystem is read a
-     block at a time, and only if what was opened is the regular file its name
-     held, never a link's target. *)
+     block at a time, through a descriptor that follows no link. *)
   let copy_regular ~src ~dst =
-    let named = Fs.lstat_opt src in
-    Fs.with_fd (Fs.openfile src [O_RDONLY]) @@ fun from ->
-    let opened = Unix.LargeFile.fstat from in
-    (match named with
-      | Some { st_kind = S_REG; st_dev; st_ino; _ }
-        when st_dev = opened.st_dev && st_ino = opened.st_ino ->
-          ()
-      | _ ->
-          Fail.raise_ Fail.Invalid
-            "%s: the handed-over file is not a regular file" src);
+    let not_regular () =
+      Fail.raise_ Fail.Invalid "%s: the handed-over file is not a regular file"
+        src
+    in
+    let from =
+      match Fs.open_nofollow src with
+        | Some fd -> fd
+        | None | (exception Fail.E _) | (exception Unix.Unix_error _) ->
+            not_regular ()
+    in
+    Fs.with_fd from @@ fun from ->
+    if (Unix.LargeFile.fstat from).st_kind <> S_REG then not_regular ();
     let tmp = Fs.temp_in (Filename.dirname dst) in
     match
       Fs.with_fd
