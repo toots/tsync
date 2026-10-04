@@ -595,10 +595,12 @@ differently. A command MUST NOT split a token on `:` or `/` itself.
   - **in a domain** (`cache`, `versions`, `share`, `trash --restore`/`--purge`, `mirror --path`, the
     paths of `export`): a relative token is domain-relative in the resolved domain, wherever the
     command runs from; an absolute token names the domain whose mount point it lies under, and is
-    refused with exit 1 (`<path> is under no domain's mount point`) when it lies under none.
+    refused (`<path> is under no domain's mount point`) when it lies under none.
 - **One domain per run.** The domains a command's tokens name and `--domain` MUST agree: two
   different names are refused before anything runs (`the domain named in a path differs from
-  --domain`, or `the paths name more than one domain`), with exit 1, or exit 2 for `rsync`.
+  --domain`, or `the paths name more than one domain`).
+- **Every refusal of this section exits 2**, from every command alike: the invocation is refused,
+  nothing failed ([failure-model.md §7.5](algorithms/failure-model.md#75-cli-exit-status)).
 - Resolving a path to an item reference reads the domain's folder markers (a permitted read,
   §2.2). A folder this client holds no id for is refused with "this client has not resolved its
   folder; run 'tsync sync'".
@@ -629,7 +631,7 @@ differently. A command MUST NOT split a token on `:` or `/` itself.
 | `mirror [--source] [--skip-chunks\|--path P]` | owner | [05 §4.6](05-ops-config.md); needs at least two members |
 | `import DIR [--only G] [--exclude G] [--force-rehash]` | owner | [05 §4.3](05-ops-config.md); exit 1 if any entry failed |
 | `export [PATH...] DIR [--source] [-j N]` | read | [05 §4.4](05-ops-config.md); each `PATH` is read in a domain (§5.2), `DIR` is local; one domain per run; exit 1 on failures or on pending local changes (listed on stderr) |
-| `rsync SRC DST [--move] [-n]` | owner | [05 §4.5](05-ops-config.md). Each argument is a side (§5.2). Two local sides, or two different domains, are refused with exit 2. `-n` prints each entry's decision and changes nothing |
+| `rsync SRC DST [--move] [-n]` | owner | [05 §4.5](05-ops-config.md). Each argument is a side (§5.2). Two local sides are refused with exit 2, like two different domains. `-n` prints each entry's decision and changes nothing |
 | `share [PATH] [--expires DUR] [--token HEX] \| --revoke TOKEN\|URL \| --clear-cache` | owner | [05 §4.11](05-ops-config.md); URL on stdout, expiry on stderr; `--revoke` exits 1 when no share of the domain held the token |
 | `config [--edit]` | none | print the parsed config with secrets masked, or run the wizard (§5.9) |
 | `default-domain [NAME] [--clear]` | none | set (must be configured), clear, or print (exit 1 when unset) |
@@ -938,7 +940,7 @@ An implementation MUST exhibit:
   `media` in a domain and is local as a side; `/mnt/mediaX/a` and `/etc/passwd` are refused in a
   domain. `cache`, `versions`, `share`, `trash`, `mirror --path` and `export` all accept
   `DOMAIN:path`; tokens naming two domains, or one differing from `--domain`, are refused before
-  anything runs.
+  anything runs, with exit 2 from each of them and from `rsync`.
 - **Cache.** `cache --fetch` on a folder makes every file beneath it pinned and prints the count;
   `cache --evict` makes them online only; a path that does not exist is reported and the remaining
   paths still run, with exit 1.

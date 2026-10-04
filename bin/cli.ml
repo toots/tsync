@@ -14,6 +14,14 @@ let fail fmt =
       raise (Exit_with 1))
     fmt
 
+(* failure-model §7.5: a refusal of the invocation itself. *)
+let refuse fmt =
+  Printf.ksprintf
+    (fun m ->
+      prerr_endline ("tsync: " ^ m);
+      raise (Exit_with 2))
+    fmt
+
 let config_opt () =
   Option.map
     (fun s -> try Config.of_string s with Config.Invalid e -> fail "%s" e)
@@ -44,12 +52,12 @@ let paths_in_domain ?name tokens =
       (fun token ->
         match Domain_path.in_domain config token with
           | Ok p -> p
-          | Error e -> fail "%s" e)
+          | Error e -> refuse "%s" e)
       tokens
   in
   match Domain_path.agree ?name (List.map fst parsed) with
     | Ok name -> (name, List.map snd parsed)
-    | Error e -> fail "%s" e
+    | Error e -> refuse "%s" e
 
 (* For what a command settles before its runtime starts. *)
 let early body =

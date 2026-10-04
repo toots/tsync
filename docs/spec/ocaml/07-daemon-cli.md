@@ -23,7 +23,7 @@ parentheses are the spec's. The request handler itself is in [08-frontends.md](0
 | Sockets, envelopes, deadlines (§4.1–§4.3) | `Tsync_ipc.Ipc`: `serve`, `close`, `publish`, `subscribers`, `Client`, `call`, `call_bulk`, `call_stream`, `advisory`, `ok`, `failure`. |
 | Supervisor socket (§4.4) | `Supervisor` `handle`: `stop`, `stats`, `report`, `uplink`. |
 | Job reports and registry (§4.6) | `Handler` `send_report` through `Ipc.advisory`; `Supervisor` `record_job`, `live_jobs`. |
-| CLI conventions (§5.1) | `Cli`: `domain`, `run`, `early`, `fail`, `Exit_with`, `verbose`, `duration`, `run_job`; `Display`; `Narrate`. |
+| CLI conventions (§5.1) | `Cli`: `domain`, `run`, `early`, `fail`, `refuse`, `Exit_with`, `verbose`, `duration`, `run_job`; `Display`; `Narrate`. |
 | Path arguments (§5.2) | `Tsync_config.Domain_path`: `parse` (a side), `in_domain`, `agree`; `Cli.paths_in_domain` is what every in-domain command calls. |
 | Commands (§5.3) | `Daemon_cmds`, `Status_cmd`, `Domain_cmds`, `Store_cmds`, `Setup_cmds`. Frontend groups: `Daemon_cmds.frontend_cmds`, from `Frontend.t.commands`. |
 | `tsync stop` (§5.4) | `Daemon_cmds.stop`, `wait_gone`, `owner_sockets`. |

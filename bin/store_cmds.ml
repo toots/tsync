@@ -295,18 +295,13 @@ let rsync src dst move dry_run name verbose =
       in
       let sd, src_in_domain, src = side src
       and dd, dst_in_domain, dst = side dst in
-      if not (src_in_domain || dst_in_domain) then (
-        prerr_endline
-          "tsync: one side must be in a domain (DOMAIN:PATH or :PATH)";
-        2)
-      else (
-        match Tsync_config.Domain_path.agree ?name [sd; dd] with
-          | Error e ->
-              prerr_endline ("tsync: " ^ e);
-              2
-          | Ok name ->
-              run_job ?name verbose
-                (Rsync { src; src_in_domain; dst; dst_in_domain; move; dry_run })))
+      if not (src_in_domain || dst_in_domain) then
+        refuse "one side must be in a domain (DOMAIN:PATH or :PATH)";
+      match Tsync_config.Domain_path.agree ?name [sd; dd] with
+        | Error e -> refuse "%s" e
+        | Ok name ->
+            run_job ?name verbose
+              (Rsync { src; src_in_domain; dst; dst_in_domain; move; dry_run }))
 
 let rsync_cmd =
   let src =

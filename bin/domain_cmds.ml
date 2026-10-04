@@ -30,14 +30,10 @@ let pause_cmd name on =
 
 (* 08 §2.1: a pulled tree has no replica to resync. *)
 let sync full name verbose =
-  match
-    try Tsync_domain.Domain.pulled (domain ?name (config ()))
-    with Exit_with _ -> None
-  with
-    | Some refusal ->
-        prerr_endline ("tsync: " ^ refusal);
-        2
-    | None -> run_job ?name verbose (Sync { full })
+  early (fun () ->
+      match Tsync_domain.Domain.pulled (domain ?name (config ())) with
+        | Some refusal -> refuse "%s" refusal
+        | None -> run_job ?name verbose (Sync { full }))
 
 let sync_cmd =
   let full =
