@@ -114,6 +114,13 @@ resource "google_storage_bucket_object" "package" {
   source = module.package.path
 }
 
+# Read here and not in the store module: a module that waits on the services
+# reads its data at apply, which replaces the grant made from it.
+data "google_storage_project_service_account" "gcs" {
+  count   = local.gcs_used ? 1 : 0
+  project = var.gcp_project
+}
+
 module "store_gcs" {
   source   = "./modules/store-gcs"
   for_each = var.gcs_stores
@@ -137,6 +144,8 @@ module "store_gcs" {
 
   source_bucket = google_storage_bucket.functions_source[0].name
   source_object = google_storage_bucket_object.package[0].name
+
+  storage_agent_email = data.google_storage_project_service_account.gcs[0].email_address
 
   depends_on = [google_project_service.required]
 }

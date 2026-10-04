@@ -165,3 +165,8 @@ variable "deploy_share" {
   # surface for no purpose.
   description = "Deploy the share function and its public endpoint. False = verification half only."
 }
+
+variable "storage_agent_email" {
+  description = "The project's Cloud Storage service agent, which publishes the bucket's notifications."
+  type        = string
+}
