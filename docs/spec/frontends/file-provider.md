@@ -587,24 +587,26 @@ running.
 ## 10. Menu bar
 
 There is no settings window; configuration is `config.json`. The app's only UI is a status item whose
-content the owner renders (`menu`) from the model shared with the Linux tray ([fuse.md](fuse.md)), so
-the platforms cannot drift.
+content the owner renders (`menu`) from the model shared with the Linux tray
+([menu-model.md](menu-model.md)), so the platforms cannot drift. Every label of a rendered menu is the
+model's.
 
-`menu` answers `{"ok":true,"menu":<menu JSON>}`, the menu model's JSON
-([07 §5.8](../07-daemon-cli.md#58-menu-model-tray-and-macos-menu-bar)):
+`menu` answers `{"ok":true,"menu":<menu JSON>}`, the model's JSON form
+([menu-model.md §7](menu-model.md#7-json-form)), rendered with no quit label:
 
 ```json
-{"ok":true,"menu":{"icon":"tsync-sync-symbolic","tooltip":"Uploading 1 · Downloading 1",
-  "entries":[{"label":"Files","enabled":true,"indent":0,"action":{"openFolder":"Files"}},
-             {"label":"movie.mkv — 40%","enabled":true,"indent":1,"action":{"reveal":{"domain":"Files","rel":"a/movie.mkv"}}},
+{"ok":true,"menu":{"icon":"tsync-sync-symbolic","tooltip":"tsync — Downloading 1",
+  "entries":[{"label":"Files — Downloading 1","enabled":true,"indent":0,"action":{"openFolder":"Files"}},
+             {"label":"movie.mkv","enabled":true,"indent":1,"action":{"reveal":{"domain":"Files","rel":"a/movie.mkv"}}},
+             {"label":"1.5 GB of 3.7 GB","enabled":true,"indent":2,"action":{}},
              {"separator":true},
              {"label":"Stats","enabled":true,"indent":0,"submenu":true,"action":{"stats":true}},
              {"label":"Hold changes","enabled":true,"indent":0,"checked":false,"action":{"setPaused":true}}]}}
 ```
 
-`menu_stats` answers `{"ok":true,"entries":[…]}`: the Stats submenu, one disabled entry per line of
-the `tsync status` report ([07 §5.5](../07-daemon-cli.md#55-tsync-status)). Until it arrives the
-submenu shows one disabled "Reading…" entry.
+`menu_stats` answers `{"ok":true,"entries":[…]}`: the stats rows of
+[menu-model.md §6](menu-model.md#6-stats-submenu), in the same JSON form. Until it arrives the
+submenu shows the model's placeholder row.
 
 - Poll every `menu_poll_interval`, skipping a poll while one is outstanding; a poll that exceeds its
   deadline counts as a failure and releases the latch. The menu is not rebuilt while open and is

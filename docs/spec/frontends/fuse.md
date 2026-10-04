@@ -1,14 +1,14 @@
 # FUSE mount and the Linux desktop
 
-This file specifies the `fuse` frontend, which presents a domain as a Linux FUSE mount, and the
-Linux desktop integration around it: mount discovery, the Dolphin plugin, the tray, service units
-and packaging. The generic seam (descriptor, request handler, hooks, error codes, item references)
+This file specifies the `fuse` frontend, which presents a domain as a Linux FUSE mount, and what
+the mount owes the Linux desktop around it: its identity in the mount table, service units and the
+base package. The desktop clients themselves are [linux-desktop.md](linux-desktop.md). The generic seam (descriptor, request handler, hooks, error codes, item references)
 is [the frontend contract](../08-frontends.md); where the mount runs and how it starts and stops is
 [07](../07-daemon-cli.md). This file says how the mount maps kernel operations onto the file
 operations ([04 §3.5](../04-checkout-cache.md)) and which POSIX semantics it guarantees.
 
-Part I is the mount. Part II is the desktop integration, which is not a frontend: it is a set of
-clients of the owner's socket plus one in-process library.
+Part I is the mount. Part II is its side of the desktop integration, which is not a frontend: it
+is a set of clients of the owner's socket plus one in-process library.
 
 Implementation notes: [../ocaml/frontends/fuse.md](../ocaml/frontends/fuse.md).
 
@@ -398,30 +398,9 @@ Recording happens on the failing worker and MUST NOT do anything that can fail (
 ## B1. Mount discovery
 
 Desktop extensions need to know whether a path is inside a tsync mount and which socket serves it.
-The rule lives once, in the core, shipped as a shared library with one C-callable entry point. The
-Dolphin plugin loads it in-process: the menu is drawn while the user waits, and asking each socket
-froze Dolphin when a daemon wedged.
-
-**`mount_points() → [(mount point, socket path)]`**, in config order:
-
-1. Load the config.
-2. Read `/proc/self/mountinfo`. Per line: field 5 is the mount point (octal escapes `\NNN` decoded);
-   after the ` - ` separator come fstype and source. Keep the mount point iff **source = `tsync`** and
-   **fstype starts with `fuse.`**.
-3. For each configured domain, compute its mount point (§2.1), resolve symlinks in its parent
-   directories, and include `(mount point, owner socket)` iff that path is among the kept mount
-   points.
-4. **Total**: any failure (no HOME, unreadable config or mount table) returns `[]`. The caller is
-   C++, where an escaping failure kills the host process.
-
-Why this rule: liveness is the mount table, not the socket (a mounted but wedged owner still counts,
-and the plugin's deadlines cover that); the source column, not the fstype, identifies tsync, because
-the fstype defaults to `fuse.sshfs`.
-
-**Shared-library contract**: SONAME `libtsync_mounts.so`, file name equal to the SONAME, installed at
-`<libdir>/tsync/`; position-independent; the embedded runtime is started once by the host from one
-thread; the entry point `tsync_mount_points` is looked up by name, called with no argument, and
-returns string pairs the host copies out immediately.
+The rule, its algorithm and the shared library that ships it are
+[linux-desktop.md §3](linux-desktop.md#3-mount-discovery). What this mount owes that rule: it
+reports the source `tsync` and a type starting with `fuse.` (§B2), at the mount point of §2.1.
 
 ## B2. Why the mount reports `fuse.sshfs`
 
@@ -433,64 +412,11 @@ thumbnails or an honest type. Tools that special-case sshfs treat the mount as s
 
 ## B3. Dolphin plugin
 
-A KF6 file-item action plugin: context-menu actions only (no KIO worker, no overlays), for
-`application/octet-stream` and `inode/directory`.
-
-Per menu:
-
-1. Offer nothing unless exactly one local file URL is selected.
-2. Resolve `(mount, rel)` by the **longest** mount point equal to the path or a prefix of it followed
-   by `/`; a sibling sharing a prefix does not match. No match → no actions.
-3. Offer **Copy Share Link**. On click: `share` by `rel`, under the client deadline of
-   [failure-model.md §8.2](../algorithms/failure-model.md#82-requests-between-processes); on `ok` copy the
-   `url` and notify "Share link copied to the clipboard."
-4. Send `stat` by `rel`: 200 ms to connect, 300 ms for the reply. No answer or a failure → only the
-   share action (acting on an item whose state is unknown is a guess).
-5. Offer **Make Available Offline**, or **Keep Offline Longer** when pinned: `restore`, a bulk action
-   watched with the liveness probe ([07 §4.3](../07-daemon-cli.md#43-deadlines-bulk-actions-and-the-liveness-probe)),
-   in the background; on success notify "<name> is available
-   offline."
-6. Unless `online-only`, offer **Make Online Only**: `evict`, the same way; on success notify "<name> is
-   online only." A directory row has no availability, so it gets both actions; both apply to the
-   subtree ([08 §3.4](../08-frontends.md)).
-
-Transport: one connection per request, one compact JSON line out, one line in, no `domain` field
-(the Linux owner socket serves one domain). Errors: a failure reply → a desktop notification with
-its `error` text; a socket error or deadline → a notification saying the daemon did not answer.
-Notifications go through `org.freedesktop.Notifications` (app `tsync`, 5 s).
+[dolphin.md](dolphin.md).
 
 ## B4. Tray
 
-A standalone process showing status for every configured domain as a StatusNotifierItem with a
-dbusmenu on the session bus, single-threaded.
-
-**Startup**: if the session bus address is unset, use `$XDG_RUNTIME_DIR/bus` when it exists, else
-fail with "no session bus: the tray needs a running desktop session" (so no private bus is
-auto-launched under ssh); reap children automatically; claim `org.tsync.Tray` (already owned → print
-"tsync-tray is already running", exit 0); claim `org.kde.StatusNotifierItem-<pid>-1`; export the
-item and menu; register with the watcher; warn when no host draws icons.
-
-**Item**: answers on both the KDE and freedesktop StatusNotifierItem interfaces; `ItemIsMenu`;
-activation methods answer empty; icon and tooltip signals only on change; re-registers when the
-watcher gets a new owner; every unclaimed method call gets an `UnknownMethod` error, never silence
-(an unanswered call costs the host a 25 s timeout).
-
-**Menu**: dbusmenu version 3, rows and icon from the shared menu model
-([07 §5.8](../07-daemon-cli.md)).
-
-**Loop** (250 ms tick), every 3 s:
-
-- re-read the config when its mtime changes (missing or bad → no domains, a warning);
-- `status` to every domain's owner in parallel, each under 1.5 s; no answer → unreachable;
-- `stats` for the submenu only when the menu opens, debounced to once per second, 4 s each;
-- **Hold changes** → `pause` on/off to every domain (1.5 s each), then an immediate re-poll so the
-  checkmark shows what the owners did; the state persists ([07 §2.6](../07-daemon-cli.md));
-- open folder / reveal file through `org.freedesktop.FileManager1`, falling back to `xdg-open` on the
-  folder; a file is never opened, only revealed;
-- **Quit** stops the tray only.
-
-**Autostart**: `/etc/xdg/autostart/tsync-tray.desktop`, visible so users can disable it (XDG autostart
-works on sessions that are not systemd-managed).
+[linux-tray.md](linux-tray.md), with the menu's content in [menu-model.md](menu-model.md).
 
 ## B5. Service units
 
@@ -504,32 +430,21 @@ unit and the binary link and leaves lingering enabled.
 | package | contents | dependencies |
 |---|---|---|
 | `tsync` | the binary, `tsync@.service`, the app icon, `<libdir>/tsync/libtsync_mounts.so` | its shared libraries, plus `fuse3` (the unmount helper is executed, not linked) |
-| `tsync-tray` | the tray, the autostart entry, the symbolic status icons | libdbus, `tsync (= same version)` |
-| `tsync-dolphin` | the plugin, RPATH `<libdir>/tsync` | Qt6, KF6, `tsync (= same version)` |
 
-- A headless server gets neither libdbus nor Qt. The discovery library ships with `tsync` (it is
-  tsync's answer; any extension should link the same object). The tray and plugin pin the exact
-  version because they speak the IPC contract.
+- The desktop packages `tsync-tray` and `tsync-dolphin`, why they are apart, and the checks made on
+  them are [linux-desktop.md §5](linux-desktop.md#5-delivery) and
+  [§6.3](linux-desktop.md#63-packages).
 - Versions: `0.0.0-<YYYYMMDD>.<run>~<distro suffix>` (deb) and release `<YYYYMMDD>.<run><dist>` (rpm).
 - Maintainer scripts: after install, reload systemd and, on upgrade, restart only the `tsync@*`
   instances that were active; before removal, stop active instances while the binary still exists
   (so `tsync stop` can unmount); after removal, delete the template's `.wants` links and reload.
-- The build fails when Qt or KF6 is missing rather than producing packages without the plugin; CI
-  checks the dependency split, that the plugin resolves the discovery library without a build-tree
-  RPATH, and that the maintainer scripts name `tsync@*.service`.
+- CI checks that the maintainer scripts name `tsync@*.service`.
 - The repository is rebuilt signed from scratch; a missing signing key aborts the publish.
 
 ## B7. Conformance (desktop)
 
-- Discovery keeps only mounts whose source is `tsync` and fstype starts with `fuse.` (so `fuse.tsync`
-  and `fuse.sshfs` from tsync are kept, a real sshfs mount is not), and only at a configured mount
-  point; a mount point
-  with a space survives decoding; a configured mount point with a trailing slash or under a
-  symlinked parent still matches; any failure yields `[]`.
-- Plugin resolution picks the longest matching mount; a sibling sharing a prefix does not match;
-  the runtime starts once; the plugin's metadata lists both MIME types.
-- Every plugin and tray request completes or fails within its deadline when the owner accepts
-  connections and never answers.
+[linux-desktop.md §6](linux-desktop.md#6-conformance), [dolphin.md §7](dolphin.md#7-conformance),
+[linux-tray.md §9](linux-tray.md#9-conformance), [menu-model.md §8](menu-model.md#8-conformance).
 
 ---
 

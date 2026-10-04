@@ -1,196 +1,208 @@
-# Linux desktop clients — as built
+# Linux desktop clients
 
-> **Status: as-built snapshot (pass 1).** This file and its siblings
-> ([dolphin.md](dolphin.md), [linux-tray.md](linux-tray.md), [menu-model.md](menu-model.md))
-> describe what `main` at `4c32fa96` does, read from the code. They are descriptive, not normative:
-> no MUST/SHOULD, no judgement. Defects and open questions are in
-> [linux-desktop-findings.md](linux-desktop-findings.md). OCaml and build specifics are in
-> [../ocaml/frontends/linux-desktop.md](../ocaml/frontends/linux-desktop.md). Until the normative
-> pass, [fuse.md](fuse.md) Part II and [07 §5.8](../07-daemon-cli.md) remain the normative text for
-> these components.
-
-This file is the index of the extraction and owns what the two clients share: their place among
-the processes, the path rules they consume, mount discovery, the owner requests they send, and how
-they are delivered.
+Two components put tsync on a Linux desktop: a context-menu plugin for the Dolphin file manager
+and a tray icon with a menu. This file owns what they share: their place among the processes, how
+each learns where a domain is mounted, mount discovery, the owner requests they send, and how they
+are delivered.
 
 | file | owns |
 |---|---|
-| this file | roles, path rules, mount discovery, the request wire as these clients use it, packaging |
+| this file | roles, mount points, mount discovery, the client side of the requests, packages, autostart, icons |
 | [dolphin.md](dolphin.md) | the Dolphin context-menu plugin |
-| [linux-tray.md](linux-tray.md) | the tray process: StatusNotifierItem, dbusmenu, poll loop, actions |
+| [linux-tray.md](linux-tray.md) | the tray process: StatusNotifierItem, dbusmenu, polling, actions |
 | [menu-model.md](menu-model.md) | the function from owner replies to an icon, a tooltip and menu rows |
-| [linux-desktop-findings.md](linux-desktop-findings.md) | defects, asymmetries, gaps, claims to verify |
+| [linux-desktop-known-complexity.md](linux-desktop-known-complexity.md) | the difficulties this problem is known to hold, each with the rule that answers it |
 
-Candidates that did not earn a document: the libdbus binding (a language note: any D-Bus library
-does), the icons (four SVG files, §5.3), the autostart entry (§5.2).
+The mount itself is [fuse.md](fuse.md). The request handler is [08 §3](../08-frontends.md); the
+process model, the sockets and the paths are [07](../07-daemon-cli.md); deadlines and error codes
+are [failure-model.md](../algorithms/failure-model.md).
+
+Implementation notes: [../ocaml/frontends/linux-desktop.md](../ocaml/frontends/linux-desktop.md).
 
 ---
 
 ## 1. Roles
 
-Both components are **client tools** in the sense of [07 §1](../07-daemon-cli.md): they own no
-domain state, hold no lock, write no file, and act only by sending requests to a domain's owner
-over its local socket.
+Both components are **client tools** ([07 §2.1](../07-daemon-cli.md#21-roles)): they own no domain
+state, hold no lock, write no file of tsync's, and act only by sending requests to a domain's
+owner over its socket.
 
-| component | process | lifetime | talks to |
-|---|---|---|---|
-| Dolphin plugin | loaded into the file manager's process | the file manager's | the owner of the domain whose mount holds the clicked item; the session bus (notifications); the clipboard |
-| Tray | its own process, one per desktop session | from session start until quit or the session bus closes | every configured domain's owner; the session bus (item, menu, file manager) |
-| Mount discovery | a shared library the plugin loads | the host process's | the config file and the kernel mount table; no socket |
+| component | runs | talks to |
+|---|---|---|
+| Dolphin plugin | inside the file manager's process, on the thread that draws its menus | the owner of the domain whose mount holds the selected item; the session bus (notifications); the clipboard |
+| Tray | its own process, one per desktop session | every configured domain's owner; the session bus (item, menu, file manager) |
+| Mount discovery | a shared library the plugin loads | the config and the kernel mount table; **no process** |
 
-Neither component is told anything by the owner: the owner publishes no events to them. The tray
-polls; the plugin asks once per menu.
+The owner pushes nothing to either: the tray polls, the plugin asks once per menu.
 
-On Linux each domain has its own owner process and its own socket, so a request carries no domain
-selector unless stated (§4).
+On Linux each domain has its own owner process and socket
+([07 §2.4](../07-daemon-cli.md#24-which-process-owns-which-domain)), so a request to an owner
+socket carries no `domain` field ([07 §4.2](../07-daemon-cli.md#42-envelopes)).
 
-## 2. Path rules consumed
+## 2. Where a domain is mounted
 
-These rules belong to the core. They are restated here as the clients evaluate them, because a
-rebuild of either client needs them exactly.
+Three parties know something about it. The config says where a mount was asked for. The owner
+knows where it mounted. The kernel mount table knows what is mounted now. They agree on an
+ordinary machine, and each client is told here which one to believe.
 
-| name | value |
-|---|---|
-| config path | `$XDG_CONFIG_HOME/tsync/config.json`, with `$HOME/.config` when `XDG_CONFIG_HOME` is unset |
-| data dir | `$XDG_DATA_HOME/tsync`, with `$HOME/.local/share` when `XDG_DATA_HOME` is unset |
-| owner socket of domain `D` | `<data dir>/tsync-D.sock` (the name verbatim, spaces included) |
-| mount point of domain `D` | the `mountPoint` option of the first `fuse` frontend of `D` that has one, when non-empty; else `$HOME/tsync/D` |
+- **The configured mount point** of a domain is the rule of
+  [fuse.md §2.1](fuse.md#21-options): the `mountPoint` of its `fuse` frontend, else
+  `$HOME/tsync/<domain>`. A domain with no `fuse` frontend has none. The config, the data
+  directory and the owner socket path are [07 §2.7](../07-daemon-cli.md#27-runtime-paths),
+  including the config given in the environment.
+- **Discovery** (§3) answers from the config and the mount table: the config for *where*, the
+  table for *whether*.
+- **The tray** uses the mount point the owner reports in its `status` reply (`mount`,
+  [fuse.md §5](fuse.md#5-hooks)) when the owner answers and reports one, and the configured mount
+  point otherwise.
+- A path is compared with a mount point only after both are made canonical: §3.2 for the
+  configured side, [dolphin.md §2](dolphin.md#2-building-the-menu) for a selected path.
 
-- `HOME` is read unconditionally; when it is unset the evaluation fails.
-- The mount point is the configured string, used verbatim: no `~` expansion, no symlink
-  resolution, no trailing-slash trimming.
-- The mount point is computed for every configured domain, whether or not it has a `fuse` frontend.
-- The config is the JSON in the environment variable `TSYNC_CONFIG_JSON` when that is set, else the
-  file's content.
+**Stated limit.** A mount started at a mount point the config does not name (the command-line
+override of [fuse.md §2.1](fuse.md#21-options)) is not found by discovery, so the plugin offers
+nothing inside it. The tray opens it correctly, since it asks the owner.
 
 ## 3. Mount discovery
 
-`mount_points() → [(mount point, socket path)]`: every configured domain whose filesystem is
-mounted now. A domain configured but not mounted is absent.
+### 3.1 The answer
 
-### 3.1 Algorithm
+`mount_points() → [(mount point, socket path)]`: one pair for every configured domain whose
+filesystem is mounted now, with the canonical mount point (§3.2) and the domain's owner socket. A
+domain that is configured and not mounted is absent. The order of the pairs is not significant.
 
-1. Compute the paths of §2 and load the config.
-2. Read `/proc/self/mountinfo` line by line. Split a line on single spaces.
+Discovery MUST NOT connect to any socket or wait on any process, and MUST NOT perform a filesystem
+operation at or below a tsync mount point: it runs on a thread that is not its own, while a user
+waits for a menu, and an owner can stop answering.
+
+Discovery MUST be **total**: whatever fails (no home directory, a config that is missing,
+unreadable or invalid, a mount table that cannot be opened or holds lines it cannot parse), the
+answer is a list, empty if need be, and nothing is raised to the caller. A line of the mount table
+that cannot be parsed is skipped; it does not empty the answer.
+
+The inputs are read on every call. A mount or unmount is reflected by the next call.
+
+### 3.2 Algorithm
+
+1. Load the config. For each domain with a `fuse` frontend, take its configured mount point (§2)
+   and make it canonical: resolve the symbolic links of its **parent** directory, and append the
+   last component unchanged. The last component is not resolved: it is the mount itself, and
+   looking through it would ask the owner. A parent that cannot be resolved leaves the configured
+   string as it is.
+2. Read `/proc/self/mountinfo`. A line is fields separated by single spaces.
    - Field 5 (1-based) is the mount point.
-   - Scan the fields after it for the first field equal to `-`. The next two fields are the
-     filesystem type and the source.
-   - Keep the line iff **source = `tsync`** and **type starts with `fuse.`**.
-   - Decode the mount point: each `\` followed by three characters that parse as an octal number is
-     replaced by the byte with that value; any other `\` is kept.
-   - A line with fewer than five fields, or with no `-` field followed by two more, is skipped.
-   - A mount table that cannot be opened yields no mounted paths.
-3. For each configured domain, in config order: compute its mount point (§2); emit
-   `(mount point, owner socket)` iff the mount point is **byte-equal** to one of the kept, decoded
-   mount points.
-4. Any failure anywhere in 1–3 yields the empty list. Nothing is raised to the caller.
+   - After it comes a variable number of optional fields, ended by a field equal to `-`. The two
+     fields after `-` are the filesystem type and the source.
+   - Keep the line iff the **source is `tsync`** and the **type starts with `fuse.`**.
+   - Decode the mount point: a `\` followed by three octal digits whose value is at most 255
+     becomes the byte of that value; any other `\` is kept as it is.
+   - A line with fewer than five fields, or with no `-` followed by two more fields, is skipped.
+3. Emit `(canonical mount point, owner socket)` for each domain of step 1 whose canonical mount
+   point is byte-equal to a kept, decoded mount point.
 
-The inputs are re-read on every call. Nothing is cached.
+### 3.3 Why this rule
 
-### 3.2 Why this rule (from the code and its history)
+- **The mount table decides liveness, not the socket.** Asking each owner from the menu thread
+  costs a wait per owner that accepts and does not answer, and freezes the file manager on one
+  that sends bytes with no end of line.
+- **Both columns are needed.** The type is not tsync's own: it defaults to `fuse.sshfs`, so that
+  the file manager does not fetch every file of a folder to draw thumbnails
+  ([fuse.md §B2](fuse.md#b2-why-the-mount-reports-fusesshfs)), and matching it alone would take a
+  real sshfs mount for a domain. The source is free text any mount may carry, so matching it alone
+  would take a tmpfs named `tsync` for a live domain.
+- **The kernel escapes** space, tab, newline and backslash in the mount point, as `\040`, `\011`,
+  `\012` and `\134`, and nothing else. A domain whose name holds a space is missed by a reader
+  that does not decode.
+- **The rule is shipped, not restated.** An extension that computed mount points and socket paths
+  itself would drift from the core. It links the core's answer instead.
 
-- The mount table decides liveness, not the socket: asking each socket from the menu thread cost
-  0.3 s per right-click with two owners that accepted and did not answer, and froze the file
-  manager when one sent bytes without a newline.
-- The source column identifies tsync, not the type, because the type is `fuse.sshfs` by default
-  ([fuse.md §B2](fuse.md)) and `fuse.tsync` only when configured so. The type test only tells a
-  FUSE mount from a non-FUSE one.
-- The rule lives in the core and is shipped as a library so that an extension does not restate
-  where a domain mounts or where its owner listens.
+### 3.4 Shared-library contract
 
-### 3.3 Shared-library contract
+These names are compatibility surface and MUST NOT change:
 
-- File `libtsync_mounts.so`, SONAME `libtsync_mounts.so`, installed at `<libdir>/tsync/`.
-- Position-independent; carries the language runtime.
-- One entry point, registered under the name **`tsync_mount_points`**, taking no argument and
-  returning a list of string pairs.
-- The host starts the runtime once, from the one thread that will call it, then looks the entry
-  point up by name and calls it. It copies the strings out before doing anything else.
-- A second object, `libtsync_mounts_fake.so`, registers the same name with three fixed pairs. It
-  exists for the plugin's test and is never installed:
+- file name and SONAME `libtsync_mounts.so`, the two equal, installed in `<libdir>/tsync/`;
+- one entry point, found by the name **`tsync_mount_points`**, taking no argument and returning
+  the list of §3.1 as pairs of byte strings.
 
-  ```
-  ("/mnt/files",        "/run/tsync-Files.sock")
-  ("/mnt/files/media",  "/run/tsync-Media.sock")
-  ("/mnt/spaced name",  "/run/tsync-Spaced Name.sock")
-  ```
+Rules:
 
-## 4. Owner requests used
+- The library is position-independent and self-contained: it brings whatever runtime it needs.
+- The host initialises it once, from the thread that will call it, and calls it from that thread
+  only. Asking again MUST NOT initialise again.
+- The host copies the strings out before it does anything else with the library.
+- A failure inside the library MUST NOT end, abort or unwind into the host process.
+- Initialising it MUST NOT change process-wide state the host depends on: signal dispositions,
+  the locale, the working directory, the environment.
 
-Transport: a Unix stream socket at the owner socket path. One request is one line of compact JSON
-ending in `\n`; the reply is one line of JSON ending in `\n`. Each request here uses its own
-connection, closed by the client after the reply.
+A test stand-in exporting the same entry point with fixed pairs MAY exist for the tests of an
+extension. It MUST NOT be installed.
 
-Reply envelope:
+## 4. Owner requests
 
-- success: `{"ok":true, …fields}`
-- failure: `{"ok":false,"code":"<code>","error":"<text>"}`
+### 4.1 Transport and bounds
 
-Neither client reads `code`.
+- A Unix stream socket at the domain's owner socket path. One request is one line of JSON ending
+  in a newline; the reply is one line ([01 §11](../01-core.md#11-ipc-framing),
+  [07 §4.2](../07-daemon-cli.md#42-envelopes)). Each request of these clients uses its own
+  connection, which the client closes.
+- **Every exchange has a deadline that covers the whole of it**: connecting, writing, and reading
+  until the newline. A timer restarted by each byte received is not a deadline: a peer that keeps
+  sending without ending its line defeats it. Each client's file states its deadlines; where it
+  states none, the client rules of
+  [failure-model.md §8.2](../algorithms/failure-model.md#82-requests-between-processes) apply.
+- A request that is abandoned is closed. The owner's work continues
+  ([07 §4.3](../07-daemon-cli.md#43-deadlines-bulk-actions-and-the-liveness-probe)).
+- No answer, a transport failure, an expired deadline and a reply that is not one JSON object are
+  one outcome, **no answer**. It is never read as `not_found` and never as success
+  ([failure-model.md §7.2](../algorithms/failure-model.md#72-client-error-codes)).
+- A reply with `ok` other than `true` is a **refusal**. The client reads its `code` and shows its
+  `error` sentence.
 
-| action | sent by | request, as written | reply fields read |
+### 4.2 Requests used
+
+Field names, replies and refusals are those of [08 §3.3](../08-frontends.md#33-actions).
+
+| action | sent by | request | reply fields read |
 |---|---|---|---|
-| `stat` | plugin | `{"action":"stat","rel":"<rel>"}` | `ok`, `availability` |
-| `share` | plugin | `{"action":"share","rel":"<rel>"}` | `ok`, `url`, `error` |
-| `restore` | plugin | `{"action":"restore","rel":"<rel>"}` | `ok`, `error` |
-| `evict` | plugin | `{"action":"evict","rel":"<rel>"}` | `ok`, `error` |
-| `status` | tray | `{"action":"status"}` | see [menu-model.md §2](menu-model.md#2-input-one-status-reply-per-domain) |
-| `stats` | tray | `{"action":"stats","domain":"<name>"}` | see [menu-model.md §6](menu-model.md#6-stats-submenu) |
-| `pause` | tray | `{"action":"pause","arg":"on"}` or `"off"` | none; the reply is discarded |
+| `stat` | plugin | `rel` | `kind`, `availability` |
+| `share` | plugin | `rel` | `url`, `expires` |
+| `restore` | plugin | `rel` | `restored`, `failed` |
+| `evict` | plugin | `rel` | `evicted`, `failed` |
+| `ping` | plugin | — | `ok` |
+| `status` | tray | — | [menu-model.md §2](menu-model.md#2-input-one-status-per-domain), and `mount` |
+| `stats` | tray | — | [menu-model.md §6](menu-model.md#6-stats-submenu) |
+| `pause` | tray | `arg`: `on` or `off` | `ok`, `error` |
 
-`<rel>` is the item's path relative to the mount point, with no leading `/`; the empty string names
-the domain's root. `<name>` is JSON-escaped. The plugin's object keys are written in alphabetical
-order (`action` before `rel`).
-
-What the owner does with them, as far as these clients depend on it:
-
-- **Target by `rel`.** With no `ref` field, an empty `rel` is the root; a non-empty `rel` is looked
-  up in the local mirror and is a file or a directory by what the mirror holds. A `rel` the mirror
-  does not hold is answered `ok:false` with the text `not found: <rel>`.
-- **`stat`** answers the item's row. A file's row has `availability`: `online-only`, `cached` or
-  `pinned` (with `pinnedUntil`). A directory's row has no `availability`.
-- **`share`** creates a share of the path, expiring 7 days after the request, and answers `url`.
-  The client cannot choose the expiry.
-- **`restore`** makes the item's content local and pins it; on a directory, every file under it,
-  one after the other, where one file's failure is logged by the owner and does not stop the rest.
-  With no `keep` field the owner applies its default pin duration. The reply is sent when the work
-  is finished.
-- **`evict`** drops the item's content from the cache; on a directory, the same subtree walk.
-- **`status`** is cheap by design: no store access. **`stats`** reaches every backend before
-  answering.
-- **`pause`** holds every change when `arg` is anything but `off`, releases on `off`, and answers
-  `{"ok":true}`.
-- `share`, `restore`, `evict` and `pause` are not among the actions a read-only domain refuses.
-- The owner handles one mutation at a time; these actions queue behind it.
+`rel` is the item's path relative to the mount point, with no leading `/`; the empty string names
+the domain's root.
 
 ## 5. Delivery
 
 ### 5.1 Packages
 
-| package | contents | dependencies |
+Package names and installed paths are compatibility surface.
+
+| package | installs | depends on |
 |---|---|---|
-| `tsync` | the binary, the system unit template, the app icon `hicolor/scalable/apps/tsync.svg`, `<libdir>/tsync/libtsync_mounts.so` | its shared libraries, `fuse3` |
-| `tsync-tray` | `/usr/bin/tsync-tray`, `/etc/xdg/autostart/tsync-tray.desktop`, the four status icons | its shared libraries (libdbus), `tsync` at exactly the same version |
-| `tsync-dolphin` | `<qt6 plugin dir>/kf6/kfileitemaction/tsyncdolphin.so` | its shared libraries (Qt 6, KF6), `tsync` at exactly the same version |
+| `tsync` | among the rest ([fuse.md §B6](fuse.md#b6-packaging)): `<libdir>/tsync/libtsync_mounts.so`, the application icon `hicolor/scalable/apps/tsync.svg` | no desktop library |
+| `tsync-tray` | `/usr/bin/tsync-tray`, `/etc/xdg/autostart/tsync-tray.desktop`, the four status icons (§5.3) | the session-bus library it links; `tsync` at exactly the same version |
+| `tsync-dolphin` | `<Qt 6 plugin directory>/kf6/kfileitemaction/tsyncdolphin.so` | Qt 6 and KDE Frameworks 6; `tsync` at exactly the same version |
 
-- The split keeps libdbus, Qt and KF6 off a headless install, and Qt/KF6 off a desktop that only
-  wants the tray.
-- The discovery library ships with `tsync`, not with the plugin: it is tsync's answer and a second
-  extension would link the same object.
-- The version pin exists because both clients speak the owner's request wire.
-- `tsync-tray` and `tsync-dolphin` carry no maintainer scripts.
-- The plugin is installed with a library search path of `<libdir>/tsync` and no build-tree path.
-  The build produces it by an install step, never by copying from the build directory (a copied
-  plugin keeps the build machine's search path).
-- Binaries are stripped.
-- A source install (`make install`) installs neither client. Its uninstall removes
-  `~/.local/bin/tsync-tray` and `~/.config/autostart/tsync-tray.desktop` if present.
-- The package build fails when Qt or KF6 is absent; it never produces a package set without the
-  plugin.
+- **The split** keeps bus and toolkit libraries off a headless machine, and the file manager's
+  toolkit off a desktop that only wants the tray.
+- **The discovery library ships with `tsync`**: it is tsync's answer, and a second extension links
+  the same object.
+- **The exact version pin** exists because both clients speak the owner's request interface.
+- Every file is installed by exactly one package, and every package of a build is a distinct
+  artifact.
+- The installed plugin MUST find `libtsync_mounts.so` in `<libdir>/tsync` through the search path
+  recorded in it, and that recorded path MUST name no directory of the build machine.
+- `tsync-tray` and `tsync-dolphin` run nothing at install or removal.
+- A package build MUST fail when the plugin cannot be built. It never produces a package set
+  without it.
 
-### 5.2 Autostart entry
+### 5.2 Autostart
 
-`/etc/xdg/autostart/tsync-tray.desktop`, mode 644:
+`/etc/xdg/autostart/tsync-tray.desktop`:
 
 ```ini
 [Desktop Entry]
@@ -204,61 +216,93 @@ Categories=Utility;
 X-GNOME-Autostart-enabled=true
 ```
 
-- XDG autostart rather than a systemd user unit: it is honoured by sessions that are not
-  systemd-managed, and becomes a session-bound unit where they are.
-- No `NoDisplay`: the entry stays visible in the desktop's startup list, where a user turns it off.
+- The tray is started by XDG autostart, not by a unit tied to a session target of the service
+  manager: such a unit is never started on a desktop whose session does not populate that target.
+- The entry MUST stay visible in the desktop's list of startup applications (no `NoDisplay`,
+  no `Hidden`): that list is where a user turns it off.
 
 ### 5.3 Icons
 
-Four SVGs, 24×24 view box, installed as
+Four status icons, installed as
 `/usr/share/icons/hicolor/symbolic/apps/tsync-<state>-symbolic.svg` for `<state>` in `idle`,
-`sync`, `paused`, `error`.
+`sync`, `paused` and `error`. The names are compatibility surface: the menu model emits them
+([menu-model.md §4](menu-model.md#4-icon-and-tooltip)) and the macOS menu maps them.
 
-- The `-symbolic` suffix together with the `symbolic/` directory is what makes GTK panels recolour
-  the icon to the panel foreground. Qt panels ignore both and recolour through the
-  `current-color-scheme` stylesheet block the SVGs carry.
-- Each SVG declares a `color` so that `currentColor` resolves when no toolkit supplies one.
+- They are installed in `hicolor` because every icon theme inherits it.
+- Each is one colour, drawn with **fills only**. A panel of the GTK family recolours a file whose
+  name ends in `-symbolic.svg` by forcing the fill of every shape to its foreground colour, so a
+  stroked mark is filled and a second colour is flattened.
+- Each carries a style element with the id `current-color-scheme`, defining the class
+  `ColorScheme-Text`, and paints with `currentColor` under that class. A panel of the KDE family
+  replaces that style element with its own colours, when the user's icon theme follows the colour
+  scheme.
+- Each declares a default `color`, so that `currentColor` resolves where no panel supplies one.
 
-### 5.4 Checks made on the built packages (CI)
+## 6. Conformance
 
-- Each of `tsync` and `tsync-tray` runs after install.
-- `tsync-tray` depends on libdbus and not on KF6; `tsync-dolphin` depends on KF6; `tsync-tray` has
-  no post-install script.
-- The installed plugin resolves `libtsync_mounts.so` with every dependency found, and its recorded
-  search path names no build directory.
-- `libtsync_mounts.so` is listed by `tsync` and not by `tsync-dolphin`.
-- The repository install test installs `tsync` and `tsync-tray` from the published repository.
+### 6.1 Mount discovery
 
-## 6. Tests — mount discovery
-
-One suite, driven by fixture files, never by the machine's real mounts.
-
-**Fixture.** A config with five domains and a mount table with six lines:
-
-| domain | configured mount point | mount table line | expected |
-|---|---|---|---|
-| `Explicit` | `<home>/elsewhere` | type `fuse.tsync`, source `tsync` | reported |
-| `Jellyfin Media` | none (default `<home>/tsync/Jellyfin Media`) | `…/tsync/Jellyfin\040Media`, type `fuse.sshfs`, source `tsync` | reported |
-| `Unmounted` | `<home>/gone` | type `fuse.sshfs`, source `user@host:` | absent |
-| `Impostor` | `<home>/impostor` | type `tmpfs`, source `tsync` | absent |
-| `Absent` | `<home>/absent` | no line | absent |
-| — | — | `/proc` (type `proc`), `<home>/other` (type `ext4`) | absent |
+Driven by fixture files, never by the machine's real mounts.
 
 **Invariants.**
 
-- A mounted domain is reported with the socket path of §2 for its name.
-- An octal escape in the table is decoded before comparison.
+- A domain is reported iff the mount table holds a line at its canonical mount point whose source
+  is `tsync` and whose type starts with `fuse.`. It is reported with its own owner socket.
+- A mount point holding a space survives decoding.
 - A domain with no configured mount point is found at the default.
-- A real sshfs mount at a configured path is not tsync's (source decides).
-- A non-FUSE mount whose source is `tsync` is not tsync's (type decides).
-- Exactly two pairs come back.
-- With `HOME` pointing at a directory that does not exist, the public entry point returns without
-  raising.
+- A real sshfs mount at a configured path is not reported (the source decides).
+- A non-FUSE mount whose source is `tsync` is not reported (the type decides).
+- A configured mount point reached through a symbolic link in a parent directory is reported, with
+  the canonical path the table lists.
+- A domain with no `fuse` frontend is not reported.
+- A table holding an unparseable line, and one holding a malformed escape, still yields every
+  other mount.
+- With no home directory, no config, an invalid config, and no mount table, the public entry
+  point returns the empty list each time, and its caller survives.
+- No socket is connected to: with every owner socket replaced by one that accepts and never
+  answers, the answer is the same and takes no longer.
 
-**Binding:** which pairs are present, the socket path of each, the count. **Incidental:** the
-order of the pairs, the scratch location, the output wording.
+**Binding:** which pairs are present, both strings of each, the count. **Incidental:** the order
+of the pairs.
 
-**Doubles a new harness needs:** a mount table as a file, a config as a file, an overridable
-`HOME`.
+**Doubles:** a mount table as a file; a config as a file; an overridable home directory; a
+directory tree with a symbolic link in it; an owner that accepts connections and never answers.
 
-The suite counts its checks and fails when none ran.
+### 6.2 Shared library
+
+- A host built against the stand-in receives every pair, with both halves intact and a space
+  preserved.
+- Asking twice initialises once and answers the same.
+- The library loads and answers on every architecture it is packaged for.
+
+### 6.3 Packages
+
+Each check is made on the package as built, not on the build tree, and each MUST have been seen to
+fail against a deliberately bad artifact before its pass counts.
+
+- `tsync` declares no dependency on a bus or toolkit library. `tsync-tray` declares the bus
+  library and not the file manager's toolkit. `tsync-dolphin` declares the toolkit.
+- `tsync-tray` and `tsync-dolphin` each depend on `tsync` at exactly their own version.
+- The installed plugin resolves every library it needs, `libtsync_mounts.so` among them, on a
+  machine that never held the build tree; its recorded search path names no build directory.
+- The plugin is installed in the directory the file manager scans, and its metadata reads back as
+  [dolphin.md §7](dolphin.md#7-conformance) requires.
+- `libtsync_mounts.so` is listed by `tsync` and by no other package; no file is listed by two
+  packages.
+- A package build with the plugin's toolkit absent fails.
+- After install, `tsync-tray` runs: started with no session bus, it exits as
+  [linux-tray.md §1](linux-tray.md#1-command-line-and-exit) says.
+- A client machine installs `tsync` and `tsync-tray` from the repository as it is served.
+
+### 6.4 Icons
+
+On a dark and on a light panel of each family, the four states are visible and distinct. This is
+checked by eye; no automated check is required.
+
+### 6.5 The wedged owner
+
+For every request of §4.2 and each of three owners, one that accepts and never answers, one that
+sends a byte at an interval shorter than any timer and never ends its line, and one that is not
+listening, the client ends the exchange by its stated deadline and reports no answer.
+
+**Doubles:** those three owners.

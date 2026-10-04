@@ -1,8 +1,12 @@
-# Linux desktop clients — OCaml and build notes (as built)
+# Linux desktop clients — OCaml and build notes
 
-Notes on how `main` at `4c32fa96` implements [../../frontends/linux-desktop.md](../../frontends/linux-desktop.md),
-[dolphin.md](../../frontends/dolphin.md) and [linux-tray.md](../../frontends/linux-tray.md).
-Descriptive, not normative.
+Notes on how the implementation on `main` built what
+[../../frontends/linux-desktop.md](../../frontends/linux-desktop.md),
+[dolphin.md](../../frontends/dolphin.md), [linux-tray.md](../../frontends/linux-tray.md) and
+[menu-model.md](../../frontends/menu-model.md) specify. Descriptive, not normative: it predates
+that text, and where the two differ the spec is what to build. Its largest departures: one loop
+served the bus and polled the owners, so the bus waited during a poll; the plugin's click actions
+had no deadline; `EventGroup` was answered without acting.
 
 ## 1. Where things are
 
