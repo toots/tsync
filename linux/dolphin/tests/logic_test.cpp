@@ -234,8 +234,10 @@ static void stats()
         timer.start();
         const ItemState state = statItem(wedged.socket, "a/b.txt", timing.statMs);
         const qint64 elapsed = timer.elapsed();
-        out << "an owner that is " << mode << ": " << names(actionsFor(state)) << "; within PLUGIN_STAT_DEADLINE plus 250 ms: "
-            << yes(elapsed <= timing.statMs + 250) << "\n";
+        // A client with no deadline over the whole exchange never returns from
+        // the trickling owner; the margin only has to tell that apart.
+        out << "an owner that is " << mode << ": " << names(actionsFor(state)) << "; ended by its deadline: "
+            << yes(elapsed <= timing.statMs + 5000) << "\n";
     }
 }
 

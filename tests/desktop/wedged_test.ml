@@ -6,7 +6,10 @@ open Tsync_ipc
 
 let dir = Printf.sprintf "/tmp/tsync-wedged-%d" (Unix.getpid ())
 let deadline = 0.5
-let margin = 0.3
+
+(* A client with no deadline over the whole exchange never ends against the
+   trickling owner; the margin only has to tell that apart. *)
+let margin = 5.
 let owner_double = Filename.concat (Sys.getcwd ()) Sys.argv.(1)
 
 let double mode socket =

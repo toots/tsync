@@ -130,9 +130,3 @@ let closed t id =
     t.opened <- None;
     install_held t)
   else []
-
-let expire t ~since =
-  if t.opened = Some since then (
-    t.opened <- None;
-    install_held t)
-  else []

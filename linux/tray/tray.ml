@@ -282,24 +282,10 @@ let run_action t : M.action -> unit = function
 (* §4.4. Answers whether the layout under [id] changed, and the work to start
    once the reply is sent. *)
 let opening t id =
-  let now = Rt.now () in
-  let changed, began =
-    locked t (fun () ->
-        let before = Layout.open_since t.layout ~now in
-        let parents = Layout.opening t.layout ~now id in
-        announce t parents;
-        let after = Layout.open_since t.layout ~now in
-        (parents <> [], if after <> before then after else None))
+  let changed =
+    change_layout t (fun layout -> Layout.opening layout ~now:(Rt.now ()) id)
   in
-  ( changed,
-    fun () ->
-      Option.iter
-        (fun since ->
-          Rt.timer Layout.menu_open_bound (fun () ->
-              ignore
-                (change_layout t (fun layout -> Layout.expire layout ~since))))
-        began;
-      fetch_stats t )
+  (changed, fun () -> fetch_stats t)
 
 let click t id =
   match locked t (fun () -> Layout.find t.layout id) with

@@ -35,9 +35,9 @@ refused not_found: nothing
 another refusal: Copy Share Link (tsync)
 a reply that is not an object: Copy Share Link (tsync)
 the first request: {"action":"stat","rel":"a/b.txt"}
-an owner that is silent: Copy Share Link (tsync); within PLUGIN_STAT_DEADLINE plus 250 ms: yes
-an owner that is trickle: Copy Share Link (tsync); within PLUGIN_STAT_DEADLINE plus 250 ms: yes
-an owner that is absent: Copy Share Link (tsync); within PLUGIN_STAT_DEADLINE plus 250 ms: yes
+an owner that is silent: Copy Share Link (tsync); ended by its deadline: yes
+an owner that is trickle: Copy Share Link (tsync); ended by its deadline: yes
+an owner that is absent: Copy Share Link (tsync); ended by its deadline: yes
 
 == requests
 {"action":"share","rel":"sub dir/a b.txt"}

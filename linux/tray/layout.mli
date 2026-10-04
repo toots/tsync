@@ -35,11 +35,5 @@ val opening : t -> now:float -> int -> int list
 (** §4.4: a [closed] event for this id. *)
 val closed : t -> int -> int list
 
-(** §4.4: [MENU_OPEN_BOUND] passed since the opening that began at [since]. *)
-val expire : t -> since:float -> int list
-
-(** When the current opening began, while the menu counts as open. *)
-val open_since : t -> now:float -> float option
-
 (** §10. *)
 val menu_open_bound : float
