@@ -1,0 +1,130 @@
+
+== the discovery stand-in
+3 pairs
+[/mnt/files] [/run/tsync/tsync-files.sock]
+[/mnt/files/media] [/run/tsync/tsync-media.sock]
+[/mnt/spaced name] [/run/tsync/tsync-spaced name.sock]
+
+== resolution
+/mnt/files/a/b.txt -> /mnt/files, rel "a/b.txt", name "b.txt", socket /run/tsync/tsync-files.sock
+/mnt/files -> /mnt/files, rel "", name "The folder", socket /run/tsync/tsync-files.sock
+/mnt/files/ -> /mnt/files, rel "", name "The folder", socket /run/tsync/tsync-files.sock
+/mnt/files/media/x.mkv -> /mnt/files/media, rel "x.mkv", name "x.mkv", socket /run/tsync/tsync-media.sock
+/mnt/files-elsewhere/x -> no mount
+/home/someone/x -> no mount
+/home/someone/shortcut/deep/c.txt -> /mnt/files, rel "a/deep/c.txt", name "c.txt", socket /run/tsync/tsync-files.sock
+/home/someone/relative/y.mkv -> /mnt/files/media, rel "y.mkv", name "y.mkv", socket /run/tsync/tsync-media.sock
+/mnt/spaced name/z -> /mnt/spaced name, rel "z", name "z", socket /run/tsync/tsync-spaced name.sock
+/mnt/files/./a//../b -> /mnt/files, rel "b", name "b", socket /run/tsync/tsync-files.sock
+/home/loop/x -> no mount
+with no mounts: no mount, 0 questions asked
+questions asked at or below a mount point: 0
+
+== menu
+file, online-only: Copy Share Link (tsync), Make Available Offline (cloud-download)
+file, cached: Copy Share Link (tsync), Make Available Offline (cloud-download), Make Online Only (cloud-upload)
+file, pinned: Copy Share Link (tsync), Keep Offline Longer (cloud-download), Make Online Only (cloud-upload)
+directory: Copy Share Link (tsync), Make Available Offline (cloud-download), Make Online Only (cloud-upload)
+symlink: Copy Share Link (tsync)
+not_found: nothing
+no answer: Copy Share Link (tsync)
+
+== stat while the menu is built
+a row: Copy Share Link (tsync), Make Available Offline (cloud-download), Make Online Only (cloud-upload)
+refused not_found: nothing
+another refusal: Copy Share Link (tsync)
+a reply that is not an object: Copy Share Link (tsync)
+the first request: {"action":"stat","rel":"a/b.txt"}
+an owner that is silent: Copy Share Link (tsync); within PLUGIN_STAT_DEADLINE plus 250 ms: yes
+an owner that is trickle: Copy Share Link (tsync); within PLUGIN_STAT_DEADLINE plus 250 ms: yes
+an owner that is absent: Copy Share Link (tsync); within PLUGIN_STAT_DEADLINE plus 250 ms: yes
+
+== requests
+{"action":"share","rel":"sub dir/a b.txt"}
+{"action":"restore","rel":"sub dir/a b.txt"}
+{"action":"evict","rel":"sub dir/a b.txt"}
+{"action":"share","rel":""}
+
+== clicks
+share, an owner that succeeds: 1 final
+    clipboard: https://files.example/s/abc
+    final notice: Share link copied to the clipboard. It expires on <1 January 2030 in the locale>.
+share, an owner that refuses: 1 final
+    final notice: Changes are held: resume to share.
+share, an owner that is not listening: 1 final
+    final notice: The tsync daemon did not answer.
+share, an owner that accepts and never answers: 1 final
+    final notice: The tsync daemon did not answer.
+restore, file, an owner that succeeds: 1 final
+    final notice: report.pdf is available offline.
+restore, file, an owner that refuses: 1 final
+    final notice: The daemon refused.
+restore, file, an owner that is not listening: 1 final
+    final notice: The tsync daemon stopped answering. The change to report.pdf may still complete.
+restore, file, an owner that accepts and never answers: 1 final
+    final notice: The tsync daemon stopped answering. The change to report.pdf may still complete.
+restore, file, an owner that stops answering the probe mid-way: 1 final
+    final notice: The tsync daemon stopped answering. The change to report.pdf may still complete.
+restore, directory, an owner that succeeds: 1 final
+    start notice #1: Making docs available offline…
+    final notice, replacing #1: docs: 12 files available offline.
+restore, directory, an owner that refuses: 1 final
+    start notice #1: Making docs available offline…
+    final notice, replacing #1: The daemon refused.
+restore, directory, an owner that is not listening: 1 final
+    start notice #1: Making docs available offline…
+    final notice, replacing #1: The tsync daemon stopped answering. The change to docs may still complete.
+restore, directory, an owner that accepts and never answers: 1 final
+    start notice #1: Making docs available offline…
+    final notice, replacing #1: The tsync daemon stopped answering. The change to docs may still complete.
+restore, directory, an owner that stops answering the probe mid-way: 1 final
+    start notice #1: Making docs available offline…
+    final notice, replacing #1: The tsync daemon stopped answering. The change to docs may still complete.
+evict, file, an owner that succeeds: 1 final
+    final notice: report.pdf is online only.
+evict, file, an owner that refuses: 1 final
+    final notice: The daemon refused.
+evict, file, an owner that is not listening: 1 final
+    final notice: The tsync daemon did not answer.
+evict, file, an owner that accepts and never answers: 1 final
+    final notice: The tsync daemon did not answer.
+evict, directory, an owner that succeeds: 1 final
+    start notice #1: Making docs online only…
+    final notice, replacing #1: docs: 7 files are online only. 2 could not be released.
+evict, directory, an owner that refuses: 1 final
+    start notice #1: Making docs online only…
+    final notice, replacing #1: The daemon refused.
+evict, directory, an owner that is not listening: 1 final
+    start notice #1: Making docs online only…
+    final notice, replacing #1: The tsync daemon stopped answering. The change to docs may still complete.
+evict, directory, an owner that accepts and never answers: 1 final
+    start notice #1: Making docs online only…
+    final notice, replacing #1: The tsync daemon stopped answering. The change to docs may still complete.
+evict, directory, an owner that stops answering the probe mid-way: 1 final
+    start notice #1: Making docs online only…
+    final notice, replacing #1: The tsync daemon stopped answering. The change to docs may still complete.
+restore, directory, some files failing: 1 final
+    start notice #1: Making docs available offline…
+    final notice, replacing #1: docs: 3 files available offline. 1 could not be fetched.
+share, an owner that answers and hangs up: 1 final
+    clipboard: https://files.example/s/abc
+    final notice: Share link copied to the clipboard. It expires on <1 January 2030 in the locale>.
+evict, directory, an owner that refuses and hangs up: 1 final
+    start notice #1: Making docs online only…
+    final notice, replacing #1: The disk is full.
+share, an owner that hangs up without answering: 1 final
+    final notice: The tsync daemon did not answer.
+restore, directory, an owner that hangs up without answering: 1 final
+    start notice #1: Making docs available offline…
+    final notice, replacing #1: The tsync daemon stopped answering. The change to docs may still complete.
+restore, directory, answered after three probes: 1 final
+    start notice #1: Making docs available offline…
+    final notice, replacing #1: docs: 3 files available offline.
+
+== metadata
+valid: yes
+name: tsync
+types: application/octet-stream, inode/directory
+file: tsyncdolphin.so
+
+7 sections

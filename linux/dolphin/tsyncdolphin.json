@@ -1,0 +1,10 @@
+{
+    "KPlugin": {
+        "Description": "Share links and offline availability for files and folders in a tsync mount",
+        "MimeTypes": [
+            "application/octet-stream",
+            "inode/directory"
+        ],
+        "Name": "tsync"
+    }
+}
