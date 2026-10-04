@@ -129,13 +129,31 @@ let () =
       else (
         p "first events: %s" (String.concat ", " (List.sort compare (events 2)));
         show "menu" (menu ());
-        p "menu_stats entries: %b"
+        (* The owner's own stats reply through the model. Figures vary with
+           the run, so a row is cut at its first figure or health. *)
           (match call [("action", "menu_stats")] with
-            | `Assoc l -> (
-                match List.assoc_opt "entries" l with
-                  | Some (`List (_ :: _)) -> true
-                  | _ -> false)
-            | _ -> false);
+          | `Assoc l -> (
+              match List.assoc_opt "entries" l with
+                | Some (`List (_ :: rows)) ->
+                    List.iter
+                      (fun row ->
+                        p "menu_stats row: %s"
+                          (match Ipc.field row "label" with
+                            | Some label -> (
+                                match
+                                  ( String.index_opt label ' ',
+                                    Tsync_core.Text.find_from label " — r" 0 )
+                                with
+                                  | _, Some i -> String.sub label 0 i
+                                  | Some i, _
+                                    when List.mem (String.sub label 0 i)
+                                           ["pid"; "cpu"; "up"] ->
+                                      String.sub label 0 i
+                                  | _ -> label)
+                            | None -> "---"))
+                      rows
+                | _ -> p "menu_stats: no entries")
+          | _ -> p "menu_stats: no reply");
         show "pause every domain" (call [("action", "pause"); ("arg", "on")]);
         show "menu while held" (menu ());
         show "resume" (call [("action", "pause"); ("arg", "off")]);

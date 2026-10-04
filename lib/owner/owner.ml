@@ -2,6 +2,7 @@ open Tsync_core
 open Tsync_ipc
 open Tsync_config
 open Tsync_domain
+module Menu = Tsync_menu.Menu_model
 
 type holder = {
   pid : int;
@@ -182,7 +183,6 @@ let housekeeping (domain : Domain.t) (module E : Tsync_sync.Engine.S) =
 let all_topics = "*"
 
 let shared_router served reports action req =
-  let now () = Unix.gettimeofday () in
   match action with
     | "subscribe" ->
         Some
@@ -197,36 +197,35 @@ let shared_router served reports action req =
             (fun s ->
               ( Domain_name.to_string s.domain.Domain.name,
                 match Handler.call s.handler Status with
-                  | st -> Ok st
-                  | exception e -> Error (Fail.classify e).reason ))
+                  | st -> Menu.status_of_json (Protocol.encode_reply Status st)
+                  | exception _ -> None ))
             served
         in
-        Some (Ipc.Reply (Ipc.ok [("menu", Menu.render answers)]))
+        Some (Ipc.Reply (Ipc.ok [("menu", Menu.to_json (Menu.render answers))]))
     | "menu_stats" ->
-        let machine : Tsync_status.Status_report.machine =
-          {
-            host = Unix.gethostname ();
-            domains =
-              Tsync_status.Status_report.answered
-                (List.map
-                   (fun (name, report) ->
-                     (name, Ok (stats_reply reports report)))
-                   reports);
-            processes = [];
-            uplinks = [];
-            jobs = [];
-            warnings = [];
-          }
+        let stats =
+          match reports with
+            | [] -> []
+            | (_, report) :: _ ->
+                Option.to_list
+                  (Menu.stats_of_json
+                     (Protocol.encode_reply (Stats [])
+                        {
+                          (stats_reply reports report) with
+                          domains =
+                            List.map
+                              (fun (_, r) ->
+                                Tsync_status.Status_report.Answered
+                                  (Report.domain_body r))
+                              reports;
+                        }))
         in
         Some
           (Ipc.Reply
              (Ipc.ok
                 [
                   ( "entries",
-                    `List
-                      (Menu.stats_entries
-                         (Tsync_status.Status_text.render ~now:(now ()) machine))
-                  );
+                    `List (List.map Menu.entry_to_json (Menu.stats stats)) );
                 ]))
     | "stop" ->
         Stop.request ();

@@ -1,0 +1,368 @@
+
+== formatters: bytes
+0 -> 0 B
+999 -> 999 B
+1000 -> 1000 B
+1500 -> 1.5 KiB
+999999 -> 976.6 KiB
+223200000 -> 212.9 MiB
+1070000000 -> 1020.4 MiB
+12800000000 -> 11.9 GiB
+2500000000000 -> 2.3 TiB
+
+== formatters: duration
+0 -> undefined
+45 -> undefined
+60 -> 1m
+90 -> 1m
+3600 -> 1h
+8000 -> 2h 13m
+86400 -> 1d
+90000 -> 1d 1h
+180000 -> 2d 2h
+-1 -> undefined
+nan -> undefined
+1e+13 -> undefined
+
+== formatters: time left
+100 at 10/s -> under a minute left
+9000 at 10/s -> 15m left
+1 at 1000/s -> under a minute left
+
+== formatters: ellipsis
+9 bytes -> "short.txt" (valid UTF-8: true)
+64 bytes -> "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" (valid UTF-8: true)
+65 bytes -> "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\226\128\166" (valid UTF-8: true)
+69 bytes -> "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\226\128\166" (valid UTF-8: true)
+81 bytes -> "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\226\128\166" (valid UTF-8: true)
+81 bytes -> "aaaaaaaaaa bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\226\128\166" (valid UTF-8: true)
+100 bytes -> "Compte rendu de la r\195\169union g\195\169n\195\169rale extraordinaire du\226\128\166" (valid UTF-8: true)
+
+== formatters: file icon
+a.JPG -> image-x-generic
+a.dng -> image-x-generic
+a.mkv -> video-x-generic
+a.opus -> audio-x-generic
+a.csv -> x-office-spreadsheet
+a.odp -> x-office-presentation
+a.epub -> x-office-document
+a.tar.zst -> package-x-generic
+a.txt -> text-x-generic
+Makefile -> text-x-generic
+.pdf -> text-x-generic
+
+== the worked example of §5
+icon    tsync-sync-symbolic
+tooltip tsync — Uploading 1 · Downloading 2
+        photos — Uploading 1 · Downloading 2 -> open photos
+            out.raw (image-x-generic) -> reveal photos:out.raw
+            holiday.mov (video-x-generic) -> reveal photos:trips/holiday.mov
+                752.0 MiB of 14.5 GiB · 1.5 MiB/s · 2h 34m left
+            notes.pdf (x-office-document) -> reveal photos:notes.pdf
+                234.4 KiB of 878.9 KiB
+        ---
+        1000 B sent
+        ---
+        Stats >
+        [ ] Hold changes -> pause true
+        ---
+        Quit tsync tray -> quit
+
+== two domains, one busy: rows sorted, traffic and rate summed
+icon    tsync-sync-symbolic
+tooltip tsync — Uploading 2
+        photos — Uploading 2 -> open photos
+            a.jpg (image-x-generic) -> reveal photos:x/a.jpg
+            b.jpg (image-x-generic) -> reveal photos:x/b.jpg
+                2.0 KiB
+        music — Idle -> open music
+        ---
+        6.0 MiB sent · 1.0 MiB to go
+        1.0 MiB/s · under a minute left
+        ---
+        Stats >
+        [ ] Hold changes -> pause true
+        ---
+        Quit tsync tray -> quit
+
+== 5 MiB at 1 MiB/s and 3 MiB at 2 MiB/s, pending bytes in each
+icon    tsync-sync-symbolic
+tooltip tsync — Uploading 2
+        one — Uploading 1 -> open one
+        two — Uploading 1 -> open two
+        ---
+        8.0 MiB sent · 180.0 MiB to go
+        3.0 MiB/s · 1m left
+        ---
+        Stats >
+        [ ] Hold changes -> pause true
+        ---
+        Quit tsync tray -> quit
+
+== nothing answering
+icon    tsync-error-symbolic
+tooltip tsync — Daemon not running
+        photos — not answering -> open photos
+        ---
+        Stats >
+        [ ] Hold changes (disabled) -> pause true
+        ---
+        Quit tsync tray -> quit
+
+== one domain paused, one unreachable
+icon    tsync-paused-symbolic
+tooltip tsync — Uploading 2 · paused
+        photos — Uploading 2 · paused -> open photos
+        music — not answering -> open music
+        ---
+        Stats >
+        [x] Hold changes -> pause false
+        ---
+        Quit tsync tray -> quit
+
+== two reachable domains, one paused
+icon    tsync-idle-symbolic
+tooltip tsync — Idle
+        photos — Paused -> open photos
+        music — Idle -> open music
+        ---
+        Stats >
+        [ ] Hold changes -> pause true
+        ---
+        Quit tsync tray -> quit
+
+== paused with more uploads than FILE_ROWS, rate zero
+icon    tsync-paused-symbolic
+tooltip tsync — Uploading 9 · paused
+        photos — Uploading 9 · paused -> open photos
+            u0.bin (text-x-generic) -> reveal photos:d/u0.bin
+            u1.bin (text-x-generic) -> reveal photos:d/u1.bin
+            u2.bin (text-x-generic) -> reveal photos:d/u2.bin
+            u3.bin (text-x-generic) -> reveal photos:d/u3.bin
+            u4.bin (text-x-generic) -> reveal photos:d/u4.bin
+            … and 2 more
+        ---
+        0 B sent · 6.7 MiB to go
+        ---
+        Stats >
+        [x] Hold changes -> pause false
+        ---
+        Quit tsync tray -> quit
+
+== a fetch count of nine above two download rows
+icon    tsync-sync-symbolic
+tooltip tsync — Downloading 2
+        photos — Downloading 2 -> open photos
+            d0.bin (text-x-generic) -> reveal photos:d/d0.bin
+            d1.bin (text-x-generic) -> reveal photos:d/d1.bin
+        ---
+        Stats >
+        [ ] Hold changes -> pause true
+        ---
+        Quit tsync tray -> quit
+
+== a fetch count of zero above one download row
+icon    tsync-sync-symbolic
+tooltip tsync — Downloading 1
+        photos — Downloading 1 -> open photos
+            d0.bin (text-x-generic) -> reveal photos:d/d0.bin
+        ---
+        Stats >
+        [ ] Hold changes -> pause true
+        ---
+        Quit tsync tray -> quit
+
+== a fetch count with no row
+icon    tsync-sync-symbolic
+tooltip tsync — Downloading 3
+        photos — Downloading 3 -> open photos
+        ---
+        Stats >
+        [ ] Hold changes -> pause true
+        ---
+        Quit tsync tray -> quit
+
+== more downloads than fit beside uploads
+icon    tsync-sync-symbolic
+tooltip tsync — Uploading 6 · Downloading 8
+        photos — Uploading 6 · Downloading 8 -> open photos
+            u0.bin (text-x-generic) -> reveal photos:d/u0.bin
+            u1.bin (text-x-generic) -> reveal photos:d/u1.bin
+            u2.bin (text-x-generic) -> reveal photos:d/u2.bin
+            u3.bin (text-x-generic) -> reveal photos:d/u3.bin
+            u4.bin (text-x-generic) -> reveal photos:d/u4.bin
+            … and 1 more
+            d0.bin (text-x-generic) -> reveal photos:d/d0.bin
+            d1.bin (text-x-generic) -> reveal photos:d/d1.bin
+            d2.bin (text-x-generic) -> reveal photos:d/d2.bin
+            d3.bin (text-x-generic) -> reveal photos:d/d3.bin
+            d4.bin (text-x-generic) -> reveal photos:d/d4.bin
+            … and 3 more
+        ---
+        Stats >
+        [ ] Hold changes -> pause true
+        ---
+        Quit tsync tray -> quit
+
+== figures absent
+icon    tsync-sync-symbolic
+tooltip tsync — Downloading 1
+        photos — Downloading 1 -> open photos
+            a.bin (text-x-generic) -> reveal photos:a.bin
+        ---
+        Stats >
+        [ ] Hold changes -> pause true
+        ---
+        Quit tsync tray -> quit
+
+== figures zero
+icon    tsync-sync-symbolic
+tooltip tsync — Downloading 1
+        photos — Downloading 1 -> open photos
+            a.bin (text-x-generic) -> reveal photos:a.bin
+                0 B of 0 B
+        ---
+        Stats >
+        [ ] Hold changes -> pause true
+        ---
+        Quit tsync tray -> quit
+
+== a name longer than LABEL_MAX with a known extension
+icon    tsync-sync-symbolic
+tooltip tsync — Downloading 1
+        docs — Downloading 1 -> open docs
+            Compte rendu de la réunion générale extraordinaire du… (x-office-document) -> reveal docs:cr/Compte rendu de la réunion générale extraordinaire du comité élargi — version définitive.PDF
+        ---
+        Stats >
+        [ ] Hold changes -> pause true
+        ---
+        Quit tsync tray -> quit
+
+== no domains, with a quit label
+icon    tsync-error-symbolic
+tooltip tsync — No domains configured
+        tsync — No domains configured
+        ---
+        Stats >
+        [ ] Hold changes (disabled) -> pause true
+        ---
+        Quit tsync tray -> quit
+
+== no domains, without a quit label
+icon    tsync-error-symbolic
+tooltip tsync — No domains configured
+        tsync — No domains configured
+        ---
+        Stats >
+        [ ] Hold changes (disabled) -> pause true
+
+== one idle domain, without a quit label
+icon    tsync-idle-symbolic
+tooltip tsync — Idle
+        photos — Idle -> open photos
+        ---
+        Stats >
+        [ ] Hold changes -> pause true
+
+== the JSON form: every kind of entry and action
+{
+  "icon": "tsync-paused-symbolic",
+  "tooltip": "tsync — Uploading 1 · Downloading 1 · paused",
+  "entries": [
+    {
+      "label": "photos — Uploading 1 · Downloading 1 · paused",
+      "enabled": true,
+      "indent": 0,
+      "action": { "openFolder": "photos" }
+    },
+    {
+      "label": "a.mkv",
+      "enabled": true,
+      "indent": 1,
+      "action": { "reveal": { "domain": "photos", "rel": "v/a.mkv" } }
+    },
+    { "label": "1.1 MiB", "enabled": true, "indent": 2, "action": {} },
+    { "separator": true },
+    { "label": "10 B sent", "enabled": true, "indent": 0, "action": {} },
+    { "separator": true },
+    {
+      "label": "Stats",
+      "enabled": true,
+      "indent": 0,
+      "action": { "stats": true },
+      "submenu": true
+    },
+    {
+      "label": "Hold changes",
+      "enabled": true,
+      "indent": 0,
+      "action": { "setPaused": false },
+      "checked": true
+    },
+    { "separator": true },
+    {
+      "label": "Quit tsync tray",
+      "enabled": true,
+      "indent": 0,
+      "action": { "quit": true }
+    }
+  ]
+}
+[{"label":"Reading…","enabled":true,"indent":0,"action":{}}]
+
+== stats: before any answer
+        Reading…
+
+== stats: nothing answering
+        No daemon answering
+
+== stats: full, two processes
+        box — owner
+        pid 102259 · up 12h 5m
+        cpu 1.0% · 739.8 MiB rss · 84.3 MiB heap
+        up 0 B · down 11.6 GiB (1.5 MiB/s)
+        ---
+        Media — read-only, versioned
+            /home/u/tsync/Media
+            cache 1216 chunks · 10.0 GiB of 10.0 GiB · 2.0 GiB pinned
+            queue 0 files · 0 B owed
+            read 515.4 MiB · written 5 B
+            wal 3 pending · 1 stuck
+            http-proxy (main) — reachable, 11 ms · journal 402 entries
+            cold (replica) — unreachable: connection refused · journal 88 entries, 12 behind · 3 corrupt — run tsync data-integrity
+            far (backfill) — unreachable · not checked
+        ---
+        box — owner
+        pid 7 · just started
+        ---
+        Files
+
+== stats: sparse
+        box — ?
+
+== stats: a journal still counting
+        ? — ?
+        ---
+        Files
+            gcs (main) — reachable · journal counting
+
+== replies with fields of the wrong type, and an empty object
+icon    tsync-sync-symbolic
+tooltip tsync — Downloading 1
+        empty — not answering -> open empty
+        list — not answering -> open list
+        wrong — Downloading 1 -> open wrong
+            ok.txt (text-x-generic) -> reveal wrong:ok.txt
+        ---
+        Stats >
+        [ ] Hold changes -> pause true
+        ---
+        Quit tsync tray -> quit
+        ? — ?
+        ---
+        ? — ?
+        ---
+        d
+            ? (?)
+
+29 cases

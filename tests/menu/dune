@@ -1,0 +1,13 @@
+(executable
+ (name menu_test)
+ (libraries tsync_core tsync_menu yojson))
+
+(rule
+ (with-stdout-to
+  menu_test.output
+  (run ./menu_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff menu_test.expected menu_test.output)))

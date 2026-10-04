@@ -24,7 +24,8 @@ val count : ?plural:string -> int -> string -> string
     narration and in the status report alike. *)
 val duration : float -> string
 
-(** [512 B], [3.0 MiB], up to TiB: every byte count shown to a person. *)
+(** [512 B], [3.0 MiB], up to TiB (menu-model §3): every byte count shown to a
+    person. *)
 val size : int -> string
 
 (** [size] per second. *)

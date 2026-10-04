@@ -1,0 +1,5 @@
+(library
+ (name tsync_menu)
+ (libraries tsync_core yojson)
+ (preprocess
+  (pps ppx_deriving_yojson)))
