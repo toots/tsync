@@ -169,13 +169,14 @@ run "gcs_accepts_defaults" {
   module { source = "./modules/store-gcs" }
 
   variables {
-    name            = "media"
-    bucket          = "a"
-    project         = "project"
-    location        = "US"
-    function_region = "us-central1"
-    source_bucket   = "src"
-    source_object   = "hash.zip"
+    name                = "media"
+    bucket              = "a"
+    project             = "project"
+    location            = "US"
+    function_region     = "us-central1"
+    source_bucket       = "src"
+    source_object       = "hash.zip"
+    storage_agent_email = "agent@example.org"
   }
 }
 
@@ -184,15 +185,16 @@ run "gcs_refuses_domain_without_share" {
   module { source = "./modules/store-gcs" }
 
   variables {
-    name            = "media"
-    bucket          = "a"
-    project         = "project"
-    location        = "US"
-    function_region = "us-central1"
-    source_bucket   = "src"
-    source_object   = "hash.zip"
-    deploy_share    = false
-    custom_domain   = "share.example.org"
+    name                = "media"
+    bucket              = "a"
+    project             = "project"
+    location            = "US"
+    function_region     = "us-central1"
+    source_bucket       = "src"
+    source_object       = "hash.zip"
+    storage_agent_email = "agent@example.org"
+    deploy_share        = false
+    custom_domain       = "share.example.org"
   }
 
   expect_failures = [google_service_account.client]
@@ -203,14 +205,15 @@ run "gcs_refuses_ceiling_above_memory" {
   module { source = "./modules/store-gcs" }
 
   variables {
-    name            = "media"
-    bucket          = "a"
-    project         = "project"
-    location        = "US"
-    function_region = "us-central1"
-    source_bucket   = "src"
-    source_object   = "hash.zip"
-    max_share_bytes = 2147483648
+    name                = "media"
+    bucket              = "a"
+    project             = "project"
+    location            = "US"
+    function_region     = "us-central1"
+    source_bucket       = "src"
+    source_object       = "hash.zip"
+    storage_agent_email = "agent@example.org"
+    max_share_bytes     = 2147483648
   }
 
   expect_failures = [google_service_account.client]
@@ -221,15 +224,16 @@ run "gcs_refuses_archive_on_adopted_bucket" {
   module { source = "./modules/store-gcs" }
 
   variables {
-    name            = "media"
-    bucket          = "a"
-    project         = "project"
-    location        = "US"
-    function_region = "us-central1"
-    source_bucket   = "src"
-    source_object   = "hash.zip"
-    create_bucket   = false
-    archive_domains = { Movies = { after_days = 30 } }
+    name                = "media"
+    bucket              = "a"
+    project             = "project"
+    location            = "US"
+    function_region     = "us-central1"
+    source_bucket       = "src"
+    source_object       = "hash.zip"
+    storage_agent_email = "agent@example.org"
+    create_bucket       = false
+    archive_domains     = { Movies = { after_days = 30 } }
   }
 
   expect_failures = [google_service_account.client]
@@ -240,13 +244,14 @@ run "gcs_refuses_long_name" {
   module { source = "./modules/store-gcs" }
 
   variables {
-    name            = "a-name-that-is-too-long"
-    bucket          = "a"
-    project         = "project"
-    location        = "US"
-    function_region = "us-central1"
-    source_bucket   = "src"
-    source_object   = "hash.zip"
+    name                = "a-name-that-is-too-long"
+    bucket              = "a"
+    project             = "project"
+    location            = "US"
+    function_region     = "us-central1"
+    source_bucket       = "src"
+    source_object       = "hash.zip"
+    storage_agent_email = "agent@example.org"
   }
 
   expect_failures = [var.name]

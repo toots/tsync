@@ -85,13 +85,10 @@ resource "google_pubsub_topic" "chunks" {
 
 # Cloud Storage publishes as its own per-project service agent, which has no
 # rights on a new topic until granted them.
-data "google_storage_project_service_account" "gcs" {
-}
-
 resource "google_pubsub_topic_iam_member" "gcs_publisher" {
   topic  = google_pubsub_topic.chunks.id
   role   = "roles/pubsub.publisher"
-  member = "serviceAccount:${data.google_storage_project_service_account.gcs.email_address}"
+  member = "serviceAccount:${var.storage_agent_email}"
 }
 
 # One notification for all three: a chunk, a sweep request and a delete request

@@ -74,6 +74,11 @@ resource "google_storage_bucket_object" "package" {
   source = module.package.path
 }
 
+data "google_storage_project_service_account" "gcs" {
+  count   = local.gcs_unused ? 0 : 1
+  project = var.gcp_project
+}
+
 module "gcs" {
   count  = local.gcs_unused ? 0 : 1
   source = "../modules/store-gcs"
@@ -90,4 +95,6 @@ module "gcs" {
 
   source_bucket = google_storage_bucket.functions_source[0].name
   source_object = google_storage_bucket_object.package[0].name
+
+  storage_agent_email = data.google_storage_project_service_account.gcs[0].email_address
 }
