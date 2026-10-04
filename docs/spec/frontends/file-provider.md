@@ -598,7 +598,7 @@ model's.
 {"ok":true,"menu":{"icon":"tsync-sync-symbolic","tooltip":"tsync — Downloading 1",
   "entries":[{"label":"Files — Downloading 1","enabled":true,"indent":0,"action":{"openFolder":"Files"}},
              {"label":"movie.mkv","enabled":true,"indent":1,"action":{"reveal":{"domain":"Files","rel":"a/movie.mkv"}}},
-             {"label":"1.5 GB of 3.7 GB","enabled":true,"indent":2,"action":{}},
+             {"label":"1.5 GiB of 3.7 GiB","enabled":true,"indent":2,"action":{}},
              {"separator":true},
              {"label":"Stats","enabled":true,"indent":0,"submenu":true,"action":{"stats":true}},
              {"label":"Hold changes","enabled":true,"indent":0,"checked":false,"action":{"setPaused":true}}]}}

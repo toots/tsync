@@ -279,7 +279,7 @@ until its last close. POSIX gives this for inodes; the mount gives it for keys:
 | `changed(keys)` | kernel invalidation (§4.7), asynchronous |
 | `reannounce`, `on_upload_done` | nothing |
 | `status_fields()` | `mount: <mount point>` |
-| `stats_fields()` | `frontend:"fuse"`, `mountPoint`, `openHandles`, `filesOpened`, `bytesRead`, `bytesWritten`, `bytesReadPerSec`, `bytesWrittenPerSec`, `handlerFailures` |
+| `stats_fields()` | `type:"fuse"`, `mount`, `openHandles`, `bytesRead`, `bytesWritten` |
 | `on_stop()` | request the owner's stop |
 
 `openHandles` counts successful opens minus releases, never below 0 (a release without a matching

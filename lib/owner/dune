@@ -8,6 +8,7 @@
   tsync_config
   tsync_domain
   tsync_ipc
+  tsync_menu
   unix
   threads.posix
   tsync_status

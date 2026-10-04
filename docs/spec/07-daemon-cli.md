@@ -668,15 +668,22 @@ asked for its own figures asks nobody. A failed answer becomes a process entry
   [{name, inFlight, waiting, max}]`, `uplinks`, `traffic`, `recentErrors [{t, level, message}]`
   (the last 50 warnings and errors). `cpuPercent` covers the interval since the previous report
   (reports under 1 s apart reuse it; the first is the lifetime average);
-- a domain body from its owner: resolved settings, `mainOffline?`, `paused`, `sync {state:
+- a domain body from its owner: `name`, `settings {versioning, symlinks, chunkSize, cacheChunkSize,
+  maxUploads, maxChunkBuffers, maxDownloads, readOnly}`, `mainOffline?`, `paused`, `sync {state:
   "incremental" | "hold", reason?, markAgeSeconds, unappliedEntries, unappliedReason?, parkedMetadata}`
   ([wal-and-journal.md §4.8](algorithms/wal-and-journal.md#48-retention-horizon-bridging-and-rebuild)),
-  `cache {chunks, bytes, pinnedBytes, maxCache, manifests?}`, `wal {pending, intent, prepared,
-  executed, stuck, lastError}`, `queues {pendingFiles, inFlight: [FIFO], bytesOwed}` (pending counted
+  `cache {chunks, bytes, pinnedBytes, maxCache, manifests?}`, `wal {intent, prepared,
+  executed, stuck, retrying, setAside, lastError?}` (no total: a reader that wants the records
+  pending sums the first three), `queues {pendingFiles, inFlight: [FIFO], bytesOwed}` (pending counted
   in files; bytes owed are whole-file bytes, in-flight included; a folder rename owes 0 bytes),
-  `frontends [...]`, `backends [{name, type, role, link?, config (secrets masked `***`), reachable, latencyMs, error,
-  journal {entries, behind, cursor, lastSync} | {counting} | {error}, corrupted {checked, chunks?,
-  truncated?}, disk?, health, totals?}]`;
+  `frontends [{type, pid?, mount?, port?, openHandles?, bytesRead?, bytesWritten?, readOnly?,
+  shares?}]`, `backends [{name, type, role, link?, config (secrets masked `***`), reach
+  {reachable:true, latencyMs} | {reachable:false, error}, journal {entries, behind} | {counting} |
+  {error}, corrupted {checked:true, chunks, truncated} | {checked:false, reason}, disk?, health,
+  copies?, traffic?}]`;
+- an owner's own `stats` answer: `{ok:true, domains:[body, …], presented:[{domain, frontend}, …],
+  self}`, where `self` is its self-description; a domain the process could not answer for is the
+  stub `{name, unanswered:true}`;
 - the fold: domain bodies deduplicated by name, a stub `{name, unanswered:true}` for a domain no
   process answered for; processes one per pid with `serves` widened; jobs deduplicated by
   (pid, kind, domain); warnings grouped by (level, message) with per-process counts and first/last

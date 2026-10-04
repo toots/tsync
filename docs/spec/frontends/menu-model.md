@@ -80,7 +80,7 @@ its own process or one process serves them all.
 
 ## 3. Formatters
 
-**Bytes.** Units `B`, `KB`, `MB`, `GB`, `TB`, each 1024 of the previous. Divide while the value is
+**Bytes.** Units `B`, `KiB`, `MiB`, `GiB`, `TiB`, each 1024 of the previous. Divide while the value is
 ≥ 1024 and a larger unit exists. Under 1024: the integer and ` B`. Otherwise one decimal place.
 The same formatter MUST be used wherever tsync prints a size to a user.
 
@@ -89,12 +89,12 @@ The same formatter MUST be used wherever tsync prints a size to a user.
 | 0 | `0 B` |
 | 999 | `999 B` |
 | 1000 | `1000 B` |
-| 1500 | `1.5 KB` |
-| 999999 | `976.6 KB` |
-| 223200000 | `212.9 MB` |
-| 1070000000 | `1020.4 MB` |
-| 12800000000 | `11.9 GB` |
-| 2500000000000 | `2.3 TB` |
+| 1500 | `1.5 KiB` |
+| 999999 | `976.6 KiB` |
+| 223200000 | `212.9 MiB` |
+| 1070000000 | `1020.4 MiB` |
+| 12800000000 | `11.9 GiB` |
+| 2500000000000 | `2.3 TiB` |
 
 **Duration.** Undefined for a negative, not-a-number or > 10¹² input. Truncate to whole seconds;
 compute days, hours and minutes; drop the zero ones; keep the first two; join with a space as
@@ -167,6 +167,7 @@ In order:
      counts, followed by ` · paused` when the domain is paused;
    - its upload file rows, then its download file rows (below).
 3. **Traffic**, when shown: a separator, the traffic line, then the rate line when there is one.
+   - The section, separator included, is absent when it has neither line.
    - Traffic line: nothing when sent bytes is unknown; nothing when it is 0 and pending bytes is
      unknown or ≤ 0; `<sent> sent` when pending bytes is unknown or ≤ 0; else
      `<sent> sent · <pending> to go`.
@@ -207,9 +208,9 @@ tooltip tsync — Uploading 1 · Downloading 2
         photos — Uploading 1 · Downloading 2 -> open photos
             out.raw (image-x-generic) -> reveal photos:out.raw
             holiday.mov (video-x-generic) -> reveal photos:trips/holiday.mov
-                752.0 MB of 14.5 GB · 1.5 MB/s · 2h 34m left
+                752.0 MiB of 14.5 GiB · 1.5 MiB/s · 2h 34m left
             notes.pdf (x-office-document) -> reveal photos:notes.pdf
-                234.4 KB of 878.9 KB
+                234.4 KiB of 878.9 KiB
         ---
         1000 B sent
         ---
@@ -242,7 +243,7 @@ tooltip tsync — No domains configured
 ```
 
 Two domains, one of them down, the other paused with two files queued: the switch reads checked
-and the click would resume. (Written for this text, not captured from an implementation.)
+and the click would resume.
 
 ```
 icon    tsync-paused-symbolic
@@ -259,7 +260,10 @@ tooltip tsync — Uploading 2 · paused
 ## 6. Stats submenu
 
 A second pure function, from the `stats` replies of the owners that answered to the rows of the
-Stats submenu. A reply whose `ok` is not `true` contributes nothing.
+Stats submenu. A reply whose `ok` is not `true` contributes nothing. A reply describes the process
+that answered under `self` and the domains it owns under `domains`
+([07 §5.5](../07-daemon-cli.md#55-tsync-status)); a domain it lists as `unanswered` contributes
+nothing.
 
 - **Placeholder**, shown until the first answer: one row `Reading…`.
 - **No reply at all**: one row `No daemon answering`.
@@ -272,50 +276,53 @@ Per answering process, a separator before each one after the first:
 
 | row | from | when a field is absent |
 |---|---|---|
-| `<host> — <role>` | `server.hostname`, `server.role` | `?` |
-| `pid <pid> · up <duration>`, or `pid <pid> · just started` when the duration is undefined | `server.pid`, `server.uptimeSeconds` | the row is omitted without a pid |
-| `cpu <x.x>% · <rss> rss · <heap> heap` | `process.cpuPercentAvg` (already a percentage), `process.rssBytes`, `process.heapBytes` | that part is omitted |
-| `up <bytes>[ (<rate>/s)] · down <bytes>[ (<rate>/s)]` | `traffic.upBytes`, `upRate`, `downBytes`, `downRate` | that part is omitted; a rate is appended only when > 0 |
+| `<host> — <role>` | `self.server.hostname`, `self.server.role` | `?` |
+| `pid <pid> · up <duration>`, or `pid <pid> · just started` when the duration is undefined | `self.server.pid`, `self.server.uptimeSeconds` | the row is omitted without a pid; the second part without an uptime |
+| `cpu <x.x>% · <rss> rss · <heap> heap` | `self.process.cpuPercentAvg` (already a percentage), `self.process.rssBytes`, `self.process.heapBytes` | that part is omitted |
+| `up <bytes>[ (<rate>/s)] · down <bytes>[ (<rate>/s)]` | `self.traffic.upBytes`, `upRate`, `downBytes`, `downRate` | that part is omitted; a rate is appended only when > 0 |
 
 Then per domain body of that reply, each preceded by a separator:
 
 | row | indent | shown when | from |
 |---|---|---|---|
-| `<name>`, `<name> — read-only`, `<name> — versioned` or `<name> — read-only, versioned` | 0 | always | the body's name, `readOnly`, `versioning` |
-| the mount point, ellipsised | 1 | some frontend reports one | the first `frontends[].mountPoint` |
+| `<name>`, `<name> — read-only`, `<name> — versioned` or `<name> — read-only, versioned` | 0 | always | the body's `name`, `settings.readOnly`, `settings.versioning` |
+| the mount point, ellipsised | 1 | some frontend reports one | the first `frontends[].mount` |
 | `cache <n> chunks · <bytes>[ of <max>][ · <pinned> pinned]` | 1 | chunks and bytes known | `cache.chunks`, `.bytes`, `.maxCache` (> 0), `.pinnedBytes` (> 0) |
 | `queue <n> files · <bytes> owed` | 1 | either known | `queues.pendingFiles`, `queues.bytesOwed` |
 | `read <bytes> · written <bytes>` | 1 | either known | the sums over `frontends[]` of `bytesRead`, `bytesWritten` |
-| `wal <n> pending · <n> stuck` | 1 | either > 0 (each part only when > 0) | `wal.pending`, `wal.stuck` |
+| `wal <n> pending · <n> stuck` | 1 | either > 0 (each part only when > 0) | pending is the sum of `wal.intent`, `wal.prepared` and `wal.executed`; `wal.stuck` |
 | one row per backend | 1 | always | `backends[]` |
 
 Backend row, parts joined with ` · `:
 
-- `<name> (<role>) — <health>`: health is `reachable`, `reachable, <n> ms` (`latencyMs`, rounded),
-  `unreachable`, or `unreachable: <error>`. Only the error is ellipsised, so the figures after it
-  survive;
+- `<name> (<role>) — <health>`, from the backend's `reach`: health is `reachable`,
+  `reachable, <n> ms` (`reach.latencyMs`, rounded), `unreachable`, or `unreachable: <error>`
+  (`reach.error`, when not empty). Only the error is ellipsised, so the figures after it survive.
+  With no `reach`, the row is `<name> (<role>)`;
 - the journal: `journal <n> entries`, or `journal <n> entries, <b> behind` when behind > 0
   (`journal.entries`, `journal.behind`); `journal counting` when the reply says `counting`; absent
   otherwise;
-- corruption, from `corrupted`: `corruption check failed` when it has an `error`; `not checked`
-  when `checked` is not true; `<n> corrupt — run tsync data-integrity` when checked and
-  `chunks` > 0; nothing when checked and clean.
+- corruption, from `corrupted`: `not checked` when `checked` is not true;
+  `<n> corrupt — run tsync data-integrity` when checked and `chunks` > 0; nothing when checked and
+  clean, or when the backend carries no `corrupted`.
 
-Worked example (written for this text, not captured from an implementation):
+Worked example:
 
 ```
         box — owner
         pid 102259 · up 12h 5m
-        cpu 1.0% · 739.8 MB rss · 84.3 MB heap
-        up 0 B · down 11.6 GB (1.5 MB/s)
+        cpu 1.0% · 739.8 MiB rss · 84.3 MiB heap
+        up 0 B · down 11.6 GiB (1.5 MiB/s)
         ---
         Media — read-only, versioned
             /home/u/tsync/Media
-            cache 1216 chunks · 10.0 GB of 10.0 GB · 2.0 GB pinned
+            cache 1216 chunks · 10.0 GiB of 10.0 GiB · 2.0 GiB pinned
             queue 0 files · 0 B owed
-            read 515.4 MB · written 0 B
+            read 515.4 MiB · written 5 B
+            wal 3 pending · 1 stuck
             http-proxy (main) — reachable, 11 ms · journal 402 entries
-            cold (replica) — unreachable: connection refused · journal 88 entries, 12 behind
+            cold (replica) — unreachable: connection refused · journal 88 entries, 12 behind · 3 corrupt — run tsync data-integrity
+            far (backfill) — unreachable · not checked
 ```
 
 ## 7. JSON form
@@ -331,7 +338,7 @@ For a client that cannot evaluate the model. The menu:
       "action": { "openFolder": "photos" } },
     { "label": "out.raw", "enabled": true, "indent": 1,
       "action": { "reveal": { "domain": "photos", "rel": "out.raw" } } },
-    { "label": "1.1 MB", "enabled": true, "indent": 2, "action": {} },
+    { "label": "1.1 MiB", "enabled": true, "indent": 2, "action": {} },
     { "separator": true },
     { "label": "Stats", "enabled": true, "indent": 0, "action": { "stats": true }, "submenu": true },
     { "label": "Hold changes", "enabled": true, "indent": 0,
@@ -361,7 +368,7 @@ someone agrees to; and both functions are total.
 **Cases the suite MUST include:**
 
 - two domains, one busy: file rows sorted; traffic and rate summed over both domains;
-- one domain reporting 5 MB sent at 1 MB/s and another 3 MB at 2 MB/s with pending bytes in each:
+- one domain reporting 5 MiB sent at 1 MiB/s and another 3 MiB at 2 MiB/s with pending bytes in each:
   the line reads the sum sent, and the time left is total pending over the summed rate;
 - nothing answering: no traffic or rate line, the switch disabled;
 - one domain paused and one unreachable: the switch checked, the paused icon, the unreachable
