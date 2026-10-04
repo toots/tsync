@@ -8,7 +8,7 @@ This file owns:
 - the **IPC contract**: sockets, envelopes, bulk actions and the liveness probe, the supervisor
   socket, advisory side channels;
 - the **CLI**: every command, its access to a domain, its output and exit status;
-- status collection, logging, the shared menu model and the config wizard.
+- status collection, logging and the config wizard.
 
 It does not own: the line-JSON framing and subscription streams ([01 §IPC framing](01-core.md)),
 the request handler and its actions ([08](08-frontends.md)), what an owner owns
@@ -475,7 +475,7 @@ Deadlines on both sides of every request are
 designates:
 
 - **Bulk actions**, bounded by progress rather than by a total deadline: `ensure_cached`,
-  `fetch_range`, `write` with `await`, `evict` and `restore` of a folder, `sync`, `prune`
+  `fetch_range`, `write` with `await`, `restore`, `evict` of a folder, `sync`, `prune`
   ([08 §3.3](08-frontends.md) marks them **B**).
 - **The liveness probe** that [failure-model.md §8.2](algorithms/failure-model.md#82-requests-between-processes)
   requires: `ping`, answered `{"ok":true}` from memory by every server (owner, store
@@ -721,26 +721,12 @@ owner, takes ownership and writes or removes the pause flag durably itself (§2.
 
 ### 5.8 Menu model (tray and macOS menu bar)
 
-A pure function from per-domain `status` replies to a menu, shared by the Linux tray and the macOS
-menu (served as JSON by the File Provider process's `menu` action):
-
-- **Summary**: no domains → "No domains configured"; every domain unreachable → "Daemon not
-  running"; nothing moving → "Paused" if all are paused, else "Idle"; otherwise
-  "Uploading N · Downloading M" plus " · paused" when any domain is paused.
-- **Icon**: all unreachable or no domains → error; all paused → paused; any transferring → sync;
-  else idle.
-- **Rows**: per domain a row opening its folder; up to 5 upload rows (the file's name, indented,
-  not actionable) then "… and N more"; download rows revealing the file ("name — P%" from `bytes`
-  of `size`, indented); a traffic line "X sent · Y to go" when non-zero (X: every domain's
-  `traffic.upBytes`, Y: every domain's `pendingBytes`); a rate line "R/s · 2h 13m left" while
-  uploading (R: every domain's `traffic.upRate`, the time Y / R; two largest non-zero units; none
-  under a minute); a Stats submenu filled on
-  open (placeholder "Reading…", never empty); "Hold changes", checked when all domains are paused,
-  disabled when all are unreachable, whose action pauses or resumes every domain; on the Linux tray,
-  quit, labelled "Quit tsync tray", which leaves the daemon running. The macOS menu has no quit row:
-  the app carrying it also relays change signals ([file-provider §2](frontends/file-provider.md#2-processes-and-ownership)).
-- **JSON**: `{icon?, tooltip, entries:[{separator} | {label, enabled, indent, checked?, submenu?,
-  action: openFolder | reveal{domain, rel} | setPaused | stats | quit}]}`.
+The status menu is one pure function from per-domain `status` replies to an icon, a tooltip and
+rows, shared by the Linux tray and the macOS menu so that the two cannot drift. It is specified in
+[frontends/menu-model.md](frontends/menu-model.md), with the form the macOS menu receives
+([§7](frontends/menu-model.md#7-json-form)). The Linux tray is
+[frontends/linux-tray.md](frontends/linux-tray.md); the macOS menu is
+[file-provider §10](frontends/file-provider.md#10-menu-bar).
 
 ### 5.9 Config wizard (`tsync config --edit`)
 
@@ -900,8 +886,7 @@ An implementation MUST exhibit:
   `{reachable:false, socketPath, error}` promptly; over a large journal, repeated reports within the
   window list the store once; a held-down member is not probed and is reported as held; totals never
   delay a reply; a domain in `hold` reports its reason and mark age.
-- **Menu.** Rendering is a pure function of the status replies (icons, tooltip, rows, "… and N
-  more", checkbox state and enablement).
+- **Menu.** [frontends/menu-model.md §8](frontends/menu-model.md#8-conformance).
 - **CLI parsing.** Shell completion offers configured domains and `DOMAIN:/` items that exist,
   folders ending in `/`, and every offer is accepted by the command; `ls` shows availability, name
   and size per file and folders with a trailing `/`; a path command finds its domain's owner socket; a path under no domain is refused with exit 1 by `ls`,

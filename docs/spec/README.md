@@ -156,11 +156,21 @@ nothing depends on them except the CLI and the request handler.
 
 | Backend driver | | Frontend | |
 |---|---|---|---|
-| [local](backends/local.md) | a directory or mounted NAS | [fuse](frontends/fuse.md) | Linux FUSE mount, and the Linux desktop integration |
+| [local](backends/local.md) | a directory or mounted NAS | [fuse](frontends/fuse.md) | Linux FUSE mount |
 | [s3](backends/s3.md) | AWS S3 and S3-compatible services | [file-provider](frontends/file-provider.md) | macOS File Provider: app, extension and owner |
 | [gcs](backends/gcs.md) | Google Cloud Storage | [http-proxy](frontends/http-proxy.md) | the store server, share links and status page |
 | [object-store-common](backends/object-store-common.md) | what s3 and gcs share, and the bucket-side functions | [android](frontends/android.md), [android-app](frontends/android-app.md) | the owner embedded in the Android app; the app itself |
 | [http-proxy](backends/http-proxy.md) | another tsync machine; owns the wire protocol | | |
+
+Clients of the owner that are not frontends:
+
+| Spec | Subject |
+|---|---|
+| [frontends/linux-desktop](frontends/linux-desktop.md) | The Linux desktop clients: where a domain is mounted, mount discovery and its shared library, the requests they send, packages, autostart, icons. |
+| [frontends/dolphin](frontends/dolphin.md) | The Dolphin context-menu plugin: share links and offline availability. |
+| [frontends/linux-tray](frontends/linux-tray.md) | The tray: StatusNotifierItem, dbusmenu, polling, the hold switch. |
+| [frontends/menu-model](frontends/menu-model.md) | The status menu as a pure function, shared by the Linux tray and the macOS menu, and its JSON form. |
+| [frontends/linux-desktop-known-complexity](frontends/linux-desktop-known-complexity.md) | The difficulties the desktop clients are known to hold, each a conformance check. |
 
 ### 4.4 Data models and algorithms
 

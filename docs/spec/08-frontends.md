@@ -7,7 +7,7 @@ to all frontends. Where frontends run and how processes are arranged is
 
 | Frontend | Spec | OS surface |
 |---|---|---|
-| `fuse` | [frontends/fuse.md](frontends/fuse.md) | Linux FUSE mount, plus the Linux desktop integration (mount discovery, Dolphin plugin, tray, packaging) |
+| `fuse` | [frontends/fuse.md](frontends/fuse.md) | Linux FUSE mount. Its desktop clients (mount discovery, Dolphin plugin, tray) are [frontends/linux-desktop.md](frontends/linux-desktop.md) |
 | `file_provider` | [frontends/file-provider.md](frontends/file-provider.md) | macOS File Provider: app, sandboxed extension, daemon side |
 | `http-proxy` | [frontends/http-proxy.md](frontends/http-proxy.md) | HTTP(S) store server for other tsync clients, share links, status page; wire in [backends/http-proxy.md](backends/http-proxy.md) |
 | `android` | [frontends/android.md](frontends/android.md) | The owner embedded in a host process on Android; the app is [frontends/android-app.md](frontends/android-app.md) |
@@ -243,7 +243,7 @@ watched with the liveness probe ([07 §4.3](07-daemon-cli.md#43-deadlines-bulk-a
 | `share_revoke` | `arg`: a token or a link | `{revoked}`: whether a share of this domain held it | P |
 | `share_clear_cache` | — | `{deleted, bytes}`: cached share artifacts removed, links unchanged | P |
 | `evict` | `ref`\|`rel` | `{evicted, failed}` | B for a folder |
-| `restore` | `ref`\|`rel`, `keep?` (seconds) | `{restored, failed}` | B for a folder |
+| `restore` | `ref`\|`rel`, `keep?` (seconds) | `{restored, failed}` | B (it fetches a whole file's bytes, or walks a subtree) |
 | `full_resync` | — | `{}` after stamping a new generation and calling `reannounce` | |
 | `sync` | `arg`: `"full"` or `""` | the resync result ([05 §4.7](05-ops-config.md)) | B, P |
 | `trash_restore` | `path`: a trashed folder as its trash entry records it | `{outcome:"restored", announced}`, `{outcome:"not_in_trash"}` or `{outcome:"name_taken"}` | B, P |
