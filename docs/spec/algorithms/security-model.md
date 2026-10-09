@@ -306,4 +306,4 @@ An implementation MUST exhibit:
 - The config is never observable with a mode wider than 0600; unknown fields are masked.
 - A request body larger than its limit is refused before it is read; a connection that stops sending is closed after the idle timeout.
 - `/stats` signed with one domain's secret mentions no other domain.
-- A folder named `</script><script>alert(1)</script>` shown on a browse page renders as text; a shared HTML file served inline runs no script on the listener origin.
+- A folder or a shared file named `</script><script>alert(1)</script>` shown on a share page renders as text; a shared HTML file served inline runs no script on the listener origin.

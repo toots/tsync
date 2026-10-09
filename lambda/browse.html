@@ -117,6 +117,13 @@
       li a.dl:hover {
         background: #8883;
       }
+      main.file {
+        max-width: none;
+        padding-top: 24px;
+      }
+      main.file .pv-body {
+        padding: 0;
+      }
       .empty {
         color: #888;
         padding: 24px 8px;
@@ -219,6 +226,7 @@
     <main>
       <div class="crumbs" id="crumbs"></div>
       <ul id="list"></ul>
+      <div class="pv-body" id="view" hidden></div>
     </main>
     <footer>
       Shared with
@@ -279,7 +287,9 @@
       // bookmarkable.
       let path = [];
       const fileUrl = (name, q) =>
-        B + "/f?path=" + encodeURIComponent([...path, name].join("/")) + q;
+        DATA.file
+          ? B + "/f?" + q.slice(1)
+          : B + "/f?path=" + encodeURIComponent([...path, name].join("/")) + q;
 
       const pathToHash = (p) => "#/" + p.map(encodeURIComponent).join("/");
       const pathFromHash = () => {
@@ -396,13 +406,16 @@
         });
       }
 
-      async function preview(f, k) {
+      function preview(f, k) {
         if (k === "audio") return openPlayer(f);
         document.getElementById("pvt").textContent = f.name;
         document.getElementById("pvdl").href = fileUrl(f.name, "&dl=1");
-        const body = document.getElementById("pvb");
-        body.innerHTML = "Loading…";
         if (!pv.open) pv.showModal();
+        return show(document.getElementById("pvb"), f, k);
+      }
+
+      async function show(body, f, k) {
+        body.innerHTML = "Loading…";
         let url;
         try {
           url = await signedUrl(f.name);
@@ -437,8 +450,24 @@
         path = pathFromHash();
         render();
       }
-      window.addEventListener("hashchange", sync);
-      sync();
+      // A file share has no folder to list: the page is the viewer, and the
+      // header button downloads the file.
+      function showFile() {
+        const dl = document.getElementById("dlall");
+        dl.textContent = "Download";
+        document.getElementById("crumbs").hidden = true;
+        document.getElementById("list").hidden = true;
+        document.querySelector("main").className = "file";
+        const view = document.getElementById("view");
+        view.hidden = false;
+        show(view, { name: DATA.title }, kind(DATA.title));
+      }
+
+      if (DATA.file) showFile();
+      else {
+        window.addEventListener("hashchange", sync);
+        sync();
+      }
     </script>
   </body>
 </html>

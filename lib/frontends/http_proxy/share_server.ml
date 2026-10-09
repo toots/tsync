@@ -123,6 +123,12 @@ let preview_kind m =
     Some "text"
   else None
 
+(* §A9.3: what a browser plays or displays by itself. *)
+let media name =
+  match Option.bind (mime name) preview_kind with
+    | Some ("image" | "audio" | "video" | "pdf") -> true
+    | _ -> false
+
 let html_escape s =
   let b = Buffer.create (String.length s) in
   String.iter
@@ -184,8 +190,9 @@ let html_headers =
     ("referrer-policy", "no-referrer");
   ]
 
-let browse_page ~token share =
-  let title = stem share.filename in
+let share_page ~token share =
+  let file = match share.target with `File _ -> true | `Dir _ -> false in
+  let title = if file then share.filename else stem share.filename in
   let kinds =
     List.sort_uniq compare
       (List.filter_map
@@ -199,11 +206,14 @@ let browse_page ~token share =
         ("__PREVIEW_KINDS__", script_json (`Assoc kinds));
         ("__PLAYER_JS__", Share_assets.player);
         ("__OG_TITLE__", html_escape title);
-        ("__OG_DESC__", html_escape "Shared folder · tsync");
+        ( "__OG_DESC__",
+          html_escape
+            (if file then "Shared file · tsync" else "Shared folder · tsync") );
         ( "__SHARE_DATA__",
           script_json
             (`Assoc
-               [("base", `String ("/s/" ^ token)); ("title", `String title)]) );
+               ([("base", `String ("/s/" ^ token)); ("title", `String title)]
+               @ if file then [("file", `Bool true)] else [])) );
       ]
   in
   { Server.status = 200; headers = html_headers; body = String page }
@@ -320,6 +330,12 @@ let manifest_at t key =
           | None -> refuse 404 "not found")
     | None -> refuse 404 "not found"
 
+(* §A9.3: read before any file-share answer, the page included. *)
+let shared_file t key =
+  let m = manifest_at t key in
+  if m.link <> None then refuse 400 "cannot serve a symlink directly";
+  m
+
 (* security §6.3: a shared folder in the trash is not served. *)
 let live_folder t id =
   if not (Folder_id.is_root id) then (
@@ -377,6 +393,17 @@ let pct_path path =
            | c -> Printf.sprintf "%%%02X" (Char.code c))
        (List.of_seq (String.to_seq path)))
 
+let file_json ~url ~name (m : Manifest.t) =
+  json
+    (`Assoc
+       [
+         ("url", `String url);
+         ("name", `String name);
+         ( "contentType",
+           match mime name with Some m -> `String m | None -> `Null );
+         ("size", `Int m.size);
+       ])
+
 let entry_name (e : Tree.entry) =
   match e.body with Dir m -> m.Folder.name | File m -> m.Manifest.name
 
@@ -429,12 +456,20 @@ let handle t ~max_zip_members (r : Server.request) ~token ~sub params =
     let share = load t token in
     let param k = List.assoc_opt k params in
     match (share.target, sub) with
+      | `File key, "" when media share.filename ->
+          ignore (shared_file t key);
+          share_page ~token share
       | `File key, ("" | "download") ->
           file_response t r ~name:share.filename ~inline:false
-            (manifest_at t key)
+            (shared_file t key)
+      | `File key, "f" ->
+          let m = shared_file t key in
+          if param "json" = Some "1" then
+            file_json ~url:("/s/" ^ token ^ "/f") ~name:share.filename m
+          else file_response t r ~name:share.filename ~inline:true m
       | `Dir id, "" ->
           live_folder t id;
-          browse_page ~token share
+          share_page ~token share
       | `Dir id, "download" ->
           live_folder t id;
           zip_response t ~max_members:max_zip_members id share.filename
@@ -453,20 +488,11 @@ let handle t ~max_zip_members (r : Server.request) ~token ~sub params =
             | `File m ->
                 let name = List.nth parts (List.length parts - 1) in
                 if param "json" = Some "1" then
-                  json
-                    (`Assoc
-                       [
-                         ( "url",
-                           `String
-                             ("/s/" ^ token ^ "/f?path="
-                             ^ pct_path (String.concat "/" parts)) );
-                         ("name", `String name);
-                         ( "contentType",
-                           match mime name with
-                             | Some m -> `String m
-                             | None -> `Null );
-                         ("size", `Int m.size);
-                       ])
+                  file_json
+                    ~url:
+                      ("/s/" ^ token ^ "/f?path="
+                      ^ pct_path (String.concat "/" parts))
+                    ~name m
                 else file_response t r ~name ~inline:(param "dl" <> Some "1") m
             | _ -> refuse 404 "not found")
       | _ -> refuse 404 "not found"

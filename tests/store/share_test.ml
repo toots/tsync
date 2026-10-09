@@ -29,6 +29,20 @@ let () =
   p "== content-disposition (security §13)";
   p "%s" (S.disposition "attachment" "report.pdf");
   p "%s" (S.disposition "inline" "a\"b\\c ✓\n.txt");
+  p "== files that open the viewer page (§A9.3)";
+  List.iter
+    (fun name -> p "%-12s %b" name (S.media name))
+    [
+      "a.MP3";
+      "a.mp4";
+      "a.jpg";
+      "a.pdf";
+      "a.txt";
+      "a.html";
+      "a.json";
+      "a.bin";
+      "mp3";
+    ];
   p "== single-pass templating";
   p "%s" (S.fill "<h1>__A__</h1> __B__" [("__A__", "__B__"); ("__B__", "b")]);
   p "== JSON inside a script";

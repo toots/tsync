@@ -208,6 +208,34 @@ def test_single_file_share_downloads(s3):
     assert body == b"hi"
 
 
+def test_media_file_share_opens_the_viewer(s3):
+    h = load_handler()
+    name = "</script>.mp3"
+    key = put_file(s3, "r", name, [("mmmm-8888", b"audiodata")])
+    tok = file_share(s3, "a7", key, name)
+    page = h.handler(event(tok), None)
+    assert page["statusCode"] == 200
+    assert "text/html" in page["headers"]["Content-Type"]
+    assert '"file": true' in page["body"]
+    assert "Shared file" in page["body"]
+    assert "</script>.mp3" not in page["body"]
+    doc = json.loads(h.handler(event(tok, "f", {"json": "1"}), None)["body"])
+    assert doc["contentType"] == "audio/mpeg" and doc["size"] == 9
+    assert "inline" in doc["url"]
+    assert fetch_url(s3, doc["url"]) == b"audiodata"
+    body, _ = follow(s3, h.handler(event(tok, "f"), None))
+    assert body == b"audiodata"
+    resp = h.handler(event(tok, "download"), None)
+    assert "attachment" in resp["headers"]["Location"]
+    assert follow(s3, resp)[0] == b"audiodata"
+
+
+def test_media_file_share_without_its_file(s3):
+    h = load_handler()
+    tok = file_share(s3, "a8", DOMAIN_PREFIX + "r/gone", "gone.mp4")
+    assert h.handler(event(tok), None)["statusCode"] == 404
+
+
 def test_max_bytes_file(s3):
     h = load_handler(max_bytes=100)
     key = put_file(s3, "r", "big.bin", [("llll-7777", b"x" * 500)], size=500)
@@ -235,6 +263,7 @@ def test_browse_page(s3):
     assert resp["statusCode"] == 200
     assert "text/html" in resp["headers"]["Content-Type"]
     assert "alb" in resp["body"]
+    assert '"file": true' not in resp["body"]
     assert "cover.jpg" not in resp["body"]  # only fetched via /list
 
 

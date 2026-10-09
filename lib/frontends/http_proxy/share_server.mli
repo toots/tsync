@@ -29,5 +29,6 @@ val parse_range :
   int -> string option -> [ `Whole | `Unsatisfiable | `Range of int * int ]
 
 val disposition : string -> string -> string
+val media : string -> bool
 val fill : string -> (string * string) list -> string
 val script_json : Yojson.Safe.t -> string
