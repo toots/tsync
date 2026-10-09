@@ -248,6 +248,21 @@ let until_uploaded name =
     Thread.delay 0.05
   done
 
+(* A folder always reads as uploaded and its publication retries on its own
+   backoff, so the peer is asked until it lists it. *)
+let until_peer_sees name =
+  let deadline = Unix.gettimeofday () +. 20. in
+  let rec ask () =
+    let names = ref [] in
+    peer_does (fun (module E) ->
+        names := List.map (fun (e : E.entry) -> e.name) (E.list_children ""));
+    if List.mem name !names || Unix.gettimeofday () > deadline then !names
+    else (
+      Thread.delay 0.05;
+      ask ())
+  in
+  ask ()
+
 let fresh_window = 1.
 let wait_stale () = Thread.delay (fresh_window +. 0.1)
 
@@ -415,11 +430,8 @@ let () =
   until_uploaded "n2.txt";
   show_notices "notices";
   let l = list ~extra:[s "pull" "now"] "root, uploads published" "root" in
-  peer_does (fun _ -> ());
-  peer_does (fun (module E) ->
-      p "  %-34s [%s]" "the peer sees"
-        (String.concat ", "
-           (List.map (fun (e : E.entry) -> e.name) (E.list_children ""))));
+  p "  %-34s [%s]" "the peer sees"
+    (String.concat ", " (until_peer_sees "offline"));
 
   p "== a pin holds the views that lead to it";
   let deep = ref_of (list "sub" sub) "deep.txt" in
