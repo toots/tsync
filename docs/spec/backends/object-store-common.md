@@ -138,7 +138,7 @@ A function deployed beside a bucket MAY serve the bucket's share links; its URL 
 - It serves a manifest only if it is valid ([data-model/backend §2.18](../data-model/backend.md#218-share)), and its `key` or `folderId` lies within the manifest's `domain`.
 - It resolves every name inside a folder share through that domain's folder namespaces, applying the anchor rule ([data-model/backend §6.3](../data-model/backend.md#63-settling-the-anchor-decides)), and stops serving a folder share once the folder is trashed.
 - Pages are built by single-pass, escaped templating.
-- Its routes and its share page are those of [http-proxy §A9.3](../frontends/http-proxy.md#a93-routes) and [§A9.6](../frontends/http-proxy.md#a96-share-page), without the `/s` prefix: a shared media file opens the page in file mode.
+- Its routes and its share page are those of [http-proxy §A9.3](../frontends/http-proxy.md#a93-routes) and [§A9.6](../frontends/http-proxy.md#a96-share-page), without the `/s` prefix: a shared media file opens the page in file mode, unless it is above the share ceiling, which is refused before any page.
 - A file or folder above the deployment's share ceiling ([11 §7](../11-infrastructure.md#7-share-function)) is refused as too large.
 - Downloads are redirects to presigned URLs that expire within the share presign TTL and never after the share.
 - A token-keyed cached archive is rebuilt once older than `share_archive_max_age` ([data-model/backend §2.19](../data-model/backend.md#219-share-artifact-cache)).

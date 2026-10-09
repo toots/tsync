@@ -230,6 +230,30 @@ def test_media_file_share_opens_the_viewer(s3):
     assert follow(s3, resp)[0] == b"audiodata"
 
 
+def test_media_file_share_too_large_has_no_page(s3):
+    h = load_handler(max_bytes=100)
+    key = put_file(s3, "r", "big.mp4", [("nnnn-9999", b"x" * 500)], size=500)
+    tok = file_share(s3, "a9", key, "big.mp4")
+    assert h.handler(event(tok), None)["statusCode"] == 413
+
+
+def test_pdf_and_text_file_shares_download(s3):
+    h = load_handler()
+    for sid, name in (("b1", "doc.pdf"), ("b2", "notes.txt")):
+        key = put_file(s3, "r", name, [("oooo-" + sid, b"bytes")])
+        resp = h.handler(event(file_share(s3, sid, key, name)), None)
+        assert "attachment" in resp["headers"]["Location"]
+
+
+def test_unknown_share_type(s3):
+    h = load_handler()
+    tok = share_manifest(s3, "b3", {
+        "v": 1, "domain": DOMAIN, "type": "link", "filename": "x.mp3",
+        "expires": 9_999_999_999,
+    })
+    assert h.handler(event(tok), None)["statusCode"] == 400
+
+
 def test_media_file_share_without_its_file(s3):
     h = load_handler()
     tok = file_share(s3, "a8", DOMAIN_PREFIX + "r/gone", "gone.mp4")

@@ -126,7 +126,7 @@ let preview_kind m =
 (* §A9.3: what a browser plays or displays by itself. *)
 let media name =
   match Option.bind (mime name) preview_kind with
-    | Some ("image" | "audio" | "video" | "pdf") -> true
+    | Some ("image" | "audio" | "video") -> true
     | _ -> false
 
 let html_escape s =
@@ -288,8 +288,12 @@ let stream t (m : Manifest.t) ~off ~len feed =
   in
   go 0
 
-let file_response t (r : Server.request) ~name ~inline (m : Manifest.t) =
+let servable (m : Manifest.t) =
   if m.link <> None then refuse 400 "cannot serve a symlink directly";
+  m
+
+let file_response t (r : Server.request) ~name ~inline (m : Manifest.t) =
+  let m = servable m in
   let size = m.size in
   let base =
     [
@@ -329,12 +333,6 @@ let manifest_at t key =
           | Some m -> m
           | None -> refuse 404 "not found")
     | None -> refuse 404 "not found"
-
-(* §A9.3: read before any file-share answer, the page included. *)
-let shared_file t key =
-  let m = manifest_at t key in
-  if m.link <> None then refuse 400 "cannot serve a symlink directly";
-  m
 
 (* security §6.3: a shared folder in the trash is not served. *)
 let live_folder t id =
@@ -457,13 +455,13 @@ let handle t ~max_zip_members (r : Server.request) ~token ~sub params =
     let param k = List.assoc_opt k params in
     match (share.target, sub) with
       | `File key, "" when media share.filename ->
-          ignore (shared_file t key);
+          ignore (servable (manifest_at t key));
           share_page ~token share
       | `File key, ("" | "download") ->
           file_response t r ~name:share.filename ~inline:false
-            (shared_file t key)
+            (manifest_at t key)
       | `File key, "f" ->
-          let m = shared_file t key in
+          let m = servable (manifest_at t key) in
           if param "json" = Some "1" then
             file_json ~url:("/s/" ^ token ^ "/f") ~name:share.filename m
           else file_response t r ~name:share.filename ~inline:true m

@@ -193,22 +193,20 @@ def file_manifest(key):
     return m
 
 
+def check_size(m):
+    if m.size > MAX_BYTES or m.count > 10000:
+        raise too_large()
+
+
 def assemble(m, chunk_prefix, cache_key):
     """Write a file's bytes to cache_key by server-side chunk assembly (no /tmp).
     Applies the size / count guards, then hands the ordered chunk keys to the
     store, which stitches them (S3 multipart-copy / GCS compose)."""
-    if m.size > MAX_BYTES:
-        raise too_large()
+    check_size(m)
     if m.count == 0:
         store.put_bytes(cache_key, b"")
         return
-    if m.count > 10000:
-        raise too_large()
     store.assemble([chunk_key(chunk_prefix, k) for k in m.keys()], cache_key)
-
-
-def build_file(file_key, chunk_prefix, cache_key):
-    assemble(file_manifest(file_key), chunk_prefix, cache_key)
 
 
 def mtime_tuple(mtime):
@@ -314,7 +312,7 @@ def is_media(name):
     """Whether a shared file opens the viewer page rather than downloading:
     what a browser plays or displays by itself."""
     mime = mime_type(name)
-    return mime is not None and preview_kind(mime) in ("image", "audio", "video", "pdf")
+    return mime is not None and preview_kind(mime) in ("image", "audio", "video")
 
 
 # ext -> preview kind, injected into browse.html so the front end has no
@@ -369,14 +367,16 @@ def load_share(token):
     return share
 
 
-def artifact(token, share):
+def artifact(token, share, m=None):
     # The whole artifact (a file's bytes, or a directory zipped) is cached under
     # CACHE_PREFIX and served presigned. For a dir this freezes the zip at
     # first-download time; fine given the short share TTL.
     cache_key = CACHE_PREFIX + token + ".data"
     if not object_exists(cache_key):
         if share["type"] == "file":
-            build_file(share["key"], chunk_prefix(share), cache_key)
+            assemble(
+                m or file_manifest(share["key"]), chunk_prefix(share), cache_key
+            )
         elif share["type"] == "dir":
             build_dir_zip(share, cache_key)
         else:
@@ -403,7 +403,7 @@ def file_answer(cache_key, name, size, as_download, want_json):
 def serve_shared_file(token, share, want_json):
     m = file_manifest(share["key"])
     return file_answer(
-        artifact(token, share), share["filename"], m.size,
+        artifact(token, share, m), share["filename"], m.size,
         as_download=False, want_json=want_json,
     )
 
@@ -463,17 +463,19 @@ def handler(event, context):
             raise ShareError(400, "missing token")
         share = load_share(token)
         q = event.get("queryStringParameters") or {}
-        is_dir = share.get("type") == "dir"
+        if share.get("type") not in ("file", "dir"):
+            raise ShareError(400, "unknown share type")
+        is_dir = share["type"] == "dir"
         if sub == "":
             if is_dir:
                 return html_response(render_browse(share, token))
             if is_media(share["filename"]):
-                file_manifest(share["key"])
+                check_size(file_manifest(share["key"]))
                 return html_response(render_browse(share, token))
             return download_artifact(token, share)
         if sub == "download":
             return download_artifact(token, share)
-        if share.get("type") == "file" and sub == "f":
+        if not is_dir and sub == "f":
             return serve_shared_file(token, share, want_json=q.get("json") == "1")
         if is_dir and sub == "list":
             return list_response(share, q.get("path", ""))
@@ -515,7 +517,7 @@ def script_json(obj):
 
 def render_browse(share, token):
     title = share.get("filename", "share")
-    is_file = share.get("type") == "file"
+    is_file = share["type"] == "file"
     if not is_file and title.endswith(".zip"):
         title = title[:-4]
     data = {"base": "/" + token, "title": title}
