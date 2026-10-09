@@ -405,4 +405,4 @@ let () =
           | Error (Unsupported r) -> "refused: " ^ r
           | Error Busy -> "busy"
           | Ok _ -> "ran"));
-  Fs.rm_rf root
+  Test_support.remove_root root

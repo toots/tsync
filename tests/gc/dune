@@ -16,7 +16,7 @@
 (executable
  (name collector_test)
  (modules collector_test)
- (libraries contract tsync_core tsync_store tsync_gc unix))
+ (libraries contract test_support tsync_core tsync_store tsync_gc unix))
 
 (executable
  (name lock_holder)
