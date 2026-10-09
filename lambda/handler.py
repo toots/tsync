@@ -5,7 +5,8 @@ Serves shared files/folders from the tsync S3 chunk store. A request path is
 (written by ``tsync share``); the full S3 key is ``SHARES_PREFIX + token``. Routes:
 
 - ``/{token}``            dir share -> HTML file browser; media file share -> the
-                          same page as a viewer; any other file share -> download
+                          same page as a viewer for a request accepting
+                          ``text/html``; anything else -> download
 - ``/{token}/download``   assemble the whole artifact (file, or dir as a zip)
 - ``/{token}/f``          (file) 302 to a presigned inline GET (``?json=1``
                           returns the URL as JSON for the viewer)
@@ -384,9 +385,9 @@ def artifact(token, share, m=None):
     return cache_key
 
 
-def download_artifact(token, share):
+def download_artifact(token, share, m=None):
     return redirect(
-        store.signed_url(artifact(token, share), share["filename"], inline=False)
+        store.signed_url(artifact(token, share, m), share["filename"], inline=False)
     )
 
 
@@ -454,6 +455,13 @@ def serve_file(share, path, as_download, want_json):
     return file_answer(cache_key, os.path.basename(rel), m.size, as_download, want_json)
 
 
+def wants_html(event):
+    """Whether the request is a browser navigation: `text/html` listed
+    explicitly, which `*/*` and a missing header are not."""
+    accept = (event.get("headers") or {}).get("accept", "")
+    return any(r.split(";")[0].strip().lower() == "text/html" for r in accept.split(","))
+
+
 def handler(event, context):
     try:
         parts = event.get("rawPath", "/").strip("/").split("/")
@@ -470,8 +478,14 @@ def handler(event, context):
             if is_dir:
                 return html_response(render_browse(share, token))
             if is_media(share["filename"]):
-                check_size(file_manifest(share["key"]))
-                return html_response(render_browse(share, token))
+                m = file_manifest(share["key"])
+                check_size(m)
+                if wants_html(event):
+                    resp = html_response(render_browse(share, token))
+                else:
+                    resp = download_artifact(token, share, m)
+                resp["headers"]["Vary"] = "Accept"
+                return resp
             return download_artifact(token, share)
         if sub == "download":
             return download_artifact(token, share)
@@ -500,7 +514,11 @@ def gcp_handler(request):
     to the event dict the core handler consumes, and its response dict back to a
     Flask (body, status, headers) tuple. The core [handler] stays AWS-shaped so
     the moto tests exercise it directly."""
-    event = {"rawPath": request.path, "queryStringParameters": dict(request.args)}
+    event = {
+        "rawPath": request.path,
+        "queryStringParameters": dict(request.args),
+        "headers": {k.lower(): v for k, v in request.headers.items()},
+    }
     resp = handler(event, None)
     return (resp.get("body", ""), resp["statusCode"], resp.get("headers", {}))
 

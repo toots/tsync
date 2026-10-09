@@ -85,7 +85,7 @@ let routes () =
       share "a2" "notes.txt" (Some "plain words");
       share "a3" "gone.mp4" None;
       let t = S.of_context (module C) in
-      let get token sub params =
+      let get ?accept token sub params =
         let r =
           S.handle t ~max_zip_members:10
             {
@@ -93,7 +93,8 @@ let routes () =
               target = "";
               path = "";
               query = "";
-              headers = [];
+              headers =
+                (match accept with Some a -> [("accept", a)] | None -> []);
               peer = "";
               body_length = `Length 0;
             }
@@ -101,9 +102,12 @@ let routes () =
         in
         let header k = Option.value ~default:"-" (List.assoc_opt k r.headers) in
         let body = body_text r in
-        p "%s /%s%s -> %d %s | %s | %s" token sub
+        p "%s /%s%s%s -> %d%s %s | %s | %s" token sub
           (if params = [] then "" else "?json=1")
-          r.status (header "content-type")
+          (match accept with Some a -> " [" ^ a ^ "]" | None -> "")
+          r.status
+          (if header "vary" = "accept" then " vary" else "")
+          (header "content-type")
           (header "content-disposition")
           (if String.starts_with ~prefix:"text/html" (header "content-type")
            then
@@ -113,6 +117,8 @@ let routes () =
            else String.trim body)
       in
       p "== routes of a file share (§A9.3)";
+      get ~accept:"text/html,application/xhtml+xml,*/*;q=0.8" "a1" "" [];
+      get ~accept:"image/*,*/*;q=0.8" "a1" "" [];
       get "a1" "" [];
       get "a1" "f" [];
       get "a1" "f" [("json", "1")];
@@ -120,7 +126,8 @@ let routes () =
       get "a1" "list" [];
       get "a2" "" [];
       get "a2" "f" [];
-      get "a3" "" []);
+      get ~accept:"text/html" "a2" "" [];
+      get ~accept:"text/html" "a3" "" []);
   Fs.rm_rf root
 
 let () =

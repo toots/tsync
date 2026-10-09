@@ -41,9 +41,13 @@ def load_handler(max_bytes=10 * 1024**3):
     return importlib.reload(handler)
 
 
-def event(token, sub="", query=None):
+BROWSER = "text/html,application/xhtml+xml,*/*;q=0.8"
+
+
+def event(token, sub="", query=None, accept=None):
     path = "/" + token + (("/" + sub) if sub else "")
-    return {"rawPath": path, "queryStringParameters": query or {}}
+    headers = {"accept": accept} if accept else {}
+    return {"rawPath": path, "queryStringParameters": query or {}, "headers": headers}
 
 
 def put(s3, key, body):
@@ -213,8 +217,14 @@ def test_media_file_share_opens_the_viewer(s3):
     name = "</script>.mp3"
     key = put_file(s3, "r", name, [("mmmm-8888", b"audiodata")])
     tok = file_share(s3, "a7", key, name)
-    page = h.handler(event(tok), None)
+    for accept in (None, "*/*", "image/*,*/*;q=0.8"):
+        resp = h.handler(event(tok, accept=accept), None)
+        assert "attachment" in resp["headers"]["Location"]
+        assert resp["headers"]["Vary"] == "Accept"
+        assert follow(s3, resp)[0] == b"audiodata"
+    page = h.handler(event(tok, accept=BROWSER), None)
     assert page["statusCode"] == 200
+    assert page["headers"]["Vary"] == "Accept"
     assert "text/html" in page["headers"]["Content-Type"]
     assert '"file": true' in page["body"]
     assert "Shared file" in page["body"]
@@ -234,13 +244,14 @@ def test_media_file_share_too_large_has_no_page(s3):
     h = load_handler(max_bytes=100)
     key = put_file(s3, "r", "big.mp4", [("nnnn-9999", b"x" * 500)], size=500)
     tok = file_share(s3, "a9", key, "big.mp4")
+    assert h.handler(event(tok, accept=BROWSER), None)["statusCode"] == 413
     assert h.handler(event(tok), None)["statusCode"] == 413
 
 
 def test_pdf_opens_the_viewer_and_text_downloads(s3):
     h = load_handler()
     key = put_file(s3, "r", "doc.pdf", [("oooo-b1", b"bytes")])
-    page = h.handler(event(file_share(s3, "b1", key, "doc.pdf")), None)
+    page = h.handler(event(file_share(s3, "b1", key, "doc.pdf"), accept=BROWSER), None)
     assert page["statusCode"] == 200 and '"file": true' in page["body"]
     key = put_file(s3, "r", "notes.txt", [("oooo-b2", b"bytes")])
     resp = h.handler(event(file_share(s3, "b2", key, "notes.txt")), None)
@@ -259,6 +270,7 @@ def test_unknown_share_type(s3):
 def test_media_file_share_without_its_file(s3):
     h = load_handler()
     tok = file_share(s3, "a8", DOMAIN_PREFIX + "r/gone", "gone.mp4")
+    assert h.handler(event(tok, accept=BROWSER), None)["statusCode"] == 404
     assert h.handler(event(tok), None)["statusCode"] == 404
 
 
