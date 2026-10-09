@@ -267,6 +267,7 @@ One template (shared with the cloud share function) serves a folder share and a 
 
 - **Folder mode** lists the folder through `list`, previews a file in place through `f?path=…&json=1`, and offers each file and the whole folder (`download`) for download.
 - **File mode** shows no listing: it asks `f?json=1` for the URL, displays the file in the page by its preview kind without starting playback, and offers `download`. The page carries nothing of the file but its name.
+- In either mode, a browser that reports no PDF viewer (`navigator.pdfViewerEnabled` false, as on phones) is shown a sentence saying so beside the download, never an empty frame.
 
 ### A9.7 ZIP of a folder
 
