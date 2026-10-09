@@ -326,6 +326,18 @@ let file_response t (r : Server.request) ~name ~inline (m : Manifest.t) =
         }
     | `Whole -> { Server.status = 200; headers = base; body = body 0 size }
 
+(* §A9.3: a navigation lists [text/html]; [*/*] and no header do not. *)
+let wants_html (r : Server.request) =
+  match Codec.header r.headers "accept" with
+    | None -> false
+    | Some accept ->
+        List.exists
+          (fun range ->
+            String.lowercase_ascii
+              (String.trim (List.hd (String.split_on_char ';' range)))
+            = "text/html")
+          (String.split_on_char ',' accept)
+
 let manifest_at t key =
   match t.store.get_opt key with
     | Some b -> (
@@ -455,8 +467,12 @@ let handle t ~max_zip_members (r : Server.request) ~token ~sub params =
     let param k = List.assoc_opt k params in
     match (share.target, sub) with
       | `File key, "" when media share.filename ->
-          ignore (servable (manifest_at t key));
-          share_page ~token share
+          let m = servable (manifest_at t key) in
+          let response =
+            if wants_html r then share_page ~token share
+            else file_response t r ~name:share.filename ~inline:false m
+          in
+          { response with headers = ("vary", "accept") :: response.headers }
       | `File key, ("" | "download") ->
           file_response t r ~name:share.filename ~inline:false
             (manifest_at t key)

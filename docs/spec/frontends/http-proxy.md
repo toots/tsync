@@ -220,7 +220,7 @@ Refusals are `text/plain` bodies `<message>\n`. Any other failure is 500 `intern
 
 | target | sub | answer |
 |---|---|---|
-| file | `""` | a media file → the share page in file mode (§A9.6); any other file → as `download` |
+| file | `""` | a media file asked for by a browser → the share page in file mode (§A9.6); otherwise as `download` |
 | file | `download` | the file's bytes as an attachment |
 | file | `f[?json=1]` | `json` → the object below with `url` = `/s/<token>/f`; otherwise the bytes, `inline` |
 | dir | `""` | the share page in folder mode (§A9.6) |
@@ -229,7 +229,9 @@ Refusals are `text/plain` bodies `<message>\n`. Any other failure is 500 `intern
 | dir | `f?path=[&dl=1][&json=1]` | resolve `path` (non-empty, else 400) to a file, else 404. `json` → `{"url":"/s/<token>/f?path=<pct-encoded>","name","contentType"(mime or null),"size"}`; otherwise the bytes, `inline` unless `dl` |
 | any other | | 404 |
 
-A **media file** is one whose name maps, in the shared mime table, to `image/*`, `audio/*`, `video/*` or `application/pdf`: what a browser plays or displays by itself. Text and HTML are not media, so a link to one still answers its bytes to a client that is not a browser.
+A **media file** is one whose name maps, in the shared mime table, to `image/*`, `audio/*`, `video/*` or `application/pdf`: what a browser plays or displays by itself. Text and HTML are not media.
+
+A request is **asked for by a browser** when its `Accept` header lists `text/html` explicitly, as a navigation does; `*/*`, another type or no header is not. Anything else that follows the link (a command-line client, an image element, the fetcher of a chat application building a link preview) is answered the file itself. Both answers of a media file's `""` carry `vary: accept`.
 
 Every file-share route reads the manifest first: a symlink manifest → 400 `cannot serve a symlink directly`; no manifest → 404. The page is never served for a file that cannot be.
 
@@ -339,7 +341,7 @@ Nothing a client sends chooses how much work the server does beyond the wire's c
 - Admission: never more data operations in flight than the bound, and the bound is reached; excess waits up to the queue bound; exactly the overflow beyond it is refused 503; metadata is never held; the budget is intact after a flood. The bound is the minimum of store opinions, ignoring none, else the default.
 - A body over its limit is refused without being read; a client that stops sending releases its slot after the idle timeout; a stale timestamp is refused before the body is read.
 - Watch: only a cursor key is watchable; `wait` is validated and clamped; a client behind is answered 200 with the header after one store read; an up-to-date one gets 204 with the header at the deadline without further reads; N waiters on one key cost N + 1 reads for one change; gates of two routes never share a loop.
-- Share server: a whole file answers 200 with `content-disposition: attachment` carrying an RFC 5987 name and `accept-ranges: bytes`; `bytes=6-10` → 206 `bytes 6-10/39`; a suffix range → 206; unsatisfiable → 416 `bytes */size`; folder listing `{dirs, files:[{name,size}]}`, sub-listing, file metadata JSON, nested bytes inline, `dl=1` as attachment; a shared media file answers the share page at `""`, its bytes inline at `f` and as an attachment at `download`, and a shared file that is not media answers its bytes as an attachment at `""`; a non-hex, unknown or expired token; another domain's token → 404; `..` → 400; a missing file → 404; a trashed shared folder is no longer served; the share page renders a hostile folder or file name as text.
+- Share server: a whole file answers 200 with `content-disposition: attachment` carrying an RFC 5987 name and `accept-ranges: bytes`; `bytes=6-10` → 206 `bytes 6-10/39`; a suffix range → 206; unsatisfiable → 416 `bytes */size`; folder listing `{dirs, files:[{name,size}]}`, sub-listing, file metadata JSON, nested bytes inline, `dl=1` as attachment; a shared media file answers the share page at `""` to a request accepting `text/html` and its bytes as an attachment to any other, both with `vary: accept`, its bytes inline at `f` and as an attachment at `download`, and a shared file that is not media answers its bytes as an attachment at `""`; a non-hex, unknown or expired token; another domain's token → 404; `..` → 400; a missing file → 404; a trashed shared folder is no longer served; the share page renders a hostile folder or file name as text.
 - ZIP: `download` streams an archive with no content length whose members are rooted at the folder's name (`<domain>/` for a whole-domain share), directories included; `unzip -t` accepts it and extraction is byte-exact.
 - Nothing the listener does writes local domain state: serving a share, a put or a watch leaves the mirror, chunk cache, staged tree and WAL untouched; deferred work lands in the owner's inbox.
 - GC: during a run, a chunk only in the space being collected is readable through the listener, and a manifest written through it naming that chunk promotes it; a manifest naming a chunk the main lacks is refused 409 `missing_chunks` with the key.
