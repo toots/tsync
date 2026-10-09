@@ -8,7 +8,7 @@ tsync share photos/2024 --expires 30d  # a folder, downloadable as a zip
 tsync share                            # the whole domain
 ```
 
-The link is printed, and its expiry on the line after. A link is public: whoever has it can download until it expires, 7 days by default. `--expires` takes a number and `d`, `h`, `m` or `s`. A folder link opens a page to browse it, preview files, and download any of them or everything as a zip. A link to a picture, a sound, a video or a PDF opens a page that shows or plays it, with a download button; a link to any other file downloads it. Add `/download` to a link to get the bytes whatever the file is, for instance from `curl`.
+The link is printed, and its expiry on the line after. A link is public: whoever has it can download until it expires, 7 days by default. `--expires` takes a number and `d`, `h`, `m` or `s`. A folder link opens a page to browse it, preview files, and download any of them or everything as a zip. A link to a picture, a sound or a video opens a page that shows or plays it, with a download button; a link to any other file downloads it. Add `/download` to a link to get the bytes whatever the file is, for instance from `curl`.
 
 ```bash
 tsync share --revoke <link or token>   # stop a link now

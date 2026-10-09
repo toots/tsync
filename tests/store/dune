@@ -112,7 +112,15 @@
 (executable
  (name share_test)
  (modules share_test)
- (libraries tsync_http_proxy yojson))
+ (libraries
+  tsync_core
+  tsync_store
+  tsync_remote
+  tsync_http
+  tsync_http_proxy
+  unix
+  threads.posix
+  yojson))
 
 (rule
  (with-stdout-to

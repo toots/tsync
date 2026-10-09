@@ -414,7 +414,7 @@
         return show(document.getElementById("pvb"), f, k);
       }
 
-      async function show(body, f, k) {
+      async function show(body, f, k, autoplay = true) {
         body.innerHTML = "Loading…";
         let url;
         try {
@@ -432,7 +432,7 @@
         } else
           el = Object.assign(document.createElement(k), {
             controls: true,
-            autoplay: true,
+            autoplay,
           });
         el.src = url;
         body.innerHTML = "";
@@ -460,7 +460,7 @@
         document.querySelector("main").className = "file";
         const view = document.getElementById("view");
         view.hidden = false;
-        show(view, { name: DATA.title }, kind(DATA.title));
+        show(view, { name: DATA.title }, kind(DATA.title), false);
       }
 
       if (DATA.file) showFile();

@@ -18,12 +18,21 @@ inline; filename="a_b_c ____.txt"; filename*=UTF-8''a%22b%5Cc%20%E2%9C%93%0A.txt
 a.MP3        true
 a.mp4        true
 a.jpg        true
-a.pdf        true
+a.pdf        false
 a.txt        false
 a.html       false
 a.json       false
 a.bin        false
 mp3          false
+== routes of a file share (§A9.3)
+a1 / -> 200 text/html; charset=utf-8 | - | page: file mode true, raw name false
+a1 /f -> 200 audio/mpeg | inline; filename="</script>.mp3"; filename*=UTF-8''%3C%2Fscript%3E.mp3 | 0123456789abcdefXYZ
+a1 /f?json=1 -> 200 application/json | - | {"url":"/s/a1/f","name":"</script>.mp3","contentType":"audio/mpeg","size":19}
+a1 /download -> 200 audio/mpeg | attachment; filename="</script>.mp3"; filename*=UTF-8''%3C%2Fscript%3E.mp3 | 0123456789abcdefXYZ
+a1 /list -> 404 text/plain; charset=utf-8 | - | not found
+a2 / -> 200 text/plain; charset=utf-8 | attachment; filename="notes.txt"; filename*=UTF-8''notes.txt | plain words
+a2 /f -> 200 text/plain; charset=utf-8 | inline; filename="notes.txt"; filename*=UTF-8''notes.txt | plain words
+a3 / -> 404 text/plain; charset=utf-8 | - | not found
 == single-pass templating
 <h1>__B__</h1> b
 == JSON inside a script

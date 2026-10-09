@@ -229,7 +229,7 @@ Refusals are `text/plain` bodies `<message>\n`. Any other failure is 500 `intern
 | dir | `f?path=[&dl=1][&json=1]` | resolve `path` (non-empty, else 400) to a file, else 404. `json` → `{"url":"/s/<token>/f?path=<pct-encoded>","name","contentType"(mime or null),"size"}`; otherwise the bytes, `inline` unless `dl` |
 | any other | | 404 |
 
-A **media file** is one whose name maps, in the shared mime table, to `image/*`, `audio/*`, `video/*` or `application/pdf`: what a browser plays or displays by itself. Text and HTML are not media, so a link to one still answers its bytes to a client that is not a browser.
+A **media file** is one whose name maps, in the shared mime table, to `image/*`, `audio/*` or `video/*`: what a browser plays or displays by itself. Text, HTML and PDF are not media: a link to one still answers its bytes to a client that is not a browser, and a PDF served with the sandboxing header of [security §13](../algorithms/security-model.md#13-html-and-browser-facing-output) is not displayed by every browser.
 
 Every file-share route reads the manifest first: a symlink manifest → 400 `cannot serve a symlink directly`; no manifest → 404. The page is never served for a file that cannot be.
 
@@ -264,7 +264,7 @@ One template (shared with the cloud share function) serves a folder share and a 
 `content-type: text/html; charset=utf-8`.
 
 - **Folder mode** lists the folder through `list`, previews a file in place through `f?path=…&json=1`, and offers each file and the whole folder (`download`) for download.
-- **File mode** shows no listing: it asks `f?json=1` for the URL, plays or displays the file in the page by its preview kind, and offers `download`. The page carries nothing of the file but its name.
+- **File mode** shows no listing: it asks `f?json=1` for the URL, displays the file in the page by its preview kind without starting playback, and offers `download`. The page carries nothing of the file but its name.
 
 ### A9.7 ZIP of a folder
 
