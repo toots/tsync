@@ -415,6 +415,12 @@
       }
 
       async function show(body, f, k, autoplay = true) {
+        // Phones have no in-page PDF viewer: a frame would stay empty.
+        if (k === "pdf" && navigator.pdfViewerEnabled === false) {
+          body.textContent =
+            "This browser cannot show a PDF inside a page. Use Download to open it.";
+          return;
+        }
         body.innerHTML = "Loading…";
         let url;
         try {
