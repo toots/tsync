@@ -312,7 +312,7 @@ def is_media(name):
     """Whether a shared file opens the viewer page rather than downloading:
     what a browser plays or displays by itself."""
     mime = mime_type(name)
-    return mime is not None and preview_kind(mime) in ("image", "audio", "video")
+    return mime is not None and preview_kind(mime) in ("image", "audio", "video", "pdf")
 
 
 # ext -> preview kind, injected into browse.html so the front end has no

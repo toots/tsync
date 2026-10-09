@@ -126,7 +126,7 @@ let preview_kind m =
 (* §A9.3: what a browser plays or displays by itself. *)
 let media name =
   match Option.bind (mime name) preview_kind with
-    | Some ("image" | "audio" | "video") -> true
+    | Some ("image" | "audio" | "video" | "pdf") -> true
     | _ -> false
 
 let html_escape s =

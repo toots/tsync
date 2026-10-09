@@ -18,7 +18,7 @@ inline; filename="a_b_c ____.txt"; filename*=UTF-8''a%22b%5Cc%20%E2%9C%93%0A.txt
 a.MP3        true
 a.mp4        true
 a.jpg        true
-a.pdf        false
+a.pdf        true
 a.txt        false
 a.html       false
 a.json       false
