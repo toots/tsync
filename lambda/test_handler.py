@@ -237,12 +237,14 @@ def test_media_file_share_too_large_has_no_page(s3):
     assert h.handler(event(tok), None)["statusCode"] == 413
 
 
-def test_pdf_and_text_file_shares_download(s3):
+def test_pdf_opens_the_viewer_and_text_downloads(s3):
     h = load_handler()
-    for sid, name in (("b1", "doc.pdf"), ("b2", "notes.txt")):
-        key = put_file(s3, "r", name, [("oooo-" + sid, b"bytes")])
-        resp = h.handler(event(file_share(s3, sid, key, name)), None)
-        assert "attachment" in resp["headers"]["Location"]
+    key = put_file(s3, "r", "doc.pdf", [("oooo-b1", b"bytes")])
+    page = h.handler(event(file_share(s3, "b1", key, "doc.pdf")), None)
+    assert page["statusCode"] == 200 and '"file": true' in page["body"]
+    key = put_file(s3, "r", "notes.txt", [("oooo-b2", b"bytes")])
+    resp = h.handler(event(file_share(s3, "b2", key, "notes.txt")), None)
+    assert "attachment" in resp["headers"]["Location"]
 
 
 def test_unknown_share_type(s3):
