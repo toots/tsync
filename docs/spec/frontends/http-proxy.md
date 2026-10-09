@@ -13,7 +13,7 @@ One tsync host holds a domain's stores (a local disk, a NAS, a bucket it has cre
 The http-proxy frontend is an HTTP(S) server that does both:
 
 - **Store server.** An authenticated, admission-bounded re-export of each served domain's *composite store*. Bytes in, bytes out. It does not present the checkout, the mirror or item references; a remote client runs its own core against it as an ordinary `http-proxy` backend.
-- **Share server.** `/s/<token>…`, unauthenticated, token as credential: file download with ranges, folder browse page, folder listing JSON, per-child bytes, streamed ZIP of a folder.
+- **Share server.** `/s/<token>…`, unauthenticated, token as credential: file download with ranges, viewer page for a media file, folder browse page, folder listing JSON, per-child bytes, streamed ZIP of a folder.
 - **Status page.** `/` serves a static login page that signs `/stats` requests in the browser.
 
 It is not a presenter of files: it installs no request-handler hooks, answers no item references and keeps no view that change notices refresh.
@@ -220,12 +220,18 @@ Refusals are `text/plain` bodies `<message>\n`. Any other failure is 500 `intern
 
 | target | sub | answer |
 |---|---|---|
-| file | `""` or `download` | the file's bytes as an attachment; a symlink manifest → 400 `cannot serve a symlink directly`; no manifest → 404 |
-| dir | `""` | the browse page (§A9.6) |
+| file | `""` | a media file → the share page in file mode (§A9.6); any other file → as `download` |
+| file | `download` | the file's bytes as an attachment |
+| file | `f[?json=1]` | `json` → the object below with `url` = `/s/<token>/f`; otherwise the bytes, `inline` |
+| dir | `""` | the share page in folder mode (§A9.6) |
 | dir | `download` | streamed ZIP of the folder (§A9.7) |
 | dir | `list?path=` | resolve `path` inside the shared folder; a folder → `{"dirs":[names],"files":[{"name","size"}]}`, each sorted by lowercase name; anything else → 404 |
 | dir | `f?path=[&dl=1][&json=1]` | resolve `path` (non-empty, else 400) to a file, else 404. `json` → `{"url":"/s/<token>/f?path=<pct-encoded>","name","contentType"(mime or null),"size"}`; otherwise the bytes, `inline` unless `dl` |
 | any other | | 404 |
+
+A **media file** is one whose name maps, in the shared mime table, to `image/*`, `audio/*`, `video/*` or `application/pdf`: what a browser plays or displays by itself. Text and HTML are not media, so a link to one still answers its bytes to a client that is not a browser.
+
+Every file-share route reads the manifest first: a symlink manifest → 400 `cannot serve a symlink directly`; no manifest → 404. The page is never served for a file that cannot be.
 
 **Path resolution.** `path` is split on `/`, empty parts dropped; a part equal to `.` or `..` → 400 `bad path`. Parts are resolved by name from the shared folder's id through the domain's folder namespaces on the store, applying the anchor rule ([security §6.3](../algorithms/security-model.md#63-a-share-never-leaves-its-domain)), never through the local mirror (share keys live in inode space; mirroring them would plant phantom entries). Unusable entries in a namespace are skipped.
 
@@ -243,19 +249,22 @@ Refusals are `text/plain` bodies `<message>\n`. Any other failure is 500 `intern
 - `accept-ranges: bytes` on 200 and 206.
 - `Range` (single range only): must start with `bytes=` and split on `-` into exactly two parts. `a-b` with `a ≤ b` → `(a, min(b, size−1))`; `a-` → `(a, size−1)`; `-n` with `n > 0` → `(max(0, size−n), size−1)`. Numbers are decimal digits only. Parsed and `a < size` → 206 with `content-range: bytes a-b/size`; parsed and `a ≥ size` → 416 with `content-range: bytes */size`; absent or unparseable → 200 whole.
 
-### A9.6 Browse page
+### A9.6 Share page
 
-The browse template (shared with the cloud share function) is filled in **one pass**, with the escaping of [security §13](../algorithms/security-model.md#13-html-and-browser-facing-output):
+One template (shared with the cloud share function) serves a folder share and a media file share. It is filled in **one pass**, with the escaping of [security §13](../algorithms/security-model.md#13-html-and-browser-facing-output):
 
 | placeholder | value | escaping |
 |---|---|---|
 | `__PREVIEW_KINDS__` | JSON: extension → `image`/`audio`/`video`/`pdf`/`html`/`text` | JSON-in-HTML |
 | `__PLAYER_JS__` | the embedded player script | none (constant) |
-| `__OG_TITLE__` | manifest `filename` without extension | HTML text/attribute |
-| `__OG_DESC__` | `Shared folder · tsync` | HTML text/attribute |
-| `__SHARE_DATA__` | JSON `{"base":"/s/<token>","title":<title>}` | JSON-in-HTML |
+| `__OG_TITLE__` | the title: for a folder, manifest `filename` without extension; for a file, `filename` whole | HTML text/attribute |
+| `__OG_DESC__` | `Shared folder · tsync`, or `Shared file · tsync` | HTML text/attribute |
+| `__SHARE_DATA__` | JSON `{"base":"/s/<token>","title":<title>}`, with `"file":true` for a file share | JSON-in-HTML |
 
 `content-type: text/html; charset=utf-8`.
+
+- **Folder mode** lists the folder through `list`, previews a file in place through `f?path=…&json=1`, and offers each file and the whole folder (`download`) for download.
+- **File mode** shows no listing: it asks `f?json=1` for the URL, plays or displays the file in the page by its preview kind, and offers `download`. The page carries nothing of the file but its name.
 
 ### A9.7 ZIP of a folder
 
@@ -330,7 +339,7 @@ Nothing a client sends chooses how much work the server does beyond the wire's c
 - Admission: never more data operations in flight than the bound, and the bound is reached; excess waits up to the queue bound; exactly the overflow beyond it is refused 503; metadata is never held; the budget is intact after a flood. The bound is the minimum of store opinions, ignoring none, else the default.
 - A body over its limit is refused without being read; a client that stops sending releases its slot after the idle timeout; a stale timestamp is refused before the body is read.
 - Watch: only a cursor key is watchable; `wait` is validated and clamped; a client behind is answered 200 with the header after one store read; an up-to-date one gets 204 with the header at the deadline without further reads; N waiters on one key cost N + 1 reads for one change; gates of two routes never share a loop.
-- Share server: a whole file answers 200 with `content-disposition: attachment` carrying an RFC 5987 name and `accept-ranges: bytes`; `bytes=6-10` → 206 `bytes 6-10/39`; a suffix range → 206; unsatisfiable → 416 `bytes */size`; folder listing `{dirs, files:[{name,size}]}`, sub-listing, file metadata JSON, nested bytes inline, `dl=1` as attachment; a non-hex, unknown or expired token; another domain's token → 404; `..` → 400; a missing file → 404; a trashed shared folder is no longer served; the browse page renders a hostile folder name as text.
+- Share server: a whole file answers 200 with `content-disposition: attachment` carrying an RFC 5987 name and `accept-ranges: bytes`; `bytes=6-10` → 206 `bytes 6-10/39`; a suffix range → 206; unsatisfiable → 416 `bytes */size`; folder listing `{dirs, files:[{name,size}]}`, sub-listing, file metadata JSON, nested bytes inline, `dl=1` as attachment; a shared media file answers the share page at `""`, its bytes inline at `f` and as an attachment at `download`, and a shared file that is not media answers its bytes as an attachment at `""`; a non-hex, unknown or expired token; another domain's token → 404; `..` → 400; a missing file → 404; a trashed shared folder is no longer served; the share page renders a hostile folder or file name as text.
 - ZIP: `download` streams an archive with no content length whose members are rooted at the folder's name (`<domain>/` for a whole-domain share), directories included; `unzip -t` accepts it and extraction is byte-exact.
 - Nothing the listener does writes local domain state: serving a share, a put or a watch leaves the mirror, chunk cache, staged tree and WAL untouched; deferred work lands in the owner's inbox.
 - GC: during a run, a chunk only in the space being collected is readable through the listener, and a manifest written through it naming that chunk promotes it; a manifest naming a chunk the main lacks is refused 409 `missing_chunks` with the key.

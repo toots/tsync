@@ -14,6 +14,16 @@ bytes=-0         whole
 == content-disposition (security §13)
 attachment; filename="report.pdf"; filename*=UTF-8''report.pdf
 inline; filename="a_b_c ____.txt"; filename*=UTF-8''a%22b%5Cc%20%E2%9C%93%0A.txt
+== files that open the viewer page (§A9.3)
+a.MP3        true
+a.mp4        true
+a.jpg        true
+a.pdf        true
+a.txt        false
+a.html       false
+a.json       false
+a.bin        false
+mp3          false
 == single-pass templating
 <h1>__B__</h1> b
 == JSON inside a script

@@ -4,8 +4,11 @@ Serves shared files/folders from the tsync S3 chunk store. A request path is
 ``/{token}[/sub]`` where ``token`` is the random hex id of a *share manifest*
 (written by ``tsync share``); the full S3 key is ``SHARES_PREFIX + token``. Routes:
 
-- ``/{token}``            dir share -> HTML file browser; file share -> download
+- ``/{token}``            dir share -> HTML file browser; media file share -> the
+                          same page as a viewer; any other file share -> download
 - ``/{token}/download``   assemble the whole artifact (file, or dir as a zip)
+- ``/{token}/f``          (file) 302 to a presigned inline GET (``?json=1``
+                          returns the URL as JSON for the viewer)
 - ``/{token}/list?path=`` (dir) one directory level as JSON: subdirs + files+sizes
 - ``/{token}/f?path=``    (dir) assemble one file; 302 to a presigned GET
                           (``?json=1`` returns the URL as JSON for inline media
@@ -29,6 +32,7 @@ bite: build on Fargate.
 import html
 import json
 import os
+import re
 import time
 import traceback
 import zipfile
@@ -306,6 +310,13 @@ def preview_kind(mime):
     return "text"  # text/plain, application/json, application/xml
 
 
+def is_media(name):
+    """Whether a shared file opens the viewer page rather than downloading:
+    what a browser plays or displays by itself."""
+    mime = mime_type(name)
+    return mime is not None and preview_kind(mime) in ("image", "audio", "video", "pdf")
+
+
 # ext -> preview kind, injected into browse.html so the front end has no
 # duplicated extension lists to keep in sync with MIME.
 PREVIEW_KINDS = {ext: preview_kind(m) for ext, m in MIME.items()}
@@ -358,7 +369,7 @@ def load_share(token):
     return share
 
 
-def download_artifact(token, share):
+def artifact(token, share):
     # The whole artifact (a file's bytes, or a directory zipped) is cached under
     # CACHE_PREFIX and served presigned. For a dir this freezes the zip at
     # first-download time; fine given the short share TTL.
@@ -370,7 +381,31 @@ def download_artifact(token, share):
             build_dir_zip(share, cache_key)
         else:
             raise ShareError(400, "unknown share type")
-    return redirect(store.signed_url(cache_key, share["filename"], inline=False))
+    return cache_key
+
+
+def download_artifact(token, share):
+    return redirect(
+        store.signed_url(artifact(token, share), share["filename"], inline=False)
+    )
+
+
+def file_answer(cache_key, name, size, as_download, want_json):
+    ctype = mime_type(name)
+    url = store.signed_url(cache_key, name, content_type=ctype, inline=not as_download)
+    if want_json:
+        return json_response(
+            {"url": url, "name": name, "contentType": ctype, "size": size}
+        )
+    return redirect(url)
+
+
+def serve_shared_file(token, share, want_json):
+    m = file_manifest(share["key"])
+    return file_answer(
+        artifact(token, share), share["filename"], m.size,
+        as_download=False, want_json=want_json,
+    )
 
 
 def list_dir(share, rel):
@@ -416,14 +451,7 @@ def serve_file(share, path, as_download, want_json):
     cache_key = CACHE_PREFIX + m.h1 + "-" + m.h2 + ".data"
     if not object_exists(cache_key):
         assemble(m, chunk_prefix(share), cache_key)
-    name = os.path.basename(rel)
-    ctype = mime_type(name)
-    url = store.signed_url(cache_key, name, content_type=ctype, inline=not as_download)
-    if want_json:
-        return json_response(
-            {"url": url, "name": name, "contentType": ctype, "size": m.size}
-        )
-    return redirect(url)
+    return file_answer(cache_key, os.path.basename(rel), m.size, as_download, want_json)
 
 
 def handler(event, context):
@@ -439,9 +467,14 @@ def handler(event, context):
         if sub == "":
             if is_dir:
                 return html_response(render_browse(share, token))
+            if is_media(share["filename"]):
+                file_manifest(share["key"])
+                return html_response(render_browse(share, token))
             return download_artifact(token, share)
         if sub == "download":
             return download_artifact(token, share)
+        if share.get("type") == "file" and sub == "f":
+            return serve_shared_file(token, share, want_json=q.get("json") == "1")
         if is_dir and sub == "list":
             return list_response(share, q.get("path", ""))
         if is_dir and sub == "f":
@@ -470,21 +503,35 @@ def gcp_handler(request):
     return (resp.get("body", ""), resp["statusCode"], resp.get("headers", {}))
 
 
+def script_json(obj):
+    """JSON that cannot close the script element it is embedded in."""
+    return (
+        json.dumps(obj)
+        .replace("<", "\\u003c")
+        .replace(">", "\\u003e")
+        .replace("&", "\\u0026")
+    )
+
+
 def render_browse(share, token):
     title = share.get("filename", "share")
-    if title.endswith(".zip"):
+    is_file = share.get("type") == "file"
+    if not is_file and title.endswith(".zip"):
         title = title[:-4]
     data = {"base": "/" + token, "title": title}
+    if is_file:
+        data["file"] = True
     # Static OG/description tags for link-preview crawlers, which don't run the
     # JS that lists the folder. No live listing here (kept O(1)), so the
     # description is generic.
-    desc = "Shared folder · tsync"
-    return (
-        BROWSE_HTML
-        .replace("__OG_TITLE__", html.escape(title, quote=True))
-        .replace("__OG_DESC__", html.escape(desc, quote=True))
-        .replace("__SHARE_DATA__", json.dumps(data))
-    )
+    desc = "Shared file · tsync" if is_file else "Shared folder · tsync"
+    values = {
+        "__OG_TITLE__": html.escape(title, quote=True),
+        "__OG_DESC__": html.escape(desc, quote=True),
+        "__SHARE_DATA__": script_json(data),
+    }
+    # One pass: a substituted value is never scanned for placeholders.
+    return re.sub("|".join(values), lambda m: values[m.group()], BROWSE_HTML)
 
 
 def _asset(name):

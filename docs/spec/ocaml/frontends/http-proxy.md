@@ -21,7 +21,7 @@ Code: `lib/frontends/http_proxy/` (`store_server.ml`, `share_server.ml`, `watch_
 | Error mapping (§A6) | `store_failure`; `bad_request`, `unauthorized`. `Server` adds `Date` to every response. |
 | Watch coalescing (§A7) | `Watch_gates.wait`. |
 | Bulk answers (§A8) | `children`; the caps are `Proxy_wire`'s. |
-| Share server (§A9) | `Share_server`: `claims`, `handle`, `load`, `stream`, `file_response`, `listing`, `zip_response`, `browse_page`, `parse_range`, `disposition`, `fill`, `script_json`; assets in `Share_assets`. |
+| Share server (§A9) | `Share_server`: `claims`, `handle`, `load`, `stream`, `file_response`, `listing`, `zip_response`, `media`, `share_page`, `parse_range`, `disposition`, `fill`, `script_json`; assets in `Share_assets`. |
 | Status (§A10) | `listener_endpoint`, `verified_routes`, `collect`, `presented`, `self_report`; `Status_page.html`. |
 | Control socket (§A11) | `control`, served by `Ipc.serve` on `Paths.store_server_socket`. |
 | Counters (§A12) | `tally_names`, `count`, `count_bytes`, `listener_report`, giving `Status_report.listener`. |
