@@ -369,14 +369,39 @@ let stored_domain route name =
     | Some b -> Share_server.manifest_domain (Bigstring.to_string b)
     | None -> None
 
+let owning t name =
+  List.filter (fun r -> stored_domain r name = Some r.domain) t.routes
+
+let held_anywhere t name =
+  List.exists
+    (fun r ->
+      match Key.of_string name with
+        | Some k -> r.store.head_opt k <> None
+        | None -> false)
+    t.routes
+
+(* security §6.4: a preview image follows the manifest its token names. *)
+let preview_candidates t op body manifest =
+  match op with
+    | Put _ | Claim _ | Put_if_unchanged _ ->
+        if Share_preview.valid body then owning t manifest else []
+    | Delete _ when not (held_anywhere t manifest) -> t.routes
+    | _ -> owning t manifest
+
+let token_named name = is_manifest_name name || Key.preview_token name <> None
+
 (* The routes that may serve a share-space operation, before any signature. *)
 let share_candidates t op body names =
   if not (List.for_all in_share_space names) then []
   else (
     match (op, names) with
       | (Get_multi | Children_multi | Delete_multi | Copy _), _
-        when List.exists is_manifest_name names ->
+        when List.exists token_named names ->
           []
+      | _, [name] when Key.preview_token name <> None ->
+          preview_candidates t op body
+            (Key.to_string
+               (Option.get (Key.share (Option.get (Key.preview_token name)))))
       | (Put _ | Claim _ | Put_if_unchanged _), [name]
         when is_manifest_name name -> (
           match Share_server.manifest_domain (Bigstring.to_string body) with
@@ -391,19 +416,9 @@ let share_candidates t op body names =
                       | Some held -> Domain_name.equal held d)
                   t.routes)
       | _, [name] when is_manifest_name name ->
-          let owning =
-            List.filter (fun r -> stored_domain r name = Some r.domain) t.routes
-          in
-          let held_anywhere =
-            List.exists
-              (fun r ->
-                match Key.of_string name with
-                  | Some k -> r.store.head_opt k <> None
-                  | None -> false)
-              t.routes
-          in
+          let owning = owning t name in
           if owning <> [] then owning
-          else if held_anywhere then []
+          else if held_anywhere t name then []
           else t.routes
       | _ -> t.routes)
 
@@ -741,7 +756,7 @@ let execute ?(partial = false) t route op body =
         let entries =
           (if max_keys = Some 0 then [] else s.list_prefix ?max_keys p)
           |> List.filter (fun (e : Store.entry) ->
-              not (is_manifest_name (Key.to_string e.key)))
+              not (token_named (Key.to_string e.key)))
         in
         {
           Server.status = 200;
@@ -988,6 +1003,20 @@ let listener_endpoint t (r : Server.request) params =
               else json (R.machine_to_yojson machine))
     | _ -> raise Not_found
 
+(* §A9.8: a thumbnailer reads a share through this listener, on loopback when
+   it listens on every address. *)
+let self_url (l : Proxy_options.listener) =
+  let host =
+    match l.binds with
+      | [] | "0.0.0.0" :: _ -> "127.0.0.1"
+      | "::" :: _ -> "[::1]"
+      | a :: _ when String.contains a ':' -> "[" ^ a ^ "]"
+      | a :: _ -> a
+  in
+  Printf.sprintf "%s://%s:%d"
+    (if l.tls = None then "http" else "https")
+    host l.port
+
 (* §A9.1: with several share-serving routes, the one whose domain the token's
    manifest names answers, else the first, so its refusal is the answer. *)
 let serve_share t (r : Server.request) params rest =
@@ -1023,7 +1052,11 @@ let serve_share t (r : Server.request) params rest =
     match t.listener with Some l -> l.max_zip_members | None -> 100_000
   in
   match
-    Share_server.handle share ~max_zip_members r ~token ~sub params
+    Share_server.handle
+      ?self:(Option.map self_url t.listener)
+      share
+      ~tls:(match t.listener with Some l -> l.tls <> None | None -> false)
+      ~max_zip_members r ~token ~sub params
     |> count_bytes [t.total] ~written:0
   with
     | { body = Stream s; _ } as response ->

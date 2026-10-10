@@ -166,6 +166,8 @@ let build_info () =
       | l ->
           String.concat ", "
             (List.map Tsync_http.Transport.impl_name (List.sort compare l)));
+  say "share previews: %s"
+    (if Share_preview.available () then "ffmpeg" else "none");
   say "service log: %s" (String.concat " " (log_reader ()));
   say "config: %s" (Paths.config_file ());
   say "data: %s" (Paths.data_dir ());

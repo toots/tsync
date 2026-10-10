@@ -24,10 +24,25 @@ a.html       false
 a.json       false
 a.bin        false
 mp3          false
+== preview image check (§A9.8)
+baseline 800x450             true
+progressive 450x800          true
+800x300                      true
+800x299                      false
+801x450                      false
+640x480                      false
+lossless frame               false
+arithmetic frame             false
+12-bit                       false
+over the byte cap            false
+no end marker                false
+not a JPEG                   false
+segment past the end         false
+scan before any frame        false
 == routes of a file share (§A9.3)
-a1 / [text/html,application/xhtml+xml,*/*;q=0.8] -> 200 vary text/html; charset=utf-8 | - | page: file mode true, raw name false
-a1 / [image/*,*/*;q=0.8] -> 200 vary audio/mpeg | attachment; filename="</script>.mp3"; filename*=UTF-8''%3C%2Fscript%3E.mp3 | 0123456789abcdefXYZ
-a1 / -> 200 vary audio/mpeg | attachment; filename="</script>.mp3"; filename*=UTF-8''%3C%2Fscript%3E.mp3 | 0123456789abcdefXYZ
+a1 / [text/html,application/xhtml+xml,*/*;q=0.8] -> 200 vary accept, user-agent text/html; charset=utf-8 | - | page: file mode true, raw name false, cache-control private, og:image http://localhost/s/a1/preview
+a1 / [image/*,*/*;q=0.8] -> 200 vary accept, user-agent audio/mpeg | attachment; filename="</script>.mp3"; filename*=UTF-8''%3C%2Fscript%3E.mp3 | 0123456789abcdefXYZ
+a1 / -> 200 vary accept, user-agent audio/mpeg | attachment; filename="</script>.mp3"; filename*=UTF-8''%3C%2Fscript%3E.mp3 | 0123456789abcdefXYZ
 a1 /f -> 200 audio/mpeg | inline; filename="</script>.mp3"; filename*=UTF-8''%3C%2Fscript%3E.mp3 | 0123456789abcdefXYZ
 a1 /f?json=1 -> 200 application/json | - | {"url":"/s/a1/f","name":"</script>.mp3","contentType":"audio/mpeg","size":19}
 a1 /download -> 200 audio/mpeg | attachment; filename="</script>.mp3"; filename*=UTF-8''%3C%2Fscript%3E.mp3 | 0123456789abcdefXYZ
@@ -36,6 +51,18 @@ a2 / -> 200 text/plain; charset=utf-8 | attachment; filename="notes.txt"; filena
 a2 /f -> 200 text/plain; charset=utf-8 | inline; filename="notes.txt"; filename*=UTF-8''notes.txt | plain words
 a2 / [text/html] -> 200 text/plain; charset=utf-8 | attachment; filename="notes.txt"; filename*=UTF-8''notes.txt | plain words
 a3 / [text/html] -> 404 text/plain; charset=utf-8 | - | not found
+== link previews (§A9.3, §A9.6, §A9.8)
+a1 / [*/*] [user-agent: WhatsApp/2.24.1.6 A] -> 200 vary accept, user-agent text/html; charset=utf-8 | - | page: file mode true, raw name false, cache-control private, og:image http://localhost/s/a1/preview
+a1 / [user-agent: curl/8.0] -> 200 vary accept, user-agent audio/mpeg | attachment; filename="</script>.mp3"; filename*=UTF-8''%3C%2Fscript%3E.mp3 | 0123456789abcdefXYZ
+a1 / [text/html] [host: box.lan:8080] -> 200 vary accept, user-agent text/html; charset=utf-8 | - | page: file mode true, raw name false, cache-control private, og:image http://box.lan:8080/s/a1/preview
+a1 / [text/html] [host: 127.0.0.1:5446] [x-forwarded-proto: https] [x-forwarded-host: files.example, edge.example] -> 200 vary accept, user-agent text/html; charset=utf-8 | - | page: file mode true, raw name false, cache-control private, og:image https://files.example/s/a1/preview
+a2 / [user-agent: WhatsApp/2.24.1.6 A] -> 200 text/plain; charset=utf-8 | attachment; filename="notes.txt"; filename*=UTF-8''notes.txt | plain words
+a1 /preview -> 200 image/png | - | 8046 bytes, PNG
+a2 /preview -> 200 image/png | - | 8046 bytes, PNG
+a3 /preview -> 200 image/png | - | 8046 bytes, PNG
+ffff /preview -> 404 text/plain; charset=utf-8 | - | not found
+a1 /preview -> 200 image/jpeg | - | 22 bytes, JPEG 800x450
+a2 /preview -> 200 image/png | - | 8046 bytes, PNG
 == single-pass templating
 <h1>__B__</h1> b
 == JSON inside a script

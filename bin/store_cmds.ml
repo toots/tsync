@@ -445,7 +445,7 @@ let mirror_cmd =
        destination."
     Term.(const mirror $ source $ skip_chunks $ path $ domain_arg $ verbose)
 
-let share path expires token revoke clear name verbose =
+let share path expires token preview revoke clear name verbose =
   set_verbose verbose;
   early @@ fun () ->
   let name, paths = paths_in_domain ?name (Option.to_list path) in
@@ -456,8 +456,21 @@ let share path expires token revoke clear name verbose =
         Tsync_owner.Owner.request ~what:"tsync share" config dom req
       in
       match (revoke, clear, path) with
+        | _ when preview <> None && (revoke <> None || clear || path <> None) ->
+            fail
+              "--preview, --revoke, --clear-cache and a path go one at a time"
         | Some _, true, _ | Some _, _, Some _ | _, true, Some _ ->
             fail "--revoke, --clear-cache and a path go one at a time"
+        | None, false, None when preview <> None -> (
+            match
+              ask (Tsync_owner.Protocol.Share_preview (Option.get preview))
+            with
+              | `Made ->
+                  say "preview image made";
+                  0
+              | `Not_made why ->
+                  say "no preview image: %s" why;
+                  1)
         | Some s, false, None ->
             if ask (Tsync_owner.Protocol.Share_revoke s) then (
               say "revoked";
@@ -478,6 +491,13 @@ let share path expires token revoke clear name verbose =
             in
             say "%s" r.url;
             prerr_endline ("expires " ^ Narrate.date r.expires);
+            (* 07 §5.6: an owner makes the image in the background; a run that
+               took ownership itself makes it before it exits. *)
+            if not (Tsync_owner.Owner.served dom.name) then (
+              match ask (Tsync_owner.Protocol.Share_preview r.url) with
+                | `Made -> ()
+                | `Not_made why -> Log.debug "share preview: %s" why
+                | exception Fail.E f -> Log.debug "share preview: %s" f.reason);
             0)
 
 let share_cmd =
@@ -499,6 +519,13 @@ let share_cmd =
       & opt (some string) None
       & info ["token"] ~docv:"HEX"
           ~doc:"Use this token, 32 to 128 lowercase hex characters.")
+  and preview =
+    Arg.(
+      value
+      & opt (some string) None
+      & info ["preview"] ~docv:"TOKEN|URL"
+          ~doc:
+            "Make the preview image of a link of this domain again, and wait.")
   and revoke =
     Arg.(
       value
@@ -513,8 +540,8 @@ let share_cmd =
   cmd "share"
     ~doc:"Create a public, expiring link to a file or folder (URL on stdout)."
     Term.(
-      const share $ path $ expires $ token $ revoke $ clear $ domain_arg
-      $ verbose)
+      const share $ path $ expires $ token $ preview $ revoke $ clear
+      $ domain_arg $ verbose)
 
 (* 07 §5.6 [versions]: a read command, from the store; [--revert] goes through
    the owner. *)

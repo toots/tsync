@@ -30,4 +30,9 @@
    catalog_file_provider.ml
    from
    (tsync_file_provider -> catalog_file_provider.enabled.ml)
-   (-> catalog_file_provider.disabled.ml))))
+   (-> catalog_file_provider.disabled.ml))
+  (select
+   catalog_preview.ml
+   from
+   (tsync_preview_av -> catalog_preview.enabled.ml)
+   (-> catalog_preview.disabled.ml))))

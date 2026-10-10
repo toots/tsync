@@ -1,0 +1,8 @@
+; Built only where the FFmpeg bindings are installed. linkall: the thumbnailer
+; registers itself when linked.
+
+(library
+ (name tsync_preview_av)
+ (optional)
+ (library_flags (-linkall))
+ (libraries tsync_core ffmpeg-av ffmpeg-avcodec ffmpeg-swscale ffmpeg-avutil))

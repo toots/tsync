@@ -130,6 +130,8 @@ let () =
            (Printf.sprintf {|{"v":1,"expires":%.0f,"domain":"d","type":"file"}|}
               (now -. day)));
       put ~age:30. (Key.v "tsync/shares/cache/0123-4567.data") "old";
+      put ~age:30. (Option.get (Key.share_preview "aa01")) "jpeg";
+      put ~age:30. (Option.get (Key.share_preview "aa02")) "jpeg";
       let share_read = ref false in
       let watched =
         {

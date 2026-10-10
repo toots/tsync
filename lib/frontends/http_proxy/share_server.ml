@@ -98,20 +98,7 @@ let load t token =
 let claims t token =
   match load t token with _ -> true | exception Refused _ -> false
 
-let mime_table =
-  match Yojson.Safe.from_string Share_assets.mime with
-    | `Assoc l ->
-        List.filter_map (function k, `String v -> Some (k, v) | _ -> None) l
-    | _ -> []
-
-let extension name =
-  match String.rindex_opt name '.' with
-    | Some i ->
-        String.lowercase_ascii
-          (String.sub name (i + 1) (String.length name - i - 1))
-    | None -> ""
-
-let mime name = List.assoc_opt (extension name) mime_table
+let mime = Mime.of_name
 
 let preview_kind m =
   if String.starts_with ~prefix:"image/" m then Some "image"
@@ -190,7 +177,27 @@ let html_headers =
     ("referrer-policy", "no-referrer");
   ]
 
-let share_page ~token share =
+(* §A9.6: the requester's own claims, which shape only its own answer. *)
+let origin ~tls (r : Server.request) =
+  let first h =
+    Option.map
+      (fun v -> String.trim (List.hd (String.split_on_char ',' v)))
+      (Codec.header r.headers h)
+  in
+  let scheme =
+    match first "x-forwarded-proto" with
+      | Some (("http" | "https") as s) -> s
+      | _ -> if tls then "https" else "http"
+  in
+  let host =
+    match first "x-forwarded-host" with
+      | Some h -> h
+      | None ->
+          Option.value ~default:"localhost" (Codec.header r.headers "host")
+  in
+  scheme ^ "://" ^ host
+
+let share_page ~origin ~token share =
   let file = match share.target with `File _ -> true | `Dir _ -> false in
   let title = if file then share.filename else stem share.filename in
   let kinds =
@@ -198,13 +205,14 @@ let share_page ~token share =
       (List.filter_map
          (fun (ext, m) ->
            Option.map (fun k -> (ext, `String k)) (preview_kind m))
-         mime_table)
+         Mime.table)
   in
   let page =
     fill Share_assets.browse
       [
         ("__PREVIEW_KINDS__", script_json (`Assoc kinds));
         ("__PLAYER_JS__", Share_assets.player);
+        ("__OG_IMAGE__", html_escape (origin ^ "/s/" ^ token ^ "/preview"));
         ("__OG_TITLE__", html_escape title);
         ( "__OG_DESC__",
           html_escape
@@ -216,7 +224,11 @@ let share_page ~token share =
                @ if file then [("file", `Bool true)] else [])) );
       ]
   in
-  { Server.status = 200; headers = html_headers; body = String page }
+  {
+    Server.status = 200;
+    headers = ("cache-control", "private") :: html_headers;
+    body = String page;
+  }
 
 (* security §13: an ASCII fallback plus the RFC 5987 form. *)
 let disposition kind name =
@@ -326,17 +338,40 @@ let file_response t (r : Server.request) ~name ~inline (m : Manifest.t) =
         }
     | `Whole -> { Server.status = 200; headers = base; body = body 0 size }
 
-(* §A9.3: a navigation lists [text/html]; [*/*] and no header do not. *)
+let preview_fetchers =
+  [
+    "facebookexternalhit";
+    "facebot";
+    "twitterbot";
+    "whatsapp";
+    "slackbot";
+    "telegrambot";
+    "discordbot";
+    "linkedinbot";
+    "skypeuripreview";
+  ]
+
+(* §A9.3: a navigation lists [text/html], [*/*] and no header do not; a
+   link-preview fetcher gets the page whatever it accepts. *)
 let wants_html (r : Server.request) =
-  match Codec.header r.headers "accept" with
+  let navigation =
+    match Codec.header r.headers "accept" with
+      | None -> false
+      | Some accept ->
+          List.exists
+            (fun range ->
+              String.lowercase_ascii
+                (String.trim (List.hd (String.split_on_char ';' range)))
+              = "text/html")
+            (String.split_on_char ',' accept)
+  in
+  navigation
+  ||
+    match Codec.header r.headers "user-agent" with
     | None -> false
-    | Some accept ->
-        List.exists
-          (fun range ->
-            String.lowercase_ascii
-              (String.trim (List.hd (String.split_on_char ';' range)))
-            = "text/html")
-          (String.split_on_char ',' accept)
+    | Some agent ->
+        let agent = String.lowercase_ascii agent in
+        List.exists (Text.contains agent) preview_fetchers
 
 let manifest_at t key =
   match t.store.get_opt key with
@@ -461,18 +496,63 @@ let zip_response t ~max_members id filename =
           Zip.finish z);
   }
 
-let handle t ~max_zip_members (r : Server.request) ~token ~sub params =
+let image ~content_type body =
+  {
+    Server.status = 200;
+    headers =
+      [("content-type", content_type); ("x-content-type-options", "nosniff")];
+    body;
+  }
+
+let card = lazy (Base64.decode_exn Share_assets.card_base64)
+let making = Atomic.make false
+
+(* §A9.8: one image made at a time; a request finding it busy, like any
+   failure, is answered the generic image. *)
+let make_preview t ~self ~token ~key share =
+  match (share.target, Share_preview.kind_of_name share.filename, self) with
+    | `File manifest, Some kind, Some self
+      when Share_preview.available ()
+           && Atomic.compare_and_set making false true ->
+        Fun.protect ~finally:(fun () -> Atomic.set making false) @@ fun () ->
+        ignore (servable (manifest_at t manifest));
+        Option.map
+          (fun b ->
+            (try t.store.put key b
+             with Fail.E f ->
+               Log.info "share: preview not stored: %s" f.reason);
+            b)
+          (Share_preview.make ~kind (self ^ "/s/" ^ token ^ "/f"))
+    | _ -> None
+
+let preview t ~self ~token share =
+  let key = Option.get (Key.share_preview token) in
+  match
+    match t.store.get_opt key with
+      | Some b when Share_preview.valid b -> Some b
+      | _ -> make_preview t ~self ~token ~key share
+  with
+    | Some b -> image ~content_type:"image/jpeg" (Bigstring b)
+    | None -> image ~content_type:"image/png" (String (Lazy.force card))
+
+let handle ?self t ~tls ~max_zip_members (r : Server.request) ~token ~sub params
+    =
   try
     let share = load t token in
     let param k = List.assoc_opt k params in
+    let share_page = share_page ~origin:(origin ~tls r) ~token in
     match (share.target, sub) with
+      | _, "preview" -> preview t ~self ~token share
       | `File key, "" when media share.filename ->
           let m = servable (manifest_at t key) in
           let response =
-            if wants_html r then share_page ~token share
+            if wants_html r then share_page share
             else file_response t r ~name:share.filename ~inline:false m
           in
-          { response with headers = ("vary", "accept") :: response.headers }
+          {
+            response with
+            headers = ("vary", "accept, user-agent") :: response.headers;
+          }
       | `File key, ("" | "download") ->
           file_response t r ~name:share.filename ~inline:false
             (manifest_at t key)
@@ -483,7 +563,7 @@ let handle t ~max_zip_members (r : Server.request) ~token ~sub params =
           else file_response t r ~name:share.filename ~inline:true m
       | `Dir id, "" ->
           live_folder t id;
-          share_page ~token share
+          share_page share
       | `Dir id, "download" ->
           live_folder t id;
           zip_response t ~max_members:max_zip_members id share.filename

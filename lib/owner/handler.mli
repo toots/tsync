@@ -19,11 +19,13 @@ type t
     requests the owner's stop. [dest_roots] and [staging_roots] confine the
     paths clients pass (security-model §7.3). [subscribers] counts the
     connections subscribed to the domain's events and [traffic] measures its
-    stores, for [status] (08 §3.3). On a pulled tree [publish] also receives the
-    notices of android §4.2. *)
+    stores, for [status] (08 §3.3). [background] runs the preview image a share
+    creation starts, a detached fiber by default. On a pulled tree [publish]
+    also receives the notices of android §4.2. *)
 val create :
   ?subscribers:(unit -> int) ->
   ?traffic:(unit -> Tsync_status.Status_report.traffic) ->
+  ?background:((unit -> unit) -> unit) ->
   ?pull_params:Pulls.params ->
   domain:Tsync_domain.Domain.t ->
   engine:(module Tsync_sync.Engine.S) ->

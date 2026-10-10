@@ -61,7 +61,8 @@ host the handler are in [07-daemon-cli.md](07-daemon-cli.md).
 - **An optional library disappears without a failing build.** `tsync_fuse` is `(optional)` and
   `tsync_file_provider` is `enabled_if` macOS. What fails is the config parser, which refuses a
   type "unknown or not compiled into this build", and `linux/build.sh`, which requires
-  `tsync build-info` to list `fuse`.
+  `tsync build-info` to list `fuse`. `tsync_preview_av` is `(optional)` too; the gate requires
+  `build-info` to print `share previews: ffmpeg`.
 - **A host that needs the main thread runs the owner on another** (`Owner.host`): FUSE takes `run`
   and calls it from a thread of its own; File Provider calls it in place.
 - **Foreign threads enter with `Rt.run_sync`**, which blocks only the calling thread: FUSE workers

@@ -14,8 +14,12 @@ val claims : t -> string -> bool
 (** The manifest's domain, when the body parses as one. *)
 val manifest_domain : string -> Domain_name.t option
 
+(** [self] is where a thumbnailer reaches this listener's own share links; [tls]
+    picks the scheme of the page's absolute URLs when no proxy names one. *)
 val handle :
+  ?self:string ->
   t ->
+  tls:bool ->
   max_zip_members:int ->
   Tsync_http.Server.request ->
   token:string ->

@@ -25,6 +25,30 @@ let claim (s : Store.t) key v =
     | Store.Won -> `Won
     | Held b -> `Held (Bigstring.to_string b)
 
+(* A frame header alone: SOI, APP0 segments holding [pad] bytes, a frame of
+   [marker], EOI. *)
+let jpeg ?(marker = 0xC0) ?(precision = 8) ?(pad = 0) ~w ~h () =
+  let b = Buffer.create 64 in
+  let bytes l = List.iter (fun c -> Buffer.add_char b (Char.chr c)) l in
+  let u16 n = bytes [n lsr 8; n land 0xFF] in
+  bytes [0xFF; 0xD8];
+  let rec app left =
+    let n = min left 60_000 in
+    bytes [0xFF; 0xE0];
+    u16 (2 + n);
+    Buffer.add_string b (String.make n 'x');
+    if left > n then app (left - n)
+  in
+  app pad;
+  bytes [0xFF; 0xFF; marker];
+  u16 11;
+  bytes [precision];
+  u16 h;
+  u16 w;
+  bytes [1; 1; 0x11; 0];
+  bytes [0xFF; 0xD9];
+  Buffer.contents b
+
 (* TSYNC_CI_REQUIRE_REAL lists the stores, comma-separated, whose test must
    run against a real bucket rather than its fake. *)
 let real_required store =

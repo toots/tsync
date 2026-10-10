@@ -11,9 +11,10 @@
 (package
  (name tsync))
 
-; tsync-tls, tsync-ssl and tsync-fuse install nothing of their own: each brings
-; a library that tsync takes as a depopt, so installing one rebuilds tsync,
-; whose optional library and the catalog's select then link it in.
+; tsync-tls, tsync-ssl, tsync-fuse and tsync-ffmpeg install nothing of their
+; own: each brings a library that tsync takes as a depopt, so installing one
+; rebuilds tsync, whose optional library and the catalog's select then link it
+; in.
 
 (package
  (name tsync-tls)
@@ -25,6 +26,10 @@
 
 (package
  (name tsync-fuse)
+ (allow_empty))
+
+(package
+ (name tsync-ffmpeg)
  (allow_empty))
 
 ; The tray is its own package so that the bus library stays off a headless

@@ -5,7 +5,7 @@ trashed: would purge 4 objects
 trashed, cancelled: stopped: cancelled
 
 == expire, dry run (cutoff 10 days ago)
-trash 7, versions 2, journal 1, shares 4
+trash 7, versions 2, journal 1, shares 5
   delete manifests/<sub>/926c8b039839cfc6-7969407bf35f59e9
   delete manifests/<trashed>/4f7b4244079f8bf6-67a7ed7af26470c3
   delete manifests/<trashed>/91e75a14034af1d0-d3be400c101eec7c
@@ -18,6 +18,7 @@ trash 7, versions 2, journal 1, shares 4
   delete journal entry of 45 days ago
   delete tsync/shares/aa01
   delete tsync/shares/cache/aa01.data
+  delete tsync/shares/cache/aa01.jpg
   delete tsync/shares/cache/0123-4567.data
   delete tsync/shares/aa05
   skipped, trashed recently: <recent>
@@ -32,7 +33,7 @@ cancelled: true
 stopped: cancelled
 
 == expire, applied
-trash 7, versions 2, journal 1, shares 4
+trash 7, versions 2, journal 1, shares 5
   delete manifests/<sub>/926c8b039839cfc6-7969407bf35f59e9
   delete manifests/<trashed>/4f7b4244079f8bf6-67a7ed7af26470c3
   delete manifests/<trashed>/91e75a14034af1d0-d3be400c101eec7c
@@ -45,6 +46,7 @@ trash 7, versions 2, journal 1, shares 4
   delete journal entry of 45 days ago
   delete tsync/shares/aa01
   delete tsync/shares/cache/aa01.data
+  delete tsync/shares/cache/aa01.jpg
   delete tsync/shares/cache/0123-4567.data
   delete tsync/shares/aa05
   skipped, trashed recently: <recent>
@@ -72,3 +74,4 @@ left on the store:
   tsync/shares/aa02
   tsync/shares/aa03
   tsync/shares/aa04
+  tsync/shares/cache/aa02.jpg

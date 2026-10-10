@@ -30,6 +30,7 @@ path also caps a single file at ~80 GB (10,000 parts). Upgrade path when these
 bite: build on Fargate.
 """
 
+import base64
 import html
 import json
 import os
@@ -343,7 +344,7 @@ def json_response(obj):
 def html_response(body):
     return {
         "statusCode": 200,
-        "headers": {"Content-Type": "text/html; charset=utf-8"},
+        "headers": {"Content-Type": "text/html; charset=utf-8", "Cache-Control": "private"},
         "body": body,
     }
 
@@ -455,11 +456,92 @@ def serve_file(share, path, as_download, want_json):
     return file_answer(cache_key, os.path.basename(rel), m.size, as_download, want_json)
 
 
+PREVIEW_FETCHERS = (
+    "facebookexternalhit", "facebot", "twitterbot", "whatsapp", "slackbot",
+    "telegrambot", "discordbot", "linkedinbot", "skypeuripreview",
+)
+
+
 def wants_html(event):
     """Whether the request is a browser navigation: `text/html` listed
-    explicitly, which `*/*` and a missing header are not."""
-    accept = (event.get("headers") or {}).get("accept", "")
-    return any(r.split(";")[0].strip().lower() == "text/html" for r in accept.split(","))
+    explicitly, which `*/*` and a missing header are not; or a link-preview
+    fetcher, which gets the page whatever it accepts."""
+    headers = event.get("headers") or {}
+    accept = headers.get("accept", "")
+    agent = headers.get("user-agent", "").lower()
+    return any(
+        r.split(";")[0].strip().lower() == "text/html" for r in accept.split(",")
+    ) or any(f in agent for f in PREVIEW_FETCHERS)
+
+
+# http-proxy §A9.8: constants of 05 §8.
+PREVIEW_MAX_BYTES = 300 * 1024
+PREVIEW_SIZE = 800
+PREVIEW_MIN_SIDE = 300
+
+
+def jpeg_dimensions(b):
+    """(width, height) from the frame header of tsync's own encoder output,
+    else None."""
+    n = len(b)
+    if n < 4 or b[:2] != b"\xff\xd8" or b[-2:] != b"\xff\xd9":
+        return None
+    i = 2
+    while True:
+        if i >= n or b[i] != 0xFF:
+            return None
+        j = i + 1
+        while j < n and b[j] == 0xFF:
+            j += 1
+        if j >= n:
+            return None
+        m = b[j]
+        if 0xD0 <= m <= 0xD7 or m == 0x01:
+            i = j + 1
+            continue
+        if m in (0x00, 0xDA, 0xD9) or j + 2 >= n:
+            return None
+        length = (b[j + 1] << 8) | b[j + 2]
+        if length < 2 or j + 1 + length > n:
+            return None
+        if m in (0xC0, 0xC2):
+            if length < 8:
+                return None
+            precision, components = b[j + 3], b[j + 8]
+            h = (b[j + 4] << 8) | b[j + 5]
+            w = (b[j + 6] << 8) | b[j + 7]
+            if precision == 8 and h > 0 and w > 0 and components in (1, 3):
+                return (w, h)
+            return None
+        if 0xC1 <= m <= 0xCF and m not in (0xC4, 0xC8, 0xCC):
+            return None
+        i = j + 1 + length
+
+
+def valid_preview(b):
+    d = len(b) <= PREVIEW_MAX_BYTES and jpeg_dimensions(b)
+    return bool(d) and max(d) == PREVIEW_SIZE and min(d) >= PREVIEW_MIN_SIDE
+
+
+def image_response(body, content_type):
+    return {
+        "statusCode": 200,
+        "headers": {"Content-Type": content_type, "X-Content-Type-Options": "nosniff"},
+        "body": base64.b64encode(body).decode(),
+        "isBase64Encoded": True,
+    }
+
+
+def preview_response(token):
+    """The stored preview image when valid, else the generic one: this function
+    carries no thumbnailer."""
+    try:
+        b = get_bytes(CACHE_PREFIX + token + ".jpg")
+    except FileNotFoundError:
+        b = b""
+    if valid_preview(b):
+        return image_response(b, "image/jpeg")
+    return image_response(CARD_PNG, "image/png")
 
 
 def handler(event, context):
@@ -474,17 +556,19 @@ def handler(event, context):
         if share.get("type") not in ("file", "dir"):
             raise ShareError(400, "unknown share type")
         is_dir = share["type"] == "dir"
+        if sub == "preview":
+            return preview_response(token)
         if sub == "":
             if is_dir:
-                return html_response(render_browse(share, token))
+                return html_response(render_browse(share, token, event))
             if is_media(share["filename"]):
                 m = file_manifest(share["key"])
                 check_size(m)
                 if wants_html(event):
-                    resp = html_response(render_browse(share, token))
+                    resp = html_response(render_browse(share, token, event))
                 else:
                     resp = download_artifact(token, share, m)
-                resp["headers"]["Vary"] = "Accept"
+                resp["headers"]["Vary"] = "Accept, User-Agent"
                 return resp
             return download_artifact(token, share)
         if sub == "download":
@@ -520,7 +604,10 @@ def gcp_handler(request):
         "headers": {k.lower(): v for k, v in request.headers.items()},
     }
     resp = handler(event, None)
-    return (resp.get("body", ""), resp["statusCode"], resp.get("headers", {}))
+    body = resp.get("body", "")
+    if resp.get("isBase64Encoded"):
+        body = base64.b64decode(body)
+    return (body, resp["statusCode"], resp.get("headers", {}))
 
 
 def script_json(obj):
@@ -533,7 +620,15 @@ def script_json(obj):
     )
 
 
-def render_browse(share, token):
+def origin(event):
+    """https and the requester's host: the page's absolute URLs, for that
+    requester alone."""
+    headers = event.get("headers") or {}
+    host = headers.get("x-forwarded-host") or headers.get("host") or "localhost"
+    return "https://" + host.split(",")[0].strip()
+
+
+def render_browse(share, token, event):
     title = share.get("filename", "share")
     is_file = share["type"] == "file"
     if not is_file and title.endswith(".zip"):
@@ -549,14 +644,18 @@ def render_browse(share, token):
         "__OG_TITLE__": html.escape(title, quote=True),
         "__OG_DESC__": html.escape(desc, quote=True),
         "__SHARE_DATA__": script_json(data),
+        "__OG_IMAGE__": html.escape(origin(event) + "/" + token + "/preview", quote=True),
     }
     # One pass: a substituted value is never scanned for placeholders.
     return re.sub("|".join(values), lambda m: values[m.group()], BROWSE_HTML)
 
 
-def _asset(name):
-    with open(os.path.join(os.path.dirname(__file__), name)) as f:
+def _asset(name, mode="r"):
+    with open(os.path.join(os.path.dirname(__file__), name), mode) as f:
         return f.read()
+
+
+CARD_PNG = _asset("share-card.png", "rb")
 
 
 BROWSE_HTML = (

@@ -44,10 +44,25 @@ def load_handler(max_bytes=10 * 1024**3):
 BROWSER = "text/html,application/xhtml+xml,*/*;q=0.8"
 
 
-def event(token, sub="", query=None, accept=None):
+def event(token, sub="", query=None, accept=None, headers=None):
     path = "/" + token + (("/" + sub) if sub else "")
-    headers = {"accept": accept} if accept else {}
+    headers = dict(headers or {})
+    if accept:
+        headers["accept"] = accept
     return {"rawPath": path, "queryStringParameters": query or {}, "headers": headers}
+
+
+def jpeg(w, h, marker=0xC0, precision=8, pad=0):
+    """A frame header alone: SOI, APP0 segments holding `pad` bytes, a frame of
+    `marker`, EOI."""
+    out = b"\xff\xd8"
+    while pad > 0:
+        n = min(pad, 60_000)
+        out += b"\xff\xe0" + (2 + n).to_bytes(2, "big") + b"x" * n
+        pad -= n
+    out += bytes([0xFF, 0xFF, marker]) + (11).to_bytes(2, "big") + bytes([precision])
+    out += h.to_bytes(2, "big") + w.to_bytes(2, "big") + bytes([1, 1, 0x11, 0])
+    return out + b"\xff\xd9"
 
 
 def put(s3, key, body):
@@ -220,11 +235,11 @@ def test_media_file_share_opens_the_viewer(s3):
     for accept in (None, "*/*", "image/*,*/*;q=0.8"):
         resp = h.handler(event(tok, accept=accept), None)
         assert "attachment" in resp["headers"]["Location"]
-        assert resp["headers"]["Vary"] == "Accept"
+        assert resp["headers"]["Vary"] == "Accept, User-Agent"
         assert follow(s3, resp)[0] == b"audiodata"
     page = h.handler(event(tok, accept=BROWSER), None)
     assert page["statusCode"] == 200
-    assert page["headers"]["Vary"] == "Accept"
+    assert page["headers"]["Vary"] == "Accept, User-Agent"
     assert "text/html" in page["headers"]["Content-Type"]
     assert '"file": true' in page["body"]
     assert "Shared file" in page["body"]
@@ -238,6 +253,64 @@ def test_media_file_share_opens_the_viewer(s3):
     resp = h.handler(event(tok, "download"), None)
     assert "attachment" in resp["headers"]["Location"]
     assert follow(s3, resp)[0] == b"audiodata"
+
+
+def test_link_preview_fetcher_gets_the_page(s3):
+    h = load_handler()
+    key = put_file(s3, "r", "clip.mp4", [("pppp-c1", b"video")])
+    tok = file_share(s3, "c1", key, "clip.mp4")
+    whatsapp = {"user-agent": "WhatsApp/2.24.1.6 A"}
+    page = h.handler(event(tok, accept="*/*", headers=whatsapp), None)
+    assert page["statusCode"] == 200 and "text/html" in page["headers"]["Content-Type"]
+    assert page["headers"]["Cache-Control"] == "private"
+    assert f'property="og:image" content="https://localhost/{tok}/preview"' in page["body"]
+    page = h.handler(
+        event(tok, accept=BROWSER, headers={
+            "host": "abc.lambda-url.example", "x-forwarded-host": "files.example, edge"}),
+        None,
+    )
+    assert f'content="https://files.example/{tok}/preview"' in page["body"]
+    resp = h.handler(event(tok, headers={"user-agent": "curl/8.0"}), None)
+    assert resp["statusCode"] == 302
+
+
+def test_preview_image(s3):
+    import base64
+
+    h = load_handler()
+    key = put_file(s3, "r", "clip.mp4", [("pppp-c2", b"video")])
+    tok = file_share(s3, "c2", key, "clip.mp4")
+
+    def preview():
+        r = h.handler(event(tok, "preview"), None)
+        assert r["statusCode"] == 200 and r["isBase64Encoded"]
+        return r["headers"]["Content-Type"], base64.b64decode(r["body"])
+
+    card = open(os.path.join(os.path.dirname(__file__), "share-card.png"), "rb").read()
+    assert preview() == ("image/png", card)
+    put(s3, PREFIX + "cache/" + tok + ".jpg", jpeg(800, 450))
+    assert preview() == ("image/jpeg", jpeg(800, 450))
+    put(s3, PREFIX + "cache/" + tok + ".jpg", jpeg(640, 480))
+    assert preview() == ("image/png", card)
+    assert h.handler(event("ffff", "preview"), None)["statusCode"] == 404
+
+
+def test_preview_image_check():
+    h = load_handler()
+    assert h.valid_preview(jpeg(800, 450))
+    assert h.valid_preview(jpeg(450, 800, marker=0xC2))
+    assert h.valid_preview(jpeg(800, 300))
+    for bad in (
+        jpeg(800, 299), jpeg(801, 450), jpeg(640, 480),
+        jpeg(800, 450, marker=0xC3), jpeg(800, 450, marker=0xC9),
+        jpeg(800, 450, precision=12),
+        jpeg(800, 450, pad=h.PREVIEW_MAX_BYTES - 30),
+        jpeg(800, 450)[:-2],
+        b"\x89PNG" + jpeg(800, 450)[4:],
+        jpeg(800, 450)[:6] + b"\xff\xf0" + jpeg(800, 450)[8:],
+        b"\xff\xd8\xff\xda\x00\x02" + jpeg(800, 450)[6:],
+    ):
+        assert not h.valid_preview(bad)
 
 
 def test_media_file_share_too_large_has_no_page(s3):

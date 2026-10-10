@@ -65,6 +65,12 @@ val share_cache : prefix
     artifact, never a manifest. *)
 val share : string -> t option
 
+(** [tsync/shares/cache/<token>.jpg], the share's preview image (02 §2.14). *)
+val share_preview : string -> t option
+
+(** The token a preview image's key names, for any key or name. *)
+val preview_token : string -> string option
+
 val shard_prefix : Domain_name.t -> string -> prefix
 val chunk : Domain_name.t -> Chunk_key.t -> t
 val chunk_from : Domain_name.t -> Chunk_key.t -> t

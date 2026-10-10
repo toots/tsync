@@ -21,8 +21,10 @@ export OPAMCONFIRMLEVEL=unsafe-yes
 opam switch list --short | grep -qx "$SWITCH" || opam switch create "$SWITCH" "$COMPILER"
 eval "$(opam env --switch="$SWITCH" --set-switch)"
 
-# A release ships both TLS implementations, OpenSSL the default.
-./scripts/opam_deps.sh tsync tsync-tls tsync-ssl tsync-fuse tsync-tray
+# A release ships both TLS implementations, OpenSSL the default. TSYNC_FFMPEG
+# adds share preview images, for a caller that installed the FFmpeg libraries.
+./scripts/opam_deps.sh tsync tsync-tls tsync-ssl tsync-fuse tsync-tray \
+  ${TSYNC_FFMPEG:+tsync-ffmpeg}
 
 # Sources, build trees and logs, which are most of a switch and nothing the
 # next run needs: every CI job caches a root, within one budget.
@@ -41,6 +43,9 @@ echo "$info"
 echo "$info" | grep -Eq '^frontends:.*\bfuse\b'
 echo "$info" | grep -Eq '^tls:.*\bopenssl\b'
 echo "$info" | grep -Eq '^tls:.*\bnative\b'
+if [ -n "${TSYNC_FFMPEG:-}" ]; then
+  echo "$info" | grep -Eq '^share previews: ffmpeg$'
+fi
 
 # linux-desktop §5.1: no package set without the plugin. Its toolkit is
 # REQUIRED in the CMake project, so a machine without it stops here. The

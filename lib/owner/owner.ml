@@ -416,6 +416,7 @@ let one_shot ~what config dom f =
       let report = Report.create domain engine ~frontend:(fun () -> None) in
       let handler =
         Handler.create ~domain ~engine ~hooks:Handler.no_hooks
+          ~background:ignore
           ~publish:(fun _ -> 0)
           ~stats:(fun _ ->
             stats_reply [(Domain_name.to_string domain.name, report)] report)
