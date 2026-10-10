@@ -240,6 +240,13 @@ let handler (r : Server.request) read_body =
           | _ -> empty 405)
     | _ -> empty 400
 
+(* Requests are served on several domains, and a conditional write is a check
+   then a write. *)
+let bucket_lock = Rt.Fmutex.create ()
+
+let handler r read_body =
+  Rt.Fmutex.with_lock bucket_lock (fun () -> handler r read_body)
+
 (* The worked examples of the S3 SigV4 documentation. *)
 let vectors () =
   let aws =
