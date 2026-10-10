@@ -12,8 +12,11 @@ cd "$(dirname "$0")/.."
 export OPAMYES=1
 
 opam pin -ny .
+# Pinning again would fetch the new sources itself, and the update below would
+# then find nothing to rebuild.
 for pkg in ffmpeg-av ffmpeg-avcodec ffmpeg-avfilter ffmpeg-avutil ffmpeg-swscale; do
-  opam pin -ny "$pkg" git+https://github.com/savonet/ocaml-ffmpeg.git#main
+  opam pin list --short | grep -qx "$pkg" ||
+    opam pin -ny "$pkg" git+https://github.com/savonet/ocaml-ffmpeg.git#main
 done
 opam update
 opam upgrade -y
