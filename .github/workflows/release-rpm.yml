@@ -83,7 +83,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ~/.opam
-          key: opam-${{ matrix.image }}-${{ matrix.arch }}-${{ hashFiles('*.opam', 'linux/build.sh') }}
+          key: opam-${{ matrix.image }}-${{ matrix.arch }}-${{ hashFiles('*.opam', 'linux/build.sh', 'scripts/opam_deps.sh') }}
 
       - name: Build
         run: ./linux/build.sh
@@ -95,7 +95,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: ~/.opam
-          key: opam-${{ matrix.image }}-${{ matrix.arch }}-${{ hashFiles('*.opam', 'linux/build.sh') }}
+          key: opam-${{ matrix.image }}-${{ matrix.arch }}-${{ hashFiles('*.opam', 'linux/build.sh', 'scripts/opam_deps.sh') }}
 
       - name: Package
         run: ./linux/rpm/build.sh
