@@ -186,8 +186,14 @@ module Make (C : Context.S) = struct
                     | None -> `Not_made ("no image could be made of " ^ filename)
                     | Some b ->
                         Composite.guard C.composite m "store a share preview";
-                        m.store.put (Option.get (Key.share_preview token)) b;
-                        `Made)
+                        let image = Option.get (Key.share_preview token) in
+                        m.store.put image b;
+                        (* A revoke during the decode deleted the image before
+                           it was written. *)
+                        if m.store.get_opt key = None then (
+                          ignore (m.store.delete image);
+                          `Not_made "the share was revoked")
+                        else `Made)
             | Some "file", _, Some _ ->
                 `Not_made
                   (filename ^ " is not an image, a video or an audio file")

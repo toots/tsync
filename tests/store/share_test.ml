@@ -200,6 +200,8 @@ let routes () =
       store "a1" (Contract.jpeg ~w:800 ~h:450 ());
       store "a2" (Contract.jpeg ~w:640 ~h:480 ());
       get "a1" "preview" [];
+      get "a2" "preview" [];
+      store "a2" (Contract.jpeg ~w:800 ~h:450 ());
       get "a2" "preview" []);
   Fs.rm_rf root
 

@@ -167,6 +167,16 @@ let () =
       p "revoke an image share: %b, preview image gone: %b\n" revoked
         (copy.get_opt (Option.get (Key.share_preview (token_of photo.url)))
         = None);
+      let racing = Option.get (create "p.jpg, revoked mid-decode" "p.jpg") in
+      Atomic.set Share_preview.thumbnailer
+        (Some
+           (fun ~kind:_ ~deadline:_ _ ->
+             ignore (S.revoke racing.url);
+             Some (Bigstring.of_string image)));
+      preview "revoked while the image is made" racing.url;
+      p "no image left behind: %b\n"
+        (copy.get_opt (Option.get (Key.share_preview (token_of racing.url)))
+        = None);
       p "\n== revoke\n";
       let file = Option.get file in
       copy.put

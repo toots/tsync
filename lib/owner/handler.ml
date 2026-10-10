@@ -76,7 +76,11 @@ let silent (domain : Tsync_domain.Domain.t) () =
   mains <> [] && List.for_all Health.is_down mains
 
 let create ?(subscribers = fun () -> 0) ?(traffic = fun () -> no_traffic)
-    ?(background = fun f -> Rt.spawn ~name:"share preview" f) ?pull_params
+    ?(background =
+      let one_at_a_time = Rt.Fmutex.create () in
+      fun f ->
+        Rt.spawn ~name:"share preview" (fun () ->
+            Rt.Fmutex.with_lock one_at_a_time f)) ?pull_params
     ~(domain : Tsync_domain.Domain.t) ~engine ~hooks ~publish ~stats ~stop
     ~dest_roots ~staging_roots () =
   let name = Domain_name.to_string domain.name in

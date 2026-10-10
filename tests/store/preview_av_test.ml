@@ -5,7 +5,7 @@ open Tsync_core
 open Tsync_store
 module Server = Tsync_http.Server
 
-let video path ~width ~height =
+let video ?(fill = fun i -> i * 4) path ~width ~height =
   let out = Av.open_output path in
   let stream =
     Av.new_video_stream ~width ~height ~pixel_format:`Yuv420p
@@ -18,7 +18,7 @@ let video path ~width ~height =
     let frame = Avutil.Video.create_frame width height `Yuv420p in
     ignore
       (Avutil.Video.frame_visit ~make_writable:true
-         (Array.iter (fun (data, _) -> Bigarray.Array1.fill data (i * 4)))
+         (Array.iter (fun (data, _) -> Bigarray.Array1.fill data (fill i)))
          frame);
     Avutil.Frame.set_pts frame (Some (Int64.of_int i));
     Av.write_frame stream frame
@@ -36,8 +36,37 @@ let show name path kind =
                 (Bigstring.length b <= Share_preview.max_bytes)
           | None -> Printf.printf "%s: not a JPEG\n" name)
 
-(* http-proxy §A9.8 on a listener: the first [preview] makes and stores the
-   image, the second answers it without making another. *)
+let luma path =
+  let input = Av.open_input path in
+  let _, stream, _ = Av.find_best_video_stream input in
+  match Av.read_input ~video_frame:[stream] input with
+    | `Video_frame (_, f) ->
+        let y = ref 0 in
+        ignore
+          (Avutil.Video.frame_visit ~make_writable:false
+             (fun planes -> y := Bigarray.Array1.get (fst planes.(0)) 0)
+             f);
+        Av.close input;
+        !y
+    | _ -> assert false
+
+(* The [thumbnail] filter passes over the black opening of the video. *)
+let fade_in dir =
+  let path = Filename.concat dir "fade.mkv" in
+  video path ~width:640 ~height:360 ~fill:(fun i -> if i < 12 then 0 else 128);
+  let jpeg = Filename.concat dir "fade.jpg" in
+  (match Share_preview.make ~kind:`Video path with
+    | Some b ->
+        Out_channel.with_open_bin jpeg (fun oc ->
+            Out_channel.output_string oc (Bigstring.to_string b));
+        Printf.printf "fade-in video: picked a lit frame: %b\n" (luma jpeg > 100)
+    | None -> print_endline "fade-in video: none");
+  Sys.remove path;
+  Sys.remove jpeg
+
+(* http-proxy §A9.8 on a listener: an image is made once and then answered from
+   the store, a failure is not attempted again, and a share whose file is gone
+   gets the generic image. *)
 let served video root =
   let d = Domain_name.v "photos" in
   let composite =
@@ -63,31 +92,40 @@ let served video root =
     let max_chunk_buffers = 4
   end in
   let module R = Tsync_remote.Remote.Make (C) in
-  let content = In_channel.with_open_bin video In_channel.input_all in
   let cs = 65536 in
-  R.publish ~parent:Folder_id.root ~leaf:"clip.mkv"
-    (R.upload_chunks ~name:"clip.mkv" ~size:(String.length content)
-       ~chunk_size:cs ~mtime:1. (fun i ->
-         Bytes
-           (Bigstring.of_string
-              (String.sub content (i * cs)
-                 (min cs (String.length content - (i * cs)))))));
-  let token = String.make 32 'a' in
-  C.store.put
-    (Option.get (Key.share token))
-    (Bigstring.of_string
-       (Yojson.Safe.to_string
-          (`Assoc
-             [
-               ("v", `Int 1);
-               ("domain", `String "photos");
-               ("type", `String "file");
-               ( "key",
-                 `String (Key.to_string (Key.child d Folder_id.root "clip.mkv"))
-               );
-               ("filename", `String "clip.mkv");
-               ("expires", `Int 9_999_999_999);
-             ])));
+  let publish name content =
+    R.publish ~parent:Folder_id.root ~leaf:name
+      (R.upload_chunks ~name ~size:(String.length content) ~chunk_size:cs
+         ~mtime:1. (fun i ->
+           Bytes
+             (Bigstring.of_string
+                (String.sub content (i * cs)
+                   (min cs (String.length content - (i * cs)))))))
+  in
+  let share token name =
+    C.store.put
+      (Option.get (Key.share token))
+      (Bigstring.of_string
+         (Yojson.Safe.to_string
+            (`Assoc
+               [
+                 ("v", `Int 1);
+                 ("domain", `String "photos");
+                 ("type", `String "file");
+                 ( "key",
+                   `String (Key.to_string (Key.child d Folder_id.root name)) );
+                 ("filename", `String name);
+                 ("expires", `Int 9_999_999_999);
+               ])))
+  in
+  publish "clip.mkv" (In_channel.with_open_bin video In_channel.input_all);
+  publish "noise.mp3" (String.make 4096 'x');
+  let token = String.make 32 'a'
+  and noise = String.make 32 'b'
+  and gone = String.make 32 'c' in
+  share token "clip.mkv";
+  share noise "noise.mp3";
+  share gone "gone.mp4";
   let share = Tsync_http_proxy.Share_server.of_context (module C) in
   let self = ref "" in
   let server =
@@ -111,7 +149,7 @@ let served video root =
        (fun ~kind ~deadline url ->
          incr made;
          thumbnail ~kind ~deadline url));
-  let preview () =
+  let preview label token =
     let r =
       Tsync_http_proxy.Share_server.handle ~self:!self share ~tls:false
         ~max_zip_members:10
@@ -126,7 +164,7 @@ let served video root =
         }
         ~token ~sub:"preview" []
     in
-    Printf.printf "served preview: %s, %s, made so far %d\n"
+    Printf.printf "%s: %s, %s, made so far %d\n" label
       (Option.value ~default:"-" (List.assoc_opt "content-type" r.headers))
       (match r.body with
         | Bigstring b -> (
@@ -136,8 +174,11 @@ let served video root =
         | _ -> "the generic image")
       !made
   in
-  preview ();
-  preview ();
+  preview "video" token;
+  preview "video again" token;
+  preview "undecodable" noise;
+  preview "undecodable again" noise;
+  preview "file gone" gone;
   Printf.printf "stored: %b\n"
     (Option.fold ~none:false ~some:Share_preview.valid
        (C.store.get_opt (Option.get (Key.share_preview token))));
@@ -155,6 +196,7 @@ let () =
   show "wide video" wide `Video;
   show "tall video, scaled up" tall `Video;
   show "missing" (Filename.concat dir "missing.mkv") `Video;
+  fade_in dir;
   served wide (Filename.concat dir "store");
   Sys.remove wide;
   Sys.remove tall;

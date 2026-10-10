@@ -18,12 +18,12 @@ val manifest_domain : string -> Domain_name.t option
     picks the scheme of the page's absolute URLs when no proxy names one. *)
 val handle :
   ?self:string ->
-  t ->
   tls:bool ->
   max_zip_members:int ->
-  Tsync_http.Server.request ->
   token:string ->
   sub:string ->
+  t ->
+  Tsync_http.Server.request ->
   (string * string) list ->
   Tsync_http.Server.response
 

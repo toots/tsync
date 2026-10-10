@@ -5,4 +5,10 @@
  (name tsync_preview_av)
  (optional)
  (library_flags (-linkall))
- (libraries tsync_core ffmpeg-av ffmpeg-avcodec ffmpeg-swscale ffmpeg-avutil))
+ (libraries
+  tsync_core
+  ffmpeg-av
+  ffmpeg-avcodec
+  ffmpeg-avfilter
+  ffmpeg-swscale
+  ffmpeg-avutil))

@@ -242,9 +242,7 @@ Every file-share route reads the manifest first: a symlink manifest → 400 `can
 
 - Content streams from the domain's composite store: a range fetches only the chunks it covers, read from the store (from either space during a collection), each checked against its chunk key. Nothing is assembled whole, and nothing is written to any local domain state.
 - At most `max_share_responses` responses are open at once; beyond it a new share request is answered 503 before any header. Once headers are sent, a response is never refused mid-stream.
-- A chunk that is missing or fails its key aborts the response: the connection closes without the
-  chunked terminator, so the client sees an incomplete transfer, never a complete file that is
-  shorter than its manifest (or than its `Content-Range`).
+- A file's bytes are sent with a `content-length`, never chunked, since FFmpeg's HTTP reader fails on a chunked range answer once it has sought a few times. A chunk that is missing or fails its key aborts the response: the connection closes before `content-length` bytes, so the client sees an incomplete transfer, never a complete file that is shorter than its manifest (or than its `Content-Range`).
 
 ### A9.5 Headers and ranges
 
@@ -283,9 +281,9 @@ One template (shared with the cloud share function) serves a folder share and a 
 
 The image a chat application shows in a link's card. Every share has one, so `preview` always answers 200 once the token is loaded:
 
-1. A stored preview image (`tsync/shares/cache/<token>.jpg`, [02 §2.14](../02-remote-model.md#214-share-manifest-json-and-share-artifacts)) that is **valid** (below) → its bytes, `image/jpeg`.
-2. Else, for a file share of an image, a video or an audio file, on a server with a thumbnailer → make it, store it, answer it.
-3. Else, or when making it fails, times out or is busy → the **generic image**: a constant PNG carrying the tsync logo and name, embedded with the template.
+1. For a file share of an image, a video or an audio file, a stored preview image (`tsync/shares/cache/<token>.jpg`, [02 §2.14](../02-remote-model.md#214-share-manifest-json-and-share-artifacts)) that is **valid** (below) → its bytes, `image/jpeg`.
+2. Else, for such a share, on a server with a thumbnailer → make it, store it, answer it.
+3. Else, or when the file cannot be served (§A9.3), or making it fails or times out → the **generic image**: a constant PNG carrying the tsync logo and name, embedded with the template. `og:image` never points at the shared file itself, whose size nothing bounds.
 
 **A valid preview image** is a JPEG of at most `SHARE_PREVIEW_MAX_BYTES` whose longest side is exactly `SHARE_PREVIEW_SIZE` and whose shortest side is at least `SHARE_PREVIEW_MIN_SIDE`, so a card is never blurred by upscaling nor cut to a sliver. Only tsync makes these images, so the check reads one encoder's output and nothing more:
 
@@ -295,7 +293,7 @@ The image a chat application shows in a link's card. Every share has one, so `pr
 
 A store write that is not a valid preview image is refused ([security §6.4](../algorithms/security-model.md#64-the-share-space-on-a-listener)); a stored one that is not, written behind the listener's back, is ignored as absent.
 
-**Making one.** A **thumbnailer** is the FFmpeg libraries, linked into a build that has them (an optional dependency); a build without them never makes a preview image and nothing else changes. The image is one frame (for a video, an early representative one; for an audio file, its embedded cover, if any), scaled, up or down, to `SHARE_PREVIEW_SIZE` on its longest side and encoded as baseline JPEG. Its input is the shared file read over ranged requests, so only the parts the decoder seeks are fetched: a creator reads it through the link's `f`, a server through its own. A result that is not valid, or none within `SHARE_PREVIEW_TIMEOUT`, is discarded. A server makes at most one at a time: a request finding it busy is answered the generic image, and the next one finds the image stored. A creator makes it after the link is returned, as the separate preview operation ([05 §4.11](../05-ops-config.md#411-share)); a server, the first time `preview` is asked for a share without one. PDFs and folders always get the generic image.
+**Making one.** A **thumbnailer** is the FFmpeg libraries, linked into a build that has them (an optional dependency); a build without them never makes a preview image and nothing else changes. The image is one frame (for a video, the most representative of ten taken at even intervals, which passes over black and faded frames; for an audio file, its embedded cover, if any), scaled, up or down, to `SHARE_PREVIEW_SIZE` on its longest side and encoded as baseline JPEG. Its input is the shared file read over ranged requests, so only the parts the decoder seeks are fetched: a creator reads it through the link's `f`, a server through its own. A result that is not valid, or none within `SHARE_PREVIEW_TIMEOUT`, is discarded. A server makes at most one at a time, in arrival order: a request waiting for it reads the store again once its turn comes, so the requests for one share make one image. A server remembers, until it restarts, the shares it failed to make an image for and answers them the generic image without trying again. An image stored after its share was revoked is deleted again by whoever stored it. A creator makes it after the link is returned, as the separate preview operation ([05 §4.11](../05-ops-config.md#411-share)); a server, the first time `preview` is asked for a share without one. PDFs and folders always get the generic image.
 
 ---
 
@@ -386,5 +384,5 @@ Nothing a client sends chooses how much work the server does beyond the wire's c
 8. **`chunk-size` not chained; `verified` and `max-concurrency` chained**: a chunk size is this domain's config; a claim about verification is what the store behind can back; the bound is set by the slowest participant.
 9. **`share-url` answers `{"self":true}`**: behind TLS termination the server cannot know its public URL; the client knows the one it reached.
 10. **A preview image is made wherever FFmpeg is linked, and never required.** The creator usually has it and the resources; a small server or a cloud function may have neither. Reading through the link fetches only what the decoder seeks, so an online-only file and a server's remote store cost a few chunks, not the file.
-10. **Shares served from the store, not the mirror or a local cache; one predicate for "who serves shares"** for both manifest writes and `/s/` reads. The store server owns no domain state.
-11. **One listener per host**: every http-proxy binding shares one port, so conflicting listener options are a startup error.
+11. **Shares served from the store, not the mirror or a local cache; one predicate for "who serves shares"** for both manifest writes and `/s/` reads. The store server owns no domain state.
+12. **One listener per host**: every http-proxy binding shares one port, so conflicting listener options are a startup error.
