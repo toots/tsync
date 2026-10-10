@@ -60,12 +60,14 @@ jobs:
         # fuse3, not fuse: libfuse3 mounts through the setuid fusermount3,
         # which only fuse3 provides. gmp-devel is for mirage-crypto-pk, and gh
         # for the publish step. dbus-devel is the tray's; cmake, Qt 6 and KDE
-        # Frameworks 6 are the Dolphin plugin's.
+        # Frameworks 6 are the Dolphin plugin's; the FFmpeg libraries make share
+        # preview images.
         run: |
           dnf install -y \
             opam gcc gcc-c++ make m4 pkgconf-pkg-config git curl unzip rsync tar gzip \
             rpm-build systemd-rpm-macros gh binutils \
             fuse3-devel fuse3 openssl-devel gmp-devel \
+            libavcodec-free-devel libavformat-free-devel libavutil-free-devel libswscale-free-devel \
             dbus-devel cmake extra-cmake-modules qt6-qtbase-devel \
             kf6-kcoreaddons-devel kf6-kio-devel
 
@@ -85,6 +87,8 @@ jobs:
 
       - name: Build
         run: ./linux/build.sh
+        env:
+          TSYNC_FFMPEG: 1
 
       - name: Save the opam root
         if: steps.opam-root.outputs.cache-hit != 'true'

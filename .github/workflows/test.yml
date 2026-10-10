@@ -22,8 +22,9 @@ jobs:
 
       - name: System libraries
         # libdbus and the bus daemon are for the tray and its suite, which
-        # runs on a private session bus.
-        run: sudo apt-get update && sudo apt-get install -y libssl-dev libfuse3-dev fuse3 libgmp-dev pkg-config libdbus-1-dev dbus
+        # runs on a private session bus; the FFmpeg libraries are for share
+        # preview images.
+        run: sudo apt-get update && sudo apt-get install -y libssl-dev libfuse3-dev fuse3 libgmp-dev pkg-config libdbus-1-dev dbus libavcodec-dev libavformat-dev libavutil-dev libswscale-dev
 
       - uses: ocaml/setup-ocaml@v3
         with:
@@ -42,7 +43,7 @@ jobs:
       - name: OCaml libraries
         env:
           TSYNC_FORMATTER: 1
-        run: ./scripts/opam_deps.sh tsync tsync-tls tsync-ssl tsync-fuse tsync-tray
+        run: ./scripts/opam_deps.sh tsync tsync-tls tsync-ssl tsync-fuse tsync-ffmpeg tsync-tray
 
       - name: Save the opam switch
         if: steps.opam-switch.outputs.cache-hit != 'true'
@@ -59,13 +60,14 @@ jobs:
 
       # 10 §4.3: an optional library whose dependency is missing is skipped
       # quietly.
-      - name: The FUSE frontend and both TLS implementations are built
+      - name: The FUSE frontend, both TLS implementations and the thumbnailer are built
         run: |
           info=$(opam exec -- ./_build/default/bin/tsync.exe build-info)
           echo "$info"
           echo "$info" | grep -Eq '^frontends:.*\bfuse\b'
           echo "$info" | grep -Eq '^tls:.*\bopenssl\b'
           echo "$info" | grep -Eq '^tls:.*\bnative\b'
+          echo "$info" | grep -Eq '^share previews: ffmpeg$'
 
       - name: Tests
         run: opam exec -- dune build @runtest --force

@@ -1,0 +1,8 @@
+available: true
+card: 800x420, within 307200 bytes: true
+wide video: 800x450, within 307200 bytes: true
+tall video, scaled up: 450x800, within 307200 bytes: true
+missing: none
+served preview: image/jpeg, 800x450, made so far 1
+served preview: image/jpeg, 800x450, made so far 1
+stored: true

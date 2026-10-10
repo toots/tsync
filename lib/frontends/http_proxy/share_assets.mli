@@ -3,4 +3,6 @@
 
 val browse : string
 val player : string
-val mime : string
+
+(** The generic preview image, a PNG (http-proxy §A9.8). *)
+val card_base64 : string

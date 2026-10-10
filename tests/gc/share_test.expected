@@ -17,6 +17,20 @@ a token: https://s.example/d/<token>, in 7 days
 the same token: refused (exists/exists): the token aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa is taken
 a short token: refused (invalid): a token is 32 to 128 lowercase hex characters
 
+== preview images
+p.jpg: https://s.example/d/<token>, in 7 days
+  {"v":1,"expires":<exp>,"domain":"d","type":"file","key":"tsync/d/manifests/.tsync-root/e286517c3c302c71-42b88c8dce07bd8b","filename":"p.jpg"}
+without a thumbnailer: not made: this build cannot make preview images
+an image, by link: made
+read through https://s.example/d/<token>/f, stored beside the manifest: true
+a text file: not made: a.txt is not an image, a video or an audio file
+docs again: https://s.example/d/<token>, in 7 days
+  {"v":1,"expires":<exp>,"domain":"d","type":"dir","folderId":"0000000000a1-1","filename":"docs.zip"}
+a folder: not made: a folder share has no preview image
+an unknown token: absent: no live share of d has the token cccccccccccccccccccccccccccccccc
+an invalid image made: not made: no image could be made of p.jpg
+revoke an image share: true, preview image gone: true
+
 == revoke
 revoke by link: true
 manifest gone: true, cached download gone: true

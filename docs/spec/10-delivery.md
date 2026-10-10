@@ -42,7 +42,7 @@ it is published, which artifacts are released and how, and how a build obtains i
 
 `test` is hermetic: it needs no secret and runs on forks. It MUST:
 
-1. **Linux**: build everything with the FUSE frontend and both TLS implementations, assert them from
+1. **Linux**: build everything with the FUSE frontend, both TLS implementations and the share preview thumbnailer, assert them from
    `tsync build-info` (§4.3), check that the sources are formatted, and run every hermetic check of tiers Pure through Multi-process and the
    Platform tier for FUSE (09 §2), including a real mount driven by file-system calls. This includes
    the menu model, mount discovery, the discovery library under a C host, and the tray as a process
@@ -112,6 +112,9 @@ deliberate, never an accident of the checkout. The job fails when the reports co
   plugin, and fails when the plugin's toolkit is absent; before it packages the plugin it runs the
   plugin's own checks ([dolphin.md §7](frontends/dolphin.md#7-conformance)) on the artifact it
   ships. A macOS release includes the File Provider app.
+- The macOS and Fedora releases include the share preview thumbnailer
+  ([http-proxy §A9.8](frontends/http-proxy.md#a98-preview-image)), FFmpeg bundled in the app or
+  required from the distribution's own libraries.
 - An Android release cross-builds the core for the app's one ABI at the app's minimum platform
   level, from the commit being released, and packages it
   ([android-app §12](frontends/android-app.md#12-build)). The package build fails without it.

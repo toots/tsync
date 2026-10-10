@@ -132,10 +132,67 @@ module Make (C : Context.S) = struct
                          (Key.v
                             (Key.prefix_to_string Key.share_cache
                             ^ token ^ ".data")));
+                    ignore
+                      (m.store.delete (Option.get (Key.share_preview token)));
                     true
                 | _ -> found)
             false
             (Composite.members C.composite)
+
+  let field f k =
+    match List.assoc_opt k f with Some (`String s) -> Some s | _ -> None
+
+  (* 05 §4.11: made through the link itself, then written beside the manifest,
+     replacing any. *)
+  let preview s =
+    let token = token_of s in
+    let key =
+      match Key.share token with
+        | Some k -> k
+        | None -> Fail.raise_ Fail.Invalid "%s is not a share token or link" s
+    in
+    let held =
+      List.find_map
+        (fun (m : Composite.member) ->
+          match Option.map Bigstring.to_string (m.store.get_opt key) with
+            | Some b
+              when Gc_plan.share ~domain:d ~now:(Unix.gettimeofday ()) b = Kept
+              -> (
+                match Yojson.Safe.from_string b with
+                  | `Assoc f -> Some (m, f)
+                  | _ | (exception Yojson.Json_error _) -> None)
+            | _ -> None)
+        (Composite.members C.composite)
+    in
+    match held with
+      | None ->
+          Fail.raise_ Fail.Absent "no live share of %s has the token %s" name
+            token
+      | Some (m, f) -> (
+          let filename = Option.value ~default:"" (field f "filename") in
+          match
+            ( field f "type",
+              Share_preview.kind_of_name filename,
+              (m.store.capabilities Key.shares).share_url )
+          with
+            | Some "file", Some kind, Some url ->
+                if not (Share_preview.available ()) then
+                  `Not_made "this build cannot make preview images"
+                else (
+                  let url =
+                    if String.ends_with ~suffix:"/" url then url else url ^ "/"
+                  in
+                  match Share_preview.make ~kind (url ^ token ^ "/f") with
+                    | None -> `Not_made ("no image could be made of " ^ filename)
+                    | Some b ->
+                        Composite.guard C.composite m "store a share preview";
+                        m.store.put (Option.get (Key.share_preview token)) b;
+                        `Made)
+            | Some "file", _, Some _ ->
+                `Not_made
+                  (filename ^ " is not an image, a video or an audio file")
+            | _, _, None -> `Not_made (m.name ^ " serves no share links")
+            | _ -> `Not_made "a folder share has no preview image")
 
   (* 05 §4.11: the share cache, and anything in the share space that is not a
      share manifest. *)

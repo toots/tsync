@@ -108,6 +108,7 @@ module Make (C : Context.S) = struct
               (fun (e : Store.entry) ->
                 if artifact e then
                   if e.last_modified < cutoff then [e.key] else []
+                else if Key.preview_token (Key.to_string e.key) <> None then []
                 else (
                   Cancel.check cancelled;
                   match st.get_opt e.key with
@@ -124,6 +125,7 @@ module Make (C : Context.S) = struct
                                      if
                                        Key.leaf a.key = token ^ ".data"
                                        && a.last_modified >= cutoff
+                                       || Key.leaf a.key = token ^ ".jpg"
                                      then Some a.key
                                      else None)
                                    listing

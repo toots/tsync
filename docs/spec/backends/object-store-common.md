@@ -141,6 +141,7 @@ A function deployed beside a bucket MAY serve the bucket's share links; its URL 
 - Its routes and its share page are those of [http-proxy §A9.3](../frontends/http-proxy.md#a93-routes) and [§A9.6](../frontends/http-proxy.md#a96-share-page), without the `/s` prefix: a shared media file opens the page in file mode, unless it is above the share ceiling, which is refused before any page.
 - A file or folder above the deployment's share ceiling ([11 §7](../11-infrastructure.md#7-share-function)) is refused as too large.
 - Downloads are redirects to presigned URLs that expire within the share presign TTL and never after the share.
+- Its `preview` route is [http-proxy §A9.8](../frontends/http-proxy.md#a98-preview-image) without a thumbnailer: it answers a stored preview image or the generic one, and the page's `og:image` always uses `https`.
 - A token-keyed cached archive is rebuilt once older than `share_archive_max_age` ([data-model/backend §2.19](../data-model/backend.md#219-share-artifact-cache)).
 - Its grants are those of [11 §7](../11-infrastructure.md#7-share-function): read on the bucket, and write to the share cache only.
 
@@ -163,5 +164,5 @@ A function deployed beside a bucket MAY serve the bucket's share links; its URL 
 - A delete request drops its chunks and their markers, refuses keys of other domains and non-chunks, and a redelivery is a no-op; a refused key leaves the request in place.
 - An empty delete request is consumed without deleting anything (the probe).
 - A store whose bucket has no function answers `verified = false`, its owner records it unconfirmed and sends it no verify or discard request, and no probe request is left behind; with the function, it answers `true`, a whole-store verification writes 4096 shard-named requests, and a discard request carries exactly its keys.
-- The share function refuses a manifest naming another domain's key or folder, stops serving a trashed folder, escapes a folder name holding `</script>`, answers the share page for a shared media file to a request accepting `text/html` and a download to any other request or for any other file, and rebuilds an archive older than `share_archive_max_age`.
+- The share function refuses a manifest naming another domain's key or folder, stops serving a trashed folder, escapes a folder name holding `</script>`, answers the share page for a shared media file to a request accepting `text/html` or from a link-preview fetcher and a download to any other request or for any other file, answers `preview` with the stored image or the generic one, and rebuilds an archive older than `share_archive_max_age`.
 - Transport: a slow but flowing answer is not a stall; a stall is measured from the last byte; 429 and throttling 503 are LOAD, other 5xx LINK, 403 REFUSED, whatever the error body.

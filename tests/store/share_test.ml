@@ -28,6 +28,29 @@ let contains s sub =
   in
   go 0
 
+let preview_checks () =
+  let show name s =
+    p "%-28s %b" name (Share_preview.valid (Bigstring.of_string s))
+  in
+  show "baseline 800x450" (Contract.jpeg ~w:800 ~h:450 ());
+  show "progressive 450x800" (Contract.jpeg ~marker:0xC2 ~w:450 ~h:800 ());
+  show "800x300" (Contract.jpeg ~w:800 ~h:300 ());
+  show "800x299" (Contract.jpeg ~w:800 ~h:299 ());
+  show "801x450" (Contract.jpeg ~w:801 ~h:450 ());
+  show "640x480" (Contract.jpeg ~w:640 ~h:480 ());
+  show "lossless frame" (Contract.jpeg ~marker:0xC3 ~w:800 ~h:450 ());
+  show "arithmetic frame" (Contract.jpeg ~marker:0xC9 ~w:800 ~h:450 ());
+  show "12-bit" (Contract.jpeg ~precision:12 ~w:800 ~h:450 ());
+  show "over the byte cap"
+    (Contract.jpeg ~pad:(Share_preview.max_bytes - 30) ~w:800 ~h:450 ());
+  let ok = Contract.jpeg ~w:800 ~h:450 () in
+  show "no end marker" (String.sub ok 0 (String.length ok - 2));
+  show "not a JPEG" ("\x89PNG" ^ String.sub ok 4 (String.length ok - 4));
+  show "segment past the end"
+    (String.sub ok 0 6 ^ "\xFF\xF0" ^ String.sub ok 8 (String.length ok - 8));
+  show "scan before any frame"
+    ("\xFF\xD8\xFF\xDA\x00\x02" ^ String.sub ok 6 (String.length ok - 6))
+
 (* §A9.3 through [handle], on a real store: three shared files of one domain. *)
 let routes () =
   Fs.rm_rf root;
@@ -85,16 +108,17 @@ let routes () =
       share "a2" "notes.txt" (Some "plain words");
       share "a3" "gone.mp4" None;
       let t = S.of_context (module C) in
-      let get ?accept token sub params =
+      let get ?accept ?(headers = []) token sub params =
         let r =
-          S.handle t ~max_zip_members:10
+          S.handle t ~tls:false ~max_zip_members:10
             {
               Server.meth = "GET";
               target = "";
               path = "";
               query = "";
               headers =
-                (match accept with Some a -> [("accept", a)] | None -> []);
+                (headers
+                @ match accept with Some a -> [("accept", a)] | None -> []);
               peer = "";
               body_length = `Length 0;
             }
@@ -102,18 +126,40 @@ let routes () =
         in
         let header k = Option.value ~default:"-" (List.assoc_opt k r.headers) in
         let body = body_text r in
-        p "%s /%s%s%s -> %d%s %s | %s | %s" token sub
+        let og_image =
+          match String.split_on_char '"' body with
+            | parts ->
+                let rec find = function
+                  | "og:image" :: " content=" :: url :: _ -> url
+                  | _ :: rest -> find rest
+                  | [] -> "-"
+                in
+                find parts
+        in
+        p "%s /%s%s%s%s -> %d%s %s | %s | %s" token sub
           (if params = [] then "" else "?json=1")
           (match accept with Some a -> " [" ^ a ^ "]" | None -> "")
+          (String.concat ""
+             (List.map (fun (k, v) -> Printf.sprintf " [%s: %s]" k v) headers))
           r.status
-          (if header "vary" = "accept" then " vary" else "")
+          (if header "vary" = "-" then "" else " vary " ^ header "vary")
           (header "content-type")
           (header "content-disposition")
           (if String.starts_with ~prefix:"text/html" (header "content-type")
            then
-             Printf.sprintf "page: file mode %b, raw name %b"
+             Printf.sprintf
+               "page: file mode %b, raw name %b, cache-control %s, og:image %s"
                (contains body {|"file":true|})
                (contains body "</script>.mp3")
+               (header "cache-control") og_image
+           else if String.starts_with ~prefix:"image/" (header "content-type")
+           then
+             Printf.sprintf "%d bytes, %s" (String.length body)
+               (match Share_preview.dimensions body with
+                 | Some (w, h) -> Printf.sprintf "JPEG %dx%d" w h
+                 | None ->
+                     if String.starts_with ~prefix:"\x89PNG\r\n" body then "PNG"
+                     else "unknown")
            else String.trim body)
       in
       p "== routes of a file share (§A9.3)";
@@ -127,7 +173,34 @@ let routes () =
       get "a2" "" [];
       get "a2" "f" [];
       get ~accept:"text/html" "a2" "" [];
-      get ~accept:"text/html" "a3" "" []);
+      get ~accept:"text/html" "a3" "" [];
+      p "== link previews (§A9.3, §A9.6, §A9.8)";
+      let whatsapp = [("user-agent", "WhatsApp/2.24.1.6 A")] in
+      get ~accept:"*/*" ~headers:whatsapp "a1" "" [];
+      get ~headers:[("user-agent", "curl/8.0")] "a1" "" [];
+      get ~accept:"text/html" ~headers:[("host", "box.lan:8080")] "a1" "" [];
+      get ~accept:"text/html"
+        ~headers:
+          [
+            ("host", "127.0.0.1:5446");
+            ("x-forwarded-proto", "https");
+            ("x-forwarded-host", "files.example, edge.example");
+          ]
+        "a1" "" [];
+      get ~headers:whatsapp "a2" "" [];
+      get "a1" "preview" [];
+      get "a2" "preview" [];
+      get "a3" "preview" [];
+      get "ffff" "preview" [];
+      let store token s =
+        C.store.put
+          (Option.get (Key.share_preview token))
+          (Bigstring.of_string s)
+      in
+      store "a1" (Contract.jpeg ~w:800 ~h:450 ());
+      store "a2" (Contract.jpeg ~w:640 ~h:480 ());
+      get "a1" "preview" [];
+      get "a2" "preview" []);
   Fs.rm_rf root
 
 let () =
@@ -171,6 +244,8 @@ let () =
       "a.bin";
       "mp3";
     ];
+  p "== preview image check (§A9.8)";
+  preview_checks ();
   routes ();
   p "== single-pass templating";
   p "%s" (S.fill "<h1>__A__</h1> __B__" [("__A__", "__B__"); ("__B__", "b")]);

@@ -632,10 +632,10 @@ differently. A command MUST NOT split a token on `:` or `/` itself.
 | `import DIR [--only G] [--exclude G] [--force-rehash]` | owner | [05 §4.3](05-ops-config.md); exit 1 if any entry failed |
 | `export [PATH...] DIR [--source] [-j N]` | read | [05 §4.4](05-ops-config.md); each `PATH` is read in a domain (§5.2), `DIR` is local; one domain per run; exit 1 on failures or on pending local changes (listed on stderr) |
 | `rsync SRC DST [--move] [-n]` | owner | [05 §4.5](05-ops-config.md). Each argument is a side (§5.2). Two local sides are refused with exit 2, like two different domains. `-n` prints each entry's decision and changes nothing |
-| `share [PATH] [--expires DUR] [--token HEX] \| --revoke TOKEN\|URL \| --clear-cache` | owner | [05 §4.11](05-ops-config.md); URL on stdout, expiry on stderr; `--revoke` exits 1 when no share of the domain held the token |
+| `share [PATH] [--expires DUR] [--token HEX] \| --preview TOKEN\|URL \| --revoke TOKEN\|URL \| --clear-cache` | owner | [05 §4.11](05-ops-config.md); URL on stdout as soon as the share exists, expiry on stderr; the preview image is then made by the owner in the background, or by this process before it exits when it ran the request itself; `--preview` makes it again and waits; `--revoke` exits 1 when no share of the domain held the token |
 | `config [--edit]` | none | print the parsed config with secrets masked, or run the wizard (§5.9) |
 | `default-domain [NAME] [--clear]` | none | set (must be configured), clear, or print (exit 1 when unset) |
-| `build-info` | none | compiled frontends and drivers, TLS implementations, the platform's reader of the service log (§2.7, the one `logs` executes), paths, sockets |
+| `build-info` | none | compiled frontends and drivers, TLS implementations, whether share preview images can be made (`share previews: ffmpeg`, else `none`), the platform's reader of the service log (§2.7, the one `logs` executes), paths, sockets |
 | `<group> <verb> [ARGS...]` | per verb | frontend-contributed ([08 §2.1](08-frontends.md)); the binary resolves `--domain`, checks the frontend is configured for it, and passes the remaining arguments uninterpreted. `fileprovider reset` terminates no process and `fileprovider purge` stops the owner only after the app released its domains ([file-provider.md §9.3–9.4](frontends/file-provider.md#93-reset)); the desktop `tsync android` group is owner-class |
 
 `--source NAME` reads from one member ([05 §3.1](05-ops-config.md) `reading_from`); `-j N` sets read

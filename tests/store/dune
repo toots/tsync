@@ -113,6 +113,7 @@
  (name share_test)
  (modules share_test)
  (libraries
+  contract
   tsync_core
   tsync_store
   tsync_remote
@@ -240,3 +241,38 @@
  (alias runtest)
  (action
   (diff copy_memo_test.expected copy_memo_test.output)))
+
+; Built only where the FFmpeg bindings are, as the thumbnailer is.
+
+(executable
+ (name preview_av_test)
+ (modules preview_av_test)
+ (optional)
+ (libraries
+  tsync_core
+  tsync_store
+  tsync_remote
+  tsync_http
+  tsync_http_proxy
+  tsync_preview_av
+  ffmpeg-av
+  ffmpeg-avcodec
+  ffmpeg-avutil
+  unix
+  yojson))
+
+(rule
+ (enabled_if %{lib-available:tsync_preview_av})
+ (action
+  (with-stdout-to
+   preview_av_test.output
+   (setenv
+    CARD
+    %{dep:../../lambda/share-card.png}
+    (run ./preview_av_test.exe)))))
+
+(rule
+ (alias runtest)
+ (enabled_if %{lib-available:tsync_preview_av})
+ (action
+  (diff preview_av_test.expected preview_av_test.output)))

@@ -116,6 +116,35 @@ let () =
              s.copy (Key.v "tsync/shares/abcd") (Key.v "tsync/shares/cache/y")));
       p "copy within the share cache: %s\n"
         (kind (fun () -> s.copy staged (Key.v "tsync/shares/cache/z")));
+      p "== preview images (security §6.4)\n";
+      let token = String.make 32 'a' in
+      let manifest = Option.get (Key.share token)
+      and image = Option.get (Key.share_preview token) in
+      let valid = Contract.jpeg ~w:800 ~h:450 () in
+      p "before its manifest: %s\n"
+        (kind (fun () -> Contract.put s image valid));
+      Contract.put s manifest
+        {|{"v":1,"domain":"d","type":"dir","folderId":".tsync-root"}|};
+      p "the manifest's domain writes a valid one: %s\n"
+        (kind (fun () -> Contract.put s image valid));
+      p "an invalid one: %s\n"
+        (kind (fun () -> Contract.put s image (Contract.jpeg ~w:640 ~h:480 ())));
+      p "another domain writes one: %s\n"
+        (kind (fun () -> Contract.put ro image valid));
+      p "another domain reads it: %s\n" (kind (fun () -> Contract.get ro image));
+      p "the manifest's domain reads it: %b\n"
+        (Contract.get s image = Some valid);
+      p "listed: %b\n"
+        (List.exists
+           (fun (e : Store.entry) -> Key.equal e.key image)
+           (s.list_prefix Key.shares));
+      p "named in a batch read: %s\n"
+        (kind (fun () -> (Option.get s.get_many) [image]));
+      p "another domain deletes it: %s\n" (kind (fun () -> ro.delete image));
+      ignore (s.delete manifest);
+      let first = s.delete image in
+      let again = s.delete image in
+      p "deleted once the manifest is gone: %b, then again: %b\n" first again;
       p "== a backend that throttles for two seconds\n";
       let slow = client "throttled" in
       Contract.put slow (Key.v "tsync/throttled/a") "a";

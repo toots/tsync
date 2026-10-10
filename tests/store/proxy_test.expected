@@ -59,6 +59,17 @@ list_many: 1 folders
 copy into a share manifest: refused/denied
 copy out of a share manifest: refused/denied
 copy within the share cache: ok
+== preview images (security §6.4)
+before its manifest: refused/denied
+the manifest's domain writes a valid one: ok
+an invalid one: refused/denied
+another domain writes one: refused/denied
+another domain reads it: refused/denied
+the manifest's domain reads it: true
+listed: false
+named in a batch read: refused/denied
+another domain deletes it: refused/denied
+deleted once the manifest is gone: true, then again: false
 == a backend that throttles for two seconds
 a read through it: ok; the peer's breaker tripped: false
 == a batch read of more than the answer budget

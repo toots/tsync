@@ -104,6 +104,7 @@ tsync/gc-jobs/D/<run>/<shard>                   discard job
 tsync/shares/<token>                            share manifest (store-wide, not per domain)
 tsync/shares/cache/<token>.data                 assembled share artifact, by token
 tsync/shares/cache/<h1>-<h2>.data               assembled file, by whole-file digest
+tsync/shares/cache/<token>.jpg                  preview image of that share
 ```
 
 Rules:
@@ -382,7 +383,9 @@ any non-empty lowercase hex token of at most 64 characters (caller-supplied toke
   `tsync/<domain>/manifests/` and be a child key; for `dir`, `folderId` MUST be a folder id ([01-core.md §2.5](01-core.md#25-folder-ids)).
   Otherwise the share is refused. Unknown fields are ignored.
 - **Artifacts**: `tsync/shares/cache/<token>.data` (a download of that share) and
-  `tsync/shares/cache/<h1>-<h2>.data` (a file by whole-file digest). Readers SHOULD
+  `tsync/shares/cache/<h1>-<h2>.data` (a file by whole-file digest), and the **preview image**
+  `tsync/shares/cache/<token>.jpg`: a JPEG within the sizes of http-proxy §A9.8, made from the shared
+  file ([http-proxy §A9.8](frontends/http-proxy.md#a98-preview-image)). Readers SHOULD
   accept a `tsync/shares/<name>.data` object directly under the share tree (meaning a share artifact,
   never a share manifest; clear-cache and expiry delete it); writers MUST NOT produce it.
 

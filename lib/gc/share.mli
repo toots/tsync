@@ -18,6 +18,13 @@ module Make (_ : Tsync_remote.Context.S) : sig
       domain's share is left alone. *)
   val revoke : string -> bool
 
+  (** A token or a link: makes the share's preview image through the link and
+      writes it beside the manifest. ABSENT when no live share of this domain
+      holds the token; [`Not_made] says why nothing was written. Blocks for up
+      to [SHARE_PREVIEW_TIMEOUT]; the creator runs it after {!create} returned.
+  *)
+  val preview : string -> [ `Made | `Not_made of string ]
+
   (** Cached share artifacts on every member: objects and bytes deleted. *)
   val clear_cache : unit -> int * int
 end

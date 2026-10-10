@@ -161,8 +161,9 @@ The share space `tsync/shares/` belongs to no domain, so its keys are confined b
 - **Write** (`PUT` of `tsync/shares/<token>`): the server MUST parse the body as a share manifest and accept it only if §6.3 holds for the route's domain and any manifest already at the key names the same domain. Otherwise 401.
 - **Read and delete** of a manifest key: allowed only if the stored manifest names the route's domain; otherwise answered as a failed signature. Deleting an absent manifest is success (204).
 - Cache artifacts live under `tsync/shares/cache/`. A share-space key that is neither `tsync/shares/<token>` nor under `cache/`: readers SHOULD accept it (meaning a cache artifact); writers MUST NOT produce it.
-- **Listing** the share space through a listener MUST return only cache artifacts, never manifest keys: a listing of tokens would hand out every domain's links.
-- **Cache artifacts** are rebuildable from the chunks; any route MAY list, read or delete them.
+- **Listing** the share space through a listener MUST return only cache artifacts, never manifest keys nor preview images (`cache/<token>.jpg`): a listing of tokens would hand out every domain's links.
+- **Cache artifacts** are rebuildable from the chunks; any route MAY list, read or delete them, except preview images.
+- **Preview images** are named by their token, so they follow the manifest: a read or a write is allowed only if the manifest at that token names the route's domain, a write only of a valid preview image ([http-proxy §A9.8](../frontends/http-proxy.md#a98-preview-image)), checked before it is stored; a delete also when the manifest is absent, since revocation deletes the manifest first. Otherwise answered as a failed signature.
 - Bulk operations MUST NOT name manifest keys; a bulk list containing one is refused whole (401).
 
 A domain writer with direct store credentials can still write any share manifest in a bucket shared by several domains; such writers are mutually trusted (§3.1).
@@ -295,7 +296,7 @@ An implementation MUST exhibit:
 - A key outside the route, an unserved domain and a bad signature produce the same status and body.
 - A bulk operation with one foreign key is refused whole.
 - A configuration with a domain named after a reserved root, or containing `/`, is refused.
-- A share manifest naming another domain, a file key outside the domain, or the trash folder id, is not served. A proxy client cannot read, overwrite, delete or list another domain's share manifests; share-space listings contain no manifest keys.
+- A share manifest naming another domain, a file key outside the domain, or the trash folder id, is not served. A proxy client cannot read, overwrite, delete or list another domain's share manifests or preview images; share-space listings contain no manifest keys and no preview images.
 - A share with a past or missing expiry answers 410; a revoked share answers 404 at once; a share of a folder that was since trashed is no longer served.
 - A caller-chosen token that is taken is refused, not overwritten.
 - A socket in a directory with group or other access is not served; a connection from another uid is closed without an answer.

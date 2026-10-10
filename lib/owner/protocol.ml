@@ -179,6 +179,7 @@ type _ request =
     }
       -> shared request
   | Share_revoke : string -> bool request
+  | Share_preview : string -> [ `Made | `Not_made of string ] request
   | Share_clear_cache : (int * int) request
   | Job : { job : Jobs.t; narrate : bool } -> int request
   | Cancel : int -> bool request
@@ -217,6 +218,7 @@ let action : type a. a request -> string = function
   | Trash_restore _ -> "trash_restore"
   | Share _ -> "share"
   | Share_revoke _ -> "share_revoke"
+  | Share_preview _ -> "share_preview"
   | Share_clear_cache -> "share_clear_cache"
   | Job _ -> "job"
   | Cancel _ -> "cancel"
@@ -243,7 +245,7 @@ let bulk : type a. a request -> bool = function
 
 let refused_while_paused : type a. a request -> bool = function
   | Revert _ | Sync _ | Trash_restore _ | Job _ | Share _ | Share_revoke _
-  | Share_clear_cache ->
+  | Share_preview _ | Share_clear_cache ->
       true
   | _ -> false
 
@@ -360,7 +362,7 @@ let request_fields : type a. a request -> (string * Yojson.Safe.t) list =
       target_fields r.item
       @ opt "expires" (fun e -> `Float e) r.expires
       @ opt "token" (fun t -> `String t) r.token
-  | Share_revoke s -> [("arg", `String s)]
+  | Share_revoke s | Share_preview s -> [("arg", `String s)]
   | Job r -> [("job", Jobs.to_yojson r.job); ("narrate", `Bool r.narrate)]
   | Cancel id -> [("job", `Int id)]
   | Pause on -> [("arg", `String (if on then "on" else "off"))]
@@ -472,6 +474,7 @@ let decode j =
                token = str j "token";
              })
     | "share_revoke" -> Request (Share_revoke (required j "arg"))
+    | "share_preview" -> Request (Share_preview (required j "arg"))
     | "share_clear_cache" -> Request Share_clear_cache
     | "job" -> (
         match Option.map Jobs.of_yojson (member j "job") with
@@ -708,6 +711,11 @@ let encode_reply : type a. a request -> a -> Yojson.Safe.t =
     | Share _ ->
         ok [("url", `String reply.url); ("expires", `Float reply.expires)]
     | Share_revoke _ -> ok [("revoked", `Bool reply)]
+    | Share_preview _ -> (
+        match reply with
+          | `Made -> ok [("made", `Bool true)]
+          | `Not_made why -> ok [("made", `Bool false); ("reason", `String why)]
+        )
     | Share_clear_cache ->
         let n, bytes = reply in
         ok [("deleted", `Int n); ("bytes", `Int bytes)]
@@ -840,6 +848,9 @@ let decode_reply : type a. a request -> Yojson.Safe.t -> a =
           expires = Option.value ~default:0. (number j "expires");
         }
     | Share_revoke _ -> flag j "revoked"
+    | Share_preview _ ->
+        if flag j "made" then `Made
+        else `Not_made (Option.value ~default:"" (str j "reason"))
     | Share_clear_cache -> (count "deleted" j, count "bytes" j)
     | Job _ -> count "exit" j
     | Cancel _ -> flag j "cancelled"

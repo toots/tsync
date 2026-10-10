@@ -227,11 +227,12 @@ Refusals are `text/plain` bodies `<message>\n`. Any other failure is 500 `intern
 | dir | `download` | streamed ZIP of the folder (§A9.7) |
 | dir | `list?path=` | resolve `path` inside the shared folder; a folder → `{"dirs":[names],"files":[{"name","size"}]}`, each sorted by lowercase name; anything else → 404 |
 | dir | `f?path=[&dl=1][&json=1]` | resolve `path` (non-empty, else 400) to a file, else 404. `json` → `{"url":"/s/<token>/f?path=<pct-encoded>","name","contentType"(mime or null),"size"}`; otherwise the bytes, `inline` unless `dl` |
+| any | `preview` | the share's preview image (§A9.8) |
 | any other | | 404 |
 
 A **media file** is one whose name maps, in the shared mime table, to `image/*`, `audio/*`, `video/*` or `application/pdf`: what a browser plays or displays by itself. Text and HTML are not media.
 
-A request is **asked for by a browser** when its `Accept` header lists `text/html` explicitly, as a navigation does; `*/*`, another type or no header is not. Anything else that follows the link (a command-line client, an image element, the fetcher of a chat application building a link preview) is answered the file itself. Both answers of a media file's `""` carry `vary: accept`.
+A request is **asked for by a browser** when its `Accept` header lists `text/html` explicitly, as a navigation does, or when its `User-Agent` contains, ignoring case, the name of a link-preview fetcher: `facebookexternalhit`, `Facebot`, `Twitterbot`, `WhatsApp`, `Slackbot`, `TelegramBot`, `Discordbot`, `LinkedInBot`, `SkypeUriPreview`. These fetch a link to build the card a chat application shows, and only the page carries what the card is made of. `*/*`, another type or no header is not. Anything else that follows the link (a command-line client, an image element) is answered the file itself. Both answers of a media file's `""` carry `vary: accept, user-agent`.
 
 Every file-share route reads the manifest first: a symlink manifest → 400 `cannot serve a symlink directly`; no manifest → 404. The page is never served for a file that cannot be.
 
@@ -262,6 +263,9 @@ One template (shared with the cloud share function) serves a folder share and a 
 | `__OG_TITLE__` | the title: for a folder, manifest `filename` without extension; for a file, `filename` whole | HTML text/attribute |
 | `__OG_DESC__` | `Shared folder · tsync`, or `Shared file · tsync` | HTML text/attribute |
 | `__SHARE_DATA__` | JSON `{"base":"/s/<token>","title":<title>}`, with `"file":true` for a file share | JSON-in-HTML |
+| `__OG_IMAGE__` | the absolute URL of `preview`: `<scheme>://<host>/s/<token>/preview` | HTML attribute |
+
+`host` is the request's `X-Forwarded-Host`, else its `Host`. `scheme` is `X-Forwarded-Proto` when it is `http` or `https`, else `https` on a TLS listener, else `http`. Both are the requester's own claims: they shape only the page answered to that request, whose `vary` covers neither, so the page is `cache-control: private`.
 
 `content-type: text/html; charset=utf-8`.
 
@@ -274,6 +278,24 @@ One template (shared with the cloud share function) serves a folder share and a 
 - Members are computed before the response starts, up to `max_zip_members`: a depth-first walk from the shared folder, children sorted bytewise by name, directories emitted as entries, paths rooted at `filename` without its extension. Member names are the validated leaf names ([01-core](../01-core.md)); none contains `..` or a leading `/`.
 - 200, `application/zip`, attachment, no content length. The archive format is [01 §13](../01-core.md#13-streaming-zip64-archives); directory entries carry mtime 0, files their manifest's mtime.
 - A member whose manifest vanished since the walk is skipped and logged; a chunk that is missing or fails its key aborts the archive as above, rather than ending its member early. A failure after headers truncates the stream and is logged.
+
+### A9.8 Preview image
+
+The image a chat application shows in a link's card. Every share has one, so `preview` always answers 200 once the token is loaded:
+
+1. A stored preview image (`tsync/shares/cache/<token>.jpg`, [02 §2.14](../02-remote-model.md#214-share-manifest-json-and-share-artifacts)) that is **valid** (below) → its bytes, `image/jpeg`.
+2. Else, for a file share of an image, a video or an audio file, on a server with a thumbnailer → make it, store it, answer it.
+3. Else, or when making it fails, times out or is busy → the **generic image**: a constant PNG carrying the tsync logo and name, embedded with the template.
+
+**A valid preview image** is a JPEG of at most `SHARE_PREVIEW_MAX_BYTES` whose longest side is exactly `SHARE_PREVIEW_SIZE` and whose shortest side is at least `SHARE_PREVIEW_MIN_SIDE`, so a card is never blurred by upscaling nor cut to a sliver. Only tsync makes these images, so the check reads one encoder's output and nothing more:
+
+1. The bytes start with `FF D8` and end with `FF D9`.
+2. From offset 2, read segments: a marker is `FF` followed by a byte other than `00` and `FF` (further `FF` bytes before it are fill, skipped); markers `D0`–`D7` and `01` have no length; any other marker is followed by a big-endian 16-bit length counting itself, at least 2, which MUST lie within the bytes.
+3. The first frame marker decides: `C0` (baseline) or `C2` (progressive), whose segment holds precision (must be 8), height, width (big-endian 16-bit, both non-zero) and a component count of 1 or 3. Any other `C1`–`CF` frame marker except `C4`, `C8` and `CC`, or reaching `DA` or `D9` first, or running out of bytes, is invalid.
+
+A store write that is not a valid preview image is refused ([security §6.4](../algorithms/security-model.md#64-the-share-space-on-a-listener)); a stored one that is not, written behind the listener's back, is ignored as absent.
+
+**Making one.** A **thumbnailer** is the FFmpeg libraries, linked into a build that has them (an optional dependency); a build without them never makes a preview image and nothing else changes. The image is one frame (for a video, an early representative one; for an audio file, its embedded cover, if any), scaled, up or down, to `SHARE_PREVIEW_SIZE` on its longest side and encoded as baseline JPEG. Its input is the shared file read over ranged requests, so only the parts the decoder seeks are fetched: a creator reads it through the link's `f`, a server through its own. A result that is not valid, or none within `SHARE_PREVIEW_TIMEOUT`, is discarded. A server makes at most one at a time: a request finding it busy is answered the generic image, and the next one finds the image stored. A creator makes it after the link is returned, as the separate preview operation ([05 §4.11](../05-ops-config.md#411-share)); a server, the first time `preview` is asked for a share without one. PDFs and folders always get the generic image.
 
 ---
 
@@ -342,7 +364,8 @@ Nothing a client sends chooses how much work the server does beyond the wire's c
 - Admission: never more data operations in flight than the bound, and the bound is reached; excess waits up to the queue bound; exactly the overflow beyond it is refused 503; metadata is never held; the budget is intact after a flood. The bound is the minimum of store opinions, ignoring none, else the default.
 - A body over its limit is refused without being read; a client that stops sending releases its slot after the idle timeout; a stale timestamp is refused before the body is read.
 - Watch: only a cursor key is watchable; `wait` is validated and clamped; a client behind is answered 200 with the header after one store read; an up-to-date one gets 204 with the header at the deadline without further reads; N waiters on one key cost N + 1 reads for one change; gates of two routes never share a loop.
-- Share server: a whole file answers 200 with `content-disposition: attachment` carrying an RFC 5987 name and `accept-ranges: bytes`; `bytes=6-10` → 206 `bytes 6-10/39`; a suffix range → 206; unsatisfiable → 416 `bytes */size`; folder listing `{dirs, files:[{name,size}]}`, sub-listing, file metadata JSON, nested bytes inline, `dl=1` as attachment; a shared media file answers the share page at `""` to a request accepting `text/html` and its bytes as an attachment to any other, both with `vary: accept`, its bytes inline at `f` and as an attachment at `download`, and a shared file that is not media answers its bytes as an attachment at `""`; a non-hex, unknown or expired token; another domain's token → 404; `..` → 400; a missing file → 404; a trashed shared folder is no longer served; the share page renders a hostile folder or file name as text.
+- Share server: a whole file answers 200 with `content-disposition: attachment` carrying an RFC 5987 name and `accept-ranges: bytes`; `bytes=6-10` → 206 `bytes 6-10/39`; a suffix range → 206; unsatisfiable → 416 `bytes */size`; folder listing `{dirs, files:[{name,size}]}`, sub-listing, file metadata JSON, nested bytes inline, `dl=1` as attachment; a shared media file answers the share page at `""` to a request accepting `text/html` and its bytes as an attachment to any other, both with `vary: accept`, its bytes inline at `f` and as an attachment at `download`, and a shared file that is not media answers its bytes as an attachment at `""`; a non-hex, unknown or expired token; another domain's token → 404; `..` → 400; a missing file → 404; a trashed shared folder is no longer served; the share page renders a hostile folder or file name as text; a `User-Agent` naming a link-preview fetcher with `Accept: */*` gets the page; the page's `og:image` is the absolute `preview` URL built from the forwarded headers, else `Host` and the listener's scheme; `preview` answers a stored image as `image/jpeg`, and the generic PNG for a folder, a PDF, a share without one on a server without a thumbnailer, and a stored image above the cap; with a thumbnailer, the first `preview` of a video share stores a JPEG within the size cap and the second answers it without making another.
+- Preview images on a listener: never listed; read or written only through a route of the manifest's domain; a write refused when it is not a valid preview image: above the byte cap, longest side other than `SHARE_PREVIEW_SIZE`, shortest side below `SHARE_PREVIEW_MIN_SIDE`, not a JPEG, a truncated segment, an arithmetic or lossless frame; a stored invalid image answered as the generic one; deleted after the manifest by revocation; left by the age rule of expiry.
 - ZIP: `download` streams an archive with no content length whose members are rooted at the folder's name (`<domain>/` for a whole-domain share), directories included; `unzip -t` accepts it and extraction is byte-exact.
 - Nothing the listener does writes local domain state: serving a share, a put or a watch leaves the mirror, chunk cache, staged tree and WAL untouched; deferred work lands in the owner's inbox.
 - GC: during a run, a chunk only in the space being collected is readable through the listener, and a manifest written through it naming that chunk promotes it; a manifest naming a chunk the main lacks is refused 409 `missing_chunks` with the key.
@@ -362,5 +385,6 @@ Nothing a client sends chooses how much work the server does beyond the wire's c
 7. **children-multi decided from listed sizes before reading**, so one huge folder cannot swell an answer.
 8. **`chunk-size` not chained; `verified` and `max-concurrency` chained**: a chunk size is this domain's config; a claim about verification is what the store behind can back; the bound is set by the slowest participant.
 9. **`share-url` answers `{"self":true}`**: behind TLS termination the server cannot know its public URL; the client knows the one it reached.
+10. **A preview image is made wherever FFmpeg is linked, and never required.** The creator usually has it and the resources; a small server or a cloud function may have neither. Reading through the link fetches only what the decoder seeks, so an online-only file and a server's remote store cost a few chunks, not the file.
 10. **Shares served from the store, not the mirror or a local cache; one predicate for "who serves shares"** for both manifest writes and `/s/` reads. The store server owns no domain state.
 11. **One listener per host**: every http-proxy binding shares one port, so conflicting listener options are a startup error.

@@ -275,12 +275,15 @@ objects added, existing ones immutable).
 
 ### 2.19 Share artifact cache
 
-- **Represents** assembled bytes a share server built: a whole file, or a folder archive.
-- **Identity** a file served by content: the whole-file digest; a download of a share: the token.
+- **Represents** assembled bytes a share server built: a whole file, or a folder archive; and a share's
+  preview image, made by its creator or a share server.
+- **Identity** a file served by content: the whole-file digest; a download of a share, or its preview
+  image: the token.
 - **Derived** entirely from chunks and manifests. A token-keyed folder archive MUST be rebuilt once older
   than `share_archive_max_age` (recommended 1 hour), so a folder share does not serve a frozen snapshot
   forever. Dropped whole by the clear-cache operation; token-keyed artifacts of deleted shares are
-  deleted with them.
+  deleted with them. A preview image is not deleted by age, since only a host with a thumbnailer can
+  make it again; without it a link's preview falls back to the generic image.
 
 ### 2.20 Deferred debt (not a store object)
 

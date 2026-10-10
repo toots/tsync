@@ -44,6 +44,10 @@ let () =
         (Manifest.make ~name:"b.txt" ~size:cs ~mtime:0. ~chunk_size:cs
            [Chunk_key.of_body "x"])
           .body );
+      ( Key.child d Folder_id.root "p.jpg",
+        (Manifest.make ~name:"p.jpg" ~size:cs ~mtime:0. ~chunk_size:cs
+           [Chunk_key.of_body "x"])
+          .body );
       ( Key.child d Folder_id.root "empty",
         Folder.marker_body { name = "empty"; id = empty } );
       ( Key.anchor d empty,
@@ -128,6 +132,41 @@ let () =
       ignore (create "a token" ~token:tok "a.txt");
       ignore (create "the same token" ~token:tok "docs");
       ignore (create "a short token" ~token:"abc" "a.txt");
+      p "\n== preview images\n";
+      let preview label s =
+        p "%s: %s\n" label
+          (match S.preview s with
+            | `Made -> "made"
+            | `Not_made why -> "not made: " ^ why
+            | exception Fail.E f -> Fail.kind_name f.kind ^ ": " ^ f.reason)
+      in
+      let photo = Option.get (create "p.jpg" "p.jpg") in
+      preview "without a thumbnailer" photo.url;
+      let asked = ref "" in
+      (* A 800x450 baseline frame header. *)
+      let image =
+        "\xFF\xD8\xFF\xC0\x00\x0B\x08\x01\xC2\x03\x20\x01\x01\x11\x00\xFF\xD9"
+      in
+      Atomic.set Share_preview.thumbnailer
+        (Some
+           (fun ~kind:_ ~deadline:_ url ->
+             asked := url;
+             Some (Bigstring.of_string image)));
+      preview "an image, by link" photo.url;
+      p "read through %s, stored beside the manifest: %b\n"
+        (Text.replace_all ~sub:(token_of photo.url) ~by:"<token>" !asked)
+        (copy.get_opt (Option.get (Key.share_preview (token_of photo.url)))
+        = Some (Bigstring.of_string image));
+      preview "a text file" (Option.get file).url;
+      preview "a folder" (Option.get (create "docs again" "docs")).url;
+      preview "an unknown token" (String.make 32 'c');
+      Atomic.set Share_preview.thumbnailer
+        (Some (fun ~kind:_ ~deadline:_ _ -> Some (Bigstring.of_string "no")));
+      preview "an invalid image made" (token_of photo.url);
+      let revoked = S.revoke photo.url in
+      p "revoke an image share: %b, preview image gone: %b\n" revoked
+        (copy.get_opt (Option.get (Key.share_preview (token_of photo.url)))
+        = None);
       p "\n== revoke\n";
       let file = Option.get file in
       copy.put

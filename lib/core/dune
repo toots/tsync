@@ -1,3 +1,15 @@
+(rule
+ (targets mime_json.ml)
+ (deps
+  (:mime %{project_root}/lambda/mime.json))
+ (action
+  (with-stdout-to
+   mime_json.ml
+   (progn
+    (echo "let json = {tsync_asset|")
+    (cat %{mime})
+    (echo "|tsync_asset}\n")))))
+
 (library
  (name tsync_core)
  (libraries mem_usage unix threads.posix duppy yojson digestif)

@@ -627,6 +627,13 @@ Token, expiry, overwrite and revocation rules are
   the chosen member directly, not through the composite (shares sit outside every domain root, so a
   read-only domain can share), never overwriting an existing one. Every share has a finite expiry,
   `SHARE_DEFAULT_EXPIRY` unless the caller chooses another. Returns `<share URL>/<token>`.
+- **`preview(token | url)`**: a separate operation, so `create` returns the link without waiting on a
+  decoder. For a file share of an image, a video or an audio file, a host with a thumbnailer makes
+  the preview image ([http-proxy §A9.8](frontends/http-proxy.md#a98-preview-image)) through the
+  link and writes it to the member holding the manifest, replacing any; otherwise, and for any other
+  share, it does nothing and says why. A host that created a share it can preview MUST start
+  `preview` once `create` has returned, as background work that never delays nor fails the
+  creation; a failure is logged at debug level. An absent or expired share → `Share_not_found`.
 - **`revoke(token | url)`**: delete the manifest, then its token-keyed artifacts.
 - **`clear_cache()`**: delete every object under the share cache, and every object of the share
   space whose name is not a share token; returns count and bytes. A reader of the share space SHOULD
@@ -760,4 +767,5 @@ Token, expiry, overwrite and revocation rules are
 | resync walk parallelism | CLI `-j`, default 32 | |
 | `VERIFY_POLL` / `VERIFY_STALL_POLLS` | 3 s / 5 | |
 | `SHARE_DEFAULT_EXPIRY` | 7 days | [security-model.md §6.2](algorithms/security-model.md#62-lifetime) |
+| `SHARE_PREVIEW_MAX_BYTES` / `SHARE_PREVIEW_SIZE` / `SHARE_PREVIEW_MIN_SIDE` / `SHARE_PREVIEW_TIMEOUT` | 300 KiB / 800 px / 300 px / 20 s | preview image: size cap, exact longest side, least shortest side (a card's least width), time to make one ([http-proxy §A9.8](frontends/http-proxy.md#a98-preview-image)) |
 | default chunk / cache chunk size | 8 MiB / 16 MiB | range: [01 §3.5](01-core.md#35-chunk-size) |

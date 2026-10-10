@@ -50,12 +50,12 @@ jobs:
       - name: System libraries
         id: brew
         run: |
-          brew install xcodegen dylibbundler pkg-config openssl@3 gmp
+          brew install xcodegen dylibbundler pkg-config openssl@3 gmp ffmpeg
           # openssl@3 is keg-only, so conf-libssl finds it only via pkg-config.
           echo "PKG_CONFIG_PATH=$(brew --prefix openssl@3)/lib/pkgconfig:$PKG_CONFIG_PATH" >> "$GITHUB_ENV"
           # 10 §4.1: a restored switch links the Cellar directory of these
           # formulae, which a newer version moves.
-          echo "linked=$(brew list --versions openssl@3 gmp | tr ' ' '-' | paste -sd_ -)" >> "$GITHUB_OUTPUT"
+          echo "linked=$(brew list --versions openssl@3 gmp ffmpeg | tr ' ' '-' | paste -sd_ -)" >> "$GITHUB_OUTPUT"
 
       - uses: ocaml/setup-ocaml@v3
         with:
@@ -68,9 +68,10 @@ jobs:
           path: _opam
           key: opam-release-macos-${{ hashFiles('*.opam', 'scripts/opam_deps.sh') }}-${{ steps.brew.outputs.linked }}
 
-      # 10 §4.2: a release ships both TLS implementations.
+      # 10 §4.2: a release ships both TLS implementations, and makes share
+      # preview images.
       - name: OCaml libraries
-        run: ./scripts/opam_deps.sh tsync tsync-tls tsync-ssl
+        run: ./scripts/opam_deps.sh tsync tsync-tls tsync-ssl tsync-ffmpeg
 
       - name: Save the opam switch
         if: steps.opam-switch.outputs.cache-hit != 'true'
@@ -79,7 +80,7 @@ jobs:
           path: _opam
           key: opam-release-macos-${{ hashFiles('*.opam', 'scripts/opam_deps.sh') }}-${{ steps.brew.outputs.linked }}
 
-      - name: The File Provider frontend and both TLS implementations are built
+      - name: The File Provider frontend, both TLS implementations and the thumbnailer are built
         run: |
           opam exec -- dune build --profile release bin/tsync.exe
           info=$(./_build/default/bin/tsync.exe build-info)
@@ -87,6 +88,7 @@ jobs:
           echo "$info" | grep -Eq '^frontends:.*\bfile_provider\b'
           echo "$info" | grep -Eq '^tls:.*\bopenssl\b'
           echo "$info" | grep -Eq '^tls:.*\bnative\b'
+          echo "$info" | grep -Eq '^share previews: ffmpeg$'
 
       # 10 §5.3: a fork receives no secrets. It builds the app unsigned and says
       # the signing half did not run; a run that should have them fails naming

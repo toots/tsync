@@ -169,8 +169,8 @@ On each member holding shares for the domain (behind the write guard):
 
 - delete every share whose body names this domain and whose expiry has passed, then the token-keyed
   artifacts of each deleted share;
-- delete share artifacts (either kind) whose modification time is older than the cutoff: they are
-  rebuildable, whichever domain built them.
+- delete share artifacts (either assembled kind) whose modification time is older than the cutoff:
+  they are rebuildable, whichever domain built them. A preview image goes only with its share.
 
 A share body that does not parse is left in place and reported.
 

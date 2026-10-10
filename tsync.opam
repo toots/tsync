@@ -29,7 +29,7 @@ depends: [
 ]
 # Each rebuilds tsync when it appears, which links its library in. The TLS
 # libraries stand for their packages, which may not appear in both lists.
-depopts: ["tsync-fuse" "tls" "ssl"]
+depopts: ["tsync-fuse" "tsync-ffmpeg" "tls" "ssl"]
 conflicts: [
   "fuse3" {< "3.10.0.1"}
 ]

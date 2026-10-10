@@ -17,6 +17,7 @@ type t = {
   domain : Tsync_domain.Domain.t;
   engine : (module Engine.S);
   hooks : hooks;
+  background : (unit -> unit) -> unit;
   publish : Ipc.json -> int;
   stats : string list -> Tsync_status.Status_report.answer;
   stop : unit -> unit;
@@ -75,8 +76,9 @@ let silent (domain : Tsync_domain.Domain.t) () =
   mains <> [] && List.for_all Health.is_down mains
 
 let create ?(subscribers = fun () -> 0) ?(traffic = fun () -> no_traffic)
-    ?pull_params ~(domain : Tsync_domain.Domain.t) ~engine ~hooks ~publish
-    ~stats ~stop ~dest_roots ~staging_roots () =
+    ?(background = fun f -> Rt.spawn ~name:"share preview" f) ?pull_params
+    ~(domain : Tsync_domain.Domain.t) ~engine ~hooks ~publish ~stats ~stop
+    ~dest_roots ~staging_roots () =
   let name = Domain_name.to_string domain.name in
   {
     pulls =
@@ -102,6 +104,7 @@ let create ?(subscribers = fun () -> 0) ?(traffic = fun () -> no_traffic)
     domain;
     engine;
     hooks;
+    background;
     publish;
     stats;
     stop;
@@ -836,7 +839,17 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
         let module S =
           Tsync_gc.Share.Make ((val Tsync_domain.Domain.context t.domain)) in
         let c = S.create ?expires:r.expires ?token:r.token (target t r.item) in
+        (* 05 §4.11: the link is answered before any image is made. *)
+        t.background (fun () ->
+            match S.preview c.url with
+              | `Made -> ()
+              | `Not_made why -> Log.debug "share preview: %s" why
+              | exception Fail.E f -> Log.debug "share preview: %s" f.reason);
         { Protocol.url = c.url; expires = c.expires }
+    | Share_preview s ->
+        let module S =
+          Tsync_gc.Share.Make ((val Tsync_domain.Domain.context t.domain)) in
+        S.preview s
     | Share_revoke s ->
         let module S =
           Tsync_gc.Share.Make ((val Tsync_domain.Domain.context t.domain)) in

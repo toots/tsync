@@ -15,6 +15,7 @@
   tsync_owner
   tsync_status
   unix
+  base64
   yojson))
 
 (rule
@@ -22,7 +23,7 @@
  (deps
   (:browse %{project_root}/lambda/browse.html)
   (:player %{project_root}/lambda/player.js)
-  (:mime %{project_root}/lambda/mime.json))
+  (:card %{project_root}/lambda/share-card.png))
  (action
   (with-stdout-to
    share_assets.ml
@@ -31,9 +32,9 @@
     (cat %{browse})
     (echo "|tsync_asset}\nlet player = {tsync_asset|")
     (cat %{player})
-    (echo "|tsync_asset}\nlet mime = {tsync_asset|")
-    (cat %{mime})
-    (echo "|tsync_asset}\n")))))
+    (echo "|tsync_asset}\nlet card_base64 = \"")
+    (system "base64 < %{card} | tr -d '\\r\\n'")
+    (echo "\"\n")))))
 
 (rule
  (targets status_page.ml)
