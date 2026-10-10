@@ -30,6 +30,10 @@ a folder: not made: a folder share has no preview image
 an unknown token: absent: no live share of d has the token cccccccccccccccccccccccccccccccc
 an invalid image made: not made: no image could be made of p.jpg
 revoke an image share: true, preview image gone: true
+p.jpg, revoked mid-decode: https://s.example/d/<token>, in 7 days
+  {"v":1,"expires":<exp>,"domain":"d","type":"file","key":"tsync/d/manifests/.tsync-root/e286517c3c302c71-42b88c8dce07bd8b","filename":"p.jpg"}
+revoked while the image is made: not made: the share was revoked
+no image left behind: true
 
 == revoke
 revoke by link: true

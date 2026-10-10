@@ -8,8 +8,9 @@ dev-repo: "git+https://github.com/toots/tsync.git"
 synopsis: "Link preview images for tsync share links, made with FFmpeg"
 depends: [
   "dune" {>= "3.17"}
-  "ffmpeg-av"
+  "ffmpeg-av" {>= "2.0.0"}
   "ffmpeg-avcodec"
+  "ffmpeg-avfilter"
   "ffmpeg-avutil"
   "ffmpeg-swscale"
 ]

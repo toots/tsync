@@ -630,10 +630,10 @@ Token, expiry, overwrite and revocation rules are
 - **`preview(token | url)`**: a separate operation, so `create` returns the link without waiting on a
   decoder. For a file share of an image, a video or an audio file, a host with a thumbnailer makes
   the preview image ([http-proxy §A9.8](frontends/http-proxy.md#a98-preview-image)) through the
-  link and writes it to the member holding the manifest, replacing any; otherwise, and for any other
-  share, it does nothing and says why. A host that created a share it can preview MUST start
+  link and writes it to the member holding the manifest, replacing any, then deletes it again if
+  the manifest is gone by then; otherwise, and for any other share, it does nothing and says why. A host that created a share it can preview MUST start
   `preview` once `create` has returned, as background work that never delays nor fails the
-  creation; a failure is logged at debug level. An absent or expired share → `Share_not_found`.
+  creation, one at a time per domain; a failure is logged at debug level. An absent or expired share → `Share_not_found`.
 - **`revoke(token | url)`**: delete the manifest, then its token-keyed artifacts.
 - **`clear_cache()`**: delete every object under the share cache, and every object of the share
   space whose name is not a share token; returns count and bytes. A reader of the share space SHOULD

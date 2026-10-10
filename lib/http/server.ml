@@ -31,10 +31,14 @@ type body =
   | Empty
   | String of string
   | Bigstring of Bigstring.t
-  | Stream of { write : (Bigstring.t -> unit) -> unit; finally : unit -> unit }
+  | Stream of {
+      write : (Bigstring.t -> unit) -> unit;
+      length : int option;
+      finally : unit -> unit;
+    }
   | Held of { bytes : Bigstring.t; finally : unit -> unit }
 
-let stream ?(finally = ignore) write = Stream { write; finally }
+let stream ?(finally = ignore) ?length write = Stream { write; length; finally }
 
 type response = { status : int; headers : Codec.headers; body : body }
 
@@ -91,7 +95,8 @@ let write_response lim conn ~head_only ~close r =
       | String s -> [("content-length", string_of_int (String.length s))]
       | Bigstring b | Held { bytes = b; _ } ->
           [("content-length", string_of_int (Bigstring.length b))]
-      | Stream _ -> [("transfer-encoding", "chunked")]
+      | Stream { length = Some n; _ } -> [("content-length", string_of_int n)]
+      | Stream { length = None; _ } -> [("transfer-encoding", "chunked")]
   in
   Codec.write_head b
     (Printf.sprintf "HTTP/1.1 %d %s" r.status (reason r.status))
@@ -107,7 +112,15 @@ let write_response lim conn ~head_only ~close r =
     | (Bigstring body | Held { bytes = body; _ }) when not head_only ->
         write (Buffer.contents b);
         write_body body
-    | Stream { write = f; _ } when not head_only ->
+    | Stream { write = f; length = Some n; _ } when not head_only ->
+        write (Buffer.contents b);
+        let sent = ref 0 in
+        f (fun piece ->
+            sent := !sent + Bigstring.length piece;
+            if !sent > n then failwith "streamed body longer than announced";
+            write_body piece);
+        if !sent < n then failwith "streamed body shorter than announced"
+    | Stream { write = f; length = None; _ } when not head_only ->
         write (Buffer.contents b);
         f (fun piece ->
             if Bigstring.length piece > 0 then (

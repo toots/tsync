@@ -63,6 +63,7 @@ a3 /preview -> 200 image/png | - | 8046 bytes, PNG
 ffff /preview -> 404 text/plain; charset=utf-8 | - | not found
 a1 /preview -> 200 image/jpeg | - | 22 bytes, JPEG 800x450
 a2 /preview -> 200 image/png | - | 8046 bytes, PNG
+a2 /preview -> 200 image/png | - | 8046 bytes, PNG
 == single-pass templating
 <h1>__B__</h1> b
 == JSON inside a script

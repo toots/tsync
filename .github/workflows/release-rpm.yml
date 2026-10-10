@@ -67,7 +67,7 @@ jobs:
             opam gcc gcc-c++ make m4 pkgconf-pkg-config git curl unzip rsync tar gzip \
             rpm-build systemd-rpm-macros gh binutils \
             fuse3-devel fuse3 openssl-devel gmp-devel \
-            libavcodec-free-devel libavformat-free-devel libavutil-free-devel libswscale-free-devel \
+            libavcodec-free-devel libavformat-free-devel libavutil-free-devel libavfilter-free-devel libswscale-free-devel \
             dbus-devel cmake extra-cmake-modules qt6-qtbase-devel \
             kf6-kcoreaddons-devel kf6-kio-devel
 

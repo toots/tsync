@@ -102,37 +102,47 @@ module Make (C : Context.S) = struct
           let artifact (e : Store.entry) =
             String.ends_with ~suffix:".data" (Key.leaf e.key)
           in
+          let listed = Hashtbl.create (List.length listing) in
+          List.iter
+            (fun (e : Store.entry) -> Hashtbl.replace listed e.key ())
+            listing;
           let bad = ref [] in
           let doomed =
             List.concat_map
               (fun (e : Store.entry) ->
                 if artifact e then
                   if e.last_modified < cutoff then [e.key] else []
-                else if Key.preview_token (Key.to_string e.key) <> None then []
                 else (
-                  Cancel.check cancelled;
-                  match st.get_opt e.key with
-                    | None -> []
-                    | Some b -> (
-                        match
-                          Gc_plan.share ~domain:d ~now (Bigstring.to_string b)
-                        with
-                          | Expired ->
-                              let token = Key.leaf e.key in
-                              e.key
-                              :: List.filter_map
-                                   (fun (a : Store.entry) ->
-                                     if
-                                       Key.leaf a.key = token ^ ".data"
-                                       && a.last_modified >= cutoff
-                                       || Key.leaf a.key = token ^ ".jpg"
-                                     then Some a.key
-                                     else None)
-                                   listing
-                          | Unparseable ->
-                              bad := e.key :: !bad;
-                              []
-                          | Kept | Other_domain -> [])))
+                  match Key.preview_token (Key.to_string e.key) with
+                    | Some token ->
+                        if Hashtbl.mem listed (Option.get (Key.share token))
+                        then []
+                        else [e.key]
+                    | None -> (
+                        Cancel.check cancelled;
+                        match st.get_opt e.key with
+                          | None -> []
+                          | Some b -> (
+                              match
+                                Gc_plan.share ~domain:d ~now
+                                  (Bigstring.to_string b)
+                              with
+                                | Expired ->
+                                    let token = Key.leaf e.key in
+                                    e.key
+                                    :: List.filter_map
+                                         (fun (a : Store.entry) ->
+                                           if
+                                             Key.leaf a.key = token ^ ".data"
+                                             && a.last_modified >= cutoff
+                                             || Key.leaf a.key = token ^ ".jpg"
+                                           then Some a.key
+                                           else None)
+                                         listing
+                                | Unparseable ->
+                                    bad := e.key :: !bad;
+                                    []
+                                | Kept | Other_domain -> []))))
               listing
           in
           let deleted = ref [] in

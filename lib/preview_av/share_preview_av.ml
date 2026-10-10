@@ -1,25 +1,92 @@
 open Tsync_core
 module Scale = Swscale.Make (Swscale.Frame) (Swscale.Frame)
 
+let samples = 10
+
 let fit width height =
   let s = Share_preview.size in
   if width >= height then (s, max 1 (height * s / width))
   else (max 1 (width * s / height), s)
 
-(* A backward seek lands on the key frame at or before one second, which is
-   the first frame of a shorter video. *)
+let rec next_frame input stream =
+  match Av.read_input ~video_frame:[stream] input with
+    | `Video_frame (_, f) -> f
+    | _ -> next_frame input stream
+
+(* A backward seek lands on a key frame, so each sample decodes one frame only;
+   a video of unknown duration gives its first frame. *)
+let candidates ~kind input stream =
+  match (kind, Av.get_input_duration ~format:`Millisecond input) with
+    | `Video, Some duration ->
+        List.filter_map
+          (fun i ->
+            let ts =
+              Int64.(div (mul duration (of_int (i + 1))) (of_int (samples + 1)))
+            in
+            match
+              Av.seek ~flags:[Seek_flag_backward] ~stream ~fmt:`Millisecond ~ts
+                input
+            with
+              | () -> Some (next_frame input stream)
+              | exception Avutil.Error `Eof -> None)
+          (List.init samples Fun.id)
+    | _ -> [next_frame input stream]
+
+(* FFmpeg's [thumbnail] filter keeps the frame whose colour histogram is
+   closest to the average of the batch, which passes over black and faded
+   frames. *)
+let representative = function
+  | [frame] -> frame
+  | frames ->
+      let first = List.hd frames in
+      let graph = Avfilter.init () in
+      let source =
+        Avfilter.attach ~name:"in"
+          ~args:
+            [
+              `Pair
+                ( "video_size",
+                  `String
+                    (Printf.sprintf "%dx%d"
+                       (Avutil.Video.frame_get_width first)
+                       (Avutil.Video.frame_get_height first)) );
+              `Pair
+                ( "pix_fmt",
+                  `Int
+                    (Avutil.Pixel_format.get_id
+                       (Avutil.Video.frame_get_pixel_format first)) );
+              `Pair ("time_base", `Rational { Avutil.num = 1; den = 1 });
+            ]
+          Avfilter.buffer graph
+      in
+      let thumbnail =
+        Avfilter.attach ~name:"thumbnail"
+          ~args:[`Pair ("n", `Int (List.length frames))]
+          (Avfilter.find "thumbnail")
+          graph
+      in
+      let sink = Avfilter.attach ~name:"out" Avfilter.buffersink graph in
+      Avfilter.link
+        (List.hd source.io.outputs.video)
+        (List.hd thumbnail.io.inputs.video);
+      Avfilter.link
+        (List.hd thumbnail.io.outputs.video)
+        (List.hd sink.io.inputs.video);
+      let graph = Avfilter.launch graph in
+      let push = List.assoc "in" graph.inputs.video in
+      List.iteri
+        (fun i frame ->
+          Avutil.Frame.set_pts frame (Some (Int64.of_int i));
+          push (`Frame frame))
+        frames;
+      push `Flush;
+      (List.assoc "out" graph.outputs.video).handler ()
+
 let frame ~kind ~interrupt url =
   let input = Av.open_input ~interrupt url in
   Fun.protect ~finally:(fun () -> Av.close input) @@ fun () ->
   let _, stream, _ = Av.find_best_video_stream input in
-  if kind = `Video then
-    Av.seek ~flags:[Seek_flag_backward] ~fmt:`Second ~ts:1L input;
-  let rec next () =
-    match Av.read_input ~video_frame:[stream] input with
-      | `Video_frame (_, f) -> f
-      | _ -> next ()
-  in
-  next ()
+  representative (candidates ~kind input stream)
 
 let jpeg frame =
   let width = Avutil.Video.frame_get_width frame

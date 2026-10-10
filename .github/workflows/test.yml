@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   linux:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v5
@@ -24,7 +24,7 @@ jobs:
         # libdbus and the bus daemon are for the tray and its suite, which
         # runs on a private session bus; the FFmpeg libraries are for share
         # preview images.
-        run: sudo apt-get update && sudo apt-get install -y libssl-dev libfuse3-dev fuse3 libgmp-dev pkg-config libdbus-1-dev dbus libavcodec-dev libavformat-dev libavutil-dev libswscale-dev
+        run: sudo apt-get update && sudo apt-get install -y libssl-dev libfuse3-dev fuse3 libgmp-dev pkg-config libdbus-1-dev dbus libavcodec-dev libavformat-dev libavutil-dev libavfilter-dev libswscale-dev
 
       - uses: ocaml/setup-ocaml@v3
         with:

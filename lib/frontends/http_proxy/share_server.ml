@@ -320,7 +320,8 @@ let file_response t (r : Server.request) ~name ~inline (m : Manifest.t) =
     ]
   in
   let body off len =
-    if len = 0 then Server.Empty else Server.stream (stream t m ~off ~len)
+    if len = 0 then Server.Empty
+    else Server.stream ~length:len (stream t m ~off ~len)
   in
   match parse_range size (Codec.header r.headers "range") with
     | `Unsatisfiable ->
@@ -496,7 +497,7 @@ let zip_response t ~max_members id filename =
           Zip.finish z);
   }
 
-let image ~content_type body =
+let image_response ~content_type body =
   {
     Server.status = 200;
     headers =
@@ -505,44 +506,72 @@ let image ~content_type body =
   }
 
 let card = lazy (Base64.decode_exn Share_assets.card_base64)
-let making = Atomic.make false
+let making = Rt.Fmutex.create ()
 
-(* §A9.8: one image made at a time; a request finding it busy, like any
-   failure, is answered the generic image. *)
-let make_preview t ~self ~token ~key share =
-  match (share.target, Share_preview.kind_of_name share.filename, self) with
-    | `File manifest, Some kind, Some self
-      when Share_preview.available ()
-           && Atomic.compare_and_set making false true ->
-        Fun.protect ~finally:(fun () -> Atomic.set making false) @@ fun () ->
-        ignore (servable (manifest_at t manifest));
-        Option.map
-          (fun b ->
-            (try t.store.put key b
-             with Fail.E f ->
-               Log.info "share: preview not stored: %s" f.reason);
-            b)
-          (Share_preview.make ~kind (self ^ "/s/" ^ token ^ "/f"))
+(* Tokens no image could be made for, kept until the process ends. *)
+let failed = Hashtbl.create 16
+let failed_lock = Mutex.create ()
+
+let has_failed token =
+  Mutex.protect failed_lock (fun () -> Hashtbl.mem failed token)
+
+let stored t key =
+  match t.store.get_opt key with
+    | Some b when Share_preview.valid b -> Some b
     | _ -> None
 
-let preview t ~self ~token share =
-  let key = Option.get (Key.share_preview token) in
-  match
-    match t.store.get_opt key with
-      | Some b when Share_preview.valid b -> Some b
-      | _ -> make_preview t ~self ~token ~key share
-  with
-    | Some b -> image ~content_type:"image/jpeg" (Bigstring b)
-    | None -> image ~content_type:"image/png" (String (Lazy.force card))
+(* §A9.8: one image made at a time; a request waiting for it reads the store
+   again, which the image made before it may have filled. *)
+let make_preview ~self ~token ~key ~kind t manifest =
+  Rt.Fmutex.with_lock making @@ fun () ->
+  match stored t key with
+    | Some b -> Some b
+    | None when has_failed token -> None
+    | None -> (
+        ignore (servable (manifest_at t manifest));
+        match Share_preview.make ~kind (self ^ "/s/" ^ token ^ "/f") with
+          | Some b ->
+              (try
+                 t.store.put key b;
+                 (* A revoke during the decode deleted the image before it
+                    was written. *)
+                 if t.store.get_opt (Option.get (Key.share token)) = None then
+                   ignore (t.store.delete key)
+               with Fail.E f ->
+                 Log.info "share: preview not stored: %s" f.reason);
+              Some b
+          | None ->
+              Mutex.protect failed_lock (fun () ->
+                  Hashtbl.replace failed token ());
+              None)
 
-let handle ?self t ~tls ~max_zip_members (r : Server.request) ~token ~sub params
+let preview ~self ~token t share =
+  let key = Option.get (Key.share_preview token) in
+  let image =
+    match (share.target, Share_preview.kind_of_name share.filename) with
+      | `File manifest, Some kind -> (
+          match (stored t key, self) with
+            | Some b, _ -> Some b
+            | None, Some self
+              when Share_preview.available () && not (has_failed token) -> (
+                try make_preview ~self ~token ~key ~kind t manifest
+                with Refused _ | Fail.E _ -> None)
+            | None, _ -> None)
+      | _ -> None
+  in
+  match image with
+    | Some b -> image_response ~content_type:"image/jpeg" (Bigstring b)
+    | None ->
+        image_response ~content_type:"image/png" (String (Lazy.force card))
+
+let handle ?self ~tls ~max_zip_members ~token ~sub t (r : Server.request) params
     =
   try
     let share = load t token in
     let param k = List.assoc_opt k params in
     let share_page = share_page ~origin:(origin ~tls r) ~token in
     match (share.target, sub) with
-      | _, "preview" -> preview t ~self ~token share
+      | _, "preview" -> preview ~self ~token t share
       | `File key, "" when media share.filename ->
           let m = servable (manifest_at t key) in
           let response =

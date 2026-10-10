@@ -12,6 +12,9 @@ cd "$(dirname "$0")/.."
 export OPAMYES=1
 
 opam pin -ny .
+for pkg in ffmpeg-av ffmpeg-avcodec ffmpeg-avfilter ffmpeg-avutil ffmpeg-swscale; do
+  opam pin -ny "$pkg" git+https://github.com/savonet/ocaml-ffmpeg.git#main
+done
 opam update
 opam upgrade -y
 opam install --deps-only -y "$@"
