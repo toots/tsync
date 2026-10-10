@@ -5,10 +5,19 @@ open Tsync_core
 open Tsync_store
 module Server = Tsync_http.Server
 
-let video ?(fill = fun i -> i * 4) path ~width ~height =
+let video ?(fill = fun i -> i * 4) ?rotation path ~width ~height =
   let out = Av.open_output path in
+  let side_data =
+    Option.map
+      (fun angle ->
+        [
+          Avutil.Frame_side_data.encode
+            (`Display_matrix (Avutil.Display_matrix.make angle));
+        ])
+      rotation
+  in
   let stream =
-    Av.new_video_stream ~width ~height ~pixel_format:`Yuv420p
+    Av.new_video_stream ?side_data ~width ~height ~pixel_format:`Yuv420p
       ~frame_rate:{ Avutil.num = 25; den = 1 }
       ~time_base:{ Avutil.num = 1; den = 25 }
       ~codec:(Avcodec.Video.find_encoder_by_name "mpeg4")
@@ -24,6 +33,30 @@ let video ?(fill = fun i -> i * 4) path ~width ~height =
     Av.write_frame stream frame
   done;
   Av.close out
+
+(* A copy of the video whose container asks for borders to be discarded. *)
+let cropped ~cropping path copy =
+  let input = Av.open_input path in
+  let _, stream, params = Av.find_best_video_stream input in
+  let out = Av.open_output copy in
+  let copied =
+    Av.new_stream_copy
+      ~params:
+        (Avcodec.params_with_side_data params
+           [Avcodec.Packet_side_data.encode (`Frame_cropping cropping)])
+      out
+  in
+  let rec copy_packets () =
+    match Av.read_input ~video_packet:[stream] input with
+      | `Video_packet (_, packet) ->
+          Av.write_packet copied (Av.get_time_base stream) packet;
+          copy_packets ()
+      | _ -> copy_packets ()
+      | exception Avutil.Error `Eof -> ()
+  in
+  copy_packets ();
+  Av.close out;
+  Av.close input
 
 let show name path kind =
   match Share_preview.make ~kind path with
@@ -189,15 +222,24 @@ let () =
   Printf.printf "available: %b\n" (Share_preview.available ());
   let dir = Filename.temp_dir "tsync-preview" "" in
   let wide = Filename.concat dir "wide.mkv"
-  and tall = Filename.concat dir "tall.mkv" in
+  and tall = Filename.concat dir "tall.mkv"
+  and sideways = Filename.concat dir "sideways.mp4"
+  and narrowed = Filename.concat dir "narrowed.mkv" in
   video wide ~width:1920 ~height:1080;
   video tall ~width:360 ~height:640;
+  video sideways ~width:1920 ~height:1080 ~rotation:90.;
+  cropped wide narrowed
+    ~cropping:{ top = 0; bottom = 0; left = 560; right = 560 };
   show "card" (Sys.getenv "CARD") `Image;
   show "wide video" wide `Video;
   show "tall video, scaled up" tall `Video;
+  show "wide video filmed sideways" sideways `Video;
+  show "wide video cropped to 800x1080" narrowed `Video;
   show "missing" (Filename.concat dir "missing.mkv") `Video;
   fade_in dir;
   served wide (Filename.concat dir "store");
   Sys.remove wide;
   Sys.remove tall;
+  Sys.remove sideways;
+  Sys.remove narrowed;
   Fs.rm_rf dir

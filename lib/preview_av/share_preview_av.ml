@@ -82,11 +82,29 @@ let representative = function
       push `Flush;
       (List.assoc "out" graph.outputs.video).handler ()
 
+(* The frame as it is meant to be shown: cropped as the container asks and
+   turned as its display matrix asks, which a phone leaves on a video filmed
+   sideways. *)
+let displayed stream frame =
+  let converter =
+    Avfilter.Utils.init_display_converter
+      ?cropping:
+        (Avcodec.Packet_side_data.cropping
+           (Avcodec.params_side_data (Av.get_codec_params stream)))
+      ~time_base:{ Avutil.num = 1; den = 1 }
+      ()
+  in
+  let shown = ref frame in
+  let keep f = shown := f in
+  Avfilter.Utils.convert_display converter keep (`Frame frame);
+  Avfilter.Utils.convert_display converter keep `Flush;
+  !shown
+
 let frame ~kind ~interrupt url =
   let input = Av.open_input ~interrupt url in
   Fun.protect ~finally:(fun () -> Av.close input) @@ fun () ->
   let _, stream, _ = Av.find_best_video_stream input in
-  representative (candidates ~kind input stream)
+  displayed stream (representative (candidates ~kind input stream))
 
 let jpeg frame =
   let width = Avutil.Video.frame_get_width frame
