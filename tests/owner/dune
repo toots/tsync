@@ -17,7 +17,12 @@
   (run ./owner_test.exe)))
 
 (rule
- (aliases runtest runtest-serial)
+ (alias runtest)
+ (action
+  (diff owner_test.expected owner_test.output)))
+
+(rule
+ (alias runtest-serial)
  (action
   (diff owner_test.expected owner_test.output)))
 
