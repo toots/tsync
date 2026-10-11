@@ -382,7 +382,7 @@ owner finds it at start.
 | E5 | Local intent | durable create, before the first local step | owner start completes it | Mid local half: local redo (idempotent). |
 | E6 | In-flight record | durable replace, before the entry's create is issued | the first cycle | The create is issued again with the same bytes: `Won` if this client's entry is there, else another client's entry is merged ([publication.md](publication.md) §4.8). |
 | E6a | Arrival record | durable replace, before a merge touches the local tree | owner start completes it | The recorded steps are applied again; the result is the uninterrupted merge's. |
-| E6b | Position | durable replace, with the step that changes it | read at start | Old or new, whole. Lost: an arrival by state. |
+| E6b | Position | durable replace, with the step that changes it | read at start | Old or new, whole. |
 | E7 | Parked records (any log) | the record itself, with its failure noted | loaded at owner start and retried (§4.7) | Survive any kill; retried at start and every `REARM_INTERVAL`. |
 | E8 | Deferred replica/backfill job log | durable replace per job, before the main write is acknowledged | loaded at owner start (every owner, including a one-shot command and the Android app) | Killed before running: run by the next owner. |
 | E9 | Queue memory, upload slots, cancel flags | volatile | rebuilt from the upload records and E8 | Lost on kill; harmless. |

@@ -53,6 +53,7 @@ Trust boundaries, each an enforcement point in this file:
 - **Replay of a captured request within the freshness window** (§4.2) by a party that can read requests on the path. TLS (§9) is what keeps requests from being captured.
 - **Availability against a network attacker.** A party that can reach the listener can use its bounded resources (§11). Exposure is controlled by the bind address and the operator's firewall.
 - **A compromised owner account.** Anything running as the owner user can read the config and act as tsync.
+- **A user who alters tsync's own state by hand.** The cache root, the data directory and the objects under a store's `tsync/` prefix are written only by tsync. A person or a tool that deletes, moves or edits them outside tsync is outside the model: no mechanism detects it, and the result is unspecified. What stays in scope is what happens to a well-intended user: crashes, power loss, a full disk, a failing link and a store that misbehaves ([failure-model](failure-model.md)); a local record that does not decode, which is set aside and reported ([durable-queue](durable-queue.md) §3.3, R6); and the loss of the chunk cache, which is disposable by design ([data-model/local-cache](../data-model/local-cache.md) §6).
 
 ### 3.2 What is relied on
 

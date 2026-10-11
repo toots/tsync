@@ -272,8 +272,6 @@ ARRIVE():
   completing it after a crash does not compute a second merge over a half-changed tree.
 - **An arrival with nothing pending** takes the first row of the merge on every key: $L$ becomes
   $M$ on the keys the entries name.
-- Entries of this client's own id are merged like any other. They arise only when the in-flight
-  record was lost with the local disk, and the merge's "same change" row absorbs them.
 
 ### 4.5 Push
 
@@ -397,8 +395,8 @@ STATE() → M at some head:
   a write in flight and not a failure: the replay gives its key its value
   ([data-model/backend.md](../data-model/backend.md) §5.2).
 
-A client **arrives by state** when its fetch answers PRUNED, when it has no position (a new client,
-or one whose position record is lost), and on request (`tsync sync --full`). It is an ordinary
+A client **arrives by state** when its fetch answers PRUNED, when it has no position (a new client),
+and on request (`tsync sync --full`). It is an ordinary
 arrival whose $M$ is read whole: the merge of §4.4 runs with the client's own $R$ and $L$, so
 pending changes are kept, guarded and merged as in any arrival. There is no state in which a client
 applies nothing, and no operation that discards pending work.
@@ -414,12 +412,6 @@ longer than the log's retention.
 
 Run at ownership start, in this order, before any request is served and before the first cycle:
 
-0. **The mirror id.** If the mirror's id is missing or differs from the sync state's
-   ([03](../03-journal-sync.md) §2.7), the mirror is not the tree this sync state describes: clear
-   the position, the in-flight and arrival records and the local intents; keep the before-value of
-   each key that has a staged edit and drop every other one; give the mirror a fresh id. The
-   client then arrives by state, and its staged edits are merged like any pending change. A pending
-   removal or rename is lost with the tree that held it; no content is.
 1. **Local intents.** Complete each namespace operation whose intent remains
    ([04](../04-checkout-cache.md) §4.10).
 2. **The arrival record.** Set $L$ to the recorded values on the recorded keys, write the recorded

@@ -171,9 +171,6 @@ What the client knows of the main, and what it is in the middle of
   for a folder. It exists exactly for the keys where the local tree differs from that knowledge.
   The pending set is read off these records; no operation is recorded.
 - **Position.** The number of the last log entry merged.
-- **Mirror id.** A random id written in the mirror's root and beside the position. They differ, or
-  one is missing, when the mirror was lost or replaced apart from the sync state
-  ([publication](../algorithms/publication.md) §4.8).
 - **In-flight record.** The number and exact bytes of an entry being created.
 - **Arrival record.** The result of a merge being enacted.
 - **Set-aside record**: an undecodable record of any of these, kept and reported like a set-aside
@@ -181,9 +178,9 @@ What the client knows of the main, and what it is in the middle of
 - Mut: replaced whole; a before-value is created before the local tree changes at its key and
   removed when the key's value is committed or returns to it.
 - Class: **authoritative, the sole record of what this client owes the main and of what it may
-  assume about it.** A lost position costs an arrival by state. A lost before-value makes its key
-  look clean: a local change there is then taken for the main's and overwritten by the next
-  arrival, which is why before-values are written durably.
+  assume about it.** A before-value that did not survive a power loss would make its key look
+  clean, and the next arrival would overwrite the local change there, which is why before-values
+  are written durably.
 
 ### 3.6a Upload records and local intents
 
@@ -370,7 +367,7 @@ local referent → referrer pairs it governs:
 | Entity | Class | Rebuilt from |
 |---|---|---|
 | staged manifests, staged bodies, set-aside manifests | **authoritative: sole copy of user data** | never |
-| before-values, position, in-flight and arrival records, set-aside records | **authoritative: sole record of what is owed and of what is known of the main** | never; a lost position is replaced by an arrival by state |
+| before-values, position, in-flight and arrival records, set-aside records | **authoritative: sole record of what is owed and of what is known of the main** | never; a client with no position arrives by state |
 | upload records, local intents | authoritative for recovery | an unrecorded staged edit is re-derived (adoption) |
 | deferred job logs | **authoritative: sole record of owed replication** | never |
 | client uuid, leases | **authoritative identity** | never |
