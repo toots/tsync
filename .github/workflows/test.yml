@@ -69,12 +69,14 @@ jobs:
           echo "$info" | grep -Eq '^tls:.*\bnative\b'
           echo "$info" | grep -Eq '^share previews: ffmpeg$'
 
+      # The tests that state a time bound run first, one at a time; the suite
+      # then diffs the outputs they left instead of running them in its pile
+      # (ocaml/09).
+      - name: Timing-sensitive tests
+        run: opam exec -- dune build @runtest-serial -j1
+
       - name: Tests
         run: opam exec -- dune build @runtest --force
-
-      # The tests that state a time bound, one at a time (ocaml/09).
-      - name: Timing-sensitive tests
-        run: opam exec -- dune build @runtest-serial -j1 --force
 
   # 10 §3.1 item 5: the android frontend in the desktop binary, its hermetic
   # checks, then the app's JVM suites, the wire suite against that binary. No
@@ -118,11 +120,11 @@ jobs:
           echo "$info"
           echo "$info" | grep -Eq '^frontends:.*\bandroid\b'
 
+      - name: Timing-sensitive frontend tests
+        run: opam exec -- dune build @tests/android/runtest-serial -j1
+
       - name: Frontend tests
         run: opam exec -- dune build @tests/android/runtest --force
-
-      - name: Timing-sensitive frontend tests
-        run: opam exec -- dune build @tests/android/runtest-serial -j1 --force
 
       - uses: actions/setup-java@v4
         with:
@@ -187,15 +189,15 @@ jobs:
 
       # A short TMPDIR: the runner's own is past the 104-byte socket path limit
       # (09 §5.9).
+      - name: Timing-sensitive tests
+        env:
+          TMPDIR: /tmp
+        run: opam exec -- dune build @runtest-serial -j1
+
       - name: Tests
         env:
           TMPDIR: /tmp
         run: opam exec -- dune build @runtest --force
-
-      - name: Timing-sensitive tests
-        env:
-          TMPDIR: /tmp
-        run: opam exec -- dune build @runtest-serial -j1 --force
 
       - name: Swift tests
         run: make -C macos test

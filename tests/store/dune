@@ -105,7 +105,7 @@
   (run ./proxy_test.exe)))
 
 (rule
- (alias runtest-serial)
+ (aliases runtest runtest-serial)
  (action
   (diff proxy_test.expected proxy_test.output)))
 

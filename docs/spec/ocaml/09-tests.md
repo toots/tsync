@@ -10,11 +10,12 @@ finding numbers to [the 2026-10-01 review](../review/2026-10-01-rewrite.md).
   with stdout to `<name>.output`, one diffs that against the committed `<name>.expected` under the
   `runtest` alias. The diff is the verdict (§4, §10.5); there is no assertion library and no check
   counter.
-- The tests whose snapshot states a time bound diff under `runtest-serial` instead: `tray_test`,
+- The tests whose snapshot states a time bound diff under `runtest-serial` as well: `tray_test`,
   `dqueue_test`, `proxy_test`, `http_test`, `lazy_test`, `rt_test`, `rt_fd_test`, `rt_class_test`.
-  CI builds `@runtest`, then `@runtest-serial -j1`, so none of them shares the runner with another
-  test; a local `dune build @runtest` does not run them. Each remains a defect of the check under
-  §10.3 until its bound is gone, and leaves the alias then.
+  CI builds `@runtest-serial -j1` first, so each runs with the runner to itself, then `@runtest`,
+  which diffs the outputs they left: `--force` re-runs a diff, not the rule that made its output.
+  `runtest` stays the whole suite everywhere else. Each remains a defect of the check under §10.3
+  until its bound is gone, and leaves the alias then.
 - A change of behaviour reads as a diff of the snapshot. `dune build @runtest --auto-promote` writes
   the new `.expected`, which is the review artefact.
 - Only stdout is captured. A test that expects a failure prints its kind (`Fail.kind_name`) or the
