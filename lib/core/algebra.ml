@@ -240,7 +240,7 @@ let applicable t : 'f command -> bool = function
       && List.for_all (( = ) i) (folders_at t p)
       && not (is_above t ~ancestor:i p.parent)
 
-let order ~temp from commands =
+let rec take ?(limit = max_int) ~temp from commands =
   let pending_folder pending i =
     List.exists (fun c -> key_of c = `Folder i) pending
   in
@@ -263,29 +263,55 @@ let order ~temp from commands =
               | _ -> None)
             pending
   in
-  let rec go t parked steps pending =
-    if pending = [] then List.rev steps
-    else (
-      let t, steps, blocked =
-        List.fold_left
-          (fun (t, steps, blocked) c ->
-            if applicable t c then (set t c, `Set c :: steps, blocked)
-            else (t, steps, c :: blocked))
-          (t, steps, []) pending
-      in
-      let blocked = List.rev blocked in
-      if List.length blocked < List.length pending then
-        go t parked steps blocked
-      else (
-        match to_park t parked blocked with
-          | None -> failwith "Algebra.order: not a batch"
-          | Some i ->
-              let p = { parent = Folder_id.root; name = temp i } in
-              go (set_folder t i (Some p)) (i :: parked)
-                (`Park (i, folder t i, p) :: steps)
-                blocked))
+  let closes parked c =
+    match key_of c with `Folder i -> List.mem i parked | `File _ -> false
   in
-  go from [] [] commands
+  (* [parked]: the folders at a temporary place whose command is not set yet. *)
+  let rec go t parked all_parked steps count pending =
+    let t, parked, steps, count, blocked =
+      List.fold_left
+        (fun (t, parked, steps, count, blocked) c ->
+          if applicable t c && (count < limit || closes parked c) then
+            ( set t c,
+              List.filter (fun i -> key_of c <> `Folder i) parked,
+              `Set c :: steps,
+              count + 1,
+              blocked )
+          else (t, parked, steps, count, c :: blocked))
+        (t, parked, steps, count, [])
+        pending
+    in
+    let blocked = List.rev blocked in
+    let park () =
+      if count < limit then to_park t all_parked blocked else None
+    in
+    if blocked = [] then `Done (List.rev steps, [])
+    else if List.length blocked < List.length pending then
+      go t parked all_parked steps count blocked
+    else (
+      match park () with
+        | Some i ->
+            let p = { parent = Folder_id.root; name = temp i } in
+            go (set_folder t i (Some p)) (i :: parked) (i :: all_parked)
+              (`Park (i, folder t i, p) :: steps)
+              count blocked
+        | None when parked = [] -> `Done (List.rev steps, blocked)
+        | None -> `Stranded parked)
+  in
+  match go from [] [] [] 0 commands with
+    | `Done result -> result
+    | `Stranded parked ->
+        let stranded c = closes parked c in
+        let steps, left =
+          take ~limit ~temp from
+            (List.filter (fun c -> not (stranded c)) commands)
+        in
+        (steps, left @ List.filter stranded commands)
+
+let order ~temp from commands =
+  match take ~temp from commands with
+    | steps, [] -> steps
+    | _ -> failwith "Algebra.order: not a batch"
 
 type 'f merged = {
   n : 'f t;
