@@ -536,7 +536,7 @@ module Make (C : Engine_ctx.S) = struct
                 else `File (p, None, v) :: acc
             | `Folder (i, place) ->
                 Hashtbl.replace seen (`Folder i) ();
-                Hashtbl.replace folders i ();
+                Hashtbl.replace folders i place;
                 if r_folder i = Some place then acc
                 else `Folder (i, None, Some place) :: acc)
         []
@@ -567,30 +567,56 @@ module Make (C : Engine_ctx.S) = struct
                 let replayed = theirs_of entries in
                 List.iter
                   (function
-                    | `Folder (i, _, Some _) -> Hashtbl.replace folders i ()
-                    | _ -> ())
+                    | `Folder (i, _, Some place) ->
+                        Hashtbl.replace folders i place
+                    | `Folder (i, _, None) -> Hashtbl.remove folders i
+                    | `File _ -> ())
                   replayed;
-                (* 05 §4.7 step 6: a file record whose folder the tree lacks. *)
-                let orphans =
+                (* 05 §4.7 step 6: what the records hold that is no part of a
+                   tree, a folder from which the root is not reached and a
+                   file in a folder the tree lacks, is left out. *)
+                let rec rooted seen i =
+                  Folder_id.is_root i
+                  || (not (List.exists (Folder_id.equal i) seen))
+                     &&
+                       match Hashtbl.find_opt folders i with
+                       | Some (place : Algebra.place) ->
+                           rooted (i :: seen) place.parent
+                       | None -> false
+                in
+                let unrooted =
                   Hashtbl.fold
-                    (fun (k : Algebra.key) () acc ->
-                      match k with
-                        | `File p
-                          when (not (Folder_id.is_root p.parent))
-                               && not (Hashtbl.mem folders p.parent) ->
-                            Log.warn
-                              "state read: %s/%s is in a folder the tree lacks"
-                              (Folder_id.to_string p.parent)
-                              p.name;
-                            `File (p, None, None) :: acc
-                        | _ -> acc)
-                    seen []
+                    (fun i _ acc -> if rooted [] i then acc else i :: acc)
+                    folders []
+                in
+                List.iter
+                  (fun i ->
+                    Log.warn "state read: folder %s is not part of the tree"
+                      (Folder_id.to_string i);
+                    Hashtbl.remove folders i)
+                  unrooted;
+                let orphans =
+                  List.map (fun i -> `Folder (i, None, None)) unrooted
+                  @ Hashtbl.fold
+                      (fun (k : Algebra.key) () acc ->
+                        match k with
+                          | `File p
+                            when (not (Folder_id.is_root p.parent))
+                                 && not (Hashtbl.mem folders p.parent) ->
+                              Log.warn
+                                "state read: %s/%s is in a folder the tree \
+                                 lacks"
+                                (Folder_id.to_string p.parent)
+                                p.name;
+                              `File (p, None, None) :: acc
+                          | _ -> acc)
+                      seen []
                 in
                 let all =
                   List.fold_left
                     (fun acc c -> Keys.add (Algebra.key_of c) c acc)
                     Keys.empty
-                    (gone () @ walked @ orphans @ replayed)
+                    (gone () @ walked @ replayed @ orphans)
                 in
                 ( t + List.length entries,
                   List.map snd (Keys.bindings all),
