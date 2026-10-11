@@ -13,8 +13,8 @@ Bodies and memory are in [memory.md](memory.md).
 | domain names (§2.2) | `Names.domain_name_error ?local_store`, `Names.reserved_roots`; `Domain_name.t` (`of_string`, `v`) |
 | leaves and paths (§2.3) | `Names.valid_leaf`, `valid_path`, `user_path` (strips one leading and one trailing `/`) |
 | logical keys (§2.4) | no type: a path is a validated string taken apart by `Names.leaf_of`, `parent_of`, `join`, `is_under`; the domain prefix is `Key.manifests`; the kind is read from local state (`Mirror.kind`), never from the spelling |
-| folder ids (§2.5) | `Folder_id.t` (`root`, `trash`, `of_string`, `v`, `mint ~uuid ~counter`); grammar in `Names.valid_folder_id` |
-| stored keys (§2.6) | `Key.namespace`, `Key.child` (namespace and `Xxh.dual leaf`), `Key.anchor`, `Key.index`, `Key.trash_entry`; readers `Key.leaf`, `parent_segment`, `is_internal_leaf`, `is_child_of`, `folder_of_namespace_key` |
+| folder ids (§2.5) | `Folder_id.t` (`root`, `of_string`, `v`, `mint ~uuid ~counter`); grammar in `Names.valid_folder_id` |
+| stored keys (§2.6) | `Key.namespace`, `Key.child` (namespace and `Xxh.dual leaf`), `Key.anchor`, `Key.index`; readers `Key.leaf`, `parent_segment`, `is_internal_leaf`, `is_child_of`, `folder_of_namespace_key` |
 | item references (§2.7) | `Names.item_ref` (`Root`, `Dir`, `File_id`, `File`), `parse_ref` (a `result`, so total), `ref_to_string`, `dir_ref`, `valid_file_id`; a malformed one is answered INVALID in `Handler.resolve_ref` |
 | mirror escaping (§2.8) | `Names.storable`, `escape`, `escape_path`, `name_max_local`, `is_internal_local`; the taken-handle refusal is `Mirror.check_handle` |
 | temporary names (§2.9) | `Names.is_temp_name`, `temp_owner`, `temp_name`; `Fs.temp_in`, `Fs.sweep_temps`; the local store's random form is `temp_name` in `lib/store/local.ml` |
@@ -43,7 +43,8 @@ Bodies and memory are in [memory.md](memory.md).
 
 With no counterpart in spec 01: `Fail` (failure-model), `Dqueue` (durable-queue), `Manifest` and
 `Folder` (02), `Keyed_locks` (04), `Cancel`, `Narrate`, `Display`, `Log` and `Usage` (07),
-`Field_spec` (05, 06), `Chunk_set`, `Bigstring`, `Text`, `Registry`.
+`Field_spec` (05, 06), `Algebra` (change-algebra), `Log_entry` (03), `Chunk_set`, `Bigstring`,
+`Text`, `Registry`.
 
 ## C.2 The runtime (spec §6.1, §6.2)
 
@@ -58,7 +59,7 @@ threads.
 | R1 finally | `Fun.protect ~finally` |
 | R1 promise | `Promise` (`resolve` raises when resolved twice, `try_resolve` answers `false`); waiters are woken after the promise's lock is released |
 | R2 time | `now`, `sleep`, `timer`, `with_timeout`, `with_stall_timeout`, `first`, `is_cancelled`, `check`; a timeout is `Rt.Timeout`, a cancellation `Rt.Cancelled` |
-| R3 coordination | `Fmutex` (FIFO, handed to the oldest live waiter), `Condition`, `Signal` (a versioned broadcast, so a wake between the check and the wait is not lost) |
+| R3 coordination | `Fmutex` (FIFO, handed to the oldest live waiter), `Signal` (a versioned broadcast, so a wake between the check and the wait is not lost) |
 | R4 bounded concurrency | `Semaphore` (`try_acquire` never passes a waiter; a width below 1 is 1; `stats` feeds the status report) |
 | R5 file I/O | `Fs`; a system call inside a `` `Threaded `` fiber blocks that fiber's thread only |
 | R6 sockets | `Tsync_http.Transport`, `Ipc` |
@@ -117,8 +118,7 @@ Numbers are findings of [the review](../review/2026-10-01-rewrite.md) that are s
   owner's answer, the admitter's timer and the liveness answer are independent. The control law's
   computation runs inside that tick, as may-block work.
 - **Wall clock for a duration (§4).** `Display` measures a command's elapsed time and its
-  10-second progress interval with `Unix.gettimeofday`. The claim confirmation in `lib/sync` is
-  timed on the wall clock too (140).
+  10-second progress interval with `Unix.gettimeofday`.
 - **EINTR outside `Fs` (§6.3).** `Sys.readdir` in `Import_plan`, `Rsync` and `Export`,
   `In_channel` in `Kept_walk`, and `Sys.file_exists` in `bin/` are not retried. Some callers use a
   bare `Unix.stat` (111).
@@ -138,7 +138,7 @@ Numbers are findings of [the review](../review/2026-10-01-rewrite.md) that are s
   then runs them. A callback that re-enters the same module would otherwise lock twice, which
   OCaml 5 raises on (A-2.4).
 - **A cancelled wait withdraws itself.** `Rt.suspend`'s `register` returns how to remove what it
-  queued, and every queue honours it (`Fmutex`, `Condition`, `Semaphore`, `Signal`, `Promise`,
+  queued, and every queue honours it (`Fmutex`, `Semaphore`, `Signal`, `Promise`,
   `Health.on_trip` through `Retry.until_held`). A hand-off whose waiter answers `false` goes to the
   next one, so a slot is never given to a fiber that left. A descriptor wait is re-armed every 30 s
   so a cancelled one does not stay registered.
@@ -150,8 +150,8 @@ Numbers are findings of [the review](../review/2026-10-01-rewrite.md) that are s
   suit lists whose length the code fixes (C-1.1).
 - **Domains start late.** `Rt` starts the scheduler at first use, since a process with a second
   domain cannot fork (B-4.4).
-- **No `Lazy.t` on the pool** (B-10.1): forcing one from two domains raises. No library under
-  `lib/` uses one.
+- **No `Lazy.t` on the pool** (B-10.1): forcing one from two domains raises. The one under
+  `lib/` is the share page's card image in `share_server.ml`.
 - **C stubs release the runtime lock around every call that can block** (`pread`, `pwrite`,
   `fsync`, `flock`, `statfs`, `fallocate`, the clone, the bigstring hash): a stub blocked while
   holding it stalls every domain at the next stop-the-world section (B-3.2). A path is copied to a

@@ -23,10 +23,6 @@ by state ([algorithms/publication.md](algorithms/publication.md),
 [algorithms/conflict-resolution.md](algorithms/conflict-resolution.md),
 [03-journal-sync.md](03-journal-sync.md)). Each note lists its departures.
 
-The notes of the other subsystems were written against an earlier protocol. Where one of them
-names a journal entry, a WAL record, a folder claim or the folder trash, it is out of date, and the
-three notes above are the ones to trust.
-
 | Subsystem | Notes |
 |---|---|
 | Foundation: names, hashing, the runtime, retry, breaker, stop | [01-core.md](01-core.md) |

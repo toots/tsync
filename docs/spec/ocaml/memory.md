@@ -12,7 +12,7 @@ and that each process reports its memory ([07 §5.5](../07-daemon-cli.md#55-tsyn
   contract, HTTP client and server, cache and staged reads and writes, the file operations, FUSE
   buffers, ZIP members. A `string` body is copied at every hop and lives on the OCaml heap, where the
   collector scans and moves it; a bigstring is allocated once, outside the heap.
-- Small metadata (manifests, folder markers, anchors, journal entries, cursors, JSON) stays a
+- Small metadata (manifests, folder markers, anchors, log entries, cursors, JSON) stays a
   `string`, converted where it leaves the store. `Manifest.of_body` checks the magic on the
   bigstring and converts only a real manifest. The composite's copy job (`sync`) never decodes a
   chunk: a body under a chunk key (`Key.chunk_of`) names nothing, is hashed in place
@@ -97,7 +97,7 @@ collections and little retained heap is a garbage storm, not a leak.
   anonymous memory stayed resident under the default allocator, 245 MiB with two arenas: freed
   blocks held in per-thread arenas (OCaml 5 mallocs large blocks individually, and the scheduler
   runs on several domains). `malloc_trim(0)` after compaction returned 564 MiB at once, leaving
-  155 MiB private for an 81 MiB heap: retention, not live data. A rebuild and every owner job end
+  155 MiB private for an 81 MiB heap: retention, not live data. Every owner job ends
   with `Usage.release`: `Gc.compact`, then `Usage.trim` (`malloc_trim` on Linux,
   `malloc_zone_pressure_relief` on macOS); the owner also trims at every housekeeping pass.
 - **The major heap is not given back without compaction.** OCaml 5 keeps freed major-heap pools for

@@ -19,22 +19,21 @@ formats and operations are mapped in [../04-checkout-cache.md](../04-checkout-ca
 | Cache body, partial body, pin (§3.3, §3.4) | `<C>/chunks/<shard>/<group key>`, `.partial`, `.pin` | `Cache` |
 | Staged manifest, set-aside (§3.5) | `<C>/staged/manifests/<escaped path>`, `.tsync-bad-…` | `Staged` |
 | Staged bodies | `<C>/staged/chunks/<id>`, `<C>/staged/whole/<id>` | `Staged`: `open_body`, `read_body`, `body_links` |
-| WAL record (§3.6) | `<D>/journal-pending/<domain>/<entry key>` | `Wal`; `Dqueue.Records`; the two queues in `Local_ops` |
+| Sync state (§3.6) | `<D>/sync/<domain>/`: `position`, `before/`, `in-flight`, `arrival` | `Sync_state` (`lib/sync`) |
+| Upload records, local intents (§3.6a) | `<D>/uploads-pending/<domain>/<record id>`, `<D>/intents-pending/<domain>/<record id>` | `Local_ops`: `upload`, `upload_kind`, `encode_intent`, `decode_intent`; `Dqueue.Records` |
 | Deferred job logs (§3.7) | `<D>/deferred-pending/<domain>/<escaped member>/`, and `.discards/` beside it | `Composite`, `Discards` (`lib/store`) |
 | Applied log (§3.8) | `<C>/applied/<YYYY-MM>.log` | `Applied` |
-| Last-sync mark (§3.9) | `<D>/last-sync-<domain>` | `Mark` |
-| Resync generation, feed watermark, dropped-shard record | `<D>/resync-<domain>`, `<D>/feed-watermark-<domain>`, `<D>/feed-dropped-<domain>` | `Engine`: `resync_generation`, `stamp_generation`, `cursor`, `changes_since`, `prune_applied` |
+| Resync generation, feed watermark, dropped-shard record (§3.9) | `<D>/resync-<domain>`, `<D>/feed-watermark-<domain>`, `<D>/feed-dropped-<domain>` | `Engine`: `resync_generation`, `cursor`, `changes_since`, `prune_applied`; `Cycle.stamp_generation` |
 | Pause flag | `<D>/paused/<domain>` | `Engine.pause_flag`, `set_paused` |
 | Export records (§3.10) | `<C>/exports/` | `Export` (`sweep_records`) |
-| Pending claim confirmations (§3.10a) | `<D>/claims-pending/<domain>/<record id>` | `Outbound`: `claim_queue`, `record_claim`, `run_claim` |
 | Kept walk, scratch (§3.11) | `<C>/scratch/.tsync-walk`, `<C>/scratch/` | `Kept_walk`, `Handler` (`lib/owner`) |
 | Temporaries | `.tsync-tmp-<pid>-<seq>.tmp` | `Names.temp_name`, `is_temp_name`, `temp_owner`; `Fs.sweep_temps` |
 | Client uuid, id leases (§3.12) | `<D>/client-uuid`, `<D>/id-leases/<hex block>` | `Identity` |
 | Locks and edit generations (§3.13) | memory | `Local_ops.with_meta`, `with_key`; `Keyed_locks` |
 | Read handles, retentions | memory | `Local_ops`: `handles`, `body_refs`, `deferred_release` |
 | Cache body locks, held intervals, in-flight table, counts | memory | `Cache.t` |
-| Handled set, stepped-aside set, cursor debouncer | memory | `Applied`, `Outbound.stepped_aside`, `Journal.t` |
-| Owner start, local recovery (04 §4.10) | — | `Engine.start`: `recover_local`, `reconcile`, `adopt_unrecorded` |
+| Cycle state, projection watch, cursor debouncer | memory | `Cycle`: `cycle_lock`, `asked`, `stuck`, `damaged`, `watching`, `took`; `Log_store.t` |
+| Owner start, local recovery (04 §4.10) | — | `Engine.start`: `recover`, `Cycle.recover_local` |
 
 ## Departures from the spec
 
@@ -51,18 +50,17 @@ formats and operations are mapped in [../04-checkout-cache.md](../04-checkout-ca
   applies `Engine.Make` once, so the in-memory state of §3.13 is the values of that one functor
   body. Frontends reach it through the owner's request handler, never by applying the functor
   themselves.
-- **A non-owner only submits.** It creates a record with `Dqueue.Records.create` under a
-  submission id and pokes the owner; `Engine.poll` rescans, and the metadata queue re-keys the
-  record with a minted entry key (`rescan_logs`).
+- **A non-owner only submits.** `Composite.submit` creates a deferred-job record with
+  `Dqueue.Records.create` under a submission id and pokes the owner; `Engine.poll` rescans.
 - **Everything a non-owner may read is replaced by rename.** `Mirror` and `Staged` write through
   `Fs.replace` or `Fs.durable_replace`; pins are empty files whose mtime is the deadline.
 - **Temporaries name their owner.** `Fs.sweep_temps` removes a temporary whose pid is dead, or one
   naming no owner once it is older than the given age; listings of the mirror and the staged tree
   skip temporary names, so a write in flight is never an entry.
-- **Unnamed staged bodies are released exactly at owner start.** `recover_local` builds the named
+- **Unnamed staged bodies are released exactly at owner start.** `Engine.recover` builds the named
   set from every decodable edit, plus every run of 16 hex characters in a set-aside manifest,
   then releases the rest: nothing else writes the staged tree yet.
 - **Machine-wide identity is outside the lock.** `Identity.client_uuid` and the lease minter use
   `Fs.create_if_absent`; a lease is taken again when the pid changes.
-- **The handled set is loaded once**, by `Engine.start` (`Applied.load`); `Applied.note` keeps it
-  and the log in step under one mutex.
+- **The applied log's head is found once**, when `Local_ops.Make` is applied (`Applied.load`);
+  `Applied.note` keeps it and the log in step under one mutex.

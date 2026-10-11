@@ -33,13 +33,14 @@ finding numbers to [the 2026-10-01 review](../review/2026-10-01-rewrite.md).
 
 | Directory | Subject |
 |---|---|
-| `tests/unit` | the runtime (`rt_test`, `rt_fd_test`, `rt_class_test`), core codecs (`core_test`), `dqueue_test`, `dqueue_raise_test`, cache group states, the uplink budget, law and modes, mapped pages; `hash` and `gc_job` are golden files |
-| `tests/store` | the store contract over each driver, the composite, the copy memo, the chunk spaces, the proxy wire, watches, share serving |
-| `tests/remote` | manifest and marker codecs, the folder index, the remote layer |
-| `tests/sync` | formats and both conflict tables (`formats_test`), recovery, two clients, offline work, the poller, the change feed, import, export, rsync, rebuild races |
+| `tests/unit` | the runtime (`rt_test`, `rt_fd_test`, `rt_class_test`), core codecs (`core_test`), `dqueue_test`, `dqueue_raise_test`, cache group states, shared outcomes, the uplink budget, law and modes, mapped pages; `hash` and `gc_job` are golden files |
+| `tests/store` | the store contract over each driver, the composite, the copy memo, the chunk spaces, the proxy wire, watches, share serving, the share preview image |
+| `tests/remote` | manifest and marker codecs, the folder index, the remote layer, the projection of log entries (`projection_test`) |
+| `tests/sync` | the merge, enumerated (`algebra_test`), every row of conflict-resolution §8.3 (`rows_test`), the cycle against a faulty main (`cycle_test`), the persistent formats (`formats_test`), the change feed, file ids, import, export, rsync and their plans |
 | `tests/gc` | `Gc_plan`, the collector, resume, queued discards, verify, retention, integrity, mirror, shares |
 | `tests/http`, `tests/ipc` | the HTTP client and server over both TLS implementations, the IPC server and client |
-| `tests/owner`, `tests/status`, `tests/config` | the request handler, jobs, the supervisor, the menu, status rendering, config parsing, the wizard |
+| `tests/owner`, `tests/status`, `tests/config`, `tests/menu` | the request handler, jobs, the supervisor, status rendering, config parsing, the wizard, the menu model |
+| `tests/desktop`, `tests/tray` | mount discovery, requests against an owner that never answers (`owner_double`), the tray on a private session bus |
 | `tests/android` | the bridge called from foreign threads (`stress_stubs.c`), the command group, the lazy tree |
 | `tests/support` | `Test_support.finish` |
 | `tests/bench` | manual measurements (`rebuild_mem`, `class_bench`): built by the default alias, run by nothing |
@@ -48,11 +49,10 @@ finding numbers to [the 2026-10-01 review](../review/2026-10-01-rewrite.md).
 
 - **Domain configuration as a value (§5.1).** A test builds a module `C : Engine_ctx.S` by hand (a
   `Local.create` store in the scratch root, wrapped in `Composite.create`) and applies `Engine.Make`;
-  `tests/sync/two_clients_test` applies it once per client over one store. `max_uploads = 1` keeps the
+  `tests/sync/rows_test` applies it once per client over one store. `max_uploads = 1` keeps the
   applied log deterministic, and a store built without a link is never governed (`Uplink.none`).
 - **Direct engine surface (§5.5).** Steps call the engine: `E.create`, `write`, `close`, `rename`,
-  `E.apply_pass` for one pass without the poller's timer, `E.drain`, `E.set_paused` to hold the queues,
-  `E.resync`, `E.bridge`.
+  `E.resync` for one cycle without the worker's timer, `E.drain`, `E.set_paused` to hold the domain.
 - **Request interface (§5.4).** `tests/owner/protocol_test` checks the request codecs; `owner_test` and
   `shared_test` serve a real socket and call it.
 - **Processes (§5.8).** `tests/gc/lock_holder.exe` is a second process holding the run lock;
@@ -82,7 +82,7 @@ that the output never shows, so every driver is diffed against the same lines.
 
 - `Store.t` is a record of functions, so a double is a real store with a few fields replaced:
   `{ s with list_prefix = … }`. There is no module of named doubles; each test writes the one it
-  needs (`flaky`, `staged` in `tests/sync/poller_retry_test`, `flaky` in `tests/gc/integrity_test`).
+  needs (`faulty` in `tests/sync/cycle_test`, `flaky` in `tests/gc/integrity_test`).
 - A double refuses or holds on a condition the test controls: an `Atomic` counter of failures left, or
   an `Rt.Promise` the call waits on. A refusal names its verb and its key prefix, so background work
   does not consume it (§5.3).
@@ -105,7 +105,7 @@ that the output never shows, so every driver is diffed against the same lines.
 - **A snapshot that does not change after a print was added means a stale binary** (pitfall B-12.3).
 - **`(optional)` hides a broken stanza.** An executable whose library is missing is silently not built,
   and its `enabled_if` rules then run nothing (pitfall B-11.1).
-- **Deferred work outlives a case.** A composite's `settle_later` or a journal's cursor debouncer can
+- **Deferred work outlives a case.** A composite's `settle_later` or the log store's cursor debouncer can
   write under a scratch root the test is removing; a stop makes the first attempt at once and end, and
   leaves the second's pending key to the drain's flush. `Test_support.finish` requests the stop, waits for
   `Rt.running` to empty and only then removes the root; a fiber still running after `Stop.grace` fails
@@ -123,10 +123,10 @@ that the output never shows, so every driver is diffed against the same lines.
 ## T.6 Gaps against the spec
 
 - **No crash-at-every-step or power-loss harness (§7.2, §7.3).** Crash windows are built by hand
-  (`tests/sync/recover_test`, `tests/gc/resume_test`); nothing kills at a labelled durable step, and
+  (`tests/sync/cycle_test`, `tests/gc/resume_test`); nothing kills at a labelled durable step, and
   no seam orders fsync against publish.
-- **No property-based conflict run (§8).** `formats_test` prints both tables exhaustively, fact to
-  decision; the two-client tests pick pairs by hand.
+- **No generated two-client run (§8.2).** `algebra_test` enumerates the merge (§8.1); `rows_test`
+  writes each row of conflict-resolution §8.3 by hand, with no generator, fault or role swap.
 - **Fixed sleeps as negative waits** (finding 158): `tests/store/spaces_test`, `tests/unit/dqueue_test`,
   `tests/gc/queued_test`. Under load a broken guard passes.
 - **Tests that cannot fail for their reason.** "Callbacks one at a time" in `remote_test` depends

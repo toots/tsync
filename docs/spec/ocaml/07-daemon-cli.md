@@ -11,7 +11,7 @@ parentheses are the spec's. The request handler itself is in [08-frontends.md](0
 | Owner assignment (§2.4) | `Supervisor.assign`: one `owner --domain D` child per domain whose frontend is `` `Per_domain `` or that has none, one `owner` child for every `` `Shared `` domain together, one `store-server` child when a domain lists `http-proxy`. The topology is `Frontend.t.presenting`. |
 | Ownership lock (§2.3) | `Owner.acquire`, `release`, `holder`: `Fs.flock` on a close-on-exec descriptor of `Paths.ownership_lock`, then the holder record. `Owner.owner_held` is 75. |
 | Owner start, serve and stop (§3.2, §3.4) | `Owner.run`, and `serve` inside it: `Domain.build ~owner:true`, the engine's `start`, a `housekeeping` fiber, `Handler.create`, `Ipc.serve`, the recovery notice, then the frontend's presentation. At the stop: `draining` is set, every engine's `drain` runs concurrently, the socket closes. |
-| Owner requests and the one-shot fallback (§2.5, §3.5) | `Owner.request`: `Owner.ask` over the socket, else `Owner.one_shot`, which takes the lock as role `command`, starts the engine with `~poll_journal:false`, calls `Handler.call` in process and drains before `release`. |
+| Owner requests and the one-shot fallback (§2.5, §3.5) | `Owner.request`: `Owner.ask` over the socket, else `Owner.one_shot`, which takes the lock as role `command`, starts the engine with `~background:false`, calls `Handler.call` in process and drains before `release`. |
 | Owner jobs (§2.5) | `Jobs.t`, `Jobs.run`; `Handler` `run_job` and `cancel`; `Protocol.Job`, `Protocol.Cancel`; `Cli.run_job`. Cancellation points: `Cancel.check`, `Cancel.race`, `Cancel.batches`. |
 | Pause (§2.6) | The engine's `set_paused` and `is_paused` over `Engine.pause_flag`; `Protocol.Pause`; `Protocol.refused_while_paused`. |
 | Runtime paths, service manager (§2.7) | `Tsync_config.Paths`, `Tsync_config.Service`. |
@@ -36,7 +36,7 @@ parentheses are the spec's. The request handler itself is in [08-frontends.md](0
 ## Where the code departs from the spec
 
 - **Commands.** `ls`, `cache --prune` and `set-aside` do not exist, nor do the `prune` and
-  `set_aside` actions; `cache` has `--evict` and `--fetch` (`Store_cmds.cache`). `sync` takes no `--source` and no `-j`.
+  `set_aside` actions; `cache` has `--evict` and `--fetch` (`Store_cmds.cache`). `sync` takes no `-j`.
 - **Status totals.** `status` takes `--json` and `-w` only. The supervisor forwards the `stats`
   argument, and an owner ignores it (`Owner` `stats_reply`): `Status_report` has no store totals.
 - **Status self-description.** `Status_report.self` has no `pools` and no `backend` block. With no
@@ -98,12 +98,12 @@ parentheses are the spec's. The request handler itself is in [08-frontends.md](0
 | `Ipc` | line 1 MiB, 256 connections, subscriber backlog 256, request deadline 30 s, client deadline 35 s, advisory 2 s, liveness probe every 10 s with a 5 s deadline |
 | `Supervisor` | backoff 1 s to 60 s, stable after 60 s, reap margin 2 s, reap poll 0.05 s, job stale after 45 s, finished job kept 300 s |
 | `Handler` | job report every 10 s, progress line every 0.25 s |
-| `Report` | probe window 5 s, journal window 60 s, listing grace 2 s |
+| `Report` | store state window 5 s |
 | `Owner` | housekeeping every 60 s |
 | `Rt` | 2 to 8 domains, at most 256 blocking threads (finding 94) |
 
 ## Tests
 
-`tests/owner/{owner,shared,supervisor,jobs,menu,protocol}_test`, `tests/ipc/ipc_test`,
+`tests/owner/{owner,shared,supervisor,jobs,protocol}_test`, `tests/menu/menu_test`, `tests/ipc/ipc_test`,
 `tests/status/render_test`, `tests/config/{config,wizard}_test`, and the runtime's own
 `tests/unit/rt*_test`. Each is a snapshot (`<exe>.expected`).

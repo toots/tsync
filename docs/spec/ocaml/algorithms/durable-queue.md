@@ -11,37 +11,32 @@ Finding numbers refer to [the 2026-10-01 review](../../review/2026-10-01-rewrite
 | Log, record, id grammar (§4.1) | `Dqueue.Records` (`open_`, `create`, `read`, `update`, `replace`, `complete`, `list`), `Dqueue.valid_id`, `Dqueue.submission_id` (`lib/core/dqueue.ml`) |
 | Set aside, R6 | `Records.set_aside`, `Records.set_aside_records`; a record that cannot be read stays in place and is retried (`decode_record`, `` `Unreadable ``) |
 | Submission, hold, release order (§4.2) | `Records.create`, `Records.create_held`, `Records.hold`, `Records.is_held`; `Dqueue.rescan` skips a held record and every later one of the same pid |
-| Re-key of an adopted WAL record | `Records.rekey`, the `rekey` argument of `Dqueue.start` and `rescan` (`Engine.rescan_logs` mints an entry key) |
 | `post`, `adopt`, `update`, `complete` (§4.3) | `Dqueue.post`, `adopt`, `Records.update`, `Records.complete` |
 | Ordered and keyed queues (§4.5) | `Dqueue.create ~ordered`; `ordered_worker`, `keyed_worker`, coalescing in `take` |
 | Outcomes (§4.6) | `run_one`, `failed`; `Rt.Cancelled` completes, `Stop.Stopping` leaves the record, `Fail.retryable` decides retry or park; `Dqueue.backoff` |
-| Parking, re-arm (§4.7) | `Dqueue.parked`, `Dqueue.rearm`, `rearm_interval`; `Engine.rearm` from the owner's `housekeeping` (`lib/owner/owner.ml`) and from the retry request |
+| Parking, re-arm (§4.7) | `Dqueue.parked`, `Dqueue.rearm`, `rearm_interval`; `Engine.rearm` (the upload queue and `Composite.rearm`) from the owner's `housekeeping` (`lib/owner/owner.ml`) and from the retry request |
 | Settle, pause (§4.8) | `Dqueue.settle`, `settle_timeout`, `pause`, `resume`; `Engine.drain`, `Composite.settle` |
-| Job kind | `'job Dqueue.kind` (`decode`, `encode`, `key`, `note`, `accepts`); two queues share the WAL through `accepts` |
-| The logs of a domain | the WAL with its `uploads` (keyed) and `metadata` (ordered) queues (`lib/sync/local_ops.ml`), `claims` (`lib/sync/outbound.ml`), one copy log per replica or backfill (`lib/store/composite.ml`), pending discards (`lib/store/discards.ml`) |
-| Start and recovery | `Engine.start`: `recover_local`, `Dqueue.start`, `reconcile`, `rescan_logs`, `adopt_unrecorded` |
-| Bulk publisher (§7.3) | `Bulk.batches` (`lib/sync/bulk.ml`): a record held from birth, rewritten to the ops whose store half happened, then adopted |
+| Job kind | `'job Dqueue.kind` (`decode`, `encode`, `key`, `note`, `accepts`) |
+| The logs of a domain | the upload records with their keyed `uploads` queue, and the local intents, a log with no queue (`lib/sync/local_ops.ml`); one copy log per replica or backfill (`lib/store/composite.ml`), pending discards (`lib/store/discards.ml`) |
+| Start and recovery | `Engine.start`: `recover`, `Cycle.recover_local`, `Dqueue.start`, `Dqueue.rescan` |
+| Bulk publisher (§7.3) | `Bulk.upload_file`, `install`, `await` (`lib/sync/bulk.ml`), over `Local_ops.install`: the chunks, then the manifest installed with its before-value under the metadata lock; the run waits for the commit of its keys |
 | Non-owner submitter | `Composite.create ~owner:false`: `submit` creates the record and calls `poke` |
-| Tests | `tests/unit/dqueue_test`, `dqueue_raise_test`, `tests/sync/recover_test`, `tests/gc/queued_test` |
+| Tests | `tests/unit/dqueue_test`, `dqueue_raise_test`, `tests/sync/cycle_test` (a restarted owner), `tests/gc/queued_test` |
 
 ## Departures from the spec
 
 - **Every record is loaded.** `post` and `rescan` take each record into memory; nothing stays on disk
   past a window (§4.4 leaves this to the implementation). `loaded`, `order` and `ready` are lists, so a
   backlog of hundreds of thousands of records makes start-up and each rescan quadratic (finding 90).
-- **The `claims` queue is not re-armed while the owner runs.** `Engine.rearm` covers the upload,
-  metadata and copy queues only (§4.7 asks it of every queue).
 - **A keyed queue retries UNEXPLAINED at the tail** (`failed`), as failure-model §7.1 asks; the outcome
   table of §4.6 lists it as non-retryable.
 - **`settle` polls.** It samples the queue every 50 ms instead of waiting on a condition; a
   cancellation ends it.
 - **No watchdog per queue** (finding 43). Status counts retrying and parked records; a queue whose
-  worker waits at a closed gate looks like one that is working.
+  worker is stalled inside a job looks like one that is working.
 - **A first write's body is not fsynced before its staged manifest names it** (finding 20, rule R2).
 - **A failed local half is not rolled back** (finding 108): `delete` drops the staged edit before the
   mirror removal, and an I/O error in between leaves the old content visible.
-- **Revive-ours publishes without a record** (finding 39): see
-  [conflict-resolution](conflict-resolution.md).
 
 ## Learnings
 
@@ -53,8 +48,6 @@ Finding numbers refer to [the 2026-10-01 review](../../review/2026-10-01-rewrite
   (pitfall C-7.10).
 - A descriptor that holds a record's lock is the caller's only once the lock is taken: `Records.hold`
   closes it on every failure (pitfall C-7.10).
-- A held record is rewritten before its hold is released, never after: a rescan between the two would
-  adopt the full record (`Bulk.batches`).
 - A retried record is superseded when a newer job for its key arrived meanwhile; its record is completed
   then, and a record left behind is adopted again by the next rescan.
 - `Records.update` never resurrects a record completed meanwhile; both run under the record's mutex.

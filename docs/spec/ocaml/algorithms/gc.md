@@ -10,20 +10,20 @@ Finding numbers refer to [the 2026-10-01 review](../../review/2026-10-01-rewrite
 | Surviving space S, outgoing space F | `Key.chunks`, `Key.chunks_from` under the collectable main's root; only `Chunk_spaces` and `lib/gc` name F (`tests/store/gc_scoping` lists the sources that do) |
 | Collectable (A1) | `Chunk_spaces.of_store`, `collectable`: a store with a `local_path` not on a network filesystem, asked on every use |
 | Driver-scoped access (§5.8) | `Chunk_spaces.read`, `twins`, `list`, called by the local driver (`lib/store/local.ml`) |
-| Reference classification (§5.3) | `Chunk_spaces.references`: the gate refuses exactly what marking halts on |
+| Reference classification (§5.3) | `Chunk_spaces.references` (a log entry through `Log_entry.chunk_names`, a manifest through `Manifest.chunk_names`): the gate refuses exactly what marking halts on; `log_references` in `collector.ml` reads the entries above the tree head |
 | Gate, publish lock, promote (§5.4) | `Chunk_spaces.gate`, `with_publish_lock` (`flock` on `Key.gc_publish_lock`), `promote`, `sync_shards` |
 | Run lock | `Chunk_spaces.with_run_lock`: an in-process check-and-set, then `lockf F_TLOCK` on `Key.gc_lock` |
 | Run record R | `Gc_record` (`read`, `write`, `clear`, `run_name`; `reconciling` reads as closing) |
 | Generation G (§5.6) | `Gc_generation`: `read`, `read_mains` (maximum over mains), `write`, `settle` |
-| Every keep or delete decision | `Gc_plan`, pure: `start`, `namespaces`, `closing_generation`, `doomed`, `keep_plan`, `trash`, `purge_order`, `versions`, `journal`, `share`, `unreferenced` (`tests/gc/plan_test`) |
+| Every keep or delete decision | `Gc_plan`, pure: `start`, `namespaces`, `closing_generation`, `doomed`, `keep_plan`, `versions`, `log`, `takeovers`, `share`, `unreferenced` (`tests/gc/plan_test`) |
 | Phases (§5.5) | `Collector.run ?budget ?pause ?verify ?keep`; outcomes `Completed`, `Suspended`, `Halted` |
 | Dry run (§5.9), status | `Collector.dry_run`, `Collector.status` |
 | Deletion on copies (§5.7) | `Composite.submit_collection_delete`, the copy job `Collection_delete`, `collection_owed`, `settle_later` (`lib/store/composite.ml`) |
 | Queued discards, the bucket function | `Discards` (`add`, `pending`, `remove`), `Bucket_function` (`probe`, `confirmed`, `due`), `Composite.probe`, `outstanding`, `retry_outstanding` |
 | Presence memo | `Copy_memo`, which reads G itself; `Chunk_set` holds its keys |
-| Retention (§4) | `Retention.Make`: `expire`, `purge`, dry runs unless `apply` |
-| Orphan namespaces (§4.6), integrity | `Integrity.Make`: `report`, `repair_tree`, `verify`, `repair_chunks` |
-| Shares (§4.5) | `Share.Make`: `create`, `revoke`, `clear_cache`; expiry in `Retention` |
+| Retention (§4) | `Retention.Make`: `expire`, a dry run unless `apply`; the log by `Log_store.retention` |
+| Integrity (05 §4.10) | `Integrity.Make`: `report`, `verify`, `repair_chunks` |
+| Shares (§4.3) | `Share.Make`: `create`, `revoke`, `clear_cache`; expiry in `Retention` |
 | Tests | `tests/gc/` (`plan_test`, `collector_test`, `resume_test`, `queued_test`, `verify_test`, `retention_test`, `integrity_test`, `share_test`, `mirror_test`), `tests/store/spaces_test`, `tests/store/gc_scoping`, `tests/unit/gc_job` |
 
 The collector takes one session per collectable main, each under that main's run lock; the first
@@ -31,8 +31,8 @@ collectable main owes its deletions to every replica and backfill (`targets` in 
 
 ## Where the code departs from the spec
 
-- **The publish lock can starve the collector** (finding 133): it is taken by polling, so a busy
-  import holding it shared can keep the collector's exclusive take waiting until it times out.
+- **The publish lock can starve the collector** (finding 133): it is taken by polling, so gated
+  writes holding it shared in turn can keep the collector's exclusive take waiting until it times out.
 - **Integrity holds the whole tree before it reports** (finding 85).
 - **Collection is refused while a remote copy would be told key by key.** `Collector.run` answers
   `Unsupported`, unless `keep`, when the collecting main owes deletions to a remote copy whose bucket

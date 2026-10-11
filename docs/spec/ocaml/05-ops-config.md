@@ -32,7 +32,7 @@ Companion to the language-neutral spec [../05-ops-config.md](../05-ops-config.md
 | The owner's view | `Engine_ctx.S`, built in `Domain.engine`, which applies `Engine.Make` once |
 | `reading_from`, `reading_at_most` (§3.1) | `?reading_from` and `?reading_at_most` of `Domain.context` |
 | `capacity` | `Domain.capacity` |
-| Key names | `Tsync_core.Key` (`Key.cursor`, `Key.journal`, `Key.shares`, …), not fields of the context |
+| Key names | `Tsync_core.Key` (`Key.cursor`, `Key.log`, `Key.shares`, …), not fields of the context |
 
 **Operations (§4).**
 
@@ -41,16 +41,17 @@ Companion to the language-neutral spec [../05-ops-config.md](../05-ops-config.md
 | Where an operation runs (§4.1) | `Tsync_owner.Jobs.t` and `Jobs.run`, called by the owner's `handler.ml`, one job at a time; `Protocol.refused_while_paused` |
 | Narration | `Tsync_core.Narrate.t`, an argument of every operation |
 | Cancellation | `?cancelled:(unit -> bool)`, `Tsync_core.Cancel` |
-| Announcing (§4.2) | `Bulk.batches` in `lib/sync/bulk.ml` (`entry_ops`, `entry_age`, `Dqueue.Records.create_held`), `Bulk.folder`, `Bulk.publish` |
+| Bulk publishers (§4.2) | `Bulk` in `lib/sync/bulk.ml`: `run`, `note`, `install`, `install_link`, `folder`, and `await`, which pushes and returns once no noted key is pending |
 | Import (§4.3) | `Import_plan.plan` (pure walk), `Engine.S.import` (`lib/sync/import.ml`), `Bulk.upload_file` |
 | Export (§4.4) | `Export.Make(Context).export`, `Export.sweep_records`; built in `bin/store_cmds.ml`, in the command's own process |
 | Rsync (§4.5) | `Rsync_plan.decide`, `unchanged`, `differing`, `disposes` (pure); `Engine.S.rsync` (`lib/sync/rsync.ml`) |
 | Mirror (§4.6) | `Store_mirror.Make(Context).mirror`, `Store_mirror.scope` |
-| Resync (§4.7) | `Engine.S.resync`, `rebuild`, `apply_pass` |
-| Trash and retention (§4.8) | `Tree.trashed`, `Tree.restore`, `Engine.S.restore_from_trash`; `Retention.Make(Context).expire`, `purge`; decisions in `Gc_plan.trash`, `versions`, `journal`, `share` |
+| Sync (§4.7) | `Engine.S.resync ?full`; the walk of a state read is `Projection.fold` (`lib/remote`), called by `Cycle.state_read` |
+| Deleted files and retention (§4.8) | `list_versions`, `all_versions` of `Remote.Make`, `Engine.S.revert`; `Retention.Make(Context).expire`; decisions in `Gc_plan.versions`, `log`, `takeovers`, `share` |
 | Collection (§4.9) | `Collector.run`, `dry_run`, `status`; `Gc_plan.start`; `Gc_record`; `Chunk_spaces.with_run_lock`; `Composite.outstanding`, `retry_outstanding` |
-| Integrity (§4.10) | `Integrity.Make(Context).report`, `repair_tree`, `verify`, `repair_chunks` |
+| Integrity (§4.10) | `Integrity.Make(Context).report`, `verify`, `repair_chunks`; findings `Disowned`, `Unmarked`, `Unaccounted`, or `Behind` |
 | Share (§4.11) | `Share.Make(Context).create`, `revoke`, `clear_cache`, called from `handler.ml` |
+| Voiding a log entry (§4.12) | `Jobs.Void_entry`, `void_entry` in `jobs.ml`, over `Log_store.read_entry` and `void_create` |
 
 ## Departures
 
@@ -66,11 +67,10 @@ Companion to the language-neutral spec [../05-ops-config.md](../05-ops-config.md
 - **A field's `default` is the wizard's.** The parser leaves an absent field out of `fields`; each driver applies its own default in `create`. An empty string is an absent string field, and `null` an absent value.
 - **The registries are the build** (pitfall B-11.1). `Driver.names ()` and `Frontend.names ()` are what `tsync build-info` prints and what the error for an unknown type lists; the optional frontends and TLS implementations enter through the `select` stubs of `lib/catalog/dune`.
 - **The wizard edits JSON, not `Config.t`.** A key it does not ask about survives a round trip, and `prepare` validates with `Config.of_json`, so the wizard cannot write what the parser refuses.
-- **The context is a first-class module over two functor families.** `Retention`, `Integrity`, `Store_mirror`, `Share` and `Export` are `Make (Context.S)`; import and rsync are layers of the engine's functor chain (`Outbound.Make`, `Bulk.Make`, `Import.Make`, `Rsync.Make` over `Engine_ctx.S`), since they publish through the owner's WAL and mirror. Each `Make` application has its own module-level state, so the engine is applied once per domain and kept by the owner.
+- **The context is a first-class module over two functor families.** `Retention`, `Integrity`, `Store_mirror`, `Share` and `Export` are `Make (Context.S)`; import and rsync are layers of the engine's functor chain (`Local_ops.Make`, `Uploads.Make`, `Cycle.Make`, `Bulk.Make`, `Import.Make`, `Rsync.Make` over `Engine_ctx.S`), since they change the domain as local operations of the owner. Each `Make` application has its own module-level state, so the engine is applied once per domain and kept by the owner.
 - **`reading_from` is a record update of the composite's store**: it replaces `get_opt`, `get_range`, `head_opt`, `list_prefix`, `watch`, `get_many`, `list_many` and `health` with the member's. A read field added to `Store.t` is not redirected until it is listed there.
 - **Decisions are pure modules, effects apply them.** `Import_plan`, `Rsync_plan` and `Gc_plan` take facts and answer variants; `tests/sync/import_plan_test`, `rsync_plan_test` and `tests/gc/plan_test` cover their tables without a store.
-- **A batch's record exists, held, before its first put** (`Dqueue.Records.create_held`), and is rewritten to the ops that ran before the hold ends; a rescan never adopts the full record in between. A batch's items run one after another, and it closes after `entry_ops` items or `entry_age` seconds.
-- **`Bulk.upload_file` stats the open descriptor before and after reading**, and a file that changed is LOCAL, never published as a mix.
+- **`Bulk.upload_file` stats the open descriptor before and after reading**, and a file that changed is LOCAL, never installed as a mix.
 - **Export claims a chunk only after its fsync** (`Fs.fsync`, then `Fs.append_durable` of the index), and holds a `flock` on the record for the run; `sweep_records` removes only records it can lock.
 - **Export and mirror pull work with `Rt.each ~width`**: a fixed number of workers take the next item under a mutex, so live fibers are bounded by the width and not by the item count.
 - **The dry run's referenced set is a `Chunk_set`**, packed, not a table of strings (finding 82).

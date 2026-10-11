@@ -8,7 +8,7 @@ Not normative. Finding numbers refer to [the 2026-10-01 review](../../review/202
 | Spec concept | Code |
 |---|---|
 | Roles, read order (§3.1) | `Composite.role`, `role_of_string`, `read_rank`, `in_read_order` (`lib/store/composite.ml`) |
-| Configuration rules (§3.2) | domain validation in `lib/config/config.ml`: names unique ignoring case, no replica or backfill without a main; backends sorted by `read_rank` |
+| Configuration rules (§3.2) | domain validation in `lib/config/config.ml`: names unique ignoring case, no replica or backfill without a main; backends sorted by `read_rank`; at most one main in `Composite.create` |
 | Construction (§4.1) | `Composite.create`; `Composite.store` is the composite, `Composite.source` the mains alone, where copy jobs read (`make_store ~source_only`) |
 | Job log, records (§3.3) | `Composite.job`, `record`, `encode_record`, `decode_record`; `<data_dir>/deferred-pending/<domain>/<escape_name>/`, run by an ordered `Dqueue` |
 | Pending discards | `Discards`, at `<log dir>.discards/` |
@@ -18,7 +18,7 @@ Not normative. Finding numbers refer to [the 2026-10-01 review](../../review/202
 | Running jobs (§4.3) | `run_job`, `run_job_body`, `sync`, `ensure_chunk`; three restarts when the referrer changed |
 | Chunk memo (§4.4) | `Copy_memo` (`look`, `trusted`, `holds`, `note`, `learn_shard`, `forget`), its keys in a `Chunk_set` |
 | Single runner (§4.5) | `Composite.start`, `rescan`, `rearm`, `pause`, `resume`, `settle`, called by `Engine` |
-| Read path (§4.6) | `ask`, `walk`, `read`, `unreachable_of`; `compute_checksum` over the readable members only |
+| Read path (§4.6) | `authority` (the main, else the first archive) answers every key that is not a chunk; `read ~chunk`, `ask`, `walk`, `unreachable_of` for chunks; `compute_checksum` by the authority |
 | Batches | `get_many`, `list_many` of the first readable member |
 | Capabilities (§4.7) | the `capabilities` field built in `make_store`; `function_confirmed` |
 | Verification requests | `Composite.queue_verification`, `Integrity.verify` (`lib/gc/integrity.ml`) |
@@ -26,7 +26,7 @@ Not normative. Finding numbers refer to [the 2026-10-01 review](../../review/202
 | Bucket function probe | `Bucket_function`, `run_probe`, `probe_due`; a confirmation is saved at `<log dir>.function` |
 | Write guard (§4.9) | `Composite.guard`, `probe_main` |
 | Mirror (§4.10) | `Store_mirror.Make.mirror` (`lib/gc/store_mirror.ml`) |
-| Integrity repair (§4.11) | `Integrity.Make`: `repair_chunks`, `repair_tree`; `Corruption_marker`; `Local.create ?verify_writes` |
+| Integrity repair (§4.11) | `Integrity.Make`: `repair_chunks`; `Corruption_marker`; `Local.create ?verify_writes` |
 | Degraded, status | `Composite.copy_stats`, `Composite.parked` |
 | Tests | `tests/store/composite_test`, `copy_memo_test`, `tests/gc/queued_test`, `mirror_test`, `verify_test` |
 

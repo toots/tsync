@@ -6,7 +6,7 @@ Companion to the language-neutral specs [../../frontends/android.md](../../front
 
 | Part | Place |
 |---|---|
-| The lazy tree: pull, pull marker, view hold, manifest refresh (04 §3.5, §2.3) | `lib/sync/engine.ml` (`pull`, `pulled_at`, `view_hold`, `hold_views`, `refresh_file`) |
+| The lazy tree: pull, pull marker, view hold, manifest refresh (04 §3.5, §2.3) | `lib/sync/engine.ml` (`pull`, `pulled_at`, `view_hold`, `hold_views`, `refresh_file`), `lib/sync/cycle.ml` (`pull_folder`, `folder_position`) |
 | When to pull, patience, freshness, notices' triggers (android §3.2–§3.3) | `lib/owner/pulls.ml` |
 | The handler on a pulled tree (android §6) | `lib/owner/handler.ml`, wherever `t.pulls` is consulted |
 | An owner with no socket (07 §3.6) | `Owner.embed`, `Owner.maintain` |
@@ -21,11 +21,11 @@ Companion to the language-neutral specs [../../frontends/android.md](../../front
 - **The tree is the frontend's.** `Frontend.t.pulled` carries the refusal text of 08 §2.1, and `Domain.build` derives `lazy_tree` from the domain's frontends. No caller chooses: a desktop one-shot owning an android domain gets the lazy tree too, and cannot replicate into a pulled mirror.
 - **Freshness is keyed by folder id**, in a table of the process, on `Rt.now`. A rename keeps it.
 - **A pull is detached from its waiter.** `Pulls.start` spawns the pull and hands back a promise; a listing waits on it for `pull_patience`, a mutation likewise, and a waiter that gives up leaves it running. Its completion sends the `changed` notice when the children differ or when a listing was answered outdated meanwhile.
-- **What a pull leaves alone.** While any pull's listing is in flight the engine notes the paths local changes and upload commits touch (the table a rebuild uses); the pull's sweep skips them. A staged edit keeps its mirror entry untouched: the publish settles it against the store.
+- **What a pull leaves alone.** A pull is a merge for one folder (`Cycle.pull_folder`, through `merge_and_enact`), under the metadata lock: a key with a before-value keeps its local value, and a staged edit is kept.
 - **"The breaker is open"** means every main member's health cell is down. A double with an always-up cell never takes that path: the tests cover patience and `unreachable`, not the breaker.
 - **Notices are a queue**, not an upcall. `Android_host.next_notice` blocks a host thread; the app runs one daemon thread on it. The core never calls into the JVM, so no core thread is ever attached to it, and the sink cannot call back into the bridge. The queue holds 1024 notices and drops the oldest.
 - **The log sink is the platform's log**, written by a C stub (`tsync_log_write`), tag `tsync`.
-- **`write` with `await`** polls every 100 ms (the engine's `await_upload`) until the staged edit is gone, an upload record of the key or any metadata record is retrying or parked, or the domain is paused.
+- **`write` with `await`** polls every 100 ms (the engine's `await_upload`) until the key has no before-value, an upload record of the key is retrying or parked, no cycle can commit the key, or the domain is paused.
 - **`check_config` with a candidate** crosses the bridge as `domain NUL candidate` in one text argument.
 - **Cleartext.** `Transport.cleartext_loopback_only`, set by `Android_host.init`, refuses a connection without TLS to a host that is not loopback; `check_config` and boot refuse a backend whose `url` field says so.
 - **Errno** values are Linux's, as constants: the consumer is the Android host.

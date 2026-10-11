@@ -20,10 +20,10 @@ What bodies are made of, and what is mapped, is in [../memory.md](../memory.md).
 | Materialisation, pinning (§4.8) | `Cache.pin`, `unpin`, `availability`, `resident`; `pin`, `assemble_to`, `fetch_range`, `downloads` (`local_ops.ml`) |
 | Promotion hand-over | `promote` (`local_ops.ml`), `Cache.adopt_body`: a hard link, else a copy |
 | Replacement (§4.9) | `Cache.enforce_cap`, `last_counts`, `touch`; run by `Engine.trim_cache` from the owner's housekeeping and after each upload |
-| Owner start | `Cache.sweep_at_start`, from `recover_local` (`lib/sync/engine.ml`) |
+| Owner start | `Cache.sweep_at_start`, from `recover` (`lib/sync/engine.ml`) |
 | Store reads and their bounds | `get_whole` and `get_range` given to `Cache.create`; the `downloads`, `ranges` and `buffers` semaphores (`lib/remote/remote.ml`) |
 | Fast or slow store | `Store.fast_read` of the composite, asked through `fast` |
-| Tests | `tests/unit/cache_states_test`, `shared_outcome_test`, `tests/sync/offline_test` |
+| Tests | `tests/unit/cache_states_test`, `shared_outcome_test` |
 
 One `Cache.t` exists per domain per owner (`local_ops.ml`), so every consumer shares its in-flight
 table and its group states.
