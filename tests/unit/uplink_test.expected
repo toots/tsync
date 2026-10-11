@@ -8,6 +8,7 @@ after its completion, debt paid by 100s: true
 == gate at 1 MiB/s
 4 MiB in 512 KiB bodies: about 2 s (the burst is 2 s of rate)
 a best-effort body beyond the budget: refused
+two chunks in line, then two bodies that are not: admitted as log entry, tree record, chunk 1, chunk 2
 a disabled link admits at once: true
 == lease split (§4.5), 1000 B/s, min_rate 100, interval 2 s
 three waiting: 333 333 333 (sum 1000)

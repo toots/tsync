@@ -39,11 +39,13 @@ val renewal : Uplink_lease.request -> Uplink_lease.answer option
 
 type ticket
 
-(** Suspends until the bytes may be sent; STOPPING once the process stops. *)
-val acquire : t -> int -> ticket
+(** Suspends until the bytes may be sent; STOPPING once the process stops. A
+    body that is not a [chunk] is admitted before every waiting chunk
+    (uplink-governor §4.3). *)
+val acquire : t -> chunk:bool -> int -> ticket
 
 (** Admitted now or refused, never waits. *)
-val try_acquire : t -> int -> ticket option
+val try_acquire : t -> chunk:bool -> int -> ticket option
 
 val completed : t -> ticket -> unit
 val abandoned : t -> ticket -> unit
@@ -54,7 +56,7 @@ val waiting : t -> int
 (** One attempt carrying [bytes] upstream, admitted per [mode] and reported
     exactly once; a best-effort attempt refused admission is cancelled without
     running. *)
-val admitted : t -> Store.mode -> int -> (unit -> 'a) -> 'a
+val admitted : t -> Store.mode -> chunk:bool -> int -> (unit -> 'a) -> 'a
 
 type link_state = [ `Ramping | `Steady | `Backing_off | `Leased ]
 type limit = Uplink_law.limit = Configured | Measured | Estimating

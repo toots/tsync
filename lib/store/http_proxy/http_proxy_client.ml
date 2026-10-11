@@ -85,8 +85,8 @@ let failure t ~op (r : answer) =
   in
   raise (Fail.E (Fail.make ~op kind reason))
 
-let request ?(mode = Store.Wait) ?(headers = []) t ~meth ?(query = [])
-    ?(body = Bigstring.empty) path =
+let request ?(mode = Store.Wait) ?(chunk = false) ?(headers = []) t ~meth
+    ?(query = []) ?(body = Bigstring.empty) path =
   let target =
     if query = [] then path else path ^ "?" ^ W.canonical_query query
   in
@@ -105,7 +105,7 @@ let request ?(mode = Store.Wait) ?(headers = []) t ~meth ?(query = [])
   in
   let r =
     if Bigstring.length body = 0 then send ()
-    else Uplink.admitted t.admission mode (Bigstring.length body) send
+    else Uplink.admitted t.admission mode ~chunk (Bigstring.length body) send
   in
   ignore (Atomic.fetch_and_add t.traffic.downloaded (Bigstring.length r.body));
   r
@@ -146,10 +146,10 @@ let ensure_served t =
                 (Tsync_http.Client.url t.endpoint)
           | _ -> failure t ~op:"bind" r)
 
-let call ?mode ?headers t op ~meth ?query ?body path =
+let call ?mode ?chunk ?headers t op ~meth ?query ?body path =
   ensure_served t;
   ladder t op (fun () ->
-      let r = request ?mode ?headers t ~meth ?query ?body path in
+      let r = request ?mode ?chunk ?headers t ~meth ?query ?body path in
       match r.status with
         | 429 | 503 -> failure t ~op r
         | s when s >= 500 -> failure t ~op r
@@ -478,7 +478,10 @@ let create ~domain ~admission ~name fields =
       Store.name;
       put =
         (fun ?mode k body ->
-          expect t "put" (call ?mode t "put" ~meth:"PUT" ~body (obj k)));
+          expect t "put"
+            (call ?mode
+               ~chunk:(Key.chunk_of k <> None)
+               t "put" ~meth:"PUT" ~body (obj k)));
       put_if_absent = put_if_absent t;
       put_if_unchanged = put_if_unchanged t;
       get_opt = get_opt t;

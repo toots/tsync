@@ -108,15 +108,18 @@ let make ~name ~admission ?share_url v =
       put =
         (fun ?(mode = Store.Wait) k body ->
           ladder "put" (fun () ->
-              Uplink.admitted admission mode (Bigstring.length body) (fun () ->
+              Uplink.admitted admission mode
+                ~chunk:(Key.chunk_of k <> None)
+                (Bigstring.length body)
+                (fun () ->
                   v.put k body;
                   up (Bigstring.length body))));
       put_if_absent =
         (fun k body ->
           ladder "put_if_absent" (fun () ->
               let r =
-                Uplink.admitted admission Wait (Bigstring.length body)
-                  (fun () ->
+                Uplink.admitted admission Wait ~chunk:false
+                  (Bigstring.length body) (fun () ->
                     let r = v.put_if_absent k body in
                     up (Bigstring.length body);
                     r)
@@ -126,7 +129,8 @@ let make ~name ~admission ?share_url v =
       put_if_unchanged =
         (fun k body expected ->
           ladder "put_if_unchanged" (fun () ->
-              Uplink.admitted admission Wait (Bigstring.length body) (fun () ->
+              Uplink.admitted admission Wait ~chunk:false
+                (Bigstring.length body) (fun () ->
                   let r =
                     v.put_if_unchanged k body
                       (Option.bind expected (fun (e : Store.entry) -> e.etag))

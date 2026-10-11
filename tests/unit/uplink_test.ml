@@ -40,7 +40,7 @@ let () =
       let t0 = Rt.now () in
       List.iter
         (fun _ ->
-          let tk = Uplink.acquire link (512 * 1024) in
+          let tk = Uplink.acquire link ~chunk:true (512 * 1024) in
           Uplink.completed link tk)
         (List.init 8 Fun.id);
       let took = Rt.now () -. t0 in
@@ -48,9 +48,30 @@ let () =
         (if took > 1.6 && took < 2.8 then "about 2 s (the burst is 2 s of rate)"
          else Printf.sprintf "%.2fs" took);
       p "a best-effort body beyond the budget: %s"
-        (match Uplink.try_acquire link (8 * 1024 * 1024) with
+        (match Uplink.try_acquire link ~chunk:true (8 * 1024 * 1024) with
           | Some _ -> "admitted"
           | None -> "refused");
+      (* The budget is spent: each body below waits about a second for its
+         megabyte, long after all four are in line. *)
+      let order = ref [] and m = Mutex.create () in
+      let waiter name ~chunk =
+        let w =
+          Rt.async (fun () ->
+              let tk = Uplink.acquire link ~chunk (1024 * 1024) in
+              Mutex.protect m (fun () -> order := name :: !order);
+              Uplink.completed link tk)
+        in
+        Rt.sleep 0.05;
+        w
+      in
+      let first_chunk = waiter "chunk 1" ~chunk:true in
+      let second_chunk = waiter "chunk 2" ~chunk:true in
+      let entry = waiter "log entry" ~chunk:false in
+      let record = waiter "tree record" ~chunk:false in
+      let waiters = [first_chunk; second_chunk; entry; record] in
+      List.iter Rt.Promise.await waiters;
+      p "two chunks in line, then two bodies that are not: admitted as %s"
+        (String.concat ", " (List.rev !order));
       p "a disabled link admits at once: %b"
         (let u =
            Uplink.link "open"
@@ -65,7 +86,7 @@ let () =
                  };
              }
          in
-         Uplink.try_acquire u (1 lsl 40) <> None))
+         Uplink.try_acquire u ~chunk:true (1 lsl 40) <> None))
 
 module Lease = Uplink_lease
 
