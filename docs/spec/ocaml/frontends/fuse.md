@@ -22,7 +22,7 @@ Code: `lib/frontends/fuse/fuse_options.ml` (the descriptor and its option checks
 | Durability (§4.9) | the engine's `sync` in `fsync` and after a write through a handle opened `O_SYNC` or `O_DSYNC`; `close` in `release` once the handle modified the file. |
 | Hidden names (§4.10) | `hide`, `retained`, `ensure_scratch`, `drop_hidden`; the engine's `retain` and `release`. |
 | Status fields (§5) | `hooks.frontend`: `mount`, `open_handles`, `bytes_read`, `bytes_written`. |
-| Start (§6.1) | `prepare`, `mounted_at`, `unescape_mount`; the option string is built in `host`. |
+| Start (§6.1) | `prepare`, `mounted_at`, `Mounts.decode`; the option string is built in `host`. |
 | Stop (§6.2) | `unmount`, `run_command`; the owner thread in `host`. |
 | Failure ring (§7) | the binding's `Fuse.recent_errors`; `report_failures`. |
 
@@ -74,7 +74,7 @@ Code: `lib/frontends/fuse/fuse_options.ml` (the descriptor and its option checks
   operations: a write passes a view of the kernel's buffer, which outlives the call because the
   worker waits; a read blits into it ([memory.md](../memory.md) M.1).
 - **The mount table escapes and resolves.** `/proc/self/mounts` writes a space, tab, newline or
-  backslash as `\ooo`, and names the resolved path, so `unescape_mount` and `Fs.resolve_parent`
+  backslash as `\ooo`, and names the resolved path, so `Mounts.decode` and `Fs.resolve_parent`
   come before any comparison. A stale mount is recognised by its source `tsync`.
 - **Options are checked twice.** `Fuse_options` refuses a bad value when the config is parsed;
   `presentation` resolves `uid` and `gid` again at start, since a user may have been removed since.

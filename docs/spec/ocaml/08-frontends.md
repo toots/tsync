@@ -52,7 +52,7 @@ host the handler are in [07-daemon-cli.md](07-daemon-cli.md).
   the `exists` reply nests its `item` at the socket and `Handler.call` re-raises the plain failure.
 - **Event ids come from one process-wide `Atomic`** (`Handler` `event_ids`), whichever domain and
   whichever fiber publishes.
-- **`pendingBytes` reads the whole WAL**, so `Handler` `pending_bytes` keeps the figure for 5 s:
+- **`pendingBytes` reads the staged tree**, so `Handler` `pending_bytes` keeps the figure for 5 s:
   menus poll `status`.
 - **Registration is a module initialiser, so linking is what enables a frontend.** `-linkall`
   keeps a library nobody references by name; the catalog's `select` makes an optional library a

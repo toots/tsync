@@ -18,8 +18,7 @@ Not normative. Finding numbers refer to [the 2026-10-01 review](../../review/202
 | Breaker (01 §8), link evidence (§6) | `Health` (`lost`, `answered`, `probe_lost`, `check`, `timed_out`), fed only by `Retry.ladder`; `Retry.until_held` |
 | Composite aggregation (§4.4) | `Composite`: `ask`, `walk`, `read`, `unreachable_of`, `guard` (`lib/store/composite.ml`) |
 | Queue policy (§7.1) | `Dqueue.failed`: `Fail.retryable`, park otherwise; UNEXPLAINED parks an ordered queue and retries a keyed one |
-| Inbound peer entry | `apply_pass` (`lib/sync/engine.ml`): a retryable kind aborts the pass, any other steps the entry aside (`stepped_aside`, `Engine.unapplied`) |
-| Link failure seen by the queues | `Outbound.note_link_failure`, `close_gate`, `wait_gate` |
+| Cycle policy (§7.1) | `Cycle.cycle_loop` (`lib/sync/cycle.ml`): a failed cycle is kept in `cycle_failing` and retried after `retry_floor`; an entry that cannot be followed is `stuck` (`unfollowable`) |
 | Read deadline | `Cache.read_deadline`, `within_deadline` (`lib/checkout/cache.ml`): the wait ends DEADLINE, the fetch continues |
 | Request deadlines (§8) | `Ipc.request_deadline`, `client_deadline`, `advisory_deadline`; `bounded` (`lib/owner/handler.ml`) |
 | Client codes (§7.2) | `Fail.code`, `Fail.kind_of_code`; `Ipc.failure` puts the code on every failed reply |
@@ -27,7 +26,7 @@ Not normative. Finding numbers refer to [the 2026-10-01 review](../../review/202
 | Peer server mapping (§7.4) | `Fail.wire_kind`; 409 with `x-tsync-kind`, 503 for load, 500 otherwise (`lib/frontends/http_proxy/store_server.ml`) |
 | CLI exit (§7.5) | `run` in `bin/cli.ml`: 1 for a classified failure with its sentence, 125 for UNEXPLAINED |
 | Stop | `Stop.request`, `Stop.grace`, `Stop.sleep`, `Stop.wait` |
-| Durable failure state | the failure noted in a record by `'job Dqueue.kind.note` (`Wal.record.last_error`, the copy job's `last_error`); `<id>.bad` records; `Corruption_marker` |
+| Durable failure state | the failure noted in a record by `'job Dqueue.kind.note` (`Local_ops.upload.last_error`, the copy job's `last_error`); `<id>.bad` records; `Corruption_marker` |
 
 One exception type carries every kind. A layer never matches on text: it reads `kind`, and the layer
 with the evidence sets it.
@@ -38,7 +37,7 @@ with the evidence sets it.
   and `bounded` does not look at whether a store was silent for the whole wait, so a client never
   latches offline on a deadline.
 - **Stalled queues look like busy ones** (finding 43). Status counts retrying and parked records; a
-  worker waiting at a closed gate is not told apart from one that is working.
+  worker stalled inside a job is not told apart from one that is working.
 
 ## Learnings
 
