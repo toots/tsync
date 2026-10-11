@@ -7,11 +7,16 @@
     Run it with every client drained on the previous version and stopped. *)
 
 (** The command's exit status. Without [apply] it only reports. It refuses to
-    act over unpublished records of the previous version unless [discard]. *)
+    act over unpublished records of the previous version unless [discard].
+
+    [in_sync] is the operator's word that this client had applied the whole
+    journal and published everything when it stopped: it then starts at entry 0
+    with its mirror as it is, where it would compare it with the whole tree. *)
 val run :
   out:(string -> unit) ->
   cancelled:(unit -> bool) ->
   Tsync_domain.Domain.t ->
   apply:bool ->
   discard:bool ->
+  in_sync:bool ->
   int

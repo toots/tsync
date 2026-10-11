@@ -31,3 +31,25 @@
   live/kept.txt top.txt
   committed 1, pending 0; the log's first entry exists: true
   the tree report is healthy: true
+== a client stopped in sync, with no position
+  arrives by state
+  d: 0 journal entries, 0 objects of the folder trash and of the 0 folders in it
+  d, here: 0 WAL records, 0 folder claims
+  d, here: starts at entry 0, taking the mirror for the tree as it stands
+  (dry run: nothing changed; --apply to act)
+  exit 0
+  the dry run wrote no position: true
+  d: 0 journal entries, 0 objects of the folder trash and of the 0 folders in it
+  d, here: 0 WAL records, 0 folder claims
+  d, here: starts at entry 0, taking the mirror for the tree as it stands
+  d: done. Start the owner: it follows the log from entry 0.
+  exit 0
+  arrives by 1 log entries: live/kept.txt top.txt
+  d: 0 journal entries, 0 objects of the folder trash and of the 0 folders in it
+  d, here: 0 WAL records, 0 folder claims
+  d, here: already has a position, which is kept
+  d: done. Start the owner: it follows the log from entry 0.
+  exit 0
+== refused over a staged edit
+  d: --in-sync refused: it has staged edits
+  exit 1

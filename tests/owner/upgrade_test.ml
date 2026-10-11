@@ -86,15 +86,15 @@ let () =
       let tree () =
         String.concat " " (List.map (fun (path, _) -> path) (E.list_tree ""))
       in
-      let upgrade ~apply ~discard =
+      let upgrade ?(in_sync = false) ~apply ~discard () =
         p "  exit %d"
           (Upgrade.run ~out:(p "  %s") ~cancelled:(Fun.const false) dom ~apply
-             ~discard)
+             ~discard ~in_sync)
       in
       p "== unpublished records of the previous version";
-      upgrade ~apply:true ~discard:false;
+      upgrade ~apply:true ~discard:false ();
       p "== a dry run";
-      upgrade ~apply:false ~discard:true;
+      upgrade ~apply:false ~discard:true ();
       p "  the journal is still there: %b"
         (main.list_prefix (Key.prefix "tsync/d/journal/") <> []);
       p "== a client that arrives before the cleanup sees the live tree only";
@@ -102,7 +102,7 @@ let () =
       ignore (E.resync ());
       p "  %s" (tree ());
       p "== the cleanup";
-      upgrade ~apply:true ~discard:true;
+      upgrade ~apply:true ~discard:true ();
       p "  left on the store:";
       List.iter
         (fun (e : Store.entry) ->
@@ -113,7 +113,7 @@ let () =
       p "  left here: WAL %b, mark %b" (Fs.exists wal)
         (Fs.exists (Filename.concat dom.data_dir "last-sync-d"));
       p "== again: nothing to do";
-      upgrade ~apply:true ~discard:false;
+      upgrade ~apply:true ~discard:false ();
       p "== an arrival by state after it, then a first commit";
       ignore (E.resync ~full:true ());
       p "  %s" (tree ());
@@ -125,5 +125,28 @@ let () =
       let module I =
         Tsync_gc.Integrity.Make ((val Tsync_domain.Domain.context dom)) in
       p "  the tree report is healthy: %b"
-        (Tsync_gc.Integrity.healthy (I.report ())));
+        (Tsync_gc.Integrity.healthy (I.report ()));
+      let position =
+        List.fold_left Filename.concat dom.data_dir ["sync"; "d"; "position"]
+      in
+      let arrival () =
+        match (E.resync ()).arrival with
+          | `State _ -> "by state"
+          | `Entries n -> Printf.sprintf "by %d log entries" n
+      in
+      p "== a client stopped in sync, with no position";
+      Fs.unlink_quiet position;
+      let arrived = arrival () in
+      p "  arrives %s" arrived;
+      Fs.unlink_quiet position;
+      upgrade ~in_sync:true ~apply:false ~discard:false ();
+      p "  the dry run wrote no position: %b" (not (Fs.exists position));
+      upgrade ~in_sync:true ~apply:true ~discard:false ();
+      let arrived = arrival () in
+      p "  arrives %s: %s" arrived (tree ());
+      upgrade ~in_sync:true ~apply:true ~discard:false ();
+      p "== refused over a staged edit";
+      E.create "draft.txt" ~exclusive:false;
+      E.close "draft.txt";
+      upgrade ~in_sync:true ~apply:true ~discard:false ());
   Test_support.finish root

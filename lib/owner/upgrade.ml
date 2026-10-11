@@ -13,7 +13,7 @@ let anchored_under body =
           | _ -> None)
     | _ | (exception _) -> None
 
-let run ~out ~cancelled (dom : Tsync_domain.Domain.t) ~apply ~discard =
+let run ~out ~cancelled (dom : Tsync_domain.Domain.t) ~apply ~discard ~in_sync =
   let say fmt = Printf.ksprintf out fmt in
   let module C = (val Tsync_domain.Domain.context dom) in
   let d = dom.name and store = C.store in
@@ -25,7 +25,25 @@ let run ~out ~cancelled (dom : Tsync_domain.Domain.t) ~apply ~discard =
     List.filter (fun n -> not (Names.is_temp_name n)) (Fs.readdir dir)
   in
   let unpublished = records wal in
-  if unpublished <> [] && not discard then (
+  let staged =
+    List.length
+      (Tsync_checkout.Staged.edits
+         (Tsync_checkout.Staged.create ~cache_root:dom.cache_root d))
+  in
+  let state = Tsync_sync.Sync_state.open_ ~data_dir:dom.data_dir d in
+  (* With no before-value, a change this client holds alone would read as the
+     main's own state at entry 0 and never be pushed. *)
+  let not_in_sync =
+    if not in_sync then None
+    else if dom.lazy_tree then Some "a lazy tree keeps a position per folder"
+    else if unpublished <> [] then Some "it has unpublished records"
+    else if staged > 0 then Some "it has staged edits"
+    else None
+  in
+  if not_in_sync <> None then (
+    say "%s: --in-sync refused: %s" name (Option.get not_in_sync);
+    1)
+  else if unpublished <> [] && not discard then (
     say
       "%s: %d records of the previous version are not published. Start the \
        previous version and let it publish them, or pass --discard to lose \
@@ -89,6 +107,12 @@ let run ~out ~cancelled (dom : Tsync_domain.Domain.t) ~apply ~discard =
       (List.length unpublished)
       (List.length (records claims))
       (if Fs.exists mark then ", the last-sync mark" else "");
+    let seeded = in_sync && Tsync_sync.Sync_state.position state = None in
+    if in_sync then
+      say "%s, here: %s" name
+        (if seeded then
+           "starts at entry 0, taking the mirror for the tree as it stands"
+         else "already has a position, which is kept");
     if not apply then (
       say "(dry run: nothing changed; --apply to act)";
       0)
@@ -103,5 +127,8 @@ let run ~out ~cancelled (dom : Tsync_domain.Domain.t) ~apply ~discard =
             Fs.rm_rf wal;
             Fs.rm_rf claims;
             Fs.unlink_quiet mark;
-            say "%s: done. Start the owner: it arrives by state." name;
+            if seeded then Tsync_sync.Sync_state.set_position state 0;
+            say "%s: done. Start the owner: it %s." name
+              (if in_sync then "follows the log from entry 0"
+               else "arrives by state");
             0))
