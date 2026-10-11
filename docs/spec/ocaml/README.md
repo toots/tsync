@@ -17,23 +17,15 @@ is an open finding of [the review](../review/2026-10-01-rewrite.md) is cited by 
 
 ## Where the implementation stands against the spec
 
-The implementation publishes through a journal, a WAL, conflict tables, folder claims and a folder
-trash. The spec has none of them. The implementation does not yet follow:
+The implementation follows the spec's protocol: before-values and a derived pending set, a numbered
+log with an atomic append, one cycle per domain, the tree as a projection of the log, the arrival
+by state ([algorithms/publication.md](algorithms/publication.md),
+[algorithms/conflict-resolution.md](algorithms/conflict-resolution.md),
+[03-journal-sync.md](03-journal-sync.md)). Each note lists its departures.
 
-- [algorithms/change-algebra.md](../algorithms/change-algebra.md): before-values, the derived pending
-  set and the merge;
-- [algorithms/publication.md](../algorithms/publication.md): the numbered log, the cycle, the
-  projection of the log onto the tree, the arrival by state;
-- [algorithms/conflict-resolution.md](../algorithms/conflict-resolution.md);
-- [03](../03-journal-sync.md): the formats and interfaces of the log and of the sync state;
-- the rules that follow from them in the other files: the tree written only by projections
-  ([data-model/backend.md](../data-model/backend.md) §6), one main per domain and reads from a copy
-  limited to chunks ([algorithms/replication.md](../algorithms/replication.md) §3.2, §4.6).
-
-The notes in this directory describe the implementation as it is. Where a note names a journal entry,
-a WAL record, a claim or the trash, it describes the code, not the spec.
-[algorithms/wal-and-journal.md](algorithms/wal-and-journal.md) describes a protocol the spec does not
-have; the spec's protocol is [algorithms/publication.md](../algorithms/publication.md).
+The notes of the other subsystems were written against an earlier protocol. Where one of them
+names a journal entry, a WAL record, a folder claim or the folder trash, it is out of date, and the
+three notes above are the ones to trust.
 
 | Subsystem | Notes |
 |---|---|
@@ -54,7 +46,7 @@ have; the spec's protocol is [algorithms/publication.md](../algorithms/publicati
 | macOS (the File Provider host) | [frontends/file-provider.md](frontends/file-provider.md) |
 | Android (cross-compilation, JNI, embedding the runtime) | [frontends/android.md](frontends/android.md) |
 | Backend and local data models | [data-model/backend.md](data-model/backend.md), [data-model/local-cache.md](data-model/local-cache.md) |
-| Algorithms: how the code maps onto each, and where it departs | [wal-and-journal](algorithms/wal-and-journal.md), [conflict-resolution](algorithms/conflict-resolution.md), [durable-queue](algorithms/durable-queue.md), [failure-model](algorithms/failure-model.md), [replication](algorithms/replication.md), [read-path-and-cache](algorithms/read-path-and-cache.md), [gc](algorithms/gc.md), [uplink-governor](algorithms/uplink-governor.md), [security-model](algorithms/security-model.md) |
+| Algorithms: how the code maps onto each, and where it departs | [publication](algorithms/publication.md), [conflict-resolution](algorithms/conflict-resolution.md), [durable-queue](algorithms/durable-queue.md), [failure-model](algorithms/failure-model.md), [replication](algorithms/replication.md), [read-path-and-cache](algorithms/read-path-and-cache.md), [gc](algorithms/gc.md), [uplink-governor](algorithms/uplink-governor.md), [security-model](algorithms/security-model.md) |
 
 ## The lessons that matter most
 
