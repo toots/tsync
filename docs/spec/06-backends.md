@@ -48,7 +48,7 @@ entry = { key: key; size: bytes; last_modified: wall-clock epoch seconds; etag: 
 
 ```
 caps = { share_url: string?;       -- base URL of the share endpoint serving this store
-         chunk_size: bytes?;       -- recommended chunk size for new files
+         chunk_size: bytes?;       -- the chunk size of new files (01 §3.5)
          max_concurrency: int?;    -- object operations this store usefully serves at once
          verified: bool }          -- every chunk this store takes is checked against its name
 ```
@@ -265,8 +265,8 @@ The registry and the drain hooks are one per process.
 Uploads over a network link are paced by the uplink governor. The seam between a store and the governor is an **admission**, a value handed to each store at construction:
 
 ```
-admission = { acquire(bytes)      -- suspends until the bytes may be sent, or fails STOPPING
-              try_acquire(bytes)  -- takes admission now if the budget allows, else refuses; never waits
+admission = { acquire(class, bytes) -- suspends until the bytes may be sent, or fails STOPPING
+              try_acquire(class, bytes) -- takes admission now if the budget allows, else refuses; never waits
               completed(bytes, elapsed)
               abandoned(bytes)
               waiting() }

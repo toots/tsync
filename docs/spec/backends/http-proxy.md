@@ -223,7 +223,7 @@ Error bodies are short `text/plain` sentences for humans. Clients act on the sta
 
 Every 409 carries `x-tsync-kind: <kind>`, the permanent kind of the store failure ([failure-model §3.1](../algorithms/failure-model.md#31-kinds)) in lower case, with the subkind where there is one: `absent` (a source the operation needed is gone), `exists`, `not_empty`, `denied`, `read_only`, `other`, `invalid`, `corrupt`, `unprepared`, or `missing_chunks`. A client reads the kind from the header; a 409 without it, or with a value it does not know, is REFUSED/`other`.
 
-`missing_chunks` is the GC reference gate's refusal of a write of a log entry, a manifest or a version, whichever PUT form or copy carried it ([gc.md §5.4](../algorithms/gc.md#54-the-collection-interlock)). Its body is the line `missing chunks` followed by one chunk key per line; the client validates each key and hands the list to the writer, which uploads them again and repeats the write with the same bytes. This is the one refusal whose body a client parses.
+`missing_chunks` is the GC reference gate's refusal of a write of a log entry, a manifest or a version, whichever PUT form or copy carried it ([gc.md §5.4](../algorithms/gc.md#54-the-collection-interlock)). Its body is the line `missing chunks` followed by one chunk key per line; the client validates each key and hands the list to the writer, whose duty is the gate's ([gc.md §5.4](../algorithms/gc.md#54-the-collection-interlock)). This is the one refusal whose body a client parses.
 
 ### 6.3 Client mapping
 
@@ -327,7 +327,7 @@ Four requests (§5.3), issued concurrently on first ask with the domain's prefix
 
 Any other non-2xx fails the call per §6.3. The result is memoised per prefix for the instance's life, shared by concurrent callers, and forgotten if it failed. The answers are fixed for the life of a server process.
 
-What a domain does with them is generic: new files use the inherited chunk size, its own concurrency is bounded by the server's, the corruption check is reported as the far store's, share links point at the returned URL.
+What a domain does with them is generic: new files use the server's chunk size and a domain configured with another is refused ([01 §3.5](../01-core.md#35-chunk-size)), its own concurrency is bounded by the server's, the corruption check is reported as the far store's, share links point at the returned URL.
 
 ---
 

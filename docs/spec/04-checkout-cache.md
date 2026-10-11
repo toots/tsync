@@ -616,8 +616,9 @@ The upload job for an upload record ([publication](algorithms/publication.md) §
   carries the manifest ([publication](algorithms/publication.md) §4.5).
 - A whole body is never modified in place, so a whole-body upload needs no snapshot. Group bodies
   may be written during step 2; step 3's generation check discards what that upload read.
-- A commit refused for missing chunks ([gc](algorithms/gc.md) §5.4) puts the named chunks again
-  from the staged bodies, which are still held (§4.7), and is repeated.
+- A commit refused for missing chunks is the push's to handle
+  ([publication §4.5](algorithms/publication.md#45-push)); the staged bodies it needs are still
+  held (§4.7).
 
 **`revert(key, version)`** (versioning required; *network*): fetch the version's manifest; under
 the metadata lock and the key lock, record the key's before-value if it has none, discard the
@@ -708,10 +709,10 @@ brings the checkout to a consistent state:
    set-aside manifest. The set of **named bodies** is every body id named by a decodable manifest,
    plus, for each set-aside manifest, every maximal run of exactly 16 lowercase hex characters in
    its bytes. False positives only keep a body longer.
-4. Recover the sync state ([publication](algorithms/publication.md) §4.8 steps 1–3): complete
-   each local intent, complete the arrival record, drop each before-value equal to the local
-   value, and give each Owed staged edit that has no before-value the content identity of its
-   base entry. This needs no network.
+4. Recover the sync state: the local intents (completed as §4.5 says), the arrival record and
+   the before-values
+   ([publication §4.8](algorithms/publication.md#48-crash-recovery) steps 1–3). This needs no
+   network.
 5. Promote every Uploaded staged edit whose key has no before-value (§4.7): its commit happened.
 6. Release every staged body not in the named set. The release is exact, with no grace
    period, because only the owner writes the staged tree and nothing else runs yet.

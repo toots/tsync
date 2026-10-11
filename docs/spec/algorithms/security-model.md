@@ -254,7 +254,7 @@ Every limit below is enforced **before** the resource it guards is spent. Parame
 |---|---|---|---|
 | Request line + headers | 16 KiB; target ≤ 8 KiB | while reading headers | 431 / 414, connection closed |
 | Header read time | `header_timeout` 30 s from accept or previous request | reading headers | connection closed |
-| Object `PUT` body | `max_put_body` 256 MiB, MUST be ≥ 4 × the largest chunk size a served domain uses | from `Content-Length` before reading; while reading a chunked body | 413 |
+| Object `PUT` body | `max_put_body` 256 MiB, MUST be ≥ 4 × the largest chunk size a served domain uses and ≥ `MAX_ENTRY_BYTES` ([publication](publication.md) §7). A log entry of one command may be larger than either ([publication](publication.md) §4.5): one above the limit is refused like any body, and the file it carries stays pending and reported | from `Content-Length` before reading; while reading a chunked body | 413 |
 | Bulk request body | `max_bulk_body` 1 MiB | same | 413 |
 | Bodies of other requests | empty | same | 400 |
 | Bytes of bodies in flight | `max_body_memory` 1 GiB, listener-wide, reserved from `Content-Length` before reading | before reading | 503 `busy` |

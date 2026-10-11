@@ -163,9 +163,8 @@ are named by id; no local ids are involved.
 ### 2.5 Folder ids
 
 The folder-id grammar is owned by
-[01-core.md §2.5](01-core.md#25-folder-ids); client identity, leases and minting by
-[03-journal-sync.md §2.1](03-journal-sync.md#21-client-identity-and-folder-id-leases-local). An id is
-final from the mint. Reserved id used in this layout: `.tsync-root` (the root's namespace). Example
+[01-core.md §2.5](01-core.md#25-folder-ids); client identity, leases, minting and the finality of a minted id by
+[03-journal-sync.md §2.1](03-journal-sync.md#21-client-identity-and-folder-id-leases-local). Reserved id used in this layout: `.tsync-root` (the root's namespace). Example
 minted id: `3f2a9c1b7d4e-1a`.
 
 ### 2.6 File manifest: binary `tsyncm03`
@@ -491,9 +490,9 @@ settled in any case ([algorithms/publication.md §4.8](algorithms/publication.md
 3. **Seal**: re-check cancel and shutdown; compute `h1`/`h2`; return the manifest. An upload writes no
    manifest: the manifest travels in the log entry that commits the file
    ([algorithms/publication.md §4.2](algorithms/publication.md#42-upload)). On a collectable main that
-   commit goes through the gate; a `MissingChunks` refusal makes the uploader drop those keys from its
-   memo and re-send them from the bytes it holds (its staged bodies, or its source file), after which
-   the commit is repeated.
+   commit goes through the gate; what the uploader does on a `MissingChunks` refusal is in
+   [algorithms/gc.md §5.4](algorithms/gc.md#54-the-collection-interlock) (the re-send) and
+   [§5.6](algorithms/gc.md#56-the-generation-and-presence-memos) (its memo).
 
 **Whole-file upload** reads from a snapshot of the source taken when it starts (a copy or reflink), so
 later writes do not reach the bytes being hashed, and compares the source's size and modification time

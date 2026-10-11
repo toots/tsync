@@ -85,8 +85,8 @@ the main comes from two places, both specified by the lazy tree
 - **pulls**: a pull brings one folder's view to the head and merges it with this client's pending
   commands on that folder. Each folder held has its own position
   ([publication §4.11](../algorithms/publication.md#411-the-lazy-tree));
-- **the pulls that precede each push**: every folder holding a pending command is pulled to the
-  head first. The other folders are not touched.
+- **the pulls that precede each push**: every folder holding a pending command, and each of its
+  ancestors, is pulled to the head first. The other folders are not touched.
 
 **When the owner pushes.** The owner runs the cycle of
 [publication §4](../algorithms/publication.md#4-the-algorithm) only to push: the cycle's wait ends
@@ -337,7 +337,8 @@ checked. Properties of the shared handler are [08](../08-frontends.md)'s.
 - A file whose creation is pending survives a pull; a file whose removal is pending is not listed
   back; a folder holding a pending command whose push keeps failing is still pulled.
 - With nothing pending the owner runs no cycle, and reads the main only in pulls. Before each push it
-  pulls to the head every folder that holds a pending command, and no other.
+  pulls to the head every folder that holds a pending command and each of its ancestors, and no
+  other.
 - A pull that changed a folder's children, and every mutation, sends a `changed` notice naming the
   folder.
 

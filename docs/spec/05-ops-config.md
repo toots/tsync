@@ -90,7 +90,7 @@ every tool that reads or writes a config (the daemon, every command, the Android
 | `symlinks` | `"keep"` \| `"follow"` \| `"skip"` | yes | |
 | `versioning` | bool | yes | |
 | `readOnly` | bool | no | false; forced true when no backend has a writable role |
-| `chunkSize` | size | no | unset: the main's recommendation, else 8 MiB; within the range of [01 §3.5](01-core.md#35-chunk-size) |
+| `chunkSize` | size | no | MUST equal the main's chunk size when the main states one; unset: the main's, else 8 MiB; within the range of [01 §3.5](01-core.md#35-chunk-size) |
 | `cacheChunkSize` | size | no | unset: 16 MiB |
 | `maxCache` | size | no | unset: unbounded |
 
@@ -237,7 +237,7 @@ Building has no side effect on the stores.
 - **GC interlock.** A reference to a chunk reaches a collectable main only through its reference
   gate ([gc.md §5.4](algorithms/gc.md#54-the-collection-interlock)): at the commit of the log entry
   that carries the manifest (an upload, an import, an rsync copy or rename, a revert), at the
-  projection of that entry, and at an integrity repair written onto the main. No operation relies on a memo of "this chunk exists on a
+  projection of that entry. No operation relies on a memo of "this chunk exists on a
   copy" across a collection except as
   [gc.md §5.6](algorithms/gc.md#56-the-generation-and-presence-memos) allows; a memo about a
   collectable main is harmless, since the gate checks presence at every commit and its "missing
@@ -269,6 +269,12 @@ before-value, by the rule and kill points of
 A folder they create is a local `mkdir` ([04 §4.5](04-checkout-cache.md#45-namespace-operations)),
 its folder id minted locally. The cycle commits these changes like any other.
 
+**They return after the commit.** Once its last change is made, the command asks for a push and
+waits until none of the keys it changed is pending. It is still running when its commits are
+made, so a commit refused for missing chunks is answered from its source. While the main cannot
+be reached it waits; interrupted, it leaves its changes pending, they are committed by a later
+cycle, and it exits non-zero naming how many are left.
+
 ### 4.3 Import
 
 `import ~src ?only ?exclude ?force_rehash` → `{imported, skipped, skipped_symlinks, failed}`; per
@@ -291,7 +297,8 @@ entry `Imported size | Skipped_exists | Skipped_symlink | Failed reason`.
 3. `on_plan(files, bytes)`.
 4. **Folders first**: create each planned folder the local tree lacks (§4.2).
 5. **Files**: a key exists if the local tree holds it, as a mirror entry or a staged edit. An
-   existing key is `Skipped_exists`, **even when its content differs**, unless `force_rehash`, which
+   existing key is `Skipped_exists`, **even when its content differs**, unless `force_rehash` or
+   the key is pending and reported as damaged ([publication.md §4.5](algorithms/publication.md#45-push)), which
    uploads the file again (re-sending chunks missing from the store) and installs its manifest
    (§4.2). Otherwise upload (chunked, deduplicated) and install the manifest (§4.2). An imported
    file is not cached locally.
@@ -308,8 +315,8 @@ A rerun after a crash skips the keys the local tree holds and sends only the chu
 present}`, `Started{rel, size, present}`, `Landed(rel, bytes)`, `Finished(rel, outcome)`.
 
 Export reads the stores, never the mirror or the chunk cache: files may be too large to pass through
-a cache, and the domain's cache is left untouched. A file with a staged edit exports the version in
-the **main's tree** and is listed as pending. `dst` must be absolute.
+a cache, and the domain's cache is left untouched. A key with a pending change on this machine exports what the
+**main's tree** holds there and is listed as pending. `dst` must be absolute.
 
 1. Each path is resolved in the store's folder tree: missing → the whole run fails
    (`<p>: no such file or folder in <domain>`); a folder → every file manifest beneath it (an
@@ -319,7 +326,8 @@ the **main's tree** and is listed as pending. `dst` must be absolute.
    `<dst>/docs/deep/b.txt`).
 3. The run fails on any relative path with a `.` or `..` segment (names come from a store; `dst` is
    someone's disk) and on two paths landing on one destination.
-4. `pending`: this machine's staged edits under the paths (a permitted read); they are reported,
+4. `pending`: the keys under the paths that this machine's pending set names
+   ([publication.md §3](algorithms/publication.md#3-state)), a permitted read; they are reported,
    not exported, and make the command exit 1.
 5. Per file:
    - with a **record** (below) whose identity matches and a destination file of the manifest's size →
@@ -597,20 +605,8 @@ age, and is warned at every start; `retry_outstanding()` re-delivers each job as
     last retained entry naming it (`expected`), a key such an entry gives a value and which has no
     record, and a manifest, marker or index in the namespace of a folder, other than the root, that
     has no anchor.
-- `repair_tree(dry_run)`: refused on a read-only domain unless dry, and whenever `tree_report`
-  makes no finding because the tree head is below the head. It writes the main's tree records
-  outside any projection, so the operator MUST run it while no client pushes to the domain.
-  - `Disowned` → delete the marker.
-  - `Unmarked` and `Unaccounted` with an `expected` value → set the key's records to that value, as
-    applying a command with that value after does
-    ([data-model/backend.md §6.1](data-model/backend.md#61-apply)), through the reference gate. A
-    manifest the gate refuses for missing chunks is reported and its record left.
-  - An `Unmarked` or `Unaccounted` finding with no `expected` value is left and
-    reported.
-
-  **What repair restores.** It recomputes a record only from a log entry the log still retains.
-  A record whose key no retained entry names is left as found: nothing on the store says what it
-  should be, whether its entry was deleted by expiry or never reached this store.
+  The report is read-only and nothing repairs the tree from it: a tree behind the log is brought
+  up by projection ([publication.md §4.6](algorithms/publication.md#46-projection-the-tree-follows-the-log)).
 - `verify()`: per member whose bucket function this owner confirmed (write guard first), one verify
   request per shard ([object-store-common §3](backends/object-store-common.md)): `Queued n`; any other
   member `Unsupported`; none queued → `Nothing_queued`; else follow each queued member: poll
@@ -686,7 +682,6 @@ Token, expiry, overwrite and revocation rules are
 - **Mirror**: stateless, additive, idempotent; it never overwrites a destination object written
   after its comparison read it, on a destination that evaluates the precondition.
 - **Sync**: runs in the owner's cycle; a state read that fails changes nothing.
-- **Tree repair**: never beside a push (§4.10).
 - **GC**: every phase saved before acting ([gc.md](algorithms/gc.md)); exclusive per domain (§4.9).
 - **Write guard**: every operation that writes a named member calls it; the main is always allowed.
 - **Concurrent work inside one operation** hands each item (a chunk, a listing record) to exactly one
@@ -719,8 +714,6 @@ Token, expiry, overwrite and revocation rules are
   empty tree for minutes and forced every reader to re-list.
 - **A state read enumerates namespaces** rather than walking from the root: a folder a projection is
   moving is at no path for a moment, and its namespace is always there.
-- **Tree repair recomputes, it does not guess**: the log is the truth, so a record no retained
-  entry names has nothing to be checked against.
 - **Shares** at a fixed root (IAM and lifecycle target one prefix), created exclusively, verified on
   the member that serves them, never minting folder ids.
 
@@ -794,8 +787,7 @@ Token, expiry, overwrite and revocation rules are
 - **Integrity**: with the tree head below the head, the tree report makes no finding and says
   why. With it at the head, a planted stale marker is reported DISOWNED, a deleted filed marker
   UNMARKED, and a record overwritten with another value, or deleted, UNACCOUNTED when a retained
-  entry names its key. Repair removes the disowned marker and restores the other two from the log;
-  a record whose key no retained entry names is left and reported; a dry run writes nothing.
+  entry names its key. The report writes nothing.
 - **Share**: manifest fields for a file and a folder; root share named `<domain>.zip`; refused when no
   member advertises a share URL; a missing path or an empty folder → not found; a read-only domain can share; a backfill-only share store is used
   when it is the only one with a URL, and refused while it lacks the object; a given token that

@@ -354,12 +354,13 @@ steps are specified by the file operations of [04](../04-checkout-cache.md) §3�
 | Pin ("make available offline") | the call returns | durable | every group whole and each pin durable ([read-path-and-cache.md](read-path-and-cache.md) §4.8) |
 | Android share-sheet save, in-app upload, picker close | the app reports success to the platform | durable | every file handed over and closed as above, or its staging copy fsynced with a durable *ready* ingest intent that the next app start commits ([android-app](../frontends/android-app.md) §8.2) |
 | Write to a domain with replica or backfill targets | the store write returns | durable | the main holds the object and each target's deferred job record is durable ([replication.md](replication.md)) |
-| Bulk publish (import, rsync), revert | the command returns 0 / the call returns | durable | every chunk on the main, every manifest installed in the local tree with its before-value (§7.3), committed or durably pending |
+| Bulk publish (import, rsync) | the command returns 0 | committed | every chunk on the main, every manifest installed in the local tree, every change committed ([05](../05-ops-config.md) §4.2) |
+| Revert | the call returns | durable | the manifest installed in the local tree with its before-value (§7.3), committed or durably pending |
 | Any one-shot command | exit status 0 | durable | its effects, plus any owed remainder durable in the domain's local state (reported on exit) |
 
 An acknowledgement says the change is in the local tree and will be pushed. It never says the
 change is on the main: that is the push's `Won` ([publication.md](publication.md) §4.5), which a
-caller waits for only when it asks (`await`, `sync`).
+caller waits for only when it asks (`await`, `sync`, a bulk publisher).
 
 An action killed before its acknowledgement is not acknowledged: it may be absent after
 restart, and it is never half applied (§8, property 2).
@@ -438,9 +439,10 @@ A kill between steps 1 and 2 leaves chunks nothing names: the next collection re
 re-run of the command uploads them again. A kill after step 2 leaves a pending command.
 
 Such a command has no staged bytes behind it. If its commit is refused for missing chunks (a
-collection ran between steps 1 and 3), the publisher uploads them again from its source while it
-still runs; otherwise the command stays pending and the file is reported as damaged
-([publication.md](publication.md) §4.5), until the publisher's next run uploads the chunks again.
+collection ran between steps 1 and 3), a bulk publisher uploads them again from its source: it
+runs until its commits are made ([05](../05-ops-config.md) §4.2). One that was killed before
+then leaves the command pending and the file reported as damaged
+([publication.md](publication.md) §4.5), until its next run uploads the chunks again.
 
 ### 7.4 Kill-point walkthrough: a namespace operation
 

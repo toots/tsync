@@ -373,7 +373,7 @@ marking) are owned by [durable-queue](durable-queue.md).
 | EXISTS | return the holder | the main arbitrates | job's own rules | n/a | the entry number is taken: arrive, then push from the new head |
 | REFUSED | one attempt | pass on | park; copy marked degraded | park | fail the cycle; reported; retried after `RETRY_FLOOR` |
 | INVALID | n/a | n/a | park; degraded | park | fail the cycle; reported |
-| CORRUPT | one attempt; a chunk is re-fetched once | ask the next member for a good copy of a chunk | park; degraded | park | an entry that does not decode: arrive by state once the tree head has passed it, else stop and report until an operator voids it ([publication](publication.md) §4.3). `missing_chunks` on a commit: upload them again, repeat the create |
+| CORRUPT | one attempt; a chunk is re-fetched once | ask the next member for a good copy of a chunk | park; degraded | park | an entry that does not decode: arrive by state once the tree head has passed it, else stop and report until an operator voids it ([publication](publication.md) §4.3). `missing_chunks` on a commit: [publication §4.5](publication.md#45-push) |
 | UNPREPARED | n/a | n/a | n/a | park | an entry of an unknown version: arrive by state once the tree head has passed it, else stop fetching and pushing; report |
 | TRANSIENT (any) | retry with backoff up to the attempt limit or the caller's deadline | fail fast on a held member when another candidate exists; the last candidate is always asked | block at the head with backoff | requeue at the tail with backoff | fail the cycle; nothing advances; an in-flight record stays; retry after `RETRY_FLOOR` |
 | UNREACHABLE | not retried by the ladder; the hold ends it | chunk reads fail over to a replica, then archives; every other read fails; writes are never redirected | block at the head | tail with backoff | as TRANSIENT |
@@ -475,7 +475,7 @@ the work behind it is cancelled only where the table says so.
 | a pool slot | transitively: every holder is bounded | — | — |
 | an upload waiting for link admission | stop, cancellation, and the governor's rules ([uplink-governor](uplink-governor.md)) | — | STOPPING or CANCELLED |
 | settling queues before exit | deadline | [durable-queue](durable-queue.md) | work left owed |
-| a stop | `STOP_GRACE` ([07](../07-daemon-cli.md)) | — | work left owed |
+| a stop | `GRACE` ([07](../07-daemon-cli.md)) | — | work left owed |
 | an advisory IPC send | deadline | owned by [07](../07-daemon-cli.md) | dropped, logged once |
 | a partial IPC request line | deadline | `IPC_LINE_DEADLINE` | connection closed |
 

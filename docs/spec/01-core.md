@@ -137,8 +137,8 @@ hexlower   = "0"–"9" | "a"–"f"
 
 - Writers MUST mint ids of the form `<12 hex> "-" <counter>`: the first 12 hex characters of
   this client's uuid, `-`, and a counter in lowercase hex that is unique for that client. Client identity, counter
-  leases and minting are owned by [03 §2.1](03-journal-sync.md#21-client-identity-and-folder-id-leases-local). A minted
-  id is final: nothing arbitrates or replaces it.
+  leases, minting and the finality of a minted id are owned by
+  [03 §2.1](03-journal-sync.md#21-client-identity-and-folder-id-leases-local).
 - Readers SHOULD accept any other `hex-id` (for example 16 or 32 hex digits with no counter)
   as a folder id with the same meaning; writers MUST NOT mint one.
 - Anything else read where a folder id is expected is INVALID (from a request) or CORRUPT (from
@@ -341,15 +341,19 @@ index(cs, pos)        = ⌊pos / cs⌋
 ### 3.5 Chunk size
 
 - The chunk size is recorded per file in its manifest and never changes for that file version.
-- A writer choosing the chunk size of a new file MUST use, in order: the domain's configured
-  chunk size ([05](05-ops-config.md)); else the main store's recommended chunk size (an
-  http-proxy peer answers with the serving domain's); else `DEFAULT_CHUNK_SIZE`. The chosen
-  value MUST lie in `[CHUNK_SIZE_MIN, CHUNK_SIZE_MAX]`; a store recommendation outside it is
+- A writer choosing the chunk size of a new file MUST use, in order: the main store's chunk size,
+  when the main states one (an http-proxy peer answers with the serving domain's); else the
+  domain's configured chunk size ([05](05-ops-config.md)); else `DEFAULT_CHUNK_SIZE`. The chosen
+  value MUST lie in `[CHUNK_SIZE_MIN, CHUNK_SIZE_MAX]`; a size stated by a store outside it is
   ignored with a warning, and a configured value outside it is refused by the validator. Every
   other client must be able to read what a writer chooses, so the range is part of the format.
+- The clients of one main cut new files alike, because a file's content identity depends on how
+  it is cut ([conflict-resolution](algorithms/conflict-resolution.md) §2). A domain whose
+  configured chunk size differs from the one its main states is refused as a configuration
+  error naming both sizes: the owner stops serving the domain once it has learned the main's.
 - Choosing a chunk size never waits on a store: a local write is offline work. Until the main
-  store's recommendation has been learned (asked in the background, from owner start on), a writer
-  uses `DEFAULT_CHUNK_SIZE`. Only deduplication across files of different chunk sizes is lost.
+  store's chunk size has been learned (asked in the background, from owner start on), a writer
+  uses the next choice in the order above. A file cut before then keeps its size.
 - A reader MUST accept any chunk size in `[1, CHUNK_SIZE_READ_MAX]` found in an existing
   manifest, and treat a larger or non-positive one as CORRUPT.
 - A symlink manifest records `DEFAULT_CHUNK_SIZE` and no chunks.
@@ -620,7 +624,7 @@ pays for finding out.
 - A **stop-aware sleep** ends early with STOPPING when a stop is requested. Every backoff and
   every wait for a link, a queue or a settle MUST be stop-aware.
 - On stop: ladders end with STOPPING; queues stop taking work; waits for settle are capped at
-  `STOP_GRACE`. STOPPING is never retried, never counted as a failure, and leaves the work owed
+  `GRACE`. STOPPING is never retried, never counted as a failure, and leaves the work owed
   on disk (the propagation rules are in
   [failure-model §5](algorithms/failure-model.md#5-propagation)).
 - The lifecycle that requests a stop, and how processes drain within the grace, is owned by
@@ -762,7 +766,7 @@ advance. The format is exact:
 | `TRIP_AFTER` / `TRIP_SPAN` | 2 failures / 1 s | |
 | `HOLD_INITIAL` / `HOLD_MAX` | 30 s / 300 s | |
 | `PROBE_TIMEOUT` | 10 s | includes retries |
-| `STOP_GRACE` | 10 s | owned by [07](07-daemon-cli.md) |
+| `GRACE` | 10 s | owned by [07](07-daemon-cli.md) |
 | `HTTP_EXCERPT` | 200 characters | |
 | `IPC_MAX_LINE` | 1 MiB | |
 | `IPC_LINE_DEADLINE` | 10 s | |

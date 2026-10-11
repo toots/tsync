@@ -99,7 +99,7 @@ Every write of a key through this driver (`put`, `put_if_absent`, `put_if_unchan
 
 The driver of a collectable main hosts the interlock of [gc §5.4](../algorithms/gc.md#54-the-collection-interlock), so no writer can bypass it:
 
-- Every `put`, `put_if_absent`, `put_if_unchanged` or `copy` whose destination is in the log, the manifest area or the version area passes the **reference gate** before it writes: shared publish lock, promotion of the named chunks when the run record is present, a presence check of every named chunk, and a refusal naming the missing chunks ([gc §5.4](../algorithms/gc.md#54-the-collection-interlock)). The chunks a log entry names are those of every manifest it carries ([03 §2.4](../03-journal-sync.md#24-log-entry-store)).
+- Every `put`, `put_if_absent`, `put_if_unchanged` or `copy` whose destination is in the log, the manifest area or the version area passes the **reference gate** of [gc §5.4](../algorithms/gc.md#54-the-collection-interlock) before it writes. The chunks a log entry names are those of every manifest it carries ([03 §2.4](../03-journal-sync.md#24-log-entry-store)).
 - The create of a log entry runs inside the gate, under the shared publish lock: an entry refused for missing chunks is not created, and its number stays free.
 - The two lock files carry the **run lock** and the **publish lock** as host-level locks. The driver offers no exclusion across hosts beyond what the filesystem's lock manager provides (§12).
 

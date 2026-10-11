@@ -339,11 +339,11 @@ when no collection-delete record and no pending discard of generation g remains 
      write G := g + 1 to the collected main                  -- even: settled
 ```
 
-- **Recorded before the main discards.** Deletions for direct and queued copies alike are durable before the main unlinks its outgoing chunks, so a crash repeats them instead of leaking them.
+- **Recorded before the main discards**, for direct and queued copies alike ([gc §5.7](gc.md#57-deletion-on-copies)).
 - **Restore after (mandatory).** Once a deletion has taken effect (a direct delete returned, or the request object is gone), every deleted key the main still holds is put back. Only then is the deletion settled. A chunk referenced again during or after the collection is thereby restored on the copy, whenever the deletion landed.
 - **Settling G.** G turns even only when every deletion of its generation is settled, so a memo is never relied on while a deletion could still invalidate it ([gc §5.6](gc.md#56-the-generation-and-presence-memos)).
 - **At start** the owner resumes every unsettled collection-delete record and pending discard, settles them, and then makes G even.
-- **A request never consumed** leaves G odd: copy memos go unused for the domain, which costs listings and puts, never safety. Re-delivery ([gc §5.7](gc.md#57-deletion-on-copies)) rewrites it with only the keys still absent from the main.
+- **A request never consumed** leaves G odd until it is re-delivered and consumed ([gc §5.7](gc.md#57-deletion-on-copies)).
 - A collection-delete record completes only after its direct deletion and restore, or once its discard is recorded pending; a pending discard is removed only after its restore.
 - **Written before pending.** A pending discard is recorded only once its request is on the copy, so a poll that finds the request gone knows it was consumed, never not yet written. A crash in between leaves the collection-delete record owed, and its rerun writes the request again.
 - Failures follow the queue discipline of §4.3.
