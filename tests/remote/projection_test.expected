@@ -1,0 +1,32 @@
+writes: 5
+== two folders and a file
+  #aaaaaaaaaaaa-1/one = 13 bytes
+  /a is #aaaaaaaaaaaa-1
+  /b is #aaaaaaaaaaaa-2
+  versions kept: 0
+writes: 5
+== the same entry applied again
+  #aaaaaaaaaaaa-1/one = 13 bytes
+  /a is #aaaaaaaaaaaa-1
+  /b is #aaaaaaaaaaaa-2
+  versions kept: 0
+== the file edited, applied twice: one version
+  #aaaaaaaaaaaa-1/one = 22 bytes
+  /a is #aaaaaaaaaaaa-1
+  /b is #aaaaaaaaaaaa-2
+  versions kept: 1
+== the folders swap names: the file follows its folder
+  #aaaaaaaaaaaa-1/one = 22 bytes
+  /a is #aaaaaaaaaaaa-2
+  /b is #aaaaaaaaaaaa-1
+  versions kept: 1
+== the file moved, its folder removed
+  #aaaaaaaaaaaa-2/moved = 22 bytes
+  /a is #aaaaaaaaaaaa-2
+  versions kept: 2
+a projection whose lease check fails writes nothing: true
+== unchanged
+  #aaaaaaaaaaaa-2/moved = 22 bytes
+  /a is #aaaaaaaaaaaa-2
+  versions kept: 2
+left under the removed folder: 0 objects
