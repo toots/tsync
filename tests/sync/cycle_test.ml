@@ -60,11 +60,14 @@ let faulty link (s : Store.t) : Store.t =
 
 let main root = Local.create ~name:"main" (Filename.concat root "store")
 
-let client ?(link = link ()) root name : (module Engine.S) =
+let client ?(link = link ()) ?replica root name : (module Engine.S) =
   let data_dir = Filename.concat root (name ^ "/data") in
   let composite =
     Composite.create ~domain:d ~data_dir ~owner:true ~poke:ignore ~knowledge
-      [{ name = "main"; role = Main; store = faulty link (main root) }]
+      ({ Composite.name = "main"; role = Main; store = faulty link (main root) }
+      :: List.map
+           (fun store -> { Composite.name = "replica"; role = Replica; store })
+           (Option.to_list replica))
   in
   let module C = struct
     let domain = d
@@ -87,8 +90,8 @@ let client ?(link = link ()) root name : (module Engine.S) =
   end in
   (module Engine.Make (C))
 
-let started ?link root name =
-  let c = client ?link root name in
+let started ?link ?replica root name =
+  let c = client ?link ?replica root name in
   let (module E) = c in
   E.start ~background:false ();
   c
@@ -377,6 +380,39 @@ let () =
           p "  B: %s\n"
             (ignore (sync b);
              tree b));
+      scenario "a parked copy is retried, and the pause flag is where 07 says"
+        (fun root ->
+          let refusing = ref true in
+          let inner = Local.create ~name:"replica" (Filename.concat root "r") in
+          let replica =
+            {
+              inner with
+              put =
+                (fun ?mode k b ->
+                  if !refusing then Fail.raise_ Fail.Corrupt "the copy refuses";
+                  inner.put ?mode k b);
+            }
+          in
+          let a = started ~replica root "A" in
+          let (module A) = a in
+          ignore (sync a);
+          write a "f" "abcd";
+          settle a;
+          let copied () =
+            inner.head_opt (Key.chunk d (Chunk_key.of_body "abcd")) <> None
+          in
+          p "  the replica refusing, it holds the chunk: %b\n" (copied ());
+          refusing := false;
+          let rearmed = A.rearm () in
+          settle a;
+          p "  re-armed: %b; the replica holds the chunk: %b\n" (rearmed > 0)
+            (copied ());
+          A.set_paused true;
+          p "  paused, the flag exists: %b\n"
+            (Fs.exists
+               (List.fold_left Filename.concat root
+                  ["A"; "data"; "paused"; Domain_name.to_string d]));
+          A.set_paused false);
       scenario "an entry its author never projected" (fun root ->
           let a = started root "A" in
           ignore (sync a);
