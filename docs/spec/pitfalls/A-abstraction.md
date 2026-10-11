@@ -611,7 +611,7 @@ This file covers mistakes that are true of any implementation in any language: s
 
 ### A-6.28 Removal committed before the pending creation of the same content
 - **Pitfall** — A batch too large for one entry is split. A moved file is a removal at one key and a creation at another, naming the same content; with the removal committed in the earlier entry, nothing on the main names that content between the two entries, a collection may delete it, and peers see neither file.
-- **Check** — When a batch is split, a file removal or replacement is committed no earlier than every pending creation of the same content identity (publication §4.5). A test splits a large move and collects between the entries.
+- **Check** — The entries of a push are chosen so that content the client still holds never leaves the main between two of them: a file removal or replacement is committed no earlier than the pending creation of the same content, and is held back while an Owed staged edit is based on it (publication §4.5, "Nothing kept is dropped on the way"). A test splits a large move and collects between the entries.
 - **Seen** — design; the peer-visible half is A-6.17.
 
 ### A-6.29 A tree record taken for the main's value at the head
