@@ -244,6 +244,12 @@ FETCH() → entries | PRUNED:
 - An entry that does not decode, or whose version this client does not know
   ([03](../03-journal-sync.md) §2.4), cannot be merged. If the tree head has passed it, the client
   arrives by state (§4.7). Otherwise it stops fetching and pushing, and reports the entry.
+- **A voided entry.** An entry that does not decode and whose void object exists
+  ([03](../03-journal-sync.md) §2.6) reads, for every reader of the log (a fetch, a state read, a
+  projection, a collection), as an entry with no command and no author. A client stopped at an
+  undecodable entry reads the entry and its void object again at each cycle. The void object is
+  created by an operator ([05](../05-ops-config.md) §4.12), never by a cycle, and has no meaning
+  for an entry that decodes or whose version is unknown.
 - The cursor only saves fetches: the cycle fetches when the cursor moved and every `SWEEP`
   whatever the cursor says. A fetch that finds nothing costs one read of entry $h+1$ and one of the
   tree head.
@@ -252,6 +258,7 @@ FETCH() → entries | PRUNED:
 
 ```
 ARRIVE():
+  complete the arrival record, if any                        # §4.8 step 2; a failure fails the cycle
   recover the in-flight record, if any                       # §4.8
   r := FETCH()
   if r = PRUNED: M := STATE(); head := M's position           # §4.7
@@ -259,11 +266,12 @@ ARRIVE():
   else: M := the last value r gives each key; head := h + |r|
   with the metadata lock:
     N := MERGE(R, L, M)                                       # change-algebra Definition 7
-    write the arrival record (N on the keys that change, the new before-values, head), durably
+    write the arrival record, durably: N on the keys that change, the before-values of the keys
+      fetched, head, and the feed keys of the lines this arrival will append
     change L to N, as conflict-resolution §4 specifies
     set the before-values so that R = M on every key fetched; h := head
+    append the changes made to L to the change feed, under the recorded feed keys
     clear the arrival record
-    append the changes made to L to the change feed
   tell this owner's frontends which paths changed
 ```
 
@@ -271,8 +279,16 @@ ARRIVE():
   merge makes no store request and a slow link never delays a local operation (G1).
 - **An arrival never fails for a reason of its own.** The merge is total (Theorem 8). A local
   storage failure while enacting it leaves the arrival record, which owner start completes (§4.8).
-- **Atomic across crashes.** The arrival record holds the merge's result, not its inputs, so
-  completing it after a crash does not compute a second merge over a half-changed tree.
+- **Atomic across crashes and failures.** The arrival record holds the merge's result, not its
+  inputs. Whatever interrupted the enactment (a crash, a full disk), the record is completed
+  before any other fetch or merge, at owner start or at the next cycle, so no second merge is ever
+  computed over a half-changed tree. A record that cannot be completed stops the cycle and is
+  reported.
+- **Only the keys fetched.** The record carries the before-values of the keys the entries name,
+  not of every key: a write to another file during the enactment records its own before-value
+  under its key lock, and completing the record leaves it alone.
+- **The feed is not lost.** The lines are appended before the record is cleared, under feed keys
+  the record names, so completing a record appends the lines that are missing and no line twice.
 - **An arrival with nothing pending** takes the first row of the merge on every key: $L$ becomes
   $M$ on the keys the entries name.
 
@@ -307,8 +323,8 @@ its own key, and its folder is present in both trees.
   another entry $h+1$ exists; the client then arrives and pushes from the new head.
 - **A refused push costs one arrival.** When the entries that got ahead touch nothing this client
   has pending, the pending set is unchanged and the same commands are pushed again with no upload.
-- **Splitting.** A batch whose encoding would exceed `MAX_ENTRY_BYTES` is pushed as several
-  entries, each a batch (Proposition 4). An entry of one command is never split, whatever its
+- **Splitting.** A batch whose encoding would exceed `MAX_ENTRY_BYTES`, or that holds more than
+  `MAX_ENTRY_COMMANDS` commands, is pushed as several entries, each a batch (Proposition 4). An entry of one command is never split, whatever its
   size. A file removal or replacement is committed no earlier
   than every pending creation of the same content identity, so content that a pending command
   moves is never left unreferenced on the main between two entries.
@@ -323,7 +339,8 @@ its own key, and its folder is present in both trees.
   its publication). The delay is the client's choice and nothing depends on its value; being
   offline is a long delay.
 - **Missing chunks with no bytes to send.** A command whose manifest names a chunk the main lacks
-  and this client cannot upload again is left out: the client clears the in-flight record, reports
+  and this client cannot upload again (an inherited chunk of a partial edit, whose base left the
+  main and was collected, and which the local cache does not hold) is left out: the client clears the in-flight record, reports
   the file as damaged ([gc.md](gc.md) §5.4), and pushes the rest of the batch. The command stays
   pending and the file stays listed in status ([failure-model.md](failure-model.md) §9) until its
   commit succeeds.
@@ -363,14 +380,26 @@ PROJECT():
 ```
 
 - **Who.** The projector of an entry at generation 0 is its author. The projector at generation
-  $g \ge 1$ is the client whose takeover object $(n, g)$ exists.
+  $g \ge 1$ is the client whose takeover object $(n, g)$ exists. A voided entry (§4.3) has no
+  author and is projected through a takeover.
+- **Short by construction.** Nothing tells a slow projector from a stopped one. An entry is one
+  put, and its projection is at most `MAX_ENTRY_COMMANDS` commands and `MAX_ENTRY_BYTES` of
+  records (or one record of any size): the caps are chosen so that a projection ends well within
+  `PROJECT_SETTLE − PROJECT_QUARANTINE` on the slowest link a client is expected to run on. The
+  long work, uploading chunks, is done before the commit and is under no deadline. A client MAY
+  use lower caps on a slow uplink. A projector that is slower still is taken over and its entry
+  is applied again from the start.
 - **Apply** sets each key of the entry to its value after on the per-object records, saving
   versions as [data-model/backend.md](../data-model/backend.md) §6.1 says. It is idempotent, and a projector that
   restarts applies the whole entry again.
 - **The lease.** A projector checks, before it starts an entry and at least every `PROJECT_LEASE`
   while it applies it, that the tree head is still $t$ and that no higher takeover generation
   exists. It issues a record write only while less than `PROJECT_LEASE` has elapsed since its last
-  such check, and stops at once when a check fails.
+  such check, and stops at once when a check fails. **Every attempt counts**: a retry of the
+  ladder ([01](../01-core.md) §7) is a write issued anew and is made only under the same test, on
+  the clock that counts suspended time. A write whose answer was lost is not repeated blindly:
+  the projector reads the record or the tree head back first. The tree head is written only after
+  reading it and finding it lower.
 - **The quarantine.** A client that takes over waits `PROJECT_QUARANTINE` before its first write,
   so every write the previous projector issued under its lease has landed or failed.
 - **Order.** An author whose entry is not the one after the tree head waits for the tree head to
@@ -423,7 +452,8 @@ Run at ownership start, in this order, before any request is served and before t
 1. **Local intents.** Complete each namespace operation whose intent remains
    ([04](../04-checkout-cache.md) §4.10).
 2. **The arrival record.** Set $L$ to the recorded values on the recorded keys, write the recorded
-   before-values and position, clear the record. Each step is idempotent.
+   before-values and position, append the feed lines not yet in the applied log, clear the
+   record. Each step is idempotent.
 3. **Before-values.** Drop each before-value equal to $L$ at its key. Give each **Owed** staged
    edit that has none the content identity of its base entry (§4.1).
 4. **Promotion.** Promote each Uploaded staged edit whose key has no before-value: its commit
@@ -511,8 +541,11 @@ opened. It runs the same protocol **per folder**:
   pending simply takes the main's values.
 - **A folder key belongs to the folder it is placed in.** A move of a folder between two folders
   held changes a key of each, and each learns of it at its own pull.
-- **A push** is attempted only when every folder that holds a key of a pending command has just
-  been pulled to the head. Its entry number is that head plus one, and its `Won` step sets those
+- **A push** is attempted only when every folder that holds a key of a pending command, and every
+  ancestor of such a folder up to the root, has just been pulled to the head. The ancestors are
+  needed because a folder's own key is in its parent's view: only they show that the folder still
+  exists and that a pending move closes no cycle, which is what makes the batch well-formed
+  (Definition 6). Its entry number is that head plus one, and its `Won` step sets those
   folders' positions to the entry's number. Folders with nothing pending are not touched: their
   views stay as they are, however old, until they are pulled.
 - **No background cycle.** Nothing fetches on the cursor or on a timer. The cycle runs to push,
@@ -603,13 +636,14 @@ append are answered by the main or fail ([replication.md](replication.md) §4.6,
 |---|---|---|
 | `BATCH_DELAY` | 10 s | the client's choice; trades commits for latency; nothing depends on it |
 | `MAX_ENTRY_BYTES` | 8 MiB | a larger batch is split into several entries; MUST NOT exceed the largest put body any store on the way to the main accepts |
+| `MAX_ENTRY_COMMANDS` | 256 | bounds the record writes of one projection (§4.6); a client MAY use less |
 | `SWEEP` | 60 s | worst-case latency when a cursor note is lost; one entry read per client per interval when idle |
 | `CURSOR_INTERVAL` | 2 s | MUST be ≥ the store's per-object write interval |
 | store wait | object store 2 s; local disk watch capped at 2 s; peer long poll ≤ 30 s | cursor reads per client |
 | `RETRY_FLOOR` | 2 s | back-off after a failed cycle |
 | `PROJECT_LEASE` | 30 s | how long a projector writes after one check |
 | `PROJECT_QUARANTINE` | `PROJECT_LEASE` plus the longest time a store write can still land after it was issued (its stall bound through every attempt of the retry ladder, [01](../01-core.md) §7) plus a margin; 5 min | MUST exceed the time a write issued under a lease can still land |
-| `PROJECT_SETTLE` | 10 min | how long an entry stays unprojected before another client takes it over; MUST be ≥ `PROJECT_QUARANTINE` |
+| `PROJECT_SETTLE` | 10 min | how long an entry stays unprojected before another client takes it over; MUST exceed `PROJECT_QUARANTINE` by the time the slowest expected client takes to project a largest entry |
 | `LOG_RETENTION` | 30 days | how far back a returning client fetches entries instead of reading the tree |
 
 ---
@@ -626,7 +660,7 @@ states, multi-client runs) is [09](../09-tests.md) §6–8. The cases of
   temporary name. A folder renamed with content inside pushes one command.
 - **Local-first.** With the link down, every write, rename, delete, mkdir, rmdir and symlink
   returns with no store round trip; everything is pushed once the link returns, in as few entries
-  as `MAX_ENTRY_BYTES` allows.
+  as `MAX_ENTRY_BYTES` and `MAX_ENTRY_COMMANDS` allow.
 - **Upload first.** Two clients upload different content for one name; both uploads complete; the
   second to commit keeps its content as a conflicted copy with no new upload.
 - **Refused push.** A push refused because of a commit that touches nothing pending is repeated at
@@ -644,6 +678,10 @@ states, multi-client runs) is [09](../09-tests.md) §6–8. The cases of
   projector killed mid-entry applies it again and ends in the same tree. An entry whose author
   never returns is projected by another client after the settle and the quarantine, and not
   before; a first projector that resumes after a takeover writes nothing more.
+- **Voided entry.** With an undecodable entry above the tree head, every client stops fetching
+  and pushing and reports it. Once its void object exists, every client merges it as an empty
+  entry, a client takes its projection over, and the entries behind it are merged and projected.
+  A void object of an entry that decodes changes nothing.
 - **State read.** A state read taken while entries are being projected equals the tree at the head
   it reports. A new client, a client whose position was pruned, and `--full` arrive by state; a
   client with pending changes that arrives by state keeps them pending, and a pending change that
@@ -681,6 +719,9 @@ states, multi-client runs) is [09](../09-tests.md) §6–8. The cases of
 - **One projector per entry, a takeover with a quarantine.** Letting any client apply any entry
   needs a conditional write and a conditional delete on every record, which stores do not all
   offer. The author is the natural single writer; a lease is needed only for an author that died.
+- **A cap, not a heartbeat.** A projection could prove it is alive by rewriting an object, and
+  watchers could wait while it changes. Bounding what one entry asks of its projector needs no
+  object and no extra write; its cost is more entries for a large batch.
 - **Commits do not wait for projections.** A dead author would otherwise stop every writer for the
   settle time.
 - **Arrive by state instead of a hold.** The merge needs three states, not a history, so a client

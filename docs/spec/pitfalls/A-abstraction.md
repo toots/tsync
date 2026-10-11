@@ -556,7 +556,7 @@ This file covers mistakes that are true of any implementation in any language: s
 
 ### A-6.17 Entry granularity and causal order
 - **Pitfall** — Import published one entry at the end (170,901 ops, 27.8 MB), invisible behind 84k deferred jobs; batching by count alone (2000) never fired for a few hundred large files. A creation was published before the folder it names. In rsync `--move`, the delete could reach peers before the put.
-- **Check** — A push is due on an age bound (`BATCH_DELAY`) and an entry is bounded in bytes (`MAX_ENTRY_BYTES`). A larger pending set is split, and each part is a batch: well-formed on its own, a folder present before anything placed in it (publication §4.5, change-algebra Definition 6). A change spread over several entries never exposes a lossy intermediate state (A-6.28).
+- **Check** — A push is due on an age bound (`BATCH_DELAY`) and an entry is bounded in bytes (`MAX_ENTRY_BYTES`) and in commands (`MAX_ENTRY_COMMANDS`). A larger pending set is split, and each part is a batch: well-formed on its own, a folder present before anything placed in it (publication §4.5, change-algebra Definition 6). A change spread over several entries never exposes a lossy intermediate state (A-6.28).
 - **Seen** — d425aa2d, ca1ee99c, PR #66, plan §6 rsync. recurred ×2, rewrite.
 
 ### A-6.18 Rebuild reported as a reset

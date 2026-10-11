@@ -157,7 +157,7 @@ class**:
 |---|---|---|---|---|
 | **none** | `config`, `default-domain`, `build-info`, `logs`, `status`, `start`, `stop` | n/a | n/a | n/a |
 | **read** | `ls`, `versions` (listing), `export` | reads stores and permitted local files | same | same |
-| **owner** | `pause`, `resume`, `retry`, `set-aside`, `cache --evict/--fetch/--prune`, `versions --revert`, `sync`, `gc`, `expire`, `mirror`, `data-integrity`, `share`, `import`, `rsync` with a domain side, every `<group> <verb>` whose frontend declares it owner-class (the whole desktop `tsync android` group) | sends the request to the owner, which runs it | takes ownership for its run and performs the request itself (§3.5) | refuses with `busy`, naming the holder |
+| **owner** | `pause`, `resume`, `retry`, `set-aside`, `cache --evict/--fetch/--prune`, `versions --revert`, `sync`, `gc`, `expire`, `mirror`, `void-entry`, `data-integrity`, `share`, `import`, `rsync` with a domain side, every `<group> <verb>` whose frontend declares it owner-class (the whole desktop `tsync android` group) | sends the request to the owner, which runs it | takes ownership for its run and performs the request itself (§3.5) | refuses with `busy`, naming the holder |
 
 "Serving" means the holder record names a socket and the socket answers. A refused connection does
 not by itself mean the owner is gone: some platforms refuse a connection while the socket's backlog
@@ -628,6 +628,7 @@ differently. A command MUST NOT split a token on `:` or `/` itself.
 | `gc [...]` | owner | [05 §4.9](05-ops-config.md) |
 | `sync [--full] [-j N]` | owner | one cycle now, or with `--full` an arrival by state ([05 §4.7](05-ops-config.md)), in the owner (`sync`, a bulk action); refuses with exit 2 for a pulled tree; prints `N log entries merged, C changes; K entries committed, P changes pending`, the first part reading `state read: F files, D folders` for an arrival by state; exit 1 if the cycle failed |
 | `data-integrity [--verify\|--repair] [--detail] [--source] [--dry-run]` | owner | [05 §4.10](05-ops-config.md); exit 1 if unhealthy |
+| `void-entry NUMBER` | owner | [05 §4.12](05-ops-config.md); prints what a voided entry loses |
 | `mirror [--skip-chunks\|--path P]` | owner | [05 §4.6](05-ops-config.md); needs a main and at least one copy |
 | `import DIR [--only G] [--exclude G] [--force-rehash]` | owner | [05 §4.3](05-ops-config.md); exit 1 if any entry failed |
 | `export [PATH...] DIR [--source] [-j N]` | read | [05 §4.4](05-ops-config.md); each `PATH` is read in a domain (§5.2), `DIR` is local; one domain per run; exit 1 on failures or on pending local changes (listed on stderr) |

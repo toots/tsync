@@ -208,7 +208,8 @@ ensure_chunk(C, c):
   return Present
 ```
 
-- `chunk_names(b)` is the list of chunks `b` names if it parses as a manifest, the chunks of every manifest it carries if it parses as a log entry, and empty otherwise (markers, anchors, the tree head, takeovers, the cursor, shares).
+- `chunk_names(b)` is the list of chunks `b` names if it parses as a manifest, and empty otherwise (log entries, markers, anchors, the tree head, takeovers, the cursor, shares).
+- A log entry is copied without its chunks being checked. An entry at or below the tree head may name content that was replaced since and collected ([gc §5.3](gc.md#53-what-is-referenced)), and nothing follows a copy's log (§4.6): what a copy must hold whole is what its tree records name.
 - A `DeleteMany` job MAY establish which of its keys the source still holds with one listing per distinct parent prefix instead of one read per key.
 - The tree head and the cursor need no dependency check: nothing reads them from a copy to decide anything (§4.6).
 - Because every job reads the source when it runs, order between logs, and a parked job run after later ones, converge on the source's state. That is why jobs carry no bodies, and why a copy job is not a copy on the target: a target-side copy would carry forward whatever the target's `src` happened to hold.
@@ -388,20 +389,6 @@ mirror(scope ∈ {All, Skip_chunks, Path(p)}):
      phase 4  the tree head, then the cursor (not into a backfill; not Path), last
   then retry every parked record of dst's log
 ```
-mirror(source := a named member, or the first in read order; scope ∈ {All, Skip_chunks, Path(p)}):
-  refuse All and Path while a collection run is open on the main       -- chunks are split across two spaces
-  for dst in the other members, sequentially, in configuration order:
-     guard(dst, "copy to " dst)
-     phase 1  chunks:   for the scope's chunks (All: every shard; Path: the chunks the in-scope
-                        manifests name), copy each chunk the dst listing lacks or holds at a different size
-     if phase 1 failed to place any chunk: stop for this dst, and report it
-     phase 2  content referrers: manifests, folder markers, anchors, versions.
-                        For immutable keys, copy when missing or of a different size;
-                        for mutable keys, copy when missing or when the bodies differ
-     phase 3  log entries, in ascending number, then takeovers (not into a backfill; All only)
-     phase 4  the tree head, then the cursor (not into a backfill; All only), last
-  then retry every parked record of dst's log
-```
 
 - The phases give the dependency order of G4 and of [data-model/backend.md §4.3](../data-model/backend.md#43-ordering-rules-crash-consistency): a chunk before anything naming it, a log entry before the tree records it gives a value to, both before the tree head, the cursor last. A copy's log entries, tree head and tree records are plain objects that nothing follows (§4.6), so mirror writes them as it writes any object; the arbitration rules of the log bind the main alone. A mirror interrupted at any point leaves no referrer without its referents.
 - Mirror never deletes. It does not detect same-size wrong chunk bytes: that is verification's job. Per-store caches are not copied.
@@ -428,7 +415,7 @@ for each corruption marker (store S, chunk c), sequentially:
 
 ## 5. Properties and why they hold
 
-**S1 (referrer after referenced).** When a manifest or a log entry is present on a copy, every chunk it names is present there. Its job ensures each named chunk before the put, and `ensure_chunk` returns only after a confirmed put, a fresh confirmation, or a memo entry whose tag equals an even G read after the referrer was read from the source. A chunk doomed in generation *g* can reappear in a referrer only after G became *g*, so such a job never relies on an entry confirmed before the doom ([gc §5.6](gc.md#56-the-generation-and-presence-memos)). A fresh confirmation made while G is odd can be overtaken by a deletion; the mandatory restore of §4.8 puts back every deleted chunk the main holds before G turns even.
+**S1 (referrer after referenced).** When a manifest is present on a copy, every chunk it names is present there. Its job ensures each named chunk before the put, and `ensure_chunk` returns only after a confirmed put, a fresh confirmation, or a memo entry whose tag equals an even G read after the referrer was read from the source. A chunk doomed in generation *g* can reappear in a referrer only after G became *g*, so such a job never relies on an entry confirmed before the doom ([gc §5.6](gc.md#56-the-generation-and-presence-memos)). A fresh confirmation made while G is odd can be overtaken by a deletion; the mandatory restore of §4.8 puts back every deleted chunk the main holds before G turns even.
 
 **S2 (no job lost).** A job is recorded durably before the write returns. Its record is removed only on success; a non-retryable failure parks it.
 
@@ -518,14 +505,14 @@ An implementation MUST exhibit:
 - **One main.** A configuration with two mains is refused. A conditional write is evaluated by the main alone; a `Held` or `Changed` answer records no job.
 - **Durability.** A job is on disk before the write returns, and survives a failure of the copy. After a restart the copy's jobs are intact and run in id order, with writes made meanwhile recorded behind them. A stop mid-job leaves it owed. A permanent failure parks the job and reports the copy degraded, across restarts; the parked job completes on retry once the cause clears. A record submitted by a non-owner is run by the owner after its poke.
 - **Convergence.** A delete job whose key the source holds again restores the key on the copy. A put job whose key the source no longer holds deletes it on the copy. A rename is converged as a put of the destination and a delete of the source. Two logs replayed in either order converge on the source.
-- **Referrer after referenced.** A manifest or a log entry reaches a copy only after every chunk it names; a chunk missing at the source because its referrer changed restarts the job with the new body; a chunk no main holds parks the job as CORRUPT with the key named.
+- **Referrer after referenced.** A manifest reaches a copy only after every chunk it names; a log entry is copied whatever chunks the copy holds; a chunk missing at the source because its referrer changed restarts the job with the new body; a chunk no main holds parks the job as CORRUPT with the key named.
 - **Memo.** 40 manifests × 4 chunks over 4 shards cost no per-chunk metadata reads, 4 shard listings and 160 chunk puts, and the same content under new names costs nothing more. While a run record is present the memo is not relied on. After a collection deletes a chunk from the copy and the chunk is referenced again, the manifest's job puts the chunk before the manifest.
 - **Collection deletes.** Owed deletions carry their generation and are durable before the main unlinks its outgoing chunks; a crash in between repeats them. A deletion deletes chunks and their markers on a copy without a function, or writes one discard request per run and shard on a copy with one, kept pending until consumed; removes its keys from the memo first; does not run while a main is down. After a deletion takes effect, every deleted chunk the main holds is restored on the copy, and only when every deletion of a generation is settled does G turn even. At start, unsettled deletions are resumed and settled before G is made even. A never-consumed request leaves G odd, and the memo unused.
 - **Generation.** While G is odd, or unreadable, or a run record in closing has no generation, no memo entry is relied on or recorded. After G changes, no entry tagged with the old value is relied on. A writer refused "missing chunks" by the gate no longer believes those chunks present anywhere.
 - **Forwards.** Forwards are asked once per chunk with its exact size, and only admitted forwards are sent; a refused forward is fetched by the manifest's job.
 - **Backfill.** Chunks before manifests; a deduplicated hole is filled; symlink manifests name no chunks; the log, the tree head, takeovers and the cursor are not carried; reads never reach it.
 - **Write guard.** Probes once then trusts; a down main refuses non-main writes as TRANSIENT naming the main; an expired hold is re-probed; a main that never answers is bounded by the probe timeout; a domain with no main is allowed.
-- **Mirror.** On any interruption, the destination holds no manifest and no log entry without its chunks, and no tree head above its log; a mutable key of equal size but different body is recopied; mirror never deletes.
+- **Mirror.** On any interruption, the destination holds no manifest without its chunks, and no tree head above its log; a mutable key of equal size but different body is recopied; mirror never deletes.
 
 ---
 

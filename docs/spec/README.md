@@ -238,7 +238,7 @@ staged body with a staged manifest → the upload queue uploads the chunks the m
 under link admission, and keeps the manifest → the cycle creates the next log entry, carrying the
 manifest, if no other client took the number → the before-value is dropped and the staged edit
 promoted → the entry is projected onto the tree and the cursor updated. Copies receive a manifest
-or an entry only after its chunks.
+only after its chunks.
 ([04](04-checkout-cache.md), [publication](algorithms/publication.md),
 [replication](algorithms/replication.md))
 
