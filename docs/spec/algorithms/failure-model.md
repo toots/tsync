@@ -34,7 +34,8 @@ in [ocaml/algorithms/failure-model.md](../ocaml/algorithms/failure-model.md).
 Out of scope: stores that return a different well-formed object under a key (caught only for
 content-addressed chunks, whose key is checked); detecting truly concurrent edits (that is
 [conflict-resolution](conflict-resolution.md)); repairing damaged stores automatically (damage is
-surfaced with a named repair and never fixed silently).
+surfaced with a named repair and never fixed silently); local or stored state altered by hand,
+outside tsync ([security-model](security-model.md) §3.1).
 
 ---
 

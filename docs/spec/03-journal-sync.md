@@ -179,7 +179,6 @@ Under `<data_dir>/sync/<domain>/`, each written by durable replace:
 | File | Content |
 |---|---|
 | `position` | the number of the last entry merged, in its written form (§2.4). Absent: no position; the client arrives by state ([publication.md](algorithms/publication.md) §4.7). Unparseable: reported and treated as absent |
-| `mirror-id` | 32 lowercase hex characters: the id of the mirror this sync state describes, equal to the content of the mirror's `.tsync-mirror` file ([04](04-checkout-cache.md) §2.1). Written once, when the mirror is created |
 | `in-flight` | `{"n":<number>,"body":"<base64 of the exact bytes of the entry>"}`. Absent: no push is in flight |
 | `arrival` | the result of a merge being enacted (below). Absent: no arrival is in progress |
 

@@ -58,7 +58,6 @@ requires rewriting a valid existing file into another form.
 <cache_root>/<domain>/
   manifests/<escaped path>                     mirror entry of a file (manifest bytes)
   manifests/<escaped dir>/                     mirror entry of a folder (a directory)
-  manifests/.tsync-mirror                      mirror id ([03](03-journal-sync.md) §2.7)
   manifests/<escaped dir>/.tsync-dir           folder marker
   manifests/<escaped dir>/.tsync-name          name marker (only when the dir's leaf is escaped)
   manifests/<escaped dir>/.tsync-fid-<hex16>   file-id marker of a file entry (§2.3)
