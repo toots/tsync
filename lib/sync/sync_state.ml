@@ -15,7 +15,6 @@ type settled =
 type arrival = {
   head : int;
   view : Folder_id.t option;
-  feed : string list;
   steps : step list;
   before : (Algebra.key * settled) list;
 }
@@ -272,7 +271,6 @@ let encode_arrival a =
           | None -> [])
        @ [
            ("head", `Int a.head);
-           ("feed", `List (List.map (fun k -> `String k) a.feed));
            ("steps", `List (List.map step_to_json a.steps));
            ( "before",
              `List
@@ -296,17 +294,10 @@ let decode_arrival body =
     | `Assoc l -> (
         match
           ( List.assoc_opt "head" l,
-            List.assoc_opt "feed" l,
             List.assoc_opt "steps" l,
             List.assoc_opt "before" l )
         with
-          | ( Some (`Int head),
-              Some (`List feed),
-              Some (`List steps),
-              Some (`List before) ) ->
-              let* feed =
-                all (function `String k -> Some k | _ -> None) feed
-              in
+          | Some (`Int head), Some (`List steps), Some (`List before) ->
               let* steps = all step_of_json steps in
               let* before = all settled_of_json before in
               let view =
@@ -314,7 +305,7 @@ let decode_arrival body =
                   | Some (`String id) -> Folder_id.of_string id
                   | _ -> None
               in
-              Some { head; view; feed; steps; before }
+              Some { head; view; steps; before }
           | _ -> None)
     | _ -> None
 

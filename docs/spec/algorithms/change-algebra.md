@@ -11,7 +11,9 @@ identity, which neither source does in this form, so the proofs are given
 here and are not inherited. Section 11 relates each result to its source.
 
 The proofs are sketches. They show why a claim holds and what it depends on,
-so that an implementation can be checked against them.
+so that an implementation can be checked against them. Theorem 3 and the five
+properties of Theorem 8 have also been checked on every pair and every triple
+of small trees (section 12, case 22), with no counter-example.
 
 This document owns the model: keys, values, commands, batches, the merge and
 the properties claimed of them. How tsync realises it is owned elsewhere: the
@@ -452,14 +454,17 @@ is keyed by the folder's identity, which the rename does not change.
 |:---|:---|
 | $l = r$: only they changed, or nobody | $m$ |
 | $m = r$: only we changed | $l$ |
-| $l = m$: the same change | $l$ |
+| $l = m$: the same change | $m$ |
 | all differ, $m = \varnothing$, $k$ a file key | $l$ |
 | all differ, otherwise | $m$; and if $k = (d, a)$ is a file key with $l \neq \varnothing$, also $l$ at a fresh key $(d, a')$ |
 
-The fourth row is "an edit outlives a delete". The fifth is the conflicted
-copy.
+The third row takes the main's value: the two are equal as values, and where a
+value carries more than what equality compares (a file's modification time),
+the main's is the one every client ends with. The fourth row is "an edit
+outlives a delete". The fifth is the conflicted copy.
 
-*Step 2, repair.* $N_1$ may violate Definition 3. Apply until none applies:
+*Step 2, repair.* $N_1$ may violate Definition 3. Apply the first rule that
+applies, in the order R1, R2, R3, until none applies:
 
 - **R1 (missing folder).** A place is occupied in a folder $d$ that is
   absent. Restore $d$: at the place it had in $M$ if it had one; otherwise
@@ -467,10 +472,16 @@ copy.
   otherwise at a fresh name in its nearest ancestor in $R$ that is present.
 - **R2 (same place).** Two keys occupy one place. The one whose value comes
   from $M$ stays. The other moves to a fresh name in the same folder.
-- **R3 (cycle).** Some folder on a cycle has a value that comes from $L$.
-  Set it to its value in $M$.
+- **R3 (cycle).** Some folder on a cycle has a value that comes from $L$ and
+  is present in $M$. Set it to its value in $M$. A folder that R1 restored is
+  absent from $M$ and is never the one chosen: R1 would restore it again.
 
-A *fresh name* is free in the state and generated only by this client.
+A *fresh name* is free in $N$ as computed so far and in $L$, and generated
+only by this client. Being free in $L$ lets the client move a file aside
+before it changes anything else in its tree.
+
+The order of the rules matters only for names: applying them in another order
+gives the same tree up to which fresh name each loser gets.
 
 Naming the loser apart is what [K21, section 3.5] also recommends for (c):
 
@@ -500,10 +511,13 @@ locally.
    ($L(k) \neq R(k)$, $L(k) \neq \varnothing$) is in $N$, at $k$ or at a
    fresh key in the same folder, and that folder is present.
 5. **Confined.** Every key where $N$ differs from $M$ has a command in $P$,
-   or is a folder restored by R1.
+   is a fresh key the merge made, or is a folder restored by R1.
 
 *Proof sketch.* (1) R3 lowers the number of folder values taken from $L$,
-and a cycle always has one, since $M$ has no cycle. R1 only restores folders
+and a cycle always has one that is present in $M$: $M$ has no cycle, $L$ has
+none, and a folder the client created is reached only through folders it
+placed. That a cycle through a folder R1 restored also has one is checked on
+small trees only (section 12, case 22). R1 only restores folders
 that exist in $R$ or $M$, of which there are finitely many. R2 moves a key
 to a name nothing else uses. When none applies, W1 to W3 hold. (2) Step 1
 gives $L$, respectively $M$, which is well-formed, so step 2 does nothing.
@@ -677,14 +691,20 @@ Each follows from a numbered result.
 20. Both sides make the same change: nothing is sent and nothing is copied.
 21. A read from a lagging replica during an outage: right bytes or absence,
     and no change to $R$ (Proposition 12).
+22. Every triple $(R, L, M)$ of well-formed trees over a small universe (two
+    or three folders, one or two names, two contents): the five properties of
+    Theorem 8, the pending set equal to $\mathit{diff}(M, N)$, and the same
+    $N$ up to fresh names under every order of R1 to R3. Every pair of such
+    trees: the difference applied in an order Theorem 3 gives passes only
+    through well-formed trees and reaches its target, and every subset of it
+    taken as a batch is one.
 
 ## 13. Open questions
 
 1. Is the progress argument (Theorem 11) sound, and is there a cleaner
    measure?
-2. Is the repair of the merge confluent, that is, does $N$ depend on the
-   order in which R1 to R3 are applied? Only one client computes a given
-   merge, so correctness does not need it, but tests do.
+2. The repair of the merge is confluent up to fresh names on every triple of
+   small trees (section 12, case 22). A proof for all trees is missing.
 3. R1 restores a removed folder under its own identity. Is there a case
    where a new identity would be the better outcome?
 4. Does anything a conflict policy could use get lost by deriving $P$ from

@@ -243,7 +243,6 @@ let () =
     {
       head = 9;
       view = None;
-      feed = [];
       steps =
         [
           Move (at "a.txt", at "a (conflicted copy from laptop).txt");

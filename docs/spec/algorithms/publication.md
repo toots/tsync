@@ -267,10 +267,10 @@ ARRIVE():
   with the metadata lock:
     N := MERGE(R, L, M)                                       # change-algebra Definition 7
     write the arrival record, durably: N on the keys that change, the before-values of the keys
-      fetched, head, and the feed keys of the lines this arrival will append
+      fetched, and head
     change L to N, as conflict-resolution §4 specifies
     set the before-values so that R = M on every key fetched; h := head
-    append the changes made to L to the change feed, under the recorded feed keys
+    append the changes made to L to the change feed
     clear the arrival record
   tell this owner's frontends which paths changed
 ```
@@ -287,8 +287,11 @@ ARRIVE():
 - **Only the keys fetched.** The record carries the before-values of the keys the entries name,
   not of every key: a write to another file during the enactment records its own before-value
   under its key lock, and completing the record leaves it alone.
-- **The feed is not lost.** The lines are appended before the record is cleared, under feed keys
-  the record names, so completing a record appends the lines that are missing and no line twice.
+- **The feed after an interrupted arrival.** The lines are appended before the record is cleared.
+  A record completed later (at owner start, or at the next cycle) cannot tell which lines the
+  interrupted enactment had appended, nor what the steps it had made looked like before. It
+  appends none, and stamps a new resync generation ([08](../08-frontends.md) §3.6): every anchor a
+  frontend holds answers stale, and the frontend lists again.
 - **An arrival with nothing pending** takes the first row of the merge on every key: $L$ becomes
   $M$ on the keys the entries name.
 
@@ -310,7 +313,7 @@ PUSH():
         clear the in-flight record
       promote the staged edits of B whose before-value was dropped   # 04 §4.7
       cursor.note(h)
-    Held(_) → ARRIVE(); a later cycle pushes again
+    Held(_) → ARRIVE(); then PUSH() again, in this cycle a bounded number of times, else in a later one
     missing chunks(C) → upload C from the staged bytes; issue the same create again
     any other failure → the in-flight record stays; §4.8 decides at the next cycle
 ```
@@ -477,8 +480,8 @@ Run at ownership start, in this order, before any request is served and before t
 1. **Local intents.** Complete each namespace operation whose intent remains
    ([04](../04-checkout-cache.md) §4.10).
 2. **The arrival record.** Set $L$ to the recorded values on the recorded keys, write the recorded
-   before-values and position, append the feed lines not yet in the applied log, clear the
-   record. Each step is idempotent.
+   before-values and position, stamp a new resync generation (§4.4), clear the record. Each step
+   is idempotent.
 3. **Before-values.** Drop each before-value equal to $L$ at its key. Give each **Owed** staged
    edit that has none the content identity of its base entry (§4.1).
 4. **Promotion.** Promote each Uploaded staged edit whose key has no before-value: its commit
@@ -528,7 +531,8 @@ already holds exactly these bytes ([06](../06-backends.md) §3.3).
 
 - Expiry ([gc.md](gc.md) §4.2) MAY delete a log entry only if its number is at most the tree head,
   it is not the head entry, and it is older than `LOG_RETENTION` by the store's own modification
-  times. It deletes in ascending number order.
+  times. It deletes in ascending number order and stops at the first entry it keeps, so the
+  retained entries stay contiguous whatever their modification times.
 - **The head entry is never deleted**, so the log is never empty and its head can be read from it
   alone, by an operator or an integrity check. Clients do not depend on it: they find the head
   from their position and the tree head (§4.3).
@@ -573,10 +577,17 @@ opened. It runs the same protocol **per folder**:
   (Definition 6). Its entry number is that head plus one, and its `Won` step sets those
   folders' positions to the entry's number. Folders with nothing pending are not touched: their
   views stay as they are, however old, until they are pulled.
-- **No background cycle.** Nothing fetches on the cursor or on a timer. The cycle runs to push,
+- **No background fetch.** Nothing fetches on the cursor or on a timer. The cycle runs to push,
   and pulls happen when the host asks.
 - **A folder never pulled** has no view, so no local operation can record a before-value in it: it
   is pulled first, and the operation waits for that.
+- **What a folder holds belongs to that folder's own view.** When a pull merges the removal or the
+  move of a subfolder, only the subfolder's pending keys count as its content for the repair of
+  the merge (R1): entries it holds from an older pull of its own are a view, not changes of this
+  client, and are dropped with it. A subfolder moved into a folder this client does not hold is
+  dropped locally, and comes back when that folder is pulled.
+- **The cycle still runs**, to push: it wakes on a local change and on the batch delay, never on
+  the cursor or on `SWEEP`.
 
 Recovery (§4.8) is unchanged. An in-flight record is settled before the next pull or push that
 reaches the main.
