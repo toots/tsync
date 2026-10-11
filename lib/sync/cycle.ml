@@ -176,6 +176,7 @@ module Make (C : Engine_ctx.S) = struct
               [(Op.Delete path, fid)]
           | _ -> [])
     | Folder (i, Some place) -> (
+        forget_dirs ();
         match path_of place with
           | None -> (
               (* A lazy tree does not hold the folder it moved into. *)
@@ -212,6 +213,7 @@ module Make (C : Engine_ctx.S) = struct
                     ignore (Mirror.record_folder ~durable:false mirror target i);
                     [(Op.Mkdir { path = target; id = Some i }, None)]))
     | Folder (i, None) -> (
+        forget_dirs ();
         match Mirror.key_of_id mirror i with
           | Some here ->
               Mirror.remove_folder mirror here;
@@ -445,7 +447,10 @@ module Make (C : Engine_ctx.S) = struct
               "the local tree kept changing under an arrival"
         | `Again need -> attempt need (rounds - 1)
     in
-    let touched = with_meta (fun () -> attempt (paths_of (decide ())) 8) in
+    let touched =
+      with_meta (fun () ->
+          keeping_dirs (fun () -> attempt (paths_of (decide ())) 8))
+    in
     Rt.Signal.broadcast settled_signal;
     changed touched;
     List.length touched

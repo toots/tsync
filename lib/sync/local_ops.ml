@@ -315,10 +315,35 @@ module Make (C : Engine_ctx.S) = struct
       (fun parent -> { Algebra.parent; name = Names.leaf_of path })
       (parent_id path)
 
+  (* The path of each folder id, kept for the time of one enactment: under the
+     metadata lock no folder moves but by the enactment itself, which forgets
+     them when it moves one. Uploads read it from other domains. *)
+  let dirs : (Folder_id.t, string option) Hashtbl.t = Hashtbl.create 64
+  let dirs_kept = ref false
+  let dirs_m = Mutex.create ()
+  let forget_dirs () = Mutex.protect dirs_m (fun () -> Hashtbl.reset dirs)
+
+  let keeping_dirs f =
+    Mutex.protect dirs_m (fun () -> dirs_kept := true);
+    Fun.protect f ~finally:(fun () ->
+        Mutex.protect dirs_m (fun () ->
+            dirs_kept := false;
+            Hashtbl.reset dirs))
+
+  let dir_of id =
+    match
+      Mutex.protect dirs_m (fun () ->
+          if !dirs_kept then Hashtbl.find_opt dirs id else None)
+    with
+      | Some dir -> dir
+      | None ->
+          let dir = Mirror.key_of_id mirror id in
+          Mutex.protect dirs_m (fun () ->
+              if !dirs_kept then Hashtbl.replace dirs id dir);
+          dir
+
   let path_of (p : Algebra.place) =
-    Option.map
-      (fun dir -> Names.join dir p.name)
-      (Mirror.key_of_id mirror p.parent)
+    Option.map (fun dir -> Names.join dir p.name) (dir_of p.parent)
 
   (* The value of a file key in [L]: the staged edit when there is one, else
      the mirror entry (conflict-resolution §3). *)
