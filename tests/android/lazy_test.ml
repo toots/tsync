@@ -437,6 +437,28 @@ let () =
   p "  %-34s [%s]" "the peer sees"
     (String.concat ", " (until_peer_sees "offline"));
 
+  p "== a subfolder moves into a folder never pulled";
+  peer_does (fun (module E) ->
+      E.mkdir "sub/inner" ~exclusive:true;
+      E.mkdir "archive" ~exclusive:true;
+      E.mkdir "archive/old" ~exclusive:true);
+  ignore (list ~extra:[s "pull" "now"] "sub, holding inner" sub);
+  peer_does (fun (module E) ->
+      E.rename ~src:"sub/inner" ~dst:"archive/old/inner" ~exclusive:true;
+      E.rename ~src:"archive/old/inner" ~dst:"archive/old/again" ~exclusive:true);
+  ignore (list ~extra:[s "pull" "now"] "sub, inner gone" sub);
+  ignore (list ~extra:[s "pull" "now"] "root" "root");
+  peer_does (fun (module E) ->
+      p "  %-34s [%s]" "the peer's root"
+        (String.concat ", "
+           (List.sort compare
+              (List.map (fun (e : E.entry) -> e.name) (E.list_children ""))));
+      p "  %-34s [%s]" "the peer's archive/old"
+        (String.concat ", "
+           (List.map
+              (fun (e : E.entry) -> e.name)
+              (E.list_children "archive/old"))));
+
   p "== a pin holds the views that lead to it";
   let deep = ref_of (list "sub" sub) "deep.txt" in
   p "  %-34s %s" "restore sub/deep.txt"

@@ -36,9 +36,22 @@ module Make (C : Engine_ctx.S) = struct
 
   let stuck : stuck option Atomic.t = Atomic.make None
   let tree_head_seen = Atomic.make 0
-  let damaged : (Algebra.place, string) Hashtbl.t = Hashtbl.create 8
+
+  (* Files whose commit was refused for chunks this client cannot send again
+     (publication §4.5): the path, and the content that was refused. Another
+     content at the key is pushed like any other. *)
+  let damaged : (Algebra.place, string * string) Hashtbl.t = Hashtbl.create 8
   let damaged_m = Mutex.create ()
   let is_damaged p = Mutex.protect damaged_m (fun () -> Hashtbl.mem damaged p)
+
+  let refused p (m : Manifest.t) =
+    Mutex.protect damaged_m (fun () ->
+        match Hashtbl.find_opt damaged p with
+          | Some (_, identity) -> identity = Log_entry.identity_of m
+          | None -> false)
+
+  (* The reason the last cycle of the background loop failed, if it did. *)
+  let cycle_failing : string option Atomic.t = Atomic.make None
   let null = Algebra.is_null ~equal:same
   let local_file_at p = Option.bind (path_of p) local_file
 
@@ -137,7 +150,22 @@ module Make (C : Engine_ctx.S) = struct
 
   (* conflict-resolution §4, one step: idempotent, under the metadata lock and
      the key locks of the files it names. *)
-  let apply_step parked : Sync_state.step -> (Op.t * string option) list =
+  (* An edit staged after an arrival's decision was recorded, which only a
+     record completed later can meet: it is kept beside the main's value, with
+     the entry it inherits from. *)
+  let keep_aside path =
+    let dst = aside_name path ~is_dir:false and size = size_of path in
+    begin_change dst;
+    repost_moved (rename_local ~src:path ~dst ~is_dir:false);
+    [
+      ( Op.Rename
+          { dst; src = path; is_dir = false; size = Some size; id = None },
+        Mirror.file_id mirror dst );
+    ]
+
+  let apply_step ?(recovered = false) parked :
+      Sync_state.step -> (Op.t * string option) list =
+    let late path = recovered && Staged.edit staged path <> None in
     function
     | Move (src, dst) -> (
         match (path_of src, path_of dst) with
@@ -160,15 +188,17 @@ module Make (C : Engine_ctx.S) = struct
         match path_of p with
           | None -> []
           | Some path ->
+              let aside = if late path then keep_aside path else [] in
               if Staged.edit staged path <> None then (
                 ignore (discard_edit path);
                 cancel_upload path);
               end_lineage path;
               Mirror.write_file ~durable:false mirror path m;
               let fid = Mirror.ensure_file_id ~durable:false mirror path in
-              [(Op.Put { path; size = m.size }, Some fid)])
+              aside @ [(Op.Put { path; size = m.size }, Some fid)])
     | File (p, None) -> (
         match path_of p with
+          | Some path when late path -> keep_aside path
           | Some path when kind path = `File ->
               let fid = Mirror.file_id mirror path in
               ignore (discard_edit path);
@@ -232,7 +262,7 @@ module Make (C : Engine_ctx.S) = struct
      so it invalidates the feed's anchors instead. *)
   let run_arrival ?(recovered = false) (a : Sync_state.arrival) =
     let parked = Hashtbl.create 2 in
-    let ops = List.concat_map (apply_step parked) a.steps in
+    let ops = List.concat_map (apply_step ~recovered parked) a.steps in
     if a.steps <> [] then Fs.syncfs (Mirror.root mirror);
     List.iter
       (fun ((key : Algebra.key), (settled : Sync_state.settled)) ->
@@ -426,7 +456,9 @@ module Make (C : Engine_ctx.S) = struct
         with_keys paths (fun () ->
             let merged = decide () in
             let need = paths_of merged in
-            if List.for_all (fun p -> List.mem p paths) need then (
+            let held = Hashtbl.create (List.length paths) in
+            List.iter (fun p -> Hashtbl.replace held p ()) paths;
+            if List.for_all (Hashtbl.mem held) need then (
               describe_clash merged;
               let arrival =
                 {
@@ -495,10 +527,18 @@ module Make (C : Engine_ctx.S) = struct
         (fun (path, _) -> Option.map (fun p -> `File p) (place_opt path))
         (Staged.edits staged)
 
+  (* What a state read gives: the head it reached, the commands from [R] to
+     [M], and the files and folders counted. *)
+  type state = {
+    head : int;
+    theirs : Log_entry.command list;
+    read : [ `Entries of int | `State of int * int ];
+  }
+
   (* publication §4.7: the tree as its records say, then every entry above
      the tree head replayed over it. Only the keys where [M] differs from [R]
      are kept, with every key of [R] that the main lacks. *)
-  let rec state_read ?(narrate = Narrate.none) () =
+  let rec state_read ?(narrate = Narrate.none) () : state =
     let t = Log_store.tree_head log in
     let seen = Hashtbl.create 4096 in
     let dirs = Hashtbl.create 256 in
@@ -618,14 +658,16 @@ module Make (C : Engine_ctx.S) = struct
                     Keys.empty
                     (gone () @ walked @ replayed @ orphans)
                 in
-                ( t + List.length entries,
-                  List.map snd (Keys.bindings all),
-                  `State (!files, Hashtbl.length folders) ))
+                {
+                  head = t + List.length entries;
+                  theirs = List.map snd (Keys.bindings all);
+                  read = `State (!files, Hashtbl.length folders);
+                })
 
   (* publication §4.7. Once its entry is gone the in-flight record cannot say
      whether the batch was committed, so the merge decides key by key. *)
   let arrive_by_state ?narrate () =
-    let head, theirs, read = state_read ?narrate () in
+    let { head; theirs; read } = state_read ?narrate () in
     Sync_state.clear_in_flight sync_state;
     let changed = merge_and_enact ~head theirs in
     Sync_state.state_read sync_state;
@@ -678,6 +720,7 @@ module Make (C : Engine_ctx.S) = struct
             List.iter
               (function
                 | `File (p, _, after) ->
+                    Mutex.protect damaged_m (fun () -> Hashtbl.remove damaged p);
                     if same_file (l_base.file p) after then
                       Sync_state.drop sync_state (`File p)
                     else Sync_state.set_file sync_state p after
@@ -719,7 +762,8 @@ module Make (C : Engine_ctx.S) = struct
                         | Some ({ state = Uploaded _; _ } as e) ->
                             Staged.write staged path { e with state = Owed };
                             post_put path
-                        | _ ->
+                        | Some _ -> ()
+                        | None ->
                             (* ponytail: the local cache may hold the chunk;
                                send it from there before giving the file up. *)
                             Log.warn
@@ -727,7 +771,8 @@ module Make (C : Engine_ctx.S) = struct
                                has no bytes to send again"
                               path;
                             Mutex.protect damaged_m (fun () ->
-                                Hashtbl.replace damaged p path)))
+                                Hashtbl.replace damaged p
+                                  (path, Log_entry.identity_of m))))
         | _ -> ())
       batch
 
@@ -767,7 +812,21 @@ module Make (C : Engine_ctx.S) = struct
   let complete_arrival () =
     match Sync_state.arrival sync_state with
       | None -> ()
-      | Some a -> changed (with_meta (fun () -> run_arrival ~recovered:true a))
+      | Some a ->
+          let paths =
+            List.sort_uniq String.compare
+              (List.concat_map
+                 (fun (step : Sync_state.step) ->
+                   List.filter_map path_of
+                     (match step with
+                       | Move (src, dst) -> [src; dst]
+                       | File (p, _) -> [p]
+                       | Folder _ -> []))
+                 a.steps)
+          in
+          changed
+            (with_meta (fun () ->
+                 with_keys paths (fun () -> run_arrival ~recovered:true a)))
 
   (* publication §4.4: what was merged, and how many paths it changed. *)
   let arrive ?narrate ?(full = false) () =
@@ -799,6 +858,22 @@ module Make (C : Engine_ctx.S) = struct
                         merge_and_enact
                           ~head:(h + List.length entries)
                           (theirs_of entries) )))
+
+  (* The commands a pull of one folder merges (publication §4.11): the last
+     value the entries give every key that any of them touched in the folder,
+     so a key that left the view and changed again is still seen leaving. *)
+  let view_commands id (entries : Log_store.entry list) =
+    let touched = Hashtbl.create 16 in
+    List.iter
+      (fun e ->
+        List.iter
+          (fun c ->
+            if concerns id c then Hashtbl.replace touched (Algebra.key_of c) ())
+          (Option.value ~default:[] (Log_store.commands e)))
+      entries;
+    List.filter
+      (fun c -> Hashtbl.mem touched (Algebra.key_of c))
+      (theirs_of entries)
 
   let pulled_marker dir =
     Filename.concat (Mirror.path mirror dir) ".tsync-pulled"
@@ -862,7 +937,7 @@ module Make (C : Engine_ctx.S) = struct
               List.fold_left
                 (fun acc c -> Keys.add (Algebra.key_of c) c acc)
                 Keys.empty
-                (gone @ walked @ List.filter (concerns id) (theirs_of entries))
+                (gone @ walked @ view_commands id entries)
             in
             (t + List.length entries, List.map snd (Keys.bindings all))
     in
@@ -873,8 +948,19 @@ module Make (C : Engine_ctx.S) = struct
             match fetch h with
               | `Pruned -> by_state ()
               | `Entries entries ->
-                  ( h + List.length entries,
-                    List.filter (concerns id) (theirs_of entries) ))
+                  (h + List.length entries, view_commands id entries))
+    in
+    (* A folder moved into one this client does not hold leaves the view. *)
+    let theirs =
+      List.map
+        (function
+          | `Folder (i, before, Some (place : Algebra.place))
+            when (not (Folder_id.equal place.parent id))
+                 && (not (Folder_id.is_root place.parent))
+                 && Mirror.key_of_id mirror place.parent = None ->
+              `Folder (i, before, None)
+          | c -> c)
+        theirs
     in
     let changed =
       if theirs = [] && folder_position dir = Some head then 0
@@ -905,7 +991,7 @@ module Make (C : Engine_ctx.S) = struct
         (Staged.edits staged)
     in
     let pushable : Log_entry.command -> bool = function
-      | `File (p, _, Some (Known _)) -> not (is_damaged p)
+      | `File (p, _, Some (Known m)) -> not (refused p m)
       | `File (_, _, Some (Identity _ | Unknown)) -> false
       | `File (_, _, None) | `Folder _ -> true
     in
@@ -1176,13 +1262,15 @@ module Make (C : Engine_ctx.S) = struct
          with
           | () ->
               if !failing <> None then Log.info "cycles run again";
-              failing := None
+              failing := None;
+              Atomic.set cycle_failing None
           | exception ((Stop.Stopping | Rt.Cancelled) as e) -> raise e
           | exception e ->
               let reason = Printexc.to_string e in
               if !failing <> Some reason then
                 Log.info "cycle failed, retrying until it runs: %s" reason;
               failing := Some reason;
+              Atomic.set cycle_failing (Some reason);
               Stop.sleep retry_floor);
         loop ())
     in

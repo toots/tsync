@@ -68,10 +68,16 @@
   notices                            {changed root, recovered}
   root, uploads published            [c.txt, mine.txt, n2.txt, offline/, sub/] read the store
   the peer sees                      [c.txt, mine.txt, n2.txt, offline, sub]
+== a subfolder moves into a folder never pulled
+  sub, holding inner                 [deep.txt, inner/] read the store
+  sub, inner gone                    [deep.txt] read the store
+  root                               [archive/, c.txt, mine.txt, n2.txt, offline/, sub/] read the store
+  the peer's root                    [archive, c.txt, mine.txt, n2.txt, offline, sub]
+  the peer's archive/old             [again]
 == a pin holds the views that lead to it
-  sub                                [deep.txt] read the store
+  sub                                [deep.txt] no read
   restore sub/deep.txt               {"ok":true,"restored":1,"failed":0}
-  root, view old but held            [c.txt, mine.txt, n2.txt, offline/, sub/] read the store, outdated
+  root, view old but held            [archive/, c.txt, mine.txt, n2.txt, offline/, sub/] read the store, outdated
   sub, view old but held             [deep.txt] read the store, outdated
   open the pinned file               "deep"
   restore root                       {"ok":false,"code":"unreachable","error":"the store is down"}
