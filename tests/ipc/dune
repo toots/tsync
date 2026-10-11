@@ -8,6 +8,6 @@
   (run ./ipc_test.exe)))
 
 (rule
- (alias runtest)
+ (aliases runtest runtest-serial)
  (action
   (diff ipc_test.expected ipc_test.output)))

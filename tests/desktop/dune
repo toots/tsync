@@ -32,6 +32,6 @@
   (run ./wedged_test.exe %{exe:owner_double.exe})))
 
 (rule
- (alias runtest)
+ (aliases runtest runtest-serial)
  (action
   (diff wedged_test.expected wedged_test.output)))

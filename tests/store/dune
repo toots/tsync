@@ -179,7 +179,7 @@
    (run ./watch_test.exe))))
 
 (rule
- (alias runtest)
+ (aliases runtest runtest-serial)
  (enabled_if
   (= %{system} linux))
  (action
