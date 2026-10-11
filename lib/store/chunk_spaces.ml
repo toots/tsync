@@ -107,13 +107,14 @@ let sync_shards t d cs =
   |> List.iter Fs.fsync_dir
 
 let references key body =
-  if Key.is_internal_leaf (Key.leaf key) then Ok []
-  else if Manifest.is_manifest body then
+  let named names =
     Result.map
       (List.sort_uniq Chunk_key.compare)
-      (Result.map_error
-         (Printf.sprintf "%s: %s" (Key.to_string key))
-         (Manifest.chunk_names body))
+      (Result.map_error (Printf.sprintf "%s: %s" (Key.to_string key)) names)
+  in
+  if Key.is_log_entry key then named (Log_entry.chunk_names body)
+  else if Key.is_internal_leaf (Key.leaf key) then Ok []
+  else if Manifest.is_manifest body then named (Manifest.chunk_names body)
   else (
     match Folder.classify_marker (Bigstring.to_string body) with
       | `Marker _ -> Ok []
