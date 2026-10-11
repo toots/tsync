@@ -22,6 +22,11 @@ listed at: Photos Moved Moved/Day1
 == a range read is not queued behind whole-chunk reads
 range "234" within 0.5s: true
 
+== the main's chunk size is binding
+before the main answered: 8 and 1
+configured with another size: photos is configured with a chunk size of 8 and its main states <the main's>
+not configured: the main's is used: true
+
 == store
   tsync/photos/chunks/025/025af5159b2bb7be-ff06005faa214512 (8)
   tsync/photos/chunks/025/025bf29515e61add-b256e565b822c46d (8)

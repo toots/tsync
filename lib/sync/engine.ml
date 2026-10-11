@@ -258,6 +258,8 @@ module Make (C : Engine_ctx.S) = struct
         try sweep_local_temps () with
           | (Stop.Stopping | Rt.Cancelled) as e -> raise e
           | e -> Log.warn "temporaries not swept: %s" (Printexc.to_string e));
+    (* 01 §3.5: the main's chunk size is asked from owner start on. *)
+    (try ignore (R.chunk_size ()) with Fail.E _ -> ());
     Dqueue.start ~paused:is_paused uploads run_upload;
     Dqueue.rescan uploads;
     Tsync_store.Composite.start ~paused:is_paused C.composite;
