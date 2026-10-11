@@ -93,16 +93,18 @@ val order :
 (** The state after [steps]. *)
 val run : 'f t -> 'f step list -> 'f t
 
-(** The result of a merge, as changes: [local] is [diff(L, N)], which the owner
-    enacts; [pending] holds, for every key the merge read or made, the command
-    from [M] to [N], null where the key ends with no before-value. *)
+(** The result of a merge, as changes:
+    - [local] is [diff(L, N)], which the owner enacts;
+    - [pending] holds, for every key the merge read or made, the command from
+      [M] to [N], null where the key ends with no before-value;
+    - [asides] are the local files kept under a fresh key, as [(from, to)];
+    - [restored] are the folders R1 brought back. *)
 type 'f merged = {
   n : 'f t;
   local : 'f command list;
   pending : 'f command list;
   asides : (place * place) list;
-      (** local files kept under a fresh key: [(from, to)] *)
-  restored : Folder_id.t list;  (** folders R1 brought back *)
+  restored : Folder_id.t list;
 }
 
 type rule = [ `R1 | `R2 | `R3 ]

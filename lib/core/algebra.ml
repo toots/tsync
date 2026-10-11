@@ -238,6 +238,26 @@ let applicable t : 'f command -> bool = function
       && List.for_all (( = ) i) (folders_at t p)
       && not (is_above t ~ancestor:i p.parent)
 
+(* One pass of [take] over the commands left: the state so far, the folders
+   parked, the steps taken in reverse, their count, and the commands that did
+   not apply. *)
+type 'f pass = {
+  state : 'f t;
+  parked : Folder_id.t list;
+  steps : 'f step list;
+  count : int;
+  blocked : 'f command list;
+}
+
+(* A merge under repair: the tree, the keys it concerns, the files moved
+   aside and the folders brought back. *)
+type 'f repairing = {
+  tree : 'f t;
+  keys : Keys.t;
+  moved : (place * place) list;
+  back : Folder_id.t list;
+}
+
 let rec take ?(limit = max_int) ~temp from commands =
   let pending_folder pending i =
     List.exists (fun c -> key_of c = `Folder i) pending
@@ -266,17 +286,22 @@ let rec take ?(limit = max_int) ~temp from commands =
   in
   (* [parked]: the folders at a temporary place whose command is not set yet. *)
   let rec go t parked all_parked steps count pending =
-    let t, parked, steps, count, blocked =
+    let { state = t; parked; steps; count; blocked } =
       List.fold_left
-        (fun (t, parked, steps, count, blocked) c ->
-          if applicable t c && (count < limit || closes parked c) then
-            ( set t c,
-              List.filter (fun i -> key_of c <> `Folder i) parked,
-              `Set c :: steps,
-              count + 1,
-              blocked )
-          else (t, parked, steps, count, c :: blocked))
-        (t, parked, steps, count, [])
+        (fun pass c ->
+          if
+            applicable pass.state c
+            && (pass.count < limit || closes pass.parked c)
+          then
+            {
+              pass with
+              state = set pass.state c;
+              parked = List.filter (fun i -> key_of c <> `Folder i) pass.parked;
+              steps = `Set c :: pass.steps;
+              count = pass.count + 1;
+            }
+          else { pass with blocked = c :: pass.blocked })
+        { state = t; parked; steps; count; blocked = [] }
         pending
     in
     let blocked = List.rev blocked in
@@ -351,12 +376,18 @@ let merge ?priority ~equal ~aside ~l ~before ~theirs () =
         if lv = rv || rv <> mv then (set_folder n i mv, copies) else (n, copies)
   in
   let n, copies = Keys.fold (fun k acc -> step1 acc k) keys (l, []) in
-  let n, keys, asides =
+  let copied =
     List.fold_left
-      (fun (n, keys, asides) (p, v) ->
-        let p' = fresh n ~is_dir:false p in
-        (set_file n p' v, Keys.add (`File p') keys, (p, p') :: asides))
-      (n, keys, []) (List.rev copies)
+      (fun acc (p, v) ->
+        let p' = fresh acc.tree ~is_dir:false p in
+        {
+          acc with
+          tree = set_file acc.tree p' v;
+          keys = Keys.add (`File p') acc.keys;
+          moved = (p, p') :: acc.moved;
+        })
+      { tree = n; keys; moved = []; back = [] }
+      (List.rev copies)
   in
   let from_m n : key -> bool = function
     | `File p -> same (file n p) (file m p)
@@ -378,47 +409,52 @@ let merge ?priority ~equal ~aside ~l ~before ~theirs () =
           in
           fresh n ~is_dir:true { parent = up d; name }
   in
-  let repair (n, keys, asides, restored) = function
+  let repair acc = function
     | Missing d ->
-        ( set_folder n d (Some (restore n d)),
-          Keys.add (`Folder d) keys,
-          asides,
-          d :: restored )
+        {
+          acc with
+          tree = set_folder acc.tree d (Some (restore acc.tree d));
+          keys = Keys.add (`Folder d) acc.keys;
+          back = d :: acc.back;
+        }
     | Clash (p, occupants) ->
-        if not (List.exists (from_m n) occupants) then
+        if not (List.exists (from_m acc.tree) occupants) then
           failwith "Algebra.merge: a place taken twice by local values";
         List.fold_left
-          (fun (n, keys, asides, restored) (k : key) ->
-            if from_m n k then (n, keys, asides, restored)
+          (fun acc (k : key) ->
+            let n = acc.tree in
+            if from_m n k then acc
             else (
               match k with
                 | `File _ ->
                     let p' = fresh n ~is_dir:false p in
-                    ( set_file (set_file n p None) p' (file n p),
-                      Keys.add (`File p') keys,
-                      (p, p') :: asides,
-                      restored )
+                    {
+                      acc with
+                      tree = set_file (set_file n p None) p' (file n p);
+                      keys = Keys.add (`File p') acc.keys;
+                      moved = (p, p') :: acc.moved;
+                    }
                 | `Folder i ->
-                    ( set_folder n i (Some (fresh n ~is_dir:true p)),
-                      keys,
-                      asides,
-                      restored )))
-          (n, keys, asides, restored)
-          occupants
+                    {
+                      acc with
+                      tree = set_folder n i (Some (fresh n ~is_dir:true p));
+                    }))
+          acc occupants
     | Cycle ids -> (
+        let n = acc.tree in
         let local i = folder m i <> None && folder n i <> folder m i in
         match List.sort Folder_id.compare (List.filter local ids) with
-          | i :: _ -> (set_folder n i (folder m i), keys, asides, restored)
+          | i :: _ -> { acc with tree = set_folder n i (folder m i) }
           | [] -> failwith "Algebra.merge: a cycle with no local move")
   in
-  let rec fix budget ((n, keys, _, _) as acc) =
-    match violation ?priority n (Keys.elements keys) with
+  let rec fix budget acc =
+    match violation ?priority acc.tree (Keys.elements acc.keys) with
       | None -> acc
       | Some _ when budget = 0 -> failwith "Algebra.merge: repair does not end"
       | Some v -> fix (budget - 1) (repair acc v)
   in
-  let n, keys, asides, restored =
-    fix ((10 * Keys.cardinal keys) + 10) (n, keys, asides, [])
+  let { tree = n; keys; moved = asides; back = restored } =
+    fix ((10 * Keys.cardinal copied.keys) + 10) copied
   in
   let command ~(from : 'f t) : key -> 'f command = function
     | `File p -> `File (p, file from p, file n p)
