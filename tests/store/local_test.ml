@@ -81,4 +81,4 @@ let () =
       p "collectable while not yet made, on a local parent: %b\n"
         (Chunk_spaces.collectable
            (Chunk_spaces.create (Filename.concat root "later/root"))));
-  Fs.rm_rf root
+  Test_support.finish root

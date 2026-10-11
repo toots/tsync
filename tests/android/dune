@@ -62,7 +62,7 @@
 (executable
  (name cli_test)
  (modules cli_test)
- (libraries tsync_core tsync_config tsync_catalog unix yojson))
+ (libraries test_support tsync_core tsync_config tsync_catalog unix yojson))
 
 (rule
  (with-stdout-to

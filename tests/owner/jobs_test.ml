@@ -177,4 +177,4 @@ let () =
       in
       p "cancelled after the first:";
       run ~cancelled:(fun () -> Atomic.get stop) ~narrate dom repair);
-  Fs.rm_rf root
+  Test_support.finish root

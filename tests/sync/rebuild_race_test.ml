@@ -151,5 +151,5 @@ let () =
       pass a;
       p "  A: %s\n  B: %s\n" (tree a) (tree b);
       p "owed: B %d/%d\n" (B.pending_uploads ()) (B.pending_metadata ());
-      Stop.request ());
-  Fs.rm_rf root
+      ());
+  Test_support.finish root

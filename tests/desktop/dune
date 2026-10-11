@@ -1,7 +1,7 @@
 (executable
  (name mounts_test)
  (modules mounts_test)
- (libraries tsync_core tsync_config tsync_catalog unix))
+ (libraries test_support tsync_core tsync_config tsync_catalog unix))
 
 (rule
  (enabled_if %{lib-available:tsync_fuse})
@@ -24,7 +24,7 @@
 (executable
  (name wedged_test)
  (modules wedged_test)
- (libraries tsync_core tsync_ipc unix yojson))
+ (libraries test_support tsync_core tsync_ipc unix yojson))
 
 (rule
  (with-stdout-to

@@ -51,4 +51,4 @@ let () =
       ignore (Cache.read_piece ranged g x ~coff:3 ~len:(x.len - 3));
       p "once its ranges complete it: %d, whole: %b" (Cache.tracked ranged)
         (Cache.is_whole ranged g.gkey));
-  Fs.rm_rf root
+  Test_support.finish root

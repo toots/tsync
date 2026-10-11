@@ -72,6 +72,7 @@
  (name jobs_test)
  (modules jobs_test)
  (libraries
+  test_support
   tsync_core
   tsync_status
   tsync_config
@@ -96,7 +97,13 @@
 (executable
  (name supervisor_test)
  (modules supervisor_test)
- (libraries tsync_core tsync_config tsync_catalog tsync_supervisor unix))
+ (libraries
+  test_support
+  tsync_core
+  tsync_config
+  tsync_catalog
+  tsync_supervisor
+  unix))
 
 (rule
  (with-stdout-to

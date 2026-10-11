@@ -121,4 +121,4 @@ let () =
            (fun (e : Tree.entry) ->
              match e.body with File m -> m.name = "b2" | _ -> false)
            (T.children Folder_id.root)));
-  Fs.rm_rf root
+  Test_support.finish root

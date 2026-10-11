@@ -179,4 +179,4 @@ let () =
         (feed "an anchor naming the dropped entry" b
            (gen ^ "|" ^ Entry_key.to_string old));
       ignore (feed "an empty anchor once a shard was dropped" b (gen ^ "|")));
-  Fs.rm_rf root
+  Test_support.finish root

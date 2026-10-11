@@ -103,7 +103,7 @@ let note t k =
   Option.iter
     (fun delay ->
       Rt.spawn ~name:"cursor" (fun () ->
-          (try Rt.sleep delay with _ -> ());
+          (try Stop.sleep delay with _ -> ());
           Mutex.protect t.m (fun () -> t.armed <- false);
           flush t))
     arm

@@ -211,4 +211,4 @@ let () =
       match S.create "a.txt" with
         | _ -> p "created\n"
         | exception Fail.E f -> p "refused: %s\n" f.reason);
-  Fs.rm_rf root
+  Test_support.finish root

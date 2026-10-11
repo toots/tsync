@@ -169,4 +169,4 @@ let () =
       p "\nowed: A %d/%d, unapplied B %d\n" (A.pending_uploads ())
         (A.pending_metadata ())
         (List.length (B.unapplied ())));
-  Fs.rm_rf root
+  Test_support.finish root

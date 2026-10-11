@@ -244,4 +244,4 @@ let () =
         (A.pending_metadata ()) (B.pending_uploads ()) (B.pending_metadata ())
         (List.length (A.unapplied ()))
         (List.length (B.unapplied ())));
-  Fs.rm_rf root
+  Test_support.finish root

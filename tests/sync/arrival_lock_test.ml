@@ -125,4 +125,4 @@ let () =
       Atomic.set armed false;
       p "the peer's file landed in the moved folder: %b"
         (A.kind "archive/two.txt" = `File));
-  Fs.rm_rf root
+  Test_support.finish root

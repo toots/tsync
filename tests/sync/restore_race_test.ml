@@ -130,4 +130,4 @@ let () =
         (before - Array.length (Sys.readdir records))
         (A.kind "box" = `Dir && Array.length (Sys.readdir records) > 0);
       p "a dead process's temporary file swept: %b" (not (Sys.file_exists temp)));
-  Fs.rm_rf root
+  Test_support.finish root

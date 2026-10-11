@@ -63,6 +63,6 @@ let () =
         (List.map (fun (mode, socket, _) -> (mode, socket)) owners
         @ [("not listening", Filename.concat dir "nobody.sock")]));
   List.iter (fun (_, _, pid) -> Unix.kill pid Sys.sigkill) owners;
-  Fs.rm_rf dir;
+  Test_support.finish dir;
   if !checked = 0 then failwith "no exchange ran";
   Printf.printf "%d exchanges\n" !checked

@@ -229,4 +229,4 @@ let () =
         (replica.head_opt (Option.get (Key.share "aa05")) = None);
       p "left on the store:\n";
       List.iter (fun k -> p "  %s\n" (alias k)) (listing ()));
-  Fs.rm_rf root
+  Test_support.finish root

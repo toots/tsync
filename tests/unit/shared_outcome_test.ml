@@ -61,4 +61,4 @@ let () =
         (outcome (fun () ->
              Rt.with_timeout 1. (fun () -> Bucket_function.probe fn check)));
       p "  checks run: %d" !checks);
-  Fs.rm_rf root
+  Test_support.finish root

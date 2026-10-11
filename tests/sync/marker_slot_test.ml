@@ -127,4 +127,4 @@ let () =
       show "a new client, rebuilt from the store" [("C", c)];
       p "\nowed: A %d/%d, B %d/%d\n" (A.pending_uploads ())
         (A.pending_metadata ()) (B.pending_uploads ()) (B.pending_metadata ()));
-  Fs.rm_rf root
+  Test_support.finish root

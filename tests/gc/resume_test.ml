@@ -158,4 +158,4 @@ let () =
             Filename.concat root (Key.to_string (Key.chunk_from d live))
           in
           Fs.write_file_for_test f "live"));
-  Test_support.remove_root root
+  Test_support.finish root

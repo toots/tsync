@@ -40,4 +40,4 @@ let () =
       p "a start beside a supervisor that does not answer: %s" (start ());
       Option.iter Unix.close held;
       p "a start once it is gone: %s" (start ()));
-  Fs.rm_rf root
+  Test_support.finish root

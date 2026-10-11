@@ -169,5 +169,5 @@ let () =
            ^ String.sub marker (at + 10) (String.length marker - at - 10)));
       rebuild "with a disowned marker";
       p "B: %s\n" (tree b);
-      Stop.request ());
-  Fs.rm_rf root
+      ());
+  Test_support.finish root

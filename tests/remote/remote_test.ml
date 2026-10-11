@@ -293,4 +293,4 @@ let () =
       List.iter Rt.Promise.await busy;
       p "\n== store\n";
       dump ());
-  Fs.rm_rf root
+  Test_support.finish root

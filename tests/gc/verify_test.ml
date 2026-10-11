@@ -214,4 +214,4 @@ let () =
       end in
       let module I = Integrity.Make (C) in
       show "verify on the main" (I.verify ~poll:0.05 ~stall_polls:3 ()));
-  Fs.rm_rf root
+  Test_support.finish root

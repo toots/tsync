@@ -16,7 +16,13 @@
 (executable
  (name remote_test)
  (modules remote_test)
- (libraries tsync_core tsync_store tsync_remote unix threads.posix))
+ (libraries
+  test_support
+  tsync_core
+  tsync_store
+  tsync_remote
+  unix
+  threads.posix))
 
 (rule
  (with-stdout-to
@@ -31,7 +37,7 @@
 (executable
  (name index_test)
  (modules index_test)
- (libraries tsync_core tsync_store tsync_remote unix))
+ (libraries test_support tsync_core tsync_store tsync_remote unix))
 
 (rule
  (with-stdout-to
