@@ -305,7 +305,8 @@ mark(ns):                                  -- a namespace or a version group
 mark(entry n):                             -- a log entry above the tree head read at the open
   body := read entry n from the collected main
     not found: references nothing          -- expiry deletes only at or below the tree head: it was projected
-    any other read failure, or a body that does not parse: stop the run, leaving it open
+    a body that does not parse, of a voided entry (publication §4.3): references nothing
+    any other read failure, or any other body that does not parse: stop the run, leaving it open
   for each chunk c named by a manifest body carries: promote(c), verify as above
   write R{Marking, cursor = l/n}
 ```

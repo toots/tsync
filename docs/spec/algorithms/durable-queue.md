@@ -474,7 +474,7 @@ empty, one peer arrived at the head):
 3. **Nothing owed remains**, except parked records, which are reported: no before-value, no
    in-flight or arrival record, no local intent; the logs are empty, the staged tree is empty.
 4. **Convergence.** The local view, the main's tree (its tree head at the head), the peer's view
-   and every replica (minus excluded keys) agree; every manifest and log entry on a replica has
+   and every replica (minus excluded keys) agree; every manifest on a replica has
    all its chunks.
 5. **Idempotence.** The final state equals that of the same actions run without a crash; in
    particular no kill produces a conflicted copy that an uninterrupted run would not.

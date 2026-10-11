@@ -137,7 +137,9 @@ A command is a key, the value before and the value after
   batch, a non-empty array of commands (§2.3) on distinct keys, in any order: a batch is a set
   ([change-algebra.md](algorithms/change-algebra.md) Definition 6).
 - **Writers** create an entry on the main only with `put_if_absent`, with the body bounded by
-  `MAX_ENTRY_BYTES` unless it holds one command ([publication.md](algorithms/publication.md) §4.5). An entry is immutable: its
+  `MAX_ENTRY_BYTES` unless it holds one command, and at most `MAX_ENTRY_COMMANDS` commands
+  ([publication.md](algorithms/publication.md) §4.5). A writer MUST decode the body it is about
+  to create and refuse to send one that does not read back as the batch. An entry is immutable: its
   key is only ever put again with the same bytes (recovery,
   [publication.md](algorithms/publication.md) §4.8).
 - **Readers**:
@@ -171,6 +173,10 @@ A command is a key, the value before and the value after
   Created only with `put_if_absent`. The highest generation of an entry is found by reading
   generations upward from 1 until one is absent. A takeover object MAY be deleted once the tree
   head has passed its entry.
+- **Void**, at `tsync/<domain>/log-takeover/<number>-void`: the body is the client uuid of the
+  client that created it. Created only with `put_if_absent`. It makes an entry that does not
+  decode read as empty ([publication.md](algorithms/publication.md) §4.3). It lies under the
+  takeovers' prefix, and every rule about where takeovers are copied, kept and deleted covers it.
 
 ### 2.7 Position, in-flight record and arrival record (local)
 
@@ -186,7 +192,7 @@ Under `<data_dir>/sync/<domain>/`, each written by durable replace, in the order
 **Arrival record**: one JSON object.
 
 ```json
-{"head":1234567,
+{"head":1234567,"feed":["1788134400001-3f9a0c1b2d4e5f60718293a4b5c6d7e8"],
  "steps":[{"move":["3f9a0c1b2d4e-40a","a.txt"],"to":["3f9a0c1b2d4e-40a","a (conflicted copy from laptop).txt"]},
           {"file":["3f9a0c1b2d4e-40a","a.txt"],"value":"<base64 of a manifest body>"},
           {"folder":"3f9a0c1b2d4e-40b","value":[".tsync-root","Pics"]}],
@@ -200,7 +206,11 @@ Under `<data_dir>/sync/<domain>/`, each written by durable replace, in the order
   `file` and `folder` set a key to `value` (`null` for ∅). A folder parked at a temporary place is
   a `folder` step whose value names the root and a temporary name ([01](01-core.md) §2.9), followed
   later by the step that gives it its place. Every step is idempotent.
-- `before`: the complete set of before-values after the arrival, in the encoding of §2.8.
+- `before`: the before-value, after the arrival, of each key the arrival fetched or created, in
+  the encoding of §2.8 (`"drop":true` in place of `before` for a key that ends with none). Keys
+  the arrival did not touch are not listed and are left as they are.
+- `feed`: the feed keys (§2.2), minted when the record is written, of the lines the arrival
+  appends.
 
 An unparseable in-flight or arrival record is set aside
 ([durable-queue.md](algorithms/durable-queue.md) R6); the client then arrives by state before it
@@ -309,6 +319,8 @@ tree_head()               → n                                 | failure
 tree_head_write(n)        → ()                                | failure
 takeover_generation(n)    → g ≥ 0                             | failure
 takeover_create(n, g)     → Won | Held(client)                | failure
+void_exists(n)            → bool                              | failure
+void_create(n)            → Won | Held(client)                | failure
 cursor_read()             → number | none                     | failure
 cursor_wait(token)        → () when the cursor may have changed, bounded      (driver-paced; expiry is not a failure)
 cursor_note(n)            → ()   never writes inline; arms the debouncer

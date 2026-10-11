@@ -181,6 +181,8 @@ objects added, existing ones immutable).
   per-object records. **Mutability** replaced whole, raised only, by the projector of that entry.
 - **Takeover** one per (entry, generation): names the client that may project an entry its previous
   projector left unprojected. **Mutability** create-if-absent.
+- **Void** at most one per entry: makes an entry that does not decode read as empty. Created by an
+  operator, create-if-absent; stored and kept with the entry's takeovers.
 - **Role, lifecycle** [algorithms/publication.md §4.6](../algorithms/publication.md#46-projection-the-tree-follows-the-log).
 
 ### 2.11 Cursor
@@ -345,9 +347,9 @@ share filenames record names, for display.
 
 ### 4.1 At rest (after every writer has finished and every debt is paid)
 
-1. **Referential completeness.** Every chunk named by a manifest, a version or a retained log entry
-   above the tree head exists (in either collection space during a run) on every member that holds
-   that referrer.
+1. **Referential completeness.** Every chunk named by a manifest or a version exists (in either
+   collection space during a run) on every member that holds that referrer, and every chunk named by
+   a log entry above the tree head exists on the main.
 2. **Content identity.** A chunk's bytes hash to its key, except where a corruption marker on that store
    says otherwise.
 3. **The log is dense.** The retained entries have consecutive numbers up to the head, and every tree
@@ -363,7 +365,7 @@ share filenames record names, for display.
    a write that went through the collection interlock since the run opened, is in the surviving space.
 8. **Copies never hold unverifiable state.** A copy is written only while the main is reachable, and
    receives only what the main already took.
-9. **Copy file completeness.** A manifest or a log entry reaches a replica only after every chunk it
+9. **Copy file completeness.** A manifest reaches a replica only after every chunk it
    names is confirmed there ("partial coverage, never partial files").
 
 ### 4.2 Temporarily violated, and who repairs
@@ -388,8 +390,8 @@ leaves the old state, the new state, or a state readers classify safely.
 1. **Referent before referrer.** Chunks before the log entry that names them; the log entry before any
    tree record it gives a value to; the tree records of an entry before the tree head names it; the
    entry before the cursor names it. This holds on every member and for every writer, including
-   member-to-member mirror and repair: a manifest or a log entry is never written to a store before
-   every chunk it names is present there.
+   member-to-member mirror and repair: a manifest is never written to a store before
+   every chunk it names is present there, and a log entry is never created on the main before them.
 2. **Interlock before reference.** On a collectable main, a log entry, a manifest or a version becomes
    visible only through the collection interlock ([algorithms/gc.md](../algorithms/gc.md)).
 3. **Authority before evidence.** A folder's anchor is written before the marker it validates.
@@ -415,6 +417,7 @@ leaves the old state, the new state, or a state readers classify safely.
 | File manifest, folder marker, anchor | the projector of the entry that changes them; integrity repair | one projector per entry ([algorithms/publication.md §4.6](../algorithms/publication.md#46-projection-the-tree-follows-the-log)) |
 | Tree head | the projector of the entry it names | the same |
 | Takeover | a client that saw an entry stay unprojected | **create-if-absent** |
+| Void | an operator, for an entry that does not decode | **create-if-absent** |
 | Version | the projector replacing or deleting a manifest | unique increasing timestamp per group |
 | Cursor | any committing client | last writer wins, debounced |
 | Folder index | full walkers allowed to write | last writer wins; validated per entry at read |

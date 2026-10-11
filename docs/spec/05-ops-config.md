@@ -203,7 +203,7 @@ Derived contexts:
    against one store would be two sets of health and limits); an uplink probe for remote stores.
 4. Build the composite: the main; `readOnly` archives; each `replica` and `backfill` as a deferred
    target whose job log lives at `<data_dir>/deferred-pending/<domain>/<escaped backend name>/`,
-   which forwards a manifest or a log entry only after the chunks it names and never forwards
+   which forwards a manifest only after the chunks it names and never forwards
    folder indexes.
 5. Build the members.
 6. **Deferred logs are resumed only by the domain's owner** ([07 §2.2](07-daemon-cli.md)). Any other
@@ -479,8 +479,8 @@ copied_bytes, changed, unguarded}`.
 8. Comparisons and copies run concurrently, at most `maxDownloads` at once, with the bodies held for
    copies bounded by `maxChunkBuffers` (§2.1).
 9. The phases run in order, each finished before the next starts: every chunk is copied before any
-   manifest or log entry that names it, a log entry before the tree records it gives a value to,
-   both before the tree head, and the cursor last. A reader of the destination never sees a manifest or a log entry whose chunks
+   manifest that names it, a log entry before the tree records it gives a value to,
+   both before the tree head, and the cursor last. A reader of the destination never sees a manifest whose chunks
    are not there yet, a tree head ahead of its records, or a cursor ahead of its entries. A chunk
    read from the source that does not hash to its name is not copied and is counted refused; a
    destination that did not take every chunk of the run receives none of the later phases.
@@ -657,6 +657,23 @@ Token, expiry, overwrite and revocation rules are
 - Expired shares are removed by `expire` ([gc.md §4.3](algorithms/gc.md#43-shares)). When a domain is
   removed from a store, its share manifests on that store go with it.
 
+### 4.12 Voiding a log entry
+
+`void_entry(n)` is the operator's way past an entry no client can decode
+([publication.md §4.3](algorithms/publication.md#43-fetch)).
+
+1. Read the tree head and entry `n` from the main. Refuse unless `n` is above the tree head and
+   the entry exists and does not decode. An entry of an unknown version is refused: it needs a
+   newer client, not a void.
+2. Create the void object of `n` with `put_if_absent`. `Held` is success.
+
+- The commands of a voided entry are not part of the main, and the chunks only they name are
+  collectable.
+- A client that had merged the entry before it was damaged (normally its author alone) still
+  holds its values and does not publish them again. Its next arrival by state replaces them with
+  the main's. The command prints this, and the operator copies aside what must be kept before
+  running `tsync sync --full` there.
+
 ---
 
 ## 5. Concurrency and failure
@@ -751,7 +768,7 @@ Token, expiry, overwrite and revocation rules are
   domain is committed as one entry holding the removal and the creation.
 - **Mirror**: heals a missing chunk, a wrong-size chunk and a missing manifest on a secondary; a
   present chunk of the right size is never read; an in-sync run copies nothing; a same-size stale manifest or cursor
-  is replaced; no destination ever holds a manifest or a log entry without its chunks, nor a tree
+  is replaced; no destination ever holds a manifest without its chunks, nor a tree
   head above the log entries and records it was copied with; a backfill receives no log entry,
   takeover, tree head or cursor; a `--path` run copies none of them. Local to GCS over in-sync
   manifests issues no request per object on GCS and hashes only local files; http-proxy to GCS
