@@ -44,11 +44,24 @@ module Make (C : Engine_ctx.S) = struct
   let damaged_m = Mutex.create ()
   let is_damaged p = Mutex.protect damaged_m (fun () -> Hashtbl.mem damaged p)
 
+  let clear_damaged p =
+    Mutex.protect damaged_m (fun () -> Hashtbl.remove damaged p)
+
+  let damaged_paths () =
+    Mutex.protect damaged_m (fun () ->
+        Hashtbl.fold (fun _ (path, _) acc -> path :: acc) damaged [])
+
   let refused p (m : Manifest.t) =
     Mutex.protect damaged_m (fun () ->
         match Hashtbl.find_opt damaged p with
           | Some (_, identity) -> identity = Log_entry.identity_of m
           | None -> false)
+
+  (* Whether no cycle can commit a pending key as things are: what a caller
+     waiting for its commit stops on. *)
+  let cannot_commit : Algebra.key -> bool = function
+    | `File p -> Atomic.get stuck <> None || is_damaged p
+    | `Folder _ -> Atomic.get stuck <> None
 
   (* The reason the last cycle of the background loop failed, if it did. *)
   let cycle_failing : string option Atomic.t = Atomic.make None
@@ -148,21 +161,24 @@ module Make (C : Engine_ctx.S) = struct
     if Fs.is_dir (Mirror.path mirror dir) then
       Fs.durable_replace (folder_position_path dir) (Key.entry_number n)
 
-  (* conflict-resolution §4, one step: idempotent, under the metadata lock and
-     the key locks of the files it names. *)
+  let move_file ~src ~dst =
+    let size = size_of src in
+    repost_moved (rename_local ~src ~dst ~is_dir:false);
+    [
+      ( Op.Rename { dst; src; is_dir = false; size = Some size; id = None },
+        Mirror.file_id mirror dst );
+    ]
+
   (* An edit staged after an arrival's decision was recorded, which only a
      record completed later can meet: it is kept beside the main's value, with
      the entry it inherits from. *)
   let keep_aside path =
-    let dst = aside_name path ~is_dir:false and size = size_of path in
+    let dst = aside_name path ~is_dir:false in
     begin_change dst;
-    repost_moved (rename_local ~src:path ~dst ~is_dir:false);
-    [
-      ( Op.Rename
-          { dst; src = path; is_dir = false; size = Some size; id = None },
-        Mirror.file_id mirror dst );
-    ]
+    move_file ~src:path ~dst
 
+  (* conflict-resolution §4, one step: idempotent, under the metadata lock and
+     the key locks of the files it names. *)
   let apply_step ?(recovered = false) parked :
       Sync_state.step -> (Op.t * string option) list =
     let late path = recovered && Staged.edit staged path <> None in
@@ -170,19 +186,7 @@ module Make (C : Engine_ctx.S) = struct
     | Move (src, dst) -> (
         match (path_of src, path_of dst) with
           | Some s, Some d when kind s = `File && kind d = `Absent ->
-              let size = size_of s in
-              repost_moved (rename_local ~src:s ~dst:d ~is_dir:false);
-              [
-                ( Op.Rename
-                    {
-                      dst = d;
-                      src = s;
-                      is_dir = false;
-                      size = Some size;
-                      id = None;
-                    },
-                  Mirror.file_id mirror d );
-              ]
+              move_file ~src:s ~dst:d
           | _ -> [])
     | File (p, Some m) -> (
         match path_of p with
@@ -720,7 +724,7 @@ module Make (C : Engine_ctx.S) = struct
             List.iter
               (function
                 | `File (p, _, after) ->
-                    Mutex.protect damaged_m (fun () -> Hashtbl.remove damaged p);
+                    clear_damaged p;
                     if same_file (l_base.file p) after then
                       Sync_state.drop sync_state (`File p)
                     else Sync_state.set_file sync_state p after

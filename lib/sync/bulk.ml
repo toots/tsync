@@ -26,8 +26,7 @@ module Make (C : Engine_ctx.S) = struct
     let install run rel (m : Manifest.t) =
       with_meta (fun () ->
           install rel m;
-          Mutex.protect damaged_m (fun () ->
-              Hashtbl.remove damaged (place_of rel)));
+          clear_damaged (place_of rel));
       note_file run rel
 
     let unchanged (a : Unix.stats) (b : Unix.stats) =
@@ -86,12 +85,9 @@ module Make (C : Engine_ctx.S) = struct
       let left () = List.length (List.filter is_pending !run) in
       let rec loop () =
         let hopeless () =
-          Atomic.get stuck <> None
-          || List.for_all
-               (function
-                 | `File p as key -> (not (is_pending key)) || is_damaged p
-                 | `Folder _ as key -> not (is_pending key))
-               !run
+          List.for_all
+            (fun key -> (not (is_pending key)) || cannot_commit key)
+            !run
         in
         if left () = 0 || cancelled () || Atomic.get paused || hopeless () then
           left ()

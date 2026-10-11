@@ -333,9 +333,7 @@ module Make (C : Engine_ctx.S) = struct
                 | `Undecodable why -> "it does not decode: " ^ why
                 | `Version v -> Printf.sprintf "it is of version %d" v ))
           (Atomic.get stuck);
-      damaged =
-        Mutex.protect damaged_m (fun () ->
-            Hashtbl.fold (fun _ (path, _) acc -> path :: acc) damaged []);
+      damaged = damaged_paths ();
       stuck = List.length parked;
       retrying = List.length retrying;
       set_aside =
@@ -381,8 +379,9 @@ module Make (C : Engine_ctx.S) = struct
     in
     let stopped () =
       Atomic.get cycle_failing <> None
-      || Atomic.get stuck <> None
-      || Option.fold ~none:false ~some:is_damaged (place_opt path)
+      || Option.fold ~none:false
+           ~some:(fun p -> cannot_commit (`File p))
+           (place_opt path)
     in
     while
       (not (committed ()))
