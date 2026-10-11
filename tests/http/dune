@@ -15,7 +15,14 @@
    (run ./http_test.exe))))
 
 (rule
- (aliases runtest runtest-serial)
+ (alias runtest)
+ (enabled_if
+  (and %{lib-available:tsync_http_ssl} %{lib-available:tsync_http_native}))
+ (action
+  (diff http_test.expected http_test.output)))
+
+(rule
+ (alias runtest-serial)
  (enabled_if
   (and %{lib-available:tsync_http_ssl} %{lib-available:tsync_http_native}))
  (action

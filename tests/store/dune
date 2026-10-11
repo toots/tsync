@@ -105,7 +105,12 @@
   (run ./proxy_test.exe)))
 
 (rule
- (aliases runtest runtest-serial)
+ (alias runtest)
+ (action
+  (diff proxy_test.expected proxy_test.output)))
+
+(rule
+ (alias runtest-serial)
  (action
   (diff proxy_test.expected proxy_test.output)))
 
@@ -179,7 +184,14 @@
    (run ./watch_test.exe))))
 
 (rule
- (aliases runtest runtest-serial)
+ (alias runtest)
+ (enabled_if
+  (= %{system} linux))
+ (action
+  (diff watch_test.expected watch_test.output)))
+
+(rule
+ (alias runtest-serial)
  (enabled_if
   (= %{system} linux))
  (action

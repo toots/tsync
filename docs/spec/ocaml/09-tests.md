@@ -10,7 +10,8 @@ finding numbers to [the 2026-10-01 review](../review/2026-10-01-rewrite.md).
   with stdout to `<name>.output`, one diffs that against the committed `<name>.expected` under the
   `runtest` alias. The diff is the verdict (§4, §10.5); there is no assertion library and no check
   counter.
-- The tests whose snapshot states a time bound diff under `runtest-serial` as well: `tray_test`,
+- The tests whose snapshot states a time bound have a second diff rule under `runtest-serial` (one
+  rule with `(aliases runtest runtest-serial)` would pull the directory's whole `runtest` into it): `tray_test`,
   `dqueue_test`, `proxy_test`, `http_test`, `lazy_test`, `rt_test`, `rt_fd_test`, `rt_class_test`,
   `watch_test`, `ipc_test`, `remote_test`, `uplink_test`, `wedged_test`, `owner_test`.
   CI builds `@runtest-serial -j1` first, so each runs with the runner to itself, then `@runtest`,

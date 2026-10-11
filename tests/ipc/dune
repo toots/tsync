@@ -8,6 +8,11 @@
   (run ./ipc_test.exe)))
 
 (rule
- (aliases runtest runtest-serial)
+ (alias runtest)
+ (action
+  (diff ipc_test.expected ipc_test.output)))
+
+(rule
+ (alias runtest-serial)
  (action
   (diff ipc_test.expected ipc_test.output)))
