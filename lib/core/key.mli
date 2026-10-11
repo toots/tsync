@@ -44,6 +44,16 @@ val chunks_from : Domain_name.t -> prefix
 val versions : Domain_name.t -> prefix
 val journal : Domain_name.t -> prefix
 val cursor : Domain_name.t -> t
+val log : Domain_name.t -> prefix
+
+(** An entry number as written: 16 decimal digits (03 §2.4). *)
+val entry_number : int -> string
+
+val log_entry : Domain_name.t -> int -> t
+val tree_head : Domain_name.t -> t
+val takeovers : Domain_name.t -> prefix
+val takeover : Domain_name.t -> int -> generation:int -> t
+val void : Domain_name.t -> int -> t
 val gc_run : Domain_name.t -> t
 val gc_generation : Domain_name.t -> t
 
@@ -122,9 +132,10 @@ val is_outgoing : t -> bool
 (** The outgoing-space prefix matching a prefix inside a surviving space. *)
 val outgoing_prefix : prefix -> prefix option
 
-(** The domain of a key in a manifest or version area. *)
+(** The domain of a key in the log, a manifest area or a version area. *)
 val domain_of_reference : t -> Domain_name.t option
 
+val is_log_entry : t -> bool
 val chunk_of_marker : t -> (Domain_name.t * Chunk_key.t) option
 val parse_verify_job : t -> (Domain_name.t * string) option
 

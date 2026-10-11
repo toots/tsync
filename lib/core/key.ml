@@ -31,6 +31,19 @@ let chunks_from d = domain_prefix d ^ "chunks.from/"
 let versions d = domain_prefix d ^ "versions/"
 let journal d = domain_prefix d ^ "journal/"
 let cursor d = domain_prefix d ^ "cursor"
+let log d = domain_prefix d ^ "log/"
+let entry_number n = Printf.sprintf "%016d" n
+
+let log_entry d n =
+  Printf.sprintf "%s%012d/%s" (log d) (n / 10_000) (entry_number n)
+
+let tree_head d = domain_prefix d ^ "tree-head"
+let takeovers d = domain_prefix d ^ "log-takeover/"
+
+let takeover d n ~generation =
+  Printf.sprintf "%s%d-%d" (takeovers d) n generation
+
+let void d n = Printf.sprintf "%s%d-void" (takeovers d) n
 let gc_run d = domain_prefix d ^ "gc-run"
 let gc_generation d = domain_prefix d ^ "gc-generation"
 let gc_lock d = domain_prefix d ^ "gc-run.lock"
@@ -121,9 +134,10 @@ let outgoing_prefix p =
 
 let domain_of_reference k =
   match area k with
-    | Some (d, ("manifests" | "versions"), _) -> Some d
+    | Some (d, ("manifests" | "versions" | "log"), _) -> Some d
     | _ -> None
 
+let is_log_entry k = match area k with Some (_, "log", _) -> true | _ -> false
 let marker_of k = Option.map (fun (d, c) -> marker d c) (chunk_parts k)
 
 let chunk_of_marker k =
