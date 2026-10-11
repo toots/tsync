@@ -213,7 +213,6 @@ let () =
             {
               head = 2;
               view = None;
-              feed = [];
               steps =
                 List.filter_map
                   (function

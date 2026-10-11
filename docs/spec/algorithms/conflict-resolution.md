@@ -150,8 +150,10 @@ restored by R1 comes back with its id; a folder moved by R2 keeps its id and eve
 
 The changes are a difference of two trees and are applied to the local tree in an order Theorem 3
 allows: a folder exists before anything is placed in it, a place is freed before it is occupied
-again, a folder is empty before it is removed, and a cycle is broken through a temporary place. A
-temporary place is never visible to a frontend and never recorded as a before-value.
+again, a folder is empty before it is removed, and a cycle is broken through a temporary place.
+Files kept aside (§4.1) are moved first: their fresh names are free in the tree as it stands. A
+temporary place is never recorded as a before-value and never reported in the change feed; an
+implementation SHOULD keep it out of listings.
 
 ### 4.4 After the merge
 
@@ -177,7 +179,8 @@ with the keys concerned and the three values of each.
 ## 5. Conflicted-copy name
 
 `aside(L)` is `conflict_name(L, n)` for the smallest `n ≥ 1` whose name is free in the folder,
-in $N$ as computed so far and among staged edits.
+in $N$ as computed so far and in $L$ (staged edits included), so that moving a file aside is
+always possible as the first step of an enactment (§4.3).
 
 - File `name.ext` → `name (conflicted copy from C).ext`, where the extension starts at the **last**
   `.` of the leaf; a leaf with no `.`, or whose only `.` is its first character, has no extension.

@@ -192,7 +192,7 @@ Under `<data_dir>/sync/<domain>/`, each written by durable replace, in the order
 **Arrival record**: one JSON object.
 
 ```json
-{"head":1234567,"feed":["1788134400001-3f9a0c1b2d4e5f60718293a4b5c6d7e8"],
+{"head":1234567,
  "steps":[{"move":["3f9a0c1b2d4e-40a","a.txt"],"to":["3f9a0c1b2d4e-40a","a (conflicted copy from laptop).txt"]},
           {"file":["3f9a0c1b2d4e-40a","a.txt"],"value":"<base64 of a manifest body>"},
           {"folder":"3f9a0c1b2d4e-40b","value":[".tsync-root","Pics"]}],
@@ -200,18 +200,19 @@ Under `<data_dir>/sync/<domain>/`, each written by durable replace, in the order
 ```
 
 - `head`: the position the arrival ends at.
+- `view` (lazy tree only): the id of the folder whose position the arrival sets
+  ([publication.md](algorithms/publication.md) §4.11). Absent on a full tree.
 - `steps`, in an order in which each can be applied to the local tree
   ([change-algebra.md](algorithms/change-algebra.md) Theorem 3): `move` takes the local file at
   one key to another key when the source is present and the destination absent;
   `file` and `folder` set a key to `value` (`null` for ∅). A folder parked at a temporary place is
-  a `folder` step whose value names the root and a temporary name ([01](01-core.md) §2.9), followed
-  later by the step that gives it its place. Every step is idempotent.
+  a `folder` step whose value names the root and the leaf `.tsync-park-<folder id>`, followed
+  later by the step that gives it its place. That leaf is not a temporary name of
+  [01](01-core.md) §2.9: the sweep of temporary files at owner start runs before the record is
+  completed and MUST NOT take a parked folder. Every step is idempotent.
 - `before`: the before-value, after the arrival, of each key the arrival fetched or created, in
   the encoding of §2.8 (`"drop":true` in place of `before` for a key that ends with none). Keys
   the arrival did not touch are not listed and are left as they are.
-- `feed`: the feed keys (§2.2), minted when the record is written, of the lines the arrival
-  appends.
-
 An unparseable in-flight or arrival record is set aside
 ([durable-queue.md](algorithms/durable-queue.md) R6); the client then arrives by state before it
 pushes again.
@@ -229,9 +230,12 @@ made durable as [publication.md](algorithms/publication.md) §4.1 says, and remo
 - The presence of a record is what makes a key pending. `before` is the main's value at the key as
   this client last knew it ([publication.md](algorithms/publication.md) §3.2).
 - Local only: a before-value reaches the store only as the `before` of a command.
-- An unparseable record is set aside. Its key, read from the record's name, stays pending with an
-  **unknown** before-value, which differs from every value; the client arrives by state before it
-  pushes again, which gives the key a known one.
+- An unparseable record is set aside, and the client arrives by state before it pushes again. A
+  record whose `before` alone does not parse keeps its key pending with an **unknown** before-value,
+  which differs from every value. A record whose key cannot be read is no before-value: a file
+  key's record name holds a hash of its leaf, so the key cannot be recovered from the name. Its
+  key then reads as clean, and the arrival by state installs the main's value there unless a
+  staged edit holds it ([publication.md](algorithms/publication.md) §4.8 step 3).
 
 ### 2.9 Feed ops and the applied log (local)
 

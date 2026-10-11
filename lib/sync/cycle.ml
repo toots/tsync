@@ -440,7 +440,6 @@ module Make (C : Engine_ctx.S) = struct
                 {
                   Sync_state.head;
                   view;
-                  feed = [];
                   steps = steps_of merged;
                   before = settled_of merged;
                 }

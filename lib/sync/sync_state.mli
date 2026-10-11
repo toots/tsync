@@ -67,7 +67,6 @@ type settled =
 type arrival = {
   head : int;
   view : Folder_id.t option;
-  feed : string list;
   steps : step list;
   before : (Algebra.key * settled) list;
 }
