@@ -319,13 +319,31 @@ PUSH():
 is a staged edit not yet Uploaded. Leaving such a file out is always allowed: it keeps its value
 in $R$ at its own key, and its folder is present in both trees.
 
-A file removal or replacement is **held back** while a pending creation that is not pushable
-carries a staged edit based on the content it removes (a file renamed, then edited): the staged
-edit's base identity is the removal's before-value. Committing the removal first would take the
-file off the main for the length of an upload, and for good if the client were lost. $B$ is the
-largest batch (Definition 6) of pushable commands that are not held back; a command that needs a
-held-back one committed first (the removal of its folder, a placement onto its name) waits with
-it.
+**Nothing kept is dropped on the way.** The theory fixes the tree a pending set ends in, not the
+trees the main passes through when the set is committed in several entries, and those are seen by
+peers, by a collection, and by everyone if this client is lost. The client chooses its entries so
+that this holds after each one:
+
+> Content that the main held before the entry, and that this client's tree still holds as the
+> value of a file key in $L$ or as the base of an Owed staged edit, is the value of a file key on
+> the main after the entry.
+
+Content the user removed or overwrote is not kept: only versions keep it. Two consequences:
+
+- A file removal or replacement is committed no earlier than a pending creation of the same
+  content identity (a file renamed or moved).
+- A file removal or replacement is **held back** while an Owed staged edit is based on the content
+  it removes (a file renamed, then edited): the staged edit's base identity is the removal's
+  before-value.
+
+$B$ is the largest batch (Definition 6) of pushable commands that keeps the rule. A command that
+needs a held-back one committed first (the removal of its folder, a placement onto its name)
+waits with it. Any such choice is a batch, and all of them end in the same tree (Proposition 4).
+
+The rule is about the order of commits. Where an order is free elsewhere, its owner says what
+protects content meanwhile: within the projection of one entry, the entry itself names the content
+until the tree head passes it ([gc.md](gc.md) §5.3); in the local tree, a move the main made is
+enacted as a move ([conflict-resolution.md](conflict-resolution.md) §4.1).
 
 - A push is attempted only when the previous fetch found the head at $h$. It is refused whenever
   another entry $h+1$ exists; the client then arrives and pushes from the new head.
@@ -333,9 +351,8 @@ it.
   has pending, the pending set is unchanged and the same commands are pushed again with no upload.
 - **Splitting.** A batch whose encoding would exceed `MAX_ENTRY_BYTES`, or that holds more than
   `MAX_ENTRY_COMMANDS` commands, is pushed as several entries, each a batch (Proposition 4). An entry of one command is never split, whatever its
-  size. A file removal or replacement is committed no earlier
-  than every pending creation of the same content identity, so content that a pending command
-  moves is never left unreferenced on the main between two entries.
+  size. The split keeps the rule above: commands that must be committed together (a swap of two
+  files) share an entry, which MAY then exceed the limits.
 - **The `Won` step is three kinds of durable write, in that order.** Each is idempotent, and the
   in-flight record goes last, so a crash inside the step leaves the record and recovery runs the
   whole step again (§4.8). Run again, a key that changed meanwhile gets the committed value as its
@@ -669,8 +686,11 @@ states, multi-client runs) is [09](../09-tests.md) §6–8. The cases of
 - **Local-first.** With the link down, every write, rename, delete, mkdir, rmdir and symlink
   returns with no store round trip; everything is pushed once the link returns, in as few entries
   as `MAX_ENTRY_BYTES` and `MAX_ENTRY_COMMANDS` allow.
-- **Renamed, then edited.** A file renamed and then edited stays at its old name on the main
-  until the content of the new name is uploaded, and both changes are committed in one entry.
+- **Nothing kept is dropped on the way.** After every entry a client commits, each content the
+  main held before it and the client's tree still holds is at some file key on the main. A file
+  renamed and then edited stays at its old name on the main until the content of the new name is
+  uploaded. A move split over several entries never commits the removal first. Two swapped files
+  are committed in one entry, whatever its size.
 - **Upload first.** Two clients upload different content for one name; both uploads complete; the
   second to commit keeps its content as a conflicted copy with no new upload.
 - **Refused push.** A push refused because of a commit that touches nothing pending is repeated at
