@@ -1,9 +1,11 @@
 == reads
-main misses, replica not asked: none
-archive answers a source miss: "archived"
-but is never asked for a checksum: none
-main down, replica answers: "stale"
-main down, absent on replica and archive: unreachable
+main misses a chunk, replica not asked: none
+archive answers a chunk the main misses: "archived"
+but not a key that is no chunk: none
+nor a checksum: none
+main down, replica answers a chunk: "on the replica"
+main down, a key that is no chunk is not read from the replica: unreachable
+main down, a chunk absent on replica and archive: unreachable
 
 == writes with the main down
 put: transient/link

@@ -230,17 +230,38 @@ let unreachable_of = function
       Fail.E { f with kind = Unreachable }
   | e -> e
 
-let read ?(probing = true) t f =
-  let a = walk ~probing ~stop_on_miss:true t.readable f in
-  match a with
-    | Answer v -> Some v
-    | _ -> (
-        let b = walk ~probing ~stop_on_miss:false t.archives f in
-        match (b, a) with
-          | Answer v, _ -> Some v
-          | _, Unreach e -> raise (unreachable_of e)
-          | Unreach e, _ -> raise (unreachable_of e)
-          | _ -> None)
+(* replication §4.6: only chunks fail over. Every other key says what the
+   tree is, so the main answers it or fails; a domain with no main is answered
+   by its first archive. *)
+let authority t =
+  match (t.mains, t.archives) with
+    | m :: _, _ -> Some m
+    | [], a :: _ -> Some a
+    | [], [] -> None
+
+let read ?(probing = true) ~chunk t f =
+  if not chunk then (
+    match authority t with
+      | None -> None
+      | Some m -> (
+          try
+            if probing then f m.store
+            else if Health.is_down m.store.health then unreachable m
+            else f m.store
+          with
+            | (Stop.Stopping | Rt.Cancelled) as e -> raise e
+            | e -> raise (unreachable_of e)))
+  else (
+    let a = walk ~probing ~stop_on_miss:true t.readable f in
+    match a with
+      | Answer v -> Some v
+      | _ -> (
+          let b = walk ~probing ~stop_on_miss:false t.archives f in
+          match (b, a) with
+            | Answer v, _ -> Some v
+            | _, Unreach e -> raise (unreachable_of e)
+            | Unreach e, _ -> raise (unreachable_of e)
+            | _ -> None))
 
 let settle_retry = 2.
 let max_forwards = 4
@@ -305,44 +326,33 @@ let put t ?mode key body =
     List.iter
       (fun c -> if not (skip t c key) then forward_chunk c key body)
       t.copies;
-  fill t (Put key);
-  List.iter (fun m -> m.store.put ?mode key body) (List.tl t.mains)
+  fill t (Put key)
 
 let put_if_absent t key body =
   let m0 = first_main t in
   let r = m0.store.put_if_absent key body in
-  let held = match r with Store.Won -> body | Held b -> b in
-  fill t (Put key);
-  List.iter (fun m -> m.store.put key held) (List.tl t.mains);
+  if r = Store.Won then fill t (Put key);
   r
 
-(* replication §4.2: the first main alone evaluates the precondition; an etag
-   read from another member never matches it, which answers [Changed]. *)
+(* replication §4.2: the main alone evaluates the precondition; an etag read
+   from another member never matches it, which answers [Changed]. *)
 let put_if_unchanged t ~fill_copies key body expected =
   let m0 = first_main t in
   match m0.store.put_if_unchanged key body expected with
     | Store.Changed -> Store.Changed
     | Written ->
         if fill_copies then fill t (Put key);
-        List.iter (fun m -> m.store.put key body) (List.tl t.mains);
         Written
 
 (* replication §4.6: a checksum describes the view the listings describe, so
    only the readable members are asked, never the archives. *)
 let compute_checksum t key algo =
-  match
-    walk ~probing:true ~stop_on_miss:true t.readable (fun s ->
-        s.compute_checksum key algo)
-  with
-    | Answer c -> Some c
-    | Miss -> None
-    | Unreach e -> raise (unreachable_of e)
+  read ~chunk:false t (fun s -> s.compute_checksum key algo)
 
 let write_all t job f =
   let m0 = first_main t in
   let v = f m0.store in
   fill t job;
-  List.iter (fun m -> ignore (f m.store)) (List.tl t.mains);
   v
 
 let probe_main t m =
@@ -622,15 +632,14 @@ let make_store t ~source_only =
   let readable = if source_only then t.mains else t.readable in
   let archives = if source_only then [] else t.archives in
   let tt = { t with readable; archives } in
-  let rd ?probing f = read ?probing tt f in
+  let is_chunk key =
+    Key.chunk_of key <> None || Key.outgoing_chunk key <> None
+  in
+  let rd ?probing ~chunk f = read ?probing ~chunk tt f in
+  let rd_key key f = rd ~chunk:(is_chunk key) f in
   let first = match readable with m :: _ -> Some m | [] -> None in
   let write_job job f =
-    if source_only then (
-      let m0 = first_main t in
-      let v = f m0.store in
-      List.iter (fun m -> ignore (f m.store)) (List.tl t.mains);
-      v)
-    else write_all t job f
+    if source_only then f (first_main t).store else write_all t job f
   in
   let batch_owner =
     match first with Some m when not source_only -> Some m | _ -> None
@@ -644,8 +653,7 @@ let make_store t ~source_only =
       Store.name = "composite";
       put =
         (fun ?mode key body ->
-          if source_only then
-            List.iter (fun m -> m.store.put ?mode key body) t.mains
+          if source_only then (first_main t).store.put ?mode key body
           else put t ?mode key body);
       put_if_absent =
         (fun key body ->
@@ -654,9 +662,10 @@ let make_store t ~source_only =
       put_if_unchanged =
         (fun key body expected ->
           put_if_unchanged t ~fill_copies:(not source_only) key body expected);
-      get_opt = (fun key -> rd (fun s -> s.get_opt key));
-      get_range = (fun key off len -> rd (fun s -> s.get_range key off len));
-      head_opt = (fun key -> rd (fun s -> s.head_opt key));
+      get_opt = (fun key -> rd_key key (fun s -> s.get_opt key));
+      get_range =
+        (fun key off len -> rd_key key (fun s -> s.get_range key off len));
+      head_opt = (fun key -> rd_key key (fun s -> s.head_opt key));
       compute_checksum = (fun key algo -> compute_checksum tt key algo);
       delete = (fun key -> write_job (Delete key) (fun s -> s.delete key));
       delete_multi =
@@ -666,13 +675,13 @@ let make_store t ~source_only =
         (fun src dst -> write_job (Copy (src, dst)) (fun s -> s.copy src dst));
       list_prefix =
         (fun ?max_keys p ->
-          match rd (fun s -> Some (s.list_prefix ?max_keys p)) with
+          match rd ~chunk:false (fun s -> Some (s.list_prefix ?max_keys p)) with
             | Some l -> l
             | None -> []);
       watch =
         (fun key last ->
           ignore
-            (rd ~probing:false (fun s ->
+            (rd ~probing:false ~chunk:false (fun s ->
                  s.watch key last;
                  Some ())));
       (* A batch read of a member held down answers nothing: reading that as
@@ -755,6 +764,10 @@ let default_timing = { discard_poll = 60.; probe_poll = 5.; probe_wait = 180. }
 let create ?(timing = default_timing) ~domain ~data_dir ~owner ~poke ~knowledge
     members =
   let mains = List.filter (fun m -> m.role = Main) members in
+  if List.length mains > 1 then
+    Fail.invalid "%s has more than one main: %s"
+      (Domain_name.to_string domain)
+      (String.concat ", " (List.map (fun m -> m.name) mains));
   let archives = List.filter (fun m -> m.role = Read_only) members in
   let copy_members =
     List.filter (fun m -> m.role = Replica) members

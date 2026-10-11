@@ -80,21 +80,28 @@ let () =
       in
       let s = Composite.store c in
       p "== reads\n";
+      let chunk n = Key.chunk d (Chunk_key.of_body n) in
+      Contract.put replica (chunk "on the replica") "on the replica";
+      Contract.put archive (chunk "archived") "archived";
       Contract.put replica (k "tsync/d/only-on-replica") "stale";
       Contract.put archive (k "tsync/d/old") "archived";
-      p "main misses, replica not asked: %s\n"
-        (show (Contract.get s (k "tsync/d/only-on-replica")));
-      p "archive answers a source miss: %s\n"
+      p "main misses a chunk, replica not asked: %s\n"
+        (show (Contract.get s (chunk "on the replica")));
+      p "archive answers a chunk the main misses: %s\n"
+        (show (Contract.get s (chunk "archived")));
+      p "but not a key that is no chunk: %s\n"
         (show (Contract.get s (k "tsync/d/old")));
-      p "but is never asked for a checksum: %s\n"
+      p "nor a checksum: %s\n"
         (match s.compute_checksum (k "tsync/d/old") Checksum.md5 with
           | Some _ -> "some"
           | None -> "none");
       main_up := false;
-      p "main down, replica answers: %s\n"
-        (show (Contract.get s (k "tsync/d/only-on-replica")));
-      p "main down, absent on replica and archive: %s\n"
-        (kind (fun () -> Contract.get s (k "tsync/d/nowhere")));
+      p "main down, replica answers a chunk: %s\n"
+        (show (Contract.get s (chunk "on the replica")));
+      p "main down, a key that is no chunk is not read from the replica: %s\n"
+        (kind (fun () -> Contract.get s (k "tsync/d/only-on-replica")));
+      p "main down, a chunk absent on replica and archive: %s\n"
+        (kind (fun () -> Contract.get s (chunk "nowhere")));
       p "\n== writes with the main down\n";
       p "put: %s\n" (kind (fun () -> Contract.put s (k "tsync/d/x") "x"));
       p "replica owes nothing: %d records\n"
