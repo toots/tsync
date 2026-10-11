@@ -304,12 +304,9 @@ watched with the liveness probe ([07 §4.3](07-daemon-cli.md#43-deadlines-bulk-a
   changes nothing and queues no upload.
 - `ensure_cached` and `fetch_range` resolve the item and serve its bytes in one step, so the
   reply's `item` describes exactly the bytes written; its `size` is the size of that content.
-- `write` with `base` (a `contentId` the client read) declares the content the edit started from. The
-  owner compares it with the key's current content identity before the write becomes part of the
-  local tree, and stages a stale write as a conflicted copy
-  ([conflict-resolution.md §7](algorithms/conflict-resolution.md#7-a-local-write-against-a-stale-base)).
-  The check is local: `base` is carried to nothing that is pushed. Without `base` the write is an
-  ordinary edit.
+- `write` with `base` (a `contentId` the client read) declares the content the edit started from. What
+  the owner does with it is
+  [conflict-resolution.md §7](algorithms/conflict-resolution.md#7-a-local-write-against-a-stale-base).
 - A socket serving several domains adds host actions (`menu`, `menu_stats` on macOS,
   [file-provider.md](frontends/file-provider.md)) and routes every other action by `domain`; its own
   refusals carry codes ([07 §4.2](07-daemon-cli.md#42-envelopes)), and a domain it does not serve is

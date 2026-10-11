@@ -80,6 +80,8 @@ entries: the conflicted copy the other client published.
   clients writing the same bytes can therefore end with a conflicted copy holding those bytes,
   when the arrival comes before the upload. An implementation MAY compute the identity of a staged
   edit at the merge to avoid it.
+- The identity is a function of the bytes and of the chunk size they are cut at. The clients of
+  one main cut alike ([01](../01-core.md) §3.5), so equal bytes have equal identities.
 - A file has no identity of its own in the theory. A file rename is a removal at one key and a
   creation at another; the local file id ([01](../01-core.md) §2.7) is a local convenience (§6).
 

@@ -512,7 +512,7 @@ Scratch directories are unique per process and wiped on entry, so concurrent run
 uses a fixed shared path. State that outlives one case in a process (debouncers, health, memo tables,
 pools) is either per instance or reset between cases, and a check SHOULD run correctly with its cases
 reordered. Before a check removes its scratch directory it requests a stop (01 §9) and waits, within
-`STOP_GRACE`, for the detached work it started to end; work still running then fails the check and is
+`GRACE`, for the detached work it started to end; work still running then fails the check and is
 named.
 
 ### 10.7 Doubles without side doors

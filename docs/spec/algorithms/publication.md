@@ -316,8 +316,16 @@ PUSH():
 ```
 
 **Which batch.** A pending command is **pushable** unless it is a file command whose value after
-is a staged edit not yet Uploaded. $B$ is every pushable command. That set is always a batch: a file left out keeps its value in $R$ at
-its own key, and its folder is present in both trees.
+is a staged edit not yet Uploaded. Leaving such a file out is always allowed: it keeps its value
+in $R$ at its own key, and its folder is present in both trees.
+
+A file removal or replacement is **held back** while a pending creation that is not pushable
+carries a staged edit based on the content it removes (a file renamed, then edited): the staged
+edit's base identity is the removal's before-value. Committing the removal first would take the
+file off the main for the length of an upload, and for good if the client were lost. $B$ is the
+largest batch (Definition 6) of pushable commands that are not held back; a command that needs a
+held-back one committed first (the removal of its folder, a placement onto its name) waits with
+it.
 
 - A push is attempted only when the previous fetch found the head at $h$. It is refused whenever
   another entry $h+1$ exists; the client then arrives and pushes from the new head.
@@ -489,7 +497,7 @@ already holds exactly these bytes ([06](../06-backends.md) §3.3).
 |---|---|---|
 | a before-value and the change of $L$ | a before-value equal to $L$ | dropped (step 3) |
 | the change of $L$ and the feed line | $L$ changed, no line | the feed misses one local change; frontends re-list what they hold open |
-| staging content and its upload record | a staged edit, no record | adopted (step 4) |
+| staging content and its upload record | a staged edit, no record | adopted (step 5) |
 | the chunk uploads and the Uploaded state | chunks on the main, edit not Uploaded | uploaded again; existing chunks are skipped |
 | the in-flight record and the create | in-flight, no entry | the entry is absent above the tree head: created |
 | the create and the `Won` step | in-flight, entry exists | the entry holds this client's bytes: the `Won` step |
@@ -635,7 +643,7 @@ append are answered by the main or fail ([replication.md](replication.md) §4.6,
 | Parameter | Recommended | Constraint / effect |
 |---|---|---|
 | `BATCH_DELAY` | 10 s | the client's choice; trades commits for latency; nothing depends on it |
-| `MAX_ENTRY_BYTES` | 8 MiB | a larger batch is split into several entries; MUST NOT exceed the largest put body any store on the way to the main accepts |
+| `MAX_ENTRY_BYTES` | 8 MiB | a larger batch is split into several entries; the put-body limit of a store on the way to the main is tied to it in [security-model.md](security-model.md) §11 |
 | `MAX_ENTRY_COMMANDS` | 256 | bounds the record writes of one projection (§4.6); a client MAY use less |
 | `SWEEP` | 60 s | worst-case latency when a cursor note is lost; one entry read per client per interval when idle |
 | `CURSOR_INTERVAL` | 2 s | MUST be ≥ the store's per-object write interval |
@@ -661,6 +669,8 @@ states, multi-client runs) is [09](../09-tests.md) §6–8. The cases of
 - **Local-first.** With the link down, every write, rename, delete, mkdir, rmdir and symlink
   returns with no store round trip; everything is pushed once the link returns, in as few entries
   as `MAX_ENTRY_BYTES` and `MAX_ENTRY_COMMANDS` allow.
+- **Renamed, then edited.** A file renamed and then edited stays at its old name on the main
+  until the content of the new name is uploaded, and both changes are committed in one entry.
 - **Upload first.** Two clients upload different content for one name; both uploads complete; the
   second to commit keeps its content as a conflicted copy with no new upload.
 - **Refused push.** A push refused because of a commit that touches nothing pending is repeated at

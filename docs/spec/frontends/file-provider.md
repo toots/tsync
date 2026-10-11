@@ -344,12 +344,9 @@ the system offered, it marks those fields unsupported for the item until the nex
 field neither stored nor returned pending would be overwritten on disk by the reply's value (Finder
 tags were silently reverted).
 
-**Concurrent edit on write.** A `write` whose `base` differs from the key's current content identity
-is a local edit of a version this client no longer has. The owner keeps both sides as
+**Concurrent edit on write.** A `write` with a stale `base` keeps both sides, as
 [conflict resolution §7](../algorithms/conflict-resolution.md#7-a-local-write-against-a-stale-base)
-specifies for a stale `base`: the item
-keeps the newer content and the local edit becomes a conflicted copy. The reply's `item` is the item
-as it now resolves; its contentVersion differs from the bytes the system sent, so the system fetches
+specifies. The contentVersion of the reply's `item` differs from the bytes the system sent, so the system fetches
 the winning content, and it learns of the copy through the working set. This is the resolution the
 framework expects from a modification on a stale base.
 

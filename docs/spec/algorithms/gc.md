@@ -133,9 +133,8 @@ on filesystem stores.
 ### 4.2 Log
 
 Expiry deletes log entries only as
-[algorithms/publication.md §4.9](publication.md#49-log-retention) allows, whatever cutoff it was given:
-never the head entry, never an entry above the tree head, never one younger than `LOG_RETENTION`, and in
-ascending number order. It then deletes the takeover objects of entries the tree head has passed.
+[algorithms/publication.md §4.9](publication.md#49-log-retention) allows, whatever cutoff it was given.
+It then deletes the takeover objects of entries the tree head has passed.
 
 An entry above the tree head references chunks (§5.3). An entry at or below it references nothing the
 tree does not.
@@ -202,8 +201,7 @@ Folder markers, anchors and folder indexes name no chunks; shares name paths or 
 Every write that makes a chunk reference visible on a collectable main MUST go through the **reference
 gate** of that main's store driver. A reference-publishing write is any put (plain or conditional) or server-side copy whose
 destination lies in the log, the manifest area or the version area. This covers: the commit of a log
-entry, the manifests and version snapshots a projection writes, integrity repair writing
-onto the main, and every such write an http-proxy listener performs for a remote
+entry, the manifests and version snapshots a projection writes, and every such write an http-proxy listener performs for a remote
 client. A chunk put received by a listener is a writer path too: it goes through the same driver and
 lands in S like any other writer's. Because the gate sits in the driver of the store that has the spaces, no caller can bypass it.
 
@@ -408,31 +406,19 @@ does G turn even, and fresh confirmations are then true until the next run turns
 
 The deletions a doom step owes each copy are recorded **durably** in the collecting owner before the
 main's outgoing entries are unlinked (§5.5), so a crash repeats deletions instead of leaking them. The
-owner executes them as specified in
-[algorithms/replication.md §4.8](replication.md#48-deletions-on-copies-outside-the-worker):
+owner executes them as
+[algorithms/replication.md §4.8](replication.md#48-deletions-on-copies-outside-the-worker) specifies:
+the re-check before, the direct or queued deletion, the wait for the copy's in-flight forwards, the
+write guard, and the restore after which a deletion is settled. This file adds:
 
-- **Re-check before** (an optimisation): immediately before issuing a deletion, the owner MAY drop every
-  key the collected main holds (§5.8).
-- **Direct delete** (a copy without queued deletion: a filesystem copy, or a remote store whose driver
-  has no confirmed deleter): delete the keys and their corruption markers. Absent keys count as
-  deleted. This costs one request per chunk on an object store, which is impractical for a large
+- **Direct delete** costs one request per chunk on an object store, which is impractical for a large
   domain: every remote driver SHOULD provide queued deletion ([06 §3.8](../06-backends.md#38-optional-operations)).
-- A copy whose store confirms queued deletion MUST be told through it, never by direct deletes.
-- **Queued deletion** (a copy with a bucket function): write the discard request, named by run and shard,
-  and keep it among the copy's pending discards (locally, durably) until the request object is gone. A
-  request already present under that name is superseded by the new one covering the same or later
-  shards.
-- **Restore after.** Once a deletion has taken effect (the direct delete returned, or the request object
-  is gone), list the collected main's shard for those keys (§5.8), and put back onto the copy,
-  from the main, every deleted key the main still holds. Only then is the deletion settled.
+- **Queued deletion.** A discard request already present under the name of a new one is superseded by
+  the new one covering the same or later shards.
 - **Settle.** When every deletion owed for generation *g* is settled, write G := *g* + 1 (even),
   holding the run lock: a collector reading G at its transition to closing would otherwise reuse *g*
   for new deletions just as G turns even. A settle that finds the lock held retries once the lock is
   free; the collector's own session also settles at its finish when nothing of *g* is owed.
-- **No stale forward.** A best-effort forward of a chunk to a copy that is still in flight when a
-  deletion is issued could land after it and put a doomed chunk back; the deletion waits for the
-  copy's in-flight forwards, and forwards started meanwhile are skipped.
-- The write guard applies: no deletion or restore runs while a main is unreachable.
 
 The **bucket function** deletes only chunk keys of the request's own domain, deletes each chunk's
 corruption marker with it, and deletes the request last, only if it refused nothing.

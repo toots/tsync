@@ -155,8 +155,8 @@ objects added, existing ones immutable).
   most one entry holds a number.
 - **Lifecycle** created by a push
   ([algorithms/publication.md §4.5](../algorithms/publication.md#45-push)), after every chunk it names
-  is on the main; deleted by expiry, never above the tree head and never the head entry
-  ([algorithms/publication.md §4.9](../algorithms/publication.md#49-log-retention)).
+  is on the main; deleted by expiry as
+  [algorithms/publication.md §4.9](../algorithms/publication.md#49-log-retention) allows.
 
 ### 2.9 Version
 
@@ -375,7 +375,7 @@ share filenames record names, for display.
 | Orphan chunks (nothing names them) | an upload whose commit has not happened yet, or never will; deletions and expiry | the commit names them; otherwise the next collection |
 | Tree behind the log (tree head below the head) | always, between a commit and the end of its projection | the entry's projector; another client after the settle ([algorithms/publication.md §4.6](../algorithms/publication.md#46-projection-the-tree-follows-the-log)) |
 | A record ahead of the tree head | a projection in progress | the projection's end; a state read replays the log over it |
-| Disowned marker still present | a projection between its anchor write and its marker writes; a lost delete | the projection's end; integrity repair |
+| Disowned marker still present | a projection between its anchor write and its marker writes; a lost delete | the projection's end; after a lost delete the marker stays, invisible, and the tree report names it |
 | Folder with an anchor and no filed marker | a projection between two of its steps | the projection's end |
 | Chunk in the outgoing space while referenced | a run between its open and the marking of that referrer | marking, or the interlock's promotion before the reference is published |
 | Copy behind the main | always, by design | the member's deferred job log |
@@ -414,7 +414,7 @@ leaves the old state, the new state, or a state readers classify safely.
 | Chunk | any client (uploads), deferred workers (copies), integrity repair (one member) | none needed: same name, same bytes |
 | Chunk deletion | a collection only | the collection interlock on the collected main ([algorithms/gc.md](../algorithms/gc.md)) |
 | Log entry | any client, from the head | **create-if-absent**: one entry per number |
-| File manifest, folder marker, anchor | the projector of the entry that changes them; integrity repair | one projector per entry ([algorithms/publication.md §4.6](../algorithms/publication.md#46-projection-the-tree-follows-the-log)) |
+| File manifest, folder marker, anchor | the projector of the entry that changes them | one projector per entry ([algorithms/publication.md §4.6](../algorithms/publication.md#46-projection-the-tree-follows-the-log)) |
 | Tree head | the projector of the entry it names | the same |
 | Takeover | a client that saw an entry stay unprojected | **create-if-absent** |
 | Void | an operator, for an entry that does not decode | **create-if-absent** |
@@ -589,7 +589,7 @@ Every entity that grows has a reclaiming path. Rules: [algorithms/gc.md](../algo
 | Discard jobs | consumed; re-delivered by the client when outstanding |
 | Shares | expiry deletes expired shares of the domain; a domain drop deletes all of its shares |
 | Share artifact cache | age rule of §2.19; deleted with its share; clear-cache |
-| Disowned markers | the projection's end; integrity repair |
+| Disowned markers | the projection's end |
 
 ---
 

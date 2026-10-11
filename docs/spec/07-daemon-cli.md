@@ -808,7 +808,7 @@ drift between hosts. Every host that owns a domain runs the same list, the Andro
 | chunk cache cap | after every upload and every `HOUSEKEEPING_INTERVAL` | [04 §4.11](04-checkout-cache.md#411-periodic-maintenance) |
 | applied-log prune | daily | [03 §2.9](03-journal-sync.md#29-feed-ops-and-the-applied-log-local) |
 | removed-id records, export-record sweep | daily | [04 §4.11](04-checkout-cache.md#411-periodic-maintenance), [05 §4.4](05-ops-config.md) |
-| log rescan and re-arming of parked records | every `HOUSEKEEPING_INTERVAL` | [durable-queue.md](algorithms/durable-queue.md#47-parking-and-retry-of-parked-records) |
+| log rescan and re-arming of parked records | every `REARM_INTERVAL` | [durable-queue.md](algorithms/durable-queue.md#47-parking-and-retry-of-parked-records) |
 
 - Each periodic task runs to completion before its next period starts; a failing task does not stop
   the others. `tsync cache --prune` runs the sweeps on demand (`prune`).
