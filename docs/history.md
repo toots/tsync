@@ -1,4 +1,4 @@
-# Versions, trash and cleanup
+# Versions and cleanup
 
 
 ## Versions
@@ -16,22 +16,13 @@ The listing shows a timestamp, a date and a size per version; `--version` takes 
 
 A revert is instant and downloads nothing: a version is a short list of chunks, and the chunks are still in the store. The file comes back online-only. The content it replaces becomes a version in turn.
 
-## Trash
+## Deleted folders
 
-Deleting a folder moves it to the trash as a whole.
-
-```bash
-tsync trash                        # list trashed folders
-tsync trash --restore projects/old # put one back where it was
-tsync trash --purge projects/old   # what deleting it for good would remove
-tsync trash --purge projects/old --apply
-```
-
-A restore is refused if something else now has the name; move that first. Other machines see the folder return like any other change.
+A folder has no version of its own. Deleting one deletes the files in it, and with versioning on each of them is a deleted file with saved versions: `tsync versions` lists them, and `--revert` puts one back once its folder exists again.
 
 ## Cleanup
 
-History and trash grow until you trim them. That takes two commands, and **both only report until you add `--apply`.**
+History grows until you trim it. That takes two commands, and **both only report until you add `--apply`.**
 
 ```bash
 tsync expire 2026-01-01           # what would go
@@ -41,7 +32,7 @@ tsync gc                          # what could be reclaimed
 tsync gc --apply
 ```
 
-**`expire`** removes versions, trashed folders, journal entries and lapsed share links older than the date. That forgets old content without freeing its space. It works with every backend.
+**`expire`** removes versions and lapsed share links older than the date, and the entries of the change log that every machine has had a month to read. That forgets old content without freeing its space. It works with every backend.
 
 **`gc`** deletes the chunks nothing refers to any more, and that is what frees space. It goes by references alone and knows nothing of dates.
 

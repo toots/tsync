@@ -24,7 +24,7 @@ On a machine with no config, the prompts go in this order. Press Enter to accept
 | Prompt | What to answer |
 |---|---|
 | `domain name` | The folder's name, for instance `media`. |
-| `versioning` | Enter for yes: previous versions are kept ([versions, trash and cleanup](history.md)). |
+| `versioning` | Enter for yes: previous versions are kept ([versions and cleanup](history.md)). |
 | `symlinks` | Enter for `keep`. See [symlinks](config.md#symlinks). |
 | `read-only` | Enter for no. |
 | `chunk size`, `cache chunk size` | Enter. |
