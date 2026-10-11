@@ -90,6 +90,7 @@ type report = {
   bytes_moved : int;
   planned : (string * decision) list;
   unpublished : string list;
+  uncommitted : int;
   cancelled : bool;
 }
 

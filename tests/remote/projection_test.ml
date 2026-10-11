@@ -18,7 +18,7 @@ let () =
       let d = Domain_name.v "photos" in
       let main = Local.create ~name:"main" (Filename.concat root "store") in
       let knowledge =
-        { Composite.is_index = (fun _ -> false); is_journal = (fun _ -> false) }
+        { Composite.is_index = (fun _ -> false); is_log = (fun _ -> false) }
       in
       let composite =
         Composite.create ~domain:d

@@ -5,8 +5,6 @@ module Domain = Tsync_domain.Domain
 module R = Tsync_status.Status_report
 
 let store_state_window = 5.
-let journal_window = 60.
-let listing_grace = 2.
 let probe_wait = Health.probe_timeout
 
 type rates = {
@@ -20,9 +18,7 @@ type slot = {
   m : Mutex.t;
   mutable probe : (R.reach * float) option;
   mutable corrupted : R.corrupted;
-  mutable listing : (R.journal * float) option;
   mutable refreshing : bool;
-  mutable listing_refreshing : bool;
   rates : rates;
   copied : Tsync_status.Self_report.rate;
 }
@@ -32,7 +28,6 @@ type t = {
   engine : (module Tsync_sync.Engine.S);
   frontend : unit -> R.frontend option;
   slots : slot list;
-  client : string;
 }
 
 let create (domain : Domain.t) engine ~frontend =
@@ -40,7 +35,6 @@ let create (domain : Domain.t) engine ~frontend =
     domain;
     engine;
     frontend;
-    client = Tsync_checkout.Identity.client_uuid domain.data_dir;
     slots =
       List.map
         (fun (backend, member) ->
@@ -50,9 +44,7 @@ let create (domain : Domain.t) engine ~frontend =
             m = Mutex.create ();
             probe = None;
             corrupted = Not_checked "no answer yet";
-            listing = None;
             refreshing = false;
-            listing_refreshing = false;
             rates =
               {
                 up = Tsync_status.Self_report.rate ~now:(Rt.now ());
@@ -62,22 +54,6 @@ let create (domain : Domain.t) engine ~frontend =
           })
         domain.members;
   }
-
-(* 07 §5.5: entries newer than the mark and authored by another client; one
-   already in the applied log is not behind, whatever the mark says. *)
-let behind t entries =
-  let (module E : Tsync_sync.Engine.S) = t.engine in
-  let mark = Tsync_sync.Mark.read ~data_dir:t.domain.data_dir t.domain.name in
-  List.length
-    (List.filter
-       (fun (k, _) ->
-         Tsync_sync.Entry_key.client k <> t.client
-         && (not (Tsync_sync.Applied.contains E.applied k))
-         &&
-           match mark with
-           | Some m -> Tsync_sync.Entry_key.compare k m > 0
-           | None -> true)
-       entries)
 
 let corrupted_sample = 1000
 
@@ -119,26 +95,6 @@ let refresh_probe t s =
       s.corrupted <- corrupted;
       s.refreshing <- false)
 
-(* Pitfall C-7.10: the claim is given back on every path. *)
-let refresh_listing t s =
-  Fun.protect
-    ~finally:(fun () ->
-      Mutex.protect s.m (fun () -> s.listing_refreshing <- false))
-    (fun () ->
-      let listing =
-        match
-          let entries =
-            Tsync_sync.Journal.list_entries
-              (Tsync_sync.Journal.create t.domain.name s.member.store)
-          in
-          R.Entries { entries = List.length entries; behind = behind t entries }
-        with
-          | listing -> listing
-          | exception e when not (Rt.is_cancelled e) ->
-              Unreadable (Fail.classify e).reason
-      in
-      Mutex.protect s.m (fun () -> s.listing <- Some (listing, Rt.now ())))
-
 let rec wait_for ~deadline f =
   if f () || Rt.now () >= deadline then ()
   else (
@@ -146,45 +102,32 @@ let rec wait_for ~deadline f =
     wait_for ~deadline f)
 
 (* A held member is not probed; a stale sample is served while a fresh one is
-   taken behind the answer. A journal listing reads every entry, so however
-   often status is asked it is taken at most once per [journal_window]. *)
-let reach_and_journal t s =
+   taken behind the answer. *)
+let reach t s =
   let store = s.member.store in
   if Health.is_held store.health then
-    ( R.Unreachable
-        (Option.value ~default:"held down" (Health.describe store.health)),
-      Mutex.protect s.m (fun () ->
-          Option.fold ~none:R.Counting ~some:fst s.listing) )
+    R.Unreachable
+      (Option.value ~default:"held down" (Health.describe store.health))
   else (
-    let stale window = function
-      | None -> true
-      | Some (_, at) -> Rt.now () -. at > window
-    in
-    let probe, list =
+    let probe =
       Mutex.protect s.m (fun () ->
-          let probe = stale store_state_window s.probe && not s.refreshing in
-          let list =
-            stale journal_window s.listing && not s.listing_refreshing
+          let stale =
+            match s.probe with
+              | None -> true
+              | Some (_, at) -> Rt.now () -. at > store_state_window
           in
+          let probe = stale && not s.refreshing in
           if probe then s.refreshing <- true;
-          if list then s.listing_refreshing <- true;
-          (probe, list))
+          probe)
     in
     if probe then Rt.spawn ~name:"status probe" (fun () -> refresh_probe t s);
-    if list then Rt.spawn ~name:"status listing" (fun () -> refresh_listing t s);
     wait_for
       ~deadline:(Rt.now () +. probe_wait)
       (fun () -> Mutex.protect s.m (fun () -> s.probe <> None));
-    wait_for
-      ~deadline:(Rt.now () +. listing_grace)
-      (fun () ->
-        Mutex.protect s.m (fun () ->
-            s.listing <> None || not s.listing_refreshing));
     Mutex.protect s.m (fun () ->
-        ( (match s.probe with
-            | Some (r, _) -> r
-            | None -> R.Unreachable "no answer yet"),
-          Option.fold ~none:R.Counting ~some:fst s.listing )))
+        match s.probe with
+          | Some (r, _) -> r
+          | None -> R.Unreachable "no answer yet"))
 
 let slot_traffic s =
   Option.map
@@ -262,7 +205,7 @@ let backend t s : R.backend =
   let specs =
     match Driver.find b.btype with Some d -> d.fields | None -> []
   in
-  let reach, journal = reach_and_journal t s in
+  let reach = reach t s in
   {
     name = b.bname;
     kind = b.btype;
@@ -276,7 +219,6 @@ let backend t s : R.backend =
           ))
         (Config.masked_fields ~specs b.fields);
     reach;
-    journal;
     corrupted = Mutex.protect s.m (fun () -> s.corrupted);
     health = Health.state store.health;
     disk = disk store;
@@ -303,7 +245,6 @@ let settings t : R.settings =
 let domain_body t : R.domain_body =
   let (module E : Tsync_sync.Engine.S) = t.engine in
   let a = E.activity () in
-  let unapplied = E.unapplied () in
   {
     name = Domain_name.to_string t.domain.name;
     paused = E.is_paused ();
@@ -315,12 +256,16 @@ let domain_body t : R.domain_body =
     settings = settings t;
     sync =
       {
-        hold = (match E.bridge () with Incremental -> None | Hold r -> Some r);
-        mark_age = a.mark_age;
-        unapplied_entries = List.length unapplied;
-        unapplied_reason = Option.map snd (List.nth_opt unapplied 0);
-        parked_metadata = List.length (E.parked ());
+        position = a.position;
+        pending = a.pending;
+        in_flight =
+          Option.bind a.position (fun h ->
+              if a.pushing then Some (h + 1) else None);
+        tree_head = (if a.tree_head > 0 then Some a.tree_head else None);
+        cannot_follow =
+          Option.map (fun (entry, reason) -> { R.entry; reason }) a.unfollowed;
       };
+    set_aside = a.set_aside;
     cache =
       {
         chunks = a.cache.bodies;
@@ -328,22 +273,13 @@ let domain_body t : R.domain_body =
         pinned_bytes = a.cache.pinned;
         max_cache = a.max_cache;
       };
-    wal =
-      {
-        intent = a.intent;
-        prepared = a.prepared;
-        executed = a.executed;
-        stuck = a.stuck;
-        retrying = a.retrying;
-        set_aside = a.set_aside;
-        last_error = a.last_error;
-      };
     queues =
       {
         pending_files = E.pending_uploads ();
-        pending_metadata = E.pending_metadata ();
-        in_flight = a.in_flight;
+        parked = a.stuck;
+        in_flight = a.uploading;
         bytes_owed = a.bytes_owed;
+        last_error = a.last_error;
       };
     frontends = Option.to_list (t.frontend ());
     backends = Rt.map_concurrently (backend t) t.slots;

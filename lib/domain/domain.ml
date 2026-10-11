@@ -40,8 +40,12 @@ let create_store config d (b : Config.backend) =
 let knowledge d =
   {
     Composite.is_index = (fun k -> Key.leaf k = ".tsync-index");
-    is_journal =
-      (fun k -> Key.under (Key.journal d) k || Key.equal k (Key.cursor d));
+    is_log =
+      (fun k ->
+        Key.under (Key.log d) k
+        || Key.under (Key.takeovers d) k
+        || Key.equal k (Key.tree_head d)
+        || Key.equal k (Key.cursor d));
   }
 
 (* 05 §3.2: one store client per backend, shared by every layer above it;

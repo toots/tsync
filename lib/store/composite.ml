@@ -141,7 +141,7 @@ let escape_name n =
        (List.of_seq (String.to_seq n)))
 
 type member = { name : string; role : role; store : Store.t }
-type knowledge = { is_index : Key.t -> bool; is_journal : Key.t -> bool }
+type knowledge = { is_index : Key.t -> bool; is_log : Key.t -> bool }
 
 (* The job a copy log is running, for the status report. *)
 type running = {
@@ -188,7 +188,7 @@ type t = { core : core; source_store : Store.t; whole : Store.t }
 
 let skip k c key =
   k.knowledge.is_index key
-  || (c.member.role = Backfill && k.knowledge.is_journal key)
+  || (c.member.role = Backfill && k.knowledge.is_log key)
 
 let unreachable m = Fail.raise_ Fail.Unreachable "%s is held down" m.name
 

@@ -1,3 +1,10 @@
 (library
  (name tsync_sync)
- (libraries tsync_core tsync_store tsync_remote tsync_checkout unix yojson base64))
+ (libraries
+  tsync_core
+  tsync_store
+  tsync_remote
+  tsync_checkout
+  unix
+  yojson
+  base64))

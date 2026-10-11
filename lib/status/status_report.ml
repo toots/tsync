@@ -117,12 +117,15 @@ type settings = {
 }
 [@@deriving yojson { strict = false }]
 
+type cannot_follow = { entry : int; reason : string }
+[@@deriving yojson { strict = false }]
+
 type sync = {
-  hold : string option; [@default None]
-  mark_age : float option; [@key "markAgeSeconds"] [@default None]
-  unapplied_entries : int; [@key "unappliedEntries"]
-  unapplied_reason : string option; [@key "unappliedReason"] [@default None]
-  parked_metadata : int; [@key "parkedMetadata"]
+  position : int option; [@default None]
+  pending : int;
+  in_flight : int option; [@key "inFlight"] [@default None]
+  tree_head : int option; [@key "treeHead"] [@default None]
+  cannot_follow : cannot_follow option; [@key "cannotFollow"] [@default None]
 }
 [@@deriving yojson { strict = false }]
 
@@ -134,22 +137,12 @@ type cache = {
 }
 [@@deriving yojson { strict = false }]
 
-type wal = {
-  intent : int;
-  prepared : int;
-  executed : int;
-  stuck : int;
-  retrying : int; [@default 0]
-  set_aside : int; [@key "setAside"] [@default 0]
-  last_error : string option; [@key "lastError"] [@default None]
-}
-[@@deriving yojson { strict = false }]
-
 type queues = {
   pending_files : int; [@key "pendingFiles"]
-  pending_metadata : int; [@key "pendingMetadata"]
+  parked : int; [@default 0]
   in_flight : string list; [@key "inFlight"]
   bytes_owed : int; [@key "bytesOwed"]
+  last_error : string option; [@key "lastError"] [@default None]
 }
 [@@deriving yojson { strict = false }]
 
@@ -167,32 +160,6 @@ type frontend = {
   unanswered : bool; [@default false]
 }
 [@@deriving yojson { strict = false }]
-
-(* 07 §5.5: {entries, behind} | {counting} | {error}. *)
-type journal =
-  | Entries of { entries : int; behind : int }
-  | Counting
-  | Unreadable of string
-
-let journal_to_yojson, journal_of_yojson =
-  tagged "journal"
-    (function
-      | Entries e ->
-          `Assoc [("entries", `Int e.entries); ("behind", `Int e.behind)]
-      | Counting -> `Assoc [("counting", `Bool true)]
-      | Unreadable e -> `Assoc [("error", `String e)])
-    (fun j ->
-      match (field "counting" j, str "error" j, int "entries" j) with
-        | Some (`Bool true), _, _ -> Some Counting
-        | _, Some e, _ -> Some (Unreadable e)
-        | _, _, Some n ->
-            Some
-              (Entries
-                 {
-                   entries = n;
-                   behind = Option.value ~default:0 (int "behind" j);
-                 })
-        | _ -> None)
 
 type corrupted =
   | Not_checked of string
@@ -286,7 +253,6 @@ type backend = {
   link : string option; [@default None]
   config : config; [@default []]
   reach : reach;
-  journal : journal;
   corrupted : corrupted;
   health : Health.state;
   disk : disk option; [@default None]
@@ -301,8 +267,8 @@ type domain_body = {
   main_offline : bool; [@key "mainOffline"] [@default false]
   settings : settings;
   sync : sync;
+  set_aside : int; [@key "setAside"] [@default 0]
   cache : cache;
-  wal : wal;
   queues : queues;
   frontends : frontend list; [@default []]
   backends : backend list; [@default []]

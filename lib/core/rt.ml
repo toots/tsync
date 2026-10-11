@@ -96,6 +96,8 @@ let ensure_started () =
 
 let now = Duppy.time
 
+external boottime : unit -> float = "tsync_boottime"
+
 let with_ctx (type r) (ctx : ctx) (fn : unit -> r) : r =
   Effect.Deep.match_with fn ()
     {

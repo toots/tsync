@@ -60,33 +60,6 @@ let after ~cursor names =
     (fun n -> String.compare n cursor > 0)
     (List.sort String.compare names)
 
-type anchor = Live | In_trash | No_anchor
-
-type trash =
-  | Delete_stale of Key.t list
-  | Skip_recent
-  | Purge of Key.t list
-  | Refuse_live
-
-let trash ~anchor ~cutoff ?(on_demand = false) (entries : (Key.t * float) list)
-    =
-  let keys = List.map fst entries in
-  match anchor with
-    | Live when on_demand -> Refuse_live
-    | Live ->
-        Delete_stale
-          (List.filter_map
-             (fun (k, mtime) -> if mtime < cutoff then Some k else None)
-             entries)
-    | (In_trash | No_anchor) when on_demand -> Purge keys
-    | In_trash | No_anchor ->
-        if List.exists (fun (_, mtime) -> mtime >= cutoff) entries then
-          Skip_recent
-        else Purge keys
-
-let purge_order (namespaces : (Key.prefix * int) list) =
-  List.stable_sort (fun (_, a) (_, b) -> compare b a) namespaces |> List.map fst
-
 let version_time key =
   match Int64.of_string_opt (Key.leaf key) with
     | Some ns when ns >= 0L -> Some ns
@@ -99,16 +72,33 @@ let versions ~cutoff keys =
       match version_time k with Some ns -> ns < cutoff_ns | None -> false)
     keys
 
-let journal ~now ~horizon ~cutoff ~cursor entries =
-  let keep_from = Int64.of_float (Float.min cutoff (now -. horizon) *. 1000.) in
+let entry_number key = int_of_string_opt (Key.leaf key)
+
+let log ~now ~retention ~tree_head (entries : (Key.t * float) list) =
+  let numbered =
+    List.filter_map
+      (fun (key, mtime) ->
+        Option.map (fun n -> (n, key, mtime)) (entry_number key))
+      entries
+    |> List.sort compare
+  in
+  let head = List.fold_left (fun acc (n, _, _) -> max acc n) 0 numbered in
   List.filter_map
-    (fun (e, key) ->
-      let named =
-        Option.fold ~none:false ~some:(Tsync_sync.Entry_key.equal e) cursor
-      in
-      if Tsync_sync.Entry_key.ms e < keep_from && not named then Some key
+    (fun (n, key, mtime) ->
+      if n <= tree_head && n <> head && mtime < now -. retention then Some key
       else None)
-    entries
+    numbered
+
+let takeovers ~tree_head keys =
+  List.filter
+    (fun key ->
+      match String.split_on_char '-' (Key.leaf key) with
+        | n :: _ -> (
+            match int_of_string_opt n with
+              | Some n -> n <= tree_head
+              | None -> false)
+        | [] -> false)
+    keys
 
 type share = Expired | Kept | Other_domain | Unparseable
 

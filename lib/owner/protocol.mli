@@ -102,9 +102,19 @@ type changes =
     }
 
 type counted = { succeeded : int; failed : int }
-type progress = Inactive | Active of { downloaded : int; total : int }
-type resynced = Incremental of int | Full of { manifests : int; failed : int }
-type trash_restored = Restored of int | Not_in_trash | Name_taken
+
+type progress =
+  | Inactive
+  | Active of { downloaded : int; total : int }
+      (** What a sync did (05 §4.7). *)
+
+type resynced = {
+  arrival : [ `Entries of int | `State of int * int ];
+  changed : int;
+  committed : int;
+  pending : int;
+}
+
 type shared = { url : string; expires : float }
 
 (** A transfer as [status] lists it (08 §3.3). *)
@@ -180,7 +190,6 @@ type _ request =
       (** [version]: a timestamp in ns; none is the newest *)
   | Full_resync : unit request
   | Sync : { full : bool } -> resynced request
-  | Trash_restore : string -> trash_restored request
   | Share : {
       item : target;  (** the domain root when the request names nothing *)
       expires : float option;  (** seconds from now *)

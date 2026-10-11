@@ -400,11 +400,13 @@ module Make (C : Context.S) = struct
                           ~source:(fun _ -> manifest_area src.store));
                     area "versions" (fun () ->
                         listed_batch "versions" (Key.versions d) ~chunks:false);
-                    area "journal" (fun () ->
-                        listed_batch "journal" (Key.journal d) ~chunks:false);
-                    area "cursor" (fun () ->
-                        headed "cursor"
-                          (Option.to_list (src.store.head_opt (Key.cursor d)))
+                    area "log" (fun () ->
+                        listed_batch "log" (Key.log d) ~chunks:false;
+                        listed_batch "takeovers" (Key.takeovers d) ~chunks:false);
+                    area "tree head and cursor" (fun () ->
+                        headed "tree head and cursor"
+                          (List.filter_map src.store.head_opt
+                             [Key.tree_head d; Key.cursor d])
                           ~chunks:false))
             | Path _, Some (chunks, keys) ->
                 area "chunks" (fun () -> headed "chunks" chunks ~chunks:true);

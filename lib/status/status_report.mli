@@ -85,12 +85,17 @@ type settings = {
 }
 [@@deriving yojson]
 
+(** An entry the client cannot follow, and why. *)
+type cannot_follow = { entry : int; reason : string } [@@deriving yojson]
+
+(** The cycle's status (03 §3.4): [in_flight] is the number of the entry being
+    created. *)
 type sync = {
-  hold : string option;  (** the reason the journal cannot be bridged *)
-  mark_age : float option;
-  unapplied_entries : int;
-  unapplied_reason : string option;
-  parked_metadata : int;
+  position : int option;
+  pending : int;
+  in_flight : int option;
+  tree_head : int option;
+  cannot_follow : cannot_follow option;
 }
 [@@deriving yojson]
 
@@ -102,22 +107,12 @@ type cache = {
 }
 [@@deriving yojson]
 
-type wal = {
-  intent : int;
-  prepared : int;
-  executed : int;
-  stuck : int;
-  retrying : int;
-  set_aside : int;
-  last_error : string option;
-}
-[@@deriving yojson]
-
 type queues = {
   pending_files : int;
-  pending_metadata : int;
+  parked : int;
   in_flight : string list;
   bytes_owed : int;
+  last_error : string option;
 }
 [@@deriving yojson]
 
@@ -134,12 +129,6 @@ type frontend = {
   shares : bool option;  (** serves share links *)
   unanswered : bool;
 }
-[@@deriving yojson]
-
-type journal =
-  | Entries of { entries : int; behind : int }
-  | Counting  (** the listing did not finish within LISTING_GRACE *)
-  | Unreadable of string
 [@@deriving yojson]
 
 type corrupted =
@@ -184,7 +173,6 @@ type backend = {
   link : string option;
   config : (string * string) list;  (** secrets masked *)
   reach : reach;
-  journal : journal;
   corrupted : corrupted;
   health : Health.state;
   disk : disk option;
@@ -199,8 +187,8 @@ type domain_body = {
   main_offline : bool;
   settings : settings;
   sync : sync;
+  set_aside : int;
   cache : cache;
-  wal : wal;
   queues : queues;
   frontends : frontend list;
   backends : backend list;

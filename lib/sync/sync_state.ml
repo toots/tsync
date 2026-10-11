@@ -14,6 +14,7 @@ type settled =
 
 type arrival = {
   head : int;
+  view : Folder_id.t option;
   feed : string list;
   steps : step list;
   before : (Algebra.key * settled) list;
@@ -266,17 +267,20 @@ let step_of_json json =
 let encode_arrival a =
   Yojson.Safe.to_string
     (`Assoc
-       [
-         ("head", `Int a.head);
-         ("feed", `List (List.map (fun k -> `String k) a.feed));
-         ("steps", `List (List.map step_to_json a.steps));
-         ( "before",
-           `List
-             (List.map
-                (fun (key, value) ->
-                  `Assoc (Log_entry.key_fields key @ settled_fields value))
-                a.before) );
-       ])
+       ((match a.view with
+          | Some id -> [("view", `String (Folder_id.to_string id))]
+          | None -> [])
+       @ [
+           ("head", `Int a.head);
+           ("feed", `List (List.map (fun k -> `String k) a.feed));
+           ("steps", `List (List.map step_to_json a.steps));
+           ( "before",
+             `List
+               (List.map
+                  (fun (key, value) ->
+                    `Assoc (Log_entry.key_fields key @ settled_fields value))
+                  a.before) );
+         ]))
 
 let all f l =
   List.fold_right
@@ -305,7 +309,12 @@ let decode_arrival body =
               in
               let* steps = all step_of_json steps in
               let* before = all settled_of_json before in
-              Some { head; feed; steps; before }
+              let view =
+                match List.assoc_opt "view" l with
+                  | Some (`String id) -> Folder_id.of_string id
+                  | _ -> None
+              in
+              Some { head; view; feed; steps; before }
           | _ -> None)
     | _ -> None
 

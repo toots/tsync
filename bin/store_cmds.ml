@@ -123,82 +123,25 @@ let expire_cmd =
       & info [] ~docv:"DATE" ~doc:"Remove what is older than this day.")
   in
   cmd "expire"
-    ~doc:"Remove trash, versions, journal entries and shares older than DATE."
+    ~doc:
+      "Remove versions and shares older than DATE, and the log entries its \
+       retention allows."
     Term.(const expire $ apply_arg $ date $ domain_arg $ verbose)
 
-(* 07 §2.5 read class: listing the trash changes nothing, so it runs here. *)
-let trash_list name =
-  let config = config () in
-  let dom =
-    Tsync_domain.Domain.build ~owner:false config (domain ?name config)
-  in
-  let module T = Tsync_remote.Tree.Make ((val Tsync_domain.Domain.context dom)) in
-  let restorable, stale =
-    List.partition (fun (f : T.trashed) -> f.state <> `Live) (T.trashed ())
-  in
-  Narrate.say (Display.narrate ())
-    "%s in the trash; %s skipped (their folders are live again, and expire \
-     removes the entries)"
-    (Narrate.count (List.length restorable) "folder")
-    (Narrate.count (List.length stale) "stale entry" ~plural:"stale entries");
-  List.iter
-    (fun (f : T.trashed) ->
-      say "%s  %s" (Narrate.date f.latest)
-        (Option.value ~default:(f.name ^ " (path not recorded)") f.path))
-    (List.sort
-       (fun (a : T.trashed) (b : T.trashed) -> compare b.latest a.latest)
-       restorable);
-  0
+let void_entry n name verbose = run_job ?name verbose (Void_entry { n })
 
-let trash_restore name path =
-  let config = config () in
-  match
-    Tsync_owner.Owner.request ~bulk:true ~what:"tsync trash --restore" config
-      (domain ?name config) (Tsync_owner.Protocol.Trash_restore path)
-  with
-    | Restored n ->
-        say "%s restored: %s announced to the other clients" path
-          (Narrate.count n "folder and file" ~plural:"folders and files");
-        0
-    | Not_in_trash ->
-        say "%s is not in the trash" path;
-        1
-    | Name_taken ->
-        say "%s already exists; restore it elsewhere or move that one first"
-          path;
-        1
-
-let trash apply purge restore name verbose =
-  early (fun () ->
-      let name, paths =
-        paths_in_domain ?name (Option.to_list purge @ Option.to_list restore)
-      in
-      match (purge, restore, paths) with
-        | Some _, None, [path] -> run_job ?name verbose (Purge { apply; path })
-        | _ ->
-            set_verbose verbose;
-            run (fun () ->
-                match (purge, restore, paths) with
-                  | Some _, Some _, _ ->
-                      fail "--purge and --restore go one at a time"
-                  | None, Some _, [path] -> trash_restore name path
-                  | _ -> trash_list name))
-
-let trash_cmd =
-  let purge =
+let void_entry_cmd =
+  let n =
     Arg.(
-      value
-      & opt (some string) None
-      & info ["purge"] ~docv:"PATH" ~doc:"Purge this trashed folder now.")
-  and restore =
-    Arg.(
-      value
-      & opt (some string) None
-      & info ["restore"] ~docv:"PATH"
-          ~doc:"Bring this trashed folder back where it was.")
+      required
+      & pos 0 (some int) None
+      & info [] ~docv:"N" ~doc:"The number of the log entry.")
   in
-  cmd "trash" ~doc:"List the trash, or restore or purge a trashed folder."
-    Term.(const trash $ apply_arg $ purge $ restore $ domain_arg $ verbose)
+  cmd "void-entry"
+    ~doc:
+      "Make a log entry that no client can decode read as empty, so the \
+       entries behind it are merged and projected."
+    Term.(const void_entry $ n $ domain_arg $ verbose)
 
 let data_integrity verify repair dry_run detail source name verbose =
   if verify && repair then (
@@ -222,9 +165,8 @@ let data_integrity_cmd =
       value & flag
       & info ["repair"]
           ~doc:
-            "Repair what can be: delete stale markers and trash entries, \
-             anchor folders, adopt unreachable folders into the trash, rewrite \
-             corrupt chunks from a sound copy.")
+            "Rewrite corrupt chunks from a sound copy. Findings in the tree \
+             are reported only.")
   and dry_run =
     Arg.(
       value & flag
@@ -430,8 +372,7 @@ let mirror_cmd =
       & info ["skip-chunks"]
           ~doc:
             "Everything but the chunks: manifests, folder markers, versions, \
-             journal entries and the cursor. Allowed while a collection is \
-             open.")
+             the log and the cursor. Allowed while a collection is open.")
   and path =
     Arg.(
       value
@@ -551,17 +492,16 @@ module Versions (C : Tsync_remote.Context.S) = struct
 
   let manifest e = Manifest.decode (R.get_version e)
 
-  (* A folder's path, climbed through its anchors; none for a folder in the
-     trash or without an anchor. *)
+  (* A folder's path, climbed through its anchors; none for a folder without
+     an anchor. *)
   let folder_path id =
     let rec climb id acc depth =
       if Folder_id.is_root id then Some (String.concat "/" acc)
       else if depth > 256 then None
       else (
         match T.anchor id with
-          | Some a when not (Folder.in_trash a) ->
-              climb a.parent (a.aname :: acc) (depth + 1)
-          | _ -> None)
+          | Some a -> climb a.parent (a.aname :: acc) (depth + 1)
+          | None -> None)
     in
     climb id [] 0
 
@@ -745,7 +685,7 @@ let cmds =
     versions_cmd;
     gc_cmd;
     expire_cmd;
-    trash_cmd;
+    void_entry_cmd;
     data_integrity_cmd;
     import_cmd;
     rsync_cmd;

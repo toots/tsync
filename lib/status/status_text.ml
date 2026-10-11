@@ -73,15 +73,24 @@ let sync b (d : domain_body) =
   if d.paused then row b "  " "PAUSED" "changes stay local until resumed";
   if d.main_offline then
     row b "  " "MAIN OFFLINE" "reads and publishing wait for it";
-  Option.iter (row b "  " "SYNC HELD") s.hold;
-  if s.unapplied_entries > 0 then
-    row b "  " "unapplied"
-      (plural s.unapplied_entries "peer entry" "peer entries"
-      ^ Option.fold ~none:"" ~some:(fun r -> " (" ^ r ^ ")") s.unapplied_reason
-      );
-  if s.parked_metadata > 0 then
-    row b "  " "parked"
-      (plural s.parked_metadata "metadata change" "metadata changes")
+  if s.pending > 0 then
+    row b "  " "pending"
+      (plural s.pending "change" "changes"
+      ^ " to commit"
+      ^
+        match s.in_flight with
+        | Some n -> Printf.sprintf ", creating entry %d" n
+        | None -> "");
+  Option.iter
+    (fun (c : cannot_follow) ->
+      row b "  " "CANNOT FOLLOW"
+        (Printf.sprintf "log entry %d: %s; nothing is fetched or pushed" c.entry
+           c.reason))
+    s.cannot_follow;
+  if d.set_aside > 0 then
+    row b "  " "SET ASIDE"
+      (plural d.set_aside "record" "records"
+      ^ " that cannot be read, kept and never run")
 
 let queues b (q : queues) =
   if q.pending_files > 0 then
@@ -92,24 +101,10 @@ let queues b (q : queues) =
         match q.in_flight with
         | [] -> ""
         | l -> ", sending " ^ String.concat ", " l);
-  if q.pending_metadata > 0 then
-    row b "  " "metadata"
-      (plural q.pending_metadata "change" "changes" ^ " pending")
-
-let wal b (w : wal) =
-  if w.set_aside > 0 then
-    row b "  " "SET ASIDE"
-      (plural w.set_aside "record" "records"
-      ^ " that cannot be read, kept and never run");
-  if w.stuck > 0 then
-    row b "  " "WAL STUCK"
-      (plural w.stuck "record" "records"
-      ^ Option.fold ~none:"" ~some:(fun e -> ": " ^ e) w.last_error);
-  if w.retrying > 0 then
-    row b "  " "RETRYING"
-      (plural w.retrying "record" "records"
-      ^ " failing, retried with backoff"
-      ^ match w.last_error with Some e when w.stuck = 0 -> ": " ^ e | _ -> "")
+  if q.parked > 0 then
+    row b "  " "PARKED"
+      (plural q.parked "upload" "uploads"
+      ^ Option.fold ~none:"" ~some:(fun e -> ": " ^ e) q.last_error)
 
 let traffic b indent (t : traffic) =
   row b indent "traffic"
@@ -155,14 +150,6 @@ let backend b (be : backend) =
     | Up, Reachable r ->
         row b "    " "reachable" (Printf.sprintf "yes (%.0f ms)" r.latency_ms)
     | Up, Unreachable e -> row b "    " "UNREACHABLE" e);
-  (match be.journal with
-    | Counting -> row b "    " "journal" "counting…"
-    | Unreadable e -> row b "    " "journal" ("unreadable: " ^ e)
-    | Entries e ->
-        row b "    " "journal"
-          (Printf.sprintf "%s, %d to apply"
-             (plural e.entries "entry" "entries")
-             e.behind));
   (match be.corrupted with
     | Not_checked why ->
         row b "    " "corrupted"
@@ -215,7 +202,6 @@ let domain b = function
       cache b d.cache;
       sync b d;
       queues b d.queues;
-      wal b d.wal;
       List.iter (frontend b) d.frontends;
       List.iter (backend b) d.backends
 

@@ -17,6 +17,7 @@ type report = {
   skipped : int;
   skipped_symlinks : int;
   failed : (string * string) list;
+  uncommitted : int;
   cancelled : bool;
 }
 

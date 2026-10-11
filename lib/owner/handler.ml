@@ -350,19 +350,6 @@ let state_changed t path =
   let (module E : Engine.S) = t.engine in
   notify_folders t [(if E.kind path = `Dir then path else Names.parent_of path)]
 
-(* Pitfall A-10.15: walked level by level, each folder removed after its
-   contents. *)
-let rmdir_subtree (module E : Engine.S) path =
-  let rec remove path =
-    List.iter
-      (fun (e : E.entry) ->
-        let p = Names.join path e.name in
-        if e.is_dir then remove p else E.delete p)
-      (E.list_children path);
-    E.rmdir path
-  in
-  remove path
-
 (* 08 §2.3: the last count of items a listing or feed page could not name,
    reported by [status]. *)
 let note_unnamed t n =
@@ -834,11 +821,6 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
         E.set_paused on;
         E.is_paused ()
     | Retry -> E.rearm ()
-    | Trash_restore path -> (
-        match E.restore_from_trash path with
-          | `Restored n -> Protocol.Restored n
-          | `Not_in_trash -> Not_in_trash
-          | `Exists -> Name_taken)
     | Share r ->
         let module S =
           Tsync_gc.Share.Make ((val Tsync_domain.Domain.context t.domain)) in
@@ -874,10 +856,14 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
         t.hooks.reannounce ()
     | Cursor -> E.cursor ()
     | Changes_since r -> changes t ~anchor:r.anchor ~limit:r.limit
-    | Sync r -> (
-        match E.resync ~full:r.full () with
-          | `Incremental n -> Protocol.Incremental n
-          | `Full (manifests, failed) -> Protocol.Full { manifests; failed })
+    | Sync r ->
+        let s = E.resync ~full:r.full () in
+        {
+          Protocol.arrival = s.arrival;
+          changed = s.changed;
+          committed = s.committed;
+          pending = s.pending;
+        }
     | Ensure_cached r ->
         let path = target t r.item in
         Transfer.check_dest ~roots:t.dest_roots r.dest;
@@ -1000,7 +986,7 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
             let path = target t item in
             if path = "" then invalid "the root cannot be removed";
             if E.kind path <> `Dir then invalid "not a folder";
-            rmdir_subtree t.engine path)
+            E.remove_tree path)
 
 (* failure-model §8.2: the reply is bounded, the work behind it is not. *)
 let bounded f =

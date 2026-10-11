@@ -11,8 +11,7 @@ type content =
   | Slots of slot array
   | Whole of { body : string; h1 : string option }
 
-type base = Base_unknown | Base_none | Base of string
-type state = Owed | Committed of Manifest.t
+type state = Owed | Uploaded of Manifest.t
 
 type edit = {
   name : string;
@@ -20,7 +19,6 @@ type edit = {
   mtime : float;
   chunk_size : int;
   content : content;
-  base : base;
   state : state;
 }
 
@@ -44,21 +42,17 @@ let encode e =
       | Whole { body; h1 } ->
           ("whole", `String body)
           :: (match h1 with Some h -> [("h1", `String h)] | None -> []))
-    @ (match e.base with
-      | Base_unknown -> []
-      | Base_none -> [("base", `Null)]
-      | Base h -> [("base", `String h)])
     @
       match e.state with
       | Owed -> []
-      | Committed m -> [("published", `String (Base64.encode_string m.body))]
+      | Uploaded m -> [("uploaded", `String (Base64.encode_string m.body))]
   in
   Yojson.Safe.to_string (`Assoc fields)
 
 let is_hex16 s = String.length s = 16 && String.for_all Names.is_hexlower s
 
 (* 04 §2.5 reader rules: missing slots mean Zero, extra ones are ignored, a
-   [published] that does not decode reads as Owed. *)
+   [uploaded] that does not decode reads as Owed. *)
 let decode body =
   match Yojson.Safe.from_string body with
     | exception _ -> None
@@ -84,7 +78,7 @@ let decode body =
               in
               match chunk_size with
                 | None -> None
-                | Some chunk_size -> (
+                | Some chunk_size ->
                     let n = Chunking.count ~size ~cs:chunk_size in
                     let slot = function
                       | `Assoc s -> (
@@ -139,38 +133,22 @@ let decode body =
                         | None, None -> Some (Slots (Array.make n Zero))
                         | _ -> None
                     in
-                    let base =
-                      match List.assoc_opt "base" f with
-                        | None -> Some Base_unknown
-                        | Some `Null -> Some Base_none
-                        | Some (`String h) when is_hex16 h -> Some (Base h)
-                        | _ -> None
-                    in
                     let state =
-                      match List.assoc_opt "published" f with
+                      match List.assoc_opt "uploaded" f with
                         | Some (`String b64) -> (
                             match
                               Option.bind
                                 (Result.to_option (Base64.decode b64))
                                 Manifest.decode
                             with
-                              | Some m -> Committed m
+                              | Some m -> Uploaded m
                               | None -> Owed)
                         | _ -> Owed
                     in
-                    match (content, base) with
-                      | Some content, Some base ->
-                          Some
-                            {
-                              name;
-                              size;
-                              mtime;
-                              chunk_size;
-                              content;
-                              base;
-                              state;
-                            }
-                      | _ -> None))
+                    Option.map
+                      (fun content ->
+                        { name; size; mtime; chunk_size; content; state })
+                      content)
           | _ -> None)
     | _ -> None
 
@@ -296,16 +274,11 @@ let edits t =
 let edits_under t dir =
   List.filter (fun (rel, _) -> Names.is_under ~dir rel) (edits t)
 
-let move ?(new_file = false) t ~src ~dst =
+let move t ~src ~dst =
   match edit t src with
     | None -> ()
     | Some e ->
-        write t dst
-          {
-            e with
-            name = Names.leaf_of dst;
-            base = (if new_file then Base_none else e.base);
-          };
+        write t dst { e with name = Names.leaf_of dst };
         remove t src
 
 let bodies_named e =

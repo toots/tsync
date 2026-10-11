@@ -65,6 +65,8 @@ type report = {
   planned : (string * decision) list;  (** every entry's decision, in order *)
   unpublished : string list;
       (** edits of this client under a domain source, not copied *)
+  uncommitted : int;
+      (** changes made and not committed when the run was interrupted *)
   cancelled : bool;
 }
 

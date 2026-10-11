@@ -1,55 +1,34 @@
-(** Integrity (spec 05 §4.10, gc.md §4.6): what is wrong with a domain's tree
-    and chunks, and the repairs that put it right. Without [apply] a repair is a
-    dry run: every read and decision, nothing written. *)
+(** Integrity (spec 05 §4.10): what the tree holds that its log does not account
+    for, the chunks a member marked corrupt, and the repair of those chunks. The
+    tree report is read-only: a tree behind its log is brought up by projection,
+    and nothing repairs the tree from a report. *)
 
 open Tsync_core
 
 type finding =
-  | Twice of { id : Folder_id.t; paths : string list }
-  | Disowned of { marker : Key.t; anchor : Folder.anchor }
-  | Trashed_live of { entry : Key.t; id : Folder_id.t }
-  | Unanchored of {
-      path : string;
-      id : Folder_id.t;
-      parent : Folder_id.t;
-      name : string;
-    }
-  | Orphan of {
-      id : Folder_id.t;
-      name : string;  (** from its anchor, else its id *)
-      parent : Folder_id.t option;  (** its anchor's *)
-      objects : int;
-      sample : Key.t list;  (** at most 3 *)
-      newest : float;  (** its anchor's and objects' latest write *)
-      top_level : bool;  (** its anchor's parent is not an orphan *)
-    }
+  | Disowned of { marker : Key.t; anchor : Folder.anchor option }
+      (** a marker its folder's anchor does not name, or whose folder has none
+      *)
+  | Unmarked of { id : Folder_id.t; parent : Folder_id.t; name : string }
+      (** a folder with an anchor and no filed marker *)
+  | Unaccounted of { key : Key.t; found : string; expected : string option }
+      (** a record that is not the value the last retained entry gives its key,
+          a key such an entry gives a value and that has no record, or a record
+          in the namespace of a folder with no anchor *)
+
+(** [Behind]: an entry exists above the tree head, the records are between two
+    trees, and no finding is made. *)
+type tree =
+  | Behind of { tree_head : int; head : int }
+  | Findings of finding list
 
 (** A chunk a member marked corrupt. *)
 type corrupt = { member : string; chunk : Chunk_key.t }
 
-type report = {
-  findings : finding list;
-      (** Twice (sorted), Disowned, Trashed_live, Unanchored, Orphan *)
-  tombstones : int;  (** namespaces holding only their anchor *)
-  unreadable : Key.t list;
-      (** folders the walk could not read: the walk is incomplete, and no orphan
-          is adopted from it (gc §4.6) *)
-  corrupt : corrupt list;
-}
+type report = { tree : tree; corrupt : corrupt list }
 
 val healthy : report -> bool
 val describe : finding -> string
-
-type tree_repair =
-  | Deleted  (** the stale marker or trash entry *)
-  | Anchored
-  | Adopted  (** into the trash, at the root under its name *)
-  | Young  (** an orphan younger than [orphan_grace] *)
-  | Nested  (** an orphan inside another, considered once that one is adopted *)
-  | Left  (** Twice: reported only *)
-  | Incomplete
-      (** an orphan, not adopted: the walk could not read every folder *)
-  | Failed of string
 
 type chunk_repair =
   | Cleared  (** the marked member's own copy is sound: rewritten over itself *)
@@ -68,21 +47,8 @@ type verified =
   | Abandoned of { left : int option; corrupt : int option }
       (** cancelled; the queued requests stay and are still consumed *)
 
-(** The journal retention horizon plus 7 days. *)
-val orphan_grace : float
-
 module Make (_ : Tsync_remote.Context.S) : sig
   val report : ?narrate:Narrate.t -> ?cancelled:(unit -> bool) -> unit -> report
-
-  (** Stops before the next finding once [cancelled] holds, answering what it
-      did. *)
-  val repair_tree :
-    ?narrate:Narrate.t ->
-    ?apply:bool ->
-    ?cancelled:(unit -> bool) ->
-    ?now:float ->
-    report ->
-    (finding * tree_repair) list
 
   (** Queue a check of every chunk on each member with a confirmed bucket
       function, then follow each every [poll] seconds (default 3) until no

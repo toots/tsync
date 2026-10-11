@@ -1,14 +1,8 @@
 open Tsync_core
 
-type t = {
-  dir : string;
-  m : Mutex.t;
-  handled : (string, unit) Hashtbl.t;
-  mutable head : Entry_key.t option;
-}
+type t = { dir : string; m : Mutex.t; mutable head : Feed_key.t option }
 
-let open_ dir =
-  { dir; m = Mutex.create (); handled = Hashtbl.create 4096; head = None }
+let open_ dir = { dir; m = Mutex.create (); head = None }
 
 (* [YYYY-MM.log]: name order is time order. *)
 let shards t =
@@ -37,7 +31,7 @@ let parse_line l =
   match String.index_opt l '\t' with
     | None -> None
     | Some i -> (
-        match Entry_key.parse (String.sub l 0 i) with
+        match Feed_key.parse (String.sub l 0 i) with
           | None -> None
           | Some k -> (
               match
@@ -68,22 +62,8 @@ let fold t f acc =
     acc (shards t)
 
 let load t =
-  let head = ref None in
-  fold t
-    (fun () (k, _) ->
-      Hashtbl.replace t.handled (Entry_key.to_string k) ();
-      head := Some k)
-    ();
-  Mutex.protect t.m (fun () -> t.head <- !head)
-
-let contains t k =
-  Mutex.protect t.m (fun () -> Hashtbl.mem t.handled (Entry_key.to_string k))
-
-let keys t =
-  Mutex.protect t.m (fun () ->
-      Hashtbl.fold
-        (fun k () acc -> Option.get (Entry_key.parse k) :: acc)
-        t.handled [])
+  let head = fold t (fun _ (k, _) -> Some k) None in
+  Mutex.protect t.m (fun () -> t.head <- head)
 
 let head t = Mutex.protect t.m (fun () -> t.head)
 
@@ -95,20 +75,18 @@ let current_shard () =
    append and only that record is lost. *)
 let note ?(fids = []) t k ops =
   Mutex.protect t.m (fun () ->
-      if not (Hashtbl.mem t.handled (Entry_key.to_string k)) then (
-        Fs.mkdir_p t.dir;
-        Fs.append_durable
-          (Filename.concat t.dir (current_shard ()))
-          ("\n" ^ Entry_key.to_string k ^ "\t"
-          ^ Yojson.Safe.to_string
-              (`List
-                 (List.mapi
-                    (fun i op -> op_to_json ?fid:(List.assoc_opt i fids) op)
-                    ops)));
-        Hashtbl.replace t.handled (Entry_key.to_string k) ();
-        t.head <- Some k))
+      Fs.mkdir_p t.dir;
+      Fs.append_durable
+        (Filename.concat t.dir (current_shard ()))
+        ("\n" ^ Feed_key.to_string k ^ "\t"
+        ^ Yojson.Safe.to_string
+            (`List
+               (List.mapi
+                  (fun i op -> op_to_json ?fid:(List.assoc_opt i fids) op)
+                  ops)));
+      t.head <- Some k)
 
-type page = { entries : (Entry_key.t * op list) list; more : bool }
+type page = { entries : (Feed_key.t * op list) list; more : bool }
 
 (* Positions are line order, the earliest line of a key being its position. *)
 let since t anchor limit =
@@ -129,7 +107,7 @@ let since t anchor limit =
       | Some a ->
           let rec drop = function
             | [] -> None
-            | (k, _) :: tl -> if Entry_key.equal k a then Some tl else drop tl
+            | (k, _) :: tl -> if Feed_key.equal k a then Some tl else drop tl
           in
           drop all
   in
@@ -139,7 +117,7 @@ let since t anchor limit =
         let entries = List.filteri (fun i _ -> i < limit) rest in
         `Page { entries; more = List.length rest > limit }
 
-(* wal-and-journal §4.8: a shard goes only when it is not the newest, every key
+(* 03 §2.9: a shard goes only when it is not the newest, every key
    in it is older than [keep], and it comes before the shard holding [hold]'s
    entry. *)
 let prune ?(hold = `Nothing) ?(before_drop = ignore) t ~now ~keep =
@@ -153,7 +131,7 @@ let prune ?(hold = `Nothing) ?(before_drop = ignore) t ~now ~keep =
           List.find_opt
             (fun shard ->
               List.exists
-                (fun (k', _) -> Entry_key.equal k k')
+                (fun (k', _) -> Feed_key.equal k k')
                 (lines_of t shard))
             all
   in
@@ -166,15 +144,11 @@ let prune ?(hold = `Nothing) ?(before_drop = ignore) t ~now ~keep =
         if
           List.for_all
             (fun (k, _) ->
-              Int64.to_float (Entry_key.ms k) /. 1000. < now -. keep)
+              Int64.to_float (Feed_key.ms k) /. 1000. < now -. keep)
             lines
         then (
           before_drop ();
           ignore (Fs.release (Filename.concat t.dir shard));
-          Mutex.protect t.m (fun () ->
-              List.iter
-                (fun (k, _) -> Hashtbl.remove t.handled (Entry_key.to_string k))
-                lines);
           removed + 1)
         else removed))
     0 all

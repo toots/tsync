@@ -25,22 +25,97 @@ type handle = {
   mutable pos : int;
 }
 
-let upload_kind accepts =
+(* 04 §2.8: the file key, so a record follows its file through a folder rename. *)
+type upload = {
+  file : Algebra.place;
+  attempts : int;
+  last_error : (string * string) option;
+}
+
+let upload_key (p : Algebra.place) = Folder_id.to_string p.parent ^ "/" ^ p.name
+
+let upload_kind =
   {
-    Dqueue.decode = Wal.decode;
-    encode = Wal.encode;
-    key =
-      (fun (r : Wal.record) ->
-        match r.ops with [Op.Put { path; _ }] -> Some path | _ -> None);
+    Dqueue.decode =
+      (fun body ->
+        match Yojson.Safe.from_string body with
+          | exception _ -> None
+          | `Assoc l as json -> (
+              match Log_entry.key_of_json json with
+                | Ok (`File file) ->
+                    Some
+                      {
+                        file;
+                        attempts =
+                          (match List.assoc_opt "attempts" l with
+                            | Some (`Int n) -> n
+                            | _ -> 0);
+                        last_error =
+                          (match List.assoc_opt "lastError" l with
+                            | Some (`Assoc e) -> (
+                                match
+                                  ( List.assoc_opt "kind" e,
+                                    List.assoc_opt "detail" e )
+                                with
+                                  | Some (`String k), Some (`String d) ->
+                                      Some (k, d)
+                                  | _ -> None)
+                            | _ -> None);
+                      }
+                | _ -> None)
+          | _ -> None);
+    encode =
+      (fun u ->
+        Yojson.Safe.to_string
+          (`Assoc
+             (Log_entry.key_fields (`File u.file)
+             @ [("attempts", `Int u.attempts)]
+             @
+               match u.last_error with
+               | Some (kind, detail) ->
+                   [
+                     ( "lastError",
+                       `Assoc
+                         [("kind", `String kind); ("detail", `String detail)] );
+                   ]
+               | None -> [])));
+    key = (fun u -> Some (upload_key u.file));
     note =
-      (fun r f ->
+      (fun u f ->
         {
-          r with
-          attempts = r.attempts + 1;
+          u with
+          attempts = u.attempts + 1;
           last_error = Some (Fail.kind_name f.kind, f.reason);
         });
-    accepts;
+    accepts = (fun _ -> true);
   }
+
+(* 04 §2.8: one feed op and the ids of the files it names, read before the
+   first local step. *)
+let encode_intent op fids =
+  Yojson.Safe.to_string
+    (`Assoc
+       [
+         ("op", Op.to_json op);
+         ("fids", `List (List.map (fun f -> `String f) fids));
+       ])
+
+let decode_intent body =
+  match Yojson.Safe.from_string body with
+    | exception _ -> None
+    | `Assoc l -> (
+        match Option.map Op.of_json (List.assoc_opt "op" l) with
+          | Some (Some op) ->
+              Some
+                ( op,
+                  match List.assoc_opt "fids" l with
+                    | Some (`List fids) ->
+                        List.filter_map
+                          (function `String f -> Some f | _ -> None)
+                          fids
+                    | _ -> [] )
+          | Some None | None | (exception Op.Bad _) -> None)
+    | _ -> None
 
 module Make (C : Engine_ctx.S) = struct
   module R = Remote.Make (C)
@@ -50,35 +125,32 @@ module Make (C : Engine_ctx.S) = struct
   let mirror = Mirror.create ~cache_root:C.cache_root d
   let staged = Staged.create ~cache_root:C.cache_root d
   let applied = Applied.open_ (Filename.concat (Mirror.root mirror) "applied")
-  let journal = Journal.create d C.store
   let folder_minter = Identity.minter ~data_dir:C.data_dir ~uuid:C.client_uuid
+  let sync_state = Sync_state.open_ ~data_dir:C.data_dir d
 
-  let wal =
-    Dqueue.Records.open_
-      (List.fold_left Filename.concat C.data_dir
-         ["journal-pending"; Domain_name.to_string d])
+  let log_dir name =
+    List.fold_left Filename.concat C.data_dir [name; Domain_name.to_string d]
+
+  let upload_log = Dqueue.Records.open_ (log_dir "uploads-pending")
+  let intents = Dqueue.Records.open_ (log_dir "intents-pending")
 
   let cache =
     Cache.create ~cache_root:C.cache_root ~domain:d ~cc:C.cache_chunk_size
       ~fast:C.store.fast_read ~get_whole:R.get_chunk
       ~get_range:R.get_chunk_range ~cap:C.max_cache
 
-  (* The applied log and the mark are observed once loaded, at start. *)
-  let keys =
-    Entry_key.minter ~client:C.client_uuid
-      ~seen:(List.filter_map Entry_key.parse (Dqueue.Records.list wal))
+  let () = Applied.load applied
 
-  let mint () = Entry_key.to_string (Entry_key.mint keys)
+  let feed_keys =
+    Feed_key.minter ~client:C.client_uuid
+      ~seen:(Option.to_list (Applied.head applied))
 
   let uploads =
     Dqueue.create ~workers:(max 1 C.max_uploads) ~name:"uploads" ~ordered:false
-      (upload_kind Wal.puts_only)
-      wal
+      upload_kind upload_log
 
-  let metadata =
-    Dqueue.create ~name:"metadata" ~ordered:true
-      (upload_kind Wal.is_metadata)
-      wal
+  let cycle_signal = Rt.Signal.create ()
+  let wake_cycle () = Rt.Signal.broadcast cycle_signal
 
   (* 04 §3.2: the metadata lock serialises every namespace change; each key's
      lock every content change of that key, taken after the metadata lock. *)
@@ -225,7 +297,8 @@ module Make (C : Engine_ctx.S) = struct
                     (String.length h.path - String.length src))
           handles)
 
-  let parent_id path = Mirror.folder_id mirror (Names.parent_of path)
+  let folder_id_of path = Mirror.folder_id mirror path
+  let parent_id path = folder_id_of (Names.parent_of path)
 
   let require_parent path =
     match parent_id path with
@@ -233,6 +306,57 @@ module Make (C : Engine_ctx.S) = struct
       | None ->
           Fail.raise_ Fail.Unprepared ~repair:"run 'tsync sync'"
             "%s: this client has not resolved its folder" (Names.parent_of path)
+
+  let place_of path : Algebra.place =
+    { parent = require_parent path; name = Names.leaf_of path }
+
+  let path_of (p : Algebra.place) =
+    Option.map
+      (fun dir -> Names.join dir p.name)
+      (Mirror.key_of_id mirror p.parent)
+
+  (* The value of a file key in [L]: the staged edit when there is one, else
+     the mirror entry (conflict-resolution §3). *)
+  let mirror_value path : Log_entry.value option =
+    match Mirror.file mirror path with
+      | `File m -> Some (Known m)
+      | `Corrupt -> Some Unknown
+      | `Dir | `Absent -> None
+
+  let local_file path : Log_entry.value option =
+    match Staged.read staged path with
+      | `Edit { state = Uploaded m; _ } -> Some (Known m)
+      | `Edit { state = Owed; _ } | `Unparseable -> Some Unknown
+      | `Absent -> mirror_value path
+
+  let local_folder id : Algebra.place option =
+    match Mirror.key_of_id mirror id with
+      | Some path when path <> "" ->
+          Option.map
+            (fun parent -> { Algebra.parent; name = Names.leaf_of path })
+            (parent_id path)
+      | _ -> None
+
+  let same_file = Option.equal Log_entry.equal
+
+  (* publication §4.1: a before-value that [L] returned to is dropped. *)
+  let settle path =
+    let p = place_of path in
+    match Sync_state.before_file sync_state p with
+      | Some before when same_file before (local_file path) ->
+          Sync_state.drop sync_state (`File p)
+      | _ -> ()
+
+  let settle_folder id =
+    match Sync_state.before_folder sync_state id with
+      | Some before when before = local_folder id ->
+          Sync_state.drop sync_state (`Folder id)
+      | _ -> ()
+
+  let note_folder id = Sync_state.record_folder sync_state id (local_folder id)
+
+  let feed ?fids ops =
+    if ops <> [] then Applied.note ?fids applied (Feed_key.mint feed_keys) ops
 
   let kind path =
     if path = "" then `Dir
@@ -281,7 +405,7 @@ module Make (C : Engine_ctx.S) = struct
   let content_id path =
     match resolve path with
       | Some (Published m) -> Some m.h1
-      | Some (Staged_edit { state = Committed m; _ }) -> Some m.h1
+      | Some (Staged_edit { state = Uploaded m; _ }) -> Some m.h1
       | Some (Staged_edit e) -> whole_digest e
       | None -> None
 
@@ -309,7 +433,7 @@ module Make (C : Engine_ctx.S) = struct
                   mtime = e.mtime;
                   content_id =
                     (match e.state with
-                      | Committed m -> Some m.h1
+                      | Uploaded m -> Some m.h1
                       | Owed -> whole_digest e);
                   etag = "";
                   staged = true;
@@ -526,6 +650,90 @@ module Make (C : Engine_ctx.S) = struct
 
   let release = close_read
 
+  (* 04 §4.7: every step idempotent; bodies go last so a reader of either
+     representation still finds its bytes. *)
+  let promote_held path =
+    match Staged.edit staged path with
+      | Some ({ state = Uploaded m; _ } as e) ->
+          (match e.content with
+            | Slots slots ->
+                let cc = Cache.cc cache in
+                List.iter
+                  (fun (g : Cache.group) ->
+                    let states =
+                      List.map
+                        (fun (x : Cache.member) ->
+                          if x.index < Array.length slots then slots.(x.index)
+                          else Staged.Zero)
+                        g.members
+                    in
+                    let staged_members =
+                      List.filter
+                        (function Staged.Staged _ -> true | _ -> false)
+                        states
+                    in
+                    if
+                      staged_members <> []
+                      && not (List.exists (( = ) Staged.Inherit) states)
+                    then (
+                      let one_body =
+                        match staged_members with
+                          | Staged.Staged { body; _ } :: _ ->
+                              List.for_all2
+                                (fun (x : Cache.member) st ->
+                                  match st with
+                                    | Staged.Staged { body = b; off } ->
+                                        b = body && off = x.off
+                                    | _ -> true)
+                                g.members states
+                              |> fun ok -> if ok then Some body else None
+                          | _ -> None
+                      in
+                      match one_body with
+                        | Some body when Staged.body_links staged body = 1 ->
+                            let fd = Staged.open_body staged body in
+                            Fs.with_fd fd (fun fd ->
+                                Fs.sys (fun () ->
+                                    Unix.LargeFile.ftruncate fd
+                                      (Int64.of_int g.gsize));
+                                Fs.fsync fd);
+                            Cache.adopt_body cache g.gkey
+                              (Staged.body_path staged body)
+                        | _ ->
+                            let data =
+                              Bigstring.concat
+                                (List.map
+                                   (fun (x : Cache.member) ->
+                                     read_staged path e
+                                       ~off:(x.index * m.chunk_size) ~len:x.len)
+                                   g.members)
+                            in
+                            let tmp =
+                              Fs.write_temp_bigstring
+                                (Filename.dirname (Staged.body_path staged "x"))
+                                data
+                            in
+                            Fun.protect
+                              ~finally:(fun () -> Fs.unlink_quiet tmp)
+                              (fun () -> Cache.adopt_body cache g.gkey tmp)))
+                  (Cache.groups ~cc m)
+            | Whole _ -> ());
+          Mirror.write_file ~own:true mirror path m;
+          end_lineage path;
+          Staged.remove staged path;
+          release_unnamed e None
+      | _ -> ()
+
+  let promote path = with_key path (fun () -> promote_held path)
+
+  (* 04 §4.3: an Uploaded edit of a clean key was committed and is promoted
+     before the key changes; then the key's before-value is recorded. *)
+  let begin_change ?durable path =
+    let p = place_of path in
+    if Sync_state.before_file sync_state p = None then (
+      promote_held path;
+      Sync_state.record_file ?durable sync_state p (mirror_value path))
+
   let size_of path =
     match resolve path with
       | Some (Published m) -> m.size
@@ -589,7 +797,6 @@ module Make (C : Engine_ctx.S) = struct
                       (Array.make
                          (Chunking.count ~size:m.size ~cs:m.chunk_size)
                          Staged.Inherit);
-                  base = Base m.h1;
                   state = Owed;
                 }
             | `Dir -> Fail.raise_ Fail.Exists "%s is a folder" path
@@ -600,7 +807,6 @@ module Make (C : Engine_ctx.S) = struct
                   mtime = Unix.gettimeofday ();
                   chunk_size = R.chunk_size ();
                   content = Slots [||];
-                  base = Base_none;
                   state = Owed;
                 })
 
@@ -735,6 +941,7 @@ module Make (C : Engine_ctx.S) = struct
   let write path ~off data =
     check_writable ();
     with_key path (fun () ->
+        begin_change ~durable:false path;
         let before = Staged.edit staged path in
         let e0 = staged_for path in
         let e = e0 in
@@ -781,6 +988,7 @@ module Make (C : Engine_ctx.S) = struct
   let truncate path size =
     check_writable ();
     with_key path (fun () ->
+        begin_change ~durable:false path;
         let before = Staged.edit staged path in
         let e = staged_for path in
         let cs = e.chunk_size in
@@ -845,12 +1053,8 @@ module Make (C : Engine_ctx.S) = struct
           Fail.raise_ Fail.Exists "%s exists" path;
         if Mirror.kind mirror path = `Dir then
           Fail.raise_ Fail.Exists "%s is a folder" path;
+        begin_change ~durable:false path;
         let before = Staged.edit staged path in
-        let base =
-          match Mirror.manifest mirror path with
-            | Some m -> Staged.Base m.h1
-            | None -> Base_none
-        in
         let e =
           {
             Staged.name = Names.leaf_of path;
@@ -858,7 +1062,6 @@ module Make (C : Engine_ctx.S) = struct
             mtime = Unix.gettimeofday ();
             chunk_size = R.chunk_size ();
             content = Slots [||];
-            base;
             state = Owed;
           }
         in
@@ -872,16 +1075,15 @@ module Make (C : Engine_ctx.S) = struct
       | None -> ()
       | Some e ->
           fsync_bodies e;
-          Staged.write staged path e
+          Staged.write staged path e;
+          Sync_state.harden sync_state (`File (place_of path))
 
   let sync path = with_key path (fun () -> sync_edit path)
 
-  (* The owner's hook to post an upload record; set by the engine. *)
-  let post_put_hook : (string -> int -> string option -> unit) ref =
-    ref (fun _ _ _ -> ())
-
-  let base_hex (e : Staged.edit) =
-    match e.base with Base h -> Some h | _ -> None
+  let post_put path =
+    ignore
+      (Dqueue.post uploads
+         { file = place_of path; attempts = 0; last_error = None })
 
   let close path =
     with_key path (fun () ->
@@ -892,17 +1094,16 @@ module Make (C : Engine_ctx.S) = struct
               x)
         in
         match Staged.edit staged path with
-          | Some e when was_dirty ->
+          | Some _ when was_dirty ->
               sync_edit path;
-              !post_put_hook path e.size (base_hex e)
+              post_put path
           | _ -> ())
 
   let aside_name path ~is_dir =
     let parent = Names.parent_of path and leaf = Names.leaf_of path in
     let rec pick n =
       let cand =
-        Names.join parent
-          (Conflict.conflict_name ~client:C.client_name ~is_dir leaf n)
+        Names.join parent (Conflict.name ~client:C.client_name ~is_dir leaf n)
       in
       if kind cand = `Absent then cand else pick (n + 1)
     in
@@ -956,13 +1157,11 @@ module Make (C : Engine_ctx.S) = struct
     let stale =
       match base with Some b -> content_id path <> Some b | None -> false
     in
-    let path, base =
-      if stale then (aside_name path ~is_dir:false, Some Staged.Base_none)
-      else (path, Option.map (fun b -> Staged.Base b) base)
-    in
+    let path = if stale then aside_name path ~is_dir:false else path in
     with_key path (fun () ->
         if Mirror.kind mirror path = `Dir then
           Fail.raise_ Fail.Exists "%s is a folder" path;
+        begin_change path;
         let before = Staged.edit staged path in
         let current = content_id path in
         with_new_bodies path @@ fun register ->
@@ -988,16 +1187,10 @@ module Make (C : Engine_ctx.S) = struct
         let st = Fs.sys (fun () -> Unix.LargeFile.stat dst) in
         let size = Int64.to_int st.st_size and chunk_size = R.chunk_size () in
         let h1 = digest_of_body ~size ~cs:chunk_size id in
-        if h1 <> None && h1 = current then release_body id
+        if h1 <> None && h1 = current then (
+          release_body id;
+          settle path)
         else (
-          let base =
-            match base with
-              | Some b -> b
-              | None -> (
-                  match Mirror.manifest mirror path with
-                    | Some m -> Base m.h1
-                    | None -> Base_none)
-          in
           let e =
             {
               Staged.name = Names.leaf_of path;
@@ -1005,7 +1198,6 @@ module Make (C : Engine_ctx.S) = struct
               mtime = st.st_mtime;
               chunk_size;
               content = Whole { body = id; h1 };
-              base;
               state = Owed;
             }
           in
@@ -1015,40 +1207,20 @@ module Make (C : Engine_ctx.S) = struct
           Option.iter (fun o -> release_unnamed o (Some e)) before;
           ignore (Mirror.ensure_file_id mirror path);
           bump path;
-          !post_put_hook path e.size (base_hex e)))
-
-  (* The paths local namespace changes and promotions touched while a rebuild
-     walks: its sweep leaves them alone. *)
-  let touched : (string, unit) Hashtbl.t option Atomic.t = Atomic.make None
-  let touched_m = Mutex.create ()
-
-  let note_touched paths =
-    Mutex.protect touched_m (fun () ->
-        Option.iter
-          (fun h -> List.iter (fun p -> Hashtbl.replace h p ()) paths)
-          (Atomic.get touched))
-
-  let was_touched p =
-    Mutex.protect touched_m (fun () ->
-        match Atomic.get touched with
-          | Some h -> Hashtbl.mem h p
-          | None -> false)
+          post_put path))
 
   (* 04 §2.8 [fids]: read before the local half, which may remove a marker. *)
-  let fids_of ops =
-    List.concat
-      (List.mapi
-         (fun i op ->
-           match
-             Option.bind (Wal.subject op) (fun (_, p) ->
-                 Mirror.file_id mirror p)
-           with
-             | Some id -> [(i, id)]
-             | None -> [])
-         ops)
+  let fid_of_op op =
+    let file =
+      match op with
+        | Op.Put { path; _ } | Delete path -> Some path
+        | Rename { is_dir = false; src; _ } -> Some src
+        | _ -> None
+    in
+    Option.bind file (Mirror.file_id mirror)
 
-  (* The ids an applied-log copy of [ops] carries: [known] by index, else the
-     id now at the path an op leaves its file at. *)
+  (* The ids a feed line carries: [known] by index, else the id now at the
+     path an op leaves its file at. *)
   let note_fids ?(known = []) ops =
     List.concat
       (List.mapi
@@ -1067,65 +1239,34 @@ module Make (C : Engine_ctx.S) = struct
                    | None -> []))
          ops)
 
-  (* WAL records of namespace changes: durable intent before the local half. *)
-  let record_intent ?(priors = []) ops =
-    note_touched (List.concat_map Op.paths ops);
-    let body =
-      Wal.encode
-        {
-          state = Intent;
-          attempts = 0;
-          ops;
-          priors;
-          local_from = [];
-          fids = fids_of ops;
-          last_error = None;
-        }
+  (* 04 §4.5, under the metadata lock: the intent, the local half (which
+     records its before-values first and drops those it returned to), the feed
+     line, then the intent's removal. *)
+  let namespace_op op local =
+    let fid = fid_of_op op in
+    let id =
+      Dqueue.Records.create intents (encode_intent op (Option.to_list fid))
     in
-    Dqueue.Records.create ~mint wal body
+    Fun.protect ~finally:(fun () -> Dqueue.Records.complete intents id) local;
+    let known = match fid with Some f -> [(0, f)] | None -> [] in
+    feed ~fids:(note_fids ~known [op]) [op];
+    changed (Op.paths op);
+    wake_cycle ()
 
-  let prepare id =
-    Dqueue.Records.update wal id (fun b ->
-        match Wal.decode b with
-          | Some r -> Wal.encode { r with state = Prepared; local_from = [] }
-          | None -> b);
-    Dqueue.adopt metadata id
+  let cancel_upload path =
+    Option.iter
+      (fun parent ->
+        Dqueue.cancel_key uploads
+          (upload_key { parent; name = Names.leaf_of path }))
+      (parent_id path)
 
   let remove_local_file l =
-    Dqueue.cancel_key uploads l;
+    cancel_upload l;
     end_lineage l;
     (match Mirror.manifest mirror l with
       | Some m -> Cache.evict cache m
       | None -> ());
     Mirror.remove_file mirror l
-
-  (* A namespace change with its local half: Intent, the local effects, then
-     Prepared for the metadata queue. *)
-  let record_owed ?priors ops local =
-    let id = record_intent ?priors ops in
-    local ();
-    prepare id
-
-  let abandon id = Dqueue.Records.complete wal id
-
-  (* Owed work names local effects, so they are durable before Prepared. *)
-  let with_intent ?priors ops local =
-    let id = record_intent ?priors ops in
-    match local () with
-      | `Owed ->
-          prepare id;
-          `Owed
-      | `Nothing_owed ->
-          abandon id;
-          `Nothing_owed
-      | exception e ->
-          abandon id;
-          raise e
-
-  let view_prior path =
-    match Mirror.manifest mirror path with
-      | Some m -> Wal.Content m.h1
-      | None -> Wal.Nothing
 
   let discard_edit path =
     match Staged.edit staged path with
@@ -1137,6 +1278,15 @@ module Make (C : Engine_ctx.S) = struct
           Some e
       | None -> None
 
+  (* The local half of a delete, under the key's lock. *)
+  let delete_held path =
+    begin_change path;
+    ignore (discard_edit path);
+    cancel_upload path;
+    end_lineage path;
+    Mirror.remove_file mirror path;
+    settle path
+
   let delete path =
     check_writable ();
     with_meta (fun () ->
@@ -1144,24 +1294,8 @@ module Make (C : Engine_ctx.S) = struct
           Fail.invalid "%s is a folder" path;
         if not (exists path) then Fail.absent "%s: no such file" path;
         ignore (require_parent path);
-        let prior = view_prior path in
-        ignore
-          (with_intent
-             ~priors:[(0, prior)]
-             [Op.Delete path]
-             (fun () ->
-               with_key path (fun () ->
-                   let e = discard_edit path in
-                   let published = Mirror.manifest mirror path <> None in
-                   end_lineage path;
-                   Mirror.remove_file mirror path;
-                   let committed =
-                     match e with
-                       | Some { state = Committed _; _ } -> true
-                       | _ -> false
-                   in
-                   if published || committed then `Owed else `Nothing_owed)));
-        changed [path])
+        namespace_op (Op.Delete path) (fun () ->
+            with_key path (fun () -> delete_held path)))
 
   let mkdir path ~exclusive =
     check_writable ();
@@ -1174,13 +1308,24 @@ module Make (C : Engine_ctx.S) = struct
                 Fail.raise_ Fail.Exists "%s is a file" path;
               ignore (require_parent path);
               let id = Identity.mint folder_minter in
-              ignore
-                (with_intent
-                   [Op.Mkdir { path; id = Some id }]
-                   (fun () ->
-                     ignore (Mirror.record_folder mirror path id);
-                     `Owed));
-              changed [path])
+              namespace_op
+                (Op.Mkdir { path; id = Some id })
+                (fun () ->
+                  Sync_state.record_folder sync_state id None;
+                  ignore (Mirror.record_folder mirror path id)))
+
+  let require_id path =
+    match Mirror.folder_id mirror path with
+      | Some id -> id
+      | None ->
+          Fail.raise_ Fail.Unprepared ~repair:"run 'tsync sync --full'"
+            "%s: this folder has no id here" path
+
+  (* The local half of removing an empty folder. *)
+  let rmdir_held path id =
+    note_folder id;
+    Mirror.remove_folder mirror path;
+    settle_folder id
 
   let rmdir path =
     check_writable ();
@@ -1190,68 +1335,75 @@ module Make (C : Engine_ctx.S) = struct
         ignore (require_parent path);
         if Mirror.list mirror path <> [] || Staged.edits_under staged path <> []
         then Fail.raise_ Fail.Not_empty "%s is not empty" path;
-        let id = Mirror.folder_id mirror path in
-        ignore
-          (with_intent
-             [Op.Rmdir { path; id }]
-             (fun () ->
-               Mirror.remove_folder mirror path;
-               `Owed));
-        changed [path])
+        let id = require_id path in
+        namespace_op
+          (Op.Rmdir { path; id = Some id })
+          (fun () -> rmdir_held path id))
 
-  (* Every staged edit moved by a rename is posted again under its new path,
-     with a key minted after the rename's. *)
+  (* 04 §4.5 [remove_tree]: children before parents, one command per item;
+     the ops of its feed line with the ids of the files they name. *)
+  let rec remove_tree_held path =
+    let below =
+      List.concat_map
+        (fun (e : entry) ->
+          let p = Names.join path e.name in
+          if e.is_dir then remove_tree_held p
+          else (
+            let fid = Mirror.file_id mirror p in
+            with_key p (fun () -> delete_held p);
+            [(Op.Delete p, fid)]))
+        (list_children path)
+    in
+    match Mirror.folder_id mirror path with
+      | Some id ->
+          rmdir_held path id;
+          below @ [(Op.Rmdir { path; id = Some id }, None)]
+      | None ->
+          Mirror.remove_folder mirror path;
+          below
+
+  let remove_tree path =
+    check_writable ();
+    with_meta (fun () ->
+        if Mirror.kind mirror path <> `Dir then
+          Fail.absent "%s: no such folder" path;
+        ignore (require_parent path);
+        let id = require_id path in
+        let intent =
+          Dqueue.Records.create intents
+            (encode_intent (Op.Rmdir { path; id = Some id }) [])
+        in
+        let ops =
+          Fun.protect
+            ~finally:(fun () -> Dqueue.Records.complete intents intent)
+            (fun () -> remove_tree_held path)
+        in
+        feed
+          ~fids:
+            (List.concat
+               (List.mapi
+                  (fun i (_, fid) ->
+                    match fid with Some f -> [(i, f)] | None -> [])
+                  ops))
+          (List.map fst ops);
+        changed (List.concat_map (fun (op, _) -> Op.paths op) ops);
+        wake_cycle ())
+
+  (* Every staged edit a rename moved is posted again under its new key. *)
   let repost_moved moved =
     List.iter
-      (fun (p, (e : Staged.edit)) -> !post_put_hook p e.size (base_hex e))
+      (fun (p, (e : Staged.edit)) -> if e.state = Owed then post_put p)
       moved
 
   (* The source key's upload is superseded: a running one fails its commit
      check, a queued one finds no edit there. *)
   let supersede src =
     bump src;
-    Dqueue.cancel_key uploads src
+    cancel_upload src
 
-  let move_edit ?new_file ~src ~dst () =
+  let move_edit ~src ~dst =
     supersede src;
-    Staged.move ?new_file staged ~src ~dst
-
-  (* Inherit slots resolve through the mirror at the edit's own path (04 §2.6),
-     so an edit about to leave its base behind takes a copy of those bytes. *)
-  let rec materialise_inherited path =
-    match
-      with_key path (fun () -> (Staged.edit staged path, generation path))
-    with
-      | Some ({ content = Slots slots; _ } as e), g
-        when Array.exists (( = ) Staged.Inherit) slots ->
-          with_new_bodies path @@ fun register ->
-          let body = Staged.new_body_id () in
-          register body;
-          let filled = Array.copy slots in
-          Fs.with_fd (Staged.open_body ~create:true staged body) (fun fd ->
-              Array.iteri
-                (fun i slot ->
-                  let len = Chunking.length ~size:e.size ~cs:e.chunk_size i in
-                  if slot = Staged.Inherit && len > 0 then (
-                    let off = i * e.chunk_size in
-                    let bytes = read_staged path e ~off ~len in
-                    Fs.pwrite_all fd bytes ~boff:0 ~len:(Bigstring.length bytes)
-                      ~off;
-                    filled.(i) <- Staged.Staged { body; off }))
-                slots;
-              Fs.fsync fd);
-          Fs.fsync_dir (Filename.dirname (Staged.body_path staged body));
-          let kept =
-            with_key path (fun () ->
-                generation path = g
-                &&
-                (Staged.write staged path { e with content = Slots filled };
-                 true))
-          in
-          if not kept then (
-            release_body body;
-            materialise_inherited path)
-      | _ -> ()
+    Staged.move staged ~src ~dst
 
   let rename_local ~src ~dst ~is_dir =
     if is_dir then (
@@ -1274,45 +1426,49 @@ module Make (C : Engine_ctx.S) = struct
         moved)
     else (
       let e = Staged.edit staged src in
-      move_edit ~src ~dst ();
+      move_edit ~src ~dst;
       Mirror.move_file mirror ~src ~dst;
       move_handles ~src ~dst;
       match e with Some e -> [(dst, e)] | None -> [])
 
-  (* Local redo of an INTENT record (wal-and-journal §4.7): idempotent. *)
-  let redo (r : Wal.record) =
-    List.iteri
-      (fun i op ->
-        match op with
-          | Op.Delete p ->
-              if Staged.edit staged p = None then Mirror.remove_file mirror p
-          | Mkdir { path; id = Some id } ->
-              if
-                Mirror.key_of_id mirror id = None
-                && Mirror.kind mirror path = `Absent
-              then ignore (Mirror.record_folder mirror path id)
-          | Rmdir { id = Some id; _ } -> (
-              match Mirror.key_of_id mirror id with
-                | Some p -> Mirror.remove_folder mirror p
-                | None -> ())
-          | Rmdir { path; id = None } ->
-              if Mirror.kind mirror path = `Dir then
-                Mirror.remove_folder mirror path
-          | Rename { is_dir = false; src; dst; _ } ->
-              let from =
-                match List.assoc_opt i r.local_from with
-                  | Some x -> x
-                  | None -> src
-              in
-              if kind from <> `Absent && kind dst = `Absent then
-                repost_moved (rename_local ~src:from ~dst ~is_dir:false)
-          | Rename { is_dir = true; dst; id = Some id; _ } -> (
-              match Mirror.key_of_id mirror id with
-                | Some here when kind dst = `Absent && here <> dst ->
-                    repost_moved (rename_local ~src:here ~dst ~is_dir:true)
-                | _ -> ())
-          | _ -> ())
-      r.ops
+  (* A file moved with everything that follows it, both keys settled; under
+     the two key locks. *)
+  let move_file_held ~src ~dst =
+    begin_change src;
+    begin_change dst;
+    let moved = rename_local ~src ~dst ~is_dir:false in
+    settle src;
+    settle dst;
+    repost_moved moved
+
+  (* Completing an intent (04 §4.5): idempotent. *)
+  let redo = function
+    | Op.Delete p -> if kind p = `File then with_key p (fun () -> delete_held p)
+    | Mkdir { path; id = Some id } ->
+        if
+          Mirror.key_of_id mirror id = None && Mirror.kind mirror path = `Absent
+        then (
+          Sync_state.record_folder sync_state id None;
+          ignore (Mirror.record_folder mirror path id))
+    | Rmdir { id = Some id; _ } -> (
+        match Mirror.key_of_id mirror id with
+          | Some p -> ignore (remove_tree_held p)
+          | None -> ())
+    | Rename { is_dir = false; src; dst; _ } ->
+        if kind src <> `Absent && kind dst = `Absent then
+          with_keys [src; dst] (fun () -> move_file_held ~src ~dst)
+    | Rename { is_dir = true; dst; id = Some id; _ } -> (
+        match Mirror.key_of_id mirror id with
+          | Some here when kind dst = `Absent && here <> dst ->
+              note_folder id;
+              repost_moved (rename_local ~src:here ~dst ~is_dir:true);
+              settle_folder id
+          | _ -> settle_folder id)
+    | Put _
+    | Mkdir { id = None; _ }
+    | Rmdir { id = None; _ }
+    | Rename { is_dir = true; id = None; _ } ->
+        ()
 
   let rename ~src ~dst ~exclusive =
     check_writable ();
@@ -1336,34 +1492,29 @@ module Make (C : Engine_ctx.S) = struct
             | _ -> ());
           ignore (require_parent dst);
           let is_dir = sk = `Dir in
-          if is_dir then ignore (require_parent src);
-          let size = if is_dir then None else Some (size_of src) in
-          let id = if is_dir then Mirror.folder_id mirror src else None in
-          let op = Op.Rename { dst; src; is_dir; size; id } in
-          let priors = if is_dir then [] else [(0, view_prior dst)] in
-          let locked =
-            if is_dir then
+          if is_dir then (
+            ignore (require_parent src);
+            let id = require_id src in
+            let replaced = if dk = `Dir then Some (require_id dst) else None in
+            let locked =
               [src; dst] @ List.map fst (Staged.edits_under staged src)
-            else [src; dst]
-          in
-          let moved = ref [] in
-          ignore
-            (with_intent ~priors [op] (fun () ->
-                 with_keys locked (fun () ->
-                     let never_published =
-                       (not is_dir) && Mirror.manifest mirror src = None
-                     in
-                     (match dk with
-                       | `Dir -> Mirror.remove_folder mirror dst
-                       | `File ->
-                           ignore (discard_edit dst);
-                           end_lineage dst;
-                           Mirror.remove_file mirror dst
-                       | `Absent -> ());
-                     moved := rename_local ~src ~dst ~is_dir;
-                     if never_published then `Nothing_owed else `Owed)));
-          repost_moved !moved;
-          changed [src; dst]))
+            in
+            namespace_op
+              (Op.Rename { dst; src; is_dir; size = None; id = Some id })
+              (fun () ->
+                with_keys locked (fun () ->
+                    Option.iter (rmdir_held dst) replaced;
+                    note_folder id;
+                    repost_moved (rename_local ~src ~dst ~is_dir:true);
+                    settle_folder id)))
+          else
+            namespace_op
+              (Op.Rename
+                 { dst; src; is_dir; size = Some (size_of src); id = None })
+              (fun () ->
+                with_keys [src; dst] (fun () ->
+                    if dk = `File then delete_held dst;
+                    move_file_held ~src ~dst))))
 
   let symlink path ~target ~exclusive =
     check_writable ();
@@ -1373,92 +1524,17 @@ module Make (C : Engine_ctx.S) = struct
         with_key path (fun () ->
             if exclusive && exists path then
               Fail.raise_ Fail.Exists "%s exists" path;
-            ignore (require_parent path);
-            (* Owed before it exists: the upload waits for this key's lock. *)
-            !post_put_hook path (String.length target) None;
+            begin_change path;
+            ignore (discard_edit path);
             Mirror.write_file mirror path
               (Manifest.symlink ~name:(Names.leaf_of path)
-                 ~mtime:(Unix.gettimeofday ()) target)));
-    changed [path]
-
-  (* 04 §4.7: every step idempotent; bodies go last so a reader of either
-     representation still finds its bytes. *)
-  let promote path =
-    with_key path (fun () ->
-        match Staged.edit staged path with
-          | Some ({ state = Committed m; _ } as e) ->
-              (match e.content with
-                | Slots slots ->
-                    let cc = Cache.cc cache in
-                    List.iter
-                      (fun (g : Cache.group) ->
-                        let states =
-                          List.map
-                            (fun (x : Cache.member) ->
-                              if x.index < Array.length slots then
-                                slots.(x.index)
-                              else Staged.Zero)
-                            g.members
-                        in
-                        let staged_members =
-                          List.filter
-                            (function Staged.Staged _ -> true | _ -> false)
-                            states
-                        in
-                        if
-                          staged_members <> []
-                          && not (List.exists (( = ) Staged.Inherit) states)
-                        then (
-                          let one_body =
-                            match staged_members with
-                              | Staged.Staged { body; _ } :: _ ->
-                                  List.for_all2
-                                    (fun (x : Cache.member) st ->
-                                      match st with
-                                        | Staged.Staged { body = b; off } ->
-                                            b = body && off = x.off
-                                        | _ -> true)
-                                    g.members states
-                                  |> fun ok -> if ok then Some body else None
-                              | _ -> None
-                          in
-                          match one_body with
-                            | Some body when Staged.body_links staged body = 1
-                              ->
-                                let fd = Staged.open_body staged body in
-                                Fs.with_fd fd (fun fd ->
-                                    Fs.sys (fun () ->
-                                        Unix.LargeFile.ftruncate fd
-                                          (Int64.of_int g.gsize));
-                                    Fs.fsync fd);
-                                Cache.adopt_body cache g.gkey
-                                  (Staged.body_path staged body)
-                            | _ ->
-                                let data =
-                                  Bigstring.concat
-                                    (List.map
-                                       (fun (x : Cache.member) ->
-                                         read_staged path e
-                                           ~off:(x.index * m.chunk_size)
-                                           ~len:x.len)
-                                       g.members)
-                                in
-                                let tmp =
-                                  Fs.write_temp_bigstring
-                                    (Filename.dirname
-                                       (Staged.body_path staged "x"))
-                                    data
-                                in
-                                Fun.protect
-                                  ~finally:(fun () -> Fs.unlink_quiet tmp)
-                                  (fun () -> Cache.adopt_body cache g.gkey tmp)))
-                      (Cache.groups ~cc m)
-                | Whole _ -> ());
-              Mirror.write_file ~own:true mirror path m;
-              end_lineage path;
-              Staged.remove staged path;
-              release_unnamed e None
-          | _ -> ())
+                 ~mtime:(Unix.gettimeofday ()) target);
+            settle path);
+        feed
+          ~fids:(note_fids [Op.Put { path; size = String.length target }])
+          [Op.Put { path; size = String.length target }]);
+    changed [path];
+    wake_cycle ()
 
   let evict path =
     match Mirror.manifest mirror path with

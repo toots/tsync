@@ -12,22 +12,37 @@ type transfer = Local_ops.transfer = {
   started : float;
 }
 
-(** What the status report reads of an engine (07 §5.5). *)
+(** What the status report reads of an engine (07 §5.5, 03 §3.4). *)
 type activity = {
-  intent : int;
-  prepared : int;
-  executed : int;
-  stuck : int;  (** parked records: retried only on {!S.rearm} *)
-  retrying : int;  (** records whose last attempt failed, retried on backoff *)
+  position : int option;  (** the last entry merged *)
+  pending : int;  (** keys with a before-value *)
+  pushing : bool;  (** an in-flight record exists *)
+  tree_head : int;  (** as last read *)
+  unfollowed : (int * string) option;
+      (** an entry this client cannot follow, and why *)
+  damaged : string list;
+      (** files whose content the main lacks and this client cannot send again
+      *)
+  stuck : int;  (** parked uploads: retried only on {!S.rearm} *)
+  retrying : int;  (** uploads whose last attempt failed, retried on backoff *)
   set_aside : int;
-      (** WAL records and staged manifests set aside: never run, kept until a
-          user removes them (durable-queue §6) *)
+      (** records and staged manifests set aside: never run, kept until a user
+          removes them (durable-queue §6) *)
   last_error : string option;
-  in_flight : string list;  (** paths of the uploads running now *)
-  bytes_owed : int;  (** whole-file bytes of every unpublished put *)
-  mark_age : float option;  (** seconds since the last-sync mark's entry *)
+  uploading : string list;  (** paths of the uploads running now *)
+  bytes_owed : int;  (** whole-file bytes of every edit not uploaded yet *)
   cache : Cache.counts;
   max_cache : int option;
+}
+
+(** What a sync did (05 §4.7): the entries merged, or the file records and
+    folders a state read found; the paths the merge changed; the entries this
+    client created; the commands still pending. *)
+type synced = {
+  arrival : [ `Entries of int | `State of int * int ];
+  changed : int;
+  committed : int;
+  pending : int;
 }
 
 module type S = sig
@@ -84,8 +99,8 @@ module type S = sig
   val write_whole :
     string -> src:string -> ?base:string -> exclusive:bool -> unit -> unit
 
-  (** Returns once the key's upload has published or started failing (08 §3.5
-      [write] with [await]), or the domain is paused. *)
+  (** Returns once the key's change is committed or its upload started failing
+      (08 §3.5 [write] with [await]), or the domain is paused. *)
   val await_upload : string -> unit
 
   val sync : string -> unit
@@ -96,6 +111,11 @@ module type S = sig
   val delete : string -> unit
   val mkdir : string -> exclusive:bool -> unit
   val rmdir : string -> unit
+
+  (** The folder and everything beneath it, as one local operation per item (04
+      §4.5). *)
+  val remove_tree : string -> unit
+
   val rename : src:string -> dst:string -> exclusive:bool -> unit
   val symlink : string -> target:string -> exclusive:bool -> unit
   val evict : string -> unit
@@ -112,12 +132,12 @@ module type S = sig
       length. *)
   val fetch_range : string -> string -> off:int -> len:int -> int
 
-  (** Local recovery, reconcile, the queues and the copy logs, then the journal
-      poller unless [poll_journal] is false. *)
-  val start : ?poll_journal:bool -> unit -> unit
+  (** Local recovery, the upload queue and the copy logs, then the background
+      cycle unless [background] is false (the default on a lazy tree). *)
+  val start : ?background:bool -> unit -> unit
 
-  (** Metadata, then uploads, then the cursor flush and the copies, within the
-      grace; what is left stays owed on disk. *)
+  (** Uploads, a last cycle, the cursor flush and the copies, within the grace;
+      what is left stays owed on disk. *)
   val drain : ?grace:float -> unit -> unit
 
   (** 04 §4.6: put a saved version of the file at [path] back, the newest when
@@ -125,17 +145,9 @@ module type S = sig
       version first. ABSENT when no such version; needs versioning. *)
   val revert : ?version:int64 -> string -> unit
 
-  (** Bring the trashed folder whose trash entry records [path] back at [path]
-      (05 §4.8): placed on the store, then the folder and every folder and file
-      beneath it announced; how many. UNPREPARED when this client has not
-      resolved the parent folder. *)
-  val restore_from_trash :
-    string -> [ `Restored of int | `Not_in_trash | `Exists ]
-
   (** Bring the content of a local directory into the domain at the same
-      relative paths (05 §4.3): folders claimed and announced first, then files
-      uploaded and announced in batches; what exists is skipped unless
-      [force_rehash]. *)
+      relative paths (05 §4.3), as local operations, and return once they are
+      committed; what exists is skipped unless [force_rehash]. *)
   val import :
     ?narrate:Narrate.t ->
     ?cancelled:(unit -> bool) ->
@@ -159,35 +171,20 @@ module type S = sig
     unit ->
     Rsync_plan.report
 
-  (** Adopt records other processes submitted, then run a journal pass soon. *)
+  (** Run a cycle now. *)
   val poll : unit -> unit
 
   (** Evicts down to the cache cap (04 §4.11), as housekeeping does on every
       pass: a host that mostly reads uploads nothing that would. *)
   val trim_cache : unit -> unit
 
-  (** One discovery-and-application pass; the number of entries applied. *)
-  val apply_pass : unit -> int
-
-  (** A full rebuild from the store's tree: manifests walked and failures. *)
-  val rebuild : ?narrate:Narrate.t -> ?parallelism:int -> unit -> int * int
-
-  (** One pass, or a rebuild when [full] or when the client cannot bridge
-      (manifests walked and failures). *)
+  (** One cycle now, its arrival by state when [full] (05 §4.7). Refused while
+      paused and on a lazy tree. *)
   val resync :
-    ?narrate:Narrate.t ->
-    ?full:bool ->
-    ?parallelism:int ->
-    unit ->
-    [ `Incremental of int | `Full of int * int ]
+    ?narrate:Narrate.t -> ?full:bool -> ?parallelism:int -> unit -> synced
 
   val set_paused : bool -> unit
   val is_paused : unit -> bool
-  val bridge : unit -> Outbound.bridge
-
-  (** Stepped-aside peer entries with their reason. *)
-  val unapplied : unit -> (string * string) list
-
   val pending_uploads : unit -> int
 
   (** The uploads running now; cheap: reads only their records. *)
@@ -197,10 +194,9 @@ module type S = sig
       range, a restore. *)
   val downloads : unit -> transfer list
 
-  (** Reads every WAL record: meant for a report, not a hot path. *)
+  (** Reads the staged tree: meant for a report, not a hot path. *)
   val activity : unit -> activity
 
-  val pending_metadata : unit -> int
   val parked : unit -> (string * Dqueue.failure_note) list
 
   (** Re-adopt every parked record; how many. *)
@@ -217,27 +213,27 @@ module type S = sig
   (** Stamps a new generation and clears the feed watermark (08 §3.6). *)
   val stamp_generation : unit -> unit
 
-  (** The current change anchor [<generation>|<entry>]; sets the feed watermark
-      when none exists (08 §2.5, §3.6). *)
+  (** The current change anchor [<generation>|<feed key>]; sets the feed
+      watermark when none exists (08 §2.5, §3.6). *)
   val cursor : unit -> string
 
   (** 08 §3.6 steps 1–5: [`Page (cursor, more, ops)] after the anchor, the
-      watermark moved to the anchor's entry; [`Stale] for another generation, an
-      entry no longer kept, or an empty entry once a shard was dropped. *)
+      watermark moved to the anchor's key; [`Stale] for another generation, a
+      line that is not kept, or an empty key once a shard was dropped. *)
   val changes_since :
     string -> limit:int -> [ `Stale | `Page of string * bool * Applied.op list ]
 
-  (** Applied-log retention (wal-and-journal §4.8); shards removed. *)
+  (** Applied-log retention (03 §2.9); shards removed. *)
   val prune_applied : unit -> int
 
   (** The owner's daily sweep of local state: stale temporaries, and the records
       of folders removed longer ago than any entry can name. *)
   val daily_maintenance : unit -> unit
 
-  (** The lazy tree (04 §3.5): the store's listing of a folder replaces its
-      published entries, overlaid with this client's owed work; whether its
-      children changed. UNPREPARED for a folder with no id here; a failed pull
-      changes nothing. Concurrent pulls of one folder share one read. *)
+  (** The lazy tree (04 §3.5, publication §4.11): an arrival for one folder;
+      whether its children changed. UNPREPARED for a folder with no id here; a
+      failed pull changes nothing. Concurrent pulls of one folder share one
+      read. *)
   val pull : string -> bool
 
   (** When the folder's last pull completed, by its pull marker (04 §2.3). *)
@@ -249,8 +245,8 @@ module type S = sig
   (** Raises the view hold of a folder and of every ancestor. *)
   val hold_views : string -> until:float -> unit
 
-  (** The store's current manifest of a file becomes its entry; an entry the
-      store no longer has is removed (android §3.2 rule 3). *)
+  (** Pulls the file's folder, so the file is at its current version (android
+      §3.2 rule 3). *)
   val refresh_file : string -> unit
 
   val mirror : Mirror.t

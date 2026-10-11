@@ -1,16 +1,25 @@
 open Tsync_core
-open Tsync_remote
 
 module Make (C : Engine_ctx.S) = struct
   include Import.Make (C)
 
-  (* 05 §4.5: every domain fact read from the store, every local one from the
-     filesystem; each action runs on the facts its decision was made on. *)
+  (* 05 §4.5: every domain fact read from the local tree after one arrival,
+     every local one from the filesystem; each action runs on the facts its
+     decision was made on. *)
   let rsync ?(narrate = Narrate.none) ?(cancelled = Fun.const false)
       ?(move = false) ?(dry_run = false) ~(src : Rsync_plan.endpoint)
       ~(dst : Rsync_plan.endpoint) () : Rsync_plan.report =
-    let segs p = if p = "" then [] else String.split_on_char '/' p in
-    let in_domain rel = T.find Folder_id.root (segs rel) in
+    let run = Bulk.run () in
+    ignore (run_cycle ~push_now:false ());
+    let in_domain rel =
+      match kind rel with
+        | `Dir -> `Folder
+        | `Absent -> `Missing
+        | `File -> (
+            match local_file rel with
+              | Some (Known m) -> `File m
+              | _ -> `Missing)
+    in
     let hash path cs =
       Fs.with_fd (Fs.openfile path [O_RDONLY]) (fun fd ->
           let size = (Unix.fstat fd).st_size in
@@ -64,16 +73,20 @@ module Make (C : Engine_ctx.S) = struct
             match in_domain src.path with
               | `Missing -> [("", `Missing)]
               | `File m -> [("", `Key m)]
-              | `Folder id ->
-                  ("", `Domain_dir)
-                  :: List.rev
-                       (T.fold_tree id ~root_path:""
-                          (fun acc dir (e : Tree.entry) ->
-                            match e.body with
-                              | Dir d ->
-                                  (Names.join dir d.name, `Domain_dir) :: acc
-                              | File f -> (Names.join dir f.name, `Key f) :: acc)
-                          []))
+              | `Folder ->
+                  let rec walk rel acc =
+                    List.fold_left
+                      (fun acc (e : entry) ->
+                        let p = Names.join rel e.name in
+                        if e.is_dir then walk p ((p, `Domain_dir) :: acc)
+                        else (
+                          match in_domain (Names.join src.path p) with
+                            | `File m -> (p, `Key m) :: acc
+                            | _ -> acc))
+                      acc
+                      (list_children (Names.join src.path rel))
+                  in
+                  ("", `Domain_dir) :: List.rev (walk "" []))
     in
     let target_fact rel ~(against : Manifest.t option) : Rsync_plan.target =
       match dst.side with
@@ -85,7 +98,7 @@ module Make (C : Engine_ctx.S) = struct
               | exception Unix.Unix_error (ENOENT, _, _) -> Absent Local)
         | Domain -> (
             match in_domain (domain_path dst.path rel) with
-              | `Folder _ -> Dir_at Domain
+              | `Folder -> Dir_at Domain
               | `File m -> Key_at m
               | `Missing -> Absent Domain)
     in
@@ -93,16 +106,14 @@ module Make (C : Engine_ctx.S) = struct
     let under dirs rel =
       List.exists (fun dir -> Names.is_under ~dir rel) dirs
     in
-    (* 05 rsync: a file whose local bytes the store has not received yet (a
-       staged edit) is not copied; a pending record over bytes the store holds
-       (an earlier copy) does not stop it. *)
+    (* 05 §4.5: an edit whose bytes the main has not received is not copied. *)
     let unpublished =
       if src.side <> Domain then []
       else
-        List.map fst
-          (Tsync_checkout.Staged.edits_under
-             (Tsync_checkout.Staged.create ~cache_root:C.cache_root C.domain)
-             src.path)
+        List.filter_map
+          (fun (p, (e : Tsync_checkout.Staged.edit)) ->
+            if e.state = Owed then Some p else None)
+          (Tsync_checkout.Staged.edits_under staged src.path)
         |> List.sort_uniq compare
     in
     let skipped_dirs = ref [] in
@@ -159,9 +170,6 @@ module Make (C : Engine_ctx.S) = struct
     let copied = ref 0 and identical = ref 0 and dirs = ref 0 in
     let skipped = ref [] and failed = ref [] and bytes = ref 0 in
     let done_ = Hashtbl.create 64 in
-    (* durable-queue §7.3: the items whose store half happened, announced even
-       if a later local step failed. *)
-    let stored = Hashtbl.create 64 in
     let succeed rel n =
       incr copied;
       bytes := !bytes + n;
@@ -209,7 +217,7 @@ module Make (C : Engine_ctx.S) = struct
                 Fs.mkdir_p (local_path dst.path rel);
                 incr dirs
             | Domain -> (
-                match Bulk.folder (domain_path dst.path rel) with
+                match Bulk.folder run (domain_path dst.path rel) with
                   | Ok _ -> incr dirs
                   | Error reason ->
                       blocked := rel :: !blocked;
@@ -217,27 +225,18 @@ module Make (C : Engine_ctx.S) = struct
         (with_decision (function Make_dir _ -> true | _ -> false));
       let upload rel tp path =
         let sent = ref 0 in
-        ignore (Bulk.upload_file ~sent:(fun n -> sent := !sent + n) tp path);
+        ignore (Bulk.upload_file ~sent:(fun n -> sent := !sent + n) run tp path);
         succeed rel !sent
       in
-      (* Uploads and copies into the domain, announced as Puts. *)
-      let size_of = function
-        | Rsync_plan.Copy_manifest (m : Manifest.t) -> m.size
-        | _ -> 0
-      in
-      Bulk.batches ~narrate ~noun:"file" ~cancelled ~queue:uploads
-        ~op:(fun (rel, d) ->
-          Op.Put
-            { path = domain_path dst.path rel; size = size_of d; base = None })
-        ~admit:(fun _ -> true)
-        ~run:(fun (rel, d) ->
+      List.iter
+        (fun (rel, d) ->
           let tp = domain_path dst.path rel in
           Narrate.progress narrate "copying into the domain: %s" tp;
           ignore
           @@ attempt rel (fun () ->
               match d with
                 | Rsync_plan.Copy_manifest m ->
-                    Bulk.publish tp m;
+                    Bulk.install run tp m;
                     succeed rel 0
                 | _ -> (
                     let path = local_path src.path rel in
@@ -245,7 +244,7 @@ module Make (C : Engine_ctx.S) = struct
                       | { st_kind = S_LNK; _ }, `Skip ->
                           skipped := (rel, "symlinks are skipped") :: !skipped
                       | { st_kind = S_LNK; _ }, `Keep ->
-                          Bulk.publish_link tp ~target:(Unix.readlink path)
+                          Bulk.install_link run tp ~target:(Unix.readlink path)
                             ~mtime:(Unix.lstat path).st_mtime;
                           succeed rel 0
                       | { st_kind = S_LNK; _ }, `Follow -> (
@@ -254,9 +253,7 @@ module Make (C : Engine_ctx.S) = struct
                             | _ | (exception Unix.Unix_error _) ->
                                 skipped :=
                                   (rel, "a dangling symlink") :: !skipped)
-                      | _ -> upload rel tp path));
-          (* A skipped symlink completes without publishing anything. *)
-          Hashtbl.mem done_ rel)
+                      | _ -> upload rel tp path)))
         (with_decision (function
           | Copy_manifest _ | Upload _ -> true
           | _ -> false));
@@ -310,45 +307,18 @@ module Make (C : Engine_ctx.S) = struct
         (with_decision (function
           | Assemble _ | Patch_local _ -> true
           | _ -> false));
-      let slot rel =
-        match T.find Folder_id.root (segs (Names.parent_of rel)) with
-          | `Folder pid -> Some (pid, Names.leaf_of rel)
-          | _ -> None
-      in
-      (* Moves within the domain: the manifest at the destination, the source
-         slot deleted, one Rename announced. *)
-      Bulk.batches ~narrate ~noun:"move" ~cancelled ~queue:metadata
-        ~op:(fun (rel, d) ->
-          let size =
-            match d with
-              | Rsync_plan.Rename_in_domain (m : Manifest.t) -> Some m.size
-              | _ -> None
-          in
-          Op.Rename
-            {
-              dst = domain_path dst.path rel;
-              src = domain_path src.path rel;
-              is_dir = false;
-              size;
-              id = None;
-            })
-        ~admit:(fun _ -> true)
-        ~run:(fun (rel, d) ->
+      List.iter
+        (fun (rel, d) ->
           let sp = domain_path src.path rel and tp = domain_path dst.path rel in
           ignore
             (attempt rel (fun () ->
                  match d with
-                   | Rsync_plan.Rename_in_domain m ->
-                       Bulk.publish tp m;
-                       Hashtbl.replace stored rel ();
-                       Option.iter
-                         (fun (pid, leaf) -> ignore (R.delete_slot pid leaf))
-                         (slot sp);
-                       with_meta (fun () ->
-                           with_key sp (fun () -> remove_local_file sp));
+                   | Rsync_plan.Rename_in_domain _ ->
+                       rename ~src:sp ~dst:tp ~exclusive:false;
+                       Bulk.note_file run sp;
+                       Bulk.note_file run tp;
                        succeed rel 0
-                   | _ -> ()));
-          Hashtbl.mem stored rel)
+                   | _ -> ())))
         (with_decision (function Rename_in_domain _ -> true | _ -> false));
       (* A move drops each source whose action ran. *)
       let drops =
@@ -364,21 +334,15 @@ module Make (C : Engine_ctx.S) = struct
                   (attempt rel (fun () -> Unix.unlink (local_path src.path rel))))
               drops
         | Domain ->
-            Bulk.batches ~narrate ~noun:"removal" ~cancelled ~queue:metadata
-              ~op:(fun (rel, _) -> Op.Delete (domain_path src.path rel))
-              ~admit:(fun _ -> true)
-              ~run:(fun (rel, _) ->
+            List.iter
+              (fun (rel, _) ->
                 let sp = domain_path src.path rel in
                 ignore
                   (attempt rel (fun () ->
-                       Option.iter
-                         (fun (pid, leaf) -> ignore (R.delete_slot pid leaf))
-                         (slot sp);
-                       Hashtbl.replace stored rel ();
-                       with_meta (fun () ->
-                           with_key sp (fun () -> remove_local_file sp))));
-                Hashtbl.mem stored rel)
+                       delete sp;
+                       Bulk.note_file run sp)))
               drops);
+    let uncommitted = if dry_run then 0 else Bulk.await ~cancelled run in
     {
       Rsync_plan.copied = !copied;
       identical = !identical;
@@ -388,6 +352,7 @@ module Make (C : Engine_ctx.S) = struct
       bytes_moved = !bytes;
       planned;
       unpublished;
+      uncommitted;
       cancelled = cancelled ();
     }
 end

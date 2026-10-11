@@ -21,8 +21,9 @@ type member = { name : string; role : role; store : Store.t }
 (** Domain knowledge a copy job needs, injected (06 §1). *)
 type knowledge = {
   is_index : Key.t -> bool;  (** per-store caches no copy carries *)
-  is_journal : Key.t -> bool;
-      (** journal entries and the cursor, which a backfill skips *)
+  is_log : Key.t -> bool;
+      (** the log, its takeovers, the tree head and the cursor, which a backfill
+          does not carry *)
 }
 
 (** One copy job, as recorded in its log. *)

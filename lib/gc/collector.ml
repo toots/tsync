@@ -113,6 +113,25 @@ let namespace_references m d ns =
           | Some body -> references e.key body))
     (store.list_prefix (Gc_plan.namespace_prefix d ns))
 
+(* gc §5.3: every chunk named by an entry above the tree head, which is
+   committed and not yet in the tree. An entry that cannot be read stops the
+   run; a voided one names nothing. *)
+let log_references m d =
+  let log = Tsync_remote.Log_store.create d m.member.store in
+  List.concat_map
+    (fun (e : Tsync_remote.Log_store.entry) ->
+      match e.read with
+        | Void -> []
+        | Entry _ ->
+            references (Key.log_entry d e.n) (Bigstring.of_string e.bytes)
+        | Undecodable _ | Later_version _ ->
+            raise
+              (Halt
+                 (Printf.sprintf
+                    "log entry %d is above the tree head and cannot be read" e.n)))
+    (Tsync_remote.Log_store.read_entries log
+       (Tsync_remote.Log_store.tree_head log + 1))
+
 type counters = {
   mutable marked : int;
   mutable promoted : int;
@@ -171,8 +190,8 @@ let verify_promoted m d n c =
           (Bigstring.of_string
              (Corruption_marker.body ~reason:"unreadable while verifying" None))
 
-let mark m d n ~verify ns =
-  let cs = List.sort_uniq Chunk_key.compare (namespace_references m d ns) in
+let mark_chunks m d n ~verify cs =
+  let cs = List.sort_uniq Chunk_key.compare cs in
   let moved = List.filter (Chunk_spaces.promote m.spaces d) cs in
   Chunk_spaces.sync_shards m.spaces d moved;
   n.promoted <- n.promoted + List.length moved;
@@ -187,7 +206,10 @@ let mark m d n ~verify ns =
         then (
           Chunk_set.add n.checked c;
           verify_promoted m d n c))
-      cs;
+      cs
+
+let mark m d n ~verify ns =
+  mark_chunks m d n ~verify (namespace_references m d ns);
   n.marked <- n.marked + 1
 
 let batches l = match Pages.cut delete_batch l with [] -> [[]] | b -> b
@@ -525,6 +547,7 @@ let session ?budget ?pause ~narrate:nr ~verify ~keep ~cancelled composite d m =
                     "  moved the chunk area aside in one rename: every chunk \
                      waits in the outgoing space until a namespace keeps it")
                 else Narrate.say nr "  the outgoing space is already there");
+            mark_chunks m d n ~verify (log_references m d);
             let todo = enumerate m d ~after in
             Narrate.say nr
               "  marking %s: every chunk a manifest names moves back"
@@ -686,6 +709,7 @@ let survey_one ~narrate:nr ~verify ~cancelled d m =
     in
     let t0 = Rt.now () in
     match
+      List.iter (Chunk_set.add referenced) (log_references m d);
       let namespaces = enumerate m d ~after:"" in
       let total = List.length namespaces in
       Narrate.say nr "%s: reading the manifests of %s on %s" m.member.name

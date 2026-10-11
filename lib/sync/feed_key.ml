@@ -1,5 +1,3 @@
-open Tsync_core
-
 type t = string
 
 let parse s =
@@ -28,9 +26,8 @@ let month k =
   Printf.sprintf "%04d-%02d" (tm.tm_year + 1900) (tm.tm_mon + 1)
 
 let make ~ms ~client = Printf.sprintf "%013Ld-%s" ms client
-let of_time ~client t = make ~ms:(Int64.of_float (t *. 1000.)) ~client
 
-(* 03 §2.2 and wal-and-journal §4.9: only the owner mints, never re-using a
+(* 03 §2.2: only the owner mints, never re-using a
    millisecond even across a backward clock step. *)
 type minter = { client_id : string; m : Mutex.t; mutable last : int64 }
 
@@ -40,14 +37,9 @@ let minter ~client ~seen =
   in
   { client_id = client; m = Mutex.create (); last }
 
-let observe t k =
-  Mutex.protect t.m (fun () -> if ms k > t.last then t.last <- ms k)
-
 let mint t =
   Mutex.protect t.m (fun () ->
       let now = Int64.of_float (Unix.gettimeofday () *. 1000.) in
       let v = if now > t.last then now else Int64.succ t.last in
       t.last <- v;
       make ~ms:v ~client:t.client_id)
-
-let journal_key d k = Key.journal_entry d ~month:(month k) ~entry:k

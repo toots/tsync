@@ -1,7 +1,7 @@
 open Tsync_core
 
 type t =
-  | Put of { path : string; size : int; base : string option }
+  | Put of { path : string; size : int }
   | Delete of string
   | Mkdir of { path : string; id : Folder_id.t option }
   | Rmdir of { path : string; id : Folder_id.t option }
@@ -16,10 +16,8 @@ type t =
 let opt k f = function Some v -> [(k, f v)] | None -> []
 
 let to_json = function
-  | Put { path; size; base } ->
-      `Assoc
-        ([("op", `String "put"); ("key", `String path); ("size", `Int size)]
-        @ opt "base" (fun b -> `String b) base)
+  | Put { path; size } ->
+      `Assoc [("op", `String "put"); ("key", `String path); ("size", `Int size)]
   | Delete p -> `Assoc [("op", `String "delete"); ("key", `String p)]
   | Mkdir { path; id } ->
       `Assoc
@@ -46,8 +44,8 @@ exception Bad of string
 
 let valid_path p = p <> "" && Names.valid_path p
 
-(* 03 §2.3: an unknown op is ignored; a known op with a missing or ill-typed
-   field makes the whole entry CORRUPT. *)
+(* 03 §2.9: an unknown op is ignored; a known op with a missing or ill-typed
+   field is [Bad]. *)
 let of_json = function
   | `Assoc f -> (
       let bad what = raise (Bad what) in
@@ -73,22 +71,12 @@ let of_json = function
       in
       match List.assoc_opt "op" f with
         | Some (`String "put") ->
-            let base =
-              match List.assoc_opt "base" f with
-                | None -> None
-                | Some (`String b)
-                  when String.length b = 16
-                       && String.for_all Names.is_hexlower b ->
-                    Some b
-                | _ -> bad "a base"
-            in
             Some
               (Put
                  {
                    path = path "key";
                    size =
                      (match size "size" with Some s -> s | None -> bad "size");
-                   base;
                  })
         | Some (`String "delete") -> Some (Delete (path "key"))
         | Some (`String "mkdir") ->
@@ -119,27 +107,6 @@ let paths = function
   | Put { path; _ } | Delete path | Mkdir { path; _ } | Rmdir { path; _ } ->
       [path]
   | Rename { dst; src; _ } -> [dst; src]
-
-let is_put = function Put _ -> true | _ -> false
-
-let encode_entry ops =
-  String.concat "" (List.map (fun op -> to_string op ^ "\n") ops)
-
-let decode_entry body =
-  let lines =
-    List.filter
-      (fun l -> l <> "")
-      (List.map String.trim (String.split_on_char '\n' body))
-  in
-  try
-    Ok
-      (List.filter_map
-         (fun l ->
-           match Yojson.Safe.from_string l with
-             | j -> of_json j
-             | exception Yojson.Json_error _ -> raise (Bad "a JSON object"))
-         lines)
-  with Bad what -> Error what
 
 let list_to_json ops = `List (List.map to_json ops)
 

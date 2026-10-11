@@ -10,10 +10,11 @@ module Make (_ : Context.S) : sig
       stop the projection. *)
   val apply : before_write:(unit -> unit) -> Log_entry.command list -> unit
 
-  (** Every file record and every filed folder marker of the tree, as the value
-      of its key. A folder that cannot be read fails the walk; a record listed
-      and gone, unclassifiable or disowned is skipped. [width] folders are read
-      ahead. *)
+  (** Every file record and every folder's anchor of the tree, as the value of
+      its key (05 §4.7), in no order; [f] is called by one fiber at a time. A
+      namespace that cannot be listed or read fails the walk; a record listed
+      and gone or unclassifiable is skipped. [width] namespaces are read at a
+      time. *)
   val fold :
     ?width:int ->
     ('a ->

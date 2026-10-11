@@ -10,7 +10,7 @@ type t =
   | Gc of { apply : bool; verify : bool; abort : bool; budget : float option }
   | Gc_copies of copies
   | Expire of { apply : bool; cutoff : float }
-  | Purge of { apply : bool; path : string }
+  | Void_entry of { n : int }
   | Import of {
       src : string;
       only : string list;
