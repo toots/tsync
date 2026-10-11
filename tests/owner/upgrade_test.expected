@@ -1,6 +1,9 @@
 == unpublished records of the previous version
   d: 1 records of the previous version are not published. Start the previous version and let it publish them, or pass --discard to lose them (staged edits are kept either way).
   exit 1
+== a client's own cleanup is refused while the store has its journal
+  d: the store still holds its journal: clean it first, without --local
+  exit 1
 == a dry run
   d: 1 journal entries, 6 objects of the folder trash and of the 2 folders in it, the journal's cursor
   d, here: 1 WAL records, 0 folder claims, the last-sync mark
@@ -49,6 +52,11 @@
   d, here: 0 WAL records, 0 folder claims
   d, here: already has a position, which is kept
   d: done. Start the owner: it follows the log from entry 0.
+  exit 0
+== a client of a store cleaned elsewhere lists no tree
+  d: 0 journal entries, 0 objects of the folder trash and of the 0 folders in it
+  d, here: 0 WAL records, 0 folder claims
+  d: done. Start the owner: it arrives by state.
   exit 0
 == refused over a staged edit
   d: --in-sync refused: it has staged edits

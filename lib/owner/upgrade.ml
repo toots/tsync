@@ -13,7 +13,8 @@ let anchored_under body =
           | _ -> None)
     | _ | (exception _) -> None
 
-let run ~out ~cancelled (dom : Tsync_domain.Domain.t) ~apply ~discard ~in_sync =
+let run_exn ~out ~cancelled (dom : Tsync_domain.Domain.t) ~apply ~discard
+    ~in_sync ~local_only =
   let say fmt = Printf.ksprintf out fmt in
   let module C = (val Tsync_domain.Domain.context dom) in
   let d = dom.name and store = C.store in
@@ -60,7 +61,7 @@ let run ~out ~cancelled (dom : Tsync_domain.Domain.t) ~apply ~discard ~in_sync =
         (Cancel.race cancelled (fun () -> store.list_prefix prefix))
     in
     let journal = keys (under "journal") in
-    let manifests = keys (Key.manifests d) in
+    let manifests = if local_only then [] else keys (Key.manifests d) in
     let namespace_of key = Key.parent_segment key in
     let anchor_leaf = Key.leaf (Key.anchor d Folder_id.root) in
     let parents = Hashtbl.create 256 in
@@ -98,6 +99,11 @@ let run ~out ~cancelled (dom : Tsync_domain.Domain.t) ~apply ~discard ~in_sync =
             [Key.cursor d]
         | _ -> []
     in
+    if local_only && journal <> [] then (
+      say
+        "%s: the store still holds its journal: clean it first, without --local"
+        name;
+      raise Exit);
     say
       "%s: %d journal entries, %d objects of the folder trash and of the %d \
        folders in it%s"
@@ -132,3 +138,7 @@ let run ~out ~cancelled (dom : Tsync_domain.Domain.t) ~apply ~discard ~in_sync =
               (if in_sync then "follows the log from entry 0"
                else "arrives by state");
             0))
+
+let run ~out ~cancelled dom ~apply ~discard ~in_sync ~local_only =
+  try run_exn ~out ~cancelled dom ~apply ~discard ~in_sync ~local_only
+  with Exit -> 1

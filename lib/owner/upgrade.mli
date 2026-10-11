@@ -11,7 +11,10 @@
 
     [in_sync] is the operator's word that this client had applied the whole
     journal and published everything when it stopped: it then starts at entry 0
-    with its mirror as it is, where it would compare it with the whole tree. *)
+    with its mirror as it is, where it would compare it with the whole tree.
+
+    [local_only] is for a client of a store another machine cleaned: the tree is
+    not listed, and a journal still there is refused. *)
 val run :
   out:(string -> unit) ->
   cancelled:(unit -> bool) ->
@@ -19,4 +22,5 @@ val run :
   apply:bool ->
   discard:bool ->
   in_sync:bool ->
+  local_only:bool ->
   int
