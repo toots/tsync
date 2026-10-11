@@ -11,6 +11,8 @@ type t =
   | Gc_copies of copies
   | Expire of { apply : bool; cutoff : float }
   | Void_entry of { n : int }
+  | Upgrade of { apply : bool; discard : bool }
+      (** a one-off, see {!Upgrade} *)
   | Import of {
       src : string;
       only : string list;

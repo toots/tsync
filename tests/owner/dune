@@ -119,3 +119,29 @@
  (alias runtest)
  (action
   (diff supervisor_test.expected supervisor_test.output)))
+
+(executable
+ (name upgrade_test)
+ (modules upgrade_test)
+ (libraries
+  test_support
+  tsync_core
+  tsync_config
+  tsync_catalog
+  tsync_domain
+  tsync_gc
+  tsync_owner
+  tsync_remote
+  tsync_sync
+  tsync_store
+  unix))
+
+(rule
+ (with-stdout-to
+  upgrade_test.output
+  (run ./upgrade_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff upgrade_test.expected upgrade_test.output)))

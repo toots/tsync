@@ -143,6 +143,24 @@ let void_entry_cmd =
        entries behind it are merged and projected."
     Term.(const void_entry $ n $ domain_arg $ verbose)
 
+let upgrade apply discard name verbose =
+  run_job ?name verbose (Upgrade { apply; discard })
+
+let upgrade_cmd =
+  let discard =
+    Arg.(
+      value & flag
+      & info ["discard"]
+          ~doc:
+            "Lose the namespace changes the previous version had not \
+             published; staged edits are kept.")
+  in
+  cmd "upgrade-from-journal"
+    ~doc:
+      "One-off: remove what the journal protocol left on the stores and here, \
+       so every client arrives by state. Stop every client first."
+    Term.(const upgrade $ apply_arg $ discard $ domain_arg $ verbose)
+
 let data_integrity verify repair dry_run detail source name verbose =
   if verify && repair then (
     prerr_endline "tsync: --verify and --repair go one at a time";
@@ -686,6 +704,7 @@ let cmds =
     gc_cmd;
     expire_cmd;
     void_entry_cmd;
+    upgrade_cmd;
     data_integrity_cmd;
     import_cmd;
     rsync_cmd;

@@ -538,8 +538,10 @@ which pulls instead.
    the walk as a whole.
 5. Hand the tree head and the collected values to the replay of the log entries above that tree
    head, which is publication's, as are the merge that follows and what it does to pending changes.
-6. A file record whose folder is absent from the replayed tree is left out and logged; integrity
-   reports it (§4.10).
+6. What the records hold that is no part of a tree is left out and logged, and integrity reports
+   it (§4.10): a folder from which following parents does not reach the root in the replayed
+   tree, and a file record whose folder is absent from it. Otherwise the merge would take such a
+   record for a peer's change and restore a folder around it.
 
 What changes locally is what the merge decides
 ([conflict-resolution.md §4](algorithms/conflict-resolution.md#4-enacting-a-merge)): the local tree
