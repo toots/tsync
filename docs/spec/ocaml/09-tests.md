@@ -11,7 +11,8 @@ finding numbers to [the 2026-10-01 review](../review/2026-10-01-rewrite.md).
   `runtest` alias. The diff is the verdict (§4, §10.5); there is no assertion library and no check
   counter.
 - The tests whose snapshot states a time bound diff under `runtest-serial` as well: `tray_test`,
-  `dqueue_test`, `proxy_test`, `http_test`, `lazy_test`, `rt_test`, `rt_fd_test`, `rt_class_test`.
+  `dqueue_test`, `proxy_test`, `http_test`, `lazy_test`, `rt_test`, `rt_fd_test`, `rt_class_test`,
+  `watch_test`, `ipc_test`, `remote_test`, `uplink_test`, `wedged_test`, `owner_test`.
   CI builds `@runtest-serial -j1` first, so each runs with the runner to itself, then `@runtest`,
   which diffs the outputs they left: `--force` re-runs a diff, not the rule that made its output.
   `runtest` stays the whole suite everywhere else. Each remains a defect of the check under §10.3

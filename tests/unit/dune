@@ -37,7 +37,7 @@
   (run ./uplink_test.exe)))
 
 (rule
- (alias runtest)
+ (aliases runtest runtest-serial)
  (action
   (diff uplink_test.expected uplink_test.output)))
 

@@ -30,7 +30,7 @@
   (run ./remote_test.exe)))
 
 (rule
- (alias runtest)
+ (aliases runtest runtest-serial)
  (action
   (diff remote_test.expected remote_test.output)))
 
