@@ -249,13 +249,12 @@ class Client(private val core: Core) {
         val reply = call(Requests.stats())
         val body = if (reply.has("cache")) reply else reply.optJSONArray("domains")?.optJSONObject(0) ?: reply
         val cache = body.optJSONObject("cache")
-        val wal = body.optJSONObject("wal")
-        val sync = body.optJSONObject("sync")
+        val queues = body.optJSONObject("queues")
         return Stats(
             cacheBytes = cache?.takeIf { it.has("bytes") }?.optLong("bytes"),
             pinnedBytes = cache?.takeIf { it.has("pinnedBytes") }?.optLong("pinnedBytes"),
-            parked = (wal?.optInt("stuck", 0) ?: 0) + (sync?.optInt("parkedMetadata", 0) ?: 0),
-            lastError = wal?.let { text(it, "lastError") }?.takeIf { it.isNotEmpty() },
+            parked = queues?.optInt("parked", 0) ?: 0,
+            lastError = queues?.let { text(it, "lastError") }?.takeIf { it.isNotEmpty() },
         )
     }
 
