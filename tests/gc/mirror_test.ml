@@ -82,17 +82,25 @@ let () =
       put (Key.child d folder "b.txt") (manifest "b.txt" ["c2"; "c3"]);
       put (Key.index d Folder_id.root) "an index";
       put (Key.version d ~group:"0000000000a1-1/h" ~ns:1L) (manifest "v" ["c1"]);
-      put (Key.journal_entry d ~month:"2026-10" ~entry:"e1") "[]";
-      put (Key.cursor d) "e1";
+      put (Key.log_entry d 1)
+        (Log_entry.encode
+           {
+             author = "a";
+             commands =
+               [
+                 `Folder
+                   ( Folder_id.mint ~uuid:"eeeeeeeeeeee" ~counter:1,
+                     None,
+                     Some { parent = Folder_id.root; name = "e1" } );
+               ];
+           });
+      put (Key.cursor d) (Key.entry_number 1);
       let composite =
         Composite.create ~domain:d
           ~data_dir:(Filename.concat root "data")
           ~owner:true ~poke:ignore
           ~knowledge:
-            {
-              Composite.is_index = (fun _ -> false);
-              is_journal = (fun _ -> false);
-            }
+            { Composite.is_index = (fun _ -> false); is_log = (fun _ -> false) }
           [
             { name = "main"; role = Main; store = main };
             { name = "copy"; role = Replica; store = copy };
@@ -213,14 +221,24 @@ let () =
       p "\n== everything but the chunks\n";
       put_chunk "c9";
       put (Key.child d folder "new.txt") (manifest "new.txt" ["c9"]);
-      put (Key.journal_entry d ~month:"2026-10" ~entry:"e2") "[]";
-      put (Key.cursor d) "e2";
+      put (Key.log_entry d 2)
+        (Log_entry.encode
+           {
+             author = "a";
+             commands =
+               [
+                 `Folder
+                   ( Folder_id.mint ~uuid:"eeeeeeeeeeee" ~counter:2,
+                     None,
+                     Some { parent = Folder_id.root; name = "e2" } );
+               ];
+           });
+      put (Key.cursor d) (Key.entry_number 2);
       run "skip-chunks" Skip_chunks;
-      p "journal entry and same-size cursor copied: %b\n"
-        (inner.head_opt (Key.journal_entry d ~month:"2026-10" ~entry:"e2")
-         <> None
+      p "log entry and same-size cursor copied: %b\n"
+        (inner.head_opt (Key.log_entry d 2) <> None
         && Option.map Bigstring.to_string (inner.get_opt (Key.cursor d))
-           = Some "e2");
+           = Some (Key.entry_number 2));
       p "\n== a chunk that does not hash to its key on the source\n";
       main.put (Key.chunk d (chunk "sound")) (Bigstring.of_string "rotten");
       put (Key.child d Folder_id.root "r.txt") (manifest "r.txt" ["sound"]);

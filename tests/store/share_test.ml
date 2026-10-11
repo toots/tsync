@@ -61,8 +61,7 @@ let routes () =
         Composite.create ~domain:d
           ~data_dir:(Filename.concat root "data")
           ~owner:true ~poke:ignore
-          ~knowledge:
-            { is_index = (fun _ -> false); is_journal = (fun _ -> false) }
+          ~knowledge:{ is_index = (fun _ -> false); is_log = (fun _ -> false) }
           [{ name = "main"; role = Main; store = main }]
       in
       let module C = struct
@@ -86,7 +85,9 @@ let routes () =
                          (String.sub content (i * 8)
                             (min 8 (String.length content - (i * 8))))))
               in
-              R.publish ~parent:Folder_id.root ~leaf:name m
+              R.put_manifest
+                (Key.child C.domain Folder_id.root name)
+                (Manifest.rename m name)
           | None -> ());
         C.store.put
           (Option.get (Key.share token))

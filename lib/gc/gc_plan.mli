@@ -58,7 +58,8 @@ val versions : cutoff:float -> Key.t list -> Key.t list
 
 (** Log entries to delete, in ascending number order (publication §4.9): at or
     below the tree head, never the head entry, and older than [retention] by the
-    modification time their store gave them. *)
+    modification time their store gave them. It stops at the first entry that
+    stays, so the retained entries are contiguous. *)
 val log :
   now:float ->
   retention:float ->

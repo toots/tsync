@@ -83,11 +83,13 @@ let log ~now ~retention ~tree_head (entries : (Key.t * float) list) =
     |> List.sort compare
   in
   let head = List.fold_left (fun acc (n, _, _) -> max acc n) 0 numbered in
-  List.filter_map
-    (fun (n, key, mtime) ->
-      if n <= tree_head && n <> head && mtime < now -. retention then Some key
-      else None)
-    numbered
+  let rec oldest = function
+    | (n, key, mtime) :: rest
+      when n <= tree_head && n <> head && mtime < now -. retention ->
+        key :: oldest rest
+    | _ -> []
+  in
+  oldest numbered
 
 let takeovers ~tree_head keys =
   List.filter

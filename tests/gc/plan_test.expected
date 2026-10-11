@@ -48,24 +48,18 @@ S  200, F  500 -> push S's entries down, then rename
 S  499, F  500 -> move F's entries across
 shards after 0ff: 100 a00
 
-== trash (§4.1): cutoff 1000
-live, entries old and new          -> delete stale entries: e0
-live, on demand                    -> refuse: live elsewhere
-in trash, one entry recent         -> skip: trashed again recently
-in trash, all old                  -> purge the subtree, then entries: e0 e1
-no anchor, old                     -> purge the subtree, then entries: e0
-in trash, recent, on demand        -> purge the subtree, then entries: e0
-purge order: tsync/d/manifests/deep/ tsync/d/manifests/mid/ tsync/d/manifests/mid2/ tsync/d/manifests/top/
-
-== versions (§4.3): cutoff 2 s
+== versions (§4.1): cutoff 2 s
 deleted: 1000000000
 
-== journal (§4.4): now 100 days, horizon 30 days
-cutoff day 60                            -> day10 day50
-cutoff day 100: the horizon holds        -> day10 day50 day69
-cutoff day 60, cursor names day 10       -> day50
+== log (publication §4.9): now day 100, retention 30 days
+entries 1 to 5, all old, tree head 5: the head stays -> 1 2 3 4
+tree head 3: nothing above it goes                   -> 1 2 3
+entries 2 and 3 younger than the retention           -> 1
+one entry, old: it is the head                       -> nothing
+listed out of order                                  -> 1 2
+takeovers the tree head (7) has passed: 6-1 7-2 7-void
 
-== shares (§4.5): now 100
+== shares (§4.3): now 100
 {"v":1,"expires":50,"domain":"d","type":"file"}    -> expired: delete
 {"v":1,"expires":150,"domain":"d","type":"file"}   -> kept
 {"v":1,"expires":50,"domain":"e","type":"file"}    -> another domain's

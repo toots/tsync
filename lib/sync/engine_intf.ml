@@ -133,7 +133,8 @@ module type S = sig
   val fetch_range : string -> string -> off:int -> len:int -> int
 
   (** Local recovery, the upload queue and the copy logs, then the background
-      cycle unless [background] is false (the default on a lazy tree). *)
+      cycle unless [background] is false. On a lazy tree the cycle only pushes.
+  *)
   val start : ?background:bool -> unit -> unit
 
   (** Uploads, a last cycle, the cursor flush and the copies, within the grace;
@@ -186,6 +187,9 @@ module type S = sig
   val set_paused : bool -> unit
   val is_paused : unit -> bool
   val pending_uploads : unit -> int
+
+  (** The keys changed here and not committed yet. *)
+  val pending_changes : unit -> int
 
   (** The uploads running now; cheap: reads only their records. *)
   val uploads : unit -> transfer list

@@ -160,11 +160,12 @@ let cases =
           },
         () );
     Case (Full_resync, ());
-    Case (Sync { full = true }, Full { manifests = 12; failed = 1 });
-    Case (Sync { full = false }, Incremental 5);
-    Case (Trash_restore "Holidays/2019", Restored 42);
-    Case (Trash_restore "nowhere", Not_in_trash);
-    Case (Trash_restore "Holidays/2019", Name_taken);
+    Case
+      ( Sync { full = true },
+        { arrival = `State (12, 3); changed = 4; committed = 1; pending = 0 } );
+    Case
+      ( Sync { full = false },
+        { arrival = `Entries 5; changed = 7; committed = 0; pending = 2 } );
     Case
       ( Job
           {
@@ -179,13 +180,7 @@ let cases =
             narrate = true;
           },
         0 );
-    Case
-      ( Job
-          {
-            job = Purge { apply = false; path = "Holidays/2019" };
-            narrate = false;
-          },
-        1 );
+    Case (Job { job = Void_entry { n = 7 }; narrate = false }, 1);
     Case (Job { job = Gc_copies Probe; narrate = false }, 0);
     Case
       ( Share { item = Rel "docs/a.txt"; expires = Some 3600.; token = None },

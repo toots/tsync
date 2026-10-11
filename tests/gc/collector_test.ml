@@ -18,7 +18,7 @@ let manifest cks =
 let knowledge =
   {
     Composite.is_index = (fun k -> Key.leaf k = ".tsync-index");
-    is_journal = (fun k -> Key.under (Key.journal d) k);
+    is_log = (fun k -> Key.under (Key.log d) k);
   }
 
 let rec files dir =

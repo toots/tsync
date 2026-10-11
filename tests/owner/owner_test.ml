@@ -217,8 +217,10 @@ let () =
                 | _ -> -1)
           | _ -> -1
       in
+      (* A poll asks for a cycle at once, which commits what is uploaded. *)
       let rec drained n =
         if pending () > 0 && n > 0 then (
+          ignore (ask [("action", "poll")]);
           Rt.sleep 0.1;
           drained (n - 1))
       in

@@ -248,7 +248,7 @@ module Make (C : Engine_ctx.S) = struct
 
   let is_paused () = Atomic.get paused
 
-  let start ?(background = not C.lazy_tree) () =
+  let start ?(background = true) () =
     let is_paused = Fs.exists paused_path in
     Atomic.set paused is_paused;
     recover ();
@@ -287,12 +287,12 @@ module Make (C : Engine_ctx.S) = struct
     if left > 0. then Tsync_store.Composite.settle ~timeout:left C.composite;
     Mirror.save_file_ids mirror
 
-  let resync ?narrate:_ ?(full = false) ?parallelism:_ () : Engine_intf.synced =
+  let resync ?narrate ?(full = false) ?parallelism:_ () : Engine_intf.synced =
     if C.lazy_tree then
       Fail.raise_ Fail.Refused "a lazy tree pulls its folders; it has no sync";
     if Atomic.get paused then
       Fail.raise_ Fail.Refused "%s is paused" (Domain_name.to_string d);
-    let c = run_cycle ~full () in
+    let c = run_cycle ?narrate ~full () in
     (match c.arrival with
       | `State _ -> with_meta (fun () -> Mirror.rebuild_index mirror)
       | `Entries _ -> ());
@@ -304,6 +304,7 @@ module Make (C : Engine_ctx.S) = struct
     }
 
   let pending_uploads () = Dqueue.pending uploads
+  let pending_changes () = Sync_state.pending_count sync_state
 
   let upload_of id =
     match Dqueue.Records.read upload_log id with

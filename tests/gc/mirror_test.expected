@@ -1,5 +1,5 @@
 == everything
-all: main -> copy, 10 checked, 10 copied (455 bytes), 0 refused, 0 changed, 0 unguarded
+all: main -> copy, 10 checked, 10 copied (571 bytes), 0 refused, 0 changed, 0 unguarded
 order of kinds: chunk, other, cursor
 index copied: false
 
@@ -13,10 +13,12 @@ said:  copy: manifests, 4 checked, 0 copied (0 B)
 said:  copy: versions, listed 1 object on main
 said:  copy: versions, listed 1 object on copy
 said:  copy: versions, 1 checked, 0 copied (0 B)
-said:  copy: journal, listed 1 object on main
-said:  copy: journal, listed 1 object on copy
-said:  copy: journal, 1 checked, 0 copied (0 B)
-said:  copy: cursor, 1 checked, 0 copied (0 B)
+said:  copy: log, listed 1 object on main
+said:  copy: log, listed 1 object on copy
+said:  copy: takeovers, listed 0 objects on main
+said:  copy: takeovers, listed 0 objects on copy
+said:  copy: log, 1 checked, 0 copied (0 B)
+said:  copy: tree head and cursor, 1 checked, 0 copied (0 B)
 said:  copy: 10 checked, 0 copied (0 B)
 
 == again
@@ -35,8 +37,8 @@ all: main -> copy, 10 checked, 1 copied (110 bytes), 0 refused, 0 changed, 0 ung
 all: main -> copy, 10 checked, 1 copied (110 bytes), 0 refused, 0 changed, 1 unguarded
 
 == everything but the chunks
-skip-chunks: main -> copy, 9 checked, 2 copied (4 bytes), 1 refused, 0 changed, 0 unguarded
-journal entry and same-size cursor copied: true
+skip-chunks: main -> copy, 9 checked, 2 copied (120 bytes), 1 refused, 0 changed, 0 unguarded
+log entry and same-size cursor copied: true
 
 == a chunk that does not hash to its key on the source
 all: main -> copy, 5 checked, 1 copied (2 bytes), 1 refused, 0 changed, 0 unguarded

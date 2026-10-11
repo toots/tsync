@@ -30,6 +30,7 @@ list_dir root                      {"ok":true,"items":[]}
 == change feed
   op                               {"op":"mkdir","ref":"d:<id1>","parentRef":"root","name":"a"}
   op                               {"op":"put","ref":"i:<file-1>","parentRef":"d:<id1>","name":"f.txt"}
+  op                               {"op":"put","ref":"i:<file-1>","parentRef":"d:<id1>","name":"f.txt"}
   op                               {"op":"put","ref":"i:<file-2>","parentRef":"d:<id1>","name":"f (conflicted copy from test).txt"}
   op                               {"op":"rename","is_dir":false,"srcRef":"i:<file-1>","srcParentRef":"d:<id1>","ref":"i:<file-1>","parentRef":"d:<id1>","name":"g.txt"}
   op                               {"op":"delete","ref":"i:<file-2>","parentRef":"d:<id1>","name":"f (conflicted copy from test).txt"}
@@ -65,11 +66,11 @@ notify_reset                       {"ok":true,"delivered":1}
 next event                         {"event":"reset","domain":"docs","id":4}
 == jobs
   line                             {"stream":"started","job":1}
-  line                             {"stream":"out","text":"full resync: 7 manifests"}
+  line                             {"stream":"out","text":"arrived by state: 7 files, 1 folder; 0 paths changed here; 0 entries committed; 0 changes pending"}
 sync --full, narrated              {"ok":true,"exit":0}
   progress streamed: true
   line                             {"stream":"started","job":2}
-  line                             {"stream":"out","text":"main: 9 chunks referenced, 0 reclaimable (0 B) (dry run: nothing changed; --apply to act)"}
+  line                             {"stream":"out","text":"main: 9 chunks referenced, 1 reclaimable (11 B) (dry run: nothing changed; --apply to act)"}
 gc dry run, narrated               {"ok":true,"exit":0}
   narration streamed: true, progress streamed: true
 gc --apply, held at opening        {"stream":"started","job":3}

@@ -71,10 +71,7 @@ let () =
           ~data_dir:(Filename.concat root "data")
           ~owner:true ~poke:ignore
           ~knowledge:
-            {
-              Composite.is_index = (fun _ -> false);
-              is_journal = (fun _ -> false);
-            }
+            { Composite.is_index = (fun _ -> false); is_log = (fun _ -> false) }
           [
             { name = "main"; role = Main; store = main };
             { name = "bucket"; role = Backfill; store = copy };
@@ -176,10 +173,7 @@ let () =
           ~data_dir:(Filename.concat root "data-main")
           ~owner:true ~poke:ignore
           ~knowledge:
-            {
-              Composite.is_index = (fun _ -> false);
-              is_journal = (fun _ -> false);
-            }
+            { Composite.is_index = (fun _ -> false); is_log = (fun _ -> false) }
           [
             {
               name = "main-bucket";

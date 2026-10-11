@@ -270,30 +270,6 @@ module Make (C : Context.S) = struct
     in
     attempt 0
 
-  let publish ?resend ~parent ~leaf (m : Manifest.t) =
-    put_manifest ?resend (slot parent leaf) (Manifest.rename m leaf)
-
-  let delete_slot parent leaf =
-    let key = slot parent leaf in
-    save_version key;
-    store.delete key
-
-  (* 02 §4.4: snapshot, server-side copy (gated), delete the source, then re-put
-     with the new leaf recorded. *)
-  let rename_file ~src:(sp, sl) ~dst:(dp, dl) =
-    let skey = slot sp sl and dkey = slot dp dl in
-    save_version skey;
-    save_version dkey;
-    store.copy skey dkey;
-    ignore (store.delete skey);
-    match store.get_opt dkey with
-      | Some b -> (
-          match Manifest.of_body b with
-            | Some m when m.name <> dl ->
-                put_manifest ~save:false dkey (Manifest.rename m dl)
-            | _ -> ())
-      | None -> ()
-
   let list_versions parent leaf =
     let group = group_of (slot parent leaf) in
     List.filter_map
@@ -329,12 +305,4 @@ module Make (C : Context.S) = struct
 
   let get_version (e : Store.entry) =
     Bigstring.to_string (Store.get store e.key)
-
-  let revert ~parent ~leaf (version : Store.entry) =
-    let body = get_version version in
-    match Manifest.decode body with
-      | Some m -> put_manifest (slot parent leaf) (Manifest.rename m leaf)
-      | None ->
-          Fail.corrupt "version %s is not a manifest"
-            (Key.to_string version.key)
 end
