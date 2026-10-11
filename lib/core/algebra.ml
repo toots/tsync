@@ -113,8 +113,6 @@ let set t : 'f command -> 'f t = function
   | `Folder (i, _, v) -> set_folder t i v
 
 let apply t commands = List.fold_left set t commands
-let files t = Places.bindings t.files
-let folders t = Ids.bindings t.folders
 
 (* ponytail: scans every changed key; index the changes by parent if a merge
    that removes many folders over a large arrival by state gets slow. *)
@@ -431,10 +429,7 @@ let merge ?priority ~equal ~aside ~l ~before ~theirs () =
     n;
     local =
       List.filter
-        (function
-          | `File (_, a, b) ->
-              not (Option.equal (fun a b -> a == b || equal a b) a b)
-          | `Folder (_, a, b) -> a <> b)
+        (fun c -> not (is_null ~equal c))
         (List.map (command ~from:l) keys);
     pending = List.map (command ~from:m) keys;
     asides = List.rev asides;

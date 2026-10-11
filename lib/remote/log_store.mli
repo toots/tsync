@@ -23,6 +23,10 @@ type entry = { n : int; bytes : string; read : read }
 (** The batch an entry holds; none for one that cannot be followed. *)
 val commands : entry -> Log_entry.command list option
 
+(** The last command the entries hold on each key they name, in key order: what
+    they make of the tree. *)
+val last_commands : entry list -> Log_entry.command list
+
 val read_entry : t -> int -> entry option
 
 (** The entries from [from] on, up to the first absent one. *)
@@ -45,12 +49,7 @@ val takeover : t -> int -> int * string option
 val takeover_create :
   t -> int -> generation:int -> client:string -> [ `Won | `Held of string ]
 
-val void_exists : t -> int -> bool
 val void_create : t -> int -> client:string -> [ `Won | `Held of string ]
-
-(** [`Moved] for a body that does not parse. *)
-val cursor_read : t -> [ `None | `At of int | `Moved ]
-
 val cursor_token : t -> string option
 
 (** Returns when the cursor may have changed, bounded by the driver. *)

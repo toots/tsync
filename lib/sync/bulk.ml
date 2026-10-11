@@ -24,22 +24,11 @@ module Make (C : Engine_ctx.S) = struct
     (* durable-queue §7.3: the chunks are on the main; the manifest becomes
        the key's local value, with its before-value. *)
     let install run rel (m : Manifest.t) =
-      let m = Manifest.rename m (Names.leaf_of rel) in
       with_meta (fun () ->
-          with_key rel (fun () ->
-              begin_change rel;
-              ignore (discard_edit rel);
-              end_lineage rel;
-              Mirror.write_file ~own:true mirror rel m;
-              ignore (Mirror.ensure_file_id mirror rel);
-              settle rel);
+          install rel m;
           Mutex.protect damaged_m (fun () ->
-              Hashtbl.remove damaged (place_of rel));
-          let op = Op.Put { path = rel; size = m.size } in
-          feed ~fids:(note_fids [op]) [op]);
-      note_file run rel;
-      changed [rel];
-      wake_cycle ()
+              Hashtbl.remove damaged (place_of rel)));
+      note_file run rel
 
     let unchanged (a : Unix.stats) (b : Unix.stats) =
       a.st_size = b.st_size && a.st_mtime = b.st_mtime

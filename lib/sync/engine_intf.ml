@@ -254,5 +254,4 @@ module type S = sig
   val refresh_file : string -> unit
 
   val mirror : Mirror.t
-  val staged_edits : unit -> (string * Staged.edit) list
 end

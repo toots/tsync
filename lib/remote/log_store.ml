@@ -37,6 +37,22 @@ let commands e =
     | Void -> Some []
     | Later_version _ | Undecodable _ -> None
 
+module Keys = Map.Make (struct
+  type t = Algebra.key
+
+  let compare = Algebra.compare_key
+end)
+
+let last_commands entries =
+  List.fold_left
+    (fun acc e ->
+      List.fold_left
+        (fun acc c -> Keys.add (Algebra.key_of c) c acc)
+        acc
+        (Option.value ~default:[] (commands e)))
+    Keys.empty entries
+  |> Keys.bindings |> List.map snd
+
 let claim_holder : Store.claim -> [ `Won | `Held of string ] = function
   | Won -> `Won
   | Held b -> `Held (String.trim (Bigstring.to_string b))
@@ -129,14 +145,6 @@ let takeover_create t n ~generation ~client =
     (t.store.put_if_absent
        (Key.takeover t.domain n ~generation)
        (Bigstring.of_string client))
-
-let cursor_read t =
-  match t.store.get_opt (Key.cursor t.domain) with
-    | None -> `None
-    | Some b -> (
-        match int_of_string_opt (String.trim (Bigstring.to_string b)) with
-          | Some n when n >= 0 -> `At n
-          | _ -> `Moved)
 
 let cursor_token t = Store.token (t.store.get_opt (Key.cursor t.domain))
 let cursor_wait t token = t.store.watch (Key.cursor t.domain) token

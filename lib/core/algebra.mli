@@ -61,12 +61,6 @@ val to_base : 'f t -> 'f base
 (** The state with each command's key set to its value after. *)
 val apply : 'f t -> 'f command list -> 'f t
 
-(** The keys changed over the base, with their values: for a state over
-    {!empty}, the whole state. *)
-val files : 'f t -> (place * 'f option) list
-
-val folders : 'f t -> (Folder_id.t * place option) list
-
 (** Definition 3 around [keys], which must hold every key changed over a
     well-formed base; [Error] describes the first violation. *)
 val well_formed : 'f t -> key list -> (unit, string) result

@@ -39,13 +39,7 @@ module Make (C : Engine_ctx.S) = struct
   let damaged : (Algebra.place, string) Hashtbl.t = Hashtbl.create 8
   let damaged_m = Mutex.create ()
   let is_damaged p = Mutex.protect damaged_m (fun () -> Hashtbl.mem damaged p)
-  let same v w = v == w || Log_entry.equal v w
-  let same_file = Option.equal same
-
-  let null : Log_entry.command -> bool = function
-    | `File (_, a, b) -> same_file a b
-    | `Folder (_, a, b) -> a = b
-
+  let null = Algebra.is_null ~equal:same
   let local_file_at p = Option.bind (path_of p) local_file
 
   let children_of dir parent : Algebra.key list =
@@ -104,11 +98,7 @@ module Make (C : Engine_ctx.S) = struct
       (Sync_state.pending sync_state)
 
   let aside ~taken ~is_dir name =
-    let rec pick n =
-      let candidate = Conflict.name ~client:C.client_name ~is_dir name n in
-      if taken candidate then pick (n + 1) else candidate
-    in
-    pick 1
+    Conflict.free ~client:C.client_name ~is_dir ~taken name
 
   (* ponytail: a parked folder is a real name of the root for the time of
      one enactment; give the mirror a hidden place if a listing ever shows it. *)
@@ -460,16 +450,7 @@ module Make (C : Engine_ctx.S) = struct
     changed touched;
     List.length touched
 
-  (* The last value the entries give each key. *)
-  let theirs_of (entries : Log_store.entry list) : Log_entry.command list =
-    List.fold_left
-      (fun acc (e : Log_store.entry) ->
-        List.fold_left
-          (fun acc c -> Keys.add (Algebra.key_of c) c acc)
-          acc
-          (Option.value ~default:[] (Log_store.commands e)))
-      Keys.empty entries
-    |> Keys.bindings |> List.map snd
+  let theirs_of = Log_store.last_commands
 
   (* publication §4.3. *)
   let fetch h =
@@ -1210,10 +1191,9 @@ module Make (C : Engine_ctx.S) = struct
           (pending ());
         List.iter
           (fun (path, (e : Staged.edit)) ->
-            match parent_id path with
+            match place_opt path with
               | None -> ()
-              | Some parent -> (
-                  let p = { Algebra.parent; name = Names.leaf_of path } in
+              | Some p -> (
                   match (e.state, Sync_state.before_file sync_state p) with
                     | Owed, None ->
                         Sync_state.record_file sync_state p (mirror_value path)
@@ -1233,13 +1213,8 @@ module Make (C : Engine_ctx.S) = struct
     in
     List.iter
       (fun (path, (e : Staged.edit)) ->
-        match parent_id path with
-          | Some parent
-            when e.state = Owed
-                 && not
-                      (List.mem
-                         { Algebra.parent; name = Names.leaf_of path }
-                         recorded) ->
+        match place_opt path with
+          | Some place when e.state = Owed && not (List.mem place recorded) ->
               post_put path
           | _ -> ())
       (Staged.edits staged)

@@ -310,6 +310,11 @@ module Make (C : Engine_ctx.S) = struct
   let place_of path : Algebra.place =
     { parent = require_parent path; name = Names.leaf_of path }
 
+  let place_opt path : Algebra.place option =
+    Option.map
+      (fun parent -> { Algebra.parent; name = Names.leaf_of path })
+      (parent_id path)
+
   let path_of (p : Algebra.place) =
     Option.map
       (fun dir -> Names.join dir p.name)
@@ -337,7 +342,10 @@ module Make (C : Engine_ctx.S) = struct
             (parent_id path)
       | _ -> None
 
-  let same_file = Option.equal Log_entry.equal
+  (* [Unknown] differs from every value, itself included, so the same value
+     read twice is told by its identity in memory. *)
+  let same v w = v == w || Log_entry.equal v w
+  let same_file = Option.equal same
 
   (* publication §4.1: a before-value that [L] returned to is dropped. *)
   let settle path =
@@ -1108,14 +1116,11 @@ module Make (C : Engine_ctx.S) = struct
           | _ -> ())
 
   let aside_name path ~is_dir =
-    let parent = Names.parent_of path and leaf = Names.leaf_of path in
-    let rec pick n =
-      let cand =
-        Names.join parent (Conflict.name ~client:C.client_name ~is_dir leaf n)
-      in
-      if kind cand = `Absent then cand else pick (n + 1)
-    in
-    pick 1
+    let parent = Names.parent_of path in
+    Names.join parent
+      (Conflict.free ~client:C.client_name ~is_dir
+         ~taken:(fun leaf -> kind (Names.join parent leaf) <> `Absent)
+         (Names.leaf_of path))
 
   (* security-model §7.3: a file handed over from another filesystem is read a
      block at a time, through a descriptor that follows no link. *)
@@ -1264,10 +1269,8 @@ module Make (C : Engine_ctx.S) = struct
 
   let cancel_upload path =
     Option.iter
-      (fun parent ->
-        Dqueue.cancel_key uploads
-          (upload_key { parent; name = Names.leaf_of path }))
-      (parent_id path)
+      (fun place -> Dqueue.cancel_key uploads (upload_key place))
+      (place_opt path)
 
   let remove_local_file l =
     cancel_upload l;
@@ -1525,25 +1528,33 @@ module Make (C : Engine_ctx.S) = struct
                     if dk = `File then delete_held dst;
                     move_file_held ~src ~dst))))
 
+  (* A manifest whose chunks the main holds becomes the key's local value, as
+     one local operation (publication §4.12); under the metadata lock. *)
+  let install path (m : Manifest.t) =
+    let m = Manifest.rename m (Names.leaf_of path) in
+    with_key path (fun () ->
+        begin_change path;
+        ignore (discard_edit path);
+        bump path;
+        end_lineage path;
+        Mirror.write_file ~own:true mirror path m;
+        ignore (Mirror.ensure_file_id mirror path);
+        settle path);
+    let op = Op.Put { path; size = m.size } in
+    feed ~fids:(note_fids [op]) [op];
+    changed [path];
+    wake_cycle ()
+
   let symlink path ~target ~exclusive =
     check_writable ();
     if C.symlinks <> `Keep then
       Fail.raise_ Fail.Refused "symbolic links are not kept in this domain";
     with_meta (fun () ->
-        with_key path (fun () ->
-            if exclusive && exists path then
-              Fail.raise_ Fail.Exists "%s exists" path;
-            begin_change path;
-            ignore (discard_edit path);
-            Mirror.write_file mirror path
-              (Manifest.symlink ~name:(Names.leaf_of path)
-                 ~mtime:(Unix.gettimeofday ()) target);
-            settle path);
-        feed
-          ~fids:(note_fids [Op.Put { path; size = String.length target }])
-          [Op.Put { path; size = String.length target }]);
-    changed [path];
-    wake_cycle ()
+        if exclusive && exists path then
+          Fail.raise_ Fail.Exists "%s exists" path;
+        install path
+          (Manifest.symlink ~name:(Names.leaf_of path)
+             ~mtime:(Unix.gettimeofday ()) target))
 
   let evict path =
     match Mirror.manifest mirror path with

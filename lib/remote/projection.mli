@@ -10,6 +10,10 @@ module Make (_ : Context.S) : sig
       stop the projection. *)
   val apply : before_write:(unit -> unit) -> Log_entry.command list -> unit
 
+  (** The folders that have a namespace in the manifest area, the root included
+      (05 §4.7 step 2): one listing of the area. *)
+  val namespaces : unit -> Folder_id.t list
+
   (** Every file record and every folder's anchor of the tree, as the value of
       its key (05 §4.7), in no order; [f] is called by one fiber at a time. A
       namespace that cannot be listed or read fails the walk; a record listed

@@ -74,5 +74,3 @@ type arrival = {
 val arrival : t -> arrival option
 val set_arrival : t -> arrival -> unit
 val clear_arrival : t -> unit
-val encode_arrival : arrival -> string
-val decode_arrival : string -> arrival option
