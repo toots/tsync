@@ -5,8 +5,8 @@ This file owns:
 - the **config schema and its validation**;
 - the **Domain Context**: the live domain every subsystem above config is given, and how it is
   built from config;
-- the **whole-domain operations** (import, export, rsync, mirror, resync, trash and deleted-file
-  listing, expire, gc, integrity, share): their interfaces and semantics.
+- the **whole-domain operations** (import, export, rsync, mirror, sync, deleted-file listing,
+  expire, gc, integrity, share): their interfaces and semantics.
 
 It does not own: the meaning of roles and the composite's read and write paths
 ([algorithms/replication.md](algorithms/replication.md)); backend key layout and byte formats
@@ -22,7 +22,7 @@ Three things are called "mirror":
 |---|---|
 | **the mirror** | this client's local projection of the domain's names ([local-cache.md](data-model/local-cache.md)) |
 | **`tsync mirror`** | backend-to-backend copy of a domain's objects (§4.6) |
-| **`tsync sync`** | resync: bring the mirror up to date with the store (§4.7) |
+| **`tsync sync`** | one cycle now, or an arrival by state: bring the local tree to the main's (§4.7) |
 
 Implementation notes: [ocaml/05-ops-config.md](ocaml/05-ops-config.md).
 
@@ -37,7 +37,7 @@ per-domain policies. Around the per-file engine two things are needed:
    unconfigured. And one place where a parsed domain becomes a live one with real stores.
 2. **Whole-domain jobs** over whole trees and keyspaces: seeding a domain from a
    folder, writing it out, copying without moving bytes already stored, repairing one store from
-   another, rebuilding this client's view, trimming history, reclaiming chunks, checking integrity,
+   another, reading the main's tree whole, trimming history, reclaiming chunks, checking integrity,
    publishing links. They run in the domain's owner, sent there by their commands; a command runs
    one itself only when no owner is serving ([07 §2.5](07-daemon-cli.md#25-one-shot-commands)).
 
@@ -104,7 +104,7 @@ every tool that reads or writes a config (the daemon, every command, the Android
 | `link` | optional non-blank string, trimmed; default `"wan"`; refused on `type: local` (a local store has no link) |
 | other keys | the driver's declared fields ([backends/](backends/)), each with its declared type. A field declared as a list (for example an `exec` command) takes a JSON array. A local store's `path` is absolute or starts with `~/`. |
 
-**Role validation.** With no `main`: a `replica` is refused ("a replica is a copy of a source of
+**Role validation.** More than one `main` is refused ("a domain has one main"). With no `main`: a `replica` is refused ("a replica is a copy of a source of
 truth"); a `backfill` is refused ("nothing to fill it from"); no `readOnly` either is refused
 ("nothing here can answer a read").
 
@@ -170,7 +170,7 @@ An immutable value handed to every subsystem working on one domain, one per doma
 | field | meaning |
 |---|---|
 | `domain_name`, `client_name`, `versioning`, `read_only`, `symlink_policy` | from config |
-| `domain_prefix`, `chunk_prefix`, `versions_prefix`, `journal_prefix`, `shares_prefix`, `cursor_key` | key names ([02](02-remote-model.md)) |
+| `domain_prefix`, `chunk_prefix`, `versions_prefix`, `log_prefix`, `takeover_prefix`, `tree_head_key`, `shares_prefix`, `cursor_key` | key names ([02](02-remote-model.md)) |
 | `cache_root`, `data_dir`, `socket_path` | local paths ([07 §2.7](07-daemon-cli.md)) |
 | `max_uploads`, `max_chunk_buffers`, `max_downloads` | concurrency budgets |
 | `chunk_size`, `cache_chunk_size`, `max_cache` | unresolved config values |
@@ -201,9 +201,10 @@ Derived contexts:
 3. For each backend, in role order ([replication.md](algorithms/replication.md)): fresh traffic
    counters; its link's admission; **one** store client (every layer above shares it: two clients
    against one store would be two sets of health and limits); an uplink probe for remote stores.
-4. Build the composite: mains; `readOnly` archives; each `replica` and `backfill` as a deferred
+4. Build the composite: the main; `readOnly` archives; each `replica` and `backfill` as a deferred
    target whose job log lives at `<data_dir>/deferred-pending/<domain>/<escaped backend name>/`,
-   which forwards a manifest only after its chunks and never forwards folder indexes.
+   which forwards a manifest or a log entry only after the chunks it names and never forwards
+   folder indexes.
 5. Build the members.
 6. **Deferred logs are resumed only by the domain's owner** ([07 §2.2](07-daemon-cli.md)). Any other
    process submits the jobs its writes cause to the logs and pokes the owner; it never runs them
@@ -218,7 +219,7 @@ Building has no side effect on the stores.
 |---|---|---|
 | owner (FUSE, File Provider, headless, Android app, a command holding ownership) | yes | resumes deferred logs |
 | store server | yes | submits deferred jobs; uses `store` only |
-| other one-shot commands | yes | submits |
+| other one-shot commands | yes | read-class commands ([07 §2.5](07-daemon-cli.md#25-one-shot-commands)): they write nothing through `store` |
 | tray, discovery library, wizard | no | parse only (mount points, roots, validation) |
 
 ---
@@ -233,12 +234,14 @@ Building has no side effect on the stores.
   any process. Running elsewhere needs a stated reason in 07 §2.5.
 - **Pause.** Operations that write a domain's stores refuse while the domain is paused
   ([07 §2.6](07-daemon-cli.md#26-pause)).
-- **GC interlock.** Every operation that publishes a reference to a chunk (a manifest from an
-  upload, an import, an rsync copy or rename, a revert) does so through the writer interlock of
-  [gc.md](algorithms/gc.md). No operation relies on a memo of "this chunk exists on a copy" across a
-  collection except as [gc.md §5.6](algorithms/gc.md#56-the-generation-and-presence-memos) allows;
-  a memo about a collectable main is harmless, since the gate checks presence at every publication and
-  its "missing chunks" refusal drops the named keys.
+- **GC interlock.** A reference to a chunk reaches a collectable main only through its reference
+  gate ([gc.md §5.4](algorithms/gc.md#54-the-collection-interlock)): at the commit of the log entry
+  that carries the manifest (an upload, an import, an rsync copy or rename, a revert), and at a
+  mirror or repair write onto the main. No operation relies on a memo of "this chunk exists on a
+  copy" across a collection except as
+  [gc.md §5.6](algorithms/gc.md#56-the-generation-and-presence-memos) allows; a memo about a
+  collectable main is harmless, since the gate checks presence at every commit and its "missing
+  chunks" refusal drops the named keys.
 - **Per-entry isolation.** A per-entry failure is recorded and the run continues, unless this file
   says the whole run fails.
 - **Failures** carry the kinds of [failure-model.md](algorithms/failure-model.md); "could not read"
@@ -256,41 +259,28 @@ Building has no side effect on the stores.
   sentences for an operator. The operation owns what it says, since only it knows why it decided; the
   caller only chooses where the sentences go (stderr for the CLI, nowhere by default).
 
-### 4.2 Announcing what an operation published (import, rsync, trash restore)
+### 4.2 Bulk publishers (import, rsync)
 
-Only the domain's owner mints journal entry keys and publishes entries
-([wal-and-journal.md §4.9](algorithms/wal-and-journal.md#49-one-owner-per-domain)). An operation
-announces its changes by the rule of
-[durable-queue.md §7.3](algorithms/durable-queue.md#73-kill-point-walkthrough-publishing-without-a-local-staged-edit):
-
-- Ops are grouped into batches of at most `ENTRY_OPS` ops, a batch closing early once `ENTRY_AGE`
-  has passed since the previous one. Each batch becomes one WAL record listing its ops, made durable
-  by the owner **before** the first object it announces is put on the store, and held (a submitter's
-  lock, [durable-queue.md §4.2](algorithms/durable-queue.md#42-ownership), taken before the record
-  has its name) until its puts ran, so the queue never decides on a manifest still landing. An op
-  whose manifest never landed (a failure, a cancel, a file left for the next batch) is dropped when
-  the record is published.
-- The owner publishes one journal entry per record, updates its mirror and applied log, and bumps
-  the cursor.
-- **No peer sees a `put` before the `mkdir` naming its folder**: an operation's folder records are
-  released before any record holding a file beneath those folders, and the owner publishes an
-  operation's records in the order they were released.
-- A crash at any point leaves every manifest already on the store named by a durable record, which
-  the owner publishes (or drops, for an op whose manifest never landed) at its next rescan.
-
-Why count and age: a deferred replica queues an entry behind the objects it names, so one entry for a
-whole run hides the run from the replica's readers until its backlog drains.
+Import and rsync run in the owner and change the domain as **local operations**
+([publication.md §4.10](algorithms/publication.md#410-one-owner-per-domain)). For each file they
+upload its chunks and build its manifest, then set the local value at its key with its
+before-value, by the rule and kill points of
+[durable-queue.md §7.3](algorithms/durable-queue.md#73-kill-point-walkthrough-publishing-without-a-local-staged-edit).
+A folder they create is a local `mkdir` ([04 §4.5](04-checkout-cache.md#45-namespace-operations)),
+its folder id minted locally. The cycle commits these changes like any other.
 
 ### 4.3 Import
 
 `import ~src ?only ?exclude ?force_rehash` → `{imported, skipped, skipped_symlinks, failed}`; per
 entry `Imported size | Skipped_exists | Skipped_symlink | Failed reason`.
 
-1. `src` is made absolute and resolved (a dangling resolution keeps the unresolved path).
+1. `src` is made absolute and resolved (a dangling resolution keeps the unresolved path). One
+   arrival runs first ([publication.md §4.4](algorithms/publication.md#44-arrive-fetch-then-merge)),
+   so the local tree the import decides from holds what peers committed; its failure fails the run.
 2. **Plan**: a recursive walk of `src`, entries in the sort order of their full paths (a directory's
    path sorts with a trailing `/`), each once. Per name, its domain-relative path `r`:
    - skipped if an `exclude` glob matches `r` or its basename, at any depth;
-   - a directory is recorded once by its resolved path (a cycle guard); with no `only`, its marker is
+   - a directory is recorded once by its resolved path (a cycle guard); with no `only`, it is
      planned at once (empty folders are imported); under `only`, only once something beneath it is
      kept; symlinked directories are never descended; an unreadable directory logs a warning and
      counts as empty;
@@ -299,20 +289,17 @@ entry `Imported size | Skipped_exists | Skipped_symlink | Failed reason`.
      target's size (`follow`, 0 when dangling).
    Glob syntax and matching: [01 §17](01-core.md#17-glob-patterns).
 3. `on_plan(files, bytes)`.
-4. **Folders first**: create each planned folder's marker on the store (claiming its folder id) and
-   announce `Mkdir(r, id)` (§4.2).
-5. **Files**: a key exists if the store has its manifest, or the mirror holds it published or staged
-   (a permitted read, [07 §2.2](07-daemon-cli.md#22-the-domain-owner)). An existing key is
-   `Skipped_exists`, **even when its content differs**, unless `force_rehash`, which uploads the file
-   again (re-sending chunks missing from the store) and announces it. Otherwise upload (chunked,
-   deduplicated, through the interlock) and announce `Put(r, size)`. An imported file is not cached
-   locally.
-6. **Symlinks** per policy: `keep` → publish a symlink manifest, dangling ones included (same
+4. **Folders first**: create each planned folder the local tree lacks (§4.2).
+5. **Files**: a key exists if the local tree holds it, as a mirror entry or a staged edit. An
+   existing key is `Skipped_exists`, **even when its content differs**, unless `force_rehash`, which
+   uploads the file again (re-sending chunks missing from the store) and installs its manifest
+   (§4.2). Otherwise upload (chunked, deduplicated) and install the manifest (§4.2). An imported
+   file is not cached locally.
+6. **Symlinks** per policy: `keep` → install a symlink manifest, dangling ones included (same
    existence rule); `follow` → import the target's content under the link's name, a dangling target
    is `Skipped_symlink`; `skip` → `Skipped_symlink`.
-7. Close the last batch; poke the owner.
 
-A rerun after a crash skips what exists; nothing it uploaded before the crash stays unannounced
+A rerun after a crash skips the keys the local tree holds and sends only the chunks the main lacks
 (§4.2).
 
 ### 4.4 Export
@@ -321,8 +308,8 @@ A rerun after a crash skips what exists; nothing it uploaded before the crash st
 present}`, `Started{rel, size, present}`, `Landed(rel, bytes)`, `Finished(rel, outcome)`.
 
 Export reads the stores, never the mirror or the chunk cache: files may be too large to pass through
-a cache, and the domain's cache is left untouched. A file with staged edits exports its **published**
-version and is listed as pending. `dst` must be absolute.
+a cache, and the domain's cache is left untouched. A file with a staged edit exports the version in
+the **main's tree** and is listed as pending. `dst` must be absolute.
 
 1. Each path is resolved in the store's folder tree: missing → the whole run fails
    (`<p>: no such file or folder in <domain>`); a folder → every file manifest beneath it (an
@@ -332,8 +319,8 @@ version and is listed as pending. `dst` must be absolute.
    `<dst>/docs/deep/b.txt`).
 3. The run fails on any relative path with a `.` or `..` segment (names come from a store; `dst` is
    someone's disk) and on two paths landing on one destination.
-4. `pending`: this machine's staged, unpublished entries under the paths (a permitted read); they
-   are reported, not exported, and make the command exit 1.
+4. `pending`: this machine's staged edits under the paths (a permitted read); they are reported,
+   not exported, and make the command exit 1.
 5. Per file:
    - with a **record** (below) whose identity matches and a destination file of the manifest's size →
      resume, skipping claimed chunks;
@@ -375,8 +362,11 @@ unlocked records older than the sweep's grace.
 `{copied, skipped, dirs, failed, bytes_moved}`. Local to local is refused; both domain endpoints are
 the same domain.
 
-**Facts.** Every domain-side fact comes from the **store** (its folder tree and manifests), never
-from the mirror; a local fact from the local filesystem. `source = Missing | Dir | File(local) |
+**Facts.** A run starts with one arrival
+([publication.md §4.4](algorithms/publication.md#44-arrive-fetch-then-merge)), whose failure fails
+the run. Every domain-side fact then comes from the **local tree** (its folders and the manifests of
+its mirror entries), which is where rsync's changes are made (§4.2); a local fact from the local
+filesystem. `source = Missing | Dir | File(local) |
 Key(manifest)`; `target = Absent(side) | Dir(side) | File(local) | Key(manifest)`;
 `local = Link(target) | Hashed(chunk keys) | Unhashed`.
 
@@ -409,23 +399,24 @@ Key(manifest)`; `target = Absent(side) | Dir(side) | File(local) | Key(manifest)
 - Entries are handled in sorted order, a directory before its content.
 - Each action uses the facts its decision was made on; it never re-reads a fact and assumes it is
   still there.
-- Copy_manifest: a symlink → publish its manifest; a file → publish a manifest over the **inherited
-  chunk keys** through the writer interlock (zero bytes moved; the chunks are promoted before the
-  manifest appears, so an open collection cannot sweep them). Announce `Put` (§4.2).
-- Upload: symlinks per policy (`skip` → Skip `Symlink_policy`; `keep` → publish the link; `follow`
+- Copy_manifest: a symlink → install its manifest at the destination; a file → install a manifest
+  over the **inherited chunk keys** (zero bytes moved; the gate of the commit promotes the chunks,
+  so an open collection cannot sweep them) (§4.2).
+- Upload: symlinks per policy (`skip` → Skip `Symlink_policy`; `keep` → install the link; `follow`
   → the target's content, a dangling target → Skip `Dangling_symlink`); a vanished source → Failed;
-  else upload (the store deduplicates, so only differing chunks are sent). Announce `Put`.
+  else upload (the store deduplicates, so only differing chunks are sent) and install the manifest
+  (§4.2).
 - Assemble: a symlink manifest → a local symlink; else write the file from its chunks.
 - Patch_local: consecutive indices merged into runs, each fetched into place; then set the mtime.
-- Rename_in_domain: publish the manifest at the destination, delete the source manifest, announce one
-  `Rename(dst, src, size, is_dir=false)`.
-- Make_dir: local `mkdir -p`, or a domain folder and `Mkdir(rel, id)`.
-- Drop source (move): local unlink, or delete the manifest and announce `Delete`.
-- The end closes the last batch and pokes the owner (§4.2).
-- Unpublished local edits under a domain source are not part of the copy; they are listed with the
-  result as skipped. An unpublished edit is a staged edit ([04 §2.5](04-checkout-cache.md)): local
-  bytes the store has not received. A pending record over bytes the store already holds (an earlier
-  copy or move not yet announced) is not one, and its file is copied.
+- Rename_in_domain: a local `rename` of the file
+  ([04 §4.5](04-checkout-cache.md#45-namespace-operations)).
+- Make_dir: local `mkdir -p`, or a local `mkdir` in the domain (§4.2).
+- Drop source (move): local unlink, or a local `delete` in the domain.
+- A domain source with a staged edit that is not Uploaded
+  ([04 §2.5](04-checkout-cache.md#25-staged-manifest)) is not part of the copy: its bytes are not
+  on the main. It is listed with the result as skipped. A pending change whose manifest names
+  content the main holds (an Uploaded staged edit, an earlier copy or move not yet committed) is
+  copied.
 - `bytes_moved` counts what crossed: chunks an upload actually put (deduplicated ones are not
   counted), and chunks a download fetched.
 - A folder that could not be created fails every entry beneath it with that reason, without
@@ -441,15 +432,17 @@ copied_bytes, changed, unguarded}`.
    space is partly under another name); the message names the phase and age and suggests `tsync gc`
    or `tsync gc --abort`. `Skip_chunks` is allowed: it reads and writes no chunk.
 3. **Source listing**:
-   - `All`: chunks, then the domain's manifests, markers and versions, then journal entries, then
-     the cursor.
+   - `All`: chunks; then the domain's manifests, markers, anchors and versions; then log entries
+     in ascending number, then takeovers; then the tree head, then the cursor. These are the four
+     phases of [replication.md §4.10](algorithms/replication.md#410-repair-mirror). A backfill
+     destination receives no log entry, takeover, tree head or cursor.
    - `Skip_chunks`: as `All`, without the chunks. For a destination whose chunks are known to be
      there (a run that just compared them, or a copy kept current by its jobs), it skips the
      longest listing of the run.
    - `Path rel`: walk the folder tree down to and under `rel`, collecting markers and manifests and
      every chunk key those manifests name; each is checked on the source (missing → the run fails
-     `<key> is missing from source <name>`); no journal, versions or cursor (they would state a
-     history that never happened).
+     `<key> is missing from source <name>`); no log entry, takeover, tree head, version or cursor
+     (they would state a history that never happened).
    - Internal leaves (folder indexes) are skipped: an index records store-reported versions and
      duplicates every manifest body.
 4. `on_scan(objects, bytes)`.
@@ -461,8 +454,8 @@ copied_bytes, changed, unguarded}`.
    - a **chunk** is named by its content ([01 §3.2](01-core.md#32-chunk-keys)): it is copied only when the destination has no entry for
      it, or when the destination's is of another size. It is never compared by content: a present
      chunk of the right size is taken as equal, and one with damaged bytes is integrity's (§4.10);
-   - **every other key** (manifests, markers, anchors, versions, journal entries, the cursor) is
-     copied when the destination has no entry, when the sizes differ, or when the checksums differ
+   - **every other key** (manifests, markers, anchors, versions, log entries, takeovers, the tree
+     head, the cursor) is copied when the destination has no entry, when the sizes differ, or when the checksums differ
      (step 6).
 6. **Checksum comparison** of a key both sides hold at the same size
    ([06 §2.5](06-backends.md#25-checksums)):
@@ -484,14 +477,19 @@ copied_bytes, changed, unguarded}`.
      the precondition (REFUSED) is written with `put`, and the key is counted `unguarded`.
 8. Comparisons and copies run concurrently, at most `maxDownloads` at once, with the bodies held for
    copies bounded by `maxChunkBuffers` (§2.1).
-9. The batches run in order, each finished before the next starts: every chunk is copied before any
-   manifest that names it, and the cursor last. A reader of the destination never sees a manifest
-   whose chunks are not there yet, or a cursor ahead of its entries. A chunk read from the source
-   that does not hash to its name is not copied and is counted refused; a destination that did not
-   take every chunk of the run receives none of the later batches.
+9. The phases run in order, each finished before the next starts: every chunk is copied before any
+   manifest or log entry that names it, the tree's records and the log before the tree head, and
+   the cursor last. A reader of the destination never sees a manifest or a log entry whose chunks
+   are not there yet, a tree head ahead of its records, or a cursor ahead of its entries. A chunk
+   read from the source that does not hash to its name is not copied and is counted refused; a
+   destination that did not take every chunk of the run receives none of the later phases. Log
+   entries reach a destination that is the main only under the condition of
+   [replication.md §4.10](algorithms/replication.md#410-repair-mirror).
+10. Each destination's parked job-log records are then retried
+    ([replication.md §4.10](algorithms/replication.md#410-repair-mirror)).
 
-An object a destination refuses (a reference gate missing the chunks a manifest names, under
-`Skip_chunks`) is counted refused for that destination with its reason, and the run goes on; any
+An object a destination refuses (a reference gate missing the chunks a manifest or a log entry
+names, under `Skip_chunks`) is counted refused for that destination with its reason, and the run goes on; any
 refusal makes the command exit 1.
 
 Additive: nothing is deleted on a destination. A chunk's content (same size, wrong bytes) is integrity's (§4.10).
@@ -499,60 +497,66 @@ Stateless: a restart re-lists. A race with another writer costs nothing: the con
 never overwrites a destination object written after the comparison read it, and a source object
 changed after it was compared is copied as read, or found by the next run.
 
-### 4.7 Resync (`tsync sync`)
+### 4.7 Sync (`tsync sync`)
 
-`resync ?full ~parallelism` → `Full{manifests, failed, reason} | Incremental{applied}`. It runs in the
-domain's owner (the `sync` bulk action when requested over IPC,
-[07 §4.3](07-daemon-cli.md#43-deadlines-bulk-actions-and-the-liveness-probe)), and is refused while
-paused.
+`sync ?full ~parallelism` → `{arrival: Entries n | State{files, folders}; changed; committed;
+pending}`: the log entries merged, or the file records and anchors a state read found; the keys the
+merge changed in the local tree; the entries this client created; the commands still pending
+afterwards. It runs in the domain's owner (the `sync` bulk action when requested over IPC,
+[07 §4.3](07-daemon-cli.md#43-deadlines-bulk-actions-and-the-liveness-probe)), is refused while
+paused, and is refused on a lazy tree ([04 §3.5](04-checkout-cache.md#35-the-local-tree-full-and-lazy)),
+which pulls instead.
 
-1. Let the metadata queue publish what it owes, bounded by the settle timeout.
-2. Decide: **full** when `full` was asked, or when the domain cannot bridge (the conditions B1–B4 of
-   [wal-and-journal.md §4.8](algorithms/wal-and-journal.md#48-retention-horizon-bridging-and-rebuild),
-   reported with their reason). Otherwise incremental.
-3. **Incremental**: one journal pass ([wal-and-journal.md §4.4](algorithms/wal-and-journal.md#44-inbound-applying-entries))
-   → `Incremental{applied}`.
-4. **Full**: a rebuild, meeting every rebuild obligation of
-   [wal-and-journal.md §4.8](algorithms/wal-and-journal.md#48-retention-horizon-bridging-and-rebuild)
-   (refused while metadata is owed: "N metadata operation(s) are not published yet, and a rebuild
-   would undo them"; listing before walking; mark and sweep only after a walk with no failure). The
-   walk itself:
-   - walks the store's folder tree (`parallelism` = the command's `-j`), rewriting the mirror **in
-     place** entry by entry; staged edits and cached chunks are kept;
-   - reports each difference as ops noted in the applied log as found (at most `RESYNC_NOTE_OPS` per
-     noted entry): a changed file → `Put`; a changed folder → `Mkdir(rel, id)`; a replaced folder →
-     `Rmdir(rel, old id)` then `Mkdir`; after a complete walk, removed entries (and their cached
-     bodies) are reported as removals;
-   - counts unusable children, logging a sample;
-   - ends by rebuilding the reverse folder index from the mirror. It stamps no new resync
-     generation: the differences it noted are the change feed's
-     ([wal-and-journal.md §4.8](algorithms/wal-and-journal.md#48-retention-horizon-bridging-and-rebuild)).
-   The mount serves the mirror throughout.
+1. Without `full`: one cycle now ([publication.md §4](algorithms/publication.md#4-the-algorithm)):
+   arrive, push what is pushable, project. The arrival is by state when the protocol says so
+   ([publication.md §4.7](algorithms/publication.md#47-state-read-and-arrival-by-state)), and the
+   result then says `State`.
+2. With `full`: the same cycle, its arrival by state.
+3. A failed fetch, state read or push fails the request with its kind; what the cycle completed
+   before it stands.
 
-### 4.8 Trash, deleted files and retention
+**The walk of a state read** is owned here. Every read is answered by the main
+([replication.md §4.6](algorithms/replication.md#46-read-path)).
 
-- **Trash**: a removed folder's marker moves into the trash namespace; its subtree is untouched
-  (unreachable from the root) until expiry.
-- `trashed()`: list the trash namespace; read each entry for its path; an unparsable body is passed
-  over (a write in flight).
-- `restore(path)`: find the entry for `path`; the target is the folder marker at `path`, which needs
-  the parent's folder id on this client (else `Parent_unknown`). Refuse when a live folder already
-  has the name. Write the anchor (parent, name), then the marker, then delete the trash entry (already
-  gone is logged and still `Restored`); announce `Mkdir(path, id)` (§4.2) so peers learn it.
-- `purge(path)` → `Purged n | Not_in_trash | Live_elsewhere`: the rules (anchors kept as tombstones,
-  trash entry last, refusal of a folder live elsewhere) are
-  [gc.md §4.2](algorithms/gc.md#42-purge).
+1. Read the tree head, before anything else.
+2. List every namespace of the manifest area
+   ([data-model/backend.md §2.5](data-model/backend.md#25-namespace)), `parallelism` at a time (the
+   command's `-j`). It is an enumeration of the area, not a walk from the root: a folder is found by
+   its namespace, wherever its marker is.
+3. In each namespace collect the folder's **anchor**, which is the folder's value (parent id, name),
+   and every **file manifest**, whose key is (the namespace's folder id, the manifest's recorded
+   name). Markers and folder indexes are not values and are not collected.
+4. A child that cannot be classified is skipped, and a child listed and gone at its read is absent
+   ([data-model/backend.md §5.2](data-model/backend.md#52-what-readers-may-observe-mid-change)): both
+   are writes of a projection, whose entry the replay covers. Any other failed listing or read fails
+   the walk as a whole.
+5. Hand the tree head and the collected values to the replay of the log entries above that tree
+   head, which is publication's, as are the merge that follows and what it does to pending changes.
+6. A file record whose folder is absent from the replayed tree is left out and logged; integrity
+   reports it (§4.10).
+
+What changes locally is what the merge decides
+([conflict-resolution.md §4](algorithms/conflict-resolution.md#4-enacting-a-merge)): the local tree
+is changed in place, key by key, and never cleared; staged edits, pending changes and cached chunks
+of unchanged files are kept; the mount serves throughout. The changes go to the change feed in lines
+of at most `FEED_LINE_OPS` ops ([03 §2.9](03-journal-sync.md#29-feed-ops-and-the-applied-log-local)), and
+no resync generation is stamped. The reverse folder index is rebuilt from the mirror afterwards
+([04 §4.9](04-checkout-cache.md#49-folder-id-index)).
+
+### 4.8 Deleted files and retention
+
 - `deleted_in_folder(key)` and `deleted_in_domain()`: from the versions namespace; a grouping whose
   live manifest is absent is a deleted file, named from a version body. They look up folder ids, never
   mint them.
-- `expire(cutoff, ?apply)` → `{trash_deleted, versions_deleted, journal_deleted, shares_deleted}`, in that
-  order (trash, versions, journal, shares); its rules are [gc.md §4](algorithms/gc.md#4-retention).
-  Without `apply` it is a dry run: the same counts, and each key it would delete, with nothing deleted.
-  `purge(path, ?apply)` likewise.
-  A client offline for longer than the retention window cannot bridge and rebuilds
-  ([wal-and-journal.md §4.8](algorithms/wal-and-journal.md#48-retention-horizon-bridging-and-rebuild)).
-- Reverting a file (a file operation, [04 §3.4](04-checkout-cache.md#34-operations)) saves a version
-  of the content it replaces when the domain keeps versions.
+- A deleted file is recovered by reverting to one of its versions (`revert`, a file operation,
+  [04 §4.6](04-checkout-cache.md#46-upload)): a local operation, committed by the cycle. The
+  version of the content a change replaces is saved by the projection of its entry
+  ([data-model/backend.md §2.9](data-model/backend.md#29-version)) when the domain keeps versions.
+- A removed folder has nothing to recover as a folder: its removal was committed only once it was
+  empty, and the files that were in it are deleted files ([gc.md §4](algorithms/gc.md#4-retention)).
+- `expire(cutoff, ?apply)` → `{versions_deleted, log_deleted, shares_deleted}`, in that order
+  (versions, log, shares); its rules are [gc.md §4](algorithms/gc.md#4-retention). Without `apply`
+  it is a dry run: the same counts, and each key it would delete, with nothing deleted.
 
 ### 4.9 Garbage collection
 
@@ -562,10 +566,10 @@ chunks_verified; chunks_corrupt; chunks_unreadable; chunks_cleared; chunks_recla
 bytes_reclaimed}` and failures `Unsupported(reason)`, `Busy(holder)`. The collector, its phases,
 precondition and writer interlock are [gc.md](algorithms/gc.md).
 
-`dry_run` → per collectable main, `survey{run: (phase, cursor) option; chunks_referenced;
+`dry_run` → for a collectable main, `survey{run: (phase, cursor) option; chunks_referenced;
 chunks_reclaimable; bytes_reclaimable; chunks_missing; per_copy: (member, count) list;
 chunks_corrupt}` and the same failures, where `chunks_missing` lists referenced chunks the main lacks
-(files a reader cannot open, and publications the gate would refuse); it changes
+(files a reader cannot open, and commits the gate would refuse); it changes
 nothing ([gc.md §5.9](algorithms/gc.md#59-dry-run)). The operator command runs it unless a collection is
 explicitly requested; `abort` and `retry_outstanding` are explicit by nature.
 
@@ -581,21 +585,38 @@ first) to re-fire the copy's notification. Both are safe to repeat.
 
 ### 4.10 Integrity
 
-- `tree_report()`: a read-only walk from the root. Per folder: its id and paths; a missing anchor →
-  `Unanchored{path, id, parent}`; a marker disowned by its anchor → `Disowned{marker, anchor}`; an id
-  at two or more paths → `Twice`; a trash entry whose id was reached from the root → `Trashed_live`;
-  a trashed folder not reached from the root that has no anchor → `Unanchored` with the trash as its
-  parent.
-  **Orphans**: list the manifest namespaces on the first main (any store type), mark every
-  namespace reachable from the root and from each trashed id; each unmarked namespace holding a child
-  object → `Orphan{id, objects, sample ≤ 3}` ([gc.md §4.6](algorithms/gc.md#46-orphan-namespaces)). Order: Twice (sorted), Disowned, Trashed_live, Unanchored, Orphan.
-- `repair_tree(dry_run)`: refused on a read-only domain unless dry; Disowned and Trashed_live →
-  delete the stale object; Unanchored → write the anchor (for a trashed folder its "in trash" anchor,
-  created only if still absent, so a restore racing the repair keeps its live anchor); a top-level
-  Orphan older than
-  `orphan_grace` → adopted into the trash, and a tombstone MAY be deleted, as
-  [gc.md §4.6](algorithms/gc.md#46-orphan-namespaces) specifies; Twice is left and reported, and so
-  is an Unanchored folder whose id is also Twice: anchoring it would choose where it lives.
+- `tree_report()`: read-only, answered by the main. It reads the tree head and whether the entry
+  after it exists. If it does, a projection is owed or in progress, the records are legitimately
+  between two trees ([data-model/backend.md §4.2](data-model/backend.md#42-temporarily-violated-and-who-repairs)),
+  and the report says so with the two numbers and makes no finding. Otherwise the tree head is at
+  the head, and the report lists every namespace of the manifest area (as a state read does, §4.7)
+  and finds, in this order:
+  - `Disowned{marker, anchor}`: a marker its folder's anchor does not name, or whose folder has no
+    anchor;
+  - `Unmarked{id, parent, name}`: a folder with an anchor and no filed marker;
+  - `Unaccounted{key, found, expected?}`: a record the log at the tree head does not account for.
+    That is a record whose key a retained log entry names and which is not the value after of the
+    last retained entry naming it (`expected`), a key such an entry gives a value and which has no
+    record, and a manifest, marker or index in the namespace of a folder, other than the root, that
+    has no anchor.
+- `repair_tree(dry_run)`: refused on a read-only domain unless dry, and whenever `tree_report`
+  makes no finding because the tree head is below the head. It writes the main's tree records
+  outside any projection, so the operator MUST run it while no client pushes to the domain, as on
+  a copy promoted to main ([replication.md §3.1](algorithms/replication.md#31-roles)).
+  - `Disowned` → delete the marker.
+  - `Unmarked` and `Unaccounted` with an `expected` value → set the key's records to that value, as
+    applying a command with that value after does
+    ([data-model/backend.md §6.1](data-model/backend.md#61-apply)), through the reference gate. A
+    manifest the gate refuses for missing chunks is reported and its record left.
+  - An `Unmarked` or `Unaccounted` finding with no `expected` value is left and
+    reported.
+
+  **What repair restores.** It recomputes a record only from a log entry the log still retains.
+  A record whose key no retained entry names is left as found: nothing on the store says what it
+  should be, whether its entry was deleted by expiry or never reached this store. On a promoted
+  copy whose log lacks entries its tree reflects, repair therefore takes each key a retained entry
+  names back to that entry's value, and what the missing entries committed at those keys is not
+  restored; the keys no retained entry names keep what the tree holds.
 - `verify()`: per member whose bucket function this owner confirmed (write guard first), one verify
   request per shard ([object-store-common §3](backends/object-store-common.md)): `Queued n`; any other
   member `Unsupported`; none queued → `Nothing_queued`; else follow each queued member: poll
@@ -639,7 +660,7 @@ Token, expiry, overwrite and revocation rules are
   space whose name is not a share token; returns count and bytes. A reader of the share space SHOULD
   accept objects there that are neither share manifests nor under the share cache (meaning: cached
   artifacts, safe to delete); writers MUST NOT produce them. Links keep working.
-- Expired shares are removed by `expire` ([gc.md §4.5](algorithms/gc.md#45-shares)). When a domain is
+- Expired shares are removed by `expire` ([gc.md §4.3](algorithms/gc.md#43-shares)). When a domain is
   removed from a store, its share manifests on that store go with it.
 
 ---
@@ -648,15 +669,15 @@ Token, expiry, overwrite and revocation rules are
 
 - **Config** is read-only after load; the uplink configuration is set once per process.
 - **Deferred work** is durable before a write is reported done; only the owner runs it (§3.2).
-- **Import and rsync**: every manifest put is named by a durable record first (§4.2); mkdirs before
-  puts; a crash leaves nothing unannounced and a rerun converges.
+- **Import and rsync**: local operations in the owner (§4.2); a crash leaves a pending change the
+  cycle commits, or chunks nothing names, which a rerun finds and a collection otherwise removes.
 - **Export**: record header before the file, per-chunk fsync then claim; resume from claims.
 - **Mirror**: stateless, additive, idempotent; it never overwrites a destination object written
   after its comparison read it, on a destination that evaluates the precondition.
-- **Resync**: runs in the owner under its serialisation; mark and sweep only after a complete walk.
-- **Restore**: anchor before marker, announcement after.
+- **Sync**: runs in the owner's cycle; a state read that fails changes nothing.
+- **Tree repair**: never beside a push (§4.10).
 - **GC**: every phase saved before acting ([gc.md](algorithms/gc.md)); exclusive per domain (§4.9).
-- **Write guard**: every operation that writes a named member calls it; mains are always allowed.
+- **Write guard**: every operation that writes a named member calls it; the main is always allowed.
 - **Concurrent work inside one operation** hands each item (a chunk, a listing record) to exactly one
   worker, opens and finishes each exported file once, and settles each file's outcome once.
 
@@ -670,12 +691,11 @@ Token, expiry, overwrite and revocation rules are
   sharing one deferred log each ran the other's jobs against the wrong store.
 - **Role required, replica and backfill one mechanism**; **read-only forced** when nothing is
   writable (EROFS at the mount beats a store error per attempt).
-- **Operations never write the owner's state or publish entries**: they submit records, so one
-  process decides every local change and mints every entry key.
-- **Batches by count and age; mkdirs before puts.**
+- **Operations that change a domain are local operations in its owner**: one process decides every
+  local change and creates every log entry, and a bulk run needs no publication path of its own.
 - **Import never overwrites** unless asked.
-- **Rsync decides from the store, before acting, by bytes**; in-domain copies inherit chunks through
-  the interlock.
+- **Rsync decides before acting, by bytes**, from the tree its changes are made to; in-domain
+  copies inherit chunks.
 - **Export off the stores**, with preallocation and claims; a record is believed only beside a file
   of the right length.
 - **Mirror** orders chunks before manifests, compares chunks by name and size (their name is their
@@ -684,8 +704,12 @@ Token, expiry, overwrite and revocation rules are
   them, and are otherwise computed on the closest side, so a run checks hundreds of thousands of
   manifests without downloading them; comparing by body read every one of them from both sides,
   one at a time. Copies of mutable keys are conditional on the destination being as compared.
-- **Resync rewrites in place and reports ops** rather than clearing: clearing served an empty tree
-  for minutes and forced every reader to re-list.
+- **An arrival by state merges in place and reports ops** rather than clearing: clearing served an
+  empty tree for minutes and forced every reader to re-list.
+- **A state read enumerates namespaces** rather than walking from the root: a folder a projection is
+  moving is at no path for a moment, and its namespace is always there.
+- **Tree repair recomputes, it does not guess**: the log is the truth, so a record no retained
+  entry names has nothing to be checked against.
 - **Shares** at a fixed root (IAM and lifecycle target one prefix), created exclusively, verified on
   the member that serves them, never minting folder ids.
 
@@ -695,7 +719,8 @@ Token, expiry, overwrite and revocation rules are
 
 - **Config**: unknown keys refused at every level including frontend and backend objects; roles
   limited to the four spellings and the read order following role then config order; a domain with
-  no main valid only when all its stores are `readOnly`, and then read-only; `uplink` fields validated
+  two mains refused; a domain with no main valid only when all its stores are `readOnly`, and then
+  read-only; `uplink` fields validated
   per [06](06-backends.md); the mount point defaulting to `$HOME/tsync/<name>`; the size parser
   accepting whatever the size printer emits; http-proxy secrets shorter than 32 characters and a
   plaintext listener off loopback refused; two `file_provider` domains colliding on identifier or
@@ -710,44 +735,56 @@ Token, expiry, overwrite and revocation rules are
   default; a lone `readOnly` backend forces read-only; the wizard cannot write a config the parser
   refuses.
 - **Read order and capacity** as [replication.md](algorithms/replication.md) and §3.1.
-- **Import**: no put published before the mkdir naming its folder; entries in full-path order,
-  each once; names with newlines and tabs survive; `only` imports only selected entries with markers
-  only for folders holding them; filters apply at any depth; empty folders are imported; `**/.git`
+- **Import**: no file is installed before its folder exists locally; entries in full-path order,
+  each once; names with newlines and tabs survive; `only` imports only selected entries, with folders
+  created only when they hold one; filters apply at any depth; empty folders are imported; `**/.git`
   excludes `.git` directories only; each symlink policy as §4.3 (kept dangling links included; broken
   followed links skipped and counted); planned bytes equal reported bytes and a file's progress sums
   to its size; a restart transfers nothing new; an existing key is skipped even when its content
-  differs, and `--force-rehash` republishes it with its new content and re-sends missing chunks;
-  identical content is deduplicated; killing an import at any point leaves no manifest unannounced
-  after the owner's next start.
+  differs, and `--force-rehash` installs it with its new content and re-sends missing chunks;
+  identical content is deduplicated; an import writes chunks and no other store object, and what it
+  imported is on the main after the cycle that commits it; killing an import at any point leaves
+  every installed file pending and committed after the owner's next start, and a rerun completes
+  the rest.
 - **Export**: every file under its own path with the right bytes and mtime, no record left; a rerun
   finds everything already there with zero chunk reads; a refused chunk fails only its file, left at
   full length with a record claiming the landed chunks, and the next run fetches only the missing
-  ones; a file changed upstream restarts from scratch; a file with staged edits exports its published
-  version and is listed pending; the domain's cache is untouched; collisions, unknown paths, `..`
+  ones; a file changed upstream restarts from scratch; a file with a staged edit exports the version in
+  the main's tree and is listed pending; the domain's cache is untouched; collisions, unknown paths, `..`
   names and relative destinations refused.
 - **Rsync**: the full decision table including patch indices; a copy within a domain moves no bytes;
-  a move of a file the mirror does not hold yet succeeds.
+  a move of a file a peer committed and this client had not merged yet succeeds; a move within a
+  domain is committed as one entry holding the removal and the creation.
 - **Mirror**: heals a missing chunk, a wrong-size chunk and a missing manifest on a secondary; a
   present chunk of the right size is never read; an in-sync run copies nothing; a same-size stale manifest or cursor
-  is replaced; no destination ever holds a manifest without its chunks. Local to GCS over in-sync
+  is replaced; no destination ever holds a manifest or a log entry without its chunks, nor a tree
+  head above the log entries and records it was copied with; a backfill receives no log entry,
+  takeover, tree head or cursor; a `--path` run copies none of them. Local to GCS over in-sync
   manifests issues no request per object on GCS and hashes only local files; http-proxy to GCS
   hashes on the proxy's server; against an S3 destination with `etagIsMd5: false`, each key is
   hashed on the source where the source keeps or computes it, and on S3 by downloading it, never
   copied without a comparison. A destination key written between the comparison and the copy is left as
   written and counted `changed`; a destination without conditional replace is written and counted
   `unguarded`.
-- **Resync**: no mark → rebuild with a reason; a clean rebuild sets the mark; a caught-up client
-  applies the journal and reports nothing; `--full` reports nothing for unchanged files; the mirror is
-  rewritten in place (chunks survive); moves, recreations and removals of folders are reported by id;
-  a failed walk leaves mark and sweep alone; owed metadata is published first and a rebuild is
-  refused while it is owed.
-- **Trash**: a restore is seen by a peer's next journal pass; purge per
-  [gc.md](algorithms/gc.md#10-conformance) (anchors kept); a purge of a live folder is refused.
+- **Sync**: `sync` runs one cycle and reports the entries merged, the keys changed and the entries
+  committed; a caught-up client with nothing pending reports zeros. `--full` arrives by state: it
+  reports nothing changed for a tree already at the head, changes the local tree in place (cached
+  chunks of unchanged files survive), keeps every staged edit and pending change, and turns a
+  pending change that clashes into a conflicted copy; moves, recreations and removals of folders
+  reach the change feed by id, in lines of at most `FEED_LINE_OPS` ops, with no new resync
+  generation. A state read finds a folder whose marker a projection has deleted and not yet
+  rewritten. A read failure injected into the walk fails the sync and changes nothing locally. A
+  lazy tree refuses `sync`.
+- **Deleted files and expiry**: a deleted file is listed from its versions and comes back by a
+  revert; `expire` reports and deletes versions, log entries and shares, in that order, per
+  [gc.md](algorithms/gc.md#10-conformance), and a dry run deletes nothing.
 - **GC**: two sessions for one domain, in one process or two, never run at once; the rest per
   [gc.md](algorithms/gc.md).
-- **Integrity**: an unanchored tree reports TWICE, TRASHED-LIVE, UNANCHORED and ORPHAN with a sample;
-  repair removes disowned and stale trash entries, anchors the rest, and adopts an orphan older than
-  `orphan_grace` into the trash (a younger one is left); orphans are found on a remote main too.
+- **Integrity**: with the tree head below the head, the tree report makes no finding and says
+  why. With it at the head, a planted stale marker is reported DISOWNED, a deleted filed marker
+  UNMARKED, and a record overwritten with another value, or deleted, UNACCOUNTED when a retained
+  entry names its key. Repair removes the disowned marker and restores the other two from the log;
+  a record whose key no retained entry names is left and reported; a dry run writes nothing.
 - **Share**: manifest fields for a file and a folder; root share named `<domain>.zip`; refused when no
   member advertises a share URL; a missing path or an empty folder → not found; a read-only domain can share; a backfill-only share store is used
   when it is the only one with a URL, and refused while it lacks the object; a given token that
@@ -760,11 +797,9 @@ Token, expiry, overwrite and revocation rules are
 
 | name | value | rule |
 |---|---|---|
-| `ENTRY_OPS` / `ENTRY_AGE` | 2000 ops / 10 s | ops per announced batch |
-| `RESYNC_NOTE_OPS` | 64 | ops per locally noted resync entry |
 | `EXPORT_MTIME_SLACK` | 2 s | |
 | `EXPORT_RECORD_GRACE` | 30 days | age past which the owner's daily sweep removes an unlocked export record |
-| resync walk parallelism | CLI `-j`, default 32 | |
+| state-read walk parallelism | CLI `-j`, default 32 | |
 | `VERIFY_POLL` / `VERIFY_STALL_POLLS` | 3 s / 5 | |
 | `SHARE_DEFAULT_EXPIRY` | 7 days | [security-model.md §6.2](algorithms/security-model.md#62-lifetime) |
 | `SHARE_PREVIEW_MAX_BYTES` / `SHARE_PREVIEW_SIZE` / `SHARE_PREVIEW_MIN_SIDE` / `SHARE_PREVIEW_TIMEOUT` | 300 KiB / 800 px / 300 px / 20 s | preview image: size cap, exact longest side, least shortest side (a card's least width), time to make one ([http-proxy §A9.8](frontends/http-proxy.md#a98-preview-image)) |

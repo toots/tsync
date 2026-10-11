@@ -100,7 +100,7 @@ The bundle the core is given ([android.md §4.1](android.md#41-what-the-host-pro
   starts at the last dot when that dot is not the first character. The name check and the creation
   are one step in the owner, so two concurrent saves never overwrite each other.
 - **Offline.** A listing reply's `outdated` and `pulledAt`
-  ([android.md §3.2](android.md#32-freshness-without-a-journal-poller)) are shown, never hidden
+  ([android.md §3.2](android.md#32-freshness-without-a-background-cycle)) are shown, never hidden
   (§7, §10.3). An `unreachable` answer or an `outdated` listing puts the app in the offline state. Only
   the `recovered` notice, or a listing that is not `outdated`, clears it: `stat`, `status` and
   mutations succeed without the store and say nothing about it.
@@ -235,7 +235,7 @@ name, or the reference of an existing file:
    is deleted; picking the next name would save the body twice.
 
 A commit succeeds once the core has adopted the body, whether or not it is uploaded yet;
-`isUploaded` in the reply says which, and the queues keep retrying.
+`isUploaded` in the reply says which, and the upload queue and the cycle keep retrying.
 
 ### 8.2 Ingest intents
 
@@ -529,7 +529,8 @@ Records in `PENDING`, and in `FAILED` whose next attempt is due, are processed i
    - a first upload is exclusive: on `exists` (another device's photo holds the name) the target moves
      to the next sequence name (§11.5) and is frozen there;
    - a re-upload of a `DONE` record carries `base` = the recorded etag, so a file someone else put at
-     the target meanwhile is kept, as [conflict resolution](../algorithms/conflict-resolution.md)
+     the target meanwhile is kept, as
+     [conflict resolution §7](../algorithms/conflict-resolution.md#7-a-local-write-against-a-stale-base)
      specifies.
 5. Success → `DONE` with size, modification and etag. Failure → `FAILED`, attempts + 1, next attempt =
    now + `retry_backoff(attempts)`, last error.
@@ -540,7 +541,7 @@ The domain is never asked whether a photo exists: the device's record is authori
 owner deleted from the domain is not uploaded again.
 
 Camera backup works through §8 like every other write, so it needs no store to make progress: with
-the store away, photos are staged up to the budget and published when it returns.
+the store away, photos are staged up to the budget and committed when it returns.
 
 ### 11.5 Naming
 

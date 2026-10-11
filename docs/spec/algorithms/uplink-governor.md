@@ -20,7 +20,7 @@ Goals:
 - **G4 No wind-up.** A sender with little to send does not accumulate permission it has never used.
 - **G5 Deliverability.** An admitted body can finish before the transport's stall detector gives up on it.
 - **G6 One controller per link per machine.** The processes of one machine run one controller per link between them, and a process started beside others does not start cold.
-- **G7 Small bodies are not starved.** Cursor and journal writes may pass a queued chunk, but only by a bounded amount.
+- **G7 Small bodies are not starved.** Cursor writes and log entries of at most SMALL_BODY may pass a queued chunk, but only by a bounded amount.
 - **G8 Stop quickly.** At shutdown, bodies waiting for admission give up at once and stay owed on disk.
 - **G9 Warm restart.** A restarted controller does not rediscover a known link from scratch.
 

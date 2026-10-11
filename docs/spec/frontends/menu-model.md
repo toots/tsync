@@ -290,7 +290,7 @@ Then per domain body of that reply, each preceded by a separator:
 | `cache <n> chunks · <bytes>[ of <max>][ · <pinned> pinned]` | 1 | chunks and bytes known | `cache.chunks`, `.bytes`, `.maxCache` (> 0), `.pinnedBytes` (> 0) |
 | `queue <n> files · <bytes> owed` | 1 | either known | `queues.pendingFiles`, `queues.bytesOwed` |
 | `read <bytes> · written <bytes>` | 1 | either known | the sums over `frontends[]` of `bytesRead`, `bytesWritten` |
-| `wal <n> pending · <n> stuck` | 1 | either > 0 (each part only when > 0) | pending is the sum of `wal.intent`, `wal.prepared` and `wal.executed`; `wal.stuck` |
+| `sync <n> pending · <n> parked · stopped at entry <n>` | 1 | any part present (the counts only when > 0, the last part only when an entry cannot be followed) | `sync.pending`, the pending count of the cycle's status ([03 §3.4](../03-journal-sync.md#34-cycle-one-per-domain-in-the-owner)); `queues.parked`, the upload queue's parked count; `sync.cannotFollow`, the number of the entry the client cannot follow |
 | one row per backend | 1 | always | `backends[]` |
 
 Backend row, parts joined with ` · `:
@@ -299,9 +299,6 @@ Backend row, parts joined with ` · `:
   `reachable, <n> ms` (`reach.latencyMs`, rounded), `unreachable`, or `unreachable: <error>`
   (`reach.error`, when not empty). Only the error is ellipsised, so the figures after it survive.
   With no `reach`, the row is `<name> (<role>)`;
-- the journal: `journal <n> entries`, or `journal <n> entries, <b> behind` when behind > 0
-  (`journal.entries`, `journal.behind`); `journal counting` when the reply says `counting`; absent
-  otherwise;
 - corruption, from `corrupted`: `not checked` when `checked` is not true;
   `<n> corrupt — run tsync data-integrity` when checked and `chunks` > 0; nothing when checked and
   clean, or when the backend carries no `corrupted`.
@@ -319,9 +316,9 @@ Worked example:
             cache 1216 chunks · 10.0 GiB of 10.0 GiB · 2.0 GiB pinned
             queue 0 files · 0 B owed
             read 515.4 MiB · written 5 B
-            wal 3 pending · 1 stuck
-            http-proxy (main) — reachable, 11 ms · journal 402 entries
-            cold (replica) — unreachable: connection refused · journal 88 entries, 12 behind · 3 corrupt — run tsync data-integrity
+            sync 3 pending · 1 parked
+            http-proxy (main) — reachable, 11 ms
+            cold (replica) — unreachable: connection refused · 3 corrupt — run tsync data-integrity
             far (backfill) — unreachable · not checked
 ```
 
@@ -383,7 +380,7 @@ someone agrees to; and both functions are total.
   boundary and the icon is that of the real extension;
 - no domains; with and without a quit label;
 - the JSON form of a menu containing every kind of entry and action;
-- the stats rows: full, sparse, a journal still counting, nothing answering;
+- the stats rows: full, sparse, an entry that cannot be followed, nothing answering;
 - the formatter tables of §3;
 - replies with fields of the wrong type, and an empty object: no failure.
 

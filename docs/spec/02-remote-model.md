@@ -6,15 +6,15 @@ and the **remote interface** above the store: the content store, the manifest st
 and history.
 
 **Core** formats are frozen and MUST be read and written exactly as specified here, with no migration:
-chunks and chunk keys, manifests, folder markers, anchors, trash entries, versions, and the journal and
-cursor ([03-journal-sync.md](03-journal-sync.md)). **Ephemeral** formats (collection state and the lock
-file, verify and discard jobs, corruption markers, share manifests and the share cache, the folder index)
-MAY change when there is a real need.
+chunks and chunk keys, manifests, folder markers, anchors, versions, and the log entry, cursor, tree
+head and takeover ([03-journal-sync.md](03-journal-sync.md)). **Ephemeral** formats (collection state
+and the lock file, verify and discard jobs, corruption markers, share manifests and the share cache,
+the folder index) MAY change when there is a real need.
 
-Related: the entities, invariants and folder-identity protocol are in
+Related: the entities, invariants and the projection of the log onto the tree are in
 [data-model/backend.md](data-model/backend.md); retention and garbage collection, including the
 collection interlock, in [algorithms/gc.md](algorithms/gc.md); the hash function, chunking, chunk keys
-and key grammar in [01-core.md](01-core.md); journal and cursor formats in
+and key grammar in [01-core.md](01-core.md); log, cursor and tree-head formats in
 [03-journal-sync.md](03-journal-sync.md); the store contract in [06-backends.md](06-backends.md).
 Implementation notes: [ocaml/02-remote-model.md](ocaml/02-remote-model.md).
 
@@ -28,12 +28,13 @@ conditional write (create-if-absent). On top of it this layer provides:
 
 - **Content-addressed, deduplicated file bodies.** A file is cut into fixed-size chunks named by the
   digest of their bytes; identical content is stored once per domain; an unchanged chunk is never
-  re-sent.
 - **A rename-stable directory tree.** Folders are identified by stable ids, not paths, so moving a
   folder rewrites a constant number of objects, never its descendants.
+- **A numbered log.** Every change to the tree is an entry created with the conditional write; the
+  per-object tree is its projection ([algorithms/publication.md](algorithms/publication.md)).
 - **Lazy access.** A reader resolves a path with one read per segment, then fetches only the chunks, or
   byte ranges of chunks, it needs.
-- **History** (versions, trash) and **integrity** (corruption markers).
+- **History** (versions) and **integrity** (corruption markers).
 
 Every layer above speaks **logical keys** (domain-relative paths); only this layer knows **stored keys**
 (hashed, id-based) and the binary formats.
@@ -87,16 +88,17 @@ tsync/D/manifests/<folder id>/<leaf hash>       child: file manifest or folder m
 tsync/D/manifests/<folder id>/.tsync-parent     the folder's anchor
 tsync/D/manifests/<folder id>/.tsync-index      folder index (optional)
 tsync/D/manifests/.tsync-root/…                 the root folder's namespace
-tsync/D/manifests/.tsync-trash/<16 hex>         trash entries
 tsync/D/chunks/<sss>/<chunk key>                chunks, surviving space; sss = first 3 hex of the key
 tsync/D/chunks.from/<sss>/<chunk key>           outgoing space, only during a collection run
 tsync/D/gc-run                                  collection run record, collectable main only
-tsync/D/gc-generation                           collection generation, first collectable main only
+tsync/D/gc-generation                           collection generation, collectable main only
 tsync/D/gc-run.lock                             run lock file (filesystem stores only; not a store object;
                                                 MAY exist before any collection ran)
 tsync/D/gc-publish.lock                         publish lock file (likewise)
 tsync/D/versions/<folder id>/<leaf hash>/<ns>   version snapshots
-tsync/D/journal/<YYYY-MM>/<entry key>           journal entries (format: 03-journal-sync.md)
+tsync/D/log/<group>/<number>                    log entries (format: 03-journal-sync.md)
+tsync/D/log-takeover/<number>-<generation>      projection takeovers (format: 03-journal-sync.md)
+tsync/D/tree-head                               tree head (format: 03-journal-sync.md)
 tsync/D/cursor                                  cursor (format: 03-journal-sync.md)
 tsync/corrupted/D/<sss>/<chunk key>             corruption marker
 tsync/verify-jobs/D/<sss>                       verify job
@@ -118,7 +120,7 @@ Rules:
   `tsync/corrupted/D/<sss>/<key>`, matching the **last** `/chunks/` segment. There is no marker key for
   anything under `chunks.from/`, for a marker, for a manifest, or when the domain is empty.
 - **Internal leaves.** Every internal leaf starts with the sentinel `.tsync-` (`.tsync-root`,
-  `.tsync-trash`, `.tsync-parent`, `.tsync-index`). A namespace listing's **child objects** are the
+  `.tsync-parent`, `.tsync-index`). A namespace listing's **child objects** are the
   listed keys whose leaf is not internal. Store listings never contain directory keys or a store's own
   temporary files ([06-backends.md §3.6](06-backends.md#36-list_prefix)).
 - **Prefixes.** A key never ends in `/`; the prefix of a namespace or shard is its key followed by `/`
@@ -147,12 +149,12 @@ manifest_key(K)        = child_key(folder id of parent(K), leaf(K))
 folder_marker_key(K)   = manifest_key(K)            (none for the root)
 anchor_key(id)         = namespace(id) ^ ".tsync-parent"
 index_key(id)          = namespace(id) ^ ".tsync-index"
-trash_key(r)           = tsync/D/manifests/.tsync-trash/<r>
 ```
 
-The folder id of a logical key comes from local state (the owner's record of settled ids), never from
-the path. A client that holds no id for a folder cannot name its children on the store (**unresolved**),
-which says nothing about what the store holds.
+A command names its key by folder id ([03-journal-sync.md §2.3](03-journal-sync.md#23-commands)), so a
+projection needs no path. A reader that starts from a logical key takes the folder id from local
+state, never from the path; a client that holds no id for a folder cannot name its children on the
+store (**unresolved**), which says nothing about what the store holds.
 
 Share serving uses the **identity layout**: the share names stored keys directly (§2.14), and folders
 are named by id; no local ids are involved.
@@ -161,9 +163,8 @@ are named by id; no local ids are involved.
 
 The folder-id grammar is owned by
 [01-core.md §2.5](01-core.md#25-folder-ids); client identity, leases and minting by
-[03-journal-sync.md §2.1](03-journal-sync.md#21-client-identity-and-folder-id-leases-local); arbitration
-by [data-model/backend.md §6](data-model/backend.md#6-folder-identity-arbitration). Reserved ids used in
-this layout: `.tsync-root` (the root's namespace) and `.tsync-trash` (the trash namespace). Example
+[03-journal-sync.md §2.1](03-journal-sync.md#21-client-identity-and-folder-id-leases-local). An id is
+final from the mint. Reserved id used in this layout: `.tsync-root` (the root's namespace). Example
 minted id: `3f2a9c1b7d4e-1a`.
 
 ### 2.6 File manifest: binary `tsyncm03`
@@ -230,7 +231,7 @@ At `child_key(parent id, name)`:
   (meaning an empty one); writers MUST NOT produce it. A marker whose
   `id` is not a folder id ([01-core.md §2.5](01-core.md#25-folder-ids)), including an empty one, is
   **unclassifiable**: skipped like
-  a write in flight, never adopted, and it references no chunk.
+  a write in flight, and it references no chunk.
 
 ### 2.8 Anchor (JSON)
 
@@ -242,23 +243,13 @@ At `anchor_key(id)`:
 
 - It has no `"dir"` field, so it never classifies as a marker.
 - **Reader**: both `parent` and `name` MUST be strings, else the body is not an anchor and the folder
-  reads as unanchored. Unknown fields are ignored. "In trash" ⇔ `parent = ".tsync-trash"`.
-- A marker at `child_key(P, N)` naming *I* is filed iff anchor(*I*) = `{parent: P, name: N}` or *I* has
-  no anchor ([data-model/backend.md](data-model/backend.md) §6.3).
+  reads as unanchored. Unknown fields are ignored.
+- A marker at `child_key(P, N)` naming *I* is filed iff anchor(*I*) = `{parent: P, name: N}`
+  ([data-model/backend.md](data-model/backend.md) §6.2).
 
-### 2.9 Trash entry (JSON)
+### 2.9 Log entry, cursor, tree head, takeover
 
-At `trash_key(<16 lowercase hex, random>)`:
-
-```json
-{"dir":true,"name":"Photos","id":"3f2a9c1b7d4e-1a","path":"Archive/Photos"}
-```
-
-- A folder-marker body plus `path`, the domain-relative path at deletion time.
-- **Reader**: read as a folder marker (§2.7); readers SHOULD accept an entry without a string `path` (meaning
-  a trash entry for expiry and repair that cannot be found by path for restore); writers MUST NOT
-  produce it.
-- The trashed folder's anchor is `{"parent":".tsync-trash","name":<its name>}`.
+[03-journal-sync.md §2.3–2.6](03-journal-sync.md#23-commands).
 
 ### 2.10 Folder index (binary `tsyncidx1`)
 
@@ -300,7 +291,7 @@ e.g. tsync/photos/versions/3f2a9c1b7d4e-1a/285b8db6c3eef5e0-7b23aee4b1561b8f/175
 **Run record** at `tsync/D/gc-run` on the collectable main only:
 
 ```json
-{"phase":"marking","started":1759140000.123,"cursor":"m/3f2a9c1b7d4e-1a"}
+{"phase":"marking","started":1759140000.123,"tree_head":1234567,"cursor":"m/3f2a9c1b7d4e-1a"}
 {"phase":"closing","started":1759140000.123,"cursor":"a3f","generation":7}
 ```
 
@@ -308,8 +299,10 @@ e.g. tsync/photos/versions/3f2a9c1b7d4e-1a/285b8db6c3eef5e0-7b23aee4b1561b8f/175
   `reconciling` (meaning `closing`); writers MUST NOT produce it.
 - `started`: seconds since the epoch; a reader accepts an integer or a float. The **run name** is
   `started × 1000` rounded, zero-padded to 13 decimal digits.
-- `cursor`: marking → the last finished namespace, `m/<folder id>` (manifest area) or `v/<folder id>`
-  (version area), which sort all `m/` before `v/`; closing and abandoning → the last finished shard; `""`
+- `tree_head`: the tree head read under the exclusive publish lock when the run opened, an integer;
+  marking covers every log entry above it. Written from the opening phase on.
+- `cursor`: marking → the last finished unit, `l/<entry number, 16 digits>` (a log entry), `m/<folder id>`
+  (manifest area) or `v/<folder id>` (version area), which sort all `l/` before `m/` before `v/`; closing and abandoning → the last finished shard; `""`
   = none. A missing `cursor` reads as `""`.
 - **Presence** of the object means a run is open, whatever its body. A body that does not parse, or
   names an unknown phase, is an **unreadable run**: readers and the gate treat the run as open; the
@@ -321,7 +314,7 @@ e.g. tsync/photos/versions/3f2a9c1b7d4e-1a/285b8db6c3eef5e0-7b23aee4b1561b8f/175
   ([algorithms/gc.md §5.5](algorithms/gc.md#55-the-collector-phase-by-phase)). Readers MUST ignore
   unknown fields.
 
-**Generation** at `tsync/D/gc-generation`, on the first collectable main of the domain:
+**Generation** at `tsync/D/gc-generation`, on the collectable main of the domain:
 
 ```json
 {"generation":8}
@@ -331,8 +324,7 @@ e.g. tsync/photos/versions/3f2a9c1b7d4e-1a/285b8db6c3eef5e0-7b23aee4b1561b8f/175
   has ([algorithms/gc.md §5.6](algorithms/gc.md#56-the-generation-and-presence-memos)).
 - Written with a plain put, only by a holder of the run lock: the collector at its transition to
   closing, and the settle of [algorithms/gc.md §5.7](algorithms/gc.md#57-deletion-on-copies).
-- **Reader**: a client reads it from every main and takes the maximum (only the collected main holds
-  it); a main that cannot answer makes it odd. Absent reads as 0. A body that does not parse, or a value that is not a non-negative
+- **Reader**: a client reads it from the main; a main that cannot answer makes it odd. Absent reads as 0. A body that does not parse, or a value that is not a non-negative
   integer, reads as odd (memos untrusted) and is reported. Unknown fields are ignored.
 
 ### 2.13 Corruption marker, verify job, discard job
@@ -404,7 +396,7 @@ instance: several instances of one domain in one process share one view.
 
 ```
 upload(key, source_path, mtime, chunk_size, cancel?, on_progress?) -> Manifest
-    errors: Cancelled, SourceChanged(path), Stopping, MissingChunks(keys), store failures
+    errors: Cancelled, SourceChanged(path), Stopping, store failures
 upload_chunks(key, size, chunk_size, mtime, source: index -> ChunkSource, cancel?) -> Manifest
 get_chunk(chunk key) -> bytes
 get_verified_chunk(chunk key) -> bytes          // fails unless dual(body) = key within two reads
@@ -417,28 +409,21 @@ fetch_manifest(key) -> Manifest | None           // None: unresolved, absent or 
 (bytes produced in place, for example by mapping the source), `Filled(length, fill)` (the caller writes
 exactly `length` bytes into a buffer).
 
-**ManifestStore** (manifests by logical key, raw objects by stored key):
+**ManifestStore** (the per-object tree, by logical key and by stored key):
 
 ```
-put_manifest(key, body)                // resolves or claims the parent chain; gated on a collectable main
 get_manifest_state(key) -> Body(bytes) | Absent | Unresolved
-head_manifest(key) -> Entry?           delete_manifest(key)
-copy_manifest(src, dst)                // server-side copy then delete of src; gated
-ensure_folder_id(dir key) -> id        // local first; otherwise claims self and ancestors
-claim_folder(dir key, id?) -> Held | Taken(id)
-place_folder(dir key)                  // the placement procedure for a settled id
-trash_folder(dir key, id)              // entry, anchor, then marker removal
-restore_folder(path) -> Restored | NotInTrash | ParentUnknown
-remove_stale_marker(slot, expected id?)
-confirm_pending_claims()               // runs the confirmations owed
+head_manifest(key) -> Entry?
 get_anchor(id) -> Anchor?   placed(id, at) -> Here | Elsewhere(anchor) | Unanchored
 holder_at(slot) -> id?                 // the filed marker's id, disowned ones read as none
 list_namespace(id) -> [Entry]   get_object(key)   get_objects(keys)   list_many?(ids)
+apply(entry)                           // the projection of one log entry: data-model/backend §6.1; gated
 ```
 
 `Unresolved` means this client holds no id for the key's folder; `Absent` means the store holds nothing
-there. A caller that memoizes answers MUST NOT memoize `Unresolved`. There is no operation that writes a
-folder marker with a plain put.
+there. A caller that memoizes answers MUST NOT memoize `Unresolved`. `apply` is the only operation that
+writes a manifest, a marker or an anchor, and only a projector calls it
+([algorithms/publication.md §4.6](algorithms/publication.md#46-projection-the-tree-follows-the-log)).
 
 **TreeReader** (the folder tree by id):
 
@@ -451,10 +436,11 @@ find(id, names) -> File(entry) | Folder(id) | Missing
 fold_tree(id, root key, f(acc, containing dir key, entry) -> acc, acc0, on_unusable?) -> acc
 ```
 
-**History**: `save_version(key)` (best effort, bounded by `snapshot_deadline`, recommended 10 s including
-retries; failures logged), `list_versions(key)`, `get_version(version key)`, `revert(key, version key)`
-(a gated copy onto the live location), and the pure helpers `parse(version key) -> (group, timestamp)?`,
-`versions_of(group)`, `manifest_of(group)`, `folder_versions(id)`.
+**History**: `save_version(slot)` (best effort, bounded by `snapshot_deadline`, recommended 10 s including
+retries; failures logged; called by `apply`), `list_versions(key)`, `get_version(version key)`, and the
+pure helpers `parse(version key) -> (group, timestamp)?`,
+`versions_of(group)`, `manifest_of(group)`, `folder_versions(id)`. Reverting to a version is a local
+operation ([04](04-checkout-cache.md) §4.6).
 
 **ChunkSpace** (reads of the collected main during a run): `head`, `get`, `get_range` across both
 spaces ([algorithms/gc.md](algorithms/gc.md) §5.8), `run_present()`, and `generation()` (G, §2.12). Promotion is performed only by
@@ -479,8 +465,9 @@ the *inode* layout (ids from local state) and the *identity* layout (share servi
 ### 3.3 What this layer requires of the store
 
 The store contract is [06-backends.md §3](06-backends.md#3-the-store-contract). One reading rule is
-this layer's: an empty or unparseable answer to create-if-absent is read back, never taken as "won"
-([data-model/backend.md §6.2](data-model/backend.md#62-claiming-a-name-for-a-new-folder)).
+this layer's: an empty or unparseable answer to the create-if-absent of a log entry is read back and
+compared with the bytes sent, never taken as "won"
+([algorithms/publication.md §4.8](algorithms/publication.md#48-crash-recovery)).
 
 ---
 
@@ -500,19 +487,19 @@ this layer's: an empty or unparseable answer to create-if-absent is read back, n
 
    Unknown chunks are put; a successful put clears the chunk's corruption memo entry. Record the key in
    the manifest and report progress (a progress callback MUST NOT block).
-3. **Publish**: re-check cancel and shutdown; compute `h1`/`h2`; seal; if versioning, `save_version`;
-   `put_manifest`. On a collectable main the put goes through the gate; a `MissingChunks` refusal makes
-   the uploader drop those keys from its memo, re-send them from the source it holds, and publish again
-   (a `Stored` chunk has no source here: the refusal propagates to the caller, which re-reads the bytes
-   from its local copy or reports the file damaged). If `cancel` was set while the put was in flight,
-   delete the manifest again and fail `Cancelled` (chunks stay: a successor reuses them).
+3. **Seal**: re-check cancel and shutdown; compute `h1`/`h2`; return the manifest. An upload writes no
+   manifest: the manifest travels in the log entry that commits the file
+   ([algorithms/publication.md §4.2](algorithms/publication.md#42-upload)). On a collectable main that
+   commit goes through the gate; a `MissingChunks` refusal makes the uploader drop those keys from its
+   memo and re-send them from the bytes it holds (its staged bodies, or its source file), after which
+   the commit is repeated.
 
 **Whole-file upload** reads from a snapshot of the source taken when it starts (a copy or reflink), so
 later writes do not reach the bytes being hashed, and compares the source's size and modification time
-after the last chunk: a change fails `SourceChanged` and publishes nothing.
+after the last chunk: a change fails `SourceChanged` and returns no manifest.
 
 **Partial rewrite** (`upload_chunks`) passes unchanged chunks as `Stored` keys, taken on trust from the
-manifest being rewritten; the gate on the main is what verifies them.
+manifest being rewritten; the gate on the main is what verifies them, at the commit.
 
 **Dedup memo**: never pre-populated by listing (that cost would scale with the archive); it is an
 optimisation only, since the gate on a collectable main checks presence
@@ -530,31 +517,18 @@ optimisation only, since the gate on a collectable main checks presence
   manifest (a write in flight). A store failure MUST propagate as a failure, never as `None`
   ([algorithms/failure-model.md](algorithms/failure-model.md)).
 
-### 4.3 Folders
+### 4.3 Folders and files in the tree
 
-The protocol (claim, confirmation, placement, trash, restore, stale-marker removal) is
-[data-model/backend.md](data-model/backend.md) §6. This layer adds:
+Every manifest, marker and anchor is written by the projection of a log entry, whose steps are
+[data-model/backend.md §6.1](data-model/backend.md#61-apply). This layer adds the spellings of §2.4
+and one rule: a manifest is put with the leaf of its key as its recorded name, whatever name the
+entry's copy of it records.
 
-- `ensure_folder_id(K)` is local first: an id the owner already holds costs no round trip. Otherwise it
-  ensures the parent, mints a candidate, claims, records the resulting id (its own on a win, the
-  holder's on `Taken`) in local state, and queues the claim's confirmation durably. If local state
-  already recorded another id for `K` meanwhile, that id wins.
-- `claim_folder(K)` on publish: the root is always held. For a folder with no local id, local state is
-  consulted first: a folder this client moved away is held (content is filed by its id); a folder this
-  client removed fails transiently (a publish must not resurrect it); otherwise the parent chain and the
-  folder are claimed. For a folder with a local id whose claim is final, no store read is needed.
-- `ensure_claimed(K)` turns `Taken` into a transient failure: the conflict tables set one folder aside,
-  and the waiting operation is retried.
-- `restore_folder(path)` needs the destination parent's id locally (else `ParentUnknown`) and writes no
-  journal entry; peers learn of it by resync.
+### 4.4 Versions
 
-### 4.4 Files (store side)
-
-- **Rename**: snapshot the source's version (if versioning), server-side copy to the destination (gated),
-  delete the source, then re-put the body with the new leaf as recorded name.
-- **Delete**: snapshot (if versioning), delete the manifest; history remains in the version area.
-- **Revert**: a gated copy of a version body onto the live location, preceded by a snapshot of the live
-  body.
+A version snapshot is taken of the body read from the slot, immediately before a projection replaces
+or deletes it, and only when [data-model/backend.md §6.1](data-model/backend.md#61-apply) says so. A
+file rename leaves a version under the old name: it is a deletion there.
 
 ### 4.5 Reading the tree
 
@@ -600,19 +574,21 @@ reported. `forget(key)` follows a successful re-upload.
 - **Below**: the composite store and its members, the retry classification, the write guard, deferred
   jobs ([06-backends.md](06-backends.md), [algorithms/replication.md](algorithms/replication.md)).
 - **Beside**: local state for folder ids and whereabouts ([data-model/local-cache.md](data-model/local-cache.md));
-  the journal for client identity and entry keys ([03-journal-sync.md](03-journal-sync.md)).
-- **Above**: the uploader and staged writes (upload, manifest store, journal writes); the read path
-  (manifests, chunks, tree find); sync and resync (tree fold, journal); whole-domain operations
+  the log store and client identity ([03-journal-sync.md](03-journal-sync.md)).
+- **Above**: the uploader and staged writes (upload); the cycle (log entries, projection, state reads);
+  the read path (manifests, chunks, tree find); whole-domain operations
   (retention, collection, integrity, mirror, rsync, share).
 
 Main flows:
 
-- *Write a file*: staged → `upload_chunks` → chunks put or deduplicated → version snapshot → claim the
-  folder chain → gated manifest put → journal entry → cursor bump.
+- *Write a file*: staged → `upload_chunks` → chunks put or deduplicated → the manifest returned to the
+  owner → a log entry carrying it, created through the gate → its projection: version snapshot, then the
+  manifest at its slot → tree head → cursor.
 - *Open a file lazily*: path → local ids (or `find`, one read per segment) → manifest → byte ranges →
   chunks.
-- *Resync*: `fold_tree` from the root; markers become local folders with their ids, manifests become
-  local manifests; indexes rewritten where worth it.
+- *State read*: the tree head, every namespace, then the log entries above that tree head
+  ([algorithms/publication.md §4.7](algorithms/publication.md#47-state-read-and-arrival-by-state));
+  indexes rewritten where worth it.
 
 ---
 
@@ -620,18 +596,20 @@ Main flows:
 
 - **Atomicity unit is one object.** Correctness rests on the ordering rules of
   [data-model/backend.md](data-model/backend.md) §4.3.
-- **Crash during upload**: orphan chunks (reclaimed by a collection); no manifest, so the file is not
-  visible. A crash after the manifest and before the journal entry is recovered by the writer's WAL.
-- **Concurrent writers to one file**: last writer wins on the manifest key; conflicts are detected in
-  the sync layer.
+- **Crash during upload**: orphan chunks (reclaimed by a collection); no entry, so the file is not
+  visible. A crash after the entry and before the end of its projection is finished by the projector,
+  or by another client after the settle.
+- **Concurrent writers to one file**: one commits first; the other merges and keeps its content as a
+  conflicted copy ([algorithms/conflict-resolution.md](algorithms/conflict-resolution.md)).
 - **Idempotence**: chunk put, promotion, discard requests (named by run and shard), batched deletes
-  (absent is success), collection resume, a claim of a slot already naming the claimant's id.
+  (absent is success), collection resume, the projection of an entry, the create of an entry with the
+  same bytes.
 - **Offline**: reads fail; `Unresolved` is never cached; a corruption listing failure reads as "nothing
   marked"; version snapshot failures are logged and swallowed within `snapshot_deadline`.
 - **Shared in-process state** MUST be updated atomically with respect to concurrent tasks: upload index
   allocation, the dedup and corruption memos, the per-domain registries, the run-open
-  cache, the tree-walk frontier, and the counters for entry keys, version timestamps and folder ids.
-- **Durable local state** used here: the client id, folder-id leases, pending claim confirmations
+  cache, the tree-walk frontier, and the counters for version timestamps and folder ids.
+- **Durable local state** used here: the client id and folder-id leases
   ([data-model/local-cache.md](data-model/local-cache.md)). Memos are memory only.
 
 ---
@@ -641,8 +619,8 @@ Main flows:
 | Choice | Why | Rejected alternative |
 |---|---|---|
 | Folders keyed by stable id; children by leaf hash | a move rewrites a constant number of objects; the hashed leaf is fixed-length and filesystem-safe | path-keyed objects (a folder move rewrites its subtree) |
-| Folder ids claimed with create-if-absent, then confirmed | two clients creating one folder must agree; a stale delete or an unarbitrating server must not strand a subtree | local mint and plain put |
-| Anchor inside the folder's namespace | a lost delete after a move would otherwise show a folder at two paths; also keeps expiry from deleting a restored folder | trusting markers alone |
+| Folder ids minted by the creating client, final from the mint | the log arbitrates where a folder is; nothing needs to arbitrate what it is called | ids claimed on the store with a conditional write, then confirmed |
+| Anchor inside the folder's namespace | a reader that meets a marker mid-projection, or one a lost delete left, can tell it is not current | trusting markers alone |
 | Binary manifest with fixed 33-byte keys | O(1) key access, mappable without heap for huge files, no escaping | JSON; per-chunk lengths |
 | Recorded name in the manifest body | version keys and shares are one-way hashes | — |
 | Dedup memo never pre-listed | listing scales with the archive | pre-listing |
@@ -678,8 +656,9 @@ An implementation MUST exhibit these observable properties:
   and omitted folders fetched singly; a disowned marker is skipped and reported; an unanchored folder is
   listed where its marker says.
 - **Uploads.** A marked chunk is re-sent rather than deduplicated; a remembered chunk is not re-checked
-  while the memo may be relied on; an upload whose source changed or vanished publishes
-  nothing; a `MissingChunks` refusal leads to a re-send and a successful publish.
+  while the memo may be relied on; an upload whose source changed or vanished returns
+  no manifest; an upload writes chunks and no other object; a `MissingChunks` refusal at the commit
+  leads to a re-send and a successful commit.
 - **Deduplication.** Identical bytes are one chunk object whatever the file or name; re-uploading
   identical content adds no chunk object; zero-filled chunks share one key; a 0-byte file names the
   empty chunk once. Identical content yields identical `h1`/`h2`; the `h1` of an empty regular file is
@@ -694,7 +673,7 @@ An implementation MUST exhibit these observable properties:
   0.5 s apart get different names; domain names containing spaces work; a job key with a missing run, a
   bad shard, a trailing `/` or an empty domain is refused.
 - **Chunk size and source changes.** New files use the configured chunk size, else the store's
-  advertised one, else 8 MiB; a source modified during a whole-file upload publishes nothing.
+  advertised one, else 8 MiB; a source modified during a whole-file upload returns no manifest.
 - **Corruption markers.** A verifying store files a marker recording the computed digest when a body
   does not hash to its key; a good rewrite clears it; a corruption listing distinguishes a store that
   found nothing from a store nothing checks.

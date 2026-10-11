@@ -1,22 +1,22 @@
 # A — Abstraction, logical and structural issues
 
-This file covers mistakes that are true of any implementation in any language: step ordering and crash consistency, concurrency and exclusion, folder identity and conflicts, failure classification, durable queues, journal and change-feed semantics, store and GC contracts, caches, security boundaries, state ownership, deadlines and truthful reporting. Each entry is a mechanism tsync already paid for. Use it in adversarial review of the OCaml 5 rewrite: for each new module, find the matching theme, run every **Check**, and weigh entries flagged `recurred` and `rewrite` first. Under fibers on a domain pool nothing is atomic between two statements, so every entry that was once "safe because one thread runs everything" is live again.
+This file covers mistakes that are true of any implementation in any language: step ordering and crash consistency, concurrency and exclusion, folder identity and conflicts, failure classification, durable queues, log and change-feed semantics, store and GC contracts, caches, security boundaries, state ownership, deadlines and truthful reporting. Each entry is a mechanism tsync already paid for. Use it in adversarial review of the OCaml 5 rewrite: for each new module, find the matching theme, run every **Check**, and weigh entries flagged `recurred` and `rewrite` first. Under fibers on a domain pool nothing is atomic between two statements, so every entry that was once "safe because one thread runs everything" is live again.
 
 ## 1. Durability, crash consistency and lost writes
 
 ### A-1.1 Local record retired before its remote commit
-- **Pitfall** — `exec_put` deleted the WAL record, then published the journal entry. A crash between left uploaded bytes, no entry for peers and nothing owed locally: a write that looked synced and was lost. The inline metadata finisher and the queue worker wrote "executed, entry published, cursor moved, record dropped" twice and disagreed on the last two steps; one order leaves a cursor past an entry with no record to reconcile.
-- **Check** — Every queue follows intent → execute → commit → retire. Grep every record delete and confirm it follows the publish and the cursor move. The completion sequence exists once.
+- **Pitfall** — A publisher deleted its local record of owed work, then created the entry on the store. A crash between left uploaded bytes, no entry for peers and nothing owed locally: a write that looked synced and was lost. Two code paths wrote the completion sequence ("entry created, cursor noted, record dropped") and disagreed on the last two steps.
+- **Check** — A before-value is dropped, the position advanced and the in-flight record cleared only in the `Won` step, in one durable step, after the entry exists (publication §4.5). The `Won` step exists once and recovery calls it (publication §4.8). Grep every drop of a before-value and every clear of the in-flight record.
 - **Seen** — PR #35, acd4f1f5. recurred ×2.
 
 ### A-1.2 Intent recorded after the local side effect
-- **Pitfall** — A metadata op ran its local half, then wrote its WAL record. A crash between left a local change the store was never owed. Replay also re-ran the op under a second record and published the first at once.
-- **Check** — The durable intent precedes any local effect. Redo of the local half is idempotent. Replay hands the existing record on; it never mints a new one.
+- **Pitfall** — A local operation changed the local tree, then wrote the record of what it owed the store. A crash between left a local change the store was never owed.
+- **Check** — The before-value of a clean key is durable before the local tree changes at that key; a crash between leaves a before-value equal to the local value, which owner start drops (publication §4.1, §4.8). A local intent is durable before the first step of a namespace operation, and completing it is idempotent (04 §4.5, §4.10).
 - **Seen** — 8616490a.
 
 ### A-1.3 Resume minted a fresh identity for work it was finishing
-- **Pitfall** — Recovery called `queue_put`, which mints a new entry key, so each replay published under a new key while the record kept the old one. The next start replayed it again: 295 byte-identical records piled up, and `stats` showed "144 to apply" forever through two code paths.
-- **Check** — Every resume path takes its key from the record. A record whose data is gone is discarded with a log line, not replayed forever.
+- **Pitfall** — Recovery re-submitted unfinished work through the path that mints a new name, so each replay published under a new name while the record kept the old one. The next start replayed it again: 295 byte-identical records piled up, and `stats` showed "144 to apply" forever through two code paths. On a numbered log the same mistake is a recovery that encodes the batch again: bytes that differ from the entry already created answer `Held`, and the client takes its own entry for a peer's.
+- **Check** — The in-flight record holds the entry number and the exact bytes; recovery issues the same create with the same bytes, and `Won` on identical bytes is its own commit (publication §4.8, change-algebra Proposition 7). An in-flight record that cannot be parsed is set aside and the client arrives by state before it pushes (03 §2.7); nothing is replayed forever.
 - **Seen** — PR #35, 8616490a. recurred ×2.
 
 ### A-1.4 Old representation removed before the new one is published
@@ -25,13 +25,13 @@ This file covers mistakes that are true of any implementation in any language: s
 - **Seen** — 6933cc16, PR #46, notes (release before switch). recurred ×2.
 
 ### A-1.5 Commit record not retired by the write that invalidates it
-- **Pitfall** — An upload recorded `s_published` and deferred promotion. A write in that window rebuilt the staged record without clearing it, so the next sync promoted the pre-write manifest: an acknowledged write vanished (reads back ZZZZ, not YYYY). Nine construction sites cleared the field by hand; a comment told the tenth.
-- **Check** — Lifecycle is a state type (`Owed | Committed`) and writes can only produce the initial state. The promoter re-reads the record under the key lock and abandons if it is gone.
+- **Pitfall** — An upload recorded its result on the staged edit and deferred promotion. A write in that window rebuilt the staged record without clearing it, so the next sync promoted the pre-write manifest: an acknowledged write vanished (reads back ZZZZ, not YYYY). Nine construction sites cleared the field by hand; a comment told the tenth.
+- **Check** — Lifecycle is a state type (`Owed | Uploaded`) and writes can only produce the initial state (04 §4.6). The promoter re-reads the record under the key lock and stops if it is not Uploaded (04 §4.7). The `Won` step compares each key with what was committed and keeps a before-value for a key written meanwhile (publication §4.5).
 - **Seen** — 8f2c48c4, PR #46, f89a24e1. recurred ×2.
 
 ### A-1.6 Publishing content that changed under the upload
 - **Pitfall** — Import chunked a source laid out for one length and could publish a mix if it changed. A write landing while a file's bytes were sent would publish a manifest for torn content. `cancel_upload` set a flag, but a manifest put already past the check still published an older edit after a newer one began.
-- **Check** — Read and size from one held descriptor; re-check length after hashing. Every upload of a mutable file has cancel-on-write plus an edit-generation check under the key lock at the moment it commits.
+- **Check** — Read and size from one held descriptor; re-check length after hashing. Every upload of a mutable file has cancel-on-write plus an edit-generation check under the key lock at the moment it records its manifest (04 §4.6).
 - **Seen** — 4f1be8b3, 8f2ccafb, f1091ded, notes (04 B.0.1). recurred ×3.
 
 ### A-1.7 Failed read substituted by zeros or empty, then published
@@ -41,7 +41,7 @@ This file covers mistakes that are true of any implementation in any language: s
 
 ### A-1.8 Sole-copy data reachable by eviction or rebuild
 - **Pitfall** — Staged bodies (unpublished, no other copy) and re-fetchable cache groups lived in one store under one naming; only documentation kept the cache cap from deleting staged data. Staged manifests sat beside the published projection, which a resync drops.
-- **Check** — Sole-copy data lives in a store eviction and resync cannot name. A test proves staged data survives cap=0 and a full resync.
+- **Check** — Sole-copy data lives in a store that eviction and an arrival by state cannot name. A test proves staged data survives cap=0 and an arrival by state.
 - **Seen** — 75c90fdd, 2d0f0fc9.
 
 ### A-1.9 Internal-name predicate matches user files
@@ -50,12 +50,12 @@ This file covers mistakes that are true of any implementation in any language: s
 - **Seen** — cfdc0752, bbf43821, 204a040b, e3225489. recurred ×3.
 
 ### A-1.10 Small state file overwritten in place
-- **Pitfall** — `open_out` truncates before writing, so a crash left an empty last-sync mark, read as a domain never synced.
+- **Pitfall** — `open_out` truncates before writing, so a crash left an empty sync-position file, read as a domain never synced.
 - **Check** — Every persisted state file is temp + fsync + rename. Empty or missing is never indistinguishable from a legitimate initial state.
 - **Seen** — 5e23e54a, PR #85.
 
 ### A-1.11 Nothing fsynced
-- **Pitfall** — WAL records, queue records, staged sidecars, partial records, the client uuid and directories after rename, link or unlink were never fsynced, nor were `mkdir -p` parents. A failed local `put` left its temp file. A USB bridge that reports no FUA makes this real.
+- **Pitfall** — Sync records, queue records, staged sidecars, partial records, the client uuid and directories after rename, link or unlink were never fsynced, nor were `mkdir -p` parents. A failed local `put` left its temp file. A USB bridge that reports no FUA makes this real.
 - **Check** — Fsync the temp before every replace-by-rename and the directory after every name change that must survive. Clean the temp on failure. A syscall seam lets a test assert fsync-before-publish.
 - **Seen** — notes (04 B.0.1, backends/local B-0, durable-queue).
 
@@ -65,13 +65,13 @@ This file covers mistakes that are true of any implementation in any language: s
 - **Seen** — 20a26efa, PR #80.
 
 ### A-1.13 Every crash point of a multi-step mutation not enumerated
-- **Pitfall** — Promotion before Executed completed a Prepared record without publishing its entry. EXECUTED kept the original ops while the queue published rewritten ones, so recovery republished the originals. Retarget moved the file before rewriting the record, so a crash re-derived a second aside name. Retire-stale-source moved and forgot before re-pointing the id.
-- **Check** — For each multi-step mutation list the crash points and the recovery for each. Record the as-published form before, or atomically with, the effect. Run the crash-at-every-step harness.
+- **Pitfall** — A multi-step publication had crash points nobody listed: a record completed without its entry published; recovery republished the original ops where the queue had published rewritten ones; a move aside moved the file before rewriting the record, so a crash re-derived a second aside name; retire-stale-source moved and forgot before re-pointing the id.
+- **Check** — For each multi-step mutation list the crash points and the recovery for each: the table of publication §4.8 for a push, an arrival and a projection, 04 §4.10 for local steps. Record the result before, or atomically with, the effect. Run the crash-at-every-step harness.
 - **Seen** — notes (04 B.0.1, wal-and-journal §3, conflict-resolution §2).
 
 ### A-1.14 Referent deleted after the index that names it
-- **Pitfall** — Purge deleting the trash marker first strands every key under it. GC close deleting on the main before copies lets the main forget keys copies still hold: a permanent leak. Expire batches with unspecified inner order could drop a trash entry before its subtree.
-- **Check** — Delete referents before the index; delete dependants before the authority that enumerates them; advance the cursor only after the whole batch is acknowledged.
+- **Pitfall** — GC close deleting on the main before copies lets the main forget keys copies still hold: a permanent leak. An expire batch with unspecified inner order can delete an index before what it names.
+- **Check** — Delete referents before the index; delete dependants before the authority that enumerates them (data-model/backend §4.3; log entries in ascending number order, publication §4.9); advance the cursor only after the whole batch is acknowledged.
 - **Seen** — 9327a879, PR #42, notes (data-model/backend). recurred ×3.
 
 ### A-1.15 Marker or resume token advanced before its work
@@ -81,7 +81,7 @@ This file covers mistakes that are true of any implementation in any language: s
 
 ### A-1.16 Orphaned staged bodies
 - **Pitfall** — Delete and revert left staged bodies behind; a crash between staging a body and writing the manifest naming it left unreachable bodies.
-- **Check** — Every removal drops what only it referenced. Startup runs a reachability sweep before replay can stage new bodies.
+- **Check** — Every removal drops what only it referenced. Startup runs a reachability sweep before anything can stage new bodies.
 - **Seen** — f8f3f9eb, 19d2a9c7.
 
 ### A-1.17 Create then write publishes an empty file on crash
@@ -119,6 +119,16 @@ This file covers mistakes that are true of any implementation in any language: s
 - **Check** — Ingest is durable before the UI is acknowledged; every write entry point records intent.
 - **Seen** — notes (android B-0).
 
+### A-1.24 Staged bytes promoted or released before the commit
+- **Pitfall** — An upload leaves chunks that nothing on the main names until the entry carrying their manifest exists, and a collection may delete them. A client that promotes the staged edit or releases its staged bodies when the upload ends has nothing to send when the commit is refused for missing chunks: the command can never be committed.
+- **Check** — A staged edit is promoted only after the `Won` step dropped its before-value, and at owner start only when it is Uploaded and its key has no before-value (04 §4.7, §4.10). The staged bodies stay until then (publication §4.2). A commit refused for missing chunks uploads them again from the staged bytes and issues the same create (gc §5.3, §5.4). A test collects between an upload and its commit.
+- **Seen** — design.
+
+### A-1.25 Merge recomputed after a crash
+- **Pitfall** — An arrival changes many keys of the local tree. A crash partway leaves the tree half-changed; a merge computed again from it takes the half already installed for local changes, and a move aside is derived a second time under a second name.
+- **Check** — The arrival record holds the merge's result (the steps, the complete set of before-values, the position) and is durable before the local tree is touched; owner start completes it and computes nothing (publication §4.4, §4.8; 03 §2.7). Every step is idempotent. A kill at each step of an arrival ends in the state of an uninterrupted one.
+- **Seen** — design; the second aside name of A-1.13 is the same shape.
+
 ## 2. Concurrency, atomicity and exclusion
 
 ### A-2.1 Check-then-act that relied on cooperative atomicity
@@ -137,13 +147,13 @@ This file covers mistakes that are true of any implementation in any language: s
 - **Seen** — b836e4bc, 291e583d, PR #46, PR #85. recurred ×2.
 
 ### A-2.4 Reference resolved outside the lock it mutates under
-- **Pitfall** — An IPC handler resolved a reference to a path before taking the mirror lock. With several File Provider requests in flight, `mv f4 sub/` racing `mv sub sub2` re-created `sub` beside the renamed folder, journaled it, and every replica agreed on the wrong tree. The rewrite hit the same need and required a reentrant metadata lock.
+- **Pitfall** — An IPC handler resolved a reference to a path before taking the mirror lock. With several File Provider requests in flight, `mv f4 sub/` racing `mv sub sub2` re-created `sub` beside the renamed folder, published it, and every replica agreed on the wrong tree. The rewrite hit the same need and required a reentrant metadata lock.
 - **Check** — Resolve and mutate in one lock hold. If helpers re-take the lock, it is reentrant or has an explicit locked/unlocked split. Tests assert the intended tree, not only convergence.
 - **Seen** — b7e4c849, b7fd7943, PR #87, 5ee48495, rewrite (`Dqueue` retry called `forget` holding `t.m`; OCaml 5 raises on the second lock and the worker died). recurred ×3, rewrite.
 
 ### A-2.5 Store round trip under the global metadata lock
 - **Pitfall** — The lock FUSE and IPC handlers wait on was held across network I/O: an inline cursor bump in a rename, every rename/delete/rmdir's store half and retry ladder (the mount froze while one store call failed), a version snapshot retrying a 500 for about 50 s, a peer entry's manifest fetches, store reads passed in as closures, a revert fetching and publishing under it, a new file asking an http-proxy store for its recommended chunk size (with the store down, every mutation of the domain waited for the retry ladder).
-- **Check** — Read the store first, then take the lock and decide from data (tables, not callbacks). Local ops complete from local state plus a WAL record. Make holding the lock across a request fail to compile: the lock is private to the module changing local state.
+- **Check** — Read the store first, then take the lock and decide from data (tables, not callbacks). Local ops complete from local state plus a before-value (publication §4.1, S8); a merge reads the store before it takes the lock (conflict-resolution §3). Make holding the lock across a request fail to compile: the lock is private to the module changing local state.
 - **Seen** — 88db71c8, ed04657a, 39568d9c, e8fe2452, 1cd593db, ab3811bd, 2a59d643, PR #92, 2d146f24. recurred ×8, rewrite.
 
 ### A-2.6 Buffer released while an asynchronous consumer still reads it
@@ -157,8 +167,8 @@ This file covers mistakes that are true of any implementation in any language: s
 - **Seen** — 00585588, PR #42, notes (01 B.3.6, 02 B.2, 05 B.2, 06 B.0.3). recurred ×5.
 
 ### A-2.8 Lost wake-up
-- **Pitfall** — "Record written" to "uploader sends it" used a bare condition; a signal with no waiter was lost and the upload waited for the next start. In the rewrite, holding lifted a catch-up gate without signalling it, deadlocking the rebuild that ends the hold.
-- **Check** — A wake-up channel carries the work item (queue + condition). Every state change that can satisfy a wait signals it; check each hold, gate and pause transition.
+- **Pitfall** — "Record written" to "uploader sends it" used a bare condition; a signal with no waiter was lost and the upload waited for the next start.
+- **Check** — A wake-up channel carries the work item (queue + condition). Every state change that can satisfy a wait signals it; check each gate and pause transition.
 - **Seen** — b6ede846, 93f40a22, 440f3ee8. recurred ×2, rewrite.
 
 ### A-2.9 Register-then-send gap for a late subscriber
@@ -167,8 +177,8 @@ This file covers mistakes that are true of any implementation in any language: s
 - **Seen** — 3ff7eaf7. rewrite.
 
 ### A-2.10 Several processes mutating one domain's local state
-- **Pitfall** — The launcher parent converged while each forked frontend ran its own queues and `sync`/import/rsync wrote the mirror, staged tree and WAL, guarded by per-process mutexes. A peer delete in the parent discarded a staged edit a FUSE child had just written (confirmed loss). Android's exec'd verbs and its linked upload queue were unordered. The durable-queue `.owner` claim was taken by every runner and checked by none, so a Prepared record could publish twice in either order. Startup recovery per process deleted bytes another frontend was writing.
-- **Check** — One owner process per domain; every mutating command (import, rsync, sync, trash, gc, export records) runs in it or holds a cross-process lock. In-process locks never stand in for cross-process exclusion. Destructive recovery runs before anything serves.
+- **Pitfall** — The launcher parent converged while each forked frontend ran its own queues and `sync`/import/rsync wrote the mirror, staged tree and sync records, guarded by per-process mutexes. A peer delete in the parent discarded a staged edit a FUSE child had just written (confirmed loss). Android's exec'd verbs and its linked upload queue were unordered. The durable-queue `.owner` claim was taken by every runner and checked by none, so a record could be published twice, in either order. Startup recovery per process deleted bytes another frontend was writing.
+- **Check** — One owner process per domain; every mutating command (import, rsync, sync, gc, export records) runs in it or holds a cross-process lock. In-process locks never stand in for cross-process exclusion. Destructive recovery runs before anything serves.
 - **Seen** — cc90f688, PR #68, PR #86, PR #104, notes (07 B.4, 04 B.0.1, durable-queue), 656700ab. recurred ×4.
 
 ### A-2.11 Active work started before a fork
@@ -182,35 +192,35 @@ This file covers mistakes that are true of any implementation in any language: s
 - **Seen** — 890ded8c, a35b9d24.
 
 ### A-2.13 Making an operation asynchronous broke callers that assumed completion
-- **Pitfall** — Rename-race scenarios relied on a rename being published when its step returned; once the metadata queue took the store half, the kept log came out in either order one run in eight.
+- **Pitfall** — Rename-race scenarios relied on a rename being published when its step returned; once a queue took the store half, the kept log came out in either order one run in eight.
 - **Check** — Any change that makes an operation asynchronous audits callers relying on completion on return; tests drain explicitly.
 - **Seen** — 13541674, 6468cf84.
 
-## 3. Namespace identity, claims and conflicts
+## 3. Namespace identity and conflicts
 
-### A-3.1 Contested name written with an unconditional put
-- **Pitfall** — Two clients creating one directory both minted an id and wrote the marker; the last won and the loser's files sat on every backend, listed by nothing: an acknowledged write gone with no report. The neighbouring test missed it because the losing namespace was empty.
-- **Check** — Every marker write is a store-native conditional create returning the holder; losing is an ordinary outcome. Never HEAD+PUT. Naming-race tests write content under the contested name.
+### A-3.1 Contested slot written with an unconditional put
+- **Pitfall** — Two clients creating one directory each wrote the store's record for the name; the last won and the loser's files sat on every backend, listed by nothing: an acknowledged write gone with no report. The neighbouring test missed it because the losing namespace was empty.
+- **Check** — The one contested write is the creation of entry h + 1: a store-native conditional create that returns the holder, where losing is an ordinary outcome followed by an arrival (publication §2 A2, §4.5). Never HEAD+PUT, never a plain put on a store that refuses the conditional create. Tree records are written only by an entry's projector (publication §4.6). Naming-race tests write content under the contested name and find both folders, each with its content (conflict-resolution §8.3, D6).
 - **Seen** — 284521fd, 0265e0e5, c51dba7f, PR #38. recurred ×3.
 
-### A-3.2 Claim protocol gaps
-- **Pitfall** — An old proxy ignoring `if_absent` overwrote and answered empty, read as a win. A non-transient failure, including S3's retryable 409 ConditionalRequestConflict, fell back to a plain PUT over the winner. Mkdir, move-destination and restore used plain puts. The winner was decided by physical buffer equality, so a lost-reply retry answered 412 counted as a loss.
-- **Check** — Claims answer `Won | Held`, byte-identical holder = Won. No plain-put fallback on a slot. Version-check the peer's claim support; probe custom S3 endpoints for conditional create before first use.
+### A-3.2 Conditional-create protocol gaps
+- **Pitfall** — An old proxy ignoring `if_absent` overwrote and answered empty, read as a win. A non-transient failure, including S3's retryable 409 ConditionalRequestConflict, fell back to a plain PUT over the winner. The winner was decided by physical buffer equality, so a lost-reply retry answered 412 counted as a loss.
+- **Check** — A conditional create answers `Won | Held`, byte-identical holder = Won (06 §3.3); recovery of an in-flight entry depends on it (publication §4.8). No plain-put fallback for a log entry or a takeover (data-model/backend §6.3). Version-check the peer's conditional-create support; probe custom S3 endpoints for it before first use.
 - **Seen** — notes (data-model/backend, 02 B.4, 06 B.0.1, backends/s3), 57556da2. recurred ×2.
 
 ### A-3.3 Stale marker left by a non-atomic move trusted
-- **Pitfall** — A client moved 22 folders, trashed and restored them: every marker put landed, no delete did, so each id sat at two paths; 47 trash entries named restored folders that expire would have reclaimed. Later: adoption compared only the anchor's parent, so a same-folder rename's leftover lent its id to a new directory; a claim treated any marker as a live holder.
-- **Check** — Every orphanable pointer has a verifier (the folder's parent anchor), written before the old marker goes. Walk, claim, adoption, expire and GC share one marker-vs-anchor predicate. Nothing anchored elsewhere is reclaimed.
+- **Pitfall** — A folder move is several plain writes, and a delete can be lost. A client moved 22 folders twice: every marker put landed, no delete did, so each id sat at two paths, and expiry would have reclaimed folders that were live. Later: a reader compared only the anchor's parent, so a same-folder rename's leftover marker lent its id to a new directory; another treated any marker as a live holder.
+- **Check** — Every orphanable pointer has a verifier: a marker is filed only if its folder's anchor names its slot, parent and name; the anchor is written before the marker it validates; a folder with no anchor is not filed (data-model/backend §2.7, §6.2). Walk, path lookup, state read, integrity and GC share that one predicate. Nothing anchored elsewhere is reclaimed.
 - **Seen** — c3ae1e7c, a2786afb, 82eb4dde, c964322d, bb795b9c, PR #88. recurred ×4.
 
 ### A-3.4 Destructive step cannot say whether it acted
 - **Pitfall** — Every driver's delete answered alike whether or not an object existed (S3 answers 204), and a rename skipped the old-marker delete when the local index lacked the parent id. Both silences produced the duplicate-id state above.
-- **Check** — Steps an invariant depends on report whether they acted; the operation fails and undoes local changes when they did not. Never skip a step because a local cache lacks data; refuse before anything moves.
+- **Check** — Steps an invariant depends on report whether they acted, or the invariant does not depend on them: a lost marker delete leaves a disowned marker, never a second filed one (data-model/backend §6.2). A projection never skips a write because a local cache lacks data: it reads the slot, and applies the whole entry again after a failure (data-model/backend §6.1).
 - **Seen** — bb795b9c, PR #88.
 
 ### A-3.5 Identities unique only by chance or per process
-- **Pitfall** — Folder ids were 64 random bits per process. Entry keys were monotonic per process only, not initialised past used keys, and any process sharing the uuid minted. Durable job names from a plain counter collided across the daemon's forks and one-shot commands.
-- **Check** — Cross-client ids are client id + a leased counter (O_EXCL lease). One process mints per client uuid, initialised past every used key. Job identities are unique across every enqueuing process.
+- **Pitfall** — Folder ids were 64 random bits per process. Time-based keys were monotonic per process only, not initialised past used keys, and any process sharing the uuid minted. Durable job names from a plain counter collided across the daemon's forks and one-shot commands.
+- **Check** — Cross-client ids are client id + a leased counter (O_EXCL lease, 03 §2.1). Only the owner mints feed keys, starting past the largest key the applied log holds (03 §2.2). Entry numbers come from the log, never from a clock. Job identities are unique across every enqueuing process.
 - **Seen** — addadddc, 9b0f6af2, notes (wal-and-journal §3). recurred ×3.
 
 ### A-3.6 Temporary names unique per host only
@@ -220,12 +230,12 @@ This file covers mistakes that are true of any implementation in any language: s
 
 ### A-3.7 Identity overwritten by a later write
 - **Pitfall** — `Folder_ids.write` replaced an existing id, so a lazy listing could replace the id references already named.
-- **Check** — Identity is write-once; replacement is a separate operation used only by a full rebuild.
+- **Check** — Identity is write-once: a folder id is final from its mint (03 §2.1), and a listing never replaces the id recorded for a folder the client holds.
 - **Seen** — 8dfe0239.
 
 ### A-3.8 Directory materialised without its id
-- **Pitfall** — A put materialised parent directories without ids; later fetches built keys from a missing parent id and skipped silently. A partial resync recorded its cursor and exited 0.
-- **Check** — Every path that materialises a directory adopts the id from the store's marker and never mints. "Cannot name" is counted and reported.
+- **Pitfall** — A put materialised parent directories without ids; later fetches built keys from a missing parent id and skipped silently. A partial walk recorded its position and exited 0.
+- **Check** — Every path that materialises a directory takes its id from the main's value for it (an entry's command or the folder's anchor); only a local creation mints. A walk that could not read a record fails as a whole (publication §4.7). "Cannot name" is counted and reported.
 - **Seen** — f32e529a.
 
 ### A-3.9 Directory move owes a caller-remembered second write
@@ -240,28 +250,23 @@ This file covers mistakes that are true of any implementation in any language: s
 
 ### A-3.11 Rename onto a name another folder holds
 - **Pitfall** — A folder renamed onto a peer's different folder overwrote its marker and stranded its subtree; the peer failed ENOTEMPTY every 2 s forever. Variants: source and destination holding the same id locally; a second conflict moving onto the first conflicted copy's name.
-- **Check** — Every loser goes to a free conflict name. Marker removal is conditional on it still naming the moved folder. "Destination already holds this id" counts as applied.
+- **Check** — The key whose value comes from the main keeps the place; every loser goes to a free conflict name (change-algebra R2, conflict-resolution §5). A projection deletes a marker only if it still names the folder that moves (data-model/backend §6.1). Every step of an arrival is idempotent: a destination that already holds the moved item counts as done (03 §2.7).
 - **Seen** — 0a300530, 8f37df8d, 5ce27035, 8f15cd53. recurred ×4.
 
 ### A-3.12 "Is this name free" consulted only the visible tree
 - **Pitfall** — Two unpublished files with one leaf under a folder a peer removed were rescued onto the same conflicted name; the first was overwritten everywhere. A second conflict on one name reused the first conflict's name.
-- **Check** — Free-name checks consult mirror and staging; conflict names are unique per conflict.
+- **Check** — Free-name checks consult the merged tree as computed so far and the staged edits; conflict names are unique per conflict (conflict-resolution §5).
 - **Seen** — fa63f5aa, PR #92. recurred ×2.
 
 ### A-3.13 Foreign op over unpublished local work skipped
-- **Pitfall** — A peer's op on a key with a staged edit was skipped, leaving 13 vs 11 bytes under one name, both sides reporting nothing to apply. A peer rename over something written locally was skipped yet counted applied (rows F10, D9).
-- **Check** — Every (peer op, local unpublished op) pair has a convergent outcome in a pure decision table, one scenario per row. "Skip and mark applied" is never an outcome; the local copy moves aside and is queued.
+- **Pitfall** — A peer's op on a key with a staged edit was skipped, leaving 13 vs 11 bytes under one name, both sides reporting nothing to apply. A peer rename over something written locally was skipped yet counted applied.
+- **Check** — The merge is a total, pure function of three states (change-algebra Definition 7, Theorem 8), and every pair of clashing operations has a row with one scenario (conflict-resolution §8.3, INV-rows). "Skip and count as merged" is never an outcome; the local content moves aside and is pending.
 - **Seen** — edece309, d1d5b3db, 7e1957df, 79a43154, f5513d0b, e6f2ceb3, PR #81, PR #92. recurred ×3.
 
 ### A-3.14 Conflict-table holes
-- **Pitfall** — Delete and file-rename arrivals consulted no store record, so a late delete removed a restored file. No `renamed_onto` for deletes or rename destinations. Rescue flattened files to the root and lost unpublished subfolders. A rename after a peer's rmdir pulled the folder out of the trash. A file/folder kind clash with both sides published stayed divergent; symmetric moving aside swapped the sides. Published losing writes survive only in version history.
-- **Check** — Every clash has a winner both machines compute identically (later key wins). Print the table and review it. Scenarios assert identical trees and contents on both clients.
+- **Pitfall** — Decisions for a delete and a file rename consulted no record of what the store held, so a late delete removed a file a peer had brought back. Rescue flattened files to the root and lost unpublished subfolders. A file/folder kind clash with both sides published stayed divergent; symmetric moving aside swapped the sides. Published losing writes survived only in version history.
+- **Check** — Only the client that arrives second acts, and the main wins whatever the kinds (conflict-resolution §1.1, §11). Every command carries its guard (03 §2.3). No clash leaves a content only in history (conflict-resolution §1.3). Print the table of §8.3 and review it. Scenarios assert identical trees and contents on both clients (INV-converge).
 - **Seen** — PR #81, PR #85, PR #92, notes (conflict-resolution §2, 09 B0.3), spec issues 4, 5. rewrite.
-
-### A-3.15 Arrival under a trashed ancestor
-- **Pitfall** — A client that had published a folder's removal still applied a peer's earlier addition inside it, showing a file the store held in the trash.
-- **Check** — The store record at a path under a trashed ancestor is absent; arrival facts consult the ancestor chain.
-- **Seen** — 05f75111. rewrite.
 
 ### A-3.16 "Staged" predicate wrong for directories
 - **Pitfall** — A folder counted as staged if its staged-tree directory existed, which a published upload leaves empty, so a folder ever written into never followed a peer's rename. Inversely, `Staged_manifest.exists` answered true for the directory above a staged file, so a peer's mkdir moved unpublished work aside as a file with nothing owed. The rewrite read a directory as an edit and failed EISDIR.
@@ -269,23 +274,23 @@ This file covers mistakes that are true of any implementation in any language: s
 - **Seen** — b31dbb7c, 090e269c, 7059de7a, PR #87, d60b04e1. recurred ×3, rewrite.
 
 ### A-3.17 Pending work not retargeted when its folder moves
-- **Pitfall** — Queued uploads kept the old path after a folder rename, found nothing, and still published, telling peers of a file the store never had. An upload whose staged bytes were gone returned as sent. Re-queued uploads took entry keys ahead of the rename, so a peer replayed the put first and kept the source as an id-less conflicted copy.
-- **Check** — A local move retargets every pending op under it after recording itself. Nothing to send means "nothing owed", publish nothing. Entry order follows causal order.
+- **Pitfall** — Queued uploads named their file by path: after a folder rename they kept the old path, found nothing, and still published, telling peers of a file the store never had. An upload whose staged bytes were gone returned as sent. Re-queued uploads were published ahead of the rename, so a peer applied the put first and kept the source as an id-less conflicted copy.
+- **Check** — Pending work is keyed by (folder id, leaf name), so a folder move retargets nothing (publication §4.1). A file rename and a move aside carry the staged edit and its upload record to the new key (conflict-resolution §4.1). Nothing to send means "nothing owed": push nothing. An entry is a set of commands that is well-formed as a whole, so nothing relies on the order of two publications (change-algebra Definition 6).
 - **Seen** — 20a75592, f7920772, c61df832. recurred ×3.
 
 ### A-3.18 Queued ops resolve their target by stale path
-- **Pitfall** — A queued rmdir or rename trashed or re-created a folder the store never had; an offline nested removal parked the inner rmdir forever and left a file delete unsent. An upload into a folder with an owed mkdir claimed the marker itself.
-- **Check** — Queued ops resolve by id at publish time (live, moved, removed, unknown, decided in one place) and publish nothing for what the store never held. Uploads wait for their folder's owed mkdir.
+- **Pitfall** — A queued rmdir or rename acted on a folder the store never had; an offline nested removal parked the inner rmdir forever and left a file delete unsent.
+- **Check** — No list of operations is kept: the pending set is one command per before-value, keyed by id, derived when a batch is pushed (publication §3.2, §4.1). A create followed by a delete leaves no before-value and pushes nothing (change-algebra Proposition 2).
 - **Seen** — 5eaf92b8, 1cd593db, d1d400db, notes (wal-and-journal §3).
 
-### A-3.19 Rebuild from remote while metadata is owed
-- **Pitfall** — A full resync restated the store's tree over unpublished local metadata ops.
-- **Check** — Refuse or drain first any rebuild while the WAL holds owed metadata. Lazy browsing never prunes unpublished work.
+### A-3.19 The main's tree installed over pending local changes
+- **Pitfall** — A full rebuild restated the store's tree over unpublished local operations.
+- **Check** — A state read is the main's side of an ordinary merge with the client's own R and L: pending changes are kept, guarded and merged, and no operation discards them (publication §4.7). A pull on a lazy tree merges with the folder's pending commands and never hides a name a pending command creates (04 §3.5).
 - **Seen** — d68f0ce4, PR #92.
 
 ### A-3.20 Only the first key of a rename consulted
-- **Pitfall** — `List.hd (op_keys op)`: a peer's rename invalidated the new name and the mount kept serving the old; the replay filter, filled with every key and read with one, could replay a rename over a source a peer had written. Open: exact-key filters miss writes under a renamed directory; `on_changed` announces the peer's keys, not the conflicted-copy name.
-- **Check** — One accessor returns every key an op touches, with subtree semantics for directories. No "primary key" accessor in invalidation or conflict checks.
+- **Pitfall** — `List.hd (op_keys op)`: a peer's rename invalidated the new name and the mount kept serving the old. Open: exact-key filters miss writes under a renamed directory.
+- **Check** — One accessor returns every path an op concerns, `[key, src]` for a rename (03 §2.9), with subtree semantics for directories. No "primary key" accessor in invalidation or conflict checks. An arrival's feed line names every change the merge made, a move aside included (03 §2.9).
 - **Seen** — f8c107fa, b41e6875, PR #100, PR #102. recurred ×2.
 
 ### A-3.21 Listing yields a name twice
@@ -313,12 +318,17 @@ This file covers mistakes that are true of any implementation in any language: s
 - **Check** — Page every lookup to completion. Name allocation is exclusive at the owner, never check-then-act across requests.
 - **Seen** — notes (android B-0).
 
+### A-3.26 A local operation changed what the client knows of the main
+- **Pitfall** — An application saved a file by deleting it and creating it again, on a machine with no peer. The delete erased the client's record of what the store held at the name, so the create was recorded as "new file, nothing expected"; the upload found a file where it expected none, took it for a peer's, and published the content as a conflicted copy of the client's own file.
+- **Check** — A local operation never changes R: it records the key's current value as its before-value only when the key has none, and leaves an existing one alone (publication §4.1, S1; change-algebra Proposition 5). R changes only in the `Won` step and in a merge. A delete then a create of one name pushes one command guarded by the old content, and a single client never produces a conflicted copy (conflict-resolution INV-own).
+- **Seen** — 17209c24 (change-algebra §2).
+
 ## 4. Failure classification: absent, unknown, transient, permanent, cancelled
 
 ### A-4.1 "Could not look" read as "absent"
-- **Pitfall** — `Sys.file_exists` false on EINTR would mint a new client uuid over the live one and abandon every unfinished WAL record. A stat behind a reimport guard read every failure as not-found and re-uploaded. Any `put_if_absent` failure read as "cannot arbitrate" claimed the name without a marker. An adoption took a store failure as a free name. An unreadable macOS `config.json` read as no domains removed every domain and its local copies. `read_file_opt`, `stat_opt`, `readdir_list_quiet` and `read_last_sync_key` answered None/`[]` on any error; Android `Ingest.children` answered "no children" and name allocation overwrote a file. Status folded only errors into "0 domains, 0 processes".
-- **Check** — Every read returns present / absent / failed; only an explicit not-found is absent. Grep for `with _ ->` on read paths: any destructive, creating or advancing decision under it is a bug.
-- **Seen** — 274cc0ab, a9a475f8, 82eb4dde, f81bb083, 91c00a2a, 8e308e4a, 4a0602e7, 37c0d67d, PR #70, #83, #87, #97, #101, #102, notes (failure-model §2–3, 01 B.3.4, android B-0), rewrite (the integrity walk skipped an unreadable folder, so repair trashed live folders below it as orphans). recurred ×10+, rewrite.
+- **Pitfall** — `Sys.file_exists` false on EINTR would mint a new client uuid over the live one and abandon every pending record. A stat behind a reimport guard read every failure as not-found and re-uploaded. A failed `put_if_absent` was read as "nobody holds the name", and a store failure as a free name. An unreadable macOS `config.json` read as no domains removed every domain and its local copies. `read_file_opt`, `stat_opt`, `readdir_list_quiet` and `read_last_sync_key` answered None/`[]` on any error; Android `Ingest.children` answered "no children" and name allocation overwrote a file. Status folded only errors into "0 domains, 0 processes".
+- **Check** — Every read returns present / absent / failed; only an explicit not-found is absent. Grep for `with _ ->` on read paths: any destructive, creating or advancing decision under it is a bug. A failed entry read is never "no entry" and a failed create is never `Won` (publication §4.3, §4.8; failure-model §5.2).
+- **Seen** — 274cc0ab, a9a475f8, 82eb4dde, f81bb083, 91c00a2a, 8e308e4a, 4a0602e7, 37c0d67d, PR #70, #83, #87, #97, #101, #102, notes (failure-model §2–3, 01 B.3.4, android B-0), rewrite (the integrity walk skipped an unreadable folder, so repair removed live folders below it). recurred ×10+, rewrite.
 
 ### A-4.2 Answer derived from failures memoised
 - **Pitfall** — Capabilities merged over zero answering members became `no_caps` (no share URL, default chunk size, unverified) and were memoised for the process life. The proxy driver kept a failed capabilities answer forever. With the main held, capabilities and chunk size came from a replica alone.
@@ -332,7 +342,7 @@ This file covers mistakes that are true of any implementation in any language: s
 
 ### A-4.4 A copy's miss taken as authoritative
 - **Pitfall** — `walk(stop_on_miss)` answered Miss when the main was unreachable and the replica missed. The old http-proxy client, with no first-use binding, answered get, range, head and delete as absent for a domain the server did not serve; an empty store looks like mass deletion to sync.
-- **Check** — A miss is authoritative only from a main, or when no earlier member failed. A driver binds once and refuses to operate on an unserved domain; "not served" is a failure.
+- **Check** — A miss is authoritative only from the main, or when no earlier member failed (replication §4.6). A driver binds once and refuses to operate on an unserved domain; "not served" is a failure.
 - **Seen** — spec issue 3, 332aa06c, notes (http-proxy gaps), 1facd6a9, 96d1a72e. rewrite.
 
 ### A-4.5 Failure vocabulary defined per driver, unknown defaults to transient
@@ -361,22 +371,22 @@ This file covers mistakes that are true of any implementation in any language: s
 - **Seen** — 27685a67.
 
 ### A-4.10 One unappliable item blocks an ordered consumer
-- **Pitfall** — A peer's folder rename onto a non-empty directory failed ENOTEMPTY every 2 s for 8 hours (5,500 log lines, about 1,900 entries stuck); one rename froze a machine for two weeks. Applying one rename created the next collision. On the publish side, a rename whose source a peer removed failed identically at the head of the ordered metadata queue.
-- **Check** — Link down waits at the head; "this item cannot succeed here" is parked, counted, reported in status and retried by a sweep while later work proceeds. Unexplained failures in ordered work park; they never loop.
+- **Pitfall** — A peer's folder rename onto a non-empty directory failed ENOTEMPTY every 2 s for 8 hours (5,500 log lines, about 1,900 entries stuck); one rename froze a machine for two weeks. Applying one rename created the next collision. On the outbound side, a rename whose source a peer removed failed identically at the head of an ordered queue.
+- **Check** — An arrival cannot fail for a reason of its own: the merge is total, and its changes are applied in an order that always exists, through a temporary place when needed (publication §4.4, conflict-resolution §4.3). An upload that cannot succeed is parked, counted, reported in status and re-armed while the rest of the pending set is pushed (publication §5.2 L1). An entry the client cannot decode is reported, and passed by an arrival by state once the tree head passes it (publication §4.3). Link down waits; unexplained failures in ordered work park; they never loop.
 - **Seen** — 0872ce2f, 25b767d9, 69544d65, 7e99a17a, 79333d45, 9efe236e, 9b73f41c, fa549e93, PR #92. recurred ×6.
 
 ### A-4.11 Retry re-queued at the tail of an ordered queue
-- **Pitfall** — A transiently failed rmdir went to the tail and was overtaken by the later mkdir, which then conflicted with the folder being removed. A job parked by Stop stayed in the loaded set, so re-adopting its record was ignored.
-- **Check** — Ordered queues retry at the head. Parking or stopping removes the job from every in-memory dedupe set.
+- **Pitfall** — A transiently failed job went to the tail of an ordered queue and was overtaken by a later job on the same name, which then conflicted with it. A job parked by Stop stayed in the loaded set, so re-adopting its record was ignored.
+- **Check** — Ordered queues retry at the head (durable-queue §4.5). Parking or stopping removes the job from every in-memory dedupe set.
 - **Seen** — 5dcca235.
 
 ### A-4.12 Cancellation read as failure
-- **Pitfall** — A deadline cancelling a request made the retry loop climb on behind a caller that had left. A probe cancelled by its deadline told health nothing, so each guarded write re-probed: 10 s per corrupted chunk in `--repair`. Bounding a stop's drain by a timeout cancelled the running job and the metadata queue recorded a permanent failure and went degraded.
+- **Pitfall** — A deadline cancelling a request made the retry loop climb on behind a caller that had left. A probe cancelled by its deadline told health nothing, so each guarded write re-probed: 10 s per corrupted chunk in `--repair`. Bounding a stop's drain by a timeout cancelled the running job and the queue recorded a permanent failure and went degraded.
 - **Check** — Cancellation is its own outcome: retry loops stop, queues leave the record as it was, and a timed-out probe still records "no answer within deadline" on health. Race a drain against a deadline; never cancel it.
 - **Seen** — 91c1a104, 7819f1c4, 9ea6d6c3, PR #102, notes (failure-model §3). recurred ×3.
 
 ### A-4.13 Stop confused with superseded or with failure
-- **Pitfall** — The upload and metadata queues read `Retry.Cancelled` as superseded and completed the record, so a stop raising it would lose work. A catch-all in `Job_copy` caught `Stopping` and fell back to a full `Job_put`, holding the drain to the grace. Old journal reads turned Stopping and Cancelled into `None`.
+- **Pitfall** — The queues read `Retry.Cancelled` as superseded and completed the record, so a stop raising it would lose work. A catch-all in `Job_copy` caught `Stopping` and fell back to a full `Job_put`, holding the drain to the grace. Old entry reads turned Stopping and Cancelled into `None`.
 - **Check** — Shutdown has its own exception, never retried, never counted as failure or cancellation. Every catch-all re-raises it first.
 - **Seen** — PR #105, PR #108, c3c4a983, notes (wal-and-journal §3). recurred ×3.
 
@@ -396,7 +406,7 @@ This file covers mistakes that are true of any implementation in any language: s
 - **Seen** — bc679a9f, 95778fb8. recurred ×2.
 
 ### A-4.17 Legitimate absence raised as an exception
-- **Pitfall** — Trash restore did `Option.get` on a parent id the client never resolved; the CLI died with a backtrace.
+- **Pitfall** — A CLI command did `Option.get` on a parent id the client had never resolved and died with a backtrace.
 - **Check** — "Not yet known locally" is an outcome with guidance ("sync first").
 - **Seen** — 679ba3de.
 
@@ -408,8 +418,8 @@ This file covers mistakes that are true of any implementation in any language: s
 - **Seen** — 2c07f6ab, 217de253, PR #52. recurred ×2.
 
 ### A-5.2 Unreadable record dropped silently
-- **Pitfall** — An unparseable record was discarded: a write the target owed and would never receive. The first fix returned a count to the caller of `list`, but the WAL and a target queue both read records, so whichever came first swallowed it. Any failed read was treated as corrupt and deleted, conflating "completed elsewhere mid-sweep" with "unreadable under descriptor exhaustion". An unparseable record decoded as an empty Intent was deleted by reconcile.
-- **Check** — Three outcomes: gone, read, unreadable (keep). Delete only on positive corruption, and set it aside. The loss signal lives on the shared log and marks the target degraded ("run mirror").
+- **Pitfall** — An unparseable record was discarded: a write the target owed and would never receive. The first fix returned a count to the caller of `list`, but two readers shared the records, so whichever came first swallowed it. Any failed read was treated as corrupt and deleted, conflating "completed elsewhere mid-sweep" with "unreadable under descriptor exhaustion". An unparseable record decoded as an empty one was deleted by recovery.
+- **Check** — Three outcomes: gone, read, unreadable (keep). Delete only on positive corruption, and set it aside. The loss signal lives on the shared log and marks the target degraded ("run mirror"). An unparseable sync record is set aside and leads to an arrival by state before the next push (03 §2.7, §2.8).
 - **Seen** — d425aa2d, PR #66, PR #67, notes (durable-queue). recurred ×3.
 
 ### A-5.3 Work dropped instead of parked
@@ -423,8 +433,8 @@ This file covers mistakes that are true of any implementation in any language: s
 - **Seen** — 9b0f6af2, PR #38.
 
 ### A-5.5 Durable records nobody resumes
-- **Pitfall** — A one-shot import left 83 records against a 60 s settle window that drains about 29; the daemon read its log only at startup. Android built domains with `resume = false`. A daemon-less machine left a timed-out command's records to nobody. In the rewrite, records submitted by other processes waited until the owner was poked. Recovery lived only in the CLI executable, so the daemon never reconciled its own WAL.
-- **Check** — Every durable log has a defined resumer in the library that owns it, rescanning at start, periodically and on poke. A one-shot command drains or leaves work to a resumer that is guaranteed to come.
+- **Pitfall** — A one-shot import left 83 records against a 60 s settle window that drains about 29; the daemon read its log only at startup. Android built domains with `resume = false`. A daemon-less machine left a timed-out command's records to nobody. Recovery lived only in the CLI executable, so the daemon never ran its own recovery.
+- **Check** — Every durable log has a defined resumer in the library that owns it, rescanning at start, periodically and on poke. A one-shot command drains or leaves work to a resumer that is guaranteed to come. Publication recovery runs in the owner at ownership start (publication §4.8).
 - **Seen** — 8c0406ca, 3d37f32f, PR #35, PR #52, notes (android B-0, durable-queue), c5ae6639. recurred ×4, rewrite.
 
 ### A-5.6 No crash-released claim on a shared log
@@ -433,8 +443,8 @@ This file covers mistakes that are true of any implementation in any language: s
 - **Seen** — 8c0406ca, 9b0f6af2, PR #52.
 
 ### A-5.7 Rescan takes a record still being built
-- **Pitfall** — A bulk publisher's batch record must be durable before the first put, but a rescan took it while uploads ran. The fix creates it already held. Old import put manifests before the batch entry and a re-run skipped existing keys without re-emitting ops, so a kill left manifests nobody announced.
-- **Check** — A record is visible to runners only once its submitter releases it. A re-run after a crash re-emits announcements for work already done.
+- **Pitfall** — A record that must be durable before its work starts was taken by a rescan while that work ran; the fix creates it already held. Old import put manifests before the entry that announced them, and a re-run skipped existing keys without announcing them, so a kill left manifests nobody announced.
+- **Check** — A record is visible to runners only once its submitter releases it. A bulk publisher writes nothing but chunks to the store, then sets the local value with its before-value: its work is pending from that step, and a re-run after a kill finds it so (publication §4.10).
 - **Seen** — 7e03f0e2, notes (durable-queue, 05 B.4). rewrite.
 
 ### A-5.8 A process accepts writes with no worker to send them
@@ -454,44 +464,44 @@ This file covers mistakes that are true of any implementation in any language: s
 
 ### A-5.11 Replica jobs replay operations instead of converging
 - **Pitfall** — `Job_put` did nothing when the key was gone, `Job_delete` deleted unconditionally. Correctness needed one global order across processes and machines: a command's Delete(k) could run after the daemon's later Put(k), leaving the copy without a key the main held.
-- **Check** — A copy job converges a key to the mains' current state when it runs, bodyless, forwarding a manifest only after its chunks.
+- **Check** — A copy job converges a key to the main's current state when it runs, bodyless, forwarding a manifest only after its chunks.
 - **Seen** — notes (replication), 332aa06c.
 
 ### A-5.12 Retry counters uncapped and invisible
-- **Pitfall** — An owed metadata record with uncapped retries froze a folder's listing indefinitely on Android.
+- **Pitfall** — An owed record with uncapped retries froze a folder's listing indefinitely on Android.
 - **Check** — Retry counters are capped and surfaced in status.
 - **Seen** — notes (android B-0).
 
-## 6. Journal, cursors and the change feed
+## 6. Log, cursors and the change feed
 
-### A-6.1 Journal read "since key K"
-- **Pitfall** — Entry keys are the writer's millisecond, but visibility order differs (latency, retries, WAL replays under original keys). Replay (at the last-sync mark) and the change feed (at an anchor) cut at a key, so an entry visible after a newer one moved the cursor was never read: with four concurrent uploads per side each peer silently lost the other's second batch while status said "0 to apply".
-- **Check** — Never dedupe by "key > cursor". Track every handled key in a positional applied log back to the retention horizon. A rebuild marks the entries it read as handled. The repro hides the newest journal object, syncs, then unhides it.
+### A-6.1 Log read "since key K"
+- **Pitfall** — Entries were named by the writer's millisecond and read by listing after the last key seen, but visibility order differs from key order (latency, retries, replays under original keys). An entry visible after a newer one had moved the cursor was never read: with four concurrent uploads per side each peer silently lost the other's second batch while status said "0 to apply". The change feed cut at an anchor's key the same way.
+- **Check** — Entries are read by number, never listed, and each number is created once (publication §4.3, 03 §2.4). The change feed answers by position in the applied log, never by "key > anchor" (03 §3.3).
 - **Seen** — aebaeff5, 2102b6bc, PR #87.
 
-### A-6.2 Mark advanced past entries not handled
-- **Pitfall** — The mark moved past entries that failed to read (`get_journal_entry` turned every error into None), and `overridden_since` could publish a stale op over a newer one. A resync bookmark advanced past folders it never fetched, so their files later arrived into directories no id named. Inversely, a spurious failure kept the mark still and every sync became a full rebuild.
-- **Check** — The mark passes an entry only once applied or recorded as stepped aside. Advancement needs a complete walk; walks report what they skipped and why (fetch vs parse).
+### A-6.2 Position advanced past entries not merged
+- **Pitfall** — The position moved past entries that failed to read (`get_journal_entry` turned every error into None), so their changes were never taken. A full walk's bookmark advanced past folders it never fetched, so their files later arrived into directories no id named. Inversely, a spurious failure kept the position still and every sync became a full rebuild.
+- **Check** — The position moves only in a merge and in the `Won` step, over entries read contiguously; a failed read fails the fetch and nothing advances (publication §3.2, §4.3). A state walk that could not read a record fails as a whole (publication §4.7); walks report what they could not read and why (fetch vs parse).
 - **Seen** — beae4871, 8c0ff231, 14d94ce5, f32e529a, notes (wal-and-journal §3). recurred ×3.
 
 ### A-6.3 Notification-only wake misses lost hints
-- **Pitfall** — The poller read the journal only when the cursor changed; a lost bump, or one landing behind a later bump from another process, left a peer's last ops unapplied indefinitely. The first fix raced a 60 s timeout against a wait that always returns sooner (watch 30 s, stores 2 s), so the sweep never ran.
-- **Check** — The cursor is a hint. Sweep on a clock measured from the last full read. Prove every fallback timer can fire.
+- **Pitfall** — The poller fetched only when the cursor changed; a lost bump, or one landing behind a later bump from another process, left a peer's last ops unapplied indefinitely. The first fix raced a 60 s timeout against a wait that always returns sooner (watch 30 s, stores 2 s), so the sweep never ran.
+- **Check** — The cursor is a hint. Fetch every `SWEEP`, measured from the last fetch, whatever the cursor says (publication §4.3). Prove every fallback timer can fire.
 - **Seen** — 9ba6f9d5, 2569ed4f, be0f7fe1, PR #81, PR #87. recurred ×2.
 
 ### A-6.4 Recording a change and announcing it are separate calls
-- **Pitfall** — Only the converging process notified frontends, so import and revert published silently. The fix in the journal seam missed the bulk path `write_journal_entry_body`; the notice failure logged at debug hid it.
-- **Check** — Record-and-announce is one call with no alternative entry; grep every publisher path, bulk included. Delivery failures log at warning. Record locally before announcing.
+- **Pitfall** — Only the converging process notified frontends, so import and revert changed the tree silently. The fix in one seam missed the bulk path; the notice failure logged at debug hid it.
+- **Check** — Changing the local tree and appending its feed line are one path with no alternative entry: a local operation, a bulk publisher and an arrival all go through it (publication §4.1, §4.4, §4.10); grep every path, bulk included. Delivery failures log at warning. The line is durable before frontends are told.
 - **Seen** — d48dc303, 492b878c, 20a26efa. recurred ×2.
 
 ### A-6.5 Change feed rebuilt from the store and filtered per machine
-- **Pitfall** — Every `changes_since` listed the journal and fetched one object per entry on the path fileproviderd takes before each enumeration. It filtered by client uuid, so CLI changes on the same machine never reached the mount.
-- **Check** — "Changes since" answers from local retained entries, noted before publishing and after applying. Filter origin per writer, not per machine.
+- **Pitfall** — Every `changes_since` listed the store's log and fetched one object per entry on the path fileproviderd takes before each enumeration. It filtered by client uuid, so CLI changes on the same machine never reached the mount.
+- **Check** — "Changes since" answers from the applied log: one line per local operation and per arrival, appended once the change is durable (03 §2.9). Filter origin per writer, not per machine.
 - **Seen** — 20a26efa, PR #80.
 
 ### A-6.6 Op described lazily against the current mirror
 - **Pitfall** — A Delete was named `f:<parent id>/<leaf>` from a marker the recursive delete had already removed; the op was dropped silently and the replica kept the directory forever. A file moved into a later-renamed folder spelled a path with nothing at it. The applying process is not the describing one, so an in-memory table fails.
-- **Check** — Everything needed to describe an op later (both ends' folder ids) is captured durably at apply time. Removal lookups have their own contract (`lookup_id_removed`). Compare the applied log with what the frontend received.
+- **Check** — Everything needed to describe an op later (both ends' folder ids) is captured durably when the change is made (03 §2.9). Removal lookups have their own contract (`lookup_id_removed`). Compare the applied log with what the frontend received.
 - **Seen** — 1b73dd2d, 694c3a82, cac8f7ea, PR #81, PR #87. recurred ×3.
 
 ### A-6.7 One unnameable op stales the whole page
@@ -539,19 +549,19 @@ This file covers mistakes that are true of any implementation in any language: s
 - **Check** — Serialisations carrying user names use an escaping format (JSON, length-prefixed).
 - **Seen** — 3c1c513a, 2d819bce, PR #87, PR #88. recurred ×2.
 
-### A-6.16 Journal-bridge predicate owned twice; horizon conditions
-- **Pitfall** — Daemon said an empty journal meant stale, CLI said up to date. Only `tsync sync` checked bridging. A client stopped beyond 30 days skipped unpruned entries older than the horizon. Applied-log prune could drop the newest shard or shards inside the horizon and duplicated lines on retry. In the rewrite B3 fired on every young journal, and after a rebuild applied entries counted as "behind".
-- **Check** — Empty is stale. The owner checks bridging every pass, including a mark older than now − H. "Behind" means "not in the applied log". Prune never removes the newest shard or anything inside the horizon.
+### A-6.16 Behind, pruned or up to date decided twice; retention conditions
+- **Pitfall** — Daemon said an empty log meant stale, CLI said up to date. Only `tsync sync` checked whether the entries a client had missed were still there. A client stopped beyond the retention skipped entries it could still read. Applied-log prune could drop the newest shard or shards inside the retention and duplicated lines on retry. In the rewrite the check fired on every young log.
+- **Check** — One function decides, in every cycle: entry h + 1 absent with the tree head below it is the head; absent with the tree head at or past it is PRUNED, and the client arrives by state (publication §4.3, §4.7). Feed prune never removes the newest shard, a shard younger than `FEED_RETENTION`, or one at or after the shard of the feed watermark (03 §2.9).
 - **Seen** — 9b0e8d0d, notes (wal-and-journal §3, 05 B.4), 131fc618, spec issues 6, 12. recurred ×2, rewrite.
 
 ### A-6.17 Entry granularity and causal order
-- **Pitfall** — Import published one entry at the end (170,901 ops, 27.8 MB), invisible behind 84k deferred jobs; batching by count alone (2000) never fired for a few hundred large files. Mkdirs must precede puts naming the folder. In rsync `--move`, the Delete can reach peers before the Put.
-- **Check** — Long producers publish on a count bound and an age bound (10 s), mkdir lists included. Parents and creations precede referencing entries. A change spread over several entries never exposes a lossy intermediate state.
+- **Pitfall** — Import published one entry at the end (170,901 ops, 27.8 MB), invisible behind 84k deferred jobs; batching by count alone (2000) never fired for a few hundred large files. A creation was published before the folder it names. In rsync `--move`, the delete could reach peers before the put.
+- **Check** — A push is due on an age bound (`BATCH_DELAY`) and an entry is bounded in bytes (`MAX_ENTRY_BYTES`). A larger pending set is split, and each part is a batch: well-formed on its own, a folder present before anything placed in it (publication §4.5, change-algebra Definition 6). A change spread over several entries never exposes a lossy intermediate state (A-6.28).
 - **Seen** — d425aa2d, ca1ee99c, PR #66, plan §6 rsync. recurred ×2, rewrite.
 
 ### A-6.18 Rebuild reported as a reset
 - **Pitfall** — A full resync rebuilds from a listing, picking up direct-to-bucket changes, but invalidated nothing, so the File Provider kept serving deleted items. A rebuild that wiped the applied log expired every anchor, demanding `list_all` at 62 s per page; fileproviderd held 40k of 220k items.
-- **Check** — A rebuild appends the difference it made as ordinary ops. Anything changing state outside the journal durably invalidates earlier anchors before any notify.
+- **Check** — An arrival by state appends the difference it made as ordinary feed lines (03 §2.9). Anything changing local state outside the feed durably invalidates earlier anchors before any notify.
 - **Seen** — ba6ca8d2, 1e85630b, dbbbe079, ceaae60e, PR #88. recurred ×2.
 
 ### A-6.19 Event omitted because another component "probably" emitted it
@@ -570,7 +580,7 @@ This file covers mistakes that are true of any implementation in any language: s
 - **Seen** — b28b776f, cf3684d8, PR #72. recurred ×2.
 
 ### A-6.22 Truncated listing feeding a computed answer
-- **Pitfall** — The diagnostic journal listing was capped at max_keys, but the entries a client is behind on are the newest: "1001 entries+, 0 to apply" while a folder sat unapplied.
+- **Pitfall** — A diagnostic listing of the store's entries was capped at max_keys, but the entries a client is behind on are the newest: "1001 entries+, 0 to apply" while a folder sat unapplied.
 - **Check** — Truncation never feeds a computed answer; bound cost by caching.
 - **Seen** — 9860fc58.
 
@@ -584,10 +594,30 @@ This file covers mistakes that are true of any implementation in any language: s
 - **Check** — A watermark is the field the query compares, owned by one function, advanced only past settled items.
 - **Seen** — PR #57, notes (android B-0). recurred ×2.
 
-### A-6.25 A peer op's local facts read at the peer's path
-- **Pitfall** — A peer names the path it saw; the local half of its op acts at that path translated through this client's moved folders and owed renames. The file id the change feed names was read at the peer's path: a delete under a folder renamed here found no id (the feed dropped it and the replica kept the file), or the id of an unrelated file now at that path (the replica dropped a file that still exists). Naming the file the delete *would* have removed is as wrong: when the arrival decision keeps it, the replica drops a live file.
-- **Check** — The arrival code that translates the path is the only reader of local facts for a peer op, and it reports what it acted on: a put's and a rename's id afterwards, a delete's only when it removed the file. No fallback reads the peer's spelling of the path.
+### A-6.25 A peer's change described by the peer's op, not by what the arrival did
+- **Pitfall** — A peer named the path it saw; the local half of its op acted at that path translated through this client's moved folders. The file id the change feed names was read at the peer's path: a delete under a folder renamed here found no id (the feed dropped it and the replica kept the file), or the id of an unrelated file now at that path (the replica dropped a file that still exists). Naming the file the delete *would* have removed is as wrong: when the merge keeps it, the replica drops a live file.
+- **Check** — Commands name a folder by id and are located through the folder-id index, never by a path a peer spelled (conflict-resolution §3). An arrival's feed line is the changes the merge made to the local tree (publication §4.4, 03 §2.9): a put's and a rename's file id afterwards, a delete's only when the merge removed the file.
 - **Seen** — b0a14d08, rewrite.
+
+### A-6.26 Two clients projecting onto one record; a stalled projector resuming
+- **Pitfall** — Applying an entry is many plain writes. Two clients applying different entries to one record out of order leave it at the older value, and a collection marking from that record deletes the newer content. A projector that stalls (a suspend, a slow request) and resumes after another client took its entry over writes old values over the new projector's.
+- **Check** — Each entry is projected by one client, in number order: its author, or the holder of the highest takeover generation (publication §4.6). A projector writes only within `PROJECT_LEASE` of a check that the tree head and the generation are unchanged, and stops when a check fails. A client that takes over waits `PROJECT_QUARANTINE` before its first write. Both durations are measured on a clock that counts time spent suspended (publication §2 A8). A test resumes a first projector after a takeover and sees no write.
+- **Seen** — design.
+
+### A-6.27 Expiry deletes the head entry or an entry above the tree head
+- **Pitfall** — With the head entry deleted, the next entry number is no longer known from the log itself. An entry above the tree head is in no tree record yet: once deleted, a state read cannot replay it and the collector no longer marks the chunks it names.
+- **Check** — Expiry deletes an entry only when its number is at most the tree head, it is not the head entry and it is older than `LOG_RETENTION` by the store's own times, in ascending number order (publication §4.9, gc §4.2). Tests cover a domain idle for longer than the retention and a domain whose projection is behind.
+- **Seen** — design.
+
+### A-6.28 Removal committed before the pending creation of the same content
+- **Pitfall** — A batch too large for one entry is split. A moved file is a removal at one key and a creation at another, naming the same content; with the removal committed in the earlier entry, nothing on the main names that content between the two entries, a collection may delete it, and peers see neither file.
+- **Check** — When a batch is split, a file removal or replacement is committed no earlier than every pending creation of the same content identity (publication §4.5). A test splits a large move and collects between the entries.
+- **Seen** — design; the peer-visible half is A-6.17.
+
+### A-6.29 A tree record taken for the main's value at the head
+- **Pitfall** — The tree is a projection that trails the log. With the tree head behind the head, a record holds the value an older entry gave it, or already the value of a later one while a projection runs. A reader that takes the records as the main's tree merges an older value as a peer's change, or misses a committed one.
+- **Check** — A state read takes the tree head, reads the records, then replays over them every entry from the tree head + 1 to the head (publication §4.7); a lazy pull does the same for one folder (04 §3.5). Nothing read from the tree enters R any other way (publication §4.6). A state read taken during a projection equals the tree at the head it reports.
+- **Seen** — design.
 
 ## 7. Store contract, replication, GC and content integrity
 
@@ -622,8 +652,8 @@ This file covers mistakes that are true of any implementation in any language: s
 - **Seen** — PR #50, f31ba9ce.
 
 ### A-7.7 GC: a writer dedups onto a chunk the collector wrote off
-- **Pitfall** — An upload HEADs each chunk, skips present ones and publishes later; mark-then-sweep could sweep an adopted chunk. Intra-domain copy, revert, republish, rsync rename, version snapshots and proxied PUTs published manifests without promoting, and the run marker was read once.
-- **Check** — A manifest becomes visible only once every chunk it names is in the surviving space. The reference gate sits in the store driver around every manifest and version write. A test performs the dedup-onto-orphan race.
+- **Pitfall** — An upload HEADs each chunk, skips present ones and commits later; mark-then-sweep could sweep an adopted chunk. Intra-domain copy, revert, republish, rsync rename, version snapshots and proxied PUTs published manifests without promoting, and the run marker was read once.
+- **Check** — A reference becomes visible only once every chunk it names is in the surviving space. The reference gate sits in the store driver around the creation of every log entry and every manifest and version write (gc §5.4). A test performs the dedup-onto-orphan race.
 - **Seen** — PR #40, 96c30ced, notes (02 B.4, backends/local B-0, http-proxy B21), 2cfba26b. recurred ×3.
 
 ### A-7.8 GC: exclusion and partial views
@@ -637,8 +667,8 @@ This file covers mistakes that are true of any implementation in any language: s
 - **Seen** — 78e844c7, 2cfba26b, 73447607, 548fbc38, 22b9a29e, 371f15da. rewrite.
 
 ### A-7.10 Memo outlives the state that justifies it
-- **Pitfall** — The process-lifetime `ensured` memo survived collections, so a manifest job could skip a deleted chunk. Evicting keys while keeping a shard "known" meant they were never relearnt. The spec put G "on the first collectable main", which a remote client cannot identify.
-- **Check** — A chunk-exists memo is invalidated by a G change, or used only behind a gate that re-checks. Memo components reset together. G is the max over every main, unknown if any is unreachable.
+- **Pitfall** — The process-lifetime `ensured` memo survived collections, so a manifest job could skip a deleted chunk. Evicting keys while keeping a shard "known" meant they were never relearnt.
+- **Check** — A chunk-exists memo is invalidated by a G change, or used only behind a gate that re-checks. Memo components reset together. G is read from the main, unknown while it is unreachable (gc §5.6).
 - **Seen** — 8d57ac65, PR #67, spec issues 13, 14. recurred ×2, rewrite.
 
 ### A-7.11 Bulk delete refusals swallowed
@@ -652,13 +682,13 @@ This file covers mistakes that are true of any implementation in any language: s
 - **Seen** — 27685a67, PR #58.
 
 ### A-7.13 Replicas in the write path
-- **Pitfall** — A write waited for mains and replicas; a cloud replica gated the journal publish, the WAL record and the release of cap-exempt staged data. Offline, the disk filled with staged bodies the local main already held.
-- **Check** — Acknowledge when the mains have it; replicas catch up from a durable queue. Release of cap-exempt data never depends on a remote.
+- **Pitfall** — A write waited for the main and the replicas; a cloud replica gated the commit and the release of cap-exempt staged data. Offline, the disk filled with staged bodies the local main already held.
+- **Check** — Acknowledge when the main has it; replicas catch up from a durable queue. Release of cap-exempt data never depends on a remote.
 - **Seen** — 9b0f6af2.
 
 ### A-7.14 Catch-up job filled from a stale replica
-- **Pitfall** — A deferred job read through the full read chain; with every main unreachable it copied another replica's older body and was consumed, leaving the target permanently stale.
-- **Check** — Replication sources are mains only. "Main unreachable" retries; it never falls through to a peer copy.
+- **Pitfall** — A deferred job read through the full read chain; with the main unreachable it copied another replica's older body and was consumed, leaving the target permanently stale.
+- **Check** — The main is the only replication source. "Main unreachable" retries; it never falls through to a peer copy.
 - **Seen** — fcf7b854, PR #38.
 
 ### A-7.15 A non-main member written while the main is gone
@@ -696,6 +726,16 @@ This file covers mistakes that are true of any implementation in any language: s
 - **Check** — Push 0 bytes and an exact chunk multiple through every layer. Every mandated wire request passes the spec's own grammar.
 - **Seen** — spec issues 1, 2, 9. rewrite.
 
+### A-7.22 Log, tree head or tree record read from a replica
+- **Pitfall** — A replica lags. With the main unreachable, a read that fails over to it answers an older entry, tree head or record; the client merges that as a peer's change and reverts committed work, or pushes from a head that is not the head.
+- **Check** — Only chunks fail over to a copy; every other read is the main's or fails UNREACHABLE (replication §4.6; change-algebra §9, Proposition 12; publication S9). With the main down, the position and the before-values do not move. A test serves a lagging replica during an outage.
+- **Seen** — design; A-7.14 is the same mistake in a replication job.
+
+### A-7.23 Marking from the tree alone
+- **Pitfall** — A committed entry is not in the tree until it is projected. A collection that marks only from the manifests present in the tree deletes the chunks of an entry committed and not yet projected; its projection then writes manifests naming chunks that are gone.
+- **Check** — Marking also covers the manifests carried by every log entry above the tree head, the tree head being read under the exclusive publish lock at the open (gc §5.3). Expiry never deletes such an entry (publication §4.9). A test collects between a commit and its projection.
+- **Seen** — design.
+
 ## 8. Caches, the mirror and rebuilds
 
 ### A-8.1 Name lookups fall through to the store
@@ -704,8 +744,8 @@ This file covers mistakes that are true of any implementation in any language: s
 - **Seen** — 038e70a3, e38f7a55, aa903e76, PR #70, PR #73. recurred ×2.
 
 ### A-8.2 Negative cache of local facts, under the wrong mark
-- **Pitfall** — The absence cache remembered misses due to "folder not known yet" or "body mid-write", returning ENOENT until a peer published. An entry applied during the fetch was recorded under the advanced mark and survived its invalidation.
-- **Check** — Negative-cache only "store says absent", keyed to the applied mark read before the fetch.
+- **Pitfall** — The absence cache remembered misses due to "folder not known yet" or "body mid-write", returning ENOENT until a peer published. An entry applied during the fetch was recorded under the advanced position and survived its invalidation.
+- **Check** — Negative-cache only "store says absent", keyed to the position read before the fetch.
 - **Seen** — 0eeb3588, 5abef187.
 
 ### A-8.3 Partial cache body taken as whole
@@ -730,7 +770,7 @@ This file covers mistakes that are true of any implementation in any language: s
 
 ### A-8.7 Rebuild clears before it refills
 - **Pitfall** — Android resync wiped 36,568 manifests and left ids unresolvable for 25 minutes. A full resync unlinked every mirror manifest (minutes, empty tree served), dropped the still-valid chunk cache and emptied the applied entries. Android's no-op `full_resync` left ids unresolvable afterwards (open).
-- **Check** — Rebuild in place and sweep by generation afterwards; content-addressed caches survive; no empty intermediate view. Everything belonging to a projection is cleared together.
+- **Check** — An arrival by state installs only the keys where the main differs and never clears the tree (04 §3.5); content-addressed caches survive; no empty intermediate view. Everything belonging to a projection is cleared together.
 - **Seen** — 661d4974, 1b08744e, c8e21256, 1e85630b, dbbbe079, PR #79. recurred ×3.
 
 ### A-8.8 Read state keyed by file, not by reader
@@ -776,7 +816,7 @@ This file covers mistakes that are true of any implementation in any language: s
 - **Seen** — 27685a67, PR #58, notes (security-model).
 
 ### A-9.7 Unbounded or unauthenticated server input
-- **Pitfall** — The old server read the whole body before routing and auth, had no header/idle/keep-alive timeout or connection cap; claims, deletes and copies bypassed admission. `wait=nan` passed the clamp; an unparseable `max_keys` listed everything. In the rewrite, an abandoned TLS handshake held a fiber until the header timeout.
+- **Pitfall** — The old server read the whole body before routing and auth, had no header/idle/keep-alive timeout or connection cap; conditional creates, deletes and copies bypassed admission. `wait=nan` passed the clamp; an unparseable `max_keys` listed everything. In the rewrite, an abandoned TLS handshake held a fiber until the header timeout.
 - **Check** — Authenticate headers before any body. Bound header size and time, idle, connections and handshakes. Every data op passes admission. Numeric parameters parse strictly; NaN and negatives are refused.
 - **Seen** — notes (security-model, http-proxy B21), 7319e7d6, 46c84804. rewrite.
 
@@ -798,7 +838,7 @@ This file covers mistakes that are true of any implementation in any language: s
 ## 10. State ownership, single owners for rules, and types
 
 ### A-10.1 State keyed per instance instead of per thing
-- **Pitfall** — Per-domain state lived in functor applications made in 5 to 17 places: 5 WAL logs over one directory, each with its own id counter; manifest memos missing each other's reads; download pools admitting twice the budget; cursor debouncers that never flushed each other; a handled set per application so daemon and `tsync sync` re-applied each other's entries; a chunk-cache byte count stale after another view evicted; a second queue consumer racing the first. Taking a functor's result instead of the functor gave every domain one store and compiled.
+- **Pitfall** — Per-domain state lived in functor applications made in 5 to 17 places: 5 record logs over one directory, each with its own id counter; manifest memos missing each other's reads; download pools admitting twice the budget; cursor debouncers that never flushed each other; sync state per application so daemon and `tsync sync` re-applied each other's entries; a chunk-cache byte count stale after another view evicted; a second queue consumer racing the first. Taking a functor's result instead of the functor gave every domain one store and compiled.
 - **Check** — For every table, counter, pool, debouncer or log, decide whether it is per process, domain or store root, and memoise on that key. Ask "one per what?" of each module- or functor-level `Hashtbl.create`/`ref`. A new consumer on a shared hand-off replaces the old.
 - **Seen** — 2dd93e17, 802769c4, 170266d9, 4b60fb43, 80feef14, ab654632, ea959665, 73edcded, 15f02279, 0e5ceaab, 8f2ccafb, 82e0adea, 7718009d, notes (02 B.2, 03 B-I.5, 04 B.1, 07 B.2/B.4). recurred ×12.
 
@@ -813,7 +853,7 @@ This file covers mistakes that are true of any implementation in any language: s
 - **Seen** — 28bb9e3e.
 
 ### A-10.4 Copies of one rule drift apart
-- **Pitfall** — Field specs drifted between backend and frontend; `"1"` meant true for one field and false for another across nine readers; `?totals=true` meant false; a blank answer was `""` or omitted; `default-domain` with no argument cleared the setting. Size printers disagreed (8M vs 8.0 MB, decimal vs 1024). An error map matched `"not found"` against `"not found: ..."`. In the rewrite: formatting drifted between status, narration and gc; "still trashed" was re-derived four times; import re-spelled `Names.is_under`; mirror and share each sorted by read rank; gcs and s3 duplicate claim resolution, range checks and bulk-delete paging. Bucket-function constants mirrored OCaml by comment.
+- **Pitfall** — Field specs drifted between backend and frontend; `"1"` meant true for one field and false for another across nine readers; `?totals=true` meant false; a blank answer was `""` or omitted; `default-domain` with no argument cleared the setting. Size printers disagreed (8M vs 8.0 MB, decimal vs 1024). An error map matched `"not found"` against `"not found: ..."`. In the rewrite: formatting drifted between status, narration and gc; import re-spelled `Names.is_under`; mirror and share each sorted by read rank; gcs and s3 duplicate conditional-create resolution, range checks and bulk-delete paging. Bucket-function constants mirrored OCaml by comment.
 - **Check** — Each rule (parse, format, validate, error spelling, capability merge) has one owner module both sides call. A printer round-trips through the parser. Reading a setting never mutates it. Review new code for re-spelled predicates and parallel sibling-driver code.
 - **Seen** — ce0f5b35, c8dfe860, aeae984d, 0dd4edbb, PR #38, #41, #48, #50, 92950c91, 5b9c9c68, ce9d5e8e, a6b946ee, 92bf8da0, rewrite (the CLI's Ctrl-C cancel addressed the owner without the domain its request named, refused on the macOS shared socket). recurred ×9, rewrite.
 
@@ -824,11 +864,11 @@ This file covers mistakes that are true of any implementation in any language: s
 
 ### A-10.6 "Is this listing entry a child" decided per caller
 - **Pitfall** — Listings include the directory key of an empty namespace, a write under its staging name and the folder index. Four callers decided differently: count and share counted the directory key as a file; `sync --full` counted it broken and never advanced, so every sync resynced the domain; GC's parser aborted on the index; mirror copied the index. The local driver's walk listed staged temps as objects and resync replicated half-written bodies; a polluted replica spread them further.
-- **Check** — One predicate, owned by the naming module, used by every walker (driver walk, GC, mirror, count, share, resync); each new internal object kind registers there. Consumers of other stores' listings filter again.
+- **Check** — One predicate, owned by the naming module, used by every walker (driver walk, GC, mirror, count, share, state walk); each new internal object kind registers there. Consumers of other stores' listings filter again.
 - **Seen** — f18188b5, 8c0ff231, f1766969, c4284b23, 22819312, 1606d0b8, e796b766, PR #70. recurred ×6.
 
 ### A-10.7 Population and walks written twice
-- **Pitfall** — Resync and lazy browse each filed a fetched child (name, id index, mirror write). `rebuild_mirror` had its own walk that diverged. "Is this key a directory in the mirror" was spelled in four places.
+- **Pitfall** — The full walk and lazy browse each filed a fetched child (name, id index, mirror write). `rebuild_mirror` had its own walk that diverged. "Is this key a directory in the mirror" was spelled in four places.
 - **Check** — One function files a child; one walk.
 - **Seen** — ac236bea, PR #70, notes. recurred ×2.
 
@@ -838,7 +878,7 @@ This file covers mistakes that are true of any implementation in any language: s
 - **Seen** — 4f09476f, 61c66680, 487721a1, ffb83708, 90ce1e32, d6f9b114, 93b75364. recurred ×7.
 
 ### A-10.9 Distinct address spaces as one string type
-- **Pitfall** — Logical and backend keys were both strings; two were built with the wrong constructor and worked only because spellings matched. The entry key had three spellings; `last-sync-<domain>` was written prefixed and bare and only basenaming made it work; four catch-alls hid it.
+- **Pitfall** — Logical and backend keys were both strings; two were built with the wrong constructor and worked only because spellings matched. A persistent key had three spellings; a state file's name was written prefixed and bare and only basenaming made it work; four catch-alls hid it.
 - **Check** — Each address space and persistent identifier is an abstract type with one parser and one printer, rejecting near-misses. Convert only at explicit boundaries. Look for `Filename.basename` and catch-alls papering over drift.
 - **Seen** — 9c899df2, aa7ef162, b995a378, 14223710, PR #35. recurred ×4.
 
@@ -848,7 +888,7 @@ This file covers mistakes that are true of any implementation in any language: s
 - **Seen** — 45ea944b.
 
 ### A-10.11 Path-to-location parsed in many places
-- **Pitfall** — Six parsers turned a string into domain + key. `share` resolved against the default domain; `ls` read an absolute path outside the domain as relative inside; trash never resolved; a `domain:path` form could capture local names with a colon; a failed resolution exited 0.
+- **Pitfall** — Six parsers turned a string into domain + key. `share` resolved against the default domain; `ls` read an absolute path outside the domain as relative inside; a `domain:path` form could capture local names with a colon; a failed resolution exited 0.
 - **Check** — One location type from one resolver (also used by completion) that picks the domain from the path. Failed resolution exits non-zero.
 - **Seen** — c804c378, a2d85eb8, bd4be598, 6b11759e, 3702b616, PR #74, PR #84. recurred ×5.
 
@@ -931,7 +971,7 @@ This file covers mistakes that are true of any implementation in any language: s
 
 ### A-11.12 Stop that hangs, double-closes or loses progress
 - **Pitfall** — A restart could hang for the whole backlog (backoffs to 300 s, serial reaping), bounded only by SIGKILL; it looked fast only because the daemon died on ENOENT unlinking a socket two owners removed. Children were signalled only when reaped. A copy cut short fell back to a full upload. In-memory cursor bumps were flushed after both queues settled, so one stuck upload lost every finished upload's bump. The File Provider router never requested shutdown and drained sequentially.
-- **Check** — One process-wide stop signal and a grace (10 s); backoffs end on it, queues take no new work, unfinished jobs stay on disk in their cheapest resumable form. Budget about 80% of the grace so the final publication flush runs. Stop reaches descendants at once; reaping is concurrent. One owner closes each resource. Hosts drain domains concurrently.
+- **Check** — One process-wide stop signal and a grace (10 s); backoffs end on it, queues take no new work, unfinished jobs stay on disk in their cheapest resumable form. Budget about 80% of the grace so the final cursor flush runs. Stop reaches descendants at once; reaping is concurrent. One owner closes each resource. Hosts drain domains concurrently.
 - **Seen** — 9ea6d6c3, c3c4a983, PR #105, PR #108, notes (07 B.4, fuse B-III), fcd5e7dc. recurred ×4.
 
 ### A-11.13 Cancellation too coarse to stop
@@ -972,7 +1012,7 @@ This file covers mistakes that are true of any implementation in any language: s
 ## 12. Truthful reporting, accounting and rate control
 
 ### A-12.1 Reporting an effect that did not happen
-- **Pitfall** — A notify to a stopped extension went nowhere and `tsync evict` printed "Evicted". `expire` exited 0 after `Error:`; `cache --evict /nonsense` exited 0; rsync of a single file enumerated zero children and succeeded; `sync --full` and `trash --purge` skipped the drain. Copy onto an existing destination kept the old one and answered success. `tsync stop` printed "Stopped" without signalling. Android evict/restore toasted success as no-ops. In the rewrite a dry-run repair printed "509 anchored" and a cancelled verification reported done.
+- **Pitfall** — A notify to a stopped extension went nowhere and `tsync evict` printed "Evicted". `expire` exited 0 after `Error:`; `cache --evict /nonsense` exited 0; rsync of a single file enumerated zero children and succeeded; `sync --full` skipped the drain. Copy onto an existing destination kept the old one and answered success. `tsync stop` printed "Stopped" without signalling. Android evict/restore toasted success as no-ops. In the rewrite a dry-run repair printed "509 anchored" and a cancelled verification reported done.
 - **Check** — Replies state confirmed effects only; IPC sends report delivery, and a caller with a user waiting fails on non-delivery. Zero work on a non-empty request is an error. Every failure sets non-zero exit; exits go through the drain. Dry runs speak in the conditional; cancelled is not done.
 - **Seen** — 34756cfd, 044f9e9b, 652baed4, bd4be598, PR #60, PR #84, notes (backends/local, android, file-provider, 07 B.4), 4bd1d2be, 607ec6f2, rewrite (`rsync --move` said a file with an unpublished edit was not copied, copied its stale store version and deleted the source). recurred ×7, rewrite.
 
@@ -1022,7 +1062,7 @@ This file covers mistakes that are true of any implementation in any language: s
 - **Seen** — PR #108, notes (uplink-governor), 2c6882c0, a9867521, e2d722cb.
 
 ### A-12.11 Guards no test watches
-- **Pitfall** — Mutation checks found guards whose removal changed no test: replay telling published from unpublished entries, dropping a rewritten chunk from the corruption set, the GC lock always granted, readahead never firing, a resync clearing nothing, s3 transient retry, double stop of an IPC subscription and unflushed replies, Executed reached on the way to Completed, inode-tree batch leftovers. statfs was unexercised until late. rsync followed symlinks and dropped empty directories until a live suite caught it.
+- **Pitfall** — Mutation checks found guards whose removal changed no test: dropping a rewritten chunk from the corruption set, the GC lock always granted, readahead never firing, a resync clearing nothing, s3 transient retry, double stop of an IPC subscription and unflushed replies, inode-tree batch leftovers. statfs was unexercised until late. rsync followed symlinks and dropped empty directories until a live suite caught it.
 - **Check** — Each guard has a test that fails when it is removed. Tree-copy tests cover symlinks, empty dirs, single files and re-runs. A suite asserts that it ran something.
 - **Seen** — 73edcded, 5eff4a06, 110695c4, ab654632, ab53edd3, dc1472ef, 674b0ec7, 62b52a6e, 170266d9, e16a9d76, ebde3345, a6ba4ace, PR #82.
 
@@ -1033,14 +1073,14 @@ This file covers mistakes that are true of any implementation in any language: s
 
 ## Review checklist
 
-1. **Durability** — Does every record retire only after its remote commit and cursor move? Is the intent durable before any local effect? Is the new state present before the old is removed, at every crash point? Is every state file temp + fsync + rename, with the directory fsynced? Can any path publish zeros or empty for bytes it failed to read? Can eviction, resync or a temp sweep reach sole-copy data or user files?
+1. **Durability** — Is every before-value dropped, and every staged edit promoted, only after its entry exists? Is the before-value durable before any local effect? Does crash recovery complete a recorded result instead of computing it again? Is the new state present before the old is removed, at every crash point? Is every state file temp + fsync + rename, with the directory fsynced? Can any path publish zeros or empty for bytes it failed to read? Can eviction, an arrival by state or a temp sweep reach sole-copy data or user files?
 2. **Concurrency** — Which check-then-act sequences assume no yield between them? Is any lock held across a store round trip, and is a reference resolved outside the lock that mutates it? Is every buffer owned until its last asynchronous reader finishes? Does any fan-out take a slot of a pool it already holds? Does every state change that can satisfy a wait signal it? Which process owns each piece of mutable local state?
-3. **Identity and conflicts** — Is every contested name claimed by conditional create, losing as an ordinary outcome? Do readers check markers against anchors through one predicate? Is every conflict name free across mirror and staging? Does every (peer op, local unpublished op) pair have a convergent row, never "skip"? Do pending ops follow their folder when it moves?
+3. **Identity and conflicts** — Is the creation of an entry the only contested write, a conditional create where losing is an ordinary outcome? Can a local operation change what the client knows of the main? Do readers check markers against anchors through one predicate? Is every conflict name free across the merged tree and staging? Does every pair of clashing operations have a convergent row, never "skip"? Is pending work keyed by folder id?
 4. **Failure classes** — Can "could not look" ever reach an absent branch that creates, deletes or advances? Is any answer built from failures memoised? Who classifies, and is unknown permanent where retries never end? Does a permanent item park instead of blocking an ordered queue? Are cancellation and stop distinct from failure everywhere?
 5. **Durable queues** — Is resume idempotent on record id? Is an unreadable record kept and the target marked degraded? Is work parked, never dropped? Does every log have a resumer, and is a record invisible until its submitter releases it?
-6. **Journal and feed** — Is anything read "since key K"? Does the mark pass only handled entries? Does every notification-driven waiter also sweep on a clock that can fire? Is everything needed to describe an op captured at apply time? Are cursors bounded positions in a stable order, with explicit end?
-7. **Stores, replication, GC** — Is every chunk hashed against its key before use? Is the corruption marker consulted before any positive memo? Is the GC reference gate in the driver around every manifest write? Are mains the only replication source, and is a non-main write refused while the main is down? Did a new interface member or batch path reach every wrapper and override?
-8. **Caches** — Do lookups ever leave the mirror? Is a negative entry a store fact under the pre-fetch mark? Is a partial body ever taken as whole? Are cached bodies validated by an opaque version from the same store? Does a rebuild ever expose an empty view?
+6. **Log and feed** — Is the log ever listed, or anything read "since key K"? Does the position pass only merged entries? Is each entry projected by one client, in order, and does a state read replay the entries above the tree head? Can expiry delete the head entry or an entry above the tree head? Does every notification-driven waiter also sweep on a clock that can fire? Is everything needed to describe an op captured when the change is made? Are cursors bounded positions in a stable order, with explicit end?
+7. **Stores, replication, GC** — Is every chunk hashed against its key before use? Is the corruption marker consulted before any positive memo? Is the GC reference gate in the driver around every entry creation and manifest write, and does marking cover the entries above the tree head? Is the main the only replication source and the only source of anything but chunks, and is a non-main write refused while the main is down? Did a new interface member or batch path reach every wrapper and override?
+8. **Caches** — Do lookups ever leave the mirror? Is a negative entry a store fact under the pre-fetch position? Is a partial body ever taken as whole? Are cached bodies validated by an opaque version from the same store? Does a rebuild ever expose an empty view?
 9. **Security** — Is every key of a multi-key request authorised? Does the signature cover the query? Are names private types parsed by segment, refusing `..` and reserved areas? Do shares carry and check their domain? Is every server input bounded before the body and every handshake timed?
 10. **Ownership and types** — For each table, counter, pool or debouncer: one per what? Is each rule (child predicate, path resolver, parser, formatter, validator) owned once? Is kind carried by type, never by spelling? Does every config writer validate with the strict parser?
 11. **Deadlines and lifecycle** — Does every request have a first-byte deadline and a silence-based stall bound on the monotonic clock? Do outer deadlines derive from inner constants? Does failover skip a down member before its ladder ends? Does every spawned fiber have an observed failure policy and every queue a stall watchdog? Does stop end backoffs, leave work owed and still flush publication state?

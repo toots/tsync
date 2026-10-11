@@ -12,7 +12,7 @@ read against fibers on a domain pool, where nothing is atomic between two statem
 
 | File | Covers | Entries |
 |---|---|---|
-| [A-abstraction.md](A-abstraction.md) | Logical and structural issues true of any implementation: durability, concurrency, namespace and conflicts, failure classification, queues, journal, store contract, caches, security, ownership, liveness, reporting. | 201 |
+| [A-abstraction.md](A-abstraction.md) | Logical and structural issues true of any implementation: durability, concurrency, namespace and conflicts, failure classification, queues, log, store contract, caches, security, ownership, liveness, reporting. | 209 |
 | [B-implementation.md](B-implementation.md) | OCaml- and implementation-specific issues: runtime and C stubs, POSIX and platform corner cases (FUSE, macOS, Android), store API quirks (S3, GCS), build and test-harness traps. | 121 |
 | [C-resources.md](C-resources.md) | CPU, memory, disk, network and descriptor consumption, measured against the Raspberry Pi Zero 2 W as reference host. | 68 |
 
@@ -21,9 +21,12 @@ read against fibers on a domain pool, where nothing is atomic between two statem
 Each entry has an ID (`A-3.4`: category, theme, entry), then:
 
 - **Pitfall**: the mechanism, with the numbers the history gave.
-- **Check**: what a reviewer verifies in the new code.
+- **Check**: what a reviewer verifies in the new code, with the spec rule that prevents the pitfall
+  where one does (`publication §4.1`, `04 §4.7`: a file of the spec and a section).
 - **Seen**: commits and PRs. `recurred ×N` marks a mistake fixed several times; `rewrite` marks
   one that already happened on the rewrite branch. Both are the strongest signal of where to look.
+  `design` marks a pitfall known from the design of the publication protocol and not met in the
+  history.
 
 Each file ends with a review checklist, one line per theme.
 

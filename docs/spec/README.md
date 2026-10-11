@@ -35,14 +35,15 @@ machines mount the same storage and see each other's changes. Some things a fold
 The constraints that shape everything:
 
 1. **The storage is dumb.** A store offers `put`, `get`, `get_range`, `head`, `delete`, `copy`,
-   `list_prefix` and exactly one conditional write, `put_if_absent`. There is no server logic, no
-   transaction, no rename and no notification (except where a driver can emulate a wait).
+   `list_prefix` and one conditional write every store provides, `put_if_absent`. There is no
+   server logic, no transaction, no rename and no notification (except where a driver can emulate a
+   wait).
 2. **Machines never talk to each other.** The store is the only shared medium. A change is
    announced by writing to the store and discovered by reading it.
 3. **Offline is normal.** Every local operation succeeds without the network and is published
    later, across crashes and restarts.
-4. **The user's data is never lost.** When two machines disagree, both versions survive: a
-   conflicted copy, or version history for the loser of a last-resort overwrite.
+4. **The user's data is never lost.** When two machines disagree, both versions survive: the one
+   committed first at its name, the other as a conflicted copy beside it.
 5. **Stored data outlives implementations.** Data written to a store, and the state a machine keeps
    locally, MUST be usable as-is by any conforming implementation: no migration, no conversion
    step. Formats are defined generally enough that data already written is valid under them.
@@ -56,12 +57,14 @@ The constraints that shape everything:
 | **Content addressing.** A file is cut into fixed-size chunks named by a hash of their bytes. | Dedup within a domain; an unchanged chunk is never re-sent; any reader can check a chunk against its name. | [01](01-core.md) |
 | **Folders are named by stable ids, not paths.** | Renaming a folder rewrites one object; item references survive renames. | [data-model/backend](data-model/backend.md) |
 | **The local mirror is the whole answer for names.** | `stat`, `readdir` and `lookup` never touch the network; a name the mirror lacks does not exist. | [04](04-checkout-cache.md) |
-| **Record intent, act locally, publish later.** | A WAL record precedes every mutation; queues do the store half; recovery finishes whatever a crash interrupted. | [wal-and-journal](algorithms/wal-and-journal.md) |
-| **An append-only journal plus a cursor hint.** | Each published change is an immutable journal entry; one cursor object tells peers to look. Peers deduplicate on "every entry handled", never on "entries after the cursor". | [wal-and-journal](algorithms/wal-and-journal.md) |
-| **Best-effort conflicts.** Resolve immediately; lose nothing; conflicted copies when in doubt; winner-takes-all only as a last resort. | Two pure decision tables: a peer's change arriving, and this client's change publishing to a store that moved on. | [conflict-resolution](algorithms/conflict-resolution.md) |
+| **Record what the main held, act locally, publish later.** | Before a key changes, the client records the main's value at it. The pending change and its guard are derived from that record and the local tree, never from a list of operations. | [publication](algorithms/publication.md) |
+| **A numbered log with an atomic append.** | A commit creates the next entry if it is absent; a client that finds the number taken merges and pushes from the new head. One cursor object tells peers to look. | [publication](algorithms/publication.md) |
+| **Upload first, commit after.** | Content is named by its hash and uploaded at any time; the commit is one small write that carries the manifest. | [publication](algorithms/publication.md) |
+| **The main wins, and nothing is lost.** | A merge takes three trees and gives one; what the client loses is kept under a conflicted-copy name and published. | [change-algebra](algorithms/change-algebra.md), [conflict-resolution](algorithms/conflict-resolution.md) |
+| **The tree is a projection of the log.** | Manifests, folder markers and anchors are written after the entry that decides them, by one client per entry; readers that do not follow the log read them. | [data-model/backend](data-model/backend.md) |
 | **One local owner per domain.** | On a machine, one process at a time owns a domain's local state; every other process acts through it. | [07](07-daemon-cli.md) |
 | **Durability before acknowledgement.** | Nothing is acknowledged, or relied on for recovery, before it is durable; a referent is durable before its referrer. | [durable-queue](algorithms/durable-queue.md) |
-| **Unpublished data lives in a store nothing else can reach.** | The cache bound, eviction and a rebuild cannot delete staged bytes. | [04](04-checkout-cache.md) |
+| **Unpublished data lives in a store nothing else can reach.** | The cache bound, eviction and an arrival cannot delete staged bytes. | [04](04-checkout-cache.md) |
 | **One failure model.** | Every layer classifies failures the same way; "could not look" is never reported as "absent". Decisions rest on signals the application owns (locks, records, protocol replies), never on a third party's error code, which is platform-dependent. | [failure-model](algorithms/failure-model.md) |
 | **A composite of stores is itself a store.** | Callers never know whether they face one bucket or five; roles are applied inside the composite. | [replication](algorithms/replication.md) |
 | **Garbage collection is safe against every writer.** | Any operation that publishes a chunk reference goes through one interlock with the collector. | [gc](algorithms/gc.md) |
@@ -75,27 +78,32 @@ The constraints that shape everything:
 |---|---|
 | **domain** | One mounted tree: a name, a set of backends with roles, a set of frontends, per-domain policies. |
 | **store / backend** | An object store holding a domain's objects. A domain's **composite** store combines its members. |
-| **role** | What a member store is for: `main` (source of truth, takes every write), `replica` (full copy filled behind the write, may serve reads), `backfill` (copy filled lazily), `readOnly` archive. |
-| **core data / ephemeral data** | Core data (chunks, manifests, folder markers, anchors, trash entries, versions, journal entries, the cursor) is the domain's content and history. Ephemeral data (collection state, job objects, corruption markers, shares, the folder index) serves operations and can be recreated. |
+| **role** | What a member store is for: `main` (the one source of truth, takes every write), `replica` (full copy filled behind the write, may serve file content), `backfill` (copy filled lazily), `readOnly` archive. |
+| **core data / ephemeral data** | Core data (chunks, log entries, manifests, folder markers, anchors, versions, the tree head, the cursor) is the domain's content and history. Ephemeral data (collection state, job objects, corruption markers, shares, the folder index) serves operations and can be recreated. |
 | **logical key** | A domain-relative path, as the user sees it. |
 | **stored key** | Where the store files an object: chunks by content hash, manifests by folder id and a hash of the leaf name. |
 | **chunk** | A fixed-size slice of a file body, keyed by two XXH3-64 digests of its bytes. |
 | **manifest** | The object describing one file version: size, chunk size, chunk keys, digests. |
 | **content identity** | The whole-file digest `h1` of a manifest; equal content has equal identity. Frontends see it as `contentId`. |
-| **folder id** | A stable id minted without coordination when a folder is created; its children are filed under it. |
-| **folder marker / anchor** | The objects that place a folder id under its parent, and settle which of several markers is real. |
+| **folder id** | A stable id minted without coordination when a folder is created, final from the mint; its children are filed under it. |
+| **folder marker / anchor** | The tree's records of where a folder is: the marker in its parent's namespace, the anchor in its own. |
 | **owner** | The one process on a machine that owns a domain's local state, converges it and serves its request interface. |
 | **ownership lock** | The per-domain lock an owner holds for its lifetime. |
 | **supervisor** | An optional per-machine process that starts owners and holds machine-wide resources (the uplink governor). It owns no domain state. |
 | **store server** | The process that serves a machine's stores to other tsync machines over HTTP; it owns no domain state. |
-| **mirror** | The owner's local projection of the domain's namespace, filed by real path. |
+| **mirror** | The owner's local copy of the domain's namespace, filed by real path. With the staged edits over it, the **local tree**. |
 | **chunk cache** | Local chunk bodies, filled on demand, bounded, with pins. |
-| **staged** | Unpublished local writes. The only copy of the user's data until uploaded. |
-| **WAL** | The write-ahead log of owed work: one record per mutation, with states intent → prepared → executed. |
-| **journal entry** | An immutable store object listing the ops one client published. |
-| **cursor** | One store object naming a recent journal entry: a hint that peers should look. |
-| **applied log** | The owner's log of every journal entry handled; also the change feed frontends read. |
-| **converge** | Recover owed work, apply peers' journal entries, run maintenance. Done by the domain's owner. |
+| **staged** | Unpublished local writes. The only copy of the user's data until committed. |
+| **key / value** | A file key is (folder id, name) and its value a manifest; a folder key is a folder id and its value (parent id, name). |
+| **before-value** | The main's value at a key this client changed and has not committed. |
+| **pending set** | The commands this client owes the main: one per before-value, from it to the local value. |
+| **log entry** | An immutable, numbered store object holding one batch of commands a client committed. The highest number is the **head**. |
+| **position** | The number of the last entry a client merged. |
+| **arrival** | A fetch of the entries after the position, then a merge of them with the pending set. |
+| **projection / tree head** | Applying an entry to the per-object tree; the number of the last entry applied. |
+| **cursor** | One store object holding a head number: a hint that peers should look. |
+| **applied log** | The owner's log of every change made to its local tree; the change feed frontends read. |
+| **converge** | Recover, run the cycle (arrive, push, project), run maintenance. Done by the domain's owner. |
 | **frontend** | One way of presenting a domain on a host: `fuse`, `file_provider`, `http-proxy`, `android`. |
 | **item reference** | How non-FUSE callers name items: `root`, `d:<folderId>`, `i:<fileId>` (a local id kept across renames), or `f:<parentFolderId>/<leaf>`. |
 | **uplink governor** | Admits uploads on a network link at a rate chosen from measured queueing delay. |
@@ -117,10 +125,10 @@ Dependencies point downwards only.
  │ Whole-domain operations: import · export · rsync · mirror · resync · expire · │  05
  │                          gc · integrity · share                               │
  ├──────────────────────────────┬────────────────────────────────────────────────┤
- │ Sync: WAL · publishing ·     │ Checkout: mirror · chunk cache · staged ·      │  03, 04
- │ journal polling · conflicts  │ file operations · folder-id index              │
+ │ Sync: before-values · cycle  │ Checkout: mirror · chunk cache · staged ·      │  03, 04
+ │ (arrive, push) · projection  │ file operations · folder-id index              │
  ├──────────────────────────────┴────────────────────────────────────────────────┤
- │ Remote model: manifests · chunks · folder tree · versions · trash ·           │  02
+ │ Remote model: manifests · chunks · the log · folder tree · versions ·         │  02
  │               collection state · corruption markers                           │
  ├───────────────────────────────────────────────────────────────────────────────┤
  │ Domain config and the Domain Context                                          │  05
@@ -142,13 +150,13 @@ nothing depends on them except the CLI and the request handler.
 |---|---|---|
 | 01 | [Foundation](01-core.md) | Name, key and folder-id grammars; hashing, chunking and chunk keys; time rules; resources and immutable data; runtime requirements; retry ladder; health breaker; IPC framing; ZIP64 streaming; glob patterns. |
 | 02 | [Remote data model](02-remote-model.md) | Byte-level backend formats and key spellings (core and ephemeral); the remote interface. |
-| 03 | [Journal & sync](03-journal-sync.md) | Client identity and leases; journal entry, cursor, applied log and last-sync mark formats; sync interfaces. |
+| 03 | [Log & sync](03-journal-sync.md) | Client identity and leases; command, log entry, cursor, tree head, sync state and applied log formats; sync interfaces. |
 | 04 | [Checkout & cache](04-checkout-cache.md) | Local on-disk formats; the file-operation interface; local behaviour and recovery. |
 | 05 | [Config & whole-domain operations](05-ops-config.md) | Config schema and validation; the Domain Context; import, export, rsync, mirror, resync, expire, gc, integrity, share. |
 | 06 | [Backends](06-backends.md) | The store contract; the composite interface; the admission seam; uplink configuration. |
 | 07 | [Process model & CLI](07-daemon-cli.md) | Roles and ownership; lifecycle; the IPC contract; every CLI command; maintenance. |
 | 08 | [Frontends](08-frontends.md) | The frontend contract: descriptor, item references and rows, the request handler, change feed, events. |
-| 09 | [Conformance](09-tests.md) | How conformance is checked: tiers, golden files, harness seams, fault and crash injection, property-based conflict testing, required coverage. |
+| 09 | [Conformance](09-tests.md) | How conformance is checked: tiers, golden files, harness seams, fault and crash injection, property-based merge testing, required coverage. |
 | 10 | [Delivery](10-delivery.md) | Where each tier runs, the gate, builds, releases, secrets. |
 | 11 | [Store infrastructure](11-infrastructure.md) | What is deployed around a bucket: client identity, the two functions, their triggers and permissions, lifecycle, outputs, operator state and tooling. Per provider: [aws](infrastructure/aws.md), [gcs](infrastructure/gcs.md). |
 
@@ -176,10 +184,11 @@ Clients of the owner that are not frontends:
 
 | Spec | Subject |
 |---|---|
-| [data-model/backend](data-model/backend.md) | What a domain stores: entities, relations, invariants, ownership, and folder-identity arbitration. |
+| [data-model/backend](data-model/backend.md) | What a domain stores: entities, relations, invariants, ownership, and the projection of the log onto the tree. |
 | [data-model/local-cache](data-model/local-cache.md) | What an owner keeps locally: what is authoritative and what is rebuildable. |
-| [algorithms/wal-and-journal](algorithms/wal-and-journal.md) | The replication protocol: WAL, publishing, discovering and applying peers' changes, recovery, retention, guarantees. |
-| [algorithms/conflict-resolution](algorithms/conflict-resolution.md) | The best-effort principle and both decision tables. |
+| [algorithms/change-algebra](algorithms/change-algebra.md) | The theory: keys, values, commands, batches, the merge, and the proof of every claim the protocol relies on. |
+| [algorithms/publication](algorithms/publication.md) | The protocol: before-values, upload, the numbered log, fetch and push, projection, arrival by state, recovery, retention. |
+| [algorithms/conflict-resolution](algorithms/conflict-resolution.md) | The principle, how a merge is enacted locally, the conflicted-copy name, and the outcome of every clash. |
 | [algorithms/durable-queue](algorithms/durable-queue.md) | Durable queues, persistence rules, and crash immunity across the application. |
 | [algorithms/failure-model](algorithms/failure-model.md) | Failure kinds, propagation, response policy, error codes and deadlines. |
 | [algorithms/replication](algorithms/replication.md) | Several stores with roles presented as one: write and read paths, deferred copies, write guard, repair. |
@@ -210,7 +219,7 @@ Every host runs the same core; they differ in which roles their processes hold.
 |---|---|
 | Linux | A supervisor holding the uplink governor; one owner process per domain, which hosts the domain's FUSE mount (or runs headless for a domain with no presenting frontend); at most one store server. |
 | macOS | One service process owns every domain, hosts the File Provider side and holds the uplink governor; a sandboxed extension and app are clients of it. |
-| Android | The app process owns its domain, with a lazy tree (folders read from the store when opened) and no journal polling; the UI and the DocumentsProvider call it directly. |
+| Android | The app process owns its domain, with a lazy tree (folders read from the store when opened) and no background cycle; the UI and the DocumentsProvider call it directly. |
 | One-shot command | Asks the running owner, or takes ownership for its own duration when none runs. |
 
 The owner of a domain does everything that changes its local state: it converges the domain,
@@ -224,28 +233,30 @@ mirror (no network) → the file's manifest → the chunk pieces covering the ra
 only those bytes from the composite store → the reader gets bytes of the one version it opened.
 ([read-path-and-cache](algorithms/read-path-and-cache.md))
 
-**Write and close a file.** Writes land in a staged body with a staged manifest → the WAL record is
-made durable → the upload queue uploads the chunks the store does not have, under link admission →
-the manifest is published under its folder id → the journal entry is published and noted → the
-cursor is updated → the WAL record completes. Copies receive the manifest only after its chunks.
-([04](04-checkout-cache.md), [wal-and-journal](algorithms/wal-and-journal.md),
+**Write and close a file.** The key's before-value is recorded if it has none → writes land in a
+staged body with a staged manifest → the upload queue uploads the chunks the main does not have,
+under link admission, and keeps the manifest → the cycle creates the next log entry, carrying the
+manifest, if no other client took the number → the before-value is dropped and the staged edit
+promoted → the entry is projected onto the tree and the cursor updated. Copies receive a manifest
+or an entry only after its chunks.
+([04](04-checkout-cache.md), [publication](algorithms/publication.md),
 [replication](algorithms/replication.md))
 
-**Create a folder offline.** WAL intent → the folder is created locally under a freshly minted
-folder id → when online, its placement is claimed on the store with `put_if_absent` and confirmed →
-the journal entry is published. ([data-model/backend](data-model/backend.md))
+**Create a folder offline.** The folder is created locally under a freshly minted folder id, with
+∅ as its before-value → when online, the cycle commits it in an entry; nothing else arbitrates its
+name. ([publication](algorithms/publication.md))
 
-**A peer's change arrives.** The owner waits on the cursor, lists the journal, skips every entry
-already handled, and applies each new entry in key order: store facts are read first, then the
-Arrival table decides under the local lock, moving an unpublished local copy aside if they clash.
-([wal-and-journal](algorithms/wal-and-journal.md),
+**A peer's change arrives.** The owner waits on the cursor, reads the entries after its position,
+and merges them with its pending changes under the local lock: the main's value wins at each key,
+and a local content that loses is moved to a conflicted-copy name, which the next push publishes.
+([publication](algorithms/publication.md),
 [conflict-resolution](algorithms/conflict-resolution.md))
 
-**Reclaim space.** Retention drops references (old versions, trash, old journal entries, expired
-shares) → a collection moves the chunk space aside, lets every writer promote the chunks it
-references back through the publish gate, deletes what is left from the main and then from each
-copy, and restores anything a copy still needs. Every phase is resumable.
-([gc](algorithms/gc.md))
+**Reclaim space.** Retention drops references (old versions, old log entries, expired shares) → a
+collection moves the chunk space aside, promotes back every chunk the tree and the unprojected
+entries name, lets every commit and projection promote what it names through the gate, deletes
+what is left from the main and then from each copy, and restores anything a copy still needs.
+Every phase is resumable. ([gc](algorithms/gc.md))
 
 **A machine mounts through another.** Its store is an `http-proxy` driver. Each request is signed
 with the domain's secret and confined to that domain. The store server answers from its own
@@ -259,9 +270,9 @@ Anything written to a store, to local disk or onto a wire is a compatibility con
 | Format | Where |
 |---|---|
 | Key, folder-id and item-reference grammars; chunk keys and shard layout; name escaping; temporary names | [01 §2–3](01-core.md) |
-| Backend key layout; manifest; folder index; folder marker, anchor, trash entry; versions; collection run record and generation; corruption markers; job objects; share manifests | [02 §2](02-remote-model.md) |
-| Client identity and leases; journal entries; cursor; applied log; last-sync mark | [03 §2](03-journal-sync.md) |
-| Local cache tree; staged manifests and bodies; WAL records; pins; folder-id index; pending claims | [04 §2](04-checkout-cache.md) |
+| Backend key layout; manifest; folder index; folder marker, anchor; versions; collection run record and generation; corruption markers; job objects; share manifests | [02 §2](02-remote-model.md) |
+| Client identity and leases; commands and log entries; cursor; tree head and takeover; position, before-values, in-flight and arrival records; applied log | [03 §2](03-journal-sync.md) |
+| Local cache tree; staged manifests and bodies; upload records and local intents; pins; folder-id index | [04 §2](04-checkout-cache.md) |
 | Durable-queue record ids and locks | [durable-queue](algorithms/durable-queue.md) |
 | Deferred-job logs | [replication](algorithms/replication.md) |
 | `config.json`; export records | [05](05-ops-config.md) |
@@ -277,9 +288,10 @@ A workable order, each step checked against [09](09-tests.md) before the next:
 1. Foundation: grammars, hashing and chunk keys (check the known-answer vectors in 01), time,
    retry, health.
 2. The store contract and the local driver; then the composite with roles and deferred copies.
-3. The remote model: manifests, upload and download, folder ids and arbitration, tree walks.
-4. Durable queues; checkout: mirror, cache, staged tree, WAL, file operations.
-5. Journal and sync with both conflict tables, driven by the multi-peer scenario harness.
+3. The remote model: manifests, upload and download, the log store, projection, tree walks.
+4. Durable queues; checkout: mirror, cache, staged tree, before-values, file operations.
+5. The merge, checked exhaustively on small trees against the theory; then the cycle, driven by the
+   multi-peer scenario harness.
 6. Config and the Domain Context; the whole-domain operations; garbage collection.
 7. The process model: owners, supervisor, request handler, IPC, lifecycle.
 8. Frontends and hosts; remote drivers; the uplink governor; the store server.

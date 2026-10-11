@@ -84,7 +84,7 @@ A store claims `verified` only after it has evidence that the verify function is
 - **Addresses.** Both IPv4 and IPv6 addresses of the endpoint are tried.
 - **TLS** as [security §9](../algorithms/security-model.md#9-tls): verified HTTPS to every non-loopback endpoint.
 - **Failure kinds** as [failure-model §4.2](../algorithms/failure-model.md#42-http-object-stores), by status and service error code, never by whether an error body parses. A LOAD failure carries the answer's `Retry-After`, which the ladder honours ([01 §7](../01-core.md#7-retry-ladder)).
-- **Verb pattern.** Every verb is one run of the retry ladder with the store's breaker cell. Inside an attempt, a TRANSIENT outcome is raised so the ladder retries it; anything else is returned for the verb to interpret (404 by verb, 412 in a claim). Per-key bulk-delete refusals are raised after the ladder, not retried inside it: the caller decides whether to repeat the batch.
+- **Verb pattern.** Every verb is one run of the retry ladder with the store's breaker cell. Inside an attempt, a TRANSIENT outcome is raised so the ladder retries it; anything else is returned for the verb to interpret (404 by verb, 412 in a conditional create). Per-key bulk-delete refusals are raised after the ladder, not retried inside it: the caller decides whether to repeat the batch.
 
 ## 5. The verify function
 
@@ -136,7 +136,7 @@ What is deployed beside a bucket (the trigger, the function's identity and permi
 A function deployed beside a bucket MAY serve the bucket's share links; its URL is the driver's `shareUrl`, and a link is `<shareUrl>/<token>`. It is a share server, and every rule of [security §6](../algorithms/security-model.md#6-share-capabilities) and [§13](../algorithms/security-model.md#13-html-and-browser-facing-output) applies to it. In particular:
 
 - It serves a manifest only if it is valid ([data-model/backend §2.18](../data-model/backend.md#218-share)), and its `key` or `folderId` lies within the manifest's `domain`.
-- It resolves every name inside a folder share through that domain's folder namespaces, applying the anchor rule ([data-model/backend §6.3](../data-model/backend.md#63-settling-the-anchor-decides)), and stops serving a folder share once the folder is trashed.
+- It resolves every name inside a folder share through that domain's folder namespaces, applying the anchor rule ([data-model/backend §6.2](../data-model/backend.md#62-what-readers-see-mid-projection)), and stops serving a folder share once the folder is removed.
 - Pages are built by single-pass, escaped templating.
 - Its routes and its share page are those of [http-proxy §A9.3](../frontends/http-proxy.md#a93-routes) and [§A9.6](../frontends/http-proxy.md#a96-share-page), without the `/s` prefix: a shared media file opens the page in file mode, unless it is above the share ceiling, which is refused before any page.
 - A file or folder above the deployment's share ceiling ([11 §7](../11-infrastructure.md#7-share-function)) is refused as too large.
@@ -164,5 +164,5 @@ A function deployed beside a bucket MAY serve the bucket's share links; its URL 
 - A delete request drops its chunks and their markers, refuses keys of other domains and non-chunks, and a redelivery is a no-op; a refused key leaves the request in place.
 - An empty delete request is consumed without deleting anything (the probe).
 - A store whose bucket has no function answers `verified = false`, its owner records it unconfirmed and sends it no verify or discard request, and no probe request is left behind; with the function, it answers `true`, a whole-store verification writes 4096 shard-named requests, and a discard request carries exactly its keys.
-- The share function refuses a manifest naming another domain's key or folder, stops serving a trashed folder, escapes a folder name holding `</script>`, answers the share page for a shared media file to a request accepting `text/html` or from a link-preview fetcher and a download to any other request or for any other file, answers `preview` with the stored image or the generic one, and rebuilds an archive older than `share_archive_max_age`.
+- The share function refuses a manifest naming another domain's key or folder, stops serving a removed folder, escapes a folder name holding `</script>`, answers the share page for a shared media file to a request accepting `text/html` or from a link-preview fetcher and a download to any other request or for any other file, answers `preview` with the stored image or the generic one, and rebuilds an archive older than `share_archive_max_age`.
 - Transport: a slow but flowing answer is not a stall; a stall is measured from the last byte; 429 and throttling 503 are LOAD, other 5xx LINK, 403 REFUSED, whatever the error body.

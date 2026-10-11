@@ -117,14 +117,14 @@ A checksum identifies a body's content, so that two stores' copies of an object 
 
 ### 3.3 `put_if_absent`
 
-- It is an atomic claim, used only for claim keys (folder identity, [data-model/backend.md](data-model/backend.md)). Content is either content-addressed or single-owner and uses `put`.
+- It is the atomic conditional create, the one arbitration between clients. It is used only for log entries and projection takeovers ([03 §2.4, §2.6](03-journal-sync.md#24-log-entry-store)); the append of a log entry is what a domain's main must provide to be pushed to ([publication.md §2](algorithms/publication.md#2-system-model-and-assumptions), A2). Every other object is content-addressed or has a single writer and uses `put`.
 - The store MUST evaluate "only if no object has this name" itself, atomically with the write. A check followed by a write is not conforming.
-- `Won` means the name now holds exactly `body`. `Held(b)` means another writer's body `b` holds the name, and this call changed nothing.
-- If the holder's body is byte-identical to `body`, the store MUST answer `Won`. This covers an attempt whose success answer was lost, so that a later attempt found its own write: the name holds exactly what the caller asked, whoever wrote it.
+- `Won` means the name now holds exactly `body`. `Held(b)` means another writer's body `b` holds the name, and this call changed nothing. `b` is the holder's whole body: for a log entry, up to `MAX_ENTRY_BYTES` ([publication.md §7](algorithms/publication.md#7-parameters)).
+- If the holder's body is byte-identical to `body`, the store MUST answer `Won`. This covers an attempt whose success answer was lost, so that a later attempt found its own write: the name holds exactly what the caller asked, whoever wrote it. The recovery of a push relies on it ([publication.md §4.8](algorithms/publication.md#48-crash-recovery)).
 - A conditional write the service reports as conflicting with another in-flight write, and as retryable, is TRANSIENT/LOAD and is retried with the precondition intact.
-- If the holder vanishes between a refused write and the read of its body, the store MUST retry the claim, at most CLAIM_RETRIES times (recommended 3), before failing TRANSIENT/LOAD.
+- If the holder vanishes between a refused write and the read of its body, the store MUST retry the conditional create, at most CLAIM_RETRIES times (recommended 3), before failing TRANSIENT/LOAD.
 - A store that cannot evaluate the precondition MUST fail REFUSED, and MUST NOT write.
-- A caller MUST NOT emulate a claim with `put`, and MUST NOT fall back to `put` when a claim fails, whatever the kind. A plain write over a claim key silently undoes the arbitration it exists for.
+- A caller MUST NOT emulate a conditional create with `put`, and MUST NOT fall back to `put` when one fails, whatever the kind. A plain write over a log entry or a takeover silently undoes the arbitration it exists for.
 
 ### 3.4 `delete` and `delete_multi`
 
@@ -132,7 +132,7 @@ A checksum identifies a body's content, so that two stores' copies of an object 
 
 - `true` means an object was present when this call removed it. `false` means the store found no object under `k`.
 - A store whose delete request does not say whether the object existed MUST learn it with a metadata read immediately before, and MUST NOT issue the delete when that read found nothing.
-- `delete` is not an arbitration primitive. Two concurrent deletes of one key may both answer `true` on such a store. A caller that needs exclusive ownership of a removal uses a claim.
+- `delete` is not an arbitration primitive. Two concurrent deletes of one key may both answer `true` on such a store. No protocol step needs exclusive ownership of a removal.
 
 `delete_multi(keys)`:
 
@@ -209,7 +209,7 @@ A conditional replace: write `body` at `k` only if `k` still holds the object th
 - `Written` means the name now holds `body`. `Changed` means the precondition failed, and this call wrote nothing.
 - An `expected` entry without an etag cannot be evaluated: the store fails REFUSED without writing. So does a store that cannot evaluate the precondition at all.
 - `Changed` may follow this call's own write whose answer was lost, the retry finding the object changed by itself. A caller MUST NOT conclude that another writer exists; it re-reads when it needs to know.
-- It is not a claim (§3.3): `Changed` carries no body, and an identical holder is not `Written`. A conditional replace guards a newer object against being overwritten; it does not arbitrate a name.
+- It is not a conditional create (§3.3): `Changed` carries no body, and an identical holder is not `Written`. A conditional replace guards a newer object against being overwritten; it does not arbitrate a name.
 - A caller MAY fall back to `put` on REFUSED, accepting the window between its read and its write, and reports that it did.
 
 ### 3.12 `compute_checksum` and `locality`
@@ -274,12 +274,12 @@ admission = { acquire(bytes)      -- suspends until the bytes may be sent, or fa
 Rules:
 
 - Every store with a link gets its link's admission. A store without a link (a filesystem store) gets none, and is neither gated nor counted.
-- **Per attempt.** Every request attempt that carries a body upstream MUST be admitted before it is sent, for its body size plus the governor's per-request overhead ([algorithms/uplink-governor.md](algorithms/uplink-governor.md)). This includes retries, the upload half of an emulated copy, job objects, markers and claims. It then reports exactly once: `completed` with the time from admission to answer, or `abandoned`.
+- **Per attempt.** Every request attempt that carries a body upstream MUST be admitted before it is sent, for its body size plus the governor's per-request overhead ([algorithms/uplink-governor.md](algorithms/uplink-governor.md)). This includes retries, the upload half of an emulated copy, job objects, markers, log entries and takeovers. It then reports exactly once: `completed` with the time from admission to answer, or `abandoned`.
 - **Modes.** A write is issued in one of two modes. `wait` acquires. `best_effort` uses `try_acquire` for every attempt, and when admission is refused the operation fails CANCELLED ("not admitted") without sending. Best-effort writes are for work that another mechanism redoes, such as chunk forwards to copies.
 - **Atomicity.** `try_acquire` takes the admission in the same step as it checks it. There is no separate check that a later acquire has to honour.
 - **Reads are never gated.** A user is waiting on them.
 - **Stall timeouts.** A remote driver's stall timeout MUST be at least the governor's STALL_TIMEOUT: the in-flight window is sized so that a body queued behind a full window still crosses within it.
-- **Traffic counters.** Each store with a link counts body bytes of every attempt in each direction, per store and per process. A claim that returns `Held` counts the holder's body read back as download. Counting happens at the store, not in the content layer, because GC, mirror and repair talk to stores directly.
+- **Traffic counters.** Each store with a link counts body bytes of every attempt in each direction, per store and per process. A `put_if_absent` that returns `Held` counts the holder's body read back as download. Counting happens at the store, not in the content layer, because GC, mirror and repair talk to stores directly.
 
 ---
 
@@ -313,7 +313,7 @@ An implementation MUST make each of these one atomic step with respect to every 
 1. **Minimal verbs, declared optional capabilities.** A store without a native batch says so, and the generic fan-out is written once, so no driver picks a concurrency width without seeing the process.
 2. **`get_range` is mandatory and checked.** Over-long answers are errors, not trimmed.
 3. **Per-key bulk-delete refusals fail the call.** Discarding them made GC report success while keys stayed on a copy that nothing walks again.
-4. **Claims are real preconditions, never emulated and never abandoned for a plain write.**
+4. **Conditional creates are real preconditions, never emulated and never abandoned for a plain write.**
 5. **"Could not look" is never "not there".**
 6. **Admission per attempt, at the store.** Retries, copies and job objects cross the same link as first attempts. Counting in the content layer missed GC, mirror and repair.
 7. **Capabilities are evidence.** A store claims `verified` only when it knows the checker is there, and a copy's deletions go through requests only once its owner has confirmed the consumer.
@@ -330,7 +330,7 @@ A conforming store, run against a real service where it has one:
 - Round-trips put, get, `get_opt`, `head_opt` (exact size), copy and listing. Absent keys read `none`, and `get` of one fails ABSENT.
 - Returns chunk-sized bodies byte-identical.
 - Answers `get_range` with exact slices at the start, middle and end of an object; the tail only for a range reaching past the end; an empty body for an offset at or past the end; and `none` for an absent key. An over-long answer from the service is refused as CORRUPT.
-- Five concurrent claims of one name leave one stored body, and every claimant is told that body; exactly one is told `Won`. A later claim answers `Held` with the holder, unchanged. A free name answers `Won` and stores the body.
+- Five concurrent `put_if_absent` of one name with distinct bodies leave one stored body, and every caller is told that body; exactly one is told `Won`. A later call with another body answers `Held` with the holder, unchanged; a later call with the holder's own bytes answers `Won`. A free name answers `Won` and stores the body.
 - `delete` answers `true`, then `false`.
 - `delete_multi` over more keys than one page, mostly absent, with survivors at the front, on the page boundary and past it, removes every survivor. An injected per-key refusal fails the call.
 - Keys holding `& < > " ' + % # ? space` and non-ASCII characters round-trip through put, get, listing and `delete_multi`. Invalid keys (`..`, `.`, empty segments, a leading or trailing `/`) are refused INVALID before any request, and never reach a file or the network.
@@ -342,7 +342,7 @@ A conforming store, run against a real service where it has one:
 - `capabilities.verified` answers as the store's checker actually runs; a discard request carries exactly its keys, and a deployed consumer deletes the named chunks, then the request.
 - Classification: a TRANSIENT failure is retried to the ladder's limit; a REFUSED one is attempted once; a health cell trips after link failures, recovers after one answer, and is kept up by a considered "no".
 - Every upload attempt, retries included, passes admission once and reports once; a best-effort write refused admission sends nothing.
-- Traffic: only bytes crossing a link count, and a filesystem store counts nothing; a lost claim counts the upload plus the holder's body read back; a put through a composite with two mains counts on both; counters are per store and summed per process.
+- Traffic: only bytes crossing a link count, and a filesystem store counts nothing; a `put_if_absent` answered `Held` counts the upload plus the holder's body read back; a chunk put through a composite with a main and a replica counts on the main, and on the replica when its forward is sent; counters are per store and summed per process.
 - Batches: request key and byte caps hold; a permanently failed batch is answered key by key; a transient batch failure is raised.
 - HTTP: sequential requests reuse one kept-alive connection; a slow but flowing answer survives, silence past the stall timeout fails TRANSIENT/LINK.
 

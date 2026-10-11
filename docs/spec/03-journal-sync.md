@@ -1,29 +1,30 @@
-# 03 — Journal and sync: formats and interfaces
+# 03 — Log and sync: formats and interfaces
 
 This file owns the persistent formats of multi-machine synchronisation and the interfaces between
 its parts:
 
-- the client identity and the entry key;
-- the journal op vocabulary and its encoding;
-- the journal entry and the cursor on the store (frozen formats);
-- the last-sync mark and the applied log on the local disk;
-- the interfaces of the journal store, the applied log, the replication engine, the poller, the
-  outbound queues and the conflict decisions.
+- the client identity and folder-id leases;
+- the command encoding and the log entry on the store;
+- the cursor, the tree head and the takeover object on the store;
+- the position, the before-values, the in-flight record and the arrival record on the local disk;
+- the feed key, the feed ops and the applied log on the local disk;
+- the interfaces of the log store, the applied log, the cycle and the merge.
 
 The behaviour is owned elsewhere and not restated here:
 
 | Topic | Owner |
 |---|---|
-| WAL states, publishing, discovery, application, recovery, horizon, bridging, rebuild | [algorithms/wal-and-journal.md](algorithms/wal-and-journal.md) |
-| Conflict principle, decision tables, conflicted-copy name | [algorithms/conflict-resolution.md](algorithms/conflict-resolution.md) |
-| WAL record byte format | [04](04-checkout-cache.md) §2.8 |
+| The model: keys, values, commands, batches, the merge | [algorithms/change-algebra.md](algorithms/change-algebra.md) |
+| Before-values, upload, fetch, push, projection, state read, recovery, retention | [algorithms/publication.md](algorithms/publication.md) |
+| Enacting a merge, the conflicted-copy name, outcomes of every clash | [algorithms/conflict-resolution.md](algorithms/conflict-resolution.md) |
+| Upload records and local intents | [04](04-checkout-cache.md) §2.8 |
 | Folder-id grammar, logical paths, key validation (P4) | [01](01-core.md) §2 |
-| Store key layout around the journal | [02](02-remote-model.md) |
+| Store key layout around the log; the manifest body | [02](02-remote-model.md) |
 | Durable writes (P2) | [algorithms/durable-queue.md](algorithms/durable-queue.md) §3 |
 | Failure kinds (P3) | [algorithms/failure-model.md](algorithms/failure-model.md) |
 | Which process owns a domain (P1), status, `poll` | [07](07-daemon-cli.md) |
 | The change-feed request (`changes_since`) | [08](08-frontends.md) §3.6 |
-| Journal expiry on the store | [algorithms/gc.md](algorithms/gc.md) |
+| Log expiry on the store | [algorithms/gc.md](algorithms/gc.md) |
 | Store waits on the cursor, per driver | [06](06-backends.md), [backends/](backends/) |
 
 The [OCaml notes](ocaml/03-journal-sync.md) describe the OCaml implementation.
@@ -33,10 +34,12 @@ The [OCaml notes](ocaml/03-journal-sync.md) describe the OCaml implementation.
 ## 1. Purpose
 
 One person mounts the same domain from several machines. Machines never talk to each other; the
-store is the only shared medium. Each client writes locally first and publishes later. A published
-unit of work is an immutable **journal entry** on the store; a single **cursor** object tells peers
-to look; each client keeps an **applied log** of what it handled, which is also its local change
-feed. The formats below are what clients exchange and what survives restarts.
+main is the only shared medium. Each client changes its local tree first and publishes later. A
+published batch of changes is an immutable, numbered **log entry** on the main; a single
+**cursor** object tells peers to look; each client keeps the main's value at every key it has
+changed and not yet published (its **before-values**), and an **applied log** of the changes made
+to its local tree, which is its local change feed. The formats below are what clients exchange and
+what survives restarts.
 
 ---
 
@@ -60,39 +63,173 @@ All text is UTF-8. "Durable replace" and "durable create-if-absent" are the prim
   (one past the highest existing block, retrying upward when the create finds it present), durably,
   before using its first id. A forked child leases its own block. Leases are never removed. Minting
   never contacts the store and never waits on another process.
+- A minted id is final: it is the folder's identity on every client, and nothing on the store
+  arbitrates or replaces it (assumption A5 of
+  [change-algebra.md](algorithms/change-algebra.md)).
 
-### 2.2 Entry key
+### 2.2 Feed key
 
-An **entry key** names one unit of work: the WAL record, the journal entry, the cursor value, the
-applied-log line and the change-feed anchor ([wal-and-journal.md](algorithms/wal-and-journal.md)
-§3.1).
+A **feed key** names one line of the applied log and is what a change-feed anchor carries (§2.9,
+[08](08-frontends.md) §2.5).
 
 ```
-entry-key = 13DIGIT "-" client-id        ; milliseconds since the epoch, zero-padded
+feed-key  = 13DIGIT "-" client-id        ; milliseconds since the epoch, zero-padded
 client-id = 32hexlower                    ; written; readers accept 1*(any character but "/")
 ```
 
-Example: `1788134400000-3f9a0c1b2d4e5f60718293a4b5c6d7e8`.
-
-- **Writers** mint keys only in the domain owner, as specified in
-  [wal-and-journal.md](algorithms/wal-and-journal.md) §4.9.
-- **Parser**: take the last `/`-separated segment (so a listing path or a stored line is accepted);
-  require exactly 13 decimal digits, then `-`, then a non-empty client id. Anything else is not an
-  entry key; in particular a month directory such as `2026-08` never parses.
-- **Order**: by milliseconds, then by client id bytewise. The order is total, not causal.
-  Lexicographic order of the written form equals this order.
+- **Writers** mint feed keys only in the domain owner: `max(now_ms, last + 1)`, where `last` starts
+  at ownership from the largest key the applied log holds, so a clock step backwards never mints a
+  used key.
+- **Order**: by milliseconds, then by client id bytewise. Lexicographic order of the written form
+  equals this order.
 - **Month shard** of a key: the UTC year and month of its milliseconds, `YYYY-MM`.
-- **Mark keys**: the last-sync mark (§2.6) is an entry key with this client's id and a
-  millisecond value that names a time, not a unit of work.
+- A feed key is local. It names nothing on the store.
 
-### 2.3 Journal ops
+### 2.3 Commands
 
-One op is one JSON object. Writers emit exactly these fields; optional fields are **omitted**,
-never written as `null`, so older readers see what they always saw.
+A command is a key, the value before and the value after
+([change-algebra.md](algorithms/change-algebra.md) Definition 4), one JSON object:
+
+```json
+{"file":["3f9a0c1b2d4e-40a","one.jpg"],"before":null,"after":"<base64 of a manifest body>"}
+{"file":["3f9a0c1b2d4e-40a","two.jpg"],"before":"8f3a0c1b2d4e5f60-1b2d4e5f608f3a0c","after":null}
+{"folder":"3f9a0c1b2d4e-40b","before":null,"after":[".tsync-root","Photos"]}
+{"folder":"3f9a0c1b2d4e-40b","before":[".tsync-root","Photos"],"after":[".tsync-root","Pics"]}
+{"folder":"3f9a0c1b2d4e-40b","before":[".tsync-root","Pics"],"after":null}
+```
+
+| Field | Meaning |
+|---|---|
+| `file` | a file key: `[folder id, leaf name]`. The leaf is one path segment ([01](01-core.md) §2.3) |
+| `folder` | a folder key: a folder id other than the root's |
+| `before` | the guard. For a file: the content identity `"<h1>-<h2>"` of the value replaced (33 characters, [02](02-remote-model.md) §2.1), or `null` for ∅. For a folder: `[parent folder id, leaf name]`, or `null` |
+| `after` | the new value. For a file: standard padded base64 of the manifest body ([02](02-remote-model.md) §2.6), whose recorded name is the key's leaf, or `null`. For a folder: `[parent folder id, leaf name]`, or `null` |
+
+- Exactly one of `file` and `folder` is present. `before` and `after` are always written, `null`
+  included.
+- A file rename is two commands: a removal at one key and a creation at the other, with the same
+  manifest.
+- **Reading a command** (entries come from a store and are untrusted, P4):
+  - unknown fields are ignored;
+  - a missing or ill-typed field, both or neither of `file` and `folder`, a folder id or a leaf
+    that fails its grammar, a `before` that is not a content identity, or an `after` that does not
+    decode to a manifest body, makes the whole entry CORRUPT
+    ([failure-model.md](algorithms/failure-model.md)). An entry is never applied with a command
+    dropped.
+- A reader does not check `before` against its own state: the main checks nothing, and a client at
+  the head knows the main exactly ([change-algebra.md](algorithms/change-algebra.md) Proposition
+  6). A projection uses `before` to recognise the record a command replaces
+  ([data-model/backend.md](data-model/backend.md) §6).
+
+### 2.4 Log entry (store)
+
+- **Number**: an integer ≥ 1, written as 16 decimal digits, zero-padded.
+- **Key**: `tsync/<domain>/log/<group>/<number>`, where `<group>` is the number divided by 10 000,
+  written as 12 decimal digits. Example: entry 1 234 567 is
+  `tsync/photos/log/000000000123/0000000001234567`.
+- **Body**: one JSON object:
+
+  ```json
+  {"v":1,"author":"3f9a0c1b2d4e5f60718293a4b5c6d7e8","commands":[ … ]}
+  ```
+
+  `v` is the format version, `1`. `author` is the client uuid of the creator. `commands` is the
+  batch, a non-empty array of commands (§2.3) on distinct keys, in any order: a batch is a set
+  ([change-algebra.md](algorithms/change-algebra.md) Definition 6).
+- **Writers** create an entry only with `put_if_absent`, with the body bounded by
+  `MAX_ENTRY_BYTES` unless it holds one command ([publication.md](algorithms/publication.md) §4.5). An entry is immutable: its
+  key is only ever put again with the same bytes (recovery,
+  [publication.md](algorithms/publication.md) §4.8).
+- **Readers**:
+  - read an entry by its number, never by listing;
+  - a body that is not a JSON object, lacks a field, or holds two commands on one key is CORRUPT;
+  - a `v` greater than 1 is an entry this reader cannot follow
+    ([publication.md](algorithms/publication.md) §4.3); it is not CORRUPT;
+  - never turn a failed read into "no entry"
+    ([failure-model.md](algorithms/failure-model.md) §5.2).
+- Replica members carry the log; backfill members do not
+  ([algorithms/replication.md](algorithms/replication.md)).
+
+### 2.5 Cursor (store)
+
+- **Key**: `tsync/<domain>/cursor`.
+- **Body**: one entry number in its written form (§2.4), with no trailing newline: the head, as far
+  as the writer knew.
+- **Readers** trim surrounding whitespace. A body that does not parse is treated as a cursor that
+  moved (a fetch follows).
+- The cursor is a hint: last writer wins, it may be stale, lost, or move backwards.
+- A store wait on the cursor compares the object's bytes: a caller's token is the body it last read.
+
+### 2.6 Tree head and takeover (store)
+
+- **Tree head**, at `tsync/<domain>/tree-head`: `{"n":<entry number as an integer>}`. Every entry up
+  to `n` is projected. Absent reads as 0. A body that does not parse is CORRUPT. Written by a plain
+  put, only by the projector of entry `n` ([publication.md](algorithms/publication.md) §4.6), and
+  only to raise it.
+- **Takeover**, at `tsync/<domain>/log-takeover/<number>-<generation>`: the body is the client uuid
+  of the client that may project entry `<number>` at that generation, a decimal integer ≥ 1.
+  Created only with `put_if_absent`. The highest generation of an entry is found by reading
+  generations upward from 1 until one is absent. A takeover object MAY be deleted once the tree
+  head has passed its entry.
+
+### 2.7 Position, in-flight record and arrival record (local)
+
+Under `<data_dir>/sync/<domain>/`, each written by durable replace:
+
+| File | Content |
+|---|---|
+| `position` | the number of the last entry merged, in its written form (§2.4). Absent: no position; the client arrives by state ([publication.md](algorithms/publication.md) §4.7). Unparseable: reported and treated as absent |
+| `mirror-id` | 32 lowercase hex characters: the id of the mirror this sync state describes, equal to the content of the mirror's `.tsync-mirror` file ([04](04-checkout-cache.md) §2.1). Written once, when the mirror is created |
+| `in-flight` | `{"n":<number>,"body":"<base64 of the exact bytes of the entry>"}`. Absent: no push is in flight |
+| `arrival` | the result of a merge being enacted (below). Absent: no arrival is in progress |
+
+**Arrival record**: one JSON object.
+
+```json
+{"head":1234567,
+ "steps":[{"move":["3f9a0c1b2d4e-40a","a.txt"],"to":["3f9a0c1b2d4e-40a","a (conflicted copy from laptop).txt"]},
+          {"file":["3f9a0c1b2d4e-40a","a.txt"],"value":"<base64 of a manifest body>"},
+          {"folder":"3f9a0c1b2d4e-40b","value":[".tsync-root","Pics"]}],
+ "before":[{"file":["3f9a0c1b2d4e-40a","a (conflicted copy from laptop).txt"],"before":null}]}
+```
+
+- `head`: the position the arrival ends at.
+- `steps`, in an order in which each can be applied to the local tree
+  ([change-algebra.md](algorithms/change-algebra.md) Theorem 3): `move` takes the local file at
+  one key to another key in the same folder when the source is present and the destination absent;
+  `file` and `folder` set a key to `value` (`null` for ∅). A folder parked at a temporary place is
+  a `folder` step whose value names the root and a temporary name ([01](01-core.md) §2.9), followed
+  later by the step that gives it its place. Every step is idempotent.
+- `before`: the complete set of before-values after the arrival, in the encoding of §2.8.
+
+An unparseable in-flight or arrival record is set aside
+([durable-queue.md](algorithms/durable-queue.md) R6); the client then arrives by state before it
+pushes again.
+
+### 2.8 Before-values (local)
+
+`<data_dir>/sync/<domain>/before/<record name>`, one file per dirty key, written by durable replace
+and removed by release:
+
+| Key | Record name | Body |
+|---|---|---|
+| file key `(d, a)` | `f-<d>-<leaf hash of a>` ([02](02-remote-model.md) §2.1) | `{"file":["<d>","<a>"],"before":<null or "<h1>-<h2>">}` |
+| folder key `i` | `d-<i>` | `{"folder":"<i>","before":<null or ["<parent id>","<leaf>"]>}` |
+
+- The presence of a record is what makes a key pending. `before` is the main's value at the key as
+  this client last knew it ([publication.md](algorithms/publication.md) §3.2).
+- Local only: a before-value reaches the store only as the `before` of a command.
+- An unparseable record is set aside. Its key, read from the record's name, stays pending with an
+  **unknown** before-value, which differs from every value; the client arrives by state before it
+  pushes again, which gives the key a known one.
+
+### 2.9 Feed ops and the applied log (local)
+
+**Feed ops** describe a change of the local tree to frontends, by path. One op is one JSON object;
+optional fields are omitted, never written as `null`.
 
 ```json
 {"op":"put","key":"photos/one.jpg","size":1024}
-{"op":"put","key":"photos/one.jpg","size":2048,"base":"8f3a0c1b2d4e5f60"}
 {"op":"delete","key":"photos/two.jpg"}
 {"op":"mkdir","key":"photos","id":"3f9a0c1b2d4e-40a"}
 {"op":"rmdir","key":"photos","id":"3f9a0c1b2d4e-40a"}
@@ -102,213 +239,140 @@ never written as `null`, so older readers see what they always saw.
 
 | Op | Required | Optional |
 |---|---|---|
-| `put` | `key` (path), `size` (integer ≥ 0) | `base` (16 lowercase hex: the content identity `h1` of the manifest the edit started from, [02](02-remote-model.md) §2.1) |
-| `delete` | `key` | — |
-| `mkdir` | `key` | `id` (folder id) |
-| `rmdir` | `key` | `id` |
-| `rename` | `key` (destination), `src` | `is_dir` (boolean, absent = `false`), `size` (integer ≥ 0), `id` (folder id, for a folder) |
+| `put` | `key` (path), `size` (integer ≥ 0) | `fid` |
+| `delete` | `key` | `fid` |
+| `mkdir` | `key`, `id` (folder id) | — |
+| `rmdir` | `key`, `id` | — |
+| `rename` | `key` (destination), `src` | `is_dir` (boolean, absent = `false`), `size`, `id` (folder id, for a folder), `fid` |
 
-- Paths are domain-relative logical paths ([01](01-core.md) §2.3): `/`-separated, no leading `/`,
-  non-empty. Folder ids follow [01](01-core.md) §2.5. Sizes are 64-bit integers written in full.
-- `base` is written only when the writer knows it, and omitted otherwise (never `null`). Readers
-  that predate it ignore it. Its use: [conflict-resolution.md](algorithms/conflict-resolution.md)
-  A2a.
-- Directory ops carry the folder's id because applying a removal destroys the local evidence it
-  could otherwise be read from. An op without `id` names the folder by path alone. Readers SHOULD accept it; writers MUST always
-  include `id`.
-- **Reading an op** (entries come from a store and are untrusted, P4):
-  - an object whose `op` is a string this reader does not know is **ignored** (forward
-    compatibility);
-  - unknown fields are ignored;
-  - a known op with a missing or ill-typed required field, a path that fails the grammar, an
-    `id` that fails the folder-id grammar, or a `base` that is not 16 lowercase hex makes the whole
-    entry CORRUPT
-    ([failure-model.md](algorithms/failure-model.md)); it is never applied with the op dropped.
-- The **paths an op concerns** are `[key]`, or `[key, src]` for a rename; a reader deciding whether
-  an op touches a path tests all of them.
+- Paths are domain-relative logical paths ([01](01-core.md) §2.3) as they were when the change was
+  made.
+- `fid` is the file's local id ([01 §2.7](01-core.md#27-item-references)) when the change was made,
+  so the feed names the file even after it moved again or went. Writers MUST record it for every op
+  naming a file. Readers SHOULD accept an op without it: the feed then names the file by the id now
+  at the op's path, or counts it unnamed.
+- A reader ignores an op whose `op` it does not know, and unknown fields.
+- The **paths an op concerns** are `[key]`, or `[key, src]` for a rename.
+- Feed ops are also the body of a local intent ([04](04-checkout-cache.md) §2.8).
 
-### 2.4 Journal entry (store; frozen)
-
-- **Key**: `tsync/<domain>/journal/<YYYY-MM>/<entry key>`, where `YYYY-MM` is the month shard of
-  the entry key (§2.2). Example: `tsync/photos/journal/2026-09/1788134400000-3f9a…e8`.
-- **Body**: the entry's ops, each encoded as §2.3 on its own line, joined by `\n`, with a trailing
-  `\n`. An entry with no ops has an empty body.
-- **Writers** write a new entry once, with a plain put, under the canonical key. An entry is
-  immutable: the same key is only ever re-put with the same bytes (recovery,
-  [wal-and-journal.md](algorithms/wal-and-journal.md) §4.7).
-- **Readers**:
-  - list the whole prefix `tsync/<domain>/journal/` recursively, and take as entries the objects
-    whose last path segment parses as an entry key (§2.2). An entry directly under the prefix, or in
-    a directory other than its month shard, is still an entry: readers SHOULD accept it; writers
-    MUST write the canonical key. A key listed at several places is one entry, and any of its
-    objects may be read;
-  - read an entry at the location the listing returned;
-  - split the body on `\n`, trim each line of surrounding whitespace, ignore empty lines, decode
-    each remaining line as §2.3; a line that is not a JSON object makes the entry CORRUPT;
-  - never turn a failed read or listing into "no entry" or "no entries"
-    ([failure-model.md](algorithms/failure-model.md) §5.2).
-- Replica members carry the journal; backfill members carry neither journal nor cursor
-  ([algorithms/replication.md](algorithms/replication.md)).
-
-### 2.5 Cursor (store; frozen)
-
-- **Key**: `tsync/<domain>/cursor`.
-- **Body**: one entry key in its written form (§2.2), with no trailing newline: the newest entry the
-  writer published, as far as it knew.
-- **Readers** trim surrounding whitespace, take the last `/` segment, and parse it as an entry key.
-  A body that does not parse is treated as a cursor that moved (a listing follows) and as no cursor
-  for the bridge check ([wal-and-journal.md](algorithms/wal-and-journal.md) §4.8).
-- The cursor is a hint: last writer wins, it may be stale, lost, or move backwards.
-- A store wait on the cursor compares the object's bytes: a caller's token is the body it last read.
-
-### 2.6 Last-sync mark (local)
-
-- **Path**: `<data_dir>/last-sync-<domain>`.
-- **Content**: one line holding an entry key (§2.2), of any client; a trailing newline is allowed.
-  A line holding a longer path whose last `/` segment is an entry key (such as the entry's store
-  key) denotes that key: readers SHOULD accept it; writers MUST write the bare key. Its meaning is specified in
-  [wal-and-journal.md](algorithms/wal-and-journal.md) §4.8.
-- **Written** by durable replace, forward only.
-- **Read**: absent (ENOENT) means no mark. Content that does not parse is reported and treated as no
-  mark (the consequence is a rebuild, which is safe). Any other read failure is a failure, never "no
-  mark".
-
-### 2.7 Applied log (local)
+**Applied log.**
 
 - **Directory**: `<cache_root>/<domain>/applied/`.
-- **Shards**: files `YYYY-MM.log`, where the month is the UTC month in which the entry was
-  **handled** (appended), not the month of its key. Shard names sort chronologically.
+- **Shards**: files `YYYY-MM.log`, the month shard of the line's feed key. Shard names sort
+  chronologically.
 - **Record**, newline-*led*:
 
   ```
-  \n<entry key>\t<JSON array of ops, §2.3>
+  \n<feed key>\t<JSON array of feed ops>
   ```
 
-  e.g. `\n1788134400001-3f9a…e8\t[{"op":"put","key":"photos/one.jpg","size":1024}]`.
 - **Appending**: one write per record to the newest shard (opened append-only, created with mode
-  0600), made durable before anything relies on it: an own entry's record is durable before the
-  entry is put on the store; a peer entry's record before the mark can pass it. The newline leads,
-  so a record torn by a crash is closed by the next append and only that record is lost.
-- **At most one record per key.** The owner appends a key only if it is not already in the log (its
-  handled set). A key on several lines: readers SHOULD accept it, and its position is its
-  earliest line; writers MUST NOT append a key twice.
-- **Contents**: this client's published entries; peers' applied entries; rebuild findings (under
-  freshly minted keys, with the ops a rebuild's diff amounts to); keys a rebuild marked handled
-  (with `[]`).
-- **Local file ids.** An op naming a file (`put`, `delete`, and `rename` of a file) MAY carry
-  `"fid":"<file id>"` in its applied-log copy only: the file's local id
-  ([01 §2.7](01-core.md#27-item-references)) when the op was handled, so the change feed names the
-  file even after it moved again or went. Writers MUST record it; it is never published. Readers
-  SHOULD accept an op without it: the feed then names the file by the id now at the op's path, or
-  counts it unnamed.
+  0600), made durable. A line is appended only after the change it names is durable in the local
+  tree. The newline leads, so a record torn by a crash is closed by the next append and only that
+  record is lost.
+- **Contents**: one line per local operation, and one line per arrival holding the changes the
+  merge made to the local tree, a move aside included. An arrival by state is reported the same
+  way, split into lines of at most `FEED_LINE_OPS` ops.
 - **Reading**: split on `\n`; a line that has no tab, whose key does not parse, or whose second
-  field is not a JSON array is dropped (a torn record). Ops inside a kept line are decoded by §2.3,
-  except that an op the reader cannot decode is dropped from the line rather than failing it.
-- **Position**: the log's order is shard order, then line order. The position of a key is its
-  **earliest** line. Order of lines is order of handling; it is the feed order and is unrelated to
-  key order.
-- **Retention**: shards are deleted only as [wal-and-journal.md](algorithms/wal-and-journal.md)
-  §4.8 allows. Nothing else removes lines.
+  field is not a JSON array is dropped (a torn record). An op the reader cannot decode is dropped
+  from its line rather than failing it.
+- **Position**: the log's order is shard order, then line order, which is feed-key order.
+- **Retention**: a shard MAY be deleted only when it is not the newest shard, every key in it is
+  older than `FEED_RETENTION`, and it precedes the shard holding the line the feed watermark names
+  ([08 §3.6](08-frontends.md#36-change-feed-changes_since)). Deleting a shard sets the
+  dropped-shard record durably first. There is no size-based pruning.
 
-### 2.8 WAL record
+### 2.10 Upload records and local intents
 
-The byte format is [04](04-checkout-cache.md) §2.8; the states, record kinds and the information a
-record carries are [wal-and-journal.md](algorithms/wal-and-journal.md) §4.1.
+[04](04-checkout-cache.md) §2.8.
 
-### 2.9 Conflicted-copy name
+### 2.11 Conflicted-copy name
 
-[conflict-resolution.md](algorithms/conflict-resolution.md) §4.7.
+[conflict-resolution.md](algorithms/conflict-resolution.md) §5.
 
 ---
 
 ## 3. Interfaces
 
 The interfaces are language-neutral. Every operation that touches the store may fail with a kind of
-[failure-model.md](algorithms/failure-model.md); ABSENT is returned only where stated.
+[failure-model.md](algorithms/failure-model.md); ABSENT is returned only where stated. Every store
+operation here is answered by the main, never by a copy
+([replication.md](algorithms/replication.md) §4.6).
 
-### 3.1 Journal store (the journal's store seam)
+### 3.1 Log store (the log's store seam)
 
 ```
-list_entries()            → [(entry key, object)] sorted by key, complete    | failure
-read_entry(object)        → [op] | ABSENT                                    | failure (CORRUPT for §2.3/§2.4 violations)
-entry_exists(key)         → present | ABSENT (at the canonical key)          | failure
-write_entry(key, [op])    → ()                                               | failure
-cursor_read()             → entry key | none                                 | failure
+read_entry(n)             → entry | ABSENT                    | failure (CORRUPT for §2.3/§2.4 violations)
+read_entries(from)        → [entry], contiguous from `from`   | failure     (MAY batch; stops at the first absent)
+create_entry(n, bytes)    → Won | Held                        | failure (missing chunks: gc §5.4)
+tree_head()               → n                                 | failure
+tree_head_write(n)        → ()                                | failure
+takeover_generation(n)    → g ≥ 0                             | failure
+takeover_create(n, g)     → Won | Held(client)                | failure
+cursor_read()             → number | none                     | failure
 cursor_wait(token)        → () when the cursor may have changed, bounded      (driver-paced; expiry is not a failure)
-cursor_note(key)          → ()   never writes inline; arms the debouncer
-cursor_bump(key)          → ()   writes now if the debounce interval has passed, else as note
-cursor_flush()            → ()   writes the pending key now; a failure is logged and dropped
-mark_read()               → entry key | none                                 | failure
-mark_write(key)           → ()                                               | failure
+cursor_note(n)            → ()   never writes inline; arms the debouncer
+cursor_flush()            → ()   writes the pending number now; a failure is logged and dropped
 ```
 
-The seam never mints keys: every write names its key. The cursor debouncer
-([wal-and-journal.md](algorithms/wal-and-journal.md) §4.2) is one per cursor object in the owner.
-
-### 3.2 Applied log
+### 3.2 Sync state (local)
 
 ```
-note(key, [op])                    → ()   durable; a no-op if key is present
-contains(key)                      → bool
-keys()                             → every kept key          (loaded once by the owner)
+position()                         → n | none
+before(key)                        → value | none | unknown
+record_before(key, value)          → ()   durable; a no-op if the key has one
+drop_before(key)                   → ()
+pending()                          → [command]            one per before-value
+in_flight()                        → (n, bytes) | none
+committed(n, batch)                → ()   the Won step: before-values, position and the in-flight record, one durable step
+arrival_begin(record), arrival_end()
+```
+
+### 3.3 Applied log
+
+```
+note([op])                         → feed key   durable
 since(anchor?, limit)              → page | stale
     page = { entries: [(key, [op])] in log order, at most limit; more: bool }
     anchor given: the entries after the anchor's position; stale if the anchor is not kept
     no anchor: from the start of the kept log
 head()                             → the key of the last line | none
-prune(now)                         → shards removed          (per wal-and-journal §4.8)
+prune(now)                         → shards removed          (§2.9)
 ```
 
-
-### 3.3 Publishing
-
-`PUBLISH(key, ops)` is the one operation that publishes an entry: note in the applied log, write
-the entry, announce the paths to the owner's frontends, note the cursor
-([wal-and-journal.md](algorithms/wal-and-journal.md) §4.2). No other code writes journal entries.
-
-### 3.4 Replication engine (one per domain, in the owner)
+### 3.4 Cycle (one per domain, in the owner)
 
 ```
-reconcile()                        → ()        at ownership start (wal-and-journal §4.7)
-apply_pass(cursor)                 → entries applied (wal-and-journal §4.4)
-rebuild_done(listed keys, t0)      → ()        notes the keys handled and moves the mark (§4.8)
-unapplied()                        → [(entry key, reason)]   the stepped-aside entries
-bridge()                           → incremental | hold(reason), with the mark and its age
+recover()                          → ()        at ownership start (publication §4.8)
+arrive()                           → changes made to the local tree (publication §4.4)
+arrive_by_state()                  → changes made to the local tree (publication §4.7)
+push()                             → committed n | refused | nothing to push (publication §4.5)
+project()                          → the tree head reached (publication §4.6)
+poll()                             ends the current wait; a cycle runs now
+status()                           → position, pending count, in-flight?, the tree head as last read,
+                                     an entry that cannot be followed, if any
 ```
 
-The engine is parameterised by the journal store, the applied log, the WAL, the staged-edit store,
-the domain configuration and the domain's file operations; the file operations provide the arrival
-enactment, the publish decision and the local redo it calls back.
+The cycle is parameterised by the log store, the sync state, the applied log, the staged-edit
+store, the domain configuration and the domain's file operations; the file operations provide the
+enactment of a merge it calls back.
 
-### 3.5 Poller
+### 3.5 Upload queue
 
-```
-start(paused?, on_changed)         one loop per domain in the owner (wal-and-journal §4.3)
-poll()                             ends the current wait; a pass runs soon
-```
+Keyed, one job per file key: pending, in flight, pending bytes, completed count, parked, pause,
+settle, re-arm, wait until a given key's content is uploaded, and until it is committed. It is a
+durable queue over the upload records ([durable-queue.md](algorithms/durable-queue.md) §4).
 
-### 3.6 Outbound queues
-
-- **Upload queue** (keyed, one job per file): pending, in flight, pending bytes, completed count,
-  pause, settle, wait until a given path's upload settles.
-- **Metadata queue** (ordered, one worker): pending (queued and in flight), parked, pause, settle,
-  re-arm.
-- Both are durable queues over the WAL ([durable-queue.md](algorithms/durable-queue.md) §4), each
-  taking its record kinds ([wal-and-journal.md](algorithms/wal-and-journal.md) §4.1).
-
-### 3.7 Conflict decisions (the policy seam)
+### 3.6 Merge (the policy seam)
 
 ```
-ARRIVAL.decide(facts)  → skip(reason) | apply([action])      total, pure
-PUBLISH.decide(facts)  → { actions: [action]; ending }       total, pure
-clashed(decision)      → bool
-describe(facts), describe(decision) → text                    for logs and the exhaustive listing
+MERGE(R, L, M)  → N                                       total, pure (change-algebra Definition 7)
+clashed(R, L, M, N) → [key]                               the keys a merge did more than install M at
+describe(…) → text                                        for logs and the exhaustive listing
 ```
 
-Facts, actions and endings are those of
-[conflict-resolution.md](algorithms/conflict-resolution.md) §4.2–4.6. Fact gathering and enactment
-live with the file operations, which own the metadata lock and cannot reach the store while holding
-it.
+Enactment lives with the file operations, which own the metadata lock and cannot reach the store
+while holding it ([conflict-resolution.md](algorithms/conflict-resolution.md) §4).
 
 ---
 
@@ -316,26 +380,22 @@ it.
 
 An implementation MUST exhibit:
 
-- **Entry keys.** Written keys round-trip through the parser; a month directory, a temporary name
-  and a key with fewer than 13 digits do not parse; a listing path yields the key of its last
-  segment; order equals the lexicographic order of written keys.
-- **Ops.** Every op round-trips, `put` with and without `base`; optional fields are omitted when
-  absent; a reader ignores an
-  unknown `op` and unknown fields; `is_dir` absent reads `false`; a known op missing a required
-  field, or naming an invalid path or folder id, makes its entry CORRUPT.
-- **Entries.** An entry placed under its month directory and one placed directly under the journal
-  prefix are both listed and read; blank lines and `\r\n` line ends are tolerated; a failed listing
-  or read is never "no entries" or "no entry".
-- **Cursor.** A body with a trailing newline or a path prefix reads as its key; an unparsable body
-  triggers a listing.
-- **Mark.** Written by durable replace; absent reads as no mark; an unparsable mark is reported and
-  read as no mark; a read failure is a failure.
-- **Applied log.** A record is kept under its key; `since` returns oldest first, is exclusive of the
-  anchor, sets `more` only when entries remain, crosses shard boundaries, and answers stale for an
-  anchor not kept; an entry handled late with an older key follows the anchor and becomes the head;
-  a torn line does not stop the reader; the head is found past a line longer than any read-ahead
-  window; noting a key twice leaves one line; with a log holding a key twice, the earliest
-  line is the anchor's position.
+- **Commands and entries.** Every command round-trips, with `null` written for ∅; a reader ignores
+  unknown fields; a command missing a field, naming an invalid folder id or leaf, or carrying an
+  `after` that is not a manifest makes its entry CORRUPT; an entry with two commands on one key is
+  CORRUPT; an entry of a later version is reported as one the client cannot follow, and is not
+  CORRUPT.
+- **Entry keys.** Entry 1 234 567 has the key of §2.4; a failed read is never "no entry".
+- **Cursor.** A body with a trailing newline reads as its number; an unparsable body triggers a
+  fetch.
+- **Tree head.** Absent reads as 0; it is never written lower than it was read.
+- **Local records.** The position, in-flight record, arrival record and before-values are written
+  by durable replace; an absent position reads as none; an unparseable record is set aside and
+  leads to an arrival by state before the next push; a before-value record's name follows from its
+  key.
+- **Applied log.** `since` returns oldest first, is exclusive of the anchor, sets `more` only when
+  entries remain, crosses shard boundaries, and answers stale for an anchor not kept; a torn line
+  does not stop the reader; the head is found past a line longer than any read-ahead window.
 - **Identity.** Concurrent processes agree on one client uuid; folder ids minted by forked and
   concurrent processes are distinct.
 
@@ -345,6 +405,9 @@ An implementation MUST exhibit:
 
 | Parameter | Value | Notes |
 |---|---|---|
-| Folder-id lease block | 1024 ids | MUST stay 1024: existing lease files grant blocks of this size |
-| Applied-log shard | one per UTC month of handling | |
-| Timing, horizon and retention parameters | — | [wal-and-journal.md](algorithms/wal-and-journal.md) §7 |
+| Folder-id lease block | 1024 ids | |
+| Log group | 10 000 entries per directory | |
+| Applied-log shard | one per UTC month | |
+| `FEED_LINE_OPS` | 64 | ops per line of an arrival by state |
+| `FEED_RETENTION` | 30 days | how long a change-feed anchor without a watermark stays answerable |
+| Timing and retention parameters of the protocol | — | [publication.md](algorithms/publication.md) §7 |

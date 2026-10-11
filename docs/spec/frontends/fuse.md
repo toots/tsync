@@ -78,7 +78,7 @@ owner process (one domain)
 
 - **Scheduler first.** The main thread enters the FUSE loop only after the owner has finished its
   start sequence up to serving its socket ([07 §3.2](../07-daemon-cli.md)), so no kernel request
-  arrives before the domain's queues exist and reconcile has run.
+  arrives before the domain's upload queue exists and local recovery has run.
 - **Bridging.** A callback that touches the domain submits a closure to the scheduler and blocks its
   worker until the result is back ([07 §3.7](../07-daemon-cli.md)). A slow read blocks only its own
   request. Callbacks that touch no domain state (`statfs`, `chmod`, `chown`, `utimens`, `flush`)
@@ -112,12 +112,12 @@ whose basename starts with `.fuse_hidden` is a **hidden name** (§4.10) and neve
 | `write` | `write(key, buf, offset)`; cancels an in-flight upload of the key; lands in staged content before replying; synchronous handles make it durable first | |
 | `truncate` | `truncate(key, size)` (content operation, visible level); cancels an in-flight upload | |
 | `flush` | nothing: the durability point is `release` (or `fsync`) | |
-| `release` | the last release after a modification: `close(key)`, which syncs the staged content and makes its WAL record durable before the reply ([04 §4.4](../04-checkout-cache.md#44-sync-and-close)) | |
+| `release` | the last release after a modification: `close(key)`, which syncs the staged content and makes the key's before-value and upload record durable before the reply ([04 §4.4](../04-checkout-cache.md#44-sync-and-close)) | |
 | `fsync` | `sync(key)` (§4.9) | |
 | `fsyncdir` | nothing: directory changes are durable when their call returns | |
 | `unlink` | `delete(key)` | |
 | `mkdir` | `mkdir(dir key)`; mode ignored | EEXIST when the name exists |
-| `rmdir` | remove the folder **only if it is empty** (no file, folder or staged entry beneath it), as one step under the owner's metadata serialisation | ENOTEMPTY otherwise |
+| `rmdir` | remove the folder **only if it is empty** (no file, folder or staged entry beneath it), as one step under the owner's metadata serialisation ([04 §4.5](../04-checkout-cache.md#45-namespace-operations)) | ENOTEMPTY otherwise |
 | `rename(src, dst, flags)` | §4.2.1 | |
 | `statfs` | §4.5 | |
 | `utimens`, `chmod`, `chown` | succeed and change nothing (failing them broke `rsync`, whose temp-file `fchmod` reported "mkstemp failed") | |
@@ -131,8 +131,8 @@ File locks (`flock`, POSIX locks) are handled by the kernel and are local to thi
 #### 4.2.1 rename
 
 - `flags` may hold `RENAME_NOREPLACE`: an existing destination answers EEXIST and nothing changes.
-  `RENAME_EXCHANGE`, `RENAME_WHITEOUT` or any other flag answers EINVAL: an atomic exchange cannot
-  be published as one change.
+  `RENAME_EXCHANGE`, `RENAME_WHITEOUT` or any other flag answers EINVAL: the file operations offer
+  no atomic exchange ([04 §3.4](../04-checkout-cache.md#34-operations)).
 - A destination whose basename is a hidden name is the hide of an open victim (§4.10).
 - Otherwise `rename(src key, dst key)` with POSIX replacement, decided and applied as one step under
   the owner's metadata serialisation:
@@ -150,12 +150,12 @@ File locks (`flock`, POSIX locks) are handled by the kernel and are local to thi
 |---|---|---|---|---|---|
 | directory | `S_IFDIR` `dirMode` | 2 | 0 | the time its set of children last changed on this client ([04](../04-checkout-cache.md)) | = mtime |
 | staged file | `S_IFREG` `fileMode` | 1 | staged size | staged mtime | = mtime |
-| published file | `S_IFREG` `fileMode` | 1 | manifest size | manifest mtime | = mtime |
-| published symlink | `S_IFLNK 0777` | 1 | length of the target | manifest mtime | = mtime |
+| file with no staged edit | `S_IFREG` `fileMode` | 1 | manifest size | manifest mtime | = mtime |
+| symlink | `S_IFLNK 0777` | 1 | length of the target | manifest mtime | = mtime |
 | retained (hidden) file | `S_IFREG` `fileMode` | 0 | retained size | retained mtime | = mtime |
 
 - Every time is stable between changes: a directory's mtime moves when a child is added, removed or
-  renamed on this client (locally or by an applied peer change), never on a mere look.
+  renamed on this client (locally or by an arrival), never on a mere look.
 - uid and gid are the configured `uid` and `gid`, the owner process's by default. Modes and
   ownership are presentation only: the store keeps neither, `chmod` and `chown` change nothing, and
   every client may present the same domain with its own.
@@ -193,8 +193,9 @@ The domain setting `symlinks` is `keep`, `follow` or `skip`.
 
 - Only `keep` lets the mount create symlinks; `follow` and `skip` refuse `symlink()` with EPERM,
   since neither may put a symlink object in the domain and "follow" is undefined at creation time.
-- Published symlinks (from a `keep` peer) are presented as symlinks whatever the local policy.
-- A symlink has no bytes to stage; its upload publishes the manifest the mirror already holds.
+- Symlinks a `keep` peer committed are presented as symlinks whatever the local policy.
+- A symlink has no bytes to stage or upload: its command carries the manifest the mirror already
+  holds.
 
 ### 4.7 Kernel caches and invalidation
 
@@ -241,7 +242,8 @@ and each durable point is a P2 acknowledgement ([durable-queue.md](../algorithms
 - `fsync` / `fdatasync` on a file: `sync(key)`: every staged byte of the key and its staged manifest
   are durable before the reply. Publishing is not implied.
 - A handle opened with `O_SYNC` or `O_DSYNC`: every `write` through it is followed by `sync(key)` before its reply.
-- `release` after a modification: `close(key)`, whose WAL record is durable before the reply.
+- `release` after a modification: `close(key)`, whose before-value and upload record are durable
+  before the reply.
 - `mkdir`, `rmdir`, `unlink`, `rename` and `symlink` are durable before their reply.
 - A crash of the owner loses nothing already made durable; a power loss may lose writes that were
   never flushed, as on any local filesystem.
@@ -256,8 +258,8 @@ until its last close. POSIX gives this for inodes; the mount gives it for keys:
   probes candidate names with `getattr` until one answers ENOENT), and unlinks the hidden name at the
   last close.
 - On that rename the mount asks the file operations to **retain** the victim's current content,
-  published or staged, as it is at that instant ([04 §3.3](../04-checkout-cache.md#33-read-handles)), binds the retention
-  to the hidden name, and then deletes the victim key in the domain (published as an ordinary
+  mirror entry or staged, as it is at that instant ([04 §3.3](../04-checkout-cache.md#33-read-handles)), binds the retention
+  to the hidden name, and then deletes the victim key in the domain (an ordinary
   delete).
 - `getattr`, `read` and `truncate` on the hidden name act on the retention. The first `write` to it
   copies the retained content into a scratch file private to the process and writes there. Nothing
@@ -267,10 +269,10 @@ until its last close. POSIX gives this for inodes; the mount gives it for keys:
   descriptor survives it). Scratch copies count against no cache cap and are removed at start.
 - Every open descriptor is a read handle of the file operations, one version per descriptor
   (close-to-open consistency, [04 §3.3](../04-checkout-cache.md#33-read-handles)): a peer's version
-  applied while a file is open is seen by opens after it; the open descriptor keeps reading the
+  installed by an arrival while a file is open is seen by opens after it; the open descriptor keeps reading the
   version it had. A local write through any descriptor is seen by every descriptor of the file. A
-  local edit meeting a peer's change is resolved by the conflict rules
-  ([conflict-resolution.md](../algorithms/conflict-resolution.md)).
+  local edit meeting a peer's change is settled by the merge
+  ([conflict-resolution.md §4](../algorithms/conflict-resolution.md#4-enacting-a-merge)).
 
 ## 5. Hooks
 
@@ -370,7 +372,7 @@ Recording happens on the failing worker and MUST NOT do anything that can fail (
   domain shows the deletion or the new file; a directory's mtime is identical on two `stat`s with no
   change between them, and moves after a child is created.
 - **Durability.** After `fsync` returns, killing the owner with SIGKILL and restarting it keeps the
-  bytes; the upload then publishes them.
+  bytes; they are then uploaded and committed.
 - **Freshness.** Another client's create, edit, delete, folder create and removal appear in the mount
   (lookup, attributes and a fresh listing), and a remote folder rename keeps the folder's identity.
 - **Multi-user.** With `allowOther` and the default ownership and modes, another user can read but not

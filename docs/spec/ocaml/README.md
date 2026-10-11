@@ -15,6 +15,26 @@ the spec, and what the code learned. A known pitfall is cited by its ID in
 [`../pitfalls/`](../pitfalls/README.md) (`A-7.9`) instead of being retold; a departure that
 is an open finding of [the review](../review/2026-10-01-rewrite.md) is cited by its number.
 
+## Where the implementation stands against the spec
+
+The implementation publishes through a journal, a WAL, conflict tables, folder claims and a folder
+trash. The spec has none of them. The implementation does not yet follow:
+
+- [algorithms/change-algebra.md](../algorithms/change-algebra.md): before-values, the derived pending
+  set and the merge;
+- [algorithms/publication.md](../algorithms/publication.md): the numbered log, the cycle, the
+  projection of the log onto the tree, the arrival by state;
+- [algorithms/conflict-resolution.md](../algorithms/conflict-resolution.md);
+- [03](../03-journal-sync.md): the formats and interfaces of the log and of the sync state;
+- the rules that follow from them in the other files: the tree written only by projections
+  ([data-model/backend.md](../data-model/backend.md) §6), one main per domain and reads from a copy
+  limited to chunks ([algorithms/replication.md](../algorithms/replication.md) §3.2, §4.6).
+
+The notes in this directory describe the implementation as it is. Where a note names a journal entry,
+a WAL record, a claim or the trash, it describes the code, not the spec.
+[algorithms/wal-and-journal.md](algorithms/wal-and-journal.md) describes a protocol the spec does not
+have; the spec's protocol is [algorithms/publication.md](../algorithms/publication.md).
+
 | Subsystem | Notes |
 |---|---|
 | Foundation: names, hashing, the runtime, retry, breaker, stop | [01-core.md](01-core.md) |

@@ -9,7 +9,8 @@ Rules shared by every frontend are owned elsewhere and only referenced here:
 - the frontend contract, item references, the item row, the actions and the shared request handler:
   [the frontend contract](../08-frontends.md);
 - the process model, the ownership lock and one-shot commands: [daemon and CLI](../07-daemon-cli.md);
-- the lazy tree and what a pull does: [04 §3.5](../04-checkout-cache.md#35-the-published-tree-full-and-lazy);
+- the lazy tree and what a pull does: [04 §3.5](../04-checkout-cache.md#35-the-local-tree-full-and-lazy);
+- the cycle, pushes and recovery: [publication](../algorithms/publication.md);
 - durability of local writes: [durable queue](../algorithms/durable-queue.md);
 - failure kinds, codes and deadlines: [failure model](../algorithms/failure-model.md);
 - trust boundaries, TLS and secrets: [security model](../algorithms/security-model.md);
@@ -25,9 +26,9 @@ process loads, and three things follow:
 
 1. **The host process is the owner.** There is no supervisor and no socket; requests arrive by direct
    call from threads the platform owns.
-2. **No replica.** A process that may die at any moment cannot keep a full mirror converged:
-   rebuilding one leaves every reference unresolvable until it ends. The owner reads a folder from
-   the store when it is asked for (the lazy tree) and applies no journal entry.
+2. **No full mirror.** A process that may die at any moment cannot keep a mirror of the whole
+   domain at the main's head. The owner keeps a lazy tree: it reads a folder from the main when it is
+   asked for, and runs no background cycle (§3.2).
 3. **A phone is often offline, or on a link that does not answer.** What was already seen and what is
    already cached MUST keep working without the store, and say that it may be out of date.
 
@@ -37,7 +38,7 @@ process loads, and three things follow:
   ([07 §2.3](../07-daemon-cli.md#23-the-ownership-lock)) with role `app` and no socket, and holds it
   for the life of the process; process death releases it. Only this process changes the domain's
   local state.
-- There is no stop and no drain. Process death is a crash-stop; the next boot reconciles
+- There is no stop and no drain. Process death is a crash-stop; the next boot recovers
   ([07 §3.6](../07-daemon-cli.md#36-embedded-host-android)).
 - One booted domain per process: the one the host names, or the only one the config names.
 - The frontend's descriptor ([08 §2.1](../08-frontends.md#21-frontend-descriptor)): presenting,
@@ -58,10 +59,11 @@ Boot is idempotent within a process; concurrent callers wait for the first.
    over the lazy tree.
 3. Start the scheduler on a thread of its own
    ([07 §3.7](../07-daemon-cli.md#37-event-loop-hosting)), run local recovery
-   ([04 §4.10](../04-checkout-cache.md#410-owner-start-local-recovery)), start the upload and
-   metadata queues, reconcile ([wal-and-journal.md](../algorithms/wal-and-journal.md)), and report
-   ready. Callers wait up to here: none of it reads a store, and a request answered before
-   reconciliation would see local state a crash left half-applied.
+   ([04 §4.10](../04-checkout-cache.md#410-owner-start-local-recovery)), start the upload queue,
+   and report ready. Callers wait up to here: none of it reads a store, and a request answered
+   before recovery would see local state a crash left half-applied. The in-flight record needs the
+   store: it is recovered before the first pull or push that reaches the main
+   ([publication §4.8](../algorithms/publication.md#48-crash-recovery)).
 4. In the background: resume deferred replica and backfill work left by earlier processes
    ([replication.md](../algorithms/replication.md)); start the maintenance schedule, the same list
    every owner runs ([07 §6](../07-daemon-cli.md#6-maintenance)).
@@ -74,14 +76,26 @@ Boot is idempotent within a process; concurrent callers wait for the first.
   ([07 §3.7](../07-daemon-cli.md#37-event-loop-hosting)); the host is restarted by the platform at
   its next use, and boots again.
 
-### 3.2 Freshness without a journal poller
+### 3.2 Freshness without a background cycle
 
-The owner runs no journal poller and applies no peer entry. Its view of what peers did comes from
-**pulls**: a pull reads one folder's children from the store and replaces the mirror's view of that
-folder, overlaid with this client's owed work, as the lazy tree specifies
-([04 §3.5](../04-checkout-cache.md#35-the-published-tree-full-and-lazy)). A completed pull stamps the
-folder ([04 §2.3](../04-checkout-cache.md#23-mirror-entries-and-markers)); a folder is **fresh** when
-this process completed a pull of it less than `pull_freshness` ago, measured on the monotonic clock.
+The owner runs no background cycle: nothing fetches on the cursor or on a timer. What it knows of
+the main comes from two places, both specified by the lazy tree
+([04 §3.5](../04-checkout-cache.md#35-the-local-tree-full-and-lazy)):
+
+- **pulls**: a pull reads one folder's state from the main and merges it with this client's pending
+  commands on that folder;
+- **the arrival that precedes each push**: the owner fetches the entries after its position and
+  merges them, for the folders it holds.
+
+**When the owner pushes.** The owner runs the cycle of
+[publication §4](../algorithms/publication.md#4-the-algorithm) only to push: the cycle's wait ends
+when the pending set has held a pushable command for `BATCH_DELAY`, and at once for a request that
+asks (a `write` with `await`). It never ends on the cursor or on `SWEEP`. A pending file command
+becomes pushable when its upload completes.
+
+A completed pull stamps the folder
+([04 §2.3](../04-checkout-cache.md#23-mirror-entries-and-markers)); a folder is **fresh** when this
+process completed a pull of it less than `pull_freshness` ago, measured on the monotonic clock.
 
 **When the owner pulls.**
 1. A child listing (`list_dir`) pulls the folder first unless it is fresh. A request carrying
@@ -91,10 +105,23 @@ this process completed a pull of it less than `pull_freshness` ago, measured on 
    mirror).
 2. A mutation that names a child by name (`create`, `mkdir`, `write` by parent and name, `symlink`,
    the destination of a `rename`) pulls the destination folder first unless it is fresh, so that an
-   existence check sees peers' entries.
-3. Opening a file (the bridge's `open`, `ensure_cached`, `fetch_range`) reads the file's current
-   manifest from the store and updates the mirror's entry; if the store no longer has it, the entry
-   is removed and the answer is `not_found`.
+   existence check sees what peers committed.
+3. Opening a file (the bridge's `open`, `ensure_cached`, `fetch_range`) first pulls the file's key:
+   the pull of [04 §3.5](../04-checkout-cache.md#35-the-local-tree-full-and-lazy) restricted to
+   one key of the file's folder.
+   - It reads the tree head, then the file's record on the main, then replays over it the commands
+     on that key of every log entry above that tree head. The record alone is never taken for the
+     main's value.
+   - It merges the value it read with the key's local value and before-value, and sets the key's
+     before-value so that what the client knows of the main at that key is what it read
+     ([conflict resolution §4](../algorithms/conflict-resolution.md#4-enacting-a-merge)). A key
+     with no pending change takes the main's value: its mirror entry is replaced, or removed when
+     the main holds no file there. A key with a pending change keeps what the merge keeps of it, at
+     the key or moved aside.
+   - It stamps no folder and writes nothing to the store.
+
+   The open then serves what its reference resolves to, and answers `not_found` when that is
+   nothing.
 4. `restore` of a folder pulls each folder of the subtree as it walks, so the subtree restored is the
    one the store holds. `evict` walks the mirror only.
 
@@ -111,9 +138,10 @@ folder it answered `outdated`, whether or not its children differ, and after eve
 performs, the owner sends the host a `changed` notice naming each folder concerned (§4.2). The host
 tells the platform; the owner does not track what the platform displays.
 
-Conflicts between this client's unpublished work and peers' changes are settled when the owner
-publishes, as the publish side of [conflict resolution](../algorithms/conflict-resolution.md)
-specifies.
+Clashes between this client's pending changes and what peers committed are settled by those
+merges, at a pull and at the arrival before a push
+([conflict resolution §4](../algorithms/conflict-resolution.md#4-enacting-a-merge)). A push never
+meets one.
 
 ### 3.3 Working without the store
 
@@ -138,21 +166,23 @@ when the mirror or the cache can answer it.
 - The view's age is carried in `pulledAt` for the host to show.
 
 **Opens: serve the version known here.**
-- The manifest read of rule 3 waits at most `pull_patience`, and not at all while the breaker is
-  open. Without an answer the open serves the mirror's version.
+- The one-key pull of rule 3 waits at most `pull_patience`, and not at all while the breaker is
+  open. Without an answer nothing is merged and the open serves the local value.
 - Bytes come from the chunk cache. A read that needs a chunk the cache lacks waits for the store as
   any read does and fails with DEADLINE ([failure-model.md](../algorithms/failure-model.md)) when it
   stays silent. A pinned file ([08 §3.4](../08-frontends.md#34-evict-and-restore)) is read whole
   without the store.
 
-**Mutations: accepted, published later.**
+**Mutations: accepted, pushed later.**
 - The destination pull of rule 2 waits at most `pull_patience`. Without it the mutation proceeds on
-  the mirror's view, is recorded in the WAL and answered; the queues publish it when the store
-  returns, across restarts.
+  the local view, records its before-values and is answered
+  ([publication §4.1](../algorithms/publication.md#41-a-local-operation)); it stays pending, across
+  restarts, until a push commits it once the store returns.
 - An exclusive creation checked against an out-of-date view may meet a name a peer took meanwhile.
-  It is settled at publish as a conflict, and nothing is overwritten.
-- `write` with `await` answers once the upload has published or has started failing; `isUploaded`
-  in the reply's item says which.
+  The arrival before the push settles it: the peer's item keeps the name, this client's is kept as
+  a conflicted copy, and nothing is overwritten.
+- `write` with `await` answers once the content is committed or its upload or push has started
+  failing; `isUploaded` in the reply's item says which.
 
 **What does need the store.** `share`, `restore` of bytes not yet cached, and the first listing of a
 folder answer `unreachable`. `status` never touches the store.
@@ -163,8 +193,9 @@ showed an offline state clears it and re-lists what it displays.
 
 ### 3.4 What is left out
 
-- The journal poller and entry application, and therefore full resync and the change feed
-  (`changes_since`, `list_all`, `cursor`): a pulled tree has no replica to rebuild or to diff.
+- The background cycle, `sync`, and the change feed with its generation (`changes_since`,
+  `list_all`, `cursor`, `full_resync`): a lazy tree holds only the folders it pulled, so there is no
+  whole tree to list or to diff. The host re-lists what it displays on notices (§4.2).
 - Subscriptions: there is no socket. The notice sink carries the same events (§4.2).
 - Symlinks: the host's config sets `symlinks: "skip"`; the platform's document model has none.
 - Ranged writes and `close`: the only write is whole-body adoption of a staged file.
@@ -197,7 +228,7 @@ The one call from the core to the host other than the log sink. A notice is one 
 event a subscriber would receive ([08 §3.8](../08-frontends.md#38-events)):
 
 - `{"event":"changed","domain":D,"id":N,"refs":["root","d:<id>",…]}`: the children of these folders
-  changed (§3.2), or an item in them changed state (an upload published, a pin was set or dropped).
+  changed (§3.2), or an item in them changed state (a write was committed, a pin was set or dropped).
 - `{"event":"recovered","domain":D,"id":N}` (§3.3).
 
 Notices are hints: a lost one costs promptness, never correctness. The sink is called on a thread of
@@ -272,8 +303,8 @@ bridge semantics, drains, and exits.
 | `request JSON` | the request, verbatim: the wire a host speaks |
 | `status` | the status text |
 
-Only a verb that sends a mutating action starts the queues and reconciles; the others only ensure
-the mirror's root.
+Only a verb that sends a mutating action starts the upload queue and the cycle; the others only
+ensure the mirror's root.
 
 `open REF` session: first line `{"ok":true,"size":N}` or a refusal; then for each input line
 `"OFFSET LENGTH"` (offset ≥ 0, length > 0) a line `{"ok":true,"length":n}` followed by exactly `n`
@@ -310,11 +341,14 @@ checked. Properties of the shared handler are [08](../08-frontends.md)'s.
 - Two listings of a folder within `pull_freshness`, and every page of one paged listing however
   far apart its pages are asked for, cost one store read; `"pull":"now"` costs one more.
 - A file a peer deleted disappears from the next pull and from the mirror; a peer's new file appears;
-  an open of a file a peer replaced serves the new version; an open of a file a peer deleted is
-  `not_found`.
-- A locally created, unpublished file survives a pull; a locally removed, unpublished file is not
-  listed back; a folder with a metadata record that cannot be published is still refreshed from the
-  store.
+  an open of a file a peer replaced serves the new version, also while the entry that replaced it is
+  not projected yet; an open of a file a peer deleted is `not_found`.
+- An open of a file with a pending local change that a peer replaced discards neither content: the
+  main's is at the name and the local one in a conflicted copy.
+- A file whose creation is pending survives a pull; a file whose removal is pending is not listed
+  back; a folder holding a pending command whose push keeps failing is still pulled.
+- With nothing pending the owner runs no cycle, and reads the main only in pulls. Before each push it
+  fetches and merges the entries after its position, for the folders it holds.
 - A pull that changed a folder's children, and every mutation, sends a `changed` notice naming the
   folder.
 
@@ -328,11 +362,12 @@ checked. Properties of the shared handler are [08](../08-frontends.md)'s.
 - A listing answered `outdated` on patience alone is followed by a `changed` notice when its pull
   completes with the same children.
 - With the store silent, a cached file opens and reads; a pinned file reads whole; `create`,
-  `mkdir`, `write`, `rename` and `delete` in a previously listed folder succeed and are published
+  `mkdir`, `write`, `rename` and `delete` in a previously listed folder succeed and are committed
   after the store returns, across a process kill.
 - When the store returns, the host receives `recovered`, and a `changed` notice for each folder
   whose background pull found different children.
-- An exclusive creation made offline onto a name a peer took meanwhile replaces nothing.
+- An exclusive creation made offline onto a name a peer took meanwhile replaces nothing and ends as
+  a conflicted copy.
 
 **Command group**
 - Every verb is driven by a spawned process per call, and the registered verbs are exactly the ones
@@ -342,10 +377,14 @@ checked. Properties of the shared handler are [08](../08-frontends.md)'s.
 
 - **Linked core, not a daemon or a process per call.** Android reaped the daemon; per-call processes
   had no read-ahead state and could not be ordered against the upload queue.
-- **Pulled tree.** A host without long-lived state cannot keep a replica: a resync wiped the mirror
-  and left every document unresolvable until it ended.
-- **Pulls overlaid with owed work, never skipped because of it.** Skipping froze a folder for as long
-  as one record kept failing.
+- **Pulled tree.** A host without a long-lived process cannot keep a full tree current: every boot
+  would owe an arrival over the whole domain before a listing could be trusted, where a pull owes
+  one folder.
+- **Pulls merged with pending commands, never skipped because of them.** Skipping froze a folder for
+  as long as one push kept failing.
+- **An open is a one-key pull, not a read of the record.** A record installed without its merge
+  would overwrite a pending edit, and a record read below the head would be taken for a peer's
+  change.
 - **Answer the last view, flagged, rather than fail.** A listing that failed whenever the store was
   silent made cached and pinned files unreachable exactly when they mattered.
 - **A view expires, unless a pin holds it.** A listing weeks old shown as the folder's contents

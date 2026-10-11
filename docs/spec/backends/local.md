@@ -45,14 +45,14 @@ Nothing is secret. Building a store touches no file.
 
 If any step fails, the temporary file is unlinked (best effort) and the failure is raised. If a concurrent removal of an empty parent makes step 2 or 3 fail with ENOENT, the write is retried once from step 1.
 
-Why each fsync: the file's fsync keeps a crash from leaving the final name on an empty or torn file (rename can reach the journal before delayed allocation writes the data). The directory's fsync makes the name itself survive, so an acknowledged put, claim, copy or delete is still there after power loss (P2).
+Why each fsync: the file's fsync keeps a crash from leaving the final name on an empty or torn file (rename can reach the journal before delayed allocation writes the data). The directory's fsync makes the name itself survive, so an acknowledged put, conditional create, copy or delete is still there after power loss (P2).
 
-**Claim** `claim(path, body)`:
+**Conditional create** `create(path, body)`:
 
 1. Stage a temporary file as in the durable write.
 2. `link(temp, path)`: success → won. EEXIST → read the holder.
 3. Where `link` is refused (`EPERM`, `EOPNOTSUPP`, `EMLINK`), rename without replacement (`RENAME_NOREPLACE`, `RENAME_EXCL`) where the platform offers it, with EEXIST meaning the same.
-4. Where neither exists, the claim fails REFUSED. There is no fallback.
+4. Where neither exists, the create fails REFUSED. There is no fallback.
 5. Unlink the temporary name, then fsync the directory.
 
 `link` and rename-without-replacement are used, never rename, because rename replaces silently. The winner's body is complete the instant its name appears.
@@ -63,15 +63,15 @@ Why each fsync: the file's fsync keeps a crash from leaving the final name on an
 
 | Contract op | Realisation |
 |---|---|
-| `put(k, b)` | The gate (§6) for a manifest or version key; then `write(<root>/<k>, b)`; then, with `verifyWrites`, the check of §9. |
-| `put_if_absent(k, b)` | `claim`. A win answers `Won`. EEXIST reads the holder: `Won` if it is byte-identical to `b` (a retransmitted link on a network filesystem can answer EEXIST to the winner), `Held(holder)` otherwise. If the holder vanished before it was read, the claim is repeated ([06 §3.3](../06-backends.md#33-put_if_absent)). |
-| `put_if_unchanged(k, b, expected)` | Under the key's lock (§5.2), and through the gate (§6) for a manifest or version key like any put. `expected = none`: `claim`, with EEXIST → `Changed` (the holder is not read). Otherwise: status of the file; no file, or an etag (§5.1) other than `expected.etag` → `Changed`; else `write(<root>/<k>, b)` → `Written`. Then, with `verifyWrites`, the check of §9. Best-effort (§5.2). |
+| `put(k, b)` | The gate (§6) for a log, manifest or version key; then `write(<root>/<k>, b)`; then, with `verifyWrites`, the check of §9. |
+| `put_if_absent(k, b)` | The gate (§6) for a log, manifest or version key; then `create`. A win answers `Won`. EEXIST reads the holder: `Won` if it is byte-identical to `b` (a retransmitted link on a network filesystem can answer EEXIST to the winner), `Held(holder)` otherwise. If the holder vanished before it was read, the create is repeated ([06 §3.3](../06-backends.md#33-put_if_absent)). |
+| `put_if_unchanged(k, b, expected)` | Under the key's lock (§5.2), and through the gate (§6) for a log, manifest or version key like any put. `expected = none`: `create`, with EEXIST → `Changed` (the holder is not read). Otherwise: status of the file; no file, or an etag (§5.1) other than `expected.etag` → `Changed`; else `write(<root>/<k>, b)` → `Written`. Then, with `verifyWrites`, the check of §9. Best-effort (§5.2). |
 | `get(k)` / `get_opt(k)` | Read the whole file. ENOENT → ABSENT / `none`. |
 | `get_range(k, off, len)` | Read `[off, min(off + len, size))`; `off ≥ size` → empty body; ENOENT → `none`. |
 | `head_opt(k)` | Status without following a symbolic link. A regular file → `{size; last_modified = mtime at full resolution; etag (§5.1); checksum = none}`. ENOENT → `none`. |
 | `delete(k)` | Unlink the regular file, fsync its directory, answer `true`. ENOENT → `false`. A directory is never removed through `delete`. |
 | `delete_multi(ks)` | Unlink each regular file in order, then fsync each distinct parent directory once, then return. Absent keys succeed. The first failure stops the call and is raised with its kind ([06 §3.4](../06-backends.md#34-delete-and-delete_multi)). |
-| `copy(src, dst)` | The gate (§6) when `dst` is a manifest or version key. `src` absent → ABSENT. Otherwise `link(src, temp)` in `dst`'s directory, `rename(temp, dst)`, fsync the directory, replacing any previous `dst`. Where a hard link is refused (`EXDEV`, `EMLINK`, `EPERM`, `EOPNOTSUPP`), read `src` and `write(dst)`. Hard links are safe because names are never written through. |
+| `copy(src, dst)` | The gate (§6) when `dst` is a log, manifest or version key. `src` absent → ABSENT. Otherwise `link(src, temp)` in `dst`'s directory, `rename(temp, dst)`, fsync the directory, replacing any previous `dst`. Where a hard link is refused (`EXDEV`, `EMLINK`, `EPERM`, `EOPNOTSUPP`), read `src` and `write(dst)`. Hard links are safe because names are never written through. |
 | `list_prefix(p, max)` | A walk of `<root>/<p>` that reports every regular file whose relative name is a valid key, with the entry `head_opt` gives. It omits temporary names, the files of §3 that are not store objects, directories, symbolic links and other file types. It descends into directories and never follows symbolic links. ENOENT on the prefix → an empty list. Sorted by key, truncated to `max`. |
 | `watch(k, last_seen)` | §8. |
 | `get_many`, `list_many` | Not declared: filesystem reads are not round trips. |
@@ -87,19 +87,20 @@ No service keeps a checksum of a file, so entries carry none: a checksum of a lo
 
 A file's etag is `<device>-<inode>-<mtime>-<ctime>-<size>`, each in lowercase hex, the modification and status-change times at the finest resolution the platform reports them (their exact bits where it reports floating-point times).
 
-- Every `put`, claim and body copy publishes a new inode by rename (§4), so the name changes whenever the body does. A hard-link `copy` gives `dst` the inode of `src`, and with it `src`'s etag: both name the same bytes, and a later write of either gives that key a new inode. Adding or removing a name of an inode changes its status-change time, so a hard-link copy, or the deletion of one of the names, also changes the etag of the other: a spurious change, which costs a re-read or a `Changed`, never a false "unchanged".
+- Every `put`, conditional create and body copy publishes a new inode by rename (§4), so the name changes whenever the body does. A hard-link `copy` gives `dst` the inode of `src`, and with it `src`'s etag: both name the same bytes, and a later write of either gives that key a new inode. Adding or removing a name of an inode changes its status-change time, so a hard-link copy, or the deletion of one of the names, also changes the etag of the other: a spurious change, which costs a re-read or a `Changed`, never a false "unchanged".
 - **Limit.** An inode freed by a replacement may be given to a later file. If that file lands at the same key, with the same size, with both its times within one tick of the filesystem's timestamps, it repeats an etag the key once had. A caller holding that old entry would take the new body as unchanged. The tick is a sub-microsecond clock on Linux local filesystems (a few milliseconds where the kernel uses its coarse clock), a second or more on FAT, HFS+ and many NFS servers. tsync's writes of one key are spaced by the work between them (a publish, a run), far beyond that tick, and every writer of the domain's objects is its owner (§5.2); an etag reused inside the tick needs three writes of one key within it, the first read and the last two unseen.
 - A filesystem that synthesises inode numbers (a FUSE mount without stable inodes) may change them across remounts. The etag then changes without the body, which costs a re-read or a `Changed`.
 
 ### 5.2 How far the conditional replace holds
 
-Every write of a key through this driver (`put`, `put_if_absent`, `put_if_unchanged`, a `copy` onto it, `delete`, `delete_multi`) holds that key's in-process lock for its duration. The status and the rename of a conditional replace are two steps, atomic under the lock against every writer in this process; a writer in another process or on another host that writes the key between them is overwritten. The domain's owner is the only writer of its domain's objects on a host ([07 §2.2](../07-daemon-cli.md#22-the-domain-owner)), so the window opens only for writers outside that model, and for hosts sharing a network mount, which §12 advises against. `expected = none` is a claim, atomic everywhere a claim is.
+Every write of a key through this driver (`put`, `put_if_absent`, `put_if_unchanged`, a `copy` onto it, `delete`, `delete_multi`) holds that key's in-process lock for its duration. The status and the rename of a conditional replace are two steps, atomic under the lock against every writer in this process; a writer in another process or on another host that writes the key between them is overwritten. The domain's owner is the only writer of its domain's objects on a host ([07 §2.2](../07-daemon-cli.md#22-the-domain-owner)), so the window opens only for writers outside that model, and for hosts sharing a network mount, which §12 advises against. `expected = none` is a conditional create, atomic everywhere one is.
 
 ## 6. The collection's gate and locks
 
 The driver of a collectable main hosts the interlock of [gc §5.4](../algorithms/gc.md#54-the-collection-interlock), so no writer can bypass it:
 
-- Every `put` or `copy` whose destination is in the manifest area or the version area passes the **reference gate** before it writes: shared publish lock, promotion of the named chunks when the run record is present, a presence check of every named chunk, and a refusal naming the missing chunks ([gc §5.4](../algorithms/gc.md#54-the-collection-interlock)).
+- Every `put`, `put_if_absent`, `put_if_unchanged` or `copy` whose destination is in the log, the manifest area or the version area passes the **reference gate** before it writes: shared publish lock, promotion of the named chunks when the run record is present, a presence check of every named chunk, and a refusal naming the missing chunks ([gc §5.4](../algorithms/gc.md#54-the-collection-interlock)). The chunks a log entry names are those of every manifest it carries ([03 §2.4](../03-journal-sync.md#24-log-entry-store)).
+- The create of a log entry runs inside the gate, under the shared publish lock: an entry refused for missing chunks is not created, and its number stays free.
 - The two lock files carry the **run lock** and the **publish lock** as host-level locks. The driver offers no exclusion across hosts beyond what the filesystem's lock manager provides (§12).
 
 ## 7. Orphaned temporary files
@@ -154,7 +155,7 @@ A mount is a network filesystem when the system reports it so: the filesystem ty
 | Watch | Polling at WATCH_INTERVAL: other hosts' writes raise no event here. |
 | Reads | Positioned reads MAY be preferred over mappings, so a vanished file or an unreachable server surfaces as the read's failure. |
 | Durability | Every fsync is a server round trip. Nothing is skipped. |
-| Claims | `link` where supported, then rename-without-replacement, else REFUSED. NFS: a retransmitted `link` whose first attempt succeeded can answer EEXIST, which reads back as `Won` (§5). |
+| Conditional create | `link` where supported, then rename-without-replacement, else REFUSED. NFS: a retransmitted `link` whose first attempt succeeded can answer EEXIST, which reads back as `Won` (§5). |
 | Copies | Hard links where supported, else a body copy over the wire. |
 | Conditional replace | Best-effort as §5.2; the window spans a server round trip. |
 | Checksums | `compute_checksum` reads the file over the wire. A host that can, asks the mount's own host through its http-proxy instead (`Proxy`). |
@@ -167,7 +168,7 @@ Recommended topology: one host mounts a network store and serves it to other hos
 ## 13. Conformance
 
 - **Durable writes.** `put`, `put_if_absent`, `copy` and `delete` each fsync the file (where one is written) before publishing it, and the directory after. The system-call order is recorded, and the count of published files is checked so the test cannot pass vacuously.
-- **Claims.** Concurrent claims on one name: exactly one `Won`, the others `Held` with the winner's body. A later claim gets the holder. A free name answers `Won` and stores the body. `delete` answers `true`, then `false`. After a delete the next claimant wins. The losers leave no temporary files.
+- **Conditional create.** Concurrent `put_if_absent` on one name with distinct bodies: exactly one `Won`, the others `Held` with the winner's body. A later call gets the holder, or `Won` when it carries the holder's bytes. A free name answers `Won` and stores the body. `delete` answers `true`, then `false`. After a delete the next caller wins. The losers leave no temporary files.
 - **Ranges.** Exact slices at the start, middle, end and whole; `[size−3, size+97)` → 3 bytes; an offset past the end → empty; an absent key → `none`. Bytes are compared, not just counted.
 - **Confinement.** Keys holding `..`, `.`, empty segments or a leading `/` are refused before any file is touched. A symbolic link inside the root that points outside is never followed, for reads, writes, deletes or listings.
 - **Listings.** A staged temporary file is neither listed nor deleted; a user file named `.syncthing.x.tmp` is listed; directories, symbolic links and the collection lock file are not listed; order is by key; `max_keys` is exact.
@@ -176,7 +177,7 @@ Recommended topology: one host mounts a network store and serves it to other hos
 - **Checksums.** `compute_checksum` equals the MD5 of the file's bytes; entries carry no checksum.
 - **Delete.** A key naming a directory removes nothing. An unlink refused with `EACCES` fails `delete_multi` REFUSED.
 - **Errors.** The same errno has the same kind in every operation. A simulated stalled call fails TRANSIENT/LINK within the local stall bound.
-- **Gate.** A manifest put naming a chunk absent from the surviving space is refused naming it; during a run the gate promotes the named chunks.
+- **Gate.** A manifest put naming a chunk absent from the surviving space is refused naming it; so is a `put_if_absent` of a log entry carrying such a manifest, and no entry is created; during a run the gate promotes the named chunks.
 - **Sweeping.** A temporary file older than the grace is removed by a walk; a younger one is kept.
 - **Watch.** A write of the key wakes a watch within a second; a watch whose key already differs from `last_seen` returns at once; a quiet key returns at the interval; reads of the object do not wake a watch on its directory.
 - **Corruption.** A good chunk files no marker and capabilities say `verified`. A scrambled body is filed under its marker key with the hash computed. A good rewrite clears the marker.

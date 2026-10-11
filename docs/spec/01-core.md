@@ -129,17 +129,16 @@ Example: file `photos/trip/img.jpg` in domain `home` is spelled
 A **folder id** names one folder for its whole life, across renames and moves.
 
 ```
-folder-id  = root-id | trash-id | hex-id
+folder-id  = root-id | hex-id
 root-id    = ".tsync-root"
-trash-id   = ".tsync-trash"
 hex-id     = 1*hexlower [ "-" 1*hexlower ]
 hexlower   = "0"–"9" | "a"–"f"
 ```
 
 - Writers MUST mint ids of the form `<12 hex> "-" <counter>`: the first 12 hex characters of
   this client's uuid, `-`, and a counter in lowercase hex that is unique for that client. Client identity, counter
-  leases and minting are owned by [03 §2.1](03-journal-sync.md#21-client-identity-and-folder-id-leases-local); arbitration between clients
-  that claim ids is owned by [data-model/backend.md §6](data-model/backend.md#6-folder-identity-arbitration).
+  leases and minting are owned by [03 §2.1](03-journal-sync.md#21-client-identity-and-folder-id-leases-local). A minted
+  id is final: nothing arbitrates or replaces it.
 - Readers SHOULD accept any other `hex-id` (for example 16 or 32 hex digits with no counter)
   as a folder id with the same meaning; writers MUST NOT mint one.
 - Anything else read where a folder id is expected is INVALID (from a request) or CORRUPT (from
@@ -166,9 +165,8 @@ reserved-key(prefix, id, name)  = prefix id "/" name     for name ∈ reserved l
   parent.
 - **Reserved leaves.** Every name a store keeps for itself begins with the sentinel `.tsync-`.
   No user leaf reaches a store key unhashed, so no user name can collide with one. The reserved
-  leaves under a folder namespace (`.tsync-parent`, `.tsync-index`), the trash namespace
-  (`.tsync-trash/`), the full key layout and the bodies filed at each key are specified in
-  [02](02-remote-model.md).
+  leaves under a folder namespace (`.tsync-parent`, `.tsync-index`), the full key layout and
+  the bodies filed at each key are specified in [02](02-remote-model.md).
 - A stored key's parent folder id is its second-to-last segment; a namespace's folder id is its
   last non-empty segment.
 
@@ -189,7 +187,7 @@ file-id  = 32hexlower
 ```
 
 - A **file id** names one file of a domain on one client for the file's whole life there: it is
-  kept across renames, moves and content changes made locally or applied from peers, and never
+  kept across renames, moves and content changes made locally or brought by a merge, and never
   reused. It is minted by the owner from the platform CSPRNG (128 bits) and is never published:
   another client knows the same file by another id. Where it is recorded is
   [local-cache §3.1](data-model/local-cache.md#31-namespace-mirror).
@@ -209,7 +207,7 @@ file-id  = 32hexlower
 - Formatting a parsed reference MUST reproduce the canonical string (`root`, `d:<id>`, `i:<id>`,
   `f:<id>/<leaf>`).
 - Resolving a reference MUST NOT mint an id or write anything: a resolution that minted
-  would publish a marker and could resurrect a deleted folder.
+  would create a folder nobody asked for.
 
 Rationale: a directory rename changes every descendant's path, and references reach system
 logs, so no user path appears in one unless the caller named it. A file id exists because a host
@@ -255,7 +253,7 @@ is at most `NAME_MAX_LOCAL` bytes, does not begin with `.tsync-`, and contains n
 - Tokens that grant access or identify a client (share tokens, the client uuid) MUST be drawn
   from the operating system's cryptographically secure generator. If it is unavailable the
   operation MUST fail; there is no fallback.
-- Short random ids (staged-body names, trash entries) MUST be drawn from a generator seeded
+- Short random ids (staged-body names) MUST be drawn from a generator seeded
   from the operating system's secure generator, and MUST NOT repeat across processes: a
   process created by `fork` MUST reseed before drawing (forked frontends once drew identical
   ids).
@@ -378,8 +376,9 @@ boards without a real-time clock sets it far off at boot), and peers' wall clock
   lease expiry on the holder's side, watchdogs, rate windows, throughput and ETA estimates, and
   debounce intervals.
 - The **wall clock** is used only for a time that is **persisted** or **compared with another
-  host**: journal entry timestamps and retention horizons, request-signature windows, GC run
-  names, version and trash timestamps, pin expiry, temp-file and orphan ages derived from file
+  host**: feed keys, retention ages (a log entry's age is the store's own modification time,
+  [publication.md](algorithms/publication.md) A8), request-signature windows, GC run
+  names, version timestamps, pin expiry, temp-file and orphan ages derived from file
   times, credential expiry claims, and human-readable timestamps in logs and status.
 - Every wall-clock comparison MUST tolerate a step: the result of a step is at most an early or
   late expiry, never a loss of data. Rules that compare wall times across hosts state their
@@ -787,7 +786,7 @@ An implementation MUST exhibit these observable properties.
 - **Chunking.** Range-to-pieces lists equal the examples in §3.4, always cover the range exactly
   once, and are empty for length 0 or chunk size 0.
 - **Keys.** The leaf `img.jpg` hashes to `066843ea47b80079-e0e3d2bb9b72c14d` under any folder;
-  the root and trash ids are `.tsync-root` and `.tsync-trash`; a folder index lives at
+  the root id is `.tsync-root`; a folder index lives at
   `<folder-id>/.tsync-index`; classification tells a child key, the index key, a namespace
   prefix and a temporary name apart. A file and a folder of one path are different logical
   keys; the root is the bare domain prefix and its parent is itself; parsing a string of
@@ -908,7 +907,7 @@ anchored. Matching is byte-wise and case-sensitive.
 | Monotonic clock for durations | wall steps at boot and under NTP trip breakers and fire stall timers | wall clock |
 | Servers never connect to clients | sandboxed clients can always reach the server | pushing to clients |
 | No TCP options on Unix sockets | an `EINVAL` on a departed peer killed an accept loop | runtime defaults |
-| Subscriber backlog drops oldest | events are hints on top of the journal | unbounded buffers |
+| Subscriber backlog drops oldest | events are hints on top of the change feed | unbounded buffers |
 | Snapshot or positioned reads for files others change in place | a truncate under a mapping kills the process | mapping the live file |
 | Resource strategy left to implementations; immutable data may be mapped | only observable limits constrain interoperability; objects replaced only by rename and content-addressed data never change in place | specified pool widths and memory strategies |
 | One composition root binds the runtime | registries stay singletons; swapping the runtime touches one place | runtime calls everywhere |
