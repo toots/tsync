@@ -472,20 +472,23 @@ module Make (C : Engine_ctx.S) = struct
       | Later_version v -> Some { n = e.n; why = `Version v }
       | Entry _ | Void -> None
 
-  (* Every key of the local tree, folders before what they hold. *)
-  let local_keys () =
+  (* Every key of the local tree: one walk of the mirror, and the staged edits
+     read once. *)
+  let local_keys () : Algebra.key list =
     let rec walk dir parent acc =
       List.fold_left
-        (fun acc (k : Algebra.key) ->
-          match k with
-            | `File _ -> k :: acc
-            | `Folder i -> (
-                match Mirror.key_of_id mirror i with
-                  | Some sub -> walk sub i (k :: acc)
-                  | None -> k :: acc))
-        acc (children_of dir parent)
+        (fun acc (c : Mirror.child) ->
+          match c.kind with
+            | `File _ -> `File { Algebra.parent; name = c.name } :: acc
+            | `Dir (Some id) ->
+                walk (Names.join dir c.name) id (`Folder id :: acc)
+            | `Dir None -> acc)
+        acc (Mirror.list mirror dir)
     in
     walk "" Folder_id.root []
+    @ List.filter_map
+        (fun (path, _) -> Option.map (fun p -> `File p) (place_opt path))
+        (Staged.edits staged)
 
   (* publication §4.7: the tree as its records say, then every entry above
      the tree head replayed over it. Only the keys where [M] differs from [R]
@@ -493,10 +496,21 @@ module Make (C : Engine_ctx.S) = struct
   let rec state_read ?(narrate = Narrate.none) () =
     let t = Log_store.tree_head log in
     let seen = Hashtbl.create 4096 in
-    let r_file p =
+    let dirs = Hashtbl.create 256 in
+    let dir_of id =
+      match Hashtbl.find_opt dirs id with
+        | Some dir -> dir
+        | None ->
+            let dir = Mirror.key_of_id mirror id in
+            Hashtbl.replace dirs id dir;
+            dir
+    in
+    let r_file (p : Algebra.place) =
       match Sync_state.before_file sync_state p with
         | Some before -> before
-        | None -> l_base.file p
+        | None ->
+            Option.bind (dir_of p.parent) (fun dir ->
+                local_file (Names.join dir p.name))
     and r_folder i =
       match Sync_state.before_folder sync_state i with
         | Some before -> before
