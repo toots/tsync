@@ -1,4 +1,9 @@
-let name ~client ~is_dir leaf n =
+let rec free ?(n = 1) ~client ~is_dir ~taken leaf =
+  let candidate = name ~client ~is_dir leaf n in
+  if taken candidate then free ~n:(n + 1) ~client ~is_dir ~taken leaf
+  else candidate
+
+and name ~client ~is_dir leaf n =
   let tag =
     if n <= 1 then Printf.sprintf " (conflicted copy from %s)" client
     else Printf.sprintf " (conflicted copy %d from %s)" n client

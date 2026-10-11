@@ -139,19 +139,7 @@ module Make (C : Engine_ctx.S) = struct
               | Some m -> Manifest.rename m leaf
               | None -> Fail.corrupt "%s: the version is not a manifest" path
           in
-          with_meta (fun () ->
-              with_key path (fun () ->
-                  begin_change path;
-                  ignore (discard_edit path);
-                  bump path;
-                  end_lineage path;
-                  Mirror.write_file ~own:true mirror path m;
-                  ignore (Mirror.ensure_file_id mirror path);
-                  settle path);
-              let op = Op.Put { path; size = m.size } in
-              feed ~fids:(note_fids [op]) [op]);
-          changed [path];
-          wake_cycle ()
+          with_meta (fun () -> install path m)
 
   (* Every maximal run of exactly 16 lowercase hex characters: the bodies a
      set-aside manifest may name. *)
@@ -387,12 +375,9 @@ module Make (C : Engine_ctx.S) = struct
     in
     let asked = ref false in
     let committed () =
-      match parent_id path with
+      match place_opt path with
         | None -> true
-        | Some parent ->
-            Sync_state.before_file sync_state
-              { parent; name = Names.leaf_of path }
-            = None
+        | Some place -> Sync_state.before_file sync_state place = None
     in
     while
       (not (committed ())) && (not (Atomic.get paused)) && not (failing ())
@@ -458,6 +443,5 @@ module Make (C : Engine_ctx.S) = struct
   let parked () = Dqueue.parked uploads
   let rearm () = Dqueue.rearm uploads
   let set_changed_hook f = changed_hook := f
-  let staged_edits () = Staged.edits staged
   let uploads = uploads_running
 end

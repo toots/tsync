@@ -47,6 +47,7 @@ type verified =
 
 module Make (C : Context.S) = struct
   module T = Tree.Make (C)
+  module P = Projection.Make (C)
 
   let d = C.domain
   let store = C.store
@@ -76,24 +77,14 @@ module Make (C : Context.S) = struct
       | [] -> ()
       | first :: _ ->
           List.iter
-            (fun (e : Log_store.entry) ->
-              List.iter
-                (fun (c : Log_entry.command) ->
-                  Hashtbl.replace table (Algebra.key_of c) c)
-                (Option.value ~default:[] (Log_store.commands e)))
-            (Log_store.read_entries log first));
+            (fun (c : Log_entry.command) ->
+              Hashtbl.replace table (Algebra.key_of c) c)
+            (Log_store.last_commands (Log_store.read_entries log first)));
     table
 
   let tree_findings ~narrate ~cancelled log =
     let expected = expected ~cancelled log in
-    let ids = Hashtbl.create 1024 in
-    Hashtbl.replace ids Folder_id.root ();
-    List.iter
-      (fun (e : Store.entry) ->
-        Option.iter
-          (fun id -> Hashtbl.replace ids id ())
-          (Key.folder_of_namespace_key d e.key))
-      (Cancel.race cancelled (fun () -> store.list_prefix (Key.manifests d)));
+    let ids = Cancel.race cancelled P.namespaces in
     let m = Mutex.create () in
     let disowned = ref []
     and anchors = Hashtbl.create 1024
@@ -133,7 +124,7 @@ module Make (C : Context.S) = struct
                 if anchor = None && not (Folder_id.is_root id) then
                   strays := e.key :: !strays)
               children))
-      (Hashtbl.fold (fun id () acc -> id :: acc) ids []);
+      ids;
     let unmarked =
       Hashtbl.fold
         (fun id (a : Folder.anchor) acc ->
@@ -191,7 +182,8 @@ module Make (C : Context.S) = struct
                   :: acc)
         expected []
     in
-    List.sort compare !disowned @ List.sort compare unmarked
+    List.sort compare !disowned
+    @ List.sort compare unmarked
     @ List.sort compare unaccounted
     @ List.map
         (fun key ->
