@@ -9,7 +9,6 @@ type t =
   | Gc_copies of copies
   | Expire of { apply : bool; cutoff : float }
   | Void_entry of { n : int }
-  | Upgrade of { apply : bool; discard : bool }
   | Import of {
       src : string;
       only : string list;
@@ -49,7 +48,6 @@ let kind = function
   | Gc_copies Retry_outstanding -> "gc --retry-outstanding"
   | Expire _ -> "expire"
   | Void_entry _ -> "void-entry"
-  | Upgrade _ -> "upgrade-from-journal"
   | Import _ -> "import"
   | Mirror _ -> "mirror"
   | Rsync { move = true; _ } -> "rsync --move"
@@ -469,8 +467,6 @@ let run io (dom : Tsync_domain.Domain.t) engine = function
   | Gc_copies act -> copies io dom.composite act
   | Expire { apply; cutoff } -> expire io dom ~apply ~cutoff
   | Void_entry { n } -> void_entry io dom n
-  | Upgrade { apply; discard } ->
-      Upgrade.run ~out:io.out ~cancelled:io.cancelled dom ~apply ~discard
   | Sync { full } ->
       let module E = (val engine : Tsync_sync.Engine.S) in
       let r = E.resync ~narrate:io.narrate ~full () in
