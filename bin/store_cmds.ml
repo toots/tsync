@@ -143,8 +143,28 @@ let void_entry_cmd =
        entries behind it are merged and projected."
     Term.(const void_entry $ n $ domain_arg $ verbose)
 
+(* Under the ownership lock but with no engine: an engine's start and drain
+   each run a cycle, which would arrive on the tree this command is there to
+   clean first. *)
 let upgrade apply discard name verbose =
-  run_job ?name verbose (Upgrade { apply; discard })
+  set_verbose verbose;
+  Tsync_owner.Owner.stop_on_signals ();
+  run (fun () ->
+      let config = config () in
+      let dom = domain ?name config in
+      let what = "tsync upgrade-from-journal" in
+      match Tsync_owner.Owner.acquire ~role:"command" ~what dom.name with
+        | Error _ ->
+            fail "%s is owned by another process: stop it first"
+              (Domain_name.to_string dom.name)
+        | Ok lock ->
+            Fun.protect
+              ~finally:(fun () -> Tsync_owner.Owner.release lock)
+              (fun () ->
+                Tsync_owner.Upgrade.run ~out:print_endline
+                  ~cancelled:Stop.requested
+                  (Tsync_domain.Domain.build ~owner:true config dom)
+                  ~apply ~discard))
 
 let upgrade_cmd =
   let discard =
