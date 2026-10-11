@@ -23,7 +23,7 @@
   (run ./lazy_test.exe)))
 
 (rule
- (alias runtest)
+ (alias runtest-serial)
  (action
   (diff lazy_test.expected lazy_test.output)))
 
