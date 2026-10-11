@@ -48,14 +48,9 @@ let client name : (module Engine.S) =
 let drain (module E : Engine.S) = E.drain ~grace:10. ()
 
 let pass (module E : Engine.S) =
-  (match E.apply_pass () with
+  match E.resync () with
     | _ -> ()
-    | exception e -> p "pass failed: %s\n" (Printexc.to_string e));
-  match E.bridge () with
-    | Engine.Hold r ->
-        p "holds: %s\n" r;
-        ignore (E.resync ())
-    | Incremental -> ()
+    | exception e -> p "pass failed: %s\n" (Printexc.to_string e)
 
 let shape label (module E : Engine.S) =
   let rec walk path =
@@ -109,8 +104,8 @@ let () =
   Rt.run_sync (fun () ->
       let a = client "A" and b = client "B" in
       let (module A) = a and (module B) = b in
-      A.start ~poll_journal:false ();
-      B.start ~poll_journal:false ();
+      A.start ~background:false ();
+      B.start ~background:false ();
       pass a;
       pass b;
       let rs ?move ?dry_run s d = A.rsync ?move ?dry_run ~src:s ~dst:d () in
@@ -165,6 +160,7 @@ let () =
         A.write path ~off:0 (Bigstring.of_string body);
         A.close path
       in
+      A.mkdir "pend" ~exclusive:false;
       put "pend/f.txt" "published";
       put "pend/g.txt" "g";
       drain a;
@@ -178,6 +174,7 @@ let () =
       A.set_paused false;
       drain a;
       p "\n== a move cancelled mid-batch announces only the moves made\n";
+      A.mkdir "mv" ~exclusive:false;
       List.iter
         (fun n -> put ("mv/" ^ n) n)
         ["a.txt"; "b.txt"; "c.txt"; "d.txt"];
@@ -198,7 +195,6 @@ let () =
       p "\n== refusals\n";
       report (rs (local src) (domain "dest/top.txt"));
       drain a;
-      p "\nowed: A %d/%d, unapplied B %d\n" (A.pending_uploads ())
-        (A.pending_metadata ())
-        (List.length (B.unapplied ())));
+      p "\nowed: A %d uploads, %d pending; B %d pending\n"
+        (A.pending_uploads ()) (A.activity ()).pending (B.activity ()).pending);
   Test_support.finish root

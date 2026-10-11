@@ -87,7 +87,7 @@ let () =
   Rt.run_sync (fun () ->
       let (module A), ctx = client "A" in
       let module X = Export.Make ((val ctx)) in
-      A.start ~poll_journal:false ();
+      A.start ~background:false ();
       ignore (A.import src);
       drain (module A);
       let cache_root = Filename.concat root "A/cache" in

@@ -1,7 +1,14 @@
 (executable
  (name formats_test)
  (modules formats_test)
- (libraries tsync_core tsync_remote tsync_checkout tsync_sync yojson unix))
+ (libraries
+  tsync_core
+  tsync_remote
+  tsync_checkout
+  tsync_sync
+  yojson
+  base64
+  unix))
 
 (rule
  (with-stdout-to

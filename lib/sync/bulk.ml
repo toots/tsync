@@ -91,11 +91,11 @@ module Make (C : Engine_ctx.S) = struct
       | `Folder i -> Sync_state.before_folder sync_state i <> None
 
     (* 05 §4.2: push, and return once none of the run's keys is pending; how
-       many are left when the run is cancelled first. *)
+       many are left when the run is cancelled, or the domain paused, first. *)
     let await ?(cancelled = Fun.const false) (run : run) =
       let left () = List.length (List.filter is_pending !run) in
       let rec loop () =
-        if left () = 0 || cancelled () then left ()
+        if left () = 0 || cancelled () || Atomic.get paused then left ()
         else (
           let committed =
             try (run_cycle ()).committed with
