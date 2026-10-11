@@ -224,6 +224,7 @@ let () =
   Sync_state.record_file state (at "one.jpg") None;
   Sync_state.record_file state (at "new.jpg") None;
   Sync_state.record_folder state sub (Some (root_place "Photos"));
+  Sync_state.record_file state (root_place "top.txt") None;
   let before_dir =
     List.fold_left Filename.concat data_dir ["sync"; "photos"; "before"]
   in
@@ -271,6 +272,8 @@ let () =
       | Some f when f.body = body -> string_of_int f.n
       | _ -> "none")
     (Sync_state.arrival reopened = Some arrival);
+  p "a file of the root is still pending: %b\n"
+    (Sync_state.before_file reopened (root_place "top.txt") = Some None);
   p "needs a state read: %b\n" (Sync_state.needs_state reopened);
   Fs.write_file_for_test
     (Filename.concat before_dir ("d-" ^ Folder_id.to_string sub))

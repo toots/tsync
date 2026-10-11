@@ -54,7 +54,6 @@ let encode_before key value =
   Yojson.Safe.to_string
     (`Assoc (Log_entry.key_fields key @ settled_fields value))
 
-(* An identity that does not parse reads as unknown: the key stays pending. *)
 let settled_of_json json : (Algebra.key * settled) option =
   let* key = ok (Log_entry.key_of_json json) in
   let field name =
@@ -63,12 +62,8 @@ let settled_of_json json : (Algebra.key * settled) option =
   match (field "drop", field "before", key) with
     | Some (`Bool true), _, _ -> Some (key, Drop)
     | _, Some v, `File _ ->
-        Some
-          ( key,
-            Before_file
-              (match Log_entry.guard_of_json v with
-                | Ok v -> v
-                | Error _ -> Some Unknown) )
+        let* v = ok (Log_entry.guard_of_json v) in
+        Some (key, Before_file v)
     | _, Some v, `Folder _ ->
         let* p = ok (Log_entry.place_of_json v) in
         Some (key, Before_folder p)
@@ -99,7 +94,7 @@ let is_record name =
   String.length name > 2
   && (name.[0] = 'f' || name.[0] = 'd')
   && name.[1] = '-'
-  && not (String.contains name '.')
+  && not (Text.contains name ".bad")
 
 let open_ ~data_dir domain =
   let dir =

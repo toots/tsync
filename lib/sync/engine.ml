@@ -335,7 +335,7 @@ module Make (C : Engine_ctx.S) = struct
           (Atomic.get stuck);
       damaged =
         Mutex.protect damaged_m (fun () ->
-            Hashtbl.fold (fun _ path acc -> path :: acc) damaged []);
+            Hashtbl.fold (fun _ (path, _) acc -> path :: acc) damaged []);
       stuck = List.length parked;
       retrying = List.length retrying;
       set_aside =
@@ -379,8 +379,16 @@ module Make (C : Engine_ctx.S) = struct
         | None -> true
         | Some place -> Sync_state.before_file sync_state place = None
     in
+    let stopped () =
+      Atomic.get cycle_failing <> None
+      || Atomic.get stuck <> None
+      || Option.fold ~none:false ~some:is_damaged (place_opt path)
+    in
     while
-      (not (committed ())) && (not (Atomic.get paused)) && not (failing ())
+      (not (committed ()))
+      && (not (Atomic.get paused))
+      && (not (failing ()))
+      && not (stopped ())
     do
       (match Staged.edit staged path with
         | Some { state = Uploaded _; _ } when not !asked ->

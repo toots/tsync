@@ -359,6 +359,24 @@ let () =
           p "  B: %s\n"
             (ignore (sync b);
              tree b));
+      scenario "a refused file is committed once written again" (fun root ->
+          let a = started root "A" in
+          ignore (sync a);
+          write a "f" "abcdefgh";
+          settle a;
+          let (module E) = a in
+          E.rename ~src:"f" ~dst:"g" ~exclusive:true;
+          ignore ((main root).delete (Key.chunk d (Chunk_key.of_body "efgh")));
+          p "  A, renamed, a chunk gone from the main: %s\n" (sync a);
+          p "  damaged: %s\n" (String.concat " " (E.activity ()).damaged);
+          write a "g" "ijkl";
+          settle a;
+          p "  A, g written again: %s; damaged: %d\n" (status a)
+            (List.length (E.activity ()).damaged);
+          let b = started root "B" in
+          p "  B: %s\n"
+            (ignore (sync b);
+             tree b));
       scenario "an entry its author never projected" (fun root ->
           let a = started root "A" in
           ignore (sync a);

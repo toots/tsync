@@ -46,14 +46,16 @@ the gate reads 1 chunks from the entry
 no position: true
 position file: "0000000001234567"
   d-3f9a0c1b2d4e-40b: {"folder":"3f9a0c1b2d4e-40b","before":[".tsync-root","Photos"]}
+  f-.tsync-root-05ccfe…: {"file":[".tsync-root","top.txt"],"before":null}
   f-3f9a0c1b2d4e-40a-1…: {"file":["3f9a0c1b2d4e-40a","one.jpg"],"before":"23159de6084fe0eb-fef0cbc1c405b4a8"}
   f-3f9a0c1b2d4e-40a-7…: {"file":["3f9a0c1b2d4e-40a","new.jpg"],"before":null}
 a second record of one key changes nothing: true
-pending: 3
-reopened: position 1234567, pending 3, in flight for entry 8, arrival kept true
+pending: 4
+reopened: position 1234567, pending 4, in flight for entry 8, arrival kept true
+a file of the root is still pending: true
 needs a state read: false
 an unparseable arrival reads as none: true
-after two unparseable records: pending 2, needs a state read true, set aside arrival.bad d-3f9a0c1b2d4e-40b.bad
+after two unparseable records: pending 3, needs a state read true, set aside arrival.bad d-3f9a0c1b2d4e-40b.bad
 
 == upload records and local intents (04 §2.8)
 {"file":["3f9a0c1b2d4e-40a","report.txt"],"attempts":2,"lastError":{"kind":"transient/link","detail":"connection reset"}}

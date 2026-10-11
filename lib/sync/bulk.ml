@@ -80,11 +80,21 @@ module Make (C : Engine_ctx.S) = struct
       | `Folder i -> Sync_state.before_folder sync_state i <> None
 
     (* 05 §4.2: push, and return once none of the run's keys is pending; how
-       many are left when the run is cancelled, or the domain paused, first. *)
+       many are left when the run is cancelled, the domain paused, or nothing
+       more can commit (a damaged file, an entry that cannot be followed). *)
     let await ?(cancelled = Fun.const false) (run : run) =
       let left () = List.length (List.filter is_pending !run) in
       let rec loop () =
-        if left () = 0 || cancelled () || Atomic.get paused then left ()
+        let hopeless () =
+          Atomic.get stuck <> None
+          || List.for_all
+               (function
+                 | `File p as key -> (not (is_pending key)) || is_damaged p
+                 | `Folder _ as key -> not (is_pending key))
+               !run
+        in
+        if left () = 0 || cancelled () || Atomic.get paused || hopeless () then
+          left ()
         else (
           let committed =
             try (run_cycle ()).committed with

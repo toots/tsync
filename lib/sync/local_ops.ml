@@ -367,8 +367,8 @@ module Make (C : Engine_ctx.S) = struct
             (parent_id path)
       | _ -> None
 
-  (* [Unknown] differs from every value, itself included, so the same value
-     read twice is told by its identity in memory. *)
+  (* Only a local value is ever [Unknown], which [Log_entry.equal] makes
+     differ from every value: read twice, it is the same by identity. *)
   let same v w = v == w || Log_entry.equal v w
   let same_file = Option.equal same
 
