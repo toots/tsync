@@ -191,7 +191,7 @@ module Make (C : Context.S) = struct
                   :: acc)
         expected []
     in
-    List.rev !disowned @ List.sort compare unmarked
+    List.sort compare !disowned @ List.sort compare unmarked
     @ List.sort compare unaccounted
     @ List.map
         (fun key ->

@@ -54,26 +54,21 @@ let settings : settings =
 
 let idle_sync =
   {
-    hold = None;
-    mark_age = Some 12.;
-    unapplied_entries = 0;
-    unapplied_reason = None;
-    parked_metadata = 0;
-  }
-
-let clean_wal =
-  {
-    intent = 0;
-    prepared = 0;
-    executed = 0;
-    stuck = 0;
-    retrying = 0;
-    set_aside = 0;
-    last_error = None;
+    position = Some 1444;
+    pending = 0;
+    in_flight = None;
+    tree_head = Some 1444;
+    cannot_follow = None;
   }
 
 let no_queues =
-  { pending_files = 0; pending_metadata = 0; in_flight = []; bytes_owed = 0 }
+  {
+    pending_files = 0;
+    parked = 0;
+    in_flight = [];
+    bytes_owed = 0;
+    last_error = None;
+  }
 
 let fuse : frontend =
   {
@@ -118,7 +113,6 @@ let gcs : backend =
     link = Some "wan";
     config = [("bucket", "media-bucket"); ("credentials", "***")];
     reach = Reachable { latency_ms = 51.2 };
-    journal = Entries { entries = 1444; behind = 0 };
     corrupted = Not_checked "no verification has run";
     health = Up;
     disk = None;
@@ -179,7 +173,7 @@ let healthy : machine =
                   pinned_bytes = 0;
                   max_cache = Some 10737418240;
                 };
-              wal = clean_wal;
+              set_aside = 0;
               queues = no_queues;
               frontends = [fuse];
               backends = [gcs];
@@ -277,13 +271,14 @@ let degraded : machine =
               };
             sync =
               {
-                hold = Some "no last-sync mark; holding until a rebuild";
-                mark_age = None;
-                unapplied_entries = 2;
-                unapplied_reason =
-                  Some "a peer's folder rename meets a local edit";
-                parked_metadata = 1;
+                position = Some 1440;
+                pending = 5;
+                in_flight = Some 1441;
+                tree_head = Some 1438;
+                cannot_follow =
+                  Some { entry = 1441; reason = "it is of version 2" };
               };
+            set_aside = 2;
             cache =
               {
                 chunks = 1088;
@@ -291,22 +286,13 @@ let degraded : machine =
                 pinned_bytes = 331769446;
                 max_cache = Some 214748364800;
               };
-            wal =
-              {
-                intent = 1;
-                prepared = 1;
-                executed = 1;
-                stuck = 1;
-                retrying = 2;
-                set_aside = 2;
-                last_error = Some "DEADLINE: store did not answer";
-              };
             queues =
               {
                 pending_files = 3;
-                pending_metadata = 1;
+                parked = 1;
                 in_flight = ["Photos/a.jpg"; "Photos/b.jpg"];
                 bytes_owed = mib 50;
+                last_error = Some "DEADLINE: store did not answer";
               };
             frontends =
               [
@@ -325,7 +311,6 @@ let degraded : machine =
                   gcs with
                   config = [("bucket", "files")];
                   reach = Unreachable "DNS lookup failed";
-                  journal = Counting;
                   corrupted = Checked { chunks = 3; truncated = true };
                   copies =
                     Some
@@ -369,7 +354,6 @@ let degraded : machine =
                   link = None;
                   config = [("path", "/srv/tsync")];
                   reach = Reachable { latency_ms = 0.4 };
-                  journal = Unreadable "permission denied";
                   corrupted = Checked { chunks = 0; truncated = false };
                   disk =
                     Some
@@ -435,7 +419,7 @@ let degraded : machine =
         };
         {
           level = Err;
-          message = "cannot bridge the journal";
+          message = "log entry 1441 cannot be followed";
           count = 1;
           first = 500.;
           last = 500.;
@@ -445,10 +429,10 @@ let degraded : machine =
   }
 
 let retrying : machine =
-  let wal =
+  let queues =
     {
-      clean_wal with
-      retrying = 1;
+      no_queues with
+      parked = 1;
       last_error = Some "LOCAL: Media/notes.txt: Permission denied";
     }
   in
@@ -456,7 +440,7 @@ let retrying : machine =
     healthy with
     domains =
       List.map
-        (function Answered d -> Answered { d with wal } | other -> other)
+        (function Answered d -> Answered { d with queues } | other -> other)
         healthy.domains;
   }
 

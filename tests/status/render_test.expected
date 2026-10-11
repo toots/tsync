@@ -12,7 +12,6 @@ Domain Media
   Backend gcs (gcs, main)  bucket media-bucket
     link             wan
     reachable        yes (51 ms)
-    journal          1444 entries, 0 to apply
     corrupted        not checked — no verification has run
     traffic          up 0 B (0 B/s), down 92 B (4 B/s)
 
@@ -44,25 +43,20 @@ Domain Files
   cache            1088 chunks, 9.5 GiB of 200.0 GiB, 316.4 MiB pinned
   PAUSED           changes stay local until resumed
   MAIN OFFLINE     reads and publishing wait for it
-  SYNC HELD        no last-sync mark; holding until a rebuild
-  unapplied        2 peer entries (a peer's folder rename meets a local edit)
-  parked           1 metadata change
-  uploads          3 files pending, 50.0 MiB owed, sending Photos/a.jpg, Photos/b.jpg
-  metadata         1 change pending
+  pending          5 changes to commit, creating entry 1441
+  CANNOT FOLLOW    log entry 1441: it is of version 2; nothing is fetched or pushed
   SET ASIDE        2 records that cannot be read, kept and never run
-  WAL STUCK        1 record: DEADLINE: store did not answer
-  RETRYING         2 records failing, retried with backoff
+  uploads          3 files pending, 50.0 MiB owed, sending Photos/a.jpg, Photos/b.jpg
+  PARKED           1 upload: DEADLINE: store did not answer
   Frontend http-proxy port 5446  NOT ANSWERING
   Backend gcs (gcs, main)  bucket files
     link             wan
     HELD DOWN        for 0m 42s after 5 failures (connection refused)
-    journal          counting…
     CORRUPTED        3 chunks or more
     copies           1204 objects owed (2 parked), 0.0/s
     sending          Music Production/…/XDROOT/Clip/ALLWAYS0010.MXF (4.8 GiB): chunk 205 of 615, 1.6 GiB sent, done in at most 2h 0m
   Backend disk (local, replica)  path /srv/tsync
     reachable        yes (0 ms)
-    journal          unreadable: permission denied
     disk             1.0 TiB free of 10.0 TiB
 
 Domain Media  NOT ANSWERING
@@ -78,7 +72,7 @@ Jobs
 
 Warnings (newest first)
   0m 10s ago WARN copy replica: parked (×3)
-  8m 20s ago ERROR cannot bridge the journal
+  8m 20s ago ERROR log entry 1441 cannot be followed
 
 survives the wire: true
 
@@ -90,14 +84,13 @@ Domain Media
   concurrency      4 uploads, 4 chunk buffers, 8 downloads
   read-only        yes
   cache            7494 chunks, 9.9 GiB of 10.0 GiB
-  RETRYING         1 record failing, retried with backoff: LOCAL: Media/notes.txt: Permission denied
+  PARKED           1 upload: LOCAL: Media/notes.txt: Permission denied
   Frontend fuse       pid 101  /home/u/tsync/Media
   Frontend http-proxy pid 102  port 5446  shared  share links
     io               read 3.0 MiB, written 1.0 KiB
   Backend gcs (gcs, main)  bucket media-bucket
     link             wan
     reachable        yes (51 ms)
-    journal          1444 entries, 0 to apply
     corrupted        not checked — no verification has run
     traffic          up 0 B (0 B/s), down 92 B (4 B/s)
 

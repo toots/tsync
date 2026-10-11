@@ -23,7 +23,7 @@ let () =
   let composite =
     Composite.create ~domain:d ~data_dir ~owner:true ~poke:ignore
       ~knowledge:
-        { Composite.is_index = (fun _ -> false); is_journal = (fun _ -> false) }
+        { Composite.is_index = (fun _ -> false); is_log = (fun _ -> false) }
       [{ name = "main"; role = Main; store }]
   in
   let module C = struct
@@ -66,10 +66,14 @@ let () =
             Rt.sleep 0.2
           done);
       let t0 = Unix.gettimeofday () in
-      let manifests, failures = E.rebuild () in
+      let synced = E.resync ~full:true () in
       Atomic.set stop true;
-      Printf.printf "%d manifests, %d failures, %.0fs\n" manifests failures
-        (Unix.gettimeofday () -. t0);
+      (match synced.arrival with
+        | `State (files, folders) ->
+            Printf.printf "%d files, %d folders, %d changed, %.0fs\n" files
+              folders synced.changed
+              (Unix.gettimeofday () -. t0)
+        | `Entries n -> Printf.printf "%d entries merged\n" n);
       show "start" start;
       show "peak (private)" (Atomic.get peak);
       show "after" (Usage.sample ());

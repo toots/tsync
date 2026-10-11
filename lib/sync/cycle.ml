@@ -510,7 +510,7 @@ module Make (C : Engine_ctx.S) = struct
   (* publication §4.7: the tree as its records say, then every entry above
      the tree head replayed over it. Only the keys where [M] differs from [R]
      are kept, with every key of [R] that the main lacks. *)
-  let rec state_read () =
+  let rec state_read ?(narrate = Narrate.none) () =
     let t = Log_store.tree_head log in
     let seen = Hashtbl.create 4096 in
     let r_file p =
@@ -529,6 +529,8 @@ module Make (C : Engine_ctx.S) = struct
           match record with
             | `File (p, m) ->
                 incr files;
+                Narrate.progress narrate "reading the main's tree: %s"
+                  (Narrate.count !files "file");
                 Hashtbl.replace seen (`File p) ();
                 let v = Some (Log_entry.Known m) in
                 if same_file (r_file p) v then acc
@@ -541,7 +543,7 @@ module Make (C : Engine_ctx.S) = struct
         []
     in
     match fetch t with
-      | `Pruned -> state_read ()
+      | `Pruned -> state_read ~narrate ()
       | `Entries entries -> (
           match List.find_map unfollowable entries with
             | Some s ->
@@ -597,8 +599,8 @@ module Make (C : Engine_ctx.S) = struct
 
   (* publication §4.7. Once its entry is gone the in-flight record cannot say
      whether the batch was committed, so the merge decides key by key. *)
-  let arrive_by_state () =
-    let head, theirs, read = state_read () in
+  let arrive_by_state ?narrate () =
+    let head, theirs, read = state_read ?narrate () in
     Sync_state.clear_in_flight sync_state;
     let changed = merge_and_enact ~head theirs in
     Sync_state.state_read sync_state;
@@ -743,23 +745,23 @@ module Make (C : Engine_ctx.S) = struct
       | Some a -> changed (with_meta (fun () -> run_arrival ~recovered:true a))
 
   (* publication §4.4: what was merged, and how many paths it changed. *)
-  let arrive ?(full = false) () =
+  let arrive ?narrate ?(full = false) () =
     complete_arrival ();
     recover_in_flight ();
     match position () with
-      | None -> arrive_by_state ()
+      | None -> arrive_by_state ?narrate ()
       | Some _ when full || Sync_state.needs_state sync_state ->
-          arrive_by_state ()
+          arrive_by_state ?narrate ()
       | Some h -> (
           match fetch h with
-            | `Pruned -> arrive_by_state ()
+            | `Pruned -> arrive_by_state ?narrate ()
             | `Entries [] ->
                 Atomic.set stuck None;
                 (`Entries 0, 0)
             | `Entries entries -> (
                 match List.find_map unfollowable entries with
                   | Some s when Atomic.get tree_head_seen >= s.n ->
-                      arrive_by_state ()
+                      arrive_by_state ?narrate ()
                   | Some s ->
                       Atomic.set stuck (Some s);
                       Fail.raise_ Fail.Corrupt
@@ -1058,7 +1060,7 @@ module Make (C : Engine_ctx.S) = struct
      [push_now] is false while the batch delay runs. A lazy tree arrives
      folder by folder when its host pulls, so its cycle only recovers and
      pushes. A paused domain runs none (07 §2.6). *)
-  let run_cycle ?(full = false) ?(push_now = true) () =
+  let run_cycle ?narrate ?(full = false) ?(push_now = true) () =
     if Atomic.get paused then
       { arrival = `Entries 0; changed = 0; committed = 0 }
     else
@@ -1068,7 +1070,7 @@ module Make (C : Engine_ctx.S) = struct
               complete_arrival ();
               recover_in_flight ();
               (`Entries 0, 0))
-            else arrive ~full ()
+            else arrive ?narrate ~full ()
           in
           let rec pushes committed =
             if not push_now then committed
@@ -1088,7 +1090,8 @@ module Make (C : Engine_ctx.S) = struct
     Atomic.set asked true;
     wake_cycle ()
 
-  (* publication §4, CYCLE. *)
+  (* publication §4, CYCLE. A lazy tree fetches nothing on the cursor or on a
+     timer (§4.11): its loop wakes to push. *)
   let cycle_loop () =
     let cursor = ref None
     and last = ref neg_infinity
@@ -1108,16 +1111,19 @@ module Make (C : Engine_ctx.S) = struct
         in
         (try
            Rt.first ~detach:true
-             [
-               (fun () -> Log_store.cursor_wait log !cursor);
-               (fun () -> Rt.Signal.wait ~since cycle_signal);
-               (fun () -> Stop.sleep wait);
-             ]
+             ((if C.lazy_tree then []
+               else [(fun () -> Log_store.cursor_wait log !cursor)])
+             @ [
+                 (fun () -> Rt.Signal.wait ~since cycle_signal);
+                 (fun () -> Stop.sleep wait);
+               ])
          with
           | Stop.Stopping -> raise Stop.Stopping
           | _ -> ());
         (match
-           let token = Log_store.cursor_token log in
+           let token =
+             if C.lazy_tree then None else Log_store.cursor_token log
+           in
            if Sync_state.pending_count sync_state > 0 && !dirty_since = None
            then dirty_since := Some (Rt.now ());
            let push_due =
@@ -1127,8 +1133,9 @@ module Make (C : Engine_ctx.S) = struct
            in
            let asked = Atomic.exchange asked false in
            if
-             asked || push_due || token <> !cursor
-             || Rt.now () -. !last >= sweep
+             asked || push_due
+             || (not C.lazy_tree)
+                && (token <> !cursor || Rt.now () -. !last >= sweep)
            then (
              last := Rt.now ();
              ignore (run_cycle ~push_now:(asked || push_due) ());

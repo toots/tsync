@@ -135,43 +135,7 @@ let () =
   p "shards after 0ff: %s\n"
     (String.concat " "
        (Gc_plan.after ~cursor:"0ff" ["a00"; "000"; "0ff"; "100"]));
-  p "\n== trash (§4.1): cutoff 1000\n";
-  let entries ages =
-    List.mapi
-      (fun i a ->
-        (k (Printf.sprintf "tsync/d/manifests/.tsync-trash/e%d" i), a))
-      ages
-  in
-  let show_trash = function
-    | Gc_plan.Delete_stale l -> "delete stale entries: " ^ keys l
-    | Skip_recent -> "skip: trashed again recently"
-    | Purge l -> "purge the subtree, then entries: " ^ keys l
-    | Refuse_live -> "refuse: live elsewhere"
-  in
-  List.iter
-    (fun (name, anchor, ages, on_demand) ->
-      p "%-34s -> %s\n" name
-        (show_trash
-           (Gc_plan.trash ~anchor ~cutoff:1000. ~on_demand (entries ages))))
-    [
-      ("live, entries old and new", Gc_plan.Live, [10.; 2000.], false);
-      ("live, on demand", Live, [10.], true);
-      ("in trash, one entry recent", In_trash, [10.; 2000.], false);
-      ("in trash, all old", In_trash, [10.; 20.], false);
-      ("no anchor, old", No_anchor, [10.], false);
-      ("in trash, recent, on demand", In_trash, [2000.], true);
-    ];
-  p "purge order: %s\n"
-    (String.concat " "
-       (List.map Key.prefix_to_string
-          (Gc_plan.purge_order
-             [
-               (Key.prefix "tsync/d/manifests/top/", 0);
-               (Key.prefix "tsync/d/manifests/deep/", 2);
-               (Key.prefix "tsync/d/manifests/mid/", 1);
-               (Key.prefix "tsync/d/manifests/mid2/", 1);
-             ])));
-  p "\n== versions (§4.3): cutoff 2 s\n";
+  p "\n== versions (§4.1): cutoff 2 s\n";
   p "deleted: %s\n"
     (keys
        (Gc_plan.versions ~cutoff:2.
@@ -181,38 +145,49 @@ let () =
             k "tsync/d/versions/a/h/3000000000";
             k "tsync/d/versions/a/h/notatime";
           ]));
-  p "\n== journal (§4.4): now 100 days, horizon 30 days\n";
+  p "\n== log (publication §4.9): now day 100, retention 30 days\n";
   let day = 86400. in
-  let entry days =
-    let e =
-      Tsync_sync.Entry_key.make
-        ~ms:(Int64.of_float (days *. day *. 1000.))
-        ~client:"c"
-    in
-    (e, Tsync_sync.Entry_key.journal_key d e)
-  in
-  let es = List.map entry [10.; 50.; 69.; 71.; 99.] in
+  let entries = List.map (fun (n, age) -> (Key.log_entry d n, age *. day)) in
   let show l =
-    String.concat " "
-      (List.map
-         (fun key ->
-           let e, _ = List.find (fun (_, k') -> Key.equal k' key) es in
-           Printf.sprintf "day%.0f"
-             (Int64.to_float (Tsync_sync.Entry_key.ms e) /. 1000. /. day))
-         l)
+    match l with
+      | [] -> "nothing"
+      | l ->
+          String.concat " "
+            (List.map
+               (fun key -> string_of_int (int_of_string (Key.leaf key)))
+               l)
   in
   List.iter
-    (fun (name, cutoff, cursor) ->
-      p "%-40s -> %s\n" name
+    (fun (name, tree_head, es) ->
+      p "%-52s -> %s\n" name
         (show
-           (Gc_plan.journal ~now:(100. *. day) ~horizon:(30. *. day)
-              ~cutoff:(cutoff *. day) ~cursor es)))
+           (Gc_plan.log ~now:(100. *. day) ~retention:(30. *. day) ~tree_head
+              (entries es))))
     [
-      ("cutoff day 60", 60., None);
-      ("cutoff day 100: the horizon holds", 100., None);
-      ("cutoff day 60, cursor names day 10", 60., Some (fst (List.hd es)));
+      ( "entries 1 to 5, all old, tree head 5: the head stays",
+        5,
+        [(1, 10.); (2, 20.); (3, 30.); (4, 40.); (5, 50.)] );
+      ( "tree head 3: nothing above it goes",
+        3,
+        [(1, 10.); (2, 20.); (3, 30.); (4, 40.); (5, 50.)] );
+      ( "entries 2 and 3 younger than the retention",
+        5,
+        [(1, 10.); (2, 80.); (3, 90.); (4, 40.); (5, 50.)] );
+      ("one entry, old: it is the head", 1, [(1, 10.)]);
+      ("listed out of order", 5, [(5, 50.); (2, 20.); (1, 10.)]);
     ];
-  p "\n== shares (§4.5): now 100\n";
+  p "takeovers the tree head (7) has passed: %s\n"
+    (String.concat " "
+       (List.map Key.leaf
+          (Gc_plan.takeovers ~tree_head:7
+             [
+               Key.takeover d 6 ~generation:1;
+               Key.takeover d 7 ~generation:2;
+               Key.void d 7;
+               Key.takeover d 8 ~generation:1;
+               Key.void d 9;
+             ])));
+  p "\n== shares (§4.3): now 100\n";
   List.iter
     (fun b ->
       p "%-50s -> %s\n" b

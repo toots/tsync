@@ -15,13 +15,13 @@ a later dry run, the function not notified: 1 discard request outstanding
 == status: corruption markers
 a store that verifies its writes, no marker: 0 corrupt
 with a marker: 1 corrupt
-== data-integrity --repair
-two findings, a dry run:
-  2 would be deleted
-  (dry run: nothing changed; drop --dry-run to act)
-  exit 0
-cancelled after the first:
-  1 would be deleted
-  cancelled: 1 finding not considered
+== data-integrity
+a finding in the tree, reported:
+  1 disowned markers
+    tsync/d/manifests/.tsync-root/ad26d6ec4afc91bb-0d49a261c0e96ea9 names a folder that has no anchor
+  exit 1
+the same under --repair, a dry run: nothing repairs the tree
+  d: no chunk to repair
+  1 finding in the tree: reported only, nothing repairs the tree
   (dry run: nothing changed; drop --dry-run to act)
   exit 1

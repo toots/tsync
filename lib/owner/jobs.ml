@@ -370,7 +370,7 @@ let integrity io (dom : Tsync_domain.Domain.t) ~repair ~apply ~detail ~source =
     if r.corrupt = [] then
       say "%s: no chunk to repair" (Domain_name.to_string dom.name);
     if findings <> [] then
-      say "%s in the tree are reported only: nothing repairs the tree"
+      say "%s in the tree: reported only, nothing repairs the tree"
         (Narrate.count (List.length findings) "finding");
     if skipped > 0 then
       say "cancelled: %s not considered" (Narrate.count skipped "chunk");

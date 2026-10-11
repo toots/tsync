@@ -18,7 +18,8 @@ let store_path = Filename.concat root "store"
 
 (* 09 §5.3: doubles over the real local store. Under [Hung] a call waits until
    the link returns, then goes through; under [Down] it answers unreachable.
-   Listings are counted on entry. *)
+   Listings and reads of the log are counted on entry: a pull makes one or
+   the other. *)
 let mode = Atomic.make `Up
 let listings = Atomic.make 0
 
@@ -35,7 +36,11 @@ let gated (s : Store.t) : Store.t =
     s with
     put = (fun ?mode k b -> gate (fun () -> s.put ?mode k b));
     put_if_absent = (fun k b -> gate (fun () -> s.put_if_absent k b));
-    get_opt = (fun k -> gate (fun () -> s.get_opt k));
+    get_opt =
+      (fun k ->
+        if Key.is_log_entry k || Key.leaf k = "tree-head" then
+          Atomic.incr listings;
+        gate (fun () -> s.get_opt k));
     get_range = (fun k o l -> gate (fun () -> s.get_range k o l));
     head_opt = (fun k -> gate (fun () -> s.head_opt k));
     delete = (fun k -> gate (fun () -> s.delete k));
@@ -71,8 +76,7 @@ let peer : (module Engine.S) Lazy.t =
      let store = Local.create ~name:"main" store_path in
      let composite =
        Composite.create ~domain:d ~data_dir ~owner:true ~poke:ignore
-         ~knowledge:
-           { is_index = (fun _ -> false); is_journal = (fun _ -> false) }
+         ~knowledge:{ is_index = (fun _ -> false); is_log = (fun _ -> false) }
          [{ name = "main"; role = Main; store }]
      in
      let module C = struct
@@ -96,7 +100,7 @@ let peer : (module Engine.S) Lazy.t =
      end in
      let e = (module Engine.Make (C) : Engine.S) in
      let (module E) = e in
-     E.start ~poll_journal:false ();
+     E.start ~background:false ();
      e)
 
 let peer_does f =

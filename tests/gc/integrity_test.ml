@@ -1,13 +1,14 @@
-(* Integrity (spec 05 §4.10, gc.md §4.6): one of each finding planted on a
-   local main, reported, repaired as a dry run, repaired, reported again. *)
+(* Integrity (spec 05 §4.10): a tree projected from its log is healthy; one of
+   each finding planted on it is reported; a tree behind its log makes no
+   finding; corrupt chunks are repaired, as a dry run first. *)
 
 open Tsync_core
 open Tsync_store
+open Tsync_remote
 open Tsync_gc
 
 let p fmt = Printf.printf fmt
 let d = Domain_name.v "d"
-let day = 86400.
 
 let () =
   let root =
@@ -16,25 +17,15 @@ let () =
       (Printf.sprintf "tsync-integrity-%d" (Unix.getpid ()))
   in
   Fs.rm_rf root;
-  let store_root = Filename.concat root "store" in
-  let main = Local.create ~name:"main" store_root
+  let main = Local.create ~name:"main" (Filename.concat root "store")
   and replica = Local.create ~name:"replica" (Filename.concat root "replica") in
-  let now = Unix.gettimeofday () in
   let ids =
     [
       ("live", "0000000000a1-1");
       ("other", "0000000000a2-1");
-      ("twice", "0000000000a3-1");
       ("moved", "0000000000a4-1");
-      ("lost", "0000000000a5-1");
-      ("nested", "0000000000a6-1");
-      ("young", "0000000000a7-1");
-      ("tomb", "0000000000a8-1");
-      ("gone", "0000000000a9-1");
-      ("binned", "0000000000b1-1");
-      ("unbinned", "0000000000b2-1");
-      ("top", "0000000000c1-1");
-      ("inner", "0000000000c2-1");
+      ("stray", "0000000000a5-1");
+      ("unanchored", "0000000000a6-1");
     ]
   in
   let id n = Folder_id.v (List.assoc n ids) in
@@ -44,56 +35,117 @@ let () =
       s ids
     |> Text.replace_all ~sub:"tsync/d/" ~by:""
   in
-  let put ?(age = 0.) key body =
-    main.put key (Bigstring.of_string body);
-    let t = now -. (age *. day) in
-    Unix.utimes (Filename.concat store_root (Key.to_string key)) t t
+  let knowledge =
+    { Composite.is_index = (fun _ -> false); is_log = (fun _ -> false) }
   in
-  let marker ?age parent name child =
-    put ?age (Key.child d parent name)
-      (Folder.marker_body { name; id = id child })
-  and anchor ?age child parent name =
-    put ?age
-      (Key.anchor d (id child))
-      (Folder.anchor_body { parent; aname = name })
-  in
-  let chunk = Chunk_key.of_body "" in
-  let file ?age parent name =
-    put ?age (Key.child d parent name)
-      (Manifest.make ~name ~size:0 ~mtime:0. ~chunk_size:Chunking.chunk_size_min
-         [chunk])
-        .body
+  let context name (main : Store.t) members =
+    let composite =
+      Composite.create ~domain:d
+        ~data_dir:(Filename.concat root name)
+        ~owner:true ~poke:ignore ~knowledge
+        ({ Composite.name = "main"; role = Main; store = main } :: members)
+    in
+    (module struct
+      let domain = d
+      let store = Composite.store composite
+      let composite = composite
+      let versioning = false
+      let chunk_size_config = Some 8
+      let max_downloads = 4
+      let max_chunk_buffers = 4
+    end : Context.S)
   in
   Rt.run_sync (fun () ->
-      put (Key.chunk d chunk) "";
-      marker Folder_id.root "live" "live";
-      anchor "live" Folder_id.root "live";
-      file (id "live") "keep.txt";
-      marker Folder_id.root "other" "other";
-      anchor "other" Folder_id.root "other";
-      marker Folder_id.root "twice" "twice";
-      marker (id "live") "twice-again" "twice";
-      marker Folder_id.root "moved" "moved";
-      anchor "moved" Folder_id.root "moved";
-      marker (id "other") "moved-before" "moved";
-      put (Key.trash_entry d "e1")
-        (Folder.trash_body { name = "live"; id = id "live" } ~path:"live");
-      anchor ~age:60. "lost" (id "gone") "lost";
-      file ~age:60. (id "lost") "a.txt";
-      anchor ~age:60. "nested" (id "lost") "nested";
-      file ~age:60. (id "nested") "b.txt";
-      file (id "young") "c.txt";
-      anchor ~age:60. "tomb" Folder_id.root "tomb";
-      anchor "binned" Folder_id.trash "binned";
-      file (id "binned") "d.txt";
-      put (Key.trash_entry d "e2")
-        (Folder.trash_body { name = "binned"; id = id "binned" } ~path:"binned");
-      file (id "unbinned") "e.txt";
-      put (Key.trash_entry d "e3")
-        (Folder.trash_body
-           { name = "unbinned"; id = id "unbinned" }
-           ~path:"old/unbinned");
+      let module C =
+        (val context "data" main
+               [{ name = "replica"; role = Replica; store = replica }])
+      in
+      let module R = Remote.Make (C) in
+      let module P = Projection.Make (C) in
+      let module I = Integrity.Make (C) in
+      let log = Log_store.create d C.store in
+      let at parent name = { Algebra.parent; name } in
+      let content name body =
+        Log_entry.Known
+          (R.upload_chunks ~name ~size:(String.length body) ~chunk_size:8
+             ~mtime:1. (fun _ -> Bytes (Bigstring.of_string body)))
+      in
+      let commit ?(project = true) n commands =
+        ignore
+          (Log_store.create_entry log n
+             (Log_entry.encode { author = "a"; commands }));
+        if project then (
+          P.apply ~before_write:ignore commands;
+          Log_store.raise_tree_head log n)
+      in
+      let keep = content "keep.txt" "kept" in
+      commit 1
+        [
+          `Folder (id "live", None, Some (at Folder_id.root "live"));
+          `Folder (id "other", None, Some (at Folder_id.root "other"));
+          `Folder (id "moved", None, Some (at (id "other") "before"));
+          `File (at (id "live") "keep.txt", None, Some keep);
+          `File (at (id "live") "gone.txt", None, Some keep);
+        ];
+      commit 2
+        [
+          `Folder
+            ( id "moved",
+              Some (at (id "other") "before"),
+              Some (at Folder_id.root "moved") );
+        ];
       let sound n = Chunk_key.of_body n in
+      let chunk_name c =
+        List.fold_left
+          (fun s n ->
+            if Chunk_key.equal c (sound n) then Printf.sprintf "<%s>" n else s)
+          (Chunk_key.to_string c)
+          ["on main"; "own copy"; "nowhere"]
+      in
+      let show (r : Integrity.report) =
+        p "healthy %b\n" (Integrity.healthy r);
+        (match r.tree with
+          | Behind { tree_head; head } ->
+              p "  behind: tree head %d, head %d; no finding made\n" tree_head
+                head
+          | Findings findings ->
+              List.iter
+                (fun f -> p "  %s\n" (alias (Integrity.describe f)))
+                findings);
+        List.iter
+          (fun (c : Integrity.corrupt) ->
+            p "  corrupt on %s: %s\n" c.member (chunk_name c.chunk))
+          r.corrupt
+      in
+      p "== a tree projected from its log\n";
+      show (I.report ());
+      p "\n== one of each finding\n";
+      let put key body = main.put key (Bigstring.of_string body) in
+      put
+        (Key.child d (id "other") "before")
+        (Folder.marker_body { name = "before"; id = id "moved" });
+      put
+        (Key.child d Folder_id.root "unanchored")
+        (Folder.marker_body { name = "unanchored"; id = id "unanchored" });
+      ignore (main.delete (Key.child d Folder_id.root "other"));
+      (match content "keep.txt" "changed" with
+        | Known m -> put (Key.child d (id "live") "keep.txt") m.body
+        | _ -> ());
+      ignore (main.delete (Key.child d (id "live") "gone.txt"));
+      (match content "lost.txt" "lost" with
+        | Known m -> put (Key.child d (id "stray") "lost.txt") m.body
+        | _ -> ());
+      let planted = I.report () in
+      show planted;
+      p "a cancelled report: %s\n"
+        (match I.report ~cancelled:(Fun.const true) () with
+          | _ -> "finished"
+          | exception Fail.E f -> f.reason);
+      p "\n== an entry above the tree head\n";
+      commit ~project:false 3
+        [`Folder (id "stray", None, Some (at Folder_id.root "stray"))];
+      show (I.report ());
+      p "\n== corrupt chunks\n";
       List.iter
         (fun n ->
           main.put (Key.chunk d (sound n)) (Bigstring.of_string n);
@@ -104,72 +156,17 @@ let () =
         (fun ((s : Store.t), n) ->
           s.put (Key.marker d (sound n)) (Bigstring.of_string "{}"))
         [(replica, "on main"); (main, "own copy"); (main, "nowhere")];
-      let composite =
-        Composite.create ~domain:d
-          ~data_dir:(Filename.concat root "data")
-          ~owner:true ~poke:ignore
-          ~knowledge:
-            {
-              Composite.is_index = (fun _ -> false);
-              is_journal = (fun _ -> false);
-            }
-          [
-            { name = "main"; role = Main; store = main };
-            { name = "replica"; role = Replica; store = replica };
-          ]
-      in
-      let module C = struct
-        let domain = d
-        let store = Composite.store composite
-        let composite = composite
-        let versioning = true
-        let chunk_size_config = None
-        let max_downloads = 4
-        let max_chunk_buffers = 4
-      end in
-      let module I = Integrity.Make (C) in
-      let chunk_name c =
-        List.fold_left
-          (fun s n ->
-            if Chunk_key.equal c (sound n) then Printf.sprintf "<%s>" n else s)
-          (Chunk_key.to_string c)
-          ["on main"; "own copy"; "nowhere"]
-      in
-      let show (r : Integrity.report) =
-        p "healthy %b, %d tombstones\n" (Integrity.healthy r) r.tombstones;
-        List.iter
-          (fun f -> p "  %s\n" (alias (Integrity.describe f)))
-          r.findings;
-        List.iter
-          (fun (c : Integrity.corrupt) ->
-            p "  corrupt on %s: %s\n" c.member (chunk_name c.chunk))
-          r.corrupt
-      in
-      let tree_outcome = function
-        | Integrity.Deleted -> "deleted"
-        | Anchored -> "anchored"
-        | Adopted -> "adopted"
-        | Young -> "young"
-        | Nested -> "nested"
-        | Left -> "left"
-        | Incomplete -> "incomplete"
-        | Failed r -> "failed: " ^ r
-      and chunk_outcome = function
+      let chunk_outcome = function
         | Integrity.Cleared -> "cleared"
         | Repaired from -> "repaired from " ^ from
         | Unrepairable -> "unrepairable"
       in
       let repair ~apply =
-        let r = I.report () in
-        List.iter
-          (fun (f, o) ->
-            p "  %s -> %s\n" (alias (Integrity.describe f)) (tree_outcome o))
-          (I.repair_tree ~apply r);
         List.iter
           (fun ((c : Integrity.corrupt), o) ->
             p "  %s on %s -> %s\n" (chunk_name c.chunk) c.member
               (chunk_outcome o))
-          (I.repair_chunks ~apply r)
+          (I.repair_chunks ~apply (I.report ()))
       in
       let listing () =
         List.map
@@ -179,42 +176,21 @@ let () =
               (s.list_prefix Key.root))
           [main; replica]
       in
-      p "== report\n";
-      show (I.report ());
-      p "a cancelled report: %s\n"
-        (match I.report ~cancelled:(Fun.const true) () with
-          | _ -> "finished"
-          | exception Fail.E f -> f.reason);
-      p "a repair cancelled before it starts repairs %d findings\n"
-        (List.length (I.repair_tree ~cancelled:(Fun.const true) (I.report ())));
-      p "\n== repair, dry run\n";
       let before = listing () in
       repair ~apply:false;
       p "dry run changed nothing: %b\n" (listing () = before);
-      p "\n== repair\n";
       repair ~apply:true;
-      p "\n== report after the repair\n";
-      show (I.report ());
-      let trash =
-        List.map
-          (fun (f : Tsync_remote.Tree.Make(C).trashed) ->
-            Printf.sprintf "%s at %s"
-              (alias (Folder_id.to_string f.id))
-              (Option.value ~default:"?" f.path))
-          (let module T = Tsync_remote.Tree.Make (C) in
-          T.trashed ())
-      in
-      p "trash: %s\n" (String.concat ", " (List.sort compare trash));
       p "replica's copy of <on main> sound: %b\n"
         (replica.get_opt (Key.chunk d (sound "on main"))
         = Some (Bigstring.of_string "on main"));
-      p "\n== a folder the walk cannot list\n";
-      marker ~age:1000. Folder_id.root "top" "top";
-      anchor ~age:1000. "top" Folder_id.root "top";
-      marker ~age:1000. (id "top") "inner" "inner";
-      anchor ~age:1000. "inner" (id "top") "inner";
-      file ~age:1000. (id "inner") "kept.txt";
-      let unlistable = Key.namespace d (id "top") in
+      p "the tree findings are still there, untouched: %b\n"
+        (Log_store.raise_tree_head log 3;
+         match ((I.report ()).tree, planted.tree) with
+           | Findings now, Findings then_ ->
+               List.for_all (fun f -> List.mem f now) then_
+           | _ -> false);
+      p "\n== a namespace that cannot be listed fails the report\n";
+      let unlistable = Key.namespace d (id "live") in
       let flaky =
         {
           main with
@@ -226,43 +202,10 @@ let () =
           list_many = None;
         }
       in
-      let composite =
-        Composite.create ~domain:d
-          ~data_dir:(Filename.concat root "data-flaky")
-          ~owner:true ~poke:ignore
-          ~knowledge:
-            {
-              Composite.is_index = (fun _ -> false);
-              is_journal = (fun _ -> false);
-            }
-          [{ name = "main"; role = Main; store = flaky }]
-      in
-      let module F = struct
-        let domain = d
-        let store = Composite.store composite
-        let composite = composite
-        let versioning = true
-        let chunk_size_config = None
-        let max_downloads = 4
-        let max_chunk_buffers = 4
-      end in
+      let module F = (val context "data-flaky" flaky []) in
       let module I = Integrity.Make (F) in
-      let r = I.report () in
-      p "unreadable: %s; healthy %b\n"
-        (String.concat ", "
-           (List.map (fun k -> alias (Key.to_string k)) r.unreadable))
-        (Integrity.healthy r);
-      List.iter
-        (fun (f, o) ->
-          match f with
-            | Integrity.Orphan _ ->
-                p "  %s -> %s\n" (alias (Integrity.describe f)) (tree_outcome o)
-            | _ -> ())
-        (I.repair_tree ~apply:true r);
-      p "inner still live: %b\n"
-        (main.get_opt (Key.child d (id "inner") "kept.txt") <> None
-        && main.get_opt (Key.anchor d (id "inner"))
-           = Some
-               (Bigstring.of_string
-                  (Folder.anchor_body { parent = id "top"; aname = "inner" }))));
+      p "%s\n"
+        (match I.report () with
+          | r -> Printf.sprintf "a report, healthy %b" (Integrity.healthy r)
+          | exception Fail.E f -> "no report: " ^ f.reason));
   Test_support.finish root

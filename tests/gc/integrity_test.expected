@@ -1,63 +1,30 @@
-== report
-healthy false, 1 tombstones
-  folder <twice> is at 2 paths: live/twice-again, twice
-  manifests/<other>/3d1f6d2e0f2564f6-a4edf94725a4bfb8 names a folder whose anchor files it under the root as "moved"
-  trash entry manifests/.tsync-trash/e1 names folder <live>, which is live
-  twice (folder <twice>) has no anchor
-  live/twice-again (folder <twice>) has no anchor
-  old/unbinned (folder <unbinned>), in the trash, has no anchor
-  folder <lost> ("lost") is unreachable, holding 1 object: manifests/<lost>/f01e5cbbc09d4fc4-9a0fcd66f030de75
-  folder <nested> ("nested") is unreachable, holding 1 object, inside another unreachable folder: manifests/<nested>/3c697ec236bbf61f-698ad1290042cc94
-  folder <young> ("<young>") is unreachable, holding 1 object: manifests/<young>/d6d50f267ed1aabb-7fe71c7d92c1e0c0
-  corrupt on main: <own copy>
-  corrupt on main: <nowhere>
-  corrupt on replica: <on main>
-a cancelled report: cancelled
-a repair cancelled before it starts repairs 0 findings
+== a tree projected from its log
+healthy true
 
-== repair, dry run
-  folder <twice> is at 2 paths: live/twice-again, twice -> left
-  manifests/<other>/3d1f6d2e0f2564f6-a4edf94725a4bfb8 names a folder whose anchor files it under the root as "moved" -> deleted
-  trash entry manifests/.tsync-trash/e1 names folder <live>, which is live -> deleted
-  twice (folder <twice>) has no anchor -> left
-  live/twice-again (folder <twice>) has no anchor -> left
-  old/unbinned (folder <unbinned>), in the trash, has no anchor -> anchored
-  folder <lost> ("lost") is unreachable, holding 1 object: manifests/<lost>/f01e5cbbc09d4fc4-9a0fcd66f030de75 -> adopted
-  folder <nested> ("nested") is unreachable, holding 1 object, inside another unreachable folder: manifests/<nested>/3c697ec236bbf61f-698ad1290042cc94 -> nested
-  folder <young> ("<young>") is unreachable, holding 1 object: manifests/<young>/d6d50f267ed1aabb-7fe71c7d92c1e0c0 -> young
+== one of each finding
+healthy false
+  manifests/.tsync-root/32edd589a699a275-98d299c1ac4e50ea names a folder that has no anchor
+  manifests/<other>/112a231873239e27-c65f2beec4ce1041 names a folder whose anchor files it under the root as "moved"
+  folder <other> is anchored under the root as "other" and has no marker there
+  manifests/<live>/18954525e207201b-dcfdae3db302a2bd holds content d5f96b27b136a597-356ebc973cafc9a8, and the log gives it content d919e86de687ce50-05cef325b63712c0
+  manifests/<live>/e299f7a82a2f5a0b-1843e38cd17a5a0a holds no record, and the log gives it content d919e86de687ce50-05cef325b63712c0
+  manifests/<stray>/5ae30706307654ad-be307db52c489e08 holds a record of a folder with no anchor, which the log does not account for
+a cancelled report: cancelled
+
+== an entry above the tree head
+healthy false
+  behind: tree head 2, head 3; no finding made
+
+== corrupt chunks
   <own copy> on main -> cleared
   <nowhere> on main -> unrepairable
   <on main> on replica -> repaired from main
 dry run changed nothing: true
-
-== repair
-  folder <twice> is at 2 paths: live/twice-again, twice -> left
-  manifests/<other>/3d1f6d2e0f2564f6-a4edf94725a4bfb8 names a folder whose anchor files it under the root as "moved" -> deleted
-  trash entry manifests/.tsync-trash/e1 names folder <live>, which is live -> deleted
-  twice (folder <twice>) has no anchor -> left
-  live/twice-again (folder <twice>) has no anchor -> left
-  old/unbinned (folder <unbinned>), in the trash, has no anchor -> anchored
-  folder <lost> ("lost") is unreachable, holding 1 object: manifests/<lost>/f01e5cbbc09d4fc4-9a0fcd66f030de75 -> adopted
-  folder <nested> ("nested") is unreachable, holding 1 object, inside another unreachable folder: manifests/<nested>/3c697ec236bbf61f-698ad1290042cc94 -> nested
-  folder <young> ("<young>") is unreachable, holding 1 object: manifests/<young>/d6d50f267ed1aabb-7fe71c7d92c1e0c0 -> young
   <own copy> on main -> cleared
   <nowhere> on main -> unrepairable
   <on main> on replica -> repaired from main
-
-== report after the repair
-healthy false, 1 tombstones
-  folder <twice> is at 2 paths: live/twice-again, twice
-  twice (folder <twice>) has no anchor
-  live/twice-again (folder <twice>) has no anchor
-  folder <nested> ("nested") is unreachable, holding 1 object: manifests/<nested>/3c697ec236bbf61f-698ad1290042cc94
-  folder <young> ("<young>") is unreachable, holding 1 object: manifests/<young>/d6d50f267ed1aabb-7fe71c7d92c1e0c0
-  corrupt on main: <nowhere>
-trash: <binned> at binned, <lost> at lost, <unbinned> at old/unbinned
 replica's copy of <on main> sound: true
+the tree findings are still there, untouched: true
 
-== a folder the walk cannot list
-unreadable: manifests/<top>/.tsync-parent; healthy false
-  folder <nested> ("nested") is unreachable, holding 1 object: manifests/<nested>/3c697ec236bbf61f-698ad1290042cc94 -> incomplete
-  folder <young> ("<young>") is unreachable, holding 1 object: manifests/<young>/d6d50f267ed1aabb-7fe71c7d92c1e0c0 -> incomplete
-  folder <inner> ("inner") is unreachable, holding 1 object: manifests/<inner>/2af84fa98a68a9b1-19465e194feef43e -> incomplete
-inner still live: true
+== a namespace that cannot be listed fails the report
+no report: listing failed

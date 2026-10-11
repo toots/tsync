@@ -804,7 +804,7 @@ let act : type a. t -> send:(Protocol.line -> unit) -> a Protocol.request -> a =
           Protocol.domain = domain_name t;
           read_only = t.domain.domain.read_only;
           paused = E.is_paused ();
-          pending_uploads = E.pending_uploads ();
+          pending_uploads = max (E.pending_uploads ()) (E.pending_changes ());
           pending_downloads = List.length downloading;
           uploading = List.map transfer (E.uploads ());
           downloading;

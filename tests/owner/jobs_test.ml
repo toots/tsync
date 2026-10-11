@@ -70,7 +70,7 @@ let () =
               ~knowledge:
                 {
                   Composite.is_index = (fun _ -> false);
-                  is_journal = (fun _ -> false);
+                  is_log = (fun _ -> false);
                 }
               [
                 { name = "main"; role = Main; store = main };
@@ -140,41 +140,24 @@ let () =
         (Bigstring.of_string "{}");
       p "with a marker: %s" (corrupted ());
       ignore (main.delete (Key.marker d (Chunk_key.of_body "rot")));
-      p "== data-integrity --repair";
-      let live = Folder_id.v "0000000000a1-1" in
-      let put key body = main.put key (Bigstring.of_string body) in
-      put
-        (Key.child d Folder_id.root "live")
-        (Folder.marker_body { name = "live"; id = live });
-      put (Key.anchor d live)
-        (Folder.anchor_body { parent = Folder_id.root; aname = "live" });
-      List.iter
-        (fun e ->
-          put (Key.trash_entry d e)
-            (Folder.trash_body { name = "live"; id = live } ~path:"live"))
-        ["e1"; "e2"];
-      let repair =
+      p "== data-integrity";
+      let stray = Folder_id.v "0000000000a1-1" in
+      main.put
+        (Key.child d Folder_id.root "stray")
+        (Bigstring.of_string
+           (Folder.marker_body { name = "stray"; id = stray }));
+      let integrity ~repair =
         Jobs.Integrity
           {
             verify = false;
-            repair = true;
+            repair;
             apply = false;
-            detail = false;
+            detail = true;
             source = None;
           }
       in
-      p "two findings, a dry run:";
-      run dom repair;
-      (* Cancelled once the first repair has been narrated. *)
-      let stop = Atomic.make false in
-      let narrate =
-        {
-          Narrate.none with
-          say =
-            (fun s ->
-              if Text.contains s "would be deleted" then Atomic.set stop true);
-        }
-      in
-      p "cancelled after the first:";
-      run ~cancelled:(fun () -> Atomic.get stop) ~narrate dom repair);
+      p "a finding in the tree, reported:";
+      run dom (integrity ~repair:false);
+      p "the same under --repair, a dry run: nothing repairs the tree";
+      run dom (integrity ~repair:true));
   Test_support.finish root

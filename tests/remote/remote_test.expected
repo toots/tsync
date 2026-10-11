@@ -1,16 +1,12 @@
-== five clients claim one name
-won: 1; every loser adopts the winner: true
-confirm: final
-
 == files and deduplication
 a: 3 chunks, b: 2 chunks, chunk objects: 3
 parallel chunk uploads count every byte sent: true
 empty file names the empty chunk once: true
 versions of a.txt: 1
-renamed manifest records its new leaf: c.txt
+a manifest is recorded under its key's leaf: c.txt
 
 == the tree
-Photos/ Photos/Trip/ Photos/empty Photos/c.txt Photos/a.txt
+Photos/ Photos/Trip/ Photos/a.txt Photos/b.txt Photos/c.txt Photos/empty
 find Photos/Trip: the folder
 
 == a listing that fails once is walked again with its subtree
@@ -20,15 +16,8 @@ failed once: true; unusable: 0; folders: Photos Photos/Trip Photos/Trip/Day1
 listed at: Photos Moved Moved/Day1
 old path: missing
 
-== trash and restore
-trash entries: 1; anchor in trash: true; live: gone
-after restore: entries 0, found true
-
-== a folder trashed twice reports its newest path
-paths: Two Two Two Two Two
-
-== a placement onto a taken name
-taken by Photos
+== a marker whose folder has no anchor is disowned
+listed at: Photos Moved Moved/Day1
 
 == a range read is not queued behind whole-chunk reads
 range "234" within 0.5s: true
@@ -289,16 +278,14 @@ range "234" within 0.5s: true
   tsync/photos/chunks/fe3/fe3881de3b440515-4a5aaca0aa05aea0 (8)
   tsync/photos/chunks/fec/fec713192cf04182-4446f4a94955d36f (8)
   tsync/photos/chunks/ff4/ff46da8285825222-980e17d2dfe0c618 (8)
-  tsync/photos/manifests/.tsync-root/48e1a90f5af8ebab-1f4a03b4e3db4fd0 (52)
   tsync/photos/manifests/.tsync-root/857fcda0047eeab4-a677d171b8d38674 (50)
+  tsync/photos/manifests/.tsync-root/9103934fc83c580d-2b0b4be229e38566 (49)
   tsync/photos/manifests/<photos-id>/.tsync-parent (40)
-  tsync/photos/manifests/<photos-id>/249fdb46916455c7-93a78be56770e1c0 (48)
+  tsync/photos/manifests/<photos-id>/3c697ec236bbf61f-698ad1290042cc94 (143)
   tsync/photos/manifests/<photos-id>/8f8952eab4c14116-c70a51267db6e78e (110)
   tsync/photos/manifests/<photos-id>/d6d50f267ed1aabb-7fe71c7d92c1e0c0 (143)
   tsync/photos/manifests/<photos-id>/f01e5cbbc09d4fc4-9a0fcd66f030de75 (110)
-  tsync/photos/manifests/aaaaaaaaaaaa-7/.tsync-parent (42)
+  tsync/photos/manifests/aaaaaaaaaaaa-7/.tsync-parent (39)
   tsync/photos/manifests/aaaaaaaaaaaa-7/507610a8e2b0c3b5-f763932de49b6c0d (48)
   tsync/photos/manifests/aaaaaaaaaaaa-8/.tsync-parent (41)
-  tsync/photos/manifests/bbbbbbbbbbbb-1/.tsync-parent (40)
-  tsync/photos/versions/<photos-id>/3c697ec236bbf61f-698ad1290042cc94/<ns> (143)
   tsync/photos/versions/<photos-id>/f01e5cbbc09d4fc4-9a0fcd66f030de75/<ns> (176)

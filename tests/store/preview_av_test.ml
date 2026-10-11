@@ -106,7 +106,7 @@ let served video root =
     Composite.create ~domain:d
       ~data_dir:(Filename.concat root "data")
       ~owner:true ~poke:ignore
-      ~knowledge:{ is_index = (fun _ -> false); is_journal = (fun _ -> false) }
+      ~knowledge:{ is_index = (fun _ -> false); is_log = (fun _ -> false) }
       [
         {
           name = "main";
@@ -127,7 +127,8 @@ let served video root =
   let module R = Tsync_remote.Remote.Make (C) in
   let cs = 65536 in
   let publish name content =
-    R.publish ~parent:Folder_id.root ~leaf:name
+    R.put_manifest
+      (Key.child C.domain Folder_id.root name)
       (R.upload_chunks ~name ~size:(String.length content) ~chunk_size:cs
          ~mtime:1. (fun i ->
            Bytes

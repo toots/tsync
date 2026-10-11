@@ -58,28 +58,15 @@ module Make (_ : Context.S) : sig
   (** Snapshot the replaced body when versioning (best effort, bounded). *)
   val save_version : Key.t -> unit
 
-  (** Put a manifest, saving a version first; on a "missing chunks" refusal the
-      named chunks are re-sent from [resend] and the put retried. *)
+  (** Put a manifest, saving a version first unless [save] is false; on a
+      "missing chunks" refusal the named chunks are re-sent from [resend] and
+      the put retried. A projection is its only caller. *)
   val put_manifest :
     ?resend:(Chunk_key.t -> Bigstring.t option) ->
     ?save:bool ->
     Key.t ->
     Manifest.t ->
     unit
-
-  (** Publish at [(parent, leaf)], recording [leaf] as the manifest's name. *)
-  val publish :
-    ?resend:(Chunk_key.t -> Bigstring.t option) ->
-    parent:Folder_id.t ->
-    leaf:string ->
-    Manifest.t ->
-    unit
-
-  (** Snapshot, then delete; answers whether a manifest was there. *)
-  val delete_slot : Folder_id.t -> string -> bool
-
-  (** Snapshots, gated copy, delete of the source, re-put with the new leaf. *)
-  val rename_file : src:Folder_id.t * string -> dst:Folder_id.t * string -> unit
 
   (** Versions of a slot, newest first, with their timestamps in ns. *)
   val list_versions : Folder_id.t -> string -> (int64 * Store.entry) list
@@ -89,8 +76,4 @@ module Make (_ : Context.S) : sig
   val all_versions : unit -> (string * (int64 * Store.entry) list) list
 
   val get_version : Store.entry -> string
-
-  (** Put a version's body back at the slot (after snapshotting the current
-      one). *)
-  val revert : parent:Folder_id.t -> leaf:string -> Store.entry -> unit
 end

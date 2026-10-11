@@ -33,8 +33,8 @@ let knowledge =
   {
     Composite.is_index =
       (fun key -> String.ends_with ~suffix:".tsync-index" (Key.to_string key));
-    is_journal =
-      (fun key -> Key.under (Key.journal d) key || Key.equal key (Key.cursor d));
+    is_log =
+      (fun key -> Key.under (Key.log d) key || Key.equal key (Key.cursor d));
   }
 
 let show = function Some s -> Printf.sprintf "%S" s | None -> "none"
@@ -108,8 +108,19 @@ let () =
       Contract.put s (Key.chunk d ck2) "two";
       let manifest = k "tsync/d/manifests/.tsync-root/aaaa" in
       Contract.put s manifest (manifest_body [ck1; ck2]);
-      Contract.put s (k "tsync/d/journal/2026-09/1790000000000-abc") "entry";
-      Contract.put s (Key.cursor d) "1790000000000-abc";
+      Contract.put s (Key.log_entry d 1)
+        (Log_entry.encode
+           {
+             author = "a";
+             commands =
+               [
+                 `Folder
+                   ( Folder_id.mint ~uuid:"aaaaaaaaaaaa" ~counter:1,
+                     None,
+                     Some { parent = Folder_id.root; name = "x" } );
+               ];
+           });
+      Contract.put s (Key.cursor d) (Key.entry_number 1);
       Contract.put s (k "tsync/d/manifests/.tsync-root/.tsync-index") "index";
       p "owed before start: %s\n"
         (String.concat ", "
@@ -126,11 +137,11 @@ let () =
       let has (st : Store.t) key = Contract.get st key <> None in
       List.iter
         (fun (n, (st : Store.t)) ->
-          p "%s: chunks %b %b, manifest %b, journal %b, cursor %b, index %b\n" n
+          p "%s: chunks %b %b, manifest %b, log %b, cursor %b, index %b\n" n
             (has st (Key.chunk d ck1))
             (has st (Key.chunk d ck2))
             (has st manifest)
-            (has st (k "tsync/d/journal/2026-09/1790000000000-abc"))
+            (has st (Key.log_entry d 1))
             (has st (Key.cursor d))
             (has st (k "tsync/d/manifests/.tsync-root/.tsync-index")))
         [("replica", replica); ("backfill", backfill)];
