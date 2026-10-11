@@ -1056,7 +1056,8 @@ module Make (C : Engine_ctx.S) = struct
     committed : int;
   }
 
-  (* One cycle (publication §4): arrive, push while a push commits, project.
+  (* One cycle (publication §4): arrive, push while a push commits, and again
+     after the arrival a refusal asks for, a few times; then project.
      [push_now] is false while the batch delay runs. A lazy tree arrives
      folder by folder when its host pulls, so its cycle only recovers and
      pushes. A paused domain runs none (07 §2.6). *)
@@ -1072,17 +1073,19 @@ module Make (C : Engine_ctx.S) = struct
               (`Entries 0, 0))
             else arrive ?narrate ~full ()
           in
-          let rec pushes committed =
+          let rec pushes ~refusals committed =
             if not push_now then committed
             else (
               match push () with
-                | `Committed _ -> pushes (committed + 1)
+                | `Committed _ -> pushes ~refusals (committed + 1)
                 | `Refused ->
                     if not C.lazy_tree then ignore (arrive ());
-                    committed
+                    if refusals > 0 then
+                      pushes ~refusals:(refusals - 1) committed
+                    else committed
                 | `Nothing -> committed)
           in
-          let committed = pushes 0 in
+          let committed = pushes ~refusals:3 0 in
           project ();
           { arrival; changed; committed })
 

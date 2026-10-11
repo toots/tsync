@@ -196,3 +196,25 @@
  (alias runtest)
  (action
   (diff rows_test.expected rows_test.output)))
+
+(executable
+ (name cycle_test)
+ (modules cycle_test)
+ (libraries
+  test_support
+  tsync_core
+  tsync_store
+  tsync_remote
+  tsync_checkout
+  tsync_sync
+  unix))
+
+(rule
+ (with-stdout-to
+  cycle_test.output
+  (run ./cycle_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff cycle_test.expected cycle_test.output)))
