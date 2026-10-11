@@ -146,7 +146,7 @@ let void_entry_cmd =
 (* Under the ownership lock but with no engine: an engine's start and drain
    each run a cycle, which would arrive on the tree this command is there to
    clean first. *)
-let upgrade apply discard in_sync name verbose =
+let upgrade apply discard in_sync local_only name verbose =
   set_verbose verbose;
   Tsync_owner.Owner.stop_on_signals ();
   run (fun () ->
@@ -164,7 +164,7 @@ let upgrade apply discard in_sync name verbose =
                 Tsync_owner.Upgrade.run ~out:print_endline
                   ~cancelled:Stop.requested
                   (Tsync_domain.Domain.build ~owner:true config dom)
-                  ~apply ~discard ~in_sync))
+                  ~apply ~discard ~in_sync ~local_only))
 
 let upgrade_cmd =
   let discard =
@@ -183,12 +183,21 @@ let upgrade_cmd =
              when it was stopped: start it at entry 0 with its mirror as it \
              is, without comparing it with the whole tree. tsync sync --full \
              makes that comparison later.")
+  and local_only =
+    Arg.(
+      value & flag
+      & info ["local"]
+          ~doc:
+            "The store was cleaned from another machine: clean this client's \
+             local state only, without listing the tree.")
   in
   cmd "upgrade-from-journal"
     ~doc:
       "One-off: remove what the journal protocol left on the stores and here, \
        so every client arrives by state. Stop every client first."
-    Term.(const upgrade $ apply_arg $ discard $ in_sync $ domain_arg $ verbose)
+    Term.(
+      const upgrade $ apply_arg $ discard $ in_sync $ local_only $ domain_arg
+      $ verbose)
 
 let data_integrity verify repair dry_run detail source name verbose =
   if verify && repair then (

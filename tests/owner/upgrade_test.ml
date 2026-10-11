@@ -86,13 +86,15 @@ let () =
       let tree () =
         String.concat " " (List.map (fun (path, _) -> path) (E.list_tree ""))
       in
-      let upgrade ?(in_sync = false) ~apply ~discard () =
+      let upgrade ?(in_sync = false) ?(local_only = false) ~apply ~discard () =
         p "  exit %d"
           (Upgrade.run ~out:(p "  %s") ~cancelled:(Fun.const false) dom ~apply
-             ~discard ~in_sync)
+             ~discard ~in_sync ~local_only)
       in
       p "== unpublished records of the previous version";
       upgrade ~apply:true ~discard:false ();
+      p "== a client's own cleanup is refused while the store has its journal";
+      upgrade ~local_only:true ~apply:true ~discard:true ();
       p "== a dry run";
       upgrade ~apply:false ~discard:true ();
       p "  the journal is still there: %b"
@@ -145,6 +147,8 @@ let () =
       let arrived = arrival () in
       p "  arrives %s: %s" arrived (tree ());
       upgrade ~in_sync:true ~apply:true ~discard:false ();
+      p "== a client of a store cleaned elsewhere lists no tree";
+      upgrade ~local_only:true ~apply:true ~discard:false ();
       p "== refused over a staged edit";
       E.create "draft.txt" ~exclusive:false;
       E.close "draft.txt";
