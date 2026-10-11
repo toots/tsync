@@ -16,3 +16,8 @@
  (name class_bench)
  (modules class_bench)
  (libraries tsync_core tsync_ipc threads.posix unix))
+
+(executable
+ (name tree_gen)
+ (modules tree_gen)
+ (libraries tsync_core tsync_store tsync_remote unix))
