@@ -78,10 +78,21 @@ val is_batch : 'f t -> 'f command list -> bool
 type 'f step =
   [ `Set of 'f command | `Park of Folder_id.t * place option * place ]
 
-(** [order ~temp from commands] (Theorem 3): the commands in an order in which
-    each is applicable and every intermediate state well-formed, a folder parked
-    at [temp id] under the root where the constraints form a cycle. [commands]
-    must be a batch of [from]; raises [Failure] otherwise. *)
+(** [take ?limit ~temp from commands] (Theorem 3): [(steps, left)], where
+    [steps] sets some of the commands in an order in which each is applicable
+    and every intermediate state well-formed, a folder parked at [temp id] under
+    the root where the constraints form a cycle, and [left] holds the commands
+    that cannot be set without one of the others. The commands of [steps] are a
+    batch of [from] (Definition 6). At most [limit] commands are set, more only
+    to give a parked folder its place. *)
+val take :
+  ?limit:int ->
+  temp:(Folder_id.t -> string) ->
+  'f t ->
+  'f command list ->
+  'f step list * 'f command list
+
+(** {!take} of a batch: every command is set; raises [Failure] otherwise. *)
 val order :
   temp:(Folder_id.t -> string) -> 'f t -> 'f command list -> 'f step list
 

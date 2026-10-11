@@ -217,6 +217,51 @@ let check_order what ~from ~to_ =
             (what ^ ": order does not reach its target")
             ~r:from ~l:from ~m:to_ ~n:(show reached)
 
+(* Every subset of a difference through [take], with and without a limit:
+   what it sets is a batch, and it sets something unless nothing can be. *)
+let takes = ref 0
+
+let check_take ~from ~to_ =
+  let all = diff from to_ in
+  let base = A.of_base (A.to_base (build from)) in
+  let rec subsets = function
+    | [] -> [[]]
+    | c :: rest ->
+        let tails = subsets rest in
+        tails @ List.map (fun t -> c :: t) tails
+  in
+  let fail what n = fail what ~r:from ~l:from ~m:to_ ~n in
+  let extra =
+    List.map
+      (fun i -> { A.parent = root; name = temp i })
+      (List.map fst (from.folders @ to_.folders))
+  in
+  if List.length all <= 6 then
+    List.iter
+      (fun subset ->
+        List.iter
+          (fun limit ->
+            incr takes;
+            let steps, left = A.take ?limit ~temp base subset in
+            let set =
+              List.filter_map
+                (function `Set c -> Some c | `Park _ -> None)
+                steps
+            in
+            let reached = read (A.run base steps) ~of_:[from; to_] ~extra in
+            if not (naive_well_formed reached) then
+              fail "take: what it sets is not a batch" (show reached);
+            if not (A.is_batch base set) then
+              fail "take: is_batch disagrees" (show reached);
+            if List.sort compare (set @ left) <> List.sort compare subset then
+              fail "take: a command is neither set nor left" (show reached);
+            if limit = None && set = [] && subset <> [] then
+              if List.exists (fun c -> A.is_batch base [c]) subset then
+                fail "take: sets nothing although one command alone is a batch"
+                  (show reached))
+          [None; Some 1; Some 2])
+      (subsets all)
+
 let check tally ~r ~l ~m =
   tally.triples <- tally.triples + 1;
   let before = diff r l and theirs = diff r m in
@@ -324,7 +369,12 @@ let run u =
     { triples = 0; copies = 0; restores = 0; dropped_moves = 0; renamed = 0 }
   in
   List.iter
-    (fun from -> List.iter (fun to_ -> check_order u.label ~from ~to_) all)
+    (fun from ->
+      List.iter
+        (fun to_ ->
+          check_order u.label ~from ~to_;
+          check_take ~from ~to_)
+        all)
     all;
   List.iter
     (fun r ->
@@ -391,6 +441,7 @@ let () =
   in
   List.iter run
     (routine @ if Sys.getenv_opt "ALGEBRA_FULL" = None then [] else full);
+  Printf.printf "%d subsets of a difference taken as a batch\n" !takes;
   if Hashtbl.length failures = 0 then print_endline "every property holds"
   else
     Hashtbl.iter
