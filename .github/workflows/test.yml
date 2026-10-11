@@ -72,6 +72,10 @@ jobs:
       - name: Tests
         run: opam exec -- dune build @runtest --force
 
+      # The tests that state a time bound, one at a time (ocaml/09).
+      - name: Timing-sensitive tests
+        run: opam exec -- dune build @runtest-serial -j1 --force
+
   # 10 §3.1 item 5: the android frontend in the desktop binary, its hermetic
   # checks, then the app's JVM suites, the wire suite against that binary. No
   # device and no cross toolchain.
@@ -116,6 +120,9 @@ jobs:
 
       - name: Frontend tests
         run: opam exec -- dune build @tests/android/runtest --force
+
+      - name: Timing-sensitive frontend tests
+        run: opam exec -- dune build @tests/android/runtest-serial -j1 --force
 
       - uses: actions/setup-java@v4
         with:
@@ -184,6 +191,11 @@ jobs:
         env:
           TMPDIR: /tmp
         run: opam exec -- dune build @runtest --force
+
+      - name: Timing-sensitive tests
+        env:
+          TMPDIR: /tmp
+        run: opam exec -- dune build @runtest-serial -j1 --force
 
       - name: Swift tests
         run: make -C macos test

@@ -29,7 +29,7 @@
     %{exe:../desktop/owner_double.exe}))))
 
 (rule
- (alias runtest)
+ (alias runtest-serial)
  (enabled_if
   (= %{system} linux))
  (action

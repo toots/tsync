@@ -47,7 +47,7 @@
   (run ./rt_test.exe)))
 
 (rule
- (alias runtest)
+ (alias runtest-serial)
  (action
   (diff rt_test.expected rt_test.output)))
 
@@ -67,7 +67,7 @@
   (run ./dqueue_test.exe)))
 
 (rule
- (alias runtest)
+ (alias runtest-serial)
  (action
   (diff dqueue_test.expected dqueue_test.output)))
 
@@ -112,7 +112,7 @@
   (run ./rt_class_test.exe)))
 
 (rule
- (alias runtest)
+ (alias runtest-serial)
  (action
   (diff rt_class_test.expected rt_class_test.output)))
 
@@ -127,7 +127,7 @@
   (run ./rt_fd_test.exe)))
 
 (rule
- (alias runtest)
+ (alias runtest-serial)
  (action
   (diff rt_fd_test.expected rt_fd_test.output)))
 
