@@ -98,12 +98,9 @@ let write (module E : Engine.S) path content =
 let drain (module E : Engine.S) = E.drain ~grace:10. ()
 
 let pass (module E : Engine.S) =
-  (match E.apply_pass () with
+  match E.resync () with
     | _ -> ()
-    | exception e -> p "pass failed: %s\n" (Printexc.to_string e));
-  match E.bridge () with
-    | Engine.Hold _ -> ignore (E.resync ())
-    | Incremental -> ()
+    | exception e -> p "pass failed: %s\n" (Printexc.to_string e)
 
 let watermark name =
   match
@@ -128,8 +125,8 @@ let () =
   Rt.run_sync (fun () ->
       let a = client "A" and b = client "B" in
       let (module A) = a and (module B) = b in
-      A.start ~poll_journal:false ();
-      B.start ~poll_journal:false ();
+      A.start ~background:false ();
+      B.start ~background:false ();
       pass a;
       pass b;
       p "== a consumer's first anchor sets the watermark\n";
@@ -140,6 +137,7 @@ let () =
       write a "x.txt" "one";
       A.mkdir "dir" ~exclusive:false;
       drain a;
+      pass b;
       A.rename ~src:"x.txt" ~dst:"dir/y.txt" ~exclusive:false;
       drain a;
       pass b;
@@ -147,9 +145,9 @@ let () =
       p "  watermark: %s\n" (watermark "B");
       ignore (feed "from its cursor" b cursor);
       p "  watermark: %s\n" (watermark "B");
-      p "== a rebuild keeps anchors valid\n";
-      ignore (B.rebuild ());
-      ignore (feed "from the cursor after a rebuild" b cursor);
+      p "== an arrival by state keeps anchors valid\n";
+      ignore (B.resync ~full:true ());
+      ignore (feed "from the cursor after an arrival by state" b cursor);
       p "== a new generation makes every anchor stale\n";
       B.stamp_generation ();
       p "  watermark: %s\n" (watermark "B");
@@ -158,25 +156,25 @@ let () =
       p "  new cursor %s\n" (show_anchor fresh);
       p "== retention: an old shard is kept while the watermark names it\n";
       let applied = Filename.concat (Mirror.root B.mirror) "applied" in
-      let old = Entry_key.make ~ms:1_600_000_000_000L ~client:"c" in
+      let old = Feed_key.make ~ms:1_600_000_000_000L ~client:"c" in
       Fs.append_durable
         (Filename.concat applied "2020-09.log")
-        ("\n" ^ Entry_key.to_string old ^ "\t[]");
+        ("\n" ^ Feed_key.to_string old ^ "\t[]");
       let mark = Filename.concat (data_dir "B") "feed-watermark-docs" in
       Fs.durable_replace mark
-        (Printf.sprintf "%s %.0f" (Entry_key.to_string old)
+        (Printf.sprintf "%s %.0f" (Feed_key.to_string old)
            (Unix.gettimeofday () *. 1000.));
       let n = B.prune_applied () in
       p "  pruned with the watermark on it: %d, dropped: %b\n" n (dropped "B");
       p "== a watermark idle past its age holds nothing\n";
       Fs.durable_replace mark
-        (Printf.sprintf "%s %.0f" (Entry_key.to_string old)
+        (Printf.sprintf "%s %.0f" (Feed_key.to_string old)
            ((Unix.gettimeofday () -. (200. *. 86400.)) *. 1000.));
       let n = B.prune_applied () in
       p "  pruned: %d, dropped: %b\n" n (dropped "B");
       let gen = String.sub fresh 0 (String.index fresh '|') in
       ignore
         (feed "an anchor naming the dropped entry" b
-           (gen ^ "|" ^ Entry_key.to_string old));
+           (gen ^ "|" ^ Feed_key.to_string old));
       ignore (feed "an empty anchor once a shard was dropped" b (gen ^ "|")));
   Test_support.finish root

@@ -90,19 +90,15 @@ let show label clients =
 let drain (module E : Engine.S) = E.drain ~grace:10. ()
 
 let pass (module E : Engine.S) =
-  (match E.apply_pass () with
+  match E.resync () with
     | _ -> ()
-    | exception e -> p "pass failed: %s\n" (Printexc.to_string e));
-  match E.bridge () with
-    | Engine.Hold r ->
-        p "holds: %s\n" r;
-        ignore (E.resync ())
-    | Incremental -> ()
+    | exception e -> p "pass failed: %s\n" (Printexc.to_string e)
 
 let report (r : Import_plan.report) =
   p "imported %d (%d bytes), skipped %d, links skipped %d, failed %d%s\n"
     r.imported r.bytes r.skipped r.skipped_symlinks (List.length r.failed)
     (if r.cancelled then ", cancelled" else "");
+  if r.uncommitted > 0 then p "  not committed yet: %d\n" r.uncommitted;
   List.iter (fun (path, reason) -> p "  %s: %s\n" path reason) r.failed
 
 let () =
@@ -121,12 +117,12 @@ let () =
   Rt.run_sync (fun () ->
       let a = client "A" and b = client "B" in
       let (module A) = a and (module B) = b in
-      A.start ~poll_journal:false ();
-      B.start ~poll_journal:false ();
+      A.start ~background:false ();
+      B.start ~background:false ();
       pass a;
       pass b;
       let both = [("A", a); ("B", b)] in
-      p "== A imports a tree, B applies the journal\n";
+      p "== A imports a tree, B arrives\n";
       report (A.import src);
       drain a;
       pass b;
@@ -134,7 +130,8 @@ let () =
       p "\n== a rerun finds everything there\n";
       report (A.import src);
       drain a;
-      p "entries B applies: %d\n" (B.apply_pass ());
+      p "entries B merges: %d\n"
+        (match (B.resync ()).arrival with `Entries n -> n | `State _ -> -1);
       p "\n== a changed file stays skipped unless forced\n";
       file "top.txt" "top, changed";
       report (A.import ~only:["top.txt"] src);
@@ -142,14 +139,14 @@ let () =
       drain a;
       pass b;
       show "after B's pass" [("B", b)];
-      p "\n== cancelled partway: only what was uploaded is announced\n";
+      p "\n== cancelled partway: only what was installed is committed\n";
       file "more/one.txt" "one";
       file "more/two.txt" "two";
       file "more/three.txt" "three";
       let checks = ref 0 in
       let cancelled () =
         incr checks;
-        !checks > 4
+        !checks > 2
       in
       report (A.import ~only:["more/**"] ~cancelled src);
       drain a;
@@ -166,7 +163,6 @@ let () =
       drain a;
       pass b;
       show "after B's pass" [("B", b)];
-      p "\nowed: A %d/%d, unapplied B %d\n" (A.pending_uploads ())
-        (A.pending_metadata ())
-        (List.length (B.unapplied ())));
+      p "\nowed: A %d uploads, %d pending; B %d pending\n"
+        (A.pending_uploads ()) (A.activity ()).pending (B.activity ()).pending);
   Test_support.finish root

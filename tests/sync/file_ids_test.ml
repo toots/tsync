@@ -74,12 +74,9 @@ let write (module E : Engine.S) path content =
 let drain (module E : Engine.S) = E.drain ~grace:10. ()
 
 let pass (module E : Engine.S) =
-  (match E.apply_pass () with
+  match E.resync () with
     | _ -> ()
-    | exception e -> p "pass failed: %s\n" (Printexc.to_string e));
-  match E.bridge () with
-    | Engine.Hold _ -> ignore (E.resync ())
-    | Incremental -> ()
+    | exception e -> p "pass failed: %s\n" (Printexc.to_string e)
 
 let op_name = function
   | Op.Put { path; _ } -> "put " ^ path
@@ -107,8 +104,8 @@ let () =
   Rt.run_sync (fun () ->
       let a = client "A" and b = client "B" in
       let (module A) = a and (module B) = b in
-      A.start ~poll_journal:false ();
-      B.start ~poll_journal:false ();
+      A.start ~background:false ();
+      B.start ~background:false ();
       pass a;
       pass b;
       p "== a staged-only file has an id, kept through publish\n";
@@ -177,20 +174,18 @@ let () =
         pass b;
         p "  B's %s/f.txt: %s\n" x
           (alias (Option.get (Mirror.file_id B.mirror (x ^ "/f.txt"))));
-        if not published then B.set_paused true;
         B.rename ~src:x ~dst:y ~exclusive:false;
-        drain b;
+        if published then drain b;
         A.delete (x ^ "/f.txt");
         drain a;
         pass b;
         show "B" b [y ^ "/f.txt"];
         last_applied b;
-        B.set_paused false;
         drain b
       in
       p "== a peer's delete under a folder renamed here, rename unpublished\n";
       peer_delete_under_renamed_folder ~published:false "X" "Y";
-      p "== the same with the rename published: the file is kept, no id named\n";
+      p "== the same with the rename published\n";
       peer_delete_under_renamed_folder ~published:true "X2" "Y2";
       p "== owner start gives an id to a file found without one\n";
       let marker =
@@ -209,45 +204,8 @@ let () =
       p "  the first pass: %d\n" (Mirror.backfill_file_ids B.mirror);
       show "B after" b ["q.txt"];
       p "  the next one: %d\n" (Mirror.backfill_file_ids B.mirror);
-      p "== an Intent record the queue takes at runtime is redone first\n";
-      let wal =
-        Dqueue.Records.open_
-          (List.fold_left Filename.concat root
-             ["A/data"; "journal-pending"; Domain_name.to_string d])
-      in
-      ignore
-        (Dqueue.Records.create wal
-           (Wal.encode
-              {
-                Wal.state = Intent;
-                attempts = 0;
-                ops =
-                  [
-                    Op.Mkdir
-                      {
-                        path = "intent-dir";
-                        id =
-                          Some (Folder_id.mint ~uuid:"dddddddddddd" ~counter:1);
-                      };
-                  ];
-                priors = [];
-                local_from = [];
-                fids = [];
-                last_error = None;
-              }));
-      A.poll ();
-      drain a;
-      pass b;
-      p "  A: %s; B: %s\n"
-        (match A.kind "intent-dir" with
-          | `Dir -> "folder"
-          | `File -> "file"
-          | `Absent -> "absent")
-        (match B.kind "intent-dir" with
-          | `Dir -> "folder"
-          | `File -> "file"
-          | `Absent -> "absent");
-      p "== passes started together run one at a time\n";
+      p "== cycles started together run one at a time\n";
+      A.mkdir "many" ~exclusive:false;
       for i = 1 to 20 do
         write a (Printf.sprintf "many/%02d.txt" i) "x"
       done;
@@ -257,14 +215,14 @@ let () =
           | `Page pg -> List.length pg.entries
           | `Stale -> 0
       in
-      Rt.iter_concurrently (fun () -> ignore (B.apply_pass ())) [(); (); (); ()];
+      Rt.iter_concurrently (fun () -> ignore (B.resync ())) [(); (); (); ()];
       let keys =
         match Applied.since B.applied None 100_000 with
           | `Page pg -> List.map fst pg.entries
           | `Stale -> []
       in
-      let unique = List.sort_uniq Entry_key.compare keys in
-      p "  entries noted: %d new, noted twice: %d\n"
+      let unique = List.sort_uniq Feed_key.compare keys in
+      p "  feed lines noted: %d new, noted twice: %d\n"
         (List.length keys - before)
         (List.length keys - List.length unique);
       (* A second mirror over A's directory is a restarted owner. *)

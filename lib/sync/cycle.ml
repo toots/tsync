@@ -287,6 +287,14 @@ module Make (C : Engine_ctx.S) = struct
       a.before;
     List.concat_map (fun (op, _) -> Op.paths op) ops
 
+  let removals_last : Log_entry.command list -> Log_entry.command list =
+    List.stable_sort (fun a b ->
+        let rank : Log_entry.command -> int = function
+          | `File (_, _, None) | `Folder (_, _, None) -> 1
+          | _ -> 0
+        in
+        compare (rank a) (rank b))
+
   (* The steps that take [L] to [N]: files moved aside first, to names free in
      both, then the rest in an order Theorem 3 allows. *)
   let steps_of (merged : Log_entry.value Algebra.merged) : Sync_state.step list
@@ -304,17 +312,60 @@ module Make (C : Engine_ctx.S) = struct
              [`File (src, None, None); `File (dst, None, l_base.file src)])
            merged.asides)
     in
-    List.map (fun (src, dst) -> Sync_state.Move (src, dst)) merged.asides
-    @ List.map
+    let ordered =
+      List.mapi
+        (fun i step -> (i, step))
+        (Algebra.order ~temp:park_name moved (removals_last rest))
+    in
+    (* conflict-resolution §4.1, a move the main made: a removal of an
+       unedited file paired with an earlier creation of the same content. *)
+    let unedited p =
+      match path_of p with
+        | Some path -> Staged.edit staged path = None
+        | None -> false
+    in
+    let removed =
+      List.filter_map
         (function
-          | `Set (`File (p, _, None)) -> Sync_state.File (p, None)
-          | `Set (`File (p, _, Some (Log_entry.Known m))) -> File (p, Some m)
-          | `Set (`File ((p : Algebra.place), _, Some _)) ->
-              Fail.corrupt "%s: a merge installs a value that is no manifest"
-                p.name
-          | `Set (`Folder (i, _, place)) -> Folder (i, place)
-          | `Park (i, _, place) -> Folder (i, Some place))
-        (Algebra.order ~temp:park_name moved rest)
+          | i, `Set (`File (p, Some (Log_entry.Known m), None)) when unedited p
+            ->
+              Some (i, p, Log_entry.identity_of m)
+          | _ -> None)
+        ordered
+    in
+    let moves, _ =
+      List.fold_left
+        (fun (moves, used) -> function
+          | j, `Set (`File (dst, None, Some (Log_entry.Known m))) -> (
+              match
+                List.find_opt
+                  (fun (i, src, identity) ->
+                    i > j
+                    && identity = Log_entry.identity_of m
+                    && not (List.mem src used))
+                  removed
+              with
+                | Some (_, src, _) -> ((j, src, dst) :: moves, src :: used)
+                | None -> (moves, used))
+          | _ -> (moves, used))
+        ([], []) ordered
+    in
+    List.map (fun (src, dst) -> Sync_state.Move (src, dst)) merged.asides
+    @ List.filter_map
+        (fun (j, step) ->
+          match (List.find_opt (fun (at, _, _) -> at = j) moves, step) with
+            | Some (_, src, dst), _ -> Some (Sync_state.Move (src, dst))
+            | None, `Set (`File (p, _, None)) ->
+                if List.exists (fun (_, src, _) -> src = p) moves then None
+                else Some (Sync_state.File (p, None))
+            | None, `Set (`File (p, _, Some (Log_entry.Known m))) ->
+                Some (File (p, Some m))
+            | None, `Set (`File ((p : Algebra.place), _, Some _)) ->
+                Fail.corrupt "%s: a merge installs a value that is no manifest"
+                  p.name
+            | None, `Set (`Folder (i, _, place)) -> Some (Folder (i, place))
+            | None, `Park (i, _, place) -> Some (Folder (i, Some place)))
+        ordered
 
   let settled_of (merged : Log_entry.value Algebra.merged) =
     List.map
@@ -842,14 +893,6 @@ module Make (C : Engine_ctx.S) = struct
              | `Folder (i, before, _) -> `Folder (i, None, before))
            all)
     in
-    let removals_last =
-      List.stable_sort (fun a b ->
-          let rank : Log_entry.command -> int = function
-            | `File (_, _, None) | `Folder (_, _, None) -> 1
-            | _ -> 0
-          in
-          compare (rank a) (rank b))
-    in
     let fits batch =
       List.length batch <= 1
       || String.length
@@ -1014,29 +1057,32 @@ module Make (C : Engine_ctx.S) = struct
   (* One cycle (publication §4): arrive, push while a push commits, project.
      [push_now] is false while the batch delay runs. A lazy tree arrives
      folder by folder when its host pulls, so its cycle only recovers and
-     pushes. *)
+     pushes. A paused domain runs none (07 §2.6). *)
   let run_cycle ?(full = false) ?(push_now = true) () =
-    Rt.Fmutex.with_lock cycle_lock (fun () ->
-        let arrival, changed =
-          if C.lazy_tree then (
-            complete_arrival ();
-            recover_in_flight ();
-            (`Entries 0, 0))
-          else arrive ~full ()
-        in
-        let rec pushes committed =
-          if not push_now then committed
-          else (
-            match push () with
-              | `Committed _ -> pushes (committed + 1)
-              | `Refused ->
-                  if not C.lazy_tree then ignore (arrive ());
-                  committed
-              | `Nothing -> committed)
-        in
-        let committed = pushes 0 in
-        project ();
-        { arrival; changed; committed })
+    if Atomic.get paused then
+      { arrival = `Entries 0; changed = 0; committed = 0 }
+    else
+      Rt.Fmutex.with_lock cycle_lock (fun () ->
+          let arrival, changed =
+            if C.lazy_tree then (
+              complete_arrival ();
+              recover_in_flight ();
+              (`Entries 0, 0))
+            else arrive ~full ()
+          in
+          let rec pushes committed =
+            if not push_now then committed
+            else (
+              match push () with
+                | `Committed _ -> pushes (committed + 1)
+                | `Refused ->
+                    if not C.lazy_tree then ignore (arrive ());
+                    committed
+                | `Nothing -> committed)
+          in
+          let committed = pushes 0 in
+          project ();
+          { arrival; changed; committed })
 
   let request_cycle () =
     Atomic.set asked true;

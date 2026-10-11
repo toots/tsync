@@ -80,9 +80,11 @@ module Make (C : Engine_ctx.S) = struct
                         let p = Names.join rel e.name in
                         if e.is_dir then walk p ((p, `Domain_dir) :: acc)
                         else (
-                          match in_domain (Names.join src.path p) with
+                          (* An edit not uploaded yet is planned, to be listed
+                             as skipped. *)
+                            match in_domain (Names.join src.path p) with
                             | `File m -> (p, `Key m) :: acc
-                            | _ -> acc))
+                            | _ -> (p, `Missing) :: acc))
                       acc
                       (list_children (Names.join src.path rel))
                   in

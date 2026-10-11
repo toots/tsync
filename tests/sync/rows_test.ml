@@ -264,4 +264,4 @@ let () =
           o.write "x/in" "in")
         ~a:(fun o -> o.write "x" "file"));
   p "%d rows, %d diverged or not quiet\n" !rows !diverged;
-  Fs.rm_rf base
+  Test_support.finish base

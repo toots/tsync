@@ -1,275 +1,88 @@
-== entry keys (03 §2.2)
+== feed keys (03 §2.2)
 "1788134400000-3f9a0c1b2d4e5f60718293a4b5c6d7e8"         1788134400000-3f9a0c1b2d4e5f60718293a4b5c6d7e8 month 2026-08
-"tsync/photos/journal/2026-09/1788134400000-abc"         1788134400000-abc month 2026-08
 "2026-08"                                                not a key
 "178813440000-abc"                                       not a key
 ".tsync-tmp-1-2.tmp"                                     not a key
+minted past a key from the future: 10000000000000-c
 
-== ops (03 §2.3)
+== feed ops (03 §2.9)
 {"op":"put","key":"photos/one.jpg","size":1024}
-{"op":"put","key":"photos/one.jpg","size":2048,"base":"8f3a0c1b2d4e5f60"}
 {"op":"delete","key":"photos/two.jpg"}
 {"op":"mkdir","key":"photos","id":"3f9a0c1b2d4e-40a"}
 {"op":"rmdir","key":"photos","id":"3f9a0c1b2d4e-40a"}
 {"op":"rename","key":"photos/two.jpg","src":"photos/one.jpg","is_dir":false,"size":1024}
 {"op":"rename","key":"pics","src":"photos","is_dir":true,"id":"3f9a0c1b2d4e-40a"}
 round trip: true
-unknown op, unknown field          1 ops
-blank lines, CRLF                  1 ops
-missing size                       CORRUPT (size)
-invalid path                       CORRUPT (a valid key)
-invalid folder id                  CORRUPT (a folder id)
-uppercase base                     CORRUPT (a base)
-not JSON                           CORRUPT (a JSON object)
+unknown op                   ignored
+unknown field                an op
+put without a size           bad: size
+an absolute path             bad: a valid key
 
-== WAL records (04 §2.8)
-spec example               intent, 1 ops, attempts 2, priors 1, localFrom 1, fids 1
-unknown state              intent, 1 ops, attempts 0, priors 0, localFrom 0, fids 0
-op list                    intent, 2 ops, attempts 0, priors 0, localFrom 0, fids 0
-unknown op                 unparseable
-priors naming no op        unparseable
-fid not an id              unparseable
-fids naming no op          unparseable
-empty op list body         unparseable
-empty ops                  prepared, 0 ops, attempts 0, priors 0, localFrom 0, fids 0
-torn                       unparseable
-fids round trip: true
-fids carried onto rewritten ops: 0 2
+== commands and log entries (03 §2.3–2.4)
+{"v":1,"author":"3f9a0c1b2d4e5f60718293a4b5c6d7e8","commands":[{"file":["3f9a0c1b2d4e-40a","one.jpg"],"before":null,"after":"<manifest>"},{"file":["3f9a0c1b2d4e-40a","two.jpg"],"before":"71ca1fc46f3a5f1c-8643e36d2bc5c592","after":null},{"folder":"3f9a0c1b2d4e-40b","before":null,"after":[".tsync-root","Photos"]},{"folder":"3f9a0c1b2d4e-40a","before":[".tsync-root","Photos"],"after":[".tsync-root","Pics"]}]}
+decodes: author kept true, 4 commands, guards read as identities true
+an empty batch: refused: a log entry with no command
+two commands on one key: refused: a log entry with two commands on one key
+a value after that is not a manifest: refused: a: a value after that is not a manifest
+unknown fields                     1 commands
+a later version                    version 2: cannot be followed
+no author                          CORRUPT (expected an author)
+a command without before           CORRUPT (expected before)
+both file and folder               CORRUPT (expected exactly one of file and folder)
+the root as a folder key           CORRUPT (expected a folder key)
+an invalid folder id               CORRUPT (expected a folder key)
+an invalid leaf                    CORRUPT (expected a file key)
+a guard that is no identity        CORRUPT (expected a content identity)
+an after that is no manifest       CORRUPT (expected a manifest)
+two commands on one key            CORRUPT (expected commands on distinct keys)
+no commands                        CORRUPT (expected a non-empty array of commands)
+not JSON                           CORRUPT (expected a JSON object)
+entry 1 234 567: tsync/photos/log/000000000123/0000000001234567
+takeover of entry 7, generation 2: tsync/photos/log-takeover/7-2
+void of entry 7: tsync/photos/log-takeover/7-void
+the gate reads 1 chunks from the entry
+
+== sync state (03 §2.7–2.8)
+no position: true
+position file: "0000000001234567"
+  d-3f9a0c1b2d4e-40b: {"folder":"3f9a0c1b2d4e-40b","before":[".tsync-root","Photos"]}
+  f-3f9a0c1b2d4e-40a-1…: {"file":["3f9a0c1b2d4e-40a","one.jpg"],"before":"23159de6084fe0eb-fef0cbc1c405b4a8"}
+  f-3f9a0c1b2d4e-40a-7…: {"file":["3f9a0c1b2d4e-40a","new.jpg"],"before":null}
+a second record of one key changes nothing: true
+pending: 3
+reopened: position 1234567, pending 3, in flight for entry 8, arrival kept true
+needs a state read: false
+an unparseable arrival reads as none: true
+after two unparseable records: pending 2, needs a state read true, set aside arrival.bad d-3f9a0c1b2d4e-40b.bad
+
+== upload records and local intents (04 §2.8)
+{"file":["3f9a0c1b2d4e-40a","report.txt"],"attempts":2,"lastError":{"kind":"transient/link","detail":"connection reset"}}
+round trip: true; key 3f9a0c1b2d4e-40a/report.txt
+no attempts, no error: true
+a folder key: set aside
+{"op":{"op":"rename","key":"b/new.txt","src":"a/old.txt","is_dir":false},"fids":["6c1e0b9a2f4d47e8a3b5c7d9e1f20384"]}
+round trip: true
+an op this reader does not know: set aside
 
 == staged manifests (04 §2.5)
-spec example           I S(9f3c@0) S(9f3c@8) Z Z, base unknown
-no v, no chunkSize     Z, base unknown
-fewer slots            I Z Z, base none
+spec example           I S(9f3c@0) S(9f3c@8) Z Z, Owed
+no v, no chunkSize     Z, Owed
+fewer slots            I Z Z, Owed
+uploaded               I, Uploaded
+uploaded, not a manifest I, Owed
 version 3              set aside
 round trip: true
 
-== applied log (03 §2.7)
-from start: [0000000000001-c(fid 6c1e) 0000000000003-c 0000000000002-c] more=false
-after 3, limit 1: [0000000000002-c] more=false
+== applied log (03 §2.9)
+from start: [0000000000001-c(fid 6c1e) 0000000000002-c 0000000000003-c] more=false
+after 1, limit 1: [0000000000002-c] more=true
 after the head: [] more=false
 unknown anchor: stale
-head: 0000000000002-c
+head, past the torn line: 0000000000003-c
 
-== conflicted names (conflict-resolution §4.7)
+== conflicted names (conflict-resolution §5)
 report.pdf     -> report (conflicted copy from laptop).pdf
 archive.tar.gz -> archive.tar (conflicted copy 2 from laptop).gz
 Makefile       -> Makefile (conflicted copy from laptop)
 .bashrc        -> .bashrc (conflicted copy from laptop)
 v1.2           -> v1.2 (conflicted copy from laptop)
-
-== the Arrival table, exhaustively (conflict-resolution §4.3)
-  put S=false removal=false none a2a=false                 skip (superseded)
-  put S=false removal=false file a2a=false                 skip (superseded)
-  put S=false removal=false file a2a=true                  skip (superseded)
-  put S=false removal=false staged_file a2a=false          skip (superseded)
-  put S=false removal=false renamed_file a2a=false         skip (superseded)
-  put S=false removal=false folder(same) a2a=false         skip (superseded)
-  put S=false removal=false folder(ours) a2a=false         skip (superseded)
-  put S=false removal=false folder(published) a2a=false    skip (superseded)
-  put S=false removal=false folder(no id) a2a=false        skip (superseded)
-  put S=false removal=true none a2a=false                  skip (superseded)
-  put S=false removal=true file a2a=false                  skip (superseded)
-  put S=false removal=true file a2a=true                   skip (superseded)
-  put S=false removal=true staged_file a2a=false           skip (superseded)
-  put S=false removal=true renamed_file a2a=false          skip (superseded)
-  put S=false removal=true folder(same) a2a=false          skip (superseded)
-  put S=false removal=true folder(ours) a2a=false          skip (superseded)
-  put S=false removal=true folder(published) a2a=false     skip (superseded)
-  put S=false removal=true folder(no id) a2a=false         skip (superseded)
-  put S=true removal=false none a2a=false                  write-theirs
-  put S=true removal=false file a2a=false                  write-theirs
-  put S=true removal=false file a2a=true                   revive-ours
-  put S=true removal=false staged_file a2a=false           file-aside, write-theirs
-  put S=true removal=false renamed_file a2a=false          retarget-our-rename, write-theirs
-  put S=true removal=false folder(same) a2a=false          skip (folder holds the name)
-  put S=true removal=false folder(ours) a2a=false          folder-aside, write-theirs
-  put S=true removal=false folder(published) a2a=false     skip (folder holds the name)
-  put S=true removal=false folder(no id) a2a=false         folder-aside-local, write-theirs
-  put S=true removal=true none a2a=false                   rescue-theirs
-  put S=true removal=true file a2a=false                   rescue-theirs
-  put S=true removal=true file a2a=true                    rescue-theirs
-  put S=true removal=true staged_file a2a=false            rescue-theirs
-  put S=true removal=true renamed_file a2a=false           rescue-theirs
-  put S=true removal=true folder(same) a2a=false           rescue-theirs
-  put S=true removal=true folder(ours) a2a=false           rescue-theirs
-  put S=true removal=true folder(published) a2a=false      rescue-theirs
-  put S=true removal=true folder(no id) a2a=false          rescue-theirs
-  delete S=false removal=false none                        skip (already applied)
-  delete S=false removal=false file                        remove-file
-  delete S=false removal=false staged_file                 skip (ours publishes later)
-  delete S=false removal=false renamed_file                skip (ours publishes later)
-  delete S=false removal=false folder(same)                skip (folder holds the name)
-  delete S=false removal=false folder(ours)                skip (folder holds the name)
-  delete S=false removal=false folder(published)           skip (folder holds the name)
-  delete S=false removal=false folder(no id)               skip (folder holds the name)
-  delete S=false removal=true none                         skip (already removed here)
-  delete S=false removal=true file                         skip (already removed here)
-  delete S=false removal=true staged_file                  skip (already removed here)
-  delete S=false removal=true renamed_file                 skip (already removed here)
-  delete S=false removal=true folder(same)                 skip (already removed here)
-  delete S=false removal=true folder(ours)                 skip (already removed here)
-  delete S=false removal=true folder(published)            skip (already removed here)
-  delete S=false removal=true folder(no id)                skip (already removed here)
-  delete S=true removal=false none                         write-theirs
-  delete S=true removal=false file                         write-theirs
-  delete S=true removal=false staged_file                  skip (ours publishes later)
-  delete S=true removal=false renamed_file                 skip (ours publishes later)
-  delete S=true removal=false folder(same)                 skip (folder holds the name)
-  delete S=true removal=false folder(ours)                 folder-aside, write-theirs
-  delete S=true removal=false folder(published)            skip (folder holds the name)
-  delete S=true removal=false folder(no id)                folder-aside-local, write-theirs
-  delete S=true removal=true none                          skip (already removed here)
-  delete S=true removal=true file                          skip (already removed here)
-  delete S=true removal=true staged_file                   skip (already removed here)
-  delete S=true removal=true renamed_file                  skip (already removed here)
-  delete S=true removal=true folder(same)                  skip (already removed here)
-  delete S=true removal=true folder(ours)                  skip (already removed here)
-  delete S=true removal=true folder(published)             skip (already removed here)
-  delete S=true removal=true folder(no id)                 skip (already removed here)
-  mkdir held=false trashed removal=false none              skip (removed since)
-  mkdir held=false trashed removal=false file              skip (removed since)
-  mkdir held=false trashed removal=false staged_file       skip (removed since)
-  mkdir held=false trashed removal=false renamed_file      skip (removed since)
-  mkdir held=false trashed removal=false folder(same)      skip (removed since)
-  mkdir held=false trashed removal=false folder(ours)      skip (removed since)
-  mkdir held=false trashed removal=false folder(published) skip (removed since)
-  mkdir held=false trashed removal=false folder(no id)     skip (removed since)
-  mkdir held=false trashed removal=true none               skip (removed since)
-  mkdir held=false trashed removal=true file               skip (removed since)
-  mkdir held=false trashed removal=true staged_file        skip (removed since)
-  mkdir held=false trashed removal=true renamed_file       skip (removed since)
-  mkdir held=false trashed removal=true folder(same)       skip (removed since)
-  mkdir held=false trashed removal=true folder(ours)       skip (removed since)
-  mkdir held=false trashed removal=true folder(published)  skip (removed since)
-  mkdir held=false trashed removal=true folder(no id)      skip (removed since)
-  mkdir held=false placed removal=false none               make-folder
-  mkdir held=false placed removal=false file               file-aside-published, make-folder
-  mkdir held=false placed removal=false staged_file        file-aside, make-folder
-  mkdir held=false placed removal=false renamed_file       retarget-our-rename, make-folder
-  mkdir held=false placed removal=false folder(same)       folder-aside, make-folder
-  mkdir held=false placed removal=false folder(ours)       folder-aside, make-folder
-  mkdir held=false placed removal=false folder(published)  folder-aside, make-folder
-  mkdir held=false placed removal=false folder(no id)      make-folder
-  mkdir held=false placed removal=true none                rescue-theirs
-  mkdir held=false placed removal=true file                rescue-theirs
-  mkdir held=false placed removal=true staged_file         rescue-theirs
-  mkdir held=false placed removal=true renamed_file        rescue-theirs
-  mkdir held=false placed removal=true folder(same)        rescue-theirs
-  mkdir held=false placed removal=true folder(ours)        rescue-theirs
-  mkdir held=false placed removal=true folder(published)   rescue-theirs
-  mkdir held=false placed removal=true folder(no id)       rescue-theirs
-  mkdir held=true trashed removal=false none               skip (already applied)
-  mkdir held=true trashed removal=false file               skip (already applied)
-  mkdir held=true trashed removal=false staged_file        skip (already applied)
-  mkdir held=true trashed removal=false renamed_file       skip (already applied)
-  mkdir held=true trashed removal=false folder(same)       skip (already applied)
-  mkdir held=true trashed removal=false folder(ours)       skip (already applied)
-  mkdir held=true trashed removal=false folder(published)  skip (already applied)
-  mkdir held=true trashed removal=false folder(no id)      skip (already applied)
-  mkdir held=true trashed removal=true none                skip (already applied)
-  mkdir held=true trashed removal=true file                skip (already applied)
-  mkdir held=true trashed removal=true staged_file         skip (already applied)
-  mkdir held=true trashed removal=true renamed_file        skip (already applied)
-  mkdir held=true trashed removal=true folder(same)        skip (already applied)
-  mkdir held=true trashed removal=true folder(ours)        skip (already applied)
-  mkdir held=true trashed removal=true folder(published)   skip (already applied)
-  mkdir held=true trashed removal=true folder(no id)       skip (already applied)
-  mkdir held=true placed removal=false none                skip (already applied)
-  mkdir held=true placed removal=false file                skip (already applied)
-  mkdir held=true placed removal=false staged_file         skip (already applied)
-  mkdir held=true placed removal=false renamed_file        skip (already applied)
-  mkdir held=true placed removal=false folder(same)        skip (already applied)
-  mkdir held=true placed removal=false folder(ours)        skip (already applied)
-  mkdir held=true placed removal=false folder(published)   skip (already applied)
-  mkdir held=true placed removal=false folder(no id)       skip (already applied)
-  mkdir held=true placed removal=true none                 skip (already applied)
-  mkdir held=true placed removal=true file                 skip (already applied)
-  mkdir held=true placed removal=true staged_file          skip (already applied)
-  mkdir held=true placed removal=true renamed_file         skip (already applied)
-  mkdir held=true placed removal=true folder(same)         skip (already applied)
-  mkdir held=true placed removal=true folder(ours)         skip (already applied)
-  mkdir held=true placed removal=true folder(published)    skip (already applied)
-  mkdir held=true placed removal=true folder(no id)        skip (already applied)
-  rmdir restored=false by_id                               rescue-ours-under, remove-folder, fill-vacated
-  rmdir restored=false at_path                             rescue-ours-under, remove-folder, fill-vacated
-  rmdir restored=false held_by_another                     skip (held by another folder)
-  rmdir restored=false gone                                skip (already applied)
-  rmdir restored=true by_id                                skip (restored since)
-  rmdir restored=true at_path                              skip (restored since)
-  rmdir restored=true held_by_another                      skip (restored since)
-  rmdir restored=true gone                                 skip (restored since)
-  rename dir, source at path, none                         move-folder, fill-vacated
-  rename dir, source at path, file                         file-aside-published, move-folder, fill-vacated
-  rename dir, source at path, staged_file                  file-aside, move-folder, fill-vacated
-  rename dir, source at path, renamed_file                 retarget-our-rename, move-folder, fill-vacated
-  rename dir, source at path, folder(same)                 retire-stale-source
-  rename dir, source at path, folder(ours)                 folder-aside, move-folder, fill-vacated
-  rename dir, source at path, folder(published)            folder-aside, move-folder, fill-vacated
-  rename dir, source at path, folder(no id)                folder-aside-local, move-folder, fill-vacated
-  rename dir, ours owed                                    skip (ours publishes later)
-  rename dir, trashed                                      skip (removed since)
-  rename dir, source gone                                  skip (nothing to move)
-  rename dir, already there                                skip (already applied)
-  rename dir, under our removal                            rescue-theirs
-  rename file S(d)=false removal=false none                source-rule
-  rename file S(d)=false removal=false file                source-rule
-  rename file S(d)=false removal=false staged_file         source-rule
-  rename file S(d)=false removal=false renamed_file        source-rule
-  rename file S(d)=false removal=false folder(same)        source-rule
-  rename file S(d)=false removal=false folder(ours)        source-rule
-  rename file S(d)=false removal=false folder(published)   source-rule
-  rename file S(d)=false removal=false folder(no id)       source-rule
-  rename file S(d)=false removal=true none                 source-rule
-  rename file S(d)=false removal=true file                 source-rule
-  rename file S(d)=false removal=true staged_file          source-rule
-  rename file S(d)=false removal=true renamed_file         source-rule
-  rename file S(d)=false removal=true folder(same)         source-rule
-  rename file S(d)=false removal=true folder(ours)         source-rule
-  rename file S(d)=false removal=true folder(published)    source-rule
-  rename file S(d)=false removal=true folder(no id)        source-rule
-  rename file S(d)=true removal=false none                 arrive, source-rule
-  rename file S(d)=true removal=false file                 arrive, source-rule
-  rename file S(d)=true removal=false staged_file          file-aside, arrive, source-rule
-  rename file S(d)=true removal=false renamed_file         retarget-our-rename, arrive, source-rule
-  rename file S(d)=true removal=false folder(same)         source-rule
-  rename file S(d)=true removal=false folder(ours)         folder-aside, arrive, source-rule
-  rename file S(d)=true removal=false folder(published)    source-rule
-  rename file S(d)=true removal=false folder(no id)        folder-aside-local, arrive, source-rule
-  rename file S(d)=true removal=true none                  rescue-theirs, source-rule
-  rename file S(d)=true removal=true file                  rescue-theirs, source-rule
-  rename file S(d)=true removal=true staged_file           rescue-theirs, source-rule
-  rename file S(d)=true removal=true renamed_file          rescue-theirs, source-rule
-  rename file S(d)=true removal=true folder(same)          rescue-theirs, source-rule
-  rename file S(d)=true removal=true folder(ours)          rescue-theirs, source-rule
-  rename file S(d)=true removal=true folder(published)     rescue-theirs, source-rule
-  rename file S(d)=true removal=true folder(no id)         rescue-theirs, source-rule
-
-== the Publish table (conflict-resolution §4.5)
-  put          base_current                                      publish
-  put          store_moved_on           ours-aside-file          superseded
-  delete       here_again                                        nothing_owed
-  delete       store_gone                                        publish
-  delete       store_as_expected        remove-from-store        publish
-  delete       store_changed                                     nothing_owed
-  mkdir        no_id                    put-marker               publish
-  mkdir        gone_here                                         nothing_owed
-  mkdir        filed_elsewhere                                   nothing_owed
-  mkdir        claimed                                           publish
-  mkdir        name_taken               ours-aside               again
-  rmdir        no_id                                             publish
-  rmdir        already_trashed                                   publish
-  rmdir        never_published                                   nothing_owed
-  rmdir        published                retire-to-trash          publish
-  rename dir   gone_here                                         nothing_owed
-  rename dir   trashed                                           nothing_owed
-  rename dir   filed_here_already                                publish
-  rename dir   never_published                                   nothing_owed
-  rename dir   name_taken               ours-aside-as-rename     superseded
-  rename dir   claimed                  move-marker              publish
-  rename file  destination_taken        retarget-our-rename      again
-  rename file  moved                                             publish
-  rename file  landed                                            publish
-  rename file  source_still_there                                retry
-  rename file  source_gone(absent)                               nothing_owed
-  rename file  source_gone(staged)      queue-upload             superseded
-  rename file  source_gone(published)   republish-here           superseded

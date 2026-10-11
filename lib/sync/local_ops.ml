@@ -1080,6 +1080,13 @@ module Make (C : Engine_ctx.S) = struct
 
   let sync path = with_key path (fun () -> sync_edit path)
 
+  (* publication §4.1: a content change is in the feed once it is durable. *)
+  let feed_put path size =
+    feed
+      ?fids:(Option.map (fun fid -> [(0, fid)]) (Mirror.file_id mirror path))
+      [Op.Put { path; size }];
+    changed [path]
+
   let post_put path =
     ignore
       (Dqueue.post uploads
@@ -1094,9 +1101,10 @@ module Make (C : Engine_ctx.S) = struct
               x)
         in
         match Staged.edit staged path with
-          | Some _ when was_dirty ->
+          | Some e when was_dirty ->
               sync_edit path;
-              post_put path
+              post_put path;
+              feed_put path e.size
           | _ -> ())
 
   let aside_name path ~is_dir =
@@ -1207,7 +1215,8 @@ module Make (C : Engine_ctx.S) = struct
           Option.iter (fun o -> release_unnamed o (Some e)) before;
           ignore (Mirror.ensure_file_id mirror path);
           bump path;
-          post_put path))
+          post_put path;
+          feed_put path e.size))
 
   (* 04 §2.8 [fids]: read before the local half, which may remove a marker. *)
   let fid_of_op op =
