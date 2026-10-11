@@ -4,7 +4,7 @@ open Tsync_checkout
 module type S = Engine_intf.S
 
 let pause_flag ~data_dir d =
-  Filename.concat data_dir ("paused-" ^ Domain_name.to_string d)
+  List.fold_left Filename.concat data_dir ["paused"; Domain_name.to_string d]
 
 let feed_retention = 30. *. 86400.
 let feed_watermark_max_age = 180. *. 86400.
@@ -448,7 +448,7 @@ module Make (C : Engine_ctx.S) = struct
   let folder_id path = Mirror.folder_id mirror path
   let path_of_id id = Mirror.key_of_id mirror id
   let parked () = Dqueue.parked uploads
-  let rearm () = Dqueue.rearm uploads
+  let rearm () = Dqueue.rearm uploads + Tsync_store.Composite.rearm C.composite
   let set_changed_hook f = changed_hook := f
   let uploads = uploads_running
 end

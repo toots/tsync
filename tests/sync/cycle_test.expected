@@ -57,6 +57,11 @@
   A, g written again: position 2, 0 pending; damaged: 0
   B: g="ijkl"
 
+== a parked copy is retried, and the pause flag is where 07 says
+  the replica refusing, it holds the chunk: false
+  re-armed: true; the replica holds the chunk: true
+  paused, the flag exists: true
+
 == an entry its author never projected
   A merges it without waiting for its projection: 1 entries merged, 0 committed, 0 pending
   A: f="one"  g="dead"; tree head: 1 of 2
