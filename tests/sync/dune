@@ -449,3 +449,18 @@
  (alias runtest)
  (action
   (diff restore_race_test.expected restore_race_test.output)))
+
+(executable
+ (name algebra_test)
+ (modules algebra_test)
+ (libraries tsync_core))
+
+(rule
+ (with-stdout-to
+  algebra_test.output
+  (run ./algebra_test.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff algebra_test.expected algebra_test.output)))
