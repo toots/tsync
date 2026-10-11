@@ -327,9 +327,9 @@ tooltip tsync — Idle
             cache 1216 chunks · 10.0 GiB of 10.0 GiB · 2.0 GiB pinned
             queue 0 files · 0 B owed
             read 515.4 MiB · written 5 B
-            wal 3 pending · 1 stuck
-            http-proxy (main) — reachable, 11 ms · journal 402 entries
-            cold (replica) — unreachable: connection refused · journal 88 entries, 12 behind · 3 corrupt — run tsync data-integrity
+            sync 3 pending · 1 parked
+            http-proxy (main) — reachable, 11 ms
+            cold (replica) — unreachable: connection refused · 3 corrupt — run tsync data-integrity
             far (backfill) — unreachable · not checked
         ---
         box — owner
@@ -340,11 +340,12 @@ tooltip tsync — Idle
 == stats: sparse
         box — ?
 
-== stats: a journal still counting
+== stats: an entry that cannot be followed
         ? — ?
         ---
         Files
-            gcs (main) — reachable · journal counting
+            sync stopped at entry 8
+            gcs (main) — reachable
 
 == replies with fields of the wrong type, and an empty object
 icon    tsync-sync-symbolic

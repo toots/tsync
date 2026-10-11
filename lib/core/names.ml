@@ -60,7 +60,6 @@ let user_path p =
   if valid_path p then p else Fail.invalid "invalid path %S" p
 
 let root_id = ".tsync-root"
-let trash_id = ".tsync-trash"
 
 let valid_hex_id s =
   match String.index_opt s '-' with
@@ -69,7 +68,7 @@ let valid_hex_id s =
         all_hex (String.sub s 0 i)
         && all_hex (String.sub s (i + 1) (String.length s - i - 1))
 
-let valid_folder_id s = s = root_id || s = trash_id || valid_hex_id s
+let valid_folder_id s = s = root_id || valid_hex_id s
 
 let is_chunk_key s =
   String.length s = 33
@@ -108,7 +107,7 @@ let parse_ref s =
   else if String.starts_with ~prefix:"d:" s then (
     let id = String.sub s 2 (String.length s - 2) in
     if id = root_id then Ok Root
-    else if valid_folder_id id && id <> trash_id then Ok (Dir id)
+    else if valid_folder_id id then Ok (Dir id)
     else Error ())
   else if String.starts_with ~prefix:"i:" s then (
     let id = String.sub s 2 (String.length s - 2) in
@@ -120,8 +119,7 @@ let parse_ref s =
       | Some i ->
           let id = String.sub rest 0 i
           and leaf = String.sub rest (i + 1) (String.length rest - i - 1) in
-          if valid_folder_id id && id <> trash_id && valid_leaf leaf then
-            Ok (File (id, leaf))
+          if valid_folder_id id && valid_leaf leaf then Ok (File (id, leaf))
           else Error ())
   else Error ()
 

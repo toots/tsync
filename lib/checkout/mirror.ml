@@ -99,7 +99,7 @@ let kind t rel =
       | None -> `Absent)
 
 let parse_marker body =
-  match Folder.classify_marker body with `Marker (m, _) -> Some m | _ -> None
+  match Folder.classify_marker body with `Marker m -> Some m | _ -> None
 
 let folder_id t rel =
   if rel = "" then Some Folder_id.root

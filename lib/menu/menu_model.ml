@@ -302,13 +302,6 @@ type reach = {
 }
 [@@deriving of_yojson { strict = false }]
 
-type journal = {
-  counting : flag; [@default false]
-  entries : count; [@default None]
-  behind : count; [@default None]
-}
-[@@deriving of_yojson { strict = false }]
-
 type corrupted = {
   checked : flag; [@default false]
   chunks : count; [@default None]
@@ -319,8 +312,6 @@ type backend = {
   name : text; [@default None]
   role : text; [@default None]
   reach : reach option; [@of_yojson lenient reach_of_yojson] [@default None]
-  journal : journal option;
-      [@of_yojson lenient journal_of_yojson] [@default None]
   corrupted : corrupted option;
       [@of_yojson lenient corrupted_of_yojson] [@default None]
 }
@@ -343,14 +334,19 @@ type cache = {
 type queues = {
   pending_files : count; [@key "pendingFiles"] [@default None]
   bytes_owed : count; [@key "bytesOwed"] [@default None]
+  parked : count; [@default None]
 }
 [@@deriving of_yojson { strict = false }]
 
-type wal = {
-  intent : count; [@default None]
-  prepared : count; [@default None]
-  executed : count; [@default None]
-  stuck : count; [@default None]
+type cannot_follow = { entry : count [@default None] }
+[@@deriving of_yojson { strict = false }]
+
+type sync = {
+  pending : count; [@default None]
+  cannot_follow : cannot_follow option;
+      [@key "cannotFollow"]
+      [@of_yojson lenient cannot_follow_of_yojson]
+      [@default None]
 }
 [@@deriving of_yojson { strict = false }]
 
@@ -368,7 +364,7 @@ type domain = {
       [@of_yojson lenient settings_of_yojson] [@default None]
   cache : cache option; [@of_yojson lenient cache_of_yojson] [@default None]
   queues : queues option; [@of_yojson lenient queues_of_yojson] [@default None]
-  wal : wal option; [@of_yojson lenient wal_of_yojson] [@default None]
+  sync : sync option; [@of_yojson lenient sync_of_yojson] [@default None]
   frontends : frontend list; [@of_yojson items frontend_of_yojson] [@default []]
   backends : backend list; [@of_yojson items backend_of_yojson] [@default []]
 }
@@ -424,19 +420,6 @@ let backend_row (b : backend) =
       | Some { error = None | Some ""; _ } -> " — unreachable"
       | Some { error = Some e; _ } -> " — unreachable: " ^ ellipsis e
   in
-  let journal =
-    match b.journal with
-      | Some { counting = true; _ } -> ["journal counting"]
-      | Some { entries = Some entries; behind; _ } ->
-          [
-            (Printf.sprintf "journal %d entries" entries
-            ^
-              match positive behind with
-              | Some n -> Printf.sprintf ", %d behind" n
-              | None -> "");
-          ]
-      | _ -> []
-  in
   let corrupt =
     match b.corrupted with
       | Some { checked = false; _ } -> ["not checked"]
@@ -450,7 +433,7 @@ let backend_row (b : backend) =
           (Option.value ~default:"?" b.name)
           (Option.value ~default:"?" b.role)
           health
-       :: (journal @ corrupt)))
+       :: corrupt))
 
 let domain_stats (d : domain) =
   let traits =
@@ -476,15 +459,7 @@ let domain_stats (d : domain) =
   in
   let queued f = Option.bind d.queues f
   and moved f = sum_known ( + ) 0 (List.map f d.frontends)
-  and wal f = Option.bind d.wal f in
-  let wal_pending =
-    sum_known ( + ) 0
-      [
-        wal (fun w -> w.intent);
-        wal (fun w -> w.prepared);
-        wal (fun w -> w.executed);
-      ]
-  in
+  and sync f = Option.bind d.sync f in
   [
     Separator;
     row (d.name ^ if traits = [] then "" else " — " ^ String.concat ", " traits);
@@ -503,11 +478,18 @@ let domain_stats (d : domain) =
       @ part (fun b -> "written " ^ size b) (moved (fun f -> f.bytes_written)))
   @ line ~indent:1
       (match
-         part (Printf.sprintf "%d pending") (positive wal_pending)
-         @ part (Printf.sprintf "%d stuck") (positive (wal (fun w -> w.stuck)))
+         part
+           (Printf.sprintf "%d pending")
+           (positive (sync (fun s -> s.pending)))
+         @ part
+             (Printf.sprintf "%d parked")
+             (positive (queued (fun q -> q.parked)))
+         @ part
+             (Printf.sprintf "stopped at entry %d")
+             (sync (fun s -> Option.bind s.cannot_follow (fun c -> c.entry)))
        with
         | [] -> []
-        | first :: rest -> ("wal " ^ first) :: rest)
+        | first :: rest -> ("sync " ^ first) :: rest)
   @ List.map backend_row d.backends
 
 let process_stats (s : stats) =

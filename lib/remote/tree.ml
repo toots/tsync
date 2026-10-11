@@ -43,7 +43,7 @@ module Make (C : Context.S) = struct
 
   let classify_child body =
     match Folder.classify_marker body with
-      | `Marker (m, _) -> `Dir m
+      | `Marker m -> `Dir m
       | `Unclassifiable -> `Unclassifiable
       | `Not_marker -> (
           match Manifest.decode body with

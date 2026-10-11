@@ -382,13 +382,10 @@ let manifest_at t key =
           | None -> refuse 404 "not found")
     | None -> refuse 404 "not found"
 
-(* security §6.3: a shared folder in the trash is not served. *)
+(* security §6.3: a shared folder that was removed is not served. *)
 let live_folder t id =
-  if not (Folder_id.is_root id) then (
-    match t.anchor id with
-      | Some a when Folder_id.equal a.parent Folder_id.trash ->
-          refuse 404 "not found"
-      | _ -> ())
+  if (not (Folder_id.is_root id)) && t.anchor id = None then
+    refuse 404 "not found"
 
 let path_parts path =
   let parts = List.filter (( <> ) "") (String.split_on_char '/' path) in

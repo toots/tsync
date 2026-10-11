@@ -295,17 +295,17 @@ let () =
          "domains":[{"name":"Media",
            "settings":{"readOnly":true,"versioning":true},
            "cache":{"chunks":1216,"bytes":10737418240,"maxCache":10737418240,"pinnedBytes":2147483648},
-           "queues":{"pendingFiles":0,"bytesOwed":0},
-           "wal":{"intent":1,"prepared":2,"executed":0,"stuck":1},
+           "queues":{"pendingFiles":0,"bytesOwed":0,"parked":1},
+           "sync":{"position":402,"pending":3,"treeHead":402},
            "frontends":[{"type":"fuse","mount":"/home/u/tsync/Media","bytesRead":540436070,"bytesWritten":0},
                         {"type":"http-proxy","bytesRead":10,"bytesWritten":5}],
            "backends":[
              {"name":"http-proxy","role":"main","reach":{"reachable":true,"latencyMs":11.4},
-              "journal":{"entries":402,"behind":0},"corrupted":{"checked":true,"chunks":0}},
+              "corrupted":{"checked":true,"chunks":0}},
              {"name":"cold","role":"replica","reach":{"reachable":false,"error":"connection refused"},
-              "journal":{"entries":88,"behind":12},"corrupted":{"checked":true,"chunks":3}},
+              "corrupted":{"checked":true,"chunks":3}},
              {"name":"far","role":"backfill","reach":{"reachable":false,"error":""},
-              "journal":{"error":"denied"},"corrupted":{"checked":false,"reason":"never"}}]}]}|};
+              "corrupted":{"checked":false,"reason":"never"}}]}]}|};
       {|{"ok":true,
          "self":{"server":{"hostname":"box","role":"owner","pid":7,"uptimeSeconds":12}},
          "domains":[{"name":"Files","settings":{"readOnly":false,"versioning":false}},
@@ -313,12 +313,13 @@ let () =
     ];
   case "stats: sparse";
   stats [{|{"ok":true,"self":{"server":{"hostname":"box"}}}|}];
-  case "stats: a journal still counting";
+  case "stats: an entry that cannot be followed";
   stats
     [
       {|{"ok":true,"domains":[{"name":"Files",
-         "backends":[{"name":"gcs","role":"main","reach":{"reachable":true},
-                      "journal":{"counting":true}}]}]}|};
+         "sync":{"position":7,"pending":0,
+                 "cannotFollow":{"entry":8,"reason":"it is of version 2"}},
+         "backends":[{"name":"gcs","role":"main","reach":{"reachable":true}}]}]}|};
     ];
 
   case "replies with fields of the wrong type, and an empty object";
@@ -340,8 +341,8 @@ let () =
       {|{"ok":true,"self":[],"domains":{"name":"x"}}|};
       {|{"ok":true,"self":{"server":"box","process":3,"traffic":null},
          "domains":[7,{"name":3},{"name":"d","settings":1,"cache":{"chunks":"many"},
-           "queues":[],"wal":{"stuck":"1"},"frontends":[1,{"mount":4}],
-           "backends":[{"reach":"up","journal":3,"corrupted":"no"}]}]}|};
+           "queues":[],"sync":{"pending":"1","cannotFollow":3},"frontends":[1,{"mount":4}],
+           "backends":[{"reach":"up","corrupted":"no"}]}]}|};
     ];
 
   if !cases = 0 then failwith "no case ran";

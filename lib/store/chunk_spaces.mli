@@ -47,9 +47,8 @@ val promote : t -> Domain_name.t -> Chunk_key.t -> bool
 val sync_shards : t -> Domain_name.t -> Chunk_key.t list -> unit
 
 (** The chunks a body in a manifest or version area names (§5.3): a manifest's
-    chunks; nothing for a folder marker, a trash entry or an internal leaf
-    (anchor, index); [Error] for anything else. The gate refuses what marking
-    would halt on. *)
+    chunks; nothing for a folder marker or an internal leaf (anchor, index);
+    [Error] for anything else. The gate refuses what marking would halt on. *)
 val references : Key.t -> Bigstring.t -> (Chunk_key.t list, string) result
 
 (** The reference gate around [write], which puts [body ()] at [key] (§5.4):

@@ -345,7 +345,7 @@ let run ?present ?shared ?roots ?socket config (domains : Config.domain list) =
         0
 
 (* 07 §2.5, §3.5: an owner for the command's duration, with every duty but
-   journal polling, drained before the lock is released. *)
+   background cycle, drained before the lock is released. *)
 let with_ownership ~what config (dom : Config.domain) f =
   match acquire ~role:"command" ~what dom.name with
     | Error h ->
