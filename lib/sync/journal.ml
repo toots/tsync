@@ -103,7 +103,8 @@ let note t k =
   Option.iter
     (fun delay ->
       Rt.spawn ~name:"cursor" (fun () ->
-          (try Stop.sleep delay with _ -> ());
+          (* A stop leaves it armed: the pending key is the drain's to flush. *)
+          Stop.sleep delay;
           Mutex.protect t.m (fun () -> t.armed <- false);
           flush t))
     arm

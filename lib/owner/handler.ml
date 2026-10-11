@@ -710,7 +710,7 @@ let run_job t ~send ~narrate job =
         report `Running ();
         Rt.spawn ~name:"job report" (fun () ->
             let rec loop () =
-              Rt.sleep job_report_interval;
+              Stop.sleep job_report_interval;
               if not (Atomic.get finished) then (
                 report `Running ();
                 loop ())

@@ -98,8 +98,9 @@ that the output never shows, so every driver is diffed against the same lines.
 - **`(optional)` hides a broken stanza.** An executable whose library is missing is silently not built,
   and its `enabled_if` rules then run nothing (pitfall B-11.1).
 - **Deferred work outlives a case.** A composite's `settle_later` or a journal's cursor debouncer can
-  write under a scratch root the test is removing. `Test_support.finish` requests the stop, waits for
-  `Rt.detached` to empty and only then removes the root; a fiber still running after `Stop.grace` fails
+  write under a scratch root the test is removing; a stop makes the first attempt at once and end, and
+  leaves the second's pending key to the drain's flush. `Test_support.finish` requests the stop, waits for
+  `Rt.running` to empty and only then removes the root; a fiber still running after `Stop.grace` fails
   the test with its name, so a detached fiber that nothing else ends waits with `Stop.sleep` (§10.6,
   pitfall B-12.11).
 - **A wait on a duration is a verdict from elapsed time** (§10.3, pitfall B-12.5). Tests wait on a

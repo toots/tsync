@@ -1,12 +1,12 @@
 open Tsync_core
 
-(* Pitfall B-12.11: detached work that outlived the case would write under the
-   root being removed, so a fiber that does not end on a stop fails the test. *)
+(* Pitfall B-12.11: work that outlived the case would write under the root
+   being removed, so a fiber that does not end on a stop fails the test. *)
 let finish root =
   Stop.request ();
   let deadline = Unix.gettimeofday () +. Stop.grace in
   let rec wait () =
-    match Rt.detached () with
+    match Rt.running () with
       | [] -> ()
       | left when Unix.gettimeofday () >= deadline ->
           prerr_endline
