@@ -23,8 +23,8 @@ module Make (C : Context.S) = struct
   let resolved_chunk_size = Atomic.make None
   let resolving_chunk_size = Atomic.make false
 
-  (* The main's recommendation, asked once in the background; a failure leaves
-     it unknown, to be asked again by the next caller. *)
+  (* The main's chunk size, asked once in the background; a failure leaves it
+     unknown, to be asked again by the next caller. *)
   let resolve_chunk_size () =
     if Atomic.compare_and_set resolving_chunk_size false true then
       Rt.spawn ~name:"chunk size" (fun () ->
@@ -32,33 +32,41 @@ module Make (C : Context.S) = struct
             | Some cs
               when cs >= Chunking.chunk_size_min
                    && cs <= Chunking.chunk_size_max ->
-                Atomic.set resolved_chunk_size (Some cs)
+                (match C.chunk_size_config with
+                  | Some configured when configured <> cs ->
+                      Log.err
+                        "%s is configured with a chunk size of %d and its main \
+                         states %d: nothing is written until they agree"
+                        (Domain_name.to_string d) configured cs
+                  | _ -> ());
+                Atomic.set resolved_chunk_size (Some (`Stated cs))
             | Some cs ->
-                Log.warn
-                  "ignoring the store's recommended chunk size %d, out of range"
-                  cs;
-                Atomic.set resolved_chunk_size
-                  (Some Chunking.default_chunk_size)
-            | None ->
-                Atomic.set resolved_chunk_size
-                  (Some Chunking.default_chunk_size)
+                Log.warn "ignoring the main's chunk size %d, out of range" cs;
+                Atomic.set resolved_chunk_size (Some `Unstated)
+            | None -> Atomic.set resolved_chunk_size (Some `Unstated)
             | exception e ->
-                Log.info "the store's recommended chunk size is unknown yet: %s"
+                Log.info "the main's chunk size is unknown yet: %s"
                   (Printexc.to_string e);
                 Atomic.set resolving_chunk_size false)
 
-  (* 01 §3.5: configured, else the main's recommendation within range, else
-     the default; never waiting for the store, so a local write stays offline
-     work. *)
+  (* 01 §3.5: the main's, which is binding on its clients; else the
+     configured one; else the default. It never waits for the store, so a
+     local write stays offline work: until the main's is learned the next
+     choice is used. *)
   let chunk_size () =
-    match C.chunk_size_config with
-      | Some cs -> cs
-      | None -> (
-          match Atomic.get resolved_chunk_size with
-            | Some cs -> cs
-            | None ->
-                resolve_chunk_size ();
-                Chunking.default_chunk_size)
+    let own =
+      Option.value ~default:Chunking.default_chunk_size C.chunk_size_config
+    in
+    match (Atomic.get resolved_chunk_size, C.chunk_size_config) with
+      | Some (`Stated cs), Some configured when configured <> cs ->
+          Fail.invalid
+            "%s is configured with a chunk size of %d and its main states %d"
+            (Domain_name.to_string d) configured cs
+      | Some (`Stated cs), _ -> cs
+      | Some `Unstated, _ -> own
+      | None, _ ->
+          resolve_chunk_size ();
+          own
 
   let marked_m = Mutex.create ()
   let marked : (string, unit) Hashtbl.t = Hashtbl.create 16

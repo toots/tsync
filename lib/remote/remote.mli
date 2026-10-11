@@ -17,7 +17,8 @@ type source =
 exception Source_changed of string
 
 module Make (_ : Context.S) : sig
-  (** The chunk size of new files (01 §3.5). *)
+  (** The chunk size of new files (01 §3.5): the main's once learned, which is
+      binding; INVALID for a domain configured with another. *)
   val chunk_size : unit -> int
 
   (** A chunk marked corrupt on a verifying member (memo refreshed every 5 s).

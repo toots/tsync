@@ -246,6 +246,39 @@ let () =
       let range = Bigstring.to_string (Slow.get_chunk_range ck 2 3) in
       p "range %S within 0.5s: %b\n" range (Rt.now () -. t0 < 0.5);
       List.iter Rt.Promise.await busy;
+      p "\n== the main's chunk size is binding\n";
+      let stating =
+        {
+          C.store with
+          capabilities =
+            (fun _ ->
+              { Store.no_caps with chunk_size = Some Chunking.chunk_size_min });
+        }
+      in
+      let module Disagreeing = Remote.Make (struct
+        include C
+
+        let store = stating
+      end) in
+      let module Following = Remote.Make (struct
+        include C
+
+        let store = stating
+        let chunk_size_config = None
+      end) in
+      p "before the main answered: %d and %d\n"
+        (Disagreeing.chunk_size ())
+        (Following.chunk_size () / Chunking.default_chunk_size);
+      Rt.sleep 0.2;
+      p "configured with another size: %s\n"
+        (match Disagreeing.chunk_size () with
+          | cs -> string_of_int cs
+          | exception Fail.E f ->
+              Text.replace_all
+                ~sub:(string_of_int Chunking.chunk_size_min)
+                ~by:"<the main's>" f.reason);
+      p "not configured: the main's is used: %b\n"
+        (Following.chunk_size () = Chunking.chunk_size_min);
       p "\n== store\n";
       dump ());
   Test_support.finish root
