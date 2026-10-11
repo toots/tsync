@@ -18,10 +18,9 @@ negative size          refused
 length mismatch        refused
 renamed records the new leaf: other.txt
 
-== folder bodies (02 §2.7–2.9)
+== folder bodies (02 §2.7–2.8)
 {"dir":true,"name":"Photos","id":"3f2a9c1b7d4e-1a"}
 {"parent":".tsync-root","name":"Photos"}
-{"dir":true,"name":"Photos","id":"3f2a9c1b7d4e-1a","path":"Archive/Photos"}
 {"id":"3f2a9c1b7d4e-1a","dir":true,"x":1}        marker 3f2a9c1b7d4e-1a
 {"dir":true,"name":"a","id":""}                  unclassifiable
 {"parent":".tsync-root","name":"a"}              not a marker
