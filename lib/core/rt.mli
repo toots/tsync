@@ -29,10 +29,10 @@ type execution = [ `Immediate | `Direct | `Threaded ]
     cancellation is logged. *)
 val spawn : ?name:string -> ?execution:execution -> (unit -> unit) -> unit
 
-(** The names of the fibers started by {!spawn} that have not ended, sorted. A
-    test waits for it to empty after a stop, before removing its scratch root;
-    the fiber of a {!run_sync} is not listed. *)
-val detached : unit -> string list
+(** The names of the fibers that have not ended, the caller's excepted, sorted:
+    detached ones, children and the ones a [detach] left behind. A test waits
+    for it to empty after a stop, before removing its scratch root. *)
+val running : unit -> string list
 
 (** [within execution fn] runs [fn] with the calling fiber scheduled as
     [execution], then puts it back. Waits inside [fn] resume as [execution], and

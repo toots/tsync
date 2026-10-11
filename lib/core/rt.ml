@@ -8,6 +8,7 @@ type execution = Duppy.execution_class
 
 (* [execution] is written by the fiber itself only. *)
 type ctx = {
+  name : string;
   cm : Mutex.t;
   mutable cancel : exn option;
   mutable hook : (exn -> unit) option;
@@ -15,8 +16,15 @@ type ctx = {
   mutable execution : execution;
 }
 
-let new_ctx execution =
-  { cm = Mutex.create (); cancel = None; hook = None; children = []; execution }
+let new_ctx name execution =
+  {
+    name;
+    cm = Mutex.create ();
+    cancel = None;
+    hook = None;
+    children = [];
+    execution;
+  }
 
 let rec cancel_ctx c exn =
   Mutex.lock c.cm;
@@ -29,8 +37,8 @@ let rec cancel_ctx c exn =
         Option.iter (fun h -> h exn) hook;
         List.iter (fun ch -> cancel_ctx ch exn) children
 
-let child_ctx ?(execution = `Threaded) parent =
-  let c = new_ctx execution in
+let child_ctx ?(name = "task") ?(execution = `Threaded) parent =
+  let c = new_ctx name execution in
   Mutex.lock parent.cm;
   let inherited = parent.cancel in
   if inherited = None then parent.children <- c :: parent.children;
@@ -44,7 +52,7 @@ let detach_ctx parent c =
 
 type _ Effect.t += Current : ctx Effect.t
 
-let root = new_ctx `Threaded
+let root = new_ctx "root" `Threaded
 let current () = try Effect.perform Current with Effect.Unhandled _ -> root
 
 type fiber = ctx
@@ -141,32 +149,26 @@ let spawn_in ?(name = "task") ctx fn =
 
 (* The context leaves its parent's children when the fiber ends. *)
 let spawn_child ?name ?execution parent fn =
-  let c = child_ctx ?execution parent in
-  spawn_in ?name c (fun () ->
-      Fun.protect ~finally:(fun () -> detach_ctx parent c) fn);
+  let c = child_ctx ?name ?execution parent in
+  (try
+     spawn_in ?name c (fun () ->
+         Fun.protect ~finally:(fun () -> detach_ctx parent c) fn)
+   with e ->
+     detach_ctx parent c;
+     raise e);
   c
 
-let detached_m = Mutex.create ()
-let detached_names : (int, string) Hashtbl.t = Hashtbl.create 64
-let next_detached = ref 0
+let spawn ?name ?execution fn = ignore (spawn_child ?name ?execution root fn)
 
-let spawn ?(name = "task") ?execution fn =
-  let id =
-    Mutex.protect detached_m (fun () ->
-        incr next_detached;
-        Hashtbl.replace detached_names !next_detached name;
-        !next_detached)
+let running () =
+  let self = current () in
+  let rec names c =
+    let children = Mutex.protect c.cm (fun () -> c.children) in
+    List.concat_map
+      (fun child -> (if child == self then [] else [child.name]) @ names child)
+      children
   in
-  let ended () =
-    Mutex.protect detached_m (fun () -> Hashtbl.remove detached_names id)
-  in
-  ignore
-    (spawn_child ~name ?execution root (fun () -> Fun.protect ~finally:ended fn))
-
-let detached () =
-  Mutex.protect detached_m (fun () ->
-      Hashtbl.fold (fun _ name names -> name :: names) detached_names []
-      |> List.sort compare)
+  List.sort compare (names root)
 
 (* [register] receives a resolver that answers whether it was the one to wake
    the fiber, since a cancellation may win the race.
@@ -584,14 +586,13 @@ let run_sync fn =
   ensure_started ();
   let m = Mutex.create () and c = Stdlib.Condition.create () in
   let result = ref None in
-  ignore
-    (spawn_child root (fun () ->
-         let r =
-           try Ok (fn ()) with e -> Error (e, Printexc.get_raw_backtrace ())
-         in
-         Mutex.protect m (fun () ->
-             result := Some r;
-             Stdlib.Condition.broadcast c)));
+  spawn (fun () ->
+      let r =
+        try Ok (fn ()) with e -> Error (e, Printexc.get_raw_backtrace ())
+      in
+      Mutex.protect m (fun () ->
+          result := Some r;
+          Stdlib.Condition.broadcast c));
   Mutex.lock m;
   while !result = None do
     Stdlib.Condition.wait c m

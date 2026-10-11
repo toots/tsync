@@ -568,11 +568,16 @@ let settle_generation t =
 let settle_later t =
   if Atomic.compare_and_set t.settle_pending false true then
     Rt.spawn ~name:"settle generation" (fun () ->
+        (* A stop brings the attempt forward and makes it the last. *)
         let rec attempt () =
-          Stop.sleep settle_retry;
+          let stopping =
+            match Stop.sleep settle_retry with
+              | () -> false
+              | exception Stop.Stopping -> true
+          in
           match settle_generation t with
-            | true -> attempt ()
-            | false -> Atomic.set t.settle_pending false
+            | true when not stopping -> attempt ()
+            | true | false -> Atomic.set t.settle_pending false
             | exception e ->
                 Atomic.set t.settle_pending false;
                 Log.warn "cannot settle the collection generation: %s"

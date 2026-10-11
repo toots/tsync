@@ -127,7 +127,19 @@ let () =
         Rt.sleep 0.01
       done;
       Rt.sleep 0.05;
-      check "ended fibers leave no context behind" (live () - before < 1_000_000));
+      check "ended fibers leave no context behind" (live () - before < 1_000_000);
+      let release = Rt.Promise.create () in
+      Rt.spawn ~name:"held" (fun () -> Rt.Promise.await release);
+      check "a fiber that has not ended is listed as running"
+        (List.mem "held" (Rt.running ()));
+      Rt.Promise.resolve release ();
+      let polls = ref 500 in
+      while Rt.running () <> [] && !polls > 0 do
+        decr polls;
+        Rt.sleep 0.01
+      done;
+      check "it leaves the list when it ends, and the caller is never listed"
+        (Rt.running () = []));
   let live () =
     Gc.full_major ();
     (Gc.stat ()).live_words * (Sys.word_size / 8)

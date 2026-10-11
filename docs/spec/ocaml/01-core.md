@@ -53,7 +53,7 @@ threads.
 
 | Capability | `Rt` |
 |---|---|
-| R1 spawn detached | `spawn`: a cancellation ends the fiber silently, any other escaping exception is logged through `Log.err` and the process continues; `detached` names the ones still running |
+| R1 spawn detached | `spawn`: a cancellation ends the fiber silently, any other escaping exception is logged through `Log.err` and the process continues; `running` names every fiber that has not ended |
 | R1 join all, map | `all`, `both`, `map_concurrently`, `iter_concurrently` (a fiber per element); `map_bounded`, `iter_bounded`, `each` (`width` workers pulling) |
 | R1 finally | `Fun.protect ~finally` |
 | R1 promise | `Promise` (`resolve` raises when resolved twice, `try_resolve` answers `false`); waiters are woken after the promise's lock is released |
