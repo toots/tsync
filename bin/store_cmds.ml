@@ -143,62 +143,6 @@ let void_entry_cmd =
        entries behind it are merged and projected."
     Term.(const void_entry $ n $ domain_arg $ verbose)
 
-(* Under the ownership lock but with no engine: an engine's start and drain
-   each run a cycle, which would arrive on the tree this command is there to
-   clean first. *)
-let upgrade apply discard in_sync local_only name verbose =
-  set_verbose verbose;
-  Tsync_owner.Owner.stop_on_signals ();
-  run (fun () ->
-      let config = config () in
-      let dom = domain ?name config in
-      let what = "tsync upgrade-from-journal" in
-      match Tsync_owner.Owner.acquire ~role:"command" ~what dom.name with
-        | Error _ ->
-            fail "%s is owned by another process: stop it first"
-              (Domain_name.to_string dom.name)
-        | Ok lock ->
-            Fun.protect
-              ~finally:(fun () -> Tsync_owner.Owner.release lock)
-              (fun () ->
-                Tsync_owner.Upgrade.run ~out:print_endline
-                  ~cancelled:Stop.requested
-                  (Tsync_domain.Domain.build ~owner:true config dom)
-                  ~apply ~discard ~in_sync ~local_only))
-
-let upgrade_cmd =
-  let discard =
-    Arg.(
-      value & flag
-      & info ["discard"]
-          ~doc:
-            "Lose the namespace changes the previous version had not \
-             published; staged edits are kept.")
-  and in_sync =
-    Arg.(
-      value & flag
-      & info ["in-sync"]
-          ~doc:
-            "This client had applied every change and published all of its own \
-             when it was stopped: start it at entry 0 with its mirror as it \
-             is, without comparing it with the whole tree. tsync sync --full \
-             makes that comparison later.")
-  and local_only =
-    Arg.(
-      value & flag
-      & info ["local"]
-          ~doc:
-            "The store was cleaned from another machine: clean this client's \
-             local state only, without listing the tree.")
-  in
-  cmd "upgrade-from-journal"
-    ~doc:
-      "One-off: remove what the journal protocol left on the stores and here, \
-       so every client arrives by state. Stop every client first."
-    Term.(
-      const upgrade $ apply_arg $ discard $ in_sync $ local_only $ domain_arg
-      $ verbose)
-
 let data_integrity verify repair dry_run detail source name verbose =
   if verify && repair then (
     prerr_endline "tsync: --verify and --repair go one at a time";
@@ -742,7 +686,6 @@ let cmds =
     gc_cmd;
     expire_cmd;
     void_entry_cmd;
-    upgrade_cmd;
     data_integrity_cmd;
     import_cmd;
     rsync_cmd;
