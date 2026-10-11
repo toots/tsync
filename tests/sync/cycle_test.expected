@@ -1,0 +1,64 @@
+== the answer to a create is lost; the owner restarts
+  A after the failed push: position 0, 1 pending, a push in flight; entries on the main: 1
+  restarted, then a write to the same name: 0 entries merged, 1 committed, 0 pending
+  A: f="two"; position 2, 0 pending; entries: 2
+  B: f="two"
+
+== a create that never left; the owner restarts
+  A after the failed push: position 0, 1 pending, a push in flight; entries on the main: 0
+  restarted: 0 entries merged, 0 committed, 0 pending
+  A: f="one"; position 1, 0 pending; entries: 1
+
+== an arrival record left by a crash is completed at start
+  B after its start, with no cycle: f="again"  g="new"; position 2, 0 pending
+  an anchor from before the crash: stale: the frontend lists again
+  the next cycle: 0 entries merged, 0 committed, 0 pending
+
+== a push refused by a commit that touches nothing pending
+  B: 0 entries merged, 1 committed, 0 pending
+  chunks B sent after A's commit got ahead: 0; entries: 2
+  B: mine="from B"  theirs="from A"
+  A: mine="from B"  theirs="from A"
+
+== more commands than an entry holds
+  A: 0 entries merged, 3 committed, 0 pending
+  commands per entry: 256, 256, 88; tree head: 3
+  B holds 600 links
+
+== a file renamed, then edited, while its upload is held
+  A: 0 entries merged, 0 committed, 2 pending
+  B meanwhile: f="kept"
+  once the upload passes, A: position 2, 0 pending
+  B: g="EDIT"
+
+== an entry no client can decode, then voided
+  A: failed: log entry 2 cannot be followed: fetching and pushing stop until it is voided or this client is upgraded [corrupt/other]
+  A: position 1, 1 pending, cannot follow entry 2 (it does not decode: expected a JSON object)
+  B: failed: log entry 2 cannot be followed: fetching and pushing stop until it is voided or this client is upgraded [corrupt/other]; position 1, 0 pending, cannot follow entry 2 (it does not decode: expected a JSON object)
+  voided. A: 1 entries merged, 1 committed, 0 pending
+  B: 2 entries merged, 0 committed, 0 pending; f="one"  g="behind"
+  entries: 3; tree head: 1
+
+== an entry of a later version
+  A: failed: log entry 1 cannot be followed: fetching and pushing stop until it is voided or this client is upgraded [corrupt/other]
+  A: position 0, 1 pending, cannot follow entry 1 (it is of version 2)
+  a void object changes nothing for it: failed: log entry 1 cannot be followed: fetching and pushing stop until it is voided or this client is upgraded [corrupt/other]
+
+== a chunk the main lost before the commit
+  A, its create failing: position 0, 1 pending, a push in flight
+  A, the chunk gone from the main: 0 entries merged, 0 committed, 1 pending
+  A: position 0, 1 pending
+  after the upload ran again: position 1, 0 pending; entries: 1
+  B: f="abcdefgh"
+
+== an entry its author never projected
+  A merges it without waiting for its projection: 1 entries merged, 0 committed, 0 pending
+  A: f="one"  g="dead"; tree head: 1 of 2
+  A commits behind it: 0 entries merged, 1 committed, 0 pending; tree head: 1 of 3
+  a new client arrives by state over the unprojected entries: f="one"  g="dead"  h="after"
+
+== a position that is gone: arrival by state keeps pending work
+  B: arrived by state, 1 committed, 0 pending
+  B: f="from A"  mine="from B"  shared="from A"  shared (conflicted copy from B)="from B"
+  A: f="from A"  mine="from B"  shared="from A"  shared (conflicted copy from B)="from B"
+
