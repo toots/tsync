@@ -6,12 +6,6 @@ let marker_body m =
     (Yojson.Safe.to_string (`String m.name))
     (Yojson.Safe.to_string (`String (Folder_id.to_string m.id)))
 
-let trash_body m ~path =
-  Printf.sprintf {|{"dir":true,"name":%s,"id":%s,"path":%s}|}
-    (Yojson.Safe.to_string (`String m.name))
-    (Yojson.Safe.to_string (`String (Folder_id.to_string m.id)))
-    (Yojson.Safe.to_string (`String path))
-
 let anchor_body a =
   Printf.sprintf {|{"parent":%s,"name":%s}|}
     (Yojson.Safe.to_string (`String (Folder_id.to_string a.parent)))
@@ -33,7 +27,7 @@ let classify_marker body =
     | Some f when List.assoc_opt "dir" f = Some (`Bool true) -> (
         let name = Option.value ~default:"" (str f "name") in
         match Option.bind (str f "id") Folder_id.of_string with
-          | Some id -> `Marker ({ name; id }, str f "path")
+          | Some id -> `Marker { name; id }
           | None -> `Unclassifiable)
     | _ -> `Not_marker
 
@@ -46,5 +40,3 @@ let decode_anchor body =
           | Some parent, Some aname -> Some { parent; aname }
           | _ -> None)
     | None -> None
-
-let in_trash a = Folder_id.equal a.parent Folder_id.trash

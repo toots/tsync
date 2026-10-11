@@ -1,9 +1,8 @@
-(** A folder id (spec 01 §2.5): the root, the trash, or a hex id. *)
+(** A folder id (spec 01 §2.5): the root or a hex id. *)
 
 type t = private string
 
 val root : t
-val trash : t
 val of_string : string -> t option
 
 (** Raises INVALID. *)

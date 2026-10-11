@@ -37,7 +37,9 @@ let sync full name verbose =
 
 let sync_cmd =
   let full =
-    Arg.(value & flag & info ["full"] ~doc:"Rebuild from the store's tree.")
+    Arg.(
+      value & flag
+      & info ["full"] ~doc:"Arrive by state: read the main's whole tree.")
   in
   cmd "sync" ~doc:"Apply other clients' changes now."
     Term.(const sync $ full $ domain_arg $ verbose)

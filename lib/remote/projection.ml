@@ -16,7 +16,7 @@ module Make (C : Context.S) = struct
             | Some m -> `Manifest m
             | None -> (
                 match Folder.classify_marker (Bigstring.to_string body) with
-                  | `Marker (m, _) -> `Marker m.id
+                  | `Marker m -> `Marker m.id
                   | `Unclassifiable | `Not_marker -> `Other))
 
   (* §6.1: a version is saved only of the content the command replaces, so an

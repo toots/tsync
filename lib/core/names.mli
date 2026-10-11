@@ -43,7 +43,6 @@ val is_under : dir:string -> string -> bool
 (** {1 Folder ids (§2.5)} *)
 
 val root_id : string
-val trash_id : string
 val valid_folder_id : string -> bool
 
 (** {1 Chunk keys and shards (§3.2, §3.6)} *)

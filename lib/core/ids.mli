@@ -14,5 +14,5 @@ val token : unit -> string
 val secret : unit -> string
 
 (** 16 lowercase hex from a seeded generator, reseeded in a forked child:
-    staged-body names and trash entries. *)
+    staged-body names. *)
 val short : unit -> string

@@ -1,7 +1,6 @@
 type t = string
 
 let root = Names.root_id
-let trash = Names.trash_id
 let of_string s = if Names.valid_folder_id s then Some s else None
 
 let v s =

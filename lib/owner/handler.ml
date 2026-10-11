@@ -743,8 +743,9 @@ let cancel t id =
         true
     | _ -> false
 
-(* 08 §3.3 [pendingBytes]: every owed record's size, which reads the whole
-   WAL, so a menu polling [status] reads it at most every [owed_window]. *)
+(* 08 §3.3 [pendingBytes]: the size of every edit not uploaded yet, which
+   reads the staged tree, so a menu polling [status] reads it at most every
+   [owed_window]. *)
 let owed_window = 5.
 
 let pending_bytes t now =

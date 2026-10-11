@@ -51,16 +51,15 @@ let () =
       ("length mismatch", b ^ "x");
     ];
   p "renamed records the new leaf: %s\n" (Manifest.rename m "other.txt").name;
-  p "\n== folder bodies (02 §2.7–2.9)\n";
+  p "\n== folder bodies (02 §2.7–2.8)\n";
   let id = Folder_id.v "3f2a9c1b7d4e-1a" in
   p "%s\n" (Folder.marker_body { name = "Photos"; id });
   p "%s\n" (Folder.anchor_body { parent = Folder_id.root; aname = "Photos" });
-  p "%s\n" (Folder.trash_body { name = "Photos"; id } ~path:"Archive/Photos");
   List.iter
     (fun body ->
       p "%-48s %s\n" body
         (match Folder.classify_marker body with
-          | `Marker (m, _) -> "marker " ^ Folder_id.to_string m.id
+          | `Marker m -> "marker " ^ Folder_id.to_string m.id
           | `Unclassifiable -> "unclassifiable"
           | `Not_marker -> "not a marker"))
     [
