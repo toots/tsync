@@ -101,5 +101,5 @@ let () =
       p "mkdir entries removed: %d\n" (List.length mkdirs);
       pass b;
       p "B: %s\n" (tree b);
-      Stop.request ());
-  Fs.rm_rf root
+      ());
+  Test_support.finish root

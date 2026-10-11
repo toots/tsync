@@ -248,4 +248,4 @@ let () =
       Gc_record.clear main d;
       p "\n== an unknown source\n";
       run "source" ~source:"nowhere" All);
-  Fs.rm_rf root
+  Test_support.finish root

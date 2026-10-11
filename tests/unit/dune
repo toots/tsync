@@ -4,7 +4,7 @@
 (executables
  (names rt_test core_test dqueue_test)
  (modules rt_test core_test dqueue_test)
- (libraries tsync_core unix))
+ (libraries test_support tsync_core unix))
 
 (executables
  (names uplink_test uplink_law_test uplink_modes_test)
@@ -134,7 +134,7 @@
 (executable
  (name shared_outcome_test)
  (modules shared_outcome_test)
- (libraries tsync_core tsync_store tsync_checkout unix))
+ (libraries test_support tsync_core tsync_store tsync_checkout unix))
 
 (rule
  (with-stdout-to
@@ -149,7 +149,7 @@
 (executable
  (name dqueue_raise_test)
  (modules dqueue_raise_test)
- (libraries tsync_core unix))
+ (libraries test_support tsync_core unix))
 
 (rule
  (with-stdout-to
@@ -164,7 +164,7 @@
 (executable
  (name cache_states_test)
  (modules cache_states_test)
- (libraries tsync_core tsync_checkout unix))
+ (libraries test_support tsync_core tsync_checkout unix))
 
 (rule
  (with-stdout-to

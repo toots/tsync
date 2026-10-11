@@ -242,4 +242,4 @@ let () =
   Sys.remove tall;
   Sys.remove sideways;
   Sys.remove narrowed;
-  Fs.rm_rf dir
+  Test_support.finish dir

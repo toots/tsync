@@ -265,4 +265,4 @@ let () =
            = Some
                (Bigstring.of_string
                   (Folder.anchor_body { parent = id "top"; aname = "inner" }))));
-  Fs.rm_rf root
+  Test_support.finish root

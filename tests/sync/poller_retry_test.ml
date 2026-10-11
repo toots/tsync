@@ -152,5 +152,5 @@ let () =
       ignore (C.apply_pass ());
       p "C publishes after a pass begun after it: %b\n"
         (until 50 (fun () -> C.pending_uploads () = 0));
-      Stop.request ());
-  Fs.rm_rf root
+      ());
+  Test_support.finish root

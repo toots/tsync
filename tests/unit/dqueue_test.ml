@@ -239,4 +239,4 @@ let () =
       p "when the settle returned: %s; later: %s; left on disk: %d\n" at_return
         (String.concat ", " (List.rev !log))
         (List.length (Dqueue.Records.list r)));
-  Fs.rm_rf dir
+  Test_support.finish dir

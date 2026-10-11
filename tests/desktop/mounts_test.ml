@@ -172,6 +172,6 @@ let () =
   (match Unix.waitpid [] pid with
     | _, WEXITED 0 -> ()
     | _ -> failwith "the child failed");
-  Fs.rm_rf root;
+  Test_support.finish root;
   if !checks = 0 then failwith "no check ran";
   Printf.printf "%d checks\n" !checks

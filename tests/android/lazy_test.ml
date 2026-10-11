@@ -462,5 +462,5 @@ let () =
        && (String.sub st i 16 = "Frontend android" || has (i + 1))
      in
      has 0);
-  Test_support.remove_root root;
+  Test_support.finish root;
   exit 0

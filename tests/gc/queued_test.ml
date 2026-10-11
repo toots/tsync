@@ -285,4 +285,4 @@ let () =
            (List.concat_map
               (fun (_, (q : Discards.pending)) -> q.keys)
               (Discards.pending log))));
-  Fs.rm_rf root
+  Test_support.finish root

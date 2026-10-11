@@ -190,4 +190,4 @@ let () =
         (not (Sys.file_exists stale))
         (Sys.file_exists held) (Sys.file_exists fresh);
       Unix.close lock);
-  Fs.rm_rf root
+  Test_support.finish root

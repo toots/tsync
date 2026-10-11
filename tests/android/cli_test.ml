@@ -221,5 +221,5 @@ let () =
              (fun v () acc -> if List.mem v registered then acc else v :: acc)
              driven [])));
   p "verbs driven: %d" (Hashtbl.length driven);
-  Fs.rm_rf root;
+  Test_support.finish root;
   exit 0

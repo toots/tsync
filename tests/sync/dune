@@ -17,6 +17,7 @@
  (name two_clients_test)
  (modules two_clients_test)
  (libraries
+  test_support
   tsync_core
   tsync_store
   tsync_remote
@@ -37,7 +38,7 @@
 (executable
  (name import_plan_test)
  (modules import_plan_test)
- (libraries tsync_core tsync_sync unix))
+ (libraries test_support tsync_core tsync_sync unix))
 
 (rule
  (with-stdout-to
@@ -53,6 +54,7 @@
  (name import_test)
  (modules import_test)
  (libraries
+  test_support
   tsync_core
   tsync_store
   tsync_remote
@@ -89,6 +91,7 @@
  (name rsync_test)
  (modules rsync_test)
  (libraries
+  test_support
   tsync_core
   tsync_store
   tsync_remote
@@ -110,6 +113,7 @@
  (name export_test)
  (modules export_test)
  (libraries
+  test_support
   tsync_core
   tsync_store
   tsync_remote
@@ -131,6 +135,7 @@
  (name recover_test)
  (modules recover_test)
  (libraries
+  test_support
   tsync_core
   tsync_store
   tsync_checkout
@@ -154,6 +159,7 @@
  (name marker_slot_test)
  (modules marker_slot_test)
  (libraries
+  test_support
   tsync_core
   tsync_store
   tsync_remote
@@ -175,6 +181,7 @@
  (name moved_edit_test)
  (modules moved_edit_test)
  (libraries
+  test_support
   tsync_core
   tsync_store
   tsync_remote
@@ -196,6 +203,7 @@
  (name poller_retry_test)
  (modules poller_retry_test)
  (libraries
+  test_support
   tsync_core
   tsync_store
   tsync_checkout
@@ -219,6 +227,7 @@
  (name lost_answer_test)
  (modules lost_answer_test)
  (libraries
+  test_support
   tsync_core
   tsync_store
   tsync_checkout
@@ -242,6 +251,7 @@
  (name rebuild_race_test)
  (modules rebuild_race_test)
  (libraries
+  test_support
   tsync_core
   tsync_store
   tsync_checkout
@@ -265,6 +275,7 @@
  (name missing_parent_test)
  (modules missing_parent_test)
  (libraries
+  test_support
   tsync_core
   tsync_store
   tsync_checkout
@@ -288,6 +299,7 @@
  (name legacy_entry_test)
  (modules legacy_entry_test)
  (libraries
+  test_support
   tsync_core
   tsync_store
   tsync_checkout
@@ -333,6 +345,7 @@
  (name feed_test)
  (modules feed_test)
  (libraries
+  test_support
   tsync_core
   tsync_store
   tsync_remote
@@ -397,6 +410,7 @@
  (name arrival_lock_test)
  (modules arrival_lock_test)
  (libraries
+  test_support
   tsync_core
   tsync_store
   tsync_remote
@@ -418,6 +432,7 @@
  (name restore_race_test)
  (modules restore_race_test)
  (libraries
+  test_support
   tsync_core
   tsync_store
   tsync_remote

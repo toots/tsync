@@ -8,6 +8,7 @@
  (enabled_if
   (= %{system} linux))
  (libraries
+  test_support
   tsync_core
   tsync_ipc
   tsync_dbus

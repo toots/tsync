@@ -38,7 +38,14 @@
 (executable
  (name retention_test)
  (modules retention_test)
- (libraries tsync_core tsync_store tsync_remote tsync_sync tsync_gc unix))
+ (libraries
+  test_support
+  tsync_core
+  tsync_store
+  tsync_remote
+  tsync_sync
+  tsync_gc
+  unix))
 
 (rule
  (with-stdout-to
@@ -68,7 +75,7 @@
 (executable
  (name queued_test)
  (modules queued_test)
- (libraries tsync_core tsync_store tsync_gc unix))
+ (libraries test_support tsync_core tsync_store tsync_gc unix))
 
 (rule
  (with-stdout-to
@@ -83,7 +90,7 @@
 (executable
  (name integrity_test)
  (modules integrity_test)
- (libraries tsync_core tsync_store tsync_remote tsync_gc unix))
+ (libraries test_support tsync_core tsync_store tsync_remote tsync_gc unix))
 
 (rule
  (with-stdout-to
@@ -98,7 +105,7 @@
 (executable
  (name verify_test)
  (modules verify_test)
- (libraries tsync_core tsync_store tsync_remote tsync_gc unix))
+ (libraries test_support tsync_core tsync_store tsync_remote tsync_gc unix))
 
 (rule
  (with-stdout-to
@@ -113,7 +120,7 @@
 (executable
  (name mirror_test)
  (modules mirror_test)
- (libraries tsync_core tsync_store tsync_remote tsync_gc unix))
+ (libraries test_support tsync_core tsync_store tsync_remote tsync_gc unix))
 
 (rule
  (with-stdout-to
@@ -128,7 +135,7 @@
 (executable
  (name share_test)
  (modules share_test)
- (libraries tsync_core tsync_store tsync_remote tsync_gc unix))
+ (libraries test_support tsync_core tsync_store tsync_remote tsync_gc unix))
 
 (rule
  (with-stdout-to

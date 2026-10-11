@@ -269,4 +269,4 @@ let () =
         "whole chunks cheap with the local main: %b; with it held down and a \
          slow replica answering: %b\n"
         cheap (s.fast_read ()));
-  Test_support.remove_root root
+  Test_support.finish root

@@ -569,7 +569,7 @@ let settle_later t =
   if Atomic.compare_and_set t.settle_pending false true then
     Rt.spawn ~name:"settle generation" (fun () ->
         let rec attempt () =
-          Rt.sleep settle_retry;
+          Stop.sleep settle_retry;
           match settle_generation t with
             | true -> attempt ()
             | false -> Atomic.set t.settle_pending false
@@ -856,7 +856,7 @@ let check_discards t src c =
 
 let poll_discards t src =
   let rec loop () =
-    Rt.sleep t.timing.discard_poll;
+    Stop.sleep t.timing.discard_poll;
     List.iter
       (fun c ->
         try check_discards t src c with
@@ -884,7 +884,7 @@ let run_probe t m =
     if m.store.head_opt key = None then true
     else if Rt.now () > deadline then false
     else (
-      Rt.sleep t.timing.probe_poll;
+      Stop.sleep t.timing.probe_poll;
       wait ())
   in
   (* Pitfall C-7.10: an unconfirmed probe is taken back, also when the wait

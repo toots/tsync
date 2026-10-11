@@ -106,4 +106,4 @@ let () =
       List.iter
         (fun b -> p "body kept: %b\n" (Staged.body_size staged b >= 0))
         bodies);
-  Fs.rm_rf root
+  Test_support.finish root

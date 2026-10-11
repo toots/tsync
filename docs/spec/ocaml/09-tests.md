@@ -33,7 +33,7 @@ finding numbers to [the 2026-10-01 review](../review/2026-10-01-rewrite.md).
 | `tests/http`, `tests/ipc` | the HTTP client and server over both TLS implementations, the IPC server and client |
 | `tests/owner`, `tests/status`, `tests/config` | the request handler, jobs, the supervisor, the menu, status rendering, config parsing, the wizard |
 | `tests/android` | the bridge called from foreign threads (`stress_stubs.c`), the command group, the lazy tree |
-| `tests/support` | `Test_support.remove_root` |
+| `tests/support` | `Test_support.finish` |
 | `tests/bench` | manual measurements (`rebuild_mem`, `class_bench`): built by the default alias, run by nothing |
 
 ## T.2 Harness seams
@@ -97,8 +97,11 @@ that the output never shows, so every driver is diffed against the same lines.
 - **A snapshot that does not change after a print was added means a stale binary** (pitfall B-12.3).
 - **`(optional)` hides a broken stanza.** An executable whose library is missing is silently not built,
   and its `enabled_if` rules then run nothing (pitfall B-11.1).
-- **Deferred work outlives a case.** A composite's `settle_later` can write a lock file under a scratch
-  root the test is removing; `Test_support.remove_root` retries the removal (pitfall B-12.11).
+- **Deferred work outlives a case.** A composite's `settle_later` or a journal's cursor debouncer can
+  write under a scratch root the test is removing. `Test_support.finish` requests the stop, waits for
+  `Rt.detached` to empty and only then removes the root; a fiber still running after `Stop.grace` fails
+  the test with its name, so a detached fiber that nothing else ends waits with `Stop.sleep` (§10.6,
+  pitfall B-12.11).
 - **A wait on a duration is a verdict from elapsed time** (§10.3, pitfall B-12.5). Tests wait on a
   state (`Dqueue.idle`, a promise the double resolves) with a bounded poll; the ones that still sleep a
   fixed time are listed below.

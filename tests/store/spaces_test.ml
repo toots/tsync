@@ -129,4 +129,4 @@ let () =
         (Contract.get s (Key.chunk d c1) <> None)
         (Contract.get s (Key.chunk d c2) <> None);
       p "absent chunk: %s\n" (Contract.show (Contract.get s (Key.chunk d c3))));
-  Fs.rm_rf root
+  Test_support.finish root

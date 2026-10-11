@@ -1,11 +1,20 @@
-(* Pitfall B-12.11: a store's deferred work (Composite.settle_later) may still
-   write under a test's scratch root while the test removes it. ponytail:
-   retried; a stop for that deferred work would end the race for every test. *)
-let remove_root root =
-  let rec remove n =
-    try Tsync_core.Fs.rm_rf root
-    with _ when n > 0 ->
-      Unix.sleepf 0.2;
-      remove (n - 1)
+open Tsync_core
+
+(* Pitfall B-12.11: detached work that outlived the case would write under the
+   root being removed, so a fiber that does not end on a stop fails the test. *)
+let finish root =
+  Stop.request ();
+  let deadline = Unix.gettimeofday () +. Stop.grace in
+  let rec wait () =
+    match Rt.detached () with
+      | [] -> ()
+      | left when Unix.gettimeofday () >= deadline ->
+          prerr_endline
+            ("still running after the stop: " ^ String.concat ", " left);
+          exit 1
+      | _ ->
+          Unix.sleepf 0.01;
+          wait ()
   in
-  remove 10
+  wait ();
+  Fs.rm_rf root

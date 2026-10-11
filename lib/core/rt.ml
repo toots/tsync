@@ -146,7 +146,27 @@ let spawn_child ?name ?execution parent fn =
       Fun.protect ~finally:(fun () -> detach_ctx parent c) fn);
   c
 
-let spawn ?name ?execution fn = ignore (spawn_child ?name ?execution root fn)
+let detached_m = Mutex.create ()
+let detached_names : (int, string) Hashtbl.t = Hashtbl.create 64
+let next_detached = ref 0
+
+let spawn ?(name = "task") ?execution fn =
+  let id =
+    Mutex.protect detached_m (fun () ->
+        incr next_detached;
+        Hashtbl.replace detached_names !next_detached name;
+        !next_detached)
+  in
+  let ended () =
+    Mutex.protect detached_m (fun () -> Hashtbl.remove detached_names id)
+  in
+  ignore
+    (spawn_child ~name ?execution root (fun () -> Fun.protect ~finally:ended fn))
+
+let detached () =
+  Mutex.protect detached_m (fun () ->
+      Hashtbl.fold (fun _ name names -> name :: names) detached_names []
+      |> List.sort compare)
 
 (* [register] receives a resolver that answers whether it was the one to wake
    the fiber, since a cancellation may win the race.
@@ -564,13 +584,14 @@ let run_sync fn =
   ensure_started ();
   let m = Mutex.create () and c = Stdlib.Condition.create () in
   let result = ref None in
-  spawn (fun () ->
-      let r =
-        try Ok (fn ()) with e -> Error (e, Printexc.get_raw_backtrace ())
-      in
-      Mutex.protect m (fun () ->
-          result := Some r;
-          Stdlib.Condition.broadcast c));
+  ignore
+    (spawn_child root (fun () ->
+         let r =
+           try Ok (fn ()) with e -> Error (e, Printexc.get_raw_backtrace ())
+         in
+         Mutex.protect m (fun () ->
+             result := Some r;
+             Stdlib.Condition.broadcast c)));
   Mutex.lock m;
   while !result = None do
     Stdlib.Condition.wait c m

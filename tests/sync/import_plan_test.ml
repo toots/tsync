@@ -63,4 +63,4 @@ let () =
   show "only photos/** and **/*.ml, links followed"
     ~only:["photos/**"; "**/*.ml"] `Follow;
   Unix.chmod (Filename.concat src "locked") 0o755;
-  Fs.rm_rf root
+  Test_support.finish root

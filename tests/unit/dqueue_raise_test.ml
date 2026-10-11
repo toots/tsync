@@ -73,4 +73,4 @@ let () =
         (String.concat " " (List.rev !log))
         (Dqueue.idle q)
         (List.length (Dqueue.Records.list r)));
-  Fs.rm_rf dir
+  Test_support.finish dir

@@ -300,4 +300,4 @@ let () =
       let during = Mirror.ensure_file_id m "during.txt" in
       p "  %s resolves to %s\n" (alias fid) (resolves m fid);
       p "  the id minted during the build resolves to %s\n" (resolves m during));
-  Test_support.remove_root root
+  Test_support.finish root

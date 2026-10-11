@@ -123,5 +123,5 @@ let () =
       A.drain ~grace:10. ();
       pass b;
       p "after an id-less folder rename\n  B: %s\n" (tree b);
-      Stop.request ());
-  Fs.rm_rf root
+      ());
+  Test_support.finish root

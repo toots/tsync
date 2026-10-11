@@ -69,5 +69,6 @@ and the local driver falls back to it through `Chunk_spaces.read`
   (`Discards.remove ~seen`, finding 61).
 - The function probe uses a request name of its own run, and an unconfirmed probe is taken back on
   every path, also when the wait raises (finding 62, pitfall C-7.10).
-- A deferred settle (`settle_later`) can outlive the case that started it and write under a scratch
-  root being removed: tests remove their root with `Test_support.remove_root` (pitfall B-12.11).
+- A deferred settle (`settle_later`) waits with `Stop.sleep`, so a stop ends it before its next
+  attempt: a test's teardown (`Test_support.finish`) waits for it before removing the scratch root
+  (pitfall B-12.11).

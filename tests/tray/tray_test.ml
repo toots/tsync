@@ -1063,4 +1063,4 @@ let () =
     results;
   if results = [] then failwith "no scenario ran";
   Printf.printf "%d scenarios\n" (List.length results);
-  if only = None then Fs.rm_rf root
+  if only = None then Test_support.finish root

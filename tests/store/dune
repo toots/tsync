@@ -6,7 +6,7 @@
 (executable
  (name local_test)
  (modules local_test)
- (libraries contract tsync_core tsync_store unix yojson))
+ (libraries test_support contract tsync_core tsync_store unix yojson))
 
 (rule
  (with-stdout-to
@@ -136,7 +136,7 @@
 (executable
  (name spaces_test)
  (modules spaces_test)
- (libraries contract tsync_core tsync_store unix))
+ (libraries test_support contract tsync_core tsync_store unix))
 
 (rule
  (with-stdout-to
@@ -168,7 +168,7 @@
 (executable
  (name watch_test)
  (modules watch_test)
- (libraries tsync_core tsync_store unix))
+ (libraries test_support tsync_core tsync_store unix))
 
 (rule
  (enabled_if
@@ -249,6 +249,7 @@
  (modules preview_av_test)
  (optional)
  (libraries
+  test_support
   tsync_core
   tsync_store
   tsync_remote
