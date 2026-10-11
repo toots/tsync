@@ -14,7 +14,7 @@ tsync default-domain --clear
 
 `tsync status` always covers every domain.
 
-**Paths inside a domain** are spelled the same way in every command (`cache`, `versions`, `share`, `export`, `mirror --path`, `trash`, `rsync`):
+**Paths inside a domain** are spelled the same way in every command (`cache`, `versions`, `share`, `export`, `mirror --path`, `rsync`):
 
 | Spelling | Means |
 |---|---|
@@ -59,17 +59,15 @@ A command acts on one domain: paths naming two, or one that differs from `--doma
 | `tsync share --clear-cache` | Delete prepared share downloads |
 | `tsync versions [PATH]` | List a file's versions, or every deleted file |
 | `tsync versions --revert PATH [--version TS]` | Put a version back |
-| `tsync trash` | List trashed folders |
-| `tsync trash --restore PATH` | Put one back |
-| `tsync trash --purge PATH [--apply]` | Delete one for good |
 
 **Stores**
 
 | Command | Does |
 |---|---|
-| `tsync sync [--full]` | Apply other machines' changes now; `--full` rebuilds this machine's view |
+| `tsync sync [--full]` | Pick up other machines' changes and publish this one's now; `--full` reads the store's whole tree |
 | `tsync mirror [--source NAME] [--path P \| --skip-chunks]` | Copy from one backend to the others |
-| `tsync data-integrity [--detail] [--verify \| --repair [--dry-run] [--source NAME]]` | Check, re-check or repair |
+| `tsync data-integrity [--detail] [--verify \| --repair [--dry-run] [--source NAME]]` | Report on the tree and the chunks, re-check the chunks, or repair them |
+| `tsync void-entry N` | Pass a damaged entry of the change log that no machine can read |
 | `tsync expire DATE [--apply]` | Remove history older than `YYYY-MM-DD` |
 | `tsync gc [--apply] [--verify] [--budget SECONDS]` | Reclaim unused chunks |
 | `tsync gc --status \| --abort` | Look at, or abandon, an open run |
@@ -100,7 +98,6 @@ Domain media
   Backend cloud (s3, main)  bucket media-bucket
     link             wan
     reachable        yes (51 ms)
-    journal          1444 entries, 0 to apply
     corrupted        not checked — no verification has run
     traffic          up 0 B (0 B/s), down 92 B (4 B/s)
 
@@ -123,10 +120,9 @@ A healthy report is short. These lines appear only when there is something to sa
 | `UNREACHABLE` | This backend did not answer, with the reason | Check the network or the credentials |
 | `copies … owed` | A replica or backfill is behind by that many objects | Nothing; it catches up |
 | `(… parked)` | Work for a copy was set aside after failing for good | Fix the cause, then `tsync retry` |
-| `RETRYING` | A change is failing and being retried, with the error | Read the error |
-| `WAL STUCK` | A change cannot be published, with the error | Read the error; `tsync logs` |
-| `SYNC HELD` | Other machines' changes are not being applied, with the reason | `tsync sync --full` |
-| `unapplied` | Changes from other machines are waiting for a local one to finish first | Usually clears by itself |
+| `pending … to commit` | Changes made here and not published yet | Nothing; they go within seconds once uploaded |
+| `PARKED` | An upload failed for good, with the error | Fix the cause, then `tsync retry` |
+| `CANNOT FOLLOW` | The store holds a change this machine cannot read, with the reason. Nothing is picked up or published until it is dealt with. | Upgrade tsync here; if the entry is damaged, `tsync void-entry N` on any machine |
 | `CORRUPTED` | A store found damaged chunks | `tsync data-integrity --repair` |
 | `corrupted  not checked` | Nothing verifies this store | See [data integrity](copies.md#data-integrity) |
 | `SET ASIDE` | Local records that could not be read were kept and skipped | Report it |

@@ -30,7 +30,7 @@ Both are the same program and the same config file. A server is a domain with an
 | [Run tsync as a server](server.md) | The `http-proxy` frontend and backend, reverse proxies, checking on a server |
 | [Use it from an Android phone](android.md) | The app: setup, files, camera backup |
 | [Keep more than one copy](copies.md) | Backend roles, replicas and backfills, `tsync mirror`, data integrity |
-| [Versions, trash and cleanup](history.md) | Reverting files, restoring folders, `expire` and `gc` |
+| [Versions and cleanup](history.md) | Reverting files, `expire` and `gc` |
 | [Share links and export](sharing.md) | Public links, and getting files out of a domain |
 | [Tuning](tuning.md) | Chunk sizes, the cache, concurrency, upload pacing |
 

@@ -18,7 +18,7 @@ The idea is the one behind iCloud Drive or Dropbox Smart Sync, pointed at your o
 - **It is an ordinary folder.** Any application reads and writes it. It is a FUSE mount on Linux, a File Provider location in Finder on macOS, and an app with a documents provider on Android.
 - **Only what you open takes space.** The whole tree is listed; content is cached as it is read, and the cache can be capped.
 - **Several machines share it.** Each one publishes its changes and picks up the others'. Work done in two places at once ends as two files, never as a lost one.
-- **History is kept.** With versioning on, every change, rename and delete leaves the previous version behind, and a deleted folder goes to a trash.
+- **History is kept.** With versioning on, every change, rename and delete of a file leaves the previous version behind, and a deleted file can be put back.
 
 ## Two ways to set it up
 
@@ -165,7 +165,6 @@ tsync import ~/Pictures                   # upload a folder you already have
 tsync rsync ~/Pictures photos:2024        # copy into a domain, sending only what differs
 tsync export video/take3.mov /mnt/disk    # a file straight from the store, resumable
 tsync versions --revert notes/todo.txt    # put the previous version back
-tsync trash --restore old-project         # bring a deleted folder back
 tsync share photos/2024                   # a public link to a file, or a folder as a zip
 tsync cache --fetch trip-2024             # keep a folder available offline
 tsync cache --evict photos/2019           # free its space, keep it listed
@@ -176,10 +175,10 @@ A path can name its domain, the same way in every command: `media:photos/2024`. 
 
 ## Good to know
 
-- **Conflicts make copies.** When two machines want one name, the change published second is kept as `report (conflicted copy from laptop).pdf`. The one case with a winner: two edits of the same file that were both already uploaded. The later one wins and the other stays in the file's version history, if versioning is on.
+- **Conflicts make copies.** When two machines want one name, the change published second is kept as `report (conflicted copy from laptop).pdf`, next to the first. Nothing is merged and nothing is dropped.
 - **Nothing is fetched ahead of time.** A file downloads when it is first read. Run `tsync cache --fetch` on what you need before you lose the network.
 - **tsync does not encrypt what it stores.** Use the bucket's or the disk's own encryption at rest. Transport is HTTPS.
-- **Destructive commands ask twice.** `tsync gc`, `tsync expire` and `tsync trash --purge` only report what they would do until you add `--apply`.
+- **Destructive commands ask twice.** `tsync gc` and `tsync expire` only report what they would do until you add `--apply`.
 - **The config is checked strictly.** A misspelled key is an error naming its place in the file, not a setting silently left at its default.
 
 ## Building from source
