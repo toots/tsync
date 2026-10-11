@@ -59,7 +59,7 @@ A replica and a backfill are one mechanism that differs in whether chunk reads r
 
 Every copy skips per-store caches (folder index objects, which describe the store that wrote them).
 
-**Promoting a copy to main** is an operator's decision, outside the composite. A copy equals the main only once every job log of every owner that writes the domain is empty with nothing parked. Promoted in any other state, its log may lack entries its tree already reflects; the operator then runs integrity repair on it before any client pushes ([05 §4.10](../05-ops-config.md#410-integrity)), which can recompute only what its retained entries say. A client's position describes the former main: every client MUST arrive by state (`tsync sync --full`) before it pushes to a promoted one.
+**A copy is a last resort.** It converges on the main eventually and is not a substitute that can take over at once. Putting a copy in service as a main is outside this specification.
 
 ### 3.2 Configuration rules
 
@@ -67,7 +67,7 @@ Every copy skips per-store caches (folder index objects, which describe the stor
 - A domain MUST NOT have more than one main.
 - Member names MUST be unique within a domain, MUST be non-empty, and MUST NOT be `.` or `..` (uniqueness ignoring case is enforced by [05 §2.1](../05-ops-config.md#21-schema-and-validation)). A name identifies durable local state (the job log), so a duplicate would make two members share one log.
 - A replica or backfill without a main MUST be refused ("nothing to fill it from").
-- A domain with no main MUST have at least one archive, and is then read-only: nothing is pushed, and its tree is the first archive's.
+- A domain with no main MUST have at least one archive, and is then read-only: nothing is pushed, and its first archive, in configuration order, stands for the main in every read (§4.6).
 - A copy is complete only with respect to writes made by owners that configure it. Every machine that writes a domain SHOULD configure the same copies. A write made by an owner that does not configure a copy reaches it only through repair.
 
 ### 3.3 Durable local state (per domain and copy)
@@ -83,7 +83,7 @@ Every copy skips per-store caches (folder index objects, which describe the stor
 ```
 
 - The last shape is a **collection delete**, appended by a collecting owner ([gc §5.5](gc.md#55-the-collector-phase-by-phase)); `generation` is the odd collection generation of that run ([02 §2.12](../02-remote-model.md#212-collection-run-record-and-generation-json)). `run`, `shard` and `generation` are present together or not at all.
-- Readers MUST accept exactly these shapes. A record that does not decode, or names an invalid key, is handled as [durable-queue](durable-queue.md#46-outcomes) handles an undecodable record.
+- Readers MUST accept exactly these shapes. A record that does not decode, or names an invalid key, is set aside ([durable-queue §3.3](durable-queue.md#33-ordering-rules), R6).
 
 Records are named with the id grammar of [durable-queue §4.1](durable-queue.md#41-structure) and run in id order; files in a log directory that do not match the record grammar are ignored. The decoder reads fields by name and ignores any it does not know. A record without `run`, `shard` and `generation` is an ordinary job, and a record without a failure note has never failed.
 
@@ -260,8 +260,11 @@ walk(chain, stop_on_miss):
 read(k, f):
   if main ≠ none and k is not a chunk key:
      return ask(main, f, last_candidate = true)       -- the main's answer, or its failure
-  a := walk([main] ++ replicas, stop_on_miss = true)  -- no main: the empty chain misses
+  a := main = none ? Miss : walk([main], stop_on_miss = true)
   if a = Answer v: return v
+  if a = Unreachable e:                               -- only then is a replica asked
+     for r in replicas: if (try ask(r, f)) = some v: return v
+                                                      -- a replica's "absent" is no answer: it may lag
   b := walk(archives, stop_on_miss = false)           -- archives hold different content: ask each
   if b = Answer v: return v
   if a = Unreachable e: raise e                       -- "could not look" never becomes "not there"
@@ -272,10 +275,10 @@ read(k, f):
 - **Only chunks fail over.** A chunk is named by its bytes, so a copy that lags can lack it but cannot hold another body under its name. Every other key (a log entry, the tree head, a takeover, the cursor, a manifest, a marker, an anchor, a version) says what the tree is or was: a copy's answer would be an older truth, which a client would take for a peer's change ([change-algebra.md](change-algebra.md) §9). Those reads are the main's or fail.
 - A main that answers "absent" means *not found*. A replica holds the same chunks or fewer, and is not asked.
 - A main that is unreachable means the replica answers for chunks.
-- Archives are asked for chunks both when the main misses and when it is unreachable. In a domain with no main, the archives answer every key, in configuration order.
+- Archives are asked for chunks both when the main misses and when it is unreachable. In a domain with no main, the first archive answers as the main would (every key that is not a chunk, and listings), and the others answer chunks only.
 - When everything is unreachable, the first unreachable error is raised, never "absent" ([failure-model §5.2](failure-model.md#52-absent-versus-could-not-look)).
 - `get` is `read(get_opt)`, with a clean `none` turned into ABSENT.
-- `list_prefix` is the main's listing, never merged and never a copy's. An empty list is an answer. Its etags and checksums are the main's. In a domain with no main it is the first reachable archive's.
+- `list_prefix` is the main's listing, never merged and never a copy's. An empty list is an answer. Its etags and checksums are the main's. In a domain with no main it is the first archive's.
 - `compute_checksum` is answered as `list_prefix` is: a checksum describes the view the composite's listings and entries describe. `locality` is that member's.
 - `watch` is a non-probing read of the main: a long poll must never be the request that finds out whether a member is back.
 - The single probe per lapsed hold is the breaker's ([01 §8](../01-core.md#8-health-breaker)); concurrent chunk reads that do not get it pass to the next member.
@@ -348,7 +351,7 @@ when no collection-delete record and no pending discard of generation g remains 
 
 ```
 guard(dst, what):
-  if dst.role = main: allow                          -- that is how a main is refilled from a replica
+  if dst.role = main: allow                          -- integrity repair of a chunk on the main
   if the main was never heard from, or is down and its hold lapsed:
      probe: main.get_opt(cursor key), bounded by PROBE_TIMEOUT including retries;
             a timeout is recorded as a lost probe
@@ -357,7 +360,7 @@ guard(dst, what):
 ```
 
 - A main heard from and up is taken at its word, so a run of guarded writes costs one look, not one each. A domain with no main passes.
-- Every operation that writes a named non-main member directly MUST call the guard first: mirror copies, integrity rewrites, verification requests, collection delete jobs and re-delivered requests, and share publication. Ordinary copy jobs are guarded too: the worker does not run while the main is down.
+- Every operation that writes a copy directly MUST call the guard first: mirror copies, integrity rewrites, verification requests, collection delete jobs and re-delivered requests, and share publication. Ordinary copy jobs are guarded too: the worker does not run while the main is down.
 - The composite's own writes cannot violate the guard: copies receive only what the main already took.
 - The guard fails TRANSIENT so that callers retry once the main is back, rather than record a permanent refusal.
 
@@ -367,8 +370,23 @@ Residual window: a main that goes down between the look and the write is not see
 
 ### 4.10 Repair: mirror
 
-Mirror is an explicit, stateless, additive whole-store copy from a source member to the others. It is the remedy for a new backfill's past content, for writes made by owners that do not configure a copy, and for parked jobs whose cause a repair of the copy clears.
+Mirror is an explicit, stateless, additive copy of the main onto its copies. It is the remedy for a new copy's past content, for writes made by owners that do not configure a copy, and for parked jobs whose cause a repair of the copy clears. It never writes the main.
 
+```
+mirror(scope ∈ {All, Skip_chunks, Path(p)}):
+  refuse All and Path while a collection run is open on the main          -- chunks are split across two spaces
+  for dst in the copies, sequentially, in configuration order:
+     guard(dst, "copy to " dst)
+     phase 1  chunks (not Skip_chunks): for the scope's chunks (All: every shard; Path: the chunks
+                        the in-scope manifests name), copy each chunk the dst listing lacks or holds
+                        at a different size
+     if phase 1 failed to place any chunk: stop for this dst, and report it
+     phase 2  log entries, in ascending number, then takeovers (not into a backfill; not Path)
+     phase 3  tree records: manifests, folder markers, anchors; and versions (not Path).
+                        For immutable keys, copy when missing or of a different size;
+                        for mutable keys, copy when missing or when the bodies differ
+     phase 4  the tree head, then the cursor (not into a backfill; not Path), last
+  then retry every parked record of dst's log
 ```
 mirror(source := a named member, or the first in read order; scope ∈ {All, Skip_chunks, Path(p)}):
   refuse All and Path while a collection run is open on the main       -- chunks are split across two spaces
@@ -385,10 +403,8 @@ mirror(source := a named member, or the first in read order; scope ∈ {All, Ski
   then retry every parked record of dst's log
 ```
 
-- The phases give the dependency order of G4: a chunk before anything naming it, the tree's records and the log before the tree head, the cursor last. A mirror interrupted at any point leaves no referrer without its referents.
+- The phases give the dependency order of G4 and of [data-model/backend.md §4.3](../data-model/backend.md#43-ordering-rules-crash-consistency): a chunk before anything naming it, a log entry before the tree records it gives a value to, both before the tree head, the cursor last. A copy's log entries, tree head and tree records are plain objects that nothing follows (§4.6), so mirror writes them as it writes any object; the arbitration rules of the log bind the main alone. A mirror interrupted at any point leaves no referrer without its referents.
 - Mirror never deletes. It does not detect same-size wrong chunk bytes: that is verification's job. Per-store caches are not copied.
-- Mirror writes onto a main pass the main's reference gate ([gc §5.4](gc.md#54-the-collection-interlock)).
-- A mirror onto a main never creates a log entry the main lacks out of order: entries are copied in ascending number with a plain put only onto a main that no client pushes to (a refill before it is put back in service).
 
 ### 4.11 Verification and integrity repair
 
@@ -420,7 +436,7 @@ for each corruption marker (store S, chunk c), sequentially:
 
 **S4 (order within a log).** One worker, head-of-line blocking for retryable failures: effects apply in id order. Parking may reorder, which S3 makes harmless.
 
-**S5 (no false absence).** `read` returns `none` only if the main answered `none`, or, for a chunk, a member in the first chain was reachable and answered `none` and every archive answered `none`.
+**S5 (no false absence).** In a domain with a main, `read` returns `none` only if the main answered `none` and, for a chunk, every archive answered `none` too. A replica's `none` never becomes the domain's.
 
 **S6 (copies never ahead).** Composite writes reach copies only after the main took them. Direct writes and job runs pass the guard.
 
@@ -451,7 +467,8 @@ for each corruption marker (store S, chunk c), sequentially:
 | Stop during a job | Neither done nor failed; the record stays | Next owner |
 | Chunk forward lost or refused admission | Nothing owed | The manifest's job fetches the chunk |
 | Copy down for hours | Records accumulate on disk; the head retries with backoff | Automatic when the link returns |
-| Copy refuses a job, or a record does not decode | Record parked; copy degraded | Automatic retry once the cause clears; operator repair otherwise |
+| Copy refuses a job | Record parked; copy degraded | Automatic retry once the cause clears; operator repair otherwise |
+| A record does not decode | Record set aside ([durable-queue §3.3](durable-queue.md#33-ordering-rules), R6); copy degraded | Operator |
 | Source names a chunk no main holds | Job parked as CORRUPT, naming the key | Integrity repair on the main; the parked retry then completes |
 | Main down | Chunk reads fail over; every other read and every composite write fails; guarded writes and job runs wait | Automatic on return |
 | Collection delete re-check finds a key live | Key dropped from the delete | None needed |

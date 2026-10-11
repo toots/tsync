@@ -136,7 +136,7 @@ A command is a key, the value before and the value after
   `v` is the format version, `1`. `author` is the client uuid of the creator. `commands` is the
   batch, a non-empty array of commands (§2.3) on distinct keys, in any order: a batch is a set
   ([change-algebra.md](algorithms/change-algebra.md) Definition 6).
-- **Writers** create an entry only with `put_if_absent`, with the body bounded by
+- **Writers** create an entry on the main only with `put_if_absent`, with the body bounded by
   `MAX_ENTRY_BYTES` unless it holds one command ([publication.md](algorithms/publication.md) §4.5). An entry is immutable: its
   key is only ever put again with the same bytes (recovery,
   [publication.md](algorithms/publication.md) §4.8).
@@ -147,7 +147,7 @@ A command is a key, the value before and the value after
     ([publication.md](algorithms/publication.md) §4.3); it is not CORRUPT;
   - never turn a failed read into "no entry"
     ([failure-model.md](algorithms/failure-model.md) §5.2).
-- Replica members carry the log; backfill members do not
+- Replica members carry the log as copies of the main's entries, written by their job logs and by mirror; backfill members do not
   ([algorithms/replication.md](algorithms/replication.md)).
 
 ### 2.5 Cursor (store)
@@ -174,11 +174,12 @@ A command is a key, the value before and the value after
 
 ### 2.7 Position, in-flight record and arrival record (local)
 
-Under `<data_dir>/sync/<domain>/`, each written by durable replace:
+Under `<data_dir>/sync/<domain>/`, each written by durable replace, in the order
+[publication.md](algorithms/publication.md) §4.5 gives when several change together:
 
 | File | Content |
 |---|---|
-| `position` | the number of the last entry merged, in its written form (§2.4). Absent: no position; the client arrives by state ([publication.md](algorithms/publication.md) §4.7). Unparseable: reported and treated as absent |
+| `position` | (full tree; a lazy tree keeps one position per folder, [04](04-checkout-cache.md) §2.3) the number of the last entry merged, in its written form (§2.4). Absent: no position; the client arrives by state ([publication.md](algorithms/publication.md) §4.7). Unparseable: reported and treated as absent |
 | `in-flight` | `{"n":<number>,"body":"<base64 of the exact bytes of the entry>"}`. Absent: no push is in flight |
 | `arrival` | the result of a merge being enacted (below). Absent: no arrival is in progress |
 
@@ -195,7 +196,7 @@ Under `<data_dir>/sync/<domain>/`, each written by durable replace:
 - `head`: the position the arrival ends at.
 - `steps`, in an order in which each can be applied to the local tree
   ([change-algebra.md](algorithms/change-algebra.md) Theorem 3): `move` takes the local file at
-  one key to another key in the same folder when the source is present and the destination absent;
+  one key to another key when the source is present and the destination absent;
   `file` and `folder` set a key to `value` (`null` for ∅). A folder parked at a temporary place is
   a `folder` step whose value names the root and a temporary name ([01](01-core.md) §2.9), followed
   later by the step that gives it its place. Every step is idempotent.
@@ -207,8 +208,8 @@ pushes again.
 
 ### 2.8 Before-values (local)
 
-`<data_dir>/sync/<domain>/before/<record name>`, one file per dirty key, written by durable replace
-and removed by release:
+`<data_dir>/sync/<domain>/before/<record name>`, one file per dirty key, written by replace,
+made durable as [publication.md](algorithms/publication.md) §4.1 says, and removed by release:
 
 | Key | Record name | Body |
 |---|---|---|
@@ -319,11 +320,11 @@ cursor_flush()            → ()   writes the pending number now; a failure is l
 ```
 position()                         → n | none
 before(key)                        → value | none | unknown
-record_before(key, value)          → ()   durable; a no-op if the key has one
+record_before(key, value)          → ()   a no-op if the key has one; durability per publication §4.1
 drop_before(key)                   → ()
 pending()                          → [command]            one per before-value
 in_flight()                        → (n, bytes) | none
-committed(n, batch)                → ()   the Won step: before-values, position and the in-flight record, one durable step
+committed(n, batch)                → ()   the Won step: before-values, then the position, then the in-flight record
 arrival_begin(record), arrival_end()
 ```
 
@@ -349,7 +350,8 @@ push()                             → committed n | refused | nothing to push (
 project()                          → the tree head reached (publication §4.6)
 poll()                             ends the current wait; a cycle runs now
 status()                           → position, pending count, in-flight?, the tree head as last read,
-                                     an entry that cannot be followed, if any
+                                     an entry that cannot be followed, if any: its number, and whether it does not
+                                     decode or is of an unknown version
 ```
 
 The cycle is parameterised by the log store, the sync state, the applied log, the staged-edit

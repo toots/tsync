@@ -154,8 +154,8 @@ client under the scratch directory; upload workers; chunk-buffer and download bo
 group size; cache cap; symlink policy; read-only and versioning flags.
 
 Two defaults carry meaning:
-- **One upload worker**, so that the order in which uploads finish, and therefore the applied log, is
-  deterministic. Tests of parallel uploads set more explicitly.
+- **One upload worker**, so that the order in which uploads finish, and therefore which files a
+  push carries, is deterministic. Tests of parallel uploads set more explicitly.
 - **The uplink governor off**, since when on it paces every store on the real clock. Tests of the
   governor run it on the controllable clock.
 

@@ -21,7 +21,7 @@ Three things are called "mirror":
 | Term | Meaning |
 |---|---|
 | **the mirror** | this client's local projection of the domain's names ([local-cache.md](data-model/local-cache.md)) |
-| **`tsync mirror`** | backend-to-backend copy of a domain's objects (§4.6) |
+| **`tsync mirror`** | copy of the main's objects onto the domain's copies (§4.6) |
 | **`tsync sync`** | one cycle now, or an arrival by state: bring the local tree to the main's (§4.7) |
 
 Implementation notes: [ocaml/05-ops-config.md](ocaml/05-ops-config.md).
@@ -236,8 +236,8 @@ Building has no side effect on the stores.
   ([07 §2.6](07-daemon-cli.md#26-pause)).
 - **GC interlock.** A reference to a chunk reaches a collectable main only through its reference
   gate ([gc.md §5.4](algorithms/gc.md#54-the-collection-interlock)): at the commit of the log entry
-  that carries the manifest (an upload, an import, an rsync copy or rename, a revert), and at a
-  mirror or repair write onto the main. No operation relies on a memo of "this chunk exists on a
+  that carries the manifest (an upload, an import, an rsync copy or rename, a revert), at the
+  projection of that entry, and at an integrity repair written onto the main. No operation relies on a memo of "this chunk exists on a
   copy" across a collection except as
   [gc.md §5.6](algorithms/gc.md#56-the-generation-and-presence-memos) allows; a memo about a
   collectable main is harmless, since the gate checks presence at every commit and its "missing
@@ -422,31 +422,32 @@ Key(manifest)`; `target = Absent(side) | Dir(side) | File(local) | Key(manifest)
 - A folder that could not be created fails every entry beneath it with that reason, without
   attempting them.
 
-### 4.6 `tsync mirror` (store to store)
+### 4.6 `tsync mirror` (the main onto its copies)
 
-`mirror ?source ?scope:(All | Skip_chunks | Path rel)` → per destination `{name, checked, copied,
+`mirror ?scope:(All | Skip_chunks | Path rel)` → per destination `{name, checked, copied,
 copied_bytes, changed, unguarded}`.
 
-1. Source: the named member, else the first member in role order.
+1. The source is the main; the destinations are the replicas and backfills. A domain with no
+   main, or with no copy, has nothing to mirror.
 2. `All` and `Path` are refused while a collection is open ([gc.md](algorithms/gc.md): the chunk
    space is partly under another name); the message names the phase and age and suggests `tsync gc`
    or `tsync gc --abort`. `Skip_chunks` is allowed: it reads and writes no chunk.
 3. **Source listing**:
-   - `All`: chunks; then the domain's manifests, markers, anchors and versions; then log entries
-     in ascending number, then takeovers; then the tree head, then the cursor. These are the four
+   - `All`: chunks; then log entries in ascending number, then takeovers; then the domain's
+     manifests, markers, anchors and versions; then the tree head, then the cursor. These are the four
      phases of [replication.md §4.10](algorithms/replication.md#410-repair-mirror). A backfill
      destination receives no log entry, takeover, tree head or cursor.
    - `Skip_chunks`: as `All`, without the chunks. For a destination whose chunks are known to be
      there (a run that just compared them, or a copy kept current by its jobs), it skips the
      longest listing of the run.
-   - `Path rel`: walk the folder tree down to and under `rel`, collecting markers and manifests and
-     every chunk key those manifests name; each is checked on the source (missing → the run fails
+   - `Path rel`: walk the folder tree down to and under `rel`, collecting markers, the anchors of
+     the folders they name, manifests, and every chunk key those manifests name; each is checked on the source (missing → the run fails
      `<key> is missing from source <name>`); no log entry, takeover, tree head, version or cursor
      (they would state a history that never happened).
    - Internal leaves (folder indexes) are skipped: an index records store-reported versions and
      duplicates every manifest body.
 4. `on_scan(objects, bytes)`.
-5. For each other member, in config order: the write guard
+5. For each destination, in config order: the write guard
    ([replication.md](algorithms/replication.md)) must allow writing it. Compare each source object
    with the destination's entry (from a listing of the destination for listed scopes, a head per
    object for `Path`). An object's size, etag and checksum always come from one entry, never a
@@ -478,18 +479,15 @@ copied_bytes, changed, unguarded}`.
 8. Comparisons and copies run concurrently, at most `maxDownloads` at once, with the bodies held for
    copies bounded by `maxChunkBuffers` (§2.1).
 9. The phases run in order, each finished before the next starts: every chunk is copied before any
-   manifest or log entry that names it, the tree's records and the log before the tree head, and
-   the cursor last. A reader of the destination never sees a manifest or a log entry whose chunks
+   manifest or log entry that names it, a log entry before the tree records it gives a value to,
+   both before the tree head, and the cursor last. A reader of the destination never sees a manifest or a log entry whose chunks
    are not there yet, a tree head ahead of its records, or a cursor ahead of its entries. A chunk
    read from the source that does not hash to its name is not copied and is counted refused; a
-   destination that did not take every chunk of the run receives none of the later phases. Log
-   entries reach a destination that is the main only under the condition of
-   [replication.md §4.10](algorithms/replication.md#410-repair-mirror).
+   destination that did not take every chunk of the run receives none of the later phases.
 10. Each destination's parked job-log records are then retried
     ([replication.md §4.10](algorithms/replication.md#410-repair-mirror)).
 
-An object a destination refuses (a reference gate missing the chunks a manifest or a log entry
-names, under `Skip_chunks`) is counted refused for that destination with its reason, and the run goes on; any
+An object a destination refuses is counted refused for that destination with its reason, and the run goes on; any
 refusal makes the command exit 1.
 
 Additive: nothing is deleted on a destination. A chunk's content (same size, wrong bytes) is integrity's (§4.10).
@@ -580,8 +578,8 @@ setting it (a kernel lock alone merges locks of one process). A second session g
 holder. `gc` refuses while the domain is paused.
 
 `outstanding()` lists, per deferred member, delete jobs a copy has not consumed yet, with count and
-age, and is warned at every start; `retry_outstanding()` rewrites each job over itself (write guard
-first) to re-fire the copy's notification. Both are safe to repeat.
+age, and is warned at every start; `retry_outstanding()` re-delivers each job as
+[gc.md §5.7](algorithms/gc.md#57-deletion-on-copies) says (write guard first), which re-fires the copy's notification. Both are safe to repeat.
 
 ### 4.10 Integrity
 
@@ -601,8 +599,7 @@ first) to re-fire the copy's notification. Both are safe to repeat.
     has no anchor.
 - `repair_tree(dry_run)`: refused on a read-only domain unless dry, and whenever `tree_report`
   makes no finding because the tree head is below the head. It writes the main's tree records
-  outside any projection, so the operator MUST run it while no client pushes to the domain, as on
-  a copy promoted to main ([replication.md §3.1](algorithms/replication.md#31-roles)).
+  outside any projection, so the operator MUST run it while no client pushes to the domain.
   - `Disowned` → delete the marker.
   - `Unmarked` and `Unaccounted` with an `expected` value → set the key's records to that value, as
     applying a command with that value after does
@@ -613,10 +610,7 @@ first) to re-fire the copy's notification. Both are safe to repeat.
 
   **What repair restores.** It recomputes a record only from a log entry the log still retains.
   A record whose key no retained entry names is left as found: nothing on the store says what it
-  should be, whether its entry was deleted by expiry or never reached this store. On a promoted
-  copy whose log lacks entries its tree reflects, repair therefore takes each key a retained entry
-  names back to that entry's value, and what the missing entries committed at those keys is not
-  restored; the keys no retained entry names keep what the tree holds.
+  should be, whether its entry was deleted by expiry or never reached this store.
 - `verify()`: per member whose bucket function this owner confirmed (write guard first), one verify
   request per shard ([object-store-common §3](backends/object-store-common.md)): `Queued n`; any other
   member `Unsupported`; none queued → `Nothing_queued`; else follow each queued member: poll

@@ -290,7 +290,7 @@ Then per domain body of that reply, each preceded by a separator:
 | `cache <n> chunks · <bytes>[ of <max>][ · <pinned> pinned]` | 1 | chunks and bytes known | `cache.chunks`, `.bytes`, `.maxCache` (> 0), `.pinnedBytes` (> 0) |
 | `queue <n> files · <bytes> owed` | 1 | either known | `queues.pendingFiles`, `queues.bytesOwed` |
 | `read <bytes> · written <bytes>` | 1 | either known | the sums over `frontends[]` of `bytesRead`, `bytesWritten` |
-| `sync <n> pending · <n> parked · stopped at entry <n>` | 1 | any part present (the counts only when > 0, the last part only when an entry cannot be followed) | `sync.pending`, the pending count of the cycle's status ([03 §3.4](../03-journal-sync.md#34-cycle-one-per-domain-in-the-owner)); `queues.parked`, the upload queue's parked count; `sync.cannotFollow`, the number of the entry the client cannot follow |
+| `sync <n> pending · <n> parked · stopped at entry <n>` | 1 | any part present (the counts only when > 0, the last part only when an entry cannot be followed) | `sync.pending`, the pending count of the cycle's status ([03 §3.4](../03-journal-sync.md#34-cycle-one-per-domain-in-the-owner)); `queues.parked`, the upload queue's parked count; `sync.cannotFollow.entry`, the number of the entry the client cannot follow |
 | one row per backend | 1 | always | `backends[]` |
 
 Backend row, parts joined with ` · `:

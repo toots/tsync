@@ -61,7 +61,8 @@ The assumptions A1–A6 of [change-algebra.md](change-algebra.md) §1 hold. This
 tsync provides each.
 
 **A1 — One main.** A domain has at most one main ([replication.md](replication.md) §3.2). A domain
-without one is read-only and nothing is pushed.
+without one is read-only: nothing is pushed, and its first archive stands for the main in every
+read below.
 
 **A2 — Atomic append.** The append is `put_if_absent` on the entry's key
 ([06](../06-backends.md) §3.3). Every store driver evaluates it atomically. A store that answers
@@ -112,7 +113,7 @@ owner's request interface.
 | **Cursor** | one object holding a head number; last writer wins, may be stale or lost | a hint; correctness never depends on it |
 
 An **entry** is a batch with its author: a set of commands, each a key with its value before and
-after ([03](../03-journal-sync.md) §2.3). A file's value after is its whole manifest, carried in
+after ([03](../03-journal-sync.md) §2.3–2.4). A file's value after is its whole manifest, carried in
 the entry, so an entry needs no other object than the chunks to be understood.
 
 $M_n$ is the tree after entries 1 to $n$. The log is the truth and the tree is derived from it. For
@@ -172,9 +173,10 @@ CYCLE (the owner, per domain):
 ### 4.1 A local operation
 
 ```
-LOCAL(op), under the metadata lock (and the key locks 04 §3.2 names):
+LOCAL(op), under the locks 04 §3.2 names (the metadata lock for a namespace change, the key lock
+          for a change of one file's content):
   for each key k the op changes:
-    if k has no before-value: record before(k) := L(k)       # durable before L changes at k
+    if k has no before-value: record before(k) := L(k)       # before L changes at k
   change L                                                    # no store request possible
   for each key k the op changed: if L(k) = before(k): drop before(k)
   append the op to the change feed
@@ -187,8 +189,9 @@ LOCAL(op), under the metadata lock (and the key locks 04 §3.2 names):
 - **Keys.** A folder operation changes one folder key. A file operation changes one file key; a
   file rename changes two, the source and the destination. A folder rename changes one key
   whatever the folder contains.
-- **Durability.** A before-value reaches the level the operation is acknowledged at
-  ([durable-queue.md](durable-queue.md) §6). A staged edit found at owner start with no
+- **Durability.** A before-value is always written before $L$ changes at its key. It is durable
+  at the level the operation is acknowledged at ([durable-queue.md](durable-queue.md) §6): at once
+  for a namespace operation, at the next sync or close for a write. An Owed staged edit found at owner start with no
   before-value takes the content identity of its base entry as its before-value, or ∅ when it has
   none ([04](../04-checkout-cache.md) §4.10): the key was clean when the edit began.
 - **A local intent** precedes a namespace operation whose local steps are not one atomic step on
@@ -239,7 +242,7 @@ FETCH() → entries | PRUNED:
 - A failed read is never "no entry" ([failure-model.md](failure-model.md) §5.2): the fetch fails
   and nothing advances.
 - An entry that does not decode, or whose version this client does not know
-  ([03](../03-journal-sync.md) §2.3), cannot be merged. If the tree head has passed it, the client
+  ([03](../03-journal-sync.md) §2.4), cannot be merged. If the tree head has passed it, the client
   arrives by state (§4.7). Otherwise it stops fetching and pushing, and reports the entry.
 - The cursor only saves fetches: the cycle fetches when the cursor moved and every `SWEEP`
   whatever the cursor says. A fetch that finds nothing costs one read of entry $h+1$ and one of the
@@ -279,15 +282,16 @@ ARRIVE():
 PUSH():
   with the metadata lock:
     B := the batch to push (below); if B = ∅: return
-    body := encode(author = this client, B)                   # 03 §2.3
+    body := encode(author = this client, B)                   # 03 §2.4
     write the in-flight record (h + 1, body), durably
   r := put_if_absent(log entry h + 1, body)                   # through the gate, gc §5.4
   case r:
     Won →
-      with the metadata lock, in one durable step:
+      with the metadata lock, and the key lock of each file key of B, in this order:
         for k in B: if L(k) = B's value at k: drop before(k)
                     else: before(k) := B's value at k
-        h := h + 1; clear the in-flight record
+        h := n                                                  # the entry's number
+        clear the in-flight record
       promote the staged edits of B whose before-value was dropped   # 04 §4.7
       cursor.note(h)
     Held(_) → ARRIVE(); a later cycle pushes again
@@ -295,8 +299,8 @@ PUSH():
     any other failure → the in-flight record stays; §4.8 decides at the next cycle
 ```
 
-**Which batch.** $B$ is every pending command except the file commands whose value after is a
-staged edit not yet uploaded. That set is always a batch: a file left out keeps its value in $R$ at
+**Which batch.** A pending command is **pushable** unless it is a file command whose value after
+is a staged edit not yet Uploaded. $B$ is every pushable command. That set is always a batch: a file left out keeps its value in $R$ at
 its own key, and its folder is present in both trees.
 
 - A push is attempted only when the previous fetch found the head at $h$. It is refused whenever
@@ -308,6 +312,10 @@ its own key, and its folder is present in both trees.
   size. A file removal or replacement is committed no earlier
   than every pending creation of the same content identity, so content that a pending command
   moves is never left unreferenced on the main between two entries.
+- **The `Won` step is three kinds of durable write, in that order.** Each is idempotent, and the
+  in-flight record goes last, so a crash inside the step leaves the record and recovery runs the
+  whole step again (§4.8). Run again, a key that changed meanwhile gets the committed value as its
+  before-value, which is what it must have.
 - **Local operations during a push** are allowed. The `Won` step compares each key with what was
   committed: a key changed meanwhile keeps a before-value, now the committed value.
 - **When.** A pushable command is pushed once the pending set has been non-empty for
@@ -317,7 +325,8 @@ its own key, and its folder is present in both trees.
 - **Missing chunks with no bytes to send.** A command whose manifest names a chunk the main lacks
   and this client cannot upload again is left out: the client clears the in-flight record, reports
   the file as damaged ([gc.md](gc.md) §5.4), and pushes the rest of the batch. The command stays
-  pending.
+  pending and the file stays listed in status ([failure-model.md](failure-model.md) §9) until its
+  commit succeeds.
 - **What a commit means.** From `Won` on, every client that arrives sees the batch. Nothing else
   the pusher does afterwards is needed for that: the projection (§4.6) serves the readers of the
   tree, not the clients' merges.
@@ -329,7 +338,7 @@ note(n):   pending := max(pending, n); if not armed: arm a timer for CURSOR_INTE
 flush():   take pending; if any, put(cursor, pending); a failure is logged and dropped
 ```
 
-The owner flushes the cursor when a drain ends, before exit, and SHOULD flush when the host signals
+The owner flushes the cursor after the last cycle of a drain, before exit, and SHOULD flush when the host signals
 imminent suspension. A lost note costs latency only: peers fetch every `SWEEP`.
 
 ### 4.6 Projection: the tree follows the log
@@ -355,9 +364,8 @@ PROJECT():
 
 - **Who.** The projector of an entry at generation 0 is its author. The projector at generation
   $g \ge 1$ is the client whose takeover object $(n, g)$ exists.
-- **Apply** sets each key of the entry to its value after on the per-object records, saving a
-  version of each file record it replaces or removes
-  ([data-model/backend.md](../data-model/backend.md) §6). It is idempotent, and a projector that
+- **Apply** sets each key of the entry to its value after on the per-object records, saving
+  versions as [data-model/backend.md](../data-model/backend.md) §6.1 says. It is idempotent, and a projector that
   restarts applies the whole entry again.
 - **The lease.** A projector checks, before it starts an entry and at least every `PROJECT_LEASE`
   while it applies it, that the tree head is still $t$ and that no higher takeover generation
@@ -405,8 +413,8 @@ applies nothing, and no operation that discards pending work.
 client cannot tell whether its batch was committed. It clears the record and lets the merge decide
 key by key: a key that holds the batch's value on the main is "the same change". The one case it
 gets wrong is a batch that was committed and then changed again by a peer, where the client keeps
-its own superseded content as a conflicted copy. This needs a client that stopped mid-push for
-longer than the log's retention.
+its own superseded content as a conflicted copy. This needs an entry that expiry deleted before
+its author recorded it: a client that stopped mid-push for longer than the log's retention.
 
 ### 4.8 Crash recovery
 
@@ -416,29 +424,34 @@ Run at ownership start, in this order, before any request is served and before t
    ([04](../04-checkout-cache.md) §4.10).
 2. **The arrival record.** Set $L$ to the recorded values on the recorded keys, write the recorded
    before-values and position, clear the record. Each step is idempotent.
-3. **Before-values.** Drop each before-value equal to $L$ at its key. Give each staged edit that
-   has none the content identity of its base entry (§4.1).
-4. **Upload records.** Adopt every staged edit that is not Uploaded and has no upload record
+3. **Before-values.** Drop each before-value equal to $L$ at its key. Give each **Owed** staged
+   edit that has none the content identity of its base entry (§4.1).
+4. **Promotion.** Promote each Uploaded staged edit whose key has no before-value: its commit
+   happened ([04](../04-checkout-cache.md) §4.7).
+5. **Upload records.** Adopt every Owed staged edit that has no upload record
    ([04](../04-checkout-cache.md) §4.10).
+
+A sync-state record that was set aside as undecodable ([03](../03-journal-sync.md) §2.7–2.8) makes
+the client arrive by state before its next push.
 
 The in-flight record is recovered by the first cycle, since it needs the store:
 
 ```
-RECOVER(in-flight (n, body)):                 # n = h + 1 by construction
-  if tree_head() ≥ n: clear the record; arrive by state (§4.7); return
-  r := put_if_absent(log entry n, body)       # the same bytes again
-  Won → the Won step of §4.5                  # ours, whether this attempt or an earlier one wrote it
-  Held(_) → clear the record                  # another client's entry: the arrival that follows merges it
+RECOVER(in-flight (n, body)):                 # n = h + 1, or n = h after a crash inside the Won step
+  e := get_opt(log entry n)
+  e = body → the Won step of §4.5             # ours
+  e ≠ none → clear the record                 # another client's entry: the arrival that follows merges it
+  e = none and tree_head() ≥ n → clear the record; arrive by state (§4.7)   # expired: outcome unknown
+  e = none otherwise → put_if_absent(log entry n, body), as in §4.5         # never created
   failure → leave the record; no fetch, merge or push runs until it is settled
 ```
 
-The tree head is read first because an entry at or below it may have been deleted by expiry
-(§4.9): creating it again would put a second entry at a number the log has passed. An entry above
-the tree head is never deleted, so an absent one was never created.
-
-`put_if_absent` answers `Won` when the name already holds exactly these bytes
-([06](../06-backends.md) §3.3), and an entry carries its author, so `Won` means "this client's
-batch is entry $n$" and nothing else does (Proposition 7).
+An entry carries its author, so equal bytes mean "this client's batch is entry $n$" and nothing
+else does (Proposition 7). An absent entry at or below the tree head was deleted by expiry (§4.9):
+creating it again would put a second entry at a number the log has passed. An absent entry above
+the tree head was never created, since expiry never deletes there. A create whose answer is lost
+is settled the same way at the next cycle, and `put_if_absent` itself answers `Won` when the name
+already holds exactly these bytes ([06](../06-backends.md) §3.3).
 
 **Crash windows.**
 
@@ -448,8 +461,9 @@ batch is entry $n$" and nothing else does (Proposition 7).
 | the change of $L$ and the feed line | $L$ changed, no line | the feed misses one local change; frontends re-list what they hold open |
 | staging content and its upload record | a staged edit, no record | adopted (step 4) |
 | the chunk uploads and the Uploaded state | chunks on the main, edit not Uploaded | uploaded again; existing chunks are skipped |
-| the in-flight record and the create | in-flight, no entry | the create is issued again: `Won` |
-| the create and the `Won` step | in-flight, entry exists | the create is issued again: `Won` on identical bytes |
+| the in-flight record and the create | in-flight, no entry | the entry is absent above the tree head: created |
+| the create and the `Won` step | in-flight, entry exists | the entry holds this client's bytes: the `Won` step |
+| inside the `Won` step | in-flight, some before-values and perhaps the position already written | the `Won` step again, from its start |
 | the `Won` step and promotion | Uploaded staged edits with no before-value | promoted at owner start ([04](../04-checkout-cache.md) §4.10) |
 | the `Won` step and the end of the projection | tree head below this client's entry | the next cycle projects it again from its start |
 | the arrival record and the end of the local change | arrival record, $L$ partly changed | completed (step 2) |
@@ -480,7 +494,38 @@ before-values, position, records, change feed and cycle. Consequences the protoc
 - **Pause** holds the cycle and the upload queue; the owner persists it
   ([07](../07-daemon-cli.md) §2.6). Local operations continue and the pending set grows.
 
-**Bulk publishers** (import, rsync, revert) run in the owner and are local operations: they upload
+### 4.11 The lazy tree
+
+A lazy tree ([04](../04-checkout-cache.md) §3.5) holds some folders only, and reads each when it is
+opened. It runs the same protocol **per folder**:
+
+- **One position per folder held.** A folder's view is $M$ restricted to the keys of that folder
+  (the file keys under it, and the folder keys whose place is in it), at that folder's position
+  $h_f$. A before-value of one of those keys is the main's value at $h_f$. Different folders may
+  be at different positions.
+- **A pull is an arrival for one folder.** It fetches the entries after $h_f$ (§4.3) and keeps the
+  commands on the folder's keys; when the fetch answers PRUNED, or the folder was never pulled, it
+  reads the folder by state instead: the tree head, the folder's namespace, then the commands on
+  its keys in the entries above that tree head (§4.7). It then merges (§4.4) with the folder's
+  local values and before-values, and sets $h_f$ to the head it read. A folder with nothing
+  pending simply takes the main's values.
+- **A folder key belongs to the folder it is placed in.** A move of a folder between two folders
+  held changes a key of each, and each learns of it at its own pull.
+- **A push** is attempted only when every folder that holds a key of a pending command has just
+  been pulled to the head. Its entry number is that head plus one, and its `Won` step sets those
+  folders' positions to the entry's number. Folders with nothing pending are not touched: their
+  views stay as they are, however old, until they are pulled.
+- **No background cycle.** Nothing fetches on the cursor or on a timer. The cycle runs to push,
+  and pulls happen when the host asks.
+- **A folder never pulled** has no view, so no local operation can record a before-value in it: it
+  is pulled first, and the operation waits for that.
+
+Recovery (§4.8) is unchanged. An in-flight record is settled before the next pull or push that
+reaches the main.
+
+### 4.12 Bulk publishers
+
+Bulk publishers (import, rsync, revert) run in the owner and are local operations: they upload
 chunks, then set $L$ at each key to the manifest they built, with its before-value. Their changes
 are pushed by the cycle like any other ([05](../05-ops-config.md) §4.2).
 
@@ -502,9 +547,10 @@ merged entry $h$, so its author's $R$ is $M_h$ and its batch gives a well-formed
 $L$ returned to it, when the entry carrying the key's value was created, or by a merge, which keeps
 every file content the client wrote (Theorem 8, property 4).
 
-**S4 — No entry names content the main lacks.** The append goes through the reference gate, which
-checks every chunk the entry's manifests name ([gc.md](gc.md) §5.4), and the staged bytes stay
-until the entry exists (§4.2).
+**S4 — No entry names content the main lacks.** On a main that is collected, the append goes
+through the reference gate, which checks every chunk the entry's manifests name
+([gc.md](gc.md) §5.4), and the staged bytes stay until the entry exists (§4.2). On any other main
+nothing removes a chunk between its upload and its commit.
 
 **S5 — A crash invents no conflict** (Proposition 7). The in-flight record is durable before the
 create and recovered by issuing the same bytes again (§4.8).
@@ -562,7 +608,7 @@ append are answered by the main or fail ([replication.md](replication.md) §4.6,
 | store wait | object store 2 s; local disk watch capped at 2 s; peer long poll ≤ 30 s | cursor reads per client |
 | `RETRY_FLOOR` | 2 s | back-off after a failed cycle |
 | `PROJECT_LEASE` | 30 s | how long a projector writes after one check |
-| `PROJECT_QUARANTINE` | `PROJECT_LEASE` plus the request deadline including retries ([failure-model.md](failure-model.md)) plus a margin; 5 min | MUST exceed the time a write issued under a lease can still land |
+| `PROJECT_QUARANTINE` | `PROJECT_LEASE` plus the longest time a store write can still land after it was issued (its stall bound through every attempt of the retry ladder, [01](../01-core.md) §7) plus a margin; 5 min | MUST exceed the time a write issued under a lease can still land |
 | `PROJECT_SETTLE` | 10 min | how long an entry stays unprojected before another client takes it over; MUST be ≥ `PROJECT_QUARANTINE` |
 | `LOG_RETENTION` | 30 days | how far back a returning client fetches entries instead of reading the tree |
 
@@ -604,7 +650,7 @@ states, multi-client runs) is [09](../09-tests.md) §6–8. The cases of
   clashes becomes a conflicted copy.
 - **Retention.** Expiry never deletes the head entry, an entry above the tree head, nor an entry
   younger than `LOG_RETENTION`.
-- **Gate.** An entry naming a chunk the main lacks is refused; the client uploads the chunk again
+- **Gate.** On a collectable main, an entry naming a chunk the main lacks is refused; the client uploads the chunk again
   from its staged bytes and commits. Staged bytes are released only after their commit.
 - **Cursor.** Notes within `CURSOR_INTERVAL` coalesce into one write of the highest number; a flush
   writes at once and nothing when idle; a stop writes a held note.

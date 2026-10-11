@@ -139,6 +139,9 @@ requires rewriting a valid existing file into another form.
   old it is, which bounds how long the view is answered while the store is silent; whether a view
   is fresh is never judged from it
   ([android §3.2](frontends/android.md#32-freshness-without-a-background-cycle)).
+- **Folder position** (lazy tree only) `.tsync-position`, beside the pull marker: the number of the
+  log entry the folder's view is at, in its written form ([03](03-journal-sync.md) §2.4). Written
+  atomically and durably with the merge that brings the view there. Absent means never pulled.
 - **View hold** (lazy tree only) `.tsync-view-hold`, beside the pull marker: decimal epoch
   milliseconds until which the folder's view is answered whatever its age. Written atomically by a
   restore, on the folder of each file it pins and on every ancestor, and only ever raised. Absent
@@ -382,6 +385,7 @@ also the **read stream id** of sequential detection
 | `delete(key)` | §4.5 | durable |
 | `mkdir(key, exclusive)` | §4.5; an existing folder is success unless `exclusive` (then EXISTS); an existing file is EXISTS | durable; UNPREPARED if the parent has no id |
 | `rmdir(key)` | §4.5; removes the folder only if it is empty (no file, folder or staged edit beneath), as one step; EXISTS otherwise | durable; UNPREPARED |
+| `remove_tree(key)` | §4.5; removes the folder and everything beneath it | durable; UNPREPARED |
 | `rename(src, dst, exclusive)` | §4.5 | durable; UNPREPARED for folders whose parent has no id |
 | `symlink(key, target, exclusive)` | §4.5; REFUSED unless the domain's symlink policy keeps links; with `exclusive`, EXISTS if the key exists | durable |
 | `retain(key)`, `release(retention)` | §3.3 | — |
@@ -422,30 +426,20 @@ operations and by merges, an arrival by state included
 differs, keeps chunks and staged data, and never clears the tree. `clear_projection()` removes
 the scratch tree only.
 
-**Lazy tree.** Absence means "not fetched". The sync state covers the folders held: a key in a
-folder never pulled has no local value and no before-value, and a command on it in a fetched
-entry is skipped. When the host pulls a folder is [android](frontends/android.md) §3.2. A
-**pull** of one folder:
+**Lazy tree.** Absence means "not fetched". The mirror holds the folders that were pulled, each
+with the position its view is at (§2.3). A key in a folder never pulled has no local value and no
+before-value, and an operation that would change one is UNPREPARED until the folder is pulled.
+What a pull does, and what a push requires of the folders held, is
+[publication](algorithms/publication.md) §4.11; when the host pulls is
+[android](frontends/android.md) §3.2. On this side a pull:
 - is refused as UNPREPARED when the folder has no local id;
-- reads the tree head, then the folder's namespace on the main, then replays over it the commands
-  of every log entry above that tree head that concern the folder: a state read
-  ([publication](algorithms/publication.md) §4.7) restricted to one folder. A child that cannot
-  be read fails the whole pull (never skipped), and a failed pull changes nothing;
-- **merges** what it read with the local values and before-values of the folder's keys
-  ([conflict-resolution](algorithms/conflict-resolution.md) §4), under the metadata lock, and sets
-  their before-values so that what the client knows of the main, at those keys, is what it read.
-  A name a pending command removes stays hidden, a name a pending command creates stays shown, and
-  staged edits are kept;
-- writes the folder's pull marker (§2.3) when it completes;
+- changes the folder's keys only by enacting a merge
+  ([conflict-resolution](algorithms/conflict-resolution.md) §4), under the metadata lock: a name a
+  pending command removes stays hidden, a name a pending command creates stays shown, and staged
+  edits are kept;
+- changes nothing when it fails;
+- writes the folder's position and its pull marker (§2.3) when it completes;
 - never writes to the store.
-
-A pull MAY be restricted to one key of a folder (opening a file): the same steps for that key
-alone, with no pull marker written.
-
-A lazy tree has one position, like a full one. Before a push it fetches and merges the entries
-after its position, restricted to the keys of the folders it holds. When that fetch answers
-PRUNED, it pulls again every folder that holds a pending command, drops its view of the others
-(they are pulled again when opened), and takes the head it read as its position.
 
 ### 3.6 Stat and availability
 
@@ -495,7 +489,10 @@ mirror entry, or ∅ when it has none ([publication](algorithms/publication.md) 
 - a staged edit with a whole body: first **split** it: for each group of the domain's current
   chunk size, a new group body holding that group's bytes, one slot per chunk; replace the
   staged manifest; release the whole body once the new manifest is durable (R3);
-- a staged edit: as is (an Uploaded edit becomes Owed with the same slots);
+- an Uploaded staged edit whose key has no before-value: its commit happened; promote it first
+  (§4.7), then continue from the mirror entry, so an edit's base is always the value its
+  before-value names;
+- any other staged edit: as is (an Uploaded edit becomes Owed with the same slots);
 - no edit, a mirror entry: every slot Inherit, size and chunk size from the entry, mtime now;
 - neither: empty, with the domain's chunk size.
 
@@ -556,10 +553,10 @@ ever read as zeros.
 
 - **`sync(key)`** (the frontend's `fsync`): under the key lock, fsync every body the staged
   manifest names that was written since the last sync (all of them after an owner restart),
-  fsync the directories of bodies created since then, and durably replace the staged
-  manifest. No staged edit: nothing to do.
+  fsync the directories of bodies created since then, durably replace the staged
+  manifest, and make the key's before-value durable. No staged edit: nothing to do.
 - **`close(key)`** (the frontend's last close after a modification, or the end of a handover):
-  sync, make the key's before-value durable, then post an upload record for the key. The post is
+  sync, then post an upload record for the key. The post is
   durable before `close` returns. A close without a staged edit, or without modification since the
   last close, posts nothing.
 
@@ -571,17 +568,24 @@ has none; the local half, its effects made durable; the removal of every before-
 value returned to; the feed line; the removal of the intent; the acknowledgement
 ([publication](algorithms/publication.md) §4.1, [durable-queue](algorithms/durable-queue.md)
 §7.4). A local half that fails undoes nothing it did not do: its intent is completed at once or
-at owner start, and the failure is returned.
+at owner start, and the failure is returned. Completing an intent is idempotent: a removal acts
+on the folder holding the recorded id, a rename moves only when the source is present and the
+destination absent, and a mkdir creates the folder with the recorded id unless a folder holds it.
 
 | Operation | Local half | Keys changed |
 |---|---|---|
 | `delete(key)` | take the key lock; discard the staged edit (its bodies released after the discard is durable, and not before open handles close) and its upload record; remove the mirror entry; MAY evict its cache bodies | the file key |
 | `mkdir(key, exclusive)` | parent id required; an existing folder: nothing to do (EXISTS with `exclusive`); otherwise mint a folder id, which is final; create the directory, marker, reverse entry and removed-id record | the new folder's key, from ∅ |
 | `rmdir(key)` | parent id required; read the folder's id; in one step under the lock, refuse a folder with any child (mirror entry, folder or staged edit) as EXISTS, else remove it; keep the removed-id record | the folder's key, to ∅ |
+| `remove_tree(key)` | one local intent; the key locks of every staged key beneath; then, children before parents, every file beneath as `delete` does and every folder as `rmdir` does, the folder itself last. One feed line holds a `delete` per file and an `rmdir` per folder, in that order | every file key beneath, to ∅; every folder key beneath and the folder's own, to ∅ |
 | `rename(src, dst, exclusive)` of a file | the POSIX rules of §3.4; take the key locks of `src` and `dst`; replacing an existing `dst` discards `dst`'s staged edit and mirror entry (an open handle on it keeps its content, §3.3); move the staged manifest, its upload record and the mirror entry (§4.1), re-stamping names | the source key, to ∅; the destination key |
 | `rename(src, dst, exclusive)` of a folder | the POSIX rules of §3.4; the parent of `src` must have an id; take the key locks of every staged key under the folder; move the mirror directory and the staged directory; reparent the id (§4.9) | the folder's key, and nothing beneath it |
 | `symlink(key, target)` | write a symlink manifest as the key's mirror entry, under the key's lock | the file key |
 
+- `remove_tree` is not one command: the theory removes a folder only when it is empty, so the
+  pending set gets one command per item removed, pushed like any other. A file a peer added
+  beneath meanwhile brings its folder back at the next arrival
+  ([conflict-resolution](algorithms/conflict-resolution.md) §8.1).
 - A file created and deleted before any push leaves no before-value: the delete brings the key
   back to ∅, its before-value.
 - A folder renamed and renamed back leaves none either.

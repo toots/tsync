@@ -72,7 +72,7 @@ decides it, and it travels upward as data.
 | **EXISTS** | `exists`, `not_empty` | The name is held by something else: a lost conditional create, `EEXIST`, `ENOTEMPTY`. A considered answer about a name; conflict policy resolves it. | no |
 | **REFUSED** | `denied`, `read_only`, `other` | The authority answered and will answer the same: permissions or credentials (`denied`); a read-only store or domain (`read_only`); any other permanent refusal whose cause this side cannot name (`other`). | not until configuration changes |
 | **INVALID** | | The request is malformed on this side: a bad argument, a malformed key or reference, an unknown action, bad JSON. | no |
-| **CORRUPT** | `missing_chunks`, `other` | An answer was obtained and contradicts what it must be: bytes that do not hash to their key, a length that disagrees with the manifest, a manifest with a hole, a range answer longer than asked, an undecodable object or local record, a dependency no member holds after all were asked. `missing_chunks` is a store refusing to take a manifest or version whose chunks it does not hold; it carries the missing chunk keys. The thing exists and is wrong. | no; only repair (for `missing_chunks`, the writer re-sends the named chunks) |
+| **CORRUPT** | `missing_chunks`, `other` | An answer was obtained and contradicts what it must be: bytes that do not hash to their key, a length that disagrees with the manifest, a manifest with a hole, a range answer longer than asked, an undecodable object or local record, a dependency no member holds after all were asked. `missing_chunks` is a store refusing to take a log entry, a manifest or a version whose chunks it does not hold; it carries the missing chunk keys. The thing exists and is wrong. | no; only repair (for `missing_chunks`, the writer re-sends the named chunks) |
 | **UNPREPARED** | `paused`, `other` | Local state cannot express the operation yet: the user paused the domain's remote work and the operation needs it (`paused`); the parent folder has no id here, or the log holds an entry of a version this client does not know (`other`). A user action (resume, sync) or convergence clears it. | not by itself |
 | **TRANSIENT** | `link`, `load`, `local` | No considered answer yet. `link`: connection error, TLS or DNS failure, a 5xx that is not throttling, a stall, a transfer truncated below its announced length. `load`: the authority answered "later" (429, a throttling 503, a peer's `busy`, a conflict-in-progress answer to a conditional write). `local`: a resource on this host (`EMFILE`, `ENFILE`, `ENOMEM`, `ENOSPC`, `EDQUOT`, `EIO`, `EAGAIN`, `EBUSY`). | yes, later |
 | **UNREACHABLE** | | Derived, never raised by a driver: every candidate that could answer is held by the breaker; TRANSIENT/link persisted past the caller's patience or deadline; a deadline expired while the store was silent; or the owner does not serve the domain named. "The store (or its server) is the problem; stop asking until told." | yes, after the link returns |
@@ -183,7 +183,7 @@ kinds:
 | 404 with a non-empty body (the body names a domain the server does not serve) | REFUSED/denied: the domain is not served there; never ABSENT. Clients SHOULD accept this form; servers MUST NOT produce it (they answer 401) |
 | 404 on an optional capability | "no opinion"; not a failure |
 | 409 with `x-tsync-kind` | the kind or subkind it names (a value from §3.1, such as `corrupt`, `exists`, `not_empty`, `unprepared`, `invalid`), carrying the server's reason; an unknown value → REFUSED/other |
-| 409 with `x-tsync-kind: missing_chunks` | CORRUPT/missing_chunks, carrying the chunk keys listed in the answer. The writer re-sends exactly those chunks and retries the write once; a second refusal parks the record |
+| 409 with `x-tsync-kind: missing_chunks` | CORRUPT/missing_chunks, carrying the chunk keys listed in the answer. The writer re-sends exactly those chunks and repeats the write ([gc](gc.md) §5.4); a writer with no bytes to send acts as [publication](publication.md) §4.5 says |
 | 409 without `x-tsync-kind` | REFUSED/other, carrying the server's reason. Clients SHOULD accept this form; servers MUST NOT produce it |
 | 403 | REFUSED/read_only |
 | 401 (a bad signature, or a domain the server does not serve) | REFUSED/denied. If the answer's `Date` differs from the local wall clock by more than the signature window, the reason says "clock skew". |
@@ -369,12 +369,12 @@ marking) are owned by [durable-queue](durable-queue.md).
 
 | Kind | Ladder | Composite | Ordered queue (replica/backfill jobs) | Keyed queue (uploads) | Cycle (fetch, push, projection) |
 |---|---|---|---|---|---|
-| ABSENT | return "no value" | the main's answer; for a chunk, ask the next member | job's own rules decide | local source gone → §4.6 | entry $h+1$ absent: the head is $h$ ([publication](publication.md) §4.3) |
+| ABSENT | return "no value" | the main's answer; for a chunk, the archives are asked too | job's own rules decide | local source gone → §4.6 | entry $h+1$ absent: the head is $h$ ([publication](publication.md) §4.3) |
 | EXISTS | return the holder | the main arbitrates | job's own rules | n/a | the entry number is taken: arrive, then push from the new head |
-| REFUSED | one attempt | pass on | park; copy marked degraded | park | fail the cycle; reported; retried at the re-arm cadence |
+| REFUSED | one attempt | pass on | park; copy marked degraded | park | fail the cycle; reported; retried after `RETRY_FLOOR` |
 | INVALID | n/a | n/a | park; degraded | park | fail the cycle; reported |
 | CORRUPT | one attempt; a chunk is re-fetched once | ask the next member for a good copy of a chunk | park; degraded | park | an entry that does not decode: arrive by state once the tree head has passed it, else stop and report. `missing_chunks` on a commit: upload them again, repeat the create |
-| UNPREPARED | n/a | n/a | n/a | park | an entry of an unknown version: stop fetching and pushing; report |
+| UNPREPARED | n/a | n/a | n/a | park | an entry of an unknown version: arrive by state once the tree head has passed it, else stop fetching and pushing; report |
 | TRANSIENT (any) | retry with backoff up to the attempt limit or the caller's deadline | fail fast on a held member when another candidate exists; the last candidate is always asked | block at the head with backoff | requeue at the tail with backoff | fail the cycle; nothing advances; an in-flight record stays; retry after `RETRY_FLOOR` |
 | UNREACHABLE | not retried by the ladder; the hold ends it | chunk reads fail over to a replica, then archives; every other read fails; writes are never redirected | block at the head | tail with backoff | as TRANSIENT |
 | STOPPING | end at once | pass through | leave the record | leave the record | end the cycle; nothing advances |
@@ -524,7 +524,8 @@ A failure a person must act on is shown in status and by the CLI, not only in a 
 Status MUST show:
 
 - each tripped breaker, with its reason and the hold's end;
-- parked records, with counts and reasons; a log entry the client cannot follow;
+- parked records, with counts and reasons; a log entry the client cannot follow; a file reported
+  damaged because its commit names chunks nobody can send again;
 - degraded copies, with their repair;
 - corruption markers and set-aside local files;
 - stalled loops and queues (§8.1);

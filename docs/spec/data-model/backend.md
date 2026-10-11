@@ -559,7 +559,7 @@ content through it at every point: ids, not paths, are what frontends and comman
 | Cursor | hint | the head |
 | Folder index | cache | namespace listing and child reads |
 | Whole-file digest in a manifest | derived | its chunk keys and lengths |
-| Recorded name in a manifest | derived (informational) | its location |
+| Recorded name in a manifest | derived: written from the key's leaf by the projection | its location |
 | Collection run | authoritative about a run in progress | — |
 | Corruption marker | authoritative finding until re-checked | re-verification |
 | Verify / discard job | request | re-issued by the client |
@@ -578,7 +578,7 @@ Every entity that grows has a reclaiming path. Rules: [algorithms/gc.md](../algo
 | Chunks | a collection on a collectable main, which also deletes on copies; expiry removes the references that make chunks garbage. A domain with no collectable main is not collected. |
 | Manifests, markers and anchors | user deletes, through the log |
 | Versions | expiry by age |
-| Log entries | expiry by age, below the tree head ([algorithms/publication.md §4.9](../algorithms/publication.md#49-log-retention)) |
+| Log entries | expiry by age, at or below the tree head ([algorithms/publication.md §4.9](../algorithms/publication.md#49-log-retention)) |
 | Takeovers | deleted once the tree head has passed their entry |
 | Folder indexes | one per namespace, capped in children and size; deleted with the folder |
 | Corruption markers | good rewrites; collections that delete the chunk |

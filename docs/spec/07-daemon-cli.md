@@ -606,7 +606,7 @@ differently. A command MUST NOT split a token on `:` or `/` itself.
   nothing failed ([failure-model.md §7.5](algorithms/failure-model.md#75-cli-exit-status)).
 - Resolving a path to an item reference reads the domain's folder markers (a permitted read,
   §2.2). A folder this client holds no id for is refused with "this client has not resolved its
-  folder; run 'tsync sync'".
+  folder; run 'tsync sync --full'".
 
 ### 5.3 Commands
 
@@ -628,7 +628,7 @@ differently. A command MUST NOT split a token on `:` or `/` itself.
 | `gc [...]` | owner | [05 §4.9](05-ops-config.md) |
 | `sync [--full] [-j N]` | owner | one cycle now, or with `--full` an arrival by state ([05 §4.7](05-ops-config.md)), in the owner (`sync`, a bulk action); refuses with exit 2 for a pulled tree; prints `N log entries merged, C changes; K entries committed, P changes pending`, the first part reading `state read: F files, D folders` for an arrival by state; exit 1 if the cycle failed |
 | `data-integrity [--verify\|--repair] [--detail] [--source] [--dry-run]` | owner | [05 §4.10](05-ops-config.md); exit 1 if unhealthy |
-| `mirror [--source] [--skip-chunks\|--path P]` | owner | [05 §4.6](05-ops-config.md); needs at least two members |
+| `mirror [--skip-chunks\|--path P]` | owner | [05 §4.6](05-ops-config.md); needs a main and at least one copy |
 | `import DIR [--only G] [--exclude G] [--force-rehash]` | owner | [05 §4.3](05-ops-config.md); exit 1 if any entry failed |
 | `export [PATH...] DIR [--source] [-j N]` | read | [05 §4.4](05-ops-config.md); each `PATH` is read in a domain (§5.2), `DIR` is local; one domain per run; exit 1 on failures or on pending local changes (listed on stderr) |
 | `rsync SRC DST [--move] [-n]` | owner | [05 §4.5](05-ops-config.md). Each argument is a side (§5.2). Two local sides are refused with exit 2, like two different domains. `-n` prints each entry's decision and changes nothing |
@@ -805,7 +805,7 @@ drift between hosts. Every host that owns a domain runs the same list, the Andro
 | local recovery, including the exact staged-orphan sweep and temporary files | at owner start | [04 §4.10](04-checkout-cache.md#410-owner-start-local-recovery) |
 | temporary files | at start and daily | [04 §4.11](04-checkout-cache.md#411-periodic-maintenance) |
 | chunk cache cap | after every upload and every `HOUSEKEEPING_INTERVAL` | [04 §4.11](04-checkout-cache.md#411-periodic-maintenance) |
-| applied-log prune | daily | [03 §2.9](03-journal-sync.md#29-feed-ops-and-the-applied-log) |
+| applied-log prune | daily | [03 §2.9](03-journal-sync.md#29-feed-ops-and-the-applied-log-local) |
 | removed-id records, export-record sweep | daily | [04 §4.11](04-checkout-cache.md#411-periodic-maintenance), [05 §4.4](05-ops-config.md) |
 | log rescan and re-arming of parked records | every `HOUSEKEEPING_INTERVAL` | [durable-queue.md](algorithms/durable-queue.md#47-parking-and-retry-of-parked-records) |
 
@@ -895,7 +895,7 @@ An implementation MUST exhibit:
   job at its next unit boundary, and closing the client without it lets the job finish.
 - **Pause.** While paused: nothing is uploaded, pushed or projected, no entry is merged, no deferred
   copy runs, and the commands §2.6 lists refuse; local operations are accepted and stay pending. The pause survives a
-  restart. A drain overrides pause: it completes while paused.
+  restart. A drain completes while paused, uploading and pushing nothing.
 - **Queue accounting.** Pending and parked uploads count files; in-flight entries are listed first
   in, first out; bytes owed are whole-file bytes, in-flight included.
 - **Stop.** A stop without a process stop drains everything; after a process stop, a queue returns

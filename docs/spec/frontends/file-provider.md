@@ -480,8 +480,7 @@ answers and streams the events of every domain it serves, now or later. One JSON
 - `id` increases within one owner process; a client uses it only for ordering.
 - `changed` names nothing: the answer is always "enumerate the working set's changes". The owner emits
   it debounced: the first changed key after a quiet period schedules one event `changed_debounce`
-  later, and later keys join it. It is raised when an arrival changed the local tree, on `revert`, when
-  the content of a write is committed, and after `full_resync` stamps a new generation.
+  later, and later keys join it. It is raised when the owner calls `changed` ([08 §3.1](../08-frontends.md)).
 - `recovered` is the domain's recovery notice
   ([08 §3.8](../08-frontends.md#38-events)), including when the owner starts serving the domain.
 - `reset` follows `notify_reset` (§9.3).
