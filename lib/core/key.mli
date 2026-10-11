@@ -42,7 +42,6 @@ val chunks : Domain_name.t -> prefix
 val chunks_from : Domain_name.t -> prefix
 
 val versions : Domain_name.t -> prefix
-val journal : Domain_name.t -> prefix
 val cursor : Domain_name.t -> t
 val log : Domain_name.t -> prefix
 
@@ -91,12 +90,10 @@ val child : Domain_name.t -> Folder_id.t -> string -> t
 
 val anchor : Domain_name.t -> Folder_id.t -> t
 val index : Domain_name.t -> Folder_id.t -> t
-val trash_entry : Domain_name.t -> string -> t
 
 (** [versions/<group>/<ns>], the group being [<folder id>/<leaf hash>]. *)
 val version : Domain_name.t -> group:string -> ns:int64 -> t
 
-val journal_entry : Domain_name.t -> month:string -> entry:string -> t
 val verify_job : Domain_name.t -> string -> t
 val discard_job : Domain_name.t -> run:string -> shard:string -> t
 

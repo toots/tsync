@@ -7,7 +7,7 @@ type entry = { key : Key.t; leaf_hash : string; body : body }
 type unusable =
   | Unreadable of Key.t * string
   | Unclassifiable of Key.t
-  | Disowned of Key.t * Folder.anchor
+  | Disowned of Key.t * Folder.anchor option
 
 type on_unusable = Fail_on_unusable | Skip of (unusable -> unit)
 
@@ -15,10 +15,12 @@ let describe_unusable = function
   | Unreadable (k, why) ->
       Printf.sprintf "%s: unreadable (%s)" (Key.to_string k) why
   | Unclassifiable k -> Printf.sprintf "%s: unclassifiable" (Key.to_string k)
-  | Disowned (k, a) ->
+  | Disowned (k, Some a) ->
       Printf.sprintf "%s: disowned by its anchor (%s/%s)" (Key.to_string k)
         (Folder_id.to_string a.parent)
         a.aname
+  | Disowned (k, None) ->
+      Printf.sprintf "%s: its folder has no anchor" (Key.to_string k)
 
 module Make (C : Context.S) = struct
   let d = C.domain
@@ -26,13 +28,6 @@ module Make (C : Context.S) = struct
 
   (* Markers, anchors and manifests are small; they cross as strings. *)
   let get k = Option.map Bigstring.to_string (store.get_opt k)
-  let put k body = store.put k (Bigstring.of_string body)
-
-  let claim_text k body =
-    match store.put_if_absent k (Bigstring.of_string body) with
-      | Store.Won -> body
-      | Held b -> Bigstring.to_string b
-
   let anchor id = Option.bind (get (Key.anchor d id)) Folder.decode_anchor
 
   let placed id ~parent ~name =
@@ -41,213 +36,10 @@ module Make (C : Context.S) = struct
       | Some a when Folder_id.equal a.parent parent && a.aname = name -> `Here
       | Some a -> `Elsewhere a
 
-  (* data-model §6.3: a marker is filed iff its folder's anchor names its slot,
-     or the folder has no anchor. *)
-  let filed ~parent ~name id =
-    match placed id ~parent ~name with
-      | `Here | `Unanchored -> true
-      | `Elsewhere _ -> false
-
+  (* data-model §6.2: a marker is filed iff its folder's anchor names its
+     slot; a marker whose folder has no anchor is disowned. *)
+  let filed ~parent ~name id = placed id ~parent ~name = `Here
   let slot parent name = Key.child d parent name
-
-  let classify_slot parent name body =
-    match Folder.classify_marker body with
-      | `Marker (m, _) ->
-          if filed ~parent ~name m.id then `Filed m.id else `Disowned m.id
-      | `Unclassifiable -> `Unclassifiable
-      | `Not_marker ->
-          if Manifest.decode body <> None then `File else `Unclassifiable
-
-  let holder_at parent name =
-    match get (slot parent name) with
-      | None -> None
-      | Some b -> (
-          match classify_slot parent name b with
-            | `Filed id -> Some id
-            | _ -> None)
-
-  let remove_marker_if ~parent ~name id =
-    let k = slot parent name in
-    match get k with
-      | Some b -> (
-          match Folder.classify_marker b with
-            | `Marker (m, _) when Folder_id.equal m.id id ->
-                ignore (store.delete k)
-            | _ -> ())
-      | None -> ()
-
-  let write_anchor id ~parent ~name =
-    put (Key.anchor d id) (Folder.anchor_body { parent; aname = name })
-
-  (* data-model §6.2 step 1: create-if-absent, then read what holds the slot;
-     an answer that names nobody is read back, never taken as won. *)
-  let rec claim ?(rounds = 8) ~parent ~name id =
-    if rounds = 0 then
-      Fail.raise_ Fail.Load "claim of %s keeps meeting litter" name
-    else (
-      let k = slot parent name in
-      let body = Folder.marker_body { name; id } in
-      let holder = claim_text k body in
-      let holder =
-        match Folder.classify_marker holder with
-          | `Marker _ -> Some holder
-          | _ -> get k
-      in
-      match holder with
-        | None -> claim ~rounds:(rounds - 1) ~parent ~name id
-        | Some h -> (
-            match Folder.classify_marker h with
-              | `Marker (m, _) when Folder_id.equal m.id id -> (
-                  match placed id ~parent ~name with
-                    | `Unanchored ->
-                        write_anchor id ~parent ~name;
-                        `Won
-                    | `Here -> `Won
-                    | `Elsewhere _ ->
-                        Fail.raise_ Fail.Link
-                          "folder %s moved while claiming %s"
-                          (Folder_id.to_string id) name)
-              | `Marker (m, _) ->
-                  if filed ~parent ~name m.id then `Taken m.id
-                  else (
-                    remove_marker_if ~parent ~name m.id;
-                    claim ~rounds:(rounds - 1) ~parent ~name id)
-              | `Unclassifiable | `Not_marker ->
-                  Fail.raise_ Fail.Exists
-                    "%s is held by something that is not a folder" name))
-
-  (* data-model §6.2 step 3. *)
-  let confirm ~parent ~name id =
-    match get (slot parent name) with
-      | None -> (
-          match claim ~parent ~name id with
-            | `Won -> `Reclaimed
-            | `Taken j -> `Lost j)
-      | Some b -> (
-          match classify_slot parent name b with
-            | `Filed j when Folder_id.equal j id -> `Final
-            | `Filed j -> `Lost j
-            | `Disowned j -> (
-                remove_marker_if ~parent ~name j;
-                match claim ~parent ~name id with
-                  | `Won -> `Reclaimed
-                  | `Taken j -> `Lost j)
-            | `File | `Unclassifiable ->
-                Fail.raise_ Fail.Exists "%s is held by a file" name)
-
-  (* data-model §6.4: the anchor first is the commit point; the marker's
-     create-if-absent decides the name. *)
-  let rec place ?(rounds = 8) id ~parent ~name =
-    write_anchor id ~parent ~name;
-    let k = slot parent name in
-    let body = Folder.marker_body { name; id } in
-    let holder = Some (claim_text k body) in
-    let holder =
-      match Option.map Folder.classify_marker holder with
-        | Some (`Marker _) -> holder
-        | _ -> get k
-    in
-    match Option.map (classify_slot parent name) holder with
-      | None ->
-          if rounds > 0 then place ~rounds:(rounds - 1) id ~parent ~name
-          else Fail.raise_ Fail.Load "placement of %s keeps failing" name
-      | Some (`Filed j) when Folder_id.equal j id -> `Placed
-      | Some (`Filed j) -> `Taken j
-      | Some (`Disowned j) ->
-          remove_marker_if ~parent ~name j;
-          if rounds > 0 then place ~rounds:(rounds - 1) id ~parent ~name
-          else Fail.raise_ Fail.Load "placement of %s keeps failing" name
-      | Some (`File | `Unclassifiable) -> `Taken_by_file
-
-  let move id ~old:(op, on) ~parent ~name =
-    match place id ~parent ~name with
-      | `Placed ->
-          if not (Folder_id.equal op parent && on = name) then
-            remove_marker_if ~parent:op ~name:on id;
-          `Placed
-      | r -> r
-
-  let trash id ~old:(op, on) ~path =
-    let entry = Key.trash_entry d (Ids.short ()) in
-    put entry (Folder.trash_body { name = on; id } ~path);
-    write_anchor id ~parent:Folder_id.trash ~name:on;
-    remove_marker_if ~parent:op ~name:on id
-
-  (* Create-if-absent: a restore racing the repair keeps its live anchor. *)
-  let anchor_in_trash id ~name =
-    ignore
-      (store.put_if_absent (Key.anchor d id)
-         (Bigstring.of_string
-            (Folder.anchor_body { parent = Folder_id.trash; aname = name })))
-
-  let trash_entries () =
-    List.filter_map
-      (fun (e : Store.entry) ->
-        match get e.key with
-          | Some b -> (
-              match Folder.classify_marker b with
-                | `Marker (m, path) -> Some (e, m, path)
-                | _ -> None)
-          | None -> None)
-      (List.filter
-         (fun (e : Store.entry) ->
-           Key.is_child_of ~namespace:(Key.namespace d Folder_id.trash) e.key)
-         (store.list_prefix (Key.namespace d Folder_id.trash)))
-
-  let trash_state id =
-    match anchor id with
-      | None -> `No_anchor
-      | Some a when Folder.in_trash a -> `In_trash
-      | Some _ -> `Live
-
-  type trashed = {
-    id : Folder_id.t;
-    name : string;
-    path : string option;
-    entries : Store.entry list;
-    latest : float;
-    state : [ `In_trash | `Live | `No_anchor ];
-  }
-
-  let trashed () =
-    let groups = Hashtbl.create 16 in
-    List.iter
-      (fun ((e : Store.entry), (m : Folder.marker), path) ->
-        let k = Folder_id.to_string m.id in
-        Hashtbl.replace groups k
-          ((e, m, path) :: Option.value ~default:[] (Hashtbl.find_opt groups k)))
-      (trash_entries ());
-    Hashtbl.fold
-      (fun _ group acc ->
-        (* Pitfall B-10.10: the newest element whole. *)
-        let newest =
-          List.fold_left
-            (fun (((b : Store.entry), _, _) as best)
-                 (((e : Store.entry), _, _) as cur) ->
-              if e.last_modified > b.last_modified then cur else best)
-            (List.hd group) group
-        in
-        let (e : Store.entry), (m : Folder.marker), path = newest in
-        {
-          id = m.id;
-          name = m.name;
-          path;
-          entries = List.map (fun (e, _, _) -> e) group;
-          latest = e.last_modified;
-          state = trash_state m.id;
-        }
-        :: acc)
-      groups []
-
-  let restore id ~parent ~name =
-    match place id ~parent ~name with
-      | `Placed ->
-          List.iter
-            (fun ((e : Store.entry), (m : Folder.marker), _) ->
-              if Folder_id.equal m.id id then ignore (store.delete e.key))
-            (trash_entries ());
-          `Placed
-      | r -> r
 
   let classify_child body =
     match Folder.classify_marker body with
@@ -293,14 +85,17 @@ module Make (C : Context.S) = struct
                           body = File m;
                         }
                   | `Dir m -> (
+                      let disowned anchor =
+                        match on_unusable with
+                          | Skip r ->
+                              r (Disowned (e.key, anchor));
+                              None
+                          | Fail_on_unusable -> None
+                      in
                       match placed m.id ~parent:id ~name:m.name with
-                        | `Elsewhere a -> (
-                            match on_unusable with
-                              | Skip r ->
-                                  r (Disowned (e.key, a));
-                                  None
-                              | Fail_on_unusable -> None)
-                        | _ ->
+                        | `Elsewhere a -> disowned (Some a)
+                        | `Unanchored -> disowned None
+                        | `Here ->
                             Some
                               {
                                 key = e.key;
@@ -382,7 +177,9 @@ module Make (C : Context.S) = struct
               | _ -> None)
           (List.combine listing bodies)
       in
-      try put (Key.index d id) (Folder_index.encode entries)
+      try
+        store.put (Key.index d id)
+          (Bigstring.of_string (Folder_index.encode entries))
       with e when not (Rt.is_cancelled e) ->
         Log.debug "folder index of %s not written: %s" (Folder_id.to_string id)
           (Printexc.to_string e));

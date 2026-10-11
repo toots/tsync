@@ -2,6 +2,7 @@ open Tsync_core
 open Tsync_store
 
 let cursor_interval = 2.
+let retention = 30. *. 86400.
 
 type t = {
   domain : Domain_name.t;

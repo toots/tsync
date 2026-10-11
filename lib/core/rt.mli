@@ -16,6 +16,10 @@ val is_cancelled : exn -> bool
 (** Monotonic seconds with an arbitrary origin. *)
 val now : unit -> float
 
+(** Seconds on a clock that counts time spent suspended: what a lease held
+    against other machines is measured on. *)
+val boottime : unit -> float
+
 (** Raises the pending cancellation of the calling fiber, if any. *)
 val check : unit -> unit
 

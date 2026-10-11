@@ -73,24 +73,40 @@ module Make (C : Context.S) = struct
           write (fun () -> ignore (store.delete (Key.anchor d i)))
       | _ -> ())
 
-  let fold ?width f acc =
+  (* 05 §4.7: an enumeration of the manifest area, so a folder is found by
+     its namespace wherever its marker is. *)
+  let namespaces () =
+    let ids = Hashtbl.create 1024 in
+    Hashtbl.replace ids Folder_id.root ();
+    List.iter
+      (fun (e : Tsync_store.Store.entry) ->
+        Option.iter
+          (fun id -> Hashtbl.replace ids id ())
+          (Key.folder_of_namespace_key d e.key))
+      (store.list_prefix (Key.manifests d));
+    Hashtbl.fold (fun id () acc -> id :: acc) ids []
+
+  let fold ?(width = C.max_downloads) f acc =
     let on_unusable =
-      Tree.Skip
-        (function
-        | Tree.Unreadable (key, _) as u when Key.is_internal_leaf (Key.leaf key)
-          ->
-            Fail.raise_ Fail.Link "state read: %s" (Tree.describe_unusable u)
-        | u -> Log.debug "state read: %s" (Tree.describe_unusable u))
+      Tree.Skip (fun u -> Log.debug "state read: %s" (Tree.describe_unusable u))
     in
-    T.fold_tree ~on_unusable ?width ~write_index:true Folder_id.root
-      ~root_path:""
-      (fun acc _ (e : Tree.entry) ->
-        match Folder_id.of_string (Key.parent_segment e.key) with
-          | None -> acc
-          | Some parent -> (
-              match e.body with
-                | File m -> f acc (`File ({ Algebra.parent; name = m.name }, m))
-                | Dir m ->
-                    f acc (`Folder (m.id, { Algebra.parent; name = m.name }))))
-      acc
+    let acc = ref acc and m = Mutex.create () in
+    let emit record = Mutex.protect m (fun () -> acc := f !acc record) in
+    Rt.iter_bounded ~width:(max 1 width)
+      (fun id ->
+        if not (Folder_id.is_root id) then (
+          match T.anchor id with
+            | Some a ->
+                emit
+                  (`Folder (id, { Algebra.parent = a.parent; name = a.aname }))
+            | None -> ());
+        List.iter
+          (fun (e : Tree.entry) ->
+            match e.body with
+              | File m ->
+                  emit (`File ({ Algebra.parent = id; name = m.name }, m))
+              | Dir _ -> ())
+          (T.children ~on_unusable ~write_index:true id))
+      (namespaces ());
+    !acc
 end

@@ -63,8 +63,10 @@ type settled =
   | Before_file of Log_entry.value option
   | Before_folder of Algebra.place option
 
+(** [view]: on a lazy tree, the folder whose position the arrival sets. *)
 type arrival = {
   head : int;
+  view : Folder_id.t option;
   feed : string list;
   steps : step list;
   before : (Algebra.key * settled) list;

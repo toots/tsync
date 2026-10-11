@@ -3,34 +3,51 @@ open Tsync_checkout
 open Tsync_remote
 
 module Make (C : Engine_ctx.S) = struct
-  include Outbound.Make (C)
+  include Cycle.Make (C)
 
-  (* What bulk publishers (import, rsync) share, in a submodule so its names
-     never shadow the engine's. *)
+  (* What bulk publishers (import, rsync) share (05 §4.2), in a submodule so
+     its names never shadow the engine's: each change is a local operation,
+     and the run waits for the commit of the keys it [note]d. *)
   module Bulk = struct
-    (* 05 §4.2 ENTRY_OPS / ENTRY_AGE. *)
-    let entry_ops = 2000
-    let entry_age = 10.
+    type run = Algebra.key list ref
 
-    (* 05 §4.3: the domain holds a key when the store has its manifest or this
-       client holds it, published or staged. *)
-    let exists rel = kind rel <> `Absent || store_manifest rel <> None
+    let run () : run = ref []
+    let note (run : run) key = run := key :: !run
+    let note_file run rel = note run (`File (place_of rel))
 
-    let publish ?resend rel m =
-      let pid = ensure_folder_id ~create:true (Names.parent_of rel) in
-      let leaf = Names.leaf_of rel in
-      R.publish ?resend ~parent:pid ~leaf m;
-      let m = Manifest.rename m leaf in
+    let exists rel =
+      match kind rel with
+        | `Absent -> false
+        | `Dir -> true
+        | `File -> not (is_damaged (place_of rel))
+
+    (* durable-queue §7.3: the chunks are on the main; the manifest becomes
+       the key's local value, with its before-value. *)
+    let install run rel (m : Manifest.t) =
+      let m = Manifest.rename m (Names.leaf_of rel) in
       with_meta (fun () ->
-          with_key rel (fun () -> Mirror.write_file ~own:true mirror rel m))
+          with_key rel (fun () ->
+              begin_change rel;
+              ignore (discard_edit rel);
+              end_lineage rel;
+              Mirror.write_file ~own:true mirror rel m;
+              ignore (Mirror.ensure_file_id mirror rel);
+              settle rel);
+          Mutex.protect damaged_m (fun () ->
+              Hashtbl.remove damaged (place_of rel));
+          let op = Op.Put { path = rel; size = m.size } in
+          feed ~fids:(note_fids [op]) [op]);
+      note_file run rel;
+      changed [rel];
+      wake_cycle ()
 
     let unchanged (a : Unix.stats) (b : Unix.stats) =
       a.st_size = b.st_size && a.st_mtime = b.st_mtime
       && a.st_ctime = b.st_ctime
 
     (* The stat is of the open descriptor, and taken again once every chunk is
-       read: a file renamed or rewritten meanwhile is never published. *)
-    let upload_file ?sent rel path =
+       read: a file renamed or rewritten meanwhile is never installed. *)
+    let upload_file ?sent run rel path =
       Fs.with_fd (Fs.openfile path [O_RDONLY]) (fun fd ->
           let st = Unix.fstat fd in
           let size = st.st_size and cs = R.chunk_size () in
@@ -52,107 +69,44 @@ module Make (C : Engine_ctx.S) = struct
                   Remote.Lazy (fun () -> read i))
             with Remote.Source_changed _ -> changed ()
           in
-          let resend ck =
-            let rec find i =
-              if i >= m.count then None
-              else if Chunk_key.equal (Manifest.key m i) ck then Some (read i)
-              else find (i + 1)
-            in
-            find 0
-          in
           if not (unchanged st (Unix.fstat fd)) then changed ();
-          publish ~resend rel m;
+          install run rel m;
           size)
 
-    let publish_link rel ~target ~mtime =
-      publish rel (Manifest.symlink ~name:(Names.leaf_of rel) ~mtime target)
+    let install_link run rel ~target ~mtime =
+      install run rel (Manifest.symlink ~name:(Names.leaf_of rel) ~mtime target)
 
-    (* A folder this client holds no id for is claimed now, so what goes
-       beneath it can be published, and announced through the ordered
-       metadata queue; [Ok false] when it was already held. *)
-    let folder rel =
+    (* [Ok false] when the folder was already there. *)
+    let folder run rel =
       match Mirror.kind mirror rel with
         | `File -> Error "a file holds this name in the domain"
-        | `Dir when Mirror.folder_id mirror rel <> None -> Ok false
-        | _ ->
-            let id = ensure_folder_id ~create:true rel in
-            with_meta (fun () ->
-                record_owed [Op.Mkdir { path = rel; id = Some id }] ignore);
+        | `Dir -> Ok false
+        | `Absent ->
+            mkdir rel ~exclusive:false;
+            Option.iter (fun id -> note run (`Folder id)) (folder_id_of rel);
             Ok true
 
-    (* durable-queue §7.3: a batch's record lists its items' ops before any of
-       them runs, and is held until they ran; it is then rewritten to the ops
-       of the items whose [run] answered that their store half happened, and
-       handed to [queue]. Items a batch did not reach go to the next one.
-       [admit] decides when a batch forms whether an item is published at
-       all. *)
-    let batches ?(narrate = Narrate.none) ~noun ~cancelled ~queue ~op ~admit
-        ~run items =
-      let rec go = function
-        | [] -> ()
-        | _ when cancelled () -> ()
-        | todo ->
-            let rec choose n acc = function
-              | e :: rest when n < entry_ops ->
-                  if admit e then choose (n + 1) (e :: acc) rest
-                  else choose n acc rest
-              | rest -> (List.rev acc, rest)
-            in
-            let chosen, rest = choose 0 [] todo in
-            if chosen = [] then go rest
-            else (
-              let id, fd =
-                Dqueue.Records.create_held ~mint wal
-                  (Wal.encode
-                     {
-                       Wal.state = Prepared;
-                       attempts = 0;
-                       ops = List.map op chosen;
-                       priors = [];
-                       local_from = [];
-                       fids = [];
-                       last_error = None;
-                     })
-              in
-              let started = Unix.gettimeofday () in
-              let ran = ref [] in
-              let rec step = function
-                | [] -> []
-                | left
-                  when cancelled ()
-                       || Unix.gettimeofday () -. started > entry_age ->
-                    left
-                | e :: rest ->
-                    if run e then ran := e :: !ran;
-                    step rest
-              in
-              (* Rewritten before the hold is released, so no rescan adopts the
-                 full record in between; the rewrite ends the hold itself. *)
-              let release () =
-                let ran = List.rev !ran in
-                let announces =
-                  Fun.protect
-                    ~finally:(fun () -> Unix.close fd)
-                    (fun () ->
-                      if List.length ran = List.length chosen then true
-                      else if ran = [] then (
-                        Dqueue.Records.complete wal id;
-                        false)
-                      else (
-                        Dqueue.Records.update wal id (fun body ->
-                            match Wal.decode body with
-                              | Some r ->
-                                  Wal.encode { r with ops = List.map op ran }
-                              | None -> body);
-                        true))
-                in
-                if announces then Dqueue.adopt queue id
-              in
-              let left = Fun.protect ~finally:release (fun () -> step chosen) in
-              Narrate.say narrate "  announced a batch of %s"
-                (Narrate.count (List.length !ran) noun);
-              go (left @ rest))
+    let is_pending : Algebra.key -> bool = function
+      | `File p -> Sync_state.before_file sync_state p <> None
+      | `Folder i -> Sync_state.before_folder sync_state i <> None
+
+    (* 05 §4.2: push, and return once none of the run's keys is pending; how
+       many are left when the run is cancelled first. *)
+    let await ?(cancelled = Fun.const false) (run : run) =
+      let left () = List.length (List.filter is_pending !run) in
+      let rec loop () =
+        if left () = 0 || cancelled () then left ()
+        else (
+          let committed =
+            try (run_cycle ()).committed with
+              | (Stop.Stopping | Rt.Cancelled) as e -> raise e
+              | e ->
+                  Log.info "waiting to commit: %s" (Printexc.to_string e);
+                  0
+          in
+          if committed = 0 && left () > 0 then Stop.sleep Cycle.retry_floor;
+          loop ())
       in
-      go items
+      loop ()
   end
 end

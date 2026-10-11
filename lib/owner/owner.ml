@@ -361,7 +361,7 @@ let with_ownership ~what config (dom : Config.domain) f =
             let domain = Domain.build ~owner:true config dom in
             let engine = Domain.engine domain in
             let (module E : Tsync_sync.Engine.S) = engine in
-            E.start ~poll_journal:false ();
+            E.start ~background:false ();
             Fun.protect
               ~finally:(fun () -> E.drain ())
               (fun () -> f domain engine))

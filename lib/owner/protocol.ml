@@ -94,8 +94,14 @@ type changes =
 
 type counted = { succeeded : int; failed : int }
 type progress = Inactive | Active of { downloaded : int; total : int }
-type resynced = Incremental of int | Full of { manifests : int; failed : int }
-type trash_restored = Restored of int | Not_in_trash | Name_taken
+
+type resynced = {
+  arrival : [ `Entries of int | `State of int * int ];
+  changed : int;
+  committed : int;
+  pending : int;
+}
+
 type shared = { url : string; expires : float }
 
 (** A transfer as [status] lists it (08 §3.3). *)
@@ -171,7 +177,6 @@ type _ request =
       (** [version]: a timestamp in ns; none is the newest *)
   | Full_resync : unit request
   | Sync : { full : bool } -> resynced request
-  | Trash_restore : string -> trash_restored request
   | Share : {
       item : target;  (** the domain root when the request names nothing *)
       expires : float option;
@@ -215,7 +220,6 @@ let action : type a. a request -> string = function
   | Revert _ -> "revert"
   | Full_resync -> "full_resync"
   | Sync _ -> "sync"
-  | Trash_restore _ -> "trash_restore"
   | Share _ -> "share"
   | Share_revoke _ -> "share_revoke"
   | Share_preview _ -> "share_preview"
@@ -238,14 +242,14 @@ let mutates : type a. a request -> bool = function
 
 let bulk : type a. a request -> bool = function
   | Ensure_cached _ | Fetch_range _ | Write _ | Evict _ | Restore _ | Sync _
-  | Trash_restore _ | Job _ ->
+  | Job _ ->
       true
   | List_all { after = None; _ } -> true
   | _ -> false
 
 let refused_while_paused : type a. a request -> bool = function
-  | Revert _ | Sync _ | Trash_restore _ | Job _ | Share _ | Share_revoke _
-  | Share_preview _ | Share_clear_cache ->
+  | Revert _ | Sync _ | Job _ | Share _ | Share_revoke _ | Share_preview _
+  | Share_clear_cache ->
       true
   | _ -> false
 
@@ -357,7 +361,6 @@ let request_fields : type a. a request -> (string * Yojson.Safe.t) list =
           ("arg", `String (Option.fold ~none:"" ~some:Int64.to_string r.version));
         ]
   | Sync r -> [("arg", `String (if r.full then "full" else ""))]
-  | Trash_restore path -> [("path", `String path)]
   | Share r ->
       target_fields r.item
       @ opt "expires" (fun e -> `Float e) r.expires
@@ -458,10 +461,6 @@ let decode j =
         Request (Revert { item = target_of j; version })
     | "full_resync" -> Request Full_resync
     | "sync" -> Request (Sync { full = str j "arg" = Some "full" })
-    | "trash_restore" -> (
-        match str j "path" with
-          | Some p -> Request (Trash_restore p)
-          | None -> Fail.invalid "trash_restore needs a path")
     | "share" ->
         Request
           (Share
@@ -691,23 +690,24 @@ let encode_reply : type a. a request -> a -> Yojson.Safe.t =
         ok [("evicted", `Int reply.succeeded); ("failed", `Int reply.failed)]
     | Restore _ ->
         ok [("restored", `Int reply.succeeded); ("failed", `Int reply.failed)]
-    | Trash_restore _ -> (
-        match reply with
-          | Restored n ->
-              ok [("outcome", `String "restored"); ("announced", `Int n)]
-          | Not_in_trash -> ok [("outcome", `String "not_in_trash")]
-          | Name_taken -> ok [("outcome", `String "name_taken")])
-    | Sync _ -> (
-        match reply with
-          | Incremental n ->
-              ok [("mode", `String "incremental"); ("applied", `Int n)]
-          | Full f ->
-              ok
-                [
-                  ("mode", `String "full");
-                  ("manifests", `Int f.manifests);
-                  ("failed", `Int f.failed);
-                ])
+    | Sync _ ->
+        ok
+          [
+            ( "arrival",
+              match reply.arrival with
+                | `Entries n -> `Assoc [("entries", `Int n)]
+                | `State (files, folders) ->
+                    `Assoc
+                      [
+                        ( "state",
+                          `Assoc
+                            [("files", `Int files); ("folders", `Int folders)]
+                        );
+                      ] );
+            ("changed", `Int reply.changed);
+            ("committed", `Int reply.committed);
+            ("pending", `Int reply.pending);
+          ]
     | Share _ ->
         ok [("url", `String reply.url); ("expires", `Float reply.expires)]
     | Share_revoke _ -> ok [("revoked", `Bool reply)]
@@ -833,15 +833,18 @@ let decode_reply : type a. a request -> Yojson.Safe.t -> a =
         }
     | Evict _ -> { succeeded = count "evicted" j; failed = count "failed" j }
     | Restore _ -> { succeeded = count "restored" j; failed = count "failed" j }
-    | Trash_restore _ -> (
-        match str j "outcome" with
-          | Some "restored" -> Restored (count "announced" j)
-          | Some "not_in_trash" -> Not_in_trash
-          | _ -> Name_taken)
     | Sync _ ->
-        if str j "mode" = Some "full" then
-          Full { manifests = count "manifests" j; failed = count "failed" j }
-        else Incremental (count "applied" j)
+        {
+          arrival =
+            (match member j "arrival" with
+              | Some (`Assoc [("entries", `Int n)]) -> `Entries n
+              | Some (`Assoc [("state", state)]) ->
+                  `State (count "files" state, count "folders" state)
+              | _ -> `Entries 0);
+          changed = count "changed" j;
+          committed = count "committed" j;
+          pending = count "pending" j;
+        }
     | Share _ ->
         {
           url = Option.value ~default:"" (str j "url");

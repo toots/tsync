@@ -63,3 +63,6 @@ val cursor_note : t -> int -> unit
 val cursor_flush : t -> unit
 
 val cursor_interval : float
+
+(** [LOG_RETENTION] (publication §7). *)
+val retention : float

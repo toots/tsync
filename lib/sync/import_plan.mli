@@ -22,6 +22,8 @@ type report = {
   skipped : int;  (** already in the domain *)
   skipped_symlinks : int;
   failed : (string * string) list;  (** path and reason *)
+  uncommitted : int;
+      (** changes made and not committed when the run was interrupted *)
   cancelled : bool;  (** what was left is not counted *)
 }
 

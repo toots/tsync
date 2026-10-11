@@ -52,44 +52,26 @@ val keep_plan : surviving:int -> outgoing:int -> keep
 (** Unit names after the cursor, sorted. *)
 val after : cursor:string -> string list -> string list
 
-type anchor = Live | In_trash | No_anchor
-
-(** What expiry, or an on-demand purge, does for one trashed folder id, given
-    its anchor and every trash entry naming it with its modification time
-    (§4.1). *)
-type trash =
-  | Delete_stale of Key.t list  (** the folder is live: these entries only *)
-  | Skip_recent  (** an entry is younger than the cutoff *)
-  | Purge of Key.t list  (** purge the subtree, then delete these entries *)
-  | Refuse_live  (** on demand, a folder anchored live elsewhere *)
-
-val trash :
-  anchor:anchor ->
-  cutoff:float ->
-  ?on_demand:bool ->
-  (Key.t * float) list ->
-  trash
-
-(** Namespaces of a purged subtree with their depths, deepest first (§4.2). *)
-val purge_order : (Key.prefix * int) list -> Key.prefix list
-
-(** Versions whose key timestamp is older than the cutoff (§4.3); a key whose
+(** Versions whose key timestamp is older than the cutoff (§4.1); a key whose
     leaf is not a timestamp is not a version. *)
 val versions : cutoff:float -> Key.t list -> Key.t list
 
-(** Journal entries to delete (§4.4): older than the cutoff and than
-    [now - horizon], never the one the cursor names. *)
-val journal :
+(** Log entries to delete, in ascending number order (publication §4.9): at or
+    below the tree head, never the head entry, and older than [retention] by the
+    modification time their store gave them. *)
+val log :
   now:float ->
-  horizon:float ->
-  cutoff:float ->
-  cursor:Tsync_sync.Entry_key.t option ->
-  (Tsync_sync.Entry_key.t * Key.t) list ->
+  retention:float ->
+  tree_head:int ->
+  (Key.t * float) list ->
   Key.t list
+
+(** The takeover and void objects of entries the tree head has passed. *)
+val takeovers : tree_head:int -> Key.t list -> Key.t list
 
 type share = Expired | Kept | Other_domain | Unparseable
 
-(** A share body, for this domain's expiry (§4.5). *)
+(** A share body, for this domain's expiry (§4.3). *)
 val share : domain:Domain_name.t -> now:float -> string -> share
 
 type survey = { reclaimable : int; bytes : int; keys : Key.t list }

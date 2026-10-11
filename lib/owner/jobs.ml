@@ -8,7 +8,7 @@ type t =
   | Gc of { apply : bool; verify : bool; abort : bool; budget : float option }
   | Gc_copies of copies
   | Expire of { apply : bool; cutoff : float }
-  | Purge of { apply : bool; path : string }
+  | Void_entry of { n : int }
   | Import of {
       src : string;
       only : string list;
@@ -47,7 +47,7 @@ let kind = function
   | Gc_copies Outstanding -> "gc --outstanding"
   | Gc_copies Retry_outstanding -> "gc --retry-outstanding"
   | Expire _ -> "expire"
-  | Purge _ -> "trash --purge"
+  | Void_entry _ -> "void-entry"
   | Import _ -> "import"
   | Mirror _ -> "mirror"
   | Rsync { move = true; _ } -> "rsync --move"
@@ -213,42 +213,49 @@ let expire io dom ~apply ~cutoff =
   let r =
     R.expire ~narrate:io.narrate ~apply ~cancelled:io.cancelled ~cutoff ()
   in
-  say "trash %d, versions %d, journal entries %d, shares %d%s%s"
-    r.counts.trash_deleted r.counts.versions_deleted r.counts.journal_deleted
-    r.counts.shares_deleted (dry_note apply)
+  say "versions %d, log entries %d, shares %d%s%s" r.counts.versions_deleted
+    r.counts.log_deleted r.counts.shares_deleted (dry_note apply)
     (if r.cancelled then "; cancelled before the end" else "");
-  List.iter
-    (fun (id, reason) ->
-      say "  purge of %s stopped: %s" (Folder_id.to_string id) reason)
-    r.stopped;
   List.iter
     (fun k -> say "  unparseable share left: %s" (Key.to_string k))
     r.unparseable_shares;
-  if r.stopped = [] && not r.cancelled then 0 else 1
+  if r.cancelled then 1 else 0
 
-let purge io dom ~apply ~path =
+(* 05 §4.12. *)
+let void_entry io (dom : Tsync_domain.Domain.t) n =
   let say fmt = Printf.ksprintf io.out fmt in
-  let module R = Retention.Make ((val Tsync_domain.Domain.context dom)) in
-  match R.purge ~narrate:io.narrate ~apply ~cancelled:io.cancelled path with
-    | Purged n ->
-        say "%s: %d objects purged%s" path n (dry_note apply);
+  let module C = (val Tsync_domain.Domain.context dom) in
+  let log = Tsync_remote.Log_store.create dom.name C.store in
+  let tree_head = Tsync_remote.Log_store.tree_head log in
+  match Tsync_remote.Log_store.read_entry log n with
+    | _ when n <= tree_head ->
+        say "entry %d is at or below the tree head (%d): nothing to void" n
+          tree_head;
+        1
+    | None ->
+        say "entry %d does not exist" n;
+        1
+    | Some { read = Entry _; _ } ->
+        say "entry %d decodes: it is not voided" n;
+        1
+    | Some { read = Later_version v; _ } ->
+        say "entry %d is of version %d: it needs a newer client, not a void" n v;
+        1
+    | Some { read = Void | Undecodable _; _ } ->
+        ignore
+          (Tsync_remote.Log_store.void_create log n
+             ~client:(Tsync_checkout.Identity.client_uuid dom.data_dir));
+        say
+          "entry %d is voided: its commands are not part of the main. The \
+           client that created it still holds its changes and loses them at \
+           its next 'tsync sync --full'; copy aside what must be kept first."
+          n;
         0
-    | Not_in_trash ->
-        say "%s is not in the trash" path;
-        1
-    | Live_elsewhere ->
-        say "%s is live elsewhere; not purged" path;
-        1
-    | Stopped reason ->
-        say "%s: purge stopped, the rest stays in the trash: %s" path reason;
-        1
 
 let kind_name = function
-  | Integrity.Twice _ -> "folders at two paths"
-  | Disowned _ -> "disowned markers"
-  | Trashed_live _ -> "trash entries of live folders"
-  | Unanchored _ -> "folders without an anchor"
-  | Orphan _ -> "unreachable folders"
+  | Integrity.Disowned _ -> "disowned markers"
+  | Unmarked _ -> "folders without a marker"
+  | Unaccounted _ -> "records the log does not account for"
 
 let counted names =
   let tally = Hashtbl.create 8 in
@@ -258,10 +265,6 @@ let counted names =
         (1 + Option.value ~default:0 (Hashtbl.find_opt tally n)))
     names;
   List.sort compare (Hashtbl.fold (fun n k acc -> (n, k) :: acc) tally [])
-
-let unfixed = function
-  | Integrity.Left | Young | Nested | Incomplete | Failed _ -> true
-  | Deleted | Anchored | Adopted -> false
 
 let verify io (dom : Tsync_domain.Domain.t) =
   let say fmt = Printf.ksprintf io.out fmt in
@@ -313,21 +316,26 @@ let integrity io (dom : Tsync_domain.Domain.t) ~repair ~apply ~detail ~source =
       (Domain_name.to_string dom.name);
   let module I = Integrity.Make ((val Tsync_domain.Domain.context dom)) in
   let r = I.report ~narrate:io.narrate ~cancelled:io.cancelled () in
+  let findings =
+    match r.tree with
+      | Findings f -> f
+      | Behind { tree_head; head } ->
+          say
+            "the tree is behind its log (tree head %d, head %d): a projection \
+             is owed or in progress, and no finding is made"
+            tree_head head;
+          []
+  in
   if not repair then (
     if Integrity.healthy r then
-      say "%s: healthy (%d tombstones)"
-        (Domain_name.to_string dom.name)
-        r.tombstones
+      say "%s: healthy" (Domain_name.to_string dom.name)
     else (
       List.iter
         (fun (n, k) -> say "%d %s" k n)
-        (counted (List.map kind_name r.findings));
+        (counted (List.map kind_name findings));
       if r.corrupt <> [] then say "%d corrupt chunks" (List.length r.corrupt);
-      if r.unreadable <> [] then
-        say "%d folders could not be read: the walk is incomplete"
-          (List.length r.unreadable);
       if detail then (
-        List.iter (fun f -> say "  %s" (Integrity.describe f)) r.findings;
+        List.iter (fun f -> say "  %s" (Integrity.describe f)) findings;
         List.iter
           (fun (c : Integrity.corrupt) ->
             say "  %s marked corrupt on %s"
@@ -336,59 +344,39 @@ let integrity io (dom : Tsync_domain.Domain.t) ~repair ~apply ~detail ~source =
           r.corrupt));
     if Integrity.healthy r then 0 else 1)
   else (
-    let tree =
-      I.repair_tree ~narrate:io.narrate ~apply ~cancelled:io.cancelled r
-    in
     let chunks =
       I.repair_chunks ~narrate:io.narrate ~apply ?source ~cancelled:io.cancelled
         r
     in
     let acted verb = if apply then verb else "would be " ^ verb in
-    let outcome = function
-      | Integrity.Deleted -> acted "deleted"
-      | Anchored -> acted "anchored"
-      | Adopted -> acted "adopted into the trash"
-      | Young -> "left: younger than the grace"
-      | Nested -> "left: inside an unreachable folder"
-      | Left -> "left: resolve by hand"
-      | Incomplete -> "left: the walk could not read every folder"
-      | Failed _ -> "failed"
-    and chunk_outcome = function
+    let chunk_outcome = function
       | Integrity.Cleared -> acted "rewritten from their own copy"
       | Repaired _ -> acted "repaired from another member"
       | Unrepairable -> "unrepairable"
     in
     List.iter
       (fun (n, k) -> say "%d %s" k n)
-      (counted
-         (List.map (fun (_, o) -> outcome o) tree
-         @ List.map (fun (_, o) -> "chunks " ^ chunk_outcome o) chunks));
-    if detail then (
-      List.iter
-        (fun (f, o) ->
-          say "  %s: %s%s" (Integrity.describe f) (outcome o)
-            (match o with Failed reason -> " (" ^ reason ^ ")" | _ -> ""))
-        tree;
+      (counted (List.map (fun (_, o) -> "chunks " ^ chunk_outcome o) chunks));
+    if detail then
       List.iter
         (fun ((c : Integrity.corrupt), o) ->
           say "  %s on %s: %s%s"
             (Chunk_key.to_string c.chunk)
             c.member (chunk_outcome o)
             (match o with Repaired from -> " (" ^ from ^ ")" | _ -> ""))
-        chunks);
+        chunks;
     (* A cancelled repair returns only what it considered. *)
-    let skipped =
-      List.length r.findings - List.length tree
-      + (List.length r.corrupt - List.length chunks)
-    in
-    if r.findings = [] && r.corrupt = [] then
-      say "%s: nothing to repair" (Domain_name.to_string dom.name);
+    let skipped = List.length r.corrupt - List.length chunks in
+    if r.corrupt = [] then
+      say "%s: no chunk to repair" (Domain_name.to_string dom.name);
+    if findings <> [] then
+      say "%s in the tree are reported only: nothing repairs the tree"
+        (Narrate.count (List.length findings) "finding");
     if skipped > 0 then
-      say "cancelled: %s not considered" (Narrate.count skipped "finding");
+      say "cancelled: %s not considered" (Narrate.count skipped "chunk");
     if not apply then say "(dry run: nothing changed; drop --dry-run to act)";
     if
-      skipped > 0
-      || List.exists (fun (_, o) -> unfixed o) tree
+      skipped > 0 || findings <> []
       || List.exists (fun (_, o) -> o = Integrity.Unrepairable) chunks
     then 1
     else 0)
@@ -406,7 +394,10 @@ let import io (module E : Tsync_sync.Engine.S) ~src ~only ~exclude ~force_rehash
     (Narrate.size r.bytes) r.skipped r.skipped_symlinks (List.length r.failed)
     (if r.cancelled then "; cancelled before the end" else "");
   List.iter (fun (path, reason) -> say "  %s: %s" path reason) r.failed;
-  if r.failed = [] && not r.cancelled then 0 else 1
+  if r.uncommitted > 0 then
+    say "%s made here and not committed yet; a later cycle commits them"
+      (Narrate.count r.uncommitted "change");
+  if r.failed = [] && r.uncommitted = 0 && not r.cancelled then 0 else 1
 
 let rsync io (module E : Tsync_sync.Engine.S) ~src ~dst ~move ~dry_run =
   let say fmt = Printf.ksprintf io.out fmt in
@@ -434,7 +425,10 @@ let rsync io (module E : Tsync_sync.Engine.S) ~src ~dst ~move ~dry_run =
   List.iter
     (fun p -> say "  not copied, unpublished edits here: %s" p)
     r.unpublished;
-  if r.failed = [] && not r.cancelled then 0 else 1
+  if r.uncommitted > 0 then
+    say "%s made here and not committed yet; a later cycle commits them"
+      (Narrate.count r.uncommitted "change");
+  if r.failed = [] && r.uncommitted = 0 && not r.cancelled then 0 else 1
 
 let mirror io (dom : Tsync_domain.Domain.t) ~source ~skip_chunks ~path =
   let say fmt = Printf.ksprintf io.out fmt in
@@ -472,22 +466,23 @@ let run io (dom : Tsync_domain.Domain.t) engine = function
       gc io dom.composite ~apply ~verify ~abort ~budget
   | Gc_copies act -> copies io dom.composite act
   | Expire { apply; cutoff } -> expire io dom ~apply ~cutoff
-  | Purge { apply; path } -> purge io dom ~apply ~path
-  | Sync { full } -> (
+  | Void_entry { n } -> void_entry io dom n
+  | Sync { full } ->
       let module E = (val engine : Tsync_sync.Engine.S) in
-      match E.resync ~narrate:io.narrate ~full () with
-        | `Incremental n ->
-            io.out
-              (Printf.sprintf "%s from other clients"
-                 (Narrate.count ~plural:"journal entries" n "journal entry"));
-            0
-        | `Full (manifests, failed) ->
-            io.out
-              (Printf.sprintf "full resync: %s%s"
-                 (Narrate.count manifests "manifest")
-                 (if failed > 0 then Printf.sprintf " (%d failed)" failed
-                  else ""));
-            if failed > 0 then 1 else 0)
+      let r = E.resync ~narrate:io.narrate ~full () in
+      io.out
+        (Printf.sprintf "%s; %s changed here; %s committed; %s pending"
+           (match r.arrival with
+             | `Entries n ->
+                 Narrate.count ~plural:"log entries" n "log entry" ^ " merged"
+             | `State (files, folders) ->
+                 Printf.sprintf "arrived by state: %s, %s"
+                   (Narrate.count files "file")
+                   (Narrate.count folders "folder"))
+           (Narrate.count r.changed "path")
+           (Narrate.count ~plural:"entries" r.committed "entry")
+           (Narrate.count r.pending "change"));
+      0
   | Mirror { source; skip_chunks; path } ->
       if dom.domain.read_only then
         Fail.raise_ Fail.Read_only "%s is read-only"

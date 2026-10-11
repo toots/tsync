@@ -5,21 +5,23 @@ module Make (C : Engine_ctx.S) = struct
 
   let import ?(narrate = Narrate.none) ?(cancelled = Fun.const false)
       ?(only = []) ?(exclude = []) ?(force_rehash = false) src =
+    let run = Bulk.run () in
+    ignore (run_cycle ~push_now:false ());
     let import_one (e : Import_plan.entry) : Import_plan.outcome =
       match e with
         | Folder _ -> Skipped_exists
-        | File { rel; path; _ } -> Imported (Bulk.upload_file rel path)
+        | File { rel; path; _ } -> Imported (Bulk.upload_file run rel path)
         | Link { rel; path; target; _ } -> (
             match C.symlinks with
               | `Skip -> Skipped_symlink
               | `Keep ->
-                  Bulk.publish_link rel ~target
+                  Bulk.install_link run rel ~target
                     ~mtime:(Unix.lstat path).st_mtime;
                   Imported 0
               | `Follow -> (
                   match Unix.stat path with
                     | { st_kind = S_REG; _ } ->
-                        Imported (Bulk.upload_file rel path)
+                        Imported (Bulk.upload_file run rel path)
                     | _ | (exception Unix.Unix_error _) -> Skipped_symlink))
     in
     let rel_of = function
@@ -49,7 +51,7 @@ module Make (C : Engine_ctx.S) = struct
         if not (cancelled ()) then (
           let rel = rel_of e in
           Narrate.progress narrate "creating folders: %s" rel;
-          match Bulk.folder rel with
+          match Bulk.folder run rel with
             | Ok true -> incr created
             | Ok false -> ()
             | Error reason ->
@@ -57,8 +59,7 @@ module Make (C : Engine_ctx.S) = struct
                   rel reason;
                 blocked := rel :: !blocked))
       folders;
-    Narrate.say narrate "  %s created and announced"
-      (Narrate.count !created "folder");
+    Narrate.say narrate "  %s created" (Narrate.count !created "folder");
     let under_blocked rel =
       List.exists (fun dir -> Names.is_under ~dir rel) !blocked
     in
@@ -87,7 +88,7 @@ module Make (C : Engine_ctx.S) = struct
         false)
       else true
     in
-    let run e =
+    let import_file e =
       Narrate.progress narrate
         ~fraction:(float !seen_bytes /. float (max 1 plan.bytes))
         "importing %d of %d files (%s of %s): %s"
@@ -99,18 +100,20 @@ module Make (C : Engine_ctx.S) = struct
           | (Stop.Stopping | Rt.Cancelled) as x -> raise x
           | x -> Failed (Printexc.to_string x)
       in
-      note e outcome;
-      match outcome with Imported _ -> true | _ -> false
+      note e outcome
     in
-    Bulk.batches ~narrate ~noun:"file" ~cancelled ~queue:uploads
-      ~op:(fun e -> Op.Put { path = rel_of e; size = size_of e; base = None })
-      ~admit ~run items;
+    List.iter
+      (fun e -> if (not (cancelled ())) && admit e then import_file e)
+      items;
+    Narrate.progress narrate "committing";
+    let uncommitted = Bulk.await ~cancelled run in
     {
       Import_plan.imported = !imported;
       bytes = !bytes;
       skipped = !skipped;
       skipped_symlinks = !skipped_links;
       failed = List.rev !failed;
+      uncommitted;
       cancelled = cancelled ();
     }
 end

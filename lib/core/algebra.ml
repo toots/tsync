@@ -432,7 +432,8 @@ let merge ?priority ~equal ~aside ~l ~before ~theirs () =
     local =
       List.filter
         (function
-          | `File (_, a, b) -> not (Option.equal ( == ) a b)
+          | `File (_, a, b) ->
+              not (Option.equal (fun a b -> a == b || equal a b) a b)
           | `Folder (_, a, b) -> a <> b)
         (List.map (command ~from:l) keys);
     pending = List.map (command ~from:m) keys;

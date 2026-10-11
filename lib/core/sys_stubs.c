@@ -11,6 +11,7 @@
 #include <signal.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 #include <sys/file.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
@@ -518,4 +519,15 @@ CAMLprim value tsync_drop_mapped_pages(value v) {
     if (len > 0) madvise((void *)start, len, MADV_DONTNEED);
   }
   return Val_unit;
+}
+
+/* Seconds on a clock that counts time spent suspended (publication A8). */
+CAMLprim value tsync_boottime(value unit) {
+  struct timespec ts;
+#if defined(__linux__)
+  clock_gettime(CLOCK_BOOTTIME, &ts);
+#else
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+#endif
+  return caml_copy_double((double)ts.tv_sec + (double)ts.tv_nsec / 1e9);
 }

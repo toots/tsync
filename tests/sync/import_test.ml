@@ -15,7 +15,7 @@ let root =
 let d = Domain_name.v "docs"
 
 let knowledge =
-  { Composite.is_index = (fun _ -> false); is_journal = (fun _ -> false) }
+  { Composite.is_index = (fun _ -> false); is_log = (fun _ -> false) }
 
 (* Runs once, on the next chunk put. *)
 let on_chunk_put = ref ignore

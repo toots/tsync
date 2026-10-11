@@ -15,7 +15,7 @@ let root =
 let d = Domain_name.v "docs"
 
 let knowledge =
-  { Composite.is_index = (fun _ -> false); is_journal = (fun _ -> false) }
+  { Composite.is_index = (fun _ -> false); is_log = (fun _ -> false) }
 
 let client name : (module Engine.S) * (module Tsync_remote.Context.S) =
   let data_dir = Filename.concat root (name ^ "/data") in

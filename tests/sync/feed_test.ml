@@ -16,7 +16,7 @@ let root =
 let d = Domain_name.v "docs"
 
 let knowledge =
-  { Composite.is_index = (fun _ -> false); is_journal = (fun _ -> false) }
+  { Composite.is_index = (fun _ -> false); is_log = (fun _ -> false) }
 
 let data_dir name = Filename.concat root (name ^ "/data")
 

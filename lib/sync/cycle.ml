@@ -1,0 +1,1165 @@
+open Tsync_core
+open Tsync_remote
+open Tsync_checkout
+
+let batch_delay = 10.
+let sweep = 60.
+let retry_floor = 2.
+let project_lease = 30.
+let project_quarantine = 300.
+let project_settle = 600.
+let feed_line_ops = 64
+
+module Keys = Map.Make (struct
+  type t = Algebra.key
+
+  let compare = Algebra.compare_key
+end)
+
+(* The cycle of one domain (spec publication §4): arrive, push, project, and
+   the recovery of the records they leave. One runs at a time, under
+   [cycle_lock]; local operations and uploads run beside it and meet it under
+   the metadata lock. *)
+module Make (C : Engine_ctx.S) = struct
+  include Uploads.Make (C)
+  module P = Projection.Make (C)
+
+  let log = Log_store.create d C.store
+  let cycle_lock = Rt.Fmutex.create ()
+  let paused = Atomic.make false
+  let asked = Atomic.make false
+
+  (* Broadcast after every commit and every arrival. *)
+  let settled_signal = Rt.Signal.create ()
+
+  type stuck = { n : int; why : [ `Undecodable of string | `Version of int ] }
+
+  let stuck : stuck option Atomic.t = Atomic.make None
+  let tree_head_seen = Atomic.make 0
+  let damaged : (Algebra.place, string) Hashtbl.t = Hashtbl.create 8
+  let damaged_m = Mutex.create ()
+  let is_damaged p = Mutex.protect damaged_m (fun () -> Hashtbl.mem damaged p)
+  let same v w = v == w || Log_entry.equal v w
+  let same_file = Option.equal same
+
+  let null : Log_entry.command -> bool = function
+    | `File (_, a, b) -> same_file a b
+    | `Folder (_, a, b) -> a = b
+
+  let local_file_at p = Option.bind (path_of p) local_file
+
+  let children_of dir parent : Algebra.key list =
+    let mirrored =
+      List.filter_map
+        (fun (c : Mirror.child) ->
+          match c.kind with
+            | `Dir (Some id) -> Some (`Folder id)
+            | `Dir None -> None
+            | `File _ -> Some (`File { Algebra.parent; name = c.name }))
+        (Mirror.list mirror dir)
+    and staged_only =
+      List.filter_map
+        (fun (p, _) ->
+          if Names.parent_of p = dir then
+            Some (`File { Algebra.parent; name = Names.leaf_of p })
+          else None)
+        (Staged.edits_under staged dir)
+    in
+    List.sort_uniq Algebra.compare_key (mirrored @ staged_only)
+
+  let pending_keys () = List.map Algebra.key_of (Sync_state.pending sync_state)
+
+  (* Whether a key occupies a place of a folder in the local tree. *)
+  let in_folder id : Algebra.key -> bool = function
+    | `File p -> Folder_id.equal p.parent id && local_file_at p <> None
+    | `Folder i -> (
+        match local_folder i with
+          | Some place -> Folder_id.equal place.parent id
+          | None -> false)
+
+  (* [L] (conflict-resolution §3), read under the metadata lock. On a lazy
+     tree what a folder holds beyond its pending keys belongs to that folder's
+     own view (publication §4.11), so it never keeps a removed folder back. *)
+  let l_base : Log_entry.value Algebra.base =
+    {
+      file = local_file_at;
+      folder = local_folder;
+      folder_at = (fun p -> Option.bind (path_of p) (Mirror.folder_id mirror));
+      children =
+        (fun id ->
+          if C.lazy_tree then
+            List.filter (fun k -> in_folder id k) (pending_keys ())
+          else (
+            match Mirror.key_of_id mirror id with
+              | Some dir -> children_of dir id
+              | None -> []));
+    }
+
+  (* One command per before-value, from [R] to [L]. *)
+  let pending () : Log_entry.command list =
+    List.map
+      (function
+        | `File (p, before, _) -> `File (p, before, l_base.file p)
+        | `Folder (i, before, _) -> `Folder (i, before, local_folder i))
+      (Sync_state.pending sync_state)
+
+  let aside ~taken ~is_dir name =
+    let rec pick n =
+      let candidate = Conflict.name ~client:C.client_name ~is_dir name n in
+      if taken candidate then pick (n + 1) else candidate
+    in
+    pick 1
+
+  (* ponytail: a parked folder is a real name of the root for the time of
+     one enactment; give the mirror a hidden place if a listing ever shows it. *)
+  let park_name id = ".tsync-park-" ^ Folder_id.to_string id
+
+  let resync_generation_path =
+    Filename.concat C.data_dir ("resync-" ^ Domain_name.to_string d)
+
+  let watermark_path =
+    Filename.concat C.data_dir ("feed-watermark-" ^ Domain_name.to_string d)
+
+  let feed_m = Mutex.create ()
+
+  (* Stamps a new generation and clears the feed watermark (08 §3.6): every
+     anchor a frontend holds answers stale. *)
+  let stamp_generation () =
+    Mutex.protect feed_m (fun () ->
+        Fs.durable_replace resync_generation_path
+          (Printf.sprintf "%.0f" (Unix.gettimeofday () *. 1000.));
+        if Fs.release watermark_path then Fs.fsync_dir C.data_dir)
+
+  let position () = Sync_state.position sync_state
+
+  (* 04 §2.3: the position of a lazy tree's folder, beside its pull marker. *)
+  let folder_position_path dir =
+    Filename.concat (Mirror.path mirror dir) ".tsync-position"
+
+  let folder_position dir =
+    Option.bind
+      (Fs.read_file_opt (folder_position_path dir))
+      (fun s -> int_of_string_opt (String.trim s))
+
+  let set_folder_position dir n =
+    if Fs.is_dir (Mirror.path mirror dir) then
+      Fs.durable_replace (folder_position_path dir) (Key.entry_number n)
+
+  (* conflict-resolution §4, one step: idempotent, under the metadata lock and
+     the key locks of the files it names. *)
+  let apply_step parked : Sync_state.step -> (Op.t * string option) list =
+    function
+    | Move (src, dst) -> (
+        match (path_of src, path_of dst) with
+          | Some s, Some d when kind s = `File && kind d = `Absent ->
+              let size = size_of s in
+              repost_moved (rename_local ~src:s ~dst:d ~is_dir:false);
+              [
+                ( Op.Rename
+                    {
+                      dst = d;
+                      src = s;
+                      is_dir = false;
+                      size = Some size;
+                      id = None;
+                    },
+                  Mirror.file_id mirror d );
+              ]
+          | _ -> [])
+    | File (p, Some m) -> (
+        match path_of p with
+          | None -> []
+          | Some path ->
+              if Staged.edit staged path <> None then (
+                ignore (discard_edit path);
+                cancel_upload path);
+              end_lineage path;
+              Mirror.write_file ~durable:false mirror path m;
+              let fid = Mirror.ensure_file_id ~durable:false mirror path in
+              [(Op.Put { path; size = m.size }, Some fid)])
+    | File (p, None) -> (
+        match path_of p with
+          | Some path when kind path = `File ->
+              let fid = Mirror.file_id mirror path in
+              ignore (discard_edit path);
+              remove_local_file path;
+              [(Op.Delete path, fid)]
+          | _ -> [])
+    | Folder (i, Some place) -> (
+        match path_of place with
+          | None -> (
+              (* A lazy tree does not hold the folder it moved into. *)
+                match Mirror.key_of_id mirror i with
+                | Some here when Staged.edits_under staged here = [] ->
+                    Mirror.remove_folder mirror here;
+                    [(Op.Rmdir { path = here; id = Some i }, None)]
+                | _ -> [])
+          | Some target -> (
+              match Mirror.key_of_id mirror i with
+                | Some here when here = target -> []
+                | Some here ->
+                    repost_moved
+                      (rename_local ~src:here ~dst:target ~is_dir:true);
+                    if place.name = park_name i then (
+                      Hashtbl.replace parked i here;
+                      [])
+                    else (
+                      let src =
+                        Option.value ~default:here (Hashtbl.find_opt parked i)
+                      in
+                      [
+                        ( Op.Rename
+                            {
+                              dst = target;
+                              src;
+                              is_dir = true;
+                              size = None;
+                              id = Some i;
+                            },
+                          None );
+                      ])
+                | None ->
+                    ignore (Mirror.record_folder ~durable:false mirror target i);
+                    [(Op.Mkdir { path = target; id = Some i }, None)]))
+    | Folder (i, None) -> (
+        match Mirror.key_of_id mirror i with
+          | Some here ->
+              Mirror.remove_folder mirror here;
+              [(Op.Rmdir { path = here; id = Some i }, None)]
+          | None -> [])
+
+  let rec lines = function
+    | [] -> []
+    | ops ->
+        let line = List.filteri (fun i _ -> i < feed_line_ops) ops
+        and rest = List.filteri (fun i _ -> i >= feed_line_ops) ops in
+        line :: lines rest
+
+  (* publication §4.4 and §4.8 step 2: every part idempotent. A record that
+     recovery completes cannot tell which of its feed lines it had appended,
+     so it invalidates the feed's anchors instead. *)
+  let run_arrival ?(recovered = false) (a : Sync_state.arrival) =
+    let parked = Hashtbl.create 2 in
+    let ops = List.concat_map (apply_step parked) a.steps in
+    if a.steps <> [] then Fs.syncfs (Mirror.root mirror);
+    List.iter
+      (fun ((key : Algebra.key), (settled : Sync_state.settled)) ->
+        match (key, settled) with
+          | _, Drop -> Sync_state.drop sync_state key
+          | `File p, Before_file v ->
+              if Sync_state.before_file sync_state p <> Some v then
+                Sync_state.set_file sync_state p v
+          | `Folder i, Before_folder v ->
+              if Sync_state.before_folder sync_state i <> Some v then
+                Sync_state.set_folder sync_state i v
+          | _ -> ())
+      a.before;
+    (match a.view with
+      | None -> Sync_state.set_position sync_state a.head
+      | Some id ->
+          Option.iter
+            (fun dir -> set_folder_position dir a.head)
+            (Mirror.key_of_id mirror id));
+    if recovered then stamp_generation ()
+    else
+      List.iter
+        (fun line ->
+          let fids =
+            List.concat
+              (List.mapi
+                 (fun i (_, fid) ->
+                   match fid with Some f -> [(i, f)] | None -> [])
+                 line)
+          in
+          feed ~fids (List.map fst line))
+        (lines ops);
+    Sync_state.clear_arrival sync_state;
+    List.iter
+      (function
+        | `File p, Sync_state.Drop ->
+            Option.iter
+              (fun path ->
+                match Staged.edit staged path with
+                  | Some { state = Uploaded _; _ } -> promote_held path
+                  | _ -> ())
+              (path_of p)
+        | _ -> ())
+      a.before;
+    List.concat_map (fun (op, _) -> Op.paths op) ops
+
+  (* The steps that take [L] to [N]: files moved aside first, to names free in
+     both, then the rest in an order Theorem 3 allows. *)
+  let steps_of (merged : Log_entry.value Algebra.merged) : Sync_state.step list
+      =
+    let targets = List.map snd merged.asides in
+    let rest =
+      List.filter
+        (function `File (p, _, _) -> not (List.mem p targets) | _ -> true)
+        merged.local
+    in
+    let moved =
+      Algebra.apply (Algebra.of_base l_base)
+        (List.concat_map
+           (fun (src, dst) ->
+             [`File (src, None, None); `File (dst, None, l_base.file src)])
+           merged.asides)
+    in
+    List.map (fun (src, dst) -> Sync_state.Move (src, dst)) merged.asides
+    @ List.map
+        (function
+          | `Set (`File (p, _, None)) -> Sync_state.File (p, None)
+          | `Set (`File (p, _, Some (Log_entry.Known m))) -> File (p, Some m)
+          | `Set (`File ((p : Algebra.place), _, Some _)) ->
+              Fail.corrupt "%s: a merge installs a value that is no manifest"
+                p.name
+          | `Set (`Folder (i, _, place)) -> Folder (i, place)
+          | `Park (i, _, place) -> Folder (i, Some place))
+        (Algebra.order ~temp:park_name moved rest)
+
+  let settled_of (merged : Log_entry.value Algebra.merged) =
+    List.map
+      (fun (c : Log_entry.command) ->
+        ( Algebra.key_of c,
+          if null c then Sync_state.Drop
+          else (
+            match c with
+              | `File (_, m, _) -> Before_file m
+              | `Folder (_, m, _) -> Before_folder m) ))
+      merged.pending
+
+  (* Every local path whose key lock an enactment needs: the file keys it
+     changes and the staged keys under the folders it moves. *)
+  let paths_of (merged : Log_entry.value Algebra.merged) =
+    List.sort_uniq String.compare
+      (List.concat_map
+         (function
+           | `File (p, _, _) -> Option.to_list (path_of p)
+           | `Folder (i, _, _) -> (
+               match Mirror.key_of_id mirror i with
+                 | Some dir -> List.map fst (Staged.edits_under staged dir)
+                 | None -> []))
+         merged.local)
+
+  let describe_clash (merged : Log_entry.value Algebra.merged) =
+    let key : Algebra.key -> string = function
+      | `File p -> Folder_id.to_string p.parent ^ "/" ^ p.name
+      | `Folder i -> Folder_id.to_string i
+    in
+    if merged.asides <> [] || merged.restored <> [] then
+      Log.info "%s: merge clashed on %s; %d kept aside, %d folders restored"
+        (Domain_name.to_string d)
+        (String.concat ", "
+           (List.filter_map
+              (fun c -> if null c then None else Some (key (Algebra.key_of c)))
+              merged.pending))
+        (List.length merged.asides)
+        (List.length merged.restored)
+
+  (* Whether a command is on a key of a folder's view (publication §4.11): a
+     file key under it, or a folder key whose place is or was in it. *)
+  let concerns id : Log_entry.command -> bool =
+    let inside = function
+      | Some (place : Algebra.place) -> Folder_id.equal place.parent id
+      | None -> false
+    in
+    function
+    | `File (p, _, _) -> Folder_id.equal p.parent id
+    | `Folder (_, before, after) -> inside before || inside after
+
+  (* publication §4.4 from the merge on. The decision is taken again with the
+     key locks held, since a write may stage an edit under its key lock alone
+     (conflict-resolution §4.1). *)
+  let merge_and_enact ?view ~head (theirs : Log_entry.command list) =
+    let before () =
+      match view with
+        | None -> pending ()
+        | Some id -> List.filter (concerns id) (pending ())
+    in
+    let decide () =
+      Algebra.merge ~equal:same ~aside ~l:l_base ~before:(before ()) ~theirs ()
+    in
+    let rec attempt paths rounds =
+      let outcome =
+        with_keys paths (fun () ->
+            let merged = decide () in
+            let need = paths_of merged in
+            if List.for_all (fun p -> List.mem p paths) need then (
+              describe_clash merged;
+              let arrival =
+                {
+                  Sync_state.head;
+                  view;
+                  feed = [];
+                  steps = steps_of merged;
+                  before = settled_of merged;
+                }
+              in
+              Sync_state.set_arrival sync_state arrival;
+              `Done (run_arrival arrival))
+            else `Again need)
+      in
+      match outcome with
+        | `Done changed -> changed
+        | `Again _ when rounds = 0 ->
+            Fail.raise_ Fail.Link
+              "the local tree kept changing under an arrival"
+        | `Again need -> attempt need (rounds - 1)
+    in
+    let touched = with_meta (fun () -> attempt (paths_of (decide ())) 8) in
+    Rt.Signal.broadcast settled_signal;
+    changed touched;
+    List.length touched
+
+  (* The last value the entries give each key. *)
+  let theirs_of (entries : Log_store.entry list) : Log_entry.command list =
+    List.fold_left
+      (fun acc (e : Log_store.entry) ->
+        List.fold_left
+          (fun acc c -> Keys.add (Algebra.key_of c) c acc)
+          acc
+          (Option.value ~default:[] (Log_store.commands e)))
+      Keys.empty entries
+    |> Keys.bindings |> List.map snd
+
+  (* publication §4.3. *)
+  let fetch h =
+    let rec go n acc =
+      match Log_store.read_entries log n with
+        | _ :: _ as more -> go (n + List.length more) (acc @ more)
+        | [] ->
+            let t = Log_store.tree_head log in
+            Atomic.set tree_head_seen t;
+            if t < n then `Entries acc
+            else if Log_store.read_entry log n <> None then go n acc
+            else `Pruned
+    in
+    go (h + 1) []
+
+  let unfollowable (e : Log_store.entry) =
+    match e.read with
+      | Undecodable why -> Some { n = e.n; why = `Undecodable why }
+      | Later_version v -> Some { n = e.n; why = `Version v }
+      | Entry _ | Void -> None
+
+  (* Every key of the local tree, folders before what they hold. *)
+  let local_keys () =
+    let rec walk dir parent acc =
+      List.fold_left
+        (fun acc (k : Algebra.key) ->
+          match k with
+            | `File _ -> k :: acc
+            | `Folder i -> (
+                match Mirror.key_of_id mirror i with
+                  | Some sub -> walk sub i (k :: acc)
+                  | None -> k :: acc))
+        acc (children_of dir parent)
+    in
+    walk "" Folder_id.root []
+
+  (* publication §4.7: the tree as its records say, then every entry above
+     the tree head replayed over it. Only the keys where [M] differs from [R]
+     are kept, with every key of [R] that the main lacks. *)
+  let rec state_read () =
+    let t = Log_store.tree_head log in
+    let seen = Hashtbl.create 4096 in
+    let r_file p =
+      match Sync_state.before_file sync_state p with
+        | Some before -> before
+        | None -> l_base.file p
+    and r_folder i =
+      match Sync_state.before_folder sync_state i with
+        | Some before -> before
+        | None -> local_folder i
+    in
+    let folders = Hashtbl.create 1024 and files = ref 0 in
+    let walked =
+      P.fold
+        (fun acc record ->
+          match record with
+            | `File (p, m) ->
+                incr files;
+                Hashtbl.replace seen (`File p) ();
+                let v = Some (Log_entry.Known m) in
+                if same_file (r_file p) v then acc
+                else `File (p, None, v) :: acc
+            | `Folder (i, place) ->
+                Hashtbl.replace seen (`Folder i) ();
+                Hashtbl.replace folders i ();
+                if r_folder i = Some place then acc
+                else `Folder (i, None, Some place) :: acc)
+        []
+    in
+    match fetch t with
+      | `Pruned -> state_read ()
+      | `Entries entries -> (
+          match List.find_map unfollowable entries with
+            | Some s ->
+                Atomic.set stuck (Some s);
+                Fail.raise_ Fail.Corrupt
+                  "log entry %d cannot be followed and the tree head has not \
+                   passed it"
+                  s.n
+            | None ->
+                let gone () =
+                  List.filter_map
+                    (fun (k : Algebra.key) ->
+                      if Hashtbl.mem seen k then None
+                      else (
+                        Hashtbl.replace seen k ();
+                        match k with
+                          | `File p -> Some (`File (p, None, None))
+                          | `Folder i -> Some (`Folder (i, None, None))))
+                    (local_keys ()
+                    @ List.map Algebra.key_of (Sync_state.pending sync_state))
+                in
+                let replayed = theirs_of entries in
+                List.iter
+                  (function
+                    | `Folder (i, _, Some _) -> Hashtbl.replace folders i ()
+                    | _ -> ())
+                  replayed;
+                (* 05 §4.7 step 6: a file record whose folder the tree lacks. *)
+                let orphans =
+                  Hashtbl.fold
+                    (fun (k : Algebra.key) () acc ->
+                      match k with
+                        | `File p
+                          when (not (Folder_id.is_root p.parent))
+                               && not (Hashtbl.mem folders p.parent) ->
+                            Log.warn
+                              "state read: %s/%s is in a folder the tree lacks"
+                              (Folder_id.to_string p.parent)
+                              p.name;
+                            `File (p, None, None) :: acc
+                        | _ -> acc)
+                    seen []
+                in
+                let all =
+                  List.fold_left
+                    (fun acc c -> Keys.add (Algebra.key_of c) c acc)
+                    Keys.empty
+                    (gone () @ walked @ orphans @ replayed)
+                in
+                ( t + List.length entries,
+                  List.map snd (Keys.bindings all),
+                  `State (!files, Hashtbl.length folders) ))
+
+  (* publication §4.7. Once its entry is gone the in-flight record cannot say
+     whether the batch was committed, so the merge decides key by key. *)
+  let arrive_by_state () =
+    let head, theirs, read = state_read () in
+    Sync_state.clear_in_flight sync_state;
+    let changed = merge_and_enact ~head theirs in
+    Sync_state.state_read sync_state;
+    (read, changed)
+
+  (* The folders whose views a batch was committed from (publication §4.11):
+     those holding a key of it, and their ancestors up to the root. *)
+  let views_of (batch : Log_entry.command list) =
+    let rec up acc id =
+      if List.exists (Folder_id.equal id) acc then acc
+      else (
+        let acc = id :: acc in
+        match local_folder id with
+          | Some place -> up acc place.parent
+          | None -> acc)
+    in
+    let parent = function
+      | Some (place : Algebra.place) -> [place.parent]
+      | None -> []
+    in
+    List.fold_left up []
+      (List.concat_map
+         (function
+           | `File ((p : Algebra.place), _, _) -> [p.parent]
+           | `Folder (_, before, after) -> parent before @ parent after)
+         batch)
+
+  let commit_position n batch =
+    if C.lazy_tree then
+      List.iter
+        (fun id ->
+          Option.iter
+            (fun dir -> set_folder_position dir n)
+            (Mirror.key_of_id mirror id))
+        (views_of batch)
+    else Sync_state.set_position sync_state n
+
+  (* The [Won] step (publication §4.5): before-values, then the position, then
+     the in-flight record; then the staged edits it committed are promoted. *)
+  let won n (batch : Log_entry.command list) =
+    let paths =
+      List.sort_uniq String.compare
+        (List.concat_map
+           (function
+             | `File (p, _, _) -> Option.to_list (path_of p) | `Folder _ -> [])
+           batch)
+    in
+    with_meta (fun () ->
+        with_keys paths (fun () ->
+            List.iter
+              (function
+                | `File (p, _, after) ->
+                    if same_file (l_base.file p) after then
+                      Sync_state.drop sync_state (`File p)
+                    else Sync_state.set_file sync_state p after
+                | `Folder (i, _, after) ->
+                    if local_folder i = after then
+                      Sync_state.drop sync_state (`Folder i)
+                    else Sync_state.set_folder sync_state i after)
+              batch;
+            commit_position n batch;
+            Sync_state.clear_in_flight sync_state;
+            List.iter
+              (fun path ->
+                if Sync_state.before_file sync_state (place_of path) = None then
+                  promote_held path)
+              paths));
+    Log_store.cursor_note log n;
+    Rt.Signal.broadcast settled_signal
+
+  let missing_of = function
+    | Fail.E { kind = Missing_chunks names; _ } ->
+        Some (List.filter_map Chunk_key.of_string names)
+    | _ -> None
+
+  (* publication §4.5, missing chunks: an edit whose bytes are staged is
+     uploaded again; a file with no bytes here is left out and reported. *)
+  let chunks_refused (batch : Log_entry.command list) missing =
+    R.drop_memo missing;
+    List.iter
+      (function
+        | `File (p, _, Some (Log_entry.Known m))
+          when List.exists
+                 (fun ck -> List.exists (Chunk_key.equal ck) missing)
+                 (Manifest.keys m) -> (
+            match path_of p with
+              | None -> ()
+              | Some path ->
+                  with_key path (fun () ->
+                      match Staged.edit staged path with
+                        | Some ({ state = Uploaded _; _ } as e) ->
+                            Staged.write staged path { e with state = Owed };
+                            post_put path
+                        | _ ->
+                            (* ponytail: the local cache may hold the chunk;
+                               send it from there before giving the file up. *)
+                            Log.warn
+                              "%s: the main lacks its content and this client \
+                               has no bytes to send again"
+                              path;
+                            Mutex.protect damaged_m (fun () ->
+                                Hashtbl.replace damaged p path)))
+        | _ -> ())
+      batch
+
+  let commit n body batch =
+    match Log_store.create_entry log n body with
+      | `Won ->
+          won n batch;
+          `Committed n
+      | `Held -> `Refused
+      | exception e -> (
+          match missing_of e with
+            | Some missing ->
+                Sync_state.clear_in_flight sync_state;
+                chunks_refused batch missing;
+                `Refused
+            | None -> raise e)
+
+  let batch_of_body body =
+    match Log_entry.decode body with
+      | `Entry e -> e.commands
+      | `Later_version _ | `Corrupt _ ->
+          Fail.corrupt "the in-flight record does not hold an entry"
+
+  (* publication §4.8, RECOVER. *)
+  let recover_in_flight () =
+    match Sync_state.in_flight sync_state with
+      | None -> ()
+      | Some { n; body } -> (
+          match Log_store.read_entry log n with
+            | Some e when e.bytes = body -> won n (batch_of_body body)
+            | Some _ -> Sync_state.clear_in_flight sync_state
+            | None when Log_store.tree_head log >= n ->
+                if C.lazy_tree then Sync_state.clear_in_flight sync_state
+                else ignore (arrive_by_state ())
+            | None -> ignore (commit n body (batch_of_body body)))
+
+  let complete_arrival () =
+    match Sync_state.arrival sync_state with
+      | None -> ()
+      | Some a -> changed (with_meta (fun () -> run_arrival ~recovered:true a))
+
+  (* publication §4.4: what was merged, and how many paths it changed. *)
+  let arrive ?(full = false) () =
+    complete_arrival ();
+    recover_in_flight ();
+    match position () with
+      | None -> arrive_by_state ()
+      | Some _ when full || Sync_state.needs_state sync_state ->
+          arrive_by_state ()
+      | Some h -> (
+          match fetch h with
+            | `Pruned -> arrive_by_state ()
+            | `Entries [] ->
+                Atomic.set stuck None;
+                (`Entries 0, 0)
+            | `Entries entries -> (
+                match List.find_map unfollowable entries with
+                  | Some s when Atomic.get tree_head_seen >= s.n ->
+                      arrive_by_state ()
+                  | Some s ->
+                      Atomic.set stuck (Some s);
+                      Fail.raise_ Fail.Corrupt
+                        "log entry %d cannot be followed: fetching and pushing \
+                         stop until it is voided or this client is upgraded"
+                        s.n
+                  | None ->
+                      Atomic.set stuck None;
+                      ( `Entries (List.length entries),
+                        merge_and_enact
+                          ~head:(h + List.length entries)
+                          (theirs_of entries) )))
+
+  let pulled_marker dir =
+    Filename.concat (Mirror.path mirror dir) ".tsync-pulled"
+
+  (* publication §4.11, a pull: an arrival for one folder, by the entries
+     after its position, or by state when it has none or they are pruned;
+     whether it changed the local tree. *)
+  let pull_folder dir =
+    let id =
+      match Mirror.folder_id mirror dir with
+        | Some id -> id
+        | None ->
+            Fail.raise_ Fail.Unprepared "%s: this client has not resolved it"
+              dir
+    in
+    let by_state () =
+      let t = Log_store.tree_head log in
+      let records =
+        T.children
+          ~on_unusable:
+            (Tree.Skip
+               (fun u -> Log.debug "pull: %s" (Tree.describe_unusable u)))
+          id
+      in
+      match fetch t with
+        | `Pruned ->
+            Fail.raise_ Fail.Link "the log moved under a pull of %s" dir
+        | `Entries entries ->
+            let walked : Log_entry.command list =
+              List.map
+                (fun (e : Tree.entry) ->
+                  match e.body with
+                    | File m ->
+                        `File
+                          ( { Algebra.parent = id; name = m.name },
+                            None,
+                            Some (Log_entry.Known m) )
+                    | Dir m ->
+                        `Folder
+                          ( m.id,
+                            None,
+                            Some { Algebra.parent = id; name = m.name } ))
+                records
+            in
+            let held =
+              with_meta (fun () ->
+                  children_of dir id
+                  @ List.filter_map
+                      (fun c ->
+                        if concerns id c then Some (Algebra.key_of c) else None)
+                      (pending ()))
+            in
+            let gone =
+              List.map
+                (function
+                  | `File p -> `File (p, None, None)
+                  | `Folder i -> `Folder (i, None, None))
+                held
+            in
+            let all =
+              List.fold_left
+                (fun acc c -> Keys.add (Algebra.key_of c) c acc)
+                Keys.empty
+                (gone @ walked @ List.filter (concerns id) (theirs_of entries))
+            in
+            (t + List.length entries, List.map snd (Keys.bindings all))
+    in
+    let head, theirs =
+      match folder_position dir with
+        | None -> by_state ()
+        | Some h -> (
+            match fetch h with
+              | `Pruned -> by_state ()
+              | `Entries entries ->
+                  ( h + List.length entries,
+                    List.filter (concerns id) (theirs_of entries) ))
+    in
+    let changed =
+      if theirs = [] && folder_position dir = Some head then 0
+      else merge_and_enact ~view:id ~head theirs
+    in
+    Fs.replace (pulled_marker dir)
+      (Printf.sprintf "%.0f" (Unix.gettimeofday () *. 1000.));
+    changed > 0
+
+  (* publication §4.5, "which batch": the pushable commands, without the
+     removals an Owed edit still inherits from, as many as an entry holds; and
+     no removal of content that a command left out creates elsewhere. *)
+  let choose_batch () : Log_entry.command list =
+    let all = List.filter (fun c -> not (null c)) (pending ()) in
+    let created : Log_entry.command -> string option = function
+      | `File (_, _, Some v) -> Log_entry.identity v
+      | _ -> None
+    and removed : Log_entry.command -> string option = function
+      | `File (_, Some before, _) -> Log_entry.identity before
+      | _ -> None
+    in
+    let inherited =
+      List.filter_map
+        (fun (path, (e : Staged.edit)) ->
+          if e.state = Owed then
+            Option.map Log_entry.identity_of (Mirror.manifest mirror path)
+          else None)
+        (Staged.edits staged)
+    in
+    let pushable : Log_entry.command -> bool = function
+      | `File (p, _, Some (Known _)) -> not (is_damaged p)
+      | `File (_, _, Some (Identity _ | Unknown)) -> false
+      | `File (_, _, None) | `Folder _ -> true
+    in
+    let held_back c =
+      match removed c with Some x -> List.mem x inherited | None -> false
+    in
+    let r =
+      Algebra.apply (Algebra.of_base l_base)
+        (List.map
+           (function
+             | `File (p, before, _) -> `File (p, None, before)
+             | `Folder (i, before, _) -> `Folder (i, None, before))
+           all)
+    in
+    let removals_last =
+      List.stable_sort (fun a b ->
+          let rank : Log_entry.command -> int = function
+            | `File (_, _, None) | `Folder (_, _, None) -> 1
+            | _ -> 0
+          in
+          compare (rank a) (rank b))
+    in
+    let fits batch =
+      List.length batch <= 1
+      || String.length
+           (Log_entry.encode { author = C.client_uuid; commands = batch })
+         <= Log_entry.max_bytes
+    in
+    let rec choose candidates limit =
+      let steps, _ = Algebra.take ?limit ~temp:park_name r candidates in
+      let batch =
+        List.filter_map (function `Set c -> Some c | `Park _ -> None) steps
+      in
+      let left = List.filter (fun c -> not (List.memq c batch)) all in
+      let elsewhere = List.filter_map created left in
+      let early =
+        List.filter
+          (fun c ->
+            match removed c with
+              | Some x -> created c <> Some x && List.mem x elsewhere
+              | None -> false)
+          batch
+      in
+      if early <> [] then
+        choose (List.filter (fun c -> not (List.memq c early)) candidates) limit
+      else if batch = [] && candidates <> [] && limit <> None then
+        choose candidates None
+      else if not (fits batch) then
+        choose candidates (Some (List.length batch / 2))
+      else batch
+    in
+    choose
+      (removals_last
+         (List.filter (fun c -> pushable c && not (held_back c)) all))
+      (Some Log_entry.max_commands)
+
+  (* The position a push is made from. On a lazy tree every folder that holds
+     a pending key, and every ancestor, is pulled first, and all must stand at
+     one head (publication §4.11). *)
+  let push_position () =
+    if not C.lazy_tree then position ()
+    else (
+      let views =
+        List.filter_map (Mirror.key_of_id mirror)
+          (with_meta (fun () -> views_of (pending ())))
+      in
+      List.iter (fun dir -> ignore (pull_folder dir)) views;
+      match List.sort_uniq compare (List.map folder_position views) with
+        | [Some h] -> Some h
+        | [] -> None
+        | _ ->
+            Fail.raise_ Fail.Link "the head moved between the pulls of a push")
+
+  (* publication §4.5. *)
+  let push () =
+    match push_position () with
+      | None -> `Nothing
+      | Some h -> (
+          let chosen =
+            with_meta (fun () ->
+                match choose_batch () with
+                  | [] -> None
+                  | batch ->
+                      let body =
+                        Log_entry.encode
+                          { author = C.client_uuid; commands = batch }
+                      in
+                      Sync_state.set_in_flight sync_state { n = h + 1; body };
+                      Some (body, batch))
+          in
+          match chosen with
+            | None -> `Nothing
+            | Some (body, batch) -> commit (h + 1) body batch)
+
+  (* What this owner saw of the entry after the tree head: the generation it
+     watches, or the takeover it holds, and since when. *)
+  type watch = { entry : int; generation : int; since : float }
+
+  let watching : watch option ref = ref None
+  let took : watch option ref = ref None
+
+  (* publication §4.6. The settle and the quarantine are waited out across
+     cycles, never inside one. *)
+  let project () =
+    let apply ~t ~generation (e : Log_store.entry) commands =
+      let checked = ref neg_infinity in
+      let before_write () =
+        if Rt.boottime () -. !checked >= project_lease /. 2. then (
+          let now = Rt.boottime () in
+          if
+            Log_store.tree_head log <> t
+            || fst (Log_store.takeover log e.n) <> generation
+          then
+            Fail.raise_ Fail.Link "the projection of entry %d was taken over"
+              e.n;
+          checked := now)
+      in
+      P.apply ~before_write commands;
+      before_write ();
+      Log_store.raise_tree_head log e.n;
+      Atomic.set tree_head_seen e.n
+    in
+    let held (w : watch option) (e : Log_store.entry) generation =
+      match w with
+        | Some w when w.entry = e.n && w.generation = generation -> Some w.since
+        | _ -> None
+    in
+    let rec loop () =
+      let t = Log_store.tree_head log in
+      Atomic.set tree_head_seen t;
+      match Log_store.read_entry log (t + 1) with
+        | None -> ()
+        | Some e -> (
+            let generation, holder = Log_store.takeover log e.n in
+            let now = Rt.boottime () in
+            let mine =
+              match (holder, e.read) with
+                | Some client, _ -> client = C.client_uuid
+                | None, Entry { author; _ } -> author = C.client_uuid
+                | None, _ -> false
+            in
+            match (mine, Log_store.commands e) with
+              | true, Some commands when generation = 0 ->
+                  apply ~t ~generation e commands;
+                  loop ()
+              | true, Some commands -> (
+                  match held !took e generation with
+                    | Some since when now -. since >= project_quarantine ->
+                        apply ~t ~generation e commands;
+                        loop ()
+                    | Some _ -> ()
+                    | None ->
+                        took := Some { entry = e.n; generation; since = now })
+              | true, None -> ()
+              | false, _ -> (
+                  match held !watching e generation with
+                    | Some since ->
+                        if
+                          now -. since >= project_settle
+                          && Log_store.takeover_create log e.n
+                               ~generation:(generation + 1)
+                               ~client:C.client_uuid
+                             = `Won
+                        then
+                          took :=
+                            Some
+                              {
+                                entry = e.n;
+                                generation = generation + 1;
+                                since = now;
+                              }
+                    | None ->
+                        watching :=
+                          Some { entry = e.n; generation; since = now }))
+    in
+    loop ()
+
+  type cycled = {
+    arrival : [ `Entries of int | `State of int * int ];
+    changed : int;
+    committed : int;
+  }
+
+  (* One cycle (publication §4): arrive, push while a push commits, project.
+     [push_now] is false while the batch delay runs. A lazy tree arrives
+     folder by folder when its host pulls, so its cycle only recovers and
+     pushes. *)
+  let run_cycle ?(full = false) ?(push_now = true) () =
+    Rt.Fmutex.with_lock cycle_lock (fun () ->
+        let arrival, changed =
+          if C.lazy_tree then (
+            complete_arrival ();
+            recover_in_flight ();
+            (`Entries 0, 0))
+          else arrive ~full ()
+        in
+        let rec pushes committed =
+          if not push_now then committed
+          else (
+            match push () with
+              | `Committed _ -> pushes (committed + 1)
+              | `Refused ->
+                  if not C.lazy_tree then ignore (arrive ());
+                  committed
+              | `Nothing -> committed)
+        in
+        let committed = pushes 0 in
+        project ();
+        { arrival; changed; committed })
+
+  let request_cycle () =
+    Atomic.set asked true;
+    wake_cycle ()
+
+  (* publication §4, CYCLE. *)
+  let cycle_loop () =
+    let cursor = ref None
+    and last = ref neg_infinity
+    and dirty_since = ref None
+    and failing = ref None in
+    let rec loop () =
+      Stop.check ();
+      if Atomic.get paused then (
+        Stop.sleep 1.;
+        loop ())
+      else (
+        let since = Rt.Signal.version cycle_signal in
+        let wait =
+          match !dirty_since with
+            | Some at -> max 0.05 (min sweep (batch_delay -. (Rt.now () -. at)))
+            | None -> sweep
+        in
+        (try
+           Rt.first ~detach:true
+             [
+               (fun () -> Log_store.cursor_wait log !cursor);
+               (fun () -> Rt.Signal.wait ~since cycle_signal);
+               (fun () -> Stop.sleep wait);
+             ]
+         with
+          | Stop.Stopping -> raise Stop.Stopping
+          | _ -> ());
+        (match
+           let token = Log_store.cursor_token log in
+           if Sync_state.pending_count sync_state > 0 && !dirty_since = None
+           then dirty_since := Some (Rt.now ());
+           let push_due =
+             match !dirty_since with
+               | Some at -> Rt.now () -. at >= batch_delay
+               | None -> false
+           in
+           let asked = Atomic.exchange asked false in
+           if
+             asked || push_due || token <> !cursor
+             || Rt.now () -. !last >= sweep
+           then (
+             last := Rt.now ();
+             ignore (run_cycle ~push_now:(asked || push_due) ());
+             cursor := token;
+             if asked || push_due then
+               dirty_since :=
+                 if Sync_state.pending_count sync_state > 0 then
+                   Some (Rt.now ())
+                 else None)
+         with
+          | () ->
+              if !failing <> None then Log.info "cycles run again";
+              failing := None
+          | exception ((Stop.Stopping | Rt.Cancelled) as e) -> raise e
+          | exception e ->
+              let reason = Printexc.to_string e in
+              if !failing <> Some reason then
+                Log.info "cycle failed, retrying until it runs: %s" reason;
+              failing := Some reason;
+              Stop.sleep retry_floor);
+        loop ())
+    in
+    try loop () with Stop.Stopping -> ()
+
+  (* publication §4.8 steps 1 to 5, at ownership start; the in-flight record
+     waits for the first cycle. *)
+  let recover_local () =
+    List.iter
+      (fun id ->
+        match Dqueue.Records.read intents id with
+          | `Gone -> ()
+          | `Body body -> (
+              match Local_ops.decode_intent body with
+                | None -> Dqueue.Records.set_aside intents id
+                | Some (op, _) ->
+                    with_meta (fun () -> redo op);
+                    Dqueue.Records.complete intents id))
+      (Dqueue.Records.list intents);
+    complete_arrival ();
+    with_meta (fun () ->
+        List.iter
+          (fun c ->
+            if null c then Sync_state.drop sync_state (Algebra.key_of c))
+          (pending ());
+        List.iter
+          (fun (path, (e : Staged.edit)) ->
+            match parent_id path with
+              | None -> ()
+              | Some parent -> (
+                  let p = { Algebra.parent; name = Names.leaf_of path } in
+                  match (e.state, Sync_state.before_file sync_state p) with
+                    | Owed, None ->
+                        Sync_state.record_file sync_state p (mirror_value path)
+                    | Uploaded _, None -> promote path
+                    | _ -> ()))
+          (Staged.edits staged));
+    let recorded =
+      List.filter_map
+        (fun id ->
+          match Dqueue.Records.read upload_log id with
+            | `Body body ->
+                Option.map
+                  (fun (u : Local_ops.upload) -> u.file)
+                  (Local_ops.upload_kind.decode body)
+            | `Gone -> None)
+        (Dqueue.Records.list upload_log)
+    in
+    List.iter
+      (fun (path, (e : Staged.edit)) ->
+        match parent_id path with
+          | Some parent
+            when e.state = Owed
+                 && not
+                      (List.mem
+                         { Algebra.parent; name = Names.leaf_of path }
+                         recorded) ->
+              post_put path
+          | _ -> ())
+      (Staged.edits staged)
+end

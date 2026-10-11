@@ -1,10 +1,11 @@
-(** Journal ops (spec 03 §2.3). Paths are domain-relative; folder ops carry the
+(** Feed ops (spec 03 §2.9): a change of the local tree, by path, in the applied
+    log and in a local intent. Paths are domain-relative; folder ops carry the
     folder's id. Optional fields are omitted when absent, never [null]. *)
 
 open Tsync_core
 
 type t =
-  | Put of { path : string; size : int; base : string option }
+  | Put of { path : string; size : int }
   | Delete of string
   | Mkdir of { path : string; id : Folder_id.t option }
   | Rmdir of { path : string; id : Folder_id.t option }
@@ -27,15 +28,6 @@ val of_json : Yojson.Safe.t -> t option
 
 (** The paths an op concerns: [[key]], or [[key; src]] for a rename. *)
 val paths : t -> string list
-
-val is_put : t -> bool
-
-(** One op per line, each followed by [\n]. *)
-val encode_entry : t list -> string
-
-(** Blank lines and surrounding whitespace ignored; [Error] makes the entry
-    CORRUPT. *)
-val decode_entry : string -> (t list, string) result
 
 val list_to_json : t list -> Yojson.Safe.t
 
