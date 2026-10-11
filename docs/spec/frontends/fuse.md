@@ -5,7 +5,7 @@ the mount owes the Linux desktop around it: its identity in the mount table, ser
 base package. The desktop clients themselves are [linux-desktop.md](linux-desktop.md). The generic seam (descriptor, request handler, hooks, error codes, item references)
 is [the frontend contract](../08-frontends.md); where the mount runs and how it starts and stops is
 [07](../07-daemon-cli.md). This file says how the mount maps kernel operations onto the file
-operations ([04 §3.5](../04-checkout-cache.md)) and which POSIX semantics it guarantees.
+operations ([04 §3.4](../04-checkout-cache.md)) and which POSIX semantics it guarantees.
 
 Part I is the mount. Part II is its side of the desktop integration, which is not a frontend: it
 is a set of clients of the owner's socket plus one in-process library.
@@ -72,7 +72,7 @@ Domain settings the mount reads: `readOnly` (§4.4), `symlinks` (§4.6), members
 ```
 owner process (one domain)
   main thread      : the FUSE loop, multi-threaded, until the session ends
-  scheduler        : the owner's single scheduler (file operations, queues, poller, socket)
+  scheduler        : the owner's single scheduler (file operations, queues, cycle, socket)
   FUSE workers     : the FUSE library's threads, one per in-flight kernel request
 ```
 

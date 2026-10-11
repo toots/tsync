@@ -84,7 +84,7 @@ The constraints that shape everything:
 | **stored key** | Where the store files an object: chunks by content hash, manifests by folder id and a hash of the leaf name. |
 | **chunk** | A fixed-size slice of a file body, keyed by two XXH3-64 digests of its bytes. |
 | **manifest** | The object describing one file version: size, chunk size, chunk keys, digests. |
-| **content identity** | The whole-file digest `h1` of a manifest; equal content has equal identity. Frontends see it as `contentId`. |
+| **content identity** | The whole-file digests `h1`, `h2` of a manifest; equal content has equal identity. Frontends see `h1` as `contentId`. |
 | **folder id** | A stable id minted without coordination when a folder is created, final from the mint; its children are filed under it. |
 | **folder marker / anchor** | The tree's records of where a folder is: the marker in its parent's namespace, the anchor in its own. |
 | **owner** | The one process on a machine that owns a domain's local state, converges it and serves its request interface. |
@@ -122,7 +122,7 @@ Dependencies point downwards only.
  ├───────────────────────────────────────────────────────────────────────────────┤
  │ Process model and CLI: owner · supervisor · IPC · lifecycle · status          │  07
  ├───────────────────────────────────────────────────────────────────────────────┤
- │ Whole-domain operations: import · export · rsync · mirror · resync · expire · │  05
+ │ Whole-domain operations: import · export · rsync · mirror · sync · expire ·   │  05
  │                          gc · integrity · share                               │
  ├──────────────────────────────┬────────────────────────────────────────────────┤
  │ Sync: before-values · cycle  │ Checkout: mirror · chunk cache · staged ·      │  03, 04
@@ -152,7 +152,7 @@ nothing depends on them except the CLI and the request handler.
 | 02 | [Remote data model](02-remote-model.md) | Byte-level backend formats and key spellings (core and ephemeral); the remote interface. |
 | 03 | [Log & sync](03-journal-sync.md) | Client identity and leases; command, log entry, cursor, tree head, sync state and applied log formats; sync interfaces. |
 | 04 | [Checkout & cache](04-checkout-cache.md) | Local on-disk formats; the file-operation interface; local behaviour and recovery. |
-| 05 | [Config & whole-domain operations](05-ops-config.md) | Config schema and validation; the Domain Context; import, export, rsync, mirror, resync, expire, gc, integrity, share. |
+| 05 | [Config & whole-domain operations](05-ops-config.md) | Config schema and validation; the Domain Context; import, export, rsync, mirror, sync, expire, gc, integrity, share. |
 | 06 | [Backends](06-backends.md) | The store contract; the composite interface; the admission seam; uplink configuration. |
 | 07 | [Process model & CLI](07-daemon-cli.md) | Roles and ownership; lifecycle; the IPC contract; every CLI command; maintenance. |
 | 08 | [Frontends](08-frontends.md) | The frontend contract: descriptor, item references and rows, the request handler, change feed, events. |

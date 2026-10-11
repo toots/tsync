@@ -156,7 +156,7 @@ With the staged edits of §3.5 laid over it, the mirror is the **local tree** $L
 - Mut: manifests replaced whole; group bodies written in place, grown and resized.
 - Life: a manifest is created by the first write, truncate, create or handover; moved by
   renames and moves aside; removed by promotion after its commit, delete, create, revert, a
-  replacing rename, or a recursive rmdir. A body is released when no manifest, set-aside manifest
+  replacing rename, or a merge that finds the main holding the same content. A body is released when no manifest, set-aside manifest
   or open read handle names it, after the switch away from it is durable.
 - Class: **authoritative, the sole copy of user data** until the entry that carries its manifest
   exists on the main.
@@ -257,7 +257,7 @@ locks and edit generations ([04](../04-checkout-cache.md) §3.2); read handles
 ([04](../04-checkout-cache.md) §3.3); the cache's body locks,
 generations, held intervals, in-flight table and counts
 ([read-path-and-cache](../algorithms/read-path-and-cache.md) §3.2); the queues' loaded records
-and slots ([durable-queue](../algorithms/durable-queue.md) §3.1); the cycle state, the projection
+and slots ([durable-queue](../algorithms/durable-queue.md) §4.3); the cycle state, the projection
 watch and the cursor debouncer ([publication](../algorithms/publication.md) §3.3). All are rebuilt
 from durable state at owner start. Retentions of open-and-unlinked content
 ([04](../04-checkout-cache.md) §3.3) are among the read handles.
@@ -356,7 +356,7 @@ local referent → referrer pairs it governs:
 | a before-value equal to the local value | a crash between the record and the change | dropped at owner start |
 | a namespace operation half done | a crash inside it | its local intent, at owner start |
 | a merge half enacted | a crash inside it | the arrival record, at owner start |
-| in-flight record with unknown outcome | a crash or a lost answer during a push | the next cycle issues the same create again ([publication](../algorithms/publication.md) §4.8) |
+| in-flight record with unknown outcome | a crash or a lost answer during a push | the next cycle reads the entry at that number ([publication](../algorithms/publication.md) §4.8) |
 | unnamed staged body | a crash between a body's creation and the manifest naming it; a deferred release | the owner-start sweep ([04](../04-checkout-cache.md) §4.10) |
 | committed staged edit not promoted | a crash after a push's `Won` step | owner start promotes it |
 | temporary object | a crash mid-replace | the temporary sweep |
@@ -390,12 +390,12 @@ The two trees differ in what the mirror promises, not in their entities.
 - **Full** (desktop hosts): the mirror is complete; the owner's cycle keeps it current; an arrival
   by state rewrites it against the main's tree.
 - **Lazy** (Android): the mirror holds the folders the user has opened; absence means "not
-  fetched". Sync state covers those folders only: a key in a folder never pulled has no local
-  value and no before-value, and an entry's command on it is skipped. The folders held are kept
-  current by pulls and by the arrivals that precede each push
-  ([04](../04-checkout-cache.md) §3.5, [android](../frontends/android.md) §3.2); a pull merges the
-  folder with the pending commands on it and never drops them, and a pull that cannot read every
-  child changes nothing. There is no background cycle. Staged edits, before-values, identity and
+  fetched". Each folder held has its own position: its view is the main's tree, for that folder,
+  at that entry, and a before-value of one of its keys is the main's value there
+  ([publication](../algorithms/publication.md) §4.11). A key in a folder never pulled has no local
+  value and no before-value. A pull is an arrival for one folder: it merges the folder with the
+  pending commands on it and never drops them, and a pull that fails changes nothing. There is no
+  background cycle. Staged edits, before-values, identity and
   deferred logs are exactly as on the full tree, and the app is their owner, resuming them at
   every start. Hard links may be unsupported, so promotion may copy.
 

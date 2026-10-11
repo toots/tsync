@@ -202,8 +202,8 @@ Folder markers, anchors and folder indexes name no chunks; shares name paths or 
 Every write that makes a chunk reference visible on a collectable main MUST go through the **reference
 gate** of that main's store driver. A reference-publishing write is any put (plain or conditional) or server-side copy whose
 destination lies in the log, the manifest area or the version area. This covers: the commit of a log
-entry, the manifests and version snapshots a projection writes, mirror or repair writing
-onto the main, a copy refilling a main, and every such write an http-proxy listener performs for a remote
+entry, the manifests and version snapshots a projection writes, integrity repair writing
+onto the main, and every such write an http-proxy listener performs for a remote
 client. A chunk put received by a listener is a writer path too: it goes through the same driver and
 lands in S like any other writer's. Because the gate sits in the driver of the store that has the spaces, no caller can bypass it.
 
@@ -304,7 +304,7 @@ mark(ns):                                  -- a namespace or a version group
 
 mark(entry n):                             -- a log entry above the tree head read at the open
   body := read entry n from the collected main
-    not found: references nothing          -- expiry deletes only below the tree head: it was projected
+    not found: references nothing          -- expiry deletes only at or below the tree head: it was projected
     any other read failure, or a body that does not parse: stop the run, leaving it open
   for each chunk c named by a manifest body carries: promote(c), verify as above
   write R{Marking, cursor = l/n}
@@ -458,7 +458,7 @@ the collection, so no caller names F, reads R, or orders lookups:
 | put | writes into S |
 | delete | deletes from both spaces, and the chunk's corruption marker is the caller's as usual |
 | listing of the chunk area | the union of both spaces under plain keys, each name once; keys of F are never listed as such |
-| put or copy into the manifest or version area | the gate (§5.4) |
+| put or copy into the log, the manifest area or the version area | the gate (§5.4) |
 
 The collector's promotion and the gate's are one implementation. Consequences, with no collection
 code at the caller: readers and writers of the main, an http-proxy server exporting it (remote clients
@@ -484,6 +484,7 @@ dry_run():
   for ns in every namespace (§5.3), sorted:
      for each child object k of ns:  body := read k      -- the same read rules as mark()
         referenced += chunks named by body
+  for each log entry above the tree head: referenced += chunks named by the manifests it carries
   for each chunk c listed in the chunk area (both spaces, §5.8), with its size:
      if c not in referenced: count c and its bytes as reclaimable
   report referenced, reclaimable count and bytes, the referenced chunks absent from the chunk area

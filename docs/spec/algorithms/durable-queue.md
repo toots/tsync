@@ -254,8 +254,8 @@ of [failure-model.md](failure-model.md) §5; the queue acts on the kind only.
 | **Done** | complete the record; reset the failure count |
 | **CANCELLED** (no longer wanted) | complete the record; not a failure |
 | **STOPPING** | leave the record on disk and in no memory; not a failure |
-| Retryable kind (TRANSIENT/*, UNREACHABLE, DEADLINE) | note the failure in the record (`update`); wait `BACKOFF(n)` (stop-aware); requeue (ordered: head; keyed: tail) |
-| Non-retryable kind (ABSENT, EXISTS, REFUSED, INVALID, CORRUPT, UNPREPARED, UNEXPLAINED) | note the failure; **park** (§4.7) |
+| Retryable kind (TRANSIENT/*, UNREACHABLE, DEADLINE; in a keyed queue also UNEXPLAINED) | note the failure in the record (`update`); wait `BACKOFF(n)` (stop-aware); requeue (ordered: head; keyed: tail) |
+| Non-retryable kind (ABSENT, EXISTS, REFUSED, INVALID, CORRUPT, UNPREPARED; in an ordered queue also UNEXPLAINED) | note the failure; **park** (§4.7) |
 
 For an ordered queue, UNEXPLAINED is non-retryable: a local bug at the head would otherwise
 block every later record forever.
@@ -297,7 +297,7 @@ block every later record forever.
   only when the domain is not paused.
 - A one-shot command that owns a domain settles its queues before exiting. Records still owed
   stay on disk; the command reports their count, and the next owner of the domain runs them
-  (§6, E16).
+  (§7.1, E16).
 
 ### 4.9 At-least-once: what makes each job kind idempotent
 
@@ -378,9 +378,9 @@ owner finds it at start.
 | E1 | Staged body (group layout or whole file) | in-place data; fsynced at sync, close, handover | named by E2; the start-of-ownership orphan sweep releases bodies nothing names | Written, no manifest names it: the write was not acknowledged; released at start. Named by a manifest: kept. |
 | E2 | Staged manifest, *Owed* or *Uploaded* | replace per write; durable at sync, close and state changes | owner start: Uploaded ones whose key has no before-value are promoted; Owed ones with no upload record are adopted | Replaced mid-write: old or new, whole. Uploaded, not committed: stays staged until its commit. |
 | E3 | Set-aside staged manifest | rename (R6) | reported at start | Kept forever with every body it may name ([04](../04-checkout-cache.md) §4.10); never adopted automatically. |
-| E4 | Before-value | durable replace, before the local tree changes at its key | read at owner start; the pending set is derived from them | Recorded, change not made: equal to the local value, dropped at start. Change made: pending until committed. |
+| E4 | Before-value | replace, before the local tree changes at its key; durable at once for a namespace operation, at sync or close for a write | read at owner start; the pending set is derived from them | Recorded, change not made: equal to the local value, dropped at start. Change made: pending until committed. |
 | E5 | Local intent | durable create, before the first local step | owner start completes it | Mid local half: local redo (idempotent). |
-| E6 | In-flight record | durable replace, before the entry's create is issued | the first cycle | The create is issued again with the same bytes: `Won` if this client's entry is there, else another client's entry is merged ([publication.md](publication.md) §4.8). |
+| E6 | In-flight record | durable replace, before the entry's create is issued | the first cycle | Recovered by reading the entry at that number ([publication.md](publication.md) §4.8). |
 | E6a | Arrival record | durable replace, before a merge touches the local tree | owner start completes it | The recorded steps are applied again; the result is the uninterrupted merge's. |
 | E6b | Position | durable replace, with the step that changes it | read at start | Old or new, whole. |
 | E7 | Parked records (any log) | the record itself, with its failure noted | loaded at owner start and retried (§4.7) | Survive any kill; retried at start and every `REARM_INTERVAL`. |
@@ -417,7 +417,7 @@ acknowledged action.
 | U1 | upload the chunks | Owed edit → upload again (existing chunks are skipped) |
 | U2 | durable replace of the staged manifest as *Uploaded* | Uploaded, before-value present → pending; the cycle pushes it |
 | P1 | in-flight record durable | the create is issued at the next cycle |
-| P2 | the entry is created | in-flight record, entry on the main → the create again: `Won` |
+| P2 | the entry is created | in-flight record, entry on the main → recognised by its bytes: the `Won` step |
 | P3 | the `Won` step: before-value dropped, position advanced, in-flight record cleared | Uploaded edit with no before-value → promoted at start |
 | P4 | promotion: cache groups, durable mirror entry, release of the staged manifest (directory fsynced), release of bodies | any sub-step: the Uploaded manifest replays the promotion idempotently; after the manifest's release, only orphan bodies remain → swept |
 | P5 | projection of the entry, tree head, cursor note | E22; the cursor is a hint |
@@ -469,7 +469,6 @@ empty, one peer arrived at the head):
    action, or its bytes survive in a conflicted copy
    ([conflict-resolution.md](conflict-resolution.md) §8.1). For a write acknowledged only at the
    *visible* level, this holds for kills of the process and not for power loss.
-   *visible* level, this holds for kills of the process and not for power loss.
 2. **Unacknowledged actions are atomic.** Each is fully applied or absent: no torn file, no
    rename that leaves both names or neither.
 3. **Nothing owed remains**, except parked records, which are reported: no before-value, no
@@ -479,7 +478,6 @@ empty, one peer arrived at the head):
    all its chunks.
 5. **Idempotence.** The final state equals that of the same actions run without a crash; in
    particular no kill produces a conflicted copy that an uninterrupted run would not.
-5. **Idempotence.** The final state equals that of the same actions run without a crash.
 6. **Visibility.** Every set-aside object and every parked record shows in status.
 7. **Single runner.** No record is run by two processes, and an ordered log's records that
    succeed take effect in id order, except for re-adopted parked records. A log is run only by

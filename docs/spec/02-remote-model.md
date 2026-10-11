@@ -28,6 +28,7 @@ conditional write (create-if-absent). On top of it this layer provides:
 
 - **Content-addressed, deduplicated file bodies.** A file is cut into fixed-size chunks named by the
   digest of their bytes; identical content is stored once per domain; an unchanged chunk is never
+  re-sent.
 - **A rename-stable directory tree.** Folders are identified by stable ids, not paths, so moving a
   folder rewrites a constant number of objects, never its descendants.
 - **A numbered log.** Every change to the tree is an entry created with the conditional write; the
@@ -422,7 +423,7 @@ apply(entry)                           // the projection of one log entry: data-
 
 `Unresolved` means this client holds no id for the key's folder; `Absent` means the store holds nothing
 there. A caller that memoizes answers MUST NOT memoize `Unresolved`. `apply` is the only operation that
-writes a manifest, a marker or an anchor, and only a projector calls it
+writes a manifest, a marker or an anchor on the main, and only a projector calls it
 ([algorithms/publication.md §4.6](algorithms/publication.md#46-projection-the-tree-follows-the-log)).
 
 **TreeReader** (the folder tree by id):
@@ -465,9 +466,9 @@ the *inode* layout (ids from local state) and the *identity* layout (share servi
 ### 3.3 What this layer requires of the store
 
 The store contract is [06-backends.md §3](06-backends.md#3-the-store-contract). One reading rule is
-this layer's: an empty or unparseable answer to the create-if-absent of a log entry is read back and
-compared with the bytes sent, never taken as "won"
-([algorithms/publication.md §4.8](algorithms/publication.md#48-crash-recovery)).
+this layer's: an empty or unparseable answer to the create-if-absent of a log entry is never taken as
+"won". The entry is read back and compared with the bytes sent, which is how an unknown outcome is
+settled in any case ([algorithms/publication.md §4.8](algorithms/publication.md#48-crash-recovery)).
 
 ---
 
@@ -653,8 +654,8 @@ An implementation MUST exhibit these observable properties:
 - **Tree reads.** An empty namespace yields no children; classification is by body; one unreadable child
   does not cost its siblings under `Skip` and fails the folder under `Fail`; a fold lists each folder
   once, in a visit order independent of prefetching; batched listings are used
-  and omitted folders fetched singly; a disowned marker is skipped and reported; an unanchored folder is
-  listed where its marker says.
+  and omitted folders fetched singly; a disowned marker is skipped and reported, and so is a marker whose folder
+  has no anchor.
 - **Uploads.** A marked chunk is re-sent rather than deduplicated; a remembered chunk is not re-checked
   while the memo may be relied on; an upload whose source changed or vanished returns
   no manifest; an upload writes chunks and no other object; a `MissingChunks` refusal at the commit

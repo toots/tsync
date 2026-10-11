@@ -121,16 +121,18 @@ For each file key $k$ where $N(k) \neq L(k)$, and for each fresh key the merge m
 | the main's value, the local one kept aside (fifth row; R2 on a file) | move the local file to `aside(k)` as a local rename does (staged edit, base entry, file id and open handles follow it), then install the main's manifest at $k$ |
 | the local value kept (second and fourth rows) | nothing changes locally |
 
-- **Staged facts are re-checked under the key lock** ([04](../04-checkout-cache.md) §3.2). A write
-  that staged an edit at $k$ after the merge read $L(k)$ makes the decision for $k$ stale: it is
-  taken again for that key with the new local value, before anything is installed.
+- **Staged facts are re-checked under the key lock** ([04](../04-checkout-cache.md) §3.2). The
+  owner takes the key lock of every file key the merge changes before it writes the arrival
+  record. A write that staged an edit at $k$ after the merge read $L(k)$ makes the decision for
+  $k$ stale: it is taken again for that key with the new local value. The arrival record holds
+  the decisions as they stand once every such lock is held.
 - A file moved aside keeps its staged bytes and its upload record under the new key. Its command is
   a creation at the fresh key, pushed like any other.
 - A read handle open on a replaced or removed file keeps the content it had
   ([04](../04-checkout-cache.md) §3.3).
 - **A move the main made.** When one arrival removes the file at one key and creates a file of the
   same content identity at another, and the local file at the first key has no staged edit, the
-  owner SHOULD enact both as one local move: the file id and the cached bytes follow, and the feed
+  owner MUST enact both as one local move: the file id and the cached bytes follow, and the feed
   reports a rename. $N$ is the same either way.
 - **A name the local tree cannot hold.** When the main's value would land on an escape handle that
   another name of the same folder already uses ([01](../01-core.md) §2.8), the owner installs it at
@@ -206,9 +208,10 @@ required.
 
 ## 7. A local write against a stale base
 
-A `write` from a frontend MAY carry `base`, the content identity of the version the edit was made
-from ([08](../08-frontends.md)). If `base` differs from the key's current content identity here
-(its staged edit if any, else its mirror entry), the edit was made to a version this client no
+A `write` from a frontend MAY carry `base`: the `contentId` of the version the edit was made
+from, which is the digest `h1` of its content identity ([08](../08-frontends.md) §2.3). An empty
+`base` is no `base`. If `base` differs from the key's current `content_id` here
+([04](../04-checkout-cache.md) §3.4), the edit was made to a version this client no
 longer holds. The write is staged at `aside(key)` as a new file of this client, and the key keeps
 its current content. The reply names the key as it now resolves; the conflicted copy reaches
 frontends through the change feed. A `write` without `base`, or with the current base, is an

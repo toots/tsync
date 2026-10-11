@@ -22,7 +22,7 @@ The domain core (mirror, chunk cache, staged edits, upload queue, cycle) knows n
 a user reaches the files. A **frontend** is one way of presenting a domain on one host. Every OS has
 its own filesystem and threading model, and which frontends exist is a build-time fact. The rules
 that must not differ between frontends are owned once, here and in the file-operation interface
-([04 §3.5](04-checkout-cache.md)): how items are named, what staged and committed mean, the error
+([04 §3.4](04-checkout-cache.md)): how items are named, what staged and committed mean, the error
 vocabulary, paging, the change feed, and what evict and restore do. Each frontend is a thin
 translation over them.
 
@@ -135,7 +135,7 @@ ref, parentRef, name, kind ("dir"|"file"|"symlink"), size, mtime (float seconds)
   that decodes names lossily still names the item exactly.
 - A row whose containing folder has no id on this client cannot be named: it is omitted and counted
   in `unnamed`, never silently dropped. A non-zero count is reported in `status` with its repair
-  (`tsync sync --full`).
+  (`tsync sync --full`; on a pulled tree, the next pull of the folder).
 
 `stat` puts the row at the top level; lists and mutation replies nest it (`items`, `item`).
 
@@ -218,8 +218,9 @@ hooks {
 ```
 
 - `changed(keys)` is called by the owner after an arrival changed the local tree (the keys it
-  changed), after a `revert`, and after a whole-domain operation run in the owner changed the local
-  tree ([publication.md §4.10](algorithms/publication.md#410-one-owner-per-domain)). It MUST NOT block on the OS surface: a frontend that invalidates kernel or system
+  changed), after a `revert`, after a whole-domain operation run in the owner changed the local
+  tree ([publication.md §4.10](algorithms/publication.md#410-one-owner-per-domain)), when the content of a write is committed (its
+  `isUploaded` changes), and after `full_resync` stamps a new generation. It MUST NOT block on the OS surface: a frontend that invalidates kernel or system
   state does so asynchronously and never from inside a callback on the same item.
 
 | hook | fuse | file_provider | android |
@@ -252,7 +253,7 @@ watched with the liveness probe ([07 §4.3](07-daemon-cli.md#43-deadlines-bulk-a
 | `symlink` | `parentRef`, `name`, `target`, `exclusive?` | `item` | M |
 | `rename` | `ref`, `parentRef`, `name`, `noreplace?` (alias `exclusive`) | `item` at the destination; a folder keeps its id, a file its file id | M |
 | `delete` | `ref`\|`rel` (a file or symlink) | `{}`; a folder target → `invalid` | M |
-| `rmdir` | `ref`\|`rel` (a folder) | `{}`; removes the folder **and its subtree** (a platform delete gesture) | M |
+| `rmdir` | `ref`\|`rel` (a folder) | `{}`; removes the folder **and its subtree** (a platform delete gesture): `remove_tree` of [04 §4.5](04-checkout-cache.md#45-namespace-operations) | M |
 | `revert` | `ref`\|`rel`, `arg` = version (`""` = latest) | `{}` | M, P |
 | `share` | `ref`\|`rel`, `expires?` (seconds from now), `token?` | `url`, `expires` (epoch seconds) | P (it writes a store) |
 | `share_revoke` | `arg`: a token or a link | `{revoked}`: whether a share of this domain held it | P |
@@ -366,7 +367,7 @@ The handler enforces these itself, whatever a frontend advertises:
 
 Answers come from the **applied log**
 ([03 §2.9](03-journal-sync.md#29-feed-ops-and-the-applied-log-local)), never from the store. It
-holds one line per local operation and one per arrival, each appended only after the change it
+holds one line per local operation and one per arrival (several for an arrival by state), each appended only after the change it
 names is durable in the local tree, so an op never names an item the local tree does not hold yet.
 Ops are not filtered by origin: a change made by a command on this machine must reach its
 frontends.

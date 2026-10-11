@@ -82,10 +82,11 @@ The owner runs no background cycle: nothing fetches on the cursor or on a timer.
 the main comes from two places, both specified by the lazy tree
 ([04 §3.5](../04-checkout-cache.md#35-the-local-tree-full-and-lazy)):
 
-- **pulls**: a pull reads one folder's state from the main and merges it with this client's pending
-  commands on that folder;
-- **the arrival that precedes each push**: the owner fetches the entries after its position and
-  merges them, for the folders it holds.
+- **pulls**: a pull brings one folder's view to the head and merges it with this client's pending
+  commands on that folder. Each folder held has its own position
+  ([publication §4.11](../algorithms/publication.md#411-the-lazy-tree));
+- **the pulls that precede each push**: every folder holding a pending command is pulled to the
+  head first. The other folders are not touched.
 
 **When the owner pushes.** The owner runs the cycle of
 [publication §4](../algorithms/publication.md#4-the-algorithm) only to push: the cycle's wait ends
@@ -106,22 +107,10 @@ process completed a pull of it less than `pull_freshness` ago, measured on the m
 2. A mutation that names a child by name (`create`, `mkdir`, `write` by parent and name, `symlink`,
    the destination of a `rename`) pulls the destination folder first unless it is fresh, so that an
    existence check sees what peers committed.
-3. Opening a file (the bridge's `open`, `ensure_cached`, `fetch_range`) first pulls the file's key:
-   the pull of [04 §3.5](../04-checkout-cache.md#35-the-local-tree-full-and-lazy) restricted to
-   one key of the file's folder.
-   - It reads the tree head, then the file's record on the main, then replays over it the commands
-     on that key of every log entry above that tree head. The record alone is never taken for the
-     main's value.
-   - It merges the value it read with the key's local value and before-value, and sets the key's
-     before-value so that what the client knows of the main at that key is what it read
-     ([conflict resolution §4](../algorithms/conflict-resolution.md#4-enacting-a-merge)). A key
-     with no pending change takes the main's value: its mirror entry is replaced, or removed when
-     the main holds no file there. A key with a pending change keeps what the merge keeps of it, at
-     the key or moved aside.
-   - It stamps no folder and writes nothing to the store.
-
-   The open then serves what its reference resolves to, and answers `not_found` when that is
-   nothing.
+3. Opening a file (the bridge's `open`, `ensure_cached`, `fetch_range`) first pulls the file's
+   folder unless it is fresh. With the folder's position recent this costs the entries committed
+   since, not a listing. The open then serves what its reference resolves to, and answers
+   `not_found` when that is nothing.
 4. `restore` of a folder pulls each folder of the subtree as it walks, so the subtree restored is the
    one the store holds. `evict` walks the mirror only.
 
@@ -166,7 +155,7 @@ when the mirror or the cache can answer it.
 - The view's age is carried in `pulledAt` for the host to show.
 
 **Opens: serve the version known here.**
-- The one-key pull of rule 3 waits at most `pull_patience`, and not at all while the breaker is
+- The pull of rule 3 waits at most `pull_patience`, and not at all while the breaker is
   open. Without an answer nothing is merged and the open serves the local value.
 - Bytes come from the chunk cache. A read that needs a chunk the cache lacks waits for the store as
   any read does and fails with DEADLINE ([failure-model.md](../algorithms/failure-model.md)) when it
@@ -184,8 +173,8 @@ when the mirror or the cache can answer it.
 - `write` with `await` answers once the content is committed or its upload or push has started
   failing; `isUploaded` in the reply's item says which.
 
-**What does need the store.** `share`, `restore` of bytes not yet cached, and the first listing of a
-folder answer `unreachable`. `status` never touches the store.
+**What does need the store.** `share`, `restore` of bytes not yet cached, the first listing of a
+folder, and a mutation in a folder never pulled answer `unreachable`. `status` never touches the store.
 
 **Recovery.** When a store request succeeds after the owner answered `unreachable`, or answered a
 listing `outdated` because the breaker was open, the owner sends the `recovered` notice. A host that
@@ -348,7 +337,7 @@ checked. Properties of the shared handler are [08](../08-frontends.md)'s.
 - A file whose creation is pending survives a pull; a file whose removal is pending is not listed
   back; a folder holding a pending command whose push keeps failing is still pulled.
 - With nothing pending the owner runs no cycle, and reads the main only in pulls. Before each push it
-  fetches and merges the entries after its position, for the folders it holds.
+  pulls to the head every folder that holds a pending command, and no other.
 - A pull that changed a folder's children, and every mutation, sends a `changed` notice naming the
   folder.
 
@@ -382,9 +371,9 @@ checked. Properties of the shared handler are [08](../08-frontends.md)'s.
   one folder.
 - **Pulls merged with pending commands, never skipped because of them.** Skipping froze a folder for
   as long as one push kept failing.
-- **An open is a one-key pull, not a read of the record.** A record installed without its merge
-  would overwrite a pending edit, and a record read below the head would be taken for a peer's
-  change.
+- **An open pulls the file's folder, it does not read the file's record.** A record installed
+  without its merge would overwrite a pending edit, and one key brought to the head alone would
+  leave its folder's view at two positions.
 - **Answer the last view, flagged, rather than fail.** A listing that failed whenever the store was
   silent made cached and pinned files unreachable exactly when they mattered.
 - **A view expires, unless a pin holds it.** A listing weeks old shown as the folder's contents
