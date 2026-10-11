@@ -5,7 +5,6 @@ module Lease = Uplink_lease
 let burst_seconds = 2.
 let stall_timeout = 60.
 let window_safety = 0.5
-let small_body = 64 * 1024
 let request_overhead = 1024
 let missed_before_local = 3
 let renewal_timeout = 1.
@@ -80,8 +79,8 @@ type gate = {
   settings : Law.settings;
   m : Mutex.t;
   budget : Budget.t;
-  line : waiter Queue.t;
-  mutable overtaken : int;
+  first : waiter Queue.t;
+  chunks : waiter Queue.t;
   mutable armed : bool;
   mutable law : Law.t;
   mutable used : bool;
@@ -154,8 +153,8 @@ let create_gate name settings =
     settings;
     m = Mutex.create ();
     budget = Budget.create ~rate:(Law.rate law) ~now;
-    line = Queue.create ();
-    overtaken = 0;
+    first = Queue.create ();
+    chunks = Queue.create ();
     armed = false;
     law;
     used = false;
@@ -181,12 +180,16 @@ let link name s =
             Hashtbl.replace links name t;
             t)
 
+(* §4.3: two FIFO lines, chunks last. *)
+let head_line g = if Queue.is_empty g.first then g.chunks else g.first
+let waiting_in g = Queue.length g.first + Queue.length g.chunks
+
 (* Called under [g.m]. *)
 let rec pump g =
-  match Queue.peek_opt g.line with
+  let line = head_line g in
+  match Queue.peek_opt line with
     | Some w when Budget.admits g.budget ~now:(Rt.now ()) w.bytes ->
-        ignore (Queue.pop g.line);
-        g.overtaken <- 0;
+        ignore (Queue.pop line);
         if Rt.Promise.try_resolve w.wake (Ok ()) then
           Budget.take g.budget ~now:(Rt.now ()) w.bytes;
         pump g
@@ -195,7 +198,7 @@ let rec pump g =
 (* One timer at most; a head blocked by the window waits for a completion. *)
 and arm g =
   if not g.armed then (
-    match Queue.peek_opt g.line with
+    match Queue.peek_opt (head_line g) with
       | Some w ->
           let delay = Budget.wait_for g.budget ~now:(Rt.now ()) w.bytes in
           if delay < infinity then (
@@ -207,16 +210,13 @@ and arm g =
                     arm g)))
       | None -> ())
 
-(* §4.3: a small body may pass the head, by at most the head's size in all. *)
-let room g b =
-  (match Queue.peek_opt g.line with
-    | None -> true
-    | Some head -> b <= small_body && g.overtaken + b <= head.bytes)
+(* §4.3: no chunk is admitted while a body that is not one waits. *)
+let room g ~chunk b =
+  Queue.is_empty g.first
+  && ((not chunk) || Queue.is_empty g.chunks)
   && Budget.admits g.budget ~now:(Rt.now ()) b
 
-let take_now g b =
-  if not (Queue.is_empty g.line) then g.overtaken <- g.overtaken + b;
-  Budget.take g.budget ~now:(Rt.now ()) b
+let take_now g b = Budget.take g.budget ~now:(Rt.now ()) b
 
 let own_report g ~timeouts ~probes =
   let r =
@@ -224,7 +224,7 @@ let own_report g ~timeouts ~probes =
       Lease.in_flight = Budget.in_flight g.budget;
       completed = g.completed_since;
       timeouts;
-      waiting = Queue.length g.line;
+      waiting = waiting_in g;
       held_back = g.held_back;
       probes;
     }
@@ -521,7 +521,7 @@ let renewal (req : Lease.request) =
                                 {
                                   Lease.idle with
                                   in_flight = Budget.in_flight g.budget;
-                                  waiting = Queue.length g.line;
+                                  waiting = waiting_in g;
                                   held_back = g.held_back;
                                 }
                               in
@@ -553,7 +553,7 @@ let used g =
     true)
   else false
 
-let acquire t bytes =
+let acquire t ~chunk bytes =
   let b = bytes + request_overhead in
   match t with
     | Open -> { taken = 0; at = 0. }
@@ -561,13 +561,13 @@ let acquire t bytes =
         let first, waiter =
           Mutex.protect g.m (fun () ->
               let first = used g in
-              if room g b then (
+              if room g ~chunk b then (
                 take_now g b;
                 (first, None))
               else (
                 let w = { bytes = b; wake = Rt.Promise.create () } in
                 g.held_back <- true;
-                Queue.push w g.line;
+                Queue.push w (if chunk then g.chunks else g.first);
                 arm g;
                 (first, Some w)))
         in
@@ -589,17 +589,18 @@ let acquire t bytes =
                         Mutex.protect g.m (fun () ->
                             if not (Rt.Promise.try_resolve w.wake (Error e))
                             then Budget.release g.budget b;
+                            let line = if chunk then g.chunks else g.first in
                             let kept = Queue.create () in
                             Queue.iter
                               (fun x -> if x != w then Queue.push x kept)
-                              g.line;
-                            Queue.clear g.line;
-                            Queue.transfer kept g.line;
+                              line;
+                            Queue.clear line;
+                            Queue.transfer kept line;
                             pump g;
                             arm g);
                         raise e))
 
-let try_acquire t bytes =
+let try_acquire t ~chunk bytes =
   let b = bytes + request_overhead in
   match t with
     | Open -> Some { taken = 0; at = 0. }
@@ -607,7 +608,7 @@ let try_acquire t bytes =
         let first, ticket =
           Mutex.protect g.m (fun () ->
               let first = used g in
-              if room g b then (
+              if room g ~chunk b then (
                 take_now g b;
                 (first, Some { taken = b; at = Rt.now () }))
               else (
@@ -637,14 +638,14 @@ let abandoned t ticket = left t ticket ~answered:false
 
 let waiting = function
   | Open -> 0
-  | Governed g -> Mutex.protect g.m (fun () -> Queue.length g.line)
+  | Governed g -> Mutex.protect g.m (fun () -> waiting_in g)
 
-let admitted t (mode : Store.mode) bytes f =
+let admitted t (mode : Store.mode) ~chunk bytes f =
   let ticket =
     match mode with
-      | Wait -> acquire t bytes
+      | Wait -> acquire t ~chunk bytes
       | Best_effort -> (
-          match try_acquire t bytes with
+          match try_acquire t ~chunk bytes with
             | Some ticket -> ticket
             | None -> raise Rt.Cancelled)
   in
@@ -744,7 +745,7 @@ let status () =
           drops = g.drops;
           headroom = g.settings.headroom;
           target_delay_ms = ms g.settings.target_delay;
-          waiting = Queue.length g.line;
+          waiting = waiting_in g;
           mode =
             (match mode with
               | Owner -> `Owner

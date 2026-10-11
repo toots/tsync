@@ -39,7 +39,7 @@ let until ?(limit = 15.) cond =
   in
   go ()
 
-let use link = Uplink.completed link (Uplink.acquire link 1000)
+let use link = Uplink.completed link (Uplink.acquire link ~chunk:true 1000)
 
 let grant rate =
   Some
